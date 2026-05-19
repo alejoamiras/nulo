@@ -1,0 +1,8 @@
+{
+	"files": [],
+	"references": [
+		{ "path": "packages/extension" },
+		{ "path": "packages/playground" },
+		{ "path": "packages/landing" }
+	]
+}

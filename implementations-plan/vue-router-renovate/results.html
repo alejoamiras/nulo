@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>vue-router 5 + Renovate — plan ELI5</title>
+  <style>
+    :root {
+      --bg: #0e1116;
+      --panel: #161b22;
+      --panel-2: #1c2129;
+      --text: #d7dde3;
+      --muted: #8b949e;
+      --border: #2a2f37;
+      --accent: #7aa2f7;
+      --accent-2: #9ece6a;
+      --warn: #e0af68;
+      --danger: #f7768e;
+      --code: #c0caf5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+    header {
+      padding: 32px 24px 16px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, #131820 0%, var(--bg) 100%);
+    }
+    header h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: -0.02em; }
+    header .meta { color: var(--muted); font-size: 13px; }
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 24px;
+      display: grid;
+      gap: 20px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 22px;
+    }
+    .card h2 { margin: 0 0 12px; font-size: 19px; letter-spacing: -0.01em; }
+    .card h3 { margin: 14px 0 6px; font-size: 15px; color: var(--accent); }
+    .card p { margin: 6px 0; }
+    .card ul, .card ol { margin: 8px 0 8px 22px; padding: 0; }
+    .card li { margin: 4px 0; }
+    code, pre {
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      color: var(--code);
+    }
+    code { background: var(--panel-2); padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+    pre {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      font-size: 12.5px;
+      line-height: 1.5;
+    }
+    pre.ascii { white-space: pre; color: var(--text); }
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-right: 6px;
+    }
+    .pill-a { background: rgba(122, 162, 247, 0.16); color: var(--accent); }
+    .pill-b { background: rgba(158, 206, 106, 0.16); color: var(--accent-2); }
+    .pill-warn { background: rgba(224, 175, 104, 0.16); color: var(--warn); }
+    .pill-danger { background: rgba(247, 118, 142, 0.16); color: var(--danger); }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .tag-low { color: var(--accent-2); }
+    .tag-med { color: var(--warn); }
+    .tag-high { color: var(--danger); }
+    .callout {
+      background: var(--panel-2);
+      border-left: 3px solid var(--accent);
+      padding: 10px 14px;
+      border-radius: 0 6px 6px 0;
+      margin: 12px 0;
+    }
+    .callout-warn { border-left-color: var(--warn); }
+    .callout-danger { border-left-color: var(--danger); }
+    footer { color: var(--muted); padding: 24px; text-align: center; font-size: 12px; }
+    .q-list { list-style: none; padding: 0; margin: 0; }
+    .q-list li {
+      padding: 10px 12px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin-bottom: 8px;
+    }
+    .q-list .q { color: var(--accent); font-weight: 600; margin-bottom: 2px; }
+    .q-list .rec { color: var(--accent-2); font-size: 13px; }
+    .legend { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>vue-router 5 + Renovate — plan ELI5</h1>
+    <div class="meta">Consolidated plan · 2026-05-18 · two scopes, two PRs · Codex review folded · awaiting approval</div>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>The 30-second version</h2>
+      <p><strong>Scope A</strong>: drop a dependency that just got archived upstream (<code>unplugin-vue-router</code>) and move to <code>vue-router 5</code>, which absorbed its features. The work is much smaller than it sounds — the archived dep isn't actually wired into our build pipeline.</p>
+      <p><strong>Scope B</strong>: turn on <strong>Renovate</strong> (a quieter, more controllable alternative to GitHub's Dependabot). Conservative defaults: 7-day age gate, weekly schedule, <code>@aztec/*</code> never touched, no auto-merge. Mend's hosted GitHub App is free for private repos.</p>
+      <p>Ship as <strong>two PRs</strong>, A first then B. Order matters: PR-A trims the Renovate routing group from 3 packages to 2, so PR-B can ship the accurate group from the start.</p>
+    </section>
+
+    <section class="card">
+      <h2>Status board</h2>
+      <pre class="ascii">vue-router 5 + Renovate — status (2026-05-18)
+─────────────────────────────────────────────────────────
+[✓] Recon (both planners)
+[✓] Draft my plan                       plan-mine.md
+[✓] Opus 4.7 parallel draft             plan-opus.md
+[✓] Consolidate plans                   plan.md
+[✓] Codex plan review                   yellow-flag → folded
+[✓] HTML ELI5                           you are here
+[▶] Present plan + HTML for approval
+─────────────────────────────────────────────────────────
+After approval:
+[✓] PR-A #99 deps/vue-router-5    → audit:vue + smoke e2e green
+[✓] Codex impl review of PR-A     yellow-flag → doc-only fixes folded
+[ ] Merge PR-A to dev
+[✓] PR-B #100 infra/renovate      → validator + actionlint green
+[✓] Codex impl review of PR-B     yellow-flag → fixes folded
+[ ] Merge PR-B to dev
+[ ] Promote dev → main            REQUIRED before Renovate App install
+[ ] Pre-create dependencies + security labels
+[ ] Install Mend Renovate App</pre>
+    </section>
+
+    <section class="card">
+      <h2>Codex review — folded corrections (4 rounds)</h2>
+      <p>Both scopes went through two Codex xhigh review rounds each — plan-stage + impl-stage. All four rounds verdicted yellow-flag; all four sets of corrections folded:</p>
+      <h3>Plan-stage corrections (both scopes)</h3>
+      <ul>
+        <li><strong>Renovate <code>packageRules</code> precedence is later-wins</strong>, not earlier-wins. The Aztec disable rule moves to the <strong>bottom</strong> of <code>packageRules</code> (was top in earlier draft).</li>
+        <li><strong><code>config:recommended</code> does NOT bundle <code>:prImmediately</code></strong> — corrected. Our <code>schedule</code> directive applies normally.</li>
+        <li><strong>Existing CI does NOT catch <code>packageManager</code> ↔ <code>setup-bun</code> drift.</strong> Initially I claimed CI doesn't run with action-pinned Bun — wrong; CI does use setup-bun. The real issue is narrower: no CI step verifies the two pinned values match.</li>
+      </ul>
+      <h3>Impl-stage PR-A (vue-router) corrections</h3>
+      <ul>
+        <li><strong>R17 (typed-route widening) was over-stated.</strong> Impl-stage Codex verified that the deleted <code>RouteNamedMap</code> only enumerated 5 static routes (<code>/common/about</code>, <code>/popup/</code>, <code>/setup/</code>, <code>/setup/install</code>, <code>/setup/update</code>) — NOT the popup auth/register/<code>[id]</code> routes I had called out. Typecheck stayed green across all 9 workspaces with no narrowing changes needed. R17 deprecated in §4.</li>
+        <li><strong><code>auto-imports.d.ts</code> regen is additive</strong>, not replacing. Running <code>build:chrome</code> against the stale file does NOT remove dead entries. <strong>Delete the file first</strong> for a clean regen. The actual regen dropped 251 lines (vs the "two dead lines" the plan originally promised) — all of them stale and unused.</li>
+      </ul>
+      <h3>Impl-stage PR-B (Renovate) corrections</h3>
+      <ul>
+        <li><strong><code>baseBranchPatterns: ["dev"]</code> added.</strong> Repo default branch is <code>main</code>; Renovate only reads config from the default branch. Without this, installing the App would onboard against empty config. Implies: PR-B must reach <code>main</code> (via the standard dev→main promotion) BEFORE installing the App.</li>
+        <li><strong>Schedule converted to cron</strong>: <code>"* 0-5 * * 1"</code> instead of <code>"before 6am on monday"</code>. Renovate's <code>@breejs/later</code> text syntax is deprecated.</li>
+        <li><strong>Validator invocation corrected</strong>: <code>--strict --no-global</code> added. Without <code>--no-global</code>, passing a filename made the validator treat <code>renovate.json</code> as self-hosted/global config — wrong mode. <code>--strict</code> fails on warnings.</li>
+        <li><strong>Validator version pinned</strong> to <code>renovate@43.150.0</code>. <code>npx --yes -p renovate</code> fetches latest on every PR — supply-chain exposure for a wallet repo. Renovate's own routing-group PR will bump this pin going forward.</li>
+        <li><strong>SECURITY.md Bun-drift note corrected</strong>: the prior wording claimed CI doesn't run with action-pinned Bun (wrong — every job uses setup-bun). The real issue is narrower (no consistency check between the two pinned values).</li>
+      </ul>
+      <p>Two operational refinements:</p>
+      <ul>
+        <li><strong>Better regen workflow</strong>: <code>bun run --cwd packages/extension build:chrome</code> is non-interactive and runs the same plugin chain as <code>dev</code>. (<code>unplugin-auto-import</code> has no CLI <code>bin</code>.)</li>
+        <li><strong>Monday-only schedule delay</strong>: merging PR-B on Tue 2026-05-19 means first PR batch lands Mon 2026-05-25 (~6-day gap). Accept that or drop schedule for the first week.</li>
+        <li><strong>Pre-create GitHub labels</strong> (<code>dependencies</code>, <code>security</code>) before the Mend App's first run; rely-on-first-run label creation is flaky.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Why now</h2>
+      <ul>
+        <li><span class="pill pill-a">Scope A</span> <strong><code>unplugin-vue-router</code> was archived upstream on 2026-02-24.</strong> Last release was 0.19.2 in late 2025. No more upstream patches. If a CVE lands, there's nobody to fix it. We're on <code>^0.15.0</code> today.</li>
+        <li><span class="pill pill-a">Scope A</span> <strong>vue-router 5</strong> ships native file-based routing — what <code>unplugin-vue-router</code> used to provide. Upstream frames it as a "boring release, no breaking changes." For us specifically: the feature was never used (we have zero typed-route consumers), so the migration is mostly deletion.</li>
+        <li><span class="pill pill-b">Scope B</span> <strong>Renovate</strong> closes the loop on the dependency-hardening work from PR #95 (age gate, audit). Without automation, dep maintenance is human-driven and inconsistent. Renovate gives us one consolidated dashboard, weekly cadence, and explicit carve-outs for the things we want to bump manually (Aztec).</li>
+        <li><span class="pill pill-b">Scope B</span> <strong>Dependabot was loud</strong> — that's why we held off. Renovate is the answer: <code>prConcurrentLimit</code>, <code>prHourlyLimit</code>, weekly schedule, no auto-merge, and a single Dependency Dashboard instead of N open PRs.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Recon — what's actually in the codebase</h2>
+      <p>Both planners (this assistant + Opus 4.7) independently verified the same facts:</p>
+      <ul>
+        <li><code>unplugin-vue-router</code> is <strong>NOT wired into <code>vite.config.ts</code></strong>. Only <code>vite-plugin-pages</code>' <code>usePages</code> is in the plugins array (line 128). The archived plugin sits as a devDep and never runs.</li>
+        <li>Its only surface in our tree: <code>packages/extension/src/types/typed-router.d.ts</code> (141 lines, <code>// @ts-nocheck</code> already) and two dead lines in <code>auto-imports.d.ts</code> (<code>defineLoader</code>, <code>definePage</code>).</li>
+        <li><strong>Zero consumers</strong>: <code>grep -r 'definePage\|defineLoader\|vue-router/auto'</code> across <code>src/</code> returns the generated files themselves. Nothing else.</li>
+        <li>All ~30 <code>router.push(...)</code> callsites use path strings (e.g., <code>"/popup/auth"</code>), not typed <code>RouteRecordNamedMap</code> objects.</li>
+        <li><code>vue-router 5.0.5</code> published 2026-04-22 (26 days old) → safe for our 7-day age gate. <code>5.0.6/5.0.7</code> are inside the window.</li>
+      </ul>
+      <div class="callout">
+        <strong>Bottom line</strong>: the "migration" is deletion + a one-version-bump of <code>vue-router</code>. No application code changes expected.
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Scope A — the migration in three steps</h2>
+      <span class="pill pill-a">Scope A</span> <strong>PR: <code>chore(deps): drop unplugin-vue-router and bump vue-router to 5</code></strong>
+      <h3>Commit 1 — remove the archived plugin</h3>
+      <ol>
+        <li>Delete <code>"unplugin-vue-router": "^0.15.0"</code> from <code>packages/extension/package.json</code> devDeps.</li>
+        <li>Delete the entire file <code>packages/extension/src/types/typed-router.d.ts</code>.</li>
+        <li><strong>Delete <code>auto-imports.d.ts</code> too</strong>, then run <code>bun run --cwd packages/extension build:chrome</code>. <code>unplugin-auto-import</code>'s d.ts writer is additive — without deleting the file, stale entries linger.</li>
+        <li>Commit the regenerated <code>auto-imports.d.ts</code> diff (251 lines of stale cruft removed alongside the two we cared about).</li>
+      </ol>
+      <h3>Commit 2 — bump vue-router</h3>
+      <ol>
+        <li><code>"vue-router": "^4.5.1"</code> → <code>"vue-router": "^5.0.5"</code> in <code>packages/extension/package.json</code>.</li>
+        <li><code>bun install</code>. Then <code>bun run typecheck:all</code>.</li>
+        <li>If any type narrowing surfaces (most likely at the auth guard <code>popup/index.ts:50-96</code>), fix at the call site.</li>
+        <li>Run <code>bun run dev</code> once → regenerates <code>components.d.ts</code> if <code>RouterLink/View</code> drift.</li>
+        <li>Wipe storybook cache locally (<code>rm -rf packages/extension/node_modules/.cache/storybook</code>) — it pins the old version.</li>
+      </ol>
+      <h3>Validation</h3>
+      <p><code>bun run audit:vue</code> (typecheck + units + lint + build) → <code>bun run test:e2e</code> (smoke; the auth guard is the canary) → ~30s manual click-through (<code>/popup/auth → /popup/general → /popup/send → /popup/settings/connected-apps/[id]</code>). <strong>Network e2e skipped</strong> — vue-router doesn't touch the Aztec wire boundary.</p>
+    </section>
+
+    <section class="card">
+      <h2>Scope B — Renovate config</h2>
+      <span class="pill pill-b">Scope B</span> <strong>PR: <code>chore(infra): add Renovate config with conservative defaults</code></strong>
+      <p>Single file: <code>renovate.json</code> at repo root. Plus doc updates in <code>CLAUDE.md</code> and <code>SECURITY.md</code>.</p>
+      <h3>The shape</h3>
+      <ul>
+        <li><strong>7-day age gate</strong> mirrors <code>bunfig.toml</code>. Renovate won't open a PR for anything younger than 7d.</li>
+        <li><strong>CVE bypass</strong>: vulnerability alerts skip schedule + concurrency limits by default. <code>vulnerabilityAlerts.minimumReleaseAge: "0 days"</code> is explicit belt-and-suspenders.</li>
+        <li><strong>Aztec disabled</strong>: <code>@aztec/*</code>, <code>@alejoamiras/aztec-accelerator</code>, <code>@defi-wonderland/aztec-standards</code>, <code>@wonderland/aztec-fee-payment</code> never get PR'd. Manual via the Aztec milestone (class-id stability required).</li>
+        <li><strong><code>@types/node</code> capped at <code>&lt;25</code></strong>: stays on the Node 24 lifecycle. 24.x patches still bump.</li>
+        <li><strong><code>baseBranchPatterns: ["dev"]</code></strong>: Renovate reads its config from the default branch (<code>main</code>) but creates PRs against <code>dev</code>.</li>
+        <li><strong>Throttled</strong>: <code>prConcurrentLimit: 3</code> + <code>prHourlyLimit: 2</code> + cron schedule <code>"* 0-5 * * 1"</code> (Mondays 0-5am Buenos Aires TZ).</li>
+        <li><strong>Grouped clusters</strong>: routing, vite, test-runner, puppeteer, storybook, codemirror, commitlint, typescript, unplugin-*. Avoids the PR-storm pattern Dependabot is famous for.</li>
+        <li><strong>No auto-merge anywhere</strong>. Wallet is security-sensitive.</li>
+        <li><strong>Single Dependency Dashboard issue</strong>: one place to see everything pending; PRs throttled separately.</li>
+        <li><strong>Validator pinned</strong>: CI runs <code>renovate@43.150.0</code> so npx doesn't fetch arbitrary fresh code per-PR.</li>
+      </ul>
+      <h3>Five corrections vs the PR #95 draft</h3>
+      <ul>
+        <li>Regex fix: <code>/^@aztec/</code> → <code>/^@aztec\/</code> (escaped JSON <code>"/^@aztec\\//"</code>). The old form matches <code>@aztec-fake/x</code>. Still catches <code>@aztec/viem</code> empirically.</li>
+        <li>Rule ordering: <strong>Aztec disable rule goes LAST</strong> in <code>packageRules</code>. Renovate's later-rules-win precedence — plan-stage Codex caught my draft initially had this backwards.</li>
+        <li><code>@types/node</code>: <code>allowedVersions: "&lt;25"</code> rather than full disable. We still want 24.x patch bumps.</li>
+        <li><strong><code>baseBranchPatterns: ["dev"]</code></strong> added (impl-stage Codex): repo default is <code>main</code> but Renovate must read config from there. PRs target <code>dev</code>.</li>
+        <li><strong>Cron schedule</strong> (impl-stage Codex): <code>"before 6am on monday"</code> is deprecated; switched to <code>"* 0-5 * * 1"</code>.</li>
+      </ul>
+      <h3>Validation</h3>
+      <p>Local: <code>npx --yes --package renovate@43.150.0 -- renovate-config-validator --strict --no-global renovate.json</code> — "Validating renovate.json as repo config" + "Config validated successfully". (<code>bunx</code> doesn't work — bun 1.3.x segfaults on the <code>re2</code> native binding pulled in by <code>renovate</code>.)</p>
+    </section>
+
+    <section class="card">
+      <h2>What happens AFTER Renovate is merged</h2>
+      <ol>
+        <li><strong>Merge PR-B</strong> into <code>dev</code>.</li>
+        <li><strong>Promote <code>dev</code> → <code>main</code></strong> via the standard promotion PR. Renovate only reads its config from the default branch (<code>main</code>); without this, install would onboard against empty config.</li>
+        <li><strong>Pre-create GitHub labels</strong> <code>dependencies</code> and <code>security</code> (rely-on-first-run label creation is flaky).</li>
+        <li><strong>You</strong> install the Mend Renovate App at <code>https://github.com/apps/renovate</code>, scoped to this repo. (Free for private repos.)</li>
+        <li>Renovate scans against <code>main</code>, creates PRs against <code>dev</code> per <code>baseBranchPatterns</code>. Mend job scheduling is 4-hourly/daily — not fixed. Vulnerability PRs skip schedule entirely.</li>
+        <li>Each PR is reviewed and merged manually. <strong>Never auto-merged.</strong></li>
+        <li>First cycle estimate: 10-15 PRs, ~5-7 weekday merges to drain.</li>
+      </ol>
+      <div class="callout callout-warn">
+        <strong>Trap to watch for</strong>: When Renovate bumps <code>package.json#packageManager</code> (the Bun version), it does NOT update <code>.github/actions/setup-bun/action.yml</code>. <strong>Existing CI does NOT auto-catch this</strong> — <code>_lint-and-typecheck.yml</code> only runs lint + typecheck + <code>bun audit</code>. Manual review on every Bun-version Renovate PR until we add a consistency check. PR body for Scope B documents this.
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Risks</h2>
+      <table>
+        <thead>
+          <tr><th>#</th><th>Risk</th><th>Sev</th><th>Mitigation</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>R1</td><td>vue-router 5 type narrowing leaks into auth guard</td><td class="tag-low">Low</td><td>typecheck + smoke e2e</td></tr>
+          <tr><td>R5</td><td><code>auto-imports.d.ts</code> regen step easy to skip</td><td class="tag-med">Med</td><td>Documented in plan; lint passes anyway but file carries dead imports</td></tr>
+          <tr><td>R9</td><td>Renovate bumps <code>@aztec/*</code> via rule precedence bug</td><td class="tag-high">High</td><td>Aztec rule LAST (later-wins); escaped regex; local validator step</td></tr>
+          <tr><td>R13</td><td>Renovate bumps <code>packageManager</code> but not setup-bun action</td><td class="tag-med">Med</td><td>Document in PR body; manual review (CI does NOT auto-catch this)</td></tr>
+          <tr><td>R14</td><td>PR-2 lands before puppeteer <code>bunfig.toml</code> excludes expire</td><td class="tag-med">Med</td><td>Time PR-2 ≥ 2026-05-19</td></tr>
+          <tr><td>R15</td><td><code>vite-plugin-pages</code> is 0.33.x — minors may break</td><td class="tag-med">Med</td><td>Manual smoke e2e on every routing-group Renovate PR until 1.0</td></tr>
+          <tr><td>R17</td><td>(DEPRECATED post-impl) Typed-route widening — over-stated in early drafts</td><td class="tag-low">n/a</td><td>Deleted <code>RouteNamedMap</code> only covered 5 static routes, none of which we access by name. Typecheck stayed green</td></tr>
+        </tbody>
+      </table>
+      <p class="legend">Full risk register (R1-R17) at <code>implementations-plan/vue-router-renovate/plan.md §4</code>.</p>
+    </section>
+
+    <section class="card">
+      <h2>Open decisions for you</h2>
+      <ol class="q-list">
+        <li>
+          <div class="q">Pin vue-router as <code>^5.0.5</code> or <code>^5</code>?</div>
+          <div>Concrete vs caret. Both behave the same in practice.</div>
+          <div class="rec">→ Recommend: <code>^5.0.5</code> (audit-trail signal).</div>
+        </li>
+        <li>
+          <div class="q">For Renovate's <code>@types/node</code>: <code>allowedVersions: "&lt;25"</code> or full disable?</div>
+          <div>The first lets 24.x patches still flow through.</div>
+          <div class="rec">→ Recommend: <code>allowedVersions: "&lt;25"</code>.</div>
+        </li>
+        <li>
+          <div class="q">Add a CI step <code>bunx --bun renovate-config-validator renovate.json</code>?</div>
+          <div>Tiny one-line addition to <code>_lint-and-typecheck.yml</code>. Catches config typos.</div>
+          <div class="rec">→ Recommend: yes (or defer to follow-up).</div>
+        </li>
+        <li>
+          <div class="q">Land PR-2 today (with a temp puppeteer carve-out) or wait until 2026-05-19?</div>
+          <div>Waiting avoids carrying a sunset-dated carve-out in the config.</div>
+          <div class="rec">→ Recommend: wait until 2026-05-19. Cleaner.</div>
+        </li>
+        <li>
+          <div class="q">Two PRs or one stacked?</div>
+          <div>Different blast radii. PR-A touches the popup router (smoke-e2e canary). PR-B is config-only.</div>
+          <div class="rec">→ Recommend: two PRs.</div>
+        </li>
+        <li>
+          <div class="q">Install Mend App before or after PR-B merge?</div>
+          <div>Installing first means an empty-config initial scan creates a noisy Dashboard.</div>
+          <div class="rec">→ Recommend: merge config first, install App second.</div>
+        </li>
+        <li>
+          <div class="q">Doc updates (<code>CLAUDE.md</code> + <code>SECURITY.md</code>) in PR-B or split?</div>
+          <div>Reviewing config and docs together can slow config review; splitting adds PR overhead.</div>
+          <div class="rec">→ Recommend: bundle into PR-B.</div>
+        </li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>What's intentionally NOT in scope</h2>
+      <div class="grid-2">
+        <div>
+          <h3>Not touched</h3>
+          <ul>
+            <li>Migrating off <code>vite-plugin-pages</code> (still needed for <code>~pages</code> virtual module)</li>
+            <li>Hash → web history routing (popup needs hash)</li>
+            <li>Wiring <code>definePage</code> / Data Loaders (zero callers)</li>
+            <li><code>@aztec/*</code> automation (always manual)</li>
+            <li><code>@types/node ≥ 25</code> (Node 24 lifecycle)</li>
+            <li><code>@wonderland/aztec-fee-payment</code> (tarball URL, not on npm)</li>
+            <li>Auto-merging anything</li>
+            <li>Self-hosted Renovate workflow</li>
+            <li>Promoting <code>bun audit</code> to required (separate follow-up)</li>
+            <li>Branch protection changes (deferred)</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Future follow-ups</h3>
+          <ul>
+            <li>Re-evaluate <code>vite-plugin-pages</code> vs vue-router 5 native file routing in 3-6 months</li>
+            <li>Promote <code>bun audit</code> from advisory to required CI</li>
+            <li>Move to text-format Bun lockfile if/when stable (enables <code>lockFileMaintenance</code>)</li>
+            <li>Self-host Renovate if hosted-App pricing changes</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Files at a glance</h2>
+      <pre class="ascii">implementations-plan/vue-router-renovate/
+├── plan-mine.md          ← my draft  (parallel)
+├── plan-opus.md          ← Opus 4.7 draft (parallel)
+├── plan.md               ← CONSOLIDATED (this is the source of truth)
+└── results.html          ← you are here</pre>
+    </section>
+  </main>
+
+  <footer>
+    Plan ready for your review. Codex review still in flight; will fold any feedback before implementation.
+  </footer>
+</body>
+</html>

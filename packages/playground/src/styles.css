@@ -1,0 +1,133 @@
+/* Minimal styling — the playground is a test fixture, not a product. */
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	padding: 16px;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+	font-size: 14px;
+	line-height: 1.4;
+	background: #f8f8f8;
+	color: #222;
+}
+
+#app {
+	max-width: 920px;
+	margin: 0 auto;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+[data-testid="pg-header"] {
+	display: flex;
+	gap: 12px;
+	padding: 8px 12px;
+	background: #fff;
+	border: 1px solid #ddd;
+	font-family: ui-monospace, monospace;
+}
+
+[data-testid="pg-header"] [data-testid="pg-status"][data-status="connected"] {
+	color: #0a7;
+	font-weight: 600;
+}
+
+[data-testid="pg-header"] [data-testid="pg-status"][data-status="error"] {
+	color: #c33;
+	font-weight: 600;
+}
+
+.pg-section {
+	border: 1px solid #ccc;
+	background: #fff;
+	padding: 8px 12px;
+}
+
+.pg-section legend {
+	font-weight: 600;
+	padding: 0 6px;
+}
+
+.pg-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin: 6px 0;
+	align-items: center;
+}
+
+button {
+	padding: 6px 10px;
+	border: 1px solid #999;
+	background: #fff;
+	cursor: pointer;
+	font-family: inherit;
+	font-size: 13px;
+}
+
+button:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+input,
+select {
+	padding: 4px 8px;
+	border: 1px solid #999;
+	font-family: inherit;
+	font-size: 13px;
+}
+
+label {
+	display: inline-flex;
+	gap: 6px;
+	align-items: center;
+}
+
+[data-testid="pg-result-feed"] {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	max-height: 300px;
+	overflow: auto;
+}
+
+[data-testid="pg-result"] {
+	display: flex;
+	gap: 8px;
+	padding: 4px 6px;
+	font-family: ui-monospace, monospace;
+	font-size: 12px;
+	border-bottom: 1px solid #eee;
+}
+
+[data-testid="pg-result"][data-status="ok"] .status {
+	color: #0a7;
+}
+[data-testid="pg-result"][data-status="error"] .status {
+	color: #c33;
+}
+[data-testid="pg-result"][data-status="pending"] .status {
+	color: #aa7;
+}
+
+.pg-error {
+	color: #c33;
+	font-family: ui-monospace, monospace;
+	font-size: 12px;
+	min-height: 1.4em;
+}
+
+[data-testid="pg-protocol-log"] {
+	background: #1e1e1e;
+	color: #ddd;
+	padding: 6px;
+	font-family: ui-monospace, monospace;
+	font-size: 11px;
+	max-height: 200px;
+	overflow: auto;
+}

@@ -1,0 +1,37 @@
+import type { ContractArtifact } from "@aztec/stdlib/abi"
+import { Gas } from "@aztec/stdlib/gas"
+import type { Action } from "@/wallet/services/execution/spec"
+import type { FpcInfo } from "../spec"
+import type { IFpcHandler } from "."
+
+export class DefaultSponsoredFpcHandler implements IFpcHandler {
+	public validateArtifact(artifact: ContractArtifact) {
+		const fn = artifact.functions.find((x) => x.name === "sponsor_unconditionally")
+		if (!fn) {
+			throw new Error("Function `sponsor_unconditionally` not found")
+		}
+		if (fn.parameters.length !== 0 || fn.returnTypes.length !== 0) {
+			throw new Error("Function `sponsor_unconditionally` has unsupported signature")
+		}
+	}
+
+	public getFeePayload(fpc: FpcInfo): Action[] {
+		return [
+			{
+				kind: "call",
+				contract: fpc.address,
+				method: "sponsor_unconditionally",
+				args: [],
+			},
+		]
+	}
+
+	public getTeardownGas(): Gas {
+		return new Gas(0, 0)
+	}
+
+	public getTotalGas(): Gas {
+		// NOTE: DA gas depends on the account type (whether account emits event for FPC call or not)
+		return new Gas(15_000, 35_000)
+	}
+}

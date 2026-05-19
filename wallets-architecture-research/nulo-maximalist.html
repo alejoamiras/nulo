@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Maximalist Nulo — 5/5 across the board</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1e252e; --border: #2a323d;
+    --text: #d1d5db; --muted: #8b949e; --accent: #9b59ff;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149; --info: #58a6ff;
+    --gold: #f1c40f;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); margin: 0; padding: 0; font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 24px 64px; }
+  nav.top { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  nav.top .home { color: var(--accent); text-decoration: none; font-weight: 600; }
+  nav.top .home:hover { text-decoration: underline; }
+  nav.top a.tab { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 4px; font-size: 13px; }
+  nav.top a.tab:hover { color: var(--text); background: var(--panel); }
+  nav.top a.tab.current { color: var(--text); background: var(--panel2); border: 1px solid var(--border); }
+  nav.top .sep { color: var(--muted); }
+  h1 { font-size: 28px; margin: 0 0 8px; color: #fff; letter-spacing: -0.5px; }
+  h2 { font-size: 20px; margin: 36px 0 12px; color: #fff; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16px; margin: 20px 0 8px; color: var(--accent); }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--panel2); color: var(--muted); margin-right: 6px; border: 1px solid var(--border); }
+  .tag.ok { color: var(--ok); border-color: var(--ok); }
+  .tag.warn { color: var(--warn); border-color: var(--warn); }
+  .tag.accent { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .prov { display: inline-block; font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
+  .prov.chat { color: var(--accent); border-color: var(--accent); }
+  .prov.codex { color: var(--info); border-color: var(--info); }
+  .prov.consolidated { color: var(--ok); border-color: var(--ok); }
+  .grid { display: grid; gap: 16px; }
+  .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 900px) { .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; }
+  .card .title { font-weight: 600; color: #fff; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .card.accent-border { border-left: 3px solid var(--accent); }
+  .card.ok-border { border-left: 3px solid var(--ok); }
+  figure.ascii { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; margin: 14px 0; overflow-x: auto; }
+  figure.ascii figcaption { font-size: 13px; color: var(--muted); font-style: italic; margin-bottom: 10px; }
+  figure.ascii pre { font: 12px/1.35 var(--mono); color: var(--text); margin: 0; white-space: pre; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th, td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; background: var(--panel); }
+  td.mono { font-family: var(--mono); font-size: 12px; }
+  td.center { text-align: center; }
+  .score { font-family: var(--mono); font-size: 11px; padding: 1px 6px; border-radius: 3px; }
+  .score.before { background: rgba(248,81,73,0.15); color: var(--err); border: 1px solid rgba(248,81,73,0.4); }
+  .score.after { background: rgba(63,185,80,0.15); color: var(--ok); border: 1px solid rgba(63,185,80,0.4); }
+  .toc { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; margin: 16px 0; font-size: 13px; }
+  .toc strong { color: var(--text); }
+  .toc a { color: var(--info); text-decoration: none; margin-right: 12px; }
+  .toc a:hover { text-decoration: underline; }
+  .breadcrumb { font-size: 12px; color: var(--muted); margin: 0 0 16px; }
+  .breadcrumb a { color: var(--info); text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  code { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  .callout { border-left: 3px solid var(--info); background: var(--panel); padding: 12px 16px; margin: 14px 0; border-radius: 0 6px 6px 0; font-size: 14px; }
+  .callout.accent { border-left-color: var(--accent); }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout strong { color: var(--info); }
+  .callout.accent strong { color: var(--accent); }
+  .callout.warn strong { color: var(--warn); }
+  .callout.ok strong { color: var(--ok); }
+  .footer { font-size: 12px; color: var(--muted); margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .footer a { color: var(--info); }
+  .hero-banner { background: linear-gradient(135deg, rgba(155,89,255,0.12), rgba(155,89,255,0.02)); border: 1px solid var(--accent); border-radius: 10px; padding: 20px 22px; margin: 16px 0 28px; }
+  .hero-banner h2 { border-bottom: none; margin: 0 0 8px; padding: 0; font-size: 18px; }
+</style>
+</head>
+<body>
+<nav class="top" aria-label="Primary">
+  <a href="index.html" class="home">Wallet Architecture Research</a>
+  <span class="sep">/</span>
+  <a href="index.html" class="tab">Overview</a>
+  <a href="wallets/rabby.html" class="tab">Rabby</a>
+  <a href="wallets/metamask.html" class="tab">MetaMask</a>
+  <a href="wallets/grego.html" class="tab">Grego</a>
+  <a href="wallets/nulo.html" class="tab">Nulo Today</a>
+  <a href="nulo-phase-2.html" class="tab">Phase 2</a>
+  <a href="nulo-phase-2-plus.html" class="tab">Phase 2+</a>
+  <a href="nulo-maximalist.html" class="tab current">Maximalist</a>
+</nav>
+
+<div class="wrap">
+
+<p class="breadcrumb"><a href="index.html">Overview</a> &nbsp;›&nbsp; Maximalist</p>
+
+<h1>Maximalist Nulo — 5/5 across the board</h1>
+<p style="color: var(--muted); margin-top: 0;">
+  The year-long, three-engineer, no-shipping-pressure vision. What Nulo looks like when every dimension is at 5/5
+  and a few new dimensions are added that the comparative study never named. Synthesized from chat reasoning + an
+  independent codex review.
+</p>
+
+<p style="margin-top: 14px;">
+  <span class="tag ok">SPINE PROGRESS</span>
+  Runtime-spine work has begun shipping: Phase 2 closed 2026-05-13; Phase 2+ Bundle 1 (production hardening) + Phase A (token imports through the journal, multi-in-flight card render fix) both shipped 2026-05-15 (<code>v0.15.7</code> + <code>v0.16.0</code>). See the <a href="nulo-phase-2-plus.html">Phase 2+</a> page for what's shipped vs what's still aspirational on the spine; the maximalist tracks (Aztec depth, dApp ergonomics, supply-chain hardening, network privacy, cross-browser parity) remain future work.
+</p>
+
+<div class="hero-banner">
+  <h2 style="color: #fff;">The single biggest reframe</h2>
+  <p style="margin: 0; color: var(--text);">
+    The 5/5 wallet is <strong>not</strong> bigger features on top of a fragile runtime. It's a <strong>runtime-reliability program</strong>
+    (Phase 2+) at the spine, with everything else hanging off it — Aztec depth, dApp ergonomics, supply-chain hardening, network privacy,
+    cross-browser parity. Maximalist Nulo is what the rest of the box looks like when you let the runtime spine do its job.
+    Wallet stays browser-only; the design discipline is "make the extension impossible to kill, not bigger".
+  </p>
+</div>
+
+<div class="toc" aria-label="On this page">
+  <strong>On this page:</strong>
+  <a href="#shape">The shape</a>
+  <a href="#dimensions">Per-dimension 5/5</a>
+  <a href="#new-dims">New dimensions</a>
+  <a href="#tracks">Tracks</a>
+  <a href="#sequencing">Sequencing</a>
+  <a href="#not-in-scope">Not in scope</a>
+  <a href="#study-misses">Study misses</a>
+</div>
+
+<h2 id="shape">The shape — runtime spine + parallel tracks <span class="prov consolidated">consolidated</span></h2>
+
+<figure class="ascii" aria-label="Maximalist Nulo shape: one runtime-reliability program at the center which is Phase 2+ done in full, then five orthogonal tracks branching from it - persistence spine, dApp+UX, surface coverage (Firefox parity), Aztec depth, hardening and continuous assurance">
+  <figcaption>"Phase 2+" is the runtime spine; five orthogonal tracks branch from it. The runtime spine gates most user-visible work; the tracks proceed largely in parallel.</figcaption>
+  <pre>                ┌─────────────────────────────────────────┐
+                │  RUNTIME-RELIABILITY PROGRAM            │
+                │  (Phase 2+ in full — the spine)         │
+                │                                         │
+                │  · Real job system (FSM + fairness +    │
+                │     idempotency + retry + tombstones    │
+                │     + sweeper + attach/detach)          │
+                │  · LazyListener + init gating           │
+                │  · per-(profile,chain) PXE concurrency  │
+                │  · alarms wake-up + resume policy       │
+                │  · Chaos discipline in CI               │
+                │  · Narrow formal methods on FSM         │
+                └────────────────┬────────────────────────┘
+                                 │
+   ┌──────────────────┬──────────┼────────────┬──────────────────┐
+   ▼                  ▼          ▼            ▼                  ▼
+ PERSISTENCE       dApp + UX     SURFACE     AZTEC DEPTH      HARDENING +
+   SPINE            TRACK         TRACK        TRACK          ASSURANCE
+                                                              (continuous)
+
+ numbered          capability    Firefox     account contract  supply chain
+ migrations,       wildcards,    MV3         registry, key     (LavaMoat etc.),
+ snapshots,        remembered    parity      rotation, L1↔L2   network privacy
+ checksums,        grants,       from one    flows, outbox     telemetry,
+ IDB backup,       per-origin    source      proofs, replay-   external audit,
+ recovery,         rate limits,  tree.       safety,           threat modeling,
+ invariant         batch                     differential      narrow formal
+ validator,        approvals,    Safari      conformance       methods on the
+ corruption        WC v2 +       Web Ext     suite vs          critical state
+ drills,           EIP-6963,     later.      upstream Aztec    machines
+ encrypted-at-     SIWE-equiv,
+ rest PII          rich tx
+                   preview</pre>
+</figure>
+
+<h2 id="dimensions">Per-dimension 5/5 targets <span class="prov consolidated">consolidated</span></h2>
+
+<p>
+  What 5/5 actually requires on each of the original 12 dimensions, with sources we'd steal from.
+  Dimensions Nulo already holds at 5/5 (package discipline, cross-service compile-time deps) are not listed.
+</p>
+
+<table aria-label="Per-dimension 5/5 targets with sources">
+  <thead>
+    <tr>
+      <th>Dimension</th>
+      <th>Today</th>
+      <th>5/5 means</th>
+      <th>Steal from</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Cryptography</td>
+      <td><span class="score before">4/5</span></td>
+      <td>Strict mode default; authenticated export; no bearer-equivalent <code>passhash</code> persistence by default; passkey-first unlock path; memory-hard KDF (Argon2id) with auto-tuned params + floor; encrypted-at-rest for all PII (not just keystore); KAT vectors for every crypto op; anti-rollback monotonic counter; compromise-recovery flow rotating all derived keys</td>
+      <td>Broader appsec norms; Grego's Argon2id posture is directionally better than PBKDF2-only</td>
+    </tr>
+    <tr>
+      <td>Aztec correctness</td>
+      <td><span class="score before">4/5</span></td>
+      <td>Account contract registry behind a single interface (schnorr today, ecdsa-* later); first-class key rotation via Aztec <code>KeyRegistry</code>; L1↔L2 deposit/withdraw + outbox proofs as first-class flows; replay-safety across re-orgs; <strong>differential conformance suite</strong> run nightly against upstream Aztec; race-correct multi-pending nonce handling; artifact-hash verification against on-chain class</td>
+      <td>Grego's upstream fluency; upstream Aztec SDK patterns; differential conformance from the broader L2 ecosystem</td>
+    </tr>
+    <tr>
+      <td>Browser coverage</td>
+      <td><span class="score before">2/5</span></td>
+      <td>Real Chrome/Brave/Edge parity (free given MV3); Firefox MV3 from one source tree, with browser-specific transport/offscreen quirks abstracted and tested; Safari Web Extensions as separate target; no hidden feature gaps</td>
+      <td>Grego's Firefox offscreen fallback; Rabby's Firefox shims</td>
+    </tr>
+    <tr>
+      <td>MV3 hygiene</td>
+      <td><span class="score before">3/5</span></td>
+      <td>Top-level listener registration; LazyListener buffering; init-gating on every port; no keepalive dependence; deterministic offscreen lifecycle (idle-close + warm boot); chaos-tested SW death; <code>chrome.storage.session</code> for ephemeral unlock state</td>
+      <td>MetaMask LazyListener; Grego ready-gate</td>
+    </tr>
+    <tr>
+      <td>Durable jobs</td>
+      <td><span class="score before">1/5</span></td>
+      <td>Full job system: persisted intent + idempotency + retry policy + cancellation + fairness + tombstones + resume-after-crash + attach/detach UI + sweeper for stuck jobs. See <a href="nulo-phase-2-plus.html">Phase 2+</a> for the full spec.</td>
+      <td>MetaMask ApprovalController shape; Rabby's persisted-progress pragmatism</td>
+    </tr>
+    <tr>
+      <td>Cold-start handling</td>
+      <td><span class="score before">1-2/5</span></td>
+      <td>Zero lost events; bounded boot budget; queued requests during init; PXE/runtime prewarm; resume-on-alarm; no "wallet not ready" surface to dApps; incremental boot — show UI before all services are ready</td>
+      <td>MetaMask init gating; Grego singleton-per-chain runtime</td>
+    </tr>
+    <tr>
+      <td>Storage / migration</td>
+      <td><span class="score before">2/5</span></td>
+      <td>Numbered migrations + snapshots + checksums + corruption quarantine + IDB backup + invariant validator + export/import recovery + migration test harness (replay from snapshots of every prior version) + rollback drills; runtime schemas (Zod / Effect Schema) at every storage boundary</td>
+      <td>MetaMask persistence-manager + migration discipline</td>
+    </tr>
+    <tr>
+      <td>dApp ergonomics</td>
+      <td><span class="score before">3/5</span></td>
+      <td>Batch approvals; capability wildcards per origin; remembered grants; per-origin rate limits; init-waits-not-errors; crisp provider errors; WalletConnect v2; EIP-6963 multi-provider discovery; rich tx preview (humanized intent + simulated state diff + security warnings); Sign-In-with-Aztec</td>
+      <td>Rabby's <code>unlockPromise</code>; Grego capability wildcards + batching</td>
+    </tr>
+    <tr>
+      <td>State architecture</td>
+      <td><span class="score before">3-4/5</span></td>
+      <td>Single owner per domain (no popup-side duplication of SW state); runtime schemas at IPC boundaries; no raw storage reads in popup; thin UI; replayable job/event logs. Keep Nulo's typed <code>Service&lt;Methods,Events&gt;</code>; add Grego-style runtime validation. <em>Don't</em> introduce <code>@metamask/messenger</code> / ObjectMultiplex / PatchStore.</td>
+      <td>Keep Nulo's typed service boundary; add Grego-style runtime validation</td>
+    </tr>
+    <tr>
+      <td>UI maturity</td>
+      <td><span class="score before">2/5</span></td>
+      <td>In-popup job-queue visibility (in-flight + stuck); resume/cancel/retry UX; explicit stalled-state UX; humanized fee-payer / privacy / NO_FROM warnings; Storybook/Histoire; Lost Pixel visual regression; WCAG AA + axe-core in CI; i18n; theming; perf budgets per entry; keyboard shortcuts + command palette + JSON-RPC console for power users</td>
+      <td>Grego's Aztec-specific chips + alerts; M6 plan already covers the build-side discipline</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="new-dims">New dimensions worth adding <span class="prov consolidated">consolidated</span></h2>
+
+<p>
+  The 12-dimension star table missed these. Each is its own first-class concern for a privacy wallet, not a sub-bullet of an existing dimension.
+</p>
+
+<div class="grid cols-2">
+  <div class="card accent-border">
+    <div class="title">Network-layer privacy</div>
+    <p>RPC routing discipline; metadata minimization; Tor/VPN-friendly endpoints; polling-rate ceilings to avoid origin linkability; sender-address rotation where Aztec supports it; private note discovery (range-proof subscriber when upstream ships). For a privacy wallet, metadata leakage is as architectural as encryption.</p>
+  </div>
+
+  <div class="card accent-border">
+    <div class="title">Supply chain &amp; release integrity</div>
+    <p>Reproducible builds; provenance attestations; dependency allowlists; patch discipline; signed releases per platform; deterministic bundles. <strong>Not</strong> the full LavaMoat stack on day one — that comes once the architecture stops moving. SBOM in CI is cheap and useful immediately.</p>
+  </div>
+
+  <div class="card accent-border">
+    <div class="title">Observability + incident response</div>
+    <p>Privacy-preserving structured traces; local redaction-first logs; user-exportable encrypted debug bundles; opt-in aggregate metrics. You will not debug MV3/proving failures blind. The debug-bundle export pattern is the privacy-respecting way to ship observability without a backend.</p>
+  </div>
+
+  <div class="card accent-border">
+    <div class="title">Threat modeling + chaos discipline</div>
+    <p>Documented threat model maintained per release; regular red-team exercises; SW-kill chaos tests in CI; corrupted-storage drills; approval-spam drills; malicious-dApp suite. Not a one-time audit — an ongoing discipline.</p>
+  </div>
+
+  <div class="card accent-border" style="grid-column: 1 / -1;">
+    <div class="title">Narrow formal methods</div>
+    <p>Model-check three things specifically — the <strong>job state machine</strong>, the <strong>permission wildcard matcher</strong>, and <strong>migration invariants</strong>. Use TLA+ or Alloy. <em>Don't</em> try to "formally verify the wallet" — that's how this kind of effort goes nowhere. The narrow scope is the whole point.</p>
+  </div>
+</div>
+
+<h2 id="tracks">The five tracks <span class="prov consolidated">consolidated</span></h2>
+
+<table aria-label="Five orthogonal tracks branching from the runtime spine">
+  <thead><tr><th>Track</th><th>Scope</th><th>Depends on</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Persistence spine</strong></td><td>Numbered migrations + rollback drills + migration test harness replaying snapshots from prior versions + model-checked migration invariants; snapshots; checksums; IDB backup + invariant validator on every read + corruption quarantine; storage-corruption chaos drills; recovery/import-export; encrypted-at-rest PII</td><td>Independent of runtime spine; can run in parallel</td></tr>
+    <tr><td><strong>dApp + UX</strong></td><td>Capability wildcards, remembered grants, per-origin rate limits, batch approval flows, WalletConnect v2, EIP-6963, SIWE-equiv, rich tx preview</td><td>Runtime spine (needs full job system)</td></tr>
+    <tr><td><strong>Surface</strong></td><td>Firefox MV3 parity from one source tree. Browser-specific transport / offscreen quirks abstracted and tested. Safari Web Extensions as a separate target later.</td><td>Should wait until offscreen/runtime abstractions stop moving</td></tr>
+    <tr><td><strong>Aztec depth</strong></td><td>Account contract registry, key rotation, L1↔L2 flows, outbox proofs, replay-safety, differential conformance suite vs upstream</td><td>Runtime spine (needs durable jobs for long flows)</td></tr>
+    <tr><td><strong>Hardening + assurance</strong></td><td>Supply chain (LavaMoat etc.), network privacy, privacy-respecting telemetry, threat modeling, chaos drills, narrow formal methods, external audit</td><td>Threat modeling starts early; release-hardening lands after architecture stabilizes</td></tr>
+  </tbody>
+</table>
+
+<h2 id="sequencing">Sequencing — a year, three engineers, no shipping pressure <span class="prov consolidated">consolidated</span></h2>
+
+<table aria-label="Month-by-month sequencing of the maximalist plan">
+  <thead><tr><th>Months</th><th>Track</th><th>What lands</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">1-3</td><td><strong>Runtime spine</strong> (gating)</td><td>JobRegistry + fairness + idempotency + retry + tombstones + sweeper + attach/detach; LazyListener; init gating; per-(profile, chain) PXE concurrency; chaos discipline; narrow formal methods. Phase 2+ in full.</td></tr>
+    <tr><td class="mono">1-4</td><td>Persistence spine (parallel)</td><td>Numbered migrations + snapshots + checksums + IDB backup + recovery/import-export + invariant checker + corruption drills.</td></tr>
+    <tr><td class="mono">3-6</td><td>dApp + UX</td><td>Capability wildcards; remembered grants; per-origin rate limits; batch approval flows; WC v2; EIP-6963; rich tx preview.</td></tr>
+    <tr><td class="mono">5-8</td><td>Surface</td><td>Firefox MV3 parity from one source tree. Safari Web Extensions as a later target.</td></tr>
+    <tr><td class="mono">6-12</td><td>Hardening + assurance</td><td>Supply chain hardening; privacy telemetry (debug-bundle export); network privacy; threat modeling; chaos in CI; narrow formal methods on job FSM + permission matcher + migration invariants; external audit gate.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="not-in-scope">What's deliberately NOT in scope <span class="prov codex">codex pushback</span></h2>
+
+<div class="callout warn">
+  These are common asks for "professionalize the wallet" that codex pushed back hard on. The wins aren't worth the time given Nulo's actual constraints.
+</div>
+
+<ul>
+  <li>
+    <strong>Dedicated progress window</strong> (a detached popout owning long-running prove UI) — adds a second long-running surface to design, maintain, and explain. The popup stays as Nulo's single user-visible surface; subscribe-by-jobId via the attach map already covers close-and-rejoin. <em>Product decision.</em>
+  </li>
+  <li>
+    <strong>Desktop proving companion</strong> (Tauri-style native daemon hosting PXE long-running) — introduces a parallel native distribution channel, install/update story, code signing, platform builds. The wallet stays browser-only. <em>Product decision.</em>
+  </li>
+  <li>
+    <strong>Mobile (RN / native)</strong> — Aztec proofs are long; mobile makes them longer. Mobile is Phase ∞, not Maximalist. <em>Product decision.</em>
+  </li>
+  <li>
+    <strong>Account abstraction features</strong> (social recovery, session keys, M-of-N) — product bets, not quality dimensions.
+    Until upstream Aztec canonizes them, building custom account-contract complexity contradicts the "lean upstream" principle.
+  </li>
+  <li>
+    <strong>LavaMoat on day one</strong> — the supply-chain track lands after the architecture stabilizes.
+    LavaMoat now would slow every iteration without proportional benefit.
+  </li>
+  <li>
+    <strong>Replace the typed <code>Service&lt;Methods,Events&gt;</code> boundary</strong> with <code>@metamask/messenger</code> /
+    ObjectMultiplex / PatchStore. Nulo's typed boundary is already 5/5; only addition is Grego-style runtime schema validation.
+  </li>
+  <li>
+    <strong>Formally verify the wallet</strong> — the narrow formal-methods scope (job FSM + permission matcher + migration invariants) is the whole point.
+    Broad formal verification of a Vue UI is a tar pit.
+  </li>
+</ul>
+
+<h2 id="study-misses">Where the comparative study undershoots <span class="prov consolidated">consolidated</span></h2>
+
+<ul>
+  <li>It implies durable jobs reaches <strong>4/5</strong> with the 8-item Phase 2. The 5/5 version needs fairness, idempotency, retry, tombstones, sweeper, attach/detach, and chaos discipline. The study underspecs this. <span class="prov codex">codex</span></li>
+  <li>It underweights <strong>network privacy</strong>. For a privacy wallet, metadata leakage is as architectural as encryption. <span class="prov codex">codex</span></li>
+  <li>It slightly overweights <strong>MetaMask-style framework mass</strong>. Nulo does not need <code>@metamask/messenger</code> / ObjectMultiplex / PatchStore to reach 5/5. <span class="prov codex">codex</span></li>
+  <li>It treats <strong>AA features as plausible "quality" expansion</strong>. Until upstream canonizes them, they're distractions. <span class="prov codex">codex</span></li>
+  <li>It doesn't surface the <strong>missing dimensions</strong> (supply chain, observability, network privacy, threat modeling, formal methods) as first-class star columns. They probably should be. <span class="prov chat">chat</span></li>
+  <li>It implies <strong>sequential phases</strong>. The reality is mostly-parallel tracks with one front-loaded gating piece. <span class="prov chat">chat</span></li>
+</ul>
+
+<div class="callout warn" style="margin-top: 16px;">
+  <strong>Note on two codex suggestions deliberately not included:</strong> codex argued for a separate approval/progress window and an optional desktop proving companion as part of the 5/5 vision. Both were ruled out as <em>product</em> decisions — see the "What's deliberately NOT in scope" section above. The runtime spine is what gets us to 5/5 on durable jobs within the existing browser-extension surface.
+</div>
+
+<div class="callout ok">
+  <strong>The maximalist take, condensed:</strong> Phase 2+ is the runtime-reliability program. Maximalist Nulo is what the rest of the box looks like when you let the runtime spine do its job — which is mostly <em>not</em> "add more features", it's "make Nulo impossible to kill, impossible to confuse, and much harder to deanonymize."
+</div>
+
+<div class="footer">
+  <p>
+    Calibrated 2026-05-12. Consolidated from chat reasoning (claude) + an independent codex review (session <code>019e1cfc-9b6a-7003-a903-3807d7c047b8</code>).
+    Source content for this page: <a href="synthesis/html-source-additions.md"><code>synthesis/html-source-additions.md</code></a>.
+  </p>
+  <p>
+    <a href="nulo-phase-2-plus.html">← Phase 2+ (durable jobs full)</a>
+    &nbsp;·&nbsp;
+    <a href="index.html">Back to overview</a>
+  </p>
+</div>
+
+</div>
+</body>
+</html>

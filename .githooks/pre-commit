@@ -1,0 +1,4 @@
+#!/bin/sh
+set -e
+bunx biome check --staged --no-errors-on-unmatched
+./scripts/check-no-brand.sh

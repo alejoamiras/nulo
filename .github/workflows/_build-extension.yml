@@ -1,0 +1,78 @@
+name: _Build extension (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to checkout.
+        required: false
+        type: string
+        default: ""
+      target:
+        description: "Build target: chrome | firefox | both"
+        required: false
+        type: string
+        default: "both"
+      version_override:
+        description: |
+          If set, write this semver into packages/extension/package.json before building.
+          Used by release.yml; empty for PR builds.
+        required: false
+        type: string
+        default: ""
+      upload_artifacts:
+        description: Upload dist/ as a workflow artifact (for downstream smoke / release).
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    name: vite build (${{ inputs.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Patch extension version
+        if: inputs.version_override != ''
+        env:
+          OVERRIDE: ${{ inputs.version_override }}
+        run: |
+          bun -e "
+            const fs = require('fs');
+            const p = JSON.parse(fs.readFileSync('packages/extension/package.json', 'utf8'));
+            p.version = process.env.OVERRIDE;
+            fs.writeFileSync('packages/extension/package.json', JSON.stringify(p, null, '\t') + '\n');
+            console.log('patched extension version to', process.env.OVERRIDE);
+          "
+
+      - name: Build Chrome
+        if: inputs.target == 'chrome' || inputs.target == 'both'
+        run: bun run --cwd packages/extension build:chrome
+
+      - name: Build Firefox
+        if: inputs.target == 'firefox' || inputs.target == 'both'
+        run: bun run --cwd packages/extension build:firefox
+
+      - name: Upload Chrome build
+        if: inputs.upload_artifacts && (inputs.target == 'chrome' || inputs.target == 'both')
+        uses: actions/upload-artifact@v7
+        with:
+          name: extension-chrome
+          path: packages/extension/dist/chrome
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Firefox build
+        if: inputs.upload_artifacts && (inputs.target == 'firefox' || inputs.target == 'both')
+        uses: actions/upload-artifact@v7
+        with:
+          name: extension-firefox
+          path: packages/extension/dist/firefox
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,367 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver to release (e.g. 0.15.0 or 0.15.0-rc.1). No leading v."
+        required: true
+        type: string
+      channel:
+        description: "stable (main only, marked --latest) or prerelease (dev only, marked --prerelease)"
+        required: true
+        type: choice
+        options: [stable, prerelease]
+      dry_run:
+        description: "Build + assemble. No tag, no branch push, no GitHub Release. Zips uploaded as workflow artifacts only."
+        required: false
+        type: boolean
+        default: true
+      publish_marketplaces:
+        description: "Enable Chrome Web Store + Firefox AMO publishing. Leave false until secrets are wired and gecko.id is real."
+        required: false
+        type: boolean
+        default: false
+      run_network_e2e:
+        description: "Run the network e2e gate (sandbox + ~30 e2e scenarios, 30-45 min). Disable only for emergency releases or pipeline tests where smoke-against-artifact is sufficient."
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    environment: production
+    outputs:
+      version: ${{ steps.parse.outputs.version }}
+      tag: ${{ steps.parse.outputs.tag }}
+      is_prerelease: ${{ steps.parse.outputs.is_prerelease }}
+    steps:
+      - name: Validate semver + branch/channel pairing
+        id: parse
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
+          REF: ${{ github.ref }}
+        run: |
+          if ! echo "$INPUT_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "::error::Invalid version format: '$INPUT_VERSION'. Expected semver (e.g. 0.15.0 or 0.15.0-rc.1)."
+            exit 1
+          fi
+          IS_PRE="false"
+          case "$INPUT_VERSION" in
+            *-*) IS_PRE="true" ;;
+          esac
+          if [ "$INPUT_CHANNEL" = "stable" ] && [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::stable channel only allowed from main; current ref is $REF"
+            exit 1
+          fi
+          if [ "$INPUT_CHANNEL" = "prerelease" ] && [ "$REF" != "refs/heads/dev" ]; then
+            echo "::error::prerelease channel only allowed from dev; current ref is $REF"
+            exit 1
+          fi
+          if [ "$INPUT_CHANNEL" = "stable" ] && [ "$IS_PRE" = "true" ]; then
+            echo "::error::stable channel cannot ship a prerelease semver ($INPUT_VERSION). Drop the suffix."
+            exit 1
+          fi
+          if [ "$INPUT_CHANNEL" = "prerelease" ] && [ "$IS_PRE" = "false" ]; then
+            echo "::error::prerelease channel requires a prerelease semver (e.g. 0.15.0-rc.1)."
+            exit 1
+          fi
+          {
+            echo "version=$INPUT_VERSION"
+            echo "tag=v$INPUT_VERSION"
+            echo "is_prerelease=$IS_PRE"
+          } >> "$GITHUB_OUTPUT"
+
+  lint-and-typecheck:
+    name: gate / lint + typecheck
+    needs: validate
+    uses: ./.github/workflows/_lint-and-typecheck.yml
+    with:
+      ref: ${{ github.ref }}
+
+  unit-tests:
+    name: gate / unit tests
+    needs: validate
+    uses: ./.github/workflows/_unit-tests.yml
+    with:
+      ref: ${{ github.ref }}
+
+  network-e2e:
+    name: gate / network e2e
+    needs: validate
+    if: inputs.run_network_e2e && needs.validate.outputs.is_prerelease == 'false'
+    uses: ./.github/workflows/_network-e2e.yml
+    with:
+      ref: ${{ github.ref }}
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  build-chrome:
+    name: build chrome
+    needs: [validate, lint-and-typecheck, unit-tests]
+    uses: ./.github/workflows/_build-extension.yml
+    with:
+      ref: ${{ github.ref }}
+      target: chrome
+      version_override: ${{ needs.validate.outputs.version }}
+      upload_artifacts: true
+
+  build-firefox:
+    name: build firefox
+    needs: [validate, lint-and-typecheck, unit-tests]
+    uses: ./.github/workflows/_build-extension.yml
+    with:
+      ref: ${{ github.ref }}
+      target: firefox
+      version_override: ${{ needs.validate.outputs.version }}
+      upload_artifacts: true
+
+  smoke-against-artifact:
+    name: smoke against artifact
+    needs: [validate, build-chrome]
+    uses: ./.github/workflows/_smoke-e2e.yml
+    with:
+      ref: ${{ github.ref }}
+      artifact_name: extension-chrome
+
+  assemble-and-publish:
+    name: assemble + publish
+    needs: [validate, build-chrome, build-firefox, smoke-against-artifact]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      TAG: ${{ needs.validate.outputs.tag }}
+      IS_PRERELEASE: ${{ needs.validate.outputs.is_prerelease }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Patch extension version
+        run: |
+          bun -e "
+            const fs = require('fs');
+            const p = JSON.parse(fs.readFileSync('packages/extension/package.json', 'utf8'));
+            p.version = process.env.VERSION;
+            fs.writeFileSync('packages/extension/package.json', JSON.stringify(p, null, '\t') + '\n');
+          "
+
+      - name: Download Chrome build
+        uses: actions/download-artifact@v8
+        with:
+          name: extension-chrome
+          path: dist/release/chrome
+
+      - name: Download Firefox build
+        uses: actions/download-artifact@v8
+        with:
+          name: extension-firefox
+          path: dist/release/firefox
+
+      - name: Zip artifacts + SHASUMS
+        run: |
+          mkdir -p dist/release
+          (cd dist/release/chrome && zip -r "../nulo-chrome-${VERSION}.zip" .)
+          (cd dist/release/firefox && zip -r "../nulo-firefox-${VERSION}.zip" .)
+          cd dist/release
+          sha256sum \
+            "nulo-chrome-${VERSION}.zip" \
+            "nulo-firefox-${VERSION}.zip" \
+            > SHASUMS256.txt
+          ls -la
+
+      - name: Upload zipped artifacts (for inspection)
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ env.VERSION }}
+          path: |
+            dist/release/nulo-chrome-${{ env.VERSION }}.zip
+            dist/release/nulo-firefox-${{ env.VERSION }}.zip
+            dist/release/SHASUMS256.txt
+          retention-days: 14
+
+      - name: Generate release notes (git-cliff)
+        uses: orhun/git-cliff-action@v4
+        id: cliff
+        with:
+          config: cliff.toml
+          args: --tag ${{ env.TAG }} --unreleased --strip header --include-path 'packages/extension/**'
+        env:
+          OUTPUT: /tmp/release-notes.md
+
+      - name: Show generated notes
+        run: |
+          echo '--- release notes preview ---'
+          cat /tmp/release-notes.md || true
+
+      - name: Configure git identity
+        if: env.DRY_RUN != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Run release-it (publish)
+        if: env.DRY_RUN != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PRE_FLAG=""
+          if [ "$IS_PRERELEASE" = "true" ]; then PRE_FLAG="--github.preRelease"; fi
+          bunx --bun release-it@20.0.1 "$VERSION" --ci \
+            --no-npm.publish \
+            --github.releaseNotes="cat /tmp/release-notes.md" \
+            --github.assets="dist/release/nulo-chrome-${VERSION}.zip" \
+            --github.assets="dist/release/nulo-firefox-${VERSION}.zip" \
+            --github.assets="dist/release/SHASUMS256.txt" \
+            $PRE_FLAG
+
+      - name: Run release-it (dry-run, no permanent state)
+        if: env.DRY_RUN == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bunx --bun release-it@20.0.1 "$VERSION" --ci --dry-run \
+            --no-npm.publish \
+            --github.releaseNotes="cat /tmp/release-notes.md"
+
+  refresh-landing:
+    name: refresh landing (Cloudflare Pages deploy hook)
+    # Stable, non-dry-run only. Prereleases don't affect /releases/latest, so
+    # there's no need to redeploy the landing for them.
+    if: ${{ !inputs.dry_run && inputs.channel == 'stable' }}
+    needs: [validate, assemble-and-publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger Cloudflare Pages deploy
+        # NOTE: a 2xx here means Cloudflare accepted the hook, not that the
+        # Pages build succeeded. Check the Cloudflare dashboard to confirm.
+        env:
+          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$DEPLOY_HOOK" ]; then
+            echo "::error::CLOUDFLARE_PAGES_DEPLOY_HOOK secret is not set"
+            exit 1
+          fi
+          code=$(curl -sS -o /tmp/cf.out -w "%{http_code}" \
+            --retry 3 --retry-all-errors --retry-delay 2 \
+            -X POST "$DEPLOY_HOOK")
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+            echo "::error::deploy-hook curl returned HTTP $code"
+            cat /tmp/cf.out
+            exit 1
+          fi
+          echo "deploy-hook triggered (HTTP $code)"
+
+  publish-chrome-store:
+    name: publish to Chrome Web Store
+    # Gate on the workflow input. Currently a stub — leave the input false until
+    # CWS_* secrets exist and the extension is ready to ship to the store.
+    if: inputs.publish_marketplaces
+    needs: [validate, assemble-and-publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-${{ needs.validate.outputs.version }}
+          path: dist/release
+      # Requires repo secrets: CWS_CLIENT_ID, CWS_CLIENT_SECRET, CWS_REFRESH_TOKEN, CWS_EXTENSION_ID
+      - name: Upload to Chrome Web Store
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          echo "Stub. Wire chrome-webstore-upload-cli or mnao305/chrome-extension-upload here."
+          echo "Example:"
+          echo "  bunx chrome-webstore-upload-cli upload \\"
+          echo "    --source dist/release/nulo-chrome-\$VERSION.zip \\"
+          echo "    --extension-id \$CWS_EXTENSION_ID \\"
+          echo "    --client-id \$CWS_CLIENT_ID \\"
+          echo "    --client-secret \$CWS_CLIENT_SECRET \\"
+          echo "    --refresh-token \$CWS_REFRESH_TOKEN"
+          exit 1  # Until secrets are wired, fail loudly when this is accidentally enabled.
+
+  publish-firefox-amo:
+    name: publish to Firefox AMO
+    # Gate on the workflow input. Stub until gecko.id is real and AMO_JWT_* secrets exist.
+    if: inputs.publish_marketplaces
+    needs: [validate, assemble-and-publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-${{ needs.validate.outputs.version }}
+          path: dist/release
+      # Requires repo secrets: AMO_JWT_ISSUER, AMO_JWT_SECRET
+      # Requires `gecko.id` in packages/extension/manifest/manifest.firefox.config.ts to be a real ID, not "{}".
+      - name: Upload to AMO
+        env:
+          IS_PRERELEASE: ${{ needs.validate.outputs.is_prerelease }}
+        run: |
+          echo "Stub. Wire web-ext sign here."
+          echo "Example:"
+          echo "  bunx web-ext sign --source-dir dist/release/firefox \\"
+          echo "    --api-key \$AMO_JWT_ISSUER --api-secret \$AMO_JWT_SECRET \\"
+          echo "    --channel \${IS_PRERELEASE:+unlisted}"
+          exit 1  # Until secrets are wired, fail loudly when this is accidentally enabled.
+
+  status:
+    name: status
+    if: always()
+    needs:
+      [
+        validate,
+        lint-and-typecheck,
+        unit-tests,
+        network-e2e,
+        build-chrome,
+        build-firefox,
+        smoke-against-artifact,
+        assemble-and-publish,
+        refresh-landing,
+      ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Aggregate results
+        run: |
+          for r in \
+            "${{ needs.validate.result }}" \
+            "${{ needs.lint-and-typecheck.result }}" \
+            "${{ needs.unit-tests.result }}" \
+            "${{ needs.network-e2e.result }}" \
+            "${{ needs.build-chrome.result }}" \
+            "${{ needs.build-firefox.result }}" \
+            "${{ needs.smoke-against-artifact.result }}" \
+            "${{ needs.assemble-and-publish.result }}" \
+            "${{ needs.refresh-landing.result }}" \
+          ; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::A release stage failed or was cancelled: $r"
+              exit 1
+            fi
+          done
+          echo "Release pipeline completed."

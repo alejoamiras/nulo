@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Nulo Playground</title>
+	<link rel="stylesheet" href="/src/styles.css" />
+	<script>
+		// Stub Node globals for browser bundles. The Aztec packages pull in
+						// `util` which references `process` at module top-level — without this,
+						// the bundle throws ReferenceError before our render() ever runs.
+						window.global = window
+						window.process = window.process || { env: {}, platform: "browser", versions: { node: "v20.0.0" }, browser: true, nextTick: (cb) => setTimeout(cb, 0) }
+						window.Buffer = window.Buffer || undefined
+	</script>
+</head>
+<body>
+	<div id="app"></div>
+	<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

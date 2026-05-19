@@ -1,0 +1,233 @@
+export const OFFSCREEN_READY_MESSAGE = "OFFSCREEN_READY"
+export const OFFSCREEN_PING = "OFFSCREEN_PING"
+export const OFFSCREEN_PONG = "OFFSCREEN_PONG"
+export const OFFSCREEN_KEEPALIVE = "OFFSCREEN_KEEPALIVE"
+
+let offscreenTimeout: NodeJS.Timeout
+let offscreenPromise: Promise<void> | null = null
+let resolveOffscreenPromise: () => void
+let rejectOffscreenPromise: (reason: string) => void
+
+const HEALTH_CHECK_TIMEOUT_MS = 3_000
+const READY_TIMEOUT_MS = 10_000
+
+const path = "src/offscreen/index.html"
+/** Lazy URL — `chrome.runtime.getURL` is unavailable when this module is
+ *  imported under vitest's node env. Computing on-demand keeps the import
+ *  graph clean for tests that pull NetworkService → PxeServiceClient. */
+let _offscreenUrl: string | undefined
+function offscreenUrl(): string {
+	if (_offscreenUrl === undefined) _offscreenUrl = chrome.runtime.getURL(path)
+	return _offscreenUrl
+}
+
+/**
+ * True on Chromium-based browsers that ship the MV3 `chrome.offscreen` API.
+ * Firefox MV3 does NOT, so the Firefox build path uses a hidden minimized
+ * window hosting the same offscreen.html instead. Pattern adapted from
+ * Grego's extension-wallet (`extension-wallet/src/background/offscreen-
+ * lifecycle.ts`).
+ *
+ * Behind a feature flag in spirit: Firefox parity is gated on manual
+ * verification. The same code ships in both Chrome and Firefox bundles;
+ * the runtime check decides which path executes. Chrome carries ~30
+ * lines of dead code from the Firefox branch.
+ */
+function hasOffscreenApi(): boolean {
+	return typeof chrome !== "undefined" && typeof chrome.offscreen !== "undefined"
+}
+
+/**
+ * Firefox-only: ID of the hidden minimized window hosting offscreen.html.
+ * Module-level so close/create can coordinate. Survives only the SW
+ * lifetime — see the SW-restart-leak caveat in `ensureOffscreenRunning`.
+ */
+let firefoxOffscreenWindowId: number | null = null
+
+const onOffscreenReady = (message: unknown) => {
+	if (message === OFFSCREEN_READY_MESSAGE) {
+		chrome.runtime.onMessage.removeListener(onOffscreenReady)
+		clearTimeout(offscreenTimeout)
+		resolveOffscreenPromise()
+		offscreenPromise = null
+	}
+	return false
+}
+const onOffscreenTimeout = () => {
+	chrome.runtime.onMessage.removeListener(onOffscreenReady)
+	// Kill the half-initialized offscreen so it doesn't become a ghost.
+	closeOffscreen().catch(() => {})
+	rejectOffscreenPromise("Offscreen is not responding")
+	offscreenPromise = null
+}
+
+/**
+ * Check if the existing offscreen document is responsive.
+ * Sends a ping and waits for a pong within HEALTH_CHECK_TIMEOUT_MS.
+ * Returns true if healthy, false if zombie/unresponsive.
+ *
+ * Browser-agnostic: both Chromium offscreen and Firefox hidden-window
+ * variants listen on `chrome.runtime.onMessage`, so the ping/pong path
+ * is identical.
+ */
+async function isOffscreenHealthy(): Promise<boolean> {
+	return new Promise<boolean>((resolve) => {
+		const timer = setTimeout(() => {
+			chrome.runtime.onMessage.removeListener(onPong)
+			resolve(false)
+		}, HEALTH_CHECK_TIMEOUT_MS)
+
+		const onPong = (message: unknown) => {
+			if (message === OFFSCREEN_PONG) {
+				chrome.runtime.onMessage.removeListener(onPong)
+				clearTimeout(timer)
+				resolve(true)
+			}
+			return false
+		}
+
+		chrome.runtime.onMessage.addListener(onPong)
+		chrome.runtime.sendMessage(OFFSCREEN_PING).catch(() => {
+			// No receiver — offscreen is definitely dead
+			chrome.runtime.onMessage.removeListener(onPong)
+			clearTimeout(timer)
+			resolve(false)
+		})
+	})
+}
+
+/**
+ * Close the existing offscreen, ignoring errors.
+ *
+ * Chromium: `chrome.offscreen.closeDocument()`.
+ * Firefox: `chrome.windows.remove(firefoxOffscreenWindowId)` if known.
+ *   If the window ID is unknown (post-SW-restart, see caveat below) we
+ *   can't close it without a `tabs` permission to look it up by URL.
+ *   That window is left running; the freshly-created replacement
+ *   coexists. Acceptable for behind-feature-flag manual verification;
+ *   tracked as a known limitation.
+ */
+async function closeOffscreen() {
+	if (hasOffscreenApi()) {
+		try {
+			await chrome.offscreen.closeDocument()
+		} catch {
+			// Already closed or Chrome cleaned it up
+		}
+		return
+	}
+	if (firefoxOffscreenWindowId !== null) {
+		try {
+			await chrome.windows.remove(firefoxOffscreenWindowId)
+		} catch {
+			// Window already gone (user closed manually, browser quit, etc.)
+		}
+		firefoxOffscreenWindowId = null
+	}
+}
+
+/**
+ * Create the offscreen surface.
+ *
+ * Chromium: `chrome.offscreen.createDocument` with the WORKERS reason.
+ *   Handles the ghost bug where `getContexts()` returns empty but
+ *   `createDocument()` throws "single offscreen document".
+ * Firefox: `chrome.windows.create` minimized + unfocused, hosting the
+ *   same offscreen.html. The window doesn't take focus and shows in the
+ *   taskbar/dock as a Nulo entry; the `chrome.runtime` message channel
+ *   works identically to Chromium's offscreen.
+ */
+async function createOffscreen() {
+	if (hasOffscreenApi()) {
+		try {
+			await chrome.offscreen.createDocument({
+				url: path,
+				reasons: ["WORKERS"],
+				justification: "Offscreen document is used for running PXE in it",
+			})
+		} catch (err) {
+			if (String(err).includes("single offscreen document")) {
+				// Ghost offscreen — close it and retry once
+				await closeOffscreen()
+				await chrome.offscreen.createDocument({
+					url: path,
+					reasons: ["WORKERS"],
+					justification: "Offscreen document is used for running PXE in it",
+				})
+			} else {
+				throw err
+			}
+		}
+		return
+	}
+	// Firefox path. `chrome.windows.create` can resolve to undefined when
+	// the browser refuses (rare, but typed that way) — fail loud so the
+	// caller's create-promise rejection path runs and the ready-gate can
+	// time out cleanly instead of hanging on a missing window id.
+	const win = await chrome.windows.create({
+		url: chrome.runtime.getURL(path),
+		state: "minimized",
+		focused: false,
+	})
+	if (!win) {
+		throw new Error("Firefox offscreen fallback: chrome.windows.create resolved without a window")
+	}
+	firefoxOffscreenWindowId = win.id ?? null
+}
+
+/**
+ * Detect whether the offscreen surface is already alive in this SW
+ * lifetime. Chromium uses the `getContexts` introspection API; Firefox
+ * relies on the in-memory `firefoxOffscreenWindowId`.
+ *
+ * Caveat (Firefox SW-restart): when the SW restarts, the in-memory
+ * tracker resets to null even if the hidden window is still alive in
+ * the browser. The next `ensureOffscreenRunning()` call will then
+ * create a new window — leaking the old one. Re-discovering the old
+ * window requires `chrome.windows.getAll({populate:true})` + a `tabs`
+ * permission to read URLs, which expands the manifest surface beyond
+ * what's needed for non-Firefox builds. Tracked as a known limitation
+ * of the initial Firefox feature-flag pass; revisit if leaks are
+ * observed during manual verification.
+ */
+async function isOffscreenAlreadyRunning(): Promise<boolean> {
+	if (hasOffscreenApi()) {
+		const existingContexts = await chrome.runtime.getContexts({
+			contextTypes: ["OFFSCREEN_DOCUMENT"],
+			documentUrls: [offscreenUrl()],
+		})
+		return existingContexts.length > 0
+	}
+	// Firefox: trust the module-local tracker (see SW-restart caveat above).
+	return firefoxOffscreenWindowId !== null
+}
+
+export async function ensureOffscreenRunning() {
+	if (await isOffscreenAlreadyRunning()) {
+		// Offscreen exists — verify it's actually responsive
+		if (await isOffscreenHealthy()) {
+			return
+		}
+		// Zombie offscreen — kill it and recreate below
+		await closeOffscreen()
+	}
+
+	if (!offscreenPromise) {
+		offscreenPromise = new Promise((resolve, reject) => {
+			resolveOffscreenPromise = resolve
+			rejectOffscreenPromise = reject
+		})
+		offscreenTimeout = setTimeout(onOffscreenTimeout, READY_TIMEOUT_MS)
+		chrome.runtime.onMessage.addListener(onOffscreenReady)
+		try {
+			await createOffscreen()
+		} catch (err) {
+			clearTimeout(offscreenTimeout)
+			chrome.runtime.onMessage.removeListener(onOffscreenReady)
+			offscreenPromise = null
+			throw err
+		}
+	}
+
+	await offscreenPromise
+}

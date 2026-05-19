@@ -1,0 +1,207 @@
+name: Quality
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, dev]
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+concurrency:
+  group: pr-quick-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      core-foundation: ${{ steps.override.outputs.full || steps.filter.outputs.core-foundation }}
+      aztec-runtime: ${{ steps.override.outputs.full || steps.filter.outputs.aztec-runtime }}
+      wallet-bridge: ${{ steps.override.outputs.full || steps.filter.outputs.wallet-bridge }}
+      extension: ${{ steps.override.outputs.full || steps.filter.outputs.extension }}
+      playground: ${{ steps.override.outputs.full || steps.filter.outputs.playground }}
+      landing: ${{ steps.override.outputs.full || steps.filter.outputs.landing }}
+      workflows: ${{ steps.override.outputs.full || steps.filter.outputs.workflows }}
+      root-config: ${{ steps.override.outputs.full || steps.filter.outputs.root-config }}
+      firefox-touching: ${{ steps.override.outputs.full || steps.filter.outputs.firefox-touching }}
+      needs-extension-build: ${{ steps.compute.outputs.needs-extension-build }}
+      needs-firefox-build: ${{ steps.compute.outputs.needs-firefox-build }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+          filters: |
+            core-foundation:
+              - 'packages/wallet-core/**'
+              - 'packages/wallet-crypto/**'
+              - 'packages/extension-messaging/**'
+              - '!packages/wallet-core/**/*.md'
+              - '!packages/wallet-crypto/**/*.md'
+              - '!packages/extension-messaging/**/*.md'
+            aztec-runtime:
+              - 'packages/aztec-runtime/**'
+              - '!packages/aztec-runtime/**/*.md'
+            wallet-bridge:
+              - 'packages/wallet-bridge/**'
+              - '!packages/wallet-bridge/**/*.md'
+            extension:
+              - 'packages/extension/**'
+              - '!packages/extension/**/*.md'
+            playground:
+              - 'packages/playground/**'
+              - '!packages/playground/**/*.md'
+            landing:
+              - 'packages/landing/**'
+              - '!packages/landing/**/*.md'
+            workflows:
+              - '.github/workflows/**'
+              - '.github/actions/**'
+            root-config:
+              - 'package.json'
+              - 'bun.lockb'
+              - 'bunfig.toml'
+              - 'biome.json'
+              - 'tsconfig.json'
+              - '.commitlintrc.json'
+              - '.githooks/**'
+            # Files that can change Firefox build divergence (not runtime behaviour).
+            # Auditor (codex) corrected this to include shared build inputs in addition
+            # to the firefox-only configs; see implementations-plan/ci-cd/build-caching-plan.md §1.1.
+            firefox-touching:
+              - 'packages/extension/manifest/manifest.firefox.config.ts'
+              - 'packages/extension/vite.firefox.config.mts'
+              - 'packages/extension/manifest/manifest.config.ts'
+              - 'packages/extension/vite.config.ts'
+              - 'packages/extension/package.json'
+              - 'bun.lockb'
+              - 'bunfig.toml'
+              - '.github/workflows/_build-extension.yml'
+              - '.github/actions/setup-bun/**'
+      - name: Override for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        id: override
+        run: echo "full=true" >> "$GITHUB_OUTPUT"
+      - name: Compute downstream flags
+        id: compute
+        env:
+          CORE: ${{ steps.override.outputs.full || steps.filter.outputs.core-foundation }}
+          RUNTIME: ${{ steps.override.outputs.full || steps.filter.outputs.aztec-runtime }}
+          BRIDGE: ${{ steps.override.outputs.full || steps.filter.outputs.wallet-bridge }}
+          EXTENSION: ${{ steps.override.outputs.full || steps.filter.outputs.extension }}
+          WORKFLOWS: ${{ steps.override.outputs.full || steps.filter.outputs.workflows }}
+          ROOT: ${{ steps.override.outputs.full || steps.filter.outputs.root-config }}
+          FIREFOX_TOUCHING: ${{ steps.override.outputs.full || steps.filter.outputs.firefox-touching }}
+          BASE_REF: ${{ github.base_ref }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$CORE" = "true" ] || [ "$RUNTIME" = "true" ] || [ "$BRIDGE" = "true" ] \
+             || [ "$EXTENSION" = "true" ] || [ "$WORKFLOWS" = "true" ] || [ "$ROOT" = "true" ]; then
+            echo "needs-extension-build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs-extension-build=false" >> "$GITHUB_OUTPUT"
+          fi
+          # Firefox build: only when something actually affects build divergence,
+          # or on main-targeted PRs (full-sanity gate), or on workflow_dispatch.
+          if [ "$EVENT" = "workflow_dispatch" ] \
+             || [ "$BASE_REF" = "main" ] \
+             || [ "$FIREFOX_TOUCHING" = "true" ]; then
+            echo "needs-firefox-build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs-firefox-build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  commitlint:
+    name: Commitlint
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-1.3.13-${{ hashFiles('bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-1.3.13-
+            ${{ runner.os }}-bun-
+      - run: bun install --frozen-lockfile
+      - name: Lint PR commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bunx commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
+
+  lint-and-typecheck:
+    name: Lint + Typecheck
+    needs: changes
+    uses: ./.github/workflows/_lint-and-typecheck.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+
+  unit-tests:
+    name: Unit tests
+    needs: changes
+    uses: ./.github/workflows/_unit-tests.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+
+  build-chrome:
+    name: Build Chrome
+    needs: changes
+    if: needs.changes.outputs.needs-extension-build == 'true'
+    uses: ./.github/workflows/_build-extension.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      target: chrome
+      upload_artifacts: true
+
+  build-firefox:
+    name: Build Firefox
+    needs: changes
+    if: needs.changes.outputs.needs-extension-build == 'true' && needs.changes.outputs.needs-firefox-build == 'true'
+    uses: ./.github/workflows/_build-extension.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      target: firefox
+      upload_artifacts: true
+
+  # Smoke e2e moved to its own pr-smoke-e2e.yml workflow:
+  # auto-runs on PRs to main, on changes within the `smoke-surface`
+  # filter, or via the `e2e:smoke` label. Mirrors pr-network-e2e.yml.
+
+  status:
+    name: Status
+    if: always()
+    needs: [changes, commitlint, lint-and-typecheck, unit-tests, build-chrome, build-firefox]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Aggregate results
+        run: |
+          for r in \
+            "${{ needs.changes.result }}" \
+            "${{ needs.commitlint.result }}" \
+            "${{ needs.lint-and-typecheck.result }}" \
+            "${{ needs.unit-tests.result }}" \
+            "${{ needs.build-chrome.result }}" \
+            "${{ needs.build-firefox.result }}" \
+          ; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::A required job failed or was cancelled: $r"
+              exit 1
+            fi
+          done
+          echo "All required gates passed (or were skipped because their filter did not trip)."

@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rabby — runtime architecture</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1e252e; --border: #2a323d;
+    --text: #d1d5db; --muted: #8b949e; --accent: #4169e1; --violet: #9b59ff;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149; --info: #58a6ff;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); margin: 0; padding: 0; font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 24px 64px; }
+  nav.top { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  nav.top .home { color: var(--violet); text-decoration: none; font-weight: 600; }
+  nav.top .home:hover { text-decoration: underline; }
+  nav.top a.tab { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 4px; font-size: 13px; }
+  nav.top a.tab:hover { color: var(--text); background: var(--panel); }
+  nav.top a.tab.current { color: var(--text); background: var(--panel2); border: 1px solid var(--accent); }
+  nav.top .sep { color: var(--muted); }
+  h1 { font-size: 28px; margin: 0 0 8px; color: #fff; letter-spacing: -0.5px; }
+  h1 .accent-stripe { color: var(--accent); }
+  h2 { font-size: 20px; margin: 36px 0 12px; color: #fff; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16px; margin: 20px 0 8px; color: var(--accent); }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--panel2); color: var(--muted); margin-right: 6px; border: 1px solid var(--border); }
+  .tag.ok { color: var(--ok); border-color: var(--ok); }
+  .tag.warn { color: var(--warn); border-color: var(--warn); }
+  .tag.accent { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .prov { display: inline-block; font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
+  .prov.research { color: var(--info); border-color: var(--info); }
+  .prov.chat { color: var(--violet); border-color: var(--violet); }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; }
+  .card.accent-border { border-left: 3px solid var(--accent); }
+  figure.ascii { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; margin: 14px 0; overflow-x: auto; }
+  figure.ascii figcaption { font-size: 13px; color: var(--muted); font-style: italic; margin-bottom: 10px; }
+  figure.ascii pre { font: 12px/1.35 var(--mono); color: var(--text); margin: 0; white-space: pre; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th, td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; background: var(--panel); }
+  td.mono { font-family: var(--mono); font-size: 12px; }
+  .toc { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; margin: 16px 0; font-size: 13px; }
+  .toc strong { color: var(--text); }
+  .toc a { color: var(--info); text-decoration: none; margin-right: 12px; }
+  .toc a:hover { text-decoration: underline; }
+  .breadcrumb { font-size: 12px; color: var(--muted); margin: 0 0 16px; }
+  .breadcrumb a { color: var(--info); text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  code { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  .callout { border-left: 3px solid var(--info); background: var(--panel); padding: 12px 16px; margin: 14px 0; border-radius: 0 6px 6px 0; font-size: 14px; }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout strong { color: var(--info); }
+  .callout.warn strong { color: var(--warn); }
+  .prev-next { display: flex; justify-content: space-between; margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 13px; }
+  .prev-next a { color: var(--info); text-decoration: none; }
+  .prev-next a:hover { text-decoration: underline; }
+  .footer { font-size: 12px; color: var(--muted); margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .verdict { background: linear-gradient(135deg, rgba(65,105,225,0.08), rgba(65,105,225,0.02)); border: 1px solid var(--accent); border-left: 3px solid var(--accent); padding: 16px 18px; border-radius: 8px; margin: 16px 0 24px; }
+</style>
+</head>
+<body>
+<nav class="top" aria-label="Primary">
+  <a href="../index.html" class="home">Wallet Architecture Research</a>
+  <span class="sep">/</span>
+  <a href="../index.html" class="tab">Overview</a>
+  <a href="rabby.html" class="tab current">Rabby</a>
+  <a href="metamask.html" class="tab">MetaMask</a>
+  <a href="grego.html" class="tab">Grego</a>
+  <a href="nulo.html" class="tab">Nulo Today</a>
+  <a href="../nulo-phase-2.html" class="tab">Phase 2</a>
+  <a href="../nulo-phase-2-plus.html" class="tab">Phase 2+</a>
+  <a href="../nulo-maximalist.html" class="tab">Maximalist</a>
+</nav>
+
+<div class="wrap">
+
+<p class="breadcrumb"><a href="../index.html">Overview</a> &nbsp;›&nbsp; Rabby</p>
+
+<h1><span class="accent-stripe">Rabby</span> — pragmatic durable jobs in the wild</h1>
+
+<div class="verdict">
+  <strong>Verdict:</strong> Rabby is the wallet that takes "the SW will die" most seriously in shipped code. It doesn't have a formal job framework, but its service-level patterns — <code>unlockPromise</code>, persisted progress markers, per-origin rate limits — are the closest match to what Nulo's Phase 2 needs. Worth studying line by line.
+</div>
+
+<div class="toc" aria-label="On this page">
+  <strong>On this page:</strong>
+  <a href="#runtime">Runtime shape</a>
+  <a href="#durable">Durable jobs</a>
+  <a href="#strengths">Strengths</a>
+  <a href="#risks">Risks</a>
+  <a href="#steal">What Nulo should steal</a>
+  <a href="#dont-copy">What not to copy</a>
+  <a href="#sources">Sources</a>
+</div>
+
+<h2 id="runtime">Runtime shape <span class="prov chat">diagram</span></h2>
+
+<p>
+  Rabby is an MV3 Chromium extension with a service worker entry, popup UI (React + Redux), and a content script. There is no offscreen document — all signing happens inside the SW or via injected provider on the dApp page. The architecture leans heavily on <em>services</em> with persisted state in <code>chrome.storage.local</code> + IndexedDB.
+</p>
+
+<figure class="ascii" aria-label="Rabby runtime: dApp talks to content script, content script bridges to service worker via runtime port, service worker hosts a service registry where each service owns its persisted state and exposes typed methods; popup connects via long-lived port and talks to the same service registry; history sync runs a resumable indexer that writes progress to IndexedDB">
+  <figcaption>Rabby's runtime: services own their own persistence, popup is a thin renderer over service state, and durable work (history sync) is structured around resumable cursors.</figcaption>
+  <pre>  ┌────────────┐         ┌──────────────────────┐
+  │  dApp page │◄───────►│  content-script.js   │
+  └────────────┘         │  (in-page provider)  │
+                         └──────────┬───────────┘
+                                    │ chrome.runtime port
+                                    ▼
+                ┌─────────────────────────────────────────┐
+                │  SERVICE WORKER (MV3)                   │
+                │                                         │
+                │  ┌─────────────────────────────────┐    │
+                │  │ Service registry                │    │
+                │  │  · keyringService               │    │
+                │  │  · permissionService            │    │
+                │  │  · preferenceService            │    │
+                │  │  · transactionWatcher           │    │
+                │  │  · perpsService                 │    │
+                │  │  · historyDbService (IDB)       │    │
+                │  │  · notificationService          │    │
+                │  │  · ...                          │    │
+                │  └─────────────────────────────────┘    │
+                │                                         │
+                │  unlockPromise: any service awaits      │
+                │   keyring boot before serving methods   │
+                │                                         │
+                │  per-origin rate limit on notifications │
+                └────────────┬──────────────────────┬─────┘
+                             │                      │
+                             ▼                      ▼
+                     chrome.storage.local      IndexedDB
+                     (config + per-service     (history,
+                      persisted state)          tx index)
+
+                             ▲
+              chrome.runtime port (long-lived)
+                             │
+                ┌────────────┴───────────┐
+                │  POPUP (React + Redux) │
+                │  thin renderer over    │
+                │  service state         │
+                └────────────────────────┘</pre>
+</figure>
+
+<h2 id="durable">How durable jobs work here <span class="prov chat">analysis</span></h2>
+
+<p>
+  Rabby doesn't have a "job registry" abstraction. What it has, and what makes durable work possible, is:
+</p>
+
+<ol>
+  <li>
+    <strong><code>unlockPromise</code> in services</strong> — when a service method runs before the keyring has finished booting, the service returns a promise that resolves once boot completes, rather than throwing. The dApp-facing handler just awaits, transparently. <span class="prov chat">R6 pattern</span>
+  </li>
+  <li>
+    <strong>Persisted progress markers</strong> — <code>historyDbService</code> stores per-(address, chainId) cursors in IndexedDB. If the SW dies mid-indexing, the next boot resumes from the last cursor instead of restarting. <span class="prov chat">R7 pattern</span>
+  </li>
+  <li>
+    <strong>Per-origin notification rate limits</strong> — <code>notificationService</code> enforces per-origin caps so a busy dApp can't blow up the popup queue. Functions as a back-pressure mechanism. <span class="prov chat">R5 pattern</span>
+  </li>
+  <li>
+    <strong>No <code>chrome.alarms</code> wake-up</strong> — Rabby relies on user interaction (popup open / dApp message) to revive the SW. It doesn't proactively resume work on a timer.
+  </li>
+</ol>
+
+<div class="callout">
+  <strong>Pattern to internalize:</strong> Rabby treats its services as durable, not its jobs. Persistence lives at the service boundary, not in a separate job framework. That's a cheaper-to-ship design than MetaMask's approval state machine, and gets you most of the benefit.
+</div>
+
+<h2 id="strengths">Strengths <span class="prov research">research</span></h2>
+
+<table aria-label="Rabby strengths">
+  <thead><tr><th>Dimension</th><th>Why it stands out</th></tr></thead>
+  <tbody>
+    <tr><td>dApp ergonomics</td><td>EIP-1193 conformance is meticulous; method handlers consistently await <code>unlockPromise</code> rather than throwing during boot. Far fewer "wallet not ready" bugs surface to dApps.</td></tr>
+    <tr><td>Service-level persistence</td><td>Every service owns its state, persists it, and rehydrates on boot. No central state blob to migrate atomically.</td></tr>
+    <tr><td>History sync resumability</td><td><code>historyDbService</code> cursors make full-chain reindexing safe to interrupt — a model for any long-running work.</td></tr>
+    <tr><td>Per-origin rate limiting</td><td><code>notificationService</code>'s per-origin caps protect the UI from runaway dApps without a global queue.</td></tr>
+    <tr><td>Cross-service signaling</td><td>Plain event emitters between services — no message bus framework, no schema. Stays readable.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="risks">Risks / anti-patterns <span class="prov research">research</span></h2>
+
+<table aria-label="Rabby risks">
+  <thead><tr><th>Risk</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>No formal job framework</td><td>Each service rolls its own resume logic. Inconsistent across the codebase.</td></tr>
+    <tr><td>No <code>chrome.alarms</code> wake-up</td><td>If the SW dies and nothing pokes it, persisted progress sits idle.</td></tr>
+    <tr><td>Manual state migrations</td><td>No numbered-migrations framework like MetaMask. Schema changes are ad hoc.</td></tr>
+    <tr><td>Mixed Redux + service-state</td><td>Some state lives in Redux (popup) and some in services (SW). Easy to drift.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="steal">What Nulo should steal <span class="prov chat">phase 2</span></h2>
+
+<ul>
+  <li><strong><code>unlockPromise</code> at every dApp-facing method</strong> — Nulo's port handlers should await profile-boot rather than throwing "wallet locked".</li>
+  <li><strong>Per-service persisted cursors</strong> — any long sync (txHistory, balance index) writes progress on every increment, so SW death is a recoverable event, not a restart.</li>
+  <li><strong>Per-origin rate limiting</strong> — when Nulo opens the door to "real users", a busy dApp must not be able to spam the approval queue.</li>
+</ul>
+
+<h2 id="dont-copy">What not to copy <span class="prov chat">phase 2</span></h2>
+
+<ul>
+  <li><strong>Ad-hoc resume logic per service</strong> — Nulo can do better by introducing a single <code>JobRegistry</code> primitive instead of N copies of the pattern.</li>
+  <li><strong>Skipping <code>chrome.alarms</code></strong> — Rabby gets away with no proactive wake-up because EVM signing is fast. Aztec proofs are not; Nulo needs the wake-up.</li>
+  <li><strong>Mixed Redux + service state</strong> — keep the existing Pinia + <code>ServiceClient</code> split; don't introduce a second source of truth.</li>
+</ul>
+
+<h2 id="sources">Sources <span class="prov research">links</span></h2>
+
+<ul>
+  <li><a href="../rabby/rabby-claude-cli.md"><code>rabby/rabby-claude-cli.md</code></a> — primary deep dive (Claude agent)</li>
+  <li><a href="../rabby/rabby-codex-cli.md"><code>rabby/rabby-codex-cli.md</code></a> — independent audit (Codex CLI)</li>
+  <li><a href="../README.md"><code>README.md</code></a> — comparative synthesis</li>
+</ul>
+
+<div class="prev-next">
+  <a href="../index.html">← Overview</a>
+  <a href="metamask.html">MetaMask →</a>
+</div>
+
+<div class="footer">
+  Calibrated 2026-05-12. Content provenance: <span class="prov research">research</span> from existing markdown synthesis, <span class="prov chat">chat additions</span> from on-page diagrams &amp; patterns surfaced post-merge.
+</div>
+
+</div>
+</body>
+</html>

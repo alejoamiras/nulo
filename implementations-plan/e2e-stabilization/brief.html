@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>E2E Stabilization — Plan Brief</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --fg: #e8eaee;
+      --muted: #9aa3b2;
+      --accent: #7aa2f7;
+      --accent-warm: #e0af68;
+      --good: #9ece6a;
+      --warn: #f7768e;
+      --card: #161922;
+      --border: #232836;
+      --radius: 10px;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --sans: -apple-system, "Segoe UI", system-ui, sans-serif;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #fafbfc;
+        --fg: #1a1d24;
+        --muted: #5b6471;
+        --accent: #3b5bdb;
+        --accent-warm: #b58200;
+        --good: #2f9e44;
+        --warn: #e03131;
+        --card: #ffffff;
+        --border: #e1e5eb;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); line-height: 1.55; }
+    body { max-width: 880px; margin: 0 auto; padding: 32px 24px 80px; }
+    h1, h2, h3, h4 { line-height: 1.25; margin-top: 0; }
+    h1 { font-size: 28px; margin-bottom: 8px; }
+    h2 { font-size: 22px; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    h3 { font-size: 17px; margin: 0 0 8px; }
+    h4 { font-size: 14px; margin: 0 0 4px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+    p { margin: 0 0 12px; }
+    code, .mono { font-family: var(--mono); font-size: 0.92em; }
+    code { background: var(--border); padding: 1px 5px; border-radius: 4px; }
+    a { color: var(--accent); }
+
+    .lead {
+      color: var(--muted);
+      font-size: 15px;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 22px;
+      margin: 12px 0;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      vertical-align: middle;
+    }
+    .tag.phase  { background: rgba(122, 162, 247, 0.15); color: var(--accent); }
+    .tag.q      { background: rgba(224, 175, 104, 0.15); color: var(--accent-warm); }
+    .tag.good   { background: rgba(158, 206, 106, 0.15); color: var(--good); }
+    .tag.warn   { background: rgba(247, 118, 142, 0.15); color: var(--warn); }
+    .tag.muted  { background: var(--border); color: var(--muted); }
+
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin: 24px 0;
+    }
+    .stat {
+      flex: 1 1 140px;
+      padding: 14px 18px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .stat-value { font-size: 26px; font-weight: 700; line-height: 1; margin-bottom: 4px; }
+    .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+    section { margin-top: 36px; }
+
+    ul.tight { margin: 0 0 12px; padding-left: 22px; }
+    ul.tight li { margin-bottom: 4px; }
+
+    .eli5 { color: var(--fg); font-style: italic; padding: 12px 14px; background: rgba(122, 162, 247, 0.06); border-left: 3px solid var(--accent); border-radius: 4px; margin-bottom: 14px; }
+    .eli5 strong { font-style: normal; }
+
+    table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; font-size: 14px; }
+    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+    td.num { font-variant-numeric: tabular-nums; }
+
+    .footer {
+      margin-top: 48px;
+      padding-top: 18px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .footer code { font-size: 12px; }
+
+    .question { display: grid; grid-template-columns: 1fr; gap: 6px; }
+    .question .ctx { color: var(--muted); font-size: 14px; }
+    .question .rec { font-size: 14px; padding: 8px 12px; background: rgba(158, 206, 106, 0.07); border-left: 3px solid var(--good); border-radius: 4px; }
+    .question .rec strong { color: var(--good); }
+
+    nav.toc { font-size: 14px; margin: 16px 0 28px; display: flex; flex-wrap: wrap; gap: 14px; }
+    nav.toc a { color: var(--muted); text-decoration: none; }
+    nav.toc a:hover { color: var(--accent); }
+  </style>
+</head>
+<body>
+
+  <h1>E2E Stabilization &mdash; Plan Brief</h1>
+  <p class="lead">
+    Plain-language summary of the stabilization plan for the Nulo wallet's
+    e2e test pipeline. Plans are persisted at
+    <code>implementations-plan/e2e-stabilization/</code>; this page is for
+    the human-context overview and the decisions we need from you before
+    Phase 0 starts. <strong>Iteration is local-first</strong> &mdash; CI
+    is the final substrate confirmation, never the feedback loop.
+  </p>
+
+  <nav class="toc">
+    <a href="#snapshot">Snapshot</a>
+    <a href="#whats-going-on">What's going on</a>
+    <a href="#phases">Phases</a>
+    <a href="#decisions">Decisions we need</a>
+    <a href="#trail">Audit trail</a>
+  </nav>
+
+  <section id="snapshot">
+    <h2>Current state, in numbers</h2>
+    <div class="status-row">
+      <div class="stat">
+        <div class="stat-value">28</div>
+        <div class="stat-label">tests quarantined</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">20&nbsp;+&nbsp;8</div>
+        <div class="stat-label">network + smoke</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">~14</div>
+        <div class="stat-label">likely defensive (pass on un-skip)</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">~7</div>
+        <div class="stat-label">real fix needed</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">2</div>
+        <div class="stat-label">defer (architectural)</div>
+      </div>
+    </div>
+    <p class="lead">
+      Numbers assume codex's expectation that PR #70's wallet fixes still
+      cover most of the network cluster. Phase 0 confirms or refutes this in
+      a single hosted CI run.
+    </p>
+  </section>
+
+  <section id="whats-going-on">
+    <h2>What's actually going on</h2>
+
+    <div class="card">
+      <h3>The short story</h3>
+      <p>
+        A week ago we shipped the CI pipeline from zero (PR #77). To get
+        the gates green, that PR <em>quarantined</em> 26 tests &mdash; literally
+        commented them out with <code>test.skip</code>. Some of those tests
+        had been investigated and fixed in PR #70 only days earlier. The
+        comments saying <em>why</em> they were skipped don't always match
+        the current code (e.g. one cites a <code>waitForToast</code> race
+        in a helper that doesn't use <code>waitForToast</code> anymore).
+      </p>
+      <p>
+        That left us with paper-quarantines: tests skipped because we
+        weren't sure, not because we knew they failed. Two of them (in
+        <code>batch-partial-failure</code> and <code>connect-locked-queue</code>)
+        predate PR #77 and have separate, real reasons to stay skipped.
+      </p>
+      <p>
+        Two passes of independent investigation (mine + a parallel Claude
+        agent) plus a codex audit all converged on the same picture: most
+        quarantines are defensive; a small handful are real bugs in the
+        test helpers; one is a slow chain on under-powered CI runners.
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>Why this matters</h3>
+      <ul class="tight">
+        <li>
+          <strong>Network e2e on <code>main</code> is a required check.</strong>
+          A skipped test passes silently; it can hide regressions that
+          ship to users.
+        </li>
+        <li>
+          <strong>Smoke e2e is currently advisory.</strong> If we get it
+          stable, we can require it on <code>dev</code> too, catching
+          regressions earlier in the PR flow.
+        </li>
+        <li>
+          <strong>Tests should be valuable, not a tax.</strong> Per your
+          guidance: succinct, valuable, not over-verbose. Each test we
+          touch will pass that bar or we'll delete it (with a reason).
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="phases">
+    <h2>The phases, in plain language</h2>
+
+    <article class="card">
+      <h3><span class="tag phase">Phase 0</span>&nbsp; Find out what's actually broken &mdash; locally first</h3>
+      <p class="eli5">
+        <strong>ELI5:</strong> imagine 28 tests in a "broken" pile. We don't
+        know if they're all broken or just suspected. We un-skip everything,
+        then run smoke and network 3&times; locally via the e2e agent (which
+        already gives us cold-start isolation per run). After we know
+        what's actually flaky locally, we push ONCE to CI for substrate
+        confirmation. CI is the final check, never the iteration loop.
+      </p>
+      <h4>What we'll learn</h4>
+      <ul class="tight">
+        <li>Which quarantines are defensive (un-skip, done).</li>
+        <li>Which have real failures (move to Phase 1 or 2).</li>
+        <li>Which are hosted-only divergences &mdash; local passes, CI
+            fails. Maps to runner-resource or substrate issues.</li>
+      </ul>
+      <h4>Cost</h4>
+      <p>Local: ~30-40 min for smoke 3&times; + ~1-1.5 hr for network
+         3&times; via <code>bun run e2e:agent</code> (parallel-safe,
+         per-run fresh ports). One Linux-container run for substrate-
+         specific tests if needed. <strong>No CI run in Phase 0</strong>
+         &mdash; CI confirms per-PR later. Total: ~2-3 hr local.</p>
+    </article>
+
+    <article class="card">
+      <h3><span class="tag phase">Phase 1</span>&nbsp; Fix the smoke tests (8 quarantined)</h3>
+      <p class="eli5">
+        <strong>ELI5:</strong> four small problems in the helpers. The tests
+        are fine; the supporting code occasionally returns "done" before
+        it's actually done, and that trips up downstream assertions. We're
+        going to fix the helpers, not weaken the tests.
+      </p>
+      <h4>The four buckets</h4>
+      <table>
+        <thead>
+          <tr><th>Cluster</th><th>Tests</th><th>What's wrong</th><th>Fix</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>S1 &mdash; appearance</td>
+            <td>1</td>
+            <td>Skip looks <strong>defensive</strong>; codex couldn't find a credible race.</td>
+            <td>Un-skip in PR-A. Reinvestigate only if it flakes.</td>
+          </tr>
+          <tr>
+            <td>S1 &mdash; security</td>
+            <td>1</td>
+            <td>Test runs third in a file after a password rotation; old
+                session state contaminates it.</td>
+            <td>Use a per-test fixture so the test gets a clean profile.</td>
+          </tr>
+          <tr>
+            <td>S2 &mdash; contacts delete</td>
+            <td>1</td>
+            <td>Skip comment claims a <code>waitForToast</code> race; the
+                helper hasn't used <code>waitForToast</code> in months. The
+                real issue is a brittle "no console errors" assertion that
+                picks up benign teardown noise.</td>
+            <td>Filter helper for benign disconnect noise.</td>
+          </tr>
+          <tr>
+            <td>S3 &mdash; SW respawn</td>
+            <td>4</td>
+            <td>The "kill the service worker" helper returns before the SW
+                is actually dead, so the next test action races the wipe.</td>
+            <td>Helper waits for storage wipe + new SW target before continuing.</td>
+          </tr>
+          <tr>
+            <td>S4 &mdash; passkey backup</td>
+            <td>1</td>
+            <td>11-service backup chain takes ~290s on a 2-vCPU hosted
+                runner (vs ~10-15s locally). Real chain slowness.</td>
+            <td>Profile the chain first. Either we find an optimization,
+                or we accept the runner is too small and bump the test's
+                timeout with diagnostic logs for the next regression.</td>
+          </tr>
+        </tbody>
+      </table>
+      <h4>Order</h4>
+      <p>S2 (smallest), S1-security, S3, S4. Each PR independent.</p>
+    </article>
+
+    <article class="card">
+      <h3><span class="tag phase">Phase 2</span>&nbsp; Fix the network tests (20 quarantined)</h3>
+      <p class="eli5">
+        <strong>ELI5:</strong> 18 of these were fixed by PR #70 days ago, then
+        re-skipped during the CI bringup as a precaution. Phase 0 confirms
+        whether the fixes still hold. If they do (very likely), we just
+        un-skip and ship. The other 2 are pre-existing skips with separate
+        reasons.
+      </p>
+      <h4>What happens</h4>
+      <ul class="tight">
+        <li><strong>The 18 PR-#77 skips</strong> &mdash; one mechanical PR-A
+            that flips them back on. If hosted CI shows ~97% pass-rate,
+            that's it. We're done.</li>
+        <li><strong>F (<code>batch-partial-failure</code>)</strong> &mdash;
+            architectural mismatch in <code>wallet-bridge</code>. Stays
+            skipped. Separate small PR later.</li>
+        <li><strong>G (<code>connect-locked-queue</code>)</strong> &mdash;
+            needs a "queued" signal from the extension before unlock.
+            Could fold into the S3 SW work.</li>
+      </ul>
+      <h4>Rotating flakes</h4>
+      <p>2-3 tests rotate flaky under cumulative load. Two of them already
+         have scoped <code>retry: 1</code>. We wait for upstream
+         <code>aztec.js</code> to migrate off IndexedDB &mdash; that's
+         expected to materially reduce the surface.</p>
+    </article>
+
+    <article class="card">
+      <h3><span class="tag phase">Phase 3</span>&nbsp; Speed audit</h3>
+      <p class="eli5">
+        <strong>ELI5:</strong> some helpers wait a fixed number of
+        milliseconds "just in case." Replace those with explicit waits for
+        the actual signal we care about. Result: tests pass faster on the
+        happy path; they still fail clearly on the sad path. Real bugs
+        surface sooner.
+      </p>
+      <h4>The biggest wins (ranked)</h4>
+      <ol class="tight">
+        <li><strong>Drop <code>retry: 2 &rarr; 1</code> on smoke.</strong>
+            Real bugs fail three times in a row; flakes don't. Surfaces
+            real bugs faster.</li>
+        <li><strong>Replace hard 10s sleep in <code>waitForTxConfirmation</code></strong>
+            with a state-driven wait on the actual tx-confirmed signal.</li>
+        <li><strong>Drop 5s post-fee-estimation sleep in
+            <code>sendTransfer</code>.</strong> May surface a real PXE
+            sync race we've been masking.</li>
+        <li><strong>Replace 500ms+2s padding in <code>refreshBalances</code>
+            fixture loops</strong> with a balance-loaded signal.</li>
+        <li><strong>Replace 200ms sleep in <code>navigateToSettings</code></strong>
+            with a per-route mount signal. <em>Medium risk &mdash; needs
+            a small per-page testid contract.</em></li>
+        <li><strong>Trim <code>openPopup</code>'s triple navigation</strong>
+            if the SW handshake is reliable enough now. <em>Highest
+            potential win (~75 invocations per smoke run) but highest
+            risk &mdash; the triple-nav was a real workaround.</em></li>
+      </ol>
+      <h4>Ground rule</h4>
+      <p>Speed changes never ship in the same PR as un-skip changes. If
+         removing a sleep surfaces a real race, we want that to be
+         attributable to one specific change.</p>
+    </article>
+
+    <article class="card">
+      <h3><span class="tag phase">Phase 4</span>&nbsp; Make it stick</h3>
+      <p class="eli5">
+        <strong>ELI5:</strong> once the suite is reliable, promote it from
+        "we run it but ignore failures" to "PRs can't merge if it's red."
+        Then write down the rules so we don't slip back.
+      </p>
+      <h4>Outputs</h4>
+      <ul class="tight">
+        <li>Smoke required on <code>dev</code> (currently advisory).</li>
+        <li>Drop the "Known failures" section from the e2e README.</li>
+        <li>Document the retry policy: at most ~5% of tests can carry
+            scoped <code>retry</code>. Above that is a real bug.</li>
+      </ul>
+    </article>
+  </section>
+
+  <section id="decisions">
+    <h2>Decisions we need from you</h2>
+    <p class="lead">Each card: short context, my recommendation, your call.</p>
+
+    <article class="card question">
+      <h3><span class="tag q">Q1</span>&nbsp; Phase 0 approach <span class="tag good">UPDATED</span></h3>
+      <p class="ctx">
+        Iterate locally first because CI is too slow to be the feedback
+        loop. Run smoke + network locally via <code>bun run e2e:agent</code>
+        (parallel-safe, cold-start per run) 3&times; each. Drill into
+        failing tests in isolation. Use a Linux container only where
+        substrate matters (e.g. <code>passkey-backup</code>). No Phase 0
+        CI run &mdash; CI confirms per-PR later.
+      </p>
+      <p class="rec"><strong>Approved.</strong> ~2-3 hr local iteration.
+        CI never burns time in baseline.</p>
+    </article>
+
+    <article class="card question">
+      <h3><span class="tag q">Q2</span>&nbsp; PR strategy</h3>
+      <p class="ctx">
+        Seven stacked PRs (A&ndash;G) onto <code>dev</code>, each fixing
+        one cluster, vs one or two grouped fix-everything PRs.
+      </p>
+      <p class="rec"><strong>My take:</strong> seven stacked. Past pattern
+        (M6, network-triage) shows stacked lands cleaner; each is
+        revertable in isolation.</p>
+    </article>
+
+    <article class="card question">
+      <h3><span class="tag q">Q3</span>&nbsp; Passkey backup (S4)</h3>
+      <p class="ctx">
+        Path A: profile the 11-service backup chain first (4-6 hr; may
+        reveal a perf opportunity). Path B: just bump the timeout (30 min;
+        ships now, less learning).
+      </p>
+      <p class="rec"><strong>My take:</strong> Path A. The profiling
+        artifact is reusable for the next regression even if the chain
+        ends up being inherently slow.</p>
+    </article>
+
+    <article class="card question">
+      <h3><span class="tag q">Q4</span>&nbsp; SW-resilience tests</h3>
+      <p class="ctx">
+        Four tests for service-worker death recovery. Both audits and
+        codex confirm they're NOT redundant with existing coverage. PR #77
+        called them "great locally, flaky on CI."
+      </p>
+      <p class="rec"><strong>My take:</strong> harden the helper, keep
+        them as first-class CI tests. Skip the "nightly only" middle
+        ground &mdash; we should be able to make these deterministic.</p>
+    </article>
+
+    <article class="card question">
+      <h3><span class="tag q">Q5</span>&nbsp; <code>retry: 2 &rarr; 1</code> on smoke</h3>
+      <p class="ctx">
+        Smoke currently retries each failing test twice. That's three
+        runs per flake hit. Real bugs fail thrice in a row anyway;
+        flakes usually don't.
+      </p>
+      <p class="rec"><strong>My take:</strong> drop to <code>retry: 1</code>
+        in PR-F (the speed pass). Measure CI wall-time change vs current
+        baseline as part of the PR.</p>
+    </article>
+
+    <article class="card question">
+      <h3><span class="tag q">Q6</span>&nbsp; Promote smoke to required on <code>dev</code></h3>
+      <p class="ctx">
+        Currently smoke is advisory on <code>dev</code>, required on
+        <code>main</code>. Once stable, requiring it on <code>dev</code>
+        catches regressions earlier.
+      </p>
+      <p class="rec"><strong>My take:</strong> flip it on after PR-A
+        lands green plus 10 PRs through the gate.</p>
+    </article>
+
+    <article class="card question">
+      <h3><span class="tag q">Q7</span>&nbsp; R1 (PXE serialization) investigation</h3>
+      <p class="ctx">
+        An earlier triage flagged PXE serialization as a real perf concern
+        in <code>@nulo/aztec-runtime</code>. After PR #70's fixes, it's
+        not blocking tests anymore but it's still real product perf.
+      </p>
+      <p class="rec"><strong>My take:</strong> defer. Multi-day rabbit
+        hole; not blocking. Revisit after upstream
+        <code>@aztec/aztec.js</code> IndexedDB &rarr; KV migration lands.</p>
+    </article>
+
+    <article class="card question">
+      <h3><span class="tag q">Q8</span>&nbsp; Test deletion threshold</h3>
+      <p class="ctx">
+        Phase 0 may surface a test that's both redundant with another
+        and flaky. Currently we keep all tests by default.
+      </p>
+      <p class="rec"><strong>My take:</strong> allow deletion with a
+        clear rationale in the PR description. The codebase already pins
+        regressions via test pins (CLAUDE.md hard rule #8) &mdash; we
+        won't lose coverage we actually want.</p>
+    </article>
+
+    <article class="card question">
+      <h3><span class="tag q">Q9</span>&nbsp; Rotating-flake under cumulative load</h3>
+      <p class="ctx">
+        2-3 tests rotate flaky on full network runs. Two already have
+        scoped <code>retry: 1</code>. Upstream <code>aztec.js</code> is
+        migrating off IndexedDB which should materially reduce the
+        surface.
+      </p>
+      <p class="rec"><strong>My take:</strong> wait for upstream. If a
+        new flake appears, scope a <code>retry: 1</code> to that specific
+        test (not globally). Track upstream migration timing separately.</p>
+    </article>
+  </section>
+
+  <section id="trail">
+    <h2>Audit trail</h2>
+    <p>All planning files live at
+       <code>implementations-plan/e2e-stabilization/</code>.</p>
+    <ul class="tight">
+      <li><code>plan-primary.md</code> &mdash; my v0 draft.</li>
+      <li><code>parallel-claude-plan.md</code> &mdash; independent Claude agent's draft.</li>
+      <li><code>plan-consolidated.md</code> &mdash; first merge of both.</li>
+      <li><code>audit-codex.md</code> &mdash; codex's critical review (session 019e26f8).</li>
+      <li><strong><code>plan-final.md</code></strong> &mdash; post-audit revision &mdash; <em>the source of truth for implementation</em>.</li>
+      <li><code>audit-codex-prompt.md</code> &mdash; what we asked codex to audit.</li>
+    </ul>
+  </section>
+
+  <div class="footer">
+    Once you've answered the 9 questions, I'll start Phase 0. After
+    implementation lands, codex reviews again; we fix what comes back,
+    and we're done. No work has started on the code yet &mdash; only
+    planning files are written.
+  </div>
+
+</body>
+</html>

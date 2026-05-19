@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Grego — runtime architecture</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1e252e; --border: #2a323d;
+    --text: #d1d5db; --muted: #8b949e; --accent: #a371f7; --violet: #9b59ff;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149; --info: #58a6ff;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); margin: 0; padding: 0; font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 24px 64px; }
+  nav.top { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  nav.top .home { color: var(--violet); text-decoration: none; font-weight: 600; }
+  nav.top .home:hover { text-decoration: underline; }
+  nav.top a.tab { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 4px; font-size: 13px; }
+  nav.top a.tab:hover { color: var(--text); background: var(--panel); }
+  nav.top a.tab.current { color: var(--text); background: var(--panel2); border: 1px solid var(--accent); }
+  nav.top .sep { color: var(--muted); }
+  h1 { font-size: 28px; margin: 0 0 8px; color: #fff; letter-spacing: -0.5px; }
+  h1 .accent-stripe { color: var(--accent); }
+  h2 { font-size: 20px; margin: 36px 0 12px; color: #fff; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16px; margin: 20px 0 8px; color: var(--accent); }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--panel2); color: var(--muted); margin-right: 6px; border: 1px solid var(--border); }
+  .prov { display: inline-block; font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
+  .prov.research { color: var(--info); border-color: var(--info); }
+  .prov.chat { color: var(--violet); border-color: var(--violet); }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; }
+  figure.ascii { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; margin: 14px 0; overflow-x: auto; }
+  figure.ascii figcaption { font-size: 13px; color: var(--muted); font-style: italic; margin-bottom: 10px; }
+  figure.ascii pre { font: 12px/1.35 var(--mono); color: var(--text); margin: 0; white-space: pre; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th, td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; background: var(--panel); }
+  td.mono { font-family: var(--mono); font-size: 12px; }
+  .toc { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; margin: 16px 0; font-size: 13px; }
+  .toc strong { color: var(--text); }
+  .toc a { color: var(--info); text-decoration: none; margin-right: 12px; }
+  .toc a:hover { text-decoration: underline; }
+  .breadcrumb { font-size: 12px; color: var(--muted); margin: 0 0 16px; }
+  .breadcrumb a { color: var(--info); text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  code { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  .callout { border-left: 3px solid var(--info); background: var(--panel); padding: 12px 16px; margin: 14px 0; border-radius: 0 6px 6px 0; font-size: 14px; }
+  .callout strong { color: var(--info); }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.warn strong { color: var(--warn); }
+  .prev-next { display: flex; justify-content: space-between; margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 13px; }
+  .prev-next a { color: var(--info); text-decoration: none; }
+  .prev-next a:hover { text-decoration: underline; }
+  .footer { font-size: 12px; color: var(--muted); margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .verdict { background: linear-gradient(135deg, rgba(163,113,247,0.08), rgba(163,113,247,0.02)); border: 1px solid var(--accent); border-left: 3px solid var(--accent); padding: 16px 18px; border-radius: 8px; margin: 16px 0 24px; }
+</style>
+</head>
+<body>
+<nav class="top" aria-label="Primary">
+  <a href="../index.html" class="home">Wallet Architecture Research</a>
+  <span class="sep">/</span>
+  <a href="../index.html" class="tab">Overview</a>
+  <a href="rabby.html" class="tab">Rabby</a>
+  <a href="metamask.html" class="tab">MetaMask</a>
+  <a href="grego.html" class="tab current">Grego</a>
+  <a href="nulo.html" class="tab">Nulo Today</a>
+  <a href="../nulo-phase-2.html" class="tab">Phase 2</a>
+  <a href="../nulo-phase-2-plus.html" class="tab">Phase 2+</a>
+  <a href="../nulo-maximalist.html" class="tab">Maximalist</a>
+</nav>
+
+<div class="wrap">
+
+<p class="breadcrumb"><a href="../index.html">Overview</a> &nbsp;›&nbsp; Grego</p>
+
+<h1><span class="accent-stripe">Grego</span> — Aztec-native, infra-light</h1>
+
+<div class="verdict">
+  <strong>Verdict:</strong> The other shipping Aztec wallet. Stronger than Nulo on a few Aztec-protocol nuances (capability wildcards, account contract variety, fee abstraction surface), weaker on durable-job infra (no formal job system, no SW death-recovery, lighter MV3 hygiene). Useful as the comparison point for Aztec-correctness; less useful as a model for Phase 2.
+</div>
+
+<div class="toc" aria-label="On this page">
+  <strong>On this page:</strong>
+  <a href="#runtime">Runtime shape</a>
+  <a href="#durable">Durable jobs</a>
+  <a href="#strengths">Strengths</a>
+  <a href="#risks">Risks</a>
+  <a href="#steal">What Nulo should steal</a>
+  <a href="#dont-copy">What not to copy</a>
+  <a href="#sources">Sources</a>
+</div>
+
+<h2 id="runtime">Runtime shape <span class="prov chat">diagram</span></h2>
+
+<p>
+  Grego is an MV3 Aztec wallet built around a single popup + service worker + offscreen-PXE topology, similar in shape to Nulo. The key differentiators are higher in the stack: capability-based permissioning, multiple account contract artifacts, and a richer fee abstraction.
+</p>
+
+<figure class="ascii" aria-label="Grego runtime: dApp talks to content script, content script bridges to service worker, service worker delegates PXE-heavy work to an offscreen document, popup connects to service worker via runtime port and renders state; service worker hosts an authorization-manager with capability wildcards, an account-contract registry supporting multiple variants, and a fee-abstraction layer">
+  <figcaption>Grego's runtime: shape is similar to Nulo but the policy layer (capabilities, account contracts, fees) is richer.</figcaption>
+  <pre>  ┌────────────┐         ┌──────────────────────┐
+  │  dApp page │◄───────►│  content-script.js   │
+  └────────────┘         └──────────┬───────────┘
+                                    │ chrome.runtime port
+                                    ▼
+        ┌──────────────────────────────────────────────────────┐
+        │  SERVICE WORKER (MV3)                                │
+        │                                                      │
+        │  ┌─────────────────────────────────────────────┐     │
+        │  │ authorization-manager                       │     │
+        │  │   capability wildcards per origin           │     │
+        │  │   (read.*, write.<asset>, etc.)             │     │
+        │  ├─────────────────────────────────────────────┤     │
+        │  │ account-contract registry                   │     │
+        │  │   schnorr, ecdsa-k, ecdsa-r, ...            │     │
+        │  ├─────────────────────────────────────────────┤     │
+        │  │ fee-abstraction layer                       │     │
+        │  │   embedded-FPC, sponsored, fee-juice, ...   │     │
+        │  ├─────────────────────────────────────────────┤     │
+        │  │ tx-history (in-memory; not durable)         │     │
+        │  └─────────────────────────────────────────────┘     │
+        │                                                      │
+        │  No formal job framework. No alarms wake-up.         │
+        └────────────────────────┬─────────────────────────────┘
+                                 │
+                          chrome.runtime
+                                 │
+                                 ▼
+                  ┌──────────────────────────────┐
+                  │  OFFSCREEN DOCUMENT          │
+                  │  PXE + BB-WASM               │
+                  └──────────────────────────────┘
+                                 ▲
+                                 │
+                  chrome.runtime port (long-lived)
+                                 │
+                  ┌──────────────────────────────┐
+                  │  POPUP (Vue / React)         │
+                  └──────────────────────────────┘</pre>
+</figure>
+
+<h2 id="durable">How durable jobs work here <span class="prov chat">analysis</span></h2>
+
+<p>
+  Honestly: they mostly don't. Grego shares Nulo's current limitation — no formal job registry, no SW death recovery, no <code>chrome.alarms</code> wake-up, no persisted progress for in-flight prove operations. The popup blocks on the prove call the same way Nulo does.
+</p>
+
+<p>
+  Where Grego pulls ahead is in the <em>policy</em> layers around the tx pipeline:
+</p>
+
+<ol>
+  <li>
+    <strong>Capability wildcards</strong> — <code>authorization-manager</code> stores permissions as wildcard patterns per origin, so a dApp can be granted <code>read.*</code> instead of a fixed list of accounts. <span class="prov chat">A11 pattern</span>
+  </li>
+  <li>
+    <strong>Multiple account contracts</strong> — accounts can be created with different signing schemes (schnorr, ecdsa-k, ecdsa-r). Nulo only ships canonical schnorr today.
+  </li>
+  <li>
+    <strong>Broader fee abstraction</strong> — fee selection covers embedded-FPC, sponsored-FPC, and fee-juice paths in a single user-facing surface.
+  </li>
+</ol>
+
+<div class="callout warn">
+  <strong>Caveat:</strong> Grego is open-source but moves fast; some of the patterns we cataloged in the research markdown may have evolved. Verify the linked file paths in the sources section before relying on a specific structure.
+</div>
+
+<h2 id="strengths">Strengths <span class="prov research">research</span></h2>
+
+<table aria-label="Grego strengths">
+  <thead><tr><th>Dimension</th><th>Why it stands out</th></tr></thead>
+  <tbody>
+    <tr><td>Capability wildcards</td><td>Wildcard permissions per origin reduce approval fatigue without giving up granularity.</td></tr>
+    <tr><td>Account contract variety</td><td>Ships multiple signing schemes; Nulo ships one.</td></tr>
+    <tr><td>Fee surface breadth</td><td>Embedded-FPC, sponsored, fee-juice unified at the UX layer.</td></tr>
+    <tr><td>Aztec protocol fluency</td><td>Tracks upstream Aztec closely; pins are conservative.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="risks">Risks / anti-patterns <span class="prov research">research</span></h2>
+
+<table aria-label="Grego risks">
+  <thead><tr><th>Risk</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>No durable jobs</td><td>Same SW-death weakness as Nulo today. Long proofs → "wallet not responding" UX.</td></tr>
+    <tr><td>In-memory tx history</td><td>Tx history is rebuilt from chain on each boot. Slow on cold start, lossy if chain prunes.</td></tr>
+    <tr><td>Lighter MV3 hygiene</td><td>Port lifecycle and cold-boot event handling are less defensive than MetaMask's.</td></tr>
+    <tr><td>Custom account contracts</td><td>Multiple contract variants = larger surface area for bugs and audit cost.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="steal">What Nulo should steal <span class="prov chat">later phase</span></h2>
+
+<ul>
+  <li><strong>Capability wildcards</strong> — Phase 3+. Reduces approval fatigue when Nulo opens to real users. Not Phase 2 scope.</li>
+  <li><strong>Account contract registry surface</strong> — eventually, when Nulo ships beyond schnorr-only, the registry shape Grego uses is a reasonable starting model.</li>
+</ul>
+
+<h2 id="dont-copy">What not to copy <span class="prov chat">phase 2</span></h2>
+
+<ul>
+  <li><strong>Lack of durable jobs</strong> — the whole point of Phase 2.</li>
+  <li><strong>In-memory tx history</strong> — Nulo already deleted its custom tx-history feature in 0.11.0; any future re-add should be durable from day one.</li>
+  <li><strong>Custom account contracts before they're necessary</strong> — Nulo's commitment to upstream <code>@aztec/accounts/schnorr</code> is a feature, not a gap.</li>
+</ul>
+
+<h2 id="sources">Sources <span class="prov research">links</span></h2>
+
+<ul>
+  <li><a href="../grego/grego-claude-cli.md"><code>grego/grego-claude-cli.md</code></a> — primary deep dive (Claude agent)</li>
+  <li><a href="../grego/grego-codex-cli.md"><code>grego/grego-codex-cli.md</code></a> — independent audit (Codex CLI)</li>
+  <li><a href="../README.md"><code>README.md</code></a> — comparative synthesis</li>
+</ul>
+
+<div class="prev-next">
+  <a href="metamask.html">← MetaMask</a>
+  <a href="nulo.html">Nulo Today →</a>
+</div>
+
+<div class="footer">
+  Calibrated 2026-05-12. Content provenance: <span class="prov research">research</span> from existing markdown synthesis, <span class="prov chat">chat additions</span> from on-page diagrams &amp; patterns surfaced post-merge.
+</div>
+
+</div>
+</body>
+</html>

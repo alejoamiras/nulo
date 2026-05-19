@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Three architecture fixes — post-audit plan</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel2: #1e252e;
+    --border: #2a323d;
+    --text: #d1d5db;
+    --muted: #8b949e;
+    --accent: #9b59ff;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --err: #f85149;
+    --info: #58a6ff;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); margin: 0; padding: 0; font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 32px 24px 64px; }
+  h1 { font-size: 26px; margin: 0 0 8px; color: #fff; letter-spacing: -0.5px; }
+  h2 { font-size: 18px; margin: 32px 0 12px; color: #fff; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  h3 { font-size: 15px; margin: 16px 0 8px; color: var(--accent); }
+  .tag {
+    display: inline-block; font-family: var(--mono); font-size: 11px;
+    padding: 2px 8px; border-radius: 4px; background: var(--panel2); color: var(--muted);
+    margin-right: 6px;
+  }
+  .tag.ok { color: var(--ok); border: 1px solid var(--ok); }
+  .tag.warn { color: var(--warn); border: 1px solid var(--warn); }
+  .tag.err { color: var(--err); border: 1px solid var(--err); }
+  .tag.info { color: var(--info); border: 1px solid var(--info); }
+  .tag.accent { background: var(--accent); color: #fff; }
+  .topbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+  .topbar .meta { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  .phase {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 18px; margin: 14px 0;
+  }
+  .phase-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+  .phase-id { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+  .phase-title { font-weight: 600; color: #fff; font-size: 16px; }
+  .eli5 {
+    font-size: 13px; color: var(--muted); font-style: italic;
+    border-left: 3px solid var(--accent); padding-left: 12px; margin: 10px 0;
+  }
+  .eli5 strong { color: var(--text); font-style: normal; }
+  .human-ctx {
+    background: var(--panel2); border-left: 3px solid var(--info);
+    padding: 10px 14px; margin: 10px 0; border-radius: 0 4px 4px 0;
+    font-size: 13px;
+  }
+  .human-ctx strong { color: var(--info); }
+  .decision {
+    background: #2a1f3a; border: 1px solid var(--accent); border-radius: 6px;
+    padding: 14px 16px; margin: 12px 0;
+  }
+  .decision-title { font-weight: 600; color: #fff; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  .decision-q { color: var(--accent); font-family: var(--mono); font-size: 12px; }
+  .option { margin: 8px 0; padding: 8px 12px; background: var(--panel); border-radius: 4px; }
+  .option .label { color: #fff; font-weight: 600; }
+  .option .pick { color: var(--ok); font-family: var(--mono); font-size: 11px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+  th, td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  code { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+  .quote {
+    border-left: 3px solid var(--info); padding: 8px 12px; background: var(--panel);
+    color: var(--text); font-size: 13px; margin: 8px 0; border-radius: 0 4px 4px 0;
+  }
+  .quote .who { font-family: var(--mono); font-size: 11px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .footer { font-size: 12px; color: var(--muted); margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .strike { text-decoration: line-through; color: var(--muted); }
+  details summary { cursor: pointer; color: var(--accent); font-size: 13px; padding: 4px 0; }
+  details[open] summary { color: #fff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="topbar">
+  <div>
+    <h1>Three architecture fixes — post-audit plan</h1>
+    <div>
+      <span class="tag accent">v2 (post-audit)</span>
+      <span class="tag ok">Phase C: ship</span>
+      <span class="tag warn">Phase A: fix-then-ship</span>
+      <span class="tag err">Phase B: skip + document</span>
+    </div>
+  </div>
+  <div class="meta">
+    branch: feat/embedded-fpc-firsttx-and-cosmetic-cleanup<br/>
+    base: master (post-PR-74)<br/>
+    plan dir: implementations-plan/embedded-fpc-firsttx-cosmetic/
+  </div>
+</div>
+
+<h2>The 30-second version</h2>
+<div class="eli5">
+  <strong>ELI5 (the whole bundle):</strong> three small architecture cleanups left over from the big PR 8c bundle. Two are safe to do (rename one helper + consolidate four duplicate code blocks). The third (a clever performance optimization for an edge case) sounded like a quick win when I drafted it, but both auditors caught real correctness bugs. Skipping it, documenting why.
+</div>
+
+<h2>The big plot twist</h2>
+<div class="human-ctx">
+  <strong>What I told you yesterday vs what I'm telling you now</strong> — I originally proposed three changes including dropping the embedded-FPC override entirely (Phase A1 "lean upstream") and shipping the first-tx normalizer (Phase B). Both audits independently said:
+  <br/><br/>
+  - Phase A: <strong>don't drop.</strong> The override does real work that I described inaccurately in the v1 plan. dApps using upstream-recommended embedded fee patterns (FeeJuicePaymentMethodWithClaim, sponsored-FPC with claim_and_end_setup) budget against <code>node.getCurrentMinFees()</code>, NOT the <code>* 1.5</code> default — so the cap aligns Nulo's gas settings with what those dApps expect. Dropping it would regress them.
+  <br/><br/>
+  - Phase B: <strong>don't ship.</strong> My proposed normalizer leaves <code>publicInputs.gasUsed</code> stale — and that IS dApp-visible (via <code>TxSimulationResult.gasUsed</code>, which dApps consume for fee-estimation UI). Plus <code>firstNullifier</code> carries multicall init semantics that no longer match the projected tree. Not the "invisible" inconsistency I claimed.
+  <br/><br/>
+  Translation: the auditors saved us from shipping two real regressions. Plan v2 reflects what's actually safe.
+</div>
+
+<h2>The two decisions still on your plate</h2>
+
+<div class="decision">
+  <div class="decision-title"><span class="decision-q">Q1</span> One PR or two?</div>
+  <div class="option">
+    <span class="label">One PR (recommended)</span> <span class="pick">⭐</span><br/>
+    Phase C (rename) + Phase A (consolidate) as two commits. Plus the doc-only change for Phase B. All three are low-risk, related "post-PR-8c residue cleanup".
+  </div>
+  <div class="option">
+    <span class="label">Two PRs</span><br/>
+    One for C (mechanical, tiny diff). One for A (consolidation). Doc-only Phase B rides with whichever.
+  </div>
+</div>
+
+<div class="decision">
+  <div class="decision-title"><span class="decision-q">Q2</span> Phase A comment style — minimal or verbose?</div>
+  <div class="option">
+    <span class="label">Minimal (option α)</span><br/>
+    "Caps maxFeesPerGas to 1.0x minFees when no explicit fees; required for embedded-FPC budget alignment."
+  </div>
+  <div class="option">
+    <span class="label">Verbose (option β)</span> <span class="pick">⭐</span><br/>
+    Explain WHICH dApp patterns depend on it (FeeJuicePaymentMethodWithClaim, sponsored-FPC with claim_and_end_setup) — so the next person reading this code knows when it matters, not just that it matters.
+  </div>
+</div>
+
+<h2>Phase C — drop the <code>NuloFeePaymentMethod</code> rename</h2>
+
+<div class="phase">
+  <div class="phase-head">
+    <div><span class="phase-id">Phase C</span> &nbsp; <span class="phase-title">Cosmetic enum rename</span></div>
+    <div><span class="tag ok">ship</span> <span class="tag">~30 min</span> <span class="tag">18 files</span></div>
+  </div>
+
+  <div class="eli5">
+    <strong>ELI5:</strong> we have a wrapper around an upstream enum that just renames the values to look nicer. The user prefers using the upstream name directly. We delete the wrapper and find/replace the 31 usages.
+  </div>
+
+  <div class="human-ctx">
+    <strong>Human context:</strong> Today, code reads <code>NuloFeePaymentMethod.FeeJuice</code> instead of upstream's <code>AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE</code>. Our names are shorter and prettier, but they add a layer for anyone reading the code to think about. Per your "lean to upstream defaults" preference, we drop the wrapper. <strong>Zero behavior change</strong> — the values are identical underneath; only the identifier reads differently.
+  </div>
+
+  <div class="quote">
+    <span class="who">codex + opus 4.7</span>
+    Both: ship as-is. Opus added one nuance: pin the exact occurrence count via grep before opening the PR (plan v1 said "18 files, 31 occurrences, +1 more identified via grep" — opus called the "+1 more" sloppy).
+  </div>
+</div>
+
+<h2>Phase A — consolidate the embedded-FPC <code>maxFeesPerGas</code> cap</h2>
+
+<div class="phase">
+  <div class="phase-head">
+    <div><span class="phase-id">Phase A</span> &nbsp; <span class="phase-title">Consolidate (not delete) the override</span></div>
+    <div><span class="tag warn">fix-then-ship</span> <span class="tag">~2 hours</span> <span class="tag">4 sites → 1 helper</span></div>
+  </div>
+
+  <div class="eli5">
+    <strong>ELI5:</strong> we have the same 10-line block copy-pasted in 4 places. The block exists to handle a quirk of how some dApps budget for fees. We move the block into one helper so future-us only has to fix it once.
+  </div>
+
+  <div class="human-ctx">
+    <strong>Human context:</strong> When a dApp pays for its own transaction (via an "embedded FPC"), it has to <strong>budget upfront</strong> for the maximum fee. Most dApps budget against the network's current minimum fees (<code>getCurrentMinFees()</code>). But our default fee calculation adds a 50% safety padding on top of that. Without an override, a dApp's budget would be ~33% short and the transaction would fail.
+    <br/><br/>
+    The override caps the wallet's <code>maxFeesPerGas</code> to <strong>match what the dApp budgeted</strong> (no padding). It's defensive code aligned with the upstream-recommended dApp pattern.
+    <br/><br/>
+    We <strong>don't change the behavior</strong>. We just stop duplicating it 4 times. Extract to a helper, fix the stale comments that still mention the long-gone <code>10^18</code> defaults, ship.
+  </div>
+
+  <h3>Why I was wrong about dropping it (my own v1 plan)</h3>
+
+  <table>
+    <thead><tr><th>v1 belief</th><th>What's actually true</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>"Override protects against <code>10^18</code> defaults that no longer exist."</td>
+        <td>True for the cause; missed the current purpose. Now it caps from <code>1.5x</code> to <code>1.0x</code> minFees — and that gap matters.</td>
+      </tr>
+      <tr>
+        <td>"<code>completeFeeOptions</code> defaults to <code>1.5x</code>; dApps targeting upstream BaseWallet already budget for that."</td>
+        <td>Upstream <code>BaseWallet</code> is one path. dApps using <code>FeeJuicePaymentMethodWithClaim</code> or sponsored-FPC with <code>claim_and_end_setup</code> budget against <code>getCurrentMinFees()</code> directly — that's the upstream-RECOMMENDED pattern in aztec.js examples. Drop = revert.</td>
+      </tr>
+      <tr>
+        <td>"4 copies of the same code, mostly redundant."</td>
+        <td>3 of the 4 sites are <strong>also the only place dApp-supplied <code>maxFeesPerGas</code> reaches the txRequest</strong> (profileTx, executeNoFromSendTx, embedded-strategy). Only <code>executeAztecSimulateTxStandard</code> threads <code>gasSettings</code> through <code>buildStandard</code>. Dropping the override = losing dApp fees on three paths.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="quote">
+    <span class="who">codex</span>
+    "the embedded-FPC cap is not dead code. It still changes behavior from upstream 1.5x minFees back to 1.0x minFees when the dApp does not supply maxFeesPerGas. A naive A1 delete is worse than 'just upstream defaults'."
+  </div>
+
+  <div class="quote">
+    <span class="who">opus 4.7</span>
+    "A1 ships a real regression for any dApp that asked the node for current min fees and budgeted against that, which is the upstream-recommended pattern."
+  </div>
+
+  <h3>What we'll actually ship</h3>
+
+  <p>One helper file <code>fee/embedded-fpc-cap.ts</code> exporting <code>applyEmbeddedFpcGasCap(txRequest, fee, node)</code>. Behavior identical to today; 4 copies become 1 call. Stale <code>10^18</code> comments rewritten to describe the actual current purpose.</p>
+
+  <p><strong>3 new unit tests</strong> for the helper, filling a gap codex flagged:</p>
+  <ol>
+    <li><code>fee.embeddedFeePayment === undefined</code> → no-op (early return; gas settings unchanged)</li>
+    <li><code>fee.embeddedFeePayment === "fjwc"</code> AND no <code>maxFeesPerGas</code> → uses <code>node.getCurrentMinFees()</code> (no <code>*1.5</code>); other fields preserved verbatim</li>
+    <li><code>fee.embeddedFeePayment === "fpc"</code> AND <code>maxFeesPerGas</code> provided → uses provided values; node NOT consulted</li>
+  </ol>
+
+  <p>The existing e2e tests (<code>tx-sendTx-feePayer</code>, <code>tx-sendTx-sponsoredFpc</code>, <code>tx-sendTx-default</code>) accept both <code>"ok"</code> and <code>"error"</code> outcomes — they won't catch budget regressions. The new unit tests pin the contract.</p>
+</div>
+
+<h2>Phase B — skip the first-tx mixed-payload normalizer</h2>
+
+<div class="phase">
+  <div class="phase-head">
+    <div><span class="phase-id">Phase B</span> &nbsp; <span class="phase-title">SKIP. Document why.</span></div>
+    <div><span class="tag err">skip</span> <span class="tag">doc-only</span></div>
+  </div>
+
+  <div class="eli5">
+    <strong>ELI5:</strong> there's a niche performance optimization we COULD add — saving ~3-5 seconds when a brand-new account does its very first dApp simulation with a mixed (read + write) payload. We thought it would be ~50 lines of code; both auditors found it would actually break the dApp's gas estimate UI. Not worth it. We write up why we're not doing it and move on.
+  </div>
+
+  <div class="human-ctx">
+    <strong>Human context:</strong> When a brand-new account does its first transaction, Nulo bundles "deploy the account" + "your actual call" into a single multicall. This produces a deeply-nested execution tree.
+    <br/><br/>
+    The optimization would have rewritten this tree on the fly during simulation, so a public-static prefix could be optimized separately from the private remainder. But the rewrite would leave <code>publicInputs.gasUsed</code> stale (still showing multicall's gas), and <strong>dApps read that field for fee estimation UI</strong>. So we'd silently over-report gas to every dApp that simulates a mixed-payload transaction on a fresh account.
+    <br/><br/>
+    The performance gain (saves 3-5s on a one-time edge case) doesn't justify the correctness compromise. Skip.
+  </div>
+
+  <h3>What we ship instead</h3>
+
+  <p>A <strong>TRACKED-FOLLOW-UP</strong> entry in <code>wallets-architecture-research/synthesis/implementation-plan-p1-p3.md</code> describing:</p>
+  <ul>
+    <li>The optimization we're not doing (first-tx mixed-payload normalizer)</li>
+    <li>The correctness issues that block the naive approach (publicInputs.gasUsed staleness, firstNullifier semantic mismatch, upstream tree-shape drift fragility)</li>
+    <li>The trigger to revisit (a real dApp pattern that frequently does mixed simulateTx before any send)</li>
+  </ul>
+
+  <p>Plus a comment in <code>service.ts</code>'s orchestrator explaining: <em>"we don't normalize because <code>publicInputs.gasUsed</code> staleness would over-report gas to the dApp."</em></p>
+
+  <div class="quote">
+    <span class="who">codex</span>
+    "The returned object becomes semantically mixed: projected privateExecutionResult, but full-multicall publicInputs / publicFunctionCalldata. That is observable through the public API, not just internal code."
+  </div>
+
+  <div class="quote">
+    <span class="who">opus 4.7</span>
+    "publicInputs.gasUsed includes ctor execution gas. The 'normalized' result will over-report gas vs what an already-initialized account would. Not 'invisible'. The 3-5s saving on first-tx-only sims is not worth shipping a subtly wrong tree projection."
+  </div>
+</div>
+
+<h2>Putting it all together</h2>
+
+<table>
+  <thead><tr><th>Phase</th><th>What ships</th><th>Test impact</th><th>Files touched</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>C</strong> — rename</td>
+      <td>Delete re-export, find-and-replace 31 occurrences</td>
+      <td>Existing tests cover (mechanical rename)</td>
+      <td>18 files</td>
+    </tr>
+    <tr>
+      <td><strong>A</strong> — consolidate</td>
+      <td>1 new helper file, 4 copies → 1 call, comments fixed</td>
+      <td>+3 unit tests for helper</td>
+      <td>~6 files</td>
+    </tr>
+    <tr>
+      <td><strong>B</strong> — doc</td>
+      <td>Architecture-research doc updated + service.ts comment</td>
+      <td>No tests change</td>
+      <td>2 files</td>
+    </tr>
+  </tbody>
+</table>
+
+<details>
+  <summary>Verification gate (must pass before merge)</summary>
+  <ol>
+    <li><code>typecheck:all</code> — 8 packages clean</li>
+    <li><code>bun run test</code> — existing + 3 new unit cases</li>
+    <li><code>bun run lint</code> — only pre-existing warnings</li>
+    <li><code>bun run build:full</code> — chrome + firefox at v0.14.9</li>
+    <li><code>bun run e2e:agent</code> — same/better failure profile than v0.14.8</li>
+  </ol>
+</details>
+
+<details>
+  <summary>What we deliberately skipped (questions resolved by audits)</summary>
+  <ul>
+    <li><span class="strike">C1: drop entirely vs alias?</span> — Drop. Both auditors agreed.</li>
+    <li><span class="strike">A1: which direction (drop/consolidate/parameterize)?</span> — Consolidate. Both auditors flagged that drop regresses dApps.</li>
+    <li><span class="strike">A2 (v1 question): observability?</span> — Skip. Not worth it.</li>
+    <li><span class="strike">B1: ship or skip?</span> — Skip + document. Both auditors flagged correctness issues.</li>
+    <li><span class="strike">B2: e2e if shipping?</span> — N/A, not shipping.</li>
+  </ul>
+</details>
+
+<h2>UX copy note</h2>
+<div class="human-ctx">
+  None of these changes have user-visible UI text. Phase A could surface as different fee estimates in the existing "Fee" panel for embedded-FPC payments — but only because we're <strong>preserving</strong> existing behavior, not changing it. No copy work needed.
+</div>
+
+<div class="footer">
+  Audits: codex session <code>019e1912-ae66-7f72-829b-1762a8e84f1d</code>, opus 4.7 in-context.<br/>
+  Plan files in <code>implementations-plan/embedded-fpc-firsttx-cosmetic/</code>:
+  <ul style="margin: 6px 0 0; padding-left: 20px;">
+    <li><code>plan.md</code> — v1 draft (pre-audit; kept for history)</li>
+    <li><code>plan-v2.md</code> — v2 final (this HTML mirrors it)</li>
+    <li><code>plan.html</code> — this file</li>
+  </ul>
+  After your decisions on Q1 + Q2, implementation is ~3 hours: Phase C (~30 min) + Phase A (~2 hours including 3 unit tests) + Phase B (~15 min doc updates) + gate (~30 min).
+</div>
+
+</div>
+</body>
+</html>

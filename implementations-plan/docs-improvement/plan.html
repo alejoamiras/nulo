@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Docs improvement — plan ELI5</title>
+<style>
+  :root {
+    --ink: #1a1814;
+    --ink-soft: #4a4640;
+    --paper: #faf7f2;
+    --paper-soft: #f2ede4;
+    --rule: #d8d0c2;
+    --accent: #c84a00;
+    --good: #2d6b2d;
+    --warn: #a06400;
+    --mono: ui-monospace, SF Mono, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--paper); }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Helvetica Neue", sans-serif;
+    color: var(--ink);
+    line-height: 1.55;
+    font-size: 16px;
+  }
+  .wrap {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 56px 32px 96px;
+  }
+  header {
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 24px;
+    margin-bottom: 40px;
+  }
+  h1 {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    margin: 0 0 8px;
+  }
+  header p { margin: 0; color: var(--ink-soft); font-size: 15px; }
+  h2 {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 56px 0 12px;
+    letter-spacing: -0.005em;
+  }
+  h2 .tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--paper);
+    background: var(--ink);
+    padding: 3px 8px;
+    border-radius: 2px;
+    margin-right: 10px;
+    vertical-align: middle;
+  }
+  h2 .tag.accent { background: var(--accent); }
+  h2 .tag.warn { background: var(--warn); }
+  h3 { font-size: 16px; font-weight: 700; margin: 28px 0 6px; }
+  p, ul, ol { margin: 0 0 14px; }
+  ul, ol { padding-left: 22px; }
+  li { margin-bottom: 4px; }
+  code {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--paper-soft);
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--rule);
+  }
+  pre {
+    background: var(--paper-soft);
+    border: 1px solid var(--rule);
+    padding: 12px 14px;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: var(--paper-soft);
+    padding: 14px 18px;
+    margin: 18px 0;
+    border-radius: 0 4px 4px 0;
+  }
+  .callout.good { border-left-color: var(--good); }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout p:last-child { margin-bottom: 0; }
+  .meta { color: var(--ink-soft); font-size: 14px; }
+  .grid {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 8px 20px;
+    margin: 12px 0 18px;
+  }
+  .grid dt {
+    font-weight: 700;
+    color: var(--ink-soft);
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding-top: 2px;
+  }
+  .grid dd { margin: 0; }
+  .phase {
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 20px 22px;
+    margin: 14px 0;
+    background: #fff;
+  }
+  .phase-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 6px;
+  }
+  .phase-head h3 { margin: 0; font-size: 18px; }
+  .phase-head .count {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+  .label {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 3px;
+    margin-right: 6px;
+  }
+  .label.eli5 { background: var(--paper-soft); color: var(--ink); border: 1px solid var(--rule); }
+  .label.why { background: #efe7d8; color: var(--ink); }
+  .label.what { background: #e4e7ef; color: var(--ink); }
+  .q-block {
+    border: 2px solid var(--accent);
+    border-radius: 6px;
+    padding: 22px 24px;
+    margin: 20px 0;
+    background: #fff;
+  }
+  .q-block h3 { margin-top: 0; color: var(--accent); }
+  .opt {
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 14px 16px;
+    margin: 10px 0;
+    background: var(--paper);
+  }
+  .opt.rec { border-color: var(--good); background: #f3f9f1; }
+  .opt h4 { margin: 0 0 6px; font-size: 14px; font-weight: 700; }
+  .opt h4 .rec-tag {
+    color: var(--good);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    margin-left: 8px;
+  }
+  .opt p { margin: 0; font-size: 14px; color: var(--ink-soft); }
+  footer {
+    margin-top: 56px;
+    padding-top: 18px;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-soft);
+    font-size: 13px;
+  }
+  .nb {
+    font-size: 13px;
+    color: var(--ink-soft);
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Documentation improvement — what we're about to do</h1>
+  <p class="meta">Plan v2, post-audit (codex xhigh + opus 4.7 agent). Source of truth: <code>implementations-plan/docs-improvement/plan-v2.md</code>.</p>
+</header>
+
+<section>
+  <h2><span class="tag">Why</span>The problem in one paragraph</h2>
+  <p>The repo grew fast — from a single-package fork into an 8-package Bun monorepo with a service worker, popup, content script, offscreen PXE, design system, and e2e harness. The docs didn't keep up. The root <code>README.md</code> is one marketing sentence. Seven of eight packages have no README at all. The <code>CLAUDE.md</code> exists but mixes "architecture humans need to read" with "rules Claude needs to follow", and its prose is sprinkled with milestone numbers (<code>M4.10</code>, <code>A11.1</code>, <code>M6 phase 4b</code>) that mean nothing to anyone outside the conversation where they were minted. Around <strong>300+ code comments</strong> are tagged the same way.</p>
+  <p>We're going to fix all of that in one PR. Three (or eight — open question below) labeled commits, no behavior changes.</p>
+</section>
+
+<section>
+  <h2><span class="tag">Why</span>What "good" looks like</h2>
+  <ul>
+    <li>A first-time contributor opens the repo and within ~15 minutes understands what Nulo is, where each package fits, how to build, how to test, and how the message bus works.</li>
+    <li>Anyone reading any file finds comments that explain <em>why</em> the code is the way it is — invariants, gotchas, external constraints — without dragging in milestone numbers nobody outside the original room remembers.</li>
+    <li><code>implementations-plan/</code> is the single quarantine for milestone vocabulary. Code points there only when the target is still load-bearing.</li>
+  </ul>
+</section>
+
+<section>
+  <h2><span class="tag">What</span>The work — five outputs</h2>
+
+  <div class="phase">
+    <div class="phase-head"><h3>1. Root README rewrite</h3><span class="count">≤120 lines</span></div>
+    <p><span class="label eli5">ELI5</span> The front door. Right now it's one line; we'll make it a one-page intro: what Nulo is, what works, how to build, where to read next.</p>
+    <p><span class="label why">Why</span> Anyone landing on GitHub for the first time bounces if the front page is empty.</p>
+  </div>
+
+  <div class="phase">
+    <div class="phase-head"><h3>2. New ARCHITECTURE.md at repo root</h3><span class="count">≤350 lines</span></div>
+    <p><span class="label eli5">ELI5</span> The map. Where every package lives, how the service worker talks to the popup, how the popup talks to the offscreen PXE, how storage migrates between wallet versions, how the offscreen document gets resurrected when Chrome kills it, how dApp sessions stay alive across SW restarts, how reads and writes are guarded against each other.</p>
+    <p><span class="label why">Why</span> Right now that picture lives split between CLAUDE.md prose, a hundred separate code comments, and people's heads. Putting it in one human-facing doc means the next contributor reads one file instead of grepping.</p>
+    <p><span class="label what">What's new vs v1 plan</span> Audits added these subsections: storage migration + destructive wipes, offscreen lifecycle, dApp-session lifecycle, strict-mode restore semantics, concurrency model (read/write guard), and the account-contract narrative.</p>
+  </div>
+
+  <div class="phase">
+    <div class="phase-head"><h3>3. CLAUDE.md rewrite (tighter)</h3><span class="count">≤350 lines</span></div>
+    <p><span class="label eli5">ELI5</span> The rulebook for AI assistants working in this repo. We strip out the architecture (that moves to ARCHITECTURE.md) and keep the rules: layer boundaries, component test conventions, cleanup order, SFC ordering, lint discipline, testid preservation. Plus a new section on how to comment code.</p>
+    <p><span class="label why">Why</span> Mixed audience is mixed: humans read past architecture they already know, and AI agents get drowned in narrative when they need the rule.</p>
+    <p><span class="label what">Verbatim preserves (audit-driven)</span> Six sections must survive the rewrite character-for-character: the <code>onBeforeUnmount</code> cleanup order, coverage minimums per layer, the SFC 10-section script-setup template, the <code>chrome.*</code> stub file:line citation, the <code>data-testid</code> preservation rule, and the lint-suppression discipline. These are exact rules the team got burned on; paraphrasing them loses what makes them load-bearing.</p>
+  </div>
+
+  <div class="phase">
+    <div class="phase-head"><h3>4. <code>implementations-plan/README.md</code></h3><span class="count">~80 lines</span></div>
+    <p><span class="label eli5">ELI5</span> The "what's in this folder" doc for the planning archive. Explains why these plan files exist, when to make a new one, how to name them, and a 5-line table mapping each milestone prefix (M2, M3, M4, M6, A11) to what it actually did — so anyone digging up old code who hits an "M4.10" reference can decode it.</p>
+    <p><span class="label why">Why</span> Right now the directory has 27 subdirectories and no front door. Future contributors need to know it's a quarantine for milestone vocabulary, not a place new code should reference.</p>
+  </div>
+
+  <div class="phase">
+    <div class="phase-head"><h3>5. Eight package READMEs</h3><span class="count">≤120 lines each</span></div>
+    <p><span class="label eli5">ELI5</span> One README per package, same template: what it owns, where it sits in the layer stack, scripts, file map, testing, key invariants. Currently only <code>playground</code> has one.</p>
+    <p><span class="label why">Why</span> Each package is a coherent unit. People should be able to open <code>packages/wallet-crypto/</code> and know it owns the KDF and the password secret box without grepping the codebase.</p>
+    <p><span class="label what">Voice</span> Audits supplied opening sentences calibrated to the right voice: technical, precise, non-marketing. Example for <code>wallet-core</code>: "The foundation. Pure ports, types, and platform-agnostic utilities. No <code>chrome.*</code>; no I/O. Every package above depends on this; this depends on nothing."</p>
+  </div>
+
+  <div class="phase">
+    <div class="phase-head"><h3>6. Code-comment cleanup</h3><span class="count">~300+ comment refs · ~120 files</span></div>
+    <p><span class="label eli5">ELI5</span> The big one. Sweep every code comment that contains a milestone, phase, or PR tag — strip the tag, keep the insight if there is one, reword for clarity, or delete the comment entirely if the residue would just be noise.</p>
+    <p><span class="label why">Why</span> Today a fresh reader hits "M4.10 PR-2: handle strict-mode toggle" and has no idea what M4.10 is. The fix is "Disabling strict mode is a security regression — confirm with the user." Same content, no archaeology required.</p>
+    <p><span class="label what">Six judgment buckets (audit-driven)</span></p>
+    <ul>
+      <li><strong>Keep, drop tag</strong> — body is useful; tag is noise.</li>
+      <li><strong>Reword</strong> — tag was the structure; rewrite into a real WHY sentence.</li>
+      <li><strong>Delete</strong> — tag was the only content.</li>
+      <li><strong>Replace cross-ref</strong> — if it points to a still-load-bearing plan doc, keep the path; otherwise repoint or drop.</li>
+      <li><strong>Split block</strong> — when one comment mixes a removable tag with a live invariant, split: keep the invariant, drop the tag-paragraph.</li>
+      <li><strong>Out of scope: runtime phase docs</strong> — codex flagged this. Some <code>phase 0/1/2/3</code> comments describe live service-startup behavior, not milestones. We whitelist <code>wallet-core/src/base/**</code> and similar before the sweep.</li>
+    </ul>
+    <div class="callout warn">
+      <p><strong>The audit catch that would have been a bug.</strong> My first-pass grep would have stripped live runtime documentation in <code>wallet-core/src/base/index.ts</code> describing how services start up in parallel-dispatch phases. Codex caught it. The revised plan explicitly whitelists these sites.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="tag accent">Decide</span>Open question — commit shape</h2>
+
+  <p>You locked "one PR, three labeled commits". Both audits independently recommended splitting the third commit per-package, because the comment cleanup hits ~120 files with judgment-heavy edits — GitHub's diff viewer renders 100+ file commits poorly and reviewers can't meaningfully scroll a single mega-diff that spans the whole repo.</p>
+
+  <div class="q-block">
+    <h3>Same PR. Same total work. Different commit shape inside.</h3>
+
+    <div class="opt">
+      <h4>Shape A — three commits (the original lock)</h4>
+      <p>Commit 1: top-level docs. Commit 2: package READMEs. Commit 3: all ~300 comment edits in one commit. Cleaner history, harder review.</p>
+    </div>
+
+    <div class="opt rec">
+      <h4>Shape B — eight commits<span class="rec-tag">audit recommendation</span></h4>
+      <p>Commits 1–2 same. Commit 3 splits into six per-package commits (wallet-core / wallet-crypto / extension-messaging / aztec-runtime / wallet-bridge / extension). Reviewer reads one package at a time. Same PR, same prose, easier review.</p>
+    </div>
+
+    <p class="nb">If you say "stay with Shape A", we ship Shape A and include a per-package checklist in the PR description so the reviewer (you) can mentally section the diff.</p>
+  </div>
+</section>
+
+<section>
+  <h2><span class="tag">What</span>Validation before the PR opens</h2>
+  <ol>
+    <li><strong>Baseline check on master.</strong> Run <code>bun run audit:vue</code> on master first; if anything is already failing, we record it as pre-existing in the PR description so this PR doesn't get blamed.</li>
+    <li><strong><code>bun run audit:vue</code></strong> on the branch — typecheck, unit + component tests, lint, build.</li>
+    <li><strong><code>bun run test:e2e</code></strong> smoke suite. Required because <code>audit:vue</code> excludes <code>tests/e2e/**</code>, and we will be editing comments inside e2e test files.</li>
+    <li><strong>Full Storybook build</strong> — <code>bun run --cwd packages/extension build-storybook</code>. Story headers are user-visible in autodocs; building everything catches render breakage.</li>
+  </ol>
+  <p class="nb">No <code>e2e:agent</code>, no Aztec sandbox. We're not touching runtime code.</p>
+</section>
+
+<section>
+  <h2><span class="tag good">Done</span>What's already done before implementation starts</h2>
+  <ul>
+    <li>Plan v1 drafted to repo (<code>implementations-plan/docs-improvement/plan.md</code>).</li>
+    <li>Plan sent to codex xhigh and an opus 4.7 agent in parallel.</li>
+    <li>Both audits returned: <strong>ship with changes</strong>. P0/P1 deltas folded into plan v2 (<code>plan-v2.md</code>).</li>
+    <li>Audit artifacts kept: <code>audit-codex.md</code> + <code>audit-opus.md</code> in the same directory.</li>
+    <li>Tasks tracked.</li>
+  </ul>
+</section>
+
+<footer>
+  <p>Once you answer the commit-shape question, I'll move to implementation: top-level docs first, then package READMEs, then the comment sweep — all on a single <code>docs/improvement-pass</code> branch, validated end-to-end before opening the PR.</p>
+</footer>
+
+</div>
+</body>
+</html>

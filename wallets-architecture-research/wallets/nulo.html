@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Nulo today — runtime architecture</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1e252e; --border: #2a323d;
+    --text: #d1d5db; --muted: #8b949e; --accent: #9b59ff; --violet: #9b59ff;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149; --info: #58a6ff;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); margin: 0; padding: 0; font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 24px 64px; }
+  nav.top { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  nav.top .home { color: var(--accent); text-decoration: none; font-weight: 600; }
+  nav.top .home:hover { text-decoration: underline; }
+  nav.top a.tab { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 4px; font-size: 13px; }
+  nav.top a.tab:hover { color: var(--text); background: var(--panel); }
+  nav.top a.tab.current { color: var(--text); background: var(--panel2); border: 1px solid var(--accent); }
+  nav.top .sep { color: var(--muted); }
+  h1 { font-size: 28px; margin: 0 0 8px; color: #fff; letter-spacing: -0.5px; }
+  h1 .accent-stripe { color: var(--accent); }
+  h2 { font-size: 20px; margin: 36px 0 12px; color: #fff; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16px; margin: 20px 0 8px; color: var(--accent); }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--panel2); color: var(--muted); margin-right: 6px; border: 1px solid var(--border); }
+  .tag.ok { color: var(--ok); border-color: var(--ok); }
+  .prov { display: inline-block; font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
+  .prov.research { color: var(--info); border-color: var(--info); }
+  .prov.chat { color: var(--violet); border-color: var(--violet); }
+  .prov.audit { color: var(--warn); border-color: var(--warn); }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; }
+  figure.ascii { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; margin: 14px 0; overflow-x: auto; }
+  figure.ascii figcaption { font-size: 13px; color: var(--muted); font-style: italic; margin-bottom: 10px; }
+  figure.ascii pre { font: 12px/1.35 var(--mono); color: var(--text); margin: 0; white-space: pre; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th, td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; background: var(--panel); }
+  td.mono { font-family: var(--mono); font-size: 12px; }
+  .toc { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; margin: 16px 0; font-size: 13px; }
+  .toc strong { color: var(--text); }
+  .toc a { color: var(--info); text-decoration: none; margin-right: 12px; }
+  .toc a:hover { text-decoration: underline; }
+  .breadcrumb { font-size: 12px; color: var(--muted); margin: 0 0 16px; }
+  .breadcrumb a { color: var(--info); text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  code { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  .callout { border-left: 3px solid var(--info); background: var(--panel); padding: 12px 16px; margin: 14px 0; border-radius: 0 6px 6px 0; font-size: 14px; }
+  .callout strong { color: var(--info); }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.warn strong { color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout.ok strong { color: var(--ok); }
+  .prev-next { display: flex; justify-content: space-between; margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 13px; }
+  .prev-next a { color: var(--info); text-decoration: none; }
+  .prev-next a:hover { text-decoration: underline; }
+  .footer { font-size: 12px; color: var(--muted); margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .verdict { background: linear-gradient(135deg, rgba(155,89,255,0.08), rgba(155,89,255,0.02)); border: 1px solid var(--accent); border-left: 3px solid var(--accent); padding: 16px 18px; border-radius: 8px; margin: 16px 0 24px; }
+</style>
+</head>
+<body>
+<nav class="top" aria-label="Primary">
+  <a href="../index.html" class="home">Wallet Architecture Research</a>
+  <span class="sep">/</span>
+  <a href="../index.html" class="tab">Overview</a>
+  <a href="rabby.html" class="tab">Rabby</a>
+  <a href="metamask.html" class="tab">MetaMask</a>
+  <a href="grego.html" class="tab">Grego</a>
+  <a href="nulo.html" class="tab current">Nulo Today</a>
+  <a href="../nulo-phase-2.html" class="tab">Phase 2</a>
+  <a href="../nulo-phase-2-plus.html" class="tab">Phase 2+</a>
+  <a href="../nulo-maximalist.html" class="tab">Maximalist</a>
+</nav>
+
+<div class="wrap">
+
+<p class="breadcrumb"><a href="../index.html">Overview</a> &nbsp;›&nbsp; Nulo Today</p>
+
+<h1><span class="accent-stripe">Nulo</span> today — where we actually are <span class="tag ok">v0.14.9 master</span></h1>
+
+<div class="verdict">
+  <strong>Verdict:</strong> Strong on package discipline, cryptography, and Aztec correctness (post-PR-76). Weak on durable jobs, cold-start handling, and storage-corruption recovery. Phase 1 + Phase 3 from the original plan shipped; Phase 2 (durable jobs) is the next big lift.
+</div>
+
+<div class="toc" aria-label="On this page">
+  <strong>On this page:</strong>
+  <a href="#runtime">Runtime shape</a>
+  <a href="#what-shipped">What shipped (P1 + P3)</a>
+  <a href="#gaps">Known gaps</a>
+  <a href="#strengths">Strengths</a>
+  <a href="#next">What comes next</a>
+</div>
+
+<h2 id="runtime">Runtime shape <span class="prov chat">diagram</span></h2>
+
+<p>
+  Nulo is an MV3 Chromium extension. Service worker hosts business-logic services; offscreen document runs the PXE + BB-WASM stack; popup is a Vue 3 + Pinia renderer that talks to services via a typed <code>ServiceClient&lt;Methods, Events&gt;</code> over <code>chrome.runtime.Port</code>.
+</p>
+
+<figure class="ascii" aria-label="Nulo today runtime: dApp talks to content script which bridges to service worker via runtime port; service worker hosts service registry covering account, profile, network, transaction, execution and dApp session; PXE work delegated to offscreen document running BB-WASM; popup connects to service worker via long-lived port; global ReadWriteGuard serializes PXE writes; 60-second ServiceClient timeout caps prove calls">
+  <figcaption>Nulo today — the SW + offscreen + popup topology that shipped at v0.14.9 with PR 8c (mixed-payload + fee unification) and PR #76 (embedded-FPC consolidation).</figcaption>
+  <pre>  ┌────────────┐         ┌──────────────────────┐
+  │  dApp page │◄───────►│  content-script.ts   │
+  └────────────┘         └──────────┬───────────┘
+                                    │ chrome.runtime port
+                                    ▼
+        ┌──────────────────────────────────────────────────────┐
+        │  SERVICE WORKER (MV3)                                │
+        │                                                      │
+        │  ┌─────────────────────────────────────────────┐     │
+        │  │ Service&lt;Methods, Events&gt; registry           │     │
+        │  │   AccountService                            │     │
+        │  │   ProfileService                            │     │
+        │  │   NetworkService                            │     │
+        │  │   TransactionService                        │     │
+        │  │   ExecutionService                          │     │
+        │  │   DappSessionService (per (origin, chainId))│     │
+        │  │   ConfigService, ContactService, ...        │     │
+        │  └─────────────────────────────────────────────┘     │
+        │                                                      │
+        │  global ReadWriteGuard on PXE — serialized writes    │
+        │  60s ServiceClient timeout (90s offscreen)           │
+        │  no AbortController in prove path                    │
+        │  heartbeat keeps SW alive only while popup is open   │
+        └────────────────────────┬─────────────────────────────┘
+                                 │
+                       chrome.runtime
+                                 │
+                                 ▼
+                  ┌──────────────────────────────┐
+                  │  OFFSCREEN DOCUMENT          │
+                  │  PXE + BB-WASM               │
+                  │   @aztec/accounts/schnorr    │
+                  │   NuloAccount adapter        │
+                  └──────────────────────────────┘
+                                 ▲
+                                 │
+                  chrome.runtime port (long-lived)
+                                 │
+                  ┌──────────────────────────────┐
+                  │  POPUP (Vue 3 + Pinia)       │
+                  │   ServiceClient subscribes;  │
+                  │   blocks on prove call       │
+                  └──────────────────────────────┘</pre>
+</figure>
+
+<h2 id="what-shipped">What actually shipped (Phase 1 + Phase 3) <span class="prov audit">post-merge audit</span></h2>
+
+<table aria-label="What shipped in Phase 1 and Phase 3">
+  <thead><tr><th>Area</th><th>What landed</th><th>Where</th></tr></thead>
+  <tbody>
+    <tr><td>Package discipline</td><td>Layer enforcement via Biome <code>noRestrictedImports</code> (M3.7), wallet-core / crypto / messaging / aztec-runtime / wallet-bridge / extension</td><td><code>biome.json</code></td></tr>
+    <tr><td>M6 UI layer model</td><td>L0–L6 component layers + C0/C1 composables, enforced via lint</td><td><code>src/components/</code>, <code>src/composables/</code></td></tr>
+    <tr><td>Aztec sim correctness</td><td>Stub-account override for sim, completeFeeOptions parity, mixed-payload fee unification (PR 8c)</td><td><code>packages/aztec-runtime/src/account/fee-options.ts</code></td></tr>
+    <tr><td>Public-static fast path</td><td>Skips PXE for read-only public-static calls</td><td><code>packages/extension/src/wallet/services/execution/fast-path.ts</code></td></tr>
+    <tr><td>Embedded-FPC consolidation</td><td>Single helper + NuloFeePaymentMethod rename + first-tx normalizer docs (PR #76)</td><td><code>packages/extension/src/wallet/services/execution/fee/embedded-fpc-cap.ts</code></td></tr>
+    <tr><td>Per-(origin, chainId) dApp sessions</td><td>CAIP-aware permission check; sessions scoped per origin and chain</td><td><code>DappSessionService</code></td></tr>
+    <tr><td>Storage hygiene</td><td>Versioned migrate gate + 0.11.0 wipe for legacy state</td><td><code>packages/extension/src/wallet/storage/migrate.ts</code></td></tr>
+    <tr><td>Crypto vectors</td><td>M2.6 KAT-style test vectors for PasswordSecretBox</td><td><code>packages/wallet-crypto/</code></td></tr>
+  </tbody>
+</table>
+
+<div class="callout ok">
+  <strong>What this buys us:</strong> Phase 1 made cross-package coupling auditable. Phase 3 made the Aztec tx pipeline correct. Phase 2 will make that pipeline <em>durable</em>.
+</div>
+
+<h2 id="gaps">Known gaps <span class="prov chat">post-merge calibration</span></h2>
+
+<table aria-label="Known gaps vs research recommendations">
+  <thead><tr><th>Gap</th><th>Impact</th><th>Fix lives in</th></tr></thead>
+  <tbody>
+    <tr><td>No <code>JobRegistry</code></td><td>SW death mid-prove = lost work; popup-close-mid-prove = "Simulation failed" lie</td><td>Phase 2 item #1</td></tr>
+    <tr><td>No <code>AbortController</code> in prove</td><td>Cancel = ignore, not actually abort</td><td>Phase 2 item #2</td></tr>
+    <tr><td>Global PXE write lock</td><td>Different chains block each other unnecessarily</td><td>Phase 2 item #6</td></tr>
+    <tr><td>No <code>chrome.alarms</code> wake-up</td><td>Cold-boot dApp messages re-init BB-WASM each time</td><td>Phase 2 item #4</td></tr>
+    <tr><td>No LazyListener boot buffer</td><td>Events fired before init can be silently dropped</td><td>Phase 2 item #5</td></tr>
+    <tr><td>No IDB storage backup</td><td>chrome.storage.local corruption = unrecoverable</td><td>Phase 2 item #7</td></tr>
+    <tr><td>No numbered migrations framework</td><td>Schema evolution is ad-hoc; future migrations risky</td><td>Phase 2 item #8</td></tr>
+    <tr><td>No capability wildcards</td><td>Approval fatigue when we open to real users</td><td>Phase 3+</td></tr>
+    <tr><td>No per-origin rate limiting</td><td>Busy dApp can spam approval queue</td><td>Phase 3+</td></tr>
+  </tbody>
+</table>
+
+<h2 id="strengths">Strengths — where Nulo already wins <span class="prov research">research</span></h2>
+
+<ul>
+  <li><strong>Package discipline (★★★★★)</strong> — Biome-enforced layer rules are stricter than any of the three peers ship.</li>
+  <li><strong>Cryptography hygiene (★★★★☆)</strong> — KAT-style vectors for PasswordSecretBox; KDF + encryption isolated in <code>@nulo/wallet-crypto</code>.</li>
+  <li><strong>Aztec correctness (★★★★☆ post-PR-76)</strong> — stub-account override, completeFeeOptions parity, fast-path, embedded-FPC consolidation.</li>
+  <li><strong>Cross-service compile-time deps (★★★★★)</strong> — every <code>ServiceClient ↔ Service</code> pair is typed end-to-end; no untyped JSON-RPC.</li>
+  <li><strong>Upstream conformance</strong> — uses canonical <code>@aztec/accounts/schnorr</code>; no custom Noir source.</li>
+</ul>
+
+<h2 id="next">What comes next <span class="prov chat">roadmap</span></h2>
+
+<p>
+  Phase 2 = durable jobs. The full design is on the <a href="../nulo-phase-2.html">Nulo Phase 2 page</a>. Realistic scope: 3–6 weeks of focused work, 8 items total, with items 1–3 (<code>JobRegistry</code> + <code>AbortController</code> + subscribe-by-jobId in the execute window) as the single most valuable PR.
+</p>
+
+<div class="prev-next">
+  <a href="grego.html">← Grego</a>
+  <a href="../nulo-phase-2.html">Nulo Phase 2 →</a>
+</div>
+
+<div class="footer">
+  Calibrated 2026-05-12 against <code>master</code> at v0.14.9 (post-PR-76). Content provenance: <span class="prov research">research</span> from existing markdown synthesis, <span class="prov audit">post-merge audit</span> reflecting what actually shipped, <span class="prov chat">chat additions</span> for diagrams and gap framing.
+</div>
+
+</div>
+</body>
+</html>

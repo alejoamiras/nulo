@@ -1,0 +1,27 @@
+{
+  "$schema": "https://unpkg.com/release-it/schema/release-it.json",
+  "git": {
+    "requireCleanWorkingDir": false,
+    "requireBranch": ["main", "dev"],
+    "commitMessage": "chore(release): ${version}",
+    "tagName": "v${version}",
+    "tagAnnotation": "Release ${version}",
+    "push": true,
+    "commit": true,
+    "tag": true,
+    "addUntrackedFiles": false
+  },
+  "npm": {
+    "publish": false,
+    "ignoreVersion": true
+  },
+  "github": {
+    "release": true,
+    "releaseName": "v${version}",
+    "draft": false,
+    "preRelease": false,
+    "tokenRef": "GITHUB_TOKEN",
+    "assets": []
+  },
+  "hooks": {}
+}

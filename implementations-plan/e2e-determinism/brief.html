@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>e2e Determinism — Plan Brief</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --fg: #e8eaee;
+      --muted: #9aa3b2;
+      --accent: #7aa2f7;
+      --accent-warm: #e0af68;
+      --good: #9ece6a;
+      --warn: #f7768e;
+      --card: #161922;
+      --border: #232836;
+      --radius: 10px;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --sans: -apple-system, "Segoe UI", system-ui, sans-serif;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #fafbfc;
+        --fg: #1a1d24;
+        --muted: #5b6471;
+        --accent: #3b5bdb;
+        --accent-warm: #b58200;
+        --good: #2f9e44;
+        --warn: #e03131;
+        --card: #ffffff;
+        --border: #e1e5eb;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); line-height: 1.55; }
+    body { max-width: 900px; margin: 0 auto; padding: 32px 24px 80px; }
+    h1, h2, h3, h4 { line-height: 1.25; margin-top: 0; }
+    h1 { font-size: 28px; margin-bottom: 8px; }
+    h2 { font-size: 22px; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    h3 { font-size: 17px; margin: 0 0 8px; }
+    h4 { font-size: 14px; margin: 0 0 4px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+    p { margin: 0 0 12px; }
+    code, .mono { font-family: var(--mono); font-size: 0.92em; }
+    code { background: var(--border); padding: 1px 5px; border-radius: 4px; }
+    a { color: var(--accent); }
+
+    .lead { color: var(--muted); font-size: 15px; margin-bottom: 24px; }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 22px;
+      margin: 12px 0;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      vertical-align: middle;
+    }
+    .tag.pr     { background: rgba(122, 162, 247, 0.15); color: var(--accent); }
+    .tag.q      { background: rgba(224, 175, 104, 0.15); color: var(--accent-warm); }
+    .tag.good   { background: rgba(158, 206, 106, 0.15); color: var(--good); }
+    .tag.warn   { background: rgba(247, 118, 142, 0.15); color: var(--warn); }
+    .tag.muted  { background: var(--border); color: var(--muted); }
+
+    .status-row { display: flex; flex-wrap: wrap; gap: 16px; margin: 24px 0; }
+    .stat { flex: 1 1 140px; padding: 14px 18px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); }
+    .stat-value { font-size: 26px; font-weight: 700; line-height: 1; margin-bottom: 4px; }
+    .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+    section { margin-top: 36px; }
+
+    ul.tight { margin: 0 0 12px; padding-left: 22px; }
+    ul.tight li { margin-bottom: 4px; }
+
+    .eli5 { color: var(--fg); font-style: italic; padding: 12px 14px; background: rgba(122, 162, 247, 0.06); border-left: 3px solid var(--accent); border-radius: 4px; margin-bottom: 14px; }
+    .eli5 strong { font-style: normal; }
+
+    table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; font-size: 14px; }
+    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+    .footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+
+    .question { display: grid; grid-template-columns: 1fr; gap: 6px; }
+    .question .ctx { color: var(--muted); font-size: 14px; }
+    .question .rec { font-size: 14px; padding: 8px 12px; background: rgba(158, 206, 106, 0.07); border-left: 3px solid var(--good); border-radius: 4px; }
+    .question .rec strong { color: var(--good); }
+
+    nav.toc { font-size: 14px; margin: 16px 0 28px; display: flex; flex-wrap: wrap; gap: 14px; }
+    nav.toc a { color: var(--muted); text-decoration: none; }
+    nav.toc a:hover { color: var(--accent); }
+  </style>
+</head>
+<body>
+
+  <h1>e2e Determinism &mdash; Plan Brief <span class="tag muted">v3a</span></h1>
+  <p class="lead">
+    The deep follow-on from the stabilization work. We're replacing
+    fixed-time sleeps in the e2e tests with state-driven signals — wait
+    for the real completion event, not for "5 seconds, probably done."
+    Three small PRs land the safe wins; two bigger items (popup
+    handshake redesign + wallet anchor-gate) are documented as deferred.
+  </p>
+  <p class="lead">
+    <strong>Third revision after a philosophical pushback.</strong> The
+    plan went through three rounds:
+    <strong>v1</strong> used the operation journal (codex-approved but
+    implementation-coupled — read internal storage);
+    <strong>v2</strong> observed the awaiting-card DOM lifecycle (purer,
+    but codex found it semantically wrong — the awaiting card unmounts
+    at submit, not chain confirmation);
+    <strong>v3a (this brief)</strong> observes the settled
+    <code>TransactionCard</code> matching <code>(amount, transferType,
+    status)</code> &mdash; the actual user-visible confirmation event.
+  </p>
+
+  <nav class="toc">
+    <a href="#why">Why this work</a>
+    <a href="#how">How the design changed</a>
+    <a href="#phases">The 3 PRs</a>
+    <a href="#deferred">Deferred</a>
+    <a href="#decisions">Decisions we need</a>
+    <a href="#trail">Audit trail</a>
+  </nav>
+
+  <section id="why">
+    <h2>Why this work</h2>
+
+    <div class="card">
+      <h3>The premise</h3>
+      <p class="eli5">
+        <strong>ELI5:</strong> after a click, the wallet does some
+        async work in the service worker. The test wants to know "is it
+        done?" Today we mostly answer with "wait 5 seconds, probably
+        done." That's an opaque guess that hides bugs and slows tests.
+        Better: wait for a concrete signal &mdash; a storage entry, a
+        DOM element, a journal record &mdash; that proves the work
+        finished.
+      </p>
+      <p>
+        Across the e2e suite we have 8 such fixed-time sleeps (plus a
+        triple-navigation workaround in <code>openPopup</code>) that
+        total ~22 seconds per network suite run. Most can be replaced
+        with signals that already exist in the wallet today. One is a
+        real wallet bug that we'll pin and file separately.
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>The mental model</h3>
+      <ul class="tight">
+        <li><strong>Software is deterministic.</strong> Given the same
+            inputs, it produces the same outputs.</li>
+        <li><strong>Timing is not.</strong> The scheduler, GC pauses,
+            IndexedDB compaction, and JIT warmup mean async work
+            completes at slightly different wall-clock times each run.</li>
+        <li><strong>Fixed-time sleeps observe at a random moment.</strong>
+            They sometimes see the work as done, sometimes not. Result:
+            "flake."</li>
+        <li><strong>State signals observe at the right moment.</strong>
+            They wait for the work to actually emit its completion.
+            Result: deterministic test behavior.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="how">
+    <h2>How the design changed after audits</h2>
+
+    <div class="card">
+      <h3>Three revision passes</h3>
+      <p>
+        Two independent investigations (mine + a parallel-Claude agent)
+        produced separate plans. Three codex audits (sessions
+        <code>019e2c76</code>, <code>019e2cc5</code>,
+        <code>019e2d36</code>) found real issues in each revision.
+      </p>
+      <h4>v1 → v2: your philosophical pushback</h4>
+      <p>
+        v1's design read the operation journal directly from
+        <code>chrome.storage.session.nulo:journal@&lt;id&gt;</code>.
+        Codex-approved, but you pushed back: <em>"if we hook up state,
+        we're testing the implementation, not the app."</em> That
+        landed. The test should synchronize on what the user observes,
+        not on internal storage.
+      </p>
+      <h4>v2 → v3a: codex caught a semantic bug</h4>
+      <p>
+        v2 used the DOM of the <code>TransactionAwaitingCard</code>:
+        wait for it to appear, then wait for it to unmount. Pure DOM,
+        no storage reads. But codex's second audit caught: the awaiting
+        card unmounts when the wallet's execute phase
+        finishes (journal <code>succeeded</code>), which happens
+        right after submit &mdash; <em>not</em> when the tx is mined.
+        Using v2 would have meant "submitted" not "confirmed," and the
+        nullifier race between consecutive transfers would still bite.
+      </p>
+      <h4>v3a (this brief)</h4>
+      <p>
+        Observe the settled <code>TransactionCard</code> &mdash; the
+        post-confirmation row that appears on the activity list.
+        Match by <code>(amount, transferType-label, status)</code>
+        using four data-attributes on the card. When the card's
+        <code>data-tx-status</code> flips to <code>"confirmed"</code>,
+        the user has just seen the green check. That's the
+        confirmation event.
+      </p>
+      <p>
+        Codex's third audit (<code>019e2d36</code>) flagged that
+        <code>TransferType</code> is a <em>numeric</em> enum
+        (<code>0|1|2|3</code>) with names
+        <code>Private/PrivateToPublic/Public/PublicToPrivate</code>,
+        and recommended binding the user-visible label
+        (<code>"Public → Public"</code>) instead of the raw enum &mdash;
+        both for DOM-purity and because the label IS what the user
+        reads. Fixed in v3a.
+      </p>
+
+      <h4>Other audit outcomes that stayed across revisions</h4>
+      <ul class="tight">
+        <li><strong>Dropped the popup-handshake signal from this
+            stack.</strong> Codex flagged: <code>chrome.storage.session</code>
+            survives MV3 service-worker suspension (so the proposed key
+            is stale-prone); the Vue watcher would miss the initial
+            connect; and the new signal would be observability, not a
+            fix for the underlying handshake-drop bug. The triple-nav
+            stays as a workaround. Real perf win (~37s/smoke) deferred
+            to a separate, carefully-designed PR.</li>
+        <li><strong>Keep <code>waitForToast("Transaction submitted")</code></strong>
+            in <code>sendTransfer</code>. The toast is the
+            service-worker-acknowledgment signal AND the diagnostic on
+            failure paths.</li>
+        <li><strong>Pin the 5s post-fee-estimation sleep + file a
+            wallet bug.</strong> Codex confirmed: it's masking a real
+            simulate→prove anchor-freshness race that lives in both UI
+            transfers AND dapp send paths. Not a test fix. Rename the
+            sleep to <code>PXE_ANCHOR_SYNC_WORKAROUND_MS</code>; open a
+            wallet issue.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="phases">
+    <h2>The 3 PRs</h2>
+
+    <article class="card">
+      <h3><span class="tag pr">PR-A</span>&nbsp; Misc small sleeps &rarr; state-driven waits</h3>
+      <p class="eli5">
+        <strong>ELI5:</strong> nine "wait 100-500ms for Vue to settle"
+        sleeps that all have a real state we can wait for instead. Open
+        a dropdown? Wait for the menu item to appear. Click a toggle?
+        Wait for its <code>data-toggle-active</code> attribute to
+        match. None of these are dramatic by themselves; together they
+        save a few seconds and make the test code honest about what
+        it's actually waiting for.
+      </p>
+      <h4>What changes</h4>
+      <ul class="tight">
+        <li>5 helper-level sleeps (dropdown waits, navigateByHash post-route, privacy-toggle, etc.) &rarr; <code>waitForSelector</code> / attribute polls.</li>
+        <li>4 stale 500ms inline blocks in <code>fee-methods.test.ts</code> &rarr; existing <code>setActiveSendType</code> helper.</li>
+        <li>Bonus: rename the 5s sleep at <code>helpers.ts:607</code> + <code>fee-methods.test.ts:104,172</code> to <code>PXE_ANCHOR_SYNC_WORKAROUND_MS</code> with a link to the wallet issue we'll file. Same behavior; honest naming.</li>
+      </ul>
+      <h4>Risk</h4>
+      <p>Low. Each sleep has a clear state-driven replacement and a small blast radius.</p>
+    </article>
+
+    <article class="card">
+      <h3><span class="tag pr">PR-B</span>&nbsp; Drop the 3s post-<code>refreshBalances</code> sleep</h3>
+      <p class="eli5">
+        <strong>ELI5:</strong> in the private-from transfer path,
+        <code>sendTransfer</code> refreshes balances then sleeps 3
+        seconds "to let PXE sync." But the next line already waits for
+        the amount input to become enabled, which is gated on the
+        balance landing. The 3s was double-defense; the downstream
+        wait is the real signal.
+      </p>
+      <h4>Risk</h4>
+      <p>Low-to-medium. If PXE refresh genuinely doesn't land before
+        the downstream wait, the input stays disabled past 60s and the
+        test fails honestly. Better than the silent guess.</p>
+    </article>
+
+    <article class="card">
+      <h3><span class="tag pr">PR-C</span>&nbsp; Tx confirmation via the settled <code>TransactionCard</code> &mdash; biggest win</h3>
+      <p class="eli5">
+        <strong>ELI5:</strong> after a transfer, today the test waits
+        10 seconds for the tx to confirm. That's 40 extra seconds on
+        the transfers scenario alone (4 transfers × 10s). After the
+        wallet confirms a tx, the user sees a row in the activity list
+        with the amount, the transfer-type chip (e.g. "Public →
+        Public"), and a green check icon. The test observes that same
+        row: when the card matching our amount + transfer-type flips
+        to <code>data-tx-status="confirmed"</code>, the user has just
+        seen the green check. That's the confirmation event.
+      </p>
+      <h4>What changes</h4>
+      <ul class="tight">
+        <li>Add 4 optional props to <code>TransactionCardLayout.vue</code>
+            that bind as data-attributes on the root Flex (which already
+            carries <code>data-testid="tx-card"</code>):
+            <code>data-tx-amount-display</code>,
+            <code>data-tx-transfer-type</code>,
+            <code>data-tx-status</code>,
+            <code>data-tx-hash</code>.</li>
+        <li><code>TransactionCard.vue</code> passes through the 4 props:
+            amount string, <code>formatTransferType(...)</code> label
+            (e.g. <code>"Public → Public"</code> &mdash; what the user
+            sees), status string derived from existing
+            <code>isPending</code>/<code>isSuccess</code>/<code>isReverted</code>/<code>isDropped</code>
+            computeds with an explicit <code>"unknown"</code>
+            fallthrough, and the tx hash.</li>
+        <li><code>waitForTxConfirmation(page, { amount, fromType, toType })</code>
+            polls for a card matching <code>(amount, transferType-label)</code>
+            whose <code>data-tx-status</code> is terminal
+            (<code>"confirmed"</code> or <code>"failed"</code>); throws
+            with hash diagnostic on non-confirmed terminal.</li>
+        <li><code>transfers.test.ts</code> updates 4 call sites.</li>
+      </ul>
+      <h4>Why this is the right design (per your philosophical critique)</h4>
+      <ul class="tight">
+        <li>The data attributes mirror user-visible info: the amount
+            text, the transfer-type chip label, the green/red icon, the
+            hash slice. Nothing internal &mdash; tests observe what the
+            user observes.</li>
+        <li>Survives wallet-internal refactors (tx-store reshape,
+            journal renames, status enum changes) as long as the
+            rendered card's user-visible info stays intact.</li>
+        <li>Catches UI regressions for free: if the activity card stops
+            rendering, transfers tests catch it immediately.</li>
+      </ul>
+      <h4>Scope caveat</h4>
+      <p>
+        Safe for the transfers scenario (4 unique
+        <code>(amount, label)</code> pairs, sequential submits). NOT a
+        safe generic primitive for parallel or repeated identical-shape
+        submits &mdash; a stale confirmed card from an earlier submit
+        could false-positive. If we later need this elsewhere, we
+        disambiguate with hash or pre-submit snapshot.
+      </p>
+      <h4>Risk</h4>
+      <p>Medium. The biggest single contract change. Unit-test
+        assertions on <code>TransactionCard</code> /
+        <code>TransactionCardLayout</code> get ~8 new cases (one per
+        attribute × pending/confirmed). E2e validation on
+        <code>transfers.test.ts</code> 5× local + 1× CI. Note:
+        <code>"confirmed"</code> here means first-mined state
+        (<code>Proposed | Checkpointed | Proven | Finalized</code>),
+        which is what the user sees as the green check &mdash; not
+        on-chain finality.</p>
+    </article>
+  </section>
+
+  <section id="deferred">
+    <h2>Deferred (separate PRs)</h2>
+
+    <div class="card">
+      <h3>Wallet anchor-freshness gate</h3>
+      <p>
+        The 5s post-fee-estimation sleep is a wallet bug, not a test
+        bug. The simulate &rarr; prove pipeline doesn't gate
+        <code>proveTx</code> on PXE having caught up to the simulate's
+        anchor block. Same pattern exists in dApp send paths.
+      </p>
+      <p>
+        Real fix: a shared anchor-freshness helper that
+        <code>ExecutionService</code> (UI) and the dApp interaction
+        flow both use before proving. Codex confirmed the scope is
+        bigger than my "10-case unit test" estimate; needs the helper
+        factored as a pure unit first. Multi-day wallet PR.
+      </p>
+      <p>
+        <strong>Action this round:</strong> rename the sleep, file an
+        issue, defer the wallet work.
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>Popup handshake signal</h3>
+      <p>
+        <code>openPopup</code>'s triple-navigation workaround is a real
+        cost (~500ms × 75 calls/smoke = ~37s). A signal-based
+        replacement is feasible but needs a careful redesign per codex
+        feedback:
+      </p>
+      <ul class="tight">
+        <li>The signal must be freshness-scoped (timestamps, not just
+            "exists") because <code>chrome.storage.session</code>
+            survives service-worker suspension.</li>
+        <li>The watcher must use <code>immediate: true</code> or write
+            on initial mount &mdash; the current connect can happen
+            before the watcher even registers.</li>
+        <li>The signal is observability; the underlying handshake-drop
+            bug remains. Triple-nav stays as a fallback.</li>
+      </ul>
+      <p>
+        <strong>Action this round:</strong> none. Filed as a follow-up.
+      </p>
+    </div>
+
+    <div class="card">
+      <h3><code>waitForToast</code> audit</h3>
+      <p>
+        Many toast waits have stronger upstream signals (row rendered,
+        storage write landed). But the toast is the only diagnostic
+        for failure paths, so removal needs per-caller care. Land
+        incrementally after the determinism PRs prove the pattern.
+      </p>
+    </div>
+  </section>
+
+  <section id="decisions">
+    <h2>Decisions we need from you</h2>
+
+    <article class="card question">
+      <h3><span class="tag q">Q1</span>&nbsp; Validation depth on PR-C</h3>
+      <p class="ctx">
+        Signal 1 (DOM-pure via settled <code>TransactionCard</code>) is
+        validated via ~8 new assertions on existing
+        <code>TransactionCard</code> / <code>TransactionCardLayout</code>
+        unit tests (one per data-attribute × pending/confirmed) + e2e
+        on <code>transfers.test.ts</code> 5× local + 1× CI. No new
+        harness needed &mdash; both components already have unit tests.
+      </p>
+      <p class="rec"><strong>Self-resolved.</strong> v3a's design needs
+        less validation than v1's because the new code path is just
+        prop bindings on already-tested components. No decision needed.</p>
+    </article>
+
+    <article class="card question">
+      <h3><span class="tag q">Q2</span>&nbsp; Wallet anchor-gate timing</h3>
+      <p class="ctx">
+        The anchor-freshness gate is bigger than I first scoped (shared
+        helper covering UI transfers AND dApp send paths). Two paths:
+        (a) pin the 5s sleep now + file the issue + ship determinism
+        PRs without touching it; (b) block determinism work on the
+        anchor-gate landing first.
+      </p>
+      <p class="rec"><strong>My take:</strong> (a) pin + defer. The 5s
+        sleep is opaque but not blocking; determinism PRs land
+        independently.</p>
+    </article>
+
+    <article class="card question">
+      <h3><span class="tag q">Q3</span>&nbsp; Popup-handshake redesign priority</h3>
+      <p class="ctx">
+        Dropping the triple-nav would save ~37s per smoke suite run
+        but needs a careful redesign. Schedule it (a) after this stack
+        lands, (b) before, or (c) skip indefinitely (the smoke suite
+        is fine).
+      </p>
+      <p class="rec"><strong>My take:</strong> (a) after this stack.
+        Determinism PRs are lower-risk and give the team time to think
+        through the handshake redesign without pressure.</p>
+    </article>
+
+    <article class="card question">
+      <h3><span class="tag q">Q4</span>&nbsp; PR ordering</h3>
+      <p class="ctx">
+        A &rarr; B &rarr; C (smallest to biggest) or C first (biggest
+        single win on transfers scenario)?
+      </p>
+      <p class="rec"><strong>My take:</strong> A &rarr; B &rarr; C.
+        A+B validate the pattern with tiny risk; C builds on
+        confidence. Same approach we used for the stabilization
+        stack and it worked well.</p>
+    </article>
+  </section>
+
+  <section id="trail">
+    <h2>Audit trail</h2>
+    <p>All planning files at
+       <code>implementations-plan/e2e-determinism/</code>.</p>
+    <ul class="tight">
+      <li><code>plan-primary.md</code> &mdash; my v0 with verified evidence.</li>
+      <li><code>parallel-claude-plan.md</code> &mdash; independent Claude agent's v0.</li>
+      <li><code>plan-consolidated.md</code> &mdash; first merge.</li>
+      <li><code>audit-codex.md</code> &mdash; codex audit #1, session <code>019e2c76</code> (tx-store scan flaws).</li>
+      <li>Codex audit #2, session <code>019e2cc5</code> (v2 awaiting-card semantic miss).</li>
+      <li>Codex audit #3, session <code>019e2d36</code> (v3a settled-card &mdash; enum naming + diagnostics).</li>
+      <li><strong><code>plan-final.md</code></strong> &mdash; v3a, post-all-3-audits &mdash; <em>the source of truth for implementation</em>.</li>
+    </ul>
+  </section>
+
+  <div class="footer">
+    Once you've answered the 4 questions, I'll start PR-A. After
+    implementation lands, codex reviews each PR; we fix what comes
+    back, and we're done. No code touched yet &mdash; only planning
+    files.
+  </div>
+
+</body>
+</html>

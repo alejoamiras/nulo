@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Affordances v4 — approval gate</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1e252e; --border: #2a323d;
+    --text: #d1d5db; --muted: #8b949e; --accent: #9b59ff;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149; --info: #58a6ff;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); margin: 0; padding: 0; font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 24px 24px 80px; }
+  .stamp { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 3px 10px; border-radius: 4px; background: var(--accent); color: #fff; margin-bottom: 8px; letter-spacing: 0.5px; }
+  h1 { font-size: 30px; margin: 0 0 8px; color: #fff; letter-spacing: -0.5px; }
+  h1 .accent { color: var(--accent); }
+  h2 { font-size: 22px; margin: 40px 0 14px; color: #fff; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: var(--accent); }
+  p { margin: 10px 0; }
+  .lead { color: var(--muted); font-size: 16px; line-height: 1.6; margin-top: 0; }
+  code { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  .grid { display: grid; gap: 16px; }
+  .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 800px) { .grid.cols-2 { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; }
+  .card .title { font-weight: 600; color: #fff; margin-bottom: 6px; }
+  .card.accent-border { border-left: 3px solid var(--accent); }
+  .card.ok-border { border-left: 3px solid var(--ok); }
+  .card.warn-border { border-left: 3px solid var(--warn); }
+  .card.info-border { border-left: 3px solid var(--info); }
+  .callout {
+    border-left: 3px solid var(--info); background: var(--panel);
+    padding: 14px 18px; margin: 16px 0; border-radius: 0 6px 6px 0; font-size: 14px;
+  }
+  .callout.accent { border-left-color: var(--accent); }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout strong { color: var(--info); }
+  .callout.accent strong { color: var(--accent); }
+  .callout.warn strong { color: var(--warn); }
+  .callout.ok strong { color: var(--ok); }
+  figure.ascii {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 14px 16px; margin: 14px 0; overflow-x: auto;
+  }
+  figure.ascii figcaption { font-size: 13px; color: var(--muted); font-style: italic; margin-bottom: 10px; }
+  figure.ascii pre { font: 12px/1.4 var(--mono); color: var(--text); margin: 0; white-space: pre; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th, td { padding: 10px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; background: var(--panel); text-transform: uppercase; letter-spacing: 0.3px; }
+  .pill { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 3px; }
+  .pill.ok { background: rgba(63,185,80,0.15); color: var(--ok); border: 1px solid rgba(63,185,80,0.3); }
+  .pill.warn { background: rgba(210,153,34,0.15); color: var(--warn); border: 1px solid rgba(210,153,34,0.3); }
+  .pill.err { background: rgba(248,81,73,0.15); color: var(--err); border: 1px solid rgba(248,81,73,0.3); }
+  .pill.muted { background: rgba(139,148,158,0.15); color: var(--muted); border: 1px solid rgba(139,148,158,0.3); }
+  .footer { color: var(--muted); font-size: 12px; margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stamp">PENDING APPROVAL · v4 · 2026-05-14</div>
+  <h1>Card affordances — <span class="accent">round 4</span></h1>
+  <p class="lead">v0.15.4 QA surfaced 5 issues. Plan went through me + a Plan subagent in parallel, then two codex pre-implementation rounds. Each round caught a real bug. Plan v4 is ready to implement.</p>
+
+  <h2>5 things you reported</h2>
+
+  <div class="grid cols-2">
+    <div class="card warn-border">
+      <div class="title">1. Retry is misleading</div>
+      <p>The Retry button on Interrupted transfer cards <em>looks</em> like it'll retry the same tx, but it just opens the Send page fresh. Plus it only existed for transfers — never for dApp ops (we can't replay dApp requests) — which feels asymmetric.</p>
+      <p><strong>Decision (you):</strong> drop retry entirely. Cleaner UX, ~9 fewer tests as a bonus.</p>
+    </div>
+    <div class="card warn-border">
+      <div class="title">2. Terminal transfer cards show no amount</div>
+      <p>Cancelled or Interrupted card for a transfer: shows the token symbol + "Cancelled" / "Transaction was interrupted". <em>No amount.</em></p>
+      <p><strong>Why:</strong> the journal record persists <code>tokenId</code> but never persisted <code>amount</code> (we explicitly punted on this in plan v3 — "don't bloat the schema").</p>
+      <p><strong>Fix:</strong> add <code>amountRaw</code> (BigInt-as-string) + <code>recipientAddress</code> to the journal record. Display amount on terminal cards via the existing <code>balanceFormatted</code> path. Recipient persisted but not displayed yet — useful for a future tx-detail view.</p>
+    </div>
+    <div class="card warn-border">
+      <div class="title">3. Terminal cards disappear after 5 min</div>
+      <p>"What the hell, why did they disappear?" — fair. The 5-min auto-age was a row-budget compromise that didn't communicate well.</p>
+      <p><strong>Fix:</strong> drop the 5-min window. Cancelled / Interrupted / Failed stay visible until browser exit (same as settled txs). Row cap bumps from 3 → 5 to make room (popup scrolls anyway if needed).</p>
+    </div>
+    <div class="card err-border">
+      <div class="title">4. Duplicate card during cancel</div>
+      <p>Click Cancel → cancelled terminal card appears immediately, but the previous awaiting card also stays visible for a few seconds.</p>
+      <p><strong>Why:</strong> the awaiting card has two data sources — TaskService (in-memory) and the journal (durable). Journal turns to <code>cancelled</code> fast; TaskService catches up slower. Brief gap = both render.</p>
+      <p><strong>Fix:</strong> when a journal record transitions to terminal AND matches the current task, clear the task immediately. This took 4 audit iterations to get right (see "the audit cycle" below).</p>
+    </div>
+    <div class="card warn-border">
+      <div class="title">5. X icon clashes with amount column</div>
+      <p>On transfer cards (which have <code>5.00 USDC</code> in the right column), the top-right X overlaps the amount text. "Almost impossible to see."</p>
+      <p><strong>Fix:</strong> when the action slot is filled, add <code>padding-right: 36px</code> to the card wrapper. Amount column shifts left and gives the X dedicated space. No layout rewrite needed.</p>
+    </div>
+    <div class="card info-border">
+      <div class="title">Context — two ways the popup knows about in-flight work</div>
+      <p><strong>TaskService:</strong> in-memory task records the SW updates as the work progresses. Fast, ephemeral, lost on SW restart.</p>
+      <p><strong>Journal:</strong> durable records in <code>chrome.storage.session</code> — Phase 2's whole reason for being. Survives SW restart + popup close/reopen.</p>
+      <p>The popup uses both; Phase 2 made the journal the primary source of truth for "is this in-flight?" The duplicate bug (#4) is fundamentally the two sources getting out of sync for a beat after cancel.</p>
+    </div>
+  </div>
+
+  <h2>The audit cycle (what changed across rounds)</h2>
+  <p class="lead">Per your workflow: parallel drafts → consolidate → codex review → iterate. Two codex rounds caught real bugs.</p>
+
+  <figure class="ascii">
+    <figcaption>How the plan evolved through 4 versions. Each ↓ is a real catch.</figcaption>
+<pre>
+v1 (orchestrator) ─┐
+                   ├──▶ v2 (consolidated)  ──┐
+v1 (Plan subagent) ─┘                        │
+                                             ▼
+                          [codex pre-impl review #1]
+                                             │
+            HARD bug: dupe-fix breaks legitimate awaiting cards
+            (task-first window + no-journal dApp path)
+                                             │
+                                             ▼
+                                          v3 (imperative clear)
+                                             │
+                                             ▼
+                            [codex pre-impl review #2]
+                                             │
+                  SHOULD: snapshot path bypasses the clear
+                  (already-terminal records on popup mount)
+                                             │
+                                             ▼
+                                          v4 (snapshot-aware clear)
+                                             │
+                                             ▼
+                                       READY TO IMPLEMENT
+</pre>
+  </figure>
+
+  <h3>What each audit round added</h3>
+  <table>
+    <thead><tr><th>Round</th><th>Caught</th><th>Fixed in</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Plan subagent (v1 → v2)</strong></td>
+        <td>
+          + Persist <code>recipientAddress</code> too (not just amount)<br/>
+          + Bump storage v6→v7 + wipe (clean QA slate)<br/>
+          + Row cap 3 → 5 (terminals live forever now)<br/>
+          + Use <code>amountRaw</code> not <code>amount</code> (BigInt-as-string clarity)<br/>
+          + Padding-RIGHT on wrapper (not padding-top on amount)
+        </td>
+        <td>v2</td>
+      </tr>
+      <tr>
+        <td><strong>Codex pre-impl #1 (v2 → v3)</strong></td>
+        <td>
+          <span class="pill err">HARD</span> Dupe-suppression rule was unsound. Task starts BEFORE journal in code (<code>service.ts:369</code> vs <code>:379</code>) — would suppress legitimate task-first windows. <code>executeNoFromSendTx</code> has no journal — would permanently suppress dApp default_entrypoint cards.
+        </td>
+        <td>v3 — switched from structural-computed to imperative clear (only runs on actual terminal events, neither broken case fires)</td>
+      </tr>
+      <tr>
+        <td><strong>Codex pre-impl #2 (v3 → v4)</strong></td>
+        <td>
+          <span class="pill warn">SHOULD</span> Mount/reconnect snapshot path skips the imperative clear. If you cancel, close popup, reopen later — the journal terminal record was already there at mount; the event handler never runs; dupe could reappear.<br/>
+          <span class="pill muted">NICE</span> <code>isMatchingTask</code> is heuristic (kind + tokenId). Could false-clear under concurrent dApp ops.
+        </td>
+        <td>v4 — extract clear logic to a helper, call it after every <code>journalOps</code> mutation (mount snapshot, reconnect snapshot, and event handler). Concurrency acknowledged as a documented known limitation (rare in practice; consequence is a flicker, not corruption)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>What we'll build (6 commits)</h2>
+  <ol>
+    <li><strong>Persist <code>amountRaw</code> + <code>recipientAddress</code></strong> on transfer journal records. Bump storage v6→v7 (one-line constant + existing wipe handles it).</li>
+    <li><strong>Display amount on terminal transfer cards</strong>. Thread <code>tokensById</code> through to Archives so it can do the same.</li>
+    <li><strong>Terminal cards forever in RecentActivityView</strong>. Drop 5-min window. Cap 3 → 5. Chronological merge of terminals + settled.</li>
+    <li><strong>Cancel-dupe fix</strong>. Imperative clear via <code>clearExecutingTaskIfMatchingTerminal</code>, called from event + mount + reconnect paths.</li>
+    <li><strong>Visual clash fix</strong>. <code>wrapper_has_actions { padding-right: 36px }</code> on <code>TransactionCardLayout</code>.</li>
+    <li><strong>Drop retry surface entirely</strong>. ~−9 tests net (retry was over-engineered for what it delivered).</li>
+  </ol>
+
+  <h2>UX copy</h2>
+  <p>No new copy strings. Existing subtitles ("Cancelled" / "Transaction was interrupted" / per-kind Failed) carry over. Amount column for terminal transfer cards uses the same format as the awaiting card (e.g. <code>5.00</code> / <code>USDC</code>).</p>
+
+  <h2>Tests</h2>
+  <p>Net test delta is <strong>negative</strong> — retry removal cuts ~9 cases; we add ~3-4 for snapshot-path regression + <code>isMatchingTask</code> matrix + degraded <code>amountRaw</code>. Per your principle: each new test pins a real regression path; nothing for "miscellaneous coverage".</p>
+
+  <table>
+    <thead><tr><th>File</th><th>Net change</th><th>What</th></tr></thead>
+    <tbody>
+      <tr><td><code>journal-state.test.ts</code></td><td>−6</td><td>Drop retryable cases + retry assertions in toEqual blocks</td></tr>
+      <tr><td><code>TransactionTerminalCard.test.ts</code></td><td>−3</td><td>Drop retry-button cases</td></tr>
+      <tr><td><code>recent-activity-handlers.test.ts</code></td><td>−2 +3</td><td>Drop retry-handler. Add <code>isMatchingTask</code> matrix (3 cases)</td></tr>
+      <tr><td><code>operation-journal/service.test.ts</code></td><td>+1</td><td>Schema accepts amountRaw + recipientAddress</td></tr>
+      <tr><td><code>TransactionCardLayout.test.ts</code> (new)</td><td>+1</td><td>has_actions class applied when actions slot filled</td></tr>
+      <tr><td><strong>Snapshot-path regression</strong> (new)</td><td>+1</td><td>Mount with terminal record + executingTask → cleared without event</td></tr>
+      <tr><td>Degraded <code>amountRaw</code> test (new)</td><td>+1</td><td>Pre-v7 record missing field → no fake "0 USDC" rendered</td></tr>
+      <tr><td><strong>Net</strong></td><td><strong>−4</strong></td><td>Smaller, sharper suite</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Known limitation we're accepting</h2>
+  <div class="callout warn">
+    <strong>Concurrent same-account dApp ops can cause a brief flicker.</strong> If two dApp ops are in flight at once (rare — approval popups serialize at the user level), a terminal event on op A could clear the executingTask while it's currently B. Visual: the awaiting card briefly disappears, then reappears within ~1 frame when TaskService re-syncs. No state corruption.
+    <p style="margin: 8px 0 0;">A future enhancement (plumb <code>journalId</code> onto task content for identity match) closes this if QA shows the flicker. Punting now because the surface change is larger and the consequence is purely cosmetic.</p>
+  </div>
+
+  <h2>What I need from you</h2>
+  <div class="callout accent">
+    <strong>Approve to proceed.</strong> All decision questions resolved across the audit cycle. After your green light I'll:
+    <ol style="margin: 8px 0;">
+      <li>Implement v4 (6 commits, schema-first ordering).</li>
+      <li>Send the implementation to codex for post-impl review.</li>
+      <li>Apply any fixes codex finds.</li>
+      <li>Bump <code>0.15.4 → 0.15.5</code>, build, hand back to you with the manual QA matrix.</li>
+    </ol>
+  </div>
+
+  <div class="footer">
+    Plan v4 at <code>implementations-plan/phase-2-followup-affordances-v4/plan.md</code><br/>
+    Audits: Plan subagent + codex sessions <code>019e26ea-027c-7ea1-9d8b-7377cef8aa55</code>.<br/>
+    Safe rollback if anything breaks: <code>git reset --hard 8e9206ff</code> (v0.15.4 — the user-tested checkpoint).
+  </div>
+</div>
+</body>
+</html>

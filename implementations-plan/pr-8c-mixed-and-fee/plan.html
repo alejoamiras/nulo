@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>PR 8c — Mixed payload + fee semantics unification</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel2: #1e252e;
+    --border: #2a323d;
+    --text: #d1d5db;
+    --muted: #8b949e;
+    --accent: #9b59ff;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --err: #f85149;
+    --info: #58a6ff;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); margin: 0; padding: 0; font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 32px 24px 64px; }
+  h1 { font-size: 26px; margin: 0 0 8px; color: #fff; letter-spacing: -0.5px; }
+  h2 { font-size: 18px; margin: 32px 0 12px; color: #fff; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  h3 { font-size: 15px; margin: 16px 0 8px; color: var(--accent); }
+  .tag {
+    display: inline-block; font-family: var(--mono); font-size: 11px;
+    padding: 2px 8px; border-radius: 4px; background: var(--panel2); color: var(--muted);
+    margin-right: 6px;
+  }
+  .tag.ok { color: var(--ok); border: 1px solid var(--ok); }
+  .tag.warn { color: var(--warn); border: 1px solid var(--warn); }
+  .tag.info { color: var(--info); border: 1px solid var(--info); }
+  .tag.accent { background: var(--accent); color: #fff; }
+  .topbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+  .topbar .meta { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .grid, .grid3 { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px;
+  }
+  .card.dim { background: var(--panel2); }
+  .card .title { font-weight: 600; color: #fff; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .card .eli5 {
+    font-size: 13px; color: var(--muted); font-style: italic;
+    border-left: 2px solid var(--accent); padding-left: 10px; margin: 6px 0 10px;
+  }
+  .card .tldr { font-size: 13px; color: var(--text); margin-bottom: 8px; }
+  .files {
+    font-family: var(--mono); font-size: 12px; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 10px;
+    color: var(--text); overflow-x: auto;
+  }
+  .files .new { color: var(--ok); }
+  .files .mod { color: var(--info); }
+  .files .dim { color: var(--muted); }
+  .phase {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0;
+  }
+  .phase.locked { opacity: 0.55; }
+  .phase-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+  .phase-num { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+  .phase-title { font-weight: 600; color: #fff; }
+  .phase-eli5 { font-size: 13px; color: var(--muted); font-style: italic; margin: 4px 0; }
+  .phase-steps { font-family: var(--mono); font-size: 12px; color: var(--text); white-space: pre-line; margin-top: 8px; padding: 8px 10px; background: var(--bg); border-radius: 6px; border: 1px solid var(--border); }
+  .flow {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 18px; font-family: var(--mono); font-size: 12px; line-height: 1.7;
+    overflow-x: auto; white-space: pre; color: var(--text);
+  }
+  .flow .h { color: var(--accent); }
+  .flow .n { color: var(--info); }
+  .flow .v { color: var(--ok); }
+  .flow .w { color: var(--warn); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
+  .legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .test-pill { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius: 3px; background: var(--panel2); border: 1px solid var(--border); margin: 2px 4px 2px 0; }
+  details { margin: 8px 0; }
+  details summary { cursor: pointer; color: var(--accent); font-size: 13px; padding: 4px 0; }
+  details[open] summary { color: #fff; }
+  .quote {
+    border-left: 3px solid var(--info); padding: 8px 12px; background: var(--panel);
+    color: var(--text); font-size: 13px; margin: 8px 0; border-radius: 0 4px 4px 0;
+  }
+  .quote .who { font-family: var(--mono); font-size: 11px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .footer { font-size: 12px; color: var(--muted); margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border); }
+  code { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+  .num { color: var(--accent); font-family: var(--mono); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="topbar">
+  <div>
+    <h1>PR 8c — Mixed payload + fee semantics unification</h1>
+    <div><span class="tag accent">v0.14.7 target</span><span class="tag info">plan v3 (post-codex review)</span><span class="tag ok">ship-ready</span></div>
+  </div>
+  <div class="meta">
+    branch: feat/pr-8c-full-mixed-and-fee-unification<br/>
+    base: 0ee26eb9 (v0.14.6, user-validated safe checkpoint)<br/>
+    plan dir: implementations-plan/pr-8c-mixed-and-fee/
+  </div>
+</div>
+
+<h2>TL;DR</h2>
+<div class="grid">
+  <div class="card">
+    <div class="title"><span class="tag accent">A</span>Mixed-payload fast path</div>
+    <div class="tldr">
+      Today: only <strong>pure</strong> public-static payloads skip the kernel sim.
+      Goal: also fast-path the <strong>leading prefix</strong> of public-static calls in a mixed <code>[public-static..., private/non-static...]</code> payload, exactly like upstream <code>BaseWallet.simulateTx</code> does.
+    </div>
+    <div class="eli5">
+      <strong>ELI5:</strong> if a dApp asks "what's my balance, then transfer 5 tokens", today we run BOTH through the slow PXE.
+      After this, we run "what's my balance" fast against the node and "transfer 5 tokens" through the slow PXE — in parallel — and stitch the results back together.
+    </div>
+  </div>
+  <div class="card">
+    <div class="title"><span class="tag accent">B</span>Fee semantics unification</div>
+    <div class="tldr">
+      Today: standard path hardcodes <code>maxFeesPerGas = 10^18</code>; fast path defaults from the node's <code>getCurrentMinFees().mul(1.5)</code>. Same dApp request can produce different gas behavior depending on which path runs.
+      Goal: one shared <code>completeFeeOptions</code> translator, used by both, mirroring upstream byte-for-byte.
+    </div>
+    <div class="eli5">
+      <strong>ELI5:</strong> the two paths disagree on what "default gas" means. We pick the upstream definition and make both paths use it.
+      Also: discovered the planner silently drops <code>maxPriorityFeesPerGas</code> from dApp requests — fix that too.
+    </div>
+  </div>
+</div>
+
+<h2>The current gap, in one diagram</h2>
+<div class="flow"><span class="h">─── what we ship today (v0.14.6) ───</span>
+
+dApp simulateTx ─┬─→ <span class="v">[pure public-static]</span> ─→ fast path ─→ <span class="v">node</span>
+                 │
+                 └─→ <span class="w">[anything else]</span>     ─→ standard path ─→ PXE (slow)
+
+<span class="h">─── what we want (v0.14.7) ───</span>
+
+dApp simulateTx ─→ split <span class="n">[pub-static prefix | remainder]</span>
+                 ┌── prefix → <span class="v">simulateViaNode (fast, parallel)</span> ─┐
+                 │                                                │
+                 └── remainder → <span class="v">PXE simulateTx (parallel)</span>     ─┴─→ merge → result
+
+<span class="h">─── gas-settings unification ───</span>
+
+dApp request <span class="n">opts.fee.gasSettings</span>
+       │
+       ├─→ standard path → <span class="w">currently uses 10^18 (hardcoded)</span>
+       └─→ fast path     → currently uses <span class="v">node minFees * 1.5</span> (upstream-faithful)
+                                                  │
+                          BOTH WILL USE THIS ────┘  (via shared completeFeeOptions)
+                          PLUS plumb <span class="w">maxPriorityFeesPerGas</span> through (currently dropped in planner)
+</div>
+
+<h2>How this is iterated</h2>
+<div class="grid3">
+  <div class="card dim">
+    <div class="title">Round 1</div>
+    <div class="tldr">Claude drafts plan (<code>my-plan.md</code>) — 13 files, identifies first-tx complication, defers it.</div>
+  </div>
+  <div class="card dim">
+    <div class="title">Round 2</div>
+    <div class="tldr">Codex drafts plan independently (<code>codex-plan.md</code>) — 16 files. Catches: <strong>maxPriorityFeesPerGas dropped in planner</strong> (critical miss in Claude's draft), proposes Nulo-local merge helper, proposes first-tx normalizer.</div>
+  </div>
+  <div class="card dim">
+    <div class="title">Round 3</div>
+    <div class="tldr">Consolidate (<code>consolidated.md</code>). Codex reviews v1, catches 3 more: <strong>IAccountContract type-leak</strong>, <strong>gasSettings transport seam</strong>, <strong>boundary precheck</strong>. Plan v2 fixes all → ship-ready.</div>
+  </div>
+</div>
+
+<h2>What changed between rounds</h2>
+<table>
+  <thead><tr><th>Issue</th><th>Claude's draft</th><th>Codex's draft</th><th>Final</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>maxPriorityFeesPerGas</code> plumbing</td>
+      <td>Not addressed</td>
+      <td>Add to planner + builder + schema</td>
+      <td><span class="tag ok">Adopt codex</span> — critical</td>
+    </tr>
+    <tr>
+      <td>First-tx multicall in mixed merge</td>
+      <td>Skip mixed; route to standard</td>
+      <td>Normalize standard-arm tree</td>
+      <td><span class="tag warn">Skip</span> — codex agreed in v2: deferral fine, edge case</td>
+    </tr>
+    <tr>
+      <td>Merge function</td>
+      <td>Call upstream <code>buildMergedSimulationResult</code></td>
+      <td>Nulo-local <code>mergeFastPathResults</code></td>
+      <td><span class="tag warn">Use upstream</span> — user preference (2026-05-11): "lean to upstream defaults if they exist; reduces our maintenance"</td>
+    </tr>
+    <tr>
+      <td>Init-detection seam</td>
+      <td>Method on ExecutionService punching through <code>account.instance</code></td>
+      <td>(raised in v2)</td>
+      <td><span class="tag ok">IAccountContract.requiresInitialization(node)</span> — clean interface boundary</td>
+    </tr>
+    <tr>
+      <td>gasSettings transport</td>
+      <td>Extend upstream <code>DefaultAccountEntrypointOptions</code></td>
+      <td>(raised in v2)</td>
+      <td><span class="tag ok">Separate parameter</span> on <code>buildTxExecutionRequest</code></td>
+    </tr>
+    <tr>
+      <td>Boundary detection</td>
+      <td>Rehydrate full payload, split after</td>
+      <td>(raised in v2)</td>
+      <td><span class="tag ok">Data-only precheck</span> for boundary, rehydrate ONLY the prefix</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Files touched (final)</h2>
+<div class="files">
+<span class="new">NEW</span>
+  packages/aztec-runtime/src/account/<span class="new">fee-options.ts</span>           — shared translator, mirrors upstream completeFeeOptions
+  packages/aztec-runtime/src/account/<span class="new">fee-options.test.ts</span>      — 6 cases
+
+<span class="mod">MODIFIED — aztec-runtime (account)</span>
+  packages/aztec-runtime/src/account/index.ts                — export fee-options + add requiresInitialization to IAccountContract
+  packages/aztec-runtime/src/account/nulo-account.ts          — use completeFeeOptions, implement requiresInitialization, separate gasSettings param
+
+<span class="mod">MODIFIED — aztec-runtime (pxe — IPXE plumbing for getSyncedBlockHeader)</span>
+  packages/aztec-runtime/src/pxe/ipxe.ts                      — add to interface
+  packages/aztec-runtime/src/pxe/spec.ts                      — add RPC method
+  packages/aztec-runtime/src/pxe/service.ts                   — implement
+  packages/aztec-runtime/src/pxe/client.ts                    — RPC client wrapper
+  packages/aztec-runtime/src/pxe/proxy.ts                     — delegate
+
+<span class="mod">MODIFIED — wallet-bridge schema</span>
+  packages/wallet-bridge/src/operation.ts                     — FeeOptions gets maxPriorityFeesPerGas?
+
+<span class="mod">MODIFIED — extension (execution)</span>
+  packages/extension/src/wallet/services/execution/operation-planner.ts        — thread maxPriorityFeesPerGas
+  packages/extension/src/wallet/services/execution/operation-planner.test.ts   — +2 cases
+  packages/extension/src/wallet/services/execution/tx-request-builder.ts       — accept maxPriorityFeesPerGas
+  packages/extension/src/wallet/services/execution/fast-path.ts                — mixed orchestration, drop local translator
+  packages/extension/src/wallet/services/execution/fast-path.test.ts           — +10 cases (8 mixed + 2 init-detection)
+  packages/extension/src/wallet/services/execution/service.ts                  — wire-up
+
+<span class="mod">MODIFIED — extension (regression pin)</span>
+  packages/extension/src/wallet/services/account/contracts/nulo-account.test.ts — +1 regression case
+
+<span class="mod">MODIFIED — versioning</span>
+  packages/extension/package.json                             — 0.14.6 → 0.14.7
+</div>
+<div class="legend">
+  <span><span class="swatch" style="background:var(--ok)"></span>new file</span>
+  <span><span class="swatch" style="background:var(--info)"></span>modified</span>
+  <span class="muted">17 file changes total. Most are small (1-line additions for IPXE plumbing).</span>
+</div>
+
+<h2>Phases</h2>
+
+<div class="phase">
+  <div class="phase-head">
+    <div><span class="phase-num">PHASE 1</span> &nbsp; <span class="phase-title">IPXE plumbing for <code>getSyncedBlockHeader()</code></span></div>
+    <div><span class="tag">~2 hours</span><span class="tag">5 files</span><span class="tag info">independent</span></div>
+  </div>
+  <div class="phase-eli5"><strong>ELI5:</strong> teach the wallet's "ask the PXE a question" channel a new question: "what block are you synced to?" — same plumbing pattern as the existing <code>simulateTx</code> RPC.</div>
+  <div class="phase-steps">Add to IPXE interface       (ipxe.ts)
+Add to RPC method types     (spec.ts)
+Add to PXE service impl     (service.ts → pxe.getSyncedBlockHeader())
+Add RPC client wrapper      (client.ts → BlockHeader.schema.parseAsync)
+Add proxy delegate          (proxy.ts)
+No tests needed — RPC pattern identical to simulateTx; covered by Phase 3 integration.</div>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <div><span class="phase-num">PHASE 2</span> &nbsp; <span class="phase-title">Shared <code>completeFeeOptions</code> translator + <code>maxPriorityFeesPerGas</code> plumbing</span></div>
+    <div><span class="tag">~3 hours</span><span class="tag">7 files</span><span class="tag warn">unblocks Phase 3</span></div>
+  </div>
+  <div class="phase-eli5"><strong>ELI5:</strong> write one function that turns "whatever the dApp sent for gas" into "real gas settings", and make BOTH paths call it. Also stop silently dropping priority fees.</div>
+  <div class="phase-steps">2a — fee-options.ts + fee-options.test.ts (6 cases)
+        ↓ mirrors upstream BaseWallet.completeFeeOptions byte-for-byte
+        ↓ Gas.from / GasFees.from rehydration + getCurrentMinFees().mul(1.5) default
+2b — nulo-account.ts.buildTxExecutionRequest uses it
+        ↓ separate gasSettings parameter (NOT extending upstream's options type)
+        ↓ drop MAX_FEE_PER_DA_GAS / MAX_FEE_PER_L2_GAS constants
+2c — Thread maxPriorityFeesPerGas through schema + planner + builder
+        ↓ wallet-bridge/operation.ts: add maxPriorityFeesPerGas? to FeeOptions
+        ↓ operation-planner.ts: extract from opts.fee.gasSettings, stringify
+        ↓ tx-request-builder.ts: pass through to NuloAccount
+        ↓ +2 operation-planner.test.ts cases
+2d — fast-path.ts drops local translator, uses shared
+        ↓ both paths now produce identical GasSettings given identical inputs
+        ↓ +1 nulo-account.test.ts regression case</div>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <div><span class="phase-num">PHASE 3</span> &nbsp; <span class="phase-title">Mixed-payload orchestration</span></div>
+    <div><span class="tag">~4 hours</span><span class="tag">3 files</span><span class="tag warn">depends on Phase 1+2</span></div>
+  </div>
+  <div class="phase-eli5"><strong>ELI5:</strong> the actual fast-path expansion. Split incoming payload at the first non-public-static call; run the prefix on the node (fast) and the remainder through PXE (slow) in parallel; merge the public return values in order; skip the optimization entirely for first-tx-init payloads with a remainder (edge case, tracked as follow-up).</div>
+  <div class="phase-steps">3a — rehydrateOptimizablePrefix(calls) → { optimizableCalls, remainingRaw } | null
+        ↓ data-only scan for boundary BEFORE rehydration (avoid double-parse)
+        ↓ rehydrate ONLY the prefix; remainder stays raw (planner re-rehydrates)
+3b — wrapStandardArmForMixedMerge(result) → TxSimulationResultWithAppOffset
+        ↓ Nulo's DefaultAccountEntrypoint = always appCallOffset 1
+        ↓ first-tx multicall case excluded upstream in orchestrator
+3c — buildMergedSimulationResult(optimized, normal) — upstream, called directly
+        ↓ Step 3b's wrap produces TxSimulationResultWithAppOffset which is
+        ↓ exactly what upstream expects → zero impedance mismatch
+        ↓ user preference: lean to upstream defaults; reduces our maintenance
+3d — runFastPath({ node, pxe, fromAddr, opts, optimizableCalls, remainingRaw, runStandardArm, logError })
+        ↓ PXE-synced header (mandatory for mixed correctness; fall back to node head)
+        ↓ Promise.all([simulateViaNode, runStandardArm.then(wrap)])
+        ↓ narrowed try/catch (only fast-path-exclusive ops)
+3e — service.ts executeAztecSimulateTx wire-up
+        ↓ split → first-tx check (only if remainder) → runFastPath
+        ↓ account.requiresInitialization(node) is the IAccountContract method
+        ↓ +10 fast-path.test.ts cases (8 mixed merge + 2 init detection)</div>
+</div>
+
+<div class="phase">
+  <div class="phase-head">
+    <div><span class="phase-num">PHASE 4</span> &nbsp; <span class="phase-title">Verification</span></div>
+    <div><span class="tag">~1.5 hours</span><span class="tag ok">all gates</span></div>
+  </div>
+  <div class="phase-eli5"><strong>ELI5:</strong> run every check we have. Fall back to v0.14.6 if anything regresses.</div>
+  <div class="phase-steps">typecheck:all          → 8 packages clean
+test                   → 1424 existing + ~13 new = ~1437 passes
+lint                   → only pre-existing warnings
+build:full             → chrome + firefox at 0.14.7
+e2e:agent              → same/better profile vs v0.14.6 baseline
+manual QA              → dist/qa-v0.14.7 — user-driven end-to-end check
+                         (mixed-payload dApp sim is the new thing to look at)</div>
+</div>
+
+<h2>Tests — granular</h2>
+<div class="grid">
+  <div class="card">
+    <div class="title">Existing tests touched</div>
+    <table>
+      <thead><tr><th>File</th><th>Change</th></tr></thead>
+      <tbody>
+        <tr><td><code>fast-path.test.ts</code></td><td>+10 cases (8 mixed + 2 init detection)</td></tr>
+        <tr><td><code>operation-planner.test.ts</code></td><td>+2 cases (priority fees plumbing)</td></tr>
+        <tr><td><code>nulo-account.test.ts</code></td><td>+1 regression case</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="card">
+    <div class="title">New test files</div>
+    <table>
+      <thead><tr><th>File</th><th>Cases</th></tr></thead>
+      <tbody>
+        <tr><td><code>fee-options.test.ts</code></td><td><span class="num">6</span> — covers maxFees default, priority fees default, forEstimation true/false, malformed inputs</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<details>
+  <summary>Phase 3 fast-path.test.ts new cases (10 total)</summary>
+  <div style="padding: 8px 0;">
+    <div class="test-pill">1. prefix + private remainder splits correctly</div>
+    <div class="test-pill">2. prefix + public-non-static remainder splits correctly</div>
+    <div class="test-pill">3. no optimizable prefix → straight to standard</div>
+    <div class="test-pill">4. PXE synced-header preferred over node head</div>
+    <div class="test-pill">5. PXE synced-header failure → fall back to node head</div>
+    <div class="test-pill">6. standard-arm wrapped with appCallOffset=1</div>
+    <div class="test-pill">7. pure-prefix → upstream buildMergedSimulationResult(_, null) returns optimized-only</div>
+    <div class="test-pill">8. mixed merge preserves stats + concat order</div>
+    <div class="test-pill">9. requiresInitialization=true + remainder → standard path</div>
+    <div class="test-pill">10. requiresInitialization=true + pure prefix → fast path STILL runs</div>
+  </div>
+</details>
+
+<div class="card" style="margin-top: 12px;">
+  <div class="title">E2E impact</div>
+  <div class="tldr">
+    <strong>Zero e2e file changes.</strong> Existing tests in <code>network/sim-methods.test.ts</code>, <code>network/connect-dapp.test.ts</code>, <code>network/transfers.test.ts</code>, and <code>network/cap-request-*.test.ts</code> all exercise simulateTx flows and will implicitly cover the mixed path. The verification step is to re-run <code>bun run e2e:agent</code> on the rebuilt branch and compare failure profile against v0.14.6 baseline (6-9 load-flakes range).
+  </div>
+</div>
+
+<h2>Codex's concerns and their resolutions</h2>
+<div class="quote">
+  <span class="who">codex round 2 (session 019e183f, response.md)</span>
+  "The planner only carries <code>maxFeesPerGas</code> through a custom <code>FeeOptions</code> shim, dropping priority fees entirely in <code>operation-planner.ts:207</code>. So <em>'mirrors upstream'</em> is true, but <em>'matches pre-8c Nulo behavior'</em> is not. That can matter if a dApp sets fee fields or <code>skipFeeEnforcement: false</code>."
+  <br/><strong>Resolution:</strong> Added Phase 2c — full plumbing through schema + planner + builder.
+</div>
+<div class="quote">
+  <span class="who">codex round 2</span>
+  "Upstream's scalar offset model cannot express 'go to <code>nested[1]</code>, then descend again'. Instead, normalize the standard PXE result before merge."
+  <br/><strong>Resolution:</strong> Codex's own v2 review agreed deferral is fine — first-tx-mixed is an edge case (dApp simulating non-pure payload before any tx has been sent). Tracked as follow-up.
+</div>
+<div class="quote">
+  <span class="who">codex round 3 (response-1.md, post-consolidation)</span>
+  "<code>requiresMulticallInit()</code> reaches through <code>account.instance.initializationHash</code>, but <code>IAccountContract</code> does not expose <code>instance</code>. As written, that plan does not type-check."
+  <br/><strong>Resolution:</strong> Added <code>IAccountContract.requiresInitialization(node)</code> method. Clean interface boundary.
+</div>
+<div class="quote">
+  <span class="who">codex round 3</span>
+  "Extending <code>DefaultAccountEntrypointOptions</code> with <code>gasSettings</code> is the wrong seam. Gas settings are not entrypoint options."
+  <br/><strong>Resolution:</strong> Separate <code>gasSettings</code> parameter on <code>buildTxExecutionRequest</code>.
+</div>
+<div class="quote">
+  <span class="who">codex round 3</span>
+  "Rehydrating a fully-private or non-optimizable payload just to throw it away is wasted work and recreates the double-parse you were trying to avoid."
+  <br/><strong>Resolution:</strong> Renamed <code>tryRehydrateCalls</code> → <code>rehydrateOptimizablePrefix</code> with data-only boundary scan before rehydration.
+</div>
+
+<h2>Risks &amp; rollback</h2>
+<table>
+  <thead><tr><th>Risk</th><th>Severity</th><th>Mitigation</th></tr></thead>
+  <tbody>
+    <tr><td><code>appCallOffset = 1</code> wrong for some Nulo case</td><td><span class="tag warn">HIGH</span></td><td>First-tx multicall excluded via <code>requiresInitialization</code>. Unit test pins wrap behavior.</td></tr>
+    <tr><td>Mixed merge return ordering bug</td><td><span class="tag warn">MED</span></td><td>Test #8 explicitly pins concat order.</td></tr>
+    <tr><td>Fee unification breaks existing flows</td><td><span class="tag warn">MED</span></td><td><code>skipFeeEnforcement: true</code> default unchanged. nulo-account regression test.</td></tr>
+    <tr><td><code>FeeOptions</code> schema bump breaks consumer</td><td><span class="tag">LOW</span></td><td><code>maxPriorityFeesPerGas?</code> is optional.</td></tr>
+    <tr><td><code>getSyncedBlockHeader</code> adds latency</td><td><span class="tag">LOW</span></td><td>RTT &lt;&lt; saved kernel-sim cost.</td></tr>
+    <tr><td>First-tx mixed silently falls back</td><td><span class="tag">LOW</span></td><td>Tracked follow-up; codex agreed deferral fine for v0.14.7.</td></tr>
+  </tbody>
+</table>
+
+<div class="card" style="margin-top: 14px; border-color: var(--ok);">
+  <div class="title" style="color: var(--ok);">Rollback</div>
+  <div class="tldr">
+    <code>git reset --hard 0ee26eb9</code> on this branch → v0.14.6 (the user-validated checkpoint saved in memory at <code>project_p1p3_safe_checkpoint.md</code>).
+    The <code>feat/p1-p3-implementation</code> branch stays untouched as the always-available baseline.
+  </div>
+</div>
+
+<h2>Out of scope (deliberate)</h2>
+<table>
+  <tbody>
+    <tr><td>First-tx multicall normalizer</td><td>Edge case; route to standard path. Future work if a real use case emerges.</td></tr>
+    <tr><td><code>accountFeePaymentMethodOptions</code> unification</td><td>Nulo uses different enum (<code>NuloFeePaymentMethod</code>). Out of scope; only gas-settings completion is unified.</td></tr>
+    <tr><td>Nulo-local merge helper</td><td>Dropped per user preference. Use upstream <code>buildMergedSimulationResult</code> directly.</td></tr>
+    <tr><td>Embedded-FPC 1× min fees override</td><td>Kept as-is in <code>execution/service.ts:1603</code>. Nulo-specific budget constraint.</td></tr>
+    <tr><td>Data migrations for <code>FeeOptions.maxPriorityFeesPerGas</code> field</td><td>None needed — optional field, no production users to migrate. Memory: <code>feedback_no_data_migrations.md</code>.</td></tr>
+  </tbody>
+</table>
+
+<div class="footer">
+  Plan files (in <code>implementations-plan/pr-8c-mixed-and-fee/</code>):
+  <ul style="margin: 6px 0 0; padding-left: 20px;">
+    <li><code>my-plan.md</code> — Claude's draft v1</li>
+    <li><code>codex-plan.md</code> — Codex's independent draft meta-doc</li>
+    <li><code>consolidated.md</code> — final plan v2 (this HTML mirrors that)</li>
+    <li><code>plan.html</code> — this file</li>
+  </ul>
+  Codex iteration: session <code>019e183f-3357-79f1-9673-27d5b792b6b2</code> (3 rounds, final verdict <em>nit-fix-then-ship</em>, all nits applied).
+</div>
+
+</div>
+</body>
+</html>

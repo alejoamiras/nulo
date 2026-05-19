@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dependency hardening — plan walkthrough</title>
+<style>
+  :root {
+    --bg: #faf8f4;
+    --ink: #1d1d1f;
+    --muted: #5a5a62;
+    --paper: #ffffff;
+    --rule: #e8e6e0;
+    --accent: #c0392b;
+    --accent-soft: #fcecea;
+    --green: #2d6a4f;
+    --green-soft: #e6f0eb;
+    --amber: #b07d20;
+    --amber-soft: #faf0d9;
+    --code-bg: #f2efe9;
+    --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.04);
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 860px; margin: 0 auto; padding: 56px 28px 96px; }
+  header.hero {
+    margin-bottom: 40px;
+    padding-bottom: 28px;
+    border-bottom: 1px solid var(--rule);
+  }
+  header.hero h1 {
+    margin: 0 0 6px;
+    font-size: 30px;
+    letter-spacing: -0.01em;
+    font-weight: 700;
+  }
+  header.hero .sub {
+    color: var(--muted);
+    font-size: 16px;
+  }
+  header.hero .meta {
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--muted);
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+  header.hero .meta span::before { content: "·"; margin-right: 18px; color: var(--rule); }
+  header.hero .meta span:first-child::before { content: ""; margin: 0; }
+
+  section { margin: 36px 0; }
+  h2 {
+    font-size: 22px;
+    margin: 0 0 16px;
+    letter-spacing: -0.01em;
+    font-weight: 600;
+  }
+  h2 .tag {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    padding: 3px 8px;
+    border-radius: 999px;
+    vertical-align: middle;
+    margin-left: 10px;
+    letter-spacing: 0.02em;
+  }
+  h3 { font-size: 17px; margin: 0 0 6px; font-weight: 600; }
+  p { margin: 0 0 12px; }
+  ul { padding-left: 22px; margin: 0 0 12px; }
+  li { margin: 4px 0; }
+  code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.92em;
+  }
+
+  .pitch {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+    box-shadow: var(--shadow);
+  }
+  .pitch p:last-child { margin-bottom: 0; }
+  .pitch ol { margin: 8px 0 0 0; padding-left: 22px; }
+  .pitch ol li { margin: 6px 0; }
+
+  .threat {
+    background: var(--accent-soft);
+    border-left: 4px solid var(--accent);
+    border-radius: 6px;
+    padding: 16px 20px;
+  }
+  .threat p:last-child { margin-bottom: 0; }
+  .threat strong { color: var(--accent); }
+
+  .phase {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 18px 22px;
+    margin: 14px 0;
+    box-shadow: var(--shadow);
+  }
+  .phase-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+  .phase-num {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    color: var(--muted);
+    background: var(--code-bg);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+  }
+  .phase-title { font-size: 17px; font-weight: 600; margin: 0; }
+  .risk { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+  .risk-low { background: var(--green-soft); color: var(--green); }
+  .risk-mid { background: var(--amber-soft); color: var(--amber); }
+  .risk-high { background: var(--accent-soft); color: var(--accent); }
+
+  .eli5-label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; display: block; }
+
+  .why { color: var(--muted); font-size: 15px; }
+
+  .question {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--amber);
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin: 12px 0;
+  }
+  .question .q { font-weight: 600; margin-bottom: 6px; }
+  .question .context { color: var(--muted); font-size: 14px; margin-bottom: 8px; }
+  .question .options { margin: 8px 0; }
+  .question .recommend {
+    margin-top: 8px;
+    font-size: 14px;
+    background: var(--green-soft);
+    color: var(--green);
+    padding: 8px 12px;
+    border-radius: 6px;
+    display: inline-block;
+  }
+  .question .recommend strong { font-weight: 600; }
+
+  .defer-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .defer-table th, .defer-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--rule); font-size: 14px; vertical-align: top; }
+  .defer-table th { background: var(--code-bg); font-weight: 600; }
+  .defer-table tr:last-child td { border-bottom: none; }
+
+  .footer { margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 13px; }
+  .footer code { font-size: 12px; }
+
+  .toc {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 18px 22px;
+    margin: 24px 0 32px;
+  }
+  .toc h3 { margin-bottom: 8px; }
+  .toc ol { margin: 0; padding-left: 22px; columns: 2; column-gap: 24px; font-size: 14px; }
+  .toc ol li { margin: 3px 0; break-inside: avoid; }
+  .toc a { color: var(--ink); text-decoration: none; border-bottom: 1px dotted var(--rule); }
+  .toc a:hover { border-bottom-color: var(--muted); }
+
+  @media (max-width: 600px) {
+    .page { padding: 32px 18px 64px; }
+    header.hero h1 { font-size: 24px; }
+    .toc ol { columns: 1; }
+  }
+
+  @media print {
+    body { background: white; }
+    .pitch, .phase, .question, .toc { box-shadow: none; border: 1px solid #ccc; break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <h1>Hardening our dependencies before something bites us</h1>
+    <p class="sub">A plain-English walkthrough of the dependency-hardening plan, the decisions you need to make, and what we're explicitly choosing to skip.</p>
+    <div class="meta">
+      <span>Plan file: <code>implementations-plan/dependency-hardening/plan.md</code></span>
+      <span>10 PRs (11 if Zod 4 in)</span>
+      <span>Audited by Opus 4.7 + Codex</span>
+      <span>14-day age gate</span>
+      <span>Aztec + Renovate descoped</span>
+    </div>
+  </header>
+
+  <section>
+    <div class="pitch">
+      <h2 style="margin-top:0">The 30-second pitch</h2>
+      <p>Our dependencies are old, and the npm world has had a rough year. Two structural changes do most of the work:</p>
+      <ol>
+        <li><strong>Add a 14-day "cooling-off" window</strong> on new package versions. If a maintainer's npm account gets compromised and someone publishes a poisoned version, we don't install it for two weeks — way longer than the typical window for npm/security researchers to catch and pull it.</li>
+        <li><strong>Make our lockfile reviewable.</strong> Today it's a binary blob we can't read in PRs. After Phase 0, every dependency change shows up as a normal text diff that you can actually review for sketchy package names or suspicious URLs.</li>
+      </ol>
+      <p>Everything else (the version bumps themselves) is just executing on the staleness backlog — phased so any single PR is small enough to revert. Renovate automation was in the plan but you've deferred it; the config is preserved in the plan file's §13 for whenever you want it.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Why this matters now</h2>
+    <div class="threat">
+      <p><strong>March 2026: axios got compromised.</strong> Someone stole a maintainer's npm token and published two poisoned versions. Within 2 seconds of running <code>npm install</code>, a cross-platform RAT (remote access trojan) was phoning home to a command-and-control server. Anyone whose CI happened to pull during the publish window — even briefly — was breached.</p>
+      <p><strong>September 2025: chalk/debug.</strong> Same shape, different packages — both extremely common dependencies. Caught within ~6 hours because someone was paying attention. The cost to the ecosystem was still significant.</p>
+      <p>Bun shipped <code>minimumReleaseAge</code> in October 2025 specifically as the defense for this attack pattern. We're going to use it with a <strong>14-day window</strong> — long enough that both attacks above (caught in ~6h and inside the publish window respectively) would be blocked with significant margin.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>What we're actually doing <span class="tag">10 PRs</span></h2>
+    <p>Each phase is one pull request. We stop after every phase and validate. If anything breaks, we revert one commit.</p>
+
+    <div class="toc">
+      <h3>Phase index</h3>
+      <ol>
+        <li><a href="#p0">Phase 0 — Lockfile migration + pin Bun</a></li>
+        <li><a href="#p1">Phase 1 — Supply-chain gate + audit</a></li>
+        <li><a href="#p2">Phase 2 — Safe within-range bumps</a></li>
+        <li><a href="#p5a">Phase 5a — Vitest 4 + landing align</a></li>
+        <li><a href="#p5b">Phase 5b — Vite 8 (with polyfill revert path)</a></li>
+        <li><a href="#p6a">Phase 6a — TypeScript range align</a></li>
+        <li><a href="#p6b">Phase 6b — TypeScript 6 (if ready)</a></li>
+        <li><a href="#p7a">Phase 7 — Smaller majors (jsdom, puppeteer, focus-trap, plugins)</a></li>
+        <li><em>Phase 8a — Zod 4 (conditional on your call)</em></li>
+      </ol>
+      <p style="margin-top:14px; font-size:13px; color:var(--muted);">Phases 3 (Renovate) and 4 (Aztec) descoped per your directives. Numbering preserved so cross-references with the plan file stay stable. Renovate config draft saved in plan §13 for whenever you want it.</p>
+    </div>
+
+    <div class="phase" id="p0">
+      <div class="phase-head">
+        <span class="phase-num">Phase 0</span>
+        <h3 class="phase-title">Lockfile migration + pin Bun</h3>
+        <span class="risk risk-low">Low risk</span>
+      </div>
+      <span class="eli5-label">In English</span>
+      <p>Our <code>bun.lockb</code> file is a binary blob — you can't read what's in it on GitHub. We're converting it to a text file (<code>bun.lock</code>) so every future dependency change is reviewable. Same content, just readable. We're also pinning the version of Bun used in CI (currently set to "latest", which is a footgun).</p>
+      <p class="why"><strong>Why this is first:</strong> every later PR will touch the lockfile. If we don't migrate now, every dep PR is a binary-blob update we can't review. This unblocks everything.</p>
+    </div>
+
+    <div class="phase" id="p1">
+      <div class="phase-head">
+        <span class="phase-num">Phase 1</span>
+        <h3 class="phase-title">Supply-chain age gate + audit check</h3>
+        <span class="risk risk-low">Low risk</span>
+      </div>
+      <span class="eli5-label">In English</span>
+      <p>Create a <code>bunfig.toml</code> that tells Bun: "don't install packages that were published less than 14 days ago." Also add a <code>bun audit</code> step to CI that warns when a known vulnerability is present in any installed package.</p>
+      <p class="why"><strong>The trade-off:</strong> if a legit bug fix ships today, we don't see it for two weeks. If a malicious version ships today, we also don't see it for two weeks — by then it's been pulled. Aztec packages aren't in the allow-list (no carve-out today) because they're exact-pinned and not being bumped in this milestone, so the gate is moot for them anyway.</p>
+    </div>
+
+    <div class="phase" id="p2">
+      <div class="phase-head">
+        <span class="phase-num">Phase 2</span>
+        <h3 class="phase-title">Safe within-range bumps</h3>
+        <span class="risk risk-low">Low risk</span>
+      </div>
+      <span class="eli5-label">In English</span>
+      <p>Run <code>bun update</code> (just an update, no major-version jumps). About 17 packages bump to their newest patch/minor version. This is the boring part — same APIs, just newer bug fixes. One PR.</p>
+    </div>
+
+    <div class="phase" id="p3" style="background:var(--code-bg); border-style:dashed;">
+      <div class="phase-head">
+        <span class="phase-num">Phase 3</span>
+        <h3 class="phase-title">Renovate automation <em>(deferred per your call)</em></h3>
+        <span class="risk" style="background:var(--rule); color:var(--muted);">Out of scope</span>
+      </div>
+      <span class="eli5-label">Why it's here at all</span>
+      <p>Was going to add Renovate (a GitHub App) to open weekly dependency-update PRs, with grouping (vite + vitest together, codemirror together, etc.) and the same 14-day gate. You've deferred it; full config draft is preserved in <code>plan.md</code> §13 so we can land it later without re-designing.</p>
+    </div>
+
+    <div class="phase" id="p4-descoped" style="background:var(--code-bg); border-style:dashed;">
+      <div class="phase-head">
+        <span class="phase-num">Phase 4</span>
+        <h3 class="phase-title">Aztec invariant fixture + 4.2.0 → 4.2.1 patch <em>(descoped)</em></h3>
+        <span class="risk" style="background:var(--rule); color:var(--muted);">Out of scope</span>
+      </div>
+      <span class="eli5-label">Why it's here at all</span>
+      <p>This phase originally bundled (a) adding a class-id + address invariant fixture for <code>NuloAccount</code>, and (b) the Aztec 4.2.0 → 4.2.1 patch bump. Codex's audit caught that the existing crypto tests don't actually lock those values at the unit level, so a patch could silently break key derivation.</p>
+      <p class="why"><strong>Per your directive, all <code>@aztec/*</code> updates are out of scope for this milestone.</strong> The fixture goes with the bump (it's a prerequisite, not a standalone deliverable) — both come back as the entry point of a future Aztec milestone.</p>
+    </div>
+
+    <div class="phase" id="p5a">
+      <div class="phase-head">
+        <span class="phase-num">Phase 5a</span>
+        <h3 class="phase-title">Vitest 4 across the monorepo + fix landing</h3>
+        <span class="risk risk-mid">Medium risk</span>
+      </div>
+      <span class="eli5-label">In English</span>
+      <p>Bump Vitest (our unit test runner) from 3 to 4 everywhere. <code>landing</code> is currently <em>two majors behind</em> (vitest 2) — same PR catches it up. Walk each <code>vitest.config.ts</code> to remove legacy options.</p>
+      <p class="why"><strong>Why split from Vite 8:</strong> Codex's audit caught that vitest 4 doesn't actually require vite 8 (only vite ≥6). Splitting these two means if one breaks, we don't have to revert both.</p>
+    </div>
+
+    <div class="phase" id="p5b">
+      <div class="phase-head">
+        <span class="phase-num">Phase 5b</span>
+        <h3 class="phase-title">Vite 8 across the monorepo</h3>
+        <span class="risk risk-high">Higher risk</span>
+      </div>
+      <span class="eli5-label">In English</span>
+      <p>Bump Vite (our build tool) from 7 to 8. The risk is in the plugin stack — about 7 plugins need to be compatible.</p>
+      <p class="why"><strong>You flagged prior trouble with <code>vite-plugin-node-polyfills</code> in this combo.</strong> The plan now has an explicit revert path: build all three workspaces (extension, landing, playground) <em>plus</em> the Firefox manifest variant <em>plus</em> manual load-as-unpacked-extension smoke. If polyfills break anywhere, we revert this PR and stay on Vite 7. Phase 7e's polyfill plugin major then holds until upstream catches up. No half-shipped Vite 8 state.</p>
+    </div>
+
+    <div class="phase" id="p6a">
+      <div class="phase-head">
+        <span class="phase-num">Phase 6a</span>
+        <h3 class="phase-title">TypeScript range alignment</h3>
+        <span class="risk risk-low">Low risk</span>
+      </div>
+      <span class="eli5-label">In English</span>
+      <p>Today, five packages use TypeScript with a tilde range (<code>~5.9.2</code> — patch updates only) and three use a caret (<code>^5.9.2</code> — minor + patch updates). Unify to caret everywhere. No version actually moves; this just stops accidental drift.</p>
+    </div>
+
+    <div class="phase" id="p6b">
+      <div class="phase-head">
+        <span class="phase-num">Phase 6b</span>
+        <h3 class="phase-title">TypeScript 6 (only if vue-tsc supports it)</h3>
+        <span class="risk risk-mid">Medium risk</span>
+      </div>
+      <span class="eli5-label">In English</span>
+      <p>Bump TypeScript from 5 to 6 — but only if <code>vue-tsc</code> (our Vue type-checker) supports it. If it doesn't, we defer until it does.</p>
+    </div>
+
+    <div class="phase" id="p7a">
+      <div class="phase-head">
+        <span class="phase-num">Phase 7</span>
+        <h3 class="phase-title">Smaller majors, one PR each</h3>
+        <span class="risk risk-mid">Medium risk</span>
+      </div>
+      <span class="eli5-label">In English</span>
+      <p>Five PRs for the remaining single-major bumps: <code>jsdom</code> (test DOM env), <code>puppeteer</code> (e2e harness), <code>focus-trap</code> (popup focus management), some Vite plugins, and <code>unplugin-*</code> family. Each has a targeted test gate matched to what it could break.</p>
+      <p class="why">Small tooling (<code>globals</code>, <code>@commitlint/cli</code>) bundled into one PR to save round-trips.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Decisions still open</h2>
+    <p>Your previous reply locked: 14-day gate, drop Renovate, <code>@types/node</code> stays on 24, <code>bun audit</code> advisory, pin Bun 1.3.13, skip vue-router 5, Vite 8 careful path. Still pending:</p>
+
+    <div class="question">
+      <div class="q">A. Zod 4 — in or out?</div>
+      <div class="context">You asked if it's risky. My honest take: <strong>medium-risk but compartmentalized.</strong> ~10 files: messaging schemas, dApp RPC validators, content-script input validators, PXE messages, storage shape parsers. Main risks are (a) <code>.errors</code> shape changed (we may introspect it), (b) some methods renamed/removed, (c) <code>extension-messaging</code>'s optional zod peerDep needs to read <code>^3 || ^4</code> during the transition. Mitigations: <code>typecheck:all</code> catches signature drift; smoke e2e catches end-to-end RPC parse failures; the changes are schema-localized — no service logic moves.</div>
+      <div class="recommend"><strong>My recommendation:</strong> Pull in, as the LAST PR (after everything else is stable). Zod 3 is EOL eventually anyway.</div>
+    </div>
+
+    <div class="question">
+      <div class="q">B. TypeScript 6 — bump if vue-tsc supports it?</div>
+      <div class="context">TS 6.0 was released recently. Each major brings new strictness. The blocker is whether <code>vue-tsc</code> 4.x (our Vue type-checker) supports TS 6. If it does, we bump. If it lags, we defer.</div>
+      <div class="recommend"><strong>Recommended:</strong> Conditional bump. I'll verify <code>vue-tsc</code> compatibility before doing it.</div>
+    </div>
+
+    <div class="question">
+      <div class="q">C. Add <code>bun pm scan</code> alongside <code>bun audit</code>?</div>
+      <div class="context"><code>bun audit</code> queries npm advisories. <code>bun pm scan</code> is a separate tool that scans the entire installed lockfile for known-bad packages (different data source / different surface). Belt-and-suspenders.</div>
+      <div class="recommend"><strong>Recommended:</strong> Yes — add as a second advisory CI step. Cheap, different signal.</div>
+    </div>
+
+    <div class="question">
+      <div class="q">D. Write the CVE-on-Friday runbook into <code>SECURITY.md</code> in Phase 1?</div>
+      <div class="context">When a CVE drops for a package within the 14-day gate, we need a documented procedure (temp allow-list the package, install, follow-up PR removing the allow-list). Draft is in plan §12.</div>
+      <div class="recommend"><strong>Recommended:</strong> Yes — write it during Phase 1.</div>
+    </div>
+
+    <div class="question">
+      <div class="q">E. Q10 re-explained — out-of-scope CI hardening, in or out?</div>
+      <div class="context">These three issues aren't npm-dependency problems; they're CI pipeline supply-chain holes Codex's audit caught:
+        <ul>
+          <li><code>release.yml:228,241</code> uses <code>bunx --bun release-it@latest</code> — every release pulls newest <code>release-it</code> from npm. If compromised, our next release builds with poisoned code.</li>
+          <li><code>setup-aztec/action.yml:40</code> does <code>curl -fsSL ... | bash</code> for the Aztec installer — no checksum, no signature.</li>
+          <li><code>actionlint.yml:62</code> does the same <code>curl | bash</code> pattern for actionlint.</li>
+        </ul>
+        The question is: tackle these alongside this milestone, or park for a separate "CI pipeline hardening" follow-up?</div>
+      <div class="recommend"><strong>Recommended:</strong> Park. Different headspace, different validation pattern.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What we're explicitly NOT doing</h2>
+    <table class="defer-table">
+      <thead>
+        <tr><th>Skipped</th><th>Why</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>zod 3 → 4</code></td><td><strong>Pending your call.</strong> See decision A above. If "in," lands as the last PR.</td></tr>
+        <tr><td><code>vue-router 4 → 5</code></td><td>Per your directive — touches every page; the routing-plugin coexistence (vue-router + vite-plugin-pages) needs to settle first.</td></tr>
+        <tr><td><code>@types/node 24 → 25</code></td><td>Per your directive — stays on 24 to match Aztec/CI Node 24.</td></tr>
+        <tr><td><strong>All <code>@aztec/*</code> updates (including 4.2.0 → 4.2.1)</strong></td><td>Per your directive — separate Aztec milestone. The class-id + address invariant fixture is a prerequisite and comes back with it.</td></tr>
+        <tr><td>Renovate automation</td><td>Per your directive — config draft preserved in plan §13 for whenever you want it.</td></tr>
+        <tr><td><code>@wonderland/aztec-fee-payment</code> npm migration</td><td>Upstream concern. Currently uses an immutable GitHub release URL — that's already strong.</td></tr>
+        <tr><td>Branch protection changes</td><td>Repo is private again. Re-evaluate when it flips back to public.</td></tr>
+        <tr><td>SLSA provenance / lockfile attestation</td><td>Production-readiness gold-plating. Own milestone.</td></tr>
+        <tr><td><code>release-it@latest</code>, curl-installed Aztec CLI</td><td>Real supply-chain holes (Codex caught these) but outside dep-tree scope. Follow-up milestone.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Workflow from here</h2>
+    <ol>
+      <li><strong>You read this</strong> and reply with any decisions you want to change.</li>
+      <li><strong>I implement</strong> the 10 PRs (or 11 if Zod 4 is in), validating after each per the test matrix in the plan.</li>
+      <li><strong>Codex reviews the implementation</strong> when phases are complete.</li>
+      <li><strong>I address review feedback</strong> if anything material surfaces.</li>
+      <li><strong>You merge</strong> the stack into <code>dev</code>.</li>
+    </ol>
+  </section>
+
+  <div class="footer">
+    <p>Detailed plan: <code>implementations-plan/dependency-hardening/plan.md</code></p>
+    <p>Drafted by Claude (Opus 4.7), reviewed in parallel by a second Opus 4.7 reviewer and Codex CLI. Audit deltas listed in §0 of the plan.</p>
+  </div>
+
+</div>
+</body>
+</html>

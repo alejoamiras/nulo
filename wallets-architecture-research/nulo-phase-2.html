@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Nulo Phase 2 — Durable jobs target architecture</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel2: #1e252e;
+    --border: #2a323d;
+    --text: #d1d5db;
+    --muted: #8b949e;
+    --accent: #9b59ff;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --err: #f85149;
+    --info: #58a6ff;
+    --gold: #f1c40f;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); margin: 0; padding: 0; font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 24px 64px; }
+
+  nav.top {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  nav.top .home { color: var(--accent); text-decoration: none; font-weight: 600; }
+  nav.top .home:hover { text-decoration: underline; }
+  nav.top a.tab { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 4px; font-size: 13px; }
+  nav.top a.tab:hover { color: var(--text); background: var(--panel); }
+  nav.top a.tab.current { color: var(--text); background: var(--panel2); border: 1px solid var(--border); }
+  nav.top .sep { color: var(--muted); }
+
+  h1 { font-size: 28px; margin: 0 0 8px; color: #fff; letter-spacing: -0.5px; }
+  h2 { font-size: 20px; margin: 36px 0 12px; color: #fff; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16px; margin: 20px 0 8px; color: var(--accent); }
+
+  .tag {
+    display: inline-block; font-family: var(--mono); font-size: 11px;
+    padding: 2px 8px; border-radius: 4px; background: var(--panel2); color: var(--muted);
+    margin-right: 6px; border: 1px solid var(--border);
+  }
+  .tag.ok { color: var(--ok); border-color: var(--ok); }
+  .tag.warn { color: var(--warn); border-color: var(--warn); }
+  .tag.accent { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .prov {
+    display: inline-block; font-family: var(--mono); font-size: 10px;
+    padding: 1px 6px; border-radius: 3px; margin-left: 6px;
+    background: var(--panel2); color: var(--muted); border: 1px solid var(--border);
+  }
+  .prov.chat { color: var(--accent); border-color: var(--accent); }
+
+  .grid { display: grid; gap: 16px; }
+  .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 900px) { .grid.cols-2 { grid-template-columns: 1fr; } }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; }
+  .card .title { font-weight: 600; color: #fff; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .card.accent-border { border-left: 3px solid var(--accent); }
+  .card.warn-border { border-left: 3px solid var(--warn); }
+
+  figure.ascii {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin: 14px 0;
+    overflow-x: auto;
+  }
+  figure.ascii figcaption {
+    font-size: 13px; color: var(--muted); font-style: italic; margin-bottom: 10px;
+  }
+  figure.ascii pre {
+    font: 12px/1.35 var(--mono);
+    color: var(--text);
+    margin: 0;
+    white-space: pre;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th, td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; background: var(--panel); }
+  td.mono { font-family: var(--mono); font-size: 12px; }
+  td.center { text-align: center; }
+
+  .toc {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 12px 16px; margin: 16px 0; font-size: 13px;
+  }
+  .toc strong { color: var(--text); }
+  .toc a { color: var(--info); text-decoration: none; margin-right: 12px; }
+  .toc a:hover { text-decoration: underline; }
+
+  .breadcrumb { font-size: 12px; color: var(--muted); margin: 0 0 16px; }
+  .breadcrumb a { color: var(--info); text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+
+  code { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+
+  .callout {
+    border-left: 3px solid var(--info);
+    background: var(--panel);
+    padding: 12px 16px;
+    margin: 14px 0;
+    border-radius: 0 6px 6px 0;
+    font-size: 14px;
+  }
+  .callout strong { color: var(--info); }
+
+  .footer { font-size: 12px; color: var(--muted); margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .footer a { color: var(--info); }
+</style>
+</head>
+<body>
+<nav class="top" aria-label="Primary">
+  <a href="index.html" class="home">Wallet Architecture Research</a>
+  <span class="sep">/</span>
+  <a href="index.html" class="tab">Overview</a>
+  <a href="wallets/rabby.html" class="tab">Rabby</a>
+  <a href="wallets/metamask.html" class="tab">MetaMask</a>
+  <a href="wallets/grego.html" class="tab">Grego</a>
+  <a href="wallets/nulo.html" class="tab">Nulo Today</a>
+  <a href="nulo-phase-2.html" class="tab current">Phase 2</a>
+  <a href="nulo-phase-2-plus.html" class="tab">Phase 2+</a>
+  <a href="nulo-maximalist.html" class="tab">Maximalist</a>
+</nav>
+
+<div class="wrap">
+
+<p class="breadcrumb"><a href="index.html">Overview</a> &nbsp;›&nbsp; Nulo Phase 2</p>
+
+<h1>Nulo Phase 2 — durable jobs target architecture</h1>
+<p style="color: var(--muted); margin-top: 0;">
+  What "send a tx" looks like when we stop fighting the SW and start designing around it dying.
+  The single biggest architectural shift surfaced by the comparative study, and the work that has to land before opening the door to real users.
+</p>
+
+<p style="margin-top: 14px;">
+  <span class="tag ok">SHIPPED</span>
+  Phase 2 closed 2026-05-13 (see <code>implementations-plan/phase-2/summary.html</code>).
+  Phase 2+ <strong>Bundle 1</strong> (production hardening — entity-storage resilience, GC, observability) shipped as <code>v0.15.7</code> on 2026-05-15.
+  Phase 2+ <strong>Phase A</strong> (token imports through the journal + multi-in-flight card render fix) shipped as <code>v0.16.0</code> on the same day.
+  See the <a href="nulo-phase-2-plus.html">Phase 2+</a> page for what's still aspirational (Phase B graduations of remaining single-shot popup ops).
+</p>
+
+<div class="toc" aria-label="On this page">
+  <strong>On this page:</strong>
+  <a href="#thesis">Thesis</a>
+  <a href="#side-by-side">Today vs Phase 2</a>
+  <a href="#diagram">Target architecture</a>
+  <a href="#lifecycle">Send-a-tx lifecycle</a>
+  <a href="#shopping">Shopping list</a>
+  <a href="#carries">Carries to Phase 2+</a>
+  <a href="#borrowed">Borrowed from whom</a>
+  <a href="#non-goals">Non-goals</a>
+</div>
+
+<h2 id="thesis">Thesis <span class="prov chat">post-merge calibration</span></h2>
+
+<p>
+  Aztec proofs take seconds to minutes. The current popup → SW execution path defaults to a 60-second <code>ServiceClient</code> timeout. Healthy proofs routinely outrun that. "Timeout" is not "cancellation" — the SW keeps proving while the popup shows failure. PXE concurrency is globally serialized; in-flight prove state is not persisted; there is no <code>chrome.alarms</code> wake-up to keep us ready for incoming dApp messages between popup sessions.
+</p>
+
+<p>
+  Phase 2's premise: <strong>stop pretending the SW will stay alive</strong>. Treat any in-flight job that survives the worker as a <em>feature</em>, not a corner case. Submit jobs that return immediately with a <code>jobId</code>. Persist state aggressively. Subscribe to job state from the popup, not via blocking calls. Wire <code>AbortController</code> through prove and sim. Partition PXE concurrency per <code>(profileId, chainId)</code> so different chains don't block each other. Use <code>chrome.alarms</code> to resume work on cold boot. Use <code>LazyListener</code> so events that fire during initialization don't get lost.
+</p>
+
+<h2 id="side-by-side">Side-by-side — today vs Phase 2 <span class="prov chat">contrast</span></h2>
+
+<div class="grid cols-2">
+  <div class="card warn-border">
+    <div class="title">Today (master @ v0.14.9)</div>
+    <ul>
+      <li>60s <code>ServiceClient</code> timeout (90s offscreen)</li>
+      <li>Popup blocks on the prove call</li>
+      <li>Global <code>ReadWriteGuard</code> on PXE</li>
+      <li>No <code>AbortController</code> in prove path</li>
+      <li>No mid-prove state persisted</li>
+      <li>Heartbeat keeps SW alive only while popup is open</li>
+      <li>Cold boot of dApp message = re-init BB-WASM (~5-10s)</li>
+    </ul>
+    <p style="color: var(--warn); margin-top: 12px;">
+      <strong>Visible failure mode:</strong> popup says "Simulation failed, transaction not sent" while the chain confirms the tx. The 60s wins the race against a longer proof; UI lies.
+    </p>
+  </div>
+
+  <div class="card accent-border">
+    <div class="title">Phase 2 target</div>
+    <ul>
+      <li><code>submitJob()</code> returns immediately with a <code>jobId</code></li>
+      <li>Popup subscribes; never blocks</li>
+      <li>Per-<code>(profileId, chainId)</code> PXE concurrency</li>
+      <li><code>AbortController</code> wired through prove and sim</li>
+      <li>Job state persisted on every transition</li>
+      <li><code>chrome.alarms</code> wakes SW on cold boot to resume work</li>
+      <li><code>LazyListener</code> buffers events fired pre-init</li>
+    </ul>
+    <p style="color: var(--accent); margin-top: 12px;">
+      <strong>What changes for the user:</strong> closing the popup mid-tx is safe. The proof keeps going. Re-open the popup; subscribe to the same <code>jobId</code>; pick up where you left off.
+    </p>
+  </div>
+</div>
+
+<h2 id="diagram">Target architecture <span class="prov chat">design</span></h2>
+
+<figure class="ascii" aria-label="Phase 2 target architecture: popup submits jobs to SW which holds a JobRegistry mapping jobId to persisted state; chrome.alarms re-arms on cold boot; LazyListener buffers boot events; AbortController plumbed per jobId; PXEConcurrencyManager scopes locks per profile and chain; offscreen runs PXE with per-job signal propagation">
+  <figcaption>The full Phase 2 runtime. Popup submits jobs and subscribes; the SW holds the durable state and dispatches work to the offscreen PXE. Each piece labeled with its source pattern.</figcaption>
+  <pre>   ┌─────────────────┐
+   │   POPUP         │      submitJob(intent) → jobId
+   │                 │    ◄──────────────────────────────┐
+   │                 │    subscribeJob(jobId) → state  ◄─┤
+   │                 │      ▲                            │
+   └────────┬────────┘      │ never blocks. popup can   │
+            │               │ close, re-open, observe.   │
+            │               │                            │
+            │               │                            │
+   ┌────────▼─────────────────┴───────────────────────────┴────────────┐
+   │   SW (MV3)                                                        │
+   │                                                                   │
+   │   ┌──────────────────┐    ┌────────────────────────────────┐     │
+   │   │ JobRegistry      │    │ chrome.alarms                  │     │
+   │   │                  │    │  (re-arm on cold boot to       │     │
+   │   │  Map&lt;jobId,      │◄───┤   resume pending jobs)         │     │
+   │   │   Job state&gt;     │    └────────────────────────────────┘     │
+   │   │                  │                                            │
+   │   │   pending        │    ┌────────────────────────────────┐     │
+   │   │   simulating     │    │ LazyListener (boot buffer)     │     │
+   │   │   awaiting-user  │◄───┤  events that fire pre-init     │     │
+   │   │   proving        │    │  replay when ready             │     │
+   │   │   submitting     │    └────────────────────────────────┘     │
+   │   │   succeeded      │                                            │
+   │   │   failed         │    ┌────────────────────────────────┐     │
+   │   │   cancelled      │◄───┤ AbortController per jobId      │     │
+   │   │                  │    │  popup.cancelJob → signal      │     │
+   │   │  Each transition │    │  propagates into PXE prove     │     │
+   │   │  persisted to    │    └────────────────────────────────┘     │
+   │   │  storage.local   │                                            │
+   │   │   + IDB backup   │    ┌────────────────────────────────┐     │
+   │   │                  │◄───┤ PXEConcurrencyManager          │     │
+   │   └──────────────────┘    │  per-(profileId, chainId)      │     │
+   │                           │  lock — reads parallel,        │     │
+   │                           │  writes serialized within scope│     │
+   │                           │  (today: ONE global lock)      │     │
+   │                           └────────────────────────────────┘     │
+   └───────────────────────────────────────────┬───────────────────────┘
+                                               │
+                                               │  job tasks dispatch
+                                               ▼
+                                  ┌─────────────────────────────┐
+                                  │   OFFSCREEN                 │
+                                  │   PXE + BB-WASM             │
+                                  │                             │
+                                  │  proveTx({ jobId, signal }) │
+                                  │  simulateTx(...)            │
+                                  │  per-job tracing            │
+                                  └─────────────────────────────┘</pre>
+</figure>
+
+<h2 id="lifecycle">Send-a-tx lifecycle — the state machine <span class="prov chat">design</span></h2>
+
+<figure class="ascii" aria-label="Lifecycle of a send-a-tx job: PENDING then SIMULATING then AWAITING_USER then PROVING then SUBMITTING then either SUCCEEDED or FAILED or CANCELLED; popup observes via subscribeJob and closing the popup mid-prove does not abort the work">
+  <figcaption>What happens when a dApp asks Nulo to send a transaction. Each state is persisted; closing the popup mid-prove no longer aborts the work.</figcaption>
+  <pre>  dApp / popup
+       │
+       │  submitJob({ kind:"aztec_sendTx", payload, opts })
+       ▼
+  SW JobRegistry.create()
+       │  status=PENDING; persist; return jobId
+       ▼
+  ┌────────────────────────────────────────────────┐
+  │ status=SIMULATING                              │
+  │  → simulate (with abort signal)                │
+  │  → write result fields to job state            │
+  └────────┬───────────────────────────────────────┘
+           │
+           ▼
+  ┌────────────────────────────────────────────────┐
+  │ status=AWAITING_USER                           │
+  │  → SW opens execute window with jobId          │
+  │  → user can: approve / reject / close window   │
+  │  → popup closing does NOT cancel; just stops   │
+  │    observing                                    │
+  └────────┬───────────────────────────────────────┘
+           │  user clicks Approve
+           ▼
+  ┌────────────────────────────────────────────────┐
+  │ status=PROVING                                 │
+  │  → offscreen.proveTx({jobId, signal})          │
+  │  → popup can close; SW keeps working           │
+  │  → if SW dies: chrome.alarms wakes it back up; │
+  │    JobRegistry sees status=PROVING; calls      │
+  │    resumeProve()                               │
+  └────────┬───────────────────────────────────────┘
+           │
+           ▼
+  ┌────────────────────────────────────────────────┐
+  │ status=SUBMITTING → SUCCEEDED                   │
+  │ or                                              │
+  │ status=FAILED (with reason) / CANCELLED         │
+  └────────────────────────────────────────────────┘
+
+  Popup observes via subscribeJob(jobId). Renders status from registry.
+  Closing popup mid-prove no longer aborts the work.</pre>
+</figure>
+
+<h2 id="shopping">Shopping list <span class="prov chat">scope estimate</span></h2>
+
+<p>
+  Eight focused items, ordered by dependency. Realistic total: <strong>3-6 weeks</strong> of focused work.
+</p>
+
+<table aria-label="Phase 2 shopping list with estimates and dependencies">
+  <thead>
+    <tr><th>#</th><th>Item</th><th>Estimate</th><th>Depends on</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="center">1</td><td><strong>JobRegistry primitive</strong> — state machine + persist</td><td class="mono">~1 week</td><td class="mono">none</td></tr>
+    <tr><td class="center">2</td><td><code>AbortController</code> plumbed through prove / sim</td><td class="mono">~2-3 days</td><td class="mono">(1)</td></tr>
+    <tr><td class="center">3</td><td><strong>Execute window</strong> — refactor from blocking await to subscribe-by-jobId</td><td class="mono">~1 week</td><td class="mono">(1)</td></tr>
+    <tr><td class="center">4</td><td><code>chrome.alarms</code> wake-up + resume policy</td><td class="mono">~3-4 days</td><td class="mono">(1)</td></tr>
+    <tr><td class="center">5</td><td><code>LazyListener</code> for SW boot event buffering</td><td class="mono">~2-3 days</td><td class="mono">none</td></tr>
+    <tr><td class="center">6</td><td><code>PXEConcurrencyManager</code> — per-(profileId, chainId) lock</td><td class="mono">~3-4 days</td><td class="mono">(1)</td></tr>
+    <tr><td class="center">7</td><td>IDB backup for unrecoverable state</td><td class="mono">~3 days</td><td class="mono">none</td></tr>
+    <tr><td class="center">8</td><td>Versioned migrations framework</td><td class="mono">~1 week</td><td class="mono">(7)</td></tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <strong>The single most valuable PR:</strong> items 1-3 together. JobRegistry + AbortController + subscribe-by-jobId in the execute window. Unblocks every other production concern. Even without 4-8, SW-death recovery improves immediately because state is persisted.
+</div>
+
+<h2 id="carries">Carries to Phase 2+ — design choices Phase 2 must make <span class="prov chat">forward compatibility</span></h2>
+
+<p>
+  Phase 2 and <a href="nulo-phase-2-plus.html">Phase 2+</a> are designed to be implementable as separate lifts: ship Phase 2, run it in production, then come back for Phase 2+ if real traffic shows the hardening is needed. <strong>Splitting works because Phase 2+ is mostly additive on top of Phase 2 — but only if Phase 2 makes a small handful of forward-looking design choices.</strong>
+</p>
+
+<p>
+  None of these are extra work. They're design choices, each a few lines. If Phase 2 makes them, Phase 2+ slots in as composition over replacement. If Phase 2 burns these bridges, Phase 2+ becomes a refactor.
+</p>
+
+<table aria-label="Five forward-looking design choices Phase 2 should make to keep Phase 2+ unblocked">
+  <thead>
+    <tr><th>#</th><th>Carry</th><th>Why it matters for Phase 2+</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="center">1</td>
+      <td>Tag every job with <code>(origin, profileId, kind)</code> at create-time</td>
+      <td>Phase 2 doesn't use the metadata, but Phase 2+ needs it for fairness caps and per-origin rate limiting. Adding it later means touching every job-create callsite.</td>
+    </tr>
+    <tr>
+      <td class="center">2</td>
+      <td>Don't delete terminal jobs; keep them with a flag or long TTL</td>
+      <td>Phase 2+ tombstones and idempotency dedup both resolve to an existing terminal jobId. Deleting them in Phase 2 means Phase 2+ needs a schema migration to bring them back.</td>
+    </tr>
+    <tr>
+      <td class="center">3</td>
+      <td>Subscribe path uses <code>Map&lt;jobId, Observer[]&gt;</code> from day one</td>
+      <td>Even if only one observer is supported at runtime in Phase 2, the data shape allows multi-observer attach later (Phase 2+ #6). Refactoring single-to-list later touches the whole subscribe API.</td>
+    </tr>
+    <tr>
+      <td class="center">4</td>
+      <td>Progress-event payloads are extensible — <code>{ stage, ...rest }</code></td>
+      <td>Phase 2+ adds a heartbeat field that the sweeper reads. Positional args in Phase 2 = breaking change in Phase 2+.</td>
+    </tr>
+    <tr>
+      <td class="center">5</td>
+      <td>Don't collapse error categories at the prove boundary</td>
+      <td>Preserve the raw error shape coming out of PXE. Phase 2+ retry policy needs to classify retryable-vs-terminal; if Phase 2 has mapped everything to a generic "Simulation failed", classification is dead on arrival.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <strong>Why split at all?</strong> Half of Phase 2+ is hardening for production-scale edge cases that Phase 2 traffic might never reveal. Fairness matters when you have queue contention. Idempotency dedup matters when dApps retry under timeout pressure. Sweepers matter when a measurable percentage of jobs get stuck. With single-digit-user traffic, you might never hit any of those, and Phase 2 alone could be enough for a long time. Let real failure modes (or their absence) tell you which Phase 2+ items are actually load-bearing.
+</div>
+
+<h2 id="borrowed">Borrowed from whom <span class="prov chat">attribution</span></h2>
+
+<p>
+  Phase 2 is mostly an assembly of patterns we identified during the comparative study. Here's where each piece comes from:
+</p>
+
+<table aria-label="Mapping Phase 2 components back to their origin in Rabby, MetaMask, or Grego">
+  <thead><tr><th>Phase 2 component</th><th>Origin pattern</th><th>Where</th></tr></thead>
+  <tbody>
+    <tr><td>JobRegistry + state machine</td><td>MetaMask's approval state machine</td><td><a href="wallets/metamask.html">MetaMask M8</a></td></tr>
+    <tr><td>Persisted progress markers</td><td>Rabby's <code>historyDbService</code></td><td><a href="wallets/rabby.html">Rabby R7</a></td></tr>
+    <tr><td><code>unlockPromise</code> await pattern</td><td>Rabby's <code>perpsService</code></td><td><a href="wallets/rabby.html">Rabby R6</a></td></tr>
+    <tr><td>LazyListener boot buffering</td><td>MetaMask's <code>extension-lazy-listener</code></td><td><a href="wallets/metamask.html">MetaMask M3</a></td></tr>
+    <tr><td>Deferred-init port gating</td><td>MetaMask's <code>await isInitialized</code></td><td><a href="wallets/metamask.html">MetaMask M4</a></td></tr>
+    <tr><td>Migrations framework</td><td>MetaMask's numbered migrations</td><td><a href="wallets/metamask.html">MetaMask M6</a></td></tr>
+    <tr><td>IndexedDB backup</td><td>MetaMask's <code>persistence-manager</code></td><td><a href="wallets/metamask.html">MetaMask M7</a></td></tr>
+    <tr><td>Capability wildcards <em>(later)</em></td><td>Grego's <code>authorization-manager</code></td><td><a href="wallets/grego.html">Grego A11</a></td></tr>
+    <tr><td>Rate-limit per origin <em>(later)</em></td><td>Rabby's notification service</td><td><a href="wallets/rabby.html">Rabby R5</a></td></tr>
+  </tbody>
+</table>
+
+<h2 id="non-goals">Non-goals — what Phase 2 explicitly is NOT <span class="prov chat">scope discipline</span></h2>
+
+<p>
+  As important as what's in scope is what stays out. These are the things we do NOT touch in Phase 2:
+</p>
+
+<ul>
+  <li><strong>Re-doing the package / layer model</strong> — it's already production-quality. Don't fix what isn't broken.</li>
+  <li><strong>Cryptography churn</strong> — <code>PasswordSecretBox</code> and the M2.6 vectors stay as-is.</li>
+  <li><strong>Aztec correctness rework</strong> — PR 8c shipped; no more sim-pipeline changes in this scope.</li>
+  <li><strong>Storybook / visual regression / e2e infra</strong> — separate track (M6 + parallel-e2e-isolation plan).</li>
+  <li><strong>Frontend / UI redesign</strong> — Phase 4 territory.</li>
+  <li><strong>LavaMoat / Snaps</strong> — Phase 4+; not blocking Phase 2 ship.</li>
+  <li><strong>Wider state-architecture refactor</strong> (Immer patches, ObjectMultiplex, <code>@metamask/messenger</code>) — Phase 2 keeps Pinia + Service&lt;Methods,Events&gt; as-is.</li>
+</ul>
+
+<div class="callout">
+  Phase 2 is <strong>infrastructure</strong>, not a redesign. Every visible UX flow in Nulo stays recognizable. What changes is what happens when those flows take longer than 60 seconds.
+</div>
+
+<div class="footer">
+  <p>
+    Calibrated 2026-05-12 against <code>master</code> at v0.14.9 (post-PR-76).
+    Source content for this page: <a href="synthesis/html-source-additions.md"><code>synthesis/html-source-additions.md</code></a>.
+  </p>
+  <p>
+    <a href="index.html">← Back to overview</a>
+    &nbsp;·&nbsp;
+    <a href="wallets/nulo.html">← See where Nulo is today</a>
+    &nbsp;·&nbsp;
+    <a href="nulo-phase-2-plus.html">Phase 2+ (durable jobs done right) →</a>
+    &nbsp;·&nbsp;
+    <a href="nulo-maximalist.html">Maximalist (5/5 everywhere) →</a>
+  </p>
+</div>
+
+</div>
+</body>
+</html>

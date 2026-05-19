@@ -1,0 +1,401 @@
+<script setup lang="ts">
+/**
+ * Single operation row inside the execute window. Three rendering
+ * shapes:
+ *
+ * - `send_transaction` + `aztec_sendTx` — header + From account +
+ *   Payload list + fee settings (either the embedded "set by app"
+ *   badge or a `<FeeSettingsCard>` v-modeled into the parent's
+ *   `op.feeSettings`).
+ * - All other read-only / register / simulate variants — header +
+ *   from account (when present) + per-kind detail rows.
+ *
+ * The parent owns the operation list + fee estimation map. The card
+ * just emits `update:feeSettings` (forwarded from FeeSettingsCard) so
+ * the parent can drive `op.feeSettings` and trigger the keyed fee
+ * estimator.
+ */
+import FeeSettingsCard from "@/popup/components/modules/send/FeeSettingsCard.vue"
+import type { ProfileInfo } from "@/wallet/services/profile/client"
+import type { FeeSettings } from "@/wallet/services/execution/client"
+import type { DappMetadata } from "@/wallet/services/dapp-session/client"
+import type { Account } from "@/wallet/services/account/client"
+import type { Network } from "@/wallet/services/network/client"
+import { humanizeOperationKind } from "./humanize"
+import type { DraftAztecSendTxOperation, DraftSendTransactionOperation, DraftUIOperation } from "./types"
+
+// `DraftUIOperation` is the shared honest type (Phase 2 follow-up). Send-like
+// `feeSettings` is optional during user editing — the card v-models it via
+// the FeeSettingsCard emit, the parent's `requiresFeeSelection` gate
+// validates before approve.
+type UIOperation = DraftUIOperation
+
+/** The send-like UI op subset (where feeSettings + fee + exec fields exist). */
+type SendLikeUIOp = (DraftAztecSendTxOperation | DraftSendTransactionOperation) & {
+	network: Network
+	account?: Account
+}
+
+defineProps<{
+	op: UIOperation
+	index: number
+	profile?: ProfileInfo
+	dapp?: DappMetadata & { logoBlobUrl?: string }
+	feeEstimate?: unknown
+	isEstimating?: boolean
+}>()
+
+const emit = defineEmits<(e: "updateFeeSettings", index: number, value: FeeSettings | undefined) => void>()
+
+// TS type predicate so the template's `v-if="isSendTx(op)"` narrows op
+// to the send-like subtype downstream (lets us access `op.feeSettings`
+// without TS complaining that non-send kinds don't carry that field).
+const isSendTx = (op: UIOperation): op is SendLikeUIOp => op.kind === "send_transaction" || op.kind === "aztec_sendTx"
+
+const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
+	if (op.kind === "send_transaction") return op.fee?.embeddedFeePayment !== undefined
+	if (op.kind === "aztec_sendTx") return op.executionMode === "default_entrypoint" || op.exec?.feePayer !== undefined
+	return false
+}
+</script>
+
+<template>
+	<Flex
+		v-if="isSendTx(op)"
+		data-testid="execute-op-item"
+		:data-op-id="index"
+		:data-op-kind="op.kind"
+		direction="column"
+		:class="$style.op_card"
+	>
+		<Flex :class="$style.op_body" direction="column" wide>
+			<Flex wide justify="between" align="center" gap="8">
+				<Text size="14" color="primary">{{ humanizeOperationKind(op.kind) }}</Text>
+			</Flex>
+			<Flex
+				data-testid="execute-op-from-account"
+				:data-account-name="op.account!.name"
+				:data-account-address="op.account!.address"
+				:class="$style.prop"
+			>
+				<Text size="12" color="secondary">From account:</Text>
+				<Text size="12" color="primary">
+					{{ op.account!.name }}
+					<Text color="secondary">({{ trimAddress(op.account!.address) }})</Text>
+				</Text>
+			</Flex>
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Payload:</Text>
+				<Flex direction="column" gap="4">
+					<!-- send_transaction has actions[]; aztec_sendTx has exec.calls[] -->
+					<template v-if="op.kind === 'send_transaction'">
+						<Text
+							v-for="(action, j) in op.actions"
+							:key="`${index}:${j}`"
+							data-testid="execute-op-payload-row"
+							size="12"
+							color="primary"
+						>
+							<template v-if="action.kind === 'call' || action.kind === 'encoded_call'">
+								<Text weight="600">
+									{{ humanizeMethodName(action.kind === "call" ? action.method : (action.name ?? action.selector)) }}
+								</Text>
+								<Text color="secondary"> on </Text>
+								<AddressDisplay :address="action.kind === 'call' ? action.contract : action.to" />
+							</template>
+							<template v-else>
+								{{ action.kind.replace("_", " ") }}
+							</template>
+						</Text>
+					</template>
+					<template v-else-if="op.kind === 'aztec_sendTx'">
+						<Text
+							v-for="(call, j) in op.exec.calls"
+							:key="`${index}:${j}`"
+							data-testid="execute-op-payload-row"
+							:data-call-name="call.name ?? ''"
+							:data-call-to="call.to?.toString() ?? ''"
+							size="12"
+							color="primary"
+						>
+							<Text weight="600">{{ humanizeMethodName(call.name ?? call.selector) }}</Text>
+							<Text color="secondary"> on </Text>
+							<AddressDisplay :address="call.to" />
+						</Text>
+					</template>
+				</Flex>
+			</Flex>
+		</Flex>
+
+		<div :class="$style.op_divider" />
+
+		<Flex
+			v-if="hasEmbeddedFee(op)"
+			data-testid="execute-op-fee-set-badge"
+			align="center"
+			gap="8"
+			wide
+			:class="$style.op_fee_set"
+		>
+			<Icon name="check-circle" size="14" color="green" />
+			<Text size="13" weight="500" color="secondary">
+				Fee payment method set by
+				<Text size="13" weight="600" color="primary">{{ dapp?.name ?? 'the app' }}</Text>
+			</Text>
+		</Flex>
+
+		<FeeSettingsCard
+			v-else
+			embedded
+			:profile="profile"
+			:network="op.network"
+			:account="op.account"
+			:feeEstimate="feeEstimate"
+			:isEstimating="isEstimating"
+			:modelValue="op.feeSettings"
+			@update:modelValue="(value: FeeSettings | undefined) => emit('updateFeeSettings', index, value)"
+		/>
+	</Flex>
+
+	<Flex
+		v-else
+		data-testid="execute-op-item"
+		:data-op-id="index"
+		:data-op-kind="op.kind"
+		:class="[$style.op_card, $style.op_card_simple]"
+		direction="column"
+		wide
+	>
+		<Flex wide justify="between">
+			<Text size="14" color="primary">{{ humanizeOperationKind(op.kind) }}</Text>
+		</Flex>
+
+		<Flex v-if="op.account" :class="$style.prop">
+			<Text size="12" color="secondary">From account:</Text>
+			<Text size="12" color="primary">
+				{{ op.account!.name }}
+				<Text color="secondary">({{ trimAddress(op.account!.address) }})</Text>
+			</Text>
+		</Flex>
+
+		<template v-if="op.kind === 'register_contract'">
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Contract address:</Text>
+				<AddressDisplay :address="op.address" />
+			</Flex>
+		</template>
+		<template v-else-if="op.kind === 'register_sender'">
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Sender address:</Text>
+				<AddressDisplay :address="op.address" />
+			</Flex>
+		</template>
+		<template v-else-if="op.kind === 'register_token'">
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Token address:</Text>
+				<AddressDisplay :address="op.address" />
+			</Flex>
+		</template>
+		<template v-else-if="op.kind === 'simulate_transaction'">
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Payload:</Text>
+				<Flex direction="column" gap="4">
+					<Text
+						v-for="(action, j) in op.actions"
+						:key="`${index}:${j}`"
+						data-testid="execute-op-payload-row"
+						size="12"
+						color="primary"
+					>
+						<template v-if="action.kind === 'call' || action.kind === 'encoded_call'">
+							<Text weight="600">
+								{{ humanizeMethodName(action.kind === "call" ? action.method : (action.name ?? action.selector)) }}
+							</Text>
+							<Text color="secondary"> on </Text>
+							<AddressDisplay :address="action.kind === 'call' ? action.contract : action.to" />
+						</template>
+						<template v-else>
+							{{ action.kind.replace("_", " ") }}
+						</template>
+					</Text>
+				</Flex>
+			</Flex>
+		</template>
+		<template v-else-if="op.kind === 'simulate_utility'">
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Contract address:</Text>
+				<AddressDisplay :address="op.contract" />
+			</Flex>
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Function:</Text>
+				<Text size="12" weight="600" color="primary">{{ humanizeMethodName(op.method) }}</Text>
+			</Flex>
+		</template>
+		<template v-else-if="op.kind === 'simulate_views'">
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">View calls:</Text>
+				<Flex direction="column" gap="4">
+					<Text v-for="(call, j) in op.calls" :key="`${index}:${j}`" size="12" color="primary">
+						<Text weight="600">{{ humanizeMethodName(call.kind === "call" ? call.method : call.selector) }}</Text>
+						<Text color="secondary"> on </Text>
+						<AddressDisplay :address="call.kind === 'call' ? call.contract : call.to" />
+					</Text>
+				</Flex>
+			</Flex>
+		</template>
+		<template v-else-if="op.kind === 'aztec_getContractClassMetadata'">
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Class id:</Text>
+				<Text size="12" color="primary">{{ trimAddress(op.id.toString()) }}</Text>
+			</Flex>
+		</template>
+		<template v-else-if="op.kind === 'aztec_getContractMetadata'">
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Contract address:</Text>
+				<AddressDisplay :address="op.address.toString()" />
+			</Flex>
+		</template>
+		<template v-else-if="op.kind === 'aztec_getPrivateEvents'">
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Contract address:</Text>
+				<AddressDisplay :address="op.eventFilter.contractAddress.toString()" />
+			</Flex>
+		</template>
+		<template v-else-if="op.kind === 'aztec_registerSender'">
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Sender address:</Text>
+				<AddressDisplay :address="op.address.toString()" />
+			</Flex>
+		</template>
+		<template v-else-if="op.kind === 'aztec_simulateTx'">
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Payload:</Text>
+				<Flex direction="column" gap="4">
+					<Text
+						v-for="(call, j) in op.exec.calls"
+						:key="`${index}:${j}`"
+						data-testid="execute-op-payload-row"
+						:data-call-name="call.name ?? ''"
+						:data-call-to="call.to?.toString() ?? ''"
+						size="12"
+						color="primary"
+					>
+						<Text weight="600">{{ humanizeMethodName(call.name ?? call.selector) }}</Text>
+						<Text color="secondary"> on </Text>
+						<AddressDisplay :address="call.to" />
+					</Text>
+				</Flex>
+			</Flex>
+		</template>
+		<template v-else-if="op.kind === 'aztec_executeUtility'">
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Contract address:</Text>
+				<AddressDisplay :address="op.call.to.toString()" />
+			</Flex>
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Function:</Text>
+				<Text size="12" weight="600" color="primary">
+					{{ humanizeMethodName(op.call.name ?? op.call.selector.toString()) }}
+				</Text>
+			</Flex>
+		</template>
+		<template v-else-if="op.kind === 'aztec_profileTx'">
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Payload:</Text>
+				<Flex direction="column" gap="4">
+					<Text
+						v-for="(call, j) in op.exec.calls"
+						:key="`${index}:${j}`"
+						data-testid="execute-op-payload-row"
+						:data-call-name="call.name ?? ''"
+						:data-call-to="call.to?.toString() ?? ''"
+						size="12"
+						color="primary"
+					>
+						<Text weight="600">{{ humanizeMethodName(call.name ?? call.selector) }}</Text>
+						<Text color="secondary"> on </Text>
+						<AddressDisplay :address="call.to" />
+					</Text>
+				</Flex>
+			</Flex>
+		</template>
+		<template v-else-if="op.kind === 'aztec_registerContract'">
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Contract address:</Text>
+				<AddressDisplay :address="op.instance.address.toString()" />
+			</Flex>
+			<Flex v-if="op.artifact" :class="$style.prop">
+				<Text size="12" color="secondary">Artifact:</Text>
+				<Text size="12" color="primary">{{ op.artifact.name ?? "(custom)" }}</Text>
+			</Flex>
+		</template>
+		<template v-else-if="op.kind === 'aztec_createAuthWit'">
+			<Flex :class="$style.prop">
+				<Text size="12" color="secondary">Message type:</Text>
+				<Text size="12" weight="600" color="primary">
+					{{
+						(op.messageHashOrIntent as { innerHash?: unknown }).innerHash !== undefined ? "Inner hash" : "Call intent"
+					}}
+				</Text>
+			</Flex>
+			<template v-if="(op.messageHashOrIntent as { call?: { to: unknown; name?: string; selector?: unknown } }).call">
+				<Flex :class="$style.prop">
+					<Text size="12" color="secondary">Target contract:</Text>
+					<AddressDisplay
+						:address="(op.messageHashOrIntent as { call: { to: { toString(): string } } }).call.to.toString()"
+					/>
+				</Flex>
+				<Flex :class="$style.prop">
+					<Text size="12" color="secondary">Function:</Text>
+					<Text size="12" weight="600" color="primary">
+						{{
+							humanizeMethodName(
+								(op.messageHashOrIntent as { call: { name?: string; selector?: { toString(): string } } }).call.name ??
+									(op.messageHashOrIntent as { call: { selector?: { toString(): string } } }).call.selector?.toString() ??
+									"",
+							)
+						}}
+					</Text>
+				</Flex>
+			</template>
+		</template>
+	</Flex>
+</template>
+
+<style module>
+.op_card {
+	width: 100%;
+
+	border: 1px solid var(--nulo-border);
+	background: transparent;
+	overflow: hidden;
+}
+
+.op_card_simple {
+	padding: 12px;
+}
+
+.op_body {
+	padding: 12px;
+}
+
+.op_divider {
+	height: 1px;
+	background: var(--nulo-border);
+}
+
+.op_fee_set {
+	padding: 12px;
+	background: var(--nulo-surface-low);
+}
+
+.prop {
+	width: 100%;
+	justify-content: space-between;
+	padding-top: 12px;
+
+	:last-child {
+		text-align: right;
+	}
+}
+</style>

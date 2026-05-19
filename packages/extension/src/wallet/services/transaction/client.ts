@@ -1,0 +1,25 @@
+import type { ServiceSpec } from "@/wallet/base"
+import { ServiceClient } from "@nulo/extension-messaging/background"
+import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { EventHandler } from "@nulo/wallet-core/utils"
+import { type Events, type Methods, TRANSACTION_SERVICE_NAME, type Tx } from "./spec"
+
+export * from "./spec"
+
+export class TransactionServiceClient extends ServiceClient<Methods, Events> implements ServiceSpec<Methods, Events> {
+	public readonly onTransactionAdded = new EventHandler<Tx>()
+	public readonly onTransactionUpdated = new EventHandler<Tx>()
+	public readonly onTransactionDeleted = new EventHandler<Tx>()
+
+	public constructor(name?: string) {
+		super(TRANSACTION_SERVICE_NAME, new LoggerServiceClient(), name)
+	}
+
+	public getTransactions(account: string): Promise<Tx[]> {
+		return this.request("getTransactions", account)
+	}
+
+	public getTransaction(hash: string): Promise<Tx> {
+		return this.request("getTransaction", hash)
+	}
+}

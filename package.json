@@ -1,0 +1,37 @@
+{
+  "name": "nulo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun run --cwd packages/extension dev",
+    "dev:playground": "bun run --cwd packages/playground dev",
+    "dev:landing": "bun run --cwd packages/landing dev",
+    "build": "bun run --cwd packages/extension build",
+    "build:chrome": "bun run --cwd packages/extension build:chrome",
+    "build:firefox": "bun run --cwd packages/extension build:firefox",
+    "test": "bun run --cwd packages/extension test",
+    "test:e2e": "bun run --cwd packages/extension test:e2e",
+    "test:e2e:network": "bun run --cwd packages/extension vitest run --config vitest.e2e.network.config.ts",
+    "test:e2e:all": "bun run --cwd packages/extension vitest run --config vitest.e2e.all.config.ts",
+    "e2e:agent": "bash packages/extension/scripts/e2e/agent.sh",
+    "lint": "biome check",
+    "lint:fix": "biome check --fix",
+    "format": "biome format --write",
+    "check": "biome check",
+    "typecheck": "vue-tsc --project packages/extension/tsconfig.json --noEmit",
+    "typecheck:all": "bun run --filter '@nulo/*' typecheck",
+    "test:all": "bun run --filter '@nulo/*' --if-present test",
+    "check:imports": "biome check packages/",
+    "audit:vue": "bun run typecheck:all && bun run test && bun run lint && bun run build",
+    "prepare": "git config core.hooksPath .githooks"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.15",
+    "@commitlint/cli": "^21.0.1",
+    "@commitlint/config-conventional": "^21.0.1"
+  },
+  "packageManager": "bun@1.3.13",
+  "version": "0.17.0"
+}

@@ -1,0 +1,62 @@
+# git-cliff config — release notes for @nulo/extension.
+# Scoped via `--include-path` in the workflow; filters out other packages.
+
+[changelog]
+header = ""
+trim = true
+body = """
+{% if version -%}
+{% set v = version | trim_start_matches(pat="v") -%}
+## {{ v }}
+
+### Install (developer preview)
+
+1. Download `nulo-chrome-{{ v }}.zip` from the assets below.
+2. Unzip locally.
+3. Open `chrome://extensions` and toggle **Developer mode** (top-right).
+4. Click **Load unpacked** and select the unzipped folder.
+
+Verify: `shasum -a 256 -c SHASUMS256.txt`
+
+Firefox build is also attached but unsigned — a signed install path will land in a later release.
+
+---
+{% else -%}
+## Unreleased
+{% endif -%}
+
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+
+{% for commit in commits -%}
+- {{ commit.message | split(pat="\\n") | first | upper_first }}\
+  {% if commit.scope %} ({{ commit.scope }}){% endif %}\
+  {% if commit.id %} [`{{ commit.id | truncate(length=7, end="") }}`]({% if remote.github.repo %}https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}/commit/{{ commit.id }}{% endif %}){% endif %}
+{% endfor %}
+{% endfor %}
+"""
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+require_conventional = false
+split_commits = false
+filter_commits = false
+tag_pattern = "v[0-9].*"
+skip_tags = "^v0\\..*-internal"
+sort_commits = "newest"
+
+commit_parsers = [
+  { message = "^feat", group = "Features" },
+  { message = "^fix", group = "Bug Fixes" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Refactor" },
+  { message = "^docs", group = "Documentation" },
+  { message = "^test", group = "Tests" },
+  { message = "^build|^ci", group = "Build / CI" },
+  { message = "^chore", group = "Chore" },
+  { message = "^revert", group = "Reverts" },
+  { message = "^style", group = "Style" },
+  { message = ".*", group = "Other" },
+]

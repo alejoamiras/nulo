@@ -1,0 +1,114 @@
+name: Network e2e
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, dev]
+    # `labeled` so adding `e2e:network` after open triggers a fresh run;
+    # `unlabeled` so removing it re-evaluates the gate instead of leaving
+    # a stale failing result.
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+concurrency:
+  group: pr-network-e2e-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      extension-network: ${{ steps.override.outputs.full || steps.filter.outputs.extension-network }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+          filters: |
+            extension-network:
+              - 'packages/extension/src/wallet/services/network/**'
+              - 'packages/extension/src/wallet/services/execution/**'
+              - 'packages/extension/src/wallet/services/fpc/**'
+              - 'packages/extension/src/wallet/services/dapp-interaction/**'
+              - 'packages/extension/src/wallet/services/dapp-session/**'
+              - 'packages/extension/src/offscreen/**'
+              - 'packages/extension/tests/e2e/network/**'
+              - 'packages/extension/tests/e2e/fixtures/**'
+              - 'packages/extension/scripts/e2e/**'
+              - 'packages/extension/vitest.e2e.network.config.ts'
+              - 'packages/extension/vitest.e2e.all.config.ts'
+              - 'packages/aztec-runtime/**'
+              - 'packages/wallet-bridge/**'
+              - 'packages/playground/**'
+              - '.github/workflows/_network-e2e.yml'
+              - '.github/workflows/pr-network-e2e.yml'
+              - '.github/actions/setup-aztec/**'
+              - '.github/actions/setup-bun/**'
+              - 'bun.lockb'
+              - 'bunfig.toml'
+              - 'package.json'
+      - name: Override for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        id: override
+        run: echo "full=true" >> "$GITHUB_OUTPUT"
+
+  decide:
+    name: Decide
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+          NETWORK: ${{ needs.changes.outputs.extension-network }}
+          LABEL_HIT: ${{ contains(github.event.pull_request.labels.*.name, 'e2e:network') }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ] \
+             || [ "$BASE" = "main" ] \
+             || [ "$LABEL_HIT" = "true" ] \
+             || { [ "$BASE" = "dev" ] && [ "$NETWORK" = "true" ]; }; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  network-e2e:
+    name: Run
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    uses: ./.github/workflows/_network-e2e.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  status:
+    name: Status
+    if: always()
+    needs: [changes, decide, network-e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Aggregate results
+        run: |
+          for r in \
+            "${{ needs.changes.result }}" \
+            "${{ needs.decide.result }}" \
+            "${{ needs.network-e2e.result }}" \
+          ; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::A required job failed or was cancelled: $r"
+              exit 1
+            fi
+          done
+          echo "Network e2e gate passed (or was skipped — no relevant changes / not labeled)."

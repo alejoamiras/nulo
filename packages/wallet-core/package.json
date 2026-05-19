@@ -1,0 +1,27 @@
+{
+	"name": "@nulo/wallet-core",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./ports": "./src/ports/index.ts",
+		"./testing": "./src/testing/index.ts",
+		"./utils": "./src/utils/index.ts",
+		"./storage": "./src/storage/index.ts",
+		"./base": "./src/base/index.ts",
+		"./logger": "./src/logger/interfaces.ts",
+		"./jobs": "./src/jobs/index.ts"
+	},
+	"scripts": {
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"@types/node": "^24.2.1",
+		"@webext-core/fake-browser": "^1.3.4",
+		"vitest": "^4.1.5",
+		"jsdom": "^29.1.1",
+		"typescript": "^6.0.3"
+	}
+}

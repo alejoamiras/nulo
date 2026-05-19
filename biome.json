@@ -1,0 +1,281 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.4.11/schema.json",
+	"vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "main" },
+	"files": {
+		"ignoreUnknown": false,
+		"includes": ["packages/**", "!**/node_modules", "!**/dist", "!**/packages/extension/src/types"]
+	},
+	"formatter": {
+		"enabled": true,
+		"useEditorconfig": true,
+		"formatWithErrors": false,
+		"indentStyle": "tab",
+		"indentWidth": 4,
+		"lineEnding": "lf",
+		"lineWidth": 140,
+		"attributePosition": "auto",
+		"bracketSpacing": true
+	},
+	"assist": { "actions": { "source": { "organizeImports": "off" } } },
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": true,
+			"style": {
+				"noNonNullAssertion": "off",
+				"noParameterAssign": "off",
+				"useEnumInitializers": "off"
+			},
+			"performance": {
+				"noDelete": "info",
+				"noAccumulatingSpread": "warn"
+			},
+			"suspicious": {
+				"noAsyncPromiseExecutor": "off",
+				"noExplicitAny": "error",
+				"noImplicitAnyLet": "warn",
+				"noAssignInExpressions": "warn",
+				"useIterableCallbackReturn": "warn"
+			},
+			"complexity": {
+				"noExtraBooleanCast": "off",
+				"noForEach": "off",
+				"noBannedTypes": "warn"
+			}
+		}
+	},
+	"overrides": [
+		{
+			"includes": ["**/*.vue"],
+			"linter": {
+				"rules": {
+					"correctness": {
+						"noUnusedVariables": "off",
+						"noUnusedImports": "off"
+					}
+				}
+			}
+		},
+		{
+			"includes": ["packages/wallet-core/src/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"paths": {
+									"@nulo/wallet-crypto": "wallet-core is the foundation — cannot import wallet-crypto",
+									"@nulo/extension-messaging": "wallet-core cannot import extension-messaging",
+									"@nulo/aztec-runtime": "wallet-core cannot import aztec-runtime",
+									"@nulo/wallet-bridge": "wallet-core cannot import wallet-bridge",
+									"@nulo/extension": "wallet-core cannot import extension",
+									"chrome-types": "wallet-core is platform-agnostic — no chrome-types"
+								},
+								"patterns": [
+									{ "group": ["@nulo/wallet-crypto/*"], "message": "wallet-core cannot import wallet-crypto subpaths" },
+									{
+										"group": ["@nulo/extension-messaging/*"],
+										"message": "wallet-core cannot import extension-messaging subpaths"
+									},
+									{ "group": ["@nulo/aztec-runtime/*"], "message": "wallet-core cannot import aztec-runtime subpaths" },
+									{ "group": ["@nulo/wallet-bridge/*"], "message": "wallet-core cannot import wallet-bridge subpaths" },
+									{ "group": ["@nulo/extension/*"], "message": "wallet-core cannot import extension subpaths" }
+								]
+							}
+						},
+						"noRestrictedGlobals": {
+							"level": "error",
+							"options": {
+								"deniedGlobals": {
+									"chrome": "wallet-core is platform-agnostic — chrome.* belongs behind a port"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["packages/wallet-crypto/src/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"paths": {
+									"@nulo/extension-messaging": "wallet-crypto cannot import extension-messaging",
+									"@nulo/aztec-runtime": "wallet-crypto cannot import aztec-runtime",
+									"@nulo/wallet-bridge": "wallet-crypto cannot import wallet-bridge",
+									"@nulo/extension": "wallet-crypto cannot import extension"
+								},
+								"patterns": [
+									{
+										"group": ["@nulo/extension-messaging/*"],
+										"message": "wallet-crypto cannot import extension-messaging subpaths"
+									},
+									{ "group": ["@nulo/aztec-runtime/*"], "message": "wallet-crypto cannot import aztec-runtime subpaths" },
+									{ "group": ["@nulo/wallet-bridge/*"], "message": "wallet-crypto cannot import wallet-bridge subpaths" },
+									{ "group": ["@nulo/extension/*"], "message": "wallet-crypto cannot import extension subpaths" }
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["packages/extension-messaging/src/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"paths": {
+									"@nulo/wallet-crypto": "extension-messaging cannot import wallet-crypto",
+									"@nulo/aztec-runtime": "extension-messaging cannot import aztec-runtime",
+									"@nulo/wallet-bridge": "extension-messaging cannot import wallet-bridge",
+									"@nulo/extension": "extension-messaging cannot import extension"
+								},
+								"patterns": [
+									{
+										"group": ["@nulo/wallet-crypto/*"],
+										"message": "extension-messaging cannot import wallet-crypto subpaths"
+									},
+									{
+										"group": ["@nulo/aztec-runtime/*"],
+										"message": "extension-messaging cannot import aztec-runtime subpaths"
+									},
+									{
+										"group": ["@nulo/wallet-bridge/*"],
+										"message": "extension-messaging cannot import wallet-bridge subpaths"
+									},
+									{ "group": ["@nulo/extension/*"], "message": "extension-messaging cannot import extension subpaths" }
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["packages/aztec-runtime/src/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"paths": {
+									"@nulo/wallet-bridge": "aztec-runtime cannot import wallet-bridge",
+									"@nulo/extension": "aztec-runtime cannot import extension"
+								},
+								"patterns": [
+									{ "group": ["@nulo/wallet-bridge/*"], "message": "aztec-runtime cannot import wallet-bridge subpaths" },
+									{ "group": ["@nulo/extension/*"], "message": "aztec-runtime cannot import extension subpaths" }
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["packages/wallet-bridge/src/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"paths": {
+									"@nulo/aztec-runtime": "wallet-bridge cannot import aztec-runtime (preserves the cleaner-than-claimed boundary verified during M3.7)",
+									"@nulo/extension": "wallet-bridge cannot import extension"
+								},
+								"patterns": [
+									{ "group": ["@nulo/aztec-runtime/*"], "message": "wallet-bridge cannot import aztec-runtime subpaths" },
+									{ "group": ["@nulo/extension/*"], "message": "wallet-bridge cannot import extension subpaths" }
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"packages/extension/src/components/core/**",
+				"packages/extension/src/components/ui/**",
+				"packages/extension/src/components/composite/**"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"paths": {
+									"@/utils/core": "UI primitives cannot use the managers/core utilities (service clients hide here)",
+									"@/stores/app.store": "UI primitives cannot import stores",
+									"@/stores/popup.store": "UI primitives cannot import stores",
+									"@/stores/cache.store": "UI primitives cannot import stores",
+									"@/stores/notification.store": "UI primitives cannot import stores"
+								},
+								"patterns": [
+									{
+										"group": ["@/wallet/services/*/client"],
+										"message": "UI primitives cannot import any *Service client"
+									},
+									{
+										"group": ["@/wallet/services/*/service"],
+										"message": "UI primitives cannot import service implementations"
+									},
+									{ "group": ["@/stores/*"], "message": "UI primitives cannot import any Pinia store" }
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["packages/extension/src/popup/components/modules/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@/popup/pages/*", "@/popup/pages/**"],
+										"message": "L4 modules (popup/components/modules/**) cannot import from L5 pages — pages depend on modules, not the other way around"
+									},
+									{
+										"group": ["@/popup/windows/*", "@/popup/windows/**"],
+										"message": "L4 modules (popup/components/modules/**) cannot import from L6 windows — windows depend on modules, not the other way around"
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		}
+	],
+	"javascript": {
+		"formatter": {
+			"jsxQuoteStyle": "double",
+			"quoteProperties": "asNeeded",
+			"trailingCommas": "all",
+			"semicolons": "asNeeded",
+			"arrowParentheses": "always",
+			"bracketSameLine": false,
+			"quoteStyle": "double",
+			"attributePosition": "auto",
+			"bracketSpacing": true
+		}
+	}
+}

@@ -1,0 +1,287 @@
+import { describe, test, expect, vi } from "vitest"
+import { FakeBackgroundTicker } from "@nulo/wallet-core/testing"
+import type { TaskService } from "@/wallet/services/task/service"
+import { BalanceJobQueue } from "./balance-job-queue"
+import type { BalanceProjector, ProjectedBalance } from "./balance-projector"
+import type { BalanceRepository } from "./balance-repository"
+import type { TokenBalanceRaw } from "./spec"
+
+const raw = (id: number, overrides: Partial<TokenBalanceRaw> = {}): TokenBalanceRaw => ({
+	id,
+	token: 1,
+	account: "0xA",
+	privateBalance: "0",
+	publicBalance: "0",
+	updatedAt: 0,
+	...overrides,
+})
+
+type TaskMock = {
+	service: TaskService
+	createNewTask: ReturnType<typeof vi.fn>
+	startNewTask: ReturnType<typeof vi.fn>
+	startTask: ReturnType<typeof vi.fn>
+	completeTask: ReturnType<typeof vi.fn>
+	failTask: ReturnType<typeof vi.fn>
+	getTaskSync: ReturnType<typeof vi.fn>
+}
+
+function makeTaskService(): TaskMock {
+	let nextId = 1
+	const finishedAt = new Map<string, boolean>()
+	const createNewTask = vi.fn().mockImplementation(() => {
+		const id = `task-${nextId++}`
+		return { id }
+	})
+	const startNewTask = vi.fn().mockImplementation(() => {
+		const id = `task-${nextId++}`
+		return { id }
+	})
+	const startTask = vi.fn()
+	const completeTask = vi.fn().mockImplementation((id: string) => {
+		finishedAt.set(id, true)
+	})
+	const failTask = vi.fn().mockImplementation((id: string) => {
+		finishedAt.set(id, true)
+	})
+	const getTaskSync = vi.fn().mockImplementation((id: string) => ({
+		id,
+		finishedAt: finishedAt.get(id) ? Date.now() : undefined,
+	}))
+	return {
+		service: { createNewTask, startNewTask, startTask, completeTask, failTask, getTaskSync } as unknown as TaskService,
+		createNewTask,
+		startNewTask,
+		startTask,
+		completeTask,
+		failTask,
+		getTaskSync,
+	}
+}
+
+function makeRepo(seeded: TokenBalanceRaw[] = []): BalanceRepository {
+	const store = new Map<number, TokenBalanceRaw>(seeded.map((b) => [b.id, b]))
+	return {
+		get: async (id: number) => store.get(id),
+		getAll: async () => Array.from(store.values()),
+		set: async (b: TokenBalanceRaw) => {
+			store.set(b.id, b)
+		},
+		delete: async (id: number) => {
+			store.delete(id)
+		},
+		allocateId: async () => {
+			const max = Array.from(store.keys()).reduce((m, k) => Math.max(m, k), 0)
+			return max + 1
+		},
+		existsByTokenAndAccount: async (tokenId: number, account: string) =>
+			Array.from(store.values()).some((b) => b.token === tokenId && b.account === account),
+	} as BalanceRepository
+}
+
+function makeProjector(results: ProjectedBalance[] | ((input: TokenBalanceRaw[]) => ProjectedBalance[])): {
+	projector: BalanceProjector
+	calls: TokenBalanceRaw[][]
+} {
+	const calls: TokenBalanceRaw[][] = []
+	const projector = {
+		project: async (balances: TokenBalanceRaw[]) => {
+			calls.push([...balances])
+			return typeof results === "function" ? results(balances) : results
+		},
+	} as BalanceProjector
+	return { projector, calls }
+}
+
+describe("BalanceJobQueue", () => {
+	test("start subscribes to the ticker; stop cancels", () => {
+		const ticker = new FakeBackgroundTicker()
+		const queue = new BalanceJobQueue(ticker, makeRepo(), makeProjector([]).projector, makeTaskService().service, {
+			onBalanceUpdated: vi.fn(),
+		})
+		expect(ticker.activeSubscriptions).toBe(0)
+		queue.start()
+		expect(ticker.activeSubscriptions).toBe(1)
+		queue.stop()
+		expect(ticker.activeSubscriptions).toBe(0)
+	})
+
+	test("enqueue dedups via Queue.priorityPass — same id only once", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const repo = makeRepo([raw(1)])
+		const tasks = makeTaskService()
+		const { projector, calls } = makeProjector([{ kind: "ok", id: 1, privateBalance: "100", publicBalance: "50" }])
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated: vi.fn() })
+
+		queue.enqueue(raw(1))
+		queue.enqueue(raw(1)) // should dedup
+		queue.enqueue(raw(1)) // should dedup
+
+		await queue.tick()
+		expect(calls).toHaveLength(1)
+		expect(calls[0]).toHaveLength(1) // only one balance in the batch
+	})
+
+	test("enqueue creates a TaskService record only once per id (pendingTasks dedup)", () => {
+		const ticker = new FakeBackgroundTicker()
+		const tasks = makeTaskService()
+		const queue = new BalanceJobQueue(ticker, makeRepo(), makeProjector([]).projector, tasks.service, {
+			onBalanceUpdated: vi.fn(),
+		})
+
+		queue.enqueue(raw(1))
+		queue.enqueue(raw(1))
+		queue.enqueue(raw(1))
+		expect(tasks.createNewTask).toHaveBeenCalledTimes(1)
+	})
+
+	test("tick drains queue until empty (not one-batch-per-tick)", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const repo = makeRepo(Array.from({ length: 30 }, (_, i) => raw(i + 1)))
+		const tasks = makeTaskService()
+		const { projector, calls } = makeProjector((input) =>
+			input.map((b) => ({ kind: "ok" as const, id: b.id, privateBalance: "1", publicBalance: "1" })),
+		)
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated: vi.fn() })
+
+		for (let i = 1; i <= 30; i++) queue.enqueue(raw(i))
+
+		await queue.tick()
+		// All 30 balances processed in a single tick, but in 3 batches of 12+12+6
+		// (batch-size ceiling preserved).
+		expect(calls.length).toBe(3)
+		expect(calls[0]!.length).toBe(12)
+		expect(calls[1]!.length).toBe(12)
+		expect(calls[2]!.length).toBe(6)
+	})
+
+	test("tick batches by FIRST account in FIFO order", async () => {
+		// The outer drain picks the first queued balance's account,
+		// batches consecutive same-account balances up to 12, then moves
+		// on. Interleaved accounts produce separate batches. This test
+		// pins that behavior verbatim.
+		const ticker = new FakeBackgroundTicker()
+		const repo = makeRepo([raw(1, { account: "0xA" }), raw(2, { account: "0xA" }), raw(3, { account: "0xB" })])
+		const tasks = makeTaskService()
+		const { projector, calls } = makeProjector((input) =>
+			input.map((b) => ({ kind: "ok" as const, id: b.id, privateBalance: "1", publicBalance: "1" })),
+		)
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated: vi.fn() })
+
+		// Interleave: A, B, A. `Queue.priorityPass` pushes to the HEAD,
+		// so the queue order is [A:2, B:3, A:1]. First batch drains
+		// consecutive same-account from the head ([A:2]); then [B:3];
+		// then [A:1].
+		queue.enqueue(raw(1, { account: "0xA" }))
+		queue.enqueue(raw(3, { account: "0xB" }))
+		queue.enqueue(raw(2, { account: "0xA" }))
+
+		await queue.tick()
+
+		expect(calls.length).toBe(3)
+		expect(calls[0]!.map((b) => b.id)).toEqual([2])
+		expect(calls[1]!.map((b) => b.id)).toEqual([3])
+		expect(calls[2]!.map((b) => b.id)).toEqual([1])
+	})
+
+	test("consecutive same-account balances coalesce into one batch", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const repo = makeRepo([raw(1, { account: "0xA" }), raw(2, { account: "0xA" }), raw(3, { account: "0xA" })])
+		const tasks = makeTaskService()
+		const { projector, calls } = makeProjector((input) =>
+			input.map((b) => ({ kind: "ok" as const, id: b.id, privateBalance: "1", publicBalance: "1" })),
+		)
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated: vi.fn() })
+
+		queue.enqueue(raw(1, { account: "0xA" }))
+		queue.enqueue(raw(2, { account: "0xA" }))
+		queue.enqueue(raw(3, { account: "0xA" }))
+		await queue.tick()
+
+		expect(calls.length).toBe(1)
+		expect(calls[0]!.map((b) => b.id).sort()).toEqual([1, 2, 3])
+	})
+
+	test("successful project writes updated balance via repo.set + completes task + fires callback", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const repo = makeRepo([raw(1, { privateBalance: "0", publicBalance: "0" })])
+		const tasks = makeTaskService()
+		const onBalanceUpdated = vi.fn()
+		const { projector } = makeProjector([{ kind: "ok", id: 1, privateBalance: "100", publicBalance: "50" }])
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated })
+
+		queue.enqueue(raw(1))
+		await queue.tick()
+
+		const updated = await repo.get(1)
+		expect(updated?.privateBalance).toBe("100")
+		expect(updated?.publicBalance).toBe("50")
+		expect(updated?.updatedAt).toBeGreaterThan(0)
+		expect(tasks.completeTask).toHaveBeenCalledTimes(1)
+		expect(onBalanceUpdated).toHaveBeenCalledTimes(1)
+	})
+
+	test("projector error surfaces as task failure; no storage write", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const original = raw(1, { privateBalance: "0" })
+		const repo = makeRepo([original])
+		const tasks = makeTaskService()
+		const onBalanceUpdated = vi.fn()
+		const { projector } = makeProjector([{ kind: "error", id: 1, error: "sim failed" }])
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated })
+
+		queue.enqueue(raw(1))
+		await queue.tick()
+
+		expect(tasks.failTask).toHaveBeenCalledWith(expect.any(String), "sim failed")
+		expect(onBalanceUpdated).not.toHaveBeenCalled()
+		expect((await repo.get(1))?.privateBalance).toBe("0") // unchanged
+	})
+
+	test("orphan balance (deleted mid-sync) fails task instead of writing", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const repo = makeRepo([]) // balance NOT in storage
+		const tasks = makeTaskService()
+		const onBalanceUpdated = vi.fn()
+		const onOrphanDetected = vi.fn()
+		const { projector } = makeProjector([{ kind: "ok", id: 1, privateBalance: "100", publicBalance: "50" }])
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
+			onBalanceUpdated,
+			onOrphanDetected,
+		})
+
+		queue.enqueue(raw(1))
+		await queue.tick()
+
+		expect(tasks.failTask).toHaveBeenCalledWith(expect.any(String), "Balance record not found")
+		expect(onBalanceUpdated).not.toHaveBeenCalled()
+		expect(onOrphanDetected).toHaveBeenCalledTimes(1)
+	})
+
+	test("empty queue — tick is a no-op", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const tasks = makeTaskService()
+		const { projector, calls } = makeProjector([])
+		const queue = new BalanceJobQueue(ticker, makeRepo(), projector, tasks.service, { onBalanceUpdated: vi.fn() })
+		await queue.tick()
+		expect(calls.length).toBe(0)
+		expect(tasks.createNewTask).not.toHaveBeenCalled()
+	})
+
+	test("tick driven via ticker subscription", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const repo = makeRepo([raw(1)])
+		const tasks = makeTaskService()
+		const { projector, calls } = makeProjector([{ kind: "ok", id: 1, privateBalance: "1", publicBalance: "1" }])
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated: vi.fn() })
+
+		queue.start()
+		queue.enqueue(raw(1))
+
+		// Queue never processes without a tick.
+		expect(calls.length).toBe(0)
+
+		await ticker.tick()
+		expect(calls.length).toBe(1)
+	})
+})

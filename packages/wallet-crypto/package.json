@@ -1,0 +1,24 @@
+{
+	"name": "@nulo/wallet-crypto",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@aztec/foundation": "4.2.0",
+		"@aztec/stdlib": "4.2.0",
+		"@nulo/wallet-core": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^24.2.1",
+		"jsdom": "^29.1.1",
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.5"
+	}
+}

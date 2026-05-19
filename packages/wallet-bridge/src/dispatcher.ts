@@ -1,0 +1,790 @@
+/**
+ * WalletSdkDispatcher — Central dispatch layer for wallet-sdk protocol messages.
+ *
+ * ## Purpose
+ *
+ * This module bridges the `@aztec/wallet-sdk` communication protocol with the
+ * extension's existing service layer. When a dApp sends a wallet method call
+ * (e.g. `sendTx`, `simulateTx`, `registerToken`) over the wallet-sdk encrypted
+ * channel, the BackgroundConnectionHandler decrypts it and delivers a
+ * `WalletMessage` with `{ type: string, args: unknown[] }`.
+ *
+ * The dispatcher's job is to:
+ *   1. Map the wallet-sdk method name to an internal `Operation` kind
+ *   2. Resolve `SessionContext` (chainId, profileId) into concrete networkId / accountAddress
+ *   3. Build the `Operation[]` array expected by `ExecutionService.executeOperations()`
+ *   4. Return the result (or throw) so the caller can build a `WalletResponse`
+ *
+ * ## Architecture
+ *
+ * The dispatcher does NOT directly call PXE, account derivation, or transaction
+ * building. It delegates everything to `ExecutionService`, which already handles
+ * all operation kinds for both the Nulo custom interface and the Aztec.js
+ * Wallet interface. This keeps business logic in one place.
+ *
+ * The session-to-network resolution mirrors `DappInteractionService.silentInteraction()`,
+ * which converts CAIP-2 identifiers to internal network/account references.
+ *
+ * ## Usage
+ *
+ * ```typescript
+ * const dispatcher = new WalletSdkDispatcher(
+ *   networkService,
+ *   accountService,
+ *   executionService,
+ *   dappInteractionService,
+ *   dappSessionService,
+ *   logger,
+ * );
+ *
+ * // In BackgroundConnectionHandler.onWalletMessage callback:
+ * const result = await dispatcher.dispatch(message.type, message.args, sessionContext);
+ * await bgHandler.sendResponse(session.sessionId, {
+ *     messageId: message.messageId,
+ *     result,
+ *     walletId: 'nulo',
+ * });
+ * ```
+ */
+
+// Every domain type the dispatcher touches now lives inside @nulo/wallet-bridge.
+// Imports use relative paths because this file IS part of wallet-bridge — the
+// package-name import (`@nulo/wallet-bridge`) would resolve at runtime but
+// wires an unnecessary self-reference through the barrel.
+import type { EncodedCallAction } from "./action"
+import { formatCaipAccount, formatCaipChain, parseCaipAccount, resolveNetworkByChainId } from "./caip"
+import type { Capability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
+import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
+import type { AztecSendTxRequest, CapabilityResult, ExecutionResult } from "./dapp-interaction-protocol"
+import type {
+	AztecCreateAuthWitOperation,
+	AztecExecuteUtilityOperation,
+	AztecGetContractClassMetadataOperation,
+	AztecGetContractMetadataOperation,
+	AztecGetPrivateEventsOperation,
+	AztecProfileTxOperation,
+	AztecRegisterContractOperation,
+	AztecRegisterSenderOperation,
+	AztecSimulateTxOperation,
+	Operation,
+} from "./operation"
+import type { OperationResult } from "./operation-result"
+import { enforceScope } from "./scope-enforcement"
+import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
+import { OriginType, type LocalTxOrigin } from "./transaction-origin"
+import type { SessionContext } from "./types"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
+import type { ILogger } from "@nulo/wallet-core/logger"
+import { LogLevel } from "@nulo/wallet-core/logger"
+import type { IAccountReader, IDappInteractionRunner, IDappSessionWriter, IExecutionRunner, INetworkReader } from "./services-contract"
+
+declare const __VERSION__: string
+
+/**
+ * Unwrap an `OperationResult`, returning the value or throwing.
+ *
+ * `cancelled` throws a structured `JobCancelledError` so the wallet-sdk
+ * handler can write `{ code: 4001, ... }` to the dApp response envelope —
+ * distinct from `failed`, which the dApp surfaces as a real error. Exported
+ * so the contract is unit-testable without standing up a full dispatcher.
+ */
+export function unwrapOperationResult(result: OperationResult): unknown {
+	switch (result.status) {
+		case "ok":
+			return result.result
+		case "cancelled":
+			throw new JobCancelledError(undefined, { jobId: result.jobId })
+		case "failed":
+			throw new Error(result.error)
+		case "skipped":
+			throw new Error("Operation was skipped")
+	}
+}
+
+/** Detects whether a sendTx `opts.from` value indicates NO_FROM
+ *  (DefaultEntrypoint). Mirrors `execution/utils/fee-detection.ts:18`;
+ *  inlined here so the dispatcher stays decoupled from extension
+ *  internals. */
+function isNoFromRequest(from: unknown): boolean {
+	return from === "NO_FROM"
+}
+
+/**
+ * A deserialized FunctionCall as received over the wallet-sdk wire protocol.
+ * These mirror `@aztec/stdlib/abi` FunctionCall but arrive as plain objects, not class instances.
+ */
+type WireFunctionCall = {
+	to: unknown
+	selector: unknown
+	args?: unknown[]
+	name?: string
+	type?: string
+	isStatic?: boolean
+	hideMsgSender?: boolean
+	returnTypes?: unknown[]
+}
+
+/** Shape of the capability manifest sent by the dApp via requestCapabilities(). */
+type CapabilityManifest = {
+	capabilities?: unknown[]
+	[key: string]: unknown
+}
+
+/**
+ * Maps wallet-sdk method names to internal Operation kinds.
+ *
+ * The wallet-sdk ExtensionWallet proxy calls methods by their WalletSchema key name.
+ * On the dApp side these are camelCase method names (e.g. `sendTx`, `simulateTx`).
+ * We map each to the corresponding `Operation.kind` that `ExecutionService` understands.
+ */
+const METHOD_TO_KIND: Record<string, Operation["kind"]> = {
+	// --- Standard Wallet interface (from @aztec/aztec.js/wallet WalletSchema) ---
+	getChainInfo: "aztec_getChainInfo",
+	getContractClassMetadata: "aztec_getContractClassMetadata",
+	getContractMetadata: "aztec_getContractMetadata",
+	getPrivateEvents: "aztec_getPrivateEvents",
+	registerSender: "aztec_registerSender",
+	getAddressBook: "aztec_getAddressBook",
+	registerContract: "aztec_registerContract",
+	simulateTx: "aztec_simulateTx",
+	executeUtility: "aztec_executeUtility",
+	profileTx: "aztec_profileTx",
+	// sendTx is handled directly in dispatch() via DappInteractionService
+	createAuthWit: "aztec_createAuthWit",
+	// --- Nulo custom methods (added via schema_patch.ts) ---
+	registerToken: "register_token",
+	getCompleteAddress: "get_complete_address",
+	simulateViews: "simulate_views",
+}
+
+/**
+ * Operations that only need a network (no account context).
+ * These map chainId → networkId.
+ */
+const NETWORK_ONLY_KINDS = new Set<Operation["kind"]>([
+	"aztec_getChainInfo",
+	"aztec_getContractClassMetadata",
+	"aztec_getContractMetadata",
+	"aztec_getPrivateEvents",
+	"aztec_registerSender",
+	"aztec_getAddressBook",
+	"aztec_registerContract",
+])
+
+/**
+ * Operations that need both network AND account context.
+ * These map chainId → networkId AND resolve the first session account.
+ */
+const ACCOUNT_KINDS = new Set<Operation["kind"]>([
+	"aztec_simulateTx",
+	"aztec_executeUtility",
+	"aztec_profileTx",
+	"aztec_createAuthWit",
+	"register_token",
+	"get_complete_address",
+	"simulate_views",
+])
+
+// Note: sendTx is handled separately in handleSendTx() via DappInteractionService
+
+export class WalletSdkDispatcher {
+	constructor(
+		private readonly networkService: INetworkReader,
+		private readonly accountService: IAccountReader,
+		private readonly executionService: IExecutionRunner,
+		private readonly dappInteractionService: IDappInteractionRunner,
+		private readonly dappSessionService: IDappSessionWriter,
+		private readonly logger: ILogger,
+	) {}
+
+	/**
+	 * Dispatch a wallet-sdk method call to the execution layer.
+	 *
+	 * @param methodName - The wallet method name from `WalletMessage.type`
+	 *   (e.g. "sendTx", "registerToken", "getCompleteAddress")
+	 * @param args - The method arguments from `WalletMessage.args`
+	 * @param ctx - Session context with chainId, profileId, origin, sessionId
+	 * @returns The result value from the first (and only) operation
+	 * @throws If the method is unsupported, the operation fails, or session context is invalid
+	 */
+	async dispatch(methodName: string, args: unknown[], ctx: SessionContext): Promise<unknown> {
+		// Enforce capability grants (type-level) then scope (per-operation)
+		const grants = await this.enforceCapability(methodName, ctx)
+		if (grants.length) {
+			enforceScope(methodName, args, grants)
+		}
+
+		// Handle methods that don't go through ExecutionService
+		if (methodName === "requestCapabilities") {
+			return this.handleRequestCapabilities(args[0] as CapabilityManifest, ctx)
+		}
+		if (methodName === "getAccounts") {
+			return this.handleGetAccounts(ctx)
+		}
+		if (methodName === "batch") {
+			return this.handleBatch(args[0] as Array<{ name: string; args: unknown[] }>, ctx)
+		}
+
+		// sendTx goes through DappInteractionService for the confirmation popup + fee selection
+		if (methodName === "sendTx") {
+			return this.handleSendTx(args, ctx)
+		}
+
+		const kind = METHOD_TO_KIND[methodName]
+		if (!kind) {
+			throw new Error(`Unsupported wallet method: ${methodName}`)
+		}
+
+		const operation = await this.buildOperation(kind, args, ctx)
+		const origin: LocalTxOrigin = { type: OriginType.DAPP, name: ctx.origin }
+
+		const results = await this.executionService.executeOperations([operation], origin)
+		return this.unwrapResult(results[0])
+	}
+
+	/**
+	 * Return accounts for the current session's profile and chain.
+	 * Scoped to session accounts only and uses per-app aliases.
+	 * WalletSchema expects: Array<{ alias: string, item: AztecAddress }>
+	 *
+	 * If the session has no accounts, returns empty array — the dApp should
+	 * call requestCapabilities() with an `accounts` type first.
+	 */
+	private async handleGetAccounts(ctx: SessionContext): Promise<unknown> {
+		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+		if (!dappSession) {
+			throw new Error(`No dApp session found for origin ${ctx.origin}`)
+		}
+
+		// No accounts yet — dApp should call requestCapabilities with accounts type first
+		if (!dappSession.accounts || dappSession.accounts.length === 0) {
+			return []
+		}
+
+		// Return session-scoped accounts with per-app aliases
+		const network = await this.resolveNetwork(ctx)
+		const allAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
+		const sessionAccountAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
+
+		return allAccounts
+			.filter((acc) => sessionAccountAddresses.has(acc.address))
+			.map((acc) => {
+				const caip = formatCaipAccount(ctx.chainId, acc.address)
+				const alias = dappSession.accountAliases?.[caip] ?? acc.name ?? ""
+				return { alias, item: acc.address }
+			})
+	}
+
+	/**
+	 * Sequential batch dispatch. The first per-leg failure aborts and propagates;
+	 * subsequent legs never run.
+	 *
+	 * The wallet-sdk batch return type is a closed `discriminatedUnion("name", …)`
+	 * over per-method return schemas — no error variant, no opt-out — so any
+	 * substituted "empty" leg Zod-fails on the dApp side. The dApp's
+	 * `handleEncryptedResponse` rejects on the error envelope before Zod runs, so
+	 * throwing is the only contract-compatible failure signal.
+	 */
+	private async handleBatch(methods: Array<{ name: string; args: unknown[] }>, ctx: SessionContext): Promise<unknown> {
+		const results: Array<{ name: string; result: unknown }> = []
+		for (const method of methods) {
+			const result = await this.dispatch(method.name, method.args, ctx)
+			results.push({ name: method.name, result })
+		}
+		return results
+	}
+
+	/**
+	 * Handle sendTx by routing through DappInteractionService.
+	 *
+	 * Unlike other methods that go directly to ExecutionService, sendTx needs
+	 * the confirmation popup for fee selection. DappInteractionService.execute()
+	 * validates the session, checks if confirmation is needed, and opens the
+	 * popup for user approval + fee method selection.
+	 */
+	private async handleSendTx(args: unknown[], ctx: SessionContext): Promise<unknown> {
+		const [_network, account] = await this.resolveNetworkAndAccount(ctx)
+		const caipAccount = formatCaipAccount(ctx.chainId, account.address)
+		this.logger.log(
+			"wallet-sdk",
+			LogLevel.Debug,
+			`handleSendTx: account=${account.address}, chainId=${ctx.chainId}, origin=${ctx.origin}`,
+		)
+
+		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+		if (!dappSession) {
+			throw new Error(`No dApp session found for origin ${ctx.origin}`)
+		}
+		this.logger.log(
+			"wallet-sdk",
+			LogLevel.Debug,
+			`handleSendTx: session=${dappSession.id}, sessionAccounts=${JSON.stringify(dappSession.accounts)}`,
+		)
+
+		const rawOpts = (args[1] as Record<string, unknown>) ?? {}
+		const isNoFrom = isNoFromRequest(rawOpts.from)
+		const opts = isNoFrom ? rawOpts : { ...rawOpts, from: account.address }
+		const execPayload = args[0] as Record<string, unknown> | undefined
+		this.logger.log(
+			"wallet-sdk",
+			LogLevel.Debug,
+			`handleSendTx: isNoFrom=${isNoFrom}, exec.feePayer=${execPayload?.feePayer}, exec.calls=${(execPayload?.calls as unknown[] | undefined)?.length}, additionalScopes=${JSON.stringify(rawOpts.additionalScopes)}`,
+		)
+
+		const sendOp: AztecSendTxRequest = {
+			kind: "aztec_sendTx" as const,
+			account: caipAccount,
+			exec: args[0] as AztecSendTxRequest["exec"],
+			opts: opts as AztecSendTxRequest["opts"],
+			...(isNoFrom ? { executionMode: "default_entrypoint" as const } : {}),
+		}
+
+		const results: ExecutionResult = await this.dappInteractionService.execute({
+			sessionId: dappSession.id,
+			operations: [sendOp],
+		})
+
+		return this.unwrapResult(results[0])
+	}
+
+	/**
+	 * Handle requestCapabilities with 3-phase approach:
+	 * 1. Check stored grants → compute delta (new/changed types)
+	 *    - Previously rejected types are included in delta (re-request)
+	 * 2. Early return if delta is empty (all already granted)
+	 * 3. Show popup for delta → user approves → merge and store
+	 *    - Track rejected types for future re-request detection
+	 */
+	private async handleRequestCapabilities(manifest: CapabilityManifest, ctx: SessionContext): Promise<unknown> {
+		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+		if (!dappSession) {
+			throw new Error(`No dApp session found for origin ${ctx.origin}`)
+		}
+
+		const requestedCapabilities = (manifest?.capabilities ?? []) as Record<string, unknown>[]
+		if (requestedCapabilities.length === 0) {
+			return {
+				version: "1.0" as const,
+				granted: [],
+				wallet: { name: "Nulo", version: __VERSION__ },
+			}
+		}
+
+		// Phase 1: Check existing grants and rejections
+		const existingGrants = dappSession.capabilityGrants ?? []
+		const existingRejections = dappSession.capabilityRejections ?? []
+		const grantedTypes = new Set(existingGrants.map((g) => g.capability.type))
+		const rejectedTypes = new Set(existingRejections.map((r) => r.capabilityType))
+
+		// Delta: capabilities not yet granted OR previously rejected (re-request)
+		const delta = requestedCapabilities.filter(
+			(cap) => !grantedTypes.has(cap.type as Capability["type"]) || rejectedTypes.has(cap.type as string),
+		)
+		// Track which delta items are re-requests (previously rejected)
+		const reRequested = requestedCapabilities.filter((cap) => rejectedTypes.has(cap.type as string)).map((cap) => cap.type as string)
+
+		// Phase 2: Early return if all types already granted and none re-requested
+		if (delta.length === 0) {
+			const granted = await this.enrichGrantedCapabilities(
+				existingGrants.map((g) => g.capability),
+				requestedCapabilities,
+				ctx,
+				dappSession,
+			)
+			return {
+				version: "1.0" as const,
+				granted,
+				wallet: { name: "Nulo", version: __VERSION__ },
+			}
+		}
+
+		// Phase 3: Show capability popup for delta
+		const existingCaps = existingGrants
+			.filter((g) => !rejectedTypes.has(g.capability.type)) // Don't show re-requested as "existing"
+			.map((g) => g.capability)
+
+		// If `accounts` type is in the delta, load available accounts for the popup
+		const hasAccountsInDelta = delta.some((cap) => cap.type === "accounts")
+		let availableAccounts: Array<{ address: string; name: string; chainId: number }> | undefined
+		if (hasAccountsInDelta) {
+			const network = await this.resolveNetwork(ctx)
+			const accounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
+			availableAccounts = accounts.map((acc) => ({
+				address: acc.address,
+				name: acc.name,
+				chainId: acc.chainId,
+			}))
+		}
+
+		let result: CapabilityResult
+		try {
+			result = await this.dappInteractionService.requestCapabilities({
+				sessionId: dappSession.id,
+				manifest,
+				delta,
+				existingGrants: existingCaps,
+				reRequested,
+				availableAccounts,
+			})
+		} catch (err) {
+			// On popup reject/close, persist rejection for all delta items so the
+			// next request renders the "previously denied" badge. The grant-path
+			// write below is unreachable when this throws.
+			const rejectedAt = Date.now()
+			const newRejections: RejectedCapabilityRecord[] = delta.map((cap) => ({
+				capabilityType: cap.type as string,
+				rejectedAt,
+			}))
+			const deltaTypes = new Set(delta.map((cap) => cap.type as string))
+			const mergedRejections = [...existingRejections.filter((r) => !deltaTypes.has(r.capabilityType)), ...newRejections]
+			await this.dappSessionService.setCapabilityRejections(dappSession.id, mergedRejections)
+			throw err
+		}
+
+		// Safety net: ensure accounts capability is in granted when accounts were selected
+		const grantedResults = result.granted as Record<string, unknown>[]
+		if (result.selectedAccounts && result.selectedAccounts.length > 0) {
+			const hasAccountsInGranted = grantedResults.some((cap) => cap.type === "accounts")
+			if (!hasAccountsInGranted) {
+				const accountsCap = delta.find((cap) => cap.type === "accounts")
+				if (accountsCap) {
+					grantedResults.push(accountsCap)
+				}
+			}
+		}
+
+		// If accounts were selected in the popup, merge with existing (don't replace)
+		if (result.selectedAccounts && result.selectedAccounts.length > 0) {
+			const existingAccounts = new Set(dappSession.accounts ?? [])
+			for (const acc of result.selectedAccounts) {
+				existingAccounts.add(acc)
+			}
+			const mergedAccounts = [...existingAccounts]
+
+			await this.dappSessionService.updateDappSession(
+				dappSession.id,
+				dappSession.permissions,
+				mergedAccounts,
+				dappSession.confirmationLevel,
+			)
+			if (result.accountAliases) {
+				await this.dappSessionService.setAccountAliases(dappSession.id, result.accountAliases)
+			}
+		}
+
+		// Compute which delta types were approved vs rejected
+		const approvedTypes = new Set(grantedResults.map((cap) => cap.type as string))
+		const now = Date.now()
+
+		// New grants: approved delta items that weren't already granted
+		const newGrants: GrantedCapabilityRecord[] = grantedResults
+			.filter((cap) => !grantedTypes.has(cap.type as Capability["type"]) || rejectedTypes.has(cap.type as string))
+			.map((cap) => ({ capability: cap as Capability, grantedAt: now }))
+		// Merge: keep existing grants (excluding re-approved types) + new grants
+		const mergedGrants = [...existingGrants.filter((g) => !rejectedTypes.has(g.capability.type)), ...newGrants]
+
+		await this.dappSessionService.setCapabilityGrants(dappSession.id, mergedGrants)
+
+		// Track rejections: delta items that were NOT approved
+		const newRejections: RejectedCapabilityRecord[] = delta
+			.filter((cap) => !approvedTypes.has(cap.type as string))
+			.map((cap) => ({ capabilityType: cap.type as string, rejectedAt: now }))
+		// Merge: keep old rejections for types not in this delta + new rejections
+		const deltaTypes = new Set(delta.map((cap) => cap.type as string))
+		const mergedRejections = [...existingRejections.filter((r) => !deltaTypes.has(r.capabilityType)), ...newRejections]
+		await this.dappSessionService.setCapabilityRejections(dappSession.id, mergedRejections)
+
+		// Reload session to pick up updated accounts/aliases
+		const updatedSession = await this.dappSessionService.getDappSession(dappSession.id)
+
+		const granted = await this.enrichGrantedCapabilities(
+			mergedGrants.map((g) => g.capability),
+			requestedCapabilities,
+			ctx,
+			updatedSession,
+		)
+
+		return {
+			version: "1.0" as const,
+			granted,
+			wallet: { name: "Nulo", version: __VERSION__ },
+		}
+	}
+
+	/**
+	 * Enrich granted capabilities with runtime data.
+	 * For "accounts" type: inject the actual account list with per-app aliases.
+	 */
+	private async enrichGrantedCapabilities(
+		grantedCaps: unknown[],
+		requestedCaps: Record<string, unknown>[],
+		ctx: SessionContext,
+		dappSession: IDappSessionRef,
+	): Promise<Record<string, unknown>[]> {
+		const result: Record<string, unknown>[] = []
+		// Use requested caps as the template to preserve the dApp's original fields
+		const grantedTypes = new Set(grantedCaps.map((c) => (c as Record<string, unknown>).type))
+
+		for (const cap of requestedCaps) {
+			if (!grantedTypes.has(cap.type)) continue
+
+			if (cap.type === "accounts") {
+				const network = await this.resolveNetwork(ctx)
+				const allAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
+				const sessionAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
+				const sessionAccounts = allAccounts.filter((acc) => sessionAddresses.has(acc.address))
+
+				result.push({
+					...cap,
+					accounts: sessionAccounts.map((acc) => {
+						const caip = formatCaipAccount(ctx.chainId, acc.address)
+						const alias = dappSession.accountAliases?.[caip] ?? acc.name ?? ""
+						return { alias, item: acc.address }
+					}),
+				})
+			} else {
+				result.push(cap)
+			}
+		}
+		return result
+	}
+
+	/**
+	 * Enforce capability grants before dispatching a method call.
+	 *
+	 * - Exempt methods (getChainInfo, requestCapabilities, batch, getAccounts) skip enforcement.
+	 * - The method's required capability type must be in the session's grants.
+	 * - Sessions without grants (new or pre-migration) are treated as having no grants,
+	 *   so non-exempt methods are blocked until requestCapabilities() is called.
+	 */
+	private async enforceCapability(methodName: string, ctx: SessionContext): Promise<GrantedCapabilityRecord[]> {
+		if (isCapabilityExempt(methodName)) return []
+
+		const requiredType = getRequiredCapability(methodName)
+		if (!requiredType) return [] // Unknown method — let dispatch() handle it
+
+		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+		if (!dappSession) return [] // No session yet — let the method handler deal with it
+
+		const grants = dappSession.capabilityGrants ?? []
+		const grantedTypes = new Set(grants.map((g) => g.capability.type))
+		if (!grantedTypes.has(requiredType)) {
+			throw new Error(`Capability "${requiredType}" not granted. The dApp must call requestCapabilities() first.`)
+		}
+		return grants
+	}
+
+	/**
+	 * Build an Operation from wallet-sdk method args and session context.
+	 *
+	 * The wallet-sdk sends args as positional arrays matching the WalletSchema
+	 * function signatures. For Aztec.js Wallet methods, the args map directly
+	 * to the operation fields. For Nulo custom methods, we unpack them
+	 * according to the schema_patch.ts definitions.
+	 */
+	private async buildOperation(kind: Operation["kind"], args: unknown[], ctx: SessionContext): Promise<Operation> {
+		if (NETWORK_ONLY_KINDS.has(kind)) {
+			const network = await this.resolveNetwork(ctx)
+			return this.buildNetworkOperation(kind, args, network.id)
+		}
+
+		if (ACCOUNT_KINDS.has(kind)) {
+			const [network, account] = await this.resolveNetworkAndAccount(ctx)
+			return this.buildAccountOperation(kind, args, network.id, account.address)
+		}
+
+		throw new Error(`Unhandled operation kind: ${kind}`)
+	}
+
+	/**
+	 * Build operations that only need network context.
+	 *
+	 * Wallet-sdk args for these methods:
+	 *   - getChainInfo(): []
+	 *   - getContractClassMetadata(id): [Fr]
+	 *   - getContractMetadata(address): [AztecAddress]
+	 *   - getPrivateEvents(eventMetadata, eventFilter): [EventMetadataDefinition, PrivateEventFilter]
+	 *   - registerSender(address, alias?): [AztecAddress, string?]
+	 *   - getAddressBook(): []
+	 *   - registerContract(instance, artifact?, secretKey?): [ContractInstanceWithAddress, ContractArtifact?, Fr?]
+	 */
+	private buildNetworkOperation(kind: Operation["kind"], args: unknown[], networkId: string): Operation {
+		switch (kind) {
+			case "aztec_getChainInfo":
+				return { kind, networkId }
+			case "aztec_getContractClassMetadata":
+				return { kind, networkId, id: args[0] as AztecGetContractClassMetadataOperation["id"] }
+			case "aztec_getContractMetadata":
+				return { kind, networkId, address: args[0] as AztecGetContractMetadataOperation["address"] }
+			case "aztec_getPrivateEvents":
+				return {
+					kind,
+					networkId,
+					eventMetadata: args[0] as AztecGetPrivateEventsOperation["eventMetadata"],
+					eventFilter: args[1] as AztecGetPrivateEventsOperation["eventFilter"],
+				}
+			case "aztec_registerSender":
+				return {
+					kind,
+					networkId,
+					address: args[0] as AztecRegisterSenderOperation["address"],
+					alias: args[1] as string | undefined,
+				}
+			case "aztec_getAddressBook":
+				return { kind, networkId }
+			case "aztec_registerContract":
+				return {
+					kind,
+					networkId,
+					instance: args[0] as AztecRegisterContractOperation["instance"],
+					artifact: args[1] as AztecRegisterContractOperation["artifact"],
+					secretKey: args[2] as AztecRegisterContractOperation["secretKey"],
+				}
+			default:
+				throw new Error(`Unknown network operation: ${kind}`)
+		}
+	}
+
+	/**
+	 * Build operations that need account context.
+	 *
+	 * Wallet-sdk args for these methods:
+	 *   - simulateTx(exec, opts): [ExecutionPayload, SimulateOptions]
+	 *   - executeUtility(call, opts): [FunctionCall, ExecuteUtilityOptions]
+	 *   - profileTx(exec, opts): [ExecutionPayload, ProfileOptions]
+	 *   - createAuthWit(messageHashOrIntent): [IntentInnerHash | CallIntent]
+	 *   - registerToken(account, token): [AztecAddress, AztecAddress]
+	 *   - getCompleteAddress(account): [AztecAddress]
+	 *   - simulateViews(calls): [FunctionCall[]]
+	 */
+	private buildAccountOperation(kind: Operation["kind"], args: unknown[], networkId: string, accountAddress: string): Operation {
+		switch (kind) {
+			case "aztec_simulateTx":
+				return {
+					kind,
+					networkId,
+					accountAddress,
+					exec: args[0] as AztecSimulateTxOperation["exec"],
+					opts: { ...((args[1] as Record<string, unknown>) ?? {}), from: accountAddress } as AztecSimulateTxOperation["opts"],
+				}
+			case "aztec_executeUtility":
+				return {
+					kind,
+					networkId,
+					accountAddress,
+					call: args[0] as AztecExecuteUtilityOperation["call"],
+					opts: {
+						...((args[1] as Record<string, unknown>) ?? {}),
+						from: accountAddress,
+					} as unknown as AztecExecuteUtilityOperation["opts"],
+				}
+			case "aztec_profileTx":
+				return {
+					kind,
+					networkId,
+					accountAddress,
+					exec: args[0] as AztecProfileTxOperation["exec"],
+					opts: { ...((args[1] as Record<string, unknown>) ?? {}), from: accountAddress } as AztecProfileTxOperation["opts"],
+				}
+			case "aztec_createAuthWit":
+				// WalletSchema: createAuthWit(from: AztecAddress, messageHashOrIntent) — args[0] is from, args[1] is the intent
+				return {
+					kind,
+					networkId,
+					accountAddress,
+					messageHashOrIntent: args[1] as AztecCreateAuthWitOperation["messageHashOrIntent"],
+				}
+			case "register_token":
+				// schema_patch: registerToken(account: AztecAddress, token: AztecAddress)
+				// The first arg is the account (already resolved), second is the token address
+				return { kind, networkId, accountAddress, address: String(args[1]) }
+			case "get_complete_address":
+				// schema_patch: getCompleteAddress(account: AztecAddress)
+				return { kind, networkId, accountAddress }
+			case "simulate_views":
+				// schema_patch: simulateViews(calls: FunctionCall[])
+				// The calls come as FunctionCall[] from the schema. ExecutionService expects
+				// (CallAction | EncodedCallAction)[]. We convert FunctionCall → EncodedCallAction.
+				return {
+					kind,
+					networkId,
+					accountAddress,
+					calls: this.functionCallsToEncodedActions(args[0] as WireFunctionCall[]),
+				}
+			default:
+				throw new Error(`Unknown account operation: ${kind}`)
+		}
+	}
+
+	/**
+	 * Convert FunctionCall[] (from wallet-sdk) to EncodedCallAction[] (for ExecutionService).
+	 *
+	 * The wallet-sdk sends FunctionCall objects (with `to`, `selector`, `args` as Fr[], etc).
+	 * The ExecutionService's SimulateViewsOperation expects `(CallAction | EncodedCallAction)[]`.
+	 * We convert to EncodedCallAction format which uses string representations.
+	 */
+	private functionCallsToEncodedActions(calls: WireFunctionCall[]): EncodedCallAction[] {
+		return calls.map((call) => ({
+			kind: "encoded_call" as const,
+			to: String(call.to),
+			selector: String(call.selector),
+			args: (call.args ?? []).map((a) => String(a)),
+			name: call.name,
+			type: call.type,
+			isStatic: call.isStatic,
+			hideMsgSender: call.hideMsgSender,
+			returnTypes: call.returnTypes ?? [],
+		}))
+	}
+
+	/**
+	 * Extract account addresses from a dApp session's CAIP accounts for the given chain.
+	 */
+	private getSessionAccountAddresses(dappSession: IDappSessionRef, chainId: number): Set<string> {
+		const prefix = `${formatCaipChain(chainId)}:`
+		return new Set(
+			dappSession.accounts?.filter((caip: string) => caip.startsWith(prefix)).map((caip: string) => parseCaipAccount(caip).address) ??
+				[],
+		)
+	}
+
+	/**
+	 * Resolve a session's chainId to a Network.
+	 */
+	private async resolveNetwork(ctx: SessionContext): Promise<INetworkRef> {
+		return resolveNetworkByChainId(this.networkService, ctx.chainId)
+	}
+
+	/**
+	 * Resolve a session's chainId to a Network + an authorized Account.
+	 *
+	 * Filters accounts to those authorized in the dApp session. If the session
+	 * has explicit accounts, only those are eligible. This ensures account-scoped
+	 * operations (simulateTx, sendTx, etc.) use session-authorized accounts,
+	 * not just the first global account.
+	 */
+	private async resolveNetworkAndAccount(ctx: SessionContext): Promise<[INetworkRef, IAccountRef]> {
+		const network = await this.resolveNetwork(ctx)
+		const allAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
+		if (allAccounts.length === 0) {
+			throw new Error(`No accounts found for profile ${ctx.profileId} on chainId ${ctx.chainId}`)
+		}
+
+		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+		if (dappSession?.accounts && dappSession.accounts.length > 0) {
+			const sessionAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
+			const sessionAccount = allAccounts.find((acc) => sessionAddresses.has(acc.address))
+			if (sessionAccount) {
+				return [network, sessionAccount]
+			}
+			throw new Error("No authorized accounts found for this dApp session")
+		}
+
+		// No session or no accounts on session — require account authorization
+		throw new Error("No accounts authorized. The dApp must call requestCapabilities() with accounts type first.")
+	}
+
+	private unwrapResult(result: OperationResult): unknown {
+		return unwrapOperationResult(result)
+	}
+}

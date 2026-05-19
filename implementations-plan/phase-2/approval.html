@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Phase 2 — approval gate</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1e252e; --border: #2a323d;
+    --text: #d1d5db; --muted: #8b949e; --accent: #9b59ff;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149; --info: #58a6ff;
+    --gold: #f1c40f;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); margin: 0; padding: 0; font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 24px 24px 80px; }
+
+  .stamp { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 3px 10px; border-radius: 4px; background: var(--accent); color: #fff; margin-bottom: 8px; letter-spacing: 0.5px; }
+
+  h1 { font-size: 30px; margin: 0 0 8px; color: #fff; letter-spacing: -0.5px; }
+  h1 .accent { color: var(--accent); }
+  h2 { font-size: 22px; margin: 40px 0 14px; color: #fff; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: var(--accent); }
+  h4 { font-size: 14px; margin: 18px 0 6px; color: #fff; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  p { margin: 10px 0; }
+
+  .lead { color: var(--muted); font-size: 16px; line-height: 1.6; margin-top: 0; }
+
+  .toc {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 14px 18px; margin: 20px 0;
+  }
+  .toc strong { color: var(--text); display: block; margin-bottom: 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
+  .toc a { color: var(--info); text-decoration: none; margin-right: 16px; font-size: 14px; }
+  .toc a:hover { text-decoration: underline; }
+
+  .grid { display: grid; gap: 16px; }
+  .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 800px) { .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; } }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; }
+  .card .title { font-weight: 600; color: #fff; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  .card.accent-border { border-left: 3px solid var(--accent); }
+  .card.ok-border { border-left: 3px solid var(--ok); }
+  .card.warn-border { border-left: 3px solid var(--warn); }
+  .card.info-border { border-left: 3px solid var(--info); }
+
+  figure.ascii {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 14px 16px; margin: 14px 0; overflow-x: auto;
+  }
+  figure.ascii figcaption { font-size: 13px; color: var(--muted); font-style: italic; margin-bottom: 10px; }
+  figure.ascii pre { font: 12px/1.35 var(--mono); color: var(--text); margin: 0; white-space: pre; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th, td { padding: 10px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; background: var(--panel); text-transform: uppercase; letter-spacing: 0.3px; }
+  td.mono { font-family: var(--mono); font-size: 12px; }
+  td.center { text-align: center; }
+
+  code { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+
+  .callout {
+    border-left: 3px solid var(--info); background: var(--panel);
+    padding: 14px 18px; margin: 16px 0; border-radius: 0 6px 6px 0; font-size: 14px;
+  }
+  .callout.accent { border-left-color: var(--accent); }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout strong { color: var(--info); }
+  .callout.accent strong { color: var(--accent); }
+  .callout.warn strong { color: var(--warn); }
+  .callout.ok strong { color: var(--ok); }
+
+  .before-after {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 18px; margin: 14px 0;
+  }
+  .before-after .row { display: grid; grid-template-columns: 80px 1fr; gap: 12px; margin: 8px 0; align-items: start; }
+  .before-after .label { font-family: var(--mono); font-size: 11px; padding: 3px 8px; border-radius: 3px; text-align: center; font-weight: 600; }
+  .before-after .label.before { background: rgba(248,81,73,0.15); color: var(--err); border: 1px solid rgba(248,81,73,0.3); }
+  .before-after .label.after { background: rgba(63,185,80,0.15); color: var(--ok); border: 1px solid rgba(63,185,80,0.3); }
+
+  .decision {
+    background: var(--panel); border: 1px solid var(--accent); border-left: 4px solid var(--accent);
+    border-radius: 6px; padding: 16px 18px; margin: 16px 0;
+  }
+  .decision .num { display: inline-block; background: var(--accent); color: #fff; padding: 2px 8px; border-radius: 3px; font-family: var(--mono); font-size: 11px; margin-right: 8px; font-weight: 600; }
+  .decision .q { font-weight: 600; color: #fff; font-size: 15px; }
+  .decision .why { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .decision .options { margin-top: 10px; }
+  .decision .options .opt { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; margin: 6px 0; font-size: 13px; }
+  .decision .options .opt strong { color: var(--text); }
+  .decision .options .opt.recommended { border-color: var(--accent); }
+  .decision .options .opt.recommended::before { content: "★ "; color: var(--accent); }
+
+  .footer { font-size: 12px; color: var(--muted); margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .footer a { color: var(--info); }
+  .footer code { font-size: 11px; }
+
+  .hero {
+    background: linear-gradient(135deg, rgba(155,89,255,0.12), rgba(155,89,255,0.02));
+    border: 1px solid var(--accent);
+    border-radius: 10px; padding: 22px 24px; margin: 14px 0 28px;
+  }
+  .hero p { margin: 8px 0; }
+  .hero p:last-child { margin-bottom: 0; }
+
+  .stage-pill { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--panel2); color: var(--text); border: 1px solid var(--border); margin: 2px; }
+  .stage-pill.terminal-ok { color: var(--ok); border-color: var(--ok); }
+  .stage-pill.terminal-bad { color: var(--err); border-color: var(--err); }
+  .stage-pill.terminal-neutral { color: var(--muted); border-color: var(--muted); }
+
+  .approval-box {
+    background: var(--panel);
+    border: 2px solid var(--accent);
+    border-radius: 10px;
+    padding: 22px 26px;
+    margin: 28px 0;
+  }
+  .approval-box h3 { margin-top: 0; color: #fff; }
+  .approval-box ol { font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<span class="stamp">approval gate · phase 2 v3</span>
+<h1>Phase 2 — what we're about to build, <span class="accent">in plain words</span></h1>
+<p class="lead">
+  Two parallel plans, two rounds of dual codex + opus 4.7 audits, 17 v1 concerns + 4 new v2 issues all addressed.
+  This document is the human-readable version. Read it, decide on the open questions, and approve before code starts.
+</p>
+
+<div class="toc" aria-label="Table of contents">
+  <strong>On this page</strong>
+  <a href="#problem">The problem (ELI5)</a>
+  <a href="#solution">What Phase 2 does</a>
+  <a href="#stages">The 7 job stages</a>
+  <a href="#user-impact">What changes for you</a>
+  <a href="#cancel">The cancel story</a>
+  <a href="#carries">The 6 carries</a>
+  <a href="#schedule">Schedule</a>
+  <a href="#decisions">Decisions you need to make</a>
+  <a href="#approval">Approval gate</a>
+</div>
+
+<h2 id="problem">The problem (ELI5)</h2>
+
+<div class="hero">
+  <p style="font-size: 16px; color: #fff; font-weight: 500;">Today, Nulo lies to you about transactions.</p>
+  <p>
+    When you send a transaction, the wallet does some math — a zero-knowledge proof — that takes 30 seconds to 2 minutes.
+    The popup waits for the math to finish. But it has a 60-second timeout. So if the math takes longer than that,
+    the popup gives up and tells you <em>"Simulation failed, transaction not sent."</em>
+  </p>
+  <p>
+    The catch: the math is still running. The transaction often actually does go through. The popup lied to you.
+  </p>
+  <p>
+    Worse: if Chrome decides to put the wallet's "service worker" to sleep mid-math (it does this aggressively to save power),
+    the math gets killed entirely. You have to start over.
+  </p>
+</div>
+
+<h3>What we know about this problem</h3>
+<ul>
+  <li>Aztec proofs <strong>routinely</strong> exceed the popup's 60-second timeout, especially on slower devices or busier transactions.</li>
+  <li>The 90-second timeout on the offscreen-side (where the math actually runs) is the <em>second</em> ceiling — sometimes the math hits that one too.</li>
+  <li>The PXE prover (the math engine, built by Aztec) cannot be interrupted mid-flight. Once it starts, it runs to completion.</li>
+  <li>Chrome's MV3 architecture <em>wants</em> the service worker to die when not actively in use. Fighting that is futile.</li>
+</ul>
+
+<h2 id="solution">What Phase 2 does (ELI5)</h2>
+
+<p>
+  Phase 2 stops treating "the wallet is alive" as a fact, and starts treating "the wallet might be alive" as the design principle.
+  Every transaction becomes a <strong>job</strong> with an ID. The job's state lives on disk, not in memory.
+  The popup just <em>observes</em> the job — it doesn't <em>own</em> it.
+</p>
+
+<div class="grid cols-2">
+  <div class="card warn-border">
+    <div class="title">Today</div>
+    <p>Popup says "Send" → popup waits → popup tells you what happened (sometimes wrong).</p>
+  </div>
+  <div class="card accent-border">
+    <div class="title">After Phase 2</div>
+    <p>Popup says "Send" → wallet creates a job → popup observes the job's status → user can close the popup, come back later, see the truth.</p>
+  </div>
+</div>
+
+<h3>Bumping the offscreen timeout</h3>
+<p>
+  Audit caught this: today the offscreen side hard-times-out at 90 seconds, which is part of why long proofs fail.
+  Phase 2 makes this configurable per-method — <code>proveTx</code> gets a generous limit or no limit at all (the job-sweeper handles stuck jobs instead).
+</p>
+
+<h2 id="stages">The 7 job stages</h2>
+
+<p>A job moves through these states:</p>
+
+<figure class="ascii" aria-label="State machine for a Phase 2 job">
+  <figcaption>The whole life of a transaction in Phase 2 — 7 states, 6 transitions. Three terminal: SUCCEEDED, FAILED, CANCELLED.</figcaption>
+  <pre>     PENDING                "Getting ready."
+       │
+       ▼
+     SIMULATING             "Checking this won't break."
+       │
+       ▼
+   ┌── PROVING ────────┐    "Doing the math (slow bit)."
+   │      │            │
+   │      ▼            │
+   │   SUBMITTING      │    "Sending it to Aztec."
+   │      │            │
+   ▼      ▼            ▼
+ FAILED  SUCCEEDED   CANCELLED
+                            (user clicked Cancel)</pre>
+</figure>
+
+<div style="margin: 14px 0;">
+  <span class="stage-pill">PENDING</span>
+  <span class="stage-pill">SIMULATING</span>
+  <span class="stage-pill">PROVING</span>
+  <span class="stage-pill">SUBMITTING</span>
+  <span class="stage-pill terminal-ok">SUCCEEDED</span>
+  <span class="stage-pill terminal-bad">FAILED</span>
+  <span class="stage-pill terminal-neutral">CANCELLED</span>
+</div>
+
+<p>What you're <em>not</em> seeing here that I considered:</p>
+<ul>
+  <li><strong>No AWAITING_USER state.</strong> The approval popup (where you click Confirm/Reject) stays as it is today — Phase 2 only makes the <em>post-approval</em> flow durable. Adding AWAITING_USER would require moving where jobs are created, which is much bigger work. Deferred to Phase 3 or later.</li>
+  <li><strong>No CANCELLING state.</strong> When you cancel, the popup says CANCELLED immediately. The math finishes uselessly in the background and the result is thrown away. Better UX than making you wait staring at a "Cancelling…" spinner.</li>
+</ul>
+
+<h2 id="user-impact">What changes for you, the user</h2>
+
+<div class="before-after">
+  <div class="row"><span class="label before">Before</span> <div>Hit "Send" → popup waits → "Simulation failed, transaction not sent" → tx actually went through, you find out an hour later.</div></div>
+  <div class="row"><span class="label after">After</span> <div>Hit "Send" → popup says "Generating proof…" → user closes the popup → proof keeps generating in the background → user opens popup again → sees "Transaction submitted" or the real failure with the real error message.</div></div>
+</div>
+
+<div class="before-after">
+  <div class="row"><span class="label before">Before</span> <div>Chrome puts the wallet to sleep mid-proof → user comes back, tries again, has to redo everything.</div></div>
+  <div class="row"><span class="label after">After</span> <div>Chrome puts the wallet to sleep mid-proof → wallet wakes itself up on a 30-second alarm → marks the proof as failed-by-Chrome-restart → user gets a clean error explaining what happened, can retry from the dApp.</div></div>
+</div>
+
+<div class="before-after">
+  <div class="row"><span class="label before">Before</span> <div>Generic "Loading…" / "Simulation failed" copy that doesn't distinguish stages.</div></div>
+  <div class="row"><span class="label after">After</span> <div>Every stage has a named title, body, and action. PROVING gets a sub-message after 30s: "Still working. Complex transactions can take a minute or more." No more "Loading…" anywhere.</div></div>
+</div>
+
+<h2 id="cancel">The cancel story</h2>
+
+<div class="callout warn">
+  <strong>Trade-off you should know about:</strong> The math engine (BB.wasm) can't be interrupted mid-flight. So when you click Cancel,
+  the popup says "Cancelled" instantly, but the math actually keeps running in the background until it finishes naturally
+  (up to a few minutes). The result is thrown away silently when it arrives. Memory cost: roughly one cancelled-proof-sized chunk holds for that duration.
+</div>
+
+<p>We accept this trade-off because the alternative is making you stare at a "Cancelling…" spinner for minutes. Engineering can't do better here without rebuilding the proof engine, which is upstream Aztec work.</p>
+
+<h2 id="carries">The 6 carries</h2>
+
+<p>
+  Phase 2 builds 8 things, but it also has to make <strong>6 specific design choices</strong> ("carries")
+  that don't matter today but will save weeks of rewrites when Phase 2+ ships. Each carry is roughly one design decision, not extra work.
+</p>
+
+<table>
+  <thead>
+    <tr><th>#</th><th>Carry (the choice)</th><th>What Phase 2+ feature it unlocks</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="center">1</td><td>Every job is tagged with <code>(origin, profileId, kind)</code> at create-time, even though Phase 2 doesn't use these fields.</td><td>Fairness (priority queues per origin), per-origin rate limits.</td></tr>
+    <tr><td class="center">2</td><td>Terminal jobs (SUCCEEDED / FAILED / CANCELLED) are <em>never deleted</em>, just flagged.</td><td>Tombstones (don't accidentally resurrect cancelled jobs), idempotency dedup.</td></tr>
+    <tr><td class="center">3</td><td>The "watch a job" subscription supports many watchers at once.</td><td>Future side-panel UI can watch the same job as the popup.</td></tr>
+    <tr><td class="center">4</td><td>Progress info uses an extensible tagged-union shape <code>{ stage, ...extras }</code>.</td><td>Future per-stage progress details (% complete, phase name) slot in without breaking anything.</td></tr>
+    <tr><td class="center">5</td><td>Error categories preserved — never collapse a real error into a generic "failed".</td><td>Retry policy can tell "user rejected" from "network blip" from "stuck job".</td></tr>
+    <tr><td class="center">6</td><td>Each job tracks an <code>attempts: number</code> counter, even though Phase 2 doesn't retry.</td><td>Phase 2+ retry-with-backoff logic works without a schema migration.</td></tr>
+  </tbody>
+</table>
+
+<p style="color: var(--muted); font-size: 13px;">
+  Two future Phase 2+ costs we're <em>deliberately accepting</em>: (a) adding a <code>dappRequestId</code> field later for "reattach this popup to that earlier dApp request" — a one-line schema bump + propagation; (b) journal garbage collection — Phase 2's terminal jobs accumulate unbounded; Phase 2+ adds a sweeper. With current low traffic this is fine for months.
+</p>
+
+<h2 id="schedule">Schedule (rough)</h2>
+
+<table>
+  <thead><tr><th>Week</th><th>What lands</th></tr></thead>
+  <tbody>
+    <tr><td class="center mono">1</td><td>Job foundation: evolve <code>OperationJournalService</code> with the 7-stage FSM, all 6 carries, the migration to v6. <em>LazyListener primitive (boot-message buffering) in parallel.</em></td></tr>
+    <tr><td class="center mono">2</td><td>Cancel surface: <code>cancelJob(jobId)</code> RPC, offscreen-side abort plumbing, lossy-cancel semantics, bumped offscreen timeout for proveTx.</td></tr>
+    <tr><td class="center mono">3</td><td>Per-(profile, chain) PXE concurrency — chains stop blocking each other. Profile-barrier mutex prevents lazy-creation races on profile delete. Registry <code>disposeProfile()</code> hooks added.</td></tr>
+    <tr><td class="center mono">4</td><td>chrome.alarms wake-up + resume policy (different stages have different resumability). IDB backup adapter (job records only) for the case where Chrome wipes session storage.</td></tr>
+    <tr><td class="center mono">5</td><td>Versioned migrations framework (absorbs Week 1's ad-hoc migration as <code>0006-add-job-tags-and-terminal.ts</code>). Execute window refactor (subscribe-by-jobId + new copy).</td></tr>
+    <tr><td class="center mono">6</td><td>Buffer: end-to-end refactor for the new subscription pattern, copy polish, edge-case fixes.</td></tr>
+  </tbody>
+</table>
+
+<p><strong>~50 new tests total</strong> (succinct: 2-5 per module, not 10 for the same thing). Pure unit tests dominate; only one new e2e network test (SW kill + recovery).</p>
+
+<h2 id="decisions">Decisions you need to make</h2>
+
+<p>Below are the decisions where my defaults are reasonable but you should sign off explicitly. Reply with any number + your call (or "default for all" if you're happy with the recommendations).</p>
+
+<div class="decision">
+  <span class="num">1</span>
+  <span class="q">Drop AWAITING_USER from Phase 2 FSM?</span>
+  <div class="why">
+    The approval popup ("click Confirm / Reject") today is a blocking call. Adding AWAITING_USER as a durable state means moving where jobs are created — significantly larger scope.
+  </div>
+  <div class="options">
+    <div class="opt recommended"><strong>Drop it</strong> — Phase 2 makes only post-approval flow durable. Pre-approval popup keeps blocking-await as today. <em>(my recommendation)</em></div>
+    <div class="opt"><strong>Keep it</strong> — invest the extra weeks now.</div>
+  </div>
+</div>
+
+<div class="decision">
+  <span class="num">2</span>
+  <span class="q">Drop the CANCELLING state — go straight to CANCELLED?</span>
+  <div class="why">
+    When user clicks Cancel during proof: with CANCELLING, the popup says "Cancelling, prove still finishing…" for up to 5 min waiting for offscreen to confirm. Without it, popup says "Cancelled" immediately and the orphaned proof completes silently in the background.
+  </div>
+  <div class="options">
+    <div class="opt recommended"><strong>Drop CANCELLING</strong> — instant feedback to user; accept the memory cost of the orphaned proof. <em>(my recommendation)</em></div>
+    <div class="opt"><strong>Keep CANCELLING</strong> — honest semantics but worse UX.</div>
+  </div>
+</div>
+
+<div class="decision">
+  <span class="num">3</span>
+  <span class="q">Drop "resume SUBMITTING after SW restart"?</span>
+  <div class="why">
+    Audit found: Aztec proofs are anchored to a block-header at prove-time. A proof generated 30+ seconds ago will be rejected by the node as "stale anchor" when re-submitted. Resuming SUBMITTING would also require persisting the ~100MB proof artifact, which is expensive.
+  </div>
+  <div class="options">
+    <div class="opt recommended"><strong>Drop it</strong> — SW restart during SUBMITTING just fails the job. User retries from the dApp. <em>(my recommendation)</em></div>
+    <div class="opt"><strong>Keep it</strong> — invest the persistence work and accept stale-anchor rejections will happen.</div>
+  </div>
+</div>
+
+<div class="decision">
+  <span class="num">4</span>
+  <span class="q">Drop heartbeat-from-prove?</span>
+  <div class="why">
+    Audit found: the prove call blocks JavaScript synchronously. A periodic "I'm still alive" heartbeat can't actually fire while prove is running. So the heartbeat plumbing was fictional.
+  </div>
+  <div class="options">
+    <div class="opt recommended"><strong>Drop it</strong> — record a single <code>enteredProveAt</code> timestamp at PROVING transition. Stale threshold relaxed to 20 minutes (down from 10 with heartbeat). <em>(my recommendation)</em></div>
+    <div class="opt"><strong>Build a workaround</strong> — split prove into chunks with yields between (much larger upstream work).</div>
+  </div>
+</div>
+
+<div class="decision">
+  <span class="num">5</span>
+  <span class="q">Drop <code>dappRequestId</code> from Phase 2?</span>
+  <div class="why">
+    This field would link "this job came from THAT specific dApp request, page reload notwithstanding". Useful in Phase 2+'s reattach feature. Audit found it's not one line — it needs propagation through executeOperations, zod schema, one-to-many handling. Cost ~2-3 hours.
+  </div>
+  <div class="options">
+    <div class="opt recommended"><strong>Drop it from Phase 2</strong> — defer to Phase 2+ when actually needed (one-field migration + propagation then). <em>(my recommendation)</em></div>
+    <div class="opt"><strong>Carry it now</strong> — pay the cost now, save the migration cost later.</div>
+  </div>
+</div>
+
+<div class="decision">
+  <span class="num">6</span>
+  <span class="q">Profile-level barrier vs scope registries per chain?</span>
+  <div class="why">
+    Phase 2 makes different chains stop blocking each other. But two shared registries (<code>ChainRuntimeRegistry</code>, <code>ArtifactRegistry</code>) are currently global. Either scope them per chain (invasive) or keep them global with a profile-level mutex above the per-chain locks (simpler).
+  </div>
+  <div class="options">
+    <div class="opt recommended"><strong>Profile barrier</strong> — single mutex per profile gates guard creation; registries get a <code>disposeProfile()</code> method (~20 LOC). <em>(my recommendation)</em></div>
+    <div class="opt"><strong>Scope registries</strong> — more parallelism but bigger refactor.</div>
+  </div>
+</div>
+
+<div class="decision">
+  <span class="num">7</span>
+  <span class="q">UX copy — sign off on the 7-stage table?</span>
+  <div class="why">
+    The proposed copy: PROVING splits into &lt;30s and &gt;30s variants ("Still working. Complex transactions can take a minute or more."). The privacy-first wording is "submit to the Aztec node" not "broadcast" (we never broadcast through middlemen). FAILED gets sub-variants per error category. Raw error text is shown in tooltip (preserved Carry #5).
+  </div>
+  <div class="options">
+    <div class="opt recommended"><strong>Sign off on the draft</strong> — final polish comes in the Week 5 implementation. <em>(my recommendation)</em></div>
+    <div class="opt"><strong>Send me the full copy table to review now</strong></div>
+    <div class="opt"><strong>I want to rewrite some of it myself</strong> — tell me which stages.</div>
+  </div>
+</div>
+
+<div class="decision">
+  <span class="num">8</span>
+  <span class="q">Schedule — 6 weeks accepting or want to compress / extend?</span>
+  <div class="why">
+    Single-dev, focused work. Week 6 is genuine buffer for e2e refactor + copy polish, not padding.
+  </div>
+  <div class="options">
+    <div class="opt recommended"><strong>6 weeks is fine</strong> — accept the schedule as-is. <em>(my recommendation)</em></div>
+    <div class="opt"><strong>Compress</strong> — drop Week 6 buffer or accept skipping the executable migration test harness.</div>
+    <div class="opt"><strong>Extend</strong> — add a Week 7 for the dropped pieces (AWAITING_USER, CANCELLING state, or dappRequestId).</div>
+  </div>
+</div>
+
+<h2 id="approval">Approval gate</h2>
+
+<div class="approval-box" style="border-color: var(--ok);">
+  <h3 style="color: var(--ok);">✓ APPROVED — 2026-05-12</h3>
+  <p><strong>Decisions 1-8:</strong> all defaults adopted.</p>
+  <p><strong>Decision 9 (token imports / other long-running flows):</strong> <strong>Path C — defer to Phase 2.5</strong>.
+  Phase 2 ships transaction durability only. After Phase 2 lands, a separate ELI5 + approval gate scopes Phase 2.5 (token import, account import, profile creation, contact bulk-import, backup restore, network switching — full inventory done from real codebase, not guessed).</p>
+  <p style="margin-bottom: 0; color: var(--muted);">Implementation begins on branch <code>feat/phase-2-durable-jobs</code>. Codex reviews each major piece as it lands.</p>
+</div>
+
+<div class="footer">
+  <p>
+    <strong>Process trail.</strong> Two parallel plans (claude + Send-Claude) → consolidated v1 → audited by codex + opus 4.7 (round 1, 17 concerns) → revised v2 → audited by codex + opus 4.7 (round 2, 4 new concerns) → final v3. All audit transcripts preserved in this session.
+  </p>
+  <p>
+    Calibrated against <code>master</code> at v0.14.9 (post-PR-76), 2026-05-12.
+    Related: <a href="../../wallets-architecture-research/nulo-phase-2.html">nulo-phase-2.html</a> · <a href="../../wallets-architecture-research/nulo-phase-2-plus.html">nulo-phase-2-plus.html</a> · <a href="../../wallets-architecture-research/nulo-maximalist.html">nulo-maximalist.html</a>
+  </p>
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,32 @@
+name: Setup Bun
+description: |
+  Install Bun, restore the install cache, and run `bun install --frozen-lockfile`.
+  Callers must `actions/checkout@v6` before invoking this action — it does NOT
+  check out the repo itself. Removed the inner checkout because every direct
+  caller in this repo already checks out first (verified in build-caching-plan
+  audit), so the duplicate was pure overhead (~5s × N jobs).
+
+  Bun version is pinned (matches `packageManager` in root package.json).
+  Cache key includes the Bun version so a Bun bump invalidates stale state.
+
+  We deliberately stay on binary `bun.lockb` for now: Bun 1.3.1 has a
+  text-lockfile bug where `bun install --frozen-lockfile` materializes
+  peer-resolved deps as duplicate physical copies, breaking vue-tsc.
+
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: 1.3.13
+
+    - uses: actions/cache@v5
+      with:
+        path: ~/.bun/install/cache
+        key: ${{ runner.os }}-bun-1.3.13-${{ hashFiles('bun.lockb') }}
+        restore-keys: |
+          ${{ runner.os }}-bun-1.3.13-
+          ${{ runner.os }}-bun-
+
+    - shell: bash
+      run: bun install --frozen-lockfile

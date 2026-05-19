@@ -1,0 +1,57 @@
+import { defineStore } from "pinia"
+
+export const useCacheStore = defineStore("cache", () => {
+	const confirm = reactive({})
+
+	const networkToEditIdx = ref()
+	/** Per-`Network` detail page → endpoint popups context. */
+	const endpointEditNetworkId = ref<string | null>(null)
+	const endpointEditId = ref<string | null>(null)
+	const accountToEditIdx = ref()
+	const contactToEditIdx = ref()
+	const fpcToEditIdx = ref()
+
+	const activeTokenIdx = ref()
+	const preselectedBalanceType = ref("private")
+	const preselectedContactToSend = ref(null)
+	const preselectedTokenAddressToAdd = ref()
+	const preselectedAuthwits = ref([])
+
+	const proposedNetworks = ref([])
+	const selectedNetwork = ref()
+	const feePaymentMethods = ref([])
+
+	const importType = ref("")
+
+	const importContact = ref(null)
+	const importContacts = ref([])
+	const importPromise = ref(null)
+
+	const failureLog = ref()
+
+	const viewerData = ref()
+
+	return {
+		confirm,
+		networkToEditIdx,
+		endpointEditNetworkId,
+		endpointEditId,
+		accountToEditIdx,
+		contactToEditIdx,
+		fpcToEditIdx,
+		activeTokenIdx,
+		proposedNetworks,
+		selectedNetwork,
+		preselectedBalanceType,
+		preselectedContactToSend,
+		preselectedTokenAddressToAdd,
+		preselectedAuthwits,
+		feePaymentMethods,
+		importType,
+		importContact,
+		importContacts,
+		importPromise,
+		failureLog,
+		viewerData,
+	}
+})

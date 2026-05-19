@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Phase 2 — closeout summary</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1e252e; --border: #2a323d;
+    --text: #d1d5db; --muted: #8b949e; --accent: #9b59ff;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149; --info: #58a6ff;
+    --gold: #f1c40f;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); margin: 0; padding: 0; font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 24px 24px 80px; }
+
+  .stamp { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 3px 10px; border-radius: 4px; background: var(--ok); color: #fff; margin-bottom: 8px; letter-spacing: 0.5px; }
+
+  h1 { font-size: 30px; margin: 0 0 8px; color: #fff; letter-spacing: -0.5px; }
+  h1 .accent { color: var(--accent); }
+  h2 { font-size: 22px; margin: 40px 0 14px; color: #fff; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: var(--accent); }
+  h4 { font-size: 14px; margin: 18px 0 6px; color: #fff; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  p { margin: 10px 0; }
+
+  .lead { color: var(--muted); font-size: 16px; line-height: 1.6; margin-top: 0; }
+
+  .toc {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 14px 18px; margin: 20px 0;
+  }
+  .toc strong { color: var(--muted); display: block; margin-bottom: 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .toc a { color: var(--info); text-decoration: none; margin-right: 16px; font-size: 14px; }
+  .toc a:hover { text-decoration: underline; }
+
+  .grid { display: grid; gap: 16px; }
+  .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 800px) { .grid.cols-2 { grid-template-columns: 1fr; } }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; }
+  .card .title { font-weight: 600; color: #fff; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  .card.accent-border { border-left: 3px solid var(--accent); }
+  .card.ok-border { border-left: 3px solid var(--ok); }
+  .card.warn-border { border-left: 3px solid var(--warn); }
+  .card.info-border { border-left: 3px solid var(--info); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th, td { padding: 10px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; background: var(--panel); text-transform: uppercase; letter-spacing: 0.3px; }
+  td.mono { font-family: var(--mono); font-size: 12px; }
+
+  code { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+
+  figure.ascii {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 14px 16px; margin: 14px 0; overflow-x: auto;
+  }
+  figure.ascii figcaption { font-size: 13px; color: var(--muted); font-style: italic; margin-bottom: 10px; }
+  figure.ascii pre { font: 12px/1.4 var(--mono); color: var(--text); margin: 0; white-space: pre; }
+
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+
+  .callout {
+    border-left: 3px solid var(--info); background: var(--panel);
+    padding: 14px 18px; margin: 16px 0; border-radius: 0 6px 6px 0; font-size: 14px;
+  }
+  .callout.accent { border-left-color: var(--accent); }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout strong { color: var(--info); }
+  .callout.accent strong { color: var(--accent); }
+  .callout.warn strong { color: var(--warn); }
+  .callout.ok strong { color: var(--ok); }
+
+  .deferral {
+    background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--warn);
+    border-radius: 6px; padding: 16px 18px; margin: 16px 0;
+  }
+  .deferral .head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .deferral .num { display: inline-block; background: var(--warn); color: #0e1116; padding: 2px 8px; border-radius: 3px; font-family: var(--mono); font-size: 11px; font-weight: 700; }
+  .deferral .title { font-weight: 600; color: #fff; font-size: 15px; }
+  .deferral .label { display: inline-block; font-family: var(--mono); font-size: 10px; padding: 2px 8px; border-radius: 3px; background: var(--panel2); color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; margin-left: auto; }
+
+  .deferral .row { display: grid; grid-template-columns: 110px 1fr; gap: 10px; margin: 6px 0; font-size: 13px; }
+  .deferral .row .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; padding-top: 2px; }
+  .deferral .row .v { color: var(--text); }
+  .deferral .row .v code { font-size: 11px; }
+
+  .footer { color: var(--muted); font-size: 12px; margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); text-align: center; }
+
+  .pill { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 3px; }
+  .pill.ok { background: rgba(63,185,80,0.15); color: var(--ok); border: 1px solid rgba(63,185,80,0.3); }
+  .pill.def { background: rgba(210,153,34,0.15); color: var(--warn); border: 1px solid rgba(210,153,34,0.3); }
+  .pill.skip { background: rgba(139,148,158,0.15); color: var(--muted); border: 1px solid rgba(139,148,158,0.3); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stamp">CLOSED · 2026-05-13</div>
+  <h1>Phase 2 — <span class="accent">closeout summary</span></h1>
+  <p class="lead">Durable jobs across SW restart + popup close/reopen. Weeks 1–5 landed; arc closed with explicit deferrals documented below. Branch <code>feat/phase-2-durable-jobs</code> sits at 11 commits ahead of <code>master</code>; 1507 tests pass.</p>
+
+  <div class="callout ok">
+    <strong>Update (2026-05-15) — Phase 2+ Bundle 1 + Phase A shipped.</strong> The deferrals D1 (migration framework) and D3 (token imports as durable jobs) and the "Cancel ignored" UX item all landed via two stacked PRs onto <code>dev</code>:
+    <ul>
+      <li><strong>PR #82 (<code>v0.15.7</code>)</strong> — production hardening: `EntityStorage` per-row JSON-parse resilience, `OperationRecordSchema` Zod validation on journal load via `_loadValidated`, `JournalGC` terminal-record cap (50 per (profileId, accountAddress) on a 60-min alarm), boot-time session-storage observability log.</li>
+      <li><strong>PR #83 (<code>v0.16.0</code>)</strong> — Phase 2.5: `token_import` OperationKind through the durable journal, kind ↔ <code>succeeded.txHash</code> invariant + <code>simulating → succeeded</code> no-prove shortcut, sibling `TokenImportRow` in the tokens view, activity-feed exclusions for token imports. Plus a Phase 2 W5 regression fix found during user QA: the recent-activity area now renders one awaiting card per in-flight journal op (previously hardcoded to <code>inFlightJournalOps[0]</code>, which caused concurrent tx A to disappear when tx B was submitted).</li>
+    </ul>
+    Decision <strong>D2 (IDB backup)</strong> remains declined as architecturally unrecoverable. <strong>D4 (Zod hardening)</strong> shipped as part of A1 layer 2 in Bundle 1. <strong>D5 (Histoire)</strong> still blocked on M6 phase 10. Phase B graduation of other single-shot popup ops is planned but not yet started — see <code>implementations-plan/phase-2-plus/plan-v4.md</code> for the post-Phase-A roadmap.
+  </div>
+
+  <div class="toc">
+    <strong>Sections</strong>
+    <a href="#what-shipped">What shipped</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#deferrals">Deferred items</a>
+    <a href="#followups">Follow-ups</a>
+    <a href="#tests">Tests &amp; tooling</a>
+  </div>
+
+  <h2 id="what-shipped">What shipped</h2>
+
+  <table>
+    <thead>
+      <tr><th>Week</th><th>Substance</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>W1</strong></td>
+        <td>FSM (<code>@nulo/wallet-core/jobs</code>) · LazyListener · subscribeWithSnapshot · journal schema rewrite + v6 wipe · prove-flow wiring (4 paths)</td>
+        <td><span class="pill ok">SHIPPED</span></td>
+      </tr>
+      <tr>
+        <td><strong>W2</strong></td>
+        <td><code>cancelJob</code> RPC + lossy-cancel checkpoints · per-method offscreen timeout (<code>proveTx</code> → 30 min)</td>
+        <td><span class="pill ok">SHIPPED</span></td>
+      </tr>
+      <tr>
+        <td><strong>Codex review</strong></td>
+        <td><code>submitting → cancelled</code> made illegal (closes cancel-after-submit contradiction) · cancelJob drops late signal · <code>markJournal("simulating")</code> hoisted before build/estimate in 3 paths</td>
+        <td><span class="pill ok">SHIPPED</span></td>
+      </tr>
+      <tr>
+        <td><strong>W3</strong></td>
+        <td>Per-(profileId, chainId) PXE concurrency · profile-level write barrier · <code>ChainRuntimeRegistry.disposeProfile</code> · profile-switch no longer disposes runtimes</td>
+        <td><span class="pill ok">SHIPPED</span></td>
+      </tr>
+      <tr>
+        <td><strong>W4</strong></td>
+        <td><code>JournalReaper</code> (chrome.alarms tick + boot sweep, per-stage grace windows, <code>stuck_proving</code> / <code>stale_on_resume</code>)</td>
+        <td><span class="pill ok">SHIPPED</span></td>
+      </tr>
+      <tr>
+        <td><strong>W5</strong></td>
+        <td><code>RecentActivityView.vue</code>: journal is now primary in-flight source · <code>onConnected</code> re-snapshot · TaskService demoted to subtask enrichment (closes codex Blocker 1)</td>
+        <td><span class="pill ok">SHIPPED</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>Phase 2 promise delivered.</strong> Today: pop the popup, fire a tx, close the popup, reopen mid-prove — the in-flight card appears from the journal and tracks the real stage. SW restart mid-prove is detected by the reaper, transitioned to <code>failed:stuck_proving</code>, and the popup reflects it on next reconnect. Cancel before submit is real; cancel after submit is dropped silently so journal/chain never disagree.
+  </div>
+
+  <h2 id="architecture">Architecture</h2>
+  <p class="lead">Where the durable-jobs subsystem ended up: three execution surfaces (popup / SW / offscreen), a journal record as the single source of truth, and a small reaper that bridges SW-suspend gaps.</p>
+
+  <h3>Component graph</h3>
+  <p>Each box is a JS context with its own lifecycle. Arrows are message-channel calls (chrome.runtime port for popup↔SW, chrome.runtime.sendMessage for SW↔offscreen).</p>
+
+  <figure class="ascii">
+    <figcaption>Components by JS context — popup is ephemeral, SW may suspend, offscreen is long-lived.</figcaption>
+    <pre>
+ ┌────────────────────────────────────────────────────────────────────┐
+ │  POPUP (Vue — port-lifecycle-bound; pops in/out repeatedly)        │
+ │                                                                    │
+ │    RecentActivityView.vue                                          │
+ │      ▲                                                             │
+ │      │ journal is PRIMARY in-flight source (W5)                    │
+ │      │                                                             │
+ │    OperationJournalServiceClient  ──▶  ExecutionServiceClient      │
+ │      • subscribeJob / events            • executeTransfer / Send   │
+ │      • onConnected → resnapshot         • cancelJob(id)            │
+ └──────────┬───────────────────────────────────────┬─────────────────┘
+            │   chrome.runtime port                 │  chrome.runtime
+            ▼                                       ▼
+ ┌────────────────────────────────────────────────────────────────────┐
+ │  SERVICE WORKER (MV3 — may suspend at any await)                   │
+ │                                                                    │
+ │   OperationJournalService            ExecutionService              │
+ │   • createOperation                  • activeControllers&lt;id, AC&gt;   │
+ │   • transitionOperation (FSM gate)   • cancelJob (drops the late   │
+ │   • emits onAdded/Updated/Deleted      cancel if FSM rejects)      │
+ │      │                                                             │
+ │      │ writes                                                      │
+ │      ▼                              ┌────────────────────────────┐ │
+ │   chrome.storage.session ◀──reads── │  JournalReaper (W4)        │ │
+ │   nulo:journal@*                    │  • boot sweep + 1m tick    │ │
+ │                                     │  • stuck_proving (proving) │ │
+ │                                     │  • stale_on_resume (rest)  │ │
+ │                                     └────────────┬───────────────┘ │
+ │                                                  │                 │
+ │   PxeServiceClient ─────▶ chrome.alarms ◀────────┘                 │
+ │   (proveTx: 30 min)       nulo:journal:reap                        │
+ └──────────┬─────────────────────────────────────────────────────────┘
+            │   chrome.runtime.sendMessage (offscreen channel)
+            ▼
+ ┌────────────────────────────────────────────────────────────────────┐
+ │  OFFSCREEN DOCUMENT (long-lived; BB.wasm host)                     │
+ │                                                                    │
+ │   PxeService                                                       │
+ │   • chainGuards     Map&lt;(profileId, chainId), ReadWriteGuard&gt;  (W3)│
+ │   • profileBarriers Map&lt;profileId, ReadWriteGuard&gt;             (W3)│
+ │      │                                                             │
+ │      └─▶ ChainRuntimeRegistry ─▶ PXE × N (parallel per-chain)      │
+ └────────────────────────────────────────────────────────────────────┘</pre>
+  </figure>
+
+  <h3>The FSM</h3>
+  <p>Seven stages; cancel is only legal pre-submit. The diagram is the contract enforced inside <code>OperationJournalService.transitionOperation</code> via <code>assertCanTransition</code>.</p>
+
+  <figure class="ascii">
+    <figcaption>Legal transitions. <code>submitting → cancelled</code> is intentionally omitted (codex-blocker fix).</figcaption>
+    <pre>
+                       cancel        cancel        cancel
+                         │             │             │  ╳ NOT LEGAL
+                         ▼             ▼             ▼     (tx broadcast;
+   pending ───▶ simulating ───▶ proving ───▶ submitting ──▶ succeeded
+                                                            cancel after
+                                                            this is dropped
+                                                            silently by
+                                                            cancelJob)
+   from ANY non-terminal stage  ──▶  failed
+                                       ▲
+                                       │ also reaper-driven:
+                                       │   kind = "stuck_proving"   (proving)
+                                       │   kind = "stale_on_resume" (others)</pre>
+  </figure>
+
+  <h3>Happy-path sequence</h3>
+  <p>Every transition is journalled BEFORE the work for that stage runs (so the popup observes the real stage, not a delayed one). Codex W1+W2 review surfaced the original "simulating after build/estimate" ordering; that's now hoisted in the 3 dApp/transfer paths.</p>
+
+  <figure class="ascii">
+    <figcaption>One UI-initiated transfer, popup open the entire time. <code>══▶</code> = event fan-out.</figcaption>
+    <pre>
+ popup        SW.ExecSvc        SW.JournalSvc        offscreen.PxeSvc
+   │              │                   │                      │
+   │executeTransfer                   │                      │
+   ├─────────────▶│  createOperation  │                      │
+   │              ├──────────────────▶│  record:pending      │
+   │ ◀══onAdded══│◀══════════════════│                      │
+   │              │  transition(simulating)                  │
+   │              ├──────────────────▶│                      │
+   │ ◀═onUpdated═│◀══════════════════│                      │
+   │              │  buildAndEstimate (fee strategies)       │
+   │              ├──────────────────────────────▶ simulateTx│
+   │              │                   │           ◀──────────│
+   │              │  transition(proving, enteredProveAt)     │
+   │              ├──────────────────▶│                      │
+   │ ◀═onUpdated═│                   │                      │
+   │              │  proveTx (AbortController bound)         │
+   │              ├──────────────────────────────▶ proveTx   │
+   │              │                   │       [BB.wasm       │
+   │              │                   │        30s..30min]   │
+   │              │                   │           ◀──────────│
+   │              │  transition(submitting)                  │
+   │              ├──────────────────▶│                      │
+   │ ◀═onUpdated═│                   │                      │
+   │              │  sendTx ────────────────────▶ node (L2)  │
+   │              │  transition(succeeded, txHash)           │
+   │              ├──────────────────▶│                      │
+   │ ◀═onUpdated═│                   │                      │</pre>
+  </figure>
+
+  <h3>SW-restart recovery (the Phase 2 motivating bug)</h3>
+  <p>SW suspends mid-prove. Pre-Phase 2 outcome: popup sees the disconnect, never gets the prove result back when a fresh SW boots, shows a stale "Proving…" forever. Post-Phase 2: journal record survives, the reaper transitions it on grace-window expiry, popup observes via <code>onConnected</code> resnapshot + subsequent <code>onUpdated</code>.</p>
+
+  <figure class="ascii">
+    <figcaption>SW#1 dies mid-prove; SW#2 boots later. Offscreen keeps running but its result is dropped (no matching request id in the fresh SW).</figcaption>
+    <pre>
+ popup        SW #1            ║ SW SUSPENDED ║      SW #2 (fresh boot)
+   │           │                ║              ║         │
+   │ proveTx   │ proveTx ──────────────────────────▶ offscreen
+   │ in-flight │                ║   (offscreen ║      (keeps going,
+   │           X SW dies        ║   keeps the  ║       result will be
+   X port disconnects           ║    prove)    ║       dropped on
+   │                            ║              ║       arrival)
+   │  (no events)               ║  journal:    ║         │
+   │                            ║  { stage:    ║         │
+   │                            ║    proving,  ║         │
+   │                            ║    updatedAt ║         │
+   │                            ║     = T0 }   ║         │
+   │                            ╚══════╤═══════╝         │
+   │                                   │  alarm wakes SW │
+   │                                   ▼                 │
+   │                              runtime.start()
+   │                              JournalReaper.start()
+   │                                • boot sweep
+   │                                  (age &lt; 35min → no-op)
+   │                                • alarm subscription
+   │           ◀════════ port reconnects ═════════════════│
+   │                                                     │
+   │ journalClient.onConnected → resnapshot()            │
+   │ getOperations() ───────────────────────────▶        │
+   │ (record still "proving"; popup shows in-flight card)│
+   │                                                     │
+   │      ⋯ time passes; alarm ticks every 1 min ⋯       │
+   │                                                     │
+   │                       JournalReaper.reap()          │
+   │                       T_now - updatedAt &gt; 35min     │
+   │                       transitionOperation(          │
+   │                         failed,                     │
+   │                         kind: "stuck_proving")      │
+   │                                  │                  │
+   │ ◀══════ onUpdated: failed:stuck_proving ════════════│
+   │  (popup card flips to "Failed — Job lost")</pre>
+  </figure>
+
+  <div class="callout accent">
+    <strong>Why no resume?</strong> Aztec proofs are block-anchored and the in-memory state of the offscreen instance that started the prove may have died too. Even when alive, the original <code>requestId</code> isn't addressable from a fresh SW. The honest outcome is "declare it lost" — and that's what the reaper does. A future retry policy could re-issue a fresh job (using the journal's <code>attempts</code> carry as the counter), but that's a Phase 3 concern.
+  </div>
+
+  <h3>Cancel — pre-submit vs. post-submit</h3>
+  <p>Two distinct behaviors depending on when the cancel arrives. The codex W1+W2 review's blocker fix was the bottom case — without it, journal said "cancelled" while a real tx existed in chain history.</p>
+
+  <figure class="ascii">
+    <figcaption>Pre-submit cancel: real cancel. Post-submit cancel: dropped silently; journal &amp; chain stay consistent.</figcaption>
+    <pre>
+ ── Pre-submit (the easy case) ─────────────────────────────────────────
+
+   popup            SW.ExecSvc                  SW.JournalSvc
+     │                  │                            │
+     │  cancelJob(id) ─▶│                            │
+     │                  │  transition(cancelled)     │
+     │                  ├───────────────────────────▶│  proving → cancelled
+     │                  │                            │  (legal)
+     │                  │  controller.abort()        │
+     │                  │  next checkpoint() in      │
+     │                  │  prove pipeline throws     │
+     │                  │  JobCancelledError         │
+     │ ◀═══════════════════ onUpdated: cancelled ════│
+     │  (popup card → "Cancelled")
+
+ ── Post-submit (the codex-blocker fix) ────────────────────────────────
+
+   popup            SW.ExecSvc                  SW.JournalSvc      FSM
+     │                  │                            │                │
+     │ (prove done; SW already did markJournal(submitting))            │
+     │                  │  sendTx in flight…         │                │
+     │                  │                            │                │
+     │  cancelJob(id) ─▶│                            │                │
+     │                  │  transition(cancelled)     │                │
+     │                  ├───────────────────────────▶│ ─────────────▶ │ submitting →
+     │                  │                            │ ◀───────────── │  cancelled?
+     │                  │                            │ throws         │ ILLEGAL
+     │                  │  catch:                    │                │
+     │                  │  "too late — drop signal"  │                │
+     │                  │  (controller NOT aborted)  │                │
+     │                  │  sendTx completes ok       │                │
+     │                  │  transition(succeeded)     │                │
+     │ ◀═══════════════════ onUpdated: succeeded ════│                │</pre>
+  </figure>
+
+  <h2 id="deferrals">Deferred items</h2>
+  <p class="lead">Five items moved out of Phase 2's scope. Each has an explicit reason and a rough re-evaluation trigger.</p>
+
+  <div class="deferral">
+    <div class="head">
+      <span class="num">D1</span>
+      <span class="title">Migration framework absorbing storage v6</span>
+      <span class="label">Mechanical refactor</span>
+    </div>
+    <div class="row"><div class="k">What</div><div class="v">The v6 wipe still lives inline in <code>packages/extension/src/wallet/storage/migrate.ts</code>. The original plan called for a small migrations framework (versioned migration entries that run on boot) to absorb it.</div></div>
+    <div class="row"><div class="k">Why deferred</div><div class="v">Mechanical refactor with zero behavior change. The current inline gate is already shipping the correct semantics (wipe pre-v6 journal/account/tx/balance state + PXE IDB). Building the framework only pays off when a v7 lands.</div></div>
+    <div class="row"><div class="k">Re-evaluate when</div><div class="v">The first time Phase 2.5 (token-imports-as-jobs) or any other schema-touching change needs a v7 migration — at that point the framework saves real time.</div></div>
+    <div class="row"><div class="k">Risk</div><div class="v">Low. Inline migrations are not technical debt at one entry; they become debt at three.</div></div>
+  </div>
+
+  <div class="deferral">
+    <div class="head">
+      <span class="num">D2</span>
+      <span class="title">IDB backup of journal (browser-restart durability)</span>
+      <span class="label">Out of useful scope</span>
+    </div>
+    <div class="row"><div class="k">What</div><div class="v">The journal lives in <code>chrome.storage.session</code>, which survives SW restart but is wiped on full browser exit. Plan called for an IndexedDB backup so records persist across browser restart too.</div></div>
+    <div class="row"><div class="k">Why deferred</div><div class="v">The recovery model for browser exit is unrecoverable: the offscreen document dies with the browser, taking the in-flight prove with it. Even if we preserved the journal record, there is no way to resume the prove from a fresh boot (proofs are block-anchored; the in-memory state is gone). The honest outcome is "declare the job lost" — which the reaper already does on SW boot (<code>stuck_proving</code> kind).</div></div>
+    <div class="row"><div class="k">Re-evaluate when</div><div class="v">If users start asking "where did my pending tx go after I closed Chrome?" — at that point IDB backup gives us a *record* to show them, even though we can't resume. Tombstone-only persistence.</div></div>
+    <div class="row"><div class="k">Risk</div><div class="v">Low. Today the user sees the tx disappear on browser restart; with the reaper running on next session boot they would see <code>failed:stuck_proving</code> in the activity feed if any record had been there. Without IDB, there's nothing to reap — but there's also no false signal.</div></div>
+  </div>
+
+  <div class="deferral">
+    <div class="head">
+      <span class="num">D3</span>
+      <span class="title">Phase 2.5 — token imports as durable jobs</span>
+      <span class="label">Path C decision</span>
+    </div>
+    <div class="row"><div class="k">What</div><div class="v">Token import flows (<code>TokenService.addToken</code>) currently use the in-memory TaskService for progress reporting. Plan Path C deferred making them jobs.</div></div>
+    <div class="row"><div class="k">Why deferred</div><div class="v">Explicit decision during the approval gate (2026-05-12): scope-limit Phase 2 to PXE prove flows; revisit token imports once the journal + reaper are validated in production. Token imports are simulation-only (no on-chain effect, no prove), so the "popup lies during proving" failure mode they share with sends is far less severe.</div></div>
+    <div class="row"><div class="k">Re-evaluate when</div><div class="v">Phase 2.5 — the natural next milestone. Will reuse the same FSM (with an "importing" stage substituting for "proving") and the same reaper machinery.</div></div>
+    <div class="row"><div class="k">Risk</div><div class="v">Low. Token import is a single async call; it doesn't have the multi-stage stall surface that sends do.</div></div>
+  </div>
+
+  <div class="deferral">
+    <div class="head">
+      <span class="num">D4</span>
+      <span class="title">Strict Zod validation on journal storage reads</span>
+      <span class="label">Codex W1W2 nice-to-fix #2</span>
+    </div>
+    <div class="row"><div class="k">What</div><div class="v">Codex flagged: <code>EntityStorage</code> returns raw parsed JSON without schema validation; <code>transitionOperation</code> trusts <code>existing.progress.stage</code> and indexes directly into <code>LEGAL_TRANSITIONS</code>. A malformed record that somehow survives the v6 wipe could throw a plain runtime error instead of a controlled <code>IllegalTransitionError</code>.</div></div>
+    <div class="row"><div class="k">Why deferred</div><div class="v">Defensive concern only. No production users today, so the v6 wipe's "best-effort" is fine — there is no pre-v6 corpus to be malformed-but-not-wiped. The reaper provides a safety net: any stuck record gets reaped to <code>failed:stuck_proving</code> eventually, even if a transition would have crashed on first attempt.</div></div>
+    <div class="row"><div class="k">Re-evaluate when</div><div class="v">Before the first production release. At that point: gate <code>storage.get</code> reads with <code>OperationRecordSchema.safeParse</code>; on failure, delete the record + log + continue. Cost is small once the schema is already canonical.</div></div>
+    <div class="row"><div class="k">Risk</div><div class="v">Low until production. Then medium — a single malformed record could surface as a hard crash on the popup. Should not ship to prod without fixing.</div></div>
+  </div>
+
+  <div class="deferral">
+    <div class="head">
+      <span class="num">D5</span>
+      <span class="title">Histoire / Lost Pixel for journal-aware RecentActivityView</span>
+      <span class="label">Visual regression</span>
+    </div>
+    <div class="row"><div class="k">What</div><div class="v">No story / visual-snapshot coverage for the new journal-primary in-flight card. M6 phase 10 covers Histoire setup repo-wide; this view should be in that batch.</div></div>
+    <div class="row"><div class="k">Why deferred</div><div class="v">Histoire wiring is not yet in <code>bun run audit:vue</code>; landing a one-off story before the framework is in place would be an orphan. The unit-tested reaper + manual smoke on a real extension reload covers the regression risk for now.</div></div>
+    <div class="row"><div class="k">Re-evaluate when</div><div class="v">M6 phase 10 — when the Histoire harness lands, RecentActivityView is in the first batch of stories.</div></div>
+    <div class="row"><div class="k">Risk</div><div class="v">Low. UI shape is conservative (existing card slot, new data source) and the manual smoke confirmed the journal-primary flow renders correctly.</div></div>
+  </div>
+
+  <h2 id="followups">Follow-ups not in Phase 2 scope</h2>
+  <p>Items raised during Phase 2 work but explicitly outside its boundary:</p>
+  <ul>
+    <li><strong>Memory cap on warm profiles</strong> — W3 stopped disposing prior-profile PXEs on switch (necessary for durable jobs). Many-profile users could now keep N PXEs warm. Not urgent because PXE memory is dominated by per-chain data, not per-profile; bound when usage data justifies it.</li>
+    <li><strong>"Cancel ignored" UX</strong> — Today, hitting Cancel during <code>submitting</code> is silently dropped and the tx proceeds. The popup should show a transient toast like "Cancel ignored — tx already broadcast" so users aren't surprised. Cosmetic, not correctness.</li>
+    <li><strong>Cross-profile fairness</strong> — With multi-profile warmth, a future "fairness" policy could limit how many simultaneous proves run across all profiles. Not on the Phase 2 critical path; <code>origin</code> + <code>profileId</code> carries on every record are the seam for this when needed.</li>
+    <li><strong>e2e refactor + copy polish</strong> — Was tentatively penciled in for W6 as a buffer; rolled into the Week 5 commit's UX copy update for <code>journalSubtitle</code>. e2e additions waiting on the M6 Histoire batch.</li>
+  </ul>
+
+  <h2 id="tests">Tests &amp; tooling</h2>
+
+  <div class="grid cols-2">
+    <div class="card ok-border">
+      <div class="title">Test coverage</div>
+      <ul>
+        <li><strong>1507</strong> tests passing, up from 1494 at Phase 2 start</li>
+        <li>+1 FSM (illegal <code>submitting → cancelled</code> pin)</li>
+        <li>+3 ChainRuntimeRegistry (disposeProfile selectivity)</li>
+        <li>+9 JournalReaper (per-stage grace windows, alarm wiring)</li>
+        <li>Existing journal contract tests + offscreen client tests still green</li>
+      </ul>
+    </div>
+    <div class="card info-border">
+      <div class="title">Tooling</div>
+      <ul>
+        <li><code>bun run typecheck</code> — clean</li>
+        <li><code>bun run lint</code> — only pre-existing warnings unrelated to Phase 2</li>
+        <li><code>bun run test</code> — 1507 / 1507 in 8s</li>
+        <li>Codex W1+W2 review completed; 2 of 2 actionable blockers fixed</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>Final commit graph</h2>
+  <table>
+    <thead><tr><th>SHA</th><th>Summary</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">c80fe6e8</td><td>weeks 3+4+5 + codex W1W2 review fixes</td></tr>
+      <tr><td class="mono">60da09ff</td><td>per-method offscreen timeout — proveTx gets 30min ceiling</td></tr>
+      <tr><td class="mono">c79b3a26</td><td>address codex Week 1 review (5 of 7 concerns)</td></tr>
+      <tr><td class="mono">74a95db0</td><td>cancelJob RPC + lossy-cancel checkpoints</td></tr>
+      <tr><td class="mono">90e521f6</td><td>wire Phase 2 FSM into prove-flow callsites</td></tr>
+      <tr><td class="mono">2895471b</td><td>rewire journal service + client for Phase 2 FSM</td></tr>
+      <tr><td class="mono">67c67776</td><td>journal schema rewrite — 7-stage FSM + carries + v6 wipe</td></tr>
+      <tr><td class="mono">e2654505</td><td>subscribeWithSnapshot race-safe helper</td></tr>
+      <tr><td class="mono">2e5b2fcc</td><td>LazyListener primitive</td></tr>
+      <tr><td class="mono">8dd20e01</td><td>job FSM pure module</td></tr>
+      <tr><td class="mono">6d7a1091</td><td>approval gate ELI5 doc</td></tr>
+    </tbody>
+  </table>
+
+  <div class="footer">
+    11 commits · 1507 tests passing · branch <code>feat/phase-2-durable-jobs</code> ready for review.<br/>
+    Deferred items are tracked in this document; re-evaluate before opening the Phase 2.5 milestone.
+  </div>
+</div>
+</body>
+</html>

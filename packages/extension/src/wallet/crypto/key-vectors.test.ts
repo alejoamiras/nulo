@@ -1,0 +1,215 @@
+/**
+ * Cryptographic derivation test vectors.
+ *
+ * Purpose
+ * -------
+ * Lock the cryptographic derivation invariants used to
+ *   (a) encrypt the profile master secret at rest (`EncryptionKey`),
+ *   (b) derive a passkey-wallet master secret from WebAuthn PRF +
+ *       credentialId (`PasskeyCredential`),
+ *   (c) derive the per-account signing key from that master secret
+ *       (`deriveSigningKey` via `@aztec/stdlib/keys`).
+ *
+ * Any accidental drift in a refactor here, or a silent upstream change
+ * in `@aztec/foundation` or `@aztec/stdlib`, fails one of these tests
+ * before it bricks every existing wallet on disk.
+ *
+ * On upgrading `@aztec/*` — the ritual
+ * ------------------------------------
+ * Some vectors are Aztec-stack sensitive: V3 (`Fr.fromBufferReduce`),
+ * V7a (`deriveSigningKey` = sha512-to-grumpkin-scalar + domain
+ * separator). When you bump `@aztec/foundation`, `@aztec/stdlib`, or
+ * `@aztec/accounts`:
+ *
+ *   1. Run `bun run test`.
+ *   2. If any vector in this file fails, **do not blindly regenerate**.
+ *   3. Classify each failure:
+ *        (a) Neutral wrap / rename — upstream just moved the code.
+ *            Confirm the underlying math is equivalent (independent
+ *            recomputation or published reference). Then regenerate
+ *            the fixture constant in this file and commit with
+ *            "chore(crypto): regenerate fixtures for @aztec X.Y.Z —
+ *            verified equivalent".
+ *        (b) Backward-compatible primitive optimization — output bytes
+ *            are identical. Test shouldn't fail; if it did, investigate
+ *            why (endianness, serialization-order change).
+ *        (c) Breaking derivation change — output bytes differ for the
+ *            same inputs. **Stop and think.** This means existing
+ *            wallets will derive different keys and brick. Pin the old
+ *            version until a migration exists, or write the migration.
+ *            V7a is the canary for this class — if it fails, the
+ *            signing key of every wallet on disk just changed.
+ *   4. Document the decision in the commit message.
+ *
+ * Aztec-independent vectors (V1, V2, V6, V8, V9, P1) survive any
+ * `@aztec/*` bump — they exercise Web Crypto or constants only.
+ *
+ * Break-it-to-prove-it
+ * --------------------
+ * Each vector was validated by temporarily breaking the constant it
+ * pins and confirming the test fails. See the per-vector header
+ * comment for what's locked.
+ *
+ * Deferred vectors
+ * ----------------
+ * V4 (poseidon2Hash account secret), V7b (NuloAccount.address), V10
+ * (passkey → address full chain), and P2 (Barretenberg Poseidon2
+ * cross-check) all require `@aztec/bb.js` WASM poseidon2, which crashes
+ * in the vitest jsdom environment with
+ * `BBApiException: std::bad_cast` on the WASM boundary. These belong in
+ * an e2e-level fixture or a slow-test suite that spawns BB for real.
+ * The unit-level locks V1–V9 still catch the bulk of regressions a
+ * refactor in this area could introduce.
+ */
+
+import { describe, expect, test } from "vitest"
+import { Fr } from "@aztec/foundation/curves/bn254"
+import { deriveSigningKey } from "@aztec/stdlib/keys"
+import { EncryptionKey } from "@nulo/wallet-crypto"
+import { PasskeyCredential } from "@nulo/wallet-crypto"
+import { PASSKEY_PRF_LABEL } from "@nulo/wallet-crypto"
+import { AccountType } from "@/wallet/services/account/spec"
+
+/** Reusable hex helper — keeps fixture constants readable. */
+const toHex = (buf: ArrayBuffer | Uint8Array) => {
+	const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf)
+	return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")
+}
+const fromHex = (hex: string) => new Uint8Array(hex.match(/.{2}/g)!.map((b) => Number.parseInt(b, 16)))
+
+describe("M2.6 — cryptographic derivation vectors", () => {
+	// ── V1: password hash ────────────────────────────────────────────
+	//
+	// Locks: SHA-256(UTF-8(password)). Platform Web Crypto, no Aztec dep.
+	// Break it: change `getPasshash` from SHA-256 to SHA-384, this fails.
+	test("V1 — getPasshash('hunter2') matches fixture", async () => {
+		const passhash = await EncryptionKey.getPasshash("hunter2")
+		expect(toHex(passhash)).toBe("f52fbd32b2b3b86ff88ef6c490628285f482af15ddcb29541f94bcf526a3f6c7")
+	})
+
+	// ── V2: AES-GCM round-trip with fixed IV ─────────────────────────
+	//
+	// Locks: PBKDF2-SHA256 at 600_000 iterations, salt = SHA-256(iv),
+	// AES-GCM-256, 13-byte prefix [version][iv].
+	// The committed ciphertext was captured by running the current
+	// encrypt() with the same password, plaintext, and IV. Two
+	// assertions hold it in place:
+	//   (a) decrypt(COMMITTED_CIPHERTEXT) === PLAINTEXT (verifies the
+	//       full decrypt chain against a real stored value), and
+	//   (b) encrypt(PLAINTEXT, mocked IV) === COMMITTED_CIPHERTEXT
+	//       (verifies encrypt's prefix assembly + AES tag emission).
+	// Break it: change PBKDF2_ITERATIONS — both assertions fail.
+	const V2_PASSWORD = "hunter2"
+	const V2_PLAINTEXT_HEX = "deadbeefcafebabe0011223344556677"
+	const V2_IV_HEX = "aaaaaaaaaaaaaaaaaaaaaaaa" // 12 bytes of 0xAA
+	const V2_CIPHERTEXT_HEX = "00aaaaaaaaaaaaaaaaaaaaaaaabbf9b797c51cbfaff2e2be5c04eee5303a5eac28711a196e271c960d5ab16a49"
+
+	test("V2a — decrypt(COMMITTED_CIPHERTEXT, password) === PLAINTEXT", async () => {
+		const key = await EncryptionKey.fromPassword(V2_PASSWORD)
+		const plaintext = await key.decrypt(fromHex(V2_CIPHERTEXT_HEX))
+		expect(toHex(plaintext)).toBe(V2_PLAINTEXT_HEX)
+	}, 10_000)
+
+	test("V2b — encrypt(PLAINTEXT, mocked IV) === COMMITTED_CIPHERTEXT", async () => {
+		const originalGRV = self.crypto.getRandomValues.bind(self.crypto)
+		const iv = fromHex(V2_IV_HEX)
+		// biome-ignore lint/suspicious/noExplicitAny: narrow mock with explicit restore in finally
+		const grv = self.crypto.getRandomValues as any
+		self.crypto.getRandomValues = ((target: Uint8Array) => {
+			target.set(iv.slice(0, target.length))
+			return target
+		}) as typeof self.crypto.getRandomValues
+		try {
+			const key = await EncryptionKey.fromPassword(V2_PASSWORD)
+			const ct = await key.encrypt(fromHex(V2_PLAINTEXT_HEX))
+			expect(toHex(ct)).toBe(V2_CIPHERTEXT_HEX)
+		} finally {
+			self.crypto.getRandomValues = originalGRV
+			void grv
+		}
+	}, 10_000)
+
+	// ── V3: passkey master-secret derivation ─────────────────────────
+	//
+	// Locks: HKDF-SHA256, salt = SHA-256(PASSKEY_KDF_LABEL || credentialId),
+	// info = PASSKEY_MASTER_LABEL, 256 output bits reduced through
+	// Fr.fromBufferReduce (big-endian, mod BN254 Fr modulus).
+	// AZTEC-SENSITIVE: depends on Fr.fromBufferReduce semantics.
+	// Break it: change PASSKEY_KDF_LABEL — fails.
+	// Input PRF is 32 clean bytes base64-encoded; credentialId is a
+	// short base64 identifier mimicking a real WebAuthn credential.
+	const V3_PRF_B64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+	const V3_CREDENTIAL_ID_B64 = "dGVzdC1jcmVkZW50aWFsLWlk"
+
+	test("V3 — PasskeyCredential master secret matches fixture", async () => {
+		const credential = await PasskeyCredential.create({ id: V3_CREDENTIAL_ID_B64, prf: V3_PRF_B64 })
+		const master = await credential.deriveMasterSecret()
+		expect(toHex(master)).toBe("2db78e1a82bbf002bd36281f079f797fe194ee2b04249df6e44efb30e879919a")
+	})
+
+	// ── V6: getHashHex (backup checksum) ─────────────────────────────
+	//
+	// Used by pages/import.vue + export/full.vue to verify backup integrity.
+	// If byte→hex encoding drifts (case change, TextEncoder swap,
+	// SHA-256 substitution), backup import silently fails.
+	// Platform Web Crypto, no Aztec dep.
+	test("V6 — getHashHex('hunter2') matches fixture", async () => {
+		const hex = await EncryptionKey.getHashHex("hunter2")
+		expect(hex).toBe("f52fbd32b2b3b86ff88ef6c490628285f482af15ddcb29541f94bcf526a3f6c7")
+	})
+
+	// ── V7a: deriveSigningKey(secret) ────────────────────────────────
+	//
+	// The signing key is what actually signs transactions. This is the
+	// primary canary for upstream drift: `deriveSigningKey` resolves to
+	// `sha512ToGrumpkinScalar([secret, DomainSeparator.IVSK_M])`.
+	// Upstream has a TODO to replace IVSK_M with a dedicated signing
+	// separator (AztecProtocol/aztec-packages#5837). When that lands,
+	// this vector fails loudly — that's the signal to migrate.
+	// AZTEC-SENSITIVE.
+	test("V7a — deriveSigningKey(fixedSecret) matches fixture", () => {
+		const secret = Fr.fromHexString("0x0000000000000000000000000000000000000000000000000000000000000042")
+		const signingKey = deriveSigningKey(secret)
+		expect(signingKey.toString()).toBe("0x14a31cb4d33a144675e70634830292153f78e8318e51f26a2f212783eb0a3cbc")
+	})
+
+	// ── V8: PASSKEY_PRF_LABEL spec constant ──────────────────────────
+	//
+	// This label is passed to `navigator.credentials.get` as the PRF
+	// eval info. Changing it detaches PRF output from every existing
+	// passkey wallet — same severity as changing PASSKEY_KDF_LABEL,
+	// but V3 starts AFTER the WebAuthn call, so label drift in the
+	// call site alone wouldn't trip V3.
+	test("V8 — PASSKEY_PRF_LABEL is 'nulo:profile:v1'", () => {
+		expect(PASSKEY_PRF_LABEL).toBe("nulo:profile:v1")
+	})
+
+	// ── V9: AccountType.Nulo_v1 numeric value ────────────────────────
+	//
+	// The enum value feeds into poseidon2Hash([master, chainId, type,
+	// index]) as the 3rd arg. Flipping Nulo_v1 from 0 to 1 changes
+	// every derived account secret. The spec.ts file has a
+	// "NEVER change it" SECURITY comment but a paranoid unit lock
+	// catches a drive-by refactor before it breaks wallets.
+	test("V9 — AccountType.Nulo_v1 === 0", () => {
+		expect(AccountType.Nulo_v1).toBe(0)
+	})
+
+	// ── P1: HKDF-SHA256 RFC 5869 Appendix A.1 ────────────────────────
+	//
+	// Cross-checks the platform HKDF implementation against a
+	// canonical external reference, independent of our labels or
+	// input shapes. If V3 fails AND P1 passes, the bug is in our
+	// label/input construction. If both fail, the platform HKDF
+	// changed (upgrade browser / Node).
+	test("P1 — HKDF-SHA256 RFC 5869 A.1 matches", async () => {
+		const ikm = fromHex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b")
+		const salt = fromHex("000102030405060708090a0b0c")
+		const info = fromHex("f0f1f2f3f4f5f6f7f8f9")
+		const expected = "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
+
+		const baseKey = await self.crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"])
+		const bits = await self.crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt, info }, baseKey, 42 * 8)
+		expect(toHex(bits)).toBe(expected)
+	})
+})

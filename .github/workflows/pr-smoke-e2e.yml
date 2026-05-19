@@ -1,0 +1,160 @@
+name: Smoke e2e
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, dev]
+    # `labeled` so adding `e2e:smoke` after open triggers a fresh run;
+    # `unlabeled` so removing it re-evaluates the gate instead of leaving
+    # a stale failing result.
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+concurrency:
+  group: pr-smoke-e2e-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      smoke-surface: ${{ steps.override.outputs.full || steps.filter.outputs.smoke-surface }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+          filters: |
+            smoke-surface:
+              # Popup + components (UI shell)
+              - 'packages/extension/src/popup/**'
+              - 'packages/extension/src/components/**'
+              - 'packages/extension/src/composables/**'
+              - 'packages/extension/src/stores/**'
+              - 'packages/extension/src/design/**'
+              - 'packages/extension/src/assets/styles/**'
+              - 'packages/extension/manifest/**'
+              # Wallet services smoke actually exercises
+              - 'packages/extension/src/wallet/services/profile/**'
+              - 'packages/extension/src/wallet/services/contact/**'
+              - 'packages/extension/src/wallet/services/passkey/**'
+              - 'packages/extension/src/wallet/services/account/**'
+              - 'packages/extension/src/wallet/services/account-state/**'
+              - 'packages/extension/src/wallet/services/config/**'
+              - 'packages/extension/src/wallet/services/window-manager/**'
+              - 'packages/extension/src/wallet/services/network/**'
+              - 'packages/extension/src/wallet/services/token/**'
+              - 'packages/extension/src/wallet/services/token-balance/**'
+              - 'packages/extension/src/wallet/services/dapp-session/**'
+              - 'packages/extension/src/wallet/storage/**'
+              - 'packages/extension/src/wallet/config/**'
+              - 'packages/extension/src/wallet/index.ts'
+              # Cross-cutting helpers shared by popup + services
+              - 'packages/extension/src/setup/**'
+              - 'packages/extension/src/core/**'
+              - 'packages/extension/src/utils/**'
+              - 'packages/extension/src/shims/**'
+              - 'packages/extension/src/types/**'
+              # Sibling packages used at the storage / auth boundary
+              - 'packages/wallet-core/**'
+              - 'packages/wallet-crypto/**'
+              - 'packages/extension-messaging/**'
+              - '!packages/wallet-core/**/*.md'
+              - '!packages/wallet-crypto/**/*.md'
+              - '!packages/extension-messaging/**/*.md'
+              # Build inputs (this workflow self-builds chrome)
+              - 'packages/extension/vite.chrome.config.mts'
+              - 'packages/extension/vite.firefox.config.mts'
+              - 'packages/extension/package.json'
+              - 'packages/extension/scripts/check-rp-id.ts'
+              - 'package.json'
+              - 'bun.lockb'
+              - 'bunfig.toml'
+              - 'tsconfig.json'
+              # Smoke harness itself
+              - 'packages/extension/tests/e2e/*.test.ts'
+              - '!packages/extension/tests/e2e/network/**'
+              - 'packages/extension/tests/e2e/fixtures/**'
+              - 'packages/extension/tests/e2e/global-setup-smoke.ts'
+              - 'packages/extension/vitest.e2e.config.ts'
+              # Workflow + reusable + composite actions that affect smoke
+              - '.github/workflows/_smoke-e2e.yml'
+              - '.github/workflows/_build-extension.yml'
+              - '.github/workflows/pr-smoke-e2e.yml'
+              - '.github/actions/setup-bun/**'
+              - '.github/actions/setup-puppeteer/**'
+      - name: Override for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        id: override
+        run: echo "full=true" >> "$GITHUB_OUTPUT"
+
+  decide:
+    name: Decide
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+          SMOKE: ${{ needs.changes.outputs.smoke-surface }}
+          LABEL_HIT: ${{ contains(github.event.pull_request.labels.*.name, 'e2e:smoke') }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ] \
+             || [ "$BASE" = "main" ] \
+             || [ "$LABEL_HIT" = "true" ] \
+             || { [ "$BASE" = "dev" ] && [ "$SMOKE" = "true" ]; }; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    uses: ./.github/workflows/_build-extension.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      target: chrome
+      upload_artifacts: true
+
+  smoke:
+    name: Run
+    needs: [decide, build]
+    if: needs.decide.outputs.run == 'true'
+    uses: ./.github/workflows/_smoke-e2e.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      artifact_name: extension-chrome
+
+  status:
+    name: Status
+    if: always()
+    needs: [changes, decide, build, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Aggregate results
+        run: |
+          for r in \
+            "${{ needs.changes.result }}" \
+            "${{ needs.decide.result }}" \
+            "${{ needs.build.result }}" \
+            "${{ needs.smoke.result }}" \
+          ; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::A required job failed or was cancelled: $r"
+              exit 1
+            fi
+          done
+          echo "Smoke e2e gate passed (or was skipped — no relevant changes / not labeled)."

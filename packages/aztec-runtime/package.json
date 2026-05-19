@@ -1,0 +1,42 @@
+{
+	"name": "@nulo/aztec-runtime",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./pxe": "./src/pxe/index.ts",
+		"./account": "./src/account/index.ts",
+		"./ports": "./src/ports/index.ts",
+		"./adapters": "./src/adapters/index.ts",
+		"./utils": "./src/utils/index.ts",
+		"./offscreen/entry": "./src/offscreen/entry.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@alejoamiras/aztec-accelerator": "4.2.0",
+		"@aztec/accounts": "4.2.0",
+		"@aztec/aztec.js": "4.2.0",
+		"@aztec/bb.js": "4.2.0",
+		"@aztec/entrypoints": "4.2.0",
+		"@aztec/foundation": "4.2.0",
+		"@aztec/noir-contracts.js": "4.2.0",
+		"@aztec/protocol-contracts": "4.2.0",
+		"@aztec/pxe": "4.2.0",
+		"@aztec/simulator": "4.2.0",
+		"@aztec/stdlib": "4.2.0",
+		"@defi-wonderland/aztec-standards": "4.2.0-aztecnr-rc.2",
+		"@nulo/extension-messaging": "workspace:*",
+		"@nulo/wallet-core": "workspace:*",
+		"@wonderland/aztec-fee-payment": "https://github.com/defi-wonderland/aztec-fee-payment/releases/download/prerelease-215fd08/wonderland-aztec-fee-payment-4.2.0-prerelease.215fd08.tgz",
+		"zod": "^3.23.8"
+	},
+	"devDependencies": {
+		"chrome-types": "^0.1.370",
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.5"
+	}
+}

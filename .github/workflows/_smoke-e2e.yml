@@ -1,0 +1,69 @@
+name: _Smoke e2e (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to checkout.
+        required: false
+        type: string
+        default: ""
+      extension_path:
+        description: |
+          Optional absolute path to a prebuilt extension directory.
+          When empty, builds Chrome from source in this job. Used by release.yml
+          to point at the unzipped artifact.
+        required: false
+        type: string
+        default: ""
+      artifact_name:
+        description: |
+          If set, downloads this workflow-run artifact into ./_e2e-extension/ and
+          uses it as the extension path. Skips the local build.
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  smoke:
+    name: Vitest + Puppeteer
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXTENSION_PATH: ${{ inputs.extension_path }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: ./.github/actions/setup-bun
+
+      - uses: ./.github/actions/setup-puppeteer
+
+      - name: Download extension artifact
+        if: inputs.artifact_name != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: _e2e-extension
+
+      - name: Set EXTENSION_PATH from downloaded artifact
+        if: inputs.artifact_name != ''
+        run: echo "EXTENSION_PATH=${{ github.workspace }}/_e2e-extension" >> "$GITHUB_ENV"
+
+      - name: Build Chrome (no artifact, no override)
+        if: inputs.artifact_name == '' && inputs.extension_path == ''
+        run: bun run --cwd packages/extension build:chrome
+
+      - name: Run smoke e2e
+        run: bun run --cwd packages/extension test:e2e
+
+      - name: Upload smoke logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-e2e-logs
+          path: |
+            packages/extension/.e2e-state
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,0 +1,72 @@
+/**
+ * Pure handler builders for RecentActivityView (Phase 2 follow-up).
+ *
+ * The Vue component itself is hard to unit-test (4+ service clients to
+ * stub, appStore, useTicker, useRouter, ...). Extracting the cancel +
+ * retry wire to a tiny pure module gives us regression coverage on the
+ * "emit → service call / navigation" link without mounting Vue.
+ *
+ * Both handlers close over a getter rather than the value directly:
+ * Vue refs are captured at handler-build time and read at emit time,
+ * so we test the same "read at click" semantics.
+ */
+
+import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
+import { ContentKind } from "@/wallet/services/task/spec"
+
+export interface CancelExecutor {
+	cancelJob(jobId: string): Promise<void>
+}
+
+/**
+ * Match an executingTask against a journal record for the cancel-dupe fix.
+ * Returns true iff the task likely refers to the same operation.
+ *
+ * KNOWN LIMITATION (codex audit Nice): matches by kind + tokenId for
+ * transfers, kind alone for dapp_execute. For concurrent same-account
+ * dApp ops (rare — dApp approval windows serialize at the user level),
+ * a terminal event on op A could false-clear executingTask when it's
+ * currently B. Consequence: brief flicker before TaskService re-syncs.
+ *
+ * If concurrency-driven flicker shows up in QA, strengthen by plumbing
+ * a journalId onto task content for strict identity match.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: TaskService spec is JS; importing the concrete TaskRecord type would create a circular Vue/TS dep here.
+export function isMatchingTask(task: any, op: OperationRecord, activeAccount: string | undefined): boolean {
+	if (!task || !op) return false
+	if (op.accountAddress !== activeAccount) return false
+	if (op.kind === "transfer") {
+		return task.content?.kind === ContentKind.Transfer && task.content?.tokenId === op.tokenId
+	}
+	if (op.kind === "dapp_execute") {
+		return task.content?.kind === ContentKind.ExecuteOperation
+	}
+	return false
+}
+
+/**
+ * Build a cancel handler. Wired to `<TransactionAwaitingCard @cancel="...">`,
+ * which now emits the card's `jobId` as a payload so multi-card render
+ * (concurrent in-flight ops) cancels the correct journal record.
+ *
+ * - Falsy / unknown `jobId` → no-op (defensive; the button is only rendered
+ *   for non-null `jobId` so this should not fire in production).
+ * - Otherwise → invoke optional `onInitiated(jobId)` for cancel-dupe tracking,
+ *   then call `cancelJob`; swallow rejection silently. The button is already
+ *   hidden at `submitting` stage, so a rejected cancel here is a tight race
+ *   we can't avoid; silent unwind is acceptable.
+ *
+ * `onInitiated` lets the caller pin the jobId for direct ID correlation in
+ * the journal event handler — bulletproof against `isMatchingTask` fragility
+ * (see RecentActivityView's `pendingCancelJobIds`).
+ */
+export function buildCancelHandler(
+	execution: CancelExecutor,
+	onInitiated?: (jobId: string) => void,
+): (jobId: string | null | undefined) => void {
+	return (jobId) => {
+		if (!jobId) return
+		onInitiated?.(jobId)
+		execution.cancelJob(jobId).catch(() => {})
+	}
+}

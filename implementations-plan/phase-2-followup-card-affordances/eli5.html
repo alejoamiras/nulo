@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Card affordances — approval gate</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1e252e; --border: #2a323d;
+    --text: #d1d5db; --muted: #8b949e; --accent: #9b59ff;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149; --info: #58a6ff;
+    --gold: #f1c40f;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); margin: 0; padding: 0; font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 24px 24px 80px; }
+
+  .stamp { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 3px 10px; border-radius: 4px; background: var(--accent); color: #fff; margin-bottom: 8px; letter-spacing: 0.5px; }
+
+  h1 { font-size: 30px; margin: 0 0 8px; color: #fff; letter-spacing: -0.5px; }
+  h1 .accent { color: var(--accent); }
+  h2 { font-size: 22px; margin: 40px 0 14px; color: #fff; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 17px; margin: 22px 0 8px; color: var(--accent); }
+  h4 { font-size: 14px; margin: 18px 0 6px; color: #fff; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  p { margin: 10px 0; }
+
+  .lead { color: var(--muted); font-size: 16px; line-height: 1.6; margin-top: 0; }
+
+  .toc {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 14px 18px; margin: 20px 0;
+  }
+  .toc strong { color: var(--muted); display: block; margin-bottom: 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .toc a { color: var(--info); text-decoration: none; margin-right: 16px; font-size: 14px; }
+  .toc a:hover { text-decoration: underline; }
+
+  .grid { display: grid; gap: 16px; }
+  .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 800px) { .grid.cols-2 { grid-template-columns: 1fr; } }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; }
+  .card .title { font-weight: 600; color: #fff; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  .card.accent-border { border-left: 3px solid var(--accent); }
+  .card.ok-border { border-left: 3px solid var(--ok); }
+  .card.warn-border { border-left: 3px solid var(--warn); }
+  .card.info-border { border-left: 3px solid var(--info); }
+  .card.err-border { border-left: 3px solid var(--err); }
+
+  code { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+
+  figure.ascii {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 14px 16px; margin: 14px 0; overflow-x: auto;
+  }
+  figure.ascii figcaption { font-size: 13px; color: var(--muted); font-style: italic; margin-bottom: 10px; }
+  figure.ascii pre { font: 12px/1.4 var(--mono); color: var(--text); margin: 0; white-space: pre; }
+
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+
+  .callout {
+    border-left: 3px solid var(--info); background: var(--panel);
+    padding: 14px 18px; margin: 16px 0; border-radius: 0 6px 6px 0; font-size: 14px;
+  }
+  .callout.accent { border-left-color: var(--accent); }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout.err { border-left-color: var(--err); }
+  .callout strong { color: var(--info); }
+  .callout.accent strong { color: var(--accent); }
+  .callout.warn strong { color: var(--warn); }
+  .callout.ok strong { color: var(--ok); }
+  .callout.err strong { color: var(--err); }
+
+  .decision {
+    background: var(--panel); border: 1px solid var(--accent); border-left: 4px solid var(--accent);
+    border-radius: 6px; padding: 16px 18px; margin: 16px 0;
+  }
+  .decision .num { display: inline-block; background: var(--accent); color: #fff; padding: 2px 8px; border-radius: 3px; font-family: var(--mono); font-size: 11px; margin-right: 8px; font-weight: 600; }
+  .decision .q { font-weight: 600; color: #fff; font-size: 15px; }
+  .decision .why { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .decision .options { margin-top: 10px; }
+  .decision .opt { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; margin: 6px 0; font-size: 13px; }
+  .decision .opt.recommended { border-color: var(--accent); }
+  .decision .opt strong { color: var(--text); }
+  .decision .opt em { color: var(--accent); font-style: normal; }
+
+  .pill { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 3px; }
+  .pill.ok { background: rgba(63,185,80,0.15); color: var(--ok); border: 1px solid rgba(63,185,80,0.3); }
+  .pill.warn { background: rgba(210,153,34,0.15); color: var(--warn); border: 1px solid rgba(210,153,34,0.3); }
+  .pill.err { background: rgba(248,81,73,0.15); color: var(--err); border: 1px solid rgba(248,81,73,0.3); }
+  .pill.muted { background: rgba(139,148,158,0.15); color: var(--muted); border: 1px solid rgba(139,148,158,0.3); }
+
+  .mockup {
+    background: #0a0d11; border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 18px; margin: 14px 0; font-family: var(--mono); font-size: 12px;
+  }
+  .mockup .badge { display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 2px; margin-right: 6px; }
+  .mockup .badge.ok { background: rgba(63,185,80,0.2); color: var(--ok); }
+  .mockup .badge.warn { background: rgba(210,153,34,0.2); color: var(--warn); }
+  .mockup .badge.err { background: rgba(248,81,73,0.2); color: var(--err); }
+  .mockup .badge.muted { background: rgba(139,148,158,0.2); color: var(--muted); }
+
+  .audit-grid {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 18px; margin: 16px 0;
+  }
+  .audit-grid h4 { margin-top: 0; }
+  .audit-row { display: grid; grid-template-columns: 100px 1fr 1fr; gap: 14px; padding: 10px 0; border-top: 1px solid var(--border); font-size: 13px; }
+  .audit-row:first-of-type { border-top: 0; }
+  .audit-row .key { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; }
+  .audit-row .source { color: var(--accent); font-size: 11px; }
+
+  .footer { color: var(--muted); font-size: 12px; margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stamp">PENDING FINAL APPROVAL · 2026-05-14 · plan v3</div>
+  <h1>Card affordances — <span class="accent">three QA-flagged gaps</span></h1>
+  <p class="lead">v0.15.3 surfaced three rough edges on the journal terminal cards. Plan v2 went through dual audit (codex + opus 4.7). You overrode placement → icon-only top-right. All open decisions now resolved. This ELI5 reflects v3.</p>
+
+  <div class="toc">
+    <strong>Sections</strong>
+    <a href="#what-broke">What broke</a>
+    <a href="#three-phases">Three phases</a>
+    <a href="#audit-grid">Audit summary</a>
+    <a href="#decisions">Your decision</a>
+    <a href="#tests-rollout">Tests &amp; rollout</a>
+  </div>
+
+  <h2 id="what-broke">What broke in v0.15.3</h2>
+
+  <div class="grid cols-2">
+    <div class="card err-border">
+      <div class="title">🪲 Issue 1 — Empty icon box</div>
+      <p>When you saw the <strong>Interrupted</strong> card after a SW restart mid-prove, the badge area was empty. No glyph.</p>
+      <p><strong>Why:</strong> I shipped icon names <code>refresh-cw</code> and <code>circle-minus</code> — those look like Material Icons but <strong>aren't in this project's icon set</strong> (only 104 specific names in <code>icons.json</code>). The Icon component silently renders empty SVG when the name is unknown — no console error.</p>
+      <p><strong>Failed</strong> didn't have this bug only because <code>close-circle</code> happened to be a real name.</p>
+    </div>
+    <div class="card warn-border">
+      <div class="title">🪲 Issue 2 — No Retry button</div>
+      <p>The Interrupted card just sits there with no action. You wanted a way to retry without manually re-navigating to the Send page.</p>
+      <p><strong>Why:</strong> I shipped the card as purely visual. Phase 2 Week 5 didn't budget for action affordances on terminal cards.</p>
+    </div>
+    <div class="card warn-border">
+      <div class="title">🪲 Issue 3 — No Cancel button</div>
+      <p>You can't even <em>trigger</em> the Cancelled state from the UI, so you couldn't test it. The "Cancelled" path exists in the SW (<code>ExecutionService.cancelJob</code>) but no popup button calls it.</p>
+      <p><strong>Why:</strong> Same reason — Phase 2 W5 wired the journal as the in-flight source of truth but never added the cancel surface on the awaiting card.</p>
+    </div>
+  </div>
+
+  <h2 id="three-phases">The plan — three phases</h2>
+
+  <p class="lead">Each phase is one commit. Smallest first. Each independently passes typecheck + tests + lint + build.</p>
+
+  <div class="card accent-border">
+    <div class="title">Phase 1 — fix the icon bug <span class="pill ok">smallest</span></div>
+    <p><strong>What:</strong> Switch the three terminal icons to actually-real names:</p>
+    <ul>
+      <li>Cancelled: <code>cancel</code> (literal X — both auditors endorsed; semantically distinct from Failed)</li>
+      <li>Interrupted: <code>refresh-circle</code> (in the <code>*-circle</code> badge family; visually echoes the "try again" suggestion)</li>
+      <li>Failed: <code>close-circle</code> (was already correct, no change)</li>
+    </ul>
+    <p>Also: extract these into a <code>const ICONS = { ... } as const</code> inside the util so the next person can't ship an invented name. Update the existing Storybook stories + the test assertions that pinned the old wrong strings.</p>
+  </div>
+
+  <div class="card accent-border">
+    <div class="title">Phase 2 — Cancel button on the awaiting card</div>
+    <p><strong>Where:</strong> Right side of the secondary row on the in-flight card. Small text link, quiet styling — never competes with the title for attention.</p>
+    <p><strong>What it does:</strong> Calls <code>executionService.cancelJob(topJournalOp.id)</code>. The SW flips the journal from <code>proving</code> → <code>cancelled</code>. The popup observes the change and the card transitions from awaiting → Cancelled.</p>
+
+    <figure class="ascii">
+      <figcaption>What the awaiting card looks like before / after Phase 2 (v3 placement — icon at top-right).</figcaption>
+<pre>
+BEFORE (v0.15.3)                              AFTER (Phase 2, v3)
+┌──────────────────────────────────────┐     ┌──────────────────────────────────────┐
+│ ⟳  Swap Tokens For Exact Tokens      │     │ ⟳  Swap Tokens For Exact Tokens   ✕  │
+│    Generating proof   [swap.aztec…]  │     │    Generating proof  [swap.aztec…]   │
+└──────────────────────────────────────┘     └──────────────────────────────────────┘
+                                              ↑ Top-right X icon (16-18px in 32px hit area)
+                                                aria-label: "Cancel transaction"
+                                                Hidden when stage = "submitting"
+</pre>
+    </figure>
+
+    <p><strong>Smart bit (from codex audit):</strong> when the SW has already moved the job to <code>submitting</code> stage, the FSM forbids cancelling — so we <em>hide</em> the button at that point. No "click does nothing" frustration; the affordance simply disappears when it stops being useful.</p>
+  </div>
+
+  <div class="card accent-border">
+    <div class="title">Phase 3 — Retry button on the Interrupted card</div>
+    <p><strong>Where:</strong> Same secondary-row right placement, mirrors the Cancel button visually.</p>
+    <p><strong>What it does:</strong> Navigates to <code>/popup/send?tokenId=X</code>. The Send page is already wired to pre-select a token from this URL param (used by other "send this token" links throughout the wallet). User completes recipient + amount; the rest is the normal Send flow.</p>
+
+    <figure class="ascii">
+      <figcaption>Retry appears only for UI-initiated transfers that were Interrupted. dApp ops + Failed + Cancelled get no Retry. v3 placement: icon at top-right.</figcaption>
+<pre>
+INTERRUPTED — UI transfer                     INTERRUPTED — dApp swap
+┌──────────────────────────────────────┐     ┌──────────────────────────────────────┐
+│ ⟳  USDC                          ↻   │     │ ⟳  Swap Tokens For Exact Tokens      │
+│    Transaction was interrupted       │     │    Transaction was interrupted       │
+└──────────────────────────────────────┘     └──────────────────────────────────────┘
+   ↑ Refresh icon top-right                    (no retry icon — wallet can't replay a
+     aria-label: "Retry transaction"            dApp request without the dApp re-issuing)
+     Wired to /popup/send?tokenId=X
+
+CANCELLED — gray                              FAILED — red
+┌──────────────────────────────────────┐     ┌──────────────────────────────────────┐
+│ ✕  Send 5 USDC                       │     │ ⊗  Send 5 USDC                       │
+│    Cancelled                         │     │    Network error                     │
+└──────────────────────────────────────┘     └──────────────────────────────────────┘
+   (no action — you did it on purpose)         (no retry in v1; per-kind retry needs
+                                                its own UX cut — deferred)
+</pre>
+    </figure>
+
+    <p><strong>Why retry is limited:</strong></p>
+    <ul>
+      <li><strong>Cancelled:</strong> You stopped it on purpose. Retry would be confusing — Send page is one tap away.</li>
+      <li><strong>Interrupted (UI transfer):</strong> ✅ Retry navigates to Send with token preselected.</li>
+      <li><strong>Interrupted (dApp):</strong> Wallet has no replay path — the dApp owns the request.</li>
+      <li><strong>Failed:</strong> Some kinds (network, prover) might recover; others (simulation) won't. Needs per-kind logic — deferred to a follow-up.</li>
+    </ul>
+  </div>
+
+  <h2 id="audit-grid">Audit summary</h2>
+  <p class="lead">Plan v1 went to codex + opus 4.7 in parallel. Both surfaced overlapping critique. Here's where they agreed, where they diverged, and which call wins.</p>
+
+  <div class="audit-grid">
+    <h4>What both audits caught (hard fixes)</h4>
+
+    <div class="audit-row">
+      <div class="key">H3</div>
+      <div>
+        <strong>Cancel button never shows for UI transfers.</strong>
+        v1 said "Cancel only on the journal-driven awaiting branch". But the template's <code>v-if</code> renders the executingTask card first, journal second. For UI transfers, both exist — executingTask wins — Cancel never appears for the most cancellable flow.
+        <div class="source" style="margin-top:6px;">opus + codex both flagged Hard / High</div>
+      </div>
+      <div>
+        <strong>v2 fix:</strong> re-architect. The journal record is canonical for "in-flight" (per the W5 docstring at L181-196 of the file). <code>executingTask</code> becomes pure subtitle enrichment. Render journal card whenever <code>topJournalOp</code> exists.
+      </div>
+    </div>
+
+    <div class="audit-row">
+      <div class="key">Late cancel</div>
+      <div>
+        <strong>Cancel during <code>submitting</code> = silent no-op.</strong>
+        User clicks Cancel right before submit completes, sees nothing happen, then a few seconds later card flips to Succeeded. Reads as "Cancel is broken."
+        <div class="source" style="margin-top:6px;">opus + codex both flagged</div>
+      </div>
+      <div>
+        <strong>v2 fix:</strong> codex's call — <em>hide the button</em> when stage is <code>submitting</code>. Structurally cleaner than a "couldn't cancel" toast. The popup already knows the stage; remove the affordance when it's not effective.
+      </div>
+    </div>
+
+    <div class="audit-row">
+      <div class="key">H1 / retry payload</div>
+      <div>
+        <strong>Retry emit had no payload.</strong> Parent would have to re-lookup the op. Minor but inefficient.
+        <div class="source" style="margin-top:6px;">opus Hard</div>
+      </div>
+      <div>
+        <strong>v2 fix:</strong> <code>emit("retry", op)</code>. Parent gets the OperationRecord directly.
+      </div>
+    </div>
+
+    <h4 style="margin-top: 24px;">Should-fix items folded in</h4>
+
+    <div class="audit-row">
+      <div class="key">Tests</div>
+      <div>v1 had 11 new + 3 modified unit cases. opus + codex called out specific gaps.</div>
+      <div>v2: +3 (opus icon-name regression pin, retry-payload, race-pin) +2 (codex wire-tests for cancel + retry routing in RecentActivityView). Total 16 new + 3 modified.</div>
+    </div>
+
+    <div class="audit-row">
+      <div class="key">defineEmits</div>
+      <div>Not spelled out in v1 — would have triggered Vue attribute-fallthrough warnings.</div>
+      <div>v2: explicit <code>const emit = defineEmits(["cancel"])</code> / <code>["retry"]</code> on both cards.</div>
+    </div>
+
+    <div class="audit-row">
+      <div class="key">Icon constants</div>
+      <div>Plain string literals in the util — same vector as the original bug.</div>
+      <div>v2: extract <code>const ICONS = { cancelled: "cancel", interrupted: "refresh-circle", failed: "close-circle" } as const</code> in journal-state.ts. (opus N2)</div>
+    </div>
+
+    <div class="audit-row">
+      <div class="key">Stale comment</div>
+      <div>Codex caught: <code>execution/spec.ts:72-76</code> still describes the pre-W2 contradictory cancel behavior (journal=cancelled + real chain tx). That race was explicitly fixed in W2.</div>
+      <div>v2: update the docstring in the same Phase 2 commit.</div>
+    </div>
+
+    <h4 style="margin-top: 24px;">Endorsed without change</h4>
+
+    <div class="audit-row">
+      <div class="key">Scope</div>
+      <div>Retry restricted to <code>interrupted + transfer</code>. dApp can't be replayed. Failed deferred.</div>
+      <div>Both audits agreed. Codex specifically said don't add a "Dismiss" button for dApp-interrupted — the 5-min age-out handles it.</div>
+    </div>
+
+    <div class="audit-row">
+      <div class="key">Placement</div>
+      <div>Inline secondary-row vs. top-right of card.</div>
+      <div>Both audits picked inline. Top-right is "owned" by the badge + title-trailing slot (explorer link on settled cards).</div>
+    </div>
+
+    <div class="audit-row">
+      <div class="key">Retry context</div>
+      <div>Token-only preselection vs. persisting recipient+amount on journal.</div>
+      <div>Both audits picked token-only. Don't bloat the journal for the rare Interrupted case; 5-min-old card means user already context-switched.</div>
+    </div>
+
+    <h4 style="margin-top: 24px;">Where opus &amp; codex disagreed (codex won)</h4>
+
+    <div class="audit-row">
+      <div class="key">Late cancel UX</div>
+      <div>opus: optimistic <code>cancelling…</code> state or a toast. codex: just hide the button when stage = submitting.</div>
+      <div>Codex's call wins — fewer lines, structurally honest, no temporary UI state to debug.</div>
+    </div>
+
+    <div class="audit-row">
+      <div class="key">E2E</div>
+      <div>opus: one non-network e2e for SW-restart-mid-prove + retry button. codex: skip e2e, add 2 RecentActivityView wire-tests instead.</div>
+      <div>Codex's call — the wire-tests prove the same regression matrix at &lt;1s vs. 30s per run, and avoid puppeteer fragility.</div>
+    </div>
+  </div>
+
+  <h2 id="decisions">Decisions resolved</h2>
+
+  <p class="lead">Your placement override (icon-only top-right) dissolved the remaining open question. All 9 decisions now resolved.</p>
+
+  <div class="callout ok">
+    <strong>Why Q2 dissolved:</strong> with icon-only buttons, no visible text is shown on the card — the X glyph universally reads as "close/stop" without the "Cancel" word's overlap with the dApp-approval popup's "Cancel request" button. Opus's overloading concern goes away. The aria-label (screen-reader-only) uses the standard <code>"Cancel transaction"</code> / <code>"Retry transaction"</code>.
+  </div>
+
+  <div class="audit-grid">
+    <h4>Final decision matrix (all 9 resolved)</h4>
+
+    <div class="audit-row">
+      <div class="key">Q1</div>
+      <div>Cancelled badge icon</div>
+      <div><code>cancel</code> — both audits endorsed</div>
+    </div>
+    <div class="audit-row">
+      <div class="key">Q2</div>
+      <div>Cancel copy</div>
+      <div><strong>Icon-only, no text</strong> — your placement choice dissolves this. aria-label: <code>"Cancel transaction"</code></div>
+    </div>
+    <div class="audit-row">
+      <div class="key">Q3</div>
+      <div>Retry copy</div>
+      <div><strong>Icon-only, no text</strong> — same. aria-label: <code>"Retry transaction"</code></div>
+    </div>
+    <div class="audit-row">
+      <div class="key">Q4</div>
+      <div>Retry context</div>
+      <div>Token-only preselection on the Send page. Don't expand the journal schema. — both audits.</div>
+    </div>
+    <div class="audit-row">
+      <div class="key">Q5</div>
+      <div>Late-cancel UX</div>
+      <div>Hide the button when stage is <code>submitting</code>. Cleaner than a toast. — codex.</div>
+    </div>
+    <div class="audit-row">
+      <div class="key">Q6</div>
+      <div>Cancel on executingTask cards</div>
+      <div>Re-architect — journal becomes primary in-flight source, executingTask is enrichment. — both audits flagged H3.</div>
+    </div>
+    <div class="audit-row">
+      <div class="key">Q7</div>
+      <div>Retry on Failed</div>
+      <div>Defer to v3+. Per-kind retry semantics (network → helps, simulation → won't) need their own UX cut. — both audits.</div>
+    </div>
+    <div class="audit-row">
+      <div class="key">Q8</div>
+      <div>Button placement</div>
+      <div><strong>Top-right icon button, 32px hit area.</strong> — your call (overrides both auditors' inline preference).</div>
+    </div>
+    <div class="audit-row">
+      <div class="key">Q9</div>
+      <div>E2E coverage</div>
+      <div>Skip network e2e. Add 2 wire-tests in <code>RecentActivityView</code> instead. — codex.</div>
+    </div>
+  </div>
+
+  <h2 id="tests-rollout">Tests &amp; rollout</h2>
+
+  <div class="grid cols-2">
+    <div class="card info-border">
+      <div class="title">Unit + component tests (16 new + 3 modified)</div>
+      <ul>
+        <li><strong>journal-state.test.ts</strong> (+7): retryable per state, icon-name regression pin per state, retry payload includes tokenId.</li>
+        <li><strong>TransactionAwaitingCard.test.ts</strong> (+4): renders Stop iff cancellable+jobId, hides when stage=submitting, emit on click.</li>
+        <li><strong>TransactionTerminalCard.test.ts</strong> (+3): renders Try again iff retryable, emit on click, negative case.</li>
+        <li><strong>RecentActivityView</strong> (+2 new wire-tests): @cancel → cancelJob(id), @retry → router.push(...).</li>
+        <li>3 modified: existing terminal-card tests' icon-name expectations updated to <code>cancel</code> / <code>refresh-circle</code>.</li>
+      </ul>
+    </div>
+    <div class="card info-border">
+      <div class="title">E2E</div>
+      <p><strong>No new e2e tests.</strong> Both audits agreed wire-tests + manual smoke buy more than network puppeteer at 30s+ per run. Existing e2e suite runs as a regression check; nothing it exercises should change.</p>
+      <p><strong>Manual QA scenarios on the build:</strong></p>
+      <ol style="margin: 0;">
+        <li>Cancel pre-submit on UI transfer → card flips to Cancelled.</li>
+        <li>Cancel right at submitting boundary → button is hidden, card transitions naturally.</li>
+        <li>Retry on Interrupted UI transfer → Send page with token preselected.</li>
+        <li>Retry button NOT shown on Interrupted dApp swap.</li>
+        <li>All three terminal icons render (no empty box).</li>
+      </ol>
+    </div>
+  </div>
+
+  <h3>Rollout</h3>
+  <p>Three commits in order:</p>
+  <ol>
+    <li><strong>Phase 1</strong> — icon fixes + constants + Storybook updates. ~5 min.</li>
+    <li><strong>Phase 2</strong> — Cancel button + re-architect for journal-primary rendering + hide-on-submitting. Updates the stale spec comment.</li>
+    <li><strong>Phase 3</strong> — Retry button + retryable flag + Send navigation.</li>
+  </ol>
+  <p>Bump <code>0.15.3 → 0.15.4</code> in the final commit.</p>
+
+  <h2 id="next">What I need from you</h2>
+
+  <div class="callout accent">
+    <strong>Just approve to proceed.</strong> All 9 decisions resolved. After your green light, I implement all three phases end-to-end, ship a fresh build (v0.15.4), and you re-test with the 5-scenario manual matrix above.
+  </div>
+
+  <div class="footer">
+    Plan v3 at <code>implementations-plan/phase-2-followup-card-affordances/plan.md</code><br/>
+    Audits: codex (session 019e266a-a79f) + opus 4.7 agent (a618308c37355b55d).<br/>
+    Safe rollback if anything breaks: <code>git reset --hard f7c6a2ab</code> (the Phase 2 safe checkpoint, pinned in memory).
+  </div>
+</div>
+</body>
+</html>

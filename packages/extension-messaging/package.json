@@ -1,0 +1,40 @@
+{
+	"name": "@nulo/extension-messaging",
+	"private": true,
+	"version": "0.2.0",
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./background": "./src/background/index.ts",
+		"./offscreen": "./src/offscreen/index.ts",
+		"./errors": "./src/errors.ts",
+		"./messages": "./src/messages.ts",
+		"./utils": "./src/utils.ts",
+		"./zod": "./src/zod-helpers.ts",
+		"./lazy-listener": "./src/lazy-listener.ts",
+		"./subscribe-with-snapshot": "./src/subscribe-with-snapshot.ts"
+	},
+	"scripts": {
+		"test": "vitest run --passWithNoTests",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@nulo/wallet-core": "workspace:*"
+	},
+	"peerDependencies": {
+		"zod": "^3.23.8"
+	},
+	"peerDependenciesMeta": {
+		"zod": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@webext-core/fake-browser": "^1.3.4",
+		"chrome-types": "^0.1.370",
+		"jsdom": "^29.1.1",
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.5",
+		"zod": "^3.23.8"
+	}
+}

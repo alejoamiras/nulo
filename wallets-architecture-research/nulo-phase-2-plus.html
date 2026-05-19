@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Nulo Phase 2+ — durable jobs done right</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1e252e; --border: #2a323d;
+    --text: #d1d5db; --muted: #8b949e; --accent: #9b59ff;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149; --info: #58a6ff;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); margin: 0; padding: 0; font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 24px 64px; }
+  nav.top { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  nav.top .home { color: var(--accent); text-decoration: none; font-weight: 600; }
+  nav.top .home:hover { text-decoration: underline; }
+  nav.top a.tab { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 4px; font-size: 13px; }
+  nav.top a.tab:hover { color: var(--text); background: var(--panel); }
+  nav.top a.tab.current { color: var(--text); background: var(--panel2); border: 1px solid var(--border); }
+  nav.top .sep { color: var(--muted); }
+  h1 { font-size: 28px; margin: 0 0 8px; color: #fff; letter-spacing: -0.5px; }
+  h2 { font-size: 20px; margin: 36px 0 12px; color: #fff; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16px; margin: 20px 0 8px; color: var(--accent); }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--panel2); color: var(--muted); margin-right: 6px; border: 1px solid var(--border); }
+  .tag.ok { color: var(--ok); border-color: var(--ok); }
+  .tag.accent { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .prov { display: inline-block; font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
+  .prov.chat { color: var(--accent); border-color: var(--accent); }
+  .prov.codex { color: var(--info); border-color: var(--info); }
+  .grid { display: grid; gap: 16px; }
+  .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 900px) { .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; }
+  .card .title { font-weight: 600; color: #fff; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .card.accent-border { border-left: 3px solid var(--accent); }
+  .card.warn-border { border-left: 3px solid var(--warn); }
+  figure.ascii { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; margin: 14px 0; overflow-x: auto; }
+  figure.ascii figcaption { font-size: 13px; color: var(--muted); font-style: italic; margin-bottom: 10px; }
+  figure.ascii pre { font: 12px/1.35 var(--mono); color: var(--text); margin: 0; white-space: pre; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th, td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; background: var(--panel); }
+  td.mono { font-family: var(--mono); font-size: 12px; }
+  td.center { text-align: center; }
+  .toc { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; margin: 16px 0; font-size: 13px; }
+  .toc strong { color: var(--text); }
+  .toc a { color: var(--info); text-decoration: none; margin-right: 12px; }
+  .toc a:hover { text-decoration: underline; }
+  .breadcrumb { font-size: 12px; color: var(--muted); margin: 0 0 16px; }
+  .breadcrumb a { color: var(--info); text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  code { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  .callout { border-left: 3px solid var(--info); background: var(--panel); padding: 12px 16px; margin: 14px 0; border-radius: 0 6px 6px 0; font-size: 14px; }
+  .callout.accent { border-left-color: var(--accent); }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout strong { color: var(--info); }
+  .callout.accent strong { color: var(--accent); }
+  .callout.warn strong { color: var(--warn); }
+  .footer { font-size: 12px; color: var(--muted); margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .footer a { color: var(--info); }
+  .property { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px; padding: 12px 14px; margin: 10px 0; }
+  .property .head { font-weight: 600; color: #fff; margin-bottom: 4px; }
+  .property .why { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<nav class="top" aria-label="Primary">
+  <a href="index.html" class="home">Wallet Architecture Research</a>
+  <span class="sep">/</span>
+  <a href="index.html" class="tab">Overview</a>
+  <a href="wallets/rabby.html" class="tab">Rabby</a>
+  <a href="wallets/metamask.html" class="tab">MetaMask</a>
+  <a href="wallets/grego.html" class="tab">Grego</a>
+  <a href="wallets/nulo.html" class="tab">Nulo Today</a>
+  <a href="nulo-phase-2.html" class="tab">Phase 2</a>
+  <a href="nulo-phase-2-plus.html" class="tab current">Phase 2+</a>
+  <a href="nulo-maximalist.html" class="tab">Maximalist</a>
+</nav>
+
+<div class="wrap">
+
+<p class="breadcrumb"><a href="index.html">Overview</a> &nbsp;›&nbsp; <a href="nulo-phase-2.html">Phase 2</a> &nbsp;›&nbsp; Phase 2+</p>
+
+<h1>Phase 2+ — durable jobs done <em>right</em></h1>
+<p style="color: var(--muted); margin-top: 0;">
+  Phase 2 stops the SW from lying to users. Phase 2+ makes durable jobs a real system instead of just a state machine —
+  fair, idempotent, retryable, attachable, chaos-tested. This is what 5/5 on the durable-jobs dimension actually requires.
+</p>
+
+<p style="margin-top: 14px;">
+  <span class="tag ok">PARTIALLY SHIPPED</span>
+  Two concrete bundles landed on 2026-05-15 — see <code>implementations-plan/phase-2-plus/plan-v4.md</code> for the implementation plan, <code>eli5.html</code> for the digestible view, and the per-PR commit graphs for the audit trail.
+</p>
+
+<div class="callout">
+  <strong>What shipped vs what's still aspirational on this page</strong>
+  <ul>
+    <li><strong>Bundle 1 (PR #82, <code>v0.15.7</code>)</strong> — per-row <code>EntityStorage</code> resilience (Property: durable substrate), <code>OperationRecordSchema</code> Zod validation on journal load, <code>JournalGC</code> bounded tombstones (50 per <code>(profileId, accountAddress)</code> on a 60-min alarm), boot-time storage-usage observability log.</li>
+    <li><strong>Phase A (PR #83, <code>v0.16.0</code>)</strong> — first non-tx <code>OperationKind</code> (<code>token_import</code>) graduates through the journal substrate. New FSM edge <code>simulating → succeeded</code> + kind ↔ <code>succeeded.txHash</code> invariant. Sibling <code>TokenImportRow</code> in the tokens view (not the activity feed). Multi-in-flight card rendering fix (Phase 2 W5 regression where concurrent tx A disappeared when tx B was submitted).</li>
+    <li><strong>Phase B (NOT YET STARTED)</strong> — graduation of other single-shot popup ops (registry/authwit on-chain writes, account/profile/network/contact ops, onboarding flows) into the journal. Roadmap captured in <code>plan-v4.md</code> §"Phase B — Expansion"; codex grouped by FSM/lifecycle shape, not by domain.</li>
+    <li><strong>Properties on this page not yet delivered</strong> — fairness queues + per-origin rate limits (Carry #1 seam preserved but unused), attachability across popup reload (declined as architecturally unnecessary today), full chaos-test discipline (advisory CI only), retry policy with backoff (Phase 2 follow-up v4 explicitly killed the retry button; the `attempts` counter is still on the record for a future round).</li>
+  </ul>
+</div>
+
+<div class="toc" aria-label="On this page">
+  <strong>On this page:</strong>
+  <a href="#diagnosis">The diagnosis</a>
+  <a href="#properties">Six properties</a>
+  <a href="#diagram">Full job system</a>
+  <a href="#chaos">Chaos discipline</a>
+  <a href="#delta">Delta from Phase 2</a>
+  <a href="#estimate">Realistic estimate</a>
+  <a href="#not-pursued">Considered, not pursued</a>
+</div>
+
+<h2 id="diagnosis">The diagnosis — Phase 2 was the floor, not the ceiling <span class="prov codex">codex pushback</span></h2>
+
+<p>
+  The 8-item Phase 2 list builds a state machine and persists it. That gets us to roughly <strong>4/5</strong> on durable jobs.
+  It does NOT get us to 5/5. The honest gap is that a state machine is not a job system — a job system also requires
+  scheduling discipline, replay safety, recovery semantics, and observability.
+</p>
+
+<div class="callout accent">
+  <strong>The single most important reframe:</strong> a state machine is not a job system. A real job system also needs scheduling discipline (fairness), replay safety (idempotency), recovery semantics (retry + tombstones), and observability (sweeper + attach/detach). Phase 2 builds the FSM; Phase 2+ wraps it in the rest of the machinery a job system actually needs.
+</div>
+
+<h2 id="properties">Six properties Phase 2 leaves on the table <span class="prov codex">codex</span></h2>
+
+<div class="property">
+  <div class="head">1. Fairness</div>
+  <div class="why">
+    <strong>What:</strong> Priority queues. User-blocking jobs (a tx the user just approved) jump ahead of background work (history sync).
+    Per-(origin, profileId) caps so a noisy dApp can't starve the rest.
+    <br><strong>Why:</strong> A FIFO queue under load means a user-approved tx waits behind a routine sync. That's a UX defect, not a correctness one — but it's the kind that destroys trust.
+  </div>
+</div>
+
+<div class="property">
+  <div class="head">2. Idempotency</div>
+  <div class="why">
+    <strong>What:</strong> Every job carries an idempotency key derived from <code>(origin, intent-hash, nonce, salt)</code>.
+    Submitting the same intent twice (e.g. dApp retries after a perceived timeout) resolves to the same <code>jobId</code> instead of duplicating work.
+    <br><strong>Why:</strong> Without it, "I clicked once but it submitted twice" becomes a real bug class. Aztec txs aren't easily revertible.
+  </div>
+</div>
+
+<div class="property">
+  <div class="head">3. Retry policy</div>
+  <div class="why">
+    <strong>What:</strong> Failed jobs distinguish <em>retryable</em> from <em>terminal</em> errors. Retryables get exponential backoff with a cap and a budget.
+    Terminals (user reject, invalid sig, contract revert) skip retry and go straight to FAILED.
+    <br><strong>Why:</strong> "Retry forever" floods the chain. "Never retry" drops recoverable network blips. Both are wrong defaults.
+  </div>
+</div>
+
+<div class="property">
+  <div class="head">4. Tombstones</div>
+  <div class="why">
+    <strong>What:</strong> Terminated jobs (cancelled, succeeded, failed-terminal) are not deleted — they're marked with a tombstone.
+    A late <code>chrome.alarms</code> wake-up that finds <code>status=PROVING</code> for a job whose tombstone says CANCELLED does nothing.
+    <br><strong>Why:</strong> Without tombstones, an alarm firing after a user cancel can resurrect the job. Subtle but real.
+  </div>
+</div>
+
+<div class="property">
+  <div class="head">5. Sweeper</div>
+  <div class="why">
+    <strong>What:</strong> A periodic scan moves stuck jobs (e.g. <code>PROVING</code> for &gt; 10min with no heartbeat) into a dead-letter queue.
+    User sees them in a "needs attention" surface; the system doesn't pretend they're still in flight.
+    <br><strong>Why:</strong> Bugs happen. Without a sweeper, a one-time progress-write failure looks identical to "still working" — forever.
+  </div>
+</div>
+
+<div class="property">
+  <div class="head">6. Attach / detach</div>
+  <div class="why">
+    <strong>What:</strong> A freshly-opened popup can subscribe to an in-flight <code>jobId</code> at any time and detach without affecting the job.
+    Multiple observers are allowed by the attach map (popup re-opened on a different tab, future side-panel surface, etc.) without coupling the job's lifecycle to any of them.
+    <br><strong>Why:</strong> The popup is ephemeral by design in MV3. The job system has to treat observation as optional and decoupled from execution.
+  </div>
+</div>
+
+<h2 id="diagram">The full job system — not just a state machine <span class="prov chat">design</span></h2>
+
+<figure class="ascii" aria-label="Phase 2+ full job system: JobRegistry plus a scheduler with priority queues per profile and chain, an idempotency map deduping by intent hash, a retry policy lookup distinguishing retryable from terminal errors, a tombstone table, a sweeper alarm scanning for stuck jobs, an attach map tracking observers; popup subscribes via jobId and can close and rejoin">
+  <figcaption>The 5/5 shape. Each labeled subsystem is one of the six properties above. Popup is the observer surface — close-safe, rejoins by jobId.</figcaption>
+  <pre>  ┌────────────────────────────────────────────────┐
+  │   POPUP                                         │
+  │     subscribeJob(jobId) → state events          │
+  │     close-safe; rejoins later by jobId          │
+  │     attach map allows multiple observers        │
+  └──────────────────┬─────────────────────────────┘
+                     │ ATTACH MAP: jobId → observers[]
+                     ▼
+  ┌────────────────────────────────────────────────────────────────┐
+  │   SW JOB SYSTEM                                                │
+  │                                                                │
+  │   ┌────────────────────┐    ┌──────────────────────────────┐   │
+  │   │ Scheduler          │    │ IdempotencyMap                │   │
+  │   │  priority queues   │◄───┤  (origin, intent-hash, nonce) │   │
+  │   │  user-blocking >>  │    │   → jobId                     │   │
+  │   │  background        │    │  dedup at submit time         │   │
+  │   │  per-(origin,prof) │    └──────────────────────────────┘   │
+  │   │  fairness caps     │                                       │
+  │   └─────────┬──────────┘    ┌──────────────────────────────┐   │
+  │             │                │ RetryPolicy                   │   │
+  │             ▼                │  classify error               │   │
+  │   ┌────────────────────┐    │   → retryable | terminal      │   │
+  │   │ JobRegistry        │◄───┤  exponential backoff + cap    │   │
+  │   │  jobId → Job state │    │  budget per job               │   │
+  │   │  persisted each    │    └──────────────────────────────┘   │
+  │   │   transition       │                                       │
+  │   │                    │    ┌──────────────────────────────┐   │
+  │   │  on transition,    │    │ TombstoneTable                │   │
+  │   │   fan out to       │◄───┤  terminal jobs marked         │   │
+  │   │   observers via    │    │  late alarm wake-up checks    │   │
+  │   │   AttachMap        │    │   tombstone before resuming   │   │
+  │   └─────────┬──────────┘    └──────────────────────────────┘   │
+  │             │                                                  │
+  │             │                ┌──────────────────────────────┐   │
+  │             │                │ Sweeper (chrome.alarms)      │   │
+  │             │◄───────────────┤  every N min:                 │   │
+  │             │                │   move stuck PROVING → DLQ    │   │
+  │             │                │   surface to user             │   │
+  │             ▼                └──────────────────────────────┘   │
+  │   ┌────────────────────┐                                       │
+  │   │ AbortController    │   PXEConcurrencyManager:               │
+  │   │  per jobId         │     per-(profileId, chainId) lock      │
+  │   │  signal → prove    │                                       │
+  │   └────────┬───────────┘                                       │
+  │            │                                                   │
+  └────────────┼───────────────────────────────────────────────────┘
+               │
+               ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │   OFFSCREEN PXE + BB-WASM                                    │
+  │     proveTx({ jobId, signal, heartbeat })                    │
+  │     emits progress events back through JobRegistry           │
+  └──────────────────────────────────────────────────────────────┘</pre>
+</figure>
+
+<h2 id="chaos">Chaos discipline <span class="prov codex">codex</span></h2>
+
+<p>
+  Everything above is hard to test in unit tests alone. Phase 2+ ships an ongoing chaos discipline as a first-class testing category, not a one-off audit:
+</p>
+
+<ul>
+  <li><strong>SW-kill chaos</strong> — periodically kill the SW mid-prove in CI; verify recovery via alarms + tombstones</li>
+  <li><strong>Approval-spam drills</strong> — fire 1000 approvals from one origin; verify per-origin rate limit + fairness</li>
+  <li><strong>Malicious-dApp suite</strong> — adversarial test cases for the dApp surface (replay, double-submit, invalid sigs, permission escalation attempts)</li>
+  <li><strong>Cold-boot fuzzing</strong> — fire dApp messages during the first 500ms of SW boot; verify LazyListener captures all of them</li>
+</ul>
+
+<p style="color: var(--muted); font-size: 13px;">
+  Storage corruption drills (inject malformed bytes into <code>chrome.storage.local</code>; verify fallback + invariant validator) move with the rest of the storage-safety work to <a href="nulo-maximalist.html#tracks">Maximalist persistence-spine</a>.
+</p>
+
+<h2 id="delta">Delta from Phase 2 <span class="prov chat">scoping</span></h2>
+
+<table aria-label="What Phase 2+ adds on top of Phase 2">
+  <thead>
+    <tr><th>Phase 2 item</th><th>Phase 2+ addition</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1. JobRegistry FSM</td><td>+ scheduler with priority queues; + idempotency map; + tombstone table; + attach map for observers</td></tr>
+    <tr><td>2. AbortController</td><td>+ heartbeat from prove → sweeper detects stale</td></tr>
+    <tr><td>3. Execute window subscribe</td><td>(unchanged — subscribe-by-jobId from Phase 2 + attach map allows multiple observers)</td></tr>
+    <tr><td>4. chrome.alarms wake-up</td><td>+ sweeper alarm for stuck-job detection → DLQ</td></tr>
+    <tr><td>5. LazyListener</td><td>(unchanged — Phase 2 covers this fully)</td></tr>
+    <tr><td>6. PXEConcurrencyManager</td><td>+ fairness caps per-(origin, profile)</td></tr>
+    <tr><td>7. IDB backup</td><td>(unchanged in Phase 2+ — invariant validator on every read and corruption quarantine are <a href="nulo-maximalist.html#tracks">Maximalist persistence-spine</a>)</td></tr>
+    <tr><td>8. Migrations framework</td><td>(unchanged in Phase 2+ — rollback drills and migration test harness are <a href="nulo-maximalist.html#tracks">Maximalist persistence-spine</a>)</td></tr>
+    <tr><td>—</td><td><strong>New:</strong> retry policy (retryable vs terminal classification)</td></tr>
+    <tr><td>—</td><td><strong>New:</strong> chaos discipline (SW-kill, storage corruption, approval spam, malicious dApp)</td></tr>
+    <tr><td>—</td><td><strong>New:</strong> narrow formal methods — model-check the job FSM and permission wildcard matcher</td></tr>
+  </tbody>
+</table>
+
+<h2 id="estimate">Realistic estimate <span class="prov chat">scope</span></h2>
+
+<p>
+  Phase 2 alone is ~3-6 weeks. Phase 2+ adds:
+</p>
+
+<ul>
+  <li>~3-4 weeks for the six job-system properties + chaos discipline harness</li>
+  <li>~1-2 weeks for narrow formal-methods setup (TLA+ or Alloy on the FSM + permission matcher)</li>
+</ul>
+
+<p>
+  Bottom line: Phase 2 → Phase 2+ is roughly <strong>1.5-2× the work</strong> of the original 8-item plan, all on the same single browser-extension surface.
+</p>
+
+<div class="callout warn">
+  <strong>The cut you'd make if you only had one extra month after Phase 2:</strong> idempotency + retry policy + tombstones + sweeper. Skip fairness (acceptable in low-concurrency cases). Skip attach/detach beyond what subscribe-by-jobId already gives you. Hold back chaos discipline and formal methods for a follow-up sprint.
+</div>
+
+<h2 id="not-pursued">Considered, not pursued — product decisions <span class="prov chat">product scope</span></h2>
+
+<p>
+  Two ideas surfaced during the design conversation that are technically tractable but were ruled out as <em>product</em> decisions. Recorded here so the thinking isn't lost; not part of Phase 2+ scope.
+</p>
+
+<div class="grid cols-2">
+  <div class="card warn-border">
+    <div class="title"><span class="tag">decided against</span> Dedicated progress window</div>
+    <p>
+      A detached <code>chrome.windows.create</code> popout that owns minutes-long proofs, with the main popup as an observer. Rabby does this for approvals.
+    </p>
+    <p style="color: var(--muted);">
+      <strong>Why not:</strong> adds a second long-running UI surface to design, maintain, and explain. The popup stays as Nulo's single user-visible surface; subscribe-by-jobId (via the attach map) already gives us close-and-rejoin without a separate window.
+    </p>
+  </div>
+
+  <div class="card warn-border">
+    <div class="title"><span class="tag">decided against</span> Desktop proving companion</div>
+    <p>
+      An optional Tauri-style native daemon that hosts PXE + BB-WASM long-running, sidestepping MV3's SW-death entirely. Extension hands work to it via WebSocket when present.
+    </p>
+    <p style="color: var(--muted);">
+      <strong>Why not:</strong> introduces a parallel native distribution channel — separate install/update story, code signing, platform builds. The wallet stays browser-only; in-extension durability is what Phase 2+ delivers.
+    </p>
+  </div>
+</div>
+
+<div class="footer">
+  <p>
+    Calibrated 2026-05-12. Synthesized from chat thinking + an independent codex review (session <code>019e1cfc-9b6a-7003-a903-3807d7c047b8</code>).
+    Source content for this page: <a href="synthesis/html-source-additions.md"><code>synthesis/html-source-additions.md</code></a>.
+  </p>
+  <p>
+    <a href="nulo-phase-2.html">← Phase 2 (shippable)</a>
+    &nbsp;·&nbsp;
+    <a href="nulo-maximalist.html">Maximalist (5/5 everywhere) →</a>
+  </p>
+</div>
+
+</div>
+</body>
+</html>

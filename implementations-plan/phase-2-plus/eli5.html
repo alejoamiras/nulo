@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Phase 2+ — ELI5 + Phase A / Phase B plan</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1e252e; --border: #2a323d;
+    --text: #d1d5db; --muted: #8b949e; --accent: #9b59ff;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149; --info: #58a6ff;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); margin: 0; padding: 0; font: 14.5px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 28px 22px 80px; }
+
+  h1 { font-size: 32px; margin: 0 0 8px; color: #fff; letter-spacing: -0.5px; }
+  h1 .accent { color: var(--accent); }
+  h2 { font-size: 22px; margin: 44px 0 14px; color: #fff; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16.5px; margin: 24px 0 8px; color: var(--accent); }
+  h4 { font-size: 13.5px; margin: 18px 0 6px; color: #fff; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  p { margin: 10px 0; }
+  .lead { color: var(--muted); font-size: 16px; line-height: 1.65; margin-top: 0; }
+
+  code { font-family: var(--mono); font-size: 12.5px; background: var(--panel2); padding: 1px 6px; border-radius: 3px; color: var(--text); }
+
+  .toc { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 14px 18px; margin: 22px 0; }
+  .toc strong { color: var(--muted); display: block; margin-bottom: 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; }
+  .toc a { color: var(--info); text-decoration: none; margin-right: 18px; font-size: 14px; }
+  .toc a:hover { text-decoration: underline; }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 18px 20px; margin: 14px 0; }
+  .card.accent { border-left: 3px solid var(--accent); }
+  .card.ok { border-left: 3px solid var(--ok); }
+  .card.warn { border-left: 3px solid var(--warn); }
+  .card.info { border-left: 3px solid var(--info); }
+  .card.err { border-left: 3px solid var(--err); }
+  .card .title { font-weight: 600; color: #fff; margin-bottom: 8px; font-size: 15px; }
+  .card .sub { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+
+  .grid { display: grid; gap: 14px; }
+  .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 760px) { .grid.cols-2 { grid-template-columns: 1fr; } }
+
+  .pill { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 3px; vertical-align: middle; }
+  .pill.ok { background: rgba(63,185,80,0.15); color: var(--ok); border: 1px solid rgba(63,185,80,0.3); }
+  .pill.warn { background: rgba(210,153,34,0.15); color: var(--warn); border: 1px solid rgba(210,153,34,0.3); }
+  .pill.info { background: rgba(88,166,255,0.15); color: var(--info); border: 1px solid rgba(88,166,255,0.3); }
+  .pill.accent { background: rgba(155,89,255,0.15); color: var(--accent); border: 1px solid rgba(155,89,255,0.3); }
+  .pill.err { background: rgba(248,81,73,0.15); color: var(--err); border: 1px solid rgba(248,81,73,0.3); }
+  .pill.muted { background: rgba(139,148,158,0.15); color: var(--muted); border: 1px solid rgba(139,148,158,0.3); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 12px 0; }
+  th, td { padding: 10px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; background: var(--panel); text-transform: uppercase; letter-spacing: 0.3px; }
+  td.mono { font-family: var(--mono); font-size: 12.5px; }
+  td.center { text-align: center; }
+
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+
+  .callout { border-left: 3px solid var(--info); background: var(--panel); padding: 14px 18px; margin: 16px 0; border-radius: 0 6px 6px 0; font-size: 14px; }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout.accent { border-left-color: var(--accent); }
+  .callout strong { color: var(--info); }
+  .callout.warn strong { color: var(--warn); }
+  .callout.ok strong { color: var(--ok); }
+  .callout.accent strong { color: var(--accent); }
+
+  .ascii { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; margin: 12px 0; overflow-x: auto; font: 12px/1.4 var(--mono); color: var(--text); white-space: pre; }
+
+  .locked { background: rgba(63,185,80,0.05); border: 1px solid rgba(63,185,80,0.25); border-left: 3px solid var(--ok); border-radius: 5px; padding: 10px 14px; margin: 8px 0; font-size: 13.5px; }
+  .locked .tag { font-family: var(--mono); font-size: 10.5px; padding: 1px 6px; border-radius: 3px; background: var(--ok); color: #0e1116; margin-right: 8px; vertical-align: middle; font-weight: 700; }
+
+  .footer { color: var(--muted); font-size: 12.5px; margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); text-align: center; }
+  .footer code { font-size: 12px; }
+
+  .meta { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 24px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Phase 2+ — <span class="accent">Phase A → Phase B plan</span></h1>
+<p class="lead">Two-bundle plan reshaped after your decisions and the design pivot. <strong>Bundle 1</strong> is invisible production hardening. <strong>Phase A</strong> graduates token imports to the journal architecture as a fully tested template. <strong>Phase B</strong> expands that template to other long-running ops, grouped by FSM shape (not domain).</p>
+
+<div class="meta">
+  <span class="pill ok">✅ SHIPPED — Bundle 1 = PR #82 (v0.15.7), Phase A = PR #83 (v0.16.0)</span>
+  <span class="pill accent">plan v4</span>
+  <span class="pill info">audits: 6 codex rounds + Plan-agent + Explore inventory</span>
+  <span class="pill muted">base: dev @ f81b3e6c → manually QA-validated</span>
+</div>
+
+<div class="callout ok">
+  <strong>Status (after manual QA):</strong> All locked decisions implemented; multi-in-flight card rendering bug found during QA was traced to Phase 2 W5 (single-card `topJournalOp[0]` render) and fixed in the Phase A PR — one card per concurrent op now, newest on top, per-jobId cancel routing, ambiguity-safe subtask decoration. Phase B (graduation of remaining single-shot ops to the journal) is documented below but <em>not yet started</em> — separate planning round after Phase A bakes in production.
+</div>
+
+<div class="toc">
+  <strong>Sections</strong>
+  <a href="#decisions">Decisions you locked</a>
+  <a href="#bundle1">Bundle 1 — hardening</a>
+  <a href="#phasea">Phase A — token imports</a>
+  <a href="#phaseb">Phase B — expansion</a>
+  <a href="#notjournaling">Won't graduate</a>
+  <a href="#workflow">Order &amp; gates</a>
+</div>
+
+<h2 id="decisions">Decisions you locked (from last reply)</h2>
+
+<div class="locked"><span class="tag">LOCKED</span><strong>GC cap = 50 terminal records.</strong> Granularity refined to <strong>per (profile, account)</strong> per codex — records already carry <code>accountAddress</code> so the implementation cost is the same, and per-account avoids one busy account evicting another's history.</div>
+
+<div class="locked"><span class="tag">LOCKED</span><strong>Graduate <code>addToken</code> fully to journal.</strong> TaskService removed for the parent op. Modal subscribes to journal events for its spinner. Sub-task (<code>parseTokenInterface</code>) keeps its TaskService wiring inside the modal — not the parent flow.</div>
+
+<div class="locked"><span class="tag">LOCKED</span><strong>Token-import card lives in tokens balances list, NOT activity feed.</strong> Activity is for transactions only. Codex's refinement: render <em>in-flight</em> and <em>failed</em> journal rows in the tokens view; <strong>no standalone success card needed</strong> — on success the journal row vanishes and <code>TokenCard</code>'s existing <code>updatedAt === 0</code> initial-sync spinner takes over.</div>
+
+<div class="locked"><span class="tag">LOCKED</span><strong>Phase A = token-import only.</strong> Ship it, validate in production, <em>then</em> expand. Phase B graduates other ops following the same template.</div>
+
+<div class="locked"><span class="tag">LOCKED</span><strong>Phase B grouped by FSM/lifecycle shape</strong>, not by domain. Single-shot read/write, transaction-shaped, multi-step import — each is one batch.</div>
+
+<h2 id="bundle1">Bundle 1 — Production hardening (<code>v0.15.7</code>)</h2>
+<p class="lead">Pure SW-internal. No UI surface. Ships first as the substrate cleanup before Phase A.</p>
+
+<div class="grid cols-2">
+  <div class="card info">
+    <div class="sub">A1 · two-layer storage resilience</div>
+    <div class="title">Stop poisoning ourselves</div>
+    <p><strong>Layer 1</strong>: try/catch around every <code>JSON.parse</code> in <code>EntityStorage</code>. Malformed row → log truncated payload, delete row, skip from iteration. (Codex caught: parsing happens here, before any Zod check could run.)</p>
+    <p><strong>Layer 2</strong>: centralize the journal service's four raw-record loads (<code>getOperation</code>, <code>getOperations</code>, <code>transitionOperation</code>, <code>deleteOperation</code>) behind one <code>_loadValidated</code> helper that does <code>OperationRecordSchema.safeParse</code>.</p>
+    <p style="color: var(--muted); font-size: 13px;">7 unit tests. Pure invariant restoration.</p>
+  </div>
+  <div class="card info">
+    <div class="sub">A2 · GC sweep</div>
+    <div class="title">Cap terminal records</div>
+    <p>New <code>nulo:journal:gc</code> alarm runs hourly. Cap of <strong>50 terminal records per (profile, account)</strong>; oldest evicted first.</p>
+    <p>Reaper handles stuck non-terminal records (existing). GC handles terminal-record bloat (new). Disjoint sets, never overlap.</p>
+    <p style="color: var(--muted); font-size: 13px;">5 unit + 1 e2e (alarm wiring).</p>
+  </div>
+  <div class="card info">
+    <div class="sub">A3 · observability</div>
+    <div class="title">Storage usage log</div>
+    <p>One log line at SW boot: bytes in session storage, number of journal records. Free data point to validate whether 50 is the right cap.</p>
+    <p style="color: var(--muted); font-size: 13px;">0 tests.</p>
+  </div>
+  <div class="card warn">
+    <div class="sub">dropped from this round</div>
+    <div class="title">B1 cancel-ignored toast · DROPPED</div>
+    <p>Both audits voted drop. Race is narrow; cost of RPC contract change isn't worth it for marginal UX. Revisit only if QA surfaces complaints.</p>
+  </div>
+</div>
+
+<h3>Reaper vs GC at a glance</h3>
+<table>
+  <thead><tr><th></th><th>Reaper (existing, Phase 2)</th><th>GC (new in Bundle 1)</th></tr></thead>
+  <tbody>
+    <tr><td>Watches</td><td>Non-terminal records (pending, simulating, proving, submitting)</td><td>Terminal records (succeeded, failed, cancelled)</td></tr>
+    <tr><td>Failure mode</td><td>Stuck-in-limbo: SW died mid-prove, UI shows "Proving…" forever</td><td>Storage bloat: tombstones accumulate beyond what UI shows</td></tr>
+    <tr><td>Action</td><td>Transition to <code>failed</code> with a kind reason</td><td>Delete the record</td></tr>
+    <tr><td>Cadence</td><td>Boot + every 1 min</td><td>Boot + every 1 hour</td></tr>
+    <tr><td>Analogy</td><td>"Did anyone leave the oven on?"</td><td>"Drawer's full of old receipts"</td></tr>
+  </tbody>
+</table>
+
+<h2 id="phasea">Phase A — Token imports through the journal (<code>v0.16</code>)</h2>
+<p class="lead">The "base substrate" for the journal-only pattern. Single-shot ops with no on-chain prove/submit, FSM <code>pending → simulating → succeeded/failed</code>. Once landed and validated, Phase B graduates more ops following this template.</p>
+
+<h3>What changes in the substrate</h3>
+
+<table>
+  <thead><tr><th>Where</th><th>Change</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><code>operation-journal/spec.ts</code></td><td><code>OperationKind</code> += <code>"token_import"</code></td><td>New op type</td></tr>
+    <tr><td><code>operation-journal/spec.ts</code></td><td><code>OperationRecord</code> += <code>contractAddress?: string</code></td><td>For tokens-view row identity</td></tr>
+    <tr><td><code>operation-journal/spec.ts</code></td><td><code>OperationFilter</code> += <code>kind?</code></td><td>Tokens view queries by kind (codex's catch)</td></tr>
+    <tr><td><code>jobs/types.ts</code></td><td><code>succeeded.txHash</code> becomes optional</td><td>Token imports have no tx hash</td></tr>
+    <tr><td><code>operation-journal/service.ts:transitionOperation</code></td><td>Invariant: <code>kind ∈ {transfer, dapp_execute}</code> ⇒ txHash present; <code>kind = token_import</code> ⇒ txHash absent</td><td>Enforce the new optionality safely</td></tr>
+    <tr><td><code>jobs/fsm.ts</code></td><td>Add <code>simulating → succeeded</code> to legal set</td><td>No-prove FSM path</td></tr>
+    <tr><td><code>RecentActivityView.vue:192</code> + <code>activity.vue:83</code></td><td>Add <code>kind !== "token_import"</code> exclusion to both feeds</td><td>Token imports do NOT live in activity (your call)</td></tr>
+  </tbody>
+</table>
+
+<p>All schema additions are <strong>forward-compatible</strong> with v0.15.6 records (optional fields only). No storage migration. No version bump.</p>
+
+<h3>Token-import flow with the new architecture</h3>
+
+<div class="ascii">User clicks "Add Token" in modal
+  │
+  ├─ paste contract address, click Confirm
+  │
+  ├─ TokenService.addToken(..., opContext: { origin: "popup" })
+  │    │
+  │    ├─ journal.createOperation({ kind: "token_import", contractAddress, … })
+  │    ├─ transition → simulating  (modal subscribes via journal client)
+  │    ├─ parseTokenInterface() + registerContract() + addToWatchlist()
+  │    └─ transition → succeeded (no txHash for non-tx ops)
+  │
+  ├─ modal sees succeeded event → closes itself
+  │
+  └─ tokens view now shows the new TokenCard with the existing
+     "initial sync" spinner (updatedAt === 0), until balance loads.
+
+If user closes modal mid-flow:
+  • journal entry keeps running
+  • tokens view shows a TokenImportRow (in-flight)
+  • on completion: row vanishes, TokenCard takes over
+  • NO modal reattach — reopening modal starts fresh.
+
+If import fails:
+  • journal transitions to failed with error.kind
+  • TokenImportRow stays for ~30s showing the error, then auto-dismisses
+  • (or: user can refresh / retry by reopening modal)
+</div>
+
+<h3>UI surfaces</h3>
+<div class="grid cols-2">
+  <div class="card accent">
+    <div class="sub">tokens view · NEW sibling component</div>
+    <div class="title">TokenImportRow</div>
+    <p>Renders for journal ops where <code>kind === "token_import"</code> AND (non-terminal OR <code>terminalAt &gt; now - 30s</code>). Sibling to <code>TokenCard</code>, NOT a variant — codex's pushback against overloading <code>TokenCard</code>.</p>
+    <p style="color: var(--muted); font-size: 13px;">In-flight + failed only. Succeeded vanishes; <code>TokenCard</code> takes over.</p>
+  </div>
+  <div class="card accent">
+    <div class="sub">NewTokenPopup.vue · modal rewire</div>
+    <div class="title">Subscribes to journal events</div>
+    <p>Replaces TaskService listener for the parent op. On succeeded: close modal. On failed: surface error inline. On modal close: unsubscribe + disconnect, no reattach.</p>
+    <p style="color: var(--muted); font-size: 13px;"><code>parseTokenInterface</code>'s sub-task tree keeps its TaskService wiring (still useful for in-modal sub-step spinners).</p>
+  </div>
+</div>
+
+<h3>Test budget for Bundle 1 + Phase A</h3>
+<table>
+  <thead><tr><th>Where</th><th>Unit</th><th>E2E</th></tr></thead>
+  <tbody>
+    <tr><td>Bundle 1 (A1 + A2 + A3)</td><td class="center">12</td><td class="center">0-1</td></tr>
+    <tr><td>Phase A (substrate + flow + UI)</td><td class="center">15</td><td class="center">2</td></tr>
+    <tr><td><strong>Total</strong></td><td class="center"><strong>27</strong></td><td class="center"><strong>2-3</strong></td></tr>
+  </tbody>
+</table>
+<p style="color: var(--muted); font-size: 13px;">Each test is load-bearing. E2E: full add-token flow + cross-flow regression (token import during a transfer's prove — pins the per-(profile, chain) PXE write-lock contention).</p>
+
+<h2 id="phaseb">Phase B — Expansion (planned, post-Phase-A)</h2>
+<p class="lead">After Phase A ships and validates in production, expand the template. Grouping by <strong>FSM/lifecycle shape</strong> (codex's call) — domains get mixed because behavioral shape is what matters for graduation, not what the op does.</p>
+
+<div class="grid cols-2">
+  <div class="card ok">
+    <div class="sub">batch B1 · same shape as token_import</div>
+    <div class="title">Single-shot journal-only ops</div>
+    <p>No on-chain prove/submit. FSM <code>pending → simulating → succeeded/failed</code>. Each has a natural non-activity home surface.</p>
+    <ul>
+      <li><strong>Add sender</strong> — PXE register, 1-3s</li>
+      <li><strong>Add contact</strong> (with sender registration opt-in)</li>
+      <li><strong>Add network</strong> — RPC node probe</li>
+      <li><strong>Add endpoint</strong> — RPC connectivity test</li>
+    </ul>
+    <p style="color: var(--muted); font-size: 13px;">~20-25 unit + 1-2 e2e. Open question: add-sender has no visual home today — do we add one or just track durably without surfacing?</p>
+  </div>
+  <div class="card warn">
+    <div class="sub">batch B2 · same shape as transfer</div>
+    <div class="title">On-chain destructive writes</div>
+    <p>Full FSM <code>pending → simulating → proving → submitting → succeeded/failed/cancelled</code>. Activity feed is the natural surface (these ARE transactions, just non-fund-transfer ones).</p>
+    <ul>
+      <li><strong>Revoke authwits</strong> (batched)</li>
+      <li><strong>Change authwits registry</strong></li>
+    </ul>
+    <p style="color: var(--muted); font-size: 13px;">~15-20 unit + 2 e2e. Open: revoke-batched = one journal op per chunk, or one op spanning all chunks?</p>
+  </div>
+  <div class="card err">
+    <div class="sub">batch B3 · multi-step with checkpoints</div>
+    <div class="title">Long import/export flows</div>
+    <p>10-30s ops with multi-stage progress. May need extending <code>JobProgress.simulating</code> with per-stage fields (<code>syncedAccounts</code>, <code>totalAccounts</code>) or adding a new <code>syncing</code> stage.</p>
+    <ul>
+      <li><strong>Import backup</strong></li>
+      <li><strong>Import seed phrase</strong></li>
+      <li><strong>Import private key</strong></li>
+      <li><strong>Create profile (passkey)</strong> — retry on <code>ProfileIdConflictError</code>; uses <code>attempts</code> carry</li>
+    </ul>
+    <p style="color: var(--muted); font-size: 13px;">~30-40 unit + 2-3 e2e.</p>
+  </div>
+  <div class="card muted">
+    <div class="sub">deferred indefinitely</div>
+    <div class="title">Approval / session flows</div>
+    <p>dApp connect-session approval, capability negotiation — different shape (user-decision gates, not async work). Phase 3 territory if at all.</p>
+  </div>
+</div>
+
+<h2 id="notjournaling">Won't graduate (explicit non-goals)</h2>
+<p>Sub-second local writes don't benefit from journaling — the op completes before SW could die. Pure overhead.</p>
+
+<table>
+  <thead><tr><th>Op</th><th>Why skip</th></tr></thead>
+  <tbody>
+    <tr><td>Edit profile/account/FPC/contact/network/endpoint name</td><td>Sub-millisecond local config writes. No PXE/network.</td></tr>
+    <tr><td>New account (local KeyStore)</td><td>Local keystore only. Sub-second.</td></tr>
+    <tr><td>New FPC</td><td>Pure storage write.</td></tr>
+    <tr><td>Confirm/Select/DataViewer popups</td><td>UI gates with no async backend.</td></tr>
+    <tr><td>Receive / address display</td><td>Read-only UI.</td></tr>
+    <tr><td>Forgot-password / unlock</td><td>Pure auth gate.</td></tr>
+    <tr><td>Passkey ceremony</td><td>Already has AbortController; SW-restart durability not a real failure mode.</td></tr>
+  </tbody>
+</table>
+
+<p style="color: var(--muted); font-size: 13px;"><strong>Rule</strong>: if op completes &lt;500ms AND has no PXE/network call, skip journaling.</p>
+
+<h2 id="workflow">Order &amp; validation gates</h2>
+
+<ol>
+  <li><strong>v0.15.7</strong> — Bundle 1 (A1 + A2 + A3). Pure SW-internal. <code>audit:vue</code> + smoke e2e + manual smoke. No network e2e needed.</li>
+  <li><strong>v0.16</strong> — Phase A (token imports). Full <code>audit:vue</code> + smoke + <strong>network e2e</strong> (add-token flow + cross-flow regression with a concurrent transfer). Manual smoke covers popup → tokens-view hand-off.</li>
+  <li><strong>v0.16.x → Phase B batches</strong> — each batch lands separately after Phase A validates in production. Order within Phase B is flexible based on observed need.</li>
+</ol>
+
+<p>Each landing is its own PR onto <code>dev</code>. Codex post-impl review after each PR before merge.</p>
+
+<div class="callout accent">
+  <strong>What I need from you next</strong> — sign-off on this plan, or any objections to Phase B's grouping (codex pushed back hard against domain grouping; I followed their call). If approved, I start implementing Bundle 1 (v0.15.7) immediately, codex post-impl review, fix, PR. Then Phase A as the next round.
+</div>
+
+<div class="footer">
+  Plan files: <code>implementations-plan/phase-2-plus/plan-v4.md</code> (final), <code>plan-v3.md</code>, <code>plan-v2.md</code>, <code>plan-v1.md</code>. Audits: codex session <code>019e2847</code> (4 rounds), Plan-agent opus 4.7, Explore inventory of 24 popup ops.
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MetaMask — runtime architecture</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1e252e; --border: #2a323d;
+    --text: #d1d5db; --muted: #8b949e; --accent: #f6851b; --violet: #9b59ff;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149; --info: #58a6ff;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); margin: 0; padding: 0; font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 24px 64px; }
+  nav.top { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  nav.top .home { color: var(--violet); text-decoration: none; font-weight: 600; }
+  nav.top .home:hover { text-decoration: underline; }
+  nav.top a.tab { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 4px; font-size: 13px; }
+  nav.top a.tab:hover { color: var(--text); background: var(--panel); }
+  nav.top a.tab.current { color: var(--text); background: var(--panel2); border: 1px solid var(--accent); }
+  nav.top .sep { color: var(--muted); }
+  h1 { font-size: 28px; margin: 0 0 8px; color: #fff; letter-spacing: -0.5px; }
+  h1 .accent-stripe { color: var(--accent); }
+  h2 { font-size: 20px; margin: 36px 0 12px; color: #fff; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16px; margin: 20px 0 8px; color: var(--accent); }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 4px; background: var(--panel2); color: var(--muted); margin-right: 6px; border: 1px solid var(--border); }
+  .prov { display: inline-block; font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
+  .prov.research { color: var(--info); border-color: var(--info); }
+  .prov.chat { color: var(--violet); border-color: var(--violet); }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; }
+  figure.ascii { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; margin: 14px 0; overflow-x: auto; }
+  figure.ascii figcaption { font-size: 13px; color: var(--muted); font-style: italic; margin-bottom: 10px; }
+  figure.ascii pre { font: 12px/1.35 var(--mono); color: var(--text); margin: 0; white-space: pre; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th, td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; background: var(--panel); }
+  td.mono { font-family: var(--mono); font-size: 12px; }
+  .toc { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; margin: 16px 0; font-size: 13px; }
+  .toc strong { color: var(--text); }
+  .toc a { color: var(--info); text-decoration: none; margin-right: 12px; }
+  .toc a:hover { text-decoration: underline; }
+  .breadcrumb { font-size: 12px; color: var(--muted); margin: 0 0 16px; }
+  .breadcrumb a { color: var(--info); text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  code { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  .callout { border-left: 3px solid var(--info); background: var(--panel); padding: 12px 16px; margin: 14px 0; border-radius: 0 6px 6px 0; font-size: 14px; }
+  .callout strong { color: var(--info); }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.warn strong { color: var(--warn); }
+  .prev-next { display: flex; justify-content: space-between; margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 13px; }
+  .prev-next a { color: var(--info); text-decoration: none; }
+  .prev-next a:hover { text-decoration: underline; }
+  .footer { font-size: 12px; color: var(--muted); margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .verdict { background: linear-gradient(135deg, rgba(246,133,27,0.08), rgba(246,133,27,0.02)); border: 1px solid var(--accent); border-left: 3px solid var(--accent); padding: 16px 18px; border-radius: 8px; margin: 16px 0 24px; }
+</style>
+</head>
+<body>
+<nav class="top" aria-label="Primary">
+  <a href="../index.html" class="home">Wallet Architecture Research</a>
+  <span class="sep">/</span>
+  <a href="../index.html" class="tab">Overview</a>
+  <a href="rabby.html" class="tab">Rabby</a>
+  <a href="metamask.html" class="tab current">MetaMask</a>
+  <a href="grego.html" class="tab">Grego</a>
+  <a href="nulo.html" class="tab">Nulo Today</a>
+  <a href="../nulo-phase-2.html" class="tab">Phase 2</a>
+  <a href="../nulo-phase-2-plus.html" class="tab">Phase 2+</a>
+  <a href="../nulo-maximalist.html" class="tab">Maximalist</a>
+</nav>
+
+<div class="wrap">
+
+<p class="breadcrumb"><a href="../index.html">Overview</a> &nbsp;›&nbsp; MetaMask</p>
+
+<h1><span class="accent-stripe">MetaMask</span> — the industrial-grade reference</h1>
+
+<div class="verdict">
+  <strong>Verdict:</strong> The most architecturally serious of the four. Approval state machine, LazyListener, persistence-manager with IDB backup, numbered migrations, ObjectMultiplex transport, Snaps sandbox, LavaMoat. Most of it is overkill for Nulo's current size, but specific primitives — especially M3, M4, M6, M7, M8 — are exactly the right next steps.
+</div>
+
+<div class="toc" aria-label="On this page">
+  <strong>On this page:</strong>
+  <a href="#runtime">Runtime shape</a>
+  <a href="#durable">Durable jobs</a>
+  <a href="#strengths">Strengths</a>
+  <a href="#risks">Risks</a>
+  <a href="#steal">What Nulo should steal</a>
+  <a href="#dont-copy">What not to copy</a>
+  <a href="#sources">Sources</a>
+</div>
+
+<h2 id="runtime">Runtime shape <span class="prov chat">diagram</span></h2>
+
+<p>
+  MetaMask's MV3 extension is built around a <code>MetaMaskController</code> that composes <em>controllers</em> from <code>@metamask/*</code> packages. Each controller exposes typed state, actions, and events via a central <code>messenger</code>. Persistence is mediated by a dedicated <code>persistence-manager</code> with explicit IDB fallback. The popup connects via long-lived <code>chrome.runtime.Port</code> and pipes traffic through <code>ObjectMultiplex</code>.
+</p>
+
+<figure class="ascii" aria-label="MetaMask runtime: dApp talks to in-page provider via content script, content script bridges to service worker via ObjectMultiplex over a runtime port, service worker hosts a MetaMaskController which composes controllers via a shared messenger, persistence-manager writes to chrome.storage.local with IndexedDB backup, approval state machine routes user-confirm requests, LazyListener buffers boot events, popup connects via the same port and renders controller state">
+  <figcaption>MetaMask's runtime: controllers communicate via a typed messenger, persistence is centralized in <code>persistence-manager</code>, and durable user prompts go through the approval state machine.</figcaption>
+  <pre>  ┌────────────┐         ┌──────────────────────┐
+  │  dApp page │◄───────►│  content-script.js   │
+  └────────────┘         │  ObjectMultiplex      │
+                         └──────────┬───────────┘
+                                    │ chrome.runtime port
+                                    ▼
+        ┌──────────────────────────────────────────────────────┐
+        │  SERVICE WORKER (MV3)                                │
+        │                                                      │
+        │  ┌─────────────────────────────────────────────┐     │
+        │  │ MetaMaskController                          │     │
+        │  │   composes @metamask/* controllers          │     │
+        │  │   shared @metamask/messenger bus            │     │
+        │  │                                             │     │
+        │  │  · KeyringController                        │     │
+        │  │  · ApprovalController (state machine)       │     │
+        │  │  · TransactionController                    │     │
+        │  │  · NetworkController                        │     │
+        │  │  · SnapsController (V8 isolates)            │     │
+        │  │  · MultichainController                     │     │
+        │  │  · NotificationController                   │     │
+        │  │  · ...                                      │     │
+        │  └─────────────────────────────────────────────┘     │
+        │                                                      │
+        │  LazyListener: buffers events fired before init,     │
+        │   replays once ready                                  │
+        │                                                      │
+        │  persistence-manager → chrome.storage.local +        │
+        │                          IndexedDB backup            │
+        │                          numbered migrations          │
+        │                                                      │
+        │  LavaMoat compartments for dependency isolation       │
+        └────────────────────────┬─────────────────────────────┘
+                                 │
+                  chrome.runtime port (long-lived)
+                                 ▼
+                  ┌──────────────────────────────┐
+                  │  POPUP (React + Redux)       │
+                  │  subscribes to controller    │
+                  │  state via messenger         │
+                  └──────────────────────────────┘</pre>
+</figure>
+
+<h2 id="durable">How durable jobs work here <span class="prov chat">analysis</span></h2>
+
+<p>
+  MetaMask is the only wallet of the four with a full <em>approval state machine</em>. It's the closest existing implementation to Nulo's Phase 2 <code>JobRegistry</code>.
+</p>
+
+<ol>
+  <li>
+    <strong>ApprovalController</strong> — every user-prompt request becomes an approval object with a stable <code>id</code>, <code>origin</code>, <code>type</code>, and <code>requestData</code>. The controller exposes methods to add, accept, reject, and resolve approvals. Resolution returns a promise the caller awaits. Each transition is reflected in state. <span class="prov chat">M8 pattern</span>
+  </li>
+  <li>
+    <strong>LazyListener</strong> — events that fire before the controller is fully initialized are buffered in <code>extension-lazy-listener</code> and replayed when init completes. Nothing silently dropped on cold boot. <span class="prov chat">M3 pattern</span>
+  </li>
+  <li>
+    <strong><code>await isInitialized</code> gating on every port</strong> — the SW's port handler awaits init before forwarding traffic. dApp messages that arrive during cold-boot don't error; they queue. <span class="prov chat">M4 pattern</span>
+  </li>
+  <li>
+    <strong>Numbered migrations</strong> — every schema change ships as a numbered migration script. Failed migrations are loggable, reversible, and tested. <span class="prov chat">M6 pattern</span>
+  </li>
+  <li>
+    <strong><code>persistence-manager</code> with IDB backup</strong> — writes to <code>chrome.storage.local</code>; if that fails or is corrupted, restores from an IndexedDB snapshot. <span class="prov chat">M7 pattern</span>
+  </li>
+</ol>
+
+<div class="callout">
+  <strong>Pattern to internalize:</strong> approvals and migrations are <em>not</em> ad-hoc — they're first-class primitives with shared lifecycle. Every durable interaction goes through the same machinery, which makes new prompt types trivial to add and impossible to drop.
+</div>
+
+<h2 id="strengths">Strengths <span class="prov research">research</span></h2>
+
+<table aria-label="MetaMask strengths">
+  <thead><tr><th>Dimension</th><th>Why it stands out</th></tr></thead>
+  <tbody>
+    <tr><td>Approval state machine</td><td>Every prompt is durable, addressable by id, and replayable. The reference implementation for our <code>JobRegistry</code>.</td></tr>
+    <tr><td>LazyListener boot buffering</td><td>Solves the "event arrived before init" class of bug permanently.</td></tr>
+    <tr><td>Numbered migrations</td><td>Schema evolution is auditable and tested. Migrations have unit tests.</td></tr>
+    <tr><td>Persistence-manager + IDB backup</td><td>Survives storage corruption; not theoretical — it has saved users.</td></tr>
+    <tr><td>LavaMoat + Snaps</td><td>Defense-in-depth for npm supply-chain attacks and 3rd-party extension code.</td></tr>
+    <tr><td>ObjectMultiplex transport</td><td>Multiple typed streams over one port. Clean separation of concerns.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="risks">Risks / anti-patterns <span class="prov research">research</span></h2>
+
+<table aria-label="MetaMask risks">
+  <thead><tr><th>Risk</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>Architectural mass</td><td>Hundreds of controllers and packages. New contributors take weeks to ramp.</td></tr>
+    <tr><td>Tight upstream coupling</td><td>Forking pieces of <code>@metamask/*</code> for custom needs is hard; upstreaming changes is slow.</td></tr>
+    <tr><td>Heavy build pipeline</td><td>LavaMoat + Snaps + V8 isolates add significant build complexity.</td></tr>
+    <tr><td>Redux at the popup</td><td>Two state systems (controller messenger + Redux) can drift if subscribed wrong.</td></tr>
+    <tr><td>Migrations are linear and irreversible</td><td>Downgrading is not supported; bad migrations can brick wallets.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="steal">What Nulo should steal <span class="prov chat">phase 2</span></h2>
+
+<ul>
+  <li><strong>Approval state machine</strong> → directly maps to Phase 2 <code>JobRegistry</code>. Build this first; everything else snaps in.</li>
+  <li><strong><code>LazyListener</code></strong> → solves Nulo's "event during SW cold-boot" loss class.</li>
+  <li><strong><code>await isInitialized</code> port gating</strong> → port handlers should await profile-boot before forwarding.</li>
+  <li><strong>Numbered migrations framework</strong> → before we open to "real users", schema changes must be auditable.</li>
+  <li><strong>IDB backup of critical state</strong> → ApprovalController-equivalent state + keystore wrapper must survive storage corruption.</li>
+</ul>
+
+<h2 id="dont-copy">What not to copy <span class="prov chat">phase 2</span></h2>
+
+<ul>
+  <li><strong><code>@metamask/messenger</code> bus</strong> — Nulo's <code>Service&lt;Methods, Events&gt;</code> is simpler and already production-quality. Don't replace it.</li>
+  <li><strong>LavaMoat</strong> — defer until we ship for real users; right now it adds build pain without payoff.</li>
+  <li><strong>Snaps</strong> — Aztec doesn't have a plugin ecosystem; sandboxing 3rd-party code is not Phase 2 scope.</li>
+  <li><strong>ObjectMultiplex</strong> — Nulo's port traffic is single-purpose; don't add a transport layer we don't need.</li>
+  <li><strong>Redux duplication of controller state</strong> — keep popup state derived directly from <code>ServiceClient</code> events.</li>
+</ul>
+
+<h2 id="sources">Sources <span class="prov research">links</span></h2>
+
+<ul>
+  <li><a href="../metamask/metamask-claude-cli.md"><code>metamask/metamask-claude-cli.md</code></a> — primary deep dive (Claude agent)</li>
+  <li><a href="../metamask/metamask-codex-cli.md"><code>metamask/metamask-codex-cli.md</code></a> — independent audit (Codex CLI)</li>
+  <li><a href="../README.md"><code>README.md</code></a> — comparative synthesis</li>
+</ul>
+
+<div class="prev-next">
+  <a href="rabby.html">← Rabby</a>
+  <a href="grego.html">Grego →</a>
+</div>
+
+<div class="footer">
+  Calibrated 2026-05-12. Content provenance: <span class="prov research">research</span> from existing markdown synthesis, <span class="prov chat">chat additions</span> from on-page diagrams &amp; patterns surfaced post-merge.
+</div>
+
+</div>
+</body>
+</html>

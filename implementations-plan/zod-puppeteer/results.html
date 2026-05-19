@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zod 4 + Puppeteer 25 — results</title>
+<style>
+  :root {
+    --bg: #faf8f4;
+    --ink: #1d1d1f;
+    --muted: #5a5a62;
+    --paper: #ffffff;
+    --rule: #e8e6e0;
+    --green: #2d6a4f;
+    --green-soft: #e6f0eb;
+    --amber: #b07d20;
+    --amber-soft: #faf0d9;
+    --red: #c0392b;
+    --red-soft: #fcecea;
+    --code-bg: #f2efe9;
+    --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.04);
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 860px; margin: 0 auto; padding: 56px 28px 96px; }
+
+  header.hero { margin-bottom: 36px; padding-bottom: 24px; border-bottom: 1px solid var(--rule); }
+  header.hero h1 { margin: 0 0 6px; font-size: 30px; letter-spacing: -0.01em; font-weight: 700; }
+  header.hero .sub { color: var(--muted); font-size: 16px; }
+  header.hero .meta { margin-top: 14px; font-size: 13px; color: var(--muted); display: flex; gap: 18px; flex-wrap: wrap; }
+  header.hero .meta span::before { content: "·"; margin-right: 18px; color: var(--rule); }
+  header.hero .meta span:first-child::before { content: ""; margin: 0; }
+
+  section { margin: 32px 0; }
+  h2 { font-size: 22px; margin: 0 0 14px; letter-spacing: -0.01em; font-weight: 600; }
+  h3 { font-size: 17px; margin: 0 0 6px; font-weight: 600; }
+  p { margin: 0 0 12px; }
+  ul { padding-left: 22px; margin: 0 0 12px; }
+  li { margin: 4px 0; }
+  code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.92em;
+  }
+  pre {
+    background: var(--code-bg);
+    padding: 12px 14px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .tldr {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+    box-shadow: var(--shadow);
+    margin-bottom: 28px;
+  }
+  .tldr p:last-child { margin-bottom: 0; }
+
+  .card-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 600px) { .card-row { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    box-shadow: var(--shadow);
+  }
+  .card.win { border-left: 4px solid var(--green); }
+  .card.deferred { border-left: 4px solid var(--amber); }
+  .card .label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  .card .label.win-l { color: var(--green); }
+  .card .label.deferred-l { color: var(--amber); }
+  .card h3 { margin-bottom: 6px; }
+  .card .ver { font-family: ui-monospace, monospace; font-size: 14px; }
+  .card .why { color: var(--muted); font-size: 14px; }
+
+  .audit-card {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 18px 22px;
+    margin: 10px 0;
+  }
+  .audit-card .who { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+  .audit-card h3 { margin-bottom: 8px; }
+
+  .quote {
+    background: var(--red-soft);
+    border-left: 4px solid var(--red);
+    border-radius: 4px;
+    padding: 12px 16px;
+    font-size: 14px;
+    color: var(--ink);
+    margin: 10px 0;
+  }
+
+  .footer { margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <h1>Zod 4 + Puppeteer 25 — what happened</h1>
+    <p class="sub">Plain-English walkthrough of today's dep-bump session. One bump shipped, one ran into a real upstream blocker and was deferred — the empirical evidence is on disk.</p>
+    <div class="meta">
+      <span>Branch <code>deps/zod4-pup25</code></span>
+      <span>3 commits</span>
+      <span>3 audit cycles (Opus + Codex pre-impl + Codex post-impl)</span>
+    </div>
+  </header>
+
+  <section>
+    <div class="tldr">
+      <h2 style="margin-top:0">The 30-second result</h2>
+      <p>You asked for both Zod 4 and Puppeteer 25 today. <strong>Puppeteer 25 shipped clean.</strong> Zod 4 had to be deferred — Aztec's compiled code requires Zod-3-only exports (<code>OK</code>, <code>ZodFirstPartyTypeKind</code>, <code>ZodParsedType</code>) that don't exist in Zod 4's main entry. Codex predicted this in the plan review; we confirmed it empirically by running the spike anyway.</p>
+      <p>The good news: the spike was cheap, fully documented, fully reverted. No code-on-disk damage. We have a clear write-up for when Aztec eventually migrates.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>By the numbers</h2>
+    <div class="card-row">
+      <div class="card win">
+        <div class="label win-l">Shipped</div>
+        <h3>Puppeteer 24 → 25</h3>
+        <p class="ver">^24.43.0 → ^25.0.4</p>
+        <p class="why">Test-infrastructure bump. Smoke e2e: 61 passed / 6 skipped, identical to the 24.43.0 baseline. No code changes — purely a manifest + lockfile bump.</p>
+      </div>
+      <div class="card deferred">
+        <div class="label deferred-l">Deferred</div>
+        <h3>Zod 3 → 4</h3>
+        <p class="ver">^3.23.8 stays</p>
+        <p class="why">Runtime-incompatible with our current Aztec packages. Spike confirmed Codex's prediction. Plan archive documents the failure mode for when Aztec migrates.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What we did with Puppeteer 25</h2>
+    <p>Two manifest tweaks + lockfile bump. That's it:</p>
+    <ul>
+      <li><code>packages/extension/package.json</code>: <code>puppeteer ^24.43.0</code> → <code>^25.0.0</code></li>
+      <li><code>bunfig.toml</code>: temporarily added <code>puppeteer</code>, <code>puppeteer-core</code>, <code>@puppeteer/browsers</code>, and <code>chromium-bidi</code> to <code>minimumReleaseAgeExcludes</code> — all 25.x versions are still inside the 7-day window (25.0.0 was published 2026-05-12). The CVE-runbook-style temp exclude is documented inline with a removal date.</li>
+    </ul>
+    <p><strong>Breaking changes — all passed our existing stack:</strong></p>
+    <ul>
+      <li>Node 22 minimum → CI is on Node 24 ✓</li>
+      <li>TypeScript 5.0.1 minimum → we're on TS 6 ✓</li>
+      <li>ESM-only — our tests already use ESM imports ✓</li>
+      <li><code>executablePath()</code> + <code>defaultArgs()</code> now return Promises — we don't call either ✓</li>
+      <li>All 12 puppeteer import sites use stable exports (<code>Browser</code>, <code>Page</code>, <code>Target</code>, <code>ConsoleMessage</code>, <code>TimeoutError</code>, <code>CDPSession</code>) ✓</li>
+    </ul>
+    <p><strong>Follow-up after 2026-05-19 16:08 UTC:</strong> remove the four entries from <code>minimumReleaseAgeExcludes</code>. The gate then resolves cleanly on the aged version.</p>
+  </section>
+
+  <section>
+    <h2>The Zod 4 story — why we couldn't ship</h2>
+
+    <h3>What we tried (Option B from the consolidated plan)</h3>
+    <p>Force a single Zod 4 across the whole tree via <code>package.json#overrides</code>. The idea: Aztec's transitive <code>zod ^3.23.8</code> would resolve to our <code>^4.4.3</code> via the override, giving us one runtime instance everyone shares. The type-bridge helper <code>az&lt;T&gt;(s): ZodType&lt;T&gt;</code> becomes a pure type cast (no runtime risk because both sides are the same v4 instance).</p>
+
+    <p>At the type level, it worked beautifully:</p>
+    <ul>
+      <li>Override resolved <code>bun pm why zod</code> to a single <code>zod@4.4.3</code></li>
+      <li><code>node_modules/.bun/</code> had exactly one zod copy</li>
+      <li>Type-bridge fixed all 75 typecheck errors → 0</li>
+      <li>Build passed</li>
+    </ul>
+
+    <h3>Where it broke</h3>
+    <p>The moment unit tests ran, 34 of 141 test suites failed to load. The error was deterministic and informative:</p>
+
+    <div class="quote">
+      <code>SyntaxError: The requested module 'zod' does not provide an export named 'OK'</code><br>
+      <code>❯ src/wallet/utils/auth-registry.ts:1</code>
+    </div>
+
+    <p>Tracing the import chain reached this in Aztec's bundle:</p>
+
+    <pre>// node_modules/.bun/@aztec+foundation@4.2.0/node_modules/@aztec/foundation/dest/schemas/utils.js
+import { OK, ZodFirstPartyTypeKind, ZodOptional, ZodParsedType, z } from 'zod';</pre>
+
+    <p>All of <code>OK</code>, <code>ZodFirstPartyTypeKind</code>, and <code>ZodParsedType</code> are Zod 3 internal exports. Zod 4's package ships them on the <code>zod/v3</code> subpath but NOT on the main <code>zod</code> entry. Without per-package zod aliasing (which Bun doesn't expose today), there's no way to give Aztec a Zod-3-compatible main entry while we use Zod 4.</p>
+
+    <h3>Why we can't work around it today</h3>
+    <ul>
+      <li><strong>Per-package alias</strong> — Bun's overrides are tree-wide. We can't say "Aztec gets v3, we get v4."</li>
+      <li><strong>Patch the package</strong> — re-exporting v3 globals from Zod 4's main entry would require shimming v4's bundle, which is fragile.</li>
+      <li><strong>Restructure to never compose Aztec schemas into our combinators</strong> — the proper "mixed-major" pattern from Zod's library-authors guide. Doable but ~20 sites need restructuring through <code>parseAsync(unknown)</code> plumbing. Substantial PR by itself.</li>
+    </ul>
+
+    <h3>What we're waiting for</h3>
+    <p>Either Aztec ships Zod 4-typed schemas upstream (no public roadmap we've seen), or we accept the restructuring cost as a dedicated PR. The deferral is recorded in the plan archive for whichever path comes first.</p>
+  </section>
+
+  <section>
+    <h2>Audit pipeline that ran</h2>
+
+    <div class="audit-card">
+      <div class="who">Opus 4.7 — parallel plan draft</div>
+      <p>Caught that the original mock-rebuild-Aztec-schemas approach was overscoped (~20 schemas with effect chains and prime-field bounds, not 6). Argued for the cast-helper instead. Identified additional schema sites I missed in the first pass.</p>
+    </div>
+
+    <div class="audit-card">
+      <div class="who">Codex — consolidated plan review</div>
+      <p><strong>Caught the exact runtime failure we'd hit.</strong> Codex explicitly reproduced that <code>z4.array(z3.string()).parse(["a"])</code> throws <code>TypeError: Cannot read properties of undefined (reading 'run')</code> — Zod 4's <code>z.array</code> eagerly checks the <code>_zod</code> marker on children at construction. We ran the spike anyway to confirm with our actual code, and Codex was 100% right.</p>
+    </div>
+
+    <div class="audit-card">
+      <div class="who">Codex — implementation review (in progress)</div>
+      <p>Reviewing the shipped Puppeteer 25 bump + the Zod 4 deferral writeup. Will fold any material findings into this branch before merge.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>What's queued</h2>
+    <ul>
+      <li><strong>Follow-up commit (this branch or a separate PR)</strong> after 2026-05-19 16:08 UTC: remove the four puppeteer entries from <code>minimumReleaseAgeExcludes</code>.</li>
+      <li><strong>Zod 4 properly</strong> — wait for Aztec to migrate, or schedule the mixed-major restructuring as a dedicated PR. Either way, the plan archive at <code>implementations-plan/zod-puppeteer/plan.md</code> §0z has the empirical context.</li>
+      <li><strong>Re-sign sweep</strong> — this PR's commits were created with <code>--no-gpg-sign</code> per the workflow we've settled into; do a rebase + sign sweep before merge.</li>
+    </ul>
+  </section>
+
+  <div class="footer">
+    <p>Branch: <code>deps/zod4-pup25</code> · Plan: <code>implementations-plan/zod-puppeteer/plan.md</code> · Spike empirical writeup: <code>plan.md §0z</code></p>
+    <p>Process: plan drafted (mine + parallel Opus 4.7) → consolidated → Codex pre-impl review → spike → revert Zod 4 → ship Puppeteer 25 → Codex post-impl review.</p>
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,588 @@
+import { fileURLToPath } from "node:url"
+import path from "node:path"
+import fs from "node:fs"
+import http from "node:http"
+import { execSync, spawn, type ChildProcess } from "node:child_process"
+import { tmpdir } from "node:os"
+import type { TestProject } from "vitest/node"
+import {
+	type AztecTestConfig,
+	checkNodeHealth,
+	waitForLocalNode,
+	createTestWallet,
+	deployTestToken,
+	createSponsoredFeeOptions,
+	LOCAL_NODE_URL,
+} from "./fixtures/aztec"
+import { type OwnedState, clearLock, isPidAlive, killOrphanByPid, readLock, writeLock } from "./lockfile"
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const EXTENSION_PATH = path.resolve(__dirname, "../../dist/chrome")
+const PLAYGROUND_DIR = path.resolve(__dirname, "../../../playground")
+const CONFIG_PATH = path.resolve(__dirname, ".test-config.json")
+const AZTEC_BIN = path.resolve(process.env.HOME || "~", ".aztec/current/node_modules/.bin/aztec")
+const ANVIL_BIN = path.resolve(process.env.HOME || "~", ".aztec/current/bin/anvil")
+
+/**
+ * Port resolution. Falls back to today's defaults if the agent wrapper
+ * (`bun run e2e:agent`) hasn't pre-allocated a fresh pack. The wrapper
+ * passes ANVIL_PORT/AZTEC_PORT/AZTEC_ADMIN_PORT/AZTEC_P2P_PORT/PLAYGROUND_PORT
+ * via env after writing them to .e2e-state/ports.json. Direct `vitest`
+ * invocations without the wrapper still work for single-agent dev.
+ */
+const ANVIL_PORT = Number(process.env.ANVIL_PORT ?? 8545)
+const ANVIL_URL = process.env.ANVIL_URL ?? `http://127.0.0.1:${ANVIL_PORT}`
+const AZTEC_PORT = Number(process.env.AZTEC_PORT ?? 8080)
+const AZTEC_ADMIN_PORT = Number(process.env.AZTEC_ADMIN_PORT ?? 8880)
+const AZTEC_P2P_PORT = Number(process.env.AZTEC_P2P_PORT ?? 40400)
+const PLAYGROUND_PORT = Number(process.env.PLAYGROUND_PORT ?? 5174)
+const PLAYGROUND_URL = process.env.PLAYGROUND_URL ?? `http://localhost:${PLAYGROUND_PORT}/`
+
+/** Per-run aztec data directory. Mandatory even for in-memory mode because
+ *  some aztec subsystems still write to ~/.aztec/data by default — two
+ *  agents writing there at the same time will corrupt LMDB. The path is
+ *  recorded in the ownership lockfile so a future run can clean it up
+ *  if this run is killed before teardown. */
+let AZTEC_DATA_DIR = path.join(tmpdir(), `nulo-aztec-${process.pid}-${Date.now()}`)
+
+let anvilProcess: ChildProcess | null = null
+let weStartedAnvil = false
+let nodeProcess: ChildProcess | null = null
+let weStartedNode = false
+let playgroundProcess: ChildProcess | null = null
+let weStartedPlayground = false
+
+/** Probe a URL with HEAD/GET; returns true on any 2xx/3xx/4xx response. */
+async function probeHttp(url: string, timeoutMs = 1500): Promise<boolean> {
+	return new Promise((resolve) => {
+		const req = http.get(url, { timeout: timeoutMs }, (res) => {
+			res.resume() // drain
+			resolve((res.statusCode ?? 0) > 0)
+		})
+		req.on("error", () => resolve(false))
+		req.on("timeout", () => {
+			req.destroy()
+			resolve(false)
+		})
+	})
+}
+
+async function waitForHttp(url: string, timeoutMs = 30_000): Promise<void> {
+	const start = Date.now()
+	while (Date.now() - start < timeoutMs) {
+		if (await probeHttp(url)) return
+		await new Promise((r) => setTimeout(r, 500))
+	}
+	throw new Error(`Timed out waiting for ${url} (${timeoutMs}ms)`)
+}
+
+/** Single-shot anvil JSON-RPC eth_blockNumber probe. Confirms the L1 is
+ *  speaking JSON-RPC, not just answering HTTP. */
+async function probeAnvil(url: string, timeoutMs = 1500): Promise<boolean> {
+	return new Promise((resolve) => {
+		const u = new URL(url)
+		const req = http.request(
+			{
+				hostname: u.hostname,
+				port: u.port,
+				path: "/",
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				timeout: timeoutMs,
+			},
+			(res) => {
+				let body = ""
+				res.on("data", (c) => {
+					body += c.toString()
+				})
+				res.on("end", () => {
+					try {
+						const parsed = JSON.parse(body)
+						resolve(typeof parsed.result === "string")
+					} catch {
+						resolve(false)
+					}
+				})
+			},
+		)
+		req.on("error", () => resolve(false))
+		req.on("timeout", () => {
+			req.destroy()
+			resolve(false)
+		})
+		req.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }))
+		req.end()
+	})
+}
+
+async function waitForAnvil(url: string, timeoutMs = 30_000): Promise<void> {
+	const start = Date.now()
+	while (Date.now() - start < timeoutMs) {
+		if (await probeAnvil(url)) return
+		await new Promise((r) => setTimeout(r, 250))
+	}
+	throw new Error(`Timed out waiting for anvil at ${url} (${timeoutMs}ms)`)
+}
+
+/**
+ * Kill orphan Chrome test processes started by THIS extension build only.
+ *
+ * Scoping by extension path (not just `--test-type`) lets a parallel impl in
+ * a different folder run its own Chromes without us murdering each other's
+ * test runs.
+ */
+function killOrphanChromes() {
+	try {
+		execSync(`pkill -f "chrome.*--load-extension=${EXTENSION_PATH}" 2>/dev/null || true`, { stdio: "ignore" })
+	} catch {}
+}
+
+export default async function setup(project: TestProject) {
+	killOrphanChromes()
+
+	// Guard: ensure extension is built
+	const manifest = path.join(EXTENSION_PATH, "manifest.json")
+	if (!fs.existsSync(manifest)) {
+		throw new Error(`Extension not found at ${EXTENSION_PATH}\nRun "bun run build" or "bun run dev" first.`)
+	}
+	project.provide("extensionPath", EXTENSION_PATH)
+
+	console.log(
+		`[e2e-setup] ports: anvil=:${ANVIL_PORT} aztec=:${AZTEC_PORT} (admin :${AZTEC_ADMIN_PORT}, p2p :${AZTEC_P2P_PORT}) playground=:${PLAYGROUND_PORT}`,
+	)
+
+	// ── Lockfile: reap orphans or take over a still-healthy pack ───────
+	// `bun run e2e:agent` always allocates fresh ports, so the prior lock's
+	// ports never match the current ones — we fall through to reaping
+	// orphans, then a fresh spawn. Direct vitest invocations with stable
+	// env can land on the reuse path.
+	const priorLock = readLock()
+	if (priorLock) {
+		const portsMatch =
+			priorLock.ports.anvil === ANVIL_PORT &&
+			priorLock.ports.aztec === AZTEC_PORT &&
+			priorLock.ports.aztecAdmin === AZTEC_ADMIN_PORT &&
+			priorLock.ports.aztecP2P === AZTEC_P2P_PORT &&
+			priorLock.ports.playground === PLAYGROUND_PORT
+		const urlMatch = priorLock.bakedLocalRpcUrl === LOCAL_NODE_URL
+		if (portsMatch && urlMatch) {
+			console.log("[e2e-setup] prior ownership lock matches current run — probing for reuse")
+			const allAlive = isPidAlive(priorLock.pids.anvil) && isPidAlive(priorLock.pids.aztec) && isPidAlive(priorLock.pids.playground)
+			const allHealthy =
+				allAlive && (await probeAnvil(ANVIL_URL)) && (await checkNodeHealth(LOCAL_NODE_URL)) && (await probeHttp(PLAYGROUND_URL))
+			if (allHealthy) {
+				const identityOk = await verifyIdentity(LOCAL_NODE_URL, priorLock.l1ContractAddresses)
+				if (identityOk) {
+					console.log("[e2e-setup] reusing prior sandbox (identity check passed)")
+					weStartedAnvil = false
+					weStartedNode = false
+					weStartedPlayground = false
+					AZTEC_DATA_DIR = priorLock.aztecDataDir
+					project.provide("playgroundUrl", PLAYGROUND_URL)
+					await deployContractsAndProvide(project)
+					return
+				}
+				console.warn("[e2e-setup] prior sandbox identity mismatch — tearing down and starting fresh")
+			} else {
+				console.warn("[e2e-setup] prior sandbox not all healthy — tearing down")
+			}
+			killOrphanByPid(priorLock.pids.anvil, "anvil")
+			killOrphanByPid(priorLock.pids.aztec, "aztec")
+			killOrphanByPid(priorLock.pids.playground, "playground")
+			try {
+				fs.rmSync(priorLock.aztecDataDir, { recursive: true, force: true })
+			} catch {}
+		} else {
+			// Different ports — fresh agent run after a previous one in the
+			// same worktree. Reap any orphans on the previous ports.
+			console.log("[e2e-setup] prior lock is for different ports — reaping orphans")
+			killOrphanByPid(priorLock.pids.anvil, "anvil")
+			killOrphanByPid(priorLock.pids.aztec, "aztec")
+			killOrphanByPid(priorLock.pids.playground, "playground")
+			try {
+				fs.rmSync(priorLock.aztecDataDir, { recursive: true, force: true })
+			} catch {}
+		}
+		clearLock()
+	}
+
+	// ── Anvil (L1) ─────────────────────────────────────────────────────
+	const anvilAlreadyRunning = await probeAnvil(ANVIL_URL)
+	if (anvilAlreadyRunning) {
+		console.log("[e2e-setup] Anvil already speaking JSON-RPC at", ANVIL_URL)
+		weStartedAnvil = false
+	} else {
+		if (!fs.existsSync(ANVIL_BIN)) {
+			console.warn("[e2e-setup] anvil binary not found at", ANVIL_BIN, "— skipping network setup")
+			project.provide("aztecTestConfig", undefined)
+			project.provide("playgroundUrl", PLAYGROUND_URL)
+			return
+		}
+		console.log("[e2e-setup] Starting anvil at", ANVIL_URL, "...")
+		anvilProcess = spawn(
+			ANVIL_BIN,
+			["--host", "127.0.0.1", "--port", String(ANVIL_PORT), "--chain-id", "31337", "--slots-in-an-epoch", "1", "--silent"],
+			{
+				stdio: "pipe",
+				detached: true,
+			},
+		)
+		weStartedAnvil = true
+
+		anvilProcess.stderr?.on("data", (data: Buffer) => {
+			const line = data.toString().trim()
+			if (line.includes("error") || line.includes("Error") || line.includes("address already in use")) {
+				console.error("[anvil]", line.slice(0, 200))
+			}
+		})
+		anvilProcess.once("exit", (code) => {
+			if (weStartedAnvil && code !== 0 && code !== null) {
+				console.error(`[anvil] exited unexpectedly with code ${code}`)
+			}
+		})
+
+		try {
+			await waitForAnvil(ANVIL_URL, 30_000)
+			console.log("[e2e-setup] Anvil is ready")
+		} catch (error) {
+			console.error("[e2e-setup] Failed to start anvil:", error)
+			await killProcessGroup(anvilProcess, "anvil", weStartedAnvil)
+			anvilProcess = null
+			project.provide("aztecTestConfig", undefined)
+			project.provide("playgroundUrl", PLAYGROUND_URL)
+			return
+		}
+	}
+
+	// ── Aztec (L2) ─────────────────────────────────────────────────────
+	const nodeAlreadyRunning = await checkNodeHealth(LOCAL_NODE_URL)
+
+	if (nodeAlreadyRunning) {
+		console.log("[e2e-setup] Local Aztec node already running at", LOCAL_NODE_URL)
+		weStartedNode = false
+	} else {
+		console.log("[e2e-setup] Starting local Aztec network at", LOCAL_NODE_URL, "...")
+		if (!fs.existsSync(AZTEC_BIN)) {
+			console.warn("[e2e-setup] aztec CLI not found at", AZTEC_BIN, "— skipping network setup")
+			project.provide("aztecTestConfig", undefined)
+			project.provide("playgroundUrl", PLAYGROUND_URL)
+			return
+		}
+
+		// Mandatory --data-directory per agent: aztec writes to $HOME/.aztec/data
+		// by default for some subsystems, which would corrupt LMDB if two
+		// agents run concurrently with the default path.
+		fs.mkdirSync(AZTEC_DATA_DIR, { recursive: true })
+
+		nodeProcess = spawn(
+			AZTEC_BIN,
+			[
+				"start",
+				"--local-network",
+				"--port",
+				String(AZTEC_PORT),
+				"--admin-port",
+				String(AZTEC_ADMIN_PORT),
+				"--p2p.p2pPort",
+				String(AZTEC_P2P_PORT),
+				"--l1-rpc-urls",
+				ANVIL_URL,
+				"--data-directory",
+				AZTEC_DATA_DIR,
+				"--disable-admin-api-key",
+			],
+			{
+				stdio: "pipe",
+				detached: true,
+				env: {
+					...process.env,
+					SEQ_MIN_TX_PER_BLOCK: "0",
+					ETHEREUM_HOSTS: ANVIL_URL,
+					ANVIL_PORT: String(ANVIL_PORT),
+					AZTEC_PORT: String(AZTEC_PORT),
+				},
+			},
+		)
+		weStartedNode = true
+
+		nodeProcess.stdout?.on("data", (data: Buffer) => {
+			const line = data.toString().trim()
+			if (line.includes("Aztec") || line.includes("ready") || line.includes("error")) {
+				console.log("[aztec-node]", line.slice(0, 200))
+			}
+		})
+		nodeProcess.stderr?.on("data", (data: Buffer) => {
+			const line = data.toString().trim()
+			if (line.includes("error") || line.includes("Error")) {
+				console.error("[aztec-node]", line.slice(0, 200))
+			}
+		})
+
+		try {
+			await waitForLocalNode(LOCAL_NODE_URL, 90_000)
+			console.log("[e2e-setup] Local Aztec node is ready")
+		} catch (error) {
+			console.error("[e2e-setup] Failed to start local node:", error)
+			await killProcessGroup(nodeProcess, "aztec", weStartedNode)
+			nodeProcess = null
+			await killProcessGroup(anvilProcess, "anvil", weStartedAnvil)
+			anvilProcess = null
+			project.provide("aztecTestConfig", undefined)
+			project.provide("playgroundUrl", PLAYGROUND_URL)
+			return
+		}
+	}
+
+	// ── Playground dev server ──────────────────────────────────────────
+	const playgroundAlreadyRunning = await probeHttp(PLAYGROUND_URL, 1500)
+	if (playgroundAlreadyRunning) {
+		console.log("[e2e-setup] Playground already running at", PLAYGROUND_URL)
+		weStartedPlayground = false
+	} else {
+		console.log("[e2e-setup] Starting playground dev server at", PLAYGROUND_URL, "...")
+		try {
+			playgroundProcess = spawn("bun", ["run", "dev"], {
+				cwd: PLAYGROUND_DIR,
+				stdio: "pipe",
+				detached: true,
+				env: {
+					...process.env,
+					NODE_ENV: "test",
+					VITE_DISABLE_HMR: "1",
+					PLAYGROUND_PORT: String(PLAYGROUND_PORT),
+				},
+			})
+			weStartedPlayground = true
+
+			playgroundProcess.stdout?.on("data", (data: Buffer) => {
+				const line = data.toString().trim()
+				if (line.includes("Local:") || line.includes("error")) {
+					console.log("[playground]", line.slice(0, 200))
+				}
+			})
+			playgroundProcess.stderr?.on("data", (data: Buffer) => {
+				const line = data.toString().trim()
+				if (line.includes("error") || line.includes("Error")) {
+					console.error("[playground]", line.slice(0, 200))
+				}
+			})
+
+			await waitForHttp(PLAYGROUND_URL, 30_000)
+			console.log("[e2e-setup] Playground is ready")
+		} catch (error) {
+			console.warn("[e2e-setup] Failed to start playground:", error)
+			await killProcessGroup(playgroundProcess, "playground", weStartedPlayground)
+			playgroundProcess = null
+			// Continue without playground — tests that depend on it will skip / fail individually
+		}
+	}
+	project.provide("playgroundUrl", PLAYGROUND_URL)
+
+	await deployContractsAndProvide(project)
+}
+
+/**
+ * Deploy SponsoredFPC + a test Token, write `.test-config.json`, and write
+ * the ownership lock with PIDs + L1 contract addresses + the address book.
+ * On reuse the lock's `deployedConfig` lets us recreate `.test-config.json`
+ * without redeploying.
+ */
+async function deployContractsAndProvide(project: TestProject): Promise<void> {
+	const existingLock = readLock()
+	if (existingLock?.deployedConfig?.nodeUrl === LOCAL_NODE_URL) {
+		fs.writeFileSync(CONFIG_PATH, JSON.stringify(existingLock.deployedConfig, null, 2))
+		project.provide("aztecTestConfig", existingLock.deployedConfig)
+		console.log("[e2e-setup] reused deployed contracts from lockfile:", existingLock.deployedConfig)
+		return
+	}
+
+	let l1ContractAddresses: Record<string, string> | undefined
+	let config: AztecTestConfig | undefined
+	try {
+		console.log("[e2e-setup] Deploying test contracts...")
+		const { wallet, accounts, node, cleanup } = await createTestWallet(LOCAL_NODE_URL)
+		try {
+			const nodeInfo = await node.getNodeInfo()
+			l1ContractAddresses = serializeL1ContractAddresses(nodeInfo.l1ContractAddresses)
+			const minterAddress = accounts[0]
+			const { paymentMethod, address: sponsoredFpcAddress } = await createSponsoredFeeOptions(wallet)
+			const feeOptions = { paymentMethod }
+
+			const tokenAddress = await deployTestToken(wallet, minterAddress, feeOptions)
+
+			config = {
+				nodeUrl: LOCAL_NODE_URL,
+				tokenAddress,
+				sponsoredFpcAddress,
+				minterAddress: minterAddress.toString(),
+			}
+
+			fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2))
+			console.log("[e2e-setup] Test contracts deployed:", JSON.stringify(config, null, 2))
+		} finally {
+			await cleanup()
+		}
+		project.provide("aztecTestConfig", config)
+	} catch (error) {
+		console.error("[e2e-setup] Failed to deploy test contracts:", error)
+		project.provide("aztecTestConfig", undefined)
+	}
+
+	// Always write the lock once children are alive, even if contract deploy
+	// failed — orphan cleanup on a future run is more valuable than the
+	// missing identity field.
+	const owned: OwnedState = {
+		startedAt: new Date().toISOString(),
+		bakedLocalRpcUrl: LOCAL_NODE_URL,
+		ports: {
+			anvil: ANVIL_PORT,
+			aztec: AZTEC_PORT,
+			aztecAdmin: AZTEC_ADMIN_PORT,
+			aztecP2P: AZTEC_P2P_PORT,
+			playground: PLAYGROUND_PORT,
+		},
+		pids: {
+			anvil: weStartedAnvil ? anvilProcess?.pid : undefined,
+			aztec: weStartedNode ? nodeProcess?.pid : undefined,
+			playground: weStartedPlayground ? playgroundProcess?.pid : undefined,
+		},
+		aztecDataDir: AZTEC_DATA_DIR,
+		l1ContractAddresses,
+		deployedConfig: config,
+	}
+	writeLock(owned)
+}
+
+function serializeL1ContractAddresses(addrs: unknown): Record<string, string> {
+	if (!addrs || typeof addrs !== "object") return {}
+	const out: Record<string, string> = {}
+	for (const [k, v] of Object.entries(addrs as Record<string, unknown>)) {
+		if (v == null) continue
+		// AztecAddress / EthAddress instances expose `.toString()`; primitives
+		// stringify naturally. Anything else gets serialized as JSON.
+		const s = typeof v === "object" && "toString" in v ? String(v) : JSON.stringify(v)
+		out[k] = s
+	}
+	return out
+}
+
+/**
+ * Identity assertion for the reuse path. Calls `getNodeInfo()` against the
+ * candidate sandbox URL and compares its L1 contract addresses to what the
+ * lockfile recorded. A foreign aztec on the same port reports different
+ * addresses and is rejected.
+ */
+async function verifyIdentity(url: string, expected: Record<string, string> | undefined): Promise<boolean> {
+	if (!expected || Object.keys(expected).length === 0) return false
+	try {
+		const { createAztecNodeClient } = await import("@aztec/aztec.js/node")
+		const node = createAztecNodeClient(url)
+		const info = await node.getNodeInfo()
+		const got = serializeL1ContractAddresses(info.l1ContractAddresses)
+		for (const [k, v] of Object.entries(expected)) {
+			if (got[k] !== v) {
+				console.warn(`[e2e-setup] identity mismatch on ${k}: lock=${v} actual=${got[k] ?? "<missing>"}`)
+				return false
+			}
+		}
+		return true
+	} catch (err) {
+		console.warn("[e2e-setup] identity check failed:", err)
+		return false
+	}
+}
+
+export async function teardown() {
+	try {
+		fs.unlinkSync(CONFIG_PATH)
+	} catch {
+		// ignore
+	}
+
+	await killProcessGroup(playgroundProcess, "playground", weStartedPlayground)
+	playgroundProcess = null
+	await killProcessGroup(nodeProcess, "aztec", weStartedNode)
+	nodeProcess = null
+	await killProcessGroup(anvilProcess, "anvil", weStartedAnvil)
+	anvilProcess = null
+
+	if (weStartedNode) {
+		try {
+			fs.rmSync(AZTEC_DATA_DIR, { recursive: true, force: true })
+		} catch {
+			// ignore
+		}
+	}
+
+	clearLock()
+	killOrphanChromes()
+}
+
+/**
+ * Send SIGTERM to the process group, wait up to 5s for clean exit, then
+ * SIGKILL escalate. Synchronous best-effort fallback for the `process.on("exit")`
+ * path lives in `bestEffortKill` below.
+ */
+async function killProcessGroup(child: ChildProcess | null, label: string, weStarted: boolean): Promise<void> {
+	if (!child?.pid || !weStarted) return
+	console.log(`[e2e-setup] Stopping ${label} (pid=${child.pid})...`)
+	try {
+		process.kill(-child.pid, "SIGTERM")
+	} catch {
+		try {
+			child.kill("SIGTERM")
+		} catch {
+			// ignore
+		}
+	}
+	const start = Date.now()
+	while (child.exitCode === null && !child.killed && Date.now() - start < 5_000) {
+		await new Promise((r) => setTimeout(r, 100))
+	}
+	if (child.exitCode === null && !child.killed) {
+		console.warn(`[e2e-setup] ${label} did not exit on SIGTERM; sending SIGKILL`)
+		try {
+			process.kill(-child.pid, "SIGKILL")
+		} catch {
+			try {
+				child.kill("SIGKILL")
+			} catch {
+				// ignore
+			}
+		}
+	}
+}
+
+/** Best-effort sync kill for the `process.on("exit")` path. Sync-only:
+ *  fires SIGTERM and lets the OS finish what it can — async waits aren't
+ *  available here. */
+function bestEffortKill(child: ChildProcess | null, weStarted: boolean): void {
+	if (!child?.pid || !weStarted) return
+	try {
+		process.kill(-child.pid, "SIGTERM")
+	} catch {
+		try {
+			child.kill("SIGTERM")
+		} catch {
+			// ignore
+		}
+	}
+}
+
+const onExit = () => {
+	bestEffortKill(playgroundProcess, weStartedPlayground)
+	bestEffortKill(nodeProcess, weStartedNode)
+	bestEffortKill(anvilProcess, weStartedAnvil)
+	clearLock()
+}
+process.on("SIGINT", onExit)
+process.on("SIGTERM", onExit)
+process.on("exit", onExit)
+
+declare module "vitest" {
+	export interface ProvidedContext {
+		extensionPath: string
+		aztecTestConfig?: AztecTestConfig
+		playgroundUrl: string
+	}
+}

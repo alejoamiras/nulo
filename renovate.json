@@ -1,0 +1,73 @@
+{
+	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
+	"extends": ["config:recommended", ":semanticCommits"],
+	"baseBranchPatterns": ["dev"],
+	"rangeStrategy": "in-range",
+	"minimumReleaseAge": "7 days",
+	"vulnerabilityAlerts": {
+		"enabled": true,
+		"minimumReleaseAge": "0 days",
+		"labels": ["dependencies", "security"]
+	},
+	"prConcurrentLimit": 3,
+	"prHourlyLimit": 2,
+	"dependencyDashboard": true,
+	"dependencyDashboardTitle": "Dependency Dashboard",
+	"labels": ["dependencies"],
+	"schedule": ["* 0-5 * * 1"],
+	"timezone": "America/Argentina/Buenos_Aires",
+	"commitMessagePrefix": "chore(deps):",
+	"commitMessageAction": "bump",
+	"commitMessageTopic": "{{depName}}",
+	"commitMessageExtra": "to {{newVersion}}",
+	"packageRules": [
+		{
+			"matchPackageNames": ["vue-router", "vite-plugin-pages"],
+			"groupName": "routing"
+		},
+		{ "matchPackageNames": ["vite", "@vitejs/plugin-vue"], "groupName": "vite" },
+		{
+			"matchPackageNames": ["vitest", "@vitest/coverage-v8", "@vue/test-utils", "jsdom"],
+			"groupName": "test-runner"
+		},
+		{ "matchPackageNames": ["/^unplugin-/"], "groupName": "unplugin-*" },
+		{ "matchPackageNames": ["/^@codemirror/"], "groupName": "codemirror" },
+		{ "matchPackageNames": ["/^@commitlint/"], "groupName": "commitlint" },
+		{ "matchPackageNames": ["typescript", "vue-tsc"], "groupName": "typescript" },
+		{ "matchPackageNames": ["/^@storybook/", "storybook"], "groupName": "storybook" },
+		{
+			"matchPackageNames": ["webextension-polyfill", "@types/webextension-polyfill"],
+			"groupName": "webextension-polyfill"
+		},
+		{
+			"matchDepTypes": ["devDependencies"],
+			"matchUpdateTypes": ["patch", "minor"],
+			"automerge": false
+		},
+		{
+			"matchUpdateTypes": ["major"],
+			"automerge": false,
+			"labels": ["dependencies", "major"]
+		},
+		{
+			"description": "TEMP carve-out mirroring bunfig.toml minimumReleaseAgeExcludes window (expires ~2026-05-19 16:08 UTC). Remove this rule on/after 2026-05-19 — the puppeteer family will then be picked up by the standard 7-day gate.",
+			"matchPackageNames": ["puppeteer", "puppeteer-core", "@puppeteer/browsers", "chromium-bidi"],
+			"enabled": false
+		},
+		{
+			"description": "Pinned to Node 24 lifecycle. Patch/minor on 24.x still bumped.",
+			"matchPackageNames": ["@types/node"],
+			"allowedVersions": "<25"
+		},
+		{
+			"description": "Aztec line: class-id stability per SECURITY.md. Manual via Aztec milestone. LAST so no later rule re-enables.",
+			"matchPackageNames": [
+				"/^@aztec\\//",
+				"@alejoamiras/aztec-accelerator",
+				"@defi-wonderland/aztec-standards",
+				"@wonderland/aztec-fee-payment"
+			],
+			"enabled": false
+		}
+	]
+}

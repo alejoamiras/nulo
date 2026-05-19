@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Wallet Architecture Research — Nulo</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel2: #1e252e;
+    --border: #2a323d;
+    --text: #d1d5db;
+    --muted: #8b949e;
+    --accent: #9b59ff;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --err: #f85149;
+    --info: #58a6ff;
+    --gold: #f1c40f;
+    --rabby: #4169e1;
+    --metamask: #f6851b;
+    --grego: #a371f7;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); margin: 0; padding: 0; font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 24px 64px; }
+
+  /* sticky nav */
+  nav.top {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  nav.top .home { color: var(--accent); text-decoration: none; font-weight: 600; }
+  nav.top .home:hover { text-decoration: underline; }
+  nav.top a.tab { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 4px; font-size: 13px; }
+  nav.top a.tab:hover { color: var(--text); background: var(--panel); }
+  nav.top a.tab.current { color: var(--text); background: var(--panel2); border: 1px solid var(--border); }
+  nav.top .sep { color: var(--muted); }
+
+  h1 { font-size: 28px; margin: 0 0 8px; color: #fff; letter-spacing: -0.5px; }
+  h2 { font-size: 20px; margin: 36px 0 12px; color: #fff; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16px; margin: 20px 0 8px; color: var(--accent); }
+  p { margin: 8px 0; }
+
+  /* tags / chips */
+  .tag {
+    display: inline-block; font-family: var(--mono); font-size: 11px;
+    padding: 2px 8px; border-radius: 4px; background: var(--panel2); color: var(--muted);
+    margin-right: 6px; border: 1px solid var(--border);
+  }
+  .tag.ok { color: var(--ok); border-color: var(--ok); }
+  .tag.warn { color: var(--warn); border-color: var(--warn); }
+  .tag.err { color: var(--err); border-color: var(--err); }
+  .tag.info { color: var(--info); border-color: var(--info); }
+  .tag.accent { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .prov {
+    display: inline-block; font-family: var(--mono); font-size: 10px;
+    padding: 1px 6px; border-radius: 3px; margin-left: 6px;
+    background: var(--panel2); color: var(--muted); border: 1px solid var(--border);
+  }
+  .prov.research { color: var(--info); border-color: var(--info); }
+  .prov.audit { color: var(--warn); border-color: var(--warn); }
+  .prov.chat { color: var(--accent); border-color: var(--accent); }
+
+  /* cards */
+  .grid { display: grid; gap: 16px; }
+  .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  .grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 900px) { .grid.cols-2, .grid.cols-4 { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 18px;
+  }
+  .card .title { font-weight: 600; color: #fff; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .card.dim { background: var(--panel2); }
+  .card a { color: var(--accent); text-decoration: none; }
+  .card a:hover { text-decoration: underline; }
+  .card .meta { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+
+  .wallet-card { border-top: 3px solid var(--border); }
+  .wallet-card.rabby   { border-top-color: var(--rabby); }
+  .wallet-card.metamask{ border-top-color: var(--metamask); }
+  .wallet-card.grego   { border-top-color: var(--grego); }
+  .wallet-card.nulo    { border-top-color: var(--accent); }
+
+  /* ascii figures */
+  figure.ascii {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin: 14px 0;
+    overflow-x: auto;
+  }
+  figure.ascii figcaption {
+    font-size: 13px; color: var(--muted); font-style: italic; margin-bottom: 10px;
+  }
+  figure.ascii pre {
+    font: 12px/1.35 var(--mono);
+    color: var(--text);
+    margin: 0;
+    white-space: pre;
+  }
+
+  /* tables */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+  th, td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; background: var(--panel); position: sticky; top: 50px; }
+  td.stars { font-family: var(--mono); color: var(--gold); white-space: nowrap; }
+  td .label { color: var(--muted); font-size: 11px; margin-left: 6px; font-family: var(--mono); }
+
+  /* TOC */
+  .toc {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 12px 16px; margin: 16px 0; font-size: 13px;
+  }
+  .toc strong { color: var(--text); }
+  .toc a { color: var(--info); text-decoration: none; margin-right: 12px; }
+  .toc a:hover { text-decoration: underline; }
+
+  code { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 1px 5px; border-radius: 3px; color: var(--text); }
+
+  .pull-quote {
+    border-left: 3px solid var(--accent); padding: 10px 14px;
+    background: var(--panel); margin: 14px 0;
+    font-size: 14px; color: var(--text); font-style: italic;
+  }
+  .pull-quote .who { display: block; font-style: normal; font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+
+  .footer { font-size: 12px; color: var(--muted); margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .footer a { color: var(--info); }
+
+  /* legend strip */
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 8px 0 16px; }
+  .legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<nav class="top" aria-label="Primary">
+  <a href="index.html" class="home">Wallet Architecture Research</a>
+  <span class="sep">/</span>
+  <a href="index.html" class="tab current">Overview</a>
+  <a href="wallets/rabby.html" class="tab">Rabby</a>
+  <a href="wallets/metamask.html" class="tab">MetaMask</a>
+  <a href="wallets/grego.html" class="tab">Grego</a>
+  <a href="wallets/nulo.html" class="tab">Nulo Today</a>
+  <a href="nulo-phase-2.html" class="tab">Phase 2</a>
+  <a href="nulo-phase-2-plus.html" class="tab">Phase 2+</a>
+  <a href="nulo-maximalist.html" class="tab">Maximalist</a>
+</nav>
+
+<div class="wrap">
+
+<h1>Comparative wallet architecture study</h1>
+<p style="color: var(--muted); margin-top: 0;">
+  Four browser-extension wallets, two independent analyses each (Claude agent + Codex CLI),
+  ~70,000 words of source material, calibrated to <code>master @ v0.14.9</code> (post-PR-76, 2026-05-12).
+</p>
+
+<div class="toc" aria-label="Table of contents">
+  <strong>On this page:</strong>
+  <a href="#findings">The four findings</a>
+  <a href="#wallets">Wallets at a glance</a>
+  <a href="#stars">Star rating table</a>
+  <a href="#glossary">Dimension glossary</a>
+  <a href="#took">What Nulo took / left</a>
+  <a href="#today">Nulo today</a>
+  <a href="#phase-2">Phase 2 preview</a>
+</div>
+
+<h2 id="findings">The four findings <span class="prov research">research</span></h2>
+<div class="grid cols-2">
+  <div class="card">
+    <div class="title">①  Nulo is already production-quality where it counts</div>
+    <p>Biome-enforced package layer rules, the M6 component model (L0–L6 + C0/C1), <code>PasswordSecretBox</code> with cross-version test vectors, and the <code>NuloAccount</code> adapter that delegates to upstream <code>@aztec/accounts/schnorr</code> with recursive payload chunking and first-tx multicall wrapping — all of this is real, not aspirational. <strong>Don't undo any of it.</strong></p>
+  </div>
+  <div class="card">
+    <div class="title">②  Long-running ops are the one big architectural gap</div>
+    <p>Default <code>ServiceClient</code> timeout is 60s. Aztec proofs routinely outrun it. "Timeout" is not "cancellation" — the SW keeps proving while the popup shows failure. PXE concurrency is globally serialized. No <code>chrome.alarms</code> wake-up. <strong>This is what Phase 2 fixes.</strong></p>
+  </div>
+  <div class="card">
+    <div class="title">③  Grego's Aztec sim patterns are non-negotiable</div>
+    <p>Stub-account simulation overrides (real signing keys never enter the simulator). Public-static fast path via <code>simulateViaNode</code> + <code>buildMergedSimulationResult</code>. <code>completeFeeOptions({forEstimation: true})</code> for one-codepath sim-vs-real gas policy. <span class="tag ok">all shipped in PR 8b/8c/9</span></p>
+  </div>
+  <div class="card">
+    <div class="title">④  Stop trying to keep the SW alive. Design around it dying.</div>
+    <p>MetaMask writes a 2-second <code>chrome.storage.session</code> timestamp and explicitly calls it a hack. Rabby pings the offscreen every 5 seconds — acknowledged bet. The right pattern: <strong>persist enough state to resume, register listeners synchronously at top-level, treat any in-flight job that survives the worker as a feature.</strong></p>
+  </div>
+</div>
+
+<h2 id="wallets">Wallets at a glance <span class="prov research">research</span></h2>
+
+<div class="grid cols-4">
+  <div class="card wallet-card rabby">
+    <div class="meta">EVM · MV3+MV2 · React+Redux</div>
+    <div class="title">Rabby</div>
+    <p>Production-grade, UX-led EVM wallet. Strong dApp patterns (PromiseFlow middleware, rate-limit per origin, unlockPromise). Resumable history-sync as a durable-job reference.</p>
+    <p><a href="wallets/rabby.html">Deep dive →</a></p>
+  </div>
+  <div class="card wallet-card metamask">
+    <div class="meta">EVM · MV3+MV2 · React+Redux</div>
+    <div class="title">MetaMask</div>
+    <p>Industrial-scale infrastructure. Compile-time-enforced cross-service deps, patch-based state sync, numbered migrations, IDB backup, approval state machine. The reference for "design around SW dying".</p>
+    <p><a href="wallets/metamask.html">Deep dive →</a></p>
+  </div>
+  <div class="card wallet-card grego">
+    <div class="meta">Aztec · MV3 · React+MUI</div>
+    <div class="title">Grego</div>
+    <p>Aztec-MV3 reference. Stub-account simulation, public-static fast path, completeFeeOptions, capability manifests, Firefox fallback, function-bind shim. Lacks durable jobs.</p>
+    <p><a href="wallets/grego.html">Deep dive →</a></p>
+  </div>
+  <div class="card wallet-card nulo">
+    <div class="meta">Aztec · MV3 · Vue 3+Pinia</div>
+    <div class="title">Nulo (us)</div>
+    <p>Lint-enforced package boundaries, NuloAccount adapter, full Phase 1+3 shipped. Big remaining gap: durable jobs (Phase 2 territory).</p>
+    <p><a href="wallets/nulo.html">Deep dive →</a></p>
+  </div>
+</div>
+
+<h2 id="stars">Star rating by dimension <span class="prov chat">post-merge calibration</span></h2>
+<p style="color: var(--muted); font-size: 13px; margin-bottom: 16px;">
+  Calibrated to current main (post-PR-76 / v0.14.9). Each cell is one team's standing on that axis; not relative skill ranking.
+  See the <a href="#glossary" style="color: var(--info);">dimension glossary</a> below for definitions.
+</p>
+
+<table aria-label="12-dimension star rating comparing the four wallets">
+  <thead>
+    <tr>
+      <th>Dimension</th>
+      <th>Rabby</th>
+      <th>MetaMask</th>
+      <th>Grego</th>
+      <th>Nulo (now)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Package / layer discipline</td>
+      <td class="stars">★★★ <span class="label">3/5</span></td>
+      <td class="stars">★★★★ <span class="label">4/5</span></td>
+      <td class="stars">★★ <span class="label">2/5</span></td>
+      <td class="stars">★★★★★ <span class="label">5/5</span></td>
+    </tr>
+    <tr>
+      <td>Cryptography hygiene</td>
+      <td class="stars">★★★ <span class="label">3/5</span></td>
+      <td class="stars">★★★★ <span class="label">4/5</span></td>
+      <td class="stars">★★★ <span class="label">3/5</span></td>
+      <td class="stars">★★★★★ <span class="label">5/5</span></td>
+    </tr>
+    <tr>
+      <td>Aztec-specific correctness</td>
+      <td class="stars">★ <span class="label">1/5</span></td>
+      <td class="stars">★ <span class="label">1/5</span></td>
+      <td class="stars">★★★★ <span class="label">4/5</span></td>
+      <td class="stars">★★★★★ <span class="label">5/5</span></td>
+    </tr>
+    <tr>
+      <td>Browser coverage</td>
+      <td class="stars">★★★★★ <span class="label">5/5</span></td>
+      <td class="stars">★★★★ <span class="label">4/5</span></td>
+      <td class="stars">★★★★ <span class="label">4/5</span></td>
+      <td class="stars">★★★★ <span class="label">4/5</span></td>
+    </tr>
+    <tr>
+      <td>MV3 / CSP hygiene</td>
+      <td class="stars">★★★ <span class="label">3/5</span></td>
+      <td class="stars">★★★ <span class="label">3/5</span></td>
+      <td class="stars">★★★★ <span class="label">4/5</span></td>
+      <td class="stars">★★★★ <span class="label">4/5</span></td>
+    </tr>
+    <tr>
+      <td>Durable jobs / long-running ops</td>
+      <td class="stars">★★★★ <span class="label">4/5</span></td>
+      <td class="stars">★★★★★ <span class="label">5/5</span></td>
+      <td class="stars">★ <span class="label">1/5</span></td>
+      <td class="stars">★ <span class="label">1/5</span></td>
+    </tr>
+    <tr>
+      <td>Cold-start handling</td>
+      <td class="stars">★★★ <span class="label">3/5</span></td>
+      <td class="stars">★★★★★ <span class="label">5/5</span></td>
+      <td class="stars">★★★ <span class="label">3/5</span></td>
+      <td class="stars">★★ <span class="label">2/5</span></td>
+    </tr>
+    <tr>
+      <td>Storage / migration safety</td>
+      <td class="stars">★★ <span class="label">2/5</span></td>
+      <td class="stars">★★★★★ <span class="label">5/5</span></td>
+      <td class="stars">★★ <span class="label">2/5</span></td>
+      <td class="stars">★ <span class="label">1/5</span></td>
+    </tr>
+    <tr>
+      <td>dApp ergonomics</td>
+      <td class="stars">★★★★ <span class="label">4/5</span></td>
+      <td class="stars">★★★★ <span class="label">4/5</span></td>
+      <td class="stars">★★★★ <span class="label">4/5</span></td>
+      <td class="stars">★★★ <span class="label">3/5</span></td>
+    </tr>
+    <tr>
+      <td>State / store architecture</td>
+      <td class="stars">★★★★ <span class="label">4/5</span></td>
+      <td class="stars">★★★★★ <span class="label">5/5</span></td>
+      <td class="stars">★★★ <span class="label">3/5</span></td>
+      <td class="stars">★★★ <span class="label">3/5</span></td>
+    </tr>
+    <tr>
+      <td>Cross-service compile-time deps</td>
+      <td class="stars">★ <span class="label">1/5</span></td>
+      <td class="stars">★★★★★ <span class="label">5/5</span></td>
+      <td class="stars">★★ <span class="label">2/5</span></td>
+      <td class="stars">★★★ <span class="label">3/5</span></td>
+    </tr>
+    <tr>
+      <td>UI maturity (chips, alerts, approval state)</td>
+      <td class="stars">★★★★ <span class="label">4/5</span></td>
+      <td class="stars">★★★★ <span class="label">4/5</span></td>
+      <td class="stars">★★★★★ <span class="label">5/5</span></td>
+      <td class="stars">★★★ <span class="label">3/5</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<p style="margin-top: 8px; font-size: 13px; color: var(--muted);">
+  <strong>Where Nulo wins:</strong> package/layer discipline, crypto hygiene, Aztec correctness (after PR 8c).
+  <strong>Where we tie:</strong> browser coverage, MV3 hygiene, state architecture.
+  <strong>Where we lose:</strong> durable jobs, cold-start handling, migration safety, dApp UX, rate-limiting.
+</p>
+
+<h2 id="glossary">Dimension glossary <span class="prov chat">chat addition</span></h2>
+<table aria-label="Glossary explaining each star-rating dimension">
+  <tbody>
+    <tr><td><strong>Package / layer discipline</strong></td><td>Are package boundaries lint-enforced; does any layer leak <code>chrome.*</code> into a lower one?</td></tr>
+    <tr><td><strong>Cryptography hygiene</strong></td><td>KDF params, encryption-at-rest vs in-memory, key-zeroization, ENCRYPTION_GUARD-style plaintext probes.</td></tr>
+    <tr><td><strong>Aztec-specific correctness</strong></td><td>Simulation overrides, fee-options completion, public-static fast path, account-contract adapter.</td></tr>
+    <tr><td><strong>Browser coverage</strong></td><td>Chrome / Firefox / Safari support depth.</td></tr>
+    <tr><td><strong>MV3 / CSP hygiene</strong></td><td>function-bind shim, Buffer/process polyfills, no eval / inline.</td></tr>
+    <tr><td><strong>Durable jobs / long-running ops</strong></td><td>SW-death survival, AbortController wiring, persisted progress, resumable workflows.</td></tr>
+    <tr><td><strong>Cold-start handling</strong></td><td>LazyListener-style event buffering, deferred-init port gating, initialization-promise discipline.</td></tr>
+    <tr><td><strong>Storage / migration safety</strong></td><td>Versioned + idempotent migrations, failure-tolerant boots, IDB backup of unrecoverable state.</td></tr>
+    <tr><td><strong>dApp ergonomics</strong></td><td>Approval state machine, capability wildcards, per-app policy, rate-limit, NO_FROM/paymaster transparency.</td></tr>
+    <tr><td><strong>State / store architecture</strong></td><td>Patch-based diffs, persist + anonymous flags, sub-channel multiplexing.</td></tr>
+    <tr><td><strong>Cross-service compile-time deps</strong></td><td>Compile-time-enforced messenger / DI graph; can a service touch something it shouldn't?</td></tr>
+    <tr><td><strong>UI maturity</strong></td><td>How clearly the UI surfaces signals (chips, alerts, approval state, what's happening during long ops).</td></tr>
+  </tbody>
+</table>
+
+<h2 id="took">What Nulo took / left <span class="prov audit">post-audit reality</span></h2>
+
+<div class="legend">
+  <span><span class="swatch" style="background:var(--ok)"></span>✅ took</span>
+  <span><span class="swatch" style="background:var(--warn)"></span>🔁 deferred to Phase 2</span>
+  <span><span class="swatch" style="background:var(--muted)"></span>⏭ later / wider refactor</span>
+</div>
+
+<div class="grid cols-2">
+  <div class="card">
+    <div class="title"><span class="tag ok">✅ took</span> Aztec parity from Grego</div>
+    <ul>
+      <li>Stub-account sim overrides (PR 8b)</li>
+      <li>Public-static fast path + mixed-payload (PR 8c)</li>
+      <li><code>completeFeeOptions({forEstimation:true})</code> shared translator (PR 9)</li>
+      <li>JSON-stringify fallback on <code>DataCloneError</code> (PR 5)</li>
+      <li>Firefox offscreen fallback (PR 7)</li>
+      <li><code>function-bind</code> CJS stub for MV3 CSP (PR 4)</li>
+      <li>Per-(origin, chainId) dApp sessions (PR 10)</li>
+      <li>NO_FROM + paymaster UX chips (later reverted per user feedback)</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="title"><span class="tag warn">🔁 Phase 2</span> The big gap</div>
+    <ul>
+      <li>AbortController plumbed through prove path</li>
+      <li>Resumable jobs with persisted progress (Rabby R7)</li>
+      <li>LazyListener for SW boot event buffering (MetaMask M3)</li>
+      <li><code>unlockPromise</code> pattern (Rabby R6)</li>
+      <li>Per-(profileId, chainId) PXE concurrency</li>
+      <li><code>chrome.alarms</code> wake-up for incoming dApp messages</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="title"><span class="tag">⏭ later</span> When we have real users</div>
+    <ul>
+      <li>Numbered + failure-tolerant migrations (MetaMask M6)</li>
+      <li>IndexedDB backup for unrecoverable controllers (MetaMask M7)</li>
+      <li>Error reporting / telemetry</li>
+      <li>Rate-limit per origin (Rabby R5)</li>
+    </ul>
+  </div>
+  <div class="card">
+    <div class="title"><span class="tag">⏭ wider refactor</span> Future option, not now</div>
+    <ul>
+      <li>PromiseFlow koa-style middleware (Rabby R3)</li>
+      <li>PatchStore Immer-diffs (MetaMask M2)</li>
+      <li>ObjectMultiplex N-channels-over-one-port (MetaMask M5)</li>
+      <li><code>@metamask/messenger</code> compile-time deps (MetaMask M1)</li>
+      <li>Proxy-based persistent stores (Rabby R2)</li>
+    </ul>
+  </div>
+</div>
+
+<h2 id="today">Nulo today <span class="prov chat">post-merge state</span></h2>
+
+<figure class="ascii" aria-label="Current Nulo runtime: popup connects to SW with 60s timeout; SW serializes PXE access globally; offscreen hosts PXE plus BB-WASM; PR 8c gives us stub-account sim and public-static fast path; 10-second liveness heartbeat keeps SW alive while popup is open">
+  <figcaption>Today's Nulo runtime — popup ↔ SW ↔ offscreen. PR 8c work in place (stub-account sim, public-static fast path, IPXE.getSyncedBlockHeader). The 60s ServiceClient timeout and global ReadWriteGuard remain the durable-jobs gap.</figcaption>
+  <pre>   ┌───────┐                  ┌─────────────────┐
+   │ POPUP │ ◄── 60s timeout ►│   SW (MV3)      │ ServiceClient default 60s
+   └───┬───┘   ServiceClient  │                 │  (90s offscreen-side)
+       │                      │ ReadWriteGuard  │ GLOBAL serialize on PXE
+       │                      │   on PXE        │  (per-(profileId,chainId)
+       │                      └────────┬────────┘  scope but one lock)
+       │                               │
+       │                               │
+   ┌───────┐                           ▼
+   │ dApp  │              ┌─────────────────────────┐
+   └───────┘              │   OFFSCREEN             │ PXE + BB-WASM
+                          │                         │ stub-account sim ✅
+                          │  IPXE.getSyncedBlock-   │ public-static fast path
+                          │    Header (PR 8c)       │  (with mixed-payload v0.14.7)
+                          └─────────────────────────┘
+
+   Liveness:  `nulo:liveness` heartbeat (10s) keeps SW alive while
+              popup is open.  When popup closes, next dApp message
+              cold-boots BB-WASM from scratch (~5-10s).</pre>
+</figure>
+
+<p>
+  <strong>Durable jobs today: none.</strong> The <code>ExecutionServiceClient</code> blocks the popup; the SW doesn't persist mid-prove state. A tx may settle even if the popup says "failed" (the 60s timeout wins the race against a longer proof).
+</p>
+
+<h2 id="phase-2">Three futures for Nulo <span class="prov chat">target design</span></h2>
+
+<p>
+  The original plan condensed everything into "Phase 2". Post-merge thinking (with codex pushback) split it into three views, ordered by ambition: the shippable cut, the same problem done <em>right</em>, and the full year-long maximalist program.
+</p>
+
+<div class="grid cols-3" style="margin-top: 12px;">
+  <div class="card" style="border-left: 3px solid var(--accent);">
+    <div class="title">Phase 2 — shippable</div>
+    <p>The original 8-item plan: JobRegistry FSM, AbortController, chrome.alarms, LazyListener, PXEConcurrencyManager, IDB backup, migrations. <strong>3-6 weeks.</strong> Stops the SW from lying to users; gets durable jobs to ~4/5.</p>
+    <p style="margin-top: 10px;"><a href="nulo-phase-2.html" style="color: var(--accent); font-weight: 600;">Read Phase 2 →</a></p>
+  </div>
+  <div class="card" style="border-left: 3px solid var(--accent);">
+    <div class="title">Phase 2+ — durable jobs full</div>
+    <p>What 5/5 durable jobs <em>actually</em> requires in the existing browser-extension surface: fairness, idempotency, retry policy, tombstones, sweeper, attach/detach. Plus chaos discipline and narrow formal methods. <strong>~1.5-2× Phase 2.</strong></p>
+    <p style="margin-top: 10px;"><a href="nulo-phase-2-plus.html" style="color: var(--accent); font-weight: 600;">Read Phase 2+ →</a></p>
+  </div>
+  <div class="card" style="border-left: 3px solid var(--accent);">
+    <div class="title">Maximalist — 5/5 everywhere</div>
+    <p>Year-long, three-engineer vision: runtime spine + persistence spine + dApp/UX + surface + Aztec depth + hardening. Plus new dimensions (network privacy, supply chain, observability, chaos, formal methods). <strong>1 year.</strong></p>
+    <p style="margin-top: 10px;"><a href="nulo-maximalist.html" style="color: var(--accent); font-weight: 600;">Read Maximalist →</a></p>
+  </div>
+</div>
+
+<div class="footer">
+  <p>
+    <strong>Source material in repo:</strong>
+  </p>
+  <ul>
+    <li><a href="README.md"><code>README.md</code></a> — executive synthesis (~50 KB, the master research doc)</li>
+    <li><a href="rabby/claude-analysis.md"><code>rabby/</code></a>, <a href="metamask/claude-analysis.md"><code>metamask/</code></a>, <a href="grego/claude-analysis.md"><code>grego/</code></a>, <a href="nulo/self-analysis.md"><code>nulo/</code></a> — two deep-dives per wallet (Claude + Codex)</li>
+    <li><a href="synthesis/implementation-plan-p1-p3.md"><code>synthesis/implementation-plan-p1-p3.md</code></a> — what we actually shipped vs deferred</li>
+    <li><a href="synthesis/html-source-additions.md"><code>synthesis/html-source-additions.md</code></a> — chat-generated content (this site's source of truth for ASCII diagrams, ratings, and Phase 2 design)</li>
+  </ul>
+  <p style="margin-top: 14px;">
+    Originally researched 2026-05-08. This view calibrated 2026-05-12 against <code>master</code> at v0.14.9 (post-PR-76).
+  </p>
+</div>
+
+</div>
+</body>
+</html>
