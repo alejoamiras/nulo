@@ -72,9 +72,7 @@ onMounted(async () => {
 		<GlobalLoader />
 
 		<RouterView v-slot="{ Component }">
-			<transition name="onboarding-fade" mode="out-in">
-				<component :is="Component" />
-			</transition>
+			<component :is="Component" />
 		</RouterView>
 	</main>
 </template>
@@ -92,16 +90,3 @@ onMounted(async () => {
 }
 </style>
 
-<style>
-/* Page transition. Defined globally (not :module) so it works across SFC
- * boundaries — the <transition> wraps the router view's component, not
- * the .shell. */
-.onboarding-fade-enter-active,
-.onboarding-fade-leave-active {
-	transition: opacity 180ms ease;
-}
-.onboarding-fade-enter-from,
-.onboarding-fade-leave-to {
-	opacity: 0;
-}
-</style>

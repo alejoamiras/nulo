@@ -51,7 +51,7 @@ function goNext() {
 			</p>
 		</header>
 
-		<div :class="[$style.statusCard, $style[status]]" data-testid="onboarding-accelerator-status">
+		<div :class="[$style.statusCard, $style[status]]" :data-status="status" data-testid="onboarding-accelerator-status">
 			<Flex align="center" gap="12">
 				<span :class="$style.dot" />
 				<div :class="$style.statusBody">
