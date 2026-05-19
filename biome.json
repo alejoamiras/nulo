@@ -1,6 +1,6 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
-	"vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "main" },
+	"vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "dev" },
 	"files": {
 		"ignoreUnknown": false,
 		"includes": ["packages/**", "!**/node_modules", "!**/dist", "!**/packages/extension/src/types"]
