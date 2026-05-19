@@ -18,13 +18,17 @@ import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
-import { useFullBackupImport } from "@/popup/components/modules/import/useFullBackupImport"
+import { useFullBackupImport } from "@/composables/useFullBackupImport"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
 
+/** Stores */
+import { useCacheStore } from "@/stores/cache.store"
+import { usePopupStore } from "@/stores/popup.store"
+
 /** Components */
-import ImportFullBackupForm from "@/popup/components/modules/import/ImportFullBackupForm.vue"
-import ImportMethodPicker from "@/popup/components/modules/import/ImportMethodPicker.vue"
-import ImportSecretForm from "@/popup/components/modules/import/ImportSecretForm.vue"
+import ImportFullBackupForm from "@/components/composite/import/ImportFullBackupForm.vue"
+import ImportMethodPicker from "@/components/composite/import/ImportMethodPicker.vue"
+import ImportSecretForm from "@/components/composite/import/ImportSecretForm.vue"
 import PasskeyCeremonyDialog from "@/popup/components/popups/PasskeyCeremonyDialog.vue"
 
 /** Errors */
@@ -256,6 +260,13 @@ const {
 	// `profileService.restore` (which requires `credentialData` for
 	// passkey type — no SW-window fallback).
 	runCeremony,
+	// Popup-specific error-log surface: open the data-viewer overlay.
+	showErrorLog: (errors) => {
+		const cacheStore = useCacheStore()
+		const popupStore = usePopupStore()
+		cacheStore.viewerData = errors
+		popupStore.open("data_viewer")
+	},
 })
 
 function clearFormState() {
