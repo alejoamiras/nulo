@@ -18,6 +18,14 @@ import { consoleMethods, LoggerStore, LogLevel } from "./logger"
 import { createWalletRuntime } from "./runtime"
 import { getErrorData } from "@nulo/wallet-core/utils"
 
+// MV3: onInstalled fires once, synchronously, when the SW boots after install.
+// Late addListener calls miss the historic event. Register at top level BEFORE
+// any awaited startup work — body lazy-imports so heavy modules don't load until fired.
+chrome.runtime.onInstalled.addListener(({ reason }) => {
+	if (reason !== "install") return
+	void import("./utils/onboarding-tab").then(({ openOrFocusOnboardingTab }) => openOrFocusOnboardingTab())
+})
+
 const config = new ConfigStore()
 const logger = new LoggerStore(config)
 const browserApi = new RealChromeBrowserApi()
