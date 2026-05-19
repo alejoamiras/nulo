@@ -302,10 +302,9 @@ once we parse the JSON output and tune to actual signal.
 and in `setup-bun/action.yml` + the commitlint inline step. Cache keys
 include the Bun version so a bump invalidates stale state.
 
-**Lockfile stays binary (`bun.lockb`)** for now. Bun 1.3.1's text-lockfile
-format triggers a peer-resolution-duplication bug in `bun install
---frozen-lockfile`. Re-evaluate after Bun 1.3.13 has bedded in and the
-upstream fix is verified.
+**Lockfile is text (`bun.lock`)** — reviewable in PR diffs, no binary
+opacity. Migrated from `bun.lockb` once Bun 1.3.13's text-lockfile
+behavior was validated against the install + typecheck gates.
 
 **CVE-on-Friday runbook.** When an advisory drops for a package newer than
 the 7-day gate window:
@@ -323,7 +322,7 @@ the 7-day gate window:
 
 **Bun bug #25305.** `bun update --latest` does not apply
 `minimumReleaseAge` to transitive deps. Workaround for bulk re-resolves:
-delete `bun.lockb` first, then re-install.
+delete `bun.lock` first, then re-install.
 
 **`bun pm scan`** is a plugin system for third-party scanners (Socket,
 Snyk, etc.), not a built-in tool. Not configured today; revisit if/when

@@ -50,7 +50,7 @@ jobs:
               - '.github/workflows/pr-network-e2e.yml'
               - '.github/actions/setup-aztec/**'
               - '.github/actions/setup-bun/**'
-              - 'bun.lockb'
+              - 'bun.lock'
               - 'bunfig.toml'
               - 'package.json'
       - name: Override for manual dispatch

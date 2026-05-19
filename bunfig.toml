@@ -29,7 +29,7 @@
 # window passes. See SECURITY.md "Dependency policy".
 #
 # Bun bug #25305: `bun update --latest` does not apply this gate to
-# transitive deps. Workaround for bulk re-resolves: delete bun.lockb
+# transitive deps. Workaround for bulk re-resolves: delete bun.lock
 # first.
 #
 # CLI equivalent: --minimum-release-age=604800
