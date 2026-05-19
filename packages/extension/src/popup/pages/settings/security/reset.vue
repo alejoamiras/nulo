@@ -36,7 +36,7 @@ const confirmText = ref("")
 
 const isReadyToReset = computed(() => checks.permanent && checks.undone && checks.sure && confirmText.value === appStore.profile?.name)
 
-const handleReset = () => {
+const handleReset = async () => {
 	if (!isReadyToReset.value) return
 
 	managers.profile.deleteProfile(appStore.profile.id)
@@ -53,6 +53,13 @@ const handleReset = () => {
 
 	appStore.isLogined = false
 	appStore.isSessionChecked = false
+
+	// Clearing the last profile? Send the user back through onboarding next
+	// time. Without this, a wallet-reset user would skip the Aztec primer
+	// and accelerator setup on their next install attempt.
+	if (!appStore.profiles.length) {
+		await appStore.setOnboardingCompleted(false)
+	}
 
 	openToast({ label: "Profile deleted", icon: "check-circle" })
 

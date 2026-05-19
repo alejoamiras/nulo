@@ -53,6 +53,18 @@ const wrapperRef = useTemplateRef("wrapperRef")
 const heroVisible = ref(true)
 let scrollEl = null
 
+// First-time install / deep-link bypass: redirect to onboarding tab when
+// no profile exists AND onboarding hasn't been completed. Add-another-
+// profile case (profiles.length > 0) keeps using the popup flow normally.
+onBeforeMount(async () => {
+	await appStore.loadOnboardingCompleted()
+	if (appStore.onboardingCompleted) return
+	if (appStore.profiles.length > 0) return
+	const { openOrFocusOnboardingTab } = await import("@/wallet/utils/onboarding-tab")
+	await openOrFocusOnboardingTab()
+	window.close()
+})
+
 /** Reactive state */
 const selectedImportOption = ref(null)
 
