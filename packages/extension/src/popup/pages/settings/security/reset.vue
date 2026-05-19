@@ -54,12 +54,11 @@ const handleReset = async () => {
 	appStore.isLogined = false
 	appStore.isSessionChecked = false
 
-	// Clearing the last profile? Send the user back through onboarding next
-	// time. Without this, a wallet-reset user would skip the Aztec primer
-	// and accelerator setup on their next install attempt.
-	if (!appStore.profiles.length) {
-		await appStore.setOnboardingCompleted(false)
-	}
+	// Note: onboardingCompleted intentionally persists across profile resets.
+	// A user who has gone through onboarding once already knows about Aztec
+	// and the accelerator; making them re-learn after a reset would be
+	// patronizing. To restart onboarding, the user uninstalls + reinstalls
+	// the extension (which wipes chrome.storage.local).
 
 	openToast({ label: "Profile deleted", icon: "check-circle" })
 

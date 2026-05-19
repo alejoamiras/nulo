@@ -236,8 +236,7 @@ const {
 			type: "warning",
 			payload: {
 				title: "Import completed with errors",
-				description:
-					"Some entries from the backup couldn't be restored. Check the developer console for details.",
+				description: "Some entries from the backup couldn't be restored. Check the developer console for details.",
 				confirmText: "OK",
 				onConfirm: () => {},
 			},

@@ -61,7 +61,10 @@ describe("useAcceleratorStatus", () => {
 	})
 
 	test("detect transitions to not-detected on HTTP error", async () => {
-		vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 502, json: async () => ({}) })))
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => ({ ok: false, status: 502, json: async () => ({}) })),
+		)
 		const scope = effectScope()
 		const result = scope.run(() => useAcceleratorStatus({ autoDetect: false }))!
 		await result.detect()
