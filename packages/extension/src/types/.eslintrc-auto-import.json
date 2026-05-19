@@ -175,6 +175,7 @@
     "useOutside": true,
     "usePasskeyCeremony": true,
     "usePopupStore": true,
+    "useProfileBootstrap": true,
     "useRoute": true,
     "useRouter": true,
     "useSecretCountdown": true,
