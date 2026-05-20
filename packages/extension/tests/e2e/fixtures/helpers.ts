@@ -158,12 +158,26 @@ export async function switchToNetwork(page: Page, networkName: string): Promise<
 	const isRealSwitch = beforeHeader !== networkName
 
 	// Navigate via the header chip → Manage Networks → detail page → set active.
+	// SettingItem rows render as <a> elements whose `href` can be `null`; raw
+	// `.click()` doesn't reliably fire on those, so the row tap uses a synthetic
+	// dispatchEvent (matches openNetworkDetail's contract).
 	await clickByTestId(page, "network-button")
 	const rowSelector = `[data-testid="network-row"][data-network-name="${networkName}"]`
 	await page.waitForSelector(rowSelector, { visible: true, timeout: 5_000 })
-	await clickSelector(page, rowSelector)
+	await page.evaluate((sel: string) => {
+		const row = document.querySelector(sel) as HTMLElement | null
+		row?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+	}, rowSelector)
 	await page.waitForSelector('[data-testid="network-set-active"]', { visible: true, timeout: 5_000 })
 	await clickByTestId(page, "network-set-active")
+	// Return to /popup/general so callers can keep using general-page selectors
+	// (importToken, refreshBalances, gas-balance reads, …). The chip flow took
+	// us from general → settings list → detail; navigate explicitly back rather
+	// than `history.go(-2)`, which is fragile under deep-link bypasses.
+	await page.evaluate(() => {
+		window.location.hash = "/popup/general"
+	})
+	await page.waitForFunction(() => window.location.hash.includes("/popup/general"), { timeout: 5_000 })
 
 	// First: wait for the network-button header to display the target name
 	// exactly. This is the "appStore.network changed" signal.

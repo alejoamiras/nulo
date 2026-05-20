@@ -164,13 +164,17 @@ async function main(): Promise<void> {
 		// Switch to Local Network — match helpers.ts:switchToNetwork. The header
 		// chip now navigates to Manage Networks; the row drills into the per-
 		// network detail page, where "Set as active" performs the switch.
+		// SettingItem renders as <a href=null>; raw `.click()` doesn't reliably
+		// fire, so the row tap uses a synthetic dispatchEvent like the canonical
+		// helper does.
 		await page.waitForSelector('[data-testid="network-button"]', { visible: true, timeout: 10_000 })
 		await page.click('[data-testid="network-button"]')
-		const localRow = await page.waitForSelector('[data-testid="network-row"][data-network-name="Local Network"]', {
-			visible: true,
-			timeout: 5_000,
-		})
-		await localRow!.click()
+		const localRowSel = '[data-testid="network-row"][data-network-name="Local Network"]'
+		await page.waitForSelector(localRowSel, { visible: true, timeout: 5_000 })
+		await page.evaluate((sel: string) => {
+			const row = document.querySelector(sel) as HTMLElement | null
+			row?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+		}, localRowSel)
 		await page.waitForSelector('[data-testid="network-set-active"]', { visible: true, timeout: 5_000 })
 		await page.click('[data-testid="network-set-active"]')
 		console.log("[derivation-parity] switched to Local Network")
