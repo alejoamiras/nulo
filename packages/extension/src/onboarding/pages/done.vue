@@ -24,24 +24,34 @@ async function openWallet() {
 	await appStore.setOnboardingCompleted(true)
 	await clearOnboardingTabTracking()
 
-	// Two paths:
-	//   - If the extension is pinned, chrome.action.openPopup() anchors a
-	//     real toolbar popup to the icon. This is the authentic experience
-	//     the user will get every time after this.
-	//   - If not pinned (the common first-install case), openPopup() either
-	//     no-ops or rejects. Fall back to chrome.windows.create on the LEFT
-	//     side so it's visually distinct from a future toolbar popup.
-	if (isPinned.value) {
-		try {
-			await chrome.action.openPopup()
-			window.close()
-			return
-		} catch {
-			// openPopup can fail in edge cases (no focused window, older
-			// Chrome version, policy restrictions). Fall through.
-		}
+	// Always try chrome.action.openPopup() first — it opens the NATIVE
+	// toolbar action popup, anchored to where Chrome decides (toolbar icon
+	// if pinned, action overflow otherwise). Pinning is a UI hint, NOT an
+	// API precondition (per codex audit + Chrome docs). The previous
+	// implementation incorrectly gated this on isPinned, which made every
+	// unpinned user fall through to the windowed fallback.
+	//
+	// Pass windowId explicitly so Chrome targets the onboarding tab's
+	// window. Without it, the API can reject if the current window isn't
+	// resolvable as the active normal window.
+	try {
+		const currentWindow = await chrome.windows.getCurrent()
+		if (typeof currentWindow.id !== "number") throw new Error("No current Chrome window id")
+		await chrome.action.openPopup({ windowId: currentWindow.id })
+		// Let Chrome finish surfacing the popup before the tab tears down.
+		setTimeout(() => window.close(), 0)
+		return
+	} catch (error) {
+		// Log instead of swallow so we can see WHY this fails in devtools.
+		// Real failure modes documented by Chromium:
+		//   - No active browser window / focused window
+		//   - Extension has no popup on the active tab (e.g. action.disable was called)
+		//   - Browser window has no toolbar (devtools window, etc.)
+		console.error("chrome.action.openPopup failed", error)
 	}
 
+	// Fallback: open a popup-shaped window. Left-positioned, slightly less
+	// tall than the native toolbar popup so it's visually distinct.
 	await chrome.windows.create({
 		url: chrome.runtime.getURL("src/popup/index.html"),
 		type: "popup",
