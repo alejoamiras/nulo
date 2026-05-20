@@ -128,11 +128,13 @@ function goNext() {
 			</div>
 		</Flex>
 
-		<Flex direction="column" align="center" gap="12" :class="$style.continueRow">
-			<!-- Always render Continue at the same Y. Disabled when status
-				isn't active so the user can't bypass the gate, but the
-				button's position never shifts between states. -->
+		<!-- Bottom CTA slot. Conditionally renders Continue OR Skip, but
+			the slot itself reserves a Continue-sized height so the visual
+			position is stable across states. Skip is vertically centered
+			inside the reserved slot. -->
+		<div :class="$style.ctaSlot">
 			<Button
+				v-if="status === 'active'"
 				variant="cta"
 				size="large"
 				:disabled="!isContinueEnabled"
@@ -141,10 +143,8 @@ function goNext() {
 			>
 				Continue
 			</Button>
-			<!-- Skip is a small text affordance below Continue when the
-				bypass is relevant (status settled, but not detected). -->
 			<button
-				v-if="status === 'not-detected' || status === 'no-bb'"
+				v-else-if="status === 'not-detected' || status === 'no-bb'"
 				type="button"
 				:class="$style.skipLink"
 				data-testid="onboarding-accelerator-skip"
@@ -152,7 +152,7 @@ function goNext() {
 			>
 				Skip. Proving will run in your browser.
 			</button>
-		</Flex>
+		</div>
 	</Flex>
 </template>
 
@@ -305,7 +305,15 @@ function goNext() {
 	border: 1px solid var(--nulo-border);
 }
 
-.continueRow {
+.ctaSlot {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	/* Reserve a Continue-sized slot so Skip occupies the same vertical
+	 * footprint as the Continue button would. Prevents the visual mass
+	 * from shifting between active and not-detected states. */
+	min-height: 48px;
 	margin-top: 8px;
 }
 
