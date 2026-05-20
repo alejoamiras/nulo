@@ -23,6 +23,21 @@ export const useAppStore = defineStore("app", () => {
 
 	const displayOption = ref("total_account_value")
 
+	// Onboarding state. True once the user has walked through the full
+	// onboarding tab flow (Create/Import → Aztec primer → Accelerator → Done).
+	// Persisted to chrome.storage.local so popup and onboarding tab agree on
+	// whether to redirect / resume. Cleared on profile reset.
+	const onboardingCompleted = ref<boolean>(false)
+	const ONBOARDING_COMPLETED_KEY = "nulo:onboarding:completed"
+	const loadOnboardingCompleted = async () => {
+		const result = await chrome.storage.local.get(ONBOARDING_COMPLETED_KEY)
+		onboardingCompleted.value = result[ONBOARDING_COMPLETED_KEY] === true
+	}
+	const setOnboardingCompleted = async (value: boolean) => {
+		onboardingCompleted.value = value
+		await chrome.storage.local.set({ [ONBOARDING_COMPLETED_KEY]: value })
+	}
+
 	const profile = ref<ProfileInfo>()
 	const profiles = ref<ProfileInfo[]>([])
 
@@ -172,5 +187,8 @@ export const useAppStore = defineStore("app", () => {
 		isPrivacyModeEnabled,
 		defaultExplorer,
 		loggerWindowId,
+		onboardingCompleted,
+		loadOnboardingCompleted,
+		setOnboardingCompleted,
 	}
 })

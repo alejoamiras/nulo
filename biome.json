@@ -263,6 +263,34 @@
 					}
 				}
 			}
+		},
+		{
+			"includes": ["packages/extension/src/onboarding/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@/popup/pages/*", "@/popup/pages/**"],
+										"message": "onboarding is a peer of popup — cannot import popup pages; promote shared logic to @/components/composite or @/composables"
+									},
+									{
+										"group": ["@/popup/windows/*", "@/popup/windows/**"],
+										"message": "onboarding cannot import popup windows; promote shared logic to @/components/composite"
+									},
+									{
+										"group": ["@/popup/components/modules/*", "@/popup/components/modules/**"],
+										"message": "onboarding cannot import popup L4 modules — promote shared modules to @/components/composite (L3)"
+									}
+								]
+							}
+						}
+					}
+				}
+			}
 		}
 	],
 	"javascript": {

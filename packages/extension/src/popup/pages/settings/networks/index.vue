@@ -29,9 +29,9 @@ const networks = computed(() =>
 
 /**
  * Tapping a row drills into the per-`Network` detail page where rename,
- * endpoints, and delete-chain live. To switch the active chain users go
- * through the header globe → `NetworksPopup`; the list radio is
- * informational only.
+ * endpoints, set-as-active, and delete-chain live. The radio icon on each
+ * row reflects whether the row is the active chain — it is informational;
+ * activation happens on the detail page.
  */
 const handleOpenDetail = (target) => {
 	router.push(`/popup/settings/networks/${target.id}`)

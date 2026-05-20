@@ -21,6 +21,7 @@ declare global {
   const checkNotificationsForShow: typeof import('../composables/notification.js').checkNotificationsForShow
   const checkSentinel: typeof import('../utils/core').checkSentinel
   const clampDecimals: typeof import('../utils/amount').clampDecimals
+  const collectRestoreErrors: typeof import('../utils/full-backup-helpers').collectRestoreErrors
   const comma: typeof import('../utils/amount').comma
   const compressData: typeof import('../utils/files').compressData
   const computeMaxFee: typeof import('../utils/fee-estimation').computeMaxFee
@@ -32,6 +33,7 @@ declare global {
   const decompressData: typeof import('../utils/files').decompressData
   const defineAsyncComponent: typeof import('vue').defineAsyncComponent
   const defineComponent: typeof import('vue').defineComponent
+  const detectBackupType: typeof import('../utils/full-backup-helpers').detectBackupType
   const downloadFile: typeof import('../utils/files').downloadFile
   const effectScope: typeof import('vue').effectScope
   const ensurePermissions: typeof import('../utils/general.js').ensurePermissions
@@ -94,9 +96,11 @@ declare global {
   const provide: typeof import('vue').provide
   const purgeNumber: typeof import('../utils/amount').purgeNumber
   const reactive: typeof import('vue').reactive
+  const readBackupFile: typeof import('../utils/full-backup-helpers').readBackupFile
   const readonly: typeof import('vue').readonly
   const ref: typeof import('vue').ref
   const refreshBalances: typeof import('../utils/core').refreshBalances
+  const remapIdInBackupData: typeof import('../utils/full-backup-helpers').remapIdInBackupData
   const resolveComponent: typeof import('vue').resolveComponent
   const sanitizeString: typeof import('../utils/string').sanitizeString
   const setLastActiveProfileId: typeof import('../utils/lastActiveProfile').setLastActiveProfileId
@@ -112,6 +116,7 @@ declare global {
   const triggerRef: typeof import('vue').triggerRef
   const trimAddress: typeof import('../utils/string').trimAddress
   const unref: typeof import('vue').unref
+  const useAcceleratorStatus: typeof import('../onboarding/composables/useAcceleratorStatus').useAcceleratorStatus
   const useAppStore: typeof import('../stores/app.store').useAppStore
   const useAttrs: typeof import('vue').useAttrs
   const useCacheStore: typeof import('../stores/cache.store').useCacheStore
@@ -124,6 +129,7 @@ declare global {
   const useFeeEstimation: typeof import('../composables/useFeeEstimation').useFeeEstimation
   const useFeeEstimationMap: typeof import('../composables/useFeeEstimationMap').useFeeEstimationMap
   const useFormState: typeof import('../composables/useFormState').useFormState
+  const useFullBackupImport: typeof import('../composables/useFullBackupImport').useFullBackupImport
   const useFullscreenPopupSetting: typeof import('../composables/fullscreenPopupSetting').useFullscreenPopupSetting
   const useId: typeof import('vue').useId
   const useLink: typeof import('vue-router').useLink
@@ -132,6 +138,7 @@ declare global {
   const useOutside: typeof import('../composables/outside.js').useOutside
   const usePasskeyCeremony: typeof import('../composables/usePasskeyCeremony').usePasskeyCeremony
   const usePopupStore: typeof import('../stores/popup.store').usePopupStore
+  const useProfileBootstrap: typeof import('../composables/useProfileBootstrap').useProfileBootstrap
   const useRoute: typeof import('vue-router').useRoute
   const useRouter: typeof import('vue-router').useRouter
   const useSecretCountdown: typeof import('../composables/useSecretCountdown').useSecretCountdown
@@ -140,6 +147,7 @@ declare global {
   const useTemplateRef: typeof import('vue').useTemplateRef
   const useTicker: typeof import('../composables/ticker').useTicker
   const useToast: typeof import('../composables/toast.js').useToast
+  const waitForProfileActive: typeof import('../composables/waitForProfileActive').waitForProfileActive
   const watch: typeof import('vue').watch
   const watchEffect: typeof import('vue').watchEffect
   const watchPostEffect: typeof import('vue').watchPostEffect
@@ -169,8 +177,14 @@ declare global {
   export type { FieldDef, FieldHandle, FormState } from '../composables/useFormState'
   import('../composables/useFormState')
   // @ts-ignore
+  export type { RestoreStatus, UseFullBackupImportOptions, UseFullBackupImportResult } from '../composables/useFullBackupImport'
+  import('../composables/useFullBackupImport')
+  // @ts-ignore
   export type { UseSecretCountdownOptions } from '../composables/useSecretCountdown'
   import('../composables/useSecretCountdown')
+  // @ts-ignore
+  export type { ProfileActivationSubject } from '../composables/waitForProfileActive'
+  import('../composables/waitForProfileActive')
   // @ts-ignore
   export type { NotificationType, NotificationPayload, NotificationItem } from '../stores/notification.store'
   import('../stores/notification.store')
@@ -190,8 +204,14 @@ declare global {
   export type { AssetPricing, FeeEstimate } from '../utils/fee-estimation'
   import('../utils/fee-estimation')
   // @ts-ignore
+  export type { BackupFileType, BackupSelection, ProcessBackupResult } from '../utils/full-backup-helpers'
+  import('../utils/full-backup-helpers')
+  // @ts-ignore
   export type { JournalTerminalVisualState, JournalTerminalDisplay, TokenForCardProps, JournalTerminalCardCtx, JournalTerminalCardProps } from '../utils/journal-state'
   import('../utils/journal-state')
+  // @ts-ignore
+  export type { AcceleratorStatus } from '../onboarding/composables/useAcceleratorStatus'
+  import('../onboarding/composables/useAcceleratorStatus')
 }
 
 // for vue template auto import
@@ -214,6 +234,7 @@ declare module 'vue' {
     readonly checkNotificationsForShow: UnwrapRef<typeof import('../composables/notification.js')['checkNotificationsForShow']>
     readonly checkSentinel: UnwrapRef<typeof import('../utils/core')['checkSentinel']>
     readonly clampDecimals: UnwrapRef<typeof import('../utils/amount')['clampDecimals']>
+    readonly collectRestoreErrors: UnwrapRef<typeof import('../utils/full-backup-helpers')['collectRestoreErrors']>
     readonly comma: UnwrapRef<typeof import('../utils/amount')['comma']>
     readonly compressData: UnwrapRef<typeof import('../utils/files')['compressData']>
     readonly computeMaxFee: UnwrapRef<typeof import('../utils/fee-estimation')['computeMaxFee']>
@@ -225,6 +246,7 @@ declare module 'vue' {
     readonly decompressData: UnwrapRef<typeof import('../utils/files')['decompressData']>
     readonly defineAsyncComponent: UnwrapRef<typeof import('vue')['defineAsyncComponent']>
     readonly defineComponent: UnwrapRef<typeof import('vue')['defineComponent']>
+    readonly detectBackupType: UnwrapRef<typeof import('../utils/full-backup-helpers')['detectBackupType']>
     readonly downloadFile: UnwrapRef<typeof import('../utils/files')['downloadFile']>
     readonly effectScope: UnwrapRef<typeof import('vue')['effectScope']>
     readonly ensurePermissions: UnwrapRef<typeof import('../utils/general.js')['ensurePermissions']>
@@ -287,9 +309,11 @@ declare module 'vue' {
     readonly provide: UnwrapRef<typeof import('vue')['provide']>
     readonly purgeNumber: UnwrapRef<typeof import('../utils/amount')['purgeNumber']>
     readonly reactive: UnwrapRef<typeof import('vue')['reactive']>
+    readonly readBackupFile: UnwrapRef<typeof import('../utils/full-backup-helpers')['readBackupFile']>
     readonly readonly: UnwrapRef<typeof import('vue')['readonly']>
     readonly ref: UnwrapRef<typeof import('vue')['ref']>
     readonly refreshBalances: UnwrapRef<typeof import('../utils/core')['refreshBalances']>
+    readonly remapIdInBackupData: UnwrapRef<typeof import('../utils/full-backup-helpers')['remapIdInBackupData']>
     readonly resolveComponent: UnwrapRef<typeof import('vue')['resolveComponent']>
     readonly sanitizeString: UnwrapRef<typeof import('../utils/string')['sanitizeString']>
     readonly setLastActiveProfileId: UnwrapRef<typeof import('../utils/lastActiveProfile')['setLastActiveProfileId']>
@@ -305,6 +329,7 @@ declare module 'vue' {
     readonly triggerRef: UnwrapRef<typeof import('vue')['triggerRef']>
     readonly trimAddress: UnwrapRef<typeof import('../utils/string')['trimAddress']>
     readonly unref: UnwrapRef<typeof import('vue')['unref']>
+    readonly useAcceleratorStatus: UnwrapRef<typeof import('../onboarding/composables/useAcceleratorStatus')['useAcceleratorStatus']>
     readonly useAppStore: UnwrapRef<typeof import('../stores/app.store')['useAppStore']>
     readonly useAttrs: UnwrapRef<typeof import('vue')['useAttrs']>
     readonly useCacheStore: UnwrapRef<typeof import('../stores/cache.store')['useCacheStore']>
@@ -317,6 +342,7 @@ declare module 'vue' {
     readonly useFeeEstimation: UnwrapRef<typeof import('../composables/useFeeEstimation')['useFeeEstimation']>
     readonly useFeeEstimationMap: UnwrapRef<typeof import('../composables/useFeeEstimationMap')['useFeeEstimationMap']>
     readonly useFormState: UnwrapRef<typeof import('../composables/useFormState')['useFormState']>
+    readonly useFullBackupImport: UnwrapRef<typeof import('../composables/useFullBackupImport')['useFullBackupImport']>
     readonly useFullscreenPopupSetting: UnwrapRef<typeof import('../composables/fullscreenPopupSetting')['useFullscreenPopupSetting']>
     readonly useId: UnwrapRef<typeof import('vue')['useId']>
     readonly useLink: UnwrapRef<typeof import('vue-router')['useLink']>
@@ -325,6 +351,7 @@ declare module 'vue' {
     readonly useOutside: UnwrapRef<typeof import('../composables/outside.js')['useOutside']>
     readonly usePasskeyCeremony: UnwrapRef<typeof import('../composables/usePasskeyCeremony')['usePasskeyCeremony']>
     readonly usePopupStore: UnwrapRef<typeof import('../stores/popup.store')['usePopupStore']>
+    readonly useProfileBootstrap: UnwrapRef<typeof import('../composables/useProfileBootstrap')['useProfileBootstrap']>
     readonly useRoute: UnwrapRef<typeof import('vue-router')['useRoute']>
     readonly useRouter: UnwrapRef<typeof import('vue-router')['useRouter']>
     readonly useSecretCountdown: UnwrapRef<typeof import('../composables/useSecretCountdown')['useSecretCountdown']>
@@ -333,6 +360,7 @@ declare module 'vue' {
     readonly useTemplateRef: UnwrapRef<typeof import('vue')['useTemplateRef']>
     readonly useTicker: UnwrapRef<typeof import('../composables/ticker')['useTicker']>
     readonly useToast: UnwrapRef<typeof import('../composables/toast.js')['useToast']>
+    readonly waitForProfileActive: UnwrapRef<typeof import('../composables/waitForProfileActive')['waitForProfileActive']>
     readonly watch: UnwrapRef<typeof import('vue')['watch']>
     readonly watchEffect: UnwrapRef<typeof import('vue')['watchEffect']>
     readonly watchPostEffect: UnwrapRef<typeof import('vue')['watchPostEffect']>

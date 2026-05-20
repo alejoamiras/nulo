@@ -15,16 +15,22 @@ import { managers, setSentinel } from "@/utils/core"
 /** Utils */
 import { pickFile } from "@/utils"
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
+import { redirectToOnboardingTabIfNeeded } from "@/wallet/utils/onboarding-tab"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
-import { useFullBackupImport } from "@/popup/components/modules/import/useFullBackupImport"
+import { useFullBackupImport } from "@/composables/useFullBackupImport"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
+import { waitForProfileActive } from "@/composables/waitForProfileActive"
+
+/** Stores */
+import { useCacheStore } from "@/stores/cache.store"
+import { usePopupStore } from "@/stores/popup.store"
 
 /** Components */
-import ImportFullBackupForm from "@/popup/components/modules/import/ImportFullBackupForm.vue"
-import ImportMethodPicker from "@/popup/components/modules/import/ImportMethodPicker.vue"
-import ImportSecretForm from "@/popup/components/modules/import/ImportSecretForm.vue"
+import ImportFullBackupForm from "@/components/composite/import/ImportFullBackupForm.vue"
+import ImportMethodPicker from "@/components/composite/import/ImportMethodPicker.vue"
+import ImportSecretForm from "@/components/composite/import/ImportSecretForm.vue"
 import PasskeyCeremonyDialog from "@/popup/components/popups/PasskeyCeremonyDialog.vue"
 
 /** Errors */
@@ -48,6 +54,11 @@ const backTo = computed(() => String(route.query.from || "/popup/register"))
 const wrapperRef = useTemplateRef("wrapperRef")
 const heroVisible = ref(true)
 let scrollEl = null
+
+// First-time install / deep-link bypass: redirect to onboarding tab when
+// no profile exists AND onboarding hasn't been completed. Shared helper at
+// @/wallet/utils/onboarding-tab; same predicate as register + profile/new.
+onBeforeMount(() => redirectToOnboardingTabIfNeeded(appStore))
 
 /** Reactive state */
 const selectedImportOption = ref(null)
@@ -110,29 +121,6 @@ const isAllowedToImportByPublicKey = computed(() => {
 })
 
 /** Handlers */
-/**
- * Resolves once the SW has emitted `onActiveProfileChanged` AND `app.vue`'s
- * handler has finished initializing the new profile (sets `appStore.profile`,
- * flips `isLogined` last). Watches BOTH conditions so the wait still works
- * if the user was already unlocked as a different profile — `isLogined`
- * alone would be a no-op in that case.
- */
-function waitForProfileActive(expectedId, timeoutMs) {
-	return new Promise((resolve, reject) => {
-		if (appStore.isLogined && appStore.profile?.id === expectedId) return resolve()
-		const t = setTimeout(() => {
-			stop()
-			reject(new Error("Profile activation timeout"))
-		}, timeoutMs)
-		const stop = watch([() => appStore.isLogined, () => appStore.profile?.id], ([logged, id]) => {
-			if (logged && id === expectedId) {
-				clearTimeout(t)
-				stop()
-				resolve()
-			}
-		})
-	})
-}
 
 const completeImport = async (profile) => {
 	await setLastActiveProfileId(profile.id)
@@ -143,7 +131,7 @@ const completeImport = async (profile) => {
 		// seed/key import helpers, which also auto-unlock). 30s covers any
 		// reasonable SW init + PXE state load; a longer hang means something
 		// is wedged, so escape to /popup/auth and let the user retry.
-		await waitForProfileActive(profile.id, 30_000)
+		await waitForProfileActive(appStore, profile.id, 30_000)
 		openToast({ label: "Profile imported", icon: "check-circle" })
 		router.push("/popup/general")
 	} catch {
@@ -256,6 +244,13 @@ const {
 	// `profileService.restore` (which requires `credentialData` for
 	// passkey type — no SW-window fallback).
 	runCeremony,
+	// Popup-specific error-log surface: open the data-viewer overlay.
+	showErrorLog: (errors) => {
+		const cacheStore = useCacheStore()
+		const popupStore = usePopupStore()
+		cacheStore.viewerData = errors
+		popupStore.open("data_viewer")
+	},
 })
 
 function clearFormState() {

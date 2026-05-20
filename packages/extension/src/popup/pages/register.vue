@@ -7,11 +7,19 @@
 </route>
 
 <script setup>
+/** Utils */
+import { redirectToOnboardingTabIfNeeded } from "@/wallet/utils/onboarding-tab"
+
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 const appStore = useAppStore()
 
 const router = useRouter()
+
+// First-time install: redirect to the onboarding tab. The popup is too small
+// for the welcome / create / import flow. Delegates to the shared predicate
+// helper so register/import/profile-new stay in lockstep.
+onBeforeMount(() => redirectToOnboardingTabIfNeeded(appStore))
 
 const handleOpen = (target) => {
 	chrome.windows.create({

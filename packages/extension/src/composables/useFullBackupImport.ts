@@ -1,7 +1,5 @@
 import { computed, ref, type Ref } from "vue"
 import { EncryptionKey } from "@nulo/wallet-crypto"
-import { useCacheStore } from "@/stores/cache.store"
-import { usePopupStore } from "@/stores/popup.store"
 import { AccountServiceClient } from "@/wallet/services/account/client"
 import { ACCOUNT_SERVICE_NAME } from "@/wallet/services/account/spec"
 import { AccountStateServiceClient } from "@/wallet/services/account-state/client"
@@ -26,7 +24,7 @@ import { TRANSACTION_SERVICE_NAME } from "@/wallet/services/transaction/spec"
 import { UserRejectedError } from "@nulo/extension-messaging/errors"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import type { PasskeyRequest } from "@/wallet/services/passkey/spec"
-import { type BackupSelection, collectRestoreErrors, readBackupFile, remapIdInBackupData } from "./import-helpers"
+import { type BackupSelection, collectRestoreErrors, readBackupFile, remapIdInBackupData } from "@/utils/full-backup-helpers"
 
 export type RestoreStatus = "" | "progress" | "failed" | "finished" | null | undefined
 
@@ -46,6 +44,13 @@ export interface UseFullBackupImportOptions {
 	 * profile imports don't touch this.
 	 */
 	runCeremony?: (req: PasskeyRequest) => Promise<PasskeyCredentialData>
+	/**
+	 * Shell-specific "show me the import errors" handler. Popup wires this
+	 * to its data-viewer overlay (cacheStore + popupStore). Onboarding wires
+	 * it to a simpler notification. Defaults to console.error so the
+	 * composable stays usable from any shell.
+	 */
+	showErrorLog?: (errors: Record<string, unknown[]>) => void
 }
 
 export interface UseFullBackupImportResult {
@@ -64,9 +69,6 @@ export interface UseFullBackupImportResult {
 }
 
 export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBackupImportResult {
-	const cacheStore = useCacheStore()
-	const popupStore = usePopupStore()
-
 	const selectedBackup = ref<BackupSelection | null>(null)
 	const decryptionPassword = ref("")
 	const restoreStatus = ref<RestoreStatus>("")
@@ -378,8 +380,11 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 
 	function showRestoreErrorLog() {
 		if (!isRestoreHasErrors.value) return
-		cacheStore.viewerData = restoreErrorLog.value
-		popupStore.open("data_viewer")
+		if (opts.showErrorLog) {
+			opts.showErrorLog(restoreErrorLog.value)
+		} else {
+			console.error("Restore errors:", restoreErrorLog.value)
+		}
 	}
 
 	function resetBackupState() {

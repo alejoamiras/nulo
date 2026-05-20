@@ -17,6 +17,7 @@ const cacheStore = useCacheStore()
 const popupStore = usePopupStore()
 
 const route = useRoute()
+const router = useRouter()
 
 const handleLockWallet = () => {
 	if (!appStore.isLogined) return
@@ -143,6 +144,11 @@ const handleOpenPopup = (target) => {
 	popupStore.open(target)
 }
 
+const handleOpenNetworks = () => {
+	if (!appStore.isLogined) return
+	router.push("/popup/settings/networks")
+}
+
 watch(
 	() => indicateFailures.value,
 	() => {
@@ -226,9 +232,9 @@ onBeforeUnmount(() => {
 			<button
 				v-if="appStore.isLogined && appStore.network?.name"
 				type="button"
-				@click="handleOpenPopup('networks')"
+				@click="handleOpenNetworks"
 				data-testid="network-button"
-				:aria-label="`Switch network (currently ${appStore.network.name})`"
+				:aria-label="`Manage networks (currently ${appStore.network.name})`"
 				:class="$style.network_chip"
 			>
 				<span :class="$style.network_label">{{ appStore.network.name }}</span>

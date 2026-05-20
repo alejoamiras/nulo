@@ -1,0 +1,47 @@
+Reject
+
+**1. Architectural concerns**
+- The plan does not currently respect the repo’s L0-L6 model. `CLAUDE.md` defines enforced component layers only under `src/components/**`, `src/popup/components/modules/**`, and `src/popup/pages/**`; your proposed `src/onboarding/components/**` and `src/onboarding/composables/**` sit outside those guardrails, so they’re neither classified nor lint-enforced. See [CLAUDE.md](CLAUDE.md:42) and [biome.json](biome.json:207).
+- The “mirror `src/setup`” assumption is wrong for a service-bound UI. [setup/index.ts](packages/extension/src/setup/index.ts:1) has no Pinia and does not import the global base styles; [popup/index.ts](packages/extension/src/popup/index.ts:19) does both. If onboarding reuses stores, notifications, or existing components, `setup` is too thin a template.
+- The plan’s “minimal Vite change” is incomplete. `vite.config.ts` auto-registers components only from `src/components` and auto-imports composables only from `src/composables` ([vite.config.ts](packages/extension/vite.config.ts:149), [vite.config.ts](packages/extension/vite.config.ts:170)). `src/onboarding/components/StepHeader.vue` and `src/onboarding/composables/useAcceleratorStatus.ts` will not resolve unless you either import them explicitly everywhere or expand Vite config beyond what the plan says.
+- The plan badly understates how much of popup bootstrap it depends on. Current create/import flows rely on popup-level orchestration in [popup/app.vue](packages/extension/src/popup/app.vue:164): `onActiveProfileChanged` initializes networks/accounts, flips `appStore.isLogined`, and routes. `profile/new.vue` literally waits for that state change before continuing ([profile/new.vue](packages/extension/src/popup/pages/profile/new.vue:134)), and `import.vue` waits for profile activation too ([import.vue](packages/extension/src/popup/pages/import.vue:120)). A bare onboarding app with only `<StepHeader>` + `<router-view>` will not reproduce that.
+
+**2. MV3 / Chrome quirks**
+- The `onInstalled` listener is planned in the wrong place. Chrome’s MV3 docs say listeners must be registered synchronously at top level, not after async startup. Your runtime only starts after `logger.rehydrate().then(runtime.start())` in [wallet/index.ts](packages/extension/src/wallet/index.ts:47), so adding the listener inside [runtime.ts](packages/extension/src/wallet/runtime.ts:80) is exactly the pattern Chrome warns can miss events. Docs: [register listeners synchronously](https://developer.chrome.com/docs/extensions/develop/migrate/to-service-workers?hl=en#register-listeners-synchronously), [install order](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle?hl=en#installation).
+- `chrome.action.openPopup()` is not a stable assumption unless you set a Chrome floor. Chrome docs say it is Chrome 127+, and Chrome 118-126 limited it to policy-installed extensions. There is no `minimum_chrome_version` in [manifest.config.ts](packages/extension/manifest/manifest.config.ts:14), so your fallback window is not just defensive; for older Chrome it is the real path. Docs: [action.openPopup](https://developer.chrome.com/docs/extensions/reference/api/action#method-openPopup).
+- `storage.session` lifecycle is mis-modeled as a durable singleton-tab tracker. Chrome says it is cleared on reload, update, disable, and browser restart. That means a restored onboarding tab can outlive the key, and the next popup click will open a second tab. Docs: [storage.session](https://developer.chrome.com/docs/extensions/reference/api/storage#property-session).
+- The plan’s own code sample is racy. Section 13 expects a module-level promise lock, but section 6’s `openOrFocusOnboardingTab()` sample does not implement one. `onInstalled` + popup trampoline can still double-open.
+- Your route examples are inconsistent. With `baseRoute: "onboarding"`, the URL should be `#/onboarding/welcome`, not `#/welcome`. The plan uses both forms in `/tmp/onboarding-plan-v1.md` ([line 45](/tmp/onboarding-plan-v1.md:45), [line 144](/tmp/onboarding-plan-v1.md:144), [line 223](/tmp/onboarding-plan-v1.md:223)).
+
+**3. Security**
+- Section 10 is wrong on permissions. Chrome docs say extension pages may fetch cross-origin only if the extension has matching `host_permissions`; CORS is not enough. So `fetch("http://127.0.0.1:59833/health")` needs a manifest change, likely `http://127.0.0.1/*`, which the plan explicitly says is unnecessary. Docs: [cross-origin requests](https://developer.chrome.com/docs/extensions/develop/concepts/network-requests?hl=en), [host permissions](https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions?hl=en#host_permissions).
+- The CSP claim is also wrong. Chrome’s default/minimum extension-page CSP is about `script-src`/`object-src`; it does not document a free `connect-src: *`. See [CSP docs](https://developer.chrome.com/docs/extensions/reference/manifest/content-security-policy).
+- Passkey from a tab context itself is probably fine, but the plan omits the actual ceremony host. `usePasskeyCeremony()` only stages a pending request ([usePasskeyCeremony.ts](packages/extension/src/composables/usePasskeyCeremony.ts:36)); the real `navigator.credentials.*` call lives in [PasskeyCeremonyDialog.vue](packages/extension/src/popup/components/popups/PasskeyCeremonyDialog.vue:54), which teleports to `#popup` ([line 82](packages/extension/src/popup/components/popups/PasskeyCeremonyDialog.vue:82)). Your onboarding shell does not create that target.
+- Sensitive inputs are not explicitly cleared on unmount in the code you want to reuse. [profile/new.vue](packages/extension/src/popup/pages/profile/new.vue:176) and [import.vue](packages/extension/src/popup/pages/import.vue:307) only remove listeners.
+
+**4. Test coverage**
+- The real E2E scope is much larger than “~5 files”. The shared fixture registers via `/popup/register` in [fixtures/extension.ts](packages/extension/tests/e2e/fixtures/extension.ts:86). Fresh-install/import/passkey assumptions also exist in [registration.test.ts](packages/extension/tests/e2e/registration.test.ts:4), [import-paths.test.ts](packages/extension/tests/e2e/import-paths.test.ts:42), [passkey-paths.test.ts](packages/extension/tests/e2e/passkey-paths.test.ts:35), [passkey-backup.test.ts](packages/extension/tests/e2e/passkey-backup.test.ts:31), [security-reset.test.ts](packages/extension/tests/e2e/security-reset.test.ts:5), [auth-flows.test.ts](packages/extension/tests/e2e/auth-flows.test.ts:82), and [check-derivation-parity.ts](packages/extension/tests/e2e/scripts/check-derivation-parity.ts:104).
+- “No new network tests required” is too optimistic. The scenarios may stay the same, but the network suite’s fixtures still depend on that shared registration helper.
+- The install-open-tab smoke test needs a custom launch path. [launchExtension()](packages/extension/tests/e2e/fixtures/extension.ts:16) already opens the popup HTML to wait for liveness, so you can’t treat “browser loaded extension” as a pristine post-install observable.
+
+**5. UX copy quality**
+- “Privacy isn’t free” is off-brand. It sounds editorial, not “cold but hand-holding”. Use: `Proofs take time. In the browser, a simple transfer can take 10–30 seconds.`
+- “Make it fast” and “free native app” are too marketing-heavy. Better: `Speed up proving` and `Aztec Accelerator runs proving outside the browser, on this device.`
+- “Aztec transactions are now waiting for you” is awkward. Better: `Your wallet is ready.`
+- The Windows CTA should not imply a real download path if there is no Windows binary.
+
+**6. Missing workflows**
+- The plan violates a locked decision: the accelerator step is supposed to require Detect or Skip, but your composable auto-detects on mount and the Learn screen has a “Skip intro” link that jumps straight to `/done`, bypassing accelerator entirely.
+- The education/accelerator steps are not actually enforced. Once step 2 creates a profile, closing the tab or opening the popup bypasses the rest forever because the redirect key is `profiles.length === 0`, not “onboarding complete”.
+- Fresh `/popup/import` is unresolved. [popup/index.ts](packages/extension/src/popup/index.ts:78) explicitly allows that route with no profile, while the plan says `import.vue` is unchanged.
+- The passkey retry-on-id-conflict path is missing from the plan even though current code implements it ([profile/new.vue](packages/extension/src/popup/pages/profile/new.vue:74), [profile/service.ts](packages/extension/src/wallet/services/profile/service.ts:225)).
+
+**7. Risks before implementation**
+- The most important risks are understated or absent: wrong `onInstalled` registration timing, missing localhost host permission, missing onboarding shell bootstrap, and broken post-create/import state orchestration.
+- The `storage.session` quota risk is noise; the real issue is lifecycle and race behavior.
+- The `no-bb` risk is misframed. Your own notes imply the fix is “open the app and let it install bb”, but the planned action is “Open Releases”.
+
+**What looks fine**
+- Not adding `web_accessible_resources` for the onboarding tab is correct.
+- Reusing `chrome.tabs.create/update` without the `"tabs"` permission is fine; Chrome docs explicitly say most tab-manipulation features do not require it.
+- Reusing the existing `ProfileServiceClient` / passkey helper from an extension tab is reasonable once the onboarding entry reproduces the popup shell pieces it actually depends on.

@@ -128,13 +128,11 @@ export async function navigateToSettings(page: Page, ...segments: string[]): Pro
 
 // ── Network ────────────────────────────────────────────────────────────
 
-/** Open the NetworksPopup by clicking the globe icon in the header. */
-export async function openNetworkPopup(page: Page): Promise<void> {
-	await clickByTestId(page, "network-button")
-	await page.waitForSelector('[data-testid="networks-popup"]', { visible: true, timeout: 5_000 })
-}
-
-/** Switch to a network by name (opens NetworksPopup, clicks the network). */
+/**
+ * Switch to a network by name. The header chip now routes to the Manage
+ * Networks settings page; from there we drill into the network's detail
+ * page and tap "Set as active".
+ */
 export async function switchToNetwork(page: Page, networkName: string): Promise<void> {
 	// Snapshot the BEFORE state. The header text identifies the chain the
 	// popup is currently on; the activeAccount key identifies the address
@@ -159,15 +157,27 @@ export async function switchToNetwork(page: Page, networkName: string): Promise<
 	// so an exact match against the rendered header is the precise contract.
 	const isRealSwitch = beforeHeader !== networkName
 
-	await openNetworkPopup(page)
-	const selector = `[data-testid="network-item"][data-network-name="${networkName}"]`
-	await page.waitForSelector(selector, { visible: true, timeout: 5_000 })
-	await clickSelector(page, selector)
-	// Force-close the popup. Vue's <Transition> can stick mid-leave under
-	// headless rAF throttling — the popup stays mounted indefinitely even
-	// after popupStore says it's closed. closeStuckPopup nukes the teleport
-	// children so the next interaction sees a clean DOM.
-	await closeStuckPopup(page)
+	// Navigate via the header chip → Manage Networks → detail page → set active.
+	// SettingItem rows render as <a> elements whose `href` can be `null`; raw
+	// `.click()` doesn't reliably fire on those, so the row tap uses a synthetic
+	// dispatchEvent (matches openNetworkDetail's contract).
+	await clickByTestId(page, "network-button")
+	const rowSelector = `[data-testid="network-row"][data-network-name="${networkName}"]`
+	await page.waitForSelector(rowSelector, { visible: true, timeout: 5_000 })
+	await page.evaluate((sel: string) => {
+		const row = document.querySelector(sel) as HTMLElement | null
+		row?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+	}, rowSelector)
+	await page.waitForSelector('[data-testid="network-set-active"]', { visible: true, timeout: 5_000 })
+	await clickByTestId(page, "network-set-active")
+	// Return to /popup/general so callers can keep using general-page selectors
+	// (importToken, refreshBalances, gas-balance reads, …). The chip flow took
+	// us from general → settings list → detail; navigate explicitly back rather
+	// than `history.go(-2)`, which is fragile under deep-link bypasses.
+	await page.evaluate(() => {
+		window.location.hash = "/popup/general"
+	})
+	await page.waitForFunction(() => window.location.hash.includes("/popup/general"), { timeout: 5_000 })
 
 	// First: wait for the network-button header to display the target name
 	// exactly. This is the "appStore.network changed" signal.

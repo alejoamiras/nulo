@@ -17,7 +17,7 @@ export default {
 	version: `${major}.${minor}.${patch}.${label}`,
 	version_name: version,
 	manifest_version: 3,
-	host_permissions: ["https://nulo.sh/"],
+	host_permissions: ["https://nulo.sh/", "http://127.0.0.1/*"],
 	action: {
 		default_popup: "src/popup/index.html#/popup/general",
 	},

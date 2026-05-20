@@ -95,4 +95,25 @@ describe("ui/ToastManager", () => {
 		await flushPromises()
 		expect(toastRoot.textContent).not.toContain("Timed out")
 	})
+
+	test("rapid second openToast resets the timer; the first timeout does not kill the second toast early", async () => {
+		mountToastManager()
+		const { openToast } = useToast()
+		// First toast, 1500ms timer.
+		openToast({ label: "First" }, 1500)
+		await flushPromises()
+		// 1000ms later, a second toast lands with a longer 2000ms timer.
+		vi.advanceTimersByTime(1000)
+		openToast({ label: "Second" }, 2000)
+		await flushPromises()
+		// The first timer (originally due at +1500ms) must have been cancelled.
+		// At +1500ms total, the second toast is still visible.
+		vi.advanceTimersByTime(500)
+		await flushPromises()
+		expect(toastRoot.textContent).toContain("Second")
+		// Then the second toast's own 2000ms timer fires — total 3000ms.
+		vi.advanceTimersByTime(1500)
+		await flushPromises()
+		expect(toastRoot.textContent).not.toContain("Second")
+	})
 })

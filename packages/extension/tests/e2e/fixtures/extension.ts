@@ -78,9 +78,60 @@ export async function launchExtension(): Promise<ExtensionContext> {
 		},
 		{ timeout: 30_000, polling: 500 },
 	)
+
+	// Default: bypass the new onboarding tab flow for all e2e tests. Existing
+	// tests (registration, import-paths, passkey-paths, etc.) drive the
+	// popup-based create/import flows directly via openPopup. Setting
+	// onboardingCompleted=true makes popup/pages/register.vue + import.vue
+	// skip their redirect-to-tab logic. Tests that specifically exercise the
+	// onboarding tab flow (tests/e2e/onboarding-tab.test.ts) reset this flag
+	// in their own setup before driving the tab.
+	await blankPage.evaluate(async () => {
+		await chrome.storage.local.set({ "nulo:onboarding:completed": true })
+	})
+
 	await blankPage.goto("about:blank")
 
 	return { browser, extensionId, consoleErrors: [], pageErrors: [] }
+}
+
+/** Open the onboarding tab directly. Use in tests that exercise the tab
+ *  flow; complementary to `openPopup` which targets the popup HTML.
+ *  Clears the `onboardingCompleted` flag first so the redirect predicates
+ *  in register/import/profile-new behave as they would on a fresh install. */
+export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
+	// Reset onboardingCompleted=false so the onboarding flow runs as on
+	// fresh install (launchExtension seeded it to true by default).
+	const setupPage = await ctx.browser.newPage()
+	patchPagePolling(setupPage)
+	await setupPage.goto(`chrome-extension://${ctx.extensionId}/src/popup/index.html`, { waitUntil: "domcontentloaded" })
+	await setupPage.evaluate(async () => {
+		await chrome.storage.local.set({ "nulo:onboarding:completed": false })
+	})
+	await setupPage.close()
+
+	const page = await ctx.browser.newPage()
+	patchPagePolling(page)
+	await page.setViewport({ width: 720, height: 900 })
+	await page.bringToFront()
+
+	ctx.consoleErrors = []
+	ctx.pageErrors = []
+
+	page.on("console", (msg: ConsoleMessage) => {
+		if (msg.type() === "error") {
+			ctx.consoleErrors.push(msg.text())
+		}
+	})
+	page.on("pageerror", (err: Error) => {
+		ctx.pageErrors.push(err)
+	})
+
+	const url = `chrome-extension://${ctx.extensionId}/src/onboarding/index.html#/onboarding/welcome`
+	await page.goto(url, { waitUntil: "domcontentloaded" })
+	// Wait for Vue mount: welcome CTA must render.
+	await page.waitForSelector('[data-testid="onboarding-welcome-create"]', { visible: true, timeout: 15_000 })
+	return page
 }
 
 /** Register a profile with a test password. Leaves the extension on #/popup/general. */

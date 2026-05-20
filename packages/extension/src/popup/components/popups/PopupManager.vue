@@ -12,7 +12,6 @@ import EditNetworkPopup from "./EditNetworkPopup.vue"
 import EditProfilePopup from "./EditProfilePopup.vue"
 import ForgotPasswordPopup from "./ForgotPasswordPopup.vue"
 import ImportContactsPopup from "./ImportContactsPopup.vue"
-import NetworksPopup from "./NetworksPopup.vue"
 import NewAccountPopup from "./NewAccountPopup.vue"
 import NewContactPopup from "./NewContactPopup.vue"
 import NewFpcPopup from "./NewFpcPopup.vue"
@@ -43,7 +42,6 @@ const popupStore = usePopupStore()
 	<EditProfilePopup :show="popupStore.isOpened('edit_profile')" @onClose="popupStore.close('edit_profile')" />
 	<SelectProfilePopup :show="popupStore.isOpened('select_profile')" @onClose="popupStore.close('select_profile')" />
 
-	<NetworksPopup :show="popupStore.isOpened('networks')" @onClose="popupStore.close('networks')" />
 	<NewNetworkPopup :show="popupStore.isOpened('new_network')" @onClose="popupStore.close('new_network')" />
 	<EditNetworkPopup :show="popupStore.isOpened('edit_network')" @onClose="popupStore.close('edit_network')" />
 	<NewEndpointPopup :show="popupStore.isOpened('new_endpoint')" @onClose="popupStore.close('new_endpoint')" />
