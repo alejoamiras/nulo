@@ -14,6 +14,7 @@ import { useToast } from "@/composables/toast"
 import { useFullBackupImport } from "@/composables/useFullBackupImport"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
+import { waitForProfileActive } from "@/composables/waitForProfileActive"
 
 /** Services */
 import { managers, setSentinel } from "@/utils/core"
@@ -34,10 +35,7 @@ const notificationStore = useNotificationStore()
 const { bootstrapActiveProfile } = useProfileBootstrap()
 
 const selectedImportOption = ref<string | null>(null)
-// Prefill the wallet-name field so the passkey discovery path (which has no
-// secret to fill in) can't fail validation on a blank name — and so users
-// generally never see an "enter a name" error. Mirrors popup/pages/import.vue.
-const profileName = ref("My Wallet")
+const profileName = ref("")
 const seedPhrase = ref<string | undefined>(undefined)
 const privateKey = ref<string | undefined>(undefined)
 const publicKey = ref<string | undefined>(undefined)
@@ -45,6 +43,47 @@ const password = ref("")
 const repeatedPassword = ref("")
 const maxPasswordLength = 128
 const isImporting = ref(false)
+
+// Wallet name is required across every import path (including passkey
+// discovery, which has no other visible field to anchor the error). Validated
+// at submit time so an empty name shakes the input + shows inline error
+// instead of silently disabling the button.
+const nameError = ref("")
+const shakeName = ref(false)
+const nameInputRef = ref<{ focus: () => void } | null>(null)
+let shakeTimer: ReturnType<typeof setTimeout> | null = null
+
+function triggerNameShake() {
+	shakeName.value = false
+	if (shakeTimer) clearTimeout(shakeTimer)
+	requestAnimationFrame(() => {
+		shakeName.value = true
+		shakeTimer = setTimeout(() => {
+			shakeName.value = false
+		}, 400)
+	})
+}
+
+function validateName(): boolean {
+	const n = trimmedName.value
+	if (n.length < 1) {
+		nameError.value = "Wallet name is required."
+		triggerNameShake()
+		nameInputRef.value?.focus()
+		return false
+	}
+	if (n.length > 32) {
+		nameError.value = "Max 32 characters."
+		triggerNameShake()
+		return false
+	}
+	nameError.value = ""
+	return true
+}
+
+function handleNameInput() {
+	if (nameError.value) nameError.value = ""
+}
 
 const error = ref({ type: "", title: "", tooltip: "" })
 function fillError(errType?: string, title?: string, tooltip?: string) {
@@ -76,13 +115,9 @@ function handleSecretInput() {
 
 const trimmedName = computed(() => profileName.value.trim())
 
-const isNameValid = computed(() => {
-	const n = trimmedName.value
-	return n.length >= 1 && n.length <= 32
-})
-
+// Excludes the name check on purpose — name is validated at submit time so
+// an empty name shakes instead of leaving the import buttons silently disabled.
 const isAllowedToContinue = computed(() => {
-	if (!isNameValid.value) return false
 	if (!password.value || password.value.length < 8) return false
 	if (selectedImportOption.value !== "public_key" && (!repeatedPassword.value || password.value !== repeatedPassword.value)) return false
 	return true
@@ -100,29 +135,12 @@ const isAllowedToImportByPublicKey = computed(() => {
 	return !!publicKey.value
 })
 
-function waitForProfileActive(expectedId: string, timeoutMs: number) {
-	return new Promise<void>((resolve, reject) => {
-		if (appStore.isLogined && appStore.profile?.id === expectedId) return resolve()
-		const t = setTimeout(() => {
-			stop()
-			reject(new Error("Profile activation timeout"))
-		}, timeoutMs)
-		const stop = watch([() => appStore.isLogined, () => appStore.profile?.id], ([logged, id]) => {
-			if (logged && id === expectedId) {
-				clearTimeout(t)
-				stop()
-				resolve()
-			}
-		})
-	})
-}
-
 async function completeImport(profile: unknown) {
 	const p = profile as { id: string }
 	await setLastActiveProfileId(p.id)
 	await setSentinel()
 	try {
-		await waitForProfileActive(p.id, 30_000)
+		await waitForProfileActive(appStore, p.id, 30_000)
 		openToast({ label: "Profile imported", icon: "check-circle" })
 		router.push("/onboarding/learn")
 	} catch {
@@ -133,6 +151,7 @@ async function completeImport(profile: unknown) {
 
 const handleImportSeed = async () => {
 	if (!isAllowedToImportBySeedPhrase.value || isImporting.value) return
+	if (!validateName()) return
 	isImporting.value = true
 	try {
 		const seedArr = (seedPhrase.value ?? "").split(" ")
@@ -148,6 +167,7 @@ const handleImportSeed = async () => {
 
 const handleImportPrivateKey = async () => {
 	if (!isAllowedToImportByPrivateKey.value || isImporting.value) return
+	if (!validateName()) return
 	isImporting.value = true
 	try {
 		const profile = await managers.profile.importPlain(trimmedName.value, privateKey.value as string, password.value)
@@ -166,6 +186,7 @@ const handleImportPrivateKey = async () => {
 
 const handleImportPublicKey = async () => {
 	if (!isAllowedToImportByPublicKey.value || isImporting.value) return
+	if (!validateName()) return
 	isImporting.value = true
 	try {
 		const profile = await managers.profile.importEncrypted(trimmedName.value, publicKey.value as string, password.value)
@@ -187,21 +208,7 @@ const handleImportPublicKey = async () => {
 const { request: ceremonyRequest, runCeremony, onResolve: onCeremonyResolve, onReject: onCeremonyReject } = usePasskeyCeremony()
 
 const handleImportPasskey = async () => {
-	if (!isNameValid.value) {
-		fillError("name", "Wallet name required", "Enter a name before importing.")
-		// Surface the error inline AND as a notification — passkey path has
-		// no other visible field to anchor the error message.
-		notificationStore.create({
-			type: "warning",
-			payload: {
-				title: "Wallet name required",
-				description: "Enter a name above before importing with a passkey.",
-				confirmText: "OK",
-				onConfirm: () => {},
-			},
-		})
-		return
-	}
+	if (!validateName()) return
 	try {
 		const credData = await runCeremony({ mode: "get" })
 		const profile = await managers.profile.importPasskey(trimmedName.value, credData)
@@ -275,6 +282,7 @@ function clearFormState() {
 const handleBack = () => clearFormState()
 
 onBeforeUnmount(() => {
+	if (shakeTimer) clearTimeout(shakeTimer)
 	password.value = ""
 	repeatedPassword.value = ""
 	seedPhrase.value = undefined
@@ -296,26 +304,28 @@ onBeforeUnmount(() => {
 		</button>
 		<StepIndicator :current="1" />
 		<header :class="$style.hero">
-			<h1 :class="$style.title_stack">
-				<span :class="$style.title_main">Import</span>
-				<span :class="$style.title_sub">Wallet</span>
-			</h1>
+			<BrutalistTitle main="Import" sub="Wallet" />
 			<div :class="$style.hero_bar" />
 			<Text size="14" color="secondary" height="150">Restore from a seed, key, or backup.</Text>
 		</header>
 
 		<Flex direction="column" gap="8">
 			<Text size="11" weight="700" color="secondary" :class="$style.section_label">Wallet name</Text>
-			<Input
-				v-model="profileName"
-				type="text"
-				placeholder="My Wallet"
-				:maxLength="32"
-				:error="error.type === 'name'"
-				data-testid="onboarding-name-input"
-			/>
-			<Text v-if="error.type === 'name'" size="12" color="red" role="alert">
-				{{ error.title }}{{ error.tooltip ? `. ${error.tooltip}` : "" }}
+			<div :class="[shakeName && $style.shake]">
+				<Input
+					ref="nameInputRef"
+					v-model="profileName"
+					type="text"
+					placeholder="My Wallet"
+					:maxLength="32"
+					:error="!!nameError"
+					:ariaInvalid="!!nameError"
+					data-testid="onboarding-name-input"
+					@input="handleNameInput"
+				/>
+			</div>
+			<Text v-if="nameError" size="12" color="red" height="150" role="alert">
+				{{ nameError }}
 			</Text>
 		</Flex>
 
@@ -489,32 +499,6 @@ onBeforeUnmount(() => {
 	gap: 12px;
 }
 
-.title_stack {
-	display: flex;
-	flex-direction: column;
-	line-height: 0.95;
-	margin: 0;
-	font-weight: 700;
-}
-
-.title_main {
-	font-family: var(--font-headline);
-	font-size: 48px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-accent);
-}
-
-.title_sub {
-	font-family: var(--font-headline);
-	font-size: 48px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-}
-
 .hero_bar {
 	width: 40px;
 	height: 2px;
@@ -529,5 +513,18 @@ onBeforeUnmount(() => {
 
 .ctas {
 	margin-top: 8px;
+}
+
+@keyframes shakeInput {
+	0% { transform: translateX(0); }
+	20% { transform: translateX(-4px); }
+	40% { transform: translateX(4px); }
+	60% { transform: translateX(-3px); }
+	80% { transform: translateX(2px); }
+	100% { transform: translateX(0); }
+}
+
+.shake {
+	animation: shakeInput 0.4s ease;
 }
 </style>

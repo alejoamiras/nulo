@@ -15,11 +15,13 @@ import { managers, setSentinel } from "@/utils/core"
 /** Utils */
 import { pickFile } from "@/utils"
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
+import { redirectToOnboardingTabIfNeeded } from "@/wallet/utils/onboarding-tab"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
 import { useFullBackupImport } from "@/composables/useFullBackupImport"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
+import { waitForProfileActive } from "@/composables/waitForProfileActive"
 
 /** Stores */
 import { useCacheStore } from "@/stores/cache.store"
@@ -54,16 +56,9 @@ const heroVisible = ref(true)
 let scrollEl = null
 
 // First-time install / deep-link bypass: redirect to onboarding tab when
-// no profile exists AND onboarding hasn't been completed. Add-another-
-// profile case (profiles.length > 0) keeps using the popup flow normally.
-onBeforeMount(async () => {
-	await appStore.loadOnboardingCompleted()
-	if (appStore.onboardingCompleted) return
-	if (appStore.profiles.length > 0) return
-	const { openOrFocusOnboardingTab } = await import("@/wallet/utils/onboarding-tab")
-	await openOrFocusOnboardingTab()
-	window.close()
-})
+// no profile exists AND onboarding hasn't been completed. Shared helper at
+// @/wallet/utils/onboarding-tab; same predicate as register + profile/new.
+onBeforeMount(() => redirectToOnboardingTabIfNeeded(appStore))
 
 /** Reactive state */
 const selectedImportOption = ref(null)
@@ -126,29 +121,6 @@ const isAllowedToImportByPublicKey = computed(() => {
 })
 
 /** Handlers */
-/**
- * Resolves once the SW has emitted `onActiveProfileChanged` AND `app.vue`'s
- * handler has finished initializing the new profile (sets `appStore.profile`,
- * flips `isLogined` last). Watches BOTH conditions so the wait still works
- * if the user was already unlocked as a different profile — `isLogined`
- * alone would be a no-op in that case.
- */
-function waitForProfileActive(expectedId, timeoutMs) {
-	return new Promise((resolve, reject) => {
-		if (appStore.isLogined && appStore.profile?.id === expectedId) return resolve()
-		const t = setTimeout(() => {
-			stop()
-			reject(new Error("Profile activation timeout"))
-		}, timeoutMs)
-		const stop = watch([() => appStore.isLogined, () => appStore.profile?.id], ([logged, id]) => {
-			if (logged && id === expectedId) {
-				clearTimeout(t)
-				stop()
-				resolve()
-			}
-		})
-	})
-}
 
 const completeImport = async (profile) => {
 	await setLastActiveProfileId(profile.id)
@@ -159,7 +131,7 @@ const completeImport = async (profile) => {
 		// seed/key import helpers, which also auto-unlock). 30s covers any
 		// reasonable SW init + PXE state load; a longer hang means something
 		// is wedged, so escape to /popup/auth and let the user retry.
-		await waitForProfileActive(profile.id, 30_000)
+		await waitForProfileActive(appStore, profile.id, 30_000)
 		openToast({ label: "Profile imported", icon: "check-circle" })
 		router.push("/popup/general")
 	} catch {

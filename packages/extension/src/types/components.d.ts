@@ -15,6 +15,7 @@ declare module 'vue' {
     AmountCard: typeof import('./../components/composite/send/AmountCard.vue')['default']
     Badge: typeof import('./../components/ui/Badge.vue')['default']
     Banner: typeof import('./../components/ui/Banner.vue')['default']
+    BrutalistTitle: typeof import('./../components/ui/BrutalistTitle.vue')['default']
     Button: typeof import('./../components/ui/Button.vue')['default']
     CapabilityDetailPanel: typeof import('./../components/composite/capabilities/CapabilityDetailPanel.vue')['default']
     Checkbox: typeof import('./../components/ui/Checkbox.vue')['default']

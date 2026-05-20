@@ -21,10 +21,7 @@ const handleOpen = (target: "terms" | "privacy") => {
 <template>
 	<Flex direction="column" align="center" :class="$style.page">
 		<Flex direction="column" align="center" gap="16" :class="$style.hero">
-			<h1 :class="$style.title_stack">
-				<span :class="$style.title_main">Welcome</span>
-				<span :class="$style.title_sub">to Nulo</span>
-			</h1>
+			<BrutalistTitle main="Welcome" sub="to Nulo" align="center" size="hero" />
 			<div :class="$style.hero_bar" />
 			<Text size="15" color="secondary" height="150" align="center" :class="$style.subhead">
 				Access the internet-native coordination layer.
@@ -75,34 +72,6 @@ const handleOpen = (target: "terms" | "privacy") => {
 
 .hero {
 	padding: 24px 0;
-}
-
-.title_stack {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	line-height: 0.95;
-	gap: 4px;
-	margin: 0;
-	font-weight: 700;
-}
-
-.title_main {
-	font-family: var(--font-headline);
-	font-size: 56px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-accent);
-}
-
-.title_sub {
-	font-family: var(--font-headline);
-	font-size: 56px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
 }
 
 .hero_bar {

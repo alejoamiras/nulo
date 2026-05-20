@@ -57,3 +57,33 @@ export function openOrFocusOnboardingTab(): Promise<void> {
 export async function clearOnboardingTabTracking(): Promise<void> {
 	await chrome.storage.session.remove(TAB_ID_KEY)
 }
+
+/**
+ * Minimal structural shape of the app store needed by the redirect
+ * predicate. Keeps the helper decoupled from the full `appStore` type
+ * (which churns independently).
+ */
+export interface OnboardingRedirectSubject {
+	onboardingCompleted: boolean
+	profiles: readonly unknown[]
+	loadOnboardingCompleted: () => Promise<void>
+}
+
+/**
+ * Predicate + side effect shared by the three popup pages that can be
+ * deep-linked on a fresh install (register, import, profile/new). When
+ * onboarding hasn't completed AND no profile exists yet, opens or
+ * refocuses the onboarding tab and closes the popup. Returns true when
+ * the redirect fired, false on no-op.
+ *
+ * Callers keep the `onBeforeMount` hook visible at the call site —
+ * extracting only the predicate, not the lifecycle binding.
+ */
+export async function redirectToOnboardingTabIfNeeded(store: OnboardingRedirectSubject): Promise<boolean> {
+	await store.loadOnboardingCompleted()
+	if (store.onboardingCompleted) return false
+	if (store.profiles.length > 0) return false
+	await openOrFocusOnboardingTab()
+	window.close()
+	return true
+}

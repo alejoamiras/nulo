@@ -70,10 +70,7 @@ function goNext() {
 	<Flex direction="column" gap="32" :class="$style.page">
 		<StepIndicator :current="3" />
 		<Flex direction="column" gap="16" :class="$style.hero">
-			<h1 :class="$style.title_stack">
-				<span :class="$style.title_main">Speed up</span>
-				<span :class="$style.title_sub">Proving</span>
-			</h1>
+			<BrutalistTitle main="Speed up" sub="Proving" />
 			<div :class="$style.hero_bar" />
 			<Text size="14" color="secondary" height="150">
 				A free menu-bar app that proves transactions natively, using every CPU core
@@ -169,32 +166,6 @@ function goNext() {
 
 .hero {
 	padding: 8px 0;
-}
-
-.title_stack {
-	display: flex;
-	flex-direction: column;
-	line-height: 0.95;
-	margin: 0;
-	font-weight: 700;
-}
-
-.title_main {
-	font-family: var(--font-headline);
-	font-size: 48px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-accent);
-}
-
-.title_sub {
-	font-family: var(--font-headline);
-	font-size: 48px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
 }
 
 .hero_bar {

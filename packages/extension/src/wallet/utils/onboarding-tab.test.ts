@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
-import { clearOnboardingTabTracking, openOrFocusOnboardingTab } from "./onboarding-tab"
+import { clearOnboardingTabTracking, openOrFocusOnboardingTab, redirectToOnboardingTabIfNeeded } from "./onboarding-tab"
 
 const TAB_ID_KEY = "nulo:onboarding:tab-id"
 
@@ -120,5 +120,71 @@ describe("openOrFocusOnboardingTab", () => {
 		await clearOnboardingTabTracking()
 
 		expect(chrome.storage.session.remove).toHaveBeenCalledWith(TAB_ID_KEY)
+	})
+})
+
+describe("redirectToOnboardingTabIfNeeded", () => {
+	function makeStore(overrides: { completed?: boolean; profilesLength?: number } = {}) {
+		const store = {
+			onboardingCompleted: overrides.completed ?? false,
+			profiles: Array.from({ length: overrides.profilesLength ?? 0 }, () => ({})) as readonly unknown[],
+			loadOnboardingCompleted: vi.fn(async () => undefined),
+		}
+		return store
+	}
+
+	test("no-op when onboarding is completed", async () => {
+		stubChrome({})
+		vi.stubGlobal("window", { close: vi.fn() })
+		const store = makeStore({ completed: true })
+		const redirected = await redirectToOnboardingTabIfNeeded(store)
+		expect(redirected).toBe(false)
+		expect(store.loadOnboardingCompleted).toHaveBeenCalledTimes(1)
+		expect(chrome.tabs.create).not.toHaveBeenCalled()
+		expect(window.close as ReturnType<typeof vi.fn>).not.toHaveBeenCalled()
+	})
+
+	test("no-op when profiles already exist", async () => {
+		stubChrome({})
+		vi.stubGlobal("window", { close: vi.fn() })
+		const store = makeStore({ completed: false, profilesLength: 1 })
+		const redirected = await redirectToOnboardingTabIfNeeded(store)
+		expect(redirected).toBe(false)
+		expect(chrome.tabs.create).not.toHaveBeenCalled()
+	})
+
+	test("opens tab + closes window when no profile and not onboarded", async () => {
+		stubChrome({ sessionGet: async () => ({}), tabsCreate: async () => ({ id: 42 }) })
+		const closeMock = vi.fn()
+		vi.stubGlobal("window", { close: closeMock })
+		const store = makeStore({ completed: false, profilesLength: 0 })
+		const redirected = await redirectToOnboardingTabIfNeeded(store)
+		expect(redirected).toBe(true)
+		expect(chrome.tabs.create).toHaveBeenCalled()
+		expect(closeMock).toHaveBeenCalled()
+	})
+
+	test("loadOnboardingCompleted is awaited before predicate check", async () => {
+		let resolveLoad: () => void = () => {}
+		const loadPromise = new Promise<void>((res) => {
+			resolveLoad = res
+		})
+		stubChrome({})
+		vi.stubGlobal("window", { close: vi.fn() })
+		// Simulate a store that flips to completed AFTER load resolves.
+		const store = {
+			onboardingCompleted: false,
+			profiles: [] as readonly unknown[],
+			loadOnboardingCompleted: vi.fn(() => {
+				return loadPromise.then(() => {
+					store.onboardingCompleted = true
+				})
+			}),
+		}
+		const pending = redirectToOnboardingTabIfNeeded(store)
+		resolveLoad()
+		const result = await pending
+		expect(result).toBe(false)
+		expect(chrome.tabs.create).not.toHaveBeenCalled()
 	})
 })

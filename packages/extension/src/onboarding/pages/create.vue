@@ -16,7 +16,8 @@ import { managers, setSentinel } from "@/utils/core"
 
 /** Utils */
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
-import { ProfileIdConflictError, UserRejectedError } from "@nulo/extension-messaging/errors"
+import { createPasskeyProfileWithRetry } from "@/wallet/utils/create-passkey-profile"
+import { UserRejectedError } from "@nulo/extension-messaging/errors"
 
 /** Stores */
 import { useNotificationStore } from "@/stores/notification.store"
@@ -34,6 +35,46 @@ const maxPasswordLength = 128
 
 const trimmedName = computed(() => profileName.value.trim())
 
+// Wallet name is required. Validated at submit time (not via :disabled) so
+// the user gets a visible shake + inline error instead of a silently-disabled
+// button. nameError clears on input.
+const nameError = ref("")
+const shakeName = ref(false)
+const nameInputRef = ref<{ focus: () => void } | null>(null)
+let shakeTimer: ReturnType<typeof setTimeout> | null = null
+
+function triggerNameShake() {
+	shakeName.value = false
+	if (shakeTimer) clearTimeout(shakeTimer)
+	requestAnimationFrame(() => {
+		shakeName.value = true
+		shakeTimer = setTimeout(() => {
+			shakeName.value = false
+		}, 400)
+	})
+}
+
+function validateName(): boolean {
+	const n = trimmedName.value
+	if (n.length < 1) {
+		nameError.value = "Wallet name is required."
+		triggerNameShake()
+		nameInputRef.value?.focus()
+		return false
+	}
+	if (n.length > 32) {
+		nameError.value = "Max 32 characters."
+		triggerNameShake()
+		return false
+	}
+	nameError.value = ""
+	return true
+}
+
+function handleNameInput() {
+	if (nameError.value) nameError.value = ""
+}
+
 const passwordStrengthHint = computed(() => {
 	if (authMethod.value === "passkey") return ""
 	if (!password.value || password.value.length < 8) return "At least 8 characters"
@@ -42,9 +83,9 @@ const passwordStrengthHint = computed(() => {
 	return "Strong password"
 })
 
+// Excludes the name check on purpose — name is validated at submit time so
+// an empty name shakes instead of leaving the button silently disabled.
 const isAllowedToContinue = computed(() => {
-	if (!trimmedName.value || trimmedName.value.length < 1) return false
-	if (trimmedName.value.length > 32) return false
 	if (authMethod.value === "passkey") return true
 	if (!password.value || password.value.length < 8) return false
 	if (password.value !== confirm.value) return false
@@ -58,27 +99,20 @@ const submitLabel = computed(() => {
 
 const { request: ceremonyRequest, runCeremony, onResolve: onCeremonyResolve, onReject: onCeremonyReject } = usePasskeyCeremony()
 
-/** Mirrors profile/new.vue's retry loop. The pre-reserved id can be claimed
- * during the WebAuthn prompt; re-run the ceremony with a fresh id. */
-async function createPasskeyProfileViaModal(name: string) {
-	const MAX_RETRIES = 1
-	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-		const profileId = await managers.profile.generateProfileId()
-		const credData = await runCeremony({ mode: "create", userHandle: profileId })
-		try {
-			return await managers.profile.createPasskeyProfile(name, credData)
-		} catch (e) {
-			if (e instanceof ProfileIdConflictError && attempt < MAX_RETRIES) {
-				continue
-			}
-			throw e
-		}
-	}
-	throw new Error("createPasskeyProfile retried beyond MAX_RETRIES")
+/** Delegates to the shared helper at @/wallet/utils/create-passkey-profile.
+ *  Same retry-on-ProfileIdConflictError contract as popup/profile/new.vue. */
+function createPasskeyProfileViaModal(name: string) {
+	return createPasskeyProfileWithRetry(name, {
+		runCeremony,
+		generateProfileId: () => managers.profile.generateProfileId(),
+		createPasskeyProfile: (n, c) => managers.profile.createPasskeyProfile(n, c),
+	})
 }
 
 async function handleSubmit() {
-	if (!isAllowedToContinue.value || isCreating.value) return
+	if (isCreating.value) return
+	if (!validateName()) return
+	if (!isAllowedToContinue.value) return
 	isCreating.value = true
 
 	let profile
@@ -122,7 +156,7 @@ async function handleSubmit() {
 }
 
 function onKeydown(e: KeyboardEvent) {
-	if (e.key === "Enter" && isAllowedToContinue.value && !isCreating.value) handleSubmit()
+	if (e.key === "Enter" && !isCreating.value) handleSubmit()
 }
 
 onMounted(() => {
@@ -131,6 +165,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
 	document.removeEventListener("keydown", onKeydown)
+	if (shakeTimer) clearTimeout(shakeTimer)
 	// Defense-in-depth: zero out secret material on unmount.
 	password.value = ""
 	confirm.value = ""
@@ -150,23 +185,29 @@ onBeforeUnmount(() => {
 		</button>
 		<StepIndicator :current="1" />
 		<header :class="$style.hero">
-			<h1 :class="$style.title_stack">
-				<span :class="$style.title_main">Create</span>
-				<span :class="$style.title_sub">Wallet</span>
-			</h1>
+			<BrutalistTitle main="Create" sub="Wallet" />
 			<div :class="$style.hero_bar" />
 		</header>
 
 		<form :class="$style.form" @submit.prevent="handleSubmit">
 			<Flex direction="column" gap="8">
 				<Text size="11" weight="700" color="secondary" :class="$style.section_label">Wallet name</Text>
-				<Input
-					v-model="profileName"
-					type="text"
-					placeholder="My Wallet"
-					:maxLength="32"
-					data-testid="onboarding-name-input"
-				/>
+				<div :class="[shakeName && $style.shake]">
+					<Input
+						ref="nameInputRef"
+						v-model="profileName"
+						type="text"
+						placeholder="My Wallet"
+						:maxLength="32"
+						:error="!!nameError"
+						:ariaInvalid="!!nameError"
+						data-testid="onboarding-name-input"
+						@input="handleNameInput"
+					/>
+				</div>
+				<Text v-if="nameError" size="12" color="red" height="150" role="alert">
+					{{ nameError }}
+				</Text>
 			</Flex>
 
 			<Flex direction="column" gap="12">
@@ -283,32 +324,6 @@ onBeforeUnmount(() => {
 	padding: 8px 0 16px;
 }
 
-.title_stack {
-	display: flex;
-	flex-direction: column;
-	line-height: 0.95;
-	margin: 0;
-	font-weight: 700;
-}
-
-.title_main {
-	font-family: var(--font-headline);
-	font-size: 48px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-accent);
-}
-
-.title_sub {
-	font-family: var(--font-headline);
-	font-size: 48px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
-}
-
 .hero_bar {
 	width: 40px;
 	height: 2px;
@@ -370,5 +385,18 @@ onBeforeUnmount(() => {
 	padding: 16px;
 	background: var(--nulo-surface);
 	border: 1px solid var(--nulo-border);
+}
+
+@keyframes shakeInput {
+	0% { transform: translateX(0); }
+	20% { transform: translateX(-4px); }
+	40% { transform: translateX(4px); }
+	60% { transform: translateX(-3px); }
+	80% { transform: translateX(2px); }
+	100% { transform: translateX(0); }
+}
+
+.shake {
+	animation: shakeInput 0.4s ease;
 }
 </style>
