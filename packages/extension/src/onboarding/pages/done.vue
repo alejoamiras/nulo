@@ -10,14 +10,22 @@ const appStore = useAppStore()
 async function openWallet() {
 	await appStore.setOnboardingCompleted(true)
 	await clearOnboardingTabTracking()
-	// Use chrome.windows.create directly, not chrome.action.openPopup —
-	// the latter requires the extension already pinned to the toolbar
-	// (which contradicts our pin-tip on this same screen).
+	// Use chrome.windows.create directly, not chrome.action.openPopup. The
+	// latter requires the extension already pinned to the toolbar, which
+	// contradicts our pin-tip on this same screen.
+	//
+	// Position the popup on the LEFT side of the screen at a slightly
+	// reduced height vs Chrome's toolbar-anchored popup. The toolbar popup
+	// is typically right-aligned (anchored to the icon); placing this one
+	// on the left makes it clear that it's a separate window opened from
+	// the onboarding tab, not the real toolbar popup.
 	await chrome.windows.create({
 		url: chrome.runtime.getURL("src/popup/index.html"),
 		type: "popup",
 		width: 380,
-		height: 620,
+		height: 580,
+		left: 24,
+		top: 100,
 	})
 	window.close()
 }
@@ -25,6 +33,7 @@ async function openWallet() {
 
 <template>
 	<Flex direction="column" align="center" gap="40" :class="$style.page">
+		<StepIndicator :current="4" />
 		<Flex direction="column" align="center" gap="16" :class="$style.hero">
 			<h1 :class="$style.title_stack">
 				<span :class="$style.title_main">You're</span>
@@ -43,7 +52,7 @@ async function openWallet() {
 			</Flex>
 			<Text size="13" color="secondary" height="150">
 				Click the puzzle icon in your Chrome toolbar, then pin Nulo for
-				quick access — that's how you'll open the wallet from now on.
+				quick access. That's how you'll open the wallet from now on.
 			</Text>
 		</Flex>
 

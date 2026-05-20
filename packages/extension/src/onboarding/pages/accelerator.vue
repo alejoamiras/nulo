@@ -12,7 +12,9 @@ const { status, info, detect } = useAcceleratorStatus()
 // affordance below that immediately routes onward — no two-click gate.
 const isContinueEnabled = computed(() => status.value === "active")
 
-const RELEASES_URL = "https://github.com/alejoamiras/aztec-accelerator/releases/latest"
+// Send users to the public landing rather than the raw GitHub releases page.
+// The landing brands the download properly + handles OS detection.
+const LANDING_URL = "https://aztec-accelerator.dev/"
 
 const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : ""
 const isWindows = computed(() => /Windows/.test(userAgent))
@@ -45,7 +47,7 @@ const statusDetail = computed(() => {
 })
 
 function openReleases() {
-	window.open(RELEASES_URL, "_blank", "noopener,noreferrer")
+	window.open(LANDING_URL, "_blank", "noopener,noreferrer")
 }
 
 // Skip immediately routes to /done — no second click required. This is a
@@ -62,6 +64,7 @@ function goNext() {
 
 <template>
 	<Flex direction="column" gap="32" :class="$style.page">
+		<StepIndicator :current="3" />
 		<Flex direction="column" gap="16" :class="$style.hero">
 			<h1 :class="$style.title_stack">
 				<span :class="$style.title_main">Speed up</span>
@@ -138,7 +141,7 @@ function goNext() {
 				data-testid="onboarding-accelerator-skip"
 				@click="handleSkip"
 			>
-				Skip — proving will run in your browser
+				Skip. Proving will run in your browser.
 			</button>
 		</Flex>
 	</Flex>

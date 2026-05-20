@@ -139,6 +139,7 @@ onBeforeUnmount(() => {
 
 <template>
 	<Flex direction="column" gap="32" :class="$style.page">
+		<StepIndicator :current="1" />
 		<header :class="$style.hero">
 			<h1 :class="$style.title_stack">
 				<span :class="$style.title_main">Create</span>
@@ -211,8 +212,8 @@ onBeforeUnmount(() => {
 
 			<div v-else :class="$style.passkeyInfo">
 				<Text size="13" color="secondary" height="150">
-					Your passkey replaces a password. Touch ID, Windows Hello, or a
-					hardware key — whichever your device supports.
+					Your passkey replaces a password. Touch ID, Windows Hello, or
+					a hardware key, whichever your device supports.
 				</Text>
 			</div>
 

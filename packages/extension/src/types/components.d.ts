@@ -62,6 +62,7 @@ declare module 'vue' {
     SettingItem: typeof import('./../components/ui/Settings/SettingItem.vue')['default']
     SettingValue: typeof import('./../components/ui/Settings/SettingValue.vue')['default']
     Spinner: typeof import('./../components/ui/Spinner.vue')['default']
+    StepIndicator: typeof import('./../onboarding/components/StepIndicator.vue')['default']
     SubPageHeader: typeof import('./../components/ui/SubPageHeader.vue')['default']
     Text: typeof import('./../components/core/Text.vue')['default']
     ToastManager: typeof import('./../components/ui/ToastManager.vue')['default']

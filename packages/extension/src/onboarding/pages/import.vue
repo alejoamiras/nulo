@@ -126,7 +126,7 @@ async function completeImport(profile: unknown) {
 		openToast({ label: "Profile imported", icon: "check-circle" })
 		router.push("/onboarding/learn")
 	} catch {
-		openToast({ label: "Profile imported — unlock to continue" })
+		openToast({ label: "Profile imported. Unlock to continue." })
 		router.push("/onboarding/learn")
 	}
 }
@@ -285,6 +285,7 @@ onBeforeUnmount(() => {
 
 <template>
 	<Flex direction="column" gap="24" :class="$style.page">
+		<StepIndicator :current="1" />
 		<header :class="$style.hero">
 			<h1 :class="$style.title_stack">
 				<span :class="$style.title_main">Import</span>
@@ -305,7 +306,7 @@ onBeforeUnmount(() => {
 				data-testid="onboarding-name-input"
 			/>
 			<Text v-if="error.type === 'name'" size="12" color="red" role="alert">
-				{{ error.title }}{{ error.tooltip ? ` — ${error.tooltip}` : "" }}
+				{{ error.title }}{{ error.tooltip ? `. ${error.tooltip}` : "" }}
 			</Text>
 		</Flex>
 

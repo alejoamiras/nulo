@@ -8,18 +8,18 @@ const router = useRouter()
 const cards = [
 	{
 		number: "01",
-		title: "Programmable privacy",
-		body: "Aztec runs private smart contracts. Your balances, transfers, and calls stay encrypted — visible only to you.",
+		title: "Public and private state",
+		body: "Aztec runs smart contracts with both public state and private state. You decide what's shared. The rest stays encrypted, visible only to you.",
 	},
 	{
 		number: "02",
 		title: "Proofs on your machine",
-		body: "Every transaction generates a zero-knowledge proof on your machine. The network only sees the proof — never your inputs.",
+		body: "Every transaction generates a zero-knowledge proof on your own machine. The network only sees the proof, never your inputs.",
 	},
 	{
 		number: "03",
 		title: "Proofs take time",
-		body: "In the browser, a simple transfer can take 10–30 seconds. The next screen explains how to speed this up.",
+		body: "In the browser, a simple transfer can take 10 to 30 seconds. The next screen explains how to speed this up.",
 	},
 ]
 
@@ -30,6 +30,7 @@ function goNext() {
 
 <template>
 	<Flex direction="column" gap="40" :class="$style.page">
+		<StepIndicator :current="2" />
 		<Flex direction="column" gap="16" :class="$style.hero">
 			<h1 :class="$style.title_stack">
 				<span :class="$style.title_main">Meet</span>
