@@ -16,7 +16,8 @@ import { managers, setSentinel } from "@/utils/core"
 
 /** Utils */
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
-import { ProfileIdConflictError, UserRejectedError } from "@nulo/extension-messaging/errors"
+import { createPasskeyProfileWithRetry } from "@/wallet/utils/create-passkey-profile"
+import { UserRejectedError } from "@nulo/extension-messaging/errors"
 
 /** Stores */
 import { useNotificationStore } from "@/stores/notification.store"
@@ -58,23 +59,14 @@ const submitLabel = computed(() => {
 
 const { request: ceremonyRequest, runCeremony, onResolve: onCeremonyResolve, onReject: onCeremonyReject } = usePasskeyCeremony()
 
-/** Mirrors profile/new.vue's retry loop. The pre-reserved id can be claimed
- * during the WebAuthn prompt; re-run the ceremony with a fresh id. */
-async function createPasskeyProfileViaModal(name: string) {
-	const MAX_RETRIES = 1
-	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-		const profileId = await managers.profile.generateProfileId()
-		const credData = await runCeremony({ mode: "create", userHandle: profileId })
-		try {
-			return await managers.profile.createPasskeyProfile(name, credData)
-		} catch (e) {
-			if (e instanceof ProfileIdConflictError && attempt < MAX_RETRIES) {
-				continue
-			}
-			throw e
-		}
-	}
-	throw new Error("createPasskeyProfile retried beyond MAX_RETRIES")
+/** Delegates to the shared helper at @/wallet/utils/create-passkey-profile.
+ *  Same retry-on-ProfileIdConflictError contract as popup/profile/new.vue. */
+function createPasskeyProfileViaModal(name: string) {
+	return createPasskeyProfileWithRetry(name, {
+		runCeremony,
+		generateProfileId: () => managers.profile.generateProfileId(),
+		createPasskeyProfile: (n, c) => managers.profile.createPasskeyProfile(n, c),
+	})
 }
 
 async function handleSubmit() {
@@ -150,10 +142,7 @@ onBeforeUnmount(() => {
 		</button>
 		<StepIndicator :current="1" />
 		<header :class="$style.hero">
-			<h1 :class="$style.title_stack">
-				<span :class="$style.title_main">Create</span>
-				<span :class="$style.title_sub">Wallet</span>
-			</h1>
+			<BrutalistTitle main="Create" sub="Wallet" />
 			<div :class="$style.hero_bar" />
 		</header>
 
@@ -281,32 +270,6 @@ onBeforeUnmount(() => {
 
 .hero {
 	padding: 8px 0 16px;
-}
-
-.title_stack {
-	display: flex;
-	flex-direction: column;
-	line-height: 0.95;
-	margin: 0;
-	font-weight: 700;
-}
-
-.title_main {
-	font-family: var(--font-headline);
-	font-size: 48px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-accent);
-}
-
-.title_sub {
-	font-family: var(--font-headline);
-	font-size: 48px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
 }
 
 .hero_bar {

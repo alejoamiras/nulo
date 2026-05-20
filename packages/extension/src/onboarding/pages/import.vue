@@ -14,6 +14,7 @@ import { useToast } from "@/composables/toast"
 import { useFullBackupImport } from "@/composables/useFullBackupImport"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
+import { waitForProfileActive } from "@/composables/waitForProfileActive"
 
 /** Services */
 import { managers, setSentinel } from "@/utils/core"
@@ -100,29 +101,12 @@ const isAllowedToImportByPublicKey = computed(() => {
 	return !!publicKey.value
 })
 
-function waitForProfileActive(expectedId: string, timeoutMs: number) {
-	return new Promise<void>((resolve, reject) => {
-		if (appStore.isLogined && appStore.profile?.id === expectedId) return resolve()
-		const t = setTimeout(() => {
-			stop()
-			reject(new Error("Profile activation timeout"))
-		}, timeoutMs)
-		const stop = watch([() => appStore.isLogined, () => appStore.profile?.id], ([logged, id]) => {
-			if (logged && id === expectedId) {
-				clearTimeout(t)
-				stop()
-				resolve()
-			}
-		})
-	})
-}
-
 async function completeImport(profile: unknown) {
 	const p = profile as { id: string }
 	await setLastActiveProfileId(p.id)
 	await setSentinel()
 	try {
-		await waitForProfileActive(p.id, 30_000)
+		await waitForProfileActive(appStore, p.id, 30_000)
 		openToast({ label: "Profile imported", icon: "check-circle" })
 		router.push("/onboarding/learn")
 	} catch {
@@ -296,10 +280,7 @@ onBeforeUnmount(() => {
 		</button>
 		<StepIndicator :current="1" />
 		<header :class="$style.hero">
-			<h1 :class="$style.title_stack">
-				<span :class="$style.title_main">Import</span>
-				<span :class="$style.title_sub">Wallet</span>
-			</h1>
+			<BrutalistTitle main="Import" sub="Wallet" />
 			<div :class="$style.hero_bar" />
 			<Text size="14" color="secondary" height="150">Restore from a seed, key, or backup.</Text>
 		</header>
@@ -487,32 +468,6 @@ onBeforeUnmount(() => {
 	display: flex;
 	flex-direction: column;
 	gap: 12px;
-}
-
-.title_stack {
-	display: flex;
-	flex-direction: column;
-	line-height: 0.95;
-	margin: 0;
-	font-weight: 700;
-}
-
-.title_main {
-	font-family: var(--font-headline);
-	font-size: 48px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-accent);
-}
-
-.title_sub {
-	font-family: var(--font-headline);
-	font-size: 48px;
-	font-weight: 700;
-	letter-spacing: -0.04em;
-	text-transform: uppercase;
-	color: var(--nulo-secondary);
 }
 
 .hero_bar {

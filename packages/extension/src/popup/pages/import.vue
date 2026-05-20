@@ -20,6 +20,7 @@ import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { useToast } from "@/composables/toast"
 import { useFullBackupImport } from "@/composables/useFullBackupImport"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
+import { waitForProfileActive } from "@/composables/waitForProfileActive"
 
 /** Stores */
 import { useCacheStore } from "@/stores/cache.store"
@@ -126,29 +127,6 @@ const isAllowedToImportByPublicKey = computed(() => {
 })
 
 /** Handlers */
-/**
- * Resolves once the SW has emitted `onActiveProfileChanged` AND `app.vue`'s
- * handler has finished initializing the new profile (sets `appStore.profile`,
- * flips `isLogined` last). Watches BOTH conditions so the wait still works
- * if the user was already unlocked as a different profile — `isLogined`
- * alone would be a no-op in that case.
- */
-function waitForProfileActive(expectedId, timeoutMs) {
-	return new Promise((resolve, reject) => {
-		if (appStore.isLogined && appStore.profile?.id === expectedId) return resolve()
-		const t = setTimeout(() => {
-			stop()
-			reject(new Error("Profile activation timeout"))
-		}, timeoutMs)
-		const stop = watch([() => appStore.isLogined, () => appStore.profile?.id], ([logged, id]) => {
-			if (logged && id === expectedId) {
-				clearTimeout(t)
-				stop()
-				resolve()
-			}
-		})
-	})
-}
 
 const completeImport = async (profile) => {
 	await setLastActiveProfileId(profile.id)
@@ -159,7 +137,7 @@ const completeImport = async (profile) => {
 		// seed/key import helpers, which also auto-unlock). 30s covers any
 		// reasonable SW init + PXE state load; a longer hang means something
 		// is wedged, so escape to /popup/auth and let the user retry.
-		await waitForProfileActive(profile.id, 30_000)
+		await waitForProfileActive(appStore, profile.id, 30_000)
 		openToast({ label: "Profile imported", icon: "check-circle" })
 		router.push("/popup/general")
 	} catch {

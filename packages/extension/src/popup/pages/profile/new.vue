@@ -25,7 +25,8 @@ import { managers, setSentinel, initTransactionService } from "@/utils/core"
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { capitalize } from "@/utils/string"
 import { sleep } from "@/wallet/utils"
-import { ProfileIdConflictError, UserRejectedError } from "@nulo/extension-messaging/errors"
+import { createPasskeyProfileWithRetry } from "@/wallet/utils/create-passkey-profile"
+import { UserRejectedError } from "@nulo/extension-messaging/errors"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -80,27 +81,14 @@ const strengthHint = computed(() => {
 const { request: ceremonyRequest, runCeremony, onResolve: onCeremonyResolve, onReject: onCeremonyReject } = usePasskeyCeremony()
 
 /** Run the passkey-create ceremony in-page, then call the SW with the
- *  collected credential. Retries ONCE on `ProfileIdConflictError` —
- *  the pre-reserved id was claimed during the WebAuthn prompt; we
- *  re-run the entire ceremony with a fresh id (and a fresh credential)
- *  to keep the credential's userHandle in sync with the persisted
- *  profile id. */
-async function createPasskeyProfileViaModal(name) {
-	const MAX_RETRIES = 1
-	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-		const profileId = await managers.profile.generateProfileId()
-		const credData = await runCeremony({ mode: "create", userHandle: profileId })
-		try {
-			return await managers.profile.createPasskeyProfile(name, credData)
-		} catch (e) {
-			if (e instanceof ProfileIdConflictError && attempt < MAX_RETRIES) {
-				// Loop and try again with a fresh id + fresh ceremony.
-				continue
-			}
-			throw e
-		}
-	}
-	throw new Error("createPasskeyProfile retried beyond MAX_RETRIES")
+ *  collected credential. Retries ONCE on ProfileIdConflictError via the
+ *  shared helper at @/wallet/utils/create-passkey-profile. */
+function createPasskeyProfileViaModal(name) {
+	return createPasskeyProfileWithRetry(name, {
+		runCeremony,
+		generateProfileId: () => managers.profile.generateProfileId(),
+		createPasskeyProfile: (n, c) => managers.profile.createPasskeyProfile(n, c),
+	})
 }
 
 const isCreating = ref(false)
