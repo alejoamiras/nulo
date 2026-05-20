@@ -7,19 +7,41 @@ import { clearOnboardingTabTracking } from "@/wallet/utils/onboarding-tab"
 
 const appStore = useAppStore()
 
+// Detected on mount so the pin-tip only shows for users who actually need
+// it. chrome.action.getUserSettings exists from Chrome 91+; we fall back
+// to "not pinned" if the API is missing or rejects.
+const isPinned = ref(false)
+onMounted(async () => {
+	try {
+		const settings = await chrome.action.getUserSettings()
+		isPinned.value = settings.isOnToolbar === true
+	} catch {
+		isPinned.value = false
+	}
+})
+
 async function openWallet() {
 	await appStore.setOnboardingCompleted(true)
 	await clearOnboardingTabTracking()
-	// Use chrome.windows.create directly, not chrome.action.openPopup. The
-	// latter requires the extension already pinned to the toolbar, which
-	// contradicts our pin-tip on this same screen.
-	//
-	// Position on the LEFT side (distinct from the toolbar popup which is
-	// right-aligned, anchored to the icon). The popup body sets
-	// min-height: 600px; the window has ~30-40px of OS chrome on top, so
-	// height 660 gives the content room to render at native size and
-	// matches the visual weight of the real toolbar popup. Earlier 580 was
-	// too compact and read like a dapp-approval popup.
+
+	// Two paths:
+	//   - If the extension is pinned, chrome.action.openPopup() anchors a
+	//     real toolbar popup to the icon. This is the authentic experience
+	//     the user will get every time after this.
+	//   - If not pinned (the common first-install case), openPopup() either
+	//     no-ops or rejects. Fall back to chrome.windows.create on the LEFT
+	//     side so it's visually distinct from a future toolbar popup.
+	if (isPinned.value) {
+		try {
+			await chrome.action.openPopup()
+			window.close()
+			return
+		} catch {
+			// openPopup can fail in edge cases (no focused window, older
+			// Chrome version, policy restrictions). Fall through.
+		}
+	}
+
 	await chrome.windows.create({
 		url: chrome.runtime.getURL("src/popup/index.html"),
 		type: "popup",
@@ -49,7 +71,13 @@ async function openWallet() {
 			</Text>
 		</Flex>
 
-		<Flex direction="column" gap="12" :class="$style.tip" data-testid="onboarding-pin-tip">
+		<Flex
+			v-if="!isPinned"
+			direction="column"
+			gap="12"
+			:class="$style.tip"
+			data-testid="onboarding-pin-tip"
+		>
 			<Flex align="center" gap="8">
 				<MaterialIcon name="extension" :size="16" color="secondary" />
 				<Text size="11" weight="700" color="secondary" :class="$style.tip_label">Pro tip</Text>
