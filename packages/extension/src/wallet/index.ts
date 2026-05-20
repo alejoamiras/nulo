@@ -17,13 +17,33 @@ import { ConfigStore } from "./config"
 import { consoleMethods, LoggerStore, LogLevel } from "./logger"
 import { createWalletRuntime } from "./runtime"
 import { getErrorData } from "@nulo/wallet-core/utils"
+import { openOrFocusOnboardingTab } from "./utils/onboarding-tab"
 
 // MV3: onInstalled fires once, synchronously, when the SW boots after install.
 // Late addListener calls miss the historic event. Register at top level BEFORE
-// any awaited startup work — body lazy-imports so heavy modules don't load until fired.
+// any awaited startup work. Use a STATIC import (above) — a dynamic
+// import("./utils/onboarding-tab") trips vite's preload runtime which calls
+// window.dispatchEvent on preload-error, but SW has no `window`.
 chrome.runtime.onInstalled.addListener(({ reason }) => {
 	if (reason !== "install") return
-	void import("./utils/onboarding-tab").then(({ openOrFocusOnboardingTab }) => openOrFocusOnboardingTab())
+	void openOrFocusOnboardingTab()
+})
+
+// Done page sends this message after the user clicks "Open wallet". The SW
+// calls chrome.action.openPopup from a context that survives the onboarding
+// tab closing itself, so the popup's lifecycle isn't tied to the tab's.
+chrome.runtime.onMessage.addListener((message: unknown): false => {
+	if (message && typeof message === "object") {
+		const msg = message as { type?: string; windowId?: number }
+		if (msg.type === "nulo:open-toolbar-popup") {
+			const windowId = typeof msg.windowId === "number" ? msg.windowId : undefined
+			chrome.action.openPopup(windowId !== undefined ? { windowId } : {}).catch((error) => {
+				console.error("SW openPopup failed:", error)
+			})
+		}
+	}
+	// Return false: we never call sendResponse, fire-and-forget only.
+	return false
 })
 
 const config = new ConfigStore()

@@ -24,34 +24,37 @@ async function openWallet() {
 	await appStore.setOnboardingCompleted(true)
 	await clearOnboardingTabTracking()
 
-	// Always try chrome.action.openPopup() first — it opens the NATIVE
-	// toolbar action popup, anchored to where Chrome decides (toolbar icon
-	// if pinned, action overflow otherwise). Pinning is a UI hint, NOT an
-	// API precondition (per codex audit + Chrome docs). The previous
-	// implementation incorrectly gated this on isPinned, which made every
-	// unpinned user fall through to the windowed fallback.
-	//
-	// Pass windowId explicitly so Chrome targets the onboarding tab's
-	// window. Without it, the API can reject if the current window isn't
-	// resolvable as the active normal window.
+	// Ask the SW to open the toolbar popup AFTER we close ourselves. We
+	// can't call chrome.action.openPopup from this tab and then close it
+	// in the same handler — the popup is anchored to the focused window's
+	// toolbar, and the close-this-tab event causes the popup to dismiss
+	// immediately (focus loss + window state churn). Routing through the
+	// SW decouples the popup lifecycle from the tab's; the SW survives
+	// our window.close() and can open the popup against the now-focused
+	// remaining tab.
+	let messaged = false
 	try {
 		const currentWindow = await chrome.windows.getCurrent()
-		if (typeof currentWindow.id !== "number") throw new Error("No current Chrome window id")
-		await chrome.action.openPopup({ windowId: currentWindow.id })
-		// Let Chrome finish surfacing the popup before the tab tears down.
-		setTimeout(() => window.close(), 0)
-		return
+		const windowId = typeof currentWindow.id === "number" ? currentWindow.id : undefined
+		await chrome.runtime.sendMessage({
+			type: "nulo:open-toolbar-popup",
+			windowId,
+		})
+		messaged = true
 	} catch (error) {
-		// Log instead of swallow so we can see WHY this fails in devtools.
-		// Real failure modes documented by Chromium:
-		//   - No active browser window / focused window
-		//   - Extension has no popup on the active tab (e.g. action.disable was called)
-		//   - Browser window has no toolbar (devtools window, etc.)
-		console.error("chrome.action.openPopup failed", error)
+		console.error("Failed to message SW for openPopup; falling back to window:", error)
 	}
 
-	// Fallback: open a popup-shaped window. Left-positioned, slightly less
-	// tall than the native toolbar popup so it's visually distinct.
+	if (messaged) {
+		// Give the SW one task to receive + start processing the message,
+		// then tear down. Without the gap, the SW message handler hasn't
+		// fired yet when we close, and Chrome can drop the pending call.
+		setTimeout(() => window.close(), 50)
+		return
+	}
+
+	// Fallback when messaging the SW isn't possible. Left-positioned
+	// popup-shaped window.
 	await chrome.windows.create({
 		url: chrome.runtime.getURL("src/popup/index.html"),
 		type: "popup",
