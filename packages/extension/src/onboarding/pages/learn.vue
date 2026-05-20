@@ -31,10 +31,10 @@ function goNext() {
 <template>
 	<Flex direction="column" gap="40" :class="$style.page">
 		<Flex direction="column" gap="16" :class="$style.hero">
-			<div :class="$style.title_stack">
+			<h1 :class="$style.title_stack">
 				<span :class="$style.title_main">Meet</span>
 				<span :class="$style.title_sub">Aztec</span>
-			</div>
+			</h1>
 			<div :class="$style.hero_bar" />
 			<Text size="14" color="secondary" height="150">
 				Three things to know before your first transaction.
@@ -43,9 +43,9 @@ function goNext() {
 
 		<div :class="$style.grid">
 			<article v-for="card in cards" :key="card.title" :class="$style.card">
-				<Text size="11" mono color="tertiary" :class="$style.card_num">{{ card.number }}</Text>
+				<Text size="11" mono color="secondary" :class="$style.card_num">{{ card.number }}</Text>
 				<Text size="16" weight="700" color="primary" :class="$style.card_title">{{ card.title }}</Text>
-				<Text size="13" color="body" height="150">{{ card.body }}</Text>
+				<Text size="13" color="secondary" height="150">{{ card.body }}</Text>
 			</article>
 		</div>
 
@@ -87,6 +87,8 @@ function goNext() {
 	display: flex;
 	flex-direction: column;
 	line-height: 0.95;
+	margin: 0;
+	font-weight: 700;
 }
 
 .title_main {
@@ -152,7 +154,7 @@ function goNext() {
 .skipLink {
 	background: transparent;
 	border: none;
-	color: var(--txt-tertiary);
+	color: var(--txt-secondary);
 	font-family: var(--font-mono);
 	font-size: 11px;
 	letter-spacing: 0.08em;
@@ -163,6 +165,12 @@ function goNext() {
 }
 
 .skipLink:hover {
+	color: var(--txt-primary);
+}
+
+.skipLink:focus-visible {
+	outline: 2px dotted var(--nulo-accent);
+	outline-offset: 2px;
 	color: var(--txt-primary);
 }
 </style>

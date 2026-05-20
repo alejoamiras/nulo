@@ -26,10 +26,10 @@ async function openWallet() {
 <template>
 	<Flex direction="column" align="center" gap="40" :class="$style.page">
 		<Flex direction="column" align="center" gap="16" :class="$style.hero">
-			<div :class="$style.title_stack">
+			<h1 :class="$style.title_stack">
 				<span :class="$style.title_main">You're</span>
 				<span :class="$style.title_sub">All Set</span>
-			</div>
+			</h1>
 			<div :class="$style.hero_bar" />
 			<Text size="14" color="secondary" height="150" align="center">
 				Your wallet is ready.
@@ -41,7 +41,7 @@ async function openWallet() {
 				<MaterialIcon name="extension" :size="16" color="secondary" />
 				<Text size="11" weight="700" color="secondary" :class="$style.tip_label">Pro tip</Text>
 			</Flex>
-			<Text size="13" color="body" height="150">
+			<Text size="13" color="secondary" height="150">
 				Click the puzzle icon in your Chrome toolbar, then pin Nulo for
 				quick access — that's how you'll open the wallet from now on.
 			</Text>
@@ -75,6 +75,8 @@ async function openWallet() {
 	align-items: center;
 	line-height: 0.95;
 	gap: 4px;
+	margin: 0;
+	font-weight: 700;
 }
 
 .title_main {

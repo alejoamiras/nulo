@@ -36,8 +36,8 @@ describe("onboarding tab", () => {
 		await waitForHash(page, "#/onboarding/accelerator", 10_000)
 
 		// Wait for the status card to settle (any terminal state). If 'active'
-		// (real accelerator is installed on the dev box), Continue is enabled
-		// without Skip. Otherwise we click Skip first.
+		// (real accelerator is installed on the dev box), click Continue.
+		// Otherwise click Skip — which now routes directly to /done.
 		const status = await page.evaluate(async () => {
 			while (true) {
 				const el = document.querySelector('[data-testid="onboarding-accelerator-status"]')
@@ -46,10 +46,11 @@ describe("onboarding tab", () => {
 				await new Promise((r) => setTimeout(r, 200))
 			}
 		})
-		if (status !== "active") {
+		if (status === "active") {
+			await clickByTestId(page, "onboarding-accelerator-continue")
+		} else {
 			await clickByTestId(page, "onboarding-accelerator-skip")
 		}
-		await clickByTestId(page, "onboarding-accelerator-continue")
 		await waitForHash(page, "#/onboarding/done", 10_000)
 
 		// Listen for the popup-window the Done CTA opens. Done click also closes
@@ -72,7 +73,7 @@ describe("onboarding tab", () => {
 		await newPage.close()
 	})
 
-	test("accelerator mock-active enables Continue without Skip", async ({ freshExtensionPerTest: extension }) => {
+	test("accelerator mock-active renders enabled Continue button", async ({ freshExtensionPerTest: extension }) => {
 		const page = await openOnboarding(extension)
 
 		// Intercept /health and return an "active" response.
@@ -110,17 +111,18 @@ describe("onboarding tab", () => {
 			{ timeout: 10_000, polling: 200 },
 		)
 
-		// Continue should be enabled without clicking Skip.
-		const continueDisabled = await page.evaluate(() => {
+		// Continue button is rendered + enabled (only renders when status==active).
+		const state = await page.evaluate(() => {
 			const btn = document.querySelector<HTMLButtonElement>('[data-testid="onboarding-accelerator-continue"]')
-			return btn?.disabled
+			return { rendered: !!btn, disabled: btn?.disabled ?? null }
 		})
-		expect(continueDisabled).toBe(false)
+		expect(state.rendered).toBe(true)
+		expect(state.disabled).toBe(false)
 
 		await page.close()
 	})
 
-	test("accelerator not-detected requires Skip to enable Continue", async ({ freshExtensionPerTest: extension }) => {
+	test("accelerator not-detected hides Continue and shows Skip link", async ({ freshExtensionPerTest: extension }) => {
 		const page = await openOnboarding(extension)
 
 		// Intercept /health and return 502 so detect fails.
@@ -145,20 +147,16 @@ describe("onboarding tab", () => {
 			{ timeout: 10_000, polling: 200 },
 		)
 
-		// Continue is initially disabled (no active, no skip).
-		const initiallyDisabled = await page.evaluate(() => {
-			const btn = document.querySelector<HTMLButtonElement>('[data-testid="onboarding-accelerator-continue"]')
-			return btn?.disabled
+		// Continue button is NOT rendered (only renders on status=active).
+		// The Skip link is the only forward-progress affordance.
+		const noContinue = await page.evaluate(() => {
+			return !document.querySelector('[data-testid="onboarding-accelerator-continue"]')
 		})
-		expect(initiallyDisabled).toBe(true)
+		expect(noContinue).toBe(true)
 
-		// Click Skip → Continue enables.
+		// Click Skip → routes immediately to /done (no two-click gate).
 		await clickByTestId(page, "onboarding-accelerator-skip")
-		const afterSkip = await page.evaluate(() => {
-			const btn = document.querySelector<HTMLButtonElement>('[data-testid="onboarding-accelerator-continue"]')
-			return btn?.disabled
-		})
-		expect(afterSkip).toBe(false)
+		await waitForHash(page, "#/onboarding/done", 5_000)
 
 		await page.close()
 	})

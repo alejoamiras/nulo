@@ -101,7 +101,7 @@ async function handleSubmit() {
 		notificationStore.create({
 			type: "warning",
 			payload: {
-				title: "Profile Creation Failed",
+				title: "Wallet creation failed",
 				description,
 				note,
 				confirmText: "OK",
@@ -140,10 +140,10 @@ onBeforeUnmount(() => {
 <template>
 	<Flex direction="column" gap="32" :class="$style.page">
 		<header :class="$style.hero">
-			<div :class="$style.title_stack">
+			<h1 :class="$style.title_stack">
 				<span :class="$style.title_main">Create</span>
 				<span :class="$style.title_sub">Wallet</span>
-			</div>
+			</h1>
 			<div :class="$style.hero_bar" />
 		</header>
 
@@ -161,11 +161,10 @@ onBeforeUnmount(() => {
 
 			<Flex direction="column" gap="12">
 				<Text size="11" weight="700" color="secondary" :class="$style.section_label">Authentication method</Text>
-				<Flex gap="0" :class="$style.tabs" role="tablist">
+				<Flex gap="0" :class="$style.tabs" role="group" aria-label="Authentication method">
 					<button
 						type="button"
-						role="tab"
-						:aria-selected="authMethod === 'password'"
+						:aria-pressed="authMethod === 'password'"
 						:class="[$style.tab, authMethod === 'password' && $style.tabActive]"
 						data-testid="onboarding-method-password"
 						@click="authMethod = 'password'"
@@ -174,8 +173,7 @@ onBeforeUnmount(() => {
 					</button>
 					<button
 						type="button"
-						role="tab"
-						:aria-selected="authMethod === 'passkey'"
+						:aria-pressed="authMethod === 'passkey'"
 						:class="[$style.tab, authMethod === 'passkey' && $style.tabActive]"
 						data-testid="onboarding-method-passkey"
 						@click="authMethod = 'passkey'"
@@ -206,13 +204,13 @@ onBeforeUnmount(() => {
 						data-testid="onboarding-password-confirm"
 					/>
 				</Flex>
-				<Text v-if="passwordStrengthHint" size="12" color="tertiary" height="150">
+				<Text v-if="passwordStrengthHint" size="12" color="secondary" height="150">
 					{{ passwordStrengthHint }}
 				</Text>
 			</Flex>
 
 			<div v-else :class="$style.passkeyInfo">
-				<Text size="13" color="body" height="150">
+				<Text size="13" color="secondary" height="150">
 					Your passkey replaces a password. Touch ID, Windows Hello, or a
 					hardware key — whichever your device supports.
 				</Text>
@@ -254,6 +252,8 @@ onBeforeUnmount(() => {
 	display: flex;
 	flex-direction: column;
 	line-height: 0.95;
+	margin: 0;
+	font-weight: 700;
 }
 
 .title_main {
@@ -302,7 +302,7 @@ onBeforeUnmount(() => {
 .tab {
 	background: transparent;
 	border: none;
-	color: var(--txt-body);
+	color: var(--txt-secondary);
 	font-family: var(--font-headline);
 	font-size: 12px;
 	font-weight: 700;
@@ -315,6 +315,11 @@ onBeforeUnmount(() => {
 
 .tab:hover {
 	color: var(--txt-primary);
+}
+
+.tab:focus-visible {
+	outline: 2px solid var(--nulo-accent);
+	outline-offset: -2px;
 }
 
 .tabActive {

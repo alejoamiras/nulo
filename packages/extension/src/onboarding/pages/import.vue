@@ -34,7 +34,10 @@ const notificationStore = useNotificationStore()
 const { bootstrapActiveProfile } = useProfileBootstrap()
 
 const selectedImportOption = ref<string | null>(null)
-const profileName = ref("")
+// Prefill the wallet-name field so the passkey discovery path (which has no
+// secret to fill in) can't fail validation on a blank name — and so users
+// generally never see an "enter a name" error. Mirrors popup/pages/import.vue.
+const profileName = ref("My Wallet")
 const seedPhrase = ref<string | undefined>(undefined)
 const privateKey = ref<string | undefined>(undefined)
 const publicKey = ref<string | undefined>(undefined)
@@ -185,7 +188,18 @@ const { request: ceremonyRequest, runCeremony, onResolve: onCeremonyResolve, onR
 
 const handleImportPasskey = async () => {
 	if (!isNameValid.value) {
-		fillError("name", "Wallet name required", "Enter a name before importing")
+		fillError("name", "Wallet name required", "Enter a name before importing.")
+		// Surface the error inline AND as a notification — passkey path has
+		// no other visible field to anchor the error message.
+		notificationStore.create({
+			type: "warning",
+			payload: {
+				title: "Wallet name required",
+				description: "Enter a name above before importing with a passkey.",
+				confirmText: "OK",
+				onConfirm: () => {},
+			},
+		})
 		return
 	}
 	try {
@@ -198,15 +212,15 @@ const handleImportPasskey = async () => {
 		notificationStore.create({
 			type: "warning",
 			payload: {
-				title: "Profile Import Failed",
+				title: "Wallet import failed",
 				description:
-					"An error occurred while importing the profile. This authenticator may not be supported or encountered an issue. Try again or use another one.",
+					"An error occurred while importing the wallet. This authenticator may not be supported or encountered an issue. Try again or use another one.",
 				note: "Windows Hello may not work correctly with some versions of Windows.",
 				confirmText: "OK",
 				onConfirm: () => {},
 			},
 		})
-		console.error("Failed to import profile:", err)
+		console.error("Failed to import wallet:", err)
 	}
 }
 
@@ -252,6 +266,8 @@ function clearFormState() {
 	seedPhrase.value = undefined
 	password.value = ""
 	repeatedPassword.value = ""
+	// Keep profileName so the user doesn't have to retype it after switching
+	// import methods.
 	resetBackupState()
 	clearError()
 }
@@ -270,10 +286,10 @@ onBeforeUnmount(() => {
 <template>
 	<Flex direction="column" gap="24" :class="$style.page">
 		<header :class="$style.hero">
-			<div :class="$style.title_stack">
+			<h1 :class="$style.title_stack">
 				<span :class="$style.title_main">Import</span>
 				<span :class="$style.title_sub">Wallet</span>
-			</div>
+			</h1>
 			<div :class="$style.hero_bar" />
 			<Text size="14" color="secondary" height="150">Restore from a seed, key, or backup.</Text>
 		</header>
@@ -285,8 +301,12 @@ onBeforeUnmount(() => {
 				type="text"
 				placeholder="My Wallet"
 				:maxLength="32"
+				:error="error.type === 'name'"
 				data-testid="onboarding-name-input"
 			/>
+			<Text v-if="error.type === 'name'" size="12" color="red" role="alert">
+				{{ error.title }}{{ error.tooltip ? ` — ${error.tooltip}` : "" }}
+			</Text>
 		</Flex>
 
 		<ImportMethodPicker
@@ -438,6 +458,8 @@ onBeforeUnmount(() => {
 	display: flex;
 	flex-direction: column;
 	line-height: 0.95;
+	margin: 0;
+	font-weight: 700;
 }
 
 .title_main {

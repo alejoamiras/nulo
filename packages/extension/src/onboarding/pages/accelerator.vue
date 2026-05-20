@@ -8,8 +8,9 @@ import { useAcceleratorStatus } from "@/onboarding/composables/useAcceleratorSta
 const router = useRouter()
 const { status, info, detect } = useAcceleratorStatus()
 
-const acknowledgedSkip = ref(false)
-const isContinueEnabled = computed(() => status.value === "active" || acknowledgedSkip.value)
+// Continue is only enabled once detection succeeds. Skip is a SEPARATE
+// affordance below that immediately routes onward — no two-click gate.
+const isContinueEnabled = computed(() => status.value === "active")
 
 const RELEASES_URL = "https://github.com/alejoamiras/aztec-accelerator/releases/latest"
 
@@ -47,8 +48,11 @@ function openReleases() {
 	window.open(RELEASES_URL, "_blank", "noopener,noreferrer")
 }
 
+// Skip immediately routes to /done — no second click required. This is a
+// "soft-require" but the friction was double-counted before (set local flag,
+// then click Continue), which Codex flagged as fake skipping.
 function handleSkip() {
-	acknowledgedSkip.value = true
+	router.push("/onboarding/done")
 }
 
 function goNext() {
@@ -59,10 +63,10 @@ function goNext() {
 <template>
 	<Flex direction="column" gap="32" :class="$style.page">
 		<Flex direction="column" gap="16" :class="$style.hero">
-			<div :class="$style.title_stack">
+			<h1 :class="$style.title_stack">
 				<span :class="$style.title_main">Speed up</span>
 				<span :class="$style.title_sub">Proving</span>
-			</div>
+			</h1>
 			<div :class="$style.hero_bar" />
 			<Text size="14" color="secondary" height="150">
 				Aztec Accelerator runs proving outside the browser, on this device.
@@ -81,7 +85,7 @@ function goNext() {
 					<Text size="15" weight="700" color="primary" :class="$style.statusTitle">
 						{{ statusTitle }}
 					</Text>
-					<Text v-if="statusDetail" size="13" color="body" height="150">
+					<Text v-if="statusDetail" size="13" color="secondary" height="150">
 						{{ statusDetail }}
 					</Text>
 				</Flex>
@@ -100,7 +104,7 @@ function goNext() {
 				{{ downloadLabel }}
 			</Button>
 			<div v-if="status === 'not-detected' && isWindows" :class="$style.windowsNote">
-				<Text size="13" color="body" height="150">
+				<Text size="13" color="secondary" height="150">
 					Aztec Accelerator isn't available on Windows yet. Proofs will run in your browser.
 				</Text>
 			</div>
@@ -118,6 +122,7 @@ function goNext() {
 
 		<Flex direction="column" align="center" gap="12" :class="$style.continueRow">
 			<Button
+				v-if="status === 'active'"
 				variant="cta"
 				size="large"
 				:disabled="!isContinueEnabled"
@@ -127,7 +132,7 @@ function goNext() {
 				Continue
 			</Button>
 			<button
-				v-if="!acknowledgedSkip && status !== 'active'"
+				v-if="status !== 'active' && status !== 'idle' && status !== 'detecting'"
 				type="button"
 				:class="$style.skipLink"
 				data-testid="onboarding-accelerator-skip"
@@ -154,6 +159,8 @@ function goNext() {
 	display: flex;
 	flex-direction: column;
 	line-height: 0.95;
+	margin: 0;
+	font-weight: 700;
 }
 
 .title_main {
@@ -258,7 +265,7 @@ function goNext() {
 .skipLink {
 	background: transparent;
 	border: none;
-	color: var(--txt-tertiary);
+	color: var(--txt-secondary);
 	font-family: var(--font-mono);
 	font-size: 11px;
 	letter-spacing: 0.08em;
@@ -269,6 +276,12 @@ function goNext() {
 }
 
 .skipLink:hover {
+	color: var(--txt-primary);
+}
+
+.skipLink:focus-visible {
+	outline: 2px dotted var(--nulo-accent);
+	outline-offset: 2px;
 	color: var(--txt-primary);
 }
 </style>

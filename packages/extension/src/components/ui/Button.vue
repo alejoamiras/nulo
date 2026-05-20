@@ -143,6 +143,14 @@ const getStyles = () => {
 	justify-content: center;
 }
 
+/* Keyboard-only focus indicator. Only fires for keyboard navigation
+ * (Tab / arrow keys) — mouse clicks don't trigger :focus-visible, so
+ * mouse users see no change. Brutalist 2px outline in the brand accent. */
+.wrapper:focus-visible {
+	outline: 2px solid var(--nulo-accent);
+	outline-offset: 2px;
+}
+
 /** SIZES */
 .wrapper.dynamic {
 	height: initial;
