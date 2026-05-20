@@ -161,16 +161,18 @@ async function main(): Promise<void> {
 			})
 		console.log("[derivation-parity] reached /popup/general")
 
-		// Switch to Local Network — match existing helpers.ts:switchToLocalNetwork
+		// Switch to Local Network — match helpers.ts:switchToNetwork. The header
+		// chip now navigates to Manage Networks; the row drills into the per-
+		// network detail page, where "Set as active" performs the switch.
 		await page.waitForSelector('[data-testid="network-button"]', { visible: true, timeout: 10_000 })
 		await page.click('[data-testid="network-button"]')
-		await page.waitForSelector('[data-testid="networks-popup"]', { visible: true, timeout: 5_000 })
-		const localItem = await page.waitForSelector('[data-testid="network-item"][data-network-name="Local Network"]', {
+		const localRow = await page.waitForSelector('[data-testid="network-row"][data-network-name="Local Network"]', {
 			visible: true,
 			timeout: 5_000,
 		})
-		await localItem!.click()
-		await page.waitForFunction(() => !document.querySelector('[data-testid="networks-popup"]'), { timeout: 5_000 })
+		await localRow!.click()
+		await page.waitForSelector('[data-testid="network-set-active"]', { visible: true, timeout: 5_000 })
+		await page.click('[data-testid="network-set-active"]')
 		console.log("[derivation-parity] switched to Local Network")
 
 		// Wait for the active account address to settle on the Local-chain account

@@ -44,6 +44,18 @@ const handleEditNetworkName = () => {
 	popupStore.open("edit_network")
 }
 
+const handleSetActive = async () => {
+	if (!network.value) return
+	if (isActive.value) return
+	try {
+		await managers.network.setActiveNetwork(network.value.id)
+		appStore.network = network.value
+		openToast({ label: "Active network updated", icon: "check-circle" })
+	} catch {
+		openToast({ label: "Failed to switch network", icon: "warning", color: "red" }, TOAST_DURATION.LONG)
+	}
+}
+
 const handleAddEndpoint = () => {
 	cacheStore.endpointEditNetworkId = networkId.value
 	cacheStore.endpointEditId = null
@@ -136,6 +148,17 @@ watch(network, (n) => {
 			<Flex direction="column" gap="12">
 				<SectionLabel label="Chain" />
 				<ItemsContainer>
+					<SettingItem
+						size="small"
+						:title="isActive ? 'Active network' : 'Set as active network'"
+						:description="isActive ? 'Currently in use' : 'Switch the wallet to this chain'"
+						:icon="isActive ? 'check-circle' : 'circle'"
+						:iconFillColor="isActive ? 'primary' : 'tertiary'"
+						iconBgColor="transparent"
+						:disabled="isActive"
+						@click="handleSetActive"
+						data-testid="network-set-active"
+					/>
 					<SettingItem
 						size="small"
 						title="Name"
