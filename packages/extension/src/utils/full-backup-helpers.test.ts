@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { collectRestoreErrors, detectBackupType, readBackupFile, remapIdInBackupData } from "./import-helpers"
+import { collectRestoreErrors, detectBackupType, readBackupFile, remapIdInBackupData } from "./full-backup-helpers"
 
 describe("detectBackupType", () => {
 	it("detects plain JSON object", () => {

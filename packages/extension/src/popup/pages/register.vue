@@ -13,6 +13,21 @@ const appStore = useAppStore()
 
 const router = useRouter()
 
+// First-time install: redirect to the onboarding tab. The popup is too small
+// for the welcome / create / import flow. If onboarding hasn't been
+// completed AND no profile exists yet, open or refocus the tab, then close
+// the popup. After onboarding completes (onboardingCompleted=true), this
+// trampoline is bypassed and register.vue won't be reachable anyway because
+// the router guard sends booted users to /popup/general.
+onBeforeMount(async () => {
+	await appStore.loadOnboardingCompleted()
+	if (appStore.onboardingCompleted) return
+	if (appStore.profiles.length > 0) return
+	const { openOrFocusOnboardingTab } = await import("@/wallet/utils/onboarding-tab")
+	await openOrFocusOnboardingTab()
+	window.close()
+})
+
 const handleOpen = (target) => {
 	chrome.windows.create({
 		type: "popup",

@@ -36,6 +36,20 @@ const notificationStore = useNotificationStore()
 const route = useRoute()
 const router = useRouter()
 
+// Deep-link bypass: if a user navigates directly to #/popup/profile/new on
+// a fresh install (no profile yet) and hasn't completed onboarding, the
+// popup is the wrong shell. Redirect to the onboarding tab. The
+// add-another-profile case (post-onboarding, profiles.length > 0) keeps
+// using this popup flow.
+onBeforeMount(async () => {
+	await appStore.loadOnboardingCompleted()
+	if (appStore.onboardingCompleted) return
+	if (appStore.profiles.length > 0) return
+	const { openOrFocusOnboardingTab } = await import("@/wallet/utils/onboarding-tab")
+	await openOrFocusOnboardingTab()
+	window.close()
+})
+
 const backTo = computed(() => String(route.query.from || "/popup/register"))
 
 const wrapperRef = useTemplateRef("wrapperRef")

@@ -36,7 +36,7 @@ const confirmText = ref("")
 
 const isReadyToReset = computed(() => checks.permanent && checks.undone && checks.sure && confirmText.value === appStore.profile?.name)
 
-const handleReset = () => {
+const handleReset = async () => {
 	if (!isReadyToReset.value) return
 
 	managers.profile.deleteProfile(appStore.profile.id)
@@ -53,6 +53,12 @@ const handleReset = () => {
 
 	appStore.isLogined = false
 	appStore.isSessionChecked = false
+
+	// Note: onboardingCompleted intentionally persists across profile resets.
+	// A user who has gone through onboarding once already knows about Aztec
+	// and the accelerator; making them re-learn after a reset would be
+	// patronizing. To restart onboarding, the user uninstalls + reinstalls
+	// the extension (which wipes chrome.storage.local).
 
 	openToast({ label: "Profile deleted", icon: "check-circle" })
 

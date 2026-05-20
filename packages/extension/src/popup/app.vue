@@ -4,19 +4,22 @@ import PopupManager from "./components/popups/PopupManager.vue"
 import Navigation from "./components/Navigation.vue"
 
 /** Utils */
-import { managers, initTransactionService, isBackgroundConnected } from "@/utils/core"
+import { managers, isBackgroundConnected } from "@/utils/core"
 import { isPrefersDarkScheme } from "@/utils/general"
 import { getLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { Config } from "@/wallet/config"
 import { AccountServiceClient, AccountType } from "@/wallet/services/account/client"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
-import { NetworkServiceClient } from "@/wallet/services/network/client"
+
+/** Composables */
+import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
+const { bootstrapActiveProfile } = useProfileBootstrap()
 
 /** Update theme */
 const root = document.querySelector("html")
@@ -72,48 +75,11 @@ function applySetting(setting) {
 	}
 }
 
-const initNetworks = async () => {
-	appStore.networks = []
-	appStore.network = null
-
-	managers.network?.disconnect()
-	managers.network = new NetworkServiceClient()
-
-	appStore.networks = await managers.network.getOrInitNetworks()
-
-	// Service-tracked active network is the source of truth. Falls back to
-	// the testnet seed if nothing is recorded (fresh profile state).
-	const active = await managers.network.getActiveNetwork()
-	if (active) {
-		appStore.network = active
-	} else {
-		appStore.network = appStore.networks.find((n) => n.kind === "testnet") ?? appStore.networks[0]
-		if (appStore.network) {
-			await managers.network.setActiveNetwork(appStore.network.id)
-		}
-	}
-
-	if (appStore.network) {
-		// Prime AztecNode cache and emit onActiveNetworkChanged so downstream
-		// services pick up the active chain.
-		await managers.network.setActiveNetwork(appStore.network.id)
-	}
-	appStore.syncNetworkStatus()
-}
-
-// Auto-create-default lives in a single idempotent server-side method
-// (`ensureDefaultAccount`). The popup can race itself across multiple
-// trigger paths (`onActiveProfileChanged` listener + `loadProfile` re-entry
-// when `isBackgroundConnected` flips) — making the server method idempotent
-// + serialized per-(profile,chain,type) tuple ensures exactly one account
-// regardless of how many concurrent callers fire.
-const initAccount = async () => {
-	managers.account?.disconnect()
-	managers.account = new AccountServiceClient()
-	await managers.account.ensureDefaultAccount(appStore.profile.id, appStore.network.chainId, AccountType.Nulo_v1, "Account")
-	appStore.accounts = await managers.account.getAccounts(appStore.profile.id, appStore.network.chainId, true)
-	await appStore.setupActiveAccount()
-}
+// initNetworks / initAccount factored into useProfileBootstrap. The compatible
+// `bootstrapActiveProfile(profile)` below replays the same chain. The chain
+// watchers below still reach into `managers.network`/`managers.account`
+// directly because they're popup-local (chain switch, etc.) and don't need
+// the bootstrap helper.
 
 /** todo: ref */
 watch(
@@ -163,21 +129,7 @@ watch(
 
 const onActiveProfileChanged = async (profile) => {
 	if (profile) {
-		appStore.profile = profile
-		// Refresh the in-memory profile list so the profile switcher + any
-		// other appStore.profiles reader sees adds (e.g. backup-import
-		// activates a freshly-restored profile) and updates (rename).
-		// SelectProfilePopup keeps its own list, but appStore.profiles still
-		// needs to be authoritative for the rest of the app.
-		appStore.profiles = await managers.profile.getProfiles()
-
-		await initNetworks()
-		await initAccount()
-
-		initTransactionService(appStore.onTxAdded, appStore.onTxUpdated)
-		await appStore.syncTransactions()
-
-		appStore.isLogined = true
+		await bootstrapActiveProfile(profile)
 	} else {
 		popupStore.closeAll()
 		appStore.isLogined = false
@@ -192,16 +144,7 @@ const loadProfile = async () => {
 	appStore.profiles = await managers.profile.getProfiles()
 	const activeProfile = await managers.profile.getActiveProfile()
 	if (activeProfile) {
-		appStore.profile = activeProfile
-
-		await initNetworks()
-		await initAccount()
-
-		initTransactionService(appStore.onTxAdded, appStore.onTxUpdated)
-
-		await appStore.syncTransactions()
-
-		appStore.isLogined = true
+		await bootstrapActiveProfile(activeProfile)
 		appStore.isSessionChecked = true
 
 		if (["popup-register", "popup-auth"].includes(route.name)) router.push("/popup/general")

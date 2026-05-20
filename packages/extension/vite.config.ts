@@ -143,6 +143,10 @@ export default defineConfig({
 					dir: "src/popup/windows",
 					baseRoute: "windows",
 				},
+				{
+					dir: "src/onboarding/pages",
+					baseRoute: "onboarding",
+				},
 			],
 		}),
 
@@ -155,7 +159,7 @@ export default defineConfig({
 				},
 			],
 			dts: "src/types/auto-imports.d.ts",
-			dirs: ["src/composables/", "src/stores/", "src/utils/"],
+			dirs: ["src/composables/", "src/stores/", "src/utils/", "src/onboarding/composables/"],
 			// Rewrites compiled _ctx.<name> template references to resolve against the
 			// auto-import registry so {{ trimAddress(...) }} works without explicit
 			// imports in every SFC. Plugin runs enforce:"post" internally — must stay
@@ -168,7 +172,7 @@ export default defineConfig({
 		}),
 
 		useComponents({
-			dirs: ["src/components"],
+			dirs: ["src/components", "src/onboarding/components"],
 			dts: "src/types/components.d.ts",
 		}),
 
@@ -292,6 +296,7 @@ export default defineConfig({
 				offscreen: "src/offscreen/index.html",
 				popup: "src/popup/index.html",
 				setup: "src/setup/index.html",
+				onboarding: "src/onboarding/index.html",
 			},
 		},
 	},
