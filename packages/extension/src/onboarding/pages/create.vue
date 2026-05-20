@@ -35,6 +35,46 @@ const maxPasswordLength = 128
 
 const trimmedName = computed(() => profileName.value.trim())
 
+// Wallet name is required. Validated at submit time (not via :disabled) so
+// the user gets a visible shake + inline error instead of a silently-disabled
+// button. nameError clears on input.
+const nameError = ref("")
+const shakeName = ref(false)
+const nameInputRef = ref<{ focus: () => void } | null>(null)
+let shakeTimer: ReturnType<typeof setTimeout> | null = null
+
+function triggerNameShake() {
+	shakeName.value = false
+	if (shakeTimer) clearTimeout(shakeTimer)
+	requestAnimationFrame(() => {
+		shakeName.value = true
+		shakeTimer = setTimeout(() => {
+			shakeName.value = false
+		}, 400)
+	})
+}
+
+function validateName(): boolean {
+	const n = trimmedName.value
+	if (n.length < 1) {
+		nameError.value = "Wallet name is required."
+		triggerNameShake()
+		nameInputRef.value?.focus()
+		return false
+	}
+	if (n.length > 32) {
+		nameError.value = "Max 32 characters."
+		triggerNameShake()
+		return false
+	}
+	nameError.value = ""
+	return true
+}
+
+function handleNameInput() {
+	if (nameError.value) nameError.value = ""
+}
+
 const passwordStrengthHint = computed(() => {
 	if (authMethod.value === "passkey") return ""
 	if (!password.value || password.value.length < 8) return "At least 8 characters"
@@ -43,9 +83,9 @@ const passwordStrengthHint = computed(() => {
 	return "Strong password"
 })
 
+// Excludes the name check on purpose — name is validated at submit time so
+// an empty name shakes instead of leaving the button silently disabled.
 const isAllowedToContinue = computed(() => {
-	if (!trimmedName.value || trimmedName.value.length < 1) return false
-	if (trimmedName.value.length > 32) return false
 	if (authMethod.value === "passkey") return true
 	if (!password.value || password.value.length < 8) return false
 	if (password.value !== confirm.value) return false
@@ -70,7 +110,9 @@ function createPasskeyProfileViaModal(name: string) {
 }
 
 async function handleSubmit() {
-	if (!isAllowedToContinue.value || isCreating.value) return
+	if (isCreating.value) return
+	if (!validateName()) return
+	if (!isAllowedToContinue.value) return
 	isCreating.value = true
 
 	let profile
@@ -114,7 +156,7 @@ async function handleSubmit() {
 }
 
 function onKeydown(e: KeyboardEvent) {
-	if (e.key === "Enter" && isAllowedToContinue.value && !isCreating.value) handleSubmit()
+	if (e.key === "Enter" && !isCreating.value) handleSubmit()
 }
 
 onMounted(() => {
@@ -123,6 +165,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
 	document.removeEventListener("keydown", onKeydown)
+	if (shakeTimer) clearTimeout(shakeTimer)
 	// Defense-in-depth: zero out secret material on unmount.
 	password.value = ""
 	confirm.value = ""
@@ -149,13 +192,22 @@ onBeforeUnmount(() => {
 		<form :class="$style.form" @submit.prevent="handleSubmit">
 			<Flex direction="column" gap="8">
 				<Text size="11" weight="700" color="secondary" :class="$style.section_label">Wallet name</Text>
-				<Input
-					v-model="profileName"
-					type="text"
-					placeholder="My Wallet"
-					:maxLength="32"
-					data-testid="onboarding-name-input"
-				/>
+				<div :class="[shakeName && $style.shake]">
+					<Input
+						ref="nameInputRef"
+						v-model="profileName"
+						type="text"
+						placeholder="My Wallet"
+						:maxLength="32"
+						:error="!!nameError"
+						:ariaInvalid="!!nameError"
+						data-testid="onboarding-name-input"
+						@input="handleNameInput"
+					/>
+				</div>
+				<Text v-if="nameError" size="12" color="red" height="150" role="alert">
+					{{ nameError }}
+				</Text>
 			</Flex>
 
 			<Flex direction="column" gap="12">
@@ -333,5 +385,18 @@ onBeforeUnmount(() => {
 	padding: 16px;
 	background: var(--nulo-surface);
 	border: 1px solid var(--nulo-border);
+}
+
+@keyframes shakeInput {
+	0% { transform: translateX(0); }
+	20% { transform: translateX(-4px); }
+	40% { transform: translateX(4px); }
+	60% { transform: translateX(-3px); }
+	80% { transform: translateX(2px); }
+	100% { transform: translateX(0); }
+}
+
+.shake {
+	animation: shakeInput 0.4s ease;
 }
 </style>
