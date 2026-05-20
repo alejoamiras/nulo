@@ -10,10 +10,9 @@ const appStore = useAppStore()
 async function openWallet() {
 	await appStore.setOnboardingCompleted(true)
 	await clearOnboardingTabTracking()
-	// Done CTA always opens a popup-shaped window directly. We avoid
-	// chrome.action.openPopup because it requires the extension to already
-	// be pinned to the toolbar — contradicts the pin-tip on this same screen,
-	// and behavior varies pre-Chrome-127 (Codex review).
+	// Use chrome.windows.create directly, not chrome.action.openPopup —
+	// the latter requires the extension already pinned to the toolbar
+	// (which contradicts our pin-tip on this same screen).
 	await chrome.windows.create({
 		url: chrome.runtime.getURL("src/popup/index.html"),
 		type: "popup",
@@ -25,97 +24,94 @@ async function openWallet() {
 </script>
 
 <template>
-	<Flex direction="column" align="center" :class="$style.page">
-		<header :class="$style.hero">
-			<h1 :class="$style.title">You're all set.</h1>
-			<p :class="$style.subtitle">Your wallet is ready.</p>
-		</header>
+	<Flex direction="column" align="center" gap="40" :class="$style.page">
+		<Flex direction="column" align="center" gap="16" :class="$style.hero">
+			<div :class="$style.title_stack">
+				<span :class="$style.title_main">You're</span>
+				<span :class="$style.title_sub">All Set</span>
+			</div>
+			<div :class="$style.hero_bar" />
+			<Text size="14" color="secondary" height="150" align="center">
+				Your wallet is ready.
+			</Text>
+		</Flex>
 
-		<div :class="$style.pinTip" data-testid="onboarding-pin-tip">
-			<span :class="$style.pinTipLabel">Tip</span>
-			<p :class="$style.pinTipBody">
+		<Flex direction="column" gap="12" :class="$style.tip" data-testid="onboarding-pin-tip">
+			<Flex align="center" gap="8">
+				<MaterialIcon name="extension" :size="16" color="secondary" />
+				<Text size="11" weight="700" color="secondary" :class="$style.tip_label">Pro tip</Text>
+			</Flex>
+			<Text size="13" color="body" height="150">
 				Click the puzzle icon in your Chrome toolbar, then pin Nulo for
-				quick access.
-			</p>
-		</div>
+				quick access — that's how you'll open the wallet from now on.
+			</Text>
+		</Flex>
 
-		<button
-			type="button"
-			:class="$style.cta"
+		<Button
+			variant="cta"
+			size="large"
 			data-testid="onboarding-done-open"
 			@click="openWallet"
 		>
 			Open wallet
-		</button>
+		</Button>
 	</Flex>
 </template>
 
 <style module>
 .page {
-	max-width: 480px;
+	max-width: 440px;
 	width: 100%;
-	margin: 96px auto 0;
-	gap: 40px;
+	margin: 48px auto 0;
 }
 
 .hero {
-	text-align: center;
+	padding: 24px 0;
 }
 
-.title {
-	font-size: 36px;
-	letter-spacing: -0.02em;
-	font-weight: 600;
-	margin: 0 0 8px;
-	color: var(--app-text);
+.title_stack {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	line-height: 0.95;
+	gap: 4px;
 }
 
-.subtitle {
-	font-size: 17px;
-	color: var(--text-secondary, #8a8a8a);
-	margin: 0;
-}
-
-.pinTip {
-	background: var(--surface, #121212);
-	border: 1px solid var(--border-color, #2a2a2a);
-	border-radius: 10px;
-	padding: 16px 20px;
-	width: 100%;
-	box-sizing: border-box;
-}
-.pinTipLabel {
-	display: block;
-	font-size: 11px;
-	color: var(--text-faint, #555);
-	letter-spacing: 0.08em;
+.title_main {
+	font-family: var(--font-headline);
+	font-size: 48px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
 	text-transform: uppercase;
-	margin-bottom: 6px;
-}
-.pinTipBody {
-	margin: 0;
-	font-size: 14px;
-	color: var(--text-secondary, #c0c0c0);
-	line-height: 1.5;
+	color: var(--nulo-accent);
 }
 
-.cta {
+.title_sub {
+	font-family: var(--font-headline);
+	font-size: 48px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
+	text-transform: uppercase;
+	color: var(--nulo-secondary);
+}
+
+.hero_bar {
+	width: 56px;
+	height: 2px;
+	background: var(--nulo-accent);
+}
+
+.tip {
 	width: 100%;
-	padding: 16px 24px;
-	border-radius: 10px;
-	border: 1px solid var(--app-text);
-	background: var(--app-text);
-	color: var(--app-bg);
-	font: inherit;
-	font-weight: 600;
-	font-size: 16px;
-	cursor: pointer;
-	transition: opacity 140ms ease;
+	padding: 16px 20px;
+	background: var(--nulo-surface);
+	border: 1px solid var(--nulo-border);
+	border-left: 2px solid var(--nulo-outline);
 }
-.cta:hover {
-	opacity: 0.85;
-}
-.cta:active {
-	opacity: 0.7;
+
+.tip_label {
+	font-family: var(--font-headline);
+	text-transform: uppercase;
+	letter-spacing: 0.18em;
 }
 </style>

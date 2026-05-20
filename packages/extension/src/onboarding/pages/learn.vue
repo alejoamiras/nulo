@@ -7,14 +7,17 @@ const router = useRouter()
 
 const cards = [
 	{
+		number: "01",
 		title: "Programmable privacy",
 		body: "Aztec runs private smart contracts. Your balances, transfers, and calls stay encrypted — visible only to you.",
 	},
 	{
-		title: "Proofs run on your machine",
+		number: "02",
+		title: "Proofs on your machine",
 		body: "Every transaction generates a zero-knowledge proof on your machine. The network only sees the proof — never your inputs.",
 	},
 	{
+		number: "03",
 		title: "Proofs take time",
 		body: "In the browser, a simple transfer can take 10–30 seconds. The next screen explains how to speed this up.",
 	},
@@ -26,29 +29,37 @@ function goNext() {
 </script>
 
 <template>
-	<Flex direction="column" align="center" :class="$style.page">
-		<header :class="$style.hero">
-			<h1 :class="$style.title">Meet Aztec</h1>
-		</header>
+	<Flex direction="column" gap="40" :class="$style.page">
+		<Flex direction="column" gap="16" :class="$style.hero">
+			<div :class="$style.title_stack">
+				<span :class="$style.title_main">Meet</span>
+				<span :class="$style.title_sub">Aztec</span>
+			</div>
+			<div :class="$style.hero_bar" />
+			<Text size="14" color="secondary" height="150">
+				Three things to know before your first transaction.
+			</Text>
+		</Flex>
 
 		<div :class="$style.grid">
-			<div v-for="card in cards" :key="card.title" :class="$style.card">
-				<h2 :class="$style.cardTitle">{{ card.title }}</h2>
-				<p :class="$style.cardBody">{{ card.body }}</p>
-			</div>
+			<article v-for="card in cards" :key="card.title" :class="$style.card">
+				<Text size="11" mono color="tertiary" :class="$style.card_num">{{ card.number }}</Text>
+				<Text size="16" weight="700" color="primary" :class="$style.card_title">{{ card.title }}</Text>
+				<Text size="13" color="body" height="150">{{ card.body }}</Text>
+			</article>
 		</div>
 
 		<Flex direction="column" align="center" gap="12" :class="$style.actions">
-			<button
-				type="button"
-				:class="$style.cta"
+			<Button
+				variant="cta"
+				size="large"
 				data-testid="onboarding-learn-continue"
 				@click="goNext"
 			>
 				Continue
-			</button>
-			<!-- Skip-intro routes to /accelerator, NOT /done — the accelerator
-				step still gates progression (Codex v2 critique). -->
+			</Button>
+			<!-- Skip intro routes to /accelerator, NOT /done — the accelerator
+				gate still applies (Codex v2 critique). -->
 			<button
 				type="button"
 				:class="$style.skipLink"
@@ -63,29 +74,54 @@ function goNext() {
 
 <style module>
 .page {
-	max-width: 960px;
+	max-width: 880px;
 	width: 100%;
-	margin: 48px auto 0;
-	gap: 40px;
+	margin: 16px auto 0;
 }
 
 .hero {
-	text-align: center;
+	padding: 8px 0 8px;
 }
-.title {
-	font-size: 32px;
-	letter-spacing: -0.02em;
-	font-weight: 600;
-	margin: 0;
-	color: var(--app-text);
+
+.title_stack {
+	display: flex;
+	flex-direction: column;
+	line-height: 0.95;
+}
+
+.title_main {
+	font-family: var(--font-headline);
+	font-size: 48px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
+	text-transform: uppercase;
+	color: var(--nulo-accent);
+}
+
+.title_sub {
+	font-family: var(--font-headline);
+	font-size: 48px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
+	text-transform: uppercase;
+	color: var(--nulo-secondary);
+}
+
+.hero_bar {
+	width: 40px;
+	height: 2px;
+	background: var(--nulo-accent);
+	margin-top: 12px;
 }
 
 .grid {
 	display: grid;
 	grid-template-columns: repeat(3, 1fr);
-	gap: 16px;
-	width: 100%;
+	gap: 1px;
+	background: var(--nulo-border);
+	border: 1px solid var(--nulo-border);
 }
+
 @media (max-width: 720px) {
 	.grid {
 		grid-template-columns: 1fr;
@@ -93,58 +129,40 @@ function goNext() {
 }
 
 .card {
-	background: var(--surface, #121212);
-	border: 1px solid var(--border-color, #2a2a2a);
-	border-radius: 12px;
-	padding: 24px;
 	display: flex;
 	flex-direction: column;
 	gap: 12px;
+	padding: 24px;
+	background: var(--card-bg);
 }
-.cardTitle {
-	font-size: 18px;
+
+.card_num {
+	letter-spacing: 0.12em;
 	font-weight: 600;
-	margin: 0;
-	color: var(--app-text);
 }
-.cardBody {
-	font-size: 14px;
-	color: var(--text-secondary, #c0c0c0);
-	margin: 0;
-	line-height: 1.55;
+
+.card_title {
+	font-family: var(--font-headline);
 }
 
 .actions {
 	margin-top: 8px;
 }
-.cta {
-	min-width: 240px;
-	padding: 14px 32px;
-	border-radius: 10px;
-	border: 1px solid var(--app-text);
-	background: var(--app-text);
-	color: var(--app-bg);
-	font: inherit;
-	font-weight: 600;
-	font-size: 15px;
-	cursor: pointer;
-	transition: opacity 140ms ease;
-}
-.cta:hover {
-	opacity: 0.85;
-}
 
 .skipLink {
 	background: transparent;
 	border: none;
-	color: var(--text-secondary, #8a8a8a);
-	font: inherit;
-	font-size: 13px;
-	text-decoration: underline;
+	color: var(--txt-tertiary);
+	font-family: var(--font-mono);
+	font-size: 11px;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
 	cursor: pointer;
-	padding: 4px 8px;
+	padding: 6px 12px;
+	transition: color 0.15s var(--bezier);
 }
+
 .skipLink:hover {
-	color: var(--app-text);
+	color: var(--txt-primary);
 }
 </style>

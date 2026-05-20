@@ -3,8 +3,8 @@
 </route>
 
 <script setup lang="ts">
-/** Components — popup-shared passkey ceremony dialog (teleports to #popup which
-	 the onboarding shell declares too). */
+/** Components — popup-shared passkey ceremony dialog (teleports to #popup
+	which the onboarding shell declares too). */
 import PasskeyCeremonyDialog from "@/popup/components/popups/PasskeyCeremonyDialog.vue"
 
 /** Composables */
@@ -131,99 +131,103 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
 	document.removeEventListener("keydown", onKeydown)
-	// Defense-in-depth: zero out secret material on unmount even though Vue's
-	// ref refs are GCed anyway.
+	// Defense-in-depth: zero out secret material on unmount.
 	password.value = ""
 	confirm.value = ""
 })
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.page">
+	<Flex direction="column" gap="32" :class="$style.page">
 		<header :class="$style.hero">
-			<h1 :class="$style.title">Set up your wallet</h1>
-			<p :class="$style.subtitle">Name it, choose how to unlock it, and you're in.</p>
+			<div :class="$style.title_stack">
+				<span :class="$style.title_main">Create</span>
+				<span :class="$style.title_sub">Wallet</span>
+			</div>
+			<div :class="$style.hero_bar" />
 		</header>
 
 		<form :class="$style.form" @submit.prevent="handleSubmit">
-			<label :class="$style.field">
-				<span :class="$style.label">Wallet name</span>
-				<input
+			<Flex direction="column" gap="8">
+				<Text size="11" weight="700" color="secondary" :class="$style.section_label">Wallet name</Text>
+				<Input
 					v-model="profileName"
 					type="text"
 					placeholder="My Wallet"
-					maxlength="32"
-					required
+					:maxLength="32"
 					data-testid="onboarding-name-input"
-					:class="$style.input"
 				/>
-			</label>
+			</Flex>
 
-			<div :class="$style.methodTabs" role="tablist">
-				<button
-					type="button"
-					role="tab"
-					:aria-selected="authMethod === 'password'"
-					:class="[$style.methodTab, authMethod === 'password' && $style.methodTabActive]"
-					data-testid="onboarding-method-password"
-					@click="authMethod = 'password'"
-				>
-					Password
-				</button>
-				<button
-					type="button"
-					role="tab"
-					:aria-selected="authMethod === 'passkey'"
-					:class="[$style.methodTab, authMethod === 'passkey' && $style.methodTabActive]"
-					data-testid="onboarding-method-passkey"
-					@click="authMethod = 'passkey'"
-				>
-					Passkey
-				</button>
-			</div>
+			<Flex direction="column" gap="12">
+				<Text size="11" weight="700" color="secondary" :class="$style.section_label">Authentication method</Text>
+				<Flex gap="0" :class="$style.tabs" role="tablist">
+					<button
+						type="button"
+						role="tab"
+						:aria-selected="authMethod === 'password'"
+						:class="[$style.tab, authMethod === 'password' && $style.tabActive]"
+						data-testid="onboarding-method-password"
+						@click="authMethod = 'password'"
+					>
+						Password
+					</button>
+					<button
+						type="button"
+						role="tab"
+						:aria-selected="authMethod === 'passkey'"
+						:class="[$style.tab, authMethod === 'passkey' && $style.tabActive]"
+						data-testid="onboarding-method-passkey"
+						@click="authMethod = 'passkey'"
+					>
+						Passkey
+					</button>
+				</Flex>
+			</Flex>
 
-			<div v-if="authMethod === 'password'" :class="$style.fields">
-				<label :class="$style.field">
-					<span :class="$style.label">Password</span>
-					<input
+			<Flex v-if="authMethod === 'password'" direction="column" gap="12">
+				<Flex direction="column" gap="8">
+					<Text size="11" weight="700" color="secondary" :class="$style.section_label">Password</Text>
+					<Input
 						v-model="password"
 						type="password"
-						:maxlength="maxPasswordLength"
-						placeholder="At least 8 characters"
-						required
+						placeholder="Strong password"
+						:maxLength="maxPasswordLength"
 						data-testid="onboarding-password-input"
-						:class="$style.input"
 					/>
-				</label>
-				<label :class="$style.field">
-					<span :class="$style.label">Confirm password</span>
-					<input
+				</Flex>
+				<Flex direction="column" gap="8">
+					<Text size="11" weight="700" color="secondary" :class="$style.section_label">Confirm password</Text>
+					<Input
 						v-model="confirm"
 						type="password"
-						:maxlength="maxPasswordLength"
-						required
+						placeholder="Repeat password"
+						:maxLength="maxPasswordLength"
 						data-testid="onboarding-password-confirm"
-						:class="$style.input"
 					/>
-				</label>
-				<p v-if="passwordStrengthHint" :class="$style.hint">{{ passwordStrengthHint }}</p>
-			</div>
+				</Flex>
+				<Text v-if="passwordStrengthHint" size="12" color="tertiary" height="150">
+					{{ passwordStrengthHint }}
+				</Text>
+			</Flex>
 
 			<div v-else :class="$style.passkeyInfo">
-				<p>
+				<Text size="13" color="body" height="150">
 					Your passkey replaces a password. Touch ID, Windows Hello, or a
 					hardware key — whichever your device supports.
-				</p>
+				</Text>
 			</div>
 
-			<button
-				type="submit"
+			<Button
+				variant="cta"
+				size="large"
 				:disabled="!isAllowedToContinue || isCreating"
-				:class="$style.submit"
+				:loading="isCreating"
 				data-testid="onboarding-submit-create"
+				@click="handleSubmit"
 			>
 				{{ submitLabel }}
-			</button>
+			</Button>
 		</form>
 
 		<PasskeyCeremonyDialog
@@ -239,131 +243,92 @@ onBeforeUnmount(() => {
 .page {
 	max-width: 480px;
 	width: 100%;
-	margin: 64px auto 0;
-	gap: 40px;
+	margin: 16px auto 0;
 }
 
 .hero {
-	text-align: center;
+	padding: 8px 0 16px;
 }
-.title {
-	font-size: 32px;
-	letter-spacing: -0.02em;
-	font-weight: 600;
-	margin: 0 0 8px;
-	color: var(--app-text);
+
+.title_stack {
+	display: flex;
+	flex-direction: column;
+	line-height: 0.95;
 }
-.subtitle {
-	font-size: 15px;
-	color: var(--text-secondary, #8a8a8a);
-	margin: 0;
+
+.title_main {
+	font-family: var(--font-headline);
+	font-size: 48px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
+	text-transform: uppercase;
+	color: var(--nulo-accent);
+}
+
+.title_sub {
+	font-family: var(--font-headline);
+	font-size: 48px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
+	text-transform: uppercase;
+	color: var(--nulo-secondary);
+}
+
+.hero_bar {
+	width: 40px;
+	height: 2px;
+	background: var(--nulo-accent);
+	margin-top: 12px;
 }
 
 .form {
 	display: flex;
 	flex-direction: column;
-	gap: 16px;
-	width: 100%;
+	gap: 24px;
 }
 
-.field {
-	display: flex;
-	flex-direction: column;
-	gap: 6px;
-}
-.label {
-	font-size: 12px;
-	color: var(--text-secondary, #8a8a8a);
+.section_label {
 	text-transform: uppercase;
-	letter-spacing: 0.06em;
-}
-.input {
-	padding: 12px 14px;
-	border-radius: 8px;
-	border: 1px solid var(--border-color, #2a2a2a);
-	background: var(--surface, #121212);
-	color: var(--app-text);
-	font: inherit;
-	font-size: 15px;
-	outline: none;
-	transition: border-color 140ms ease;
-}
-.input:focus {
-	border-color: var(--app-text);
+	letter-spacing: 0.18em;
+	font-family: var(--font-headline);
 }
 
-.methodTabs {
-	display: grid;
-	grid-template-columns: 1fr 1fr;
-	gap: 4px;
-	padding: 4px;
-	background: var(--surface, #121212);
-	border: 1px solid var(--border-color, #2a2a2a);
-	border-radius: 10px;
+.tabs {
+	border: 1px solid var(--nulo-outline);
+	background: var(--nulo-surface);
+	width: fit-content;
 }
-.methodTab {
-	padding: 10px;
+
+.tab {
 	background: transparent;
 	border: none;
-	color: var(--text-secondary, #8a8a8a);
-	font: inherit;
-	font-size: 14px;
-	font-weight: 500;
+	color: var(--txt-body);
+	font-family: var(--font-headline);
+	font-size: 12px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.12em;
+	padding: 10px 20px;
 	cursor: pointer;
-	border-radius: 8px;
-	transition: background 140ms ease, color 140ms ease;
+	transition: background 0.15s var(--bezier), color 0.15s var(--bezier);
 }
-.methodTab:hover {
-	color: var(--app-text);
+
+.tab:hover {
+	color: var(--txt-primary);
 }
-.methodTabActive {
-	background: var(--app-text);
+
+.tabActive {
+	background: var(--nulo-accent);
 	color: var(--app-bg);
 }
 
-.fields {
-	display: flex;
-	flex-direction: column;
-	gap: 12px;
-}
-
-.hint {
-	font-size: 12px;
-	color: var(--text-secondary, #8a8a8a);
-	margin: 0;
+.tabActive:hover {
+	color: var(--app-bg);
 }
 
 .passkeyInfo {
-	font-size: 14px;
-	color: var(--text-secondary, #c0c0c0);
-	background: var(--surface, #121212);
-	border: 1px solid var(--border-color, #2a2a2a);
-	border-radius: 10px;
 	padding: 16px;
-	line-height: 1.5;
-}
-.passkeyInfo p {
-	margin: 0;
-}
-
-.submit {
-	margin-top: 8px;
-	padding: 14px 20px;
-	border-radius: 10px;
-	border: 1px solid var(--app-text);
-	background: var(--app-text);
-	color: var(--app-bg);
-	font: inherit;
-	font-weight: 600;
-	font-size: 15px;
-	cursor: pointer;
-	transition: opacity 140ms ease;
-}
-.submit:disabled {
-	opacity: 0.4;
-	cursor: not-allowed;
-}
-.submit:not(:disabled):hover {
-	opacity: 0.85;
+	background: var(--nulo-surface);
+	border: 1px solid var(--nulo-border);
 }
 </style>

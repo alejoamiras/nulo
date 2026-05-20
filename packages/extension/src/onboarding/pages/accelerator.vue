@@ -11,22 +11,37 @@ const { status, info, detect } = useAcceleratorStatus()
 const acknowledgedSkip = ref(false)
 const isContinueEnabled = computed(() => status.value === "active" || acknowledgedSkip.value)
 
-// Soft-require: user must either successfully detect OR explicitly click Skip
-// (locked decision). Auto-detect runs on mount; if it returns 'active', the
-// gate is satisfied. Any other status keeps Continue disabled until the user
-// clicks Skip.
-
 const RELEASES_URL = "https://github.com/alejoamiras/aztec-accelerator/releases/latest"
 
+const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : ""
+const isWindows = computed(() => /Windows/.test(userAgent))
 const downloadLabel = computed(() => {
-	const ua = typeof navigator !== "undefined" ? navigator.userAgent : ""
-	if (/Mac/.test(ua)) return "Download for macOS"
-	if (/Linux/.test(ua)) return "Download for Linux"
-	if (/Windows/.test(ua)) return "Aztec Accelerator on Windows"
+	if (/Mac/.test(userAgent)) return "Download for macOS"
+	if (/Linux/.test(userAgent)) return "Download for Linux"
 	return "Download Aztec Accelerator"
 })
 
-const isWindows = computed(() => typeof navigator !== "undefined" && /Windows/.test(navigator.userAgent))
+const statusTitle = computed(() => {
+	switch (status.value) {
+		case "active": return "Active"
+		case "no-bb": return "Almost ready"
+		case "not-detected": return "Not detected"
+		default: return "Looking..."
+	}
+})
+
+const statusDetail = computed(() => {
+	switch (status.value) {
+		case "active":
+			return info.value?.aztec_version ? `Aztec runtime ${info.value.aztec_version}.` : "Proofs will be generated natively."
+		case "no-bb":
+			return "Open Aztec Accelerator from your menu bar and wait for setup to finish."
+		case "not-detected":
+			return "Proofs will run in your browser (slower)."
+		default:
+			return ""
+	}
+})
 
 function openReleases() {
 	window.open(RELEASES_URL, "_blank", "noopener,noreferrer")
@@ -42,74 +57,75 @@ function goNext() {
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.page">
-		<header :class="$style.hero">
-			<h1 :class="$style.title">Speed up proving</h1>
-			<p :class="$style.subtitle">
+	<Flex direction="column" gap="32" :class="$style.page">
+		<Flex direction="column" gap="16" :class="$style.hero">
+			<div :class="$style.title_stack">
+				<span :class="$style.title_main">Speed up</span>
+				<span :class="$style.title_sub">Proving</span>
+			</div>
+			<div :class="$style.hero_bar" />
+			<Text size="14" color="secondary" height="150">
 				Aztec Accelerator runs proving outside the browser, on this device.
 				It lives in your menu bar.
-			</p>
-		</header>
+			</Text>
+		</Flex>
 
-		<div :class="[$style.statusCard, $style[status]]" :data-status="status" data-testid="onboarding-accelerator-status">
-			<Flex align="center" gap="12">
+		<div
+			:class="[$style.statusCard, $style[status]]"
+			:data-status="status"
+			data-testid="onboarding-accelerator-status"
+		>
+			<Flex align="center" gap="16">
 				<span :class="$style.dot" />
-				<div :class="$style.statusBody">
-					<strong :class="$style.statusLabel">
-						<template v-if="status === 'idle' || status === 'detecting'">Looking for Aztec Accelerator...</template>
-						<template v-else-if="status === 'active'">Active.</template>
-						<template v-else-if="status === 'no-bb'">Almost ready.</template>
-						<template v-else>Not detected.</template>
-					</strong>
-					<p :class="$style.statusDetail">
-						<template v-if="status === 'active'">
-							Aztec runtime {{ info?.aztec_version || "" }}. Proofs will be generated natively.
-						</template>
-						<template v-else-if="status === 'no-bb'">
-							Aztec Accelerator is still installing its proving binary. Open the menu-bar app and wait for setup to finish.
-						</template>
-						<template v-else-if="status === 'not-detected'">
-							Proofs will run in your browser (slower).
-						</template>
-					</p>
-				</div>
+				<Flex direction="column" gap="4" :class="$style.statusBody">
+					<Text size="15" weight="700" color="primary" :class="$style.statusTitle">
+						{{ statusTitle }}
+					</Text>
+					<Text v-if="statusDetail" size="13" color="body" height="150">
+						{{ statusDetail }}
+					</Text>
+				</Flex>
 			</Flex>
 		</div>
 
-		<Flex direction="column" gap="8" :class="$style.actions">
-			<button
-				v-if="status === 'not-detected' && !isWindows"
-				type="button"
-				:class="$style.cta"
+		<Flex direction="column" gap="10" :class="$style.actions">
+			<Button
+				v-if="(status === 'not-detected' || status === 'no-bb') && !isWindows"
+				variant="primary"
+				size="large"
+				wide
 				data-testid="onboarding-accelerator-download"
 				@click="openReleases"
 			>
 				{{ downloadLabel }}
-			</button>
-			<p v-if="status === 'not-detected' && isWindows" :class="$style.windowsNote">
-				Aztec Accelerator isn't available on Windows yet.
-			</p>
-			<button
+			</Button>
+			<div v-if="status === 'not-detected' && isWindows" :class="$style.windowsNote">
+				<Text size="13" color="body" height="150">
+					Aztec Accelerator isn't available on Windows yet. Proofs will run in your browser.
+				</Text>
+			</div>
+			<Button
 				v-if="status === 'not-detected' || status === 'no-bb' || status === 'active'"
-				type="button"
-				:class="[$style.cta, status === 'active' && $style.ctaOutline]"
+				:variant="status === 'active' ? 'primary_outline' : 'primary_outline'"
+				size="large"
+				wide
 				data-testid="onboarding-accelerator-test"
 				@click="detect"
 			>
 				{{ status === "active" ? "Re-test" : "Test connection" }}
-			</button>
+			</Button>
 		</Flex>
 
-		<Flex direction="column" align="center" gap="10" :class="$style.continueRow">
-			<button
-				type="button"
-				:class="$style.continue"
+		<Flex direction="column" align="center" gap="12" :class="$style.continueRow">
+			<Button
+				variant="cta"
+				size="large"
 				:disabled="!isContinueEnabled"
 				data-testid="onboarding-accelerator-continue"
 				@click="goNext"
 			>
 				Continue
-			</button>
+			</Button>
 			<button
 				v-if="!acknowledgedSkip && status !== 'active'"
 				type="button"
@@ -117,7 +133,7 @@ function goNext() {
 				data-testid="onboarding-accelerator-skip"
 				@click="handleSkip"
 			>
-				Skip — proving will run in your browser.
+				Skip — proving will run in your browser
 			</button>
 		</Flex>
 	</Flex>
@@ -127,75 +143,100 @@ function goNext() {
 .page {
 	max-width: 560px;
 	width: 100%;
-	margin: 48px auto 0;
-	gap: 32px;
+	margin: 16px auto 0;
 }
 
 .hero {
-	text-align: center;
+	padding: 8px 0;
 }
-.title {
-	font-size: 32px;
-	letter-spacing: -0.02em;
-	font-weight: 600;
-	margin: 0 0 8px;
-	color: var(--app-text);
+
+.title_stack {
+	display: flex;
+	flex-direction: column;
+	line-height: 0.95;
 }
-.subtitle {
-	font-size: 15px;
-	color: var(--text-secondary, #8a8a8a);
-	margin: 0;
-	line-height: 1.55;
+
+.title_main {
+	font-family: var(--font-headline);
+	font-size: 48px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
+	text-transform: uppercase;
+	color: var(--nulo-accent);
+}
+
+.title_sub {
+	font-family: var(--font-headline);
+	font-size: 48px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
+	text-transform: uppercase;
+	color: var(--nulo-secondary);
+}
+
+.hero_bar {
+	width: 40px;
+	height: 2px;
+	background: var(--nulo-accent);
+	margin-top: 12px;
 }
 
 .statusCard {
-	background: var(--surface, #121212);
-	border: 1px solid var(--border-color, #2a2a2a);
-	border-radius: 12px;
+	background: var(--nulo-surface);
+	border: 1px solid var(--nulo-border);
 	padding: 20px 24px;
+	transition: border-color 0.2s var(--bezier);
+}
+
+.statusCard.active {
+	border-color: var(--green);
+}
+
+.statusCard.no-bb {
+	border-color: var(--yellow);
+}
+
+.statusCard.not-detected {
+	border-color: var(--nulo-outline);
 }
 
 .dot {
 	width: 10px;
 	height: 10px;
-	border-radius: 50%;
 	flex-shrink: 0;
-	background: var(--text-faint, #555);
-	transition: background 200ms ease;
+	background: var(--nulo-secondary);
+	transition: background 0.2s var(--bezier);
 }
+
 .idle .dot,
 .detecting .dot {
-	background: #8a8a8a;
+	background: var(--nulo-secondary);
 	animation: pulse 1.4s ease-in-out infinite;
 }
+
 .active .dot {
-	background: #6fc06f;
+	background: var(--green);
 }
+
 .no-bb .dot {
-	background: #d9a85f;
+	background: var(--yellow);
 }
+
 .not-detected .dot {
-	background: #e07070;
+	background: var(--red);
 }
+
 @keyframes pulse {
-	0%, 100% { opacity: 0.5; }
+	0%, 100% { opacity: 0.45; }
 	50% { opacity: 1; }
 }
 
 .statusBody {
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
+	flex: 1;
 }
-.statusLabel {
-	font-size: 15px;
-	font-weight: 600;
-	color: var(--app-text);
-}
-.statusDetail {
-	margin: 0;
-	font-size: 13px;
-	color: var(--text-secondary, #8a8a8a);
+
+.statusTitle {
+	font-family: var(--font-headline);
 }
 
 .actions {
@@ -203,70 +244,31 @@ function goNext() {
 	flex-direction: column;
 	gap: 8px;
 }
-.cta {
-	padding: 12px 20px;
-	border-radius: 8px;
-	border: 1px solid var(--app-text);
-	background: var(--app-text);
-	color: var(--app-bg);
-	font: inherit;
-	font-weight: 500;
-	font-size: 14px;
-	cursor: pointer;
-	transition: opacity 140ms ease;
-}
-.cta:hover {
-	opacity: 0.85;
-}
-.ctaOutline {
-	background: transparent;
-	color: var(--app-text);
-}
 
 .windowsNote {
-	font-size: 13px;
-	color: var(--text-secondary, #8a8a8a);
-	margin: 0;
-	padding: 12px;
-	background: var(--surface, #121212);
-	border: 1px solid var(--border-color, #2a2a2a);
-	border-radius: 8px;
+	padding: 14px 16px;
+	background: var(--nulo-surface);
+	border: 1px solid var(--nulo-border);
 }
 
 .continueRow {
 	margin-top: 8px;
 }
-.continue {
-	min-width: 240px;
-	padding: 14px 32px;
-	border-radius: 10px;
-	border: 1px solid var(--app-text);
-	background: var(--app-text);
-	color: var(--app-bg);
-	font: inherit;
-	font-weight: 600;
-	font-size: 15px;
-	cursor: pointer;
-	transition: opacity 140ms ease;
-}
-.continue:disabled {
-	opacity: 0.4;
-	cursor: not-allowed;
-}
-.continue:not(:disabled):hover {
-	opacity: 0.85;
-}
+
 .skipLink {
 	background: transparent;
 	border: none;
-	color: var(--text-secondary, #8a8a8a);
-	font: inherit;
-	font-size: 13px;
-	text-decoration: underline;
+	color: var(--txt-tertiary);
+	font-family: var(--font-mono);
+	font-size: 11px;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
 	cursor: pointer;
-	padding: 4px 8px;
+	padding: 6px 12px;
+	transition: color 0.15s var(--bezier);
 }
+
 .skipLink:hover {
-	color: var(--app-text);
+	color: var(--txt-primary);
 }
 </style>

@@ -18,6 +18,6 @@ body {
 	width: 100%;
 	min-width: 320px;
 	background: var(--app-bg);
-	color: var(--app-text);
-	font-family: var(--font-family, "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+	color: var(--txt-primary);
+	font-family: var(--font-body);
 }

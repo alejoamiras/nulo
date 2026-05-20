@@ -4,104 +4,98 @@
 
 <script setup lang="ts">
 const router = useRouter()
-
-const goCreate = () => router.push("/onboarding/create")
-const goImport = () => router.push("/onboarding/import")
 </script>
 
 <template>
 	<Flex direction="column" align="center" :class="$style.page">
-		<header :class="$style.hero">
-			<h1 :class="$style.title">Welcome to Nulo.</h1>
-			<p :class="$style.subtitle">A private wallet for Aztec.</p>
-		</header>
-
-		<Flex direction="column" gap="16" :class="$style.choices">
-			<button
-				type="button"
-				:class="[$style.choice, $style.primary]"
-				data-testid="onboarding-welcome-create"
-				@click="goCreate"
-			>
-				<span :class="$style.choiceTitle">Create a new wallet</span>
-				<span :class="$style.choiceBody">Takes about a minute.</span>
-			</button>
-
-			<button
-				type="button"
-				:class="$style.choice"
-				data-testid="onboarding-welcome-import"
-				@click="goImport"
-			>
-				<span :class="$style.choiceTitle">Import an existing wallet</span>
-				<span :class="$style.choiceBody">Restore from a seed, key, or backup.</span>
-			</button>
+		<Flex direction="column" align="center" gap="16" :class="$style.hero">
+			<div :class="$style.title_stack">
+				<span :class="$style.title_main">Welcome</span>
+				<span :class="$style.title_sub">to Nulo</span>
+			</div>
+			<div :class="$style.hero_bar" />
+			<Text size="14" color="secondary" height="150" align="center">
+				A private wallet for Aztec.
+			</Text>
 		</Flex>
+
+		<Flex direction="column" gap="12" :class="$style.actions">
+			<Button
+				variant="cta"
+				size="large"
+				data-testid="onboarding-welcome-create"
+				@click="router.push('/onboarding/create')"
+			>
+				Create a new wallet
+			</Button>
+			<Button
+				variant="cta_outline"
+				size="large"
+				data-testid="onboarding-welcome-import"
+				@click="router.push('/onboarding/import')"
+			>
+				Import an existing wallet
+			</Button>
+		</Flex>
+
+		<Text size="11" color="tertiary" align="center" mono :class="$style.footer">
+			BY CONTINUING, YOU ACCEPT NULO'S TERMS &amp; PRIVACY POLICY
+		</Text>
 	</Flex>
 </template>
 
 <style module>
 .page {
-	max-width: 560px;
+	max-width: 480px;
 	width: 100%;
-	margin: 64px auto 0;
-	gap: 48px;
+	margin: 32px auto 0;
+	gap: 56px;
+	flex: 1;
 }
 
 .hero {
-	text-align: center;
+	padding: 24px 0;
 }
 
-.title {
-	font-size: 36px;
-	letter-spacing: -0.02em;
-	font-weight: 600;
-	margin: 0 0 8px;
-	color: var(--app-text);
-}
-
-.subtitle {
-	font-size: 17px;
-	color: var(--text-secondary, #8a8a8a);
-	margin: 0;
-}
-
-.choices {
-	width: 100%;
-}
-
-.choice {
+.title_stack {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+	align-items: center;
+	line-height: 0.95;
+	gap: 4px;
+}
+
+.title_main {
+	font-family: var(--font-headline);
+	font-size: 56px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
+	text-transform: uppercase;
+	color: var(--nulo-accent);
+}
+
+.title_sub {
+	font-family: var(--font-headline);
+	font-size: 56px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
+	text-transform: uppercase;
+	color: var(--nulo-secondary);
+}
+
+.hero_bar {
+	width: 56px;
+	height: 2px;
+	background: var(--nulo-accent);
+}
+
+.actions {
 	width: 100%;
-	padding: 24px 28px;
-	border-radius: 12px;
-	border: 1px solid var(--border-color, #2a2a2a);
-	background: var(--surface, #121212);
-	color: var(--app-text);
-	text-align: left;
-	cursor: pointer;
-	transition: border-color 140ms ease, background 140ms ease, transform 80ms ease;
-	font: inherit;
-}
-.choice:hover {
-	border-color: var(--app-text);
-}
-.choice:active {
-	transform: translateY(1px);
-}
-.primary {
-	border-color: var(--app-text);
 }
 
-.choiceTitle {
-	font-size: 17px;
-	font-weight: 600;
-}
-
-.choiceBody {
-	font-size: 14px;
-	color: var(--text-secondary, #8a8a8a);
+.footer {
+	margin-top: auto;
+	padding-top: 32px;
+	letter-spacing: 0.08em;
 }
 </style>

@@ -268,24 +268,26 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.page">
+	<Flex direction="column" gap="24" :class="$style.page">
 		<header :class="$style.hero">
-			<h1 :class="$style.title">Import your wallet</h1>
-			<p :class="$style.subtitle">Restore from a seed, key, or backup.</p>
+			<div :class="$style.title_stack">
+				<span :class="$style.title_main">Import</span>
+				<span :class="$style.title_sub">Wallet</span>
+			</div>
+			<div :class="$style.hero_bar" />
+			<Text size="14" color="secondary" height="150">Restore from a seed, key, or backup.</Text>
 		</header>
 
-		<label :class="$style.field">
-			<span :class="$style.label">Wallet name</span>
-			<input
+		<Flex direction="column" gap="8">
+			<Text size="11" weight="700" color="secondary" :class="$style.section_label">Wallet name</Text>
+			<Input
 				v-model="profileName"
 				type="text"
 				placeholder="My Wallet"
-				maxlength="32"
-				required
+				:maxLength="32"
 				data-testid="onboarding-name-input"
-				:class="$style.input"
 			/>
-		</label>
+		</Flex>
 
 		<ImportMethodPicker
 			v-if="!selectedImportOption"
@@ -324,86 +326,90 @@ onBeforeUnmount(() => {
 			@passwordInput="handlePasswordInput"
 		/>
 
-		<div v-if="selectedImportOption" :class="$style.ctas">
+		<Flex v-if="selectedImportOption" direction="column" gap="10" :class="$style.ctas">
 			<template v-if="selectedImportOption === 'full_backup'">
-				<button
+				<Button
 					v-if="selectedBackup?.type === 'encrypted' && !selectedBackup?.profileType"
-					type="button"
-					:class="$style.cta"
+					variant="cta"
+					size="large"
 					:disabled="!decryptionPassword"
 					data-testid="onboarding-submit-import"
 					@click="decryptBackup"
 				>
 					Decrypt backup
-				</button>
-				<button
+				</Button>
+				<Button
 					v-if="selectedBackup?.profileType && restoreStatus !== 'finished'"
-					type="button"
-					:class="$style.cta"
+					variant="cta"
+					size="large"
 					:disabled="!isAllowedToImportBackup || restoreStatus === 'failed' || restoreStatus === 'progress'"
+					:loading="restoreStatus === 'progress'"
 					data-testid="onboarding-submit-import"
 					@click="restoreBackup"
 				>
 					{{ restoreStatus === "progress" ? "Importing..." : "Import wallet" }}
-				</button>
-				<button
+				</Button>
+				<Button
 					v-if="restoreStatus === 'finished' && isRestoreHasErrors"
-					type="button"
-					:class="$style.cta"
+					variant="cta"
+					size="large"
 					@click="importedProfile && completeImport(importedProfile as { id: string })"
 				>
 					Continue
-				</button>
-				<button
+				</Button>
+				<Button
 					v-if="restoreStatus === 'finished' && isRestoreHasErrors"
-					type="button"
-					:class="[$style.cta, $style.ctaOutline]"
+					variant="cta_outline"
+					size="large"
 					@click="showRestoreErrorLog"
 				>
 					View errors
-				</button>
+				</Button>
 			</template>
 
-			<button
+			<Button
 				v-if="selectedImportOption === 'seed'"
-				type="button"
-				:class="$style.cta"
+				variant="cta"
+				size="large"
 				:disabled="!isAllowedToImportBySeedPhrase || isImporting"
+				:loading="isImporting"
 				data-testid="onboarding-submit-import"
 				@click="handleImportSeed"
 			>
 				Import wallet
-			</button>
-			<button
+			</Button>
+			<Button
 				v-if="selectedImportOption === 'private_key'"
-				type="button"
-				:class="$style.cta"
+				variant="cta"
+				size="large"
 				:disabled="!isAllowedToImportByPrivateKey || isImporting"
+				:loading="isImporting"
 				data-testid="onboarding-submit-import"
 				@click="handleImportPrivateKey"
 			>
 				Import wallet
-			</button>
-			<button
+			</Button>
+			<Button
 				v-if="selectedImportOption === 'public_key'"
-				type="button"
-				:class="$style.cta"
+				variant="cta"
+				size="large"
 				:disabled="!isAllowedToImportByPublicKey || isImporting"
+				:loading="isImporting"
 				data-testid="onboarding-submit-import"
 				@click="handleImportPublicKey"
 			>
 				Import wallet
-			</button>
+			</Button>
 
-			<button
-				type="button"
-				:class="[$style.cta, $style.ctaOutline]"
+			<Button
+				variant="cta_outline"
+				size="large"
 				:disabled="restoreStatus === 'progress'"
 				@click="handleBack"
 			>
 				Back to methods
-			</button>
-		</div>
+			</Button>
+		</Flex>
 
 		<PasskeyCeremonyDialog
 			v-if="ceremonyRequest"
@@ -418,79 +424,53 @@ onBeforeUnmount(() => {
 .page {
 	max-width: 560px;
 	width: 100%;
-	margin: 48px auto 0;
-	gap: 24px;
+	margin: 16px auto 0;
 }
 
 .hero {
-	text-align: center;
-}
-.title {
-	font-size: 32px;
-	letter-spacing: -0.02em;
-	font-weight: 600;
-	margin: 0 0 8px;
-	color: var(--app-text);
-}
-.subtitle {
-	font-size: 15px;
-	color: var(--text-secondary, #8a8a8a);
-	margin: 0;
-}
-
-.field {
+	padding: 8px 0 16px;
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+	gap: 12px;
 }
-.label {
-	font-size: 12px;
-	color: var(--text-secondary, #8a8a8a);
+
+.title_stack {
+	display: flex;
+	flex-direction: column;
+	line-height: 0.95;
+}
+
+.title_main {
+	font-family: var(--font-headline);
+	font-size: 48px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
 	text-transform: uppercase;
-	letter-spacing: 0.06em;
+	color: var(--nulo-accent);
 }
-.input {
-	padding: 12px 14px;
-	border-radius: 8px;
-	border: 1px solid var(--border-color, #2a2a2a);
-	background: var(--surface, #121212);
-	color: var(--app-text);
-	font: inherit;
-	font-size: 15px;
-	outline: none;
-	transition: border-color 140ms ease;
+
+.title_sub {
+	font-family: var(--font-headline);
+	font-size: 48px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
+	text-transform: uppercase;
+	color: var(--nulo-secondary);
 }
-.input:focus {
-	border-color: var(--app-text);
+
+.hero_bar {
+	width: 40px;
+	height: 2px;
+	background: var(--nulo-accent);
+}
+
+.section_label {
+	font-family: var(--font-headline);
+	text-transform: uppercase;
+	letter-spacing: 0.18em;
 }
 
 .ctas {
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
 	margin-top: 8px;
-}
-.cta {
-	padding: 14px 20px;
-	border-radius: 10px;
-	border: 1px solid var(--app-text);
-	background: var(--app-text);
-	color: var(--app-bg);
-	font: inherit;
-	font-weight: 600;
-	font-size: 15px;
-	cursor: pointer;
-	transition: opacity 140ms ease;
-}
-.cta:disabled {
-	opacity: 0.4;
-	cursor: not-allowed;
-}
-.cta:not(:disabled):hover {
-	opacity: 0.85;
-}
-.ctaOutline {
-	background: transparent;
-	color: var(--app-text);
 }
 </style>
