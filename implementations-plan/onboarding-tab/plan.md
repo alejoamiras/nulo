@@ -4,7 +4,7 @@
 
 ## 0. Context (unchanged)
 
-Nulo Wallet — Chrome MV3 extension at `/Users/alejoamiras/Projects/nulo/nulo-3`. Vue 3 + Vite + Bun. Today first-time onboarding renders inside the popup; we are moving it to a dedicated full-page HTML tab to mirror Rabby's pattern.
+Nulo Wallet — Chrome MV3 extension in this repo. Vue 3 + Vite + Bun. Today first-time onboarding renders inside the popup; we are moving it to a dedicated full-page HTML tab to mirror Rabby's pattern.
 
 User-confirmed decisions (locked):
 - Profile name → required input with placeholder.
@@ -95,7 +95,7 @@ packages/extension/src/wallet/utils/                     ← extended
 
 Edited files:
 - `packages/extension/vite.config.ts` — add onboarding entry, pages dir, **append** onboarding dirs to existing auto-import (`src/composables`, `src/stores`, `src/utils`) + auto-component (`src/components`) globs.
-- `/Users/alejoamiras/Projects/nulo/nulo-3/biome.json` (repo root, not packages/extension) — add `noRestrictedImports` override for `src/onboarding/**` using the existing structure at biome.json:207.
+- `biome.json` (repo root, not packages/extension) — add `noRestrictedImports` override for `src/onboarding/**` using the existing structure at biome.json:207.
 - `packages/extension/manifest/manifest.config.ts` — add `host_permissions: ["http://127.0.0.1/*"]`.
 - `packages/extension/src/wallet/index.ts` — register `onInstalled` listener at module top level.
 - `packages/extension/src/wallet/runtime.ts` — no change (listener moved out of here).
@@ -148,7 +148,7 @@ No new chrome permissions required. `chrome.tabs.create` for an extension URL do
 
 **Biome override is in the REPO-ROOT `biome.json`, NOT `packages/extension/biome.json`.**
 
-`/Users/alejoamiras/Projects/nulo/nulo-3/biome.json` — extend the existing `includes` → `linter` → `rules` → `style` → `noRestrictedImports` structure at biome.json:207. Locate the existing override pattern that bans imports from popup pages into modules; add a sibling override scoped to `packages/extension/src/onboarding/**`:
+`biome.json` — extend the existing `includes` → `linter` → `rules` → `style` → `noRestrictedImports` structure at biome.json:207. Locate the existing override pattern that bans imports from popup pages into modules; add a sibling override scoped to `packages/extension/src/onboarding/**`:
 
 ```jsonc
 // Conceptual shape (must match the actual schema used at biome.json:207):
