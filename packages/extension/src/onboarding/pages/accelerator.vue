@@ -72,8 +72,9 @@ function goNext() {
 			</h1>
 			<div :class="$style.hero_bar" />
 			<Text size="14" color="secondary" height="150">
-				Aztec Accelerator runs proving outside the browser, on this device.
-				It lives in your menu bar.
+				A free menu-bar app that proves transactions natively, using every CPU core
+				your machine has. Browser proofs that take 30 seconds drop to a few.
+				Optional, but strongly recommended.
 			</Text>
 		</Flex>
 
@@ -82,7 +83,7 @@ function goNext() {
 			:data-status="status"
 			data-testid="onboarding-accelerator-status"
 		>
-			<Flex align="center" gap="16">
+			<Flex align="center" gap="16" :class="$style.statusInner">
 				<span :class="$style.dot" />
 				<Flex direction="column" gap="4" :class="$style.statusBody">
 					<Text size="15" weight="700" color="primary" :class="$style.statusTitle">
@@ -92,9 +93,23 @@ function goNext() {
 						{{ statusDetail }}
 					</Text>
 				</Flex>
+				<!-- Re-test lives INSIDE the status card so its position doesn't
+					shift relative to the Continue button below as the
+					Download CTA shows/hides. -->
+				<button
+					v-if="status === 'not-detected' || status === 'no-bb' || status === 'active'"
+					type="button"
+					:class="$style.retest"
+					data-testid="onboarding-accelerator-test"
+					@click="detect"
+				>
+					{{ status === "active" ? "Re-test" : "Test" }}
+				</button>
 			</Flex>
 		</div>
 
+		<!-- Reserve vertical space so Continue / Skip stay in the same Y
+			position regardless of whether Download is rendered. -->
 		<Flex direction="column" gap="10" :class="$style.actions">
 			<Button
 				v-if="(status === 'not-detected' || status === 'no-bb') && !isWindows"
@@ -111,16 +126,6 @@ function goNext() {
 					Aztec Accelerator isn't available on Windows yet. Proofs will run in your browser.
 				</Text>
 			</div>
-			<Button
-				v-if="status === 'not-detected' || status === 'no-bb' || status === 'active'"
-				:variant="status === 'active' ? 'primary_outline' : 'primary_outline'"
-				size="large"
-				wide
-				data-testid="onboarding-accelerator-test"
-				@click="detect"
-			>
-				{{ status === "active" ? "Re-test" : "Test connection" }}
-			</Button>
 		</Flex>
 
 		<Flex direction="column" align="center" gap="12" :class="$style.continueRow">
@@ -198,6 +203,38 @@ function goNext() {
 	transition: border-color 0.2s var(--bezier);
 }
 
+.statusInner {
+	width: 100%;
+}
+
+.retest {
+	margin-left: auto;
+	background: transparent;
+	border: 1px solid var(--nulo-outline);
+	color: var(--txt-secondary);
+	font-family: var(--font-headline);
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	padding: 8px 14px;
+	cursor: pointer;
+	transition: background 0.15s var(--bezier), color 0.15s var(--bezier),
+		border-color 0.15s var(--bezier);
+	flex-shrink: 0;
+}
+
+.retest:hover {
+	background: var(--nulo-surface-low);
+	color: var(--txt-primary);
+	border-color: var(--nulo-secondary);
+}
+
+.retest:focus-visible {
+	outline: 2px dotted var(--nulo-accent);
+	outline-offset: 2px;
+}
+
 .statusCard.active {
 	border-color: var(--green);
 }
@@ -253,6 +290,9 @@ function goNext() {
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
+	/* Reserve space for the Download CTA even when active, so Continue
+	 * keeps the same vertical position regardless of status. */
+	min-height: 48px;
 }
 
 .windowsNote {

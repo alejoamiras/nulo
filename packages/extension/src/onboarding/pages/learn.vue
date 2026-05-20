@@ -14,12 +14,12 @@ const cards = [
 	{
 		number: "02",
 		title: "Proofs on your machine",
-		body: "Fully private state needs you to construct the proof. Your transaction's zero-knowledge proof is built locally. The network sees the proof, never your inputs.",
+		body: "Private state only stays private if you generate the proof yourself. Every Aztec transaction builds its zero-knowledge proof on your machine, before anything leaves it. The network only ever sees the proof.",
 	},
 	{
 		number: "03",
 		title: "Proofs take time",
-		body: "In the browser, a simple transfer can take 10 to 30 seconds. The next screen explains how to speed this up.",
+		body: "Generating proofs is computationally heavy. In the browser, a single transfer can take 10 to 30 seconds. Running the prover natively cuts that to a fraction.",
 	},
 ]
 

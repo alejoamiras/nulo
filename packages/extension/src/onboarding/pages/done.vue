@@ -14,18 +14,19 @@ async function openWallet() {
 	// latter requires the extension already pinned to the toolbar, which
 	// contradicts our pin-tip on this same screen.
 	//
-	// Position the popup on the LEFT side of the screen at a slightly
-	// reduced height vs Chrome's toolbar-anchored popup. The toolbar popup
-	// is typically right-aligned (anchored to the icon); placing this one
-	// on the left makes it clear that it's a separate window opened from
-	// the onboarding tab, not the real toolbar popup.
+	// Position on the LEFT side (distinct from the toolbar popup which is
+	// right-aligned, anchored to the icon). The popup body sets
+	// min-height: 600px; the window has ~30-40px of OS chrome on top, so
+	// height 660 gives the content room to render at native size and
+	// matches the visual weight of the real toolbar popup. Earlier 580 was
+	// too compact and read like a dapp-approval popup.
 	await chrome.windows.create({
 		url: chrome.runtime.getURL("src/popup/index.html"),
 		type: "popup",
 		width: 380,
-		height: 580,
+		height: 660,
 		left: 24,
-		top: 100,
+		top: 80,
 	})
 	window.close()
 }
