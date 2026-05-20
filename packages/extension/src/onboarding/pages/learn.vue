@@ -14,7 +14,7 @@ const cards = [
 	{
 		number: "02",
 		title: "Proofs on your machine",
-		body: "Every transaction generates a zero-knowledge proof on your own machine. The network only sees the proof, never your inputs.",
+		body: "Fully private state needs you to construct the proof. Your transaction's zero-knowledge proof is built locally. The network sees the proof, never your inputs.",
 	},
 	{
 		number: "03",

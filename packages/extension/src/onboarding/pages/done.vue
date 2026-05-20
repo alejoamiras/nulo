@@ -37,11 +37,14 @@ async function openWallet() {
 		<Flex direction="column" align="center" gap="16" :class="$style.hero">
 			<h1 :class="$style.title_stack">
 				<span :class="$style.title_main">You're</span>
-				<span :class="$style.title_sub">All Set</span>
+				<span :class="$style.title_sub">In</span>
 			</h1>
 			<div :class="$style.hero_bar" />
-			<Text size="14" color="secondary" height="150" align="center">
-				Your wallet is ready.
+			<Text size="15" color="secondary" height="150" align="center" :class="$style.subhead">
+				Access the private coordination internet layer.
+			</Text>
+			<Text size="13" color="secondary" height="150" align="center" mono :class="$style.tagline">
+				Private by default. Sovereign by design.
 			</Text>
 		</Flex>
 
@@ -110,6 +113,16 @@ async function openWallet() {
 	width: 56px;
 	height: 2px;
 	background: var(--nulo-accent);
+}
+
+.subhead {
+	max-width: 380px;
+}
+
+.tagline {
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	opacity: 0.65;
 }
 
 .tip {

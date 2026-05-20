@@ -26,8 +26,11 @@ const handleOpen = (target: "terms" | "privacy") => {
 				<span :class="$style.title_sub">to Nulo</span>
 			</h1>
 			<div :class="$style.hero_bar" />
-			<Text size="14" color="secondary" height="150" align="center">
-				A private wallet for Aztec.
+			<Text size="15" color="secondary" height="150" align="center" :class="$style.subhead">
+				Access the internet-native coordination layer.
+			</Text>
+			<Text size="13" color="secondary" height="150" align="center" mono :class="$style.tagline">
+				Private by default. Sovereign by design.
 			</Text>
 		</Flex>
 
@@ -106,6 +109,16 @@ const handleOpen = (target: "terms" | "privacy") => {
 	width: 56px;
 	height: 2px;
 	background: var(--nulo-accent);
+}
+
+.subhead {
+	max-width: 360px;
+}
+
+.tagline {
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	opacity: 0.65;
 }
 
 .actions {
