@@ -36,6 +36,9 @@ import { parseCaipAccount, parseCaipChain, resolveNetworkByChainId } from "@/wal
 import { useDappInteractionPayload } from "@/composables/useDappInteractionPayload"
 import { useDappHostname } from "@/composables/useDappHostname"
 import { useFeeEstimationMap } from "@/composables/useFeeEstimationMap"
+import { useToast, TOAST_DURATION } from "@/composables/toast"
+
+const { openToast } = useToast()
 
 // Local alias — kept for diff minimality. The honest type lives in `./types.ts`
 // (DraftUIOperation) so send-like `feeSettings` is optional during user editing.
@@ -94,7 +97,10 @@ const {
 	// pre-existing mismatch.
 	estimate: ({ op, feeSettings }) => executionService.estimateOperationFee(op as unknown as Operation, feeSettings),
 	debounceMs: 500,
-	onError: (key, err) => console.error(`[Execute] Fee estimation failed for op ${key}:`, getErrorMessage(err), getErrorData(err)),
+	onError: (key, err) => {
+		console.error(`[Execute] Fee estimation failed for op ${key}:`, getErrorMessage(err), getErrorData(err))
+		openToast({ label: "Couldn't estimate fee — retry.", icon: "warning", color: "red" }, TOAST_DURATION.LONG)
+	},
 })
 
 function setError(title: string, tooltip: string = title, type: string = "error") {

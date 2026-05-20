@@ -98,22 +98,6 @@
 	transform: scaleX(1);
 }
 
-/* ── Logo Circle Breathing ── */
-
-@keyframes breathe {
-	0%,
-	100% {
-		opacity: 1;
-	}
-	50% {
-		opacity: 0.4;
-	}
-}
-
-.nav__logo-o {
-	animation: breathe 4s ease-in-out infinite;
-}
-
 /* ── Wallet Subtle Float ── */
 
 @keyframes float {
@@ -179,10 +163,6 @@
    ──────────────────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
-	.nav__logo-o {
-		animation: none;
-	}
-
 	.wallet {
 		animation: none;
 	}

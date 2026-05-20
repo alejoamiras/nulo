@@ -13,6 +13,10 @@ let closeTm
 
 export const useToast = () => {
 	const openToast = (newToast, duration = TOAST_DURATION.DEFAULT) => {
+		// Cancel any in-flight timer before swapping the toast value. Without
+		// this, a rapid second openToast inherits the first toast's timeout
+		// and disappears early.
+		clearTimeout(closeTm)
 		toast.value = newToast
 
 		closeTm = setTimeout(() => {
