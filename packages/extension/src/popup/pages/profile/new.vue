@@ -26,6 +26,7 @@ import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { capitalize } from "@/utils/string"
 import { sleep } from "@/wallet/utils"
 import { createPasskeyProfileWithRetry } from "@/wallet/utils/create-passkey-profile"
+import { redirectToOnboardingTabIfNeeded } from "@/wallet/utils/onboarding-tab"
 import { UserRejectedError } from "@nulo/extension-messaging/errors"
 
 /** Store */
@@ -37,19 +38,10 @@ const notificationStore = useNotificationStore()
 const route = useRoute()
 const router = useRouter()
 
-// Deep-link bypass: if a user navigates directly to #/popup/profile/new on
-// a fresh install (no profile yet) and hasn't completed onboarding, the
-// popup is the wrong shell. Redirect to the onboarding tab. The
-// add-another-profile case (post-onboarding, profiles.length > 0) keeps
-// using this popup flow.
-onBeforeMount(async () => {
-	await appStore.loadOnboardingCompleted()
-	if (appStore.onboardingCompleted) return
-	if (appStore.profiles.length > 0) return
-	const { openOrFocusOnboardingTab } = await import("@/wallet/utils/onboarding-tab")
-	await openOrFocusOnboardingTab()
-	window.close()
-})
+// Deep-link bypass: redirect to onboarding tab when no profile exists AND
+// onboarding hasn't been completed. Same predicate as register + import,
+// shared via @/wallet/utils/onboarding-tab.
+onBeforeMount(() => redirectToOnboardingTabIfNeeded(appStore))
 
 const backTo = computed(() => String(route.query.from || "/popup/register"))
 

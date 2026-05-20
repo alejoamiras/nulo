@@ -15,6 +15,7 @@ import { managers, setSentinel } from "@/utils/core"
 /** Utils */
 import { pickFile } from "@/utils"
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
+import { redirectToOnboardingTabIfNeeded } from "@/wallet/utils/onboarding-tab"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
@@ -55,16 +56,9 @@ const heroVisible = ref(true)
 let scrollEl = null
 
 // First-time install / deep-link bypass: redirect to onboarding tab when
-// no profile exists AND onboarding hasn't been completed. Add-another-
-// profile case (profiles.length > 0) keeps using the popup flow normally.
-onBeforeMount(async () => {
-	await appStore.loadOnboardingCompleted()
-	if (appStore.onboardingCompleted) return
-	if (appStore.profiles.length > 0) return
-	const { openOrFocusOnboardingTab } = await import("@/wallet/utils/onboarding-tab")
-	await openOrFocusOnboardingTab()
-	window.close()
-})
+// no profile exists AND onboarding hasn't been completed. Shared helper at
+// @/wallet/utils/onboarding-tab; same predicate as register + profile/new.
+onBeforeMount(() => redirectToOnboardingTabIfNeeded(appStore))
 
 /** Reactive state */
 const selectedImportOption = ref(null)
