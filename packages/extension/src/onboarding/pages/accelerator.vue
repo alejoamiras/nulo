@@ -129,8 +129,10 @@ function goNext() {
 		</Flex>
 
 		<Flex direction="column" align="center" gap="12" :class="$style.continueRow">
+			<!-- Always render Continue at the same Y. Disabled when status
+				isn't active so the user can't bypass the gate, but the
+				button's position never shifts between states. -->
 			<Button
-				v-if="status === 'active'"
 				variant="cta"
 				size="large"
 				:disabled="!isContinueEnabled"
@@ -139,8 +141,10 @@ function goNext() {
 			>
 				Continue
 			</Button>
+			<!-- Skip is a small text affordance below Continue when the
+				bypass is relevant (status settled, but not detected). -->
 			<button
-				v-if="status !== 'active' && status !== 'idle' && status !== 'detecting'"
+				v-if="status === 'not-detected' || status === 'no-bb'"
 				type="button"
 				:class="$style.skipLink"
 				data-testid="onboarding-accelerator-skip"

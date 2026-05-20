@@ -137,7 +137,7 @@ describe("onboarding tab", () => {
 		await page.close()
 	})
 
-	test("accelerator not-detected hides Continue and shows Skip link", async ({ freshExtensionPerTest: extension }) => {
+	test("accelerator not-detected disables Continue and shows Skip link", async ({ freshExtensionPerTest: extension }) => {
 		const page = await openOnboarding(extension)
 
 		// Intercept /health and return 502 so detect fails.
@@ -162,12 +162,16 @@ describe("onboarding tab", () => {
 			{ timeout: 10_000, polling: 200 },
 		)
 
-		// Continue button is NOT rendered (only renders on status=active).
-		// The Skip link is the only forward-progress affordance.
-		const noContinue = await page.evaluate(() => {
-			return !document.querySelector('[data-testid="onboarding-accelerator-continue"]')
+		// Continue button is always rendered now (for Y-stability), but
+		// disabled when status isn't active. Skip link is the forward-
+		// progress affordance.
+		const continueDisabled = await page.evaluate(() => {
+			const btn = document.querySelector<HTMLButtonElement>(
+				'[data-testid="onboarding-accelerator-continue"]',
+			)
+			return btn?.classList.toString().includes("disabled") || btn?.getAttribute("disabled") !== null
 		})
-		expect(noContinue).toBe(true)
+		expect(continueDisabled).toBe(true)
 
 		// Click Skip → routes immediately to /done (no two-click gate).
 		await clickByTestId(page, "onboarding-accelerator-skip")
