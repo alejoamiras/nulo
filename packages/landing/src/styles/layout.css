@@ -36,15 +36,6 @@
 	color: var(--c-on-surface);
 }
 
-.nav__logo-o {
-	display: inline-block;
-	width: 1.15em;
-	height: 1.15em;
-	border: 1.5px solid currentColor;
-	border-radius: 50%;
-	vertical-align: -0.12em;
-}
-
 .nav__cta {
 	font-family: var(--font-headline);
 	font-size: 0.875rem;
