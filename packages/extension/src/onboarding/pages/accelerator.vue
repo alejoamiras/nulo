@@ -26,10 +26,14 @@ const downloadLabel = computed(() => {
 
 const statusTitle = computed(() => {
 	switch (status.value) {
-		case "active": return "Active"
-		case "no-bb": return "Almost ready"
-		case "not-detected": return "Not detected"
-		default: return "Looking..."
+		case "active":
+			return "Active"
+		case "no-bb":
+			return "Almost ready"
+		case "not-detected":
+			return "Not detected"
+		default:
+			return "Looking..."
 	}
 })
 

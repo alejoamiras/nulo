@@ -287,9 +287,9 @@ openToast({ label: "Message", icon: "copy" }, 2_000)
 
 Plans + audit transcripts under [`implementations-plan/`](./implementations-plan/README.md) are committed artifacts. They get read by future contributors and future Claude sessions that have no idea who you are or where you cloned the repo. A few rules:
 
-- **No personal absolute paths.** Never write `/Users/<name>/...` or `/home/<name>/...` or `C:\Users\<name>\...` in any plan file, audit transcript, or status doc. Use repo-relative paths (`packages/extension/src/popup/app.vue:164`) — they survive the clone and they don't leak whose machine the plan was written on.
-- **No machine-specific paths in general.** Things like `/tmp/...` temp file paths or `/var/folders/...` macOS scratch dirs belong in transient terminal output, never in committed planning docs. Quote the conversation context instead ("the codex review transcript saved at this session's CODEX_DIR") or paste the response inline.
-- **The same rule applies to file links in audit reports.** When recording a codex / opus audit, rewrite paths to repo-relative before committing — e.g. `[plan.md](implementations-plan/<topic>/plan.md)` not `[plan.md](/Users/alejo/.../implementations-plan/<topic>/plan.md)`.
+- **No personal absolute paths.** Never write home-directory-rooted paths (macOS `~/...` expansions, Linux `~/Projects/...` expansions, Windows user-profile paths) in any plan file, audit transcript, or status doc. Use repo-relative paths (`packages/extension/src/popup/app.vue:164`) — they survive the clone and they don't leak whose machine the plan was written on.
+- **No machine-specific paths in general.** Temp-file paths (system scratch dirs, macOS folder containers, Linux tmpdirs) belong in transient terminal output, never in committed planning docs. Quote the conversation context instead ("the codex review transcript saved at this session's CODEX_DIR") or paste the response inline.
+- **The same rule applies to file links in audit reports.** When recording a codex / opus audit, rewrite paths to repo-relative before committing — e.g. `[plan.md](implementations-plan/<topic>/plan.md)` rather than an absolute path that includes a username segment.
 - **OK to reference outside repos by name when load-bearing.** E.g. "the Rabby reference implementation" or "the aztec-accelerator native app". Don't include the clone path on your machine.
 
 ## Quality gates — local and CI

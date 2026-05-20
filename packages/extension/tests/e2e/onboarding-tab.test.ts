@@ -68,24 +68,26 @@ describe("onboarding tab", () => {
 
 		// Wait for the flag to flip. Done.openWallet awaits setOnboarding-
 		// Completed before any popup-open call, so this should be quick.
-		await page.waitForFunction(
-			async () => {
-				const r = await chrome.storage.local.get("nulo:onboarding:completed")
-				return r["nulo:onboarding:completed"] === true
-			},
-			{ timeout: 5_000, polling: 100 },
-		).catch(async () => {
-			// The page may have started closing before the function could
-			// run — open a fresh page and re-check from there.
-			const fresh = await extension.browser.newPage()
-			await fresh.goto(`chrome-extension://${extension.extensionId}/src/popup/index.html`, { waitUntil: "domcontentloaded" })
-			const flag = await fresh.evaluate(async () => {
-				const r = await chrome.storage.local.get("nulo:onboarding:completed")
-				return r["nulo:onboarding:completed"]
+		await page
+			.waitForFunction(
+				async () => {
+					const r = await chrome.storage.local.get("nulo:onboarding:completed")
+					return r["nulo:onboarding:completed"] === true
+				},
+				{ timeout: 5_000, polling: 100 },
+			)
+			.catch(async () => {
+				// The page may have started closing before the function could
+				// run — open a fresh page and re-check from there.
+				const fresh = await extension.browser.newPage()
+				await fresh.goto(`chrome-extension://${extension.extensionId}/src/popup/index.html`, { waitUntil: "domcontentloaded" })
+				const flag = await fresh.evaluate(async () => {
+					const r = await chrome.storage.local.get("nulo:onboarding:completed")
+					return r["nulo:onboarding:completed"]
+				})
+				expect(flag).toBe(true)
+				await fresh.close()
 			})
-			expect(flag).toBe(true)
-			await fresh.close()
-		})
 	})
 
 	test("accelerator mock-active renders enabled Continue button", async ({ freshExtensionPerTest: extension }) => {

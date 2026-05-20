@@ -27,25 +27,31 @@ vi.mock("@/utils/core", () => {
 	}
 })
 
+// Vitest 4 requires `function` expressions (not arrow functions) for mocks
+// instantiated with `new`. Arrow factories error: "() => ... is not a constructor".
 vi.mock("@/wallet/services/network/client", () => ({
-	NetworkServiceClient: vi.fn().mockImplementation(() => ({
-		disconnect: vi.fn(),
-		getOrInitNetworks: vi.fn(async () => [{ id: "n1", chainId: 1, kind: "testnet" }]),
-		getActiveNetwork: vi.fn(async () => ({ id: "n1", chainId: 1, kind: "testnet" })),
-		setActiveNetwork: vi.fn(async () => undefined),
-		// app.store.syncNetworkStatus fires fire-and-forget; provide a stub so
-		// it resolves cleanly and doesn't show up as an unhandled rejection.
-		getNodeStatus: vi.fn(async () => 0),
-	})),
+	NetworkServiceClient: vi.fn(function () {
+		return {
+			disconnect: vi.fn(),
+			getOrInitNetworks: vi.fn(async () => [{ id: "n1", chainId: 1, kind: "testnet" }]),
+			getActiveNetwork: vi.fn(async () => ({ id: "n1", chainId: 1, kind: "testnet" })),
+			setActiveNetwork: vi.fn(async () => undefined),
+			// app.store.syncNetworkStatus fires fire-and-forget; provide a stub so
+			// it resolves cleanly and doesn't show up as an unhandled rejection.
+			getNodeStatus: vi.fn(async () => 0),
+		}
+	}),
 	NodeStatus: { Online: 0 },
 }))
 
 vi.mock("@/wallet/services/account/client", () => ({
-	AccountServiceClient: vi.fn().mockImplementation(() => ({
-		disconnect: vi.fn(),
-		ensureDefaultAccount: vi.fn(async () => undefined),
-		getAccounts: vi.fn(async () => [{ address: "0xacc1", index: 0, visible: true }]),
-	})),
+	AccountServiceClient: vi.fn(function () {
+		return {
+			disconnect: vi.fn(),
+			ensureDefaultAccount: vi.fn(async () => undefined),
+			getAccounts: vi.fn(async () => [{ address: "0xacc1", index: 0, visible: true }]),
+		}
+	}),
 	AccountType: { Nulo_v1: "Nulo_v1" },
 }))
 
