@@ -223,7 +223,10 @@ const {
 		console.log(`[send:${sendInstanceId}] estimateTransferFee firing`)
 		return executionService.estimateTransferFee(networkId, accountAddress, tokenId, tt, destination, amount, settings)
 	},
-	onError: (err) => console.error(`[send:${sendInstanceId}] estimateTransferFee failed:`, err),
+	onError: (err) => {
+		console.error(`[send:${sendInstanceId}] estimateTransferFee failed:`, err)
+		openToast({ label: "Couldn't estimate fee — retry.", icon: "warning", color: "red" }, TOAST_DURATION.LONG)
+	},
 })
 const isSending = ref(false)
 
