@@ -49,8 +49,7 @@ const steps: Array<{ num: string; label: string }> = [
 	grid-template-columns: repeat(4, 1fr);
 	gap: 8px;
 	width: 100%;
-	max-width: 560px;
-	margin: 0 auto 16px;
+	margin: 0 0 16px;
 }
 
 .cell {
