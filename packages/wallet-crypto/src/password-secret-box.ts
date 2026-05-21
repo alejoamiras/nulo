@@ -36,7 +36,6 @@
  * distinguish those — they're system-level bugs, not user input.
  */
 
-import type { ILogger } from "@nulo/wallet-core/logger"
 import { array_equals } from "@nulo/wallet-core/utils"
 import { EncryptionKey } from "./encryption-key"
 import { zeroize } from "./zeroize"
@@ -75,8 +74,6 @@ export type Sealed = {
 }
 
 export class PasswordSecretBox {
-	public constructor(private readonly logger: ILogger) {}
-
 	/** Encrypts `secret` under a key derived from `password`. Returns the
 	 *  base64-encoded guard+secret pair for storage plus the passhash for
 	 *  the immediate session-open. */

@@ -179,7 +179,7 @@ export async function runFastPath(deps: FastPathDeps): Promise<TxSimulationResul
 		// Mirror upstream `BaseWallet.simulateTx`: prefer PXE synced
 		// header, fall back to node head. Critical for mixed merge so
 		// both arms anchor at the same chain state.
-		let blockHeader
+		let blockHeader: Awaited<ReturnType<typeof pxe.getSyncedBlockHeader>> | undefined
 		try {
 			blockHeader = await pxe.getSyncedBlockHeader()
 		} catch {

@@ -16,7 +16,6 @@ const STUBS = {
 
 // Tests use minimal Capability shapes; cast to bypass the tagged-union
 // requirements (accounts capability requires `accounts` field, etc.).
-// biome-ignore lint/suspicious/noExplicitAny: test fixture
 const mountPanel = (capability: Record<string, unknown>, granted = false) =>
 	// biome-ignore lint/suspicious/noExplicitAny: test fixture
 	mount(CapabilityDetailPanel, { props: { capability: capability as any, granted }, global: { stubs: STUBS } })

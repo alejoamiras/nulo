@@ -1,0 +1,100 @@
+<script setup lang="ts">
+import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { computed } from "vue"
+import { useWalletConnection } from "@/composables/useWalletConnection"
+import { FAUCET_TOKENS } from "@/constants/tokens"
+import { ETH, USDC } from "@/contracts/deployments"
+import { TESTIDS } from "@/lib/testids"
+import AppToastRegion from "./components/AppToastRegion.vue"
+import Footer from "./components/Footer.vue"
+import TokenCard from "./components/TokenCard.vue"
+import WalletPanel from "./components/WalletPanel.vue"
+
+const { status, wallet, selectedAccount } = useWalletConnection()
+
+const tokenEntries = computed(() =>
+	FAUCET_TOKENS.map((token) => ({
+		token,
+		address: token.symbol === "USDC" ? USDC : ETH,
+	})),
+)
+
+const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.fromString(selectedAccount.value) : null))
+</script>
+
+<template>
+	<main class="page" :data-testid="TESTIDS.app">
+		<header class="hero">
+			<h1>DRIP TEST ASSETS</h1>
+			<p class="sub">
+				Alpha-testnet only. Connect an Aztec wallet and mint fixed USDC or ETH into a public or
+				private balance. Internal faucet. No real value.
+			</p>
+		</header>
+
+		<WalletPanel />
+
+		<!--
+		Cards always render so the page never collapses into the header
+		alone. Composables only activate when the user is connected; the
+		`:key` flips on connection state so the card cleanly re-mounts and
+		the composable lifecycle is unambiguous (no half-active polling).
+		-->
+		<section class="cards">
+			<TokenCard
+				v-for="entry in tokenEntries"
+				:key="`${entry.token.symbol}:${status === 'connected' ? 'on' : 'off'}`"
+				:token="entry.token"
+				:token-address="entry.address"
+				:wallet="status === 'connected' && wallet ? wallet : undefined"
+				:account="status === 'connected' && accountAddress ? accountAddress : undefined"
+			/>
+		</section>
+
+		<Footer />
+
+		<AppToastRegion />
+	</main>
+</template>
+
+<style scoped>
+.page {
+	max-width: 760px;
+	margin: 0 auto;
+	padding: 80px 32px 96px;
+	color: var(--txt-primary);
+	display: flex;
+	flex-direction: column;
+	gap: 32px;
+}
+
+.hero {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	margin-bottom: 8px;
+}
+
+.hero h1 {
+	font-family: var(--font-headline);
+	font-weight: 700;
+	font-size: 44px;
+	letter-spacing: -0.02em;
+	line-height: 1.04;
+	margin: 0;
+}
+
+.hero .sub {
+	color: var(--txt-secondary);
+	font-size: 16px;
+	max-width: 62ch;
+	margin: 0;
+	line-height: 1.55;
+}
+
+.cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+	gap: 20px;
+}
+</style>

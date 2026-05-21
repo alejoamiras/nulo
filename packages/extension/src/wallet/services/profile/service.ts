@@ -62,7 +62,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	public constructor(config: IConfig, logger: ILogger, browserApi?: BrowserApi) {
 		super(PROFILE_SERVICE_NAME, logger)
 		this.repo = new ProfileRepository(browserApi)
-		this.secretBox = new PasswordSecretBox(logger)
+		this.secretBox = new PasswordSecretBox()
 		this.sessionManager = new SessionManager(config, logger, (p) => this.emit("onActiveProfileChanged", p), browserApi)
 	}
 

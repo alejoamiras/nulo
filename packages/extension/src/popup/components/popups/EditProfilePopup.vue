@@ -24,6 +24,11 @@ const props = defineProps({
 let profileService = null
 const nameTerm = ref("")
 const isStartedEditing = ref(false)
+// Names of OTHER profiles (excluding the one being edited), NFKC + lowercase
+// normalized, populated when the popup opens. Used to block updates that
+// would shadow another profile's name — same case-folded NFKC compare as
+// the F4 duplicate hard-block on Create/Import.
+const otherProfileNames = ref([])
 
 const handleFillFieldsWithDefaultValues = () => {
 	nameTerm.value = appStore.profile?.name
@@ -31,10 +36,16 @@ const handleFillFieldsWithDefaultValues = () => {
 	isStartedEditing.value = false
 }
 
-const isAlreadyExist = computed(() => appStore.profile.name.toLowerCase() === nameTerm.value.toLowerCase() && isStartedEditing.value)
+const isUnchanged = computed(() => appStore.profile.name.toLowerCase() === nameTerm.value.toLowerCase() && isStartedEditing.value)
+const isCollision = computed(() => {
+	if (!nameTerm.value || !isStartedEditing.value) return false
+	const normalized = nameTerm.value.normalize("NFKC").toLocaleLowerCase()
+	return otherProfileNames.value.includes(normalized)
+})
 const isAvailableToUpdateProfile = computed(() => {
 	if (!nameTerm.value?.length) return
-	if (isAlreadyExist.value) return
+	if (isUnchanged.value) return
+	if (isCollision.value) return
 
 	return true
 })
@@ -45,6 +56,21 @@ const handleUpdateProfile = async () => {
 
 	isProfileUpdateInProgress.value = true
 	try {
+		// Re-validate collision against a fresh getProfiles() inside the
+		// in-progress latch. Closes the race where `otherProfileNames` was
+		// still loading when the user clicked Update (initial population is
+		// async; without this re-check a fast click could submit before the
+		// list arrived). Service has no server-side uniqueness check, so
+		// this is the only defense-in-depth path.
+		const currentId = appStore.profile?.id
+		const freshList = await profileService.getProfiles()
+		const normalized = nameTerm.value.normalize("NFKC").toLocaleLowerCase()
+		const collidesNow = freshList.some((p) => p.id !== currentId && p.name.normalize("NFKC").toLocaleLowerCase() === normalized)
+		if (collidesNow) {
+			otherProfileNames.value = freshList.filter((p) => p.id !== currentId).map((p) => p.name.normalize("NFKC").toLocaleLowerCase())
+			isProfileUpdateInProgress.value = false
+			return
+		}
 		appStore.profile = await profileService.changeProfileName(appStore.profile.id, nameTerm.value)
 		emit("onClose")
 
@@ -65,9 +91,16 @@ watch(
 			profileService = null
 			nameTerm.value = ""
 			isStartedEditing.value = false
+			otherProfileNames.value = []
 		} else {
 			profileService = new ProfileServiceClient()
 			nameTerm.value = appStore.profile?.name
+			// Populate the cross-profile collision list. Excludes the
+			// current profile by id so renaming to the same name doesn't
+			// trigger a false-positive collision.
+			const currentId = appStore.profile?.id
+			const profiles = await profileService.getProfiles()
+			otherProfileNames.value = profiles.filter((p) => p.id !== currentId).map((p) => p.name.normalize("NFKC").toLocaleLowerCase())
 
 			document.addEventListener("keydown", onKeydown)
 		}
@@ -105,13 +138,17 @@ const onKeydown = (e) => {
 					v-model="nameTerm"
 					autofocus
 					sanitize
-					:maxLength="25"
+					:maxLength="32"
 					@input="isStartedEditing = true"
 					data-testid="profile-name-input"
 				>
 					<template #right>
 						<Transition name="fade">
-							<Flex v-if="isAlreadyExist" align="center" gap="6">
+							<Flex v-if="isCollision" align="center" gap="6">
+								<Icon name="warning" size="12" color="red" />
+								<Text size="12" weight="600" color="primary"> Name in use </Text>
+							</Flex>
+							<Flex v-else-if="isUnchanged" align="center" gap="6">
 								<Icon name="warning" size="12" color="red" />
 								<Text size="12" weight="600" color="primary"> Already exist </Text>
 							</Flex>

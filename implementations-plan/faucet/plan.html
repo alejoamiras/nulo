@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Nulo × Aztec Faucet — Plan Briefing</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #0a0908;
+    --surface: #141312;
+    --surface-low: #1d1b1a;
+    --surface-high: #2b2a28;
+    --accent: #f8f1e7;
+    --outline: #4a463f;
+    --text: #f5f0e6;
+    --text-mid: #999187;
+    --text-soft: rgba(245, 240, 230, 0.45);
+    --mint: #18d2a5;
+    --orange: #ff5500;
+    --red: #f03c3c;
+    --yellow: #e6c525;
+    --sand: #b88555;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--text); font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; }
+  body { padding: 48px 24px 96px; }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header.title { border-bottom: 1px solid var(--outline); padding-bottom: 24px; margin-bottom: 32px; }
+  header.title .eyebrow { color: var(--text-mid); font: 500 11px/1 "JetBrains Mono", ui-monospace, monospace; letter-spacing: 0.16em; text-transform: uppercase; }
+  header.title h1 { font: 700 38px/1.05 "Space Grotesk", system-ui, sans-serif; letter-spacing: -0.02em; margin: 12px 0 8px; }
+  header.title .sub { color: var(--text-mid); font-size: 15px; }
+  section { margin: 40px 0; }
+  section h2 { font: 700 22px/1.2 "Space Grotesk", system-ui, sans-serif; letter-spacing: -0.01em; margin-bottom: 16px; border-bottom: 1px solid var(--outline); padding-bottom: 8px; }
+  section h2 .num { color: var(--text-soft); font-family: "JetBrains Mono", monospace; font-size: 14px; margin-right: 12px; font-weight: 500; }
+  p { margin: 12px 0; max-width: 68ch; }
+  p.lede { color: var(--text); font-size: 17px; }
+  .muted { color: var(--text-mid); }
+  ul, ol { padding-left: 22px; margin: 12px 0; }
+  ul li, ol li { margin: 6px 0; max-width: 64ch; }
+  code, pre { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.92em; }
+  code { background: var(--surface-low); color: var(--accent); padding: 1px 6px; border-radius: 3px; border: 1px solid var(--outline); }
+  .card { background: var(--surface); border: 1px solid var(--outline); padding: 20px 24px; margin: 16px 0; }
+  .card h3 { font: 600 16px/1.3 "Space Grotesk", system-ui, sans-serif; margin-bottom: 4px; }
+  .card .meta { color: var(--text-mid); font: 500 11px/1 "JetBrains Mono", monospace; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 12px; }
+  .card .meta .tag { display: inline-block; border: 1px solid var(--outline); padding: 3px 7px; margin-right: 6px; color: var(--text); border-radius: 2px; }
+  .card .meta .tag.in { background: var(--surface-high); }
+  .card .meta .tag.out { color: var(--text-mid); }
+  .glossary { display: grid; grid-template-columns: max-content 1fr; gap: 12px 24px; margin-top: 16px; }
+  .glossary dt { color: var(--accent); font-weight: 600; padding-top: 1px; }
+  .glossary dd { color: var(--text); max-width: 64ch; }
+  .phase { border-left: 2px solid var(--outline); padding: 4px 0 4px 20px; margin: 22px 0; }
+  .phase .label { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
+  .phase .label .id { font-family: "JetBrains Mono", monospace; color: var(--accent); font-weight: 600; }
+  .phase .label .name { font: 600 18px/1.2 "Space Grotesk", system-ui, sans-serif; }
+  .phase .label .estimate { color: var(--text-soft); font: 500 12px/1 "JetBrains Mono", monospace; margin-left: auto; }
+  .phase .eli5 { color: var(--text); margin: 8px 0; max-width: 68ch; }
+  .phase .what { color: var(--text-mid); font-size: 14px; margin-top: 6px; max-width: 68ch; }
+  .phase .what strong { color: var(--accent); font-weight: 600; }
+  .question { background: linear-gradient(180deg, var(--surface-high), var(--surface)); border: 1px solid var(--outline); border-left: 4px solid var(--yellow); padding: 20px 24px; margin: 18px 0; }
+  .question h3 { font: 600 17px/1.3 "Space Grotesk", system-ui, sans-serif; margin-bottom: 4px; }
+  .question .tag { display: inline-block; color: var(--yellow); font: 500 11px/1 "JetBrains Mono", monospace; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 12px; }
+  .question p { margin: 8px 0; }
+  .question .why { color: var(--text-mid); }
+  .question .options { display: grid; gap: 8px; margin-top: 10px; }
+  .question .options .opt { background: var(--surface-low); border: 1px solid var(--outline); padding: 10px 14px; }
+  .question .options .opt .lbl { color: var(--accent); font-weight: 600; }
+  .question .options .opt .desc { color: var(--text-mid); font-size: 14px; margin-top: 2px; }
+  .settled { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; }
+  .settled .item { background: var(--surface-low); border: 1px solid var(--outline); padding: 12px 14px; }
+  .settled .item .k { color: var(--text-mid); font: 500 11px/1 "JetBrains Mono", monospace; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 6px; }
+  .settled .item .v { color: var(--accent); font-weight: 600; }
+  .settled .item .v small { color: var(--text-mid); font-weight: 400; display: block; margin-top: 4px; font-size: 12px; }
+  .pillrow { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pill { font: 500 11px/1 "JetBrains Mono", monospace; letter-spacing: 0.08em; text-transform: uppercase; background: var(--surface-high); border: 1px solid var(--outline); padding: 5px 9px; color: var(--text-mid); }
+  .pill.ok { color: var(--mint); border-color: var(--mint); }
+  .pill.warn { color: var(--yellow); border-color: var(--yellow); }
+  hr { border: none; border-top: 1px solid var(--outline); margin: 32px 0; }
+  footer { color: var(--text-soft); font-size: 12px; margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--outline); font-family: "JetBrains Mono", monospace; }
+  .toc { background: var(--surface); border: 1px solid var(--outline); padding: 16px 20px; margin-bottom: 32px; }
+  .toc h2 { border: none; padding: 0; font-size: 14px; font-family: "JetBrains Mono", monospace; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-mid); font-weight: 500; margin-bottom: 10px; }
+  .toc ol { padding-left: 20px; font-size: 14px; }
+  .toc ol li { margin: 3px 0; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  details { background: var(--surface-low); border: 1px solid var(--outline); padding: 8px 14px; margin: 10px 0; }
+  details summary { cursor: pointer; color: var(--accent); font-weight: 500; padding: 4px 0; user-select: none; }
+  details[open] summary { margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="title">
+  <div class="eyebrow">Plan briefing · v2 · for human review</div>
+  <h1>Nulo × Aztec Faucet</h1>
+  <p class="sub">A faucet web app at <code>packages/faucet/</code> so the Aztec Foundation team can self-mint test USDC and ETH on alpha-testnet via Wonderland's permissionless <code>Dripper</code> contract. Plain-English breakdown of what we're building, why, and what decisions still need your input.</p>
+  <p class="sub" style="margin-top: 12px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--outline); font-size: 13px;"><strong style="color: var(--accent);">v2 — post-audit.</strong> Codex reviewed v1 and flagged 4 BLOCKERs + 7 SHOULDs. Active spec is <code>plan-v2.md</code>; v1 (<code>plan.md</code>) preserved as the audit target. Audit transcript: <code>audit-codex.md</code>. This HTML reflects v2.</p>
+</header>
+
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#what">What is this thing, really?</a></li>
+    <li><a href="#glossary">Glossary — the words we keep using</a></li>
+    <li><a href="#shape">The shape of the product</a></li>
+    <li><a href="#settled">Decisions you've already made</a></li>
+    <li><a href="#phases">Phases — what gets built when, ELI5</a></li>
+    <li><a href="#questions">Decisions still needed</a></li>
+    <li><a href="#risks">Honest risks</a></li>
+    <li><a href="#nongoals">What we're NOT building</a></li>
+    <li><a href="#next">Next steps</a></li>
+  </ol>
+</nav>
+
+<section id="what">
+  <h2><span class="num">01</span>What is this thing, really?</h2>
+  <p class="lede">A one-screen website that gives the Aztec Foundation team test tokens to play with, so they can try Nulo and the Wonderland AMM/swap without having to manually deploy contracts or beg someone for tokens.</p>
+  <p>The flow is exactly three steps:</p>
+  <ol>
+    <li>You land on the page.</li>
+    <li>You connect your Aztec wallet (Nulo).</li>
+    <li>You click <em>"Drip 1,000 USDC to public"</em> (or one of three sister buttons). A wallet popup asks you to confirm. A transaction goes through. Your balance updates.</li>
+  </ol>
+  <p>That's it. The whole product. No backend, no rate limit, no rocket science.</p>
+  <p>The trick is that <strong>the contract that mints these tokens (the "Dripper") is permissionless</strong> — anyone can call it, no auth, no allowlist. Wonderland already built it. We just deploy it once, point our frontend at it, and the on-chain primitives enforce everything we need. No custodial wallet sitting on a server signing things on behalf of users.</p>
+</section>
+
+<section id="glossary">
+  <h2><span class="num">02</span>Glossary — the words we keep using</h2>
+  <dl class="glossary">
+    <dt>Aztec</dt>
+    <dd>A blockchain (think "ethereum-compatible") with privacy built in at the protocol level. Transactions can be public (visible to everyone, like normal blockchains) or private (encrypted notes that only the parties involved can decrypt).</dd>
+
+    <dt>Alpha-testnet</dt>
+    <dd>Aztec's public test network. It works like the real network but uses fake tokens. This is where the faucet runs.</dd>
+
+    <dt>Wallet</dt>
+    <dd>The software that holds your cryptographic keys and signs transactions. Nulo is a browser extension wallet for Aztec — like MetaMask, but for Aztec, and built by us.</dd>
+
+    <dt>Faucet</dt>
+    <dd>A website that gives you free test tokens. Same idea as "drinking fountain" — turn the tap, get tokens. Every test network has one or more.</dd>
+
+    <dt>Token</dt>
+    <dd>A digital asset on a blockchain. "USDC" and "ETH" on mainnet are real money; on testnets they're fake versions with the same names so testers don't have to learn new vocabulary.</dd>
+
+    <dt>Dripper</dt>
+    <dd>A specific smart contract from Wonderland's <code>aztec-standards</code> library. It has two functions: <code>drip_to_public(token, amount)</code> and <code>drip_to_private(token, amount)</code>. No auth — anyone can call it.</dd>
+
+    <dt>Smart contract</dt>
+    <dd>Code that lives on the blockchain. Anyone can read it, anyone can call it (if it allows public calls). Deterministic, transparent, immutable once deployed.</dd>
+
+    <dt>Wallet SDK</dt>
+    <dd>A standard handshake protocol from the Aztec team that lets any website talk to any Aztec wallet. Think OAuth, but for crypto wallets. Our faucet uses it so the wallet choice is up to the user (in practice: Nulo).</dd>
+
+    <dt>Public vs private balance</dt>
+    <dd>On Aztec, your token balance lives in two slots. "Public" = visible to everyone (like a normal blockchain). "Private" = encrypted notes only you can decrypt. The faucet lets the user choose which slot to drip into.</dd>
+
+    <dt>Sponsored FPC</dt>
+    <dd>A "Fee-Paying Contract" run by the network that pays gas fees on behalf of users. Without it, you'd need to already hold some fee asset to do anything — chicken and egg. With it, even a brand-new account can transact. Crucial for a faucet.</dd>
+
+    <dt>Vue 3, Vite, Bun, Biome</dt>
+    <dd>The tech stack. Vue = the UI framework (same as Nulo extension). Vite = the build tool. Bun = the package manager / runtime. Biome = the linter + formatter. All already pinned in this monorepo.</dd>
+  </dl>
+</section>
+
+<section id="shape">
+  <h2><span class="num">03</span>The shape of the product</h2>
+  <p>One page. Five vertical bands top-to-bottom:</p>
+  <pre style="background: var(--surface); border: 1px solid var(--outline); padding: 20px; overflow-x: auto; color: var(--text); line-height: 1.4;">
+┌────────────────────────────────────────────┐
+│                                            │
+│  DRIP TEST ASSETS                          │   ← Hero
+│  Alpha-testnet only. Connect an Aztec      │
+│  wallet and mint fixed USDC or ETH…        │
+│                                            │
+│  ─────                                     │
+│                                            │
+│  [ Connect wallet ]   or                   │   ← Wallet panel
+│  Connected · 0xa1b…f93c · alpha-testnet    │
+│                                            │
+│  ─────                                     │
+│                                            │
+│  ┌────────────────┐  ┌────────────────┐    │   ← Two TokenCards
+│  │ USDC           │  │ ETH            │    │
+│  │ Fixed: 1,000   │  │ Fixed: 1       │    │
+│  │ ─────          │  │ ─────          │    │
+│  │ public  0.00   │  │ public  0.00   │    │
+│  │ private 0.00   │  │ private 0.00   │    │
+│  │ [Public]       │  │ [Public]       │    │
+│  │ [Private]      │  │ [Private]      │    │
+│  │ Test token ·   │  │ Test token ·   │    │
+│  │ no real value  │  │ no real value  │    │
+│  └────────────────┘  └────────────────┘    │
+│                                            │
+│  ─────                                     │
+│                                            │
+│  Contracts: USDC · ETH · Dripper           │   ← Footer
+│  Alpha-testnet · Permissionless · No limit │
+│                                            │
+└────────────────────────────────────────────┘
+  </pre>
+  <p>Visually: <strong>brutalist dark</strong>. Black background, cream text, 1px outlines, mono accents, no gradients, no shadows, no decorative icons. Same register as the Nulo extension. The only "graphic" is the 3×3 emoji grid the user sees during the wallet connection security check — and that's a protocol requirement, not branding.</p>
+</section>
+
+<section id="settled">
+  <h2><span class="num">04</span>Decisions you've already made</h2>
+  <p>You answered eight questions earlier today. These are locked in:</p>
+  <div class="settled">
+    <div class="item"><div class="k">Location</div><div class="v">packages/faucet/<small>Vue 3 + Vite in the monorepo</small></div></div>
+    <div class="item"><div class="k">Network</div><div class="v">alpha-testnet only<small>No switcher, no sandbox</small></div></div>
+    <div class="item"><div class="k">Contracts</div><div class="v">Deploy fresh in this PR<small>One-time, commit addresses</small></div></div>
+    <div class="item"><div class="k">Branding</div><div class="v">Vendor design tokens<small>Build faucet components fresh</small></div></div>
+    <div class="item"><div class="k">Wallet support</div><div class="v">Any wallet via SDK<small>Nulo is the first/only in practice</small></div></div>
+    <div class="item"><div class="k">Rate limit</div><div class="v">None<small>Trust the audience</small></div></div>
+    <div class="item"><div class="k">Drip amount</div><div class="v">Fixed per token<small>1,000 USDC · 1 ETH</small></div></div>
+    <div class="item"><div class="k">Token labels</div><div class="v">USDC + ETH<small>With "Test token · no real value" chip</small></div></div>
+  </div>
+</section>
+
+<section id="phases">
+  <h2><span class="num">05</span>Phases — what gets built when, ELI5</h2>
+  <p>The plan ships in seven small phases. Each phase ends with a green checkpoint before the next starts (typecheck + tests + build all pass). Total estimate: <strong>~4 working days</strong>. <em>v2 re-ordered Phase F earlier so Phases C–E test against real on-chain contracts, not placeholders.</em></p>
+
+  <div class="phase">
+    <div class="label"><span class="id">A</span><span class="name">Scaffold + brand foundation</span><span class="estimate">½ day</span></div>
+    <p class="eli5"><strong>ELI5:</strong> Build the empty shell of the website. Make it look right — Nulo's dark style, the right fonts, the right colors. No buttons do anything yet, but the page renders and looks correct.</p>
+    <p class="what"><strong>What lands:</strong> the package itself (<code>packages/faucet/</code>), config files for build/lint/type-check, a placeholder page, fonts, brand CSS variables copied from the extension, basic UI primitives (Button, Card, Tag, Spinner, Toast).</p>
+  </div>
+
+  <div class="phase">
+    <div class="label"><span class="id">B</span><span class="name">Contracts plumbing</span><span class="estimate">½ day</span></div>
+    <p class="eli5"><strong>ELI5:</strong> Wire up the pieces of code that know where the smart contracts <em>will</em> live on the blockchain. Still nothing visible to the user — we're preparing the runway. Placeholder addresses for now; real ones land in Phase F (next).</p>
+    <p class="what"><strong>What lands:</strong> the deployments JSON file (with placeholders), the helper that parses it and rebuilds proper on-chain contract instances, validations that addresses make sense, the helper that knows the Sponsored FPC address.</p>
+  </div>
+
+  <div class="phase">
+    <div class="label"><span class="id">F</span><span class="name">Contract deployment <span style="color: var(--yellow);">(moved early — v2)</span></span><span class="estimate">½ day</span></div>
+    <p class="eli5"><strong>ELI5:</strong> One-time setup. You (the maintainer) run a command from your laptop that actually deploys the Dripper and the two Token contracts to alpha-testnet, then writes their addresses into a JSON file we commit. <em>v2 moved this earlier</em> so the remaining phases test against real on-chain contracts instead of placeholders. Re-running is safe — it doesn't re-deploy things that already exist.</p>
+    <p class="what"><strong>What lands:</strong> a self-contained deployer script (~150 lines, vendored from Wonderland's deploy logic but with our token list), the real <code>deployments.json</code> committed to the repo, the deploy command documented in the README. Uses <code>DEPLOYER_SECRET</code> + <code>AZTEC_NODE_URL</code> env (separate from the frontend's <code>VITE_AZTEC_NODE_URL</code>).</p>
+  </div>
+
+  <div class="phase">
+    <div class="label"><span class="id">C</span><span class="name">Wallet connect flow</span><span class="estimate">1 day</span></div>
+    <p class="eli5"><strong>ELI5:</strong> The "Connect wallet" button works. Click it → Nulo prompts. <em>Two interactions:</em> first you see a 3×3 emoji grid in both the website and the wallet — eyeball that they match (security check against impersonation). Then the wallet asks you to approve permissions (read balances, submit drip transactions). After both, you're connected and the page shows your address.</p>
+    <p class="what"><strong>What lands:</strong> the connect button with all six states (idle/discovering/verifying/<strong>capability-approval</strong>/connected/error), the emoji verification modal, the capability-approval inline UI (<em>new in v2 — was collapsed into one state in v1</em>), the status indicator, an inline banner if your account isn't deployed on-chain yet, and all the SDK plumbing.</p>
+  </div>
+
+  <div class="phase">
+    <div class="label"><span class="id">D</span><span class="name">Token reads (balances)</span><span class="estimate">½ day</span></div>
+    <p class="eli5"><strong>ELI5:</strong> Show the user how many tokens they have. The two token cards (USDC, ETH) appear after connect, each showing both public and private balances. Balances auto-refresh every 15 seconds. Read-only — no transactions yet. Since Phase F already deployed real contracts, this now exercises the real chain (not a placeholder fake).</p>
+    <p class="what"><strong>What lands:</strong> the balance-reading composable (polling every 15s via <code>wallet.executeUtility</code> — <em>v2 corrected from the wrong API in v1</em>), the formatter that turns big numbers into "1,234.50", token cards with balance rows but no buttons, the address-display component with click-to-copy.</p>
+  </div>
+
+  <div class="phase">
+    <div class="label"><span class="id">E</span><span class="name">Drip flow — the main feature</span><span class="estimate">1 day</span></div>
+    <p class="eli5"><strong>ELI5:</strong> The moment the faucet "works". You click a drip button. The button shows a spinner. Your wallet pops up asking you to confirm the transaction. You confirm. The transaction goes to the network, gets mined, the balance updates, a success toast appears with a link to the transaction on the block explorer. <em>v2 simplification:</em> only one drip can be in flight at a time — all four buttons disable until it completes (wallets serialize popups anyway, queueing was confusing).</p>
+    <p class="what"><strong>What lands:</strong> the drip composable (calls Dripper.drip_to_public/private with the Sponsored FPC as fee payer, waits for the receipt), the four drip buttons fully wired, the toast notifications, and a robust set of error states (wallet rejected, network down, tx reverted, sponsor unavailable, account uninitialized, etc.). <em>v2 cut: ActivityFeed — toast covers immediate feedback; the wallet's own history covers the durable record.</em></p>
+  </div>
+
+  <div class="phase">
+    <div class="label"><span class="id">G</span><span class="name">Smoke e2e + polish + README</span><span class="estimate">½ day</span></div>
+    <p class="eli5"><strong>ELI5:</strong> Write an automated test that pretends to be a user clicking through the whole flow — using a fake wallet (no real network needed) so it runs fast in CI. Clean up the README. Spot-check accessibility. Ship.</p>
+    <p class="what"><strong>What lands:</strong> a 5-case smoke test, a mock wallet provider (supporting all 7 RPCs the faucet uses — <em>v2 audit caught that v1's mock was missing <code>registerContract</code></em>), finalized footer copy, the README with dev/deploy/host instructions.</p>
+  </div>
+
+  <p class="muted" style="margin-top: 24px;">After each phase: <code>bun run --cwd packages/faucet typecheck && bun run --cwd packages/faucet test && bun run --cwd packages/faucet build</code> stays green before we move on. <em>v2 fixed v1's shell-invalid <code>&amp;&amp; test &amp;&amp;</code> (would have run the shell builtin).</em> Total: ~55 unit/component cases + 5 smoke (down from v1's 95 — trimmed per audit). Sub-30-second test run.</p>
+</section>
+
+<section id="questions">
+  <h2><span class="num">06</span>Decision still needed (no rush)</h2>
+  <p>One question remains — replaces v1's two-question §13 (which violated the brief). Neither sub-piece blocks development; sensible defaults work for dev, but the real values should land before public hand-off.</p>
+
+  <div class="question">
+    <div class="tag">Question · alpha-testnet environment</div>
+    <h3>Which exact alpha-testnet environment are we shipping against?</h3>
+    <p class="why"><strong>Four values that need to land in env before public hand-off:</strong></p>
+    <ul style="margin-left: 20px; color: var(--text-mid); font-size: 14px;">
+      <li><code>AZTEC_NODE_URL</code> (and frontend <code>VITE_AZTEC_NODE_URL</code>) — the canonical RPC URL</li>
+      <li><code>VITE_EXPLORER_BASE_URL</code> — the explorer that success-toast tx links point at</li>
+      <li><code>VITE_CHAIN_ID</code> — wallet-sdk discovery matcher (so we don't ship a wildcard in prod)</li>
+      <li><code>VITE_CHAIN_VERSION</code> — matching protocol version</li>
+    </ul>
+    <p class="why"><strong>Bonus, only because it directly affects v1 fragility:</strong> is the Sponsored FPC known-good on the target environment right now? If it's down, every drip fails — we should know before we hand the URL out.</p>
+    <p class="why"><strong>Default if no answer:</strong> wildcard chainId, mainline alpha-testnet RPC, Cloudflare's <code>&lt;project&gt;.pages.dev</code>. Works for dev; just less strict.</p>
+  </div>
+
+  <p class="muted" style="margin-top: 14px; font-size: 13px;">v1 also asked about a custom hosting domain (<code>faucet.nulo.sh</code> vs <code>pages.dev</code>). Audit asked us to drop one — we kept the chainId/environment question because it directly affects whether drips work; domain only affects link copy and can be swapped via env later.</p>
+</section>
+
+<section id="risks">
+  <h2><span class="num">07</span>Honest risks</h2>
+  <p>Not all risks are equal. These are the ones worth thinking about.</p>
+
+  <div class="card">
+    <h3>Alpha-testnet's Sponsored FPC reliability</h3>
+    <div class="meta"><span class="tag in">external</span><span class="tag out">no mitigation</span></div>
+    <p>The faucet pays gas fees via a "Sponsored FPC" run by the Aztec team. If their FPC goes down or hits quota limits, every drip fails until they fix it. We can't control this from our side. The faucet surfaces a clear error and tells the user to retry.</p>
+  </div>
+
+  <div class="card">
+    <h3>Account-not-deployed gotcha</h3>
+    <div class="meta"><span class="tag in">internal</span><span class="tag in">mitigated</span></div>
+    <p>If someone connects a brand-new Aztec wallet account that hasn't been used yet, the first drip will fail with a cryptic "nullifier" error. <strong>Mitigation:</strong> on connect, we check if their account contract is on-chain. If not, we show a friendly banner: <em>"Your wallet account isn't on-chain yet. Send any transaction from your wallet first to initialize it — then come back here."</em></p>
+  </div>
+
+  <div class="card">
+    <h3>Private drips are slow (30-90 seconds)</h3>
+    <div class="meta"><span class="tag in">UX</span><span class="tag in">mitigated</span></div>
+    <p>Aztec's private path requires generating a cryptographic proof, which takes 30-90 seconds depending on network load. The UI shows <em>"Submitting in wallet…"</em> with a subtext warning. After 2 minutes we soften it to <em>"Still working — check your wallet."</em></p>
+  </div>
+
+  <div class="card">
+    <h3>Bundle size (~5-6 MB)</h3>
+    <div class="meta"><span class="tag in">internal</span><span class="tag in">accepted</span></div>
+    <p>The Aztec wasm libraries are heavy. We accept this for an internal-only tool. If we ever open the faucet to the public and the cold-start latency becomes a complaint, we'd lazy-load the wasm behind the connect-button click. Not urgent.</p>
+  </div>
+
+  <div class="card">
+    <h3>Test token name confusion ("USDC" / "ETH")</h3>
+    <div class="meta"><span class="tag in">UX</span><span class="tag in">partially mitigated</span></div>
+    <p>Using mainnet brand names is convenient but could confuse a newcomer. We mitigate with the <em>"Test token · no real value"</em> chip on every card and in the footer. If Foundation feedback shows actual confusion, we can rename to <code>tUSDC</code> / <code>tETH</code>.</p>
+  </div>
+</section>
+
+<section id="nongoals">
+  <h2><span class="num">08</span>What we're NOT building (explicit)</h2>
+  <p>To keep the scope honest:</p>
+  <div class="pillrow">
+    <span class="pill">no backend</span>
+    <span class="pill">no rate limiting</span>
+    <span class="pill">no swap UI</span>
+    <span class="pill">no transfer-between-users</span>
+    <span class="pill">no balance history</span>
+    <span class="pill">no multi-network switcher</span>
+    <span class="pill">no custom amounts</span>
+    <span class="pill">no wallet creation</span>
+    <span class="pill">no i18n</span>
+    <span class="pill">no mobile-specific UI</span>
+    <span class="pill">no @nulo/ui extraction</span>
+    <span class="pill">no extension refactor</span>
+    <span class="pill">no auto-reconnect</span>
+    <span class="pill">no Storybook</span>
+    <span class="pill">no Sentry</span>
+    <span class="pill">no light/dark toggle</span>
+    <span class="pill">no marketing copy</span>
+    <span class="pill">no network e2e in v1</span>
+  </div>
+  <p style="margin-top: 14px;" class="muted">Every one of these is a deliberate choice to keep this PR shippable in ~4 days. Any of them could become its own follow-up later.</p>
+</section>
+
+<section id="next">
+  <h2><span class="num">09</span>Next steps</h2>
+  <ol>
+    <li><strong>You read the plan</strong> — either this HTML for the human-friendly version or <code>implementations-plan/faucet/plan.md</code> for the full technical depth.</li>
+    <li><strong>I send the consolidated plan to codex for one more review pass</strong> — already in flight as you read this.</li>
+    <li><strong>You approve (or ask for changes).</strong></li>
+    <li><strong>I implement</strong> — phase by phase, gates green between each.</li>
+    <li><strong>I send the implementation to codex for review.</strong></li>
+    <li><strong>I apply fixes from the review.</strong></li>
+    <li><strong>You verify locally + we merge.</strong></li>
+  </ol>
+  <p>You'll see ASCII status updates throughout. Each phase will end with a checkpoint message describing what landed and what's next.</p>
+</section>
+
+<footer>
+  Plan briefing · v2 (post-audit) · companion to the active spec
+  <code>implementations-plan/faucet/plan-v2.md</code> ·
+  audit transcript: <code>audit-codex.md</code> ·
+  v1 archive (audit target): <code>plan.md</code> ·
+  source plans: <code>plan-mine.md</code>, <code>plan-opus.md</code>, <code>plan-codex.md</code>
+  · brief: <code>brief.md</code>
+</footer>
+
+</div>
+</body>
+</html>

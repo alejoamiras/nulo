@@ -1,20 +1,16 @@
 /**
  * Unit tests for `PasswordSecretBox`.
  *
- * Pure class, no storage, no browser API. Constructable with just a
- * logger. Covers seal/unseal round-trip, the wrong-password null-return
- * contract (NOT throw), `ENCRYPTION_GUARD` pass-through, and the base64
- * encoding lock.
+ * Pure class, no storage, no browser API. Covers seal/unseal round-trip,
+ * the wrong-password null-return contract (NOT throw), `ENCRYPTION_GUARD`
+ * pass-through, and the base64 encoding lock.
  */
 
 import { describe, expect, test } from "vitest"
-import type { ILogger } from "@nulo/wallet-core/logger"
 import { ENCRYPTION_GUARD, type EncryptedProfileSecret, PasswordSecretBox } from "./password-secret-box"
 
-const noopLogger: ILogger = { log: () => {} }
-
 function newBox(): PasswordSecretBox {
-	return new PasswordSecretBox(noopLogger)
+	return new PasswordSecretBox()
 }
 
 const PLAINTEXT_HEX = "0011223344556677889900aabbccddeeff00112233445566778899aabbccddee"

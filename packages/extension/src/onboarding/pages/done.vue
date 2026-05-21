@@ -68,7 +68,7 @@ async function openWallet() {
 </script>
 
 <template>
-	<Flex direction="column" align="center" gap="40" :class="$style.page">
+	<OnboardingPage align="center" :gap="40">
 		<StepIndicator :current="4" />
 		<Flex direction="column" align="center" gap="16" :class="$style.hero">
 			<BrutalistTitle main="You're" sub="In" align="center" />
@@ -106,18 +106,16 @@ async function openWallet() {
 		>
 			Open wallet
 		</Button>
-	</Flex>
+	</OnboardingPage>
 </template>
 
 <style module>
-.page {
-	max-width: 440px;
-	width: 100%;
-	margin: 48px auto 0;
-}
-
 .hero {
-	padding: 24px 0;
+	/* `padding-top: 48px` keeps the final celebration screen's roomier top
+	 * rhythm: the unified OnboardingPage margin-top is 24 px (down from done's
+	 * previous 48 px); compensating with 48 px of hero padding-top restores
+	 * the original 72 px top-of-shell distance. */
+	padding: 48px 0 24px;
 }
 
 .hero_bar {

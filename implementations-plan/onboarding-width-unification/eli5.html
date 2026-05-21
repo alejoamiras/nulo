@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Onboarding width unification — ELI5</title>
+<style>
+  :root {
+    --ink: #1c1c1c;
+    --ink-soft: #5a5a5a;
+    --ink-faint: #9a9a9a;
+    --rule: #e8e8e8;
+    --bg: #fdfcfa;
+    --accent: #b88a2c;
+    --good: #4d7a3a;
+    --bad: #b04040;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #ececec;
+      --ink-soft: #b6b6b6;
+      --ink-faint: #6a6a6a;
+      --rule: #2a2a2a;
+      --bg: #161513;
+      --accent: #d6a64a;
+      --good: #8db374;
+      --bad: #d68585;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", Helvetica, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 64px 28px 96px;
+  }
+  h1 {
+    font-size: 28px;
+    line-height: 1.2;
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+  }
+  .sub {
+    color: var(--ink-soft);
+    margin: 0 0 48px;
+    font-size: 15px;
+  }
+  h2 {
+    font-size: 20px;
+    margin: 56px 0 12px;
+    letter-spacing: -0.01em;
+    line-height: 1.3;
+  }
+  h3 {
+    font-size: 16px;
+    margin: 28px 0 8px;
+    color: var(--ink);
+  }
+  p { margin: 0 0 14px; color: var(--ink); }
+  p.note { color: var(--ink-soft); font-size: 14px; }
+  ul { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 6px; }
+  hr {
+    border: none;
+    border-top: 1px solid var(--rule);
+    margin: 48px 0;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 16px 0 24px;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th {
+    font-weight: 600;
+    color: var(--ink-soft);
+    background: transparent;
+  }
+  td.num { font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+  td.warn { color: var(--bad); }
+  td.ok { color: var(--good); }
+  .pill {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--rule);
+    color: var(--ink-soft);
+    letter-spacing: 0.02em;
+  }
+  .pill-accent { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+  blockquote {
+    margin: 16px 0;
+    padding: 12px 18px;
+    border-left: 2px solid var(--accent);
+    color: var(--ink-soft);
+    font-size: 15px;
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+  .legend {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-bottom: 8px;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch {
+    display: inline-block;
+    height: 10px;
+    background: var(--rule);
+    border: 1px solid var(--ink-faint);
+  }
+  .row {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin-bottom: 8px;
+  }
+  .row .label {
+    width: 110px;
+    font-size: 13px;
+    color: var(--ink-soft);
+    font-variant-numeric: tabular-nums;
+  }
+  .row .bar {
+    height: 14px;
+    background: var(--ink-faint);
+    opacity: 0.35;
+  }
+  .row .bar.target { background: var(--accent); opacity: 0.7; }
+  .row .px {
+    font-size: 12px;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  footer {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid var(--rule);
+    font-size: 13px;
+    color: var(--ink-faint);
+  }
+  footer code { font-size: 12px; }
+  code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    background: color-mix(in srgb, var(--ink) 6%, transparent);
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Onboarding width unification</h1>
+<p class="sub">A plain-language walkthrough of why the onboarding flow feels "toy-shaped" right now and how we'd fix it.</p>
+
+<h2>The problem in one sentence</h2>
+<p>The first six pages a new user sees each pick their own width independently, so the layout visibly jumps around between steps. That looks unintentional, which makes the product feel like a hobby project on first impression.</p>
+
+<h2>Show me the jumps</h2>
+<p class="note">Each bar below shows how wide that page's content area is today. Wider bar = wider content. The orange bar is the proposed target.</p>
+
+<div class="legend">
+  <span><span class="swatch"></span>today</span>
+  <span><span class="swatch" style="background: var(--accent); opacity: 0.7; border: none;"></span>after</span>
+</div>
+
+<div class="row"><div class="label">welcome</div><div class="bar" style="width: 480px;"></div><div class="px">480 px</div></div>
+<div class="row"><div class="label">create (1)</div><div class="bar" style="width: 480px;"></div><div class="px">480 px</div></div>
+<div class="row"><div class="label">import (1)</div><div class="bar" style="width: 560px;"></div><div class="px">560 px ← also step 1, different width!</div></div>
+<div class="row"><div class="label">learn (2)</div><div class="bar" style="width: 720px;"></div><div class="px">880 px (clipped at 720 for display)</div></div>
+<div class="row"><div class="label">accelerator (3)</div><div class="bar" style="width: 560px;"></div><div class="px">560 px</div></div>
+<div class="row"><div class="label">done (4)</div><div class="bar" style="width: 440px;"></div><div class="px">440 px ← narrowest</div></div>
+
+<p style="margin-top: 32px;">After the fix, all six bars become the same orange width:</p>
+
+<div class="row"><div class="label">welcome</div><div class="bar target" style="width: 640px;"></div><div class="px">640 px</div></div>
+<div class="row"><div class="label">create (1)</div><div class="bar target" style="width: 640px;"></div><div class="px">640 px</div></div>
+<div class="row"><div class="label">import (1)</div><div class="bar target" style="width: 640px;"></div><div class="px">640 px</div></div>
+<div class="row"><div class="label">learn (2)</div><div class="bar target" style="width: 640px;"></div><div class="px">640 px</div></div>
+<div class="row"><div class="label">accelerator (3)</div><div class="bar target" style="width: 640px;"></div><div class="px">640 px</div></div>
+<div class="row"><div class="label">done (4)</div><div class="bar target" style="width: 640px;"></div><div class="px">640 px</div></div>
+
+<hr />
+
+<h2>Why does this happen?</h2>
+<p>Each onboarding page is a separate file. Whoever wrote each file picked a width that "felt right" for that page in isolation:</p>
+<ul>
+  <li><b>create</b> and <b>done</b> use ~440–480 px because they're mostly a form + one button — they look "right" at popup width.</li>
+  <li><b>learn</b> uses 880 px because it has three cards side-by-side and needs the horizontal room.</li>
+  <li><b>import</b> and <b>accelerator</b> landed somewhere in the middle (560 px).</li>
+</ul>
+<p>Each choice makes sense alone. Together, you get four different widths in a row and the eye reads "this product can't decide what it is".</p>
+
+<blockquote>The user's instinct that it was "popup-inherited" is half-right. There's no actual popup component being imported — it's just that 440–480 px happens to be close to the wallet popup's own width, so the eye associates those onboarding screens with popup-shaped surfaces.</blockquote>
+
+<hr />
+
+<h2>The plan, in plain English</h2>
+
+<h3>Step 1 — Pick one width</h3>
+<p>We chose <b>640 pixels</b>. Here's the why:</p>
+<ul>
+  <li>Wide enough that the four-step progress indicator (which has a natural width of about 560 px) doesn't get squashed.</li>
+  <li>Narrow enough that the simple forms (just a wallet name and a password) don't feel marooned in whitespace.</li>
+  <li>Wide enough for the three-card "Meet Aztec" layout to still render side-by-side instead of stacking.</li>
+</ul>
+
+<h3>Step 2 — Build a shared "Onboarding Page" wrapper</h3>
+<p>Instead of editing six files to all say <code>max-width: 640px</code> and hoping they don't drift apart again next quarter, we build one small Vue component that owns the width. Every page wraps its content in this component. If we ever want to change the width, we change it in one place.</p>
+<p class="note">This is the architectural-discipline answer instead of the duct-tape answer. Slight upfront cost; future drift becomes impossible.</p>
+
+<h3>Step 3 — Lower the "stack the cards" trigger</h3>
+<p>The "Meet Aztec" page has a rule that says "if the screen is narrower than 720 px, stack the three cards vertically instead of side-by-side." Since our new container is 640 px wide, that rule would always fire and we'd lose the side-by-side layout we wanted to preserve. We lower the trigger to 560 px so three columns survive inside our 640 px container.</p>
+
+<h3>Step 4 — Don't break the test selectors</h3>
+<p>The codebase has end-to-end tests that look for specific HTML attributes (like <code>data-testid="onboarding-name-input"</code>) on form elements. The fix only swaps an outer wrapper; nothing inside the forms moves. The test selectors keep working without edits.</p>
+
+<hr />
+
+<h2>What could go wrong?</h2>
+<p class="note">Pre-mortem — security &amp; adversarial considerations from the plan, in plain language.</p>
+<ul>
+  <li><b>Test breakage:</b> Low risk. The selectors are on inputs / buttons inside forms — we don't touch those.</li>
+  <li><b>Accessibility regression:</b> Low risk. No new motion, no DOM reordering, the "current step" indicator still announces correctly to screen readers.</li>
+  <li><b>Visual regression for users mid-onboarding during release:</b> Low impact. The onboarding tab is a single-session surface — closes itself when you open the wallet for the first time. Next time you open it, you'd see the new layout.</li>
+  <li><b>Bypassing the wallet-creation gate:</b> Not introduced here. Already possible by deep-linking; the redirect logic in <code>app.vue</code> already prevents it for users without a profile.</li>
+</ul>
+
+<hr />
+
+<h2>Open questions</h2>
+<ul>
+  <li><b>Auto-imports.</b> The codebase auto-imports components from <code>src/components/</code>. We're putting the new wrapper in <code>src/onboarding/components/</code>, which might or might not be in the auto-import scope. If not, we add an explicit import — single line per page. To verify during implementation.</li>
+  <li><b>The top margin on "done".</b> The "done" page sits 48 px down from the top today (more than the other pages' 16 px). After unification it sits 24 px down — a bit closer to the top. If this looks wrong in the manual smoke test, we add extra padding to the hero block on that page only.</li>
+</ul>
+
+<footer>
+  Plan source: <code>implementations-plan/onboarding-width-unification/plan.md</code>. This file is the human companion — not the spec.
+</footer>
+
+</main>
+</body>
+</html>

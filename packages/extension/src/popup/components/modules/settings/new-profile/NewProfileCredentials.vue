@@ -25,6 +25,7 @@ const isPasswordType = ref(true)
 				:maxLength="maxPasswordLength"
 				placeholder="Strong password"
 				autofocus
+				data-testid="register-password-input"
 			>
 				<template #suffix>
 					<button
@@ -52,6 +53,7 @@ const isPasswordType = ref(true)
 				:type="isPasswordType ? 'password' : 'text'"
 				:maxLength="maxPasswordLength"
 				placeholder="Repeat password"
+				data-testid="register-password-confirm-input"
 			/>
 		</Flex>
 	</div>

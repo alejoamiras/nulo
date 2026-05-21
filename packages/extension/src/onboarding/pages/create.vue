@@ -10,8 +10,10 @@ import PasskeyCeremonyDialog from "@/popup/components/popups/PasskeyCeremonyDial
 /** Composables */
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
+import { useProfileNameField } from "@/composables/useProfileNameField"
 
 /** Services */
+import type { ProfileInfo } from "@/wallet/services/profile/spec"
 import { managers, setSentinel } from "@/utils/core"
 
 /** Utils */
@@ -26,54 +28,25 @@ const router = useRouter()
 const notificationStore = useNotificationStore()
 const { bootstrapActiveProfile } = useProfileBootstrap()
 
-const profileName = ref("")
 const authMethod = ref<"password" | "passkey">("password")
 const password = ref("")
 const confirm = ref("")
 const isCreating = ref(false)
 const maxPasswordLength = 128
 
-const trimmedName = computed(() => profileName.value.trim())
-
-// Wallet name is required. Validated at submit time (not via :disabled) so
+// Profile name is required. Validated at submit time (not via :disabled) so
 // the user gets a visible shake + inline error instead of a silently-disabled
 // button. nameError clears on input.
-const nameError = ref("")
-const shakeName = ref(false)
-const nameInputRef = ref<{ focus: () => void } | null>(null)
-let shakeTimer: ReturnType<typeof setTimeout> | null = null
-
-function triggerNameShake() {
-	shakeName.value = false
-	if (shakeTimer) clearTimeout(shakeTimer)
-	requestAnimationFrame(() => {
-		shakeName.value = true
-		shakeTimer = setTimeout(() => {
-			shakeName.value = false
-		}, 400)
-	})
-}
-
-function validateName(): boolean {
-	const n = trimmedName.value
-	if (n.length < 1) {
-		nameError.value = "Wallet name is required."
-		triggerNameShake()
-		nameInputRef.value?.focus()
-		return false
-	}
-	if (n.length > 32) {
-		nameError.value = "Max 32 characters."
-		triggerNameShake()
-		return false
-	}
-	nameError.value = ""
-	return true
-}
-
-function handleNameInput() {
-	if (nameError.value) nameError.value = ""
-}
+const {
+	profileName,
+	trimmedName,
+	nameError,
+	shakeName,
+	nameInputRef,
+	validate: validateName,
+	handleInput: handleNameInput,
+	dispose: disposeNameField,
+} = useProfileNameField()
 
 const passwordStrengthHint = computed(() => {
 	if (authMethod.value === "passkey") return ""
@@ -94,7 +67,7 @@ const isAllowedToContinue = computed(() => {
 
 const submitLabel = computed(() => {
 	if (isCreating.value) return "Creating..."
-	return authMethod.value === "passkey" ? "Create with passkey" : "Create wallet"
+	return authMethod.value === "passkey" ? "Create with passkey" : "Create profile"
 })
 
 const { request: ceremonyRequest, runCeremony, onResolve: onCeremonyResolve, onReject: onCeremonyReject } = usePasskeyCeremony()
@@ -111,11 +84,18 @@ function createPasskeyProfileViaModal(name: string) {
 
 async function handleSubmit() {
 	if (isCreating.value) return
-	if (!validateName()) return
 	if (!isAllowedToContinue.value) return
+	// Latch FIRST so the async getProfiles() fetch can't race a second click
+	// past the validate check before the lock is set.
 	isCreating.value = true
 
-	let profile
+	const existingNames = (await managers.profile.getProfiles()).map((p) => p.name)
+	if (!validateName({ existingNames })) {
+		isCreating.value = false
+		return
+	}
+
+	let profile: ProfileInfo
 	try {
 		profile =
 			authMethod.value === "passkey"
@@ -135,7 +115,7 @@ async function handleSubmit() {
 		notificationStore.create({
 			type: "warning",
 			payload: {
-				title: "Wallet creation failed",
+				title: "Profile creation failed",
 				description,
 				note,
 				confirmText: "OK",
@@ -164,8 +144,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+	disposeNameField()
 	document.removeEventListener("keydown", onKeydown)
-	if (shakeTimer) clearTimeout(shakeTimer)
 	// Defense-in-depth: zero out secret material on unmount.
 	password.value = ""
 	confirm.value = ""
@@ -173,7 +153,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex direction="column" gap="32" :class="$style.page">
+	<OnboardingPage>
 		<button
 			type="button"
 			:class="$style.back"
@@ -185,22 +165,23 @@ onBeforeUnmount(() => {
 		</button>
 		<StepIndicator :current="1" />
 		<header :class="$style.hero">
-			<BrutalistTitle main="Create" sub="Wallet" />
+			<BrutalistTitle main="Create" sub="Profile" />
 			<div :class="$style.hero_bar" />
 		</header>
 
 		<form :class="$style.form" @submit.prevent="handleSubmit">
 			<Flex direction="column" gap="8">
-				<Text size="11" weight="700" color="secondary" :class="$style.section_label">Wallet name</Text>
+				<Text size="11" weight="700" color="secondary" :class="$style.section_label">Profile name</Text>
 				<div :class="[shakeName && $style.shake]">
 					<Input
 						ref="nameInputRef"
 						v-model="profileName"
 						type="text"
-						placeholder="My Wallet"
+						placeholder="My Profile"
 						:maxLength="32"
 						:error="!!nameError"
 						:ariaInvalid="!!nameError"
+						sanitize
 						data-testid="onboarding-name-input"
 						@input="handleNameInput"
 					/>
@@ -285,16 +266,10 @@ onBeforeUnmount(() => {
 			@resolve="onCeremonyResolve"
 			@reject="onCeremonyReject"
 		/>
-	</Flex>
+	</OnboardingPage>
 </template>
 
 <style module>
-.page {
-	max-width: 480px;
-	width: 100%;
-	margin: 16px auto 0;
-}
-
 .back {
 	align-self: flex-start;
 	display: inline-flex;

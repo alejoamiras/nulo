@@ -34,6 +34,7 @@ jobs:
             smoke-surface:
               # Popup + components (UI shell)
               - 'packages/extension/src/popup/**'
+              - 'packages/extension/src/onboarding/**'
               - 'packages/extension/src/components/**'
               - 'packages/extension/src/composables/**'
               - 'packages/extension/src/stores/**'

@@ -14,6 +14,7 @@ import { useToast } from "@/composables/toast"
 import { useFullBackupImport } from "@/composables/useFullBackupImport"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
+import { useProfileNameField } from "@/composables/useProfileNameField"
 import { waitForProfileActive } from "@/composables/waitForProfileActive"
 
 /** Services */
@@ -35,7 +36,6 @@ const notificationStore = useNotificationStore()
 const { bootstrapActiveProfile } = useProfileBootstrap()
 
 const selectedImportOption = ref<string | null>(null)
-const profileName = ref("")
 const seedPhrase = ref<string | undefined>(undefined)
 const privateKey = ref<string | undefined>(undefined)
 const publicKey = ref<string | undefined>(undefined)
@@ -44,46 +44,20 @@ const repeatedPassword = ref("")
 const maxPasswordLength = 128
 const isImporting = ref(false)
 
-// Wallet name is required across every import path (including passkey
+// Profile name is required across every import path (including passkey
 // discovery, which has no other visible field to anchor the error). Validated
 // at submit time so an empty name shakes the input + shows inline error
 // instead of silently disabling the button.
-const nameError = ref("")
-const shakeName = ref(false)
-const nameInputRef = ref<{ focus: () => void } | null>(null)
-let shakeTimer: ReturnType<typeof setTimeout> | null = null
-
-function triggerNameShake() {
-	shakeName.value = false
-	if (shakeTimer) clearTimeout(shakeTimer)
-	requestAnimationFrame(() => {
-		shakeName.value = true
-		shakeTimer = setTimeout(() => {
-			shakeName.value = false
-		}, 400)
-	})
-}
-
-function validateName(): boolean {
-	const n = trimmedName.value
-	if (n.length < 1) {
-		nameError.value = "Wallet name is required."
-		triggerNameShake()
-		nameInputRef.value?.focus()
-		return false
-	}
-	if (n.length > 32) {
-		nameError.value = "Max 32 characters."
-		triggerNameShake()
-		return false
-	}
-	nameError.value = ""
-	return true
-}
-
-function handleNameInput() {
-	if (nameError.value) nameError.value = ""
-}
+const {
+	profileName,
+	trimmedName,
+	nameError,
+	shakeName,
+	nameInputRef,
+	validate: validateName,
+	handleInput: handleNameInput,
+	dispose: disposeNameField,
+} = useProfileNameField()
 
 const error = ref({ type: "", title: "", tooltip: "" })
 function fillError(errType?: string, title?: string, tooltip?: string) {
@@ -113,8 +87,6 @@ function handleSecretInput() {
 	if (error.value.type === "secret") fillError()
 }
 
-const trimmedName = computed(() => profileName.value.trim())
-
 // Excludes the name check on purpose — name is validated at submit time so
 // an empty name shakes instead of leaving the import buttons silently disabled.
 const isAllowedToContinue = computed(() => {
@@ -136,7 +108,17 @@ const isAllowedToImportByPublicKey = computed(() => {
 })
 
 async function completeImport(profile: unknown) {
-	const p = profile as { id: string }
+	const p = profile as { id: string; name: string; type: "password" | "passkey" }
+	// Seed / private-key / public-key / passkey handlers already call
+	// bootstrapActiveProfile before reaching here; full-backup goes through
+	// useFullBackupImport which invokes opts.completeImport directly WITHOUT
+	// bootstrapping (popup relies on app.vue's `onActiveProfileChanged`
+	// listener, which the onboarding shell doesn't have). Calling bootstrap
+	// here is idempotent for the explicit-import paths and load-bearing for
+	// the full-backup path — without it `waitForProfileActive` below hangs
+	// for the full 30s timeout because appStore.isLogined / profile.id
+	// never flip.
+	await bootstrapActiveProfile(p)
 	await setLastActiveProfileId(p.id)
 	await setSentinel()
 	try {
@@ -151,9 +133,13 @@ async function completeImport(profile: unknown) {
 
 const handleImportSeed = async () => {
 	if (!isAllowedToImportBySeedPhrase.value || isImporting.value) return
-	if (!validateName()) return
 	isImporting.value = true
 	try {
+		const existingNames = (await managers.profile.getProfiles()).map((p) => p.name)
+		if (!validateName({ existingNames })) {
+			isImporting.value = false
+			return
+		}
 		const seedArr = (seedPhrase.value ?? "").split(" ")
 		const profile = await managers.profile.importMnemonic(trimmedName.value, seedArr, password.value)
 		await bootstrapActiveProfile(profile)
@@ -167,9 +153,13 @@ const handleImportSeed = async () => {
 
 const handleImportPrivateKey = async () => {
 	if (!isAllowedToImportByPrivateKey.value || isImporting.value) return
-	if (!validateName()) return
 	isImporting.value = true
 	try {
+		const existingNames = (await managers.profile.getProfiles()).map((p) => p.name)
+		if (!validateName({ existingNames })) {
+			isImporting.value = false
+			return
+		}
 		const profile = await managers.profile.importPlain(trimmedName.value, privateKey.value as string, password.value)
 		await bootstrapActiveProfile(profile)
 		await completeImport(profile)
@@ -186,9 +176,13 @@ const handleImportPrivateKey = async () => {
 
 const handleImportPublicKey = async () => {
 	if (!isAllowedToImportByPublicKey.value || isImporting.value) return
-	if (!validateName()) return
 	isImporting.value = true
 	try {
+		const existingNames = (await managers.profile.getProfiles()).map((p) => p.name)
+		if (!validateName({ existingNames })) {
+			isImporting.value = false
+			return
+		}
 		const profile = await managers.profile.importEncrypted(trimmedName.value, publicKey.value as string, password.value)
 		await bootstrapActiveProfile(profile)
 		await completeImport(profile)
@@ -208,8 +202,14 @@ const handleImportPublicKey = async () => {
 const { request: ceremonyRequest, runCeremony, onResolve: onCeremonyResolve, onReject: onCeremonyReject } = usePasskeyCeremony()
 
 const handleImportPasskey = async () => {
-	if (!validateName()) return
+	if (isImporting.value) return
+	isImporting.value = true
 	try {
+		const existingNames = (await managers.profile.getProfiles()).map((p) => p.name)
+		if (!validateName({ existingNames })) {
+			isImporting.value = false
+			return
+		}
 		const credData = await runCeremony({ mode: "get" })
 		const profile = await managers.profile.importPasskey(trimmedName.value, credData)
 		await bootstrapActiveProfile(profile)
@@ -219,15 +219,17 @@ const handleImportPasskey = async () => {
 		notificationStore.create({
 			type: "warning",
 			payload: {
-				title: "Wallet import failed",
+				title: "Profile import failed",
 				description:
-					"An error occurred while importing the wallet. This authenticator may not be supported or encountered an issue. Try again or use another one.",
+					"An error occurred while importing the profile. This authenticator may not be supported or encountered an issue. Try again or use another one.",
 				note: "Windows Hello may not work correctly with some versions of Windows.",
 				confirmText: "OK",
 				onConfirm: () => {},
 			},
 		})
-		console.error("Failed to import wallet:", err)
+		console.error("Failed to import profile:", err)
+	} finally {
+		isImporting.value = false
 	}
 }
 
@@ -238,6 +240,7 @@ const {
 	importedProfile,
 	isAllowedToImportBackup,
 	isRestoreHasErrors,
+	parsedBackupName,
 	pickBackupFile,
 	decryptBackup,
 	restoreBackup,
@@ -251,6 +254,10 @@ const {
 	pickFile,
 	completeImport,
 	runCeremony,
+	// F3: typed name overrides the backup-embedded name when non-empty
+	// after trim. Composable spread-clones before passing to restore() so
+	// the parsed backup data isn't mutated in place.
+	profileName,
 	// Onboarding-specific error-log surface: notify-based, not a popup dialog.
 	showErrorLog: (errors) => {
 		notificationStore.create({
@@ -264,6 +271,14 @@ const {
 		})
 		console.error("Restore errors:", errors)
 	},
+})
+
+// Guarded prefill: when a backup is parsed, fill the Profile-name input —
+// but only when the user hasn't typed anything yet. Protects mid-typing
+// from being clobbered if a heavy file's parse completes after the user
+// starts typing in the name field.
+watch(parsedBackupName, (newName) => {
+	if (newName && !profileName.value.trim()) profileName.value = newName
 })
 
 function clearFormState() {
@@ -282,7 +297,7 @@ function clearFormState() {
 const handleBack = () => clearFormState()
 
 onBeforeUnmount(() => {
-	if (shakeTimer) clearTimeout(shakeTimer)
+	disposeNameField()
 	password.value = ""
 	repeatedPassword.value = ""
 	seedPhrase.value = undefined
@@ -292,7 +307,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex direction="column" gap="24" :class="$style.page">
+	<OnboardingPage :gap="24">
 		<button
 			type="button"
 			:class="$style.back"
@@ -304,22 +319,23 @@ onBeforeUnmount(() => {
 		</button>
 		<StepIndicator :current="1" />
 		<header :class="$style.hero">
-			<BrutalistTitle main="Import" sub="Wallet" />
+			<BrutalistTitle main="Import" sub="Profile" />
 			<div :class="$style.hero_bar" />
 			<Text size="14" color="secondary" height="150">Restore from a seed, key, or backup.</Text>
 		</header>
 
 		<Flex direction="column" gap="8">
-			<Text size="11" weight="700" color="secondary" :class="$style.section_label">Wallet name</Text>
+			<Text size="11" weight="700" color="secondary" :class="$style.section_label">Profile name</Text>
 			<div :class="[shakeName && $style.shake]">
 				<Input
 					ref="nameInputRef"
 					v-model="profileName"
 					type="text"
-					placeholder="My Wallet"
+					placeholder="My Profile"
 					:maxLength="32"
 					:error="!!nameError"
 					:ariaInvalid="!!nameError"
+					sanitize
 					data-testid="onboarding-name-input"
 					@input="handleNameInput"
 				/>
@@ -387,7 +403,7 @@ onBeforeUnmount(() => {
 					data-testid="onboarding-submit-import"
 					@click="restoreBackup"
 				>
-					{{ restoreStatus === "progress" ? "Importing..." : "Import wallet" }}
+					{{ restoreStatus === "progress" ? "Importing..." : "Import profile" }}
 				</Button>
 				<Button
 					v-if="restoreStatus === 'finished' && isRestoreHasErrors"
@@ -416,7 +432,7 @@ onBeforeUnmount(() => {
 				data-testid="onboarding-submit-import"
 				@click="handleImportSeed"
 			>
-				Import wallet
+				Import profile
 			</Button>
 			<Button
 				v-if="selectedImportOption === 'private_key'"
@@ -427,7 +443,7 @@ onBeforeUnmount(() => {
 				data-testid="onboarding-submit-import"
 				@click="handleImportPrivateKey"
 			>
-				Import wallet
+				Import profile
 			</Button>
 			<Button
 				v-if="selectedImportOption === 'public_key'"
@@ -438,7 +454,7 @@ onBeforeUnmount(() => {
 				data-testid="onboarding-submit-import"
 				@click="handleImportPublicKey"
 			>
-				Import wallet
+				Import profile
 			</Button>
 
 			<Button
@@ -457,16 +473,10 @@ onBeforeUnmount(() => {
 			@resolve="onCeremonyResolve"
 			@reject="onCeremonyReject"
 		/>
-	</Flex>
+	</OnboardingPage>
 </template>
 
 <style module>
-.page {
-	max-width: 560px;
-	width: 100%;
-	margin: 16px auto 0;
-}
-
 .back {
 	align-self: flex-start;
 	display: inline-flex;

@@ -20,7 +20,8 @@
  */
 import { expect } from "vitest"
 import type { Page } from "puppeteer"
-import { clickByTestId, openPopup, waitForHash, test } from "./fixtures/extension"
+import { clickByTestId, openPopup, replaceInputValue, waitForHash, test } from "./fixtures/extension"
+import { getActiveProfileName } from "./fixtures/helpers"
 import { setupPasskeyVirtualAuth } from "./fixtures/passkey"
 
 /** Read the active account address from chrome.storage.local. The wallet
@@ -44,6 +45,10 @@ async function registerPasskeyProfile(page: Page): Promise<void> {
 	})
 
 	await clickByTestId(page, "register-create-btn")
+
+	// Wait for the create page to mount before typing the name.
+	await page.waitForSelector('[data-testid="register-name-input"]', { visible: true, timeout: 10_000 })
+	await replaceInputValue(page, '[data-testid="register-name-input"]', "Test Profile")
 
 	// Switch the method-tabs from password (default) → passkey.
 	await page.waitForSelector('[data-testid="register-method-passkey"]', { visible: true, timeout: 10_000 })
@@ -139,9 +144,10 @@ test("register → reset profile → import via passkey discovery → same addre
 
 		// Step 2: reset profile via /popup/settings/security/reset.
 		// All three confirm checkboxes + the profile-name confirm input
-		// must be ticked/typed for `reset-submit-btn` to enable. Default
-		// passkey-profile name is "Profile 1" (`profile/new.vue:67`:
-		// `name = \`Profile ${profiles.length + 1}\``).
+		// must be ticked/typed for `reset-submit-btn` to enable. Profile
+		// name is read dynamically from the reset page's data-profile-name
+		// attribute — after F1 the user picks the name explicitly, so a
+		// hardcoded "Profile 1" no longer holds.
 		await page.evaluate(() => {
 			window.location.hash = "#/popup/settings/security/reset"
 		})
@@ -152,13 +158,14 @@ test("register → reset profile → import via passkey discovery → same addre
 		await clickByTestId(page, "reset-checkbox-undone")
 		await clickByTestId(page, "reset-checkbox-sure")
 
-		await page.evaluate(() => {
+		const activeProfileName = await getActiveProfileName(page)
+		await page.evaluate((expectedName: string) => {
 			const input = document.querySelector<HTMLInputElement>('[data-testid="reset-confirm-input"] input')
 			if (!input) throw new Error("reset-confirm-input not found")
 			const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set
-			setter?.call(input, "Profile 1")
+			setter?.call(input, expectedName)
 			input.dispatchEvent(new Event("input", { bubbles: true }))
-		})
+		}, activeProfileName)
 
 		await page.waitForFunction(
 			() => {
@@ -187,6 +194,12 @@ test("register → reset profile → import via passkey discovery → same addre
 			timeout: 15_000,
 			polling: 500,
 		})
+
+		// F2: passkey re-import requires an explicit Profile name now. Type
+		// before triggering the discovery ceremony — same testid as the
+		// non-passkey import paths (`import-name-input`).
+		await page.waitForSelector('[data-testid="import-name-input"]', { visible: true, timeout: 10_000 })
+		await replaceInputValue(page, '[data-testid="import-name-input"]', "Reimported Profile")
 
 		await page.waitForSelector('[data-testid="import-option-passkey"]', { visible: true, timeout: 10_000 })
 		await clickByTestId(page, "import-option-passkey")
