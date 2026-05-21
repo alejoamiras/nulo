@@ -1,11 +1,25 @@
 <script setup lang="ts">
+import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { computed } from "vue"
 import { useWalletConnection } from "@/composables/useWalletConnection"
+import { FAUCET_TOKENS } from "@/constants/tokens"
+import { ETH, USDC } from "@/contracts/deployments"
 import { TESTIDS } from "@/lib/testids"
 import AccountNotDeployedBanner from "./components/AccountNotDeployedBanner.vue"
 import AppToastRegion from "./components/AppToastRegion.vue"
+import TokenCard from "./components/TokenCard.vue"
 import WalletPanel from "./components/WalletPanel.vue"
 
-const { status, accountDeployed } = useWalletConnection()
+const { status, accountDeployed, wallet, selectedAccount } = useWalletConnection()
+
+const tokenEntries = computed(() =>
+	FAUCET_TOKENS.map((token) => ({
+		token,
+		address: token.symbol === "USDC" ? USDC : ETH,
+	})),
+)
+
+const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.fromString(selectedAccount.value) : null))
 </script>
 
 <template>
@@ -21,6 +35,17 @@ const { status, accountDeployed } = useWalletConnection()
 		<WalletPanel />
 
 		<AccountNotDeployedBanner v-if="status === 'connected' && accountDeployed === false" />
+
+		<section v-if="status === 'connected' && wallet && accountAddress" class="cards">
+			<TokenCard
+				v-for="entry in tokenEntries"
+				:key="entry.token.symbol"
+				:token="entry.token"
+				:token-address="entry.address"
+				:wallet="wallet"
+				:account="accountAddress"
+			/>
+		</section>
 
 		<AppToastRegion />
 	</main>
@@ -51,5 +76,11 @@ const { status, accountDeployed } = useWalletConnection()
 	font-size: 16px;
 	max-width: 56ch;
 	margin: 0;
+}
+
+.cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	gap: 16px;
 }
 </style>
