@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.1](https://github.com/alejoamiras/nulo/compare/v0.21.0...v0.21.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* **faucet:** allow bb.js wasm data URI + workers in CSP ([#43](https://github.com/alejoamiras/nulo/issues/43)) ([9057c95](https://github.com/alejoamiras/nulo/commit/9057c9522b5947e701ff1863d8bd3690536758a3))
+
 ## [0.21.0](https://github.com/alejoamiras/nulo/compare/v0.20.2...v0.21.0) (2026-05-21)
 
 
