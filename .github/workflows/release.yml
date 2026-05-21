@@ -171,6 +171,14 @@ jobs:
 
   attach-assets:
     needs: [resolve, lint-and-typecheck, unit-tests, network-e2e, build-chrome, build-firefox, smoke-against-artifact]
+    # Skipped needs (e.g. network-e2e on prerelease or manual run_network_e2e=false)
+    # would skip this job by default. The explicit guards let the job proceed when
+    # a need was skipped but fail-fast if any need failed or was cancelled.
+    if: |
+      always() &&
+      needs.resolve.result == 'success' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
