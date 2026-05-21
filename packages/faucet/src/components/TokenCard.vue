@@ -35,6 +35,13 @@ const buttonsDisabled = computed(() => drip.inflight.value !== null)
 const publicLast = computed(() => drip.last[`${props.token.symbol}:public`] ?? null)
 const privateLast = computed(() => drip.last[`${props.token.symbol}:private`] ?? null)
 
+const cardDripState = computed<"idle" | "dripping" | "ok" | "error">(() => {
+	if (publicDripping.value || privateDripping.value) return "dripping"
+	const latest = publicLast.value ?? privateLast.value
+	if (!latest) return "idle"
+	return latest.kind === "txHash" ? "ok" : "error"
+})
+
 function dripStateFor(target: DripTarget) {
 	const isActive = target === "public" ? publicDripping.value : privateDripping.value
 	if (isActive) return "dripping" as const
@@ -90,6 +97,9 @@ async function handleDrip(target: DripTarget) {
 		<p v-if="privateDripping" class="hint">Private drips take 30–90 seconds.</p>
 		<footer class="foot">
 			<DisclaimerTag />
+			<span class="status" :data-testid="TESTIDS.dripStatus" :data-drip-status="cardDripState">
+				{{ cardDripState }}
+			</span>
 		</footer>
 	</Card>
 </template>
@@ -129,6 +139,18 @@ async function handleDrip(target: DripTarget) {
 
 .foot {
 	display: flex;
-	justify-content: flex-start;
+	justify-content: space-between;
+	align-items: center;
 }
+
+.status {
+	color: var(--txt-secondary);
+	font: 500 11px/1 var(--font-mono);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.status[data-drip-status="ok"] { color: var(--mint); }
+.status[data-drip-status="error"] { color: var(--red); }
+.status[data-drip-status="dripping"] { color: var(--yellow); }
 </style>

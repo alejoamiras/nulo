@@ -1,6 +1,6 @@
 /**
  * Normalize errors from wallet-sdk, simulation, and tx submission into
- * UI categories with the exact toast copy plan-v2 §6 specifies.
+ * UI categories with their canonical toast copy.
  *
  * Categories (ordered most-specific first):
  *   user-rejected · capability-rejected · no-wallet · network · tx-reverted

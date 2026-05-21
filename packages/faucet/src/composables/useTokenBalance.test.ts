@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mockContractMethods = {
-	balance_of_public: vi.fn(() => ({ request: async () => ({ call: "public" }) })),
-	balance_of_private: vi.fn(() => ({ request: async () => ({ call: "private" }) })),
+	balance_of_public: vi.fn(() => ({ request: async () => ({ calls: [{ call: "public" }] }) })),
+	balance_of_private: vi.fn(() => ({ request: async () => ({ calls: [{ call: "private" }] }) })),
 }
 const mockContract = { methods: mockContractMethods }
 
@@ -19,6 +19,14 @@ import { useTokenBalance } from "./useTokenBalance"
 const TOKEN = { toString: () => "0xtoken" } as unknown as Parameters<typeof useTokenBalance>[1]
 const ACCOUNT = { toString: () => "0xaccount" } as unknown as Parameters<typeof useTokenBalance>[2]
 
+type ExecuteUtilityResult = { result: unknown[] }
+
+// Wrap a value into the shape executeUtility actually returns —
+// `UtilityExecutionResult` per @aztec/stdlib/tx/profiling.d.ts:476.
+function utility(...values: unknown[]): ExecuteUtilityResult {
+	return { result: values }
+}
+
 function makeWallet(opts: { publicBalance?: bigint; privateBalance?: bigint; throws?: Error } = {}) {
 	const calls: unknown[] = []
 	return {
@@ -26,7 +34,7 @@ function makeWallet(opts: { publicBalance?: bigint; privateBalance?: bigint; thr
 		executeUtility: vi.fn(async (call: { call: string }, _opts: unknown) => {
 			calls.push(call)
 			if (opts.throws) throw opts.throws
-			return call.call === "public" ? (opts.publicBalance ?? 0n) : (opts.privateBalance ?? 0n)
+			return call.call === "public" ? utility(opts.publicBalance ?? 0n) : utility(opts.privateBalance ?? 0n)
 		}),
 	}
 }
@@ -41,7 +49,7 @@ describe("useTokenBalance", () => {
 		vi.useRealTimers()
 	})
 
-	it("fetches both public + private balances on mount", async () => {
+	it("fetches both public + private balances on mount (extracts result[0] from UtilityExecutionResult)", async () => {
 		const w = makeWallet({ publicBalance: 1_000_000n, privateBalance: 2_000_000n })
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
 		const handle = useTokenBalance(w as any, TOKEN, ACCOUNT)
@@ -52,19 +60,30 @@ describe("useTokenBalance", () => {
 		handle.dispose()
 	})
 
-	it("uses wallet.executeUtility with the correct empty-arrays option shape", async () => {
+	it("uses wallet.executeUtility with the canonical option shape (scopes + empty arrays)", async () => {
 		const w = makeWallet()
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
 		const handle = useTokenBalance(w as any, TOKEN, ACCOUNT)
 		await vi.waitFor(() => expect(w.executeUtility).toHaveBeenCalled())
 		const optsArg = w.executeUtility.mock.calls[0][1] as Record<string, unknown>
 		expect(optsArg).toMatchObject({
-			from: ACCOUNT,
-			scopes: [],
+			scopes: [ACCOUNT],
 			authWitnesses: [],
 			capsules: [],
 			extraHashedArgs: [],
 		})
+		// Critical: does NOT pass `from` — that's a SendOptions key, not ExecuteUtilityOptions
+		expect(optsArg).not.toHaveProperty("from")
+		handle.dispose()
+	})
+
+	it("extracts the FunctionCall from ExecutionPayload.calls[0] (not the whole exec)", async () => {
+		const w = makeWallet()
+		// biome-ignore lint/suspicious/noExplicitAny: test stub
+		const handle = useTokenBalance(w as any, TOKEN, ACCOUNT)
+		await vi.waitFor(() => expect(w.executeUtility).toHaveBeenCalled())
+		const callArg = w.executeUtility.mock.calls[0][0]
+		expect(callArg).toMatchObject({ call: "public" })
 		handle.dispose()
 	})
 
@@ -107,24 +126,24 @@ describe("useTokenBalance", () => {
 		handle.dispose()
 	})
 
-	it("returns BigInt unchanged when the SDK returns bigint", async () => {
-		const w = makeWallet({ publicBalance: 12345678901234567890n })
-		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		const handle = useTokenBalance(w as any, TOKEN, ACCOUNT)
-		await vi.waitFor(() => expect(handle.publicBalance.value).toBe(12345678901234567890n))
-		handle.dispose()
-	})
-
-	it("coerces SDK return values with a toBigInt() method", async () => {
+	it("handles Fr-shaped result values (calls toBigInt() on objects that expose it)", async () => {
 		const w = {
-			executeUtility: vi.fn(async (call: { call: string }) => ({
-				toBigInt: () => (call.call === "public" ? 777n : 888n),
-			})),
+			executeUtility: vi.fn(async (call: { call: string }) => utility({ toBigInt: () => (call.call === "public" ? 777n : 888n) })),
 		}
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
 		const handle = useTokenBalance(w as any, TOKEN, ACCOUNT)
 		await vi.waitFor(() => expect(handle.publicBalance.value).toBe(777n))
 		expect(handle.privateBalance.value).toBe(888n)
+		handle.dispose()
+	})
+
+	it("returns 0n if UtilityExecutionResult.result is empty", async () => {
+		const w = {
+			executeUtility: vi.fn(async () => ({ result: [] })),
+		}
+		// biome-ignore lint/suspicious/noExplicitAny: test stub
+		const handle = useTokenBalance(w as any, TOKEN, ACCOUNT)
+		await vi.waitFor(() => expect(handle.publicBalance.value).toBe(0n))
 		handle.dispose()
 	})
 
@@ -137,11 +156,11 @@ describe("useTokenBalance", () => {
 	})
 
 	it("ignores writes after dispose (no late state updates from in-flight fetch)", async () => {
-		let resolve: (v: bigint) => void = () => {}
+		let resolve: (v: ExecuteUtilityResult) => void = () => {}
 		const w = {
 			executeUtility: vi.fn(
 				() =>
-					new Promise<bigint>((r) => {
+					new Promise<ExecuteUtilityResult>((r) => {
 						resolve = r
 					}),
 			),
@@ -149,7 +168,7 @@ describe("useTokenBalance", () => {
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
 		const handle = useTokenBalance(w as any, TOKEN, ACCOUNT)
 		handle.dispose()
-		resolve(99n)
+		resolve(utility(99n))
 		await vi.advanceTimersByTimeAsync(0)
 		expect(handle.publicBalance.value).toBeNull()
 	})

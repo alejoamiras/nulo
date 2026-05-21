@@ -17,12 +17,8 @@ export interface DripResult {
 	readonly category?: NormalizedError["category"]
 }
 
-/**
- * Single global in-flight drip per plan-v2 §4 (codex audit r5). Wallet
- * popups serialize anyway — letting multiple drips queue creates a
- * confusing wallet UX. All four DripButtons disable while one drip is
- * active; the active one shows its spinner.
- */
+// Global single in-flight gate. Wallet popups serialize on the wallet
+// side anyway; letting parallel drips queue creates confusing popup UX.
 const inflight = ref<{ tokenSymbol: TokenSymbol; target: DripTarget } | null>(null)
 const last = reactive<Record<string, DripResult | null>>({})
 
@@ -44,7 +40,6 @@ async function drip(
 	target: DripTarget,
 ): Promise<DripResult> {
 	if (inflight.value !== null) {
-		// global gate; caller's button is already disabled but be defensive
 		return { kind: "error", value: "Another drip is in flight." }
 	}
 	inflight.value = { tokenSymbol: token.symbol, target }
@@ -52,8 +47,6 @@ async function drip(
 	try {
 		const dripperContract = await Contract.at(DRIPPER, DripperContractArtifact, wallet)
 		const fnName = target === "public" ? "drip_to_public" : "drip_to_private"
-		// Access the methods bag through a structural type — the SDK's
-		// generated contract proxy doesn't expose a clean signature here.
 		const methods = (
 			dripperContract as unknown as {
 				methods: Record<string, (...args: unknown[]) => { request: () => Promise<unknown> }>
@@ -67,15 +60,17 @@ async function drip(
 		const exec = await interaction.request()
 
 		const fpc = await getSponsoredFpcInstance()
-		// The SDK's ExecutionPayload type in @aztec/aztec.js@4.2.0 doesn't
-		// include `feePayer`. Nulo's dispatcher materializes the embedded
-		// fee path at runtime (packages/wallet-bridge/src/dispatcher.ts:331).
-		// Single typed-boundary cast — matches playground transactions.ts:111.
-		// biome-ignore lint/suspicious/noExplicitAny: SDK ExecutionPayload omits feePayer in this version
+		// Explicit feePayer keeps the faucet wallet-agnostic — every
+		// wallet-sdk wallet sees an embedded sponsored-FPC fee and either
+		// honors it or fails bluntly. ExecutionPayload is a class with a
+		// constructor, so the spread loses the prototype chain; we cast
+		// at the boundary because the runtime accepts the plain object
+		// but the typed signature doesn't.
+		// biome-ignore lint/suspicious/noExplicitAny: ExecutionPayload class shape; runtime accepts plain object with feePayer
 		const execWithFee: any = { ...(exec as object), feePayer: fpc.address }
 
-		// biome-ignore lint/suspicious/noExplicitAny: SDK sendTx signature varies; runtime accepts our shape
-		const tx = await (wallet as any).sendTx(execWithFee, { from: account })
+		// biome-ignore lint/suspicious/noExplicitAny: SendOptions structural cast
+		const tx = await (wallet as any).sendTx(execWithFee, { from: account } as any)
 		const txHash = extractTxHash(tx)
 		const result: DripResult = { kind: "txHash", value: txHash }
 		last[key] = result
@@ -90,10 +85,18 @@ async function drip(
 	}
 }
 
+/**
+ * sendTx with the default wait option returns `{ receipt: TxReceipt }`
+ * (TxSendResultMined); with NO_WAIT it returns `{ txHash }`
+ * (TxSendResultImmediate). The faucet uses the mined path, so the hash
+ * lives at `tx.receipt.txHash`. The top-level `txHash` fallback keeps
+ * test stubs that emit the immediate shape working.
+ */
 function extractTxHash(tx: unknown): string {
 	if (typeof tx === "string") return tx
 	if (tx && typeof tx === "object") {
-		const t = tx as { txHash?: unknown; hash?: unknown }
+		const t = tx as { receipt?: { txHash?: unknown }; txHash?: unknown; hash?: unknown }
+		if (t.receipt?.txHash) return String(t.receipt.txHash)
 		if (t.txHash) return String(t.txHash)
 		if (t.hash) return String(t.hash)
 	}

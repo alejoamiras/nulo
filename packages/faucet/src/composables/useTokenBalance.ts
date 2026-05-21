@@ -17,14 +17,15 @@ export interface UseTokenBalanceHandle {
 }
 
 /**
- * Per-token balance reader. Polls `balance_of_public` and `balance_of_private`
- * every 15s via `wallet.executeUtility(...)` — NOT `simulateUtility`. The
- * canonical option shape (with empty `scopes`/`authWitnesses`/`capsules`/
- * `extraHashedArgs` arrays) matches the playground at
- * `packages/playground/src/sections/simulation.ts:99` (codex audit r1).
+ * Per-token balance reader. Polls balance_of_public + balance_of_private
+ * every 15s via wallet.executeUtility. Extracts the first FunctionCall
+ * from the ExecutionPayload returned by `method().request()`, then passes
+ * the canonical option shape (scopes + empty authWitnesses/capsules/
+ * extraHashedArgs) — the public ExecuteUtilityOptions type is narrower
+ * than what the execution service requires at runtime.
  *
- * Caller owns lifecycle: invoke `dispose()` in `onBeforeUnmount` of the
- * parent component (per CLAUDE.md composable rule).
+ * Caller owns lifecycle: invoke dispose() in onBeforeUnmount of the
+ * parent component.
  */
 export function useTokenBalance(wallet: Wallet, tokenAddress: AztecAddress, accountAddress: AztecAddress): UseTokenBalanceHandle {
 	const publicBalance = ref<bigint | null>(null)
@@ -39,16 +40,9 @@ export function useTokenBalance(wallet: Wallet, tokenAddress: AztecAddress, acco
 		loading.value = true
 		try {
 			const contract = await Contract.at(tokenAddress, TokenContractArtifact, wallet)
-			const opts = {
-				from: accountAddress,
-				scopes: [],
-				authWitnesses: [],
-				capsules: [],
-				extraHashedArgs: [],
-			}
 			const [pub, prv] = await Promise.all([
-				readBalance(wallet, contract, "balance_of_public", accountAddress, opts),
-				readBalance(wallet, contract, "balance_of_private", accountAddress, opts),
+				readBalance(wallet, contract, "balance_of_public", accountAddress),
+				readBalance(wallet, contract, "balance_of_private", accountAddress),
 			])
 			if (disposed) return
 			publicBalance.value = pub
@@ -90,12 +84,12 @@ interface ContractWithMethods {
 	methods: Record<string, (...args: unknown[]) => { request: () => Promise<unknown> }>
 }
 
-interface ExecuteUtilityOpts {
-	from: AztecAddress
-	scopes: AztecAddress[]
-	authWitnesses: unknown[]
-	capsules: unknown[]
-	extraHashedArgs: unknown[]
+interface ExecutionPayloadShape {
+	calls?: unknown[]
+}
+
+interface UtilityExecutionResultShape {
+	result?: unknown[]
 }
 
 async function readBalance(
@@ -103,19 +97,37 @@ async function readBalance(
 	contract: unknown,
 	fn: "balance_of_public" | "balance_of_private",
 	account: AztecAddress,
-	opts: ExecuteUtilityOpts,
 ): Promise<bigint> {
 	const c = contract as ContractWithMethods
 	const method = c.methods[fn]
 	if (typeof method !== "function") {
 		throw new Error(`Token contract is missing method ${fn}`)
 	}
-	const call = await method(account).request()
-	// SDK `executeUtility` is typed against zod-inferred shapes; the
-	// playground casts at the boundary. We do the same in one spot.
-	// biome-ignore lint/suspicious/noExplicitAny: SDK uses zod-inferred types
-	const result = await (wallet as any).executeUtility(call, opts)
-	return toBigInt(result)
+	const exec = (await method(account).request()) as ExecutionPayloadShape
+	const call = exec.calls?.[0]
+	if (!call) {
+		throw new Error(`${fn} produced no FunctionCall`)
+	}
+	// ExecuteUtilityOptions publicly declares only `scopes` and optional
+	// `authWitnesses`, but the execution service also requires `capsules`
+	// and `extraHashedArgs` at runtime — see playground simulation.ts:106
+	// for the same boundary cast.
+	const opts = {
+		scopes: [account],
+		authWitnesses: [],
+		capsules: [],
+		extraHashedArgs: [],
+		// biome-ignore lint/suspicious/noExplicitAny: ExecuteUtilityOptions narrower than runtime
+	} as any
+	// biome-ignore lint/suspicious/noExplicitAny: FunctionCall isn't exported through aztec.js root
+	const raw = (await wallet.executeUtility(call as any, opts)) as UtilityExecutionResultShape
+	return extractFirstFr(raw)
+}
+
+function extractFirstFr(raw: UtilityExecutionResultShape): bigint {
+	const first = raw.result?.[0]
+	if (first === undefined || first === null) return 0n
+	return toBigInt(first)
 }
 
 function toBigInt(value: unknown): bigint {

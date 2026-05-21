@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mockEstablishSecureChannel = vi.fn()
 const mockDisconnectProvider = vi.fn()
+const mockOnDisconnect = vi.fn<(handler: () => void) => () => void>()
+let lastDisconnectHandler: (() => void) | null = null
 
 const mockProvider = {
 	id: "nulo",
@@ -18,7 +20,7 @@ const mockProvider = {
 	establishSecureChannel: mockEstablishSecureChannel,
 	disconnect: mockDisconnectProvider,
 	isDisconnected: () => false,
-	onDisconnect: () => () => {},
+	onDisconnect: (handler: () => void) => mockOnDisconnect(handler),
 }
 
 async function* yieldOne() {
@@ -95,6 +97,14 @@ describe("useWalletConnection", () => {
 		__resetWalletConnectionForTests()
 		mockEstablishSecureChannel.mockReset()
 		mockDisconnectProvider.mockReset()
+		mockOnDisconnect.mockReset()
+		lastDisconnectHandler = null
+		mockOnDisconnect.mockImplementation((handler: () => void) => {
+			lastDisconnectHandler = handler
+			return () => {
+				lastDisconnectHandler = null
+			}
+		})
 		mockGetAvailableWallets.mockReset()
 		mockGetAvailableWallets.mockImplementation(() => ({
 			wallets: yieldOne(),
@@ -225,6 +235,21 @@ describe("useWalletConnection", () => {
 		const b = c.connect()
 		await Promise.race([Promise.all([a, b]), new Promise((r) => setTimeout(r, 50))])
 		expect(mockGetAvailableWallets).toHaveBeenCalledTimes(1)
+	})
+
+	it("subscribes to provider.onDisconnect during connect and resets state when it fires", async () => {
+		const pending = makePending()
+		mockEstablishSecureChannel.mockResolvedValue(pending)
+		const c = useWalletConnection()
+		await c.connect()
+		await c.confirmVerification()
+		expect(c.status.value).toBe("connected")
+		expect(mockOnDisconnect).toHaveBeenCalledTimes(1)
+		// Simulate the wallet dropping the channel on its end.
+		lastDisconnectHandler?.()
+		expect(c.status.value).toBe("idle")
+		expect(c.wallet.value).toBeNull()
+		expect(c.accounts.value).toEqual([])
 	})
 
 	it("granted-accounts rejection (empty granted.accounts) lands in 'error'", async () => {

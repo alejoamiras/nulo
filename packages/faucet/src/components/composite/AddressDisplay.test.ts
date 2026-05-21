@@ -47,4 +47,42 @@ describe("AddressDisplay", () => {
 		const w = mount(AddressDisplay, { props: { address: "" } })
 		expect(w.text()).toContain("—")
 	})
+
+	it("does NOT call clipboard.writeText for an empty address", async () => {
+		const w = mount(AddressDisplay, { props: { address: "" } })
+		await w.get("button").trigger("click")
+		await Promise.resolve()
+		expect(writeText).not.toHaveBeenCalled()
+	})
+
+	it("does NOT shorten an address that's already short enough", () => {
+		const short = "0x123"
+		const w = mount(AddressDisplay, { props: { address: short } })
+		expect(w.text()).toContain(short)
+		expect(w.text()).not.toContain("…")
+	})
+
+	it("shows a transient 'copied' confirmation after a successful copy", async () => {
+		const w = mount(AddressDisplay, { props: { address: FULL } })
+		await w.get("button").trigger("click")
+		await Promise.resolve()
+		await Promise.resolve()
+		expect(w.text()).toContain("copied")
+	})
+
+	it("clears the 'copied' confirmation after the 1.2s timeout", async () => {
+		const w = mount(AddressDisplay, { props: { address: FULL } })
+		await w.get("button").trigger("click")
+		await Promise.resolve()
+		await Promise.resolve()
+		expect(w.text()).toContain("copied")
+		vi.advanceTimersByTime(1500)
+		await Promise.resolve()
+		expect(w.text()).not.toContain("copied")
+	})
+
+	it("uses type=button so it doesn't accidentally submit a parent form", () => {
+		const w = mount(AddressDisplay, { props: { address: FULL } })
+		expect(w.get("button").attributes("type")).toBe("button")
+	})
 })

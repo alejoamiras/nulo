@@ -45,8 +45,9 @@ export interface DeploymentConfig {
 }
 
 export function getDeploymentConfig(network: Network): DeploymentConfig {
-	// AZTEC_NODE_URL overrides the per-network default. The frontend has its
-	// own VITE_AZTEC_NODE_URL — deliberately separate (codex audit r2).
+	// AZTEC_NODE_URL overrides the per-network default. The frontend reads
+	// its own VITE_AZTEC_NODE_URL — deliberately separate so the bundled
+	// build never embeds DEPLOYER_SECRET-adjacent config.
 	const nodeUrl = process.env.AZTEC_NODE_URL || NETWORK_URLS[network]
 	return {
 		network: { name: network, nodeUrl },

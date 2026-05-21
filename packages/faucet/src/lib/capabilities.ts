@@ -3,11 +3,14 @@ import type { AztecAddress } from "@aztec/aztec.js/addresses"
 /**
  * Build the wallet-sdk capability manifest for the faucet.
  *
- * Scope is tight per plan-v2 §5:
+ * Scope is tight:
  *  - `accounts.canCreateAuthWit: false` (Dripper has no auth guards).
- *  - `contracts` lists ONLY [DRIPPER, USDC, ETH]. NOT SponsoredFPC —
- *    Nulo's dispatcher materializes the embedded `feePayer` path
- *    internally (codex audit r2 fix; see useFaucetDrip).
+ *  - `contracts` lists ONLY [DRIPPER, USDC, ETH]. SponsoredFPC stays
+ *    OUT — the wallet materializes the embedded `feePayer` path
+ *    internally so the dApp never needs to register the FPC contract.
+ *    Adding SponsoredFPC here would break scope enforcement on every
+ *    drip's fee payment because the address wouldn't match the
+ *    granted scope.
  *  - `simulation.utilities.scope` is restricted to the 4 balance reads
  *    we issue via `wallet.executeUtility`.
  *  - `transaction.scope` is the 2 Dripper functions we send.

@@ -12,7 +12,8 @@
 		"test:watch": "vitest",
 		"test:e2e": "vitest run --config vitest.e2e.config.ts",
 		"deploy:testnet": "bun run scripts/deploy.ts --network testnet",
-		"deploy:testnet:dry": "bun run scripts/deploy.ts --network testnet --dry-run"
+		"deploy:testnet:dry": "bun run scripts/deploy.ts --network testnet --dry-run",
+		"verify:deployments": "bun run scripts/verify-deployments.ts"
 	},
 	"dependencies": {
 		"@aztec/accounts": "4.2.0",
@@ -29,7 +30,6 @@
 		"@aztec/wallet-sdk": "4.2.0",
 		"@aztec/wallets": "4.2.0",
 		"@defi-wonderland/aztec-standards": "4.2.0-aztecnr-rc.2",
-		"focus-trap": "^8.0.0",
 		"vue": "^3.5.18"
 	},
 	"devDependencies": {

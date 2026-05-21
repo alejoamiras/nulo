@@ -34,6 +34,7 @@ const wallet = ref<Wallet | null>(null)
 let provider: WalletProvider | null = null
 let pending: PendingConnection | null = null
 let cancelDiscovery: (() => void) | null = null
+let unsubscribeDisconnect: (() => void) | null = null
 
 export function useWalletConnection() {
 	return {
@@ -79,6 +80,13 @@ async function connect(): Promise<void> {
 			throw new Error("No wallet discovered")
 		}
 		provider = firstProvider
+		// Wallet-side disconnect (extension reload, user revokes session)
+		// must reset the dApp state too — otherwise we hold a stale Wallet
+		// handle and the next drip silently does nothing.
+		unsubscribeDisconnect = firstProvider.onDisconnect(() => {
+			cleanupSession()
+			status.value = "idle"
+		})
 
 		status.value = "verifying"
 		const p = await firstProvider.establishSecureChannel(APP_ID)
@@ -220,6 +228,14 @@ export function extractGrantedAccounts(result: unknown): GrantedAccount[] {
 }
 
 function cleanupSession(): void {
+	if (unsubscribeDisconnect) {
+		try {
+			unsubscribeDisconnect()
+		} catch {
+			// best-effort
+		}
+		unsubscribeDisconnect = null
+	}
 	provider = null
 	pending = null
 	cancelDiscovery = null
