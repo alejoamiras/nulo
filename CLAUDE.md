@@ -324,7 +324,63 @@ Configured in [`.github/`](./.github/). The full contributor guide is at [`CI.md
 - `dev` — day-to-day integration. Required checks enforced.
 - Feature branches → PR into `dev`.
 - Promote `dev → main` via PR when ready.
-- **Releases are driven by release-please.** Every push to main runs `.github/workflows/release.yml`, which calls `googleapis/release-please-action@v4` to open/update a Release PR (`chore: release @nulo/extension X.Y.Z`). Merging the Release PR creates the tag + GitHub Release; the same workflow run then attaches Chrome + Firefox zips + SHASUMS, overlays git-cliff release notes onto the GitHub Release body, and triggers the Cloudflare Pages deploy hook. Human `chore: bump extension to X.Y.Z` commits remain **deprecated**. The release workflow's `workflow_dispatch` trigger is an escape hatch for re-publishing assets to an existing tag (with `dry_run`, `run_network_e2e`, `publish_marketplaces` toggles). Config files: `.github/release-please-config.json`, `.release-please-manifest.json`, `CHANGELOG.md`.
+- **Releases are driven by release-please** (with a workaround). See [§ Release runbook](#release-runbook) below for the full per-release procedure. Short version: release-please opens a Release PR on every push to `main`; merging the PR is supposed to auto-tag + create the GitHub Release + run the publish chain, but `release-please-action@v4` has an open bug ([googleapis/release-please-action#1205](https://github.com/googleapis/release-please-action/issues/1205) + [googleapis/release-please#2712](https://github.com/googleapis/release-please/issues/2712)) that aborts the auto-publish phase. Until that's fixed upstream, every release needs a 45-second manual unstick + `workflow_dispatch` republish. Human `chore: bump extension to X.Y.Z` commits remain **deprecated**. Config files: `.github/release-please-config.json`, `.release-please-manifest.json`, `CHANGELOG.md`. Workflow: `.github/workflows/release.yml`.
+
+### Release runbook
+
+Per-release procedure for shipping a stable release from `main` (e.g. `0.20.3`). Total time: ~20 min, of which ~45 seconds is manual.
+
+**Prerequisites** (one-time, already done):
+- GitHub App `nulo-release-bot` installed on the repo with `RELEASE_PLEASE_APP_ID` + `RELEASE_PLEASE_APP_PRIVATE_KEY` repo secrets wired.
+- `CLOUDFLARE_PAGES_DEPLOY_HOOK` repo secret set (used by the workflow's `refresh-landing` job).
+
+**Steps:**
+
+1. **Get the work onto `main`.** Promote `dev → main` via the usual `release: promote dev → main (...)` PR. Merge-commit (per `main`'s ruleset).
+2. **Wait for the Release PR.** The push to `main` triggers `release.yml`. release-please opens a Release PR titled `chore(main): release X.Y.Z` (version chosen automatically from Conventional Commits since the last tag — `feat:` → minor, `fix:` → patch, `BREAKING CHANGE:` → major). Review the auto-generated `CHANGELOG.md` diff in the PR.
+3. **Merge the Release PR via the UI** (merge commit).
+4. **Wait for the post-merge `release.yml` run.** It will run release-please-action again. **Expected: it aborts with `⚠ There are untagged, merged release PRs outstanding - aborting` and the downstream gates + publish jobs all skip.** This is the v4 bug.
+5. **Manual unstick** (~45 seconds — paste into terminal):
+   ```bash
+   # Replace VERSION + MERGE_COMMIT + PR_NUM
+   VERSION=0.20.3
+   MERGE_COMMIT=$(gh pr view <PR_NUM> --json mergeCommit -q '.mergeCommit.oid')
+   git fetch origin main
+   git tag -a "v$VERSION" "$MERGE_COMMIT" -m "Release $VERSION"
+   git push origin "v$VERSION"
+   gh pr edit <PR_NUM> --add-label "autorelease: tagged" --remove-label "autorelease: pending"
+   gh release create "v$VERSION" --title "v$VERSION" --notes "Filled by publish run." --target main
+   ```
+6. **Trigger the publish chain via `workflow_dispatch`:**
+   ```bash
+   gh workflow run release.yml --ref main \
+     -f tag="v$VERSION" -f dry_run=false \
+     -f run_network_e2e=true -f publish_marketplaces=false
+   ```
+   This runs `lint+typecheck → unit-tests → network-e2e → build chrome+firefox → smoke-against-artifact → attach-assets` (zips + SHASUMS + git-cliff body overlay). ~15-25 min.
+7. **Cloudflare landing redeploy.** The workflow's `refresh-landing` step only fires on the `push:main` path, not on `workflow_dispatch`. Either:
+   - Push a no-op commit to `main` (e.g. a CLAUDE.md update) to re-trigger `release.yml` and let `refresh-landing` run, OR
+   - Curl the `CLOUDFLARE_PAGES_DEPLOY_HOOK` value directly (the secret is also exposed in the repo's Cloudflare Pages dashboard).
+8. **Verify**: `gh release view v$VERSION --json assets -q '[.assets[] | .name]'` should list `nulo-chrome-X.Y.Z.zip`, `nulo-firefox-X.Y.Z.zip`, `SHASUMS256.txt`.
+
+**Why the manual unstick is required (the v4 bug):**
+
+`release-please-action@v4` runs both "open Release PR" and "tag + publish merged Release PR" phases. The publish phase looks for a previously-created GitHub Release that matches the merged PR's manifest entry — when no such release exists yet (because the publish phase is supposed to be the one creating it), it logs `⚠ Expected 1 releases, only found 0` and bails with the "outstanding" error instead of creating the release itself. Both the original action issue ([#1205](https://github.com/googleapis/release-please-action/issues/1205)) and the upstream tool issue ([release-please#2712](https://github.com/googleapis/release-please/issues/2712)) are open with no fix.
+
+**All versions are affected** (verified by source-level inspection):
+- `release-please-action@v3.7.13` (bundles release-please 15.13.0): same abort logic in `base.ts` + `manifest.ts`. Also 18 months unmaintained.
+- `release-please-action@v4` (bundles release-please 17.3.0): current. Hits the bug.
+- `release-please-action@v5.0.0` (bundles release-please 17.6.0): Node 24 runtime bump + minor unrelated fixes. Same abort path. Active issues confirm the deadlock on v5.
+
+Downgrading to v3 also requires renaming our `target-branch:` input back to `default-branch:` — not worth the churn for no actual fix.
+
+The manual unstick (tag + `autorelease: tagged` label + empty GitHub Release) places the repo in the state the action's publish phase *expects* to find. The follow-up `workflow_dispatch` then exercises the publish chain end-to-end via our `always() && needs.X.result == 'success'` guards (which require the explicit tag input to bypass `release-please` entirely).
+
+**Things that DO work without manual intervention:**
+- release-please opens correctly-titled Release PRs (after the `group-pull-request-title-pattern` fix in [`release-please-config.json`](.github/release-please-config.json)).
+- The Release PR's CI runs normally (App-token triggers the PR-quick workflow → `Quality / Status`).
+- The Release PR's commits are bot-verified (App-authenticated → satisfies `main`'s signed-commits rule).
+- The `workflow_dispatch` publish chain runs all gates + builds + smoke + attach-assets end-to-end.
 
 ## What this file is NOT
 
