@@ -1,0 +1,47 @@
+{
+	"name": "@nulo/faucet",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"preview": "vite preview",
+		"typecheck": "vue-tsc --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"test:e2e": "vitest run --config vitest.e2e.config.ts",
+		"deploy:testnet": "bun run scripts/deploy.ts --network testnet",
+		"deploy:testnet:dry": "bun run scripts/deploy.ts --network testnet --dry-run"
+	},
+	"dependencies": {
+		"@aztec/accounts": "4.2.0",
+		"@aztec/aztec.js": "4.2.0",
+		"@aztec/bb.js": "4.2.0",
+		"@aztec/constants": "4.2.0",
+		"@aztec/foundation": "4.2.0",
+		"@aztec/noir-acvm_js": "4.2.0",
+		"@aztec/noir-contracts.js": "4.2.0",
+		"@aztec/noir-noirc_abi": "4.2.0",
+		"@aztec/protocol-contracts": "4.2.0",
+		"@aztec/pxe": "4.2.0",
+		"@aztec/stdlib": "4.2.0",
+		"@aztec/wallet-sdk": "4.2.0",
+		"@aztec/wallets": "4.2.0",
+		"@defi-wonderland/aztec-standards": "4.2.0-aztecnr-rc.2",
+		"focus-trap": "^8.0.0",
+		"vue": "^3.5.18"
+	},
+	"devDependencies": {
+		"@types/node": "^24.2.1",
+		"@vitejs/plugin-vue": "^6.0.1",
+		"@vue/compiler-sfc": "^3.5.18",
+		"@vue/test-utils": "^2.4.9",
+		"jsdom": "^29.1.1",
+		"typescript": "^6.0.3",
+		"vite": "^8.0.11",
+		"vite-plugin-node-polyfills": "^0.26.0",
+		"vitest": "^4.1.5",
+		"vue-tsc": "^3.0.5"
+	}
+}

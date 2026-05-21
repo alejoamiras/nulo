@@ -8,10 +8,13 @@
     "dev": "bun run --cwd packages/extension dev",
     "dev:playground": "bun run --cwd packages/playground dev",
     "dev:landing": "bun run --cwd packages/landing dev",
+    "dev:faucet": "bun run --cwd packages/faucet dev",
     "build": "bun run --cwd packages/extension build",
     "build:chrome": "bun run --cwd packages/extension build:chrome",
     "build:firefox": "bun run --cwd packages/extension build:firefox",
+    "build:faucet": "bun run --cwd packages/faucet build",
     "test": "bun run --cwd packages/extension test",
+    "test:faucet": "bun run --cwd packages/faucet test",
     "test:e2e": "bun run --cwd packages/extension test:e2e",
     "test:e2e:network": "bun run --cwd packages/extension vitest run --config vitest.e2e.network.config.ts",
     "test:e2e:all": "bun run --cwd packages/extension vitest run --config vitest.e2e.all.config.ts",
@@ -25,6 +28,7 @@
     "test:all": "bun run --filter '@nulo/*' --if-present test",
     "check:imports": "biome check packages/",
     "audit:vue": "bun run typecheck:all && bun run test && bun run lint && bun run build",
+    "audit:faucet": "bun run typecheck:all && bun run test:faucet && bun run lint && bun run build:faucet",
     "prepare": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
