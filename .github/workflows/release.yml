@@ -170,7 +170,7 @@ jobs:
       artifact_name: extension-chrome
 
   attach-assets:
-    needs: [resolve, build-chrome, build-firefox, smoke-against-artifact]
+    needs: [resolve, lint-and-typecheck, unit-tests, network-e2e, build-chrome, build-firefox, smoke-against-artifact]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
