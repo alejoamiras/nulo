@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.2](https://github.com/alejoamiras/nulo/compare/v0.20.1...v0.20.2) (2026-05-21)
+
+
+### Bug Fixes
+
+* **ci:** prepend always() to skip-propagation guards ([#31](https://github.com/alejoamiras/nulo/issues/31)) ([0f78649](https://github.com/alejoamiras/nulo/commit/0f786497c0960aea68d9dce4b95ce8c807125fbd))
+
 ## [0.20.1](https://github.com/alejoamiras/nulo/compare/v0.20.0...v0.20.1) (2026-05-21)
 
 
