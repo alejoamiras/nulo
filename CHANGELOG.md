@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.20.1](https://github.com/alejoamiras/nulo/compare/v0.20.0...v0.20.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* **ci:** set release-please title pattern explicitly (chore${scope}: release${component} ${version}) ([#24](https://github.com/alejoamiras/nulo/issues/24)) ([40899c2](https://github.com/alejoamiras/nulo/commit/40899c262983cb2bb33c997148ac468afa99aff3))
+* **ci:** unstick release-please workflow (3 follow-ups from v0.20.0) ([#18](https://github.com/alejoamiras/nulo/issues/18)) ([2db0dd2](https://github.com/alejoamiras/nulo/commit/2db0dd21d31783f077063aaa93a290886c51bca7))
+* **ci:** use release-please default title pattern (chore${scope}: release${component} ${version}) ([#21](https://github.com/alejoamiras/nulo/issues/21)) ([5fbf741](https://github.com/alejoamiras/nulo/commit/5fbf74176c1622161d7a70ce217a830337383615))
+
 ## [0.20.0](https://github.com/alejoamiras/nulo/compare/v0.17.1...v0.20.0) (2026-05-21)
 
 
