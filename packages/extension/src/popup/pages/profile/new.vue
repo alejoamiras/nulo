@@ -16,6 +16,7 @@ import PasskeyCeremonyDialog from "@/popup/components/popups/PasskeyCeremonyDial
 
 /** Composables */
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
+import { useProfileNameField } from "@/composables/useProfileNameField"
 
 /** Services */
 import { AccountServiceClient } from "@/wallet/services/account/client"
@@ -54,7 +55,23 @@ const password = ref("")
 const repeatedPassword = ref("")
 const maxPasswordLength = 128
 
+// Profile name is required. Validated at submit time (not via :disabled) so
+// the user gets a visible shake + inline error instead of a silently-disabled
+// button. nameError clears on input.
+const {
+	profileName,
+	trimmedName,
+	nameError,
+	shakeName,
+	nameInputRef,
+	validate: validateName,
+	handleInput: handleNameInput,
+	dispose: disposeNameField,
+} = useProfileNameField()
+
 const isAllowedToContinue = computed(() => {
+	// Name validation runs at submit time (shake + inline error); excluded
+	// here on purpose so an empty name doesn't silently disable the button.
 	if (type.value === "passkey") return true
 	if (!password.value.length || password.value.length < 8) return false
 	if (!repeatedPassword.value || password.value !== repeatedPassword.value) return false
@@ -87,10 +104,18 @@ const isCreating = ref(false)
 const handleCreate = async () => {
 	if (!isAllowedToContinue.value || isCreating.value) return
 
+	// Latch FIRST, before the async getProfiles() fetch: two rapid clicks
+	// both hit the pre-check on the same tick, and without an early latch
+	// they'd race past it and create two profiles.
 	isCreating.value = true
 
-	const profiles = await managers.profile.getProfiles()
-	const name = `Profile ${profiles.length + 1}`
+	const existingNames = (await managers.profile.getProfiles()).map((p) => p.name)
+	if (!validateName({ existingNames })) {
+		isCreating.value = false
+		return
+	}
+	const name = trimmedName.value
+
 	let profile
 	try {
 		profile =
@@ -168,6 +193,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+	disposeNameField()
 	document.removeEventListener("keydown", onKeydown)
 	scrollEl?.removeEventListener("scroll", handleScroll)
 	scrollEl = null
@@ -191,6 +217,27 @@ onBeforeUnmount(() => {
 						<span :class="$style.title_sub">Profile</span>
 					</div>
 					<div :class="$style.hero_bar" />
+				</div>
+
+				<div :class="$style.section_last">
+					<span :class="$style.section_label">Profile name</span>
+					<div :class="[shakeName && $style.shake]">
+						<Input
+							ref="nameInputRef"
+							v-model="profileName"
+							type="text"
+							placeholder="My Profile"
+							:maxLength="32"
+							:error="!!nameError"
+							:ariaInvalid="!!nameError"
+							sanitize
+							data-testid="register-name-input"
+							@input="handleNameInput"
+						/>
+					</div>
+					<Text v-if="nameError" size="12" color="red" height="150" role="alert">
+						{{ nameError }}
+					</Text>
 				</div>
 
 				<NewProfileMethodTabs v-model:type="type" />
@@ -333,5 +380,18 @@ onBeforeUnmount(() => {
 	padding: 20px 24px;
 	background: var(--app-bg);
 	border-top: 1px solid var(--nulo-border);
+}
+
+@keyframes shakeInput {
+	0% { transform: translateX(0); }
+	20% { transform: translateX(-4px); }
+	40% { transform: translateX(4px); }
+	60% { transform: translateX(-3px); }
+	80% { transform: translateX(2px); }
+	100% { transform: translateX(0); }
+}
+
+.shake {
+	animation: shakeInput 0.4s ease;
 }
 </style>

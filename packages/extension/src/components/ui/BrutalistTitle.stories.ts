@@ -17,7 +17,7 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Default: Story = {
-	args: { main: "Create", sub: "Wallet" },
+	args: { main: "Create", sub: "Profile" },
 }
 
 export const HeroCenter: Story = {

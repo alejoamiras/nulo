@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Profile-name parity — plain-English companion</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #fbfbfa;
+  --fg: #1a1a1a;
+  --muted: #555;
+  --accent: #4a3fa8;
+  --rule: #eaeaea;
+  --pill-bg: #efefee;
+  --pill-fg: #555;
+  --code-bg: #f0efed;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15161a;
+    --fg: #e8e8e8;
+    --muted: #b0b0b0;
+    --accent: #b3aaff;
+    --rule: #2a2b30;
+    --pill-bg: #232427;
+    --pill-fg: #c0c0c0;
+    --code-bg: #1f2024;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+}
+main {
+  max-width: 720px;
+  margin: 56px auto;
+  padding: 0 24px 96px;
+}
+h1, h2, h3 {
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+h1 {
+  font-size: 32px;
+  margin: 0 0 8px;
+}
+h2 {
+  font-size: 22px;
+  margin: 56px 0 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+}
+h3 {
+  font-size: 18px;
+  margin: 32px 0 8px;
+}
+p, ul, ol {
+  margin: 8px 0 16px;
+  color: var(--fg);
+}
+ul, ol { padding-left: 24px; }
+li { margin: 6px 0; }
+.lede {
+  font-size: 17px;
+  color: var(--muted);
+  margin-bottom: 24px;
+}
+.pill {
+  display: inline-block;
+  background: var(--pill-bg);
+  color: var(--pill-fg);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-right: 4px;
+  letter-spacing: 0.01em;
+}
+code, .mono {
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+  font-size: 14px;
+  background: var(--code-bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.phase {
+  margin: 24px 0;
+  padding: 20px 24px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+.phase h3 { margin-top: 0; }
+.phase .why {
+  color: var(--muted);
+  font-size: 14px;
+  margin-top: 12px;
+}
+.q {
+  margin: 16px 0;
+  padding: 16px 20px;
+  border-left: 3px solid var(--accent);
+  background: var(--pill-bg);
+}
+.q .label {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.q strong { color: var(--fg); }
+footer {
+  margin-top: 64px;
+  padding-top: 24px;
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 13px;
+}
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Profile-name parity</h1>
+<p class="lede">
+A plain-English companion to <code>plan-v2.md</code>. No file paths, no
+acronyms, no "ProfileServiceClient." Just what we're changing, why,
+and what could go wrong.
+</p>
+
+<h2>The problem in one paragraph</h2>
+<p>
+Nulo has two ways for a user to create a wallet account — the first-run
+onboarding tab, and the in-app "create" page inside the extension popup.
+On the onboarding tab, the user types a name (like "Spending" or "Work")
+before the account is created. Inside the extension, they don't — Nulo
+makes one up automatically, calling it "Profile 3" or whatever, and the
+user has to rename it later. That's the first half of the issue.
+</p>
+<p>
+The second half: the onboarding tab calls these accounts <strong>wallets</strong>,
+and the rest of the extension calls them <strong>profiles</strong>. Same thing,
+two words. A new user picks a wallet name on day one, then opens the app
+and sees "Edit profile" and gets briefly confused.
+</p>
+
+<h2>What we're doing</h2>
+<p>
+Two changes, landing together as one PR:
+</p>
+<ul>
+  <li><strong>Add the name field</strong> to the extension's create + import
+  pages, so people pick the name <em>before</em> the account is created — same
+  as onboarding does today.</li>
+  <li><strong>Pick one word</strong> for user-facing text. The choice: "Profile."
+  The extension already uses it everywhere; the onboarding tab swaps "Wallet" →
+  "Profile" in headings, placeholders, buttons, and error messages.</li>
+</ul>
+<p>
+Code that lives behind the scenes (function names, variable names, internal
+APIs) keeps its existing names. The word swap is only in things the user
+sees.
+</p>
+
+<h2>The two surprises we found during planning</h2>
+
+<h3>Surprise 1 — the import-from-backup path silently ignores typed names</h3>
+<p>
+When someone restores from a backup file, the file already contains a name
+("My Vault" or whatever the user picked when they made the backup). The
+restore code happily uses that, ignoring anything the user types into the
+name field on the restore page.
+</p>
+<p>
+This is actually a pre-existing bug in the onboarding flow — the
+"Wallet name" field there does nothing on the full-backup path. The fix:
+when the user picks a backup file, we read the name out of it and put it
+in the input field for them. If they want to rename, they can — and that
+override now actually works.
+</p>
+
+<h3>Surprise 2 — many tests break because they relied on the auto-name</h3>
+<p>
+The auto-naming behavior wasn't just a UI convenience — it was load-bearing
+for the automated test suite. Many tests clicked "create profile" without
+typing a name, expecting the auto-name to kick in. After this change, those
+tests would just hang on the empty-name shake animation.
+</p>
+<p>
+The plan now spells out every test file that needs an extra "type a name
+here" step, plus two tests that hardcoded the expected name as "Profile 1"
+(which only existed because of the auto-naming sequence).
+</p>
+
+<h2>Decisions we locked in</h2>
+
+<div class="q">
+  <div class="label">Decision 1</div>
+  <strong>Which word wins?</strong> "Profile." Onboarding switches from "Wallet."
+</div>
+
+<div class="q">
+  <div class="label">Decision 2</div>
+  <strong>How deep does the rename go?</strong> Only user-visible text and
+  end-to-end test IDs that contain the loser term. Internal code keeps its
+  current names.
+</div>
+
+<div class="q">
+  <div class="label">Decision 3</div>
+  <strong>Which surfaces get aligned?</strong> All of them — Create, Import,
+  Edit, Select, Settings, the auth pill at the top. No "Profile" left
+  next to "Wallet" anywhere a user can see.
+</div>
+
+<div class="q">
+  <div class="label">Decision 4</div>
+  <strong>What happens with the backup path?</strong> Prefill the name field
+  from the backup when the user picks the file. They can override. The override
+  is honored.
+</div>
+
+<div class="q">
+  <div class="label">Decision 5</div>
+  <strong>What if a user types a name that already exists?</strong> Block them
+  at the create/import step with a clear inline message ("This name is already
+  in use."). They have to pick a different one. Exception: when restoring two
+  backups with the same name, the app silently appends a number — that's
+  existing behavior and we kept it.
+</div>
+
+<div class="q">
+  <div class="label">Decision 6</div>
+  <strong>How long can a profile name be?</strong> 32 characters everywhere.
+  The Edit dialog was capped at 25 — pre-existing inconsistency. Now it
+  matches.
+</div>
+
+<h2>The phases, in order</h2>
+
+<div class="phase">
+  <h3>P0 — Shared name-input toolkit</h3>
+  <p>Build a small reusable piece (an "input field with validation, error
+  shake, and a duplicate check") that all four create/import pages share.
+  Then refactor the two onboarding pages to use it. No visible change yet.</p>
+  <p class="why"><strong>Why first?</strong> Doing the toolkit before the
+  feature work means the feature work is "use the toolkit" rather than
+  "copy-paste twice and try to keep them in sync."</p>
+</div>
+
+<div class="phase">
+  <h3>P1 — Fix the backup name drop</h3>
+  <p>Change the backup-restore code so it actually uses the typed name when
+  the user provides one, and exposes the backup's embedded name so the form
+  can prefill it.</p>
+  <p class="why"><strong>Why second?</strong> Fixing this before adding the
+  name field to the extension's import page means both pages (onboarding and
+  extension) get the fix at the same time, without an intermediate "extension
+  shows a field that doesn't work" state.</p>
+</div>
+
+<div class="phase">
+  <h3>P2 — Extension's Create page</h3>
+  <p>Add the name input, plug it into the toolkit, drop the auto-name.</p>
+  <p class="why"><strong>Why now?</strong> Foundation is ready; user-visible
+  feature can land cleanly.</p>
+</div>
+
+<div class="phase">
+  <h3>P3 — Extension's Import page</h3>
+  <p>Drop the "My Profile 3" pre-fill, add the same name input, wire it to
+  the now-fixed backup-restore.</p>
+</div>
+
+<div class="phase">
+  <h3>P4 — Edit dialog + Storybook tidy</h3>
+  <p>Edit dialog's character limit goes from 25 to 32. A Storybook story
+  that still says "Wallet" flips to "Profile."</p>
+</div>
+
+<div class="phase">
+  <h3>P5 — Onboarding copy sweep</h3>
+  <p>Change "Wallet" to "Profile" everywhere on the onboarding pages. Tiny,
+  mechanical, one-by-one.</p>
+</div>
+
+<div class="phase">
+  <h3>P6 — Test suite fixup</h3>
+  <p>Update every test that relied on the auto-name behavior to type a name
+  first. Update two tests that hardcoded "Profile 1." Rename one test
+  constant for cleanliness.</p>
+  <p class="why"><strong>Why so late?</strong> Test changes touch the most
+  files; doing them after the source changes keeps the commits clean and
+  reviewable.</p>
+</div>
+
+<div class="phase">
+  <h3>P7 — Final guard rail</h3>
+  <p>Re-search the entire extension for any leftover "Wallet" string. Run
+  the full local test gate. If anything new pops up, address it.</p>
+</div>
+
+<div class="phase">
+  <h3>P8 — Implementation review</h3>
+  <p>After the code is written, send the diff to an independent reviewer
+  (another model, different family) and ask "what would an attacker
+  exploit? Where's the silent failure?" Fix whatever it finds.</p>
+</div>
+
+<h2>What we're explicitly NOT doing in this PR</h2>
+<ul>
+  <li><strong>No rename of "Lock wallet," "Open wallet," "Wallet version"
+  on the About page.</strong> Those refer to the app itself, not the
+  account record. Keeping "wallet" there is correct.</li>
+  <li><strong>No defense against look-alike characters.</strong> A user
+  could type "Acme" with a Cyrillic 'А' instead of Latin 'A' — they'd look
+  identical but be different strings. This is real but rare; we'd rather
+  ship the main feature now and harden against confusables in a focused
+  follow-up.</li>
+  <li><strong>No server-side validation of backup-file names.</strong> If
+  someone crafts a malicious backup with a 5,000-character name, the
+  restore code will accept it. Defense-in-depth is a separate task.</li>
+  <li><strong>No internal-code rename.</strong> The terms "profile" and
+  "ProfileService" stay in the source files. Renaming user-visible text
+  is enough to make the app coherent.</li>
+</ul>
+
+<h2>Risks worth knowing about</h2>
+<ul>
+  <li><strong>End-to-end tests need careful updating.</strong> Eight test
+  files reach into the create or import flow. Each needs a small change.
+  The risk: one of those tests is used by another test we haven't found
+  yet. Mitigation: run the suite after every couple of files, not at the
+  end.</li>
+  <li><strong>Race on the backup-prefill.</strong> If someone is mid-typing
+  when they pick a file, the auto-prefill could clobber their input. The
+  fix: only prefill when the input is empty, so half-typed names don't
+  vanish.</li>
+  <li><strong>Existing 30-character profile names</strong> were possible
+  via onboarding but couldn't be fully edited in the Edit dialog (capped
+  at 25). Bumping the cap to 32 is permissive — no migration risk.</li>
+</ul>
+
+<footer>
+  Generated as a companion to <code>plan-v2.md</code>. For the full
+  technical plan, read the markdown alongside this file.
+</footer>
+
+</main>
+</body>
+</html>

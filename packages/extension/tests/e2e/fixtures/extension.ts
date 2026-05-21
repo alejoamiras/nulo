@@ -154,6 +154,10 @@ async function registerProfile(ctx: ExtensionContext): Promise<void> {
 		timeout: 10_000,
 	})
 
+	// Profile name is required at submit time (F1: pre-create explicit
+	// naming). Without typing, validateName() short-circuits the handler.
+	await replaceInputValue(page, '[data-testid="register-name-input"]', "Test Profile")
+
 	await page.waitForSelector('input[placeholder="Strong password"]', {
 		visible: true,
 		timeout: 10_000,
@@ -542,6 +546,8 @@ export const test = base.extend<{
 						setter?.call(input, v)
 						input.dispatchEvent(new Event("input", { bubbles: true }))
 					}
+					// F2: profile name is required at submit time.
+					setVal('[data-testid="import-name-input"] input', "Imported Profile")
 					setVal('[data-testid="import-private-key-input"] input', secretKey)
 					setVal('[data-testid="import-password-input"] input', pwd)
 					setVal('[data-testid="import-password-confirm-input"] input', pwd)

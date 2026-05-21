@@ -1,5 +1,6 @@
 import { computed, ref, type Ref } from "vue"
 import { EncryptionKey } from "@nulo/wallet-crypto"
+import { sanitizeString } from "@/utils/string"
 import { AccountServiceClient } from "@/wallet/services/account/client"
 import { ACCOUNT_SERVICE_NAME } from "@/wallet/services/account/spec"
 import { AccountStateServiceClient } from "@/wallet/services/account-state/client"
@@ -51,6 +52,15 @@ export interface UseFullBackupImportOptions {
 	 * composable stays usable from any shell.
 	 */
 	showErrorLog?: (errors: Record<string, unknown[]>) => void
+	/**
+	 * Optional reactive name from the parent's Profile-name input. When the
+	 * trimmed value is non-empty, it overrides the backup-embedded name
+	 * during `restoreBackup` via a spread-clone (the parsed backup data is
+	 * NOT mutated in place). When absent or empty after trim, the
+	 * backup-embedded name is used unchanged. The service's existing
+	 * duplicate-name auto-suffix at `service.ts:825-840` still applies.
+	 */
+	profileName?: Ref<string>
 }
 
 export interface UseFullBackupImportResult {
@@ -61,6 +71,13 @@ export interface UseFullBackupImportResult {
 	importedProfile: Ref<unknown>
 	isAllowedToImportBackup: Ref<boolean>
 	isRestoreHasErrors: Ref<boolean>
+	/**
+	 * Backup-embedded profile name, surfaced after a successful parse so the
+	 * parent page can prefill its Profile-name input. `null` until a file is
+	 * picked + parsed (plain backups) or decrypted (encrypted backups).
+	 * Resets to `null` in `resetBackupState`.
+	 */
+	parsedBackupName: Ref<string | null>
 	pickBackupFile: () => Promise<void>
 	decryptBackup: () => Promise<void>
 	restoreBackup: () => Promise<void>
@@ -74,6 +91,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 	const restoreStatus = ref<RestoreStatus>("")
 	const restoreErrorLog = ref<Record<string, unknown[]>>({})
 	const importedProfile = ref<unknown>(null)
+	const parsedBackupName = ref<string | null>(null)
 
 	const isRestoreHasErrors = computed(() => Object.keys(restoreErrorLog.value).length > 0)
 
@@ -106,6 +124,25 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				)
 				return
 			}
+			// Surface the backup-embedded profile name as soon as it's
+			// available so the parent page can prefill the Profile-name
+			// input. Plain backups carry the name in the parsed JSON
+			// (`backup.data.profile.name`); encrypted backups only expose it
+			// after `decryptBackup`, handled in that function below.
+			//
+			// Sanitize before publishing — a maliciously crafted backup file
+			// could embed bidi-override / zero-width / unauthorized chars.
+			// `Input.vue` only sanitizes on user input events; the prefill
+			// watcher's `v-model` assignment bypasses that path, so we MUST
+			// sanitize here.
+			if (selection.type === "plain") {
+				const parsed = selection.backup as { data?: { profile?: { name?: string } } } | null
+				const raw = parsed?.data?.profile?.name
+				if (typeof raw === "string" && raw.length > 0) {
+					const cleaned = sanitizeString(raw, 32)
+					if (cleaned.length > 0) parsedBackupName.value = cleaned
+				}
+			}
 			restoreStatus.value = null
 			opts.password.value = ""
 			opts.repeatedPassword.value = ""
@@ -125,11 +162,20 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			const encryptedBytes = new Uint8Array(Buffer.from(selectedBackup.value?.backup as string, "base64"))
 			const decryptedBytes = await key.decrypt(encryptedBytes)
 			const decodedJson = new TextDecoder().decode(decryptedBytes)
-			const backupObject = JSON.parse(decodedJson) as { data?: { profile?: { type?: string } } }
+			const backupObject = JSON.parse(decodedJson) as { data?: { profile?: { type?: string; name?: string } } }
 			selectedBackup.value = {
 				...(selectedBackup.value as BackupSelection),
 				backup: backupObject,
 				profileType: backupObject?.data?.profile?.type ?? null,
+			}
+			// Encrypted backups only expose the embedded name AFTER decrypt
+			// succeeds. Surface it for the parent's prefill watcher.
+			// Same sanitization rationale as in `pickBackupFile` above —
+			// the prefill watcher bypasses `Input.vue`'s sanitize path.
+			const rawName = backupObject?.data?.profile?.name
+			if (typeof rawName === "string" && rawName.length > 0) {
+				const cleaned = sanitizeString(rawName, 32)
+				if (cleaned.length > 0) parsedBackupName.value = cleaned
 			}
 			opts.clearError()
 		} catch {
@@ -230,7 +276,15 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				}
 			}
 
-			const newProfile = await profileService.restore(profile, masterKey, opts.password.value, credentialData)
+			// Honor the parent-supplied Profile-name override when non-empty
+			// after trim. Spread-clone the backup-parsed profile so we never
+			// mutate the parsed `data.profile` in place (the data structure
+			// may be re-read on retry paths). Service-side auto-suffix at
+			// `profile/service.ts:825-840` still resolves collisions against
+			// existing profiles.
+			const override = opts.profileName?.value.trim()
+			const profileForRestore = override ? { ...profile, name: override } : profile
+			const newProfile = await profileService.restore(profileForRestore, masterKey, opts.password.value, credentialData)
 
 			if (newProfile.restoreError) {
 				restoreStatus.value = "failed"
@@ -393,6 +447,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		restoreStatus.value = ""
 		restoreErrorLog.value = {}
 		importedProfile.value = null
+		parsedBackupName.value = null
 	}
 
 	return {
@@ -403,6 +458,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		importedProfile,
 		isAllowedToImportBackup,
 		isRestoreHasErrors,
+		parsedBackupName,
 		pickBackupFile,
 		decryptBackup,
 		restoreBackup,

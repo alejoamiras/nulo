@@ -28,7 +28,6 @@ export const ContractsAnyScope: Story = {
 
 export const ContractsExplicitList: Story = {
 	args: {
-		// biome-ignore lint/suspicious/noExplicitAny: story fixture — minimal capability shape
 		capability: {
 			type: "contracts",
 			contracts: ["0xabc1234567890def", "0xdef9876543210abc"],

@@ -21,6 +21,7 @@ import { redirectToOnboardingTabIfNeeded } from "@/wallet/utils/onboarding-tab"
 import { useToast } from "@/composables/toast"
 import { useFullBackupImport } from "@/composables/useFullBackupImport"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
+import { useProfileNameField } from "@/composables/useProfileNameField"
 import { waitForProfileActive } from "@/composables/waitForProfileActive"
 
 /** Stores */
@@ -67,7 +68,22 @@ const seedPhrase = ref()
 const privateKey = ref()
 const publicKey = ref()
 
-const profileName = ref("My Profile")
+// Profile name is required across every import path (including passkey
+// discovery, which has no other visible field to anchor the error).
+// Validated at submit time so an empty name shakes the input + shows inline
+// error instead of silently disabling the button. Full-backup path prefills
+// from the parsed backup name via a guarded watch (only when input is
+// empty — protects mid-typing from being clobbered by a delayed parse).
+const {
+	profileName,
+	trimmedName,
+	nameError,
+	shakeName,
+	nameInputRef,
+	validate: validateName,
+	handleInput: handleNameInput,
+	dispose: disposeNameField,
+} = useProfileNameField()
 
 const password = ref("")
 const repeatedPassword = ref("")
@@ -101,8 +117,9 @@ const handleSecretInput = () => {
 	if (error.value.type === "secret") fillError()
 }
 
+// Excludes the name check on purpose — name is validated at submit time so
+// an empty name shakes instead of leaving the import buttons silently disabled.
 const isAllowedToContinue = computed(() => {
-	if (!profileName.value || profileName.value.length < 2) return false
 	if (!password.value || password.value.length < 8) return false
 	if (selectedImportOption.value !== "public_key" && (!repeatedPassword.value || password.value !== repeatedPassword.value)) return false
 	return true
@@ -121,6 +138,12 @@ const isAllowedToImportByPublicKey = computed(() => {
 })
 
 /** Handlers */
+
+// In-flight latch for seed/private-key/public-key/passkey paths. The full-
+// backup path has its own `restoreStatus` gate inside `useFullBackupImport`.
+// Set BEFORE the async `getProfiles()` fetch so two rapid clicks can't both
+// pass the pre-check before the lock is set.
+const isImporting = ref(false)
 
 const completeImport = async (profile) => {
 	await setLastActiveProfileId(profile.id)
@@ -142,19 +165,33 @@ const completeImport = async (profile) => {
 }
 
 const handleImportSeed = async () => {
-	if (!isAllowedToImportBySeedPhrase.value) return
+	if (!isAllowedToImportBySeedPhrase.value || isImporting.value) return
+	isImporting.value = true
 	try {
-		const profile = await managers.profile.importMnemonic(profileName.value.trim(), seedPhrase.value.split(" "), password.value)
+		const existingNames = (await managers.profile.getProfiles()).map((p) => p.name)
+		if (!validateName({ existingNames })) {
+			isImporting.value = false
+			return
+		}
+		const profile = await managers.profile.importMnemonic(trimmedName.value, seedPhrase.value.split(" "), password.value)
 		await completeImport(profile)
 	} catch (err) {
 		fillError("unknown", err)
+	} finally {
+		isImporting.value = false
 	}
 }
 
 const handleImportPrivateKey = async () => {
-	if (!isAllowedToImportByPrivateKey.value) return
+	if (!isAllowedToImportByPrivateKey.value || isImporting.value) return
+	isImporting.value = true
 	try {
-		const profile = await managers.profile.importPlain(profileName.value.trim(), privateKey.value, password.value)
+		const existingNames = (await managers.profile.getProfiles()).map((p) => p.name)
+		if (!validateName({ existingNames })) {
+			isImporting.value = false
+			return
+		}
+		const profile = await managers.profile.importPlain(trimmedName.value, privateKey.value, password.value)
 		await completeImport(profile)
 	} catch (err) {
 		// `profile/service.ts` throws `new Error("Invalid secret length")` —
@@ -166,13 +203,21 @@ const handleImportPrivateKey = async () => {
 		} else {
 			fillError("unknown", err)
 		}
+	} finally {
+		isImporting.value = false
 	}
 }
 
 const handleImportPublicKey = async () => {
-	if (!isAllowedToImportByPublicKey.value) return
+	if (!isAllowedToImportByPublicKey.value || isImporting.value) return
+	isImporting.value = true
 	try {
-		const profile = await managers.profile.importEncrypted(profileName.value.trim(), publicKey.value, password.value)
+		const existingNames = (await managers.profile.getProfiles()).map((p) => p.name)
+		if (!validateName({ existingNames })) {
+			isImporting.value = false
+			return
+		}
+		const profile = await managers.profile.importEncrypted(trimmedName.value, publicKey.value, password.value)
 		await completeImport(profile)
 	} catch (err) {
 		// `profile/service.ts:575` throws `new Error("Invalid password")` for
@@ -186,6 +231,8 @@ const handleImportPublicKey = async () => {
 		} else {
 			fillError("unknown", err)
 		}
+	} finally {
+		isImporting.value = false
 	}
 }
 
@@ -193,11 +240,18 @@ const handleImportPublicKey = async () => {
 const { request: ceremonyRequest, runCeremony, onResolve: onCeremonyResolve, onReject: onCeremonyReject } = usePasskeyCeremony()
 
 const handleImportPasskey = async () => {
+	if (isImporting.value) return
+	isImporting.value = true
 	try {
+		const existingNames = (await managers.profile.getProfiles()).map((p) => p.name)
+		if (!validateName({ existingNames })) {
+			isImporting.value = false
+			return
+		}
 		// Discovery `get` — no allowedCredentials; user picks from their
 		// available passkeys.
 		const credData = await runCeremony({ mode: "get" })
-		const profile = await managers.profile.importPasskey(profileName.value.trim(), credData)
+		const profile = await managers.profile.importPasskey(trimmedName.value, credData)
 		await completeImport(profile)
 	} catch (err) {
 		// Path A user cancel: silent return (matches prior behavior — no
@@ -216,6 +270,8 @@ const handleImportPasskey = async () => {
 			},
 		})
 		console.error("Failed to import profile:", err)
+	} finally {
+		isImporting.value = false
 	}
 }
 
@@ -227,6 +283,7 @@ const {
 	importedProfile,
 	isAllowedToImportBackup,
 	isRestoreHasErrors,
+	parsedBackupName,
 	pickBackupFile,
 	decryptBackup,
 	restoreBackup,
@@ -244,6 +301,10 @@ const {
 	// `profileService.restore` (which requires `credentialData` for
 	// passkey type — no SW-window fallback).
 	runCeremony,
+	// F3: typed name overrides the backup-embedded name when non-empty
+	// after trim. Composable spread-clones before passing to restore() so
+	// the parsed backup data isn't mutated in place.
+	profileName,
 	// Popup-specific error-log surface: open the data-viewer overlay.
 	showErrorLog: (errors) => {
 		const cacheStore = useCacheStore()
@@ -253,9 +314,18 @@ const {
 	},
 })
 
+// Guarded prefill: when a backup is parsed, fill the Profile-name input —
+// but only when the user hasn't typed anything yet. Protects mid-typing
+// from being clobbered if a heavy file's parse completes after the user
+// starts typing in the name field.
+watch(parsedBackupName, (newName) => {
+	if (newName && !profileName.value.trim()) profileName.value = newName
+})
+
+// Keep `profileName` across import-method switches so the user doesn't have
+// to retype it when they hit Back. Matches the onboarding flow's behavior.
 function clearFormState() {
 	selectedImportOption.value = null
-	profileName.value = ""
 	privateKey.value = null
 	publicKey.value = null
 	seedPhrase.value = null
@@ -289,8 +359,6 @@ const handleScroll = () => {
 
 /** Lifecycle */
 onMounted(async () => {
-	const profiles = await managers.profile.getProfiles()
-	profileName.value = `My Profile${profiles?.length ? ` ${profiles.length}` : ""}`
 	document.addEventListener("keydown", onKeydown)
 	await nextTick()
 	scrollEl = wrapperRef.value?.wrapper
@@ -300,6 +368,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+	disposeNameField()
 	document.removeEventListener("keydown", onKeydown)
 	scrollEl?.removeEventListener("scroll", handleScroll)
 	scrollEl = null
@@ -325,6 +394,27 @@ onBeforeUnmount(() => {
 						<span :class="$style.title_sub">Profile</span>
 					</div>
 					<div :class="$style.hero_bar" />
+				</div>
+
+				<div :class="$style.name_section">
+					<span :class="$style.section_label">Profile name</span>
+					<div :class="[shakeName && $style.shake]">
+						<Input
+							ref="nameInputRef"
+							v-model="profileName"
+							type="text"
+							placeholder="My Profile"
+							:maxLength="32"
+							:error="!!nameError"
+							:ariaInvalid="!!nameError"
+							sanitize
+							data-testid="import-name-input"
+							@input="handleNameInput"
+						/>
+					</div>
+					<Text v-if="nameError" size="12" color="red" height="150" role="alert">
+						{{ nameError }}
+					</Text>
 				</div>
 
 				<ImportMethodPicker
@@ -545,5 +635,34 @@ onBeforeUnmount(() => {
 	padding: 20px 24px;
 	background: var(--app-bg);
 	border-top: 1px solid var(--nulo-border);
+}
+
+.name_section {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding-bottom: 12px;
+}
+
+.section_label {
+	font-family: var(--font-headline);
+	font-size: 11px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.18em;
+	color: var(--nulo-secondary);
+}
+
+@keyframes shakeInput {
+	0% { transform: translateX(0); }
+	20% { transform: translateX(-4px); }
+	40% { transform: translateX(4px); }
+	60% { transform: translateX(-3px); }
+	80% { transform: translateX(2px); }
+	100% { transform: translateX(0); }
+}
+
+.shake {
+	animation: shakeInput 0.4s ease;
 }
 </style>

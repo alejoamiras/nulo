@@ -117,7 +117,7 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 			})
 			popupStore.open("import_contacts")
 
-			let res
+			let res: Array<ContactRecord & { isSender?: boolean }>
 			try {
 				res = await importPromise
 			} catch {

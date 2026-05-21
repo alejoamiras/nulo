@@ -1,5 +1,5 @@
 import { expect } from "vitest"
-import { test, openPopup, waitForHash, typeIntoInput, clickByTestId } from "./fixtures/extension"
+import { test, openPopup, waitForHash, typeIntoInput, replaceInputValue, clickByTestId } from "./fixtures/extension"
 
 test("fresh install shows register page", async ({ extension }) => {
 	const page = await openPopup(extension)
@@ -27,6 +27,9 @@ test("create profile with password", async ({ extension }) => {
 		visible: true,
 		timeout: 10_000,
 	})
+
+	// Profile name is required at submit time (F1).
+	await replaceInputValue(page, '[data-testid="register-name-input"]', "Test Profile")
 
 	await page.waitForSelector('input[placeholder="Strong password"]', {
 		visible: true,
