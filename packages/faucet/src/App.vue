@@ -1,12 +1,28 @@
 <script setup lang="ts">
+import { useWalletConnection } from "@/composables/useWalletConnection"
+import { TESTIDS } from "@/lib/testids"
+import AccountNotDeployedBanner from "./components/AccountNotDeployedBanner.vue"
+import AppToastRegion from "./components/AppToastRegion.vue"
+import WalletPanel from "./components/WalletPanel.vue"
+
+const { status, accountDeployed } = useWalletConnection()
 </script>
 
 <template>
-	<main class="page" data-testid="fa-app">
+	<main class="page" :data-testid="TESTIDS.app">
 		<header class="hero">
 			<h1>DRIP TEST ASSETS</h1>
-			<p class="sub">Alpha-testnet only. Connect an Aztec wallet and mint fixed USDC or ETH into a public or private balance. Internal faucet. No real value.</p>
+			<p class="sub">
+				Alpha-testnet only. Connect an Aztec wallet and mint fixed USDC or ETH into a public or
+				private balance. Internal faucet. No real value.
+			</p>
 		</header>
+
+		<WalletPanel />
+
+		<AccountNotDeployedBanner v-if="status === 'connected' && accountDeployed === false" />
+
+		<AppToastRegion />
 	</main>
 </template>
 
@@ -16,7 +32,11 @@
 	margin: 0 auto;
 	padding: 64px 24px 96px;
 	color: var(--txt-primary);
+	display: flex;
+	flex-direction: column;
+	gap: 24px;
 }
+
 .hero h1 {
 	font-family: var(--font-headline);
 	font-weight: 700;
@@ -25,6 +45,7 @@
 	line-height: 1.05;
 	margin: 0 0 12px;
 }
+
 .hero .sub {
 	color: var(--txt-secondary);
 	font-size: 16px;
