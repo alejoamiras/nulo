@@ -19,7 +19,7 @@ const handleOpen = (target: "terms" | "privacy") => {
 </script>
 
 <template>
-	<Flex direction="column" align="center" :class="$style.page">
+	<OnboardingPage align="center" :gap="56">
 		<Flex direction="column" align="center" gap="16" :class="$style.hero">
 			<BrutalistTitle main="Welcome" sub="to Nulo" align="center" size="hero" />
 			<div :class="$style.hero_bar" />
@@ -58,18 +58,10 @@ const handleOpen = (target: "terms" | "privacy") => {
 			and
 			<span @click="handleOpen('privacy')" :class="$style.link">Privacy Policy</span>
 		</Text>
-	</Flex>
+	</OnboardingPage>
 </template>
 
 <style module>
-.page {
-	max-width: 480px;
-	width: 100%;
-	margin: 32px auto 0;
-	gap: 56px;
-	flex: 1;
-}
-
 .hero {
 	padding: 24px 0;
 }

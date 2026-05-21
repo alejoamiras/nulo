@@ -67,7 +67,7 @@ function goNext() {
 </script>
 
 <template>
-	<Flex direction="column" gap="32" :class="$style.page">
+	<OnboardingPage>
 		<StepIndicator :current="3" />
 		<Flex direction="column" gap="16" :class="$style.hero">
 			<BrutalistTitle main="Speed up" sub="Proving" />
@@ -154,16 +154,10 @@ function goNext() {
 				Skip. Proving will run in your browser.
 			</button>
 		</div>
-	</Flex>
+	</OnboardingPage>
 </template>
 
 <style module>
-.page {
-	max-width: 560px;
-	width: 100%;
-	margin: 16px auto 0;
-}
-
 .hero {
 	padding: 8px 0;
 }
