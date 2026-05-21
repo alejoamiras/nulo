@@ -1,0 +1,52 @@
+name: release-please (dev / prerelease)
+
+# Manual-only trigger. We deliberately do NOT auto-fire on `push: dev`:
+# - dev sees many commits per day; auto-firing would update the Prerelease
+#   PR constantly and create noise on the PR feed.
+# - rc cuts are explicit decisions, not background activity. Triggering this
+#   workflow manually IS the "cut an rc" action.
+#
+# Flow:
+#   1. Features land on dev as usual.
+#   2. When ready to cut an rc, run this workflow via `gh workflow run`.
+#   3. release-please opens (or updates) a Prerelease PR titled
+#      `chore(dev): release X.Y.Z-rc[.N]`.
+#   4. Review + merge the PR.
+#   5. The publish chain runs via release.yml's workflow_dispatch escape
+#      hatch (see CLAUDE.md `### Release runbook` → `Prerelease (rc)`).
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: release-prerelease
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # App-authenticated token: required for the Prerelease PR's commits to
+      # satisfy `dev`'s signed-commits + Quality-check rules (same secrets
+      # as the stable flow).
+      - name: Mint App token
+        id: app
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.RELEASE_PLEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
+
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: .github/release-please-prerelease-config.json
+          manifest-file: .release-please-prerelease-manifest.json
+          # Pin to dev. Without this, release-please-action defaults to the
+          # repo's default branch (also `dev` today, but make it explicit so
+          # the workflow keeps working if the default changes).
+          target-branch: dev
+          token: ${{ steps.app.outputs.token }}
