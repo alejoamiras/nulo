@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { JobCancelledError, UserRejectedError, WalletError, walletErrorFromPayload } from "./errors"
+import { CapabilityNotGrantedError, JobCancelledError, UserRejectedError, WalletError, walletErrorFromPayload } from "./errors"
 
 describe("walletErrorFromPayload", () => {
 	test("JobCancelledError round-trips with code + jobId preserved", () => {
@@ -27,5 +27,20 @@ describe("walletErrorFromPayload", () => {
 		const original = new UserRejectedError()
 		const rebuilt = walletErrorFromPayload(original.toPayload())
 		expect(rebuilt).toBeInstanceOf(UserRejectedError)
+	})
+
+	test("CapabilityNotGrantedError round-trips with capabilityType + exact stable message", () => {
+		// Stable-message contract: dApp authors substring-match on the literal
+		// "Call requestCapabilities() first." Changing this wording silently
+		// breaks any consumer that relies on it; the assertion below pins it.
+		const original = new CapabilityNotGrantedError("accounts")
+		expect(original.message).toBe("accounts capability not granted. Call requestCapabilities() first.")
+
+		const rebuilt = walletErrorFromPayload(original.toPayload())
+		expect(rebuilt).toBeInstanceOf(CapabilityNotGrantedError)
+		expect(rebuilt).toBeInstanceOf(WalletError)
+		expect(rebuilt.code).toBe(CapabilityNotGrantedError.CODE)
+		expect(rebuilt.message).toBe(original.message)
+		expect((rebuilt.details as { capabilityType?: string })?.capabilityType).toBe("accounts")
 	})
 })

@@ -1,13 +1,13 @@
 import { describe, test, expect, beforeAll } from "vitest"
-import { JobCancelledError } from "@nulo/extension-messaging/errors"
+import { CapabilityNotGrantedError, JobCancelledError } from "@nulo/extension-messaging/errors"
 import { unwrapOperationResult, WalletSdkDispatcher } from "./dispatcher"
-import type { GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
+import type { Capability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
 import type { CapabilityResult } from "./dapp-interaction-protocol"
 import type { Operation } from "./operation"
 import type { OperationResult } from "./operation-result"
 import type { IAccountReader, IDappInteractionRunner, IDappSessionWriter, IExecutionRunner, INetworkReader } from "./services-contract"
 import type { IDappSessionRef, INetworkRef } from "./session-types"
-import type { ILogger } from "@nulo/wallet-core/logger"
+import { LogLevel, type ILogger } from "@nulo/wallet-core/logger"
 
 // __VERSION__ is a vite define-injected global at build time; provide it for tests.
 beforeAll(() => {
@@ -277,5 +277,241 @@ describe("unwrapOperationResult", () => {
 
 	test("skipped throws (batch sibling after a non-ok)", () => {
 		expect(() => unwrapOperationResult({ status: "skipped" })).toThrow()
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Phase 1 (plan-v3) — handleGetAccounts contract rows
+// ---------------------------------------------------------------------------
+
+/** Logger-capturing helper for the getAccounts tests below. */
+function capturingLogger(): { logger: ILogger; calls: Array<{ level: LogLevel; msg: string }> } {
+	const calls: Array<{ level: LogLevel; msg: string }> = []
+	return {
+		calls,
+		logger: {
+			log: (_scope, level, msg) => {
+				calls.push({ level, msg: String(msg) })
+			},
+		},
+	}
+}
+
+/** Dispatcher factory that lets each getAccounts test wire in its own
+ *  session, account reader, and logger. The default network has chainId 0 to
+ *  match the shared `ctx` constant. */
+function makeGetAccountsDispatcher(opts: {
+	session: IDappSessionRef
+	accounts?: Array<{ address: string; name: string; chainId: number }>
+	logger?: ILogger
+}): { dispatcher: WalletSdkDispatcher; loggerCalls?: Array<{ level: LogLevel; msg: string }> } {
+	const sessionWriter: IDappSessionWriter = {
+		tryGetDappSessionByOriginAndChain: async () => opts.session,
+		getDappSession: async () => opts.session,
+		updateDappSession: async () => opts.session,
+		setAccountAliases: async () => opts.session,
+		setCapabilityGrants: async () => opts.session,
+		setCapabilityRejections: async () => opts.session,
+	}
+	const network: INetworkRef = { id: "net-0", chainId: 0 }
+	const networkReader: INetworkReader = { getNetworks: async () => [network] }
+	const accountReader: IAccountReader = {
+		getAccounts: async () => opts.accounts ?? [],
+	}
+	const interaction: IDappInteractionRunner = {
+		execute: async () => ({}) as never,
+		requestCapabilities: async () => ({ granted: [] }) as CapabilityResult,
+	}
+	const cap = capturingLogger()
+	const logger = opts.logger ?? cap.logger
+	return {
+		dispatcher: new WalletSdkDispatcher(networkReader, accountReader, stubExecution, interaction, sessionWriter, logger),
+		loggerCalls: opts.logger ? undefined : cap.calls,
+	}
+}
+
+describe("dispatcher.handleGetAccounts — plan-v3 contract", () => {
+	test("no session → throws plain 'No dApp session found' Error (NOT CapabilityNotGrantedError)", async () => {
+		// Ordering pin: if a future refactor moves the session-not-found check
+		// AFTER the CapabilityNotGrantedError throw, dApps relying on the
+		// session-expired diagnostic would silently start seeing 4100.
+		const sessionWriter: IDappSessionWriter = {
+			tryGetDappSessionByOriginAndChain: async () => null as unknown as IDappSessionRef,
+			getDappSession: async () => null as unknown as IDappSessionRef,
+			updateDappSession: async () => null as unknown as IDappSessionRef,
+			setAccountAliases: async () => null as unknown as IDappSessionRef,
+			setCapabilityGrants: async () => null as unknown as IDappSessionRef,
+			setCapabilityRejections: async () => null as unknown as IDappSessionRef,
+		}
+		const network: INetworkRef = { id: "net-0", chainId: 0 }
+		const networkReader: INetworkReader = { getNetworks: async () => [network] }
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: async () => ({ granted: [] }) as CapabilityResult,
+		}
+		const dispatcher = new WalletSdkDispatcher(networkReader, stubAccount, stubExecution, interaction, sessionWriter, noopLogger)
+
+		await expect(dispatcher.dispatch("getAccounts", [], ctx)).rejects.toThrow(/No dApp session found/)
+		await expect(dispatcher.dispatch("getAccounts", [], ctx)).rejects.not.toBeInstanceOf(CapabilityNotGrantedError)
+	})
+
+	test("no accounts grant → throws CapabilityNotGrantedError with exact stable message + debug log", async () => {
+		// Stable-message contract (plan-v3 §5): the literal string is a public
+		// contract because substring-matching dApps lock it in. If you change
+		// the wording, change it everywhere AND coordinate with downstream.
+		const session = makeSession()
+		const { dispatcher, loggerCalls } = makeGetAccountsDispatcher({ session })
+
+		await expect(dispatcher.dispatch("getAccounts", [], ctx)).rejects.toBeInstanceOf(CapabilityNotGrantedError)
+		await expect(dispatcher.dispatch("getAccounts", [], ctx)).rejects.toMatchObject({
+			code: "CAPABILITY_NOT_GRANTED",
+			message: "accounts capability not granted. Call requestCapabilities() first.",
+			details: { capabilityType: "accounts" },
+		})
+
+		// Log noise control: dApps may re-fire getAccounts() per render, so the
+		// pre-grant throw must be Debug, not Info.
+		const debugCalls = (loggerCalls ?? []).filter((c) => c.level === LogLevel.Debug)
+		expect(debugCalls.length).toBeGreaterThan(0)
+		expect(debugCalls.some((c) => c.msg.includes("CAPABILITY_NOT_GRANTED"))).toBe(true)
+	})
+
+	test("session has 1 account → returns formatted Aliased<AztecAddress> (fast path, regression pin)", async () => {
+		// CAIP account for chainId 0 on the address below.
+		const addr = "0x1111111111111111111111111111111111111111111111111111111111111111"
+		const caip = `aztec:0:${addr}`
+		const session = makeSession({
+			accounts: [caip],
+			accountAliases: { [caip]: "my-app-alias" },
+		})
+		const { dispatcher } = makeGetAccountsDispatcher({
+			session,
+			accounts: [{ address: addr, name: "Account 1", chainId: 0 }],
+		})
+
+		const result = await dispatcher.dispatch("getAccounts", [], ctx)
+		expect(result).toEqual([{ alias: "my-app-alias", item: addr }])
+	})
+
+	test("desync — accounts grant exists but session.accounts is empty → returns [] + warn log (NO throw)", async () => {
+		// Defensive path: if storage shipped a bad write, don't loop the dApp
+		// via the 4100 throw. Return [] and warn so an engineer notices.
+		const accountsGrant: GrantedCapabilityRecord = {
+			capability: { type: "accounts", canGet: true, canCreateAuthWit: false, accounts: [] } as Capability,
+			grantedAt: 1,
+		}
+		const session = makeSession({ accounts: [], capabilityGrants: [accountsGrant] })
+		const { dispatcher, loggerCalls } = makeGetAccountsDispatcher({ session })
+
+		const result = await dispatcher.dispatch("getAccounts", [], ctx)
+		expect(result).toEqual([])
+		const warnCalls = (loggerCalls ?? []).filter((c) => c.level === LogLevel.Warn)
+		expect(warnCalls.some((c) => c.msg.includes("Desync"))).toBe(true)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// Phase 1.5 (plan-v3) — field-aware `accounts` delta + enrich uses stored grant
+// ---------------------------------------------------------------------------
+
+describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff", () => {
+	/** Phase 1.5 tests go through `enrichGrantedCapabilities` which calls
+	 *  `resolveNetwork()` — so we need a network reader configured for the
+	 *  ctx.chainId (0). The default `stubNetwork` returns [], which throws. */
+	function makePhase15Dispatcher(
+		writer: IDappSessionWriter,
+		requestCapabilitiesImpl: (params: unknown) => Promise<CapabilityResult>,
+	): WalletSdkDispatcher {
+		const network: INetworkRef = { id: "net-0", chainId: 0 }
+		const networkReader: INetworkReader = { getNetworks: async () => [network] }
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: requestCapabilitiesImpl as never,
+		}
+		return new WalletSdkDispatcher(networkReader, stubAccount, stubExecution, interaction, writer, noopLogger)
+	}
+
+	test("granted accounts(canCreateAuthWit:false) + re-requested SAME shape → no popup (same-shape no-op)", async () => {
+		// Regression pin: the field-aware filter must not over-trigger. If two
+		// requests are shape-equal, the second one short-circuits via the
+		// `delta.length === 0` early return and the popup never opens.
+		let popupCalls = 0
+		const existingAccountsCap: Capability = {
+			type: "accounts",
+			canGet: true,
+			canCreateAuthWit: false,
+			accounts: [],
+		}
+		const session = makeSession({
+			capabilityGrants: [{ capability: existingAccountsCap, grantedAt: 1 }],
+		})
+		const { writer } = makeSessionWriter(session)
+		const dispatcher = makePhase15Dispatcher(writer, async () => {
+			popupCalls++
+			return { granted: [{ type: "accounts" }] } as CapabilityResult
+		})
+
+		const manifest = { capabilities: [{ type: "accounts", canGet: true, canCreateAuthWit: false }] }
+		await dispatcher.dispatch("requestCapabilities", [manifest], ctx)
+
+		expect(popupCalls).toBe(0)
+	})
+
+	test("granted accounts(canCreateAuthWit:false) + re-requested with canCreateAuthWit:true → popup RE-OPENS (Bug B fix)", async () => {
+		// This is the authority-escalation regression pin. Without the
+		// field-aware diff (type-only `grantedTypes.has(cap.type)`), the dApp
+		// could silently upgrade from `canGet`-only to `canCreateAuthWit:true`.
+		let popupCalls = 0
+		const existingAccountsCap: Capability = {
+			type: "accounts",
+			canGet: true,
+			canCreateAuthWit: false,
+			accounts: [],
+		}
+		const session = makeSession({
+			capabilityGrants: [{ capability: existingAccountsCap, grantedAt: 1 }],
+		})
+		const { writer } = makeSessionWriter(session)
+		const dispatcher = makePhase15Dispatcher(writer, async () => {
+			popupCalls++
+			return { granted: [{ type: "accounts", canGet: true, canCreateAuthWit: true }] } as CapabilityResult
+		})
+
+		const manifest = { capabilities: [{ type: "accounts", canGet: true, canCreateAuthWit: true }] }
+		await dispatcher.dispatch("requestCapabilities", [manifest], ctx)
+
+		expect(popupCalls).toBe(1)
+	})
+
+	test("enrichGrantedCapabilities — stored canCreateAuthWit:false, requested true → response shows false (wire can't lie)", async () => {
+		// If a dApp later asks for the upgraded shape AND the user denies it,
+		// the wire response must reflect what was actually granted (the older
+		// `false`), not what was requested (`true`). Otherwise the dApp would
+		// think it has canCreateAuthWit until scope-enforcement refuses the
+		// next createAuthWit call — confusing UX + protocol-correctness bug.
+		const existingAccountsCap: Capability = {
+			type: "accounts",
+			canGet: true,
+			canCreateAuthWit: false,
+			accounts: [],
+		}
+		const session = makeSession({
+			capabilityGrants: [{ capability: existingAccountsCap, grantedAt: 1 }],
+		})
+		const { writer } = makeSessionWriter(session)
+		// Popup returns ONLY the original `false` shape — simulating user deny on
+		// the upgrade. The bug Phase 1.5 fixes is that the dApp would still see
+		// `canCreateAuthWit:true` in the wire response because the OLD code
+		// spread the REQUESTED cap shape, not the stored one.
+		const dispatcher = makePhase15Dispatcher(writer, async () => {
+			return { granted: [{ type: "accounts", canGet: true, canCreateAuthWit: false }] } as CapabilityResult
+		})
+
+		const manifest = { capabilities: [{ type: "accounts", canGet: true, canCreateAuthWit: true }] }
+		const result = (await dispatcher.dispatch("requestCapabilities", [manifest], ctx)) as { granted: Array<Record<string, unknown>> }
+
+		const accountsResult = result.granted.find((c) => c.type === "accounts")
+		expect(accountsResult?.canCreateAuthWit).toBe(false)
+		expect(accountsResult?.canGet).toBe(true)
 	})
 })
