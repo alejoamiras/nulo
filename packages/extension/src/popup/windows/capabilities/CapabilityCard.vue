@@ -17,7 +17,7 @@
  */
 import CapabilityDetailPanel from "@/components/composite/capabilities/CapabilityDetailPanel.vue"
 import type { Capability } from "@nulo/wallet-bridge"
-import type { CapabilityRisk } from "./capability-meta"
+import type { CapabilityRisk } from "@/wallet/services/dapp-session/capability-meta"
 
 defineProps<{
 	capability: Capability

@@ -12,7 +12,7 @@ import AccountSelectRow from "./AccountSelectRow.vue"
 /** Utils */
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { formatCaipAccount } from "@/wallet/utils/caip"
-import { getCapabilityInfo } from "./capability-meta"
+import { getCapabilityInfo } from "@/wallet/services/dapp-session/capability-meta"
 
 /** Services */
 import { type ProfileInfo, ProfileServiceClient } from "@/wallet/services/profile/client"

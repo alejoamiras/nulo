@@ -12,6 +12,7 @@ import { Dropdown } from "@/components/ui/Dropdown"
 
 /** Services */
 import { DappSessionServiceClient } from "@/wallet/services/dapp-session/client"
+import { getCapabilityInfo } from "@/wallet/services/dapp-session/capability-meta"
 
 /** Store */
 import { useCacheStore } from "@/stores/cache.store"
@@ -21,17 +22,8 @@ const popupStore = usePopupStore()
 
 const router = useRouter()
 
-const GRANT_SHORT_LABELS = {
-	accounts: "Accounts",
-	contracts: "Contracts",
-	contractClasses: "Classes",
-	simulation: "Simulation",
-	transaction: "Transactions",
-	data: "Private data",
-}
-
 const formatGrantSummary = (grants) => {
-	return grants.map((g) => GRANT_SHORT_LABELS[g.capability.type] ?? g.capability.type).join(" \u00B7 ")
+	return grants.map((g) => getCapabilityInfo(g.capability.type).shortLabel).join(" \u00B7 ")
 }
 
 const dappSessions = ref([])

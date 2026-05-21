@@ -2,17 +2,10 @@
 // .vue call sites that already import it without types.
 import { DateTime } from "luxon"
 
-export const CAPABILITY_LABELS: Record<string, string> = {
-	accounts: "Share accounts",
-	contracts: "Register and query contracts",
-	contractClasses: "Query contract classes",
-	simulation: "Simulate transactions",
-	transaction: "Send transactions",
-	data: "Access private data",
-}
+import { getCapabilityInfo } from "@/wallet/services/dapp-session/capability-meta"
 
 export function getCapabilityLabel(type: string): string {
-	return CAPABILITY_LABELS[type] ?? type
+	return getCapabilityInfo(type).label
 }
 
 export function formatSessionExpiry(expiryMs: number | undefined): string {
