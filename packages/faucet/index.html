@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Aztec Network Faucet · Nulo</title>
+	<meta name="description" content="Test USDC and ETH on Aztec alpha-testnet. Public or private balance. Powered by Nulo." />
+	<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+	<script>
+		// Aztec packages pull in `util` which references `process` at module
+		// top-level. Without these stubs the bundle throws ReferenceError
+		// before main.ts can mount. Matches packages/playground/index.html.
+		window.global = window
+		window.process = window.process || { env: {}, platform: "browser", versions: { node: "v20.0.0" }, browser: true, nextTick: (cb) => setTimeout(cb, 0) }
+		window.Buffer = window.Buffer || undefined
+	</script>
+</head>
+<body>
+	<div id="app"></div>
+	<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

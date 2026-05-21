@@ -3,6 +3,7 @@
 	"references": [
 		{ "path": "packages/extension" },
 		{ "path": "packages/playground" },
-		{ "path": "packages/landing" }
+		{ "path": "packages/landing" },
+		{ "path": "packages/faucet" }
 	]
 }
