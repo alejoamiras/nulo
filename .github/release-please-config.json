@@ -7,7 +7,6 @@
 			"package-name": "@nulo/extension",
 			"include-component-in-tag": false,
 			"include-v-in-tag": true,
-			"release-as": "0.20.0",
 			"extra-files": [
 				{ "type": "json", "path": "packages/extension/package.json", "jsonpath": "$.version" }
 			],
@@ -28,7 +27,6 @@
 			]
 		}
 	},
-	"pull-request-title-pattern": "chore: release ${component} ${version}",
-	"component-no-space": true,
+	"pull-request-title-pattern": "chore: release ${version}",
 	"separate-pull-requests": false
 }
