@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Capabilities popup — plain-language plan</title>
+  <style>
+    :root {
+      --bg: #fafaf8;
+      --fg: #1b1a17;
+      --muted: #6b6660;
+      --accent: #c97a2e;
+      --rule: #d8d5cf;
+      --code-bg: #f0eee9;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1a1a17;
+        --fg: #ece8df;
+        --muted: #a39d92;
+        --accent: #e8a25a;
+        --rule: #38342c;
+        --code-bg: #2a2722;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font-family: ui-serif, Georgia, "New York", serif;
+      font-size: 17px;
+      line-height: 1.55;
+      padding: 4rem 1.5rem 6rem;
+    }
+    main {
+      max-width: 38rem;
+      margin: 0 auto;
+    }
+    header { margin-bottom: 3rem; }
+    h1 {
+      font-size: 1.7rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      line-height: 1.2;
+      margin: 0 0 0.5rem;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-style: italic;
+      font-size: 1rem;
+      margin: 0;
+    }
+    h2 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.005em;
+      margin: 3rem 0 1rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--rule);
+    }
+    h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      margin: 2rem 0 0.5rem;
+      color: var(--fg);
+    }
+    p { margin: 0.8rem 0; }
+    ul, ol { padding-left: 1.4rem; margin: 0.6rem 0 1rem; }
+    li { margin: 0.35rem 0; }
+    code {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 0.88em;
+      background: var(--code-bg);
+      padding: 0.08em 0.35em;
+      border-radius: 2px;
+    }
+    .phase {
+      margin: 1.25rem 0;
+      padding: 1.25rem 1.4rem;
+      border-left: 3px solid var(--accent);
+      background: var(--code-bg);
+    }
+    .phase h3 { margin-top: 0; }
+    .phase .why {
+      margin-top: 0.6rem;
+      font-style: italic;
+      color: var(--muted);
+    }
+    .toc {
+      font-size: 0.95rem;
+      color: var(--muted);
+      margin-bottom: 2rem;
+    }
+    .toc a { color: var(--muted); text-decoration: none; }
+    .toc a:hover { color: var(--fg); }
+    .toc ol { padding-left: 1.4rem; margin: 0.4rem 0; }
+    .toc li { margin: 0.15rem 0; }
+    .quote {
+      border-left: 3px solid var(--rule);
+      padding-left: 1rem;
+      color: var(--muted);
+      margin: 1rem 0;
+    }
+    .openq {
+      margin: 1.5rem 0;
+      padding: 1rem 1.25rem;
+      border: 1px solid var(--rule);
+      border-radius: 0;
+    }
+    .openq h3 {
+      margin: 0 0 0.4rem;
+      color: var(--accent);
+    }
+    .openq p { margin: 0.3rem 0; }
+    .openq .ask { font-weight: 600; color: var(--fg); }
+    footer {
+      margin-top: 4rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--rule);
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+    strong { font-weight: 700; }
+  </style>
+</head>
+<body>
+<main>
+<header>
+  <h1>The capabilities popup, in plain language</h1>
+  <p class="subtitle">Companion to <code>plan-v2.md</code> — what we're changing and why, with the jargon stripped out.</p>
+</header>
+
+<nav class="toc">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#what">What's a capabilities popup?</a></li>
+    <li><a href="#problem">What's wrong with the current one?</a></li>
+    <li><a href="#plan">The seven steps to fix it</a></li>
+    <li><a href="#security">The security bit (worth reading)</a></li>
+    <li><a href="#open">Open questions for you</a></li>
+  </ol>
+</nav>
+
+<section id="what">
+<h2>What's a capabilities popup?</h2>
+<p>When a website (a "dApp") connects to your Nulo wallet, it doesn't just say "let me in." It hands the wallet a <strong>list of permissions it wants</strong> — read my accounts, send transactions on this contract, simulate things, etc. The wallet shows you a popup with that list, and you decide which to grant.</p>
+<p>Each item in that list is called a <strong>capability</strong>. There are six types today:</p>
+<ul>
+  <li><code>accounts</code> — see your account addresses, register tokens, optionally create scoped signatures.</li>
+  <li><code>contracts</code> — register and read contract metadata on this network.</li>
+  <li><code>contractClasses</code> — read contract <em>class</em> metadata.</li>
+  <li><code>simulation</code> — run "what would happen if I called this?" locally, without sending anything.</li>
+  <li><code>transaction</code> — request that you send transactions on certain contracts.</li>
+  <li><code>data</code> — read your address book and private notes/events; register senders for decryption.</li>
+</ul>
+<p>Granting a capability is <strong>NOT</strong> the same as letting the dApp do those things directly. It's just opening the door so the dApp can <em>ask</em>. For example, granting the <code>transaction</code> capability does <strong>not</strong> mean the dApp can quietly send sends. Every send still pops up another approval window. The capability is the gate; the per-call popup is the lock.</p>
+</section>
+
+<section id="problem">
+<h2>What's wrong with the current one?</h2>
+<p>Three things, all related to <strong>trust</strong>:</p>
+
+<h3>1. It lies, a little</h3>
+<p>The popup currently says <em>"Submit transactions to the network on your behalf"</em> for the <code>transaction</code> capability. Read in isolation, that sounds like blanket authority — "say yes here, I'll do it without bugging you again." That's wrong. Every send still triggers a popup. The current copy was honest about this in a single small footnote ("Each transaction still requires your approval") but the headline contradicted it.</p>
+<p>Similarly, the <code>accounts</code> capability has an optional flag called <code>canCreateAuthWit</code> — short for "create auth witness". The detail panel says "Create auth witnesses." If you don't know what an auth witness is, that sentence is meaningless. If you do, it sounds like you're granting general signing power. The reality: an auth witness is typically a <em>scoped</em> signature, checked against your other granted permissions (transaction / simulation scope) before it's signed — narrower than "sign anything." But the scope-check is conditional: if the dApp has no transaction or simulation capability, only the account-level check applies; for raw-message authwits, there's no call-semantic check at all. So the honest framing is "<em>may also</em> request auth witnesses for shared accounts" — which is what v2.1 lands.</p>
+
+<h3>2. It's loud in a quiet family</h3>
+<p>Nulo's design is brutalist — sharp borders, monochrome surfaces, monospaced uppercase labels, sparing use of color. Look at the execute popup or the verify popup: borders and mono text, no chip backgrounds. But the capabilities popup is full of saturated chips: red HIGH / yellow MEDIUM / green LOW for risk, green check-circles in every checkbox, an orange "previously denied" badge. Visually it doesn't belong with its siblings.</p>
+
+<h3>3. It tells you less than it could</h3>
+<p>The detail panel shows scopes like:</p>
+<pre><code>  0xabc...123
+    fn: transfer_in_private</code></pre>
+<p>That's fine. But the <em>execute</em> popup, which is the next surface the user sees, decodes function names into friendly labels ("Transfer (private)") and resolves contract addresses against the local address book (if you've named one of these contracts "Aztec Bridge", you'll see that name). The capabilities popup doesn't. Two popups, same data, different decode depth.</p>
+</section>
+
+<section id="plan">
+<h2>The seven steps to fix it</h2>
+<p>The plan has seven phases. Each one is independently shippable — no phase blocks reading the next — but they're ordered to make the layer-rule violation go away first.</p>
+
+<div class="phase">
+  <h3>Phase 0 — Move the capability metadata to a shared place</h3>
+  <p>Today, the labels and descriptions for each capability live in three different files: the popup, the settings page helper, and the settings list helper. Three copies. The popup's copy lives in a "window-level" folder; the settings copy lives in a "settings module" folder. The repo has rules (enforced by Biome) about which folder can import from which — settings can't reach into windows. So we can't just point all three at the popup's file.</p>
+  <p>Solution: move the metadata into a lower-layer folder that both can import from. One source of truth. Pure data; no Vue, no Chrome APIs.</p>
+  <p class="why">Why first: every later phase touches both surfaces. If we don't move the metadata first, we either lie about "single source of truth" or violate the layer rule.</p>
+</div>
+
+<div class="phase">
+  <h3>Phase 1 — Rewrite the copy</h3>
+  <p>Replace the dishonest labels with honest ones. "Send transactions" gets a clarifying sentence "Each transaction still requires your approval." "Account access" replaces "Share your accounts" and explicitly mentions both the read path AND the always-present <code>registerToken</code> path. The <code>data</code> capability stops claiming it's only "private notes" and acknowledges it also covers the address book and the <code>registerSender</code> write path.</p>
+  <p>For unknown capability types (a future-proofing case): the headline becomes the constant string "Unknown permission" instead of the raw type from the wire.</p>
+  <p class="why">Why: the current copy contradicts itself across the head + detail panel. v2 makes them agree, and grounds the claims against what the protocol actually does.</p>
+</div>
+
+<div class="phase">
+  <h3>Phase 2 — Replace the colored chips with brutalist mono glyphs</h3>
+  <p>The risk indicator becomes three monospace tokens: <code>▲ HIGH</code>, <code>● MED</code>, <code>— LOW</code>. No color. Same information, fits the family.</p>
+  <p>Checkbox check-icons turn from green to "primary" (matches the rest of the popup family).</p>
+  <p>The "previously denied" badge keeps an <strong>orange border</strong> — both audits independently agreed the all-mono treatment we initially proposed was too quiet for a warning. The family does have targeted orange accents (the verify popup uses one for non-ASCII hostnames; the signer strip uses one for mixed signers). Keeping orange-on-transparent matches that pattern.</p>
+  <p>The new "UNRECOGNIZED" badge for unknown capability types gets the same orange-border treatment.</p>
+  <p class="why">Why: visual consistency with the popup family. Mono surfaces, targeted accents, no chip fills.</p>
+</div>
+
+<div class="phase">
+  <h3>Phase 3 — Decode the scopes more honestly</h3>
+  <p>For each scope row, show both the raw method id AND the friendly label (if we recognize the method). Example:</p>
+  <pre><code>  0xabc…123  (@Aztec Bridge)
+    fn: transfer_in_private  ·  Transfer (private)</code></pre>
+  <p>The raw method id is the authoritative thing. The friendly label is an annotation. We don't replace one with the other because <code>humanizeMethodName</code> is many-to-one — three distinct methods (<code>transfer</code>, <code>transfer_in_private</code>, <code>transfer_private_to_private</code>) all collapse to "Transfer (private)". Showing only the friendly label would hide which one the dApp is asking for.</p>
+  <p>Contract addresses get the same treatment: raw trimmed address as primary, parenthetical <code>(@local-contact-name)</code> annotation only if the user has named that address in their own address book.</p>
+  <p>Contract <em>class</em> IDs (a different beast, despite looking like addresses) are rendered as plain trimmed strings — no contact lookup, no name resolution.</p>
+  <p>Strings on the wire (cap.type, function names, contract addresses) all pass through a sanitizer that strips bidi-control unicode characters (which can flip text direction and visually scramble labels) and clamps long strings.</p>
+  <p class="why">Why: a careful user verifies what they're approving. Raw IDs + sanitization keep the dApp from cosmetically misrepresenting a scope.</p>
+</div>
+
+<div class="phase">
+  <h3>Phase 4 — Popup-level orchestration polish</h3>
+  <p>Section headers say "New permissions requested" / "Already granted." The DappIdentityBlock action label says "is requesting permissions."</p>
+  <p>Unknown capability cards <strong>default to unchecked</strong>. Today, every card defaults to checked; if you click Approve without thinking, you grant the unknown one too. v2 forces a deliberate click for anything the wallet doesn't recognize. The risk indicator is forced to <code>▲ HIGH</code> for unknown types.</p>
+  <p class="why">Why: misclicks on unknown capabilities can persist in the session and a future wallet version could honor them. Default-off makes the misclick path harder.</p>
+</div>
+
+<div class="phase">
+  <h3>Phase 5 — Settings page parity</h3>
+  <p>The settings → connected apps → [dApp] page shows the same capability detail panel. Inherit all the visual changes from Phase 2-3 (mono, raw IDs, address rendering). Rename "Granted capabilities" → "Granted permissions" to match the popup.</p>
+  <p>The connected-apps list (the top-level summary view) used a third, separate set of short labels — they now read from the same source as the popup.</p>
+  <p class="why">Why: visual + terminology consistency across the whole capability-related surface area. One source of truth, top to bottom.</p>
+</div>
+
+<div class="phase">
+  <h3>Phase 6 — Test sweep</h3>
+  <p>Run the unit tests, the typecheck, the build, and the audit:vue gate (which bundles all four). Then run the 9 end-to-end network tests that exercise the capability + send-tx + authwit paths. Then a manual smoke through the unpacked extension to eyeball the visual changes.</p>
+  <p class="why">Why: codex's first audit pointed out that running only one e2e test (the basic capability request) wasn't enough — we need the authwit + send-tx-with-feePayer tests to confirm the protocol claims in the copy are actually true.</p>
+</div>
+</section>
+
+<section id="security">
+<h2>The security bit (worth reading)</h2>
+<p>A capability popup is one of those rare UI surfaces where every byte the dApp can influence is a potential attack surface. The plan treats every dApp-controlled field as untrusted:</p>
+
+<ul>
+  <li><strong>Capability type</strong>. Could be an unrecognized string designed to look friendly. v2: never used as the head label; only displayed in a sanitized + clamped + escaped mono row.</li>
+  <li><strong>Function names in scopes</strong>. Could be a real-looking method that maps to something else, or a long Unicode string with bidi-control chars to flip text. v2: length-clamped, control-char-stripped, displayed with the raw alongside any friendly annotation.</li>
+  <li><strong>Contract addresses in scopes</strong>. Could be addresses the user has named misleadingly in their address book. v2: raw address is always primary; the local name is parenthetical and clearly marked with an <code>@</code> prefix.</li>
+  <li><strong>"Previously denied" badge</strong>. Already protects against re-request mis-clicks. v2 keeps it visually loud (orange border) but in the brutalist style.</li>
+</ul>
+
+<p>One thing the plan does <strong>not</strong> fix: the dispatcher's current handling of capability <em>upgrades</em> (e.g., a dApp granted scope <code>["A"]</code> later asks for <code>["A", "B"]</code>). For non-<code>accounts</code> capability types, the diff today is type-only, which means the upgrade slips through without a popup or the "previously denied" badge. That's a separate, known issue filed as <code>wallet-sdk-capability-field-diff</code>. v2 documents this gap honestly and does not pretend the badge covers it.</p>
+</section>
+
+<section id="open">
+<h2>Open questions for you</h2>
+
+<div class="openq">
+  <h3>1. "Capabilities" → "Permissions" rename scope</h3>
+  <p>The plan renames the user-facing word from "capabilities" to "permissions" in three places: the popup section headers, the popup identity-block action label, and the settings detail page header. The internal type names (the <code>Capability</code> type, the <code>cap-*</code> testids) stay — they're protocol-level.</p>
+  <p class="ask">Confirm — full rename across user-facing copy? Or popup-only?</p>
+</div>
+
+<div class="openq">
+  <h3>2. Default-OFF on unrecognized capability cards</h3>
+  <p>If a dApp asks for a capability type the wallet doesn't know about, the card defaults to unchecked. The user has to deliberately click it to approve. This guards against future protocol drift and against attackers padding their request with unknown types hoping for an autopilot Approve click.</p>
+  <p class="ask">Confirm — default-OFF on unknowns is the right call?</p>
+</div>
+
+<div class="openq">
+  <h3>3. PREVIOUSLY DENIED badge: orange border, mono text</h3>
+  <p>Both audits agreed that the all-mono version was too quiet for a warning state. The family does use targeted orange accents elsewhere. v2 lands on orange border, transparent fill, mono uppercase text. The new UNRECOGNIZED chip uses the same treatment.</p>
+  <p class="ask">Confirm — keep an orange accent on warning chips?</p>
+</div>
+
+<div class="openq">
+  <h3>4. The "May" hedge in the accounts head description</h3>
+  <p>The <code>accounts</code> capability can include an optional flag for creating scoped signatures. Some grants will have it; most won't. The proposed head description hedges with "May also create scoped signatures…" The detail panel below decodes whether that flag is actually set.</p>
+  <p>The hedge is honest but reads a little awkward. The alternative is to drop the clause entirely and rely on the detail panel — but many users never expand the detail panel, so dropping the clause means signing flag is invisible at a glance.</p>
+  <p class="ask">Keep the "May" hedge? Or drop it and rely on the detail panel?</p>
+</div>
+
+<div class="openq">
+  <h3>5. Risk glyph choices: ▲ ● —</h3>
+  <p>HIGH gets a filled triangle, MEDIUM a filled circle, LOW an em-dash. The em-dash at 10px in a mono font may render thinner than the triangle/circle (a subtle visual inconsistency). An alternative is the middle-dot (·) for LOW, which is geometrically closer to the others.</p>
+  <p class="ask">Keep <code>—</code> for LOW, or swap to <code>·</code>?</p>
+</div>
+
+<div class="openq">
+  <h3>6. Confirmation-policy footnote?</h3>
+  <p>The popup copy assumes the default session policy. A power user can tighten the policy in settings, which would cause more operation types to trigger popups. The plan does not add a footnote about "if you've changed your confirmation policy, more steps may require approval." The settings page is the right surface for that explanation; we'd rather not clutter the popup.</p>
+  <p class="ask">Confirm — no policy-related footnote in the popup?</p>
+</div>
+</section>
+
+<footer>
+  <p>Reading the full plan: <code>implementations-plan/capabilities-popup-quality/plan-v2.md</code> at the repo root. The audit transcripts (codex + opus) live alongside under the same directory.</p>
+</footer>
+</main>
+</body>
+</html>
