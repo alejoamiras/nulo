@@ -130,6 +130,8 @@ async function main(): Promise<void> {
 					setter?.call(input, v)
 					input.dispatchEvent(new Event("input", { bubbles: true }))
 				}
+				// F2: profile name is required at submit time.
+				setVal('[data-testid="import-name-input"] input', "Derivation Parity")
 				setVal('[data-testid="import-private-key-input"] input', secretKey)
 				setVal('[data-testid="import-password-input"] input', pwd)
 				setVal('[data-testid="import-password-confirm-input"] input', pwd)

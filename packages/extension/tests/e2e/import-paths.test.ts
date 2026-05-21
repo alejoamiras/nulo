@@ -72,6 +72,8 @@ async function importPlainKey(page: Page, secret: string, password: string): Pro
 				setter?.call(input, v)
 				input.dispatchEvent(new Event("input", { bubbles: true }))
 			}
+			// F2: profile name is required at submit time.
+			setVal('[data-testid="import-name-input"] input', "Imported Profile")
 			setVal('[data-testid="import-private-key-input"] input', s)
 			setVal('[data-testid="import-password-input"] input', p)
 			setVal('[data-testid="import-password-confirm-input"] input', p)
@@ -105,6 +107,8 @@ async function importEncryptedKey(page: Page, encrypted: string, password: strin
 				setter?.call(input, v)
 				input.dispatchEvent(new Event("input", { bubbles: true }))
 			}
+			// F2: profile name is required at submit time.
+			setVal('[data-testid="import-name-input"] input', "Imported Profile")
 			setVal('[data-testid="import-public-key-input"] input', s)
 			// public_key flow has a single password field (no confirm).
 			setVal('[data-testid="import-password-input"] input', p)
@@ -138,6 +142,8 @@ async function importSeed(page: Page, seed: string, password: string): Promise<v
 				setter?.call(input, v)
 				input.dispatchEvent(new Event("input", { bubbles: true }))
 			}
+			// F2: profile name is required at submit time.
+			setVal('[data-testid="import-name-input"] input', "Imported Profile")
 			setVal('[data-testid="import-seed-input"] input', s)
 			setVal('[data-testid="import-password-input"] input', p)
 			setVal('[data-testid="import-password-confirm-input"] input', p)

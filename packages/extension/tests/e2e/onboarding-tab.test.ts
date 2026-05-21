@@ -4,7 +4,7 @@ import { clickByTestId, openOnboarding, replaceInputValue, test, waitForHash } f
 
 const ONBOARDING_HEALTH_URL = "http://127.0.0.1:59833/health"
 const TEST_PASSWORD = "OnboardingTest_!23"
-const TEST_WALLET_NAME = "Onboarding Test"
+const TEST_PROFILE_NAME = "Onboarding Test"
 
 describe("onboarding tab", () => {
 	test("welcome screen renders both CTAs", async ({ freshExtensionPerTest: extension }) => {
@@ -22,7 +22,7 @@ describe("onboarding tab", () => {
 		await waitForHash(page, "#/onboarding/create", 10_000)
 
 		// Fill the name + password fields
-		await replaceInputValue(page, '[data-testid="onboarding-name-input"]', TEST_WALLET_NAME)
+		await replaceInputValue(page, '[data-testid="onboarding-name-input"]', TEST_PROFILE_NAME)
 		await replaceInputValue(page, '[data-testid="onboarding-password-input"]', TEST_PASSWORD)
 		await replaceInputValue(page, '[data-testid="onboarding-password-confirm"]', TEST_PASSWORD)
 

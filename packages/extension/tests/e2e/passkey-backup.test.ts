@@ -25,7 +25,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect } from "vitest"
 import type { Page } from "puppeteer"
-import { clickByTestId, openPopup, waitForHash, test } from "./fixtures/extension"
+import { clickByTestId, openPopup, replaceInputValue, waitForHash, test } from "./fixtures/extension"
+import { getActiveProfileName } from "./fixtures/helpers"
 import { setupPasskeyVirtualAuth } from "./fixtures/passkey"
 
 /** Drive the passkey-register flow on a fresh extension at /popup/register.
@@ -38,6 +39,11 @@ async function registerPasskeyProfile(page: Page): Promise<void> {
 		polling: 500,
 	})
 	await clickByTestId(page, "register-create-btn")
+
+	// F1: name is required at submit time.
+	await page.waitForSelector('[data-testid="register-name-input"]', { visible: true, timeout: 10_000 })
+	await replaceInputValue(page, '[data-testid="register-name-input"]', "Test Profile")
+
 	await page.waitForSelector('[data-testid="register-method-passkey"]', { visible: true, timeout: 10_000 })
 	await clickByTestId(page, "register-method-passkey")
 	await page.waitForSelector('[data-testid="register-submit-btn"]', { visible: true, timeout: 10_000 })
@@ -380,15 +386,16 @@ test("passkey full-backup: in-session round-trip (register → reset → import 
 		await clickByTestId(page, "reset-checkbox-permanent")
 		await clickByTestId(page, "reset-checkbox-undone")
 		await clickByTestId(page, "reset-checkbox-sure")
-		// Default passkey-profile name pattern matches `profile/new.vue:67`
-		// (`Profile ${profiles.length + 1}`).
-		await page.evaluate(() => {
+		// Profile name is now user-typed (F1) — read it from the reset
+		// page's data-profile-name attribute rather than hardcoding.
+		const activeProfileName = await getActiveProfileName(page)
+		await page.evaluate((expectedName: string) => {
 			const input = document.querySelector<HTMLInputElement>('[data-testid="reset-confirm-input"] input')
 			if (!input) throw new Error("reset-confirm-input not found")
 			const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set
-			setter?.call(input, "Profile 1")
+			setter?.call(input, expectedName)
 			input.dispatchEvent(new Event("input", { bubbles: true }))
-		})
+		}, activeProfileName)
 		await page.waitForFunction(
 			() => {
 				const btn = document.querySelector<HTMLButtonElement>('[data-testid="reset-submit-btn"]')

@@ -39,7 +39,7 @@ const handleOpen = (target: "terms" | "privacy") => {
 				data-testid="onboarding-welcome-create"
 				@click="router.push('/onboarding/create')"
 			>
-				Create wallet
+				Create profile
 			</Button>
 			<Button
 				variant="primary_outline"
@@ -48,7 +48,7 @@ const handleOpen = (target: "terms" | "privacy") => {
 				data-testid="onboarding-welcome-import"
 				@click="router.push('/onboarding/import')"
 			>
-				Import wallet
+				Import profile
 			</Button>
 		</Flex>
 
