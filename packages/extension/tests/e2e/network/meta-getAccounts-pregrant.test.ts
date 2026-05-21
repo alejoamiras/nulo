@@ -8,10 +8,11 @@ const hasConfig = aztecConfig !== undefined
 
 /**
  * `getAccounts` pre-grant now throws `CapabilityNotGrantedError` (EIP-1193 4100)
- * instead of silently returning []. The throw triggers the dApp's existing
- * `try { getAccounts } catch { requestCapabilities }` fallback, which sends the
- * full capability manifest in a single popup — fixing the whole flow end-to-end
- * for dApps like Nethermind's faucet.
+ * instead of silently returning []. This test pins ONLY the error-surface side
+ * of that contract — that the dApp gets a recognisable failure rather than a
+ * silent empty result. It does NOT exercise the downstream
+ * `requestCapabilities()` fallback path; that's covered separately by the
+ * existing `meta-getAccounts.test.ts` (post-grant fast-path).
  *
  * The match below is intentionally loose because the wallet-sdk wraps
  * `response.error` in `new Error(JSON.stringify(error))` at

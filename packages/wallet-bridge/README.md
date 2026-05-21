@@ -167,9 +167,10 @@ some dApps will substring-match on it.
 
 Note: today the wallet only ever throws this for the `accounts` capability
 (from `dispatcher.handleGetAccounts`). Other capability-gated methods reject
-with the existing scope-enforcement error format; widening the
-`CapabilityNotGrantedError` surface to those is tracked under the follow-up
-plan `wallet-sdk-capability-field-diff`.
+with the existing scope-enforcement error format. Widening the
+`CapabilityNotGrantedError` surface to other methods is a separate, deferred
+follow-up — it would change the error-string contract for those methods, so
+it needs its own audit cycle before any rollout.
 
 ## Scripts
 
