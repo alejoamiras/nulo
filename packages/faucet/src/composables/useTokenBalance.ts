@@ -18,14 +18,15 @@ export interface UseTokenBalanceHandle {
 
 /**
  * Per-token balance reader. Polls balance_of_public + balance_of_private
- * every 15s via wallet.executeUtility. Extracts the first FunctionCall
- * from the ExecutionPayload returned by `method().request()`, then passes
- * the canonical option shape (scopes + empty authWitnesses/capsules/
- * extraHashedArgs) — the public ExecuteUtilityOptions type is narrower
- * than what the execution service requires at runtime.
+ * every 15s. The two paths diverge by Aztec function kind:
+ *   - `balance_of_public` is `#[external("public")] #[view]` → read via
+ *     `interaction.simulate({from})`. The SDK returns a SimulationResult
+ *     `{ result, ... }`, so we extract `.result` and coerce to bigint.
+ *   - `balance_of_private` is `#[external("utility")]` → read via
+ *     `wallet.executeUtility(call, opts)`. The SDK returns a
+ *     UtilityExecutionResult `{ result: Fr[], ... }`; we pick result[0].
  *
- * Caller owns lifecycle: invoke dispose() in onBeforeUnmount of the
- * parent component.
+ * Caller owns lifecycle: invoke dispose() in onBeforeUnmount.
  */
 export function useTokenBalance(wallet: Wallet, tokenAddress: AztecAddress, accountAddress: AztecAddress): UseTokenBalanceHandle {
 	const publicBalance = ref<bigint | null>(null)
@@ -92,6 +93,10 @@ interface UtilityExecutionResultShape {
 	result?: unknown[]
 }
 
+interface SimulationResultShape {
+	result?: unknown
+}
+
 async function readBalance(
 	wallet: Wallet,
 	contract: unknown,
@@ -103,15 +108,23 @@ async function readBalance(
 	if (typeof method !== "function") {
 		throw new Error(`Token contract is missing method ${fn}`)
 	}
+	// Token contract attributes (aztec-standards):
+	//   balance_of_public:  #[external("public")] #[view]   ← on-chain public view
+	//   balance_of_private: #[external("utility")]           ← off-chain utility
+	// Public views are read via `interaction.simulate({from})` and return a
+	// `SimulationResult { result, … }` — we extract `.result` not the wrapper
+	// (passing the wrapper to a coercer that expects bigint silently returns 0n).
+	if (fn === "balance_of_public") {
+		const interaction = method(account)
+		// biome-ignore lint/suspicious/noExplicitAny: SDK SimulationResult.result is typed `any` upstream
+		const raw = (await (interaction as any).simulate({ from: account })) as SimulationResultShape
+		return toBigInt(raw?.result)
+	}
 	const exec = (await method(account).request()) as ExecutionPayloadShape
 	const call = exec.calls?.[0]
 	if (!call) {
 		throw new Error(`${fn} produced no FunctionCall`)
 	}
-	// ExecuteUtilityOptions publicly declares only `scopes` and optional
-	// `authWitnesses`, but the execution service also requires `capsules`
-	// and `extraHashedArgs` at runtime — see playground simulation.ts:106
-	// for the same boundary cast.
 	const opts = {
 		scopes: [account],
 		authWitnesses: [],

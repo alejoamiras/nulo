@@ -26,11 +26,13 @@ jobs:
       extension: ${{ steps.override.outputs.full || steps.filter.outputs.extension }}
       playground: ${{ steps.override.outputs.full || steps.filter.outputs.playground }}
       landing: ${{ steps.override.outputs.full || steps.filter.outputs.landing }}
+      faucet: ${{ steps.override.outputs.full || steps.filter.outputs.faucet }}
       workflows: ${{ steps.override.outputs.full || steps.filter.outputs.workflows }}
       root-config: ${{ steps.override.outputs.full || steps.filter.outputs.root-config }}
       firefox-touching: ${{ steps.override.outputs.full || steps.filter.outputs.firefox-touching }}
       needs-extension-build: ${{ steps.compute.outputs.needs-extension-build }}
       needs-firefox-build: ${{ steps.compute.outputs.needs-firefox-build }}
+      needs-faucet-build: ${{ steps.compute.outputs.needs-faucet-build }}
     steps:
       - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v4
@@ -60,6 +62,9 @@ jobs:
             landing:
               - 'packages/landing/**'
               - '!packages/landing/**/*.md'
+            faucet:
+              - 'packages/faucet/**'
+              - '!packages/faucet/**/*.md'
             workflows:
               - '.github/workflows/**'
               - '.github/actions/**'
@@ -95,6 +100,7 @@ jobs:
           RUNTIME: ${{ steps.override.outputs.full || steps.filter.outputs.aztec-runtime }}
           BRIDGE: ${{ steps.override.outputs.full || steps.filter.outputs.wallet-bridge }}
           EXTENSION: ${{ steps.override.outputs.full || steps.filter.outputs.extension }}
+          FAUCET: ${{ steps.override.outputs.full || steps.filter.outputs.faucet }}
           WORKFLOWS: ${{ steps.override.outputs.full || steps.filter.outputs.workflows }}
           ROOT: ${{ steps.override.outputs.full || steps.filter.outputs.root-config }}
           FIREFOX_TOUCHING: ${{ steps.override.outputs.full || steps.filter.outputs.firefox-touching }}
@@ -115,6 +121,13 @@ jobs:
             echo "needs-firefox-build=true" >> "$GITHUB_OUTPUT"
           else
             echo "needs-firefox-build=false" >> "$GITHUB_OUTPUT"
+          fi
+          # Faucet build runs on faucet-touching PRs + any workflow / root
+          # config change that could affect its bundle.
+          if [ "$FAUCET" = "true" ] || [ "$WORKFLOWS" = "true" ] || [ "$ROOT" = "true" ]; then
+            echo "needs-faucet-build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs-faucet-build=false" >> "$GITHUB_OUTPUT"
           fi
 
   commitlint:
@@ -178,6 +191,15 @@ jobs:
       target: firefox
       upload_artifacts: true
 
+  build-faucet:
+    name: Build Faucet
+    needs: changes
+    if: needs.changes.outputs.needs-faucet-build == 'true'
+    uses: ./.github/workflows/_build-faucet.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      upload_artifacts: true
+
   # Smoke e2e moved to its own pr-smoke-e2e.yml workflow:
   # auto-runs on PRs to main, on changes within the `smoke-surface`
   # filter, or via the `e2e:smoke` label. Mirrors pr-network-e2e.yml.
@@ -185,7 +207,7 @@ jobs:
   status:
     name: Status
     if: always()
-    needs: [changes, commitlint, lint-and-typecheck, unit-tests, build-chrome, build-firefox]
+    needs: [changes, commitlint, lint-and-typecheck, unit-tests, build-chrome, build-firefox, build-faucet]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -198,6 +220,7 @@ jobs:
             "${{ needs.unit-tests.result }}" \
             "${{ needs.build-chrome.result }}" \
             "${{ needs.build-firefox.result }}" \
+            "${{ needs.build-faucet.result }}" \
           ; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
               echo "::error::A required job failed or was cancelled: $r"

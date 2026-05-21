@@ -16,7 +16,6 @@ export const TESTIDS = {
 	btnDisconnect: "fa-btn-disconnect",
 	btnInstallNulo: "fa-btn-install-nulo",
 	account: "fa-account",
-	bannerAccountNotDeployed: "fa-banner-account-not-deployed",
 
 	// Verification modal — 3×3 emoji grid + match/cancel
 	verificationModal: "fa-verification-modal",
@@ -28,6 +27,7 @@ export const TESTIDS = {
 	// Capability approval — second wallet interaction after verify
 	capabilityApproval: "fa-capability-approval",
 	btnCapabilityRetry: "fa-btn-capability-retry",
+	settingUp: "fa-setting-up",
 
 	// Token cards
 	tokenCard: "fa-token-card",

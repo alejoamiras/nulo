@@ -5,13 +5,12 @@ import { useWalletConnection } from "@/composables/useWalletConnection"
 import { FAUCET_TOKENS } from "@/constants/tokens"
 import { ETH, USDC } from "@/contracts/deployments"
 import { TESTIDS } from "@/lib/testids"
-import AccountNotDeployedBanner from "./components/AccountNotDeployedBanner.vue"
 import AppToastRegion from "./components/AppToastRegion.vue"
 import Footer from "./components/Footer.vue"
 import TokenCard from "./components/TokenCard.vue"
 import WalletPanel from "./components/WalletPanel.vue"
 
-const { status, accountDeployed, wallet, selectedAccount } = useWalletConnection()
+const { status, wallet, selectedAccount } = useWalletConnection()
 
 const tokenEntries = computed(() =>
 	FAUCET_TOKENS.map((token) => ({
@@ -35,16 +34,20 @@ const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.from
 
 		<WalletPanel />
 
-		<AccountNotDeployedBanner v-if="status === 'connected' && accountDeployed === false" />
-
-		<section v-if="status === 'connected' && wallet && accountAddress" class="cards">
+		<!--
+		Cards always render so the page never collapses into the header
+		alone. Composables only activate when the user is connected; the
+		`:key` flips on connection state so the card cleanly re-mounts and
+		the composable lifecycle is unambiguous (no half-active polling).
+		-->
+		<section class="cards">
 			<TokenCard
 				v-for="entry in tokenEntries"
-				:key="entry.token.symbol"
+				:key="`${entry.token.symbol}:${status === 'connected' ? 'on' : 'off'}`"
 				:token="entry.token"
 				:token-address="entry.address"
-				:wallet="wallet"
-				:account="accountAddress"
+				:wallet="status === 'connected' && wallet ? wallet : undefined"
+				:account="status === 'connected' && accountAddress ? accountAddress : undefined"
 			/>
 		</section>
 
@@ -56,34 +59,42 @@ const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.from
 
 <style scoped>
 .page {
-	max-width: 720px;
+	max-width: 760px;
 	margin: 0 auto;
-	padding: 64px 24px 96px;
+	padding: 80px 32px 96px;
 	color: var(--txt-primary);
 	display: flex;
 	flex-direction: column;
-	gap: 24px;
+	gap: 32px;
+}
+
+.hero {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	margin-bottom: 8px;
 }
 
 .hero h1 {
 	font-family: var(--font-headline);
 	font-weight: 700;
-	font-size: 38px;
+	font-size: 44px;
 	letter-spacing: -0.02em;
-	line-height: 1.05;
-	margin: 0 0 12px;
+	line-height: 1.04;
+	margin: 0;
 }
 
 .hero .sub {
 	color: var(--txt-secondary);
 	font-size: 16px;
-	max-width: 56ch;
+	max-width: 62ch;
 	margin: 0;
+	line-height: 1.55;
 }
 
 .cards {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-	gap: 16px;
+	grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+	gap: 20px;
 }
 </style>

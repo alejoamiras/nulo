@@ -40,6 +40,7 @@ import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { poseidon2Hash } from "@aztec/foundation/crypto/poseidon"
 import { createLogger } from "@aztec/foundation/log"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
+import { deriveSigningKey } from "@aztec/stdlib/keys"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { DripperContract, DripperContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Dripper.js"
 import { TokenContract, TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
@@ -149,6 +150,14 @@ async function buildSponsoredFeeOptions(wallet: Wallet): Promise<InteractionFeeO
 
 // ── Account deploy (idempotent) ─────────────────────────────────────────────
 
+// `NO_FROM` is the SDK's sentinel for "deploy without routing through any
+// account contract entrypoint" — required for the very first account
+// deploy because the account doesn't exist yet (chicken/egg). The SDK
+// exports it from `dest/contract/interaction_options.js` but no public
+// subpath re-exports the constant in 4.2.0; inlining the literal is
+// equivalent because the SDK does a string comparison internally.
+const NO_FROM = "NO_FROM" as const
+
 async function ensureAccountDeployed(manager: AccountManager, node: AztecNode, feeOptions: InteractionFeeOptions): Promise<void> {
 	const address = manager.getInstance().address
 	const existing = await node.getContract(address)
@@ -159,11 +168,13 @@ async function ensureAccountDeployed(manager: AccountManager, node: AztecNode, f
 	logger.info(`Deploying account at ${address.toString()}…`)
 	try {
 		const deployMethod = await manager.getDeployMethod()
-		await deployMethod.send({ fee: feeOptions, from: AztecAddress.ZERO })
+		// biome-ignore lint/suspicious/noExplicitAny: NO_FROM sentinel not re-exported through a public subpath in 4.2.0
+		await deployMethod.send({ fee: feeOptions, from: NO_FROM as any })
 		logger.info(`Account deployed at ${address.toString()}`)
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : String(err)
-		if (msg.includes("Existing nullifier")) {
+		const cause = err instanceof Error && "cause" in err && err.cause instanceof Error ? err.cause.message : ""
+		if (msg.includes("Existing nullifier") || cause.includes("Existing nullifier")) {
 			logger.info(`Account already deployed at ${address.toString()} (existing nullifier)`)
 			return
 		}
@@ -269,12 +280,7 @@ async function run(): Promise<void> {
 		return
 	}
 
-	const deployerSecret = process.env.DEPLOYER_SECRET
-	if (!deployerSecret || deployerSecret.trim().length < 32) {
-		throw new Error("DEPLOYER_SECRET env required (≥32 chars; hashed with poseidon2 before use)")
-	}
-
-	const secretField = await poseidon2Hash([Fr.fromBufferReduce(Buffer.from(deployerSecret, "utf8"))])
+	const account = await resolveDeployerKeys()
 
 	const node = createAztecNodeClient(config.network.nodeUrl)
 	const wallet = await EmbeddedWallet.create(config.network.nodeUrl, {
@@ -289,14 +295,16 @@ async function run(): Promise<void> {
 		const nodeInfo = await node.getNodeInfo()
 		logger.info(`Connected to node ${nodeInfo.nodeVersion}`)
 
-		const accountManager = await wallet.createSchnorrAccount(secretField, Fr.ZERO)
-		const account = await accountManager.getAccount()
-		logger.info(`Deployer account: ${account.getAddress().toString()}`)
+		const accountManager = await (account.kind === "hex"
+			? wallet.createSchnorrAccount(account.secret, account.salt, account.signingKey)
+			: wallet.createSchnorrAccount(account.secret, Fr.ZERO))
+		const accountInstance = await accountManager.getAccount()
+		logger.info(`Deployer account: ${accountInstance.getAddress().toString()}`)
 
 		const fee = await buildSponsoredFeeOptions(wallet)
 		await ensureAccountDeployed(accountManager, node, fee)
 
-		const deployOptions: DeployOptions = { from: account.getAddress(), fee }
+		const deployOptions: DeployOptions = { from: accountInstance.getAddress(), fee }
 
 		const dripperResult = await deployIfMissing(
 			wallet,
@@ -347,6 +355,33 @@ async function run(): Promise<void> {
 
 // Allow `bun run scripts/deploy.ts` direct invocation. Also exports the
 // helpers above so tests (if added later) can import them.
+type DeployerKeys = { kind: "hex"; secret: Fr; salt: Fr; signingKey: ReturnType<typeof deriveSigningKey> } | { kind: "utf8"; secret: Fr }
+
+async function resolveDeployerKeys(): Promise<DeployerKeys> {
+	// Prefer the holonym-style hex+salt pair: if a project already has a
+	// funded testnet account under (secretKey, salt, derivedSigningKey),
+	// supplying those same values reproduces the same account address —
+	// which is what lets the faucet share an existing fee-juiced deployer.
+	const hexSecret = process.env.DEPLOYER_SECRET_KEY
+	const hexSalt = process.env.DEPLOYER_SALT
+	if (hexSecret && hexSalt) {
+		const secret = Fr.fromString(hexSecret)
+		const salt = Fr.fromString(hexSalt)
+		return { kind: "hex", secret, salt, signingKey: deriveSigningKey(secret) }
+	}
+	// Fallback: a free-form string that gets poseidon-hashed. Original
+	// upstream pattern; convenient for one-off testnet experiments.
+	const utf8 = process.env.DEPLOYER_SECRET
+	if (utf8 && utf8.trim().length >= 32) {
+		const secret = await poseidon2Hash([Fr.fromBufferReduce(Buffer.from(utf8, "utf8"))])
+		return { kind: "utf8", secret }
+	}
+	throw new Error(
+		"Provide either DEPLOYER_SECRET_KEY+DEPLOYER_SALT (hex Frs, reuses an existing account) " +
+			"or DEPLOYER_SECRET (≥32-char utf8 string, derives a fresh account).",
+	)
+}
+
 const isDirectInvocation = import.meta.url === `file://${process.argv[1]}`
 if (isDirectInvocation) {
 	run().catch((err: unknown) => {

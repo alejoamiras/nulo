@@ -4,6 +4,7 @@ import { useWalletConnection } from "@/composables/useWalletConnection"
 import { TESTIDS } from "@/lib/testids"
 import AddressDisplay from "./composite/AddressDisplay.vue"
 import AppButton from "./ui/AppButton.vue"
+import Spinner from "./ui/Spinner.vue"
 import VerificationModal from "./VerificationModal.vue"
 
 const {
@@ -37,12 +38,13 @@ const connectLabel = computed(() => {
 	}
 })
 
-const showConnectButton = computed(() => status.value !== "connected")
+const showConnectButton = computed(() => status.value !== "connected" && status.value !== "setting-up")
 const showCapabilityApproval = computed(
 	() => status.value === "capability-approval" || (status.value === "error" && error.value?.category === "capability-rejected"),
 )
 const showCapabilityError = computed(() => status.value === "error" && error.value?.category === "capability-rejected")
 const showNoWalletCta = computed(() => status.value === "error" && error.value?.category === "no-wallet")
+const showSettingUp = computed(() => status.value === "setting-up")
 
 async function onClick() {
 	if (status.value === "connected") {
@@ -71,6 +73,11 @@ function openInstall() {
 			>
 				Disconnect
 			</button>
+		</div>
+
+		<div v-else-if="showSettingUp" class="setting-up" :data-testid="TESTIDS.settingUp">
+			<Spinner :size="18" />
+			<span>Setting up your session…</span>
 		</div>
 
 		<div v-else-if="showCapabilityApproval" class="capability" :data-testid="TESTIDS.capabilityApproval">
@@ -169,6 +176,15 @@ function openInstall() {
 	gap: 12px;
 	align-items: flex-start;
 	max-width: 56ch;
+}
+
+.setting-up {
+	display: inline-flex;
+	align-items: center;
+	gap: 12px;
+	color: var(--txt-secondary);
+	font: 500 13px/1 var(--font-mono);
+	letter-spacing: 0.04em;
 }
 
 .capability h3,

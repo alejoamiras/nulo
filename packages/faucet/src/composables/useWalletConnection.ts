@@ -1,5 +1,3 @@
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { WalletManager } from "@aztec/wallet-sdk/manager"
 import type { PendingConnection, WalletProvider } from "@aztec/wallet-sdk/manager"
@@ -7,6 +5,7 @@ import { DripperContractArtifact } from "@defi-wonderland/aztec-standards/dist/s
 import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
 import { ref } from "vue"
 import { DRIPPER, ETH, rebuildDripperInstance, rebuildEthInstance, rebuildUsdcInstance, USDC } from "@/contracts/deployments"
+import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import { buildFaucetManifest } from "@/lib/capabilities"
 import { readChainInfo } from "@/lib/chain-info"
 import { hashToEmoji } from "@/lib/emoji"
@@ -14,7 +13,7 @@ import { type NormalizedError, normalizeError } from "@/lib/errors"
 
 const APP_ID = "nulo-faucet"
 
-export type ConnectStatus = "idle" | "discovering" | "verifying" | "capability-approval" | "connected" | "error"
+export type ConnectStatus = "idle" | "discovering" | "verifying" | "capability-approval" | "setting-up" | "connected" | "error"
 
 export interface GrantedAccount {
 	readonly address: string
@@ -27,7 +26,6 @@ const status = ref<ConnectStatus>("idle")
 const verificationEmojis = ref<string | null>(null)
 const accounts = ref<GrantedAccount[]>([])
 const selectedAccount = ref<string | null>(null)
-const accountDeployed = ref<boolean | null>(null)
 const error = ref<NormalizedError | null>(null)
 const wallet = ref<Wallet | null>(null)
 
@@ -42,7 +40,6 @@ export function useWalletConnection() {
 		verificationEmojis,
 		accounts,
 		selectedAccount,
-		accountDeployed,
 		error,
 		wallet,
 		connect,
@@ -109,6 +106,7 @@ async function confirmVerification(): Promise<void> {
 		status.value = "capability-approval"
 		await requestCapabilities()
 	} catch (err) {
+		console.error("[faucet] confirmVerification failed", err)
 		error.value = normalizeError(err)
 		status.value = "error"
 		cleanupSession()
@@ -155,14 +153,16 @@ async function disconnect(): Promise<void> {
 async function requestCapabilities(): Promise<void> {
 	if (!wallet.value) return
 	try {
+		const sponsoredFpc = await getSponsoredFpcInstance()
 		const manifest = buildFaucetManifest({
 			dripperAddress: DRIPPER,
 			usdcAddress: USDC,
 			ethAddress: ETH,
+			sponsoredFpcAddress: sponsoredFpc.address,
 		})
 		// SDK uses zod-inferred AppCapabilities; the manifest shape is
 		// structurally compatible but the public type is not exported in a
-		// usable form. Single typed-boundary cast — matches playground.
+		// usable form. Single typed-boundary cast.
 		// biome-ignore lint/suspicious/noExplicitAny: SDK manifest type is zod-inferred
 		const result = await wallet.value.requestCapabilities(manifest as any)
 		const granted = extractGrantedAccounts(result)
@@ -173,17 +173,16 @@ async function requestCapabilities(): Promise<void> {
 			throw new Error("No accounts granted by wallet")
 		}
 
+		// The user already clicked Approve — we're now doing post-approval
+		// setup (registering contracts with the wallet's PXE). This can
+		// take 2-4s, so transition to a dedicated state so the UI doesn't
+		// keep saying "Awaiting permissions".
+		status.value = "setting-up"
 		await registerFaucetContracts(wallet.value)
-
-		// Pre-flight: account contract on-chain? If missing, the banner is
-		// the polite alternative to a cryptic "Existing nullifier" error
-		// on first drip.
-		if (selectedAccount.value) {
-			accountDeployed.value = await probeAccountDeployed(selectedAccount.value)
-		}
 
 		status.value = "connected"
 	} catch (err) {
+		console.error("[faucet] requestCapabilities failed", err)
 		error.value = normalizeError(err)
 		status.value = "error"
 	}
@@ -194,18 +193,6 @@ async function registerFaucetContracts(w: Wallet): Promise<void> {
 	await w.registerContract(dripperInst, DripperContractArtifact)
 	await w.registerContract(usdcInst, TokenContractArtifact)
 	await w.registerContract(ethInst, TokenContractArtifact)
-}
-
-async function probeAccountDeployed(addressStr: string): Promise<boolean | null> {
-	const nodeUrl = import.meta.env.VITE_AZTEC_NODE_URL
-	if (!nodeUrl) return null
-	try {
-		const node = createAztecNodeClient(nodeUrl)
-		const contract = await node.getContract(AztecAddress.fromString(addressStr))
-		return contract !== null && contract !== undefined
-	} catch {
-		return null
-	}
 }
 
 interface GrantedAccountsCap {
@@ -242,7 +229,6 @@ function cleanupSession(): void {
 	wallet.value = null
 	accounts.value = []
 	selectedAccount.value = null
-	accountDeployed.value = null
 	verificationEmojis.value = null
 }
 

@@ -1,5 +1,6 @@
 import type { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Contract } from "@aztec/aztec.js/contracts"
+import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { DripperContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Dripper.js"
 import { reactive, ref } from "vue"
@@ -21,6 +22,13 @@ export interface DripResult {
 // side anyway; letting parallel drips queue creates confusing popup UX.
 const inflight = ref<{ tokenSymbol: TokenSymbol; target: DripTarget } | null>(null)
 const last = reactive<Record<string, DripResult | null>>({})
+
+interface DripperInteraction {
+	request: (opts?: { fee?: { paymentMethod: SponsoredFeePaymentMethod } }) => Promise<unknown>
+}
+interface DripperContract {
+	methods: Record<string, (...args: unknown[]) => DripperInteraction>
+}
 
 export function useFaucetDrip(wallet: Wallet, account: AztecAddress) {
 	return {
@@ -45,32 +53,25 @@ async function drip(
 	inflight.value = { tokenSymbol: token.symbol, target }
 	const key = `${token.symbol}:${target}`
 	try {
-		const dripperContract = await Contract.at(DRIPPER, DripperContractArtifact, wallet)
+		const dripperContract = (await Contract.at(DRIPPER, DripperContractArtifact, wallet)) as unknown as DripperContract
 		const fnName = target === "public" ? "drip_to_public" : "drip_to_private"
-		const methods = (
-			dripperContract as unknown as {
-				methods: Record<string, (...args: unknown[]) => { request: () => Promise<unknown> }>
-			}
-		).methods
-		const method = methods[fnName]
+		const method = dripperContract.methods[fnName]
 		if (typeof method !== "function") {
 			throw new Error(`Dripper missing method ${fnName}`)
 		}
-		const interaction = method(tokenAddress, token.onchainAmount)
-		const exec = await interaction.request()
-
 		const fpc = await getSponsoredFpcInstance()
-		// Explicit feePayer keeps the faucet wallet-agnostic — every
-		// wallet-sdk wallet sees an embedded sponsored-FPC fee and either
-		// honors it or fails bluntly. ExecutionPayload is a class with a
-		// constructor, so the spread loses the prototype chain; we cast
-		// at the boundary because the runtime accepts the plain object
-		// but the typed signature doesn't.
-		// biome-ignore lint/suspicious/noExplicitAny: ExecutionPayload class shape; runtime accepts plain object with feePayer
-		const execWithFee: any = { ...(exec as object), feePayer: fpc.address }
+		// Pass the fee through `.request({ fee })` so aztec.js merges the
+		// SponsoredFPC's `sponsor_unconditionally()` call into exec.calls
+		// AND sets exec.feePayer. Tagging feePayer manually leaves the
+		// public setup phase with no sponsor call, which the sequencer
+		// rejects as "Setup function not on allow list".
+		const interaction = method(tokenAddress, token.onchainAmount)
+		const exec = await interaction.request({
+			fee: { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) },
+		})
 
-		// biome-ignore lint/suspicious/noExplicitAny: SendOptions structural cast
-		const tx = await (wallet as any).sendTx(execWithFee, { from: account } as any)
+		// biome-ignore lint/suspicious/noExplicitAny: SendOptions structural cast for SDK signature variance across versions
+		const tx = await (wallet as any).sendTx(exec, { from: account } as any)
 		const txHash = extractTxHash(tx)
 		const result: DripResult = { kind: "txHash", value: txHash }
 		last[key] = result

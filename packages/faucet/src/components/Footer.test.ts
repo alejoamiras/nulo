@@ -7,6 +7,15 @@ vi.mock("@/contracts/deployments", () => ({
 	ETH: { toString: () => "0xeth" },
 }))
 
+// VITE_EXPLORER_BASE_URL may be set via .env.local on a dev's machine,
+// which would make the Footer render anchor tags for the contracts and
+// break the "no anchors when unset" assertion. Mock the explorer helper
+// to return "" so the test is hermetic regardless of env state.
+vi.mock("@/lib/explorer", () => ({
+	explorerTxUrl: () => "",
+	explorerAddressUrl: () => "",
+}))
+
 import Footer from "./Footer.vue"
 
 describe("Footer", () => {

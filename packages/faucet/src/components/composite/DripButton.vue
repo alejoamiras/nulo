@@ -1,14 +1,13 @@
 <script setup lang="ts">
-import type { DripState } from "@/composables/useFaucetDrip"
 import AppButton from "@/components/ui/AppButton.vue"
 
 const props = withDefaults(
 	defineProps<{
-		state?: DripState
 		label: string
+		loading?: boolean
 		disabled?: boolean
 	}>(),
-	{ state: "idle", disabled: false },
+	{ loading: false, disabled: false },
 )
 
 const emit = defineEmits<{ click: [] }>()
@@ -21,14 +20,11 @@ function onClick() {
 <template>
 	<AppButton
 		variant="outline"
-		:loading="state === 'dripping'"
+		:loading="loading"
 		:disabled="disabled"
-		:data-drip-state="state"
+		:data-loading="loading"
 		@click="onClick"
 	>
-		<span v-if="state === 'idle'">{{ label }}</span>
-		<span v-else-if="state === 'dripping'">Sending tx…</span>
-		<span v-else-if="state === 'ok'">Sent</span>
-		<span v-else>Failed — retry</span>
+		{{ label }}
 	</AppButton>
 </template>

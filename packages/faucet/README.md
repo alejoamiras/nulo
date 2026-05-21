@@ -126,9 +126,9 @@ maintainer's responsibility before merging deploy changes.
 
 Three composables (no Pinia):
 
-- `useWalletConnection` — discovery → emoji verify → capabilities → register contracts
-- `useFaucetDrip` — single global in-flight drip; explicit `feePayer = SPONSORED_FPC_ADDRESS`
-- `useTokenBalance` — polls `balance_of_public` + `balance_of_private` every 15s via `wallet.executeUtility(...)`
+- `useWalletConnection` — discovery → emoji verify → capability approval → `setting-up` (register contracts) → connected
+- `useFaucetDrip` — single global in-flight drip; `interaction.request({ fee: new SponsoredFeePaymentMethod(fpc.address) })` embeds the sponsor call so the public-setup-phase passes the allow-list
+- `useTokenBalance` — polls every 15s. `balance_of_public` (public view) via `interaction.simulate({from})` → `SimulationResult.result`; `balance_of_private` (utility) via `wallet.executeUtility(call, opts)` → `UtilityExecutionResult.result[0]`
 
 ## File layout
 

@@ -1,8 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-// Mock the SDK boundary so the composable can be exercised end-to-end
-// without a live wallet. We mock the Dripper contract proxy + the
-// SponsoredFPC address resolver.
+/*
+ * Mock the SDK boundary so the composable can be exercised end-to-end
+ * without a live wallet. The contract proxy's `.request({ fee })`
+ * receives the SponsoredFeePaymentMethod and returns an ExecutionPayload
+ * that already has feePayer + the sponsor call merged — that's what
+ * aztec.js does in real usage. We mimic the shape here.
+ *
+ * SponsoredFeePaymentMethod is also mocked so the test doesn't try to
+ * construct the real class (which needs Aztec internals).
+ */
 
 const mockDripperMethods = {
 	drip_to_public: vi.fn(),
@@ -12,6 +19,13 @@ const mockDripper = { methods: mockDripperMethods }
 
 vi.mock("@aztec/aztec.js/contracts", () => ({
 	Contract: { at: vi.fn(async () => mockDripper) },
+}))
+
+vi.mock("@aztec/aztec.js/fee", () => ({
+	SponsoredFeePaymentMethod: class {
+		readonly _kind = "sponsored"
+		constructor(public readonly address: { toString: () => string }) {}
+	},
 }))
 
 vi.mock("@defi-wonderland/aztec-standards/dist/src/artifacts/Dripper.js", () => ({
@@ -49,16 +63,29 @@ function makeWallet() {
 	}
 }
 
+/**
+ * Build an interaction whose `.request({ fee })` mimics aztec.js's
+ * actual behavior: merges the sponsor call + feePayer into the payload
+ * so the test can assert the dApp passes the merged exec to sendTx.
+ */
+function makeInteraction(target: "public" | "private") {
+	return {
+		request: vi.fn(async (opts?: { fee?: { paymentMethod: { address?: { toString: () => string } } } }) => {
+			const sponsorAddr = opts?.fee?.paymentMethod?.address
+			return {
+				calls: [{ target }, ...(sponsorAddr ? [{ kind: "sponsor_unconditionally", on: sponsorAddr.toString() }] : [])],
+				feePayer: sponsorAddr,
+			}
+		}),
+	}
+}
+
 beforeEach(() => {
 	__resetFaucetDripForTests()
 	mockDripperMethods.drip_to_public.mockReset()
 	mockDripperMethods.drip_to_private.mockReset()
-	mockDripperMethods.drip_to_public.mockImplementation(() => ({
-		request: async () => ({ calls: [{ target: "public" }] }),
-	}))
-	mockDripperMethods.drip_to_private.mockImplementation(() => ({
-		request: async () => ({ calls: [{ target: "private" }] }),
-	}))
+	mockDripperMethods.drip_to_public.mockImplementation(() => makeInteraction("public"))
+	mockDripperMethods.drip_to_private.mockImplementation(() => makeInteraction("private"))
 })
 
 afterEach(() => {
@@ -91,14 +118,32 @@ describe("useFaucetDrip", () => {
 		expect(mockDripperMethods.drip_to_public).toHaveBeenCalledWith(ETH_ADDR, 1_000_000_000_000_000_000n)
 	})
 
-	it("attaches the SponsoredFPC address as feePayer in the exec payload", async () => {
+	it("passes a SponsoredFeePaymentMethod to interaction.request({fee}) so the sponsor call is embedded", async () => {
+		const w = makeWallet()
+		// biome-ignore lint/suspicious/noExplicitAny: test stub
+		const drip = useFaucetDrip(w as any, ACCOUNT)
+		await drip.drip(USDC, USDC_ADDR, "public")
+		const interactionInstance = mockDripperMethods.drip_to_public.mock.results[0]?.value as ReturnType<typeof makeInteraction>
+		expect(interactionInstance.request).toHaveBeenCalledWith({
+			fee: { paymentMethod: expect.objectContaining({ _kind: "sponsored" }) },
+		})
+	})
+
+	it("sendTx receives the merged exec (sponsor call + feePayer) and the selected account", async () => {
 		const w = makeWallet()
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
 		const drip = useFaucetDrip(w as any, ACCOUNT)
 		await drip.drip(USDC, USDC_ADDR, "public")
 		expect(w.sendTx).toHaveBeenCalledTimes(1)
 		const [exec, opts] = w.sendTx.mock.calls[0]
-		expect((exec as { feePayer?: { toString: () => string } }).feePayer?.toString()).toBe("0xfpc")
+		const execObj = exec as {
+			feePayer?: { toString: () => string }
+			calls: Array<{ kind?: string; target?: string }>
+		}
+		expect(execObj.feePayer?.toString()).toBe("0xfpc")
+		// Both the dripper call and the sponsor_unconditionally call land in exec.calls.
+		expect(execObj.calls.some((c) => c.target === "public")).toBe(true)
+		expect(execObj.calls.some((c) => c.kind === "sponsor_unconditionally")).toBe(true)
 		expect((opts as { from: AztecAddress }).from).toBe(ACCOUNT)
 	})
 
@@ -160,7 +205,6 @@ describe("useFaucetDrip", () => {
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
 		const drip = useFaucetDrip(w as any, ACCOUNT)
 		const p1 = drip.drip(USDC, USDC_ADDR, "public")
-		// While the first is in flight, the second is gated.
 		await new Promise((r) => setTimeout(r, 0))
 		const second = await drip.drip(ETH, ETH_ADDR, "public")
 		expect(second.kind).toBe("error")

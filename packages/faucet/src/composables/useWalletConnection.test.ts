@@ -69,6 +69,11 @@ vi.mock("@defi-wonderland/aztec-standards/dist/src/artifacts/Dripper.js", () => 
 vi.mock("@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js", () => ({
 	TokenContractArtifact: { name: "Token" },
 }))
+vi.mock("@/contracts/sponsored-fpc", () => ({
+	getSponsoredFpcInstance: async () => ({
+		address: { toString: () => "0xfpc" },
+	}),
+}))
 
 import { extractGrantedAccounts, useWalletConnection, __resetWalletConnectionForTests } from "./useWalletConnection"
 
