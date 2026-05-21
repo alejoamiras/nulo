@@ -53,7 +53,7 @@
 // wires an unnecessary self-reference through the barrel.
 import type { EncodedCallAction } from "./action"
 import { formatCaipAccount, formatCaipChain, parseCaipAccount, resolveNetworkByChainId } from "./caip"
-import type { Capability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
+import type { AccountsCapability, Capability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
 import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
 import type { AztecSendTxRequest, CapabilityResult, ExecutionResult } from "./dapp-interaction-protocol"
 import type {
@@ -73,7 +73,7 @@ import { enforceScope } from "./scope-enforcement"
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { OriginType, type LocalTxOrigin } from "./transaction-origin"
 import type { SessionContext } from "./types"
-import { JobCancelledError } from "@nulo/extension-messaging/errors"
+import { CapabilityNotGrantedError, JobCancelledError } from "@nulo/extension-messaging/errors"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import type { IAccountReader, IDappInteractionRunner, IDappSessionWriter, IExecutionRunner, INetworkReader } from "./services-contract"
@@ -107,6 +107,16 @@ export function unwrapOperationResult(result: OperationResult): unknown {
  *  internals. */
 function isNoFromRequest(from: unknown): boolean {
 	return from === "NO_FROM"
+}
+
+/** Compare two `accounts` capability shapes by the fields that affect
+ *  authority. `canGet` and `canCreateAuthWit` are coerced via `Boolean(...)`
+ *  so `undefined` is treated as `false` (matches the default semantics in
+ *  scope-enforcement: missing flag = no permission). The `accounts` array
+ *  field is dispatcher-emitted, not dApp-controlled, and is excluded from
+ *  the comparison. */
+function accountsCapsEqual(a: AccountsCapability, b: AccountsCapability): boolean {
+	return Boolean(a.canGet) === Boolean(b.canGet) && Boolean(a.canCreateAuthWit) === Boolean(b.canCreateAuthWit)
 }
 
 /**
@@ -247,8 +257,16 @@ export class WalletSdkDispatcher {
 	 * Scoped to session accounts only and uses per-app aliases.
 	 * WalletSchema expects: Array<{ alias: string, item: AztecAddress }>
 	 *
-	 * If the session has no accounts, returns empty array — the dApp should
-	 * call requestCapabilities() with an `accounts` type first.
+	 * Contract rows (see plan-v3 §3):
+	 *  - Session not found → throws plain "No dApp session found" Error (unchanged
+	 *    so dApps relying on the session-expired diagnostic see it intact).
+	 *  - Session has ≥1 account → fast path, returns them.
+	 *  - Session has 0 accounts + accounts grant exists (desync) → returns [] + warn
+	 *    so the engineer sees the bad write but the dApp doesn't loop.
+	 *  - Session has 0 accounts + NO grant → throws `CapabilityNotGrantedError`
+	 *    (EIP-1193 4100). The dApp's existing `try { getAccounts } catch { requestCapabilities }`
+	 *    fallback catches it and sends the full manifest. See wallet-bridge README
+	 *    for the dApp-side parse recipe.
 	 */
 	private async handleGetAccounts(ctx: SessionContext): Promise<unknown> {
 		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
@@ -256,12 +274,38 @@ export class WalletSdkDispatcher {
 			throw new Error(`No dApp session found for origin ${ctx.origin}`)
 		}
 
-		// No accounts yet — dApp should call requestCapabilities with accounts type first
-		if (!dappSession.accounts || dappSession.accounts.length === 0) {
+		// Fast path.
+		if (dappSession.accounts && dappSession.accounts.length > 0) {
+			return this.formatSessionAccounts(dappSession, ctx)
+		}
+
+		// Defensive: grant exists but accounts list is empty. Don't throw 4100
+		// (the dApp may interpret that as "needs requestCapabilities" and loop);
+		// return [] and warn so an engineer notices the bad write.
+		const grants = dappSession.capabilityGrants ?? []
+		const hasAccountsGrant = grants.some((g) => g.capability.type === "accounts")
+		if (hasAccountsGrant) {
+			this.logger.log("wallet-sdk", LogLevel.Warn, `Desync: accounts grant exists but session.accounts is empty for ${ctx.origin}`)
 			return []
 		}
 
-		// Return session-scoped accounts with per-app aliases
+		// Pre-grant: throw structured 4100 so the dApp's fallback fires. Log level
+		// is Debug because a misbehaving dApp may re-fire getAccounts() per render.
+		this.logger.log(
+			"wallet-sdk",
+			LogLevel.Debug,
+			`getAccounts pre-grant from ${ctx.origin} — throwing CAPABILITY_NOT_GRANTED to nudge requestCapabilities()`,
+		)
+		throw new CapabilityNotGrantedError("accounts")
+	}
+
+	/**
+	 * Project a session's account list into the `Array<{ alias, item }>` shape
+	 * WalletSchema expects. Extracted so the fast path in `handleGetAccounts`
+	 * and the granted-accounts emission in `enrichGrantedCapabilities` use the
+	 * same projection — format parity is pinned by the dispatcher unit tests.
+	 */
+	private async formatSessionAccounts(dappSession: IDappSessionRef, ctx: SessionContext): Promise<unknown> {
 		const network = await this.resolveNetwork(ctx)
 		const allAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
 		const sessionAccountAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
@@ -376,10 +420,22 @@ export class WalletSdkDispatcher {
 		const grantedTypes = new Set(existingGrants.map((g) => g.capability.type))
 		const rejectedTypes = new Set(existingRejections.map((r) => r.capabilityType))
 
-		// Delta: capabilities not yet granted OR previously rejected (re-request)
-		const delta = requestedCapabilities.filter(
-			(cap) => !grantedTypes.has(cap.type as Capability["type"]) || rejectedTypes.has(cap.type as string),
-		)
+		// Delta: capabilities not yet granted OR previously rejected (re-request).
+		//
+		// For `accounts` specifically, compare full shape — `canGet` /
+		// `canCreateAuthWit` — not just type. Without this, a dApp granted
+		// `{canGet:true, canCreateAuthWit:false}` could later request
+		// `{canCreateAuthWit:true}` and the type-only filter would return empty,
+		// silently authorising the upgrade. The breadth fix for other cap types
+		// is filed as `wallet-sdk-capability-field-diff`.
+		const delta = requestedCapabilities.filter((cap) => {
+			if (rejectedTypes.has(cap.type as string)) return true
+			if (cap.type === "accounts") {
+				const existing = existingGrants.find((g) => g.capability.type === "accounts")
+				return !existing || !accountsCapsEqual(existing.capability as AccountsCapability, cap as unknown as AccountsCapability)
+			}
+			return !grantedTypes.has(cap.type as Capability["type"])
+		})
 		// Track which delta items are re-requests (previously rejected)
 		const reRequested = requestedCapabilities.filter((cap) => rejectedTypes.has(cap.type as string)).map((cap) => cap.type as string)
 
@@ -534,8 +590,19 @@ export class WalletSdkDispatcher {
 				const sessionAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
 				const sessionAccounts = allAccounts.filter((acc) => sessionAddresses.has(acc.address))
 
+				// Read canGet / canCreateAuthWit from the STORED grant, not the
+				// requested cap. The wire response must reflect what was actually
+				// granted — otherwise a dApp that requested `canCreateAuthWit:true`
+				// would see `true` in the response even when storage has `false`,
+				// then scope-enforcement would later refuse the createAuthWit call.
+				const storedAccounts = grantedCaps.find((g) => (g as Record<string, unknown>).type === "accounts") as
+					| AccountsCapability
+					| undefined
+
 				result.push({
 					...cap,
+					canGet: storedAccounts?.canGet ?? false,
+					canCreateAuthWit: storedAccounts?.canCreateAuthWit ?? false,
 					accounts: sessionAccounts.map((acc) => {
 						const caip = formatCaipAccount(ctx.chainId, acc.address)
 						const alias = dappSession.accountAliases?.[caip] ?? acc.name ?? ""

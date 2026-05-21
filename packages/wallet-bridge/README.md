@@ -118,6 +118,60 @@ For other failures (network errors, simulation failures, etc.), the dApp
 receives `err.message` as a plain non-JSON string. The recipe's
 `try { info = JSON.parse(...) } catch { ... }` falls through gracefully.
 
+## getAccounts before requestCapabilities
+
+`wallet.getAccounts()` throws `CapabilityNotGrantedError` (code `4100`,
+EIP-1193 "Unauthorized") when called on a session that has not yet been
+granted the `accounts` capability. dApps should call `requestCapabilities()`
+first; if they don't, the throw triggers their existing fallback path:
+
+```ts
+try {
+  const accounts = await wallet.getAccounts()
+} catch (err) {
+  // Fallback works for ANY throw — bare-catch is fine (e.g. Nethermind faucet).
+  // Code-aware discrimination (optional):
+  const msg = err instanceof Error ? err.message : String(err)
+  try {
+    const parsed = JSON.parse(msg)
+    if (parsed.code === 4100 && parsed.data?.walletErrorCode === "CAPABILITY_NOT_GRANTED") {
+      // The wallet is telling us to request capabilities first.
+    }
+  } catch {
+    /* not a structured error — bare-catch fallback handles it */
+  }
+
+  // Always send the full manifest: one popup grants accounts + simulation
+  // + transaction + etc. The dApp can do everything afterwards.
+  const granted = await wallet.requestCapabilities(myFullManifest)
+}
+```
+
+The structured envelope (pre-SDK-collapse):
+
+```jsonc
+{
+  "code": 4100,
+  "message": "accounts capability not granted. Call requestCapabilities() first.",
+  "data": {
+    "walletErrorCode": "CAPABILITY_NOT_GRANTED",
+    "capabilityType": "accounts"
+  }
+}
+```
+
+The `data.walletErrorCode` discriminator distinguishes this 4100 from any
+other "unauthorized" surface the wallet might add later. The error message is
+a public contract — it must stay byte-for-byte stable across versions because
+some dApps will substring-match on it.
+
+Note: today the wallet only ever throws this for the `accounts` capability
+(from `dispatcher.handleGetAccounts`). Other capability-gated methods reject
+with the existing scope-enforcement error format. Widening the
+`CapabilityNotGrantedError` surface to other methods is a separate, deferred
+follow-up — it would change the error-string contract for those methods, so
+it needs its own audit cycle before any rollout.
+
 ## Scripts
 
 | Command | Effect |
