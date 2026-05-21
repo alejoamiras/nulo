@@ -23,10 +23,10 @@ on:
         type: boolean
         default: false
       run_network_e2e:
-        description: "Run network e2e gate (~30-45 min). Disable only for emergency re-publish."
+        description: "Run network e2e gate (~30-45 min). Off by default on workflow_dispatch; opt in for paranoid republishes. Stable push:main always runs it (this input is only consulted on workflow_dispatch)."
         required: false
         type: boolean
-        default: true
+        default: false
       publish_marketplaces:
         description: "Enable Chrome Web Store + Firefox AMO publishing (stubs until secrets are wired)."
         required: false
@@ -148,11 +148,19 @@ jobs:
 
   network-e2e:
     needs: resolve
+    # Network-e2e firing rules:
+    # - Stable push to main (auto-release): runs by default. The is_prerelease
+    #   guard never trips here since stable tags never carry a `-` suffix.
+    # - workflow_dispatch (any tag, stable or prerelease): runs only when
+    #   `run_network_e2e=true` is explicitly passed. Default is false so
+    #   prerelease republishes don't burn 30-45 min unless asked.
     if: |
       always() &&
       needs.resolve.result == 'success' &&
-      needs.resolve.outputs.is_prerelease == 'false' &&
-      (github.event_name == 'push' || github.event.inputs.run_network_e2e == 'true')
+      (
+        (needs.resolve.outputs.is_prerelease == 'false' && github.event_name == 'push') ||
+        github.event.inputs.run_network_e2e == 'true'
+      )
     uses: ./.github/workflows/_network-e2e.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
