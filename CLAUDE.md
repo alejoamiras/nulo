@@ -377,7 +377,7 @@ Per-rc procedure. Same v4 bug as stable; same ~45 second unstick. Network-e2e is
    No auto-fire on push:dev — rc cuts are explicit decisions. Within ~30 sec, release-please opens a Prerelease PR titled `chore(dev): release X.Y.Z-rc[.N]`.
    - First rc of a new minor: `v0.21.0-rc` (no number suffix).
    - Second cut, same minor: `v0.21.0-rc.1`. Third: `v0.21.0-rc.2`. Counter auto-increments per release-please's prerelease versioning strategy.
-3. **Review + merge the Prerelease PR via the UI** (merge commit, per `dev`'s ruleset).
+3. **Review + merge the Prerelease PR via the UI** (squash, per `dev`'s ruleset).
 4. **Expected: same v4 abort.** `release-prerelease.yml` doesn't have a downstream publish chain at all — the unstick + publish steps live below.
 5. **Manual unstick** (~45 seconds — paste into terminal, mind the `--prerelease` flag):
    ```bash
