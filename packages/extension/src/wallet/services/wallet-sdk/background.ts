@@ -26,6 +26,7 @@
 import { BackgroundConnectionHandler, type PendingDiscovery, type ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
 import type { WalletMessage, WalletResponse } from "@aztec/wallet-sdk/types"
 import { validateContentScriptMessage } from "./content-script-validator"
+import { toWalletResponseError } from "./error-envelope"
 
 import type { ServiceCollection } from "@/wallet/base"
 import { NetworkService } from "@/wallet/services/network/service"
@@ -36,7 +37,6 @@ import { DappInteractionService } from "@/wallet/services/dapp-interaction/servi
 import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
 import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/service"
 import { DiscoveryQueue, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
-import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { jsonStringify } from "@nulo/wallet-core/utils"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@/wallet/logger"
@@ -396,7 +396,7 @@ async function handleDiscovery(
 			const newSession = await dappSessionService.addDappSession(
 				params.dappMetadata,
 				[{ methods: [] }],
-				[], // empty accounts — will be populated via getAccounts()
+				[], // empty accounts — populated via requestCapabilities() (or the dApp falls back when getAccounts() throws CAPABILITY_NOT_GRANTED)
 				AccessLevel.Transactions,
 				chainId,
 			)
@@ -458,21 +458,15 @@ async function handleWalletMessage(
 		const raw = await dispatcher.dispatch(message.type, message.args, ctx)
 		response.result = toJsonSafe(raw)
 	} catch (error) {
-		if (error instanceof JobCancelledError) {
-			// Structured EIP-1193-aligned cancel envelope. Upstream
-			// `@aztec/wallet-sdk` collapses this to `new Error(JSON.stringify(error))`
-			// at `extension_wallet.ts:181`, so the dApp receives a plain Error
-			// whose `.message` is the JSON payload. Documented recipe in the
-			// wallet-bridge README. `data.walletErrorCode` discriminates this
-			// from `UserRejectedError` (pre-approval reject) for telemetry.
-			response.error = {
-				code: 4001,
-				message: error.message,
-				data: { walletErrorCode: JobCancelledError.CODE, jobId: (error.details as { jobId?: string } | undefined)?.jobId },
-			}
-		} else {
-			response.error = error instanceof Error ? error.message : String(error)
-		}
+		// Structured EIP-1193-aligned envelope for recognised WalletError subclasses
+		// (JobCancelledError → 4001, CapabilityNotGrantedError → 4100). Upstream
+		// `@aztec/wallet-sdk` collapses `response.error` to
+		// `new Error(JSON.stringify(error))` at `extension_wallet.ts:181`, so dApps
+		// that want to discriminate parse the message — see the wallet-bridge
+		// README for the recipe. Mapping lives in `error-envelope.ts` so it can be
+		// unit-tested in isolation; everything not recognised collapses to a
+		// string, preserving the original wire contract.
+		response.error = toWalletResponseError(error)
 		// `response.error` may be an object now — stringify for the log line so
 		// logs don't read "[object Object]".
 		const logMsg = typeof response.error === "string" ? response.error : jsonStringify(response.error)

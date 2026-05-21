@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Wallet account-sharing fix — plain-language companion (v3)</title>
+<style>
+  :root {
+    --bg: #fafaf7;
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --rule: #d8d6cf;
+    --accent: #b8530b;
+    --warn: #8a3a08;
+    --good: #2c6e49;
+    --card: #ffffff;
+    --code-bg: #f0eee7;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.55;
+  }
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 64px 32px 96px;
+  }
+  h1 {
+    font-size: 32px;
+    line-height: 1.15;
+    margin: 0 0 8px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  h2 {
+    font-size: 22px;
+    line-height: 1.25;
+    margin: 56px 0 12px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    padding-top: 12px;
+    border-top: 1px solid var(--rule);
+  }
+  h3 {
+    font-size: 17px;
+    margin: 28px 0 8px;
+    font-weight: 600;
+  }
+  h4 {
+    font-size: 15px;
+    margin: 16px 0 4px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  p { margin: 12px 0; }
+  ul, ol { padding-left: 22px; margin: 12px 0; }
+  li { margin: 6px 0; }
+  .subtitle {
+    color: var(--muted);
+    font-size: 15px;
+    margin: 0 0 32px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    padding: 20px 24px;
+    margin: 16px 0;
+  }
+  .card-accent {
+    border-left: 4px solid var(--accent);
+    background: #fff8f0;
+  }
+  .card-warn {
+    border-left: 4px solid var(--warn);
+    background: #fff4ec;
+  }
+  .card-good {
+    border-left: 4px solid var(--good);
+    background: #f1f7f3;
+  }
+  .card-q {
+    border-left: 4px solid #4a6fa5;
+    background: #f0f4fa;
+  }
+  .card-pivot {
+    border-left: 4px solid #6b4ea5;
+    background: #f4f0fa;
+  }
+  .small { font-size: 14px; color: var(--muted); }
+  .tag {
+    display: inline-block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 2px 8px;
+    background: var(--code-bg);
+    color: var(--muted);
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .tag-critical { background: #ffe2d4; color: var(--warn); }
+  .tag-high { background: #fff0d4; color: #8a5a08; }
+  .tag-new { background: #d4ecdc; color: var(--good); }
+  .tag-pivot { background: #e0d4ec; color: #5a3a85; }
+  code, pre {
+    font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+    font-size: 13px;
+  }
+  code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+  }
+  pre {
+    background: var(--code-bg);
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 12px 0;
+    line-height: 1.45;
+  }
+  pre code {
+    background: none;
+    padding: 0;
+  }
+  .quote {
+    font-style: italic;
+    color: var(--muted);
+    border-left: 3px solid var(--rule);
+    padding: 4px 16px;
+    margin: 14px 0;
+  }
+  .diagram {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    padding: 18px 20px;
+    margin: 16px 0;
+    font-family: "JetBrains Mono", "SF Mono", Menlo, monospace;
+    font-size: 13px;
+    line-height: 1.4;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .questions ol {
+    counter-reset: q;
+    list-style: none;
+    padding-left: 0;
+  }
+  .questions ol li {
+    counter-increment: q;
+    margin: 18px 0;
+    padding-left: 36px;
+    position: relative;
+  }
+  .questions ol li::before {
+    content: counter(q);
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 26px;
+    height: 26px;
+    background: var(--accent);
+    color: white;
+    text-align: center;
+    line-height: 26px;
+    font-weight: 600;
+    font-size: 14px;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid var(--rule);
+    margin: 48px 0;
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>What broke, what we're fixing, and why we changed direction</h1>
+<p class="subtitle">Plain-language companion for the <code>wallet-sdk-implicit-account-grant</code> plan. <strong>This is the v3 version</strong> — we pivoted after the v2 approval gate based on your insight. Read the full plan in <code>plan-v3.md</code> for engineering specifics.</p>
+
+<div class="card card-pivot">
+<h3><span class="tag tag-pivot">PIVOT</span> Why this is v3 and not v2</h3>
+<p>v1 (silent return) was rejected by the audits. v2 (open an account-selection popup automatically) was approved by all audits and patched 3 times. <strong>At the approval gate you noticed that v2 only fixes the first symptom</strong>: Nethermind's faucet gets past account selection, but the very next click ("Claim Fee Juice") still fails because we never grant the <em>transaction</em> permission. v2 just moves the failure one click deeper.</p>
+<p>v3 throws a clear, structured error instead. This forces Nethermind's existing fallback code to fire, which sends our wallet the <strong>full</strong> permission manifest (accounts + contracts + simulation + transaction). One popup grants everything the faucet needs. End-to-end fix, smaller PR, aligned with the wallet-sdk spec.</p>
+</div>
+
+<h2>The one-paragraph version</h2>
+<div class="card card-accent">
+<p>Two well-known Aztec websites — <strong>Nethermind's Fee Juice faucet</strong> and <strong>Wonderland's Token Dripper</strong> — break when users try to connect their Nulo wallet. They use a shortcut (<code>getAccounts()</code>) that our wallet currently answers with silence (an empty list). They display that as "you have no accounts" and stop. <strong>v3 fix:</strong> our wallet now throws a clear structured error (EIP-1193 code 4100, "Unauthorized") when this shortcut is taken without permission. Both sites have fallback code that catches the error and calls the correct permission flow — which triggers a single popup where the user grants everything the site needs. Smaller PR than v2, fixes the entire flow end-to-end, and aligns with what the Aztec wallet-sdk spec already recommends.</p>
+</div>
+
+<h2>Why this matters to the user</h2>
+<p>Right now, anyone trying to use Nulo with these two sites hits a dead end at first connection. They've installed the wallet, gone through onboarding, set up an account — and the very first dApp they try doesn't work. That's the kind of bug that breaks trust quickly.</p>
+<p>The v3 fix is also a quiet endorsement of the right pattern. By throwing a clear error instead of silently smoothing over the issue, we nudge dApp authors toward the spec-compliant flow. Other wallets aligned with the spec already do this; we're catching up.</p>
+
+<h2>How a wallet connection works (the 60-second version)</h2>
+
+<div class="diagram">  ┌─────────┐                                         ┌────────────┐
+  │ Website │                                         │  Wallet    │
+  │ (dApp)  │                                         │ (Nulo)     │
+  └────┬────┘                                         └─────┬──────┘
+       │  1. "Hi, any wallets out there?"                   │
+       ├───────────────────────────────────────────────────►│
+       │                                                    │
+       │  2. "I'm Nulo. Open a secure channel?"             │
+       │◄───────────────────────────────────────────────────┤
+       │                                                    │
+       │  3. [emoji match — proves no one is intercepting]  │
+       │                                                    │
+       │  4. ┌─ try { getAccounts() } ◄── the shortcut      │
+       │     │                                              │
+       │     │  v3 fix: throws CAPABILITY_NOT_GRANTED       │
+       │     │                                              │
+       │     └─ catch { requestCapabilities(fullManifest) } │
+       │        ◄── the canonical flow                      │
+       │                                                    │
+       │  5. (popup: pick accounts AND grant ALL the perms  │
+       │     the dApp needs in ONE dialog)                  │
+       │                                                    │
+       │  6. dApp can now do everything: claim, transfer…   │</div>
+
+<h2>The fix in one sentence</h2>
+
+<div class="card card-good">
+<p>When a site takes the shortcut, our wallet throws a clear structured error that tells it "call requestCapabilities first" — both sites already have fallback code that catches this and does the right thing. <strong>One popup. Full permission grant. End-to-end fix.</strong></p>
+</div>
+
+<h2>The phases, in plain language</h2>
+
+<div class="card">
+<h3><span class="tag">Phase 1</span> Throw a structured error</h3>
+<p><strong>What:</strong> when a site calls <code>getAccounts()</code> before getting accounts permission, we throw a structured <code>CapabilityNotGrantedError</code>. This maps to EIP-1193 code 4100 ("Unauthorized") on the wire — the standard Web3 error code for "you need to ask for permission first."</p>
+<p><strong>Why this works:</strong> Nethermind's faucet code (and almost certainly Wonderland's) has a <code>try/catch</code> around <code>getAccounts()</code> that calls <code>requestCapabilities()</code> on any error. Today our silent empty array means the catch never fires. With v3, the throw triggers the catch → full manifest sent → one popup grants everything the dApp needs.</p>
+<p><strong>Smaller than v2:</strong> no new types, no time-based rejection memory, no popup hollow-state work, no inflight dedupe. Just a throw + the error class.</p>
+</div>
+
+<div class="card card-warn">
+<h3><span class="tag tag-critical">Phase 1.5 — CRITICAL</span> Fix a quiet security bug we found</h3>
+<p><strong>What:</strong> our wallet has a pre-existing flaw where, once a site has been granted basic account access, it can later upgrade to "sign things on the user's behalf" without showing a new popup. The wallet was checking "do you already have an accounts permission?" with a yes/no flag instead of comparing the actual permission shape.</p>
+<p><strong>Why it matters:</strong> this bug exists regardless of v2 vs v3. Both auditors flagged it as ship-blocking. The fix compares permission shapes properly so any upgrade triggers a fresh popup.</p>
+<p><strong>Honest caveat:</strong> we only fix the <code>accounts</code> permission shape in this PR. The same kind of flaw exists for other permission types (contracts, simulation, transactions) — filed as a follow-up plan with its own audit cycle, since the fix is more delicate for those.</p>
+</div>
+
+<div class="card">
+<h3><span class="tag">Phase 1.4</span> Extract a testable helper</h3>
+<p><strong>What:</strong> the bit of code that converts our internal errors into the standard wire format gets pulled into its own file so we can write unit tests for it.</p>
+<p><strong>Why:</strong> both auditors caught that my v3 plan tried to test this code where it's inlined inside a larger function — hard to mock, harder to assert. Extracting it into a pure helper means tests can just construct error objects and check the output shape.</p>
+</div>
+
+<div class="card">
+<h3><span class="tag">Phase 2</span> Tests</h3>
+<p><strong>What:</strong> 11 changes total — 1 in the error-class tests, 6 in the dispatcher tests, 3 in the new extracted-helper tests, 1 updated end-to-end test. Each pins one specific behavior of the new contract.</p>
+<p><strong>Important:</strong> one existing end-to-end test today actively asserts the BROKEN behavior ("the wallet returns an empty array silently"). We flip it to assert the new throw — using a flexible match because the wallet-sdk wraps our structured error inside a plain Error containing JSON, so the dApp doesn't see the code directly; it has to parse the message. The test accepts either format.</p>
+<p><strong>What we explicitly test:</strong></p>
+<ul>
+  <li>The throw fires for pre-grant <code>getAccounts</code> with the right code and message</li>
+  <li>The fast path (post-grant <code>getAccounts</code>) is unchanged</li>
+  <li>Session-not-found still throws its old error (refactor protection)</li>
+  <li>Phase 1.5 security fix (no silent upgrade)</li>
+  <li>Phase 1.5 same-shape re-request doesn't over-trigger (no useless re-popup)</li>
+  <li>The error round-trips correctly through the wallet-sdk's JSON wrapper (the contract our README will document)</li>
+</ul>
+</div>
+
+<div class="card">
+<h3><span class="tag">Phase 3</span> Verification matrix after deploy</h3>
+<p>Side-load the extension, connect both sites, verify:</p>
+<ul>
+  <li>Nethermind: ONE permission popup → approve → "Claim" works end-to-end</li>
+  <li>Wonderland (if their code has the same fallback pattern as Nethermind): same flow works</li>
+  <li>Wonderland (if not): page shows the new error string — we file an issue with their team</li>
+  <li>Returning visit: session is sticky, no popup needed</li>
+  <li>Existing CI tests still pass under the new contract</li>
+</ul>
+</div>
+
+<div class="card">
+<h3><span class="tag">Phase 4</span> File issues with dApp teams</h3>
+<p>After the fix ships, file GitHub issues against Nethermind's open-source faucet and Wonderland's team pointing at the wallet-sdk spec recommendation. Suggest they invert their try/catch: call <code>requestCapabilities()</code> first, fall back to <code>getAccounts()</code> only for wallets that don't implement it. This is what the spec recommends and what other wallets enforce.</p>
+</div>
+
+<h2>What the audits caught</h2>
+<p>Three independent audit rounds:</p>
+
+<div class="card">
+<h4>Round 1: codex + opus on v1 (silent return)</h4>
+<p>Both said ship-with-changes. Caught the lazy-grant idea + the field-blind security bug. Consolidated into v2.</p>
+</div>
+
+<div class="card">
+<h4>Round 2: codex on v2 (final review)</h4>
+<p>Ship-with-changes. Caught 3 small blockers (wrong CTA route, missing type extension, missing dispatcher guard). Patched into v2.1.</p>
+</div>
+
+<div class="card card-pivot">
+<h4>Pivot: you redirected to v3 at the approval gate</h4>
+<p>You noticed v2 only fixes one click. Re-planned as v3 (throw structured error).</p>
+</div>
+
+<div class="card">
+<h4>Round 3: codex + opus on v3 (this round)</h4>
+<p>Both ship-with-changes. Convergent finding: I had the wrong file path for the error-mapping code (it's in <code>background.ts</code>, not <code>dispatcher.ts</code>). Opus added the sharp insight that the wallet-sdk wraps our error in JSON, so dApps don't see the code directly — needs documentation. All findings patched into v3.1.</p>
+</div>
+
+<div class="card">
+<h4>Round 4: codex final pass on v3.1 (running now)</h4>
+<p>One more confirmation pass before approval.</p>
+</div>
+
+<h2 class="questions">Open decisions — where your call matters</h2>
+<p>Most of the original questions are now resolved. What's left:</p>
+
+<div class="questions">
+<ol>
+
+<li>
+  <div class="card card-q">
+    <h4>The error message text</h4>
+    <p>The wallet throws <em>"accounts capability not granted. Call requestCapabilities() first."</em> Lower-case, terse — matches our brutalist style. The literal function name <code>requestCapabilities()</code> is in normal case because it's a function reference. This text is for <strong>dApp developers</strong>, not end users — it appears in dApp consoles. <strong>Does the wording feel right?</strong> Once we ship it, dApp authors will substring-match on it, so changing it later is hard.</p>
+  </div>
+</li>
+
+<li>
+  <div class="card card-q">
+    <h4>Wonderland response if they don't have a fallback</h4>
+    <p>Nethermind's open-source code definitely has a fallback that catches our throw. Wonderland is closed-source so we don't know. If they don't have one, their UI will show our error string instead of "no accounts" — the new error message at least tells their team what to fix. <strong>Want me to draft the GitHub issue text we'd send to Wonderland post-merge?</strong></p>
+  </div>
+</li>
+
+<li>
+  <div class="card card-q">
+    <h4>Three follow-up plans we're filing (not implementing in this PR)</h4>
+    <ol>
+      <li><code>wallet-sdk-capability-field-diff</code> — broaden Phase 1.5's field-aware security fix to all permission types (contracts, simulation, etc). Needs its own audit cycle.</li>
+      <li><code>wallet-sdk-requestcapabilities-rate-limit</code> — add per-origin rate limit on permission popups. Pre-existing concern, not amplified by v3.</li>
+      <li><code>wallet-sdk-error-envelope-typed-codes</code> — explore making the wallet-sdk surface our structured error codes natively without requiring dApps to <code>JSON.parse(err.message)</code>. Low priority, ecosystem-level.</li>
+    </ol>
+    <p>All three are documented in plan-v3.md §9. <strong>Want any of them moved into this PR's scope?</strong> Recommendation: no — keep this PR tight.</p>
+  </div>
+</li>
+
+</ol>
+</div>
+
+<h2>What's NOT in scope</h2>
+<ul>
+  <li><strong>Network end-to-end tests against the real Aztec testnet.</strong> You declined this earlier — we'll cover with unit + smoke E2E only.</li>
+  <li><strong>Filing an upstream PR to the Aztec wallet-sdk spec.</strong> The spec ambiguity isn't blocking this fix; worth raising eventually.</li>
+  <li><strong>The three follow-up plans above</strong> — filed but not implemented here.</li>
+</ul>
+
+<hr>
+
+<p class="small">Generated alongside <code>plan-v3.md</code> (now at v3.1 after codex + opus audits). If you spot anything in the plain-language version that doesn't match the technical plan, the technical plan is the source of truth.</p>
+
+</main>
+</body>
+</html>

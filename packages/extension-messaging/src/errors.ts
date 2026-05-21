@@ -112,6 +112,34 @@ export class JobCancelledError extends WalletError {
 	}
 }
 
+/**
+ * Raised when a dApp invokes a wallet method that requires a capability it has
+ * not yet been granted. Today the dispatcher throws this from
+ * `handleGetAccounts` when no `accounts` grant exists, so that dApps which call
+ * `getAccounts()` before `requestCapabilities()` fall into their existing
+ * fallback path instead of silently receiving `[]`.
+ *
+ * Maps to EIP-1193 code 4100 ("Unauthorized — the requested method and/or
+ * account has not been authorized by the user") when surfaced to dApps. The
+ * wallet-sdk background handler writes a structured `response.error` with
+ * `data.walletErrorCode = "CAPABILITY_NOT_GRANTED"` and `data.capabilityType`
+ * so dApps that JSON.parse the wrapped error message can discriminate.
+ *
+ * Message text is a public contract — substring-matching dApps lock it in.
+ * Keep the literal stable across versions; never interpolate user input
+ * (origin, session, address) because the wallet-sdk wraps the envelope in
+ * `new Error(JSON.stringify(error))` and unescaped input would break the JSON.
+ */
+export class CapabilityNotGrantedError extends WalletError {
+	public static readonly CODE = "CAPABILITY_NOT_GRANTED"
+
+	public constructor(capabilityType: string, message = `${capabilityType} capability not granted. Call requestCapabilities() first.`) {
+		super(CapabilityNotGrantedError.CODE, message, { capabilityType })
+		this.name = "CapabilityNotGrantedError"
+		Object.setPrototypeOf(this, CapabilityNotGrantedError.prototype)
+	}
+}
+
 /** Request payload failed validation at the RPC boundary. */
 export class ValidationError extends WalletError {
 	public static readonly CODE = "VALIDATION"
@@ -177,6 +205,13 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new UserRejectedError(payload.message, payload.details)
 		case JobCancelledError.CODE:
 			return new JobCancelledError(payload.message, payload.details as { jobId?: string } | undefined)
+		case CapabilityNotGrantedError.CODE: {
+			// Reconstruct preserves both the capabilityType discriminator and the
+			// stable message wording so the popup-side / dApp-side instanceof check
+			// and substring-match contracts both survive the JSON boundary.
+			const ct = (payload.details as { capabilityType?: string } | undefined)?.capabilityType ?? "unknown"
+			return new CapabilityNotGrantedError(ct, payload.message)
+		}
 		case ValidationError.CODE:
 			return new ValidationError(payload.message, payload.details)
 		case InvalidPasswordError.CODE:
