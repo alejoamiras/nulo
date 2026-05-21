@@ -68,6 +68,10 @@ jobs:
         with:
           config-file: .github/release-please-config.json
           manifest-file: .release-please-manifest.json
+          # Explicit target. Without this release-please-action defaults to
+          # the repo's default branch (`dev`), which would open Release PRs
+          # against dev with a malformed title (component+version both miss).
+          target-branch: main
           token: ${{ steps.app.outputs.token }}
 
   # Translate either trigger path into the same {tag, version, sha, is_prerelease}
