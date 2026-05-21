@@ -7,6 +7,7 @@ import { ETH, USDC } from "@/contracts/deployments"
 import { TESTIDS } from "@/lib/testids"
 import AccountNotDeployedBanner from "./components/AccountNotDeployedBanner.vue"
 import AppToastRegion from "./components/AppToastRegion.vue"
+import Footer from "./components/Footer.vue"
 import TokenCard from "./components/TokenCard.vue"
 import WalletPanel from "./components/WalletPanel.vue"
 
@@ -46,6 +47,8 @@ const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.from
 				:account="accountAddress"
 			/>
 		</section>
+
+		<Footer />
 
 		<AppToastRegion />
 	</main>
