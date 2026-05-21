@@ -54,7 +54,7 @@ Runs when any `.github/workflows/**`, `.github/actions/**`, or shell script chan
 
 Two triggers in one workflow:
 
-- **`push` to `main`** — runs `googleapis/release-please-action@v4`. release-please scans Conventional Commits since the last tag and opens or updates a Release PR titled `chore: release @nulo/extension X.Y.Z`. The PR bumps `package.json` + appends to `CHANGELOG.md` + updates `.release-please-manifest.json`. The PR's commits are app-authenticated (verified) via `actions/create-github-app-token@v1` using the `RELEASE_PLEASE_APP_ID` + `RELEASE_PLEASE_APP_PRIVATE_KEY` secrets. When the Release PR is merged, the next push-to-main run sees `release_created=true` and the same workflow continues: gates → build chrome + firefox → smoke against the zipped artifact → `attach-assets` (zip + SHASUMS + `gh release upload --clobber` + `gh release edit --notes-file` with git-cliff body) → Cloudflare Pages deploy hook → marketplace stubs (gated).
+- **`push` to `main`** — runs `googleapis/release-please-action@v4`. release-please scans Conventional Commits since the last tag and opens or updates a Release PR titled `chore: release X.Y.Z`. The PR bumps `package.json` + appends to `CHANGELOG.md` + updates `.release-please-manifest.json`. The PR's commits are app-authenticated (verified) via `actions/create-github-app-token@v1` using the `RELEASE_PLEASE_APP_ID` + `RELEASE_PLEASE_APP_PRIVATE_KEY` secrets. When the Release PR is merged, the next push-to-main run sees `release_created=true` and the same workflow continues: gates → build chrome + firefox → smoke against the zipped artifact → `attach-assets` (zip + SHASUMS + `gh release upload --clobber` + `gh release edit --notes-file` with git-cliff body) → Cloudflare Pages deploy hook → marketplace stubs (gated).
 
 - **`workflow_dispatch`** — re-publish artifacts for an existing tag. Takes `tag` (e.g. `v0.20.0`), `dry_run` (default false), `run_network_e2e` (default true), and `publish_marketplaces` (default false). Skips `release-please`; runs `resolve` → gates → build → smoke → `attach-assets`. Useful when an asset upload failed mid-publish.
 
@@ -91,7 +91,7 @@ Everything CI runs has a local equivalent:
 Releases are driven by `release-please`. The human touchpoint is a single click — merging the Release PR.
 
 1. Confirm what you want to ship is on `main` (via the usual `release: promote dev → main` PR).
-2. Wait for `release.yml` to run on the push to main. It opens (or updates) a Release PR titled `chore: release @nulo/extension X.Y.Z`. The version comes from Conventional Commits since the last tag.
+2. Wait for `release.yml` to run on the push to main. It opens (or updates) a Release PR titled `chore: release X.Y.Z`. The version comes from Conventional Commits since the last tag.
 3. Review the Release PR. CI runs the normal `Quality / Status` check. Eyeball the proposed `CHANGELOG.md` diff + `package.json` bumps.
 4. Merge the Release PR via the GitHub UI (merge commit).
 5. The next push-to-main run of `release.yml` sees the release was created. The same workflow run continues: gates → build chrome + firefox → smoke → `attach-assets` (uploads zips + SHASUMS, overlays git-cliff release notes onto the GitHub Release body) → Cloudflare deploy hook.
@@ -100,7 +100,7 @@ Tag format is `v<X.Y.Z>` (forced by `include-v-in-tag: true` + `include-componen
 
 ### Forcing the next-version
 
-For the first release-please-managed release, `release-as: "0.20.0"` in `.github/release-please-config.json` pinned the version. Remove that field once 0.20.0 ships; release-please then picks the next version from Conventional Commit types (`feat:` → minor, `fix:` → patch, `BREAKING CHANGE:` → major). To force a specific version mid-flight, add a `Release-As: X.Y.Z` footer to any commit on `main`.
+release-please picks the next version from Conventional Commit types: `feat:` → minor, `fix:` → patch, `BREAKING CHANGE:` (in the body or footer) → major. To force a specific version mid-flight, add a `Release-As: X.Y.Z` footer to any commit on `main`.
 
 ### Re-publishing assets for an existing tag
 
