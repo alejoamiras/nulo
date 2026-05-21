@@ -1,12 +1,100 @@
 /* ================================================================
-   Layout — Nav + Footer (structural chrome)
+   Layout — Banner + Nav + Footer (structural chrome)
    ================================================================ */
+
+/* ── Demo / preview banner ── */
+
+/*
+ * Two CSS vars expose the live banner height so the nav and hero can sit
+ * clear of it. --demo-banner-h is the mobile height; on wider viewports
+ * the banner collapses slightly via --demo-banner-h-md.
+ */
+:root {
+	--demo-banner-h: 3.25rem;
+	--demo-banner-h-md: 2.5rem;
+}
+
+.demo-banner {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	z-index: 60;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--s-3);
+	min-height: var(--demo-banner-h);
+	padding: var(--s-2) var(--s-4);
+	background: rgba(10, 9, 8, 0.85);
+	backdrop-filter: blur(16px);
+	-webkit-backdrop-filter: blur(16px);
+	border-bottom: 1px solid rgba(255, 180, 171, 0.3);
+	font-family: var(--font-body);
+	font-size: 0.6875rem;
+	font-weight: 500;
+	letter-spacing: 0.2em;
+	text-transform: uppercase;
+	line-height: 1.4;
+	color: var(--c-on-surface-variant);
+	text-align: center;
+
+	@media (min-width: 768px) {
+		min-height: var(--demo-banner-h-md);
+		font-size: 0.75rem;
+	}
+}
+
+.demo-banner__dot {
+	flex: 0 0 auto;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--c-error);
+	box-shadow: 0 0 10px rgba(255, 180, 171, 0.45);
+	animation: demo-banner-pulse 2.4s var(--ease-out) infinite;
+
+	@media (prefers-reduced-motion: reduce) {
+		animation: none;
+	}
+}
+
+@keyframes demo-banner-pulse {
+	0%,
+	100% {
+		opacity: 1;
+		box-shadow: 0 0 10px rgba(255, 180, 171, 0.45);
+	}
+	50% {
+		opacity: 0.55;
+		box-shadow: 0 0 4px rgba(255, 180, 171, 0.2);
+	}
+}
+
+.demo-banner__text {
+	margin: 0;
+	display: inline-flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: center;
+	gap: 0 var(--s-3);
+
+	& strong {
+		font-weight: 600;
+		letter-spacing: 0.24em;
+		color: var(--c-error);
+	}
+}
+
+.demo-banner__sep {
+	color: var(--c-outline-variant);
+}
 
 /* ── Navigation ── */
 
 .nav {
 	position: fixed;
-	top: 0;
+	top: var(--demo-banner-h);
 	left: 0;
 	right: 0;
 	z-index: 50;
@@ -20,6 +108,10 @@
 	transition:
 		padding var(--dur-normal) var(--ease-out),
 		background var(--dur-normal) var(--ease-out);
+
+	@media (min-width: 768px) {
+		top: var(--demo-banner-h-md);
+	}
 
 	&.nav--scrolled {
 		padding: var(--s-4) var(--s-8);

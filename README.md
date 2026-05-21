@@ -1,5 +1,17 @@
 # Nulo Wallet
 
+> ## ⚠️ DEMO / PREVIEW BUILD — NOT A PRODUCTION WALLET
+>
+> **Nulo is a demo for evaluation and feedback. It is not a production wallet.**
+>
+> - **No security audit.** The code has not been reviewed by an external security firm.
+> - **Do not use with real funds or mainnet keys.** Aztec testnet only. Treat any key material you import as compromised.
+> - **Storage format is unstable.** Profiles, sessions, and on-disk schemas may change between builds. Expect data wipes and full reseeds.
+> - **Interfaces will change without notice.** dApp surface, popup UX, and message shapes are still in flux.
+> - **No uptime, support, or recovery guarantees.** This is a preview of work in progress, published so people can try it, file bugs, and follow along.
+>
+> If you are looking for a production Aztec wallet, this is not it — come back later, or follow [`implementations-plan/`](./implementations-plan/README.md) to track readiness.
+
 A self-custody wallet for the [Aztec network](https://aztec.network), packaged as a Chrome and Firefox extension. Nulo runs the Aztec [Private Execution Environment](https://docs.aztec.network/aztec/protocol/circuits/pxe) locally so transactions are simulated and signed on the user's machine; no node operator sees the contents.
 
 The extension exposes the canonical `@aztec/wallet-sdk` surface to dApps and uses the upstream `@aztec/accounts/schnorr` account contract — there is no custom Noir source in this repo.
