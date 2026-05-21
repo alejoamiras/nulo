@@ -47,13 +47,13 @@ Hygiene item (commit subject capitalization in `3110e5dd`) deliberately not take
 ## Next steps (after this PR lands)
 
 1. Promote `dev → main` via the usual `release: promote dev → main` PR.
-2. Push to main triggers `release.yml`. release-please opens a Release PR `chore: release @nulo/extension 0.20.0`.
+2. Push to main triggers `release.yml`. release-please opens a Release PR `chore: release X.Y.Z`.
 3. Review the Release PR (CI runs Quality / Status). Merge it.
 4. Tag `v0.20.0` is created + GitHub Release pushed. Same workflow run attaches Chrome + Firefox zips + SHASUMS + git-cliff release body + triggers Cloudflare deploy hook.
 
 ## Follow-ups (out of scope)
 
-- Remove `release-as: "0.20.0"` from `.github/release-please-config.json` after 0.20.0 ships. From then on release-please picks the next version from Conventional Commit types.
+- ~~Remove `release-as: "0.20.0"` from `.github/release-please-config.json` after 0.20.0 ships.~~ Done in the v0.20.0 follow-up PR. From then on release-please picks the next version from Conventional Commit types.
 - Prerelease flow from `dev` (Q3): add a parallel `release-please-prerelease.yml` keyed on push:dev with its own manifest.
 - Marketplace publishing: wire `CWS_*` + `AMO_JWT_*` secrets + replace the Firefox `gecko.id` placeholder, then flip `publish_marketplaces=true` on a manual workflow_dispatch.
 - Reconcile CLAUDE.md's "Subject line must be lower-case" wording with the actual commitlint config (or tighten the config to match the doc).

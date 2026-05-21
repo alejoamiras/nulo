@@ -125,14 +125,21 @@ jobs:
             echo "is_prerelease=$IS_PRE"
           } >> "$GITHUB_OUTPUT"
 
+  # Reusable workflows inherit skip propagation through `always()`-conditioned
+  # ancestors, so every gate below needs an explicit `if: needs.resolve.result
+  # == 'success'`. Without it, a workflow_dispatch run (where `release-please`
+  # is skipped) silently skips all gates and the publish job then fails on the
+  # missing artifact. Caught the hard way on the v0.20.0 republish run.
   lint-and-typecheck:
     needs: resolve
+    if: needs.resolve.result == 'success'
     uses: ./.github/workflows/_lint-and-typecheck.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
 
   unit-tests:
     needs: resolve
+    if: needs.resolve.result == 'success'
     uses: ./.github/workflows/_unit-tests.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
@@ -140,6 +147,7 @@ jobs:
   network-e2e:
     needs: resolve
     if: |
+      needs.resolve.result == 'success' &&
       needs.resolve.outputs.is_prerelease == 'false' &&
       (github.event_name == 'push' || github.event.inputs.run_network_e2e == 'true')
     uses: ./.github/workflows/_network-e2e.yml
@@ -150,6 +158,7 @@ jobs:
 
   build-chrome:
     needs: [resolve, lint-and-typecheck, unit-tests]
+    if: needs.resolve.result == 'success' && needs.lint-and-typecheck.result == 'success' && needs.unit-tests.result == 'success'
     uses: ./.github/workflows/_build-extension.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
@@ -159,6 +168,7 @@ jobs:
 
   build-firefox:
     needs: [resolve, lint-and-typecheck, unit-tests]
+    if: needs.resolve.result == 'success' && needs.lint-and-typecheck.result == 'success' && needs.unit-tests.result == 'success'
     uses: ./.github/workflows/_build-extension.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
@@ -168,6 +178,7 @@ jobs:
 
   smoke-against-artifact:
     needs: [resolve, build-chrome]
+    if: needs.resolve.result == 'success' && needs.build-chrome.result == 'success'
     uses: ./.github/workflows/_smoke-e2e.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
