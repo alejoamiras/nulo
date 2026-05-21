@@ -3,11 +3,6 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 import { useAcceleratorStatus } from "./useAcceleratorStatus"
 
-const flush = async () => {
-	await Promise.resolve()
-	await Promise.resolve()
-}
-
 beforeEach(() => {
 	vi.unstubAllGlobals()
 })
