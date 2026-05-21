@@ -21,7 +21,10 @@ Operating rules for AI assistants (and any contributor) working in this reposito
 ## Branching + merging
 
 - `dev` is the **default branch** and the integration lane. Feature work happens on short-lived branches off `dev` (named `feat/...`, `fix/...`, `chore/...`, `refactor/...`, `docs/...`, `test/...`, `deps/...`) and lands via **squash-merge** PRs. dev's history stays linear — one commit per merged PR.
-- `main` is the **stable branch**. Releases are cut from main via `release.yml`. main advances only via `release: promote dev → main` PRs, which use a **merge commit** (not squash). The merge commit preserves dev's history as the second parent — read main's own timeline via `git log main --first-parent`.
+- `main` is the **stable branch**. main advances via two PR types — both use a **merge commit** (not squash):
+  - `release: promote dev → main` PRs land the next release-candidate set of features.
+  - `chore: release @nulo/extension X.Y.Z` PRs are opened by **release-please** after every push to main. Merging one creates the tag + GitHub Release; the release workflow then attaches built artifacts + git-cliff notes + redeploys the landing.
+  Read main's own timeline via `git log main --first-parent`.
 - **Merge type is enforced per branch via GitHub rulesets**: dev allows only `squash`, main allows only `merge`. The repo-level toggle has both enabled, but the per-branch ruleset narrows what's selectable at PR-merge time.
 - Both branches require **signed commits** (SSH or GPG — GitHub's web-flow signature on UI-merges satisfies this) and a passing **`Quality / Status`** required check before merge.
 - **Force-pushes and branch deletions are blocked.** Use a feature branch + PR for everything. Admin bypass via the ruleset's pull-request bypass-mode is reserved for catch-22 cases (e.g., a required check whose name was renamed since the PR opened).
@@ -321,7 +324,7 @@ Configured in [`.github/`](./.github/). The full contributor guide is at [`CI.md
 - `dev` — day-to-day integration. Required checks enforced.
 - Feature branches → PR into `dev`.
 - Promote `dev → main` via PR when ready.
-- **Releases happen via `gh workflow run release.yml`**, never via human `chore: bump extension to X.Y.Z` commits — those are deprecated. The release workflow takes a `version` + `channel` input and handles the bump, changelog (git-cliff), tag, and GitHub Release.
+- **Releases are driven by release-please.** Every push to main runs `.github/workflows/release.yml`, which calls `googleapis/release-please-action@v4` to open/update a Release PR (`chore: release @nulo/extension X.Y.Z`). Merging the Release PR creates the tag + GitHub Release; the same workflow run then attaches Chrome + Firefox zips + SHASUMS, overlays git-cliff release notes onto the GitHub Release body, and triggers the Cloudflare Pages deploy hook. Human `chore: bump extension to X.Y.Z` commits remain **deprecated**. The release workflow's `workflow_dispatch` trigger is an escape hatch for re-publishing assets to an existing tag (with `dry_run`, `run_network_e2e`, `publish_marketplaces` toggles). Config files: `.github/release-please-config.json`, `.release-please-manifest.json`, `CHANGELOG.md`.
 
 ## What this file is NOT
 

@@ -17,7 +17,8 @@ Contributor-facing reference for what runs when, how to opt in to slow gates, ho
 | Open / sync PR to `dev` | `pr-quick` always; `pr-smoke-e2e` + `pr-network-e2e` when their filters trip or their label is set | 3–10 min (`pr-quick`); +5–10 min each if smoke / network triggers |
 | Open / sync PR to `main` | all three workflows above run unconditionally | 15–25 min total |
 | Add the `e2e:smoke` or `e2e:network` label | the corresponding workflow runs (removing the label re-evaluates) | as above |
-| Click "Run workflow" on `release.yml` | full gate + build + smoke against artifact + tag + GitHub Release | 15–25 min |
+| Push to `main` | `release.yml` (release-please opens or updates a Release PR; merging it tags + creates the GitHub Release + attaches built artifacts) | 1–2 min for the PR refresh; 15–25 min for the publish run after merge |
+| Click "Run workflow" on `release.yml` | re-publish artifacts for an existing tag (escape hatch) | 15–25 min |
 
 ### `pr-quick.yml`
 
@@ -51,9 +52,15 @@ Runs when any `.github/workflows/**`, `.github/actions/**`, or shell script chan
 
 ### `release.yml`
 
-Manual `workflow_dispatch` only. Takes `version` (semver), `channel` (`stable` from `main`, `prerelease` from `dev`), `dry_run` (default true), and `publish_marketplaces` (default false, stub).
+Two triggers in one workflow:
 
-Flow: validate → quality gate → network e2e (stable only) → build chrome + firefox → smoke against the zipped artifact → assemble + zip + SHASUMS → render notes (`git-cliff`) → tag + push + GitHub release (`release-it`). Marketplace publish (CWS + AMO) is stubbed until secrets are wired.
+- **`push` to `main`** — runs `googleapis/release-please-action@v4`. release-please scans Conventional Commits since the last tag and opens or updates a Release PR titled `chore: release X.Y.Z`. The PR bumps `package.json` + appends to `CHANGELOG.md` + updates `.release-please-manifest.json`. The PR's commits are app-authenticated (verified) via `actions/create-github-app-token@v1` using the `RELEASE_PLEASE_APP_ID` + `RELEASE_PLEASE_APP_PRIVATE_KEY` secrets. When the Release PR is merged, the next push-to-main run sees `release_created=true` and the same workflow continues: gates → build chrome + firefox → smoke against the zipped artifact → `attach-assets` (zip + SHASUMS + `gh release upload --clobber` + `gh release edit --notes-file` with git-cliff body) → Cloudflare Pages deploy hook → marketplace stubs (gated).
+
+- **`workflow_dispatch`** — re-publish artifacts for an existing tag. Takes `tag` (e.g. `v0.20.0`), `dry_run` (default false), `run_network_e2e` (default true), and `publish_marketplaces` (default false). Skips `release-please`; runs `resolve` → gates → build → smoke → `attach-assets`. Useful when an asset upload failed mid-publish.
+
+Marketplace publish (CWS + AMO) is stubbed until secrets are wired (`CWS_*` + `AMO_JWT_*`).
+
+Config files: `.github/release-please-config.json`, `.release-please-manifest.json`, `CHANGELOG.md`. The git-cliff template at `cliff.toml` provides the final release-body content.
 
 ## Labels
 
@@ -81,16 +88,31 @@ Everything CI runs has a local equivalent:
 
 ## Releasing
 
-1. Confirm `dev` is at the state you want to ship from (or `main` for a stable release).
-2. In the GitHub Actions tab, find `release.yml` → "Run workflow".
-3. Fill in:
-   - `version` — e.g. `0.15.0` (stable) or `0.15.0-rc.1` (prerelease).
-   - `channel` — `stable` (must be run from `main`) or `prerelease` (must be run from `dev`).
-   - `dry_run` — leave **true** for the first run on a new version. Verify the workflow-run artifacts (zips + SHASUMS) look right, then re-run with `dry_run=false` to actually tag + publish.
-   - `publish_marketplaces` — leave **false** until the CWS + AMO secrets are wired and the Firefox `gecko.id` is real.
-4. The workflow gates pass → tag pushed → GitHub Release created with both zips + SHASUMS attached + git-cliff-generated notes as the body.
+Releases are driven by `release-please`. The human touchpoint is a single click — merging the Release PR.
 
-Tag format is `v<X.Y.Z>`. Prerelease: `v<X.Y.Z>-rc.<N>`. Stable releases are marked `--latest`; prereleases are marked `--prerelease`.
+1. Confirm what you want to ship is on `main` (via the usual `release: promote dev → main` PR).
+2. Wait for `release.yml` to run on the push to main. It opens (or updates) a Release PR titled `chore: release X.Y.Z`. The version comes from Conventional Commits since the last tag.
+3. Review the Release PR. CI runs the normal `Quality / Status` check. Eyeball the proposed `CHANGELOG.md` diff + `package.json` bumps.
+4. Merge the Release PR via the GitHub UI (merge commit).
+5. The next push-to-main run of `release.yml` sees the release was created. The same workflow run continues: gates → build chrome + firefox → smoke → `attach-assets` (uploads zips + SHASUMS, overlays git-cliff release notes onto the GitHub Release body) → Cloudflare deploy hook.
+
+Tag format is `v<X.Y.Z>` (forced by `include-v-in-tag: true` + `include-component-in-tag: false` in `.github/release-please-config.json`). Prerelease support (e.g. `v<X.Y.Z>-rc.<N>` from `dev`) is deferred to a follow-up PR.
+
+### Forcing the next-version
+
+release-please picks the next version from Conventional Commit types: `feat:` → minor, `fix:` → patch, `BREAKING CHANGE:` (in the body or footer) → major. To force a specific version mid-flight, add a `Release-As: X.Y.Z` footer to any commit on `main`.
+
+### Re-publishing assets for an existing tag
+
+If a release was tagged but the asset upload failed (e.g. transient `gh release upload` error), use the `workflow_dispatch` escape hatch:
+
+1. GitHub Actions tab → `release.yml` → "Run workflow".
+2. Fill in:
+   - `tag` — e.g. `v0.20.0`. Required.
+   - `dry_run` — leave **false** to actually upload; `true` previews without changing the release.
+   - `run_network_e2e` — leave **true** in most cases. Disable only for emergency re-publishes where the network gate is known-good.
+   - `publish_marketplaces` — leave **false** until the CWS + AMO secrets are wired.
+3. The workflow skips `release-please`, fetches the tag, and re-runs gates → build → smoke → `attach-assets`. The Cloudflare hook is **skipped** on manual re-publishes (only fires on the original push-to-main release).
 
 ## Debugging a failing PR
 

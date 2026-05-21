@@ -1,0 +1,23 @@
+# Review — release-please rollout v1
+## Verdict
+REJECT
+
+## Per-section findings
+- §3 New files: `.github/release-please-config.json` is not fully sound. The config keys are mostly real, and `changelog-path: "../../CHANGELOG.md"` is at least aligned with release-please’s “relative to package directory” model, but the bootstrap logic is wrong: `.release-please-manifest.json` seeded to `0.20.0` tells release-please the current released version is `0.20.0`, not “make the next release 0.20.0”. That undercuts the whole first-release plan. Use `release-as: 0.20.0` / `Release-As` for the first cut instead. Also, the workflow outputs in `.github/workflows/release-please.yml` are wrong for a manifest monorepo: package outputs are path-prefixed, not plain `release_created` / `tag_name` / `version`. The config also misses any `extra-files` equivalent for keeping root `package.json` versioned with `packages/extension/package.json`.
+- §4 Workflow rewrite: Opus is right on the workflow-chaining flaw. With the default `GITHUB_TOKEN`, release-please-created resources do not fan out into other workflows, so `release.yml` on `release: published` will not reliably run. That also means the plan’s assumption that `Quality / Status` runs on the Release PR is false unless release-please uses a different auth token. Separately, the rewrite drops the old `dry_run` and `run_network_e2e` controls, so the proposed manual smoke test against `v0.17.1` is not state-neutral anymore. The sketch also omits `ref` on the build reusable calls; that breaks the manual “re-publish this tag” path because those jobs default back to the workflow branch ref.
+- §7 First release cycle: this section is the most incorrect. Step 2 is not a valid “force 0.20.0” mechanism. Step 3 is false with default-token PR creation, because the Release PR will not trigger the normal PR workflows. Step 6 is false for the same reason on the release side: the publish/build/attach chain will not start. I also accept Opus’s signed-commit objection: the plan should not assume `GITHUB_TOKEN`-driven release-please commits satisfy the branch’s signed-commit requirement. That needs a GitHub App or other explicitly validated auth path before this is safe.
+- §8 Migration sequence: commit subjects are lower-case and I don’t see banned milestone/phase tags in the proposed files. But commit 5, `chore(release): bump @nulo/extension + root package.json to 0.20.0`, conflicts with `CLAUDE.md`’s explicit “never via human bump commit” rule, and the plan does not earn its exception because release-please already has first-release override mechanisms. The seeded `CHANGELOG.md` entry is also coupled to the broken manifest bootstrap and should not be treated as safe.
+
+## Cross-cutting / missed items
+1. `release-please.yml` should include the full permissions release-please expects; the plan omits at least `issues: write`.
+2. Root `package.json` version sync is not designed for future releases. After 0.20.0, it will drift unless release-please is told to update it explicitly.
+3. The manual re-publish path needs overwrite semantics for assets (`gh release upload` otherwise fails on existing filenames) and a clear rule for whether it should edit release notes.
+4. The Cloudflare hook gating is underspecified after the trigger rewrite. A manual asset re-publish should probably not redeploy landing by default.
+5. Marketplace stubs technically remain, but the automatic stable path no longer has any operator switch for enabling them later.
+
+## Verifiable claims to validate before merge
+1. Validate the first-release override with release-please’s documented `release-as` / `Release-As` behavior, not a manifest seed: https://github.com/googleapis/release-please/blob/main/docs/manifest-releaser.md
+2. Validate monorepo action outputs and package-prefixed names in `release-please-action@v4`: https://github.com/googleapis/release-please-action
+3. Validate that `../../CHANGELOG.md` is actually updated from the `packages/extension` component in a test run: https://github.com/googleapis/release-please/blob/main/docs/manifest-releaser.md
+4. Validate the auth model end-to-end: the token used for release-please must both trigger downstream workflows and satisfy signed-commit rules on `main`: https://github.com/googleapis/release-please-action and https://docs.github.com/actions/security-for-github-actions/security-guides/automatic-token-authentication
+5. Validate the rewritten `release.yml` by dispatching against an existing tag and confirming every reusable workflow checks out that tag, uploads with overwrite semantics, and does not unintentionally redeploy landing or stores.
