@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.21.0](https://github.com/alejoamiras/nulo/compare/v0.20.2...v0.21.0) (2026-05-21)
+
+
+### Features
+
+* **ci:** add release-please prerelease flow + fix stable manifest drift ([#36](https://github.com/alejoamiras/nulo/issues/36)) ([5959ea0](https://github.com/alejoamiras/nulo/commit/5959ea00f85e52ee657818afeca88f217797bee8))
+* **extension:** profile-name input + onboarding copy parity ([#37](https://github.com/alejoamiras/nulo/issues/37)) ([8b5ecfd](https://github.com/alejoamiras/nulo/commit/8b5ecfd1d58acc30f6650e0903d9625e890a5f32))
+
+
+### Bug Fixes
+
+* **onboarding:** unify step page widths via shared layout component ([#40](https://github.com/alejoamiras/nulo/issues/40)) ([853b398](https://github.com/alejoamiras/nulo/commit/853b3987356e02dcaa0f87872bf1d206bd91301e))
+
+
+### Misc
+
+* clear remaining lint debt + drop merged plan STATUS.md ([#39](https://github.com/alejoamiras/nulo/issues/39)) ([849c456](https://github.com/alejoamiras/nulo/commit/849c4560f7ca34e60c2e6bbc15cd6c6d48b88293))
+
+
+### Docs
+
+* **claude:** add Release runbook + document the release-please-action v4 abort bug ([#34](https://github.com/alejoamiras/nulo/issues/34)) ([1e69f46](https://github.com/alejoamiras/nulo/commit/1e69f4638f228672f76e3c39968e4f0c470c227a))
+
 ## [0.20.2](https://github.com/alejoamiras/nulo/compare/v0.20.1...v0.20.2) (2026-05-21)
 
 
