@@ -27,6 +27,7 @@ import { BackgroundConnectionHandler, type PendingDiscovery, type ActiveSession 
 import type { WalletMessage, WalletResponse } from "@aztec/wallet-sdk/types"
 import { validateContentScriptMessage } from "./content-script-validator"
 import { toWalletResponseError } from "./error-envelope"
+import { E2E_PROBE_ENABLED, hashSid, probe } from "@/wallet/utils/probe"
 
 import type { ServiceCollection } from "@/wallet/base"
 import { NetworkService } from "@/wallet/services/network/service"
@@ -143,6 +144,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 			},
 
 			onSessionEstablished: async (session) => {
+				if (E2E_PROBE_ENABLED) probe("SESSION-EST", { sidH: hashSid(session.sessionId), origin: session.origin })
 				// Sessions are per-`(origin, chainId)`. The upstream
 				// `ActiveSession` carries `chainInfo` (set from the matching
 				// discovery during key exchange — see the wallet-sdk
@@ -174,11 +176,20 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 			},
 
 			onSessionTerminated: (sessionId) => {
+				if (E2E_PROBE_ENABLED) probe("SESSION-TERM", { sidH: hashSid(sessionId) })
 				sessionQueues.delete(sessionId)
 				decryptQueues.delete(sessionId)
 			},
 
 			onWalletMessage: (session, message) => {
+				if (E2E_PROBE_ENABLED) {
+					probe("BCH-RECV", {
+						sidH: hashSid(session.sessionId),
+						method: message.type,
+						messageId: message.messageId,
+						queueDepth: sessionQueues.size,
+					})
+				}
 				const key = session.sessionId
 				const prev = sessionQueues.get(key) ?? Promise.resolve()
 				const next = prev.then(() => handleWalletMessage(session, message, handler, dispatcher, profileService, logger))
@@ -203,8 +214,43 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	const decryptQueues = new Map<string, Promise<void>>()
 	// biome-ignore lint/suspicious/noExplicitAny: monkey-patching private method on BackgroundConnectionHandler to serialize decryption
 	;(handler as any).handleEncryptedMessage = async (sessionId: string, encrypted: unknown) => {
+		if (E2E_PROBE_ENABLED) {
+			// biome-ignore lint/suspicious/noExplicitAny: reading upstream's private activeSessions map for session-lookup-miss visibility — the upstream silently returns on miss, which is what we're tracing.
+			const activeSessions = (handler as any).activeSessions as Map<string, unknown> | undefined
+			const hasSession = activeSessions?.has(sessionId) ?? false
+			probe("BCH-DECRYPT-IN", {
+				sidH: hashSid(sessionId),
+				hasSession,
+				activeCount: activeSessions?.size ?? 0,
+				queueDepth: decryptQueues.size,
+			})
+			if (!hasSession) {
+				// Upstream's handleEncryptedMessage at background_connection_handler.js:173
+				// is about to silently `return` because activeSessions.get(sessionId)
+				// is undefined. This is THE H2 falsification signal.
+				probe("BCH-SESSION-LOOKUP-MISS", { sidH: hashSid(sessionId), activeCount: activeSessions?.size ?? 0 })
+			}
+		}
 		const prev = decryptQueues.get(sessionId) ?? Promise.resolve()
-		const next = prev.then(() => origDecrypt(sessionId, encrypted))
+		const decryptStartedAt = E2E_PROBE_ENABLED ? Date.now() : 0
+		const next = prev.then(async () => {
+			try {
+				const result = await origDecrypt(sessionId, encrypted)
+				if (E2E_PROBE_ENABLED) {
+					probe("BCH-DECRYPT-OUT", { sidH: hashSid(sessionId), status: "ok", elapsedMs: Date.now() - decryptStartedAt })
+				}
+				return result
+			} catch (err) {
+				if (E2E_PROBE_ENABLED) {
+					probe("BCH-DECRYPT-OUT", {
+						sidH: hashSid(sessionId),
+						status: "throw",
+						elapsedMs: Date.now() - decryptStartedAt,
+					})
+				}
+				throw err
+			}
+		})
 		decryptQueues.set(
 			sessionId,
 			next.catch(() => {}),
@@ -473,9 +519,26 @@ async function handleWalletMessage(
 		logger.log("wallet-sdk", LogLevel.Error, `Method ${message.type} failed for ${session.origin}: ${logMsg}`)
 	}
 
+	if (E2E_PROBE_ENABLED) {
+		// biome-ignore lint/suspicious/noExplicitAny: reading upstream's private activeSessions map to detect mid-RPC session loss before the send attempts.
+		const activeSessions = (handler as any).activeSessions as Map<string, unknown> | undefined
+		probe("BCH-SEND-WIRE", {
+			sidH: hashSid(session.sessionId),
+			method: message.type,
+			messageId: message.messageId,
+			hasSession: activeSessions?.has(session.sessionId) ?? false,
+			isError: response.error !== undefined,
+		})
+	}
 	try {
 		await handler.sendResponse(session.sessionId, response)
+		if (E2E_PROBE_ENABLED) {
+			probe("BCH-SEND", { sidH: hashSid(session.sessionId), method: message.type, status: "ok" })
+		}
 	} catch (sendError) {
+		if (E2E_PROBE_ENABLED) {
+			probe("BCH-SEND", { sidH: hashSid(session.sessionId), method: message.type, status: "throw" })
+		}
 		logger.log(
 			"wallet-sdk",
 			LogLevel.Error,

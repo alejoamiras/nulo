@@ -12,6 +12,7 @@ import AccountSelectRow from "./AccountSelectRow.vue"
 /** Utils */
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { formatCaipAccount } from "@/wallet/utils/caip"
+import { E2E_PROBE_ENABLED, probe } from "@/wallet/utils/probe"
 import { getCapabilityInfo } from "./capability-meta"
 
 /** Services */
@@ -192,6 +193,7 @@ const approve = async () => {
 			}
 		}
 
+		if (E2E_PROBE_ENABLED) probe("CAP-APPROVE", { id: requestId.value, grantedCount: granted.length })
 		await interactionService.resolveInteraction(requestId.value!, {
 			granted,
 			selectedAccounts: resultSelectedAccounts,

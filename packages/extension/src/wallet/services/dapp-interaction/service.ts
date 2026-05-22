@@ -9,6 +9,7 @@ import { DappSessionService, AccessLevel, type DappSession } from "@/wallet/serv
 import { ExecutionService, type Operation, type OperationKind } from "@/wallet/services/execution/service"
 import { OriginType, type LocalTxOrigin } from "@/wallet/services/transaction/service"
 import { getRandomHex, Lock } from "@/wallet/utils"
+import { E2E_PROBE_ENABLED, probe } from "@/wallet/utils/probe"
 import type { WindowManager } from "@/wallet/services/window-manager/window-manager"
 import { parseCaipAccount, parseCaipChain, resolveNetworkByChainId } from "@/wallet/utils/caip"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
@@ -100,6 +101,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			throw new Error("Invalid id")
 		}
 		this.storage.delete(id)
+		if (E2E_PROBE_ENABLED) probe("DI-CAP-SETTLE", { id, hasHandle: !!interactionRequest.handleId })
 		// Detach before settling: popup may close in the same event-loop turn
 		// as the resolveInteraction RPC, and the onRemoved event could race
 		// with settle if it arrives first.
@@ -174,6 +176,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 				id = getRandomHex(8)
 			} while (this.storage.has(id))
 
+			if (E2E_PROBE_ENABLED) probe("DI-CAP-OPEN", { id, type })
 			const handle = this.windowManager.openAndAwait<ExecutionResult | CapabilityResult | DiscoveryResult>({
 				url: chrome.runtime.getURL(`src/popup/index.html#/windows/${type}?requestId=${id}`),
 				width: 400,

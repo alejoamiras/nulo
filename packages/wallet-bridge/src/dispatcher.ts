@@ -218,38 +218,82 @@ export class WalletSdkDispatcher {
 	 * @throws If the method is unsupported, the operation fails, or session context is invalid
 	 */
 	async dispatch(methodName: string, args: unknown[], ctx: SessionContext): Promise<unknown> {
-		// Enforce capability grants (type-level) then scope (per-operation)
-		const grants = await this.enforceCapability(methodName, ctx)
-		if (grants.length) {
-			enforceScope(methodName, args, grants)
+		const probeEnabled = (import.meta as unknown as { env?: { VITE_E2E_PROBE?: string } }).env?.VITE_E2E_PROBE === "1"
+		const startedAt = probeEnabled ? Date.now() : 0
+		if (probeEnabled) {
+			console.log(`[PROBE]${JSON.stringify({ b: "WB-IN", t: Date.now(), method: methodName, sidH: ctx.sessionId.slice(0, 6) })}`)
 		}
+		try {
+			// Enforce capability grants (type-level) then scope (per-operation)
+			const grants = await this.enforceCapability(methodName, ctx)
+			if (grants.length) {
+				enforceScope(methodName, args, grants)
+			}
 
-		// Handle methods that don't go through ExecutionService
-		if (methodName === "requestCapabilities") {
-			return this.handleRequestCapabilities(args[0] as CapabilityManifest, ctx)
-		}
-		if (methodName === "getAccounts") {
-			return this.handleGetAccounts(ctx)
-		}
-		if (methodName === "batch") {
-			return this.handleBatch(args[0] as Array<{ name: string; args: unknown[] }>, ctx)
-		}
+			// Handle methods that don't go through ExecutionService
+			if (methodName === "requestCapabilities") {
+				const r = await this.handleRequestCapabilities(args[0] as CapabilityManifest, ctx)
+				if (probeEnabled) {
+					console.log(
+						`[PROBE]${JSON.stringify({ b: "WB-OUT", t: Date.now(), method: methodName, status: "ok", elapsedMs: Date.now() - startedAt })}`,
+					)
+				}
+				return r
+			}
+			if (methodName === "getAccounts") {
+				const r = await this.handleGetAccounts(ctx)
+				if (probeEnabled) {
+					console.log(
+						`[PROBE]${JSON.stringify({ b: "WB-OUT", t: Date.now(), method: methodName, status: "ok", elapsedMs: Date.now() - startedAt })}`,
+					)
+				}
+				return r
+			}
+			if (methodName === "batch") {
+				const r = await this.handleBatch(args[0] as Array<{ name: string; args: unknown[] }>, ctx)
+				if (probeEnabled) {
+					console.log(
+						`[PROBE]${JSON.stringify({ b: "WB-OUT", t: Date.now(), method: methodName, status: "ok", elapsedMs: Date.now() - startedAt })}`,
+					)
+				}
+				return r
+			}
 
-		// sendTx goes through DappInteractionService for the confirmation popup + fee selection
-		if (methodName === "sendTx") {
-			return this.handleSendTx(args, ctx)
+			// sendTx goes through DappInteractionService for the confirmation popup + fee selection
+			if (methodName === "sendTx") {
+				const r = await this.handleSendTx(args, ctx)
+				if (probeEnabled) {
+					console.log(
+						`[PROBE]${JSON.stringify({ b: "WB-OUT", t: Date.now(), method: methodName, status: "ok", elapsedMs: Date.now() - startedAt })}`,
+					)
+				}
+				return r
+			}
+
+			const kind = METHOD_TO_KIND[methodName]
+			if (!kind) {
+				throw new Error(`Unsupported wallet method: ${methodName}`)
+			}
+
+			const operation = await this.buildOperation(kind, args, ctx)
+			const origin: LocalTxOrigin = { type: OriginType.DAPP, name: ctx.origin }
+
+			const results = await this.executionService.executeOperations([operation], origin)
+			const result = this.unwrapResult(results[0])
+			if (probeEnabled) {
+				console.log(
+					`[PROBE]${JSON.stringify({ b: "WB-OUT", t: Date.now(), method: methodName, status: "ok", elapsedMs: Date.now() - startedAt })}`,
+				)
+			}
+			return result
+		} catch (err) {
+			if (probeEnabled) {
+				console.log(
+					`[PROBE]${JSON.stringify({ b: "WB-OUT", t: Date.now(), method: methodName, status: "throw", elapsedMs: Date.now() - startedAt })}`,
+				)
+			}
+			throw err
 		}
-
-		const kind = METHOD_TO_KIND[methodName]
-		if (!kind) {
-			throw new Error(`Unsupported wallet method: ${methodName}`)
-		}
-
-		const operation = await this.buildOperation(kind, args, ctx)
-		const origin: LocalTxOrigin = { type: OriginType.DAPP, name: ctx.origin }
-
-		const results = await this.executionService.executeOperations([operation], origin)
-		return this.unwrapResult(results[0])
 	}
 
 	/**
