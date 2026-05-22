@@ -63,18 +63,35 @@ export async function waitForPopup(
 	// 'raf' polling which is throttled in offscreen tabs (this popup
 	// definitely is offscreen — it's a separate browser target).
 	patchPagePolling(page)
-	// Wait for SW liveness so the page can render
-	await page.waitForFunction(
-		async () => {
-			try {
-				const r = await chrome.storage.session.get("nulo:liveness")
-				return !!r["nulo:liveness"]
-			} catch {
-				return false
-			}
-		},
-		{ timeout: 10_000, polling: 250 },
-	)
+	// Wait for SW liveness so the page can render. Wrap in detach recovery:
+	// under full-suite load the freshly-created popup target can transiently
+	// detach DURING this wait (puppeteer-core FrameManager#onClientDisconnect),
+	// yielding `Error: waitForFunction failed: frame got detached` even when
+	// openPopup + waitForMainFrame already passed cleanly. One re-wait on the
+	// same target consistently recovers; the failure is the FrameManager
+	// disposing isolated worlds before the target stabilizes, not a real SW
+	// readiness problem.
+	const livenessFn = () =>
+		page.waitForFunction(
+			async () => {
+				try {
+					const r = await chrome.storage.session.get("nulo:liveness")
+					return !!r["nulo:liveness"]
+				} catch {
+					return false
+				}
+			},
+			{ timeout: 10_000, polling: 250 },
+		)
+	try {
+		await livenessFn()
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err)
+		if (!/frame got detached|Session closed|Target closed/i.test(msg)) throw err
+		// Re-stabilize main frame then retry once.
+		await waitForMainFrame(page, 8_000)
+		await livenessFn()
+	}
 	return page
 }
 
