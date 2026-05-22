@@ -634,9 +634,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// `liveMin * multiplier` — that's what a fresh build would have
 		// finalized. If the chain min hasn't drifted, they match.
 		// (codex audit SHOULD-FIX #3)
-		const node = await this.networkService.getNode(network.chainId)
 		try {
-			const currentMin = await node.getCurrentMinFees()
+			const currentMin = await this.networkService.withBinding(network.chainId, async (b) => b.node.getCurrentMinFees())
 			const multiplier = inputs.feeSettings.priorityLevel
 				? PRIORITY_MULTIPLIERS[inputs.feeSettings.priorityLevel]
 				: DEFAULT_FEE_MULTIPLIER
@@ -1635,8 +1634,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 	private async executeAztecGetChainInfo(op: AztecGetChainInfoOperation): Promise<ChainInfo> {
 		const network = await this.networkService.getNetwork(op.networkId)
-		const node = await this.networkService.getNode(network.chainId)
-		const { l1ChainId, rollupVersion } = await node.getNodeInfo()
+		const { l1ChainId, rollupVersion } = await this.networkService.withBinding(network.chainId, async (b) => b.node.getNodeInfo())
 		return { chainId: new Fr(l1ChainId), version: new Fr(rollupVersion) }
 	}
 
@@ -1728,49 +1726,50 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw new Error("Wallet locked")
 		}
 		const network = await this.networkService.getNetwork(op.networkId)
-		const node = await this.networkService.getNode(network.chainId)
 
-		if (remainingRaw.length > 0) {
-			const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
-			const needsInit = await account.requiresInitialization(node)
-			if (needsInit) {
-				// Mixed + first-tx → don't try to merge. The naive "normalize
-				// the standard arm's private-execution tree onto the inner
-				// entrypoint subtree" approach was audited (codex 019e1912
-				// + opus 4.7, 2026-05-12) and rejected because:
-				//   • publicInputs.gasUsed IS dApp-visible via
-				//     TxSimulationResult.gasUsed and would over-report
-				//     (ctor gas leaks into the projected result).
-				//   • firstNullifier of the multicall result IS the account
-				//     init nullifier; carrying it onto an entrypoint-rooted
-				//     tree is semantically wrong.
-				// See wallets-architecture-research/synthesis/
-				// implementation-plan-p1-p3.md "Tracked follow-ups" §4 for
-				// the trigger conditions to revisit.
+		return this.networkService.withBinding(network.chainId, async (b) => {
+			if (remainingRaw.length > 0) {
+				const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
+				const needsInit = await account.requiresInitialization(b.node)
+				if (needsInit) {
+					// Mixed + first-tx → don't try to merge. The naive "normalize
+					// the standard arm's private-execution tree onto the inner
+					// entrypoint subtree" approach was audited (codex 019e1912
+					// + opus 4.7, 2026-05-12) and rejected because:
+					//   • publicInputs.gasUsed IS dApp-visible via
+					//     TxSimulationResult.gasUsed and would over-report
+					//     (ctor gas leaks into the projected result).
+					//   • firstNullifier of the multicall result IS the account
+					//     init nullifier; carrying it onto an entrypoint-rooted
+					//     tree is semantically wrong.
+					// See wallets-architecture-research/synthesis/
+					// implementation-plan-p1-p3.md "Tracked follow-ups" §4 for
+					// the trigger conditions to revisit.
+					return this.executeAztecSimulateTxStandard(op)
+				}
+			}
+
+			const pxe = this.pxeService.getPXE(b.info)
+
+			const result = await runFastPath({
+				node: b.node,
+				pxe,
+				fromAddr: AztecAddress.fromString(op.accountAddress),
+				opts: op.opts,
+				optimizableCalls,
+				remainingRaw,
+				runStandardArm: async (rawCalls) =>
+					this.executeAztecSimulateTxStandard({ ...op, exec: { ...op.exec, calls: rawCalls as never } }),
+				// Naive — upstream uses it only for error contextualization;
+				// no functional impact on sim correctness.
+				getContractName: async () => undefined,
+				logError: (msg, err) => this.logError(msg, err),
+			})
+			if (result === null) {
 				return this.executeAztecSimulateTxStandard(op)
 			}
-		}
-
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
-
-		const result = await runFastPath({
-			node,
-			pxe,
-			fromAddr: AztecAddress.fromString(op.accountAddress),
-			opts: op.opts,
-			optimizableCalls,
-			remainingRaw,
-			runStandardArm: async (rawCalls) =>
-				this.executeAztecSimulateTxStandard({ ...op, exec: { ...op.exec, calls: rawCalls as never } }),
-			// Naive — upstream uses it only for error contextualization;
-			// no functional impact on sim correctness.
-			getContractName: async () => undefined,
-			logError: (msg, err) => this.logError(msg, err),
+			return result
 		})
-		if (result === null) {
-			return this.executeAztecSimulateTxStandard(op)
-		}
-		return result
 	}
 
 	/** Standard path: full PXE simulation through the account entrypoint
@@ -2130,8 +2129,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const network = await this.networkService.getNetwork(op.networkId)
 		const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress.toString())
 
-		const node = await this.networkService.getNode(network.chainId)
-		const nodeInfo = await node.getNodeInfo()
+		const nodeInfo = await this.networkService.withBinding(network.chainId, async (b) => b.node.getNodeInfo())
 		const metadata = {
 			chainId: new Fr(nodeInfo.l1ChainId),
 			version: new Fr(nodeInfo.rollupVersion),
