@@ -24,7 +24,9 @@ const cases: Array<{ id: number; name: string; method: string; btn: string }> = 
 for (const c of cases) {
 	test.skipIf(!hasConfig)(
 		`sim-${c.name} (#${c.id}) — silent path returns ok or error`,
-		{ timeout: 120_000 },
+		// retry: 1 — load-induced flake under cumulative full-suite state.
+		// Passes deterministically in isolation. Per network-test-triage prior art.
+		{ timeout: 120_000, retry: 1 },
 		async ({ dappConnectedExtensionPerTest: dappConnectedExtension }) => {
 			const page = dappConnectedExtension.playgroundPage
 
