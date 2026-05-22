@@ -3,7 +3,7 @@ import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import { normalizeError } from "@nulo/wallet-core/jobs"
 import type { ILogger } from "@/wallet/logger"
-import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
+import { NetworkService } from "@/wallet/services/network/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import type { OperationContext } from "@/wallet/services/operation-journal/spec"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
@@ -272,7 +272,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			throw new Error("unknown network id")
 		}
 
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
+		const pxe = this.pxeService.getPXE(this.networks.networkInfoLive(network))
 
 		const instance = await pxe.getContractInstance(AztecAddress.fromString(token.contract))
 		if (!instance) {
@@ -357,7 +357,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				throw new Error("unknown network id")
 			}
 
-			const pxe = this.pxeService.getPXE(networkInfoFrom(network))
+			const pxe = this.pxeService.getPXE(this.networks.networkInfoLive(network))
 
 			const instance = await pxe.getContractInstance(AztecAddress.fromString(contract))
 			if (!instance) {

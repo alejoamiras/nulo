@@ -82,8 +82,14 @@ function makeService(): ServiceHooks {
 			profileId: "p",
 			chainId: 0,
 			name: "Local",
-			primaryEndpointId: "e1",
 			endpoints: [{ id: "e1", rpcUrl: "http://x" }],
+		})),
+		// Live binding accessor — falls back to endpoints[0] when no live
+		// route is cached (matches the production helper's behavior).
+		networkInfoLive: vi.fn((network: { profileId: string; chainId: number; endpoints: Array<{ rpcUrl: string }> }) => ({
+			profileId: network.profileId,
+			chainId: network.chainId,
+			rpcUrl: network.endpoints[0]?.rpcUrl ?? "",
 		})),
 	}
 

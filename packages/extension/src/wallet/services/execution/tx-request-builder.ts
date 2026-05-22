@@ -53,7 +53,7 @@ import type { AccountService } from "@/wallet/services/account/service"
 import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { IAccountContract, PartialGasSettingsRPC } from "@nulo/aztec-runtime/account"
 import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
-import { networkInfoFrom, type NetworkService, type Network } from "@/wallet/services/network/service"
+import type { NetworkService, Network } from "@/wallet/services/network/service"
 import type { ProfileService } from "@/wallet/services/profile/service"
 import type { IPXE, PxeServiceClient } from "@/wallet/services/pxe/client"
 import { StepContent, type TaskService, type WrappedTask } from "@/wallet/services/task/service"
@@ -101,9 +101,14 @@ export class TxRequestBuilder {
 			const network = await this.networkService.getNetwork(op.networkId)
 			const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
 			const node = await this.networkService.getNode(network.chainId)
-			const pxe = this.pxeService.getPXE(networkInfoFrom(network))
+			const pxe = this.pxeService.getPXE(this.networkService.networkInfoLive(network))
 
-			const nodeInfo = await node.getNodeInfo()
+			// Failure-report path for the chain-info read. PXE-side calls
+			// downstream go through `pxeService` and have their own error
+			// handling; the direct `node.getNodeInfo()` is the AztecNode call
+			// most likely to fail on a bad endpoint, so it's the one we route
+			// through the classifier.
+			const nodeInfo = await this.networkService.withBinding(network.chainId, async (b) => b.node.getNodeInfo())
 			const contracts = this.resolver.extractContracts(op.actions)
 			const instances = await this.resolver.resolveInstances(pxe, contracts)
 			const artifacts = await this.resolver.resolveArtifacts(pxe, instances)
@@ -387,7 +392,7 @@ export class TxRequestBuilder {
 
 			const network = await this.networkService.getNetwork(op.networkId)
 			const node = await this.networkService.getNode(network.chainId)
-			const pxe = this.pxeService.getPXE(networkInfoFrom(network))
+			const pxe = this.pxeService.getPXE(this.networkService.networkInfoLive(network))
 			const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
 			this.log(`buildNoFrom: account resolved, address=${account.address.toString()}`)
 
@@ -444,8 +449,11 @@ export class TxRequestBuilder {
 			}
 
 			const hashedArguments = [await HashedValues.fromArgs(call.args)]
-			const nodeInfo = await node.getNodeInfo()
-			const currentMinFees = await node.getCurrentMinFees()
+			// Both reads are AztecNode-direct calls; route through withBinding
+			// so failures count toward the failure classifier (Phase 1/3).
+			const [nodeInfo, currentMinFees] = await this.networkService.withBinding(network.chainId, async (b) =>
+				Promise.all([b.node.getNodeInfo(), b.node.getCurrentMinFees()]),
+			)
 			const gasSettings = GasSettings.fallback({ maxFeesPerGas: currentMinFees })
 			const txRequest = new TxExecutionRequest(
 				call.to,

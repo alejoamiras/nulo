@@ -34,7 +34,7 @@ import {
 	collectOffchainEffects,
 } from "@aztec/stdlib/tx"
 import z from "zod"
-import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
+import { NetworkService } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { AccountService } from "@/wallet/services/account/service"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
@@ -466,7 +466,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				activityFnName = reused.fnName
 				activityArgs = reused.args
 				network = await this.networkService.getNetwork(networkId)
-				pxe = this.pxeService.getPXE(networkInfoFrom(network))
+				pxe = this.pxeService.getPXE(this.networkService.networkInfoLive(network))
 				const profile = await this.profileService.getActiveProfile()
 				if (!profile) throw new Error("Wallet locked")
 				account = await this.accountService.getAccountContract(profile.id, network.chainId, accountAddress)
@@ -1010,14 +1010,16 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 		const providedInstance = await ContractInstanceWithAddressSchema.optional().parseAsync(op.instance)
 		const instance =
-			providedInstance ?? (await this.pxeService.getContractInstance(networkInfoFrom(network), AztecAddress.fromString(op.address)))
+			providedInstance ??
+			(await this.pxeService.getContractInstance(this.networkService.networkInfoLive(network), AztecAddress.fromString(op.address)))
 		if (!instance) {
 			throw new Error("Contract instance not found")
 		}
 
 		const providedArtifact = await ContractArtifactSchema.optional().parseAsync(op.artifact)
 		const artifact =
-			providedArtifact ?? (await this.pxeService.getContractArtifact(networkInfoFrom(network), instance.currentContractClassId))
+			providedArtifact ??
+			(await this.pxeService.getContractArtifact(this.networkService.networkInfoLive(network), instance.currentContractClassId))
 		if (!artifact) {
 			throw new Error("Contract artifact not found")
 		}
@@ -1032,12 +1034,12 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw new Error("Contract address doesn't match instance address")
 		}
 
-		await this.pxeService.registerContract(networkInfoFrom(network), { instance, artifact })
+		await this.pxeService.registerContract(this.networkService.networkInfoLive(network), { instance, artifact })
 	}
 
 	private async executeRegisterSender(op: RegisterSenderOperation): Promise<void> {
 		const network = await this.networkService.getNetwork(op.networkId)
-		await this.pxeService.registerSender(networkInfoFrom(network), AztecAddress.fromString(op.address))
+		await this.pxeService.registerSender(this.networkService.networkInfoLive(network), AztecAddress.fromString(op.address))
 	}
 
 	private async executeRegisterToken(op: RegisterTokenOperation, origin: LocalTxOrigin, parentTask?: WrappedTask): Promise<void> {
@@ -1211,7 +1213,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const network = await this.networkService.getNetwork(op.networkId)
 		const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
 
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
+		const pxe = this.pxeService.getPXE(this.networkService.networkInfoLive(network))
 
 		const registeredContracts = new Set<string>((await pxe.getContracts()).map((x) => x.toString()))
 		if (!registeredContracts.has(op.contract)) {
@@ -1265,7 +1267,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
 
 		const node = await this.networkService.getNode(network.chainId)
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
+		const pxe = this.pxeService.getPXE(this.networkService.networkInfoLive(network))
 		const contracts = this.resolver.extractContracts(op.calls)
 		const instances = await this.resolver.resolveInstances(pxe, contracts)
 		const artifacts = await this.resolver.resolveArtifacts(pxe, instances)
@@ -1573,7 +1575,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		op: AztecGetContractClassMetadataOperation,
 	): Promise<{ isContractClassPubliclyRegistered: boolean; isArtifactRegistered: boolean }> {
 		const network = await this.networkService.getNetwork(op.networkId)
-		const artifact = await this.pxeService.getContractArtifact(networkInfoFrom(network), op.id, { pxeOnly: true })
+		const artifact = await this.pxeService.getContractArtifact(this.networkService.networkInfoLive(network), op.id, { pxeOnly: true })
 		return {
 			isContractClassPubliclyRegistered: !!artifact,
 			isArtifactRegistered: !!artifact,
@@ -1592,14 +1594,20 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// Check PXE-local only: simulation requires both instance AND artifact
 		// registered in PXE. The full cascade (node/known/registry) finds on-chain
 		// data that PXE can't use for simulation.
-		const localInstance = await this.pxeService.getContractInstance(networkInfoFrom(network), op.address, { pxeOnly: true })
+		const localInstance = await this.pxeService.getContractInstance(this.networkService.networkInfoLive(network), op.address, {
+			pxeOnly: true,
+		})
 
 		let hasArtifact = false
 		if (localInstance) {
 			try {
-				const artifact = await this.pxeService.getContractArtifact(networkInfoFrom(network), localInstance.currentContractClassId, {
-					pxeOnly: true,
-				})
+				const artifact = await this.pxeService.getContractArtifact(
+					this.networkService.networkInfoLive(network),
+					localInstance.currentContractClassId,
+					{
+						pxeOnly: true,
+					},
+				)
 				hasArtifact = !!artifact
 			} catch {
 				hasArtifact = false
@@ -1614,7 +1622,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// the local known-bundle fallback still runs underneath.
 		let isPublished = isLocallyRegistered
 		if (!isPublished) {
-			const fullInstance = await this.pxeService.getContractInstance(networkInfoFrom(network), op.address, {
+			const fullInstance = await this.pxeService.getContractInstance(this.networkService.networkInfoLive(network), op.address, {
 				nodeBestEffort: true,
 			})
 			isPublished = !!fullInstance
@@ -1631,7 +1639,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 	private async executeAztecGetPrivateEvents(op: AztecGetPrivateEventsOperation): Promise<PackedPrivateEvent[]> {
 		const network = await this.networkService.getNetwork(op.networkId)
-		return this.pxeService.getPrivateEvents(networkInfoFrom(network), op.eventMetadata.eventSelector, op.eventFilter)
+		return this.pxeService.getPrivateEvents(
+			this.networkService.networkInfoLive(network),
+			op.eventMetadata.eventSelector,
+			op.eventFilter,
+		)
 	}
 
 	private async executeAztecGetChainInfo(op: AztecGetChainInfoOperation): Promise<ChainInfo> {
@@ -1642,7 +1654,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 	private async executeAztecRegisterSender(op: AztecRegisterSenderOperation): Promise<AztecAddress> {
 		const network = await this.networkService.getNetwork(op.networkId)
-		return this.pxeService.registerSender(networkInfoFrom(network), op.address)
+		return this.pxeService.registerSender(this.networkService.networkInfoLive(network), op.address)
 	}
 
 	private async executeAztecGetAddressBook(_op: AztecGetAddressBookOperation): Promise<Aliased<AztecAddress>[]> {
@@ -1675,7 +1687,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// etc.). When neither has it, fail loudly with a message telling
 		// the dApp to pass `artifact` — there is no remote registry fallback.
 		const classId = instance.currentContractClassId
-		const artifact = providedArtifact ?? (await this.pxeService.getContractArtifact(networkInfoFrom(network), classId))
+		const artifact =
+			providedArtifact ?? (await this.pxeService.getContractArtifact(this.networkService.networkInfoLive(network), classId))
 		if (!artifact) {
 			throw new Error(
 				`Contract artifact not found for class ${classId}. ` +
@@ -1689,10 +1702,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw new Error("Contract artifact doesn't match instance's current class id")
 		}
 
-		await this.pxeService.registerContract(networkInfoFrom(network), { instance, artifact })
+		await this.pxeService.registerContract(this.networkService.networkInfoLive(network), { instance, artifact })
 
 		if (op.secretKey) {
-			await this.pxeService.registerAccount(networkInfoFrom(network), op.secretKey, await computePartialAddress(instance))
+			await this.pxeService.registerAccount(
+				this.networkService.networkInfoLive(network),
+				op.secretKey,
+				await computePartialAddress(instance),
+			)
 		}
 
 		return instance
@@ -1821,7 +1838,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 		const network = await this.networkService.getNetwork(op.networkId)
 		const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
+		const pxe = this.pxeService.getPXE(this.networkService.networkInfoLive(network))
 		await account.ensureRegistered(pxe)
 		return pxe.executeUtility(op.call, {
 			authwits: await z.array(AuthWitness.schema).optional().parseAsync(op.opts.authWitnesses),

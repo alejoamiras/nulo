@@ -969,8 +969,15 @@ describe("NetworkService failover engine (multi-rpc-failover Phase 1)", () => {
 		expect(events).toEqual(["snapback"])
 	})
 
-	test("promoteEndpoint reorders + flips active + emits source: 'manual'", async () => {
-		const { service, local } = setupServiceWithStorage({ "https://a.test": nodeInfoForChain(42) })
+	test("promoteEndpoint probes promoted endpoint, then flips active + emits source: 'manual'", async () => {
+		// Both endpoints must answer the chainId probe so `promoteEndpoint`
+		// can probe-before-activate (codex post-impl review §2: probe is
+		// the load-bearing security check against silently activating a
+		// chainId-mismatched endpoint).
+		const { service, local } = setupServiceWithStorage({
+			"https://a.test": nodeInfoForChain(42),
+			"https://b.test": nodeInfoForChain(42),
+		})
 		seedNetwork(
 			local,
 			makeNetwork(42, [
@@ -988,6 +995,35 @@ describe("NetworkService failover engine (multi-rpc-failover Phase 1)", () => {
 		expect(updated.endpoints[0]!.id).toBe("ep-b")
 		expect(routeState(service, "net-42").activeEndpointId).toBe("ep-b")
 		expect(events).toEqual(["manual"])
+	})
+
+	test("promoteEndpoint with chainId-mismatched target: persists reorder, throws, does NOT flip active", async () => {
+		// User promotes ep-b but ep-b now reports a different chainId
+		// (misconfigured / malicious). The reorder is persisted (user
+		// intent is durable), but `activeEndpointId` stays on ep-a and the
+		// endpoint goes into the `invalidChain` quarantine.
+		const { service, local } = setupServiceWithStorage({
+			"https://a.test": nodeInfoForChain(42),
+			"https://b.test": nodeInfoForChain(999), // wrong chain!
+		})
+		seedNetwork(
+			local,
+			makeNetwork(42, [
+				{ id: "ep-a", rpcUrl: "https://a.test" },
+				{ id: "ep-b", rpcUrl: "https://b.test" },
+			]),
+		)
+		await service.acquireBinding(42)
+
+		await expect(service.promoteEndpoint("net-42", "ep-b")).rejects.toThrow(/ENDPOINT_CHAIN_MISMATCH/)
+
+		// Reorder is committed (endpoints[0] is now ep-b — user preference).
+		const network = await service.getNetwork("net-42")
+		expect(network.endpoints[0]!.id).toBe("ep-b")
+		// Active route did NOT move; quarantined.
+		const state = routeState(service, "net-42")
+		expect(state.activeEndpointId).toBe("ep-a")
+		expect(state.invalidChain.has("ep-b")).toBe(true)
 	})
 
 	test("clearEndpointCooldowns wipes cooldowns + invalidChain (no active flip)", async () => {

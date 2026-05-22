@@ -3,7 +3,7 @@ import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
-import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
+import { NetworkService } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
@@ -157,7 +157,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 			}
 
 			const network = await resolveNetworkByChainId(this.networkService, chainId)
-			const pxe = this.pxeService.getPXE(networkInfoFrom(network))
+			const pxe = this.pxeService.getPXE(this.networkService.networkInfoLive(network))
 
 			const toDiscover: { instance: ContractInstanceWithAddress; artifact: ContractArtifact }[] = []
 
@@ -240,7 +240,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 			throw new Error("Profile locked")
 		}
 		const network = await this.networkService.getNetwork(networkId)
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
+		const pxe = this.pxeService.getPXE(this.networkService.networkInfoLive(network))
 
 		const fpcInstance = await pxe.getContractInstance(AztecAddress.fromString(address))
 		if (!fpcInstance) {
@@ -342,7 +342,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		// Type-narrowed: existing.type === FpcType.DefaultSponsoredFpc here
 		// (the PrivateFPC early-return above eliminated the other variant).
 		const network = await resolveNetworkByChainId(this.networkService, existing.chainId)
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
+		const pxe = this.pxeService.getPXE(this.networkService.networkInfoLive(network))
 
 		const fpcInstance = await pxe.getContractInstance(AztecAddress.fromString(address))
 		if (!fpcInstance) {
