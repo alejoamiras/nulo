@@ -1,0 +1,165 @@
+/**
+ * Best-effort "queued" journal-record creation at wallet-sdk message arrival.
+ *
+ * Extracted from `background.ts` so the cap + pre-auth + parsing logic is
+ * unit-testable without spinning up the full BackgroundConnectionHandler.
+ *
+ * Behaviour:
+ *   - Skip queued visibility when:
+ *       - no active profile
+ *       - no matching dapp session
+ *       - no `transaction` capability grant
+ *       - per-session cap reached (MAX_QUEUED_PER_SESSION)
+ *       - global cap reached (MAX_QUEUED_GLOBAL)
+ *   - Skip ONLY for `sendTx` messages — caller is responsible for routing.
+ *   - Cap enforcement is atomic via `queuedCreationLock` — without this,
+ *     concurrent arrivals all see a stale count and the cap is advisory
+ *     rather than protective (codex + opus post-impl F1).
+ */
+import type { WalletMessage } from "@aztec/wallet-sdk/types"
+import type { ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
+import type { ILogger } from "@/wallet/logger"
+import { LogLevel } from "@/wallet/logger"
+import { Lock, getErrorMessage } from "@nulo/wallet-core/utils"
+import type { OperationJournalService } from "@/wallet/services/operation-journal/service"
+import type { ProfileService } from "@/wallet/services/profile/service"
+import type { DappSessionService } from "@/wallet/services/dapp-session/service"
+import type { NetworkService } from "@/wallet/services/network/service"
+import { parseCaipAccount, resolveNetworkByChainId } from "@/wallet/utils/caip"
+import type { CaipAccount } from "@/wallet/services/dapp-interaction/spec"
+
+/** Per-session queued-record cap. Bounds the activity feed under burst flood. */
+export const MAX_QUEUED_PER_SESSION = 8
+/** Global queued-record cap across all sessions. Coarser DoS backstop. */
+export const MAX_QUEUED_GLOBAL = 32
+
+/** Module-level lock around count + create. Closes the burst-bypass race
+ *  flagged by codex + opus in the post-impl review. */
+export const queuedCreationLock = new Lock("wallet-sdk-bg:queued-creation")
+
+/**
+ * Mirror of background.ts's chainInfoToChainId. Inlined to keep this module
+ * test-harness-friendly (avoids dragging the full background.ts import
+ * graph into unit tests). XORs chainId with rollup version per
+ * NetworkService convention.
+ */
+import type { Fr } from "@aztec/foundation/curves/bn254"
+function chainInfoToChainId(obj: { chainInfo: { chainId: Fr | string; version: Fr | string } }): number {
+	const raw = obj.chainInfo
+	const chainId = typeof raw.chainId === "string" ? Number(BigInt(raw.chainId)) : Number(raw.chainId.toBigInt())
+	const version = typeof raw.version === "string" ? Number(BigInt(raw.version)) : Number(raw.version.toBigInt())
+	return (chainId ^ version) >>> 0
+}
+
+export interface TryCreateQueuedJournalDeps {
+	journal: OperationJournalService
+	profile: ProfileService
+	dappSession: DappSessionService
+	networkSvc: NetworkService
+	logger: ILogger
+}
+
+/**
+ * Create a journal record at `queued` stage so the activity feed surfaces
+ * an incoming sendTx the moment it arrives — BEFORE the per-session FIFO
+ * lets the handler open the approval popup.
+ *
+ * Returns the new record's id, or `undefined` on any failure. Best-effort
+ * visibility: a failure here NEVER blocks the actual handler from running
+ * (the handler falls back to creating its own in-flight record via
+ * `beginDappExecuteJournal`).
+ *
+ * Cheap pre-auth gates: skip queued visibility when there's no active
+ * profile, no dapp session, or no sendTx capability grant. Avoids
+ * surfacing requests that the handler will reject anyway.
+ *
+ * Cap enforcement is atomic: the count-then-create section runs under
+ * `queuedCreationLock` so concurrent arrivals can't all see a stale
+ * "below cap" count and over-create.
+ */
+export async function tryCreateQueuedJournal(
+	message: WalletMessage,
+	session: ActiveSession,
+	deps: TryCreateQueuedJournalDeps,
+): Promise<string | undefined> {
+	const { journal, profile, dappSession, networkSvc, logger } = deps
+	try {
+		const activeProfile = await profile.getActiveProfile()
+		if (!activeProfile) return undefined
+
+		const chainId = chainInfoToChainId(session)
+		const dapp = await dappSession.tryGetDappSessionByOriginAndChain(session.origin, String(chainId))
+		if (!dapp?.accounts?.length) return undefined
+
+		// sendTx requires the `transaction` capability (the capability type
+		// scoped to send-like operations). Pre-auth-gate skip when missing.
+		const hasSendTxGrant = (dapp.capabilityGrants ?? []).some((g) => g.capability.type === "transaction")
+		if (!hasSendTxGrant) return undefined
+
+		// DappSession.accounts is string[] of CAIP. Parse to get the bare address.
+		const firstCaipAccount = dapp.accounts[0] as CaipAccount
+		const { address: accountAddress } = parseCaipAccount(firstCaipAccount)
+
+		// `networkId` for activity-feed scoping must be the INTERNAL network row id
+		// (RecentActivityView.journalRecordInScope filters on `network.id`), NOT
+		// `String(chainId)`. Without this resolution the queued card never renders.
+		const network = await resolveNetworkByChainId(networkSvc, chainId)
+		if (!network) return undefined
+
+		// Critical section: cap check + record create must be atomic.
+		await queuedCreationLock.enter()
+		try {
+			const sessionQueuedCount = await journal.countOperations({
+				sessionId: session.sessionId,
+				stage: "queued",
+			})
+			if (sessionQueuedCount >= MAX_QUEUED_PER_SESSION) {
+				logger.log(
+					"wallet-sdk-bg",
+					LogLevel.Debug,
+					`Per-session queued cap reached for ${session.sessionId}; skipping queued visibility`,
+				)
+				return undefined
+			}
+			const globalQueuedCount = await journal.countOperations({ stage: "queued" })
+			if (globalQueuedCount >= MAX_QUEUED_GLOBAL) {
+				logger.log("wallet-sdk-bg", LogLevel.Warn, `Global queued cap reached (${MAX_QUEUED_GLOBAL}); skipping queued visibility`)
+				return undefined
+			}
+
+			const primaryMethod = extractPrimaryMethodFromSendTx(message)
+			const record = await journal.createOperation({
+				kind: "dapp_execute",
+				origin: "dapp",
+				profileId: activeProfile.id,
+				sessionId: session.sessionId,
+				accountAddress,
+				networkId: network.id,
+				title: primaryMethod ?? "Transaction",
+				subtitle: session.origin,
+				initialStage: { stage: "queued" },
+			})
+			return record.id
+		} finally {
+			queuedCreationLock.leave()
+		}
+	} catch (error) {
+		logger.log("wallet-sdk-bg", LogLevel.Warn, `tryCreateQueuedJournal failed: ${getErrorMessage(error)}`)
+		return undefined
+	}
+}
+
+/**
+ * Best-effort primary-method extraction from a sendTx wallet message.
+ * Mirrors what `executeAztecSendTx` does to compute the title at journal
+ * creation time, so the title is consistent between the queued surface
+ * and the post-claim in-flight surface.
+ */
+export function extractPrimaryMethodFromSendTx(message: WalletMessage): string | undefined {
+	if (message.type !== "sendTx") return undefined
+	const args = message.args as unknown[] | undefined
+	if (!Array.isArray(args)) return undefined
+	const exec = args[0] as { calls?: Array<{ name?: string }> } | undefined
+	if (!exec?.calls) return undefined
+	return exec.calls.find((c) => typeof c?.name === "string")?.name
+}
