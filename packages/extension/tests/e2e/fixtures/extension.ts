@@ -715,7 +715,7 @@ export function patchPagePolling(page: Page): void {
  */
 function isFrameDetachError(err: unknown): boolean {
 	const msg = err instanceof Error ? err.message : String(err)
-	return /Navigating frame was detached|frame got detached|Session closed|Target closed/i.test(msg)
+	return /Navigating frame was detached|frame got detached|Session closed|Target closed|Connection closed/i.test(msg)
 }
 
 /** Open the extension popup in a new page with error collection. */

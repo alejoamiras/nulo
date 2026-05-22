@@ -53,7 +53,7 @@ export async function waitForPopup(
 		await waitForMainFrame(page)
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err)
-		if (!/frame got detached|Session closed|Target closed/i.test(msg)) throw err
+		if (!/frame got detached|Session closed|Target closed|Connection closed/i.test(msg)) throw err
 		// Re-wait for main frame after the detach — the browser usually
 		// recreates the frame within a few hundred ms.
 		await waitForMainFrame(page, 8_000)
@@ -87,7 +87,7 @@ export async function waitForPopup(
 		await livenessFn()
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err)
-		if (!/frame got detached|Session closed|Target closed/i.test(msg)) throw err
+		if (!/frame got detached|Session closed|Target closed|Connection closed/i.test(msg)) throw err
 		// Re-stabilize main frame then retry once.
 		await waitForMainFrame(page, 8_000)
 		await livenessFn()
