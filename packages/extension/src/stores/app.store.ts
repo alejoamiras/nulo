@@ -108,11 +108,20 @@ export const useAppStore = defineStore("app", () => {
 		if (!network.value) return
 		networkStatus.value = "sync"
 		const oldNetworkId = network.value?.id
-		const status = await managers.network.getNodeStatus(network.value.id)
+		const [status, health] = await Promise.all([
+			managers.network.getNodeStatus(network.value.id),
+			managers.network.getEndpointHealth(network.value.id),
+		])
 
 		if (oldNetworkId !== network.value?.id) return
 
-		networkStatus.value = NodeStatus[status]
+		// Compound state: "degraded" amber dot when the node is alive but
+		// the live route isn't on the user-preferred endpoint (failover or
+		// post-promote pending snapback). Falls through to the standard
+		// NodeStatus rendering when the route is on preferred.
+		const preferredId = network.value.endpoints[0]?.id
+		const isDegraded = status === NodeStatus.Active && preferredId !== undefined && health.activeEndpointId !== preferredId
+		networkStatus.value = isDegraded ? "degraded" : NodeStatus[status]
 	}
 	const renameNetwork = async (id: string, name: string) => {
 		await managers.network.renameNetwork(id, name)
