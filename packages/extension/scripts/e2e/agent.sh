@@ -41,6 +41,14 @@ fi
 echo "[e2e:agent] bundle contains $AZTEC_NODE_URL ✓"
 
 echo "[e2e:agent] running network e2e..."
+# `E2E_REQUIRE_SETUP=1` tells `tests/e2e/global-setup.ts` that this is the
+# real agent runner (not a contributor running vitest directly without a
+# sandbox), so a failed `deployContractsAndProvide` MUST surface as a loud
+# failure rather than the historical silent `aztecTestConfig: undefined`
+# pass-by-skip. Without this gate, every test gets `describe.skipIf(!config)`
+# and vitest exits 0 with `61 skipped` — which is what hid this entire suite
+# from CI for weeks.
+E2E_REQUIRE_SETUP=1 \
 ANVIL_URL="$ANVIL_URL" \
 ANVIL_PORT="$ANVIL_PORT" \
 AZTEC_NODE_URL="$AZTEC_NODE_URL" \

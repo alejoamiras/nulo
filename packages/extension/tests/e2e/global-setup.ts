@@ -426,6 +426,26 @@ async function deployContractsAndProvide(project: TestProject): Promise<void> {
 	} catch (error) {
 		console.error("[e2e-setup] Failed to deploy test contracts:", error)
 		project.provide("aztecTestConfig", undefined)
+		// Env-gated fail-loud. The `bun run e2e:agent` wrapper
+		// (`scripts/e2e/agent.sh`) sets `E2E_REQUIRE_SETUP=1` to mark this
+		// as a real test invocation where the sandbox is supposed to be
+		// available. In that mode we propagate the deploy failure so vitest
+		// exits non-zero with a clear message — instead of every test
+		// gating on `describe.skipIf(!hasAztecTestConfig)` and silently
+		// passing-by-skip. Without this gate, the suite was reporting
+		// `61 skipped` exit 0 on every CI run since the public repo opened.
+		//
+		// For contributor-local invocations without the agent wrapper
+		// (e.g. running vitest directly without an Aztec sandbox), the env
+		// var is unset and we keep the legacy skip-silently behavior so
+		// they aren't blocked from running unrelated tests.
+		if (process.env.E2E_REQUIRE_SETUP === "1") {
+			throw new Error(
+				`[e2e-setup] FATAL: failed to deploy test contracts and E2E_REQUIRE_SETUP=1 is set. ` +
+					`Aborting run to prevent silent pass-by-skip. Original error: ` +
+					`${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
 	}
 
 	// Always write the lock once children are alive, even if contract deploy
