@@ -106,6 +106,15 @@ describe("CapabilityCard", () => {
 		expect(w.find('[data-testid="cap-rerequested-badge"]').exists()).toBe(true)
 	})
 
+	test("granted + isUnknown variant ALSO renders the UNRECOGNIZED chip", () => {
+		// codex post-impl §5: read-only existing-grant cards in the popup
+		// must still surface the unknown-cap warning, otherwise a user who
+		// scrolls down to the "Already granted" section sees no signal that
+		// one of their existing grants is for an unrecognized type.
+		const w = factory({ granted: true, isUnknown: true })
+		expect(w.find('[data-testid="cap-unrecognized-badge"]').exists()).toBe(true)
+	})
+
 	test("clicking the head emits toggleExpanded (new variant)", async () => {
 		const w = factory()
 		await w.find('[data-testid="cap-detail-toggle"]').trigger("click")

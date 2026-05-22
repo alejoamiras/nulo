@@ -294,6 +294,7 @@ onUnmounted(() => {
 							:selected="cap.selected"
 							granted
 							:expanded="expandedCards.has(i)"
+							:isUnknown="cap.isUnknown"
 							@toggleExpanded="toggleExpand(i)"
 						/>
 					</Flex>

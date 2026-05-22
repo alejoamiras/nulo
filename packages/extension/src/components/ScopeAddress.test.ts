@@ -58,19 +58,35 @@ describe("ScopeAddress", () => {
 	})
 
 	test("the contact name passes through sanitizeWireString (bidi-control stripped)", async () => {
-		getContactByAddress.mockResolvedValueOnce({ name: `evil‮name` })
+		// U+202E (RLO) between 'evil' and 'name'; \u escape keeps the
+		// test source pure ASCII for clean git diffs.
+		getContactByAddress.mockResolvedValueOnce({ name: `evil\u202Ename` })
 		const w = factory({ address: "0xabc" })
 		await flushPromises()
 		expect(w.text()).toMatch(/\(@evilname\)/)
 	})
 
-	test("click writes the RAW (untrimmed) address to the clipboard", async () => {
+	test("click writes the FULL address to the clipboard (no truncation), stripped of control chars", async () => {
 		getContactByAddress.mockResolvedValueOnce(null)
 		const w = factory({ address: "0x1234567890abcdef" })
 		await flushPromises()
 		await w.find('[data-testid="scope-address"]').trigger("click")
+		// Same value (clean ASCII), no truncation — clipboard never gets the
+		// trimmed `0x1234…cdef` display form.
 		expect(writeText).toHaveBeenCalledWith("0x1234567890abcdef")
 		expect(openToast).toHaveBeenCalled()
+	})
+
+	test("clipboard payload is stripped of invisible/control chars even when input has them (codex post-impl §3)", async () => {
+		// A hostile dApp could send an address with embedded zero-width chars
+		// so the user sees a visually-clean address but pastes a different
+		// value. The clipboard write strips invisibles WITHOUT truncating.
+		getContactByAddress.mockResolvedValueOnce(null)
+		const evil = "0x12\u200B34\u202E56\u00AD78\u0009"
+		const w = factory({ address: evil })
+		await flushPromises()
+		await w.find('[data-testid="scope-address"]').trigger("click")
+		expect(writeText).toHaveBeenCalledWith("0x12345678")
 	})
 
 	test("Enter key copies (a11y parity with click)", async () => {

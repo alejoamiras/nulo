@@ -129,7 +129,14 @@ function riskWord(r: CapabilityRisk): string {
 
 			<Flex direction="column" gap="2" wide>
 				<Flex align="center" justify="between" gap="8">
-					<Text size="14" weight="600" color="tertiary">{{ label }}</Text>
+					<Flex align="center" gap="6" :class="$style.head_label_row">
+						<Text size="14" weight="600" color="tertiary" :class="isUnknown && $style.mono_label">
+							{{ label }}
+						</Text>
+						<span v-if="isUnknown" data-testid="cap-unrecognized-badge" :class="$style.warning_badge">
+							unrecognized
+						</span>
+					</Flex>
 					<Icon
 						@click.stop="emit('toggleExpanded')"
 						name="chevron"

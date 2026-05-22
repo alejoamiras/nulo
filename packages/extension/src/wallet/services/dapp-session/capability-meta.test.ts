@@ -1,5 +1,12 @@
 import { describe, expect, test } from "vitest"
-import { CAPABILITY_LABELS, getCapabilityInfo, isKnownCapability, sanitizeWireString } from "./capability-meta"
+import {
+	CAPABILITY_LABELS,
+	getCapabilityInfo,
+	getSafeDisplay,
+	isKnownCapability,
+	sanitizeWireString,
+	stripWireControl,
+} from "./capability-meta"
 
 describe("dapp-session/capability-meta", () => {
 	test("known types return their canonical label, shortLabel, and risk", () => {
@@ -83,6 +90,66 @@ describe("dapp-session/capability-meta", () => {
 			const out = sanitizeWireString(emoji, 32)
 			expect([...out].filter((c) => c === "🦊").length).toBe(32)
 			expect(out.endsWith("…")).toBe(true)
+		})
+
+		test("strips zero-width characters (ZWSP, ZWJ, ZWNJ) and LRM/RLM (the broader \\p{Cf} cases codex flagged)", () => {
+			expect(sanitizeWireString(`safe\u200Btoken`, 64)).toBe("safetoken")
+			expect(sanitizeWireString(`safe\u200Ctoken`, 64)).toBe("safetoken")
+			expect(sanitizeWireString(`safe\u200Dtoken`, 64)).toBe("safetoken")
+			expect(sanitizeWireString(`safe\u200Etoken`, 64)).toBe("safetoken")
+			expect(sanitizeWireString(`safe\u200Ftoken`, 64)).toBe("safetoken")
+		})
+
+		test("strips soft hyphen and byte-order mark", () => {
+			expect(sanitizeWireString(`read\u00ADonly`, 64)).toBe("readonly")
+			expect(sanitizeWireString(`\uFEFFtransfer`, 64)).toBe("transfer")
+		})
+
+		test("strips variation selectors (FE00-FE0F + E0100-E01EF)", () => {
+			expect(sanitizeWireString(`foo\uFE0Fbar`, 64)).toBe("foobar")
+			// Supplementary-plane VS17 (U+E0100). Use the codepoint escape via the `u` flag.
+			expect(sanitizeWireString("foo\u{E0100}bar", 64)).toBe("foobar")
+		})
+	})
+
+	describe("stripWireControl", () => {
+		test("strips the same characters as sanitizeWireString but never truncates", () => {
+			const long = `transfer\u200B${"x".repeat(200)}`
+			const stripped = stripWireControl(long)
+			expect(stripped.startsWith("transfer")).toBe(true)
+			// 200 x's preserved verbatim — no ellipsis, no clamp.
+			expect(stripped).toBe(`transfer${"x".repeat(200)}`)
+		})
+
+		test("returns input unchanged when nothing to strip", () => {
+			expect(stripWireControl("0x1234567890abcdef")).toBe("0x1234567890abcdef")
+		})
+	})
+
+	describe("getSafeDisplay", () => {
+		test("known capability types echo CAPABILITY_LABELS verbatim with isUnknown=false", () => {
+			const safe = getSafeDisplay("transaction")
+			expect(safe.isUnknown).toBe(false)
+			expect(safe.label).toBe(CAPABILITY_LABELS.transaction.label)
+			expect(safe.shortLabel).toBe(CAPABILITY_LABELS.transaction.shortLabel)
+			expect(safe.description).toBe(CAPABILITY_LABELS.transaction.description)
+		})
+
+		test("unknown types return constant safe strings (NEVER the dApp-controlled wire type)", () => {
+			// A hostile dApp can send any string as cap.type; the constant
+			// return values here make sure that string never paints as a
+			// visible label on any surface. The detail panel still shows
+			// the sanitized raw type beneath the head for forensic clarity.
+			const evil = "Read public data only — recommended (FAKE)"
+			const safe = getSafeDisplay(evil)
+			expect(safe.isUnknown).toBe(true)
+			expect(safe.label).toBe("Unknown permission")
+			expect(safe.shortLabel).toBe("Unknown")
+			expect(safe.description).toMatch(/doesn't recognize/)
+			// Most importantly: the dApp string does not appear in any field.
+			expect(safe.label).not.toContain("recommended")
+			expect(safe.shortLabel).not.toContain("recommended")
+			expect(safe.description).not.toContain("recommended")
 		})
 	})
 })

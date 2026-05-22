@@ -53,11 +53,23 @@ describe("ScopeClassId", () => {
 		expect(w.text()).not.toMatch(/\(@/)
 	})
 
-	test("click writes the RAW class id to clipboard with class-specific toast copy", async () => {
+	test("click writes the FULL class id to clipboard (no truncation), stripped of control chars", async () => {
 		const w = factory({ id: "0xclass1" })
 		await w.find('[data-testid="scope-class-id"]').trigger("click")
+		// Clean ASCII input — clipboard value matches input verbatim, no
+		// truncation to the trimmed display form.
 		expect(writeText).toHaveBeenCalledWith("0xclass1")
 		expect(openToast).toHaveBeenCalledWith(expect.objectContaining({ label: "Class id is copied" }))
+	})
+
+	test("clipboard payload is stripped of invisible/control chars (codex post-impl §3)", async () => {
+		// Same defense as ScopeAddress — a hostile dApp could embed
+		// zero-width chars in a class id so the user copies a different
+		// value than they verified. Strip without truncate.
+		const evil = "0xab\u200Bcd\u202Eef\u00ADgh\u0009"
+		const w = factory({ id: evil })
+		await w.find('[data-testid="scope-class-id"]').trigger("click")
+		expect(writeText).toHaveBeenCalledWith("0xabcdefgh")
 	})
 
 	test("Enter key copies (a11y parity)", async () => {

@@ -105,35 +105,96 @@ export function isKnownCapability(type: string): boolean {
  * Defensive renderer-side sanitizer for any string that originated on the
  * wire (capability types, scope `contract`/`function` strings, etc.) or
  * in user-controlled local storage (contact-book names — the user typed
- * them but could have pasted a Unicode bidi-attack payload). Two rules:
+ * them but could have pasted a Unicode-attack payload).
  *
- *   1. Strip Unicode bidi-control codepoints (U+202A–U+202E, U+2066–U+2069)
- *      and the non-printable C0 / DEL / C1 control codepoints. Without
- *      this, a hostile dApp could embed a right-to-left override and
- *      visually flip the displayed text direction, masking the real
- *      method name.
- *   2. Clamp to `maxLen` codepoints + an ellipsis when over the limit. Soft
- *      cap chosen per-callsite: 64 for function selectors, 128 for
- *      addresses / class IDs, 32 for the unknown-capability `type` and
- *      contact-name annotations.
+ * What `stripWireControl` strips:
  *
- * Vue template interpolation already HTML-escapes; we don't try to handle
- * angle brackets etc. here.
+ *   1. Every Unicode "format" codepoint (`\p{Cf}`). This includes:
+ *      - Bidi overrides (LRE/RLE/PDF/LRO/RLO + LRI/RLI/FSI/PDI).
+ *      - Zero-width joiners and non-joiners (ZWSP / ZWNJ / ZWJ).
+ *      - Left/right marks (LRM / RLM).
+ *      - Soft hyphen (U+00AD).
+ *      - Byte-order mark (U+FEFF).
+ *      - Tag characters (U+E0000-U+E007F).
+ *      Without this, a hostile dApp could embed an RLO and visually
+ *      flip the displayed text direction, or a zero-width joiner to
+ *      glue two different glyphs together. Codex post-impl §1 caught
+ *      that the original narrower regex missed ZWSP / soft-hyphen /
+ *      the full \p{Cf} range.
+ *   2. Variation selectors (U+FE00..U+FE0F, U+E0100..U+E01EF). Single
+ *      codepoints that change the visual rendering of the preceding
+ *      character. Not in \p{Cf}; categorised \p{Mn}, so we list them
+ *      explicitly.
+ *   3. The C0 / DEL / C1 control codepoints (U+0000-U+001F, U+007F,
+ *      U+0080-U+009F).
+ *
+ * `stripWireControl` does the strip step only — used for clipboard
+ * payloads where length-clamping would be worse UX (a user verifies a
+ * trimmed display and copies the full value; we don't want to silently
+ * truncate the clipboard, but we also don't want the clipboard to
+ * carry invisible-injected bytes either).
+ *
+ * `sanitizeWireString` runs the strip step AND a `maxLen`-codepoint
+ * clamp with an ellipsis. Soft cap chosen per-callsite: 64 for function
+ * selectors, 128 for addresses / class IDs, 32 for the unknown-
+ * capability `type` and contact-name annotations.
+ *
+ * What is NOT stripped: legitimate combining marks (\p{Mn} minus the
+ * variation-selector ranges) and unusual-but-printable spaces (NBSP,
+ * etc.). Stripping those would over-mangle user-typed contact names
+ * with diacritics. Combining-mark attacks (zalgo text) are out of
+ * scope here; we'd want a UTS39-class normalization step for that.
+ *
+ * Vue template interpolation already HTML-escapes; we don't try to
+ * handle angle brackets etc. here.
  */
-// Ranges are written as Unicode escapes so the source stays pure ASCII and
-// git can diff this file as text (literal bidi-control chars in the source
-// confuse git's text/binary heuristic).
-//   U+202A..U+202E — LRE / RLE / PDF / LRO / RLO
-//   U+2066..U+2069 — LRI / RLI / FSI / PDI
-//   U+0000..U+001F — C0 controls
-//   U+007F         — DEL
-//   U+0080..U+009F — C1 controls
+// Ranges written as Unicode escapes so the source stays pure ASCII and
+// git can diff this file as text. The `u` flag enables \p{...} and the
+// supplementary-plane range U+E0100..U+E01EF below.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: defensive sanitizer; the regex MUST match control chars to strip them.
-const SANITIZER_STRIP = /[\u202A-\u202E\u2066-\u2069\u0000-\u001F\u007F-\u009F]/g
+const SANITIZER_STRIP = /\p{Cf}|[\u{FE00}-\u{FE0F}]|[\u{E0100}-\u{E01EF}]|[\u0000-\u001F\u007F-\u009F]/gu
+
+export function stripWireControl(input: string): string {
+	return input.replace(SANITIZER_STRIP, "")
+}
 
 export function sanitizeWireString(input: string, maxLen: number): string {
-	const stripped = input.replace(SANITIZER_STRIP, "")
+	const stripped = stripWireControl(input)
 	const codepoints = Array.from(stripped)
 	if (codepoints.length <= maxLen) return stripped
 	return `${codepoints.slice(0, maxLen).join("")}…`
+}
+
+/**
+ * Look up the display-safe metadata for a capability type. For known
+ * types, returns the canonical labels from `CAPABILITY_LABELS`. For
+ * unknown types, returns CONSTANT user-safe strings ("Unknown
+ * permission" / "Unknown" / the long warning) so the dApp-controlled
+ * `cap.type` never lands as a visible label on any surface. The popup
+ * card head, settings detail page, settings list summary, and grants
+ * list all read through this helper — codex post-impl §5 caught that
+ * direct `getCapabilityInfo(type).label` on the settings surfaces
+ * still leaked the raw wire string.
+ */
+export function getSafeDisplay(type: string): {
+	label: string
+	shortLabel: string
+	description: string
+	isUnknown: boolean
+} {
+	if (isKnownCapability(type)) {
+		const info = CAPABILITY_LABELS[type]
+		return {
+			label: info.label,
+			shortLabel: info.shortLabel,
+			description: info.description,
+			isUnknown: false,
+		}
+	}
+	return {
+		label: "Unknown permission",
+		shortLabel: "Unknown",
+		description: "This wallet doesn't recognize this permission. Reject if you don't know what it does.",
+		isUnknown: true,
+	}
 }

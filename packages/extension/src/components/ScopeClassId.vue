@@ -12,14 +12,15 @@
  * named contact to imply a relationship that doesn't exist.
  */
 import { trimAddress } from "@/utils/string"
-import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
+import { sanitizeWireString, stripWireControl } from "@/wallet/services/dapp-session/capability-meta"
 
 const props = defineProps<{ id: string }>()
 
 const { openToast } = useToast()
 
 function handleClick() {
-	window.navigator.clipboard.writeText(props.id)
+	// Same stripping-without-truncation rule as ScopeAddress (codex post-impl §3).
+	window.navigator.clipboard.writeText(stripWireControl(props.id))
 	openToast({ label: "Class id is copied", icon: "copy" })
 }
 </script>
