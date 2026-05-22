@@ -34,12 +34,33 @@ export interface IAccountReader {
 	getAccounts(profileId: string, chainId: number): Promise<IAccountRef[]>
 }
 
+/**
+ * Optional execution-side hooks bag. Lets long-running per-op handlers
+ * signal "no longer FIFO-dependent" (so the wallet-sdk session FIFO can
+ * advance) and lets the message-arrival layer pass a pre-allocated
+ * journal id (so the in-flight surface is visible in the activity feed
+ * before the handler runs).
+ *
+ * Kept as a structural type so wallet-bridge doesn't import from the
+ * extension package. The concrete `ExecutionHooks` in `@/wallet/...`
+ * is structurally compatible.
+ */
+export interface IExecutionHooks {
+	onTxRequestFinalized?: () => void
+	queuedJournalId?: string
+}
+
 export interface IExecutionRunner {
-	executeOperations(operations: Operation[], origin: LocalTxOrigin): Promise<OperationResult[]>
+	executeOperations(
+		operations: Operation[],
+		origin: LocalTxOrigin,
+		parentTaskOrHooks?: unknown,
+		hooks?: IExecutionHooks,
+	): Promise<OperationResult[]>
 }
 
 export interface IDappInteractionRunner {
-	execute(params: ExecutionParams, cancellationToken?: string): Promise<ExecutionResult>
+	execute(params: ExecutionParams, cancellationToken?: string, hooks?: IExecutionHooks): Promise<ExecutionResult>
 	requestCapabilities(params: CapabilityParams, cancellationToken?: string): Promise<CapabilityResult>
 }
 

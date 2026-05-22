@@ -70,6 +70,11 @@ export const REAP_PERIOD_MINUTES = 1
  *   the answer within seconds; 5 min is a safety margin for slow nodes.
  */
 const STAGE_GRACE_MS: Readonly<Record<Exclude<JobStage, "succeeded" | "failed" | "cancelled">, number>> = {
+	// Matches the wallet-sdk dApp-interaction popup timeout (INTERACTION_TIMEOUT_MS).
+	// A queued record that survives 10 minutes means background.ts either crashed
+	// or somehow lost the handler — sweep it so the activity feed doesn't show a
+	// permanently-stuck "Queued..." card.
+	queued: 10 * 60_000,
 	pending: 2 * 60_000,
 	simulating: 10 * 60_000,
 	proving: 35 * 60_000,

@@ -24,6 +24,7 @@ import {
 	type DiscoveryPayload,
 	type DiscoveryParams,
 	type DiscoveryResult,
+	type ExecutionHooks,
 	type ExecutionParams,
 	type CaipChain,
 	type CaipAccount,
@@ -121,7 +122,9 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		this.logInfo(`executeAndResolve: starting [${kinds}] for ${origin.name}`)
 		try {
 			await this.profileService.refreshSession()
-			const result = await this.executionService.executeOperations(operations, origin)
+			// Forward hooks captured at interaction-creation time. Survives the
+			// popup handoff because we stash them on the interaction record.
+			const result = await this.executionService.executeOperations(operations, origin, undefined, interaction.hooks)
 			this.logInfo(`executeAndResolve: resolved [${kinds}]`)
 			this.windowManager.settle(interaction.handleId, result)
 		} catch (error) {
@@ -137,14 +140,14 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		}
 	}
 
-	public async execute(params: ExecutionParams, cancellationToken?: string): Promise<ExecutionResult> {
+	public async execute(params: ExecutionParams, cancellationToken?: string, hooks?: ExecutionHooks): Promise<ExecutionResult> {
 		await this.ensureInitialized()
 		const session = await this.validateSession(params)
 		const payload: ExecutionPayload = { params, session }
 		if (!(await this.isConfirmationNeeded(payload))) {
-			return await this.silentInteraction(payload)
+			return await this.silentInteraction(payload, hooks)
 		}
-		return (await this.interaction("execute", payload, cancellationToken)) as ExecutionResult
+		return (await this.interaction("execute", payload, cancellationToken, hooks)) as ExecutionResult
 	}
 
 	public async requestCapabilities(params: CapabilityParams, cancellationToken?: string): Promise<CapabilityResult> {
@@ -163,6 +166,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		type: string,
 		payload: ExecutionPayload | CapabilityPayload | DiscoveryPayload,
 		cancellationToken?: string,
+		hooks?: ExecutionHooks,
 	): Promise<ExecutionResult | CapabilityResult | DiscoveryResult> {
 		let interaction: DappInteraction
 
@@ -171,7 +175,8 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 
 			let id: string
 			do {
-				id = getRandomHex(8)
+				// 16 bytes / 128 bits (codex-round-1 defense-in-depth).
+				id = getRandomHex(16)
 			} while (this.storage.has(id))
 
 			const handle = this.windowManager.openAndAwait<ExecutionResult | CapabilityResult | DiscoveryResult>({
@@ -187,6 +192,10 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 				payload,
 				handleId: handle.handleId,
 				cancellationToken: cancellationToken ?? id,
+				// Hooks persist on the interaction so they survive across the
+				// popup handoff (interaction() returns → user approves → popup
+				// calls approveInteraction → executeAndResolve picks hooks up).
+				hooks,
 			}
 
 			this.storage.set(id, interaction)
@@ -199,7 +208,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		}
 	}
 
-	private async silentInteraction(payload: ExecutionPayload): Promise<ExecutionResult> {
+	private async silentInteraction(payload: ExecutionPayload, hooks?: ExecutionHooks): Promise<ExecutionResult> {
 		const profile = await this.profileService.getActiveProfile()
 		if (profile?.id !== payload.session.profileId) {
 			throw new Error("Wallet locked")
@@ -237,10 +246,15 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			operations.push(materialized as unknown as Operation)
 		}
 		await this.profileService.refreshSession()
-		return await this.executionService.executeOperations(operations, {
-			type: OriginType.DAPP,
-			name: payload.session.dappMetadata.name ?? "Unknown dapp",
-		})
+		return await this.executionService.executeOperations(
+			operations,
+			{
+				type: OriginType.DAPP,
+				name: payload.session.dappMetadata.name ?? "Unknown dapp",
+			},
+			undefined,
+			hooks,
+		)
 	}
 
 	private async validateSession({ sessionId, operations }: ExecutionParams): Promise<DappSession> {

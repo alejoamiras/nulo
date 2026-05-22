@@ -6,6 +6,12 @@ import { TERMINAL_STAGES, isTerminal, type JobStage } from "./types"
 describe("job FSM", () => {
 	test("legal transitions match the documented graph", () => {
 		const legalEdges: ReadonlyArray<[JobStage, JobStage]> = [
+			// queued is the pre-execution holding stage; claim path is
+			// queued → pending. Early-error / user-cancel-while-queued
+			// paths complete via queued → failed | cancelled.
+			["queued", "pending"],
+			["queued", "failed"],
+			["queued", "cancelled"],
 			["pending", "simulating"],
 			["simulating", "proving"],
 			["proving", "submitting"],
@@ -32,6 +38,15 @@ describe("job FSM", () => {
 
 	test("illegal transitions are rejected (including all terminal outgoing edges)", () => {
 		const illegalEdges: ReadonlyArray<[JobStage, JobStage]> = [
+			// queued must pass through pending — no stage skipping.
+			["queued", "simulating"],
+			["queued", "proving"],
+			["queued", "submitting"],
+			["queued", "succeeded"],
+			// no back-edges into queued either.
+			["pending", "queued"],
+			["simulating", "queued"],
+			["proving", "queued"],
 			// no back-edges
 			["simulating", "pending"],
 			["proving", "simulating"],

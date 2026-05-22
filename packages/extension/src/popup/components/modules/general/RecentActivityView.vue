@@ -343,6 +343,11 @@ function cardSubtitleFor(op) {
 		}
 	}
 	switch (op.progress?.stage) {
+		case "queued":
+			// Pre-handler state surfaced by the wallet-sdk session FIFO.
+			// User sees "Queued..." while a previous sendTx is still being
+			// approved + simulated + built ahead of this one.
+			return "Queued..."
 		case "pending":
 			return "Preparing..."
 		case "simulating":

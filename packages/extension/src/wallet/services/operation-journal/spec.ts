@@ -61,6 +61,14 @@ export interface OperationRecord {
 	origin: OperationOrigin
 	/** Carry #1: profile id — tagged at create-time for Phase 2+ fairness. */
 	profileId: string
+	/**
+	 * Session id for `dapp_execute` records originating from a wallet-sdk
+	 * message. Populated by `tryCreateQueuedJournal` from
+	 * `ActiveSession.sessionId`. Used by the per-session queued-record
+	 * cap. Undefined for `popup`-origin records (UI-initiated transfers,
+	 * token imports).
+	 */
+	sessionId?: string
 	/** Carry #4: extensible per-stage progress payload (from `@nulo/wallet-core/jobs`). */
 	progress: JobProgress
 	/** Carry #5: present iff `progress.stage === "failed"`; raw category preserved. */
@@ -121,6 +129,14 @@ export type NewOperationInput = {
 	kind: OperationKind
 	origin: OperationOrigin
 	profileId: string
+	/**
+	 * Optional session id for dapp_execute records originating from a
+	 * wallet-sdk message. Populated by `tryCreateQueuedJournal` from
+	 * `ActiveSession.sessionId`. Used by the per-session queued-record
+	 * cap and future per-session GC. Undefined for UI-initiated records
+	 * (transfers, token imports).
+	 */
+	sessionId?: string
 	accountAddress?: string
 	networkId?: string
 	tokenId?: number
@@ -130,6 +146,15 @@ export type NewOperationInput = {
 	recipientAddress?: string
 	contractAddress?: string
 	transferType?: TransferType
+	/**
+	 * Optional initial-stage override. Defaults to `{ stage: "pending" }`.
+	 * Restricted to non-terminal pre-execution stages so callers can't
+	 * mint impossible terminal-stage records by accident. Used by
+	 * `background.ts:onWalletMessage` (via `tryCreateQueuedJournal`) to
+	 * surface incoming dApp sendTx requests in the activity feed before
+	 * the handler claims them.
+	 */
+	initialStage?: { stage: "queued" } | { stage: "pending" }
 }
 
 // ── Zod schemas ──────────────────────────────────────────────────────
@@ -138,6 +163,7 @@ export const OperationKindSchema = z.enum(["transfer", "dapp_execute", "token_im
 export const OperationOriginSchema = z.enum(["popup", "dapp"])
 
 export const JobProgressSchema: z.ZodType<JobProgress> = z.discriminatedUnion("stage", [
+	z.object({ stage: z.literal("queued") }),
 	z.object({ stage: z.literal("pending") }),
 	z.object({ stage: z.literal("simulating") }),
 	z.object({ stage: z.literal("proving"), enteredProveAt: z.number() }),
@@ -145,6 +171,17 @@ export const JobProgressSchema: z.ZodType<JobProgress> = z.discriminatedUnion("s
 	z.object({ stage: z.literal("succeeded"), txHash: z.string().optional() }),
 	z.object({ stage: z.literal("failed") }),
 	z.object({ stage: z.literal("cancelled") }),
+])
+
+/**
+ * Narrowed initial-stage schema for `createOperation` callers. Only the
+ * pre-execution stages — `queued` and `pending` — are admissible as
+ * initial state. Anything past `pending` (e.g. `simulating`, terminal
+ * stages) would skip the FSM and is rejected here at the parse boundary.
+ */
+const InitialStageSchema = z.discriminatedUnion("stage", [
+	z.object({ stage: z.literal("queued") }),
+	z.object({ stage: z.literal("pending") }),
 ])
 
 export const JobErrorSchema: z.ZodType<JobError> = z.object({
@@ -158,6 +195,7 @@ export const OperationRecordSchema: z.ZodType<OperationRecord> = z.object({
 	kind: OperationKindSchema,
 	origin: OperationOriginSchema,
 	profileId: z.string().min(1),
+	sessionId: z.string().optional(),
 	progress: JobProgressSchema,
 	error: JobErrorSchema.nullable(),
 	terminalAt: z.number().nullable(),
@@ -179,6 +217,7 @@ export const NewOperationInputSchema: z.ZodType<NewOperationInput> = z.object({
 	kind: OperationKindSchema,
 	origin: OperationOriginSchema,
 	profileId: z.string().min(1),
+	sessionId: z.string().optional(),
 	accountAddress: z.string().optional(),
 	networkId: z.string().optional(),
 	tokenId: z.number().optional(),
@@ -188,9 +227,11 @@ export const NewOperationInputSchema: z.ZodType<NewOperationInput> = z.object({
 	recipientAddress: z.string().optional(),
 	contractAddress: z.string().optional(),
 	transferType: z.nativeEnum(TransferType).optional(),
+	initialStage: InitialStageSchema.optional(),
 })
 
 export const JobStageSchema: z.ZodType<JobStage> = z.enum([
+	"queued",
 	"pending",
 	"simulating",
 	"proving",
@@ -209,6 +250,18 @@ export const OperationFilterSchema = z.object({
 })
 
 export type OperationFilter = z.infer<typeof OperationFilterSchema>
+
+/**
+ * Lightweight count-query filter. Used by `tryCreateQueuedJournal`'s
+ * per-session and global queued-record caps so the journal doesn't have
+ * to materialize full records just to know the count.
+ */
+export const OperationCountFilterSchema = z.object({
+	sessionId: z.string().optional(),
+	stage: JobStageSchema.optional(),
+})
+
+export type OperationCountFilter = z.infer<typeof OperationCountFilterSchema>
 
 // ── RPC surface ──────────────────────────────────────────────────────
 
@@ -237,6 +290,10 @@ export const OperationJournalMethodSchemas = {
 		params: z.tuple([OperationFilterSchema.optional()]),
 		result: z.array(OperationRecordSchema),
 	},
+	countOperations: {
+		params: z.tuple([OperationCountFilterSchema]),
+		result: z.number().int().nonnegative(),
+	},
 	deleteOperation: {
 		params: z.tuple([z.string().min(1)]),
 		result: z.void(),
@@ -248,6 +305,7 @@ export type Methods = {
 	transitionOperation(id: string, progress: JobProgress, error?: JobError | null): OperationRecord
 	getOperation(id: string): OperationRecord | undefined
 	getOperations(filter?: OperationFilter): OperationRecord[]
+	countOperations(filter: OperationCountFilter): number
 	deleteOperation(id: string): void
 }
 

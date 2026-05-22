@@ -55,6 +55,7 @@ import { feeJuiceAddress } from "@/wallet/utils/fee-juice"
 import { computeMaxFee, formatFeeJuice, feeToUsd } from "@/utils/fee-estimation"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import type { OperationContext, OperationRecord } from "@/wallet/services/operation-journal/spec"
+import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import { TaskService, type WrappedTask, ExecuteOperationContent, TransferContent } from "@/wallet/services/task/service"
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
@@ -862,7 +863,12 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 	}
 
-	public async executeOperations(operations: Operation[], origin: LocalTxOrigin, parentTask?: WrappedTask): Promise<OperationResult[]> {
+	public async executeOperations(
+		operations: Operation[],
+		origin: LocalTxOrigin,
+		parentTask?: WrappedTask,
+		hooks?: ExecutionHooks,
+	): Promise<OperationResult[]> {
 		await this.ensureInitialized()
 		const results: OperationResult[] = []
 		for (const operation of operations) {
@@ -954,7 +960,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 						break
 					}
 					case "aztec_sendTx": {
-						result = await this.executeAztecSendTx(operation, origin, operationTask)
+						// Hooks forwarded ONLY to aztec_sendTx; other ops don't need them.
+						result = await this.executeAztecSendTx(operation, origin, operationTask, hooks)
 						break
 					}
 					case "aztec_createAuthWit": {
@@ -1173,6 +1180,92 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			this.logError("Failed to create dapp_execute journal record", getErrorMessage(error))
 			return undefined
 		}
+	}
+
+	/**
+	 * Claim a pre-allocated queued journal record (transition queued → pending)
+	 * OR create a new in-flight record if no queued id was provided.
+	 *
+	 * The journal-layer mutex on `transitionOperation` serializes claim
+	 * against cancelJob, so a user-cancel that lands between record creation
+	 * and claim WINS the race and the claim sees the cancelled stage at
+	 * `getOperation` re-read time. We then throw `JobCancelledSentinel` to
+	 * reuse the existing cancelled-pipeline that surfaces as EIP-1193 4001.
+	 *
+	 * Cancellation behavior:
+	 *   - no queuedJournalId               → create new (original path)
+	 *   - record not found in journal       → create new (reaper deleted it)
+	 *   - record stage === "queued"          → claim. Controller registered
+	 *                                          IMMEDIATELY after stage write
+	 *                                          (codex-round-4 F3 — no
+	 *                                          intermediary await between
+	 *                                          claim and controller).
+	 *   - record stage IS NOT "queued"       → throw `JobCancelledSentinel`.
+	 *                                          Surfaces as 4001 to the dApp
+	 *                                          via the existing pipeline.
+	 *
+	 * Journal-storage failures (write error inside `transitionOperation`)
+	 * RE-THROW the original error so executeOperations classifies as a
+	 * failed operation, NOT as cancelled. Conflating the two would destroy
+	 * observability (codex-round-5).
+	 */
+	private async claimOrCreateDappExecuteJournal(
+		networkId: string,
+		accountAddress: string,
+		origin: LocalTxOrigin,
+		calls: { method?: string }[] | undefined,
+		hooks: ExecutionHooks | undefined,
+	): Promise<{ journalId: string | undefined; controller: AbortController | undefined }> {
+		if (!hooks?.queuedJournalId) {
+			const id = await this.beginDappExecuteJournal(networkId, accountAddress, origin, calls)
+			const controller = id ? new AbortController() : undefined
+			if (id && controller) this.activeControllers.set(id, controller)
+			return { journalId: id, controller }
+		}
+
+		const queuedId = hooks.queuedJournalId
+		const record = await this.operationJournal.getOperation(queuedId).catch(() => null)
+		if (!record) {
+			// Record was reaped (boot sweep or staleness GC). Best-effort
+			// fallback — create new in-flight record so execution proceeds.
+			this.logDebug(`Queued record ${queuedId} not found; creating new in-flight record`)
+			const id = await this.beginDappExecuteJournal(networkId, accountAddress, origin, calls)
+			const controller = id ? new AbortController() : undefined
+			if (id && controller) this.activeControllers.set(id, controller)
+			return { journalId: id, controller }
+		}
+		if (record.progress?.stage !== "queued") {
+			// Cancelled / failed before claim (most likely: cancelJob raced
+			// our claim and won the journal-layer mutex). Surface via the
+			// existing cancelled pipeline; the dApp sees EIP-1193 4001.
+			this.logInfo(`Queued record ${queuedId} is ${record.progress?.stage}; aborting via JobCancelledSentinel`)
+			throw new JobCancelledSentinel(queuedId)
+		}
+
+		// Happy path: claim. The journal mutex serializes us against any
+		// concurrent cancelJob — whichever acquires first wins.
+		try {
+			await this.operationJournal.transitionOperation(queuedId, { stage: "pending" })
+		} catch (error) {
+			// Transition failed. Re-read to disambiguate cancellation race
+			// (cancelJob won the mutex) from a genuine storage failure.
+			const recheck = await this.operationJournal.getOperation(queuedId).catch(() => null)
+			if (recheck && recheck.progress?.stage !== "queued") {
+				this.logInfo(`Queued record ${queuedId} was ${recheck.progress?.stage}'d during claim; cancelled-path`)
+				throw new JobCancelledSentinel(queuedId)
+			}
+			// Genuine journal-storage failure — preserve observability by
+			// re-throwing instead of masking as cancellation.
+			throw error
+		}
+
+		// Register the controller IMMEDIATELY — no await between the stage
+		// write and this set(). cancelJob() reads activeControllers to find
+		// a controller to abort; if it lands during this microtask window,
+		// it would find no controller. The next sync line closes the gap.
+		const controller = new AbortController()
+		this.activeControllers.set(queuedId, controller)
+		return { journalId: queuedId, controller }
 	}
 
 	private async markJournal(journalId: string | undefined, progress: JobProgress, error?: JobError | null): Promise<void> {
@@ -1844,13 +1937,15 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		op: AztecSendTxOperation,
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
+		hooks?: ExecutionHooks,
 	): Promise<SendReturn<InteractionWaitOptions>> {
 		// `default_entrypoint` is a special dApp path that bypasses the
 		// standard tx-build pipeline and runs its own kernelless discovery.
-		// Journal coverage for it is deferred — the typical dApp tx surface
-		// (regular `aztec_sendTx` with `from`) is what users see day-to-day.
+		// Forward hooks so concurrent NO_FROM sendTx still get the FIFO baton
+		// release at the right point (and benefit from the queued-record
+		// claim if one was pre-allocated).
 		if (op.executionMode === "default_entrypoint") {
-			return this.executeNoFromSendTx(op, origin, parentTask)
+			return this.executeNoFromSendTx(op, origin, parentTask, hooks)
 		}
 
 		// JS-context trust boundary: approveInteraction() ships popup-built
@@ -1863,22 +1958,18 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw new Error("aztec_sendTx: feeSettings is required for the standard execution path")
 		}
 
-		// Durable journal record for dApp-initiated sends. Mirrors the
-		// pattern `executeTransfer` uses for UI-initiated transfers, so
-		// the activity feed stays consistent across SW restart + popup
-		// close/reopen. Carries the dApp identity via `subtitle` so the
-		// in-flight chip matches the settled chip rendered from the tx
-		// itself.
+		// Durable journal record for dApp-initiated sends. Either claims a
+		// pre-allocated queued record (set by background.ts:tryCreateQueuedJournal
+		// at message arrival) or creates a fresh one. See claim helper for the
+		// safety properties around cancel-during-claim.
 		const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
-		const journalId = await this.beginDappExecuteJournal(
+		const { journalId, controller } = await this.claimOrCreateDappExecuteJournal(
 			op.networkId,
 			op.accountAddress,
 			origin,
 			primaryMethod ? [{ method: primaryMethod }] : undefined,
+			hooks,
 		)
-
-		const controller = journalId ? new AbortController() : undefined
-		if (journalId && controller) this.activeControllers.set(journalId, controller)
 		const checkCancelled = (): void => {
 			if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
 		}
@@ -1916,6 +2007,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			)
 
 			checkCancelled()
+			// FIFO baton release: txRequest is built and the random nonce is
+			// sealed into it (tx-request-builder.ts:126 uses Fr.random()). The
+			// session-FIFO can now advance — the next message's handler can
+			// start its own tx-build in parallel with our proving. Proving
+			// itself remains serialized at PXE's `withPxeWrite`, so true
+			// parallel execution doesn't kick in, but popups + UI surface
+			// concurrency does.
+			hooks?.onTxRequestFinalized?.()
 			await this.markJournal(journalId, { stage: "proving", enteredProveAt: Date.now() })
 			const sendAdditionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
 			const provedTx = await this.coordinator.proveTxTask(pxe, txRequest, [account.address, ...sendAdditionalScopes], parentTask)
@@ -1967,6 +2066,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		op: AztecSendTxOperation,
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
+		hooks?: ExecutionHooks,
 	): Promise<SendReturn<InteractionWaitOptions>> {
 		this.logDebug(
 			`executeNoFromSendTx: starting, accountAddress=${op.accountAddress}, calls=${op.exec?.calls?.length}, additionalScopes=${JSON.stringify(op.opts?.additionalScopes)}`,
@@ -1976,20 +2076,17 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 
 		// Phase 2: NO_FROM / default_entrypoint dApp paths get the same durable
-		// coverage as the standard flows. Codex Week 1 review flagged that
-		// the original "journal coverage deferred" comment left this path
-		// without `profileId`, `enteredProveAt`, normalized failure envelope,
-		// or cancel support.
+		// coverage as the standard flows. Claim-or-create mirrors the standard
+		// executeAztecSendTx path so queued visibility + cancel-safe claim
+		// work for first-time-account-deploy sendTx too.
 		const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
-		const journalId = await this.beginDappExecuteJournal(
+		const { journalId, controller } = await this.claimOrCreateDappExecuteJournal(
 			op.networkId,
 			op.accountAddress,
 			origin,
 			primaryMethod ? [{ method: primaryMethod }] : undefined,
+			hooks,
 		)
-
-		const controller = journalId ? new AbortController() : undefined
-		if (journalId && controller) this.activeControllers.set(journalId, controller)
 		const checkCancelled = (): void => {
 			if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
 		}
@@ -2077,6 +2174,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 			// Prove with account in scope
 			checkCancelled()
+			// FIFO baton release for the NO_FROM path — same semantic as the
+			// standard path (executeAztecSendTx). txRequest + gas limits are
+			// finalized; subsequent proving is serialized at PXE anyway, so
+			// concurrent next-message handlers can start safely.
+			hooks?.onTxRequestFinalized?.()
 			await this.markJournal(journalId, { stage: "proving", enteredProveAt: Date.now() })
 			const provedTx = await this.coordinator.proveTxTask(pxe, txRequest, scopesWithAccount, parentTask)
 			checkCancelled()

@@ -36,8 +36,11 @@ import { ProfileService } from "@/wallet/services/profile/service"
 import { DappInteractionService } from "@/wallet/services/dapp-interaction/service"
 import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
 import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/service"
+import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { DiscoveryQueue, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
-import { jsonStringify } from "@nulo/wallet-core/utils"
+import { jsonStringify, getErrorMessage } from "@nulo/wallet-core/utils"
+import type { CaipAccount } from "@/wallet/services/dapp-interaction/spec"
+import { parseCaipAccount, resolveNetworkByChainId } from "@/wallet/utils/caip"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@/wallet/logger"
 import type { Fr } from "@aztec/foundation/curves/bn254"
@@ -57,6 +60,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	const profileService: ProfileService = services.get(ProfileService.name)
 	const dappInteractionService: DappInteractionService = services.get(DappInteractionService.name)
 	const dappSessionService: DappSessionService = services.get(DappSessionService.name)
+	const operationJournal: OperationJournalService = services.get(OperationJournalService.name)
 
 	const dispatcher = new WalletSdkDispatcher(
 		networkService,
@@ -181,10 +185,66 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 			onWalletMessage: (session, message) => {
 				const key = session.sessionId
 				const prev = sessionQueues.get(key) ?? Promise.resolve()
-				const next = prev.then(() => handleWalletMessage(session, message, handler, dispatcher, profileService, logger))
+
+				// New baton-based FIFO. The baton resolves when the handler
+				// either:
+				//   (a) explicitly calls `releaseFifo()` mid-execution (the
+				//       sendTx path does this after tx-build), OR
+				//   (b) completes (the safety-net `.finally(releaseFifo)`),
+				// whichever fires first. Allows concurrent dApp sendTx to
+				// proceed past the popup-wait phase while previous proving
+				// continues in the background.
+				let resolveBaton!: () => void
+				const baton = new Promise<void>((resolve) => {
+					resolveBaton = resolve
+				})
+				let released = false
+				const releaseFifo = () => {
+					if (released) return
+					released = true
+					resolveBaton()
+				}
+
+				// Only top-level `sendTx` messages get a pre-allocated queued
+				// journal record. `batch` is excluded by design — the recursive
+				// dispatch in WalletSdkDispatcher.handleBatch can't safely
+				// route hooks per-leg, so we'd end up with a batch-level
+				// queued record that no inner leg knows to claim.
+				// TODO(queued-visibility-for-batch): batched sendTx legs
+				// currently bypass the queued-record creation path. Lifting
+				// this requires a per-leg queued-record model or a relaxation
+				// of the batch contract; out of scope for the
+				// concurrent-dApp-sendTx fix.
+				const queuedJournalIdPromise: Promise<string | undefined> =
+					message.type === "sendTx"
+						? tryCreateQueuedJournal(
+								message,
+								session,
+								operationJournal,
+								profileService,
+								dappSessionService,
+								networkService,
+								logger,
+							)
+						: Promise.resolve(undefined)
+
+				const handlerChain = queuedJournalIdPromise.then((queuedJournalId) =>
+					prev.then(() =>
+						handleWalletMessage(session, message, handler, dispatcher, profileService, operationJournal, logger, {
+							releaseFifo,
+							queuedJournalId,
+						}),
+					),
+				)
+				// Safety-net release for handlers that don't call releaseFifo
+				// explicitly (every non-sendTx path) — preserves backward-
+				// compatible FIFO semantics for those. `.catch(() => {})` on
+				// the ignored side prevents an unhandled-rejection warning
+				// if the handler throws.
+				handlerChain.finally(releaseFifo).catch(() => {})
 				sessionQueues.set(
 					key,
-					next.catch(() => {}),
+					baton.catch(() => {}),
 				)
 			},
 		},
@@ -424,6 +484,32 @@ async function handleDiscovery(
 }
 
 /**
+ * Per-message hooks passed to `handleWalletMessage` from `onWalletMessage`.
+ * Concurrent-sendTx wiring (see `onWalletMessage` doc comment).
+ */
+type WalletMessageHooks = {
+	/**
+	 * Release the per-session FIFO baton. Called by handlers that have
+	 * finished their FIFO-ordered work (e.g., sendTx after tx-build) but
+	 * still have background work to do (e.g., proving). The next message's
+	 * handler can start while this one's tail runs.
+	 *
+	 * The dispatcher forwards this down through DispatchHooks. Most
+	 * handlers don't call it explicitly; the safety-net `.finally`
+	 * in `onWalletMessage` releases the baton at handler completion.
+	 */
+	releaseFifo?: () => void
+	/**
+	 * Pre-allocated journal id from `tryCreateQueuedJournal`. The sendTx
+	 * handler claims (queued → pending) instead of creating new. The
+	 * `handleWalletMessage` catch block uses the journal record state
+	 * (not a mutable flag) to decide whether to transition to `failed`
+	 * on an unclaimed-error.
+	 */
+	queuedJournalId?: string
+}
+
+/**
  * Handle an incoming wallet message from a connected dApp.
  *
  * Dispatches the method call to the WalletSdkDispatcher, then encrypts
@@ -435,7 +521,9 @@ async function handleWalletMessage(
 	handler: BackgroundConnectionHandler,
 	dispatcher: WalletSdkDispatcher,
 	profileService: ProfileService,
+	operationJournal: OperationJournalService,
 	logger: ILogger,
+	hooks?: WalletMessageHooks,
 ): Promise<void> {
 	const response: WalletResponse = {
 		messageId: message.messageId,
@@ -455,7 +543,11 @@ async function handleWalletMessage(
 			sessionId: session.sessionId,
 		}
 
-		const raw = await dispatcher.dispatch(message.type, message.args, ctx)
+		// Hooks ride as an internal 4th arg — deliberately NOT on `ctx` so
+		// `dispatch("batch", ...)`'s recursive ctx forwarding can't leak them
+		// into batch legs (would let an inner sendTx release the top-level
+		// baton before the batch finishes).
+		const raw = await dispatcher.dispatch(message.type, message.args, ctx, hooks)
 		response.result = toJsonSafe(raw)
 	} catch (error) {
 		// Structured EIP-1193-aligned envelope for recognised WalletError subclasses
@@ -471,6 +563,36 @@ async function handleWalletMessage(
 		// logs don't read "[object Object]".
 		const logMsg = typeof response.error === "string" ? response.error : jsonStringify(response.error)
 		logger.log("wallet-sdk", LogLevel.Error, `Method ${message.type} failed for ${session.origin}: ${logMsg}`)
+
+		// If a queued journal record exists and is STILL at queued stage,
+		// the handler failed before claiming it. Transition to failed so
+		// the UI doesn't show a permanently-stuck "Queued..." card.
+		// Use the journal record as source of truth (not a mutable flag)
+		// to disambiguate "handler claimed and then failed" (terminal state
+		// already correct) from "handler failed before claim" (we own the
+		// terminal state).
+		if (hooks?.queuedJournalId) {
+			try {
+				const record = await operationJournal.getOperation(hooks.queuedJournalId)
+				if (record?.progress?.stage === "queued") {
+					await operationJournal.transitionOperation(
+						hooks.queuedJournalId,
+						{ stage: "failed" },
+						{
+							kind: "popup_bound",
+							message: getErrorMessage(error),
+							normalizedRaw: null,
+						},
+					)
+				}
+			} catch (transitionError) {
+				logger.log(
+					"wallet-sdk",
+					LogLevel.Warn,
+					`Failed to mark queued record ${hooks.queuedJournalId} as failed: ${getErrorMessage(transitionError)}`,
+				)
+			}
+		}
 	}
 
 	try {
@@ -482,6 +604,113 @@ async function handleWalletMessage(
 			`Failed to send response for ${message.type}: ${sendError instanceof Error ? sendError.message : String(sendError)}`,
 		)
 	}
+}
+
+/** Per-session queued-record cap. Prevents a flooding dApp from filling
+ *  the activity feed with hundreds of "Queued..." cards. Beyond this cap,
+ *  new sendTx still processes normally — just without queued visibility. */
+const MAX_QUEUED_PER_SESSION = 8
+/** Global queued-record cap across all sessions. Coarser DoS backstop. */
+const MAX_QUEUED_GLOBAL = 32
+
+/**
+ * Create a journal record at `queued` stage so the activity feed surfaces
+ * an incoming sendTx the moment it arrives — BEFORE the per-session FIFO
+ * lets the handler open the approval popup.
+ *
+ * Returns the new record's id, or `undefined` on any failure. Best-effort
+ * visibility: a failure here NEVER blocks the actual handler from running
+ * (the handler falls back to creating its own in-flight record via
+ * `beginDappExecuteJournal`).
+ *
+ * Cheap pre-auth gates: skip queued visibility when there's no active
+ * profile, no dapp session, or no sendTx capability grant. Avoids
+ * surfacing requests that the handler will reject anyway.
+ */
+async function tryCreateQueuedJournal(
+	message: WalletMessage,
+	session: ActiveSession,
+	journal: OperationJournalService,
+	profile: ProfileService,
+	dappSession: DappSessionService,
+	networkSvc: NetworkService,
+	logger: ILogger,
+): Promise<string | undefined> {
+	try {
+		const activeProfile = await profile.getActiveProfile()
+		if (!activeProfile) return undefined
+
+		const chainId = chainInfoToChainId(session)
+		const dapp = await dappSession.tryGetDappSessionByOriginAndChain(session.origin, String(chainId))
+		if (!dapp?.accounts?.length) return undefined
+
+		// sendTx requires the `transaction` capability (the capability type
+		// scoped to send-like operations). Pre-auth-gate skip when missing.
+		const hasSendTxGrant = (dapp.capabilityGrants ?? []).some((g) => g.capability.type === "transaction")
+		if (!hasSendTxGrant) return undefined
+
+		// DappSession.accounts is string[] of CAIP. Parse to get the bare address.
+		const firstCaipAccount = dapp.accounts[0] as CaipAccount
+		const { address: accountAddress } = parseCaipAccount(firstCaipAccount)
+
+		// `networkId` for activity-feed scoping must be the INTERNAL network row id
+		// (RecentActivityView.journalRecordInScope filters on `network.id`), NOT
+		// `String(chainId)`. Without this resolution the queued card never renders.
+		const network = await resolveNetworkByChainId(networkSvc, chainId)
+		if (!network) return undefined
+
+		// Caps — DoS protection (codex round-3 + round-4 T1).
+		const sessionQueuedCount = await journal.countOperations({
+			sessionId: session.sessionId,
+			stage: "queued",
+		})
+		if (sessionQueuedCount >= MAX_QUEUED_PER_SESSION) {
+			logger.log(
+				"wallet-sdk-bg",
+				LogLevel.Debug,
+				`Per-session queued cap reached for ${session.sessionId}; skipping queued visibility`,
+			)
+			return undefined
+		}
+		const globalQueuedCount = await journal.countOperations({ stage: "queued" })
+		if (globalQueuedCount >= MAX_QUEUED_GLOBAL) {
+			logger.log("wallet-sdk-bg", LogLevel.Warn, `Global queued cap reached (${MAX_QUEUED_GLOBAL}); skipping queued visibility`)
+			return undefined
+		}
+
+		const primaryMethod = extractPrimaryMethodFromSendTx(message)
+		const record = await journal.createOperation({
+			kind: "dapp_execute",
+			origin: "dapp",
+			profileId: activeProfile.id,
+			sessionId: session.sessionId,
+			accountAddress,
+			networkId: network.id,
+			title: primaryMethod ?? "Transaction",
+			subtitle: session.origin,
+			initialStage: { stage: "queued" },
+		})
+		return record.id
+	} catch (error) {
+		logger.log("wallet-sdk-bg", LogLevel.Warn, `tryCreateQueuedJournal failed: ${getErrorMessage(error)}`)
+		return undefined
+	}
+}
+
+/**
+ * Best-effort primary-method extraction from a sendTx wallet message.
+ * Mirrors what `executeAztecSendTx` does to compute the title at journal
+ * creation time, so the title is consistent between the queued surface
+ * and the post-claim in-flight surface (the claim helper doesn't update
+ * the title — its only mutation is the FSM stage).
+ */
+function extractPrimaryMethodFromSendTx(message: WalletMessage): string | undefined {
+	if (message.type !== "sendTx") return undefined
+	const args = message.args as unknown[] | undefined
+	if (!Array.isArray(args)) return undefined
+	const exec = args[0] as { calls?: Array<{ name?: string }> } | undefined
+	if (!exec?.calls) return undefined
+	return exec.calls.find((c) => typeof c?.name === "string")?.name
 }
 
 /**

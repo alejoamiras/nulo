@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Two pending transactions — bug ELI5</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --ink: #1f1d1a;
+    --paper: #faf7f1;
+    --muted: #6c6760;
+    --accent: #b94b2c;
+    --soft: #ede5d3;
+    --rule: #d4cab2;
+    --hl-good: #2d6b3e;
+    --hl-bad: #a8341c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #f3eee3;
+      --paper: #1a1814;
+      --muted: #a39d8f;
+      --accent: #e9986a;
+      --soft: #2a2620;
+      --rule: #3a352b;
+      --hl-good: #6dba81;
+      --hl-bad: #e08a6f;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--paper); color: var(--ink); }
+  body {
+    font: 16px/1.65 ui-serif, "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 64px 32px 96px;
+  }
+  h1 {
+    font: 700 32px/1.2 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+  h2 {
+    font: 600 22px/1.3 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 48px 0 12px;
+    letter-spacing: -0.005em;
+  }
+  h3 {
+    font: 600 16px/1.35 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 28px 0 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+  .subtitle {
+    color: var(--muted);
+    font-style: italic;
+    margin: 0 0 32px;
+  }
+  p, ul, ol { margin: 12px 0; }
+  ul, ol { padding-left: 24px; }
+  li { margin: 6px 0; }
+  hr {
+    border: 0;
+    border-top: 1px solid var(--rule);
+    margin: 48px 0;
+  }
+  code {
+    font: 13.5px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    background: var(--soft);
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  pre {
+    font: 13.5px/1.55 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    background: var(--soft);
+    padding: 16px 20px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 16px 0;
+  }
+  pre code { background: transparent; padding: 0; }
+  blockquote {
+    border-left: 3px solid var(--accent);
+    margin: 16px 0;
+    padding: 4px 0 4px 18px;
+    color: var(--muted);
+    font-style: italic;
+  }
+  .callout {
+    background: var(--soft);
+    border-left: 4px solid var(--accent);
+    padding: 14px 18px;
+    margin: 20px 0;
+    border-radius: 0 6px 6px 0;
+  }
+  .callout.bad { border-color: var(--hl-bad); }
+  .callout.good { border-color: var(--hl-good); }
+  .callout p:first-child { margin-top: 0; }
+  .callout p:last-child { margin-bottom: 0; }
+  .label {
+    display: inline-block;
+    font: 600 11px/1 ui-sans-serif, system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 4px 8px;
+    border-radius: 3px;
+    background: var(--soft);
+    color: var(--muted);
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .label.bad { background: var(--hl-bad); color: var(--paper); }
+  .label.good { background: var(--hl-good); color: var(--paper); }
+  .step {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 14px;
+    align-items: start;
+    margin: 18px 0;
+  }
+  .step-num {
+    font: 600 14px/1 ui-sans-serif, system-ui, sans-serif;
+    color: var(--accent);
+    background: var(--soft);
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .step-body p:first-child { margin-top: 2px; }
+  .footer {
+    margin-top: 64px;
+    color: var(--muted);
+    font-size: 13px;
+    font-style: italic;
+    text-align: center;
+  }
+  .ascii {
+    font: 12.5px/1.45 ui-monospace, monospace;
+    color: var(--muted);
+    background: var(--soft);
+    padding: 14px 18px;
+    border-radius: 6px;
+    white-space: pre;
+    overflow-x: auto;
+    margin: 16px 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>Two pending transactions, one visible</h1>
+<p class="subtitle">A friends-QA bug, deep-debugged. ELI5 for the person who didn't read the code.</p>
+
+<h2>The thing that broke</h2>
+
+<p>Friends QA'ing the faucet hit something weird. They'd click "Get USDC (public)" twice in a row, expecting two pending transactions. The wallet showed <strong>only one</strong>. After the first transaction confirmed, the second would suddenly appear in "loading…" state, then confirm.</p>
+
+<p>The user described it as "a visual bug" — meaning both transactions <em>do</em> eventually go through, but the wallet hides the second one until the first is done.</p>
+
+<div class="callout">
+<p><strong>What we expected:</strong> two cards both showing "Proving…" at once, then both showing "Confirmed".</p>
+<p><strong>What happened:</strong> one card showing "Proving…", then "Confirmed", then a second card appearing from nowhere showing "Proving…", then "Confirmed".</p>
+</div>
+
+<h2>The wrong answer I gave first</h2>
+
+<span class="label bad">round 1</span>
+
+<p>I went looking and found a <strong>mutex</strong> (a "lock" that lets only one thing at a time pass through) inside the part of the wallet that handles approval popups. I thought: "Aha — this lock is held too long. It blocks the second transaction's popup from opening until the first one finishes proving."</p>
+
+<p>I wrote up a plan to release the lock earlier. I sent it to <strong>codex</strong>, my AI reviewer for these things.</p>
+
+<p>Codex came back with <strong>BLOCKER</strong> and explained: I was wrong about <em>where</em> the lock was actually held.</p>
+
+<p>In JavaScript, a piece of code like <code>finally { release_lock() }</code> at the end of a function runs <em>immediately</em> when the function's <code>return</code> statement is evaluated — not when whatever the function returned has finished. So the popup-lock I'd diagnosed was actually being released the moment the popup opened, not when the transaction finished. The wallet was fine on <em>that</em> lock.</p>
+
+<p>The real chokepoint was a different mechanism — one layer up.</p>
+
+<h2>What was actually wrong</h2>
+
+<span class="label">round 2</span>
+
+<p>Each time a dApp (like the faucet) sends the wallet a message — "approve this transaction", "register this contract", "what's the balance?" — it goes into a <strong>queue</strong>. The wallet processes messages from the same dApp <em>one at a time</em>. This queue is deliberate: some messages depend on each other (you have to <em>register</em> a contract before you can <em>call</em> it), and processing them out of order would create bugs.</p>
+
+<p>The queue is "first in, first out": when one message is done being handled, the next one starts. Simple.</p>
+
+<p>The problem: <strong>"done being handled" was defined too broadly</strong>. For a <code>sendTx</code> (send transaction) message, the wallet considered the message "still being handled" until the transaction had:</p>
+
+<ol>
+<li>Shown the approval popup</li>
+<li>Been approved by the user</li>
+<li>Been simulated locally</li>
+<li>Been <strong>proven</strong> (this takes the longest — generating cryptographic proof)</li>
+<li>Been submitted to the blockchain</li>
+<li>Been confirmed in a block</li>
+</ol>
+
+<p>All of steps 1–6 had to finish before the <em>next</em> message in the queue could even start. So if you submitted T1 and T2 back-to-back, T2 had to wait for T1's full lifecycle before its popup even opened.</p>
+
+<div class="ascii">
+TODAY                                                AFTER FIX
+
+T1: popup → approve → prove → submit → confirm       T1: popup → approve → [tx built] ──▶ prove → submit → confirm
+                                       ↑                                       │
+                                       │                                       └─ release queue here
+T2: ............................. WAITING ......     T2: ........... popup → approve → prove → submit → confirm
+    (queue is still blocked by T1)                       (started right after T1's tx was built,
+                                                          while T1's proving was still running)
+</div>
+
+<h2>The fix, in one sentence</h2>
+
+<div class="callout good">
+<p>Let a <code>sendTx</code> handler tell the queue "I'm done depending on the queue's ordering" the moment it has built its transaction, not when the transaction has fully gone through.</p>
+</div>
+
+<p>Concretely: every time a wallet message arrives, the queue mechanism passes the handler a little callback called <code>onTxRequestFinalized</code>. The handler can call it whenever its work no longer needs to be serialized against subsequent messages.</p>
+
+<ul>
+<li>For <code>sendTx</code>: the handler calls it right after the transaction request object is built (this is where the nonce — a unique number — gets baked in). After that, the proving and submitting can run alongside the next message.</li>
+<li>For most other messages (<code>registerContract</code>, <code>executeUtility</code>, etc.): the handler doesn't call it explicitly. A safety net releases it when the handler finishes, exactly like today. Backward-compatible.</li>
+</ul>
+
+<h2>The corrections codex made on round 2</h2>
+
+<span class="label">round 2 details</span>
+
+<p>I sent the corrected plan back to codex. This time it came back <strong>needs-work</strong> (not blocker — meaning direction was right, but two real issues).</p>
+
+<div class="step">
+  <div class="step-num">1</div>
+  <div class="step-body">
+    <h3>Don't put the callback on SessionContext</h3>
+    <p>I'd planned to attach the new <code>releaseFifo</code> callback to an object called <code>SessionContext</code> that travels with every dispatched message. Codex pointed out: there's a separate message type called <code>batch</code> that runs multiple operations as one unit, and it recursively reuses the same context for each operation inside. If a batched <code>sendTx</code> released the queue early, the rest of the batch would no longer be serialized — letting the <em>next</em> session message cut in front of unfinished batch work.</p>
+    <p><strong>Fix:</strong> pass the callback as a separate, internal argument that <em>doesn't</em> get forwarded into batch recursion.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">2</div>
+  <div class="step-body">
+    <h3>The NO_FROM path was missed</h3>
+    <p>The wallet has two code paths for sendTx: a <strong>standard</strong> one and a <strong>NO_FROM</strong> one (used when an account doesn't exist on-chain yet — first-time deploys). My plan only wired the callback into the standard path. The NO_FROM path would have stayed serialized.</p>
+    <p><strong>Fix:</strong> fire the callback in both paths, at their respective "transaction built" moments.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">3</div>
+  <div class="step-body">
+    <h3>Move the release point a tiny bit earlier</h3>
+    <p>I'd planned to release the queue right <em>after</em> writing a "proving started" marker to a journal (a durable log of in-flight transactions). Codex pointed out: this couples queue progress to a small bit of disk I/O. Cleaner to release the queue right before that — the moment the transaction is built and the cancellation check passes.</p>
+    <p>Also renamed the callback from <code>onProvingStarted</code> to <code>onTxRequestFinalized</code> to match what's actually true at that point.</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">4</div>
+  <div class="step-body">
+    <h3>My nonce model was slightly wrong</h3>
+    <p>I assumed PXE (the wallet's internal state engine) allocated transaction nonces sequentially. Codex showed me the actual code: the wallet generates each nonce as a <em>random field element</em> (a 254-bit random number). Two concurrent transactions get independent random nonces; collision is mathematically possible but astronomically unlikely (1 in 2^254). So the safety claim shifted from "FIFO guarantees uniqueness" to "random space is big enough that it doesn't matter".</p>
+    <p>This doesn't change the implementation — just my mental model and the comment text.</p>
+  </div>
+</div>
+
+<h2>What stays serialized (the constraint I didn't choose)</h2>
+
+<p>Even with this fix, the <strong>proving step itself</strong> still runs one transaction at a time per wallet. There's a separate serialization deep in the Aztec runtime that protects the PXE's internal state. Two concurrent provings would race on shared state, so the runtime explicitly serializes them.</p>
+
+<p>From the user's point of view, this means: with the fix, both approval popups appear in sequence (you approve T1, then T2's popup is RIGHT THERE — no waiting), both in-flight cards show up, and proving rapidly alternates between them. Both confirm at roughly the same time.</p>
+
+<p>Without the fix: you approve T1, wait an eternity for it to finish, T2's popup finally opens, you approve, then wait again.</p>
+
+<p>Lifting the proving serialization would be a much deeper change inside the runtime layer — out of scope here. The friends-QA complaint was about the popup/UI sequencing, which this fix addresses.</p>
+
+<h2>Open questions / things to watch</h2>
+
+<ul>
+<li><strong>Out-of-order results.</strong> Once T1 and T2 run concurrently, T2 can finish before T1. The wallet SDK that dApps use to talk to the wallet correlates responses by a message ID (not by order of arrival), so this should be fine. There's a test specifically for this.</li>
+<li><strong>Settlement race.</strong> If a user closes a popup at the exact same moment they approve it (or the popup times out while the wallet is processing the approve), who wins? Codex flagged this as a pre-existing race, not made worse by this fix. There's a test for it too.</li>
+<li><strong>True parallelism is bounded by PXE serialization.</strong> Don't oversell this fix as "concurrent transactions". The UI is concurrent; the proving alternates. Worth being honest with the user about that.</li>
+</ul>
+
+<h2>Status as of writing</h2>
+
+<ul>
+<li><span class="label good">done</span> Plan written, twice (v1 was wrong, v2 is right)</li>
+<li><span class="label good">done</span> Codex round 1 caught the wrong-layer diagnosis</li>
+<li><span class="label good">done</span> Codex round 2 caught two real issues + several refinements</li>
+<li><span class="label">pending</span> Your approval</li>
+<li><span class="label">later</span> Implementation</li>
+<li><span class="label">later</span> Codex review of the actual code</li>
+<li><span class="label">later</span> PR to <code>dev</code></li>
+</ul>
+
+<div class="footer">
+Plan + both codex transcripts archived under<br />
+<code>implementations-plan/dapp-interaction-lock-fix/</code>
+</div>
+
+</body>
+</html>
