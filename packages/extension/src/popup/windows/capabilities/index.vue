@@ -12,7 +12,7 @@ import AccountSelectRow from "./AccountSelectRow.vue"
 /** Utils */
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { formatCaipAccount } from "@/wallet/utils/caip"
-import { getCapabilityInfo } from "@/wallet/services/dapp-session/capability-meta"
+import { buildCapabilityItems, type UICapabilityItem } from "./build-items"
 
 /** Services */
 import { type ProfileInfo, ProfileServiceClient } from "@/wallet/services/profile/client"
@@ -26,15 +26,6 @@ import { useDappHostname } from "@/composables/useDappHostname"
 
 type UIDappMetadata = DappMetadata & { loadingLogo?: boolean; logoBlobUrl?: string }
 type UIAccount = { address: string; name: string; chainId: number }
-type UICapability = {
-	capability: Capability
-	label: string
-	description: string
-	isNew: boolean
-	selected: boolean
-	risk: "low" | "medium" | "high"
-	reRequested: boolean
-}
 type UIError = { title: string; tooltip: string; type: string }
 
 /** Store */
@@ -44,7 +35,7 @@ const appStore = useAppStore()
 const router = useRouter()
 
 const profile = ref<ProfileInfo>()
-const capabilities = ref<UICapability[]>([])
+const capabilities = ref<UICapabilityItem[]>([])
 
 const needsAccountSelection = ref(false)
 const availableAccounts = ref<UIAccount[]>([])
@@ -108,38 +99,10 @@ const init = async () => {
 			}
 		}
 
-		const items: UICapability[] = []
 		const reRequestedTypes = new Set(payload.value.params.reRequested ?? [])
 		const existingGrants = payload.value.params.existingGrants as Capability[]
 
-		for (const cap of delta) {
-			if (cap.type === "accounts") continue
-			const info = getCapabilityInfo(cap.type)
-			items.push({
-				capability: cap,
-				label: info.label,
-				description: info.description,
-				isNew: true,
-				selected: true,
-				risk: info.risk,
-				reRequested: reRequestedTypes.has(cap.type),
-			})
-		}
-
-		for (const cap of existingGrants) {
-			const info = getCapabilityInfo(cap.type)
-			items.push({
-				capability: cap,
-				label: info.label,
-				description: info.description,
-				isNew: false,
-				selected: true,
-				risk: info.risk,
-				reRequested: false,
-			})
-		}
-
-		capabilities.value = items
+		capabilities.value = buildCapabilityItems(delta, existingGrants, reRequestedTypes)
 	} catch (error) {
 		console.error(getErrorData(error))
 		setError("Something went wrong")
@@ -271,7 +234,7 @@ onUnmounted(() => {
 				:dapp="dapp"
 				:hostname="dappHostname"
 				:hostnameSuspicious="hostnameHasNonAscii"
-				actionLabel="is requesting access to Nulo"
+				actionLabel="is requesting permissions"
 			/>
 
 			<Flex direction="column" gap="20" :class="$style.sections">
@@ -293,7 +256,7 @@ onUnmounted(() => {
 				</Flex>
 
 				<Flex v-if="capabilities.filter(c => c.isNew).length" direction="column" gap="10" wide>
-					<SectionLabel label="New capabilities requested" :count="capabilities.filter(c => c.isNew).length" />
+					<SectionLabel label="New permissions requested" :count="capabilities.filter(c => c.isNew).length" />
 
 					<Flex direction="column" gap="6" wide>
 						<CapabilityCard
@@ -308,6 +271,7 @@ onUnmounted(() => {
 							:granted="false"
 							:expanded="expandedCards.has(i)"
 							:reRequested="cap.reRequested"
+							:isUnknown="cap.isUnknown"
 							:disabled="isLoading || processingError?.type === 'error'"
 							@toggleExpanded="toggleExpand(i)"
 							@toggleSelected="toggleCapability(i)"

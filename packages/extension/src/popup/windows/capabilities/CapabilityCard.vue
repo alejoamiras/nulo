@@ -32,6 +32,14 @@ defineProps<{
 	granted: boolean
 	expanded: boolean
 	reRequested?: boolean
+	/**
+	 * Unknown capability types pass `isUnknown=true` so the card head
+	 * shows an UNRECOGNIZED chip alongside the (dApp-controlled) label.
+	 * The parent (`build-items.ts`) also flips `selected` to `false` for
+	 * these — together, the user gets a loud visual signal AND must
+	 * deliberately click to approve.
+	 */
+	isUnknown?: boolean
 	disabled?: boolean
 }>()
 
@@ -83,8 +91,13 @@ function riskWord(r: CapabilityRisk): string {
 
 			<Flex direction="column" gap="2" wide>
 				<Flex align="center" justify="between" gap="8">
-					<Flex align="center" gap="6">
-						<Text size="14" weight="600" color="primary">{{ label }}</Text>
+					<Flex align="center" gap="6" :class="$style.head_label_row">
+						<Text size="14" weight="600" :color="isUnknown ? 'tertiary' : 'primary'" :class="isUnknown && $style.mono_label">
+							{{ label }}
+						</Text>
+						<span v-if="isUnknown" data-testid="cap-unrecognized-badge" :class="$style.warning_badge">
+							unrecognized
+						</span>
 						<span v-if="reRequested" data-testid="cap-rerequested-badge" :class="$style.warning_badge">
 							previously denied
 						</span>
@@ -206,10 +219,10 @@ function riskWord(r: CapabilityRisk): string {
 }
 
 /**
- * Warning badge — used for PREVIOUSLY DENIED today; Phase 4 will reuse
- * the same class for the UNRECOGNIZED chip. Orange border on transparent
- * fill matches the family's targeted-warning treatment (verify popup's
- * IDN-warning, signer strip's MIXED tag) while staying brutalist.
+ * Warning badge — used for PREVIOUSLY DENIED and UNRECOGNIZED chips.
+ * Orange border on transparent fill matches the family's targeted-
+ * warning treatment (verify popup's IDN-warning, signer strip's MIXED
+ * tag) while staying brutalist.
  */
 .warning_badge {
 	padding: 1px 6px;
@@ -223,5 +236,22 @@ function riskWord(r: CapabilityRisk): string {
 	color: var(--orange);
 	background: transparent;
 	white-space: nowrap;
+}
+
+/**
+ * The dApp-controlled cap.type string lands as the head label for an
+ * unrecognized capability. Render it in mono + tertiary so the eye
+ * lands on the UNRECOGNIZED chip first; the type itself is visibly
+ * "raw data, not friendly UI". Sanitization happens upstream in
+ * `getCapabilityInfo` / `sanitizeWireString` in the detail panel; here
+ * the typography signals the trust boundary.
+ */
+.mono_label {
+	font-family: var(--font-mono);
+	letter-spacing: 0.04em;
+}
+
+.head_label_row {
+	flex-wrap: wrap;
 }
 </style>

@@ -87,6 +87,25 @@ describe("CapabilityCard", () => {
 		expect(w.find('[data-testid="cap-rerequested-badge"]').exists()).toBe(false)
 	})
 
+	test("unrecognized badge appears when isUnknown=true", () => {
+		const w = factory({ isUnknown: true })
+		expect(w.find('[data-testid="cap-unrecognized-badge"]').exists()).toBe(true)
+		expect(w.text().toLowerCase()).toContain("unrecognized")
+	})
+
+	test("unrecognized badge is hidden when isUnknown is not set", () => {
+		const w = factory()
+		expect(w.find('[data-testid="cap-unrecognized-badge"]').exists()).toBe(false)
+	})
+
+	test("both badges coexist when an unknown cap was previously denied", () => {
+		// Edge case: a dApp re-requests an unknown capability that the user
+		// previously rejected. Both warning signals should show.
+		const w = factory({ isUnknown: true, reRequested: true })
+		expect(w.find('[data-testid="cap-unrecognized-badge"]').exists()).toBe(true)
+		expect(w.find('[data-testid="cap-rerequested-badge"]').exists()).toBe(true)
+	})
+
 	test("clicking the head emits toggleExpanded (new variant)", async () => {
 		const w = factory()
 		await w.find('[data-testid="cap-detail-toggle"]').trigger("click")
