@@ -4,6 +4,7 @@ import AppButton from "@/components/ui/AppButton.vue"
 const props = withDefaults(
 	defineProps<{
 		label: string
+		ariaLabel?: string
 		loading?: boolean
 		disabled?: boolean
 	}>(),
@@ -23,6 +24,7 @@ function onClick() {
 		:loading="loading"
 		:disabled="disabled"
 		:data-loading="loading"
+		:aria-label="ariaLabel || label"
 		@click="onClick"
 	>
 		{{ label }}

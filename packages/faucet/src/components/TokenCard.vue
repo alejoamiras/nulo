@@ -27,7 +27,7 @@ const connected = !!(props.wallet && props.account)
 const balance: UseTokenBalanceHandle | null =
 	connected && props.wallet && props.account ? useTokenBalance(props.wallet, props.tokenAddress, props.account) : null
 const drip = connected && props.wallet && props.account ? useFaucetDrip(props.wallet, props.account) : null
-const { push } = useToast()
+const { push, dismiss } = useToast()
 
 // Per-card "last drip" — single source of recency. Without this, a
 // global-keyed lookup like `publicLast ?? privateLast` permanently
@@ -42,7 +42,12 @@ interface CardDripState {
 }
 const lastDrip = ref<CardDripState | null>(null)
 const emphasized = ref(false)
-let emphasisTimer: ReturnType<typeof setTimeout> | null = null
+// The card pushes a toast with a "view tx" link on every successful drip.
+// We track its id so that if the user re-drips before the toast TTL, we
+// dismiss the prior toast — otherwise its (now-stale) link is still
+// clickable during the new inflight state. Closes the toast-path mirror
+// of the inline-row stale-link bug.
+let lastTxToastId: number | null = null
 
 const publicDripping = computed(() => (drip ? drip.isActive(props.token.symbol, "public") : false))
 const privateDripping = computed(() => (drip ? drip.isActive(props.token.symbol, "private") : false))
@@ -76,6 +81,12 @@ const statusLabel = computed(() => {
 
 async function handleDrip(target: DripTarget) {
 	if (!drip || !balance) return
+	// Dismiss any still-visible toast from a prior drip so its (now-stale)
+	// "view tx" link doesn't sit clickable during this new inflight cycle.
+	if (lastTxToastId !== null) {
+		dismiss(lastTxToastId)
+		lastTxToastId = null
+	}
 	const result = await drip.drip(props.token, props.tokenAddress, target)
 	const txUrl = result.kind === "txHash" ? explorerTxUrl(result.value) : ""
 	lastDrip.value = {
@@ -85,22 +96,14 @@ async function handleDrip(target: DripTarget) {
 		txUrl,
 		at: Date.now(),
 	}
-	// Success emphasis decays after 3s (link stays visible, color softens).
-	// Errors stay emphasized until the next click — a quiet error is easy
-	// to miss; the button itself is the retry affordance.
+	// Emphasis persists for BOTH success and error until the next drip
+	// click clears it. Earlier behaviour decayed success after 3s, which
+	// users missed entirely (friends-QA feedback). The next click resets
+	// state at the top of this handler.
 	emphasized.value = true
-	if (emphasisTimer !== null) {
-		clearTimeout(emphasisTimer)
-		emphasisTimer = null
-	}
-	if (result.kind === "txHash") {
-		emphasisTimer = setTimeout(() => {
-			emphasized.value = false
-		}, 3_000)
-	}
 
 	if (result.kind === "txHash") {
-		push({
+		lastTxToastId = push({
 			kind: "ok",
 			text: `Dripped ${props.token.displayAmount} ${props.token.symbol} to ${target}`,
 			link: txUrl ? { label: "view tx", href: txUrl } : undefined,
@@ -113,7 +116,6 @@ async function handleDrip(target: DripTarget) {
 
 onBeforeUnmount(() => {
 	balance?.dispose()
-	if (emphasisTimer !== null) clearTimeout(emphasisTimer)
 })
 </script>
 
@@ -133,14 +135,16 @@ onBeforeUnmount(() => {
 			<DripButton
 				:loading="publicDripping"
 				:disabled="buttonsDisabled && !publicDripping"
-				:label="`Drip ${token.displayAmount} ${token.symbol} to public`"
+				:label="`Get ${token.symbol} (public)`"
+				:aria-label="`Get ${token.displayAmount} ${token.symbol} into your public balance`"
 				:data-testid="TESTIDS.btnDripPublic"
 				@click="handleDrip('public')"
 			/>
 			<DripButton
 				:loading="privateDripping"
 				:disabled="buttonsDisabled && !privateDripping"
-				:label="`Drip ${token.displayAmount} ${token.symbol} to private`"
+				:label="`Get ${token.symbol} (private)`"
+				:aria-label="`Get ${token.displayAmount} ${token.symbol} into your private balance`"
 				:data-testid="TESTIDS.btnDripPrivate"
 				@click="handleDrip('private')"
 			/>
@@ -164,7 +168,7 @@ onBeforeUnmount(() => {
 		>
 			<span class="status-text">{{ statusLabel }}</span>
 			<a
-				v-if="lastDrip?.txUrl"
+				v-if="lastDrip?.txUrl && statusKind === 'ok'"
 				class="status-link"
 				:href="lastDrip.txUrl"
 				target="_blank"

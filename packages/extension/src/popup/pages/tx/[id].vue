@@ -18,6 +18,7 @@ import { DateTime } from "luxon"
 /** Services */
 import { TokenServiceClient } from "@/wallet/services/token/client"
 import { OriginType } from "@/wallet/services/transaction/client"
+import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
@@ -47,6 +48,13 @@ const route = useRoute()
 const router = useRouter()
 
 const tokenService = new TokenServiceClient()
+const configService = new ConfigServiceClient()
+
+// Debug panel visibility — gated behind either flag so contributors who
+// only ever flip `developerMode` (which gates other internal UI) also see
+// it, and `debugMode` (the narrower "show me the raw tx soup" toggle)
+// works on its own.
+const showDebugPanel = ref(false)
 
 const tx = computed(() => appStore.transactions.find((t) => t.hash === route.params.id))
 const call = computed(() => (tx.value?.calls ? getPrimaryCall(tx.value.calls) : undefined))
@@ -118,10 +126,15 @@ const userCalls = computed(() => {
 
 onMounted(async () => {
 	tokens.value = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
+	const props = await configService.getProps()
+	const debugMode = props.find((p) => p.key === "debugMode")?.value ?? false
+	const developerMode = props.find((p) => p.key === "developerMode")?.value ?? false
+	showDebugPanel.value = Boolean(debugMode || developerMode)
 })
 
 onBeforeUnmount(() => {
 	tokenService.disconnect()
+	configService.disconnect()
 })
 </script>
 
@@ -229,6 +242,23 @@ onBeforeUnmount(() => {
 				<SectionLabel label="Details" />
 
 				<Flex wide direction="column" gap="10" :class="$style.details_box">
+					<Flex v-if="tx?.hash" wide justify="between" align="center">
+						<span :class="$style.detail_key">Tx hash</span>
+						<a
+							v-if="explorerUrl"
+							:href="explorerUrl"
+							target="_blank"
+							rel="noopener noreferrer"
+							data-testid="tx-hash-link"
+							:class="[$style.detail_value_mono, $style.detail_link]"
+						>{{ trimAddress(tx.hash, 6, 4) }}</a>
+						<span
+							v-else
+							@click="handleCopy(tx.hash)"
+							:class="[$style.detail_value_mono, 'copyable']"
+						>{{ trimAddress(tx.hash, 6, 4) }}</span>
+					</Flex>
+
 					<Flex v-if="originLabel" wide justify="between" align="center">
 						<span :class="$style.detail_key">App</span>
 						<span :class="$style.detail_value">{{ originLabel }}</span>
@@ -298,7 +328,7 @@ onBeforeUnmount(() => {
 				</Flex>
 			</Flex>
 
-			<TxDebugPanel :tx="tx" @copy="handleCopy" />
+			<TxDebugPanel v-if="showDebugPanel" :tx="tx" @copy="handleCopy" />
 		</Flex>
 
 		<Flex v-else wide direction="column" align="center" gap="12" :class="$style.content">
@@ -347,7 +377,10 @@ onBeforeUnmount(() => {
 	font-weight: 700;
 	letter-spacing: 0.1em;
 	text-transform: uppercase;
-	color: var(--nulo-outline);
+	/* Was --nulo-outline (#4a463f on dark) — too dim to read. Bumped to
+	   --txt-secondary (#999187 on dark) so the link is legibly above the
+	   timestamp meta but still subordinate to primary text. */
+	color: var(--txt-secondary);
 	text-decoration: none;
 	cursor: pointer;
 
@@ -362,6 +395,17 @@ onBeforeUnmount(() => {
 		& svg {
 			fill: var(--nulo-accent);
 		}
+	}
+}
+
+.detail_link {
+	color: var(--txt-secondary);
+	text-decoration: none;
+	cursor: pointer;
+	transition: color 0.2s var(--bezier);
+
+	&:hover {
+		color: var(--nulo-accent);
 	}
 }
 
