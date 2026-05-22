@@ -15,9 +15,11 @@
  *      hostile dApp could send anything; the contact name is
  *      user-controlled but the user could have pasted an attack
  *      payload.
- *   3. Click writes the RAW (pre-sanitize, untrimmed) address to the
- *      clipboard so the user gets the verifiable on-chain value, not
- *      the cosmetic display.
+ *   3. Click writes the untrimmed address to the clipboard, passed
+ *      through `stripWireControl` (strip-but-don't-clamp) first. The
+ *      user gets the full verifiable on-chain value — not the cosmetic
+ *      `0x1234…cdef` display, and never with attacker-injected bidi /
+ *      zero-width bytes riding along.
  *
  * Lives in the flat `src/components/` tier (NOT `composite/`) because
  * the `managers.contact` lookup violates L3's `@/utils/core` ban. Tier

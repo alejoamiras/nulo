@@ -34,10 +34,13 @@ defineProps<{
 	reRequested?: boolean
 	/**
 	 * Unknown capability types pass `isUnknown=true` so the card head
-	 * shows an UNRECOGNIZED chip alongside the (dApp-controlled) label.
-	 * The parent (`build-items.ts`) also flips `selected` to `false` for
-	 * these — together, the user gets a loud visual signal AND must
-	 * deliberately click to approve.
+	 * shows an UNRECOGNIZED chip. The `label` itself is the wallet-
+	 * controlled constant "Unknown permission" — the parent
+	 * (`build-items.ts`) routes through `getSafeDisplay()` and overrides
+	 * the dApp-controlled `cap.type` before it ever reaches this prop.
+	 * The parent also flips `selected` to `false` for these — together,
+	 * the user gets a loud visual signal AND must deliberately click to
+	 * approve.
 	 */
 	isUnknown?: boolean
 	disabled?: boolean
@@ -246,12 +249,14 @@ function riskWord(r: CapabilityRisk): string {
 }
 
 /**
- * The dApp-controlled cap.type string lands as the head label for an
- * unrecognized capability. Render it in mono + tertiary so the eye
- * lands on the UNRECOGNIZED chip first; the type itself is visibly
- * "raw data, not friendly UI". Sanitization happens upstream in
- * `getCapabilityInfo` / `sanitizeWireString` in the detail panel; here
- * the typography signals the trust boundary.
+ * Mono treatment for the unknown-capability head label. The label
+ * itself is the wallet-controlled constant "Unknown permission"
+ * (build-items.ts routes through getSafeDisplay so the dApp-controlled
+ * cap.type never reaches the head). The mono typography is a
+ * visual-rhythm tweak that pairs with the UNRECOGNIZED chip — both
+ * signal "this card is the odd one out" so the eye lands on the
+ * warning. The dApp-controlled raw type is rendered separately in the
+ * detail panel through sanitizeWireString.
  */
 .mono_label {
 	font-family: var(--font-mono);
