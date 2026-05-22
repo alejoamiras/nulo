@@ -1266,212 +1266,214 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const network = await this.networkService.getNetwork(op.networkId)
 		const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
 
-		const node = await this.networkService.getNode(network.chainId)
-		const pxe = this.pxeService.getPXE(this.networkService.networkInfoLive(network))
-		const contracts = this.resolver.extractContracts(op.calls)
-		const instances = await this.resolver.resolveInstances(pxe, contracts)
-		const artifacts = await this.resolver.resolveArtifacts(pxe, instances)
+		return this.networkService.withBinding(network.chainId, async (b) => {
+			const node = b.node
+			const pxe = this.pxeService.getPXE(b.info)
+			const contracts = this.resolver.extractContracts(op.calls)
+			const instances = await this.resolver.resolveInstances(pxe, contracts)
+			const artifacts = await this.resolver.resolveArtifacts(pxe, instances)
 
-		const registeredContracts = new Set<string>((await pxe.getContracts()).map((x) => x.toString()))
-		for (const [contract, instance] of instances) {
-			if (!registeredContracts.has(contract)) {
-				this.logDebug("Register contract")
-				await pxe.registerContract({
-					instance,
-					artifact: artifacts.get(instance.currentContractClassId.toString()),
-				})
+			const registeredContracts = new Set<string>((await pxe.getContracts()).map((x) => x.toString()))
+			for (const [contract, instance] of instances) {
+				if (!registeredContracts.has(contract)) {
+					this.logDebug("Register contract")
+					await pxe.registerContract({
+						instance,
+						artifact: artifacts.get(instance.currentContractClassId.toString()),
+					})
+				}
 			}
-		}
 
-		const result: {
-			encoded: Fr[][]
-			decoded: AbiDecoded[]
-		} = {
-			encoded: [],
-			decoded: [],
-		}
+			const result: {
+				encoded: Fr[][]
+				decoded: AbiDecoded[]
+			} = {
+				encoded: [],
+				decoded: [],
+			}
 
-		const calls: [FunctionCall, number, number, AbiType[]][] = []
-		const utility: [Promise<UtilityExecutionResult>, number, AbiType[]][] = []
-		let privateCalls = 0
-		let publicCalls = 0
+			const calls: [FunctionCall, number, number, AbiType[]][] = []
+			const utility: [Promise<UtilityExecutionResult>, number, AbiType[]][] = []
+			let privateCalls = 0
+			let publicCalls = 0
 
-		await account.ensureRegistered(pxe)
+			await account.ensureRegistered(pxe)
 
-		for (let i = 0; i < op.calls.length; i++) {
-			const call = op.calls[i]
-			switch (call.kind) {
-				case "call": {
-					const instance = instances.get(call.contract)
-					if (!instance) {
-						throw new Error("Contract not found")
-					}
-					const artifact = artifacts.get(instance.currentContractClassId.toString())
-					if (!artifact) {
-						throw new Error("Contract artifact not found")
-					}
-					const fn =
-						artifact.functions.find((x) => x.name === call.method) ??
-						artifact.nonDispatchPublicFunctions.find((x) => x.name === call.method)
-					if (!fn) {
-						throw new Error("Method not found")
-					}
-					const fnSelector = await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)
-					const encodedArgs = encodeArguments(fn, call.args)
-					if (fn.functionType === FunctionType.UTILITY) {
-						utility.push([
-							pxe.executeUtility(
+			for (let i = 0; i < op.calls.length; i++) {
+				const call = op.calls[i]
+				switch (call.kind) {
+					case "call": {
+						const instance = instances.get(call.contract)
+						if (!instance) {
+							throw new Error("Contract not found")
+						}
+						const artifact = artifacts.get(instance.currentContractClassId.toString())
+						if (!artifact) {
+							throw new Error("Contract artifact not found")
+						}
+						const fn =
+							artifact.functions.find((x) => x.name === call.method) ??
+							artifact.nonDispatchPublicFunctions.find((x) => x.name === call.method)
+						if (!fn) {
+							throw new Error("Method not found")
+						}
+						const fnSelector = await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)
+						const encodedArgs = encodeArguments(fn, call.args)
+						if (fn.functionType === FunctionType.UTILITY) {
+							utility.push([
+								pxe.executeUtility(
+									new FunctionCall(
+										fn.name,
+										AztecAddress.fromString(call.contract),
+										fnSelector,
+										fn.functionType,
+										false,
+										fn.isStatic,
+										encodedArgs,
+										fn.returnTypes,
+									),
+									{ scopes: [account.address] },
+								),
+								i,
+								fn.returnTypes,
+							])
+						} else {
+							calls.push([
 								new FunctionCall(
 									fn.name,
 									AztecAddress.fromString(call.contract),
 									fnSelector,
 									fn.functionType,
-									false,
+									call.hideSender === true,
 									fn.isStatic,
 									encodedArgs,
 									fn.returnTypes,
 								),
-								{ scopes: [account.address] },
-							),
-							i,
-							fn.returnTypes,
-						])
-					} else {
-						calls.push([
-							new FunctionCall(
-								fn.name,
-								AztecAddress.fromString(call.contract),
-								fnSelector,
-								fn.functionType,
-								call.hideSender === true,
-								fn.isStatic,
-								encodedArgs,
+								i,
+								fn.functionType === FunctionType.PUBLIC ? publicCalls++ : privateCalls++,
 								fn.returnTypes,
-							),
-							i,
-							fn.functionType === FunctionType.PUBLIC ? publicCalls++ : privateCalls++,
-							fn.returnTypes,
-						])
-					}
-					this.logDebug("Call enqueued.")
-					break
-				}
-				case "encoded_call": {
-					const instance = instances.get(call.to)
-					if (!instance) {
-						throw new Error("Contract not found")
-					}
-					const artifact = artifacts.get(instance.currentContractClassId.toString())
-					if (!artifact) {
-						throw new Error("Contract artifact not found")
-					}
-					let fn: FunctionAbi | undefined
-					for (const _fn of artifact.functions) {
-						const selector = await FunctionSelector.fromNameAndParameters(_fn.name, _fn.parameters)
-						if (selector.toString() === call.selector) {
-							fn = _fn
-							break
+							])
 						}
+						this.logDebug("Call enqueued.")
+						break
 					}
-					if (!fn) {
-						for (const _fn of artifact.nonDispatchPublicFunctions) {
+					case "encoded_call": {
+						const instance = instances.get(call.to)
+						if (!instance) {
+							throw new Error("Contract not found")
+						}
+						const artifact = artifacts.get(instance.currentContractClassId.toString())
+						if (!artifact) {
+							throw new Error("Contract artifact not found")
+						}
+						let fn: FunctionAbi | undefined
+						for (const _fn of artifact.functions) {
 							const selector = await FunctionSelector.fromNameAndParameters(_fn.name, _fn.parameters)
 							if (selector.toString() === call.selector) {
 								fn = _fn
 								break
 							}
 						}
-					}
-					if (!fn) {
-						throw new Error("Method not found")
-					}
-					if (fn.functionType === FunctionType.UTILITY) {
-						utility.push([
-							pxe.executeUtility(
+						if (!fn) {
+							for (const _fn of artifact.nonDispatchPublicFunctions) {
+								const selector = await FunctionSelector.fromNameAndParameters(_fn.name, _fn.parameters)
+								if (selector.toString() === call.selector) {
+									fn = _fn
+									break
+								}
+							}
+						}
+						if (!fn) {
+							throw new Error("Method not found")
+						}
+						if (fn.functionType === FunctionType.UTILITY) {
+							utility.push([
+								pxe.executeUtility(
+									new FunctionCall(
+										fn.name,
+										AztecAddress.fromString(call.to),
+										FunctionSelector.fromString(call.selector),
+										fn.functionType,
+										false,
+										fn.isStatic,
+										call.args.map((x) => Fr.fromString(x)),
+										fn.returnTypes,
+									),
+									{ scopes: [account.address] },
+								),
+								i,
+								fn.returnTypes,
+							])
+						} else {
+							calls.push([
 								new FunctionCall(
 									fn.name,
 									AztecAddress.fromString(call.to),
 									FunctionSelector.fromString(call.selector),
 									fn.functionType,
-									false,
+									call.hideMsgSender === true,
 									fn.isStatic,
 									call.args.map((x) => Fr.fromString(x)),
 									fn.returnTypes,
 								),
-								{ scopes: [account.address] },
-							),
-							i,
-							fn.returnTypes,
-						])
-					} else {
-						calls.push([
-							new FunctionCall(
-								fn.name,
-								AztecAddress.fromString(call.to),
-								FunctionSelector.fromString(call.selector),
-								fn.functionType,
-								call.hideMsgSender === true,
-								fn.isStatic,
-								call.args.map((x) => Fr.fromString(x)),
+								i,
+								fn.functionType === FunctionType.PUBLIC ? publicCalls++ : privateCalls++,
 								fn.returnTypes,
-							),
-							i,
-							fn.functionType === FunctionType.PUBLIC ? publicCalls++ : privateCalls++,
-							fn.returnTypes,
-						])
+							])
+						}
+						this.logDebug("EncodedCall enqueued.")
+						break
 					}
-					this.logDebug("EncodedCall enqueued.")
-					break
 				}
 			}
-		}
 
-		if (calls.length) {
-			const payload = new ExecutionPayload(
-				calls.map((x) => x[0]),
-				[],
-				[],
-				[],
-			)
-			const txRequest = await account.buildTxExecutionRequest(node, pxe, payload, {
-				cancellable: false,
-				txNonce: Fr.random(),
-				feePaymentMethodOptions: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
-			})
-			const simulatedTx = await pxe.simulateTx(txRequest, {
-				simulatePublic: true,
-				skipFeeEnforcement: true,
-				scopes: [account.address],
-			})
+			if (calls.length) {
+				const payload = new ExecutionPayload(
+					calls.map((x) => x[0]),
+					[],
+					[],
+					[],
+				)
+				const txRequest = await account.buildTxExecutionRequest(node, pxe, payload, {
+					cancellable: false,
+					txNonce: Fr.random(),
+					feePaymentMethodOptions: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
+				})
+				const simulatedTx = await pxe.simulateTx(txRequest, {
+					simulatePublic: true,
+					skipFeeEnforcement: true,
+					scopes: [account.address],
+				})
 
-			const publicReturn = simulatedTx.getPublicReturnValues()
-			const privateReturn =
-				txRequest.origin.toString() === op.accountAddress
-					? simulatedTx.getPrivateReturnValues().nested
-					: simulatedTx.getPrivateReturnValues().nested[1].nested
+				const publicReturn = simulatedTx.getPublicReturnValues()
+				const privateReturn =
+					txRequest.origin.toString() === op.accountAddress
+						? simulatedTx.getPrivateReturnValues().nested
+						: simulatedTx.getPrivateReturnValues().nested[1].nested
 
-			for (const [call, i, j, types] of calls) {
-				const values = (call.type === FunctionType.PUBLIC ? publicReturn[j] : privateReturn[j]).values ?? []
-				result.encoded[i] = values
+				for (const [call, i, j, types] of calls) {
+					const values = (call.type === FunctionType.PUBLIC ? publicReturn[j] : privateReturn[j]).values ?? []
+					result.encoded[i] = values
+					try {
+						result.decoded[i] = decodeFromAbi(types, values)
+					} catch (error) {
+						this.logError("Failed to decode simulation results", types, values, getErrorMessage(error))
+					}
+				}
+			}
+
+			for (const [promise, i, types] of utility) {
+				const { result: values } = await promise
 				try {
 					result.decoded[i] = decodeFromAbi(types, values)
 				} catch (error) {
-					this.logError("Failed to decode simulation results", types, values, getErrorMessage(error))
+					this.logError("Failed to encode utility simulation results", types, values, getErrorMessage(error))
 				}
+				result.encoded[i] = values
 			}
-		}
 
-		for (const [promise, i, types] of utility) {
-			const { result: values } = await promise
-			try {
-				result.decoded[i] = decodeFromAbi(types, values)
-			} catch (error) {
-				this.logError("Failed to encode utility simulation results", types, values, getErrorMessage(error))
-			}
-			result.encoded[i] = values
-		}
-
-		return result
+			return result
+		})
 	}
 
 	public async getGasBalances(networkId: string, accountAddress: string, forceRefresh?: boolean): Promise<GasBalances> {
@@ -1803,14 +1805,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// `maxPriorityFeesPerGas`) so `nulo-account.ts`'s
 		// `completeFeeOptions` call uses the dApp-supplied values rather
 		// than silently defaulting from `node.getCurrentMinFees() * 1.5`.
-		const [txRequest, node, pxe, account] = await this.txBuilder.buildStandard(
+		const [txRequest, , pxe, account, network] = await this.txBuilder.buildStandard(
 			{ ...op, actions },
 			feePaymentMethod,
 			undefined,
 			op.opts.fee?.gasSettings,
 		)
 		suggestGasLimits(txRequest, fee)
-		await applyEmbeddedFpcGasCap(txRequest, fee, node)
+		await this.networkService.withBinding(network.chainId, async (b) => applyEmbeddedFpcGasCap(txRequest, fee, b.node))
 		const additionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
 		// Thread `stubAccountAddresses` so the simulated account contract
 		// is the stubbed pass-through one (override path at
@@ -1851,9 +1853,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw new Error("Invalid `opts.from`")
 		}
 		const [actions, feePaymentMethod, fee] = await this.planner.processAztecJsPayload(op.exec, op.opts)
-		const [txRequest, node, pxe] = await this.txBuilder.buildStandard({ ...op, actions }, feePaymentMethod)
+		const [txRequest, , pxe, , network] = await this.txBuilder.buildStandard({ ...op, actions }, feePaymentMethod)
 		suggestGasLimits(txRequest, fee)
-		await applyEmbeddedFpcGasCap(txRequest, fee, node)
+		await this.networkService.withBinding(network.chainId, async (b) => applyEmbeddedFpcGasCap(txRequest, fee, b.node))
 		const additionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
 		return pxe.profileTx(txRequest, {
 			profileMode: op.opts.profileMode,
@@ -1931,7 +1933,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			await this.markJournal(journalId, { stage: "simulating" })
 			checkCancelled()
 
-			const [txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod] = await this.buildAndEstimateTxRequest(
+			const [txRequest, , pxe, account, network, nonce, txCalls, feePaymentMethod] = await this.buildAndEstimateTxRequest(
 				{ ...op, actions, fee },
 				op.feeSettings,
 				parentTask,
@@ -1967,7 +1969,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			if (op.opts.wait === "NO_WAIT") {
 				return { txHash, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 			}
-			const receipt = await node.getTxReceipt(txHash)
+			// Route post-send receipt fetch through withBinding so a node
+			// failure here counts toward the classifier.
+			const receipt = await this.networkService.withBinding(network.chainId, async (b) => b.node.getTxReceipt(txHash))
 			return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 		} catch (error) {
 			if (error instanceof JobCancelledSentinel) {
@@ -2019,7 +2023,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		try {
 			await this.markJournal(journalId, { stage: "simulating" })
 
-			const [txRequest, node, pxe, account, network, txCalls] = await this.txBuilder.buildNoFrom(op, parentTask)
+			const [txRequest, , pxe, account, network, txCalls] = await this.txBuilder.buildNoFrom(op, parentTask)
 			this.logDebug(
 				`executeNoFromSendTx: buildNoFromTxRequest completed, txCalls=${txCalls.length}, account=${account.address.toString()}`,
 			)
@@ -2040,7 +2044,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				gasPadding: 1,
 			}
 			suggestGasLimits(txRequest, feeOpts)
-			await applyEmbeddedFpcGasCap(txRequest, feeOpts, node)
+			await this.networkService.withBinding(network.chainId, async (b) => applyEmbeddedFpcGasCap(txRequest, feeOpts, b.node))
 
 			// Kernelless auth witness discovery: stub the user's account so verify_private_authwit
 			// doesn't fail on missing witnesses. The stub accepts any authwit during simulation.
@@ -2070,7 +2074,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const effects = collectOffchainEffects(discoveryResult.privateExecutionResult)
 			this.logDebug(`executeNoFromSendTx: offchain effects found: ${effects.length}`)
 			if (effects.length) {
-				const nodeInfo2 = await node.getNodeInfo()
+				const nodeInfo2 = await this.networkService.withBinding(network.chainId, async (b) => b.node.getNodeInfo())
 				const chainInfo = { chainId: new Fr(nodeInfo2.l1ChainId), version: new Fr(nodeInfo2.rollupVersion) }
 				for (const effect of effects) {
 					try {
@@ -2095,7 +2099,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				{ simulatePublic: true, skipFeeEnforcement: true, scopes: scopesWithAccount },
 				parentTask,
 			)
-			await finalizeGasLimits(node, txRequest, simulatedTx, 1, undefined, feeOpts, 1)
+			await this.networkService.withBinding(network.chainId, async (b) =>
+				finalizeGasLimits(b.node, txRequest, simulatedTx, 1, undefined, feeOpts, 1),
+			)
 
 			// Prove with account in scope
 			checkCancelled()
@@ -2127,7 +2133,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			if (op.opts.wait === "NO_WAIT") {
 				return { txHash, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 			}
-			const receipt = await node.getTxReceipt(txHash)
+			// Route post-send receipt fetch through withBinding so a node
+			// failure here counts toward the classifier.
+			const receipt = await this.networkService.withBinding(network.chainId, async (b) => b.node.getTxReceipt(txHash))
 			return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 		} catch (error) {
 			if (error instanceof JobCancelledSentinel) {

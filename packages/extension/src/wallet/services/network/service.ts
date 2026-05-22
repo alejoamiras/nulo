@@ -367,18 +367,14 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			const network = await this.storage.get(id)
 			if (network?.profileId !== profile.id) throw new Error("Invalid id")
 			await this._writeActive(profile.id, id)
-			const preferred = network.endpoints[0]
-			if (preferred) {
-				this.nodes.set(network.chainId, {
-					node: this.nodeFactory.createNode(preferred.rpcUrl),
-					endpointId: preferred.id,
-					rpcUrl: preferred.rpcUrl,
-				})
-				// Reset routeState for the newly-active network — switching chains
-				// is a fresh routing context; stale cooldowns from a prior session
-				// shouldn't carry over.
-				this.routeState.set(network.id, newRouteState(preferred.id))
-			}
+			// Codex post-impl review §1 (round 2): do NOT pre-seed `nodes`
+			// or `routeState` here. Pre-seeding would bind to `endpoints[0]`
+			// without a chainId probe AND would wipe any existing
+			// `invalidChain` quarantine for the network (e.g. an endpoint
+			// that was quarantined earlier in this session via a failed
+			// `promoteEndpoint` probe). Lazy init in `_resolveBindingLocked`
+			// preserves any prior quarantine and lets the first traffic
+			// call go through the normal binding-resolution path.
 			this.emit("onActiveNetworkChanged", network)
 			return network
 		} finally {
@@ -593,18 +589,32 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 
 		// Phase 2 (outside lock): probe chainId. The probe IS the security
 		// check — failure means the promoted endpoint is misconfigured and
-		// the live route must not move there.
+		// the live route must not move there. The failure-recording paths
+		// below MUST initialize `routeState` if it doesn't exist yet —
+		// otherwise the quarantine is lost (codex post-impl review round 2
+		// §1: failed-probe paths must record state even on inactive/never-
+		// traffic'd networks; the user may later switch to this network and
+		// the quarantine needs to apply).
+		const ensureRouteState = (): NetworkRouteState => {
+			let state = this.routeState.get(networkAfterSplice.id)
+			if (!state) {
+				// Seed with the OLD primary as active. The promoted endpoint
+				// will be quarantined below; the previously-preferred
+				// endpoint (now at endpoints[1] after splice) becomes the
+				// implicit active until something else takes over.
+				const fallback = networkAfterSplice.endpoints[1]?.id ?? endpointId
+				state = newRouteState(fallback)
+				this.routeState.set(networkAfterSplice.id, state)
+			}
+			return state
+		}
 		let probedChainId: number
 		try {
 			probedChainId = await this._getChainId(promotedEndpoint.rpcUrl, networkAfterSplice.kind)
 		} catch (err) {
-			// Transport failure on the probe. Mark the endpoint cooldown so
-			// `_resolveBindingLocked`'s snapback won't immediately retry it,
-			// but DO NOT quarantine — could be a transient failure.
 			try {
 				await this.lock.enter()
-				const state = this.routeState.get(networkAfterSplice.id)
-				if (state) markCooldown(state, endpointId)
+				markCooldown(ensureRouteState(), endpointId)
 			} finally {
 				this.lock.leave()
 			}
@@ -613,8 +623,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		if (probedChainId !== networkAfterSplice.chainId) {
 			try {
 				await this.lock.enter()
-				const state = this.routeState.get(networkAfterSplice.id)
-				if (state) quarantineInvalidChain(state, endpointId)
+				quarantineInvalidChain(ensureRouteState(), endpointId)
 			} finally {
 				this.lock.leave()
 			}
@@ -623,9 +632,19 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			)
 		}
 
-		// Phase 3 (under lock): probe passed — flip the live route.
+		// Phase 3 (under lock): probe passed — flip the live route. Verify
+		// the promoted endpoint is STILL `endpoints[0]` (codex post-impl
+		// review round 2 §2: two concurrent promotes can finish out of
+		// order; the earlier probe must not overwrite the later promote).
 		try {
 			await this.lock.enter()
+			const current = await this.storage.get(networkAfterSplice.id)
+			if (!current || current.endpoints[0]?.id !== endpointId) {
+				// A newer promote has taken endpoints[0]; this promote's
+				// activation is stale. Drop the activate-and-emit step.
+				// The probe-passed quarantine-clear is harmless.
+				return current ?? networkAfterSplice
+			}
 			let state = this.routeState.get(networkAfterSplice.id)
 			if (!state) {
 				state = newRouteState(endpointId)
@@ -645,7 +664,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 				toEndpointId: endpointId,
 				source: "manual",
 			})
-			return networkAfterSplice
+			return current
 		} finally {
 			this.lock.leave()
 		}

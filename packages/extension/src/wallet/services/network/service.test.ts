@@ -1135,4 +1135,60 @@ describe("NetworkService failover engine (multi-rpc-failover Phase 1)", () => {
 		;(service as any)._countFailure("net-42", "ep-a", Object.assign(new Error("aborted"), { name: "AbortError" }))
 		expect(routeState(service, "net-42").failures.size).toBe(0)
 	})
+
+	test("withBinding reports failures by binding identity, not URL (cross-profile safe)", async () => {
+		// Codex post-impl review §5: withBinding's catch must report via
+		// (binding.network.id, binding.endpoint.id), NOT URL lookup. URL
+		// lookup leaks across profiles when both share an RPC URL.
+		const { service, local } = setupServiceWithStorage({ "https://shared.test": nodeInfoForChain(42) })
+		seedNetwork(local, makeNetwork(42, [{ id: "ep-shared", rpcUrl: "https://shared.test" }]))
+		await service.acquireBinding(42)
+
+		await expect(
+			service.withBinding(42, async () => {
+				throw { status: 503 }
+			}),
+		).rejects.toMatchObject({ status: 503 })
+
+		// Synchronous assert: _countFailure ran inline in withBinding's catch.
+		// No setTimeout flush needed (that was the old URL-async path).
+		expect(routeState(service, "net-42").failures.get("ep-shared")?.hard).toBe(1)
+	})
+
+	test("_scheduleRebindChain swallows rejections without failing the failover", async () => {
+		// Codex post-impl review §6: there was no test for the
+		// `.catch(logError)` arm of the fire-and-forget rebind. Verify a
+		// rejected rebindChain doesn't break the failover commit path or
+		// resurface as an unhandled rejection.
+		const { service, local } = setupServiceWithStorage({
+			"https://a.test": nodeInfoForChain(42),
+			"https://b.test": nodeInfoForChain(42),
+		})
+		seedNetwork(
+			local,
+			makeNetwork(42, [
+				{ id: "ep-a", rpcUrl: "https://a.test" },
+				{ id: "ep-b", rpcUrl: "https://b.test" },
+			]),
+		)
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;((service as any).pxeServiceClient as { rebindChain: () => Promise<void> }).rebindChain = vi
+			.fn()
+			.mockRejectedValue(new Error("offscreen down"))
+
+		await service.acquireBinding(42)
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(service as any)._countFailure("net-42", "ep-a", { status: 503 })
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(service as any)._countFailure("net-42", "ep-a", { status: 503 })
+
+		// Failover completes despite the rebindChain rejection — and the
+		// rejection is swallowed (we don't see an unhandled rejection here
+		// because `_scheduleRebindChain` attaches a `.catch(logError)`).
+		const after = await service.acquireBinding(42)
+		expect(after.endpoint.id).toBe("ep-b")
+		// Flush microtasks so the catch handler runs before assertions
+		// complete (otherwise vitest's unhandled-rejection guard could fire).
+		await new Promise((r) => setTimeout(r, 0))
+	})
 })
