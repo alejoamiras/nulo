@@ -2,7 +2,7 @@ import type { BlockExplorerType } from "@/wallet/constants/explorers"
 
 export class Config {
 	// Appearance
-	theme: "dark" | "light" | "system" = "dark"
+	theme: "dark" | "light" | "system" = "system"
 	sidePanel: boolean = false
 	showNode: boolean = true
 	showPopupFullscreen: boolean = true

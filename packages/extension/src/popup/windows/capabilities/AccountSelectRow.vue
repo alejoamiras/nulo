@@ -25,6 +25,7 @@ const caip = (a: { address: string; chainId: number }) => formatCaipAccount(a.ch
 		data-testid="cap-account-item"
 		:data-account-id="account.address"
 		:data-account-name="account.name"
+		:data-selected="selected || undefined"
 		role="button"
 		tabindex="0"
 		@click="emit('toggle')"

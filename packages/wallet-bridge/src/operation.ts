@@ -13,7 +13,6 @@ export type OperationKind = Operation["kind"]
 
 export type Operation =
 	// Nulo interface:
-	| GetCompleteAddressOperation
 	| RegisterContractOperation
 	| RegisterSenderOperation
 	| RegisterTokenOperation
@@ -36,12 +35,6 @@ export type Operation =
 	| AztecCreateAuthWitOperation
 
 // Nulo interface:
-
-export type GetCompleteAddressOperation = {
-	readonly kind: "get_complete_address"
-	readonly networkId: string
-	readonly accountAddress: string
-}
 
 export type RegisterContractOperation = {
 	readonly kind: "register_contract"
@@ -111,6 +104,15 @@ export type SimulateUtilityOperation = {
 	readonly args: unknown[]
 }
 
+/**
+ * Internal-only operation kind. The dApp-facing `simulateViews` wallet-sdk
+ * method was retired (see [implementations-plan/faucet-add-token/plan-v2.md]).
+ * The `simulate_views` kind survives for internal callers — `balance-projector`
+ * batches token balance reads, and `execution/service.ts` queries FeeJuice
+ * public + private FPC balance for gas estimation. The whole op kind can be
+ * dropped once those callers are refactored to use `aztec_simulateTx` +
+ * `aztec_executeUtility` (filed as the `deprecate-simulate-views` follow-up).
+ */
 export type SimulateViewsOperation = {
 	readonly kind: "simulate_views"
 	readonly networkId: string

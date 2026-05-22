@@ -21,13 +21,14 @@ function render(value: bigint | null): string {
 
 <template>
 	<div class="row">
-		<div class="cell">
-			<span class="label">balance · public</span>
-			<span class="value" :data-testid="TESTIDS.balancePublic">{{ publicText }}</span>
-		</div>
+		<!-- Order matches the wallet popup convention: private first, public second. -->
 		<div class="cell">
 			<span class="label">balance · private</span>
 			<span class="value" :data-testid="TESTIDS.balancePrivate">{{ privateText }}</span>
+		</div>
+		<div class="cell">
+			<span class="label">balance · public</span>
+			<span class="value" :data-testid="TESTIDS.balancePublic">{{ publicText }}</span>
 		</div>
 	</div>
 </template>

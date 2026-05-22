@@ -282,9 +282,9 @@ onBeforeUnmount(() => {
 				</Text>
 			</Flex>
 
-			<!-- Granted capabilities -->
+			<!-- Granted permissions -->
 			<Flex v-if="grantedCapabilities.length" direction="column" gap="10" wide>
-				<SectionLabel label="Granted capabilities" :count="grantedCapabilities.length" />
+				<SectionLabel label="Granted permissions" :count="grantedCapabilities.length" />
 				<GrantedCapabilitiesList :grants="grantedCapabilities" />
 			</Flex>
 

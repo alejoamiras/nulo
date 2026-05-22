@@ -229,6 +229,24 @@ export const OperationJournalMethodSchemas = {
 		params: z.tuple([z.string().min(1), JobProgressSchema, JobErrorSchema.nullable().optional()]),
 		result: OperationRecordSchema,
 	},
+	/**
+	 * Update non-FSM metadata on an existing record (title / subtitle). Unlike
+	 * `transitionOperation`, this never moves the stage and is safe to call on
+	 * terminal records. Used by `tokenService.addToken` to backfill the
+	 * resolved symbol as the title once metadata fetch returns — the journal
+	 * entry is created up-front (so the tokens-view in-flight row pops in
+	 * immediately) and gets its title rewritten when the symbol resolves.
+	 */
+	setOperationMeta: {
+		params: z.tuple([
+			z.string().min(1),
+			z.object({
+				title: z.string().optional(),
+				subtitle: z.string().optional(),
+			}),
+		]),
+		result: OperationRecordSchema,
+	},
 	getOperation: {
 		params: z.tuple([z.string().min(1)]),
 		result: OperationRecordSchema.optional(),
@@ -246,6 +264,7 @@ export const OperationJournalMethodSchemas = {
 export type Methods = {
 	createOperation(input: NewOperationInput): OperationRecord
 	transitionOperation(id: string, progress: JobProgress, error?: JobError | null): OperationRecord
+	setOperationMeta(id: string, meta: { title?: string; subtitle?: string }): OperationRecord
 	getOperation(id: string): OperationRecord | undefined
 	getOperations(filter?: OperationFilter): OperationRecord[]
 	deleteOperation(id: string): void

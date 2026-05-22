@@ -1,15 +1,23 @@
 /**
- * Contract registration + metadata. Canonical wallet-sdk methods only —
- * registerToken (Nulo-custom) was dropped in the canonical refactor.
+ * Contract registration + metadata. Canonical wallet-sdk methods + the
+ * Nulo-custom `registerToken` (re-introduced via the runtime schema patch in
+ * `lib/nulo-schema-patch.ts`).
  *
  * registerContract needs a real ContractInstance which the test driver passes
  * via the `pg-input-contractInstance` textarea (JSON-stringified instance).
  */
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
+import type { Wallet } from "@aztec/aztec.js/wallet"
 import { getWallet } from "../lib/wallet"
 import { logCall } from "../lib/log"
 import { getInput, getState, setState } from "../state"
+
+/** Typed augmentation for the Nulo-custom method. The runtime patch in
+ *  `lib/nulo-schema-patch.ts` makes this true at runtime; the cast aligns TS. */
+type WalletWithRegisterToken = Wallet & {
+	registerToken(account: AztecAddress, token: AztecAddress): Promise<void>
+}
 
 export function renderContracts(): string {
 	const s = getState()
@@ -21,6 +29,7 @@ export function renderContracts(): string {
 				<label>Token addr: <input data-testid="pg-input-tokenAddress" name="tokenAddress" type="text" placeholder="0x..." /></label>
 				<label>Class id: <input data-testid="pg-input-classId" name="classId" type="text" placeholder="0x..." /></label>
 				<label>Sender addr: <input data-testid="pg-input-senderAddress" name="senderAddress" type="text" placeholder="0x..." /></label>
+				<label>Account addr: <input data-testid="pg-input-accountAddress" name="accountAddress" type="text" placeholder="0x..." /></label>
 			</div>
 			<div class="pg-row">
 				<label>Contract instance JSON:
@@ -30,6 +39,7 @@ export function renderContracts(): string {
 			<div class="pg-row">
 				<button data-testid="pg-btn-registerContract" type="button" ${dis}>registerContract</button>
 				<button data-testid="pg-btn-registerSender" type="button" ${dis}>registerSender</button>
+				<button data-testid="pg-btn-registerToken" type="button" ${dis}>registerToken</button>
 				<button data-testid="pg-btn-getContractMetadata" type="button" ${dis}>getContractMetadata</button>
 				<button data-testid="pg-btn-getContractClassMetadata" type="button" ${dis}>getContractClassMetadata</button>
 			</div>
@@ -89,6 +99,20 @@ export function bindContracts(root: HTMLElement): void {
 			// biome-ignore lint/suspicious/noExplicitAny: instance shape varies by aztec.js version
 			const instance = JSON.parse(raw) as any
 			return wallet.registerContract(instance)
+		}),
+	)
+
+	root.querySelector<HTMLButtonElement>('[data-testid="pg-btn-registerToken"]')?.addEventListener(
+		"click",
+		safe("registerToken", async () => {
+			const wallet = getWallet()! as WalletWithRegisterToken
+			const accountInput = getInput("accountAddress") || getInput("senderAddress")
+			if (!accountInput) throw new Error("Empty accountAddress — set the input first")
+			const tokenInput = getInput("tokenAddress")
+			if (!tokenInput) throw new Error("Empty tokenAddress — set the input first")
+			const account = AztecAddress.fromString(accountInput)
+			const token = AztecAddress.fromString(tokenInput)
+			return wallet.registerToken(account, token)
 		}),
 	)
 }

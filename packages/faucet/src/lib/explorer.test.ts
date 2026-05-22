@@ -21,8 +21,8 @@ describe("explorer URLs (aztecscan testnet)", () => {
 		expect(explorerTxUrl(TX)).toBe(`https://testnet.aztecscan.xyz/tx-effects/${TX}`)
 	})
 
-	it("contract URLs use the /contracts/<address> path", () => {
-		expect(explorerAddressUrl(ADDR)).toBe(`https://testnet.aztecscan.xyz/contracts/${ADDR}`)
+	it("contract URLs use the /contracts/instances/<address> path (aztecscan schema 2026-05-22)", () => {
+		expect(explorerAddressUrl(ADDR)).toBe(`https://testnet.aztecscan.xyz/contracts/instances/${ADDR}`)
 	})
 
 	it("returns the empty string when the env base URL isn't configured", () => {

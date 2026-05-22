@@ -49,6 +49,7 @@ declare global {
   const getCurrentWatcher: typeof import('vue').getCurrentWatcher
   const getDecimalSeparator: typeof import('../utils/amount').getDecimalSeparator
   const getLastActiveProfileId: typeof import('../utils/lastActiveProfile').getLastActiveProfileId
+  const getMethodLabel: typeof import('../utils/tx-enrichment').getMethodLabel
   const getOriginLabel: typeof import('../utils/tx-enrichment').getOriginLabel
   const getPrimaryCall: typeof import('../utils/tx-enrichment').getPrimaryCall
   const getTemplate: typeof import('../composables/notification.js').getTemplate
@@ -266,6 +267,7 @@ declare module 'vue' {
     readonly getCurrentWatcher: UnwrapRef<typeof import('vue')['getCurrentWatcher']>
     readonly getDecimalSeparator: UnwrapRef<typeof import('../utils/amount')['getDecimalSeparator']>
     readonly getLastActiveProfileId: UnwrapRef<typeof import('../utils/lastActiveProfile')['getLastActiveProfileId']>
+    readonly getMethodLabel: UnwrapRef<typeof import('../utils/tx-enrichment')['getMethodLabel']>
     readonly getOriginLabel: UnwrapRef<typeof import('../utils/tx-enrichment')['getOriginLabel']>
     readonly getPrimaryCall: UnwrapRef<typeof import('../utils/tx-enrichment')['getPrimaryCall']>
     readonly getTemplate: UnwrapRef<typeof import('../composables/notification.js')['getTemplate']>

@@ -1,5 +1,6 @@
 import { mount } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { ref } from "vue"
 
 type DripResult = { kind: "txHash"; value: string } | { kind: "error"; value: string }
 const refreshFn = vi.fn(async () => {})
@@ -7,6 +8,11 @@ const dripFn = vi.fn<(_t: unknown, _a: unknown, target: "public" | "private") =>
 	kind: "txHash",
 	value: target === "public" ? "0xpublic" : "0xprivate",
 }))
+
+// Real Vue ref so the component's reactive `dripping` computed actually
+// re-runs when tests mutate inflight state. The existing mock object
+// shape `{ value: … }` doesn't trigger reactivity.
+const inflightRef = ref<{ tokenSymbol: string; target: string } | null>(null)
 
 vi.mock("@/composables/useTokenBalance", () => ({
 	useTokenBalance: () => ({
@@ -20,21 +26,23 @@ vi.mock("@/composables/useTokenBalance", () => ({
 }))
 
 vi.mock("@/composables/useFaucetDrip", () => {
-	const inflight = { value: null as { tokenSymbol: string; target: string } | null }
 	const lastRecord: Record<string, { kind: string; value: string }> = {}
 	return {
 		useFaucetDrip: () => ({
-			inflight,
+			inflight: inflightRef,
 			last: lastRecord,
-			isActive: (sym: string, tgt: string) => inflight.value?.tokenSymbol === sym && inflight.value.target === tgt,
+			isActive: (sym: string, tgt: string) => inflightRef.value?.tokenSymbol === sym && inflightRef.value.target === tgt,
 			drip: dripFn,
 		}),
 	}
 })
 
-const pushFn = vi.fn()
+// Track returned toast ids so we can assert `dismiss(prevId)` on re-drip.
+let nextToastId = 1
+const pushFn = vi.fn<(toast: { kind: string; text: string; link?: { label: string; href: string } }) => number>(() => nextToastId++)
+const dismissFn = vi.fn<(id: number) => void>()
 vi.mock("@/composables/useToast", () => ({
-	useToast: () => ({ push: pushFn, dismiss: vi.fn(), toasts: { value: [] } }),
+	useToast: () => ({ push: pushFn, dismiss: dismissFn, toasts: { value: [] } }),
 }))
 
 vi.mock("@/lib/explorer", () => ({
@@ -60,6 +68,9 @@ describe("TokenCard", () => {
 			value: target === "public" ? "0xpublic" : "0xprivate",
 		}))
 		pushFn.mockClear()
+		dismissFn.mockClear()
+		nextToastId = 1
+		inflightRef.value = null
 	})
 	afterEach(() => {
 		vi.clearAllMocks()
@@ -82,12 +93,20 @@ describe("TokenCard", () => {
 		expect(w.text()).toContain("Test token · no real value")
 	})
 
-	it("renders both drip buttons with the correct labels", () => {
+	it("renders both drip buttons with the new 'Get …' copy (no amount)", () => {
 		const w = makeCard()
 		const pub = w.get(`[data-testid="${TESTIDS.btnDripPublic}"]`)
 		const priv = w.get(`[data-testid="${TESTIDS.btnDripPrivate}"]`)
-		expect(pub.text()).toBe("Drip 1,000 USDC to public")
-		expect(priv.text()).toBe("Drip 1,000 USDC to private")
+		expect(pub.text()).toBe("Get USDC (public)")
+		expect(priv.text()).toBe("Get USDC (private)")
+	})
+
+	it("drip buttons carry an aria-label that names the amount + target balance", () => {
+		const w = makeCard()
+		const pub = w.get(`[data-testid="${TESTIDS.btnDripPublic}"]`)
+		const priv = w.get(`[data-testid="${TESTIDS.btnDripPrivate}"]`)
+		expect(pub.attributes("aria-label")).toBe("Get 1,000 USDC into your public balance")
+		expect(priv.attributes("aria-label")).toBe("Get 1,000 USDC into your private balance")
 	})
 
 	it("renders the balance row with public + private values", () => {
@@ -101,7 +120,7 @@ describe("TokenCard", () => {
 		expect(w.find(`[data-testid="${TESTIDS.dripStatus}"]`).exists()).toBe(false)
 	})
 
-	it("clicking 'Drip … to public' calls drip() with target=public and refreshes balance", async () => {
+	it("clicking 'Get USDC (public)' calls drip() with target=public and refreshes balance", async () => {
 		const w = makeCard()
 		await w.get(`[data-testid="${TESTIDS.btnDripPublic}"]`).trigger("click")
 		await Promise.resolve()
@@ -111,7 +130,7 @@ describe("TokenCard", () => {
 		expect(refreshFn).toHaveBeenCalled()
 	})
 
-	it("clicking 'Drip … to private' calls drip() with target=private", async () => {
+	it("clicking 'Get USDC (private)' calls drip() with target=private", async () => {
 		const w = makeCard()
 		await w.get(`[data-testid="${TESTIDS.btnDripPrivate}"]`).trigger("click")
 		await Promise.resolve()
@@ -155,7 +174,6 @@ describe("TokenCard", () => {
 	})
 
 	it("recency: a later private drip overrides an earlier public drip in the status row", async () => {
-		// dripFn flips kind to error on second call so we can tell which one wins.
 		dripFn
 			.mockImplementationOnce(async () => ({ kind: "txHash" as const, value: "0xpublic" }))
 			.mockImplementationOnce(async () => ({ kind: "error" as const, value: "Reverted" }))
@@ -167,22 +185,19 @@ describe("TokenCard", () => {
 		await Promise.resolve()
 		await Promise.resolve()
 		const row = w.find(`[data-testid="${TESTIDS.dripStatus}"]`)
-		// The newer (private/error) outcome wins regardless of insertion order.
 		expect(row.attributes("data-drip-status")).toBe("error")
 		expect(row.text()).toContain("Reverted")
 	})
 
-	it("ok emphasis decays after 3s: row stays, emphasized marker drops", async () => {
+	it("ok emphasis persists past 3s — no auto-decay timer (user-noticed-confirmation fix)", async () => {
 		vi.useFakeTimers()
 		const w = makeCard()
 		await w.get(`[data-testid="${TESTIDS.btnDripPublic}"]`).trigger("click")
 		await Promise.resolve()
 		await Promise.resolve()
 		expect(w.find(`[data-testid="${TESTIDS.dripStatus}"]`).attributes("data-emphasized")).toBe("true")
-		await vi.advanceTimersByTimeAsync(3_500)
-		const row = w.find(`[data-testid="${TESTIDS.dripStatus}"]`)
-		expect(row.exists()).toBe(true)
-		expect(row.attributes("data-emphasized")).toBeUndefined()
+		await vi.advanceTimersByTimeAsync(10_000)
+		expect(w.find(`[data-testid="${TESTIDS.dripStatus}"]`).attributes("data-emphasized")).toBe("true")
 		vi.useRealTimers()
 	})
 
@@ -195,9 +210,83 @@ describe("TokenCard", () => {
 		await Promise.resolve()
 		expect(w.find(`[data-testid="${TESTIDS.dripStatus}"]`).attributes("data-emphasized")).toBe("true")
 		await vi.advanceTimersByTimeAsync(10_000)
-		// Emphasis should still be set — errors don't auto-decay.
 		expect(w.find(`[data-testid="${TESTIDS.dripStatus}"]`).attributes("data-emphasized")).toBe("true")
 		vi.useRealTimers()
+	})
+
+	it("during inflight: the status-link from the previous drip is suppressed", async () => {
+		// Step 1: complete a successful drip to populate lastDrip with txUrl.
+		const w = makeCard()
+		await w.get(`[data-testid="${TESTIDS.btnDripPublic}"]`).trigger("click")
+		await Promise.resolve()
+		await Promise.resolve()
+		// Sanity: link is present now.
+		expect(w.find(`[data-testid="${TESTIDS.dripStatus}"] a`).exists()).toBe(true)
+
+		// Step 2: force inflight state on the SAME card via the shared ref. Vue's
+		// computed `dripping` reads `inflightRef.value` so this triggers the
+		// statusKind transition without us needing a deferred mock promise.
+		inflightRef.value = { tokenSymbol: "USDC", target: "private" }
+		await w.vm.$nextTick()
+
+		// Step 3: status-link should be GONE; status-text should reflect inflight.
+		const row = w.find(`[data-testid="${TESTIDS.dripStatus}"]`)
+		expect(row.attributes("data-drip-status")).toBe("dripping")
+		expect(row.find("a").exists()).toBe(false)
+		expect(row.text()).toContain("Proving private")
+	})
+
+	it("re-drip dismisses the prior success toast so its stale 'view tx' link can't be clicked mid-flight", async () => {
+		const w = makeCard()
+		// First drip → push() returns id=1, stored as lastTxToastId.
+		await w.get(`[data-testid="${TESTIDS.btnDripPublic}"]`).trigger("click")
+		await Promise.resolve()
+		await Promise.resolve()
+		expect(dismissFn).not.toHaveBeenCalled()
+
+		// Second drip → handler dismisses lastTxToastId (1) before awaiting drip.
+		await w.get(`[data-testid="${TESTIDS.btnDripPrivate}"]`).trigger("click")
+		await Promise.resolve()
+		await Promise.resolve()
+		expect(dismissFn).toHaveBeenCalledWith(1)
+	})
+
+	it("error → success transition: the status row fully swaps text + reveals the new tx link", async () => {
+		dripFn
+			.mockImplementationOnce(async () => ({ kind: "error" as const, value: "Reverted" }))
+			.mockImplementationOnce(async () => ({ kind: "txHash" as const, value: "0xprivate" }))
+		const w = makeCard()
+		await w.get(`[data-testid="${TESTIDS.btnDripPublic}"]`).trigger("click")
+		await Promise.resolve()
+		await Promise.resolve()
+		let row = w.find(`[data-testid="${TESTIDS.dripStatus}"]`)
+		expect(row.attributes("data-drip-status")).toBe("error")
+		expect(row.find("a").exists()).toBe(false)
+
+		await w.get(`[data-testid="${TESTIDS.btnDripPrivate}"]`).trigger("click")
+		await Promise.resolve()
+		await Promise.resolve()
+		row = w.find(`[data-testid="${TESTIDS.dripStatus}"]`)
+		expect(row.attributes("data-drip-status")).toBe("ok")
+		expect(row.text()).not.toContain("Reverted")
+		expect(row.find("a").attributes("href")).toBe("https://explorer.test/tx/0xprivate")
+	})
+
+	it("success → error transition: the tx link is removed and the error message takes over", async () => {
+		dripFn
+			.mockImplementationOnce(async () => ({ kind: "txHash" as const, value: "0xpublic" }))
+			.mockImplementationOnce(async () => ({ kind: "error" as const, value: "Insufficient gas" }))
+		const w = makeCard()
+		await w.get(`[data-testid="${TESTIDS.btnDripPublic}"]`).trigger("click")
+		await Promise.resolve()
+		await Promise.resolve()
+		await w.get(`[data-testid="${TESTIDS.btnDripPrivate}"]`).trigger("click")
+		await Promise.resolve()
+		await Promise.resolve()
+		const row = w.find(`[data-testid="${TESTIDS.dripStatus}"]`)
+		expect(row.attributes("data-drip-status")).toBe("error")
+		expect(row.text()).toContain("Insufficient gas")
+		expect(row.find("a").exists()).toBe(false)
 	})
 
 	it("carries the stable testid + data-symbol on the card root", () => {

@@ -38,6 +38,19 @@ export const FEE_METHODS = new Set([
 ])
 
 /**
+ * Look up the wallet-curated friendly label for `method` from
+ * `METHOD_LABELS`. Returns `null` for anything not in the allowlist —
+ * call sites that need a fallback (e.g. the journal title) use
+ * `humanizeMethodName` instead, which title-cases unknowns. The
+ * capability popup uses `getMethodLabel` because tautological
+ * title-casing of a dApp-controlled function name on a trust-sensitive
+ * surface would only add noise.
+ */
+export function getMethodLabel(method: string): string | null {
+	return METHOD_LABELS[method] ?? null
+}
+
+/**
  * Maps a method name/selector to a human-readable label.
  * - Known Aztec methods get friendly labels
  * - Hex selectors get truncated

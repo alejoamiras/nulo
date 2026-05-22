@@ -12,7 +12,7 @@ import AccountSelectRow from "./AccountSelectRow.vue"
 /** Utils */
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { formatCaipAccount } from "@/wallet/utils/caip"
-import { getCapabilityInfo } from "./capability-meta"
+import { buildCapabilityItems, type UICapabilityItem } from "./build-items"
 
 /** Services */
 import { type ProfileInfo, ProfileServiceClient } from "@/wallet/services/profile/client"
@@ -26,15 +26,6 @@ import { useDappHostname } from "@/composables/useDappHostname"
 
 type UIDappMetadata = DappMetadata & { loadingLogo?: boolean; logoBlobUrl?: string }
 type UIAccount = { address: string; name: string; chainId: number }
-type UICapability = {
-	capability: Capability
-	label: string
-	description: string
-	isNew: boolean
-	selected: boolean
-	risk: "low" | "medium" | "high"
-	reRequested: boolean
-}
 type UIError = { title: string; tooltip: string; type: string }
 
 /** Store */
@@ -44,12 +35,22 @@ const appStore = useAppStore()
 const router = useRouter()
 
 const profile = ref<ProfileInfo>()
-const capabilities = ref<UICapability[]>([])
+const capabilities = ref<UICapabilityItem[]>([])
 
 const needsAccountSelection = ref(false)
 const availableAccounts = ref<UIAccount[]>([])
 const selectedAccounts = ref<UIAccount[]>([])
 const accountAliases = ref<Record<string, string>>({})
+
+// True when the dApp asked for accounts capability but the wallet resolved
+// the session's chain to a network with zero accounts. The most common cause
+// is a chain-info mismatch — e.g. a dApp sending Fr.ZERO/Fr.ZERO that
+// resolves to the wallet's Local Network seed while the user's accounts
+// live on testnet. Approving here would silently give the dApp a session
+// with `accounts: []` and every subsequent op would fail with "No accounts
+// authorized." Block the approve gate explicitly so the user gets a clear
+// error instead of a confusing downstream failure.
+const noAccountsAvailable = ref(false)
 
 const isLoading = ref(false)
 const processingError = ref<UIError>()
@@ -102,44 +103,36 @@ const init = async () => {
 			if (payload.value.params.availableAccounts?.length) {
 				needsAccountSelection.value = true
 				availableAccounts.value = payload.value.params.availableAccounts
+				// If exactly one account is available, pre-select it. The user
+				// still sees the row and must Approve; this just removes the
+				// extra click. `availableAccounts` is wallet-derived (not
+				// dApp-supplied), so there's no path for a malicious dApp to
+				// inject a phantom account here.
+				if (availableAccounts.value.length === 1) {
+					selectedAccounts.value = [...availableAccounts.value]
+				}
 			} else {
-				const { openToast } = useToast()
-				openToast({ label: "No accounts available for this network. Create one first.", icon: "info" }, TOAST_DURATION.LONG)
+				// Accounts requested but none exist on this chain. Mark the
+				// popup as blocked — approving here would silently grant the
+				// dApp a session with no accounts and every later op would
+				// fail with a confusing "No accounts authorized" error. The
+				// surface-level cause is usually a chain-info mismatch
+				// (dApp sending Fr.ZERO that resolves to the wallet's Local
+				// Network seed). Surface an actionable error directly.
+				noAccountsAvailable.value = true
+				setError(
+					"No accounts on this chain",
+					"This dApp is asking for accounts on a chain where you have none. " +
+						"Either switch the wallet's active network or ask the dApp to pin the right chain.",
+					"error",
+				)
 			}
 		}
 
-		const items: UICapability[] = []
 		const reRequestedTypes = new Set(payload.value.params.reRequested ?? [])
 		const existingGrants = payload.value.params.existingGrants as Capability[]
 
-		for (const cap of delta) {
-			if (cap.type === "accounts") continue
-			const info = getCapabilityInfo(cap.type)
-			items.push({
-				capability: cap,
-				label: info.label,
-				description: info.description,
-				isNew: true,
-				selected: true,
-				risk: info.risk,
-				reRequested: reRequestedTypes.has(cap.type),
-			})
-		}
-
-		for (const cap of existingGrants) {
-			const info = getCapabilityInfo(cap.type)
-			items.push({
-				capability: cap,
-				label: info.label,
-				description: info.description,
-				isNew: false,
-				selected: true,
-				risk: info.risk,
-				reRequested: false,
-			})
-		}
-
-		capabilities.value = items
+		capabilities.value = buildCapabilityItems(delta, existingGrants, reRequestedTypes)
 	} catch (error) {
 		console.error(getErrorData(error))
 		setError("Something went wrong")
@@ -165,6 +158,11 @@ const onActiveProfileChanged = (_profile?: ProfileInfo) => {
 }
 
 const approve = async () => {
+	if (noAccountsAvailable.value) {
+		// init() already populated the error block; refuse approval explicitly
+		// so the user can't bypass via Enter / keyboard.
+		return
+	}
 	if (needsAccountSelection.value && selectedAccounts.value.length === 0) {
 		setError("Select at least one account", "You must select at least one account to share with the dApp", "warning")
 		return
@@ -271,7 +269,7 @@ onUnmounted(() => {
 				:dapp="dapp"
 				:hostname="dappHostname"
 				:hostnameSuspicious="hostnameHasNonAscii"
-				actionLabel="is requesting access to Nulo"
+				actionLabel="is requesting permissions"
 			/>
 
 			<Flex direction="column" gap="20" :class="$style.sections">
@@ -293,7 +291,7 @@ onUnmounted(() => {
 				</Flex>
 
 				<Flex v-if="capabilities.filter(c => c.isNew).length" direction="column" gap="10" wide>
-					<SectionLabel label="New capabilities requested" :count="capabilities.filter(c => c.isNew).length" />
+					<SectionLabel label="New permissions requested" :count="capabilities.filter(c => c.isNew).length" />
 
 					<Flex direction="column" gap="6" wide>
 						<CapabilityCard
@@ -308,6 +306,7 @@ onUnmounted(() => {
 							:granted="false"
 							:expanded="expandedCards.has(i)"
 							:reRequested="cap.reRequested"
+							:isUnknown="cap.isUnknown"
 							:disabled="isLoading || processingError?.type === 'error'"
 							@toggleExpanded="toggleExpand(i)"
 							@toggleSelected="toggleCapability(i)"
@@ -330,6 +329,7 @@ onUnmounted(() => {
 							:selected="cap.selected"
 							granted
 							:expanded="expandedCards.has(i)"
+							:isUnknown="cap.isUnknown"
 							@toggleExpanded="toggleExpand(i)"
 						/>
 					</Flex>

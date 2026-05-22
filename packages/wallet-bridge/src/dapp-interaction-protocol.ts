@@ -22,7 +22,6 @@ import type {
 	AztecRegisterSenderOperation,
 	AztecSendTxOperation,
 	AztecSimulateTxOperation,
-	GetCompleteAddressOperation,
 	RegisterContractOperation,
 	RegisterSenderOperation,
 	RegisterTokenOperation,
@@ -38,10 +37,6 @@ type AccountParams = NetworkParams | "accountAddress"
 type SendParams = AccountParams | "feeSettings"
 
 // Nulo interface:
-
-export type GetCompleteAddressRequest = Omit<GetCompleteAddressOperation, AccountParams> & {
-	account: CaipAccount
-}
 
 export type RegisterContractRequest = Omit<RegisterContractOperation, NetworkParams> & {
 	chain: CaipChain
@@ -123,7 +118,6 @@ export type AztecCreateAuthWitRequest = Omit<AztecCreateAuthWitOperation, Accoun
 
 export type OperationRequest =
 	// Nulo interface:
-	| GetCompleteAddressRequest
 	| RegisterContractRequest
 	| RegisterSenderRequest
 	| RegisterTokenRequest

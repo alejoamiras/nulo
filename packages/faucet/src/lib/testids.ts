@@ -37,6 +37,10 @@ export const TESTIDS = {
 	btnDripPrivate: "fa-btn-drip-private",
 	dripStatus: "fa-drip-status",
 
+	// One-click "Add to wallet" — calls registerToken on the connected wallet
+	btnAddToWallet: "fa-btn-add-to-wallet",
+	addTokenStatus: "fa-add-token-status",
+
 	// Toast
 	toast: "fa-toast",
 } as const

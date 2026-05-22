@@ -256,6 +256,7 @@ const onKeydown = (event) => {
 
 .trigger {
 	width: 100%;
+	cursor: pointer;
 }
 
 .canvas {

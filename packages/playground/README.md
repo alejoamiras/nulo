@@ -52,7 +52,7 @@ Bundles are a playground-only convenience: the wallet itself models capabilities
 | Data | `getPrivateEvents` |
 | Batch | meta-only / mixed / partial-failure |
 
-`registerToken`, `getCompleteAddress`, and `simulateViews` (Nulo-custom RPCs inherited from the fork) were removed in the canonical refactor. Use `wallet.registerContract()`, the granted capability response, and `simulateUtility` / `BatchCall.simulate()` respectively.
+`registerToken` is the only Nulo-custom RPC surfaced on top of the canonical wallet-sdk schema — see `packages/wallet-bridge/README.md` for the schema-patch contract. `getCompleteAddress` and `simulateViews` were dropped in the canonical refactor and are not coming back; use the granted-accounts capability response and `simulateUtility` / `BatchCall.simulate()` respectively.
 
 ## Stack
 
