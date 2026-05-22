@@ -436,7 +436,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				: undefined
 
 			let txRequest: TxExecutionRequest
-			let node: Awaited<ReturnType<NetworkService["getNode"]>>
 			let pxe: Awaited<ReturnType<PxeServiceClient["getPXE"]>>
 			let account: Awaited<ReturnType<AccountService["getAccountContract"]>>
 			let network: Awaited<ReturnType<NetworkService["getNetwork"]>>
@@ -467,7 +466,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				activityFnName = reused.fnName
 				activityArgs = reused.args
 				network = await this.networkService.getNetwork(networkId)
-				node = await this.networkService.getNode(network.chainId)
 				pxe = this.pxeService.getPXE(networkInfoFrom(network))
 				const profile = await this.profileService.getActiveProfile()
 				if (!profile) throw new Error("Wallet locked")
@@ -488,7 +486,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 				const built = await this.buildAndEstimateTxRequest(op, op.feeSettings, transferTask)
 				txRequest = built[0]
-				node = built[1]
 				pxe = built[2]
 				account = built[3]
 				network = built[4]
@@ -506,7 +503,12 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const tx = await provedTx.toTx()
 			await markJournal({ stage: "submitting" })
 			checkCancelled()
-			await this.coordinator.sendTxTask(node, tx, transferTask)
+			// Re-acquire via withBinding so a node.sendTx failure routes
+			// through the classifier and the active endpoint takes a hit.
+			// If failover happened between build and send, the live node
+			// reflects the new endpoint; the tx itself is chain-bound by
+			// its embedded chainId so it's portable across endpoints.
+			await this.networkService.withBinding(network.chainId, async (b) => this.coordinator.sendTxTask(b.node, tx, transferTask))
 
 			const txHash = tx.getTxHash().toString()
 			// Activity-feed shape is always transfer-only (no FPC fee payload).
@@ -1104,7 +1106,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			await this.markJournal(journalId, { stage: "simulating" })
 			checkCancelled()
 
-			const [txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod] = await this.buildAndEstimateTxRequest(
+			const [txRequest, , pxe, account, network, nonce, txCalls, feePaymentMethod] = await this.buildAndEstimateTxRequest(
 				op,
 				op.feeSettings,
 				parentTask,
@@ -1118,7 +1120,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const tx = await provedTx.toTx()
 			await this.markJournal(journalId, { stage: "submitting" })
 			checkCancelled()
-			await this.coordinator.sendTxTask(node, tx, parentTask)
+			await this.networkService.withBinding(network.chainId, async (b) => this.coordinator.sendTxTask(b.node, tx, parentTask))
 
 			const txHash = tx.getTxHash().toString()
 			await this.transactionService.addTransaction(
@@ -1928,7 +1930,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const tx = await provedTx.toTx()
 			await this.markJournal(journalId, { stage: "submitting" })
 			checkCancelled()
-			await this.coordinator.sendTxTask(node, tx, parentTask)
+			await this.networkService.withBinding(network.chainId, async (b) => this.coordinator.sendTxTask(b.node, tx, parentTask))
 
 			const txHash = tx.getTxHash()
 			await this.transactionService.addTransaction(
@@ -2088,7 +2090,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const tx = await provedTx.toTx()
 			await this.markJournal(journalId, { stage: "submitting" })
 			checkCancelled()
-			await this.coordinator.sendTxTask(node, tx, parentTask)
+			await this.networkService.withBinding(network.chainId, async (b) => this.coordinator.sendTxTask(b.node, tx, parentTask))
 
 			const txHash = tx.getTxHash()
 			await this.transactionService.addTransaction(
