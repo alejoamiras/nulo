@@ -47,11 +47,13 @@ export function bindBatch(root: HTMLElement): void {
 		safeBatch("batch", () => {
 			const wallet = getWallet()!
 			// Only include exempt methods (capability-map.ts:14) so this works
-			// without any granted capabilities.
+			// without any granted capabilities. `getAccounts` is NOT exempt: it
+			// throws CapabilityNotGrantedError("accounts") pre-grant — pinned by
+			// meta-getAccounts-pregrant.test.ts. So this batch uses 3x getChainInfo.
 			// biome-ignore lint/suspicious/noExplicitAny: structural batch shape
 			return (wallet as any).batch([
 				{ name: "getChainInfo", args: [] },
-				{ name: "getAccounts", args: [] },
+				{ name: "getChainInfo", args: [] },
 				{ name: "getChainInfo", args: [] },
 			])
 		}),
@@ -61,13 +63,16 @@ export function bindBatch(root: HTMLElement): void {
 		"click",
 		safeBatch("batch", async () => {
 			const wallet = getWallet()!
-			// Silent meta + a single token-balance simulateUtility.
+			// Silent meta (exempt) + two `basic`-bundle silent legs. `getAccounts`
+			// would throw without the `accounts` cap (see comment in batch-meta
+			// above) — so this batch uses getChainInfo + 2x getContractMetadata
+			// to stress both an exempt leg AND a contracts-gated leg.
 			// (No sendTx leg in this variant — sendTx-in-batch deserves its own
 			//  test with deeper popup choreography. See plan §3 #36.)
 			// biome-ignore lint/suspicious/noExplicitAny: structural batch shape
 			return (wallet as any).batch([
 				{ name: "getChainInfo", args: [] },
-				{ name: "getAccounts", args: [] },
+				{ name: "getContractMetadata", args: [getInput("tokenAddress") || "0x0"] },
 				{ name: "getContractMetadata", args: [getInput("tokenAddress") || "0x0"] },
 			])
 		}),

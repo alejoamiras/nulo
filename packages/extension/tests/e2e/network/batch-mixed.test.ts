@@ -10,9 +10,11 @@ const hasConfig = aztecConfig !== undefined
 /**
  * Test #36 — batch with silent + cap-required legs.
  *
- * The mixed batch in the playground combines getChainInfo + getAccounts +
- * getContractMetadata. All silent on default sessions, but getContractMetadata
- * needs `contracts` capability — so the test grants `basic` first.
+ * The mixed batch in the playground combines getChainInfo (exempt) + two
+ * getContractMetadata legs. getContractMetadata needs `contracts` capability —
+ * the test grants `basic` first (which includes contracts + simulation).
+ * `getAccounts` is NOT included because it throws CapabilityNotGrantedError
+ * pre-`accounts`-grant (meta-getAccounts-pregrant.test.ts pins that contract).
  */
 test.skipIf(!hasConfig)(
 	"batch-mixed — silent path returns named results for all legs",
@@ -44,6 +46,6 @@ test.skipIf(!hasConfig)(
 		})
 		expect(result.status).toBe("ok")
 		const arr = result.resultJson as Array<{ name: string }>
-		expect(arr.map((r) => r.name).sort()).toEqual(["getAccounts", "getChainInfo", "getContractMetadata"])
+		expect(arr.map((r) => r.name).sort()).toEqual(["getChainInfo", "getContractMetadata", "getContractMetadata"])
 	},
 )

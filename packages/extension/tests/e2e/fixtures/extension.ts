@@ -734,8 +734,42 @@ export function patchPagePolling(page: Page): void {
 	}
 }
 
+/**
+ * Detect puppeteer detach errors that can occur during the brief CDP race
+ * between `browser.newPage()` and the first `page.goto(...)`. These signal
+ * a half-initialized frame, not a wallet-side problem — retrying with a
+ * fresh page resolves them. Symptom string varies across puppeteer-core
+ * versions and timing; match on any of the known phrases.
+ */
+function isFrameDetachError(err: unknown): boolean {
+	const msg = err instanceof Error ? err.message : String(err)
+	return /Navigating frame was detached|frame got detached|Session closed|Target closed/i.test(msg)
+}
+
 /** Open the extension popup in a new page with error collection. */
 export async function openPopup(ctx: ExtensionContext): Promise<Page> {
+	// One bounded retry on frame-detach errors: under accumulated suite load,
+	// `browser.newPage()` can return a page whose CDP frame is in a half-
+	// initialized state, causing the first `page.goto(popupUrl)` to throw
+	// "Navigating frame was detached" immediately. The mitigation is simply
+	// to close and re-create the page. A broader catch would mask real
+	// crashes — match only on known detach-error signatures.
+	let attempt = 0
+	const maxAttempts = 2
+	for (;;) {
+		try {
+			return await openPopupOnce(ctx)
+		} catch (err) {
+			attempt += 1
+			if (attempt >= maxAttempts || !isFrameDetachError(err)) throw err
+			if (process.env.NULO_E2E_OPENPOPUP_LOG === "1") {
+				console.log(`[openPopup] retry-on-detach attempt=${attempt}`)
+			}
+		}
+	}
+}
+
+async function openPopupOnce(ctx: ExtensionContext): Promise<Page> {
 	const page = await ctx.browser.newPage()
 	patchPagePolling(page)
 	await page.setViewport({ width: 360, height: 600 })

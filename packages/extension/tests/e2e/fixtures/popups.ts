@@ -47,7 +47,17 @@ export async function waitForPopup(
 	// Puppeteer can resolve waitForTarget before the page's main frame is wired
 	// up — calling waitForFunction immediately throws "Requesting main frame too
 	// early!" Poll until mainFrame() succeeds before doing any further waits.
-	await waitForMainFrame(page)
+	// Tolerate transient frame-detach errors here: under load the CDP connection
+	// can transiently flap between target-creation and main-frame readiness.
+	try {
+		await waitForMainFrame(page)
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err)
+		if (!/frame got detached|Session closed|Target closed/i.test(msg)) throw err
+		// Re-wait for main frame after the detach — the browser usually
+		// recreates the frame within a few hundred ms.
+		await waitForMainFrame(page, 8_000)
+	}
 	// Apply the same waitForFunction/waitForSelector polling patch as openPopup
 	// — without it, every wait on this approval popup uses Puppeteer's default
 	// 'raf' polling which is throttled in offscreen tabs (this popup
@@ -268,10 +278,32 @@ export async function getExecuteOps(page: Page): Promise<Array<{ id: string; kin
 	)
 }
 
+/**
+ * Wait for the capabilities popup to finish its async render before tests
+ * read cap rows / select accounts. The popup mounts the Vue tree only after
+ * `init()` completes (DappInteractionService payload fetch + manifest resolve).
+ *
+ * Symmetric with `waitForExecuteContent`. Resolves as soon as EITHER a
+ * `cap-item` (capability row) OR a `cap-account-item` (account picker row)
+ * is visible — different bundles mount different surfaces and a strict
+ * cap-item-only wait silently times out via `.catch(() => undefined)` on
+ * the accounts-only path, leaving downstream selectors racing.
+ */
+export async function waitCapabilitiesReady(page: Page, timeout = 15_000): Promise<void> {
+	await page.waitForFunction(
+		() =>
+			document.querySelector('[data-testid="cap-item"]') !== null ||
+			document.querySelector('[data-testid="cap-account-item"]') !== null,
+		{ timeout, polling: 200 },
+	)
+}
+
 /** Read the visible capability rows: returns `{ id, granted }[]`. Waits for at
  *  least one cap-item to render — the popup's init() is async. */
 export async function getCapItems(page: Page): Promise<Array<{ id: string; granted: boolean; rerequested: boolean }>> {
-	await page.waitForSelector('[data-testid="cap-item"]', { visible: true, timeout: 10_000 }).catch(() => undefined)
+	// Wait for popup readiness (cap-item OR cap-account-item) instead of
+	// only cap-item — the bundle under test might be accounts-only.
+	await waitCapabilitiesReady(page).catch(() => undefined)
 	return page.evaluate(() =>
 		[...document.querySelectorAll<HTMLElement>('[data-testid="cap-item"]')].map((el) => ({
 			id: el.getAttribute("data-cap-id") ?? "",
