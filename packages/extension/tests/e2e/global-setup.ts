@@ -213,6 +213,20 @@ export default async function setup(project: TestProject) {
 		weStartedAnvil = false
 	} else {
 		if (!fs.existsSync(ANVIL_BIN)) {
+			// Same fail-loud gate as the deploy-failure path below: when invoked
+			// via scripts/e2e/agent.sh, missing infrastructure must abort the
+			// run, not pass-by-skip. Otherwise CI reports `61 skipped` exit 0
+			// and the suite stays silently broken (this regressed in CI from
+			// 2026-05-22 when the setup-aztec action didn't symlink
+			// ~/.aztec/current — every PR's network-e2e check was "green" while
+			// running zero tests).
+			if (process.env.E2E_REQUIRE_SETUP === "1") {
+				throw new Error(
+					`[e2e-setup] FATAL: anvil binary not found at ${ANVIL_BIN} and E2E_REQUIRE_SETUP=1 is set. ` +
+						`Aborting run to prevent silent pass-by-skip. Ensure setup-aztec installed Aztec CLI ` +
+						`AND created the ~/.aztec/current symlink (CI: see .github/actions/setup-aztec/action.yml).`,
+				)
+			}
 			console.warn("[e2e-setup] anvil binary not found at", ANVIL_BIN, "— skipping network setup")
 			project.provide("aztecTestConfig", undefined)
 			project.provide("playgroundUrl", PLAYGROUND_URL)
@@ -263,6 +277,14 @@ export default async function setup(project: TestProject) {
 	} else {
 		console.log("[e2e-setup] Starting local Aztec network at", LOCAL_NODE_URL, "...")
 		if (!fs.existsSync(AZTEC_BIN)) {
+			// See comment above the matching ANVIL_BIN gate for the rationale.
+			if (process.env.E2E_REQUIRE_SETUP === "1") {
+				throw new Error(
+					`[e2e-setup] FATAL: aztec CLI not found at ${AZTEC_BIN} and E2E_REQUIRE_SETUP=1 is set. ` +
+						`Aborting run to prevent silent pass-by-skip. Ensure setup-aztec installed Aztec CLI ` +
+						`AND created the ~/.aztec/current symlink (CI: see .github/actions/setup-aztec/action.yml).`,
+				)
+			}
 			console.warn("[e2e-setup] aztec CLI not found at", AZTEC_BIN, "— skipping network setup")
 			project.provide("aztecTestConfig", undefined)
 			project.provide("playgroundUrl", PLAYGROUND_URL)
