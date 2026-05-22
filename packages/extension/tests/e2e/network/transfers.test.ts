@@ -6,6 +6,7 @@ import {
 	waitForTxConfirmation,
 	navigateToTokenDetail,
 	getTokenDetailBalances,
+	waitForTokenDetailBalances,
 	clickNavTab,
 } from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
@@ -118,11 +119,16 @@ test.skipIf(!hasConfig)(
 			const page = await openPopup(tokenReadyExtension)
 			await waitForHash(page, "#/popup/general")
 			await navigateToTokenDetail(page)
-			const { privateBalance, publicBalance } = await getTokenDetailBalances(page)
-			console.log(`Token detail balances — public: "${publicBalance}", private: "${privateBalance}"`)
 			// SponsoredFPC: balances aren't affected by gas fees.
 			// pub→pub 10 (net 0), pub→priv 100 (-100/+100), priv→pub 50 (+50/-50), priv→priv 10 (net 0)
-			// Expected: public=950, private=50
+			// Expected: public=950, private=50.
+			// Use waitForTokenDetailBalances to force a refresh + poll past the
+			// async TokenBalanceService projection lag under full-suite load.
+			const { privateBalance, publicBalance } = await waitForTokenDetailBalances(page, {
+				publicContains: "950",
+				privateContains: "50",
+			})
+			console.log(`Token detail balances — public: "${publicBalance}", private: "${privateBalance}"`)
 			expect(publicBalance).toContain("950")
 			expect(privateBalance).toContain("50")
 			console.log("✓ Token detail balances correct (pub=950, priv=50)")
