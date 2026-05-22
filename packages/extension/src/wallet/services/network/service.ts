@@ -11,6 +11,20 @@ import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
+import { classifyEndpointError } from "./error-classifier"
+import {
+	clearCooldowns,
+	type EndpointHealthSnapshot,
+	isAvailable,
+	markCooldown,
+	type NetworkRouteState,
+	newRouteState,
+	pickFailoverCandidates,
+	quarantineInvalidChain,
+	recordFailure,
+	recordSuccess,
+	snapshotRouteState,
+} from "./route-state"
 import {
 	type ChainKind,
 	ERR_ACTIVE_NETWORK,
@@ -31,6 +45,23 @@ import {
 } from "./spec"
 
 export * from "./spec"
+
+/**
+ * Caller-facing accessor returned by `acquireBinding(chainId)`. Captures the
+ * full routing context for one logical op so the caller's subsequent reads
+ * stay pinned to the same endpoint even if a parallel op triggers failover.
+ *
+ * `withBinding(chainId, fn)` is the sanctioned consumer — it wraps `fn` in
+ * the try/catch that calls `reportEndpointFailure(endpoint.rpcUrl, err)` on
+ * the catch path. Manual binding acquisition without the wrapper bypasses
+ * failure-tracking and is a code-review block.
+ */
+export type NetworkBinding = {
+	network: Network
+	endpoint: NetworkEndpoint
+	info: NetworkInfo
+	node: AztecNode
+}
 
 /**
  * Per-profile active-network pointer. The service owns this state (vs. v0
@@ -146,7 +177,19 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public readonly onChainPurged = new EventHandler<{ profileId: string; chainId: number }>()
 
 	private readonly storage = new EntityStorage<Network>("nulo:core:networks", chrome.storage.local)
-	private readonly nodes = new Map<number, AztecNode>()
+	/**
+	 * Per-chain live node cache. The entry carries endpoint identity so
+	 * failover / snapback can detect when the cached node is for a stale
+	 * endpoint and rebuild. The map is wiped on profile switch / delete.
+	 */
+	private readonly nodes = new Map<number, { node: AztecNode; endpointId: string; rpcUrl: string }>()
+	/**
+	 * Per-network in-memory routing state. Tracks the currently-active
+	 * endpoint, failure counters, cooldowns, and the invalidChain quarantine
+	 * set. Created lazily on first traffic call to `_resolveBinding`.
+	 * Wiped on profile switch / delete + on `deleteNetwork`.
+	 */
+	private readonly routeState = new Map<string, NetworkRouteState>()
 	/** URL-keyed transient cache for pending-tx polling pin. */
 	private readonly transientNodes = new Map<string, { node: AztecNode; failures: number }>()
 	private readonly lock: Lock
@@ -196,7 +239,12 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 				await this._writeActive(profile.id, activeId)
 				const active = seeded.find((n) => n.id === activeId)!
 				const preferred = active.endpoints[0]!
-				this.nodes.set(active.chainId, this.nodeFactory.createNode(preferred.rpcUrl))
+				this.nodes.set(active.chainId, {
+					node: this.nodeFactory.createNode(preferred.rpcUrl),
+					endpointId: preferred.id,
+					rpcUrl: preferred.rpcUrl,
+				})
+				this.routeState.set(active.id, newRouteState(preferred.id))
 			}
 			return seeded
 		} finally {
@@ -301,6 +349,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			await this.purgeChain(profile.id, network.chainId, network.id)
 			await this.storage.delete(id)
 			this.nodes.delete(network.chainId)
+			this.routeState.delete(network.id)
 			this.emit("onNetworkDeleted", network)
 			return network
 		} finally {
@@ -320,7 +369,15 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			await this._writeActive(profile.id, id)
 			const preferred = network.endpoints[0]
 			if (preferred) {
-				this.nodes.set(network.chainId, this.nodeFactory.createNode(preferred.rpcUrl))
+				this.nodes.set(network.chainId, {
+					node: this.nodeFactory.createNode(preferred.rpcUrl),
+					endpointId: preferred.id,
+					rpcUrl: preferred.rpcUrl,
+				})
+				// Reset routeState for the newly-active network — switching chains
+				// is a fresh routing context; stale cooldowns from a prior session
+				// shouldn't carry over.
+				this.routeState.set(network.id, newRouteState(preferred.id))
 			}
 			this.emit("onActiveNetworkChanged", network)
 			return network
@@ -409,11 +466,23 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			}
 			network.endpoints[idx] = updated
 			await this.storage.set(network.id, network)
-			// Evict transient cache for the OLD URL, plus the chain's primary node
-			// cache if this endpoint is at the head of `endpoints[]` (the preferred
-			// slot — what `getNode` currently resolves to in the no-failover case).
+			// Evict transient cache for the OLD URL. Editing the URL is also a
+			// trust-reset for the endpoint: forget any failure counters /
+			// cooldowns / invalidChain entry — the user just supplied a
+			// (presumably fixed) URL, which we already re-probed for chainId
+			// above so it's safe to drop the old quarantine.
 			this.transientNodes.delete(oldUrl)
-			if (network.endpoints[0]?.id === endpointId) {
+			const state = this.routeState.get(network.id)
+			if (state) {
+				state.failures.delete(endpointId)
+				state.cooldownUntil.delete(endpointId)
+				state.invalidChain.delete(endpointId)
+			}
+			// If this endpoint is the live active route OR sits at the head of
+			// `endpoints[]`, evict the cached node so the next `_resolveBinding`
+			// re-creates against the new URL.
+			const cached = this.nodes.get(network.chainId)
+			if (network.endpoints[0]?.id === endpointId || cached?.endpointId === endpointId) {
 				this.nodes.delete(network.chainId)
 			}
 			this.emit("onNetworkUpdated", network)
@@ -445,7 +514,22 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			const removed = network.endpoints.splice(idx, 1)[0]!
 			await this.storage.set(network.id, network)
 			this.transientNodes.delete(removed.rpcUrl)
-			if (wasPreferred) {
+			// Forget the deleted endpoint's routing state (counters, cooldown,
+			// invalidChain). If it was the live active route, also evict the
+			// node cache and re-point active to endpoints[0] so the next
+			// `_resolveBinding` call resolves fresh.
+			const state = this.routeState.get(network.id)
+			if (state) {
+				state.failures.delete(endpointId)
+				state.cooldownUntil.delete(endpointId)
+				state.invalidChain.delete(endpointId)
+				if (state.activeEndpointId === endpointId) {
+					const fallback = network.endpoints[0]
+					if (fallback) state.activeEndpointId = fallback.id
+				}
+			}
+			const cached = this.nodes.get(network.chainId)
+			if (wasPreferred || cached?.endpointId === endpointId) {
 				this.nodes.delete(network.chainId)
 			}
 			this.emit("onNetworkUpdated", network)
@@ -456,14 +540,16 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	}
 
 	/**
-	 * Splice an endpoint to `endpoints[0]` (the preferred / snap-back
-	 * target). Persisted state encodes user preference; in-memory routing
-	 * state may still resolve to a different `activeEndpointId` until the
-	 * next traffic-driven probe (Phase 1 chunk C wires the probe path).
+	 * Splice an endpoint to `endpoints[0]` (the user-preferred / snap-back
+	 * target). Clears the promoted endpoint's cooldown + invalidChain entry
+	 * (user expressed trust). Updates `activeEndpointId` to the promoted
+	 * endpoint so subsequent traffic flows through it; the existing cached
+	 * node is evicted so the next `_resolveBinding` resolves against the new
+	 * URL. Emits `onPrimaryEndpointChanged` with `source: "manual"`.
 	 *
-	 * For chunk B (no failover logic yet), the semantics are simple:
-	 * reorder + evict cache + emit. The next `getNode` will resolve to the
-	 * new `endpoints[0]`.
+	 * If the promoted endpoint is unhealthy, the first traffic call will
+	 * fail and the classifier-driven failover engages — no special probe-
+	 * before-flip dance here.
 	 */
 	public async promoteEndpoint(networkId: string, endpointId: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.promoteEndpoint.params, [networkId, endpointId], "promoteEndpoint")
@@ -481,6 +567,19 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			const [moved] = network.endpoints.splice(idx, 1)
 			network.endpoints.unshift(moved!)
 			await this.storage.set(network.id, network)
+			// Reset routing state for the promoted endpoint (user trust signal)
+			// and flip the active route to it.
+			let state = this.routeState.get(network.id)
+			if (!state) {
+				state = newRouteState(endpointId)
+				this.routeState.set(network.id, state)
+			} else {
+				state.failures.delete(endpointId)
+				state.cooldownUntil.delete(endpointId)
+				state.invalidChain.delete(endpointId)
+				state.exhaustedAt = undefined
+				state.activeEndpointId = endpointId
+			}
 			this.nodes.delete(network.chainId)
 			this.emit("onPrimaryEndpointChanged", {
 				networkId: network.id,
@@ -495,8 +594,64 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		}
 	}
 
+	/**
+	 * "Retry preferred" recovery — user-driven. Wipes every endpoint's
+	 * cooldown + invalidChain entry on the network. Does NOT flip
+	 * `activeEndpointId` directly; the next `_resolveBinding` call will see
+	 * `endpoints[0]` as available and run the snapback probe, which is the
+	 * only sanctioned path back to active.
+	 */
+	public async clearEndpointCooldowns(networkId: string): Promise<Network> {
+		validateParams(NetworkMethodSchemas.clearEndpointCooldowns.params, [networkId], "clearEndpointCooldowns")
+		await this.ensureInitialized()
+		const profile = await this.profileService.getActiveProfile()
+		if (!profile) throw new Error("Profile locked")
+		try {
+			await this.lock.enter()
+			const network = await this.storage.get(networkId)
+			if (network?.profileId !== profile.id) throw new Error("Invalid id")
+			const state = this.routeState.get(network.id)
+			if (state) clearCooldowns(state)
+			this.emit("onNetworkUpdated", network)
+			return network
+		} finally {
+			this.lock.leave()
+		}
+	}
+
+	/**
+	 * Serializable read of the network's `NetworkRouteState`. If no state
+	 * has been initialized yet (chain never traffic'd this session), returns
+	 * a default snapshot pointing at `endpoints[0]`. Throws on unknown
+	 * `networkId`.
+	 */
+	public async getEndpointHealth(networkId: string): Promise<EndpointHealthSnapshot> {
+		validateParams(NetworkMethodSchemas.getEndpointHealth.params, [networkId], "getEndpointHealth")
+		await this.ensureInitialized()
+		const profile = await this.profileService.getActiveProfile()
+		if (!profile) throw new Error("Profile locked")
+		const network = await this.storage.get(networkId)
+		if (network?.profileId !== profile.id) throw new Error("Invalid id")
+		const state = this.routeState.get(network.id)
+		if (state) return snapshotRouteState(state)
+		const preferred = network.endpoints[0]
+		return {
+			activeEndpointId: preferred?.id ?? "",
+			failures: {},
+			cooldownUntil: {},
+			invalidChain: [],
+		}
+	}
+
 	// ── Status / node accessors ──────────────────────────────────────────
 
+	/**
+	 * Probes the currently-active endpoint (which may differ from
+	 * `endpoints[0]` during a failover episode) and returns its health
+	 * state. The header / settings UX combines this with
+	 * `activeEndpointId !== endpoints[0].id` to decide between green /
+	 * amber / red.
+	 */
 	public async getNodeStatus(networkId: string): Promise<NodeStatus> {
 		validateParams(NetworkMethodSchemas.getNodeStatus.params, [networkId], "getNodeStatus")
 		await this.ensureInitialized()
@@ -504,10 +659,12 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		if (!profile) throw new Error("Profile locked")
 		const network = await this.storage.get(networkId)
 		if (network?.profileId !== profile.id) throw new Error("Invalid id")
-		const preferred = network.endpoints[0]
-		if (!preferred) return NodeStatus.Inactive
+		const state = this.routeState.get(network.id)
+		const activeId = state?.activeEndpointId ?? network.endpoints[0]?.id
+		const active = network.endpoints.find((e) => e.id === activeId) ?? network.endpoints[0]
+		if (!active) return NodeStatus.Inactive
 		try {
-			const probedChainId = await this._getChainId(preferred.rpcUrl)
+			const probedChainId = await this._getChainId(active.rpcUrl, network.kind)
 			if (probedChainId !== network.chainId) return NodeStatus.InvalidChain
 			return NodeStatus.Active
 		} catch {
@@ -515,24 +672,54 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		}
 	}
 
+	/**
+	 * Legacy accessor — returns just the live `AztecNode` for the chain.
+	 * New callers should prefer `acquireBinding(chainId)` (or the safer
+	 * `withBinding(chainId, fn)` wrapper) so the captured endpoint identity
+	 * is available for failure-reporting and per-op pinning.
+	 */
 	public async getNode(chainId: number): Promise<AztecNode> {
+		const binding = await this.acquireBinding(chainId)
+		return binding.node
+	}
+
+	/**
+	 * Resolves the live `NetworkBinding` for a chain. Lazily initializes
+	 * routing state, runs the snapback probe when the live route is off
+	 * `endpoints[0]` and preferred is available, and triggers failover when
+	 * the cached active is unavailable (cooldown / invalidChain set by a
+	 * prior `reportEndpointFailure` strike).
+	 *
+	 * The returned binding captures `(network, endpoint, info, node)` at
+	 * resolution time — callers should pass it through their op and treat
+	 * later state changes as out-of-band (the next op acquires a fresh
+	 * binding). Use `withBinding(chainId, fn)` instead of acquiring + calling
+	 * by hand; the wrapper enforces the try/catch that reports failures.
+	 */
+	public async acquireBinding(chainId: number): Promise<NetworkBinding> {
 		await this.ensureInitialized()
 		try {
 			await this.lock.enter()
-			let node = this.nodes.get(chainId)
-			if (!node) {
-				const profile = await this.profileService.getActiveProfile()
-				if (!profile) throw new Error("Profile locked")
-				const network = (await this.storage.getValues()).find((n) => n.profileId === profile.id && n.chainId === chainId)
-				if (!network) throw new Error(`No network configured for chainId ${chainId}`)
-				const preferred = network.endpoints[0]
-				if (!preferred) throw new Error(`Network ${network.id} has no endpoints`)
-				node = this.nodeFactory.createNode(preferred.rpcUrl)
-				this.nodes.set(chainId, node)
-			}
-			return node
+			return await this._resolveBindingLocked(chainId)
 		} finally {
 			this.lock.leave()
+		}
+	}
+
+	/**
+	 * Sanctioned consumer of `acquireBinding`. Wraps the caller's op in a
+	 * try/catch that reports every failure to `reportEndpointFailure`, which
+	 * is what drives the failure-counter classifier into failover. Manual
+	 * acquisition + raw `.method()` calls skip this and are a code-review
+	 * block.
+	 */
+	public async withBinding<T>(chainId: number, fn: (binding: NetworkBinding) => Promise<T>): Promise<T> {
+		const binding = await this.acquireBinding(chainId)
+		try {
+			return await fn(binding)
+		} catch (err) {
+			this.reportEndpointFailure(binding.endpoint.rpcUrl, err)
+			throw err
 		}
 	}
 
@@ -557,11 +744,83 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		return created
 	}
 
-	public reportEndpointFailure(url: string): void {
+	/**
+	 * Reports an endpoint-level failure. The lookup + counter mutation runs
+	 * fire-and-forget so the caller (typically a try/catch wrapper or
+	 * tx-poll background worker) doesn't block.
+	 *
+	 * Two paths:
+	 *   1. RouteState path — URL matches a known endpoint of the active
+	 *      profile. Classifier buckets the error (hard/soft/evict/ignore)
+	 *      and updates the route state. Failover engages on the next
+	 *      `_resolveBinding` call when the active endpoint becomes
+	 *      unavailable.
+	 *   2. Transient-cache path — URL is not a known endpoint (e.g. a
+	 *      stale tx-poll URL whose endpoint was deleted). Falls back to the
+	 *      legacy 3-strike eviction so the dangling cache entry doesn't
+	 *      keep serving a dead URL.
+	 */
+	public reportEndpointFailure(url: string, error?: unknown): void {
+		// Sync transient-cache path (M4.10 tx-poll pin). Same behavior as
+		// before: 3 strikes evicts the cache entry so the next
+		// `getNodeForUrl` falls through to the chain's current primary.
 		const entry = this.transientNodes.get(url)
-		if (!entry) return
-		entry.failures += 1
-		if (entry.failures >= 3) this.transientNodes.delete(url)
+		if (entry) {
+			entry.failures += 1
+			if (entry.failures >= 3) this.transientNodes.delete(url)
+		}
+		// Async routeState path (new). Classifier buckets the error;
+		// failover engages on the next `_resolveBinding` call when the
+		// active endpoint becomes unavailable.
+		void this._reportEndpointFailureAsync(url, error)
+	}
+
+	private async _reportEndpointFailureAsync(url: string, error: unknown): Promise<void> {
+		try {
+			const lookup = await this._findEndpointByUrl(url)
+			if (!lookup) return
+			this._countFailure(lookup.networkId, lookup.endpointId, error)
+		} catch (err) {
+			this.logError("reportEndpointFailure async path failed", getErrorMessage(err))
+		}
+	}
+
+	private _countFailure(networkId: string, endpointId: string, error: unknown): void {
+		const state = this.routeState.get(networkId)
+		if (!state) return
+		const cls = classifyEndpointError(error)
+		switch (cls.kind) {
+			case "ignore":
+				return
+			case "evict":
+				quarantineInvalidChain(state, endpointId)
+				return
+			case "hard":
+			case "soft": {
+				const result = recordFailure(state, endpointId, cls.kind)
+				if (result.tripped && state.activeEndpointId === endpointId) {
+					// Demote the active endpoint immediately — the next
+					// `_resolveBinding` call sees `isAvailable(active) === false`
+					// and runs the failover loop.
+					markCooldown(state, endpointId)
+				}
+				return
+			}
+		}
+	}
+
+	/** Looks up the `{ networkId, endpointId }` for an active-profile
+	 *  endpoint whose URL matches `url`. Returns undefined if no match. */
+	private async _findEndpointByUrl(url: string): Promise<{ networkId: string; endpointId: string } | undefined> {
+		const profile = await this.profileService.getActiveProfile()
+		if (!profile) return undefined
+		const networks = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
+		for (const network of networks) {
+			for (const ep of network.endpoints) {
+				if (ep.rpcUrl === url) return { networkId: network.id, endpointId: ep.id }
+			}
+		}
+		return undefined
 	}
 
 	/**
@@ -680,6 +939,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		try {
 			await this.lock.enter()
 			this.nodes.clear()
+			this.routeState.clear()
 			this.transientNodes.clear()
 		} finally {
 			this.lock.leave()
@@ -691,6 +951,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		try {
 			await this.lock.enter()
 			this.nodes.clear()
+			this.routeState.clear()
 			this.transientNodes.clear()
 			const networks = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
 			for (const network of networks) {
@@ -773,6 +1034,171 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 
 	private async _writeActive(profileId: string, networkId: string): Promise<void> {
 		await chrome.storage.local.set({ [activeKey(profileId)]: networkId })
+	}
+
+	/**
+	 * Lock-held core of `acquireBinding`. Resolves the live endpoint for
+	 * `chainId`, possibly running snapback or failover as a side effect.
+	 *
+	 *   1. Look up the Network for `chainId` (active profile only).
+	 *   2. Lazily initialize `routeState` if absent (active = endpoints[0]).
+	 *   3. If active is unavailable (cooldown/invalidChain set by a prior
+	 *      `reportEndpointFailure` strike): run `_tryFailover` — picks the
+	 *      next viable candidate, probes chainId, swaps active on success.
+	 *      Sets `exhaustedAt` if every candidate fails.
+	 *   4. Else if active != endpoints[0] AND endpoints[0] is available:
+	 *      run `_trySnapback` — probes preferred; on success snaps back.
+	 *   5. Recreate the `nodes[chainId]` entry if it's stale (different
+	 *      endpointId or rpcUrl from the resolved active).
+	 *
+	 * Both probes (`_tryFailover`, `_trySnapback`) are pure side-effect:
+	 * they mutate `state.activeEndpointId` + `nodes[chainId]` and emit the
+	 * appropriate events. The final `nodes[chainId]` entry IS the binding
+	 * we return.
+	 */
+	private async _resolveBindingLocked(chainId: number): Promise<NetworkBinding> {
+		const profile = await this.profileService.getActiveProfile()
+		if (!profile) throw new Error("Profile locked")
+		const network = (await this.storage.getValues()).find((n) => n.profileId === profile.id && n.chainId === chainId)
+		if (!network) throw new Error(`No network configured for chainId ${chainId}`)
+		const preferred = network.endpoints[0]
+		if (!preferred) throw new Error(`Network ${network.id} has no endpoints`)
+
+		let state = this.routeState.get(network.id)
+		if (!state) {
+			state = newRouteState(preferred.id)
+			this.routeState.set(network.id, state)
+		}
+
+		// If the active endpoint id no longer exists in `endpoints[]` (was
+		// deleted concurrently), snap back to preferred — the deletion path
+		// already updated `activeEndpointId`, but defensively reconfirm here.
+		if (!network.endpoints.some((e) => e.id === state.activeEndpointId)) {
+			state.activeEndpointId = preferred.id
+		}
+
+		// Failover / snapback decision tree.
+		if (!isAvailable(state, state.activeEndpointId)) {
+			await this._tryFailover(network, state)
+		} else if (state.activeEndpointId !== preferred.id && isAvailable(state, preferred.id)) {
+			await this._trySnapback(network, state, preferred)
+		}
+
+		const activeEp = network.endpoints.find((e) => e.id === state.activeEndpointId) ?? preferred
+		const cached = this.nodes.get(chainId)
+		let entry = cached
+		if (!entry || entry.endpointId !== activeEp.id || entry.rpcUrl !== activeEp.rpcUrl) {
+			entry = {
+				node: this.nodeFactory.createNode(activeEp.rpcUrl),
+				endpointId: activeEp.id,
+				rpcUrl: activeEp.rpcUrl,
+			}
+			this.nodes.set(chainId, entry)
+		}
+
+		// Reset counters opportunistically: a successful binding-acquire
+		// implies the caller is about to use the active endpoint; reporting
+		// success happens via `_countSuccess` on the next traffic call.
+		// We don't pre-reset here — that's the caller's job via the
+		// post-call success path (not yet wired; counters reset lazily via
+		// the 60s decay window in `recordFailure`).
+
+		return {
+			network,
+			endpoint: activeEp,
+			info: { profileId: network.profileId, chainId: network.chainId, rpcUrl: activeEp.rpcUrl },
+			node: entry.node,
+		}
+	}
+
+	/**
+	 * Cycle through `pickFailoverCandidates`, probing each candidate's
+	 * chainId. First match wins: mark the previous active for cooldown,
+	 * flip `activeEndpointId`, emit `onPrimaryEndpointChanged({ source:
+	 * "failover" })`. If every candidate fails its probe (chainId mismatch
+	 * → invalidChain; transport error → cooldown), set `exhaustedAt` and
+	 * emit `onPrimaryEndpointDegraded({ exhausted: true })`. The caller
+	 * sees no error — the binding still resolves (to a stale active), and
+	 * the next traffic call against the stale endpoint will fail and
+	 * propagate to the caller.
+	 */
+	private async _tryFailover(network: Network, state: NetworkRouteState): Promise<void> {
+		const previousActiveId = state.activeEndpointId
+		const candidateIds = pickFailoverCandidates(
+			state,
+			network.endpoints.map((e) => e.id),
+		)
+		for (const candidateId of candidateIds) {
+			const candidate = network.endpoints.find((e) => e.id === candidateId)
+			if (!candidate) continue
+			try {
+				const probedChainId = await this._getChainId(candidate.rpcUrl, network.kind)
+				if (probedChainId !== network.chainId) {
+					quarantineInvalidChain(state, candidateId)
+					continue
+				}
+				state.activeEndpointId = candidateId
+				state.exhaustedAt = undefined
+				recordSuccess(state, candidateId)
+				this.nodes.set(network.chainId, {
+					node: this.nodeFactory.createNode(candidate.rpcUrl),
+					endpointId: candidateId,
+					rpcUrl: candidate.rpcUrl,
+				})
+				this.emit("onPrimaryEndpointChanged", {
+					networkId: network.id,
+					fromEndpointId: previousActiveId,
+					toEndpointId: candidateId,
+					source: "failover",
+				})
+				return
+			} catch (err) {
+				const cls = classifyEndpointError(err)
+				if (cls.kind === "evict") quarantineInvalidChain(state, candidateId)
+				else markCooldown(state, candidateId)
+			}
+		}
+		// Exhausted: every candidate failed. Emit degraded event so UI can
+		// show the persistent banner. The binding still resolves (stale
+		// active); next call against the stale node will throw.
+		state.exhaustedAt = Date.now()
+		this.emit("onPrimaryEndpointDegraded", { networkId: network.id, exhausted: true })
+	}
+
+	/**
+	 * Opportunistic recovery: when the active is healthy but isn't on
+	 * `endpoints[0]`, probe preferred. On success, snap back. On failure,
+	 * mark preferred's cooldown (or quarantine on chain mismatch) — the
+	 * snapback won't retry until cooldown elapses (~5min) or the user
+	 * clears it.
+	 */
+	private async _trySnapback(network: Network, state: NetworkRouteState, preferred: NetworkEndpoint): Promise<void> {
+		const previousActiveId = state.activeEndpointId
+		try {
+			const probedChainId = await this._getChainId(preferred.rpcUrl, network.kind)
+			if (probedChainId !== network.chainId) {
+				quarantineInvalidChain(state, preferred.id)
+				return
+			}
+			state.activeEndpointId = preferred.id
+			state.exhaustedAt = undefined
+			recordSuccess(state, preferred.id)
+			this.nodes.set(network.chainId, {
+				node: this.nodeFactory.createNode(preferred.rpcUrl),
+				endpointId: preferred.id,
+				rpcUrl: preferred.rpcUrl,
+			})
+			this.emit("onPrimaryEndpointChanged", {
+				networkId: network.id,
+				fromEndpointId: previousActiveId,
+				toEndpointId: preferred.id,
+				source: "snapback",
+			})
+		} catch (err) {
+			const cls = classifyEndpointError(err)
+			if (cls.kind === "evict") quarantineInvalidChain(state, preferred.id)
+			else markCooldown(state, preferred.id)
+		}
 	}
 
 	private async _isKnownEndpointUrl(url: string): Promise<boolean> {

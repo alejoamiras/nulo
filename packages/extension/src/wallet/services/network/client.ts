@@ -4,6 +4,7 @@ import { validateParams, validateResult } from "@nulo/extension-messaging/zod"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import {
+	type EndpointHealthSnapshot,
 	type Events,
 	type Methods,
 	type Network,
@@ -114,6 +115,18 @@ export class NetworkServiceClient extends ServiceClient<Methods, Events> impleme
 		validateParams(NetworkMethodSchemas.promoteEndpoint.params, [networkId, endpointId], "promoteEndpoint")
 		const result = await this.request("promoteEndpoint", networkId, endpointId)
 		return validateResult(NetworkMethodSchemas.promoteEndpoint.result, result, "promoteEndpoint")
+	}
+
+	public async clearEndpointCooldowns(networkId: string): Promise<Network> {
+		validateParams(NetworkMethodSchemas.clearEndpointCooldowns.params, [networkId], "clearEndpointCooldowns")
+		const result = await this.request("clearEndpointCooldowns", networkId)
+		return validateResult(NetworkMethodSchemas.clearEndpointCooldowns.result, result, "clearEndpointCooldowns")
+	}
+
+	public async getEndpointHealth(networkId: string): Promise<EndpointHealthSnapshot> {
+		validateParams(NetworkMethodSchemas.getEndpointHealth.params, [networkId], "getEndpointHealth")
+		const result = await this.request("getEndpointHealth", networkId)
+		return validateResult(NetworkMethodSchemas.getEndpointHealth.result, result, "getEndpointHealth")
 	}
 
 	public async getNodeStatus(networkId: string): Promise<NodeStatus> {

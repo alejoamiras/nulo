@@ -1,6 +1,9 @@
 import { z } from "zod"
+import type { EndpointFailureCounters, EndpointHealthSnapshot } from "./route-state"
 
 export const NETWORK_SERVICE_NAME = "network"
+
+export type { EndpointFailureCounters, EndpointHealthSnapshot }
 
 export enum NodeStatus {
 	Active,
@@ -110,6 +113,25 @@ export const NetworkInfoSchema: z.ZodType<NetworkInfo> = z.object({
 	rpcUrl: z.string(),
 })
 
+/** Per-endpoint failure counters mirrored from `route-state.ts`. */
+const EndpointFailureCountersSchema: z.ZodType<EndpointFailureCounters> = z.object({
+	hard: z.number(),
+	soft: z.number(),
+	lastIncidentAt: z.number(),
+})
+
+/**
+ * Serializable projection of `NetworkRouteState`. Maps become Records, Sets
+ * become arrays so the wire boundary (SW ↔ popup) can JSON-serialize.
+ */
+export const EndpointHealthSnapshotSchema: z.ZodType<EndpointHealthSnapshot> = z.object({
+	activeEndpointId: z.string(),
+	failures: z.record(z.string(), EndpointFailureCountersSchema),
+	cooldownUntil: z.record(z.string(), z.number()),
+	invalidChain: z.array(z.string()),
+	exhaustedAt: z.number().optional(),
+})
+
 /**
  * Per-method schemas. Tuples preserve positional-param ordering (our wire
  * format sends params as a positional list).
@@ -163,6 +185,14 @@ export const NetworkMethodSchemas = {
 		params: z.tuple([z.string().min(1), z.string().min(1)]),
 		result: NetworkSchema,
 	},
+	clearEndpointCooldowns: {
+		params: z.tuple([z.string().min(1)]),
+		result: NetworkSchema,
+	},
+	getEndpointHealth: {
+		params: z.tuple([z.string().min(1)]),
+		result: EndpointHealthSnapshotSchema,
+	},
 	getNodeStatus: {
 		params: z.tuple([z.string().min(1)]),
 		result: NodeStatusSchema,
@@ -215,11 +245,26 @@ export type Methods = {
 	deleteEndpoint(networkId: string, endpointId: string): NetworkEndpoint
 	/**
 	 * Promotes an endpoint to `endpoints[0]` (the user-preferred position).
-	 * Splices the endpoint out and unshifts it to the head. Evicts the
-	 * cached node so the next `getNode` call re-resolves the route. Emits
+	 * Splices the endpoint out and unshifts it to the head. Clears that
+	 * endpoint's cooldown + invalidChain entry. Evicts the cached node so
+	 * the next `getNode` call re-resolves the route. Emits
 	 * `onPrimaryEndpointChanged` with `source: "manual"`.
 	 */
 	promoteEndpoint(networkId: string, endpointId: string): Network
+	/**
+	 * User-driven "Retry preferred" recovery. Clears every endpoint's
+	 * cooldown + invalidChain entry for the network. Does NOT flip
+	 * `activeEndpointId`; the next traffic call probes `endpoints[0]`
+	 * naturally via the snapback path.
+	 */
+	clearEndpointCooldowns(networkId: string): Network
+	/**
+	 * Plain-object snapshot of the network's in-memory `NetworkRouteState`.
+	 * Used by popup surfaces (settings page dots, header status) to render
+	 * per-endpoint health. Returns a default snapshot (active = endpoints[0])
+	 * if no route state has been initialized yet.
+	 */
+	getEndpointHealth(networkId: string): EndpointHealthSnapshot
 	/**
 	 * Probes the network's currently-active endpoint and returns
 	 * Active / Inactive / InvalidChain. (Active = "alive at the right
