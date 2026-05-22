@@ -380,7 +380,7 @@ describe("NetworkService public API (M4.10)", () => {
 			expect(network.kind).toBe("custom")
 			expect(network.endpoints).toHaveLength(1)
 			expect(network.endpoints[0]!.rpcUrl).toBe("https://rpc.test/1")
-			expect(network.primaryEndpointId).toBe(network.endpoints[0]!.id)
+			expect(network.endpoints).toHaveLength(1)
 			expect(events).toHaveLength(1)
 			expect(events[0]!.id).toBe(network.id)
 		})
@@ -474,8 +474,8 @@ describe("NetworkService public API (M4.10)", () => {
 
 			const updated = await service.getNetwork(network.id)
 			expect(updated.endpoints).toHaveLength(2)
-			// primary unchanged
-			expect(updated.primaryEndpointId).toBe(network.primaryEndpointId)
+			// preferred (endpoints[0]) unchanged after appending a backup
+			expect(updated.endpoints[0]!.id).toBe(network.endpoints[0]!.id)
 		})
 
 		test("rejects ENDPOINT_CHAIN_MISMATCH when probed chainId differs", async () => {
@@ -509,7 +509,6 @@ describe("NetworkService public API (M4.10)", () => {
 				chainId: 0,
 				name: "Local Network",
 				kind: "local" as const,
-				primaryEndpointId: "ep-1",
 				endpoints: [{ id: "ep-1", rpcUrl: "http://localhost:8080" }],
 			}
 			local.store.set("nulo:core:networks@local-1", JSON.stringify(localNet))
@@ -521,14 +520,15 @@ describe("NetworkService public API (M4.10)", () => {
 		})
 	})
 
-	describe("setPrimaryEndpoint", () => {
-		test("updates primary, emits event, evicts AztecNode cache for that chainId", async () => {
+	describe("promoteEndpoint", () => {
+		test("splices the endpoint to index 0, emits event with source=manual, evicts AztecNode cache", async () => {
 			const { service, factory } = setupServiceWithStorage({
 				"https://rpc.test/1": nodeInfoForChain(7),
 				"https://rpc.test/2": nodeInfoForChain(7),
 			})
 			const network = await service.addNetwork("X", "https://rpc.test/1")
 			const ep2 = await service.addEndpoint(network.id, "B", "https://rpc.test/2")
+			const ep1Id = network.endpoints[0]!.id
 
 			// Prime the AztecNode cache via getNode().
 			await service.getNode(7)
@@ -536,25 +536,28 @@ describe("NetworkService public API (M4.10)", () => {
 			expect(((service as any).nodes as Map<number, unknown>).has(7)).toBe(true)
 			const before = factory.created.length
 
-			const events: { networkId: string; endpointId: string }[] = []
+			const events: unknown[] = []
 			service.onPrimaryEndpointChanged.add((evt) => {
 				events.push(evt)
 				return Promise.resolve()
 			})
 
-			await service.setPrimaryEndpoint(network.id, ep2.id)
+			const updated = await service.promoteEndpoint(network.id, ep2.id)
 
+			// New head is ep2.
+			expect(updated.endpoints[0]!.id).toBe(ep2.id)
+			expect(updated.endpoints.map((e) => e.id)).toEqual([ep2.id, ep1Id])
 			// Cache evicted.
 			// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 			expect(((service as any).nodes as Map<number, unknown>).has(7)).toBe(false)
-			// Event fired.
-			expect(events).toEqual([{ networkId: network.id, endpointId: ep2.id }])
+			// Event fired with the new payload shape.
+			expect(events).toEqual([{ networkId: network.id, fromEndpointId: ep1Id, toEndpointId: ep2.id, source: "manual" }])
 			// Next getNode creates a fresh node bound to the new URL.
 			await service.getNode(7)
 			expect(factory.created.length).toBeGreaterThan(before)
 		})
 
-		test("no-op when endpointId already primary (no event)", async () => {
+		test("no-op when endpointId already at index 0 (no event)", async () => {
 			const { service } = setupServiceWithStorage({
 				"https://rpc.test/1": nodeInfoForChain(1),
 			})
@@ -564,20 +567,27 @@ describe("NetworkService public API (M4.10)", () => {
 				events.push(evt)
 				return Promise.resolve()
 			})
-			await service.setPrimaryEndpoint(network.id, network.primaryEndpointId)
+			await service.promoteEndpoint(network.id, network.endpoints[0]!.id)
 			expect(events).toHaveLength(0)
 		})
 	})
 
 	describe("deleteEndpoint", () => {
-		test("rejects PRIMARY_ENDPOINT", async () => {
+		test("allows deletion of endpoints[0] (the preferred); endpoints[1] shifts into the preferred slot", async () => {
+			// Schema collapse change: ERR_PRIMARY_ENDPOINT is gone. The user
+			// can delete the preferred endpoint; the next entry becomes the
+			// new preferred. The only remaining guard is ERR_LAST_ENDPOINT.
 			const { service } = setupServiceWithStorage({
 				"https://rpc.test/1": nodeInfoForChain(1),
 				"https://rpc.test/2": nodeInfoForChain(1),
 			})
 			const network = await service.addNetwork("X", "https://rpc.test/1")
-			await service.addEndpoint(network.id, "B", "https://rpc.test/2")
-			await expect(service.deleteEndpoint(network.id, network.primaryEndpointId)).rejects.toThrow(/PRIMARY_ENDPOINT/)
+			const ep2 = await service.addEndpoint(network.id, "B", "https://rpc.test/2")
+			const ep1Id = network.endpoints[0]!.id
+			await service.deleteEndpoint(network.id, ep1Id)
+			const after = await service.getNetwork(network.id)
+			expect(after.endpoints).toHaveLength(1)
+			expect(after.endpoints[0]!.id).toBe(ep2.id)
 		})
 
 		test("rejects LAST_ENDPOINT when only one endpoint exists", async () => {
@@ -585,7 +595,7 @@ describe("NetworkService public API (M4.10)", () => {
 				"https://rpc.test/1": nodeInfoForChain(1),
 			})
 			const network = await service.addNetwork("X", "https://rpc.test/1")
-			await expect(service.deleteEndpoint(network.id, network.primaryEndpointId)).rejects.toThrow(/LAST_ENDPOINT/)
+			await expect(service.deleteEndpoint(network.id, network.endpoints[0]!.id)).rejects.toThrow(/LAST_ENDPOINT/)
 		})
 
 		test("removes a non-primary endpoint and emits onNetworkUpdated", async () => {
@@ -609,7 +619,7 @@ describe("NetworkService public API (M4.10)", () => {
 	})
 
 	describe("setActiveNetwork", () => {
-		test("does NOT mutate primaryEndpointId; emits onActiveNetworkChanged", async () => {
+		test("does NOT mutate endpoints[] order; emits onActiveNetworkChanged", async () => {
 			const { service } = setupServiceWithStorage({
 				"https://rpc.test/1": nodeInfoForChain(1),
 				"https://rpc.test/2": nodeInfoForChain(2),
@@ -623,12 +633,12 @@ describe("NetworkService public API (M4.10)", () => {
 			})
 			await service.setActiveNetwork(b.id)
 			const re = await service.getNetwork(b.id)
-			expect(re.primaryEndpointId).toBe(b.primaryEndpointId)
+			expect(re.endpoints[0]!.id).toBe(b.endpoints[0]!.id)
 			expect(events).toHaveLength(1)
 			expect(events[0]!.id).toBe(b.id)
-			// Ensure A's primary still untouched too.
+			// Ensure A's preferred endpoint still untouched too.
 			const reA = await service.getNetwork(a.id)
-			expect(reA.primaryEndpointId).toBe(a.primaryEndpointId)
+			expect(reA.endpoints[0]!.id).toBe(a.endpoints[0]!.id)
 		})
 	})
 
@@ -701,7 +711,7 @@ describe("NetworkService public API (M4.10)", () => {
 			expect(snapshot).toHaveLength(2)
 			for (const n of snapshot) {
 				expect(n.endpoints.length).toBeGreaterThan(0)
-				expect(typeof n.primaryEndpointId).toBe("string")
+				expect(typeof n.endpoints[0]!.id).toBe("string")
 			}
 		})
 
@@ -730,7 +740,6 @@ describe("NetworkService public API (M4.10)", () => {
 					profileId: "p1",
 					chainId: 1,
 					name: "Imported",
-					primaryEndpointId: "e1",
 					endpoints: [{ id: "e1", rpcUrl: "https://rpc.test/1" }],
 				},
 			]
@@ -787,7 +796,6 @@ describe("NetworkService.onProfileDeleted cascade", () => {
 			chainId: 7,
 			name: "P2",
 			kind: "custom" as const,
-			primaryEndpointId: "ep-p2",
 			endpoints: [{ id: "ep-p2", rpcUrl: "https://rpc.test/c" }],
 		}
 		local.store.set("nulo:core:networks@n-p2", JSON.stringify(p2Network))

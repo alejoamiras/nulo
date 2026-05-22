@@ -121,16 +121,20 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			throw new Error("duplicated hash")
 		}
 		const now = Date.now()
-		// Capture the primary endpoint URL at submission time so receipt
+		// Capture the preferred endpoint URL at submission time so receipt
 		// polling stays bound to it across primary-endpoint swaps. Lookup
 		// is best-effort — if the network record can't be resolved (e.g.
 		// just deleted), the field stays undefined and polling falls back
-		// to the chain's current primary at read time.
+		// to the chain's current preferred at read time. Phase 3 of the
+		// multi-rpc-failover work will switch this to take the captured
+		// URL/id from the caller's binding (codex final-pass §7 item 1) —
+		// the current "look up at submit time" path still races failover.
+		// TODO(multi-rpc-failover Phase 3): API change to pass URL+id in.
 		let submittedEndpointUrl: string | undefined
 		try {
 			const networks = await this.networkService.getNetworks(chainId)
 			const network = networks[0]
-			submittedEndpointUrl = network?.endpoints.find((e) => e.id === network.primaryEndpointId)?.rpcUrl
+			submittedEndpointUrl = network?.endpoints[0]?.rpcUrl
 		} catch {
 			submittedEndpointUrl = undefined
 		}

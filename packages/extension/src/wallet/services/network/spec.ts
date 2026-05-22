@@ -28,18 +28,25 @@ export type Network = {
 	chainId: number
 	/** User-customizable display name. */
 	name: string
-	/** Persisted user choice — which endpoint receives traffic by default. */
-	primaryEndpointId: string
-	/** Endpoints owned by this Network. Always ≥1. */
+	/**
+	 * Endpoints owned by this Network. Always ≥1. ORDER IS AUTHORITATIVE:
+	 * `endpoints[0]` is the user-preferred endpoint (the snap-back target);
+	 * the rest are the failover priority list. The runtime tracks which
+	 * endpoint is currently routing (the "active" one) in an in-memory
+	 * `NetworkRouteState` that may differ from `endpoints[0]` during a
+	 * failover episode. Persisted state encodes preference; in-memory state
+	 * encodes the operational reality. (No separate `primaryEndpointId`
+	 * pointer — codex final-pass §1 confirmed the simpler shape.)
+	 */
 	endpoints: NetworkEndpoint[]
 	/** Optional chain-type metadata. Set at seed time; "custom" otherwise. */
 	kind?: ChainKind
 }
 
 /**
- * Synthesized at lookup-time from `(Network, primaryEndpoint.rpcUrl)`. Kept
- * structurally identical to the prior `Network` shape on the PXE-facing
- * boundary so `chain-runtime.ts` keeps working unchanged.
+ * Synthesized at lookup-time from `(Network, endpoints[0].rpcUrl)`. Kept
+ * structurally identical to the prior shape on the PXE-facing boundary so
+ * `chain-runtime.ts` keeps working unchanged.
  */
 export type NetworkInfo = {
 	profileId: string
@@ -49,13 +56,14 @@ export type NetworkInfo = {
 
 /**
  * Helper: project a Network down to the legacy `NetworkInfo` shape using
- * its primary endpoint's URL. Throws if the network has no primary
- * endpoint (data-shape invariant violation).
+ * its preferred endpoint's URL (`endpoints[0]`). Throws if the network has
+ * no endpoints — guarded by the `.min(1)` zod constraint on the schema, so
+ * this should be unreachable.
  */
 export function networkInfoFrom(network: Network): NetworkInfo {
-	const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
-	if (!primary) throw new Error(`Network ${network.id} has no primary endpoint`)
-	return { profileId: network.profileId, chainId: network.chainId, rpcUrl: primary.rpcUrl }
+	const preferred = network.endpoints[0]
+	if (!preferred) throw new Error(`Network ${network.id} has no endpoints`)
+	return { profileId: network.profileId, chainId: network.chainId, rpcUrl: preferred.rpcUrl }
 }
 
 // ── Service-thrown error message prefixes ────────────────────────────
@@ -66,9 +74,12 @@ export const ERR_DUPLICATE_CHAIN = "DUPLICATE_CHAIN"
 export const ERR_DUPLICATE_ENDPOINT = "DUPLICATE_ENDPOINT"
 export const ERR_ENDPOINT_CHAIN_MISMATCH = "ENDPOINT_CHAIN_MISMATCH"
 export const ERR_LAST_ENDPOINT = "LAST_ENDPOINT"
-export const ERR_PRIMARY_ENDPOINT = "PRIMARY_ENDPOINT"
 export const ERR_ACTIVE_NETWORK = "ACTIVE_NETWORK"
 export const ERR_BACKUP_TOO_OLD = "BACKUP_TOO_OLD"
+// ERR_PRIMARY_ENDPOINT removed in the multi-rpc-failover work: with the
+// `endpoints[]`-order-is-priority schema, every endpoint is deletable
+// (subject to ERR_LAST_ENDPOINT). Deleting endpoints[0] just promotes
+// endpoints[1] to preferred.
 
 // ── Zod schemas for the RPC boundary ─────────────────────────────────
 
@@ -85,7 +96,6 @@ export const NetworkSchema: z.ZodType<Network> = z.object({
 	profileId: z.string(),
 	chainId: z.number(),
 	name: z.string(),
-	primaryEndpointId: z.string(),
 	endpoints: z.array(NetworkEndpointSchema).min(1),
 	kind: ChainKindSchema.optional(),
 })
@@ -149,7 +159,7 @@ export const NetworkMethodSchemas = {
 		params: z.tuple([z.string().min(1), z.string().min(1)]),
 		result: NetworkEndpointSchema,
 	},
-	setPrimaryEndpoint: {
+	promoteEndpoint: {
 		params: z.tuple([z.string().min(1), z.string().min(1)]),
 		result: NetworkSchema,
 	},
@@ -184,8 +194,8 @@ export type Methods = {
 	deleteNetwork(id: string): Network
 	/**
 	 * Switches the active chain pointer. Primes the AztecNode cache. Does
-	 * NOT mutate `primaryEndpointId` (that's a separate user choice via
-	 * `setPrimaryEndpoint`).
+	 * NOT mutate `endpoints[]` order (that's a separate user choice via
+	 * `promoteEndpoint`).
 	 */
 	setActiveNetwork(id: string): Network
 	/** Returns the currently active network, or null if none. */
@@ -198,15 +208,37 @@ export type Methods = {
 	/** Updates an endpoint's label and/or rpcUrl. Re-probes on URL change. */
 	updateEndpoint(networkId: string, endpointId: string, label: string | undefined, rpcUrl: string): NetworkEndpoint
 	/**
-	 * Deletes an endpoint. Rejects `PRIMARY_ENDPOINT` if it's the primary,
-	 * or `LAST_ENDPOINT` if it's the only one on the network.
+	 * Deletes an endpoint. Rejects `LAST_ENDPOINT` if it's the only one on
+	 * the network. The previously-preferred endpoint (`endpoints[0]`) can be
+	 * deleted; deletion shifts `endpoints[1]` into preferred position.
 	 */
 	deleteEndpoint(networkId: string, endpointId: string): NetworkEndpoint
-	/** Sets the primary endpoint for a network. Evicts the AztecNode cache. */
-	setPrimaryEndpoint(networkId: string, endpointId: string): Network
-	/** Probes the network's primary endpoint and returns Active/Inactive/InvalidChain. */
+	/**
+	 * Promotes an endpoint to `endpoints[0]` (the user-preferred position).
+	 * Splices the endpoint out and unshifts it to the head. Evicts the
+	 * cached node so the next `getNode` call re-resolves the route. Emits
+	 * `onPrimaryEndpointChanged` with `source: "manual"`.
+	 */
+	promoteEndpoint(networkId: string, endpointId: string): Network
+	/**
+	 * Probes the network's currently-active endpoint and returns
+	 * Active / Inactive / InvalidChain. (Active = "alive at the right
+	 * chainId.") Header UX combines this with `endpoints[0] != activeEndpointId`
+	 * to render the amber Degraded dot.
+	 */
 	getNodeStatus(networkId: string): NodeStatus
 }
+
+/**
+ * Discriminator on `onPrimaryEndpointChanged` payload: what caused the live
+ * route to change?
+ *  - "manual": user called `promoteEndpoint` or reordered endpoints.
+ *  - "failover": automatic failover after threshold tripped on the previous
+ *    active endpoint.
+ *  - "snapback": opportunistic recovery when a previously-failed preferred
+ *    endpoint passed its post-cooldown probe.
+ */
+export type PrimaryEndpointChangeSource = "manual" | "failover" | "snapback"
 
 export type Events = {
 	/** Emitted when a new network is added. */
@@ -217,8 +249,22 @@ export type Events = {
 	onNetworkDeleted: Network
 	/** Emitted when the active chain changes. */
 	onActiveNetworkChanged: Network
-	/** Emitted when a network's primary endpoint changes. */
-	onPrimaryEndpointChanged: { networkId: string; endpointId: string }
+	/**
+	 * Emitted when a network's active routing endpoint changes. Carries the
+	 * source discriminator so the UI can distinguish manual user actions
+	 * (no toast) from automatic failover events (toast + amber dot).
+	 */
+	onPrimaryEndpointChanged: {
+		networkId: string
+		fromEndpointId: string | undefined
+		toEndpointId: string
+		source: PrimaryEndpointChangeSource
+	}
+	/**
+	 * Emitted when failover exhausted all configured endpoints for a chain.
+	 * UI surfaces a persistent banner with a "Retry preferred" button.
+	 */
+	onPrimaryEndpointDegraded: { networkId: string; exhausted: boolean }
 	/**
 	 * Emitted after `purgeChain` finishes wiping chain-scoped state. UI uses
 	 * this to refresh views (account list, tx list, etc.).

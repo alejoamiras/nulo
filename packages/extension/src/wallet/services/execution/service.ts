@@ -613,15 +613,19 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			return undefined
 		}
 
-		// Endpoint identity (codex audit gap — primary can change at runtime)
+		// Endpoint identity (codex audit gap — preferred can change at runtime).
+		// After the multi-rpc-failover schema collapse, `endpoints[0]` IS the
+		// preferred. The cached entry's `primaryEndpointId` field is an
+		// internal snapshot — keep the name for diff minimality; Phase 3 of
+		// failover will switch this whole path to binding-derived identity.
 		const network = await this.networkService.getNetwork(inputs.networkId)
-		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
-		if (!primary) {
-			this.logDebug(`tryConsumeTransferEstimate ${estimateId}: no primary endpoint`)
+		const preferred = network.endpoints[0]
+		if (!preferred) {
+			this.logDebug(`tryConsumeTransferEstimate ${estimateId}: no preferred endpoint`)
 			return undefined
 		}
-		if (primary.id !== entry.primaryEndpointId || primary.rpcUrl !== entry.primaryEndpointUrl) {
-			this.logDebug(`tryConsumeTransferEstimate ${estimateId}: primary endpoint changed`)
+		if (preferred.id !== entry.primaryEndpointId || preferred.rpcUrl !== entry.primaryEndpointUrl) {
+			this.logDebug(`tryConsumeTransferEstimate ${estimateId}: preferred endpoint changed`)
 			return undefined
 		}
 
@@ -704,8 +708,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		let estimateId: string | undefined
 		if (reuseEligible) {
 			try {
-				const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
-				if (primary) {
+				const preferred = network.endpoints[0]
+				if (preferred) {
 					// Fingerprint the EXACT fee the txRequest was built with —
 					// not a fresh `getCurrentMinFees()` after the fact (codex
 					// audit SHOULD-FIX #3). Both FJ and FPC strategies finalize
@@ -730,8 +734,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 						feeSettingsHash: fingerprintFeeSettings(op.feeSettings),
 						profileId: profile.id,
 						baseFeeFingerprint,
-						primaryEndpointId: primary.id,
-						primaryEndpointUrl: primary.rpcUrl,
+						primaryEndpointId: preferred.id,
+						primaryEndpointUrl: preferred.rpcUrl,
 						pendingHashes,
 						txRequest,
 						nonce,

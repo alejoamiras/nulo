@@ -19,7 +19,6 @@ import {
 	ERR_DUPLICATE_ENDPOINT,
 	ERR_ENDPOINT_CHAIN_MISMATCH,
 	ERR_LAST_ENDPOINT,
-	ERR_PRIMARY_ENDPOINT,
 	type Events,
 	type Methods,
 	type Network,
@@ -28,6 +27,7 @@ import {
 	NETWORK_SERVICE_NAME,
 	NetworkMethodSchemas,
 	NodeStatus,
+	type PrimaryEndpointChangeSource,
 } from "./spec"
 
 export * from "./spec"
@@ -136,7 +136,13 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public readonly onNetworkUpdated = new EventHandler<Network>()
 	public readonly onNetworkDeleted = new EventHandler<Network>()
 	public readonly onActiveNetworkChanged = new EventHandler<Network>()
-	public readonly onPrimaryEndpointChanged = new EventHandler<{ networkId: string; endpointId: string }>()
+	public readonly onPrimaryEndpointChanged = new EventHandler<{
+		networkId: string
+		fromEndpointId: string | undefined
+		toEndpointId: string
+		source: PrimaryEndpointChangeSource
+	}>()
+	public readonly onPrimaryEndpointDegraded = new EventHandler<{ networkId: string; exhausted: boolean }>()
 	public readonly onChainPurged = new EventHandler<{ profileId: string; chainId: number }>()
 
 	private readonly storage = new EntityStorage<Network>("nulo:core:networks", chrome.storage.local)
@@ -189,8 +195,8 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			if (activeId) {
 				await this._writeActive(profile.id, activeId)
 				const active = seeded.find((n) => n.id === activeId)!
-				const primaryEndpoint = active.endpoints.find((e) => e.id === active.primaryEndpointId)!
-				this.nodes.set(active.chainId, this.nodeFactory.createNode(primaryEndpoint.rpcUrl))
+				const preferred = active.endpoints[0]!
+				this.nodes.set(active.chainId, this.nodeFactory.createNode(preferred.rpcUrl))
 			}
 			return seeded
 		} finally {
@@ -312,9 +318,9 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			const network = await this.storage.get(id)
 			if (network?.profileId !== profile.id) throw new Error("Invalid id")
 			await this._writeActive(profile.id, id)
-			const primaryEndpoint = network.endpoints.find((e) => e.id === network.primaryEndpointId)
-			if (primaryEndpoint) {
-				this.nodes.set(network.chainId, this.nodeFactory.createNode(primaryEndpoint.rpcUrl))
+			const preferred = network.endpoints[0]
+			if (preferred) {
+				this.nodes.set(network.chainId, this.nodeFactory.createNode(preferred.rpcUrl))
 			}
 			this.emit("onActiveNetworkChanged", network)
 			return network
@@ -404,9 +410,10 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			network.endpoints[idx] = updated
 			await this.storage.set(network.id, network)
 			// Evict transient cache for the OLD URL, plus the chain's primary node
-			// cache if this endpoint is the primary.
+			// cache if this endpoint is at the head of `endpoints[]` (the preferred
+			// slot — what `getNode` currently resolves to in the no-failover case).
 			this.transientNodes.delete(oldUrl)
-			if (network.primaryEndpointId === endpointId) {
+			if (network.endpoints[0]?.id === endpointId) {
 				this.nodes.delete(network.chainId)
 			}
 			this.emit("onNetworkUpdated", network)
@@ -430,12 +437,17 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			if (network.endpoints.length === 1) {
 				throw new Error(`${ERR_LAST_ENDPOINT}: Cannot delete the last endpoint. Delete the network instead.`)
 			}
-			if (network.primaryEndpointId === endpointId) {
-				throw new Error(`${ERR_PRIMARY_ENDPOINT}: Cannot delete the primary endpoint. Make another endpoint primary first.`)
-			}
+			// Deleting the preferred endpoint (`endpoints[0]`) is now allowed —
+			// the slice shifts `endpoints[1]` into position 0 which becomes the
+			// new preferred. Evict the cached node if we just deleted the live
+			// one so the next `getNode` re-resolves.
+			const wasPreferred = network.endpoints[0]?.id === endpointId
 			const removed = network.endpoints.splice(idx, 1)[0]!
 			await this.storage.set(network.id, network)
 			this.transientNodes.delete(removed.rpcUrl)
+			if (wasPreferred) {
+				this.nodes.delete(network.chainId)
+			}
 			this.emit("onNetworkUpdated", network)
 			return removed
 		} finally {
@@ -443,8 +455,18 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		}
 	}
 
-	public async setPrimaryEndpoint(networkId: string, endpointId: string): Promise<Network> {
-		validateParams(NetworkMethodSchemas.setPrimaryEndpoint.params, [networkId, endpointId], "setPrimaryEndpoint")
+	/**
+	 * Splice an endpoint to `endpoints[0]` (the preferred / snap-back
+	 * target). Persisted state encodes user preference; in-memory routing
+	 * state may still resolve to a different `activeEndpointId` until the
+	 * next traffic-driven probe (Phase 1 chunk C wires the probe path).
+	 *
+	 * For chunk B (no failover logic yet), the semantics are simple:
+	 * reorder + evict cache + emit. The next `getNode` will resolve to the
+	 * new `endpoints[0]`.
+	 */
+	public async promoteEndpoint(networkId: string, endpointId: string): Promise<Network> {
+		validateParams(NetworkMethodSchemas.promoteEndpoint.params, [networkId, endpointId], "promoteEndpoint")
 		await this.ensureInitialized()
 		const profile = await this.profileService.getActiveProfile()
 		if (!profile) throw new Error("Profile locked")
@@ -452,12 +474,20 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			await this.lock.enter()
 			const network = await this.storage.get(networkId)
 			if (network?.profileId !== profile.id) throw new Error("Invalid id")
-			if (!network.endpoints.some((e) => e.id === endpointId)) throw new Error("Invalid endpoint id")
-			if (network.primaryEndpointId === endpointId) return network
-			network.primaryEndpointId = endpointId
+			const idx = network.endpoints.findIndex((e) => e.id === endpointId)
+			if (idx < 0) throw new Error("Invalid endpoint id")
+			const fromEndpointId = network.endpoints[0]?.id
+			if (idx === 0) return network
+			const [moved] = network.endpoints.splice(idx, 1)
+			network.endpoints.unshift(moved!)
 			await this.storage.set(network.id, network)
 			this.nodes.delete(network.chainId)
-			this.emit("onPrimaryEndpointChanged", { networkId: network.id, endpointId })
+			this.emit("onPrimaryEndpointChanged", {
+				networkId: network.id,
+				fromEndpointId,
+				toEndpointId: endpointId,
+				source: "manual",
+			})
 			this.emit("onNetworkUpdated", network)
 			return network
 		} finally {
@@ -474,10 +504,10 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		if (!profile) throw new Error("Profile locked")
 		const network = await this.storage.get(networkId)
 		if (network?.profileId !== profile.id) throw new Error("Invalid id")
-		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
-		if (!primary) return NodeStatus.Inactive
+		const preferred = network.endpoints[0]
+		if (!preferred) return NodeStatus.Inactive
 		try {
-			const probedChainId = await this._getChainId(primary.rpcUrl)
+			const probedChainId = await this._getChainId(preferred.rpcUrl)
 			if (probedChainId !== network.chainId) return NodeStatus.InvalidChain
 			return NodeStatus.Active
 		} catch {
@@ -495,9 +525,9 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 				if (!profile) throw new Error("Profile locked")
 				const network = (await this.storage.getValues()).find((n) => n.profileId === profile.id && n.chainId === chainId)
 				if (!network) throw new Error(`No network configured for chainId ${chainId}`)
-				const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
-				if (!primary) throw new Error(`Network ${network.id} has no primary endpoint`)
-				node = this.nodeFactory.createNode(primary.rpcUrl)
+				const preferred = network.endpoints[0]
+				if (!preferred) throw new Error(`Network ${network.id} has no endpoints`)
+				node = this.nodeFactory.createNode(preferred.rpcUrl)
 				this.nodes.set(chainId, node)
 			}
 			return node
@@ -542,9 +572,9 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async getNetworkInfo(networkId: string): Promise<NetworkInfo> {
 		await this.ensureInitialized()
 		const network = await this.getNetwork(networkId)
-		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
-		if (!primary) throw new Error(`Network ${network.id} has no primary endpoint`)
-		return { profileId: network.profileId, chainId: network.chainId, rpcUrl: primary.rpcUrl }
+		const preferred = network.endpoints[0]
+		if (!preferred) throw new Error(`Network ${network.id} has no endpoints`)
+		return { profileId: network.profileId, chainId: network.chainId, rpcUrl: preferred.rpcUrl }
 	}
 
 	// ── Cascade coordinator ──────────────────────────────────────────────
@@ -692,7 +722,6 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			profileId,
 			chainId,
 			name,
-			primaryEndpointId: endpointId,
 			endpoints: [endpoint],
 			kind,
 		}
@@ -762,7 +791,6 @@ function isNewShapeNetwork(value: unknown): value is Network {
 		typeof v.profileId === "string" &&
 		typeof v.chainId === "number" &&
 		typeof v.name === "string" &&
-		typeof v.primaryEndpointId === "string" &&
 		Array.isArray(v.endpoints) &&
 		v.endpoints.length > 0
 	)
