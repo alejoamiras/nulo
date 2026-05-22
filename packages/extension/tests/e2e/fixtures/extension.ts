@@ -57,6 +57,26 @@ export async function launchExtension(): Promise<ExtensionContext> {
 	)
 	const extensionId = new URL(workerTarget.url()).hostname
 
+	// Forward SW console output (specifically [PROBE...] lines) to the
+	// vitest stdout so the e2e-full-network-recovery probe traces are
+	// visible in the run output. Gated on VITE_E2E_PROBE=1 to avoid noise
+	// in normal smoke runs.
+	if (process.env.VITE_E2E_PROBE === "1") {
+		try {
+			const worker = await workerTarget.worker()
+			if (worker) {
+				worker.on("console", (msg) => {
+					const text = msg.text()
+					if (text.startsWith("[PROBE")) {
+						console.log(`[SW]${text}`)
+					}
+				})
+			}
+		} catch {
+			// best-effort — don't fail the fixture if probe capture wiring breaks
+		}
+	}
+
 	// Wait for SW to fully initialize (liveness signal in chrome.storage.session).
 	// runtime.ts writes the first liveness immediately after initWalletSdkHandler;
 	// 30s timeout matches the helper in sw-resilience.test.ts and gives headroom
@@ -121,6 +141,10 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	page.on("console", (msg: ConsoleMessage) => {
 		if (msg.type() === "error") {
 			ctx.consoleErrors.push(msg.text())
+		}
+		const text = msg.text()
+		if (text.startsWith("[PROBE")) {
+			console.log(`[PAGE]${text}`)
 		}
 	})
 	page.on("pageerror", (err: Error) => {
@@ -723,6 +747,10 @@ export async function openPopup(ctx: ExtensionContext): Promise<Page> {
 	page.on("console", (msg: ConsoleMessage) => {
 		if (msg.type() === "error") {
 			ctx.consoleErrors.push(msg.text())
+		}
+		const text = msg.text()
+		if (text.startsWith("[PROBE")) {
+			console.log(`[PAGE]${text}`)
 		}
 	})
 
