@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.22.0](https://github.com/alejoamiras/nulo/compare/v0.21.1...v0.22.0) (2026-05-22)
+
+
+### Features
+
+* **capabilities:** brutalist popup with honest copy + sanitized decode parity ([#47](https://github.com/alejoamiras/nulo/issues/47)) ([f57bba0](https://github.com/alejoamiras/nulo/commit/f57bba0f183030eeef8fe58189f46efb78fa946c))
+* **faucet,extension:** one-click "add to wallet" via registerToken RPC ([#50](https://github.com/alejoamiras/nulo/issues/50)) ([f3eb249](https://github.com/alejoamiras/nulo/commit/f3eb249d3344a5a7c2ddb192bd2c62a341a679b1))
+
+
+### Bug Fixes
+
+* **qa:** friends QA feedback batch [#1](https://github.com/alejoamiras/nulo/issues/1) — faucet + extension polish ([#48](https://github.com/alejoamiras/nulo/issues/48)) ([72df8f2](https://github.com/alejoamiras/nulo/commit/72df8f2cddb2268a0cb3582dcd337b58405ae8c2))
+
 ## [0.21.1](https://github.com/alejoamiras/nulo/compare/v0.21.0...v0.21.1) (2026-05-21)
 
 
