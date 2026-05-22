@@ -402,6 +402,28 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		})
 	}
 
+	/**
+	 * Failover-safe URL rebind. Acquires the same per-chain write guard as
+	 * `clearChainState` (drains in-flight readers + writers on this chain
+	 * first), then disposes the cached `ChainRuntime`. Critically, this
+	 * does NOT delete the IndexedDB — chainId is unchanged, the DB stays
+	 * valid; only the AztecNode (URL-bound) needs replacement.
+	 *
+	 * Triggered by the SW-side `NetworkService` after failover/snapback/
+	 * promote that changed the active endpoint for the chain. The next
+	 * `withPxeRead`/`withPxeWrite` re-initializes against the new URL via
+	 * the standard `registry.getOrInit` path.
+	 */
+	public async rebindChain(profileId: string, chainId: number): Promise<void> {
+		const barrier = this.getProfileBarrier(profileId)
+		const chainGuard = this.getChainGuard(profileId, chainId)
+		await barrier.read(async () => {
+			await chainGuard.write(async () => {
+				await this.registry.dispose(profileId, chainId)
+			})
+		})
+	}
+
 	private async withPxeRead<T>(label: string, network: NetworkInfo, fn: (pxe: PXE, node: AztecNode) => Promise<T>): Promise<T> {
 		const start = Date.now()
 		const barrier = this.getProfileBarrier(network.profileId)

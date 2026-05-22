@@ -1064,6 +1064,32 @@ describe("NetworkService failover engine (multi-rpc-failover Phase 1)", () => {
 		expect(routeState(service, "net-42").failures.get("ep-a")?.hard).toBe(1)
 	})
 
+	test("successful failover schedules pxeServiceClient.rebindChain(profileId, chainId)", async () => {
+		const { service, local } = setupServiceWithStorage({
+			"https://a.test": nodeInfoForChain(42),
+			"https://b.test": nodeInfoForChain(42),
+		})
+		seedNetwork(
+			local,
+			makeNetwork(42, [
+				{ id: "ep-a", rpcUrl: "https://a.test" },
+				{ id: "ep-b", rpcUrl: "https://b.test" },
+			]),
+		)
+		const rebindStub = vi.fn().mockResolvedValue(undefined)
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;((service as any).pxeServiceClient as { rebindChain: typeof rebindStub }).rebindChain = rebindStub
+
+		await service.acquireBinding(42) // init
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(service as any)._countFailure("net-42", "ep-a", { status: 503 })
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(service as any)._countFailure("net-42", "ep-a", { status: 503 })
+		await service.acquireBinding(42) // triggers failover
+
+		expect(rebindStub).toHaveBeenCalledWith("p1", 42)
+	})
+
 	test("classifier 'ignore' bucket does not move counters", async () => {
 		const { service, local } = setupServiceWithStorage({ "https://a.test": nodeInfoForChain(42) })
 		seedNetwork(local, makeNetwork(42, [{ id: "ep-a", rpcUrl: "https://a.test" }]))

@@ -581,6 +581,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 				state.activeEndpointId = endpointId
 			}
 			this.nodes.delete(network.chainId)
+			this._scheduleRebindChain(network.profileId, network.chainId)
 			this.emit("onPrimaryEndpointChanged", {
 				networkId: network.id,
 				fromEndpointId,
@@ -1145,6 +1146,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 					endpointId: candidateId,
 					rpcUrl: candidate.rpcUrl,
 				})
+				this._scheduleRebindChain(network.profileId, network.chainId)
 				this.emit("onPrimaryEndpointChanged", {
 					networkId: network.id,
 					fromEndpointId: previousActiveId,
@@ -1163,6 +1165,30 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		// active); next call against the stale node will throw.
 		state.exhaustedAt = Date.now()
 		this.emit("onPrimaryEndpointDegraded", { networkId: network.id, exhausted: true })
+	}
+
+	/**
+	 * Fire-and-forget rebind of the offscreen PXE runtime. Called after
+	 * any route change that switches the active endpoint URL (failover,
+	 * snapback, manual promote) so the PXE drains in-flight ops and
+	 * rebuilds its node binding against the new URL — under its per-chain
+	 * write guard, so concurrent reads finish on the old runtime safely.
+	 *
+	 * Does NOT block the failover engine — held under `this.lock` already,
+	 * adding an await on the offscreen RPC would serialize every other
+	 * routing decision. Errors are logged but swallowed; the registry's
+	 * URL-mismatch rebuild path at `chain-runtime.ts:135-138` is a safety
+	 * net if rebindChain fails or hasn't completed before the next read.
+	 */
+	private _scheduleRebindChain(profileId: string, chainId: number): void {
+		// Defensive: in unit-test paths the PxeServiceClient may be stubbed
+		// without this method. Skip the rebind silently in that case — the
+		// registry's URL-mismatch rebuild path is the safety net.
+		const rebind = (this.pxeServiceClient as { rebindChain?: (p: string, c: number) => Promise<void> }).rebindChain
+		if (typeof rebind !== "function") return
+		void rebind.call(this.pxeServiceClient, profileId, chainId).catch((err) => {
+			this.logError(`PxeServiceClient.rebindChain(${profileId}, ${chainId}) failed`, getErrorMessage(err))
+		})
 	}
 
 	/**
@@ -1188,6 +1214,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 				endpointId: preferred.id,
 				rpcUrl: preferred.rpcUrl,
 			})
+			this._scheduleRebindChain(network.profileId, network.chainId)
 			this.emit("onPrimaryEndpointChanged", {
 				networkId: network.id,
 				fromEndpointId: previousActiveId,
