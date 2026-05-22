@@ -1,12 +1,21 @@
+diff --git a/node_modules/@aztec/noir-acvm_js/.bun-tag-3dec197029e6bc65 b/.bun-tag-3dec197029e6bc65
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/package.json b/package.json
-index 2fc37bb3c27f1a4257f19fe5dc110ab1c398ba58..c699ac21ea53a0ddd910907e6de14418f8cc524b 100644
+index 2fc37bb3c27f1a4257f19fe5dc110ab1c398ba58..4c7b799d967238cf70f8bcd5884e206b33506266 100644
 --- a/package.json
 +++ b/package.json
-@@ -19,7 +19,6 @@
+@@ -19,7 +19,12 @@
    "license": "MIT",
    "main": "./nodejs/acvm_js.js",
    "types": "./web/acvm_js.d.ts",
 -  "module": "./web/acvm_js.js",
++  "exports": {
++    ".": {
++      "node": "./nodejs/acvm_js.js",
++      "default": "./web/acvm_js.js"
++    }
++  },
    "files": [
      "nodejs",
      "web",

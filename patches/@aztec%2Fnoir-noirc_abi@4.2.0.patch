@@ -1,12 +1,21 @@
+diff --git a/node_modules/@aztec/noir-noirc_abi/.bun-tag-e7138ab40018e8ec b/.bun-tag-e7138ab40018e8ec
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/package.json b/package.json
-index 839ec9d7b5748e236b4143aaf60a7286183da4ed..6dd893d4895666933b4846f2913723e99a0c6821 100644
+index 839ec9d7b5748e236b4143aaf60a7286183da4ed..f684f6209bf2c1989e2edfab73e05b023df2431b 100644
 --- a/package.json
 +++ b/package.json
-@@ -24,7 +24,6 @@
+@@ -24,7 +24,12 @@
    },
    "main": "./nodejs/noirc_abi_wasm.js",
    "types": "./web/noirc_abi_wasm.d.ts",
 -  "module": "./web/noirc_abi_wasm.js",
++  "exports": {
++    ".": {
++      "node": "./nodejs/noirc_abi_wasm.js",
++      "default": "./web/noirc_abi_wasm.js"
++    }
++  },
    "sideEffects": false,
    "scripts": {
      "build": "bash ./build.sh",
