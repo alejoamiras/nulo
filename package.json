@@ -37,5 +37,9 @@
     "@commitlint/config-conventional": "^21.0.1"
   },
   "packageManager": "bun@1.3.13",
-  "version": "0.20.0"
+  "version": "0.20.0",
+  "patchedDependencies": {
+    "@aztec/noir-noirc_abi@4.2.0": "patches/@aztec%2Fnoir-noirc_abi@4.2.0.patch",
+    "@aztec/noir-acvm_js@4.2.0": "patches/@aztec%2Fnoir-acvm_js@4.2.0.patch"
+  }
 }
