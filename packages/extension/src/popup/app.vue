@@ -10,6 +10,7 @@ import { getLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { Config } from "@/wallet/config"
 import { AccountServiceClient, AccountType } from "@/wallet/services/account/client"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
+import { E2E_PROBE_ENABLED, probe } from "@/wallet/utils/probe"
 
 /** Composables */
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
@@ -99,6 +100,9 @@ watch(
 	async () => {
 		if (!appStore.network) return
 
+		const watchStartedAt = E2E_PROBE_ENABLED ? Date.now() : 0
+		if (E2E_PROBE_ENABLED) probe("WATCH-IN", { chainId: appStore.network.chainId })
+
 		appStore.syncNetworkStatus()
 
 		// Re-fetch accounts for the new chain, and auto-create a default if
@@ -118,12 +122,15 @@ watch(
 		managers.account?.disconnect()
 		managers.account = new AccountServiceClient()
 		appStore.accounts = await managers.account.getAccounts(appStore.profile.id, appStore.network.chainId, true)
+		if (E2E_PROBE_ENABLED) probe("WATCH-AFTER-GET", { chainId: appStore.network.chainId, accountCount: appStore.accounts.length })
 		if (appStore.accounts.length === 0) {
+			if (E2E_PROBE_ENABLED) probe("WATCH-ENSURE", { chainId: appStore.network.chainId })
 			await managers.account.ensureDefaultAccount(appStore.profile.id, appStore.network.chainId, AccountType.Nulo_v1, "Account")
 			appStore.accounts = await managers.account.getAccounts(appStore.profile.id, appStore.network.chainId, true)
 		}
 		await appStore.setupActiveAccount()
 		await appStore.syncTransactions()
+		if (E2E_PROBE_ENABLED) probe("WATCH-OUT", { chainId: appStore.network.chainId, elapsedMs: Date.now() - watchStartedAt })
 	},
 )
 

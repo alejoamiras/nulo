@@ -59,6 +59,7 @@ echo "[e2e:agent] running network e2e..."
 # and vitest exits 0 with `61 skipped` — which is what hid this entire suite
 # from CI for weeks.
 E2E_REQUIRE_SETUP=1 \
+VITE_E2E_PROBE=1 \
 ANVIL_URL="$ANVIL_URL" \
 ANVIL_PORT="$ANVIL_PORT" \
 AZTEC_NODE_URL="$AZTEC_NODE_URL" \

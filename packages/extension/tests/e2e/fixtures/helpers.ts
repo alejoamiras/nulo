@@ -134,6 +134,9 @@ export async function navigateToSettings(page: Page, ...segments: string[]): Pro
  * page and tap "Set as active".
  */
 export async function switchToNetwork(page: Page, networkName: string): Promise<void> {
+	const probeEnabled = process.env.VITE_E2E_PROBE === "1"
+	const switchStartedAt = probeEnabled ? Date.now() : 0
+	if (probeEnabled) console.log(`[PROBE-TEST]${JSON.stringify({ b: "SWITCH-IN", t: Date.now(), networkName })}`)
 	// Snapshot the BEFORE state. The header text identifies the chain the
 	// popup is currently on; the activeAccount key identifies the address
 	// `setupActiveAccount` last wrote. Both are needed to disambiguate
@@ -189,6 +192,8 @@ export async function switchToNetwork(page: Page, networkName: string): Promise<
 		{ timeout: 30_000, polling: 250 },
 		networkName,
 	)
+	if (probeEnabled)
+		console.log(`[PROBE-TEST]${JSON.stringify({ b: "SWITCH-HDR", t: Date.now(), elapsedMs: Date.now() - switchStartedAt })}`)
 
 	// Then: wait for the network watcher's `setupActiveAccount` to land. On
 	// a real switch, `nulo:ui:activeAccount` flips away from `beforeAccount`
@@ -205,6 +210,8 @@ export async function switchToNetwork(page: Page, networkName: string): Promise<
 		{ timeout: 30_000, polling: 250 },
 		{ prev: beforeAccount, real: isRealSwitch },
 	)
+	if (probeEnabled)
+		console.log(`[PROBE-TEST]${JSON.stringify({ b: "SWITCH-ACTIVE", t: Date.now(), elapsedMs: Date.now() - switchStartedAt })}`)
 }
 
 /** Switch to the Local Network (chain ID 0, http://localhost:8080). */
