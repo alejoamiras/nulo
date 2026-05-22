@@ -315,13 +315,12 @@ onBeforeUnmount(() => {
 				<div :class="$style.empty_state">
 					<span :class="$style.empty_headline">NOTHING HERE YET</span>
 					<span :class="$style.empty_sub">
-						Tap
 						<button
 							type="button"
 							@click="popupStore.open('new_token')"
 							data-testid="tokens-empty-import-link"
 							:class="$style.empty_link"
-						>here</button>
+						>Tap</button>
 						to import your first token.
 					</span>
 				</div>
