@@ -4,7 +4,7 @@ What the investigation taught. Short pointers; details in the linked files.
 
 ## Outcome
 
-`bun run e2e:agent` went from **0/61 silent skips** → **62/62 actually passing**.
+`bun run e2e:agent` went from **0/61 silent skips** → **61/61 actually passing** (exit 0, ~24 min). The test count dropped from 62 → 61 because the diagnostic test (`_diag-cluster-a.test.ts`) was deleted as part of the probe-strip.
 
 Two product fixes (one race, one batch-payload alignment) plus one config-level retry budget did the work. The Tier A plan that preceded the investigation got most of the diagnosis wrong.
 

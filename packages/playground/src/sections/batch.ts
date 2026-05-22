@@ -46,10 +46,15 @@ export function bindBatch(root: HTMLElement): void {
 		"click",
 		safeBatch("batch", () => {
 			const wallet = getWallet()!
-			// Only include exempt methods (capability-map.ts:14) so this works
-			// without any granted capabilities. `getAccounts` is NOT exempt: it
-			// throws CapabilityNotGrantedError("accounts") pre-grant — pinned by
-			// meta-getAccounts-pregrant.test.ts. So this batch uses 3x getChainInfo.
+			// Only include methods that are silently dispatchable pre-grant.
+			// `getAccounts` is in EXEMPT_METHODS (capability-map.ts:14) for
+			// `enforceCapability` purposes, but `handleGetAccounts` still throws
+			// CapabilityNotGrantedError("accounts") when no accounts have been
+			// granted — pinned by meta-getAccounts-pregrant.test.ts. The batch
+			// dispatcher re-runs `dispatch()` per leg and aborts on first throw,
+			// so a single `getAccounts` leg here would error the entire batch.
+			// 3x getChainInfo keeps the test exercising the multi-leg dispatch
+			// path without touching the accounts contract.
 			// biome-ignore lint/suspicious/noExplicitAny: structural batch shape
 			return (wallet as any).batch([
 				{ name: "getChainInfo", args: [] },
@@ -63,10 +68,10 @@ export function bindBatch(root: HTMLElement): void {
 		"click",
 		safeBatch("batch", async () => {
 			const wallet = getWallet()!
-			// Silent meta (exempt) + two `basic`-bundle silent legs. `getAccounts`
-			// would throw without the `accounts` cap (see comment in batch-meta
-			// above) — so this batch uses getChainInfo + 2x getContractMetadata
-			// to stress both an exempt leg AND a contracts-gated leg.
+			// Silent meta + two `basic`-bundle silent legs. `getAccounts` pre-grant
+			// throws inside `handleGetAccounts` (see comment in batch-meta above)
+			// — so this batch uses getChainInfo + 2x getContractMetadata to stress
+			// both an exempt leg AND a contracts-gated leg.
 			// (No sendTx leg in this variant — sendTx-in-batch deserves its own
 			//  test with deeper popup choreography. See plan §3 #36.)
 			// biome-ignore lint/suspicious/noExplicitAny: structural batch shape
