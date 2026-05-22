@@ -5,7 +5,6 @@ import {
 	waitForBalance,
 	waitForTxConfirmation,
 	navigateToTokenDetail,
-	getTokenDetailBalances,
 	waitForTokenDetailBalances,
 	clickNavTab,
 } from "../fixtures/helpers"
