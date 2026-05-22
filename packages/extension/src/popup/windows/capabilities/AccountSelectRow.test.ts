@@ -33,6 +33,13 @@ describe("AccountSelectRow", () => {
 		expect(row.attributes("data-account-name")).toBe("Alpha")
 	})
 
+	test("exposes data-selected when selected so e2e helpers can be idempotent", () => {
+		const unselected = factory({ selected: false })
+		expect(unselected.find('[data-testid="cap-account-item"]').attributes("data-selected")).toBeUndefined()
+		const selected = factory({ selected: true })
+		expect(selected.find('[data-testid="cap-account-item"]').attributes("data-selected")).toBe("true")
+	})
+
 	test("renders the truncated address", () => {
 		const w = factory()
 		expect(w.text()).toContain("0x1234...cdef")

@@ -93,6 +93,14 @@ const init = async () => {
 			if (payload.value.params.availableAccounts?.length) {
 				needsAccountSelection.value = true
 				availableAccounts.value = payload.value.params.availableAccounts
+				// If exactly one account is available, pre-select it. The user
+				// still sees the row and must Approve; this just removes the
+				// extra click. `availableAccounts` is wallet-derived (not
+				// dApp-supplied), so there's no path for a malicious dApp to
+				// inject a phantom account here.
+				if (availableAccounts.value.length === 1) {
+					selectedAccounts.value = [...availableAccounts.value]
+				}
 			} else {
 				const { openToast } = useToast()
 				openToast({ label: "No accounts available for this network. Create one first.", icon: "info" }, TOAST_DURATION.LONG)
