@@ -118,7 +118,6 @@ import { ExecutionCoordinator } from "./execution-coordinator"
 import { type Aliased, ContractInitializationStatus } from "@aztec/aztec.js/wallet"
 import { rehydrateOptimizablePrefix, runFastPath } from "./fast-path"
 import type { PackedPrivateEvent } from "@aztec/pxe/client/bundle"
-import { E2E_PROBE_ENABLED, probe } from "@/wallet/utils/probe"
 
 export * from "./spec"
 
@@ -874,8 +873,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 			const traceId = crypto.randomUUID().slice(0, 8)
 			this.logDebug(`[${traceId}] executeOperations: starting ${operation.kind}`)
-			const execStartedAt = E2E_PROBE_ENABLED ? Date.now() : 0
-			if (E2E_PROBE_ENABLED) probe("EXEC-IN", { kind: operation.kind, traceId })
 
 			const content = new ExecuteOperationContent(operation.kind, this.planner.extractPrimaryMethod(operation))
 			const operationTask = parentTask ? parentTask.startSubtask(content) : this.taskService.startNewTask(content, undefined, origin)
@@ -970,9 +967,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				}
 				operationTask.complete()
 				this.logDebug(`[${traceId}] executeOperations: ${operation.kind} completed`)
-				if (E2E_PROBE_ENABLED) {
-					probe("EXEC-OUT", { kind: operation.kind, traceId, status: "ok", elapsedMs: Date.now() - execStartedAt })
-				}
 				results.push({ status: "ok", result })
 			} catch (error) {
 				const classified = classifyOperationCatch(error, operationTask, getErrorMessage)
@@ -980,14 +974,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 					this.logInfo(`[${traceId}] executeOperations: ${operation.kind} cancelled by user`)
 				} else {
 					this.logError(`[${traceId}] executeOperations: ${operation.kind} failed:`, classified.error)
-				}
-				if (E2E_PROBE_ENABLED) {
-					probe("EXEC-OUT", {
-						kind: operation.kind,
-						traceId,
-						status: classified.status,
-						elapsedMs: Date.now() - execStartedAt,
-					})
 				}
 				results.push(classified)
 			}

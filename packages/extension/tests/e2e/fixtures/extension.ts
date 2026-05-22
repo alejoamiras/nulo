@@ -57,30 +57,6 @@ export async function launchExtension(): Promise<ExtensionContext> {
 	)
 	const extensionId = new URL(workerTarget.url()).hostname
 
-	// Forward SW console output ([PROBE...] lines) to vitest stdout so the
-	// e2e-full-network-recovery probe traces are visible in the run output.
-	// Puppeteer's WebWorker class doesn't expose a console listener, so we
-	// attach a raw CDP session and listen to Runtime.consoleAPICalled.
-	// Gated on VITE_E2E_PROBE=1 to avoid noise in normal smoke runs.
-	if (process.env.VITE_E2E_PROBE === "1") {
-		try {
-			const cdp = await workerTarget.createCDPSession()
-			await cdp.send("Runtime.enable")
-			// biome-ignore lint/suspicious/noExplicitAny: CDP event payload shape isn't strictly typed in puppeteer
-			cdp.on("Runtime.consoleAPICalled", (evt: any) => {
-				const args = evt?.args
-				if (!Array.isArray(args) || args.length === 0) return
-				const first = args[0]
-				const text = typeof first?.value === "string" ? first.value : ""
-				if (text.startsWith("[PROBE")) {
-					console.log(`[SW]${text}`)
-				}
-			})
-		} catch {
-			// best-effort — don't fail the fixture if probe capture wiring breaks
-		}
-	}
-
 	// Wait for SW to fully initialize (liveness signal in chrome.storage.session).
 	// runtime.ts writes the first liveness immediately after initWalletSdkHandler;
 	// 30s timeout matches the helper in sw-resilience.test.ts and gives headroom
@@ -145,10 +121,6 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	page.on("console", (msg: ConsoleMessage) => {
 		if (msg.type() === "error") {
 			ctx.consoleErrors.push(msg.text())
-		}
-		const text = msg.text()
-		if (text.startsWith("[PROBE")) {
-			console.log(`[PAGE]${text}`)
 		}
 	})
 	page.on("pageerror", (err: Error) => {
@@ -785,10 +757,6 @@ async function openPopupOnce(ctx: ExtensionContext): Promise<Page> {
 	page.on("console", (msg: ConsoleMessage) => {
 		if (msg.type() === "error") {
 			ctx.consoleErrors.push(msg.text())
-		}
-		const text = msg.text()
-		if (text.startsWith("[PROBE")) {
-			console.log(`[PAGE]${text}`)
 		}
 	})
 

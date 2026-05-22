@@ -9,7 +9,6 @@ import { EntityStorage } from "@/wallet/storage"
 import { array_max, hasIntersectionByKeys } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { NuloAccount, type IAccountContract } from "@nulo/aztec-runtime/account"
-import { E2E_PROBE_ENABLED, probe } from "@/wallet/utils/probe"
 import { ACCOUNT_SERVICE_NAME, AccountType, type Account, type Events, type Methods } from "./spec"
 
 export * from "./spec"
@@ -78,19 +77,13 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	 */
 	public async ensureDefaultAccount(profileId: string, chainId: number, type: AccountType, name: string): Promise<Account> {
 		await this.ensureInitialized()
-		const ensureStartedAt = E2E_PROBE_ENABLED ? Date.now() : 0
-		if (E2E_PROBE_ENABLED) probe("ACCT-ENSURE-IN", { chainId, type })
-		const result = await this.serializePerTuple(profileId, chainId, type, async () => {
+		return this.serializePerTuple(profileId, chainId, type, async () => {
 			const existing = (await this.storage.getValues()).filter((x) => x.profileId === profileId && x.chainId === chainId)
 			if (existing.length > 0) {
-				if (E2E_PROBE_ENABLED) probe("ACCT-ENSURE-HIT", { chainId, existingCount: existing.length })
 				return existing.sort((a, b) => a.index - b.index)[0]!
 			}
-			if (E2E_PROBE_ENABLED) probe("ACCT-ENSURE-CREATE", { chainId })
 			return this.createAccountInternal(profileId, chainId, type, name)
 		})
-		if (E2E_PROBE_ENABLED) probe("ACCT-ENSURE-OUT", { chainId, elapsedMs: Date.now() - ensureStartedAt })
-		return result
 	}
 
 	private async createAccountInternal(profileId: string, chainId: number, type: AccountType, name: string): Promise<Account> {
@@ -100,10 +93,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		if (type !== AccountType.Nulo_v1) {
 			throw new Error("unsupported account type")
 		}
-		const accountNewStartedAt = E2E_PROBE_ENABLED ? Date.now() : 0
-		if (E2E_PROBE_ENABLED) probe("ACCOUNT-NEW-IN", { chainId })
 		const address = (await NuloAccount.new(secret, this.logger)).address.toString()
-		if (E2E_PROBE_ENABLED) probe("ACCOUNT-NEW-OUT", { chainId, elapsedMs: Date.now() - accountNewStartedAt })
 		const account: Account = {
 			profileId,
 			chainId,

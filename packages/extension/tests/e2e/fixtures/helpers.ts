@@ -1,6 +1,3 @@
-import { appendFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import type { Page } from "puppeteer"
 import { clickByTestId, clickSelector, replaceInputValue } from "./extension"
 
@@ -21,51 +18,6 @@ import { clickByTestId, clickSelector, replaceInputValue } from "./extension"
  */
 
 const TEST_PASSWORD = "TestPassword123!"
-
-// ── Diagnostic probes (e2e-full-network-recovery) ──────────────────────────
-
-/**
- * Read all probe records written to chrome.storage.local during the test,
- * dump them as one-record-per-line JSON to a tmpfile and clear the keys.
- *
- * vitest's default reporter SUPPRESSES console.log output from passing tests
- * (the output only surfaces on failure). To get a deterministic trace
- * regardless of pass/fail, we append directly to a file at
- * `$TMPDIR/nulo-probes-<runid>.jsonl`. Caller can `cat` it after the run.
- *
- * The runid is `process.env.NULO_PROBE_RUN_ID` if set (agent.sh export),
- * else falls back to the current PID.
- */
-export async function dumpProbes(page: Page, label = "probes"): Promise<void> {
-	if (process.env.VITE_E2E_PROBE !== "1") return
-	const runId = process.env.NULO_PROBE_RUN_ID ?? String(process.pid)
-	const path = join(tmpdir(), `nulo-probes-${runId}.jsonl`)
-	try {
-		const probes = (await page.evaluate(async () => {
-			const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
-			const records: unknown[] = []
-			const keys: string[] = []
-			for (const k of Object.keys(all)) {
-				if (k.startsWith("nulo:probe:")) {
-					records.push(all[k])
-					keys.push(k)
-				}
-			}
-			if (keys.length > 0) await chrome.storage.local.remove(keys)
-			return records
-		})) as Array<{ t?: number } & Record<string, unknown>>
-		probes.sort((a, b) => (a?.t ?? 0) - (b?.t ?? 0))
-		// One header + one record-per-line so the file is grep-friendly.
-		appendFileSync(path, `# ${new Date().toISOString()} label=${label} count=${probes.length}\n`)
-		for (const p of probes) {
-			appendFileSync(path, `${JSON.stringify(p)}\n`)
-		}
-		// ALSO emit to stderr so failing tests surface the file location.
-		process.stderr.write(`[DUMP-${label}] wrote ${probes.length} records to ${path}\n`)
-	} catch (err) {
-		process.stderr.write(`[DUMP-${label}] FAILED: ${err instanceof Error ? err.message : String(err)}\n`)
-	}
-}
 
 /**
  * Pinned workaround for a wallet bug: the simulate→prove pipeline doesn't
@@ -182,20 +134,6 @@ export async function navigateToSettings(page: Page, ...segments: string[]): Pro
  * page and tap "Set as active".
  */
 export async function switchToNetwork(page: Page, networkName: string): Promise<void> {
-	const probeEnabled = process.env.VITE_E2E_PROBE === "1"
-	const switchStartedAt = probeEnabled ? Date.now() : 0
-	if (probeEnabled) console.log(`[PROBE-TEST]${JSON.stringify({ b: "SWITCH-IN", t: Date.now(), networkName })}`)
-	try {
-		await switchToNetworkInner(page, networkName, switchStartedAt, probeEnabled)
-	} catch (err) {
-		// Dump probes on failure so we can see what the wallet-side trace
-		// looked like up to the hang point.
-		if (probeEnabled) await dumpProbes(page, `switch-fail-${networkName.replace(/\s+/g, "-")}`)
-		throw err
-	}
-}
-
-async function switchToNetworkInner(page: Page, networkName: string, switchStartedAt: number, probeEnabled: boolean): Promise<void> {
 	// Snapshot the BEFORE state. The header text identifies the chain the
 	// popup is currently on; the activeAccount key identifies the address
 	// `setupActiveAccount` last wrote. Both are needed to disambiguate
@@ -251,8 +189,6 @@ async function switchToNetworkInner(page: Page, networkName: string, switchStart
 		{ timeout: 30_000, polling: 250 },
 		networkName,
 	)
-	if (probeEnabled)
-		console.log(`[PROBE-TEST]${JSON.stringify({ b: "SWITCH-HDR", t: Date.now(), elapsedMs: Date.now() - switchStartedAt })}`)
 
 	// Then: wait for the network watcher's `setupActiveAccount` to land. On
 	// a real switch, `nulo:ui:activeAccount` flips away from `beforeAccount`
@@ -269,8 +205,6 @@ async function switchToNetworkInner(page: Page, networkName: string, switchStart
 		{ timeout: 30_000, polling: 250 },
 		{ prev: beforeAccount, real: isRealSwitch },
 	)
-	if (probeEnabled)
-		console.log(`[PROBE-TEST]${JSON.stringify({ b: "SWITCH-ACTIVE", t: Date.now(), elapsedMs: Date.now() - switchStartedAt })}`)
 }
 
 /** Switch to the Local Network (chain ID 0, http://localhost:8080). */

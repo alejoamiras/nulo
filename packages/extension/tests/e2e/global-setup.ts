@@ -349,10 +349,6 @@ export default async function setup(project: TestProject) {
 					...process.env,
 					NODE_ENV: "test",
 					VITE_DISABLE_HMR: "1",
-					// Mirror the wallet build's probe gate so the playground bundle
-					// also emits diagnostic probes during the e2e investigation.
-					// See implementations-plan/e2e-full-network-recovery/plan.md §4.2.
-					VITE_E2E_PROBE: "1",
 					PLAYGROUND_PORT: String(PLAYGROUND_PORT),
 				},
 			})

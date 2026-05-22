@@ -18,17 +18,6 @@ import { consoleMethods, LoggerStore, LogLevel } from "./logger"
 import { createWalletRuntime } from "./runtime"
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { openOrFocusOnboardingTab } from "./utils/onboarding-tab"
-import { E2E_PROBE_ENABLED, probe } from "./utils/probe"
-
-// SW-LIFECYCLE probes — fire on every SW lifecycle event so the H2 hypothesis
-// (activeSessions lost on SW restart between handshake and 2nd RPC) becomes
-// directly observable from probe traces. See plan §4 #16.
-if (E2E_PROBE_ENABLED) {
-	probe("SW-LIFECYCLE", { event: "boot" })
-	chrome.runtime.onStartup.addListener(() => probe("SW-LIFECYCLE", { event: "onStartup" }))
-	chrome.runtime.onSuspend.addListener(() => probe("SW-LIFECYCLE", { event: "onSuspend" }))
-	chrome.runtime.onSuspendCanceled.addListener(() => probe("SW-LIFECYCLE", { event: "onSuspendCanceled" }))
-}
 
 // MV3: onInstalled fires once, synchronously, when the SW boots after install.
 // Late addListener calls miss the historic event. Register at top level BEFORE

@@ -27,11 +27,8 @@ ANVIL_URL=$(jq -r .anvilUrl "$PORTS_JSON")
 AZTEC_NODE_URL=$(jq -r .aztecUrl "$PORTS_JSON")
 PLAYGROUND_URL=$(jq -r .playgroundUrl "$PORTS_JSON")
 
-# VITE_E2E_PROBE turns on the diagnostic probe call-sites for the network-
-# recovery investigation. See implementations-plan/e2e-full-network-recovery/plan.md.
-# Off by default in prod; the bundle-grep below verifies probes don't leak.
-echo "[e2e:agent] building wallet with VITE_LOCAL_NETWORK_RPC_URL=$AZTEC_NODE_URL VITE_E2E_PROBE=1"
-VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" VITE_E2E_PROBE=1 bun run build:chrome
+echo "[e2e:agent] building wallet with VITE_LOCAL_NETWORK_RPC_URL=$AZTEC_NODE_URL"
+VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" bun run build:chrome
 
 # Bundle assertion — if the URL didn't actually land in dist, abort before the
 # tests waste cycles. This catches the silent failure mode where vi.stubEnv-
@@ -43,13 +40,6 @@ if ! grep -rq "$AZTEC_NODE_URL" dist/chrome 2>/dev/null; then
 fi
 echo "[e2e:agent] bundle contains $AZTEC_NODE_URL ✓"
 
-# E2E_PROBE assertion — the probe call-sites should be present in the e2e
-# build (we WANT them on here). The inverse check (probes absent in a
-# non-probe build) lives in CI as a separate workflow step.
-if ! grep -rq '\[PROBE\]' dist/chrome 2>/dev/null; then
-  echo "[e2e:agent] WARN: built bundle does not contain probe call-sites; investigation will yield no data." >&2
-fi
-
 echo "[e2e:agent] running network e2e..."
 # `E2E_REQUIRE_SETUP=1` tells `tests/e2e/global-setup.ts` that this is the
 # real agent runner (not a contributor running vitest directly without a
@@ -59,7 +49,6 @@ echo "[e2e:agent] running network e2e..."
 # and vitest exits 0 with `61 skipped` — which is what hid this entire suite
 # from CI for weeks.
 E2E_REQUIRE_SETUP=1 \
-VITE_E2E_PROBE=1 \
 ANVIL_URL="$ANVIL_URL" \
 ANVIL_PORT="$ANVIL_PORT" \
 AZTEC_NODE_URL="$AZTEC_NODE_URL" \

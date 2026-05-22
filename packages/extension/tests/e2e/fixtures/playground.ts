@@ -27,15 +27,6 @@ export const PLAYGROUND_TEST_URL = (() => {
 export async function openPlayground(ctx: ExtensionContext): Promise<Page> {
 	const page = await ctx.browser.newPage()
 	patchPagePolling(page)
-	// Forward playground probe lines to vitest stdout (gated on VITE_E2E_PROBE).
-	if (process.env.VITE_E2E_PROBE === "1") {
-		page.on("console", (msg) => {
-			const text = msg.text()
-			if (text.startsWith("[PROBE")) {
-				console.log(`[PG]${text}`)
-			}
-		})
-	}
 	const url = PLAYGROUND_TEST_URL.endsWith("/") ? `${PLAYGROUND_TEST_URL}?test=1` : `${PLAYGROUND_TEST_URL}/?test=1`
 	await page.goto(url, { waitUntil: "domcontentloaded" })
 	await page.waitForSelector('[data-testid="pg-status"]', { timeout: 10_000 })
