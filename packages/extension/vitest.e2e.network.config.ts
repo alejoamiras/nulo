@@ -29,6 +29,15 @@ export default defineConfig({
 		// Confirmed via diagnostic test in implementations-plan/e2e-full-network-recovery/findings.md.
 		pool: "forks",
 		isolate: true,
+		// One default retry across all network tests. The network suite runs
+		// 40+ files against a single long-lived anvil+aztec sandbox; under
+		// cumulative load the puppeteer 15s target-wait inside waitForPopup
+		// occasionally drops with a generic `Timed out after waiting 15000ms`
+		// (see "rotating flake" pattern in implementations-plan/network-test-triage/
+		// full-suite-findings.md). Per-test retry: N overrides this if a
+		// specific test needs a different budget (e.g. concurrency-rapid-fire
+		// uses retry: 2).
+		retry: 1,
 		// Node v24 enforces JSON import attributes; @aztec/accounts imports JSON without them.
 		// Use the unstable loader to relax this check in the global setup process.
 		server: {
