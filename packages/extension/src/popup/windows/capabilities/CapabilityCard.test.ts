@@ -48,9 +48,33 @@ describe("CapabilityCard", () => {
 		expect(w.text()).toContain("MyDesc")
 	})
 
-	test("renders the risk text", () => {
-		const w = factory({ risk: "low" })
-		expect(w.text()).toContain("low")
+	test("renders the risk word in uppercase", () => {
+		expect(factory({ risk: "low" }).text()).toContain("LOW")
+		expect(factory({ risk: "medium" }).text()).toContain("MED")
+		expect(factory({ risk: "high" }).text()).toContain("HIGH")
+	})
+
+	test("exposes data-cap-risk as the authoritative selector for e2e + screenshots", () => {
+		const w = factory({ risk: "medium" })
+		const tag = w.find("[data-cap-risk]")
+		expect(tag.exists()).toBe(true)
+		expect(tag.attributes("data-cap-risk")).toBe("medium")
+	})
+
+	test("renders the risk glyph next to the word", () => {
+		// Glyphs are wallet-controlled (the wire `risk` field doesn't exist).
+		// Pin the mapping so a future copy edit can't accidentally swap glyphs.
+		expect(factory({ risk: "high" }).text()).toContain("▲")
+		expect(factory({ risk: "medium" }).text()).toContain("●")
+		expect(factory({ risk: "low" }).text()).toContain("—")
+	})
+
+	test("checkbox uses neutral 'primary' color when checked, not semantic green", () => {
+		// Phase 2: drop the saturated green check; checkbox stays brutalist mono.
+		const w = factory({ selected: true })
+		const check = w.find('i[data-name="check-circle"]')
+		expect(check.exists()).toBe(true)
+		expect(check.attributes("data-color")).toBe("primary")
 	})
 
 	test("re-requested badge appears when reRequested=true", () => {

@@ -5,7 +5,7 @@
  *
  * - `granted=false` (the "new" delta variant) — toggleable via the
  *   leading checkbox; head is fully clickable to expand the detail
- *   panel; risk chip + chevron sit on the right; an optional
+ *   panel; risk tag + chevron sit on the right; an optional
  *   "previously denied" badge surfaces re-requests.
  * - `granted=true` — readonly with a static check icon; chevron
  *   toggles expansion only.
@@ -14,6 +14,10 @@
  * `toggleSelected` (head checkbox) and `toggleExpanded` (head body or
  * chevron) so the parent can drive `capabilities[i].selected` and the
  * `expandedCards` set.
+ *
+ * Risk visual is mono uppercase + glyph (no semantic color). Targeted
+ * orange accents are reserved for the warning badges (PREVIOUSLY DENIED)
+ * so the user's eye lands on a warning, not on risk severity.
  */
 import CapabilityDetailPanel from "@/components/composite/capabilities/CapabilityDetailPanel.vue"
 import type { Capability } from "@nulo/wallet-bridge"
@@ -32,6 +36,23 @@ defineProps<{
 }>()
 
 const emit = defineEmits(["toggleExpanded", "toggleSelected"])
+
+/**
+ * Mono glyphs for the risk indicator. `—` (em-dash) reads as a quiet
+ * negation for LOW; `●` (black circle) is a neutral pip for MED;
+ * `▲` (black up triangle) is a soft alert for HIGH. All three live in
+ * the same geometric weight at 10px in `var(--font-mono)`.
+ */
+function riskGlyph(r: CapabilityRisk): string {
+	if (r === "high") return "▲"
+	if (r === "medium") return "●"
+	return "—"
+}
+
+function riskWord(r: CapabilityRisk): string {
+	if (r === "medium") return "MED"
+	return r.toUpperCase()
+}
 </script>
 
 <template>
@@ -56,7 +77,7 @@ const emit = defineEmits(["toggleExpanded", "toggleSelected"])
 				@click.stop="emit('toggleSelected')"
 				:class="$style.checkbox_hit"
 			>
-				<Icon v-if="selected" name="check-circle" size="16" color="green" />
+				<Icon v-if="selected" name="check-circle" size="16" color="primary" />
 				<Icon v-else name="circle" size="16" color="secondary" />
 			</Flex>
 
@@ -64,18 +85,15 @@ const emit = defineEmits(["toggleExpanded", "toggleSelected"])
 				<Flex align="center" justify="between" gap="8">
 					<Flex align="center" gap="6">
 						<Text size="14" weight="600" color="primary">{{ label }}</Text>
-						<span v-if="reRequested" data-testid="cap-rerequested-badge" :class="$style.denied_badge">
+						<span v-if="reRequested" data-testid="cap-rerequested-badge" :class="$style.warning_badge">
 							previously denied
 						</span>
 					</Flex>
 					<Flex align="center" gap="6">
-						<Text
-							size="11"
-							weight="600"
-							:color="risk === 'high' ? 'red' : risk === 'medium' ? 'yellow' : 'green'"
-						>
-							{{ risk }}
-						</Text>
+						<span :class="$style.risk_tag" :data-cap-risk="risk">
+							<span :class="$style.risk_glyph">{{ riskGlyph(risk) }}</span>
+							{{ riskWord(risk) }}
+						</span>
 						<Icon
 							name="chevron"
 							size="12"
@@ -164,8 +182,38 @@ const emit = defineEmits(["toggleExpanded", "toggleSelected"])
 	cursor: pointer;
 }
 
-.denied_badge {
+/**
+ * Risk tag — mono uppercase, no fill, no semantic color. Glyph + word
+ * carry the signal at the family's quiet tag rhythm (compare
+ * AccountSelectRow's chain_label + alias_label).
+ */
+.risk_tag {
+	flex-shrink: 0;
+
+	display: inline-flex;
+	align-items: center;
+
+	font-family: var(--font-mono);
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	color: var(--nulo-secondary);
+	white-space: nowrap;
+}
+
+.risk_glyph {
+	padding-right: 4px;
+}
+
+/**
+ * Warning badge — used for PREVIOUSLY DENIED today; Phase 4 will reuse
+ * the same class for the UNRECOGNIZED chip. Orange border on transparent
+ * fill matches the family's targeted-warning treatment (verify popup's
+ * IDN-warning, signer strip's MIXED tag) while staying brutalist.
+ */
+.warning_badge {
 	padding: 1px 6px;
+	border: 1px solid var(--orange);
 
 	font-family: var(--font-mono);
 	font-size: 10px;
@@ -173,7 +221,7 @@ const emit = defineEmits(["toggleExpanded", "toggleSelected"])
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
 	color: var(--orange);
-	background: rgba(255, 170, 0, 0.12);
+	background: transparent;
 	white-space: nowrap;
 }
 </style>
