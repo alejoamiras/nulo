@@ -54,6 +54,8 @@ declare module 'vue' {
     PopupHeader: typeof import('./../components/ui/Popup/PopupHeader.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    ScopeAddress: typeof import('./../components/ScopeAddress.vue')['default']
+    ScopeClassId: typeof import('./../components/ScopeClassId.vue')['default']
     SecretCountdownClose: typeof import('./../components/composite/SecretCountdownClose.vue')['default']
     SecretExportLayout: typeof import('./../components/composite/SecretExportLayout.vue')['default']
     SecretRevealCard: typeof import('./../components/composite/SecretRevealCard.vue')['default']

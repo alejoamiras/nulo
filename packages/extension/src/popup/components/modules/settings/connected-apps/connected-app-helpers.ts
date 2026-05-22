@@ -2,17 +2,13 @@
 // .vue call sites that already import it without types.
 import { DateTime } from "luxon"
 
-export const CAPABILITY_LABELS: Record<string, string> = {
-	accounts: "Share accounts",
-	contracts: "Register and query contracts",
-	contractClasses: "Query contract classes",
-	simulation: "Simulate transactions",
-	transaction: "Send transactions",
-	data: "Access private data",
-}
+import { getSafeDisplay } from "@/wallet/services/dapp-session/capability-meta"
 
 export function getCapabilityLabel(type: string): string {
-	return CAPABILITY_LABELS[type] ?? type
+	// Route through getSafeDisplay so unknown wire types render as the
+	// constant "Unknown permission" — codex post-impl §5 caught that the
+	// settings surfaces were still leaking the raw cap.type label.
+	return getSafeDisplay(type).label
 }
 
 export function formatSessionExpiry(expiryMs: number | undefined): string {
