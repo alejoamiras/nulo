@@ -184,6 +184,12 @@ export class JournalReaper {
 			let kind: string
 			if (stage === "proving") {
 				kind = unconditional ? "sw_restart_post_prove" : "stuck_proving"
+			} else if (stage === "queued") {
+				// Plan §14: queued records that exceed their grace window are
+				// "stuck" rather than "stale-on-resume" — they never made it
+				// past the message-arrival surface (background.ts somehow lost
+				// the handler). Tagged distinctly for observability.
+				kind = "stuck_queued"
 			} else {
 				kind = "stale_on_resume"
 			}

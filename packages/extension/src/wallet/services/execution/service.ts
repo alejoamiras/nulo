@@ -1263,6 +1263,16 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// write and this set(). cancelJob() reads activeControllers to find
 		// a controller to abort; if it lands during this microtask window,
 		// it would find no controller. The next sync line closes the gap.
+		//
+		// The OTHER side of this invariant lives in cancelJob → transitionOperation
+		// → `_transitionLocked` (operation-journal/service.ts). That path has
+		// its own awaits BEFORE it calls `controller.abort()`, which yields
+		// the microtask back to us so we get a chance to set the controller
+		// before any cancel-side abort lands. This is correctness-by-microtask-
+		// interleaving and is fragile against future refactors of either side
+		// (opus post-impl F5). If you refactor `_transitionLocked` to remove
+		// its awaits, OR introduce an await between this line and the calling
+		// site's first `checkCancelled()`, re-verify the race.
 		const controller = new AbortController()
 		this.activeControllers.set(queuedId, controller)
 		return { journalId: queuedId, controller }
@@ -1973,6 +1983,13 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const checkCancelled = (): void => {
 			if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
 		}
+		// Immediately after claim — opus post-impl F2 catch. A user-cancel that
+		// landed during the await-chain INSIDE the claim helper (e.g. between
+		// the journal mutex acquisition and the controller.set call) would have
+		// set the abort signal. Surface it here BEFORE the planner /
+		// authwit-discovery work runs, so we don't do side-effecting PXE work
+		// for a cancelled request.
+		checkCancelled()
 
 		try {
 			if (op.accountAddress !== op.opts?.from?.toString()) {
@@ -2090,6 +2107,10 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const checkCancelled = (): void => {
 			if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
 		}
+		// Mirror of opus F2 fix in executeAztecSendTx — surface an abort that
+		// landed during the claim's await chain BEFORE we start side-effecting
+		// PXE work.
+		checkCancelled()
 
 		try {
 			await this.markJournal(journalId, { stage: "simulating" })

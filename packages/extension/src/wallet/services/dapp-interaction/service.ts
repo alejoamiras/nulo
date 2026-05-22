@@ -7,6 +7,8 @@ import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
 import { DappSessionService, AccessLevel, type DappSession } from "@/wallet/services/dapp-session/service"
 import { ExecutionService, type Operation, type OperationKind } from "@/wallet/services/execution/service"
+import { OperationJournalService } from "@/wallet/services/operation-journal/service"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { OriginType, type LocalTxOrigin } from "@/wallet/services/transaction/service"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import type { WindowManager } from "@/wallet/services/window-manager/window-manager"
@@ -57,6 +59,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 	private accountService: AccountService = null!
 	private dappSessionService: DappSessionService = null!
 	private executionService: ExecutionService = null!
+	private operationJournal: OperationJournalService = null!
 
 	public constructor(
 		logger: ILogger,
@@ -71,6 +74,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		this.accountService = services.get(AccountService.name)
 		this.dappSessionService = services.get(DappSessionService.name)
 		this.executionService = services.get(ExecutionService.name)
+		this.operationJournal = services.get(OperationJournalService.name)
 	}
 
 	public async getInteractionPayload(id: string): Promise<ExecutionPayload | CapabilityPayload | DiscoveryPayload> {
@@ -144,6 +148,24 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		await this.ensureInitialized()
 		const session = await this.validateSession(params)
 		const payload: ExecutionPayload = { params, session }
+
+		// Cancel-before-claim short-circuit (codex F2 / post-impl review):
+		// If the user cancelled this sendTx while it was queued, the journal
+		// record is now at stage `cancelled`. Throw the cancelled-pipeline
+		// error directly so the popup never opens — without this, the user
+		// would see an approval popup for a request they already cancelled.
+		// Reads the journal AS THE SOURCE OF TRUTH; the journal mutex on
+		// `transitionOperation` ensures we see a consistent stage.
+		if (hooks?.queuedJournalId) {
+			const queuedRec = await this.operationJournal.getOperation(hooks.queuedJournalId).catch(() => null)
+			if (queuedRec && queuedRec.progress?.stage !== "queued") {
+				this.logInfo(
+					`execute: queued record ${hooks.queuedJournalId} is ${queuedRec.progress?.stage}; short-circuiting before popup`,
+				)
+				throw new JobCancelledError("Request was cancelled before approval")
+			}
+		}
+
 		if (!(await this.isConfirmationNeeded(payload))) {
 			return await this.silentInteraction(payload, hooks)
 		}

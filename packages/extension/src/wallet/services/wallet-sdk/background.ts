@@ -38,7 +38,7 @@ import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
 import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { DiscoveryQueue, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
-import { jsonStringify, getErrorMessage } from "@nulo/wallet-core/utils"
+import { jsonStringify, getErrorMessage, Lock } from "@nulo/wallet-core/utils"
 import type { CaipAccount } from "@/wallet/services/dapp-interaction/spec"
 import { parseCaipAccount, resolveNetworkByChainId } from "@/wallet/utils/caip"
 import type { ILogger } from "@/wallet/logger"
@@ -614,6 +614,19 @@ const MAX_QUEUED_PER_SESSION = 8
 const MAX_QUEUED_GLOBAL = 32
 
 /**
+ * Module-level lock around the `countOperations + createOperation` section
+ * of `tryCreateQueuedJournal`. Without this, two concurrent `onWalletMessage`
+ * invocations both read the same count, both pass the cap check, and both
+ * create records — making the per-session / global caps advisory rather
+ * than protective. Codex + opus post-impl reviews flagged this as F1.
+ *
+ * Held briefly (~1ms — one count + one storage write per acquisition); the
+ * worst case is N concurrent message arrivals serializing here. Bounds
+ * journal-storage growth under burst floods.
+ */
+const queuedCreationLock = new Lock("wallet-sdk-bg:queued-creation")
+
+/**
  * Create a journal record at `queued` stage so the activity feed surfaces
  * an incoming sendTx the moment it arrives — BEFORE the per-session FIFO
  * lets the handler open the approval popup.
@@ -626,6 +639,10 @@ const MAX_QUEUED_GLOBAL = 32
  * Cheap pre-auth gates: skip queued visibility when there's no active
  * profile, no dapp session, or no sendTx capability grant. Avoids
  * surfacing requests that the handler will reject anyway.
+ *
+ * Cap enforcement is atomic: the count-then-create section runs under
+ * `queuedCreationLock` so concurrent arrivals can't all see a stale
+ * "below cap" count and over-create.
  */
 async function tryCreateQueuedJournal(
 	message: WalletMessage,
@@ -659,38 +676,45 @@ async function tryCreateQueuedJournal(
 		const network = await resolveNetworkByChainId(networkSvc, chainId)
 		if (!network) return undefined
 
-		// Caps — DoS protection (codex round-3 + round-4 T1).
-		const sessionQueuedCount = await journal.countOperations({
-			sessionId: session.sessionId,
-			stage: "queued",
-		})
-		if (sessionQueuedCount >= MAX_QUEUED_PER_SESSION) {
-			logger.log(
-				"wallet-sdk-bg",
-				LogLevel.Debug,
-				`Per-session queued cap reached for ${session.sessionId}; skipping queued visibility`,
-			)
-			return undefined
-		}
-		const globalQueuedCount = await journal.countOperations({ stage: "queued" })
-		if (globalQueuedCount >= MAX_QUEUED_GLOBAL) {
-			logger.log("wallet-sdk-bg", LogLevel.Warn, `Global queued cap reached (${MAX_QUEUED_GLOBAL}); skipping queued visibility`)
-			return undefined
-		}
+		// Critical section: cap check + record create must be atomic.
+		// Otherwise N concurrent arrivals all see a stale "below cap" count
+		// and over-create. Codex F1 / Opus F1.
+		await queuedCreationLock.enter()
+		try {
+			const sessionQueuedCount = await journal.countOperations({
+				sessionId: session.sessionId,
+				stage: "queued",
+			})
+			if (sessionQueuedCount >= MAX_QUEUED_PER_SESSION) {
+				logger.log(
+					"wallet-sdk-bg",
+					LogLevel.Debug,
+					`Per-session queued cap reached for ${session.sessionId}; skipping queued visibility`,
+				)
+				return undefined
+			}
+			const globalQueuedCount = await journal.countOperations({ stage: "queued" })
+			if (globalQueuedCount >= MAX_QUEUED_GLOBAL) {
+				logger.log("wallet-sdk-bg", LogLevel.Warn, `Global queued cap reached (${MAX_QUEUED_GLOBAL}); skipping queued visibility`)
+				return undefined
+			}
 
-		const primaryMethod = extractPrimaryMethodFromSendTx(message)
-		const record = await journal.createOperation({
-			kind: "dapp_execute",
-			origin: "dapp",
-			profileId: activeProfile.id,
-			sessionId: session.sessionId,
-			accountAddress,
-			networkId: network.id,
-			title: primaryMethod ?? "Transaction",
-			subtitle: session.origin,
-			initialStage: { stage: "queued" },
-		})
-		return record.id
+			const primaryMethod = extractPrimaryMethodFromSendTx(message)
+			const record = await journal.createOperation({
+				kind: "dapp_execute",
+				origin: "dapp",
+				profileId: activeProfile.id,
+				sessionId: session.sessionId,
+				accountAddress,
+				networkId: network.id,
+				title: primaryMethod ?? "Transaction",
+				subtitle: session.origin,
+				initialStage: { stage: "queued" },
+			})
+			return record.id
+		} finally {
+			queuedCreationLock.leave()
+		}
 	} catch (error) {
 		logger.log("wallet-sdk-bg", LogLevel.Warn, `tryCreateQueuedJournal failed: ${getErrorMessage(error)}`)
 		return undefined
