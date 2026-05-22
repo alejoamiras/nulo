@@ -4,12 +4,9 @@ import { navigateToSettings, waitForToast } from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
-// biome-ignore lint/correctness/noUnusedVariables: kept for un-skip — restore `test.skipIf(!hasConfig)` when cluster A is fixed.
 const hasConfig = aztecConfig !== undefined
 
-// SKIP: cluster A (tokenReadyExtension importToken cascade).
-// See implementations-plan/network-test-triage/plan.md — un-skip on cluster fix.
-test.skip("delete imported token from settings", { timeout: 120_000 }, async ({ tokenReadyExtension }) => {
+test.skipIf(!hasConfig)("delete imported token from settings", { timeout: 120_000 }, async ({ tokenReadyExtension }) => {
 	const page = await openPopup(tokenReadyExtension)
 	await waitForHash(page, "#/popup/general")
 

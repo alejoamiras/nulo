@@ -4,15 +4,12 @@ import { PXE_ANCHOR_SYNC_WORKAROUND_MS, sendTransfer, selectFeeMethod, setActive
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
-// biome-ignore lint/correctness/noUnusedVariables: kept for un-skip — restore `test.skipIf(!hasConfig)` when clusters A+B are fixed.
 const hasConfig = aztecConfig !== undefined
 
 // Fee method tests use separate fixtures from transfer tests.
 // Each test verifies a different fee payment method via the FeeSettingsCard UI.
 
-// SKIP: clusters A+B (tokenReadyExtension importToken cascade + feeJuiceImportedExtension cascade).
-// See implementations-plan/network-test-triage/plan.md — un-skip on cluster fix.
-test.skip("sponsored FPC is default fee method", { timeout: 180_000 }, async ({ tokenReadyExtension }) => {
+test.skipIf(!hasConfig)("sponsored FPC is default fee method", { timeout: 180_000 }, async ({ tokenReadyExtension }) => {
 	const page = await openPopup(tokenReadyExtension)
 	await waitForHash(page, "#/popup/general")
 
@@ -41,7 +38,7 @@ test.skip("sponsored FPC is default fee method", { timeout: 180_000 }, async ({ 
 
 // SKIP: clusters A+B (tokenReadyExtension importToken cascade + feeJuiceImportedExtension cascade).
 // See implementations-plan/network-test-triage/plan.md — un-skip on cluster fix.
-test.skip("transfer with sponsored FPC fee", { timeout: 180_000 }, async ({ tokenReadyExtension }) => {
+test.skipIf(!hasConfig)("transfer with sponsored FPC fee", { timeout: 180_000 }, async ({ tokenReadyExtension }) => {
 	const page = await openPopup(tokenReadyExtension)
 	await waitForHash(page, "#/popup/general")
 
@@ -61,7 +58,7 @@ test.skip("transfer with sponsored FPC fee", { timeout: 180_000 }, async ({ toke
 // public + private FJ balances without needing a UI-level claim.
 // SKIP: clusters A+B (tokenReadyExtension importToken cascade + feeJuiceImportedExtension cascade).
 // See implementations-plan/network-test-triage/plan.md — un-skip on cluster fix.
-test.skip("transfer with public Fee Juice", { timeout: 300_000 }, async ({ feeJuiceImportedExtension }) => {
+test.skipIf(!hasConfig)("transfer with public Fee Juice", { timeout: 300_000 }, async ({ feeJuiceImportedExtension }) => {
 	const page = await openPopup(feeJuiceImportedExtension)
 	await waitForHash(page, "#/popup/general")
 
@@ -124,7 +121,7 @@ test.skip("transfer with public Fee Juice", { timeout: 300_000 }, async ({ feeJu
 // spend that balance to sponsor a transfer.
 // SKIP: clusters A+B (tokenReadyExtension importToken cascade + feeJuiceImportedExtension cascade).
 // See implementations-plan/network-test-triage/plan.md — un-skip on cluster fix.
-test.skip("transfer with private Fee Juice", { timeout: 300_000 }, async ({ feeJuiceImportedExtension }) => {
+test.skipIf(!hasConfig)("transfer with private Fee Juice", { timeout: 300_000 }, async ({ feeJuiceImportedExtension }) => {
 	const page = await openPopup(feeJuiceImportedExtension)
 	await waitForHash(page, "#/popup/general")
 
@@ -185,7 +182,7 @@ test.skip("transfer with private Fee Juice", { timeout: 300_000 }, async ({ feeJ
 // private FeeJuice (PrivateFPC.balance_of) without UI claim flow.
 // SKIP: clusters A+B (tokenReadyExtension importToken cascade + feeJuiceImportedExtension cascade).
 // See implementations-plan/network-test-triage/plan.md — un-skip on cluster fix.
-test.skip("gas balance card shows non-zero FeeJuice", { timeout: 120_000 }, async ({ feeJuiceImportedExtension }) => {
+test.skipIf(!hasConfig)("gas balance card shows non-zero FeeJuice", { timeout: 120_000 }, async ({ feeJuiceImportedExtension }) => {
 	const page = await openPopup(feeJuiceImportedExtension)
 	await waitForHash(page, "#/popup/general")
 
