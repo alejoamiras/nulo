@@ -10,6 +10,10 @@
  * `wallet.getAccounts()` is kept available as a fallback path for tests that
  * explicitly exercise it.
  */
+// Patch WalletSchema before wallet-sdk reads it (Nulo-custom `registerToken`).
+// Must be the first import in this module — see nulo-schema-patch.ts header.
+import "./nulo-schema-patch"
+
 import { WalletManager, type WalletProvider } from "@aztec/wallet-sdk/manager"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import type { ChainInfo } from "@aztec/aztec.js/account"

@@ -22,6 +22,7 @@ import { type ProfileInfo, ProfileServiceClient } from "@/wallet/services/profil
 import { type Network, NetworkServiceClient } from "@/wallet/services/network/client"
 import { type Account, AccountServiceClient } from "@/wallet/services/account/client"
 import { ExecutionServiceClient, type FeeSettings, type Operation } from "@/wallet/services/execution/client"
+import { TokenServiceClient } from "@/wallet/services/token/client"
 import {
 	type CaipAccount,
 	type CaipChain,
@@ -67,8 +68,31 @@ const isLoading = ref(false)
 const isWrongProfile = ref(false)
 const processingError = ref<UIError>()
 
+/**
+ * True once `init()` has finished materializing the operations list. The
+ * footer (Reject/Confirm) renders unconditionally in the template, so without
+ * this gate a fast click before init() resolves would call `approve()` with
+ * `operations.value === []` — `approveInteraction()` happily detaches and
+ * executes the empty list, and downstream code unwraps `results[0]` of
+ * nothing. Flip to true at the end of init() once we have at least one
+ * operation; refuse approval until then.
+ */
+const initComplete = ref(false)
+
 const executionService = new ExecutionServiceClient()
 const interactionService = new DappInteractionServiceClient()
+const tokenService = new TokenServiceClient()
+
+/**
+ * Pre-fetched metadata for `register_token` operations, keyed by contract
+ * address. Resolved by parseTokenInterface + fetchTokenMetadata in init() so
+ * the OperationCard renders name + symbol + decimals alongside the address
+ * BEFORE the user clicks Allow. The pre-fetch is the only anti-phishing
+ * surface the user has — the popup must not be approvable while it's loading.
+ */
+const tokenMetadata = ref<Map<string, { name: string; symbol: string; decimals: number }>>(new Map())
+const tokenMetadataLoading = ref(false)
+const tokenMetadataError = ref<Map<string, string>>(new Map())
 
 const {
 	requestId,
@@ -156,7 +180,6 @@ const init = async () => {
 					_operations.push({ ...op, network, networkId: network.id })
 					break
 				}
-				case "get_complete_address":
 				case "register_token":
 				case "simulate_transaction":
 				case "simulate_utility":
@@ -225,8 +248,36 @@ const init = async () => {
 		session.value = payload.value.session
 		operations.value = _operations
 		accounts.value = _accounts
+		// Only flip after operations are committed to state. If the popup
+		// is dismissed mid-init (cancel from another window) we want the
+		// approve gate to stay closed.
+		initComplete.value = _operations.length > 0
 		accountService.disconnect()
 		networkService.disconnect()
+
+		// Pre-fetch token metadata for any `register_token` ops so the
+		// OperationCard renders name/symbol/decimals before Allow. The Allow
+		// button is disabled while this is in flight (see template).
+		const registerOps = _operations.filter((op): op is UIOperation & { kind: "register_token" } => op.kind === "register_token")
+		if (registerOps.length > 0) {
+			tokenMetadataLoading.value = true
+			try {
+				await Promise.all(
+					registerOps.map(async (op) => {
+						try {
+							const meta = await tokenService.previewTokenMetadata(op.networkId, op.accountAddress, op.address)
+							tokenMetadata.value.set(op.address, meta)
+						} catch (err) {
+							const msg = getErrorMessage(err)
+							tokenMetadataError.value.set(op.address, msg)
+							console.warn(`[Execute] previewTokenMetadata failed for ${op.address}: ${msg}`)
+						}
+					}),
+				)
+			} finally {
+				tokenMetadataLoading.value = false
+			}
+		}
 	} catch (error) {
 		console.error(getErrorData(error))
 		setError("Something went wrong")
@@ -252,6 +303,13 @@ const handleFeeUpdate = (index: number, value: FeeSettings | undefined) => {
 
 const approve = async () => {
 	if (isInteractionCancelled.value || isLoading.value) return
+	// Block approval until init() has finished and at least one operation
+	// exists. Without this guard, a fast click before payload materialization
+	// would approve an empty operations list.
+	if (!initComplete.value || operations.value.length === 0) return
+	// Also block while the popup is pre-fetching token metadata for any
+	// `register_token` op — D7 enforcement.
+	if (tokenMetadataLoading.value) return
 	// UX gate: any send-like op still missing user-picked fee?
 	// Cast to DraftOperation works around a pre-existing AztecAddress/Fr
 	// structural mismatch between popup-resolved Operation and wallet-bridge's
@@ -317,6 +375,7 @@ profileService.onActiveProfileChanged.add(onActiveProfileChanged)
 onMounted(async () => {
 	profileService.connect()
 	interactionService.connect()
+	tokenService.connect()
 
 	if (!appStore.isSessionChecked) {
 		await new Promise<void>((resolve) => {
@@ -347,6 +406,7 @@ onUnmounted(() => {
 	profileService.disconnect()
 	interactionService.disconnect()
 	executionService.disconnect()
+	tokenService.disconnect()
 	window.removeEventListener("beforeunload", reject)
 })
 </script>
@@ -386,6 +446,9 @@ onUnmounted(() => {
 						:dapp="dapp ?? undefined"
 						:feeEstimate="feeEstimates[i]"
 						:isEstimating="!!estimatingOps[i]"
+						:tokenMetadata="op.kind === 'register_token' ? tokenMetadata.get((op as { address: string }).address) : undefined"
+						:tokenMetadataError="op.kind === 'register_token' ? tokenMetadataError.get((op as { address: string }).address) : undefined"
+						:tokenMetadataLoading="op.kind === 'register_token' && tokenMetadataLoading"
 						@updateFeeSettings="handleFeeUpdate"
 					/>
 				</Flex>
@@ -416,7 +479,7 @@ onUnmounted(() => {
 					variant="primary"
 					size="medium"
 					:loading="isLoading"
-					:disabled="processingError?.type === 'error'"
+					:disabled="processingError?.type === 'error' || tokenMetadataLoading || !initComplete || operations.length === 0"
 				>
 					<Text size="13" color="inverse">{{ isLoading ? "EXECUTING" : "Confirm" }}</Text>
 				</Button>

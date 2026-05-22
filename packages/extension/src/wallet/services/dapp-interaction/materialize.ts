@@ -87,7 +87,6 @@ export async function materializeRequest(request: OperationRequest, deps: Materi
 			const network = await deps.resolveNetwork(request.chain)
 			return { ...request, networkId: network.id } as MaterializedNonSend
 		}
-		case "get_complete_address":
 		case "register_token":
 		case "simulate_transaction":
 		case "simulate_utility":

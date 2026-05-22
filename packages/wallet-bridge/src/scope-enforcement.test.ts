@@ -209,17 +209,22 @@ describe("profileTx", () => {
 	})
 })
 
-// ── simulateViews ─────────────────────────────────────────────────────
+// ── simulateViews / getCompleteAddress ───────────────────────────────
+//
+// Both wallet-sdk methods were retired. They appear in no METHOD_SCOPE_CHECKER
+// entry, so enforceScope must no-op for them. This guards against accidental
+// re-introduction of either method without a scope checker — which would
+// silently bypass scope enforcement.
 
-describe("simulateViews", () => {
-	test("wildcard passes", () => {
-		const grants = [grant({ type: "simulation", transactions: { scope: "*" } })]
-		expect(() => enforceScope("simulateViews", [[{ to: addr(ADDR_A), name: "view" }]], grants)).not.toThrow()
+describe("retired methods", () => {
+	test("simulateViews is a no-op (no checker registered)", () => {
+		const grants = [grant({ type: "simulation", transactions: { scope: [{ contract: ADDR_A, function: "view" }] } })]
+		expect(() => enforceScope("simulateViews", [[{ to: addr(ADDR_B), name: "view" }]], grants)).not.toThrow()
 	})
 
-	test("out of scope throws", () => {
-		const grants = [grant({ type: "simulation", transactions: { scope: [{ contract: ADDR_A, function: "view" }] } })]
-		expect(() => enforceScope("simulateViews", [[{ to: addr(ADDR_B), name: "view" }]], grants)).toThrow(/Scope violation/)
+	test("getCompleteAddress is a no-op (no checker registered)", () => {
+		const grants = [grant({ type: "accounts", canGet: true, accounts: [] })]
+		expect(() => enforceScope("getCompleteAddress", [ADDR_A], grants)).not.toThrow()
 	})
 })
 

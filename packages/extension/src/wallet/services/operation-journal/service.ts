@@ -226,6 +226,37 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		return updated
 	}
 
+	/**
+	 * Update title / subtitle on an existing record. Does NOT transition the
+	 * stage and does NOT touch terminalAt. Used by `tokenService.addToken` to
+	 * backfill the resolved symbol as the title — the journal entry is created
+	 * with `title: undefined` up-front so the in-flight row appears
+	 * immediately, then this method rewrites the title once metadata fetch
+	 * succeeds. Emits `onOperationUpdated` so subscribers (TokensView) re-render.
+	 *
+	 * Unlike `transitionOperation`, this is safe to call on terminal records —
+	 * if the import succeeded and the row vanished, the update lands but
+	 * affects nothing user-visible. That keeps the caller simple (no need to
+	 * race against the success transition).
+	 */
+	public async setOperationMeta(id: string, meta: { title?: string; subtitle?: string }): Promise<OperationRecord> {
+		validateParams(OperationJournalMethodSchemas.setOperationMeta.params, [id, meta], "setOperationMeta")
+		await this.ensureInitialized()
+		const existing = await this._loadValidated(id)
+		if (!existing) {
+			throw new Error(`Operation not found: ${id}`)
+		}
+		const updated: OperationRecord = {
+			...existing,
+			title: meta.title !== undefined ? meta.title : existing.title,
+			subtitle: meta.subtitle !== undefined ? meta.subtitle : existing.subtitle,
+			updatedAt: Date.now(),
+		}
+		await this.storage.set(id, updated)
+		this.emit("onOperationUpdated", updated)
+		return updated
+	}
+
 	public async getOperation(id: string): Promise<OperationRecord | undefined> {
 		validateParams(OperationJournalMethodSchemas.getOperation.params, [id], "getOperation")
 		await this.ensureInitialized()

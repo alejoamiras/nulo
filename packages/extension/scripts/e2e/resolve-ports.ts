@@ -62,6 +62,7 @@ export interface PortPack {
 	aztecAdmin: number
 	aztecP2P: number
 	playground: number
+	faucet: number
 }
 
 export async function reservePortPack(): Promise<{ ports: PortPack; release: () => Promise<void> }> {
@@ -71,6 +72,7 @@ export async function reservePortPack(): Promise<{ ports: PortPack; release: () 
 		aztecAdmin: await reservePort(),
 		aztecP2P: await reservePort(),
 		playground: await reservePort(),
+		faucet: await reservePort(),
 	}
 	const ports: PortPack = {
 		anvil: r.anvil.port,
@@ -78,11 +80,19 @@ export async function reservePortPack(): Promise<{ ports: PortPack; release: () 
 		aztecAdmin: r.aztecAdmin.port,
 		aztecP2P: r.aztecP2P.port,
 		playground: r.playground.port,
+		faucet: r.faucet.port,
 	}
 	return {
 		ports,
 		release: async () => {
-			await Promise.all([r.anvil.release(), r.aztec.release(), r.aztecAdmin.release(), r.aztecP2P.release(), r.playground.release()])
+			await Promise.all([
+				r.anvil.release(),
+				r.aztec.release(),
+				r.aztecAdmin.release(),
+				r.aztecP2P.release(),
+				r.playground.release(),
+				r.faucet.release(),
+			])
 		},
 	}
 }
@@ -98,13 +108,14 @@ async function main() {
 		anvilUrl: `http://127.0.0.1:${ports.anvil}`,
 		aztecUrl: `http://localhost:${ports.aztec}`,
 		playgroundUrl: `http://localhost:${ports.playground}/`,
+		faucetUrl: `http://localhost:${ports.faucet}/`,
 		resolvedAt: new Date().toISOString(),
 	}
 	await writeFile(PORTS_PATH, `${JSON.stringify(payload, null, 2)}\n`, "utf-8")
 	await release()
 	process.stdout.write(
 		`${[
-			`[resolve-ports] anvil=:${ports.anvil} aztec=:${ports.aztec} (admin :${ports.aztecAdmin}, p2p :${ports.aztecP2P}) playground=:${ports.playground}`,
+			`[resolve-ports] anvil=:${ports.anvil} aztec=:${ports.aztec} (admin :${ports.aztecAdmin}, p2p :${ports.aztecP2P}) playground=:${ports.playground} faucet=:${ports.faucet}`,
 			`[resolve-ports] wrote ${PORTS_PATH}`,
 		].join("\n")}\n`,
 	)
