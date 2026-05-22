@@ -35,12 +35,13 @@ async function waitForLiveness(page: Page): Promise<void> {
 	)
 }
 
-// The active chain (`Network.id`) and the chain's primary endpoint
-// (`Network.primaryEndpointId`) live in `chrome.storage.local`. SW
-// recycle wipes session, NOT local — so both should round-trip. This
-// test stops + respawns the SW and asserts the network detail page
-// renders the same primary-endpoint marker.
-test("SW restart preserves active network + primary endpoint", async ({ registeredExtension }) => {
+// The active chain (`Network.id`) and the chain's endpoint list
+// (`Network.endpoints[]`, where `endpoints[0]` is the user-preferred —
+// no separate `primaryEndpointId` pointer post-multi-rpc-failover) live
+// in `chrome.storage.local`. SW recycle wipes session, NOT local — so
+// both should round-trip. This test stops + respawns the SW and asserts
+// the storage values byte-equal pre-restart.
+test("SW restart preserves active network + endpoints order", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
 
@@ -87,17 +88,21 @@ test("SW restart preserves active network + primary endpoint", async ({ register
 	expect(after.networkRows).toEqual(before.networkRows)
 	expect(after.activeNetwork).toEqual(before.activeNetwork)
 
-	// Each Network row must carry a `primaryEndpointId` and at least one
-	// endpoint after the restart. EntityStorage serializes values via
-	// JSON.stringify, so chrome.storage returns the raw JSON string.
-	// Catches a subtle regression where the storage shape persists but
-	// `primaryEndpointId` gets stripped on read.
+	// Each Network row must carry a non-empty `endpoints[]` after the
+	// restart, with each endpoint having a stable id and rpcUrl.
+	// EntityStorage serializes values via JSON.stringify, so
+	// chrome.storage returns the raw JSON string. Catches a regression
+	// where the storage shape persists but the endpoints array shifts
+	// from the schema-collapse migration (v7→v8) is rolled back.
 	for (const raw of Object.values(after.networkRows) as unknown[]) {
-		const row = JSON.parse(raw as string) as { primaryEndpointId?: string; endpoints?: unknown[] }
-		expect(typeof row.primaryEndpointId).toBe("string")
-		expect((row.primaryEndpointId ?? "").length).toBeGreaterThan(0)
+		const row = JSON.parse(raw as string) as { endpoints?: Array<{ id?: string; rpcUrl?: string }> }
 		expect(Array.isArray(row.endpoints)).toBe(true)
 		expect((row.endpoints ?? []).length).toBeGreaterThanOrEqual(1)
+		const preferred = row.endpoints?.[0]
+		expect(typeof preferred?.id).toBe("string")
+		expect((preferred?.id ?? "").length).toBeGreaterThan(0)
+		expect(typeof preferred?.rpcUrl).toBe("string")
+		expect((preferred?.rpcUrl ?? "").length).toBeGreaterThan(0)
 	}
 
 	expect(registeredExtension.pageErrors).toEqual([])

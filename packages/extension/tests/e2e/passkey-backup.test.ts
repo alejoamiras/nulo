@@ -105,7 +105,6 @@ function buildSyntheticPasskeyBackup(credentialId: string, accountAddress: strin
 							rpcUrl: process.env.AZTEC_NODE_URL ?? "http://localhost:8080",
 						},
 					],
-					primaryEndpointId: "syn-endpoint-id",
 				},
 			],
 			account: [
