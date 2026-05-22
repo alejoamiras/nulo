@@ -185,6 +185,17 @@ export async function switchToNetwork(page: Page, networkName: string): Promise<
 	const probeEnabled = process.env.VITE_E2E_PROBE === "1"
 	const switchStartedAt = probeEnabled ? Date.now() : 0
 	if (probeEnabled) console.log(`[PROBE-TEST]${JSON.stringify({ b: "SWITCH-IN", t: Date.now(), networkName })}`)
+	try {
+		await switchToNetworkInner(page, networkName, switchStartedAt, probeEnabled)
+	} catch (err) {
+		// Dump probes on failure so we can see what the wallet-side trace
+		// looked like up to the hang point.
+		if (probeEnabled) await dumpProbes(page, `switch-fail-${networkName.replace(/\s+/g, "-")}`)
+		throw err
+	}
+}
+
+async function switchToNetworkInner(page: Page, networkName: string, switchStartedAt: number, probeEnabled: boolean): Promise<void> {
 	// Snapshot the BEFORE state. The header text identifies the chain the
 	// popup is currently on; the activeAccount key identifies the address
 	// `setupActiveAccount` last wrote. Both are needed to disambiguate
