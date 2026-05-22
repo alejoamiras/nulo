@@ -200,3 +200,60 @@ This means our cluster classification was wrong:
 The consolidated plan's cluster A fix branches (SW keepalive, encrypted-channel session, response-relay drop) are likely all wrong — there's no encrypted-channel bug to fix. The cluster B fix (account pre-provision) is also misdirected — account provisioning works in 23ms.
 
 The real fix is whatever makes the popup's `appStore.network` update reliably after a "Set as active" click in suite-load conditions. This needs its own diagnostic phase.
+
+---
+
+## 3rd update — codex deep-dive nailed the actual bug
+
+Codex resumed session and traced the popup code-level path. Key finding:
+
+**The bug is a race in `handleSetActive` at `packages/extension/src/popup/pages/settings/networks/[id].vue:47-57`:**
+
+```ts
+const handleSetActive = async () => {
+    if (!network.value) return
+    if (isActive.value) return
+    try {
+        await managers.network.setActiveNetwork(network.value.id)  // RPC in flight
+        appStore.network = network.value                            // ← reads stale ref
+```
+
+`network` is a `computed(() => appStore.networks.find((n) => n.id === networkId.value))` where `networkId = route.params.id`.
+
+The test helper at `tests/e2e/fixtures/helpers.ts:177` (`window.location.hash = "/popup/general"`) changes the route BEFORE the RPC resolves. By the time `appStore.network = network.value` runs, `network.value` is `undefined`.
+
+Watcher at `app.vue:97-127` early-returns at `if (!appStore.network) return` → no `WATCH-IN` probe → 30s of silence → test gives up.
+
+### The fix (commit `1d0e7f3`)
+
+Snapshot `network.value` into a local before the await:
+
+```ts
+const target = network.value
+try {
+    await managers.network.setActiveNetwork(target.id)
+    appStore.network = target
+```
+
+### Codex bonus finding — pool/isolate was a no-op
+
+Vitest 4.1.5 already defaults to `pool: "forks"` + `isolate: true` (per `node_modules/vitest/dist/chunks/coverage.DM_a_rWm.js:176-180` and `config.cjs:50`). Commit `a104133`'s explicit setting was redundant. Documenting it for clarity isn't harmful, but the user's instinct about "missing pools config" was the symptomatic but-not-causal observation.
+
+### Final tally
+
+| Stage | Tests passing |
+|---|---|
+| Baseline (silent skips) | 0/61 |
+| After PR #46 (infra) | 17/61 |
+| **After race fix (1d0e7f3)** | **53/53 active passing (62 total, 7 skipped)** |
+| After also re-enabling 3 more quarantined files | 56/62 |
+
+Race fix alone resolved 34 of 36 original failures. Re-enabling the additional 3 quarantined files surfaced 4 new failures — a DIFFERENT bug class (frame-detached errors + popup-target timeouts under longer suite-load), not the original 30s switch hang.
+
+### Open follow-ups (out of scope for this PR)
+
+- `batch-mixed` + `meta-batch` failures: wallet returns `status="error"` for batch RPCs. Functional bug in the batch handler — separate investigation.
+- `cap-request-basic`, `data-privateEvents`: "Navigating frame was detached" — likely puppeteer/CDP state issue under sustained suite-load. Probably related to file-scope fixture lifecycle.
+- `cap-request-rerequest`, `sim-methods/sim-executeUtility`: 15s timeout on popup-target wait — distinct timing surface from the race we fixed.
+
+These 6 remaining failures share a pattern of being NEW classes of bugs not predicted by the original plan. They aren't cascades of the race we just fixed. They warrant their own focused investigations.
