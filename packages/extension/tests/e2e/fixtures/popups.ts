@@ -53,6 +53,17 @@ export async function waitForPopup(
 	// 'raf' polling which is throttled in offscreen tabs (this popup
 	// definitely is offscreen — it's a separate browser target).
 	patchPagePolling(page)
+	// Forward popup-window probe lines to vitest stdout. Different prefix
+	// from openPopup's listener so traces can be attributed to the kind of
+	// popup that emitted them.
+	if (process.env.VITE_E2E_PROBE === "1") {
+		page.on("console", (msg) => {
+			const text = msg.text()
+			if (text.startsWith("[PROBE")) {
+				console.log(`[POPUP-${kind.toUpperCase()}]${text}`)
+			}
+		})
+	}
 	// Wait for SW liveness so the page can render
 	await page.waitForFunction(
 		async () => {
