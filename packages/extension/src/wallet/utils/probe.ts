@@ -12,33 +12,52 @@
  * Payload rules: method name, short hashed sessionId, timestamps, elapsed ms,
  * boundary marker. NEVER: addresses, balances, raw RPC args, ciphertext,
  * manifests, verification hashes. Probes are synchronous and side-effect-free.
+ *
+ * Storage strategy: probes append to chrome.storage.local["nulo:probes"]
+ * (bounded ring buffer). Tests read + clear at strategic points. This is
+ * deterministic across SW context, popup context, and offscreen context —
+ * unlike console.log which requires CDP capture per-context. Cap at 500
+ * entries to keep the storage write affordable even under heavy probe load.
  */
 
 declare const __VERSION__: string
 
 export const E2E_PROBE_ENABLED: boolean = import.meta.env.VITE_E2E_PROBE === "1"
 
+const PROBE_KEY_PREFIX = "nulo:probe:"
+
+type ProbeRecord = { b: string; t: number } & Record<string, unknown>
+
 /**
- * Emit a probe line. Synchronous. Side-effect-free aside from console output.
+ * Emit a probe record. Console-logs (best-effort visibility in devtools)
+ * AND writes to chrome.storage.local under a per-call unique key.
  *
- * Call as:
- *   if (E2E_PROBE_ENABLED) probe("BCH-RECV", { sessionIdH: hashSid(s), method })
+ * Per-call unique keys avoid read-modify-write races between concurrent
+ * probes. Tests read via chrome.storage.local.get(null) and filter by the
+ * `nulo:probe:` prefix, then clear all probe keys.
  *
- * The `if` guard at the call site lets the compiler dead-code-eliminate
- * payload-construction (string interpolation, object literal) when probes
- * are off. Without it, the payload is built every call even though the
- * `probe()` body early-returns.
+ * Fire-and-forget. Probes MUST NOT block the hot path.
  */
 export function probe(boundary: string, payload: Record<string, unknown> = {}): void {
-	// Defensive: if a caller forgot the guard, still no-op when disabled.
 	if (!E2E_PROBE_ENABLED) return
-	const line = JSON.stringify({ b: boundary, t: Date.now(), ...payload })
-	// Use plain console.log: probes run inside SW + popup + offscreen contexts;
-	// the SW's logger queues, but probe output should arrive even if the queue
-	// is stuck. SW console messages route to the SW devtools panel; popup ones
-	// to the popup devtools panel; the test harness captures both via CDP.
-	console.log(`[PROBE]${line}`)
+	const rec: ProbeRecord = { b: boundary, t: Date.now(), ...payload }
+	const line = `[PROBE]${JSON.stringify(rec)}`
+	console.log(line)
+	// chrome.storage is only available in extension contexts (SW, popup,
+	// offscreen, content scripts). Skip silently in playground / external
+	// contexts where this module is imported by mistake.
+	if (typeof chrome === "undefined" || !chrome.storage?.local) return
+	// Unique key per probe call: timestamp + counter + random suffix.
+	// Counter handles same-millisecond calls; random handles cross-context
+	// (SW vs popup vs offscreen) collisions on the same timestamp.
+	probeCounter += 1
+	const key = `${PROBE_KEY_PREFIX}${rec.t}:${probeCounter}:${Math.random().toString(36).slice(2, 6)}`
+	void chrome.storage.local.set({ [key]: rec }).catch(() => {
+		// best-effort; probes must never break the hot path.
+	})
 }
+
+let probeCounter = 0
 
 /**
  * Hash a sessionId for probe logs. Don't leak full UUIDs in case probes ever
