@@ -3,6 +3,7 @@ import type { AztecAddress } from "@aztec/aztec.js/addresses"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { computed, onBeforeUnmount, ref } from "vue"
 import { type DripTarget, useFaucetDrip } from "@/composables/useFaucetDrip"
+import { useFaucetAddToken } from "@/composables/useFaucetAddToken"
 import { useTokenBalance, type UseTokenBalanceHandle } from "@/composables/useTokenBalance"
 import { useToast } from "@/composables/useToast"
 import type { FaucetToken } from "@/constants/tokens"
@@ -27,6 +28,7 @@ const connected = !!(props.wallet && props.account)
 const balance: UseTokenBalanceHandle | null =
 	connected && props.wallet && props.account ? useTokenBalance(props.wallet, props.tokenAddress, props.account) : null
 const drip = connected && props.wallet && props.account ? useFaucetDrip(props.wallet, props.account) : null
+const addToken = useFaucetAddToken()
 const { push, dismiss } = useToast()
 
 // Per-card "last drip" — single source of recency. Without this, a
@@ -114,7 +116,48 @@ async function handleDrip(target: DripTarget) {
 	}
 }
 
+// Single tracked reset timer. Without this, rapid clicks (button only
+// disabled during `submitting`) stack untracked setTimeouts — an older
+// timer can fire DURING a newer submission and flip the composable back
+// to `idle`, defeating the re-entrancy guard in `useFaucetAddToken`.
+// Track + clear before re-setting.
+let addTokenResetTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleAddTokenReset() {
+	if (addTokenResetTimer !== null) clearTimeout(addTokenResetTimer)
+	addTokenResetTimer = setTimeout(() => {
+		addTokenResetTimer = null
+		addToken.reset()
+	}, 3_000)
+}
+
+async function handleAddToWallet() {
+	if (!props.wallet || !props.account) return
+	// Cancel any pending reset from a prior cycle so a stale timer can't
+	// flip status back to `idle` mid-submission.
+	if (addTokenResetTimer !== null) {
+		clearTimeout(addTokenResetTimer)
+		addTokenResetTimer = null
+	}
+	await addToken.addToken(props.wallet, props.account.toString(), props.tokenAddress)
+	const final = addToken.status.value
+	if (final.kind === "ok") {
+		push({ kind: "ok", text: `${props.token.symbol} added to your wallet.` })
+	} else if (final.kind === "error") {
+		push({ kind: "error", text: final.error.message })
+	} else if (final.kind === "unsupported") {
+		push({ kind: "error", text: "Your wallet doesn't support adding tokens. Update Nulo and reload." })
+	}
+	// `rejected` is silent per the wallet-bridge cancel recipe — no toast.
+
+	// Schedule the auto-reset so the button label returns to "Add to wallet".
+	scheduleAddTokenReset()
+}
+
 onBeforeUnmount(() => {
+	if (addTokenResetTimer !== null) {
+		clearTimeout(addTokenResetTimer)
+		addTokenResetTimer = null
+	}
 	balance?.dispose()
 })
 </script>
@@ -132,14 +175,7 @@ onBeforeUnmount(() => {
 			:loading="balance?.loading.value ?? false"
 		/>
 		<div class="actions">
-			<DripButton
-				:loading="publicDripping"
-				:disabled="buttonsDisabled && !publicDripping"
-				:label="`Get ${token.symbol} (public)`"
-				:aria-label="`Get ${token.displayAmount} ${token.symbol} into your public balance`"
-				:data-testid="TESTIDS.btnDripPublic"
-				@click="handleDrip('public')"
-			/>
+			<!-- Order matches the wallet popup convention: private first, public second. -->
 			<DripButton
 				:loading="privateDripping"
 				:disabled="buttonsDisabled && !privateDripping"
@@ -148,6 +184,29 @@ onBeforeUnmount(() => {
 				:data-testid="TESTIDS.btnDripPrivate"
 				@click="handleDrip('private')"
 			/>
+			<DripButton
+				:loading="publicDripping"
+				:disabled="buttonsDisabled && !publicDripping"
+				:label="`Get ${token.symbol} (public)`"
+				:aria-label="`Get ${token.displayAmount} ${token.symbol} into your public balance`"
+				:data-testid="TESTIDS.btnDripPublic"
+				@click="handleDrip('public')"
+			/>
+		</div>
+		<div v-if="connected" class="add-to-wallet">
+			<button
+				type="button"
+				class="add-to-wallet-btn"
+				:disabled="addToken.status.value.kind === 'submitting'"
+				:data-testid="TESTIDS.btnAddToWallet"
+				:data-add-status="addToken.status.value.kind"
+				:aria-label="`Add ${token.symbol} to your wallet`"
+				@click="handleAddToWallet"
+			>
+				<template v-if="addToken.status.value.kind === 'submitting'">Adding…</template>
+				<template v-else-if="addToken.status.value.kind === 'ok'">Added ✓</template>
+				<template v-else>Add {{ token.symbol }} to wallet</template>
+			</button>
 		</div>
 		<footer class="foot">
 			<DisclaimerTag />
@@ -203,6 +262,38 @@ onBeforeUnmount(() => {
 	display: flex;
 	gap: 12px;
 	flex-wrap: wrap;
+}
+
+.add-to-wallet {
+	display: flex;
+}
+
+.add-to-wallet-btn {
+	flex: 1;
+	padding: 8px 12px;
+	background: transparent;
+	border: 1px dashed var(--nulo-outline);
+	color: var(--txt-secondary);
+	font: 500 12px/1.3 var(--font-mono);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	cursor: pointer;
+	transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.add-to-wallet-btn:hover:not(:disabled) {
+	border-color: var(--nulo-accent);
+	color: var(--nulo-accent);
+}
+
+.add-to-wallet-btn:disabled {
+	cursor: not-allowed;
+	opacity: 0.6;
+}
+
+.add-to-wallet-btn[data-add-status="ok"] {
+	border-color: var(--mint);
+	color: var(--mint);
 }
 
 .hint {

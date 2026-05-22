@@ -42,6 +42,16 @@ const availableAccounts = ref<UIAccount[]>([])
 const selectedAccounts = ref<UIAccount[]>([])
 const accountAliases = ref<Record<string, string>>({})
 
+// True when the dApp asked for accounts capability but the wallet resolved
+// the session's chain to a network with zero accounts. The most common cause
+// is a chain-info mismatch — e.g. a dApp sending Fr.ZERO/Fr.ZERO that
+// resolves to the wallet's Local Network seed while the user's accounts
+// live on testnet. Approving here would silently give the dApp a session
+// with `accounts: []` and every subsequent op would fail with "No accounts
+// authorized." Block the approve gate explicitly so the user gets a clear
+// error instead of a confusing downstream failure.
+const noAccountsAvailable = ref(false)
+
 const isLoading = ref(false)
 const processingError = ref<UIError>()
 const expandedCards = ref(new Set<number>())
@@ -102,8 +112,20 @@ const init = async () => {
 					selectedAccounts.value = [...availableAccounts.value]
 				}
 			} else {
-				const { openToast } = useToast()
-				openToast({ label: "No accounts available for this network. Create one first.", icon: "info" }, TOAST_DURATION.LONG)
+				// Accounts requested but none exist on this chain. Mark the
+				// popup as blocked — approving here would silently grant the
+				// dApp a session with no accounts and every later op would
+				// fail with a confusing "No accounts authorized" error. The
+				// surface-level cause is usually a chain-info mismatch
+				// (dApp sending Fr.ZERO that resolves to the wallet's Local
+				// Network seed). Surface an actionable error directly.
+				noAccountsAvailable.value = true
+				setError(
+					"No accounts on this chain",
+					"This dApp is asking for accounts on a chain where you have none. " +
+						"Either switch the wallet's active network or ask the dApp to pin the right chain.",
+					"error",
+				)
 			}
 		}
 
@@ -136,6 +158,11 @@ const onActiveProfileChanged = (_profile?: ProfileInfo) => {
 }
 
 const approve = async () => {
+	if (noAccountsAvailable.value) {
+		// init() already populated the error block; refuse approval explicitly
+		// so the user can't bypass via Enter / keyboard.
+		return
+	}
 	if (needsAccountSelection.value && selectedAccounts.value.length === 0) {
 		setError("Select at least one account", "You must select at least one account to share with the dApp", "warning")
 		return

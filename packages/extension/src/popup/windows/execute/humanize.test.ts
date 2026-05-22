@@ -29,11 +29,13 @@ describe("humanizeOperationKind", () => {
 	})
 
 	it("replaces ALL underscores in multi-underscore snake_case kinds", () => {
-		// `String.prototype.replace(string, ...)` is non-global and would
-		// fix only the first underscore — so `get_complete_address` would
-		// render as "Get complete_address". `replaceAll` covers every
-		// underscore.
-		expect(humanizeOperationKind("get_complete_address")).toBe("Get complete address")
+		// `String.prototype.replace(string, ...)` is non-global and would fix
+		// only the first underscore. `replaceAll` covers every underscore. We
+		// don't currently ship any multi-underscore op kind (the prior
+		// `get_complete_address` was retired), so test the function purely
+		// against a synthetic kind to guard against accidental reversion to
+		// `replace`.
+		expect(humanizeOperationKind("hypothetical_multi_underscore_kind")).toBe("Hypothetical multi underscore kind")
 	})
 
 	it("returns empty string for empty input (no crash)", () => {

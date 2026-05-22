@@ -43,6 +43,19 @@ defineProps<{
 	dapp?: DappMetadata & { logoBlobUrl?: string }
 	feeEstimate?: unknown
 	isEstimating?: boolean
+	/**
+	 * Pre-fetched token metadata for `register_token` operations. Resolved by
+	 * the parent before the card renders so the user can see name / symbol /
+	 * decimals BEFORE pressing Allow. `undefined` while the parent is still
+	 * fetching OR if the contract returned incomplete metadata.
+	 *
+	 * SECURITY: the strings here are attacker-controllable (a malicious token
+	 * contract can return any value for getName / getSymbol). The template
+	 * always renders the contract address alongside so the user can verify.
+	 */
+	tokenMetadata?: { name: string; symbol: string; decimals: number }
+	tokenMetadataError?: string
+	tokenMetadataLoading?: boolean
 }>()
 
 const emit = defineEmits<(e: "updateFeeSettings", index: number, value: FeeSettings | undefined) => void>()
@@ -191,9 +204,50 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 			</Flex>
 		</template>
 		<template v-else-if="op.kind === 'register_token'">
+			<template v-if="tokenMetadataLoading">
+				<Flex :class="$style.prop" align="center" gap="6">
+					<Spinner size="14" />
+					<Text size="12" color="secondary">Loading token metadata…</Text>
+				</Flex>
+			</template>
+			<template v-else-if="tokenMetadata">
+				<!-- Resolved symbol + name + decimals on one row. The contract
+				     address renders below as a separate prop row so the user
+				     can verify against a trusted source — the symbol/name come
+				     straight from the on-chain contract and are
+				     attacker-controllable. Name is hidden when it duplicates
+				     the symbol (e.g. test USDC where both equal "USDC"). -->
+				<Flex :class="$style.prop" align="baseline">
+					<Flex align="baseline" gap="6">
+						<Text size="14" weight="600" color="primary" data-testid="register-token-symbol">
+							{{ tokenMetadata.symbol }}
+						</Text>
+						<Text
+							v-if="tokenMetadata.name && tokenMetadata.name.toLowerCase() !== tokenMetadata.symbol.toLowerCase()"
+							size="12"
+							color="secondary"
+							data-testid="register-token-name"
+						>
+							· {{ tokenMetadata.name }}
+						</Text>
+					</Flex>
+					<Text size="12" color="tertiary" data-testid="register-token-decimals">
+						{{ tokenMetadata.decimals }} decimals
+					</Text>
+				</Flex>
+			</template>
+			<template v-else-if="tokenMetadataError">
+				<Flex :class="$style.prop" direction="column" gap="2">
+					<Text size="12" color="orange" data-testid="register-token-meta-error">
+						Couldn't resolve token metadata
+					</Text>
+					<Text size="11" color="tertiary">Verify the contract address before approving.</Text>
+				</Flex>
+			</template>
+
 			<Flex :class="$style.prop">
-				<Text size="12" color="secondary">Token address:</Text>
-				<AddressDisplay :address="op.address" />
+				<Text size="12" color="secondary">Contract address:</Text>
+				<AddressDisplay :address="op.address" data-testid="register-token-address" />
 			</Flex>
 		</template>
 		<template v-else-if="op.kind === 'simulate_transaction'">

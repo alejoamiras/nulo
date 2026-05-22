@@ -2,7 +2,8 @@
  * Read-only meta methods. Silent-path on default sessions
  * (confirmationLevel = Transactions, all of these are <= PxeState).
  *
- * getCompleteAddress (Nulo-custom) was dropped in the canonical refactor.
+ * The dropped `getCompleteAddress` / `simulateViews` dApp-facing surfaces are
+ * documented in `packages/wallet-bridge/README.md` under "Custom RPC methods".
  */
 import { getWallet } from "../lib/wallet"
 import { logCall } from "../lib/log"

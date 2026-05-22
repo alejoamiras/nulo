@@ -45,7 +45,6 @@ export type {
 	AztecSimulateTxOperation,
 	FeeOptions,
 	GasLimits,
-	GetCompleteAddressOperation,
 	Operation,
 	OperationKind,
 	RegisterContractOperation,

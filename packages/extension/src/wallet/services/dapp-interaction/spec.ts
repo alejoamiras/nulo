@@ -27,7 +27,6 @@ export type {
 	CapabilityResult,
 	ExecutionParams,
 	ExecutionResult,
-	GetCompleteAddressRequest,
 	OperationRequest,
 	RegisterContractRequest,
 	RegisterSenderRequest,

@@ -17,7 +17,6 @@ import {
 import { AuthWitness } from "@aztec/stdlib/auth-witness"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import {
-	type CompleteAddress,
 	computeContractAddressFromInstance,
 	type ContractInstanceWithAddress,
 	ContractInstanceWithAddressSchema,
@@ -66,7 +65,6 @@ import {
 	EXECUTION_SERVICE_NAME,
 	type Methods,
 	type Operation,
-	type GetCompleteAddressOperation,
 	type RegisterSenderOperation,
 	type RegisterTokenOperation,
 	type RegisterContractOperation,
@@ -880,10 +878,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			try {
 				let result: unknown
 				switch (operation.kind) {
-					case "get_complete_address": {
-						result = await this.executeGetCompleteAddress(operation)
-						break
-					}
 					case "register_contract": {
 						result = await this.executeRegisterContract(operation)
 						break
@@ -982,16 +976,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	}
 
 	// Nulo base:
-
-	private async executeGetCompleteAddress(op: GetCompleteAddressOperation): Promise<CompleteAddress> {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet locked")
-		}
-		const network = await this.networkService.getNetwork(op.networkId)
-		const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
-		return await account.getCompleteAddress()
-	}
 
 	private async executeRegisterContract(op: RegisterContractOperation): Promise<void> {
 		const addressNum = AztecAddress.fromString(op.address).toBigInt()
