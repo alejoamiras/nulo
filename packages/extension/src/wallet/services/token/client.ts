@@ -60,7 +60,7 @@ export class TokenServiceClient extends ServiceClient<Methods, Events> implement
 		networkId: string,
 		accountAddress: string,
 		contract: string,
-	): Promise<{ name: string; symbol: string; decimals: number }> {
+	): Promise<{ name: string; symbol: string; decimals: number; interface: TokenInterface }> {
 		return this.request("previewTokenMetadata", networkId, accountAddress, contract)
 	}
 }

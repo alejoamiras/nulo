@@ -257,10 +257,12 @@ patch does NOT restore them):
 
 - `getCompleteAddress` — the `accounts` capability response already carries
   the account list. Use `wallet.requestCapabilities()` → granted accounts.
-- `simulateViews` — use `wallet.simulateUtility()` (or batch them via
-  `wallet.batch([{name: "executeUtility", ...}, ...])`). The `simulate_views`
-  *operation kind* survives internally for the balance projector + gas-balance
-  code; that refactor is filed as `deprecate-simulate-views`.
+- `simulateViews` — fully retired. dApp-facing method AND internal
+  `simulate_views` op kind both gone. Use `wallet.simulateUtility()` (or batch
+  via `wallet.batch([{name: "executeUtility", ...}, ...])`). The internal
+  batching logic that previously lived behind the op kind now lives in
+  `packages/extension/src/wallet/services/execution/helpers/batched-view-simulation.ts`,
+  called directly by balance-projector + gas-balance.
 
 If a future Aztec.js version ships its own `registerToken`, the patch's
 signature-drift guard throws at SW init (`expected 2 params, found N`). Pin the

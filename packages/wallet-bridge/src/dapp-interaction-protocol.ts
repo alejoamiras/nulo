@@ -28,7 +28,6 @@ import type {
 	SendTransactionOperation,
 	SimulateTransactionOperation,
 	SimulateUtilityOperation,
-	SimulateViewsOperation,
 } from "./operation"
 import type { OperationResult } from "./operation-result"
 
@@ -59,10 +58,6 @@ export type SimulateTransactionRequest = Omit<SimulateTransactionOperation, Acco
 }
 
 export type SimulateUtilityRequest = Omit<SimulateUtilityOperation, AccountParams> & {
-	account: CaipAccount
-}
-
-export type SimulateViewsRequest = Omit<SimulateViewsOperation, AccountParams> & {
 	account: CaipAccount
 }
 
@@ -124,7 +119,6 @@ export type OperationRequest =
 	| SendTransactionRequest
 	| SimulateTransactionRequest
 	| SimulateUtilityRequest
-	| SimulateViewsRequest
 	// Aztec.js interface:
 	| AztecGetContractClassMetadataRequest
 	| AztecGetContractMetadataRequest

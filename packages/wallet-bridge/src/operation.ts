@@ -19,7 +19,6 @@ export type Operation =
 	| SendTransactionOperation
 	| SimulateTransactionOperation
 	| SimulateUtilityOperation
-	| SimulateViewsOperation
 	// Aztec.js interface:
 	| AztecGetContractClassMetadataOperation
 	| AztecGetContractMetadataOperation
@@ -102,22 +101,6 @@ export type SimulateUtilityOperation = {
 	readonly contract: string
 	readonly method: string
 	readonly args: unknown[]
-}
-
-/**
- * Internal-only operation kind. The dApp-facing `simulateViews` wallet-sdk
- * method was retired (see [implementations-plan/faucet-add-token/plan-v2.md]).
- * The `simulate_views` kind survives for internal callers — `balance-projector`
- * batches token balance reads, and `execution/service.ts` queries FeeJuice
- * public + private FPC balance for gas estimation. The whole op kind can be
- * dropped once those callers are refactored to use `aztec_simulateTx` +
- * `aztec_executeUtility` (filed as the `deprecate-simulate-views` follow-up).
- */
-export type SimulateViewsOperation = {
-	readonly kind: "simulate_views"
-	readonly networkId: string
-	readonly accountAddress: string
-	readonly calls: (CallAction | EncodedCallAction)[]
 }
 
 // Aztec.js interface:

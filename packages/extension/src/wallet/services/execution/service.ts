@@ -71,7 +71,6 @@ import {
 	type SendTransactionOperation,
 	type SimulateTransactionOperation,
 	type SimulateUtilityOperation,
-	type SimulateViewsOperation,
 	type OperationResult,
 	type Action,
 	type FeeSettings,
@@ -95,6 +94,9 @@ import {
 import { coerceAmount } from "./coerce-amount"
 import { OperationPlanner } from "./operation-planner"
 import { ContractResolver } from "./contract-resolver"
+import { batchedViewSimulation } from "./helpers/batched-view-simulation"
+import { getViewSimulationDeps } from "./helpers/get-view-simulation-deps"
+import type { MaterializedRegisterTokenOperation } from "./models"
 import { AuthwitDiscoverer } from "./authwit-discoverer"
 import { TxRequestBuilder } from "./tx-request-builder"
 import {
@@ -248,6 +250,16 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	private operationJournal: OperationJournalService = null!
 	private planner: OperationPlanner = null!
 	private resolver: ContractResolver = null!
+
+	/**
+	 * Public read-only access to the `ContractResolver` instance so external
+	 * callers (BalanceProjector, getViewSimulationDeps) get the same instance
+	 * rather than reaching into `this.resolver` via a private-state escape
+	 * hatch (codex final-pass FC6).
+	 */
+	public get contractResolver(): ContractResolver {
+		return this.resolver
+	}
 	private authwit: AuthwitDiscoverer = null!
 	private txBuilder: TxRequestBuilder = null!
 	private feeStrategies: Map<FeeSettings["paymentMethod"]["kind"], FeeStrategy> = null!
@@ -902,10 +914,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 						result = await this.executeSimulateUtility(operation)
 						break
 					}
-					case "simulate_views": {
-						result = await this.executeSimulateViews(operation)
-						break
-					}
 					// Aztec.js interface:
 					case "aztec_getContractClassMetadata": {
 						result = await this.executeAztecGetContractClassMetadata(operation)
@@ -1019,12 +1027,44 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		await this.pxeService.registerSender(networkInfoFrom(network), AztecAddress.fromString(op.address))
 	}
 
-	private async executeRegisterToken(op: RegisterTokenOperation, origin: LocalTxOrigin, parentTask?: WrappedTask): Promise<void> {
+	private async executeRegisterToken(
+		op: MaterializedRegisterTokenOperation,
+		origin: LocalTxOrigin,
+		parentTask?: WrappedTask,
+	): Promise<void> {
 		const profile = await this.profileService.getActiveProfile()
 		if (!profile) {
 			throw new Error("Wallet locked")
 		}
-		const ti = await this.tokenService.parseTokenInterface(op.networkId, op.address, parentTask)
+		const network = await this.networkService.getNetwork(op.networkId)
+
+		// Honor the popup's pre-fetched interface (`previewedInterface`) if it
+		// passes the contract+chainId sanity check (Opus F4). Otherwise fall back
+		// to a fresh `parseTokenInterface`. The previewed interface is set by
+		// the popup's approve mapper AFTER `previewTokenMetadata` resolves, so
+		// it's extension-internal data — but we still validate it identifies
+		// the same on-chain contract the dApp asked us to register, in case of
+		// popup-side bugs.
+		let ti
+		if (
+			op.previewedInterface &&
+			op.previewedInterface.contract.toLowerCase() === op.address.toLowerCase() &&
+			op.previewedInterface.chainId === network.chainId
+		) {
+			ti = op.previewedInterface
+		} else {
+			if (op.previewedInterface) {
+				this.logError(
+					"executeRegisterToken: discarding previewedInterface — contract/chainId mismatch",
+					op.previewedInterface.contract,
+					op.previewedInterface.chainId,
+					op.address,
+					network.chainId,
+				)
+			}
+			ti = await this.tokenService.parseTokenInterface(op.networkId, op.address, parentTask)
+		}
+
 		if (
 			ti.getNameFn === undefined ||
 			ti.getSymbolFn === undefined ||
@@ -1234,223 +1274,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 	}
 
-	public async executeSimulateViews(op: SimulateViewsOperation): Promise<{ encoded: Fr[][]; decoded: AbiDecoded[] }> {
-		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet locked")
-		}
-		const network = await this.networkService.getNetwork(op.networkId)
-		const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
-
-		const node = await this.networkService.getNode(network.chainId)
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
-		const contracts = this.resolver.extractContracts(op.calls)
-		const instances = await this.resolver.resolveInstances(pxe, contracts)
-		const artifacts = await this.resolver.resolveArtifacts(pxe, instances)
-
-		const registeredContracts = new Set<string>((await pxe.getContracts()).map((x) => x.toString()))
-		for (const [contract, instance] of instances) {
-			if (!registeredContracts.has(contract)) {
-				this.logDebug("Register contract")
-				await pxe.registerContract({
-					instance,
-					artifact: artifacts.get(instance.currentContractClassId.toString()),
-				})
-			}
-		}
-
-		const result: {
-			encoded: Fr[][]
-			decoded: AbiDecoded[]
-		} = {
-			encoded: [],
-			decoded: [],
-		}
-
-		const calls: [FunctionCall, number, number, AbiType[]][] = []
-		const utility: [Promise<UtilityExecutionResult>, number, AbiType[]][] = []
-		let privateCalls = 0
-		let publicCalls = 0
-
-		await account.ensureRegistered(pxe)
-
-		for (let i = 0; i < op.calls.length; i++) {
-			const call = op.calls[i]
-			switch (call.kind) {
-				case "call": {
-					const instance = instances.get(call.contract)
-					if (!instance) {
-						throw new Error("Contract not found")
-					}
-					const artifact = artifacts.get(instance.currentContractClassId.toString())
-					if (!artifact) {
-						throw new Error("Contract artifact not found")
-					}
-					const fn =
-						artifact.functions.find((x) => x.name === call.method) ??
-						artifact.nonDispatchPublicFunctions.find((x) => x.name === call.method)
-					if (!fn) {
-						throw new Error("Method not found")
-					}
-					const fnSelector = await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)
-					const encodedArgs = encodeArguments(fn, call.args)
-					if (fn.functionType === FunctionType.UTILITY) {
-						utility.push([
-							pxe.executeUtility(
-								new FunctionCall(
-									fn.name,
-									AztecAddress.fromString(call.contract),
-									fnSelector,
-									fn.functionType,
-									false,
-									fn.isStatic,
-									encodedArgs,
-									fn.returnTypes,
-								),
-								{ scopes: [account.address] },
-							),
-							i,
-							fn.returnTypes,
-						])
-					} else {
-						calls.push([
-							new FunctionCall(
-								fn.name,
-								AztecAddress.fromString(call.contract),
-								fnSelector,
-								fn.functionType,
-								call.hideSender === true,
-								fn.isStatic,
-								encodedArgs,
-								fn.returnTypes,
-							),
-							i,
-							fn.functionType === FunctionType.PUBLIC ? publicCalls++ : privateCalls++,
-							fn.returnTypes,
-						])
-					}
-					this.logDebug("Call enqueued.")
-					break
-				}
-				case "encoded_call": {
-					const instance = instances.get(call.to)
-					if (!instance) {
-						throw new Error("Contract not found")
-					}
-					const artifact = artifacts.get(instance.currentContractClassId.toString())
-					if (!artifact) {
-						throw new Error("Contract artifact not found")
-					}
-					let fn: FunctionAbi | undefined
-					for (const _fn of artifact.functions) {
-						const selector = await FunctionSelector.fromNameAndParameters(_fn.name, _fn.parameters)
-						if (selector.toString() === call.selector) {
-							fn = _fn
-							break
-						}
-					}
-					if (!fn) {
-						for (const _fn of artifact.nonDispatchPublicFunctions) {
-							const selector = await FunctionSelector.fromNameAndParameters(_fn.name, _fn.parameters)
-							if (selector.toString() === call.selector) {
-								fn = _fn
-								break
-							}
-						}
-					}
-					if (!fn) {
-						throw new Error("Method not found")
-					}
-					if (fn.functionType === FunctionType.UTILITY) {
-						utility.push([
-							pxe.executeUtility(
-								new FunctionCall(
-									fn.name,
-									AztecAddress.fromString(call.to),
-									FunctionSelector.fromString(call.selector),
-									fn.functionType,
-									false,
-									fn.isStatic,
-									call.args.map((x) => Fr.fromString(x)),
-									fn.returnTypes,
-								),
-								{ scopes: [account.address] },
-							),
-							i,
-							fn.returnTypes,
-						])
-					} else {
-						calls.push([
-							new FunctionCall(
-								fn.name,
-								AztecAddress.fromString(call.to),
-								FunctionSelector.fromString(call.selector),
-								fn.functionType,
-								call.hideMsgSender === true,
-								fn.isStatic,
-								call.args.map((x) => Fr.fromString(x)),
-								fn.returnTypes,
-							),
-							i,
-							fn.functionType === FunctionType.PUBLIC ? publicCalls++ : privateCalls++,
-							fn.returnTypes,
-						])
-					}
-					this.logDebug("EncodedCall enqueued.")
-					break
-				}
-			}
-		}
-
-		if (calls.length) {
-			const payload = new ExecutionPayload(
-				calls.map((x) => x[0]),
-				[],
-				[],
-				[],
-			)
-			const txRequest = await account.buildTxExecutionRequest(node, pxe, payload, {
-				cancellable: false,
-				txNonce: Fr.random(),
-				feePaymentMethodOptions: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
-			})
-			const simulatedTx = await pxe.simulateTx(txRequest, {
-				simulatePublic: true,
-				skipFeeEnforcement: true,
-				scopes: [account.address],
-			})
-
-			const publicReturn = simulatedTx.getPublicReturnValues()
-			const privateReturn =
-				txRequest.origin.toString() === op.accountAddress
-					? simulatedTx.getPrivateReturnValues().nested
-					: simulatedTx.getPrivateReturnValues().nested[1].nested
-
-			for (const [call, i, j, types] of calls) {
-				const values = (call.type === FunctionType.PUBLIC ? publicReturn[j] : privateReturn[j]).values ?? []
-				result.encoded[i] = values
-				try {
-					result.decoded[i] = decodeFromAbi(types, values)
-				} catch (error) {
-					this.logError("Failed to decode simulation results", types, values, getErrorMessage(error))
-				}
-			}
-		}
-
-		for (const [promise, i, types] of utility) {
-			const { result: values } = await promise
-			try {
-				result.decoded[i] = decodeFromAbi(types, values)
-			} catch (error) {
-				this.logError("Failed to encode utility simulation results", types, values, getErrorMessage(error))
-			}
-			result.encoded[i] = values
-		}
-
-		return result
-	}
-
 	public async getGasBalances(networkId: string, accountAddress: string, forceRefresh?: boolean): Promise<GasBalances> {
 		await this.ensureInitialized()
 
@@ -1480,21 +1303,28 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	}
 
 	async #computeGasBalances(cacheKey: string, networkId: string, accountAddress: string): Promise<GasBalances> {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet locked")
-		}
+		await this.ensureInitialized()
 		const network = await this.networkService.getNetwork(networkId)
+
+		const deps = await getViewSimulationDeps(
+			{
+				profiles: this.profileService,
+				networks: this.networkService,
+				accounts: this.accountService,
+				pxeService: this.pxeService,
+				contractResolver: this.resolver,
+				logger: this.logger,
+			},
+			networkId,
+			accountAddress,
+		)
 
 		// Public FeeJuice balance via balance_of_public on the FeeJuice contract
 		this.logDebug(`getGasBalances: networkId=${networkId}, accountAddress=${accountAddress}`)
 		let publicFeeJuice = "0"
 		try {
-			const publicResult = await this.executeSimulateViews({
-				kind: "simulate_views",
-				networkId,
-				accountAddress,
-				calls: [
+			const publicResult = await batchedViewSimulation(
+				[
 					{
 						kind: "call",
 						contract: feeJuiceAddress,
@@ -1502,7 +1332,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 						args: [accountAddress],
 					},
 				],
-			})
+				deps,
+			)
 			if (publicResult.encoded[0]?.[0]) {
 				publicFeeJuice = publicResult.encoded[0][0].toBigInt().toString()
 			}
@@ -1518,11 +1349,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const fpcs = await this.fpcService.getFpcs(network.chainId)
 			const bridgedFpc = fpcs.find((f) => f.type === FpcType.PrivateFpc)
 			if (bridgedFpc) {
-				const privateResult = await this.executeSimulateViews({
-					kind: "simulate_views",
-					networkId,
-					accountAddress,
-					calls: [
+				const privateResult = await batchedViewSimulation(
+					[
 						{
 							kind: "call",
 							contract: bridgedFpc.address,
@@ -1530,7 +1358,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 							args: [accountAddress],
 						},
 					],
-				})
+					deps,
+				)
 				if (privateResult.encoded[0]?.[0]) {
 					privateFeeJuice = privateResult.encoded[0][0].toBigInt().toString()
 				}
