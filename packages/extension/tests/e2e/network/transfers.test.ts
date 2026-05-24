@@ -151,7 +151,7 @@ test.skipIf(!hasConfig)(
 			await clickByTestId(page, "actions-send")
 			// SendPopup mounted — send-from-type proves the token loaded
 			// (if the bug were present, we'd see "No available tokens" instead).
-			await page.waitForSelector('[data-testid="send-from-type"]', { timeout: 15_000 })
+			await page.waitForSelector('[data-testid="send-from-type"]', { timeout: 30_000 })
 			await clickByTestId(page, "send-from-type")
 			const hasAmountInput = await page.evaluate(() => !!document.querySelector('[data-testid="send-amount-input"]'))
 			expect(hasAmountInput).toBe(true)

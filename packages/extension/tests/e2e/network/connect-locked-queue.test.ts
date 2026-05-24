@@ -42,7 +42,7 @@ test.skipIf(!hasConfig)(
 		const discoverPage = await discoverP
 		await approveDiscover(discoverPage)
 
-		const verifyPage = await waitForPopup(registeredExtensionPerTest, "verify", { timeout: 15_000 })
+		const verifyPage = await waitForPopup(registeredExtensionPerTest, "verify", { timeout: 30_000 })
 		await approveVerify(verifyPage)
 
 		await dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 20_000 })

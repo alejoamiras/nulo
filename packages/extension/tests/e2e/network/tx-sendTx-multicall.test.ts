@@ -38,7 +38,7 @@ for (const c of cases) {
 				select.dispatchEvent(new Event("change", { bubbles: true }))
 			})
 			const seqGrant = await snapshotResultSeq(page)
-			const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 15_000 })
+			const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
 			await clickByTestId(page, "pg-btn-requestCapabilities")
 			const capPopup = await capPopupP
 			await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 10_000 })

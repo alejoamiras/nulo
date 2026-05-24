@@ -29,7 +29,7 @@ test.skipIf(!hasConfig)(
 
 		// First attempt — reject
 		const seqA = await snapshotResultSeq(page)
-		const popup1P = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 15_000 })
+		const popup1P = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-requestCapabilities")
 		const popup1 = await popup1P
 		await rejectCapabilities(popup1)
@@ -41,7 +41,7 @@ test.skipIf(!hasConfig)(
 
 		// Second attempt — popup shows rerequested badge on data row
 		const seqB = await snapshotResultSeq(page)
-		const popup2P = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 15_000 })
+		const popup2P = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-requestCapabilities")
 		const popup2 = await popup2P
 

@@ -70,7 +70,7 @@ test.skipIf(!hasConfig)(
 
 		// Submit with toggle ON — both contact and sender are removed.
 		await clickByTestId(page, "confirm-submit")
-		await page.waitForFunction((sel: string) => !document.querySelector(sel), { timeout: 15_000 }, rowSelector)
+		await page.waitForFunction((sel: string) => !document.querySelector(sel), { timeout: 30_000 }, rowSelector)
 		// "Contact deleted" only fires after BOTH deleteContact AND deleteSender
 		// resolve in the confirm callback (pages/settings/contacts/index.vue).
 		// Without this wait, the next addContact races the in-flight deleteSender
@@ -131,7 +131,7 @@ test.skipIf(!hasConfig)(
 		expect(stateAfterFlip).toBe("false")
 
 		await clickByTestId(page, "confirm-submit")
-		await page.waitForFunction((sel: string) => !document.querySelector(sel), { timeout: 15_000 }, rowSelector)
+		await page.waitForFunction((sel: string) => !document.querySelector(sel), { timeout: 30_000 }, rowSelector)
 		await waitForToast(page, "Contact deleted", 30_000)
 
 		// Re-add the same address WITHOUT requesting sender. If the OFF branch

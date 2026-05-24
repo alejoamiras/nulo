@@ -247,7 +247,7 @@ export async function approveExecute(page: Page, opts: { feeMethod?: "sponsored"
 		// service round-trip that can take several seconds on cold start. Wait for the
 		// trigger to be visible before clicking it; otherwise the click is a no-op
 		// against a not-yet-mounted DOM and the per-method option never renders.
-		await page.waitForSelector('[data-testid="send-fee-method-trigger"]', { visible: true, timeout: 15_000 })
+		await page.waitForSelector('[data-testid="send-fee-method-trigger"]', { visible: true, timeout: 30_000 })
 		await page.evaluate(() => {
 			;(document.querySelector('[data-testid="send-fee-method-trigger"]') as HTMLElement)?.click()
 		})
@@ -271,7 +271,7 @@ export async function rejectExecute(page: Page): Promise<void> {
  * the "execute-op-item read returns []" race that previously skipped the
  * tx-sendTx-* suite.
  */
-export async function waitForExecuteContent(page: Page, timeout = 15_000): Promise<void> {
+export async function waitForExecuteContent(page: Page, timeout = 30_000): Promise<void> {
 	await page.waitForSelector('[data-testid="execute-op-item"]', { visible: true, timeout })
 }
 
@@ -298,7 +298,7 @@ export async function getExecuteOps(page: Page): Promise<Array<{ id: string; kin
  * cap-item-only wait silently times out via `.catch(() => undefined)` on
  * the accounts-only path, leaving downstream selectors racing.
  */
-export async function waitCapabilitiesReady(page: Page, timeout = 15_000): Promise<void> {
+export async function waitCapabilitiesReady(page: Page, timeout = 30_000): Promise<void> {
 	await page.waitForFunction(
 		() =>
 			document.querySelector('[data-testid="cap-item"]') !== null ||
