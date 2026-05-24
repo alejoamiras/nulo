@@ -23,6 +23,15 @@ on:
         required: false
         type: string
         default: ""
+      shard_label:
+        description: |
+          Artifact-safe label for the shard (e.g. "1-of-5"). actions/upload-artifact
+          rejects `/` in artifact names, so the caller passes a separate label
+          here distinct from the `shard` input's vitest expression. Empty falls
+          back to "full" for the unsharded invocation.
+        required: false
+        type: string
+        default: ""
       probe:
         description: |
           Set to "1" when this workflow run is intentionally running with probes on
@@ -91,8 +100,9 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          # Suffix with shard so matrix runs don't collide on upload.
-          name: network-e2e-logs-${{ inputs.shard || 'full' }}
+          # Use shard_label (e.g. "1-of-5") not shard ("1/5") — upload-artifact
+          # rejects `/` in names (actions/upload-artifact#647).
+          name: network-e2e-logs-${{ inputs.shard_label || 'full' }}
           path: |
             packages/extension/.e2e-state
             /tmp/aztec-*.log

@@ -89,7 +89,7 @@ jobs:
           fi
 
   network-e2e:
-    name: Run / shard ${{ matrix.shard }}/5
+    name: Run / shard ${{ matrix.shard.id }}
     needs: decide
     if: needs.decide.outputs.run == 'true'
     strategy:
@@ -103,11 +103,22 @@ jobs:
         # two known slow files (multi-account-from, tx-sendTx-multicall) into
         # the same shard at N=4; N=5 separates them. ~25% more runner cost for
         # materially better worst-case shard wall-time.
-        shard: ['1/5', '2/5', '3/5', '4/5', '5/5']
+        #
+        # `id` is the vitest --shard=N/M value. `label` is the artifact-safe
+        # variant (no `/`). actions/upload-artifact rejects `/` in artifact
+        # names (https://github.com/actions/upload-artifact/issues/647), so
+        # the reusable workflow takes both as separate inputs.
+        shard:
+          - { id: "1/5", label: "1-of-5" }
+          - { id: "2/5", label: "2-of-5" }
+          - { id: "3/5", label: "3-of-5" }
+          - { id: "4/5", label: "4-of-5" }
+          - { id: "5/5", label: "5-of-5" }
     uses: ./.github/workflows/_network-e2e.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
-      shard: ${{ matrix.shard }}
+      shard: ${{ matrix.shard.id }}
+      shard_label: ${{ matrix.shard.label }}
     secrets:
       SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
 
