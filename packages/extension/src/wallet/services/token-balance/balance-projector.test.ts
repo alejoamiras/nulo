@@ -70,8 +70,6 @@ function balance(id: number, tokenId: number, account = ACCOUNT_A): TokenBalance
 		id,
 		token: tokenId,
 		account,
-		privateBalance: null,
-		publicBalance: null,
 		updatedAt: 0,
 	}
 }
