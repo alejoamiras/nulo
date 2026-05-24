@@ -21,7 +21,10 @@ export async function waitForPopup(
 	kind: PopupKind,
 	opts: { requestId?: string; timeout?: number } = {},
 ): Promise<Page> {
-	const timeout = opts.timeout ?? 15_000
+	// CI CPU pressure pushes popup-mount latency up against the 15s cliff
+	// (see implementations-plan/network-followups/plan.md §C). 30s gives 2×
+	// margin without changing the steady-state — fast machines resolve in ms.
+	const timeout = opts.timeout ?? 30_000
 	// Snapshot existing matching target URLs so we only resolve a NEW popup,
 	// not a stale one left by a prior interaction. URL contains a unique
 	// requestId set by DappInteractionService.interaction(), so URL novelty
