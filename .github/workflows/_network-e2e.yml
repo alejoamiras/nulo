@@ -88,7 +88,9 @@ jobs:
         shell: bash
         run: |
           cd packages/extension
-          HITS=$(grep -RnE '(PROBE|nulo:probe:|VITE_E2E_PROBE)' dist/chrome 2>/dev/null | wc -l | tr -d ' ')
+          # grep exits 1 on no-match; with `set -e -o pipefail` that aborts the
+          # script before the `HITS > 0` check, so wrap the pipeline in `|| true`.
+          HITS=$( { grep -RnE '(PROBE|nulo:probe:|VITE_E2E_PROBE)' dist/chrome 2>/dev/null || true; } | wc -l | tr -d ' ')
           if [ "$HITS" -gt 0 ]; then
             echo "::error::Probe strings found in built bundle ($HITS hits)."
             grep -RnE '(PROBE|nulo:probe:|VITE_E2E_PROBE)' dist/chrome | head -20
