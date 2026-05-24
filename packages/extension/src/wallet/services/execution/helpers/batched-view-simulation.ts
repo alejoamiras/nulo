@@ -121,7 +121,7 @@ export async function batchedViewSimulation(
 
 	for (let i = 0; i < calls.length; i++) {
 		const call = calls[i]
-		const enqueued = await enqueueCall(call, i, instances, artifacts, account, pxe)
+		const enqueued = await enqueueCall(call, instances, artifacts, account, pxe)
 		if (enqueued.kind === "utility") {
 			utility.push([enqueued.promise, i, enqueued.returnTypes])
 		} else {
@@ -192,7 +192,6 @@ type EnqueuedCall =
 
 async function enqueueCall(
 	call: CallAction | EncodedCallAction,
-	_index: number,
 	instances: Map<string, ContractInstanceWithAddress>,
 	artifacts: Map<string, ContractArtifact>,
 	account: IAccountContract,

@@ -37,7 +37,10 @@ vi.mock("@aztec/stdlib/abi", async (importOriginal) => {
 			fromNameAndParameters: vi.fn(async (name: string, _params: unknown) => ({
 				toString: () => `selector-${name}`,
 			})),
-			fromString: actual.FunctionSelector.fromString,
+			// Stub fromString too — real impl validates as hex. The encoded_call
+			// path passes the selector through and we want the test to focus on
+			// classification + propagation, not hex validity.
+			fromString: vi.fn((selector: string) => ({ toString: () => selector })),
 		},
 		// encodeArguments expects real ABI params; return a deterministic stub.
 		encodeArguments: vi.fn(() => []),
@@ -307,14 +310,15 @@ describe("batchedViewSimulation", () => {
 			publicReturns: [[new Fr(0n)]],
 			captureFunctionCalls,
 		})
-		const selector = "0x12345678"
-		// Mock selector lookup: stub findFunctionBySelector by registering the fn under the selector
-		// (we directly invoke encoded_call here; helper resolves via artifact lookup)
+		// Match the helper's `findFunctionBySelector` lookup: our top-of-file
+		// `vi.mock` makes `FunctionSelector.fromNameAndParameters(name)` return
+		// `{toString: () => 'selector-${name}'}`, so passing that exact string
+		// hits the encoded_call → tx-typed branch instead of erroring out.
 		const calls: EncodedCallAction[] = [
 			{
 				kind: "encoded_call",
 				to: CONTRACT_A,
-				selector,
+				selector: "selector-bal_pub",
 				args: [],
 				name: "bal_pub",
 				type: "public",
@@ -323,14 +327,36 @@ describe("batchedViewSimulation", () => {
 				returnTypes: [],
 			},
 		]
-		// The helper uses findFunctionBySelector which iterates artifact.functions
-		// and matches by computed selector. Our stub artifact has fns but no
-		// selectors match. To exercise this path we need to ensure the artifact's
-		// function selector resolves correctly.
-		// For this test we use a workaround: skip selector-matching by using `call` kind.
-		// Pinning the encoded_call hideMsgSender path properly is done in the integration test.
-		await expect(batchedViewSimulation(calls, deps)).rejects.toThrow(/Method not found/)
-		// The skip-via-error keeps this test honest about what unit-level mocking can verify.
+		await batchedViewSimulation(calls, deps)
+		const txCapture = captureFunctionCalls.find((c) => c.type === FunctionType.PUBLIC)
+		expect(txCapture?.hideMsgSender).toBe(true)
+	})
+
+	test("'encoded_call' UTILITY ignores hideMsgSender → hardcoded false", async () => {
+		const captureFunctionCalls: Array<{ hideMsgSender: boolean; type: FunctionType; index: number }> = []
+		const deps = makeDeps({
+			functions: { bal_priv: { kind: FunctionType.UTILITY } },
+			utilityReturns: new Map([["bal_priv", [new Fr(0n)]]]),
+			captureFunctionCalls,
+		})
+		// hideMsgSender:true on UTILITY-typed encoded_call → helper hardcodes
+		// false on the FunctionCall constructor arg regardless of input.
+		const calls: EncodedCallAction[] = [
+			{
+				kind: "encoded_call",
+				to: CONTRACT_A,
+				selector: "selector-bal_priv",
+				args: [],
+				name: "bal_priv",
+				type: "utility",
+				isStatic: false,
+				hideMsgSender: true,
+				returnTypes: [],
+			},
+		]
+		await batchedViewSimulation(calls, deps)
+		const utilityCapture = captureFunctionCalls.find((c) => c.type === FunctionType.UTILITY)
+		expect(utilityCapture?.hideMsgSender).toBe(false)
 	})
 
 	test("UTILITY calls always pass hideMsgSender=false regardless of input kind", async () => {
