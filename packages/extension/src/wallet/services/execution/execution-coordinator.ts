@@ -39,7 +39,6 @@ import type { Tx, TxExecutionRequest, TxProvingResult, TxSimulationResult } from
 import type { ILogger } from "@/wallet/logger"
 import type { IPXE } from "@/wallet/services/pxe/client"
 import { StepContent, type TaskService, type WrappedTask } from "@/wallet/services/task/service"
-import { E2E_PROBE_ENABLED, probe } from "@/wallet/utils/probe"
 
 export class ExecutionCoordinator {
 	public constructor(
@@ -57,16 +56,12 @@ export class ExecutionCoordinator {
 	): Promise<TxSimulationResult> {
 		const step = new StepContent("Simulating transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.tasks.startNewTask(step)
-		const startedAt = E2E_PROBE_ENABLED ? Date.now() : 0
-		if (E2E_PROBE_ENABLED) probe("EC-SIM-START", {})
 		try {
 			const simulatedTx = await pxe.simulateTx(txRequest, opts)
 			task.complete()
-			if (E2E_PROBE_ENABLED) probe("EC-SIM-END", { status: "ok", elapsedMs: Date.now() - startedAt })
 			return simulatedTx
 		} catch (error) {
 			task.fail(error)
-			if (E2E_PROBE_ENABLED) probe("EC-SIM-END", { status: "throw", elapsedMs: Date.now() - startedAt })
 			throw error
 		}
 	}
@@ -80,16 +75,12 @@ export class ExecutionCoordinator {
 	): Promise<TxProvingResult> {
 		const step = new StepContent("Generating proof")
 		const task = parentTask ? parentTask.startSubtask(step) : this.tasks.startNewTask(step)
-		const startedAt = E2E_PROBE_ENABLED ? Date.now() : 0
-		if (E2E_PROBE_ENABLED) probe("EC-PROVE-START", {})
 		try {
 			const provedTx = await pxe.proveTx(txRequest, scopes)
 			task.complete()
-			if (E2E_PROBE_ENABLED) probe("EC-PROVE-END", { status: "ok", elapsedMs: Date.now() - startedAt })
 			return provedTx
 		} catch (error) {
 			task.fail(error)
-			if (E2E_PROBE_ENABLED) probe("EC-PROVE-END", { status: "throw", elapsedMs: Date.now() - startedAt })
 			throw error
 		}
 	}
@@ -98,15 +89,11 @@ export class ExecutionCoordinator {
 	public async sendTxTask(node: AztecNode, tx: Tx, parentTask?: WrappedTask): Promise<void> {
 		const step = new StepContent("Sending transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.tasks.startNewTask(step)
-		const startedAt = E2E_PROBE_ENABLED ? Date.now() : 0
-		if (E2E_PROBE_ENABLED) probe("EC-SEND-START", {})
 		try {
 			await node.sendTx(tx)
 			task.complete()
-			if (E2E_PROBE_ENABLED) probe("EC-SEND-END", { status: "ok", elapsedMs: Date.now() - startedAt })
 		} catch (error) {
 			task.fail(error)
-			if (E2E_PROBE_ENABLED) probe("EC-SEND-END", { status: "throw", elapsedMs: Date.now() - startedAt })
 			throw error
 		}
 	}

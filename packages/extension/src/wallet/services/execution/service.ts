@@ -118,7 +118,6 @@ import { ExecutionCoordinator } from "./execution-coordinator"
 import { type Aliased, ContractInitializationStatus } from "@aztec/aztec.js/wallet"
 import { rehydrateOptimizablePrefix, runFastPath } from "./fast-path"
 import type { PackedPrivateEvent } from "@aztec/pxe/client/bundle"
-import { E2E_PROBE_ENABLED, probe } from "@/wallet/utils/probe"
 
 export * from "./spec"
 
@@ -1946,10 +1945,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			if (op.opts.wait === "NO_WAIT") {
 				return { txHash, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 			}
-			const receiptStartedAt = E2E_PROBE_ENABLED ? Date.now() : 0
-			if (E2E_PROBE_ENABLED) probe("EXEC-AZTEC-SENDTX-RECEIPT-START", { path: "standard" })
 			const receipt = await node.getTxReceipt(txHash)
-			if (E2E_PROBE_ENABLED) probe("EXEC-AZTEC-SENDTX-RECEIPT-END", { path: "standard", elapsedMs: Date.now() - receiptStartedAt })
 			return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 		} catch (error) {
 			if (error instanceof JobCancelledSentinel) {
@@ -2109,10 +2105,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			if (op.opts.wait === "NO_WAIT") {
 				return { txHash, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 			}
-			const receiptStartedAt = E2E_PROBE_ENABLED ? Date.now() : 0
-			if (E2E_PROBE_ENABLED) probe("EXEC-AZTEC-SENDTX-RECEIPT-START", { path: "nofrom" })
 			const receipt = await node.getTxReceipt(txHash)
-			if (E2E_PROBE_ENABLED) probe("EXEC-AZTEC-SENDTX-RECEIPT-END", { path: "nofrom", elapsedMs: Date.now() - receiptStartedAt })
 			return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 		} catch (error) {
 			if (error instanceof JobCancelledSentinel) {
