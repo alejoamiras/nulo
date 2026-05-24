@@ -5,7 +5,7 @@ import {
 	waitForBalance,
 	waitForTxConfirmation,
 	navigateToTokenDetail,
-	waitForTokenDetailBalances,
+	getTokenDetailBalances,
 	clickNavTab,
 } from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
@@ -121,12 +121,19 @@ test.skipIf(!hasConfig)(
 			// SponsoredFPC: balances aren't affected by gas fees.
 			// pub→pub 10 (net 0), pub→priv 100 (-100/+100), priv→pub 50 (+50/-50), priv→priv 10 (net 0)
 			// Expected: public=950, private=50.
-			// Use waitForTokenDetailBalances to force a refresh + poll past the
-			// async TokenBalanceService projection lag under full-suite load.
-			const { privateBalance, publicBalance } = await waitForTokenDetailBalances(page, {
-				publicContains: "950",
-				privateContains: "50",
-			})
+			// The token detail page auto-fires refreshTokenBalance on mount (see
+			// tokens/[id].vue:onMounted), so we wait for the DOM to reflect the
+			// projection result instead of clicking the Refresh button via a
+			// helper. Poll the balance selectors until both flip to expected.
+			await page.waitForFunction(
+				() => {
+					const pub = document.querySelector('[data-testid="public-balance-value"]')?.textContent?.trim() ?? ""
+					const priv = document.querySelector('[data-testid="private-balance-value"]')?.textContent?.trim() ?? ""
+					return pub.includes("950") && priv.includes("50")
+				},
+				{ timeout: 30_000, polling: 500 },
+			)
+			const { privateBalance, publicBalance } = await getTokenDetailBalances(page)
 			console.log(`Token detail balances — public: "${publicBalance}", private: "${privateBalance}"`)
 			expect(publicBalance).toContain("950")
 			expect(privateBalance).toContain("50")
