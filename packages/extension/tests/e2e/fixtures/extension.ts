@@ -130,7 +130,7 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	const url = `chrome-extension://${ctx.extensionId}/src/onboarding/index.html#/onboarding/welcome`
 	await page.goto(url, { waitUntil: "domcontentloaded" })
 	// Wait for Vue mount: welcome CTA must render.
-	await page.waitForSelector('[data-testid="onboarding-welcome-create"]', { visible: true, timeout: 15_000 })
+	await page.waitForSelector('[data-testid="onboarding-welcome-create"]', { visible: true, timeout: 30_000 })
 	return page
 }
 
@@ -142,7 +142,7 @@ async function registerProfile(ctx: ExtensionContext): Promise<void> {
 
 	// Wait for GlobalLoader to disappear (SW must connect first)
 	await page.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), {
-		timeout: 15_000,
+		timeout: 30_000,
 		polling: 500,
 	})
 
@@ -193,7 +193,7 @@ async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
 	const dappPage = await openPlayground(ctx)
 
 	// Set up popup listeners BEFORE the click so we don't miss the events.
-	const discoverP = waitForPopup(ctx, "discover", { timeout: 15_000 })
+	const discoverP = waitForPopup(ctx, "discover", { timeout: 30_000 })
 
 	// Bumped from 5s to 30s — under network-suite load the playground vite
 	// server cold-load + dapp Vue mount can take 10-20s; clickByTestId polls
@@ -206,7 +206,7 @@ async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
 	const discoverPage = await discoverP
 	await approveDiscover(discoverPage)
 
-	const verifyPage = await waitForPopup(ctx, "verify", { timeout: 15_000 })
+	const verifyPage = await waitForPopup(ctx, "verify", { timeout: 30_000 })
 	await approveVerify(verifyPage)
 
 	await dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 20_000 })
@@ -522,7 +522,7 @@ export const test = base.extend<{
 
 			await waitForHash(page, "#/popup/register", 15_000)
 			await page.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), {
-				timeout: 15_000,
+				timeout: 30_000,
 				polling: 500,
 			})
 
@@ -813,7 +813,7 @@ async function openPopupOnce(ctx: ExtensionContext): Promise<Page> {
 		await page.goto(popupUrl, { waitUntil: "domcontentloaded" })
 		await page.waitForFunction(
 			() => window.location.hash !== "#/" && window.location.hash !== "" && !document.querySelector('[data-testid="global-loader"]'),
-			{ timeout: 15_000, polling: 200 },
+			{ timeout: 30_000, polling: 200 },
 		)
 	}
 	if (process.env.NULO_E2E_OPENPOPUP_LOG === "1") {
