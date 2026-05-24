@@ -34,7 +34,6 @@ export type {
 	SendTransactionRequest,
 	SimulateTransactionRequest,
 	SimulateUtilityRequest,
-	SimulateViewsRequest,
 } from "@nulo/wallet-bridge"
 
 export const DAPP_INTERACTION_SERVICE_NAME = "dapp-interaction"

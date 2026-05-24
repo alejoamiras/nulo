@@ -1,24 +1,29 @@
 /**
- * Balance projection: given raw balance records, call the execution
- * service's `executeSimulateViews` and unpack the results into
+ * Balance projection: given raw balance records, batch their `balance_of_*`
+ * reads via the `batchedViewSimulation` helper and unpack the results into
  * `{ privateBalance, publicBalance }`.
  *
- * Groups by `(account, chainId)` internally — the caller does NOT need
- * to pre-group. Max-12-per-network-call batch size.
+ * Groups by `(account, chainId)` internally — the caller does NOT need to
+ * pre-group. Max-12-per-network-call batch size.
  *
- * Return shape lets the caller (`BalanceJobQueue`) decide whether to
- * write each balance (success) or surface an error on its task record.
+ * Return shape lets the caller (`BalanceJobQueue`) decide whether to write
+ * each balance (success) or surface an error on its task record.
  */
 
 import { FunctionType } from "@aztec/stdlib/abi"
 import type { ILogger } from "@/wallet/logger"
+import { LogLevel } from "@/wallet/logger"
+import type { AccountService } from "@/wallet/services/account/service"
 import type { CallAction, EncodedCallAction, ExecutionService } from "@/wallet/services/execution/service"
+import { batchedViewSimulation } from "@/wallet/services/execution/helpers/batched-view-simulation"
+import { getViewSimulationDeps } from "@/wallet/services/execution/helpers/get-view-simulation-deps"
 import type { NetworkService } from "@/wallet/services/network/service"
+import type { ProfileService } from "@/wallet/services/profile/service"
+import type { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { BalanceOfPrivateFn, BalanceOfPublicFn } from "@/wallet/services/token/functions"
 import type { TokenService, Token } from "@/wallet/services/token/service"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { ViewFn } from "@/wallet/utils/fn"
-import { LogLevel } from "@/wallet/logger"
 import type { TokenBalanceRaw } from "./spec"
 
 /** Per-balance projection outcome. */
@@ -36,6 +41,9 @@ export class BalanceProjector {
 		private readonly execution: ExecutionService,
 		private readonly networks: NetworkService,
 		private readonly tokens: TokenService,
+		private readonly profiles: ProfileService,
+		private readonly accounts: AccountService,
+		private readonly pxeService: PxeServiceClient,
 		private readonly logger?: ILogger,
 		private readonly logSource: string = "balance-projector",
 	) {}
@@ -119,12 +127,22 @@ export class BalanceProjector {
 			}
 
 			if (calls.length > 0) {
-				const results = await this.execution.executeSimulateViews({
-					kind: "simulate_views",
-					networkId: network.id,
-					accountAddress: account,
-					calls: calls.map((x) => x[0]),
-				})
+				const deps = await getViewSimulationDeps(
+					{
+						profiles: this.profiles,
+						networks: this.networks,
+						accounts: this.accounts,
+						pxeService: this.pxeService,
+						contractResolver: this.execution.contractResolver,
+						logger: this.logger,
+					},
+					network.id,
+					account,
+				)
+				const results = await batchedViewSimulation(
+					calls.map((x) => x[0]),
+					deps,
+				)
 
 				for (let i = 0; i < calls.length; i++) {
 					const [_, tbIndex, isPrivate, viewFn] = calls[i]

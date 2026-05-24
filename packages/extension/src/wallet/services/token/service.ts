@@ -461,7 +461,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		networkId: string,
 		accountAddress: string,
 		contract: string,
-	): Promise<{ name: string; symbol: string; decimals: number }> {
+	): Promise<{ name: string; symbol: string; decimals: number; interface: TokenInterface }> {
 		await this.ensureInitialized()
 		const profile = await this.profiles.getActiveProfile()
 		if (!profile) {
@@ -469,7 +469,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		}
 		const tokenInterface = await this.parseTokenInterface(networkId, contract)
 		const [name, symbol, decimals] = await this.fetchTokenMetadata(profile.id, networkId, accountAddress, tokenInterface)
-		return { name, symbol, decimals }
+		return { name, symbol, decimals, interface: tokenInterface }
 	}
 
 	private async fetchTokenMetadata(

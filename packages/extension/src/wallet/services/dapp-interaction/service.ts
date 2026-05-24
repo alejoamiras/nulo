@@ -287,13 +287,6 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 					operation.actions.forEach((x) => this.checkMethodPermission(session, x.kind, chain))
 					break
 				}
-				case "simulate_views": {
-					const chain = operation.account.substring(0, operation.account.lastIndexOf(":"))
-					this.checkAccountPermission(session, operation.account)
-					this.checkMethodPermission(session, operation.kind, chain)
-					operation.calls.forEach((x) => this.checkMethodPermission(session, x.kind, chain))
-					break
-				}
 			}
 		}
 		return session
@@ -390,8 +383,6 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			case "simulate_transaction":
 				return AccessLevel.PrivateData
 			case "simulate_utility":
-				return AccessLevel.PrivateData
-			case "simulate_views":
 				return AccessLevel.PrivateData
 			case "send_transaction":
 				return AccessLevel.Transactions

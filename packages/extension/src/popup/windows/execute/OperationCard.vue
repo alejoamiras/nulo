@@ -285,18 +285,6 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 				<Text size="12" weight="600" color="primary">{{ humanizeMethodName(op.method) }}</Text>
 			</Flex>
 		</template>
-		<template v-else-if="op.kind === 'simulate_views'">
-			<Flex :class="$style.prop">
-				<Text size="12" color="secondary">View calls:</Text>
-				<Flex direction="column" gap="4">
-					<Text v-for="(call, j) in op.calls" :key="`${index}:${j}`" size="12" color="primary">
-						<Text weight="600">{{ humanizeMethodName(call.kind === "call" ? call.method : call.selector) }}</Text>
-						<Text color="secondary"> on </Text>
-						<AddressDisplay :address="call.kind === 'call' ? call.contract : call.to" />
-					</Text>
-				</Flex>
-			</Flex>
-		</template>
 		<template v-else-if="op.kind === 'aztec_getContractClassMetadata'">
 			<Flex :class="$style.prop">
 				<Text size="12" color="secondary">Class id:</Text>

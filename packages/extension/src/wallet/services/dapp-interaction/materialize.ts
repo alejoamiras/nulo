@@ -90,7 +90,6 @@ export async function materializeRequest(request: OperationRequest, deps: Materi
 		case "register_token":
 		case "simulate_transaction":
 		case "simulate_utility":
-		case "simulate_views":
 		case "aztec_simulateTx":
 		case "aztec_executeUtility":
 		case "aztec_profileTx":

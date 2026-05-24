@@ -169,9 +169,11 @@ const NETWORK_ONLY_KINDS = new Set<Operation["kind"]>([
 const ACCOUNT_KINDS = new Set<Operation["kind"]>(["aztec_simulateTx", "aztec_executeUtility", "aztec_profileTx", "aztec_createAuthWit"])
 
 // Note: sendTx and registerToken are handled separately via DappInteractionService
-// (handleSendTx / handleRegisterToken). simulate_views and get_complete_address are no
-// longer dApp-facing — `simulate_views` op kind is retained for internal callers (the
-// balance projector + gas-balance code); `get_complete_address` is dropped entirely.
+// (handleSendTx / handleRegisterToken). simulate_views and get_complete_address are
+// fully retired — both dApp-facing wire surfaces and the `simulate_views` op kind
+// itself were removed. The batching logic that previously lived behind
+// `simulate_views` now lives in `extension/src/wallet/services/execution/helpers/
+// batched-view-simulation.ts`, called directly by balance-projector + gas-balance.
 
 export class WalletSdkDispatcher {
 	constructor(
