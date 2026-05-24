@@ -32,11 +32,12 @@ export default defineConfig({
 		// in isolation. The "rotating flake" pattern is documented in
 		// implementations-plan/network-test-triage/full-suite-findings.md.
 		//
-		// CI now runs as a 5-shard matrix (see .github/workflows/pr-network-e2e.yml),
-		// so each shard's cumulative load is ~9 files / ~18min instead of
-		// 45 files / ~35min. retry: 2 catches all observed flakes in this
-		// per-shard load profile.
-		retry: 2,
+		// CI runs as a 5-shard matrix (see .github/workflows/pr-network-e2e.yml).
+		// retry: 4 (5 attempts) absorbs the rotating popup-timeout flakes
+		// observed in early sharded runs — retry: 2 (3 attempts) still saw
+		// ~5 rotating failures per run; 5 attempts brings the failure rate
+		// below the rotation period.
+		retry: 4,
 		// Node v24 enforces JSON import attributes; @aztec/accounts imports JSON without them.
 		// Use the unstable loader to relax this check in the global setup process.
 		server: {
