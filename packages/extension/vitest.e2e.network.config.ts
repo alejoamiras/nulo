@@ -33,12 +33,16 @@ export default defineConfig({
 		// pattern in implementations-plan/network-test-triage/full-suite-findings.md
 		// documents this.
 		//
-		// Local (M-series, fast disk): retry: 2 catches all observed flakes.
-		// CI (hosted ubuntu-latest, slower disk + CPU): the 15s budget eats
-		// 2-consecutive drops more often, so CI gets retry: 3. Empirically
-		// the first hosted run after the symlink fix landed had 7 of 45 files
-		// dropping at retry: 2; retry: 3 captures the rotating victim set.
-		retry: process.env.CI === "true" ? 3 : 2,
+		// Locally (M-series, fast disk) retry: 2 catches all observed flakes
+		// for 61/61 green. On CI (hosted ubuntu-latest) 2-7 tests still drop
+		// under cumulative aztec/anvil sandbox load — but those are mostly
+		// 120s waitForFunction timeouts on tx confirmation, not 15s puppeteer
+		// drops, so MORE retries don't help (verified empirically: retry: 3
+		// produced MORE rotating failures, not fewer). The proper CI fix is
+		// suite sharding (run files in groups, each with fresh sandbox) —
+		// separate infrastructure PR. Until then, Network e2e on CI is
+		// advisory only.
+		retry: 2,
 		// Node v24 enforces JSON import attributes; @aztec/accounts imports JSON without them.
 		// Use the unstable loader to relax this check in the global setup process.
 		server: {
