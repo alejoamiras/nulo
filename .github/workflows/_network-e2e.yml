@@ -15,15 +15,35 @@ on:
         required: false
         type: string
         default: "http://localhost:8080"
+      shard:
+        description: |
+          vitest --shard expression (e.g. "1/5"). Empty string runs the full suite.
+          Caller workflows use this with a matrix strategy to parallelize across
+          runners; each shard runs its own anvil + aztec sandbox.
+        required: false
+        type: string
+        default: ""
+      probe:
+        description: |
+          Set to "1" when this workflow run is intentionally running with probes on
+          (slow-test investigation). The bundle-grep guard skips when "1" because
+          the build will legitimately contain probe strings. Default empty runs
+          the guard, which fails the workflow if probe strings ship in dist/chrome.
+        required: false
+        type: string
+        default: ""
     secrets:
       SPONSORED_FPC_SALT:
         required: false
 
 jobs:
   network-e2e:
-    name: Aztec agent
+    name: ${{ inputs.shard && format('Aztec agent (shard {0})', inputs.shard) || 'Aztec agent' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Per-shard wall-time worst case is ~20m (9 files + cold-start ~5m). 30m
+    # budget gives headroom without masking real hangs. Was 60m for the single
+    # unsharded job; that ceiling no longer applies.
+    timeout-minutes: 30
     env:
       AZTEC_NODE_URL: ${{ inputs.aztec_node_url }}
       SPONSORED_FPC_SALT: ${{ !contains(inputs.aztec_node_url, 'localhost') && secrets.SPONSORED_FPC_SALT || '' }}
@@ -41,16 +61,42 @@ jobs:
       - uses: ./.github/actions/setup-puppeteer
 
       - name: Run network e2e via agent
-        run: bun run e2e:agent
+        run: |
+          if [ -n "${{ inputs.shard }}" ]; then
+            bun run e2e:agent --shard=${{ inputs.shard }}
+          else
+            bun run e2e:agent
+          fi
+
+      # Permanent guard: PR #46's lessons doc flagged bundle-grep as the actual
+      # leak guarantee for diagnostic probes (compile-time gate is design intent,
+      # not safety property). Probes accidentally surviving to dist/chrome would
+      # leak protocol details to browser consoles in production. Skip the guard
+      # when `inputs.probe == '1'` because slow-test investigation builds
+      # legitimately contain probe strings.
+      - name: Verify no probe code in shipped bundle
+        if: always() && inputs.probe != '1'
+        shell: bash
+        run: |
+          cd packages/extension
+          HITS=$(grep -RnE '(PROBE|nulo:probe:|VITE_E2E_PROBE)' dist/chrome 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$HITS" -gt 0 ]; then
+            echo "::error::Probe strings found in built bundle ($HITS hits)."
+            grep -RnE '(PROBE|nulo:probe:|VITE_E2E_PROBE)' dist/chrome | head -20
+            exit 1
+          fi
+          echo "Bundle clean: no probe strings."
 
       - name: Upload network e2e logs on failure
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: network-e2e-logs
+          # Suffix with shard so matrix runs don't collide on upload.
+          name: network-e2e-logs-${{ inputs.shard || 'full' }}
           path: |
             packages/extension/.e2e-state
             /tmp/aztec-*.log
             /tmp/anvil-*.log
+            /tmp/nulo-probes-*.jsonl
           if-no-files-found: ignore
           retention-days: 7
