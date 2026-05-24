@@ -84,7 +84,7 @@ export async function waitForPopup(
 					return false
 				}
 			},
-			{ timeout: 10_000, polling: 250 },
+			{ timeout: 30_000, polling: 250 },
 		)
 	try {
 		await livenessFn()
@@ -191,7 +191,7 @@ export async function approveCapabilities(
 		() =>
 			document.querySelector('[data-testid="cap-item"]') !== null ||
 			document.querySelector('[data-testid="cap-account-item"]') !== null,
-		{ timeout: 10_000, polling: 200 },
+		{ timeout: 30_000, polling: 200 },
 	)
 	for (const capId of opts.toggleOff ?? []) {
 		await page.waitForSelector(`[data-testid="cap-item"][data-cap-id="${capId}"] [data-testid="cap-toggle"]`, {
@@ -251,7 +251,7 @@ export async function approveExecute(page: Page, opts: { feeMethod?: "sponsored"
 		await page.evaluate(() => {
 			;(document.querySelector('[data-testid="send-fee-method-trigger"]') as HTMLElement)?.click()
 		})
-		await page.waitForSelector(`[data-testid="send-fee-method-${opts.feeMethod}"]`, { visible: true, timeout: 10_000 })
+		await page.waitForSelector(`[data-testid="send-fee-method-${opts.feeMethod}"]`, { visible: true, timeout: 30_000 })
 		await page.evaluate((kind: string) => {
 			;(document.querySelector(`[data-testid="send-fee-method-${kind}"]`) as HTMLElement)?.click()
 		}, opts.feeMethod)

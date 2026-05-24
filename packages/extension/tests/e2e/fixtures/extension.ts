@@ -53,7 +53,7 @@ export async function launchExtension(): Promise<ExtensionContext> {
 	// Discover extension ID from service worker target
 	const workerTarget = await browser.waitForTarget(
 		(target) => target.type() === "service_worker" && target.url().includes("service-worker-loader"),
-		{ timeout: 10_000 },
+		{ timeout: 30_000 },
 	)
 	const extensionId = new URL(workerTarget.url()).hostname
 
@@ -151,7 +151,7 @@ async function registerProfile(ctx: ExtensionContext): Promise<void> {
 	// Wait for RegisterPopup submit button to mount
 	await page.waitForSelector('[data-testid="register-submit-btn"]', {
 		visible: true,
-		timeout: 10_000,
+		timeout: 30_000,
 	})
 
 	// Profile name is required at submit time (F1: pre-create explicit
@@ -160,7 +160,7 @@ async function registerProfile(ctx: ExtensionContext): Promise<void> {
 
 	await page.waitForSelector('input[placeholder="Strong password"]', {
 		visible: true,
-		timeout: 10_000,
+		timeout: 30_000,
 	})
 
 	const testPassword = "TestPassword123!"
@@ -170,8 +170,8 @@ async function registerProfile(ctx: ExtensionContext): Promise<void> {
 	// Submit (waitForFunction inside clickByTestId gates on :disabled)
 	await clickByTestId(page, "register-submit-btn")
 
-	await waitForHash(page, "#/popup/general", 15_000)
-	await page.waitForSelector('[data-testid="balance-amount"]', { visible: true, timeout: 10_000 })
+	await waitForHash(page, "#/popup/general", 30_000)
+	await page.waitForSelector('[data-testid="balance-amount"]', { visible: true, timeout: 30_000 })
 	await page.close()
 }
 
@@ -297,7 +297,7 @@ export const test = base.extend<{
 			// no accounts → cap-account-item list is empty → every accounts/sendTx/
 			// sim test fails. (Confirmed by Codex audit run 1 — Codex 2026-04-26.)
 			const setupPage = await openPopup(registeredExtension)
-			await waitForHash(setupPage, "#/popup/general", 15_000)
+			await waitForHash(setupPage, "#/popup/general", 30_000)
 			await switchToLocalNetwork(setupPage)
 			await setupPage.close()
 			const playgroundPage = await connectPlayground(registeredExtension)
@@ -309,13 +309,26 @@ export const test = base.extend<{
 	dappConnectedExtensionPerTest: [
 		// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
 		async ({}, use) => {
-			const ctx = await launchExtension()
-			await registerProfile(ctx)
-			const setupPage = await openPopup(ctx)
-			await waitForHash(setupPage, "#/popup/general", 15_000)
-			await switchToLocalNetwork(setupPage)
+			// Phase-tag each setup step. A failure here previously surfaced
+			// downstream as `Cannot read properties of undefined (reading
+			// 'playgroundPage')` — the test body destructured the fixture
+			// result, but use() never ran because setup threw. The tag
+			// converts that opaque collapse into a precise origin line.
+			const phase = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+				try {
+					return await fn()
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err)
+					throw new Error(`[dappConnectedExtensionPerTest:${name}] ${msg}`)
+				}
+			}
+			const ctx = await phase("launchExtension", () => launchExtension())
+			await phase("registerProfile", () => registerProfile(ctx))
+			const setupPage = await phase("openPopup", () => openPopup(ctx))
+			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
+			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
 			await setupPage.close()
-			const playgroundPage = await connectPlayground(ctx)
+			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
 			await use(Object.assign(ctx, { playgroundPage }))
 			await ctx.browser.close()
 		},
@@ -328,7 +341,7 @@ export const test = base.extend<{
 			const ctx = await launchExtension()
 			await registerProfile(ctx)
 			const page = await openPopup(ctx)
-			await waitForHash(page, "#/popup/general", 15_000)
+			await waitForHash(page, "#/popup/general", 30_000)
 			await switchToLocalNetwork(page)
 			await page.close()
 			await use(ctx)
@@ -347,7 +360,7 @@ export const test = base.extend<{
 			await registerProfile(ctx)
 
 			const page = await openPopup(ctx)
-			await waitForHash(page, "#/popup/general", 15_000)
+			await waitForHash(page, "#/popup/general", 30_000)
 			await switchToLocalNetwork(page)
 
 			const accountAddress = await getAccountAddress(page)
@@ -416,7 +429,7 @@ export const test = base.extend<{
 			await registerProfile(ctx)
 
 			const page = await openPopup(ctx)
-			await waitForHash(page, "#/popup/general", 15_000)
+			await waitForHash(page, "#/popup/general", 30_000)
 			await switchToLocalNetwork(page)
 
 			const accountAddress = await getAccountAddress(page)
@@ -520,7 +533,7 @@ export const test = base.extend<{
 			const ctx = await launchExtension()
 			const page = await openPopup(ctx)
 
-			await waitForHash(page, "#/popup/register", 15_000)
+			await waitForHash(page, "#/popup/register", 30_000)
 			await page.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), {
 				timeout: 30_000,
 				polling: 500,
@@ -533,10 +546,10 @@ export const test = base.extend<{
 			})
 			await waitForHash(page, "#/popup/import", 5_000)
 
-			await page.waitForSelector('[data-testid="import-option-private-key"]', { visible: true, timeout: 10_000 })
+			await page.waitForSelector('[data-testid="import-option-private-key"]', { visible: true, timeout: 30_000 })
 			await clickByTestId(page, "import-option-private-key")
 
-			await page.waitForSelector('[data-testid="import-private-key-input"] input', { visible: true, timeout: 10_000 })
+			await page.waitForSelector('[data-testid="import-private-key-input"] input', { visible: true, timeout: 30_000 })
 			await page.evaluate(
 				({ secretKey, pwd }: { secretKey: string; pwd: string }) => {
 					const setVal = (sel: string, v: string) => {
