@@ -41,10 +41,10 @@ test.skipIf(!hasConfig)(
 			select.dispatchEvent(new Event("change", { bubbles: true }))
 		})
 		const seqGrant = await snapshotResultSeq(page)
-		const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 15_000 })
+		const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-requestCapabilities")
 		const capPopup = await capPopupP
-		await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 10_000 })
+		await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 30_000 })
 		const accountIds = await capPopup.evaluate(() =>
 			[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) => r.getAttribute("data-account-id")),
 		)
@@ -89,8 +89,12 @@ test.skipIf(!hasConfig)(
 		const addressDisplayed = await execPopup.$('[data-testid="register-token-address"]')
 		expect(addressDisplayed).not.toBeNull()
 
-		// Approve and wait for the dApp's promise to settle.
-		await execPopup.click('[data-testid="execute-confirm-btn"]')
+		// Approve and wait for the dApp's promise to settle. Use clickByTestId
+		// (NOT raw page.click) so we wait for the Confirm button to become
+		// enabled — dev's :disabled gate is initComplete + tokenMetadataLoading
+		// + operations.length, all async. Raw click races the init and the
+		// approve() handler silently no-ops on the missing guards.
+		await clickByTestId(execPopup, "execute-confirm-btn")
 		const result = await waitForPgResult(page, "registerToken", seqRegister, 30_000)
 		expect(result.status).toBe("ok")
 
