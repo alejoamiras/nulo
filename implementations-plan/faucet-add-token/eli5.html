@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Faucet "Add to Wallet" — ELI5</title>
+<style>
+  :root {
+    --bg: #fcfcfb;
+    --ink: #1a1a1a;
+    --muted: #666;
+    --rule: #e6e6e2;
+    --accent: #2563eb;
+    --warn: #b45309;
+  }
+  body {
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    max-width: 720px;
+    margin: 4rem auto;
+    padding: 0 1.5rem 6rem;
+  }
+  h1 { font-size: 1.8rem; margin: 0 0 0.5rem; letter-spacing: -0.01em; }
+  h2 { font-size: 1.15rem; margin: 2.4rem 0 0.6rem; letter-spacing: -0.01em; }
+  h3 { font-size: 0.95rem; margin: 1.6rem 0 0.4rem; letter-spacing: -0.005em; color: var(--muted); text-transform: uppercase; font-weight: 600; }
+  p { margin: 0 0 0.9rem; }
+  hr { border: 0; border-top: 1px solid var(--rule); margin: 2rem 0; }
+  .lede { font-size: 1.05rem; color: var(--muted); margin-bottom: 2rem; }
+  .phase { margin: 1.2rem 0 1.8rem; padding-left: 0.9rem; border-left: 2px solid var(--rule); }
+  .phase strong { display: block; margin-bottom: 0.3rem; }
+  code { font: 0.93em ui-monospace, "SF Mono", Menlo, monospace; background: #f3f3ee; padding: 0.05em 0.4em; border-radius: 3px; }
+  .why { color: var(--muted); font-style: italic; }
+  .warn { color: var(--warn); }
+  .open { margin: 0.6rem 0 0.6rem 0; padding: 0.6rem 0.9rem; background: #fff8e6; border-left: 2px solid var(--warn); border-radius: 2px; }
+  ul { margin: 0.4rem 0 0.9rem; padding-left: 1.4rem; }
+  li { margin-bottom: 0.2rem; }
+</style>
+</head>
+<body>
+
+<h1>Faucet "Add to Wallet" — ELI5</h1>
+<p class="lede">A button on the faucet that one-clicks the dripped USDC / ETH into the user's wallet popup — like Metamask's "Add Token" but for our Aztec extension. Here's what's happening, in plain language.</p>
+
+<hr />
+
+<h2>The shape of the problem</h2>
+
+<p>When you drip USDC from the faucet, the tokens land in your Aztec account — but the Nulo wallet popup doesn't know to <em>show</em> them. Today you have to copy the USDC contract address from somewhere, open the wallet, click "Add token", paste, confirm. Four steps. Most users give up.</p>
+
+<p>EVM wallets solved this with <code>wallet_watchAsset</code> — a tiny RPC method the dApp calls. We want the same thing for Aztec, hitting our Nulo extension over the wallet-sdk channel that's already wired up.</p>
+
+<h2>The good news (most of it is built)</h2>
+
+<p>Recon found that the extension side is <strong>already wired</strong>:</p>
+<ul>
+  <li>Our dispatcher knows how to receive a <code>registerToken</code> RPC.</li>
+  <li>The execution service knows how to add the token to the user's list, with origin tracking ("Requested by faucet.nulo.app").</li>
+  <li>The popup knows how to render a confirmation card for it.</li>
+  <li>The capability system already gates it under the "accounts" permission.</li>
+</ul>
+<p>So why doesn't it work today?</p>
+
+<h2>The catch</h2>
+
+<p>The standard <code>@aztec/wallet-sdk</code> library — used by dApps to talk to wallets — has a strict allowlist of methods. Anything not in <code>WalletSchema</code> gets rejected on both ends of the encrypted channel. Our <code>registerToken</code> isn't in the allowlist.</p>
+
+<p>An earlier version of our code added it back via a small "schema patch" — but that was deleted during a cleanup pass ("dropped in the canonical refactor"). So today, the dispatcher's <code>registerToken</code> code path is literally unreachable. It's like having a working light bulb but the switch isn't wired to anything.</p>
+
+<h2>What we're doing about it</h2>
+
+<div class="phase">
+  <strong>1. Re-add the missing switch (the "schema patch")</strong>
+  <p>A tiny file that says "hey wallet-sdk, <code>registerToken</code> takes two addresses and returns nothing." Drop it on both sides — extension and faucet — and the existing wiring lights up.</p>
+  <p class="why">Why two copies, not a shared package? It's literally one Zod entry. A shared package would expose <code>@nulo/wallet-bridge</code> to outside dApps, which we don't want yet. A unit test pins the shape on both ends.</p>
+</div>
+
+<div class="phase">
+  <strong>2. Drop the dead RPCs we'll never use</strong>
+  <p>Two other old methods (<code>getCompleteAddress</code>, <code>simulateViews</code>) are also dead today. We delete the dApp-facing wiring for both, but keep <code>simulate_views</code> as an internal operation — the wallet's balance projector still uses it under the hood.</p>
+  <p class="why">Why now? Less surface = fewer footguns. If we're touching this layer anyway, this is the moment.</p>
+</div>
+
+<div class="phase">
+  <strong>3. Add the button</strong>
+  <p>Each token card on the faucet (USDC, ETH) gets an "Add to wallet" button next to the drip buttons. Click it, the extension pops up a confirmation card with the contract address. Approve → token appears in the wallet popup. Cancel → nothing happens (no error message, like Metamask).</p>
+</div>
+
+<div class="phase">
+  <strong>4. Reinstate the playground tester</strong>
+  <p>Our internal playground (used to dogfood custom RPCs) loses its old <code>registerToken</code> button. Add it back — same schema patch, same one-line button binding.</p>
+</div>
+
+<div class="phase">
+  <strong>5. Test it end-to-end</strong>
+  <p>Add a network e2e test that boots the whole stack (anvil + aztec sandbox + extension + faucet), simulates a user clicking the button, approves the popup, and asserts the token now shows up in the wallet popup's token list. The test runs in parallel with other agents on different worktree ports.</p>
+</div>
+
+<hr />
+
+<h2>What could go wrong (security)</h2>
+
+<p>A malicious dApp could call <code>registerToken</code> with a fake USDC. The defenses:</p>
+<ul>
+  <li>The wallet shows a confirmation popup with the contract address. The user sees what's being added.</li>
+  <li>The popup also shows "Requested by &lt;origin&gt;" — so the user knows which dApp asked.</li>
+  <li>It's gated under the <em>accounts</em> capability — a dApp must already have been granted account access.</li>
+  <li>The token list is per-network and per-account, so a testnet faucet can't pollute your mainnet view.</li>
+  <li>Adding the same token twice silently no-ops, so spam loops can't bloat storage.</li>
+</ul>
+<p>What we're <em>not</em> defending against in this PR: lookalike token names (a malicious "USDC" at a different address). The popup shows the address — the user is responsible for noticing. We've filed it as a follow-up.</p>
+
+<h2>Open questions worth your eyes</h2>
+
+<div class="open">
+  <strong>The popup confirmation today shows the contract address only.</strong> Should we also resolve and show the token <em>name</em> / <em>symbol</em> before the Allow / Deny? Cleaner UX, but it adds a second PXE round-trip before the popup renders. Filed as a follow-up — flag if you want it bundled.
+</div>
+
+<div class="open">
+  <strong>Auto-fire <code>registerToken</code> right after a successful drip?</strong> Currently rejected (you said "user clicks the button") to avoid pop-up spam. Worth revisiting if real users don't notice the button.
+</div>
+
+<div class="open">
+  <strong>Push <code>wallet_watchAsset</code> upstream into <code>@aztec/wallet-sdk</code>?</strong> Would let us delete the schema patch entirely. But it blocks on upstream review, and we want this feature now. Filed as a deferred parallel track.
+</div>
+
+<hr />
+
+<h2>What you get when this merges</h2>
+
+<ul>
+  <li>One-click "Add to wallet" on the faucet, for USDC and ETH.</li>
+  <li>Playground gets its <code>registerToken</code> button back, so future custom RPCs have a tester.</li>
+  <li>Dead RPC surface (<code>getCompleteAddress</code>, dApp-side <code>simulateViews</code>) cleaned out.</li>
+  <li>Documentation explaining the schema-patch pattern, so the next person who sees it doesn't have to reverse-engineer it.</li>
+  <li>An e2e test that catches breakage on every network-suite run.</li>
+</ul>
+
+</body>
+</html>

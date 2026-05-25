@@ -4,8 +4,12 @@
  *   - profileTx (same payload, different op)
  *   - executeUtility (balance_of_public read)
  *
- * simulateViews (Nulo-custom) was dropped in the canonical refactor —
- * use simulateUtility / BatchCall.simulate() per wallet-sdk skill.
+ * The retired Nulo-custom `simulateViews` surface is documented in
+ * `packages/wallet-bridge/README.md` under "Custom RPC methods". The
+ * dApp-facing method AND the `simulate_views` op kind are both gone; the
+ * batching logic now lives in
+ * `extension/src/wallet/services/execution/helpers/batched-view-simulation.ts`
+ * and is called directly by balance-projector + gas-balance.
  *
  * Function-call construction uses @defi-wonderland/aztec-standards Token
  * artifact + Contract.at() pattern, mirroring real dApps.

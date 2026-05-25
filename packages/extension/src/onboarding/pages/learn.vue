@@ -29,7 +29,7 @@ function goNext() {
 </script>
 
 <template>
-	<Flex direction="column" gap="40" :class="$style.page">
+	<OnboardingPage :gap="40">
 		<StepIndicator :current="2" />
 		<Flex direction="column" gap="16" :class="$style.hero">
 			<BrutalistTitle main="Meet" sub="Aztec" />
@@ -67,16 +67,10 @@ function goNext() {
 				Skip intro
 			</button>
 		</Flex>
-	</Flex>
+	</OnboardingPage>
 </template>
 
 <style module>
-.page {
-	max-width: 880px;
-	width: 100%;
-	margin: 16px auto 0;
-}
-
 .hero {
 	padding: 8px 0 8px;
 }
@@ -96,7 +90,12 @@ function goNext() {
 	border: 1px solid var(--nulo-border);
 }
 
-@media (max-width: 720px) {
+/* Stack when OnboardingPage's container shrinks below 540 px. Below that,
+ * each card's usable text width (after 24 px side padding) drops under
+ * ~130 px — too cramped for the existing card copy. Container query (not
+ * viewport @media) because the shell adds 24+24 px horizontal padding,
+ * which a viewport-based rule would have to subtract. */
+@container onboarding-page (max-width: 540px) {
 	.grid {
 		grid-template-columns: 1fr;
 	}

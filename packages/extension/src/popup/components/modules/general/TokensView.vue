@@ -314,7 +314,15 @@ onBeforeUnmount(() => {
 			<template v-if="!newTokens.length && !sortedTokenBalances.length && !visibleTokenImports.length">
 				<div :class="$style.empty_state">
 					<span :class="$style.empty_headline">NOTHING HERE YET</span>
-					<span :class="$style.empty_sub">Tap ⋯ above to import your first token.</span>
+					<span :class="$style.empty_sub">
+						<button
+							type="button"
+							@click="popupStore.open('new_token')"
+							data-testid="tokens-empty-import-link"
+							:class="$style.empty_link"
+						>Tap</button>
+						to import your first token.
+					</span>
 				</div>
 			</template>
 		</Flex>
@@ -369,5 +377,33 @@ onBeforeUnmount(() => {
 	font-size: 11px;
 	line-height: 1.4;
 	color: var(--nulo-outline);
+}
+
+.empty_link {
+	/* Real <button> styled inline as a link so it carries native a11y
+	   (focusable, Enter/Space activatable) instead of <a href="#"> + preventDefault.
+	   Inherits font + spacing from the surrounding .empty_sub. */
+	display: inline;
+	padding: 0;
+	margin: 0;
+	border: 0;
+	background: transparent;
+
+	font: inherit;
+	color: var(--txt-secondary);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	cursor: pointer;
+
+	transition: color 0.2s var(--bezier);
+
+	&:hover {
+		color: var(--nulo-accent);
+	}
+
+	&:focus-visible {
+		outline: 2px solid var(--nulo-accent);
+		outline-offset: 2px;
+	}
 }
 </style>

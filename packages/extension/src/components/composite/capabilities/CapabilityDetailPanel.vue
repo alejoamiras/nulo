@@ -1,23 +1,40 @@
 <script setup lang="ts">
+/**
+ * Expanded details for one capability card. Renders the per-flag rows
+ * and the scope contents in the brutalist family style: raw wire strings
+ * are primary, friendly annotations are secondary. The helpers here are
+ * shared with `<ScopeAddress>` / `<ScopeClassId>` (clipboard wiring +
+ * contact-name annotation) — those components own the trust-aware
+ * rendering for addresses and class ids.
+ */
 import type { Capability, Scope, ScopePattern } from "@nulo/wallet-bridge"
-
-/** Composables */
-const { openToast } = useToast()
+import ScopeAddress from "@/components/ScopeAddress.vue"
+import ScopeClassId from "@/components/ScopeClassId.vue"
+import { getMethodLabel } from "@/utils/tx-enrichment"
+import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 
 defineProps<{
 	capability: Capability
 	granted: boolean
 }>()
 
-const copyAddress = (addr: string) => {
-	window.navigator.clipboard.writeText(addr)
-	openToast({ label: "Address is copied", icon: "copy" })
-}
-
-const formatScope = (scope: Scope): { isWildcard: boolean; patterns: ScopePattern[] } => {
+function formatScope(scope: Scope): { isWildcard: boolean; patterns: ScopePattern[] } {
 	if (scope === "*") return { isWildcard: true, patterns: [] }
 	if (Array.isArray(scope)) return { isWildcard: false, patterns: scope }
 	return { isWildcard: true, patterns: [] }
+}
+
+/**
+ * Render-time function-id sanitizer. `humanizeMethodName` is many-to-one
+ * lossy (transfer, transfer_in_private, and transfer_private_to_private
+ * all collapse to "Transfer (private)"), so we always show the RAW
+ * sanitized method id and only attach the friendly label when
+ * `METHOD_LABELS` knows it. Length cap of 64 handles legitimate Aztec
+ * method names (the longest builtins are < 40 chars) while clamping
+ * pathological wire values.
+ */
+function fnLabel(fn: string): string {
+	return sanitizeWireString(fn, 64)
 }
 </script>
 
@@ -29,11 +46,17 @@ const formatScope = (scope: Scope): { isWildcard: boolean; patterns: ScopePatter
 			<Flex direction="column" gap="4" :class="$style.detail_list">
 				<Flex v-if="capability.canGet !== false" align="center" gap="6">
 					<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
-					<Text size="12" color="secondary">View accounts</Text>
+					<Text size="12" color="secondary">Read your account addresses</Text>
 				</Flex>
 				<Flex v-if="capability.canCreateAuthWit" align="center" gap="6">
 					<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
-					<Text size="12" color="secondary">Create auth witnesses</Text>
+					<Text size="12" color="secondary">
+						Sign auth witnesses for actions on your accounts (scope-checked against your other granted permissions before signing)
+					</Text>
+				</Flex>
+				<Flex align="center" gap="6">
+					<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
+					<Text size="12" color="secondary">Register tokens (adds an entry to your wallet's local registry)</Text>
 				</Flex>
 			</Flex>
 		</template>
@@ -46,7 +69,12 @@ const formatScope = (scope: Scope): { isWildcard: boolean; patterns: ScopePatter
 					<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
 					<Text size="12" color="secondary">Any contract</Text>
 				</Flex>
-				<Flex v-else-if="Array.isArray(capability.contracts)" direction="column" gap="8" :class="$style.detail_list">
+				<Flex
+					v-else-if="Array.isArray(capability.contracts)"
+					direction="column"
+					gap="8"
+					:class="$style.detail_list"
+				>
 					<Flex
 						v-for="(addr, ai) in capability.contracts"
 						:key="ai"
@@ -54,14 +82,7 @@ const formatScope = (scope: Scope): { isWildcard: boolean; patterns: ScopePatter
 						gap="6"
 					>
 						<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
-						<Text
-							@click="copyAddress(String(addr))"
-							size="12"
-							color="secondary"
-							:class="$style.copyable"
-						>
-							{{ String(addr) }}
-						</Text>
+						<ScopeAddress :address="String(addr)" />
 					</Flex>
 				</Flex>
 			</Flex>
@@ -88,7 +109,12 @@ const formatScope = (scope: Scope): { isWildcard: boolean; patterns: ScopePatter
 					<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
 					<Text size="12" color="secondary">Any contract class</Text>
 				</Flex>
-				<Flex v-else-if="Array.isArray(capability.classes)" direction="column" gap="8" :class="$style.detail_list">
+				<Flex
+					v-else-if="Array.isArray(capability.classes)"
+					direction="column"
+					gap="8"
+					:class="$style.detail_list"
+				>
 					<Flex
 						v-for="(cls, ci) in capability.classes"
 						:key="ci"
@@ -96,14 +122,7 @@ const formatScope = (scope: Scope): { isWildcard: boolean; patterns: ScopePatter
 						gap="6"
 					>
 						<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
-						<Text
-							@click="copyAddress(String(cls))"
-							size="12"
-							color="secondary"
-							:class="$style.copyable"
-						>
-							{{ String(cls) }}
-						</Text>
+						<ScopeClassId :id="String(cls)" />
 					</Flex>
 				</Flex>
 			</Flex>
@@ -119,8 +138,13 @@ const formatScope = (scope: Scope): { isWildcard: boolean; patterns: ScopePatter
 		<!-- simulation -->
 		<template v-else-if="capability.type === 'simulation'">
 			<Flex v-if="capability.transactions" direction="column" gap="4">
-				<Text size="12" weight="600" color="secondary">Transaction simulation:</Text>
-				<Flex v-if="formatScope(capability.transactions.scope).isWildcard" align="center" gap="6" :class="$style.detail_list">
+				<Text size="12" weight="600" color="secondary">Simulate transactions (and view-calls) in scope:</Text>
+				<Flex
+					v-if="formatScope(capability.transactions.scope).isWildcard"
+					align="center"
+					gap="6"
+					:class="$style.detail_list"
+				>
 					<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
 					<Text size="12" color="secondary">Any contract, any function</Text>
 				</Flex>
@@ -133,24 +157,29 @@ const formatScope = (scope: Scope): { isWildcard: boolean; patterns: ScopePatter
 					>
 						<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
 						<Flex direction="column" gap="3">
-							<Text
-								@click="copyAddress(String(p.contract))"
-								size="12"
-								color="secondary"
-								:class="String(p.contract) !== '*' && $style.copyable"
-							>
-								{{ String(p.contract) === "*" ? "Any contract" : String(p.contract) }}
-							</Text>
-							<Text size="11" color="tertiary">
-								fn: {{ String(p.function) === "*" ? "any function" : p.function }}
-							</Text>
+							<Text v-if="String(p.contract) === '*'" size="12" color="secondary">Any contract</Text>
+							<ScopeAddress v-else :address="String(p.contract)" />
+							<Flex align="center" gap="6">
+								<Text size="11" color="tertiary">fn:</Text>
+								<Text size="11" weight="600" color="secondary" :class="$style.mono">
+									{{ String(p.function) === "*" ? "*" : fnLabel(String(p.function)) }}
+								</Text>
+								<Text v-if="String(p.function) !== '*' && getMethodLabel(String(p.function))" size="11" color="tertiary">
+									· {{ getMethodLabel(String(p.function)) }}
+								</Text>
+							</Flex>
 						</Flex>
 					</Flex>
 				</Flex>
 			</Flex>
 			<Flex v-if="capability.utilities" direction="column" gap="4">
-				<Text size="12" weight="600" color="secondary">Utility simulation:</Text>
-				<Flex v-if="formatScope(capability.utilities.scope).isWildcard" align="center" gap="6" :class="$style.detail_list">
+				<Text size="12" weight="600" color="secondary">Simulate utilities in scope:</Text>
+				<Flex
+					v-if="formatScope(capability.utilities.scope).isWildcard"
+					align="center"
+					gap="6"
+					:class="$style.detail_list"
+				>
 					<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
 					<Text size="12" color="secondary">Any contract, any function</Text>
 				</Flex>
@@ -163,26 +192,22 @@ const formatScope = (scope: Scope): { isWildcard: boolean; patterns: ScopePatter
 					>
 						<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
 						<Flex direction="column" gap="3">
-							<Text
-								@click="copyAddress(String(p.contract))"
-								size="12"
-								color="secondary"
-								:class="String(p.contract) !== '*' && $style.copyable"
-							>
-								{{ String(p.contract) === "*" ? "Any contract" : String(p.contract) }}
-							</Text>
-							<Text size="11" color="tertiary">
-								fn: {{ String(p.function) === "*" ? "any function" : p.function }}
-							</Text>
+							<Text v-if="String(p.contract) === '*'" size="12" color="secondary">Any contract</Text>
+							<ScopeAddress v-else :address="String(p.contract)" />
+							<Flex align="center" gap="6">
+								<Text size="11" color="tertiary">fn:</Text>
+								<Text size="11" weight="600" color="secondary" :class="$style.mono">
+									{{ String(p.function) === "*" ? "*" : fnLabel(String(p.function)) }}
+								</Text>
+								<Text v-if="String(p.function) !== '*' && getMethodLabel(String(p.function))" size="11" color="tertiary">
+									· {{ getMethodLabel(String(p.function)) }}
+								</Text>
+							</Flex>
 						</Flex>
 					</Flex>
 				</Flex>
 			</Flex>
-			<Text
-				v-if="!capability.transactions && !capability.utilities"
-				size="12"
-				color="tertiary"
-			>
+			<Text v-if="!capability.transactions && !capability.utilities" size="12" color="tertiary">
 				No scopes specified
 			</Text>
 		</template>
@@ -190,8 +215,13 @@ const formatScope = (scope: Scope): { isWildcard: boolean; patterns: ScopePatter
 		<!-- transaction -->
 		<template v-else-if="capability.type === 'transaction'">
 			<Flex direction="column" gap="4">
-				<Text size="12" weight="600" color="secondary">Scope:</Text>
-				<Flex v-if="formatScope(capability.scope).isWildcard" align="center" gap="6" :class="$style.detail_list">
+				<Text size="12" weight="600" color="secondary">Allowed transactions:</Text>
+				<Flex
+					v-if="formatScope(capability.scope).isWildcard"
+					align="center"
+					gap="6"
+					:class="$style.detail_list"
+				>
 					<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
 					<Text size="12" color="secondary">Any contract, any function</Text>
 				</Flex>
@@ -204,21 +234,25 @@ const formatScope = (scope: Scope): { isWildcard: boolean; patterns: ScopePatter
 					>
 						<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
 						<Flex direction="column" gap="3">
-							<Text
-								@click="copyAddress(String(p.contract))"
-								size="12"
-								color="secondary"
-								:class="String(p.contract) !== '*' && $style.copyable"
-							>
-								{{ String(p.contract) === "*" ? "Any contract" : String(p.contract) }}
-							</Text>
-							<Text size="11" color="tertiary">
-								fn: {{ String(p.function) === "*" ? "any function" : p.function }}
-							</Text>
+							<Text v-if="String(p.contract) === '*'" size="12" color="secondary">Any contract</Text>
+							<ScopeAddress v-else :address="String(p.contract)" />
+							<Flex align="center" gap="6">
+								<Text size="11" color="tertiary">fn:</Text>
+								<Text size="11" weight="600" color="secondary" :class="$style.mono">
+									{{ String(p.function) === "*" ? "*" : fnLabel(String(p.function)) }}
+								</Text>
+								<Text v-if="String(p.function) !== '*' && getMethodLabel(String(p.function))" size="11" color="tertiary">
+									· {{ getMethodLabel(String(p.function)) }}
+								</Text>
+							</Flex>
 						</Flex>
 					</Flex>
 				</Flex>
 			</Flex>
+			<!-- Load-bearing invariant: dapp-interaction/service.ts:354-362 forces -->
+			<!-- the execute popup for every sendTx under default policy. Editing -->
+			<!-- this line is a security-relevant change; the capability-meta test -->
+			<!-- pins the equivalent description copy too. -->
 			<Text size="11" color="tertiary" :style="{ lineHeight: '1.3' }">
 				Each transaction still requires your approval
 			</Text>
@@ -229,16 +263,32 @@ const formatScope = (scope: Scope): { isWildcard: boolean; patterns: ScopePatter
 			<Flex direction="column" gap="4" :class="$style.detail_list">
 				<Flex v-if="capability.addressBook" align="center" gap="6">
 					<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
-					<Text size="12" color="secondary">Address book access</Text>
+					<Text size="12" color="secondary">Read address book</Text>
+				</Flex>
+				<Flex align="center" gap="6">
+					<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
+					<Text size="12" color="secondary">
+						Register senders (adds an entry to your wallet's local registry for event decryption)
+					</Text>
 				</Flex>
 			</Flex>
 			<Flex v-if="capability.privateEvents" direction="column" gap="4">
-				<Text size="12" weight="600" color="secondary">Private events:</Text>
-				<Flex v-if="capability.privateEvents.contracts === '*'" align="center" gap="6" :class="$style.detail_list">
+				<Text size="12" weight="600" color="secondary">Read private events from:</Text>
+				<Flex
+					v-if="capability.privateEvents.contracts === '*'"
+					align="center"
+					gap="6"
+					:class="$style.detail_list"
+				>
 					<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
 					<Text size="12" color="secondary">Any contract</Text>
 				</Flex>
-				<Flex v-else-if="Array.isArray(capability.privateEvents.contracts)" direction="column" gap="8" :class="$style.detail_list">
+				<Flex
+					v-else-if="Array.isArray(capability.privateEvents.contracts)"
+					direction="column"
+					gap="8"
+					:class="$style.detail_list"
+				>
 					<Flex
 						v-for="(addr, ai) in capability.privateEvents.contracts"
 						:key="ai"
@@ -246,29 +296,25 @@ const formatScope = (scope: Scope): { isWildcard: boolean; patterns: ScopePatter
 						gap="6"
 					>
 						<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
-						<Text
-							@click="copyAddress(String(addr))"
-							size="12"
-							color="secondary"
-							:class="$style.copyable"
-						>
-							{{ String(addr) }}
-						</Text>
+						<ScopeAddress :address="String(addr)" />
 					</Flex>
 				</Flex>
 			</Flex>
-			<Text
-				v-if="!capability.addressBook && !capability.privateEvents"
-				size="12"
-				color="tertiary"
-			>
-				No scopes specified
-			</Text>
 		</template>
 
 		<!-- unknown -->
 		<template v-else>
-			<Text size="12" color="tertiary">No details available</Text>
+			<Flex direction="column" gap="6">
+				<Text size="12" color="secondary">
+					This wallet doesn't recognize this permission. Reject if you don't know what it does.
+				</Text>
+				<Flex align="center" gap="6">
+					<Text size="11" color="tertiary">type:</Text>
+					<Text size="11" weight="600" color="secondary" :class="$style.mono">
+						{{ sanitizeWireString(String((capability as { type: string }).type), 32) }}
+					</Text>
+				</Flex>
+			</Flex>
 		</template>
 	</Flex>
 </template>
@@ -276,7 +322,7 @@ const formatScope = (scope: Scope): { isWildcard: boolean; patterns: ScopePatter
 <style module>
 .panel {
 	background: var(--nulo-surface-low);
-	padding: 10px 12px;
+	padding: 12px;
 	line-height: 1.5;
 }
 
@@ -293,16 +339,8 @@ const formatScope = (scope: Scope): { isWildcard: boolean; patterns: ScopePatter
 	line-height: 1.5;
 }
 
-.copyable {
-	cursor: pointer;
-	text-decoration: underline;
-	text-decoration-style: dotted;
-	text-underline-offset: 2px;
-	word-break: break-all;
-	line-height: 1.5;
-
-	&:hover {
-		color: var(--txt-primary);
-	}
+.mono {
+	font-family: var(--font-mono);
+	letter-spacing: 0.04em;
 }
 </style>

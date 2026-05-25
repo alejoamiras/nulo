@@ -11,6 +11,13 @@ describe("onboarding tab", () => {
 		const page = await openOnboarding(extension)
 		await page.waitForSelector('[data-testid="onboarding-welcome-create"]', { visible: true })
 		await page.waitForSelector('[data-testid="onboarding-welcome-import"]', { visible: true })
+
+		// Pins the a11y decision: app.vue#shell is the page's single `<main>` landmark;
+		// OnboardingPage renders a `<div>` to avoid nesting. A future refactor swapping
+		// the wrapper to `<main>` / `<section>` would fail this assertion immediately.
+		const mainCount = await page.evaluate(() => document.querySelectorAll("main").length)
+		expect(mainCount).toBe(1)
+
 		await page.close()
 	})
 

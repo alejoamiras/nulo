@@ -103,6 +103,7 @@
     "getCurrentWatcher": true,
     "getDecimalSeparator": true,
     "getLastActiveProfileId": true,
+    "getMethodLabel": true,
     "getOriginLabel": true,
     "getPrimaryCall": true,
     "getTemplate": true,

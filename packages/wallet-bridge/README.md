@@ -210,3 +210,69 @@ against a fake services-contract; no real chain or runtime needed.
 Pre-1.0 — minor bumps allowed to widen public types non-breakingly (e.g. the
 `cancelled` variant added in 0.2.0). Major/exhaustive consumers may need a
 new case added to their switches.
+
+## Custom RPC methods (Nulo extensions)
+
+The wallet exposes one Nulo-custom RPC on top of the canonical `@aztec/wallet-sdk`
+`WalletSchema`:
+
+| Method | Signature | Capability | Popup |
+|---|---|---|---|
+| `registerToken` | `(account: AztecAddress, token: AztecAddress) => Promise<void>` | `accounts` | **Always** (per-call confirmation; AccessLevel.AppState) |
+
+`registerToken` adds the token to the wallet's **profile + chain** watchlist
+(not per-account — every account on this chain tracks the token's balance
+once added). The popup pre-fetches the token's `name` / `symbol` / `decimals`
+via `parseTokenInterface` and renders them BEFORE Allow/Deny so the user can
+recognise phishing tokens. The contract address is always shown alongside the
+metadata — the strings come straight from the on-chain contract and are
+attacker-controllable.
+
+### Schema-patch contract
+
+`WalletSchema` is mutable upstream. We extend it at runtime with a Zod entry
+for `registerToken`. **Three inline copies** of the patch live in this monorepo:
+
+| Side | File | Imported by |
+|---|---|---|
+| Extension | `packages/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts` | `wallet-sdk/background.ts` (first import) |
+| Faucet | `packages/faucet/src/lib/nulo-schema-patch.ts` | `composables/useWalletConnection.ts` (first import) |
+| Playground | `packages/playground/src/lib/nulo-schema-patch.ts` | `lib/wallet.ts` (first import) |
+
+Each file is **side-effect only** — no exports. Drift between the three copies
+is pinned by `dispatcher.test.ts` ("schema patch extends WalletSchema with a
+2-arg `registerToken` entry") which imports the extension's copy directly. When
+adding a new Nulo-custom RPC, update all three copies and add a paired
+reachability assertion.
+
+The shared-package alternative (`@nulo/wallet-bridge-client`) was deliberately
+rejected to avoid acquiring third-party dApp consumers on `wallet-bridge` — the
+package depends on `wallet-core` + `extension-messaging` and is intended to stay
+extension-internal.
+
+### Dropped surface
+
+Previously Nulo-custom but no longer reachable from any dApp (the schema
+patch does NOT restore them):
+
+- `getCompleteAddress` — the `accounts` capability response already carries
+  the account list. Use `wallet.requestCapabilities()` → granted accounts.
+- `simulateViews` — fully retired. dApp-facing method AND internal
+  `simulate_views` op kind both gone. Use `wallet.simulateUtility()` (or batch
+  via `wallet.batch([{name: "executeUtility", ...}, ...])`). The internal
+  batching logic that previously lived behind the op kind now lives in
+  `packages/extension/src/wallet/services/execution/helpers/batched-view-simulation.ts`,
+  called directly by balance-projector + gas-balance.
+
+If a future Aztec.js version ships its own `registerToken`, the patch's
+signature-drift guard throws at SW init (`expected 2 params, found N`). Pin the
+`@aztec/wallet-sdk` version exactly (`4.2.0` today) so the patch's
+assumptions are stable across upgrades.
+
+### Not in `batch`
+
+`BatchedMethodSchema` is built from `WalletMethodSchemas` upstream, not from
+`WalletSchema`. Our runtime patch mutates `WalletSchema` but the upstream
+`BatchedMethodSchema` is already frozen. So `wallet.batch([{name:
+"registerToken", ...}])` Zod-rejects on the dApp side. Treat `registerToken`
+as a single-shot call.

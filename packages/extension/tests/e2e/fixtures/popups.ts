@@ -209,9 +209,13 @@ export async function approveCapabilities(
 			visible: true,
 			timeout: 5_000,
 		})
+		// Idempotent select: only click if the row isn't already selected.
+		// Necessary because the wallet auto-selects the single-account case
+		// — clicking again would de-select and fail the "Select at least one
+		// account" approval guard.
 		await page.evaluate((id: string) => {
 			const row = document.querySelector<HTMLElement>(`[data-testid="cap-account-item"][data-account-id="${id}"]`)
-			row?.click()
+			if (row && !row.dataset.selected) row.click()
 		}, accountId)
 	}
 	for (const [accountId, alias] of Object.entries(opts.aliases ?? {})) {

@@ -8,6 +8,7 @@ import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { TokenService, type Token, type TokenInfo } from "@/wallet/services/token/service"
 import { ExecutionService } from "@/wallet/services/execution/service"
+import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { TaskService } from "@/wallet/services/task/service"
 import { OriginType, TransactionService, type Tx, TxStatus } from "@/wallet/services/transaction/service"
 import { SystemClock } from "@/core/adapters/system-clock"
@@ -57,7 +58,15 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		this.executionService = services.get(ExecutionService.name)
 		this.taskService = services.get(TaskService.name)
 
-		const projector = new BalanceProjector(this.executionService, this.networkService, this.tokenService, this.logger)
+		const projector = new BalanceProjector(
+			this.executionService,
+			this.networkService,
+			this.tokenService,
+			this.profileService,
+			this.accountService,
+			new PxeServiceClient(this.logger),
+			this.logger,
+		)
 		this.queue = new BalanceJobQueue(
 			this.ticker,
 			this.repo,

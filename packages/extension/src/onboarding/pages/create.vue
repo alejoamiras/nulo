@@ -153,7 +153,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex direction="column" gap="32" :class="$style.page">
+	<OnboardingPage>
 		<button
 			type="button"
 			:class="$style.back"
@@ -266,16 +266,10 @@ onBeforeUnmount(() => {
 			@resolve="onCeremonyResolve"
 			@reject="onCeremonyReject"
 		/>
-	</Flex>
+	</OnboardingPage>
 </template>
 
 <style module>
-.page {
-	max-width: 480px;
-	width: 100%;
-	margin: 16px auto 0;
-}
-
 .back {
 	align-self: flex-start;
 	display: inline-flex;

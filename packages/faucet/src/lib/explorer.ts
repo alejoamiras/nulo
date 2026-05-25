@@ -2,9 +2,9 @@
  * Build explorer URLs for tx hashes + contract addresses, targeting
  * https://testnet.aztecscan.xyz (configurable via VITE_EXPLORER_BASE_URL).
  *
- * aztecscan URL shapes:
+ * aztecscan URL shapes (verified 2026-05-22):
  *   - Transactions live at `/tx-effects/<hash>`
- *   - Contracts live at `/contracts/<address>` (Dripper, USDC, ETH)
+ *   - Contract instances live at `/contracts/instances/<address>` (Dripper, USDC, ETH)
  *
  * Returns "" when no base URL is configured — callers suppress the link
  * in that case so the surrounding text still reads cleanly.
@@ -25,5 +25,5 @@ export function explorerTxUrl(hash: string): string {
 export function explorerAddressUrl(addr: string): string {
 	const b = base()
 	if (!b || !addr) return ""
-	return `${b}/contracts/${addr}`
+	return `${b}/contracts/instances/${addr}`
 }
