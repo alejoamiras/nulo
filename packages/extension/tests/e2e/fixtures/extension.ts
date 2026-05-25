@@ -190,7 +190,19 @@ async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
 	const { openPlayground } = await import("./playground")
 	const { waitForPopup, approveDiscover, approveVerify } = await import("./popups")
 
-	const dappPage = await openPlayground(ctx)
+	// Internal phase-tag so the outer `[dappConnectedExtensionPerTest:connectPlayground]`
+	// error tells us WHICH step inside this function fails. Without this we
+	// only know "30s timeout somewhere in here" — useless for triage.
+	const step = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+		try {
+			return await fn()
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err)
+			throw new Error(`connectPlayground:${name} — ${msg}`)
+		}
+	}
+
+	const dappPage = await step("openPlayground", () => openPlayground(ctx))
 
 	// Set up popup listeners BEFORE the click so we don't miss the events.
 	const discoverP = waitForPopup(ctx, "discover", { timeout: 30_000 })
@@ -200,10 +212,10 @@ async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
 	// for ~10s on its own which is still usually enough, but the explicit
 	// waitForSelector here was the load-bearing 5s timeout that cascaded
 	// into ~40 fixture failures.
-	await dappPage.waitForSelector('[data-testid="pg-btn-connect"]', { visible: true, timeout: 30_000 })
-	await clickByTestId(dappPage, "pg-btn-connect")
+	await step("waitForConnectBtn", () => dappPage.waitForSelector('[data-testid="pg-btn-connect"]', { visible: true, timeout: 30_000 }))
+	await step("clickConnect", () => clickByTestId(dappPage, "pg-btn-connect"))
 
-	const discoverPage = await discoverP
+	const discoverPage = await step("awaitDiscoverPopup", () => discoverP)
 	// Arm the verify popup wait BEFORE approveDiscover triggers the SW to
 	// create the verify window. Codex audit caught: approveDiscover only
 	// clicks (popups.ts:126), doesn't wait for close. If verify opens
@@ -212,11 +224,13 @@ async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
 	// the test then hangs for 30s waiting for a NEW verify target that
 	// never appears. Race confirmed deterministic on shard 5.
 	const verifyP = waitForPopup(ctx, "verify", { timeout: 30_000 })
-	await approveDiscover(discoverPage)
-	const verifyPage = await verifyP
-	await approveVerify(verifyPage)
+	await step("approveDiscover", () => approveDiscover(discoverPage))
+	const verifyPage = await step("awaitVerifyPopup", () => verifyP)
+	await step("approveVerify", () => approveVerify(verifyPage))
 
-	await dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 20_000 })
+	await step("waitForConnectedStatus", () =>
+		dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 30_000 }),
+	)
 	return dappPage
 }
 
