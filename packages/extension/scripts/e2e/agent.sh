@@ -27,8 +27,8 @@ ANVIL_URL=$(jq -r .anvilUrl "$PORTS_JSON")
 AZTEC_NODE_URL=$(jq -r .aztecUrl "$PORTS_JSON")
 PLAYGROUND_URL=$(jq -r .playgroundUrl "$PORTS_JSON")
 
-echo "[e2e:agent] building wallet with VITE_LOCAL_NETWORK_RPC_URL=$AZTEC_NODE_URL"
-VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" bun run build:chrome
+echo "[e2e:agent] building wallet with VITE_LOCAL_NETWORK_RPC_URL=$AZTEC_NODE_URL (NULO_E2E_WALLET_PROBE=${NULO_E2E_WALLET_PROBE:-0})"
+VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" NULO_E2E_WALLET_PROBE="${NULO_E2E_WALLET_PROBE:-}" bun run build:chrome
 
 # Bundle assertion — if the URL didn't actually land in dist, abort before the
 # tests waste cycles. This catches the silent failure mode where vi.stubEnv-

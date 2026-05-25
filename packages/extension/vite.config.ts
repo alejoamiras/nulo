@@ -319,5 +319,11 @@ export default defineConfig({
 			LOG_LEVEL: "verbose",
 			BB_WASM_PATH: "/assets/barretenberg.wasm.gz",
 		}),
+		// E2E-only: enable wallet-side `[wallet-probe]` timing logs that trace
+		// onSessionEstablished + handleDiscovery phases for the network-followups
+		// connectPlayground:awaitVerifyPopup investigation. Bake in via define
+		// because SWs can't read process.env at runtime. See
+		// implementations-plan/network-followups/audit-codex-rootcause-6.md.
+		"globalThis.NULO_E2E_WALLET_PROBE": JSON.stringify(process.env.NULO_E2E_WALLET_PROBE ?? ""),
 	},
 })

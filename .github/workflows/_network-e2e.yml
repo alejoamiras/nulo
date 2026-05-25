@@ -60,6 +60,11 @@ jobs:
       # multi-account-from). See implementations-plan/network-followups/slow-tests-hypotheses.md
       # for the deferred investigation. Locally these still run (env unset).
       NULO_E2E_SKIP_DEFERRED_SLOW: "1"
+      # E2E-only: enable wallet-side `[wallet-probe]` timing logs to find the
+      # connectPlayground:awaitVerifyPopup root cause (audit-codex-rootcause-6).
+      # Baked into the wallet bundle via vite `define` at build time (only when
+      # set). Bundle-grep step is aware of this marker and skips when probe is on.
+      NULO_E2E_WALLET_PROBE: "1"
     steps:
       - uses: actions/checkout@v6
         with:
