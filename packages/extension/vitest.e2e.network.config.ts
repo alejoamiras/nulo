@@ -25,19 +25,14 @@ export default defineConfig({
 		// behavior in case a future vitest version shifts the default.
 		pool: "forks",
 		isolate: true,
-		// Default retries across all network tests. The network suite runs
-		// against an anvil+aztec sandbox; under cumulative load the puppeteer
-		// 15s target-wait inside waitForPopup occasionally drops with a
-		// generic `Timed out after waiting 15000ms`. Tests pass deterministically
-		// in isolation. The "rotating flake" pattern is documented in
-		// implementations-plan/network-test-triage/full-suite-findings.md.
-		//
-		// CI runs as a 5-shard matrix (see .github/workflows/pr-network-e2e.yml).
-		// retry: 4 (5 attempts) absorbs the rotating popup-timeout flakes
-		// observed in early sharded runs — retry: 2 (3 attempts) still saw
-		// ~5 rotating failures per run; 5 attempts brings the failure rate
-		// below the rotation period.
-		retry: 4,
+		// 3 attempts per test. Mostly a guard against transient CI flake — the
+		// rotating popup-timeout flakes documented in
+		// implementations-plan/network-test-triage/full-suite-findings.md were
+		// actually a Vue popup race (popup approve handler silently returning
+		// when clicked before init completed). That race is fixed at the source
+		// (see implementations-plan/network-followups/audit-codex-rootcause.md
+		// for the investigation + fix); retry is just belt-and-suspenders now.
+		retry: 2,
 		// Node v24 enforces JSON import attributes; @aztec/accounts imports JSON without them.
 		// Use the unstable loader to relax this check in the global setup process.
 		server: {
