@@ -320,15 +320,8 @@ export const test = base.extend<{
 			const setupPage = await openPopup(registeredExtension)
 			await waitForHash(setupPage, "#/popup/general", 30_000)
 			await switchToLocalNetwork(setupPage)
-			// Keep setupPage OPEN through connectPlayground so the wallet SW
-			// stays hot during the dApp connect handshake. Closing here lets
-			// MV3 idle-suspend the SW while the playground page loads; the
-			// cold restart then blows past upstream wallet-sdk's 2s
-			// KEY_EXCHANGE_TIMEOUT_MS. Codex audit-4 verified there's no
-			// extra message after KEY_EXCHANGE_REQUEST, so the bottleneck is
-			// SW boot, not handshake protocol. Close after handshake done.
-			const playgroundPage = await connectPlayground(registeredExtension)
 			await setupPage.close()
+			const playgroundPage = await connectPlayground(registeredExtension)
 			await use(Object.assign(registeredExtension, { playgroundPage }))
 		},
 		{ scope: "file" },
@@ -355,12 +348,8 @@ export const test = base.extend<{
 			const setupPage = await phase("openPopup", () => openPopup(ctx))
 			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
 			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
-			// Keep setupPage OPEN through connectPlayground (codex audit-4):
-			// closing here lets MV3 idle-suspend the SW during the playground
-			// page load, then the cold restart busts the upstream wallet-sdk
-			// 2s KEY_EXCHANGE_TIMEOUT_MS. Close after handshake completes.
-			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
 			await setupPage.close()
+			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
 			await use(Object.assign(ctx, { playgroundPage }))
 			await ctx.browser.close()
 		},
