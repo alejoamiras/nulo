@@ -52,8 +52,9 @@ bun --version
 
 if ! command -v node >/dev/null; then
 	# Retry-on-network-blip + arch detection (linux/amd64 emulation on macOS).
-	# Pin to v24.4.0 (the version GitHub Actions setup-node@v6 currently uses).
-	NODE_VERSION="${NODE_VERSION:-v24.4.0}"
+	# Pin to v24.16.0 (latest 24.x LTS as of bootstrap). Aztec's install script
+	# requires Node >= 24.12.0; 24.4.0 (default in setup-node@v6) is too old.
+	NODE_VERSION="${NODE_VERSION:-v24.16.0}"
 	ARCH=$(uname -m); case "$ARCH" in x86_64) ARCH=x64;; aarch64) ARCH=arm64;; esac
 	for attempt in 1 2 3; do
 		if curl -fsSL --retry 5 --retry-delay 2 --retry-max-time 120 \
@@ -86,12 +87,33 @@ echo "::endgroup::"
 echo "::group::aztec cli"
 AZTEC_VERSION=$(bun -e "console.log(JSON.parse(require('fs').readFileSync('packages/extension/package.json','utf8')).dependencies['@aztec/aztec.js'])")
 echo "Aztec version: $AZTEC_VERSION"
-if [ ! -d "/root/.aztec/versions/$AZTEC_VERSION" ]; then
+echo "node: $(command -v node) ($(node --version))"
+echo "anvil: $(command -v anvil) ($(anvil --version 2>&1 | head -1))"
+# Force re-install if the bin dir is empty (previous failed installs left
+# stub directories that pass `-d` but contain no binaries).
+AZTEC_BIN_DIR="/root/.aztec/versions/$AZTEC_VERSION/bin"
+if [ ! -x "$AZTEC_BIN_DIR/anvil" ]; then
+	echo "::warning::aztec install absent or stale at $AZTEC_BIN_DIR; reinstalling"
+	rm -rf "/root/.aztec/versions/$AZTEC_VERSION"
 	export CI=1
 	export FOUNDRY_DIR="$HOME/.foundry"
 	curl -fsSL "https://install.aztec.network/${AZTEC_VERSION}/install" | VERSION="$AZTEC_VERSION" bash
 fi
+# global-setup.ts looks at ~/.aztec/current/bin/anvil exactly. The aztec
+# installer SHOULD have put anvil there; if it didn't (foundry already in PATH,
+# or partial install), symlink our foundry anvil so the test stack finds it.
+if [ ! -x "$AZTEC_BIN_DIR/anvil" ]; then
+	if [ -x /root/.foundry/bin/anvil ]; then
+		echo "::warning::aztec install didn't place anvil; symlinking foundry's"
+		mkdir -p "$AZTEC_BIN_DIR"
+		ln -sfn /root/.foundry/bin/anvil "$AZTEC_BIN_DIR/anvil"
+	else
+		echo "::error::no anvil available anywhere"
+		exit 2
+	fi
+fi
 ln -sfn "/root/.aztec/versions/${AZTEC_VERSION}" /root/.aztec/current
+ls -la "$AZTEC_BIN_DIR/" || true
 export PATH="/root/.aztec/current/bin:/root/.aztec/current/node_modules/.bin:$PATH"
 echo "::endgroup::"
 
