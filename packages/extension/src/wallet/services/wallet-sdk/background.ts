@@ -143,14 +143,6 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 			},
 
 			onSessionEstablished: async (session) => {
-				// PROBE: timing instrumentation to find the e2e shard cliff
-				// (audit-codex-rootcause-6.md). Gated on NULO_E2E_WALLET_PROBE=1.
-				const probe = (globalThis as { NULO_E2E_WALLET_PROBE?: string }).NULO_E2E_WALLET_PROBE === "1"
-				const t0 = probe ? performance.now() : 0
-				const probeLog = (label: string, t: number) => {
-					if (probe) console.log(`[wallet-probe] onSessionEstablished ${label} +${(performance.now() - t).toFixed(0)}ms`)
-				}
-
 				// Sessions are per-`(origin, chainId)`. The upstream
 				// `ActiveSession` carries `chainInfo` (set from the matching
 				// discovery during key exchange — see the wallet-sdk
@@ -158,14 +150,9 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				// directly from the session being established. No side-channel
 				// map needed.
 				const chainId = String(chainInfoToChainId(session))
-				probeLog("start", t0)
-				const tLookup = probe ? performance.now() : 0
 				const dappSession = await dappSessionService.tryGetDappSessionByOriginAndChain(session.origin, chainId)
-				probeLog(`tryGetDappSessionByOriginAndChain (found=${!!dappSession})`, tLookup)
 				if (dappSession) {
-					const tHash = probe ? performance.now() : 0
 					await dappSessionService.setVerificationHash(dappSession.id, session.verificationHash)
-					probeLog("setVerificationHash", tHash)
 				}
 
 				const verifKey = pendingKey(session.origin, chainId)
@@ -173,40 +160,17 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				if (isNewConnection) pendingVerification.delete(verifKey)
 
 				const needsVerification = isNewConnection || (dappSession && !dappSession.trustedVerification)
-				if (probe) {
-					console.log(
-						`[wallet-probe] onSessionEstablished decide isNew=${isNewConnection} hasSession=${!!dappSession} trusted=${dappSession?.trustedVerification} needsVerification=${needsVerification}`,
-					)
-				}
 
 				if (needsVerification && dappSession) {
-					const tCreate = probe ? performance.now() : 0
-					const verifyUrl = chrome.runtime.getURL(
-						`src/popup/index.html#/windows/verify?sessionId=${dappSession.id}&isReconnect=${!isNewConnection}`,
-					)
-					if (probe) console.log(`[wallet-probe] onSessionEstablished verify URL: ${verifyUrl}`)
-					// AWAIT so we know if chrome actually created the window or threw.
-					// Previously fire-and-forget; iter #16 showed waitForPopup never sees verify
-					// even though this code path runs — need to know if create succeeded.
-					chrome.windows
-						.create({
-							type: "popup",
-							url: verifyUrl,
-							height: 800,
-							width: 400,
-						})
-						.then((w) => {
-							if (probe)
-								console.log(
-									`[wallet-probe] onSessionEstablished chrome.windows.create resolved windowId=${w?.id} tabId=${w?.tabs?.[0]?.id} +${(performance.now() - tCreate).toFixed(0)}ms`,
-								)
-						})
-						.catch((err) => {
-							console.error(`[wallet-probe] onSessionEstablished chrome.windows.create REJECTED:`, err)
-						})
-					probeLog("chrome.windows.create issued (sync)", tCreate)
+					chrome.windows.create({
+						type: "popup",
+						url: chrome.runtime.getURL(
+							`src/popup/index.html#/windows/verify?sessionId=${dappSession.id}&isReconnect=${!isNewConnection}`,
+						),
+						height: 800,
+						width: 400,
+					})
 				}
-				probeLog("total", t0)
 			},
 
 			onSessionTerminated: (sessionId) => {
@@ -416,14 +380,7 @@ async function handleDiscovery(
 		pendingDiscoveryPromises.set(dedupeKey, popupPromise)
 
 		try {
-			const probe = (globalThis as { NULO_E2E_WALLET_PROBE?: string }).NULO_E2E_WALLET_PROBE === "1"
-			const probeLog = (label: string, t: number) => {
-				if (probe) console.log(`[wallet-probe] handleDiscovery ${label} +${(performance.now() - t).toFixed(0)}ms`)
-			}
-
-			const tDiscover = probe ? performance.now() : 0
 			const result = await dappInteractionService.discover(params, discovery.requestId)
-			probeLog(`dappInteractionService.discover (approved=${result.approved})`, tDiscover)
 			if (!result.approved) {
 				handler.rejectDiscovery(discovery.requestId)
 				logger.log("wallet-sdk", LogLevel.Info, `Discovery denied: ${discovery.origin}`)
@@ -436,7 +393,6 @@ async function handleDiscovery(
 			// `chainId` is required and scopes the entire session. No
 			// `chains` field on `DappPermissions` — it would duplicate the
 			// parent session's `chainId`.
-			const tAdd = probe ? performance.now() : 0
 			const newSession = await dappSessionService.addDappSession(
 				params.dappMetadata,
 				[{ methods: [] }],
@@ -444,18 +400,13 @@ async function handleDiscovery(
 				AccessLevel.Transactions,
 				chainId,
 			)
-			probeLog("addDappSession (incl deleteExpired full-store scan)", tAdd)
 
 			// Initialize with empty capability grants so enforceCapability()
 			// blocks non-exempt methods until requestCapabilities() is called.
-			const tCaps = probe ? performance.now() : 0
 			await dappSessionService.setCapabilityGrants(newSession.id, [])
-			probeLog("setCapabilityGrants", tCaps)
 
 			pendingVerification.add(dedupeKey)
-			const tApprove = probe ? performance.now() : 0
 			handler.approveDiscovery(discovery.requestId)
-			probeLog("handler.approveDiscovery", tApprove)
 			logger.log("wallet-sdk", LogLevel.Info, `Discovery approved: ${discovery.origin} chain=${chainId}`)
 		} finally {
 			resolvePopup!()

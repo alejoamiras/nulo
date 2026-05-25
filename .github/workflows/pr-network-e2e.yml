@@ -119,9 +119,6 @@ jobs:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       shard: ${{ matrix.shard.id }}
       shard_label: ${{ matrix.shard.label }}
-      # TEMP iter #15: enable wallet-probe to trace connectPlayground:awaitVerifyPopup
-      # bottleneck. Bundle-grep skips when probe=1. Remove after triage.
-      probe: "1"
     secrets:
       SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
 

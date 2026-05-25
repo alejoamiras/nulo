@@ -57,24 +57,6 @@ export async function launchExtension(): Promise<ExtensionContext> {
 	)
 	const extensionId = new URL(workerTarget.url()).hostname
 
-	// PROBE: forward SW console.log lines tagged [wallet-probe] to test stdout
-	// so the wallet-side timing instrumentation surfaces in CI logs. Gated on
-	// the SW probe build flag implicitly — when probe is off, no [wallet-probe]
-	// lines are emitted so this is a no-op.
-	try {
-		const swWorker = await workerTarget.worker()
-		if (swWorker) {
-			swWorker.on("console", (msg) => {
-				const text = msg.text()
-				if (text.includes("[wallet-probe]")) {
-					console.log(`[sw] ${text}`)
-				}
-			})
-		}
-	} catch {
-		// Worker hookup is best-effort; failure here doesn't break tests.
-	}
-
 	// Wait for SW to fully initialize (liveness signal in chrome.storage.session).
 	// runtime.ts writes the first liveness immediately after initWalletSdkHandler;
 	// 30s timeout matches the helper in sw-resilience.test.ts and gives headroom

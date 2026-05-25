@@ -372,19 +372,13 @@ export default async function setup(project: TestProject) {
 					NODE_ENV: "test",
 					VITE_DISABLE_HMR: "1",
 					PLAYGROUND_PORT: String(PLAYGROUND_PORT),
-					// E2E-only: override upstream wallet-sdk's hardcoded 2s ECDH
-					// timeout to validate the cold-SW-vs-upstream-race hypothesis
-					// (audit-codex-rootcause-3.md). Playground vite.config.ts has a
-					// transform plugin that only fires when this env is set. The
-					// wallet extension uses a different submodule and is unaffected.
-					NULO_E2E_KEY_EXCHANGE_MS: process.env.NULO_E2E_KEY_EXCHANGE_MS ?? "10000",
 				},
 			})
 			weStartedPlayground = true
 
 			playgroundProcess.stdout?.on("data", (data: Buffer) => {
 				const line = data.toString().trim()
-				if (line.includes("Local:") || line.includes("error") || line.includes("patched wallet-sdk")) {
+				if (line.includes("Local:") || line.includes("error")) {
 					console.log("[playground]", line.slice(0, 200))
 				}
 			})
