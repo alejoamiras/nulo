@@ -37,6 +37,12 @@ jobs:
               - 'packages/extension/src/wallet/services/fpc/**'
               - 'packages/extension/src/wallet/services/dapp-interaction/**'
               - 'packages/extension/src/wallet/services/dapp-session/**'
+              # TokenBalance + token detail page — added 2026-05-24 so a
+              # TokenBalance-only bugfix PR on `dev` doesn't silently skip the
+              # network matrix. The Phase B TokenBalance auto-refresh change
+              # lives in tokens/[id].vue + balance service code.
+              - 'packages/extension/src/wallet/services/token-balance/**'
+              - 'packages/extension/src/popup/pages/tokens/**'
               - 'packages/extension/src/offscreen/**'
               - 'packages/extension/tests/e2e/network/**'
               - 'packages/extension/tests/e2e/fixtures/**'
@@ -83,12 +89,36 @@ jobs:
           fi
 
   network-e2e:
-    name: Run
+    name: Run / shard ${{ matrix.shard.id }}
     needs: decide
     if: needs.decide.outputs.run == 'true'
+    strategy:
+      # Don't cancel other shards when one fails — under flaky CI we want the
+      # full per-shard picture. fail-fast: true would mask "is this 1 specific
+      # shard failing or is the suite broadly broken?"
+      fail-fast: false
+      matrix:
+        # N=5 splits the 45 network test files into 9-per-shard. N=5 (not N=4)
+        # because vitest's deterministic SHA-1-of-file-path sharder puts the
+        # two known slow files (multi-account-from, tx-sendTx-multicall) into
+        # the same shard at N=4; N=5 separates them. ~25% more runner cost for
+        # materially better worst-case shard wall-time.
+        #
+        # `id` is the vitest --shard=N/M value. `label` is the artifact-safe
+        # variant (no `/`). actions/upload-artifact rejects `/` in artifact
+        # names (https://github.com/actions/upload-artifact/issues/647), so
+        # the reusable workflow takes both as separate inputs.
+        shard:
+          - { id: "1/5", label: "1-of-5" }
+          - { id: "2/5", label: "2-of-5" }
+          - { id: "3/5", label: "3-of-5" }
+          - { id: "4/5", label: "4-of-5" }
+          - { id: "5/5", label: "5-of-5" }
     uses: ./.github/workflows/_network-e2e.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      shard: ${{ matrix.shard.id }}
+      shard_label: ${{ matrix.shard.label }}
     secrets:
       SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
 

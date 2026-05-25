@@ -21,7 +21,10 @@ export async function waitForPopup(
 	kind: PopupKind,
 	opts: { requestId?: string; timeout?: number } = {},
 ): Promise<Page> {
-	const timeout = opts.timeout ?? 15_000
+	// CI CPU pressure pushes popup-mount latency up against the 15s cliff
+	// (see implementations-plan/network-followups/plan.md §C). 30s gives 2×
+	// margin without changing the steady-state — fast machines resolve in ms.
+	const timeout = opts.timeout ?? 30_000
 	// Snapshot existing matching target URLs so we only resolve a NEW popup,
 	// not a stale one left by a prior interaction. URL contains a unique
 	// requestId set by DappInteractionService.interaction(), so URL novelty
@@ -81,7 +84,7 @@ export async function waitForPopup(
 					return false
 				}
 			},
-			{ timeout: 10_000, polling: 250 },
+			{ timeout: 30_000, polling: 250 },
 		)
 	try {
 		await livenessFn()
@@ -188,7 +191,7 @@ export async function approveCapabilities(
 		() =>
 			document.querySelector('[data-testid="cap-item"]') !== null ||
 			document.querySelector('[data-testid="cap-account-item"]') !== null,
-		{ timeout: 10_000, polling: 200 },
+		{ timeout: 30_000, polling: 200 },
 	)
 	for (const capId of opts.toggleOff ?? []) {
 		await page.waitForSelector(`[data-testid="cap-item"][data-cap-id="${capId}"] [data-testid="cap-toggle"]`, {
@@ -244,11 +247,11 @@ export async function approveExecute(page: Page, opts: { feeMethod?: "sponsored"
 		// service round-trip that can take several seconds on cold start. Wait for the
 		// trigger to be visible before clicking it; otherwise the click is a no-op
 		// against a not-yet-mounted DOM and the per-method option never renders.
-		await page.waitForSelector('[data-testid="send-fee-method-trigger"]', { visible: true, timeout: 15_000 })
+		await page.waitForSelector('[data-testid="send-fee-method-trigger"]', { visible: true, timeout: 30_000 })
 		await page.evaluate(() => {
 			;(document.querySelector('[data-testid="send-fee-method-trigger"]') as HTMLElement)?.click()
 		})
-		await page.waitForSelector(`[data-testid="send-fee-method-${opts.feeMethod}"]`, { visible: true, timeout: 10_000 })
+		await page.waitForSelector(`[data-testid="send-fee-method-${opts.feeMethod}"]`, { visible: true, timeout: 30_000 })
 		await page.evaluate((kind: string) => {
 			;(document.querySelector(`[data-testid="send-fee-method-${kind}"]`) as HTMLElement)?.click()
 		}, opts.feeMethod)
@@ -268,7 +271,7 @@ export async function rejectExecute(page: Page): Promise<void> {
  * the "execute-op-item read returns []" race that previously skipped the
  * tx-sendTx-* suite.
  */
-export async function waitForExecuteContent(page: Page, timeout = 15_000): Promise<void> {
+export async function waitForExecuteContent(page: Page, timeout = 30_000): Promise<void> {
 	await page.waitForSelector('[data-testid="execute-op-item"]', { visible: true, timeout })
 }
 
@@ -295,7 +298,7 @@ export async function getExecuteOps(page: Page): Promise<Array<{ id: string; kin
  * cap-item-only wait silently times out via `.catch(() => undefined)` on
  * the accounts-only path, leaving downstream selectors racing.
  */
-export async function waitCapabilitiesReady(page: Page, timeout = 15_000): Promise<void> {
+export async function waitCapabilitiesReady(page: Page, timeout = 30_000): Promise<void> {
 	await page.waitForFunction(
 		() =>
 			document.querySelector('[data-testid="cap-item"]') !== null ||

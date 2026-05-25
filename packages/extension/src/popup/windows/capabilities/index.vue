@@ -350,7 +350,14 @@ onUnmounted(() => {
 			</Tooltip>
 
 			<Flex align="center" justify="between" gap="12">
-				<Button data-testid="cap-reject-btn" @click="reject" wide variant="primary_outline" size="medium" :disabled="isLoading">
+				<Button
+					data-testid="cap-reject-btn"
+					@click="reject"
+					wide
+					variant="primary_outline"
+					size="medium"
+					:disabled="isLoading || !requestId"
+				>
 					Reject
 				</Button>
 
@@ -361,7 +368,7 @@ onUnmounted(() => {
 					variant="primary"
 					size="medium"
 					:loading="isLoading"
-					:disabled="processingError?.type === 'error'"
+					:disabled="processingError?.type === 'error' || !requestId"
 				>
 					<Text size="13" color="inverse">Approve</Text>
 				</Button>

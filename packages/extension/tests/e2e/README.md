@@ -71,6 +71,22 @@ If you `bun run vitest run --config vitest.e2e.network.config.ts` directly with 
 
 If any check fails, setup reaps the stale children and cold-starts a fresh stack. `bun run e2e:agent` always allocates fresh ports, so it never hits the reuse path — the lockfile only serves orphan cleanup there.
 
+## CI sharding (5-way matrix)
+
+CI runs the network suite as a **5-shard GitHub Actions matrix** (`.github/workflows/pr-network-e2e.yml`). Each shard:
+
+- Is its own ubuntu-latest VM — own anvil, own aztec node, own playground vite, own Chrome
+- Gets ~9 of the 45 network test files, assigned deterministically by vitest's `--shard=N/M` (SHA-1 hash of filename)
+- Runs in parallel with the other 4 shards
+
+**Wall time**: ~10–15 min (vs ~35–45 min unsharded). CPU minutes: ~25% more than serial (each shard pays the ~30s anvil+aztec boot cost), but the wall-time win is dramatic.
+
+**Why N=5 and not N=4 or N=9**: N=4 collides the two known-slow files (`tx-sendTx-multicall`, `multi-account-from`) on the same shard, blowing the shard timeout. N=9 (1 file/shard) eliminates cumulative state but pays the boot cost 9× — diminishing returns. N=5 is the sweet spot.
+
+**Failing shard logs**: each shard uploads its own artifact (`network-e2e-logs-<N>-of-5`) containing `.e2e-state`, `aztec-*.log`, `anvil-*.log` on failure.
+
+**Quarantined tests**: the 2 deterministic-slow files above are skipped in CI via `NULO_E2E_SKIP_DEFERRED_SLOW=1` env (still run locally). Tracked in `implementations-plan/network-followups/slow-tests-hypotheses.md`.
+
 ## Troubleshooting
 
 **`FATAL: built bundle does not contain http://localhost:<port>`** — vite didn't substitute `import.meta.env.VITE_LOCAL_NETWORK_RPC_URL`. Confirm `vite.config.ts` exposes the `VITE_*` env (this is on by default; the build wrapper passes the env via `VITE_LOCAL_NETWORK_RPC_URL=... bun run build:chrome`).

@@ -6,6 +6,11 @@ import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
+// Deferred slow-test marker (see implementations-plan/network-followups/slow-tests-hypotheses.md).
+// On CI per-shard runner, this test deterministically exhausts its timeout
+// budget under cap-popup target-creation backpressure (H-OP-3). Skipped in
+// CI via NULO_E2E_SKIP_DEFERRED_SLOW=1; runs locally to retain coverage.
+const skipDeferredSlow = process.env.NULO_E2E_SKIP_DEFERRED_SLOW === "1"
 
 /**
  * Test #39 — characterization: multi-account session, sendTx ignores
@@ -24,7 +29,7 @@ const hasConfig = aztecConfig !== undefined
 // back-to-back), the `dappConnectedExtension` fixture's capability popup
 // occasionally takes >15s to mount and the inner `waitForPopup` timeout
 // fires. Deterministic in isolation; retry stays scoped here.
-test.skipIf(!hasConfig)(
+test.skipIf(!hasConfig || skipDeferredSlow)(
 	"multi-account-from — handleSendTx picks first session account regardless of opts.from",
 	{ timeout: 180_000, retry: 1 },
 	async ({ dappConnectedExtension }) => {
@@ -36,7 +41,7 @@ test.skipIf(!hasConfig)(
 			select.dispatchEvent(new Event("change", { bubbles: true }))
 		})
 		const seqGrant = await snapshotResultSeq(page)
-		const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 15_000 })
+		const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-requestCapabilities")
 		const capPopup = await capPopupP
 		await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 10_000 })

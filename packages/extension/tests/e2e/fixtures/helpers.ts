@@ -511,41 +511,6 @@ export async function getTokenDetailBalances(page: Page): Promise<{ privateBalan
 	return { privateBalance, publicBalance }
 }
 
-/**
- * Force a balance refresh on the token detail page, then poll the balance
- * values until they contain the expected strings (or timeout). Use after a
- * sequence of transfers where the on-chain state has settled but the popup's
- * TokenBalanceService cache hasn't projected yet.
- *
- * The async balance projector at packages/extension/src/wallet/services/token-balance/
- * balance-job-queue.ts runs on a 1s ticker; under full-suite load the cache
- * can lag the activity card's "confirmed" status by multiple seconds. Reading
- * the balance card immediately after waitForTxConfirmation can yield stale
- * values (e.g. 850 when the on-chain value is 950).
- */
-export async function waitForTokenDetailBalances(
-	page: Page,
-	expected: { publicContains: string; privateContains: string },
-	timeout = 30_000,
-): Promise<{ privateBalance: string; publicBalance: string }> {
-	// Click the refresh button to kick the projection queue.
-	await page.waitForSelector('[aria-label="Refresh balance"]', { visible: true, timeout: 10_000 })
-	await page.evaluate(() => {
-		;(document.querySelector('[aria-label="Refresh balance"]') as HTMLElement)?.click()
-	})
-	// Poll the balance cards until both contain the expected substrings.
-	await page.waitForFunction(
-		({ pub, priv }: { pub: string; priv: string }) => {
-			const pubText = document.querySelector('[data-testid="public-balance-value"]')?.textContent?.trim() ?? ""
-			const privText = document.querySelector('[data-testid="private-balance-value"]')?.textContent?.trim() ?? ""
-			return pubText.includes(pub) && privText.includes(priv)
-		},
-		{ timeout, polling: 500 },
-		{ pub: expected.publicContains, priv: expected.privateContains },
-	)
-	return getTokenDetailBalances(page)
-}
-
 // ── Transfer ───────────────────────────────────────────────────────────
 
 export interface SendTransferOptions {
