@@ -181,15 +181,30 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 
 				if (needsVerification && dappSession) {
 					const tCreate = probe ? performance.now() : 0
-					chrome.windows.create({
-						type: "popup",
-						url: chrome.runtime.getURL(
-							`src/popup/index.html#/windows/verify?sessionId=${dappSession.id}&isReconnect=${!isNewConnection}`,
-						),
-						height: 800,
-						width: 400,
-					})
-					probeLog("chrome.windows.create issued", tCreate)
+					const verifyUrl = chrome.runtime.getURL(
+						`src/popup/index.html#/windows/verify?sessionId=${dappSession.id}&isReconnect=${!isNewConnection}`,
+					)
+					if (probe) console.log(`[wallet-probe] onSessionEstablished verify URL: ${verifyUrl}`)
+					// AWAIT so we know if chrome actually created the window or threw.
+					// Previously fire-and-forget; iter #16 showed waitForPopup never sees verify
+					// even though this code path runs — need to know if create succeeded.
+					chrome.windows
+						.create({
+							type: "popup",
+							url: verifyUrl,
+							height: 800,
+							width: 400,
+						})
+						.then((w) => {
+							if (probe)
+								console.log(
+									`[wallet-probe] onSessionEstablished chrome.windows.create resolved windowId=${w?.id} tabId=${w?.tabs?.[0]?.id} +${(performance.now() - tCreate).toFixed(0)}ms`,
+								)
+						})
+						.catch((err) => {
+							console.error(`[wallet-probe] onSessionEstablished chrome.windows.create REJECTED:`, err)
+						})
+					probeLog("chrome.windows.create issued (sync)", tCreate)
 				}
 				probeLog("total", t0)
 			},
