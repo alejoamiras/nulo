@@ -117,7 +117,7 @@ export class BalanceProjector {
 			// covers the whole public arm. A per-token swap WOULD NOT work — it
 			// produces [pub_0, priv_0, pub_1, priv_1, …], breaking the prefix
 			// at the first private call and reducing fast-path coverage to one
-			// call total. See `implementations-plan/fast-path-internal-views/plan-v2.md` §1a.
+			// call total.
 			for (let i = 0; i < balances.length; i++) {
 				const balance = balances[i]
 				const token = tokenCache.get(balance.id)

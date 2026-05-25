@@ -60,19 +60,29 @@
  *   - Decode failures are isolated per-call: `decodeFromAbi` errors are
  *     logged but don't blow up sibling decodes.
  *
- * ## Fallback policy on fast-arm failure
+ * ## Fallback policy — pre-dispatch vs post-dispatch
  *
- *   - `SimulationError` (real contract revert from `simulateViaNode`):
+ * Pre-dispatch failures (before either tx arm starts):
+ *   - **Anchor unavailable** (both `pxe.getSyncedBlockHeader` and
+ *     `node.getBlockHeader` fail): WARN-log; demote `leadingFast` into
+ *     `slow` so a single combined `pxe.simulateTx` runs the whole batch.
+ *     No second pass.
+ *   - **`completeFeeOptions` throws**: same WARN-log + demote-then-single-
+ *     slow-pass behavior. Different log message.
+ *   - **`node.getNodeInfo()` throws**: **propagate**. Shared-fate with the
+ *     standard path (`buildTxExecutionRequest` uses it transitively),
+ *     so no point catching here. Matches `fast-path.ts:170`.
+ *
+ * Post-dispatch failures (after both arms have launched in parallel):
+ *   - **`SimulationError`** from `simulateViaNode` (real contract revert):
  *     **propagate**. Replaying through PXE produces the same error 3-5s
  *     later. Launched utility promises are left un-awaited — matches
  *     pre-PR behavior for any throw before the utility-await loop.
- *   - Generic `Error` (infra: anchor missing, completeFeeOptions failure,
- *     node RPC blip): **WARN-log + full rerun** through standard
- *     `pxe.simulateTx` over (leadingFast ++ slow). Utility queue is NOT
- *     re-launched — original utility[] promises are awaited once at end.
- *   - `node.getNodeInfo()` throw: **propagate**. Shared-fate with the
- *     standard path (`buildTxExecutionRequest` uses it transitively),
- *     so no point catching here. Matches `fast-path.ts:170`.
+ *   - **Generic `Error`** from `simulateViaNode` (network blip, RPC
+ *     mismatch, etc.): WARN-log + **full rerun** through standard
+ *     `pxe.simulateTx` over `allTxCalls` (leadingFast ++ slow). Utility
+ *     queue is NOT re-launched — original `utilityLaunched` promises are
+ *     awaited once at end.
  *
  * ## Upstream PXE serialization (for future contributors)
  *
@@ -182,20 +192,15 @@ export async function batchedViewSimulation(
 	// here — we defer launch until after the anchor read (see partition below).
 	type ClassifiedUtility = { kind: "utility"; functionCall: FunctionCall; returnTypes: AbiType[]; originalIndex: number }
 	type ClassifiedTx = { kind: "tx"; functionCall: FunctionCall; returnTypes: AbiType[]; originalIndex: number }
-	const classified: Array<ClassifiedUtility | ClassifiedTx> = []
 	const allTxCalls: ClassifiedTx[] = []
 	const allUtility: ClassifiedUtility[] = []
 
 	for (let i = 0; i < calls.length; i++) {
 		const c = await classifyCall(calls[i], instances, artifacts)
 		if (c.kind === "utility") {
-			const cu: ClassifiedUtility = { ...c, originalIndex: i }
-			classified.push(cu)
-			allUtility.push(cu)
+			allUtility.push({ ...c, originalIndex: i })
 		} else {
-			const ct: ClassifiedTx = { ...c, originalIndex: i }
-			classified.push(ct)
-			allTxCalls.push(ct)
+			allTxCalls.push({ ...c, originalIndex: i })
 		}
 	}
 
@@ -299,15 +304,18 @@ export async function batchedViewSimulation(
 		// pre-PR behavior for any throw before utility-await loop).
 		throw fastSettled.reason
 	} else {
-		// Infra: anchor stale during node call, completeFeeOptions error inside
-		// runFastArm, node RPC blip, etc. WARN + full rerun.
+		// Infra: simulateViaNode rejected (network blip, RPC mismatch, malformed
+		// node response). Pre-dispatch failures (anchor missing /
+		// completeFeeOptions throw) are handled above without ever invoking
+		// runFastArm, so we never see them on this branch. WARN + full rerun.
 		const firstFast = leadingFast[0]
 		const fastContract = firstFast ? firstFast.functionCall.to.toString() : "<empty>"
 		const fastSelector = firstFast ? firstFast.functionCall.selector.toString() : "<empty>"
+		const chainIdLog = chainInfo ? chainInfo.chainId.toString() : "<unknown>"
 		logger?.log(
 			LOG_SOURCE,
 			LogLevel.Warn,
-			`fast arm rejected (non-SimulationError); rerunning through standard path. firstContract=${fastContract} firstSelector=${fastSelector} reason=${getErrorMessage(fastSettled.reason)}`,
+			`fast arm rejected (non-SimulationError); rerunning through standard path. chainId=${chainIdLog} firstContract=${fastContract} firstSelector=${fastSelector} reason=${getErrorMessage(fastSettled.reason)}`,
 		)
 		rerunNeeded = true
 	}
@@ -399,7 +407,7 @@ export async function batchedViewSimulation(
 		try {
 			decoded[i] = decodeFromAbi(types, values)
 		} catch (error) {
-			logger?.log(LOG_SOURCE, LogLevel.Error, "Failed to encode utility simulation results", types, values, getErrorMessage(error))
+			logger?.log(LOG_SOURCE, LogLevel.Error, "Failed to decode utility simulation results", types, values, getErrorMessage(error))
 		}
 		encoded[i] = values
 	}

@@ -669,18 +669,54 @@ describe("batchedViewSimulation — fast arm (PUBLIC+isStatic leading prefix)", 
 		await expect(batchedViewSimulation([publicStaticCall()], deps)).rejects.toThrow(/node info error/)
 	})
 
-	test("ordering: anchor read completes BEFORE utility launch (rw-guard hazard)", async () => {
-		simulateViaNodeMock.mockResolvedValueOnce([fastSimResult([{ values: [new Fr(0n)] }])])
+	test("completeFeeOptions throws → silent FULL fallback (pre-dispatch, simulateViaNode never called)", async () => {
+		const { completeFeeOptions } = await import("@nulo/aztec-runtime/account")
+		const completeFeeOptionsMock = completeFeeOptions as unknown as ReturnType<typeof vi.fn>
+		// Save current impl, swap in a throw for this test only.
+		const original = completeFeeOptionsMock.getMockImplementation()
+		completeFeeOptionsMock.mockImplementationOnce(async () => {
+			throw new Error("gas settings boom")
+		})
+		try {
+			const deps = makeDeps({
+				functions: {
+					bal_pub: { kind: FunctionType.PUBLIC, isStatic: true },
+					bal_priv: { kind: FunctionType.PRIVATE, isStatic: true },
+				},
+				publicReturns: [[new Fr(55n)]],
+				privateReturns: [[new Fr(66n)]],
+			})
+			const result = await batchedViewSimulation([publicStaticCall(), privateCall()], deps)
+			// Pre-dispatch failure → leadingFast demoted into slow → ONE simulateTx covers both.
+			expect(simulateViaNodeMock).not.toHaveBeenCalled()
+			expect(deps.pxe.simulateTx).toHaveBeenCalledOnce()
+			expect(result.encoded[0]?.[0]?.toBigInt()).toBe(55n)
+			expect(result.encoded[1]?.[0]?.toBigInt()).toBe(66n)
+		} finally {
+			if (original) completeFeeOptionsMock.mockImplementation(original)
+		}
+	})
+
+	test("ordering: anchor → utility-launch → tx-arm-dispatch (full spec, rw-guard hazard)", async () => {
+		// Instrument all four observable points: anchor read, utility call,
+		// simulateViaNode (fast arm), and simulateTx (slow arm dispatch via
+		// buildTxExecutionRequest — used as a proxy for slow-arm start).
 		const events: string[] = []
+		simulateViaNodeMock.mockImplementationOnce(async () => {
+			events.push("fast-arm-call")
+			return [fastSimResult([{ values: [new Fr(0n)] }])]
+		})
 		const deps = makeDeps({
 			functions: {
 				bal_pub: { kind: FunctionType.PUBLIC, isStatic: true },
+				bal_priv: { kind: FunctionType.PRIVATE, isStatic: true },
 				bal_util: { kind: FunctionType.UTILITY },
 			},
+			privateReturns: [[new Fr(0n)]],
 			utilityReturns: new Map([["bal_util", [new Fr(0n)]]]),
 		})
-		// Wrap pxe.getSyncedBlockHeader and pxe.executeUtility to record invocation order.
-		const origAnchor = deps.pxe.getSyncedBlockHeader.bind(deps.pxe)
+		// biome-ignore lint/suspicious/noExplicitAny: stub patching
+		const origAnchor = (deps.pxe as any).getSyncedBlockHeader.bind(deps.pxe)
 		// biome-ignore lint/suspicious/noExplicitAny: stub patching
 		;(deps.pxe as any).getSyncedBlockHeader = vi.fn(async () => {
 			events.push("anchor-call")
@@ -695,13 +731,34 @@ describe("batchedViewSimulation — fast arm (PUBLIC+isStatic leading prefix)", 
 			// biome-ignore lint/suspicious/noExplicitAny: forward through stub boundary
 			return origExecUtility(call as any, optsArg as any)
 		})
-		await batchedViewSimulation([publicStaticCall(), utilityCall()], deps)
-		// Anchor return must occur before any utility call.
+		const origBuildTxReq = deps.account.buildTxExecutionRequest.bind(deps.account)
+		// biome-ignore lint/suspicious/noExplicitAny: stub patching
+		;(deps.account as any).buildTxExecutionRequest = vi.fn(async (n: unknown, pxeArg: unknown, payload: unknown, opts: unknown) => {
+			events.push("slow-arm-build")
+			// biome-ignore lint/suspicious/noExplicitAny: forward through stub boundary
+			return origBuildTxReq(n as any, pxeArg as any, payload as any, opts as any)
+		})
+		// Mixed batch → both fast and slow arms dispatched. Utility launches
+		// between anchor read and tx-arm dispatch.
+		await batchedViewSimulation([publicStaticCall(), privateCall(), utilityCall()], deps)
+
+		// Required invariants:
 		const anchorReturnIdx = events.indexOf("anchor-return")
-		const firstUtilityCallIdx = events.indexOf("utility-call")
+		const utilityCallIdx = events.indexOf("utility-call")
+		const fastArmCallIdx = events.indexOf("fast-arm-call")
+		const slowArmBuildIdx = events.indexOf("slow-arm-build")
 		expect(anchorReturnIdx).toBeGreaterThanOrEqual(0)
-		expect(firstUtilityCallIdx).toBeGreaterThanOrEqual(0)
-		expect(anchorReturnIdx).toBeLessThan(firstUtilityCallIdx)
+		expect(utilityCallIdx).toBeGreaterThanOrEqual(0)
+		expect(fastArmCallIdx).toBeGreaterThanOrEqual(0)
+		expect(slowArmBuildIdx).toBeGreaterThanOrEqual(0)
+		// 1. Anchor returns before utility launches.
+		expect(anchorReturnIdx).toBeLessThan(utilityCallIdx)
+		// 2. Anchor returns before either tx arm dispatches.
+		expect(anchorReturnIdx).toBeLessThan(fastArmCallIdx)
+		expect(anchorReturnIdx).toBeLessThan(slowArmBuildIdx)
+		// 3. Utility launches before either tx arm dispatches (eager-launch invariant).
+		expect(utilityCallIdx).toBeLessThan(fastArmCallIdx)
+		expect(utilityCallIdx).toBeLessThan(slowArmBuildIdx)
 	})
 
 	test("indexing: 2 PUBLIC+isStatic + 2 PRIVATE in mixed batch unpack to correct originalIndex slots", async () => {
@@ -736,12 +793,7 @@ describe("batchedViewSimulation — fast arm (PUBLIC+isStatic leading prefix)", 
 		expect(result.encoded[1]?.[0]?.toBigInt()).toBe(9n)
 	})
 
-	test("only ONE flatMap construction per fast-arm dispatch (no per-tuple recompute)", async () => {
-		// We can't directly observe `flatMap`, but we can observe `simulateViaNodeMock`
-		// being called once. If the implementation invoked flatMap inside the per-tuple
-		// loop, simulateViaNode would still be called once — but the unpack would
-		// still be correct. This test is a contract check that fast arm dispatches
-		// once total per helper invocation, not once per call.
+	test("fast-arm dispatches once total per helper invocation, not once per call", async () => {
 		simulateViaNodeMock.mockResolvedValueOnce([
 			fastSimResult([{ values: [new Fr(1n)] }, { values: [new Fr(2n)] }, { values: [new Fr(3n)] }]),
 		])
