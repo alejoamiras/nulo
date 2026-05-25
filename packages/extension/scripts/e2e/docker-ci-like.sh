@@ -51,7 +51,19 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 bun --version
 
 if ! command -v node >/dev/null; then
-	curl -fsSL https://nodejs.org/dist/v24.0.0/node-v24.0.0-linux-x64.tar.xz -o /tmp/node.tar.xz
+	# Retry-on-network-blip + arch detection (linux/amd64 emulation on macOS).
+	# Pin to v24.4.0 (the version GitHub Actions setup-node@v6 currently uses).
+	NODE_VERSION="${NODE_VERSION:-v24.4.0}"
+	ARCH=$(uname -m); case "$ARCH" in x86_64) ARCH=x64;; aarch64) ARCH=arm64;; esac
+	for attempt in 1 2 3; do
+		if curl -fsSL --retry 5 --retry-delay 2 --retry-max-time 120 \
+				"https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-${ARCH}.tar.xz" \
+				-o /tmp/node.tar.xz; then
+			break
+		fi
+		echo "Node download attempt $attempt failed; retrying in 5s..."
+		sleep 5
+	done
 	mkdir -p /opt/node && tar -xJf /tmp/node.tar.xz -C /opt/node --strip-components=1
 	export PATH="/opt/node/bin:$PATH"
 fi
