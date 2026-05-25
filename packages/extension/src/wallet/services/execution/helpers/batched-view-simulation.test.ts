@@ -19,7 +19,7 @@
  * `describe.skipIf(!process.env.RUN_NETWORK_E2E)`.
  */
 
-import { describe, expect, test, vi } from "vitest"
+import { beforeEach, describe, expect, test, vi } from "vitest"
 
 // Mock the heavy Aztec stdlib parts the helper composes with. The unit
 // tests are about classification + batching + ordering — NOT about whether
@@ -50,11 +50,31 @@ vi.mock("@aztec/stdlib/abi", async (importOriginal) => {
 	}
 })
 
+// Mock the fast-arm primitives. `simulateViaNode` is the upstream node-direct
+// sim path; we control its return shape per-test to validate unpack. The
+// `completeFeeOptions` shim mirrors what `runFastArm` calls — it's lazy on the
+// fast path only, so most non-fast tests don't need to invoke it.
+vi.mock("@aztec/wallet-sdk/base-wallet", () => ({
+	simulateViaNode: vi.fn(),
+}))
+vi.mock("@nulo/aztec-runtime/account", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@nulo/aztec-runtime/account")>()
+	return {
+		...actual,
+		completeFeeOptions: vi.fn(async () => ({ id: "stub-gas-settings" })),
+	}
+})
+
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { FunctionType, type FunctionAbi } from "@aztec/stdlib/abi"
+import { SimulationError } from "@aztec/stdlib/errors"
 import type { CallAction, EncodedCallAction } from "@nulo/wallet-bridge"
+import { simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
+import { type ILogger, LogLevel } from "@/wallet/logger"
 import { batchedViewSimulation, type BatchedViewSimulationDeps } from "./batched-view-simulation"
+
+const simulateViaNodeMock = simulateViaNode as unknown as ReturnType<typeof vi.fn>
 
 // ── Test helpers / fixtures ─────────────────────────────────────────────
 
@@ -64,12 +84,12 @@ const ACCOUNT_ADDR = AztecAddress.fromString("0x00000000000000000000000000000000
 const OTHER_ORIGIN = AztecAddress.fromString("0x000000000000000000000000000000000000000000000000000000000000000b")
 
 /** Build a stub FunctionAbi with the minimum surface the helper reads. */
-function abi(name: string, kind: FunctionType): FunctionAbi {
+function abi(name: string, kind: FunctionType, isStatic = false): FunctionAbi {
 	return {
 		name,
 		functionType: kind,
 		isInternal: false,
-		isStatic: false,
+		isStatic,
 		parameters: [],
 		returnTypes: [],
 		errorTypes: {},
@@ -86,7 +106,7 @@ function artifact(fns: FunctionAbi[]) {
 type Event = { type: "executeUtility-call" | "executeUtility-resolve" | "simulateTx-call" | "simulateTx-resolve"; index?: number }
 
 function makeDeps(opts: {
-	functions: Record<string, { kind: FunctionType }>
+	functions: Record<string, { kind: FunctionType; isStatic?: boolean }>
 	publicReturns?: Fr[][]
 	privateReturns?: Fr[][]
 	/** Set true to make the origin returned by `buildTxExecutionRequest` NOT
@@ -96,10 +116,17 @@ function makeDeps(opts: {
 	utilityDelay?: number
 	events?: Event[]
 	captureFunctionCalls?: Array<{ hideMsgSender: boolean; type: FunctionType; index: number }>
+	/** Stub for `pxe.getSyncedBlockHeader()` — set to "throw" to force node
+	 *  fallback. Defaults to returning a sentinel header. */
+	pxeHeader?: "ok" | "throw"
+	/** Stub for `node.getBlockHeader()` — only consulted when pxe throws. */
+	nodeHeader?: "ok" | "null" | "throw"
+	/** Stub `node.getNodeInfo()` — defaults to plausible testnet values. */
+	nodeInfo?: { l1ChainId: number; rollupVersion: number } | "throw"
 }): BatchedViewSimulationDeps {
 	const fnAbis: Map<string, FunctionAbi> = new Map()
-	for (const [name, { kind }] of Object.entries(opts.functions)) {
-		fnAbis.set(name, abi(name, kind))
+	for (const [name, { kind, isStatic }] of Object.entries(opts.functions)) {
+		fnAbis.set(name, abi(name, kind, isStatic ?? false))
 	}
 
 	let utilityCallCount = 0
@@ -109,6 +136,10 @@ function makeDeps(opts: {
 	const pxe: any = {
 		getContracts: vi.fn(async () => [CONTRACT_A, CONTRACT_B].map((c) => AztecAddress.fromString(c))),
 		registerContract: vi.fn(async () => undefined),
+		getSyncedBlockHeader: vi.fn(async () => {
+			if (opts.pxeHeader === "throw") throw new Error("pxe sync error")
+			return { id: "pxe-synced-header" }
+		}),
 		executeUtility: vi.fn(async (call: { name: string; hideMsgSender?: boolean; type?: FunctionType }, _opts: unknown) => {
 			const idx = utilityCallCount++
 			opts.events?.push({ type: "executeUtility-call", index: idx })
@@ -145,7 +176,17 @@ function makeDeps(opts: {
 	}
 
 	// biome-ignore lint/suspicious/noExplicitAny: duck-typed node stub
-	const node: any = {}
+	const node: any = {
+		getBlockHeader: vi.fn(async () => {
+			if (opts.nodeHeader === "throw") throw new Error("node rpc error")
+			if (opts.nodeHeader === "null") return null
+			return { id: "node-header" }
+		}),
+		getNodeInfo: vi.fn(async () => {
+			if (opts.nodeInfo === "throw") throw new Error("node info error")
+			return opts.nodeInfo ?? { l1ChainId: 11155111, rollupVersion: 4127419662 }
+		}),
+	}
 
 	// biome-ignore lint/suspicious/noExplicitAny: stub IAccountContract — only the surface the helper touches
 	const account: any = {
@@ -428,5 +469,286 @@ describe("batchedViewSimulation", () => {
 			.map((e, i) => (e.type === "executeUtility-resolve" ? i : -1))
 			.reduce((a, b) => Math.max(a, b), -1)
 		expect(lastUtilityResolveIdx).toBeGreaterThan(simulateTxResolveIdx)
+	})
+})
+
+// ── Fast-arm tests (PR adding leading-prefix public-static optimization) ────
+
+describe("batchedViewSimulation — fast arm (PUBLIC+isStatic leading prefix)", () => {
+	beforeEach(() => {
+		simulateViaNodeMock.mockReset()
+	})
+
+	function fastSimResult(publicReturnValues: Array<{ values: Fr[] }>): import("@aztec/stdlib/tx").TxSimulationResult {
+		return {
+			publicOutput: {
+				publicReturnValues,
+			},
+			// biome-ignore lint/suspicious/noExplicitAny: shape covers only what unpack reads
+		} as any
+	}
+
+	function publicStaticCall(method = "bal_pub"): CallAction {
+		return { kind: "call", contract: CONTRACT_A, method, args: [] }
+	}
+
+	function privateCall(method = "bal_priv"): CallAction {
+		return { kind: "call", contract: CONTRACT_A, method, args: [] }
+	}
+
+	function utilityCall(method = "bal_util"): CallAction {
+		return { kind: "call", contract: CONTRACT_A, method, args: [] }
+	}
+
+	test("pure PUBLIC+isStatic batch → simulateViaNode only, no pxe.simulateTx", async () => {
+		simulateViaNodeMock.mockResolvedValueOnce([fastSimResult([{ values: [new Fr(100n)] }, { values: [new Fr(200n)] }])])
+		const deps = makeDeps({
+			functions: { bal_pub: { kind: FunctionType.PUBLIC, isStatic: true } },
+		})
+		const result = await batchedViewSimulation([publicStaticCall(), publicStaticCall()], deps)
+		expect(simulateViaNodeMock).toHaveBeenCalledOnce()
+		expect(deps.pxe.simulateTx).not.toHaveBeenCalled()
+		expect(result.encoded[0]?.[0]?.toBigInt()).toBe(100n)
+		expect(result.encoded[1]?.[0]?.toBigInt()).toBe(200n)
+	})
+
+	test("mixed leading prefix + private tail → BOTH arms invoked, results merged by originalIndex", async () => {
+		simulateViaNodeMock.mockResolvedValueOnce([fastSimResult([{ values: [new Fr(1n)] }, { values: [new Fr(2n)] }])])
+		const deps = makeDeps({
+			functions: {
+				bal_pub: { kind: FunctionType.PUBLIC, isStatic: true },
+				bal_priv: { kind: FunctionType.PRIVATE, isStatic: true },
+			},
+			privateReturns: [[new Fr(7n)]],
+		})
+		const calls: CallAction[] = [publicStaticCall(), publicStaticCall(), privateCall()]
+		const result = await batchedViewSimulation(calls, deps)
+		expect(simulateViaNodeMock).toHaveBeenCalledOnce()
+		expect(deps.pxe.simulateTx).toHaveBeenCalledOnce()
+		expect(result.encoded[0]?.[0]?.toBigInt()).toBe(1n)
+		expect(result.encoded[1]?.[0]?.toBigInt()).toBe(2n)
+		expect(result.encoded[2]?.[0]?.toBigInt()).toBe(7n)
+	})
+
+	test("PRIVATE first → prefix empty, fast arm NOT triggered, today's path runs", async () => {
+		const deps = makeDeps({
+			functions: {
+				bal_pub: { kind: FunctionType.PUBLIC, isStatic: true },
+				bal_priv: { kind: FunctionType.PRIVATE, isStatic: true },
+			},
+			publicReturns: [[new Fr(42n)]],
+			privateReturns: [[new Fr(7n)]],
+		})
+		const calls: CallAction[] = [privateCall(), publicStaticCall()]
+		await batchedViewSimulation(calls, deps)
+		expect(simulateViaNodeMock).not.toHaveBeenCalled()
+		expect(deps.pxe.simulateTx).toHaveBeenCalledOnce()
+	})
+
+	test("PUBLIC-non-static breaks the prefix → fast arm gets only leading static run", async () => {
+		simulateViaNodeMock.mockResolvedValueOnce([fastSimResult([{ values: [new Fr(99n)] }])])
+		const deps = makeDeps({
+			functions: {
+				bal_pub: { kind: FunctionType.PUBLIC, isStatic: true },
+				do_thing: { kind: FunctionType.PUBLIC, isStatic: false },
+				bal_pub2: { kind: FunctionType.PUBLIC, isStatic: true },
+			},
+			publicReturns: [[new Fr(50n)], [new Fr(150n)]],
+		})
+		const calls: CallAction[] = [
+			publicStaticCall("bal_pub"), // fast
+			publicStaticCall("do_thing"), // breaks prefix
+			publicStaticCall("bal_pub2"), // would be fast-eligible but prefix already broken
+		]
+		await batchedViewSimulation(calls, deps)
+		expect(simulateViaNodeMock).toHaveBeenCalledOnce()
+		// Fast arm got 1 call only.
+		const fastCallsArg = simulateViaNodeMock.mock.calls[0]?.[1] as unknown[]
+		expect(fastCallsArg).toHaveLength(1)
+	})
+
+	test("hideSender:true on leading PUBLIC+isStatic call → routed to slow arm (prefix breaks at that call)", async () => {
+		const deps = makeDeps({
+			functions: { bal_pub: { kind: FunctionType.PUBLIC, isStatic: true } },
+			publicReturns: [[new Fr(0n)]],
+		})
+		const calls: CallAction[] = [{ kind: "call", contract: CONTRACT_A, method: "bal_pub", args: [], hideSender: true }]
+		await batchedViewSimulation(calls, deps)
+		// Prefix breaks at the first call because hideMsgSender === true; fast arm never invoked.
+		expect(simulateViaNodeMock).not.toHaveBeenCalled()
+		expect(deps.pxe.simulateTx).toHaveBeenCalledOnce()
+	})
+
+	test("all-public-static + UTILITY queued → fast arm runs, slow arm skipped, utility parallel", async () => {
+		simulateViaNodeMock.mockResolvedValueOnce([fastSimResult([{ values: [new Fr(1n)] }])])
+		const deps = makeDeps({
+			functions: {
+				bal_pub: { kind: FunctionType.PUBLIC, isStatic: true },
+				bal_util: { kind: FunctionType.UTILITY },
+			},
+			utilityReturns: new Map([["bal_util", [new Fr(8n)]]]),
+		})
+		const calls: CallAction[] = [publicStaticCall(), utilityCall()]
+		const result = await batchedViewSimulation(calls, deps)
+		expect(simulateViaNodeMock).toHaveBeenCalledOnce()
+		expect(deps.pxe.simulateTx).not.toHaveBeenCalled()
+		expect(deps.pxe.executeUtility).toHaveBeenCalledOnce()
+		expect(result.encoded[0]?.[0]?.toBigInt()).toBe(1n)
+		expect(result.encoded[1]?.[0]?.toBigInt()).toBe(8n)
+	})
+
+	test("block-header anchor missing → silent FULL fallback, simulateViaNode never called", async () => {
+		const deps = makeDeps({
+			functions: { bal_pub: { kind: FunctionType.PUBLIC, isStatic: true } },
+			publicReturns: [[new Fr(5n)]],
+			pxeHeader: "throw",
+			nodeHeader: "null",
+		})
+		const result = await batchedViewSimulation([publicStaticCall()], deps)
+		expect(simulateViaNodeMock).not.toHaveBeenCalled()
+		expect(deps.pxe.simulateTx).toHaveBeenCalledOnce()
+		expect(result.encoded[0]?.[0]?.toBigInt()).toBe(5n)
+	})
+
+	test("simulateViaNode throws SimulationError → propagates, slow arm result discarded", async () => {
+		const simErr = new SimulationError("revert msg", [])
+		simulateViaNodeMock.mockRejectedValueOnce(simErr)
+		const deps = makeDeps({
+			functions: { bal_pub: { kind: FunctionType.PUBLIC, isStatic: true } },
+		})
+		await expect(batchedViewSimulation([publicStaticCall()], deps)).rejects.toBe(simErr)
+	})
+
+	test("simulateViaNode throws generic Error → WARN log + full rerun via standard simulateTx", async () => {
+		simulateViaNodeMock.mockRejectedValueOnce(new Error("node blip"))
+		const logSpy = vi.fn()
+		const deps = makeDeps({
+			functions: {
+				bal_pub: { kind: FunctionType.PUBLIC, isStatic: true },
+				bal_priv: { kind: FunctionType.PRIVATE, isStatic: true },
+			},
+			publicReturns: [[new Fr(33n)]],
+			privateReturns: [[new Fr(77n)]],
+		})
+		// Replace the no-op logger with a spy.
+		;(deps as { logger?: ILogger }).logger = { log: logSpy } as ILogger
+		const calls: CallAction[] = [publicStaticCall(), privateCall()]
+		const result = await batchedViewSimulation(calls, deps)
+		// Slow arm called twice: once in the original parallel dispatch, once in
+		// the rerun with combined payload. The combined rerun's values land in
+		// encoded[].
+		expect(deps.pxe.simulateTx).toHaveBeenCalledTimes(2)
+		expect(logSpy).toHaveBeenCalled()
+		const warnCall = logSpy.mock.calls.find((c) => c[1] === LogLevel.Warn)
+		expect(warnCall).toBeTruthy()
+		expect(result.encoded[0]?.[0]?.toBigInt()).toBe(33n)
+		expect(result.encoded[1]?.[0]?.toBigInt()).toBe(77n)
+	})
+
+	test("rerun invariant: utility executeUtility called exactly ONCE, not re-launched on fast-arm fallback", async () => {
+		simulateViaNodeMock.mockRejectedValueOnce(new Error("fast blip"))
+		const deps = makeDeps({
+			functions: {
+				bal_pub: { kind: FunctionType.PUBLIC, isStatic: true },
+				bal_util: { kind: FunctionType.UTILITY },
+			},
+			publicReturns: [[new Fr(0n)]],
+			utilityReturns: new Map([["bal_util", [new Fr(0n)]]]),
+		})
+		await batchedViewSimulation([publicStaticCall(), utilityCall()], deps)
+		// Utility launched once at the start; rerun must NOT re-launch.
+		expect(deps.pxe.executeUtility).toHaveBeenCalledOnce()
+	})
+
+	test("node.getNodeInfo throws → propagates (shared-fate with slow arm, no silent fallback)", async () => {
+		simulateViaNodeMock.mockResolvedValueOnce([fastSimResult([{ values: [new Fr(0n)] }])])
+		const deps = makeDeps({
+			functions: { bal_pub: { kind: FunctionType.PUBLIC, isStatic: true } },
+			nodeInfo: "throw",
+		})
+		await expect(batchedViewSimulation([publicStaticCall()], deps)).rejects.toThrow(/node info error/)
+	})
+
+	test("ordering: anchor read completes BEFORE utility launch (rw-guard hazard)", async () => {
+		simulateViaNodeMock.mockResolvedValueOnce([fastSimResult([{ values: [new Fr(0n)] }])])
+		const events: string[] = []
+		const deps = makeDeps({
+			functions: {
+				bal_pub: { kind: FunctionType.PUBLIC, isStatic: true },
+				bal_util: { kind: FunctionType.UTILITY },
+			},
+			utilityReturns: new Map([["bal_util", [new Fr(0n)]]]),
+		})
+		// Wrap pxe.getSyncedBlockHeader and pxe.executeUtility to record invocation order.
+		const origAnchor = deps.pxe.getSyncedBlockHeader.bind(deps.pxe)
+		// biome-ignore lint/suspicious/noExplicitAny: stub patching
+		;(deps.pxe as any).getSyncedBlockHeader = vi.fn(async () => {
+			events.push("anchor-call")
+			const r = await origAnchor()
+			events.push("anchor-return")
+			return r
+		})
+		const origExecUtility = deps.pxe.executeUtility.bind(deps.pxe)
+		// biome-ignore lint/suspicious/noExplicitAny: stub patching
+		;(deps.pxe as any).executeUtility = vi.fn(async (call: unknown, optsArg: unknown) => {
+			events.push("utility-call")
+			// biome-ignore lint/suspicious/noExplicitAny: forward through stub boundary
+			return origExecUtility(call as any, optsArg as any)
+		})
+		await batchedViewSimulation([publicStaticCall(), utilityCall()], deps)
+		// Anchor return must occur before any utility call.
+		const anchorReturnIdx = events.indexOf("anchor-return")
+		const firstUtilityCallIdx = events.indexOf("utility-call")
+		expect(anchorReturnIdx).toBeGreaterThanOrEqual(0)
+		expect(firstUtilityCallIdx).toBeGreaterThanOrEqual(0)
+		expect(anchorReturnIdx).toBeLessThan(firstUtilityCallIdx)
+	})
+
+	test("indexing: 2 PUBLIC+isStatic + 2 PRIVATE in mixed batch unpack to correct originalIndex slots", async () => {
+		simulateViaNodeMock.mockResolvedValueOnce([fastSimResult([{ values: [new Fr(101n)] }, { values: [new Fr(102n)] }])])
+		const deps = makeDeps({
+			functions: {
+				bal_pub: { kind: FunctionType.PUBLIC, isStatic: true },
+				bal_priv: { kind: FunctionType.PRIVATE, isStatic: true },
+			},
+			privateReturns: [[new Fr(201n)], [new Fr(202n)]],
+		})
+		const calls: CallAction[] = [publicStaticCall(), publicStaticCall(), privateCall(), privateCall()]
+		const result = await batchedViewSimulation(calls, deps)
+		expect(result.encoded[0]?.[0]?.toBigInt()).toBe(101n)
+		expect(result.encoded[1]?.[0]?.toBigInt()).toBe(102n)
+		expect(result.encoded[2]?.[0]?.toBigInt()).toBe(201n)
+		expect(result.encoded[3]?.[0]?.toBigInt()).toBe(202n)
+	})
+
+	test("origin-equality after partition: private-only slow payload still uses .nested branch", async () => {
+		simulateViaNodeMock.mockResolvedValueOnce([fastSimResult([{ values: [new Fr(1n)] }])])
+		const deps = makeDeps({
+			functions: {
+				bal_pub: { kind: FunctionType.PUBLIC, isStatic: true },
+				bal_priv: { kind: FunctionType.PRIVATE, isStatic: true },
+			},
+			privateReturns: [[new Fr(9n)]],
+			originDiffers: false, // pin: origin === account.address → .nested
+		})
+		const calls: CallAction[] = [publicStaticCall(), privateCall()]
+		const result = await batchedViewSimulation(calls, deps)
+		expect(result.encoded[1]?.[0]?.toBigInt()).toBe(9n)
+	})
+
+	test("only ONE flatMap construction per fast-arm dispatch (no per-tuple recompute)", async () => {
+		// We can't directly observe `flatMap`, but we can observe `simulateViaNodeMock`
+		// being called once. If the implementation invoked flatMap inside the per-tuple
+		// loop, simulateViaNode would still be called once — but the unpack would
+		// still be correct. This test is a contract check that fast arm dispatches
+		// once total per helper invocation, not once per call.
+		simulateViaNodeMock.mockResolvedValueOnce([
+			fastSimResult([{ values: [new Fr(1n)] }, { values: [new Fr(2n)] }, { values: [new Fr(3n)] }]),
+		])
+		const deps = makeDeps({
+			functions: { bal_pub: { kind: FunctionType.PUBLIC, isStatic: true } },
+		})
+		await batchedViewSimulation([publicStaticCall(), publicStaticCall(), publicStaticCall()], deps)
+		expect(simulateViaNodeMock).toHaveBeenCalledOnce()
 	})
 })

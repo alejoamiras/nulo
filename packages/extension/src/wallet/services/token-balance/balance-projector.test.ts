@@ -120,18 +120,21 @@ describe("BalanceProjector", () => {
 		expect(batchedViewSimulationMock).not.toHaveBeenCalled()
 	})
 
-	test("single token with both balance fns → enqueues 2 calls, returns ok", async () => {
+	test("single token with both balance fns → enqueues 2 calls in [PUBLIC, PRIVATE] order, returns ok", async () => {
 		const t = token(1)
 		const projector = makeProjector({ tokens: [t] })
+		// Two-pass enqueue: PUBLIC first (index 0), then PRIVATE (index 1).
+		// Reordered in fast-path-internal-views PR so `batchedViewSimulation`'s
+		// leading PUBLIC+isStatic prefix covers the public arm.
 		batchedViewSimulationMock.mockResolvedValueOnce({
-			encoded: [[new Fr(7n)], [new Fr(42n)]],
+			encoded: [[new Fr(42n)], [new Fr(7n)]],
 			decoded: [],
 		})
 
 		const result = await projector.project([balance(1, 1)])
 		expect(batchedViewSimulationMock).toHaveBeenCalledTimes(1)
 		const callsArg = batchedViewSimulationMock.mock.calls[0][0]
-		expect(callsArg).toHaveLength(2) // private + public
+		expect(callsArg).toHaveLength(2) // public + private
 		expect(result[0]).toEqual({
 			kind: "ok",
 			id: 1,
@@ -207,5 +210,40 @@ describe("BalanceProjector", () => {
 		const result = await projector.project([balance(1, 1), balance(2, 1)])
 		expect(result).toHaveLength(2)
 		expect(result.every((r) => r.kind === "error" && r.error === "PXE went away")).toBe(true)
+	})
+
+	test("two-pass enqueue: all PUBLIC calls precede all PRIVATE calls in the chunk (regression pin for fast-path-internal-views)", async () => {
+		// Fixture: 3 tokens, each with BOTH public and private balance fns.
+		// After the two-pass enqueue (PUBLIC first across all balances, then
+		// PRIVATE), the chunk should be:
+		//   [pub_t1, pub_t2, pub_t3, priv_t1, priv_t2, priv_t3]
+		// NOT the old per-token interleaving:
+		//   [priv_t1, pub_t1, priv_t2, pub_t2, priv_t3, pub_t3]
+		const tokens = [token(1), token(2), token(3)]
+		const projector = makeProjector({ tokens })
+		batchedViewSimulationMock.mockResolvedValueOnce({
+			encoded: Array.from({ length: 6 }, () => [new Fr(0n)]),
+			decoded: [],
+		})
+		await projector.project([balance(10, 1), balance(20, 2), balance(30, 3)])
+		expect(batchedViewSimulationMock).toHaveBeenCalledTimes(1)
+		const callsArg = batchedViewSimulationMock.mock.calls[0][0] as Array<
+			{ kind: "call"; method: string } | { kind: "encoded_call"; selector: string }
+		>
+		expect(callsArg).toHaveLength(6)
+		// First three calls = all PUBLIC. balance_of_public is encoded
+		// (kind="encoded_call" + selector-balance_of_public).
+		for (let i = 0; i < 3; i++) {
+			const c = callsArg[i]
+			expect(c.kind).toBe("encoded_call")
+			expect((c as { selector: string }).selector).toBe("selector-balance_of_public")
+		}
+		// Last three calls = all PRIVATE. balance_of_private is UTILITY-typed,
+		// enqueued as kind="call" with method name.
+		for (let i = 3; i < 6; i++) {
+			const c = callsArg[i]
+			expect(c.kind).toBe("call")
+			expect((c as { method: string }).method).toBe("balance_of_private")
+		}
 	})
 })
