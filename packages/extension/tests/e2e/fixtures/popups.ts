@@ -29,12 +29,30 @@ export async function waitForPopup(
 	// not a stale one left by a prior interaction. URL contains a unique
 	// requestId set by DappInteractionService.interaction(), so URL novelty
 	// is the right discriminator when the caller doesn't already have the id.
+	const probe = process.env.NULO_E2E_WALLET_PROBE === "1"
 	const preExisting = new Set(
 		ctx.browser
 			.targets()
 			.filter((t) => t.type() === "page" && t.url().includes(`#/windows/${kind}`))
 			.map((t) => t.url()),
 	)
+	if (probe) {
+		console.log(`[fixture-probe] waitForPopup(${kind}) start preExisting=${preExisting.size}`)
+		const allTargets = ctx.browser.targets()
+		console.log(
+			`[fixture-probe] all targets at start (${allTargets.length}): ${allTargets.map((t) => `${t.type()}:${t.url().slice(0, 100)}`).join(" | ")}`,
+		)
+		const onCreated = (t: Target) => {
+			console.log(`[fixture-probe] waitForPopup(${kind}) targetcreated type=${t.type()} url=${t.url().slice(0, 200)}`)
+		}
+		const onChanged = (t: Target) => {
+			if (t.type() === "page" && (t.url().includes("/windows/") || t.url().includes("popup/index.html"))) {
+				console.log(`[fixture-probe] waitForPopup(${kind}) targetchanged type=${t.type()} url=${t.url().slice(0, 200)}`)
+			}
+		}
+		ctx.browser.on("targetcreated", onCreated)
+		ctx.browser.on("targetchanged", onChanged)
+	}
 	const target: Target = await ctx.browser.waitForTarget(
 		(t) => {
 			if (t.type() !== "page") return false
