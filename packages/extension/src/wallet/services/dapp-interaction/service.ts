@@ -235,27 +235,6 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		if (profile?.id !== payload.session.profileId) {
 			throw new Error("Wallet locked")
 		}
-		// Silent path (self-paid sendTx, no popup): fast-forward the queued
-		// record to `pending` so the UI shows "Preparing..." immediately
-		// instead of briefly showing "Queued..." for a request that never
-		// opens a popup (opus post-impl F7).
-		//
-		// The claim helper in `claimOrCreateDappExecuteJournal` accepts BOTH
-		// `queued` and `pending` as legitimate pre-claim stages — if we
-		// fast-forward to pending here, the claim path skips its own
-		// transition and just registers the controller. Failure here is
-		// non-fatal: if a cancel races us and wins, the claim path's
-		// recheck logic catches the cancelled record and throws the
-		// JobCancelledSentinel correctly.
-		if (hooks?.queuedJournalId) {
-			try {
-				await this.operationJournal.transitionOperation(hooks.queuedJournalId, { stage: "pending" })
-			} catch (err) {
-				this.logDebug(
-					`silent-path fast-forward queued→pending failed (likely cancel race); claim helper will handle: ${getErrorMessage(err)}`,
-				)
-			}
-		}
 		// Phase 2 follow-up: request→operation logic lives in the shared
 		// materializer. Pre-followup this path and the popup Execute window
 		// each had their own switch; they diverged on the send-like feeSettings
@@ -289,6 +268,40 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			operations.push(materialized as unknown as Operation)
 		}
 		await this.profileService.refreshSession()
+
+		// Silent path (self-paid sendTx, no popup): fast-forward the queued
+		// record to `pending` so the UI shows "Preparing..." immediately
+		// instead of briefly showing "Queued..." for a request that never
+		// opens a popup (opus post-impl F7).
+		//
+		// CRITICAL ORDERING (codex closeout F1): this fast-forward MUST stay
+		// immediately before `executeOperations()`. If we hoisted it to the
+		// top of the method, a throw in `materializeRequest` /
+		// `refreshSession` / profile-check would leave the record stranded
+		// at `pending` — the `handleWalletMessage` safety net only
+		// terminalizes records still at `queued` (background.ts), so the UI
+		// would show "Preparing..." until the reaper's `pending` grace
+		// expires (~2 min). Keeping the transition here ensures that any
+		// pre-execute throw leaves the record at `queued` for the safety
+		// net to catch.
+		//
+		// The claim helper in `claimOrCreateDappExecuteJournal` accepts BOTH
+		// `queued` and `pending` as legitimate pre-claim stages — if we
+		// fast-forward to pending here, the claim path skips its own
+		// transition and just registers the controller. Failure here is
+		// non-fatal: if a cancel races us and wins, the claim path's
+		// recheck logic catches the cancelled record and throws the
+		// JobCancelledSentinel correctly.
+		if (hooks?.queuedJournalId) {
+			try {
+				await this.operationJournal.transitionOperation(hooks.queuedJournalId, { stage: "pending" })
+			} catch (err) {
+				this.logDebug(
+					`silent-path fast-forward queued→pending failed (likely cancel race); claim helper will handle: ${getErrorMessage(err)}`,
+				)
+			}
+		}
+
 		return await this.executionService.executeOperations(
 			operations,
 			{
