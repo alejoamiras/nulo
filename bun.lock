@@ -248,7 +248,6 @@
   },
   "patchedDependencies": {
     "@aztec/noir-acvm_js@4.2.0": "patches/@aztec%2Fnoir-acvm_js@4.2.0.patch",
-    "@aztec/wallet-sdk@4.2.0": "patches/@aztec%2Fwallet-sdk@4.2.0.patch",
     "@aztec/noir-noirc_abi@4.2.0": "patches/@aztec%2Fnoir-noirc_abi@4.2.0.patch",
   },
   "packages": {
