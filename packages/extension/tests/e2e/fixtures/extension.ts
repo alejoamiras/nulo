@@ -204,9 +204,16 @@ async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
 	await clickByTestId(dappPage, "pg-btn-connect")
 
 	const discoverPage = await discoverP
+	// Arm the verify popup wait BEFORE approveDiscover triggers the SW to
+	// create the verify window. Codex audit caught: approveDiscover only
+	// clicks (popups.ts:126), doesn't wait for close. If verify opens
+	// faster than the next waitForPopup, the snapshot at popups.ts:32
+	// treats the already-existing target as preExisting and ignores it —
+	// the test then hangs for 30s waiting for a NEW verify target that
+	// never appears. Race confirmed deterministic on shard 5.
+	const verifyP = waitForPopup(ctx, "verify", { timeout: 30_000 })
 	await approveDiscover(discoverPage)
-
-	const verifyPage = await waitForPopup(ctx, "verify", { timeout: 30_000 })
+	const verifyPage = await verifyP
 	await approveVerify(verifyPage)
 
 	await dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 20_000 })
