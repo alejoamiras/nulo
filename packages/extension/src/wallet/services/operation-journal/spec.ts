@@ -213,22 +213,48 @@ export const OperationRecordSchema: z.ZodType<OperationRecord> = z.object({
 	transferType: z.nativeEnum(TransferType).optional(),
 })
 
-export const NewOperationInputSchema: z.ZodType<NewOperationInput> = z.object({
-	kind: OperationKindSchema,
-	origin: OperationOriginSchema,
-	profileId: z.string().min(1),
-	sessionId: z.string().optional(),
-	accountAddress: z.string().optional(),
-	networkId: z.string().optional(),
-	tokenId: z.number().optional(),
-	title: z.string().optional(),
-	subtitle: z.string().optional(),
-	amountRaw: z.string().optional(),
-	recipientAddress: z.string().optional(),
-	contractAddress: z.string().optional(),
-	transferType: z.nativeEnum(TransferType).optional(),
-	initialStage: InitialStageSchema.optional(),
-})
+/**
+ * `NewOperationInput` schema with a discriminated-union refinement:
+ * `initialStage: "queued"` is ONLY legal for `dapp_execute` + `dapp` origin
+ * + `sessionId` present. Without these the journal can't render the queued
+ * card correctly (RecentActivityView.journalRecordInScope filters by
+ * accountAddress + networkId from the dapp side) and the per-session cap
+ * can't apply (no sessionId to count against).
+ *
+ * Codex + opus post-impl reviews flagged the un-refined version as too
+ * permissive — it admitted records like `{kind:"transfer", initialStage:"queued"}`
+ * that would never render in the activity feed.
+ */
+export const NewOperationInputSchema: z.ZodType<NewOperationInput> = z
+	.object({
+		kind: OperationKindSchema,
+		origin: OperationOriginSchema,
+		profileId: z.string().min(1),
+		sessionId: z.string().optional(),
+		accountAddress: z.string().optional(),
+		networkId: z.string().optional(),
+		tokenId: z.number().optional(),
+		title: z.string().optional(),
+		subtitle: z.string().optional(),
+		amountRaw: z.string().optional(),
+		recipientAddress: z.string().optional(),
+		contractAddress: z.string().optional(),
+		transferType: z.nativeEnum(TransferType).optional(),
+		initialStage: InitialStageSchema.optional(),
+	})
+	.refine(
+		(v) => {
+			// `initialStage: "queued"` is reserved for the wallet-sdk
+			// message-arrival surface — must carry the full dapp-execute
+			// context for the activity feed + per-session cap to work.
+			if (v.initialStage?.stage !== "queued") return true
+			return v.kind === "dapp_execute" && v.origin === "dapp" && typeof v.sessionId === "string" && v.sessionId.length > 0
+		},
+		{
+			message:
+				"initialStage='queued' requires kind='dapp_execute' + origin='dapp' + non-empty sessionId (queued is reserved for wallet-sdk message-arrival surface)",
+		},
+	)
 
 export const JobStageSchema: z.ZodType<JobStage> = z.enum([
 	"queued",

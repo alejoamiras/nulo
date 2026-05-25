@@ -188,4 +188,35 @@ describe("claimOrCreateDappExecuteJournal", () => {
 		expect(result.controller).toBeUndefined()
 		expect(activeControllers.size).toBe(0)
 	})
+
+	test("queuedJournalId set + record already at PENDING → skips claim transition, registers controller (silent-path fast-forward)", async () => {
+		// Silent path in DappInteractionService.execute pre-transitions
+		// queued → pending so the UI doesn't show "Queued..." for a sendTx
+		// that never opens a popup. The claim helper must recognize this
+		// state and NOT throw + NOT re-transition + still register the
+		// controller. Opus post-impl F7.
+		const { deps, activeControllers, journal } = makeDeps()
+		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "pending" } })
+
+		const result = await claimOrCreateDappExecuteJournal(deps, {
+			...INPUT_NO_QUEUED,
+			queuedJournalId: "silent-prefast-id",
+		})
+
+		// No transitionOperation call — the record was already at pending.
+		expect(journal.transitionOperation).not.toHaveBeenCalled()
+		// Controller registered + returned, same as queued claim path.
+		expect(result.journalId).toBe("silent-prefast-id")
+		expect(activeControllers.has("silent-prefast-id")).toBe(true)
+	})
+
+	test("queuedJournalId set + record at simulating → throws JobCancelledSentinel (not a valid pre-claim state)", async () => {
+		// `simulating` is past the pending pre-claim stages. The helper must
+		// reject — silent-path only fast-forwards to pending, never past it.
+		const { deps, journal } = makeDeps()
+		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "simulating" } })
+		await expect(
+			claimOrCreateDappExecuteJournal(deps, { ...INPUT_NO_QUEUED, queuedJournalId: "weird-stage-id" }),
+		).rejects.toBeInstanceOf(JobCancelledSentinel)
+	})
 })

@@ -16,6 +16,7 @@ import { OriginType, TxStatus } from "@/wallet/services/transaction/spec"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
+import { stageSubtitle } from "@/utils/card-subtitle"
 import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisplay } from "@/utils/journal-state"
 import { formatTransferType, humanizeMethodName } from "@/utils/tx-enrichment"
 import { buildCancelHandler, isMatchingTask } from "./recent-activity-handlers"
@@ -342,23 +343,10 @@ function cardSubtitleFor(op) {
 			}
 		}
 	}
-	switch (op.progress?.stage) {
-		case "queued":
-			// Pre-handler state surfaced by the wallet-sdk session FIFO.
-			// User sees "Queued..." while a previous sendTx is still being
-			// approved + simulated + built ahead of this one.
-			return "Queued..."
-		case "pending":
-			return "Preparing..."
-		case "simulating":
-			return "Simulating..."
-		case "proving":
-			return "Generating proof..."
-		case "submitting":
-			return "Submitting..."
-		default:
-			return "Processing..."
-	}
+	// Stage-level default — pure helper in `@/utils/card-subtitle` so the
+	// switch is unit-testable. The executingTask subtask decoration above
+	// stays inline because it consumes Vue reactive state.
+	return stageSubtitle(op.progress?.stage)
 }
 
 /** True when an executingTask is present but no in-flight journal record

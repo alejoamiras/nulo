@@ -235,6 +235,27 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		if (profile?.id !== payload.session.profileId) {
 			throw new Error("Wallet locked")
 		}
+		// Silent path (self-paid sendTx, no popup): fast-forward the queued
+		// record to `pending` so the UI shows "Preparing..." immediately
+		// instead of briefly showing "Queued..." for a request that never
+		// opens a popup (opus post-impl F7).
+		//
+		// The claim helper in `claimOrCreateDappExecuteJournal` accepts BOTH
+		// `queued` and `pending` as legitimate pre-claim stages — if we
+		// fast-forward to pending here, the claim path skips its own
+		// transition and just registers the controller. Failure here is
+		// non-fatal: if a cancel races us and wins, the claim path's
+		// recheck logic catches the cancelled record and throws the
+		// JobCancelledSentinel correctly.
+		if (hooks?.queuedJournalId) {
+			try {
+				await this.operationJournal.transitionOperation(hooks.queuedJournalId, { stage: "pending" })
+			} catch (err) {
+				this.logDebug(
+					`silent-path fast-forward queued→pending failed (likely cancel race); claim helper will handle: ${getErrorMessage(err)}`,
+				)
+			}
+		}
 		// Phase 2 follow-up: request→operation logic lives in the shared
 		// materializer. Pre-followup this path and the popup Execute window
 		// each had their own switch; they diverged on the send-like feeSettings

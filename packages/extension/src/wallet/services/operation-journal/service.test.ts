@@ -313,6 +313,7 @@ describe("OperationJournalService", () => {
 			...VALID_INPUT,
 			kind: "dapp_execute",
 			origin: "dapp",
+			sessionId: "session-X",
 			initialStage: { stage: "queued" },
 		})
 		const claimed = await service.transitionOperation(rec.id, { stage: "pending" })
@@ -324,6 +325,7 @@ describe("OperationJournalService", () => {
 			...VALID_INPUT,
 			kind: "dapp_execute",
 			origin: "dapp",
+			sessionId: "session-X",
 			initialStage: { stage: "queued" },
 		})
 		await expect(service.transitionOperation(rec.id, { stage: "simulating" })).rejects.toBeInstanceOf(IllegalTransitionError)
@@ -334,6 +336,7 @@ describe("OperationJournalService", () => {
 			...VALID_INPUT,
 			kind: "dapp_execute",
 			origin: "dapp",
+			sessionId: "session-X",
 			initialStage: { stage: "queued" },
 		})
 		const cancelled = await service.transitionOperation(rec.id, { stage: "cancelled" })
@@ -341,8 +344,10 @@ describe("OperationJournalService", () => {
 		expect(cancelled.terminalAt).not.toBeNull()
 	})
 
-	test("countOperations: filters by sessionId and stage; excludes sessionless records when sessionId filter is set", async () => {
-		// Sessioned dapp records
+	test("countOperations: filters by sessionId and stage; excludes other sessions' records", async () => {
+		// Sessioned dapp records — only the wallet-sdk message-arrival surface
+		// creates queued records, so the per-session cap query exercises
+		// across dapp_execute records with distinct sessionIds.
 		await service.createOperation({
 			kind: "dapp_execute",
 			origin: "dapp",
@@ -364,20 +369,56 @@ describe("OperationJournalService", () => {
 			sessionId: "s2",
 			initialStage: { stage: "queued" },
 		})
-		// Sessionless UI transfer (popup origin, no sessionId) — must NOT count
-		// against any per-session queued cap.
+		// Sessionless UI transfer (popup origin, no sessionId) at default
+		// `pending` stage — must NOT count against any per-session queued cap
+		// because (a) it has no sessionId and (b) it's not at queued stage.
 		await service.createOperation({
 			kind: "transfer",
 			origin: "popup",
 			profileId: "p1",
-			initialStage: { stage: "queued" },
 		})
 
 		expect(await service.countOperations({ sessionId: "s1", stage: "queued" })).toBe(2)
 		expect(await service.countOperations({ sessionId: "s2", stage: "queued" })).toBe(1)
-		expect(await service.countOperations({ stage: "queued" })).toBe(4)
+		expect(await service.countOperations({ stage: "queued" })).toBe(3)
 		// No filter → total non-deleted records.
 		expect(await service.countOperations({})).toBe(4)
+	})
+
+	test("createOperation: rejects initialStage='queued' without sessionId (refinement)", async () => {
+		await expect(
+			service.createOperation({
+				kind: "dapp_execute",
+				origin: "dapp",
+				profileId: "p1",
+				// no sessionId
+				initialStage: { stage: "queued" },
+			}),
+		).rejects.toThrow(/sessionId/)
+	})
+
+	test("createOperation: rejects initialStage='queued' with kind='transfer' (refinement)", async () => {
+		await expect(
+			service.createOperation({
+				kind: "transfer",
+				origin: "popup",
+				profileId: "p1",
+				sessionId: "irrelevant",
+				initialStage: { stage: "queued" },
+			}),
+		).rejects.toThrow(/dapp_execute/)
+	})
+
+	test("createOperation: rejects initialStage='queued' with origin='popup' (refinement)", async () => {
+		await expect(
+			service.createOperation({
+				kind: "dapp_execute",
+				origin: "popup",
+				profileId: "p1",
+				sessionId: "session-X",
+				initialStage: { stage: "queued" },
+			}),
+		).rejects.toThrow(/dapp/)
 	})
 
 	test("countOperations: stage filter excludes records in other stages", async () => {
@@ -385,6 +426,7 @@ describe("OperationJournalService", () => {
 			...VALID_INPUT,
 			kind: "dapp_execute",
 			origin: "dapp",
+			sessionId: "session-X",
 			initialStage: { stage: "queued" },
 		})
 		await service.transitionOperation(r.id, { stage: "pending" })
@@ -412,6 +454,7 @@ describe("OperationJournalService", () => {
 			...VALID_INPUT,
 			kind: "dapp_execute",
 			origin: "dapp",
+			sessionId: "session-X",
 			initialStage: { stage: "queued" },
 		})
 		const claim = service.transitionOperation(rec.id, { stage: "pending" })
@@ -444,6 +487,7 @@ describe("OperationJournalService", () => {
 			...VALID_INPUT,
 			kind: "dapp_execute",
 			origin: "dapp",
+			sessionId: "session-X",
 			initialStage: { stage: "queued" },
 		})
 		// Move record to pending first (legal).

@@ -87,29 +87,43 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 		if (id && controller) activeControllers.set(id, controller)
 		return { journalId: id, controller }
 	}
-	if (record.progress?.stage !== "queued") {
+	// Accept queued OR pending. Queued is the normal claim path; pending
+	// is what the silent-path optimization (in DappInteractionService.execute)
+	// fast-forwards to so the UI doesn't briefly show "Queued..." for a
+	// sendTx that never opens a popup. In the pending case we skip the
+	// transitionOperation call (already-advanced) and just register the
+	// controller. Any other stage (cancelled / failed / succeeded /
+	// simulating / proving / submitting) is a hard "don't execute" signal.
+	const stage = record.progress?.stage
+	if (stage !== "queued" && stage !== "pending") {
 		// Cancelled / failed before claim (most likely: cancelJob raced
 		// our claim and won the journal-layer mutex). Surface via the
 		// existing cancelled pipeline; the dApp sees EIP-1193 4001.
-		logger?.info(`Queued record ${queuedJournalId} is ${record.progress?.stage}; aborting via JobCancelledSentinel`)
+		logger?.info(`Queued record ${queuedJournalId} is ${stage}; aborting via JobCancelledSentinel`)
 		throw new JobCancelledSentinel(queuedJournalId)
 	}
 
 	// Happy path: claim. The journal mutex serializes us against any
 	// concurrent cancelJob — whichever acquires first wins.
-	try {
-		await operationJournal.transitionOperation(queuedJournalId, { stage: "pending" })
-	} catch (error) {
-		// Transition failed. Re-read to disambiguate cancellation race
-		// (cancelJob won the mutex) from a genuine storage failure.
-		const recheck = await operationJournal.getOperation(queuedJournalId).catch(() => null)
-		if (recheck && recheck.progress?.stage !== "queued") {
-			logger?.info(`Queued record ${queuedJournalId} was ${recheck.progress?.stage}'d during claim; cancelled-path`)
-			throw new JobCancelledSentinel(queuedJournalId)
+	if (stage === "queued") {
+		try {
+			await operationJournal.transitionOperation(queuedJournalId, { stage: "pending" })
+		} catch (error) {
+			// Transition failed. Re-read to disambiguate cancellation race
+			// (cancelJob won the mutex) from a genuine storage failure.
+			const recheck = await operationJournal.getOperation(queuedJournalId).catch(() => null)
+			if (recheck && recheck.progress?.stage !== "queued") {
+				logger?.info(`Queued record ${queuedJournalId} was ${recheck.progress?.stage}'d during claim; cancelled-path`)
+				throw new JobCancelledSentinel(queuedJournalId)
+			}
+			// Genuine journal-storage failure — preserve observability by
+			// re-throwing instead of masking as cancellation.
+			throw error
 		}
-		// Genuine journal-storage failure — preserve observability by
-		// re-throwing instead of masking as cancellation.
-		throw error
+	} else {
+		// stage === "pending" — silent-path pre-transitioned. Skip the
+		// transitionOperation call; just register the controller and return.
+		logger?.debug(`Queued record ${queuedJournalId} already at pending (silent-path pre-claim); registering controller only`)
 	}
 
 	// Register the controller IMMEDIATELY — no await between the stage
