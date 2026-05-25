@@ -1,0 +1,35 @@
+diff --git a/dest/extension/provider/extension_provider.js b/dest/extension/provider/extension_provider.js
+index aae5fa5f60ef7aa7b480ea696c7ee853b652dd0e..3e0967f25fc4a529bacd7b3d875eb9c125e76f0c 100644
+--- a/dest/extension/provider/extension_provider.js
++++ b/dest/extension/provider/extension_provider.js
+@@ -3,7 +3,10 @@ import { promiseWithResolvers } from '@aztec/foundation/promise';
+ import { deriveSessionKeys, exportPublicKey, generateKeyPair, importPublicKey } from '../../crypto.js';
+ import { WalletMessageType } from '../../types.js';
+ /** Default discovery timeout - long to give users time to approve */ const DEFAULT_DISCOVERY_TIMEOUT_MS = 60000; // 60 seconds
+-/** Key exchange timeout - short, wallet should respond quickly after discovery approval */ const KEY_EXCHANGE_TIMEOUT_MS = 2000; // 2 seconds
++/** Key exchange timeout - short, wallet should respond quickly after discovery approval */
++// PATCH (nulo): bumped 2000 → 10000 to tolerate cold SW boot on CI runners.
++// See implementations-plan/network-followups/audit-codex-rootcause-3.md
++const KEY_EXCHANGE_TIMEOUT_MS = 10000; // 10 seconds
+ /**
+  * A discovered wallet before key exchange.
+  * Has basic info and MessagePort, but no shared key yet.
+diff --git a/src/extension/provider/extension_provider.ts b/src/extension/provider/extension_provider.ts
+index f312732b619e55ca1d98750669f52336073bc2b3..96ea7033f481f12d6bc626f221f0fdb2838aad17 100644
+--- a/src/extension/provider/extension_provider.ts
++++ b/src/extension/provider/extension_provider.ts
+@@ -17,7 +17,13 @@ import {
+ const DEFAULT_DISCOVERY_TIMEOUT_MS = 60000; // 60 seconds
+ 
+ /** Key exchange timeout - short, wallet should respond quickly after discovery approval */
+-const KEY_EXCHANGE_TIMEOUT_MS = 2000; // 2 seconds
++// PATCH (nulo): bumped 2000 → 10000 to tolerate cold SW boot on CI runners.
++// Wallet's `initWalletSdkHandler()` must complete bb.wasm init + migrations +
++// services.start() before this handshake; that exceeds 2s on first cold start
++// of a fresh browser under per-shard CI CPU pressure. Hit deterministically
++// on the network-followups e2e shard 5. Aztec audit transcript:
++// implementations-plan/network-followups/audit-codex-rootcause-3.md
++const KEY_EXCHANGE_TIMEOUT_MS = 10000; // 10 seconds
+ 
+ /**
+  * A discovered wallet before key exchange.
