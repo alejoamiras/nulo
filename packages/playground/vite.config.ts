@@ -79,6 +79,10 @@ export default defineConfig({
 	},
 	clearScreen: false,
 	optimizeDeps: {
-		exclude: ["@aztec/bb.js", "@aztec/noir-acvm_js", "@aztec/noir-noirc_abi"],
+		// When patching the wallet-sdk constant, exclude it from optimizeDeps
+		// so the vite transform plugin can see + rewrite individual source files.
+		// Without this exclude, esbuild pre-bundles the package and our `transform`
+		// hook never sees the original source.
+		exclude: ["@aztec/bb.js", "@aztec/noir-acvm_js", "@aztec/noir-noirc_abi", ...(e2eKeyExchangeMs ? ["@aztec/wallet-sdk"] : [])],
 	},
 })

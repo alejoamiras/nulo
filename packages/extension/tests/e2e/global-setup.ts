@@ -384,7 +384,7 @@ export default async function setup(project: TestProject) {
 
 			playgroundProcess.stdout?.on("data", (data: Buffer) => {
 				const line = data.toString().trim()
-				if (line.includes("Local:") || line.includes("error")) {
+				if (line.includes("Local:") || line.includes("error") || line.includes("patched wallet-sdk")) {
 					console.log("[playground]", line.slice(0, 200))
 				}
 			})
