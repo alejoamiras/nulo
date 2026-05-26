@@ -1,7 +1,7 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { waitForPopup, waitForExecuteContent, approveCapabilities, approveExecute } from "../fixtures/popups"
+import { waitForPopup, waitForExecuteContent, approveExecute } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -11,31 +11,25 @@ const hasConfig = aztecConfig !== undefined
  * Test #29 — sendTx default (account-bound). Always opens /windows/execute
  * (Transactions=5 >= confirmationLevel=5).
  *
- * Flow: grant transaction cap → set inputs → click → /windows/execute opens
- * with FeeSettingsCard (no fee preset) → user accepts default → tx submits.
+ * Flow: tx cap pre-granted by fixture → set inputs → click → /windows/execute
+ * opens with FeeSettingsCard (no fee preset) → user accepts default → tx submits.
+ *
+ * Uses `dappConnectedExtensionWithTransactionCap` so the cap-popup round-trip
+ * happens during fixture setup (hookTimeout=300s) rather than in this test's
+ * 180s budget. Mirrors the Phase 2 fix applied to register-token. The earlier
+ * inline cap-grant + tx flow exceeded the 180s budget on cold shard 3 (PR #63
+ * Network e2e run) even after retry x2; pushing the cap-grant work into the
+ * fixture should keep the test body in the 30–60s range it actually needs.
+ *
+ * See implementations-plan/e2e-stabilization/lessons/phase-3a.md for the
+ * probe findings that ruled out cross-browser warm-up and pivoted to this
+ * approach.
  */
 test.skipIf(!hasConfig)(
 	"tx-sendTx-default — popup opens, fee picker shown, confirm submits",
 	{ timeout: 180_000 },
-	async ({ dappConnectedExtension }) => {
-		const page = dappConnectedExtension.playgroundPage
-
-		// Grant transaction bundle (includes accounts + transaction)
-		await page.evaluate(() => {
-			const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')!
-			select.value = "transaction"
-			select.dispatchEvent(new Event("change", { bubbles: true }))
-		})
-		const seqGrant = await snapshotResultSeq(page)
-		const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
-		await clickByTestId(page, "pg-btn-requestCapabilities")
-		const capPopup = await capPopupP
-		await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 10_000 })
-		const accountIds = await capPopup.evaluate(() =>
-			[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) => r.getAttribute("data-account-id")),
-		)
-		await approveCapabilities(capPopup, { accounts: [accountIds[0]!] })
-		await waitForPgResult(page, "requestCapabilities", seqGrant, 30_000)
+	async ({ dappConnectedExtensionWithTransactionCap }) => {
+		const { playgroundPage: page } = dappConnectedExtensionWithTransactionCap
 
 		// Set inputs
 		await page.evaluate(
@@ -56,7 +50,7 @@ test.skipIf(!hasConfig)(
 
 		// Fire sendTx + drive the execute popup
 		const seqTx = await snapshotResultSeq(page)
-		const execPopupP = waitForPopup(dappConnectedExtension, "execute", { timeout: 30_000 })
+		const execPopupP = waitForPopup(dappConnectedExtensionWithTransactionCap, "execute", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-sendTx-default")
 		const execPopup = await execPopupP
 		await waitForExecuteContent(execPopup)
