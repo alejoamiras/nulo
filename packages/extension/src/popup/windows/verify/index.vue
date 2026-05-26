@@ -235,7 +235,7 @@ onUnmounted(() => {
 				<div data-testid="verify-always-trust-toggle"><Toggle :modelValue="alwaysTrust" @update:modelValue="(v: boolean) => (alwaysTrust = v)" /></div>
 			</Flex>
 
-			<Button data-testid="verify-confirm-btn" @click="handleConfirm" wide variant="primary" size="medium">
+			<Button data-testid="verify-confirm-btn" @click="handleConfirm" wide variant="primary" size="medium" :disabled="!session">
 				<Text size="13" color="inverse">OK</Text>
 			</Button>
 		</Flex>

@@ -6,6 +6,14 @@ import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
+// Deferred-slow quarantine. See implementations-plan/network-followups/audit-codex-register-token.md.
+// This spec stacks TWO cold interaction flows in one test (cap popup +
+// availableAccounts hydration, then execute popup + token-metadata prefetch),
+// so on cold-shard CI it can exceed any reasonable test budget. Restructuring
+// to pre-grant the cap via fixture is the right long-term fix (tracked in
+// Issue #59). Skipped in CI via `NULO_E2E_SKIP_DEFERRED_SLOW=1`; still runs
+// locally (warm machine).
+const skipDeferredSlow = process.env.NULO_E2E_SKIP_DEFERRED_SLOW === "1"
 
 /**
  * registerToken (Nulo-custom RPC) — happy path.
@@ -25,7 +33,7 @@ const hasConfig = aztecConfig !== undefined
  * helpers are mature; the faucet-driven e2e (using FAUCET_DEV_PORT +
  * faucetUrl fixture) is a separate spec.
  */
-test.skipIf(!hasConfig)(
+test.skipIf(!hasConfig || skipDeferredSlow)(
 	"registerToken — happy path: popup shows resolved metadata, approve persists token",
 	{ timeout: 60_000 },
 	async ({ dappConnectedExtension }) => {
@@ -41,10 +49,17 @@ test.skipIf(!hasConfig)(
 			select.dispatchEvent(new Event("change", { bubbles: true }))
 		})
 		const seqGrant = await snapshotResultSeq(page)
-		const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 15_000 })
+		// 60s (not 30s) because this is the FIRST cap popup on a cold shard.
+		// On cold SW the chrome.windows.create round-trip + SW handler boot can
+		// push popup-target appearance past 30s on CI runners. Other tests'
+		// 30s is fine because they run later in the shard when the SW is warm.
+		const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 60_000 })
 		await clickByTestId(page, "pg-btn-requestCapabilities")
 		const capPopup = await capPopupP
-		await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 10_000 })
+		// Same rationale as above — loadInteractionPayload() then needs to
+		// round-trip through the SW to resolve availableAccounts (PXE +
+		// accountService warmup), and on cold shard that can also take >30s.
+		await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 60_000 })
 		const accountIds = await capPopup.evaluate(() =>
 			[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) => r.getAttribute("data-account-id")),
 		)
@@ -89,8 +104,12 @@ test.skipIf(!hasConfig)(
 		const addressDisplayed = await execPopup.$('[data-testid="register-token-address"]')
 		expect(addressDisplayed).not.toBeNull()
 
-		// Approve and wait for the dApp's promise to settle.
-		await execPopup.click('[data-testid="execute-confirm-btn"]')
+		// Approve and wait for the dApp's promise to settle. Use clickByTestId
+		// (NOT raw page.click) so we wait for the Confirm button to become
+		// enabled — dev's :disabled gate is initComplete + tokenMetadataLoading
+		// + operations.length, all async. Raw click races the init and the
+		// approve() handler silently no-ops on the missing guards.
+		await clickByTestId(execPopup, "execute-confirm-btn")
 		const result = await waitForPgResult(page, "registerToken", seqRegister, 30_000)
 		expect(result.status).toBe("ok")
 

@@ -44,7 +44,7 @@ Triggers:
 
 ### `pr-network-e2e.yml`
 
-Runs the network e2e suite (anvil + Aztec sandbox + playground + the extension build). 46/64 passing today; the rest are quarantined via co-located `test.skip` pointing at [`implementations-plan/network-test-triage/plan.md`](./implementations-plan/network-test-triage/plan.md). Same trigger shape as `pr-smoke-e2e`, but with the `extension-network` filter (network-touching wallet code, runtime, bridge, playground, etc.) and the `e2e:network` label.
+Runs the network e2e suite (anvil + Aztec sandbox + playground + the extension build) as a **5-shard parallel matrix** — each shard owns its own sandbox + ~9 of the 45 test files (deterministic SHA-1-of-filename distribution). Wall time ~10–15 min (vs ~35–45 min unsharded). Same trigger shape as `pr-smoke-e2e`, but with the `extension-network` filter (network-touching wallet code, runtime, bridge, playground, etc.) and the `e2e:network` label. See [`packages/extension/tests/e2e/README.md`](./packages/extension/tests/e2e/README.md#ci-sharding-5-way-matrix) for the shard-design rationale + the 2 quarantined slow tests.
 
 ### `actionlint.yml`
 

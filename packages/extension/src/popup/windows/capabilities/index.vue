@@ -56,6 +56,14 @@ const isLoading = ref(false)
 const processingError = ref<UIError>()
 const expandedCards = ref(new Set<number>())
 
+// initComplete flips after init() resolves the dApp interaction payload
+// AND populates `capabilities.value`. Without it, the Approve button can be
+// clicked while `payload.value` is still null / `capabilities.value` is still
+// `[]`; approve() would silently no-op or approve an empty grant set. Codex
+// audit-final-merge HIGH #1. Race-safety parallel to execute/index.vue's
+// `initComplete` predicate.
+const initComplete = ref(false)
+
 const interactionService = new DappInteractionServiceClient()
 
 const {
@@ -133,6 +141,9 @@ const init = async () => {
 		const existingGrants = payload.value.params.existingGrants as Capability[]
 
 		capabilities.value = buildCapabilityItems(delta, existingGrants, reRequestedTypes)
+		// Only flip after capabilities are committed to state. If init throws
+		// or the popup is cancelled mid-flight, the approve gate stays closed.
+		initComplete.value = true
 	} catch (error) {
 		console.error(getErrorData(error))
 		setError("Something went wrong")
@@ -158,6 +169,13 @@ const onActiveProfileChanged = (_profile?: ProfileInfo) => {
 }
 
 const approve = async () => {
+	// Defense in depth: template's `:disabled="!initComplete"` should already
+	// block this, but if Enter / programmatic click slips through during init,
+	// throw loudly instead of silently no-opping (which was the 19-iteration
+	// failure mode in the discover popup). Codex audit-final-merge HIGH #1.
+	if (!initComplete.value) {
+		throw new Error("capabilities approve() called before init() completed — :disabled gate must include !initComplete")
+	}
 	if (noAccountsAvailable.value) {
 		// init() already populated the error block; refuse approval explicitly
 		// so the user can't bypass via Enter / keyboard.
@@ -350,7 +368,14 @@ onUnmounted(() => {
 			</Tooltip>
 
 			<Flex align="center" justify="between" gap="12">
-				<Button data-testid="cap-reject-btn" @click="reject" wide variant="primary_outline" size="medium" :disabled="isLoading">
+				<Button
+					data-testid="cap-reject-btn"
+					@click="reject"
+					wide
+					variant="primary_outline"
+					size="medium"
+					:disabled="isLoading || !requestId"
+				>
 					Reject
 				</Button>
 
@@ -361,7 +386,7 @@ onUnmounted(() => {
 					variant="primary"
 					size="medium"
 					:loading="isLoading"
-					:disabled="processingError?.type === 'error'"
+					:disabled="processingError?.type === 'error' || !initComplete"
 				>
 					<Text size="13" color="inverse">Approve</Text>
 				</Button>

@@ -53,7 +53,7 @@ export async function launchExtension(): Promise<ExtensionContext> {
 	// Discover extension ID from service worker target
 	const workerTarget = await browser.waitForTarget(
 		(target) => target.type() === "service_worker" && target.url().includes("service-worker-loader"),
-		{ timeout: 10_000 },
+		{ timeout: 30_000 },
 	)
 	const extensionId = new URL(workerTarget.url()).hostname
 
@@ -130,7 +130,7 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	const url = `chrome-extension://${ctx.extensionId}/src/onboarding/index.html#/onboarding/welcome`
 	await page.goto(url, { waitUntil: "domcontentloaded" })
 	// Wait for Vue mount: welcome CTA must render.
-	await page.waitForSelector('[data-testid="onboarding-welcome-create"]', { visible: true, timeout: 15_000 })
+	await page.waitForSelector('[data-testid="onboarding-welcome-create"]', { visible: true, timeout: 30_000 })
 	return page
 }
 
@@ -142,7 +142,7 @@ async function registerProfile(ctx: ExtensionContext): Promise<void> {
 
 	// Wait for GlobalLoader to disappear (SW must connect first)
 	await page.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), {
-		timeout: 15_000,
+		timeout: 30_000,
 		polling: 500,
 	})
 
@@ -151,7 +151,7 @@ async function registerProfile(ctx: ExtensionContext): Promise<void> {
 	// Wait for RegisterPopup submit button to mount
 	await page.waitForSelector('[data-testid="register-submit-btn"]', {
 		visible: true,
-		timeout: 10_000,
+		timeout: 30_000,
 	})
 
 	// Profile name is required at submit time (F1: pre-create explicit
@@ -160,7 +160,7 @@ async function registerProfile(ctx: ExtensionContext): Promise<void> {
 
 	await page.waitForSelector('input[placeholder="Strong password"]', {
 		visible: true,
-		timeout: 10_000,
+		timeout: 30_000,
 	})
 
 	const testPassword = "TestPassword123!"
@@ -170,8 +170,8 @@ async function registerProfile(ctx: ExtensionContext): Promise<void> {
 	// Submit (waitForFunction inside clickByTestId gates on :disabled)
 	await clickByTestId(page, "register-submit-btn")
 
-	await waitForHash(page, "#/popup/general", 15_000)
-	await page.waitForSelector('[data-testid="balance-amount"]', { visible: true, timeout: 10_000 })
+	await waitForHash(page, "#/popup/general", 30_000)
+	await page.waitForSelector('[data-testid="balance-amount"]', { visible: true, timeout: 30_000 })
 	await page.close()
 }
 
@@ -190,26 +190,47 @@ async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
 	const { openPlayground } = await import("./playground")
 	const { waitForPopup, approveDiscover, approveVerify } = await import("./popups")
 
-	const dappPage = await openPlayground(ctx)
+	// Internal phase-tag so the outer `[dappConnectedExtensionPerTest:connectPlayground]`
+	// error tells us WHICH step inside this function fails. Without this we
+	// only know "30s timeout somewhere in here" — useless for triage.
+	const step = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+		try {
+			return await fn()
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err)
+			throw new Error(`connectPlayground:${name} — ${msg}`)
+		}
+	}
+
+	const dappPage = await step("openPlayground", () => openPlayground(ctx))
 
 	// Set up popup listeners BEFORE the click so we don't miss the events.
-	const discoverP = waitForPopup(ctx, "discover", { timeout: 15_000 })
+	const discoverP = waitForPopup(ctx, "discover", { timeout: 30_000 })
 
 	// Bumped from 5s to 30s — under network-suite load the playground vite
 	// server cold-load + dapp Vue mount can take 10-20s; clickByTestId polls
 	// for ~10s on its own which is still usually enough, but the explicit
 	// waitForSelector here was the load-bearing 5s timeout that cascaded
 	// into ~40 fixture failures.
-	await dappPage.waitForSelector('[data-testid="pg-btn-connect"]', { visible: true, timeout: 30_000 })
-	await clickByTestId(dappPage, "pg-btn-connect")
+	await step("waitForConnectBtn", () => dappPage.waitForSelector('[data-testid="pg-btn-connect"]', { visible: true, timeout: 30_000 }))
+	await step("clickConnect", () => clickByTestId(dappPage, "pg-btn-connect"))
 
-	const discoverPage = await discoverP
-	await approveDiscover(discoverPage)
+	const discoverPage = await step("awaitDiscoverPopup", () => discoverP)
+	// Arm the verify popup wait BEFORE approveDiscover triggers the SW to
+	// create the verify window. Codex audit caught: approveDiscover only
+	// clicks (popups.ts:126), doesn't wait for close. If verify opens
+	// faster than the next waitForPopup, the snapshot at popups.ts:32
+	// treats the already-existing target as preExisting and ignores it —
+	// the test then hangs for 30s waiting for a NEW verify target that
+	// never appears. Race confirmed deterministic on shard 5.
+	const verifyP = waitForPopup(ctx, "verify", { timeout: 30_000 })
+	await step("approveDiscover", () => approveDiscover(discoverPage))
+	const verifyPage = await step("awaitVerifyPopup", () => verifyP)
+	await step("approveVerify", () => approveVerify(verifyPage))
 
-	const verifyPage = await waitForPopup(ctx, "verify", { timeout: 15_000 })
-	await approveVerify(verifyPage)
-
-	await dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 20_000 })
+	await step("waitForConnectedStatus", () =>
+		dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 30_000 }),
+	)
 	return dappPage
 }
 
@@ -297,7 +318,7 @@ export const test = base.extend<{
 			// no accounts → cap-account-item list is empty → every accounts/sendTx/
 			// sim test fails. (Confirmed by Codex audit run 1 — Codex 2026-04-26.)
 			const setupPage = await openPopup(registeredExtension)
-			await waitForHash(setupPage, "#/popup/general", 15_000)
+			await waitForHash(setupPage, "#/popup/general", 30_000)
 			await switchToLocalNetwork(setupPage)
 			await setupPage.close()
 			const playgroundPage = await connectPlayground(registeredExtension)
@@ -309,13 +330,26 @@ export const test = base.extend<{
 	dappConnectedExtensionPerTest: [
 		// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
 		async ({}, use) => {
-			const ctx = await launchExtension()
-			await registerProfile(ctx)
-			const setupPage = await openPopup(ctx)
-			await waitForHash(setupPage, "#/popup/general", 15_000)
-			await switchToLocalNetwork(setupPage)
+			// Phase-tag each setup step. A failure here previously surfaced
+			// downstream as `Cannot read properties of undefined (reading
+			// 'playgroundPage')` — the test body destructured the fixture
+			// result, but use() never ran because setup threw. The tag
+			// converts that opaque collapse into a precise origin line.
+			const phase = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+				try {
+					return await fn()
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err)
+					throw new Error(`[dappConnectedExtensionPerTest:${name}] ${msg}`)
+				}
+			}
+			const ctx = await phase("launchExtension", () => launchExtension())
+			await phase("registerProfile", () => registerProfile(ctx))
+			const setupPage = await phase("openPopup", () => openPopup(ctx))
+			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
+			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
 			await setupPage.close()
-			const playgroundPage = await connectPlayground(ctx)
+			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
 			await use(Object.assign(ctx, { playgroundPage }))
 			await ctx.browser.close()
 		},
@@ -328,7 +362,7 @@ export const test = base.extend<{
 			const ctx = await launchExtension()
 			await registerProfile(ctx)
 			const page = await openPopup(ctx)
-			await waitForHash(page, "#/popup/general", 15_000)
+			await waitForHash(page, "#/popup/general", 30_000)
 			await switchToLocalNetwork(page)
 			await page.close()
 			await use(ctx)
@@ -347,7 +381,7 @@ export const test = base.extend<{
 			await registerProfile(ctx)
 
 			const page = await openPopup(ctx)
-			await waitForHash(page, "#/popup/general", 15_000)
+			await waitForHash(page, "#/popup/general", 30_000)
 			await switchToLocalNetwork(page)
 
 			const accountAddress = await getAccountAddress(page)
@@ -416,7 +450,7 @@ export const test = base.extend<{
 			await registerProfile(ctx)
 
 			const page = await openPopup(ctx)
-			await waitForHash(page, "#/popup/general", 15_000)
+			await waitForHash(page, "#/popup/general", 30_000)
 			await switchToLocalNetwork(page)
 
 			const accountAddress = await getAccountAddress(page)
@@ -520,9 +554,9 @@ export const test = base.extend<{
 			const ctx = await launchExtension()
 			const page = await openPopup(ctx)
 
-			await waitForHash(page, "#/popup/register", 15_000)
+			await waitForHash(page, "#/popup/register", 30_000)
 			await page.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), {
-				timeout: 15_000,
+				timeout: 30_000,
 				polling: 500,
 			})
 
@@ -533,10 +567,10 @@ export const test = base.extend<{
 			})
 			await waitForHash(page, "#/popup/import", 5_000)
 
-			await page.waitForSelector('[data-testid="import-option-private-key"]', { visible: true, timeout: 10_000 })
+			await page.waitForSelector('[data-testid="import-option-private-key"]', { visible: true, timeout: 30_000 })
 			await clickByTestId(page, "import-option-private-key")
 
-			await page.waitForSelector('[data-testid="import-private-key-input"] input', { visible: true, timeout: 10_000 })
+			await page.waitForSelector('[data-testid="import-private-key-input"] input', { visible: true, timeout: 30_000 })
 			await page.evaluate(
 				({ secretKey, pwd }: { secretKey: string; pwd: string }) => {
 					const setVal = (sel: string, v: string) => {
@@ -706,8 +740,42 @@ export function patchPagePolling(page: Page): void {
 	}
 }
 
+/**
+ * Detect puppeteer detach errors that can occur during the brief CDP race
+ * between `browser.newPage()` and the first `page.goto(...)`. These signal
+ * a half-initialized frame, not a wallet-side problem — retrying with a
+ * fresh page resolves them. Symptom string varies across puppeteer-core
+ * versions and timing; match on any of the known phrases.
+ */
+function isFrameDetachError(err: unknown): boolean {
+	const msg = err instanceof Error ? err.message : String(err)
+	return /Navigating frame was detached|frame got detached|Session closed|Target closed|Connection closed/i.test(msg)
+}
+
 /** Open the extension popup in a new page with error collection. */
 export async function openPopup(ctx: ExtensionContext): Promise<Page> {
+	// One bounded retry on frame-detach errors: under accumulated suite load,
+	// `browser.newPage()` can return a page whose CDP frame is in a half-
+	// initialized state, causing the first `page.goto(popupUrl)` to throw
+	// "Navigating frame was detached" immediately. The mitigation is simply
+	// to close and re-create the page. A broader catch would mask real
+	// crashes — match only on known detach-error signatures.
+	let attempt = 0
+	const maxAttempts = 2
+	for (;;) {
+		try {
+			return await openPopupOnce(ctx)
+		} catch (err) {
+			attempt += 1
+			if (attempt >= maxAttempts || !isFrameDetachError(err)) throw err
+			if (process.env.NULO_E2E_OPENPOPUP_LOG === "1") {
+				console.log(`[openPopup] retry-on-detach attempt=${attempt}`)
+			}
+		}
+	}
+}
+
+async function openPopupOnce(ctx: ExtensionContext): Promise<Page> {
 	const page = await ctx.browser.newPage()
 	patchPagePolling(page)
 	await page.setViewport({ width: 360, height: 600 })
@@ -779,7 +847,7 @@ export async function openPopup(ctx: ExtensionContext): Promise<Page> {
 		await page.goto(popupUrl, { waitUntil: "domcontentloaded" })
 		await page.waitForFunction(
 			() => window.location.hash !== "#/" && window.location.hash !== "" && !document.querySelector('[data-testid="global-loader"]'),
-			{ timeout: 15_000, polling: 200 },
+			{ timeout: 30_000, polling: 200 },
 		)
 	}
 	if (process.env.NULO_E2E_OPENPOPUP_LOG === "1") {
