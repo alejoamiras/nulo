@@ -261,6 +261,16 @@ export const test = base.extend<{
 	 *  tx-sendTx-multicall) so cap state from one case doesn't leak to the next. */
 	dappConnectedExtensionPerTest: ExtensionContext & { playgroundPage: Page }
 	/** Per-test fresh browser + registered profile + Local Network + dapp
+	 *  connected via @nulo/playground + `accounts` capability ALREADY GRANTED
+	 *  for the playground origin. Use this for tests that exercise an
+	 *  account-cap-gated RPC (registerToken, getAccounts post-grant) without
+	 *  paying the cold cap-popup round-trip during the test budget — the
+	 *  cap-popup work happens in fixture setup, which has hookTimeout=300s.
+	 *  The exposed `accountAddress` is the first account from the cap popup
+	 *  (the one the fixture selected on the dApp's behalf).
+	 *  See implementations-plan/e2e-stabilization/plan.md §6, §8.4. */
+	dappConnectedExtensionWithAccountsCap: ExtensionContext & { playgroundPage: Page; accountAddress: string }
+	/** Per-test fresh browser + registered profile + Local Network + dapp
 	 *  connected + `transaction` bundle (accounts + transaction caps) ALREADY
 	 *  GRANTED for the playground origin. Use this for tests that exercise a
 	 *  transaction-cap-gated RPC (sendTx, multicall) without paying the cold
@@ -269,7 +279,7 @@ export const test = base.extend<{
 	 *  is the first account from the cap popup (the one the fixture selected on
 	 *  the dApp's behalf).
 	 *
-	 *  Mirrors the Phase 2 `dappConnectedExtensionWithAccountsCap` pattern; the
+	 *  Mirrors the `dappConnectedExtensionWithAccountsCap` pattern; the
 	 *  cap-grant inner helper is intentionally duplicated rather than abstracted
 	 *  to keep the two fixtures independently auditable. Refactor once we have
 	 *  three or more such fixtures (CLAUDE.md "same code in 3 places" threshold).
@@ -378,6 +388,67 @@ export const test = base.extend<{
 		{ scope: "test" },
 	],
 
+	dappConnectedExtensionWithAccountsCap: [
+		// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
+		async ({}, use) => {
+			const phase = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+				try {
+					return await fn()
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err)
+					throw new Error(`[dappConnectedExtensionWithAccountsCap:${name}] ${msg}`)
+				}
+			}
+			const ctx = await phase("launchExtension", () => launchExtension())
+			await phase("registerProfile", () => registerProfile(ctx))
+			const setupPage = await phase("openPopup", () => openPopup(ctx))
+			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
+			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
+			await setupPage.close()
+			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
+
+			// Pre-grant ONLY the `accounts` capability for the playground origin
+			// (NOT the wider `basic` bundle). Scoped per audit-codex-final-pass §1
+			// and plan.md §8.4. Runs inside the fixture's hookTimeout (300s) so
+			// the cold-shard cap-popup work doesn't eat into any consumer's
+			// per-test budget. The selected account address is returned to the
+			// consumer so it doesn't have to re-derive it from popup rows.
+			const accountAddress = await phase("grantAccountsCap", async () => {
+				await playgroundPage.evaluate(() => {
+					const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
+					if (!select) throw new Error("pg-bundle-select not present on playground page")
+					select.value = "accounts"
+					select.dispatchEvent(new Event("change", { bubbles: true }))
+				})
+				const seqGrant = await snapshotResultSeq(playgroundPage)
+				// 60s waitForPopup because this is THE first cap popup on a cold shard;
+				// chrome.windows.create + SW handler boot can push popup-target
+				// appearance past 30s on CI runners.
+				const capPopupP = waitForPopup(ctx, "capabilities", { timeout: 60_000 })
+				await clickByTestId(playgroundPage, "pg-btn-requestCapabilities")
+				const capPopup = await capPopupP
+				// 60s here too — loadInteractionPayload() round-trips through the SW
+				// to resolve availableAccounts (PXE + accountService warmup) which
+				// can also exceed 30s on cold shard.
+				await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 60_000 })
+				const accountIds = await capPopup.evaluate(() =>
+					[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) =>
+						r.getAttribute("data-account-id"),
+					),
+				)
+				const address = accountIds[0]
+				if (!address) throw new Error("capabilities popup returned no accounts")
+				await approveCapabilities(capPopup, { accounts: [address] })
+				await waitForPgResult(playgroundPage, "requestCapabilities", seqGrant, 30_000)
+				return address
+			})
+
+			await use(Object.assign(ctx, { playgroundPage, accountAddress }))
+			await ctx.browser.close()
+		},
+		{ scope: "test" },
+	],
+
 	dappConnectedExtensionWithTransactionCap: [
 		// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
 		async ({}, use) => {
@@ -400,9 +471,9 @@ export const test = base.extend<{
 			// Pre-grant the `transaction` bundle (accounts + transaction caps).
 			// Tx-cap-gated tests (sendTx, multicall) opt into this fixture to
 			// push the cold cap-popup round-trip into hookTimeout (300s) instead
-			// of paying it during the test budget. Same scope rules as Phase 2's
-			// dappConnectedExtensionWithAccountsCap: per-test, playground origin
-			// only, no state leak to siblings.
+			// of paying it during the test budget. Same scope rules as the
+			// accounts-cap fixture above: per-test, playground origin only,
+			// no state leak to siblings.
 			const accountAddress = await phase("grantTransactionCap", async () => {
 				await playgroundPage.evaluate(() => {
 					const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
