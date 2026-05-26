@@ -41,14 +41,16 @@ test.skipIf(!hasConfig)(
 			select.dispatchEvent(new Event("change", { bubbles: true }))
 		})
 		const seqGrant = await snapshotResultSeq(page)
-		const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
+		// 60s (not 30s) because this is the FIRST cap popup on a cold shard.
+		// On cold SW the chrome.windows.create round-trip + SW handler boot can
+		// push popup-target appearance past 30s on CI runners. Other tests'
+		// 30s is fine because they run later in the shard when the SW is warm.
+		const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 60_000 })
 		await clickByTestId(page, "pg-btn-requestCapabilities")
 		const capPopup = await capPopupP
-		// 60s (not 30s) because this is the FIRST cap popup on a cold shard.
-		// loadInteractionPayload() round-trips through the wallet SW which on
-		// cold boot can take 15-30s for the wallet to resolve availableAccounts
-		// (PXE + accountService warmup). Other tests' 10s is fine because they
-		// run later in the shard when the SW is warm.
+		// Same rationale as above — loadInteractionPayload() then needs to
+		// round-trip through the SW to resolve availableAccounts (PXE +
+		// accountService warmup), and on cold shard that can also take >30s.
 		await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 60_000 })
 		const accountIds = await capPopup.evaluate(() =>
 			[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) => r.getAttribute("data-account-id")),
