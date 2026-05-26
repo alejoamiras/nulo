@@ -18,6 +18,7 @@ The agent wrapper handles port allocation, the wallet build, and the test invoca
 bun run e2e:agent                                    # full network suite
 bun run e2e:agent --reporter=verbose                 # extra args go to vitest
 bun run e2e:agent tests/e2e/network/transfers.test.ts # filter to one file
+bun run e2e:agent --shard=5/5                        # reproduce one CI shard (see "CI sharding")
 ```
 
 Internally `scripts/e2e/agent.sh`:
@@ -86,6 +87,15 @@ CI runs the network suite as a **5-shard GitHub Actions matrix** (`.github/workf
 **Failing shard logs**: each shard uploads its own artifact (`network-e2e-logs-<N>-of-5`) containing `.e2e-state`, `aztec-*.log`, `anvil-*.log` on failure.
 
 **Quarantined tests**: the 2 deterministic-slow files above are skipped in CI via `NULO_E2E_SKIP_DEFERRED_SLOW=1` env (still run locally). Tracked in `implementations-plan/network-followups/slow-tests-hypotheses.md`.
+
+**Reproducing a CI shard locally**: pass `--shard=N/5` to `e2e:agent`:
+
+```bash
+bun run e2e:agent --shard=5/5                                  # just the files in shard 5
+NULO_E2E_SKIP_DEFERRED_SLOW=1 bun run e2e:agent --shard=1/5    # match CI's quarantine env
+```
+
+Vitest's deterministic SHA-1-of-filename sharder picks the same files locally as in CI, so this is the fastest way to reproduce a shard-specific failure (e.g. "register-token only fails on shard 1"). Each invocation still starts its own anvil + aztec + playground; running multiple shards in parallel needs multiple worktrees (see "Running multiple agents in parallel" above).
 
 ## Troubleshooting
 
