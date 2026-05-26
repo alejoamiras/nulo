@@ -27,7 +27,10 @@ const hasConfig = aztecConfig !== undefined
  */
 test.skipIf(!hasConfig)(
 	"tx-sendTx-default — popup opens, fee picker shown, confirm submits",
-	{ timeout: 180_000 },
+	// 240s budget because on the heavy shard (3, after fee-methods's 4
+	// FJ transfers) the post-approve waitForPgResult below can take ~180s
+	// for the chain to mine + return the dApp callback. Local warm: ~10s.
+	{ timeout: 240_000 },
 	async ({ dappConnectedExtensionWithTransactionCap }) => {
 		const { playgroundPage: page } = dappConnectedExtensionWithTransactionCap
 
@@ -67,7 +70,9 @@ test.skipIf(!hasConfig)(
 
 		await approveExecute(execPopup)
 
-		const result = await waitForPgResult(page, "sendTx", seqTx, 120_000)
+		// 180s (bumped from 120s) because on heavy shard 3 the chain takes
+		// longer to mine our TX + return the dApp callback after approval.
+		const result = await waitForPgResult(page, "sendTx", seqTx, 180_000)
 		expect(["ok", "error"]).toContain(result.status)
 	},
 )
