@@ -34,6 +34,15 @@ const profile = ref<ProfileInfo>()
 const isLoading = ref(false)
 const processingError = ref<UIError>()
 
+// isReady flips true only after init() commits payload + dApp identity +
+// active profile. Gates Allow so the user can't approve a session whose
+// hostname/logo/name they haven't seen yet (phishing surface). Allow stays
+// disabled until the trust anchor is rendered; Deny stays fast on
+// !requestId because early reject is harmless. Codex audit-codex-final-pass
+// §2 chose Allow-only-gate over opus's symmetric-gate. Investigation
+// journey: implementations-plan/network-followups/investigation-journey.md.
+const isReady = ref(false)
+
 const interactionService = new DappInteractionServiceClient()
 
 const {
@@ -64,6 +73,12 @@ const init = async () => {
 	try {
 		profile.value = await profileService.getActiveProfile()
 		await loadInteractionPayload()
+		// Belt-and-suspenders: require every state `approve()` reads is committed
+		// (profile, requestId, dapp). Codex review nit — relying on the composable
+		// invariant alone ("load() only resolves after dapp.value is set") is true
+		// today but brittle against future composable refactors. Stays false in
+		// error paths so the Allow button never opens on a half-loaded popup.
+		if (profile.value && requestId.value && dapp.value) isReady.value = true
 	} catch (error) {
 		console.error(getErrorData(error))
 		setError("Something went wrong")
@@ -77,6 +92,14 @@ const onActiveProfileChanged = (_profile?: ProfileInfo) => {
 }
 
 const approve = async () => {
+	// Defensive: template's `:disabled="!isReady"` should already block this,
+	// but if a stray Enter / programmatic click slips through during init,
+	// throw loudly rather than silently no-op. Silent guards on async-init
+	// popups cost 19 iterations to find last time — see
+	// implementations-plan/network-followups/investigation-journey.md.
+	if (!isReady.value) {
+		throw new Error("discover approve() called before init() completed — :disabled gate must include !isReady")
+	}
 	if (isInteractionCancelled.value || isLoading.value || !requestId.value) return
 	try {
 		isLoading.value = true
@@ -202,7 +225,7 @@ onUnmounted(() => {
 					variant="primary"
 					size="medium"
 					:loading="isLoading"
-					:disabled="processingError?.type === 'error' || !requestId"
+					:disabled="processingError?.type === 'error' || !isReady"
 				>
 					<Text size="13" color="inverse">Allow</Text>
 				</Button>
