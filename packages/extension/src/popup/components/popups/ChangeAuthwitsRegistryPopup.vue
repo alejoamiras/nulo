@@ -108,10 +108,10 @@ watch(
 )
 
 const onKeydown = (e) => {
-	// Skip Enter when not ready — handleChangeRegistry's own guard
-	// will also reject, but checking here keeps the keyboard path
-	// symmetric with the disabled-button template gate.
-	if (e.key === "Enter" && isAllowedToExecute.value) handleChangeRegistry()
+	// Mirror the full button :disabled gate (template uses
+	// `!isAllowedToExecute || isLoading`). Without the isLoading check,
+	// rapid Enter could re-enter the handler while a request is in flight.
+	if (e.key === "Enter" && isAllowedToExecute.value && !isLoading.value) handleChangeRegistry()
 }
 </script>
 

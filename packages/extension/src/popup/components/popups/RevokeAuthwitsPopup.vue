@@ -161,8 +161,10 @@ watch(
 )
 
 const onKeydown = (e) => {
-	// Skip Enter when not ready — symmetric with template's disabled-button gate.
-	if (e.key === "Enter" && isAllowedToExecute.value) handleRevokeAuthwits()
+	// Mirror the full button :disabled gate (template uses
+	// `!isAllowedToExecute || isErrorOccurred`) AND add isLoading so
+	// rapid Enter doesn't re-enter the handler while a request is in flight.
+	if (e.key === "Enter" && isAllowedToExecute.value && !isErrorOccurred.value && !isLoading.value) handleRevokeAuthwits()
 }
 </script>
 
