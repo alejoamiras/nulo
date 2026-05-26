@@ -1,6 +1,8 @@
 import puppeteer, { TimeoutError, type Browser, type Page, type ConsoleMessage } from "puppeteer"
 import { test as base, inject } from "vitest"
 import { switchToLocalNetwork, importToken, getAccountAddress, refreshBalances } from "./helpers"
+import { snapshotResultSeq, waitForPgResult } from "./playground"
+import { waitForPopup, approveCapabilities } from "./popups"
 import type { AztecTestConfig } from "./aztec"
 
 export interface ExtensionContext {
@@ -134,8 +136,10 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	return page
 }
 
-/** Register a profile with a test password. Leaves the extension on #/popup/general. */
-async function registerProfile(ctx: ExtensionContext): Promise<void> {
+/** Register a profile with a test password. Leaves the extension on #/popup/general.
+ *  Exported so the Phase 3 cold-shard warm-up tap (and any other test infra that
+ *  drives the full register flow outside the fixture pipeline) can reuse it. */
+export async function registerProfile(ctx: ExtensionContext): Promise<void> {
 	const page = await openPopup(ctx)
 
 	await waitForHash(page, "#/popup/register")
@@ -185,8 +189,11 @@ async function registerProfile(ctx: ExtensionContext): Promise<void> {
  *
  * Returns the dApp Page so the caller can keep driving it; the caller is
  * responsible for closing it (or letting the browser teardown handle it).
+ *
+ * Exported alongside `registerProfile` so the Phase 3 cold-shard warm-up tap
+ * can perform the same setup without going through the fixture pipeline.
  */
-async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
+export async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
 	const { openPlayground } = await import("./playground")
 	const { waitForPopup, approveDiscover, approveVerify } = await import("./popups")
 
@@ -253,6 +260,21 @@ export const test = base.extend<{
 	 *  for files with multiple parameterized cases (sim-methods, authwit-variants,
 	 *  tx-sendTx-multicall) so cap state from one case doesn't leak to the next. */
 	dappConnectedExtensionPerTest: ExtensionContext & { playgroundPage: Page }
+	/** Per-test fresh browser + registered profile + Local Network + dapp
+	 *  connected + `transaction` bundle (accounts + transaction caps) ALREADY
+	 *  GRANTED for the playground origin. Use this for tests that exercise a
+	 *  transaction-cap-gated RPC (sendTx, multicall) without paying the cold
+	 *  cap-popup round-trip during the test budget — the cap-popup work happens
+	 *  in fixture setup, which has hookTimeout=300s. The exposed `accountAddress`
+	 *  is the first account from the cap popup (the one the fixture selected on
+	 *  the dApp's behalf).
+	 *
+	 *  Mirrors the Phase 2 `dappConnectedExtensionWithAccountsCap` pattern; the
+	 *  cap-grant inner helper is intentionally duplicated rather than abstracted
+	 *  to keep the two fixtures independently auditable. Refactor once we have
+	 *  three or more such fixtures (CLAUDE.md "same code in 3 places" threshold).
+	 *  See implementations-plan/e2e-stabilization/lessons/phase-3a.md. */
+	dappConnectedExtensionWithTransactionCap: ExtensionContext & { playgroundPage: Page; accountAddress: string }
 	/** Fresh browser with extension loaded, **no profile registered**. Per-test
 	 *  scope. Use for tests that drive the import or register flow from
 	 *  scratch (e.g. tests/e2e/import-paths.test.ts). */
@@ -351,6 +373,62 @@ export const test = base.extend<{
 			await setupPage.close()
 			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
 			await use(Object.assign(ctx, { playgroundPage }))
+			await ctx.browser.close()
+		},
+		{ scope: "test" },
+	],
+
+	dappConnectedExtensionWithTransactionCap: [
+		// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
+		async ({}, use) => {
+			const phase = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+				try {
+					return await fn()
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err)
+					throw new Error(`[dappConnectedExtensionWithTransactionCap:${name}] ${msg}`)
+				}
+			}
+			const ctx = await phase("launchExtension", () => launchExtension())
+			await phase("registerProfile", () => registerProfile(ctx))
+			const setupPage = await phase("openPopup", () => openPopup(ctx))
+			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
+			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
+			await setupPage.close()
+			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
+
+			// Pre-grant the `transaction` bundle (accounts + transaction caps).
+			// Tx-cap-gated tests (sendTx, multicall) opt into this fixture to
+			// push the cold cap-popup round-trip into hookTimeout (300s) instead
+			// of paying it during the test budget. Same scope rules as Phase 2's
+			// dappConnectedExtensionWithAccountsCap: per-test, playground origin
+			// only, no state leak to siblings.
+			const accountAddress = await phase("grantTransactionCap", async () => {
+				await playgroundPage.evaluate(() => {
+					const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
+					if (!select) throw new Error("pg-bundle-select not present on playground page")
+					select.value = "transaction"
+					select.dispatchEvent(new Event("change", { bubbles: true }))
+				})
+				const seqGrant = await snapshotResultSeq(playgroundPage)
+				// 60s timeouts because this is THE first cap popup on a cold shard.
+				const capPopupP = waitForPopup(ctx, "capabilities", { timeout: 60_000 })
+				await clickByTestId(playgroundPage, "pg-btn-requestCapabilities")
+				const capPopup = await capPopupP
+				await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 60_000 })
+				const accountIds = await capPopup.evaluate(() =>
+					[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) =>
+						r.getAttribute("data-account-id"),
+					),
+				)
+				const address = accountIds[0]
+				if (!address) throw new Error("capabilities popup returned no accounts")
+				await approveCapabilities(capPopup, { accounts: [address] })
+				await waitForPgResult(playgroundPage, "requestCapabilities", seqGrant, 30_000)
+				return address
+			})
+
+			await use(Object.assign(ctx, { playgroundPage, accountAddress }))
 			await ctx.browser.close()
 		},
 		{ scope: "test" },
