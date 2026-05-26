@@ -85,7 +85,11 @@ const isAllowedToExecute = computed(() => {
 })
 
 async function handleRevokeAuthwits() {
-	if (!isAllowedToExecute) return
+	// `isAllowedToExecute` is a computed ref — must dereference `.value`.
+	// Pre-fix this guard was a no-op (refs are always truthy as objects);
+	// Enter could fire the handler before feeSettings was set on all chunks.
+	// Codex audit-codex-rootcause-8 #4.
+	if (!isAllowedToExecute.value) return
 
 	isLoading.value = true
 
@@ -157,7 +161,8 @@ watch(
 )
 
 const onKeydown = (e) => {
-	if (e.key === "Enter") handleRevokeAuthwits()
+	// Skip Enter when not ready — symmetric with template's disabled-button gate.
+	if (e.key === "Enter" && isAllowedToExecute.value) handleRevokeAuthwits()
 }
 </script>
 

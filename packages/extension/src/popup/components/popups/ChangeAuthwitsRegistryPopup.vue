@@ -64,7 +64,11 @@ const isAllowedToExecute = computed(() => {
 })
 
 async function handleChangeRegistry() {
-	if (!isAllowedToExecute) return
+	// `isAllowedToExecute` is a computed ref (always truthy as a ref object) —
+	// must dereference `.value` for the guard to actually work. Pre-fix this
+	// guard was a no-op, letting Enter / programmatic clicks fire the handler
+	// before `feeSettings.value` was set. Codex audit-codex-rootcause-8 #3.
+	if (!isAllowedToExecute.value) return
 
 	try {
 		isLoading.value = true
@@ -104,7 +108,10 @@ watch(
 )
 
 const onKeydown = (e) => {
-	if (e.key === "Enter") handleChangeRegistry()
+	// Skip Enter when not ready — handleChangeRegistry's own guard
+	// will also reject, but checking here keeps the keyboard path
+	// symmetric with the disabled-button template gate.
+	if (e.key === "Enter" && isAllowedToExecute.value) handleChangeRegistry()
 }
 </script>
 

@@ -44,7 +44,12 @@ test.skipIf(!hasConfig)(
 		const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-requestCapabilities")
 		const capPopup = await capPopupP
-		await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 30_000 })
+		// 60s (not 30s) because this is the FIRST cap popup on a cold shard.
+		// loadInteractionPayload() round-trips through the wallet SW which on
+		// cold boot can take 15-30s for the wallet to resolve availableAccounts
+		// (PXE + accountService warmup). Other tests' 10s is fine because they
+		// run later in the shard when the SW is warm.
+		await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 60_000 })
 		const accountIds = await capPopup.evaluate(() =>
 			[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) => r.getAttribute("data-account-id")),
 		)
