@@ -6,6 +6,14 @@ import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
+// Deferred-slow quarantine. See implementations-plan/network-followups/audit-codex-register-token.md.
+// This spec stacks TWO cold interaction flows in one test (cap popup +
+// availableAccounts hydration, then execute popup + token-metadata prefetch),
+// so on cold-shard CI it can exceed any reasonable test budget. Restructuring
+// to pre-grant the cap via fixture is the right long-term fix (tracked in
+// Issue #59). Skipped in CI via `NULO_E2E_SKIP_DEFERRED_SLOW=1`; still runs
+// locally (warm machine).
+const skipDeferredSlow = process.env.NULO_E2E_SKIP_DEFERRED_SLOW === "1"
 
 /**
  * registerToken (Nulo-custom RPC) — happy path.
@@ -25,7 +33,7 @@ const hasConfig = aztecConfig !== undefined
  * helpers are mature; the faucet-driven e2e (using FAUCET_DEV_PORT +
  * faucetUrl fixture) is a separate spec.
  */
-test.skipIf(!hasConfig)(
+test.skipIf(!hasConfig || skipDeferredSlow)(
 	"registerToken — happy path: popup shows resolved metadata, approve persists token",
 	{ timeout: 60_000 },
 	async ({ dappConnectedExtension }) => {

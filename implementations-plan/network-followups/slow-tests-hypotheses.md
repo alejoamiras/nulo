@@ -6,6 +6,16 @@
 
 The two slow tests remain known load-induced flakes that sharding (Phase A) likely mitigates by reducing cumulative load per shard. Re-evaluate after sharding lands on CI.
 
+**Update (2026-05-26)**: a third test joined the deferred list — `register-token.test.ts`. Distinct mechanism: this test stacks TWO cold interaction flows (cap popup + execute popup) in one spec, so on cold-shard CI the cumulative inner-wait budget exceeds any reasonable test timeout (codex math: ~210s of potential waits vs 60s test budget). Restructuring (pre-grant cap via fixture, split "grant" from "register") is the right long-term fix — tracked in **Issue #59**. Audit transcript: `audit-codex-register-token.md`.
+
+## Quarantined tests (skipped via `NULO_E2E_SKIP_DEFERRED_SLOW=1` on CI)
+
+| File | Reason | Tracked in |
+|---|---|---|
+| `multi-account-from.test.ts` | Load-induced flake under cap-popup target-creation backpressure (H-OP-3) | this doc |
+| `tx-sendTx-multicall.test.ts` | bb.wasm `proveTx` cold-start cost per fresh Chrome (H-OP-1) | this doc |
+| `register-token.test.ts` | Stacked cold flows (cap + execute popups) exceed test timeout budget | Issue #59 + `audit-codex-register-token.md` |
+
 ## What we tried
 
 - Re-introduced storage-based `probe()` helper at `packages/extension/src/wallet/utils/probe.ts` (per PR #46's `lessons/probe-infrastructure.md`)
