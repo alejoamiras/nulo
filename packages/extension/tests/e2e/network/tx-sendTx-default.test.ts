@@ -67,13 +67,17 @@ test.skipIf(!hasConfig)(
 
 		await approveExecute(execPopup)
 
-		// 30s (down from 120s) because pg-btn-sendTx-default now sends with
-		// `wait: "NO_WAIT"` — the dApp's promise settles when the wallet
-		// submits the tx (txHash + offchain output) without waiting on chain
-		// mining. The popup-shape test asserts that the dApp got the
-		// callback, not on receipt mining latency. Codex audit session
-		// 019e6628-bc1c-7282-a1eb-aad1cc5bd70d for the diagnosis.
-		const result = await waitForPgResult(page, "sendTx", seqTx, 30_000)
+		// 90s budget because, even with `wait: "NO_WAIT"` removing receipt
+		// mining from the path, the wallet still PROVES the tx before
+		// submission. On CI's shard 3 the prover queue is pressured by
+		// fee-methods.test.ts running first (4 real fee-juice tx flows),
+		// and WASM proving without the local accelerator takes ~30-50s for
+		// each prove there. Empirically: Phase 4 acceptance run sized at 30s
+		// failed deterministically on 4 of 5 runs; ~3× margin chosen.
+		// Local M-series WASM run (post-accelerator-off, same shard 3
+		// ordering): 6 tests in 106s combined → tx-sendTx-default fits in
+		// ~10-20s. CI runner is ~4× slower under prover-queue load.
+		const result = await waitForPgResult(page, "sendTx", seqTx, 90_000)
 		expect(["ok", "error"]).toContain(result.status)
 	},
 )
