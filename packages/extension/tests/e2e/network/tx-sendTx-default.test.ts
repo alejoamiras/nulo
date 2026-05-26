@@ -67,7 +67,13 @@ test.skipIf(!hasConfig)(
 
 		await approveExecute(execPopup)
 
-		const result = await waitForPgResult(page, "sendTx", seqTx, 120_000)
+		// 30s (down from 120s) because pg-btn-sendTx-default now sends with
+		// `wait: "NO_WAIT"` — the dApp's promise settles when the wallet
+		// submits the tx (txHash + offchain output) without waiting on chain
+		// mining. The popup-shape test asserts that the dApp got the
+		// callback, not on receipt mining latency. Codex audit session
+		// 019e6628-bc1c-7282-a1eb-aad1cc5bd70d for the diagnosis.
+		const result = await waitForPgResult(page, "sendTx", seqTx, 30_000)
 		expect(["ok", "error"]).toContain(result.status)
 	},
 )
