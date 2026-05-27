@@ -34,6 +34,19 @@ import { getLastActiveProfileId } from "@/utils/lastActiveProfile"
 // `managers.*` access, if at all.
 initAppServiceContext()
 
+// E2E test affordance: expose `managers` on `window.__nuloE2E` when the
+// build was made with `VITE_E2E_DEBUG=1`. The e2e runner (scripts/e2e/
+// agent.sh) sets it; production builds don't, so the symbol is absent
+// from shipped bundles. The bundle-grep guard in
+// .github/workflows/_network-e2e.yml (`PROBE|nulo:probe:|VITE_E2E_PROBE`)
+// catches diagnostic-probe code that ships by mistake; the same review
+// discipline applies here — if `__nuloE2E` ever appears in dist/chrome
+// without the e2e env, that's a regression to flag.
+if (import.meta.env.VITE_E2E_DEBUG === "1") {
+	// biome-ignore lint/suspicious/noExplicitAny: e2e-only debug surface
+	;(window as any).__nuloE2E = { managers }
+}
+
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 
