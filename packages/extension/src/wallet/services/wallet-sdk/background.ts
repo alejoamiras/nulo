@@ -23,6 +23,10 @@
  * 4. **Responses**: Results are encrypted and sent back through the channel.
  */
 
+// Patch WalletSchema before wallet-sdk reads it (Nulo-custom `registerToken`).
+// Must be the first import in this module — see nulo-schema-patch.ts header.
+import "./nulo-schema-patch"
+
 import { BackgroundConnectionHandler, type PendingDiscovery, type ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
 import type { WalletMessage, WalletResponse } from "@aztec/wallet-sdk/types"
 import { validateContentScriptMessage } from "./content-script-validator"

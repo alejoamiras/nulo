@@ -575,3 +575,175 @@ describe("dispatcher batch hooks isolation", () => {
 		expect(true).toBe(true)
 	})
 })
+
+// ── registerToken (Nulo-custom) — schema-patch reachability + routing ───
+//
+// These tests pin the BLOCKER fixes from the dual audit:
+//   - The runtime schema patch must extend WalletSchema with `registerToken`
+//     (otherwise the dApp-side Proxy refuses the call before it reaches us).
+//   - The dispatcher must route `registerToken` through DappInteractionService.execute()
+//     (otherwise the popup gate is bypassed; the previous code path sent it
+//     straight to ExecutionService.executeOperations which silenced the confirm).
+//   - The capability gate must require the `accounts` capability.
+//   - `getCompleteAddress` and `simulateViews` must NOT dispatch — they were
+//     dropped from the wire surface. Regression guard against re-introduction
+//     without a paired schema entry + test.
+
+describe("dispatcher — registerToken reachability + routing", () => {
+	test("schema patch extends WalletSchema with a 2-arg `registerToken` entry", async () => {
+		// Import the production patch from the extension package. This is the
+		// reachability assertion: if the side-effect import drifts (renamed,
+		// moved, or accidentally tree-shaken by a future bundler), this test
+		// fails.
+		await import("../../extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
+		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
+		expect("registerToken" in WalletSchema).toBe(true)
+		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
+		const entry = (WalletSchema as any).registerToken
+		expect(typeof entry?.parameters).toBe("function")
+		const params = entry.parameters()
+		expect(params.items.length).toBe(2)
+	})
+
+	test("dispatch('registerToken', ...) routes through DappInteractionService.execute (NOT executeOperations)", async () => {
+		const session = makeSession({
+			capabilityGrants: [
+				{
+					capability: {
+						type: "accounts",
+						canGet: true,
+						canCreateAuthWit: false,
+						accounts: [{ alias: "main", item: "0x123" }],
+					} as Capability,
+					grantedAt: 1,
+				},
+			],
+			accounts: ["aztec:0:0xacc"],
+		})
+		const { writer } = makeSessionWriter(session)
+
+		const executeCalls: unknown[] = []
+		const executionCalls: unknown[] = []
+		const interaction: IDappInteractionRunner = {
+			execute: async (params: unknown) => {
+				executeCalls.push(params)
+				return [{ status: "ok", result: undefined }] as never
+			},
+			requestCapabilities: async () => ({}) as never,
+		}
+		const execution: IExecutionRunner = {
+			executeOperations: async (ops) => {
+				executionCalls.push(ops)
+				return [{ status: "ok", result: undefined }] as OperationResult[]
+			},
+		}
+		const network: INetworkReader = {
+			getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
+		}
+		const account: IAccountReader = {
+			getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }],
+		}
+		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
+
+		await dispatcher.dispatch("registerToken", ["0xacc", "0xdeadbeef"], ctx)
+
+		expect(executeCalls).toHaveLength(1)
+		expect(executionCalls).toHaveLength(0)
+		const params = executeCalls[0] as { operations: Array<{ kind: string; account: string; address: string }> }
+		expect(params.operations[0].kind).toBe("register_token")
+		// The dApp-supplied account (args[0]) must be threaded into the
+		// request — NOT silently swapped for a different session-authorized
+		// account. Storage scoping is profile+chain but the journal records
+		// the requested account.
+		expect(params.operations[0].account).toBe("aztec:0:0xacc")
+		expect(params.operations[0].address).toBe("0xdeadbeef")
+	})
+
+	test("dispatch('registerToken', ...) rejects when the requested account is not in the session's authorized list", async () => {
+		const session = makeSession({
+			capabilityGrants: [
+				{
+					capability: {
+						type: "accounts",
+						canGet: true,
+						canCreateAuthWit: false,
+						accounts: [{ alias: "main", item: "0xacc" }],
+					} as Capability,
+					grantedAt: 1,
+				},
+			],
+			accounts: ["aztec:0:0xacc"], // only 0xacc is authorized
+		})
+		const { writer } = makeSessionWriter(session)
+
+		const interaction: IDappInteractionRunner = {
+			execute: async () => [{ status: "ok", result: undefined }] as never,
+			requestCapabilities: async () => ({}) as never,
+		}
+		const execution: IExecutionRunner = {
+			executeOperations: async () => [] as OperationResult[],
+		}
+		const network: INetworkReader = {
+			getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
+		}
+		const account: IAccountReader = {
+			getAccounts: async () => [
+				{ address: "0xacc", name: "main", chainId: 0 },
+				{ address: "0xunauthorized", name: "extra", chainId: 0 },
+			],
+		}
+		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
+
+		// dApp asks the wallet to register a token for 0xunauthorized — an
+		// account that exists on the wallet but is NOT in the session's
+		// authorized list. The dispatcher must refuse rather than silently
+		// substituting the session's authorized 0xacc.
+		await expect(dispatcher.dispatch("registerToken", ["0xunauthorized", "0xdeadbeef"], ctx)).rejects.toThrow(/not authorized/i)
+	})
+
+	test("batch([{name:'registerToken', ...}]) is rejected server-side", async () => {
+		// Even if a raw protocol client bypasses the SDK's dApp-side Zod
+		// validation (BatchedMethodSchema is built from WalletMethodSchemas,
+		// not the runtime-patched WalletSchema), the dispatcher must reject
+		// batched registerToken because it requires a popup gate that a
+		// batch result can't represent.
+		const session = makeSession()
+		const { writer } = makeSessionWriter(session)
+		const dispatcher = makeDispatcher(writer, async () => ({}) as CapabilityResult)
+
+		await expect(dispatcher.dispatch("batch", [[{ name: "registerToken", args: ["0xacc", "0xdeadbeef"] }]], ctx)).rejects.toThrow(
+			/cannot be used inside batch/i,
+		)
+	})
+
+	test("batch([{name:'sendTx', ...}]) is also rejected (same popup-gated reason)", async () => {
+		const session = makeSession()
+		const { writer } = makeSessionWriter(session)
+		const dispatcher = makeDispatcher(writer, async () => ({}) as CapabilityResult)
+
+		await expect(dispatcher.dispatch("batch", [[{ name: "sendTx", args: [{}, {}] }]], ctx)).rejects.toThrow(
+			/cannot be used inside batch/i,
+		)
+	})
+
+	test("dispatch('getCompleteAddress', ...) is no longer supported (regression guard)", async () => {
+		const session = makeSession()
+		const { writer } = makeSessionWriter(session)
+		const dispatcher = makeDispatcher(writer, async () => ({}) as CapabilityResult)
+		await expect(dispatcher.dispatch("getCompleteAddress", ["0xacc"], ctx)).rejects.toThrow(/Unsupported wallet method/)
+	})
+
+	test("dispatch('simulateViews', ...) is no longer supported (regression guard)", async () => {
+		const session = makeSession()
+		const { writer } = makeSessionWriter(session)
+		const dispatcher = makeDispatcher(writer, async () => ({}) as CapabilityResult)
+		await expect(dispatcher.dispatch("simulateViews", [[]], ctx)).rejects.toThrow(/Unsupported wallet method/)
+	})
+
+	test("getRequiredCapability('registerToken') === 'accounts'", async () => {
+		const { getRequiredCapability } = await import("./capability-map")
+		expect(getRequiredCapability("registerToken")).toBe("accounts")
+		expect(getRequiredCapability("getCompleteAddress")).toBeNull()
+		expect(getRequiredCapability("simulateViews")).toBeNull()
+	})
+})

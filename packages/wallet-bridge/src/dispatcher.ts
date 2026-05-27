@@ -51,11 +51,10 @@
 // Imports use relative paths because this file IS part of wallet-bridge — the
 // package-name import (`@nulo/wallet-bridge`) would resolve at runtime but
 // wires an unnecessary self-reference through the barrel.
-import type { EncodedCallAction } from "./action"
 import { formatCaipAccount, formatCaipChain, parseCaipAccount, resolveNetworkByChainId } from "./caip"
 import type { AccountsCapability, Capability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
 import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
-import type { AztecSendTxRequest, CapabilityResult, ExecutionResult } from "./dapp-interaction-protocol"
+import type { AztecSendTxRequest, CapabilityResult, ExecutionResult, RegisterTokenRequest } from "./dapp-interaction-protocol"
 import type {
 	AztecCreateAuthWitOperation,
 	AztecExecuteUtilityOperation,
@@ -146,21 +145,6 @@ function accountsCapsEqual(a: AccountsCapability, b: AccountsCapability): boolea
 	return Boolean(a.canGet) === Boolean(b.canGet) && Boolean(a.canCreateAuthWit) === Boolean(b.canCreateAuthWit)
 }
 
-/**
- * A deserialized FunctionCall as received over the wallet-sdk wire protocol.
- * These mirror `@aztec/stdlib/abi` FunctionCall but arrive as plain objects, not class instances.
- */
-type WireFunctionCall = {
-	to: unknown
-	selector: unknown
-	args?: unknown[]
-	name?: string
-	type?: string
-	isStatic?: boolean
-	hideMsgSender?: boolean
-	returnTypes?: unknown[]
-}
-
 /** Shape of the capability manifest sent by the dApp via requestCapabilities(). */
 type CapabilityManifest = {
 	capabilities?: unknown[]
@@ -186,12 +170,9 @@ const METHOD_TO_KIND: Record<string, Operation["kind"]> = {
 	simulateTx: "aztec_simulateTx",
 	executeUtility: "aztec_executeUtility",
 	profileTx: "aztec_profileTx",
-	// sendTx is handled directly in dispatch() via DappInteractionService
+	// sendTx and registerToken are handled directly in dispatch() via
+	// DappInteractionService — both need the confirmation popup.
 	createAuthWit: "aztec_createAuthWit",
-	// --- Nulo custom methods (added via schema_patch.ts) ---
-	registerToken: "register_token",
-	getCompleteAddress: "get_complete_address",
-	simulateViews: "simulate_views",
 }
 
 /**
@@ -212,17 +193,14 @@ const NETWORK_ONLY_KINDS = new Set<Operation["kind"]>([
  * Operations that need both network AND account context.
  * These map chainId → networkId AND resolve the first session account.
  */
-const ACCOUNT_KINDS = new Set<Operation["kind"]>([
-	"aztec_simulateTx",
-	"aztec_executeUtility",
-	"aztec_profileTx",
-	"aztec_createAuthWit",
-	"register_token",
-	"get_complete_address",
-	"simulate_views",
-])
+const ACCOUNT_KINDS = new Set<Operation["kind"]>(["aztec_simulateTx", "aztec_executeUtility", "aztec_profileTx", "aztec_createAuthWit"])
 
-// Note: sendTx is handled separately in handleSendTx() via DappInteractionService
+// Note: sendTx and registerToken are handled separately via DappInteractionService
+// (handleSendTx / handleRegisterToken). simulate_views and get_complete_address are
+// fully retired — both dApp-facing wire surfaces and the `simulate_views` op kind
+// itself were removed. The batching logic that previously lived behind
+// `simulate_views` now lives in `extension/src/wallet/services/execution/helpers/
+// batched-view-simulation.ts`, called directly by balance-projector + gas-balance.
 
 export class WalletSdkDispatcher {
 	constructor(
@@ -267,9 +245,14 @@ export class WalletSdkDispatcher {
 			return this.handleBatch(args[0] as Array<{ name: string; args: unknown[] }>, ctx)
 		}
 
-		// sendTx goes through DappInteractionService for the confirmation popup + fee selection
+		// sendTx and registerToken both go through DappInteractionService for the
+		// confirmation popup. sendTx also drives fee selection; registerToken pre-fetches
+		// token metadata so the user sees name + symbol + decimals before approving.
 		if (methodName === "sendTx") {
 			return this.handleSendTx(args, ctx, hooks)
+		}
+		if (methodName === "registerToken") {
+			return this.handleRegisterToken(args, ctx)
 		}
 
 		const kind = METHOD_TO_KIND[methodName]
@@ -362,6 +345,22 @@ export class WalletSdkDispatcher {
 	 * throwing is the only contract-compatible failure signal.
 	 */
 	private async handleBatch(methods: Array<{ name: string; args: unknown[] }>, ctx: SessionContext): Promise<unknown> {
+		// Refuse legs whose semantics rely on a confirmation popup. Upstream
+		// `BatchedMethodSchema` is built from the canonical `WalletMethodSchemas`
+		// (not from runtime-patched `WalletSchema`), so a stock SDK already
+		// Zod-blocks these on the dApp side. But a raw protocol client could
+		// bypass the SDK and send the leg directly; we close that hole here
+		// so the README's "not in batch" contract is enforced server-side.
+		//
+		// `sendTx` and `registerToken` are the popup-gated methods. Both
+		// require user interaction (fee selection / token metadata review)
+		// that isn't representable in a batch result.
+		for (const method of methods) {
+			if (method.name === "sendTx" || method.name === "registerToken") {
+				throw new Error(`Method "${method.name}" cannot be used inside batch — it requires a confirmation popup`)
+			}
+		}
+
 		const results: Array<{ name: string; result: unknown }> = []
 		for (const method of methods) {
 			const result = await this.dispatch(method.name, method.args, ctx)
@@ -426,6 +425,65 @@ export class WalletSdkDispatcher {
 			undefined,
 			hooks ? { onTxRequestFinalized: hooks.onTxRequestFinalized, queuedJournalId: hooks.queuedJournalId } : undefined,
 		)
+
+		return this.unwrapResult(results[0])
+	}
+
+	/**
+	 * Handle registerToken by routing through DappInteractionService.
+	 *
+	 * Unlike straight-to-execution methods, registerToken needs the confirmation
+	 * popup so the user can see the resolved token name + symbol + decimals
+	 * (pre-fetched by the popup via parseTokenInterface) before approving. The
+	 * popup gate is the only per-call defense against silent token-list pollution
+	 * once the `accounts` capability has been granted.
+	 *
+	 * The dApp-supplied account (args[0]) is honored: it's validated against the
+	 * session's authorized accounts and forwarded to the popup + execution
+	 * service + journal. Storage scoping is profile+chain (the token shows up
+	 * for every account on this chain), but the account argument still carries
+	 * audit value — the journal records "which account did the dApp ask on
+	 * behalf of." Without validation, a dApp could pass any account address
+	 * (including ones not in their session); with validation, the wallet
+	 * refuses with a clear error instead of silently substituting a different
+	 * authorized account.
+	 */
+	private async handleRegisterToken(args: unknown[], ctx: SessionContext): Promise<unknown> {
+		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+		if (!dappSession) {
+			throw new Error(`No dApp session found for origin ${ctx.origin}`)
+		}
+
+		// Resolve the dApp-supplied account against the session's authorized
+		// list. Falls back to the first session-authorized account if args[0]
+		// isn't a valid address (lenient parsing — old SDK shapes pass the
+		// address as a raw string vs. AztecAddress instance).
+		const requestedAccount = String(args[0])
+		const network = await this.resolveNetwork(ctx)
+		const allAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
+		const sessionAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
+		const account = allAccounts.find((acc) => sessionAddresses.has(acc.address) && acc.address === requestedAccount)
+		if (!account) {
+			// Either the dApp passed an unknown account, or the requested
+			// account isn't in this session's authorized set. Refuse rather
+			// than silently substituting — the user granted permission for a
+			// specific subset of accounts via requestCapabilities.
+			throw new Error(`registerToken: account ${requestedAccount} is not authorized for this dApp session`)
+		}
+		const caipAccount = formatCaipAccount(ctx.chainId, account.address)
+
+		const tokenAddress = String(args[1])
+
+		const registerOp: RegisterTokenRequest = {
+			kind: "register_token" as const,
+			account: caipAccount,
+			address: tokenAddress,
+		}
+
+		const results: ExecutionResult = await this.dappInteractionService.execute({
+			sessionId: dappSession.id,
+			operations: [registerOp],
+		})
 
 		return this.unwrapResult(results[0])
 	}
@@ -759,9 +817,9 @@ export class WalletSdkDispatcher {
 	 *   - executeUtility(call, opts): [FunctionCall, ExecuteUtilityOptions]
 	 *   - profileTx(exec, opts): [ExecutionPayload, ProfileOptions]
 	 *   - createAuthWit(messageHashOrIntent): [IntentInnerHash | CallIntent]
-	 *   - registerToken(account, token): [AztecAddress, AztecAddress]
-	 *   - getCompleteAddress(account): [AztecAddress]
-	 *   - simulateViews(calls): [FunctionCall[]]
+	 *
+	 * registerToken / sendTx are handled separately via handleRegisterToken /
+	 * handleSendTx, which route through DappInteractionService for the popup gate.
 	 */
 	private buildAccountOperation(kind: Operation["kind"], args: unknown[], networkId: string, accountAddress: string): Operation {
 		switch (kind) {
@@ -800,47 +858,9 @@ export class WalletSdkDispatcher {
 					accountAddress,
 					messageHashOrIntent: args[1] as AztecCreateAuthWitOperation["messageHashOrIntent"],
 				}
-			case "register_token":
-				// schema_patch: registerToken(account: AztecAddress, token: AztecAddress)
-				// The first arg is the account (already resolved), second is the token address
-				return { kind, networkId, accountAddress, address: String(args[1]) }
-			case "get_complete_address":
-				// schema_patch: getCompleteAddress(account: AztecAddress)
-				return { kind, networkId, accountAddress }
-			case "simulate_views":
-				// schema_patch: simulateViews(calls: FunctionCall[])
-				// The calls come as FunctionCall[] from the schema. ExecutionService expects
-				// (CallAction | EncodedCallAction)[]. We convert FunctionCall → EncodedCallAction.
-				return {
-					kind,
-					networkId,
-					accountAddress,
-					calls: this.functionCallsToEncodedActions(args[0] as WireFunctionCall[]),
-				}
 			default:
 				throw new Error(`Unknown account operation: ${kind}`)
 		}
-	}
-
-	/**
-	 * Convert FunctionCall[] (from wallet-sdk) to EncodedCallAction[] (for ExecutionService).
-	 *
-	 * The wallet-sdk sends FunctionCall objects (with `to`, `selector`, `args` as Fr[], etc).
-	 * The ExecutionService's SimulateViewsOperation expects `(CallAction | EncodedCallAction)[]`.
-	 * We convert to EncodedCallAction format which uses string representations.
-	 */
-	private functionCallsToEncodedActions(calls: WireFunctionCall[]): EncodedCallAction[] {
-		return calls.map((call) => ({
-			kind: "encoded_call" as const,
-			to: String(call.to),
-			selector: String(call.selector),
-			args: (call.args ?? []).map((a) => String(a)),
-			name: call.name,
-			type: call.type,
-			isStatic: call.isStatic,
-			hideMsgSender: call.hideMsgSender,
-			returnTypes: call.returnTypes ?? [],
-		}))
 	}
 
 	/**

@@ -19,6 +19,7 @@ import { type OwnedState, clearLock, isPidAlive, killOrphanByPid, readLock, writ
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const EXTENSION_PATH = path.resolve(__dirname, "../../dist/chrome")
 const PLAYGROUND_DIR = path.resolve(__dirname, "../../../playground")
+const FAUCET_DIR = path.resolve(__dirname, "../../../faucet")
 const CONFIG_PATH = path.resolve(__dirname, ".test-config.json")
 const AZTEC_BIN = path.resolve(process.env.HOME || "~", ".aztec/current/node_modules/.bin/aztec")
 const ANVIL_BIN = path.resolve(process.env.HOME || "~", ".aztec/current/bin/anvil")
@@ -37,6 +38,12 @@ const AZTEC_ADMIN_PORT = Number(process.env.AZTEC_ADMIN_PORT ?? 8880)
 const AZTEC_P2P_PORT = Number(process.env.AZTEC_P2P_PORT ?? 40400)
 const PLAYGROUND_PORT = Number(process.env.PLAYGROUND_PORT ?? 5174)
 const PLAYGROUND_URL = process.env.PLAYGROUND_URL ?? `http://localhost:${PLAYGROUND_PORT}/`
+/** Faucet dev server. Opt-in via FAUCET_DEV_PORT (the agent wrapper sets it when
+ *  the suite includes the `faucet-add-token` spec). Without this gate, every
+ *  network e2e run would spawn the faucet, which is expensive (Vite + Vue +
+ *  Aztec deps) and pointless for tests that don't touch the faucet. */
+const FAUCET_PORT = process.env.FAUCET_DEV_PORT ? Number(process.env.FAUCET_DEV_PORT) : undefined
+const FAUCET_URL = FAUCET_PORT ? `http://localhost:${FAUCET_PORT}/` : undefined
 
 /** Per-run aztec data directory. Mandatory even for in-memory mode because
  *  some aztec subsystems still write to ~/.aztec/data by default — two
@@ -51,6 +58,8 @@ let nodeProcess: ChildProcess | null = null
 let weStartedNode = false
 let playgroundProcess: ChildProcess | null = null
 let weStartedPlayground = false
+let faucetProcess: ChildProcess | null = null
+let weStartedFaucet = false
 
 /** Probe a URL with HEAD/GET; returns true on any 2xx/3xx/4xx response. */
 async function probeHttp(url: string, timeoutMs = 1500): Promise<boolean> {
@@ -163,13 +172,26 @@ export default async function setup(project: TestProject) {
 			priorLock.ports.aztec === AZTEC_PORT &&
 			priorLock.ports.aztecAdmin === AZTEC_ADMIN_PORT &&
 			priorLock.ports.aztecP2P === AZTEC_P2P_PORT &&
-			priorLock.ports.playground === PLAYGROUND_PORT
+			priorLock.ports.playground === PLAYGROUND_PORT &&
+			// Faucet port is optional — match only if both sides agree on its
+			// presence and value. Lockfiles written before faucet wiring have
+			// `priorLock.ports.faucet === undefined`; current runs without
+			// faucet have `FAUCET_PORT === undefined`. Both match.
+			priorLock.ports.faucet === FAUCET_PORT
 		const urlMatch = priorLock.bakedLocalRpcUrl === LOCAL_NODE_URL
 		if (portsMatch && urlMatch) {
 			console.log("[e2e-setup] prior ownership lock matches current run — probing for reuse")
-			const allAlive = isPidAlive(priorLock.pids.anvil) && isPidAlive(priorLock.pids.aztec) && isPidAlive(priorLock.pids.playground)
+			const allCoreAlive =
+				isPidAlive(priorLock.pids.anvil) && isPidAlive(priorLock.pids.aztec) && isPidAlive(priorLock.pids.playground)
+			const faucetAlive = FAUCET_PORT ? isPidAlive(priorLock.pids.faucet) : true
+			const faucetHealthy = FAUCET_URL ? await probeHttp(FAUCET_URL) : true
 			const allHealthy =
-				allAlive && (await probeAnvil(ANVIL_URL)) && (await checkNodeHealth(LOCAL_NODE_URL)) && (await probeHttp(PLAYGROUND_URL))
+				allCoreAlive &&
+				faucetAlive &&
+				(await probeAnvil(ANVIL_URL)) &&
+				(await checkNodeHealth(LOCAL_NODE_URL)) &&
+				(await probeHttp(PLAYGROUND_URL)) &&
+				faucetHealthy
 			if (allHealthy) {
 				const identityOk = await verifyIdentity(LOCAL_NODE_URL, priorLock.l1ContractAddresses)
 				if (identityOk) {
@@ -177,8 +199,10 @@ export default async function setup(project: TestProject) {
 					weStartedAnvil = false
 					weStartedNode = false
 					weStartedPlayground = false
+					weStartedFaucet = false
 					AZTEC_DATA_DIR = priorLock.aztecDataDir
 					project.provide("playgroundUrl", PLAYGROUND_URL)
+					project.provide("faucetUrl", FAUCET_URL)
 					await deployContractsAndProvide(project)
 					return
 				}
@@ -189,6 +213,7 @@ export default async function setup(project: TestProject) {
 			killOrphanByPid(priorLock.pids.anvil, "anvil")
 			killOrphanByPid(priorLock.pids.aztec, "aztec")
 			killOrphanByPid(priorLock.pids.playground, "playground")
+			killOrphanByPid(priorLock.pids.faucet, "faucet")
 			try {
 				fs.rmSync(priorLock.aztecDataDir, { recursive: true, force: true })
 			} catch {}
@@ -199,6 +224,7 @@ export default async function setup(project: TestProject) {
 			killOrphanByPid(priorLock.pids.anvil, "anvil")
 			killOrphanByPid(priorLock.pids.aztec, "aztec")
 			killOrphanByPid(priorLock.pids.playground, "playground")
+			killOrphanByPid(priorLock.pids.faucet, "faucet")
 			try {
 				fs.rmSync(priorLock.aztecDataDir, { recursive: true, force: true })
 			} catch {}
@@ -213,9 +239,24 @@ export default async function setup(project: TestProject) {
 		weStartedAnvil = false
 	} else {
 		if (!fs.existsSync(ANVIL_BIN)) {
+			// Same fail-loud gate as the deploy-failure path below: when invoked
+			// via scripts/e2e/agent.sh, missing infrastructure must abort the
+			// run, not pass-by-skip. Otherwise CI reports `61 skipped` exit 0
+			// and the suite stays silently broken (this regressed in CI from
+			// 2026-05-22 when the setup-aztec action didn't symlink
+			// ~/.aztec/current — every PR's network-e2e check was "green" while
+			// running zero tests).
+			if (process.env.E2E_REQUIRE_SETUP === "1") {
+				throw new Error(
+					`[e2e-setup] FATAL: anvil binary not found at ${ANVIL_BIN} and E2E_REQUIRE_SETUP=1 is set. ` +
+						`Aborting run to prevent silent pass-by-skip. Ensure setup-aztec installed Aztec CLI ` +
+						`AND created the ~/.aztec/current symlink (CI: see .github/actions/setup-aztec/action.yml).`,
+				)
+			}
 			console.warn("[e2e-setup] anvil binary not found at", ANVIL_BIN, "— skipping network setup")
 			project.provide("aztecTestConfig", undefined)
 			project.provide("playgroundUrl", PLAYGROUND_URL)
+			project.provide("faucetUrl", FAUCET_URL)
 			return
 		}
 		console.log("[e2e-setup] Starting anvil at", ANVIL_URL, "...")
@@ -250,6 +291,7 @@ export default async function setup(project: TestProject) {
 			anvilProcess = null
 			project.provide("aztecTestConfig", undefined)
 			project.provide("playgroundUrl", PLAYGROUND_URL)
+			project.provide("faucetUrl", FAUCET_URL)
 			return
 		}
 	}
@@ -263,9 +305,18 @@ export default async function setup(project: TestProject) {
 	} else {
 		console.log("[e2e-setup] Starting local Aztec network at", LOCAL_NODE_URL, "...")
 		if (!fs.existsSync(AZTEC_BIN)) {
+			// See comment above the matching ANVIL_BIN gate for the rationale.
+			if (process.env.E2E_REQUIRE_SETUP === "1") {
+				throw new Error(
+					`[e2e-setup] FATAL: aztec CLI not found at ${AZTEC_BIN} and E2E_REQUIRE_SETUP=1 is set. ` +
+						`Aborting run to prevent silent pass-by-skip. Ensure setup-aztec installed Aztec CLI ` +
+						`AND created the ~/.aztec/current symlink (CI: see .github/actions/setup-aztec/action.yml).`,
+				)
+			}
 			console.warn("[e2e-setup] aztec CLI not found at", AZTEC_BIN, "— skipping network setup")
 			project.provide("aztecTestConfig", undefined)
 			project.provide("playgroundUrl", PLAYGROUND_URL)
+			project.provide("faucetUrl", FAUCET_URL)
 			return
 		}
 
@@ -329,6 +380,7 @@ export default async function setup(project: TestProject) {
 			anvilProcess = null
 			project.provide("aztecTestConfig", undefined)
 			project.provide("playgroundUrl", PLAYGROUND_URL)
+			project.provide("faucetUrl", FAUCET_URL)
 			return
 		}
 	}
@@ -378,6 +430,55 @@ export default async function setup(project: TestProject) {
 	}
 	project.provide("playgroundUrl", PLAYGROUND_URL)
 
+	// ── Faucet dev server (opt-in via FAUCET_DEV_PORT) ─────────────────
+	// Only spawned when the test runner pre-allocated a faucet port. This
+	// keeps the default network suite lightweight — faucet startup adds ~5s
+	// + a Vite + Vue process per worktree.
+	if (FAUCET_PORT && FAUCET_URL) {
+		const faucetAlreadyRunning = await probeHttp(FAUCET_URL, 1500)
+		if (faucetAlreadyRunning) {
+			console.log("[e2e-setup] Faucet already running at", FAUCET_URL)
+			weStartedFaucet = false
+		} else {
+			console.log("[e2e-setup] Starting faucet dev server at", FAUCET_URL, "...")
+			try {
+				faucetProcess = spawn("bun", ["run", "dev"], {
+					cwd: FAUCET_DIR,
+					stdio: "pipe",
+					detached: true,
+					env: {
+						...process.env,
+						NODE_ENV: "test",
+						FAUCET_DEV_PORT: String(FAUCET_PORT),
+					},
+				})
+				weStartedFaucet = true
+
+				faucetProcess.stdout?.on("data", (data: Buffer) => {
+					const line = data.toString().trim()
+					if (line.includes("Local:") || line.includes("error")) {
+						console.log("[faucet]", line.slice(0, 200))
+					}
+				})
+				faucetProcess.stderr?.on("data", (data: Buffer) => {
+					const line = data.toString().trim()
+					if (line.includes("error") || line.includes("Error")) {
+						console.error("[faucet]", line.slice(0, 200))
+					}
+				})
+
+				await waitForHttp(FAUCET_URL, 30_000)
+				console.log("[e2e-setup] Faucet is ready")
+			} catch (error) {
+				console.warn("[e2e-setup] Failed to start faucet:", error)
+				await killProcessGroup(faucetProcess, "faucet", weStartedFaucet)
+				faucetProcess = null
+				// Continue — only faucet-specific tests will fail.
+			}
+		}
+	}
+	project.provide("faucetUrl", FAUCET_URL)
+
 	await deployContractsAndProvide(project)
 }
 
@@ -426,6 +527,26 @@ async function deployContractsAndProvide(project: TestProject): Promise<void> {
 	} catch (error) {
 		console.error("[e2e-setup] Failed to deploy test contracts:", error)
 		project.provide("aztecTestConfig", undefined)
+		// Env-gated fail-loud. The `bun run e2e:agent` wrapper
+		// (`scripts/e2e/agent.sh`) sets `E2E_REQUIRE_SETUP=1` to mark this
+		// as a real test invocation where the sandbox is supposed to be
+		// available. In that mode we propagate the deploy failure so vitest
+		// exits non-zero with a clear message — instead of every test
+		// gating on `describe.skipIf(!hasAztecTestConfig)` and silently
+		// passing-by-skip. Without this gate, the suite was reporting
+		// `61 skipped` exit 0 on every CI run since the public repo opened.
+		//
+		// For contributor-local invocations without the agent wrapper
+		// (e.g. running vitest directly without an Aztec sandbox), the env
+		// var is unset and we keep the legacy skip-silently behavior so
+		// they aren't blocked from running unrelated tests.
+		if (process.env.E2E_REQUIRE_SETUP === "1") {
+			throw new Error(
+				`[e2e-setup] FATAL: failed to deploy test contracts and E2E_REQUIRE_SETUP=1 is set. ` +
+					`Aborting run to prevent silent pass-by-skip. Original error: ` +
+					`${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
 	}
 
 	// Always write the lock once children are alive, even if contract deploy
@@ -440,11 +561,13 @@ async function deployContractsAndProvide(project: TestProject): Promise<void> {
 			aztecAdmin: AZTEC_ADMIN_PORT,
 			aztecP2P: AZTEC_P2P_PORT,
 			playground: PLAYGROUND_PORT,
+			...(FAUCET_PORT ? { faucet: FAUCET_PORT } : {}),
 		},
 		pids: {
 			anvil: weStartedAnvil ? anvilProcess?.pid : undefined,
 			aztec: weStartedNode ? nodeProcess?.pid : undefined,
 			playground: weStartedPlayground ? playgroundProcess?.pid : undefined,
+			faucet: weStartedFaucet ? faucetProcess?.pid : undefined,
 		},
 		aztecDataDir: AZTEC_DATA_DIR,
 		l1ContractAddresses,
@@ -499,6 +622,8 @@ export async function teardown() {
 		// ignore
 	}
 
+	await killProcessGroup(faucetProcess, "faucet", weStartedFaucet)
+	faucetProcess = null
 	await killProcessGroup(playgroundProcess, "playground", weStartedPlayground)
 	playgroundProcess = null
 	await killProcessGroup(nodeProcess, "aztec", weStartedNode)
@@ -584,5 +709,10 @@ declare module "vitest" {
 		extensionPath: string
 		aztecTestConfig?: AztecTestConfig
 		playgroundUrl: string
+		/** Defined only when the network suite pre-allocated a faucet port via
+		 *  `FAUCET_DEV_PORT`. Tests that exercise the faucet dApp (e.g.
+		 *  `faucet-add-token.test.ts`) consume this; tests that don't need it
+		 *  ignore the field. */
+		faucetUrl?: string
 	}
 }

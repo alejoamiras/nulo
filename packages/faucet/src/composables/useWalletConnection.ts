@@ -1,3 +1,7 @@
+// Patch WalletSchema before wallet-sdk reads it (Nulo-custom `registerToken`).
+// Must be the first import in this module — see nulo-schema-patch.ts header.
+import "@/lib/nulo-schema-patch"
+
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { WalletManager } from "@aztec/wallet-sdk/manager"
 import type { PendingConnection, WalletProvider } from "@aztec/wallet-sdk/manager"

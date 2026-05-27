@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>E2E Stabilization Plan — ELI5</title>
+<style>
+  body { font: 16px/1.55 -apple-system, system-ui, sans-serif; max-width: 760px; margin: 2.5rem auto; padding: 0 1.25rem; color: #1d1d1f; background: #fafafa; }
+  h1 { font-size: 1.85rem; margin: 0 0 0.4rem; }
+  .subtitle { color: #6e6e73; margin: 0 0 2rem; }
+  h2 { font-size: 1.3rem; margin-top: 2.4rem; padding-top: 1.1rem; border-top: 1px solid #e5e5e5; }
+  h3 { font-size: 1.05rem; margin-top: 1.6rem; }
+  p, li { color: #424245; }
+  code { background: #f0f0f2; padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.92em; }
+  .box { background: white; border: 1px solid #e5e5e5; border-radius: 8px; padding: 1.1rem 1.3rem; margin: 1.2rem 0; }
+  .box.warn { border-color: #d97706; background: #fffbf2; }
+  .box.note { border-color: #2563eb; background: #f5f9ff; }
+  .timeline { border-left: 2px solid #d1d1d6; margin-left: 0.4rem; padding-left: 1.3rem; }
+  .phase { margin: 1rem 0; }
+  .phase strong { display: block; margin-bottom: 0.25rem; }
+  table { border-collapse: collapse; margin: 1rem 0; width: 100%; }
+  th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #e5e5e5; font-size: 0.95em; }
+  th { background: #f5f5f7; font-weight: 600; }
+  .pill { display: inline-block; padding: 0.1em 0.5em; border-radius: 999px; font-size: 0.82em; font-weight: 500; }
+  .pill.h { background: #fee; color: #c2410c; }
+  .pill.m { background: #fff7e0; color: #92400e; }
+  .pill.l { background: #e6f4ea; color: #1f7a3a; }
+  .question { color: #6e6e73; font-style: italic; margin-top: 0.4rem; }
+  hr { border: 0; border-top: 1px solid #e5e5e5; margin: 2rem 0; }
+</style>
+</head>
+<body>
+
+<h1>E2E Stabilization Plan</h1>
+<p class="subtitle">Plain-language companion to <code>plan.md</code> · scope: Issues #58, #59, and the cold-shard rotation · ~20 hours, 2–3 working days</p>
+
+<div class="box note">
+  <strong>What we're trying to do:</strong> finish stabilizing the network end-to-end tests so the CI signal is trustworthy enough to merge other feature PRs. After PR #46 we're <em>close</em> but not there — 3 known problems remain, all fixable at the UI / test layer without touching wallet services.
+</div>
+
+<h2>The 3 problems, in plain English</h2>
+
+<div class="phase">
+  <strong>1. The discover popup has a phishing-shaped bug <span class="pill h">HIGH</span></strong>
+  <p>When a dApp asks "can I connect?", a popup appears with the dApp's name, logo, and hostname. <em>The Allow button is currently clickable BEFORE those identity details finish loading.</em> A malicious dApp could trick a user into approving a session they never identified.</p>
+  <p class="question">Why isn't this just a test problem? Because in production, slow networks + auto-focused buttons + scripted Enter keys can race the same way.</p>
+</div>
+
+<div class="phase">
+  <strong>2. One specific test does too much in one go <span class="pill m">MEDIUM</span></strong>
+  <p><code>register-token.test.ts</code> opens TWO popups in sequence (request capabilities, then register the token). On cold CI runners, both popups take a while to appear, and the combined time exceeds the test's 60-second budget. We've quarantined it for now; we want to un-quarantine.</p>
+  <p class="question">Why not just give it more time? Because the inner waits sum to ~210 seconds in the worst case — no realistic budget actually catches it. The fix is to remove the redundant work, not extend the deadline.</p>
+</div>
+
+<div class="phase">
+  <strong>3. Cold shards rotate — quarantine just moves the bullet <span class="pill m">MEDIUM</span></strong>
+  <p>Our CI runs the network suite as 5 parallel shards, each on a fresh machine. The first popup-driven test in each shard pays a "cold start" tax because the wallet's service worker, WebAssembly crypto, and Aztec node all have to warm up. Quarantine the offender? The next test becomes the new victim.</p>
+  <p class="question">Why does this only matter on CI? Locally, your machine is warm and fast; cold-start is invisible. On hosted CI, it's the dominant cost.</p>
+</div>
+
+<h2>The plan in 4 phases</h2>
+
+<div class="timeline">
+  <div class="phase">
+    <strong>Phase 1 — Fix the discover popup (~5h)</strong>
+    <p>Add a single <code>isReady</code> readiness flag that flips true only after EVERYTHING loads. Gate the Allow button on it. If a click sneaks through anyway (Enter key, weird timing), <em>throw an error</em> instead of silently doing nothing — silent guards are what cost us 19 iterations last time.</p>
+    <p>While we're in there: also verify the Authwits popups' Enter-key handlers check loading + error state (not just "is it allowed").</p>
+  </div>
+
+  <div class="phase">
+    <strong>Phase 2 — Restructure register-token (~6h)</strong>
+    <p>Create a small test fixture that pre-grants the <code>accounts</code> capability (the one register-token actually needs — codex caught us assuming it needed <code>basic</code>). Then the test only has to drive ONE popup instead of two. Drop the quarantine, run 5 times locally before pushing.</p>
+  </div>
+
+  <div class="phase">
+    <strong>Phase 3 — Warm up the cold shard (~7h, includes a 1h probe)</strong>
+    <p>Add a "warm-up tap": open a throwaway browser BEFORE any tests run, drive one cap-popup-and-reject flow to wake up the service worker + WebAssembly + Aztec node, then close it. Real tests start warm.</p>
+    <p><em>But first</em> we need to prove the warm-up actually helps. Phase 3A is a 1-hour probe: launch browser A with warm-up, close it, launch browser B fresh, measure browser B's first cap-popup time vs without warm-up. If it doesn't drop by ≥30%, we fall back to a different layer.</p>
+  </div>
+
+  <div class="phase">
+    <strong>Phase 4 — Acceptance gate (no code, just measurement)</strong>
+    <p>Trigger the CI workflow 5 times in a row on a pinned branch (so the commit doesn't move). Count how many of the 5 runs are 5/5 green. <strong>3 of 5 = done. 4 of 5 = comfortable. 5 of 5 = celebrate (and we can promote Network e2e to a required check).</strong></p>
+  </div>
+</div>
+
+<h2>Why "local-first" matters</h2>
+
+<div class="box">
+  <p>You said it twice: "CI is the last gate. You can not run them in CI and expect green if we don't have greens locally." The plan codifies this — every phase has explicit local commands that must pass before any CI push. Local is ~10 minutes per shard; CI is ~15 + scheduling. Iterating on CI is the wrong loop.</p>
+  <p>Also documented now: <code>bun run e2e:agent --shard=N/5</code> reproduces exactly the same files CI would run for that shard (deterministic SHA-1-of-filename distribution).</p>
+</div>
+
+<h2>What's NOT in scope (deliberately)</h2>
+
+<ul>
+  <li>The other 2 quarantined slow tests (<code>multi-account-from</code>, <code>tx-sendTx-multicall</code>) — different root causes, future PR.</li>
+  <li>Self-hosted CI runners — out of scope per your "test restructure / new fixtures OK" constraint (but not "spin up infrastructure").</li>
+  <li>Touching anything under <code>src/wallet/services/**</code> — all 3 problems fix at the UI / test layer.</li>
+  <li>Promoting Network e2e to a required CI check — only after Phase 4 hits 5/5 on 5/5.</li>
+  <li>Smoke suite changes — separate scope.</li>
+</ul>
+
+<h2>What we'd touch in code</h2>
+
+<table>
+<tr><th>Phase</th><th>File</th><th>Production?</th><th>Codex review?</th></tr>
+<tr><td>1A</td><td><code>discover/index.vue</code></td><td>Yes (~12 lines, Vue)</td><td>Yes (popup readiness gate)</td></tr>
+<tr><td>1B</td><td><code>ChangeAuthwitsRegistryPopup.vue</code></td><td>Yes (1 line, Enter gate)</td><td>Verify only</td></tr>
+<tr><td>1B</td><td><code>RevokeAuthwitsPopup.vue</code></td><td>Yes (1 line, Enter gate)</td><td>Verify only</td></tr>
+<tr><td>2</td><td><code>fixtures/extension.ts</code></td><td>No (test fixture)</td><td>No</td></tr>
+<tr><td>2</td><td><code>network/register-token.test.ts</code></td><td>No</td><td>No</td></tr>
+<tr><td>3</td><td><code>tests/e2e/global-setup.ts</code></td><td>No (test setup)</td><td>No</td></tr>
+<tr><td>3</td><td><code>fixtures/extension.ts</code> (helper extract)</td><td>No (refactor)</td><td>No</td></tr>
+<tr><td>3</td><td><code>.github/workflows/_network-e2e.yml</code></td><td>No (env var)</td><td>No</td></tr>
+</table>
+
+<p>Your constraint: <em>"If you touch the wallet code, you'll have to ask Codex a review."</em> The only wallet/Vue touch is Phase 1's discover popup — explicit codex review prompt is in <code>plan.md</code> §10 for that step.</p>
+
+<h2>Open questions before approval</h2>
+
+<ol>
+  <li><strong>Phase 3A probe outcome.</strong> If browser-A warm-up doesn't reduce browser-B's first cap-popup latency by ≥30%, we switch from <code>global-setup.ts</code> to a per-test fixture-layer warm-up. 1h spike will tell.</li>
+  <li><strong>Fixture naming.</strong> <code>dappConnectedExtensionWithAccountsCap</code> is accurate but long. Need a naming check against the existing 11 fixtures in <code>extension.ts</code>.</li>
+  <li><strong>Warm-up always-on or opt-in?</strong> Currently <code>NULO_E2E_WARMUP=1</code> in CI. Adding ~30-60s to local dev if always-on. Recommend: opt-in for 2 weeks of stability data, then flip.</li>
+  <li><strong>Phase 1B verification.</strong> Codex says the Authwits Enter-key gates were already fixed by us; we verify in HEAD before assuming the work is done.</li>
+</ol>
+
+<h2>Risks we're tracking</h2>
+
+<ul>
+  <li><strong>Phase 1 → Phase 3 interaction.</strong> The <code>isReady</code> pattern in discover might interact with how the warm-up tap drives the same popup. Phase 1 must land first so Phase 3 has a clean target.</li>
+  <li><strong>launchExtension() not callable from global-setup.</strong> Current code depends on <code>inject("extensionPath")</code>. Phase 3 needs to extract a non-vitest helper. Estimated half-day if needed.</li>
+  <li><strong>Warm-up that silently grants caps</strong> would mask permission bugs. The plan REQUIRES the warm-up to reject the request (not approve), with a security check.</li>
+  <li><strong>Advisory CI gate as attack window.</strong> If Network e2e stays advisory forever, a real network regression could ship under the noise. Phase 4's 5/5 bar is what gets it promoted to required.</li>
+</ul>
+
+<hr>
+
+<p class="subtitle">Next step: approval gate. If you're good with this shape, we start Phase 1 — discover popup <code>isReady</code> fix + ≥10 component tests, all proven locally before any CI push.</p>
+
+</body>
+</html>

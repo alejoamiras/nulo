@@ -27,7 +27,6 @@ export type {
 	CapabilityResult,
 	ExecutionParams,
 	ExecutionResult,
-	GetCompleteAddressRequest,
 	OperationRequest,
 	RegisterContractRequest,
 	RegisterSenderRequest,
@@ -35,7 +34,6 @@ export type {
 	SendTransactionRequest,
 	SimulateTransactionRequest,
 	SimulateUtilityRequest,
-	SimulateViewsRequest,
 } from "@nulo/wallet-bridge"
 
 export const DAPP_INTERACTION_SERVICE_NAME = "dapp-interaction"

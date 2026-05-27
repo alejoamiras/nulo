@@ -45,6 +45,7 @@ import type { ContractNameResolver } from "@aztec/pxe/client/lazy"
 import { buildMergedSimulationResult, simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
 import { completeFeeOptions, type PartialGasSettingsRPC } from "@nulo/aztec-runtime/account"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
+import { getBlockHeaderAnchor } from "./helpers/block-header-anchor"
 
 /**
  * For Nulo's `DefaultAccountEntrypoint` standard path: the flattened
@@ -176,15 +177,10 @@ export async function runFastPath(deps: FastPathDeps): Promise<TxSimulationResul
 	let optimizedResults: TxSimulationResult[]
 	let normalResult: TxSimulationResultWithAppOffset | null = null
 	try {
-		// Mirror upstream `BaseWallet.simulateTx`: prefer PXE synced
-		// header, fall back to node head. Critical for mixed merge so
-		// both arms anchor at the same chain state.
-		let blockHeader: Awaited<ReturnType<typeof pxe.getSyncedBlockHeader>> | undefined
-		try {
-			blockHeader = await pxe.getSyncedBlockHeader()
-		} catch {
-			blockHeader = (await node.getBlockHeader()) ?? undefined
-		}
+		// Shared helper — mirrors upstream `BaseWallet.simulateTx` by preferring
+		// PXE-synced header so a parallel slow arm using `pxe.simulateTx` observes
+		// roughly the same chain block. See `helpers/block-header-anchor.ts`.
+		const blockHeader = await getBlockHeaderAnchor(pxe, node)
 		if (!blockHeader) return null
 
 		const gasSettings = await completeFeeOptions({

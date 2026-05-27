@@ -29,7 +29,7 @@ export async function openPlayground(ctx: ExtensionContext): Promise<Page> {
 	patchPagePolling(page)
 	const url = PLAYGROUND_TEST_URL.endsWith("/") ? `${PLAYGROUND_TEST_URL}?test=1` : `${PLAYGROUND_TEST_URL}/?test=1`
 	await page.goto(url, { waitUntil: "domcontentloaded" })
-	await page.waitForSelector('[data-testid="pg-status"]', { timeout: 10_000 })
+	await page.waitForSelector('[data-testid="pg-status"]', { timeout: 30_000 })
 	return page
 }
 

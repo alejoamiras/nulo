@@ -30,9 +30,8 @@ export function humanizeOperationKind(kind: string): string {
 			.toLowerCase()
 	} else {
 		// snake_case → space-separated words. Use `replaceAll` so
-		// multi-underscore kinds like `get_complete_address` render
-		// cleanly as "Get complete address" rather than leaving later
-		// underscores intact.
+		// multi-underscore kinds render cleanly rather than leaving
+		// later underscores intact.
 		out = out.replaceAll("_", " ")
 	}
 	if (out.length === 0) return out

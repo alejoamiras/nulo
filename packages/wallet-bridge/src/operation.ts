@@ -13,14 +13,12 @@ export type OperationKind = Operation["kind"]
 
 export type Operation =
 	// Nulo interface:
-	| GetCompleteAddressOperation
 	| RegisterContractOperation
 	| RegisterSenderOperation
 	| RegisterTokenOperation
 	| SendTransactionOperation
 	| SimulateTransactionOperation
 	| SimulateUtilityOperation
-	| SimulateViewsOperation
 	// Aztec.js interface:
 	| AztecGetContractClassMetadataOperation
 	| AztecGetContractMetadataOperation
@@ -36,12 +34,6 @@ export type Operation =
 	| AztecCreateAuthWitOperation
 
 // Nulo interface:
-
-export type GetCompleteAddressOperation = {
-	readonly kind: "get_complete_address"
-	readonly networkId: string
-	readonly accountAddress: string
-}
 
 export type RegisterContractOperation = {
 	readonly kind: "register_contract"
@@ -109,13 +101,6 @@ export type SimulateUtilityOperation = {
 	readonly contract: string
 	readonly method: string
 	readonly args: unknown[]
-}
-
-export type SimulateViewsOperation = {
-	readonly kind: "simulate_views"
-	readonly networkId: string
-	readonly accountAddress: string
-	readonly calls: (CallAction | EncodedCallAction)[]
 }
 
 // Aztec.js interface:
