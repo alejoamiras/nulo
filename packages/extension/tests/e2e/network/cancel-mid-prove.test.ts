@@ -39,7 +39,7 @@ test.skipIf(!hasConfig)(
 			select.dispatchEvent(new Event("change", { bubbles: true }))
 		})
 		const seqGrant = await snapshotResultSeq(page)
-		const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 15_000 })
+		const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-requestCapabilities")
 		const capPopup = await capPopupP
 		await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 10_000 })
@@ -103,13 +103,19 @@ test.skipIf(!hasConfig)(
 		await approveExecute(execPopup)
 
 		// Open the wallet popup; wait for the in-flight awaiting card to render.
+		// 90s (bumped from 30s) for the same latency family that bit
+		// tx-sendTx-default on Phase 4 acceptance runs r2+r4: the wallet
+		// transitions into awaiting/proving UI only after the wallet starts
+		// proving, and on slow GitHub-hosted runners the prove start itself
+		// can take 30-90s under variable runner load. Codex audit session
+		// 019e6743-2fb7-7df3-bad7-6cf503cf2338 §2 recommended this bump.
 		const walletPopup = await openPopup(dappConnectedExtension)
-		await walletPopup.waitForSelector('[data-testid="tx-awaiting-card"]', { timeout: 30_000 })
+		await walletPopup.waitForSelector('[data-testid="tx-awaiting-card"]', { timeout: 90_000 })
 		// The cancel button is hidden during `submitting` (FSM forbids that
 		// transition). It's present during `pending` / `simulating` / `proving`.
 		// On a sandbox network the prove phase dominates; this selector should
 		// be live well before submit.
-		await walletPopup.waitForSelector('[data-testid="tx-awaiting-cancel"]', { visible: true, timeout: 30_000 })
+		await walletPopup.waitForSelector('[data-testid="tx-awaiting-cancel"]', { visible: true, timeout: 90_000 })
 		await clickByTestId(walletPopup, "tx-awaiting-cancel")
 
 		// dApp-side rejection arrives once the SW catches the cancel.

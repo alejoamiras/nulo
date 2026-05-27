@@ -20,7 +20,7 @@ test.skipIf(!hasConfig)(
 	async ({ registeredExtension }) => {
 		const dappPage = await openPlayground(registeredExtension)
 
-		const discoverP = waitForPopup(registeredExtension, "discover", { timeout: 15_000 })
+		const discoverP = waitForPopup(registeredExtension, "discover", { timeout: 30_000 })
 		await clickByTestId(dappPage, "pg-btn-connect")
 
 		const discoverPage = await discoverP

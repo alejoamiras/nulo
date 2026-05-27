@@ -55,12 +55,29 @@ function onBalanceUpdated(tb) {
 	tokenBalance.value = tb
 }
 
+/** Read the currently-cached balance for this (token, account). Fast path
+ *  for first paint — the actual refresh is fired separately via `scheduleRefresh()`. */
+async function readCurrentTokenBalance() {
+	if (!token.value || !appStore.account?.address) return
+	tokenBalance.value = (await tokenBalanceService.getTokenBalances(token.value.id, appStore.account.address))?.at(0)
+}
+
+/** Fire-and-forget refresh. `refreshTokenBalance` enqueues a balance job
+ *  on the 1s-tick projector queue and returns immediately; the actual
+ *  projection result arrives via `onTokenBalanceUpdated` (subscribed above).
+ *  Don't await — awaiting only confirms enqueue, not freshness. */
+function scheduleRefresh() {
+	if (!tokenBalance.value?.id) return
+	void tokenBalanceService.refreshTokenBalance(tokenBalance.value.id)
+}
+
 watch(
 	() => token.value,
 	async () => {
 		if (token.value) {
 			cacheStore.activeTokenIdx = token.value?.id
-			tokenBalance.value = (await tokenBalanceService.getTokenBalances(token.value.id, appStore.account.address))?.at(0)
+			await readCurrentTokenBalance()
+			scheduleRefresh()
 		}
 	},
 )
@@ -68,19 +85,18 @@ watch(
 watch(
 	() => appStore.account,
 	async () => {
-		tokenBalance.value = (await tokenBalanceService.getTokenBalances(token.value.id, appStore.account.address))?.at(0)
+		await readCurrentTokenBalance()
 		if (!tokenBalance.value) {
 			cacheStore.activeTokenIdx = null
 			router.push("/popup/general")
+			return
 		}
+		scheduleRefresh()
 	},
 )
 
 /** Trailing actions */
-const handleRefreshBalance = () => {
-	if (!tokenBalance.value?.id) return
-	tokenBalanceService.refreshTokenBalance(tokenBalance.value.id)
-}
+const handleRefreshBalance = () => scheduleRefresh()
 
 const handleCopy = (value, label) => {
 	window.navigator.clipboard.writeText(value)
@@ -101,7 +117,15 @@ onMounted(async () => {
 	token.value = await tokenService.getToken(route.params.id)
 	if (!token.value) {
 		router.push("/popup/general")
+		return
 	}
+	// Auto-fire balance refresh on entry. The page-mount fast path reads the
+	// cached value above for instant render; this kicks the async projector
+	// so the fresh balance arrives via onTokenBalanceUpdated (subscribed at
+	// line 52) within ~1-3s under normal load — no manual Refresh click
+	// needed. Removes the e2e helper waitForTokenDetailBalances workaround.
+	await readCurrentTokenBalance()
+	scheduleRefresh()
 })
 
 onBeforeUnmount(() => {

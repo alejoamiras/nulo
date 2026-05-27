@@ -9,10 +9,10 @@ const hasConfig = aztecConfig !== undefined
 /**
  * Test #14 — batch of meta-only methods is silent.
  *
- * batch is exempt (capability-map.ts:14). The legs we call (getChainInfo ×2 +
- * getAccounts) are all exempt — no capability needed. Returns `{ name,
- * result }[]`. (We avoid getAddressBook here because it requires the `data`
- * cap which isn't granted in this fixture.)
+ * batch is exempt (capability-map.ts:14). The legs we call (3x getChainInfo)
+ * are all exempt — no capability needed. Returns `{ name, result }[]`.
+ * (getAccounts is NOT exempt; it throws CapabilityNotGrantedError pre-grant.
+ *  See meta-getAccounts-pregrant.test.ts.)
  */
 test.skipIf(!hasConfig)(
 	"meta-batch — meta-only batch silent, returns named results",
@@ -24,6 +24,6 @@ test.skipIf(!hasConfig)(
 		expect(result.status).toBe("ok")
 		const arr = result.resultJson as Array<{ name: string }>
 		expect(arr.length).toBe(3)
-		expect(arr.map((r) => r.name)).toEqual(expect.arrayContaining(["getAccounts", "getChainInfo"]))
+		expect(arr.map((r) => r.name)).toEqual(["getChainInfo", "getChainInfo", "getChainInfo"])
 	},
 )
