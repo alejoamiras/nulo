@@ -27,7 +27,10 @@ const hasConfig = aztecConfig !== undefined
  */
 test.skipIf(!hasConfig)(
 	"tx-sendTx-default — popup opens, fee picker shown, confirm submits",
-	{ timeout: 180_000 },
+	// Test budget MUST exceed waitForPgResult (180s) below — needs room for
+	// fixture/setup (~15s on cold shard) + popup drive (~5s) + the wait
+	// itself. 240s gives ~60s headroom over the wait ceiling.
+	{ timeout: 240_000 },
 	async ({ dappConnectedExtensionWithTransactionCap }) => {
 		const { playgroundPage: page } = dappConnectedExtensionWithTransactionCap
 
