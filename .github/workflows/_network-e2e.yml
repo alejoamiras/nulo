@@ -41,6 +41,26 @@ on:
         required: false
         type: string
         default: ""
+      test_files:
+        description: |
+          Explicit space-separated list of test files to run, passed straight to
+          vitest as positional args. Used by the dedicated heavy-network job to
+          run e.g. tests/e2e/network/fee-methods.test.ts alone, separated from
+          the SHA-1-distributed matrix shards so it doesn't pre-pressure the
+          prover queue for popup-shape tests sharing the same shard host.
+          Leave empty for the default (sharded) suite distribution.
+        required: false
+        type: string
+        default: ""
+      exclude_files:
+        description: |
+          Space-separated --exclude patterns passed to vitest. Used by the
+          lightweight matrix shards to exclude heavy-network files that are
+          run in a dedicated job (see test_files). Without this, an excluded
+          file would still consume one slot in the SHA-1 shard distribution.
+        required: false
+        type: string
+        default: ""
     secrets:
       SPONSORED_FPC_SALT:
         required: false
@@ -74,11 +94,28 @@ jobs:
       - uses: ./.github/actions/setup-puppeteer
 
       - name: Run network e2e via agent
+        env:
+          EXCLUDE_FILES: ${{ inputs.exclude_files }}
+          TEST_FILES: ${{ inputs.test_files }}
+          SHARD: ${{ inputs.shard }}
         run: |
-          if [ -n "${{ inputs.shard }}" ]; then
-            bun run e2e:agent --shard=${{ inputs.shard }}
+          # Use bash arrays + read -ra so word-splitting is explicit + scoped
+          # (avoids shellcheck SC2086 noise on intentional split-into-flags).
+          read -ra EXCLUDE_LIST <<< "$EXCLUDE_FILES"
+          read -ra TEST_FILE_LIST <<< "$TEST_FILES"
+          EXCLUDE_ARGS=()
+          for f in "${EXCLUDE_LIST[@]}"; do
+            [ -n "$f" ] && EXCLUDE_ARGS+=(--exclude "$f")
+          done
+
+          if [ "${#TEST_FILE_LIST[@]}" -gt 0 ] && [ -n "${TEST_FILE_LIST[0]}" ]; then
+            # Dedicated mode: caller specified explicit test files. Ignore shard;
+            # the file list IS the workload.
+            bun run e2e:agent "${TEST_FILE_LIST[@]}" "${EXCLUDE_ARGS[@]}"
+          elif [ -n "$SHARD" ]; then
+            bun run e2e:agent --shard="$SHARD" "${EXCLUDE_ARGS[@]}"
           else
-            bun run e2e:agent
+            bun run e2e:agent "${EXCLUDE_ARGS[@]}"
           fi
 
       # Permanent guard: PR #46's lessons doc flagged bundle-grep as the actual

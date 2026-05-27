@@ -27,7 +27,10 @@ const hasConfig = aztecConfig !== undefined
  */
 test.skipIf(!hasConfig)(
 	"tx-sendTx-default — popup opens, fee picker shown, confirm submits",
-	{ timeout: 180_000 },
+	// Test budget MUST exceed waitForPgResult (180s) below — needs room for
+	// fixture/setup (~15s on cold shard) + popup drive (~5s) + the wait
+	// itself. 240s gives ~60s headroom over the wait ceiling.
+	{ timeout: 240_000 },
 	async ({ dappConnectedExtensionWithTransactionCap }) => {
 		const { playgroundPage: page } = dappConnectedExtensionWithTransactionCap
 
@@ -67,13 +70,24 @@ test.skipIf(!hasConfig)(
 
 		await approveExecute(execPopup)
 
-		// 30s (down from 120s) because pg-btn-sendTx-default now sends with
-		// `wait: "NO_WAIT"` — the dApp's promise settles when the wallet
-		// submits the tx (txHash + offchain output) without waiting on chain
-		// mining. The popup-shape test asserts that the dApp got the
-		// callback, not on receipt mining latency. Codex audit session
-		// 019e6628-bc1c-7282-a1eb-aad1cc5bd70d for the diagnosis.
-		const result = await waitForPgResult(page, "sendTx", seqTx, 30_000)
+		// 180s budget chosen empirically by the Phase 4 acceptance gate:
+		//   - 30s failed deterministically (4 of 5 runs) — prover starts cold
+		//   - 90s failed too (split fee-methods to its own job didn't help) —
+		//     so the bottleneck is the runner-pool prover time itself,
+		//     not the same-shard queue pressure
+		// Per codex audit session 019e6743-2fb7-7df3-bad7-6cf503cf2338 §1
+		// (Phase 4 follow-up): 180s is the hosted-runner-prover envelope.
+		// NO_WAIT already trims the post-submit side; the wallet still does
+		// buildAndEstimateTxRequest → proveTxTask → sendTxTask before the
+		// dApp's promise settles. Local M-series WASM equivalent: <15s.
+		const t0 = Date.now()
+		const result = await waitForPgResult(page, "sendTx", seqTx, 180_000)
+		const waitMs = Date.now() - t0
+		// Print to CI log for runner-envelope tuning. Codex audit suggested
+		// stage-level (simulating/proving/submitting) timing in follow-up
+		// if 180s also flakes; this wrapper timing is the minimum viable
+		// diagnostic that doesn't require wallet code changes.
+		console.log(`[tx-sendTx-default] waitForPgResult settled in ${waitMs}ms`)
 		expect(["ok", "error"]).toContain(result.status)
 	},
 )
