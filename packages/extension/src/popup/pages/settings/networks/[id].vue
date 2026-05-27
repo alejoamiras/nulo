@@ -77,9 +77,9 @@ const handleEditEndpoint = (endpoint) => {
 
 const handleSetPrimary = async (endpoint) => {
 	if (!network.value) return
-	if (network.value.primaryEndpointId === endpoint.id) return
+	if (network.value.endpoints[0]?.id === endpoint.id) return
 	try {
-		await managers.network.setPrimaryEndpoint(network.value.id, endpoint.id)
+		await managers.network.promoteEndpoint(network.value.id, endpoint.id)
 		await refreshNetworks()
 		openToast({ label: "Primary endpoint updated" })
 	} catch {
@@ -89,7 +89,8 @@ const handleSetPrimary = async (endpoint) => {
 
 const handleDeleteEndpoint = (endpoint) => {
 	if (!network.value) return
-	if (network.value.primaryEndpointId === endpoint.id) return
+	// Deleting endpoints[0] (the preferred) is now allowed; endpoints[1]
+	// shifts into the preferred slot. Only the LAST_ENDPOINT guard remains.
 	if (network.value.endpoints.length === 1) return
 
 	cacheStore.confirm.confirm_text = "Yes, delete endpoint"
@@ -103,9 +104,7 @@ const handleDeleteEndpoint = (endpoint) => {
 			openToast({ label: "Endpoint deleted" })
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err)
-			if (msg.includes("PRIMARY_ENDPOINT")) {
-				openToast({ label: "Make another endpoint primary first.", icon: "warning" }, TOAST_DURATION.LONG)
-			} else if (msg.includes("LAST_ENDPOINT")) {
+			if (msg.includes("LAST_ENDPOINT")) {
 				openToast({ label: "Last endpoint — delete the chain instead.", icon: "warning" }, TOAST_DURATION.LONG)
 			} else {
 				openToast({ label: "Failed to delete endpoint", icon: "warning" }, TOAST_DURATION.LONG)
@@ -193,12 +192,12 @@ watch(network, (n) => {
 				<SectionLabel label="Endpoints" :count="network.endpoints.length" />
 				<ItemsContainer>
 					<SettingItem
-						v-for="endpoint in network.endpoints"
+						v-for="(endpoint, endpointIdx) in network.endpoints"
 						:key="endpoint.id"
 						:title="endpoint.label || endpoint.rpcUrl"
 						:description="endpoint.label ? endpoint.rpcUrl : undefined"
-						:icon="network.primaryEndpointId === endpoint.id ? 'check-circle' : 'circle'"
-						:iconFillColor="network.primaryEndpointId === endpoint.id ? 'primary' : 'tertiary'"
+						:icon="endpointIdx === 0 ? 'check-circle' : 'circle'"
+						:iconFillColor="endpointIdx === 0 ? 'primary' : 'tertiary'"
 						iconBgColor="transparent"
 						@click="handleSetPrimary(endpoint)"
 						data-testid="endpoint-row"
@@ -220,7 +219,7 @@ watch(network, (n) => {
 								<Tooltip
 									position="end"
 									delay="350"
-									v-if="network.primaryEndpointId !== endpoint.id && network.endpoints.length > 1"
+									v-if="network.endpoints.length > 1"
 								>
 									<Icon
 										@click.stop="handleDeleteEndpoint(endpoint)"

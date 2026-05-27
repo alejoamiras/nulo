@@ -33,12 +33,22 @@ vi.mock("@/wallet/services/network/client", () => ({
 	NetworkServiceClient: vi.fn(function () {
 		return {
 			disconnect: vi.fn(),
-			getOrInitNetworks: vi.fn(async () => [{ id: "n1", chainId: 1, kind: "testnet" }]),
-			getActiveNetwork: vi.fn(async () => ({ id: "n1", chainId: 1, kind: "testnet" })),
+			getOrInitNetworks: vi.fn(async () => [
+				{ id: "n1", chainId: 1, kind: "testnet", endpoints: [{ id: "ep1", rpcUrl: "https://r.test" }] },
+			]),
+			getActiveNetwork: vi.fn(async () => ({
+				id: "n1",
+				chainId: 1,
+				kind: "testnet",
+				endpoints: [{ id: "ep1", rpcUrl: "https://r.test" }],
+			})),
 			setActiveNetwork: vi.fn(async () => undefined),
 			// app.store.syncNetworkStatus fires fire-and-forget; provide a stub so
 			// it resolves cleanly and doesn't show up as an unhandled rejection.
 			getNodeStatus: vi.fn(async () => 0),
+			getEndpointHealth: vi.fn(async () => ({ activeEndpointId: "ep1", failures: {}, cooldownUntil: {}, invalidChain: [] })),
+			onPrimaryEndpointChanged: { add: vi.fn() },
+			onPrimaryEndpointDegraded: { add: vi.fn() },
 		}
 	}),
 	NodeStatus: { Online: 0 },

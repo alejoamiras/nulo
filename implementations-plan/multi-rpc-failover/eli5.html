@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Multi-RPC failover — plain-language plan</title>
+<style>
+:root {
+  --bg: #fafaf8; --fg: #1b1a17; --muted: #6b6660;
+  --accent: #c97a2e; --rule: #d8d5cf; --code-bg: #f0eee9;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1a17; --fg: #ece8df; --muted: #a39d92;
+    --accent: #e8a25a; --rule: #38342c; --code-bg: #2a2722;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: ui-serif, Georgia, serif; font-size: 17px; line-height: 1.55;
+  padding: 4rem 1.5rem 6rem;
+}
+main { max-width: 38rem; margin: 0 auto; }
+h1 { font-size: 1.7rem; font-weight: 700; margin: 0 0 0.5rem; line-height: 1.2; }
+.subtitle { color: var(--muted); font-style: italic; font-size: 1rem; margin: 0 0 3rem; }
+h2 {
+  font-size: 1.25rem; font-weight: 700; margin: 3rem 0 1rem;
+  padding-top: 1.25rem; border-top: 1px solid var(--rule);
+}
+h3 { font-size: 1rem; font-weight: 700; margin: 2rem 0 0.5rem; }
+p { margin: 0.8rem 0; }
+ul, ol { padding-left: 1.4rem; margin: 0.6rem 0 1rem; }
+li { margin: 0.35rem 0; }
+code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em;
+  background: var(--code-bg); padding: 0.08em 0.35em;
+}
+.phase {
+  margin: 1.25rem 0; padding: 1.25rem 1.4rem;
+  border-left: 3px solid var(--accent); background: var(--code-bg);
+}
+.phase h3 { margin-top: 0; }
+.phase .why { margin-top: 0.6rem; font-style: italic; color: var(--muted); }
+.openq {
+  margin: 1.5rem 0; padding: 1rem 1.25rem; border: 1px solid var(--rule);
+}
+.openq h3 { margin: 0 0 0.4rem; color: var(--accent); }
+.openq p { margin: 0.3rem 0; }
+.openq .ask { font-weight: 600; color: var(--fg); }
+.diagram {
+  font-family: ui-monospace, monospace; font-size: 0.85em; line-height: 1.4;
+  background: var(--code-bg); padding: 1rem 1.25rem; white-space: pre;
+  overflow-x: auto; margin: 1rem 0;
+}
+strong { font-weight: 700; }
+</style>
+</head>
+<body>
+<main>
+<h1>Multi-RPC failover, in plain language</h1>
+<p class="subtitle">Companion to <code>plan.md</code> — what we're changing and why.</p>
+
+<h2>What this fixes</h2>
+<p>Right now, when you set up an Aztec network in Nulo, you can configure multiple RPC endpoints — but the wallet only ever talks to one of them at a time (the "primary"). If that one goes down, you have to manually open Settings, find the network, and flip the primary endpoint to another one. The wallet won't try to recover on its own. It won't even tell you "your primary RPC is unreachable" — operations just hang or error and you have to figure out why.</p>
+<p>This plan adds <strong>automatic failover</strong>: if the primary endpoint fails twice in a row, the wallet silently switches to the next endpoint in your list, runs a quick sanity check that the new one's actually on the right chain, and shows you a small toast saying "Switched to backup RPC: <em>label</em>". The header gets an amber "Degraded" dot so you know you're not on your preferred endpoint anymore. Settings shows both your "Preferred" endpoint and the "Active" one when they differ, with a "Retry preferred" button to snap back.</p>
+
+<h2>The tricky bit: PXE state</h2>
+<p>Aztec wallets keep a thing called the <strong>PXE</strong> (Private eXecution Environment) — basically a local cache of decrypted notes, contract data, and chain sync progress. The PXE is tied to one specific RPC endpoint because the block stream comes from there. If we change the endpoint, we have to rebuild the PXE.</p>
+<p>Naive approach: tear down everything on failover, rebuild against the new endpoint. <em>This wipes your decryption progress.</em> Bad UX — a flaky endpoint shouldn't cost you minutes of resync.</p>
+<p>Smart approach (what the plan does):</p>
+<ul>
+  <li><strong>In-flight operations stay pinned</strong> to whatever endpoint they started on. If you're mid-transaction and the endpoint flakes, the receipt polling continues against the original URL.</li>
+  <li><strong>Only new operations</strong> see the post-failover endpoint.</li>
+  <li><strong>The PXE rebuild happens under a write-lock</strong> so existing readers finish before the swap; no half-state.</li>
+  <li><strong>We NEVER wipe the chain database</strong> on failover. The notes/senders/contracts stay valid because the <em>chain</em> didn't change, only the endpoint serving it. This is the single most dangerous landmine in this work — there's a function called <code>clearChainState()</code> that would do exactly the wrong thing if called here; the plan flags it loudly.</li>
+</ul>
+
+<h2>Threshold + recovery</h2>
+<p>The wallet doesn't fail over on a single error. It uses a small state machine:</p>
+<ul>
+  <li><strong>2 hard failures in a row</strong> = failover. (Hard = network down, HTTP 5xx, rate-limit, RPC server error.) A single hiccup is forgiven. The fetch layer already has its own retry-with-backoff, so by the time we count a failure, it's "this endpoint replied wrong despite trying multiple times."</li>
+  <li><strong>60 seconds of healthy traffic</strong> after a failure = the counter resets. One bad day doesn't permanently sour an endpoint.</li>
+  <li><strong>After failover</strong>, the dead endpoint gets a 5-minute cooldown. After cooldown, it's eligible for re-promotion (but only on next user-driven traffic — no background pinging).</li>
+  <li><strong>If a candidate endpoint reports the wrong chain ID</strong> (it claims to be on Aztec mainnet but actually isn't), it gets permanently quarantined for the session. The wallet won't try it again until you restart the service worker or fix the URL.</li>
+  <li><strong>If all endpoints fail</strong>, you see a banner: "All endpoints for &lt;chain&gt; are unreachable" with a "Retry preferred" button. The wallet doesn't keep retrying in a loop.</li>
+</ul>
+
+<h2>What about transactions?</h2>
+<p>This is the part where you really don't want bugs. The plan is conservative:</p>
+<ul>
+  <li><strong>Transactions are NEVER auto-retried across failover.</strong> If you submit a tx and the endpoint dies mid-submit, the wallet shows you an error. You decide whether to retry — and if you do, the wallet regenerates the tx (same nonce, deterministic) so the second submission gets the same tx hash, which means mempool deduplication handles the "what if both endpoints accepted it" case correctly.</li>
+  <li><strong>Receipt polling stays pinned</strong> to the endpoint the tx was submitted to. Even after failover changes the live route, receipts for in-flight txs come from the original endpoint until that endpoint gives up.</li>
+  <li><strong>Reads also don't retry automatically.</strong> When a read fails, the wallet fails over (so the <em>next</em> read uses the new endpoint), but the failing read itself returns an error. Polling loops naturally recover because they re-fire on the next tick; user-facing reads either re-fire when the user clicks "refresh" or when the next ambient refresh kicks in. The reason: silently retrying anything (even reads) opens a class of double-execute bugs we'd rather not have.</li>
+</ul>
+
+<h2>The 4 phases</h2>
+
+<div class="phase">
+<h3>Phase 1 — Routing core</h3>
+<p>Build the failure-classifier, the in-memory route-state, the failover state machine, and the new <code>acquireBinding()</code> API. Drop <code>primaryEndpointId</code> from persisted state (<code>endpoints[0]</code> is now implicitly preferred). Extend the existing <code>onPrimaryEndpointChanged</code> event with a <code>source</code> field that says "failover" or "manual."</p>
+<p class="why">Why first: this is the engine. Until it works in isolation, nothing else lands.</p>
+</div>
+
+<div class="phase">
+<h3>Phase 2 — PXE-safe rebind</h3>
+<p>Wire the PXE service to subscribe to network failover events and rebind the chain runtime under the per-chain write lock. Crucially: never call <code>clearChainState()</code> on rebind. Test that in-flight readers/writers drain cleanly before the new endpoint takes over.</p>
+<p class="why">Why second: this is the correctness-critical piece. Phase 1 alone would work without PXE coherence (until the user does anything private), but the moment notes get involved, you need the rebind to be lock-ordered and DB-preserving.</p>
+</div>
+
+<div class="phase">
+<h3>Phase 3 — Caller adoption</h3>
+<p>~20 call sites across <code>execution/</code>, <code>token/</code>, <code>fpc/</code>, <code>note/</code>, <code>account-state/</code>, <code>transaction/</code>, <code>tx-request-builder.ts</code>. Each one switches from <code>networkService.getNode(chainId)</code> to <code>networkService.acquireBinding(chainId)</code> and uses the binding's bundled <code>{ network, endpoint, info, node }</code> for everything in that logical op. Recording <code>submittedEndpointUrl</code> on tx submission switches to the live endpoint, not the persisted preferred.</p>
+<p class="why">Why third: this is the biggest grep-and-replace surface. Doing it after Phase 1+2 means the new API is stable when we hit these sites.</p>
+</div>
+
+<div class="phase">
+<h3>Phase 4 — Popup surface</h3>
+<p>Listen to the new events in the Vue store. Add the amber "Degraded" header dot. Add Preferred/Active markers in Settings. Show the "Retry preferred" banner when all endpoints are exhausted. Wire the toast for failover events.</p>
+<p class="why">Why fourth: nothing user-visible should ship until the underlying behavior is correct. The UI is the last layer on top.</p>
+</div>
+
+<h2>Failover state machine</h2>
+<div class="diagram">LIVE_PREFERRED (active = endpoints[0])
+   │
+   │ 2 hard failures (or 8 soft)
+   ▼
+FAILOVER
+   │
+   │ next endpoint passes chainId probe
+   ▼
+LIVE_FALLBACK (active != endpoints[0])
+   │     ↑
+   │     │ failover again if backup fails
+   │     │
+   │ user clicks "Retry preferred"
+   │ OR manually promotes preferred
+   ▼
+LIVE_PREFERRED  ← snap back
+
+If FAILOVER exhausts all endpoints:
+EXHAUSTED → banner shown, no auto-retry
+
+SW restart → wipes in-memory state → LIVE_PREFERRED</div>
+
+<h2>The security bit</h2>
+<p>RPC endpoints are the network's view of the world. An attacker who controls one of your endpoints can lie to you about balances, transaction status, mempool inclusion. The threat model already exists in single-endpoint configurations; multi-endpoint doesn't make it worse, but it does open new attack surfaces:</p>
+<ul>
+  <li><strong>Endpoint impersonation</strong> — an endpoint claims to be on chain X but isn't. Mitigation: probe chainId on every promotion. Mismatch = permanent quarantine for the session.</li>
+  <li><strong>Forced failover</strong> — an attacker degrades your preferred endpoint to push your traffic onto their malicious backup. Mitigation: the wallet shows you when you're on a fallback (amber dot, toast, Settings markers). You can see "I'm not on my preferred endpoint anymore" and investigate.</li>
+  <li><strong>Double-submit on retry</strong> — if a tx submission ambiguously failed, retrying on a different endpoint could land it twice. Mitigation: failover NEVER auto-retries writes. The user explicitly clicks retry; deterministic nonce makes mempool dedupe handle the rest.</li>
+  <li><strong>Mid-failover PXE corruption</strong> — if we wiped chain state on rebind, your notes would disappear. Mitigation: we don't. The plan flags this as a critical landmine.</li>
+</ul>
+
+<h2>Open questions for you</h2>
+
+<p>The final codex pass trimmed my open questions down to just the two real user-facing ones. Everything else is an implementation detail I've made calls on — flagged in <code>plan.md</code> § "Decisions I've made" if you want to override.</p>
+
+<div class="openq">
+  <h3>1. Drop <code>primaryEndpointId</code> or keep it?</h3>
+  <p>The plan drops it. <code>endpoints[0]</code> is implicitly the user-preferred. To make another endpoint preferred, reorder the array. The first codex pass argued for keeping it as an explicit pointer (more decoupled); the final codex pass confirmed dropping is fine if we add tests/docs asserting "array order is authoritative."</p>
+  <p class="ask">Confirm: drop?</p>
+</div>
+
+<div class="openq">
+  <h3>2. No auto-snapback when preferred recovers?</h3>
+  <p>The plan says: once failover happens, the wallet stays on the backup until you explicitly retry (button or manual selection). The alternative is "snap back automatically when preferred's cooldown elapses and a probe succeeds." Auto-snapback would feel magic but could cause flapping if both endpoints are intermittently bad.</p>
+  <p class="ask">Confirm: no auto-snapback?</p>
+</div>
+
+</main>
+</body>
+</html>

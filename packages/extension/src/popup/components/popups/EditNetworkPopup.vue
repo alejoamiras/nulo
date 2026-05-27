@@ -52,8 +52,8 @@ const isAvailableToUpdateNetwork = computed(() => {
 
 const handleFillFieldsWithDefaultValues = () => {
 	nameTerm.value = networkToEdit.value?.name ?? ""
-	const primary = networkToEdit.value?.endpoints.find((e) => e.id === networkToEdit.value.primaryEndpointId)
-	urlTerm.value = primary?.rpcUrl ?? ""
+	const preferred = networkToEdit.value?.endpoints[0]
+	urlTerm.value = preferred?.rpcUrl ?? ""
 }
 
 const isNetworkUpdateInProgress = ref(false)

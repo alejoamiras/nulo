@@ -8,7 +8,6 @@
 
 import type { AccountService } from "@/wallet/services/account/service"
 import type { NetworkService } from "@/wallet/services/network/service"
-import { networkInfoFrom } from "@/wallet/services/network/service"
 import type { ProfileService } from "@/wallet/services/profile/service"
 import type { PxeServiceClient } from "@/wallet/services/pxe/client"
 import type { ILogger } from "@/wallet/logger"
@@ -24,6 +23,22 @@ export interface GetViewSimulationDepsServices {
 	readonly logger?: ILogger
 }
 
+/**
+ * Resolves deps via `acquireBinding` (post-multi-rpc-failover) instead of
+ * the deprecated `getNode` + `networkInfoFrom(network)` pair. The binding
+ * goes through `_resolveBindingLocked`, which means:
+ *   - The returned `node` is the LIVE active endpoint (snapback-honoring),
+ *     not necessarily `endpoints[0]`.
+ *   - The `pxe` is built against the same binding's URL (no split-brain
+ *     where node and PXE point at different endpoints).
+ *
+ * For full failover engagement (failure reporting → classifier → cooldown),
+ * the caller's `batchedViewSimulation` call should be wrapped in
+ * `withBinding(chainId, ...)`. View simulations are read-only, so missing
+ * failure reports just means the threshold doesn't tick for these
+ * endpoints — no fund loss. We accept that tradeoff to keep the helper
+ * signature minimal across the simulate-views refactor + multi-rpc merge.
+ */
 export async function getViewSimulationDeps(
 	services: GetViewSimulationDepsServices,
 	networkId: string,
@@ -35,11 +50,11 @@ export async function getViewSimulationDeps(
 	}
 	const network = await services.networks.getNetwork(networkId)
 	const account = await services.accounts.getAccountContract(profile.id, network.chainId, accountAddress)
-	const node = await services.networks.getNode(network.chainId)
-	const pxe = services.pxeService.getPXE(networkInfoFrom(network))
+	const binding = await services.networks.acquireBinding(network.chainId)
+	const pxe = services.pxeService.getPXE(binding.info)
 	return {
 		pxe,
-		node,
+		node: binding.node,
 		account,
 		contractResolver: services.contractResolver,
 		logger: services.logger,

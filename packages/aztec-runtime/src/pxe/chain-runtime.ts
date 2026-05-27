@@ -123,19 +123,23 @@ export class ChainRuntimeRegistry {
 	}
 
 	/** Lazy-init for `(network.profileId, network.chainId)`. Concurrent
-	 *  callers share the same init promise. If the runtime exists but
-	 *  its rpcUrl no longer matches (network re-bound), the existing
-	 *  runtime is disposed and re-initialized under the new URL. */
+	 *  callers share the same init promise.
+	 *
+	 *  Returns the cached runtime IF one exists, regardless of whether
+	 *  `network.rpcUrl` matches. The previous opportunistic URL-mismatch
+	 *  rebuild was racy under `chainGuard.read` — concurrent readers can
+	 *  hold `runtime.pxe` while a second reader's mismatch-rebuild
+	 *  disposes it (codex post-impl review §1 blocker). Endpoint changes
+	 *  now go exclusively through the explicit `rebindChain` RPC, which
+	 *  acquires `chainGuard.write` and drains in-flight readers first.
+	 *
+	 *  Callers that arrive with a stale URL after a failover-then-rebind
+	 *  cycle still get the live runtime — the registry's cached URL is
+	 *  the source of truth, not the URL passed by the caller. */
 	public async getOrInit(network: NetworkInfo): Promise<ChainRuntime> {
 		const k = this.key(network.profileId, network.chainId)
 		const existing = this.runtimes.get(k)
-		if (existing && existing.rpcUrl === network.rpcUrl) {
-			return existing
-		}
-		if (existing && existing.rpcUrl !== network.rpcUrl) {
-			this.runtimes.delete(k)
-			await existing.dispose()
-		}
+		if (existing) return existing
 
 		let promise = this.initPromises.get(k)
 		if (!promise) {

@@ -68,4 +68,19 @@ export type Methods = {
 	 * NetworkService.purgeChain coordinator when a chain is removed.
 	 */
 	clearChainState(profileId: string, chainId: number): void
+	/**
+	 * Failover-safe URL rebind. Disposes the cached `ChainRuntime` for
+	 * `(profileId, chainId)` under the per-chain write guard so any
+	 * in-flight readers drain first. Does NOT delete the IndexedDB — the
+	 * chain DB stays valid across endpoint changes because chainId is
+	 * unchanged.
+	 *
+	 * Distinct from `clearChainState` in two ways:
+	 *   - No IndexedDB delete (PXE notes/senders/contracts survive).
+	 *   - Caller is the failover engine, not the chain-purge cascade.
+	 *
+	 * The next `withPxeRead`/`withPxeWrite` against this chain re-initializes
+	 * the runtime against the new URL supplied in `NetworkInfo`.
+	 */
+	rebindChain(profileId: string, chainId: number): void
 }

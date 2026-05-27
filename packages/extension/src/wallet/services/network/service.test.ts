@@ -22,7 +22,8 @@ import { ConfigStore } from "@/wallet/config"
 import { FakeNodeFactory } from "@/core/testing/fake-node-factory"
 import type { ProfileService } from "@/wallet/services/profile/service"
 import { NetworkService } from "./service"
-import type { Network, NetworkEndpoint } from "./spec"
+import type { NetworkRouteState } from "./route-state"
+import type { Network, NetworkEndpoint, PrimaryEndpointChangeSource } from "./spec"
 
 type NodeInfo = {
 	l1ChainId: number
@@ -380,7 +381,7 @@ describe("NetworkService public API (M4.10)", () => {
 			expect(network.kind).toBe("custom")
 			expect(network.endpoints).toHaveLength(1)
 			expect(network.endpoints[0]!.rpcUrl).toBe("https://rpc.test/1")
-			expect(network.primaryEndpointId).toBe(network.endpoints[0]!.id)
+			expect(network.endpoints).toHaveLength(1)
 			expect(events).toHaveLength(1)
 			expect(events[0]!.id).toBe(network.id)
 		})
@@ -474,8 +475,8 @@ describe("NetworkService public API (M4.10)", () => {
 
 			const updated = await service.getNetwork(network.id)
 			expect(updated.endpoints).toHaveLength(2)
-			// primary unchanged
-			expect(updated.primaryEndpointId).toBe(network.primaryEndpointId)
+			// preferred (endpoints[0]) unchanged after appending a backup
+			expect(updated.endpoints[0]!.id).toBe(network.endpoints[0]!.id)
 		})
 
 		test("rejects ENDPOINT_CHAIN_MISMATCH when probed chainId differs", async () => {
@@ -509,7 +510,6 @@ describe("NetworkService public API (M4.10)", () => {
 				chainId: 0,
 				name: "Local Network",
 				kind: "local" as const,
-				primaryEndpointId: "ep-1",
 				endpoints: [{ id: "ep-1", rpcUrl: "http://localhost:8080" }],
 			}
 			local.store.set("nulo:core:networks@local-1", JSON.stringify(localNet))
@@ -521,14 +521,15 @@ describe("NetworkService public API (M4.10)", () => {
 		})
 	})
 
-	describe("setPrimaryEndpoint", () => {
-		test("updates primary, emits event, evicts AztecNode cache for that chainId", async () => {
+	describe("promoteEndpoint", () => {
+		test("splices the endpoint to index 0, emits event with source=manual, evicts AztecNode cache", async () => {
 			const { service, factory } = setupServiceWithStorage({
 				"https://rpc.test/1": nodeInfoForChain(7),
 				"https://rpc.test/2": nodeInfoForChain(7),
 			})
 			const network = await service.addNetwork("X", "https://rpc.test/1")
 			const ep2 = await service.addEndpoint(network.id, "B", "https://rpc.test/2")
+			const ep1Id = network.endpoints[0]!.id
 
 			// Prime the AztecNode cache via getNode().
 			await service.getNode(7)
@@ -536,25 +537,28 @@ describe("NetworkService public API (M4.10)", () => {
 			expect(((service as any).nodes as Map<number, unknown>).has(7)).toBe(true)
 			const before = factory.created.length
 
-			const events: { networkId: string; endpointId: string }[] = []
+			const events: unknown[] = []
 			service.onPrimaryEndpointChanged.add((evt) => {
 				events.push(evt)
 				return Promise.resolve()
 			})
 
-			await service.setPrimaryEndpoint(network.id, ep2.id)
+			const updated = await service.promoteEndpoint(network.id, ep2.id)
 
+			// New head is ep2.
+			expect(updated.endpoints[0]!.id).toBe(ep2.id)
+			expect(updated.endpoints.map((e) => e.id)).toEqual([ep2.id, ep1Id])
 			// Cache evicted.
 			// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 			expect(((service as any).nodes as Map<number, unknown>).has(7)).toBe(false)
-			// Event fired.
-			expect(events).toEqual([{ networkId: network.id, endpointId: ep2.id }])
+			// Event fired with the new payload shape.
+			expect(events).toEqual([{ networkId: network.id, fromEndpointId: ep1Id, toEndpointId: ep2.id, source: "manual" }])
 			// Next getNode creates a fresh node bound to the new URL.
 			await service.getNode(7)
 			expect(factory.created.length).toBeGreaterThan(before)
 		})
 
-		test("no-op when endpointId already primary (no event)", async () => {
+		test("no-op when endpointId already at index 0 (no event)", async () => {
 			const { service } = setupServiceWithStorage({
 				"https://rpc.test/1": nodeInfoForChain(1),
 			})
@@ -564,20 +568,27 @@ describe("NetworkService public API (M4.10)", () => {
 				events.push(evt)
 				return Promise.resolve()
 			})
-			await service.setPrimaryEndpoint(network.id, network.primaryEndpointId)
+			await service.promoteEndpoint(network.id, network.endpoints[0]!.id)
 			expect(events).toHaveLength(0)
 		})
 	})
 
 	describe("deleteEndpoint", () => {
-		test("rejects PRIMARY_ENDPOINT", async () => {
+		test("allows deletion of endpoints[0] (the preferred); endpoints[1] shifts into the preferred slot", async () => {
+			// Schema collapse change: ERR_PRIMARY_ENDPOINT is gone. The user
+			// can delete the preferred endpoint; the next entry becomes the
+			// new preferred. The only remaining guard is ERR_LAST_ENDPOINT.
 			const { service } = setupServiceWithStorage({
 				"https://rpc.test/1": nodeInfoForChain(1),
 				"https://rpc.test/2": nodeInfoForChain(1),
 			})
 			const network = await service.addNetwork("X", "https://rpc.test/1")
-			await service.addEndpoint(network.id, "B", "https://rpc.test/2")
-			await expect(service.deleteEndpoint(network.id, network.primaryEndpointId)).rejects.toThrow(/PRIMARY_ENDPOINT/)
+			const ep2 = await service.addEndpoint(network.id, "B", "https://rpc.test/2")
+			const ep1Id = network.endpoints[0]!.id
+			await service.deleteEndpoint(network.id, ep1Id)
+			const after = await service.getNetwork(network.id)
+			expect(after.endpoints).toHaveLength(1)
+			expect(after.endpoints[0]!.id).toBe(ep2.id)
 		})
 
 		test("rejects LAST_ENDPOINT when only one endpoint exists", async () => {
@@ -585,7 +596,7 @@ describe("NetworkService public API (M4.10)", () => {
 				"https://rpc.test/1": nodeInfoForChain(1),
 			})
 			const network = await service.addNetwork("X", "https://rpc.test/1")
-			await expect(service.deleteEndpoint(network.id, network.primaryEndpointId)).rejects.toThrow(/LAST_ENDPOINT/)
+			await expect(service.deleteEndpoint(network.id, network.endpoints[0]!.id)).rejects.toThrow(/LAST_ENDPOINT/)
 		})
 
 		test("removes a non-primary endpoint and emits onNetworkUpdated", async () => {
@@ -609,7 +620,7 @@ describe("NetworkService public API (M4.10)", () => {
 	})
 
 	describe("setActiveNetwork", () => {
-		test("does NOT mutate primaryEndpointId; emits onActiveNetworkChanged", async () => {
+		test("does NOT mutate endpoints[] order; emits onActiveNetworkChanged", async () => {
 			const { service } = setupServiceWithStorage({
 				"https://rpc.test/1": nodeInfoForChain(1),
 				"https://rpc.test/2": nodeInfoForChain(2),
@@ -623,12 +634,12 @@ describe("NetworkService public API (M4.10)", () => {
 			})
 			await service.setActiveNetwork(b.id)
 			const re = await service.getNetwork(b.id)
-			expect(re.primaryEndpointId).toBe(b.primaryEndpointId)
+			expect(re.endpoints[0]!.id).toBe(b.endpoints[0]!.id)
 			expect(events).toHaveLength(1)
 			expect(events[0]!.id).toBe(b.id)
-			// Ensure A's primary still untouched too.
+			// Ensure A's preferred endpoint still untouched too.
 			const reA = await service.getNetwork(a.id)
-			expect(reA.primaryEndpointId).toBe(a.primaryEndpointId)
+			expect(reA.endpoints[0]!.id).toBe(a.endpoints[0]!.id)
 		})
 	})
 
@@ -701,7 +712,7 @@ describe("NetworkService public API (M4.10)", () => {
 			expect(snapshot).toHaveLength(2)
 			for (const n of snapshot) {
 				expect(n.endpoints.length).toBeGreaterThan(0)
-				expect(typeof n.primaryEndpointId).toBe("string")
+				expect(typeof n.endpoints[0]!.id).toBe("string")
 			}
 		})
 
@@ -730,7 +741,6 @@ describe("NetworkService public API (M4.10)", () => {
 					profileId: "p1",
 					chainId: 1,
 					name: "Imported",
-					primaryEndpointId: "e1",
 					endpoints: [{ id: "e1", rpcUrl: "https://rpc.test/1" }],
 				},
 			]
@@ -787,7 +797,6 @@ describe("NetworkService.onProfileDeleted cascade", () => {
 			chainId: 7,
 			name: "P2",
 			kind: "custom" as const,
-			primaryEndpointId: "ep-p2",
 			endpoints: [{ id: "ep-p2", rpcUrl: "https://rpc.test/c" }],
 		}
 		local.store.set("nulo:core:networks@n-p2", JSON.stringify(p2Network))
@@ -797,5 +806,389 @@ describe("NetworkService.onProfileDeleted cascade", () => {
 
 		expect(pxeStub).toHaveBeenCalledWith("p1", 42)
 		expect(pxeStub).not.toHaveBeenCalledWith("p2", 7)
+	})
+})
+
+describe("NetworkService failover engine (multi-rpc-failover Phase 1)", () => {
+	/** Materialize a Network record directly into the fake storage area.
+	 *  Bypasses the addNetwork → _getChainId path so we can stand up a
+	 *  multi-endpoint network in one statement. */
+	function seedNetwork(local: FakeStorageArea, network: Network): void {
+		local.store.set(`nulo:core:networks@${network.id}`, JSON.stringify(network))
+	}
+
+	function makeNetwork(chainId: number, endpoints: NetworkEndpoint[]): Network {
+		return { id: `net-${chainId}`, profileId: "p1", chainId, name: `Chain ${chainId}`, kind: "custom", endpoints }
+	}
+
+	function routeState(service: NetworkService, networkId: string): NetworkRouteState {
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		const map = (service as any).routeState as Map<string, NetworkRouteState>
+		const state = map.get(networkId)
+		if (!state) throw new Error(`No routeState for ${networkId} — call acquireBinding first`)
+		return state
+	}
+
+	test("acquireBinding lazily initializes routeState pointing at endpoints[0]", async () => {
+		const { service, local } = setupServiceWithStorage({ "https://a.test": nodeInfoForChain(42) })
+		seedNetwork(
+			local,
+			makeNetwork(42, [
+				{ id: "ep-a", rpcUrl: "https://a.test" },
+				{ id: "ep-b", rpcUrl: "https://b.test" },
+			]),
+		)
+		const binding = await service.acquireBinding(42)
+		expect(binding.endpoint.id).toBe("ep-a")
+		expect(binding.info.rpcUrl).toBe("https://a.test")
+		expect(routeState(service, "net-42").activeEndpointId).toBe("ep-a")
+	})
+
+	test("acquireBinding returns the same AztecNode on a second call (no factory churn)", async () => {
+		const { service, local, factory } = setupServiceWithStorage({ "https://a.test": nodeInfoForChain(42) })
+		seedNetwork(local, makeNetwork(42, [{ id: "ep-a", rpcUrl: "https://a.test" }]))
+		const first = await service.acquireBinding(42)
+		const second = await service.acquireBinding(42)
+		expect(second.node).toBe(first.node)
+		// Single factory.createNode() — the second acquireBinding hits the cache.
+		expect(factory.created.length).toBe(1)
+	})
+
+	test("hard threshold (2) trips → next acquireBinding fails over to endpoints[1]", async () => {
+		const { service, local } = setupServiceWithStorage({
+			"https://a.test": nodeInfoForChain(42),
+			"https://b.test": nodeInfoForChain(42),
+		})
+		seedNetwork(
+			local,
+			makeNetwork(42, [
+				{ id: "ep-a", rpcUrl: "https://a.test" },
+				{ id: "ep-b", rpcUrl: "https://b.test" },
+			]),
+		)
+		await service.acquireBinding(42) // init routeState
+		const events: Array<{ source: PrimaryEndpointChangeSource; toEndpointId: string }> = []
+		service.onPrimaryEndpointChanged.add(async (e) => {
+			events.push({ source: e.source, toEndpointId: e.toEndpointId })
+		})
+
+		// Two hard failures on ep-a (the active) trip the threshold and mark
+		// the active in cooldown. The 5xx HTTP status is a "hard" bucket.
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to bypass async URL lookup
+		;(service as any)._countFailure("net-42", "ep-a", { status: 503 })
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(service as any)._countFailure("net-42", "ep-a", { status: 503 })
+
+		const after = await service.acquireBinding(42)
+		expect(after.endpoint.id).toBe("ep-b")
+		expect(events).toHaveLength(1)
+		expect(events[0]).toEqual({ source: "failover", toEndpointId: "ep-b" })
+	})
+
+	test("failover quarantines a chainId-mismatched candidate via invalidChain", async () => {
+		const { service, local } = setupServiceWithStorage({
+			"https://a.test": nodeInfoForChain(42),
+			"https://wrong-chain.test": nodeInfoForChain(999), // wrong chain
+			"https://b.test": nodeInfoForChain(42),
+		})
+		seedNetwork(
+			local,
+			makeNetwork(42, [
+				{ id: "ep-a", rpcUrl: "https://a.test" },
+				{ id: "ep-wrong", rpcUrl: "https://wrong-chain.test" },
+				{ id: "ep-b", rpcUrl: "https://b.test" },
+			]),
+		)
+		await service.acquireBinding(42) // init
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(service as any)._countFailure("net-42", "ep-a", { status: 503 })
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(service as any)._countFailure("net-42", "ep-a", { status: 503 })
+
+		const after = await service.acquireBinding(42)
+		expect(after.endpoint.id).toBe("ep-b")
+		expect(routeState(service, "net-42").invalidChain.has("ep-wrong")).toBe(true)
+	})
+
+	test("all candidates fail → exhaustedAt set + onPrimaryEndpointDegraded fires", async () => {
+		const { service, local } = setupServiceWithStorage({
+			"https://a.test": nodeInfoForChain(42),
+			"https://b.test": new Error("ECONNREFUSED"),
+			"https://c.test": new Error("ECONNREFUSED"),
+		})
+		seedNetwork(
+			local,
+			makeNetwork(42, [
+				{ id: "ep-a", rpcUrl: "https://a.test" },
+				{ id: "ep-b", rpcUrl: "https://b.test" },
+				{ id: "ep-c", rpcUrl: "https://c.test" },
+			]),
+		)
+		await service.acquireBinding(42) // init
+		const degradedEvents: Array<{ networkId: string; exhausted: boolean }> = []
+		service.onPrimaryEndpointDegraded.add(async (e) => {
+			degradedEvents.push(e)
+		})
+
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(service as any)._countFailure("net-42", "ep-a", { status: 503 })
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(service as any)._countFailure("net-42", "ep-a", { status: 503 })
+
+		await service.acquireBinding(42) // triggers failover loop; all probes fail
+
+		expect(routeState(service, "net-42").exhaustedAt).toBeDefined()
+		expect(degradedEvents).toEqual([{ networkId: "net-42", exhausted: true }])
+	})
+
+	test("snapback fires when active != preferred and preferred probe succeeds", async () => {
+		const { service, local } = setupServiceWithStorage({
+			"https://a.test": nodeInfoForChain(42),
+			"https://b.test": nodeInfoForChain(42),
+		})
+		seedNetwork(
+			local,
+			makeNetwork(42, [
+				{ id: "ep-a", rpcUrl: "https://a.test" },
+				{ id: "ep-b", rpcUrl: "https://b.test" },
+			]),
+		)
+		// Drive into a state where active=ep-b (post-failover) and preferred=ep-a
+		// is available.
+		await service.acquireBinding(42)
+		const state = routeState(service, "net-42")
+		state.activeEndpointId = "ep-b"
+
+		const events: PrimaryEndpointChangeSource[] = []
+		service.onPrimaryEndpointChanged.add(async (e) => {
+			events.push(e.source)
+		})
+
+		const after = await service.acquireBinding(42)
+		expect(after.endpoint.id).toBe("ep-a")
+		expect(events).toEqual(["snapback"])
+	})
+
+	test("promoteEndpoint probes promoted endpoint, then flips active + emits source: 'manual'", async () => {
+		// Both endpoints must answer the chainId probe so `promoteEndpoint`
+		// can probe-before-activate (codex post-impl review §2: probe is
+		// the load-bearing security check against silently activating a
+		// chainId-mismatched endpoint).
+		const { service, local } = setupServiceWithStorage({
+			"https://a.test": nodeInfoForChain(42),
+			"https://b.test": nodeInfoForChain(42),
+		})
+		seedNetwork(
+			local,
+			makeNetwork(42, [
+				{ id: "ep-a", rpcUrl: "https://a.test" },
+				{ id: "ep-b", rpcUrl: "https://b.test" },
+			]),
+		)
+		await service.acquireBinding(42) // init routeState
+		const events: PrimaryEndpointChangeSource[] = []
+		service.onPrimaryEndpointChanged.add(async (e) => {
+			events.push(e.source)
+		})
+
+		const updated = await service.promoteEndpoint("net-42", "ep-b")
+		expect(updated.endpoints[0]!.id).toBe("ep-b")
+		expect(routeState(service, "net-42").activeEndpointId).toBe("ep-b")
+		expect(events).toEqual(["manual"])
+	})
+
+	test("promoteEndpoint with chainId-mismatched target: persists reorder, throws, does NOT flip active", async () => {
+		// User promotes ep-b but ep-b now reports a different chainId
+		// (misconfigured / malicious). The reorder is persisted (user
+		// intent is durable), but `activeEndpointId` stays on ep-a and the
+		// endpoint goes into the `invalidChain` quarantine.
+		const { service, local } = setupServiceWithStorage({
+			"https://a.test": nodeInfoForChain(42),
+			"https://b.test": nodeInfoForChain(999), // wrong chain!
+		})
+		seedNetwork(
+			local,
+			makeNetwork(42, [
+				{ id: "ep-a", rpcUrl: "https://a.test" },
+				{ id: "ep-b", rpcUrl: "https://b.test" },
+			]),
+		)
+		await service.acquireBinding(42)
+
+		await expect(service.promoteEndpoint("net-42", "ep-b")).rejects.toThrow(/ENDPOINT_CHAIN_MISMATCH/)
+
+		// Reorder is committed (endpoints[0] is now ep-b — user preference).
+		const network = await service.getNetwork("net-42")
+		expect(network.endpoints[0]!.id).toBe("ep-b")
+		// Active route did NOT move; quarantined.
+		const state = routeState(service, "net-42")
+		expect(state.activeEndpointId).toBe("ep-a")
+		expect(state.invalidChain.has("ep-b")).toBe(true)
+	})
+
+	test("clearEndpointCooldowns wipes cooldowns + invalidChain (no active flip)", async () => {
+		const { service, local } = setupServiceWithStorage({ "https://a.test": nodeInfoForChain(42) })
+		seedNetwork(
+			local,
+			makeNetwork(42, [
+				{ id: "ep-a", rpcUrl: "https://a.test" },
+				{ id: "ep-b", rpcUrl: "https://b.test" },
+			]),
+		)
+		await service.acquireBinding(42)
+		const state = routeState(service, "net-42")
+		state.activeEndpointId = "ep-b"
+		state.cooldownUntil.set("ep-a", Date.now() + 60_000)
+		state.invalidChain.add("ep-other")
+		state.exhaustedAt = Date.now()
+
+		await service.clearEndpointCooldowns("net-42")
+
+		expect(state.cooldownUntil.size).toBe(0)
+		expect(state.invalidChain.size).toBe(0)
+		expect(state.exhaustedAt).toBeUndefined()
+		expect(state.activeEndpointId).toBe("ep-b") // NOT flipped
+	})
+
+	test("getEndpointHealth returns default snapshot before any traffic", async () => {
+		const { service, local } = setupServiceWithStorage({})
+		seedNetwork(
+			local,
+			makeNetwork(42, [
+				{ id: "ep-a", rpcUrl: "https://a.test" },
+				{ id: "ep-b", rpcUrl: "https://b.test" },
+			]),
+		)
+		const snap = await service.getEndpointHealth("net-42")
+		expect(snap.activeEndpointId).toBe("ep-a")
+		expect(snap.failures).toEqual({})
+		expect(snap.cooldownUntil).toEqual({})
+		expect(snap.invalidChain).toEqual([])
+	})
+
+	test("getEndpointHealth reflects live route state after traffic", async () => {
+		const { service, local } = setupServiceWithStorage({ "https://a.test": nodeInfoForChain(42) })
+		seedNetwork(local, makeNetwork(42, [{ id: "ep-a", rpcUrl: "https://a.test" }]))
+		await service.acquireBinding(42)
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(service as any)._countFailure("net-42", "ep-a", { status: 503 })
+		const snap = await service.getEndpointHealth("net-42")
+		expect(snap.failures["ep-a"]?.hard).toBe(1)
+	})
+
+	test("withBinding propagates fn() errors and counts them via classifier", async () => {
+		const { service, local } = setupServiceWithStorage({ "https://a.test": nodeInfoForChain(42) })
+		seedNetwork(
+			local,
+			makeNetwork(42, [
+				{ id: "ep-a", rpcUrl: "https://a.test" },
+				{ id: "ep-b", rpcUrl: "https://b.test" },
+			]),
+		)
+		await service.acquireBinding(42) // init
+
+		await expect(
+			service.withBinding(42, async () => {
+				throw { status: 503, message: "upstream down" }
+			}),
+		).rejects.toMatchObject({ status: 503 })
+
+		// reportEndpointFailure goes async via _findEndpointByUrl; flush.
+		await new Promise((r) => setTimeout(r, 0))
+		await new Promise((r) => setTimeout(r, 0))
+
+		expect(routeState(service, "net-42").failures.get("ep-a")?.hard).toBe(1)
+	})
+
+	test("successful failover schedules pxeServiceClient.rebindChain(profileId, chainId)", async () => {
+		const { service, local } = setupServiceWithStorage({
+			"https://a.test": nodeInfoForChain(42),
+			"https://b.test": nodeInfoForChain(42),
+		})
+		seedNetwork(
+			local,
+			makeNetwork(42, [
+				{ id: "ep-a", rpcUrl: "https://a.test" },
+				{ id: "ep-b", rpcUrl: "https://b.test" },
+			]),
+		)
+		const rebindStub = vi.fn().mockResolvedValue(undefined)
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;((service as any).pxeServiceClient as { rebindChain: typeof rebindStub }).rebindChain = rebindStub
+
+		await service.acquireBinding(42) // init
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(service as any)._countFailure("net-42", "ep-a", { status: 503 })
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(service as any)._countFailure("net-42", "ep-a", { status: 503 })
+		await service.acquireBinding(42) // triggers failover
+
+		expect(rebindStub).toHaveBeenCalledWith("p1", 42)
+	})
+
+	test("classifier 'ignore' bucket does not move counters", async () => {
+		const { service, local } = setupServiceWithStorage({ "https://a.test": nodeInfoForChain(42) })
+		seedNetwork(local, makeNetwork(42, [{ id: "ep-a", rpcUrl: "https://a.test" }]))
+		await service.acquireBinding(42)
+		// AbortError is classified as "ignore" (user-initiated cancel).
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(service as any)._countFailure("net-42", "ep-a", Object.assign(new Error("aborted"), { name: "AbortError" }))
+		expect(routeState(service, "net-42").failures.size).toBe(0)
+	})
+
+	test("withBinding reports failures by binding identity, not URL (cross-profile safe)", async () => {
+		// Codex post-impl review §5: withBinding's catch must report via
+		// (binding.network.id, binding.endpoint.id), NOT URL lookup. URL
+		// lookup leaks across profiles when both share an RPC URL.
+		const { service, local } = setupServiceWithStorage({ "https://shared.test": nodeInfoForChain(42) })
+		seedNetwork(local, makeNetwork(42, [{ id: "ep-shared", rpcUrl: "https://shared.test" }]))
+		await service.acquireBinding(42)
+
+		await expect(
+			service.withBinding(42, async () => {
+				throw { status: 503 }
+			}),
+		).rejects.toMatchObject({ status: 503 })
+
+		// Synchronous assert: _countFailure ran inline in withBinding's catch.
+		// No setTimeout flush needed (that was the old URL-async path).
+		expect(routeState(service, "net-42").failures.get("ep-shared")?.hard).toBe(1)
+	})
+
+	test("_scheduleRebindChain swallows rejections without failing the failover", async () => {
+		// Codex post-impl review §6: there was no test for the
+		// `.catch(logError)` arm of the fire-and-forget rebind. Verify a
+		// rejected rebindChain doesn't break the failover commit path or
+		// resurface as an unhandled rejection.
+		const { service, local } = setupServiceWithStorage({
+			"https://a.test": nodeInfoForChain(42),
+			"https://b.test": nodeInfoForChain(42),
+		})
+		seedNetwork(
+			local,
+			makeNetwork(42, [
+				{ id: "ep-a", rpcUrl: "https://a.test" },
+				{ id: "ep-b", rpcUrl: "https://b.test" },
+			]),
+		)
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;((service as any).pxeServiceClient as { rebindChain: () => Promise<void> }).rebindChain = vi
+			.fn()
+			.mockRejectedValue(new Error("offscreen down"))
+
+		await service.acquireBinding(42)
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(service as any)._countFailure("net-42", "ep-a", { status: 503 })
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+		;(service as any)._countFailure("net-42", "ep-a", { status: 503 })
+
+		// Failover completes despite the rebindChain rejection — and the
+		// rejection is swallowed (we don't see an unhandled rejection here
+		// because `_scheduleRebindChain` attaches a `.catch(logError)`).
+		const after = await service.acquireBinding(42)
+		expect(after.endpoint.id).toBe("ep-b")
+		// Flush microtasks so the catch handler runs before assertions
+		// complete (otherwise vitest's unhandled-rejection guard could fire).
+		await new Promise((r) => setTimeout(r, 0))
 	})
 })

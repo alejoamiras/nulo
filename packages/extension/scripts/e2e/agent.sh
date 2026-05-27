@@ -29,8 +29,12 @@ AZTEC_NODE_URL=$(jq -r .aztecUrl "$PORTS_JSON")
 PLAYGROUND_URL=$(jq -r .playgroundUrl "$PORTS_JSON")
 FAUCET_URL=$(jq -r .faucetUrl "$PORTS_JSON")
 
-echo "[e2e:agent] building wallet with VITE_LOCAL_NETWORK_RPC_URL=$AZTEC_NODE_URL"
-VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" bun run build:chrome
+echo "[e2e:agent] building wallet with VITE_LOCAL_NETWORK_RPC_URL=$AZTEC_NODE_URL + VITE_E2E_DEBUG=1"
+# VITE_E2E_DEBUG=1 stamps the popup-side `window.__nuloE2E` debug
+# surface into the bundle so e2e tests can drive `managers.*` from
+# page.evaluate. Production builds (made without this env) don't have
+# the symbol; the bundle-grep guard below catches it if it leaks.
+VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" VITE_E2E_DEBUG=1 bun run build:chrome
 
 # Bundle assertion — if the URL didn't actually land in dist, abort before the
 # tests waste cycles. This catches the silent failure mode where vi.stubEnv-

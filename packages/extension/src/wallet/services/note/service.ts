@@ -4,7 +4,7 @@ import { canonicalSlotHex, type NoteFieldType, type NoteSchema } from "@nulo/azt
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
-import { NetworkService, networkInfoFrom, type Network } from "@/wallet/services/network/service"
+import { NetworkService, type Network } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { type Methods, type Note, NOTE_SERVICE_NAME } from "./spec"
@@ -126,7 +126,7 @@ export class NoteService extends Service<Methods> implements ServiceSpec<Methods
 
 	private async fetchKnownContractsNotes(network: Network, account: string): Promise<NoteDao[]> {
 		const res = []
-		const knownContracts = await this.pxeService.getContracts(networkInfoFrom(network))
+		const knownContracts = await this.pxeService.getContracts(this.networkService.networkInfoLive(network))
 		for (const contract of knownContracts.filter((x) => x.toBigInt() > 6n)) {
 			res.push(...(await this.fetchContractNotes(network, account, contract)))
 		}
@@ -134,7 +134,7 @@ export class NoteService extends Service<Methods> implements ServiceSpec<Methods
 	}
 
 	private async fetchContractNotes(network: Network, account: string, contract: AztecAddress): Promise<NoteDao[]> {
-		return await this.pxeService.getNotes(networkInfoFrom(network), {
+		return await this.pxeService.getNotes(this.networkService.networkInfoLive(network), {
 			contractAddress: contract,
 			status: NoteStatus.ACTIVE,
 			scopes: [AztecAddress.fromString(account)],
@@ -186,7 +186,7 @@ export class NoteService extends Service<Methods> implements ServiceSpec<Methods
 
 	private async fetchClassId(network: Network, address: AztecAddress): Promise<string | undefined> {
 		try {
-			const instance = await this.pxeService.getContractInstance(networkInfoFrom(network), address)
+			const instance = await this.pxeService.getContractInstance(this.networkService.networkInfoLive(network), address)
 			return instance?.currentContractClassId.toString()
 		} catch (error) {
 			this.logWarn("Failed to load contract instance for note schema lookup", address.toString(), getErrorMessage(error))

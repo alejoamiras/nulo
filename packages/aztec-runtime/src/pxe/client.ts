@@ -190,4 +190,11 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 	public async clearChainState(profileId: string, chainId: number): Promise<void> {
 		await this.request("clearChainState", profileId, chainId)
 	}
+
+	/** Dispose the offscreen runtime for `(profileId, chainId)` WITHOUT
+	 *  wiping IndexedDB. Called by the SW-side failover engine after an
+	 *  active-endpoint URL change. */
+	public async rebindChain(profileId: string, chainId: number): Promise<void> {
+		await this.request("rebindChain", profileId, chainId)
+	}
 }

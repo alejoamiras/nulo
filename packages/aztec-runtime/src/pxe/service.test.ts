@@ -167,3 +167,48 @@ describe("PxeService.getContractInstance cascade", () => {
 		expect(f.nodeCalls).toBe(0)
 	})
 })
+
+describe("PxeService.rebindChain (multi-rpc-failover Phase 2)", () => {
+	beforeEach(() => {
+		vi.stubGlobal("chrome", {
+			runtime: { onMessage: { addListener: () => {}, removeListener: () => {} }, sendMessage: () => Promise.resolve() },
+		})
+	})
+	afterEach(() => vi.unstubAllGlobals())
+
+	test("disposes the cached runtime — next read re-creates via factory", async () => {
+		const pxeInstance = { address: { toString: () => "pxe-instance" } } as unknown as ContractInstanceWithAddress
+		const f = makeFactory({ pxeInstance, nodeBehavior: "returns-undefined" })
+		const service = makeService(f.factory)
+		;(service as unknown as { artifacts: { ensureKnown: () => Promise<void>; getKnownInstance: (a: string) => undefined } }).artifacts =
+			{ ensureKnown: async () => {}, getKnownInstance: () => undefined }
+
+		// First call lazy-inits the runtime.
+		await service.getContractInstance(network, address)
+		expect(f.pxeCalls).toBe(1)
+
+		// rebindChain disposes the runtime; next call must re-init.
+		await service.rebindChain(network.profileId, network.chainId)
+		await service.getContractInstance(network, address)
+		expect(f.pxeCalls).toBe(2)
+	})
+
+	test("does NOT delete IndexedDB (distinct from clearChainState)", async () => {
+		// We assert this indirectly: rebindChain never invokes indexedDB at
+		// all. Stub `indexedDB.deleteDatabase` globally so we can fail loudly
+		// if it gets called.
+		const deleteDbSpy = vi.fn()
+		// biome-ignore lint/suspicious/noExplicitAny: test-only global stub
+		vi.stubGlobal("indexedDB", { deleteDatabase: deleteDbSpy } as any)
+
+		const f = makeFactory({ nodeBehavior: "returns-undefined" })
+		const service = makeService(f.factory)
+		;(service as unknown as { artifacts: { ensureKnown: () => Promise<void>; getKnownInstance: (a: string) => undefined } }).artifacts =
+			{ ensureKnown: async () => {}, getKnownInstance: () => undefined }
+
+		await service.getContractInstance(network, address)
+		await service.rebindChain(network.profileId, network.chainId)
+
+		expect(deleteDbSpy).not.toHaveBeenCalled()
+	})
+})

@@ -86,16 +86,21 @@ describe("ChainRuntimeRegistry", () => {
 		expect(creations.length).toBe(2)
 	})
 
-	test("rebinding rpcUrl disposes the old runtime and creates a new one", async () => {
+	test("getOrInit ignores rpcUrl mismatch — returns cached runtime regardless of caller's URL", async () => {
+		// Removed the opportunistic URL-mismatch rebuild path because it
+		// ran under `chainGuard.read` and racy-disposed runtimes that
+		// concurrent readers were still using. Endpoint changes go
+		// exclusively through `PxeService.rebindChain` which acquires
+		// `chainGuard.write` and drains in-flight readers first. (codex
+		// post-impl review §1 blocker.)
 		const { factory, creations } = makeFactory()
 		const registry = new ChainRuntimeRegistry(factory)
 		const r1 = await registry.getOrInit(network("p1", 1, "https://a"))
 		const r2 = await registry.getOrInit(network("p1", 1, "https://b"))
-		expect(r1).not.toBe(r2)
+		expect(r1).toBe(r2)
 		expect(r1.rpcUrl).toBe("https://a")
-		expect(r2.rpcUrl).toBe("https://b")
-		expect(creations[0].stop).toHaveBeenCalledTimes(1)
-		expect(creations[1].stop).not.toHaveBeenCalled()
+		expect(creations.length).toBe(1)
+		expect(creations[0].stop).not.toHaveBeenCalled()
 	})
 
 	test("peek does not initialize; returns undefined before getOrInit", () => {

@@ -26,6 +26,15 @@ export function useProfileBootstrap() {
 
 		managers.network?.disconnect()
 		managers.network = new NetworkServiceClient()
+		// Failover / snapback / degraded events drive the header's dot color.
+		// `syncNetworkStatus` fetches the live `(NodeStatus, EndpointHealth)`
+		// pair and derives "active" / "degraded" / "inactive" accordingly.
+		managers.network.onPrimaryEndpointChanged.add(async () => {
+			await appStore.syncNetworkStatus()
+		})
+		managers.network.onPrimaryEndpointDegraded.add(async () => {
+			await appStore.syncNetworkStatus()
+		})
 
 		appStore.networks = await managers.network.getOrInitNetworks()
 

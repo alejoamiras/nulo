@@ -5,7 +5,7 @@ import { Service } from "@nulo/extension-messaging/background"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { NetworkService } from "@/wallet/services/network/service"
 import type { Network } from "@/wallet/services/network/spec"
-import { networkInfoFrom, NodeStatus } from "@/wallet/services/network/spec"
+import { NodeStatus } from "@/wallet/services/network/spec"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import {
@@ -41,7 +41,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 		await this.ensureInitialized()
 		const network = await this.networkService.getNetwork(networkId)
 		try {
-			const accounts = await this.pxeService.getRegisteredAccounts(networkInfoFrom(network))
+			const accounts = await this.pxeService.getRegisteredAccounts(this.networkService.networkInfoLive(network))
 			return accounts.map((x) => x.address.toString())
 		} catch (error) {
 			this.logError("Failed to fetch registered accounts", getErrorMessage(error))
@@ -53,7 +53,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 		await this.ensureInitialized()
 		const network = await this.networkService.getNetwork(networkId)
 		try {
-			const senders = await this.pxeService.getSenders(networkInfoFrom(network))
+			const senders = await this.pxeService.getSenders(this.networkService.networkInfoLive(network))
 			return senders.map((x) => x.toString())
 		} catch (error) {
 			this.logError("Failed to fetch registered senders", getErrorMessage(error))
@@ -97,7 +97,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 	public async addSender(networkId: string, address: string): Promise<string> {
 		await this.ensureInitialized()
 		const network = await this.networkService.getNetwork(networkId)
-		const info = networkInfoFrom(network)
+		const info = this.networkService.networkInfoLive(network)
 		try {
 			const sender = (await this.pxeService.registerSender(info, AztecAddress.fromString(address))).toString()
 			this.emit("onSenderAdded", sender)
@@ -112,7 +112,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 		await this.ensureInitialized()
 		const network = await this.networkService.getNetwork(networkId)
 		try {
-			await this.pxeService.removeSender(networkInfoFrom(network), AztecAddress.fromString(address))
+			await this.pxeService.removeSender(this.networkService.networkInfoLive(network), AztecAddress.fromString(address))
 			this.emit("onSenderDeleted", address)
 			return address
 		} catch (error) {
@@ -125,7 +125,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 		await this.ensureInitialized()
 		const network = await this.networkService.getNetwork(networkId)
 		try {
-			const contracts = await this.pxeService.getContracts(networkInfoFrom(network))
+			const contracts = await this.pxeService.getContracts(this.networkService.networkInfoLive(network))
 			return contracts.map((x) => x.toString())
 		} catch (error) {
 			this.logError("Failed to fetch registered contracts", getErrorMessage(error))
@@ -152,7 +152,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 				const senders = await this.getSenders(n.id)
 				const contracts = await this.getContracts(n.id)
 				const contractsFull: BackupContract[] = []
-				const nInfo = networkInfoFrom(n)
+				const nInfo = this.networkService.networkInfoLive(n)
 				for (const c of contracts) {
 					const instance = await this.pxeService.getContractInstance(nInfo, AztecAddress.fromString(c))
 					if (!instance) continue
@@ -193,7 +193,10 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 				try {
 					if (!network) throw new Error("Network not found")
 
-					await this.pxeService.registerSender(networkInfoFrom(network), AztecAddress.fromString(sender.address))
+					await this.pxeService.registerSender(
+						this.networkService.networkInfoLive(network),
+						AztecAddress.fromString(sender.address),
+					)
 					senders.push(sender)
 				} catch (err) {
 					senders.push({
@@ -214,7 +217,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 						continue
 					}
 
-					await this.pxeService.registerContract(networkInfoFrom(network), {
+					await this.pxeService.registerContract(this.networkService.networkInfoLive(network), {
 						instance: contract.instance,
 						artifact: contract.artifact,
 					})

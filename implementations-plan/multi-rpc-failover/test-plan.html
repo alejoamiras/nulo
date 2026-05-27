@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Multi-RPC failover — manual test plan</title>
+<style>
+:root {
+  --bg: #fafaf8; --fg: #1b1a17; --muted: #6b6660;
+  --accent: #c97a2e; --rule: #d8d5cf; --code-bg: #f0eee9;
+  --green: #2f7a3a; --amber: #c97a2e; --red: #b2402e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1a17; --fg: #ece8df; --muted: #a39d92;
+    --accent: #e8a25a; --rule: #38342c; --code-bg: #2a2722;
+    --green: #6fbf7d; --amber: #e8a25a; --red: #e87663;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: ui-serif, Georgia, serif; font-size: 17px; line-height: 1.55;
+  padding: 4rem 1.5rem 6rem;
+}
+main { max-width: 40rem; margin: 0 auto; }
+h1 { font-size: 1.7rem; font-weight: 700; margin: 0 0 0.5rem; line-height: 1.2; }
+.subtitle { color: var(--muted); font-style: italic; font-size: 1rem; margin: 0 0 3rem; }
+h2 {
+  font-size: 1.25rem; font-weight: 700; margin: 3rem 0 1rem;
+  padding-top: 1.25rem; border-top: 1px solid var(--rule);
+}
+h3 { font-size: 1rem; font-weight: 700; margin: 2rem 0 0.5rem; }
+p { margin: 0.8rem 0; }
+ul, ol { padding-left: 1.4rem; margin: 0.6rem 0 1rem; }
+li { margin: 0.35rem 0; }
+code, kbd {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em;
+  background: var(--code-bg); padding: 0.08em 0.35em;
+}
+pre {
+  font-family: ui-monospace, monospace; font-size: 0.85em; line-height: 1.4;
+  background: var(--code-bg); padding: 1rem 1.25rem; white-space: pre;
+  overflow-x: auto; margin: 1rem 0;
+}
+.tier {
+  margin: 1.5rem 0; padding: 1.25rem 1.4rem;
+  border-left: 3px solid var(--accent); background: var(--code-bg);
+}
+.tier h2 {
+  margin: 0 0 0.5rem; padding: 0; border: 0; font-size: 1.1rem;
+}
+.tier .meta {
+  color: var(--muted); font-style: italic; font-size: 0.9rem; margin: 0 0 1rem;
+}
+.expect {
+  margin: 0.6rem 0; padding: 0.6rem 0.9rem;
+  background: var(--bg); border: 1px solid var(--rule);
+  font-size: 0.95em;
+}
+.expect strong { color: var(--accent); }
+.dot {
+  display: inline-block; width: 0.65em; height: 0.65em;
+  vertical-align: middle; margin-right: 0.3em; border-radius: 0;
+}
+.dot-green { background: var(--green); }
+.dot-amber { background: var(--amber); }
+.dot-red { background: var(--red); }
+.caveat {
+  margin: 2rem 0; padding: 1rem 1.25rem;
+  border: 1px dashed var(--rule); color: var(--muted); font-size: 0.95em;
+}
+.caveat strong { color: var(--fg); }
+strong { font-weight: 700; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Multi-RPC failover — manual test plan</h1>
+<p class="subtitle">Three tiers. Tier 1 proves nothing broke. Tier 2 exercises the engine. Tier 3 validates the security invariants. Skip down freely.</p>
+
+<p>Open two DevTools windows alongside the popup: <strong>popup DevTools</strong> (right-click the extension icon → Inspect popup) and the <strong>service worker DevTools</strong> (<code>chrome://extensions</code> → find Nulo → "Inspect views: service worker"). Most observability comes through the SW console.</p>
+
+<section class="tier">
+<h2>Tier 1 — Schema-collapse smoke</h2>
+<p class="meta">≈ 3 min. Verifies the Phase 1B schema collapse (drop <code>primaryEndpointId</code>; <code>endpoints[0]</code> is the preferred) didn't break the visible surface.</p>
+
+<ol>
+  <li>Popup opens. Header dot is <span class="dot dot-green"></span><strong>green</strong> (Testnet active, healthy).</li>
+  <li>Settings → Networks → Testnet. Endpoint list renders. The preferred endpoint (<code>endpoints[0]</code>) is the row with a <strong>filled check-circle icon</strong>; the others show an empty circle. No text label, just the icon.</li>
+  <li>Click "Add endpoint" → URL <code>https://rpc.testnet.aztec-labs.com</code> (same as preferred) → expect rejection with <code>DUPLICATE_ENDPOINT</code>. Cancel.</li>
+  <li><strong>New behavior:</strong> the delete button on the preferred endpoint (<code>endpoints[0]</code>) is now <strong>enabled</strong>. Used to be disabled with "can't delete primary". Do not actually click.</li>
+</ol>
+
+<div class="expect"><strong>Regression signal:</strong> any of the above crashes, renders blank, or throws <code>PRIMARY_ENDPOINT</code> on delete.</div>
+</section>
+
+<section class="tier">
+<h2>Tier 2 — Failover engine</h2>
+<p class="meta">≈ 15 min. Needs at least two endpoints on a chain.</p>
+
+<h3>Setup</h3>
+<ol>
+  <li>Settings → Networks → Testnet → Add endpoint. Label <code>Backup</code>; URL a second known-good Aztec testnet RPC if available. If not, run the single-endpoint variant below.</li>
+  <li>Confirm <code>rpc.testnet.aztec-labs.com</code> sits at position 0, <code>Backup</code> at position 1.</li>
+</ol>
+
+<h3>Force failover via DevTools network override</h3>
+<ol>
+  <li>Popup DevTools → Network panel → right-click <code>rpc.testnet.aztec-labs.com</code> → "Block request URL".</li>
+  <li>In the popup, do something that hits the node (switch accounts, pull-to-refresh on Activity).</li>
+</ol>
+
+<div class="expect">
+<strong>Expected:</strong> header dot turns <span class="dot dot-amber"></span><strong>amber</strong> within a few seconds. SW console logs:
+<pre>onPrimaryEndpointChanged { source: "failover", fromEndpointId, toEndpointId }</pre>
+</div>
+
+<ol start="3">
+  <li>Unblock the URL in DevTools. Wait ≈ 5 min (the cooldown). Trigger another node action.</li>
+</ol>
+
+<div class="expect">
+<strong>Expected:</strong> dot returns <span class="dot dot-green"></span><strong>green</strong>. SW logs <code>onPrimaryEndpointChanged { source: "snapback" }</code>.
+</div>
+
+<h3>Single-endpoint forced-break variant</h3>
+<p>If you can't get a second testnet RPC:</p>
+<ol>
+  <li>Block the only endpoint via DevTools.</li>
+  <li>Trigger any node action.</li>
+</ol>
+
+<div class="expect">
+<strong>Expected:</strong> dot turns <span class="dot dot-red"></span><strong>red</strong> (Inactive); SW logs <code>onPrimaryEndpointDegraded { exhausted: true }</code>. Unblock + trigger again → recovers to green.
+</div>
+
+<h3>Manual promote with snapback</h3>
+<ol>
+  <li>With two endpoints configured, promote the backup so it becomes <code>endpoints[0]</code>.</li>
+</ol>
+
+<div class="expect">
+<strong>Expected:</strong> dot stays green (probe-before-activate passes). Live route flips to backup. SW logs <code>onPrimaryEndpointChanged { source: "manual" }</code>. Promote the original back — same expectations.
+</div>
+</section>
+
+<section class="tier">
+<h2>Tier 3 — Security invariants</h2>
+<p class="meta">≈ 10 min. Optional but worth doing if you have a second local sandbox. These tests prove the codex blockers stay closed.</p>
+
+<h3>Chain-mismatched endpoint promotion (CRITICAL)</h3>
+<p>This validates the round-2 rework: a never-traffic'd network with a quarantined endpoint must <em>not</em> later activate that endpoint on chain switch.</p>
+
+<ol>
+  <li>Get a URL responding to <code>getNodeInfo</code> with a <em>different</em> chainId. Easiest: a separate Aztec sandbox with a fresh genesis.</li>
+  <li>Try <code>addEndpoint</code> with that URL → expect immediate rejection with <code>ENDPOINT_CHAIN_MISMATCH</code> (this is <em>add</em>-time protection; already shipped).</li>
+  <li><strong>The interesting case</strong> — what if a known-good endpoint <em>later</em> turns mismatched. Simulate: in SW DevTools console, mutate an endpoint's URL by reaching directly into <code>chrome.storage.local</code> bypassing the probe. Switch away from the network, then back. Promote the now-mismatched endpoint.</li>
+</ol>
+
+<div class="expect">
+<strong>Expected:</strong> <code>promoteEndpoint</code> throws <code>ENDPOINT_CHAIN_MISMATCH</code>. The reorder commits in the persisted list (user preference is durable). The live route stays on the previously-preferred endpoint. The mismatched endpoint enters the <code>invalidChain</code> quarantine.
+</div>
+
+<h3>Concurrent promote interleave</h3>
+<p>Harder to trigger by hand; covered by unit tests. If you want to eyeball: open SW DevTools, fire two <code>promoteEndpoint</code> calls in quick succession via the client. The later-fired one wins (phase 3 re-reads <code>endpoints[0]</code> and drops stale activations).</p>
+</section>
+
+<h2>What to look for in the SW console</h2>
+<p>The network service isn't globalThis-exposed, so the easiest observability is event logs. Grep the SW console for:</p>
+
+<ul>
+  <li><code>onPrimaryEndpointChanged</code> — every route flip (manual / failover / snapback).</li>
+  <li><code>onPrimaryEndpointDegraded</code> — exhaustion signal.</li>
+  <li><code>Failed to fetch node info</code> — probe errors.</li>
+  <li><code>PxeServiceClient.rebindChain</code> — offscreen PXE rebind issues.</li>
+</ul>
+
+<div class="caveat">
+<strong>What's NOT yet wired (Phase 4 follow-up):</strong>
+<ul>
+  <li>Toast on failover / snapback.</li>
+  <li>Settings page "Preferred" vs "Active" split markers when they differ.</li>
+  <li>Persistent "All endpoints unreachable" banner + "Retry preferred" button on exhaustion.</li>
+</ul>
+The only new user-visible UI in this PR is the <span class="dot dot-amber"></span><strong>amber Degraded dot</strong> in the header. Everything else is engine-side behavior observable through the SW console.
+</div>
+
+</main>
+</body>
+</html>

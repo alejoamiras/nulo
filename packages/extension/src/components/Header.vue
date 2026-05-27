@@ -379,6 +379,9 @@ onBeforeUnmount(() => {
 	&.active {
 		background: var(--green);
 	}
+	&.degraded {
+		background: var(--amber, #f59e0b);
+	}
 	&.inactive {
 		background: var(--red);
 	}

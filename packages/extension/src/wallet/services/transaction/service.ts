@@ -1,11 +1,15 @@
-import { TxHash, TxStatus as AztecTxStatus, TxExecutionResult as AztecTxExecutionResult } from "@aztec/stdlib/tx"
+import {
+	TxHash,
+	TxStatus as AztecTxStatus,
+	TxExecutionResult as AztecTxExecutionResult,
+	type TxReceipt as AztecTxReceipt,
+} from "@aztec/stdlib/tx"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { AccountService, type Account } from "@/wallet/services/account/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService } from "@/wallet/services/profile/service"
-import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { StepContent, type WrappedTask } from "@/wallet/services/task/service"
 import { EntityStorage } from "@/wallet/storage"
 import { sleep } from "@/wallet/utils"
@@ -39,7 +43,6 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	private profileService: ProfileService = null!
 	private accountService: AccountService = null!
 	private networkService: NetworkService = null!
-	private pxeService: PxeServiceClient = null!
 
 	public constructor(logger: ILogger) {
 		super(TRANSACTION_SERVICE_NAME, logger)
@@ -49,7 +52,6 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		this.profileService = services.get(ProfileService.name)
 		this.accountService = services.get(AccountService.name)
 		this.networkService = services.get(NetworkService.name)
-		this.pxeService = new PxeServiceClient(this.logger)
 
 		this.accountService.onAccountDeleted.add(this.onAccountDeleted)
 		this.networkService.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
@@ -121,16 +123,20 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			throw new Error("duplicated hash")
 		}
 		const now = Date.now()
-		// Capture the primary endpoint URL at submission time so receipt
+		// Capture the preferred endpoint URL at submission time so receipt
 		// polling stays bound to it across primary-endpoint swaps. Lookup
 		// is best-effort — if the network record can't be resolved (e.g.
 		// just deleted), the field stays undefined and polling falls back
-		// to the chain's current primary at read time.
+		// to the chain's current preferred at read time. Phase 3 of the
+		// multi-rpc-failover work will switch this to take the captured
+		// URL/id from the caller's binding (codex final-pass §7 item 1) —
+		// the current "look up at submit time" path still races failover.
+		// TODO(multi-rpc-failover Phase 3): API change to pass URL+id in.
 		let submittedEndpointUrl: string | undefined
 		try {
 			const networks = await this.networkService.getNetworks(chainId)
 			const network = networks[0]
-			submittedEndpointUrl = network?.endpoints.find((e) => e.id === network.primaryEndpointId)?.rpcUrl
+			submittedEndpointUrl = network?.endpoints[0]?.rpcUrl
 		} catch {
 			submittedEndpointUrl = undefined
 		}
@@ -198,25 +204,25 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		// Pin polling to the endpoint that submitted this tx: staying on
 		// the originating endpoint avoids transient receipt-not-yet-indexed
 		// issues when the user swaps the network's primary endpoint mid-
-		// pending. Falls back to the current primary if the URL is no
-		// longer a known endpoint (deleted) — handled inside
-		// `getNodeForUrl`.
-		const node = tx.submittedEndpointUrl
-			? await this.networkService.getNodeForUrl(tx.submittedEndpointUrl, tx.chainId)
-			: await this.networkService.getNode(tx.chainId)
-		if (!node) {
-			this.logError("Unknown network")
-			return
-		}
-
-		let receipt: Awaited<ReturnType<typeof node.getTxReceipt>>
-		try {
-			receipt = await node.getTxReceipt(TxHash.fromString(tx.hash))
-		} catch (err) {
-			if (tx.submittedEndpointUrl) {
-				this.networkService.reportEndpointFailure(tx.submittedEndpointUrl)
+		// pending. Falls back to the current binding if the URL is no
+		// longer a known endpoint (deleted).
+		let receipt: AztecTxReceipt
+		if (tx.submittedEndpointUrl) {
+			const node = await this.networkService.getNodeForUrl(tx.submittedEndpointUrl, tx.chainId)
+			if (!node) {
+				this.logError("Unknown network")
+				return
 			}
-			throw err
+			try {
+				receipt = await node.getTxReceipt(TxHash.fromString(tx.hash))
+			} catch (err) {
+				this.networkService.reportEndpointFailure(tx.submittedEndpointUrl, err)
+				throw err
+			}
+		} else {
+			// No submittedEndpointUrl recorded — route through the live binding
+			// so classifier-driven failover engages on the active endpoint.
+			receipt = await this.networkService.withBinding(tx.chainId, async (b) => b.node.getTxReceipt(TxHash.fromString(tx.hash)))
 		}
 		const status = this.getTxStatus(receipt.status)
 		const executionResult = this.getTxExecutionResult(receipt.executionResult)

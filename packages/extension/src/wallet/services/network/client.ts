@@ -4,6 +4,7 @@ import { validateParams, validateResult } from "@nulo/extension-messaging/zod"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import {
+	type EndpointHealthSnapshot,
 	type Events,
 	type Methods,
 	type Network,
@@ -11,6 +12,7 @@ import {
 	NETWORK_SERVICE_NAME,
 	NetworkMethodSchemas,
 	type NodeStatus,
+	type PrimaryEndpointChangeSource,
 } from "./spec"
 
 export * from "./spec"
@@ -25,7 +27,13 @@ export class NetworkServiceClient extends ServiceClient<Methods, Events> impleme
 	public readonly onNetworkUpdated = new EventHandler<Network>()
 	public readonly onNetworkDeleted = new EventHandler<Network>()
 	public readonly onActiveNetworkChanged = new EventHandler<Network>()
-	public readonly onPrimaryEndpointChanged = new EventHandler<{ networkId: string; endpointId: string }>()
+	public readonly onPrimaryEndpointChanged = new EventHandler<{
+		networkId: string
+		fromEndpointId: string | undefined
+		toEndpointId: string
+		source: PrimaryEndpointChangeSource
+	}>()
+	public readonly onPrimaryEndpointDegraded = new EventHandler<{ networkId: string; exhausted: boolean }>()
 	public readonly onChainPurged = new EventHandler<{ profileId: string; chainId: number }>()
 
 	public constructor(name?: string) {
@@ -103,10 +111,22 @@ export class NetworkServiceClient extends ServiceClient<Methods, Events> impleme
 		return validateResult(NetworkMethodSchemas.deleteEndpoint.result, result, "deleteEndpoint")
 	}
 
-	public async setPrimaryEndpoint(networkId: string, endpointId: string): Promise<Network> {
-		validateParams(NetworkMethodSchemas.setPrimaryEndpoint.params, [networkId, endpointId], "setPrimaryEndpoint")
-		const result = await this.request("setPrimaryEndpoint", networkId, endpointId)
-		return validateResult(NetworkMethodSchemas.setPrimaryEndpoint.result, result, "setPrimaryEndpoint")
+	public async promoteEndpoint(networkId: string, endpointId: string): Promise<Network> {
+		validateParams(NetworkMethodSchemas.promoteEndpoint.params, [networkId, endpointId], "promoteEndpoint")
+		const result = await this.request("promoteEndpoint", networkId, endpointId)
+		return validateResult(NetworkMethodSchemas.promoteEndpoint.result, result, "promoteEndpoint")
+	}
+
+	public async clearEndpointCooldowns(networkId: string): Promise<Network> {
+		validateParams(NetworkMethodSchemas.clearEndpointCooldowns.params, [networkId], "clearEndpointCooldowns")
+		const result = await this.request("clearEndpointCooldowns", networkId)
+		return validateResult(NetworkMethodSchemas.clearEndpointCooldowns.result, result, "clearEndpointCooldowns")
+	}
+
+	public async getEndpointHealth(networkId: string): Promise<EndpointHealthSnapshot> {
+		validateParams(NetworkMethodSchemas.getEndpointHealth.params, [networkId], "getEndpointHealth")
+		const result = await this.request("getEndpointHealth", networkId)
+		return validateResult(NetworkMethodSchemas.getEndpointHealth.result, result, "getEndpointHealth")
 	}
 
 	public async getNodeStatus(networkId: string): Promise<NodeStatus> {

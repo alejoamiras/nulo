@@ -3,14 +3,11 @@ import { type InteractionWaitOptions, type SendReturn, extractOffchainOutput } f
 import { Fr } from "@aztec/foundation/curves/bn254"
 import {
 	type AbiDecoded,
-	type AbiType,
 	AbiTypeSchema,
 	type ContractArtifact,
 	ContractArtifactSchema,
 	encodeArguments,
-	type FunctionAbi,
 	FunctionSelector,
-	FunctionType,
 	FunctionCall,
 	decodeFromAbi,
 } from "@aztec/stdlib/abi"
@@ -25,7 +22,6 @@ import {
 } from "@aztec/stdlib/contract"
 import type { ChainInfo } from "@aztec/entrypoints/interfaces"
 import {
-	ExecutionPayload,
 	type TxExecutionRequest,
 	type TxProfileResult,
 	type TxSimulationResult,
@@ -33,7 +29,7 @@ import {
 	collectOffchainEffects,
 } from "@aztec/stdlib/tx"
 import z from "zod"
-import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
+import { NetworkService } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { AccountService } from "@/wallet/services/account/service"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
@@ -66,7 +62,6 @@ import {
 	type Methods,
 	type Operation,
 	type RegisterSenderOperation,
-	type RegisterTokenOperation,
 	type RegisterContractOperation,
 	type SendTransactionOperation,
 	type SimulateTransactionOperation,
@@ -446,7 +441,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				: undefined
 
 			let txRequest: TxExecutionRequest
-			let node: Awaited<ReturnType<NetworkService["getNode"]>>
 			let pxe: Awaited<ReturnType<PxeServiceClient["getPXE"]>>
 			let account: Awaited<ReturnType<AccountService["getAccountContract"]>>
 			let network: Awaited<ReturnType<NetworkService["getNetwork"]>>
@@ -477,8 +471,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				activityFnName = reused.fnName
 				activityArgs = reused.args
 				network = await this.networkService.getNetwork(networkId)
-				node = await this.networkService.getNode(network.chainId)
-				pxe = this.pxeService.getPXE(networkInfoFrom(network))
+				pxe = this.pxeService.getPXE(this.networkService.networkInfoLive(network))
 				const profile = await this.profileService.getActiveProfile()
 				if (!profile) throw new Error("Wallet locked")
 				account = await this.accountService.getAccountContract(profile.id, network.chainId, accountAddress)
@@ -498,7 +491,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 				const built = await this.buildAndEstimateTxRequest(op, op.feeSettings, transferTask)
 				txRequest = built[0]
-				node = built[1]
 				pxe = built[2]
 				account = built[3]
 				network = built[4]
@@ -516,7 +508,12 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const tx = await provedTx.toTx()
 			await markJournal({ stage: "submitting" })
 			checkCancelled()
-			await this.coordinator.sendTxTask(node, tx, transferTask)
+			// Re-acquire via withBinding so a node.sendTx failure routes
+			// through the classifier and the active endpoint takes a hit.
+			// If failover happened between build and send, the live node
+			// reflects the new endpoint; the tx itself is chain-bound by
+			// its embedded chainId so it's portable across endpoints.
+			await this.networkService.withBinding(network.chainId, async (b) => this.coordinator.sendTxTask(b.node, tx, transferTask))
 
 			const txHash = tx.getTxHash().toString()
 			// Activity-feed shape is always transfer-only (no FPC fee payload).
@@ -623,15 +620,19 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			return undefined
 		}
 
-		// Endpoint identity (codex audit gap — primary can change at runtime)
+		// Endpoint identity (codex audit gap — preferred can change at runtime).
+		// After the multi-rpc-failover schema collapse, `endpoints[0]` IS the
+		// preferred. The cached entry's `primaryEndpointId` field is an
+		// internal snapshot — keep the name for diff minimality; Phase 3 of
+		// failover will switch this whole path to binding-derived identity.
 		const network = await this.networkService.getNetwork(inputs.networkId)
-		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
-		if (!primary) {
-			this.logDebug(`tryConsumeTransferEstimate ${estimateId}: no primary endpoint`)
+		const preferred = network.endpoints[0]
+		if (!preferred) {
+			this.logDebug(`tryConsumeTransferEstimate ${estimateId}: no preferred endpoint`)
 			return undefined
 		}
-		if (primary.id !== entry.primaryEndpointId || primary.rpcUrl !== entry.primaryEndpointUrl) {
-			this.logDebug(`tryConsumeTransferEstimate ${estimateId}: primary endpoint changed`)
+		if (preferred.id !== entry.primaryEndpointId || preferred.rpcUrl !== entry.primaryEndpointUrl) {
+			this.logDebug(`tryConsumeTransferEstimate ${estimateId}: preferred endpoint changed`)
 			return undefined
 		}
 
@@ -640,9 +641,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// `liveMin * multiplier` — that's what a fresh build would have
 		// finalized. If the chain min hasn't drifted, they match.
 		// (codex audit SHOULD-FIX #3)
-		const node = await this.networkService.getNode(network.chainId)
 		try {
-			const currentMin = await node.getCurrentMinFees()
+			const currentMin = await this.networkService.withBinding(network.chainId, async (b) => b.node.getCurrentMinFees())
 			const multiplier = inputs.feeSettings.priorityLevel
 				? PRIORITY_MULTIPLIERS[inputs.feeSettings.priorityLevel]
 				: DEFAULT_FEE_MULTIPLIER
@@ -714,8 +714,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		let estimateId: string | undefined
 		if (reuseEligible) {
 			try {
-				const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
-				if (primary) {
+				const preferred = network.endpoints[0]
+				if (preferred) {
 					// Fingerprint the EXACT fee the txRequest was built with —
 					// not a fresh `getCurrentMinFees()` after the fact (codex
 					// audit SHOULD-FIX #3). Both FJ and FPC strategies finalize
@@ -740,8 +740,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 						feeSettingsHash: fingerprintFeeSettings(op.feeSettings),
 						profileId: profile.id,
 						baseFeeFingerprint,
-						primaryEndpointId: primary.id,
-						primaryEndpointUrl: primary.rpcUrl,
+						primaryEndpointId: preferred.id,
+						primaryEndpointUrl: preferred.rpcUrl,
 						pendingHashes,
 						txRequest,
 						nonce,
@@ -997,14 +997,16 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 		const providedInstance = await ContractInstanceWithAddressSchema.optional().parseAsync(op.instance)
 		const instance =
-			providedInstance ?? (await this.pxeService.getContractInstance(networkInfoFrom(network), AztecAddress.fromString(op.address)))
+			providedInstance ??
+			(await this.pxeService.getContractInstance(this.networkService.networkInfoLive(network), AztecAddress.fromString(op.address)))
 		if (!instance) {
 			throw new Error("Contract instance not found")
 		}
 
 		const providedArtifact = await ContractArtifactSchema.optional().parseAsync(op.artifact)
 		const artifact =
-			providedArtifact ?? (await this.pxeService.getContractArtifact(networkInfoFrom(network), instance.currentContractClassId))
+			providedArtifact ??
+			(await this.pxeService.getContractArtifact(this.networkService.networkInfoLive(network), instance.currentContractClassId))
 		if (!artifact) {
 			throw new Error("Contract artifact not found")
 		}
@@ -1019,12 +1021,12 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw new Error("Contract address doesn't match instance address")
 		}
 
-		await this.pxeService.registerContract(networkInfoFrom(network), { instance, artifact })
+		await this.pxeService.registerContract(this.networkService.networkInfoLive(network), { instance, artifact })
 	}
 
 	private async executeRegisterSender(op: RegisterSenderOperation): Promise<void> {
 		const network = await this.networkService.getNetwork(op.networkId)
-		await this.pxeService.registerSender(networkInfoFrom(network), AztecAddress.fromString(op.address))
+		await this.pxeService.registerSender(this.networkService.networkInfoLive(network), AztecAddress.fromString(op.address))
 	}
 
 	private async executeRegisterToken(
@@ -1045,7 +1047,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// it's extension-internal data — but we still validate it identifies
 		// the same on-chain contract the dApp asked us to register, in case of
 		// popup-side bugs.
-		let ti
+		let ti: import("@/wallet/services/token/service").TokenInterface
 		if (
 			op.previewedInterface &&
 			op.previewedInterface.contract.toLowerCase() === op.address.toLowerCase() &&
@@ -1125,7 +1127,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			await this.markJournal(journalId, { stage: "simulating" })
 			checkCancelled()
 
-			const [txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod] = await this.buildAndEstimateTxRequest(
+			const [txRequest, , pxe, account, network, nonce, txCalls, feePaymentMethod] = await this.buildAndEstimateTxRequest(
 				op,
 				op.feeSettings,
 				parentTask,
@@ -1139,7 +1141,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const tx = await provedTx.toTx()
 			await this.markJournal(journalId, { stage: "submitting" })
 			checkCancelled()
-			await this.coordinator.sendTxTask(node, tx, parentTask)
+			await this.networkService.withBinding(network.chainId, async (b) => this.coordinator.sendTxTask(b.node, tx, parentTask))
 
 			const txHash = tx.getTxHash().toString()
 			await this.transactionService.addTransaction(
@@ -1230,7 +1232,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const network = await this.networkService.getNetwork(op.networkId)
 		const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
 
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
+		const pxe = this.pxeService.getPXE(this.networkService.networkInfoLive(network))
 
 		const registeredContracts = new Set<string>((await pxe.getContracts()).map((x) => x.toString()))
 		if (!registeredContracts.has(op.contract)) {
@@ -1381,7 +1383,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		op: AztecGetContractClassMetadataOperation,
 	): Promise<{ isContractClassPubliclyRegistered: boolean; isArtifactRegistered: boolean }> {
 		const network = await this.networkService.getNetwork(op.networkId)
-		const artifact = await this.pxeService.getContractArtifact(networkInfoFrom(network), op.id, { pxeOnly: true })
+		const artifact = await this.pxeService.getContractArtifact(this.networkService.networkInfoLive(network), op.id, { pxeOnly: true })
 		return {
 			isContractClassPubliclyRegistered: !!artifact,
 			isArtifactRegistered: !!artifact,
@@ -1400,14 +1402,20 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// Check PXE-local only: simulation requires both instance AND artifact
 		// registered in PXE. The full cascade (node/known/registry) finds on-chain
 		// data that PXE can't use for simulation.
-		const localInstance = await this.pxeService.getContractInstance(networkInfoFrom(network), op.address, { pxeOnly: true })
+		const localInstance = await this.pxeService.getContractInstance(this.networkService.networkInfoLive(network), op.address, {
+			pxeOnly: true,
+		})
 
 		let hasArtifact = false
 		if (localInstance) {
 			try {
-				const artifact = await this.pxeService.getContractArtifact(networkInfoFrom(network), localInstance.currentContractClassId, {
-					pxeOnly: true,
-				})
+				const artifact = await this.pxeService.getContractArtifact(
+					this.networkService.networkInfoLive(network),
+					localInstance.currentContractClassId,
+					{
+						pxeOnly: true,
+					},
+				)
 				hasArtifact = !!artifact
 			} catch {
 				hasArtifact = false
@@ -1422,7 +1430,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// the local known-bundle fallback still runs underneath.
 		let isPublished = isLocallyRegistered
 		if (!isPublished) {
-			const fullInstance = await this.pxeService.getContractInstance(networkInfoFrom(network), op.address, {
+			const fullInstance = await this.pxeService.getContractInstance(this.networkService.networkInfoLive(network), op.address, {
 				nodeBestEffort: true,
 			})
 			isPublished = !!fullInstance
@@ -1439,19 +1447,22 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 	private async executeAztecGetPrivateEvents(op: AztecGetPrivateEventsOperation): Promise<PackedPrivateEvent[]> {
 		const network = await this.networkService.getNetwork(op.networkId)
-		return this.pxeService.getPrivateEvents(networkInfoFrom(network), op.eventMetadata.eventSelector, op.eventFilter)
+		return this.pxeService.getPrivateEvents(
+			this.networkService.networkInfoLive(network),
+			op.eventMetadata.eventSelector,
+			op.eventFilter,
+		)
 	}
 
 	private async executeAztecGetChainInfo(op: AztecGetChainInfoOperation): Promise<ChainInfo> {
 		const network = await this.networkService.getNetwork(op.networkId)
-		const node = await this.networkService.getNode(network.chainId)
-		const { l1ChainId, rollupVersion } = await node.getNodeInfo()
+		const { l1ChainId, rollupVersion } = await this.networkService.withBinding(network.chainId, async (b) => b.node.getNodeInfo())
 		return { chainId: new Fr(l1ChainId), version: new Fr(rollupVersion) }
 	}
 
 	private async executeAztecRegisterSender(op: AztecRegisterSenderOperation): Promise<AztecAddress> {
 		const network = await this.networkService.getNetwork(op.networkId)
-		return this.pxeService.registerSender(networkInfoFrom(network), op.address)
+		return this.pxeService.registerSender(this.networkService.networkInfoLive(network), op.address)
 	}
 
 	private async executeAztecGetAddressBook(_op: AztecGetAddressBookOperation): Promise<Aliased<AztecAddress>[]> {
@@ -1484,7 +1495,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// etc.). When neither has it, fail loudly with a message telling
 		// the dApp to pass `artifact` — there is no remote registry fallback.
 		const classId = instance.currentContractClassId
-		const artifact = providedArtifact ?? (await this.pxeService.getContractArtifact(networkInfoFrom(network), classId))
+		const artifact =
+			providedArtifact ?? (await this.pxeService.getContractArtifact(this.networkService.networkInfoLive(network), classId))
 		if (!artifact) {
 			throw new Error(
 				`Contract artifact not found for class ${classId}. ` +
@@ -1498,10 +1510,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw new Error("Contract artifact doesn't match instance's current class id")
 		}
 
-		await this.pxeService.registerContract(networkInfoFrom(network), { instance, artifact })
+		await this.pxeService.registerContract(this.networkService.networkInfoLive(network), { instance, artifact })
 
 		if (op.secretKey) {
-			await this.pxeService.registerAccount(networkInfoFrom(network), op.secretKey, await computePartialAddress(instance))
+			await this.pxeService.registerAccount(
+				this.networkService.networkInfoLive(network),
+				op.secretKey,
+				await computePartialAddress(instance),
+			)
 		}
 
 		return instance
@@ -1537,49 +1553,50 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw new Error("Wallet locked")
 		}
 		const network = await this.networkService.getNetwork(op.networkId)
-		const node = await this.networkService.getNode(network.chainId)
 
-		if (remainingRaw.length > 0) {
-			const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
-			const needsInit = await account.requiresInitialization(node)
-			if (needsInit) {
-				// Mixed + first-tx → don't try to merge. The naive "normalize
-				// the standard arm's private-execution tree onto the inner
-				// entrypoint subtree" approach was audited (codex 019e1912
-				// + opus 4.7, 2026-05-12) and rejected because:
-				//   • publicInputs.gasUsed IS dApp-visible via
-				//     TxSimulationResult.gasUsed and would over-report
-				//     (ctor gas leaks into the projected result).
-				//   • firstNullifier of the multicall result IS the account
-				//     init nullifier; carrying it onto an entrypoint-rooted
-				//     tree is semantically wrong.
-				// See wallets-architecture-research/synthesis/
-				// implementation-plan-p1-p3.md "Tracked follow-ups" §4 for
-				// the trigger conditions to revisit.
+		return this.networkService.withBinding(network.chainId, async (b) => {
+			if (remainingRaw.length > 0) {
+				const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
+				const needsInit = await account.requiresInitialization(b.node)
+				if (needsInit) {
+					// Mixed + first-tx → don't try to merge. The naive "normalize
+					// the standard arm's private-execution tree onto the inner
+					// entrypoint subtree" approach was audited (codex 019e1912
+					// + opus 4.7, 2026-05-12) and rejected because:
+					//   • publicInputs.gasUsed IS dApp-visible via
+					//     TxSimulationResult.gasUsed and would over-report
+					//     (ctor gas leaks into the projected result).
+					//   • firstNullifier of the multicall result IS the account
+					//     init nullifier; carrying it onto an entrypoint-rooted
+					//     tree is semantically wrong.
+					// See wallets-architecture-research/synthesis/
+					// implementation-plan-p1-p3.md "Tracked follow-ups" §4 for
+					// the trigger conditions to revisit.
+					return this.executeAztecSimulateTxStandard(op)
+				}
+			}
+
+			const pxe = this.pxeService.getPXE(b.info)
+
+			const result = await runFastPath({
+				node: b.node,
+				pxe,
+				fromAddr: AztecAddress.fromString(op.accountAddress),
+				opts: op.opts,
+				optimizableCalls,
+				remainingRaw,
+				runStandardArm: async (rawCalls) =>
+					this.executeAztecSimulateTxStandard({ ...op, exec: { ...op.exec, calls: rawCalls as never } }),
+				// Naive — upstream uses it only for error contextualization;
+				// no functional impact on sim correctness.
+				getContractName: async () => undefined,
+				logError: (msg, err) => this.logError(msg, err),
+			})
+			if (result === null) {
 				return this.executeAztecSimulateTxStandard(op)
 			}
-		}
-
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
-
-		const result = await runFastPath({
-			node,
-			pxe,
-			fromAddr: AztecAddress.fromString(op.accountAddress),
-			opts: op.opts,
-			optimizableCalls,
-			remainingRaw,
-			runStandardArm: async (rawCalls) =>
-				this.executeAztecSimulateTxStandard({ ...op, exec: { ...op.exec, calls: rawCalls as never } }),
-			// Naive — upstream uses it only for error contextualization;
-			// no functional impact on sim correctness.
-			getContractName: async () => undefined,
-			logError: (msg, err) => this.logError(msg, err),
+			return result
 		})
-		if (result === null) {
-			return this.executeAztecSimulateTxStandard(op)
-		}
-		return result
 	}
 
 	/** Standard path: full PXE simulation through the account entrypoint
@@ -1594,14 +1611,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// `maxPriorityFeesPerGas`) so `nulo-account.ts`'s
 		// `completeFeeOptions` call uses the dApp-supplied values rather
 		// than silently defaulting from `node.getCurrentMinFees() * 1.5`.
-		const [txRequest, node, pxe, account] = await this.txBuilder.buildStandard(
+		const [txRequest, , pxe, account, network] = await this.txBuilder.buildStandard(
 			{ ...op, actions },
 			feePaymentMethod,
 			undefined,
 			op.opts.fee?.gasSettings,
 		)
 		suggestGasLimits(txRequest, fee)
-		await applyEmbeddedFpcGasCap(txRequest, fee, node)
+		await this.networkService.withBinding(network.chainId, async (b) => applyEmbeddedFpcGasCap(txRequest, fee, b.node))
 		const additionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
 		// Thread `stubAccountAddresses` so the simulated account contract
 		// is the stubbed pass-through one (override path at
@@ -1629,7 +1646,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 		const network = await this.networkService.getNetwork(op.networkId)
 		const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
+		const pxe = this.pxeService.getPXE(this.networkService.networkInfoLive(network))
 		await account.ensureRegistered(pxe)
 		return pxe.executeUtility(op.call, {
 			authwits: await z.array(AuthWitness.schema).optional().parseAsync(op.opts.authWitnesses),
@@ -1642,9 +1659,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw new Error("Invalid `opts.from`")
 		}
 		const [actions, feePaymentMethod, fee] = await this.planner.processAztecJsPayload(op.exec, op.opts)
-		const [txRequest, node, pxe] = await this.txBuilder.buildStandard({ ...op, actions }, feePaymentMethod)
+		const [txRequest, , pxe, , network] = await this.txBuilder.buildStandard({ ...op, actions }, feePaymentMethod)
 		suggestGasLimits(txRequest, fee)
-		await applyEmbeddedFpcGasCap(txRequest, fee, node)
+		await this.networkService.withBinding(network.chainId, async (b) => applyEmbeddedFpcGasCap(txRequest, fee, b.node))
 		const additionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
 		return pxe.profileTx(txRequest, {
 			profileMode: op.opts.profileMode,
@@ -1722,7 +1739,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			await this.markJournal(journalId, { stage: "simulating" })
 			checkCancelled()
 
-			const [txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod] = await this.buildAndEstimateTxRequest(
+			const [txRequest, , pxe, account, network, nonce, txCalls, feePaymentMethod] = await this.buildAndEstimateTxRequest(
 				{ ...op, actions, fee },
 				op.feeSettings,
 				parentTask,
@@ -1738,7 +1755,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const tx = await provedTx.toTx()
 			await this.markJournal(journalId, { stage: "submitting" })
 			checkCancelled()
-			await this.coordinator.sendTxTask(node, tx, parentTask)
+			await this.networkService.withBinding(network.chainId, async (b) => this.coordinator.sendTxTask(b.node, tx, parentTask))
 
 			const txHash = tx.getTxHash()
 			await this.transactionService.addTransaction(
@@ -1758,7 +1775,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			if (op.opts.wait === "NO_WAIT") {
 				return { txHash, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 			}
-			const receipt = await node.getTxReceipt(txHash)
+			// Route post-send receipt fetch through withBinding so a node
+			// failure here counts toward the classifier.
+			const receipt = await this.networkService.withBinding(network.chainId, async (b) => b.node.getTxReceipt(txHash))
 			return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 		} catch (error) {
 			if (error instanceof JobCancelledSentinel) {
@@ -1810,7 +1829,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		try {
 			await this.markJournal(journalId, { stage: "simulating" })
 
-			const [txRequest, node, pxe, account, network, txCalls] = await this.txBuilder.buildNoFrom(op, parentTask)
+			const [txRequest, , pxe, account, network, txCalls] = await this.txBuilder.buildNoFrom(op, parentTask)
 			this.logDebug(
 				`executeNoFromSendTx: buildNoFromTxRequest completed, txCalls=${txCalls.length}, account=${account.address.toString()}`,
 			)
@@ -1831,7 +1850,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				gasPadding: 1,
 			}
 			suggestGasLimits(txRequest, feeOpts)
-			await applyEmbeddedFpcGasCap(txRequest, feeOpts, node)
+			await this.networkService.withBinding(network.chainId, async (b) => applyEmbeddedFpcGasCap(txRequest, feeOpts, b.node))
 
 			// Kernelless auth witness discovery: stub the user's account so verify_private_authwit
 			// doesn't fail on missing witnesses. The stub accepts any authwit during simulation.
@@ -1861,7 +1880,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const effects = collectOffchainEffects(discoveryResult.privateExecutionResult)
 			this.logDebug(`executeNoFromSendTx: offchain effects found: ${effects.length}`)
 			if (effects.length) {
-				const nodeInfo2 = await node.getNodeInfo()
+				const nodeInfo2 = await this.networkService.withBinding(network.chainId, async (b) => b.node.getNodeInfo())
 				const chainInfo = { chainId: new Fr(nodeInfo2.l1ChainId), version: new Fr(nodeInfo2.rollupVersion) }
 				for (const effect of effects) {
 					try {
@@ -1886,7 +1905,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				{ simulatePublic: true, skipFeeEnforcement: true, scopes: scopesWithAccount },
 				parentTask,
 			)
-			await finalizeGasLimits(node, txRequest, simulatedTx, 1, undefined, feeOpts, 1)
+			await this.networkService.withBinding(network.chainId, async (b) =>
+				finalizeGasLimits(b.node, txRequest, simulatedTx, 1, undefined, feeOpts, 1),
+			)
 
 			// Prove with account in scope
 			checkCancelled()
@@ -1898,7 +1919,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const tx = await provedTx.toTx()
 			await this.markJournal(journalId, { stage: "submitting" })
 			checkCancelled()
-			await this.coordinator.sendTxTask(node, tx, parentTask)
+			await this.networkService.withBinding(network.chainId, async (b) => this.coordinator.sendTxTask(b.node, tx, parentTask))
 
 			const txHash = tx.getTxHash()
 			await this.transactionService.addTransaction(
@@ -1918,7 +1939,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			if (op.opts.wait === "NO_WAIT") {
 				return { txHash, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 			}
-			const receipt = await node.getTxReceipt(txHash)
+			// Route post-send receipt fetch through withBinding so a node
+			// failure here counts toward the classifier.
+			const receipt = await this.networkService.withBinding(network.chainId, async (b) => b.node.getTxReceipt(txHash))
 			return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 		} catch (error) {
 			if (error instanceof JobCancelledSentinel) {
@@ -1939,8 +1962,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const network = await this.networkService.getNetwork(op.networkId)
 		const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress.toString())
 
-		const node = await this.networkService.getNode(network.chainId)
-		const nodeInfo = await node.getNodeInfo()
+		const nodeInfo = await this.networkService.withBinding(network.chainId, async (b) => b.node.getNodeInfo())
 		const metadata = {
 			chainId: new Fr(nodeInfo.l1ChainId),
 			version: new Fr(nodeInfo.rollupVersion),

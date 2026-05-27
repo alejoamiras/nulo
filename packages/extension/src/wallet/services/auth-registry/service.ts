@@ -96,7 +96,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			throw new Error(`Cannot revoke more than ${MAX_REVOKES_PER_TX} authwits per single tx`)
 		}
 
-		const authwits = []
+		const authwits: Authwit[] = []
 		for (const id of ids) {
 			const authwit = await this.authwits.get(`${id}`)
 			if (!authwit) {
@@ -128,8 +128,9 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			await this.transactionService.waitForTx(txHash, task)
 
 			const network = await this.networkService.getNetwork(networkId)
-			const node = await this.networkService.getNode(network.chainId)
-			await this.syncAuthwits(node, account, task, authwits)
+			await this.networkService.withBinding(network.chainId, async (b) => {
+				await this.syncAuthwits(b.node, account, task, authwits)
+			})
 
 			task.complete()
 		} catch (error) {
@@ -172,8 +173,9 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			await this.transactionService.waitForTx(txHash, task)
 
 			const network = await this.networkService.getNetwork(networkId)
-			const node = await this.networkService.getNode(network.chainId)
-			await this.syncStatus(node, account, task)
+			await this.networkService.withBinding(network.chainId, async (b) => {
+				await this.syncStatus(b.node, account, task)
+			})
 
 			task.complete()
 		} catch (error) {
@@ -191,8 +193,9 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		const task = this.taskService.startNewTask(new StepContent("Sync auth registry"))
 		try {
 			const network = await this.networkService.getNetwork(networkId)
-			const node = await this.networkService.getNode(network.chainId)
-			await Promise.all([this.syncAuthwits(node, account, task), this.syncStatus(node, account, task)])
+			await this.networkService.withBinding(network.chainId, async (b) => {
+				await Promise.all([this.syncAuthwits(b.node, account, task), this.syncStatus(b.node, account, task)])
+			})
 			task.complete()
 		} catch (error) {
 			task.fail(error)

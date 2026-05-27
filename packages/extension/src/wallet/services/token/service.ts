@@ -3,7 +3,7 @@ import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import { normalizeError } from "@nulo/wallet-core/jobs"
 import type { ILogger } from "@/wallet/logger"
-import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
+import { NetworkService } from "@/wallet/services/network/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import type { OperationContext } from "@/wallet/services/operation-journal/spec"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
@@ -284,7 +284,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			throw new Error("unknown network id")
 		}
 
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
+		const pxe = this.pxeService.getPXE(this.networks.networkInfoLive(network))
 
 		const instance = await pxe.getContractInstance(AztecAddress.fromString(token.contract))
 		if (!instance) {
@@ -369,7 +369,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				throw new Error("unknown network id")
 			}
 
-			const pxe = this.pxeService.getPXE(networkInfoFrom(network))
+			const pxe = this.pxeService.getPXE(this.networks.networkInfoLive(network))
 
 			const instance = await pxe.getContractInstance(AztecAddress.fromString(contract))
 			if (!instance) {
@@ -485,26 +485,27 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 
 		const account = await this.accounts.getAccountContract(profileId, network.chainId, address)
 
-		const node = await this.networks.getNode(network.chainId)
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
-
-		const getNameFn = ti.getNameFn ? GetNameFn.new(ti.getNameFn.name, ti.getNameFn.impl) : undefined
-		const getSymbolFn = ti.getSymbolFn ? GetSymbolFn.new(ti.getSymbolFn.name, ti.getSymbolFn.impl) : undefined
-		const getDecimalsFn = ti.getDecimalsFn ? GetDecimalsFn.new(ti.getDecimalsFn.name, ti.getDecimalsFn.impl) : undefined
-
-		return [
-			getNameFn
-				? ((await simulate(node, pxe, account, ti.contract, getNameFn, getNameFn.buildArgs())) as string)
-				: ti.contract === feeJuiceAddress
-					? feeJuiceName
-					: "<name>",
-			getSymbolFn
-				? ((await simulate(node, pxe, account, ti.contract, getSymbolFn, getSymbolFn.buildArgs())) as string)
-				: ti.contract === feeJuiceAddress
-					? feeJuiceSymbol
-					: "<symbol>",
-			getDecimalsFn ? ((await simulate(node, pxe, account, ti.contract, getDecimalsFn, getDecimalsFn.buildArgs())) as number) : 0,
-		]
+		return this.networks.withBinding(network.chainId, async (b) => {
+			const pxe = this.pxeService.getPXE(b.info)
+			const getNameFn = ti.getNameFn ? GetNameFn.new(ti.getNameFn.name, ti.getNameFn.impl) : undefined
+			const getSymbolFn = ti.getSymbolFn ? GetSymbolFn.new(ti.getSymbolFn.name, ti.getSymbolFn.impl) : undefined
+			const getDecimalsFn = ti.getDecimalsFn ? GetDecimalsFn.new(ti.getDecimalsFn.name, ti.getDecimalsFn.impl) : undefined
+			return [
+				getNameFn
+					? ((await simulate(b.node, pxe, account, ti.contract, getNameFn, getNameFn.buildArgs())) as string)
+					: ti.contract === feeJuiceAddress
+						? feeJuiceName
+						: "<name>",
+				getSymbolFn
+					? ((await simulate(b.node, pxe, account, ti.contract, getSymbolFn, getSymbolFn.buildArgs())) as string)
+					: ti.contract === feeJuiceAddress
+						? feeJuiceSymbol
+						: "<symbol>",
+				getDecimalsFn
+					? ((await simulate(b.node, pxe, account, ti.contract, getDecimalsFn, getDecimalsFn.buildArgs())) as number)
+					: 0,
+			]
+		})
 	}
 
 	private async findToken(profileId: string, chainId: number, contract: string): Promise<Token | undefined> {

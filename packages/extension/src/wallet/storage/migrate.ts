@@ -34,9 +34,13 @@
  *   would silently render `0 USDC` via `balanceFormatted(undefined, …)`
  *   which returns "0" (codex audit catch). Wipe to avoid the fake
  *   "0 USDC" ghost. Reuses the existing `nulo:journal@` session-wipe path.
+ * v8 (multi-rpc-failover schema collapse) drops `primaryEndpointId` from
+ *   the Network record; `endpoints[0]` is now the preferred endpoint.
+ *   Pre-release destructive wipe of `nulo:core:networks@` reseeds the
+ *   defaults with the new shape on next unlock.
  */
 const STORAGE_VERSION_KEY = "nulo:core:storage-version"
-const CURRENT_VERSION = 7
+const CURRENT_VERSION = 8
 
 const KEYS_TO_WIPE = [
 	"nulo:core:accounts",
