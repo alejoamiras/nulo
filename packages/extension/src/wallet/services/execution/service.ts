@@ -3,14 +3,11 @@ import { type InteractionWaitOptions, type SendReturn, extractOffchainOutput } f
 import { Fr } from "@aztec/foundation/curves/bn254"
 import {
 	type AbiDecoded,
-	type AbiType,
 	AbiTypeSchema,
 	type ContractArtifact,
 	ContractArtifactSchema,
 	encodeArguments,
-	type FunctionAbi,
 	FunctionSelector,
-	FunctionType,
 	FunctionCall,
 	decodeFromAbi,
 } from "@aztec/stdlib/abi"
@@ -25,7 +22,6 @@ import {
 } from "@aztec/stdlib/contract"
 import type { ChainInfo } from "@aztec/entrypoints/interfaces"
 import {
-	ExecutionPayload,
 	type TxExecutionRequest,
 	type TxProfileResult,
 	type TxSimulationResult,
@@ -66,7 +62,6 @@ import {
 	type Methods,
 	type Operation,
 	type RegisterSenderOperation,
-	type RegisterTokenOperation,
 	type RegisterContractOperation,
 	type SendTransactionOperation,
 	type SimulateTransactionOperation,
@@ -1052,7 +1047,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// it's extension-internal data — but we still validate it identifies
 		// the same on-chain contract the dApp asked us to register, in case of
 		// popup-side bugs.
-		let ti
+		let ti: import("@/wallet/services/token/service").TokenInterface
 		if (
 			op.previewedInterface &&
 			op.previewedInterface.contract.toLowerCase() === op.address.toLowerCase() &&
