@@ -4,12 +4,21 @@ import DripButton from "./DripButton.vue"
 
 describe("DripButton", () => {
 	it("shows the label prop verbatim regardless of loading state", () => {
-		const idle = mount(DripButton, { props: { label: "Drip 1,000 USDC to public" } })
+		const idle = mount(DripButton, { props: { label: "Get USDC (public)" } })
 		const loading = mount(DripButton, {
-			props: { label: "Drip 1,000 USDC to public", loading: true },
+			props: { label: "Get USDC (public)", loading: true },
 		})
-		expect(idle.text()).toBe("Drip 1,000 USDC to public")
-		expect(loading.text()).toBe("Drip 1,000 USDC to public")
+		expect(idle.text()).toBe("Get USDC (public)")
+		expect(loading.text()).toBe("Get USDC (public)")
+	})
+
+	it("uses the ariaLabel prop when provided; falls back to label otherwise", () => {
+		const withAria = mount(DripButton, {
+			props: { label: "Get USDC (public)", ariaLabel: "Get 1,000 USDC into your public balance" },
+		})
+		expect(withAria.get("button").attributes("aria-label")).toBe("Get 1,000 USDC into your public balance")
+		const withoutAria = mount(DripButton, { props: { label: "Get USDC (public)" } })
+		expect(withoutAria.get("button").attributes("aria-label")).toBe("Get USDC (public)")
 	})
 
 	it("emits click when clicked in the idle state", async () => {
@@ -54,8 +63,8 @@ describe("DripButton", () => {
 	})
 
 	it("button label is stable across all states (no Sent / Failed text override)", () => {
-		const w = mount(DripButton, { props: { label: "Drip 1 ETH to private" } })
-		expect(w.text()).toBe("Drip 1 ETH to private")
+		const w = mount(DripButton, { props: { label: "Get ETH (private)" } })
+		expect(w.text()).toBe("Get ETH (private)")
 	})
 
 	it("idle button does not show a spinner", () => {

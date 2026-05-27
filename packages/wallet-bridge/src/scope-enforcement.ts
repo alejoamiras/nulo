@@ -150,28 +150,6 @@ function checkExecuteUtility(args: unknown[], grants: GrantedCapabilityRecord[])
 	}
 }
 
-function checkSimulateViews(args: unknown[], grants: GrantedCapabilityRecord[]): void {
-	const calls = args[0]
-	if (!Array.isArray(calls)) {
-		throw new Error("Scope enforcement: simulateViews expects calls to be an array")
-	}
-	if (calls.length === 0) return
-
-	const caps = grantsOfType<SimulationCapability>(grants, "simulation")
-	if (!caps.length) return
-
-	const typedCalls = calls as WireCall[]
-	const permitted = caps.some((c) => {
-		const scope = c.transactions?.scope
-		if (!scope) return false
-		return typedCalls.every((call) => matchesScope(String(call.to), call.name, scope))
-	})
-	if (!permitted) {
-		const desc = typedCalls.map((c) => `${c.name}@${String(c.to)}`).join(", ")
-		throw new Error(`Scope violation: simulateViews calls [${desc}], not permitted by granted simulation.transactions scope`)
-	}
-}
-
 function checkGetPrivateEvents(args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	const eventFilter = args[1] as Record<string, unknown> | undefined
 	const address = String(eventFilter?.contractAddress)
@@ -296,7 +274,6 @@ const METHOD_SCOPE_CHECKER: Record<string, (args: unknown[], grants: GrantedCapa
 	simulateTx: (args, grants) => checkSimulationTransactions("simulateTx", args, grants),
 	profileTx: (args, grants) => checkSimulationTransactions("profileTx", args, grants),
 	executeUtility: checkExecuteUtility,
-	simulateViews: checkSimulateViews,
 	getPrivateEvents: checkGetPrivateEvents,
 	createAuthWit: checkCreateAuthWit,
 }

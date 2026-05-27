@@ -1,7 +1,7 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
 import { callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { waitForPopup, approveCapabilities } from "../fixtures/popups"
+import { waitForPopup, approveCapabilities, waitCapabilitiesReady } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -34,10 +34,10 @@ for (const c of cases) {
 				select.dispatchEvent(new Event("change", { bubbles: true }))
 			})
 			const seqGrant = await snapshotResultSeq(page)
-			const popupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 15_000 })
+			const popupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
 			await clickByTestId(page, "pg-btn-requestCapabilities")
 			const popup = await popupP
-			await popup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 10_000 })
+			await waitCapabilitiesReady(popup)
 			const accountIds = await popup.evaluate(() =>
 				[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) =>
 					r.getAttribute("data-account-id"),

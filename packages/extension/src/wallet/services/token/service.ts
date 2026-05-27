@@ -118,18 +118,25 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	): Promise<TokenInfo> {
 		await this.ensureInitialized()
 
-		// Phase 2.5: durable journal entry for the import. Replaces the
-		// previous in-memory TaskService task for the parent op — the journal
-		// survives SW restart and surfaces in the tokens-view TokenImportRow
-		// while the import is in flight. Sub-step progress (parseTokenInterface,
-		// metadata fetch) still flows through TaskService when a parentTask
-		// is supplied by the dApp execute path.
-		//
-		// The record stays in `pending` while queued behind the global token
-		// lock; we only transition to `simulating` once metadata-fetch work
-		// actually starts. Otherwise queued imports would look active to the
-		// reaper (codex post-impl catch) AND a `finally` lock.leave() before
-		// lock.enter() succeeds would corrupt the lock's owner state.
+		// Fast idempotency short-circuit (Opus H2 / codex DEFERRED).
+		// If the token is already on this profile+chain, return without
+		// creating a new journal entry or running fetchTokenMetadata.
+		// Without this guard, a malicious or buggy dApp could spam
+		// registerToken with the same contract address and force a PXE
+		// round-trip + journal write per attempt. The lock still protects
+		// the write path against concurrent imports of NEW addresses.
+		const existing = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
+		if (existing) {
+			return getTokenInfo(existing)
+		}
+
+		// Phase 2.5: durable journal entry for the import. Created up-front
+		// (title=undefined) so the tokens-view TokenImportRow pops in
+		// immediately after approval, carrying the "Requested by <origin>"
+		// subtitle. The title gets backfilled with the resolved symbol once
+		// fetchTokenMetadata returns (via `setOperationMeta`) — without this
+		// backfill the row would show the short contract address as a
+		// fallback (TokenImportRow.vue:30-33).
 		const journalOp = await this.journal.createOperation({
 			kind: "token_import",
 			origin: opContext.origin,
@@ -149,6 +156,11 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			let token = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
 			if (!token) {
 				const [name, symbol, decimals] = await this.fetchTokenMetadata(profileId, networkId, accountAddress, tokenInterface)
+				// Backfill the title with the resolved symbol so the in-flight
+				// TokenImportRow stops falling back to the short contract
+				// address. Safe to call even if the row has already vanished
+				// (setOperationMeta tolerates terminal records).
+				await this.journal.setOperationMeta(journalOp.id, { title: symbol })
 				token = {
 					id: array_max((await this.tokens.getKeys()).map((x) => +x)) + 1,
 					profileId,
@@ -434,6 +446,30 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			task.fail(error)
 			throw error
 		}
+	}
+
+	/**
+	 * Resolve a token's user-facing metadata (name, symbol, decimals) WITHOUT
+	 * persisting anything. Wraps `parseTokenInterface` + the private
+	 * `fetchTokenMetadata`. Used by the `register_token` popup pre-fetch so the
+	 * user sees what they're approving before pressing Allow.
+	 *
+	 * The returned strings come from the on-chain contract — a malicious contract
+	 * can return any name/symbol. UI MUST render the contract address alongside.
+	 */
+	public async previewTokenMetadata(
+		networkId: string,
+		accountAddress: string,
+		contract: string,
+	): Promise<{ name: string; symbol: string; decimals: number; interface: TokenInterface }> {
+		await this.ensureInitialized()
+		const profile = await this.profiles.getActiveProfile()
+		if (!profile) {
+			throw new Error("Wallet locked")
+		}
+		const tokenInterface = await this.parseTokenInterface(networkId, contract)
+		const [name, symbol, decimals] = await this.fetchTokenMetadata(profile.id, networkId, accountAddress, tokenInterface)
+		return { name, symbol, decimals, interface: tokenInterface }
 	}
 
 	private async fetchTokenMetadata(

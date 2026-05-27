@@ -267,7 +267,6 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 					this.checkScopesPermissions(session, operation.eventFilter.scopes)
 					break
 				}
-				case "get_complete_address":
 				case "register_token":
 				case "simulate_utility":
 				case "aztec_simulateTx":
@@ -286,13 +285,6 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 					this.checkAccountPermission(session, operation.account)
 					this.checkMethodPermission(session, operation.kind, chain)
 					operation.actions.forEach((x) => this.checkMethodPermission(session, x.kind, chain))
-					break
-				}
-				case "simulate_views": {
-					const chain = operation.account.substring(0, operation.account.lastIndexOf(":"))
-					this.checkAccountPermission(session, operation.account)
-					this.checkMethodPermission(session, operation.kind, chain)
-					operation.calls.forEach((x) => this.checkMethodPermission(session, x.kind, chain))
 					break
 				}
 			}
@@ -360,6 +352,15 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		) {
 			return true
 		}
+		// `register_token` is always per-call confirmable — the popup carries the
+		// resolved token name/symbol/decimals/contract address so the user can
+		// recognise phishing attempts. Driven by an explicit kind match rather
+		// than the (accessLevel, confirmationLevel) gate because the latter is
+		// seeded to `Transactions` for wallet-sdk sessions and would otherwise
+		// silence the popup.
+		if (payload.params.operations.find((x) => x.kind === "register_token")) {
+			return true
+		}
 		return false
 	}
 
@@ -375,8 +376,6 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		switch (kind) {
 			case "register_token":
 				return AccessLevel.AppState
-			case "get_complete_address":
-				return AccessLevel.PublicData
 			case "register_contract":
 				return AccessLevel.PxeState
 			case "register_sender":
@@ -384,8 +383,6 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			case "simulate_transaction":
 				return AccessLevel.PrivateData
 			case "simulate_utility":
-				return AccessLevel.PrivateData
-			case "simulate_views":
 				return AccessLevel.PrivateData
 			case "send_transaction":
 				return AccessLevel.Transactions

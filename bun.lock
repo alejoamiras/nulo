@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "nulo",
@@ -38,7 +39,7 @@
     },
     "packages/extension": {
       "name": "@nulo/extension",
-      "version": "0.17.1",
+      "version": "0.20.0",
       "dependencies": {
         "@alejoamiras/aztec-accelerator": "4.2.0",
         "@aztec/accounts": "4.2.0",
@@ -244,6 +245,10 @@
         "vitest": "^4.1.5",
       },
     },
+  },
+  "patchedDependencies": {
+    "@aztec/noir-acvm_js@4.2.0": "patches/@aztec%2Fnoir-acvm_js@4.2.0.patch",
+    "@aztec/noir-noirc_abi@4.2.0": "patches/@aztec%2Fnoir-noirc_abi@4.2.0.patch",
   },
   "packages": {
     "@adobe/css-tools": ["@adobe/css-tools@4.4.4", "", {}, "sha512-Elp+iwUx5rN5+Y8xLt5/GRoG20WGoDCQ/1Fb+1LiGtvwbDavuSk0jhD/eZdckHAuzcDzccnkv+rEjyWfRx18gg=="],

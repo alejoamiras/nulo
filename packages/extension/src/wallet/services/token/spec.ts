@@ -165,6 +165,33 @@ export type Methods = {
 	 * @param contract Token contract address.
 	 */
 	parseTokenInterface(networkId: string, contract: string): TokenInterface
+
+	/**
+	 * Resolve a token's user-facing metadata (name, symbol, decimals) WITHOUT
+	 * adding the token to storage. Used by the dApp `register_token` popup so
+	 * the user can see what they're about to add before clicking Allow.
+	 *
+	 * Also returns the parsed `TokenInterface` so the popup can thread it into
+	 * the operation via `previewedInterface`, letting `executeRegisterToken`
+	 * skip a redundant `parseTokenInterface` round-trip after Allow. The
+	 * executor validates `contract === op.address` + `chainId === network.chainId`
+	 * before trusting the threaded interface; on mismatch it falls back to the
+	 * canonical `parseTokenInterface` fetch.
+	 *
+	 * Returns `{ name: "<name>", symbol: "<symbol>", decimals: 0 }` placeholder
+	 * strings when the contract's interface is incomplete. Callers must NOT
+	 * trust the strings as authentic — they come straight from the on-chain
+	 * contract and a phishing contract can return any string. Always render
+	 * the contract address alongside.
+	 * @param networkId Network id.
+	 * @param accountAddress Address of an account used to drive the simulation.
+	 * @param contract Token contract address.
+	 */
+	previewTokenMetadata(
+		networkId: string,
+		accountAddress: string,
+		contract: string,
+	): { name: string; symbol: string; decimals: number; interface: TokenInterface }
 }
 
 export type Events = {

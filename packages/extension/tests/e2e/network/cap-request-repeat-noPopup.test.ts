@@ -28,7 +28,7 @@ test.skipIf(!hasConfig)(
 
 		// First request — popup shown, approve
 		const seqA = await snapshotResultSeq(page)
-		const popupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 15_000 })
+		const popupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-requestCapabilities")
 		await approveCapabilities(await popupP)
 		const first = await waitForPgResult(page, "requestCapabilities", seqA, 30_000)

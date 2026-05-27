@@ -55,4 +55,12 @@ export class TokenServiceClient extends ServiceClient<Methods, Events> implement
 	public parseTokenInterface(networkId: string, contract: string): Promise<TokenInterface> {
 		return this.request("parseTokenInterface", networkId, contract)
 	}
+
+	public previewTokenMetadata(
+		networkId: string,
+		accountAddress: string,
+		contract: string,
+	): Promise<{ name: string; symbol: string; decimals: number; interface: TokenInterface }> {
+		return this.request("previewTokenMetadata", networkId, accountAddress, contract)
+	}
 }

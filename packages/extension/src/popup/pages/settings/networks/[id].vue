@@ -47,9 +47,16 @@ const handleEditNetworkName = () => {
 const handleSetActive = async () => {
 	if (!network.value) return
 	if (isActive.value) return
+	// Snapshot before the await: `network` is computed from `route.params.id`,
+	// and if the caller (or another reactive consumer) navigates while the
+	// RPC is in flight, `network.value` becomes `undefined` after the await.
+	// Without the snapshot, `appStore.network = network.value` would write
+	// `undefined`, leaving the popup with no active network until the next
+	// reactive trigger. See implementations-plan/e2e-full-network-recovery/findings.md.
+	const target = network.value
 	try {
-		await managers.network.setActiveNetwork(network.value.id)
-		appStore.network = network.value
+		await managers.network.setActiveNetwork(target.id)
+		appStore.network = target
 		openToast({ label: "Active network updated", icon: "check-circle" })
 	} catch {
 		openToast({ label: "Failed to switch network", icon: "warning", color: "red" }, TOAST_DURATION.LONG)

@@ -15,18 +15,71 @@ on:
         required: false
         type: string
         default: "http://localhost:8080"
+      shard:
+        description: |
+          vitest --shard expression (e.g. "1/5"). Empty string runs the full suite.
+          Caller workflows use this with a matrix strategy to parallelize across
+          runners; each shard runs its own anvil + aztec sandbox.
+        required: false
+        type: string
+        default: ""
+      shard_label:
+        description: |
+          Artifact-safe label for the shard (e.g. "1-of-5"). actions/upload-artifact
+          rejects `/` in artifact names, so the caller passes a separate label
+          here distinct from the `shard` input's vitest expression. Empty falls
+          back to "full" for the unsharded invocation.
+        required: false
+        type: string
+        default: ""
+      probe:
+        description: |
+          Set to "1" when this workflow run is intentionally running with probes on
+          (slow-test investigation). The bundle-grep guard skips when "1" because
+          the build will legitimately contain probe strings. Default empty runs
+          the guard, which fails the workflow if probe strings ship in dist/chrome.
+        required: false
+        type: string
+        default: ""
+      test_files:
+        description: |
+          Explicit space-separated list of test files to run, passed straight to
+          vitest as positional args. Used by the dedicated heavy-network job to
+          run e.g. tests/e2e/network/fee-methods.test.ts alone, separated from
+          the SHA-1-distributed matrix shards so it doesn't pre-pressure the
+          prover queue for popup-shape tests sharing the same shard host.
+          Leave empty for the default (sharded) suite distribution.
+        required: false
+        type: string
+        default: ""
+      exclude_files:
+        description: |
+          Space-separated --exclude patterns passed to vitest. Used by the
+          lightweight matrix shards to exclude heavy-network files that are
+          run in a dedicated job (see test_files). Without this, an excluded
+          file would still consume one slot in the SHA-1 shard distribution.
+        required: false
+        type: string
+        default: ""
     secrets:
       SPONSORED_FPC_SALT:
         required: false
 
 jobs:
   network-e2e:
-    name: Aztec agent
+    name: ${{ inputs.shard && format('Aztec agent (shard {0})', inputs.shard) || 'Aztec agent' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Per-shard wall-time worst case is ~20m (9 files + cold-start ~5m). 30m
+    # budget gives headroom without masking real hangs. Was 60m for the single
+    # unsharded job; that ceiling no longer applies.
+    timeout-minutes: 30
     env:
       AZTEC_NODE_URL: ${{ inputs.aztec_node_url }}
       SPONSORED_FPC_SALT: ${{ !contains(inputs.aztec_node_url, 'localhost') && secrets.SPONSORED_FPC_SALT || '' }}
+      # Quarantine the 2 deterministic slow tests on CI (tx-sendTx-multicall,
+      # multi-account-from). See implementations-plan/network-followups/slow-tests-hypotheses.md
+      # for the deferred investigation. Locally these still run (env unset).
+      NULO_E2E_SKIP_DEFERRED_SLOW: "1"
     steps:
       - uses: actions/checkout@v6
         with:
@@ -41,16 +94,62 @@ jobs:
       - uses: ./.github/actions/setup-puppeteer
 
       - name: Run network e2e via agent
-        run: bun run e2e:agent
+        env:
+          EXCLUDE_FILES: ${{ inputs.exclude_files }}
+          TEST_FILES: ${{ inputs.test_files }}
+          SHARD: ${{ inputs.shard }}
+        run: |
+          # Use bash arrays + read -ra so word-splitting is explicit + scoped
+          # (avoids shellcheck SC2086 noise on intentional split-into-flags).
+          read -ra EXCLUDE_LIST <<< "$EXCLUDE_FILES"
+          read -ra TEST_FILE_LIST <<< "$TEST_FILES"
+          EXCLUDE_ARGS=()
+          for f in "${EXCLUDE_LIST[@]}"; do
+            [ -n "$f" ] && EXCLUDE_ARGS+=(--exclude "$f")
+          done
+
+          if [ "${#TEST_FILE_LIST[@]}" -gt 0 ] && [ -n "${TEST_FILE_LIST[0]}" ]; then
+            # Dedicated mode: caller specified explicit test files. Ignore shard;
+            # the file list IS the workload.
+            bun run e2e:agent "${TEST_FILE_LIST[@]}" "${EXCLUDE_ARGS[@]}"
+          elif [ -n "$SHARD" ]; then
+            bun run e2e:agent --shard="$SHARD" "${EXCLUDE_ARGS[@]}"
+          else
+            bun run e2e:agent "${EXCLUDE_ARGS[@]}"
+          fi
+
+      # Permanent guard: PR #46's lessons doc flagged bundle-grep as the actual
+      # leak guarantee for diagnostic probes (compile-time gate is design intent,
+      # not safety property). Probes accidentally surviving to dist/chrome would
+      # leak protocol details to browser consoles in production. Skip the guard
+      # when `inputs.probe == '1'` because slow-test investigation builds
+      # legitimately contain probe strings.
+      - name: Verify no probe code in shipped bundle
+        if: always() && inputs.probe != '1'
+        shell: bash
+        run: |
+          cd packages/extension
+          # grep exits 1 on no-match; with `set -e -o pipefail` that aborts the
+          # script before the `HITS > 0` check, so wrap the pipeline in `|| true`.
+          HITS=$( { grep -RnE '(PROBE|nulo:probe:|VITE_E2E_PROBE)' dist/chrome 2>/dev/null || true; } | wc -l | tr -d ' ')
+          if [ "$HITS" -gt 0 ]; then
+            echo "::error::Probe strings found in built bundle ($HITS hits)."
+            grep -RnE '(PROBE|nulo:probe:|VITE_E2E_PROBE)' dist/chrome | head -20
+            exit 1
+          fi
+          echo "Bundle clean: no probe strings."
 
       - name: Upload network e2e logs on failure
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: network-e2e-logs
+          # Use shard_label (e.g. "1-of-5") not shard ("1/5") — upload-artifact
+          # rejects `/` in names (actions/upload-artifact#647).
+          name: network-e2e-logs-${{ inputs.shard_label || 'full' }}
           path: |
             packages/extension/.e2e-state
             /tmp/aztec-*.log
             /tmp/anvil-*.log
+            /tmp/nulo-probes-*.jsonl
           if-no-files-found: ignore
           retention-days: 7

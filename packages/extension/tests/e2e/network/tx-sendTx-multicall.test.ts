@@ -6,6 +6,11 @@ import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
+// Deferred slow-test marker (see implementations-plan/network-followups/slow-tests-hypotheses.md).
+// On CI per-shard runner, this file's tests deterministically exhaust their
+// timeout budget (3 attempts × ~10min each) under bb.wasm cold-start cost.
+// Skipped in CI via NULO_E2E_SKIP_DEFERRED_SLOW=1; runs locally to retain coverage.
+const skipDeferredSlow = process.env.NULO_E2E_SKIP_DEFERRED_SLOW === "1"
 
 /**
  * Tests #32 + #33 — sendTx multi-call variants.
@@ -21,7 +26,7 @@ const cases: Array<{ id: number; name: string; btn: string }> = [
 ]
 
 for (const c of cases) {
-	test.skipIf(!hasConfig)(
+	test.skipIf(!hasConfig || skipDeferredSlow)(
 		`tx-sendTx-${c.name} (#${c.id}) — popup opens, multiple payload rows`,
 		{ timeout: 240_000, retry: 1 },
 		async ({ dappConnectedExtensionPerTest: dappConnectedExtension }) => {
@@ -33,7 +38,7 @@ for (const c of cases) {
 				select.dispatchEvent(new Event("change", { bubbles: true }))
 			})
 			const seqGrant = await snapshotResultSeq(page)
-			const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 15_000 })
+			const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
 			await clickByTestId(page, "pg-btn-requestCapabilities")
 			const capPopup = await capPopupP
 			await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 10_000 })

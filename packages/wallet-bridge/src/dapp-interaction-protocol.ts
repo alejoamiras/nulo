@@ -22,14 +22,12 @@ import type {
 	AztecRegisterSenderOperation,
 	AztecSendTxOperation,
 	AztecSimulateTxOperation,
-	GetCompleteAddressOperation,
 	RegisterContractOperation,
 	RegisterSenderOperation,
 	RegisterTokenOperation,
 	SendTransactionOperation,
 	SimulateTransactionOperation,
 	SimulateUtilityOperation,
-	SimulateViewsOperation,
 } from "./operation"
 import type { OperationResult } from "./operation-result"
 
@@ -38,10 +36,6 @@ type AccountParams = NetworkParams | "accountAddress"
 type SendParams = AccountParams | "feeSettings"
 
 // Nulo interface:
-
-export type GetCompleteAddressRequest = Omit<GetCompleteAddressOperation, AccountParams> & {
-	account: CaipAccount
-}
 
 export type RegisterContractRequest = Omit<RegisterContractOperation, NetworkParams> & {
 	chain: CaipChain
@@ -64,10 +58,6 @@ export type SimulateTransactionRequest = Omit<SimulateTransactionOperation, Acco
 }
 
 export type SimulateUtilityRequest = Omit<SimulateUtilityOperation, AccountParams> & {
-	account: CaipAccount
-}
-
-export type SimulateViewsRequest = Omit<SimulateViewsOperation, AccountParams> & {
 	account: CaipAccount
 }
 
@@ -123,14 +113,12 @@ export type AztecCreateAuthWitRequest = Omit<AztecCreateAuthWitOperation, Accoun
 
 export type OperationRequest =
 	// Nulo interface:
-	| GetCompleteAddressRequest
 	| RegisterContractRequest
 	| RegisterSenderRequest
 	| RegisterTokenRequest
 	| SendTransactionRequest
 	| SimulateTransactionRequest
 	| SimulateUtilityRequest
-	| SimulateViewsRequest
 	// Aztec.js interface:
 	| AztecGetContractClassMetadataRequest
 	| AztecGetContractMetadataRequest

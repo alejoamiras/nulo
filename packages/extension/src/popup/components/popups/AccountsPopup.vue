@@ -183,6 +183,7 @@ const handleManageAccounts = () => {
 }
 
 .icon_btn {
+	cursor: pointer;
 	transition: all 0.2s var(--bezier);
 
 	&:hover {

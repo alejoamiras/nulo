@@ -45,7 +45,6 @@ export type {
 	AztecSimulateTxOperation,
 	FeeOptions,
 	GasLimits,
-	GetCompleteAddressOperation,
 	Operation,
 	OperationKind,
 	RegisterContractOperation,
@@ -54,7 +53,6 @@ export type {
 	SendTransactionOperation,
 	SimulateTransactionOperation,
 	SimulateUtilityOperation,
-	SimulateViewsOperation,
 } from "@nulo/wallet-bridge"
 export type {
 	FailedOperationResult,
@@ -62,3 +60,20 @@ export type {
 	OperationResult,
 	SkippedOperationResult,
 } from "@nulo/wallet-bridge"
+
+import type { RegisterTokenOperation } from "@nulo/wallet-bridge"
+import type { TokenInterface } from "@/wallet/services/token/spec"
+
+/**
+ * Materialized form of `RegisterTokenOperation` carrying the optional
+ * `previewedInterface` hint that the popup attaches in its approve mapper
+ * after `previewTokenMetadata` resolves. The wire `RegisterTokenOperation`
+ * in `@nulo/wallet-bridge` stays clean of any `TokenInterface` import
+ * (wallet-bridge has no dependency on extension types — layer hierarchy
+ * forbids it). The executor accepts this extended type, validates
+ * `previewedInterface.contract === op.address` + `chainId === network.chainId`
+ * before trusting the hint, and falls back to `parseTokenInterface` on mismatch.
+ */
+export type MaterializedRegisterTokenOperation = RegisterTokenOperation & {
+	readonly previewedInterface?: TokenInterface
+}

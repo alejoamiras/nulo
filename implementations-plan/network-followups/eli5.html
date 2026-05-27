@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Network E2E Follow-ups — ELI5</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --fg-muted: #555;
+    --bg: #fefefe;
+    --accent: #2563eb;
+    --rule: #e5e5e5;
+    --code-bg: #f4f4f5;
+    --warn-bg: #fff7ed;
+    --warn-fg: #9a3412;
+    --ok-bg: #ecfdf5;
+    --ok-fg: #065f46;
+    --info-bg: #eff6ff;
+    --info-fg: #1e40af;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0;
+  }
+  main {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 6rem;
+  }
+  h1 {
+    font-size: 2rem;
+    line-height: 1.2;
+    margin: 0 0 0.5rem;
+    font-weight: 600;
+  }
+  h2 {
+    font-size: 1.4rem;
+    margin: 3rem 0 0.75rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+    font-weight: 600;
+  }
+  h2:first-of-type { border-top: none; padding-top: 0; }
+  h3 {
+    font-size: 1.1rem;
+    margin: 1.75rem 0 0.5rem;
+    font-weight: 600;
+  }
+  p, li { margin: 0.6rem 0; }
+  ul, ol { padding-left: 1.5rem; }
+  .lede {
+    color: var(--fg-muted);
+    font-size: 1.1rem;
+    margin: 0 0 2rem;
+  }
+  code, .mono {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.92em;
+    background: var(--code-bg);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+  pre {
+    background: var(--code-bg);
+    padding: 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 0.85em;
+    line-height: 1.5;
+  }
+  pre code {
+    background: none;
+    padding: 0;
+    border-radius: 0;
+  }
+  .box {
+    margin: 1rem 0;
+    padding: 0.8rem 1rem;
+    border-radius: 6px;
+    border-left: 3px solid;
+  }
+  .box.info { background: var(--info-bg); border-color: var(--info-fg); }
+  .box.warn { background: var(--warn-bg); border-color: var(--warn-fg); }
+  .box.ok { background: var(--ok-bg); border-color: var(--ok-fg); }
+  .box.info strong { color: var(--info-fg); }
+  .box.warn strong { color: var(--warn-fg); }
+  .box.ok strong { color: var(--ok-fg); }
+  .phase {
+    margin: 1.5rem 0;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+  }
+  .phase-title {
+    font-weight: 600;
+    color: var(--accent);
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+  }
+  .phase-what, .phase-why {
+    margin: 0.4rem 0;
+  }
+  .phase-what::before {
+    content: "What: ";
+    color: var(--fg-muted);
+    font-weight: 600;
+  }
+  .phase-why::before {
+    content: "Why: ";
+    color: var(--fg-muted);
+    font-weight: 600;
+  }
+  .ascii-flow {
+    background: var(--code-bg);
+    padding: 1rem 1.25rem;
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.82em;
+    line-height: 1.4;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid var(--rule);
+    margin: 3rem 0;
+  }
+  .footer {
+    margin-top: 4rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--rule);
+    color: var(--fg-muted);
+    font-size: 0.92em;
+  }
+  .q {
+    margin: 1rem 0;
+    padding: 0.8rem 1rem;
+    background: var(--code-bg);
+    border-radius: 6px;
+  }
+  .q-question {
+    font-weight: 600;
+    margin: 0 0 0.4rem;
+  }
+  .q-context {
+    color: var(--fg-muted);
+    font-size: 0.95em;
+    margin: 0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.92em;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th {
+    background: var(--code-bg);
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Network E2E Follow-ups</h1>
+<p class="lede">A second pass on the test suite after PR #46. Three independent improvements bundled into one PR. Plain language.</p>
+
+<h2>What this PR is for</h2>
+<p>PR #46 (the previous one) restored the network e2e test suite from <strong>0 tests running</strong> (silent-skipping) to <strong>61/61 passing locally</strong>. But on CI it&rsquo;s still 52-54 of 61 passing &mdash; 7-9 tests rotate-flake each run because all 45 test files share one Aztec sandbox process, and that sandbox gets sluggish under cumulative load.</p>
+
+<p>PR #46&rsquo;s body documented three follow-ups. This PR bundles them.</p>
+
+<div class="box ok">
+  <p><strong>Goal:</strong> all 5 sharded CI runs green &middot; token detail page shows fresh balance on entry without manual refresh &middot; 2 specific slow tests either fixed or documented.</p>
+</div>
+
+<h2>The three follow-ups</h2>
+
+<h3>1. Suite sharding (the big CI win)</h3>
+<p>Currently CI runs all 45 test files sequentially against one Aztec sandbox. After ~30 files, the sandbox is sluggish. Late files time out.</p>
+<p><strong>Fix:</strong> split the test files across <strong>5 parallel GitHub Actions runners</strong>. Each runner gets its own fresh Aztec sandbox, runs ~9 files, then dies. No cumulative load.</p>
+
+<div class="box info">
+  <p><strong>Why N=5 specifically:</strong> vitest's <code>--shard</code> flag distributes files by their SHA-1 hash. We empirically know that <code>multi-account-from</code> and <code>tx-sendTx-multicall</code> are the two slowest files. At N=4, those two hash into the same shard &mdash; one runner gets pummeled while the other three sit idle. At N=5, they split into different shards. The 25% extra runner cost is worth the wall-time reduction.</p>
+</div>
+
+<h3>2. TokenBalance auto-refresh (the user UX win)</h3>
+<p>Right now, when you open a token's detail page in the wallet, you see whatever balance was last cached. If you just sent a transfer, that balance might be stale by a few seconds. You have to click a "Refresh" button to see the new value.</p>
+<p><strong>Fix:</strong> the page auto-fires a refresh when it opens. You see the cached value first (instant), and the fresh value arrives within ~1-3 seconds without clicking anything.</p>
+
+<div class="box info">
+  <p><strong>The subtle bit:</strong> the wallet&rsquo;s background service already publishes "balance updated" events. The page already subscribes to them. The only missing piece is that the page wasn't triggering the refresh on mount &mdash; the user had to click. We just move that click into <code>onMounted</code>.</p>
+</div>
+
+<p>This also lets us delete a test-only helper (<code>waitForTokenDetailBalances</code>) that the e2e tests have been using as a workaround.</p>
+
+<h3>3. Slow-test investigation (the time-boxed bet)</h3>
+<p>Two tests are persistently slow on CI: <code>multi-account-from</code> takes 148 seconds (should be &lt;30s), <code>tx-sendTx-multicall</code> takes 427 seconds (over 7 minutes). They time out repeatedly.</p>
+<p><strong>Approach:</strong> spend up to <strong>2 hours</strong> wiring diagnostic probes + analyzing the traces. If we find a clear root cause, fix it. If we don&rsquo;t in 2 hours, commit a <code>slow-tests-hypotheses.md</code> file documenting what we tried + the 3 leading theories, and ship the other two follow-ups without blocking on this.</p>
+
+<div class="box warn">
+  <p><strong>Why time-box this:</strong> sharding alone might make these tests pass &mdash; each shard's load is now 1/5 of what one runner was doing before. So the "slow test" might actually just be "single-sandbox congestion under heavy serial load." If sharding makes the tests pass, we don&rsquo;t need to fix anything wallet-side.</p>
+</div>
+
+<h2>How the work flows (the 5 phases)</h2>
+
+<div class="phase">
+  <p class="phase-title">Phase A &mdash; Sharding infrastructure</p>
+  <p class="phase-what">Update the GitHub Actions workflow to run 5 parallel matrix shards instead of 1 sequential job. Each shard gets its own Aztec sandbox via the existing setup-aztec composite action.</p>
+  <p class="phase-why">Highest-confidence CI win. Lands first so subsequent phases benefit from a stable, fast CI signal.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase A.2 &mdash; Bundle-grep CI step</p>
+  <p class="phase-what">Add a permanent CI guard that fails the workflow if probe code accidentally lands in the shipped extension bundle.</p>
+  <p class="phase-why">PR #46&rsquo;s lessons doc explicitly flagged this as a follow-up. Belongs in any PR that touches the probe infrastructure (this one will, in Phase C).</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase B &mdash; TokenBalance auto-refresh</p>
+  <p class="phase-what">Modify <code>tokens/[id].vue</code> to call <code>refreshTokenBalance()</code> on mount + watcher changes. Fire-and-forget &mdash; the page already listens for <code>onTokenBalanceUpdated</code> events.</p>
+  <p class="phase-why">User-facing improvement + lets us delete the e2e helper workaround.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase B.1 &mdash; Delete the helper, simplify the test</p>
+  <p class="phase-what">Remove <code>waitForTokenDetailBalances</code>. Update <code>transfers.test.ts</code> to use a plain <code>waitForFunction</code> on the balance value selectors.</p>
+  <p class="phase-why">Cleanup. The helper was a workaround for the bug we just fixed.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase C &mdash; Slow-test probes (TEMPORARY) [2h clock starts]</p>
+  <p class="phase-what">Re-introduce the storage-based probe pattern from PR #46&rsquo;s lessons. Wire 5-6 probe boundaries around the transaction send path (prove, simulate, send, getTxReceipt). Add a one-off diagnostic test that runs the 2 slow tests with the probes on.</p>
+  <p class="phase-why">Same approach that worked in PR #46. Storage-based capture is more reliable than console.log under vitest's test runner.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase C.1 &mdash; CI probe-run + trace analysis</p>
+  <p class="phase-what">Push the probe commit, observe a CI run, pull the probe traces from the artifact upload, analyze.</p>
+  <p class="phase-why">This is the diagnostic step. The traces tell us where the time is going.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase C.2 &mdash; Fix OR document</p>
+  <p class="phase-what">If the trace clearly shows where the time goes &mdash; apply the smallest possible fix (likely candidate: switch the two tests to <code>wait: "NO_WAIT"</code> if <code>getTxReceipt</code> is dominant and the test assertion doesn't actually need a mined receipt). If unclear &mdash; commit <code>slow-tests-hypotheses.md</code> with traces + 3 leading hypotheses + next-step probes.</p>
+  <p class="phase-why">2-hour time-box. Sharding alone may fix this, in which case there's nothing more to do.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase C.3 &mdash; Strip probes</p>
+  <p class="phase-what">Delete all the probe code, the helper, and the diagnostic test. The bundle-grep CI step (Phase A.2) verifies nothing got missed.</p>
+  <p class="phase-why">Probes are debugging code, not production code. Same discipline as PR #46.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase D &mdash; 3 consecutive green CI runs</p>
+  <p class="phase-what">Three full PR-trigger runs with all 5 shards green. No retries, no flakes.</p>
+  <p class="phase-why">Sharding's CI behavior under real load is the validation gate. One green run could be luck; three in a row is signal.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase E &mdash; PR body update + post-merge steps</p>
+  <p class="phase-what">Drop the "advisory only" callout from PR #46. Document the <code>gh api</code> command to re-add "Network e2e / Status" to <code>dev</code>'s required-checks ruleset (manual user step post-merge).</p>
+  <p class="phase-why">Network e2e on <code>dev</code> was made advisory in PR #46 due to the CI failures. Sharding fixes the CI failures. Time to re-require the check.</p>
+</div>
+
+<h2>What could go wrong (safety review)</h2>
+
+<h3>Probe code shipping to production</h3>
+<p>Phase C re-introduces probe code temporarily. If we forget to strip it, the production extension bundle would leak protocol details to the browser console.</p>
+<p><strong>How we prevent it:</strong></p>
+<ul>
+  <li>All probes gated by a build-time flag (<code>VITE_E2E_PROBE</code>). When unset, Vite tree-shakes the probe call sites.</li>
+  <li><strong>Phase A.2's bundle-grep CI step</strong> &mdash; this is the actual guarantee. Permanently in the workflow. If a probe string survives to <code>dist/chrome</code>, the CI fails.</li>
+  <li>Probe payloads contain only method names, timestamps, elapsed-ms, batch sizes. Never addresses, balances, or anything sensitive.</li>
+</ul>
+
+<h3>Sharding cost explosion</h3>
+<p>5 parallel runners instead of 1 = 5x the GitHub Actions concurrent cost.</p>
+<p><strong>How we manage it:</strong></p>
+<ul>
+  <li>Paths-filter still restricts to PRs that touch network-relevant code.</li>
+  <li>Total runner-minutes: 5 runners &times; 18 min &asymp; 90 vs current 1 &times; 35 = 35. That's ~2.6&times; the runner cost for ~2&times; faster wall-time feedback. Acceptable.</li>
+  <li>Each shard has a 30-minute timeout (down from 60), so a runaway shard can't burn extra budget.</li>
+</ul>
+
+<h3>TokenBalance auto-refresh causing flicker</h3>
+<p>Page reads cached value first, then async refresh arrives &mdash; user briefly sees old then new value.</p>
+<p><strong>How we handle it:</strong> the existing component already subscribes to balance-updated events &mdash; we're just triggering them more reliably. If the flicker is noticeable, the existing <code>BalanceView</code> component already uses a spinner pattern (subscribed to TaskService progress) we can apply later. Not a blocker for this PR.</p>
+
+<h3>The "wait: NO_WAIT" fix candidate weakening test coverage</h3>
+<p>If we switch the 2 slow tests to <code>wait: "NO_WAIT"</code>, we stop waiting for the transaction to be mined before checking the assertion. This is fine IF the test's real assertion is about the popup UI or the dApp's RPC response shape, not about the on-chain mined state. Both target tests' assertions ARE popup-shape, so it's safe.</p>
+
+<h2>Open questions (gating approval)</h2>
+
+<div class="q">
+  <p class="q-question">1. 5 concurrent GitHub Actions runners per PR &mdash; is the cost acceptable?</p>
+  <p class="q-context">paths-filter restricts which PRs trigger this, so it&rsquo;s only network-related work that pays the cost. Still worth confirming.</p>
+</div>
+
+<div class="q">
+  <p class="q-question">2. If the page-level TokenBalance fix isn&rsquo;t enough &mdash; willing to escalate to opus&rsquo;s service-level fix as a follow-up?</p>
+  <p class="q-context">The page-level fix is the safer first attempt. If the e2e test poll still times out after this fix lands, we&rsquo;d need to fix the service-level race in <code>onTransactionUpdated</code> separately.</p>
+</div>
+
+<div class="q">
+  <p class="q-question">3. 2h time-box starts from probe-commit-push, not from probe-data-capture &mdash; OK?</p>
+  <p class="q-context">Includes CI iteration overhead. The alternative is "2h from when we have traces in hand" which is more generous but harder to bound.</p>
+</div>
+
+<div class="q">
+  <p class="q-question">4. Slow-test fix: if <code>getTxReceipt</code> dominates the trace, switch both tests to <code>wait: "NO_WAIT"</code>?</p>
+  <p class="q-context">Most likely concrete fix per codex. The tests' assertions don't require mined receipts; they assert on popup shape.</p>
+</div>
+
+<h2>Why three plans + audits?</h2>
+<p>Same Tier A protocol from PR #46. Three plans written in parallel: main, codex (xhigh), opus 4.7 subagent. Codex final-reviewed the consolidated version.</p>
+
+<p><strong>What this process actually caught:</strong></p>
+<ul>
+  <li>Main plan said N=4 shards. Codex traced vitest's SHA-1 distribution and identified that N=4 clusters both slow files together. N=5 splits them.</li>
+  <li>Main plan said "TokenBalance: await refresh on mount." Codex caught that <code>refreshTokenBalance</code> is enqueue-only &mdash; awaiting it gives nothing. Fixed to fire-and-forget.</li>
+  <li>Main plan didn't extend the <code>extension-network</code> paths-filter for TokenBalance code. Codex caught that future TokenBalance-only bugfix PRs would silently skip the network gate.</li>
+  <li>Main plan didn't include the bundle-grep CI step. Opus argued this was the recovery PR's outstanding follow-up; included.</li>
+  <li>Codex's final-review found 3 wording/spec corrections: bundle-grep step had a broken bash glob and wrong env-var visibility; probe table incorrectly attributed <code>multi-account-from</code> to the NO_FROM path; diagnostic test wouldn't actually be routed by filename prefix.</li>
+</ul>
+
+<h2>Estimated effort</h2>
+<p><strong>6-12 engineering hours</strong>, spread across the phases. Sharding 2-3h + TokenBalance 1-2h + slow-test 2h time-boxed + iteration buffer.</p>
+
+<div class="box ok">
+  <p><strong>What you decide next:</strong></p>
+  <ol style="margin: 0.4rem 0 0 1.5rem; padding: 0;">
+    <li>Approve the plan as-is &rarr; I start Phase A (sharding infrastructure).</li>
+    <li>Approve with changes &rarr; tell me what to adjust.</li>
+    <li>Reject &rarr; we replan.</li>
+  </ol>
+  <p style="margin-top: 0.6rem; margin-bottom: 0;">There&rsquo;s a second approval gate at Phase C.2 (after probe data is captured) where you decide between applying the fix candidate or shipping with the slow tests documented.</p>
+</div>
+
+<div class="footer">
+  <p>Source plan: <code>implementations-plan/network-followups/plan.md</code> &middot; Audit transcripts in the same directory.</p>
+  <p>Generated 2026-05-24.</p>
+</div>
+
+</main>
+</body>
+</html>

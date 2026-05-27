@@ -52,6 +52,10 @@ wallet-core  →  wallet-crypto  →  extension-messaging  →  aztec-runtime  �
 
 Each package can import only the layers below it. `wallet-bridge` deliberately does NOT depend on `aztec-runtime`. `wallet-core` has `chrome.*` banned via biome `noRestrictedGlobals`.
 
+### Custom RPC schema patch (`registerToken`)
+
+`registerToken` is added to `@aztec/wallet-sdk`'s `WalletSchema` at runtime via three identical inline files: `packages/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts`, `packages/faucet/src/lib/nulo-schema-patch.ts`, `packages/playground/src/lib/nulo-schema-patch.ts`. Each is **side-effect only** (no exports) and is imported as the first import in the module that constructs the wallet-sdk client. Drift between the three copies is pinned by [`packages/wallet-bridge/src/dispatcher.test.ts`](./packages/wallet-bridge/src/dispatcher.test.ts) (reachability test imports the extension's copy and asserts shape). When adding a new Nulo-custom RPC, update all three copies AND add a paired reachability assertion. See [`packages/wallet-bridge/README.md`](./packages/wallet-bridge/README.md) "Custom RPC methods" for the full contract.
+
 ## Extension component model (L0–L6)
 
 Six layers, low → high. A layer can import only from layers below it. Enforced via `biome.json` `noRestrictedImports` overrides.

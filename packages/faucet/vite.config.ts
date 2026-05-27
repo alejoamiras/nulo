@@ -8,10 +8,16 @@ const COOP_COEP_HEADERS = {
 	"Cross-Origin-Embedder-Policy": "require-corp",
 }
 
+// Dev server port. Defaults to 5176 for local DX; the e2e network harness
+// overrides this per-worktree via FAUCET_DEV_PORT so parallel agents don't
+// collide. strictPort is only on for local dev — when the harness picks a
+// port, Vite must be allowed to bind to whatever it allocates.
+const FAUCET_DEV_PORT = Number(process.env.FAUCET_DEV_PORT) || 5176
+
 export default defineConfig({
 	server: {
-		port: 5176,
-		strictPort: true,
+		port: FAUCET_DEV_PORT,
+		strictPort: !process.env.FAUCET_DEV_PORT,
 		// bb.js threaded wasm requires cross-origin isolation. Same headers
 		// ship in production via public/_headers (Cloudflare Pages).
 		headers: COOP_COEP_HEADERS,
