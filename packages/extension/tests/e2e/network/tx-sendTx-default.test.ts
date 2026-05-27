@@ -67,17 +67,24 @@ test.skipIf(!hasConfig)(
 
 		await approveExecute(execPopup)
 
-		// 90s budget because, even with `wait: "NO_WAIT"` removing receipt
-		// mining from the path, the wallet still PROVES the tx before
-		// submission. On CI's shard 3 the prover queue is pressured by
-		// fee-methods.test.ts running first (4 real fee-juice tx flows),
-		// and WASM proving without the local accelerator takes ~30-50s for
-		// each prove there. Empirically: Phase 4 acceptance run sized at 30s
-		// failed deterministically on 4 of 5 runs; ~3× margin chosen.
-		// Local M-series WASM run (post-accelerator-off, same shard 3
-		// ordering): 6 tests in 106s combined → tx-sendTx-default fits in
-		// ~10-20s. CI runner is ~4× slower under prover-queue load.
-		const result = await waitForPgResult(page, "sendTx", seqTx, 90_000)
+		// 180s budget chosen empirically by the Phase 4 acceptance gate:
+		//   - 30s failed deterministically (4 of 5 runs) — prover starts cold
+		//   - 90s failed too (split fee-methods to its own job didn't help) —
+		//     so the bottleneck is the runner-pool prover time itself,
+		//     not the same-shard queue pressure
+		// Per codex audit session 019e6743-2fb7-7df3-bad7-6cf503cf2338 §1
+		// (Phase 4 follow-up): 180s is the hosted-runner-prover envelope.
+		// NO_WAIT already trims the post-submit side; the wallet still does
+		// buildAndEstimateTxRequest → proveTxTask → sendTxTask before the
+		// dApp's promise settles. Local M-series WASM equivalent: <15s.
+		const t0 = Date.now()
+		const result = await waitForPgResult(page, "sendTx", seqTx, 180_000)
+		const waitMs = Date.now() - t0
+		// Print to CI log for runner-envelope tuning. Codex audit suggested
+		// stage-level (simulating/proving/submitting) timing in follow-up
+		// if 180s also flakes; this wrapper timing is the minimum viable
+		// diagnostic that doesn't require wallet code changes.
+		console.log(`[tx-sendTx-default] waitForPgResult settled in ${waitMs}ms`)
 		expect(["ok", "error"]).toContain(result.status)
 	},
 )
