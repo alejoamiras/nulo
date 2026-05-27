@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Fast-path internal views — ELI5</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.55 -apple-system, system-ui, "Helvetica Neue", sans-serif; max-width: 720px; margin: 3rem auto; padding: 0 1.25rem; color: #1c1c1c; background: #fafafa; }
+  @media (prefers-color-scheme: dark) { body { color: #e8e8e8; background: #161616; } code, pre { background: #222 !important; color: #f1f1f1 !important; } .arm { background: #1f1f1f !important; border-color: #333 !important; } }
+  h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; border-bottom: 1px solid #ddd; padding-bottom: .25rem; }
+  h3 { font-size: 0.98rem; margin: 1.25rem 0 .25rem; }
+  p, li { margin: .4rem 0; }
+  code { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; background: #eee; padding: 1px 5px; border-radius: 3px; }
+  pre { background: #eee; padding: .75rem; border-radius: 5px; overflow-x: auto; font-size: 13px; }
+  .lede { color: #555; font-style: italic; }
+  .arm { display: block; border: 1px solid #ccc; background: #fff; padding: .6rem .9rem; margin: .4rem 0; border-radius: 4px; }
+  .pos { color: #186a3b; }
+  .neg { color: #922b21; }
+  .neutral { color: #555; }
+  .q { font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; margin: .75rem 0; font-size: 14px; }
+  th, td { border: 1px solid #ccc; padding: .35rem .55rem; text-align: left; }
+  th { background: #f0f0f0; }
+  @media (prefers-color-scheme: dark) { th { background: #222; } td, th { border-color: #444; } }
+</style>
+</head>
+<body>
+
+<h1>Fast-path for internal balance reads</h1>
+<p class="lede">A small, focused follow-up to PR #56. We make balance refresh and gas-balance reads measurably faster by sending the "easy" calls directly to the chain node — bypassing a slow gate they don't need.</p>
+
+<h2>1. What this PR does in one sentence</h2>
+<p>When our wallet asks "how much of token X do I own?" on a public token, it currently goes through a heavy proving pipeline. This PR lets it skip the pipeline for read-only public questions, which is what it was already doing for dApp simulations. We're closing the gap between "internal" and "external" balance reads.</p>
+
+<h2>2. The five-second background</h2>
+<p>Aztec has two ways to "ask" a contract a question:</p>
+<ul>
+  <li class="arm"><b>Through the kernel (slow path):</b> goes through the wallet's account contract, runs a kernel circuit, validates signatures and auth witnesses. Required for anything that <i>does</i> something (private transfers, complex public writes). Optionally also for <i>asking</i> things.</li>
+  <li class="arm"><b>Direct to node (fast path):</b> the chain node runs the function and returns the answer. No kernel. No auth. Only works for <code>public + static</code> functions — those marked read-only at compile time. Available since Aztec wallet-sdk 4.2.</li>
+</ul>
+<p>The fast path is roughly an order of magnitude faster for read-only public calls because it skips the kernel proving setup AND a global lock the wallet holds while proving transactions.</p>
+
+<h2>3. What we already did, and what we missed</h2>
+<table>
+  <tr><th>Place that asks balance questions</th><th>Today</th></tr>
+  <tr><td>A dApp asking through <code>aztec_simulateTx</code></td><td><span class="pos">✓ uses fast path</span> (shipped v0.14.7)</td></tr>
+  <tr><td>Our own UI refreshing token balances (balance-projector)</td><td><span class="neg">✗ slow path</span></td></tr>
+  <tr><td>Our own UI checking gas balance (FeeJuice)</td><td><span class="neg">✗ slow path</span></td></tr>
+</table>
+<p>This PR extends the same fast-path optimization to those last two — the wallet's own internal reads.</p>
+
+<h2>4. Why now / why this is worth doing</h2>
+<ul>
+  <li><b>It's the same lock as proving.</b> If you submit a transaction, the wallet starts proving (can take seconds to minutes). During that time, a balance refresh sits behind the same lock. Skipping the lock for reads removes that user-visible stall.</li>
+  <li><b>Every primitive already exists upstream.</b> We're not inventing anything — we're calling the same <code>simulateViaNode</code> helper our dApp side already calls. The risk surface is small.</li>
+  <li><b>Free correctness improvement.</b> Both arms (fast and slow) anchor at the same chain block, so the answers are identical. We pinned that invariant in tests.</li>
+</ul>
+
+<h2>5. What changes in the code</h2>
+<p>One helper file gets smarter. Today it splits calls into two groups:</p>
+<pre>          ┌── PUBLIC + PRIVATE bundled    →  slow path (one kernel pass)
+calls  ───┤
+          └── UTILITY reads (private balances)  →  parallel, off the kernel</pre>
+<p>After this PR, it splits into three:</p>
+<pre>          ┌── PUBLIC + isStatic           →  FAST PATH (direct to node)  ◀ new
+calls  ───┼── everything else PUBLIC+PRIVATE  →  slow path
+          └── UTILITY reads                →  parallel, off the kernel</pre>
+<p>The fast path and the slow path run <i>at the same time</i> (in parallel) when a batch has both kinds. The slow path goes away entirely when every call is fast-eligible — which is the common case for balance refresh.</p>
+
+<h2>6. What could go wrong (and what we do about it)</h2>
+<table>
+  <tr><th>Concern</th><th>How we handle it</th></tr>
+  <tr><td>The two arms anchor at different blocks → inconsistent balances on screen</td><td>Both arms use the same <i>block header</i> as their anchor. Same pattern upstream's BaseWallet already uses.</td></tr>
+  <tr><td>The fast helper had a class-rehydration bug twice in the dApp version</td><td>That bug happened because data crossed an extension-process boundary. Our internal helper never crosses a boundary — the calls stay in the service-worker process the whole time.</td></tr>
+  <tr><td>Fast helper errors at runtime (network blip, node hiccup)</td><td>Silent fallback: we re-route the fast calls through the slow path. User sees a slightly slower refresh, not an error.</td></tr>
+  <tr><td>A contract claims to be "static" but isn't</td><td>Noir's compiler enforces this at compile time. If the artifact says static, it's static.</td></tr>
+</table>
+
+<h2>7. How we'll know it worked</h2>
+<ul>
+  <li><b>Unit tests:</b> pin the routing decision (when does fast vs slow get picked?) and the silent-fallback behavior.</li>
+  <li><b>Integration test:</b> spin up a real Aztec sandbox, run balance reads through the helper, assert the answers match what the slow path produces.</li>
+  <li><b>Manual smoke:</b> open the popup, refresh tokens, watch it feel faster — especially while a transaction is proving in the background.</li>
+</ul>
+
+<h2>8. Open questions the plan calls out</h2>
+<ul>
+  <li><span class="q">Should we cache the block header across batches?</span> balance-projector chunks 50 tokens into 5 batches of 12; each currently re-fetches the header. Small cost, probably skip for v1. <span class="neutral">→ "follow up if measurable"</span></li>
+  <li><span class="q">Should we also refactor the dApp-side fast-path orchestrator?</span> No — different output contract (it must merge into one upstream result; ours unpacks per-call). Different problems, same primitive.</li>
+</ul>
+
+<h2>9. Process for this work</h2>
+<p>This is a <b>Tier B plan</b> (medium, contained). That means:</p>
+<ol>
+  <li>This document (the plan)</li>
+  <li>Two independent reviews run in parallel — one by Opus, one by Codex — both asked to attack it adversarially</li>
+  <li>Consolidate findings into a v2 plan</li>
+  <li>One more critical review pass by Codex on the consolidated plan</li>
+  <li>I show you the final plan + Codex's verdict</li>
+  <li>You say Go (or send it back for changes)</li>
+  <li>Implementation</li>
+  <li>Post-implementation review by Codex on the actual diff</li>
+  <li>Fix loop if needed</li>
+  <li>Squash-merge to <code>dev</code></li>
+</ol>
+
+</body>
+</html>

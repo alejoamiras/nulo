@@ -98,26 +98,48 @@ export class BalanceProjector {
 		try {
 			const calls: [CallAction | EncodedCallAction, number, boolean, ViewFn][] = []
 			const perBalance: Record<number, { privateBalance: string; publicBalance: string }> = {}
+			// Cache so the two passes below don't re-fetch the same token metadata.
+			const tokenCache = new Map<number, Awaited<ReturnType<typeof this.tokens.getTokenRaw>>>()
 
+			// Pass 0: initialize perBalance entries + populate the token cache.
 			for (let i = 0; i < balances.length; i++) {
 				const balance = balances[i]
 				perBalance[balance.id] = {
 					privateBalance: balance.privateBalance ?? "0",
 					publicBalance: balance.publicBalance ?? "0",
 				}
-				const token = await this.tokens.getTokenRaw(balance.token)
+				tokenCache.set(balance.id, await this.tokens.getTokenRaw(balance.token))
+			}
 
-				if (token.balanceOfPrivateFn) {
-					const fn = BalanceOfPrivateFn.new(token.balanceOfPrivateFn.name, token.balanceOfPrivateFn.impl)
-					await this.enqueueCall(calls, fn, token, account, i, true)
-				} else {
-					perBalance[balance.id].privateBalance = "0"
-				}
+			// Pass 1: enqueue every PUBLIC call across all balances first.
+			// Two-pass produces a chunk shape [pub_0..pub_{N-1}, priv_0..priv_{N-1}]
+			// so the leading PUBLIC+isStatic prefix in `batchedViewSimulation`
+			// covers the whole public arm. A per-token swap WOULD NOT work — it
+			// produces [pub_0, priv_0, pub_1, priv_1, …], breaking the prefix
+			// at the first private call and reducing fast-path coverage to one
+			// call total.
+			for (let i = 0; i < balances.length; i++) {
+				const balance = balances[i]
+				const token = tokenCache.get(balance.id)
+				if (!token) continue // unreachable: pass 0 populated for every balance
 				if (token.balanceOfPublicFn) {
 					const fn = BalanceOfPublicFn.new(token.balanceOfPublicFn.name, token.balanceOfPublicFn.impl)
 					await this.enqueueCall(calls, fn, token, account, i, false)
 				} else {
 					perBalance[balance.id].publicBalance = "0"
+				}
+			}
+
+			// Pass 2: enqueue every PRIVATE call across all balances second.
+			for (let i = 0; i < balances.length; i++) {
+				const balance = balances[i]
+				const token = tokenCache.get(balance.id)
+				if (!token) continue // unreachable: pass 0 populated for every balance
+				if (token.balanceOfPrivateFn) {
+					const fn = BalanceOfPrivateFn.new(token.balanceOfPrivateFn.name, token.balanceOfPrivateFn.impl)
+					await this.enqueueCall(calls, fn, token, account, i, true)
+				} else {
+					perBalance[balance.id].privateBalance = "0"
 				}
 			}
 
