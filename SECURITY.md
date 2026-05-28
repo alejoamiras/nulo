@@ -306,6 +306,58 @@ include the Bun version so a bump invalidates stale state.
 opacity. Migrated from `bun.lockb` once Bun 1.3.13's text-lockfile
 behavior was validated against the install + typecheck gates.
 
+## Binary dependencies
+
+`accelerator-server` (Linux x86_64 binary from
+[`alejoamiras/aztec-accelerator`](https://github.com/alejoamiras/aztec-accelerator))
+is installed on every CI runner that executes the network-e2e suite, via
+the [`setup-accelerator-server`](./.github/actions/setup-accelerator-server/action.yml)
+composite action. Trust posture:
+
+- **Version + SHA-256 pinned in repo.** The composite action requires
+  callers to pass `expected_sha256`; the workflow
+  ([`_network-e2e.yml`](./.github/workflows/_network-e2e.yml)) pins it as
+  a literal. Bumping the version requires updating both fields together
+  in the same PR. Reviewers MUST treat any change to the binary URL,
+  version, or expected hash as security-relevant.
+- **SHA-256 sidecar from the same release is a sanity check, not a
+  security boundary.** A release-origin compromise would replace the
+  tarball AND the sidecar together. The repo-pinned hash is the
+  authoritative anchor.
+- **Bump procedure**:
+  1. Download the new tarball: `curl -sSfL <BASE>/<TARBALL> -o /tmp/t.tgz`.
+  2. Compute the hash: `shasum -a 256 /tmp/t.tgz`.
+  3. Update `version` AND `expected_sha256` in `_network-e2e.yml`'s
+     `setup-accelerator-server` step in one commit.
+  4. CI verifies on first install; mismatch is loud (workflow goes red).
+- **Single-maintainer trust model.** `alejoamiras/aztec-accelerator` is
+  a single-maintainer repo. The maintainer is the same person who owns
+  Nulo, so the trust model is what it is. Defense: pinning + per-bump
+  PR review.
+
+**Distribution scope.** We download + execute the binary on ephemeral CI
+runners only. We do NOT vendor it into the repo, ship it with the
+extension, or expose it on a public network. The binary writes to
+`~/.aztec-accelerator/versions/` on the runner (transient — destroyed
+with the VM) and listens on `127.0.0.1:59833` only.
+
+**Origin authorization.** The binary's `ALLOWED_ORIGINS` env var is
+deliberately left unset, which (per upstream `accelerator-server.rs:32-49`
++ `server.rs:210`) auto-approves all origins. Safe in our threat model
+because (a) CI runners are single-tenant, (b) `pull_request` workflows
+from forks do not receive repo secrets, (c) the only call traffic on
+the runner originates from the wallet we built. See
+[`implementations-plan/accelerator-server-ci/lessons/phase-1.md`](./implementations-plan/accelerator-server-ci/lessons/phase-1.md)
+for the full source-read.
+
+**License posture.** The `@alejoamiras/aztec-accelerator` npm SDK is
+AGPL-3.0-only; the server binary inherits the same license. We invoke
+it as a build/test tool — no AGPL §13 (network-access disclosure)
+trigger is obvious in this CI-internal use (no end users reached, no
+public network endpoint). This is not legal advice; if the integration
+scope ever expands (e.g. exposing accelerator-server in a deployed
+Nulo service), redo the analysis.
+
 **CVE-on-Friday runbook.** When an advisory drops for a package newer than
 the 7-day gate window:
 1. Identify the patched version from the advisory.

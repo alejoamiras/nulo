@@ -61,6 +61,14 @@ on:
         required: false
         type: string
         default: ""
+      disable_accelerator:
+        description: |
+          Skip accelerator-server install + startup + hard-fail enforcement.
+          Wallet falls back to in-browser WASM proving (pre-PR baseline).
+          Rollback flag for emergencies. See plan §10 + CI.md "Accelerator in CI".
+        required: false
+        type: boolean
+        default: false
     secrets:
       SPONSORED_FPC_SALT:
         required: false
@@ -80,6 +88,14 @@ jobs:
       # multi-account-from). See implementations-plan/network-followups/slow-tests-hypotheses.md
       # for the deferred investigation. Locally these still run (env unset).
       NULO_E2E_SKIP_DEFERRED_SLOW: "1"
+      # Baked into the wallet build at `bun run build:chrome` time (via the
+      # agent.sh subprocess). When "1", `packages/extension/src/accelerator/config.ts`
+      # sets `ACCELERATOR_REQUIRED=true`, which makes the offscreen factory
+      # construct `ProductionPxeFactory` in required-mode (eager
+      # checkAcceleratorStatus preflight + onPhase throw on
+      # "fallback"/"denied"). When empty, the wallet behaves exactly like
+      # the production build (silent WASM fallback if no accelerator).
+      VITE_NULO_ACCELERATOR_REQUIRED: ${{ inputs.disable_accelerator && '' || '1' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -92,6 +108,81 @@ jobs:
           skip_cli: ${{ inputs.aztec_node_url != 'http://localhost:8080' }}
 
       - uses: ./.github/actions/setup-puppeteer
+
+      # Install + verify + start accelerator-server. Skipped when the
+      # rollback flag is set; in that case the wallet build's
+      # VITE_NULO_ACCELERATOR_REQUIRED is also empty so chain-runtime.ts
+      # behaves like production (silent WASM fallback).
+      - uses: ./.github/actions/setup-accelerator-server
+        if: '!inputs.disable_accelerator'
+        with:
+          version: "1.0.1"
+          # Computed locally via `shasum -a 256` on the v1.0.1 tarball.
+          # Cross-checked against the upstream `.sha256` sidecar (which is
+          # a sanity confirmation, NOT a security boundary — a release-
+          # origin compromise would replace both). See SECURITY.md
+          # "Binary dependencies" for the bump procedure.
+          expected_sha256: 86344c2b778c381d809a6eb6887b8a9b9fe2d0b4714c64c5bd3477f758a0b10f
+
+      - name: Start accelerator-server
+        if: '!inputs.disable_accelerator'
+        shell: bash
+        env:
+          # Skip the server's first-prove bb-download tax by handing it the
+          # pre-installed binary from setup-aztec. The per-arch path is the
+          # native ELF, not the Node-wrapped .bin/bb shim. If setup-aztec
+          # ever shifts layout, the pre-check below dumps the structure.
+          BB_BINARY_PATH: $HOME/.aztec/current/node_modules/@aztec/bb.js/build/amd64-linux/bb
+          # ALLOWED_ORIGINS deliberately unset:
+          #   - upstream accelerator-server.rs:32-49 documents that when
+          #     unset, auth_manager=None → server.rs:210 auto-approves all
+          #     origins (headless-mode contract). Confirmed in lessons/phase-1.md.
+          #   - the README's example `ALLOWED_ORIGINS=http://localhost:5173`
+          #     is WRONG for our extension (our offscreen origin is
+          #     chrome-extension://<id>, not the playground origin).
+          #     Setting it to that would 403 every /prove → silent WASM
+          #     fallback (which Layer 2 catches but as a confusing error).
+          # tracing-subscriber default = info; emits "Received /prove request"
+          # for each prove + version-cache info we tail in the advisory step.
+          RUST_LOG: "info"
+        run: |
+          set -euo pipefail
+          if [ ! -x "$BB_BINARY_PATH" ]; then
+            echo "::error::BB_BINARY_PATH=$BB_BINARY_PATH not executable. setup-aztec layout may have shifted."
+            ls -la "$HOME/.aztec/" || true
+            ls -la "$HOME/.aztec/current/" 2>/dev/null || true
+            find "$HOME/.aztec" -name bb -type f 2>/dev/null | head -10 || true
+            exit 1
+          fi
+          nohup accelerator-server > /tmp/accelerator-server.log 2>&1 &
+          echo "ACCELERATOR_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for accelerator-server ready (Layer 1 preflight)
+        if: '!inputs.disable_accelerator'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for _i in $(seq 1 30); do
+            if curl -sSfL http://127.0.0.1:59833/health > /tmp/accelerator-health.json 2>/dev/null; then
+              # bb_available is the authoritative liveness signal. Version-
+              # cache matching is enforced later by Layer 2's eager
+              # checkAcceleratorStatus in chain-runtime.ts, where the error
+              # message includes the SDK's expected version (clearer than a
+              # workflow-level jq failure).
+              if jq -e '.bb_available == true' /tmp/accelerator-health.json > /dev/null; then
+                echo "Accelerator ready: $(cat /tmp/accelerator-health.json)"
+                exit 0
+              fi
+              echo "::error::accelerator-server alive but bb_available != true"
+              cat /tmp/accelerator-health.json
+              tail -30 /tmp/accelerator-server.log || true
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "::error::accelerator-server failed to come up in 30s"
+          tail -50 /tmp/accelerator-server.log || true
+          exit 1
 
       - name: Run network e2e via agent
         env:
@@ -139,6 +230,43 @@ jobs:
           fi
           echo "Bundle clean: no probe strings."
 
+      # Advisory only — does NOT exit non-zero. Layer 2 in chain-runtime.ts
+      # is the authoritative hard-fail; this step surfaces server-side
+      # activity counts in the run summary for measurement / debugging.
+      # See plan §8 for layer design.
+      - name: Surface accelerator activity (advisory)
+        if: always() && !inputs.disable_accelerator
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f /tmp/accelerator-server.log ]; then
+            echo "::warning::accelerator-server log missing — possible startup failure"
+            exit 0
+          fi
+          # Verified literal pattern from accelerator-server source
+          # (server.rs:392: `tracing::info!("Received /prove request");`).
+          PROVE_COUNT=$(grep -c 'Received /prove request' /tmp/accelerator-server.log || true)
+          echo "::notice::accelerator-server log shows ${PROVE_COUNT} /prove requests this run"
+          {
+            echo "### accelerator-server activity"
+            echo "- /prove request lines: ${PROVE_COUNT}"
+            echo "- log size: $(wc -c < /tmp/accelerator-server.log) bytes"
+            echo "- last 5 lines:"
+            echo '```'
+            tail -5 /tmp/accelerator-server.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Shut down accelerator-server
+        if: always() && !inputs.disable_accelerator
+        shell: bash
+        run: |
+          if [ -n "${ACCELERATOR_PID:-}" ]; then
+            kill -TERM "${ACCELERATOR_PID}" 2>/dev/null || true
+            wait "${ACCELERATOR_PID}" 2>/dev/null || true
+          fi
+          pkill -TERM accelerator-server 2>/dev/null || true
+
       - name: Upload network e2e logs on failure
         if: failure()
         uses: actions/upload-artifact@v7
@@ -151,5 +279,7 @@ jobs:
             /tmp/aztec-*.log
             /tmp/anvil-*.log
             /tmp/nulo-probes-*.jsonl
+            /tmp/accelerator-server.log
+            /tmp/accelerator-health.json
           if-no-files-found: ignore
           retention-days: 7

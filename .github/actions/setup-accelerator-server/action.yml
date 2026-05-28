@@ -1,0 +1,86 @@
+name: Setup accelerator-server
+description: |
+  Install the headless aztec-accelerator server (Linux x86_64) for CI proving.
+  Verifies the downloaded tarball against a repo-pinned SHA-256 — not the
+  upstream sidecar, which a release-origin compromise would replace alongside
+  the tarball. Caches by version+SHA so cache invalidation tracks any change
+  in either input.
+
+  Adds the binary to PATH at $RUNNER_TEMP/accelerator-bin. No sudo. No
+  global filesystem mutation outside RUNNER_TEMP, which the runner reaps.
+
+  Bumping: update `version` AND `expected_sha256` in the caller workflow,
+  computed via `shasum -a 256` on a freshly downloaded tarball. See
+  SECURITY.md "Binary dependencies" for the procedure.
+
+inputs:
+  version:
+    description: |
+      accelerator-server release tag suffix. The full tag is
+      `accelerator-v${version}` and the asset is
+      `accelerator-server-${version}-linux-x86_64.tar.gz`.
+    required: false
+    default: "1.0.1"
+  expected_sha256:
+    description: |
+      Repo-pinned SHA-256 of the linux-x86_64 tarball. REQUIRED — not
+      defaulted. Forcing the caller to pass it makes accidental version
+      bumps fail loudly at the verify step (instead of silently installing
+      a different binary). Computed via `shasum -a 256 <tarball>`.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Compute install dir
+      id: paths
+      shell: bash
+      run: |
+        echo "bin_dir=$RUNNER_TEMP/accelerator-bin" >> "$GITHUB_OUTPUT"
+
+    - name: Cache accelerator-server binary
+      id: cache
+      uses: actions/cache@v5
+      with:
+        path: ${{ steps.paths.outputs.bin_dir }}
+        key: ${{ runner.os }}-accelerator-server-${{ inputs.version }}-${{ inputs.expected_sha256 }}
+
+    - name: Download + verify + install
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        VER: ${{ inputs.version }}
+        EXPECTED_SHA: ${{ inputs.expected_sha256 }}
+        BIN_DIR: ${{ steps.paths.outputs.bin_dir }}
+      run: |
+        set -euo pipefail
+        BASE="https://github.com/alejoamiras/aztec-accelerator/releases/download/accelerator-v${VER}"
+        TARBALL="accelerator-server-${VER}-linux-x86_64.tar.gz"
+        TMP=$(mktemp -d)
+        cd "$TMP"
+        curl -sSfL "${BASE}/${TARBALL}" -o "${TARBALL}"
+
+        ACTUAL=$(shasum -a 256 "${TARBALL}" | awk '{print $1}')
+        if [ "${ACTUAL}" != "${EXPECTED_SHA}" ]; then
+          echo "::error::accelerator-server SHA-256 mismatch."
+          echo "  expected: ${EXPECTED_SHA}"
+          echo "  actual:   ${ACTUAL}"
+          echo "  url:      ${BASE}/${TARBALL}"
+          echo "  Update SECURITY.md procedure if bumping version."
+          exit 1
+        fi
+
+        tar -xzf "${TARBALL}"
+        mkdir -p "${BIN_DIR}"
+        mv accelerator-server "${BIN_DIR}/accelerator-server"
+        chmod +x "${BIN_DIR}/accelerator-server"
+
+    - name: Add to PATH
+      shell: bash
+      run: echo "${{ steps.paths.outputs.bin_dir }}" >> "$GITHUB_PATH"
+
+    - name: Verify executable
+      shell: bash
+      run: |
+        which accelerator-server
+        ldd "$(which accelerator-server)" || true

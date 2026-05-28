@@ -36,6 +36,34 @@ jobs:
       - name: Biome check
         run: bun run lint
 
+      # Defensive review-time guard, NOT a security boundary. The
+      # accelerator-required CI mode (chain-runtime.ts onPhase throw) is
+      # bypassed by calling `prover.setForceLocal(true)` on the SDK's
+      # AcceleratorProver. We don't expect production code to ever call
+      # this — fail loud if it appears outside test files. Bracket access
+      # like `prover["setForceLocal"](true)` bypasses this grep; we accept
+      # that because this is review defense, not a hard constraint. Biome
+      # has no AST-call matcher in our version (only noRestrictedGlobals
+      # / Imports / Types), so a grep is the honest tool here.
+      # See implementations-plan/accelerator-server-ci/plan.md §7.
+      - name: Forbid setForceLocal outside test files
+        shell: bash
+        run: |
+          set -euo pipefail
+          HITS=$( {
+            grep -RnE 'setForceLocal\b' \
+              --include='*.ts' --include='*.vue' \
+              --exclude-dir='node_modules' --exclude-dir='dist' \
+              packages/ 2>/dev/null \
+            | grep -vE '(__tests__|\.test\.ts|\.spec\.ts)' \
+            || true
+          } )
+          if [ -n "$HITS" ]; then
+            echo "::error::setForceLocal called outside test files — would bypass accelerator-required CI enforcement"
+            echo "$HITS"
+            exit 1
+          fi
+
       # Catches malformed/deprecated Renovate config keys. Does NOT catch
       # semantic issues like packageRules precedence bugs or the bun
       # packageManager / setup-bun action drift — those need manual review.

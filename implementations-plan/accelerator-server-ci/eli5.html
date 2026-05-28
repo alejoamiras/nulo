@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ELI5 — accelerator-server CI integration</title>
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --accent: #2a5d8f;
+    --rule: #e0e0e0;
+    --bg: #fbfbfb;
+    --code-bg: #f1f1f1;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 5rem;
+    line-height: 1.6;
+    font-size: 17px;
+  }
+  h1 { font-size: 1.8rem; font-weight: 600; margin-top: 2.5rem; margin-bottom: 0.5rem; }
+  h2 { font-size: 1.3rem; font-weight: 600; margin-top: 2.5rem; margin-bottom: 0.5rem; border-bottom: 1px solid var(--rule); padding-bottom: 0.3rem; }
+  h3 { font-size: 1.05rem; font-weight: 600; margin-top: 1.6rem; margin-bottom: 0.3rem; color: var(--accent); }
+  p { margin: 0.6rem 0; }
+  ul { padding-left: 1.4rem; }
+  li { margin: 0.3rem 0; }
+  code { background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.92em; }
+  pre { background: var(--code-bg); padding: 0.8rem 1rem; border-radius: 4px; overflow-x: auto; font-size: 0.88em; }
+  pre code { background: none; padding: 0; }
+  .muted { color: var(--muted); }
+  .pill { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; background: var(--code-bg); font-size: 0.82em; color: var(--muted); }
+  .ascii { font-family: ui-monospace, "SF Mono", Menlo, monospace; white-space: pre; font-size: 0.85em; line-height: 1.45; }
+  .nav { margin: 1rem 0 2rem; padding: 0.8rem 1rem; background: white; border: 1px solid var(--rule); border-radius: 4px; }
+  .nav a { display: inline-block; margin-right: 1rem; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .meta { color: var(--muted); font-size: 0.9rem; }
+</style>
+</head>
+<body>
+
+<h1>The accelerator-server CI integration, in plain words</h1>
+<p class="meta">Companion to <a href="plan.md"><code>plan.md</code></a>. Aimed at a reader who has zero context on this project.</p>
+
+<div class="nav">
+  <strong>Other docs:</strong>
+  <a href="plan.md">plan.md</a>
+  <a href="plan-opus-draft.md">plan-opus-draft.md</a>
+  <a href="plan-codex-draft.md">plan-codex-draft.md</a>
+</div>
+
+<h2>What problem are we solving?</h2>
+
+<p>Nulo is a browser-extension crypto wallet that sends private transactions on Aztec — a Layer-2 network where every transaction is a zero-knowledge proof. Before a transaction can be sent, the wallet has to <em>generate</em> that proof. Proof generation is computationally heavy.</p>
+
+<p>Today, our test suite runs proof generation in the browser, in WebAssembly. WASM is portable but ~5× slower than native code. On our CI runners (shared cloud machines that vary in speed), some test runs finish in 2 seconds; some take over 3 minutes. That variance breaks our tests randomly — what we've been calling "CI flake."</p>
+
+<p>The fix: run a small native program on the CI runner called <code>accelerator-server</code> that does the proving job. It uses a battle-tested Rust binary (<code>bb</code>) instead of WASM, so it's fast <em>and</em> consistent.</p>
+
+<h2>What the wallet already does (so we have less to change)</h2>
+
+<p>The wallet's proving code already knows about <code>accelerator-server</code>. There's a small library called <code>@alejoamiras/aztec-accelerator</code> that the wallet uses to construct its proof generator. The library does this:</p>
+
+<ol>
+  <li>Check if <code>accelerator-server</code> is running on the local machine at <code>127.0.0.1:59833</code> (it pings a <code>/health</code> endpoint).</li>
+  <li>If yes → send the proof job to the server. Fast native proving. Done.</li>
+  <li>If no → quietly fall back to in-browser WASM. Slow but works.</li>
+</ol>
+
+<p>So the change here is <strong>not</strong> a code change to the wallet. It's a <strong>workflow change</strong> on the CI side: install <code>accelerator-server</code> on the runner before the tests start. The wallet will auto-detect it. Magic.</p>
+
+<h2>The "but" — quiet fallback is dangerous</h2>
+
+<p>Step 3 above is the trap. If <code>accelerator-server</code> crashes mid-test, the wallet quietly switches to WASM. Tests still pass (maybe), but now we're <em>silently</em> running the slow path — which means we wouldn't notice the regression until much later. And the whole point of installing accelerator was to <em>not</em> run on WASM in CI.</p>
+
+<p>So the plan needs a way to make this fallback <strong>loud</strong>. If the wallet ever falls back during a CI test, that test should fail. Hard.</p>
+
+<h2>The plan, phase by phase</h2>
+
+<h3>Phase 1 — Install the binary on the runner</h3>
+<p>Create a small reusable "composite action" at <code>.github/actions/setup-accelerator-server/action.yml</code>. It downloads the <code>accelerator-server</code> tarball from the upstream GitHub release, checks its SHA-256 hash against one we've <strong>pinned in our own repo</strong> (not the one shipped alongside the binary — that one could be replaced together with a compromised binary), and unpacks it onto the runner.</p>
+
+<h3>Phase 2 — Wire it into the network-e2e workflow</h3>
+<p>Modify <code>.github/workflows/_network-e2e.yml</code>. After the existing setup steps, add three things:</p>
+<ul>
+  <li><strong>Start the server</strong> in the background. Tell it where to find the <code>bb</code> binary (already on disk from our existing <code>setup-aztec</code> step) so it doesn't waste time downloading it.</li>
+  <li><strong>Wait for it to be ready</strong> — ping <code>/health</code> for up to 30 seconds, checking that it knows about our Aztec version AND that <code>bb</code> is loaded.</li>
+  <li><strong>After the tests run</strong>, look at the server's log. If we see zero proof requests came in, that means the wallet went WASM behind our back. Fail the workflow loudly.</li>
+</ul>
+
+<h3>Phase 3 — Make the wallet enforce "no fallback" too</h3>
+<p>Even with the server running, the wallet's library could still fall back silently (e.g. the server denies the request, or the response is malformed). To catch this <em>at the exact moment</em> it happens:</p>
+<ul>
+  <li>Add a small config module at <code>packages/extension/src/accelerator/config.ts</code> that holds the host/port and a <code>required</code> flag.</li>
+  <li>In <code>packages/aztec-runtime/src/pxe/chain-runtime.ts</code>, when <code>required</code> is on (set by the CI workflow via an env var), do two things: (a) check the server's health BEFORE starting the wallet, and throw an error if it's not ready; (b) install a callback on the prover that throws if it ever fires a "fallback" or "denied" phase.</li>
+</ul>
+<p>That's a small code change but it gives us per-test enforcement: any test that triggers a silent fallback dies immediately with a clear error pointing at the prove call that broke.</p>
+
+<h3>Phase 4 — Documentation and a kill switch</h3>
+<p>Add an input <code>disable_accelerator: true</code> to the workflow. If something goes badly wrong post-merge, one manual workflow-dispatch click flips us back to the pre-merge WASM-only behavior while we fix forward. Document the bump procedure in <code>SECURITY.md</code> (version + SHA-256 always pinned together), update <code>CLAUDE.md</code> + <code>CI.md</code> to reflect the new enforcement.</p>
+
+<h2>How we make the fallback loud — three layers</h2>
+
+<p>One layer catches what the others can't. Defense in depth:</p>
+
+<div class="ascii">
+Layer 1 — Pre-test probe (workflow step)
+    Did the server come up at all? Does it have bb loaded?
+    Misses: mid-test crash, per-test fallback
+
+Layer 2 — Runtime throw (wallet code)
+    onPhase callback throws if "fallback" or "denied" fires
+    Catches the failure at the exact prove call
+
+Layer 3 — Post-test log scrape (workflow step)
+    Did any proof requests reach the server at all?
+    Catches: tests crashed before Layer 2 could throw
+</div>
+
+<h2>Why one PR, not three?</h2>
+
+<p>Both the opus and codex parallel-draft authors argued for splitting this into 3 sequential PRs. I'm consolidating to one because:</p>
+<ul>
+  <li>The wallet's proving code already creates an <code>AcceleratorProver</code> instance unconditionally. There's no "spawn the server but don't use it yet" mode — once the server is up, the wallet finds it automatically. So a "Phase 1: shadow run" PR isn't physically possible without a separate code change to disable the wallet's detection, which we'd then undo in Phase 2. Round trip for nothing.</li>
+  <li>The total surface is small (~80 lines across the wallet runtime + config module + new offscreen hook).</li>
+  <li>The kill switch IS the granular rollback that 3 PRs would give you. If something breaks post-merge, flip <code>disable_accelerator: true</code> in a workflow_dispatch run; we're back to WASM in 30 seconds.</li>
+</ul>
+
+<p>The trade-off you should know: <strong>one PR has a bigger blast radius</strong>. If something subtle breaks (e.g. our offscreen <code>chrome-extension://</code> Origin header gets rejected by the server), all 5 shards on <code>dev</code> go red at once. The kill switch is the mitigation, but it's still a worse first impression than a staged rollout.</p>
+
+<h2>Open questions (what I don't know yet)</h2>
+
+<p>Each must be answered before the PR can merge. Most are spike-during-Phase-1 items, not blockers for approval.</p>
+
+<ul>
+  <li><strong>Q1 — Does the server accept our <code>chrome-extension://</code> Origin header?</strong>
+    The server has an <code>ALLOWED_ORIGINS</code> env var. When unset, all browser origins are auto-approved. We leave it unset for v1 and capture the actual Origin header from the log on the first run; tighten later if needed.</li>
+  <li><strong>Q2 — Is the <code>bb</code> binary actually where we think it is after <code>setup-aztec</code>?</strong>
+    Verified locally — it's at <code>~/.aztec/current/node_modules/.bin/bb</code>. Need one CI spike to confirm the same path on a fresh ubuntu runner.</li>
+  <li><strong>Q3 — Does the server's static binary actually run on ubuntu-latest's glibc?</strong>
+    Likely yes (the upstream README claims static binary), but we run <code>ldd</code> on first install to surface mismatches loudly.</li>
+  <li><strong>Q4 — What does the server's log look like?</strong>
+    Affects how we grep for prove-request counts in Layer 3. Spike during Phase 1.</li>
+  <li><strong>Q5 — What's the SHA-256 of the v1.0.1 tarball?</strong>
+    Compute and pin in the workflow caller before opening the PR.</li>
+</ul>
+
+<h2>How this links back to recent work</h2>
+
+<p>Last sprint we landed 7 PRs (#60–#66) trying to stabilize the network-e2e suite under CI prover-pool variability. We had to quarantine one test (<code>tx-sendTx-default</code>) and bump another's wait budget from 30s to 90s (<code>cancel-mid-prove</code>) because some runs of the runner pool were 90× slower than others on the same proof.</p>
+
+<p>If accelerator-server delivers what its README claims (native <code>bb</code> proving with consistent timing), <strong>both</strong> of those decisions become reversible. The follow-up plan would be:</p>
+<ul>
+  <li>Run the quarantined test with accelerator + see if it consistently finishes in &lt;30 seconds. If yes → un-quarantine.</li>
+  <li>Restore <code>cancel-mid-prove</code>'s 30s waits. If they pass → revert the 90s bumps.</li>
+</ul>
+
+<p>But that's a <em>separate</em> plan, after we measure. The current plan is just "land accelerator + make CI hard-fail if it ever falls back to WASM." We earn the right to un-quarantine by measuring first.</p>
+
+<h2>Security in plain words</h2>
+
+<ul>
+  <li><strong>We're trusting a single-maintainer GitHub repo for the binary.</strong> The maintainer is the same person who owns Nulo, so the trust model is already what it is. We pin the SHA-256 in our own repo so a compromised release alone can't replace the binary without us noticing.</li>
+  <li><strong>The server only listens on 127.0.0.1.</strong> It cannot accidentally be exposed to the public internet — the binding is hardcoded.</li>
+  <li><strong>Our CI runners are single-tenant.</strong> Each test shard gets its own fresh ubuntu VM. Nothing else is on the box.</li>
+  <li><strong>The binary is AGPL-3.0.</strong> We run it in CI; we never ship it to users. The AGPL "network deployment" clause (§13) is not triggered.</li>
+  <li><strong>One person shouldn't be able to quietly bypass the enforcement.</strong> A defensive lint rule blocks any code from calling <code>setForceLocal(true)</code> outside test files. Reviewers can still inspect workflow YAML changes for trust-relevant edits.</li>
+</ul>
+
+<h2>What would make me say "this isn't ready yet"</h2>
+<ul>
+  <li>If Q1 turns out negative — i.e. the server rejects our extension's Origin header — we need to either compute the chrome-extension ID at build time and pre-populate <code>ALLOWED_ORIGINS</code>, or get an upstream patch. Either is a delay.</li>
+  <li>If Q3 fails — i.e. the static binary needs a glibc newer than ubuntu-latest ships — we'd need to either build accelerator-server from source in CI, or switch to a different runner image. Significant delay.</li>
+  <li>If measurement shows accelerator is &lt;10% faster than WASM on CI — the entire plan stops paying back and we should consider reverting. But this would be very surprising.</li>
+</ul>
+
+</body>
+</html>

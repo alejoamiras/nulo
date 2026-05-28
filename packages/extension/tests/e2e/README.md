@@ -30,6 +30,26 @@ Internally `scripts/e2e/agent.sh`:
 
 `global-setup.ts` reads those env vars, spawns anvil + aztec + playground (each with the assigned port) and writes an ownership lockfile at `.e2e-state/owned.json`.
 
+### Accelerator: local vs CI
+
+**Locally** (`bun run e2e:agent`), the wallet's `AcceleratorProver` (from `@alejoamiras/aztec-accelerator`) auto-detects whichever proving backend is up on `127.0.0.1:59833`:
+
+- **Aztec Accelerator** (the user-facing desktop app on macOS) running → native bb proving.
+- Nothing → silent fallback to in-browser WASM (still works, just slower).
+
+There is no `VITE_NULO_ACCELERATOR_REQUIRED` enforcement locally. This matches production behavior — end users without Aztec Accelerator installed get WASM proving without any error.
+
+**In CI** (`pr-network-e2e.yml`), the workflow:
+
+1. Installs the headless **`accelerator-server`** binary (Linux x86_64 release from `alejoamiras/aztec-accelerator`, SHA-256 pinned).
+2. Starts it on the runner's `127.0.0.1:59833`.
+3. Builds the wallet with `VITE_NULO_ACCELERATOR_REQUIRED=1` → `chain-runtime.ts` constructs `ProductionPxeFactory` in required-mode (eager preflight + `onPhase` throw on silent-fallback paths).
+4. Any test where the wallet would have fallen back to WASM fails loudly with `[accelerator-required] SDK emitted phase="fallback"`.
+
+The terminology gap matters: **Aztec Accelerator** is the desktop app a user installs; **accelerator-server** is the headless binary CI uses. Same HTTP contract, different surface.
+
+**Caveat for local devs running e2e while Aztec Accelerator is running**: both compete on `127.0.0.1:59833`. The wallet probes `/health` and routes to whichever responds first — usually the one that started first. No crash, but proves may be routed to the desktop app instead of being explicitly absent. If this matters for a specific test, quit the desktop app before `bun run e2e:agent`.
+
 ## Running multiple agents in parallel
 
 Open one terminal per worktree and run `bun run e2e:agent` in each. Each agent allocates fresh ports and owns its own anvil + aztec + playground:
