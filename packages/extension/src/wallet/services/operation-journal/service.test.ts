@@ -260,6 +260,41 @@ describe("OperationJournalService", () => {
 			expect(done.progress.stage).toBe("succeeded")
 			expect(done.terminalAt).not.toBeNull()
 		})
+
+		// v2 Layer A — pin `submitting.txHash === succeeded.txHash` invariant.
+		// Drift across the prove/submit boundary would silently break
+		// RecentActivityView's per-hash pending-suppression filter and bring
+		// the disappearing-card bug back. Catch at the FSM layer.
+		test("submitting.txHash must match succeeded.txHash when both are populated", async () => {
+			const rec = await service.createOperation(VALID_INPUT)
+			await service.transitionOperation(rec.id, { stage: "simulating" })
+			await service.transitionOperation(rec.id, { stage: "proving", enteredProveAt: Date.now() })
+			await service.transitionOperation(rec.id, { stage: "submitting", txHash: "0xaaa" })
+			await expect(
+				service.transitionOperation(rec.id, { stage: "succeeded", txHash: "0xbbb" } as unknown as JobProgress),
+			).rejects.toThrow(/submitting\.txHash !== succeeded\.txHash/i)
+		})
+
+		test("submitting → succeeded with matching txHashes is accepted", async () => {
+			const rec = await service.createOperation(VALID_INPUT)
+			await service.transitionOperation(rec.id, { stage: "simulating" })
+			await service.transitionOperation(rec.id, { stage: "proving", enteredProveAt: Date.now() })
+			await service.transitionOperation(rec.id, { stage: "submitting", txHash: "0xcanonical" })
+			const done = await service.transitionOperation(rec.id, { stage: "succeeded", txHash: "0xcanonical" } as unknown as JobProgress)
+			expect(done.progress.stage).toBe("succeeded")
+		})
+
+		test("bare submitting (no txHash) → succeeded(txHash) is still accepted (no drift to check against)", async () => {
+			// Backward-compat: pre-v2 records that landed in submitting without
+			// a txHash should still be transitionable to succeeded. The drift
+			// check is conditional on submitting carrying a hash.
+			const rec = await service.createOperation(VALID_INPUT)
+			await service.transitionOperation(rec.id, { stage: "simulating" })
+			await service.transitionOperation(rec.id, { stage: "proving", enteredProveAt: Date.now() })
+			await service.transitionOperation(rec.id, { stage: "submitting" })
+			const done = await service.transitionOperation(rec.id, { stage: "succeeded", txHash: "0xanything" } as unknown as JobProgress)
+			expect(done.progress.stage).toBe("succeeded")
+		})
 	})
 
 	test("getOperations filter accepts `kind` and isolates token_import from on-chain ops", async () => {

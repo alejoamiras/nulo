@@ -259,6 +259,23 @@ export class OperationJournalService extends Service<Methods, Events> implements
 					throw new ValidationError("transitionOperation: succeeded token_import must not carry a txHash")
 				}
 			}
+
+			// v2 Layer A: pin `submitting.txHash === succeeded.txHash` when both
+			// are populated. The four execution paths emit the canonical
+			// `tx.getTxHash().toString()` at BOTH the submitting and succeeded
+			// transitions; if they ever drift the RecentActivityView per-hash
+			// pending-suppression filter (`filterPendingDoubleRender`) silently
+			// no-ops and the disappearing-card bug returns. Catch the drift here
+			// at the FSM layer rather than letting it surface as a UI
+			// regression. The check is conditional on submitting carrying a
+			// hash so older records / non-tx kinds aren't affected.
+			if (existing.progress.stage === "submitting" && existing.progress.txHash && hasTxHash) {
+				if (existing.progress.txHash !== progress.txHash) {
+					throw new ValidationError(
+						`transitionOperation: submitting.txHash !== succeeded.txHash (${existing.progress.txHash} vs ${progress.txHash}) — hash drift across the prove/submit boundary`,
+					)
+				}
+			}
 		}
 
 		const now = Date.now()

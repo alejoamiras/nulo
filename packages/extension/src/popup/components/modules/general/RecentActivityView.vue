@@ -12,7 +12,7 @@ import { OperationJournalServiceClient } from "@/wallet/services/operation-journ
 import { TaskServiceClient } from "@/wallet/services/task/client"
 import { ContentKind, TaskStatus } from "@/wallet/services/task/spec"
 import { TokenServiceClient } from "@/wallet/services/token/client"
-import { OriginType, TxStatus } from "@/wallet/services/transaction/spec"
+import { OriginType } from "@/wallet/services/transaction/spec"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
@@ -50,24 +50,18 @@ const filteredRecentTransactions = computed(() => {
 	const source = props.token
 		? appStore.transactions.filter((t) => t.calls?.some((c) => c.contract === props.token?.contract))
 		: appStore.transactions
-	// Per-hash pending suppression. When `executingTask` exists we have
-	// no hash to scope on (the task entity doesn't carry the chain
-	// txHash), so we fall back to blanket suppression. See
-	// `filterPendingDoubleRender` for the disappearing-card bug pin.
+	// Per-hash pending suppression — journal-first. Suppress a pending
+	// chain tx only if its hash matches an in-flight journal record in
+	// the `submitting` stage (the one stage carrying a txHash). All
+	// pre-submit journal stages (queued / pending / simulating / proving)
+	// have no chain tx yet, so they pull nothing through the filter and
+	// pending chain txs from prior-but-still-in-flight ops stay visible.
 	//
-	// TODO(follow-up: dapp-interaction-lock-fix-v2):
-	//   The blanket fallback below is the residual hole for the
-	//   disappearing-card bug — `executingTask` is set during every dApp
-	//   sendTx (not just legacy orphans), so once T2 transitions out of
-	//   `queued` the blanket kicks in and hides T1's pending chain tx
-	//   again. Codex audit `019e6abf` flagged this. Fix lives in the
-	//   follow-up: drop the blanket branch in favor of journal-record-
-	//   first matching, AND populate `submitting.txHash` in all four
-	//   `execution/service.ts:markJournal({ stage: "submitting" })` sites
-	//   so the hash-scoped path actually triggers in production.
-	if (executingTask.value) {
-		return source.filter((t) => t.status !== TxStatus.Pending)
-	}
+	// Pre-v2 had a blanket fallback that hid ALL pending chain txs while
+	// any `executingTask` existed. That regressed T1 → vanish-on-confirm
+	// whenever T2 was anywhere past `queued`. Dropped in v2 Layer A: the
+	// journal records, now that `submitting.txHash` is populated upstream,
+	// fully cover the double-render avoidance the blanket was for.
 	return filterPendingDoubleRender(source, inFlightJournalOps.value)
 })
 

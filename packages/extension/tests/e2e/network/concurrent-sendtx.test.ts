@@ -32,7 +32,7 @@ const hasConfig = aztecConfig !== undefined
  * avoids the full prove pipeline so the test stays well under the network
  * shard's per-file wall-time budget.
  *
- * TODO(follow-up: dapp-interaction-lock-fix-v2):
+ * TODO(follow-up: dapp-interaction-lock-fix-v3 — parallel popups):
  *   This test exercises the popup-serialization + queued-record invariants
  *   but does NOT exercise the FIFO baton release at `onTxRequestFinalized`
  *   — popup #1 is rejected BEFORE approval, so the wallet's
@@ -43,8 +43,8 @@ const hasConfig = aztecConfig !== undefined
  *     - Asserts popup #2 opens precisely at T1's tx-build boundary, not after
  *       T1's full proving/submit cycle
  *     - Asserts both txs eventually confirm
- *   Note: that test will exceed today's per-file shard budget (full
- *   proving × 2). Codex audit `019e6abf` P2 flagged this gap.
+ *   Lands with v3 (Layer B — parallel popup UX refactor), where the new
+ *   boundary is what the test pins. Codex audit `019e6abf` P2 flagged this.
  */
 test.skipIf(!hasConfig)(
 	"concurrent-sendtx — two queued sendTx requests serialize FIFO and both settle",

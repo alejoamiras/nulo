@@ -122,18 +122,10 @@ describe("isMatchingTask", () => {
 
 // Disappearing-card regression: T1 transitions to `succeeded` while T2 is
 // still in-flight; T1's pending chain tx must remain visible so the user
-// keeps seeing the row until the chain tx confirms.
-//
-// TODO(follow-up: dapp-interaction-lock-fix-v2):
-//   These tests pin the INTENDED behaviour: a `submitting` journal record
-//   carrying `txHash` suppresses the matching pending chain tx. The runtime
-//   does not yet populate `submitting.txHash` (all four `markJournal({ stage:
-//   "submitting" })` call sites in `execution/service.ts` transition bare),
-//   so this filter is effectively a no-op in production today. Codex audit
-//   `019e6abf` P2 flagged this. Once the follow-up lands the `txHash`
-//   population + drops the `executingTask` blanket fallback in
-//   `RecentActivityView.vue`, these assertions become live coverage rather
-//   than contract pins.
+// keeps seeing the row until the chain tx confirms. v2 Layer A made this
+// live coverage — the runtime now populates `submitting.txHash` at all four
+// execution-service call sites, and `RecentActivityView.filteredRecentTransactions`
+// uses this helper directly (no blanket fallback).
 describe("filterPendingDoubleRender", () => {
 	const t1Hash = "0xtxhash1"
 	const t2Hash = "0xtxhash2"
@@ -203,5 +195,19 @@ describe("filterPendingDoubleRender", () => {
 			makeOp({ id: "j2", kind: "dapp_execute", terminalAt: null, progress: { stage: "queued" }, sessionId: "s1" }),
 		]
 		expect(filterPendingDoubleRender(txs, inFlight).map((t) => t.hash)).toEqual([t2Hash])
+	})
+
+	test("two concurrent journal records both at `submitting` → both matching pending chain txs suppressed", () => {
+		// v2 Layer A: covers the multi-pending case the pre-v2 blanket-suppress
+		// was masking. Two concurrent sendTx ops each reach `submitting` (each
+		// carrying its own canonical txHash). Both matching pending chain txs
+		// must be suppressed; non-matching chain txs stay visible.
+		const t3Hash = "0xtxhash3"
+		const txs = [tx(t1Hash, TxStatus.Pending), tx(t2Hash, TxStatus.Pending), tx(t3Hash, TxStatus.Pending)]
+		const inFlight = [
+			makeOp({ id: "j1", kind: "dapp_execute", terminalAt: null, progress: { stage: "submitting", txHash: t1Hash } }),
+			makeOp({ id: "j2", kind: "dapp_execute", terminalAt: null, progress: { stage: "submitting", txHash: t2Hash } }),
+		]
+		expect(filterPendingDoubleRender(txs, inFlight).map((t) => t.hash)).toEqual([t3Hash])
 	})
 })
