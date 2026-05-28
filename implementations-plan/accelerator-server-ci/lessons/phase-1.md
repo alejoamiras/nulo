@@ -115,6 +115,39 @@ And `~/.aztec/current` is a symlink to `~/.aztec/versions/4.2.0`. So the path `$
 
 Move `BB_BINARY_PATH` definition out of the `env:` YAML block into the shell `run:` block with `export`. The subshell that `nohup accelerator-server` spawns inherits the exported var. Single small workflow edit.
 
+## PR #67 attempt 2 + 3 — perf signal (after fixes)
+
+After commit `6404851` (codex post-impl fixes), the network-e2e matrix produced these numbers:
+
+| Job | Wall time | Status | Prior baseline | Speedup |
+|---|---|---|---|---|
+| shard 1/5 | 4m21s | ✓ pass | ~20m worst | ~4.6× |
+| shard 2/5 | 4m50s | ✓ pass | ~20m worst | ~4.1× |
+| shard 3/5 | 3m40s | ✓ pass | ~20m worst | ~5.5× |
+| shard 4/5 | 6m58s | ✓ pass | ~20m worst | ~2.9× |
+| shard 5/5 | 6m17s | ✗ fail | ~20m worst | n/a (timeout, see below) |
+| heavy / fee-methods | 4m35s | ✓ pass | ~20m worst | ~4.3× |
+
+Average wall-time across the 5 passing jobs is ~4.4× faster than the prior WASM baseline. This is the headline result of integrating accelerator-server.
+
+### shard 5/5 failure — pre-existing flake, NOT accelerator-related
+
+The one failing test was `sim-profileTx (#24)` in `packages/extension/tests/e2e/network/sim-methods.test.ts:26` — a SIMULATION test, not a prove. `profileTx` runs the simulator (`pxe.profileTx()`) which doesn't generate ZK proofs and doesn't touch the accelerator at all.
+
+Failure mode: puppeteer 30s wait timeout on capability-popup grant (`waitForPopup(..., { timeout: 30_000 })` at line 37). This is the same class of slow-runner-pool flake we fought during the prior e2e stabilization arc (PRs #60–#66), where the cap-popup cold tax exceeded 30s on slow runner members. We fixed `register-token` and `tx-sendTx-default` via the pre-grant fixture pattern (`dappConnectedExtensionWith*Cap`) but `sim-methods.test.ts` still uses the per-test grant path (`dappConnectedExtensionPerTest`).
+
+**Follow-up tracked**: migrate `sim-methods.test.ts` (and any other `*PerTest` capability-using test) to a pre-grant fixture. Out of scope for this PR — that's an e2e-stabilization concern, not an accelerator one.
+
+### What the perf signal unlocks for the un-quarantine follow-up
+
+The original motivation for this work was: GitHub-hosted runner-pool variability where wallet `prove+submit` chains take ~2s on fast runners but >180s on slow ones, forcing us to quarantine `tx-sendTx-default` and bump `cancel-mid-prove` waits to 90s. With accelerator-server doing native bb proving:
+
+- Prove times become deterministic (native bb, not WASM throttled by browser)
+- The slow-runner tail should compress significantly
+- `tx-sendTx-default` un-quarantine + `cancel-mid-prove` 30s wait restoration become real options
+
+Measuring on a separate follow-up PR after this lands.
+
 ## Wording correction (per user)
 
 | Term | Meaning |
