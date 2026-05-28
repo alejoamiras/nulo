@@ -128,11 +128,9 @@ jobs:
         if: '!inputs.disable_accelerator'
         shell: bash
         env:
-          # Skip the server's first-prove bb-download tax by handing it the
-          # pre-installed binary from setup-aztec. The per-arch path is the
-          # native ELF, not the Node-wrapped .bin/bb shim. If setup-aztec
-          # ever shifts layout, the pre-check below dumps the structure.
-          BB_BINARY_PATH: $HOME/.aztec/current/node_modules/@aztec/bb.js/build/amd64-linux/bb
+          # tracing-subscriber default = info; emits "Received /prove request"
+          # for each prove + version-cache info we tail in the advisory step.
+          RUST_LOG: "info"
           # ALLOWED_ORIGINS deliberately unset:
           #   - upstream accelerator-server.rs:32-49 documents that when
           #     unset, auth_manager=None → server.rs:210 auto-approves all
@@ -142,11 +140,16 @@ jobs:
           #     chrome-extension://<id>, not the playground origin).
           #     Setting it to that would 403 every /prove → silent WASM
           #     fallback (which Layer 2 catches but as a confusing error).
-          # tracing-subscriber default = info; emits "Received /prove request"
-          # for each prove + version-cache info we tail in the advisory step.
-          RUST_LOG: "info"
         run: |
           set -euo pipefail
+          # BB_BINARY_PATH is defined INSIDE the script, not in `env:`, because
+          # YAML env values are NOT shell-expanded by GitHub Actions — a literal
+          # `$HOME` would have been passed verbatim. Set + export here so the
+          # nohup subshell inherits it. Skip the server's first-prove
+          # bb-download tax by handing it the pre-installed binary from
+          # setup-aztec. The per-arch native ELF is the right target, not the
+          # Node-wrapped .bin/bb shim.
+          export BB_BINARY_PATH="$HOME/.aztec/current/node_modules/@aztec/bb.js/build/amd64-linux/bb"
           if [ ! -x "$BB_BINARY_PATH" ]; then
             echo "::error::BB_BINARY_PATH=$BB_BINARY_PATH not executable. setup-aztec layout may have shifted."
             ls -la "$HOME/.aztec/" || true

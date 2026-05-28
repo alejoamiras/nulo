@@ -84,6 +84,37 @@ Our proving payloads (msgpack-serialized execution steps) are well under 50MB. N
 - **Q4 (SIGTERM cleanliness)**: workflow uses `kill -TERM "${ACCELERATOR_PID}"` then `pkill -TERM accelerator-server` as belt-and-suspenders. If we see leaked processes between runs we'll capture here.
 - **Q6 (log format)**: resolved above for the `/prove` request pattern. Will verify on first run that lines actually appear with `RUST_LOG` default.
 
+## First CI run findings (PR #67 attempt 1)
+
+Pushed PR #67 with the implementation. **All 6 network-e2e jobs failed at ~2 min** (pre-test, at the "Start accelerator-server" step). Lint, typecheck, unit tests, smoke e2e, build chrome — all passed. Only the network-e2e accelerator integration broke.
+
+### Bug — `$HOME` literal in workflow YAML `env:` value
+
+Symptom (from shard 2/5 log):
+
+```
+##[error]BB_BINARY_PATH=$HOME/.aztec/current/node_modules/@aztec/bb.js/build/amd64-linux/bb not executable.
+```
+
+The `$BB_BINARY_PATH` value in the error message contains the literal string `$HOME` — it was never expanded. Root cause: **GitHub Actions does NOT shell-expand `$VAR` references in workflow `env:` blocks.** The value is passed verbatim to the child shell, where `$HOME/.aztec/...` is a literal that doesn't satisfy `[ -x ... ]`.
+
+### Verified layout from the precheck dump (good news)
+
+The precheck `find $HOME/.aztec -name bb -type f` output confirms my chosen path WOULD have worked if `$HOME` had been expanded:
+
+```
+/home/runner/.aztec/versions/4.2.0/node_modules/@aztec/bb.js/build/amd64-linux/bb
+/home/runner/.aztec/versions/4.2.0/node_modules/@aztec/bb.js/build/arm64-macos/bb
+/home/runner/.aztec/versions/4.2.0/node_modules/@aztec/bb.js/build/arm64-linux/bb
+/home/runner/.aztec/versions/4.2.0/node_modules/@aztec/bb.js/build/amd64-macos/bb
+```
+
+And `~/.aztec/current` is a symlink to `~/.aztec/versions/4.2.0`. So the path `$HOME/.aztec/current/node_modules/@aztec/bb.js/build/amd64-linux/bb` IS the right target on a Linux x86_64 runner. Codex's pre-impl concern that the path "might not be right" turned out unfounded; my pre-impl probe to set the right value was correct. Only the YAML expansion was wrong.
+
+### Fix
+
+Move `BB_BINARY_PATH` definition out of the `env:` YAML block into the shell `run:` block with `export`. The subshell that `nohup accelerator-server` spawns inherits the exported var. Single small workflow edit.
+
 ## Wording correction (per user)
 
 | Term | Meaning |
