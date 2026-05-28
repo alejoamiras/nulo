@@ -1,16 +1,11 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { waitForPopup, waitForExecuteContent, approveCapabilities, approveExecute } from "../fixtures/popups"
+import { waitForPopup, waitForExecuteContent, approveExecute } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
-// Deferred slow-test marker (see implementations-plan/network-followups/slow-tests-hypotheses.md).
-// On CI per-shard runner, this file's tests deterministically exhaust their
-// timeout budget (3 attempts × ~10min each) under bb.wasm cold-start cost.
-// Skipped in CI via NULO_E2E_SKIP_DEFERRED_SLOW=1; runs locally to retain coverage.
-const skipDeferredSlow = process.env.NULO_E2E_SKIP_DEFERRED_SLOW === "1"
 
 /**
  * Tests #32 + #33 — sendTx multi-call variants.
@@ -19,6 +14,12 @@ const skipDeferredSlow = process.env.NULO_E2E_SKIP_DEFERRED_SLOW === "1"
  * #33 multicall >5 (7 calls): triggers nulo-account.ts recursive chunking
  *     (CLAUDE.md mentions 5-call chunk wrapping). Verifies the popup still
  *     renders + the wallet handles the chunked authwit path.
+ *
+ * Uses `dappConnectedExtensionWithTransactionCap` so the cap-popup round-trip
+ * happens during fixture setup (hookTimeout=300s) rather than during this
+ * test's budget. Mirrors register-token.test.ts (PR #63) + tx-sendTx-default
+ * (PR #64). The fixture grants the transaction bundle for a single account;
+ * multicall does N calls FROM THAT ONE ACCOUNT, not N accounts.
  */
 const cases: Array<{ id: number; name: string; btn: string }> = [
 	{ id: 32, name: "multicall", btn: "pg-btn-sendTx-multicall" },
@@ -26,29 +27,11 @@ const cases: Array<{ id: number; name: string; btn: string }> = [
 ]
 
 for (const c of cases) {
-	test.skipIf(!hasConfig || skipDeferredSlow)(
+	test.skipIf(!hasConfig)(
 		`tx-sendTx-${c.name} (#${c.id}) — popup opens, multiple payload rows`,
 		{ timeout: 240_000, retry: 1 },
-		async ({ dappConnectedExtensionPerTest: dappConnectedExtension }) => {
-			const page = dappConnectedExtension.playgroundPage
-
-			await page.evaluate(() => {
-				const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')!
-				select.value = "transaction"
-				select.dispatchEvent(new Event("change", { bubbles: true }))
-			})
-			const seqGrant = await snapshotResultSeq(page)
-			const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
-			await clickByTestId(page, "pg-btn-requestCapabilities")
-			const capPopup = await capPopupP
-			await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 10_000 })
-			const accountIds = await capPopup.evaluate(() =>
-				[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) =>
-					r.getAttribute("data-account-id"),
-				),
-			)
-			await approveCapabilities(capPopup, { accounts: [accountIds[0]!] })
-			await waitForPgResult(page, "requestCapabilities", seqGrant, 30_000)
+		async ({ dappConnectedExtensionWithTransactionCap }) => {
+			const { playgroundPage: page } = dappConnectedExtensionWithTransactionCap
 
 			await page.evaluate(
 				({ token, recipient }: { token: string; recipient: string }) => {
@@ -67,7 +50,7 @@ for (const c of cases) {
 			)
 
 			const seqTx = await snapshotResultSeq(page)
-			const execPopupP = waitForPopup(dappConnectedExtension, "execute", { timeout: 30_000 })
+			const execPopupP = waitForPopup(dappConnectedExtensionWithTransactionCap, "execute", { timeout: 30_000 })
 			await clickByTestId(page, c.btn)
 			const execPopup = await execPopupP
 			await waitForExecuteContent(execPopup)
