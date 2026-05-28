@@ -102,20 +102,19 @@ CI runs the network suite as a **5-shard GitHub Actions matrix** (`.github/workf
 
 **Wall time**: ~10–15 min (vs ~35–45 min unsharded). CPU minutes: ~25% more than serial (each shard pays the ~30s anvil+aztec boot cost), but the wall-time win is dramatic.
 
-**Why N=5 and not N=4 or N=9**: N=4 collides the two known-slow files (`tx-sendTx-multicall`, `multi-account-from`) on the same shard, blowing the shard timeout. N=9 (1 file/shard) eliminates cumulative state but pays the boot cost 9× — diminishing returns. N=5 is the sweet spot.
+**Why N=5 and not N=4 or N=9**: legacy reasoning from when `tx-sendTx-multicall` and `multi-account-from` were collision-sensitive under WASM proving. N=4 collided them on the same shard, blowing the shard timeout; N=5 separated them. Post-accelerator (PR #67) the per-prove time is bounded enough that the collision concern no longer holds — N=5 is preserved for now as the stable shape, but could be tuned in a future PR.
 
-**Failing shard logs**: each shard uploads its own artifact (`network-e2e-logs-<N>-of-5`) containing `.e2e-state`, `aztec-*.log`, `anvil-*.log` on failure.
-
-**Quarantined tests**: the 2 deterministic-slow files above are skipped in CI via `NULO_E2E_SKIP_DEFERRED_SLOW=1` env (still run locally). Tracked in `implementations-plan/network-followups/slow-tests-hypotheses.md`.
+**Failing shard logs**: each shard uploads its own artifact (`network-e2e-logs-<N>-of-5`) containing `.e2e-state`, `aztec-*.log`, `anvil-*.log`, `accelerator-server.log`, `accelerator-health.json` on failure.
 
 **Reproducing a CI shard locally**: pass `--shard=N/5` to `e2e:agent`:
 
 ```bash
 bun run e2e:agent --shard=5/5                                  # just the files in shard 5
-NULO_E2E_SKIP_DEFERRED_SLOW=1 bun run e2e:agent --shard=1/5    # match CI's quarantine env
 ```
 
 Vitest's deterministic SHA-1-of-filename sharder picks the same files locally as in CI, so this is the fastest way to reproduce a shard-specific failure (e.g. "register-token only fails on shard 1"). Each invocation still starts its own anvil + aztec + playground; running multiple shards in parallel needs multiple worktrees (see "Running multiple agents in parallel" above).
+
+**Previously quarantined tests**: `tx-sendTx-default`, `tx-sendTx-multicall`, `multi-account-from` were previously skipped on CI via `NULO_E2E_SKIP_DEFERRED_SLOW=1` due to WASM-proving slow-runner variability + cap-popup load. Un-quarantined as part of `implementations-plan/network-e2e-unquarantine/plan.md` (companion to `implementations-plan/accelerator-server-ci/plan.md`).
 
 **Known limitation: cold-shard rotation.** Each shard starts with a fresh anvil + aztec + playground + Chrome + extension. The FIRST capability-popup-driven test in shard 1 (whichever file the SHA-1 sharder puts first) pays a cold-SW penalty — `chrome.windows.create` + bb.js init + PXE warmup can push that test past its budget. Quarantining the offender just exposes the next file as the new "first" victim. The structural fix is a fixture-level warm-up tap or pre-grant-capability fixture; tracked in [Issue #59](https://github.com/alejoamiras/nulo/issues/59). Until then: Network e2e is treated as advisory on `dev` (only `Quality / Status` is the required check); single-shard re-runs (or local repro via `--shard=N/5`) usually pass green once the SW is warm.
 

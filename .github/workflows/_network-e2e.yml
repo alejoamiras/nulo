@@ -84,10 +84,6 @@ jobs:
     env:
       AZTEC_NODE_URL: ${{ inputs.aztec_node_url }}
       SPONSORED_FPC_SALT: ${{ !contains(inputs.aztec_node_url, 'localhost') && secrets.SPONSORED_FPC_SALT || '' }}
-      # Quarantine the 2 deterministic slow tests on CI (tx-sendTx-multicall,
-      # multi-account-from). See implementations-plan/network-followups/slow-tests-hypotheses.md
-      # for the deferred investigation. Locally these still run (env unset).
-      NULO_E2E_SKIP_DEFERRED_SLOW: "1"
       # Baked into the wallet build at `bun run build:chrome` time (via the
       # agent.sh subprocess). When "1", `packages/extension/src/accelerator/config.ts`
       # sets `ACCELERATOR_REQUIRED=true`, which makes the offscreen factory

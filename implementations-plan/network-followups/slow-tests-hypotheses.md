@@ -88,3 +88,17 @@ Resurrect via `git show 1081c1b^:packages/extension/src/wallet/utils/probe.ts` e
 - Consolidated followup plan: `implementations-plan/network-followups/plan.md` §6
 - Opus's parallel plan §2.3: `implementations-plan/network-followups/audit-opus.md`
 - Codex's parallel plan §2.3: `implementations-plan/network-followups/audit-codex.md`
+
+---
+
+## Resolution (2026-05-28)
+
+All 3 quarantined tests un-quarantined as part of `implementations-plan/network-e2e-unquarantine/plan.md`, enabled by `implementations-plan/accelerator-server-ci/plan.md` (PR #67) landing native bb proving on CI.
+
+| Test | Resolution |
+|---|---|
+| `multi-account-from.test.ts` | Migrated to new `dappConnectedExtensionWithFirstTwoAccountsCap` pre-grant fixture; cap-popup cold path no longer in test budget |
+| `tx-sendTx-multicall.test.ts` | Un-quarantined + migrated to `dappConnectedExtensionWithTransactionCap` fixture; native bb proving collapses the prove-time tail |
+| `register-token.test.ts` (PR #63) | Resolved earlier via the pre-grant fixture pattern; already removed from quarantine |
+
+The H-OP-1, H-OP-2, H-OP-3 hypotheses listed above were never falsified in this doc's lifetime, but the structural fixes (accelerator + pre-grant fixtures) addressed the underlying classes regardless. The probe infrastructure investigation remains a worthwhile follow-up if a NEW class of slow flake surfaces.
