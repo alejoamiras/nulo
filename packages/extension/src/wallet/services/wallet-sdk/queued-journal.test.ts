@@ -82,12 +82,18 @@ function makeProfileStub() {
 	}
 }
 
-function makeDappSessionStub() {
+function makeDappSessionStub(opts: { name?: string | null } = { name: "Example Dapp" }) {
+	// `null` distinguishes "explicitly omit dappMetadata" from "default name" —
+	// passing `undefined` would trigger the default parameter, so callers must
+	// pass `{ name: null }` to simulate a session created before dappMetadata
+	// was populated.
+	const metadata = opts.name === null ? undefined : { name: opts.name }
 	return {
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
 		tryGetDappSessionByOriginAndChain: vi.fn<() => Promise<any>>(async () => ({
 			accounts: ["aztec:1338:0xabc"],
 			capabilityGrants: [{ capability: { type: "transaction" } }, { capability: { type: "accounts" } }],
+			dappMetadata: metadata,
 		})),
 	}
 }
@@ -114,8 +120,21 @@ describe("tryCreateQueuedJournal", () => {
 		expect(rec?.sessionId).toBe("session-A")
 		expect(rec?.networkId).toBe("network-row-1")
 		expect(rec?.title).toBe("drip_to_public")
-		expect(rec?.subtitle).toBe("https://example.test")
+		expect(rec?.subtitle).toBe("Example Dapp")
 		expect(rec?.progress.stage).toBe("queued")
+	})
+
+	test("subtitle falls back to 'Unknown dapp' when session has no dappMetadata.name", async () => {
+		// QA-reported: subtitle previously used `session.origin` (the full URL),
+		// surfacing raw URLs in the activity-card chip when the second tx hit
+		// the queued path during speed-runs. Mirrors `dapp-interaction/service.ts:309`
+		// so the queued record's chip matches what the live-claim record's
+		// chip would have been.
+		const { deps, journal } = makeDeps({ dappSession: makeDappSessionStub({ name: null }) as never })
+		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
+		expect(id).toBeDefined()
+		const rec = await journal.getOperation(id as string)
+		expect(rec?.subtitle).toBe("Unknown dapp")
 	})
 
 	test("skips when no active profile (wallet locked)", async () => {

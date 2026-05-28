@@ -19,7 +19,7 @@ import { balanceFormatted } from "@/utils/amount.js"
 import { stageSubtitle } from "@/utils/card-subtitle"
 import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisplay } from "@/utils/journal-state"
 import { formatTransferType, humanizeMethodName } from "@/utils/tx-enrichment"
-import { buildCancelHandler, isMatchingTask } from "./recent-activity-handlers"
+import { buildCancelHandler, filterPendingDoubleRender, isMatchingTask } from "./recent-activity-handlers"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -50,13 +50,25 @@ const filteredRecentTransactions = computed(() => {
 	const source = props.token
 		? appStore.transactions.filter((t) => t.calls?.some((c) => c.contract === props.token?.contract))
 		: appStore.transactions
-	// Suppress pending txs while any in-flight awaiting card is showing —
-	// the card already represents the operation; a pending tx arriving
-	// before the task completes would cause a duplicate entry at different
-	// lifecycle stages. With multi-card rendering, ANY in-flight surface
-	// (journal cards or orphan executingTask) keeps the suppression active.
-	const inFlight = executingTask.value || showJournalAwaiting.value
-	return inFlight ? source.filter((t) => t.status !== TxStatus.Pending) : source
+	// Per-hash pending suppression. When `executingTask` exists we have
+	// no hash to scope on (the task entity doesn't carry the chain
+	// txHash), so we fall back to blanket suppression. See
+	// `filterPendingDoubleRender` for the disappearing-card bug pin.
+	//
+	// TODO(follow-up: dapp-interaction-lock-fix-v2):
+	//   The blanket fallback below is the residual hole for the
+	//   disappearing-card bug — `executingTask` is set during every dApp
+	//   sendTx (not just legacy orphans), so once T2 transitions out of
+	//   `queued` the blanket kicks in and hides T1's pending chain tx
+	//   again. Codex audit `019e6abf` flagged this. Fix lives in the
+	//   follow-up: drop the blanket branch in favor of journal-record-
+	//   first matching, AND populate `submitting.txHash` in all four
+	//   `execution/service.ts:markJournal({ stage: "submitting" })` sites
+	//   so the hash-scoped path actually triggers in production.
+	if (executingTask.value) {
+		return source.filter((t) => t.status !== TxStatus.Pending)
+	}
+	return filterPendingDoubleRender(source, inFlightJournalOps.value)
 })
 
 /** Chronological merge of terminal journal records + settled chain txs.

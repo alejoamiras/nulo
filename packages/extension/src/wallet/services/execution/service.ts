@@ -516,6 +516,10 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			checkCancelled()
 
 			const tx = await provedTx.toTx()
+			// TODO(follow-up: dapp-interaction-lock-fix-v2):
+			//   Populate `txHash` here (`tx.getTxHash().toString()`) — see the
+			//   sibling TODOs on the `this.markJournal(...)` submitting sites
+			//   below for the full rationale.
 			await markJournal({ stage: "submitting" })
 			checkCancelled()
 			await this.coordinator.sendTxTask(node, tx, transferTask)
@@ -1145,6 +1149,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			checkCancelled()
 
 			const tx = await provedTx.toTx()
+			// TODO(follow-up: dapp-interaction-lock-fix-v2):
+			//   Populate `txHash` here from `tx.getTxHash().toString()` so the
+			//   RecentActivityView pending-suppression filter
+			//   (`filterPendingDoubleRender`) can match this in-flight record to
+			//   its pending chain tx. Today the filter is a no-op in production
+			//   because the schema permits `submitting.txHash` but no call site
+			//   sets it — see audit `019e6abf` P2 + the TODO on
+			//   `filterPendingDoubleRender` in `recent-activity-handlers.ts`.
 			await this.markJournal(journalId, { stage: "submitting" })
 			checkCancelled()
 			await this.coordinator.sendTxTask(node, tx, parentTask)
@@ -1788,6 +1800,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
 			const offchainOutput = extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
 			const tx = await provedTx.toTx()
+			// TODO(follow-up: dapp-interaction-lock-fix-v2):
+			//   Populate `txHash` here from `tx.getTxHash().toString()` so the
+			//   RecentActivityView pending-suppression filter
+			//   (`filterPendingDoubleRender`) can match this in-flight record to
+			//   its pending chain tx. Today the filter is a no-op in production
+			//   because the schema permits `submitting.txHash` but no call site
+			//   sets it — see audit `019e6abf` P2 + the TODO on
+			//   `filterPendingDoubleRender` in `recent-activity-handlers.ts`.
 			await this.markJournal(journalId, { stage: "submitting" })
 			checkCancelled()
 			await this.coordinator.sendTxTask(node, tx, parentTask)
@@ -1955,6 +1975,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
 			const offchainOutput = extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
 			const tx = await provedTx.toTx()
+			// TODO(follow-up: dapp-interaction-lock-fix-v2):
+			//   Populate `txHash` here from `tx.getTxHash().toString()` so the
+			//   RecentActivityView pending-suppression filter
+			//   (`filterPendingDoubleRender`) can match this in-flight record to
+			//   its pending chain tx. Today the filter is a no-op in production
+			//   because the schema permits `submitting.txHash` but no call site
+			//   sets it — see audit `019e6abf` P2 + the TODO on
+			//   `filterPendingDoubleRender` in `recent-activity-handlers.ts`.
 			await this.markJournal(journalId, { stage: "submitting" })
 			checkCancelled()
 			await this.coordinator.sendTxTask(node, tx, parentTask)

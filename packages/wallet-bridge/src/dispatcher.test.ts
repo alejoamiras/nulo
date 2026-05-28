@@ -566,14 +566,6 @@ describe("dispatcher batch hooks isolation", () => {
 		// nothing inside the legs invokes onTxRequestFinalized, fired remains 0.
 		expect(fired).toBe(0)
 	})
-
-	test("hooks ARE forwarded to non-batch dispatch (positive control)", async () => {
-		// Negative control would be: same hooks bag, but on a top-level sendTx
-		// (not batch). That requires more harness setup; we trust the positive
-		// case is exercised in the extension-side tests. This test pins the
-		// invariant: batch dropping is intentional, not a bug in plumbing.
-		expect(true).toBe(true)
-	})
 })
 
 // ── registerToken (Nulo-custom) — schema-patch reachability + routing ───

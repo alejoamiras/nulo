@@ -128,6 +128,19 @@ export async function tryCreateQueuedJournal(
 			}
 
 			const primaryMethod = extractPrimaryMethodFromSendTx(message)
+			// Chip label: prefer the dApp's display name from its stored
+			// session metadata (DappSession.dappMetadata.name, set at
+			// discover/verify time). Falls back to "Unknown dapp" to match
+			// the pre-existing execution path (`dapp-interaction/service.ts:309`)
+			// so the queued record's subtitle equals what the live-claim record
+			// would have gotten — keeps the chip text identical across queued
+			// vs first-tx paths. NOTE: dappMetadata lives on DappSession (our
+			// stored session), NOT on ActiveSession (the wallet-sdk transport
+			// session) — those are two different types that both happen to be
+			// in scope here. Previously this used `session.origin` (the full
+			// URL on the transport session), which surfaced raw URLs in the
+			// activity-card chip.
+			const dappName = dapp.dappMetadata?.name ?? "Unknown dapp"
 			const record = await journal.createOperation({
 				kind: "dapp_execute",
 				origin: "dapp",
@@ -136,7 +149,7 @@ export async function tryCreateQueuedJournal(
 				accountAddress,
 				networkId: network.id,
 				title: primaryMethod ?? "Transaction",
-				subtitle: session.origin,
+				subtitle: dappName,
 				initialStage: { stage: "queued" },
 			})
 			return record.id
