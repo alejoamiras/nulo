@@ -1,7 +1,8 @@
 import { describe, expect, test, vi } from "vitest"
 import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
 import { ContentKind } from "@/wallet/services/task/spec"
-import { buildCancelHandler, isMatchingTask } from "./recent-activity-handlers"
+import { TxStatus } from "@/wallet/services/transaction/spec"
+import { buildCancelHandler, filterPendingDoubleRender, isMatchingTask, type MinimalChainTx } from "./recent-activity-handlers"
 
 function makeOp(overrides: Partial<OperationRecord> = {}): OperationRecord {
 	return {
@@ -116,5 +117,91 @@ describe("isMatchingTask", () => {
 	test("null task or op → no match (defensive)", () => {
 		expect(isMatchingTask(null, makeOp(), "0xabc")).toBe(false)
 		expect(isMatchingTask(transferTask, null as never, "0xabc")).toBe(false)
+	})
+})
+
+// Disappearing-card regression: T1 transitions to `succeeded` while T2 is
+// still in-flight; T1's pending chain tx must remain visible so the user
+// keeps seeing the row until the chain tx confirms.
+//
+// TODO(follow-up: dapp-interaction-lock-fix-v2):
+//   These tests pin the INTENDED behaviour: a `submitting` journal record
+//   carrying `txHash` suppresses the matching pending chain tx. The runtime
+//   does not yet populate `submitting.txHash` (all four `markJournal({ stage:
+//   "submitting" })` call sites in `execution/service.ts` transition bare),
+//   so this filter is effectively a no-op in production today. Codex audit
+//   `019e6abf` P2 flagged this. Once the follow-up lands the `txHash`
+//   population + drops the `executingTask` blanket fallback in
+//   `RecentActivityView.vue`, these assertions become live coverage rather
+//   than contract pins.
+describe("filterPendingDoubleRender", () => {
+	const t1Hash = "0xtxhash1"
+	const t2Hash = "0xtxhash2"
+
+	function tx(hash: string, status: TxStatus): MinimalChainTx {
+		return { hash, status }
+	}
+
+	test("pending chain tx with no in-flight journal matches → stays visible", () => {
+		const txs = [tx(t1Hash, TxStatus.Pending)]
+		expect(filterPendingDoubleRender(txs, []).map((t) => t.hash)).toEqual([t1Hash])
+	})
+
+	test("pending chain tx that matches a `submitting` journal op → suppressed", () => {
+		const txs = [tx(t1Hash, TxStatus.Pending)]
+		const inFlight = [makeOp({ id: "j1", kind: "dapp_execute", terminalAt: null, progress: { stage: "submitting", txHash: t1Hash } })]
+		expect(filterPendingDoubleRender(txs, inFlight)).toEqual([])
+	})
+
+	test("pending T1 chain tx stays visible when T2 is queued (T2 has no txHash) — the lost-card pin", () => {
+		const txs = [tx(t1Hash, TxStatus.Pending)]
+		const inFlight = [
+			makeOp({
+				id: "j2",
+				kind: "dapp_execute",
+				terminalAt: null,
+				progress: { stage: "queued" },
+				sessionId: "s1",
+			}),
+		]
+		expect(filterPendingDoubleRender(txs, inFlight).map((t) => t.hash)).toEqual([t1Hash])
+	})
+
+	test("pending T1 chain tx stays visible when T2 is proving (no txHash yet) — covers the user-reported gap", () => {
+		// Mirrors the QA-reported sequence: T1 succeeded, T2 still proving.
+		// T1's pending chain tx must keep T1 on screen until it confirms.
+		const txs = [tx(t1Hash, TxStatus.Pending)]
+		const inFlight = [makeOp({ id: "j2", kind: "dapp_execute", terminalAt: null, progress: { stage: "proving", enteredProveAt: 0 } })]
+		expect(filterPendingDoubleRender(txs, inFlight).map((t) => t.hash)).toEqual([t1Hash])
+	})
+
+	test("submitting-stage journal records WITHOUT txHash don't suppress anything", () => {
+		// `submitting.txHash` is optional in the schema. A record between FSM
+		// entry and txHash population should NOT swallow unrelated pending txs.
+		const txs = [tx(t1Hash, TxStatus.Pending)]
+		const inFlight = [makeOp({ id: "j1", kind: "dapp_execute", terminalAt: null, progress: { stage: "submitting" } })]
+		expect(filterPendingDoubleRender(txs, inFlight).map((t) => t.hash)).toEqual([t1Hash])
+	})
+
+	test("non-pending chain txs are always visible regardless of in-flight set", () => {
+		// Use any non-Pending status (Proposed, Proven, Finalized). The
+		// filter only acts on Pending.
+		const txs = [tx(t1Hash, TxStatus.Proven), tx(t2Hash, TxStatus.Finalized)]
+		const inFlight = [makeOp({ id: "j1", kind: "dapp_execute", terminalAt: null, progress: { stage: "submitting", txHash: t1Hash } })]
+		// t1Hash matches but its chain tx is Proven, not Pending, so it stays.
+		expect(
+			filterPendingDoubleRender(txs, inFlight)
+				.map((t) => t.hash)
+				.sort(),
+		).toEqual([t1Hash, t2Hash].sort())
+	})
+
+	test("multi-record in-flight set suppresses only the matching pending tx", () => {
+		const txs = [tx(t1Hash, TxStatus.Pending), tx(t2Hash, TxStatus.Pending)]
+		const inFlight = [
+			makeOp({ id: "j1", kind: "dapp_execute", terminalAt: null, progress: { stage: "submitting", txHash: t1Hash } }),
+			makeOp({ id: "j2", kind: "dapp_execute", terminalAt: null, progress: { stage: "queued" }, sessionId: "s1" }),
+		]
+		expect(filterPendingDoubleRender(txs, inFlight).map((t) => t.hash)).toEqual([t2Hash])
 	})
 })

@@ -7,6 +7,8 @@ import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
 import { DappSessionService, AccessLevel, type DappSession } from "@/wallet/services/dapp-session/service"
 import { ExecutionService, type Operation, type OperationKind } from "@/wallet/services/execution/service"
+import { OperationJournalService } from "@/wallet/services/operation-journal/service"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { OriginType, type LocalTxOrigin } from "@/wallet/services/transaction/service"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import type { WindowManager } from "@/wallet/services/window-manager/window-manager"
@@ -24,6 +26,7 @@ import {
 	type DiscoveryPayload,
 	type DiscoveryParams,
 	type DiscoveryResult,
+	type ExecutionHooks,
 	type ExecutionParams,
 	type CaipChain,
 	type CaipAccount,
@@ -56,6 +59,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 	private accountService: AccountService = null!
 	private dappSessionService: DappSessionService = null!
 	private executionService: ExecutionService = null!
+	private operationJournal: OperationJournalService = null!
 
 	public constructor(
 		logger: ILogger,
@@ -70,6 +74,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		this.accountService = services.get(AccountService.name)
 		this.dappSessionService = services.get(DappSessionService.name)
 		this.executionService = services.get(ExecutionService.name)
+		this.operationJournal = services.get(OperationJournalService.name)
 	}
 
 	public async getInteractionPayload(id: string): Promise<ExecutionPayload | CapabilityPayload | DiscoveryPayload> {
@@ -121,7 +126,9 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		this.logInfo(`executeAndResolve: starting [${kinds}] for ${origin.name}`)
 		try {
 			await this.profileService.refreshSession()
-			const result = await this.executionService.executeOperations(operations, origin)
+			// Forward hooks captured at interaction-creation time. Survives the
+			// popup handoff because we stash them on the interaction record.
+			const result = await this.executionService.executeOperations(operations, origin, undefined, interaction.hooks)
 			this.logInfo(`executeAndResolve: resolved [${kinds}]`)
 			this.windowManager.settle(interaction.handleId, result)
 		} catch (error) {
@@ -137,14 +144,32 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		}
 	}
 
-	public async execute(params: ExecutionParams, cancellationToken?: string): Promise<ExecutionResult> {
+	public async execute(params: ExecutionParams, cancellationToken?: string, hooks?: ExecutionHooks): Promise<ExecutionResult> {
 		await this.ensureInitialized()
 		const session = await this.validateSession(params)
 		const payload: ExecutionPayload = { params, session }
-		if (!(await this.isConfirmationNeeded(payload))) {
-			return await this.silentInteraction(payload)
+
+		// Cancel-before-claim short-circuit (codex F2 / post-impl review):
+		// If the user cancelled this sendTx while it was queued, the journal
+		// record is now at stage `cancelled`. Throw the cancelled-pipeline
+		// error directly so the popup never opens — without this, the user
+		// would see an approval popup for a request they already cancelled.
+		// Reads the journal AS THE SOURCE OF TRUTH; the journal mutex on
+		// `transitionOperation` ensures we see a consistent stage.
+		if (hooks?.queuedJournalId) {
+			const queuedRec = await this.operationJournal.getOperation(hooks.queuedJournalId).catch(() => null)
+			if (queuedRec && queuedRec.progress?.stage !== "queued") {
+				this.logInfo(
+					`execute: queued record ${hooks.queuedJournalId} is ${queuedRec.progress?.stage}; short-circuiting before popup`,
+				)
+				throw new JobCancelledError("Request was cancelled before approval")
+			}
 		}
-		return (await this.interaction("execute", payload, cancellationToken)) as ExecutionResult
+
+		if (!(await this.isConfirmationNeeded(payload))) {
+			return await this.silentInteraction(payload, hooks)
+		}
+		return (await this.interaction("execute", payload, cancellationToken, hooks)) as ExecutionResult
 	}
 
 	public async requestCapabilities(params: CapabilityParams, cancellationToken?: string): Promise<CapabilityResult> {
@@ -163,6 +188,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		type: string,
 		payload: ExecutionPayload | CapabilityPayload | DiscoveryPayload,
 		cancellationToken?: string,
+		hooks?: ExecutionHooks,
 	): Promise<ExecutionResult | CapabilityResult | DiscoveryResult> {
 		let interaction: DappInteraction
 
@@ -171,7 +197,8 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 
 			let id: string
 			do {
-				id = getRandomHex(8)
+				// 16 bytes / 128 bits (codex-round-1 defense-in-depth).
+				id = getRandomHex(16)
 			} while (this.storage.has(id))
 
 			const handle = this.windowManager.openAndAwait<ExecutionResult | CapabilityResult | DiscoveryResult>({
@@ -187,6 +214,10 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 				payload,
 				handleId: handle.handleId,
 				cancellationToken: cancellationToken ?? id,
+				// Hooks persist on the interaction so they survive across the
+				// popup handoff (interaction() returns → user approves → popup
+				// calls approveInteraction → executeAndResolve picks hooks up).
+				hooks,
 			}
 
 			this.storage.set(id, interaction)
@@ -199,7 +230,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		}
 	}
 
-	private async silentInteraction(payload: ExecutionPayload): Promise<ExecutionResult> {
+	private async silentInteraction(payload: ExecutionPayload, hooks?: ExecutionHooks): Promise<ExecutionResult> {
 		const profile = await this.profileService.getActiveProfile()
 		if (profile?.id !== payload.session.profileId) {
 			throw new Error("Wallet locked")
@@ -237,10 +268,49 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			operations.push(materialized as unknown as Operation)
 		}
 		await this.profileService.refreshSession()
-		return await this.executionService.executeOperations(operations, {
-			type: OriginType.DAPP,
-			name: payload.session.dappMetadata.name ?? "Unknown dapp",
-		})
+
+		// Silent path (self-paid sendTx, no popup): fast-forward the queued
+		// record to `pending` so the UI shows "Preparing..." immediately
+		// instead of briefly showing "Queued..." for a request that never
+		// opens a popup (opus post-impl F7).
+		//
+		// CRITICAL ORDERING (codex closeout F1): this fast-forward MUST stay
+		// immediately before `executeOperations()`. If we hoisted it to the
+		// top of the method, a throw in `materializeRequest` /
+		// `refreshSession` / profile-check would leave the record stranded
+		// at `pending` — the `handleWalletMessage` safety net only
+		// terminalizes records still at `queued` (background.ts), so the UI
+		// would show "Preparing..." until the reaper's `pending` grace
+		// expires (~2 min). Keeping the transition here ensures that any
+		// pre-execute throw leaves the record at `queued` for the safety
+		// net to catch.
+		//
+		// The claim helper in `claimOrCreateDappExecuteJournal` accepts BOTH
+		// `queued` and `pending` as legitimate pre-claim stages — if we
+		// fast-forward to pending here, the claim path skips its own
+		// transition and just registers the controller. Failure here is
+		// non-fatal: if a cancel races us and wins, the claim path's
+		// recheck logic catches the cancelled record and throws the
+		// JobCancelledSentinel correctly.
+		if (hooks?.queuedJournalId) {
+			try {
+				await this.operationJournal.transitionOperation(hooks.queuedJournalId, { stage: "pending" })
+			} catch (err) {
+				this.logDebug(
+					`silent-path fast-forward queued→pending failed (likely cancel race); claim helper will handle: ${getErrorMessage(err)}`,
+				)
+			}
+		}
+
+		return await this.executionService.executeOperations(
+			operations,
+			{
+				type: OriginType.DAPP,
+				name: payload.session.dappMetadata.name ?? "Unknown dapp",
+			},
+			undefined,
+			hooks,
+		)
 	}
 
 	private async validateSession({ sessionId, operations }: ExecutionParams): Promise<DappSession> {

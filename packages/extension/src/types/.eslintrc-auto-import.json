@@ -163,6 +163,7 @@
     "shallowReactive": true,
     "shallowReadonly": true,
     "shallowRef": true,
+    "stageSubtitle": true,
     "stringCompare": true,
     "toRaw": true,
     "toRef": true,

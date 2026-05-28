@@ -13,8 +13,18 @@
  * retryable vs terminal without revisiting the schema (Carry #5).
  */
 
-/** Stages a job can be in. Three are terminal (see {@link TERMINAL_STAGES}). */
-export type JobStage = "pending" | "simulating" | "proving" | "submitting" | "succeeded" | "failed" | "cancelled"
+/**
+ * Stages a job can be in. Three are terminal (see {@link TERMINAL_STAGES}).
+ *
+ * `queued` is a pre-execution holding stage for records created at message
+ * arrival before the handler claims them. Used by the wallet-sdk session
+ * FIFO surface so concurrent dApp sendTx requests are visible in the
+ * activity feed BEFORE their handler runs. Handlers transition queued →
+ * pending the moment they claim ownership; the journal-layer mutex on
+ * `transitionOperation` ensures a concurrent `cancelJob` can't race with
+ * the claim.
+ */
+export type JobStage = "queued" | "pending" | "simulating" | "proving" | "submitting" | "succeeded" | "failed" | "cancelled"
 
 /**
  * Terminal stages. Records in these stages never transition further; the
@@ -37,6 +47,7 @@ export function isTerminal(stage: JobStage): boolean {
  * inside BB.wasm prove are not feasible — the prover blocks the JS turn).
  */
 export type JobProgress =
+	| { stage: "queued" }
 	| { stage: "pending" }
 	| { stage: "simulating" }
 	| { stage: "proving"; enteredProveAt: number }

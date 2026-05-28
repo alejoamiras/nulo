@@ -54,6 +54,8 @@ import { feeJuiceAddress } from "@/wallet/utils/fee-juice"
 import { computeMaxFee, formatFeeJuice, feeToUsd } from "@/utils/fee-estimation"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import type { OperationContext, OperationRecord } from "@/wallet/services/operation-journal/spec"
+import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
+import { claimOrCreateDappExecuteJournal as claimOrCreateDappExecuteJournalImpl } from "./claim-helper"
 import { TaskService, type WrappedTask, ExecuteOperationContent, TransferContent } from "@/wallet/services/task/service"
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
@@ -514,6 +516,10 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			checkCancelled()
 
 			const tx = await provedTx.toTx()
+			// TODO(follow-up: dapp-interaction-lock-fix-v2):
+			//   Populate `txHash` here (`tx.getTxHash().toString()`) — see the
+			//   sibling TODOs on the `this.markJournal(...)` submitting sites
+			//   below for the full rationale.
 			await markJournal({ stage: "submitting" })
 			checkCancelled()
 			await this.coordinator.sendTxTask(node, tx, transferTask)
@@ -872,7 +878,12 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 	}
 
-	public async executeOperations(operations: Operation[], origin: LocalTxOrigin, parentTask?: WrappedTask): Promise<OperationResult[]> {
+	public async executeOperations(
+		operations: Operation[],
+		origin: LocalTxOrigin,
+		parentTask?: WrappedTask,
+		hooks?: ExecutionHooks,
+	): Promise<OperationResult[]> {
 		await this.ensureInitialized()
 		const results: OperationResult[] = []
 		for (const operation of operations) {
@@ -956,7 +967,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 						break
 					}
 					case "aztec_sendTx": {
-						result = await this.executeAztecSendTx(operation, origin, operationTask)
+						// Hooks forwarded ONLY to aztec_sendTx; other ops don't need them.
+						result = await this.executeAztecSendTx(operation, origin, operationTask, hooks)
 						break
 					}
 					case "aztec_createAuthWit": {
@@ -1137,6 +1149,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			checkCancelled()
 
 			const tx = await provedTx.toTx()
+			// TODO(follow-up: dapp-interaction-lock-fix-v2):
+			//   Populate `txHash` here from `tx.getTxHash().toString()` so the
+			//   RecentActivityView pending-suppression filter
+			//   (`filterPendingDoubleRender`) can match this in-flight record to
+			//   its pending chain tx. Today the filter is a no-op in production
+			//   because the schema permits `submitting.txHash` but no call site
+			//   sets it — see audit `019e6abf` P2 + the TODO on
+			//   `filterPendingDoubleRender` in `recent-activity-handlers.ts`.
 			await this.markJournal(journalId, { stage: "submitting" })
 			checkCancelled()
 			await this.coordinator.sendTxTask(node, tx, parentTask)
@@ -1197,6 +1217,37 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			this.logError("Failed to create dapp_execute journal record", getErrorMessage(error))
 			return undefined
 		}
+	}
+
+	/**
+	 * Claim a pre-allocated queued journal record (transition queued → pending)
+	 * OR create a new in-flight record if no queued id was provided.
+	 *
+	 * Decision tree + invariants live in `./claim-helper.ts` so they're
+	 * unit-testable without spinning up the full ExecutionService harness.
+	 * This thin wrapper just binds `this.*` dependencies into the helper's
+	 * dependency injection shape.
+	 */
+	private async claimOrCreateDappExecuteJournal(
+		networkId: string,
+		accountAddress: string,
+		origin: LocalTxOrigin,
+		calls: { method?: string }[] | undefined,
+		hooks: ExecutionHooks | undefined,
+	): Promise<{ journalId: string | undefined; controller: AbortController | undefined }> {
+		return claimOrCreateDappExecuteJournalImpl(
+			{
+				operationJournal: this.operationJournal,
+				activeControllers: this.activeControllers,
+				createFreshRecord: (n, a, o, c) => this.beginDappExecuteJournal(n, a, o, c),
+				logger: {
+					debug: (msg) => this.logDebug(msg),
+					info: (msg) => this.logInfo(msg),
+					error: (msg, raw) => this.logError(msg, raw),
+				},
+			},
+			{ networkId, accountAddress, origin, calls, queuedJournalId: hooks?.queuedJournalId },
+		)
 	}
 
 	private async markJournal(journalId: string | undefined, progress: JobProgress, error?: JobError | null): Promise<void> {
@@ -1657,13 +1708,15 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		op: AztecSendTxOperation,
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
+		hooks?: ExecutionHooks,
 	): Promise<SendReturn<InteractionWaitOptions>> {
 		// `default_entrypoint` is a special dApp path that bypasses the
 		// standard tx-build pipeline and runs its own kernelless discovery.
-		// Journal coverage for it is deferred — the typical dApp tx surface
-		// (regular `aztec_sendTx` with `from`) is what users see day-to-day.
+		// Forward hooks so concurrent NO_FROM sendTx still get the FIFO baton
+		// release at the right point (and benefit from the queued-record
+		// claim if one was pre-allocated).
 		if (op.executionMode === "default_entrypoint") {
-			return this.executeNoFromSendTx(op, origin, parentTask)
+			return this.executeNoFromSendTx(op, origin, parentTask, hooks)
 		}
 
 		// JS-context trust boundary: approveInteraction() ships popup-built
@@ -1676,25 +1729,28 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw new Error("aztec_sendTx: feeSettings is required for the standard execution path")
 		}
 
-		// Durable journal record for dApp-initiated sends. Mirrors the
-		// pattern `executeTransfer` uses for UI-initiated transfers, so
-		// the activity feed stays consistent across SW restart + popup
-		// close/reopen. Carries the dApp identity via `subtitle` so the
-		// in-flight chip matches the settled chip rendered from the tx
-		// itself.
+		// Durable journal record for dApp-initiated sends. Either claims a
+		// pre-allocated queued record (set by background.ts:tryCreateQueuedJournal
+		// at message arrival) or creates a fresh one. See claim helper for the
+		// safety properties around cancel-during-claim.
 		const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
-		const journalId = await this.beginDappExecuteJournal(
+		const { journalId, controller } = await this.claimOrCreateDappExecuteJournal(
 			op.networkId,
 			op.accountAddress,
 			origin,
 			primaryMethod ? [{ method: primaryMethod }] : undefined,
+			hooks,
 		)
-
-		const controller = journalId ? new AbortController() : undefined
-		if (journalId && controller) this.activeControllers.set(journalId, controller)
 		const checkCancelled = (): void => {
 			if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
 		}
+		// Immediately after claim — opus post-impl F2 catch. A user-cancel that
+		// landed during the await-chain INSIDE the claim helper (e.g. between
+		// the journal mutex acquisition and the controller.set call) would have
+		// set the abort signal. Surface it here BEFORE the planner /
+		// authwit-discovery work runs, so we don't do side-effecting PXE work
+		// for a cancelled request.
+		checkCancelled()
 
 		try {
 			if (op.accountAddress !== op.opts?.from?.toString()) {
@@ -1729,6 +1785,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			)
 
 			checkCancelled()
+			// FIFO baton release: txRequest is built and the random nonce is
+			// sealed into it (tx-request-builder.ts:126 uses Fr.random()). The
+			// session-FIFO can now advance — the next message's handler can
+			// start its own tx-build in parallel with our proving. Proving
+			// itself remains serialized at PXE's `withPxeWrite`, so true
+			// parallel execution doesn't kick in, but popups + UI surface
+			// concurrency does.
+			hooks?.onTxRequestFinalized?.()
 			await this.markJournal(journalId, { stage: "proving", enteredProveAt: Date.now() })
 			const sendAdditionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
 			const provedTx = await this.coordinator.proveTxTask(pxe, txRequest, [account.address, ...sendAdditionalScopes], parentTask)
@@ -1736,6 +1800,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
 			const offchainOutput = extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
 			const tx = await provedTx.toTx()
+			// TODO(follow-up: dapp-interaction-lock-fix-v2):
+			//   Populate `txHash` here from `tx.getTxHash().toString()` so the
+			//   RecentActivityView pending-suppression filter
+			//   (`filterPendingDoubleRender`) can match this in-flight record to
+			//   its pending chain tx. Today the filter is a no-op in production
+			//   because the schema permits `submitting.txHash` but no call site
+			//   sets it — see audit `019e6abf` P2 + the TODO on
+			//   `filterPendingDoubleRender` in `recent-activity-handlers.ts`.
 			await this.markJournal(journalId, { stage: "submitting" })
 			checkCancelled()
 			await this.coordinator.sendTxTask(node, tx, parentTask)
@@ -1780,6 +1852,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		op: AztecSendTxOperation,
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
+		hooks?: ExecutionHooks,
 	): Promise<SendReturn<InteractionWaitOptions>> {
 		this.logDebug(
 			`executeNoFromSendTx: starting, accountAddress=${op.accountAddress}, calls=${op.exec?.calls?.length}, additionalScopes=${JSON.stringify(op.opts?.additionalScopes)}`,
@@ -1789,23 +1862,24 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 
 		// Phase 2: NO_FROM / default_entrypoint dApp paths get the same durable
-		// coverage as the standard flows. Codex Week 1 review flagged that
-		// the original "journal coverage deferred" comment left this path
-		// without `profileId`, `enteredProveAt`, normalized failure envelope,
-		// or cancel support.
+		// coverage as the standard flows. Claim-or-create mirrors the standard
+		// executeAztecSendTx path so queued visibility + cancel-safe claim
+		// work for first-time-account-deploy sendTx too.
 		const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
-		const journalId = await this.beginDappExecuteJournal(
+		const { journalId, controller } = await this.claimOrCreateDappExecuteJournal(
 			op.networkId,
 			op.accountAddress,
 			origin,
 			primaryMethod ? [{ method: primaryMethod }] : undefined,
+			hooks,
 		)
-
-		const controller = journalId ? new AbortController() : undefined
-		if (journalId && controller) this.activeControllers.set(journalId, controller)
 		const checkCancelled = (): void => {
 			if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
 		}
+		// Mirror of opus F2 fix in executeAztecSendTx — surface an abort that
+		// landed during the claim's await chain BEFORE we start side-effecting
+		// PXE work.
+		checkCancelled()
 
 		try {
 			await this.markJournal(journalId, { stage: "simulating" })
@@ -1890,12 +1964,25 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 			// Prove with account in scope
 			checkCancelled()
+			// FIFO baton release for the NO_FROM path — same semantic as the
+			// standard path (executeAztecSendTx). txRequest + gas limits are
+			// finalized; subsequent proving is serialized at PXE anyway, so
+			// concurrent next-message handlers can start safely.
+			hooks?.onTxRequestFinalized?.()
 			await this.markJournal(journalId, { stage: "proving", enteredProveAt: Date.now() })
 			const provedTx = await this.coordinator.proveTxTask(pxe, txRequest, scopesWithAccount, parentTask)
 			checkCancelled()
 			const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
 			const offchainOutput = extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
 			const tx = await provedTx.toTx()
+			// TODO(follow-up: dapp-interaction-lock-fix-v2):
+			//   Populate `txHash` here from `tx.getTxHash().toString()` so the
+			//   RecentActivityView pending-suppression filter
+			//   (`filterPendingDoubleRender`) can match this in-flight record to
+			//   its pending chain tx. Today the filter is a no-op in production
+			//   because the schema permits `submitting.txHash` but no call site
+			//   sets it — see audit `019e6abf` P2 + the TODO on
+			//   `filterPendingDoubleRender` in `recent-activity-handlers.ts`.
 			await this.markJournal(journalId, { stage: "submitting" })
 			checkCancelled()
 			await this.coordinator.sendTxTask(node, tx, parentTask)

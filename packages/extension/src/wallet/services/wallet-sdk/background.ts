@@ -40,8 +40,11 @@ import { ProfileService } from "@/wallet/services/profile/service"
 import { DappInteractionService } from "@/wallet/services/dapp-interaction/service"
 import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
 import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/service"
+import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { DiscoveryQueue, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
-import { jsonStringify } from "@nulo/wallet-core/utils"
+import { jsonStringify, getErrorMessage } from "@nulo/wallet-core/utils"
+import { tryCreateQueuedJournal } from "./queued-journal"
+import { createSessionBaton } from "./session-baton"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@/wallet/logger"
 import type { Fr } from "@aztec/foundation/curves/bn254"
@@ -61,6 +64,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	const profileService: ProfileService = services.get(ProfileService.name)
 	const dappInteractionService: DappInteractionService = services.get(DappInteractionService.name)
 	const dappSessionService: DappSessionService = services.get(DappSessionService.name)
+	const operationJournal: OperationJournalService = services.get(OperationJournalService.name)
 
 	const dispatcher = new WalletSdkDispatcher(
 		networkService,
@@ -185,10 +189,51 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 			onWalletMessage: (session, message) => {
 				const key = session.sessionId
 				const prev = sessionQueues.get(key) ?? Promise.resolve()
-				const next = prev.then(() => handleWalletMessage(session, message, handler, dispatcher, profileService, logger))
+
+				// Baton-based FIFO (see `session-baton.ts` for mechanics).
+				// Resolves when the handler explicitly calls `releaseFifo()`
+				// (sendTx path, after tx-build) OR when the handler completes
+				// (safety-net `.finally(releaseFifo)`), whichever fires first.
+				const { baton, releaseFifo } = createSessionBaton()
+
+				// Only top-level `sendTx` messages get a pre-allocated queued
+				// journal record. `batch` is excluded by design — the recursive
+				// dispatch in WalletSdkDispatcher.handleBatch can't safely
+				// route hooks per-leg, so we'd end up with a batch-level
+				// queued record that no inner leg knows to claim.
+				// TODO(queued-visibility-for-batch): batched sendTx legs
+				// currently bypass the queued-record creation path. Lifting
+				// this requires a per-leg queued-record model or a relaxation
+				// of the batch contract; out of scope for the
+				// concurrent-dApp-sendTx fix.
+				const queuedJournalIdPromise: Promise<string | undefined> =
+					message.type === "sendTx"
+						? tryCreateQueuedJournal(message, session, {
+								journal: operationJournal,
+								profile: profileService,
+								dappSession: dappSessionService,
+								networkSvc: networkService,
+								logger,
+							})
+						: Promise.resolve(undefined)
+
+				const handlerChain = queuedJournalIdPromise.then((queuedJournalId) =>
+					prev.then(() =>
+						handleWalletMessage(session, message, handler, dispatcher, profileService, operationJournal, logger, {
+							releaseFifo,
+							queuedJournalId,
+						}),
+					),
+				)
+				// Safety-net release for handlers that don't call releaseFifo
+				// explicitly (every non-sendTx path) — preserves backward-
+				// compatible FIFO semantics for those. `.catch(() => {})` on
+				// the ignored side prevents an unhandled-rejection warning
+				// if the handler throws.
+				handlerChain.finally(releaseFifo).catch(() => {})
 				sessionQueues.set(
 					key,
-					next.catch(() => {}),
+					baton.catch(() => {}),
 				)
 			},
 		},
@@ -428,6 +473,32 @@ async function handleDiscovery(
 }
 
 /**
+ * Per-message hooks passed to `handleWalletMessage` from `onWalletMessage`.
+ * Concurrent-sendTx wiring (see `onWalletMessage` doc comment).
+ */
+type WalletMessageHooks = {
+	/**
+	 * Release the per-session FIFO baton. Called by handlers that have
+	 * finished their FIFO-ordered work (e.g., sendTx after tx-build) but
+	 * still have background work to do (e.g., proving). The next message's
+	 * handler can start while this one's tail runs.
+	 *
+	 * The dispatcher forwards this down through DispatchHooks. Most
+	 * handlers don't call it explicitly; the safety-net `.finally`
+	 * in `onWalletMessage` releases the baton at handler completion.
+	 */
+	releaseFifo?: () => void
+	/**
+	 * Pre-allocated journal id from `tryCreateQueuedJournal`. The sendTx
+	 * handler claims (queued → pending) instead of creating new. The
+	 * `handleWalletMessage` catch block uses the journal record state
+	 * (not a mutable flag) to decide whether to transition to `failed`
+	 * on an unclaimed-error.
+	 */
+	queuedJournalId?: string
+}
+
+/**
  * Handle an incoming wallet message from a connected dApp.
  *
  * Dispatches the method call to the WalletSdkDispatcher, then encrypts
@@ -439,7 +510,9 @@ async function handleWalletMessage(
 	handler: BackgroundConnectionHandler,
 	dispatcher: WalletSdkDispatcher,
 	profileService: ProfileService,
+	operationJournal: OperationJournalService,
 	logger: ILogger,
+	hooks?: WalletMessageHooks,
 ): Promise<void> {
 	const response: WalletResponse = {
 		messageId: message.messageId,
@@ -459,7 +532,11 @@ async function handleWalletMessage(
 			sessionId: session.sessionId,
 		}
 
-		const raw = await dispatcher.dispatch(message.type, message.args, ctx)
+		// Hooks ride as an internal 4th arg — deliberately NOT on `ctx` so
+		// `dispatch("batch", ...)`'s recursive ctx forwarding can't leak them
+		// into batch legs (would let an inner sendTx release the top-level
+		// baton before the batch finishes).
+		const raw = await dispatcher.dispatch(message.type, message.args, ctx, hooks)
 		response.result = toJsonSafe(raw)
 	} catch (error) {
 		// Structured EIP-1193-aligned envelope for recognised WalletError subclasses
@@ -475,6 +552,36 @@ async function handleWalletMessage(
 		// logs don't read "[object Object]".
 		const logMsg = typeof response.error === "string" ? response.error : jsonStringify(response.error)
 		logger.log("wallet-sdk", LogLevel.Error, `Method ${message.type} failed for ${session.origin}: ${logMsg}`)
+
+		// If a queued journal record exists and is STILL at queued stage,
+		// the handler failed before claiming it. Transition to failed so
+		// the UI doesn't show a permanently-stuck "Queued..." card.
+		// Use the journal record as source of truth (not a mutable flag)
+		// to disambiguate "handler claimed and then failed" (terminal state
+		// already correct) from "handler failed before claim" (we own the
+		// terminal state).
+		if (hooks?.queuedJournalId) {
+			try {
+				const record = await operationJournal.getOperation(hooks.queuedJournalId)
+				if (record?.progress?.stage === "queued") {
+					await operationJournal.transitionOperation(
+						hooks.queuedJournalId,
+						{ stage: "failed" },
+						{
+							kind: "popup_bound",
+							message: getErrorMessage(error),
+							normalizedRaw: null,
+						},
+					)
+				}
+			} catch (transitionError) {
+				logger.log(
+					"wallet-sdk",
+					LogLevel.Warn,
+					`Failed to mark queued record ${hooks.queuedJournalId} as failed: ${getErrorMessage(transitionError)}`,
+				)
+			}
+		}
 	}
 
 	try {
