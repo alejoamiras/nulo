@@ -47,3 +47,11 @@ The structural changes work. The residual flake is runner-pool variability that 
 Replace `tx-sendTx-default` with a journal-stage observation test. Add stage-level instrumentation (markJournal console emission for `simulating` / `proving` / `submitting` / `succeeded`) in the same PR. Once the redesign lands, drop the `skipDeferredSlow` gate.
 
 Estimate: 4-6 hours for the redesign + instrumentation. Wallet code touch (markJournal callsite) requires codex review per CLAUDE.md.
+
+---
+
+## Resolution (2026-05-28)
+
+The "redesign tx-sendTx-default with journal-stage assertion" follow-up was superseded by a simpler structural fix: `implementations-plan/accelerator-server-ci/plan.md` (PR #67) landed native bb proving on CI runners, which collapses the per-prove time tail that motivated the journal-stage redesign. The follow-up `implementations-plan/network-e2e-unquarantine/plan.md` removes the `skipDeferredSlow` gate from `tx-sendTx-default` and restores `cancel-mid-prove`'s 30s post-approve selector waits — both via the un-quarantine PR rather than a wallet-code-level redesign.
+
+The journal-stage instrumentation would still be valuable for future un-quarantine signal beyond accelerator perf (PR #67 plan §11 flags it as a follow-up).

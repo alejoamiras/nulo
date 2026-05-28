@@ -456,3 +456,9 @@ Add +1 day if Phase 1 codex review surfaces a regression needing Phase 1.5. Add 
 ---
 
 **Next step**: per CLAUDE.md Tier-A protocol § 3, this consolidated plan goes back to codex for one final critical pass before approval gate. Then ELI5 HTML companion. Then approval gate.
+
+---
+
+## Resolution (2026-05-28)
+
+The `NULO_E2E_SKIP_DEFERRED_SLOW` quarantine + `skipDeferredSlow` mechanism described throughout this plan was removed by `implementations-plan/network-e2e-unquarantine/plan.md` (companion to `implementations-plan/accelerator-server-ci/plan.md`). The 3 originally-quarantined tests (`multi-account-from`, `tx-sendTx-multicall`, `register-token`) all run on CI again — `register-token` was resolved by the pre-grant fixture pattern landed during this plan's own execution (PR #63); the other two were resolved by the accelerator-server CI integration + a `dappConnectedExtensionWithFirstTwoAccountsCap` fixture variant.
