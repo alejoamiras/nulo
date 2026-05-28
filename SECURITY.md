@@ -324,12 +324,19 @@ composite action. Trust posture:
   security boundary.** A release-origin compromise would replace the
   tarball AND the sidecar together. The repo-pinned hash is the
   authoritative anchor.
-- **Bump procedure**:
-  1. Download the new tarball: `curl -sSfL <BASE>/<TARBALL> -o /tmp/t.tgz`.
-  2. Compute the hash: `shasum -a 256 /tmp/t.tgz`.
-  3. Update `version` AND `expected_sha256` in `_network-e2e.yml`'s
+- **Bump procedure** (we pin the EXTRACTED binary hash, not the
+  tarball hash — the binary is what `actions/cache` restores so it
+  must be the trust anchor on every run; verifying only the tarball
+  on download would leave cache-hit runs unverified):
+  1. Compute the binary hash from the upstream tarball in one shot:
+     ```bash
+     curl -sSfL https://github.com/alejoamiras/aztec-accelerator/releases/download/accelerator-v<VER>/accelerator-server-<VER>-linux-x86_64.tar.gz \
+       | tar -xzO accelerator-server | shasum -a 256
+     ```
+  2. Update `version` AND `expected_sha256` in `_network-e2e.yml`'s
      `setup-accelerator-server` step in one commit.
-  4. CI verifies on first install; mismatch is loud (workflow goes red).
+  3. CI re-hashes the binary on EVERY install (cache-miss + cache-hit);
+     mismatch is loud (workflow goes red).
 - **Single-maintainer trust model.** `alejoamiras/aztec-accelerator` is
   a single-maintainer repo. The maintainer is the same person who owns
   Nulo, so the trust model is what it is. Defense: pinning + per-bump

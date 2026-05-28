@@ -1,4 +1,4 @@
-import { ACCELERATOR_HOST, ACCELERATOR_PORT, ACCELERATOR_REQUIRED } from "@/accelerator/config"
+import { ACCELERATOR_HOST, ACCELERATOR_PORT, ACCELERATOR_REQUIRED, ACCELERATOR_REQUIRED_BUILD_STAMP } from "@/accelerator/config"
 import { consoleMethods, LogLevel } from "@/wallet/logger"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
@@ -44,6 +44,15 @@ self.onunhandledrejection = (e: PromiseRejectionEvent) => {
 	} catch {
 		// Logger itself may fail if SW is dead — don't cascade
 	}
+}
+
+// Pin the accelerator-required build stamp into the bundle so vite
+// cannot tree-shake the import. The CI agent greps dist/chrome for the
+// literal value as a propagation assertion. No-op at runtime.
+// See packages/extension/src/accelerator/config.ts for full context.
+if (ACCELERATOR_REQUIRED_BUILD_STAMP) {
+	;(globalThis as { __NULO_ACCELERATOR_REQUIRED_BUILD_STAMP__?: string }).__NULO_ACCELERATOR_REQUIRED_BUILD_STAMP__ =
+		ACCELERATOR_REQUIRED_BUILD_STAMP
 }
 
 // run services — await initialization before signaling ready.

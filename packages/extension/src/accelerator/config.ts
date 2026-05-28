@@ -24,3 +24,20 @@ export const ACCELERATOR_PORT = 59833
 export const ACCELERATOR_HEALTH_URL = `http://${ACCELERATOR_HOST}:${ACCELERATOR_PORT}/health` as const
 
 export const ACCELERATOR_REQUIRED = (import.meta.env.VITE_NULO_ACCELERATOR_REQUIRED ?? "") === "1"
+
+/**
+ * Build-time marker. Present in the shipped bundle ONLY when this build
+ * was stamped with `VITE_NULO_ACCELERATOR_REQUIRED=1`. The CI agent
+ * (`packages/extension/scripts/e2e/agent.sh`) greps `dist/chrome` for
+ * the literal string `NULO_ACCELERATOR_REQUIRED_BUILD_STAMP` as a
+ * propagation assertion — if the env var didn't reach the wallet build,
+ * Layer 2 enforcement (chain-runtime.ts onPhase throw) would silently
+ * disappear and the suite could pass on WASM even when the server is up
+ * but unhealthy mid-test. (Codex post-impl audit finding #3.)
+ *
+ * Pinned to a no-op runtime side effect in `offscreen/index.ts` so vite
+ * cannot tree-shake the import + string.
+ */
+export const ACCELERATOR_REQUIRED_BUILD_STAMP: "NULO_ACCELERATOR_REQUIRED_BUILD_STAMP" | null = ACCELERATOR_REQUIRED
+	? "NULO_ACCELERATOR_REQUIRED_BUILD_STAMP"
+	: null

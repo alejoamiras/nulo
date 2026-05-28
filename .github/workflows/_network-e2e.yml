@@ -95,7 +95,14 @@ jobs:
       # checkAcceleratorStatus preflight + onPhase throw on
       # "fallback"/"denied"). When empty, the wallet behaves exactly like
       # the production build (silent WASM fallback if no accelerator).
-      VITE_NULO_ACCELERATOR_REQUIRED: ${{ inputs.disable_accelerator && '' || '1' }}
+      #
+      # Expression shape `disable_accelerator == false && '1' || ''` instead
+      # of the inverted form: GitHub Actions short-circuits `&&` such that
+      # `true && ''` returns `''` (right operand), and then `'' || '1'`
+      # falls through to `'1'` because empty string is falsy. So the inverted
+      # form would resolve to `'1'` in BOTH branches, completely defeating
+      # the disable flag (codex post-impl audit finding #1).
+      VITE_NULO_ACCELERATOR_REQUIRED: ${{ inputs.disable_accelerator == false && '1' || '' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -117,12 +124,15 @@ jobs:
         if: '!inputs.disable_accelerator'
         with:
           version: "1.0.1"
-          # Computed locally via `shasum -a 256` on the v1.0.1 tarball.
-          # Cross-checked against the upstream `.sha256` sidecar (which is
-          # a sanity confirmation, NOT a security boundary — a release-
-          # origin compromise would replace both). See SECURITY.md
-          # "Binary dependencies" for the bump procedure.
-          expected_sha256: 86344c2b778c381d809a6eb6887b8a9b9fe2d0b4714c64c5bd3477f758a0b10f
+          # SHA-256 of the EXTRACTED binary (not the tarball — different
+          # hashes; the binary is what `actions/cache` restores, so it's
+          # the trust anchor on every run). Computed locally via:
+          #   curl ... | tar -xzO accelerator-server | shasum -a 256
+          # The upstream `.sha256` sidecar in the GH release covers the
+          # tarball; we don't trust the sidecar as a security boundary
+          # anyway (release-origin compromise would replace both).
+          # See SECURITY.md "Binary dependencies" for the bump procedure.
+          expected_sha256: d701837047429334a19cc0d75d8723615c367a9d9d8a531e72fd5e66ccc9a664
 
       - name: Start accelerator-server
         if: '!inputs.disable_accelerator'

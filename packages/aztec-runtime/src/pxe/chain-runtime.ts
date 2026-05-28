@@ -153,7 +153,7 @@ export class ProductionPxeFactory implements PxeFactory {
 		if (this.required) {
 			const status = await prover.checkAcceleratorStatus()
 			if (!status.available) {
-				throw new Error("[accelerator-required] accelerator-server unavailable. " + `Status: ${JSON.stringify(status)}`)
+				throw new Error(`[accelerator-required] accelerator-server unavailable. Status: ${JSON.stringify(status)}`)
 			}
 			if (status.needsDownload) {
 				console.warn(
