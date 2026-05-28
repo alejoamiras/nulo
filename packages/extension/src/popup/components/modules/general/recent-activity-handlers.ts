@@ -27,30 +27,22 @@ export interface MinimalChainTx {
  *
  * Bug pinned: a previous blanket filter hid T1's pending chain tx as soon
  * as T1's journal record transitioned to `succeeded`, while T2 was still
- * queued. T1 vanished from the feed (succeeded → returns null from the
- * terminal-card resolver, AND its chain tx was suppressed because T2
- * was in-flight). Came back only after T1's chain tx left `pending`.
+ * in-flight. T1 vanished from the feed (succeeded → returns null from
+ * the terminal-card resolver, AND its chain tx was suppressed because
+ * T2 was in-flight). Came back only after T1's chain tx left `pending`.
  *
- * Per-hash scoping: only suppress chain txs whose hash matches an
- * in-flight journal record currently in `submitting` stage (the only
- * in-flight stage whose schema permits a `txHash`). Records in queued /
- * pending / simulating / proving stages don't have a chain tx yet — they
- * pull nothing from this filter.
+ * Per-hash scoping: suppress chain txs whose hash matches an in-flight
+ * journal record currently in `submitting` stage (the one in-flight
+ * stage whose schema permits a `txHash`, populated at all four
+ * `execution/service.ts:markJournal({ stage: "submitting", txHash })`
+ * call sites). Records in queued / pending / simulating / proving stages
+ * don't have a chain tx yet, so they pull nothing through this filter
+ * and T1's pending chain tx stays visible while T2 is anywhere in the
+ * pre-submit lifecycle.
  *
- * TODO(follow-up: dapp-interaction-lock-fix-v2):
- *   The runtime does not currently populate `submitting.txHash` — the four
- *   `markJournal({ stage: "submitting" })` call sites in `execution/service.ts`
- *   all transition bare and then jump straight to `succeeded({ txHash })`. So
- *   in production this helper's `inFlightHashes` set is always empty and the
- *   filter is effectively a no-op. The disappearing-card bug remains for the
- *   broader case — once T2 advances past `queued` into any in-flight stage,
- *   the blanket fallback in RecentActivityView's `executingTask` branch
- *   kicks in and hides T1's pending chain tx again. The QA-validated path
- *   (T1 terminals while T2 is still queued) IS covered today; this is the
- *   narrow window the unit tests below pin against the eventual contract.
- *   Resolution requires: (a) setting `txHash` at the `submitting` transition
- *   in all four execution paths, and (b) dropping the `executingTask` blanket
- *   fallback in favor of journal-record-first matching.
+ * Drift safety: the FSM invariant in `operation-journal/service.ts:_transitionLocked`
+ * enforces `submitting.txHash === succeeded.txHash` so a future hash-fn
+ * change can't silently no-op the filter — the FSM throws first.
  */
 export function filterPendingDoubleRender(
 	txs: ReadonlyArray<MinimalChainTx>,
