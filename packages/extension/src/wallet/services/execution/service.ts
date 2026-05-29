@@ -1838,38 +1838,52 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// `finally`.
 		const { release: releaseSlot, preController } = await this.acquireExecutionSlot(op.networkId, hooks?.queuedJournalId)
 
-		// Durable journal record for dApp-initiated sends. Either claims a
-		// pre-allocated queued record (set by background.ts:tryCreateQueuedJournal
-		// at message arrival) or creates a fresh one. See claim helper for the
-		// safety properties around cancel-during-claim. Claim runs AFTER the slot
-		// is held so a record waiting for the slot stays `queued` (not `pending`),
-		// and reuses the pre-acquire controller so cancel works throughout.
-		const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
-		const { journalId, controller } = await this.claimOrCreateDappExecuteJournal(
-			op.networkId,
-			op.accountAddress,
-			origin,
-			primaryMethod ? [{ method: primaryMethod }] : undefined,
-			hooks,
-			preController,
-		)
-		const checkCancelled = (): void => {
-			if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
-		}
-		// Immediately after claim — opus post-impl F2 catch. A user-cancel that
-		// landed during the await-chain INSIDE the claim helper (e.g. between
-		// the journal mutex acquisition and the controller.set call) would have
-		// set the abort signal. Surface it here BEFORE the planner /
-		// authwit-discovery work runs, so we don't do side-effecting PXE work
-		// for a cancelled request.
-		checkCancelled()
-
+		// `journalId` is hoisted so the catch (mark failed) + finally (controller
+		// cleanup + slot release) run even if the claim or the immediate
+		// post-claim cancel-check throws on a raced cancel. If those threw before
+		// the try, `releaseSlot()` would never run and the (profileId, chainId)
+		// lane would wedge until SW restart (codex v3 engine-audit blocker).
+		let journalId: string | undefined
 		try {
+			// Durable journal record. Claims the pre-allocated queued record (set
+			// by background.ts:tryCreateQueuedJournal at message arrival) or creates
+			// a fresh one. Runs AFTER the slot is held so a record waiting for the
+			// slot stays `queued` (not `pending`), and reuses the pre-acquire
+			// controller so cancel works throughout. See claim helper for the
+			// cancel-during-claim safety properties.
+			const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
+			const claimed = await this.claimOrCreateDappExecuteJournal(
+				op.networkId,
+				op.accountAddress,
+				origin,
+				primaryMethod ? [{ method: primaryMethod }] : undefined,
+				hooks,
+				preController,
+			)
+			journalId = claimed.journalId
+			const controller = claimed.controller
+			const checkCancelled = (): void => {
+				if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
+			}
+			// opus post-impl F2 catch — surface a cancel that landed during the
+			// claim's await-chain BEFORE any side-effecting PXE work.
+			checkCancelled()
+
 			if (op.accountAddress !== op.opts?.from?.toString()) {
 				throw new Error("Invalid `opts.from`")
 			}
 
 			const [actions, _, fee] = await this.planner.processAztecJsPayload(op.exec, op.opts)
+
+			// v3: enter `simulating` BEFORE authwit discovery (which runs real
+			// `pxe.simulateTx`). Keeps the holder out of the short-grace `pending`
+			// window during a potentially-slow discovery + build — `pending`'s
+			// 2-min reaper grace is not a defensible ceiling for simulation, and
+			// the holder is no longer wait-heartbeated once it holds the slot.
+			// Matches the NO_FROM path, which already marks simulating first
+			// (codex v3 engine-audit blocker).
+			await this.markJournal(journalId, { stage: "simulating" })
+			checkCancelled()
 
 			// Skip auth witness discovery for embedded fee payments — the dApp handles its own
 			// fee calls (e.g., FeeJuice:claim_and_end_setup) which conflict with the discovery
@@ -1885,9 +1899,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				}
 			}
 
-			// Enter `simulating` before build/estimate — fee strategies inside
-			// `buildAndEstimateTxRequest` run real simulateTx calls.
-			await this.markJournal(journalId, { stage: "simulating" })
 			checkCancelled()
 
 			const [txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod] = await this.buildAndEstimateTxRequest(
@@ -1973,29 +1984,36 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// release in `finally`. Cancel-during-wait aborts → JobCancelledSentinel.
 		const { release: releaseSlot, preController } = await this.acquireExecutionSlot(op.networkId, hooks?.queuedJournalId)
 
-		// Phase 2: NO_FROM / default_entrypoint dApp paths get the same durable
-		// coverage as the standard flows. Claim-or-create mirrors the standard
-		// executeAztecSendTx path so queued visibility + cancel-safe claim
-		// work for first-time-account-deploy sendTx too. Reuses the pre-acquire
-		// controller (cancel works through the wait + execution).
-		const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
-		const { journalId, controller } = await this.claimOrCreateDappExecuteJournal(
-			op.networkId,
-			op.accountAddress,
-			origin,
-			primaryMethod ? [{ method: primaryMethod }] : undefined,
-			hooks,
-			preController,
-		)
-		const checkCancelled = (): void => {
-			if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
-		}
-		// Mirror of opus F2 fix in executeAztecSendTx — surface an abort that
-		// landed during the claim's await chain BEFORE we start side-effecting
-		// PXE work.
-		checkCancelled()
-
+		// `journalId` hoisted so the catch + finally (controller cleanup + slot
+		// release) run even if the claim / post-claim cancel-check throws on a
+		// raced cancel — otherwise the slot would leak and wedge the
+		// (profileId, chainId) lane (codex v3 engine-audit blocker). Mirrors the
+		// standard path.
+		let journalId: string | undefined
 		try {
+			// Phase 2: NO_FROM / default_entrypoint dApp paths get the same durable
+			// coverage as the standard flows. Claim-or-create mirrors the standard
+			// executeAztecSendTx path so queued visibility + cancel-safe claim
+			// work for first-time-account-deploy sendTx too. Reuses the pre-acquire
+			// controller (cancel works through the wait + execution).
+			const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
+			const claimed = await this.claimOrCreateDappExecuteJournal(
+				op.networkId,
+				op.accountAddress,
+				origin,
+				primaryMethod ? [{ method: primaryMethod }] : undefined,
+				hooks,
+				preController,
+			)
+			journalId = claimed.journalId
+			const controller = claimed.controller
+			const checkCancelled = (): void => {
+				if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
+			}
+			// Mirror of opus F2 fix — surface an abort that landed during the
+			// claim's await chain BEFORE side-effecting PXE work.
+			checkCancelled()
+
 			await this.markJournal(journalId, { stage: "simulating" })
 
 			const [txRequest, node, pxe, account, network, txCalls] = await this.txBuilder.buildNoFrom(op, parentTask)

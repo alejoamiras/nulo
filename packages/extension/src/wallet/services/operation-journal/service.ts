@@ -335,9 +335,23 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	 */
 	public async touchOperation(id: string): Promise<void> {
 		await this.ensureInitialized()
-		const existing = await this._loadValidated(id)
-		if (!existing) return
-		await this.storage.set(id, { ...existing, updatedAt: Date.now() })
+		// MUST take the same global lock as `transitionOperation`: this is a
+		// load → merge → write, and without the lock a stale snapshot could
+		// clobber a concurrent `queued→pending` / `*→cancelled` / reaper
+		// `*→failed` transition (codex v3 engine-audit blocker). Re-read FRESH
+		// inside the lock so the bump applies to the current record, and skip
+		// the write entirely once the record is terminal — a heartbeat must
+		// never resurrect a just-cancelled/failed/succeeded record's updatedAt
+		// (which could briefly hide it from a terminal-state consumer).
+		await this.transitionLock.enter()
+		try {
+			const existing = await this._loadValidated(id)
+			if (!existing) return
+			if (isTerminal(existing.progress.stage)) return
+			await this.storage.set(id, { ...existing, updatedAt: Date.now() })
+		} finally {
+			this.transitionLock.leave()
+		}
 	}
 
 	public async getOperation(id: string): Promise<OperationRecord | undefined> {

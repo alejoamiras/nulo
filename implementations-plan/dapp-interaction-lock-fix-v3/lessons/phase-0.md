@@ -36,3 +36,13 @@ Landed BEFORE Phase 1 so the machinery exists before waiting can occur. All stil
 - **Heartbeat (stage-agnostic):** `executionWaiters: Set<jobId>` holds ids WAITING on acquire; a 30s timer calls the new `OperationJournalService.touchOperation(id)` (bumps `updatedAt`, no emit → no UI churn) so the periodic reaper (keys on updatedAt; queued grace 10min / pending 2min) doesn't false-reap a record waiting (N-1)×per-tx behind others. Membership spans only the wait (added before acquire, removed in `finally` on success OR abort); a holder relies on stage-transition updatedAt bumps (proving grace 35min). Boot sweep stays unconditional → a waiter whose heartbeat stopped on SW death is still failed on restart (correct recovery).
 - 30s heartbeat << 2min pending grace → ≥3 bumps per window even if one's delayed (codex "comfortably below").
 - Tests: claim-helper reuse + orphan-cleanup (2); touchOperation bump-no-emit + missing-noop (2). typecheck ✓, 49 targeted ✓, audit:vue ✓.
+
+## Phase 3 fixes — codex engine audit found 3 BLOCKERS (caught before activation; codex earned its keep)
+
+Audited the engine (phases 2+3) BEFORE moving the baton. Verdict: blocker × 3. All in the acquire-to-first-stage corridor. The mutex PRIMITIVE itself was clean (item 1 severity none). Fixes:
+
+1. **Slot-release leak.** `releaseSlot()` only ran in a `finally` that began AFTER claim + checkCancelled — both can throw on a raced cancel. A pre-`try` throw would wedge the (profileId,chainId) lane until SW restart once Phase 1 adds contention. Fix: hoisted `let journalId`, moved the claim + checkCancelled INSIDE the `try` whose `finally` releases the slot. Both paths.
+2. **Pending-corridor false-reap (my pre-flagged worry — confirmed real).** A holder sat in `pending` (2-min grace, un-heartbeated) during authwit discovery's real `simulateTx`; the reaper could fail it while the tx still executes (later journal writes swallowed) → journal `failed` but tx real. Fix: standard path now `markJournal(simulating)` BEFORE authwit discovery (authwit discovery IS simulation; more truthful; under the 10-min simulating grace). NO_FROM already marked simulating first. The post-acquire `pending` window is now just claim→processAztecJsPayload (pure parsing)→simulating = sub-second.
+3. **`touchOperation` unlocked write.** Load-merge-write without the `transitionLock` could clobber a concurrent queued→pending / →cancelled / reaper →failed. Fix: `touchOperation` now takes `transitionLock`, re-reads fresh inside, and skips the write if the record is already terminal (never resurrect a just-terminalized record's updatedAt).
+
+Verified post-fix: typecheck ✓, 220 execution+journal tests ✓, audit:vue ✓. Re-sent to codex for a focused confirm-the-fixes pass before Phase 1.
