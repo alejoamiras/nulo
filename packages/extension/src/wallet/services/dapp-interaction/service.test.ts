@@ -51,7 +51,9 @@ function makeService(overrides: {
 	return { svc, internals }
 }
 
-const emptyPayload = { params: { operations: [] }, session: {} } as unknown as DappInteraction["payload"]
+// session.profileId matches makeService's default getActiveProfile ({ id: "p1" })
+// so the executeAndResolve active-profile guard passes.
+const emptyPayload = { params: { operations: [] }, session: { profileId: "p1" } } as unknown as DappInteraction["payload"]
 const origin: LocalTxOrigin = { type: OriginType.DAPP, name: "test-dapp" }
 
 describe("DappInteractionService forwards execution hooks (does not fire the baton release)", () => {

@@ -129,6 +129,22 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		const kinds = operations.map((o) => o.kind).join(", ")
 		this.logInfo(`executeAndResolve: starting [${kinds}] for ${origin.name}`)
 		try {
+			// Re-validate the active profile still matches the session this popup
+			// was approved under. A popup is a separate window that can outlive a
+			// profile switch or a wallet lock (up to INTERACTION_TIMEOUT_MS). Without
+			// this guard, approval would execute against whatever profile is active
+			// NOW — the wrong PXE if the same account exists in another profile, and
+			// a SPLIT execution-mutex lane (the mutex keys on the active profile, so
+			// two requests from one session would serialize on different lanes if the
+			// profile changed between them, breaking the in-order guarantee). Mirrors
+			// the silentInteraction guard.
+			const payload = interaction.payload
+			if ("session" in payload) {
+				const active = await this.profileService.getActiveProfile()
+				if (active?.id !== payload.session.profileId) {
+					throw new Error("Active profile changed since approval; aborting to avoid executing against the wrong profile")
+				}
+			}
 			await this.profileService.refreshSession()
 			// Forward hooks captured at interaction-creation time. Survives the
 			// popup handoff because we stash them on the interaction record.
