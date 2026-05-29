@@ -30,6 +30,18 @@ otherwise. With the guard, the executing profile always equals the session's
 profile, so the mutex key is consistent (no lane split) and no wrong-profile
 execution. typecheck + service tests green.
 
+**Re-audit:** `closed`, no new issue. Codex confirmed the guard removes the
+stale-popup window, placement before `refreshSession()` is correct (matches the
+silent path), the capabilities popup is unaffected (it resolves via
+`resolveInteraction`, not `executeAndResolve`), and the throw settles the dApp
+promise via `windowManager.cancel` with no handle/storage leak. **Residual
+(negligible, deferred):** a microsecond TOCTOU remains because
+`resolveExecutionMutexKey` re-reads the active profile a few async hops after the
+guard — vs the minutes-long popup-open window now closed. Making it airtight
+would require threading `session.profileId` through execution keying instead of
+re-reading active state; deferred as a follow-up (a user profile-switch inside a
+sub-millisecond window is not realistically exploitable).
+
 ### P1 — unbounded execution-mutex queue for silent/self-paid sendTx → DEFER + DOCUMENT (owner decision)
 
 A buggy/malicious dApp can burst many silent (self-paid, embedded-fee) sendTx;
