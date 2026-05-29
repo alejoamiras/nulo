@@ -56,6 +56,7 @@ import { OperationJournalService } from "@/wallet/services/operation-journal/ser
 import type { OperationContext, OperationRecord } from "@/wallet/services/operation-journal/spec"
 import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import { claimOrCreateDappExecuteJournal as claimOrCreateDappExecuteJournalImpl } from "./claim-helper"
+import { ExecutionMutex, type ExecutionMutexRelease } from "./execution-mutex"
 import { TaskService, type WrappedTask, ExecuteOperationContent, TransferContent } from "@/wallet/services/task/service"
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
@@ -296,6 +297,15 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	 *  in-flight prove pipeline checks `signal.aborted` at each stage
 	 *  boundary and short-circuits with {@link JobCancelledSentinel}. */
 	private activeControllers = new Map<string, AbortController>()
+
+	/** v3: per-(profileId, chainId) FIFO mutex serializing dApp sendTx
+	 *  EXECUTION (build → simulate → prove → submit). Once the session-FIFO
+	 *  baton releases at popup approval, two approved sendTx can both reach
+	 *  execution; this mutex keeps them sequential so T2 doesn't simulate
+	 *  against T1's not-yet-spent private notes (which would get T2 rejected
+	 *  on-chain). Keyed to match PXE's own `chainGuard` scope. Held from
+	 *  before authwit discovery through submit, both send paths. */
+	private readonly executionMutex = new ExecutionMutex()
 
 	public constructor(logger: ILogger) {
 		super(EXECUTION_SERVICE_NAME, logger)
@@ -1216,6 +1226,18 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	 * This thin wrapper just binds `this.*` dependencies into the helper's
 	 * dependency injection shape.
 	 */
+	/** Resolve the execution-mutex key for a dApp sendTx: `(profileId, chainId)`,
+	 *  matching PXE's `chainGuard` scope exactly. Both lookups are metadata-only
+	 *  (no PXE call), so calling them before acquiring the mutex is safe — they
+	 *  don't contend on the chain guard. `getNetwork` is re-resolved inside
+	 *  `buildAndEstimateTxRequest` later; the duplicate lookup is a negligible
+	 *  in-memory cost paid for keying correctness. */
+	private async resolveExecutionMutexKey(networkId: string): Promise<string> {
+		const profile = await this.profileService.getActiveProfile()
+		const network = await this.networkService.getNetwork(networkId)
+		return `${profile?.id ?? "noprofile"}:${network.chainId}`
+	}
+
 	private async claimOrCreateDappExecuteJournal(
 		networkId: string,
 		accountAddress: string,
@@ -1717,10 +1739,20 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw new Error("aztec_sendTx: feeSettings is required for the standard execution path")
 		}
 
+		// v3: acquire the per-(profileId, chainId) execution slot BEFORE the
+		// journal claim and any PXE-touching work. While the session-FIFO baton
+		// still releases at handler completion this is uncontended (instant
+		// acquire); once the baton moves to popup approval (a later phase) this
+		// is what keeps T1 and T2 from interleaving their simulate/prove against
+		// shared private-note state. Held through submit; released in `finally`.
+		const mutexKey = await this.resolveExecutionMutexKey(op.networkId)
+		const releaseSlot: ExecutionMutexRelease = await this.executionMutex.acquire(mutexKey)
+
 		// Durable journal record for dApp-initiated sends. Either claims a
 		// pre-allocated queued record (set by background.ts:tryCreateQueuedJournal
 		// at message arrival) or creates a fresh one. See claim helper for the
-		// safety properties around cancel-during-claim.
+		// safety properties around cancel-during-claim. Claim runs AFTER the slot
+		// is held so a record waiting for the slot stays `queued` (not `pending`).
 		const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
 		const { journalId, controller } = await this.claimOrCreateDappExecuteJournal(
 			op.networkId,
@@ -1820,6 +1852,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw error
 		} finally {
 			if (journalId) this.activeControllers.delete(journalId)
+			releaseSlot()
 		}
 	}
 
@@ -1840,6 +1873,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		if (op.feeSettings?.paymentMethod?.kind && op.feeSettings.paymentMethod.kind !== "embedded") {
 			throw new Error("DefaultEntrypoint transactions must use embedded fee payment")
 		}
+
+		// v3: NO_FROM acquires the SAME per-(profileId, chainId) execution slot
+		// as the standard path. This path has no nonce at all (history records
+		// Fr.ZERO), so the mutex is its ONLY protection against concurrent
+		// build/simulate interleaving. Acquire before claim + any PXE work;
+		// release in `finally`.
+		const mutexKey = await this.resolveExecutionMutexKey(op.networkId)
+		const releaseSlot: ExecutionMutexRelease = await this.executionMutex.acquire(mutexKey)
 
 		// Phase 2: NO_FROM / default_entrypoint dApp paths get the same durable
 		// coverage as the standard flows. Claim-or-create mirrors the standard
@@ -1987,6 +2028,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw error
 		} finally {
 			if (journalId) this.activeControllers.delete(journalId)
+			releaseSlot()
 		}
 	}
 

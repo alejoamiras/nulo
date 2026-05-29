@@ -22,4 +22,8 @@ There is no `background.test.ts` today — the baton is only covered by `session
 
 ## Phase 2 — ExecutionMutex
 
-(in progress)
+- **2a** (commit): pure `ExecutionMutex` primitive + 11 unit tests. Abort-correct FIFO chain; the subtle case (abort a middle waiter without stranding the successor or letting it jump the holder) is the abort→`prior.finally(release)` splice.
+- **2b** (commit): wired into both send paths. `resolveExecutionMutexKey(networkId)` → `(profileId, chainId)` matching the PXE chainGuard. `acquire` before claim + any PXE work; `releaseSlot()` in the existing `finally`; claim moved after acquire (so a future waiter stays `queued`). Uncontended while the baton still serializes at handler-completion → behavior-neutral. Verified: typecheck ✓, 163 execution tests ✓, audit:vue ✓.
+- Deferred to Phase 3 (they only matter once waiting can happen, i.e. after the baton moves): pre-acquire abort controller for cancel-during-wait, and the stage-agnostic heartbeat. Importing `ExecutionMutexAbortError` deferred too (unused until the abort-mapping lands) to avoid an unused-import lint error.
+
+Key granularity decision: keyed `(profileId, chainId)` NOT `networkId`. If a profile ever holds two network rows for one chainId, keying by networkId would under-serialize vs the chainGuard (which keys by profileId+chainId). Paying one extra `getNetwork` lookup before acquire (metadata-only, non-PXE) buys exact-match correctness.
