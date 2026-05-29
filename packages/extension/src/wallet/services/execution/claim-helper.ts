@@ -59,6 +59,15 @@ export interface ClaimHelperInput {
 	origin: LocalTxOrigin
 	calls?: { method?: string }[]
 	queuedJournalId?: string
+	/** v3: a controller pre-registered (under `queuedJournalId`) BEFORE the
+	 *  ExecutionMutex acquire, so a user-cancel can abort the acquire wait. On
+	 *  the normal claim path the helper REUSES it (the claimed id ===
+	 *  `queuedJournalId`), so `activeControllers[id]` already holds the right
+	 *  controller throughout — strictly safer for the cancel-vs-claim race than
+	 *  creating one only after the transition. On the create-fresh fallback
+	 *  (record reaped → a NEW id) the helper deletes the now-orphaned
+	 *  `queuedJournalId` entry so it doesn't leak. */
+	reuseController?: AbortController
 }
 
 export interface ClaimHelperResult {
@@ -68,7 +77,7 @@ export interface ClaimHelperResult {
 
 export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, input: ClaimHelperInput): Promise<ClaimHelperResult> {
 	const { operationJournal, activeControllers, createFreshRecord, logger } = deps
-	const { networkId, accountAddress, origin, calls, queuedJournalId } = input
+	const { networkId, accountAddress, origin, calls, queuedJournalId, reuseController } = input
 
 	if (!queuedJournalId) {
 		const id = await createFreshRecord(networkId, accountAddress, origin, calls)
@@ -81,6 +90,12 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 	if (!record) {
 		// Record was reaped (boot sweep or staleness GC). Best-effort
 		// fallback — create new in-flight record so execution proceeds.
+		// A pre-acquire controller registered under the now-gone queuedJournalId
+		// is orphaned; drop it so `activeControllers` doesn't leak (v3 — codex
+		// final-pass edge). cancelJob(queuedJournalId) couldn't have fired (the
+		// record is gone, so its journal transition would have thrown), so the
+		// orphan never aborted.
+		if (reuseController) activeControllers.delete(queuedJournalId)
 		logger?.debug(`Queued record ${queuedJournalId} not found; creating new in-flight record`)
 		const id = await createFreshRecord(networkId, accountAddress, origin, calls)
 		const controller = id ? new AbortController() : undefined
@@ -131,6 +146,13 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 	// a controller to abort; if it lands during this microtask window,
 	// it would find no controller. The next sync line closes the gap.
 	//
+	// v3: when a `reuseController` was pre-registered (under queuedJournalId,
+	// before the ExecutionMutex acquire), reuse it. Because queuedJournalId ===
+	// this claimed id, the controller has been in `activeControllers` since
+	// before the acquire wait — so cancelJob always finds it, which is strictly
+	// safer than the original "register only after the transition" timing. The
+	// `set` is idempotent in that case (same key, same value).
+	//
 	// The OTHER side of this invariant lives in cancelJob → transitionOperation
 	// → `_transitionLocked` (operation-journal/service.ts). That path has
 	// its own awaits BEFORE it calls `controller.abort()`, which yields
@@ -138,7 +160,7 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 	// before any cancel-side abort lands. This is correctness-by-microtask-
 	// interleaving and is fragile against future refactors of either side
 	// (opus post-impl F5).
-	const controller = new AbortController()
+	const controller = reuseController ?? new AbortController()
 	activeControllers.set(queuedJournalId, controller)
 	return { journalId: queuedJournalId, controller }
 }

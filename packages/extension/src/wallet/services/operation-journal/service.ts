@@ -322,6 +322,24 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		return updated
 	}
 
+	/**
+	 * v3: bump `updatedAt` without changing any field. SW-internal liveness
+	 * heartbeat for records actively WAITING on the ExecutionMutex — keeps the
+	 * periodic reaper (which keys on `updatedAt` vs the per-stage grace window)
+	 * from declaring a legitimately-waiting record "stuck". Deliberately does
+	 * NOT emit `onOperationUpdated`: a heartbeat changes nothing user-visible,
+	 * and emitting on every tick would churn the popup's `subscribeJob`
+	 * consumers. The boot sweep is `unconditional` (ignores `updatedAt`), so a
+	 * record whose heartbeat stopped because the SW died is still failed on
+	 * restart — exactly the desired recovery. No-ops if the record is gone.
+	 */
+	public async touchOperation(id: string): Promise<void> {
+		await this.ensureInitialized()
+		const existing = await this._loadValidated(id)
+		if (!existing) return
+		await this.storage.set(id, { ...existing, updatedAt: Date.now() })
+	}
+
 	public async getOperation(id: string): Promise<OperationRecord | undefined> {
 		validateParams(OperationJournalMethodSchemas.getOperation.params, [id], "getOperation")
 		await this.ensureInitialized()

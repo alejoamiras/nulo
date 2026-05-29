@@ -297,6 +297,29 @@ describe("OperationJournalService", () => {
 		})
 	})
 
+	// v3: touchOperation — SW-internal liveness heartbeat for mutex waiters.
+	describe("touchOperation", () => {
+		test("bumps updatedAt without changing stage and without emitting onOperationUpdated", async () => {
+			const rec = await service.createOperation(VALID_INPUT)
+			const updatedEvents: string[] = []
+			service.onOperationUpdated.add((op) => updatedEvents.push(op.id))
+
+			// Advance the clock so the bump is observable.
+			await new Promise((r) => setTimeout(r, 5))
+			await service.touchOperation(rec.id)
+
+			const after = await service.getOperation(rec.id)
+			expect(after?.updatedAt).toBeGreaterThan(rec.updatedAt)
+			expect(after?.progress.stage).toBe(rec.progress.stage)
+			// Heartbeat must NOT churn the UI subscription.
+			expect(updatedEvents).toEqual([])
+		})
+
+		test("no-ops silently when the record is gone (reaped mid-wait)", async () => {
+			await expect(service.touchOperation("does-not-exist")).resolves.toBeUndefined()
+		})
+	})
+
 	test("getOperations filter accepts `kind` and isolates token_import from on-chain ops", async () => {
 		await service.createOperation(VALID_INPUT) // transfer
 		await service.createOperation({ ...VALID_INPUT, kind: "dapp_execute" })
