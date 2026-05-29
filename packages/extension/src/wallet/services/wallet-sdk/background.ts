@@ -41,7 +41,7 @@ import { DappInteractionService } from "@/wallet/services/dapp-interaction/servi
 import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
 import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
-import { DiscoveryQueue, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
+import { type DispatchHooks, DiscoveryQueue, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
 import { jsonStringify, getErrorMessage } from "@nulo/wallet-core/utils"
 import { tryCreateQueuedJournal } from "./queued-journal"
 import { createSessionBaton } from "./session-baton"
@@ -191,8 +191,9 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				const prev = sessionQueues.get(key) ?? Promise.resolve()
 
 				// Baton-based FIFO (see `session-baton.ts` for mechanics).
-				// Resolves when the handler explicitly calls `releaseFifo()`
-				// (sendTx path, after tx-build) OR when the handler completes
+				// Resolves when the sendTx handler signals approval via
+				// `onInteractionApproved` (the user approves the popup, or a
+				// silent request starts executing) OR when the handler completes
 				// (safety-net `.finally(releaseFifo)`), whichever fires first.
 				const { baton, releaseFifo } = createSessionBaton()
 
@@ -220,7 +221,13 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				const handlerChain = queuedJournalIdPromise.then((queuedJournalId) =>
 					prev.then(() =>
 						handleWalletMessage(session, message, handler, dispatcher, profileService, operationJournal, logger, {
-							releaseFifo,
+							// Bind the baton release into the `onInteractionApproved`
+							// slot — fired downstream at the popup-approval / silent
+							// seam in DappInteractionService. The field name is shared
+							// across DispatchHooks → ExecutionHooks so the wiring is
+							// type-checked end-to-end (a past field-name drift here is
+							// exactly what left this release dead before).
+							onInteractionApproved: releaseFifo,
 							queuedJournalId,
 						}),
 					),
@@ -473,36 +480,17 @@ async function handleDiscovery(
 }
 
 /**
- * Per-message hooks passed to `handleWalletMessage` from `onWalletMessage`.
- * Concurrent-sendTx wiring (see `onWalletMessage` doc comment).
- */
-type WalletMessageHooks = {
-	/**
-	 * Release the per-session FIFO baton. Called by handlers that have
-	 * finished their FIFO-ordered work (e.g., sendTx after tx-build) but
-	 * still have background work to do (e.g., proving). The next message's
-	 * handler can start while this one's tail runs.
-	 *
-	 * The dispatcher forwards this down through DispatchHooks. Most
-	 * handlers don't call it explicitly; the safety-net `.finally`
-	 * in `onWalletMessage` releases the baton at handler completion.
-	 */
-	releaseFifo?: () => void
-	/**
-	 * Pre-allocated journal id from `tryCreateQueuedJournal`. The sendTx
-	 * handler claims (queued → pending) instead of creating new. The
-	 * `handleWalletMessage` catch block uses the journal record state
-	 * (not a mutable flag) to decide whether to transition to `failed`
-	 * on an unclaimed-error.
-	 */
-	queuedJournalId?: string
-}
-
-/**
  * Handle an incoming wallet message from a connected dApp.
  *
  * Dispatches the method call to the WalletSdkDispatcher, then encrypts
  * and sends the response back through the BackgroundConnectionHandler.
+ *
+ * `hooks` is the wallet-bridge `DispatchHooks` contract (imported, not a
+ * local mirror) so the `onInteractionApproved` baton wiring is type-checked
+ * against the dispatcher's expectation — preventing a recurrence of the
+ * field-name drift that left the release dead. `onInteractionApproved` rides
+ * to the sendTx path; `queuedJournalId` is used here (catch block) to decide
+ * whether an unclaimed `queued` record should be transitioned to `failed`.
  */
 async function handleWalletMessage(
 	session: ActiveSession,
@@ -512,7 +500,7 @@ async function handleWalletMessage(
 	profileService: ProfileService,
 	operationJournal: OperationJournalService,
 	logger: ILogger,
-	hooks?: WalletMessageHooks,
+	hooks?: DispatchHooks,
 ): Promise<void> {
 	const response: WalletResponse = {
 		messageId: message.messageId,

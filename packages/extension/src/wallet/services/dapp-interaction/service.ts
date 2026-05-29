@@ -96,6 +96,13 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		// would race with the async execution that follows. Detach stops the
 		// listener; executeAndResolve settles the promise when it completes.
 		this.windowManager.detach(interaction.handleId)
+		// User approved: release the session FIFO baton now so the next pending
+		// dApp message's popup can open immediately, in parallel with this
+		// request's execution. On-chain ordering stays serialized downstream by
+		// the per-(profileId, chainId) execution mutex — releasing here governs
+		// popup/UI concurrency only. Idempotent with the onWalletMessage
+		// safety-net `.finally(releaseFifo)`.
+		interaction.hooks?.onInteractionApproved?.()
 		this.executeAndResolve(interaction, operations, origin)
 	}
 
@@ -301,6 +308,14 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 				)
 			}
 		}
+
+		// No popup on the silent path: the request is effectively "approved"
+		// the moment it starts executing. Release the FIFO baton here (before
+		// the long executeOperations call) so a following dApp message isn't
+		// blocked behind this request's full execution. Mirrors the popup-path
+		// release in approveInteraction; idempotent with the onWalletMessage
+		// safety-net.
+		hooks?.onInteractionApproved?.()
 
 		return await this.executionService.executeOperations(
 			operations,

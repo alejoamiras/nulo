@@ -54,8 +54,15 @@ export const DAPP_INTERACTION_SERVICE_NAME = "dapp-interaction"
  * would never see them.
  */
 export type ExecutionHooks = {
-	/** Release the wallet-sdk session FIFO baton when the txRequest is built. */
-	onTxRequestFinalized?: () => void
+	/**
+	 * Release the wallet-sdk session FIFO baton. Fired at the approval seam —
+	 * `approveInteraction()` when the user approves the popup, or
+	 * `silentInteraction()` when a no-popup request begins executing — so the
+	 * next pending message's popup can open. Idempotent (the baton's release
+	 * callback no-ops after the first call), so the `onWalletMessage`
+	 * safety-net `.finally(releaseFifo)` is harmless if it also fires.
+	 */
+	onInteractionApproved?: () => void
 	/**
 	 * Pre-allocated journal id from `background.ts:onWalletMessage`. Handler
 	 * claims (queued → pending) this record instead of creating a new one.

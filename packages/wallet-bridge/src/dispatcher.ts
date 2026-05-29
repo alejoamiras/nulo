@@ -89,12 +89,14 @@ import type { IAccountReader, IDappInteractionRunner, IDappSessionWriter, IExecu
  */
 export interface DispatchHooks {
 	/**
-	 * Called from inside the long-running per-op handler the moment the
-	 * tx request is finalized (nonce sealed, txRequest built) and no
-	 * further FIFO-ordered work depends on the session queue. Releases
-	 * the session FIFO baton so the next pending message's popup can open.
+	 * Called the moment the user approves the interaction popup (or a silent,
+	 * no-popup request begins executing). Releases the session FIFO baton so
+	 * the next pending message's popup can open while this request runs.
+	 * Execution itself stays serialized downstream by the per-(profileId,
+	 * chainId) execution mutex, so releasing here is a UI/popup-concurrency
+	 * signal, not an on-chain ordering one.
 	 */
-	onTxRequestFinalized?: () => void
+	onInteractionApproved?: () => void
 	/**
 	 * Pre-allocated journal id from `background.ts:onWalletMessage`. When
 	 * present, the handler should TRANSITION this record (queued → pending
@@ -239,7 +241,7 @@ export class WalletSdkDispatcher {
 		if (methodName === "batch") {
 			// CRITICAL: do NOT forward `hooks` into batch legs. handleBatch
 			// recurses into dispatch() per-leg; forwarding hooks would let an
-			// inner sendTx leg's `onTxRequestFinalized` release the top-level
+			// inner sendTx leg's `onInteractionApproved` release the top-level
 			// FIFO baton before the batch finishes, breaking the batch's
 			// sequential-completion contract.
 			return this.handleBatch(args[0] as Array<{ name: string; args: unknown[] }>, ctx)
@@ -423,7 +425,7 @@ export class WalletSdkDispatcher {
 			// hooks are the only thing we're forwarding. Arg 3 is the new hooks
 			// bag (see services-contract.ts:IDappInteractionRunner).
 			undefined,
-			hooks ? { onTxRequestFinalized: hooks.onTxRequestFinalized, queuedJournalId: hooks.queuedJournalId } : undefined,
+			hooks ? { onInteractionApproved: hooks.onInteractionApproved, queuedJournalId: hooks.queuedJournalId } : undefined,
 		)
 
 		return this.unwrapResult(results[0])

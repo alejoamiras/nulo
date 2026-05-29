@@ -1908,14 +1908,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			)
 
 			checkCancelled()
-			// FIFO baton release: txRequest is built and the random nonce is
-			// sealed into it (tx-request-builder.ts:126 uses Fr.random()). The
-			// session-FIFO can now advance — the next message's handler can
-			// start its own tx-build in parallel with our proving. Proving
-			// itself remains serialized at PXE's `withPxeWrite`, so true
-			// parallel execution doesn't kick in, but popups + UI surface
-			// concurrency does.
-			hooks?.onTxRequestFinalized?.()
 			await this.markJournal(journalId, { stage: "proving", enteredProveAt: Date.now() })
 			const sendAdditionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
 			const provedTx = await this.coordinator.proveTxTask(pxe, txRequest, [account.address, ...sendAdditionalScopes], parentTask)
@@ -2096,11 +2088,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 			// Prove with account in scope
 			checkCancelled()
-			// FIFO baton release for the NO_FROM path — same semantic as the
-			// standard path (executeAztecSendTx). txRequest + gas limits are
-			// finalized; subsequent proving is serialized at PXE anyway, so
-			// concurrent next-message handlers can start safely.
-			hooks?.onTxRequestFinalized?.()
 			await this.markJournal(journalId, { stage: "proving", enteredProveAt: Date.now() })
 			const provedTx = await this.coordinator.proveTxTask(pxe, txRequest, scopesWithAccount, parentTask)
 			checkCancelled()
