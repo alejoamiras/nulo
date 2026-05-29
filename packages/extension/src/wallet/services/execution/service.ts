@@ -1270,6 +1270,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	private async acquireExecutionSlot(
 		networkId: string,
 		queuedJournalId: string | undefined,
+		onEnqueued?: () => void,
 	): Promise<{ release: ExecutionMutexRelease; preController: AbortController | undefined }> {
 		const mutexKey = await this.resolveExecutionMutexKey(networkId)
 
@@ -1281,7 +1282,17 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 
 		try {
-			const release = await this.executionMutex.acquire(mutexKey, preController?.signal)
+			// `acquire` installs this request as the FIFO tail SYNCHRONOUSLY, before
+			// its first await (execution-mutex.ts). The instant we've called it we
+			// are enqueued ahead of anyone who calls `acquire` later. Fire the baton
+			// release HERE — before awaiting the grant — so the next session
+			// message's popup opens immediately WHILE execution order is preserved:
+			// that later request can only reach its own `acquire` after the baton
+			// advances, i.e. strictly behind us in the FIFO. Releasing at popup
+			// approval (before this point) would let a faster successor overtake us.
+			const acquirePromise = this.executionMutex.acquire(mutexKey, preController?.signal)
+			onEnqueued?.()
+			const release = await acquirePromise
 			return { release, preController }
 		} catch (err) {
 			// Aborted while waiting (user cancelled the Queued record) — clean the
@@ -1829,14 +1840,19 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 
 		// v3: acquire the per-(profileId, chainId) execution slot BEFORE the
-		// journal claim and any PXE-touching work. While the session-FIFO baton
-		// still releases at handler completion this is uncontended (instant
-		// acquire); once the baton moves to popup approval (a later phase) this
-		// is what keeps T1 and T2 from interleaving their simulate/prove against
-		// shared private-note state. A user-cancel of the Queued record aborts
-		// the wait → JobCancelledSentinel. Held through submit; released in
-		// `finally`.
-		const { release: releaseSlot, preController } = await this.acquireExecutionSlot(op.networkId, hooks?.queuedJournalId)
+		// journal claim and any PXE-touching work. This is where the session-FIFO
+		// baton is released — via the onExecutionEnqueued hook, fired inside
+		// acquireExecutionSlot the instant we're enqueued — so the next dApp popup
+		// opens now while we keep our place at the head of the execution FIFO.
+		// That ordering is what stops T1 and T2 from interleaving their
+		// simulate/prove against shared private-note state. A user-cancel of the
+		// Queued record aborts the wait → JobCancelledSentinel. Held through
+		// submit; released in `finally`.
+		const { release: releaseSlot, preController } = await this.acquireExecutionSlot(
+			op.networkId,
+			hooks?.queuedJournalId,
+			hooks?.onExecutionEnqueued,
+		)
 
 		// `journalId` is hoisted so the catch (mark failed) + finally (controller
 		// cleanup + slot release) run even if the claim or the immediate
@@ -1972,9 +1988,15 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// v3: NO_FROM acquires the SAME per-(profileId, chainId) execution slot
 		// as the standard path. This path has no nonce at all (history records
 		// Fr.ZERO), so the mutex is its ONLY protection against concurrent
-		// build/simulate interleaving. Acquire before claim + any PXE work;
-		// release in `finally`. Cancel-during-wait aborts → JobCancelledSentinel.
-		const { release: releaseSlot, preController } = await this.acquireExecutionSlot(op.networkId, hooks?.queuedJournalId)
+		// build/simulate interleaving. Acquire before claim + any PXE work; the
+		// session-FIFO baton is released from inside acquireExecutionSlot
+		// (onExecutionEnqueued) once we're enqueued. Release the slot in
+		// `finally`. Cancel-during-wait aborts → JobCancelledSentinel.
+		const { release: releaseSlot, preController } = await this.acquireExecutionSlot(
+			op.networkId,
+			hooks?.queuedJournalId,
+			hooks?.onExecutionEnqueued,
+		)
 
 		// `journalId` hoisted so the catch + finally (controller cleanup + slot
 		// release) run even if the claim / post-claim cancel-check throws on a

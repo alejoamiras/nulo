@@ -191,9 +191,8 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				const prev = sessionQueues.get(key) ?? Promise.resolve()
 
 				// Baton-based FIFO (see `session-baton.ts` for mechanics).
-				// Resolves when the sendTx handler signals approval via
-				// `onInteractionApproved` (the user approves the popup, or a
-				// silent request starts executing) OR when the handler completes
+				// Resolves when the sendTx handler enqueues on the execution mutex
+				// (via `onExecutionEnqueued`) OR when the handler completes
 				// (safety-net `.finally(releaseFifo)`), whichever fires first.
 				const { baton, releaseFifo } = createSessionBaton()
 
@@ -221,13 +220,14 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				const handlerChain = queuedJournalIdPromise.then((queuedJournalId) =>
 					prev.then(() =>
 						handleWalletMessage(session, message, handler, dispatcher, profileService, operationJournal, logger, {
-							// Bind the baton release into the `onInteractionApproved`
-							// slot — fired downstream at the popup-approval / silent
-							// seam in DappInteractionService. The field name is shared
-							// across DispatchHooks → ExecutionHooks so the wiring is
-							// type-checked end-to-end (a past field-name drift here is
-							// exactly what left this release dead before).
-							onInteractionApproved: releaseFifo,
+							// Bind the baton release into the `onExecutionEnqueued`
+							// slot — fired downstream by ExecutionService the instant
+							// the approved request enqueues on the execution mutex
+							// (which preserves execution order). The field name is
+							// shared across DispatchHooks → ExecutionHooks so the wiring
+							// is type-checked end-to-end (a past field-name drift here
+							// is exactly what left this release dead before).
+							onExecutionEnqueued: releaseFifo,
 							queuedJournalId,
 						}),
 					),
@@ -486,9 +486,9 @@ async function handleDiscovery(
  * and sends the response back through the BackgroundConnectionHandler.
  *
  * `hooks` is the wallet-bridge `DispatchHooks` contract (imported, not a
- * local mirror) so the `onInteractionApproved` baton wiring is type-checked
+ * local mirror) so the `onExecutionEnqueued` baton wiring is type-checked
  * against the dispatcher's expectation — preventing a recurrence of the
- * field-name drift that left the release dead. `onInteractionApproved` rides
+ * field-name drift that left the release dead. `onExecutionEnqueued` rides
  * to the sendTx path; `queuedJournalId` is used here (catch block) to decide
  * whether an unclaimed `queued` record should be transitioned to `failed`.
  */

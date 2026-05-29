@@ -1,14 +1,14 @@
 /**
- * DappInteractionService — approval-seam baton release (v3 activation).
+ * DappInteractionService — execution-hook forwarding (v3 parallel popups).
  *
- * Pins the behavior the previously-dead hook never delivered: the session
- * FIFO baton is released at the APPROVAL seam, not at execution completion.
- * Two seams must fire `onInteractionApproved`:
- *   - `approveInteraction` — the user approves the popup.
- *   - `silentInteraction`  — a no-popup (self-paid) request begins executing.
- * Both must fire while execution is still in flight, so the next pending dApp
- * message's popup can open in parallel (on-chain ordering stays serialized
- * downstream by the execution mutex).
+ * Contract: DappInteractionService FORWARDS the execution hooks bag to
+ * `executeOperations` — it must NOT fire `onExecutionEnqueued` itself. The
+ * baton release fires downstream in `ExecutionService.acquireExecutionSlot`,
+ * once the request has enqueued on the execution mutex (which is what preserves
+ * execution order across concurrent popups). These tests pin "hooks reach
+ * executeOperations intact, and are not fired prematurely at the popup/silent
+ * seam" — the field-name + threading half of the wiring whose drift left the
+ * release dead pre-v3.
  *
  * Construction injects partial service mocks directly — standing up the full
  * six-service graph `init()` pulls would be far heavier than the seam under
@@ -28,7 +28,7 @@ const noopLogger: ILogger = { log: () => {} }
  *  (executeAndResolve's await chain) runs before assertions. */
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
-/** Structural view of the privates the seam tests inject/drive. */
+/** Structural view of the privates the tests inject/drive. */
 type Internals = {
 	storage: Map<string, DappInteraction>
 	profileService: { refreshSession: () => Promise<void>; getActiveProfile: () => Promise<{ id: string } | undefined> }
@@ -40,33 +40,29 @@ function makeService(overrides: {
 	executeOperations?: (...args: unknown[]) => Promise<unknown>
 	getActiveProfile?: () => Promise<{ id: string } | undefined>
 }) {
-	const windowManager = {
-		detach: vi.fn(),
-		settle: vi.fn(),
-		cancel: vi.fn(),
-	} as unknown as WindowManager
+	const windowManager = { detach: vi.fn(), settle: vi.fn(), cancel: vi.fn() } as unknown as WindowManager
 	const svc = new DappInteractionService(noopLogger, windowManager)
 	const internals = svc as unknown as Internals
 	internals.profileService = {
 		refreshSession: vi.fn(async () => {}),
 		getActiveProfile: overrides.getActiveProfile ?? (async () => ({ id: "p1" })),
 	}
-	internals.executionService = {
-		executeOperations: overrides.executeOperations ?? (async () => []),
-	}
-	return { svc, internals, windowManager }
+	internals.executionService = { executeOperations: overrides.executeOperations ?? (async () => []) }
+	return { svc, internals }
 }
 
 const emptyPayload = { params: { operations: [] }, session: {} } as unknown as DappInteraction["payload"]
 const origin: LocalTxOrigin = { type: OriginType.DAPP, name: "test-dapp" }
 
-describe("DappInteractionService approval-seam baton release", () => {
-	test("approveInteraction fires onInteractionApproved at approval, not gated on execution completion", async () => {
+describe("DappInteractionService forwards execution hooks (does not fire the baton release)", () => {
+	test("approveInteraction (popup path) forwards the stored hooks to executeOperations", async () => {
 		const releaseSpy = vi.fn()
-		// executeOperations never resolves: settle() only runs once it does, so
-		// "settle not called" proves the release did NOT wait for execution.
-		const executeOperations = vi.fn(() => new Promise<unknown>(() => {}))
-		const { svc, internals, windowManager } = makeService({ executeOperations })
+		let observedHooks: ExecutionHooks | undefined
+		const executeOperations = vi.fn(async (...args: unknown[]) => {
+			observedHooks = args[3] as ExecutionHooks | undefined
+			return []
+		})
+		const { svc, internals } = makeService({ executeOperations })
 
 		const id = "interaction-1"
 		internals.storage.set(id, {
@@ -74,51 +70,45 @@ describe("DappInteractionService approval-seam baton release", () => {
 			payload: emptyPayload,
 			handleId: "handle-1",
 			cancellationToken: id,
-			hooks: { onInteractionApproved: releaseSpy },
+			hooks: { onExecutionEnqueued: releaseSpy, queuedJournalId: "q-1" },
 		})
 
 		await svc.approveInteraction(id, [], origin)
-
-		// Released on approval.
-		expect(releaseSpy).toHaveBeenCalledTimes(1)
-
-		// Execution kicks off in the background and stays pending forever; the
-		// popup is never settled. The release already fired exactly once — it is
-		// not coupled to execution finishing.
 		await flush()
+
 		expect(executeOperations).toHaveBeenCalledTimes(1)
-		expect(releaseSpy).toHaveBeenCalledTimes(1)
-		expect(windowManager.settle).not.toHaveBeenCalled()
+		expect(observedHooks?.onExecutionEnqueued).toBe(releaseSpy)
+		expect(observedHooks?.queuedJournalId).toBe("q-1")
+		// The release is NOT fired by DappInteractionService — ExecutionService
+		// fires it once the request enqueues on the mutex.
+		expect(releaseSpy).not.toHaveBeenCalled()
 	})
 
-	test("approveInteraction without hooks does not throw (no-op release)", async () => {
-		const { svc, internals } = makeService({ executeOperations: async () => [] })
-		const id = "interaction-2"
-		internals.storage.set(id, {
-			id,
-			payload: emptyPayload,
-			handleId: "handle-2",
-			cancellationToken: id,
-		})
-		await expect(svc.approveInteraction(id, [], origin)).resolves.toBeUndefined()
-	})
-
-	test("silentInteraction fires onInteractionApproved before executeOperations resolves", async () => {
+	test("silentInteraction forwards the hooks to executeOperations", async () => {
 		const releaseSpy = vi.fn()
-		const executeOperations = vi.fn(() => new Promise<unknown>(() => {}))
+		let observedHooks: ExecutionHooks | undefined
+		const executeOperations = vi.fn(async (...args: unknown[]) => {
+			observedHooks = args[3] as ExecutionHooks | undefined
+			return []
+		})
 		const { internals } = makeService({ executeOperations, getActiveProfile: async () => ({ id: "p1" }) })
 
-		const payload = {
-			params: { operations: [] },
-			session: { profileId: "p1", dappMetadata: { name: "test-dapp" } },
-		}
-		const hooks: ExecutionHooks = { onInteractionApproved: releaseSpy }
+		// No queuedJournalId → skip the queued→pending fast-forward (which would
+		// touch operationJournal); the hook-forwarding contract is what we pin.
+		const payload = { params: { operations: [] }, session: { profileId: "p1", dappMetadata: { name: "test-dapp" } } }
+		const hooks: ExecutionHooks = { onExecutionEnqueued: releaseSpy }
 
-		// Don't await: executeOperations hangs by design. Drive microtasks instead.
-		void internals.silentInteraction(payload, hooks)
-		await flush()
+		await internals.silentInteraction(payload, hooks)
 
-		expect(releaseSpy).toHaveBeenCalledTimes(1)
 		expect(executeOperations).toHaveBeenCalledTimes(1)
+		expect(observedHooks?.onExecutionEnqueued).toBe(releaseSpy)
+		expect(releaseSpy).not.toHaveBeenCalled()
+	})
+
+	test("approveInteraction without hooks does not throw", async () => {
+		const { svc, internals } = makeService({ executeOperations: async () => [] })
+		const id = "interaction-3"
+		internals.storage.set(id, { id, payload: emptyPayload, handleId: "handle-3", cancellationToken: id })
+		await expect(svc.approveInteraction(id, [], origin)).resolves.toBeUndefined()
 	})
 })

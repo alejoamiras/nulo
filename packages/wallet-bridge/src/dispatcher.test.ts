@@ -528,7 +528,7 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
  *
  * Codex round-3 F3 + R6 confirmation: `dispatch("batch", legs, ctx, hooks)`
  * MUST NOT forward hooks into the recursive per-leg dispatch. Otherwise a
- * batched sendTx leg's `onInteractionApproved` would advance the top-level
+ * batched sendTx leg's `onExecutionEnqueued` would advance the top-level
  * session FIFO baton before later batch legs complete, breaking batch's
  * sequential-completion contract.
  */
@@ -548,7 +548,7 @@ describe("dispatcher batch hooks isolation", () => {
 		// don't leak into recursive leg dispatches.
 		let fired = 0
 		const hooks = {
-			onInteractionApproved: () => {
+			onExecutionEnqueued: () => {
 				fired++
 			},
 			queuedJournalId: "top-level-queued-id",
@@ -557,7 +557,7 @@ describe("dispatcher batch hooks isolation", () => {
 		// Dispatch a batch with two methods that exercise the recursive
 		// dispatch path. `getAccounts` is a simple method that completes
 		// quickly. If hooks leak into the recursive ctx, this test would
-		// observe `fired` being non-zero (no handler calls `onInteractionApproved`
+		// observe `fired` being non-zero (no handler calls `onExecutionEnqueued`
 		// for non-sendTx ops anyway, but the safety-net would still preserve it).
 		const batchLegs = [
 			{ name: "getAccounts", args: [] },
@@ -570,20 +570,20 @@ describe("dispatcher batch hooks isolation", () => {
 
 		// The hooks were forwarded to the OUTER dispatch but should NOT
 		// have been forwarded into the recursive per-leg dispatches. Since
-		// nothing inside the legs invokes onInteractionApproved, fired remains 0.
+		// nothing inside the legs invokes onExecutionEnqueued, fired remains 0.
 		expect(fired).toBe(0)
 	})
 })
 
 /**
  * Positive counterpart to the batch-isolation test: a non-batch `sendTx`
- * MUST forward `onInteractionApproved` (the baton release) + `queuedJournalId`
+ * MUST forward `onExecutionEnqueued` (the baton release) + `queuedJournalId`
  * through to `DappInteractionService.execute` under the exact field names it
  * reads. Pins the wiring whose field-name drift left the release dead before
  * v3 — if someone renames one side of the hooks bag again, this fails.
  */
 describe("dispatcher sendTx hook forwarding", () => {
-	test("dispatch('sendTx', ...) forwards onInteractionApproved + queuedJournalId to DappInteractionService.execute", async () => {
+	test("dispatch('sendTx', ...) forwards onExecutionEnqueued + queuedJournalId to DappInteractionService.execute", async () => {
 		const session = makeSession({
 			capabilityGrants: [
 				{ capability: { type: "accounts", canGet: true, canCreateAuthWit: false, accounts: [] }, grantedAt: 1 },
@@ -611,9 +611,9 @@ describe("dispatcher sendTx hook forwarding", () => {
 
 		const release = () => {}
 		// Empty exec.calls → scope enforcement is vacuously satisfied.
-		await dispatcher.dispatch("sendTx", [{ calls: [] }, {}], ctx, { onInteractionApproved: release, queuedJournalId: "q-1" })
+		await dispatcher.dispatch("sendTx", [{ calls: [] }, {}], ctx, { onExecutionEnqueued: release, queuedJournalId: "q-1" })
 
-		expect(observedHooks?.onInteractionApproved).toBe(release)
+		expect(observedHooks?.onExecutionEnqueued).toBe(release)
 		expect(observedHooks?.queuedJournalId).toBe("q-1")
 	})
 })

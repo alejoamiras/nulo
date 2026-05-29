@@ -35,19 +35,21 @@ export interface IAccountReader {
 }
 
 /**
- * Optional interaction/execution hooks bag. `onInteractionApproved` lets the
- * dApp-interaction layer signal "the user approved this request (or a silent,
- * no-popup request is starting)" so the wallet-sdk session FIFO baton can
- * advance and the next pending message's popup can open. `queuedJournalId`
- * lets the message-arrival layer pass a pre-allocated journal id (so the
- * in-flight surface is visible in the activity feed before the handler runs).
+ * Optional execution hooks bag. `onExecutionEnqueued` is invoked by the wallet
+ * once the approved request has taken its place in the per-(profileId, chainId)
+ * execution FIFO (the execution mutex). That — not popup approval — is the
+ * point at which releasing the caller's session FIFO baton is safe: any later
+ * request necessarily enqueues strictly behind this one, so execution order is
+ * preserved while popups still open concurrently. `queuedJournalId` lets the
+ * message-arrival layer pass a pre-allocated journal id (so the in-flight
+ * surface is visible in the activity feed before the handler runs).
  *
- * Kept as a structural type so wallet-bridge doesn't import from the
- * extension package. The concrete `ExecutionHooks` in `@/wallet/...`
- * is structurally compatible.
+ * Kept as a structural type so wallet-bridge doesn't import from the extension
+ * package. The extension's `ExecutionHooks` aliases this type directly, so the
+ * field set stays in lockstep across the layer boundary.
  */
 export interface IExecutionHooks {
-	onInteractionApproved?: () => void
+	onExecutionEnqueued?: () => void
 	queuedJournalId?: string
 }
 
