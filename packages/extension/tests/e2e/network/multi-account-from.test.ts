@@ -1,16 +1,11 @@
 import { expect, inject } from "vitest"
-import { clickByTestId, test } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { waitForPopup, waitForExecuteContent, approveExecute } from "../fixtures/popups"
+import { clickByTestId, openPopup, test } from "../fixtures/extension"
+import { snapshotResultSeq } from "../fixtures/playground"
+import { approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxProvingStage } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
-// CI-quarantined via NULO_E2E_SKIP_DEFERRED_SLOW. Uses sendTx-default (NO_WAIT)
-// so the slow path is the WASM kernel-prove chain, NOT receipt mining.
-// accelerator-server 1.0.1 only covers `createChonkProof`. Same un-quarantine
-// criteria as tx-sendTx-default.
-const skipDeferredSlow = process.env.NULO_E2E_SKIP_DEFERRED_SLOW === "1"
 
 /**
  * Test #39 — characterization: multi-account session, sendTx ignores
@@ -26,10 +21,13 @@ const skipDeferredSlow = process.env.NULO_E2E_SKIP_DEFERRED_SLOW === "1"
  * setup (hookTimeout=300s) instead of during the test budget. Mirrors the
  * single-account fixture (PR #64) but tolerates 1-or-2 accounts depending
  * on what the wallet exposed — the characterization holds either way.
+ *
+ * Asserts on `data-stage="proving"` (wallet popup) instead of the dApp's
+ * full sendTx promise. See implementations-plan/journal-stage-restructure/.
  */
-test.skipIf(!hasConfig || skipDeferredSlow)(
+test.skipIf(!hasConfig)(
 	"multi-account-from — handleSendTx picks first session account regardless of opts.from",
-	{ timeout: 120_000 },
+	{ timeout: 90_000 },
 	async ({ dappConnectedExtensionWithFirstTwoAccountsCap }) => {
 		const { playgroundPage: page } = dappConnectedExtensionWithFirstTwoAccountsCap
 
@@ -49,7 +47,7 @@ test.skipIf(!hasConfig || skipDeferredSlow)(
 			{ token: aztecConfig!.tokenAddress, recipient: aztecConfig!.minterAddress },
 		)
 
-		const seqTx = await snapshotResultSeq(page)
+		await snapshotResultSeq(page)
 		const execPopupP = waitForPopup(dappConnectedExtensionWithFirstTwoAccountsCap, "execute", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-sendTx-default")
 		const execPopup = await execPopupP
@@ -65,7 +63,10 @@ test.skipIf(!hasConfig || skipDeferredSlow)(
 		expect(fromAddress.length).toBeGreaterThan(0)
 
 		await approveExecute(execPopup)
-		const result = await waitForPgResult(page, "sendTx", seqTx, 120_000)
-		expect(["ok", "error"]).toContain(result.status)
+
+		// Wait for the wallet's journal to enter `proving` instead of the dApp's
+		// full sendTx promise.
+		const walletPopup = await openPopup(dappConnectedExtensionWithFirstTwoAccountsCap)
+		await waitForSendTxProvingStage(walletPopup)
 	},
 )
