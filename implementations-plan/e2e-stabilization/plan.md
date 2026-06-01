@@ -459,6 +459,6 @@ Add +1 day if Phase 1 codex review surfaces a regression needing Phase 1.5. Add 
 
 ---
 
-## Partial resolution (revised 2026-06-01)
+## Fully resolved (revised)
 
-`register-token` was un-quarantined during this plan's own execution (PR #63) via the pre-grant fixture pattern. `multi-account-from` + `tx-sendTx-multicall` were attempted-but-reverted during PR #67 (`implementations-plan/network-e2e-unquarantine/`): the WASM kernel-prove chain (init/inner/reset/tail) is the bottleneck on slow-runner-pool CI members and accelerator-server 1.0.1 only covers the final chonk step. Those two stay quarantined, plus the test added later via PR #66 (`tx-sendTx-default`). Fixture migrations + NO_WAIT improvements were kept as strict-better changes.
+`register-token` was un-quarantined during this plan's own execution (PR #63) via the pre-grant fixture pattern. `multi-account-from` + `tx-sendTx-multicall` + `tx-sendTx-default` (added later via PR #66) all un-quarantined by the journal-stage assertion restructure (`implementations-plan/journal-stage-restructure/`). The `NULO_E2E_SKIP_DEFERRED_SLOW` gate has been removed from CI. The restructure also opportunistically migrated 3 sibling tests (`tx-sendTx-noFrom`, `tx-sendTx-feePayer`, `tx-sendTx-sponsoredFpc`) to the same pattern. Fixture migrations + NO_WAIT improvements from PR #67 were kept as strict-better foundations.

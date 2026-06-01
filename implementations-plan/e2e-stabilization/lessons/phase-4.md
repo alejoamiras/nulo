@@ -50,6 +50,6 @@ Estimate: 4-6 hours for the redesign + instrumentation. Wallet code touch (markJ
 
 ---
 
-## Partial resolution (revised 2026-06-01)
+## Fully resolved (revised)
 
-`cancel-mid-prove`'s 30s post-approve selector waits were restored in PR #67 (chonk-prove is fast under accelerator). `tx-sendTx-default`'s un-quarantine was ATTEMPTED but REVERTED — accelerator-server 1.0.1 only covers `createChonkProof`; the init/inner/reset/tail kernel proofs still run via bb.js WASM and exceed puppeteer's 300s protocolTimeout on slow runners. The journal-stage redesign codex originally proposed remains the right long-term fix; the budget bump (+NO_WAIT) workaround proved insufficient (4 CI iterations).
+`cancel-mid-prove`'s 30s post-approve selector waits were restored in PR #67 (chonk-prove is fast under accelerator). `tx-sendTx-default`'s un-quarantine was ATTEMPTED in PR #67 then REVERTED; the journal-stage redesign codex originally proposed (`implementations-plan/journal-stage-restructure/`) was implemented in a separate PR and is what finally un-quarantined it (plus its 2 quarantined siblings). The mechanism — `waitForSendTxProvingStage()` against `data-stage="proving"` on the existing `tx-awaiting-card` — exactly matches what codex recommended in this audit (~2 weeks of arc).
