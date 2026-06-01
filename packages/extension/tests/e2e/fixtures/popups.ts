@@ -325,3 +325,45 @@ export async function getCapItems(page: Page): Promise<Array<{ id: string; grant
 		})),
 	)
 }
+
+/**
+ * Wait for the wallet's journal-driven `tx-awaiting-card` to reach the
+ * `"proving"` stage. The card is rendered by `TransactionAwaitingCard.vue`
+ * and exposes its current stage via `data-stage` (added in
+ * implementations-plan/journal-stage-restructure/plan.md Phase A).
+ *
+ * Use this in popup-shape sendTx tests instead of waiting on the dApp's
+ * full `wallet.sendTx()` promise. The promise resolves only after the
+ * wallet's full pipeline completes (build → simulate → kernel proofs →
+ * chonk proof → submit). On slow CI runners the WASM kernel-prove tail
+ * (not covered by accelerator-server 1.0.1) can exceed 300s, blowing
+ * any reasonable test budget.
+ *
+ * The `"proving"` stage transition fires post-simulate, pre-prove-
+ * completion (see `packages/extension/src/wallet/services/execution/service.ts:512`).
+ * Reaching it validates that the wallet:
+ *   1. Received the dApp's request
+ *   2. Built the tx + ran simulate successfully
+ *   3. Entered the prove pipeline
+ *
+ * Which is exactly what popup-shape tests want to verify. It does NOT
+ * validate that prove COMPLETES or that the tx broadcasts — those are
+ * covered by `transfers.test.ts` (which uses `waitForTxConfirmation` via
+ * the wallet-UI-driven send flow, exercising the same prove stack
+ * structurally).
+ *
+ * Intentionally NOT a generic `waitForJournalStage(walletPopup, stage)`
+ * helper: codex audit defensive design. Future tests wanting a different
+ * stage must add a new named helper, which is visible in PR review.
+ * An adversarial weakening from "proving" to "pending" would require
+ * renaming THIS function, not swapping a string parameter — much louder
+ * in diff.
+ *
+ * Default timeout: 30s. The `"proving"` transition is fast (<10s typical
+ * on local WASM, <5s on CI with accelerator); 30s absorbs popup-mount
+ * latency on slow runners without leaving room for the slow prove tail.
+ */
+export async function waitForSendTxProvingStage(walletPopup: Page, options: { timeout?: number } = {}): Promise<void> {
+	const { timeout = 30_000 } = options
+	await walletPopup.waitForSelector(`[data-testid="tx-awaiting-card"][data-stage="proving"]`, { timeout })
+}
