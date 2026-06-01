@@ -1,7 +1,7 @@
 import { expect, inject } from "vitest"
-import { clickByTestId, test } from "../fixtures/extension"
+import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { waitForPopup, waitForExecuteContent, approveCapabilities, approveExecute } from "../fixtures/popups"
+import { approveCapabilities, approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxProvingStage } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -15,8 +15,8 @@ const hasConfig = aztecConfig !== undefined
  * "sponsored" }) handles the two-step.
  */
 test.skipIf(!hasConfig)(
-	"tx-sendTx-sponsoredFpc — user override → sponsored fee → submit",
-	{ timeout: 180_000 },
+	"tx-sendTx-sponsoredFpc — user override → sponsored fee → reaches proving stage",
+	{ timeout: 90_000 },
 	async ({ dappConnectedExtension }) => {
 		const page = dappConnectedExtension.playgroundPage
 
@@ -52,7 +52,7 @@ test.skipIf(!hasConfig)(
 			{ token: aztecConfig!.tokenAddress, recipient: aztecConfig!.minterAddress },
 		)
 
-		const seqTx = await snapshotResultSeq(page)
+		await snapshotResultSeq(page)
 		const execPopupP = waitForPopup(dappConnectedExtension, "execute", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-sendTx-default")
 		const execPopup = await execPopupP
@@ -62,7 +62,10 @@ test.skipIf(!hasConfig)(
 		// "sponsored" is the typical default + reasserted via the override flow.
 		await approveExecute(execPopup, { feeMethod: "sponsored" })
 
-		const result = await waitForPgResult(page, "sendTx", seqTx, 120_000)
-		expect(["ok", "error"]).toContain(result.status)
+		// Wait for the wallet's journal to enter `proving` instead of the dApp's
+		// full sendTx promise. The popup-shape + fee-method override flow is
+		// what this test verifies.
+		const walletPopup = await openPopup(dappConnectedExtension)
+		await waitForSendTxProvingStage(walletPopup)
 	},
 )

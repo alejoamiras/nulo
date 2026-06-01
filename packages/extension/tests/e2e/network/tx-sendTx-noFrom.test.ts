@@ -1,7 +1,7 @@
 import { expect, inject } from "vitest"
-import { clickByTestId, test } from "../fixtures/extension"
+import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { waitForPopup, waitForExecuteContent, approveCapabilities, approveExecute } from "../fixtures/popups"
+import { approveCapabilities, approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxProvingStage } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -14,8 +14,8 @@ const hasConfig = aztecConfig !== undefined
  * "fee set by app" badge (no fee picker; embedded paymentMethod).
  */
 test.skipIf(!hasConfig)(
-	"tx-sendTx-noFrom — popup shows fee-set badge, no fee picker",
-	{ timeout: 180_000 },
+	"tx-sendTx-noFrom — popup shows fee-set badge, no fee picker, reaches proving stage",
+	{ timeout: 90_000 },
 	async ({ dappConnectedExtension }) => {
 		const page = dappConnectedExtension.playgroundPage
 
@@ -51,7 +51,7 @@ test.skipIf(!hasConfig)(
 			{ token: aztecConfig!.tokenAddress, recipient: aztecConfig!.minterAddress },
 		)
 
-		const seqTx = await snapshotResultSeq(page)
+		await snapshotResultSeq(page)
 		const execPopupP = waitForPopup(dappConnectedExtension, "execute", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-sendTx-noFrom")
 		const execPopup = await execPopupP
@@ -63,7 +63,9 @@ test.skipIf(!hasConfig)(
 
 		await approveExecute(execPopup)
 
-		const result = await waitForPgResult(page, "sendTx", seqTx, 120_000)
-		expect(["ok", "error"]).toContain(result.status)
+		// Wait for the wallet's journal to enter `proving` instead of the dApp's
+		// full sendTx promise. See waitForSendTxProvingStage.
+		const walletPopup = await openPopup(dappConnectedExtension)
+		await waitForSendTxProvingStage(walletPopup)
 	},
 )

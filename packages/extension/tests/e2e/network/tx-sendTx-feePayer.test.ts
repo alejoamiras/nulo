@@ -1,7 +1,7 @@
 import { expect, inject } from "vitest"
-import { clickByTestId, test } from "../fixtures/extension"
+import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { waitForPopup, waitForExecuteContent, approveCapabilities, approveExecute } from "../fixtures/popups"
+import { approveCapabilities, approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxProvingStage } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -13,8 +13,8 @@ const hasConfig = aztecConfig !== undefined
  * popup shows the "fee set by app" badge.
  */
 test.skipIf(!hasConfig)(
-	"tx-sendTx-feePayer — exec.feePayer triggers embedded fee + fee-set badge",
-	{ timeout: 180_000 },
+	"tx-sendTx-feePayer — exec.feePayer triggers embedded fee + fee-set badge, reaches proving stage",
+	{ timeout: 90_000 },
 	async ({ dappConnectedExtension }) => {
 		const page = dappConnectedExtension.playgroundPage
 
@@ -51,7 +51,7 @@ test.skipIf(!hasConfig)(
 			{ token: aztecConfig!.tokenAddress, recipient: aztecConfig!.minterAddress, feePayer: aztecConfig!.sponsoredFpcAddress },
 		)
 
-		const seqTx = await snapshotResultSeq(page)
+		await snapshotResultSeq(page)
 		const execPopupP = waitForPopup(dappConnectedExtension, "execute", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-sendTx-feePayer")
 		const execPopup = await execPopupP
@@ -62,9 +62,10 @@ test.skipIf(!hasConfig)(
 
 		await approveExecute(execPopup)
 
-		const result = await waitForPgResult(page, "sendTx", seqTx, 120_000)
-		// feePayer points at the deployed SponsoredFPC; tx may submit ok or error
-		// depending on FPC state. Test verifies the popup-path + fee-set badge.
-		expect(["ok", "error"]).toContain(result.status)
+		// Wait for the wallet's journal to enter `proving` instead of the dApp's
+		// full sendTx promise. feePayer is the SponsoredFPC; the popup-shape +
+		// fee-set badge are what this test verifies, not on-chain completion.
+		const walletPopup = await openPopup(dappConnectedExtension)
+		await waitForSendTxProvingStage(walletPopup)
 	},
 )
