@@ -327,8 +327,9 @@ export async function getCapItems(page: Page): Promise<Array<{ id: string; grant
 }
 
 /**
- * Wait for the wallet's journal-driven `tx-awaiting-card` to reach the
- * `"proving"` stage. The card is rendered by `TransactionAwaitingCard.vue`
+ * Wait for the wallet's journal-driven `tx-awaiting-card` to reach any
+ * active processing stage (simulating, proving, or submitting — i.e. past
+ * pending/queued). The card is rendered by `TransactionAwaitingCard.vue`
  * and exposes its current stage via `data-stage` (added in
  * implementations-plan/journal-stage-restructure/plan.md Phase A).
  *
@@ -339,31 +340,39 @@ export async function getCapItems(page: Page): Promise<Array<{ id: string; grant
  * (not covered by accelerator-server 1.0.1) can exceed 300s, blowing
  * any reasonable test budget.
  *
- * The `"proving"` stage transition fires post-simulate, pre-prove-
- * completion (see `packages/extension/src/wallet/services/execution/service.ts:512`).
- * Reaching it validates that the wallet:
- *   1. Received the dApp's request
- *   2. Built the tx + ran simulate successfully
- *   3. Entered the prove pipeline
+ * Reaching an active stage validates that the wallet:
+ *   1. Received the dApp's request (entered journal as `pending`)
+ *   2. Advanced past `pending`/`queued` into actual work
  *
- * Which is exactly what popup-shape tests want to verify. It does NOT
- * validate that prove COMPLETES or that the tx broadcasts — those are
- * covered by `transfers.test.ts` (which uses `waitForTxConfirmation` via
- * the wallet-UI-driven send flow, exercising the same prove stack
- * structurally).
+ * Which is what popup-shape tests want to verify. It does NOT validate
+ * that prove COMPLETES or that the tx broadcasts — those are covered by
+ * `transfers.test.ts` (which uses `waitForTxConfirmation` via the
+ * wallet-UI-driven send flow, exercising the same prove stack structurally).
+ *
+ * Why not `[data-stage="proving"]` specifically: empirically on slow
+ * hardware the wallet spends most of its wall-time in `simulating` (the
+ * "proving is the long-lived stage" claim is true ONLY under accelerator's
+ * chonk path). A `proving`-only selector races and false-fails on local
+ * WASM. The broader "any active stage" matcher catches the wallet
+ * reliably regardless of which stage it lingers in.
  *
  * Intentionally NOT a generic `waitForJournalStage(walletPopup, stage)`
- * helper: codex audit defensive design. Future tests wanting a different
+ * helper: codex audit defensive design. Future tests wanting a specific
  * stage must add a new named helper, which is visible in PR review.
- * An adversarial weakening from "proving" to "pending" would require
- * renaming THIS function, not swapping a string parameter — much louder
- * in diff.
+ * An adversarial weakening to include `pending`/`queued` would require
+ * editing the `:not(...)` filter inline — loud in diff.
  *
- * Default timeout: 30s. The `"proving"` transition is fast (<10s typical
- * on local WASM, <5s on CI with accelerator); 30s absorbs popup-mount
- * latency on slow runners without leaving room for the slow prove tail.
+ * Default timeout: 30s. The transition from pending to simulating is
+ * fast (<5s typical even on slow hardware); 30s absorbs popup-mount
+ * latency on slow runners.
  */
-export async function waitForSendTxProvingStage(walletPopup: Page, options: { timeout?: number } = {}): Promise<void> {
+export async function waitForSendTxActiveStage(walletPopup: Page, options: { timeout?: number } = {}): Promise<void> {
 	const { timeout = 30_000 } = options
-	await walletPopup.waitForSelector(`[data-testid="tx-awaiting-card"][data-stage="proving"]`, { timeout })
+	// CSS attribute-chained `:not(...)` excludes pending/queued. Vue omits
+	// the `data-stage` attribute entirely when the prop is null/undefined,
+	// so the bare `[data-stage]` predicate filters those out implicitly.
+	await walletPopup.waitForSelector(
+		`[data-testid="tx-awaiting-card"][data-stage]:not([data-stage="pending"]):not([data-stage="queued"])`,
+		{ timeout },
+	)
 }

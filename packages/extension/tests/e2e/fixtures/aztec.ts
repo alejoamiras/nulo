@@ -422,3 +422,26 @@ export async function setupPreFundedAccount(
 	const masterBase64 = Buffer.from(master.toBuffer()).toString("base64")
 	return { masterBase64, accountAddress: expectedAddress }
 }
+
+/**
+ * Convenience wrapper for pre-minting public tokens to a dApp-granted account
+ * before exercising the wallet's sendTx flow in popup-shape tests. Without this,
+ * the wallet's simulate step fails ("not enough balance"), the journal advances
+ * straight to `failed`, and the `tx-awaiting-card` never reaches an active
+ * stage — which breaks waitForSendTxActiveStage(). cancel-mid-prove.test.ts
+ * uses an identical inline block; this helper consolidates it for the 6 tests
+ * restructured in implementations-plan/journal-stage-restructure/.
+ */
+export async function mintPublicTokensForAccount(
+	aztecConfig: AztecTestConfig,
+	accountAddress: string,
+	amount = 100n * 10n ** 18n,
+): Promise<void> {
+	const { wallet, cleanup } = await createTestWallet(aztecConfig.nodeUrl)
+	try {
+		const feeOptions = await createSponsoredFeeOptions(wallet)
+		await mintPublicTokens(wallet, aztecConfig.tokenAddress, accountAddress, amount, aztecConfig.minterAddress, feeOptions)
+	} finally {
+		await cleanup()
+	}
+}

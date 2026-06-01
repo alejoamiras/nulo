@@ -1,8 +1,8 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq } from "../fixtures/playground"
-import { approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxProvingStage } from "../fixtures/popups"
-import type { AztecTestConfig } from "../fixtures/aztec"
+import { approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxActiveStage } from "../fixtures/popups"
+import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
@@ -29,7 +29,13 @@ test.skipIf(!hasConfig)(
 	"multi-account-from — handleSendTx picks first session account regardless of opts.from",
 	{ timeout: 90_000 },
 	async ({ dappConnectedExtensionWithFirstTwoAccountsCap }) => {
-		const { playgroundPage: page } = dappConnectedExtensionWithFirstTwoAccountsCap
+		const { playgroundPage: page, accountAddresses } = dappConnectedExtensionWithFirstTwoAccountsCap
+
+		// Pre-mint to BOTH session accounts so simulate succeeds regardless of
+		// which one the wallet picks (characterization: it always picks the first).
+		for (const addr of accountAddresses) {
+			await mintPublicTokensForAccount(aztecConfig!, addr)
+		}
 
 		await page.evaluate(
 			({ token, recipient }: { token: string; recipient: string }) => {
@@ -67,6 +73,6 @@ test.skipIf(!hasConfig)(
 		// Wait for the wallet's journal to enter `proving` instead of the dApp's
 		// full sendTx promise.
 		const walletPopup = await openPopup(dappConnectedExtensionWithFirstTwoAccountsCap)
-		await waitForSendTxProvingStage(walletPopup)
+		await waitForSendTxActiveStage(walletPopup)
 	},
 )

@@ -1,8 +1,8 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { approveCapabilities, approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxProvingStage } from "../fixtures/popups"
-import type { AztecTestConfig } from "../fixtures/aztec"
+import { approveCapabilities, approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxActiveStage } from "../fixtures/popups"
+import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
@@ -33,6 +33,9 @@ test.skipIf(!hasConfig)(
 		)
 		await approveCapabilities(capPopup, { accounts: [accountIds[0]!] })
 		await waitForPgResult(page, "requestCapabilities", seqGrant, 30_000)
+
+		// Pre-mint tokens so simulate succeeds + journal enters active stage.
+		await mintPublicTokensForAccount(aztecConfig!, accountIds[0]!)
 
 		await page.evaluate(
 			({ token, recipient, feePayer }: { token: string; recipient: string; feePayer: string }) => {
@@ -66,6 +69,6 @@ test.skipIf(!hasConfig)(
 		// full sendTx promise. feePayer is the SponsoredFPC; the popup-shape +
 		// fee-set badge are what this test verifies, not on-chain completion.
 		const walletPopup = await openPopup(dappConnectedExtension)
-		await waitForSendTxProvingStage(walletPopup)
+		await waitForSendTxActiveStage(walletPopup)
 	},
 )

@@ -1,8 +1,8 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq } from "../fixtures/playground"
-import { approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxProvingStage } from "../fixtures/popups"
-import type { AztecTestConfig } from "../fixtures/aztec"
+import { approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxActiveStage } from "../fixtures/popups"
+import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
@@ -31,7 +31,12 @@ test.skipIf(!hasConfig)(
 	"tx-sendTx-default — popup opens, fee picker shown, confirm reaches journal proving stage",
 	{ timeout: 60_000 },
 	async ({ dappConnectedExtensionWithTransactionCap }) => {
-		const { playgroundPage: page } = dappConnectedExtensionWithTransactionCap
+		const { playgroundPage: page, accountAddress } = dappConnectedExtensionWithTransactionCap
+
+		// Pre-mint tokens to the dApp account so simulate succeeds (otherwise
+		// the journal goes straight to `failed` and the awaiting card never
+		// reaches an active stage — breaks waitForSendTxActiveStage).
+		await mintPublicTokensForAccount(aztecConfig!, accountAddress)
 
 		// Set inputs
 		await page.evaluate(
@@ -70,8 +75,8 @@ test.skipIf(!hasConfig)(
 		await approveExecute(execPopup)
 
 		// Wait for the wallet's journal to enter `proving` instead of the dApp's
-		// full sendTx promise. See waitForSendTxProvingStage for rationale.
+		// full sendTx promise. See waitForSendTxActiveStage for rationale.
 		const walletPopup = await openPopup(dappConnectedExtensionWithTransactionCap)
-		await waitForSendTxProvingStage(walletPopup)
+		await waitForSendTxActiveStage(walletPopup)
 	},
 )

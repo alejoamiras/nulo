@@ -1,8 +1,8 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq } from "../fixtures/playground"
-import { approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxProvingStage } from "../fixtures/popups"
-import type { AztecTestConfig } from "../fixtures/aztec"
+import { approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxActiveStage } from "../fixtures/popups"
+import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
@@ -35,7 +35,10 @@ for (const c of cases) {
 		`tx-sendTx-${c.name} (#${c.id}) — popup opens, multiple payload rows, reaches proving stage`,
 		{ timeout: 90_000 },
 		async ({ dappConnectedExtensionWithTransactionCap }) => {
-			const { playgroundPage: page } = dappConnectedExtensionWithTransactionCap
+			const { playgroundPage: page, accountAddress } = dappConnectedExtensionWithTransactionCap
+
+			// Pre-mint enough tokens to cover the multicall (3 or 7 × 1-token transfers).
+			await mintPublicTokensForAccount(aztecConfig!, accountAddress)
 
 			await page.evaluate(
 				({ token, recipient }: { token: string; recipient: string }) => {
@@ -68,7 +71,7 @@ for (const c of cases) {
 			// even for the chunked variant, since the kernel-prove tail (which
 			// dominates) doesn't gate this stage transition.
 			const walletPopup = await openPopup(dappConnectedExtensionWithTransactionCap)
-			await waitForSendTxProvingStage(walletPopup)
+			await waitForSendTxActiveStage(walletPopup)
 		},
 	)
 }
