@@ -88,3 +88,20 @@ Resurrect via `git show 1081c1b^:packages/extension/src/wallet/utils/probe.ts` e
 - Consolidated followup plan: `implementations-plan/network-followups/plan.md` §6
 - Opus's parallel plan §2.3: `implementations-plan/network-followups/audit-opus.md`
 - Codex's parallel plan §2.3: `implementations-plan/network-followups/audit-codex.md`
+
+---
+
+## Resolution (2026-05-28)
+
+**Partial resolution (revised 2026-06-01):** `implementations-plan/accelerator-server-ci/plan.md` (PR #67) landed accelerator-server in CI for the `createChonkProof` step. The companion `implementations-plan/network-e2e-unquarantine/plan.md` attempted to un-quarantine all 3 tests but had to REVERT for two of them after CI experiments showed the WASM kernel-prove chain (init/inner/reset/tail — NOT covered by accelerator-server 1.0.1) exceeds puppeteer's `protocolTimeout=300s` ceiling on slow-runner-pool members.
+
+| Test | Status |
+|---|---|
+| `register-token.test.ts` (PR #63) | ✅ Resolved via pre-grant fixture |
+| `multi-account-from.test.ts` | ⚠️ Re-quarantined. Fixture migration kept (`dappConnectedExtensionWithFirstTwoAccountsCap`). |
+| `tx-sendTx-multicall.test.ts` | ⚠️ Re-quarantined. Fixture migration + NO_WAIT kept. |
+| `tx-sendTx-default.test.ts` (added in PR #66) | ⚠️ Stays quarantined. |
+
+**Path forward:** un-quarantine when accelerator-server upstream exposes endpoints for init/inner/reset/tail kernel proofs, OR when tests are restructured to assert against journal-stage transitions (codex's recommendation in audit `019e6743…`) instead of waiting on the dApp's full sendTx promise.
+
+H-OP-1, H-OP-2, H-OP-3 remain plausible — the structural fixes (accelerator chonk-only + pre-grant fixtures) addressed PART of the slow path but not all of it.

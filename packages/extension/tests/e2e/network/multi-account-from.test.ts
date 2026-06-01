@@ -1,15 +1,15 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { waitForPopup, waitForExecuteContent, approveCapabilities, approveExecute } from "../fixtures/popups"
+import { waitForPopup, waitForExecuteContent, approveExecute } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
-// Deferred slow-test marker (see implementations-plan/network-followups/slow-tests-hypotheses.md).
-// On CI per-shard runner, this test deterministically exhausts its timeout
-// budget under cap-popup target-creation backpressure (H-OP-3). Skipped in
-// CI via NULO_E2E_SKIP_DEFERRED_SLOW=1; runs locally to retain coverage.
+// CI-quarantined via NULO_E2E_SKIP_DEFERRED_SLOW. Uses sendTx-default (NO_WAIT)
+// so the slow path is the WASM kernel-prove chain, NOT receipt mining.
+// accelerator-server 1.0.1 only covers `createChonkProof`. Same un-quarantine
+// criteria as tx-sendTx-default.
 const skipDeferredSlow = process.env.NULO_E2E_SKIP_DEFERRED_SLOW === "1"
 
 /**
@@ -21,37 +21,17 @@ const skipDeferredSlow = process.env.NULO_E2E_SKIP_DEFERRED_SLOW === "1"
  * silently ignored. This test pins that current behavior — if/when fixed,
  * the assertion flips.
  *
- * Note: requires the wallet to have 2+ accounts AND the user to grant both
- * via the cap popup. Today's cap UI lets the user click multiple
- * cap-account-item rows.
+ * Uses `dappConnectedExtensionWithFirstTwoAccountsCap` so the cap-popup
+ * round-trip (which grants up to 2 accounts) happens during fixture
+ * setup (hookTimeout=300s) instead of during the test budget. Mirrors the
+ * single-account fixture (PR #64) but tolerates 1-or-2 accounts depending
+ * on what the wallet exposed — the characterization holds either way.
  */
-// Per-test retry for this file: under cumulative load (43 network files
-// back-to-back), the `dappConnectedExtension` fixture's capability popup
-// occasionally takes >15s to mount and the inner `waitForPopup` timeout
-// fires. Deterministic in isolation; retry stays scoped here.
 test.skipIf(!hasConfig || skipDeferredSlow)(
 	"multi-account-from — handleSendTx picks first session account regardless of opts.from",
-	{ timeout: 180_000, retry: 1 },
-	async ({ dappConnectedExtension }) => {
-		const page = dappConnectedExtension.playgroundPage
-
-		await page.evaluate(() => {
-			const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')!
-			select.value = "transaction"
-			select.dispatchEvent(new Event("change", { bubbles: true }))
-		})
-		const seqGrant = await snapshotResultSeq(page)
-		const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
-		await clickByTestId(page, "pg-btn-requestCapabilities")
-		const capPopup = await capPopupP
-		await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 10_000 })
-		const accountIds = await capPopup.evaluate(() =>
-			[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) => r.getAttribute("data-account-id")),
-		)
-		// Grant only one account if there's only one — characterization holds either way
-		const accountsToGrant = accountIds.slice(0, Math.min(2, accountIds.length))
-		await approveCapabilities(capPopup, { accounts: accountsToGrant.filter((a): a is string => !!a) })
-		await waitForPgResult(page, "requestCapabilities", seqGrant, 30_000)
+	{ timeout: 120_000 },
+	async ({ dappConnectedExtensionWithFirstTwoAccountsCap }) => {
+		const { playgroundPage: page } = dappConnectedExtensionWithFirstTwoAccountsCap
 
 		await page.evaluate(
 			({ token, recipient }: { token: string; recipient: string }) => {
@@ -70,7 +50,7 @@ test.skipIf(!hasConfig || skipDeferredSlow)(
 		)
 
 		const seqTx = await snapshotResultSeq(page)
-		const execPopupP = waitForPopup(dappConnectedExtension, "execute", { timeout: 30_000 })
+		const execPopupP = waitForPopup(dappConnectedExtensionWithFirstTwoAccountsCap, "execute", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-sendTx-default")
 		const execPopup = await execPopupP
 		await waitForExecuteContent(execPopup)

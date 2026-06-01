@@ -319,7 +319,7 @@ Configured in [`.github/`](./.github/). The full contributor guide is at [`CI.md
 
 - **Every PR**: `Quality / Status` aggregates commitlint, lint, typecheck, units, build. **Required check** on `main` + `dev`.
 - **`Smoke e2e / Status`**: runs on PRs to `main` (always), on PRs to `dev` whose diff touches the `smoke-surface` filter, or on PRs labeled `e2e:smoke`. Status emits pass when skipped. Currently advisory; will become required once the smoke fixture-cleanup follow-up PR lands.
-- **`Network e2e / Status`**: same shape as smoke, with the `extension-network` filter and `e2e:network` label. **Required check** on `main`.
+- **`Network e2e / Status`**: same shape as smoke, with the `extension-network` filter and `e2e:network` label. **Required check** on `main`. Each shard installs `accelerator-server` (Linux x86_64 binary from `alejoamiras/aztec-accelerator` releases, SHA-256-pinned in `_network-e2e.yml`) and enforces native bb proving via `VITE_NULO_ACCELERATOR_REQUIRED=1` baked into the wallet build. Silent fallback to WASM is a hard fail. Rollback: set `vars.NULO_E2E_DISABLE_ACCELERATOR=1` (Settings → Actions → Variables) or use the `workflow_dispatch` input `disable_accelerator: true`. See [CI.md § Accelerator in CI](./CI.md#accelerator-in-ci).
 - **Workflow-level**: actionlint + shellcheck run when workflow YAML or shell scripts change.
 
 ### Branches + releases

@@ -33,6 +33,7 @@ Composite actions live in `.github/actions/` and are shared step fragments used 
 | `setup-bun` | checkout + bun + install cache + `bun install --frozen-lockfile` |
 | `setup-aztec` | Foundry + Aztec CLI matching the `@aztec/aztec.js` version |
 | `setup-puppeteer` | warm `~/.cache/puppeteer` |
+| `setup-accelerator-server` | download + SHA-256 verify + install the headless `accelerator-server` binary (Linux x86_64) for CI proving. Used by `_network-e2e.yml`. See [CI.md](../CI.md#accelerator-in-ci). |
 
 ## Triggers cheat-sheet
 

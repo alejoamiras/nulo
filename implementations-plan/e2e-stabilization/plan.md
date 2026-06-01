@@ -456,3 +456,9 @@ Add +1 day if Phase 1 codex review surfaces a regression needing Phase 1.5. Add 
 ---
 
 **Next step**: per CLAUDE.md Tier-A protocol § 3, this consolidated plan goes back to codex for one final critical pass before approval gate. Then ELI5 HTML companion. Then approval gate.
+
+---
+
+## Partial resolution (revised 2026-06-01)
+
+`register-token` was un-quarantined during this plan's own execution (PR #63) via the pre-grant fixture pattern. `multi-account-from` + `tx-sendTx-multicall` were attempted-but-reverted during PR #67 (`implementations-plan/network-e2e-unquarantine/`): the WASM kernel-prove chain (init/inner/reset/tail) is the bottleneck on slow-runner-pool CI members and accelerator-server 1.0.1 only covers the final chonk step. Those two stay quarantined, plus the test added later via PR #66 (`tx-sendTx-default`). Fixture migrations + NO_WAIT improvements were kept as strict-better changes.

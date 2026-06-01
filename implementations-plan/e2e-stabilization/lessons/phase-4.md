@@ -47,3 +47,9 @@ The structural changes work. The residual flake is runner-pool variability that 
 Replace `tx-sendTx-default` with a journal-stage observation test. Add stage-level instrumentation (markJournal console emission for `simulating` / `proving` / `submitting` / `succeeded`) in the same PR. Once the redesign lands, drop the `skipDeferredSlow` gate.
 
 Estimate: 4-6 hours for the redesign + instrumentation. Wallet code touch (markJournal callsite) requires codex review per CLAUDE.md.
+
+---
+
+## Partial resolution (revised 2026-06-01)
+
+`cancel-mid-prove`'s 30s post-approve selector waits were restored in PR #67 (chonk-prove is fast under accelerator). `tx-sendTx-default`'s un-quarantine was ATTEMPTED but REVERTED — accelerator-server 1.0.1 only covers `createChonkProof`; the init/inner/reset/tail kernel proofs still run via bb.js WASM and exceed puppeteer's 300s protocolTimeout on slow runners. The journal-stage redesign codex originally proposed remains the right long-term fix; the budget bump (+NO_WAIT) workaround proved insufficient (4 CI iterations).
