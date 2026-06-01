@@ -459,6 +459,6 @@ Add +1 day if Phase 1 codex review surfaces a regression needing Phase 1.5. Add 
 
 ---
 
-## Resolution (2026-05-28)
+## Partial resolution (revised 2026-06-01)
 
-The `NULO_E2E_SKIP_DEFERRED_SLOW` quarantine + `skipDeferredSlow` mechanism described throughout this plan was removed by `implementations-plan/network-e2e-unquarantine/plan.md` (companion to `implementations-plan/accelerator-server-ci/plan.md`). The 3 originally-quarantined tests (`multi-account-from`, `tx-sendTx-multicall`, `register-token`) all run on CI again — `register-token` was resolved by the pre-grant fixture pattern landed during this plan's own execution (PR #63); the other two were resolved by the accelerator-server CI integration + a `dappConnectedExtensionWithFirstTwoAccountsCap` fixture variant.
+`register-token` was un-quarantined during this plan's own execution (PR #63) via the pre-grant fixture pattern. `multi-account-from` + `tx-sendTx-multicall` were attempted-but-reverted during PR #67 (`implementations-plan/network-e2e-unquarantine/`): the WASM kernel-prove chain (init/inner/reset/tail) is the bottleneck on slow-runner-pool CI members and accelerator-server 1.0.1 only covers the final chonk step. Those two stay quarantined, plus the test added later via PR #66 (`tx-sendTx-default`). Fixture migrations + NO_WAIT improvements were kept as strict-better changes.

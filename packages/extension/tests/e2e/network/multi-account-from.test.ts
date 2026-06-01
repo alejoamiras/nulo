@@ -6,6 +6,11 @@ import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
+// CI-quarantined via NULO_E2E_SKIP_DEFERRED_SLOW. Uses sendTx-default (NO_WAIT)
+// so the slow path is the WASM kernel-prove chain, NOT receipt mining.
+// accelerator-server 1.0.1 only covers `createChonkProof`. Same un-quarantine
+// criteria as tx-sendTx-default.
+const skipDeferredSlow = process.env.NULO_E2E_SKIP_DEFERRED_SLOW === "1"
 
 /**
  * Test #39 — characterization: multi-account session, sendTx ignores
@@ -22,12 +27,9 @@ const hasConfig = aztecConfig !== undefined
  * single-account fixture (PR #64) but tolerates 1-or-2 accounts depending
  * on what the wallet exposed — the characterization holds either way.
  */
-test.skipIf(!hasConfig)(
+test.skipIf(!hasConfig || skipDeferredSlow)(
 	"multi-account-from — handleSendTx picks first session account regardless of opts.from",
-	// 420s budget: this test uses sendTx-default (NO_WAIT) which still pays
-	// the WASM kernel-prove envelope on slow-runner-pool members. See
-	// tx-sendTx-default.test.ts for the same reasoning.
-	{ timeout: 420_000 },
+	{ timeout: 120_000 },
 	async ({ dappConnectedExtensionWithFirstTwoAccountsCap }) => {
 		const { playgroundPage: page } = dappConnectedExtensionWithFirstTwoAccountsCap
 
@@ -63,7 +65,7 @@ test.skipIf(!hasConfig)(
 		expect(fromAddress.length).toBeGreaterThan(0)
 
 		await approveExecute(execPopup)
-		const result = await waitForPgResult(page, "sendTx", seqTx, 360_000)
+		const result = await waitForPgResult(page, "sendTx", seqTx, 120_000)
 		expect(["ok", "error"]).toContain(result.status)
 	},
 )

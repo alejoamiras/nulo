@@ -50,8 +50,6 @@ Estimate: 4-6 hours for the redesign + instrumentation. Wallet code touch (markJ
 
 ---
 
-## Resolution (2026-05-28)
+## Partial resolution (revised 2026-06-01)
 
-The "redesign tx-sendTx-default with journal-stage assertion" follow-up was superseded by a simpler structural fix: `implementations-plan/accelerator-server-ci/plan.md` (PR #67) landed native bb proving on CI runners, which collapses the per-prove time tail that motivated the journal-stage redesign. The follow-up `implementations-plan/network-e2e-unquarantine/plan.md` removes the `skipDeferredSlow` gate from `tx-sendTx-default` and restores `cancel-mid-prove`'s 30s post-approve selector waits — both via the un-quarantine PR rather than a wallet-code-level redesign.
-
-The journal-stage instrumentation would still be valuable for future un-quarantine signal beyond accelerator perf (PR #67 plan §11 flags it as a follow-up).
+`cancel-mid-prove`'s 30s post-approve selector waits were restored in PR #67 (chonk-prove is fast under accelerator). `tx-sendTx-default`'s un-quarantine was ATTEMPTED but REVERTED — accelerator-server 1.0.1 only covers `createChonkProof`; the init/inner/reset/tail kernel proofs still run via bb.js WASM and exceed puppeteer's 300s protocolTimeout on slow runners. The journal-stage redesign codex originally proposed remains the right long-term fix; the budget bump (+NO_WAIT) workaround proved insufficient (4 CI iterations).
