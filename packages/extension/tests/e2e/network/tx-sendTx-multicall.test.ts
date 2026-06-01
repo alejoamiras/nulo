@@ -29,7 +29,13 @@ const cases: Array<{ id: number; name: string; btn: string }> = [
 for (const c of cases) {
 	test.skipIf(!hasConfig)(
 		`tx-sendTx-${c.name} (#${c.id}) — popup opens, multiple payload rows`,
-		{ timeout: 240_000, retry: 1 },
+		// 420s budget absorbs the WASM kernel-prove tail on slow-runner-pool
+		// members. accelerator-server 1.0.1 only covers `createChonkProof`;
+		// init/inner/reset/tail still run in-process via bb.js WASM. Multicall
+		// has more kernel proofs than single-call tests so it needs the same
+		// budget as tx-sendTx-default. NO_WAIT (playground) already trims the
+		// post-submit receipt wait.
+		{ timeout: 420_000, retry: 1 },
 		async ({ dappConnectedExtensionWithTransactionCap }) => {
 			const { playgroundPage: page } = dappConnectedExtensionWithTransactionCap
 
@@ -59,7 +65,7 @@ for (const c of cases) {
 			expect(payloadRows).toBeGreaterThanOrEqual(c.id === 33 ? 7 : 3)
 
 			await approveExecute(execPopup)
-			const result = await waitForPgResult(page, "sendTx", seqTx, 180_000)
+			const result = await waitForPgResult(page, "sendTx", seqTx, 360_000)
 			expect(["ok", "error"]).toContain(result.status)
 		},
 	)
