@@ -9,7 +9,7 @@ const STUBS = {
 	Spinner: { template: '<span data-testid="stub-spinner" />' },
 	TransactionCardLayout: {
 		template: `
-			<div :data-testid="testId">
+			<div :data-testid="testId" :data-stage="stage">
 				<span class="title">{{ title }}</span>
 				<slot name="title-trailing" />
 				<slot name="badge" />
@@ -19,7 +19,7 @@ const STUBS = {
 				<span class="symbol">{{ amountSymbol }}</span>
 			</div>
 		`,
-		props: ["title", "icon", "amount", "amountSymbol", "testId"],
+		props: ["title", "icon", "amount", "amountSymbol", "testId", "stage"],
 	},
 }
 
@@ -59,6 +59,15 @@ describe("composite/TransactionAwaitingCard", () => {
 	test("forwards the testId 'tx-awaiting-card' to the underlying layout", () => {
 		const w = mountCard()
 		expect(w.find("[data-testid='tx-awaiting-card']").exists()).toBe(true)
+	})
+
+	test("forwards the stage prop to the underlying layout (e2e selector contract)", () => {
+		// E2E tests wait for `[data-testid="tx-awaiting-card"][data-stage="proving"]`
+		// via waitForSendTxProvingStage. Contract: this card threads its `stage`
+		// prop through to TransactionCardLayout, which renders it as `data-stage`
+		// on the root (real binding tested in TransactionCardLayout.test.ts).
+		const w = mountCard({ stage: "proving" })
+		expect(w.find("[data-testid='tx-awaiting-card']").attributes("data-stage")).toBe("proving")
 	})
 
 	test("forwards amount + amountSymbol props to the layout", () => {

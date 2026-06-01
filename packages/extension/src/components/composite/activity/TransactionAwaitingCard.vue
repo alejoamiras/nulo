@@ -58,6 +58,7 @@ const emit = defineEmits(["cancel"])
 		:icon="icon"
 		:amount="amount"
 		:amountSymbol="amountSymbol"
+		:stage="stage"
 		testId="tx-awaiting-card"
 	>
 		<template #badge>
