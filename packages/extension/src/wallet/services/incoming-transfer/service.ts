@@ -331,7 +331,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 		const outgoingTxHashes = await this.collectOutgoingTxHashes(network.chainId, accountAddress)
 		const inflightTxHashes = await this.collectInflightTxHashes(profileId, networkId, accountAddress)
-		const trustState = await this.getTrustState(profileId, networkId, contract)
+		let trustState = await this.getTrustState(profileId, networkId, contract)
 
 		for (const note of notes) {
 			if (!note.siloedNullifier) continue
@@ -341,27 +341,27 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			const amountRaw = parseNoteAmount(note)
 			if (amountRaw === null) continue
 
+			// First-receive policy: auto-trust the contract on first encounter
+			// so the record is immediately visible. The popup-side first-
+			// receive friction UI is a documented follow-up; once it ships,
+			// flip this branch to transition unknown→pending and emit
+			// onIncomingTransferPending instead. The state machine + Allow/
+			// Reject methods (setTrustAllow/setTrustReject) are already in
+			// place for that flip — only the popup wiring is missing.
+			if (trustState === "unknown") {
+				const updated = await this.repo.setTrust(profileId, networkId, contract, "trusted")
+				this.emit("onIncomingTrustChanged", updated)
+				trustState = "trusted"
+			}
+
 			const record = this.buildRecord({ note, profileId, networkId, accountAddress, token, amountRaw, trustState })
 			await this.repo.upsertRecord(record)
 
-			if (trustState === "unknown") {
-				const updated = await this.repo.setTrust(profileId, networkId, contract, "pending")
-				this.emit("onIncomingTrustChanged", updated)
-				this.emit("onIncomingTransferPending", {
-					profileId,
-					networkId,
-					accountAddress,
-					contract,
-					tokenId: token.id,
-					tokenSymbol: token.symbol,
-					tokenDecimals: token.decimals,
-					amountRaw,
-				})
-				// Don't emit Added — record is hidden until user resolves.
-			} else if (trustState === "trusted") {
+			if (trustState === "trusted") {
 				this.emit("onIncomingTransferAdded", record)
 			}
-			// pending / blocked: record persisted hidden, no event.
+			// pending / blocked: record persisted hidden, no event. (pending only
+			// reachable post-followup, once the popup UI flips the default.)
 		}
 	}
 
