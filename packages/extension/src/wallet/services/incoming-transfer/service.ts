@@ -190,12 +190,19 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		await this.setTrustState(profileId, networkId, contract, "trusted")
 		// Flip every hidden record for this contract to visible; emit Added
 		// for each so the popup activity feed updates atomically.
+		// Visibility gate (codex post-impl followup): if `incomingTransfersVisible`
+		// is off, persist the records as visible (so a future toggle-on shows
+		// them) but DO NOT emit live events that would surface rows on an
+		// already-mounted page where the user has opted out.
+		const visibilityEnabled = await this.isVisibilityEnabled()
 		const records = await this.repo.listByContract(profileId, networkId, contract)
 		for (const record of records) {
 			if (!record.hidden) continue
 			const updated = { ...record, hidden: false }
 			await this.repo.upsertRecord(updated)
-			this.emit("onIncomingTransferAdded", updated)
+			if (visibilityEnabled) {
+				this.emit("onIncomingTransferAdded", updated)
+			}
 		}
 	}
 

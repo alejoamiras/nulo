@@ -215,6 +215,8 @@ incomingTransferService.onConnected.add(loadIncomingTransfers)
 // Visibility settings toggle: reload incoming records when the user flips
 // `incomingTransfersVisible` while this widget is mounted. getIncoming-
 // Transfers returns [] when off, clearing the local array atomically.
+// ServiceClient doesn't auto-connect on listener registration; an
+// explicit connect in onMounted below ensures onUpdate fires.
 const configService = new ConfigServiceClient()
 function onConfigUpdate(prop) {
 	if (prop.key === "incomingTransfersVisible") {
@@ -634,6 +636,15 @@ const handleSelectTerminal = (op) => {
 
 onMounted(async () => {
 	await loadTokens()
+
+	// ServiceClient doesn't auto-connect on listener registration — make
+	// an explicit connect so the onUpdate listener (visibility toggle
+	// reload) fires under runtime config changes.
+	try {
+		await configService.connect()
+	} catch {
+		// Non-fatal; reload-on-toggle just won't fire until next mount.
+	}
 
 	// Newest-first replay — otherwise concurrent tasks could surface the older one.
 	const allTasks = await taskService.getTasks()

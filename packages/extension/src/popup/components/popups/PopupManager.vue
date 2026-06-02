@@ -76,6 +76,36 @@ incomingTransferService.onConnected.add(async () => {
 	}
 })
 
+// ServiceClient doesn't auto-connect on listener registration — registers
+// fire only after `connect()` or the first request. Explicit connect on
+// mount so `onConnected` (replay path) and `onIncomingTransferPending`
+// (live path) are both wired up immediately.
+onMounted(async () => {
+	try {
+		await incomingTransferService.connect()
+	} catch {
+		// Connect is retried on the first method call; non-fatal here.
+	}
+})
+
+// Multi-contract queue: when the user resolves (Allow/Reject) and the
+// trust popup closes, re-trigger `replayPendingPrompts` so the NEXT
+// pending contract surfaces on the same popup session. Without this,
+// the single-slot popup overwrites prior payloads and only the last
+// replayed contract was actionable per reconnect.
+watch(
+	() => popupStore.isOpened("incoming_trust"),
+	async (isOpen, wasOpen) => {
+		if (!wasOpen || isOpen) return
+		if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) return
+		try {
+			await incomingTransferService.replayPendingPrompts(appStore.profile.id, appStore.network.id, appStore.account.address)
+		} catch {
+			// Replay best-effort.
+		}
+	},
+)
+
 onBeforeUnmount(() => {
 	incomingTransferService.disconnect()
 })

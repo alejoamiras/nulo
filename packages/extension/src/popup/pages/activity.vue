@@ -81,6 +81,9 @@ incomingTransferService.onConnected.add(loadIncomingTransfers)
 // incoming rows on screen until the next mount (codex post-impl audit
 // critical). Reload routes through getIncomingTransfers which returns []
 // when the toggle is off, clearing the local array atomically.
+// ServiceClient doesn't auto-connect on listener registration — we
+// explicitly connect on mount so onUpdate fires (codex post-impl
+// followup high — without this, the subscriber is inert).
 const configService = new ConfigServiceClient()
 function onConfigUpdate(prop) {
 	if (prop.key === "incomingTransfersVisible") {
@@ -160,6 +163,14 @@ onMounted(async () => {
 	await loadTerminalJournalOps()
 	await loadTokens()
 	await loadIncomingTransfers()
+	// Trigger an explicit ConfigService connect so the onUpdate listener
+	// receives runtime toggle changes (ServiceClient registers but doesn't
+	// auto-connect).
+	try {
+		await configService.connect()
+	} catch {
+		// Non-fatal; reload-on-toggle just won't fire until next mount.
+	}
 })
 
 onBeforeUnmount(() => {

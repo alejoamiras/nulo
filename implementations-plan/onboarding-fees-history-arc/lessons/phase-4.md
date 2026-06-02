@@ -89,39 +89,24 @@ prompt → Allow/Reject flow.
 
 ## What's deferred (flagged for follow-up)
 
-### Required by the audit but deferred to a follow-up PR
+> **2026-06-02 update:** items 1–3 below LANDED in commit `e1acdfb` +
+> `47e5731` + this commit (the codex post-impl audit follow-up cycle).
+> Only items 4–6 + the alarms refactor below remain as follow-ups.
 
-1. **First-receive friction popup UI.** The state machine, persisted
-   trust enum, and Allow/Reject service methods exist. Missing: a Vue
-   popup component (mirror of `ReceivePopup` / `NewContactPopup`) that
-   subscribes to `onIncomingTransferPending`, presents the contract +
-   amount, and calls `setTrustAllow` / `setTrustReject`. Wiring point:
-   `popup/components/popups/PopupManager.vue`.
-2. **`incomingTransfersVisible` settings toggle.** Per plan §C4 (cross-
-   device same-seed escape hatch). Config field + a settings page row
-   (mirror an existing boolean toggle in `popup/pages/settings/`).
-   Service-level gate: filter `getIncomingTransfers` results when off.
-3. **Cleanup fan-out wiring.** `clearProfile` / `clearChain` methods
-   exist on the service; need to be called from `ProfileService`'s
-   profile-delete path and `NetworkService.purgeChain`. Currently the
-   stores aren't wiped on profile-delete / chain-purge — known data-
-   hygiene gap.
+### Shipped after the initial F2.c commit (post-impl audit follow-ups)
 
-### Production-grade items deferred (not blocking arc)
+1. **First-receive friction popup UI** — `IncomingTrustPopup.vue` (`popup/components/popups/`). PopupManager subscribes to `onIncomingTransferPending`, opens the popup with the contract + amount, wires Allow/Reject to `setTrustAllow` / `setTrustReject`. Multi-contract queue via popupStore watcher: after each resolution, `replayPendingPrompts` surfaces the next pending contract. Explicit `connect()` on mount so the subscribers actually fire (codex re-audit critical).
+2. **`incomingTransfersVisible` settings toggle** — config field + Settings → Appearance row with cross-device-same-seed copy. Service-level gate at both `getIncomingTransfers` (initial load) AND `scanContract` emit-Added (live events) AND `setTrustAllow` emit (Allow flip). UI subscribes to `ConfigService.onUpdate`; reloads on toggle flip to clear/restore already-mounted rows. Both clients explicitly `connect()` on mount.
+3. **Cleanup fan-out wiring** — `IncomingTransferService.init` registers `onProfileDeleted` → `clearProfile` and `registerChainPurgeSubscriber` → `clearChain`. Records + trust state are wiped on profile-delete + chain-purge.
+4. **ProfileService.onActiveProfileChanged subscription** — hydrateSchedulers re-runs on profile switch.
+5. **`sanitizeJournalSubtitle` widened** — RFC 3986 scheme shape `/^[a-z][a-z0-9+.\-]*:\/\//i` covers `chrome-extension://`, `aztec://`, custom schemes. Five new pin cases.
 
-4. **Network e2e for incoming receives.** Two-account same-PXE scenario
-   that asserts (a) A→B transfer surfaces on B's History page, and
-   (b) self-mint via faucet drip does NOT surface as incoming on the
-   sender. Substantial test setup; budget didn't permit this turn.
-5. **Symbol-collision badge.** Defense against a fake-USDC contract
-   minting to an unsuspecting user. Per plan §A10 — secondary defense
-   on top of the per-token known-list gate (first-receive friction is
-   the primary defense once it ships).
-6. **5-minute recent-tx-hash ring buffer.** Belt-and-suspenders dedupe
-   for the proving→submitting race (codex v2-followup C3 / A26). The
-   3-source dedupe today closes the common case; the ring buffer is
-   opportunistic defense for unusual SW + IDB write latency. Trade-off
-   acceptable given correctness anchored on the other 3 sources.
+### Still deferred (out of arc scope; tracked as follow-ups)
+
+6. **`setInterval` → `chrome.alarms` refactor.** MV3 SWs suspend between events; `setInterval` is unreliable. The codebase already uses `chrome.alarms` in `operation-journal/reaper.ts` + `operation-journal/gc.ts` — same pattern applies. Known limitation: incoming receives may not discover while the popup is closed and the SW is suspended; opening the popup re-mounts everything and `startScheduler` kicks one immediate poll, so discovery resumes within milliseconds of the popup opening. Acceptable for v1; alarms refactor is a separate PR.
+7. **Network e2e for incoming receives.** Four tests called out by codex post-impl audit: faucet-drip name regression (in-flight title == settled title), A→B incoming-receive (B sees nothing before resolving trust, Allow surfaces queued row, second receive auto-shows), self-mint dedupe (sender never sees own tx as "Received"), visibility-off escape hatch (toggle off blocks live + initial). Requires `aztecTestConfig` sandbox time not available this session. Logged as a tracked follow-up.
+8. **Symbol-collision badge.** Defense against a fake-USDC contract minting to an unsuspecting user. Per plan §A10 — secondary defense on top of the first-receive friction. The friction popup now ships; the badge is a follow-up.
+9. **5-minute recent-tx-hash ring buffer.** Belt-and-suspenders dedupe for the proving→submitting race (codex v2-followup C3 / A26). The 3-source dedupe today (records + outgoing-tx + in-flight-journal-txHash) + late-delete-on-onTransactionAdded closes the common case; the ring buffer is opportunistic defense for unusual SW + IDB write latency. Acceptable trade-off given correctness anchored on the other 3 sources + the late-delete reconciliation.
 
 ## What broke during impl (and the fix)
 
