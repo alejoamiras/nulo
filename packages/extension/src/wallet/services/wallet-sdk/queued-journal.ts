@@ -27,6 +27,7 @@ import type { DappSessionService } from "@/wallet/services/dapp-session/service"
 import type { NetworkService } from "@/wallet/services/network/service"
 import { parseCaipAccount, resolveNetworkByChainId } from "@/wallet/utils/caip"
 import type { CaipAccount } from "@/wallet/services/dapp-interaction/spec"
+import { pickPrimaryMethod } from "@/utils/primary-method"
 
 /** Per-session queued-record cap. Bounds the activity feed under burst flood. */
 export const MAX_QUEUED_PER_SESSION = 8
@@ -173,6 +174,5 @@ export function extractPrimaryMethodFromSendTx(message: WalletMessage): string |
 	const args = message.args as unknown[] | undefined
 	if (!Array.isArray(args)) return undefined
 	const exec = args[0] as { calls?: Array<{ name?: string }> } | undefined
-	if (!exec?.calls) return undefined
-	return exec.calls.find((c) => typeof c?.name === "string")?.name
+	return pickPrimaryMethod(exec?.calls)
 }

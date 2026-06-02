@@ -4,7 +4,9 @@
  * Uses fake ProfileService + TokenService — no chrome.*, no real PXE, no
  * real Aztec crypto. Exercises: buildTransferOperation happy path per
  * transfer type, wallet-lock throw, unsupported transfer type,
- * processAztecJsPayload action normalization, extractPrimaryMethod shape.
+ * processAztecJsPayload action normalization, extractPrimaryMethod shape
+ * (including the FEE_METHODS-filtered drip regression — see the dedicated
+ * describe block at the bottom).
  */
 
 import { describe, expect, test, vi } from "vitest"
@@ -232,5 +234,83 @@ describe("OperationPlanner.extractPrimaryMethod", () => {
 	test("returns undefined for operation kinds with no primary call", () => {
 		const op = { kind: "register_sender" } as unknown as Operation
 		expect(planner.extractPrimaryMethod(op)).toBeUndefined()
+	})
+})
+
+// FEE_METHODS-filter regression: when the planner's input includes a fee
+// method as the first call (faucet drip wraps the user's drip_to_private
+// behind a wallet-injected sponsor_unconditionally), the in-flight task
+// title MUST be derived from the USER call, not the fee call. Pinned here
+// so a future refactor of the planner or the shared pickPrimaryMethod helper
+// that breaks this contract fails CI before the proving-state card regresses.
+describe("OperationPlanner.extractPrimaryMethod — FEE_METHODS filter (drip regression)", () => {
+	const planner = new OperationPlanner(makeProfile(), makeTokenService(makeToken()))
+
+	test("actions: [sponsor, drip] → drip method (filters fee call)", () => {
+		const op = {
+			kind: "send_transaction",
+			actions: [
+				{ kind: "call", method: "sponsor_unconditionally" },
+				{ kind: "call", method: "drip_to_private" },
+			],
+		} as unknown as SendTransactionOperation
+		expect(planner.extractPrimaryMethod(op)).toBe("drip_to_private")
+	})
+
+	test("actions: [pay_fee, transfer] → transfer method", () => {
+		const op = {
+			kind: "send_transaction",
+			actions: [
+				{ kind: "call", method: "pay_fee" },
+				{ kind: "call", method: "transfer_in_private" },
+			],
+		} as unknown as SendTransactionOperation
+		expect(planner.extractPrimaryMethod(op)).toBe("transfer_in_private")
+	})
+
+	test("encoded_call actions: [sponsor, drip] → drip name", () => {
+		const op = {
+			kind: "send_transaction",
+			actions: [
+				{ kind: "encoded_call", name: "sponsor_unconditionally", selector: "0x01" },
+				{ kind: "encoded_call", name: "drip_to_private", selector: "0x02" },
+			],
+		} as unknown as SendTransactionOperation
+		expect(planner.extractPrimaryMethod(op)).toBe("drip_to_private")
+	})
+
+	test("exec.calls: [sponsor, drip] → drip name", () => {
+		const op = {
+			kind: "aztec_sendTx",
+			exec: {
+				calls: [
+					{ name: "sponsor_unconditionally", selector: "0x01" },
+					{ name: "drip_to_private", selector: "0x02" },
+				],
+			},
+		} as unknown as AztecSendTxOperation
+		expect(planner.extractPrimaryMethod(op)).toBe("drip_to_private")
+	})
+
+	test("preserves mint heuristic — actions: [transfer, mint_to_private] → mint", () => {
+		const op = {
+			kind: "send_transaction",
+			actions: [
+				{ kind: "call", method: "transfer_in_public" },
+				{ kind: "call", method: "mint_to_private" },
+			],
+		} as unknown as SendTransactionOperation
+		expect(planner.extractPrimaryMethod(op)).toBe("mint_to_private")
+	})
+
+	test("(BUG PIN) all-fee-only actions return the first fee method (pre-existing behavior)", () => {
+		const op = {
+			kind: "send_transaction",
+			actions: [
+				{ kind: "call", method: "sponsor_unconditionally" },
+				{ kind: "call", method: "pay_fee" },
+			],
+		} as unknown as SendTransactionOperation
+		expect(planner.extractPrimaryMethod(op)).toBe("sponsor_unconditionally")
 	})
 })
