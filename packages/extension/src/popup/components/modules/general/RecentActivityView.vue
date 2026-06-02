@@ -11,6 +11,7 @@ import TransactionCard from "../activity/TransactionCard.vue"
 import { ExecutionServiceClient } from "@/wallet/services/execution/client"
 import { OperationJournalServiceClient } from "@/wallet/services/operation-journal/client"
 import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
+import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { TaskServiceClient } from "@/wallet/services/task/client"
 import { ContentKind, TaskStatus } from "@/wallet/services/task/spec"
 import { TokenServiceClient } from "@/wallet/services/token/client"
@@ -210,6 +211,17 @@ incomingTransferService.onIncomingTransferAdded.add(onIncomingTransferAdded)
 incomingTransferService.onIncomingTransferUpdated.add(onIncomingTransferUpdated)
 incomingTransferService.onIncomingTransferDeleted.add(onIncomingTransferDeleted)
 incomingTransferService.onConnected.add(loadIncomingTransfers)
+
+// Visibility settings toggle: reload incoming records when the user flips
+// `incomingTransfersVisible` while this widget is mounted. getIncoming-
+// Transfers returns [] when off, clearing the local array atomically.
+const configService = new ConfigServiceClient()
+function onConfigUpdate(prop) {
+	if (prop.key === "incomingTransfersVisible") {
+		loadIncomingTransfers()
+	}
+}
+configService.onUpdate.add(onConfigUpdate)
 
 function incomingCardProps(inc) {
 	const token = inc.tokenId !== undefined ? tokenById(inc.tokenId) : undefined
@@ -649,6 +661,7 @@ onBeforeUnmount(() => {
 	journalService.disconnect()
 	executionService.disconnect()
 	incomingTransferService.disconnect()
+	configService.disconnect()
 })
 </script>
 

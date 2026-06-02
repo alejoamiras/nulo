@@ -33,8 +33,10 @@ import TokenMetadataPopup from "./TokenMetadataPopup.vue"
 import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
 
 /** Store */
+import { useAppStore } from "@/stores/app.store"
 import { useCacheStore } from "@/stores/cache.store.ts"
 import { usePopupStore } from "@/stores/popup.store"
+const appStore = useAppStore()
 const popupStore = usePopupStore()
 const cacheStore = useCacheStore()
 
@@ -60,6 +62,19 @@ function onIncomingTransferPending(payload) {
 	popupStore.open("incoming_trust")
 }
 incomingTransferService.onIncomingTransferPending.add(onIncomingTransferPending)
+
+// Replay pending prompts on (re)connect so a user who closed the popup
+// without resolving doesn't get stranded. The service only emits Pending
+// on the unknown→pending transition (one-shot); without this, subsequent
+// popup loads would silently keep records hidden forever.
+incomingTransferService.onConnected.add(async () => {
+	if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) return
+	try {
+		await incomingTransferService.replayPendingPrompts(appStore.profile.id, appStore.network.id, appStore.account.address)
+	} catch {
+		// Replay is best-effort — a transient port hiccup shouldn't error out.
+	}
+})
 
 onBeforeUnmount(() => {
 	incomingTransferService.disconnect()

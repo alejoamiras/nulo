@@ -57,4 +57,8 @@ export class IncomingTransferServiceClient extends ServiceClient<Methods, Events
 	public clearChain(profileId: string, networkId: string): Promise<void> {
 		return this.request("clearChain", profileId, networkId)
 	}
+
+	public replayPendingPrompts(profileId: string, networkId: string, accountAddress: string): Promise<void> {
+		return this.request("replayPendingPrompts", profileId, networkId, accountAddress)
+	}
 }

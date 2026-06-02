@@ -133,4 +133,9 @@ export type Methods = {
 	/** Clear all records + trust state for a chain (profile-scoped). Called
 	 *  from the chain-purge fanout (mirrors `pxe.clearChainState`). */
 	clearChain(profileId: string, networkId: string): void
+	/** Re-emit `onIncomingTransferPending` for every contract currently in
+	 *  pending trust state. Called by the popup-side `PopupManager` on
+	 *  (re)connect so a user who closed the popup unresolved doesn't get
+	 *  stuck — the next popup load re-prompts. */
+	replayPendingPrompts(profileId: string, networkId: string, accountAddress: string): void
 }

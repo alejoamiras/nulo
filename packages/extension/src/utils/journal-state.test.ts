@@ -304,4 +304,16 @@ describe("sanitizeJournalSubtitle — URL-shape defense", () => {
 	test("string containing http but not prefix → unchanged", () => {
 		expect(sanitizeJournalSubtitle("see https://docs for help")).toBe("see https://docs for help")
 	})
+	test("chrome-extension:// scheme → bracketed (broader-than-http coverage)", () => {
+		expect(sanitizeJournalSubtitle("chrome-extension://abcdef")).toBe("[chrome-extension://abcdef]")
+	})
+	test("aztec:// scheme → bracketed", () => {
+		expect(sanitizeJournalSubtitle("aztec://something")).toBe("[aztec://something]")
+	})
+	test("custom scheme with digits and pluses → bracketed", () => {
+		expect(sanitizeJournalSubtitle("a1b+x://x")).toBe("[a1b+x://x]")
+	})
+	test("scheme without :// → unchanged", () => {
+		expect(sanitizeJournalSubtitle("mailto:abc@example.com")).toBe("mailto:abc@example.com")
+	})
 })

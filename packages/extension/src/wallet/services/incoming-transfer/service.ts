@@ -120,12 +120,31 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		this.tokenService.onTokenAdded.add(this.onTokenAdded)
 		this.tokenService.onTokenDeleted.add(this.onTokenDeleted)
 		this.transactionService.onTransactionAdded.add(this.onTransactionAdded)
+		// Profile lifecycle: re-hydrate the scheduler set when the active
+		// profile changes (otherwise we keep scanning the old profile's
+		// tokens). Wipe stored records when a profile is deleted.
+		this.profileService.onActiveProfileChanged.add(this.onActiveProfileChanged)
+		this.profileService.onProfileDeleted.add(this.onProfileDeleted)
+		// Chain-purge fan-out (mirrors TransactionService.init at line 55):
+		// when a chain is removed, drop our records + trust rows for that
+		// (profile, network) pair.
+		this.networkService.registerChainPurgeSubscriber(async (profileId, _chainId, networkId) => {
+			await this.clearChain(profileId, networkId)
+		})
 
 		// Hydrate schedulers from any tokens already in storage. Without
 		// this, a SW restart would wait for the next onTokenAdded event
 		// before resuming any polling — which never fires for tokens
 		// added in a prior session.
 		await this.hydrateSchedulers()
+	}
+
+	private onActiveProfileChanged = async (): Promise<void> => {
+		await this.hydrateSchedulers()
+	}
+
+	private onProfileDeleted = async (profile: { id: string }): Promise<void> => {
+		await this.clearProfile(profile.id)
 	}
 
 	// --- public surface ---
@@ -381,9 +400,71 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			await this.repo.upsertRecord(record)
 
 			if (trustState === "trusted") {
-				this.emit("onIncomingTransferAdded", record)
+				// Live-event gate: respect the `incomingTransfersVisible`
+				// settings toggle on the EMIT path too. Without this, the
+				// initial-load gate in `getIncomingTransfers` would block
+				// already-mounted pages from showing the row, but live
+				// updates would slip past and surface anyway (codex post-
+				// impl audit critical).
+				if (await this.isVisibilityEnabled()) {
+					this.emit("onIncomingTransferAdded", record)
+				}
 			}
 			// pending / blocked: record persisted hidden, no event emit-Added.
+		}
+	}
+
+	/** Visibility check used by both initial-load (`getIncomingTransfers`)
+	 *  and live-event emit paths. Fails OPEN (returns true) if the config
+	 *  service is unreachable so a transient port hiccup doesn't silently
+	 *  suppress events. */
+	private async isVisibilityEnabled(): Promise<boolean> {
+		try {
+			return (await this.configService.getValue("incomingTransfersVisible")) !== false
+		} catch {
+			return true
+		}
+	}
+
+	/**
+	 * Re-emit `onIncomingTransferPending` for every contract currently in
+	 * `pending` trust state that the caller's account owns hidden records
+	 * for. Called by `PopupManager` on (re)connect so a user who closed the
+	 * popup without resolving doesn't get stuck — the next popup load
+	 * re-prompts. Without this, the service only emits Pending on the
+	 * `unknown → pending` transition, which is a one-shot event that
+	 * vanishes if the popup wasn't open at the time.
+	 */
+	public async replayPendingPrompts(profileId: string, networkId: string, accountAddress: string): Promise<void> {
+		await this.ensureInitialized()
+		const trustRecords = await this.repo.listTrust()
+		const pending = trustRecords.filter((t) => t.profileId === profileId && t.networkId === networkId && t.state === "pending")
+		if (pending.length === 0) return
+		const tokens = await this.tokenService.getTokensRaw(profileId)
+		let network
+		try {
+			network = await this.networkService.getNetwork(networkId)
+		} catch {
+			return
+		}
+		for (const trust of pending) {
+			const scoped = (await this.repo.listByContract(profileId, networkId, trust.contract)).filter(
+				(r) => r.accountAddress === accountAddress,
+			)
+			if (scoped.length === 0) continue
+			const token = tokens.find((t) => t.contract === trust.contract && t.chainId === network.chainId)
+			if (!token) continue
+			const first = scoped[0]
+			this.emit("onIncomingTransferPending", {
+				profileId,
+				networkId,
+				accountAddress,
+				contract: trust.contract,
+				tokenId: token.id,
+				tokenSymbol: token.symbol,
+				tokenDecimals: token.decimals,
+				amountRaw: first.amountRaw,
+			})
 		}
 	}
 

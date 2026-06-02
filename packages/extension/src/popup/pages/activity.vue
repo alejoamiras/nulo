@@ -17,6 +17,7 @@ import { TransactionServiceClient } from "@/wallet/services/transaction/client"
 import { OperationJournalServiceClient } from "@/wallet/services/operation-journal/client"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
+import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Utils */
 import { buildActivityRows } from "@/utils/activity-rows"
@@ -74,6 +75,19 @@ incomingTransferService.onIncomingTransferAdded.add(onIncomingTransferAdded)
 incomingTransferService.onIncomingTransferUpdated.add(onIncomingTransferUpdated)
 incomingTransferService.onIncomingTransferDeleted.add(onIncomingTransferDeleted)
 incomingTransferService.onConnected.add(loadIncomingTransfers)
+
+// React to the visibility settings toggle while the page is mounted.
+// Without this, flipping the toggle off would leave already-loaded
+// incoming rows on screen until the next mount (codex post-impl audit
+// critical). Reload routes through getIncomingTransfers which returns []
+// when the toggle is off, clearing the local array atomically.
+const configService = new ConfigServiceClient()
+function onConfigUpdate(prop) {
+	if (prop.key === "incomingTransfersVisible") {
+		loadIncomingTransfers()
+	}
+}
+configService.onUpdate.add(onConfigUpdate)
 
 /** Journal terminal records (Phase 2 follow-up).
  *  Loaded on mount + refreshed on every journal event so the list reacts to
@@ -153,6 +167,7 @@ onBeforeUnmount(() => {
 	tokenService.disconnect()
 	journalService.disconnect()
 	incomingTransferService.disconnect()
+	configService.disconnect()
 	heroObserver?.disconnect()
 })
 </script>

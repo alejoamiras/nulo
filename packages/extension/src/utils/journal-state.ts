@@ -134,7 +134,11 @@ export function journalTerminalDisplay(op: OperationRecord): JournalTerminalDisp
  */
 export function sanitizeJournalSubtitle(raw: string | undefined | null): string | null {
 	if (!raw) return null
-	if (/^https?:\/\//i.test(raw)) return `[${raw}]`
+	// Match any `<scheme>://` prefix (http, https, chrome-extension, aztec,
+	// arbitrary custom schemes) — the bracket signal is "not a link" at a
+	// glance, not "is an http(s) URL specifically" (codex post-impl audit M1).
+	// RFC 3986 scheme: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ).
+	if (/^[a-z][a-z0-9+.\-]*:\/\//i.test(raw)) return `[${raw}]`
 	return raw
 }
 
