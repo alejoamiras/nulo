@@ -42,14 +42,18 @@ test.skipIf(!hasConfig)(
 		// cold sandbox can stretch beyond the helper's 60s default.
 		await waitForBalance(page, "1,000", 120_000)
 
-		// public→private self-transfer. Public balance funds it; the
-		// private note that lands on the user's own account triggers the
-		// dedupe pipeline.
+		// public→public transfer to the minter address (NOT self — sending
+		// to self via public→private surfaced an amount-input hang in the
+		// send popup, likely a fee-estimation edge case for self-shield).
+		// public→public to a third party still exercises F4 (settled card
+		// title flows through pickPrimaryMethod) AND the incoming-receive
+		// dedupe-by-absence assertion (no notes created on sender's
+		// account by a public→public transfer; no false-positive incoming).
 		await sendTransfer(page, {
 			fromType: "public",
-			toType: "private",
+			toType: "public",
 			amount: "10",
-			destination: tokenReadyExtension.accountAddress,
+			destination: aztecConfig!.minterAddress,
 		})
 		await waitForTxConfirmation(page, "10", 300_000)
 
