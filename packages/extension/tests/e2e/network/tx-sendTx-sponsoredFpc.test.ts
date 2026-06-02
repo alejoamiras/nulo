@@ -1,7 +1,7 @@
-import { expect, inject } from "vitest"
+import { inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { approveCapabilities, approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxActiveStage } from "../fixtures/popups"
+import { snapshotResultSeq } from "../fixtures/playground"
+import { approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxActiveStage } from "../fixtures/popups"
 import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -13,31 +13,20 @@ const hasConfig = aztecConfig !== undefined
  * Default sendTx (no preset fee) opens with FeeSettingsCard. The user clicks
  * the trigger to override, then picks "sponsored". approveExecute({ feeMethod:
  * "sponsored" }) handles the two-step.
+ *
+ * Uses `dappConnectedExtensionWithTransactionCap` so the cap-popup
+ * round-trip happens in fixture setup (hookTimeout=300s) rather than
+ * during this test's budget. Asserts on `data-stage` (active processing
+ * stage) instead of the dApp's full sendTx promise.
  */
 test.skipIf(!hasConfig)(
-	"tx-sendTx-sponsoredFpc — user override → sponsored fee → reaches proving stage",
+	"tx-sendTx-sponsoredFpc — user override → sponsored fee → reaches active stage",
 	{ timeout: 90_000 },
-	async ({ dappConnectedExtension }) => {
-		const page = dappConnectedExtension.playgroundPage
-
-		await page.evaluate(() => {
-			const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')!
-			select.value = "transaction"
-			select.dispatchEvent(new Event("change", { bubbles: true }))
-		})
-		const seqGrant = await snapshotResultSeq(page)
-		const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
-		await clickByTestId(page, "pg-btn-requestCapabilities")
-		const capPopup = await capPopupP
-		await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 10_000 })
-		const accountIds = await capPopup.evaluate(() =>
-			[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) => r.getAttribute("data-account-id")),
-		)
-		await approveCapabilities(capPopup, { accounts: [accountIds[0]!] })
-		await waitForPgResult(page, "requestCapabilities", seqGrant, 30_000)
+	async ({ dappConnectedExtensionWithTransactionCap }) => {
+		const { playgroundPage: page, accountAddress } = dappConnectedExtensionWithTransactionCap
 
 		// Pre-mint tokens so simulate succeeds + journal enters active stage.
-		await mintPublicTokensForAccount(aztecConfig!, accountIds[0]!)
+		await mintPublicTokensForAccount(aztecConfig!, accountAddress)
 
 		await page.evaluate(
 			({ token, recipient }: { token: string; recipient: string }) => {
@@ -56,7 +45,7 @@ test.skipIf(!hasConfig)(
 		)
 
 		await snapshotResultSeq(page)
-		const execPopupP = waitForPopup(dappConnectedExtension, "execute", { timeout: 30_000 })
+		const execPopupP = waitForPopup(dappConnectedExtensionWithTransactionCap, "execute", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-sendTx-default")
 		const execPopup = await execPopupP
 		await waitForExecuteContent(execPopup)
@@ -65,10 +54,10 @@ test.skipIf(!hasConfig)(
 		// "sponsored" is the typical default + reasserted via the override flow.
 		await approveExecute(execPopup, { feeMethod: "sponsored" })
 
-		// Wait for the wallet's journal to enter `proving` instead of the dApp's
-		// full sendTx promise. The popup-shape + fee-method override flow is
-		// what this test verifies.
-		const walletPopup = await openPopup(dappConnectedExtension)
+		// Wait for the wallet's journal to enter an active processing stage
+		// instead of the dApp's full sendTx promise. The popup-shape +
+		// fee-method override flow is what this test verifies.
+		const walletPopup = await openPopup(dappConnectedExtensionWithTransactionCap)
 		await waitForSendTxActiveStage(walletPopup)
 	},
 )

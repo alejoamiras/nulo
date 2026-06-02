@@ -327,9 +327,9 @@ export async function getCapItems(page: Page): Promise<Array<{ id: string; grant
 }
 
 /**
- * Wait for the wallet's journal-driven `tx-awaiting-card` to reach any
- * active processing stage (simulating, proving, or submitting — i.e. past
- * pending/queued). The card is rendered by `TransactionAwaitingCard.vue`
+ * Wait for the wallet's journal-driven `tx-awaiting-card` to reach one of
+ * the three active processing stages: `simulating`, `proving`, or
+ * `submitting`. The card is rendered by `TransactionAwaitingCard.vue`
  * and exposes its current stage via `data-stage` (added in
  * implementations-plan/journal-stage-restructure/plan.md Phase A).
  *
@@ -343,6 +343,7 @@ export async function getCapItems(page: Page): Promise<Array<{ id: string; grant
  * Reaching an active stage validates that the wallet:
  *   1. Received the dApp's request (entered journal as `pending`)
  *   2. Advanced past `pending`/`queued` into actual work
+ *   3. Has not (yet) reached a terminal state (`succeeded|failed|cancelled`).
  *
  * Which is what popup-shape tests want to verify. It does NOT validate
  * that prove COMPLETES or that the tx broadcasts — those are covered by
@@ -353,14 +354,19 @@ export async function getCapItems(page: Page): Promise<Array<{ id: string; grant
  * hardware the wallet spends most of its wall-time in `simulating` (the
  * "proving is the long-lived stage" claim is true ONLY under accelerator's
  * chonk path). A `proving`-only selector races and false-fails on local
- * WASM. The broader "any active stage" matcher catches the wallet
- * reliably regardless of which stage it lingers in.
+ * WASM. The broader "simulating|proving|submitting" matcher catches the
+ * wallet reliably regardless of which stage it lingers in.
+ *
+ * The selector is an EXPLICIT ALLOWLIST of the three non-terminal active
+ * stages — not a `:not(pending):not(queued)` negation that would
+ * accidentally match terminal states if the UI ever kept awaiting cards
+ * mounted through `failed`/`cancelled`/`succeeded`. RecentActivityView
+ * currently unmounts on `terminalAt`, but the helper contract should not
+ * silently depend on that invariant (codex post-impl finding #3).
  *
  * Intentionally NOT a generic `waitForJournalStage(walletPopup, stage)`
  * helper: codex audit defensive design. Future tests wanting a specific
  * stage must add a new named helper, which is visible in PR review.
- * An adversarial weakening to include `pending`/`queued` would require
- * editing the `:not(...)` filter inline — loud in diff.
  *
  * Default timeout: 30s. The transition from pending to simulating is
  * fast (<5s typical even on slow hardware); 30s absorbs popup-mount
@@ -368,11 +374,8 @@ export async function getCapItems(page: Page): Promise<Array<{ id: string; grant
  */
 export async function waitForSendTxActiveStage(walletPopup: Page, options: { timeout?: number } = {}): Promise<void> {
 	const { timeout = 30_000 } = options
-	// CSS attribute-chained `:not(...)` excludes pending/queued. Vue omits
-	// the `data-stage` attribute entirely when the prop is null/undefined,
-	// so the bare `[data-stage]` predicate filters those out implicitly.
 	await walletPopup.waitForSelector(
-		`[data-testid="tx-awaiting-card"][data-stage]:not([data-stage="pending"]):not([data-stage="queued"])`,
+		'[data-testid="tx-awaiting-card"][data-stage="simulating"], [data-testid="tx-awaiting-card"][data-stage="proving"], [data-testid="tx-awaiting-card"][data-stage="submitting"]',
 		{ timeout },
 	)
 }

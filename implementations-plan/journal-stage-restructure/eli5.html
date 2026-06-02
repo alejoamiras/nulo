@@ -115,16 +115,18 @@ pending  →  queued  →  simulating  →  proving  →  submitting  →  succe
 
 <p>The Vue component already has a <code>stage</code> prop — we're literally just plumbing one extra value through to the DOM. Five lines of code in the wallet UI.</p>
 
+<p><em>Note: the final implementation broadened from "wait for proving" to "wait for any active processing stage" (<code>simulating</code>, <code>proving</code>, or <code>submitting</code>) because on local WASM the wallet spends most of its time in <code>simulating</code> — a <code>proving</code>-only matcher raced the test's 200ms poll. The codex post-impl audit then tightened the matcher from "anything not pending/queued" to an explicit allowlist of those three stages so terminal results (failed, cancelled, succeeded) never silently match. The helper is <code>waitForSendTxActiveStage</code>.</em></p>
+
 <h2>The plan, phase by phase</h2>
 
 <h3>Phase A — Add the <code>data-stage</code> attribute</h3>
 <p>Edit two Vue files: <code>TransactionCardLayout.vue</code> (adds the attribute binding on the root element) and <code>TransactionAwaitingCard.vue</code> (passes its existing <code>stage</code> prop through to the layout). Add unit tests in two test files: one for the contract (the actual binding) and one for the wiring (the prop pass-through).</p>
 
 <h3>Phase B — New test helper</h3>
-<p>Add <code>waitForSendTxProvingStage(walletPopup)</code> — a one-purpose function that waits for the wallet's tx-awaiting-card to reach stage "proving". Deliberately narrow: a future PR can't quietly weaken this to "wait for stage 'pending'" by changing one string parameter; they'd have to rename the function, which is loud in PR diffs.</p>
+<p>Add <code>waitForSendTxActiveStage(walletPopup)</code> — a one-purpose function that waits for the wallet's tx-awaiting-card to reach any of three active stages (<code>simulating</code>, <code>proving</code>, <code>submitting</code>). Deliberately narrow: a future PR can't quietly weaken this to "wait for stage 'pending'" by changing one string parameter; they'd have to rename the function, which is loud in PR diffs.</p>
 
 <h3>Phase C — Restructure the 3 quarantined tests</h3>
-<p>Edit <code>tx-sendTx-default.test.ts</code>, <code>multi-account-from.test.ts</code>, and <code>tx-sendTx-multicall.test.ts</code>. Replace "wait for dApp's full sendTx promise" with "open wallet popup, wait for stage = proving." Remove the quarantine gate that's been hiding these from CI.</p>
+<p>Edit <code>tx-sendTx-default.test.ts</code>, <code>multi-account-from.test.ts</code>, and <code>tx-sendTx-multicall.test.ts</code>. Replace "wait for dApp's full sendTx promise" with "open wallet popup, wait for any active stage." Remove the quarantine gate that's been hiding these from CI.</p>
 
 <h3>Phase D — Restructure 3 more tests with the same pattern</h3>
 <p>The opportunistic ones: <code>tx-sendTx-noFrom.test.ts</code>, <code>tx-sendTx-feePayer.test.ts</code>, <code>tx-sendTx-sponsoredFpc.test.ts</code>. Currently passing on CI, but exhibit the same pattern. Restructure for consistency (and as a buffer against future slow-runner-pool flake).</p>

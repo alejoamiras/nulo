@@ -1,5 +1,6 @@
-<script setup>
-import { Comment } from "vue"
+<script setup lang="ts">
+import { Comment, type PropType } from "vue"
+import type { JobStage } from "@nulo/wallet-core/jobs"
 /**
  * Shared presentational layout for activity cards. Both
  * `TransactionAwaitingCard` (in-flight, TaskService / journal-driven) and
@@ -57,7 +58,7 @@ defineProps({
 	txTransferTypeLabel: { type: String, default: undefined },
 	txStatus: { type: String, default: undefined },
 	txHash: { type: String, default: undefined },
-	stage: { type: String, default: undefined },
+	stage: { type: String as PropType<JobStage | null>, default: null },
 })
 
 /**

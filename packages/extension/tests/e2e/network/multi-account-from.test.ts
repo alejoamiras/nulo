@@ -8,34 +8,44 @@ const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
 
 /**
- * Test #39 — characterization: multi-account session, sendTx ignores
- * dApp's `opts.from` and uses the first session account.
+ * Test #39 — multi-account session: sendTx settles via the first session
+ * account when granted up to 2 accounts.
  *
- * dispatcher.ts:769 + :335 always pick the first match from
- * resolveNetworkAndAccount and overwrite `opts.from`. The dApp's choice is
- * silently ignored. This test pins that current behavior — if/when fixed,
- * the assertion flips.
+ * KNOWN LIMITATION (codex post-impl finding #1): this test does NOT exercise
+ * the "wallet ignores opts.from" claim end-to-end. The playground's
+ * `pg-btn-sendTx-default` reads `opts.from = state.selectedAccount`, and
+ * `requestCapabilities()` sets `selectedAccount = granted[0]`. So
+ * `opts.from === accountAddresses[0]` regardless of how many accounts the
+ * fixture grants — the wallet's "always pick the first" matches the dApp's
+ * choice by construction. To genuinely characterize the
+ * `dispatcher.ts:769 + :335` overwrite, the playground needs a hook to set
+ * `selectedAccount = accountAddresses[1]` before the click; tracked as a
+ * follow-up (the playground change is small but lives outside this PR).
+ *
+ * What this test currently pins:
+ *   - The cap popup successfully grants up to 2 accounts.
+ *   - sendTx with the first granted account reaches an active journal stage.
+ *   - The execute popup shows a non-empty `from` address.
  *
  * Uses `dappConnectedExtensionWithFirstTwoAccountsCap` so the cap-popup
  * round-trip (which grants up to 2 accounts) happens during fixture
- * setup (hookTimeout=300s) instead of during the test budget. Mirrors the
- * single-account fixture (PR #64) but tolerates 1-or-2 accounts depending
- * on what the wallet exposed — the characterization holds either way.
+ * setup (hookTimeout=300s) instead of during the test budget. Tolerates
+ * 1-or-2 accounts depending on what the wallet exposed.
  *
- * Asserts on `data-stage="proving"` (wallet popup) instead of the dApp's
- * full sendTx promise. See implementations-plan/journal-stage-restructure/.
+ * Asserts on `data-stage` (active stage) instead of the dApp's full
+ * sendTx promise. See implementations-plan/journal-stage-restructure/.
  */
 test.skipIf(!hasConfig)(
-	"multi-account-from — handleSendTx picks first session account regardless of opts.from",
+	"multi-account-from — sendTx via first session account reaches active stage",
 	{ timeout: 90_000 },
 	async ({ dappConnectedExtensionWithFirstTwoAccountsCap }) => {
 		const { playgroundPage: page, accountAddresses } = dappConnectedExtensionWithFirstTwoAccountsCap
 
-		// Pre-mint to BOTH session accounts so simulate succeeds regardless of
-		// which one the wallet picks (characterization: it always picks the first).
-		for (const addr of accountAddresses) {
-			await mintPublicTokensForAccount(aztecConfig!, addr)
-		}
+		// Pre-mint to the first session account only. The playground always uses
+		// `selectedAccount` (= the first granted account) as `opts.from`, so the
+		// second mint would be dead work until the test grows a real second-account
+		// override hook (see docstring).
+		await mintPublicTokensForAccount(aztecConfig!, accountAddresses[0]!)
 
 		await page.evaluate(
 			({ token, recipient }: { token: string; recipient: string }) => {
@@ -59,10 +69,9 @@ test.skipIf(!hasConfig)(
 		const execPopup = await execPopupP
 		await waitForExecuteContent(execPopup)
 
-		// Check the from-account on the op card via the new testid (D2: added in
-		// canonical refactor). Read data-account-address; characterization says
-		// the popup shows the FIRST session account regardless of which account
-		// the dApp set in opts.from.
+		// Read the from-account on the op card (testid added in canonical refactor).
+		// Just verifies the popup renders a from-account — the equivalence to
+		// accountAddresses[0] is incidental given the playground wiring.
 		const fromAddress = await execPopup.evaluate(
 			() => document.querySelector('[data-testid="execute-op-from-account"]')?.getAttribute("data-account-address") ?? "",
 		)
@@ -70,8 +79,8 @@ test.skipIf(!hasConfig)(
 
 		await approveExecute(execPopup)
 
-		// Wait for the wallet's journal to enter `proving` instead of the dApp's
-		// full sendTx promise.
+		// Wait for the wallet's journal to enter an active processing stage
+		// instead of the dApp's full sendTx promise.
 		const walletPopup = await openPopup(dappConnectedExtensionWithFirstTwoAccountsCap)
 		await waitForSendTxActiveStage(walletPopup)
 	},

@@ -61,13 +61,22 @@ describe("composite/TransactionAwaitingCard", () => {
 		expect(w.find("[data-testid='tx-awaiting-card']").exists()).toBe(true)
 	})
 
-	test("forwards the stage prop to the underlying layout (e2e selector contract)", () => {
-		// E2E tests wait for `[data-testid="tx-awaiting-card"][data-stage="proving"]`
-		// via waitForSendTxProvingStage. Contract: this card threads its `stage`
-		// prop through to TransactionCardLayout, which renders it as `data-stage`
-		// on the root (real binding tested in TransactionCardLayout.test.ts).
-		const w = mountCard({ stage: "proving" })
-		expect(w.find("[data-testid='tx-awaiting-card']").attributes("data-stage")).toBe("proving")
+	test("forwards every JobStage literal through to the layout (e2e selector contract)", () => {
+		// E2E tests select on `[data-testid="tx-awaiting-card"][data-stage=...]`
+		// via waitForSendTxActiveStage (matches simulating|proving|submitting).
+		// Contract: this card threads each `stage` literal through to
+		// TransactionCardLayout verbatim. Canonical type:
+		// packages/wallet-core/src/jobs/types.ts JobStage.
+		const stages = ["pending", "queued", "simulating", "proving", "submitting", "succeeded", "failed", "cancelled"]
+		for (const s of stages) {
+			const w = mountCard({ stage: s })
+			expect(w.find("[data-testid='tx-awaiting-card']").attributes("data-stage")).toBe(s)
+		}
+	})
+
+	test("data-stage is omitted when stage prop is null/default (no in-flight journal binding)", () => {
+		const w = mountCard()
+		expect(w.find("[data-testid='tx-awaiting-card']").attributes("data-stage")).toBeUndefined()
 	})
 
 	test("forwards amount + amountSymbol props to the layout", () => {

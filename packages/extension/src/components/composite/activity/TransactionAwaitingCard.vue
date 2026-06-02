@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 /**
  * In-flight phase of an activity card. Wraps `TransactionCardLayout` so its
  * field positions stay byte-identical with `TransactionCard` (the settled
@@ -13,6 +13,8 @@
  * at that point — removing the affordance is structurally honest (better than
  * a silent no-op click).
  */
+import type { PropType } from "vue"
+import type { JobStage } from "@nulo/wallet-core/jobs"
 import TransactionCardLayout from "./TransactionCardLayout.vue"
 
 defineProps({
@@ -45,8 +47,10 @@ defineProps({
 	jobId: { type: String, default: null },
 	/** Current journal stage. When `"submitting"`, the Cancel button is
 	 *  hidden — the FSM forbids `submitting → cancelled` and the SW would
-	 *  silently drop the signal. Removing the affordance is the cleaner UX. */
-	stage: { type: String, default: null },
+	 *  silently drop the signal. Removing the affordance is the cleaner UX.
+	 *  Typed via `JobStage` so e2e selectors that key off `data-stage` can
+	 *  rely on the literal set defined in `@nulo/wallet-core/jobs`. */
+	stage: { type: String as PropType<JobStage | null>, default: null },
 })
 
 const emit = defineEmits(["cancel"])

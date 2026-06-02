@@ -1,7 +1,7 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { approveCapabilities, approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
+import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -12,6 +12,9 @@ const hasConfig = aztecConfig !== undefined
  * instead of the account contract. dispatcher.ts:82-88,334-348 sets
  * executionMode: "default_entrypoint", which makes the popup show the
  * "fee set by app" badge (no fee picker; embedded paymentMethod).
+ *
+ * Uses `dappConnectedExtensionWithTransactionCap` so the cap-popup
+ * round-trip happens in fixture setup (hookTimeout=300s).
  *
  * Unlike the other restructured sendTx tests, this one does NOT wait on a
  * journal stage. The playground's `pg-btn-sendTx-noFrom` calls
@@ -28,24 +31,8 @@ const hasConfig = aztecConfig !== undefined
 test.skipIf(!hasConfig)(
 	"tx-sendTx-noFrom — popup shows fee-set badge, no fee picker",
 	{ timeout: 60_000 },
-	async ({ dappConnectedExtension }) => {
-		const page = dappConnectedExtension.playgroundPage
-
-		await page.evaluate(() => {
-			const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')!
-			select.value = "transaction"
-			select.dispatchEvent(new Event("change", { bubbles: true }))
-		})
-		const seqGrant = await snapshotResultSeq(page)
-		const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
-		await clickByTestId(page, "pg-btn-requestCapabilities")
-		const capPopup = await capPopupP
-		await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 10_000 })
-		const accountIds = await capPopup.evaluate(() =>
-			[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) => r.getAttribute("data-account-id")),
-		)
-		await approveCapabilities(capPopup, { accounts: [accountIds[0]!] })
-		await waitForPgResult(page, "requestCapabilities", seqGrant, 30_000)
+	async ({ dappConnectedExtensionWithTransactionCap }) => {
+		const page = dappConnectedExtensionWithTransactionCap.playgroundPage
 
 		await page.evaluate(
 			({ token, recipient }: { token: string; recipient: string }) => {
@@ -64,7 +51,7 @@ test.skipIf(!hasConfig)(
 		)
 
 		const seqTx = await snapshotResultSeq(page)
-		const execPopupP = waitForPopup(dappConnectedExtension, "execute", { timeout: 30_000 })
+		const execPopupP = waitForPopup(dappConnectedExtensionWithTransactionCap, "execute", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-sendTx-noFrom")
 		const execPopup = await execPopupP
 		await waitForExecuteContent(execPopup)
