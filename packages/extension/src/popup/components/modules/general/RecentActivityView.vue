@@ -2,6 +2,7 @@
 /** Components */
 import TransactionAwaitingCard from "@/components/composite/activity/TransactionAwaitingCard.vue"
 import TransactionTerminalCard from "@/components/composite/activity/TransactionTerminalCard.vue"
+import TransactionIncomingCard from "@/components/composite/activity/TransactionIncomingCard.vue"
 import TransactionCard from "../activity/TransactionCard.vue"
 
 /** Vendor */
@@ -9,6 +10,7 @@ import TransactionCard from "../activity/TransactionCard.vue"
 /** Services */
 import { ExecutionServiceClient } from "@/wallet/services/execution/client"
 import { OperationJournalServiceClient } from "@/wallet/services/operation-journal/client"
+import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
 import { TaskServiceClient } from "@/wallet/services/task/client"
 import { ContentKind, TaskStatus } from "@/wallet/services/task/spec"
 import { TokenServiceClient } from "@/wallet/services/token/client"
@@ -92,6 +94,12 @@ const recentActivityRows = computed(() => {
 	for (const tx of filteredRecentTransactions.value) {
 		rows.push({ type: "tx", key: `tx:${tx.hash}`, sortKey: tx.updatedAt, tx })
 	}
+	for (const inc of incomingTransfers.value) {
+		// Token-scoped views (token-detail page) only show incoming for the
+		// active token. The home view shows all.
+		if (props.token && inc.tokenId !== props.token.id) continue
+		rows.push({ type: "incoming", key: `incoming:${inc.siloedNullifier}`, sortKey: inc.discoveredAt, inc })
+	}
 	rows.sort((a, b) => b.sortKey - a.sortKey)
 	return rows.slice(0, remaining)
 })
@@ -171,6 +179,50 @@ taskService.onTaskDeleted.add(onExecutingTaskDeleted)
  *  off automatically. */
 const journalService = new OperationJournalServiceClient()
 const journalOps = ref([])
+
+/** Third source for the activity-row merge: incoming-receive records from
+ *  trusted fungible-token contracts. Filtered at the service layer
+ *  (hidden=false only); the merge below adds them to recentActivityRows. */
+const incomingTransferService = new IncomingTransferServiceClient()
+const incomingTransfers = ref([])
+
+async function loadIncomingTransfers() {
+	if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) return
+	incomingTransfers.value = await incomingTransferService.getIncomingTransfers(
+		appStore.profile.id,
+		appStore.network.id,
+		appStore.account.address,
+	)
+}
+function onIncomingTransferAdded(inc) {
+	const idx = incomingTransfers.value.findIndex((x) => x.siloedNullifier === inc.siloedNullifier)
+	if (idx === -1) incomingTransfers.value = [inc, ...incomingTransfers.value]
+	else incomingTransfers.value[idx] = inc
+}
+function onIncomingTransferUpdated(inc) {
+	const idx = incomingTransfers.value.findIndex((x) => x.siloedNullifier === inc.siloedNullifier)
+	if (idx !== -1) incomingTransfers.value[idx] = inc
+}
+function onIncomingTransferDeleted(inc) {
+	incomingTransfers.value = incomingTransfers.value.filter((x) => x.siloedNullifier !== inc.siloedNullifier)
+}
+incomingTransferService.onIncomingTransferAdded.add(onIncomingTransferAdded)
+incomingTransferService.onIncomingTransferUpdated.add(onIncomingTransferUpdated)
+incomingTransferService.onIncomingTransferDeleted.add(onIncomingTransferDeleted)
+incomingTransferService.onConnected.add(loadIncomingTransfers)
+
+function incomingCardProps(inc) {
+	const token = inc.tokenId !== undefined ? tokenById(inc.tokenId) : undefined
+	return {
+		tokenSymbol: token?.symbol || "Token",
+		amountRaw: inc.amountRaw,
+		tokenDecimals: token?.decimals || 0,
+		txHash: inc.txHash,
+	}
+}
+function handleSelectIncoming(inc) {
+	if (inc.tokenId !== undefined) router.push(`/popup/tokens/${inc.tokenId}`)
+}
 
 /** Phase 2 follow-up: execution-service client for Cancel surface.
  *  Disconnected in onBeforeUnmount alongside the others. */
@@ -596,6 +648,7 @@ onBeforeUnmount(() => {
 	tokenService.disconnect()
 	journalService.disconnect()
 	executionService.disconnect()
+	incomingTransferService.disconnect()
 })
 </script>
 
@@ -649,12 +702,17 @@ onBeforeUnmount(() => {
 			<!-- Chronological merge of terminal journal records + settled chain
 			     txs. Branch by row.type. -->
 			<template v-for="row in recentActivityRows" :key="row.key">
+				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
+				<TransactionIncomingCard
+					v-else-if="row.type === 'incoming'"
+					v-bind="incomingCardProps(row.inc)"
+					@click="handleSelectIncoming(row.inc)"
+				/>
 				<TransactionTerminalCard
-					v-if="row.type === 'journal' && journalTerminalCardProps(row.op)"
+					v-else-if="row.type === 'journal' && journalTerminalCardProps(row.op)"
 					v-bind="journalTerminalCardProps(row.op)"
 					@click="handleSelectTerminal(row.op)"
 				/>
-				<TransactionCard v-else-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
 			</template>
 		</div>
 	</Flex>
@@ -695,12 +753,17 @@ onBeforeUnmount(() => {
 			/>
 			<TransactionAwaitingCard v-else-if="!renderedInFlightOps.length && awaitingAccountTxs.length" />
 			<template v-for="row in recentActivityRows" :key="row.key">
+				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
+				<TransactionIncomingCard
+					v-else-if="row.type === 'incoming'"
+					v-bind="incomingCardProps(row.inc)"
+					@click="handleSelectIncoming(row.inc)"
+				/>
 				<TransactionTerminalCard
-					v-if="row.type === 'journal' && journalTerminalCardProps(row.op)"
+					v-else-if="row.type === 'journal' && journalTerminalCardProps(row.op)"
 					v-bind="journalTerminalCardProps(row.op)"
 					@click="handleSelectTerminal(row.op)"
 				/>
-				<TransactionCard v-else-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
 			</template>
 		</div>
 	</Flex>
