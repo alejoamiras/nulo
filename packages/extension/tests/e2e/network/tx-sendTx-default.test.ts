@@ -28,7 +28,7 @@ const hasConfig = aztecConfig !== undefined
  * implementations-plan/journal-stage-restructure/plan.md.
  */
 test.skipIf(!hasConfig)(
-	"tx-sendTx-default — popup opens, fee picker shown, confirm reaches journal proving stage",
+	"tx-sendTx-default — popup opens, fee picker shown, confirm reaches journal active stage",
 	{ timeout: 60_000 },
 	async ({ dappConnectedExtensionWithTransactionCap }) => {
 		const { playgroundPage: page, accountAddress } = dappConnectedExtensionWithTransactionCap
