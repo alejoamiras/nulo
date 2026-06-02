@@ -562,6 +562,12 @@ const handleSelectTx = (tx) => {
 	router.push(`/popup/tx/${tx.hash}`)
 }
 
+// Terminal journal rows (cancelled / interrupted / failed pre-broadcast)
+// have no chain tx hash. Route to the dedicated journal detail page.
+const handleSelectTerminal = (op) => {
+	router.push(`/popup/journal/${op.id}`)
+}
+
 onMounted(async () => {
 	await loadTokens()
 
@@ -646,6 +652,7 @@ onBeforeUnmount(() => {
 				<TransactionTerminalCard
 					v-if="row.type === 'journal' && journalTerminalCardProps(row.op)"
 					v-bind="journalTerminalCardProps(row.op)"
+					@click="handleSelectTerminal(row.op)"
 				/>
 				<TransactionCard v-else-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
 			</template>
@@ -691,6 +698,7 @@ onBeforeUnmount(() => {
 				<TransactionTerminalCard
 					v-if="row.type === 'journal' && journalTerminalCardProps(row.op)"
 					v-bind="journalTerminalCardProps(row.op)"
+					@click="handleSelectTerminal(row.op)"
 				/>
 				<TransactionCard v-else-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
 			</template>

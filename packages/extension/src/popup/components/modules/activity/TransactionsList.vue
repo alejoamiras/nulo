@@ -48,10 +48,18 @@ const groupedRows = computed(() => {
 	return Array.from(groups, ([date, rows]) => ({ date, rows }))
 })
 
-const handleSelectTx = (row) => {
-	// Only "tx" rows are navigable; journal terminal rows have no detail page yet.
-	if (row.type !== "tx") return
-	router.push(`/popup/tx/${row.tx.hash}`)
+const handleSelectRow = (row) => {
+	// Two detail pages: tx/:hash for rows backed by an on-chain tx,
+	// journal/:id for terminal journal records (cancelled / interrupted /
+	// failed pre-broadcast — no chain tx exists). Earlier phases gated
+	// journal rows as non-navigable; F3 ships the journal detail surface.
+	if (row.type === "tx") {
+		router.push(`/popup/tx/${row.tx.hash}`)
+		return
+	}
+	if (row.type === "journal") {
+		router.push(`/popup/journal/${row.op.id}`)
+	}
 }
 
 /** Map a journal record row → TransactionTerminalCard props via the shared
@@ -73,8 +81,12 @@ function terminalCardProps(op) {
 
 			<!-- Rows for this date — branch on type. -->
 			<template v-for="row in group.rows" :key="row.key">
-				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row)" />
-				<TransactionTerminalCard v-else-if="terminalCardProps(row.op)" v-bind="terminalCardProps(row.op)" />
+				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectRow(row)" />
+				<TransactionTerminalCard
+					v-else-if="terminalCardProps(row.op)"
+					v-bind="terminalCardProps(row.op)"
+					@click="handleSelectRow(row)"
+				/>
 			</template>
 		</Flex>
 	</Flex>

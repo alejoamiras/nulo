@@ -121,6 +121,23 @@ export function journalTerminalDisplay(op: OperationRecord): JournalTerminalDisp
 	return { state: "failed", subtitle, icon: ICONS.failed, color: "red" }
 }
 
+/**
+ * Render a journal-record `subtitle` (dApp-controlled at session-discover time)
+ * as defensive plain text. A malicious dApp could set its origin/subtitle to
+ * something that LOOKS like an http(s) URL — if we ever rendered it as an
+ * anchor or even just bare text in a context the user reads top-down, it could
+ * mislead. Bracket any URL-shaped value so the UI signals "not a link" at a
+ * glance. Returns null on null/undefined/empty input.
+ *
+ * Pure helper to keep the regression pin testable without mounting Vue.
+ * Consumed by `journal/[id].vue`.
+ */
+export function sanitizeJournalSubtitle(raw: string | undefined | null): string | null {
+	if (!raw) return null
+	if (/^https?:\/\//i.test(raw)) return `[${raw}]`
+	return raw
+}
+
 /** Subtitle copy per documented `JobError.kind` + live execution catch-alls. */
 function failedSubtitleFor(kind: string): string {
 	switch (kind) {

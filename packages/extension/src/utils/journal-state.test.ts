@@ -9,7 +9,7 @@
 
 import { describe, expect, test } from "vitest"
 import type { OperationKind, OperationRecord } from "@/wallet/services/operation-journal/spec"
-import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisplay } from "./journal-state"
+import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisplay, sanitizeJournalSubtitle } from "./journal-state"
 
 function recordWith(overrides: Partial<OperationRecord> = {}): OperationRecord {
 	return {
@@ -273,5 +273,35 @@ describe("buildJournalTerminalCardProps", () => {
 			TEST_CTX,
 		)
 		expect(props).toBeNull()
+	})
+})
+
+// dApp-controlled `subtitle` is the origin/name stored at session-discover
+// time. The journal detail page renders it; if a malicious dApp set its
+// origin to an http(s) URL string, the bare value could be visually
+// confusable with a link. `sanitizeJournalSubtitle` brackets URL-shaped
+// values so the UI can render the text plainly without it reading as
+// "tap to open."
+describe("sanitizeJournalSubtitle — URL-shape defense", () => {
+	test("null / undefined / empty → null", () => {
+		expect(sanitizeJournalSubtitle(null)).toBeNull()
+		expect(sanitizeJournalSubtitle(undefined)).toBeNull()
+		expect(sanitizeJournalSubtitle("")).toBeNull()
+	})
+	test("plain dApp name → returned verbatim", () => {
+		expect(sanitizeJournalSubtitle("uniswap.example")).toBe("uniswap.example")
+		expect(sanitizeJournalSubtitle("My DApp")).toBe("My DApp")
+	})
+	test("https URL → bracketed", () => {
+		expect(sanitizeJournalSubtitle("https://evil.com/?steal=secret")).toBe("[https://evil.com/?steal=secret]")
+	})
+	test("http URL → bracketed", () => {
+		expect(sanitizeJournalSubtitle("http://localhost:3000/app")).toBe("[http://localhost:3000/app]")
+	})
+	test("case-insensitive URL match", () => {
+		expect(sanitizeJournalSubtitle("HTTPS://EVIL.COM")).toBe("[HTTPS://EVIL.COM]")
+	})
+	test("string containing http but not prefix → unchanged", () => {
+		expect(sanitizeJournalSubtitle("see https://docs for help")).toBe("see https://docs for help")
 	})
 })
