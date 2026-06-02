@@ -1,0 +1,446 @@
+import type { ILogger } from "@/wallet/logger"
+import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
+import { Service } from "@nulo/extension-messaging/background"
+import { EventHandler, getErrorMessage } from "@nulo/wallet-core/utils"
+import { ProfileService } from "@/wallet/services/profile/service"
+import { NetworkService, type Network } from "@/wallet/services/network/service"
+import { AccountService } from "@/wallet/services/account/service"
+import { TokenService, type Token, type TokenInfo } from "@/wallet/services/token/service"
+import { TransactionService, type Tx } from "@/wallet/services/transaction/service"
+import { OperationJournalService } from "@/wallet/services/operation-journal/service"
+import { NoteService, type RawNote } from "@/wallet/services/note/service"
+import { IncomingTransferRepository } from "./repository"
+import {
+	INCOMING_TRANSFER_SERVICE_NAME,
+	type Events,
+	type IncomingTransferPending,
+	type IncomingTransferRecord,
+	type IncomingTrustRecord,
+	type IncomingTrustState,
+	type Methods,
+} from "./spec"
+
+export * from "./spec"
+
+/** Default poll cadence per (networkId, accountAddress) scheduler. Start
+ *  conservative (30s); a future PR can tune based on SW restart frequency
+ *  + PXE sync cadence. */
+const DEFAULT_POLL_INTERVAL_MS = 30_000
+
+/**
+ * IncomingTransferService — surfaces decrypted notes that arrived from known
+ * fungible-token contracts as "Received" rows in the activity feed.
+ *
+ * Dependencies (declared via `dependencies`):
+ *   - ProfileService — active profile context for record scoping
+ *   - NetworkService — resolve networks by id / chainId
+ *   - AccountService — currently-active account address
+ *   - TokenService — watched-contract list; lifecycle events
+ *   - TransactionService — outgoing tx hashes (dedupe source)
+ *   - OperationJournalService — in-flight `progress.txHash` (dedupe source)
+ *   - NoteService — `getNotesRaw` for the raw NoteDao fields
+ *
+ * Discovery loop:
+ *   ONE singleflight scheduler per (networkId, accountAddress). Each tick
+ *   iterates the registered contract list and calls
+ *   `noteService.getNotesRaw(networkId, account, contract)`. For each note,
+ *   the 3-source dedupe gates record creation: prior records
+ *   (`siloedNullifier`), user's own outgoing tx hashes, in-flight journal
+ *   `progress.txHash`.
+ *
+ * Trust state machine (per `(profileId, networkId, contract)`):
+ *   unknown → first note → pending (hidden, popup prompts)
+ *   pending → all queued records stay hidden until user resolves
+ *   Allow → trusted; queued records visible, emit Added for each
+ *   Reject → blocked; queued records stay hidden silently
+ *   trusted → subsequent records insert visible
+ *   blocked → subsequent records insert hidden (silent)
+ *
+ * Late-delete reconciliation: when `TransactionService.onTransactionAdded`
+ * fires, any existing record whose txHash matches is deleted — closes the
+ * proving→submitting race window for self-mint / change-note cases that
+ * arrived via PXE before the local tx was journalled.
+ */
+export class IncomingTransferService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	public static name = INCOMING_TRANSFER_SERVICE_NAME
+
+	public readonly dependencies: readonly string[] = [
+		ProfileService.name,
+		NetworkService.name,
+		AccountService.name,
+		TokenService.name,
+		TransactionService.name,
+		OperationJournalService.name,
+		NoteService.name,
+	]
+
+	public readonly onIncomingTransferAdded = new EventHandler<IncomingTransferRecord>()
+	public readonly onIncomingTransferUpdated = new EventHandler<IncomingTransferRecord>()
+	public readonly onIncomingTransferDeleted = new EventHandler<IncomingTransferRecord>()
+	public readonly onIncomingTransferPending = new EventHandler<IncomingTransferPending>()
+	public readonly onIncomingTrustChanged = new EventHandler<IncomingTrustRecord>()
+
+	private readonly repo = new IncomingTransferRepository()
+	private profileService: ProfileService = null!
+	private networkService: NetworkService = null!
+	private accountService: AccountService = null!
+	private tokenService: TokenService = null!
+	private transactionService: TransactionService = null!
+	private operationJournalService: OperationJournalService = null!
+	private noteService: NoteService = null!
+
+	/** Singleflight scheduler per `(networkId, accountAddress)`. The interval
+	 *  id keeps each scheduler one-at-a-time. */
+	private readonly schedulers = new Map<string, ReturnType<typeof setInterval>>()
+	/** Contracts each scheduler watches, by scheduler key. */
+	private readonly watchedContracts = new Map<string, Set<string>>()
+	/** Reentrancy guard so a slow poll doesn't double-fire. */
+	private readonly polling = new Set<string>()
+
+	private readonly pollIntervalMs: number
+
+	public constructor(logger: ILogger, pollIntervalMs: number = DEFAULT_POLL_INTERVAL_MS) {
+		super(INCOMING_TRANSFER_SERVICE_NAME, logger)
+		this.pollIntervalMs = pollIntervalMs
+	}
+
+	protected async init(services: ServiceCollection): Promise<void> {
+		this.profileService = services.get(ProfileService.name)
+		this.networkService = services.get(NetworkService.name)
+		this.accountService = services.get(AccountService.name)
+		this.tokenService = services.get(TokenService.name)
+		this.transactionService = services.get(TransactionService.name)
+		this.operationJournalService = services.get(OperationJournalService.name)
+		this.noteService = services.get(NoteService.name)
+
+		this.tokenService.onTokenAdded.add(this.onTokenAdded)
+		this.tokenService.onTokenDeleted.add(this.onTokenDeleted)
+		this.transactionService.onTransactionAdded.add(this.onTransactionAdded)
+
+		// Hydrate schedulers from any tokens already in storage. Without
+		// this, a SW restart would wait for the next onTokenAdded event
+		// before resuming any polling — which never fires for tokens
+		// added in a prior session.
+		await this.hydrateSchedulers()
+	}
+
+	// --- public surface ---
+
+	public async getIncomingTransfers(
+		profileId: string,
+		networkId: string,
+		accountAddress: string,
+		tokenId?: number,
+	): Promise<IncomingTransferRecord[]> {
+		await this.ensureInitialized()
+		const records = await this.repo.listForAccount(profileId, networkId, accountAddress)
+		return records
+			.filter((r) => !r.hidden)
+			.filter((r) => tokenId === undefined || r.tokenId === tokenId)
+			.sort(orderByBlockIndex)
+	}
+
+	public async getTrustState(profileId: string, networkId: string, contract: string): Promise<IncomingTrustState> {
+		await this.ensureInitialized()
+		const record = await this.repo.getTrust(profileId, networkId, contract)
+		return record?.state ?? "unknown"
+	}
+
+	public async setTrustState(profileId: string, networkId: string, contract: string, state: IncomingTrustState): Promise<void> {
+		await this.ensureInitialized()
+		const record = await this.repo.setTrust(profileId, networkId, contract, state)
+		this.emit("onIncomingTrustChanged", record)
+	}
+
+	public async setTrustAllow(profileId: string, networkId: string, contract: string): Promise<void> {
+		await this.setTrustState(profileId, networkId, contract, "trusted")
+		// Flip every hidden record for this contract to visible; emit Added
+		// for each so the popup activity feed updates atomically.
+		const records = await this.repo.listByContract(profileId, networkId, contract)
+		for (const record of records) {
+			if (!record.hidden) continue
+			const updated = { ...record, hidden: false }
+			await this.repo.upsertRecord(updated)
+			this.emit("onIncomingTransferAdded", updated)
+		}
+	}
+
+	public async setTrustReject(profileId: string, networkId: string, contract: string): Promise<void> {
+		await this.setTrustState(profileId, networkId, contract, "blocked")
+		// Hidden records stay hidden. No event emission — silent rejection.
+	}
+
+	public async clearProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		await this.repo.clearProfile(profileId)
+		await this.hydrateSchedulers()
+	}
+
+	public async clearChain(profileId: string, networkId: string): Promise<void> {
+		await this.ensureInitialized()
+		await this.repo.clearChain(profileId, networkId)
+		await this.hydrateSchedulers()
+	}
+
+	// --- internal: scheduler ---
+
+	private schedulerKey(networkId: string, accountAddress: string): string {
+		return `${networkId}|${accountAddress}`
+	}
+
+	private async resolveNetworkByChainId(chainId: number): Promise<Network | undefined> {
+		try {
+			const networks = await this.networkService.getNetworks(chainId)
+			return networks[0]
+		} catch {
+			return undefined
+		}
+	}
+
+	/** Rebuild the scheduler set from current tokens + active accounts. */
+	private async hydrateSchedulers(): Promise<void> {
+		// Clear existing schedulers; we re-register below.
+		for (const id of this.schedulers.values()) clearInterval(id)
+		this.schedulers.clear()
+		this.watchedContracts.clear()
+
+		const profile = await this.profileService.getActiveProfile()
+		if (!profile) return
+		const networks = await this.networkService.getNetworks()
+		const tokens = await this.tokenService.getTokensRaw(profile.id)
+
+		for (const network of networks) {
+			const tokensForNet = tokens.filter((t) => t.chainId === network.chainId)
+			if (tokensForNet.length === 0) continue
+			const accounts = await this.accountService.getAccounts(profile.id, network.chainId)
+			for (const account of accounts) {
+				const key = this.schedulerKey(network.id, account.address)
+				const contracts = new Set(tokensForNet.map((t) => t.contract))
+				this.watchedContracts.set(key, contracts)
+				this.startScheduler(profile.id, network.id, account.address)
+			}
+		}
+	}
+
+	private startScheduler(profileId: string, networkId: string, accountAddress: string): void {
+		const key = this.schedulerKey(networkId, accountAddress)
+		if (this.schedulers.has(key)) return
+		const interval = setInterval(() => {
+			this.poll(profileId, networkId, accountAddress).catch((err) => {
+				this.logWarn(`Poll failed: ${getErrorMessage(err)}`)
+			})
+		}, this.pollIntervalMs)
+		this.schedulers.set(key, interval)
+		// Kick once immediately so first-receive doesn't wait one full
+		// interval after SW restart / token-add.
+		this.poll(profileId, networkId, accountAddress).catch((err) => {
+			this.logWarn(`Initial poll failed: ${getErrorMessage(err)}`)
+		})
+	}
+
+	private onTokenAdded = async (token: TokenInfo): Promise<void> => {
+		// TokenInfo lacks `profileId`; trust the active profile context the
+		// emit is happening in. (The token service emits while the owning
+		// profile is loaded.)
+		const profile = await this.profileService.getActiveProfile()
+		if (!profile) return
+		const network = await this.resolveNetworkByChainId(token.chainId)
+		if (!network) return
+		const accounts = await this.accountService.getAccounts(profile.id, network.chainId)
+		for (const account of accounts) {
+			const key = this.schedulerKey(network.id, account.address)
+			let contracts = this.watchedContracts.get(key)
+			if (!contracts) {
+				contracts = new Set()
+				this.watchedContracts.set(key, contracts)
+			}
+			contracts.add(token.contract)
+			this.startScheduler(profile.id, network.id, account.address)
+		}
+	}
+
+	private onTokenDeleted = async (token: TokenInfo): Promise<void> => {
+		const profile = await this.profileService.getActiveProfile()
+		if (!profile) return
+		const network = await this.resolveNetworkByChainId(token.chainId)
+		if (!network) return
+		const accounts = await this.accountService.getAccounts(profile.id, network.chainId)
+		for (const account of accounts) {
+			const key = this.schedulerKey(network.id, account.address)
+			const contracts = this.watchedContracts.get(key)
+			if (!contracts) continue
+			contracts.delete(token.contract)
+			if (contracts.size === 0) {
+				const interval = this.schedulers.get(key)
+				if (interval) clearInterval(interval)
+				this.schedulers.delete(key)
+				this.watchedContracts.delete(key)
+			}
+		}
+	}
+
+	private onTransactionAdded = async (tx: Tx): Promise<void> => {
+		// Late-delete: if a tx we just added has a hash matching an existing
+		// incoming record, that record was actually our own outgoing tx's
+		// note — clean it up.
+		const profile = await this.profileService.getActiveProfile()
+		if (!profile) return
+		const network = await this.resolveNetworkByChainId(tx.chainId)
+		if (!network) return
+		const matches = await this.repo.listByTxHash(profile.id, network.id, tx.hash)
+		for (const record of matches) {
+			await this.repo.deleteRecord(record.siloedNullifier)
+			this.emit("onIncomingTransferDeleted", record)
+		}
+	}
+
+	private async poll(profileId: string, networkId: string, accountAddress: string): Promise<void> {
+		const key = this.schedulerKey(networkId, accountAddress)
+		if (this.polling.has(key)) return
+		this.polling.add(key)
+		try {
+			const contracts = this.watchedContracts.get(key)
+			if (!contracts || contracts.size === 0) return
+			for (const contract of contracts) {
+				try {
+					await this.scanContract(profileId, networkId, accountAddress, contract)
+				} catch (error) {
+					this.logWarn(`Scan failed for ${contract}: ${getErrorMessage(error)}`)
+				}
+			}
+		} finally {
+			this.polling.delete(key)
+		}
+	}
+
+	private async scanContract(profileId: string, networkId: string, accountAddress: string, contract: string): Promise<void> {
+		let notes: RawNote[]
+		try {
+			notes = await this.noteService.getNotesRaw(networkId, accountAddress, contract)
+		} catch (error) {
+			this.logWarn(`getNotesRaw failed: ${getErrorMessage(error)}`)
+			return
+		}
+
+		const network = await this.networkService.getNetwork(networkId)
+		const tokens = await this.tokenService.getTokensRaw(profileId)
+		const token = tokens.find((t) => t.contract === contract && t.chainId === network.chainId)
+		// Token-removed: don't surface anything for a contract the user has
+		// since removed.
+		if (!token) return
+
+		const outgoingTxHashes = await this.collectOutgoingTxHashes(network.chainId, accountAddress)
+		const inflightTxHashes = await this.collectInflightTxHashes(profileId, networkId, accountAddress)
+		const trustState = await this.getTrustState(profileId, networkId, contract)
+
+		for (const note of notes) {
+			if (!note.siloedNullifier) continue
+			if (await this.repo.hasRecord(note.siloedNullifier)) continue
+			if (outgoingTxHashes.has(note.txHash)) continue
+			if (inflightTxHashes.has(note.txHash)) continue
+			const amountRaw = parseNoteAmount(note)
+			if (amountRaw === null) continue
+
+			const record = this.buildRecord({ note, profileId, networkId, accountAddress, token, amountRaw, trustState })
+			await this.repo.upsertRecord(record)
+
+			if (trustState === "unknown") {
+				const updated = await this.repo.setTrust(profileId, networkId, contract, "pending")
+				this.emit("onIncomingTrustChanged", updated)
+				this.emit("onIncomingTransferPending", {
+					profileId,
+					networkId,
+					accountAddress,
+					contract,
+					tokenId: token.id,
+					tokenSymbol: token.symbol,
+					tokenDecimals: token.decimals,
+					amountRaw,
+				})
+				// Don't emit Added — record is hidden until user resolves.
+			} else if (trustState === "trusted") {
+				this.emit("onIncomingTransferAdded", record)
+			}
+			// pending / blocked: record persisted hidden, no event.
+		}
+	}
+
+	private buildRecord(params: {
+		note: RawNote
+		profileId: string
+		networkId: string
+		accountAddress: string
+		token: Token
+		amountRaw: string
+		trustState: IncomingTrustState
+	}): IncomingTransferRecord {
+		const { note, profileId, networkId, accountAddress, token, amountRaw, trustState } = params
+		const hidden = trustState !== "trusted"
+		return {
+			siloedNullifier: note.siloedNullifier,
+			profileId,
+			networkId,
+			accountAddress,
+			contract: token.contract,
+			tokenId: token.id,
+			owner: note.content?.owner ?? accountAddress,
+			amountRaw,
+			noteHash: note.noteHash,
+			txHash: note.txHash,
+			l2BlockNumber: note.l2BlockNumber,
+			txIndexInBlock: note.txIndexInBlock,
+			noteIndexInTx: note.noteIndexInTx,
+			hidden,
+			discoveredAt: Date.now(),
+		}
+	}
+
+	private async collectOutgoingTxHashes(chainId: number, accountAddress: string): Promise<Set<string>> {
+		try {
+			const txs = await this.transactionService.getTransactions(accountAddress)
+			return new Set(txs.filter((t) => t.chainId === chainId).map((t) => t.hash))
+		} catch (error) {
+			this.logWarn(`getTransactions failed: ${getErrorMessage(error)}`)
+			return new Set()
+		}
+	}
+
+	private async collectInflightTxHashes(profileId: string, networkId: string, accountAddress: string): Promise<Set<string>> {
+		try {
+			const ops = await this.operationJournalService.getOperations({ profileId, isTerminal: false })
+			const hashes = new Set<string>()
+			for (const op of ops) {
+				if (op.accountAddress !== accountAddress) continue
+				if (op.networkId !== networkId) continue
+				const txHash = (op.progress as { txHash?: string })?.txHash
+				if (txHash) hashes.add(txHash)
+			}
+			return hashes
+		} catch (error) {
+			this.logWarn(`getOperations failed: ${getErrorMessage(error)}`)
+			return new Set()
+		}
+	}
+}
+
+/** Decode the UintNote amount from the parsed content map. Returns the
+ *  raw u128 stringified decimal, or null if the note isn't a UintNote /
+ *  failed to decode. */
+function parseNoteAmount(note: RawNote): string | null {
+	const value = note.content?.value
+	if (!value) return null
+	try {
+		const big = BigInt(value)
+		return big.toString()
+	} catch {
+		return null
+	}
+}
+
+/** Order records by (block, txIndex, noteIndex) ascending. Sorting helper
+ *  exported so tests can pin the ordering invariant. */
+export function orderByBlockIndex(a: IncomingTransferRecord, b: IncomingTransferRecord): number {
+	if (a.l2BlockNumber !== b.l2BlockNumber) return a.l2BlockNumber - b.l2BlockNumber
+	if (a.txIndexInBlock !== b.txIndexInBlock) return a.txIndexInBlock - b.txIndexInBlock
+	return a.noteIndexInTx - b.noteIndexInTx
+}
