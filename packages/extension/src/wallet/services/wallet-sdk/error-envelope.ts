@@ -16,7 +16,7 @@
  * `JSON.parse(err.message).code` (see wallet-bridge README for the recipe).
  */
 
-import { CapabilityNotGrantedError, JobCancelledError } from "@nulo/extension-messaging/errors"
+import { CapabilityNotGrantedError, JobCancelledError, TooManyPendingError } from "@nulo/extension-messaging/errors"
 import type { WalletResponse } from "@aztec/wallet-sdk/types"
 
 export function toWalletResponseError(error: unknown): WalletResponse["error"] {
@@ -38,6 +38,16 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 				walletErrorCode: CapabilityNotGrantedError.CODE,
 				capabilityType: (error.details as { capabilityType?: string } | undefined)?.capabilityType,
 			},
+		}
+	}
+	if (error instanceof TooManyPendingError) {
+		// -32005 = JSON-RPC "Limit exceeded" (closest standard; EIP-1193 has no
+		// rate-limit code). Backpressure — the dApp retries after its in-flight
+		// sendTx settle. No origin/profile detail (no oracle).
+		return {
+			code: -32005,
+			message: error.message,
+			data: { walletErrorCode: TooManyPendingError.CODE },
 		}
 	}
 	return error instanceof Error ? error.message : String(error)
