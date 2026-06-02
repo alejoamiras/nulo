@@ -72,7 +72,7 @@ describe("DappInteractionService forwards execution hooks (does not fire the bat
 			payload: emptyPayload,
 			handleId: "handle-1",
 			cancellationToken: id,
-			hooks: { onExecutionEnqueued: releaseSpy, queuedJournalId: "q-1" },
+			hooks: { onExecutionEnqueued: releaseSpy, queuedJournalId: "q-1", originKey: "https://dapp.example" },
 		})
 
 		await svc.approveInteraction(id, [], origin)
@@ -81,6 +81,8 @@ describe("DappInteractionService forwards execution hooks (does not fire the bat
 		expect(executeOperations).toHaveBeenCalledTimes(1)
 		expect(observedHooks?.onExecutionEnqueued).toBe(releaseSpy)
 		expect(observedHooks?.queuedJournalId).toBe("q-1")
+		// originKey rides the same bag through to executeOperations (→ the cap).
+		expect(observedHooks?.originKey).toBe("https://dapp.example")
 		// The release is NOT fired by DappInteractionService — ExecutionService
 		// fires it once the request enqueues on the mutex.
 		expect(releaseSpy).not.toHaveBeenCalled()
@@ -98,12 +100,13 @@ describe("DappInteractionService forwards execution hooks (does not fire the bat
 		// No queuedJournalId → skip the queued→pending fast-forward (which would
 		// touch operationJournal); the hook-forwarding contract is what we pin.
 		const payload = { params: { operations: [] }, session: { profileId: "p1", dappMetadata: { name: "test-dapp" } } }
-		const hooks: ExecutionHooks = { onExecutionEnqueued: releaseSpy }
+		const hooks: ExecutionHooks = { onExecutionEnqueued: releaseSpy, originKey: "https://dapp.example" }
 
 		await internals.silentInteraction(payload, hooks)
 
 		expect(executeOperations).toHaveBeenCalledTimes(1)
 		expect(observedHooks?.onExecutionEnqueued).toBe(releaseSpy)
+		expect(observedHooks?.originKey).toBe("https://dapp.example")
 		expect(releaseSpy).not.toHaveBeenCalled()
 	})
 
