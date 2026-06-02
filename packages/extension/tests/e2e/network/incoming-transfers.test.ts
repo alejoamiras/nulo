@@ -39,8 +39,8 @@ const hasConfig = aztecConfig !== undefined
 test.skipIf(!hasConfig)(
 	"incoming-transfer arc — name regression + empty happy path + self-mint dedupe",
 	{ timeout: 180_000, retry: 0 },
-	async ({ freshExtensionPerTest }) => {
-		const page = await openPopup(freshExtensionPerTest)
+	async ({ registeredExtension }) => {
+		const page = await openPopup(registeredExtension)
 		await waitForHash(page, "#/popup/general", 30_000)
 
 		// Navigate to the History page. activity.vue mounts the three
