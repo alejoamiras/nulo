@@ -1,7 +1,6 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
-import { callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { waitForPopup, approveCapabilities, waitCapabilitiesReady } from "../fixtures/popups"
+import { callExpectingNoPopup } from "../fixtures/playground"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -11,9 +10,15 @@ const hasConfig = aztecConfig !== undefined
  * Tests #23-#25 — canonical simulation methods (simulateTx, profileTx,
  * executeUtility) are silent on default sessions (PrivateData=4 < confLevel=5).
  *
- * Each parametrized case: grant `accounts` + `simulation` (`accounts` bundle
- * provides both), set token + recipient inputs, click the method's button,
- * assert callExpectingNoPopup result.
+ * Each parametrized case: set token + recipient inputs, click the method's
+ * button, assert callExpectingNoPopup result.
+ *
+ * Uses `dappConnectedExtensionWithAccountsCap` so the cap-popup round-trip
+ * happens during fixture setup (hookTimeout=300s) rather than during this
+ * test's budget. Mirrors the pattern landed in `register-token.test.ts`
+ * (PR #63). Pre-fix, sim-profileTx (#24) was the residual cap-popup-class
+ * flake observed during PR #67's first CI run — the fixture migration is
+ * the structural fix per accelerator-server-ci/lessons/phase-1.md.
  */
 const cases: Array<{ id: number; name: string; method: string; btn: string }> = [
 	{ id: 23, name: "simulateTx", method: "simulateTx", btn: "pg-btn-simulateTx-transfer" },
@@ -24,29 +29,10 @@ const cases: Array<{ id: number; name: string; method: string; btn: string }> = 
 for (const c of cases) {
 	test.skipIf(!hasConfig)(
 		`sim-${c.name} (#${c.id}) — silent path returns ok or error`,
-		{ timeout: 120_000 },
-		async ({ dappConnectedExtensionPerTest: dappConnectedExtension }) => {
-			const page = dappConnectedExtension.playgroundPage
+		{ timeout: 60_000 },
+		async ({ dappConnectedExtensionWithAccountsCap }) => {
+			const { playgroundPage: page } = dappConnectedExtensionWithAccountsCap
 
-			await page.evaluate(() => {
-				const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')!
-				select.value = "accounts"
-				select.dispatchEvent(new Event("change", { bubbles: true }))
-			})
-			const seqGrant = await snapshotResultSeq(page)
-			const popupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
-			await clickByTestId(page, "pg-btn-requestCapabilities")
-			const popup = await popupP
-			await waitCapabilitiesReady(popup)
-			const accountIds = await popup.evaluate(() =>
-				[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) =>
-					r.getAttribute("data-account-id"),
-				),
-			)
-			await approveCapabilities(popup, { accounts: [accountIds[0]!] })
-			await waitForPgResult(page, "requestCapabilities", seqGrant, 30_000)
-
-			// Set inputs the section needs
 			await page.evaluate(
 				({ token, recipient }: { token: string; recipient: string }) => {
 					const setVal = (sel: string, v: string) => {
@@ -63,7 +49,7 @@ for (const c of cases) {
 				{ token: aztecConfig!.tokenAddress, recipient: aztecConfig!.minterAddress },
 			)
 
-			const result = await callExpectingNoPopup(dappConnectedExtension, page, c.method, async () => {
+			const result = await callExpectingNoPopup(dappConnectedExtensionWithAccountsCap, page, c.method, async () => {
 				await clickByTestId(page, c.btn)
 			})
 			expect(["ok", "error"]).toContain(result.status)

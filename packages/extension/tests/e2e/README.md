@@ -30,6 +30,26 @@ Internally `scripts/e2e/agent.sh`:
 
 `global-setup.ts` reads those env vars, spawns anvil + aztec + playground (each with the assigned port) and writes an ownership lockfile at `.e2e-state/owned.json`.
 
+### Accelerator: local vs CI
+
+**Locally** (`bun run e2e:agent`), the wallet's `AcceleratorProver` (from `@alejoamiras/aztec-accelerator`) auto-detects whichever proving backend is up on `127.0.0.1:59833`:
+
+- **Aztec Accelerator** (the user-facing desktop app on macOS) running → native bb proving.
+- Nothing → silent fallback to in-browser WASM (still works, just slower).
+
+There is no `VITE_NULO_ACCELERATOR_REQUIRED` enforcement locally. This matches production behavior — end users without Aztec Accelerator installed get WASM proving without any error.
+
+**In CI** (`pr-network-e2e.yml`), the workflow:
+
+1. Installs the headless **`accelerator-server`** binary (Linux x86_64 release from `alejoamiras/aztec-accelerator`, SHA-256 pinned).
+2. Starts it on the runner's `127.0.0.1:59833`.
+3. Builds the wallet with `VITE_NULO_ACCELERATOR_REQUIRED=1` → `chain-runtime.ts` constructs `ProductionPxeFactory` in required-mode (eager preflight + `onPhase` throw on silent-fallback paths).
+4. Any test where the wallet would have fallen back to WASM fails loudly with `[accelerator-required] SDK emitted phase="fallback"`.
+
+The terminology gap matters: **Aztec Accelerator** is the desktop app a user installs; **accelerator-server** is the headless binary CI uses. Same HTTP contract, different surface.
+
+**Caveat for local devs running e2e while Aztec Accelerator is running**: both compete on `127.0.0.1:59833`. The wallet probes `/health` and routes to whichever responds first — usually the one that started first. No crash, but proves may be routed to the desktop app instead of being explicitly absent. If this matters for a specific test, quit the desktop app before `bun run e2e:agent`.
+
 ## Running multiple agents in parallel
 
 Open one terminal per worktree and run `bun run e2e:agent` in each. Each agent allocates fresh ports and owns its own anvil + aztec + playground:
@@ -82,20 +102,19 @@ CI runs the network suite as a **5-shard GitHub Actions matrix** (`.github/workf
 
 **Wall time**: ~10–15 min (vs ~35–45 min unsharded). CPU minutes: ~25% more than serial (each shard pays the ~30s anvil+aztec boot cost), but the wall-time win is dramatic.
 
-**Why N=5 and not N=4 or N=9**: N=4 collides the two known-slow files (`tx-sendTx-multicall`, `multi-account-from`) on the same shard, blowing the shard timeout. N=9 (1 file/shard) eliminates cumulative state but pays the boot cost 9× — diminishing returns. N=5 is the sweet spot.
+**Why N=5 and not N=4 or N=9**: legacy reasoning from when `tx-sendTx-multicall` and `multi-account-from` were collision-sensitive under WASM proving. N=4 collided them on the same shard, blowing the shard timeout; N=5 separated them. Post-accelerator (PR #67) the per-prove time is bounded enough that the collision concern no longer holds — N=5 is preserved for now as the stable shape, but could be tuned in a future PR.
 
-**Failing shard logs**: each shard uploads its own artifact (`network-e2e-logs-<N>-of-5`) containing `.e2e-state`, `aztec-*.log`, `anvil-*.log` on failure.
-
-**Quarantined tests**: the 2 deterministic-slow files above are skipped in CI via `NULO_E2E_SKIP_DEFERRED_SLOW=1` env (still run locally). Tracked in `implementations-plan/network-followups/slow-tests-hypotheses.md`.
+**Failing shard logs**: each shard uploads its own artifact (`network-e2e-logs-<N>-of-5`) containing `.e2e-state`, `aztec-*.log`, `anvil-*.log`, `accelerator-server.log`, `accelerator-health.json` on failure.
 
 **Reproducing a CI shard locally**: pass `--shard=N/5` to `e2e:agent`:
 
 ```bash
 bun run e2e:agent --shard=5/5                                  # just the files in shard 5
-NULO_E2E_SKIP_DEFERRED_SLOW=1 bun run e2e:agent --shard=1/5    # match CI's quarantine env
 ```
 
 Vitest's deterministic SHA-1-of-filename sharder picks the same files locally as in CI, so this is the fastest way to reproduce a shard-specific failure (e.g. "register-token only fails on shard 1"). Each invocation still starts its own anvil + aztec + playground; running multiple shards in parallel needs multiple worktrees (see "Running multiple agents in parallel" above).
+
+**Previously quarantined**: `tx-sendTx-default`, `multi-account-from`, `tx-sendTx-multicall` (both #32 + #33) were previously skipped on CI via `NULO_E2E_SKIP_DEFERRED_SLOW=1` (now removed) due to the WASM kernel-prove tail exceeding puppeteer's 300s `protocolTimeout` on slow runners. Resolved by restructuring those tests + the `tx-sendTx-{noFrom,feePayer,sponsoredFpc}` siblings to assert on the wallet's journal `proving` stage via `waitForSendTxActiveStage()` instead of waiting on the dApp's full sendTx promise. See `implementations-plan/journal-stage-restructure/`.
 
 **Known limitation: cold-shard rotation.** Each shard starts with a fresh anvil + aztec + playground + Chrome + extension. The FIRST capability-popup-driven test in shard 1 (whichever file the SHA-1 sharder puts first) pays a cold-SW penalty — `chrome.windows.create` + bb.js init + PXE warmup can push that test past its budget. Quarantining the offender just exposes the next file as the new "first" victim. The structural fix is a fixture-level warm-up tap or pre-grant-capability fixture; tracked in [Issue #59](https://github.com/alejoamiras/nulo/issues/59). Until then: Network e2e is treated as advisory on `dev` (only `Quality / Status` is the required check); single-shard re-runs (or local repro via `--shard=N/5`) usually pass green once the SW is warm.
 

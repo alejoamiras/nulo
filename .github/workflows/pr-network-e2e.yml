@@ -2,6 +2,12 @@ name: Network e2e
 
 on:
   workflow_dispatch:
+    inputs:
+      disable_accelerator:
+        description: "Skip accelerator-server for this manual run (investigation override)"
+        required: false
+        type: boolean
+        default: false
   pull_request:
     branches: [main, dev]
     # `labeled` so adding `e2e:network` after open triggers a fresh run;
@@ -55,6 +61,7 @@ jobs:
               - '.github/workflows/_network-e2e.yml'
               - '.github/workflows/pr-network-e2e.yml'
               - '.github/actions/setup-aztec/**'
+              - '.github/actions/setup-accelerator-server/**'
               - '.github/actions/setup-bun/**'
               - 'bun.lock'
               - 'bunfig.toml'
@@ -129,6 +136,13 @@ jobs:
       # with the dedicated heavy jobs below (`network-e2e-heavy`,
       # `network-e2e-heavy-concurrent`).
       exclude_files: "tests/e2e/network/fee-methods.test.ts tests/e2e/network/concurrent-sendtx-confirm.test.ts"
+      # Two paths to disable accelerator (both need repo write access):
+      #   - vars.NULO_E2E_DISABLE_ACCELERATOR=1 (Settings → Variables) for
+      #     PR-triggered runs — the actual emergency kill switch
+      #   - workflow_dispatch input for one-off manual reruns
+      # PR authors cannot toggle either (vars require write access; dispatch
+      # is gated by branch protection). See plan §10.
+      disable_accelerator: ${{ github.event.inputs.disable_accelerator == 'true' || vars.NULO_E2E_DISABLE_ACCELERATOR == '1' }}
     secrets:
       SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
 
@@ -146,6 +160,7 @@ jobs:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       shard_label: "heavy"
       test_files: "tests/e2e/network/fee-methods.test.ts"
+      disable_accelerator: ${{ github.event.inputs.disable_accelerator == 'true' || vars.NULO_E2E_DISABLE_ACCELERATOR == '1' }}
     secrets:
       SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
 
@@ -163,6 +178,7 @@ jobs:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       shard_label: "heavy-concurrent"
       test_files: "tests/e2e/network/concurrent-sendtx-confirm.test.ts"
+      disable_accelerator: ${{ github.event.inputs.disable_accelerator == 'true' || vars.NULO_E2E_DISABLE_ACCELERATOR == '1' }}
     secrets:
       SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
 

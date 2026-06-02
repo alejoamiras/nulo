@@ -1,7 +1,9 @@
+import { ACCELERATOR_HOST, ACCELERATOR_PORT, ACCELERATOR_REQUIRED, ACCELERATOR_REQUIRED_BUILD_STAMP } from "@/accelerator/config"
 import { consoleMethods, LogLevel } from "@/wallet/logger"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { createPxeOffscreen } from "@nulo/aztec-runtime/offscreen/entry"
+import { ProductionPxeFactory } from "@nulo/aztec-runtime/pxe"
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { OFFSCREEN_READY_MESSAGE, OFFSCREEN_PING, OFFSCREEN_PONG } from "@/wallet/utils/offscreen"
 import { isBenignSwDisconnect } from "./is-benign-sw-disconnect"
@@ -44,14 +46,34 @@ self.onunhandledrejection = (e: PromiseRejectionEvent) => {
 	}
 }
 
+// Pin the accelerator-required build stamp into the bundle so vite
+// cannot tree-shake the import. The CI agent greps dist/chrome for the
+// literal value as a propagation assertion. No-op at runtime.
+// See packages/extension/src/accelerator/config.ts for full context.
+if (ACCELERATOR_REQUIRED_BUILD_STAMP) {
+	;(globalThis as { __NULO_ACCELERATOR_REQUIRED_BUILD_STAMP__?: string }).__NULO_ACCELERATOR_REQUIRED_BUILD_STAMP__ =
+		ACCELERATOR_REQUIRED_BUILD_STAMP
+}
+
 // run services — await initialization before signaling ready.
 // Bootstrap lives in @nulo/aztec-runtime/offscreen/entry; this shell
 // wires the concrete Chrome-backed clients and keeps the READY send
 // so aztec-runtime stays chrome-free.
 const t0 = Date.now()
+// `factory` is only customized when ACCELERATOR_REQUIRED (CI builds). For
+// production builds the field is omitted; PxeService defaults to a vanilla
+// ProductionPxeFactory with no accelerator policy, preserving the SDK's
+// silent WASM fallback for users without Aztec Accelerator installed.
 await createPxeOffscreen({
 	profiles: new ProfileServiceClient(),
 	logger: new LoggerServiceClient(),
+	factory: ACCELERATOR_REQUIRED
+		? new ProductionPxeFactory(undefined, {
+				required: true,
+				host: ACCELERATOR_HOST,
+				port: ACCELERATOR_PORT,
+			})
+		: undefined,
 })
 logger.log("pxe", LogLevel.Info, `Offscreen services initialized (${Date.now() - t0}ms)`)
 

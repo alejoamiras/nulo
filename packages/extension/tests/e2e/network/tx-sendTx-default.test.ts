@@ -1,50 +1,42 @@
 import { expect, inject } from "vitest"
-import { clickByTestId, test } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { waitForPopup, waitForExecuteContent, approveExecute } from "../fixtures/popups"
-import type { AztecTestConfig } from "../fixtures/aztec"
+import { clickByTestId, openPopup, test } from "../fixtures/extension"
+import { snapshotResultSeq } from "../fixtures/playground"
+import { approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxActiveStage } from "../fixtures/popups"
+import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
-// CI-quarantined via NULO_E2E_SKIP_DEFERRED_SLOW. Phase 4 acceptance gate
-// hit 2/5 at 5/5 green even after the structural fixes (NO_WAIT, pre-grant
-// fixture, heavy-split for fee-methods, 180s wait + 240s budget). The
-// residual flake is GitHub-hosted runner-pool variability: on a fast
-// runner the wait settles in ~2s; on a slow runner the wallet's
-// buildAndEstimateTxRequest -> proveTxTask -> sendTxTask chain takes
-// >180s. Vitest retries land on the same runner, so they don't help.
-//
-// Codex audit session 019e6743-2fb7-7df3-bad7-6cf503cf2338 §3 recommends
-// REDESIGNING this test to assert against journal-stage transitions
-// (simulating/proving) instead of the dApp's full sendTx promise. Tracked
-// for a follow-up PR.
-//
-// Local (warm M-series, WASM) still runs the test: ~10s test exec.
-const skipDeferredSlow = process.env.NULO_E2E_SKIP_DEFERRED_SLOW === "1"
 
 /**
  * Test #29 — sendTx default (account-bound). Always opens /windows/execute
  * (Transactions=5 >= confirmationLevel=5).
  *
  * Flow: tx cap pre-granted by fixture → set inputs → click → /windows/execute
- * opens with FeeSettingsCard (no fee preset) → user accepts default → tx submits.
+ * opens with FeeSettingsCard (no fee preset) → user accepts default → wallet
+ * journal-driven awaiting card transitions to `proving` stage.
  *
  * Uses `dappConnectedExtensionWithTransactionCap` so the cap-popup round-trip
  * happens during fixture setup (hookTimeout=300s) rather than in this test's
- * 240s budget. Mirrors the Phase 2 fix applied to register-token.
+ * test budget.
  *
- * See implementations-plan/e2e-stabilization/lessons/phase-3a.md for the
- * Phase 3A probe findings and Phase 4 codex audit notes for the
- * runner-variability deadlock.
+ * Asserts on `data-stage="proving"` instead of waiting on the dApp's full
+ * sendTx promise — accelerator-server 1.0.1 only covers `createChonkProof`;
+ * init/inner/reset/tail kernel proofs still run in-process via bb.js WASM
+ * and exceed puppeteer's protocolTimeout on slow runners. Reaching the
+ * `proving` stage validates wallet built + simulated + entered the prove
+ * pipeline — exactly what popup-shape tests should check. See
+ * implementations-plan/journal-stage-restructure/plan.md.
  */
-test.skipIf(!hasConfig || skipDeferredSlow)(
-	"tx-sendTx-default — popup opens, fee picker shown, confirm submits",
-	// Test budget MUST exceed waitForPgResult (180s) below — needs room for
-	// fixture/setup (~15s on cold shard) + popup drive (~5s) + the wait
-	// itself. 240s gives ~60s headroom over the wait ceiling.
-	{ timeout: 240_000 },
+test.skipIf(!hasConfig)(
+	"tx-sendTx-default — popup opens, fee picker shown, confirm reaches journal active stage",
+	{ timeout: 60_000 },
 	async ({ dappConnectedExtensionWithTransactionCap }) => {
-		const { playgroundPage: page } = dappConnectedExtensionWithTransactionCap
+		const { playgroundPage: page, accountAddress } = dappConnectedExtensionWithTransactionCap
+
+		// Pre-mint tokens to the dApp account so simulate succeeds (otherwise
+		// the journal goes straight to `failed` and the awaiting card never
+		// reaches an active stage — breaks waitForSendTxActiveStage).
+		await mintPublicTokensForAccount(aztecConfig!, accountAddress)
 
 		// Set inputs
 		await page.evaluate(
@@ -64,7 +56,7 @@ test.skipIf(!hasConfig || skipDeferredSlow)(
 		)
 
 		// Fire sendTx + drive the execute popup
-		const seqTx = await snapshotResultSeq(page)
+		await snapshotResultSeq(page)
 		const execPopupP = waitForPopup(dappConnectedExtensionWithTransactionCap, "execute", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-sendTx-default")
 		const execPopup = await execPopupP
@@ -82,24 +74,9 @@ test.skipIf(!hasConfig || skipDeferredSlow)(
 
 		await approveExecute(execPopup)
 
-		// 180s budget chosen empirically by the Phase 4 acceptance gate:
-		//   - 30s failed deterministically (4 of 5 runs) — prover starts cold
-		//   - 90s failed too (split fee-methods to its own job didn't help) —
-		//     so the bottleneck is the runner-pool prover time itself,
-		//     not the same-shard queue pressure
-		// Per codex audit session 019e6743-2fb7-7df3-bad7-6cf503cf2338 §1
-		// (Phase 4 follow-up): 180s is the hosted-runner-prover envelope.
-		// NO_WAIT already trims the post-submit side; the wallet still does
-		// buildAndEstimateTxRequest → proveTxTask → sendTxTask before the
-		// dApp's promise settles. Local M-series WASM equivalent: <15s.
-		const t0 = Date.now()
-		const result = await waitForPgResult(page, "sendTx", seqTx, 180_000)
-		const waitMs = Date.now() - t0
-		// Print to CI log for runner-envelope tuning. Codex audit suggested
-		// stage-level (simulating/proving/submitting) timing in follow-up
-		// if 180s also flakes; this wrapper timing is the minimum viable
-		// diagnostic that doesn't require wallet code changes.
-		console.log(`[tx-sendTx-default] waitForPgResult settled in ${waitMs}ms`)
-		expect(["ok", "error"]).toContain(result.status)
+		// Wait for the wallet's journal to enter `proving` instead of the dApp's
+		// full sendTx promise. See waitForSendTxActiveStage for rationale.
+		const walletPopup = await openPopup(dappConnectedExtensionWithTransactionCap)
+		await waitForSendTxActiveStage(walletPopup)
 	},
 )

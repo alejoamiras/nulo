@@ -285,6 +285,19 @@ export const test = base.extend<{
 	 *  three or more such fixtures (CLAUDE.md "same code in 3 places" threshold).
 	 *  See implementations-plan/e2e-stabilization/lessons/phase-3a.md. */
 	dappConnectedExtensionWithTransactionCap: ExtensionContext & { playgroundPage: Page; accountAddress: string }
+	/** Same as `dappConnectedExtensionWithTransactionCap` BUT pre-grants the
+	 *  `transaction` bundle for up to the FIRST TWO accounts the cap popup
+	 *  exposes. Use this for tests that characterize multi-account session
+	 *  behavior (multi-account-from) without paying the cap-popup cold tax
+	 *  during the test budget. The exposed `accountAddresses` is the array
+	 *  of granted accounts (1 or 2 entries depending on what the wallet
+	 *  exposed). Mirrors the `dappConnectedExtensionWithTransactionCap`
+	 *  pattern; the cap-grant inner helper is intentionally duplicated
+	 *  rather than abstracted for the same audit-independence reason. */
+	dappConnectedExtensionWithFirstTwoAccountsCap: ExtensionContext & {
+		playgroundPage: Page
+		accountAddresses: string[]
+	}
 	/** Fresh browser with extension loaded, **no profile registered**. Per-test
 	 *  scope. Use for tests that drive the import or register flow from
 	 *  scratch (e.g. tests/e2e/import-paths.test.ts). */
@@ -500,6 +513,63 @@ export const test = base.extend<{
 			})
 
 			await use(Object.assign(ctx, { playgroundPage, accountAddress }))
+			await ctx.browser.close()
+		},
+		{ scope: "test" },
+	],
+
+	dappConnectedExtensionWithFirstTwoAccountsCap: [
+		// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
+		async ({}, use) => {
+			const phase = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+				try {
+					return await fn()
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err)
+					throw new Error(`[dappConnectedExtensionWithFirstTwoAccountsCap:${name}] ${msg}`)
+				}
+			}
+			const ctx = await phase("launchExtension", () => launchExtension())
+			await phase("registerProfile", () => registerProfile(ctx))
+			const setupPage = await phase("openPopup", () => openPopup(ctx))
+			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
+			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
+			await setupPage.close()
+			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
+
+			// Pre-grant the `transaction` bundle to the first 1-or-2 accounts the
+			// cap popup exposes. Multi-account-session tests opt into this fixture
+			// to push the cold cap-popup work into hookTimeout (300s) instead of
+			// paying it during the test budget. Tests that need to characterize
+			// "wallet picks first session account regardless of opts.from" rely on
+			// having 2+ accounts granted — but tolerate 1 if that's what the wallet
+			// exposed (characterization holds either way).
+			const accountAddresses = await phase("grantFirstTwoAccountsTransactionCap", async () => {
+				await playgroundPage.evaluate(() => {
+					const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
+					if (!select) throw new Error("pg-bundle-select not present on playground page")
+					select.value = "transaction"
+					select.dispatchEvent(new Event("change", { bubbles: true }))
+				})
+				const seqGrant = await snapshotResultSeq(playgroundPage)
+				// 60s timeouts because this is THE first cap popup on a cold shard.
+				const capPopupP = waitForPopup(ctx, "capabilities", { timeout: 60_000 })
+				await clickByTestId(playgroundPage, "pg-btn-requestCapabilities")
+				const capPopup = await capPopupP
+				await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 60_000 })
+				const accountIds = await capPopup.evaluate(() =>
+					[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) =>
+						r.getAttribute("data-account-id"),
+					),
+				)
+				const granted = accountIds.slice(0, Math.min(2, accountIds.length)).filter((a): a is string => !!a)
+				if (granted.length === 0) throw new Error("capabilities popup returned no accounts")
+				await approveCapabilities(capPopup, { accounts: granted })
+				await waitForPgResult(playgroundPage, "requestCapabilities", seqGrant, 30_000)
+				return granted
+			})
+
+			await use(Object.assign(ctx, { playgroundPage, accountAddresses }))
 			await ctx.browser.close()
 		},
 		{ scope: "test" },
