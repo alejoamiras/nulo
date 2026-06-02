@@ -24,11 +24,29 @@
   status + error, assert ok.
 - Run launched on a fresh sandbox; result pending.
 
-## Decision tree (next fire, from the run)
-- **status=ok** → expand to 3× confirm; then build the funding fixture +
-  `concurrent-sendtx-noFrom-confirm.test.ts`. Replace this spike.
-- **reaches an active stage (proving) but fails** → boundary test is viable (active
-  is enough); build the NO_FROM approval-boundary test instead.
-- **errors before active (build/simulate)** → BOTH confirm + boundary infeasible
-  (the plan's boundary fallback assumed an active stage is reachable) → STOP +
-  report with the empirical evidence.
+## RESULT (spike run, fresh sandbox)
+`status=error`. The private NO_FROM failed during the kernelless DISCOVERY
+simulation (`simulatePublic=true skipTxValidation=true`) with a Noir constraint
+error: **`Cannot satisfy constraint 'self._is_some'`** (functionSelector 851827960).
+It never reached an active/proving stage — it dies at simulate.
+
+Read: under DefaultEntrypoint there is no account-contract context, so an
+arbitrary `transfer_public_to_private(from=accountAddress, …)` can't satisfy the
+token's note/authorization constraints. The kernelless authwit discovery doesn't
+fix this — the constraint fails inside the discovery sim itself. Other token
+private fns face the same (transfers need notes + from-auth; `mint_to_private` is
+minter-gated). NO_FROM/DefaultEntrypoint isn't designed for a user-account token
+transfer.
+
+## CONCLUSION → blocked (report, don't thrash)
+- The realistic candidate errors BEFORE active → BOTH the confirm test and the
+  boundary fallback are infeasible (both need an active stage).
+- No obvious NO_FROM-compatible private call that confirms; chasing the Noir
+  constraint is open-ended (the "don't thrash" line).
+- **Crucially redundant:** the execution mutex is ALREADY e2e-proven on the
+  STANDARD path (v3 `concurrent-sendtx-confirm`, merged), and the NO_FROM path
+  uses the byte-identical `acquireExecutionSlot(originKey, onEnqueued)` integration
+  (unit-tested + codex ship-it). A NO_FROM-specific e2e adds little.
+- Per the loop's hard limit (real design fork → STOP + report), and since P1 (the
+  actual deliverable) is complete + validated, stop here and report. Recommend
+  shipping P1 alone; defer the NO_FROM e2e as a documented follow-up.
