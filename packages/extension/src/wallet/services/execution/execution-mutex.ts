@@ -39,6 +39,27 @@ export class ExecutionMutexAbortError extends Error {
 	}
 }
 
+/** Thrown from `acquire` when a backpressure cap is hit BEFORE enqueue — either
+ *  the per-origin contribution cap or the coarse total-lane cap. Distinct class
+ *  so the caller can map it onto the dApp-facing `TooManyPendingError` (→ -32005)
+ *  rather than a generic failure. The `key` is the internal lane key
+ *  (profileId:chainId); it is NOT surfaced to the dApp (no origin/profile oracle). */
+export class ExecutionMutexCapacityError extends Error {
+	public constructor(key: string) {
+		super(`ExecutionMutex capacity reached for key "${key}"`)
+		this.name = "ExecutionMutexCapacityError"
+	}
+}
+
+/** Backpressure caps for a capped `acquire`. When present, the per-origin and
+ *  total-lane depths are tracked and enforced. `originKey` MUST be the canonical
+ *  browser origin (NOT a display name or sessionId — both are spoofable/multipliable). */
+export type AcquireCaps = {
+	originKey: string
+	maxOriginDepth: number
+	maxLaneDepth: number
+}
+
 /** Release callback returned by `acquire`. Idempotent — calling it more than
  *  once is a no-op. MUST be called (use `try/finally`) or the key stays locked
  *  forever. */
@@ -50,15 +71,44 @@ export class ExecutionMutex {
 	 *  awaits the current tail, then installs its own promise as the new tail. */
 	private readonly tails = new Map<string, Promise<void>>()
 
+	/** Per-lane depth (waiting + holding). Tracked ONLY for capped acquires, so
+	 *  uncapped callers (and the FIFO-mechanics unit tests) are unaffected. */
+	private readonly laneDepth = new Map<string, number>()
+	/** Per-(lane, origin) depth, keyed `${laneKey}|${originKey}` (a lane key
+	 *  `profileId:chainId` and a browser origin both exclude `|`, so the join is
+	 *  unambiguous — and ASCII, unlike a NUL separator which makes git treat the
+	 *  source as binary). */
+	private readonly originDepth = new Map<string, number>()
+
 	/**
 	 * Acquire the lock for `key`, FIFO. Resolves with a release callback once
 	 * the slot is granted. If `signal` fires before the grant, rejects with
 	 * `ExecutionMutexAbortError` and removes this waiter from the chain without
 	 * disturbing FIFO order for successors.
+	 *
+	 * When `caps` is given, a backpressure cap is enforced BEFORE enqueue: reject
+	 * with `ExecutionMutexCapacityError` if the per-origin OR total-lane depth is
+	 * already at its limit. A capacity reject mutates nothing. Depth is
+	 * incremented only after passing both caps, and decremented exactly once in
+	 * `release` (the sole decrement path) — an aborted waiter's slot is freed when
+	 * its chained release fires (conservative over-count; never an under-count, so
+	 * the cap cannot be bypassed).
 	 */
-	public async acquire(key: string, signal?: AbortSignal): Promise<ExecutionMutexRelease> {
+	public async acquire(key: string, signal?: AbortSignal, caps?: AcquireCaps): Promise<ExecutionMutexRelease> {
 		// Fast reject: already aborted before we even enqueue.
 		if (signal?.aborted) throw new ExecutionMutexAbortError(key)
+
+		// Backpressure cap — checked + applied atomically before enqueue.
+		const originDepthKey = caps ? `${key}|${caps.originKey}` : undefined
+		if (caps && originDepthKey) {
+			const laneNow = this.laneDepth.get(key) ?? 0
+			const originNow = this.originDepth.get(originDepthKey) ?? 0
+			if (laneNow >= caps.maxLaneDepth || originNow >= caps.maxOriginDepth) {
+				throw new ExecutionMutexCapacityError(key)
+			}
+			this.laneDepth.set(key, laneNow + 1)
+			this.originDepth.set(originDepthKey, originNow + 1)
+		}
 
 		const prior = this.tails.get(key) ?? Promise.resolve()
 
@@ -75,6 +125,15 @@ export class ExecutionMutex {
 			released = true
 			// GC the key if no one enqueued behind us (tail still points at mine).
 			if (this.tails.get(key) === mine) this.tails.delete(key)
+			// Sole decrement path for the depth counters (idempotent via `released`).
+			if (originDepthKey) {
+				const lane = (this.laneDepth.get(key) ?? 1) - 1
+				if (lane <= 0) this.laneDepth.delete(key)
+				else this.laneDepth.set(key, lane)
+				const origin = (this.originDepth.get(originDepthKey) ?? 1) - 1
+				if (origin <= 0) this.originDepth.delete(originDepthKey)
+				else this.originDepth.set(originDepthKey, origin)
+			}
 			resolveMine()
 		}
 
@@ -92,7 +151,8 @@ export class ExecutionMutex {
 			// enqueued behind us is awaiting `mine`. Chain `mine`'s resolution to
 			// the REAL prior holder so the successor still serializes correctly
 			// (it proceeds only after `prior` actually completes), and so the key
-			// is GC'd if we were the tail.
+			// is GC'd if we were the tail. The chained release also decrements the
+			// depth counters (conservative over-count until `prior` settles).
 			//
 			// `released` guard makes this safe even if a (buggy) double-fire of the
 			// signal occurs — only the first resolves.

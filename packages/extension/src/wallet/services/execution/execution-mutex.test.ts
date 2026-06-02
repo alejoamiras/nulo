@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { ExecutionMutex, ExecutionMutexAbortError } from "./execution-mutex"
+import { ExecutionMutex, ExecutionMutexAbortError, ExecutionMutexCapacityError } from "./execution-mutex"
 
 /** Microtask flush helper — lets queued `.then` callbacks run. */
 const tick = () => new Promise<void>((r) => setTimeout(r, 0))
@@ -197,5 +197,71 @@ describe("ExecutionMutex", () => {
 		const r2 = await m.acquire("k")
 		expect(m.isLocked("k")).toBe(true)
 		r2()
+	})
+})
+
+describe("ExecutionMutex — backpressure cap (P1)", () => {
+	test("per-origin cap rejects at the limit and frees one slot per release", async () => {
+		const m = new ExecutionMutex()
+		const caps = { originKey: "https://a.example", maxOriginDepth: 2, maxLaneDepth: 99 }
+		const rA = await m.acquire("L", undefined, caps) // holds; origin depth 1
+		const pB = m.acquire("L", undefined, caps) // queued; origin depth 2
+		await tick()
+		// 3rd for the same origin exceeds maxOriginDepth=2 — rejects, mutates nothing.
+		await expect(m.acquire("L", undefined, caps)).rejects.toBeInstanceOf(ExecutionMutexCapacityError)
+		rA() // release holder → frees a slot; B acquires
+		const rB = await pB
+		// A slot is free again: a NEW acquire is accepted (queues behind B), not rejected.
+		const pC = m.acquire("L", undefined, caps)
+		await tick()
+		rB() // release B → C acquires
+		const rC = await pC
+		rC()
+		// Full drain leaves no phantom depth — a fresh capped acquire still works.
+		const rD = await m.acquire("L", undefined, caps)
+		rD()
+		expect(m.isLocked("L")).toBe(false)
+	})
+
+	test("total-lane cap rejects across origins even when each origin is under its cap", async () => {
+		const m = new ExecutionMutex()
+		const mk = (o: string) => ({ originKey: o, maxOriginDepth: 99, maxLaneDepth: 2 })
+		const rA = await m.acquire("L", undefined, mk("a")) // lane depth 1
+		const pB = m.acquire("L", undefined, mk("b")) // lane depth 2 (different origin)
+		await tick()
+		// A third origin is under its own cap but the lane is full.
+		await expect(m.acquire("L", undefined, mk("c"))).rejects.toBeInstanceOf(ExecutionMutexCapacityError)
+		rA()
+		const rB = await pB
+		rB()
+	})
+
+	test("aborted waiter's depth frees only when the holder releases (conservative over-count)", async () => {
+		const m = new ExecutionMutex()
+		const caps = { originKey: "o", maxOriginDepth: 2, maxLaneDepth: 99 }
+		const rA = await m.acquire("L", undefined, caps) // holds; depth 1
+		const ac = new AbortController()
+		const pB = m.acquire("L", ac.signal, caps) // queued; depth 2
+		await tick()
+		ac.abort()
+		await expect(pB).rejects.toBeInstanceOf(ExecutionMutexAbortError)
+		// Conservative: B's slot is NOT freed yet (its release is chained to A's),
+		// so the lane still reads full — a new acquire hits the cap.
+		await expect(m.acquire("L", undefined, caps)).rejects.toBeInstanceOf(ExecutionMutexCapacityError)
+		// A releases → B's chained release fires → both slots free → new acquire fits.
+		rA()
+		await tick()
+		const rC = await m.acquire("L", undefined, caps)
+		rC()
+		expect(m.isLocked("L")).toBe(false)
+	})
+
+	test("uncapped acquire never hits the capacity cap (depth tracking is cap-only)", async () => {
+		const m = new ExecutionMutex()
+		const r0 = await m.acquire("L")
+		const ps = [m.acquire("L"), m.acquire("L"), m.acquire("L")]
+		r0()
+		for (const p of ps) (await p)()
+		expect(m.isLocked("L")).toBe(false)
 	})
 })
