@@ -1,5 +1,5 @@
 <route lang="json">
-{ "meta": { "title": "Meet Aztec" } }
+{ "meta": { "title": "Fees on Aztec" } }
 </route>
 
 <script setup lang="ts">
@@ -8,26 +8,27 @@ const router = useRouter()
 const cards = [
 	{
 		number: "01",
-		title: "Public and private state",
-		body: "Aztec runs smart contracts with both public state and private state. You decide what's shared. The rest stays encrypted, visible only to you.",
+		title: "Fee juice",
+		body: "Every Aztec transaction pays a fee in fee juice — the network's native asset, like gas on Ethereum. You'll need some before you can send.",
 	},
 	{
 		number: "02",
-		title: "Proofs on your machine",
-		body: "Private state only stays private if you generate the proof yourself. Every Aztec transaction builds its zero-knowledge proof on your machine, before anything leaves it. The network only ever sees the proof.",
+		title: "Private fee juice",
+		body: "Hold your fee juice in your private balance and the fees you pay stay private too. Your account, your amount, your transaction — only you see them.",
 	},
 	{
 		number: "03",
-		title: "Proofs take time",
-		body: "Generating proofs is computationally heavy. In the browser, a single transfer can take 10 to 30 seconds. Running the prover natively cuts that to a fraction.",
+		title: "Sponsored fees",
+		body: "Apps can pay your fees for you, or accept other tokens as payment. The wallet's fee settings handles all three modes.",
 	},
 ]
 
-// Continue advances into the fee-juice explainer step. Skip is intentionally a
-// SEPARATE handler that goes straight to /accelerator — the accelerator gate
-// still applies, same constraint that pre-dated the fees step.
+// Continue routes onward into the accelerator detection. Skip lands at the
+// same place — the explainer is short enough that "Skip" just means "I've
+// read enough"; the user can revisit fee details from the wallet's fee
+// settings panel later.
 function goContinue() {
-	router.push("/onboarding/fees")
+	router.push("/onboarding/accelerator")
 }
 function goSkip() {
 	router.push("/onboarding/accelerator")
@@ -36,12 +37,12 @@ function goSkip() {
 
 <template>
 	<OnboardingPage :gap="40">
-		<StepIndicator :current="2" />
+		<StepIndicator :current="3" />
 		<Flex direction="column" gap="16" :class="$style.hero">
-			<BrutalistTitle main="Meet" sub="Aztec" />
+			<BrutalistTitle main="Fees on" sub="Aztec" />
 			<div :class="$style.hero_bar" />
 			<Text size="14" color="secondary" height="150">
-				Three things to know before your first transaction.
+				Three things to know about paying for transactions on Aztec.
 			</Text>
 		</Flex>
 
@@ -57,18 +58,15 @@ function goSkip() {
 			<Button
 				variant="cta"
 				size="large"
-				data-testid="onboarding-learn-continue"
+				data-testid="onboarding-fees-continue"
 				@click="goContinue"
 			>
 				Continue
 			</Button>
-			<!-- Skip intro routes to /accelerator, NOT /done — the accelerator
-				gate still applies (Codex v2 critique). Continue (above) routes
-				into the new /fees explainer step. -->
 			<button
 				type="button"
 				:class="$style.skipLink"
-				data-testid="onboarding-learn-skip"
+				data-testid="onboarding-fees-skip"
 				@click="goSkip"
 			>
 				Skip intro

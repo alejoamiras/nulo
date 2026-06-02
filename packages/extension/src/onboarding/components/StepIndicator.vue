@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * Onboarding step indicator. Four-step brutalist row:
- *   [01]     [02]     [03]     [04]
- *   ━━━━━    ━━━━━    ─────    ─────
- *   SETUP    AZTEC    SPEED    DONE
+ * Onboarding step indicator. Five-step brutalist row:
+ *   [01]     [02]     [03]     [04]     [05]
+ *   ━━━━━    ━━━━━    ━━━━━    ─────    ─────
+ *   SETUP    AZTEC    FEES     SPEED    DONE
  *
  * The 2px bar underneath each cell carries the state:
  *   active:  --nulo-accent (warm off-white)
@@ -13,13 +13,14 @@
  * Welcome page intentionally has no indicator — it owns the canvas with
  * its own hero. Indicator appears starting from /create.
  */
-defineProps<{ current: 1 | 2 | 3 | 4 }>()
+defineProps<{ current: 1 | 2 | 3 | 4 | 5 }>()
 
 const steps: Array<{ num: string; label: string }> = [
 	{ num: "01", label: "Setup" },
 	{ num: "02", label: "Aztec" },
-	{ num: "03", label: "Speed" },
-	{ num: "04", label: "Done" },
+	{ num: "03", label: "Fees" },
+	{ num: "04", label: "Speed" },
+	{ num: "05", label: "Done" },
 ]
 </script>
 
@@ -46,7 +47,7 @@ const steps: Array<{ num: string; label: string }> = [
 <style module>
 .row {
 	display: grid;
-	grid-template-columns: repeat(4, 1fr);
+	grid-template-columns: repeat(5, 1fr);
 	gap: 8px;
 	width: 100%;
 	margin: 0 0 16px;

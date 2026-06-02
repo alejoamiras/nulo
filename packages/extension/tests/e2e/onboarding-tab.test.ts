@@ -38,8 +38,16 @@ describe("onboarding tab", () => {
 		// Wait for the bootstrap to finish + route to /learn
 		await waitForHash(page, "#/onboarding/learn", 30_000)
 
-		// Continue to accelerator
+		// Continue from learn now routes into the fee-juice explainer step
+		// (was direct-to-accelerator pre-arc). Skip on learn still routes
+		// straight to /accelerator — covered by the dedicated skip test below.
 		await clickByTestId(page, "onboarding-learn-continue")
+		await waitForHash(page, "#/onboarding/fees", 10_000)
+
+		// Continue from /fees → /accelerator. Skip on /fees routes to the
+		// same destination (the explainer is short; no value in a dedicated
+		// skip-to-done shortcut).
+		await clickByTestId(page, "onboarding-fees-continue")
 		await waitForHash(page, "#/onboarding/accelerator", 10_000)
 
 		// Wait for the status card to settle (any terminal state). If 'active'
