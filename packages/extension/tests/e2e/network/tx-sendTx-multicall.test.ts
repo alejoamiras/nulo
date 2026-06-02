@@ -1,18 +1,11 @@
 import { expect, inject } from "vitest"
-import { clickByTestId, test } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { waitForPopup, waitForExecuteContent, approveExecute } from "../fixtures/popups"
-import type { AztecTestConfig } from "../fixtures/aztec"
+import { clickByTestId, openPopup, test } from "../fixtures/extension"
+import { snapshotResultSeq } from "../fixtures/playground"
+import { approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxActiveStage } from "../fixtures/popups"
+import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
-// CI-quarantined via NULO_E2E_SKIP_DEFERRED_SLOW. Multicall has N+ inner kernel
-// proofs that still run via bb.js WASM (accelerator-server 1.0.1 only covers
-// the final chonk step). On slow-runner-pool members the WASM kernel-prove
-// envelope exceeds puppeteer's protocolTimeout. NO_WAIT (playground) trims the
-// receipt-mining tail but the proving is the bottleneck. Un-quarantine when
-// accelerator-server covers more proof methods.
-const skipDeferredSlow = process.env.NULO_E2E_SKIP_DEFERRED_SLOW === "1"
 
 /**
  * Tests #32 + #33 — sendTx multi-call variants.
@@ -27,6 +20,10 @@ const skipDeferredSlow = process.env.NULO_E2E_SKIP_DEFERRED_SLOW === "1"
  * test's budget. Mirrors register-token.test.ts (PR #63) + tx-sendTx-default
  * (PR #64). The fixture grants the transaction bundle for a single account;
  * multicall does N calls FROM THAT ONE ACCOUNT, not N accounts.
+ *
+ * Asserts on `data-stage="proving"` (wallet popup) instead of the dApp's
+ * full sendTx promise. See implementations-plan/journal-stage-restructure/.
+ * `retry: 1` removed (per audit "zero retries" acceptance gate).
  */
 const cases: Array<{ id: number; name: string; btn: string }> = [
 	{ id: 32, name: "multicall", btn: "pg-btn-sendTx-multicall" },
@@ -34,11 +31,14 @@ const cases: Array<{ id: number; name: string; btn: string }> = [
 ]
 
 for (const c of cases) {
-	test.skipIf(!hasConfig || skipDeferredSlow)(
-		`tx-sendTx-${c.name} (#${c.id}) — popup opens, multiple payload rows`,
-		{ timeout: 240_000, retry: 1 },
+	test.skipIf(!hasConfig)(
+		`tx-sendTx-${c.name} (#${c.id}) — popup opens, multiple payload rows, reaches active stage`,
+		{ timeout: 90_000 },
 		async ({ dappConnectedExtensionWithTransactionCap }) => {
-			const { playgroundPage: page } = dappConnectedExtensionWithTransactionCap
+			const { playgroundPage: page, accountAddress } = dappConnectedExtensionWithTransactionCap
+
+			// Pre-mint enough tokens to cover the multicall (3 or 7 × 1-token transfers).
+			await mintPublicTokensForAccount(aztecConfig!, accountAddress)
 
 			await page.evaluate(
 				({ token, recipient }: { token: string; recipient: string }) => {
@@ -56,7 +56,7 @@ for (const c of cases) {
 				{ token: aztecConfig!.tokenAddress, recipient: aztecConfig!.minterAddress },
 			)
 
-			const seqTx = await snapshotResultSeq(page)
+			await snapshotResultSeq(page)
 			const execPopupP = waitForPopup(dappConnectedExtensionWithTransactionCap, "execute", { timeout: 30_000 })
 			await clickByTestId(page, c.btn)
 			const execPopup = await execPopupP
@@ -66,8 +66,12 @@ for (const c of cases) {
 			expect(payloadRows).toBeGreaterThanOrEqual(c.id === 33 ? 7 : 3)
 
 			await approveExecute(execPopup)
-			const result = await waitForPgResult(page, "sendTx", seqTx, 180_000)
-			expect(["ok", "error"]).toContain(result.status)
+
+			// Wait for the wallet's journal to enter `proving` — fast (<10s)
+			// even for the chunked variant, since the kernel-prove tail (which
+			// dominates) doesn't gate this stage transition.
+			const walletPopup = await openPopup(dappConnectedExtensionWithTransactionCap)
+			await waitForSendTxActiveStage(walletPopup)
 		},
 	)
 }

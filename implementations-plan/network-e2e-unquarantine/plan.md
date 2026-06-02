@@ -4,6 +4,8 @@
 
 **Audit cycle:** [`audit-codex.md`](./audit-codex.md) (`approve-with-fixes`) + [`audit-opus.md`](./audit-opus.md) (`approve-with-fixes`). Both flagged the same two structural issues — phase ordering should put `sim-methods` first for cleaner cap-popup-class attribution, and the `multi-account-from` fixture migration should land upfront rather than deferred. Both applied. Plus prose corrections (H-OP-3 mechanism, file-scope, multicall chunking, Q3 framing). Details in §12 "Audit response log."
 
+**Status update (revised):** the partial resolution recorded throughout this doc graduated to **full resolution** via [`../journal-stage-restructure/plan.md`](../journal-stage-restructure/plan.md). The 3 affected tests (`tx-sendTx-default`, `multi-account-from`, `tx-sendTx-multicall`) are now un-quarantined via journal-stage assertion (`waitForSendTxProvingStage()`); the `NULO_E2E_SKIP_DEFERRED_SLOW` gate is removed from CI. The fixture migrations + NO_WAIT improvements from this plan stayed as strict-better foundations.
+
 ## 1. Goal
 
 Restore network-e2e to a "zero skips, zero artificially-bumped waits" state. The accelerator integration (PR #67) removes the bb.wasm proving variability that motivated quarantining 3 tests + bumping `cancel-mid-prove` waits. With native proving and the existing pre-grant fixture pattern (built during PRs #63/#64), the artificial gates are no longer load-bearing.

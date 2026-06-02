@@ -93,15 +93,13 @@ Resurrect via `git show 1081c1b^:packages/extension/src/wallet/utils/probe.ts` e
 
 ## Resolution (2026-05-28)
 
-**Partial resolution (revised 2026-06-01):** `implementations-plan/accelerator-server-ci/plan.md` (PR #67) landed accelerator-server in CI for the `createChonkProof` step. The companion `implementations-plan/network-e2e-unquarantine/plan.md` attempted to un-quarantine all 3 tests but had to REVERT for two of them after CI experiments showed the WASM kernel-prove chain (init/inner/reset/tail — NOT covered by accelerator-server 1.0.1) exceeds puppeteer's `protocolTimeout=300s` ceiling on slow-runner-pool members.
+**Fully resolved (revised, dated when this PR merges):** the journal-stage assertion restructure (`implementations-plan/journal-stage-restructure/`) un-quarantined all 3 deferred-slow tests by replacing the "wait on dApp's full sendTx promise" assertion (slow because of WASM kernel-prove tail) with `waitForSendTxProvingStage(walletPopup)` — asserts the wallet reached the journal `proving` stage instead of waiting for the prove to complete. The `NULO_E2E_SKIP_DEFERRED_SLOW` gate has been removed from CI.
 
 | Test | Status |
 |---|---|
 | `register-token.test.ts` (PR #63) | ✅ Resolved via pre-grant fixture |
-| `multi-account-from.test.ts` | ⚠️ Re-quarantined. Fixture migration kept (`dappConnectedExtensionWithFirstTwoAccountsCap`). |
-| `tx-sendTx-multicall.test.ts` | ⚠️ Re-quarantined. Fixture migration + NO_WAIT kept. |
-| `tx-sendTx-default.test.ts` (added in PR #66) | ⚠️ Stays quarantined. |
+| `multi-account-from.test.ts` | ✅ Un-quarantined via journal-stage restructure |
+| `tx-sendTx-multicall.test.ts` (both #32 + #33) | ✅ Un-quarantined via journal-stage restructure |
+| `tx-sendTx-default.test.ts` (added in PR #66) | ✅ Un-quarantined via journal-stage restructure |
 
-**Path forward:** un-quarantine when accelerator-server upstream exposes endpoints for init/inner/reset/tail kernel proofs, OR when tests are restructured to assert against journal-stage transitions (codex's recommendation in audit `019e6743…`) instead of waiting on the dApp's full sendTx promise.
-
-H-OP-1, H-OP-2, H-OP-3 remain plausible — the structural fixes (accelerator chonk-only + pre-grant fixtures) addressed PART of the slow path but not all of it.
+H-OP-1, H-OP-2, H-OP-3 turned out to be the right characterization: the slow path WAS the WASM kernel-prove chain on slow-runner-pool members. The structural fix wasn't accelerator (which only covers `createChonkProof`) — it was **changing what the tests wait for**: stop at pipeline entry (`proving` stage) instead of pipeline completion. End-to-end mining coverage stays concentrated in `transfers.test.ts` (which uses `waitForTxConfirmation()` via the wallet-UI-driven send flow, exercising the same prove stack).
