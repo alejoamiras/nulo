@@ -1,15 +1,30 @@
 # v3 follow-ups — execution-mutex queue cap (P1) + NO_FROM concurrency e2e (P2)
 
-Status: **planning** (deep-plan protocol, Tier B). Two deferred findings from the
-v3 post-impl codex review (`../dapp-interaction-lock-fix-v3/audit-codex-postimpl.md`).
-Audit transcript: [`audit-codex.md`](audit-codex.md). **Decision pending at the
-approval gate:** the P1 cap principal (see ⭑ below).
+Status: **P1 shipped, P2 deferred** (deep-plan protocol, Tier B). Two deferred
+findings from the v3 post-impl codex review
+(`../dapp-interaction-lock-fix-v3/audit-codex-postimpl.md`).
+Audit transcript: [`audit-codex.md`](audit-codex.md). Owner adopted the hybrid cap
+(⭑ below) at the approval gate.
 
 Owner's clarifying answers: P1 = cap all sendTx + reject overflow; P2 = full
 both-confirm via funding fixture. **Codex audit upgraded P1's cap design** — see ⭑.
 
 **Ship as two separate PRs** (codex + opus agree): P1 is a ready behavior/security
 fix; P2 is spike-gated test-infra research. Don't couple them.
+
+**P2 outcome — DEFERRED as a documented follow-up.** The spike found no
+NO_FROM-compatible private call that reaches an active stage: the realistic
+`transfer_public_to_private` candidate fails at the kernelless discovery sim
+(`Cannot satisfy constraint 'self._is_some'`, selector 851827960) because
+DefaultEntrypoint carries no account-contract context to authorize a user-account
+transfer. Both the confirm test and the boundary fallback need an active stage, so
+both are infeasible without new fixtures, and chasing the Noir constraint is
+open-ended. The execution mutex is already e2e-proven on the STANDARD path (v3
+`concurrent-sendtx-confirm`, merged) and the NO_FROM path reuses the byte-identical
+`acquireExecutionSlot` integration (unit-tested + codex ship-it), so a
+NO_FROM-specific e2e is largely redundant. Full investigation:
+[`lessons/phase-5.md`](lessons/phase-5.md). The unused P2 playground scaffolding
+(`pg-btn-sendTx-noFrom-private`) was reverted so the P1 PR ships clean.
 
 ---
 
