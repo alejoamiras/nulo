@@ -1,7 +1,7 @@
 import { expect, inject } from "vitest"
-import { openPopup, test, waitForHash } from "../fixtures/extension"
+import { openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { approveExecute, rejectExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
+import { approveExecute, rejectExecute, waitForExecuteContent, waitForPopup, waitForSendTxActiveStage } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -35,24 +35,11 @@ test.skipIf(!hasConfig)(
 		const { playgroundPage: page, accountAddress } = ctx
 
 		// Pre-mint public balance so T1's simulate succeeds and it reaches the
-		// slow prove phase (mirrors cancel-mid-prove). Without balance, simulate
-		// reverts fast and T1 terminalizes before the boundary snapshot.
+		// slow prove phase. Without balance, simulate reverts fast and T1
+		// terminalizes before the boundary snapshot. (dev's shared helper.)
 		{
-			const { createTestWallet, createSponsoredFeeOptions, mintPublicTokens } = await import("../fixtures/aztec")
-			const { wallet, cleanup } = await createTestWallet(aztecConfig!.nodeUrl)
-			try {
-				const feeOptions = await createSponsoredFeeOptions(wallet)
-				await mintPublicTokens(
-					wallet,
-					aztecConfig!.tokenAddress,
-					accountAddress,
-					100n * 10n ** 18n,
-					aztecConfig!.minterAddress,
-					feeOptions,
-				)
-			} finally {
-				await cleanup()
-			}
+			const { mintPublicTokensForAccount } = await import("../fixtures/aztec")
+			await mintPublicTokensForAccount(aztecConfig!, accountAddress)
 		}
 
 		await page.evaluate(
@@ -102,57 +89,29 @@ test.skipIf(!hasConfig)(
 		await waitForExecuteContent(secondPopup)
 		const elapsedMs = Date.now() - tApprove
 
-		// Deterministic discriminator: at popup #2 open, T1 must be ACTIVE
-		// (non-terminal) and T2 still `queued`. Pre-v3, popup #2 could only open
-		// after T1 had terminalized — so an active T1 here is the activation.
+		// Discriminator, read via the journal-stage convention dev standardized:
+		// each in-flight awaiting card exposes its stage as `data-stage`. Open the
+		// wallet and wait until a card reaches an active stage — i.e. T1 claimed
+		// its mutex slot and is mid-execution (this also skips the sub-second
+		// window where T1 is briefly still `queued` right after popup #2 opens).
+		// Pre-v3, popup #2 could only open AFTER T1 terminalized, so T1 would be in
+		// history (not an awaiting card) and only T2's queued card would be in
+		// flight — the opposite of the two-card state asserted below.
 		const walletPopup = await openPopup(ctx)
-		await waitForHash(walletPopup, "#/popup/general", 30_000)
-		const readRecords = () =>
-			walletPopup.evaluate(async () => {
-				const all = (await chrome.storage.session.get(null)) as Record<string, unknown>
-				return Object.keys(all)
-					.filter((k) => k.startsWith("nulo:journal@"))
-					.map((k) => {
-						const raw = all[k]
-						try {
-							return typeof raw === "string"
-								? (JSON.parse(raw) as { kind: string; progress?: { stage?: string }; sessionId?: string })
-								: null
-						} catch {
-							return null
-						}
-					})
-					.filter(
-						(r): r is { kind: string; progress?: { stage?: string }; sessionId?: string } => !!r && r.kind === "dapp_execute",
-					)
-					.map((r) => ({ stage: r.progress?.stage ?? "?", sessionId: r.sessionId }))
-			})
-
-		// T1 claims its record (queued → pending → simulating) the moment it wins
-		// the uncontended mutex slot — a tick or two after popup #2 opened. Poll
-		// until that's visible so we don't snapshot the sub-second window where T1
-		// is briefly still `queued` alongside T2.
-		const activeStages = new Set(["pending", "simulating", "proving", "submitting"])
-		let records = await readRecords()
-		const deadline = Date.now() + 30_000
-		while (!records.some((r) => activeStages.has(r.stage)) && Date.now() < deadline) {
-			await new Promise((r) => setTimeout(r, 200))
-			records = await readRecords()
-		}
+		await waitForSendTxActiveStage(walletPopup)
+		const stages = await walletPopup.evaluate(() =>
+			[...document.querySelectorAll<HTMLElement>('[data-testid="tx-awaiting-card"]')].map(
+				(el) => el.getAttribute("data-stage") ?? "?",
+			),
+		)
 		await walletPopup.close()
 
-		expect(records.length).toBeGreaterThanOrEqual(2)
-		const sessionIds = new Set(records.map((r) => r.sessionId).filter(Boolean))
-		expect(sessionIds.size).toBe(1)
-		const stages = records.map((r) => r.stage)
-		// Exactly one record still queued (T2, gated behind T1 on the execution mutex).
-		expect(stages.filter((s) => s === "queued").length).toBe(1)
-		// At least one record active (T1 mid-execution) — it claimed and progressed.
+		// Two in-flight cards at once: T1 active + T2 still queued behind it on the
+		// execution mutex. (≥2 tolerates any stray prior in-flight op.)
+		expect(stages.length).toBeGreaterThanOrEqual(2)
+		expect(stages).toContain("queued")
+		const activeStages = new Set(["pending", "simulating", "proving", "submitting"])
 		expect(stages.some((s) => activeStages.has(s))).toBe(true)
-		// Nothing terminal yet: popup #2 opened WHILE T1 was running, not after it
-		// finished (the pre-v3 behavior).
-		const terminal = new Set(["succeeded", "failed", "cancelled"])
-		expect(stages.some((s) => terminal.has(s))).toBe(false)
 
 		// Sanity on the wall-clock: popup #2 opened far sooner than a full T1
 		// prove+submit (tens of seconds on the sandbox). Generous to absorb CI

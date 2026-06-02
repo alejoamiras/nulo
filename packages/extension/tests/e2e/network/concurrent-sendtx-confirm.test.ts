@@ -31,23 +31,10 @@ test.skipIf(!hasConfig)(
 	async ({ dappConnectedExtensionWithTransactionCap: ctx }) => {
 		const { playgroundPage: page, accountAddress } = ctx
 
-		// Pre-mint enough public balance for two transfers of 1.
+		// Pre-mint enough public balance for two transfers of 1. (dev's shared helper.)
 		{
-			const { createTestWallet, createSponsoredFeeOptions, mintPublicTokens } = await import("../fixtures/aztec")
-			const { wallet, cleanup } = await createTestWallet(aztecConfig!.nodeUrl)
-			try {
-				const feeOptions = await createSponsoredFeeOptions(wallet)
-				await mintPublicTokens(
-					wallet,
-					aztecConfig!.tokenAddress,
-					accountAddress,
-					100n * 10n ** 18n,
-					aztecConfig!.minterAddress,
-					feeOptions,
-				)
-			} finally {
-				await cleanup()
-			}
+			const { mintPublicTokensForAccount } = await import("../fixtures/aztec")
+			await mintPublicTokensForAccount(aztecConfig!, accountAddress)
 		}
 
 		await page.evaluate(
