@@ -12,6 +12,7 @@ import EditNetworkPopup from "./EditNetworkPopup.vue"
 import EditProfilePopup from "./EditProfilePopup.vue"
 import ForgotPasswordPopup from "./ForgotPasswordPopup.vue"
 import ImportContactsPopup from "./ImportContactsPopup.vue"
+import IncomingTrustPopup from "./IncomingTrustPopup.vue"
 import NewAccountPopup from "./NewAccountPopup.vue"
 import NewContactPopup from "./NewContactPopup.vue"
 import NewFpcPopup from "./NewFpcPopup.vue"
@@ -28,9 +29,41 @@ import SelectProfilePopup from "./SelectProfilePopup.vue"
 import SelectTokenPopup from "./SelectTokenPopup.vue"
 import TokenMetadataPopup from "./TokenMetadataPopup.vue"
 
+/** Services */
+import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
+
 /** Store */
+import { useCacheStore } from "@/stores/cache.store.ts"
 import { usePopupStore } from "@/stores/popup.store"
 const popupStore = usePopupStore()
+const cacheStore = useCacheStore()
+
+// First-receive friction subscriber. PopupManager is always mounted in
+// the popup app, so this is the canonical place to open the trust prompt
+// when IncomingTransferService discovers a note from an unknown contract.
+const incomingTransferService = new IncomingTransferServiceClient()
+function onIncomingTransferPending(payload) {
+	// Coalesce: if a trust popup is already open for this contract, no-op.
+	// (The service emits pending ONLY on the unknown→pending transition,
+	// so subsequent notes from the same pending contract don't re-emit.
+	// This guard handles the edge case where the user closed the popup
+	// without resolving and a fresh note arrived.)
+	if (popupStore.isOpened("incoming_trust") && cacheStore.incomingTrust?.contract === payload.contract) return
+	cacheStore.incomingTrust = {
+		tokenSymbol: payload.tokenSymbol,
+		tokenDecimals: payload.tokenDecimals,
+		amountRaw: payload.amountRaw,
+		contract: payload.contract,
+		allow: () => incomingTransferService.setTrustAllow(payload.profileId, payload.networkId, payload.contract),
+		reject: () => incomingTransferService.setTrustReject(payload.profileId, payload.networkId, payload.contract),
+	}
+	popupStore.open("incoming_trust")
+}
+incomingTransferService.onIncomingTransferPending.add(onIncomingTransferPending)
+
+onBeforeUnmount(() => {
+	incomingTransferService.disconnect()
+})
 </script>
 
 <template>
@@ -71,4 +104,6 @@ const popupStore = usePopupStore()
 	<ImportContactsPopup :show="popupStore.isOpened('import_contacts')" @onClose="popupStore.close('import_contacts')" />
 
 	<ReceivePopup :show="popupStore.isOpened('receive')" @onClose="popupStore.close('receive')" />
+
+	<IncomingTrustPopup :show="popupStore.isOpened('incoming_trust')" @onClose="popupStore.close('incoming_trust')" />
 </template>

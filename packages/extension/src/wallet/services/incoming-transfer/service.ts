@@ -9,6 +9,7 @@ import { TokenService, type Token, type TokenInfo } from "@/wallet/services/toke
 import { TransactionService, type Tx } from "@/wallet/services/transaction/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { NoteService, type RawNote } from "@/wallet/services/note/service"
+import { ConfigService } from "@/wallet/services/config/service"
 import { IncomingTransferRepository } from "./repository"
 import {
 	INCOMING_TRANSFER_SERVICE_NAME,
@@ -72,6 +73,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		TransactionService.name,
 		OperationJournalService.name,
 		NoteService.name,
+		ConfigService.name,
 	]
 
 	public readonly onIncomingTransferAdded = new EventHandler<IncomingTransferRecord>()
@@ -88,6 +90,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	private transactionService: TransactionService = null!
 	private operationJournalService: OperationJournalService = null!
 	private noteService: NoteService = null!
+	private configService: ConfigService = null!
 
 	/** Singleflight scheduler per `(networkId, accountAddress)`. The interval
 	 *  id keeps each scheduler one-at-a-time. */
@@ -112,6 +115,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		this.transactionService = services.get(TransactionService.name)
 		this.operationJournalService = services.get(OperationJournalService.name)
 		this.noteService = services.get(NoteService.name)
+		this.configService = services.get(ConfigService.name)
 
 		this.tokenService.onTokenAdded.add(this.onTokenAdded)
 		this.tokenService.onTokenDeleted.add(this.onTokenDeleted)
@@ -133,6 +137,17 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		tokenId?: number,
 	): Promise<IncomingTransferRecord[]> {
 		await this.ensureInitialized()
+		// Settings escape hatch: when `incomingTransfersVisible === false`,
+		// records are still persisted (so flipping back on shows history
+		// retroactively) but the activity feed sees an empty list. Useful
+		// for cross-device same-seed users where another device's outgoing
+		// surfaces here as incoming.
+		try {
+			const visible = await this.configService.getValue("incomingTransfersVisible")
+			if (visible === false) return []
+		} catch {
+			// Config service unavailable — fail open (default behaviour).
+		}
 		const records = await this.repo.listForAccount(profileId, networkId, accountAddress)
 		return records
 			.filter((r) => !r.hidden)
@@ -341,17 +356,25 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			const amountRaw = parseNoteAmount(note)
 			if (amountRaw === null) continue
 
-			// First-receive policy: auto-trust the contract on first encounter
-			// so the record is immediately visible. The popup-side first-
-			// receive friction UI is a documented follow-up; once it ships,
-			// flip this branch to transition unknown→pending and emit
-			// onIncomingTransferPending instead. The state machine + Allow/
-			// Reject methods (setTrustAllow/setTrustReject) are already in
-			// place for that flip — only the popup wiring is missing.
+			// First-receive policy: transition unknown → pending and emit a
+			// pending event so the popup can prompt the user for Allow/Reject.
+			// While pending, the record is persisted hidden — `setTrustAllow`
+			// flips queued records visible atomically, `setTrustReject`
+			// keeps them hidden permanently.
 			if (trustState === "unknown") {
-				const updated = await this.repo.setTrust(profileId, networkId, contract, "trusted")
+				const updated = await this.repo.setTrust(profileId, networkId, contract, "pending")
 				this.emit("onIncomingTrustChanged", updated)
-				trustState = "trusted"
+				trustState = "pending"
+				this.emit("onIncomingTransferPending", {
+					profileId,
+					networkId,
+					accountAddress,
+					contract,
+					tokenId: token.id,
+					tokenSymbol: token.symbol,
+					tokenDecimals: token.decimals,
+					amountRaw,
+				})
 			}
 
 			const record = this.buildRecord({ note, profileId, networkId, accountAddress, token, amountRaw, trustState })
@@ -360,8 +383,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			if (trustState === "trusted") {
 				this.emit("onIncomingTransferAdded", record)
 			}
-			// pending / blocked: record persisted hidden, no event. (pending only
-			// reachable post-followup, once the popup UI flips the default.)
+			// pending / blocked: record persisted hidden, no event emit-Added.
 		}
 	}
 
