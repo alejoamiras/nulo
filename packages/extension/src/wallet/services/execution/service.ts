@@ -56,6 +56,7 @@ import { OperationJournalService } from "@/wallet/services/operation-journal/ser
 import type { OperationContext, OperationRecord } from "@/wallet/services/operation-journal/spec"
 import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import { claimOrCreateDappExecuteJournal as claimOrCreateDappExecuteJournalImpl } from "./claim-helper"
+import { ExecutionMutex, ExecutionMutexAbortError, type ExecutionMutexRelease } from "./execution-mutex"
 import { TaskService, type WrappedTask, ExecuteOperationContent, TransferContent } from "@/wallet/services/task/service"
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
@@ -296,6 +297,27 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	 *  in-flight prove pipeline checks `signal.aborted` at each stage
 	 *  boundary and short-circuits with {@link JobCancelledSentinel}. */
 	private activeControllers = new Map<string, AbortController>()
+
+	/** v3: per-(profileId, chainId) FIFO mutex serializing dApp sendTx
+	 *  EXECUTION (build → simulate → prove → submit). Once the session-FIFO
+	 *  baton releases at popup approval, two approved sendTx can both reach
+	 *  execution; this mutex keeps them sequential so T2 doesn't simulate
+	 *  against T1's not-yet-spent private notes (which would get T2 rejected
+	 *  on-chain). Keyed to match PXE's own `chainGuard` scope. Held from
+	 *  before authwit discovery through submit, both send paths. */
+	private readonly executionMutex = new ExecutionMutex()
+
+	/** v3: journal ids currently WAITING on `executionMutex.acquire` (not yet
+	 *  holding). While non-empty, `executionHeartbeatTimer` bumps each record's
+	 *  `updatedAt` so the periodic reaper doesn't false-declare a legitimately-
+	 *  waiting record "stuck" — the Nth concurrent sendTx can wait (N-1)×per-tx
+	 *  while queued, which can exceed the 10-min queued / 2-min pending grace.
+	 *  Membership spans only the acquire wait: a holder uses its stage-transition
+	 *  `updatedAt` bumps (proving grace is 35 min). Stage-agnostic by design —
+	 *  silent-path waiters fast-forward to `pending` before executing. */
+	private readonly executionWaiters = new Set<string>()
+	private executionHeartbeatTimer?: ReturnType<typeof setInterval>
+	private static readonly EXECUTION_WAIT_HEARTBEAT_MS = 30_000
 
 	public constructor(logger: ILogger) {
 		super(EXECUTION_SERVICE_NAME, logger)
@@ -1216,12 +1238,112 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	 * This thin wrapper just binds `this.*` dependencies into the helper's
 	 * dependency injection shape.
 	 */
+	/** Resolve the execution-mutex key for a dApp sendTx: `(profileId, chainId)`,
+	 *  matching PXE's `chainGuard` scope exactly. Both lookups are metadata-only
+	 *  (no PXE call), so calling them before acquiring the mutex is safe — they
+	 *  don't contend on the chain guard. `getNetwork` is re-resolved inside
+	 *  `buildAndEstimateTxRequest` later; the duplicate lookup is a negligible
+	 *  in-memory cost paid for keying correctness. */
+	private async resolveExecutionMutexKey(networkId: string): Promise<string> {
+		const profile = await this.profileService.getActiveProfile()
+		const network = await this.networkService.getNetwork(networkId)
+		return `${profile?.id ?? "noprofile"}:${network.chainId}`
+	}
+
+	/**
+	 * Acquire the per-(profileId, chainId) execution slot for a dApp sendTx,
+	 * FIFO. When a `queuedJournalId` exists (a "Queued" record the user can see
+	 * + cancel), an AbortController is registered under it BEFORE the acquire so
+	 * a user-cancel during the wait aborts `acquire` → surfaces as
+	 * `JobCancelledSentinel` → the dApp sees EIP-1193 4001. That same controller
+	 * is reused by the journal claim (claimed id === queuedJournalId), so it
+	 * lives in `activeControllers` continuously from before the wait through
+	 * execution — strictly safer for the cancel-vs-claim race than registering
+	 * one only after the claim transition.
+	 *
+	 * The waiting record is heartbeated (updatedAt bumped) for the duration of
+	 * the wait so the periodic reaper doesn't declare it stuck.
+	 *
+	 * Returns the mutex release callback (call in `finally`) and the
+	 * pre-acquire controller to thread into the claim.
+	 */
+	private async acquireExecutionSlot(
+		networkId: string,
+		queuedJournalId: string | undefined,
+		onEnqueued?: () => void,
+	): Promise<{ release: ExecutionMutexRelease; preController: AbortController | undefined }> {
+		const mutexKey = await this.resolveExecutionMutexKey(networkId)
+
+		let preController: AbortController | undefined
+		if (queuedJournalId) {
+			preController = new AbortController()
+			this.activeControllers.set(queuedJournalId, preController)
+			this.beginExecutionWait(queuedJournalId)
+		}
+
+		try {
+			// `acquire` installs this request as the FIFO tail SYNCHRONOUSLY, before
+			// its first await (execution-mutex.ts). The instant we've called it we
+			// are enqueued ahead of anyone who calls `acquire` later. Fire the baton
+			// release HERE — before awaiting the grant — so the next session
+			// message's popup opens immediately WHILE execution order is preserved:
+			// that later request can only reach its own `acquire` after the baton
+			// advances, i.e. strictly behind us in the FIFO. Releasing at popup
+			// approval (before this point) would let a faster successor overtake us.
+			const acquirePromise = this.executionMutex.acquire(mutexKey, preController?.signal)
+			onEnqueued?.()
+			const release = await acquirePromise
+			return { release, preController }
+		} catch (err) {
+			// Aborted while waiting (user cancelled the Queued record) — clean the
+			// pre-acquire controller and surface via the cancelled pipeline.
+			if (queuedJournalId) this.activeControllers.delete(queuedJournalId)
+			if (err instanceof ExecutionMutexAbortError) throw new JobCancelledSentinel(queuedJournalId ?? "")
+			throw err
+		} finally {
+			// Wait is over (acquired OR aborted). A holder no longer needs the
+			// heartbeat — its stage transitions bump updatedAt; proving grace is
+			// 35 min.
+			if (queuedJournalId) this.endExecutionWait(queuedJournalId)
+		}
+	}
+
+	private beginExecutionWait(journalId: string): void {
+		this.executionWaiters.add(journalId)
+		if (!this.executionHeartbeatTimer) {
+			this.executionHeartbeatTimer = setInterval(() => {
+				void this.heartbeatExecutionWaiters()
+			}, ExecutionService.EXECUTION_WAIT_HEARTBEAT_MS)
+		}
+	}
+
+	private endExecutionWait(journalId: string): void {
+		this.executionWaiters.delete(journalId)
+		if (this.executionWaiters.size === 0 && this.executionHeartbeatTimer) {
+			clearInterval(this.executionHeartbeatTimer)
+			this.executionHeartbeatTimer = undefined
+		}
+	}
+
+	private async heartbeatExecutionWaiters(): Promise<void> {
+		// Snapshot — touchOperation awaits and the set can mutate mid-iteration.
+		for (const id of [...this.executionWaiters]) {
+			try {
+				await this.operationJournal.touchOperation(id)
+			} catch {
+				// Record gone (reaped / cancelled / completed) — harmless; the next
+				// settle removes it from the wait-set.
+			}
+		}
+	}
+
 	private async claimOrCreateDappExecuteJournal(
 		networkId: string,
 		accountAddress: string,
 		origin: LocalTxOrigin,
 		calls: { method?: string }[] | undefined,
 		hooks: ExecutionHooks | undefined,
+		reuseController?: AbortController,
 	): Promise<{ journalId: string | undefined; controller: AbortController | undefined }> {
 		return claimOrCreateDappExecuteJournalImpl(
 			{
@@ -1234,7 +1356,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 					error: (msg, raw) => this.logError(msg, raw),
 				},
 			},
-			{ networkId, accountAddress, origin, calls, queuedJournalId: hooks?.queuedJournalId },
+			{ networkId, accountAddress, origin, calls, queuedJournalId: hooks?.queuedJournalId, reuseController },
 		)
 	}
 
@@ -1717,35 +1839,67 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw new Error("aztec_sendTx: feeSettings is required for the standard execution path")
 		}
 
-		// Durable journal record for dApp-initiated sends. Either claims a
-		// pre-allocated queued record (set by background.ts:tryCreateQueuedJournal
-		// at message arrival) or creates a fresh one. See claim helper for the
-		// safety properties around cancel-during-claim.
-		const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
-		const { journalId, controller } = await this.claimOrCreateDappExecuteJournal(
+		// v3: acquire the per-(profileId, chainId) execution slot BEFORE the
+		// journal claim and any PXE-touching work. This is where the session-FIFO
+		// baton is released — via the onExecutionEnqueued hook, fired inside
+		// acquireExecutionSlot the instant we're enqueued — so the next dApp popup
+		// opens now while we keep our place at the head of the execution FIFO.
+		// That ordering is what stops T1 and T2 from interleaving their
+		// simulate/prove against shared private-note state. A user-cancel of the
+		// Queued record aborts the wait → JobCancelledSentinel. Held through
+		// submit; released in `finally`.
+		const { release: releaseSlot, preController } = await this.acquireExecutionSlot(
 			op.networkId,
-			op.accountAddress,
-			origin,
-			primaryMethod ? [{ method: primaryMethod }] : undefined,
-			hooks,
+			hooks?.queuedJournalId,
+			hooks?.onExecutionEnqueued,
 		)
-		const checkCancelled = (): void => {
-			if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
-		}
-		// Immediately after claim — opus post-impl F2 catch. A user-cancel that
-		// landed during the await-chain INSIDE the claim helper (e.g. between
-		// the journal mutex acquisition and the controller.set call) would have
-		// set the abort signal. Surface it here BEFORE the planner /
-		// authwit-discovery work runs, so we don't do side-effecting PXE work
-		// for a cancelled request.
-		checkCancelled()
 
+		// `journalId` is hoisted so the catch (mark failed) + finally (controller
+		// cleanup + slot release) run even if the claim or the immediate
+		// post-claim cancel-check throws on a raced cancel. If those threw before
+		// the try, `releaseSlot()` would never run and the (profileId, chainId)
+		// lane would wedge until SW restart (codex v3 engine-audit blocker).
+		let journalId: string | undefined
 		try {
+			// Durable journal record. Claims the pre-allocated queued record (set
+			// by background.ts:tryCreateQueuedJournal at message arrival) or creates
+			// a fresh one. Runs AFTER the slot is held so a record waiting for the
+			// slot stays `queued` (not `pending`), and reuses the pre-acquire
+			// controller so cancel works throughout. See claim helper for the
+			// cancel-during-claim safety properties.
+			const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
+			const claimed = await this.claimOrCreateDappExecuteJournal(
+				op.networkId,
+				op.accountAddress,
+				origin,
+				primaryMethod ? [{ method: primaryMethod }] : undefined,
+				hooks,
+				preController,
+			)
+			journalId = claimed.journalId
+			const controller = claimed.controller
+			const checkCancelled = (): void => {
+				if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
+			}
+			// opus post-impl F2 catch — surface a cancel that landed during the
+			// claim's await-chain BEFORE any side-effecting PXE work.
+			checkCancelled()
+
 			if (op.accountAddress !== op.opts?.from?.toString()) {
 				throw new Error("Invalid `opts.from`")
 			}
 
 			const [actions, _, fee] = await this.planner.processAztecJsPayload(op.exec, op.opts)
+
+			// v3: enter `simulating` BEFORE authwit discovery (which runs real
+			// `pxe.simulateTx`). Keeps the holder out of the short-grace `pending`
+			// window during a potentially-slow discovery + build — `pending`'s
+			// 2-min reaper grace is not a defensible ceiling for simulation, and
+			// the holder is no longer wait-heartbeated once it holds the slot.
+			// Matches the NO_FROM path, which already marks simulating first
+			// (codex v3 engine-audit blocker).
+			await this.markJournal(journalId, { stage: "simulating" })
+			checkCancelled()
 
 			// Skip auth witness discovery for embedded fee payments — the dApp handles its own
 			// fee calls (e.g., FeeJuice:claim_and_end_setup) which conflict with the discovery
@@ -1761,9 +1915,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				}
 			}
 
-			// Enter `simulating` before build/estimate — fee strategies inside
-			// `buildAndEstimateTxRequest` run real simulateTx calls.
-			await this.markJournal(journalId, { stage: "simulating" })
 			checkCancelled()
 
 			const [txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod] = await this.buildAndEstimateTxRequest(
@@ -1773,14 +1924,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			)
 
 			checkCancelled()
-			// FIFO baton release: txRequest is built and the random nonce is
-			// sealed into it (tx-request-builder.ts:126 uses Fr.random()). The
-			// session-FIFO can now advance — the next message's handler can
-			// start its own tx-build in parallel with our proving. Proving
-			// itself remains serialized at PXE's `withPxeWrite`, so true
-			// parallel execution doesn't kick in, but popups + UI surface
-			// concurrency does.
-			hooks?.onTxRequestFinalized?.()
 			await this.markJournal(journalId, { stage: "proving", enteredProveAt: Date.now() })
 			const sendAdditionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
 			const provedTx = await this.coordinator.proveTxTask(pxe, txRequest, [account.address, ...sendAdditionalScopes], parentTask)
@@ -1820,6 +1963,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw error
 		} finally {
 			if (journalId) this.activeControllers.delete(journalId)
+			releaseSlot()
 		}
 	}
 
@@ -1841,27 +1985,49 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw new Error("DefaultEntrypoint transactions must use embedded fee payment")
 		}
 
-		// Phase 2: NO_FROM / default_entrypoint dApp paths get the same durable
-		// coverage as the standard flows. Claim-or-create mirrors the standard
-		// executeAztecSendTx path so queued visibility + cancel-safe claim
-		// work for first-time-account-deploy sendTx too.
-		const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
-		const { journalId, controller } = await this.claimOrCreateDappExecuteJournal(
+		// v3: NO_FROM acquires the SAME per-(profileId, chainId) execution slot
+		// as the standard path. This path has no nonce at all (history records
+		// Fr.ZERO), so the mutex is its ONLY protection against concurrent
+		// build/simulate interleaving. Acquire before claim + any PXE work; the
+		// session-FIFO baton is released from inside acquireExecutionSlot
+		// (onExecutionEnqueued) once we're enqueued. Release the slot in
+		// `finally`. Cancel-during-wait aborts → JobCancelledSentinel.
+		const { release: releaseSlot, preController } = await this.acquireExecutionSlot(
 			op.networkId,
-			op.accountAddress,
-			origin,
-			primaryMethod ? [{ method: primaryMethod }] : undefined,
-			hooks,
+			hooks?.queuedJournalId,
+			hooks?.onExecutionEnqueued,
 		)
-		const checkCancelled = (): void => {
-			if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
-		}
-		// Mirror of opus F2 fix in executeAztecSendTx — surface an abort that
-		// landed during the claim's await chain BEFORE we start side-effecting
-		// PXE work.
-		checkCancelled()
 
+		// `journalId` hoisted so the catch + finally (controller cleanup + slot
+		// release) run even if the claim / post-claim cancel-check throws on a
+		// raced cancel — otherwise the slot would leak and wedge the
+		// (profileId, chainId) lane (codex v3 engine-audit blocker). Mirrors the
+		// standard path.
+		let journalId: string | undefined
 		try {
+			// Phase 2: NO_FROM / default_entrypoint dApp paths get the same durable
+			// coverage as the standard flows. Claim-or-create mirrors the standard
+			// executeAztecSendTx path so queued visibility + cancel-safe claim
+			// work for first-time-account-deploy sendTx too. Reuses the pre-acquire
+			// controller (cancel works through the wait + execution).
+			const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
+			const claimed = await this.claimOrCreateDappExecuteJournal(
+				op.networkId,
+				op.accountAddress,
+				origin,
+				primaryMethod ? [{ method: primaryMethod }] : undefined,
+				hooks,
+				preController,
+			)
+			journalId = claimed.journalId
+			const controller = claimed.controller
+			const checkCancelled = (): void => {
+				if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
+			}
+			// Mirror of opus F2 fix — surface an abort that landed during the
+			// claim's await chain BEFORE side-effecting PXE work.
+			checkCancelled()
+
 			await this.markJournal(journalId, { stage: "simulating" })
 
 			const [txRequest, node, pxe, account, network, txCalls] = await this.txBuilder.buildNoFrom(op, parentTask)
@@ -1944,11 +2110,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 			// Prove with account in scope
 			checkCancelled()
-			// FIFO baton release for the NO_FROM path — same semantic as the
-			// standard path (executeAztecSendTx). txRequest + gas limits are
-			// finalized; subsequent proving is serialized at PXE anyway, so
-			// concurrent next-message handlers can start safely.
-			hooks?.onTxRequestFinalized?.()
 			await this.markJournal(journalId, { stage: "proving", enteredProveAt: Date.now() })
 			const provedTx = await this.coordinator.proveTxTask(pxe, txRequest, scopesWithAccount, parentTask)
 			checkCancelled()
@@ -1987,6 +2148,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw error
 		} finally {
 			if (journalId) this.activeControllers.delete(journalId)
+			releaseSlot()
 		}
 	}
 

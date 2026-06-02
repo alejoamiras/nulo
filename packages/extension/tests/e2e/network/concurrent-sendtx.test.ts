@@ -34,7 +34,7 @@ const hasConfig = aztecConfig !== undefined
  *
  * TODO(follow-up: dapp-interaction-lock-fix-v3 — parallel popups):
  *   This test exercises the popup-serialization + queued-record invariants
- *   but does NOT exercise the FIFO baton release at `onTxRequestFinalized`
+ *   but does NOT exercise the FIFO baton release at `onExecutionEnqueued`
  *   — popup #1 is rejected BEFORE approval, so the wallet's
  *   `buildAndEstimateTxRequest` never runs. The baton-release boundary
  *   (background.ts: queued → pending → baton.release) is unverified at

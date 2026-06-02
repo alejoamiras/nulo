@@ -172,7 +172,7 @@ describe("createSessionBaton", () => {
 		}
 
 		const a = enqueueWithEarlyRelease(1, async (release) => {
-			release() // early release — mimics onTxRequestFinalized firing
+			release() // early release — mimics onExecutionEnqueued firing
 			await aTail // simulate long proving tail
 		})
 		const b = enqueueWithEarlyRelease(2, async () => {

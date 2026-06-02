@@ -100,6 +100,45 @@ describe("claimOrCreateDappExecuteJournal", () => {
 		expect(activeControllers.has("queued-id")).toBe(true)
 	})
 
+	// v3: pre-acquire controller reuse.
+	test("reuseController set + record at queued → REUSES the pre-acquire controller (not a fresh one)", async () => {
+		const { deps, activeControllers, journal } = makeDeps()
+		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "queued" } })
+		const preController = new AbortController()
+		// Simulate the pre-acquire registration done by acquireExecutionSlot.
+		activeControllers.set("queued-id", preController)
+
+		const result = await claimOrCreateDappExecuteJournal(deps, {
+			...INPUT_NO_QUEUED,
+			queuedJournalId: "queued-id",
+			reuseController: preController,
+		})
+
+		expect(result.controller).toBe(preController)
+		expect(activeControllers.get("queued-id")).toBe(preController)
+	})
+
+	test("reuseController set + record reaped (not found) → drops the orphaned pre-acquire entry, creates fresh under the new id", async () => {
+		const { deps, activeControllers, createFreshRecord, journal } = makeDeps()
+		journal.getOperation.mockResolvedValueOnce(null) // reaped
+		createFreshRecord.mockResolvedValueOnce("fresh-id")
+		const preController = new AbortController()
+		activeControllers.set("queued-id", preController)
+
+		const result = await claimOrCreateDappExecuteJournal(deps, {
+			...INPUT_NO_QUEUED,
+			queuedJournalId: "queued-id",
+			reuseController: preController,
+		})
+
+		// The stale queuedJournalId entry is gone (no leak)...
+		expect(activeControllers.has("queued-id")).toBe(false)
+		// ...and a fresh controller is registered under the new id.
+		expect(result.journalId).toBe("fresh-id")
+		expect(activeControllers.has("fresh-id")).toBe(true)
+		expect(result.controller).not.toBe(preController)
+	})
+
 	test("queuedJournalId set + record at cancelled stage → throws JobCancelledSentinel without transitioning", async () => {
 		const { deps, journal } = makeDeps()
 		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "cancelled" } })

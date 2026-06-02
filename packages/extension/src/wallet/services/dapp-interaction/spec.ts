@@ -1,7 +1,7 @@
 import type { DappSession, DappMetadata } from "@/wallet/services/dapp-session/spec"
 import type { Operation } from "@/wallet/services/execution/spec"
 import type { LocalTxOrigin } from "@/wallet/services/transaction/spec"
-import type { CapabilityParams, CapabilityResult, ExecutionParams, ExecutionResult } from "@nulo/wallet-bridge"
+import type { CapabilityParams, CapabilityResult, ExecutionParams, ExecutionResult, IExecutionHooks } from "@nulo/wallet-bridge"
 
 /** Protocol-shape types (`ExecutionParams`, `ExecutionResult`,
  *  `CapabilityParams`, `CapabilityResult`, all `OperationRequest`
@@ -52,16 +52,14 @@ export const DAPP_INTERACTION_SERVICE_NAME = "dapp-interaction"
  * step 1, picked up by `executeAndResolve` at step 2. Without this storage,
  * the hooks would die at step 1's return and the post-popup execution path
  * would never see them.
+ *
+ * Aliases wallet-bridge's `IExecutionHooks` (rather than re-declaring the same
+ * optional shape) so the field set stays in lockstep with the dispatcher's
+ * contract: a one-sided rename on either side is a build error, not a silent
+ * runtime no-op. `onExecutionEnqueued` fires once the request has enqueued on
+ * the execution mutex — see `ExecutionService.acquireExecutionSlot`.
  */
-export type ExecutionHooks = {
-	/** Release the wallet-sdk session FIFO baton when the txRequest is built. */
-	onTxRequestFinalized?: () => void
-	/**
-	 * Pre-allocated journal id from `background.ts:onWalletMessage`. Handler
-	 * claims (queued → pending) this record instead of creating a new one.
-	 */
-	queuedJournalId?: string
-}
+export type ExecutionHooks = IExecutionHooks
 
 export type DappInteraction = {
 	id: string

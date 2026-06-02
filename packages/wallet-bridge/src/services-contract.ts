@@ -35,18 +35,21 @@ export interface IAccountReader {
 }
 
 /**
- * Optional execution-side hooks bag. Lets long-running per-op handlers
- * signal "no longer FIFO-dependent" (so the wallet-sdk session FIFO can
- * advance) and lets the message-arrival layer pass a pre-allocated
- * journal id (so the in-flight surface is visible in the activity feed
- * before the handler runs).
+ * Optional execution hooks bag. `onExecutionEnqueued` is invoked by the wallet
+ * once the approved request has taken its place in the per-(profileId, chainId)
+ * execution FIFO (the execution mutex). That — not popup approval — is the
+ * point at which releasing the caller's session FIFO baton is safe: any later
+ * request necessarily enqueues strictly behind this one, so execution order is
+ * preserved while popups still open concurrently. `queuedJournalId` lets the
+ * message-arrival layer pass a pre-allocated journal id (so the in-flight
+ * surface is visible in the activity feed before the handler runs).
  *
- * Kept as a structural type so wallet-bridge doesn't import from the
- * extension package. The concrete `ExecutionHooks` in `@/wallet/...`
- * is structurally compatible.
+ * Kept as a structural type so wallet-bridge doesn't import from the extension
+ * package. The extension's `ExecutionHooks` aliases this type directly, so the
+ * field set stays in lockstep across the layer boundary.
  */
 export interface IExecutionHooks {
-	onTxRequestFinalized?: () => void
+	onExecutionEnqueued?: () => void
 	queuedJournalId?: string
 }
 
