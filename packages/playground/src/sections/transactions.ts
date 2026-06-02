@@ -26,6 +26,7 @@ export function renderTransactions(): string {
 			<div class="pg-row">
 				<button data-testid="pg-btn-sendTx-default" type="button" ${dis}>sendTx default</button>
 				<button data-testid="pg-btn-sendTx-noFrom" type="button" ${dis}>sendTx NoFrom</button>
+				<button data-testid="pg-btn-sendTx-noFrom-private" type="button" ${dis}>sendTx NoFrom (private)</button>
 				<button data-testid="pg-btn-sendTx-feePayer" type="button" ${dis}>sendTx feePayer</button>
 				<button data-testid="pg-btn-sendTx-multicall" type="button" ${dis}>sendTx multicall</button>
 				<button data-testid="pg-btn-sendTx-multicall-chunked" type="button" ${dis}>sendTx multicall &gt;5</button>
@@ -34,7 +35,7 @@ export function renderTransactions(): string {
 	`
 }
 
-async function buildTransferExec(callCount = 1) {
+async function buildTransferExec(callCount = 1, fnName = "transfer_public_to_public") {
 	const tokenAddress = getInput("tokenAddress")
 	const recipient = getInput("recipient")
 	const amount = getInput("amount") || "1"
@@ -48,11 +49,13 @@ async function buildTransferExec(callCount = 1) {
 	const fromAddr = s.selectedAccount ? AztecAddress.fromString(s.selectedAccount) : AztecAddress.fromString(recipient)
 	const toAddr = AztecAddress.fromString(recipient)
 
-	// Build N transfer calls. For the chunked variant (callCount > 5) we issue
+	// Build N transfer calls via `fnName` (default public→public; the NoFrom-private
+	// trigger uses transfer_public_to_private — a single PRIVATE call, which is what
+	// DefaultEntrypoint requires). For the chunked variant (callCount > 5) we issue
 	// N independent BatchCall.request() requests and concat their calls arrays.
 	const calls: unknown[] = []
 	for (let i = 0; i < callCount; i++) {
-		const exec = await token.methods.transfer_public_to_public(fromAddr, toAddr, BigInt(amount), BigInt(i)).request()
+		const exec = await token.methods[fnName](fromAddr, toAddr, BigInt(amount), BigInt(i)).request()
 		calls.push(...(exec.calls ?? []))
 	}
 	return { exec: { calls, authWitnesses: [], capsules: [], extraHashedArgs: [] }, fromAddr }
@@ -99,6 +102,19 @@ export function bindTransactions(root: HTMLElement): void {
 			const { exec } = await buildTransferExec(1)
 			// NoFrom: dispatcher.ts:82-88 detects from === "NO_FROM" and routes
 			// through DefaultEntrypoint instead of the account contract.
+			// biome-ignore lint/suspicious/noExplicitAny: NO_FROM is a sentinel string the SDK doesn't type
+			return wallet.sendTx(exec as any, { from: "NO_FROM", wait: "NO_WAIT" } as any)
+		}),
+	)
+
+	root.querySelector<HTMLButtonElement>('[data-testid="pg-btn-sendTx-noFrom-private"]')?.addEventListener(
+		"click",
+		safe("sendTx", async () => {
+			const wallet = getWallet()!
+			// Single PRIVATE call (transfer_public_to_private) via DefaultEntrypoint —
+			// the shape NO_FROM actually accepts (buildNoFrom rejects public fns). Used
+			// by the NO_FROM concurrency spike/e2e.
+			const { exec } = await buildTransferExec(1, "transfer_public_to_private")
 			// biome-ignore lint/suspicious/noExplicitAny: NO_FROM is a sentinel string the SDK doesn't type
 			return wallet.sendTx(exec as any, { from: "NO_FROM", wait: "NO_WAIT" } as any)
 		}),
