@@ -56,11 +56,18 @@ import { OperationJournalService } from "@/wallet/services/operation-journal/ser
 import type { OperationContext, OperationRecord } from "@/wallet/services/operation-journal/spec"
 import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import { claimOrCreateDappExecuteJournal as claimOrCreateDappExecuteJournalImpl } from "./claim-helper"
-import { ExecutionMutex, ExecutionMutexAbortError, type ExecutionMutexRelease } from "./execution-mutex"
+import {
+	type AcquireCaps,
+	ExecutionMutex,
+	ExecutionMutexAbortError,
+	ExecutionMutexCapacityError,
+	type ExecutionMutexRelease,
+} from "./execution-mutex"
 import { TaskService, type WrappedTask, ExecuteOperationContent, TransferContent } from "@/wallet/services/task/service"
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
+import { TooManyPendingError } from "@nulo/extension-messaging/errors"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
 import { classifyOperationCatch, maybeRethrowAsRpcCancel } from "./rpc-cancel"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
@@ -318,6 +325,12 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	private readonly executionWaiters = new Set<string>()
 	private executionHeartbeatTimer?: ReturnType<typeof setInterval>
 	private static readonly EXECUTION_WAIT_HEARTBEAT_MS = 30_000
+	/** Backpressure caps on the per-(profileId, chainId) execution lane. The
+	 *  per-origin cap stops one dApp monopolizing the shared lane and starving
+	 *  another; the lane cap is a coarse total ceiling. Mirror the journal
+	 *  in-flight visibility caps (8 / 32). */
+	private static readonly EXECUTION_ORIGIN_CAP = 8
+	private static readonly EXECUTION_LANE_CAP = 32
 
 	public constructor(logger: ILogger) {
 		super(EXECUTION_SERVICE_NAME, logger)
@@ -1271,8 +1284,17 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		networkId: string,
 		queuedJournalId: string | undefined,
 		onEnqueued?: () => void,
+		originKey?: string,
 	): Promise<{ release: ExecutionMutexRelease; preController: AbortController | undefined }> {
 		const mutexKey = await this.resolveExecutionMutexKey(networkId)
+		// Per-origin + total-lane backpressure cap. `originKey` is the canonical
+		// dApp origin (threaded from ctx.origin); the sentinel keeps an unexpected
+		// absent origin capped under one bucket rather than bypassing the cap.
+		const caps: AcquireCaps = {
+			originKey: originKey ?? "__no_origin__",
+			maxOriginDepth: ExecutionService.EXECUTION_ORIGIN_CAP,
+			maxLaneDepth: ExecutionService.EXECUTION_LANE_CAP,
+		}
 
 		let preController: AbortController | undefined
 		if (queuedJournalId) {
@@ -1290,20 +1312,34 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			// that later request can only reach its own `acquire` after the baton
 			// advances, i.e. strictly behind us in the FIFO. Releasing at popup
 			// approval (before this point) would let a faster successor overtake us.
-			const acquirePromise = this.executionMutex.acquire(mutexKey, preController?.signal)
+			// (On a capacity reject `acquire`'s synchronous cap-check rejects before
+			// enqueue; onEnqueued still fires, which is a harmless early baton-advance
+			// for a request that has just failed.)
+			const acquirePromise = this.executionMutex.acquire(mutexKey, preController?.signal, caps)
 			onEnqueued?.()
 			const release = await acquirePromise
 			return { release, preController }
 		} catch (err) {
-			// Aborted while waiting (user cancelled the Queued record) — clean the
-			// pre-acquire controller and surface via the cancelled pipeline.
+			// Clean the pre-acquire controller for any non-grant exit.
 			if (queuedJournalId) this.activeControllers.delete(queuedJournalId)
+			if (err instanceof ExecutionMutexCapacityError) {
+				// Lane/origin backpressure. Terminalize the journal record HERE: the
+				// caller's claim never runs, and the background safety-net only
+				// terminalizes records still at `queued` — but the silent path
+				// fast-forwards to `pending` before executing, so without this an
+				// over-cap silent sendTx would leave a stuck `pending` card until the
+				// reaper grace expires. Surface to the dApp as -32005.
+				await this.markJournal(queuedJournalId, { stage: "failed" }, normalizeError(err, "dapp_execute"))
+				throw new TooManyPendingError()
+			}
+			// Aborted while waiting (user cancelled the Queued record) — surface via
+			// the cancelled pipeline.
 			if (err instanceof ExecutionMutexAbortError) throw new JobCancelledSentinel(queuedJournalId ?? "")
 			throw err
 		} finally {
-			// Wait is over (acquired OR aborted). A holder no longer needs the
-			// heartbeat — its stage transitions bump updatedAt; proving grace is
-			// 35 min.
+			// Wait is over (granted, aborted, or capacity-rejected). A holder no
+			// longer needs the heartbeat — its stage transitions bump updatedAt;
+			// proving grace is 35 min.
 			if (queuedJournalId) this.endExecutionWait(queuedJournalId)
 		}
 	}
@@ -1852,6 +1888,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			op.networkId,
 			hooks?.queuedJournalId,
 			hooks?.onExecutionEnqueued,
+			hooks?.originKey,
 		)
 
 		// `journalId` is hoisted so the catch (mark failed) + finally (controller
@@ -1996,6 +2033,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			op.networkId,
 			hooks?.queuedJournalId,
 			hooks?.onExecutionEnqueued,
+			hooks?.originKey,
 		)
 
 		// `journalId` hoisted so the catch + finally (controller cleanup + slot

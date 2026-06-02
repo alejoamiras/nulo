@@ -140,6 +140,28 @@ export class CapabilityNotGrantedError extends WalletError {
 	}
 }
 
+/**
+ * Raised when a dApp's sendTx is refused because the per-(profileId, chainId)
+ * execution lane is at capacity — either the dApp's own per-origin pending cap
+ * or the coarse total-lane cap (see `ExecutionMutex`). Backpressure, NOT a
+ * permanent failure: the dApp should retry once its in-flight sendTx settle.
+ *
+ * Maps to JSON-RPC code -32005 ("Limit exceeded") when surfaced to dApps, with
+ * `data.walletErrorCode = "TOO_MANY_PENDING"`. The message is a stable public
+ * contract — never interpolate origin/profile/account: the wallet-sdk wraps the
+ * envelope in `new Error(JSON.stringify(error))` (unescaped input breaks the
+ * JSON), and naming the full lane would leak it to the calling dApp.
+ */
+export class TooManyPendingError extends WalletError {
+	public static readonly CODE = "TOO_MANY_PENDING"
+
+	public constructor(message = "Too many pending transactions; retry after the in-flight ones settle.") {
+		super(TooManyPendingError.CODE, message)
+		this.name = "TooManyPendingError"
+		Object.setPrototypeOf(this, TooManyPendingError.prototype)
+	}
+}
+
 /** Request payload failed validation at the RPC boundary. */
 export class ValidationError extends WalletError {
 	public static readonly CODE = "VALIDATION"

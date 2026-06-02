@@ -615,6 +615,37 @@ describe("dispatcher sendTx hook forwarding", () => {
 
 		expect(observedHooks?.onExecutionEnqueued).toBe(release)
 		expect(observedHooks?.queuedJournalId).toBe("q-1")
+		// originKey = canonical ctx.origin (the per-origin backpressure cap principal).
+		expect(observedHooks?.originKey).toBe(ctx.origin)
+	})
+
+	test("dispatch('sendTx', ...) sets originKey from ctx.origin even when no FIFO hooks are supplied", async () => {
+		const session = makeSession({
+			capabilityGrants: [
+				{ capability: { type: "accounts", canGet: true, canCreateAuthWit: false, accounts: [] }, grantedAt: 1 },
+				{ capability: { type: "transaction", scope: [] }, grantedAt: 1 },
+			],
+			accounts: ["aztec:0:0xacc"],
+		})
+		const { writer } = makeSessionWriter(session)
+		let observedHooks: IExecutionHooks | undefined
+		const interaction: IDappInteractionRunner = {
+			execute: async (_params, _cancellationToken, hooks) => {
+				observedHooks = hooks
+				return [{ status: "ok", result: undefined }] as never
+			},
+			requestCapabilities: async () => ({}) as never,
+		}
+		const network: INetworkReader = { getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
+		const account: IAccountReader = { getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }] }
+		const dispatcher = new WalletSdkDispatcher(network, account, stubExecution, interaction, writer, noopLogger)
+
+		// No 4th-arg hooks — the per-origin cap must still receive originKey so a
+		// dApp that arrives without the FIFO-baton hooks can't bypass the cap.
+		await dispatcher.dispatch("sendTx", [{ calls: [] }, {}], ctx)
+
+		expect(observedHooks?.originKey).toBe(ctx.origin)
+		expect(observedHooks?.onExecutionEnqueued).toBeUndefined()
 	})
 })
 

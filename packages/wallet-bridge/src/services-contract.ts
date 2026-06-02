@@ -44,6 +44,11 @@ export interface IAccountReader {
  * message-arrival layer pass a pre-allocated journal id (so the in-flight
  * surface is visible in the activity feed before the handler runs).
  *
+ * `originKey` is the canonical browser origin of the calling dApp (NOT a display
+ * name or sessionId). It scopes the per-origin execution-mutex backpressure cap
+ * so one dApp can't monopolize the shared `(profileId, chainId)` lane and starve
+ * another. The dispatcher sets it from `ctx.origin` on every sendTx.
+ *
  * Kept as a structural type so wallet-bridge doesn't import from the extension
  * package. The extension's `ExecutionHooks` aliases this type directly, so the
  * field set stays in lockstep across the layer boundary.
@@ -51,6 +56,7 @@ export interface IAccountReader {
 export interface IExecutionHooks {
 	onExecutionEnqueued?: () => void
 	queuedJournalId?: string
+	originKey?: string
 }
 
 export interface IExecutionRunner {
