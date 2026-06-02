@@ -264,4 +264,27 @@ describe("ExecutionMutex — backpressure cap (P1)", () => {
 		for (const p of ps) (await p)()
 		expect(m.isLocked("L")).toBe(false)
 	})
+
+	test("aborted capped waiter (signal fired twice) frees its slot exactly once → cap fully restored", async () => {
+		const m = new ExecutionMutex()
+		const caps = { originKey: "o", maxOriginDepth: 2, maxLaneDepth: 99 }
+		const rA = await m.acquire("L", undefined, caps)
+		const ac = new AbortController()
+		const pB = m.acquire("L", ac.signal, caps)
+		await tick()
+		ac.abort()
+		ac.abort() // idempotent on the signal; must not cause a double decrement
+		await expect(pB).rejects.toBeInstanceOf(ExecutionMutexAbortError)
+		rA()
+		await tick()
+		// Cap restored to exactly 2: two fresh acquires fit, a third rejects — proves
+		// the depth was decremented once (no under-count admitting >N, no stuck slot).
+		const r1 = await m.acquire("L", undefined, caps)
+		const p2 = m.acquire("L", undefined, caps)
+		await tick()
+		await expect(m.acquire("L", undefined, caps)).rejects.toBeInstanceOf(ExecutionMutexCapacityError)
+		r1()
+		;(await p2)()
+		expect(m.isLocked("L")).toBe(false)
+	})
 })

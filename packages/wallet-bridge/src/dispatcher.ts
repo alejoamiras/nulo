@@ -422,10 +422,13 @@ export class WalletSdkDispatcher {
 				operations: [sendOp],
 			},
 			// Arg 2 is the existing cancellationToken slot — leave undefined when
-			// hooks are the only thing we're forwarding. Arg 3 is the new hooks
-			// bag (see services-contract.ts:IDappInteractionRunner).
+			// hooks are the only thing we're forwarding. Arg 3 is the hooks bag
+			// (see services-contract.ts:IDappInteractionRunner). `originKey` is
+			// ALWAYS set from ctx.origin (not gated on `hooks`) so the per-origin
+			// backpressure cap applies to every dApp sendTx, even ones that arrive
+			// without the FIFO-baton hooks.
 			undefined,
-			hooks ? { onExecutionEnqueued: hooks.onExecutionEnqueued, queuedJournalId: hooks.queuedJournalId } : undefined,
+			{ onExecutionEnqueued: hooks?.onExecutionEnqueued, queuedJournalId: hooks?.queuedJournalId, originKey: ctx.origin },
 		)
 
 		return this.unwrapResult(results[0])
