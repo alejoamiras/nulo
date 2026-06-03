@@ -9,12 +9,12 @@ const cards = [
 	{
 		number: "01",
 		title: "Fee juice",
-		body: "Every Aztec transaction pays a fee in fee juice — the network's native asset, like gas on Ethereum. You'll need some before you can send.",
+		body: "Every Aztec transaction pays a fee in fee juice, the L2 gas asset. The only way to get fee juice today is to burn $AZTEC on L1, which transforms into L2 fee juice on bridging. Fee juice is not transferable.",
 	},
 	{
 		number: "02",
 		title: "Private fee juice",
-		body: "Hold your fee juice in your private balance and the fees you pay stay private too. Your account, your amount, your transaction — only you see them.",
+		body: "Private fee juice is a separate asset from regular (public) fee juice. Hold private fee juice and the fees you pay stay private too: your account, your amount, your transaction, only you see them. Private fee juice is also not transferable.",
 	},
 	{
 		number: "03",
@@ -24,8 +24,8 @@ const cards = [
 ]
 
 // Continue routes onward into the accelerator detection. Skip lands at the
-// same place — the explainer is short enough that "Skip" just means "I've
-// read enough"; the user can revisit fee details from the wallet's fee
+// same place; the explainer is short enough that "Skip" just means "I've
+// read enough", and the user can revisit fee details from the wallet's fee
 // settings panel later.
 function goContinue() {
 	router.push("/onboarding/accelerator")
@@ -97,7 +97,7 @@ function goSkip() {
 
 /* Stack when OnboardingPage's container shrinks below 540 px. Below that,
  * each card's usable text width (after 24 px side padding) drops under
- * ~130 px — too cramped for the existing card copy. Container query (not
+ * ~130 px, too cramped for the existing card copy. Container query (not
  * viewport @media) because the shell adds 24+24 px horizontal padding,
  * which a viewport-based rule would have to subtract. */
 @container onboarding-page (max-width: 540px) {
