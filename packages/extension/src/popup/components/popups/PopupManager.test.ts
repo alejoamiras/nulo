@@ -35,6 +35,7 @@ interface IncomingTrustState {
 	contract?: string
 	profileId?: string
 	networkId?: string
+	accountAddress?: string
 	allow?: () => Promise<void>
 	reject?: () => Promise<void>
 }
