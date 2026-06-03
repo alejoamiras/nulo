@@ -363,6 +363,13 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		}
 	}
 
+	/** Per-hash reentrancy guard: `EventHandler.invoke` is sync-fires-async
+	 *  (no await on subscribers), so two `onTransactionAdded` events for the
+	 *  same hash can both observe the same `listByTxHash` result before
+	 *  either delete completes — leading to double `onIncomingTransferDeleted`
+	 *  emits. Storage delete is idempotent; event emission isn't. */
+	private readonly txDeleteInflight = new Set<string>()
+
 	private onTransactionAdded = async (tx: Tx): Promise<void> => {
 		// Late-delete: if a tx we just added has a hash matching an existing
 		// incoming record, that record was actually our own outgoing tx's
@@ -371,10 +378,23 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		if (!profile) return
 		const network = await this.resolveNetworkByChainId(tx.chainId)
 		if (!network) return
-		const matches = await this.repo.listByTxHash(profile.id, network.id, tx.hash)
-		for (const record of matches) {
-			await this.repo.deleteRecord(record.siloedNullifier)
-			this.emit("onIncomingTransferDeleted", record)
+		const guardKey = `${profile.id}|${network.id}|${tx.account}|${tx.hash}`
+		if (this.txDeleteInflight.has(guardKey)) return
+		this.txDeleteInflight.add(guardKey)
+		try {
+			const matches = await this.repo.listByTxHash(profile.id, network.id, tx.hash)
+			for (const record of matches) {
+				// Same-hash collision across accounts is legal under split-fee /
+				// sponsored flows: account A's outgoing tx can deliver a note
+				// to account B in the same hash. Only delete records whose
+				// own accountAddress matches THIS tx's account; B's records
+				// stay until B's own tx confirms.
+				if (record.accountAddress !== tx.account) continue
+				await this.repo.deleteRecord(record.siloedNullifier)
+				this.emit("onIncomingTransferDeleted", record)
+			}
+		} finally {
+			this.txDeleteInflight.delete(guardKey)
 		}
 	}
 

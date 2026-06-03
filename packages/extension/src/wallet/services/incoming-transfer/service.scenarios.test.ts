@@ -802,6 +802,83 @@ describe("IncomingTransferService — late-delete on onTransactionAdded", () => 
 		expect(records.has(pre.siloedNullifier)).toBe(true)
 		expect(deleted).not.toHaveBeenCalled()
 	})
+
+	test("(P5) per-hash reentrancy guard: two same-hash events → exactly one Delete emit", async () => {
+		const transaction = makeTransactionStub()
+		const { service } = await bootService({ transaction })
+
+		const pre = {
+			siloedNullifier: validNullifier(9),
+			profileId: "p1",
+			networkId: "n1",
+			accountAddress: "0xa",
+			contract: tokenA.contract,
+			tokenId: 1,
+			owner: "0xa",
+			amountRaw: "100",
+			noteHash: "0xnh",
+			txHash: "0xreentrant",
+			l2BlockNumber: 1,
+			txIndexInBlock: 0,
+			noteIndexInTx: 0,
+			hidden: false,
+			discoveredAt: 0,
+		}
+		records.set(pre.siloedNullifier, pre)
+
+		const deleted = vi.fn()
+		service.onIncomingTransferDeleted.add(deleted)
+
+		// Fire twice back-to-back — two listeners observing the same
+		// listByTxHash result before either delete completes would have
+		// emitted Deleted twice without the guard.
+		transaction.onTransactionAdded.invoke({ hash: "0xreentrant", account: "0xa", chainId: 1, calls: [] } as never)
+		transaction.onTransactionAdded.invoke({ hash: "0xreentrant", account: "0xa", chainId: 1, calls: [] } as never)
+		await flushPromises()
+
+		expect(records.has(pre.siloedNullifier)).toBe(false)
+		expect(deleted).toHaveBeenCalledTimes(1)
+	})
+
+	test("(P5) account filter: same hash across accounts → only the originating account's record deleted", async () => {
+		const transaction = makeTransactionStub()
+		const { service } = await bootService({ transaction })
+
+		// Two accounts with the same incoming txHash (legal under split-fee
+		// / sponsored flows where account A's outgoing tx can deliver a
+		// note to account B in the same hash).
+		const recordA = {
+			siloedNullifier: validNullifier(10),
+			profileId: "p1",
+			networkId: "n1",
+			accountAddress: "0xA",
+			contract: tokenA.contract,
+			tokenId: 1,
+			owner: "0xA",
+			amountRaw: "100",
+			noteHash: "0xnh",
+			txHash: "0xshared",
+			l2BlockNumber: 1,
+			txIndexInBlock: 0,
+			noteIndexInTx: 0,
+			hidden: false,
+			discoveredAt: 0,
+		}
+		const recordB = { ...recordA, siloedNullifier: validNullifier(11), accountAddress: "0xB", owner: "0xB" }
+		records.set(recordA.siloedNullifier, recordA)
+		records.set(recordB.siloedNullifier, recordB)
+
+		const deleted = vi.fn()
+		service.onIncomingTransferDeleted.add(deleted)
+
+		transaction.onTransactionAdded.invoke({ hash: "0xshared", account: "0xA", chainId: 1, calls: [] } as never)
+		await flushPromises()
+
+		// Only account A's record gone; B's stays grounding.
+		expect(records.has(recordA.siloedNullifier)).toBe(false)
+		expect(records.has(recordB.siloedNullifier)).toBe(true)
+		expect(deleted).toHaveBeenCalledTimes(1)
+	})
 })
 
 describe("IncomingTransferService — cleanup wiring", () => {
