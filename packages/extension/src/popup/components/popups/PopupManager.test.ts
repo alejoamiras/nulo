@@ -307,7 +307,7 @@ describe("PopupManager — P6 visibility race + onUnmount listener cleanup", () 
 
 	test("(pre-init) config event fired BEFORE seed resolves is ignored", async () => {
 		// Hold getValue in a never-resolving promise so init can't complete.
-		let resolveGet: ((v: boolean) => void) | null = null
+		let resolveGet: (v: boolean) => void = () => {}
 		configGetValueImpl = () =>
 			new Promise<boolean>((r) => {
 				resolveGet = r
@@ -325,7 +325,7 @@ describe("PopupManager — P6 visibility race + onUnmount listener cleanup", () 
 		expect(configUpdateHandlers.length).toBe(0)
 
 		// Resolve seed, finalize init.
-		resolveGet?.(false)
+		resolveGet(false)
 		await flushPromises()
 
 		// Listener now registered.

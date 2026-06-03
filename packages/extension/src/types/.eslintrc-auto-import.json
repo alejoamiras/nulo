@@ -118,6 +118,7 @@
     "getTxCategory": true,
     "getTxTitle": true,
     "h": true,
+    "humanizeErrorKind": true,
     "humanizeMethodName": true,
     "initAppServiceContext": true,
     "initTransactionService": true,

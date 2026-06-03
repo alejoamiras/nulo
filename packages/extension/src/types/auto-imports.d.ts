@@ -58,6 +58,7 @@ declare global {
   const getTxCategory: typeof import('../utils/tx-enrichment').getTxCategory
   const getTxTitle: typeof import('../utils/tx-enrichment').getTxTitle
   const h: typeof import('vue').h
+  const humanizeErrorKind: typeof import('../utils/journal-state').humanizeErrorKind
   const humanizeMethodName: typeof import('../utils/tx-enrichment').humanizeMethodName
   const initAppServiceContext: typeof import('../utils/core').initAppServiceContext
   const initTransactionService: typeof import('../utils/core').initTransactionService
@@ -286,6 +287,7 @@ declare module 'vue' {
     readonly getTxCategory: UnwrapRef<typeof import('../utils/tx-enrichment')['getTxCategory']>
     readonly getTxTitle: UnwrapRef<typeof import('../utils/tx-enrichment')['getTxTitle']>
     readonly h: UnwrapRef<typeof import('vue')['h']>
+    readonly humanizeErrorKind: UnwrapRef<typeof import('../utils/journal-state')['humanizeErrorKind']>
     readonly humanizeMethodName: UnwrapRef<typeof import('../utils/tx-enrichment')['humanizeMethodName']>
     readonly initAppServiceContext: UnwrapRef<typeof import('../utils/core')['initAppServiceContext']>
     readonly initTransactionService: UnwrapRef<typeof import('../utils/core')['initTransactionService']>

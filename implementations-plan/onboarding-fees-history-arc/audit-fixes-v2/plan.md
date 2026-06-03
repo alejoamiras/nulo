@@ -16,12 +16,12 @@
 ## What this PR ships (13 phases)
 
 ```
-P1   ─ fees.vue copy (A1-A4)                              [copy]      ▒
-P2   ─ method label "Claim Fee Juice" (D1)                [copy]      ▒
-P3   ─ aria-controls conditional + v-show                 [a11y]      ▒
-P4a  ─ C2 popup-reopen failing repro e2e                  [test]      ▒
-P5   ─ onTransactionAdded per-hash + account filter       [bug-fix]   ▒▒
-P6   ─ PopupManager visibility seed + onUnmount cleanup   [bug-fix]   ▒▒
+P1   ─ fees.vue copy (A1-A4)                              [copy]      ▒ ✓
+P2   ─ method label "Claim Fee Juice" (D1)                [copy]      ▒ ✓
+P3   ─ aria-controls conditional + v-show                 [a11y]      ▒ ✓
+P4a  ─ C2 popup-reopen failing repro e2e                  [test]      ▒ ✓
+P5   ─ onTransactionAdded per-hash + account filter       [bug-fix]   ▒▒ ✓
+P6   ─ PopupManager visibility seed + onUnmount cleanup   [bug-fix]   ▒▒ ✓
 P7   ─ Tactical C1: NewTokenPopup auto-setTrustAllow      [bug-fix]   ▒▒
 P8   ─ Tactical C2: one-shot replay on triple-ready       [bug-fix]   ▒▒
 P9   ─ B2 categorical label helper                        [util]      ▒
