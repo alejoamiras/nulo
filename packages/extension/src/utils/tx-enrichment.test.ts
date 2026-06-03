@@ -37,6 +37,12 @@ describe("humanizeMethodName — fallback when no label exists", () => {
 		expect(humanizeMethodName("transfer_in_private")).toBe("Transfer (private)")
 		expect(humanizeMethodName("mint_to_private")).toBe("Mint (private)")
 	})
+	test("claim_and_end_setup → 'Claim Fee Juice' (D1 UX-friendly label)", () => {
+		// Surfaces as the primary method on claim+payment txs; the raw
+		// snake_case "Claim And End Setup" was robotic. Pinned so a
+		// future METHOD_LABELS edit doesn't silently regress.
+		expect(humanizeMethodName("claim_and_end_setup")).toBe("Claim Fee Juice")
+	})
 	test("empty / falsy input → Unknown", () => {
 		expect(humanizeMethodName("")).toBe("Unknown")
 	})

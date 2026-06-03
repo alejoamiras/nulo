@@ -27,6 +27,7 @@ const METHOD_LABELS: Record<string, string> = {
 	shield: "Shield",
 	unshield: "Unshield",
 	redeem_shield: "Redeem shield",
+	claim_and_end_setup: "Claim Fee Juice",
 }
 
 /**
