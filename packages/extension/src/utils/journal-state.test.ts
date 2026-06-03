@@ -9,7 +9,13 @@
 
 import { describe, expect, test } from "vitest"
 import type { OperationKind, OperationRecord } from "@/wallet/services/operation-journal/spec"
-import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisplay, sanitizeJournalSubtitle } from "./journal-state"
+import {
+	ACTIVITY_FEED_KINDS,
+	buildJournalTerminalCardProps,
+	humanizeErrorKind,
+	journalTerminalDisplay,
+	sanitizeJournalSubtitle,
+} from "./journal-state"
 
 function recordWith(overrides: Partial<OperationRecord> = {}): OperationRecord {
 	return {
@@ -376,4 +382,57 @@ describe("sanitizeJournalSubtitle — URL-shape defense", () => {
 
 	// 12:34 starts with a digit, not alpha — RFC 3986 scheme grammar requires
 	// ALPHA first. The pin above verifies it passes through unchanged.
+})
+
+// User-facing labels for error.kind. Whitelist source-of-truth: verified
+// against `wallet-core/jobs/types.ts` documented values + `failedSubtitleFor`
+// switch in this file + reaper.ts emissions + execution/service.ts normalizeError
+// call sites. `stuck_queued` is critical — the reaper emits it on queued-record
+// time-out and pinning it here ensures the raw kind never leaks into the
+// "Reason" row on the journal-detail page (codex post-impl audit H2 + opus C1).
+describe("humanizeErrorKind — JobError.kind → user-facing label", () => {
+	test("network → 'Network'", () => {
+		expect(humanizeErrorKind("network")).toBe("Network")
+	})
+	test("simulation → 'Simulation'", () => {
+		expect(humanizeErrorKind("simulation")).toBe("Simulation")
+	})
+	test("prover → 'Proof generation'", () => {
+		expect(humanizeErrorKind("prover")).toBe("Proof generation")
+	})
+	test("popup_bound → 'Popup closed'", () => {
+		expect(humanizeErrorKind("popup_bound")).toBe("Popup closed")
+	})
+	test("dapp_execute → 'dApp'", () => {
+		expect(humanizeErrorKind("dapp_execute")).toBe("dApp")
+	})
+	test("transfer → 'Transfer'", () => {
+		expect(humanizeErrorKind("transfer")).toBe("Transfer")
+	})
+	test("sw_restart_post_prove → 'Browser restart'", () => {
+		expect(humanizeErrorKind("sw_restart_post_prove")).toBe("Browser restart")
+	})
+	test("stale_on_resume → 'Stale on resume'", () => {
+		expect(humanizeErrorKind("stale_on_resume")).toBe("Stale on resume")
+	})
+	test("stuck_proving → 'Stuck proving'", () => {
+		expect(humanizeErrorKind("stuck_proving")).toBe("Stuck proving")
+	})
+	test("(REGRESSION PIN) stuck_queued → 'Stuck queued'", () => {
+		// reaper emits this on queued-record time-out (reaper.ts:192,
+		// reaper.test.ts:102 + :136). Pre-fix it leaked the raw kind into
+		// the UI. Codex post-impl audit H2 + opus C1.
+		expect(humanizeErrorKind("stuck_queued")).toBe("Stuck queued")
+	})
+	test("user_rejected → 'User rejected'", () => {
+		expect(humanizeErrorKind("user_rejected")).toBe("User rejected")
+	})
+	test("unknown → 'Unknown'", () => {
+		expect(humanizeErrorKind("unknown")).toBe("Unknown")
+	})
+	test("any unrecognized kind → 'Error'", () => {
+		expect(humanizeErrorKind("metadata_fetch")).toBe("Error")
+		expect(humanizeErrorKind("totally_new_kind")).toBe("Error")
+		expect(humanizeErrorKind("")).toBe("Error")
+	})
 })

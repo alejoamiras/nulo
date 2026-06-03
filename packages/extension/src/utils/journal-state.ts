@@ -147,6 +147,51 @@ export function sanitizeJournalSubtitle(raw: string | undefined | null): string 
 	return raw
 }
 
+/**
+ * User-facing label for an error kind. Each documented `JobError.kind`
+ * value maps to a short tag-style label; unknown kinds → `"Error"`.
+ *
+ * The journal-detail page renders this as the "Reason" row — distinct
+ * from `failedSubtitleFor`'s sentence-form subtitle ("Network" vs.
+ * "Network error"). Both surfaces stay consistent with the kind value
+ * the reaper / executor classify against.
+ *
+ * `stuck_queued` IS in the whitelist — the reaper at
+ * `operation-journal/reaper.ts:192` emits it on queued-record time-out.
+ * Without humanization it would leak the raw kind name into the UI.
+ * Codex post-impl audit H2 + opus C1.
+ */
+export function humanizeErrorKind(kind: string): string {
+	switch (kind) {
+		case "network":
+			return "Network"
+		case "simulation":
+			return "Simulation"
+		case "prover":
+			return "Proof generation"
+		case "popup_bound":
+			return "Popup closed"
+		case "dapp_execute":
+			return "dApp"
+		case "transfer":
+			return "Transfer"
+		case "sw_restart_post_prove":
+			return "Browser restart"
+		case "stale_on_resume":
+			return "Stale on resume"
+		case "stuck_proving":
+			return "Stuck proving"
+		case "stuck_queued":
+			return "Stuck queued"
+		case "user_rejected":
+			return "User rejected"
+		case "unknown":
+			return "Unknown"
+		default:
+			return "Error"
+	}
+}
+
 /** Subtitle copy per documented `JobError.kind` + live execution catch-alls. */
 function failedSubtitleFor(kind: string): string {
 	switch (kind) {

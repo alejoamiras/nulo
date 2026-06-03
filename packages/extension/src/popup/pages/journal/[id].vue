@@ -38,7 +38,7 @@ import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 
 /** Utils */
-import { ACTIVITY_FEED_KINDS, journalTerminalDisplay, sanitizeJournalSubtitle } from "@/utils/journal-state"
+import { ACTIVITY_FEED_KINDS, humanizeErrorKind, journalTerminalDisplay, sanitizeJournalSubtitle } from "@/utils/journal-state"
 import { humanizeMethodName, formatTransferType } from "@/utils/tx-enrichment"
 import { balanceFormatted } from "@/utils/amount.js"
 
@@ -185,7 +185,7 @@ onBeforeUnmount(() => {
 			<!-- Categorical error kind (always safe to display) -->
 			<Flex v-if="errorKind" direction="column" gap="6" :class="$style.row">
 				<span :class="$style.rowLabel">Reason</span>
-				<span :class="$style.rowValue" data-testid="journal-detail-error-kind-tag">{{ errorKind }}</span>
+				<span :class="$style.rowValue" data-testid="journal-detail-error-kind-tag">{{ humanizeErrorKind(errorKind) }}</span>
 			</Flex>
 
 			<!-- Timestamps -->
