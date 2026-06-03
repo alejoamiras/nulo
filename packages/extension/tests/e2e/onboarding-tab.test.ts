@@ -154,6 +154,33 @@ describe("onboarding tab", () => {
 		await page.close()
 	})
 
+	test("skip links on /learn and /fees both route to /accelerator (split-handler pin)", async ({ freshExtensionPerTest: extension }) => {
+		// Drive the two skip buttons directly. The arc redesigned the
+		// happy-path into learn → fees → accelerator; each skip is its own
+		// handler routing to /accelerator (not /done). Without this pin, a
+		// future refactor that consolidates handlers could silently fan one
+		// of them to the wrong target.
+		const page = await openOnboarding(extension)
+
+		// /learn skip → /accelerator
+		await page.evaluate(() => {
+			window.location.hash = "#/onboarding/learn"
+		})
+		await waitForHash(page, "#/onboarding/learn", 10_000)
+		await clickByTestId(page, "onboarding-learn-skip")
+		await waitForHash(page, "#/onboarding/accelerator", 10_000)
+
+		// /fees skip → /accelerator
+		await page.evaluate(() => {
+			window.location.hash = "#/onboarding/fees"
+		})
+		await waitForHash(page, "#/onboarding/fees", 10_000)
+		await clickByTestId(page, "onboarding-fees-skip")
+		await waitForHash(page, "#/onboarding/accelerator", 10_000)
+
+		await page.close()
+	})
+
 	test("accelerator not-detected hides Continue and shows Skip link", async ({ freshExtensionPerTest: extension }) => {
 		const page = await openOnboarding(extension)
 

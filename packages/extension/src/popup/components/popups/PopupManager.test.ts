@@ -28,8 +28,19 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 // reactive via reading `target in popupsState` on each tracker tick — so
 // a reactive() proxy here is enough to drive the close→dequeue cycle.
 
-const popupsState = reactive({})
-const cacheState = reactive({ incomingTrust: {} })
+interface IncomingTrustState {
+	tokenSymbol?: string
+	tokenDecimals?: number
+	amountRaw?: string
+	contract?: string
+	profileId?: string
+	networkId?: string
+	allow?: () => Promise<void>
+	reject?: () => Promise<void>
+}
+
+const popupsState: Record<string, { order: number; payload?: unknown }> = reactive({})
+const cacheState: { incomingTrust: IncomingTrustState } = reactive({ incomingTrust: {} })
 
 const popupStore = {
 	get popups() {
@@ -38,21 +49,32 @@ const popupStore = {
 	get len() {
 		return Object.keys(popupsState).length
 	},
-	isOpened: (target) => target in popupsState,
-	open: (target) => {
+	isOpened: (target: string) => target in popupsState,
+	open: (target: string) => {
 		popupsState[target] = { order: Object.keys(popupsState).length }
 	},
-	close: (target) => {
+	close: (target: string) => {
 		if (target in popupsState) delete popupsState[target]
 	},
-	getPayload: (target) => popupsState[target]?.payload,
+	getPayload: (target: string) => popupsState[target]?.payload,
 }
 
 // ── Captured listener bus ───────────────────────────────────────────────
 
-const incomingPendingHandlers = []
-const configUpdateHandlers = []
-const incomingConnectedHandlers = []
+interface PendingPayload {
+	profileId: string
+	networkId: string
+	accountAddress: string
+	contract: string
+	tokenId: number
+	tokenSymbol: string
+	tokenDecimals: number
+	amountRaw: string
+}
+
+const incomingPendingHandlers: Array<(p: PendingPayload) => void | Promise<void>> = []
+const configUpdateHandlers: Array<(p: { key: string; value: unknown }) => void> = []
+const incomingConnectedHandlers: Array<() => void | Promise<void>> = []
 
 const setTrustAllow = vi.fn().mockResolvedValue(undefined)
 const setTrustReject = vi.fn().mockResolvedValue(undefined)
@@ -62,11 +84,11 @@ vi.mock("@/wallet/services/incoming-transfer/client", () => ({
 	IncomingTransferServiceClient: vi.fn(function () {
 		return {
 			onIncomingTransferPending: {
-				add: (h) => incomingPendingHandlers.push(h),
+				add: (h: (p: PendingPayload) => void | Promise<void>) => incomingPendingHandlers.push(h),
 				remove: () => {},
 			},
 			onConnected: {
-				add: (h) => incomingConnectedHandlers.push(h),
+				add: (h: () => void | Promise<void>) => incomingConnectedHandlers.push(h),
 				remove: () => {},
 			},
 			connect: vi.fn().mockResolvedValue(undefined),
@@ -82,7 +104,7 @@ vi.mock("@/wallet/services/config/client", () => ({
 	ConfigServiceClient: vi.fn(function () {
 		return {
 			onUpdate: {
-				add: (h) => configUpdateHandlers.push(h),
+				add: (h: (p: { key: string; value: unknown }) => void) => configUpdateHandlers.push(h),
 				remove: () => {},
 			},
 			connect: vi.fn().mockResolvedValue(undefined),
@@ -128,13 +150,13 @@ function payload(overrides = {}) {
 	}
 }
 
-async function firePending(p) {
+async function firePending(p: PendingPayload) {
 	for (const h of incomingPendingHandlers) {
 		await h(p)
 	}
 }
 
-async function fireAndFlush(p) {
+async function fireAndFlush(p: PendingPayload) {
 	await firePending(p)
 	await flushPromises()
 }
@@ -144,7 +166,7 @@ function reset() {
 	configUpdateHandlers.length = 0
 	incomingConnectedHandlers.length = 0
 	for (const k of Object.keys(popupsState)) delete popupsState[k]
-	for (const k of Object.keys(cacheState.incomingTrust)) delete cacheState.incomingTrust[k]
+	for (const k of Object.keys(cacheState.incomingTrust)) delete (cacheState.incomingTrust as Record<string, unknown>)[k]
 	setTrustAllow.mockClear()
 	setTrustReject.mockClear()
 	replayPendingPrompts.mockClear()
@@ -253,7 +275,7 @@ describe("PopupManager — pending-trust queue + triple-key dedup", () => {
 
 		// Popup is for the FIRST event (net-1, 0xcA). The allow closure must
 		// call setTrustAllow(p1, net-1, 0xcA) — NOT the most recent (net-2, 0xcB).
-		await cacheState.incomingTrust.allow()
+		await cacheState.incomingTrust.allow?.()
 
 		expect(setTrustAllow).toHaveBeenCalledExactlyOnceWith("p1", "net-1", "0xcA")
 	})
