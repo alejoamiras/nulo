@@ -17,9 +17,9 @@
  *     a replay-while-open for the same triple does NOT enqueue a dup.
  */
 
-import { flushPromises, mount } from "@vue/test-utils"
+import { type VueWrapper, flushPromises, mount as rawMount } from "@vue/test-utils"
 import { reactive } from "vue"
-import { beforeEach, describe, expect, test, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 
 // ── Reactive store stand-ins ────────────────────────────────────────────
 //
@@ -128,12 +128,15 @@ vi.mock("@/stores/cache.store.ts", () => ({
 vi.mock("@/stores/popup.store", () => ({
 	usePopupStore: () => popupStore,
 }))
+// Controllable appStore for the P8 triple-ready watcher tests. Reactive
+// so the watcher inside PopupManager observes changes.
+const appStoreState = reactive({
+	profile: { id: "p1" } as { id?: string } | null,
+	network: { id: "net-1", chainId: 1 } as { id?: string; chainId?: number } | null,
+	account: { address: "0xacct" } as { address?: string } | null,
+})
 vi.mock("@/stores/app.store", () => ({
-	useAppStore: () => ({
-		profile: { id: "p1" },
-		network: { id: "net-1", chainId: 1 },
-		account: { address: "0xacct" },
-	}),
+	useAppStore: () => appStoreState,
 }))
 
 // `shallow: true` auto-stubs every child component. The queue logic lives
@@ -180,9 +183,29 @@ function reset() {
 	replayPendingPrompts.mockClear()
 	configUpdateRemoveSpy.mockClear()
 	configGetValueImpl = () => Promise.resolve(true)
+	appStoreState.profile = { id: "p1" }
+	appStoreState.network = { id: "net-1", chainId: 1 }
+	appStoreState.account = { address: "0xacct" }
+}
+
+// Track mounted wrappers so afterEach can unmount them. Required because
+// the P8 watcher in PopupManager listens to the shared reactive
+// `appStoreState` — without unmounting, watchers from prior test mounts
+// continue firing on subsequent tests' state mutations.
+const trackedWrappers: VueWrapper<unknown>[] = []
+function mount(component: unknown, options?: Parameters<typeof rawMount>[1]): VueWrapper<unknown> {
+	const w = rawMount(component as never, options)
+	trackedWrappers.push(w)
+	return w
 }
 
 beforeEach(reset)
+afterEach(() => {
+	while (trackedWrappers.length > 0) {
+		const w = trackedWrappers.pop()
+		w?.unmount()
+	}
+})
 
 // ── Tests ───────────────────────────────────────────────────────────────
 
@@ -360,5 +383,73 @@ describe("PopupManager — P6 visibility race + onUnmount listener cleanup", () 
 		mount(PopupManager, { shallow: SHALLOW })
 		await flushPromises()
 		expect(configUpdateHandlers.length).toBe(1)
+	})
+})
+
+describe("PopupManager — P8 triple-ready replay (C2 tactical)", () => {
+	test("onConnected with active triple ready: replayPendingPrompts called once", async () => {
+		mount(PopupManager, { shallow: SHALLOW })
+		await flushPromises()
+		// Fire onConnected; triple is populated from the default reset state.
+		for (const h of incomingConnectedHandlers) await h()
+		await flushPromises()
+		expect(replayPendingPrompts).toHaveBeenCalledExactlyOnceWith("p1", "net-1", "0xacct")
+	})
+
+	test("onConnected with empty triple, then triple populates: replay fires via watcher", async () => {
+		appStoreState.profile = null
+		appStoreState.network = null
+		appStoreState.account = null
+		mount(PopupManager, { shallow: SHALLOW })
+		await flushPromises()
+		// onConnected fires while triple unset → early-return, no replay.
+		for (const h of incomingConnectedHandlers) await h()
+		await flushPromises()
+		expect(replayPendingPrompts).not.toHaveBeenCalled()
+
+		// Now populate the triple → watcher fires tryReplay → replay called.
+		appStoreState.profile = { id: "p1" }
+		appStoreState.network = { id: "net-1", chainId: 1 }
+		appStoreState.account = { address: "0xacct" }
+		await flushPromises()
+		expect(replayPendingPrompts).toHaveBeenCalledExactlyOnceWith("p1", "net-1", "0xacct")
+	})
+
+	test("idempotency: onConnected fires twice for the same triple → replay called only once", async () => {
+		mount(PopupManager, { shallow: SHALLOW })
+		await flushPromises()
+		for (const h of incomingConnectedHandlers) await h()
+		await flushPromises()
+		for (const h of incomingConnectedHandlers) await h()
+		await flushPromises()
+		expect(replayPendingPrompts).toHaveBeenCalledTimes(1)
+	})
+
+	test("profile switch: triple .id changes → replay re-fires for the new profile", async () => {
+		mount(PopupManager, { shallow: SHALLOW })
+		await flushPromises()
+		for (const h of incomingConnectedHandlers) await h()
+		await flushPromises()
+		expect(replayPendingPrompts).toHaveBeenCalledExactlyOnceWith("p1", "net-1", "0xacct")
+
+		// Profile switch — watcher fires, replay re-runs for the new triple.
+		appStoreState.profile = { id: "p2" }
+		await flushPromises()
+		expect(replayPendingPrompts).toHaveBeenCalledTimes(2)
+		expect(replayPendingPrompts).toHaveBeenLastCalledWith("p2", "net-1", "0xacct")
+	})
+
+	test("unmount: watcher deregistered → triple changes after unmount do not call replay", async () => {
+		const w = mount(PopupManager, { shallow: SHALLOW })
+		await flushPromises()
+		for (const h of incomingConnectedHandlers) await h()
+		await flushPromises()
+		w.unmount()
+		await flushPromises()
+		replayPendingPrompts.mockClear()
+		// Triple changes post-unmount.
+		appStoreState.profile = { id: "p2" }
+		await flushPromises()
+		expect(replayPendingPrompts).not.toHaveBeenCalled()
 	})
 })

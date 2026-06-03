@@ -98,18 +98,46 @@ function onIncomingTransferPending(payload) {
 }
 incomingTransferService.onIncomingTransferPending.add(onIncomingTransferPending)
 
-// Replay pending prompts on (re)connect so a user who closed the popup
-// without resolving doesn't get stranded. The service only emits Pending
-// on the unknown→pending transition (one-shot); without this, subsequent
-// popup loads would silently keep records hidden forever.
-incomingTransferService.onConnected.add(async () => {
-	if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) return
+// Replay pending prompts when the active appStore triple is ready (P8
+// tactical C2 fix). The popup re-mounts on every open and `loadProfile`
+// populates `appStore.profile/network/account` asynchronously. If
+// `onConnected` fires BEFORE that cascade completes, the previous
+// "early-return on missing triple" silently dropped the replay and
+// the trust prompt never re-surfaced after a popup close/reopen.
+//
+// Fix: idempotency-key the replay by the triple itself. Both
+// `onConnected` AND a granular watcher on the triple's id fields call
+// `tryReplay`. The first one to see a ready triple wins; the other
+// no-ops via `replayedForKey`. Subsequent profile switches re-key,
+// so they re-fire replay for the new triple.
+//
+// Stale-resolve race under rapid profile switching (A→B→A) is documented
+// residual: a B-replay resolving after the user returned to A enqueues
+// stale payloads that get absorbed by the existing triple-key dedup
+// (they don't match the active triple, so the popup ignores them).
+// Full cancellation guards are deferred to the trust-state-machine arc.
+let replayedForKey = null
+async function tryReplayForTriple() {
+	const pid = appStore.profile?.id
+	const nid = appStore.network?.id
+	const addr = appStore.account?.address
+	if (!pid || !nid || !addr) return
+	const key = `${pid}|${nid}|${addr}`
+	if (replayedForKey === key) return
+	replayedForKey = key
 	try {
-		await incomingTransferService.replayPendingPrompts(appStore.profile.id, appStore.network.id, appStore.account.address)
+		await incomingTransferService.replayPendingPrompts(pid, nid, addr)
 	} catch {
-		// Replay is best-effort — a transient port hiccup shouldn't error out.
+		// Transient port hiccup. Allow retry on the next triple change.
+		replayedForKey = null
 	}
-})
+}
+incomingTransferService.onConnected.add(tryReplayForTriple)
+const unwatchTriple = watch(
+	() => [appStore.profile?.id, appStore.network?.id, appStore.account?.address],
+	() => tryReplayForTriple(),
+	{ immediate: false },
+)
 
 // Visibility-toggle gate: when `incomingTransfersVisible` flips false→true
 // at runtime, the service's emit path is now silent on the OFF side
@@ -196,6 +224,7 @@ onBeforeUnmount(() => {
 	// visibilityInitialized state. Closes opus H-6 (listener leak across
 	// popup mount/unmount cycles).
 	configService.onUpdate.remove(onConfigUpdate)
+	unwatchTriple()
 	incomingTransferService.disconnect()
 	configService.disconnect()
 })
