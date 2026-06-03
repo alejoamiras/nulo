@@ -121,7 +121,14 @@ incomingTransferService.onConnected.add(async () => {
 // reach that triple safely. Co-authored via codex post-impl audit H1.
 const configService = new ConfigServiceClient()
 let lastVisibility = true
+// Init gate (P6, codex Med #1): the onUpdate handler must NOT process
+// events until the seed `getValue` has resolved. Otherwise an OFF→ON
+// flip arriving in the connect-vs-seed window reads the optimistic
+// `true` default and misclassifies as no-op. Belt + suspenders alongside
+// moving the listener registration into onMounted below.
+let visibilityInitialized = false
 function onConfigUpdate(prop) {
+	if (!visibilityInitialized) return
 	if (prop.key !== "incomingTransfersVisible") return
 	const newValue = prop.value !== false
 	const wasOff = lastVisibility === false
@@ -132,7 +139,6 @@ function onConfigUpdate(prop) {
 		// Replay best-effort; transient port hiccups must not crash the popup.
 	})
 }
-configService.onUpdate.add(onConfigUpdate)
 
 // ServiceClient doesn't auto-connect on listener registration — registers
 // fire only after `connect()` or the first request. Explicit connect on
@@ -157,6 +163,13 @@ onMounted(async () => {
 	} catch {
 		// Fail open — matches the service's own `isVisibilityEnabled` policy.
 	}
+	// Listener registration AFTER the seed completes (P6): the prior
+	// module-top registration left a race window where a real OFF→ON
+	// flip could be misclassified against the optimistic default. With
+	// the registration inside onMounted, events fired before this point
+	// are not delivered to this handler at all.
+	configService.onUpdate.add(onConfigUpdate)
+	visibilityInitialized = true
 })
 
 // Multi-contract queue: when the user resolves (Allow/Reject) and the
@@ -178,6 +191,11 @@ watch(
 )
 
 onBeforeUnmount(() => {
+	// Deregister the config update listener BEFORE disconnect so a stale
+	// event firing during teardown can't write to a torn lastVisibility /
+	// visibilityInitialized state. Closes opus H-6 (listener leak across
+	// popup mount/unmount cycles).
+	configService.onUpdate.remove(onConfigUpdate)
 	incomingTransferService.disconnect()
 	configService.disconnect()
 })

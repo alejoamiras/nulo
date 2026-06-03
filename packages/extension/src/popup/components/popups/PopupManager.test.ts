@@ -100,16 +100,24 @@ vi.mock("@/wallet/services/incoming-transfer/client", () => ({
 	}),
 }))
 
+// Controllable getValue resolver for P6 seed-race tests. Tests can swap
+// this to a deferred to simulate the connect-vs-seed window.
+let configGetValueImpl: () => Promise<boolean> = () => Promise.resolve(true)
+const configUpdateRemoveSpy = vi.fn()
 vi.mock("@/wallet/services/config/client", () => ({
 	ConfigServiceClient: vi.fn(function () {
 		return {
 			onUpdate: {
 				add: (h: (p: { key: string; value: unknown }) => void) => configUpdateHandlers.push(h),
-				remove: () => {},
+				remove: (h: (p: { key: string; value: unknown }) => void) => {
+					configUpdateRemoveSpy(h)
+					const idx = configUpdateHandlers.indexOf(h)
+					if (idx >= 0) configUpdateHandlers.splice(idx, 1)
+				},
 			},
 			connect: vi.fn().mockResolvedValue(undefined),
 			disconnect: vi.fn(),
-			getValue: vi.fn().mockResolvedValue(true),
+			getValue: vi.fn().mockImplementation(() => configGetValueImpl()),
 		}
 	}),
 }))
@@ -170,6 +178,8 @@ function reset() {
 	setTrustAllow.mockClear()
 	setTrustReject.mockClear()
 	replayPendingPrompts.mockClear()
+	configUpdateRemoveSpy.mockClear()
+	configGetValueImpl = () => Promise.resolve(true)
 }
 
 beforeEach(reset)
@@ -278,5 +288,77 @@ describe("PopupManager — pending-trust queue + triple-key dedup", () => {
 		await cacheState.incomingTrust.allow?.()
 
 		expect(setTrustAllow).toHaveBeenCalledExactlyOnceWith("p1", "net-1", "0xcA")
+	})
+})
+
+describe("PopupManager — P6 visibility race + onUnmount listener cleanup", () => {
+	test("(post-init) OFF→ON config event calls replayPendingPrompts with active triple", async () => {
+		// Seed reads false (persisted OFF state).
+		configGetValueImpl = () => Promise.resolve(false)
+		mount(PopupManager, { shallow: SHALLOW })
+		await flushPromises()
+
+		// Fire the OFF→ON event after init completes.
+		for (const h of configUpdateHandlers) h({ key: "incomingTransfersVisible", value: true })
+		await flushPromises()
+
+		expect(replayPendingPrompts).toHaveBeenCalledExactlyOnceWith("p1", "net-1", "0xacct")
+	})
+
+	test("(pre-init) config event fired BEFORE seed resolves is ignored", async () => {
+		// Hold getValue in a never-resolving promise so init can't complete.
+		let resolveGet: ((v: boolean) => void) | null = null
+		configGetValueImpl = () =>
+			new Promise<boolean>((r) => {
+				resolveGet = r
+			})
+		mount(PopupManager, { shallow: SHALLOW })
+		// flush microtasks so connect() resolves but getValue stays pending
+		await flushPromises()
+
+		// At this point: connect resolved, getValue still pending. The
+		// listener should NOT be registered yet OR (if it is) the gate
+		// flag should suppress.
+		// The handler may have been added BEFORE the gate landed in P6 v1;
+		// in P6, registration is INSIDE onMounted AFTER seed resolves, so
+		// configUpdateHandlers should still be empty here.
+		expect(configUpdateHandlers.length).toBe(0)
+
+		// Resolve seed, finalize init.
+		resolveGet?.(false)
+		await flushPromises()
+
+		// Listener now registered.
+		expect(configUpdateHandlers.length).toBe(1)
+
+		// Fire post-init OFF→ON: replay called once.
+		for (const h of configUpdateHandlers) h({ key: "incomingTransfersVisible", value: true })
+		await flushPromises()
+		expect(replayPendingPrompts).toHaveBeenCalledTimes(1)
+	})
+
+	test("mount → unmount removes the config listener (no listener leak)", async () => {
+		const w = mount(PopupManager, { shallow: SHALLOW })
+		await flushPromises()
+		expect(configUpdateHandlers.length).toBe(1)
+
+		w.unmount()
+		await flushPromises()
+
+		expect(configUpdateRemoveSpy).toHaveBeenCalledTimes(1)
+		// And the handlers array reflects the removal (our mock spliced).
+		expect(configUpdateHandlers.length).toBe(0)
+	})
+
+	test("mount → unmount → mount: exactly one listener registered after the second mount", async () => {
+		const w1 = mount(PopupManager, { shallow: SHALLOW })
+		await flushPromises()
+		w1.unmount()
+		await flushPromises()
+		expect(configUpdateHandlers.length).toBe(0)
+
+		mount(PopupManager, { shallow: SHALLOW })
+		await flushPromises()
+		expect(configUpdateHandlers.length).toBe(1)
 	})
 })
