@@ -585,6 +585,33 @@ describe("IncomingTransferService — account lifecycle (P5 carry)", () => {
 		const schedulersAfter = (service as never as { schedulers: Map<string, unknown> }).schedulers
 		expect(schedulersAfter.size).toBe(schedulersBefore.size)
 	})
+
+	test("(P12 backfill) onAccountAdded → hydrateSchedulers populates a scheduler entry for the new account", async () => {
+		// Symmetric to onAccountDeleted. Codex Low #2 from the prior arc:
+		// without this pin, a future refactor that drops the
+		// `accountService.onAccountAdded.add(...)` subscription would silently
+		// regress the "new account starts scanning immediately" behavior.
+		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
+		const token = makeTokenStub([tokenA])
+		// Start with no accounts; we'll inject one via the event below.
+		const account = makeAccountStub([])
+		const { service } = await bootService({ network, account, token })
+
+		const schedulers = (service as never as { schedulers: Map<string, unknown> }).schedulers
+		expect(schedulers.has("n1|0xnewAccount")).toBe(false)
+
+		// Mutate the account stub's backing list BEFORE firing the event —
+		// hydrateSchedulers reads via getAccounts which the stub filters
+		// against the list.
+		account.getAccounts.mockImplementation(async (_p: string, chainId: number) => {
+			if (chainId !== 1) return []
+			return [{ profileId: "p1", chainId: 1, address: "0xnewAccount" }]
+		})
+		account.onAccountAdded.invoke({ profileId: "p1", chainId: 1, address: "0xnewAccount" })
+		await flushPromises()
+
+		expect(schedulers.has("n1|0xnewAccount")).toBe(true)
+	})
 })
 
 describe("IncomingTransferService — scanContract dedup + emit semantics", () => {
