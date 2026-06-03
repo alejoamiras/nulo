@@ -394,20 +394,10 @@ watch(
 
 onMounted(async () => {
 	console.log(`[send:${sendInstanceId}] mounted`)
-	// Route mount fetch through the sequence-guarded refetch so a slow
-	// mount-fetch from a prior identity can't overwrite newer data.
-	// Post-impl audit High #2 — mount path previously bypassed
-	// identityFetchSeq.
-	const mountSeq = ++identityFetchSeq
-	const [t, tb, c] = await Promise.all([
-		tokenService.getTokens(appStore.profile.id, appStore.network.chainId),
-		tokenBalanceService.getTokenBalances(undefined, appStore.account.address),
-		contactService.getContacts(),
-	])
-	if (mountSeq !== identityFetchSeq) return
-	tokens.value = t
-	tokenBalances.value = tb
-	contacts.value = c
+	// Route mount fetch through the shared refetch so it inherits the
+	// sequence guard AND the null-triple defense AND the
+	// activeTokenIdx-rebind logic.
+	await refetchIdentityScopedState()
 
 	// Query-param preselect survives the unmount of tokens/[id] (which clears
 	// cacheStore.activeTokenIdx on its onBeforeUnmount). Falls through to
@@ -415,17 +405,9 @@ onMounted(async () => {
 	const queryTokenId = route.query.tokenId ? Number(route.query.tokenId) : null
 	if (queryTokenId && tokens.value.some((tok) => tok.id === queryTokenId)) {
 		cacheStore.activeTokenIdx = queryTokenId
+		initSendType()
+		initReceiverType()
 	}
-
-	if (!cacheStore.activeTokenIdx && tokens.value.length) {
-		cacheStore.activeTokenIdx = tokens.value[0].id
-	} else if (cacheStore.activeTokenIdx && !tokens.value.some((tok) => tok.id === cacheStore.activeTokenIdx)) {
-		// Old idx points at a token from a prior identity. Reset.
-		cacheStore.activeTokenIdx = tokens.value[0]?.id ?? undefined
-	}
-
-	initSendType()
-	initReceiverType()
 
 	if (cacheStore.preselectedContactToSend) {
 		selectedContact.value = cacheStore.preselectedContactToSend

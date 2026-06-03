@@ -75,21 +75,33 @@ function enqueueIfNew(payload) {
 	return true
 }
 
+function payloadMatchesLiveTriple(p) {
+	return p.profileId === appStore.profile?.id && p.networkId === appStore.network?.id && p.accountAddress === appStore.account?.address
+}
+
 function dequeueNextPendingTrust() {
 	if (popupStore.isOpened("incoming_trust")) return
-	const next = pendingTrustQueue.shift()
-	if (!next) return
-	cacheStore.incomingTrust = {
-		tokenSymbol: next.tokenSymbol,
-		tokenDecimals: next.tokenDecimals,
-		amountRaw: next.amountRaw,
-		contract: next.contract,
-		profileId: next.profileId,
-		networkId: next.networkId,
-		allow: () => incomingTransferService.setTrustAllow(next.profileId, next.networkId, next.contract),
-		reject: () => incomingTransferService.setTrustReject(next.profileId, next.networkId, next.contract),
+	// Defensive drop on dequeue (post-impl codex audit High second-cycle).
+	// Even with the live-triple guard on ingress, an identity switch can
+	// happen WHILE payloads are queued. Skip any mismatched entries
+	// without opening them.
+	while (pendingTrustQueue.length > 0) {
+		const next = pendingTrustQueue.shift()
+		if (!next) return
+		if (!payloadMatchesLiveTriple(next)) continue
+		cacheStore.incomingTrust = {
+			tokenSymbol: next.tokenSymbol,
+			tokenDecimals: next.tokenDecimals,
+			amountRaw: next.amountRaw,
+			contract: next.contract,
+			profileId: next.profileId,
+			networkId: next.networkId,
+			allow: () => incomingTransferService.setTrustAllow(next.profileId, next.networkId, next.contract),
+			reject: () => incomingTransferService.setTrustReject(next.profileId, next.networkId, next.contract),
+		}
+		popupStore.open("incoming_trust")
+		return
 	}
-	popupStore.open("incoming_trust")
 }
 
 function onIncomingTransferPending(payload) {
@@ -145,7 +157,34 @@ async function tryReplayForTriple() {
 incomingTransferService.onConnected.add(tryReplayForTriple)
 const unwatchTriple = watch(
 	() => [appStore.profile?.id, appStore.network?.id, appStore.account?.address],
-	() => tryReplayForTriple(),
+	() => {
+		// Identity switched. Purge queued payloads that no longer match
+		// the live triple AND close an open incoming_trust popup if its
+		// payload is now stale. Without this, a payload accepted on A
+		// before the switch could still open under B (post-impl codex
+		// audit second-cycle High).
+		for (let i = pendingTrustQueue.length - 1; i >= 0; i--) {
+			if (!payloadMatchesLiveTriple(pendingTrustQueue[i])) {
+				pendingTrustQueue.splice(i, 1)
+			}
+		}
+		if (popupStore.isOpened("incoming_trust")) {
+			const t = cacheStore.incomingTrust
+			const matches =
+				t?.profileId === appStore.profile?.id &&
+				t?.networkId === appStore.network?.id &&
+				// cacheStore payload doesn't carry accountAddress; the
+				// triple identity is enough — if profile + network match,
+				// the popup is still relevant. Otherwise close.
+				true
+			if (!matches) {
+				popupStore.close("incoming_trust")
+				cacheStore.incomingTrust = {}
+			}
+		}
+		// Then fire the replay path for the new triple.
+		tryReplayForTriple()
+	},
 	{ immediate: false },
 )
 

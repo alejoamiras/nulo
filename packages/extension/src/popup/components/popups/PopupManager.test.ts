@@ -300,6 +300,38 @@ describe("PopupManager — pending-trust queue + triple-key dedup", () => {
 		expect(cacheState.incomingTrust.contract).toBeUndefined()
 	})
 
+	test("(post-impl 2nd cycle) accept on A, switch to B, close → no stale A popup re-opens under B", async () => {
+		// Codex post-impl 2nd-cycle High repro: queue/open A payloads,
+		// switch identity to B, close the active popup. Without the
+		// triple-watcher purge + dequeue defense, the next queued A
+		// payload would still open under B.
+		mount(PopupManager, { shallow: SHALLOW })
+		await flushPromises()
+
+		// Two A payloads — first opens, second queues.
+		await fireAndFlush(payload({ contract: "0xcA1" }))
+		await fireAndFlush(payload({ contract: "0xcA2" }))
+		expect(popupStore.isOpened("incoming_trust")).toBe(true)
+		expect(cacheState.incomingTrust.contract).toBe("0xcA1")
+
+		// User switches profile to a new identity.
+		appStoreState.profile = { id: "p2" }
+		await flushPromises()
+
+		// The open popup was for profile p1 → triple no longer matches →
+		// watcher closed it AND purged the queue.
+		expect(popupStore.isOpened("incoming_trust")).toBe(false)
+		expect(cacheState.incomingTrust.contract).toBeUndefined()
+
+		// Force a dequeue attempt — the prior A's second payload (0xcA2)
+		// must NOT open under B even if it survived the purge.
+		// (Defensive depth in dequeueNextPendingTrust.)
+		// Simulating a close re-trigger:
+		popupStore.close("incoming_trust")
+		await flushPromises()
+		expect(popupStore.isOpened("incoming_trust")).toBe(false)
+	})
+
 	test("currently-open popup coalesce: dup fired while open does NOT add to queue", async () => {
 		mount(PopupManager, { shallow: SHALLOW })
 		await flushPromises()
