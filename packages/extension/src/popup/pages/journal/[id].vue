@@ -12,9 +12,18 @@
  * transaction (cancelled, interrupted, failed-pre-broadcast). Cousin of
  * `tx/[id].vue` — that page handles records that DID produce a chain tx
  * via `TransactionService`. Journal records have no `hash`, no block, no
- * fee, no explorer URL — what they have is a kind, a terminal-state badge,
- * an optional dApp origin chip, an optional transfer amount, and
- * (when developer/debug mode is on) the raw error fields.
+ * fee, no explorer URL.
+ *
+ * P10 brutalist restructure: mirrors `tx/[id].vue`'s information hierarchy
+ * (hero_meta timestamps → optional amount block → categorical chip → origin
+ * chip → details box → dev panel) using the same brutalist tokens (mono
+ * labels, headline keys, 1px borders, no rounded corners). Reuses
+ * tx/[id].vue's style vocabulary verbatim. The confirmed-tx detail page
+ * is NOT touched.
+ *
+ * The categorical chip (P9 helper) distinguishes pre-broadcast failures
+ * from interrupted-mid-flight, surfacing simulation-vs-on-chain UX without
+ * exposing internal `JobError.kind` strings.
  *
  * Subscribes to `onOperationDeleted` so that if the record is removed
  * (GC or profile delete) while the user is on this page, we redirect back
@@ -38,7 +47,13 @@ import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 
 /** Utils */
-import { ACTIVITY_FEED_KINDS, humanizeErrorKind, journalTerminalDisplay, sanitizeJournalSubtitle } from "@/utils/journal-state"
+import {
+	ACTIVITY_FEED_KINDS,
+	categoricalLabel,
+	humanizeErrorKind,
+	journalTerminalDisplay,
+	sanitizeJournalSubtitle,
+} from "@/utils/journal-state"
 import { humanizeMethodName, formatTransferType } from "@/utils/tx-enrichment"
 import { balanceFormatted } from "@/utils/amount.js"
 
@@ -101,6 +116,10 @@ const errorKind = computed(() => op.value?.error?.kind ?? null)
 const errorMessage = computed(() => op.value?.error?.message ?? null)
 const errorNormalizedRaw = computed(() => op.value?.error?.normalizedRaw ?? null)
 
+// B2 categorical label (P9 helper). Wallet-controlled — consumes only
+// op.error?.kind + op.kind + op.progress.stage. Never reads op.subtitle.
+const category = computed(() => (op.value ? categoricalLabel(op.value) : null))
+
 const createdAtLabel = computed(() => {
 	if (!op.value?.createdAt) return null
 	return DateTime.fromMillis(op.value.createdAt).toFormat("MMM dd, yyyy 'at' HH:mm")
@@ -157,65 +176,88 @@ onBeforeUnmount(() => {
 	<Flex direction="column" :class="$style.wrapper" data-testid="journal-detail-page">
 		<SubPageHeader :title="title" :backTo="'/popup/activity'" />
 
-		<Flex v-if="op && display" wide direction="column" gap="24" :class="$style.content">
-			<!-- Terminal-state badge — cancelled / interrupted / failed -->
-			<Flex align="center" gap="12" :class="$style.statusRow">
-				<Icon :name="display.icon" size="20" :color="display.color" />
-				<Flex direction="column" gap="2">
-					<span :class="$style.statusLabel" data-testid="journal-detail-state">{{ display.state }}</span>
-					<span :class="$style.statusSubtitle" data-testid="journal-detail-error-kind">{{ display.subtitle }}</span>
-				</Flex>
+		<Flex v-if="op && display" wide direction="column" gap="20" :class="$style.content">
+			<!-- Hero meta — terminal timestamp; matches tx/[id].vue's tx_time slot but
+				 with the journal-record terminal time instead of an explorer link.
+				 No chain hash / no explorer link branch because journal records have
+				 no on-chain tx. -->
+			<Flex align="center" justify="center" gap="8" :class="$style.hero_meta">
+				<span v-if="terminalAtLabel" :class="$style.tx_time">{{ terminalAtLabel }}</span>
 			</Flex>
 
 			<!-- Transfer amount block (transfer kind only) -->
 			<Flex v-if="isTransfer && amountDisplay" align="center" direction="column" gap="6">
-				<span :class="$style.amountValue">
+				<span :class="$style.amount_value">
 					{{ amountDisplay }}
-					<span v-if="token?.symbol" :class="$style.amountSymbol">{{ token.symbol }}</span>
+					<span v-if="token?.symbol" :class="$style.amount_symbol">{{ token.symbol }}</span>
 				</span>
-				<span v-if="transferTypeLabel" :class="$style.amountCaption">{{ transferTypeLabel }}</span>
+				<span v-if="transferTypeLabel" :class="$style.amount_caption">{{ transferTypeLabel }}</span>
 			</Flex>
+
+			<!-- Categorical chip — P9 + P10. Wallet-controlled, sanitize-invariant. -->
+			<div v-if="category" :class="$style.category_chip" data-testid="journal-detail-category">
+				{{ category.label }}
+			</div>
 
 			<!-- Origin chip (dApp identity, URL-sanitized) -->
-			<Flex v-if="originChip" direction="column" gap="6" :class="$style.row">
-				<span :class="$style.rowLabel">App</span>
-				<span :class="$style.rowValue" data-testid="journal-detail-origin">{{ originChip }}</span>
+			<Flex v-if="originChip" align="center" justify="center" gap="6" :class="$style.origin_row">
+				<span :class="$style.origin_label">App</span>
+				<span :class="$style.origin_value" data-testid="journal-detail-origin">{{ originChip }}</span>
 			</Flex>
 
-			<!-- Categorical error kind (always safe to display) -->
-			<Flex v-if="errorKind" direction="column" gap="6" :class="$style.row">
-				<span :class="$style.rowLabel">Reason</span>
-				<span :class="$style.rowValue" data-testid="journal-detail-error-kind-tag">{{ humanizeErrorKind(errorKind) }}</span>
-			</Flex>
+			<!-- Details box — mirrors tx/[id].vue's details_box pattern. -->
+			<Flex wide direction="column" gap="10" :class="$style.details_box">
+				<Flex v-if="category" wide direction="column" gap="4">
+					<span :class="$style.detail_key">What happened</span>
+					<span :class="$style.detail_context" data-testid="journal-detail-context">{{ category.context }}</span>
+				</Flex>
 
-			<!-- Timestamps -->
-			<Flex v-if="createdAtLabel || terminalAtLabel" direction="column" gap="6" :class="$style.row">
-				<span :class="$style.rowLabel">Times</span>
-				<Flex direction="column" gap="2">
-					<span v-if="createdAtLabel" :class="$style.rowValue">Started {{ createdAtLabel }}</span>
-					<span v-if="terminalAtLabel" :class="$style.rowValue">Ended {{ terminalAtLabel }}</span>
+				<Flex v-if="errorKind" wide justify="between" align="center">
+					<span :class="$style.detail_key">Reason</span>
+					<span :class="$style.detail_value_mono" data-testid="journal-detail-error-kind-tag">
+						{{ humanizeErrorKind(errorKind) }}
+					</span>
+				</Flex>
+
+				<Flex v-if="createdAtLabel" wide justify="between" align="center">
+					<span :class="$style.detail_key">Started</span>
+					<span :class="$style.detail_value_mono">{{ createdAtLabel }}</span>
+				</Flex>
+
+				<Flex v-if="terminalAtLabel" wide justify="between" align="center">
+					<span :class="$style.detail_key">Ended</span>
+					<span :class="$style.detail_value_mono">{{ terminalAtLabel }}</span>
+				</Flex>
+
+				<Flex wide justify="between" align="center">
+					<span :class="$style.detail_key">State</span>
+					<Flex align="center" gap="6">
+						<Icon :name="display.icon" size="12" :color="display.color" />
+						<span :class="$style.detail_value_mono" data-testid="journal-detail-state">{{ display.state }}</span>
+					</Flex>
 				</Flex>
 			</Flex>
 
-			<!-- Developer-mode-gated raw error envelope -->
-			<Flex v-if="showDevFields && (errorMessage || errorNormalizedRaw)" direction="column" gap="6" :class="$style.row">
-				<span :class="$style.rowLabel">Error (developer mode)</span>
+			<!-- Developer-mode-gated raw error envelope. Preserved verbatim per
+				 user QA feedback ("I like the 'developer mode on' error showing"). -->
+			<Flex v-if="showDevFields && (errorMessage || errorNormalizedRaw)" direction="column" gap="6" :class="$style.dev_box">
+				<span :class="$style.detail_key">Error (developer mode)</span>
 				<pre
 					v-if="errorMessage"
-					:class="$style.codeBlock"
+					:class="$style.code_block"
 					data-testid="journal-detail-error-message"
 				>{{ errorMessage }}</pre>
 				<pre
 					v-if="errorNormalizedRaw"
-					:class="$style.codeBlock"
+					:class="$style.code_block"
 					data-testid="journal-detail-error-raw"
 				>{{ errorNormalizedRaw }}</pre>
 			</Flex>
 		</Flex>
 
 		<Flex v-else-if="notFound" wide direction="column" align="center" gap="12" :class="$style.content">
-			<span :class="$style.emptyHeadline">RECORD NOT FOUND</span>
-			<span :class="$style.emptySub">This journal record isn't in your current activity feed.</span>
+			<span :class="$style.empty_headline">RECORD NOT FOUND</span>
+			<span :class="$style.empty_sub">This journal record isn't in your current activity feed.</span>
 		</Flex>
 	</Flex>
 </template>
@@ -224,69 +266,124 @@ onBeforeUnmount(() => {
 .wrapper {
 	flex: 1;
 	overflow: auto;
+	scrollbar-gutter: stable;
 	background: var(--app-bg);
 	padding-bottom: var(--nav-clearance);
 }
+
 .content {
 	padding: 4px 20px 24px 20px;
 }
-.statusRow {
-	padding-top: 12px;
+
+/* Hero — mirrors tx/[id].vue */
+.hero_meta {
+	flex-wrap: wrap;
+	row-gap: 4px;
 }
-.statusLabel {
-	font-family: var(--font-headline);
-	font-size: 18px;
-	font-weight: 700;
-	letter-spacing: 0.02em;
-	color: var(--txt-primary);
-	text-transform: capitalize;
-}
-.statusSubtitle {
-	font-family: var(--font-body);
-	font-size: 13px;
-	color: var(--txt-secondary);
-}
-.amountValue {
-	font-family: var(--font-headline);
-	font-size: 28px;
-	font-weight: 700;
-	color: var(--txt-primary);
-	letter-spacing: -0.01em;
-}
-.amountSymbol {
+
+.tx_time {
 	font-family: var(--font-mono);
-	font-size: 14px;
+	font-size: 11px;
+	color: var(--nulo-secondary);
+}
+
+/* Amount block — verbatim from tx/[id].vue tokens */
+.amount_value {
+	font-family: var(--font-mono);
+	font-size: 24px;
+	font-weight: 500;
+	color: var(--txt-primary);
+}
+
+.amount_symbol {
+	color: var(--nulo-secondary);
+}
+
+.amount_caption {
+	font-family: var(--font-headline);
+	font-size: 10px;
+	font-weight: 700;
 	letter-spacing: 0.1em;
-	color: var(--txt-secondary);
-	margin-left: 6px;
-}
-.amountCaption {
-	font-family: var(--font-mono);
-	font-size: 10px;
-	font-weight: 600;
-	letter-spacing: 0.12em;
 	text-transform: uppercase;
-	color: var(--txt-secondary);
+	color: var(--nulo-secondary);
 }
-.row {
-	border-top: 1px solid var(--nulo-border);
-	padding-top: 16px;
-}
-.rowLabel {
-	font-family: var(--font-mono);
+
+/* Categorical chip — same pattern as tx/[id].vue's transfer_type_chip:
+   inline pill, mono headline, uppercase, 1px border. */
+.category_chip {
+	align-self: center;
+
+	padding: 5px 12px;
+	border: 1px solid var(--nulo-border);
+	background: transparent;
+
+	font-family: var(--font-headline);
 	font-size: 10px;
-	font-weight: 600;
-	letter-spacing: 0.12em;
+	font-weight: 700;
+	letter-spacing: 0.15em;
 	text-transform: uppercase;
-	color: var(--txt-tertiary);
+	color: var(--nulo-secondary);
 }
-.rowValue {
-	font-family: var(--font-body);
-	font-size: 14px;
+
+/* Origin chip — small subtitle row above the details box */
+.origin_row {
+	align-self: center;
+}
+
+.origin_label {
+	font-family: var(--font-headline);
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: var(--nulo-secondary);
+}
+
+.origin_value {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--nulo-secondary);
+	word-break: break-all;
+}
+
+/* Details box — mirrors tx/[id].vue details_box */
+.details_box {
+	padding: 12px;
+	border: 1px solid var(--nulo-border);
+	background: transparent;
+}
+
+.detail_key {
+	font-family: var(--font-headline);
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+	color: var(--nulo-secondary);
+}
+
+.detail_value_mono {
+	font-family: var(--font-mono);
+	font-size: 12px;
+	font-weight: 600;
 	color: var(--txt-primary);
-	word-break: break-word;
 }
-.codeBlock {
+
+.detail_context {
+	font-family: var(--font-body);
+	font-size: 12px;
+	line-height: 1.5;
+	color: var(--txt-primary);
+}
+
+/* Developer-mode error block — preserved styling */
+.dev_box {
+	padding: 12px;
+	border: 1px solid var(--nulo-border);
+	background: transparent;
+}
+
+.code_block {
 	font-family: var(--font-mono);
 	font-size: 11px;
 	background: var(--nulo-surface-low);
@@ -297,18 +394,22 @@ onBeforeUnmount(() => {
 	color: var(--txt-secondary);
 	margin: 0;
 }
-.emptyHeadline {
+
+/* Empty state — mirrors tx/[id].vue */
+.empty_headline {
 	font-family: var(--font-headline);
 	font-size: 14px;
 	font-weight: 700;
-	letter-spacing: 0.12em;
-	color: var(--txt-secondary);
-}
-.emptySub {
-	font-family: var(--font-body);
-	font-size: 12px;
-	line-height: 1.5;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
 	color: var(--nulo-secondary);
+	margin-top: 48px;
+}
+
+.empty_sub {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--nulo-outline);
 	text-align: center;
 }
 </style>
