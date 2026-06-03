@@ -300,6 +300,27 @@ describe("PopupManager — pending-trust queue + triple-key dedup", () => {
 		expect(cacheState.incomingTrust.contract).toBeUndefined()
 	})
 
+	test("(post-impl 3rd cycle) account-switch on same profile/network closes the stale open popup", async () => {
+		// Codex 3rd-cycle Medium: trust payloads are account-scoped per
+		// incoming-transfer/spec.ts:84. Account-only switches MUST also
+		// close a popup whose payload references the prior account.
+		mount(PopupManager, { shallow: SHALLOW })
+		await flushPromises()
+
+		// Open popup on account 0xacct.
+		await fireAndFlush(payload({ accountAddress: "0xacct", contract: "0xcAcc" }))
+		expect(popupStore.isOpened("incoming_trust")).toBe(true)
+		expect(cacheState.incomingTrust.accountAddress).toBe("0xacct")
+
+		// User switches account within the same profile + network.
+		appStoreState.account = { address: "0xother" }
+		await flushPromises()
+
+		// The stale popup must close (it referenced 0xacct, not 0xother).
+		expect(popupStore.isOpened("incoming_trust")).toBe(false)
+		expect(cacheState.incomingTrust.accountAddress).toBeUndefined()
+	})
+
 	test("(post-impl 2nd cycle) accept on A, switch to B, close → no stale A popup re-opens under B", async () => {
 		// Codex post-impl 2nd-cycle High repro: queue/open A payloads,
 		// switch identity to B, close the active popup. Without the

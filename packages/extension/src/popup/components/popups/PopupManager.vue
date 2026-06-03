@@ -96,6 +96,7 @@ function dequeueNextPendingTrust() {
 			contract: next.contract,
 			profileId: next.profileId,
 			networkId: next.networkId,
+			accountAddress: next.accountAddress,
 			allow: () => incomingTransferService.setTrustAllow(next.profileId, next.networkId, next.contract),
 			reject: () => incomingTransferService.setTrustReject(next.profileId, next.networkId, next.contract),
 		}
@@ -170,13 +171,15 @@ const unwatchTriple = watch(
 		}
 		if (popupStore.isOpened("incoming_trust")) {
 			const t = cacheStore.incomingTrust
+			// Trust payloads are account-scoped (see incoming-transfer/spec.ts
+			// `IncomingTransferPending.accountAddress`); replay is filtered
+			// by account in service.replayPendingPrompts. Account-only
+			// switches MUST also close the popup. Post-impl audit 3rd-
+			// cycle Medium.
 			const matches =
 				t?.profileId === appStore.profile?.id &&
 				t?.networkId === appStore.network?.id &&
-				// cacheStore payload doesn't carry accountAddress; the
-				// triple identity is enough — if profile + network match,
-				// the popup is still relevant. Otherwise close.
-				true
+				t?.accountAddress === appStore.account?.address
 			if (!matches) {
 				popupStore.close("incoming_trust")
 				cacheStore.incomingTrust = {}

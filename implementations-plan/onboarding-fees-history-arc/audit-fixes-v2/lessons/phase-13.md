@@ -63,12 +63,14 @@
   immediate-kick poll (not just the 30s tick); in practice the PXE
   call + note-decode latency still exceeds the popup's sub-100ms
   `setTrustAllow` write. Documented per post-impl codex audit Low.
-- **C2 rapid-switch race**: closed by the second-cycle post-impl audit
-  fixup. `onIncomingTransferPending` drops payloads for non-active
-  triples on ingress; the identity-switch watcher purges queued
-  payloads + closes a stale open popup; `dequeueNextPendingTrust`
-  defensively skips mismatched entries on its way out. The popup
-  cannot open for a non-active triple via any path.
+- **C2 identity-switch race**: closed via three layers landed across
+  the post-impl audit cycles. `onIncomingTransferPending` drops
+  payloads for non-active triples on ingress; the identity-switch
+  watcher purges queued payloads and closes a stale open popup
+  (full triple comparison: profile + network + account per the 3rd-
+  cycle audit Medium fix); `dequeueNextPendingTrust` defensively
+  skips mismatched entries on its way out. Covers profile-switch,
+  network-switch, AND account-switch transitions.
 - **P11 scope**: only `send.vue` was rehydrated; other identity-scoped
   consumers (activity.vue, RecentActivityView, settings/tokens,
   detail pages) are deferred to the trust-state-machine follow-up arc.
