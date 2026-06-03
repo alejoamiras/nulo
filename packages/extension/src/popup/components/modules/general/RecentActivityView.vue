@@ -644,12 +644,19 @@ onMounted(async () => {
 	await loadTokens()
 
 	// ServiceClient doesn't auto-connect on listener registration — make
-	// an explicit connect so the onUpdate listener (visibility toggle
-	// reload) fires under runtime config changes.
+	// explicit connects so the onUpdate (visibility toggle) and
+	// onConnected (loadIncomingTransfers) listeners fire. Without the
+	// incoming connect, the onConnected handler never runs and the
+	// widget's incoming-transfer rows stay empty across re-mounts.
 	try {
 		await configService.connect()
 	} catch {
 		// Non-fatal; reload-on-toggle just won't fire until next mount.
+	}
+	try {
+		await incomingTransferService.connect()
+	} catch {
+		// Non-fatal; the widget will still render outgoing rows.
 	}
 
 	// Newest-first replay — otherwise concurrent tasks could surface the older one.
