@@ -58,8 +58,11 @@
 
 ## Residual risks documented for the PR description
 
-- **C1 race**: scheduler poll could beat the popup's `setTrustAllow` write
-  (~100ms vs 30s poll cadence; extremely unlikely under normal usage).
+- **C1 race**: the scheduler's `startScheduler` fires an IMMEDIATE poll
+  on token-add (zero-delay), THEN 30s ticks. The race is with the
+  immediate-kick poll (not just the 30s tick); in practice the PXE
+  call + note-decode latency still exceeds the popup's sub-100ms
+  `setTrustAllow` write. Documented per post-impl codex audit Low.
 - **C2 rapid-switch race**: a replay for an old profile could enqueue
   stale payloads after the user has switched profiles; the existing
   triple-key queue dedup absorbs the worst case (popup doesn't open
@@ -109,3 +112,56 @@ These were all written up + audit-graded across 4 codex Reject rounds.
 The split decision (this arc ships user-visible bug fixes + tactical
 C1/C2; the concurrency-safe trust state machine ships separately)
 preserved the analysis without rolling it into a single mega-PR.
+
+## Post-impl audit fixups (after codex Reject)
+
+Codex post-impl returned Reject with 2 Highs + 1 Low + 1 Nit. The two
+Highs were real and addressed in a fixups commit; the Low was a docs
+correction (applied here); the Nit was a false-positive (verified via
+grep — no source consumers of the dropped testid; only stale built
+output in `dist/`).
+
+### High #1 — Stale-triple defense in PopupManager
+
+`PopupManager.vue:onIncomingTransferPending` now drops payloads whose
+`(profileId, networkId, accountAddress)` doesn't match the LIVE
+`appStore` triple. Under rapid profile switch (A→B→A), a replay
+emitted for A's triple can resolve after the user has moved to B;
+without this defense, the stale payload would enqueue under A's key
+and the allow/reject closures would bind to A's triple at dequeue
+time. Test added:
+`PopupManager.test.ts > stale-triple defense: payload for non-active
+triple is dropped`. The existing cross-network test was updated to
+switch `appStoreState.network` between fires so each payload is
+valid at fire-time.
+
+### High #2 — send.vue activeTokenIdx reset + onMounted sequence guard
+
+`refetchIdentityScopedState` now resets `cacheStore.activeTokenIdx`
+when the new token list doesn't contain the prior id + re-runs
+`initSendType` + `initReceiverType` to re-validate the form state.
+
+`onMounted` now routes through the sequence counter so a slow mount-
+fetch from a prior identity can't overwrite newer data. Also resets
+`activeTokenIdx` if the stored id isn't in the post-mount token list.
+
+(No automated regression test added for the send.vue paths; the
+component has too many service-client dependencies for a focused
+mount test. Covered in manual QA.)
+
+### Low — Race-window doc correction
+
+`phase-7.md` and the residual-risks section of this file are updated
+to clarify that the scheduler's race is with the IMMEDIATE-kick poll
+(zero-delay on token-add), not only the 30s polling tick. The race
+still favors `setTrustAllow` in practice (PXE latency &gt; trust
+write) but the documentation now matches the source.
+
+### Nit (dismissed — false positive)
+
+Codex flagged that the P10 restructure dropped the
+`journal-detail-error-kind` testid. Grep confirms NO source-tree
+consumers exist; the only hit is the stale built file at
+`dist/chrome/assets/_id_-DZI4_a19.js` (regenerated on every build).
+The new testids `journal-detail-context` + `journal-detail-error-kind-tag`
+are what's referenced by tests and downstream automation.

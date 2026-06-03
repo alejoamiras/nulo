@@ -262,13 +262,17 @@ describe("PopupManager — pending-trust queue + triple-key dedup", () => {
 	})
 
 	test("same contract on DIFFERENT networks: BOTH surface (triple-key dedup, not bare-contract)", async () => {
+		// Post-impl audit High #1: the stale-triple guard drops payloads
+		// whose triple doesn't match the live appStore. To still exercise
+		// the queue's triple-key dedup (vs bare-contract dedup), switch
+		// `appStoreState.network` between firing the two payloads so each
+		// is valid at fire-time. This models the real scenario where the
+		// user changes network between two pending-prompt events.
 		mount(PopupManager, { shallow: SHALLOW })
 		await flushPromises()
 
-		// Same contract address (e.g. USDC twin), two networks.
+		// Fire net-1 payload while appStore is on net-1.
 		await fireAndFlush(payload({ networkId: "net-1", contract: "0xUSDC" }))
-		await fireAndFlush(payload({ networkId: "net-2", contract: "0xUSDC" }))
-
 		expect(cacheState.incomingTrust.contract).toBe("0xUSDC")
 		expect(cacheState.incomingTrust.networkId).toBe("net-1")
 		expect(popupStore.isOpened("incoming_trust")).toBe(true)
@@ -276,10 +280,24 @@ describe("PopupManager — pending-trust queue + triple-key dedup", () => {
 		popupStore.close("incoming_trust")
 		await flushPromises()
 
+		// Switch the live triple to net-2 before firing the net-2 payload.
+		appStoreState.network = { id: "net-2", chainId: 2 }
+		await flushPromises()
+		await fireAndFlush(payload({ networkId: "net-2", contract: "0xUSDC" }))
+
 		// Net-2 twin surfaces — would have been suppressed under bare-contract dedup.
 		expect(cacheState.incomingTrust.contract).toBe("0xUSDC")
 		expect(cacheState.incomingTrust.networkId).toBe("net-2")
 		expect(popupStore.isOpened("incoming_trust")).toBe(true)
+	})
+
+	test("(post-impl) stale-triple defense: payload for non-active triple is dropped", async () => {
+		mount(PopupManager, { shallow: SHALLOW })
+		await flushPromises()
+		// appStore is on net-1; fire a payload for net-2 → must NOT enqueue.
+		await fireAndFlush(payload({ networkId: "net-2", contract: "0xstaleNet" }))
+		expect(popupStore.isOpened("incoming_trust")).toBe(false)
+		expect(cacheState.incomingTrust.contract).toBeUndefined()
 	})
 
 	test("currently-open popup coalesce: dup fired while open does NOT add to queue", async () => {

@@ -348,11 +348,12 @@ watch(
 )
 
 // P11 E1 fix: refetch identity-scoped state (tokens, tokenBalances,
-// contacts) whenever the active appStore triple changes. Before this,
-// the page snapshotted state once on mount and never re-fetched on
-// profile switch → "no available tokens" error after Profile A → B.
-// Sequence counter guards against stale-resolve races (older fetch
-// resolving after a newer one).
+// contacts) whenever the active appStore triple changes. Sequence
+// counter guards against stale-resolve races. Post-impl audit High #2:
+// the activeTokenIdx is global (cacheStore) — when the new token set
+// doesn't contain the old id, reset to tokens[0] so activeToken stays
+// resolvable. Re-run the send/receiver init logic so the form state
+// matches the new active token.
 let identityFetchSeq = 0
 async function refetchIdentityScopedState() {
 	const mySeq = ++identityFetchSeq
@@ -373,6 +374,16 @@ async function refetchIdentityScopedState() {
 	tokens.value = t
 	tokenBalances.value = tb
 	contacts.value = c
+
+	// Reset activeTokenIdx if the prior selection isn't in the new token
+	// set (e.g. profile switch). Without this, `activeToken` computed
+	// returns undefined and downstream send / fee-estimation flows break.
+	if (!t.some((tok) => tok.id === cacheStore.activeTokenIdx)) {
+		cacheStore.activeTokenIdx = t[0]?.id ?? undefined
+	}
+	// Re-validate the form state for the (possibly new) active token.
+	initSendType()
+	initReceiverType()
 }
 
 watch(
@@ -383,20 +394,34 @@ watch(
 
 onMounted(async () => {
 	console.log(`[send:${sendInstanceId}] mounted`)
-	tokens.value = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
-	tokenBalances.value = await tokenBalanceService.getTokenBalances(undefined, appStore.account.address)
-	contacts.value = await contactService.getContacts()
+	// Route mount fetch through the sequence-guarded refetch so a slow
+	// mount-fetch from a prior identity can't overwrite newer data.
+	// Post-impl audit High #2 — mount path previously bypassed
+	// identityFetchSeq.
+	const mountSeq = ++identityFetchSeq
+	const [t, tb, c] = await Promise.all([
+		tokenService.getTokens(appStore.profile.id, appStore.network.chainId),
+		tokenBalanceService.getTokenBalances(undefined, appStore.account.address),
+		contactService.getContacts(),
+	])
+	if (mountSeq !== identityFetchSeq) return
+	tokens.value = t
+	tokenBalances.value = tb
+	contacts.value = c
 
 	// Query-param preselect survives the unmount of tokens/[id] (which clears
 	// cacheStore.activeTokenIdx on its onBeforeUnmount). Falls through to
 	// whatever activeTokenIdx may still be set, then to tokens[0].
 	const queryTokenId = route.query.tokenId ? Number(route.query.tokenId) : null
-	if (queryTokenId && tokens.value.some((t) => t.id === queryTokenId)) {
+	if (queryTokenId && tokens.value.some((tok) => tok.id === queryTokenId)) {
 		cacheStore.activeTokenIdx = queryTokenId
 	}
 
 	if (!cacheStore.activeTokenIdx && tokens.value.length) {
 		cacheStore.activeTokenIdx = tokens.value[0].id
+	} else if (cacheStore.activeTokenIdx && !tokens.value.some((tok) => tok.id === cacheStore.activeTokenIdx)) {
+		// Old idx points at a token from a prior identity. Reset.
+		cacheStore.activeTokenIdx = tokens.value[0]?.id ?? undefined
 	}
 
 	initSendType()

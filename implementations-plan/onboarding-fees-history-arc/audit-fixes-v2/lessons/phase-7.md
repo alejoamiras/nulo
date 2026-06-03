@@ -30,12 +30,15 @@ v3 codex audit also caught a startup-ordering hole: a popup-origin
 addToken during the boot window (before `IncomingTransferService.init`
 runs) would silently skip the auto-trust.
 
-This tactical fix lives in the popup itself. Race window with the
-scheduler: ~100ms for `setTrustAllow` to write vs the scheduler's
-30-second polling interval. In practice the scheduler's first poll
-includes PXE call + note decoding latency that exceeds the trust
-write by orders of magnitude. The user's reported scenario closes;
-the full concurrency-safe design ships in a separate arc.
+This tactical fix lives in the popup itself. Race window: the
+scheduler's `startScheduler` fires an IMMEDIATE poll on token-add (zero
+delay), THEN subsequent polls every 30s. So the race is with the
+immediate-kick poll, not just the 30s tick — corrected per the post-
+impl codex audit Low finding. In practice the immediate poll still
+includes the PXE call + note-decoding latency (typically &gt;100ms),
+which exceeds the popup's `setTrustAllow` write (sub-100ms repo
+write + emit). The user's reported scenario closes; the full
+concurrency-safe design ships in a separate arc.
 
 ## Security boundary preserved
 

@@ -93,6 +93,16 @@ function dequeueNextPendingTrust() {
 }
 
 function onIncomingTransferPending(payload) {
+	// Stale-triple defense (post-impl codex audit High #1). Replay calls
+	// are async; under rapid profile switch (A→B→A) a payload emitted
+	// for A's triple can resolve AFTER the user has switched to B. The
+	// triple-key queue dedup alone is insufficient because the payload
+	// would still enqueue under A's key and (worse) the allow/reject
+	// closures bind to A's triple at dequeue time. Compare against the
+	// LIVE appStore triple and drop on mismatch.
+	if (payload.profileId !== appStore.profile?.id) return
+	if (payload.networkId !== appStore.network?.id) return
+	if (payload.accountAddress !== appStore.account?.address) return
 	if (!enqueueIfNew(payload)) return
 	dequeueNextPendingTrust()
 }
