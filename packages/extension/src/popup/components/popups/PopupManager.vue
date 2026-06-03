@@ -44,23 +44,57 @@ const cacheStore = useCacheStore()
 // First-receive friction subscriber. PopupManager is always mounted in
 // the popup app, so this is the canonical place to open the trust prompt
 // when IncomingTransferService discovers a note from an unknown contract.
+//
+// Multi-contract queue: the service can emit-storm a batch of Pending
+// events (e.g. `replayPendingPrompts` on (re)connect for N pending
+// contracts), but the popup can only show one at a time. We queue them
+// here, deduping by `(profileId, networkId, contract)` triple — codex
+// post-impl audit M3 + opus C3: bare-contract dedup mis-handles the same
+// token address that legitimately exists on multiple networks (e.g. a
+// USDC twin). The dedup check covers BOTH (a) entries already in the
+// queue and (b) the currently-open popup's payload (codex final-review
+// L) so a replay-while-open doesn't enqueue a duplicate.
 const incomingTransferService = new IncomingTransferServiceClient()
-function onIncomingTransferPending(payload) {
-	// Coalesce: if a trust popup is already open for this contract, no-op.
-	// (The service emits pending ONLY on the unknown→pending transition,
-	// so subsequent notes from the same pending contract don't re-emit.
-	// This guard handles the edge case where the user closed the popup
-	// without resolving and a fresh note arrived.)
-	if (popupStore.isOpened("incoming_trust") && cacheStore.incomingTrust?.contract === payload.contract) return
+const pendingTrustQueue = []
+
+function tripleKeyOf(payload) {
+	return `${payload.profileId}|${payload.networkId}|${payload.contract}`
+}
+
+function activePopupKey() {
+	const t = cacheStore.incomingTrust
+	if (!t || !t.contract) return null
+	return `${t.profileId ?? ""}|${t.networkId ?? ""}|${t.contract}`
+}
+
+function enqueueIfNew(payload) {
+	const key = tripleKeyOf(payload)
+	if (popupStore.isOpened("incoming_trust") && activePopupKey() === key) return false
+	if (pendingTrustQueue.some((p) => tripleKeyOf(p) === key)) return false
+	pendingTrustQueue.push(payload)
+	return true
+}
+
+function dequeueNextPendingTrust() {
+	if (popupStore.isOpened("incoming_trust")) return
+	const next = pendingTrustQueue.shift()
+	if (!next) return
 	cacheStore.incomingTrust = {
-		tokenSymbol: payload.tokenSymbol,
-		tokenDecimals: payload.tokenDecimals,
-		amountRaw: payload.amountRaw,
-		contract: payload.contract,
-		allow: () => incomingTransferService.setTrustAllow(payload.profileId, payload.networkId, payload.contract),
-		reject: () => incomingTransferService.setTrustReject(payload.profileId, payload.networkId, payload.contract),
+		tokenSymbol: next.tokenSymbol,
+		tokenDecimals: next.tokenDecimals,
+		amountRaw: next.amountRaw,
+		contract: next.contract,
+		profileId: next.profileId,
+		networkId: next.networkId,
+		allow: () => incomingTransferService.setTrustAllow(next.profileId, next.networkId, next.contract),
+		reject: () => incomingTransferService.setTrustReject(next.profileId, next.networkId, next.contract),
 	}
 	popupStore.open("incoming_trust")
+}
+
+function onIncomingTransferPending(payload) {
+	if (!enqueueIfNew(payload)) return
+	dequeueNextPendingTrust()
 }
 incomingTransferService.onIncomingTransferPending.add(onIncomingTransferPending)
 
@@ -126,20 +160,20 @@ onMounted(async () => {
 })
 
 // Multi-contract queue: when the user resolves (Allow/Reject) and the
-// trust popup closes, re-trigger `replayPendingPrompts` so the NEXT
-// pending contract surfaces on the same popup session. Without this,
-// the single-slot popup overwrites prior payloads and only the last
-// replayed contract was actionable per reconnect.
+// trust popup closes, pull the next pending payload off the local queue
+// and reopen the popup for it. The queue is fed by:
+//   - live `onIncomingTransferPending` events (first-receive transition),
+//   - `replayPendingPrompts` on (re)connect (above), which fires Pending
+//     events for every contract in pending trust state,
+//   - `replayPendingPrompts` on visibility OFF→ON flip (below).
+// All three paths converge on the same queue + triple-key dedup, so a
+// burst of overlapping events surfaces every distinct contract once,
+// in arrival order.
 watch(
 	() => popupStore.isOpened("incoming_trust"),
-	async (isOpen, wasOpen) => {
+	(isOpen, wasOpen) => {
 		if (!wasOpen || isOpen) return
-		if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) return
-		try {
-			await incomingTransferService.replayPendingPrompts(appStore.profile.id, appStore.network.id, appStore.account.address)
-		} catch {
-			// Replay best-effort.
-		}
+		dequeueNextPendingTrust()
 	},
 )
 
