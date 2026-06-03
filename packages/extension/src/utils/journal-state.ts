@@ -192,6 +192,62 @@ export function humanizeErrorKind(kind: string): string {
 	}
 }
 
+/**
+ * B2: categorical label + one-line context for a failed/cancelled
+ * journal record. Maps `op.error?.kind` to a user-friendly category
+ * with a brief explanation. Distinguishes pre-broadcast failures
+ * (your wallet caught it before reaching the network) from interrupted-
+ * mid-flight (wallet restarted; tx may still be on-chain) from generic
+ * categories (network errors, app errors).
+ *
+ * Consumes ONLY wallet-controlled fields: `op.error?.kind`,
+ * `op.kind`, `op.progress?.stage`. NEVER reads `op.subtitle` (dApp-
+ * controlled) so the new B1 detail page can render the category
+ * without re-opening the P1 sanitize hole.
+ *
+ * The "Reason" row in journal/[id].vue continues to use
+ * `humanizeErrorKind` for the technical-name surface; this helper is
+ * the categorical chip + context surface.
+ */
+export type CategoricalFailureLabel = {
+	label: string
+	context: string
+}
+
+export function categoricalLabel(op: OperationRecord): CategoricalFailureLabel {
+	const kind = op.error?.kind ?? "unknown"
+	switch (kind) {
+		case "user_rejected":
+			return { label: "You rejected", context: "You stopped this transaction." }
+		case "popup_bound":
+			return { label: "Popup closed early", context: "The popup closed before this transaction could finish." }
+		case "simulation":
+		case "prover":
+		case "stuck_proving":
+		case "stuck_queued":
+			return {
+				label: "Stopped before broadcast",
+				context: "Your wallet caught this before reaching the network. Often balance, fees, or invalid call.",
+			}
+		case "sw_restart_post_prove":
+		case "stale_on_resume":
+			return {
+				label: "Interrupted mid-flight",
+				context: "The wallet restarted before confirming this. Transaction may still be on-chain — check the explorer.",
+			}
+		case "network":
+			return {
+				label: "Network error",
+				context: "Couldn't reach the network. The transaction may not have been submitted.",
+			}
+		case "transfer":
+		case "dapp_execute":
+			return { label: "Reported by app", context: "The connected app reported an error." }
+		default:
+			return { label: "Error", context: "Something went wrong with this transaction." }
+	}
+}
+
 /** Subtitle copy per documented `JobError.kind` + live execution catch-alls. */
 function failedSubtitleFor(kind: string): string {
 	switch (kind) {

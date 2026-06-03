@@ -12,6 +12,7 @@ import type { OperationKind, OperationRecord } from "@/wallet/services/operation
 import {
 	ACTIVITY_FEED_KINDS,
 	buildJournalTerminalCardProps,
+	categoricalLabel,
 	humanizeErrorKind,
 	journalTerminalDisplay,
 	sanitizeJournalSubtitle,
@@ -434,5 +435,64 @@ describe("humanizeErrorKind — JobError.kind → user-facing label", () => {
 		expect(humanizeErrorKind("metadata_fetch")).toBe("Error")
 		expect(humanizeErrorKind("totally_new_kind")).toBe("Error")
 		expect(humanizeErrorKind("")).toBe("Error")
+	})
+})
+
+describe("categoricalLabel — B2 failure category + context for journal/[id].vue", () => {
+	function failed(kind: string): OperationRecord {
+		return recordWith({ progress: { stage: "failed" }, error: { kind, message: "", normalizedRaw: null } })
+	}
+
+	test("user_rejected → 'You rejected'", () => {
+		const { label, context } = categoricalLabel(failed("user_rejected"))
+		expect(label).toBe("You rejected")
+		expect(context).toBe("You stopped this transaction.")
+	})
+	test("popup_bound → 'Popup closed early'", () => {
+		expect(categoricalLabel(failed("popup_bound")).label).toBe("Popup closed early")
+	})
+	test("simulation / prover / stuck_proving / stuck_queued → 'Stopped before broadcast'", () => {
+		for (const kind of ["simulation", "prover", "stuck_proving", "stuck_queued"]) {
+			expect(categoricalLabel(failed(kind)).label).toBe("Stopped before broadcast")
+		}
+	})
+	test("sw_restart_post_prove / stale_on_resume → 'Interrupted mid-flight' + check explorer hint", () => {
+		for (const kind of ["sw_restart_post_prove", "stale_on_resume"]) {
+			const { label, context } = categoricalLabel(failed(kind))
+			expect(label).toBe("Interrupted mid-flight")
+			expect(context).toContain("check the explorer")
+		}
+	})
+	test("network → 'Network error'", () => {
+		expect(categoricalLabel(failed("network")).label).toBe("Network error")
+	})
+	test("transfer / dapp_execute → 'Reported by app'", () => {
+		for (const kind of ["transfer", "dapp_execute"]) {
+			expect(categoricalLabel(failed(kind)).label).toBe("Reported by app")
+		}
+	})
+	test("unknown / unrecognized → 'Error'", () => {
+		expect(categoricalLabel(failed("unknown")).label).toBe("Error")
+		expect(categoricalLabel(failed("metadata_fetch")).label).toBe("Error")
+	})
+	test("no error envelope → 'Error' fallback", () => {
+		// op without error.kind defaults to "unknown" → fallback case.
+		const op = recordWith({ progress: { stage: "failed" }, error: null })
+		expect(categoricalLabel(op).label).toBe("Error")
+	})
+
+	test("(SANITIZE-INVARIANCE PIN) categoricalLabel ignores op.subtitle even if dApp injects an evil-shaped string", () => {
+		// The helper must NOT pull strings from op.subtitle. If a future
+		// refactor accidentally wires the context line to op.subtitle, the
+		// previously-sanitized dApp-controlled string would render raw.
+		const op = recordWith({
+			progress: { stage: "failed" },
+			error: { kind: "simulation", message: "", normalizedRaw: null },
+			subtitle: "http://evil.example/danger",
+		})
+		const { label, context } = categoricalLabel(op)
+		expect(label).not.toContain("evil")
+		expect(context).not.toContain("evil")
+		expect(context).not.toContain("http")
 	})
 })
