@@ -387,20 +387,29 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// While pending, the record is persisted hidden — `setTrustAllow`
 			// flips queued records visible atomically, `setTrustReject`
 			// keeps them hidden permanently.
+			//
+			// Visibility gate (codex post-impl audit C2): the EMIT must
+			// respect `incomingTransfersVisible`. Without this, an OFF toggle
+			// suppresses initial-load + Added events but the Pending prompt
+			// still pops on first receive — leaking that a contract was
+			// touched. The trust transition + record persistence still happen
+			// so a toggle-on later can replay via `replayPendingPrompts`.
 			if (trustState === "unknown") {
 				const updated = await this.repo.setTrust(profileId, networkId, contract, "pending")
 				this.emit("onIncomingTrustChanged", updated)
 				trustState = "pending"
-				this.emit("onIncomingTransferPending", {
-					profileId,
-					networkId,
-					accountAddress,
-					contract,
-					tokenId: token.id,
-					tokenSymbol: token.symbol,
-					tokenDecimals: token.decimals,
-					amountRaw,
-				})
+				if (await this.isVisibilityEnabled()) {
+					this.emit("onIncomingTransferPending", {
+						profileId,
+						networkId,
+						accountAddress,
+						contract,
+						tokenId: token.id,
+						tokenSymbol: token.symbol,
+						tokenDecimals: token.decimals,
+						amountRaw,
+					})
+				}
 			}
 
 			const record = this.buildRecord({ note, profileId, networkId, accountAddress, token, amountRaw, trustState })
@@ -444,6 +453,13 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	 */
 	public async replayPendingPrompts(profileId: string, networkId: string, accountAddress: string): Promise<void> {
 		await this.ensureInitialized()
+		// Visibility gate (codex post-impl audit C2): if the user toggled
+		// incoming-transfers OFF, the replay-on-(re)connect path must NOT
+		// surface prompts — same privacy promise as the Pending emit in
+		// `scanContract`. PopupManager owns the false→true flip replay, so
+		// when the user toggles back on, that path re-invokes this method
+		// and the gate passes.
+		if (!(await this.isVisibilityEnabled())) return
 		const trustRecords = await this.repo.listTrust()
 		const pending = trustRecords.filter((t) => t.profileId === profileId && t.networkId === networkId && t.state === "pending")
 		if (pending.length === 0) return

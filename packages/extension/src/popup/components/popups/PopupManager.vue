@@ -31,6 +31,7 @@ import TokenMetadataPopup from "./TokenMetadataPopup.vue"
 
 /** Services */
 import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
+import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -76,6 +77,29 @@ incomingTransferService.onConnected.add(async () => {
 	}
 })
 
+// Visibility-toggle gate: when `incomingTransfersVisible` flips false→true
+// at runtime, the service's emit path is now silent on the OFF side
+// (incoming-transfer/service.ts gates both `scanContract` Pending emits
+// and `replayPendingPrompts` on the toggle). So a user who left contracts
+// in pending state while toggled OFF gets no auto-prompt on toggle-on —
+// PopupManager owns the false→true replay because it knows the active
+// `(profile, network, account)` triple from `appStore`. The service can't
+// reach that triple safely. Co-authored via codex post-impl audit H1.
+const configService = new ConfigServiceClient()
+let lastVisibility = true
+function onConfigUpdate(prop) {
+	if (prop.key !== "incomingTransfersVisible") return
+	const newValue = prop.value !== false
+	const wasOff = lastVisibility === false
+	lastVisibility = newValue
+	if (!wasOff || !newValue) return
+	if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) return
+	incomingTransferService.replayPendingPrompts(appStore.profile.id, appStore.network.id, appStore.account.address).catch(() => {
+		// Replay best-effort; transient port hiccups must not crash the popup.
+	})
+}
+configService.onUpdate.add(onConfigUpdate)
+
 // ServiceClient doesn't auto-connect on listener registration — registers
 // fire only after `connect()` or the first request. Explicit connect on
 // mount so `onConnected` (replay path) and `onIncomingTransferPending`
@@ -85,6 +109,19 @@ onMounted(async () => {
 		await incomingTransferService.connect()
 	} catch {
 		// Connect is retried on the first method call; non-fatal here.
+	}
+	try {
+		await configService.connect()
+	} catch {
+		// Non-fatal; toggle-flip replay just won't fire this session.
+	}
+	// Seed the "prior value" tracker so the first user-driven flip is
+	// detected correctly. Without this, `lastVisibility` defaults to
+	// `true` and an actual OFF→ON flip would be misread as no-op.
+	try {
+		lastVisibility = (await configService.getValue("incomingTransfersVisible")) !== false
+	} catch {
+		// Fail open — matches the service's own `isVisibilityEnabled` policy.
 	}
 })
 
@@ -108,6 +145,7 @@ watch(
 
 onBeforeUnmount(() => {
 	incomingTransferService.disconnect()
+	configService.disconnect()
 })
 </script>
 
