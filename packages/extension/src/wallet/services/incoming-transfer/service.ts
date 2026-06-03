@@ -125,6 +125,20 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		// tokens). Wipe stored records when a profile is deleted.
 		this.profileService.onActiveProfileChanged.add(this.onActiveProfileChanged)
 		this.profileService.onProfileDeleted.add(this.onProfileDeleted)
+		// Account lifecycle (codex post-impl audit C3): without these, a newly
+		// added account stays unscanned until SW restart (or the user adds a
+		// token), and a deleted account keeps polling PXE indefinitely — both
+		// wasted PXE calls and a privacy footgun (PXE keeps querying for an
+		// account the user removed). hydrateSchedulers is the simplest correct
+		// reaction to onAccountAdded (chain pull + ratify); onAccountDeleted
+		// is a targeted tear-down per (networkId, accountAddress) key across
+		// every network sharing the account's chainId.
+		this.accountService.onAccountAdded.add(this.onAccountAdded)
+		this.accountService.onAccountDeleted.add(this.onAccountDeleted)
+		// onAccountUpdated intentionally not subscribed — Account.address is
+		// derivation-bound (profileId + chainId + index + type) and cannot
+		// change for an existing record. A name/visibility flip would not
+		// affect scheduling.
 		// Chain-purge fan-out (mirrors TransactionService.init at line 55):
 		// when a chain is removed, drop our records + trust rows for that
 		// (profile, network) pair.
@@ -145,6 +159,35 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 	private onProfileDeleted = async (profile: { id: string }): Promise<void> => {
 		await this.clearProfile(profile.id)
+	}
+
+	private onAccountAdded = async (_account: { chainId: number; address: string }): Promise<void> => {
+		// Lightweight re-hydrate — onAccountAdded is rare (user-driven). The
+		// cost is one tokens-by-profile read + one accounts-by-(profile,chain)
+		// read per network. Cheaper than open-coding the scheduler bookkeeping
+		// and reusing hydrateSchedulers keeps the per-account add path
+		// converging on the same end state as a fresh service init.
+		await this.hydrateSchedulers()
+	}
+
+	private onAccountDeleted = async (account: { chainId: number; address: string }): Promise<void> => {
+		// Targeted tear-down: stop polling for every (network, deletedAccount)
+		// scheduler key. Without this, the interval keeps PXE-querying for an
+		// account the user removed — wasted calls and a privacy footgun.
+		let networks: Network[]
+		try {
+			networks = await this.networkService.getNetworks(account.chainId)
+		} catch (error) {
+			this.logWarn(`onAccountDeleted: failed to resolve networks: ${getErrorMessage(error)}`)
+			return
+		}
+		for (const network of networks) {
+			const key = this.schedulerKey(network.id, account.address)
+			const interval = this.schedulers.get(key)
+			if (interval) clearInterval(interval)
+			this.schedulers.delete(key)
+			this.watchedContracts.delete(key)
+		}
 	}
 
 	// --- public surface ---
