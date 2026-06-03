@@ -99,7 +99,7 @@ afterEach(() => {
 })
 
 describe("IncomingTrustPopup — contract verification surface", () => {
-	test("default state: trimmed address visible; full address NOT in DOM; aria-expanded=false", async () => {
+	test("default state: trimmed address visible; full row in DOM but hidden; aria-expanded=false; aria-controls absent", async () => {
 		const show = ref(true)
 		const w = mount(IncomingTrustPopup, { props: { show: show.value }, global: { stubs: STUBS } })
 		await flushPromises()
@@ -111,12 +111,23 @@ describe("IncomingTrustPopup — contract verification surface", () => {
 		const expandBtn = w.find('[data-testid="incoming-trust-contract-expand"]')
 		expect(expandBtn.exists()).toBe(true)
 		expect(expandBtn.attributes("aria-expanded")).toBe("false")
+		// aria-controls is conditionally emitted only when expanded — APG SC 4.1.2 +
+		// ARIA 1.2: no dangling controls reference + no focusable invisible target.
+		expect(expandBtn.attributes("aria-controls")).toBeUndefined()
 
-		expect(w.find('[data-testid="incoming-trust-contract-full"]').exists()).toBe(false)
-		expect(w.find('[data-testid="incoming-trust-contract-copy"]').exists()).toBe(false)
+		// Under v-show the node is in the DOM with style="display: none". The
+		// inner [data-testid="incoming-trust-contract-full"] is inside the
+		// hidden container; check the container has display:none rather than
+		// using `isVisible()` (which doesn't walk through Vue's stub trees
+		// reliably with our minimal Flex/PopupCard stubs).
+		const fullRow = w.find("#incoming-trust-contract-full")
+		expect(fullRow.exists()).toBe(true)
+		expect(fullRow.attributes("style") ?? "").toContain("display: none")
+		expect(w.find('[data-testid="incoming-trust-contract-full"]').exists()).toBe(true)
+		expect(w.find('[data-testid="incoming-trust-contract-copy"]').exists()).toBe(true)
 	})
 
-	test("expand: click toggle → aria-expanded=true + full address visible + testid present", async () => {
+	test("expand: click toggle → aria-expanded=true + aria-controls resolves + full address visible", async () => {
 		const w = mount(IncomingTrustPopup, { props: { show: true }, global: { stubs: STUBS } })
 		await flushPromises()
 
@@ -125,6 +136,9 @@ describe("IncomingTrustPopup — contract verification surface", () => {
 		const full = w.find('[data-testid="incoming-trust-contract-full"]')
 		expect(full.exists()).toBe(true)
 		expect(full.text()).toBe(contractAddress)
+		// Container should NOT have display:none after expand.
+		const fullRow = w.find("#incoming-trust-contract-full")
+		expect(fullRow.attributes("style") ?? "").not.toContain("display: none")
 
 		const expandBtn = w.find('[data-testid="incoming-trust-contract-expand"]')
 		expect(expandBtn.attributes("aria-expanded")).toBe("true")
@@ -133,17 +147,21 @@ describe("IncomingTrustPopup — contract verification surface", () => {
 		expect(w.find('[data-testid="incoming-trust-contract-copy"]').exists()).toBe(true)
 	})
 
-	test("collapse: a second click on expand toggle → full removed + aria-expanded=false", async () => {
+	test("collapse: a second click on expand toggle → full hidden + aria-expanded=false + aria-controls absent", async () => {
 		const w = mount(IncomingTrustPopup, { props: { show: true }, global: { stubs: STUBS } })
 		await flushPromises()
 		const expandBtn = w.find('[data-testid="incoming-trust-contract-expand"]')
 
 		await expandBtn.trigger("click")
-		expect(w.find('[data-testid="incoming-trust-contract-full"]').exists()).toBe(true)
+		// v-show keeps the node in DOM; check the FULL ROW container has no
+		// display:none, not just the inner span.
+		const expandedRow = () => w.find("#incoming-trust-contract-full")
+		expect(expandedRow().attributes("style") ?? "").not.toContain("display: none")
 
 		await expandBtn.trigger("click")
-		expect(w.find('[data-testid="incoming-trust-contract-full"]').exists()).toBe(false)
+		expect(expandedRow().attributes("style") ?? "").toContain("display: none")
 		expect(expandBtn.attributes("aria-expanded")).toBe("false")
+		expect(expandBtn.attributes("aria-controls")).toBeUndefined()
 	})
 
 	test("copy: click → navigator.clipboard.writeText called with full address + success toast", async () => {
@@ -179,16 +197,16 @@ describe("IncomingTrustPopup — contract verification surface", () => {
 		await flushPromises()
 
 		await w.find('[data-testid="incoming-trust-contract-expand"]').trigger("click")
-		expect(w.find('[data-testid="incoming-trust-contract-full"]').exists()).toBe(true)
+		expect(w.find("#incoming-trust-contract-full").attributes("style") ?? "").not.toContain("display: none")
 
 		await w.setProps({ show: false })
 		await flushPromises()
 		await w.setProps({ show: true })
 		await flushPromises()
 
-		// After reopen, full row should be hidden again — protecting against
-		// state bleed across separate pending contracts.
-		expect(w.find('[data-testid="incoming-trust-contract-full"]').exists()).toBe(false)
+		// After reopen, full row should be hidden again (display:none under v-show)
+		// to prevent state bleed across separate pending contracts.
+		expect(w.find("#incoming-trust-contract-full").attributes("style") ?? "").toContain("display: none")
 		expect(w.find('[data-testid="incoming-trust-contract-expand"]').attributes("aria-expanded")).toBe("false")
 	})
 })

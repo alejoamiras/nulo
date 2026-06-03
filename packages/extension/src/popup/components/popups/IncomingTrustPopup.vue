@@ -135,7 +135,7 @@ watch(
 						type="button"
 						:class="$style.contract_button"
 						:aria-expanded="expanded"
-						aria-controls="incoming-trust-contract-full"
+						:aria-controls="expanded ? 'incoming-trust-contract-full' : undefined"
 						data-testid="incoming-trust-contract-expand"
 						@click="toggleExpanded"
 					>
@@ -151,7 +151,7 @@ watch(
 						/>
 					</button>
 					<div
-						v-if="expanded"
+						v-show="expanded"
 						id="incoming-trust-contract-full"
 						:class="$style.contract_full_row"
 					>
