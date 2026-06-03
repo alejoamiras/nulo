@@ -22,13 +22,13 @@ P3   ─ aria-controls conditional + v-show                 [a11y]      ▒ ✓
 P4a  ─ C2 popup-reopen failing repro e2e                  [test]      ▒ ✓
 P5   ─ onTransactionAdded per-hash + account filter       [bug-fix]   ▒▒ ✓
 P6   ─ PopupManager visibility seed + onUnmount cleanup   [bug-fix]   ▒▒ ✓
-P7   ─ Tactical C1: NewTokenPopup auto-setTrustAllow      [bug-fix]   ▒▒
-P8   ─ Tactical C2: one-shot replay on triple-ready       [bug-fix]   ▒▒
-P9   ─ B2 categorical label helper                        [util]      ▒
-P10  ─ B1 brutalist restructure of journal/[id].vue       [ui]        ▒▒▒
-P11  ─ E1 identity-scoped consumer rehydration            [bug-fix]   ▒▒▒
-P12  ─ Test pin backfill                                  [test]      ▒
-P13  ─ Manual QA + lessons + PR rollback matrix           [docs]      ▒
+P7   ─ Tactical C1: NewTokenPopup auto-setTrustAllow      [bug-fix]   ▒▒ ✓
+P8   ─ Tactical C2: one-shot replay on triple-ready       [bug-fix]   ▒▒ ✓
+P9   ─ B2 categorical label helper                        [util]      ▒ ✓
+P10  ─ B1 brutalist restructure of journal/[id].vue       [ui]        ▒▒▒ ✓
+P11  ─ E1 identity-scoped consumer rehydration            [bug-fix]   ▒▒▒ ✓
+P12  ─ Test pin backfill                                  [test]      ▒ ✓
+P13  ─ Manual QA + lessons + PR rollback matrix           [docs]      ▒ ✓
 ```
 
 Risk: ▒ trivial · ▒▒ moderate · ▒▒▒ substantial
