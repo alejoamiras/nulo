@@ -347,6 +347,40 @@ watch(
 	{ deep: true },
 )
 
+// P11 E1 fix: refetch identity-scoped state (tokens, tokenBalances,
+// contacts) whenever the active appStore triple changes. Before this,
+// the page snapshotted state once on mount and never re-fetched on
+// profile switch → "no available tokens" error after Profile A → B.
+// Sequence counter guards against stale-resolve races (older fetch
+// resolving after a newer one).
+let identityFetchSeq = 0
+async function refetchIdentityScopedState() {
+	const mySeq = ++identityFetchSeq
+	if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) {
+		if (mySeq === identityFetchSeq) {
+			tokens.value = []
+			tokenBalances.value = []
+			contacts.value = []
+		}
+		return
+	}
+	const [t, tb, c] = await Promise.all([
+		tokenService.getTokens(appStore.profile.id, appStore.network.chainId),
+		tokenBalanceService.getTokenBalances(undefined, appStore.account.address),
+		contactService.getContacts(),
+	])
+	if (mySeq !== identityFetchSeq) return
+	tokens.value = t
+	tokenBalances.value = tb
+	contacts.value = c
+}
+
+watch(
+	() => [appStore.profile?.id, appStore.network?.id, appStore.account?.address],
+	() => refetchIdentityScopedState(),
+	{ immediate: false },
+)
+
 onMounted(async () => {
 	console.log(`[send:${sendInstanceId}] mounted`)
 	tokens.value = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
