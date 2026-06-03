@@ -134,11 +134,16 @@ export function journalTerminalDisplay(op: OperationRecord): JournalTerminalDisp
  */
 export function sanitizeJournalSubtitle(raw: string | undefined | null): string | null {
 	if (!raw) return null
-	// Match any `<scheme>://` prefix (http, https, chrome-extension, aztec,
-	// arbitrary custom schemes) — the bracket signal is "not a link" at a
-	// glance, not "is an http(s) URL specifically" (codex post-impl audit M1).
-	// RFC 3986 scheme: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ).
-	if (/^[a-z][a-z0-9+.\-]*:\/\//i.test(raw)) return `[${raw}]`
+	// Match any `<scheme>:` prefix (http://, mailto:, tel:, javascript:, data:,
+	// chrome-extension://, aztec://, arbitrary custom schemes). The widened
+	// match (scheme + bare colon, not just scheme://) catches schemeful values
+	// that aren't URL-shaped per RFC 3986 §1.1.2 but still read as actionable
+	// links to a glancing user. False-positives on plain text containing colons
+	// (timestamps `12:34`, versions `v1:`, CSS-like `color:red`) are accepted —
+	// callers only pass dApp-controlled origin fields here, where bracketing
+	// noise is safer than missing a real link-shaped value.
+	// RFC 3986 scheme grammar: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ).
+	if (/^[a-z][a-z0-9+.\-]*:/i.test(raw)) return `[${raw}]`
 	return raw
 }
 
@@ -218,7 +223,10 @@ export function buildJournalTerminalCardProps(op: OperationRecord, ctx: JournalT
 	const token = isTransfer && op.tokenId !== undefined ? ctx.tokenById(op.tokenId) : undefined
 	const title = isTransfer ? token?.symbol || "Transfer" : op.title ? humanizeMethodName(op.title) : "Transaction"
 	const activityIcon = isTransfer ? "arrow-narrow-up-right" : "zap"
-	const originLabel = isTransfer ? null : (op.subtitle ?? null)
+	// `op.subtitle` is the dApp-controlled origin/name persisted at session-
+	// discover time. Bracket schemeful values so a malicious dApp can't make
+	// its label visually read as a clickable link on the main feed.
+	const originLabel = isTransfer ? null : sanitizeJournalSubtitle(op.subtitle)
 	// Gate on `=== undefined` because TransferType.Private === 0; a truthy
 	// check would silently drop the Private → Private chip.
 	const transferTypeLabel = isTransfer && op.transferType !== undefined ? formatTransferType(op.transferType) : null

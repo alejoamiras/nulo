@@ -247,6 +247,24 @@ describe("buildJournalTerminalCardProps", () => {
 		expect(props?.title).toBe("Transaction")
 	})
 
+	test("dapp_execute with schemeful subtitle → originLabel bracketed (sanitize widening)", () => {
+		// `op.subtitle` is dApp-controlled. A malicious dApp setting its
+		// origin to `https://evil.com` must surface in the terminal-card
+		// originLabel as `[https://evil.com]` — the user reads it as plain
+		// text, not as a clickable link. Audit-fixes P1 pinning.
+		const props = buildJournalTerminalCardProps(
+			recordWith({
+				kind: "dapp_execute",
+				title: "swap",
+				subtitle: "https://evil.com",
+				progress: { stage: "failed" },
+				error: { kind: "network", message: "x", normalizedRaw: null },
+			}),
+			TEST_CTX,
+		)
+		expect(props?.originLabel).toBe("[https://evil.com]")
+	})
+
 	test("non-activity kind (token_import) → null (footgun guard)", () => {
 		// The helper must not produce an activity-feed card for kinds whose
 		// home surface is elsewhere. Accidental callers get a clean null
@@ -313,7 +331,49 @@ describe("sanitizeJournalSubtitle — URL-shape defense", () => {
 	test("custom scheme with digits and pluses → bracketed", () => {
 		expect(sanitizeJournalSubtitle("a1b+x://x")).toBe("[a1b+x://x]")
 	})
-	test("scheme without :// → unchanged", () => {
-		expect(sanitizeJournalSubtitle("mailto:abc@example.com")).toBe("mailto:abc@example.com")
+
+	// Widened to `scheme:` (no `//` required) per audit-fixes plan P1 + codex
+	// audit feedback. Catches mailto / tel / javascript / data / chrome-extension
+	// + the malformed `http:evil` shape that the original `scheme://` regex
+	// missed. Tradeoff documented below: plain-text values with a leading
+	// `<word>:` (timestamps, versions, CSS pairs) WILL also bracket — accepted
+	// because callers only pass dApp-controlled origin fields, where
+	// noise-bracketing is safer than missing a real schemeful value.
+	test("mailto: → bracketed (widened from scheme:// to scheme:)", () => {
+		expect(sanitizeJournalSubtitle("mailto:abc@example.com")).toBe("[mailto:abc@example.com]")
 	})
+	test("tel: → bracketed", () => {
+		expect(sanitizeJournalSubtitle("tel:+15555550100")).toBe("[tel:+15555550100]")
+	})
+	test("javascript: → bracketed (XSS-shaped value)", () => {
+		expect(sanitizeJournalSubtitle("javascript:alert(1)")).toBe("[javascript:alert(1)]")
+	})
+	test("data: → bracketed (data-URI-shaped value)", () => {
+		expect(sanitizeJournalSubtitle("data:text/plain;base64,aGV5")).toBe("[data:text/plain;base64,aGV5]")
+	})
+	test("malformed http:evil (no //) → bracketed", () => {
+		expect(sanitizeJournalSubtitle("http:evil")).toBe("[http:evil]")
+	})
+	test("chrome-extension:abc (no //) → bracketed", () => {
+		expect(sanitizeJournalSubtitle("chrome-extension:abc")).toBe("[chrome-extension:abc]")
+	})
+
+	// Documented false-positive trade-offs. The widened regex accepts these
+	// (and brackets them). Callers feed dApp-controlled origin fields, where
+	// over-bracketing is benign — these test cases just pin the trade-off so
+	// a future "tighten the regex" PR doesn't accidentally break the
+	// schemeful coverage we intentionally widened to.
+	test("digit-prefixed value (timestamp 12:34) → unchanged (RFC 3986 scheme requires ALPHA first)", () => {
+		expect(sanitizeJournalSubtitle("12:34")).toBe("12:34")
+	})
+	test("(FALSE POSITIVE PIN) word-with-colon 'note:' → bracketed", () => {
+		// `note:` matches the regex (starts with alpha, followed by colon).
+		expect(sanitizeJournalSubtitle("note:")).toBe("[note:]")
+	})
+	test("(FALSE POSITIVE PIN) CSS-like 'color:red' → bracketed", () => {
+		expect(sanitizeJournalSubtitle("color:red")).toBe("[color:red]")
+	})
+
+	// 12:34 starts with a digit, not alpha — RFC 3986 scheme grammar requires
+	// ALPHA first. The pin above verifies it passes through unchanged.
 })

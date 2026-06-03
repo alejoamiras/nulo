@@ -20,7 +20,7 @@ import { OriginType } from "@/wallet/services/transaction/spec"
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
 import { stageSubtitle } from "@/utils/card-subtitle"
-import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisplay } from "@/utils/journal-state"
+import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisplay, sanitizeJournalSubtitle } from "@/utils/journal-state"
 import { formatTransferType, humanizeMethodName } from "@/utils/tx-enrichment"
 import { buildCancelHandler, filterPendingDoubleRender, isMatchingTask } from "./recent-activity-handlers"
 
@@ -156,7 +156,11 @@ const executingProgressSubtitle = computed(() => {
  *  leave this null so the chip is suppressed. */
 const executingOriginLabel = computed(() => {
 	if (!executingTask.value || isUiTransfer.value) return null
-	return executingTask.value.origin?.name ?? null
+	// `origin.name` is dApp-controlled; bracket schemeful values so a
+	// malicious dApp can't make its in-flight label visually read as a link.
+	// The orphan-fallback awaiting cards bind this same value, so the wrap
+	// here covers both render sites.
+	return sanitizeJournalSubtitle(executingTask.value.origin?.name)
 })
 const executingAmount = computed(() => {
 	if (!isUiTransfer.value) return null
@@ -339,10 +343,12 @@ function cardTitleFor(op) {
 }
 
 /** Per-op dApp identity chip. The persisted record's `subtitle` field
- *  carries the dApp hostname for `dapp_execute` ops; null for transfers. */
+ *  carries the dApp hostname for `dapp_execute` ops; null for transfers.
+ *  Sanitized so a schemeful subtitle (set by a malicious dApp at session-
+ *  discover time) is bracketed and doesn't read as a clickable link. */
 function cardOriginLabelFor(op) {
 	if (!op || op.kind === "transfer") return null
-	return op.subtitle ?? null
+	return sanitizeJournalSubtitle(op.subtitle)
 }
 
 /** Per-op icon. Transfers use the up-right arrow; dApp ops use the zap. */
