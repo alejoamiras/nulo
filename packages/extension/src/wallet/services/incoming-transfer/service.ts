@@ -241,42 +241,72 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	}
 
 	public async setTrustAllow(profileId: string, networkId: string, contract: string): Promise<boolean> {
-		// Stale-popup guard (codex post-impl audit Path-2 High #2): if the
-		// user removed the token while the trust prompt was still open,
-		// pressing Allow must NOT ride into a `trusted` state for a contract
-		// that no longer has a token registration. Otherwise re-add via
-		// `register_token` would skip the prompt (it sees `trusted`) AND
-		// the records the user just wiped would never get re-prompted.
-		// Returns `false` so the popup can skip the misleading success
-		// toast (codex audit-3 Medium).
+		// Stale-popup guard (codex post-impl audit Path-2 High #2): refuse
+		// the flip if the contract no longer has a token registration.
 		if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) return false
 		await this.setTrustState(profileId, networkId, contract, "trusted")
+
+		// Compensating-action re-check (codex audit-5 High). `setTrustState`
+		// awaits; `onTokenDeleted` may have landed during that await,
+		// wiping records and resetting trust to `unknown` — and our
+		// setTrustState write then CLOBBERED the unknown back to trusted.
+		// Without this revert, the re-add path would see `trusted` and
+		// skip the friction prompt, AND we'd be about to resurrect
+		// just-deleted records in the loop below.
+		if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) {
+			await this.setTrustState(profileId, networkId, contract, "unknown")
+			return false
+		}
+
 		// Flip every hidden record for this contract to visible; emit Added
 		// for each so the popup activity feed updates atomically.
-		// Visibility gate (codex post-impl followup): if `incomingTransfersVisible`
-		// is off, persist the records as visible (so a future toggle-on shows
-		// them) but DO NOT emit live events that would surface rows on an
-		// already-mounted page where the user has opted out.
+		// Visibility gate: if `incomingTransfersVisible` is off, persist
+		// the records as visible (so a future toggle-on shows them) but
+		// DO NOT emit live events.
 		const visibilityEnabled = await this.isVisibilityEnabled()
 		const records = await this.repo.listByContract(profileId, networkId, contract)
 		for (const record of records) {
 			if (!record.hidden) continue
+			// Per-iteration race guard (codex audit-5 High). `onTokenDeleted`
+			// can land between the listByContract snapshot above and this
+			// upsert. Without the per-record getRecord check, the upsert
+			// resurrects a row the delete path just dropped — a visible
+			// orphan in the activity feed.
+			const stillThere = await this.repo.getRecord(record.siloedNullifier)
+			if (!stillThere) continue
 			const updated = { ...record, hidden: false }
 			await this.repo.upsertRecord(updated)
 			if (visibilityEnabled) {
 				this.emit("onIncomingTransferAdded", updated)
 			}
 		}
+
+		// Final compensating-action check: between the per-record loop's
+		// last iteration and now, delete may have landed AGAIN. If so,
+		// revert trust (records are already wiped by the delete path) and
+		// return false so the caller skips the success toast.
+		if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) {
+			await this.setTrustState(profileId, networkId, contract, "unknown")
+			return false
+		}
 		return true
 	}
 
 	public async setTrustReject(profileId: string, networkId: string, contract: string): Promise<boolean> {
-		// Same stale-popup guard as setTrustAllow (codex Path-2 High #2). A
-		// late Reject on a deleted token is just a no-op; the records are
-		// already wiped and trust is `unknown`. Returns `false` on refusal
-		// so the popup can skip the misleading "Hiding…" toast.
+		// Stale-popup guard: refuse the flip if the contract is no longer
+		// registered (codex Path-2 High #2).
 		if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) return false
 		await this.setTrustState(profileId, networkId, contract, "blocked")
+
+		// Compensating-action re-check (codex audit-5 High). A delete that
+		// landed during the setTrustState await would have reset trust to
+		// `unknown`; our write just clobbered it to `blocked`. Re-add
+		// would then incorrectly skip the friction prompt (blocked is
+		// terminal — Pending never emits). Revert to `unknown`.
+		if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) {
+			await this.setTrustState(profileId, networkId, contract, "unknown")
+			return false
+		}
 		// Hidden records stay hidden. No event emission — silent rejection.
 		return true
 	}

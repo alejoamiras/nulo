@@ -1668,6 +1668,123 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 		expect(seen).not.toHaveBeenCalled()
 	})
 
+	test("(Audit-5 High) setTrustAllow reverts trust to unknown when delete lands after the upfront guard", async () => {
+		// Race: upfront isTokenStillRegistered passes (returns true), but
+		// then onTokenDeleted lands during the setTrustState await. The
+		// post-await re-check (token now gone) must revert the trusted
+		// write back to unknown so the re-add path correctly re-prompts.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "pending",
+			updatedAt: 0,
+		})
+
+		// Stale-during-flow: getTokensRaw returns [tokenA] for the upfront
+		// check, then [] for the post-setTrustState re-check. Counter is
+		// reset HERE (post-bootService) so the hydrateSchedulers call at
+		// startup doesn't consume our budget.
+		let getTokensCalls = 0
+		tokenStub.getTokensRaw = vi.fn().mockImplementation(async () => {
+			getTokensCalls++
+			return getTokensCalls === 1 ? [tokenA] : []
+		})
+
+		const ok = await service.setTrustAllow("p1", "n1", tokenA.contract)
+
+		expect(ok).toBe(false)
+		// The compensating-action revert wrote `unknown` on top of the
+		// trusted write — final state matches what a clean re-add expects.
+		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("unknown")
+	})
+
+	test("(Audit-5 High) setTrustReject reverts trust to unknown when delete lands after the upfront guard", async () => {
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "pending",
+			updatedAt: 0,
+		})
+
+		let getTokensCalls = 0
+		tokenStub.getTokensRaw = vi.fn().mockImplementation(async () => {
+			getTokensCalls++
+			return getTokensCalls === 1 ? [tokenA] : []
+		})
+
+		const ok = await service.setTrustReject("p1", "n1", tokenA.contract)
+
+		expect(ok).toBe(false)
+		// Revert wrote `unknown` over the `blocked` write so a future
+		// re-add re-prompts (blocked would terminally suppress the prompt).
+		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("unknown")
+	})
+
+	test("(Audit-5 High) setTrustAllow skips per-record upsert when record was deleted mid-loop", async () => {
+		// Race: setTrustAllow snapshotted records via listByContract, but
+		// onTokenDeleted ran its delete-per-record path before our upsert
+		// could resurrect them. The per-iteration getRecord re-check must
+		// skip those rows so the activity feed stays empty.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "pending",
+			updatedAt: 0,
+		})
+		// Pre-seed a hidden record (the snapshot will see it; we drop it
+		// from the underlying Map BEFORE setTrustAllow's per-record loop
+		// runs, simulating a mid-flight delete).
+		records.set("k_orphan", {
+			siloedNullifier: "k_orphan",
+			profileId: "p1",
+			networkId: "n1",
+			accountAddress: "0xa",
+			contract: tokenA.contract,
+			tokenId: tokenA.id,
+			owner: "0xa",
+			amountRaw: "100",
+			noteHash: "0xnh",
+			txHash: "0xtx",
+			l2BlockNumber: 1,
+			txIndexInBlock: 0,
+			noteIndexInTx: 0,
+			hidden: true,
+			discoveredAt: 0,
+		})
+
+		// Intercept listByContract to return the snapshot, then delete the
+		// underlying record. The per-record getRecord re-check should
+		// observe `undefined` and skip the upsert.
+		const realRepo = (service as never as { repo: { listByContract: (...args: unknown[]) => unknown } }).repo
+		const originalList = realRepo.listByContract.bind(realRepo) as (...args: unknown[]) => Promise<unknown[]>
+		realRepo.listByContract = vi.fn().mockImplementation(async (...args: unknown[]) => {
+			const snap = await originalList(...args)
+			records.delete("k_orphan")
+			return snap
+		})
+
+		const added = vi.fn()
+		service.onIncomingTransferAdded.add(added)
+
+		await service.setTrustAllow("p1", "n1", tokenA.contract)
+
+		// No Added emit; record stays deleted.
+		expect(added).not.toHaveBeenCalled()
+		expect(records.has("k_orphan")).toBe(false)
+	})
+
 	test("(Audit-4 High) replayPendingPrompts skips a row whose trust was reset to unknown after the snapshot", async () => {
 		// Parallel case: token registration is still live, but the trust
 		// row got reset to `unknown` between the listTrust snapshot and the
