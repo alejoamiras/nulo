@@ -1252,17 +1252,44 @@ describe("IncomingTransferService — Path 2 block-timestamp + token-delete wipe
 describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () => {
 	const network = () => makeNetworkStub([{ id: "n1", chainId: 1 }])
 
-	test("(High #1) scanContract bails when contract was unwatched mid-flight", async () => {
-		// Boot with BOTH tokenA + tokenB registered + watched. We delete only
-		// tokenA — that leaves the schedulerKey entry in `watchedContracts`
-		// alive (because tokenB is still in the set), but the entry no
-		// longer contains tokenA's contract. scan(tokenA) should then bail.
-		// (If we deleted the only token, the key entry would be removed
-		// entirely and the "no scheduler" relaxation would skip the guard
-		// — that's not the race we want to test.)
+	test("(High #1) scan started BEFORE delete bails via the !token guard on token-snapshot lookup", async () => {
+		// Sanity: when the delete fires before the scan begins, the
+		// existing `if (!token) return` guard catches it. The generation
+		// counter is for the harder mid-flight case (next test).
 		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
 		const tokenStub = makeTokenStub([tokenA, tokenB])
 		const noteSvc = makeNoteStub({ [tokenA.contract]: [note({ l2BlockNumber: 7 })] }, { 7: 1_700_000_007 })
+		const { service } = await bootService({
+			network: network(),
+			account: accountStub,
+			token: tokenStub,
+			note: noteSvc,
+		})
+		tokenStub.getTokensRaw = vi.fn().mockResolvedValue([tokenB])
+		tokenStub.onTokenDeleted.invoke(tokenA as never)
+		await flushPromises()
+
+		const upsertSpy = vi.spyOn((service as never as { repo: { upsertRecord: () => Promise<void> } }).repo, "upsertRecord")
+		await scan(service)
+
+		expect(upsertSpy).not.toHaveBeenCalled()
+	})
+
+	test("(High #1 in-flight) generation counter bails a scan whose setup completed BEFORE delete", async () => {
+		// Hold getNotesRaw in flight: capture the resolver, return a pending
+		// promise. The scan calls genKey-snapshot BEFORE this await, so
+		// startGen=0 (no bumps yet). While the scan is parked, fire
+		// onTokenDeleted (bumps to 1). Resolve getNotesRaw → scan continues,
+		// per-note loop's isStale() check observes 1 !== 0 → bail.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA, tokenB])
+		let resolveNotes: ((value: unknown[]) => void) | null = null
+		const noteSvc = makeNoteStub({}, { 7: 1_700_000_007 })
+		noteSvc.getNotesRaw = vi.fn().mockImplementation(() => {
+			return new Promise<unknown[]>((resolve) => {
+				resolveNotes = resolve
+			})
+		})
 		const { service } = await bootService({
 			network: network(),
 			account: accountStub,
@@ -1276,19 +1303,130 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 			state: "trusted",
 			updatedAt: 0,
 		})
+		const upsertSpy = vi.spyOn((service as never as { repo: { upsertRecord: () => Promise<void> } }).repo, "upsertRecord")
 
-		// Delete tokenA only; tokenB remains. onTokenDeleted removes tokenA
-		// from the schedulerKey set, but the entry itself survives.
+		// Start the scan but don't await — it's parked on getNotesRaw.
+		const scanPromise = scan(service)
+		await flushPromises()
+		expect(resolveNotes).not.toBeNull()
+
+		// Fire delete while scan is parked. This bumps the generation.
 		tokenStub.getTokensRaw = vi.fn().mockResolvedValue([tokenB])
 		tokenStub.onTokenDeleted.invoke(tokenA as never)
 		await flushPromises()
 
-		const upsertSpy = vi.spyOn((service as never as { repo: { upsertRecord: () => Promise<void> } }).repo, "upsertRecord")
-		await scan(service)
+		// Release getNotesRaw with one matching note. Scan resumes; the
+		// per-note loop should immediately bail on the staleness check.
+		if (resolveNotes !== null) (resolveNotes as (value: unknown[]) => void)([note({ l2BlockNumber: 7 })])
+		await scanPromise
 
-		// No upsert: race guard at top-of-loop detects that tokenA is no
-		// longer in the (still-existing) watched set and returns.
 		expect(upsertSpy).not.toHaveBeenCalled()
+	})
+
+	test("(High #1 in-flight) backfill upsert ALSO bails when delete lands during the PXE backfill await", async () => {
+		// Seed: record exists with blockTimestamp undefined. Next scan
+		// enters the backfill branch, awaits blockTimestampFor. While
+		// parked, delete fires. The new pre-upsert isStale() check must
+		// suppress the backfill upsert.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA, tokenB])
+		let resolveBlockTs: ((value: number | undefined) => void) | null = null
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note({ l2BlockNumber: 77 })] })
+		noteSvc.getBlockTimestamp = vi.fn().mockImplementation(() => {
+			return new Promise<number | undefined>((resolve) => {
+				resolveBlockTs = resolve
+			})
+		})
+		const { service } = await bootService({
+			network: network(),
+			account: accountStub,
+			token: tokenStub,
+			note: noteSvc,
+		})
+		// Pre-seed existing record missing blockTimestamp.
+		records.set(validNullifier(1), {
+			siloedNullifier: validNullifier(1),
+			profileId: "p1",
+			networkId: "n1",
+			accountAddress: "0xa",
+			contract: tokenA.contract,
+			tokenId: tokenA.id,
+			owner: "0xa",
+			amountRaw: "100",
+			noteHash: "0xnh1",
+			txHash: "0xtx1",
+			l2BlockNumber: 77,
+			txIndexInBlock: 0,
+			noteIndexInTx: 0,
+			hidden: false,
+			discoveredAt: 1,
+		})
+		const upsertSpy = vi.spyOn((service as never as { repo: { upsertRecord: () => Promise<void> } }).repo, "upsertRecord")
+
+		// Start scan; it parks on the backfill PXE call inside the per-note
+		// loop's existing-record branch.
+		const scanPromise = scan(service)
+		await flushPromises()
+		expect(resolveBlockTs).not.toBeNull()
+
+		// Delete fires mid-backfill; generation bumps.
+		tokenStub.getTokensRaw = vi.fn().mockResolvedValue([tokenB])
+		tokenStub.onTokenDeleted.invoke(tokenA as never)
+		await flushPromises()
+
+		// Resolve the PXE call with a valid timestamp. Without the
+		// pre-upsert isStale() check, the backfill upsert would fire and
+		// resurrect a row the delete path already removed.
+		if (resolveBlockTs !== null) (resolveBlockTs as (value: number | undefined) => void)(1_700_000_077)
+		await scanPromise
+
+		expect(upsertSpy).not.toHaveBeenCalled()
+	})
+
+	test("(Audit-3 Medium) setTrustAllow returns false when token is no longer registered", async () => {
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([])
+		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
+
+		const result = await service.setTrustAllow("p1", "n1", tokenA.contract)
+		expect(result).toBe(false)
+	})
+
+	test("(Audit-3 Medium) setTrustAllow returns true on a successful flip", async () => {
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "pending",
+			updatedAt: 0,
+		})
+
+		const result = await service.setTrustAllow("p1", "n1", tokenA.contract)
+		expect(result).toBe(true)
+		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("trusted")
+	})
+
+	test("(Audit-3 Medium) setTrustReject returns false/true symmetrically", async () => {
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const stale = await bootService({ network: network(), account: accountStub, token: makeTokenStub([]) })
+		expect(await stale.service.setTrustReject("p1", "n1", tokenA.contract)).toBe(false)
+
+		records.clear()
+		trust.clear()
+
+		const live = await bootService({ network: network(), account: accountStub, token: makeTokenStub([tokenA]) })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "pending",
+			updatedAt: 0,
+		})
+		expect(await live.service.setTrustReject("p1", "n1", tokenA.contract)).toBe(true)
+		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("blocked")
 	})
 
 	test("(High #2) setTrustAllow on deleted token is a no-op", async () => {

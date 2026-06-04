@@ -135,10 +135,14 @@ export type Methods = {
 	setTrustState(profileId: string, networkId: string, contract: string, state: IncomingTrustState): void
 	/** User accepted the first-receive prompt: `pending → trusted`. Flips
 	 *  all hidden records for this contract to visible; emits
-	 *  `onIncomingTransferAdded` for each. */
-	setTrustAllow(profileId: string, networkId: string, contract: string): void
-	/** User rejected the first-receive prompt: `pending → blocked`. */
-	setTrustReject(profileId: string, networkId: string, contract: string): void
+	 *  `onIncomingTransferAdded` for each. Returns `false` when the contract
+	 *  no longer has a token registration (stale-popup race: user deleted
+	 *  the token between Pending emit and Allow click) — caller should
+	 *  suppress the success toast in that case. */
+	setTrustAllow(profileId: string, networkId: string, contract: string): boolean
+	/** User rejected the first-receive prompt: `pending → blocked`. Same
+	 *  `false`-on-stale-token contract as `setTrustAllow`. */
+	setTrustReject(profileId: string, networkId: string, contract: string): boolean
 	/** Clear all records + trust state for a profile. Called from the
 	 *  profile-delete fanout. */
 	clearProfile(profileId: string): void

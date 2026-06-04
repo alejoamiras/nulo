@@ -99,6 +99,17 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	private readonly watchedContracts = new Map<string, Set<string>>()
 	/** Reentrancy guard so a slow poll doesn't double-fire. */
 	private readonly polling = new Set<string>()
+	/** Per-contract generation counter (codex post-impl audit Path-2 High #1
+	 *  + audit-2 High #1 / backfill). Bumped on every token registration
+	 *  change (`onTokenAdded`, `onTokenDeleted`, `hydrateSchedulers`). A
+	 *  `scanContract` call captures the generation at start; if any later
+	 *  check observes a higher generation, the scan bails before mutating
+	 *  storage. This covers ALL race surfaces — including the last-token
+	 *  delete (whole watchedContracts entry removed) and the clear/rebuild
+	 *  gap in `hydrateSchedulers`. Tests that call `scanContract` directly
+	 *  never bump, so the captured value equals the current value → no
+	 *  false bail. Keyed by `${networkId}|${accountAddress}|${contract}`. */
+	private readonly scanGenerations = new Map<string, number>()
 
 	private readonly pollIntervalMs: number
 
@@ -229,14 +240,16 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		this.emit("onIncomingTrustChanged", record)
 	}
 
-	public async setTrustAllow(profileId: string, networkId: string, contract: string): Promise<void> {
+	public async setTrustAllow(profileId: string, networkId: string, contract: string): Promise<boolean> {
 		// Stale-popup guard (codex post-impl audit Path-2 High #2): if the
 		// user removed the token while the trust prompt was still open,
 		// pressing Allow must NOT ride into a `trusted` state for a contract
 		// that no longer has a token registration. Otherwise re-add via
 		// `register_token` would skip the prompt (it sees `trusted`) AND
 		// the records the user just wiped would never get re-prompted.
-		if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) return
+		// Returns `false` so the popup can skip the misleading success
+		// toast (codex audit-3 Medium).
+		if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) return false
 		await this.setTrustState(profileId, networkId, contract, "trusted")
 		// Flip every hidden record for this contract to visible; emit Added
 		// for each so the popup activity feed updates atomically.
@@ -254,15 +267,18 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				this.emit("onIncomingTransferAdded", updated)
 			}
 		}
+		return true
 	}
 
-	public async setTrustReject(profileId: string, networkId: string, contract: string): Promise<void> {
+	public async setTrustReject(profileId: string, networkId: string, contract: string): Promise<boolean> {
 		// Same stale-popup guard as setTrustAllow (codex Path-2 High #2). A
 		// late Reject on a deleted token is just a no-op; the records are
-		// already wiped and trust is `unknown`.
-		if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) return
+		// already wiped and trust is `unknown`. Returns `false` on refusal
+		// so the popup can skip the misleading "Hiding…" toast.
+		if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) return false
 		await this.setTrustState(profileId, networkId, contract, "blocked")
 		// Hidden records stay hidden. No event emission — silent rejection.
+		return true
 	}
 
 	private async isTokenStillRegistered(profileId: string, networkId: string, contract: string): Promise<boolean> {
@@ -296,6 +312,15 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		return `${networkId}|${accountAddress}`
 	}
 
+	private genKey(networkId: string, accountAddress: string, contract: string): string {
+		return `${networkId}|${accountAddress}|${contract}`
+	}
+
+	private bumpGeneration(networkId: string, accountAddress: string, contract: string): void {
+		const k = this.genKey(networkId, accountAddress, contract)
+		this.scanGenerations.set(k, (this.scanGenerations.get(k) ?? 0) + 1)
+	}
+
 	private async resolveNetworkByChainId(chainId: number): Promise<Network | undefined> {
 		try {
 			const networks = await this.networkService.getNetworks(chainId)
@@ -307,6 +332,15 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 	/** Rebuild the scheduler set from current tokens + active accounts. */
 	private async hydrateSchedulers(): Promise<void> {
+		// Invalidate every in-flight scan generation before we tear down +
+		// rebuild. Any scanContract whose generation snapshot is older than
+		// what we set below will bail before writing. (Codex post-impl
+		// audit-2 High #1 — without this, the clear-then-repopulate gap
+		// would let a mid-flight scan resurrect rows.)
+		for (const key of this.scanGenerations.keys()) {
+			this.scanGenerations.set(key, (this.scanGenerations.get(key) ?? 0) + 1)
+		}
+
 		// Clear existing schedulers; we re-register below.
 		for (const id of this.schedulers.values()) clearInterval(id)
 		this.schedulers.clear()
@@ -356,6 +390,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		if (!network) return
 		const accounts = await this.accountService.getAccounts(profile.id, network.chainId)
 		for (const account of accounts) {
+			// Bump per-(account, contract) generation so any in-flight scan
+			// that pre-dates this add bails before mutating.
+			this.bumpGeneration(network.id, account.address, token.contract)
 			const key = this.schedulerKey(network.id, account.address)
 			let contracts = this.watchedContracts.get(key)
 			if (!contracts) {
@@ -374,6 +411,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		if (!network) return
 		const accounts = await this.accountService.getAccounts(profile.id, network.chainId)
 		for (const account of accounts) {
+			// Bump generation FIRST — any in-flight scan immediately bails
+			// on its next race-guard check, even if we tear down the
+			// schedulerKey entry entirely below (last-token-delete).
+			this.bumpGeneration(network.id, account.address, token.contract)
 			const key = this.schedulerKey(network.id, account.address)
 			const contracts = this.watchedContracts.get(key)
 			if (!contracts) continue
@@ -467,6 +508,13 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	}
 
 	private async scanContract(profileId: string, networkId: string, accountAddress: string, contract: string): Promise<void> {
+		// Capture the generation BEFORE any await so a registration change
+		// during this scan's setup phase invalidates it. Any later checks
+		// observing a higher current generation bail before mutating.
+		const genK = this.genKey(networkId, accountAddress, contract)
+		const startGen = this.scanGenerations.get(genK) ?? 0
+		const isStale = (): boolean => (this.scanGenerations.get(genK) ?? 0) !== startGen
+
 		let notes: RawNote[]
 		try {
 			notes = await this.noteService.getNotesRaw(networkId, accountAddress, contract)
@@ -499,28 +547,14 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			return ts
 		}
 
-		const watchedKey = this.schedulerKey(networkId, accountAddress)
-		// Race guard helper (codex post-impl audit Path-2 High #1). Returns
-		// true when `onTokenDeleted` has already cleared this contract from
-		// `watchedContracts` between the start of the scan and the current
-		// iteration. We only treat this as a race when the schedulerKey
-		// entry EXISTS but lacks the contract — `undefined` means the
-		// scheduler never ran (direct test call, fresh boot), which is not
-		// a deletion race.
-		const isUnwatched = (): boolean => {
-			const set = this.watchedContracts.get(watchedKey)
-			return set !== undefined && !set.has(contract)
-		}
-
 		for (const note of notes) {
 			if (!note.siloedNullifier) continue
 
-			// A concurrent `onTokenDeleted` clears the contract atomically.
-			// If we've crossed that boundary mid-scan, every remaining write
-			// would re-create rows the user just deleted. Bail the whole scan
-			// — the deletion path emits its own `onIncomingTransferDeleted`
-			// for what was already there.
-			if (isUnwatched()) return
+			// A concurrent `onTokenDeleted` / `hydrateSchedulers` has run
+			// since we started — every remaining write would re-create rows
+			// the user just deleted (or stitch them back into a torn-down
+			// scheduler set). Bail the whole scan.
+			if (isStale()) return
 
 			// Backfill blockTimestamp on records persisted with `undefined`
 			// (transient PXE lag at first-scan). Without this, the missing
@@ -531,7 +565,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			if (existing) {
 				if (existing.blockTimestamp === undefined) {
 					const ts = await blockTimestampFor(note.l2BlockNumber)
-					if (ts !== undefined) {
+					// Re-check race after the PXE await — onTokenDeleted may
+					// have wiped this very record between the lookup and now.
+					// Without this re-check, the backfill resurrects rows
+					// the delete path just dropped (codex audit-2 second High).
+					if (ts !== undefined && !isStale()) {
 						await this.repo.upsertRecord({ ...existing, blockTimestamp: ts })
 					}
 				}
@@ -578,7 +616,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// since the top-of-loop check (getRecord, isVisibilityEnabled,
 			// setTrust, blockTimestampFor). If `onTokenDeleted` slipped in
 			// during any of those awaits, bail before persisting.
-			if (isUnwatched()) return
+			if (isStale()) return
 			const record = this.buildRecord({ note, profileId, networkId, accountAddress, token, amountRaw, trustState, blockTimestamp })
 			await this.repo.upsertRecord(record)
 
