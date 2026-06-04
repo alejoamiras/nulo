@@ -361,6 +361,31 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				this.watchedContracts.delete(key)
 			}
 		}
+
+		// Subagent diagnosis (token-remove + re-add bug): the scheduler
+		// teardown above is necessary but not sufficient. IncomingTransferRecord
+		// rows carry a tokenId pointing at the now-deleted token. On re-add,
+		// TokenService allocates a NEW id, so those records orphan and the
+		// activity feed falls through to "Token" symbol with raw amounts.
+		// Fix: wipe the records + reset the trust row to unknown.
+		// Under Path 2 (block-timestamp adoption), re-adding the same contract
+		// then re-indexes from PXE with identical `blockTimestamp`s — so the
+		// activity feed shows the same chronological order as before the
+		// delete, no UX regression.
+		const records = await this.repo.listByContract(profile.id, network.id, token.contract)
+		for (const record of records) {
+			await this.repo.deleteRecord(record.siloedNullifier)
+			this.emit("onIncomingTransferDeleted", record)
+		}
+		// Reset trust to unknown so re-add via popup auto-trusts cleanly
+		// (P7 setTrustAllow flows through), or via dApp register_token
+		// re-prompts (correct: a re-registering dApp shouldn't ride on a
+		// stale prior trust decision).
+		const trustRecord = await this.repo.getTrust(profile.id, network.id, token.contract)
+		if (trustRecord) {
+			const updated = await this.repo.setTrust(profile.id, network.id, token.contract, "unknown")
+			this.emit("onIncomingTrustChanged", updated)
+		}
 	}
 
 	/** Per-hash reentrancy guard: `EventHandler.invoke` is sync-fires-async
@@ -437,6 +462,19 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const inflightTxHashes = await this.collectInflightTxHashes(profileId, networkId, accountAddress)
 		let trustState = await this.getTrustState(profileId, networkId, contract)
 
+		// Per-scan block-timestamp cache (Path 2): query PXE once per unique
+		// L2 block in this batch — multiple notes from the same block share
+		// the lookup. PXE may fail; the cache distinguishes "fetched-and-
+		// missing" (entry exists with `undefined` value) from "not-yet-
+		// fetched" (entry absent) so we don't retry within a single scan.
+		const blockTimestampCache = new Map<number, number | undefined>()
+		const blockTimestampFor = async (bn: number): Promise<number | undefined> => {
+			if (blockTimestampCache.has(bn)) return blockTimestampCache.get(bn)
+			const ts = await this.noteService.getBlockTimestamp(networkId, bn)
+			blockTimestampCache.set(bn, ts)
+			return ts
+		}
+
 		for (const note of notes) {
 			if (!note.siloedNullifier) continue
 			if (await this.repo.hasRecord(note.siloedNullifier)) continue
@@ -475,7 +513,8 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				}
 			}
 
-			const record = this.buildRecord({ note, profileId, networkId, accountAddress, token, amountRaw, trustState })
+			const blockTimestamp = await blockTimestampFor(note.l2BlockNumber)
+			const record = this.buildRecord({ note, profileId, networkId, accountAddress, token, amountRaw, trustState, blockTimestamp })
 			await this.repo.upsertRecord(record)
 
 			if (trustState === "trusted") {
@@ -562,8 +601,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		token: Token
 		amountRaw: string
 		trustState: IncomingTrustState
+		blockTimestamp: number | undefined
 	}): IncomingTransferRecord {
-		const { note, profileId, networkId, accountAddress, token, amountRaw, trustState } = params
+		const { note, profileId, networkId, accountAddress, token, amountRaw, trustState, blockTimestamp } = params
 		const hidden = trustState !== "trusted"
 		return {
 			siloedNullifier: note.siloedNullifier,
@@ -581,6 +621,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			noteIndexInTx: note.noteIndexInTx,
 			hidden,
 			discoveredAt: Date.now(),
+			blockTimestamp,
 		}
 	}
 

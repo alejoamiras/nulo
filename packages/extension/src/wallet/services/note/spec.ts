@@ -57,4 +57,11 @@ export type Methods = {
 	 * noteIndexInTx)`.
 	 */
 	getNotesRaw(networkId: string, account: string, contract?: string): RawNote[]
+	/**
+	 * Chain-derived UTC seconds for an L2 block. Returns `undefined` when
+	 * the node can't resolve it. Thin wrapper over PxeService so the
+	 * incoming-transfer service can populate `IncomingTransferRecord.blockTimestamp`
+	 * without taking a PXE-service dependency directly.
+	 */
+	getBlockTimestamp(networkId: string, blockNumber: number): number | undefined
 }

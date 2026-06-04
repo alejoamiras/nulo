@@ -57,6 +57,23 @@ export class NoteService extends Service<Methods> implements ServiceSpec<Methods
 		)
 	}
 
+	/**
+	 * Chain-derived UTC seconds for an L2 block. Returns `undefined` when
+	 * the node can't resolve it. Activity-feed consumers use this so their
+	 * sort/render survives token remove + re-add (re-indexed records get
+	 * the same chain timestamp; without this, they'd jump to `Date.now()`).
+	 */
+	public async getBlockTimestamp(networkId: string, blockNumber: number): Promise<number | undefined> {
+		await this.ensureInitialized()
+		try {
+			const network = await this.networkService.getNetwork(networkId)
+			return await this.pxeService.getBlockTimestamp(networkInfoFrom(network), blockNumber)
+		} catch (error) {
+			this.logWarn(`getBlockTimestamp failed for block ${blockNumber}: ${getErrorMessage(error)}`)
+			return undefined
+		}
+	}
+
 	public async getNotesRaw(networkId: string, account: string, contract?: string): Promise<RawNote[]> {
 		await this.ensureInitialized()
 		const network = await this.networkService.getNetwork(networkId)

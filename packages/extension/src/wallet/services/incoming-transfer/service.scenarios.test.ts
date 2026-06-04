@@ -167,12 +167,15 @@ function makeJournalStub(
 	}
 }
 
-function makeNoteStub(notesByContract: Record<string, unknown[]> = {}) {
+function makeNoteStub(notesByContract: Record<string, unknown[]> = {}, blockTimestampsByNumber: Record<number, number | undefined> = {}) {
 	return {
 		name: "note",
 		dependencies: [],
 		getNotesRaw: vi.fn().mockImplementation(async (_n: string, _a: string, contract: string) => {
 			return notesByContract[contract] ?? []
+		}),
+		getBlockTimestamp: vi.fn().mockImplementation(async (_n: string, blockNumber: number) => {
+			return blockTimestampsByNumber[blockNumber]
 		}),
 		async start() {},
 	}
@@ -1001,5 +1004,247 @@ describe("IncomingTransferService — cleanup wiring", () => {
 		expect(records.has("k2")).toBe(true)
 		expect(trust.has(trustKey("p1", "n1", "0xc"))).toBe(false)
 		expect(trust.has(trustKey("p1", "n2", "0xc"))).toBe(true)
+	})
+})
+
+describe("IncomingTransferService — Path 2 block-timestamp + token-delete wipe", () => {
+	const network = () => makeNetworkStub([{ id: "n1", chainId: 1 }])
+	const token = () => makeTokenStub([tokenA])
+
+	test("(Path 2) scanContract populates blockTimestamp on insert", async () => {
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note({ l2BlockNumber: 42 })] }, { 42: 1_700_000_000 })
+		const { service } = await bootService({ network: network(), token: token(), note: noteSvc })
+		// Trust = trusted so the record persists visible immediately.
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+
+		await scan(service)
+
+		const persisted = [...records.values()][0]
+		expect(persisted.blockTimestamp).toBe(1_700_000_000)
+		expect(persisted.l2BlockNumber).toBe(42)
+	})
+
+	test("(Path 2) blockTimestamp lookup is memoized per scan (1 PXE call per unique block)", async () => {
+		// 3 notes, 2 unique blocks → 2 PXE calls.
+		const notes = [
+			note({ siloedNullifier: validNullifier(10), txHash: "0xt1", l2BlockNumber: 10, noteIndexInTx: 0 }),
+			note({ siloedNullifier: validNullifier(11), txHash: "0xt2", l2BlockNumber: 10, noteIndexInTx: 1 }),
+			note({ siloedNullifier: validNullifier(12), txHash: "0xt3", l2BlockNumber: 11, noteIndexInTx: 0 }),
+		]
+		const noteSvc = makeNoteStub({ [tokenA.contract]: notes }, { 10: 1_700_000_000, 11: 1_700_000_036 })
+		const { service } = await bootService({ network: network(), token: token(), note: noteSvc })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+
+		await scan(service)
+
+		// Exactly 2 lookups (block 10 fetched once, reused; block 11 once).
+		expect(noteSvc.getBlockTimestamp).toHaveBeenCalledTimes(2)
+		const persisted = [...records.values()]
+		expect(persisted.find((r) => r.l2BlockNumber === 10)?.blockTimestamp).toBe(1_700_000_000)
+		expect(persisted.find((r) => r.l2BlockNumber === 11)?.blockTimestamp).toBe(1_700_000_036)
+	})
+
+	test("(Path 2) PXE failure → record still persists, blockTimestamp left undefined", async () => {
+		// Mocked PXE returns undefined for the block — record persists with
+		// blockTimestamp=undefined; sort path falls back to discoveredAt.
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note({ l2BlockNumber: 99 })] }, { 99: undefined })
+		const { service } = await bootService({ network: network(), token: token(), note: noteSvc })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+
+		await scan(service)
+
+		const persisted = [...records.values()][0]
+		expect(persisted.blockTimestamp).toBeUndefined()
+		expect(persisted.siloedNullifier).toBe(validNullifier(1))
+	})
+
+	test("(token-delete wipe) onTokenDeleted purges records + resets trust to unknown", async () => {
+		// Pre-seed records + trust=trusted for tokenA. Token delete should
+		// wipe both. Closes the subagent-diagnosed remove+re-add bug.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
+
+		records.set("k1", {
+			siloedNullifier: "k1",
+			profileId: "p1",
+			networkId: "n1",
+			accountAddress: "0xa",
+			contract: tokenA.contract,
+			tokenId: tokenA.id,
+			owner: "0xa",
+			amountRaw: "100",
+			noteHash: "0xnh",
+			txHash: "0xtx1",
+			l2BlockNumber: 1,
+			txIndexInBlock: 0,
+			noteIndexInTx: 0,
+			hidden: false,
+			discoveredAt: 0,
+			blockTimestamp: 1_700_000_000,
+		})
+		records.set("k2", {
+			siloedNullifier: "k2",
+			profileId: "p1",
+			networkId: "n1",
+			accountAddress: "0xa",
+			contract: tokenA.contract,
+			tokenId: tokenA.id,
+			owner: "0xa",
+			amountRaw: "200",
+			noteHash: "0xnh2",
+			txHash: "0xtx2",
+			l2BlockNumber: 2,
+			txIndexInBlock: 0,
+			noteIndexInTx: 0,
+			hidden: false,
+			discoveredAt: 0,
+			blockTimestamp: 1_700_000_036,
+		})
+		// Unrelated contract's records must survive.
+		records.set("kOther", {
+			siloedNullifier: "kOther",
+			profileId: "p1",
+			networkId: "n1",
+			accountAddress: "0xa",
+			contract: tokenB.contract,
+			tokenId: tokenB.id,
+			owner: "0xa",
+			amountRaw: "50",
+			noteHash: "0xnh3",
+			txHash: "0xtx3",
+			l2BlockNumber: 3,
+			txIndexInBlock: 0,
+			noteIndexInTx: 0,
+			hidden: false,
+			discoveredAt: 0,
+		})
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+
+		const deleted = vi.fn()
+		const trustChanged = vi.fn()
+		service.onIncomingTransferDeleted.add(deleted)
+		service.onIncomingTrustChanged.add(trustChanged)
+
+		// Fire the token-delete event.
+		tokenStub.onTokenDeleted.invoke(tokenA as never)
+		await flushPromises()
+
+		// tokenA's records wiped; tokenB's record untouched.
+		expect(records.has("k1")).toBe(false)
+		expect(records.has("k2")).toBe(false)
+		expect(records.has("kOther")).toBe(true)
+		expect(deleted).toHaveBeenCalledTimes(2)
+		// Trust row for tokenA flipped to unknown.
+		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("unknown")
+		expect(trustChanged).toHaveBeenCalled()
+	})
+
+	test("(token-delete wipe) trust row absent → no trustChanged emit but records still wiped", async () => {
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
+
+		records.set("k1", {
+			siloedNullifier: "k1",
+			profileId: "p1",
+			networkId: "n1",
+			accountAddress: "0xa",
+			contract: tokenA.contract,
+			tokenId: tokenA.id,
+			owner: "0xa",
+			amountRaw: "100",
+			noteHash: "0xnh",
+			txHash: "0xtx1",
+			l2BlockNumber: 1,
+			txIndexInBlock: 0,
+			noteIndexInTx: 0,
+			hidden: false,
+			discoveredAt: 0,
+		})
+		// NO trust row pre-seeded.
+
+		const trustChanged = vi.fn()
+		service.onIncomingTrustChanged.add(trustChanged)
+
+		tokenStub.onTokenDeleted.invoke(tokenA as never)
+		await flushPromises()
+
+		expect(records.has("k1")).toBe(false)
+		// No trust row to reset → no emit.
+		expect(trustChanged).not.toHaveBeenCalled()
+	})
+
+	test("(remove + re-add) records re-index from PXE with original blockTimestamp preserved", async () => {
+		// Pre-seed PXE state: note for tokenA at block 42, timestamp 1.7B.
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note({ l2BlockNumber: 42 })] }, { 42: 1_700_000_000 })
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const { service } = await bootService({
+			network: network(),
+			account: accountStub,
+			token: tokenStub,
+			note: noteSvc,
+		})
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+
+		// First scan: record persists with blockTimestamp=1.7B.
+		await scan(service)
+		const firstPersist = [...records.values()][0]
+		expect(firstPersist.blockTimestamp).toBe(1_700_000_000)
+
+		// Delete the token → records + trust wiped.
+		tokenStub.onTokenDeleted.invoke(tokenA as never)
+		await flushPromises()
+		expect(records.size).toBe(0)
+
+		// Simulate re-add: setTrust back to trusted (mimics the popup-add
+		// auto-trust path), then re-scan.
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		await scan(service)
+
+		// Re-indexed record has the ORIGINAL chain timestamp, not Date.now().
+		const reindexed = [...records.values()][0]
+		expect(reindexed.blockTimestamp).toBe(1_700_000_000)
+		expect(reindexed.l2BlockNumber).toBe(42)
+		// siloedNullifier is identical to the original (cryptographically
+		// stable across delete + re-discover).
+		expect(reindexed.siloedNullifier).toBe(validNullifier(1))
 	})
 })

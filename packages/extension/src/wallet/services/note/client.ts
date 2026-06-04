@@ -17,4 +17,8 @@ export class NoteServiceClient extends ServiceClient<Methods> implements Service
 	public getNotesRaw(networkId: string, account: string, contract?: string): Promise<RawNote[]> {
 		return this.request("getNotesRaw", networkId, account, contract)
 	}
+
+	public getBlockTimestamp(networkId: string, blockNumber: number): Promise<number | undefined> {
+		return this.request("getBlockTimestamp", networkId, blockNumber)
+	}
 }

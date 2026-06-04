@@ -64,6 +64,18 @@ export type IncomingTransferRecord = {
 	/** Local Date.now() at first discovery. Fallback ordering when
 	 *  multiple records share the same block-index tuple. */
 	discoveredAt: number
+	/**
+	 * Chain-derived UTC seconds for the block that minted this note.
+	 * Populated at scanContract-time via `noteService.getBlockTimestamp`.
+	 * Optional because:
+	 *   - Legacy records persisted before this field existed don't have it.
+	 *   - PXE may transiently fail to resolve the block; we still persist
+	 *     the record so the user doesn't lose discovery state.
+	 * Activity-feed sort prefers `blockTimestamp ?? discoveredAt` so the
+	 * order survives token remove + re-add (re-indexed records get
+	 * identical chain timestamps from PXE).
+	 */
+	blockTimestamp?: number
 }
 
 /** Trust-state row keyed by `(profileId, networkId, contract)`. */

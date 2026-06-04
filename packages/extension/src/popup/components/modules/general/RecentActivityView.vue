@@ -99,7 +99,11 @@ const recentActivityRows = computed(() => {
 		// Token-scoped views (token-detail page) only show incoming for the
 		// active token. The home view shows all.
 		if (props.token && inc.tokenId !== props.token.id) continue
-		rows.push({ type: "incoming", key: `incoming:${inc.siloedNullifier}`, sortKey: inc.discoveredAt, inc })
+		// Path 2: prefer block timestamp (chain-derived, survives remove+re-add).
+		// Fall back to discoveredAt for legacy records or when PXE didn't
+		// resolve the block. *1000 to align magnitude with tx.updatedAt (ms).
+		const sortKey = inc.blockTimestamp !== undefined ? inc.blockTimestamp * 1000 : inc.discoveredAt
+		rows.push({ type: "incoming", key: `incoming:${inc.siloedNullifier}`, sortKey, inc })
 	}
 	rows.sort((a, b) => b.sortKey - a.sortKey)
 	return rows.slice(0, remaining)

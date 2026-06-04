@@ -47,13 +47,7 @@ import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 
 /** Utils */
-import {
-	ACTIVITY_FEED_KINDS,
-	categoricalLabel,
-	humanizeErrorKind,
-	journalTerminalDisplay,
-	sanitizeJournalSubtitle,
-} from "@/utils/journal-state"
+import { ACTIVITY_FEED_KINDS, categoricalLabel, journalTerminalDisplay, sanitizeJournalSubtitle } from "@/utils/journal-state"
 import { humanizeMethodName, formatTransferType } from "@/utils/tx-enrichment"
 import { balanceFormatted } from "@/utils/amount.js"
 
@@ -127,7 +121,6 @@ const originChip = computed(() => {
 	return sanitizeJournalSubtitle(op.value.subtitle)
 })
 
-const errorKind = computed(() => op.value?.error?.kind ?? null)
 const errorMessage = computed(() => op.value?.error?.message ?? null)
 const errorNormalizedRaw = computed(() => op.value?.error?.normalizedRaw ?? null)
 
@@ -243,13 +236,6 @@ onBeforeUnmount(() => {
 					<span :class="$style.detail_value_mono" data-testid="journal-detail-category">{{ category.label }}</span>
 				</Flex>
 
-				<Flex v-if="errorKind" wide justify="between" align="center">
-					<span :class="$style.detail_key">Reason</span>
-					<span :class="$style.detail_value_mono" data-testid="journal-detail-error-kind-tag">
-						{{ humanizeErrorKind(errorKind) }}
-					</span>
-				</Flex>
-
 				<Flex v-if="createdAtLabel" wide justify="between" align="center">
 					<span :class="$style.detail_key">Started</span>
 					<span :class="$style.detail_value_mono">{{ createdAtLabel }}</span>
@@ -262,10 +248,7 @@ onBeforeUnmount(() => {
 
 				<Flex wide justify="between" align="center">
 					<span :class="$style.detail_key">State</span>
-					<Flex align="center" gap="6">
-						<Icon :name="display.icon" size="12" :color="display.color" />
-						<span :class="$style.detail_value_mono" data-testid="journal-detail-state">{{ display.state }}</span>
-					</Flex>
+					<span :class="$style.detail_value_mono" data-testid="journal-detail-state">{{ display.state }}</span>
 				</Flex>
 			</Flex>
 

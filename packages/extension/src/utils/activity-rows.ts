@@ -60,12 +60,16 @@ export function buildActivityRows({
 	}
 
 	for (const inc of incomingTransfers) {
-		// discoveredAt is the sortKey — PXE doesn't expose block timestamps,
-		// so wall-clock at discovery is the closest approximation. Reasonable
-		// for activity-feed ordering; absolute correctness across SW restarts
-		// could be added later by resolving block timestamps via a PXE
-		// extension.
-		rows.push({ type: "incoming", key: `incoming:${inc.siloedNullifier}`, sortKey: inc.discoveredAt, inc })
+		// Path 2: prefer the chain-derived block timestamp (UTC seconds) over
+		// the wall-clock `discoveredAt`. Block timestamp survives token
+		// remove + re-add (records get re-indexed from PXE with identical
+		// `blockTimestamp`s) AND survives a new-device restore from the
+		// same mnemonic. Wall-clock falls back only for legacy records OR
+		// when PXE failed to resolve the block at scan-time. Multiply seconds
+		// by 1000 so the magnitude is comparable to the millisecond values
+		// used for tx / journal sortKeys.
+		const sortKey = inc.blockTimestamp !== undefined ? inc.blockTimestamp * 1000 : inc.discoveredAt
+		rows.push({ type: "incoming", key: `incoming:${inc.siloedNullifier}`, sortKey, inc })
 	}
 
 	return rows.sort((a, b) => b.sortKey - a.sortKey)
