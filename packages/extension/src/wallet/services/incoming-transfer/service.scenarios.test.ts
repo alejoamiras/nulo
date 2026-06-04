@@ -1613,4 +1613,111 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 		const callsAfterSecondScan = (noteSvc.getBlockTimestamp as ReturnType<typeof vi.fn>).mock.calls.length
 		expect(callsAfterSecondScan).toBe(callsBeforeSecondScan)
 	})
+
+	test("(Audit-4 High) replayPendingPrompts skips a row whose token was deleted after the snapshot", async () => {
+		// Codex audit-4 finding: replayPendingPrompts snapshots
+		// `tokens = getTokensRaw(...)` before the per-row loop. If the
+		// token gets deleted between that snapshot and a later iteration,
+		// the snapshot still names it AND the per-row find succeeds — so
+		// without a live re-check, the emit would resurrect an orphan
+		// prompt. Verify the new live-token + live-trust re-checks suppress
+		// the emit.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		// Stale snapshot: first getTokensRaw call (the outer snapshot)
+		// returns the token; second call (the per-row live re-check)
+		// returns empty. Simulates a delete landing between.
+		const tokenStub = makeTokenStub([tokenA])
+		let getTokensCalls = 0
+		tokenStub.getTokensRaw = vi.fn().mockImplementation(async () => {
+			getTokensCalls++
+			return getTokensCalls === 1 ? [tokenA] : []
+		})
+		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "pending",
+			updatedAt: 0,
+		})
+		records.set("k1", {
+			siloedNullifier: "k1",
+			profileId: "p1",
+			networkId: "n1",
+			accountAddress: "0xa",
+			contract: tokenA.contract,
+			tokenId: tokenA.id,
+			owner: "0xa",
+			amountRaw: "100",
+			noteHash: "0xnh",
+			txHash: "0xtx",
+			l2BlockNumber: 1,
+			txIndexInBlock: 0,
+			noteIndexInTx: 0,
+			hidden: true,
+			discoveredAt: 0,
+		})
+
+		const seen = vi.fn()
+		service.onIncomingTransferPending.add(seen)
+
+		await service.replayPendingPrompts("p1", "n1", "0xa")
+
+		// Live re-check fires: second getTokensRaw call returns [], the
+		// `liveTokens.some(...)` check is false, the emit is suppressed.
+		expect(seen).not.toHaveBeenCalled()
+	})
+
+	test("(Audit-4 High) replayPendingPrompts skips a row whose trust was reset to unknown after the snapshot", async () => {
+		// Parallel case: token registration is still live, but the trust
+		// row got reset to `unknown` between the listTrust snapshot and the
+		// per-row emit. The live trust re-check must catch this.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
+		// Snapshot state: trust is `pending`.
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "pending",
+			updatedAt: 0,
+		})
+		records.set("k1", {
+			siloedNullifier: "k1",
+			profileId: "p1",
+			networkId: "n1",
+			accountAddress: "0xa",
+			contract: tokenA.contract,
+			tokenId: tokenA.id,
+			owner: "0xa",
+			amountRaw: "100",
+			noteHash: "0xnh",
+			txHash: "0xtx",
+			l2BlockNumber: 1,
+			txIndexInBlock: 0,
+			noteIndexInTx: 0,
+			hidden: true,
+			discoveredAt: 0,
+		})
+
+		// Intercept repo.getTrust: snapshot listTrust returns the pending
+		// row, but the per-row live getTrust returns `unknown` (simulating
+		// a reset that landed after the snapshot).
+		const realRepo = (service as never as { repo: { getTrust: (...args: unknown[]) => unknown } }).repo
+		realRepo.getTrust = vi.fn().mockResolvedValue({
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "unknown",
+			updatedAt: 0,
+		})
+
+		const seen = vi.fn()
+		service.onIncomingTransferPending.add(seen)
+
+		await service.replayPendingPrompts("p1", "n1", "0xa")
+
+		expect(seen).not.toHaveBeenCalled()
+	})
 })

@@ -700,6 +700,20 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			if (scoped.length === 0) continue
 			const token = tokens.find((t) => t.contract === trust.contract && t.chainId === network.chainId)
 			if (!token) continue
+
+			// Live re-check before emit (codex audit-4 High). The `pending`
+			// snapshot at line 687 and the `tokens` snapshot at line 689 are
+			// taken before this loop. If `onTokenDeleted` fires between then
+			// and now, the snapshots still name the deleted contract — and
+			// emitting `onIncomingTransferPending` would re-open an orphan
+			// prompt that PopupManager's `state === "unknown"` close-handler
+			// already purged. Re-fetch live trust state + live token
+			// registration per-row; skip if either has gone stale.
+			const liveTrust = await this.repo.getTrust(profileId, networkId, trust.contract)
+			if (liveTrust?.state !== "pending") continue
+			const liveTokens = await this.tokenService.getTokensRaw(profileId)
+			if (!liveTokens.some((t) => t.contract === trust.contract && t.chainId === network.chainId)) continue
+
 			const first = scoped[0]
 			this.emit("onIncomingTransferPending", {
 				profileId,

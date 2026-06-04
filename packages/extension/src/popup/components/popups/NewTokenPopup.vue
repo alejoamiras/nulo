@@ -223,7 +223,9 @@ const handleAddToken = async () => {
 		try {
 			const ok = await incomingTransferService.setTrustAllow(submittingProfileId, submittingNetworkId, newToken.contract)
 			if (ok === false) {
-				console.warn(`[NewTokenPopup] auto-trust refused for ${newToken.contract} — token-registry not yet visible`)
+				console.warn(
+					`[NewTokenPopup] auto-trust refused for ${newToken.contract} — guard returned false (either token not yet visible to getTokensRaw or lookup error)`,
+				)
 			}
 		} catch {
 			// Trust write failed — proceed with token-added flow. The
