@@ -594,10 +594,28 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// touched. The trust transition + record persistence still happen
 			// so a toggle-on later can replay via `replayPendingPrompts`.
 			if (trustState === "unknown") {
+				// Pre-flight stale check (codex audit-3 High): a delete that
+				// lands AFTER the top-of-loop check but BEFORE this transition
+				// block must not write a `pending` row for a deleted contract.
+				// Two failure modes without this:
+				//   1) NO prior trust row → onTokenDeleted emits no `unknown`
+				//      event (it only emits when a row exists), so PopupManager
+				//      has nothing to react to and the stale scan opens a
+				//      first-receive prompt for a deleted contract.
+				//   2) WITH prior trust row → onTokenDeleted emits `unknown`,
+				//      PopupManager closes/purges, then THIS code re-emits
+				//      `pending` afterwards, reopening an orphan prompt.
+				if (isStale()) return
 				const updated = await this.repo.setTrust(profileId, networkId, contract, "pending")
+				// Post-await stale checks: setTrust + isVisibilityEnabled both
+				// open await windows. Re-check before EACH emit so a deletion
+				// during either await suppresses the dependent event.
+				if (isStale()) return
 				this.emit("onIncomingTrustChanged", updated)
 				trustState = "pending"
-				if (await this.isVisibilityEnabled()) {
+				const visible = await this.isVisibilityEnabled()
+				if (isStale()) return
+				if (visible) {
 					this.emit("onIncomingTransferPending", {
 						profileId,
 						networkId,

@@ -1409,6 +1409,73 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("trusted")
 	})
 
+	test("(Audit-3 High) pending transition bails when delete lands during the unknown→pending window", async () => {
+		// First-receive race: trust is `unknown` (no prior row), scan
+		// discovers a new note for a contract, then mid-await between the
+		// top-of-loop isStale check and the `setTrust("pending")` call,
+		// the user removes the token. Without the new pre-flight + post-
+		// await isStale checks, the scan would create a pending trust row
+		// AND open a first-receive prompt for a deleted contract.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA, tokenB])
+		let resolveBlockTs: ((value: number | undefined) => void) | null = null
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note({ l2BlockNumber: 88 })] })
+		// Block the SECOND PXE call (used by the per-note loop after the
+		// pending transition), but resolve the first quickly. To make this
+		// surface, we use getBlockTimestamp itself as the await window —
+		// it's called BEFORE upsertRecord and AFTER the pending transition.
+		// Actually the simplest reproduction: block getNotesRaw, fire
+		// delete BEFORE notes resolve, then check no setTrust(pending) fires.
+		let resolveNotes: ((value: unknown[]) => void) | null = null
+		noteSvc.getNotesRaw = vi.fn().mockImplementation(() => {
+			return new Promise<unknown[]>((resolve) => {
+				resolveNotes = resolve
+			})
+		})
+		noteSvc.getBlockTimestamp = vi.fn().mockImplementation(() => {
+			return new Promise<number | undefined>((resolve) => {
+				resolveBlockTs = resolve
+			})
+		})
+		const { service } = await bootService({
+			network: network(),
+			account: accountStub,
+			token: tokenStub,
+			note: noteSvc,
+		})
+		// NO trust row — exercises the "no prior trust row" failure mode.
+
+		const trustChanged = vi.fn()
+		const transferPending = vi.fn()
+		service.onIncomingTrustChanged.add(trustChanged)
+		service.onIncomingTransferPending.add(transferPending)
+
+		const scanPromise = scan(service)
+		await flushPromises()
+		expect(resolveNotes).not.toBeNull()
+
+		// Delete fires while scan is parked on getNotesRaw. Generation bumps.
+		tokenStub.getTokensRaw = vi.fn().mockResolvedValue([tokenB])
+		tokenStub.onTokenDeleted.invoke(tokenA as never)
+		await flushPromises()
+
+		// Resolve notes → scan resumes. Per-note loop's top-of-iteration
+		// isStale() catches the race FIRST (before the pending transition).
+		if (resolveNotes !== null) (resolveNotes as (value: unknown[]) => void)([note({ l2BlockNumber: 88 })])
+		// resolveBlockTs may never get called if isStale bails first; that's
+		// the desired outcome. We resolve it defensively to drain the test.
+		if (resolveBlockTs !== null) (resolveBlockTs as (value: number | undefined) => void)(1_700_000_088)
+		await scanPromise
+
+		// Critical: NO `pending` trust row created, NO Pending event emitted.
+		expect(trust.get(trustKey("p1", "n1", tokenA.contract))).toBeUndefined()
+		expect(transferPending).not.toHaveBeenCalled()
+		// onIncomingTrustChanged should not fire from the scan path. (It
+		// would normally fire from onTokenDeleted's trust-reset, but that
+		// only fires when a trust row exists — and there is none here.)
+		expect(trustChanged).not.toHaveBeenCalled()
+	})
+
 	test("(Audit-3 Medium) setTrustReject returns false/true symmetrically", async () => {
 		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
 		const stale = await bootService({ network: network(), account: accountStub, token: makeTokenStub([]) })

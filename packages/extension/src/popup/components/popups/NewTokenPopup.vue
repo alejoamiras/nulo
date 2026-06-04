@@ -212,8 +212,19 @@ const handleAddToken = async () => {
 		// effort; transient errors don't fail the add. dApp-driven
 		// `register_token` flows through `origin: "dapp"` and bypasses
 		// this popup entirely, so the friction prompt stays for them.
+		//
+		// Boolean return contract (codex audit-3 Medium): setTrustAllow
+		// returns `false` when its stale-popup guard refuses (token not
+		// registered at lookup time). For this auto-trust path, that
+		// signals a TokenService → IncomingTransferService visibility gap
+		// — getTokensRaw didn't see the just-added token. We log but don't
+		// fail the add; the next first-receive falls through to the
+		// standard pending-prompt path.
 		try {
-			await incomingTransferService.setTrustAllow(submittingProfileId, submittingNetworkId, newToken.contract)
+			const ok = await incomingTransferService.setTrustAllow(submittingProfileId, submittingNetworkId, newToken.contract)
+			if (ok === false) {
+				console.warn(`[NewTokenPopup] auto-trust refused for ${newToken.contract} — token-registry not yet visible`)
+			}
 		} catch {
 			// Trust write failed — proceed with token-added flow. The
 			// next first-receive will fall through to the standard
