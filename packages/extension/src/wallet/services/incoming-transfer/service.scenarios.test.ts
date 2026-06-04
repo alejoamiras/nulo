@@ -493,7 +493,7 @@ describe("IncomingTransferService — trust transitions", () => {
 
 	test("setTrustAllow with visibility=false flips records visible but does NOT emit (P4 carry)", async () => {
 		const config = makeConfigStub(false)
-		const { service } = await bootService({ config })
+		const { service } = await bootService({ config, token: makeTokenStub([tokenA]) })
 		records.set("k", {
 			siloedNullifier: "k",
 			profileId: "p1",
@@ -520,7 +520,7 @@ describe("IncomingTransferService — trust transitions", () => {
 	})
 
 	test("setTrustReject sets state=blocked + does NOT flip hidden records visible", async () => {
-		const { service } = await bootService()
+		const { service } = await bootService({ token: makeTokenStub([tokenA]) })
 		records.set("k", {
 			siloedNullifier: "k",
 			profileId: "p1",
@@ -1246,5 +1246,166 @@ describe("IncomingTransferService — Path 2 block-timestamp + token-delete wipe
 		// siloedNullifier is identical to the original (cryptographically
 		// stable across delete + re-discover).
 		expect(reindexed.siloedNullifier).toBe(validNullifier(1))
+	})
+})
+
+describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () => {
+	const network = () => makeNetworkStub([{ id: "n1", chainId: 1 }])
+
+	test("(High #1) scanContract bails when contract was unwatched mid-flight", async () => {
+		// Boot with BOTH tokenA + tokenB registered + watched. We delete only
+		// tokenA — that leaves the schedulerKey entry in `watchedContracts`
+		// alive (because tokenB is still in the set), but the entry no
+		// longer contains tokenA's contract. scan(tokenA) should then bail.
+		// (If we deleted the only token, the key entry would be removed
+		// entirely and the "no scheduler" relaxation would skip the guard
+		// — that's not the race we want to test.)
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA, tokenB])
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note({ l2BlockNumber: 7 })] }, { 7: 1_700_000_007 })
+		const { service } = await bootService({
+			network: network(),
+			account: accountStub,
+			token: tokenStub,
+			note: noteSvc,
+		})
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+
+		// Delete tokenA only; tokenB remains. onTokenDeleted removes tokenA
+		// from the schedulerKey set, but the entry itself survives.
+		tokenStub.getTokensRaw = vi.fn().mockResolvedValue([tokenB])
+		tokenStub.onTokenDeleted.invoke(tokenA as never)
+		await flushPromises()
+
+		const upsertSpy = vi.spyOn((service as never as { repo: { upsertRecord: () => Promise<void> } }).repo, "upsertRecord")
+		await scan(service)
+
+		// No upsert: race guard at top-of-loop detects that tokenA is no
+		// longer in the (still-existing) watched set and returns.
+		expect(upsertSpy).not.toHaveBeenCalled()
+	})
+
+	test("(High #2) setTrustAllow on deleted token is a no-op", async () => {
+		// Boot with NO tokens (simulates a token whose delete already ran but
+		// the popup's allow closure was still queued/open).
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([])
+		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
+		// Pre-seed trust=unknown (the post-delete state).
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "unknown",
+			updatedAt: 0,
+		})
+		const trustChanged = vi.fn()
+		service.onIncomingTrustChanged.add(trustChanged)
+
+		await service.setTrustAllow("p1", "n1", tokenA.contract)
+
+		// Stale-popup guard: tokenService.getTokensRaw returns [] → no flip.
+		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("unknown")
+		expect(trustChanged).not.toHaveBeenCalled()
+	})
+
+	test("(High #2) setTrustReject on deleted token is a no-op", async () => {
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([])
+		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "unknown",
+			updatedAt: 0,
+		})
+		const trustChanged = vi.fn()
+		service.onIncomingTrustChanged.add(trustChanged)
+
+		await service.setTrustReject("p1", "n1", tokenA.contract)
+
+		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("unknown")
+		expect(trustChanged).not.toHaveBeenCalled()
+	})
+
+	test("(High #2) setTrustAllow on a still-registered token works normally", async () => {
+		// Sanity: the guard MUST NOT block legitimate Allow flows.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "pending",
+			updatedAt: 0,
+		})
+
+		await service.setTrustAllow("p1", "n1", tokenA.contract)
+
+		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("trusted")
+	})
+
+	test("(Medium #1) second scan backfills blockTimestamp after a first-scan PXE miss", async () => {
+		// First-scan PXE returns undefined for block 50 → record persists
+		// with blockTimestamp=undefined. On second scan, PXE is now healthy
+		// for that block. The existing-record branch should detect the
+		// missing field, re-call PXE, and patch via upsertRecord.
+		const blockMap: Record<number, number | undefined> = { 50: undefined }
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note({ l2BlockNumber: 50 })] }, blockMap)
+		const tokenStub = makeTokenStub([tokenA])
+		const { service } = await bootService({ network: network(), token: tokenStub, note: noteSvc })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+
+		await scan(service)
+		const first = [...records.values()][0]
+		expect(first.blockTimestamp).toBeUndefined()
+
+		// PXE recovers: block 50 timestamp is now resolvable.
+		blockMap[50] = 1_700_000_050
+
+		await scan(service)
+		const second = [...records.values()][0]
+		expect(second.blockTimestamp).toBe(1_700_000_050)
+		// Other fields untouched — backfill preserves the original record.
+		expect(second.siloedNullifier).toBe(validNullifier(1))
+		expect(second.l2BlockNumber).toBe(50)
+	})
+
+	test("(Medium #1) backfill is skipped when blockTimestamp is already populated", async () => {
+		// If the existing record already has blockTimestamp, the per-scan
+		// branch must NOT re-call PXE (wasted RPC).
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note({ l2BlockNumber: 60 })] }, { 60: 1_700_000_060 })
+		const tokenStub = makeTokenStub([tokenA])
+		const { service } = await bootService({ network: network(), token: tokenStub, note: noteSvc })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+
+		await scan(service)
+		// Pre-condition: first scan persisted with timestamp.
+		expect([...records.values()][0].blockTimestamp).toBe(1_700_000_060)
+		const callsBeforeSecondScan = (noteSvc.getBlockTimestamp as ReturnType<typeof vi.fn>).mock.calls.length
+
+		await scan(service)
+		const callsAfterSecondScan = (noteSvc.getBlockTimestamp as ReturnType<typeof vi.fn>).mock.calls.length
+		expect(callsAfterSecondScan).toBe(callsBeforeSecondScan)
 	})
 })

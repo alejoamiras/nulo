@@ -121,6 +121,38 @@ function onIncomingTransferPending(payload) {
 }
 incomingTransferService.onIncomingTransferPending.add(onIncomingTransferPending)
 
+// Stale-trust defense (codex post-impl audit Path-2 High #2). If a token
+// gets deleted while its trust prompt is queued or open, the service
+// resets trust to `unknown` and wipes records. We must (a) purge any
+// queued payloads for that triple so the next dequeue doesn't open a
+// prompt for a deleted token, and (b) close the currently-open prompt
+// if it matches — otherwise the user pressing Allow would land on the
+// service's stale-popup guard (no-op), but the popup would briefly
+// linger in a broken state.
+function purgeTripleFromQueue(profileId, networkId, contract) {
+	for (let i = pendingTrustQueue.length - 1; i >= 0; i--) {
+		const p = pendingTrustQueue[i]
+		if (p.profileId === profileId && p.networkId === networkId && p.contract === contract) {
+			pendingTrustQueue.splice(i, 1)
+		}
+	}
+	if (popupStore.isOpened("incoming_trust")) {
+		const t = cacheStore.incomingTrust
+		if (t?.profileId === profileId && t?.networkId === networkId && t?.contract === contract) {
+			popupStore.close("incoming_trust")
+			cacheStore.incomingTrust = {}
+		}
+	}
+}
+function onIncomingTrustChanged(record) {
+	// Only the `unknown` transition signals "the registration is gone /
+	// being re-prompted from scratch". `pending` / `trusted` / `blocked`
+	// don't need a queue purge — those are normal state changes.
+	if (record?.state !== "unknown") return
+	purgeTripleFromQueue(record.profileId, record.networkId, record.contract)
+}
+incomingTransferService.onIncomingTrustChanged.add(onIncomingTrustChanged)
+
 // Replay pending prompts when the active appStore triple is ready (P8
 // tactical C2 fix). The popup re-mounts on every open and `loadProfile`
 // populates `appStore.profile/network/account` asynchronously. If
@@ -276,6 +308,8 @@ onBeforeUnmount(() => {
 	// visibilityInitialized state. Closes opus H-6 (listener leak across
 	// popup mount/unmount cycles).
 	configService.onUpdate.remove(onConfigUpdate)
+	incomingTransferService.onIncomingTrustChanged.remove(onIncomingTrustChanged)
+	incomingTransferService.onIncomingTransferPending.remove(onIncomingTransferPending)
 	unwatchTriple()
 	incomingTransferService.disconnect()
 	configService.disconnect()

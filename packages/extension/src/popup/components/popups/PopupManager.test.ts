@@ -73,7 +73,16 @@ interface PendingPayload {
 	amountRaw: string
 }
 
+interface TrustChangedPayload {
+	profileId: string
+	networkId: string
+	contract: string
+	state: "unknown" | "pending" | "trusted" | "blocked"
+	updatedAt?: number
+}
+
 const incomingPendingHandlers: Array<(p: PendingPayload) => void | Promise<void>> = []
+const incomingTrustChangedHandlers: Array<(p: TrustChangedPayload) => void | Promise<void>> = []
 const configUpdateHandlers: Array<(p: { key: string; value: unknown }) => void> = []
 const incomingConnectedHandlers: Array<() => void | Promise<void>> = []
 
@@ -86,6 +95,10 @@ vi.mock("@/wallet/services/incoming-transfer/client", () => ({
 		return {
 			onIncomingTransferPending: {
 				add: (h: (p: PendingPayload) => void | Promise<void>) => incomingPendingHandlers.push(h),
+				remove: () => {},
+			},
+			onIncomingTrustChanged: {
+				add: (h: (p: TrustChangedPayload) => void | Promise<void>) => incomingTrustChangedHandlers.push(h),
 				remove: () => {},
 			},
 			onConnected: {
@@ -173,8 +186,16 @@ async function fireAndFlush(p: PendingPayload) {
 	await flushPromises()
 }
 
+async function fireTrustChangedAndFlush(p: TrustChangedPayload) {
+	for (const h of incomingTrustChangedHandlers) {
+		await h(p)
+	}
+	await flushPromises()
+}
+
 function reset() {
 	incomingPendingHandlers.length = 0
+	incomingTrustChangedHandlers.length = 0
 	configUpdateHandlers.length = 0
 	incomingConnectedHandlers.length = 0
 	for (const k of Object.keys(popupsState)) delete popupsState[k]
@@ -383,6 +404,59 @@ describe("PopupManager — pending-trust queue + triple-key dedup", () => {
 		await cacheState.incomingTrust.allow?.()
 
 		expect(setTrustAllow).toHaveBeenCalledExactlyOnceWith("p1", "net-1", "0xcA")
+	})
+
+	test("(codex Path-2 High #2) trust→unknown for the open triple closes the popup + clears cache", async () => {
+		// Open the trust prompt for (p1, net-1, 0xcA), then simulate the
+		// service emitting onIncomingTrustChanged with state=unknown for the
+		// same triple — the signal sent by onTokenDeleted's trust-reset.
+		mount(PopupManager, { shallow: SHALLOW })
+		await flushPromises()
+		await fireAndFlush(payload({ networkId: "net-1", contract: "0xcA" }))
+		expect("incoming_trust" in popupsState).toBe(true)
+		expect(cacheState.incomingTrust.contract).toBe("0xcA")
+
+		await fireTrustChangedAndFlush({ profileId: "p1", networkId: "net-1", contract: "0xcA", state: "unknown" })
+
+		expect("incoming_trust" in popupsState).toBe(false)
+		expect(cacheState.incomingTrust.contract).toBeUndefined()
+	})
+
+	test("(codex Path-2 High #2) trust→unknown for a QUEUED (not-yet-open) triple purges it from the queue", async () => {
+		// Enqueue triples A + B (B is queued behind A's open popup). Then
+		// emit trust→unknown for B. Closing A must NOT then open B.
+		mount(PopupManager, { shallow: SHALLOW })
+		await flushPromises()
+		await fireAndFlush(payload({ networkId: "net-1", contract: "0xcA" }))
+		await fireAndFlush(payload({ networkId: "net-1", contract: "0xcB" }))
+		expect("incoming_trust" in popupsState).toBe(true)
+		expect(cacheState.incomingTrust.contract).toBe("0xcA")
+
+		await fireTrustChangedAndFlush({ profileId: "p1", networkId: "net-1", contract: "0xcB", state: "unknown" })
+
+		// Now close A's popup → dequeue runs but the only queued entry (B)
+		// was purged, so nothing reopens.
+		delete popupsState.incoming_trust
+		await flushPromises()
+		expect("incoming_trust" in popupsState).toBe(false)
+	})
+
+	test("(codex Path-2 High #2) trust→trusted/pending/blocked do NOT close an open popup", async () => {
+		// Only the `unknown` transition signals "registration is gone".
+		// Other transitions are normal state changes — leave the popup alone.
+		mount(PopupManager, { shallow: SHALLOW })
+		await flushPromises()
+		await fireAndFlush(payload({ networkId: "net-1", contract: "0xcA" }))
+		expect("incoming_trust" in popupsState).toBe(true)
+
+		await fireTrustChangedAndFlush({ profileId: "p1", networkId: "net-1", contract: "0xcA", state: "trusted" })
+		expect("incoming_trust" in popupsState).toBe(true)
+
+		await fireTrustChangedAndFlush({ profileId: "p1", networkId: "net-1", contract: "0xcA", state: "pending" })
+		expect("incoming_trust" in popupsState).toBe(true)
+
+		await fireTrustChangedAndFlush({ profileId: "p1", networkId: "net-1", contract: "0xcA", state: "blocked" })
+		expect("incoming_trust" in popupsState).toBe(true)
 	})
 })
 

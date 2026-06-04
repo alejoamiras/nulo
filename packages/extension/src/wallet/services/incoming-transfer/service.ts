@@ -230,6 +230,13 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	}
 
 	public async setTrustAllow(profileId: string, networkId: string, contract: string): Promise<void> {
+		// Stale-popup guard (codex post-impl audit Path-2 High #2): if the
+		// user removed the token while the trust prompt was still open,
+		// pressing Allow must NOT ride into a `trusted` state for a contract
+		// that no longer has a token registration. Otherwise re-add via
+		// `register_token` would skip the prompt (it sees `trusted`) AND
+		// the records the user just wiped would never get re-prompted.
+		if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) return
 		await this.setTrustState(profileId, networkId, contract, "trusted")
 		// Flip every hidden record for this contract to visible; emit Added
 		// for each so the popup activity feed updates atomically.
@@ -250,8 +257,25 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	}
 
 	public async setTrustReject(profileId: string, networkId: string, contract: string): Promise<void> {
+		// Same stale-popup guard as setTrustAllow (codex Path-2 High #2). A
+		// late Reject on a deleted token is just a no-op; the records are
+		// already wiped and trust is `unknown`.
+		if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) return
 		await this.setTrustState(profileId, networkId, contract, "blocked")
 		// Hidden records stay hidden. No event emission — silent rejection.
+	}
+
+	private async isTokenStillRegistered(profileId: string, networkId: string, contract: string): Promise<boolean> {
+		try {
+			const network = await this.networkService.getNetwork(networkId)
+			const tokens = await this.tokenService.getTokensRaw(profileId)
+			return tokens.some((t) => t.contract === contract && t.chainId === network.chainId)
+		} catch {
+			// On any lookup failure, fail CLOSED (return false) — refusing
+			// a trust flip is safer than honoring one on a contract whose
+			// registration we couldn't verify.
+			return false
+		}
 	}
 
 	public async clearProfile(profileId: string): Promise<void> {
@@ -475,9 +499,45 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			return ts
 		}
 
+		const watchedKey = this.schedulerKey(networkId, accountAddress)
+		// Race guard helper (codex post-impl audit Path-2 High #1). Returns
+		// true when `onTokenDeleted` has already cleared this contract from
+		// `watchedContracts` between the start of the scan and the current
+		// iteration. We only treat this as a race when the schedulerKey
+		// entry EXISTS but lacks the contract — `undefined` means the
+		// scheduler never ran (direct test call, fresh boot), which is not
+		// a deletion race.
+		const isUnwatched = (): boolean => {
+			const set = this.watchedContracts.get(watchedKey)
+			return set !== undefined && !set.has(contract)
+		}
+
 		for (const note of notes) {
 			if (!note.siloedNullifier) continue
-			if (await this.repo.hasRecord(note.siloedNullifier)) continue
+
+			// A concurrent `onTokenDeleted` clears the contract atomically.
+			// If we've crossed that boundary mid-scan, every remaining write
+			// would re-create rows the user just deleted. Bail the whole scan
+			// — the deletion path emits its own `onIncomingTransferDeleted`
+			// for what was already there.
+			if (isUnwatched()) return
+
+			// Backfill blockTimestamp on records persisted with `undefined`
+			// (transient PXE lag at first-scan). Without this, the missing
+			// value is permanent — `hasRecord` skips the row on every later
+			// scan and the activity feed sticks to `discoveredAt` instead of
+			// the chain timestamp (codex post-impl audit Path-2 Medium #1).
+			const existing = await this.repo.getRecord(note.siloedNullifier)
+			if (existing) {
+				if (existing.blockTimestamp === undefined) {
+					const ts = await blockTimestampFor(note.l2BlockNumber)
+					if (ts !== undefined) {
+						await this.repo.upsertRecord({ ...existing, blockTimestamp: ts })
+					}
+				}
+				continue
+			}
+
 			if (outgoingTxHashes.has(note.txHash)) continue
 			if (inflightTxHashes.has(note.txHash)) continue
 			const amountRaw = parseNoteAmount(note)
@@ -514,6 +574,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			}
 
 			const blockTimestamp = await blockTimestampFor(note.l2BlockNumber)
+			// Defense-in-depth race guard. Substantial async work happened
+			// since the top-of-loop check (getRecord, isVisibilityEnabled,
+			// setTrust, blockTimestampFor). If `onTokenDeleted` slipped in
+			// during any of those awaits, bail before persisting.
+			if (isUnwatched()) return
 			const record = this.buildRecord({ note, profileId, networkId, accountAddress, token, amountRaw, trustState, blockTimestamp })
 			await this.repo.upsertRecord(record)
 
