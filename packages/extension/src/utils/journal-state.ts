@@ -172,7 +172,7 @@ export function humanizeErrorKind(kind: string): string {
 		case "popup_bound":
 			return "Popup closed"
 		case "dapp_execute":
-			return "dApp"
+			return "App"
 		case "transfer":
 			return "Transfer"
 		case "sw_restart_post_prove":
@@ -215,6 +215,12 @@ export type CategoricalFailureLabel = {
 }
 
 export function categoricalLabel(op: OperationRecord): CategoricalFailureLabel {
+	// Cancelled-stage ops carry no `error.kind` (the FSM transitions to
+	// cancelled via user action, not a thrown error). Default-arm
+	// "Error" was wrong for cancellation; surface as "Cancelled" instead.
+	if (op.progress?.stage === "cancelled" && !op.error?.kind) {
+		return { label: "Cancelled", context: "This transaction was cancelled." }
+	}
 	const kind = op.error?.kind ?? "unknown"
 	switch (kind) {
 		case "user_rejected":

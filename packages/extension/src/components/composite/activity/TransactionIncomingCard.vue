@@ -47,7 +47,8 @@ const hashSlice = computed(() => {
 <template>
 	<TransactionCardLayout
 		:title="tokenSymbol"
-		icon="download"
+		icon="arrow-narrow-up-right"
+		:iconRotate="180"
 		:amount="formattedAmount ? `+${formattedAmount}` : null"
 		:amountSymbol="tokenSymbol"
 		testId="tx-incoming-card"

@@ -104,6 +104,21 @@ const transferTypeLabel = computed(() => {
 	return formatTransferType(op.value.transferType)
 })
 
+// Method label (when title is set; pre-broadcast records may not have one).
+const methodLabel = computed(() => {
+	if (!op.value?.title) return null
+	if (isTransfer.value) return null
+	return humanizeMethodName(op.value.title)
+})
+
+// Recipient surface for transfer kinds (only populated post-broadcast on
+// some paths; null otherwise). Trimmed for the row presentation.
+const recipientLabel = computed(() => {
+	const r = op.value?.recipientAddress
+	if (!r) return null
+	return `${r.slice(0, 6)}…${r.slice(-4)}`
+})
+
 // Sanitize the dApp-controlled subtitle before rendering. A malicious dApp
 // could set its origin to an http(s)-URL-looking string; the helper brackets
 // URL-shaped values so the UI signals "not a link" at a glance.
@@ -194,22 +209,38 @@ onBeforeUnmount(() => {
 				<span v-if="transferTypeLabel" :class="$style.amount_caption">{{ transferTypeLabel }}</span>
 			</Flex>
 
-			<!-- Categorical chip — P9 + P10. Wallet-controlled, sanitize-invariant. -->
-			<div v-if="category" :class="$style.category_chip" data-testid="journal-detail-category">
-				{{ category.label }}
+			<!-- Transfer-type chip (transfer kind only) — mirrors tx/[id].vue. -->
+			<div v-if="transferTypeLabel" :class="$style.category_chip" data-testid="journal-detail-transfer-type">
+				{{ transferTypeLabel }}
 			</div>
 
-			<!-- Origin chip (dApp identity, URL-sanitized) -->
-			<Flex v-if="originChip" align="center" justify="center" gap="6" :class="$style.origin_row">
-				<span :class="$style.origin_label">App</span>
-				<span :class="$style.origin_value" data-testid="journal-detail-origin">{{ originChip }}</span>
-			</Flex>
-
-			<!-- Details box — mirrors tx/[id].vue's details_box pattern. -->
+			<!-- Details box — mirrors tx/[id].vue's details_box. App/Method/To/etc.
+				 surfaced as rows (not standalone chips) so the layout matches the
+				 confirmed-tx detail page. -->
 			<Flex wide direction="column" gap="10" :class="$style.details_box">
 				<Flex v-if="category" wide direction="column" gap="4">
 					<span :class="$style.detail_key">What happened</span>
 					<span :class="$style.detail_context" data-testid="journal-detail-context">{{ category.context }}</span>
+				</Flex>
+
+				<Flex v-if="originChip" wide justify="between" align="center">
+					<span :class="$style.detail_key">App</span>
+					<span :class="$style.detail_value_mono" data-testid="journal-detail-origin">{{ originChip }}</span>
+				</Flex>
+
+				<Flex v-if="methodLabel" wide justify="between" align="center">
+					<span :class="$style.detail_key">Method</span>
+					<span :class="$style.detail_value_mono" data-testid="journal-detail-method">{{ methodLabel }}</span>
+				</Flex>
+
+				<Flex v-if="recipientLabel" wide justify="between" align="center">
+					<span :class="$style.detail_key">To</span>
+					<span :class="$style.detail_value_mono" data-testid="journal-detail-recipient">{{ recipientLabel }}</span>
+				</Flex>
+
+				<Flex v-if="category && category.label !== 'Error'" wide justify="between" align="center">
+					<span :class="$style.detail_key">Outcome</span>
+					<span :class="$style.detail_value_mono" data-testid="journal-detail-category">{{ category.label }}</span>
 				</Flex>
 
 				<Flex v-if="errorKind" wide justify="between" align="center">

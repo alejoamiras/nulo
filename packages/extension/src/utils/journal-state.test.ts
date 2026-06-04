@@ -404,8 +404,8 @@ describe("humanizeErrorKind — JobError.kind → user-facing label", () => {
 	test("popup_bound → 'Popup closed'", () => {
 		expect(humanizeErrorKind("popup_bound")).toBe("Popup closed")
 	})
-	test("dapp_execute → 'dApp'", () => {
-		expect(humanizeErrorKind("dapp_execute")).toBe("dApp")
+	test("dapp_execute → 'App' (we never use 'dApp' in user-facing copy)", () => {
+		expect(humanizeErrorKind("dapp_execute")).toBe("App")
 	})
 	test("transfer → 'Transfer'", () => {
 		expect(humanizeErrorKind("transfer")).toBe("Transfer")
