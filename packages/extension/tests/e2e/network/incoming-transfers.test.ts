@@ -105,8 +105,11 @@ test.skipIf(!hasConfig)(
 		await waitForHash(seedPage, "#/popup/general", 30_000)
 
 		// Read the active triple from chrome.storage so the pre-seed matches.
+		// Profile id is persisted under `nulo:ui:lastActiveProfile` (see
+		// `utils/lastActiveProfile.ts`); account address under
+		// `nulo:ui:activeAccount` (see `stores/app.store.ts`).
 		const triple = await seedPage.evaluate(async () => {
-			const profile = (await chrome.storage.local.get("nulo:ui:activeProfile"))["nulo:ui:activeProfile"]
+			const profile = (await chrome.storage.local.get("nulo:ui:lastActiveProfile"))["nulo:ui:lastActiveProfile"]
 			const account = (await chrome.storage.local.get("nulo:ui:activeAccount"))["nulo:ui:activeAccount"]
 			return { profileId: typeof profile === "string" ? profile : null, account: typeof account === "string" ? account : null }
 		})
