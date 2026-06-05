@@ -99,23 +99,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	private readonly watchedContracts = new Map<string, Set<string>>()
 	/** Reentrancy guard so a slow poll doesn't double-fire. */
 	private readonly polling = new Set<string>()
-	/** Per-contract generation counter (codex post-impl audit Path-2 High #1
-	 *  + audit-2 High #1 / backfill). Bumped on every token registration
-	 *  change (`onTokenAdded`, `onTokenDeleted`, `hydrateSchedulers`). A
-	 *  `scanContract` call captures the generation at start; if any later
-	 *  check observes a higher generation, the scan bails before mutating
-	 *  storage. This covers ALL race surfaces — including the last-token
-	 *  delete (whole watchedContracts entry removed) and the clear/rebuild
-	 *  gap in `hydrateSchedulers`. Tests that call `scanContract` directly
-	 *  never bump, so the captured value equals the current value → no
-	 *  false bail. Keyed by `${networkId}|${accountAddress}|${contract}`. */
-	private readonly scanGenerations = new Map<string, number>()
-
 	/** Single global lock serializing every writer on this service's storage
 	 *  surface. Replaces the ad-hoc race guards (scanGenerations,
-	 *  txDeleteInflight, compensating reverts) once the writer migration
-	 *  in upcoming phases lands. Plan reference: implementations-plan/
-	 *  incoming-trust-state-machine-refactor/plan.md §Phase 0. */
+	 *  txDeleteInflight, compensating reverts) that prior audit cycles
+	 *  accumulated. Plan reference: implementations-plan/
+	 *  incoming-trust-state-machine-refactor/plan.md. */
 	private readonly serviceLock: Lock
 
 	/** Lifecycle epoch — bumped by clear / delete paths that wipe storage,
@@ -360,15 +348,6 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		return `${networkId}|${accountAddress}`
 	}
 
-	private genKey(networkId: string, accountAddress: string, contract: string): string {
-		return `${networkId}|${accountAddress}|${contract}`
-	}
-
-	private bumpGeneration(networkId: string, accountAddress: string, contract: string): void {
-		const k = this.genKey(networkId, accountAddress, contract)
-		this.scanGenerations.set(k, (this.scanGenerations.get(k) ?? 0) + 1)
-	}
-
 	private async resolveNetworkByChainId(chainId: number): Promise<Network | undefined> {
 		try {
 			const networks = await this.networkService.getNetworks(chainId)
@@ -378,17 +357,12 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		}
 	}
 
-	/** Rebuild the scheduler set from current tokens + active accounts. */
+	/** Rebuild the scheduler set from current tokens + active accounts.
+	 *  Lifecycle-cancel safety: callers wrapping hydrateSchedulers (e.g.,
+	 *  clearProfile/clearChain in Phase 6) bump `serviceEpoch` so any
+	 *  in-flight scan whose snapshot predates the rebuild will bail.
+	 */
 	private async hydrateSchedulers(): Promise<void> {
-		// Invalidate every in-flight scan generation before we tear down +
-		// rebuild. Any scanContract whose generation snapshot is older than
-		// what we set below will bail before writing. (Codex post-impl
-		// audit-2 High #1 — without this, the clear-then-repopulate gap
-		// would let a mid-flight scan resurrect rows.)
-		for (const key of this.scanGenerations.keys()) {
-			this.scanGenerations.set(key, (this.scanGenerations.get(key) ?? 0) + 1)
-		}
-
 		// Clear existing schedulers; we re-register below.
 		for (const id of this.schedulers.values()) clearInterval(id)
 		this.schedulers.clear()
@@ -438,9 +412,6 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		if (!network) return
 		const accounts = await this.accountService.getAccounts(profile.id, network.chainId)
 		for (const account of accounts) {
-			// Bump per-(account, contract) generation so any in-flight scan
-			// that pre-dates this add bails before mutating.
-			this.bumpGeneration(network.id, account.address, token.contract)
 			const key = this.schedulerKey(network.id, account.address)
 			let contracts = this.watchedContracts.get(key)
 			if (!contracts) {
@@ -463,9 +434,6 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// concurrent scan can't slip a row in between teardown + wipe.
 			const accounts = await this.accountService.getAccounts(profile.id, network.chainId)
 			for (const account of accounts) {
-				// scanGenerations bump kept here until Phase 4 retires the
-				// generation-counter code path in scanContract.
-				this.bumpGeneration(network.id, account.address, token.contract)
 				const key = this.schedulerKey(network.id, account.address)
 				const contracts = this.watchedContracts.get(key)
 				if (!contracts) continue
@@ -551,13 +519,8 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	}
 
 	private async scanContract(profileId: string, networkId: string, accountAddress: string, contract: string): Promise<void> {
-		// Capture the generation BEFORE any await so a registration change
-		// during this scan's setup phase invalidates it. Any later checks
-		// observing a higher current generation bail before mutating.
-		const genK = this.genKey(networkId, accountAddress, contract)
-		const startGen = this.scanGenerations.get(genK) ?? 0
-		const isStale = (): boolean => (this.scanGenerations.get(genK) ?? 0) !== startGen
-
+		// ── UNLOCKED discovery (PXE-bound — kept outside the service lock
+		// so user-mediated writers like setTrustAllow don't wait on PXE) ──
 		let notes: RawNote[]
 		try {
 			notes = await this.noteService.getNotesRaw(networkId, accountAddress, contract)
@@ -567,21 +530,18 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		}
 
 		const network = await this.networkService.getNetwork(networkId)
-		const tokens = await this.tokenService.getTokensRaw(profileId)
-		const token = tokens.find((t) => t.contract === contract && t.chainId === network.chainId)
-		// Token-removed: don't surface anything for a contract the user has
-		// since removed.
-		if (!token) return
 
-		const outgoingTxHashes = await this.collectOutgoingTxHashes(network.chainId, accountAddress)
-		const inflightTxHashes = await this.collectInflightTxHashes(profileId, networkId, accountAddress)
-		let trustState = await this.getTrustState(profileId, networkId, contract)
+		// Capture lifecycle epoch BEFORE further async work. If clear /
+		// onTokenDeleted / onAccountDeleted bumps the epoch while we're
+		// still pre-lock, every per-note CS will observe the mismatch and
+		// bail. Closes the codex final-audit Critical (PXE outside lock =
+		// scan can otherwise resurrect just-wiped rows).
+		const epochAtStart = this.serviceEpoch
 
-		// Per-scan block-timestamp cache (Path 2): query PXE once per unique
-		// L2 block in this batch — multiple notes from the same block share
-		// the lookup. PXE may fail; the cache distinguishes "fetched-and-
-		// missing" (entry exists with `undefined` value) from "not-yet-
-		// fetched" (entry absent) so we don't retry within a single scan.
+		// Block-timestamp cache scoped to this scan. Lazy lookup inside the
+		// per-note critical section: only blocks of notes that actually need
+		// processing (new record or missing-blockTimestamp backfill) trigger
+		// a PXE call. Multiple notes from the same block share the lookup.
 		const blockTimestampCache = new Map<number, number | undefined>()
 		const blockTimestampFor = async (bn: number): Promise<number | undefined> => {
 			if (blockTimestampCache.has(bn)) return blockTimestampCache.get(bn)
@@ -590,109 +550,89 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			return ts
 		}
 
+		// ── LOCKED commit (per-note critical section) ──
+		// Note: only the FIRST note in this poll that observes `unknown`
+		// triggers the unknown→pending transition + Pending emit. Subsequent
+		// notes find `pending` and skip the emit (sticky pending semantic).
 		for (const note of notes) {
 			if (!note.siloedNullifier) continue
+			await this.withServiceLock(async () => {
+				// Lifecycle-cancel guard.
+				if (this.serviceEpoch !== epochAtStart) return
 
-			// A concurrent `onTokenDeleted` / `hydrateSchedulers` has run
-			// since we started — every remaining write would re-create rows
-			// the user just deleted (or stitch them back into a torn-down
-			// scheduler set). Bail the whole scan.
-			if (isStale()) return
+				// Live re-reads INSIDE the lock.
+				const tokens = await this.tokenService.getTokensRaw(profileId)
+				const token = tokens.find((t) => t.contract === contract && t.chainId === network.chainId)
+				if (!token) return // Token removed concurrently.
 
-			// Backfill blockTimestamp on records persisted with `undefined`
-			// (transient PXE lag at first-scan). Without this, the missing
-			// value is permanent — `hasRecord` skips the row on every later
-			// scan and the activity feed sticks to `discoveredAt` instead of
-			// the chain timestamp (codex post-impl audit Path-2 Medium #1).
-			const existing = await this.repo.getRecord(note.siloedNullifier)
-			if (existing) {
-				if (existing.blockTimestamp === undefined) {
-					const ts = await blockTimestampFor(note.l2BlockNumber)
-					// Re-check race after the PXE await — onTokenDeleted may
-					// have wiped this very record between the lookup and now.
-					// Without this re-check, the backfill resurrects rows
-					// the delete path just dropped (codex audit-2 second High).
-					if (ts !== undefined && !isStale()) {
-						await this.repo.upsertRecord({ ...existing, blockTimestamp: ts })
+				// Re-read tx-suppression sets live. The outer-scan-loop
+				// approach would stale these between notes if onTransactionAdded
+				// fires mid-scan (codex R1 M1 / R2 confirmation).
+				const outgoingTxHashes = await this.collectOutgoingTxHashes(network.chainId, accountAddress)
+				const inflightTxHashes = await this.collectInflightTxHashes(profileId, networkId, accountAddress)
+
+				// Existing-record branch: backfill blockTimestamp if missing.
+				const existing = await this.repo.getRecord(note.siloedNullifier)
+				if (existing) {
+					if (existing.blockTimestamp === undefined) {
+						const ts = await blockTimestampFor(note.l2BlockNumber)
+						if (ts !== undefined) {
+							await this.repo.upsertRecord({ ...existing, blockTimestamp: ts })
+						}
+					}
+					return
+				}
+
+				if (outgoingTxHashes.has(note.txHash)) return
+				if (inflightTxHashes.has(note.txHash)) return
+				const amountRaw = parseNoteAmount(note)
+				if (amountRaw === null) return
+
+				// Read trust FRESH inside the lock — kills the residual race
+				// codex audit-6 identified (the LOCAL trustState going stale
+				// across PXE await chains in the prior design).
+				const liveTrust = (await this.repo.getTrust(profileId, networkId, contract))?.state ?? "unknown"
+				let trustState = liveTrust
+
+				// First-receive: transition unknown → pending and emit the
+				// pending event so the popup can prompt the user. Visibility
+				// gate respects the user's `incomingTransfersVisible` toggle.
+				if (trustState === "unknown") {
+					const updated = await this.repo.setTrust(profileId, networkId, contract, "pending")
+					this.emit("onIncomingTrustChanged", updated)
+					trustState = "pending"
+					if (await this.isVisibilityEnabled()) {
+						this.emit("onIncomingTransferPending", {
+							profileId,
+							networkId,
+							accountAddress,
+							contract,
+							tokenId: token.id,
+							tokenSymbol: token.symbol,
+							tokenDecimals: token.decimals,
+							amountRaw,
+						})
 					}
 				}
-				continue
-			}
 
-			if (outgoingTxHashes.has(note.txHash)) continue
-			if (inflightTxHashes.has(note.txHash)) continue
-			const amountRaw = parseNoteAmount(note)
-			if (amountRaw === null) continue
+				const blockTimestamp = await blockTimestampFor(note.l2BlockNumber)
+				const record = this.buildRecord({
+					note,
+					profileId,
+					networkId,
+					accountAddress,
+					token,
+					amountRaw,
+					trustState,
+					blockTimestamp,
+				})
+				await this.repo.upsertRecord(record)
 
-			// First-receive policy: transition unknown → pending and emit a
-			// pending event so the popup can prompt the user for Allow/Reject.
-			// While pending, the record is persisted hidden — `setTrustAllow`
-			// flips queued records visible atomically, `setTrustReject`
-			// keeps them hidden permanently.
-			//
-			// Visibility gate (codex post-impl audit C2): the EMIT must
-			// respect `incomingTransfersVisible`. Without this, an OFF toggle
-			// suppresses initial-load + Added events but the Pending prompt
-			// still pops on first receive — leaking that a contract was
-			// touched. The trust transition + record persistence still happen
-			// so a toggle-on later can replay via `replayPendingPrompts`.
-			if (trustState === "unknown") {
-				// Pre-flight stale check (codex audit-3 High): a delete that
-				// lands AFTER the top-of-loop check but BEFORE this transition
-				// block must not write a `pending` row for a deleted contract.
-				// Two failure modes without this:
-				//   1) NO prior trust row → onTokenDeleted emits no `unknown`
-				//      event (it only emits when a row exists), so PopupManager
-				//      has nothing to react to and the stale scan opens a
-				//      first-receive prompt for a deleted contract.
-				//   2) WITH prior trust row → onTokenDeleted emits `unknown`,
-				//      PopupManager closes/purges, then THIS code re-emits
-				//      `pending` afterwards, reopening an orphan prompt.
-				if (isStale()) return
-				const updated = await this.repo.setTrust(profileId, networkId, contract, "pending")
-				// Post-await stale checks: setTrust + isVisibilityEnabled both
-				// open await windows. Re-check before EACH emit so a deletion
-				// during either await suppresses the dependent event.
-				if (isStale()) return
-				this.emit("onIncomingTrustChanged", updated)
-				trustState = "pending"
-				const visible = await this.isVisibilityEnabled()
-				if (isStale()) return
-				if (visible) {
-					this.emit("onIncomingTransferPending", {
-						profileId,
-						networkId,
-						accountAddress,
-						contract,
-						tokenId: token.id,
-						tokenSymbol: token.symbol,
-						tokenDecimals: token.decimals,
-						amountRaw,
-					})
-				}
-			}
-
-			const blockTimestamp = await blockTimestampFor(note.l2BlockNumber)
-			// Defense-in-depth race guard. Substantial async work happened
-			// since the top-of-loop check (getRecord, isVisibilityEnabled,
-			// setTrust, blockTimestampFor). If `onTokenDeleted` slipped in
-			// during any of those awaits, bail before persisting.
-			if (isStale()) return
-			const record = this.buildRecord({ note, profileId, networkId, accountAddress, token, amountRaw, trustState, blockTimestamp })
-			await this.repo.upsertRecord(record)
-
-			if (trustState === "trusted") {
-				// Live-event gate: respect the `incomingTransfersVisible`
-				// settings toggle on the EMIT path too. Without this, the
-				// initial-load gate in `getIncomingTransfers` would block
-				// already-mounted pages from showing the row, but live
-				// updates would slip past and surface anyway (codex post-
-				// impl audit critical).
-				if (await this.isVisibilityEnabled()) {
+				if (trustState === "trusted" && (await this.isVisibilityEnabled())) {
 					this.emit("onIncomingTransferAdded", record)
 				}
-			}
-			// pending / blocked: record persisted hidden, no event emit-Added.
+				// pending / blocked: record persisted hidden, no Added emit.
+			})
 		}
 	}
 

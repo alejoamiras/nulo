@@ -1323,65 +1323,14 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 		expect(upsertSpy).not.toHaveBeenCalled()
 	})
 
-	test("(High #1 in-flight) backfill upsert ALSO bails when delete lands during the PXE backfill await", async () => {
-		// Seed: record exists with blockTimestamp undefined. Next scan
-		// enters the backfill branch, awaits blockTimestampFor. While
-		// parked, delete fires. The new pre-upsert isStale() check must
-		// suppress the backfill upsert.
-		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
-		const tokenStub = makeTokenStub([tokenA, tokenB])
-		let resolveBlockTs: ((value: number | undefined) => void) | null = null
-		const noteSvc = makeNoteStub({ [tokenA.contract]: [note({ l2BlockNumber: 77 })] })
-		noteSvc.getBlockTimestamp = vi.fn().mockImplementation(() => {
-			return new Promise<number | undefined>((resolve) => {
-				resolveBlockTs = resolve
-			})
-		})
-		const { service } = await bootService({
-			network: network(),
-			account: accountStub,
-			token: tokenStub,
-			note: noteSvc,
-		})
-		// Pre-seed existing record missing blockTimestamp.
-		records.set(validNullifier(1), {
-			siloedNullifier: validNullifier(1),
-			profileId: "p1",
-			networkId: "n1",
-			accountAddress: "0xa",
-			contract: tokenA.contract,
-			tokenId: tokenA.id,
-			owner: "0xa",
-			amountRaw: "100",
-			noteHash: "0xnh1",
-			txHash: "0xtx1",
-			l2BlockNumber: 77,
-			txIndexInBlock: 0,
-			noteIndexInTx: 0,
-			hidden: false,
-			discoveredAt: 1,
-		})
-		const upsertSpy = vi.spyOn((service as never as { repo: { upsertRecord: () => Promise<void> } }).repo, "upsertRecord")
-
-		// Start scan; it parks on the backfill PXE call inside the per-note
-		// loop's existing-record branch.
-		const scanPromise = scan(service)
-		await flushPromises()
-		expect(resolveBlockTs).not.toBeNull()
-
-		// Delete fires mid-backfill; generation bumps.
-		tokenStub.getTokensRaw = vi.fn().mockResolvedValue([tokenB])
-		tokenStub.onTokenDeleted.invoke(tokenA as never)
-		await flushPromises()
-
-		// Resolve the PXE call with a valid timestamp. Without the
-		// pre-upsert isStale() check, the backfill upsert would fire and
-		// resurrect a row the delete path already removed.
-		if (resolveBlockTs !== null) (resolveBlockTs as (value: number | undefined) => void)(1_700_000_077)
-		await scanPromise
-
-		expect(upsertSpy).not.toHaveBeenCalled()
-	})
+	// REMOVED: "(High #1 in-flight) backfill upsert ALSO bails when delete lands during PXE backfill await"
+	// Pinned the old scanGenerations isStale() re-check during the backfill PXE await.
+	// Under the global serviceLock, the race is structurally impossible:
+	// onTokenDeleted's invoke is async but its handler acquires the lock —
+	// while scan holds it across the parked PXE call, the delete handler is
+	// queued. After scan completes its CS (including the backfill upsert),
+	// the lock releases and the delete handler runs. End-state-correct.
+	// Lock-based equivalent: LR12 in service.lock-races.test.ts (Phase 7).
 
 	test("(Audit-3 Medium) setTrustAllow returns false when token is no longer registered", async () => {
 		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
