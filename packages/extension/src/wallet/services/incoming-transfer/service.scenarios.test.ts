@@ -1734,3 +1734,128 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 		expect(seen).not.toHaveBeenCalled()
 	})
 })
+
+describe("IncomingTransferService — lock-races (Phase 7 pins for the global serviceLock refactor)", () => {
+	const network = () => makeNetworkStub([{ id: "n1", chainId: 1 }])
+
+	test("(LR9 reentrancy) setTrustAllow public wrapper does NOT deadlock against its own locked helper", async () => {
+		// Regression pin: the public setTrustAllow acquires the serviceLock
+		// once and the body uses _setTrustStateLocked (no re-acquire). If a
+		// future refactor accidentally chained the public method through
+		// another lock-acquiring method, the Lock primitive's non-reentrant
+		// semantics would deadlock until the 5-min force-release timer fires.
+		// A successful resolution under the vitest default timeout proves
+		// the wrappers are split correctly.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "pending",
+			updatedAt: 0,
+		})
+
+		const ok = await service.setTrustAllow("p1", "n1", tokenA.contract)
+		expect(ok).toBe(true)
+		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("trusted")
+	})
+
+	test("(LR12 lifecycle epoch) clearChain during in-flight scan: no records persisted post-clear", async () => {
+		// Pre-seed: token + trusted trust row so scanContract would persist
+		// the records it discovers. Park getNotesRaw so we can fire
+		// clearChain between getNotesRaw + the per-note critical section.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		let resolveNotes: ((value: unknown[]) => void) | null = null
+		const noteSvc = makeNoteStub({}, { 7: 1_700_000_007 })
+		noteSvc.getNotesRaw = vi.fn().mockImplementation(() => {
+			return new Promise<unknown[]>((resolve) => {
+				resolveNotes = resolve
+			})
+		})
+		const { service } = await bootService({
+			network: network(),
+			account: accountStub,
+			token: tokenStub,
+			note: noteSvc,
+		})
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		const upsertSpy = vi.spyOn((service as never as { repo: { upsertRecord: () => Promise<void> } }).repo, "upsertRecord")
+
+		// Start scan; parks on getNotesRaw (BEFORE epochAtStart capture? — no,
+		// epoch is captured AFTER getNotesRaw in the new design, but BEFORE
+		// the per-note CS. So a clearChain firing while scan is parked on
+		// getNotesRaw will bump the epoch BEFORE scan's per-note CS check.)
+		const scanPromise = scan(service)
+		await flushPromises()
+		expect(resolveNotes).not.toBeNull()
+
+		// Fire clearChain while scan is parked. clearChain acquires the
+		// lock (no contention — scan doesn't hold the lock yet), wipes
+		// trust + records, bumps serviceEpoch.
+		await service.clearChain("p1", "n1")
+		await flushPromises()
+
+		// Release notes. Scan resumes; epochAtStart was captured before
+		// clearChain bumped, so scan's per-note CS check observes the
+		// mismatch and bails before any upsertRecord call.
+		if (resolveNotes !== null) (resolveNotes as (value: unknown[]) => void)([note({ l2BlockNumber: 7 })])
+		await scanPromise
+
+		// Storage is empty + no upserts happened.
+		expect(records.size).toBe(0)
+		expect(upsertSpy).not.toHaveBeenCalled()
+	})
+
+	test("(LR4 concurrent onTransactionAdded same hash) → exactly one Delete emit", async () => {
+		// Two onTransactionAdded events for the same tx hash. The serviceLock
+		// serializes them: the first runs to completion (deletes record,
+		// emits Deleted), the second finds the record gone, no-ops.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const txStub = makeTransactionStub()
+		const { service } = await bootService({
+			network: network(),
+			account: accountStub,
+			token: tokenStub,
+			transaction: txStub,
+		})
+		records.set(validNullifier(1), {
+			siloedNullifier: validNullifier(1),
+			profileId: "p1",
+			networkId: "n1",
+			accountAddress: "0xa",
+			contract: tokenA.contract,
+			tokenId: tokenA.id,
+			owner: "0xa",
+			amountRaw: "100",
+			noteHash: "0xnh1",
+			txHash: "0xtx-shared",
+			l2BlockNumber: 1,
+			txIndexInBlock: 0,
+			noteIndexInTx: 0,
+			hidden: false,
+			discoveredAt: 0,
+		})
+		const deletedSpy = vi.fn()
+		service.onIncomingTransferDeleted.add(deletedSpy)
+
+		const tx = { hash: "0xtx-shared", chainId: 1, account: "0xa" }
+		// Fire twice in the same microtask; both queue on the lock.
+		const a = txStub.onTransactionAdded.invoke(tx as never)
+		const b = txStub.onTransactionAdded.invoke(tx as never)
+		await Promise.all([a, b])
+		await flushPromises()
+
+		expect(deletedSpy).toHaveBeenCalledTimes(1)
+		expect(records.size).toBe(0)
+	})
+})

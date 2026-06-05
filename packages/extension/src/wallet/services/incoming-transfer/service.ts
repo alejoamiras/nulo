@@ -529,6 +529,13 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	}
 
 	private async scanContract(profileId: string, networkId: string, accountAddress: string, contract: string): Promise<void> {
+		// Capture lifecycle epoch BEFORE any await — if a clear / onTokenDeleted /
+		// onAccountDeleted runs during PXE I/O or any other await in the unlocked
+		// discovery phase, every per-note CS below will observe the mismatch
+		// and bail. Closes the codex final-audit Critical (PXE outside lock =
+		// scan can otherwise resurrect just-wiped rows).
+		const epochAtStart = this.serviceEpoch
+
 		// ── UNLOCKED discovery (PXE-bound — kept outside the service lock
 		// so user-mediated writers like setTrustAllow don't wait on PXE) ──
 		let notes: RawNote[]
@@ -540,13 +547,6 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		}
 
 		const network = await this.networkService.getNetwork(networkId)
-
-		// Capture lifecycle epoch BEFORE further async work. If clear /
-		// onTokenDeleted / onAccountDeleted bumps the epoch while we're
-		// still pre-lock, every per-note CS will observe the mismatch and
-		// bail. Closes the codex final-audit Critical (PXE outside lock =
-		// scan can otherwise resurrect just-wiped rows).
-		const epochAtStart = this.serviceEpoch
 
 		// Block-timestamp cache scoped to this scan. Lazy lookup inside the
 		// per-note critical section: only blocks of notes that actually need
