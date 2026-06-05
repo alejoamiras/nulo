@@ -42,6 +42,7 @@ import {
 } from "@/wallet/services/token/functions"
 import { TransferType } from "@/wallet/services/transaction/spec"
 import type { Fn } from "@/wallet/utils/fn"
+import { pickPrimaryMethod } from "@/utils/primary-method"
 import type {
 	Action,
 	AddCapsuleAction,
@@ -238,13 +239,18 @@ export class OperationPlanner {
 	 *  Returns undefined for operation kinds that have no "primary" call. */
 	public extractPrimaryMethod(operation: Operation): string | undefined {
 		if ("actions" in operation && Array.isArray(operation.actions)) {
-			const call = operation.actions.find((a) => a.kind === "call" || a.kind === "encoded_call")
-			if (call?.kind === "call") return call.method
-			if (call?.kind === "encoded_call") return call.name ?? call.selector
+			const carriers: Array<{ method?: string; name?: string }> = []
+			for (const action of operation.actions) {
+				if (action.kind === "call") carriers.push({ method: action.method })
+				else if (action.kind === "encoded_call") carriers.push({ name: action.name ?? action.selector })
+			}
+			return pickPrimaryMethod(carriers)
 		}
 		if ("exec" in operation && (operation as AztecSendTxOperation).exec?.calls?.length) {
-			const first = (operation as AztecSendTxOperation).exec.calls[0]
-			return first.name?.toString() ?? first.selector?.toString()
+			const carriers = (operation as AztecSendTxOperation).exec.calls.map((c) => ({
+				name: c.name?.toString() ?? c.selector?.toString(),
+			}))
+			return pickPrimaryMethod(carriers)
 		}
 		return undefined
 	}

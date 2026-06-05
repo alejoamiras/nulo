@@ -107,9 +107,11 @@ test.skipIf(!hasConfig)(
 		const walletPopup = await openPopup(ctx)
 		await waitForHash(walletPopup, "#/popup/general", 30_000)
 		const journalRecords = await walletPopup.evaluate(async () => {
-			// Records are persisted under `nulo:journal@<id>` in chrome.storage.session
-			// (see OperationJournalService EntityStorage construction).
-			const all = (await chrome.storage.session.get(null)) as Record<string, unknown>
+			// Records are persisted under `nulo:journal@<id>` in chrome.storage.local
+			// (see OperationJournalService EntityStorage construction; storage was
+			// moved from session → local on 2026-06-05 so failed/cancelled history
+			// survives browser exit).
+			const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
 			const keys = Object.keys(all).filter((k) => k.startsWith("nulo:journal@"))
 			return keys
 				.map((k) => {

@@ -2,6 +2,7 @@
 /** Components */
 import TransactionAwaitingCard from "@/components/composite/activity/TransactionAwaitingCard.vue"
 import TransactionTerminalCard from "@/components/composite/activity/TransactionTerminalCard.vue"
+import TransactionIncomingCard from "@/components/composite/activity/TransactionIncomingCard.vue"
 import TransactionCard from "../activity/TransactionCard.vue"
 
 /** Vendor */
@@ -9,6 +10,8 @@ import TransactionCard from "../activity/TransactionCard.vue"
 /** Services */
 import { ExecutionServiceClient } from "@/wallet/services/execution/client"
 import { OperationJournalServiceClient } from "@/wallet/services/operation-journal/client"
+import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
+import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { TaskServiceClient } from "@/wallet/services/task/client"
 import { ContentKind, TaskStatus } from "@/wallet/services/task/spec"
 import { TokenServiceClient } from "@/wallet/services/token/client"
@@ -17,7 +20,7 @@ import { OriginType } from "@/wallet/services/transaction/spec"
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
 import { stageSubtitle } from "@/utils/card-subtitle"
-import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisplay } from "@/utils/journal-state"
+import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisplay, sanitizeJournalSubtitle } from "@/utils/journal-state"
 import { formatTransferType, humanizeMethodName } from "@/utils/tx-enrichment"
 import { buildCancelHandler, filterPendingDoubleRender, isMatchingTask } from "./recent-activity-handlers"
 
@@ -92,6 +95,16 @@ const recentActivityRows = computed(() => {
 	for (const tx of filteredRecentTransactions.value) {
 		rows.push({ type: "tx", key: `tx:${tx.hash}`, sortKey: tx.updatedAt, tx })
 	}
+	for (const inc of incomingTransfers.value) {
+		// Token-scoped views (token-detail page) only show incoming for the
+		// active token. The home view shows all.
+		if (props.token && inc.tokenId !== props.token.id) continue
+		// Path 2: prefer block timestamp (chain-derived, survives remove+re-add).
+		// Fall back to discoveredAt for legacy records or when PXE didn't
+		// resolve the block. *1000 to align magnitude with tx.updatedAt (ms).
+		const sortKey = inc.blockTimestamp !== undefined ? inc.blockTimestamp * 1000 : inc.discoveredAt
+		rows.push({ type: "incoming", key: `incoming:${inc.siloedNullifier}`, sortKey, inc })
+	}
 	rows.sort((a, b) => b.sortKey - a.sortKey)
 	return rows.slice(0, remaining)
 })
@@ -147,7 +160,11 @@ const executingProgressSubtitle = computed(() => {
  *  leave this null so the chip is suppressed. */
 const executingOriginLabel = computed(() => {
 	if (!executingTask.value || isUiTransfer.value) return null
-	return executingTask.value.origin?.name ?? null
+	// `origin.name` is dApp-controlled; bracket schemeful values so a
+	// malicious dApp can't make its in-flight label visually read as a link.
+	// The orphan-fallback awaiting cards bind this same value, so the wrap
+	// here covers both render sites.
+	return sanitizeJournalSubtitle(executingTask.value.origin?.name)
 })
 const executingAmount = computed(() => {
 	if (!isUiTransfer.value) return null
@@ -171,6 +188,63 @@ taskService.onTaskDeleted.add(onExecutingTaskDeleted)
  *  off automatically. */
 const journalService = new OperationJournalServiceClient()
 const journalOps = ref([])
+
+/** Third source for the activity-row merge: incoming-receive records from
+ *  trusted fungible-token contracts. Filtered at the service layer
+ *  (hidden=false only); the merge below adds them to recentActivityRows. */
+const incomingTransferService = new IncomingTransferServiceClient()
+const incomingTransfers = ref([])
+
+async function loadIncomingTransfers() {
+	if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) return
+	incomingTransfers.value = await incomingTransferService.getIncomingTransfers(
+		appStore.profile.id,
+		appStore.network.id,
+		appStore.account.address,
+	)
+}
+function onIncomingTransferAdded(inc) {
+	const idx = incomingTransfers.value.findIndex((x) => x.siloedNullifier === inc.siloedNullifier)
+	if (idx === -1) incomingTransfers.value = [inc, ...incomingTransfers.value]
+	else incomingTransfers.value[idx] = inc
+}
+function onIncomingTransferUpdated(inc) {
+	const idx = incomingTransfers.value.findIndex((x) => x.siloedNullifier === inc.siloedNullifier)
+	if (idx !== -1) incomingTransfers.value[idx] = inc
+}
+function onIncomingTransferDeleted(inc) {
+	incomingTransfers.value = incomingTransfers.value.filter((x) => x.siloedNullifier !== inc.siloedNullifier)
+}
+incomingTransferService.onIncomingTransferAdded.add(onIncomingTransferAdded)
+incomingTransferService.onIncomingTransferUpdated.add(onIncomingTransferUpdated)
+incomingTransferService.onIncomingTransferDeleted.add(onIncomingTransferDeleted)
+incomingTransferService.onConnected.add(loadIncomingTransfers)
+
+// Visibility settings toggle: reload incoming records when the user flips
+// `incomingTransfersVisible` while this widget is mounted. getIncoming-
+// Transfers returns [] when off, clearing the local array atomically.
+// ServiceClient doesn't auto-connect on listener registration; an
+// explicit connect in onMounted below ensures onUpdate fires.
+const configService = new ConfigServiceClient()
+function onConfigUpdate(prop) {
+	if (prop.key === "incomingTransfersVisible") {
+		loadIncomingTransfers()
+	}
+}
+configService.onUpdate.add(onConfigUpdate)
+
+function incomingCardProps(inc) {
+	const token = inc.tokenId !== undefined ? tokenById(inc.tokenId) : undefined
+	return {
+		tokenSymbol: token?.symbol || "Token",
+		amountRaw: inc.amountRaw,
+		tokenDecimals: token?.decimals || 0,
+		txHash: inc.txHash,
+	}
+}
+function handleSelectIncoming(inc) {
+	if (inc.tokenId !== undefined) router.push(`/popup/tokens/${inc.tokenId}`)
+}
 
 /** Phase 2 follow-up: execution-service client for Cancel surface.
  *  Disconnected in onBeforeUnmount alongside the others. */
@@ -273,10 +347,12 @@ function cardTitleFor(op) {
 }
 
 /** Per-op dApp identity chip. The persisted record's `subtitle` field
- *  carries the dApp hostname for `dapp_execute` ops; null for transfers. */
+ *  carries the dApp hostname for `dapp_execute` ops; null for transfers.
+ *  Sanitized so a schemeful subtitle (set by a malicious dApp at session-
+ *  discover time) is bracketed and doesn't read as a clickable link. */
 function cardOriginLabelFor(op) {
 	if (!op || op.kind === "transfer") return null
-	return op.subtitle ?? null
+	return sanitizeJournalSubtitle(op.subtitle)
 }
 
 /** Per-op icon. Transfers use the up-right arrow; dApp ops use the zap. */
@@ -562,8 +638,30 @@ const handleSelectTx = (tx) => {
 	router.push(`/popup/tx/${tx.hash}`)
 }
 
+// Terminal journal rows (cancelled / interrupted / failed pre-broadcast)
+// have no chain tx hash. Route to the dedicated journal detail page.
+const handleSelectTerminal = (op) => {
+	router.push(`/popup/journal/${op.id}`)
+}
+
 onMounted(async () => {
 	await loadTokens()
+
+	// ServiceClient doesn't auto-connect on listener registration — make
+	// explicit connects so the onUpdate (visibility toggle) and
+	// onConnected (loadIncomingTransfers) listeners fire. Without the
+	// incoming connect, the onConnected handler never runs and the
+	// widget's incoming-transfer rows stay empty across re-mounts.
+	try {
+		await configService.connect()
+	} catch {
+		// Non-fatal; reload-on-toggle just won't fire until next mount.
+	}
+	try {
+		await incomingTransferService.connect()
+	} catch {
+		// Non-fatal; the widget will still render outgoing rows.
+	}
 
 	// Newest-first replay — otherwise concurrent tasks could surface the older one.
 	const allTasks = await taskService.getTasks()
@@ -590,6 +688,8 @@ onBeforeUnmount(() => {
 	tokenService.disconnect()
 	journalService.disconnect()
 	executionService.disconnect()
+	incomingTransferService.disconnect()
+	configService.disconnect()
 })
 </script>
 
@@ -643,11 +743,17 @@ onBeforeUnmount(() => {
 			<!-- Chronological merge of terminal journal records + settled chain
 			     txs. Branch by row.type. -->
 			<template v-for="row in recentActivityRows" :key="row.key">
-				<TransactionTerminalCard
-					v-if="row.type === 'journal' && journalTerminalCardProps(row.op)"
-					v-bind="journalTerminalCardProps(row.op)"
+				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
+				<TransactionIncomingCard
+					v-else-if="row.type === 'incoming'"
+					v-bind="incomingCardProps(row.inc)"
+					@click="handleSelectIncoming(row.inc)"
 				/>
-				<TransactionCard v-else-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
+				<TransactionTerminalCard
+					v-else-if="row.type === 'journal' && journalTerminalCardProps(row.op)"
+					v-bind="journalTerminalCardProps(row.op)"
+					@click="handleSelectTerminal(row.op)"
+				/>
 			</template>
 		</div>
 	</Flex>
@@ -688,11 +794,17 @@ onBeforeUnmount(() => {
 			/>
 			<TransactionAwaitingCard v-else-if="!renderedInFlightOps.length && awaitingAccountTxs.length" />
 			<template v-for="row in recentActivityRows" :key="row.key">
-				<TransactionTerminalCard
-					v-if="row.type === 'journal' && journalTerminalCardProps(row.op)"
-					v-bind="journalTerminalCardProps(row.op)"
+				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
+				<TransactionIncomingCard
+					v-else-if="row.type === 'incoming'"
+					v-bind="incomingCardProps(row.inc)"
+					@click="handleSelectIncoming(row.inc)"
 				/>
-				<TransactionCard v-else-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row.tx)" />
+				<TransactionTerminalCard
+					v-else-if="row.type === 'journal' && journalTerminalCardProps(row.op)"
+					v-bind="journalTerminalCardProps(row.op)"
+					@click="handleSelectTerminal(row.op)"
+				/>
 			</template>
 		</div>
 	</Flex>

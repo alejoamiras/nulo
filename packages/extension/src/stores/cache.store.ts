@@ -2,6 +2,10 @@ import { defineStore } from "pinia"
 
 export const useCacheStore = defineStore("cache", () => {
 	const confirm = reactive({})
+	/** First-receive friction popup payload. Holds the closures that
+	 *  IncomingTrustPopup invokes for Allow / Reject. Populated by the
+	 *  PopupManager-level subscriber on `onIncomingTransferPending`. */
+	const incomingTrust = reactive({})
 
 	const networkToEditIdx = ref()
 	/** Per-`Network` detail page → endpoint popups context. */
@@ -33,6 +37,7 @@ export const useCacheStore = defineStore("cache", () => {
 
 	return {
 		confirm,
+		incomingTrust,
 		networkToEditIdx,
 		endpointEditNetworkId,
 		endpointEditId,

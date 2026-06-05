@@ -9,7 +9,14 @@
 
 import { describe, expect, test } from "vitest"
 import type { OperationKind, OperationRecord } from "@/wallet/services/operation-journal/spec"
-import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisplay } from "./journal-state"
+import {
+	ACTIVITY_FEED_KINDS,
+	buildJournalTerminalCardProps,
+	categoricalLabel,
+	humanizeErrorKind,
+	journalTerminalDisplay,
+	sanitizeJournalSubtitle,
+} from "./journal-state"
 
 function recordWith(overrides: Partial<OperationRecord> = {}): OperationRecord {
 	return {
@@ -247,6 +254,24 @@ describe("buildJournalTerminalCardProps", () => {
 		expect(props?.title).toBe("Transaction")
 	})
 
+	test("dapp_execute with schemeful subtitle → originLabel bracketed (sanitize widening)", () => {
+		// `op.subtitle` is dApp-controlled. A malicious dApp setting its
+		// origin to `https://evil.com` must surface in the terminal-card
+		// originLabel as `[https://evil.com]` — the user reads it as plain
+		// text, not as a clickable link. Audit-fixes P1 pinning.
+		const props = buildJournalTerminalCardProps(
+			recordWith({
+				kind: "dapp_execute",
+				title: "swap",
+				subtitle: "https://evil.com",
+				progress: { stage: "failed" },
+				error: { kind: "network", message: "x", normalizedRaw: null },
+			}),
+			TEST_CTX,
+		)
+		expect(props?.originLabel).toBe("[https://evil.com]")
+	})
+
 	test("non-activity kind (token_import) → null (footgun guard)", () => {
 		// The helper must not produce an activity-feed card for kinds whose
 		// home surface is elsewhere. Accidental callers get a clean null
@@ -273,5 +298,201 @@ describe("buildJournalTerminalCardProps", () => {
 			TEST_CTX,
 		)
 		expect(props).toBeNull()
+	})
+})
+
+// dApp-controlled `subtitle` is the origin/name stored at session-discover
+// time. The journal detail page renders it; if a malicious dApp set its
+// origin to an http(s) URL string, the bare value could be visually
+// confusable with a link. `sanitizeJournalSubtitle` brackets URL-shaped
+// values so the UI can render the text plainly without it reading as
+// "tap to open."
+describe("sanitizeJournalSubtitle — URL-shape defense", () => {
+	test("null / undefined / empty → null", () => {
+		expect(sanitizeJournalSubtitle(null)).toBeNull()
+		expect(sanitizeJournalSubtitle(undefined)).toBeNull()
+		expect(sanitizeJournalSubtitle("")).toBeNull()
+	})
+	test("plain dApp name → returned verbatim", () => {
+		expect(sanitizeJournalSubtitle("uniswap.example")).toBe("uniswap.example")
+		expect(sanitizeJournalSubtitle("My DApp")).toBe("My DApp")
+	})
+	test("https URL → bracketed", () => {
+		expect(sanitizeJournalSubtitle("https://evil.com/?steal=secret")).toBe("[https://evil.com/?steal=secret]")
+	})
+	test("http URL → bracketed", () => {
+		expect(sanitizeJournalSubtitle("http://localhost:3000/app")).toBe("[http://localhost:3000/app]")
+	})
+	test("case-insensitive URL match", () => {
+		expect(sanitizeJournalSubtitle("HTTPS://EVIL.COM")).toBe("[HTTPS://EVIL.COM]")
+	})
+	test("string containing http but not prefix → unchanged", () => {
+		expect(sanitizeJournalSubtitle("see https://docs for help")).toBe("see https://docs for help")
+	})
+	test("chrome-extension:// scheme → bracketed (broader-than-http coverage)", () => {
+		expect(sanitizeJournalSubtitle("chrome-extension://abcdef")).toBe("[chrome-extension://abcdef]")
+	})
+	test("aztec:// scheme → bracketed", () => {
+		expect(sanitizeJournalSubtitle("aztec://something")).toBe("[aztec://something]")
+	})
+	test("custom scheme with digits and pluses → bracketed", () => {
+		expect(sanitizeJournalSubtitle("a1b+x://x")).toBe("[a1b+x://x]")
+	})
+
+	// Widened to `scheme:` (no `//` required) per audit-fixes plan P1 + codex
+	// audit feedback. Catches mailto / tel / javascript / data / chrome-extension
+	// + the malformed `http:evil` shape that the original `scheme://` regex
+	// missed. Tradeoff documented below: plain-text values with a leading
+	// `<word>:` (timestamps, versions, CSS pairs) WILL also bracket — accepted
+	// because callers only pass dApp-controlled origin fields, where
+	// noise-bracketing is safer than missing a real schemeful value.
+	test("mailto: → bracketed (widened from scheme:// to scheme:)", () => {
+		expect(sanitizeJournalSubtitle("mailto:abc@example.com")).toBe("[mailto:abc@example.com]")
+	})
+	test("tel: → bracketed", () => {
+		expect(sanitizeJournalSubtitle("tel:+15555550100")).toBe("[tel:+15555550100]")
+	})
+	test("javascript: → bracketed (XSS-shaped value)", () => {
+		expect(sanitizeJournalSubtitle("javascript:alert(1)")).toBe("[javascript:alert(1)]")
+	})
+	test("data: → bracketed (data-URI-shaped value)", () => {
+		expect(sanitizeJournalSubtitle("data:text/plain;base64,aGV5")).toBe("[data:text/plain;base64,aGV5]")
+	})
+	test("malformed http:evil (no //) → bracketed", () => {
+		expect(sanitizeJournalSubtitle("http:evil")).toBe("[http:evil]")
+	})
+	test("chrome-extension:abc (no //) → bracketed", () => {
+		expect(sanitizeJournalSubtitle("chrome-extension:abc")).toBe("[chrome-extension:abc]")
+	})
+
+	// Documented false-positive trade-offs. The widened regex accepts these
+	// (and brackets them). Callers feed dApp-controlled origin fields, where
+	// over-bracketing is benign — these test cases just pin the trade-off so
+	// a future "tighten the regex" PR doesn't accidentally break the
+	// schemeful coverage we intentionally widened to.
+	test("digit-prefixed value (timestamp 12:34) → unchanged (RFC 3986 scheme requires ALPHA first)", () => {
+		expect(sanitizeJournalSubtitle("12:34")).toBe("12:34")
+	})
+	test("(FALSE POSITIVE PIN) word-with-colon 'note:' → bracketed", () => {
+		// `note:` matches the regex (starts with alpha, followed by colon).
+		expect(sanitizeJournalSubtitle("note:")).toBe("[note:]")
+	})
+	test("(FALSE POSITIVE PIN) CSS-like 'color:red' → bracketed", () => {
+		expect(sanitizeJournalSubtitle("color:red")).toBe("[color:red]")
+	})
+
+	// 12:34 starts with a digit, not alpha — RFC 3986 scheme grammar requires
+	// ALPHA first. The pin above verifies it passes through unchanged.
+})
+
+// User-facing labels for error.kind. Whitelist source-of-truth: verified
+// against `wallet-core/jobs/types.ts` documented values + `failedSubtitleFor`
+// switch in this file + reaper.ts emissions + execution/service.ts normalizeError
+// call sites. `stuck_queued` is critical — the reaper emits it on queued-record
+// time-out and pinning it here ensures the raw kind never leaks into the
+// "Reason" row on the journal-detail page (codex post-impl audit H2 + opus C1).
+describe("humanizeErrorKind — JobError.kind → user-facing label", () => {
+	test("network → 'Network'", () => {
+		expect(humanizeErrorKind("network")).toBe("Network")
+	})
+	test("simulation → 'Simulation'", () => {
+		expect(humanizeErrorKind("simulation")).toBe("Simulation")
+	})
+	test("prover → 'Proof generation'", () => {
+		expect(humanizeErrorKind("prover")).toBe("Proof generation")
+	})
+	test("popup_bound → 'Popup closed'", () => {
+		expect(humanizeErrorKind("popup_bound")).toBe("Popup closed")
+	})
+	test("dapp_execute → 'App' (we never use 'dApp' in user-facing copy)", () => {
+		expect(humanizeErrorKind("dapp_execute")).toBe("App")
+	})
+	test("transfer → 'Transfer'", () => {
+		expect(humanizeErrorKind("transfer")).toBe("Transfer")
+	})
+	test("sw_restart_post_prove → 'Browser restart'", () => {
+		expect(humanizeErrorKind("sw_restart_post_prove")).toBe("Browser restart")
+	})
+	test("stale_on_resume → 'Stale on resume'", () => {
+		expect(humanizeErrorKind("stale_on_resume")).toBe("Stale on resume")
+	})
+	test("stuck_proving → 'Stuck proving'", () => {
+		expect(humanizeErrorKind("stuck_proving")).toBe("Stuck proving")
+	})
+	test("(REGRESSION PIN) stuck_queued → 'Stuck queued'", () => {
+		// reaper emits this on queued-record time-out (reaper.ts:192,
+		// reaper.test.ts:102 + :136). Pre-fix it leaked the raw kind into
+		// the UI. Codex post-impl audit H2 + opus C1.
+		expect(humanizeErrorKind("stuck_queued")).toBe("Stuck queued")
+	})
+	test("user_rejected → 'User rejected'", () => {
+		expect(humanizeErrorKind("user_rejected")).toBe("User rejected")
+	})
+	test("unknown → 'Unknown'", () => {
+		expect(humanizeErrorKind("unknown")).toBe("Unknown")
+	})
+	test("any unrecognized kind → 'Error'", () => {
+		expect(humanizeErrorKind("metadata_fetch")).toBe("Error")
+		expect(humanizeErrorKind("totally_new_kind")).toBe("Error")
+		expect(humanizeErrorKind("")).toBe("Error")
+	})
+})
+
+describe("categoricalLabel — B2 failure category + context for journal/[id].vue", () => {
+	function failed(kind: string): OperationRecord {
+		return recordWith({ progress: { stage: "failed" }, error: { kind, message: "", normalizedRaw: null } })
+	}
+
+	test("user_rejected → 'You rejected'", () => {
+		const { label, context } = categoricalLabel(failed("user_rejected"))
+		expect(label).toBe("You rejected")
+		expect(context).toBe("You stopped this transaction.")
+	})
+	test("popup_bound → 'Popup closed early'", () => {
+		expect(categoricalLabel(failed("popup_bound")).label).toBe("Popup closed early")
+	})
+	test("simulation / prover / stuck_proving / stuck_queued → 'Stopped before broadcast'", () => {
+		for (const kind of ["simulation", "prover", "stuck_proving", "stuck_queued"]) {
+			expect(categoricalLabel(failed(kind)).label).toBe("Stopped before broadcast")
+		}
+	})
+	test("sw_restart_post_prove / stale_on_resume → 'Interrupted mid-flight' + check explorer hint", () => {
+		for (const kind of ["sw_restart_post_prove", "stale_on_resume"]) {
+			const { label, context } = categoricalLabel(failed(kind))
+			expect(label).toBe("Interrupted mid-flight")
+			expect(context).toContain("check the explorer")
+		}
+	})
+	test("network → 'Network error'", () => {
+		expect(categoricalLabel(failed("network")).label).toBe("Network error")
+	})
+	test("transfer / dapp_execute → 'Reported by app'", () => {
+		for (const kind of ["transfer", "dapp_execute"]) {
+			expect(categoricalLabel(failed(kind)).label).toBe("Reported by app")
+		}
+	})
+	test("unknown / unrecognized → 'Error'", () => {
+		expect(categoricalLabel(failed("unknown")).label).toBe("Error")
+		expect(categoricalLabel(failed("metadata_fetch")).label).toBe("Error")
+	})
+	test("no error envelope → 'Error' fallback", () => {
+		// op without error.kind defaults to "unknown" → fallback case.
+		const op = recordWith({ progress: { stage: "failed" }, error: null })
+		expect(categoricalLabel(op).label).toBe("Error")
+	})
+
+	test("(SANITIZE-INVARIANCE PIN) categoricalLabel ignores op.subtitle even if dApp injects an evil-shaped string", () => {
+		// The helper must NOT pull strings from op.subtitle. If a future
+		// refactor accidentally wires the context line to op.subtitle, the
+		// previously-sanitized dApp-controlled string would render raw.
+		const op = recordWith({
+			progress: { stage: "failed" },
+			error: { kind: "simulation", message: "", normalizedRaw: null },
+			subtitle: "http://evil.example/danger",
+		})
+		const { label, context } = categoricalLabel(op)
+		expect(label).not.toContain("evil")
+		expect(context).not.toContain("evil")
+		expect(context).not.toContain("http")
 	})
 })

@@ -121,6 +121,139 @@ export function journalTerminalDisplay(op: OperationRecord): JournalTerminalDisp
 	return { state: "failed", subtitle, icon: ICONS.failed, color: "red" }
 }
 
+/**
+ * Render a journal-record `subtitle` (dApp-controlled at session-discover time)
+ * as defensive plain text. A malicious dApp could set its origin/subtitle to
+ * something that LOOKS like an http(s) URL — if we ever rendered it as an
+ * anchor or even just bare text in a context the user reads top-down, it could
+ * mislead. Bracket any URL-shaped value so the UI signals "not a link" at a
+ * glance. Returns null on null/undefined/empty input.
+ *
+ * Pure helper to keep the regression pin testable without mounting Vue.
+ * Consumed by `journal/[id].vue`.
+ */
+export function sanitizeJournalSubtitle(raw: string | undefined | null): string | null {
+	if (!raw) return null
+	// Match any `<scheme>:` prefix (http://, mailto:, tel:, javascript:, data:,
+	// chrome-extension://, aztec://, arbitrary custom schemes). The widened
+	// match (scheme + bare colon, not just scheme://) catches schemeful values
+	// that aren't URL-shaped per RFC 3986 §1.1.2 but still read as actionable
+	// links to a glancing user. False-positives on plain text containing colons
+	// (timestamps `12:34`, versions `v1:`, CSS-like `color:red`) are accepted —
+	// callers only pass dApp-controlled origin fields here, where bracketing
+	// noise is safer than missing a real link-shaped value.
+	// RFC 3986 scheme grammar: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ).
+	if (/^[a-z][a-z0-9+.\-]*:/i.test(raw)) return `[${raw}]`
+	return raw
+}
+
+/**
+ * User-facing label for an error kind. Each documented `JobError.kind`
+ * value maps to a short tag-style label; unknown kinds → `"Error"`.
+ *
+ * The journal-detail page renders this as the "Reason" row — distinct
+ * from `failedSubtitleFor`'s sentence-form subtitle ("Network" vs.
+ * "Network error"). Both surfaces stay consistent with the kind value
+ * the reaper / executor classify against.
+ *
+ * `stuck_queued` IS in the whitelist — the reaper at
+ * `operation-journal/reaper.ts:192` emits it on queued-record time-out.
+ * Without humanization it would leak the raw kind name into the UI.
+ * Codex post-impl audit H2 + opus C1.
+ */
+export function humanizeErrorKind(kind: string): string {
+	switch (kind) {
+		case "network":
+			return "Network"
+		case "simulation":
+			return "Simulation"
+		case "prover":
+			return "Proof generation"
+		case "popup_bound":
+			return "Popup closed"
+		case "dapp_execute":
+			return "App"
+		case "transfer":
+			return "Transfer"
+		case "sw_restart_post_prove":
+			return "Browser restart"
+		case "stale_on_resume":
+			return "Stale on resume"
+		case "stuck_proving":
+			return "Stuck proving"
+		case "stuck_queued":
+			return "Stuck queued"
+		case "user_rejected":
+			return "User rejected"
+		case "unknown":
+			return "Unknown"
+		default:
+			return "Error"
+	}
+}
+
+/**
+ * B2: categorical label + one-line context for a failed/cancelled
+ * journal record. Maps `op.error?.kind` to a user-friendly category
+ * with a brief explanation. Distinguishes pre-broadcast failures
+ * (your wallet caught it before reaching the network) from interrupted-
+ * mid-flight (wallet restarted; tx may still be on-chain) from generic
+ * categories (network errors, app errors).
+ *
+ * Consumes ONLY wallet-controlled fields: `op.error?.kind`,
+ * `op.kind`, `op.progress?.stage`. NEVER reads `op.subtitle` (dApp-
+ * controlled) so the new B1 detail page can render the category
+ * without re-opening the P1 sanitize hole.
+ *
+ * The "Reason" row in journal/[id].vue continues to use
+ * `humanizeErrorKind` for the technical-name surface; this helper is
+ * the categorical chip + context surface.
+ */
+export type CategoricalFailureLabel = {
+	label: string
+	context: string
+}
+
+export function categoricalLabel(op: OperationRecord): CategoricalFailureLabel {
+	// Cancelled-stage ops carry no `error.kind` (the FSM transitions to
+	// cancelled via user action, not a thrown error). Default-arm
+	// "Error" was wrong for cancellation; surface as "Cancelled" instead.
+	if (op.progress?.stage === "cancelled" && !op.error?.kind) {
+		return { label: "Cancelled", context: "This transaction was cancelled." }
+	}
+	const kind = op.error?.kind ?? "unknown"
+	switch (kind) {
+		case "user_rejected":
+			return { label: "You rejected", context: "You stopped this transaction." }
+		case "popup_bound":
+			return { label: "Popup closed early", context: "The popup closed before this transaction could finish." }
+		case "simulation":
+		case "prover":
+		case "stuck_proving":
+		case "stuck_queued":
+			return {
+				label: "Stopped before broadcast",
+				context: "Your wallet caught this before reaching the network. Often balance, fees, or invalid call.",
+			}
+		case "sw_restart_post_prove":
+		case "stale_on_resume":
+			return {
+				label: "Interrupted mid-flight",
+				context: "The wallet restarted before confirming this. Transaction may still be on-chain — check the explorer.",
+			}
+		case "network":
+			return {
+				label: "Network error",
+				context: "Couldn't reach the network. The transaction may not have been submitted.",
+			}
+		case "transfer":
+		case "dapp_execute":
+			return { label: "Reported by app", context: "The connected app reported an error." }
+		default:
+			return { label: "Error", context: "Something went wrong with this transaction." }
+	}
+}
+
 /** Subtitle copy per documented `JobError.kind` + live execution catch-alls. */
 function failedSubtitleFor(kind: string): string {
 	switch (kind) {
@@ -197,7 +330,10 @@ export function buildJournalTerminalCardProps(op: OperationRecord, ctx: JournalT
 	const token = isTransfer && op.tokenId !== undefined ? ctx.tokenById(op.tokenId) : undefined
 	const title = isTransfer ? token?.symbol || "Transfer" : op.title ? humanizeMethodName(op.title) : "Transaction"
 	const activityIcon = isTransfer ? "arrow-narrow-up-right" : "zap"
-	const originLabel = isTransfer ? null : (op.subtitle ?? null)
+	// `op.subtitle` is the dApp-controlled origin/name persisted at session-
+	// discover time. Bracket schemeful values so a malicious dApp can't make
+	// its label visually read as a clickable link on the main feed.
+	const originLabel = isTransfer ? null : sanitizeJournalSubtitle(op.subtitle)
 	// Gate on `=== undefined` because TransferType.Private === 0; a truthy
 	// check would silently drop the Private → Private chip.
 	const transferTypeLabel = isTransfer && op.transferType !== undefined ? formatTransferType(op.transferType) : null

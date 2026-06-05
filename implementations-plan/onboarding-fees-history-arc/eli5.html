@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Onboarding + Fees + History arc — ELI5</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --ink: #1d1b1a;
+    --ink-soft: #58524c;
+    --bg: #faf8f4;
+    --rule: #ddd6cb;
+    --accent: #c64a1f;
+    --code-bg: #efe9dd;
+    --max: 720px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main {
+    max-width: var(--max);
+    margin: 0 auto;
+    padding: 48px 24px 96px;
+  }
+  header {
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 24px;
+    margin-bottom: 32px;
+  }
+  h1 {
+    font: 700 32px/1.2 system-ui, sans-serif;
+    letter-spacing: -0.01em;
+    margin: 0 0 8px;
+  }
+  h1 span.tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 2px 6px;
+    border-radius: 2px;
+    vertical-align: middle;
+    margin-left: 8px;
+  }
+  h2 {
+    font: 700 22px/1.3 system-ui, sans-serif;
+    letter-spacing: -0.01em;
+    margin: 48px 0 8px;
+    padding-top: 24px;
+    border-top: 1px solid var(--rule);
+  }
+  h2.no-rule { border-top: 0; padding-top: 0; }
+  h3 {
+    font: 600 16px/1.4 system-ui, sans-serif;
+    margin: 28px 0 4px;
+  }
+  p { margin: 12px 0; }
+  ul { margin: 12px 0; padding-left: 24px; }
+  li { margin: 6px 0; }
+  .lead { color: var(--ink-soft); font-size: 17px; }
+  .label {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 4px;
+  }
+  .note {
+    background: var(--code-bg);
+    border-left: 2px solid var(--accent);
+    padding: 12px 16px;
+    margin: 16px 0;
+    font-size: 14px;
+    color: var(--ink-soft);
+  }
+  code {
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 2px;
+    font: 13px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  footer {
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-soft);
+    font-size: 13px;
+  }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>Onboarding + Fees + History <span class="tag">ELI5</span></h1>
+  <p class="lead">Four small but visible wallet improvements, shipping as one PR with four commits. The idea: round out the activity feed, fix one annoying label bug, and give new users an honest answer to "how do fees work here?"</p>
+</header>
+
+<h2 class="no-rule">The four pieces, in plain English</h2>
+
+<h3>1. Don't call it "Sponsored unconditionally" while it's still proving</h3>
+<p><span class="label">Phase 1 — bug fix</span></p>
+<p>When you tap a button in a dApp, the wallet bundles the actual thing you wanted (say, "drip me some test tokens") with a fee-payment call ("the faucet pays my fee"). Those are two separate operations stitched into one transaction.</p>
+<p>While the wallet generates the cryptographic proof, the card says <em>"Sponsored unconditionally"</em>. Once the transaction lands on-chain, it flips to <em>"Drip to private"</em> — which is what you actually meant all along.</p>
+<p>The fix: there's a list of "this is fee-payment plumbing, not what the user asked for" methods in the codebase. The settled-card label already skips them. We're routing the in-flight label through the same filter so both surfaces agree.</p>
+<p>Five places in the code build the in-flight label today. After the fix, they all share one helper. One source of truth.</p>
+
+<h3>2. Tell new users what "fee juice" even is</h3>
+<p><span class="label">Phase 2 — onboarding</span></p>
+<p>Aztec has a native asset called <em>fee juice</em>. Like gas on Ethereum — every transaction needs some. There's also a <em>private</em> version: hold your fee juice privately and the fees you pay stay private too.</p>
+<p>The wallet supports a third option: apps can pay your fees for you, or accept other tokens as fee payment. That's worth saying once, upfront, so the fee-settings panel doesn't feel like alien tech the first time you see it.</p>
+<p>We're expanding the onboarding step indicator from 4 cells to 5 — adding a new <strong>Fees</strong> cell between Aztec and Speed. Three short cards in the same brutalist style the wallet already uses. Flow: setup → meet aztec → <strong>fees (new)</strong> → accelerator → done.</p>
+
+<h3>3. Let people open canceled / waiting transactions</h3>
+<p><span class="label">Phase 3 — clickable history</span></p>
+<p>Right now: if a transaction succeeds and lands on-chain, you can tap its history card and see the full details. If you cancelled the transaction, or the proof generation crashed mid-flight, the card just sits there — you can't tap it.</p>
+<p>We're building a small "journal detail" page that opens when you tap one of those. It shows what stage the transaction reached, the dApp that asked for it (if any), the amount you were sending (if it's a transfer), and a one-line reason for the terminal state ("Cancelled", "Couldn't generate proof", "Transaction was interrupted"). Raw error text stays hidden unless you have developer mode on.</p>
+<p>While we're there, we polish the page for transactions that <em>are</em> already openable but haven't mined yet: clearer banner, hide the explorer link until the tx actually exists on-chain, show the estimated fee with a "this might change" note.</p>
+
+<h3>4. Show incoming transfers in history</h3>
+<p><span class="label">Phase 4 — incoming receives</span></p>
+<p>Today the wallet's history only shows things <em>you</em> did. If someone sends you tokens, your balance goes up, but nothing shows up in your activity feed. That's wrong.</p>
+<p>We're adding a new background service that watches for notes (Aztec's private-token unit) arriving on your account from token contracts you've added. Each new arrival becomes a "Received" row in your history, with the token symbol and amount.</p>
+<p>The tricky part is telling apart "someone sent me something" from "I sent something and got a change note back". We compare every newly-arrived note's transaction hash against your own outgoing transactions. If it matches, it's your own activity already — no duplicate row.</p>
+<p>Scope is locked to fungible tokens you've already added to your wallet. NFTs and random unknown-contract notes are out of scope for this PR.</p>
+<p>Two extra defenses come with it. The <em>first</em> note you ever receive from a new token contract requires a one-shot confirmation popup (shows the contract address — guards against fake-USDC scams). And there's a settings toggle to hide incoming transfers entirely — useful if you run the same wallet seed on multiple devices and don't want each device tagging the other's outgoing as &ldquo;received.&rdquo;</p>
+
+<h2>Why one PR, not four</h2>
+<p>Three of the four items touch the same files (the helper that picks a transaction's display name, the history list, the transaction-detail page). Splitting into separate PRs would cause three merge conflicts and force you to track three sets of CI runs. One PR keeps the test coverage in lockstep.</p>
+<p>Commits land in risk-ascending order — easiest to revert first, biggest service last — so a partial revert is still safe.</p>
+
+<h2>Security questions we asked ourselves</h2>
+<ul>
+  <li><strong>Could a malicious dApp hide a real call by naming it "sponsor_unconditionally"?</strong> The card title would skip it, but the consent popup shows the full call list. The user has already approved the payload.</li>
+  <li><strong>Could a fake token mint to you and look real in your history?</strong> Only tokens you've explicitly added show up. Adding a token still requires a popup confirmation.</li>
+  <li><strong>Could the new error-detail page leak internal state?</strong> Raw error messages are hidden unless developer mode is on. Same gate the existing debug panel uses.</li>
+  <li><strong>What if our PXE crashes mid-sync?</strong> The service catches and logs. Existing records stay; nothing fake gets inserted.</li>
+</ul>
+
+<h2>Open questions (post-audit)</h2>
+<ul>
+  <li><s>"Received from &lt;contract&gt;" label</s> — <em>resolved:</em> blank. The icon + symbol identifies the row enough, and a contract address can read like a sender address.</li>
+  <li><s>Pending-tx banner placement</s> — <em>resolved:</em> cut the banner. Reuse the existing pending status icon plus a "Pending settlement" subtitle on the fee row. Consistent across surfaces.</li>
+  <li>Should incoming receives count toward per-token "total transferred" stats? Plan defers — not in this arc.</li>
+  <li>Cross-device same-seed limitation: documented <em>and</em> backed by a settings toggle ("Show incoming transfers", default on). User can hide entirely if they run the same seed on multiple devices.</li>
+  <li><em>New (audit-flagged):</em> Discovery loop architecture. The existing balance-refresh ticker only drains an explicit queue — it doesn't poll. We need a real passive trigger. Plan defaults to a NoteService watch loop; alternatives (PXE block-sync hook; TokenBalanceService extension) tracked for the F2 impl phase.</li>
+  <li><em>New:</em> First-receive friction copy + UX placement. Plan defaults to a popup card mirroring token-import.</li>
+  <li><em>New:</em> Settings toggle wording — "Show incoming transfers" vs. alternatives.</li>
+</ul>
+
+<footer>
+  <p>Plan: <a href="plan.md">plan.md</a> · Audit transcripts: <a href="audit-codex.md">audit-codex.md</a>, <a href="audit-opus.md">audit-opus.md</a> · Per-phase lessons: <a href="lessons/">lessons/</a></p>
+</footer>
+
+</main>
+</body>
+</html>

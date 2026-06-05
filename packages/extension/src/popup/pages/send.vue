@@ -347,26 +347,67 @@ watch(
 	{ deep: true },
 )
 
+// P11 E1 fix: refetch identity-scoped state (tokens, tokenBalances,
+// contacts) whenever the active appStore triple changes. Sequence
+// counter guards against stale-resolve races. Post-impl audit High #2:
+// the activeTokenIdx is global (cacheStore) — when the new token set
+// doesn't contain the old id, reset to tokens[0] so activeToken stays
+// resolvable. Re-run the send/receiver init logic so the form state
+// matches the new active token.
+let identityFetchSeq = 0
+async function refetchIdentityScopedState() {
+	const mySeq = ++identityFetchSeq
+	if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) {
+		if (mySeq === identityFetchSeq) {
+			tokens.value = []
+			tokenBalances.value = []
+			contacts.value = []
+		}
+		return
+	}
+	const [t, tb, c] = await Promise.all([
+		tokenService.getTokens(appStore.profile.id, appStore.network.chainId),
+		tokenBalanceService.getTokenBalances(undefined, appStore.account.address),
+		contactService.getContacts(),
+	])
+	if (mySeq !== identityFetchSeq) return
+	tokens.value = t
+	tokenBalances.value = tb
+	contacts.value = c
+
+	// Reset activeTokenIdx if the prior selection isn't in the new token
+	// set (e.g. profile switch). Without this, `activeToken` computed
+	// returns undefined and downstream send / fee-estimation flows break.
+	if (!t.some((tok) => tok.id === cacheStore.activeTokenIdx)) {
+		cacheStore.activeTokenIdx = t[0]?.id ?? undefined
+	}
+	// Re-validate the form state for the (possibly new) active token.
+	initSendType()
+	initReceiverType()
+}
+
+watch(
+	() => [appStore.profile?.id, appStore.network?.id, appStore.account?.address],
+	() => refetchIdentityScopedState(),
+	{ immediate: false },
+)
+
 onMounted(async () => {
 	console.log(`[send:${sendInstanceId}] mounted`)
-	tokens.value = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
-	tokenBalances.value = await tokenBalanceService.getTokenBalances(undefined, appStore.account.address)
-	contacts.value = await contactService.getContacts()
+	// Route mount fetch through the shared refetch so it inherits the
+	// sequence guard AND the null-triple defense AND the
+	// activeTokenIdx-rebind logic.
+	await refetchIdentityScopedState()
 
 	// Query-param preselect survives the unmount of tokens/[id] (which clears
 	// cacheStore.activeTokenIdx on its onBeforeUnmount). Falls through to
 	// whatever activeTokenIdx may still be set, then to tokens[0].
 	const queryTokenId = route.query.tokenId ? Number(route.query.tokenId) : null
-	if (queryTokenId && tokens.value.some((t) => t.id === queryTokenId)) {
+	if (queryTokenId && tokens.value.some((tok) => tok.id === queryTokenId)) {
 		cacheStore.activeTokenIdx = queryTokenId
+		initSendType()
+		initReceiverType()
 	}
-
-	if (!cacheStore.activeTokenIdx && tokens.value.length) {
-		cacheStore.activeTokenIdx = tokens.value[0].id
-	}
-
-	initSendType()
-	initReceiverType()
 
 	if (cacheStore.preselectedContactToSend) {
 		selectedContact.value = cacheStore.preselectedContactToSend

@@ -63,6 +63,16 @@ export type Methods = {
 	 *  for the tx-construction fast path. */
 	getSyncedBlockHeader(network: NetworkInfo): BlockHeader
 	/**
+	 * Chain-derived UTC seconds timestamp for an L2 block. Returns
+	 * `undefined` when the node can't resolve the block (network error,
+	 * unknown block number, etc.) — caller treats undefined as "fall back
+	 * to wall-clock." Stable across PXE re-syncs; used by activity-feed
+	 * consumers that need chronological order to survive token remove +
+	 * re-add (the records get re-indexed from PXE but `Date.now()` would
+	 * jump forward; this stays correct).
+	 */
+	getBlockTimestamp(network: NetworkInfo, blockNumber: number): number | undefined
+	/**
 	 * Dispose any active runtime for `(profileId, chainId)` and delete its
 	 * IndexedDB at `pxe/${profileId}/${chainId}`. Called by the SW-side
 	 * NetworkService.purgeChain coordinator when a chain is removed.

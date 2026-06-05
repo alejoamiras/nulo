@@ -1,0 +1,25 @@
+Couldn't write `RESPONSE_FILE` or run Vitest in this sandbox: repo writes are blocked and Vitest fails trying to create `/tmp` dirs. Audit below.
+
+Verdict: Reject
+
+## Critical (must fix before merge)
+- F4 is still incomplete for the wallet’s own FeeJuice-with-claim path. `FeeJuiceWithClaimStrategy` prepends `claim_and_end_setup` into `op.actions` via `unshift` at `packages/extension/src/wallet/services/execution/fee/fee-juice-with-claim-strategy.ts:27`, and `getFeeJuiceClaimPayload` defines that injected call at `packages/extension/src/wallet/utils/fee-juice.ts:14-21`. But `FEE_METHODS` in `packages/extension/src/utils/primary-method.ts:13-18` does not include `claim_and_end_setup`. Result: `pickPrimaryMethod` still treats the fee-claim call as user intent. That leaks into `getPrimaryCall`/`getTxTitle`/`getTxCategory`/`getCallCountLabel` in `packages/extension/src/utils/tx-enrichment.ts:80-119`, the awaiting-placeholder clear path in `packages/extension/src/stores/app.store.ts:136-140`, and the detail-page filtered call list in `packages/extension/src/popup/pages/tx/[id].vue:60-75,130-134`. Concrete fallout: FJWC transfers can title as `Claim And End Setup`, lose transfer classification/amount display, show the fee-claim in user call lists, and fail awaiting-tx dedupe because `args[1]` on the claim call is the amount, not the recipient. Fix: add `claim_and_end_setup` to `FEE_METHODS` and pin `[claim_and_end_setup, transfer]` regressions in `primary-method.test.ts`, `tx-enrichment.test.ts`, and `app.store.test.ts` plus the `exec.calls` shape if you support dApp-provided claim payloads.
+
+## High
+- None beyond the critical F4 gap above.
+
+## Medium
+- F1’s changed skip semantics are not actually pinned. `learn.vue` split the handler at `packages/extension/src/onboarding/pages/learn.vue:29-34` and `fees.vue` has its own skip/continue handlers at `packages/extension/src/onboarding/pages/fees.vue:30-35`, but the updated e2e only drives the continue chain at `packages/extension/tests/e2e/onboarding-tab.test.ts:41-51`. The comment at `onboarding-tab.test.ts:41-43` says learn-skip is covered elsewhere; I couldn’t find that test. This is exactly the behavior that was easy to break pre-impl. Fix: add route assertions for `onboarding-learn-skip -> #/onboarding/accelerator` and `onboarding-fees-skip -> #/onboarding/accelerator`.
+
+## Low + Nits
+- `StepIndicator` is acceptable, but only partially semantic. The current step is marked with `aria-current="step"` in `packages/extension/src/onboarding/components/StepIndicator.vue:28-44`, which is good, but the structure is `nav > div` rather than an ordered list, so assistive tech does not get “step X of 5” for free. Not a blocker, but if you touch it again, render an `<ol>`/`li>` or add `aria-posinset`/`aria-setsize`.
+- A couple of comments/test names are stale after the F4 extraction: `OperationPlanner.extractPrimaryMethod` still says “Reads the first call” in `packages/extension/src/wallet/services/execution/operation-planner.ts:15-17,236-239`, and `queued-journal.test.ts` still names the behavior as `args[0].calls[0].name` at `packages/extension/src/wallet/services/wallet-sdk/queued-journal.test.ts:253-257`. That is documentation drift, not runtime risk.
+
+## What looks fine
+- Site coverage: the exact grep you asked for only surfaced the planned 7 F4 touchpoints under `packages/extension/src`, and a broader pass (`calls?.find`, `calls[0]`, etc.) did not uncover another missed primary-method site. The only extra hit was `packages/extension/src/popup/components/modules/tx/tx-detail-helpers.ts:70`, which intentionally looks for a fee method, not a user-primary method.
+- Keeping `pickActionMethod` local to `service.ts` is the right trade-off. Hoisting it would drag `Action`-layer knowledge into the layer-agnostic helper and invert the dependency direction.
+- The `getPrimaryCall<T extends { method: string }>` widening is fine. It preserves caller shape instead of erasing fields like `transfers`; I did not find a downstream consumer that becomes less type-safe because of it.
+- Preserving the all-fee-only fallback as a BUG PIN is the right call for this PR. The behavior is ugly, but changing it here would mix extraction with product semantics.
+- F1 consumer coverage is clean. I found `StepIndicator` used only in `create.vue`, `import.vue`, `learn.vue`, `fees.vue`, `accelerator.vue`, and `done.vue`, plus generated `components.d.ts`; no hidden runtime consumer was missed.
+- The `learn.vue` split itself is correct, and I found no telemetry/analytics attached to the old shared handler.
+- After the missing `claim_and_end_setup` case is pinned, I would not require a new F4 runtime e2e to merge. The abstraction is otherwise structurally sound; the real miss is an incomplete fee-method allowlist, not lack of a full-stack harness.

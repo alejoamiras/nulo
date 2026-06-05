@@ -74,6 +74,7 @@ declare module 'vue' {
     Tooltip: typeof import('./../components/ui/Tooltip.vue')['default']
     TransactionAwaitingCard: typeof import('./../components/composite/activity/TransactionAwaitingCard.vue')['default']
     TransactionCardLayout: typeof import('./../components/composite/activity/TransactionCardLayout.vue')['default']
+    TransactionIncomingCard: typeof import('./../components/composite/activity/TransactionIncomingCard.vue')['default']
     TransactionTerminalCard: typeof import('./../components/composite/activity/TransactionTerminalCard.vue')['default']
     Update: typeof import('./../components/update.vue')['default']
   }

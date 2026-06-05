@@ -51,6 +51,7 @@ import type { JobStage } from "@nulo/wallet-core/jobs"
 defineProps({
 	title: { type: String, required: true },
 	icon: { type: String, required: true },
+	iconRotate: { type: [String, Number], default: 0 },
 	amount: { type: String, default: null },
 	amountSymbol: { type: String, default: null },
 	testId: { type: String, default: undefined },
@@ -107,7 +108,7 @@ function hasActionsContent() {
 	>
 		<Flex align="center" gap="16" :class="$style.left_content">
 			<Flex align="center" justify="center" :class="$style.activity_icon">
-				<Icon :name="icon" size="18" color="secondary" />
+				<Icon :name="icon" :rotate="iconRotate" size="18" color="secondary" />
 				<div v-if="$slots.badge" :class="$style.badge">
 					<slot name="badge" />
 				</div>

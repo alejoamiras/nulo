@@ -128,21 +128,22 @@ import { ExecutionCoordinator } from "./execution-coordinator"
 import { type Aliased, ContractInitializationStatus } from "@aztec/aztec.js/wallet"
 import { rehydrateOptimizablePrefix, runFastPath } from "./fast-path"
 import type { PackedPrivateEvent } from "@aztec/pxe/client/bundle"
+import { pickPrimaryMethod } from "@/utils/primary-method"
 
 export * from "./spec"
 
-/** Best-effort extraction of a human-readable method name from a tx's
- *  Action list. Used by `dapp_execute` journal records so the activity
- *  card's title shows the called function rather than a generic
- *  "Transaction" label. Encoded-call actions carry their decoded `name`
- *  optionally; raw call actions always carry `method`. */
-function primaryActionMethod(actions: readonly Action[] | undefined): string | undefined {
-	if (!Array.isArray(actions)) return undefined
-	for (const action of actions) {
-		if (action.kind === "call" && action.method) return action.method
-		if (action.kind === "encoded_call" && action.name) return action.name
+/** Project an `Action[]` (a discriminated union with non-call variants like
+ *  `AddCapsuleAction`) into the carrier shape `pickPrimaryMethod` expects.
+ *  Inlined here rather than in `primary-method.ts` because that helper is
+ *  layer-agnostic — importing `Action` from the execution spec would invert
+ *  the dependency direction. */
+function pickActionMethod(actions: readonly Action[] | undefined): string | undefined {
+	const carriers: Array<{ method?: string; name?: string }> = []
+	for (const action of actions ?? []) {
+		if (action.kind === "call") carriers.push({ method: action.method })
+		else if (action.kind === "encoded_call") carriers.push({ name: action.name ?? action.selector })
 	}
-	return undefined
+	return pickPrimaryMethod(carriers)
 }
 
 /** Snapshot of the SW state at estimate time. Used by `executeTransfer` to
@@ -1146,7 +1147,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// `TransactionCardLayout.vue` relies on this record carrying the
 		// dApp identity in `subtitle` so the in-flight chip matches the
 		// settled chip rendered from the transaction itself.
-		const primaryMethod = primaryActionMethod(op.actions)
+		const primaryMethod = pickActionMethod(op.actions)
 		const journalId = await this.beginDappExecuteJournal(
 			op.networkId,
 			op.accountAddress,
@@ -1225,7 +1226,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		try {
 			const profile = await this.profileService.getActiveProfile()
 			if (!profile) return undefined
-			const primaryMethod = Array.isArray(calls) ? calls.find((c) => c?.method)?.method : undefined
+			const primaryMethod = pickPrimaryMethod(calls)
 			const op = await this.operationJournal.createOperation({
 				kind: "dapp_execute",
 				origin: "dapp",

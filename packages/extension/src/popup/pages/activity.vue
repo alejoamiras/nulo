@@ -16,9 +16,11 @@ import TransactionsList from "../components/modules/activity/TransactionsList.vu
 import { TransactionServiceClient } from "@/wallet/services/transaction/client"
 import { OperationJournalServiceClient } from "@/wallet/services/operation-journal/client"
 import { TokenServiceClient } from "@/wallet/services/token/client"
+import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
+import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Utils */
-import { ACTIVITY_FEED_KINDS } from "@/utils/journal-state"
+import { buildActivityRows } from "@/utils/activity-rows"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -40,6 +42,55 @@ const tokensById = computed(() => {
 	for (const t of tokens.value) map[t.id] = t
 	return map
 })
+
+/** Incoming-receive surface — third source for the activity row merge.
+ *  Filtered by trust state at the service layer; only visible (trusted)
+ *  records arrive via getIncomingTransfers. */
+const incomingTransferService = new IncomingTransferServiceClient()
+const incomingTransfers = ref([])
+
+async function loadIncomingTransfers() {
+	if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) return
+	incomingTransfers.value = await incomingTransferService.getIncomingTransfers(
+		appStore.profile.id,
+		appStore.network.id,
+		appStore.account.address,
+	)
+}
+
+function onIncomingTransferAdded(inc) {
+	const idx = incomingTransfers.value.findIndex((x) => x.siloedNullifier === inc.siloedNullifier)
+	if (idx === -1) incomingTransfers.value = [inc, ...incomingTransfers.value]
+	else incomingTransfers.value[idx] = inc
+}
+function onIncomingTransferUpdated(inc) {
+	const idx = incomingTransfers.value.findIndex((x) => x.siloedNullifier === inc.siloedNullifier)
+	if (idx !== -1) incomingTransfers.value[idx] = inc
+}
+function onIncomingTransferDeleted(inc) {
+	incomingTransfers.value = incomingTransfers.value.filter((x) => x.siloedNullifier !== inc.siloedNullifier)
+}
+
+incomingTransferService.onIncomingTransferAdded.add(onIncomingTransferAdded)
+incomingTransferService.onIncomingTransferUpdated.add(onIncomingTransferUpdated)
+incomingTransferService.onIncomingTransferDeleted.add(onIncomingTransferDeleted)
+incomingTransferService.onConnected.add(loadIncomingTransfers)
+
+// React to the visibility settings toggle while the page is mounted.
+// Without this, flipping the toggle off would leave already-loaded
+// incoming rows on screen until the next mount (codex post-impl audit
+// critical). Reload routes through getIncomingTransfers which returns []
+// when the toggle is off, clearing the local array atomically.
+// ServiceClient doesn't auto-connect on listener registration — we
+// explicitly connect on mount so onUpdate fires (codex post-impl
+// followup high — without this, the subscriber is inert).
+const configService = new ConfigServiceClient()
+function onConfigUpdate(prop) {
+	if (prop.key === "incomingTransfersVisible") {
+		loadIncomingTransfers()
+	}
+}
+configService.onUpdate.add(onConfigUpdate)
 
 /** Journal terminal records (Phase 2 follow-up).
  *  Loaded on mount + refreshed on every journal event so the list reacts to
@@ -74,28 +125,19 @@ journalService.onOperationUpdated.add(onJournalUpdated)
 journalService.onOperationDeleted.add(onJournalDeleted)
 journalService.onConnected.add(loadTerminalJournalOps)
 
-/** Discriminated row model — see TransactionsList for shape. Merges chain
- *  txs with terminal journal records, filters succeeded-journal (those
- *  already surface as the corresponding chain tx), filters by active
- *  account, sorts newest-first by timestamp. */
-const activityRows = computed(() => {
-	const rows = []
-	for (const tx of appStore.transactions) {
-		rows.push({ type: "tx", key: `tx:${tx.hash}`, sortKey: tx.updatedAt, tx })
-	}
-	for (const op of terminalJournalOps.value) {
-		// Skip succeeded — they have a chain TransactionService entry already.
-		if (op.progress?.stage === "succeeded") continue
-		// Only kinds classified as activity-feed render here (token_import etc.
-		// have other home surfaces). Centralized in utils/journal-state.ts.
-		if (!ACTIVITY_FEED_KINDS.has(op.kind)) continue
-		// Account scoping: don't surface a different account's terminal records.
-		if (op.accountAddress !== appStore.account?.address) continue
-		if (op.terminalAt === null) continue
-		rows.push({ type: "journal", key: `journal:${op.id}`, sortKey: op.terminalAt, op })
-	}
-	return rows.sort((a, b) => b.sortKey - a.sortKey)
-})
+/** Discriminated row model — see TransactionsList for shape. Three sources
+ *  merge into one date-sorted feed: chain txs, terminal journal records
+ *  (cancelled / interrupted / failed-pre-broadcast), and incoming-receive
+ *  records. Merge logic lives in utils/activity-rows.ts so both this page
+ *  and the home Recent Activity widget agree on filter + sort semantics. */
+const activityRows = computed(() =>
+	buildActivityRows({
+		transactions: appStore.transactions,
+		terminalJournalOps: terminalJournalOps.value,
+		incomingTransfers: incomingTransfers.value,
+		accountAddress: appStore.account?.address,
+	}),
+)
 
 /** Hero visibility → compact sticky title fade */
 const heroRef = useTemplateRef("heroRef")
@@ -120,12 +162,23 @@ onMounted(async () => {
 	}
 	await loadTerminalJournalOps()
 	await loadTokens()
+	await loadIncomingTransfers()
+	// Trigger an explicit ConfigService connect so the onUpdate listener
+	// receives runtime toggle changes (ServiceClient registers but doesn't
+	// auto-connect).
+	try {
+		await configService.connect()
+	} catch {
+		// Non-fatal; reload-on-toggle just won't fire until next mount.
+	}
 })
 
 onBeforeUnmount(() => {
 	transactionService.disconnect()
 	tokenService.disconnect()
 	journalService.disconnect()
+	incomingTransferService.disconnect()
+	configService.disconnect()
 	heroObserver?.disconnect()
 })
 </script>

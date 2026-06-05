@@ -21,6 +21,7 @@
 import { DateTime } from "luxon"
 import TransactionCard from "./TransactionCard.vue"
 import TransactionTerminalCard from "@/components/composite/activity/TransactionTerminalCard.vue"
+import TransactionIncomingCard from "@/components/composite/activity/TransactionIncomingCard.vue"
 import { buildJournalTerminalCardProps } from "@/utils/journal-state"
 
 const router = useRouter()
@@ -48,10 +49,35 @@ const groupedRows = computed(() => {
 	return Array.from(groups, ([date, rows]) => ({ date, rows }))
 })
 
-const handleSelectTx = (row) => {
-	// Only "tx" rows are navigable; journal terminal rows have no detail page yet.
-	if (row.type !== "tx") return
-	router.push(`/popup/tx/${row.tx.hash}`)
+const handleSelectRow = (row) => {
+	// Three detail surfaces:
+	//   tx/:hash      — rows backed by an on-chain tx
+	//   journal/:id   — terminal journal records (no chain tx exists)
+	//   tokens/:id    — incoming-receive rows route to the token-detail
+	//                   page rather than a per-receive detail (cleaner UX
+	//                   given there's no fee / block-explorer / per-row
+	//                   debug info to surface).
+	if (row.type === "tx") {
+		router.push(`/popup/tx/${row.tx.hash}`)
+		return
+	}
+	if (row.type === "journal") {
+		router.push(`/popup/journal/${row.op.id}`)
+		return
+	}
+	if (row.type === "incoming" && row.inc.tokenId !== undefined) {
+		router.push(`/popup/tokens/${row.inc.tokenId}`)
+	}
+}
+
+function incomingCardProps(inc) {
+	const token = props.tokensById[inc.tokenId]
+	return {
+		tokenSymbol: token?.symbol || "Token",
+		amountRaw: inc.amountRaw,
+		tokenDecimals: token?.decimals || 0,
+		txHash: inc.txHash,
+	}
 }
 
 /** Map a journal record row → TransactionTerminalCard props via the shared
@@ -73,8 +99,17 @@ function terminalCardProps(op) {
 
 			<!-- Rows for this date — branch on type. -->
 			<template v-for="row in group.rows" :key="row.key">
-				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectTx(row)" />
-				<TransactionTerminalCard v-else-if="terminalCardProps(row.op)" v-bind="terminalCardProps(row.op)" />
+				<TransactionCard v-if="row.type === 'tx'" :tx="row.tx" @click="handleSelectRow(row)" />
+				<TransactionIncomingCard
+					v-else-if="row.type === 'incoming'"
+					v-bind="incomingCardProps(row.inc)"
+					@click="handleSelectRow(row)"
+				/>
+				<TransactionTerminalCard
+					v-else-if="row.type === 'journal' && terminalCardProps(row.op)"
+					v-bind="terminalCardProps(row.op)"
+					@click="handleSelectRow(row)"
+				/>
 			</template>
 		</Flex>
 	</Flex>

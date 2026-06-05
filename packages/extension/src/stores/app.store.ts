@@ -7,6 +7,7 @@ import { NodeStatus } from "@/wallet/services/network/client"
 import type { ProfileInfo } from "@/wallet/services/profile/client"
 import type { Tx } from "@/wallet/services/transaction/spec"
 import type { BlockExplorerType } from "@/wallet/constants/explorers"
+import { getPrimaryCall } from "@/utils/tx-enrichment"
 
 import { useSyncedRef } from "@/composables/syncedRef.js"
 
@@ -127,7 +128,12 @@ export const useAppStore = defineStore("app", () => {
 	const transactions = ref<Tx[]>([])
 	const onTxAdded = async (tx: Tx) => {
 		transactions.value.unshift(tx)
-		const call = tx.calls[0]
+		// Use the shared primary-call picker so FEE_METHODS (sponsor_unconditionally
+		// etc.) get filtered out before destination resolution. Without this, a
+		// dApp + FPC tx whose calls[0] is the fee call would compare the FPC's
+		// address against the awaiting placeholder's intended destination — the
+		// awaiting card would never clear.
+		const call = getPrimaryCall(tx.calls)
 		const destination = (call?.transfers?.length ? call?.transfers[0].to : (call?.args?.[1] as string | undefined)) ?? ""
 		const awaitingTxIdx = awaitingTransactions.value.findIndex(
 			(t) => t.account === tx.account && t.contract === call?.contract && t.destination === destination,
