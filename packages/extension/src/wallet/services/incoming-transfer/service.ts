@@ -200,14 +200,18 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		await this.hydrateSchedulers()
 	}
 
-	private onAccountDeleted = async (account: { chainId: number; address: string }): Promise<void> => {
+	private onAccountDeleted = async (account: { profileId: string; chainId: number; address: string }): Promise<void> => {
 		// Targeted tear-down: stop polling for every (network, deletedAccount)
 		// scheduler key. Without this, the interval keeps PXE-querying for an
 		// account the user removed — wasted calls and a privacy footgun.
 		// Wipes records belonging to the deleted account per-contract.
 		// Trust rows are contract-scoped (not account-scoped) → survive.
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) return
+		//
+		// Codex post-impl audit High #2: use `account.profileId` (NOT
+		// `getActiveProfile()`). The chain-purge + profile-delete paths
+		// fire onAccountDeleted for inactive profiles; using the active
+		// profile id would wipe rows from the wrong profile.
+		const activeProfile = await this.profileService.getActiveProfile()
 		let networks: Network[]
 		try {
 			networks = await this.networkService.getNetworks(account.chainId)
@@ -218,14 +222,22 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 		await this.withServiceLock(async () => {
 			for (const network of networks) {
-				const key = this.schedulerKey(network.id, account.address)
-				const interval = this.schedulers.get(key)
-				if (interval) clearInterval(interval)
-				this.schedulers.delete(key)
-				this.watchedContracts.delete(key)
+				// Scheduler key is `(networkId, address)` — no profileId. Only
+				// touch the scheduler maps when the deleted account belongs
+				// to the active profile (otherwise we'd kill the active
+				// profile's scheduler for a same-address inactive account).
+				if (activeProfile && account.profileId === activeProfile.id) {
+					const key = this.schedulerKey(network.id, account.address)
+					const interval = this.schedulers.get(key)
+					if (interval) clearInterval(interval)
+					this.schedulers.delete(key)
+					this.watchedContracts.delete(key)
+				}
 
-				// Wipe records for the deleted account on this network.
-				const records = await this.repo.listForAccount(profile.id, network.id, account.address)
+				// Wipe records belonging to THIS account on THIS network.
+				// Always uses account.profileId — chain purge / profile delete
+				// can fire this handler for inactive profiles.
+				const records = await this.repo.listForAccount(account.profileId, network.id, account.address)
 				for (const record of records) {
 					await this.repo.deleteRecord(record.siloedNullifier)
 					this.emit("onIncomingTransferDeleted", record)
@@ -336,10 +348,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			await this.repo.clearProfile(profileId)
 			// Lock held across the wipe AND scheduler rebuild so a queued poll
 			// can't fire between the two and repopulate state we just cleared
-			// (codex R2 H1).
+			// (codex R2 H1). hydrateSchedulers bumps serviceEpoch internally
+			// so any in-flight scan whose snapshot predates this wipe bails.
 			await this.hydrateSchedulers()
-			// Invalidate any in-flight scans whose PXE snapshot predates this wipe.
-			this.bumpServiceEpoch()
 		})
 	}
 
@@ -348,7 +359,6 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		await this.withServiceLock(async () => {
 			await this.repo.clearChain(profileId, networkId)
 			await this.hydrateSchedulers()
-			this.bumpServiceEpoch()
 		})
 	}
 
@@ -368,11 +378,17 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	}
 
 	/** Rebuild the scheduler set from current tokens + active accounts.
-	 *  Lifecycle-cancel safety: callers wrapping hydrateSchedulers (e.g.,
-	 *  clearProfile/clearChain in Phase 6) bump `serviceEpoch` so any
-	 *  in-flight scan whose snapshot predates the rebuild will bail.
+	 *  Bumps `serviceEpoch` because the rebuild changes the schedulable
+	 *  contracts surface — any in-flight scan that captured its epoch
+	 *  before this rebuild MUST bail (it may be scanning under a profile
+	 *  / network / contract set that no longer applies). Codex post-impl
+	 *  audit High #1: `onActiveProfileChanged` calls hydrateSchedulers
+	 *  without other lifecycle hooks; placing the bump inside the rebuild
+	 *  covers EVERY hydrate caller (init, profile-change, account-add,
+	 *  clearProfile, clearChain).
 	 */
 	private async hydrateSchedulers(): Promise<void> {
+		this.bumpServiceEpoch()
 		// Clear existing schedulers; we re-register below.
 		for (const id of this.schedulers.values()) clearInterval(id)
 		this.schedulers.clear()

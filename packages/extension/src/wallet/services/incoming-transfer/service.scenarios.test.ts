@@ -1275,7 +1275,7 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 		expect(upsertSpy).not.toHaveBeenCalled()
 	})
 
-	test("(High #1 in-flight) generation counter bails a scan whose setup completed BEFORE delete", async () => {
+	test("(legacy pin, post-lock) scan whose epoch snapshot predates a delete bails before mutating", async () => {
 		// Hold getNotesRaw in flight: capture the resolver, return a pending
 		// promise. The scan calls genKey-snapshot BEFORE this await, so
 		// startGen=0 (no bumps yet). While the scan is parked, fire
@@ -1330,7 +1330,7 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 	// while scan holds it across the parked PXE call, the delete handler is
 	// queued. After scan completes its CS (including the backfill upsert),
 	// the lock releases and the delete handler runs. End-state-correct.
-	// Lock-based equivalent: LR12 in service.lock-races.test.ts (Phase 7).
+	// Lock-based equivalent: LR12 in the lock-races describe block below.
 
 	test("(Audit-3 Medium) setTrustAllow returns false when token is no longer registered", async () => {
 		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
@@ -1622,7 +1622,7 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 	// longer exists — the global service Lock (implementations-plan/
 	// incoming-trust-state-machine-refactor/) prevents the race those
 	// reverts recovered from. Race-ordering pins for the new lock-based
-	// behavior live in service.lock-races.test.ts (Phase 7).
+	// behavior live in the lock-races describe block below.
 
 	test("(Audit-5 High) setTrustAllow skips per-record upsert when record was deleted mid-loop", async () => {
 		// Race: setTrustAllow snapshotted records via listByContract, but
@@ -1790,10 +1790,12 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 		})
 		const upsertSpy = vi.spyOn((service as never as { repo: { upsertRecord: () => Promise<void> } }).repo, "upsertRecord")
 
-		// Start scan; parks on getNotesRaw (BEFORE epochAtStart capture? — no,
-		// epoch is captured AFTER getNotesRaw in the new design, but BEFORE
-		// the per-note CS. So a clearChain firing while scan is parked on
-		// getNotesRaw will bump the epoch BEFORE scan's per-note CS check.)
+		// Start scan; it captures `epochAtStart = this.serviceEpoch` BEFORE
+		// any await (including getNotesRaw), then parks on getNotesRaw. A
+		// clearChain firing during the park acquires the lock, bumps the
+		// epoch via hydrateSchedulers, and releases. When scan resumes and
+		// reaches its per-note CS, `this.serviceEpoch !== epochAtStart` →
+		// bail before persisting.
 		const scanPromise = scan(service)
 		await flushPromises()
 		expect(resolveNotes).not.toBeNull()
@@ -1812,6 +1814,55 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 
 		// Storage is empty + no upserts happened.
 		expect(records.size).toBe(0)
+		expect(upsertSpy).not.toHaveBeenCalled()
+	})
+
+	test("(LR13 profile switch invalidates in-flight scan) → no records persisted post-switch", async () => {
+		// Codex post-impl audit High #1: an A→B profile switch must bump
+		// serviceEpoch so a scan for profile A parked on getNotesRaw can't
+		// resume and emit Added events for A under B's identity. The fix
+		// moves bumpServiceEpoch() into hydrateSchedulers() so every caller
+		// (including onActiveProfileChanged) invalidates in-flight scans.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const profileStub = makeProfileStub({ id: "p1" })
+		let resolveNotes: ((value: unknown[]) => void) | null = null
+		const noteSvc = makeNoteStub({}, { 7: 1_700_000_007 })
+		noteSvc.getNotesRaw = vi.fn().mockImplementation(() => {
+			return new Promise<unknown[]>((resolve) => {
+				resolveNotes = resolve
+			})
+		})
+		const { service } = await bootService({
+			profile: profileStub,
+			network: network(),
+			account: accountStub,
+			token: tokenStub,
+			note: noteSvc,
+		})
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		const upsertSpy = vi.spyOn((service as never as { repo: { upsertRecord: () => Promise<void> } }).repo, "upsertRecord")
+
+		// Start scan; parks on getNotesRaw.
+		const scanPromise = scan(service)
+		await flushPromises()
+		expect(resolveNotes).not.toBeNull()
+
+		// Profile switch fires → onActiveProfileChanged → hydrateSchedulers
+		// → bumpServiceEpoch. The in-flight scan's epochAtStart is now stale.
+		profileStub.onActiveProfileChanged.invoke()
+		await flushPromises()
+
+		// Release notes. Scan's per-note CS observes epoch mismatch and bails.
+		if (resolveNotes !== null) (resolveNotes as (value: unknown[]) => void)([note({ l2BlockNumber: 7 })])
+		await scanPromise
+
 		expect(upsertSpy).not.toHaveBeenCalled()
 	})
 
