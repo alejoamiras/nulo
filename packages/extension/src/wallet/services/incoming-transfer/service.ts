@@ -332,14 +332,24 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 	public async clearProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
-		await this.repo.clearProfile(profileId)
-		await this.hydrateSchedulers()
+		await this.withServiceLock(async () => {
+			await this.repo.clearProfile(profileId)
+			// Lock held across the wipe AND scheduler rebuild so a queued poll
+			// can't fire between the two and repopulate state we just cleared
+			// (codex R2 H1).
+			await this.hydrateSchedulers()
+			// Invalidate any in-flight scans whose PXE snapshot predates this wipe.
+			this.bumpServiceEpoch()
+		})
 	}
 
 	public async clearChain(profileId: string, networkId: string): Promise<void> {
 		await this.ensureInitialized()
-		await this.repo.clearChain(profileId, networkId)
-		await this.hydrateSchedulers()
+		await this.withServiceLock(async () => {
+			await this.repo.clearChain(profileId, networkId)
+			await this.hydrateSchedulers()
+			this.bumpServiceEpoch()
+		})
 	}
 
 	// --- internal: scheduler ---
