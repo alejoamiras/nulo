@@ -216,6 +216,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		// Targeted tear-down: stop polling for every (network, deletedAccount)
 		// scheduler key. Without this, the interval keeps PXE-querying for an
 		// account the user removed — wasted calls and a privacy footgun.
+		// Wipes records belonging to the deleted account per-contract.
+		// Trust rows are contract-scoped (not account-scoped) → survive.
+		const profile = await this.profileService.getActiveProfile()
+		if (!profile) return
 		let networks: Network[]
 		try {
 			networks = await this.networkService.getNetworks(account.chainId)
@@ -223,13 +227,25 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			this.logWarn(`onAccountDeleted: failed to resolve networks: ${getErrorMessage(error)}`)
 			return
 		}
-		for (const network of networks) {
-			const key = this.schedulerKey(network.id, account.address)
-			const interval = this.schedulers.get(key)
-			if (interval) clearInterval(interval)
-			this.schedulers.delete(key)
-			this.watchedContracts.delete(key)
-		}
+
+		await this.withServiceLock(async () => {
+			for (const network of networks) {
+				const key = this.schedulerKey(network.id, account.address)
+				const interval = this.schedulers.get(key)
+				if (interval) clearInterval(interval)
+				this.schedulers.delete(key)
+				this.watchedContracts.delete(key)
+
+				// Wipe records for the deleted account on this network.
+				const records = await this.repo.listForAccount(profile.id, network.id, account.address)
+				for (const record of records) {
+					await this.repo.deleteRecord(record.siloedNullifier)
+					this.emit("onIncomingTransferDeleted", record)
+				}
+			}
+			// Invalidate any in-flight scan whose PXE snapshot predates this wipe.
+			this.bumpServiceEpoch()
+		})
 	}
 
 	// --- public surface ---
