@@ -48,6 +48,19 @@ async function makeSucceeded(service: OperationJournalService, input: NewOperati
 	return rec.id
 }
 
+async function makeFailed(service: OperationJournalService, input: NewOperationInput): Promise<string> {
+	const rec = await service.createOperation(input)
+	await service.transitionOperation(rec.id, { stage: "simulating" })
+	await service.transitionOperation(rec.id, { stage: "failed" }, { kind: "simulation", message: "boom", normalizedRaw: null })
+	return rec.id
+}
+
+async function makeCancelled(service: OperationJournalService, input: NewOperationInput): Promise<string> {
+	const rec = await service.createOperation(input)
+	await service.transitionOperation(rec.id, { stage: "cancelled" })
+	return rec.id
+}
+
 describe("JournalGC.sweep", () => {
 	let api: FakeBrowserApi
 	let service: OperationJournalService
@@ -124,6 +137,52 @@ describe("JournalGC.sweep", () => {
 		const bCount = surviving.filter((r) => r.accountAddress === "0xB").length
 		expect(aCount).toBe(3)
 		expect(bCount).toBe(2)
+	})
+
+	test("failed records are preserved past the cap (QA feedback 2026-06-05)", async () => {
+		// Failed records are pure journal artifacts — no on-chain truth
+		// elsewhere. Losing them is data loss. The new policy: only
+		// `succeeded` records count toward eviction candidates.
+		for (let i = 0; i < 5; i++) await makeFailed(service, TRANSFER)
+		const gc = new JournalGC(service, api.alarms, logger, { capPerScope: 2 })
+
+		await gc.sweep()
+
+		const remaining = await service.getOperations({ isTerminal: true })
+		// All 5 survive — cap doesn't apply to failed records.
+		expect(remaining).toHaveLength(5)
+		expect(remaining.every((r) => r.progress.stage === "failed")).toBe(true)
+	})
+
+	test("cancelled records are preserved past the cap (QA feedback 2026-06-05)", async () => {
+		for (let i = 0; i < 5; i++) await makeCancelled(service, TRANSFER)
+		const gc = new JournalGC(service, api.alarms, logger, { capPerScope: 2 })
+
+		await gc.sweep()
+
+		const remaining = await service.getOperations({ isTerminal: true })
+		expect(remaining).toHaveLength(5)
+		expect(remaining.every((r) => r.progress.stage === "cancelled")).toBe(true)
+	})
+
+	test("mixed scope: only succeeded records are evicted; failed/cancelled retained", async () => {
+		// 4 succeeded (over cap), 2 failed, 2 cancelled. Cap = 2.
+		// Expected: 2 succeeded survive + 2 failed + 2 cancelled = 6.
+		for (let i = 0; i < 4; i++) await makeSucceeded(service, TRANSFER)
+		for (let i = 0; i < 2; i++) await makeFailed(service, TRANSFER)
+		for (let i = 0; i < 2; i++) await makeCancelled(service, TRANSFER)
+		const gc = new JournalGC(service, api.alarms, logger, { capPerScope: 2 })
+
+		await gc.sweep()
+
+		const remaining = await service.getOperations({ isTerminal: true })
+		const byStage = remaining.reduce<Record<string, number>>((acc, r) => {
+			acc[r.progress.stage] = (acc[r.progress.stage] ?? 0) + 1
+			return acc
+		}, {})
+		expect(byStage.succeeded).toBe(2)
+		expect(byStage.failed).toBe(2)
+		expect(byStage.cancelled).toBe(2)
 	})
 
 	test("alarm tick fires sweep; stop() removes alarm + listener", async () => {

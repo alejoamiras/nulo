@@ -128,6 +128,25 @@ const errorNormalizedRaw = computed(() => op.value?.error?.normalizedRaw ?? null
 // op.error?.kind + op.kind + op.progress.stage. Never reads op.subtitle.
 const category = computed(() => (op.value ? categoricalLabel(op.value) : null))
 
+// State row value is title-case for visual parity with the other rows
+// (which show user-friendly capitalized strings, not raw tokens).
+const stateLabel = computed(() => {
+	if (!display.value?.state) return null
+	const s = display.value.state
+	return s.charAt(0).toUpperCase() + s.slice(1)
+})
+
+// Hide the Outcome row when its label duplicates the State row (e.g.
+// generic cancelled: Outcome "Cancelled" + State "Cancelled"). When
+// they differ (e.g. user_rejected → Outcome "You rejected", State
+// "Cancelled"), both rows surface distinct information and we keep
+// the Outcome row.
+const showOutcome = computed(() => {
+	if (!category.value) return false
+	if (category.value.label === "Error") return false
+	return category.value.label.toLowerCase() !== display.value?.state
+})
+
 const createdAtLabel = computed(() => {
 	if (!op.value?.createdAt) return null
 	return DateTime.fromMillis(op.value.createdAt).toFormat("MMM dd, yyyy 'at' HH:mm")
@@ -231,9 +250,9 @@ onBeforeUnmount(() => {
 					<span :class="$style.detail_value_mono" data-testid="journal-detail-recipient">{{ recipientLabel }}</span>
 				</Flex>
 
-				<Flex v-if="category && category.label !== 'Error'" wide justify="between" align="center">
+				<Flex v-if="showOutcome" wide justify="between" align="center">
 					<span :class="$style.detail_key">Outcome</span>
-					<span :class="$style.detail_value_mono" data-testid="journal-detail-category">{{ category.label }}</span>
+					<span :class="$style.detail_value_mono" data-testid="journal-detail-category">{{ category?.label }}</span>
 				</Flex>
 
 				<Flex v-if="createdAtLabel" wide justify="between" align="center">
@@ -248,7 +267,7 @@ onBeforeUnmount(() => {
 
 				<Flex wide justify="between" align="center">
 					<span :class="$style.detail_key">State</span>
-					<span :class="$style.detail_value_mono" data-testid="journal-detail-state">{{ display.state }}</span>
+					<span :class="$style.detail_value_mono" data-testid="journal-detail-state">{{ stateLabel }}</span>
 				</Flex>
 			</Flex>
 

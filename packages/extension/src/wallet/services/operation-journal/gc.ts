@@ -14,6 +14,16 @@
  * reaper handles non-terminal stuck records; the two paths never touch the
  * same record set.
  *
+ * **Eviction policy** (QA feedback 2026-06-05): only `succeeded` records
+ * are evictable. Failed and cancelled records have NO on-chain truth
+ * elsewhere — they exist only in this journal, so losing them is real
+ * data loss for the user. Succeeded records correspond to confirmed
+ * on-chain transactions; their history is re-derivable from PXE + the
+ * tx hash, so capping them keeps storage bounded without losing
+ * irretrievable state. Failed/cancelled records still count toward the
+ * group when grouping by scope, but are skipped during the eviction-
+ * candidate selection.
+ *
  * `accountAddress`-less terminal records (a failed token-import before the
  * account scope was set, for instance) cluster under a synthetic
  * `(profileId, null)` bucket with the same cap.
@@ -116,10 +126,13 @@ export class JournalGC {
 
 		let evicted = 0
 		for (const [key, bucket] of groups) {
-			if (bucket.length <= this.capPerScope) continue
+			// Only `succeeded` records are evictable. Failed/cancelled exist
+			// only here; losing them is real data loss (QA feedback 2026-06-05).
+			const evictable = bucket.filter((op) => op.progress?.stage === "succeeded")
+			if (evictable.length <= this.capPerScope) continue
 			// Newest first; entries beyond the cap are the oldest by terminalAt.
-			bucket.sort((a, b) => (b.terminalAt ?? 0) - (a.terminalAt ?? 0))
-			for (const victim of bucket.slice(this.capPerScope)) {
+			evictable.sort((a, b) => (b.terminalAt ?? 0) - (a.terminalAt ?? 0))
+			for (const victim of evictable.slice(this.capPerScope)) {
 				try {
 					await this.journal.deleteOperation(victim.id)
 					evicted++
