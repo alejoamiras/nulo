@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>dapp-interaction-lock-fix-v3 — ELI5</title>
+<style>
+  :root { --fg:#1a1a1a; --muted:#5a5a5a; --bg:#fafaf7; --accent:#b54a00; --border:#d8d4cc; --code-bg:#f0ece4; --ok:#155724; --okbg:#d4edda; }
+  * { box-sizing:border-box; }
+  body { font-family:ui-serif,Georgia,Cambria,"Times New Roman",Times,serif; color:var(--fg); background:var(--bg); line-height:1.6; max-width:780px; margin:3rem auto; padding:0 1.5rem 4rem; font-size:17px; }
+  h1,h2,h3 { font-family:ui-sans-serif,system-ui,sans-serif; letter-spacing:-0.01em; }
+  h1 { font-size:2.1rem; margin-bottom:.15em; }
+  h1 + p.sub { color:var(--muted); margin-top:0; font-size:1rem; }
+  h2 { margin-top:2.6rem; font-size:1.4rem; padding-bottom:.2em; border-bottom:1px solid var(--border); }
+  h3 { margin-top:1.8rem; font-size:1.1rem; color:var(--accent); }
+  code { background:var(--code-bg); padding:.1em .35em; border-radius:3px; font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:.88em; }
+  pre { background:var(--code-bg); padding:1em; border-radius:6px; overflow-x:auto; line-height:1.45; font-family:ui-monospace,Menlo,monospace; font-size:.82em; }
+  blockquote { margin:1.4em 0; padding:.7em 1.1em; border-left:3px solid var(--accent); background:var(--code-bg); color:var(--muted); }
+  table { border-collapse:collapse; width:100%; margin:1.2em 0; font-size:.92em; }
+  th,td { border:1px solid var(--border); padding:.5em .7em; text-align:left; vertical-align:top; }
+  th { background:var(--code-bg); font-family:ui-sans-serif,system-ui,sans-serif; }
+  .takeaway { background:#fffaeb; border:1px solid #f4d68b; border-radius:6px; padding:1em 1.2em; margin:1.5em 0; }
+  .takeaway strong { display:block; margin-bottom:.3em; color:var(--accent); }
+  .ship { display:inline-block; background:var(--okbg); color:var(--ok); padding:.15em .6em; border-radius:4px; font-family:ui-sans-serif,system-ui,sans-serif; font-size:.85em; font-weight:600; }
+  ul li, ol li { margin:.35em 0; }
+  .footnote { color:var(--muted); font-size:.85em; margin-top:3.5em; padding-top:1em; border-top:1px solid var(--border); }
+  .flow { font-family:ui-monospace,Menlo,monospace; font-size:.8em; white-space:pre; background:var(--code-bg); padding:1em; border-radius:6px; overflow-x:auto; }
+</style>
+</head>
+<body>
+
+<h1>v3 — Parallel popups</h1>
+<p class="sub">ELI5 companion to <a href="plan.md">plan.md</a> · 2026-05-28 · status: <span class="ship">plan ship-it</span> — awaiting your go/no-go</p>
+
+<div class="takeaway">
+  <strong>One-sentence summary</strong>
+  Make the second transaction's popup open the instant you approve the first (instead of waiting for the first to finish), while keeping the two transactions running one-at-a-time underneath so nothing breaks on-chain. Along the way we found — and will fix — a real bug from PR #53 that's been making popup #2 wait far longer than it should.
+</div>
+
+<h2>What you'll see when it's done</h2>
+
+<div class="flow">T1 sendTx  → popup 1 opens
+T2 sendTx  (you fire it while popup 1 is still open)
+You approve popup 1
+   → popup 2 appears RIGHT AWAY
+   → T1's card shows "Estimating fee…"
+You approve popup 2
+   → T2's card shows "Queued"
+T1 runs: estimate → simulate → prove → submit → done
+   → T2 leaves "Queued" and starts its own run
+T2 runs: prove → submit → done</div>
+
+<p>The key word is <b>"right away"</b>. Today popup 2 doesn't show until popup 1's transaction is fully finished. After v3, popup 2 shows the moment you approve popup 1.</p>
+
+<h2>Two things we discovered while planning</h2>
+
+<h3>1. There's a hidden bug from PR #53 — and it's your exact complaint</h3>
+
+<p>PR #53 was <em>supposed</em> to release the "go ahead, next transaction" signal early — right after the first transaction builds. But the code that passes that signal and the code that reads it use <strong>two different names for the same thing</strong> (<code>releaseFifo</code> vs <code>onTxRequestFinalized</code>). So the early signal was never actually connected. It's been silently doing nothing since PR #53.</p>
+
+<p>The fallback safety-net still works — it releases the signal, but only when the <em>whole</em> first transaction finishes. That's <strong>exactly why popup 2 waits so long</strong>. So v3 isn't only a new feature; step one is fixing this dead wire and adding the test that should have caught it.</p>
+
+<h3>2. The "traffic cop" we add is about correctness, not just looks</h3>
+
+<p>My first draft of the plan said the new traffic-cop (a "mutex" — a thing that lets only one transaction through at a time) was purely cosmetic — just to make T2 show "Queued". <strong>Codex proved that wrong</strong>, and it's an important catch:</p>
+
+<p>If we let popup 2 open early <em>and</em> let both transactions run at the same time, they'd both look at the same private notes (your spendable balance pieces) and both try to spend them. The second transaction would then get <strong>rejected by the network</strong> for double-spending. The NO_FROM transaction type is even more exposed — it has no anti-collision number at all.</p>
+
+<table>
+  <tr><th>Approach</th><th>What happens</th></tr>
+  <tr><td>Today (dead wire)</td><td>Both run strictly one-after-another. Correct, but popup 2 waits ages.</td></tr>
+  <tr><td>Naïve fix (open popup 2 early, no traffic cop)</td><td>Popup 2 opens fast ✓ — but T2 gets rejected on-chain. <b>Broken.</b></td></tr>
+  <tr><td>v3 (open popup 2 early + traffic cop on execution)</td><td>Popup 2 opens fast ✓ <b>and</b> transactions still run one-at-a-time ✓.</td></tr>
+</table>
+
+<p>So the traffic cop <em>restores</em> the safety that opening popup 2 early would otherwise remove. It's load-bearing.</p>
+
+<h2>How it's built (6 phases)</h2>
+
+<ol>
+  <li><b>Phase 0 — fix the dead wire.</b> Connect the release signal correctly + add a test that drives the real path end-to-end (the kind that would've caught the PR #53 bug). This stabilises the ground everything else stands on.</li>
+  <li><b>Phase 1 — release at approval.</b> Move the "next transaction can go" signal to fire when you <em>approve</em> a popup, not when the transaction finishes building. (Subtlety codex caught: it has to fire from the exact approval handler, because the obvious-looking spot actually resolves much later.)</li>
+  <li><b>Phase 2 — the traffic cop.</b> A new one-at-a-time lock, keyed per (profile, chain) — matching how the underlying transaction engine already locks. Custom-built because the repo's existing lock auto-expires after 5 minutes, and proving can legitimately take longer. It wraps the <em>entire</em> execution of each transaction, both transaction types.</li>
+  <li><b>Phase 3 — cancel + cleanup.</b> Make "Cancel" work even while T2 is waiting its turn (needs a small piece of wiring so the cancel can interrupt the wait). Plus keep the janitor from prematurely cancelling a transaction that's legitimately just waiting in line.</li>
+  <li><b>Phase 4 — automated tests.</b> A cheap test that proves popup 2 opens fast; a heavier test that proves both transactions actually complete in order.</li>
+  <li><b>Phase 5 — a build for you to try.</b></li>
+</ol>
+
+<h2>Decisions you already made (thanks)</h2>
+<ul>
+  <li><b>Sequential, not parallel</b> — T2 waits for T1 to fully finish. (Matches what you described; the engine can't prove two at once anyway.)</li>
+  <li><b>Skip the standalone spike</b> — your note that "proving can't go parallel" + 5 minutes of code-reading answered everything the spike would have.</li>
+</ul>
+
+<h2>One decision I'd like to flip on you</h2>
+
+<p>You chose the <b>standard test lane</b> for the end-to-end tests. The cheap "popup opens fast" test fits there fine. But the heavier "both transactions complete" test runs two real proofs back-to-back, and the repo's history shows multi-proof tests blow the standard lane's time budget (that's why the fee tests have their own dedicated lane). So the plan routes that one heavy test to the <b>dedicated heavy lane</b> instead. Flagging because it's a small deviation from what you picked — say the word if you'd rather I try the standard lane first.</p>
+
+<h2>Is it risky?</h2>
+
+<ul>
+  <li><b>The hard correctness question got the most scrutiny</b> — codex specifically hunted for a way the two transactions could corrupt each other, found it (stale notes), and the plan now closes it with the traffic cop wrapping the full execution. Both reviewers signed off.</li>
+  <li><b>Cancel, restart, and janitor edge-cases</b> are all explicitly handled in the plan with named fixes.</li>
+  <li><b>No new cryptography, no new dependencies.</b> Pure wiring + a small lock, all in the wallet's own service layer.</li>
+  <li>Scope: ~600–800 lines + tests, across the 6 phases. Bigger than v2, smaller than the original PR #53.</li>
+</ul>
+
+<h2>The decision in front of you</h2>
+<p>The plan passed the full review ceremony: dual audit (both said "needs revision", both folded in), then a final pass that returned <span class="ship">ship-it</span> with zero remaining serious issues. I won't write a line of implementation until you approve. Your options:</p>
+<ul>
+  <li><b>Approve</b> → I start Phase 0 (the dead-wire fix), committing per-phase.</li>
+  <li><b>Approve with the e2e-lane change reverted</b> → same, but I attempt the heavy test in the standard lane first.</li>
+  <li><b>Hold</b> → questions / changes before I begin.</li>
+</ul>
+
+<p class="footnote">
+  Full plan: <a href="plan.md">plan.md</a>. Audit transcripts: <code>audit-codex.md</code> (v1 audit, found the correctness hole), <code>audit-opus.md</code> (v1 audit, found the dead wire), <code>audit-codex-final.md</code> (consolidated-plan pass, ship-it). Branch <code>fix/dapp-interaction-lock-scope-v3</code> off <code>dev</code>. Predecessors: v1 = PR #53, v2 = PR #68.
+</p>
+
+</body>
+</html>

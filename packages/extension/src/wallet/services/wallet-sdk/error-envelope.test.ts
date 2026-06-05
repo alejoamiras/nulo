@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { CapabilityNotGrantedError, JobCancelledError } from "@nulo/extension-messaging/errors"
+import { CapabilityNotGrantedError, JobCancelledError, TooManyPendingError } from "@nulo/extension-messaging/errors"
 import { toWalletResponseError } from "./error-envelope"
 
 describe("toWalletResponseError", () => {
@@ -33,6 +33,18 @@ describe("toWalletResponseError", () => {
 		expect(parsed.code).toBe(4100)
 		expect(parsed.data.walletErrorCode).toBe("CAPABILITY_NOT_GRANTED")
 		expect(parsed.data.capabilityType).toBe("accounts")
+	})
+
+	test("TooManyPendingError → {code:-32005, walletErrorCode} with no origin/profile detail", () => {
+		const env = toWalletResponseError(new TooManyPendingError())
+		expect(env).toEqual({
+			code: -32005,
+			message: "Too many pending transactions; retry after the in-flight ones settle.",
+			data: { walletErrorCode: TooManyPendingError.CODE },
+		})
+		// No oracle: the envelope must not carry a lane/origin/profile field.
+		const data = (env as { data: Record<string, unknown> }).data
+		expect(Object.keys(data)).toEqual(["walletErrorCode"])
 	})
 
 	test("plain Error → string fallback (preserves wire contract for unrecognised throws)", () => {

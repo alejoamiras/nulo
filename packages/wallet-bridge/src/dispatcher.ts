@@ -89,12 +89,14 @@ import type { IAccountReader, IDappInteractionRunner, IDappSessionWriter, IExecu
  */
 export interface DispatchHooks {
 	/**
-	 * Called from inside the long-running per-op handler the moment the
-	 * tx request is finalized (nonce sealed, txRequest built) and no
-	 * further FIFO-ordered work depends on the session queue. Releases
-	 * the session FIFO baton so the next pending message's popup can open.
+	 * Invoked by the wallet once the approved request has enqueued on the
+	 * per-(profileId, chainId) execution mutex. Releases the session FIFO baton
+	 * so the next pending message's popup can open — safely, because this
+	 * request is already ahead of any later one in the execution FIFO, so
+	 * message/approval order is preserved. Popup/UI concurrency without
+	 * reordering execution.
 	 */
-	onTxRequestFinalized?: () => void
+	onExecutionEnqueued?: () => void
 	/**
 	 * Pre-allocated journal id from `background.ts:onWalletMessage`. When
 	 * present, the handler should TRANSITION this record (queued → pending
@@ -239,7 +241,7 @@ export class WalletSdkDispatcher {
 		if (methodName === "batch") {
 			// CRITICAL: do NOT forward `hooks` into batch legs. handleBatch
 			// recurses into dispatch() per-leg; forwarding hooks would let an
-			// inner sendTx leg's `onTxRequestFinalized` release the top-level
+			// inner sendTx leg's `onExecutionEnqueued` release the top-level
 			// FIFO baton before the batch finishes, breaking the batch's
 			// sequential-completion contract.
 			return this.handleBatch(args[0] as Array<{ name: string; args: unknown[] }>, ctx)
@@ -420,10 +422,13 @@ export class WalletSdkDispatcher {
 				operations: [sendOp],
 			},
 			// Arg 2 is the existing cancellationToken slot — leave undefined when
-			// hooks are the only thing we're forwarding. Arg 3 is the new hooks
-			// bag (see services-contract.ts:IDappInteractionRunner).
+			// hooks are the only thing we're forwarding. Arg 3 is the hooks bag
+			// (see services-contract.ts:IDappInteractionRunner). `originKey` is
+			// ALWAYS set from ctx.origin (not gated on `hooks`) so the per-origin
+			// backpressure cap applies to every dApp sendTx, even ones that arrive
+			// without the FIFO-baton hooks.
 			undefined,
-			hooks ? { onTxRequestFinalized: hooks.onTxRequestFinalized, queuedJournalId: hooks.queuedJournalId } : undefined,
+			{ onExecutionEnqueued: hooks?.onExecutionEnqueued, queuedJournalId: hooks?.queuedJournalId, originKey: ctx.origin },
 		)
 
 		return this.unwrapResult(results[0])

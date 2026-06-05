@@ -329,6 +329,38 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		return updated
 	}
 
+	/**
+	 * v3: bump `updatedAt` without changing any field. SW-internal liveness
+	 * heartbeat for records actively WAITING on the ExecutionMutex — keeps the
+	 * periodic reaper (which keys on `updatedAt` vs the per-stage grace window)
+	 * from declaring a legitimately-waiting record "stuck". Deliberately does
+	 * NOT emit `onOperationUpdated`: a heartbeat changes nothing user-visible,
+	 * and emitting on every tick would churn the popup's `subscribeJob`
+	 * consumers. The boot sweep is `unconditional` (ignores `updatedAt`), so a
+	 * record whose heartbeat stopped because the SW died is still failed on
+	 * restart — exactly the desired recovery. No-ops if the record is gone.
+	 */
+	public async touchOperation(id: string): Promise<void> {
+		await this.ensureInitialized()
+		// MUST take the same global lock as `transitionOperation`: this is a
+		// load → merge → write, and without the lock a stale snapshot could
+		// clobber a concurrent `queued→pending` / `*→cancelled` / reaper
+		// `*→failed` transition (codex v3 engine-audit blocker). Re-read FRESH
+		// inside the lock so the bump applies to the current record, and skip
+		// the write entirely once the record is terminal — a heartbeat must
+		// never resurrect a just-cancelled/failed/succeeded record's updatedAt
+		// (which could briefly hide it from a terminal-state consumer).
+		await this.transitionLock.enter()
+		try {
+			const existing = await this._loadValidated(id)
+			if (!existing) return
+			if (isTerminal(existing.progress.stage)) return
+			await this.storage.set(id, { ...existing, updatedAt: Date.now() })
+		} finally {
+			this.transitionLock.leave()
+		}
+	}
+
 	public async getOperation(id: string): Promise<OperationRecord | undefined> {
 		validateParams(OperationJournalMethodSchemas.getOperation.params, [id], "getOperation")
 		await this.ensureInitialized()
