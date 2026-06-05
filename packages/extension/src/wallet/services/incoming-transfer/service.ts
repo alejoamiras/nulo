@@ -1,7 +1,7 @@
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
-import { EventHandler, getErrorMessage } from "@nulo/wallet-core/utils"
+import { EventHandler, Lock, getErrorMessage } from "@nulo/wallet-core/utils"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { NetworkService, type Network } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
@@ -111,11 +111,42 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	 *  false bail. Keyed by `${networkId}|${accountAddress}|${contract}`. */
 	private readonly scanGenerations = new Map<string, number>()
 
+	/** Single global lock serializing every writer on this service's storage
+	 *  surface. Replaces the ad-hoc race guards (scanGenerations,
+	 *  txDeleteInflight, compensating reverts) once the writer migration
+	 *  in upcoming phases lands. Plan reference: implementations-plan/
+	 *  incoming-trust-state-machine-refactor/plan.md §Phase 0. */
+	private readonly serviceLock: Lock
+
+	/** Lifecycle epoch — bumped by clear / delete paths that wipe storage,
+	 *  so an in-flight scanContract (which fetches PXE notes BEFORE entering
+	 *  the per-note critical section) can detect that its snapshot is stale
+	 *  and bail before persisting. Closes the lifecycle-cancel race the
+	 *  codex final-audit identified. */
+	private serviceEpoch = 0
+
 	private readonly pollIntervalMs: number
 
 	public constructor(logger: ILogger, pollIntervalMs: number = DEFAULT_POLL_INTERVAL_MS) {
 		super(INCOMING_TRANSFER_SERVICE_NAME, logger)
 		this.pollIntervalMs = pollIntervalMs
+		this.serviceLock = new Lock(INCOMING_TRANSFER_SERVICE_NAME, logger)
+	}
+
+	/** Run `fn` inside the service lock. Acquire → try → finally release. */
+	private async withServiceLock<T>(fn: () => Promise<T>): Promise<T> {
+		await this.serviceLock.enter()
+		try {
+			return await fn()
+		} finally {
+			this.serviceLock.leave()
+		}
+	}
+
+	/** Bump the lifecycle epoch — call from clear / delete paths so any
+	 *  in-flight scanContract whose epochAtStart no longer matches bails. */
+	private bumpServiceEpoch(): void {
+		this.serviceEpoch += 1
 	}
 
 	protected async init(services: ServiceCollection): Promise<void> {
