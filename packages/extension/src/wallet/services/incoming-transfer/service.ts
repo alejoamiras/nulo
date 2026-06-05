@@ -441,48 +441,43 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		if (!profile) return
 		const network = await this.resolveNetworkByChainId(token.chainId)
 		if (!network) return
-		const accounts = await this.accountService.getAccounts(profile.id, network.chainId)
-		for (const account of accounts) {
-			// Bump generation FIRST — any in-flight scan immediately bails
-			// on its next race-guard check, even if we tear down the
-			// schedulerKey entry entirely below (last-token-delete).
-			this.bumpGeneration(network.id, account.address, token.contract)
-			const key = this.schedulerKey(network.id, account.address)
-			const contracts = this.watchedContracts.get(key)
-			if (!contracts) continue
-			contracts.delete(token.contract)
-			if (contracts.size === 0) {
-				const interval = this.schedulers.get(key)
-				if (interval) clearInterval(interval)
-				this.schedulers.delete(key)
-				this.watchedContracts.delete(key)
-			}
-		}
 
-		// Subagent diagnosis (token-remove + re-add bug): the scheduler
-		// teardown above is necessary but not sufficient. IncomingTransferRecord
-		// rows carry a tokenId pointing at the now-deleted token. On re-add,
-		// TokenService allocates a NEW id, so those records orphan and the
-		// activity feed falls through to "Token" symbol with raw amounts.
-		// Fix: wipe the records + reset the trust row to unknown.
-		// Under Path 2 (block-timestamp adoption), re-adding the same contract
-		// then re-indexes from PXE with identical `blockTimestamp`s — so the
-		// activity feed shows the same chronological order as before the
-		// delete, no UX regression.
-		const records = await this.repo.listByContract(profile.id, network.id, token.contract)
-		for (const record of records) {
-			await this.repo.deleteRecord(record.siloedNullifier)
-			this.emit("onIncomingTransferDeleted", record)
-		}
-		// Reset trust to unknown so re-add via popup auto-trusts cleanly
-		// (P7 setTrustAllow flows through), or via dApp register_token
-		// re-prompts (correct: a re-registering dApp shouldn't ride on a
-		// stale prior trust decision).
-		const trustRecord = await this.repo.getTrust(profile.id, network.id, token.contract)
-		if (trustRecord) {
-			const updated = await this.repo.setTrust(profile.id, network.id, token.contract, "unknown")
-			this.emit("onIncomingTrustChanged", updated)
-		}
+		await this.withServiceLock(async () => {
+			// Scheduler teardown + row mutations both inside the lock so a
+			// concurrent scan can't slip a row in between teardown + wipe.
+			const accounts = await this.accountService.getAccounts(profile.id, network.chainId)
+			for (const account of accounts) {
+				// scanGenerations bump kept here until Phase 4 retires the
+				// generation-counter code path in scanContract.
+				this.bumpGeneration(network.id, account.address, token.contract)
+				const key = this.schedulerKey(network.id, account.address)
+				const contracts = this.watchedContracts.get(key)
+				if (!contracts) continue
+				contracts.delete(token.contract)
+				if (contracts.size === 0) {
+					const interval = this.schedulers.get(key)
+					if (interval) clearInterval(interval)
+					this.schedulers.delete(key)
+					this.watchedContracts.delete(key)
+				}
+			}
+
+			// Records wipe + trust reset. Re-add re-indexes via PXE with
+			// identical blockTimestamps so activity-feed order is preserved.
+			const records = await this.repo.listByContract(profile.id, network.id, token.contract)
+			for (const record of records) {
+				await this.repo.deleteRecord(record.siloedNullifier)
+				this.emit("onIncomingTransferDeleted", record)
+			}
+			const trustRecord = await this.repo.getTrust(profile.id, network.id, token.contract)
+			if (trustRecord) {
+				const updated = await this.repo.setTrust(profile.id, network.id, token.contract, "unknown")
+				this.emit("onIncomingTrustChanged", updated)
+			}
+
+			// Invalidate any in-flight scans whose PXE snapshot predates this wipe.
+			this.bumpServiceEpoch()
+		})
 	}
 
 	/** Per-hash reentrancy guard: `EventHandler.invoke` is sync-fires-async
