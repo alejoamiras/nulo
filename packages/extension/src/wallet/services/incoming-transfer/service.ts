@@ -718,7 +718,6 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const trustRecords = await this.repo.listTrust()
 		const pending = trustRecords.filter((t) => t.profileId === profileId && t.networkId === networkId && t.state === "pending")
 		if (pending.length === 0) return
-		const tokens = await this.tokenService.getTokensRaw(profileId)
 		let network
 		try {
 			network = await this.networkService.getNetwork(networkId)
@@ -726,36 +725,31 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			return
 		}
 		for (const trust of pending) {
-			const scoped = (await this.repo.listByContract(profileId, networkId, trust.contract)).filter(
-				(r) => r.accountAddress === accountAddress,
-			)
-			if (scoped.length === 0) continue
-			const token = tokens.find((t) => t.contract === trust.contract && t.chainId === network.chainId)
-			if (!token) continue
+			await this.withServiceLock(async () => {
+				const scoped = (await this.repo.listByContract(profileId, networkId, trust.contract)).filter(
+					(r) => r.accountAddress === accountAddress,
+				)
+				if (scoped.length === 0) return
+				// Live re-reads INSIDE the lock. The outer `tokens` + `pending`
+				// snapshots predate this critical section; a concurrent
+				// onTokenDeleted may have made them stale.
+				const liveTokens = await this.tokenService.getTokensRaw(profileId)
+				const token = liveTokens.find((t) => t.contract === trust.contract && t.chainId === network.chainId)
+				if (!token) return
+				const liveTrust = await this.repo.getTrust(profileId, networkId, trust.contract)
+				if (liveTrust?.state !== "pending") return
 
-			// Live re-check before emit (codex audit-4 High). The `pending`
-			// snapshot at line 687 and the `tokens` snapshot at line 689 are
-			// taken before this loop. If `onTokenDeleted` fires between then
-			// and now, the snapshots still name the deleted contract — and
-			// emitting `onIncomingTransferPending` would re-open an orphan
-			// prompt that PopupManager's `state === "unknown"` close-handler
-			// already purged. Re-fetch live trust state + live token
-			// registration per-row; skip if either has gone stale.
-			const liveTrust = await this.repo.getTrust(profileId, networkId, trust.contract)
-			if (liveTrust?.state !== "pending") continue
-			const liveTokens = await this.tokenService.getTokensRaw(profileId)
-			if (!liveTokens.some((t) => t.contract === trust.contract && t.chainId === network.chainId)) continue
-
-			const first = scoped[0]
-			this.emit("onIncomingTransferPending", {
-				profileId,
-				networkId,
-				accountAddress,
-				contract: trust.contract,
-				tokenId: token.id,
-				tokenSymbol: token.symbol,
-				tokenDecimals: token.decimals,
-				amountRaw: first.amountRaw,
+				const first = scoped[0]
+				this.emit("onIncomingTransferPending", {
+					profileId,
+					networkId,
+					accountAddress,
+					contract: trust.contract,
+					tokenId: token.id,
+					tokenSymbol: token.symbol,
+					tokenDecimals: token.decimals,
+					amountRaw: first.amountRaw,
+				})
 			})
 		}
 	}
