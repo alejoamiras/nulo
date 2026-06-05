@@ -5,9 +5,11 @@
  * an `OperationRecord` with a stage (Phase 2 FSM) plus carry fields that
  * Phase 2+ uses for fairness, retries, tombstones, and idempotency.
  *
- * Records live in `chrome.storage.session` — survive SW suspension, are
- * cleared on full browser exit. The v6 storage migration wipes pre-Phase 2
- * shapes; there are no production users to migrate.
+ * Records live in `chrome.storage.local` — survive SW suspension AND full
+ * browser exit. (Pre-2026-06-05 they were in `chrome.storage.session`; the
+ * exit-wipe was nuking failed/cancelled tx history the user expected to
+ * keep.) The v6 storage migration wipes pre-Phase 2 shapes; there are no
+ * production users to migrate.
  *
  * Phase 2 carries (see `implementations-plan/phase-2/approval.html`):
  *   #1  `origin`, `profileId` tagged at create-time

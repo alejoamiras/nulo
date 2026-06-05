@@ -73,11 +73,18 @@ export class OperationJournalService extends Service<Methods, Events> implements
 
 	public constructor(logger: ILogger, browserApi?: BrowserApi) {
 		super(OPERATION_JOURNAL_SERVICE_NAME, logger)
-		// Session storage: records survive SW restart but clear on browser exit
-		// (stale ops post-reboot aren't actionable anyway).
+		// Local storage: records survive SW restart AND full browser exit.
+		// Originally used `chrome.storage.session` on the rationale that
+		// "stale ops post-reboot aren't actionable anyway" — true for IN-
+		// FLIGHT records, but terminal records (failed/cancelled/succeeded)
+		// ARE the user's history. Session storage's browser-exit wipe was
+		// erasing failed/cancelled history that the user expected to keep
+		// (QA feedback 2026-06-05). The reaper's boot-sweep still marks
+		// surviving non-terminal records as failed on SW restart — same
+		// behavior as before, just the durability layer changed.
 		this.storage = browserApi
-			? new EntityStorage<OperationRecord>("nulo:journal", browserApi.storage.session)
-			: new EntityStorage<OperationRecord>("nulo:journal", chrome.storage.session)
+			? new EntityStorage<OperationRecord>("nulo:journal", browserApi.storage.local)
+			: new EntityStorage<OperationRecord>("nulo:journal", chrome.storage.local)
 		// Instantiated in the constructor (not as a field initializer) so the
 		// logger reference is guaranteed to be the same instance the base
 		// Service stores on `this`. See class field comment above for the

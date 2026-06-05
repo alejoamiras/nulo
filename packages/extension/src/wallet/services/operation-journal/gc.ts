@@ -4,7 +4,7 @@
  * Carry #2 of the Phase 2 plan keeps terminal records (succeeded / failed /
  * cancelled) instead of auto-deleting them — tombstones serve idempotency
  * checks and the activity card history. With no bound, those tombstones
- * accumulate forever in `chrome.storage.session`. The UI caps the home-tab
+ * accumulate forever in `chrome.storage.local`. The UI caps the home-tab
  * preview at 5 rows, so the bloat is visually invisible up to thousands of
  * records, but the storage quota is finite.
  *

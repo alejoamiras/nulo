@@ -71,7 +71,7 @@ describe("OperationJournalService", () => {
 		expect(rec.subtitle).toBe("to 0xdef")
 
 		// Persisted via the port
-		const entries = await api.storage.session.get(null)
+		const entries = await api.storage.local.get(null)
 		expect(`nulo:journal@${rec.id}` in entries).toBe(true)
 
 		expect(seen).toHaveBeenCalledWith(rec)
@@ -204,24 +204,24 @@ describe("OperationJournalService", () => {
 	describe("schema-invalid row resilience", () => {
 		test("getOperation drops a schema-invalid row and returns undefined", async () => {
 			// Write a row directly to storage that bypasses the journal's create path.
-			await api.storage.session.set({ "nulo:journal@deadbeef": JSON.stringify({ id: "deadbeef", kind: "transfer" }) })
+			await api.storage.local.set({ "nulo:journal@deadbeef": JSON.stringify({ id: "deadbeef", kind: "transfer" }) })
 			expect(await service.getOperation("deadbeef")).toBeUndefined()
 			// The bad row should have been deleted as a side effect.
 			expect(await service.getOperation("deadbeef")).toBeUndefined()
-			const remaining = await api.storage.session.get("nulo:journal@deadbeef")
+			const remaining = await api.storage.local.get("nulo:journal@deadbeef")
 			expect("nulo:journal@deadbeef" in remaining).toBe(false)
 		})
 
 		test("getOperations skips schema-invalid rows and returns only the valid ones", async () => {
 			const valid = await service.createOperation(VALID_INPUT)
-			await api.storage.session.set({ "nulo:journal@bogus": JSON.stringify({ id: "bogus", foo: 1 }) })
+			await api.storage.local.set({ "nulo:journal@bogus": JSON.stringify({ id: "bogus", foo: 1 }) })
 
 			const ops = await service.getOperations()
 			expect(ops.map((o) => o.id)).toEqual([valid.id])
 		})
 
 		test("transitionOperation throws 'not found' if the existing row is schema-invalid (record removed)", async () => {
-			await api.storage.session.set({ "nulo:journal@zombie": JSON.stringify({ id: "zombie", kind: "transfer" }) })
+			await api.storage.local.set({ "nulo:journal@zombie": JSON.stringify({ id: "zombie", kind: "transfer" }) })
 			await expect(service.transitionOperation("zombie", { stage: "simulating" })).rejects.toThrow(/not found/i)
 		})
 	})

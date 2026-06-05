@@ -83,7 +83,7 @@ describe("JournalGC.sweep", () => {
 		for (let i = 0; i < ids.length; i++) {
 			const op = await service.getOperation(ids[i])
 			if (!op) throw new Error("setup: record vanished")
-			await api.storage.session.set({
+			await api.storage.local.set({
 				[`nulo:journal@${op.id}`]: JSON.stringify({ ...op, terminalAt: 1_000_000 + i * 10 }),
 			})
 		}
