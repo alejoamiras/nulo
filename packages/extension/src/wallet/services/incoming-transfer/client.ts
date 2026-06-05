@@ -38,10 +38,6 @@ export class IncomingTransferServiceClient extends ServiceClient<Methods, Events
 		return this.request("getTrustState", profileId, networkId, contract)
 	}
 
-	public setTrustState(profileId: string, networkId: string, contract: string, state: IncomingTrustState): Promise<void> {
-		return this.request("setTrustState", profileId, networkId, contract, state)
-	}
-
 	public setTrustAllow(profileId: string, networkId: string, contract: string): Promise<boolean> {
 		return this.request("setTrustAllow", profileId, networkId, contract)
 	}

@@ -79,12 +79,14 @@ async function handleCopy() {
 
 async function handleAllow() {
 	try {
-		// setTrustAllow returns false when the service refuses the flip
-		// (token was deleted between the Pending emit and the user's click
-		// — codex audit-3 Medium). Suppress the success toast in that case;
-		// the popup-close logic in PopupManager already handles the UI.
+		// setTrustAllow returns true when the trust flip was applied, false
+		// when the service refused (stale-popup race — token deleted between
+		// Pending emit and click), undefined if the closure wasn't bound.
+		// Show the success toast ONLY on explicit true so an IPC boundary
+		// that drops the return value (defensive — codex final-audit High)
+		// doesn't mislead the user.
 		const ok = await cacheStore.incomingTrust.allow?.()
-		if (ok !== false) {
+		if (ok === true) {
 			openToast({ label: `Now showing receives for ${tokenSymbol.value}`, icon: "check" })
 		}
 	} catch {
@@ -96,7 +98,7 @@ async function handleAllow() {
 async function handleReject() {
 	try {
 		const ok = await cacheStore.incomingTrust.reject?.()
-		if (ok !== false) {
+		if (ok === true) {
 			openToast({ label: `Hiding receives from ${tokenSymbol.value}`, icon: "info" })
 		}
 	} catch {

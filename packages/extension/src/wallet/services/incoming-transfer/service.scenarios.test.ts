@@ -1668,65 +1668,12 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 		expect(seen).not.toHaveBeenCalled()
 	})
 
-	test("(Audit-5 High) setTrustAllow reverts trust to unknown when delete lands after the upfront guard", async () => {
-		// Race: upfront isTokenStillRegistered passes (returns true), but
-		// then onTokenDeleted lands during the setTrustState await. The
-		// post-await re-check (token now gone) must revert the trusted
-		// write back to unknown so the re-add path correctly re-prompts.
-		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
-		const tokenStub = makeTokenStub([tokenA])
-		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
-		trust.set(trustKey("p1", "n1", tokenA.contract), {
-			profileId: "p1",
-			networkId: "n1",
-			contract: tokenA.contract,
-			state: "pending",
-			updatedAt: 0,
-		})
-
-		// Stale-during-flow: getTokensRaw returns [tokenA] for the upfront
-		// check, then [] for the post-setTrustState re-check. Counter is
-		// reset HERE (post-bootService) so the hydrateSchedulers call at
-		// startup doesn't consume our budget.
-		let getTokensCalls = 0
-		tokenStub.getTokensRaw = vi.fn().mockImplementation(async () => {
-			getTokensCalls++
-			return getTokensCalls === 1 ? [tokenA] : []
-		})
-
-		const ok = await service.setTrustAllow("p1", "n1", tokenA.contract)
-
-		expect(ok).toBe(false)
-		// The compensating-action revert wrote `unknown` on top of the
-		// trusted write — final state matches what a clean re-add expects.
-		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("unknown")
-	})
-
-	test("(Audit-5 High) setTrustReject reverts trust to unknown when delete lands after the upfront guard", async () => {
-		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
-		const tokenStub = makeTokenStub([tokenA])
-		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
-		trust.set(trustKey("p1", "n1", tokenA.contract), {
-			profileId: "p1",
-			networkId: "n1",
-			contract: tokenA.contract,
-			state: "pending",
-			updatedAt: 0,
-		})
-
-		let getTokensCalls = 0
-		tokenStub.getTokensRaw = vi.fn().mockImplementation(async () => {
-			getTokensCalls++
-			return getTokensCalls === 1 ? [tokenA] : []
-		})
-
-		const ok = await service.setTrustReject("p1", "n1", tokenA.contract)
-
-		expect(ok).toBe(false)
-		// Revert wrote `unknown` over the `blocked` write so a future
-		// re-add re-prompts (blocked would terminally suppress the prompt).
-		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("unknown")
-	})
+	// Audit-5 compensating-revert tests REMOVED. The behavior they pinned
+	// (revert trust to "unknown" after detecting a stale token mid-flow) no
+	// longer exists — the global service Lock (implementations-plan/
+	// incoming-trust-state-machine-refactor/) prevents the race those
+	// reverts recovered from. Race-ordering pins for the new lock-based
+	// behavior live in service.lock-races.test.ts (Phase 7).
 
 	test("(Audit-5 High) setTrustAllow skips per-record upsert when record was deleted mid-loop", async () => {
 		// Race: setTrustAllow snapshotted records via listByContract, but

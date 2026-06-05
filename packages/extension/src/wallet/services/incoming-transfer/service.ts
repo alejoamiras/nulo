@@ -265,81 +265,52 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		return record?.state ?? "unknown"
 	}
 
-	public async setTrustState(profileId: string, networkId: string, contract: string, state: IncomingTrustState): Promise<void> {
-		await this.ensureInitialized()
+	/** Internal trust transition. Caller MUST hold the service lock. */
+	private async _setTrustStateLocked(profileId: string, networkId: string, contract: string, state: IncomingTrustState): Promise<void> {
 		const record = await this.repo.setTrust(profileId, networkId, contract, state)
 		this.emit("onIncomingTrustChanged", record)
 	}
 
 	public async setTrustAllow(profileId: string, networkId: string, contract: string): Promise<boolean> {
-		// Stale-popup guard (codex post-impl audit Path-2 High #2): refuse
-		// the flip if the contract no longer has a token registration.
-		if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) return false
-		await this.setTrustState(profileId, networkId, contract, "trusted")
+		await this.ensureInitialized()
+		return this.withServiceLock(async () => {
+			// Stale-popup guard: refuse the flip if the contract is no longer
+			// registered. Inside the lock, so the check + writes are atomic.
+			if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) return false
+			await this._setTrustStateLocked(profileId, networkId, contract, "trusted")
 
-		// Compensating-action re-check (codex audit-5 High). `setTrustState`
-		// awaits; `onTokenDeleted` may have landed during that await,
-		// wiping records and resetting trust to `unknown` — and our
-		// setTrustState write then CLOBBERED the unknown back to trusted.
-		// Without this revert, the re-add path would see `trusted` and
-		// skip the friction prompt, AND we'd be about to resurrect
-		// just-deleted records in the loop below.
-		if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) {
-			await this.setTrustState(profileId, networkId, contract, "unknown")
-			return false
-		}
-
-		// Flip every hidden record for this contract to visible; emit Added
-		// for each so the popup activity feed updates atomically.
-		// Visibility gate: if `incomingTransfersVisible` is off, persist
-		// the records as visible (so a future toggle-on shows them) but
-		// DO NOT emit live events.
-		const visibilityEnabled = await this.isVisibilityEnabled()
-		const records = await this.repo.listByContract(profileId, networkId, contract)
-		for (const record of records) {
-			if (!record.hidden) continue
-			// Per-iteration race guard (codex audit-5 High). `onTokenDeleted`
-			// can land between the listByContract snapshot above and this
-			// upsert. Without the per-record getRecord check, the upsert
-			// resurrects a row the delete path just dropped — a visible
-			// orphan in the activity feed.
-			const stillThere = await this.repo.getRecord(record.siloedNullifier)
-			if (!stillThere) continue
-			const updated = { ...record, hidden: false }
-			await this.repo.upsertRecord(updated)
-			if (visibilityEnabled) {
-				this.emit("onIncomingTransferAdded", updated)
+			// Flip every hidden record for this contract to visible; emit
+			// Added for each so the popup activity feed updates atomically.
+			// Visibility gate: if `incomingTransfersVisible` is off, persist
+			// records visible (so a future toggle-on shows them) but DO NOT
+			// emit live events.
+			const visibilityEnabled = await this.isVisibilityEnabled()
+			const records = await this.repo.listByContract(profileId, networkId, contract)
+			for (const record of records) {
+				if (!record.hidden) continue
+				// Per-iteration getRecord re-check: tests may directly mutate
+				// the records Map (bypassing the service + the lock). Lock
+				// alone can't catch those. Cheap (one repo read per record).
+				const stillThere = await this.repo.getRecord(record.siloedNullifier)
+				if (!stillThere) continue
+				const updated = { ...record, hidden: false }
+				await this.repo.upsertRecord(updated)
+				if (visibilityEnabled) {
+					this.emit("onIncomingTransferAdded", updated)
+				}
 			}
-		}
-
-		// Final compensating-action check: between the per-record loop's
-		// last iteration and now, delete may have landed AGAIN. If so,
-		// revert trust (records are already wiped by the delete path) and
-		// return false so the caller skips the success toast.
-		if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) {
-			await this.setTrustState(profileId, networkId, contract, "unknown")
-			return false
-		}
-		return true
+			return true
+		})
 	}
 
 	public async setTrustReject(profileId: string, networkId: string, contract: string): Promise<boolean> {
-		// Stale-popup guard: refuse the flip if the contract is no longer
-		// registered (codex Path-2 High #2).
-		if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) return false
-		await this.setTrustState(profileId, networkId, contract, "blocked")
-
-		// Compensating-action re-check (codex audit-5 High). A delete that
-		// landed during the setTrustState await would have reset trust to
-		// `unknown`; our write just clobbered it to `blocked`. Re-add
-		// would then incorrectly skip the friction prompt (blocked is
-		// terminal — Pending never emits). Revert to `unknown`.
-		if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) {
-			await this.setTrustState(profileId, networkId, contract, "unknown")
-			return false
-		}
-		// Hidden records stay hidden. No event emission — silent rejection.
-		return true
+		await this.ensureInitialized()
+		return this.withServiceLock(async () => {
+			if (!(await this.isTokenStillRegistered(profileId, networkId, contract))) return false
+			await this._setTrustStateLocked(profileId, networkId, contract, "blocked")
+			// Hidden records stay hidden. No event emission — silent rejection.
+			return true
+		})
 	}
 
 	private async isTokenStillRegistered(profileId: string, networkId: string, contract: string): Promise<boolean> {
