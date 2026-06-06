@@ -138,6 +138,11 @@ contract DeployBridge is Script {
     int24 constant ETH_FJ_TICK_LOWER = 69060;
     int24 constant ETH_FJ_TICK_UPPER = 115140;
 
+    // ── USDC/WETH pool (~2,100 USDC per WETH), currency0=USDC(6dec) < WETH ──
+    uint160 constant USDC_WETH_SQRT_PRICE = 1728916962386276374966316084832192;
+    int24 constant USDC_WETH_TICK_LOWER = 169800;
+    int24 constant USDC_WETH_TICK_UPPER = 229800;
+
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
         uint256 mintCount = vm.envOr("FEE_MINT_COUNT", uint256(100));
@@ -172,7 +177,33 @@ contract DeployBridge is Script {
         helper.sweep(address(0));
         helper.sweep(FEE_JUICE);
 
+        // ── USDC/WETH pool (new pool — our token, so initialize creates it) ──
+        // WETH (0xfFf9…) sits near the top of the address space, so a CREATE-
+        // deployed token is below it with overwhelming probability → USDC is
+        // currency0, matching the reference orientation. Bump the deployer nonce
+        // on the rare miss.
+        require(address(usdc) < WETH, "USDC must sort below WETH (currency0)");
+        uint256 wethSeed = vm.envOr("WETH_SEED", uint256(2 ether));
+        int256 usdcWethLiquidity = int256(vm.envOr("USDC_WETH_LIQUIDITY", uint256(6e13)));
+
+        // Over-provision the helper (10k USDC); modifyLiquidity takes what it needs, rest swept.
+        for (uint256 i = 0; i < 10; i++) usdc.mint(address(helper), usdc.maxMintPerTx());
+        IWETH(WETH).deposit{value: wethSeed}();
+        IERC20(WETH).safeTransfer(address(helper), wethSeed);
+
+        PoolKey memory usdcWethKey = PoolKey({
+            currency0: Currency.wrap(address(usdc)),
+            currency1: Currency.wrap(WETH),
+            fee: FEE,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(0))
+        });
+        helper.setup(0, usdcWethKey, USDC_WETH_SQRT_PRICE, USDC_WETH_TICK_LOWER, USDC_WETH_TICK_UPPER, usdcWethLiquidity);
+        console.log("USDC/WETH pool seeded");
+
+        helper.sweep(address(usdc));
+        helper.sweep(WETH);
+
         vm.stopBroadcast();
-        console.log("--- USDC/WETH pool seeding is a follow-up (currency ordering depends on the deployed USDC address) ---");
     }
 }

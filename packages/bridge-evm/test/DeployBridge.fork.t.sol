@@ -28,6 +28,10 @@ contract DeployBridgeForkTest is Test {
     int24 constant ETH_FJ_TICK_LOWER = 69060;
     int24 constant ETH_FJ_TICK_UPPER = 115140;
 
+    uint160 constant USDC_WETH_SQRT_PRICE = 1728916962386276374966316084832192;
+    int24 constant USDC_WETH_TICK_LOWER = 169800;
+    int24 constant USDC_WETH_TICK_UPPER = 229800;
+
     receive() external payable {} // accept ETH swept back from the helper
 
     function setUp() public {
@@ -76,5 +80,21 @@ contract DeployBridgeForkTest is Test {
         helper.sweep(FEE_JUICE);
         assertEq(IERC20(FEE_JUICE).balanceOf(address(helper)), 0, "helper FJ swept");
         assertEq(address(helper).balance, 0, "helper ETH swept");
+
+        // ── USDC/WETH pool — NEW pool (our token), so initialize creates it
+        // and the PoolManager ends up holding our brand-new USDC. ──
+        assertTrue(address(usdc) < WETH, "usdc sorts below WETH");
+        for (uint256 i = 0; i < 10; i++) usdc.mint(address(helper), usdc.maxMintPerTx()); // 10k USDC
+        deal(WETH, address(helper), 2 ether);
+
+        PoolKey memory uw = PoolKey({
+            currency0: Currency.wrap(address(usdc)),
+            currency1: Currency.wrap(WETH),
+            fee: FEE,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(0))
+        });
+        helper.setup(0, uw, USDC_WETH_SQRT_PRICE, USDC_WETH_TICK_LOWER, USDC_WETH_TICK_UPPER, 6e13);
+        assertGt(IERC20(address(usdc)).balanceOf(POOL_MANAGER), 0, "USDC/WETH pool seeded with our token");
     }
 }
