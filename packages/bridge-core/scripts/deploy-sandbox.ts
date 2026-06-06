@@ -16,10 +16,13 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { getInitialTestAccountsData } from "@aztec/accounts/testing"
 import { loadContractArtifact } from "@aztec/aztec.js/abi"
+import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
+import { PublicKeys } from "@aztec/aztec.js/keys"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
+import { TxStatus } from "@aztec/aztec.js/tx"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { TokenPortalAbi, TokenPortalBytecode } from "@aztec/l1-artifacts"
@@ -109,21 +112,47 @@ async function main() {
 	} catch {}
 	const fee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
 	const opts = { from, fee }
+	const sendOpts = { ...opts, wait: { waitForStatus: TxStatus.PROPOSED } }
 
 	const deployL2 = async (label: string, art: unknown, args: unknown[], ctor: string): Promise<Contract> => {
-		const c = await Contract.deploy(ewallet as never, art as never, args as never, ctor)
-			.send({ ...opts, contractAddressSalt: Fr.random(), universalDeploy: true } as never)
-			.deployed()
+		const salt = Fr.random()
+		const instance = await getContractInstanceFromInstantiationParams(
+			art as never,
+			{
+				constructorArgs: args,
+				salt,
+				publicKeys: PublicKeys.default(),
+				deployer: AztecAddress.ZERO,
+				constructorArtifact: ctor,
+			} as never,
+		)
+		await Contract.deploy(ewallet as never, art as never, args as never, ctor).send({
+			...opts,
+			contractAddressSalt: salt,
+			universalDeploy: true,
+			wait: { waitForStatus: TxStatus.PROPOSED },
+		} as never)
+		const c = await Contract.at(instance.address, art as never, ewallet as never)
 		console.log(`${label}:`, c.address.toString())
 		return c
 	}
 
-	const proxy = await deployL2("TokenMinterProxy", nargoArtifact("token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json"), [], "constructor")
+	const proxy = await deployL2(
+		"TokenMinterProxy",
+		nargoArtifact("token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json"),
+		[],
+		"constructor",
+	)
 	const token = await deployL2("Token", TokenContractArtifact, ["Nulo USDC", "USDC", 6, proxy.address], "constructor_with_minter")
-	const bridge = await deployL2("TokenBridge", nargoArtifact("token_bridge/target/token_bridge_contract-TokenBridge.json"), [proxy.address, EthAddress.fromString(portal)], "constructor")
+	const bridge = await deployL2(
+		"TokenBridge",
+		nargoArtifact("token_bridge/target/token_bridge_contract-TokenBridge.json"),
+		[proxy.address, EthAddress.fromString(portal)],
+		"constructor",
+	)
 
-	await proxy.methods.set_token(token.address).send(opts).wait()
-	await proxy.methods.set_minter(bridge.address, true).send(opts).wait()
+	await proxy.methods.set_token(token.address).send(sendOpts)
+	await proxy.methods.set_minter(bridge.address, true).send(sendOpts)
 	console.log("proxy wired (token + bridge minter)")
 
 	// ─── Wire L1 portal + fund mock (viem) ───────────────────────────
@@ -134,7 +163,18 @@ async function main() {
 	console.log("portal initialized")
 
 	try {
-		const fjAbi = [{ type: "function", name: "mint", inputs: [{ name: "to", type: "address" }, { name: "amount", type: "uint256" }], outputs: [], stateMutability: "nonpayable" }]
+		const fjAbi = [
+			{
+				type: "function",
+				name: "mint",
+				inputs: [
+					{ name: "to", type: "address" },
+					{ name: "amount", type: "uint256" },
+				],
+				outputs: [],
+				stateMutability: "nonpayable",
+			},
+		]
 		const fj = getContract({ address: feeJuice, abi: fjAbi as never, client: wallet as never })
 		// biome-ignore lint/suspicious/noExplicitAny: viem contract write typing
 		const mh = await (fj as any).write.mint([mock, 100_000n * 10n ** 18n])
