@@ -5,3 +5,4 @@
 
 export * from "./progress"
 export * from "./recovery"
+export * from "./recovery-crypto"

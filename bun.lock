@@ -40,7 +40,11 @@
     "packages/bridge-core": {
       "name": "@nulo/bridge-core",
       "version": "0.1.0",
+      "dependencies": {
+        "@nulo/wallet-crypto": "workspace:*",
+      },
       "devDependencies": {
+        "@types/node": "^24.2.1",
         "typescript": "^6.0.3",
         "vitest": "^4.1.5",
       },
