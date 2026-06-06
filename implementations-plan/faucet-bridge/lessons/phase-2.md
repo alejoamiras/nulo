@@ -22,8 +22,15 @@
 - **Currency ordering:** `require(usdc < WETH)` — WETH `0xfFf9…` is near the top of the address space, so a CREATE-deployed token sorts below it ~always → USDC=currency0, reuse the reference price/ticks. The ETH/feeJuice pool already exists live (initialize no-ops, add can be single-sided); USDC/WETH is new (our token → initialize creates it, PM gains our USDC).
 - Test gotcha: a Foundry `Test` contract needs `receive() external payable {}` to accept ETH swept back by the helper.
 
+## Sandbox e2e architecture — codex consult (verdict: option c)
+Consulted codex (xhigh) on how to test the L1↔L2 bridge + V4 fuel-swap on the local sandbox, which has no Uniswap V4 + no FeeAssetHandler. **Verdict: option (c)** — mock the `swapTarget` locally; keep the green Sepolia-fork Foundry test as the authoritative real-V4 integration test.
+- Codex confirmed **(b) is a trap**: aztec 4.2.0 `local-network` takes `--l1-rpc-urls` but deploys FRESH Aztec L1 contracts onto that RPC → a Sepolia fork gives real V4 but a NEW rollup, not canonical Aztec L2 state. Misses the cross-chain point.
+- (a) deploy-V4-locally: highest cost + still synthetic FeeJuice (no real FeeAssetHandler) → false "swap covered" confidence.
+- (c) decoupling is sound IFF the local mock exercises router orchestration: ERC20+native paths, WETH unwrap, under/over-delivery (balance-mismatch guard), revert-after-approval rollback, public+private claim — most already covered by the 8 SwapBridgeRouter mock tests.
+- ✅ `src/mocks/MockSwapTarget.sol` — deployable mock (take input → return FeeJuice at a configurable rate, honors minOutput + actually transfers `out`). The sandbox harness funds it with FeeJuice + sets the rate.
+
 ## Next
-- TokenPortal + L2 token/bridge deploy via aztec.js (task #4); swap-path integration test (USDC→WETH→ETH→feeJuice through the router) alongside the bridge-core l1 layer (task #3); local sandbox harness (task #2).
+- TokenPortal + L2 token/bridge deploy via aztec.js (task #4); local sandbox harness using MockSwapTarget (task #2); bridge-core l1/l2 layer (task #3).
 
 ## Gotcha
 - Don't write `@aztec/...` inside `///`/`/** */` NatSpec — solc parses `@aztec` as a doc tag ("Documentation tag ... not valid"). Use "aztec" without the `@` in prose comments.
