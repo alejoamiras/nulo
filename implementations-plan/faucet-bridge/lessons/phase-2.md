@@ -9,11 +9,11 @@
 - **UniswapFuelSwap:** add `hooks == address(0)` + hop-continuity to `_validateRoute` (R2 mandatory edit).
 
 ## Done
-- ✅ `MintableERC20.sol` + 7 forge tests (cap enforcement at/over, permissionless, Permit2 pre-approve for every holder, non-Permit2 allowance normal, decimals). `forge test` green (10 total incl. keystone).
+- ✅ `MintableERC20.sol` + 7 forge tests (cap enforcement at/over, permissionless, Permit2 pre-approve for every holder, non-Permit2 allowance normal, decimals).
+- ✅ `UniswapFuelSwap._validateRoute` hardened (R2 mandatory): every hop must be hookless (`hooks==address(0)`) + hop-continuity (each hop's output feeds the next input; the WETH<->native-ETH unwrap is the one allowed discontinuity). 6 forge tests (single/two-hop pass, hooks rejected, discontinuity rejected, native-unwrap passes, last-hop-must-be-FJ). `forge test` green (16 total incl. keystone + MintableERC20).
 
 ## Next (authoring — live-net-independent, validatable with mocks)
 - `SwapBridgeRouter` (strip attestation, keep `isPrivate`) + mock-based forge tests (reuse the reference's MockPermit2/MockSwap/MockPortal pattern).
-- `_validateRoute` `hooks==0` + hop-continuity edit + test.
 - Canonical-`TokenPortal` deploy script (authored; running it is operator-gated).
 
 ## Operator-gated (NOT runnable in sandbox)

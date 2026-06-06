@@ -222,6 +222,8 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
      *      1. First hop sells inputToken (or WETH for native-ETH single-hop).
      *      2. Last hop outputs feeJuice.
      *      3. Native ETH single-hop requires inputToken == weth.
+     *      4. Every hop uses a hookless pool (hooks == address(0)).
+     *      5. Each hop's output feeds the next hop's input (WETH<->ETH allowed).
      */
     function _validateRoute(
         address inputToken,
@@ -247,6 +249,25 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
             ? Currency.unwrap(last.currency1)
             : Currency.unwrap(last.currency0);
         require(lastOutput == feeJuice, "UniswapFuelSwap: last hop must output feeJuice");
+
+        // Every hop must use a hookless pool — we only route through our own
+        // seeded pools; a non-zero hooks address is an untrusted pool that the
+        // minFuelOutput slippage bound does not protect against. And each hop's
+        // output must feed the next hop's input; the WETH<->native-ETH unwrap
+        // is the one allowed discontinuity (settlement handles it).
+        for (uint256 i = 0; i < path.length; i++) {
+            require(address(path[i].hooks) == address(0), "UniswapFuelSwap: hooks not allowed");
+            if (i + 1 < path.length) {
+                address outI =
+                    zeroForOnes[i] ? Currency.unwrap(path[i].currency1) : Currency.unwrap(path[i].currency0);
+                address inNext = zeroForOnes[i + 1]
+                    ? Currency.unwrap(path[i + 1].currency0)
+                    : Currency.unwrap(path[i + 1].currency1);
+                bool continuous =
+                    outI == inNext || (outI == weth && inNext == address(0)) || (outI == address(0) && inNext == weth);
+                require(continuous, "UniswapFuelSwap: hop discontinuity");
+            }
+        }
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────
