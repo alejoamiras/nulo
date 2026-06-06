@@ -15,8 +15,10 @@
 - ✅ `token_bridge` attestation stripped + compiles (rc.2 nargo); schnorr dep + TXE test module removed.
 - ✅ bridge-evm `UniswapFuelSwap` + interfaces compile (`forge build`).
 
-## Next (live-net-independent — not yet done)
-- Keystone content-hash equality test (Solidity `Hash.sha256ToField` vs Noir `token_portal_content_hash_lib`) for fixed vectors — the one cross-chain guard the TXE can't provide. Ready to build with both toolchains in place.
+- ✅ **Keystone content-hash equality test (cross-chain proof).** Foundry (`bridge-evm/test/ContentHash.t.sol`) pins the 3 canonical L1 hashes (mint_to_public/private, withdraw) for fixed vectors; the Noir `keystone` crate asserts `token_portal_content_hash_lib` produces the SAME 3 values. `forge test` 3 pass + `nargo test` 3 pass (rc.2). The one cross-chain boundary the TXE can't test is now pinned in both toolchains — a selector/arg-order drift fails both sides. (Note: the R2 canonical-portal decision already makes the L1 hashes canonical-by-lineage; this keystone is the explicit regression pin.)
+
+## P1 remaining: ONLY the live-net recon (operator-gated)
+All live-net-INDEPENDENT P1 work is complete (both packages compile; cross-chain hashes proven). The sole remaining P1 item is the **recon go/no-go** — `getNodeInfo()` for the FeeJuicePortal underlying + `FeeAssetHandler` wiring + `mintAmount` + rollup version — which needs operator infra (`VITE_AZTEC_NODE_URL` + network egress + a Sepolia key). This is the plan's stop-the-line gate and gates P2+.
 
 ## BLOCKED (needs operator infra — the plan's stop-the-line gate)
 - Live-net recon go/no-go: `getNodeInfo()` for FeeJuicePortal underlying + `FeeAssetHandler` wiring + `mintAmount` + rollup version. Needs `VITE_AZTEC_NODE_URL` + network egress + a Sepolia key. **Cannot run in CI/sandbox** — must be run on operator infra before P2 deploy-shaping.
