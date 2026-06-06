@@ -41,7 +41,11 @@
       "name": "@nulo/bridge-core",
       "version": "0.1.0",
       "dependencies": {
+        "@aztec/accounts": "4.2.0",
+        "@aztec/aztec.js": "4.2.0",
+        "@aztec/foundation": "4.2.0",
         "@nulo/wallet-crypto": "workspace:*",
+        "viem": "npm:@aztec/viem@2.38.2",
       },
       "devDependencies": {
         "@types/node": "^24.2.1",

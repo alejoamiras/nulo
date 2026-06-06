@@ -12,7 +12,11 @@
 		"test:watch": "vitest"
 	},
 	"dependencies": {
-		"@nulo/wallet-crypto": "workspace:*"
+		"@nulo/wallet-crypto": "workspace:*",
+		"@aztec/aztec.js": "4.2.0",
+		"@aztec/accounts": "4.2.0",
+		"@aztec/foundation": "4.2.0",
+		"viem": "npm:@aztec/viem@2.38.2"
 	},
 	"devDependencies": {
 		"@types/node": "^24.2.1",
