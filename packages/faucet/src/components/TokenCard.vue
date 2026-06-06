@@ -9,10 +9,8 @@ import { useToast } from "@/composables/useToast"
 import type { FaucetToken } from "@/constants/tokens"
 import { explorerTxUrl } from "@/lib/explorer"
 import { TESTIDS } from "@/lib/testids"
-import Card from "./ui/Card.vue"
+import { Card, DisclaimerTag, DripButton } from "@nulo/design"
 import BalanceRow from "./composite/BalanceRow.vue"
-import DisclaimerTag from "./composite/DisclaimerTag.vue"
-import DripButton from "./composite/DripButton.vue"
 
 const props = defineProps<{
 	token: FaucetToken

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { TESTIDS } from "@/lib/testids"
-import AppButton from "./ui/AppButton.vue"
+import { AppButton } from "@nulo/design"
 import EmojiGrid from "./composite/EmojiGrid.vue"
 
 defineProps<{ emojis: string | null }>()

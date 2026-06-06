@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import AppButton from "@/components/ui/AppButton.vue"
+import AppButton from "../ui/AppButton.vue"
 
 const props = withDefaults(
 	defineProps<{
