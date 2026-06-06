@@ -5,6 +5,7 @@
 
 export * from "./content-hash"
 export * from "./l1"
+export * from "./l2"
 export * from "./progress"
 export * from "./recovery"
 export * from "./recovery-crypto"
