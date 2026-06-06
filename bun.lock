@@ -37,9 +37,25 @@
         "vitest": "^4.1.5",
       },
     },
+    "packages/design": {
+      "name": "@nulo/design",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@vitejs/plugin-vue": "^6.0.1",
+        "@vue/compiler-sfc": "^3.5.18",
+        "@vue/test-utils": "^2.4.9",
+        "jsdom": "^29.1.1",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.5",
+        "vue-tsc": "^3.0.5",
+      },
+      "peerDependencies": {
+        "vue": "^3.5.18",
+      },
+    },
     "packages/extension": {
       "name": "@nulo/extension",
-      "version": "0.20.0",
+      "version": "0.23.0-fast-path-internal-views",
       "dependencies": {
         "@alejoamiras/aztec-accelerator": "4.2.0",
         "@aztec/accounts": "4.2.0",
@@ -159,6 +175,7 @@
         "@aztec/wallet-sdk": "4.2.0",
         "@aztec/wallets": "4.2.0",
         "@defi-wonderland/aztec-standards": "4.2.0-aztecnr-rc.2",
+        "@nulo/design": "workspace:*",
         "vue": "^3.5.18",
       },
       "devDependencies": {
@@ -714,6 +731,8 @@
     "@nodelib/fs.walk": ["@nodelib/fs.walk@1.2.8", "", { "dependencies": { "@nodelib/fs.scandir": "2.1.5", "fastq": "^1.6.0" } }, "sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg=="],
 
     "@nulo/aztec-runtime": ["@nulo/aztec-runtime@workspace:packages/aztec-runtime"],
+
+    "@nulo/design": ["@nulo/design@workspace:packages/design"],
 
     "@nulo/extension": ["@nulo/extension@workspace:packages/extension"],
 
