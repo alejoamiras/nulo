@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — Faucet → Bridge</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1rem 0; padding: 0.75rem 1rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .phase b { color: #111; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .tag { display: inline-block; font-size: 0.72rem; padding: 0.1rem 0.45rem; border-radius: 3px; background: #eee; color: #555; margin-left: 0.3rem; vertical-align: middle; }
+    .hi { background: #fde2e2; color: #a11; }
+    .med { background: #fef3cd; color: #8a6d000; }
+    .lo { background: #e3f3e3; color: #277; }
+  </style>
+</head>
+<body>
+  <h1>Faucet → Bridge</h1>
+  <p>Turn Nulo's testnet faucet into a unified <b>Faucet + Bridge</b> app. Today the faucet hands you fake USDC/ETH on Aztec (L2). We're adding a real <b>bridge</b>: move those tokens between Ethereum (L1) and Aztec (L2) in both directions, and "fuel up" — swap a slice of your USDC into Aztec's gas token (<b>Fee Juice</b>) and land it on L2, all in one transaction. The whole thing stays a <b>static website with no server</b>, like the faucet. It reuses the work the author already did for the Holonym bridge — but strips out Holonym's identity/compliance checks and its database backend.</p>
+
+  <h2>Why this got the heaviest planning ("mega-deep")</h2>
+  <p>The plan scored HIGH on three of six risk dimensions: <b>Novelty</b> (first L1↔L2 bridge in this repo), <b>External coupling</b> (Ethereum + Uniswap + Permit2 + Aztec's portals all at once), and <b>Security</b> (it moves value across chains in one signed transaction). Three highs including novelty ⇒ the full ceremony: research agents mapped the code first, then three independent plans, then <b>two rounds of hostile review</b> by two different AI model families.</p>
+  <p>That review paid for itself. It caught two "facts" the plan had wrong: a contract we were about to <i>hand-write</i> already ships ready-made in Aztec's libraries (so we just deploy it), and a minting function we thought was locked-down is actually open to anyone. Both made the plan <i>simpler</i> and safer.</p>
+
+  <h2>The plan, phase by phase</h2>
+  <div class="phase"><b>P0 — Shared design package.</b><span class="tag lo">low</span> Pull the faucet's buttons/cards/colors into a reusable <code>@nulo/design</code> package so faucet and bridge look identical. Pure refactor.</div>
+  <div class="phase"><b>P0.5 — Plumbing spike.</b><span class="tag hi">high</span> Before building anything real, prove the tricky tech actually runs in a plain website: the Ethereum wallet library, the private-fee-juice library, and in-browser crypto. Fail fast here, not in month two.</div>
+  <div class="phase"><b>P1 — Look before you leap.</b><span class="tag hi">highest</span> Ask the live network what addresses it actually uses, confirm it speaks our pinned version, and confirm we can mint test Fee Juice. A 20-line test pins the one thing that, if wrong, silently loses funds: that Ethereum and Aztec agree on the exact message format. <b>Stop-the-line if the network doesn't match.</b></div>
+  <div class="phase"><b>P2 — Deploy the portal.</b><span class="tag med">med</span> The "portal" is the L1↔L2 lockbox. Aztec already ships a clean one — we deploy our own copy pointed at our tokens instead of writing risky bridge code from scratch.</div>
+  <div class="phase"><b>P3 — L1 faucet token.</b><span class="tag med">med</span> A fake USDC/ETH on Ethereum anyone can mint (capped per transaction) so people have something to bridge. Redeploy the L2 tokens so both the faucet and the bridge can mint the <i>same</i> token.</div>
+  <div class="phase"><b>P4 — Bridge brain.</b><span class="tag med">med</span> A framework-free TypeScript library with all the bridge logic (deposit, claim, withdraw, status-tracking, encrypted local recovery). Reuses Nulo's existing crypto.</div>
+  <div class="phase"><b>P5 — App shell.</b><span class="tag med">med</span> Turn the faucet into a two-tab app (Faucet / Bridge) and wire up the second wallet (Ethereum) next to the existing Aztec one.</div>
+  <div class="phase"><b>P6 — First real round-trip.</b><span class="tag hi">high</span> Move a token L1→L2 for real, with public Fee Juice, and a live progress bar. <b>Exit gate: you can export your recovery secret and re-import it after closing the tab.</b></div>
+  <div class="phase"><b>P7 — Private fuel.</b><span class="tag hi">high</span> Pay your Aztec fees <i>privately</i> via Wonderland's Fee-Paying Contract. The fiddliest cryptography in the project (the author already fixed the key bug once).</div>
+  <div class="phase"><b>P8 — Withdraw home.</b><span class="tag hi">high</span> Move tokens L2→L1. This is the long wait (proving takes 20–60 min) — and where the "N blocks remaining" bar really shines.</div>
+  <div class="phase"><b>P9 — The headline trick.</b><span class="tag hi">high</span> The "spend USDC, get Fee Juice + your bridged tokens in one transaction" swap, via our own Uniswap pools. Supports <b>private</b> tokens too (your call — see below).</div>
+  <div class="phase"><b>P10 — Polish + ship.</b><span class="tag lo">low</span> Activity list, retire the old package, two domains, docs.</div>
+
+  <h2>Human context (the ideas behind the decisions)</h2>
+  <ul>
+    <li><b>Portal / Fee Juice.</b> A portal locks a token on one side and mints it on the other via the chains' official message mailbox. Fee Juice is Aztec's gas token — you need a little to do anything on L2.</li>
+    <li><b>No server, on purpose.</b> Keeps infrastructure trivial. The cost: your "claim secret" lives only in your browser. Lose it before the second step and your deposit is stuck. So a loud "export your secret" button is built into the core flow, not bolted on later.</li>
+    <li><b>Private secrets are like cash.</b> For <i>private</i> transfers, the claim secret isn't tied to a recipient — whoever holds it can claim the funds. So an exported private secret is a bearer credential: treat the export file like cash, and the UI says so.</li>
+    <li><b>Why copy Holonym but drop half of it.</b> Holonym's bridge carried identity/compliance checks and a database. We keep the clever cross-chain plumbing and throw away the compliance layer — which is exactly what lets us offer private bridging that Holonym had to disable.</li>
+  </ul>
+
+  <h2>Open questions (resolved in early phases, not blocking approval)</h2>
+  <ul>
+    <li>Does the live network run our pinned version, is the Fee-Juice minter wired, and how big is each mint packet? → answered by the Phase-1 look-before-you-leap, which can halt the project cheaply if the answer is bad.</li>
+    <li>Does the Ethereum wallet library work against Aztec's forked copy of its dependency? → answered by the Phase-0.5 spike, with a hand-rolled fallback ready.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>What I need you to approve</h2>
+    <ul>
+      <li><b>Scope &amp; phases</b> as above (unified tabbed app; bidirectional bridge; public + private Fee Juice; USDC + ETH; seed our own swap pools; no server).</li>
+      <li><b>Tier:</b> mega-deep — confirmed (the two rounds of review are done and folded in).</li>
+      <li><b>Sequencing call:</b> the headline one-tx swap (P9) lands <i>after</i> the simpler direct bridge + private fuel are proven, so the riskiest piece can't mask earlier failures. The swap is still in v1 — just not first. OK?</li>
+      <li><b>Privacy:</b> confirmed FULL PARITY — the one-tx swap can bridge private tokens too.</li>
+      <li><b>/harden:</b> you chose no dedicated security audit; the built-in reviews stand. (Can revisit before any mainnet move.)</li>
+      <li>Approve / conditionally approve (with conditions) / reject (with blockers).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds</h2>
+    <p>One of these kicks off the autonomous build. <b>Use exactly one per session</b> — setting one replaces the other.</p>
+    <p class="warning">Recommended: <code>/loop</code> — a long, dependency-ordered, CI-gated build where the per-turn "pick the next phase, build, test, commit, watch CI, advance" rhythm is the whole point.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended: /loop</h3>
+      <pre><code>/loop Each turn, in priority order:
+1. Inspect (non-blocking): read implementations-plan/faucet-bridge/plan.md (per-phase status = source of truth) + lessons/; git status + git log --oneline -5. If a PR exists, gh pr view --json statusCheckRollup (no --watch).
+2. CI in flight on HEAD SHA? Stream gh run watch &lt;id&gt; up to ~10 min; if stuck, inspect logs + report blocked.
+3. Failed check/local run? Triage + fix; /codex xhigh if non-trivial. Commit (small, conventional) + push. After 5 failures on the same step, STOP + reassess.
+4. In-flight phase green? Mark it done in plan.md, file lessons/phase-N.md, print LESSONS_FILE=..., advance.
+5. Nothing in flight? Pick the next pending phase (deps: P0/P0.5/P1 front; P4 with P5) + execute: edit -> bun run lint + the relevant test (forge test / nargo test / bun run test / test:e2e / e2e:agent) -> commit -> push.
+6. All phases done? Post-impl: /code-review max --fix -> commit separately -> codex post-impl audit (/codex xhigh) -> address high/critical -> stop + surface.
+Discipline: plan.md/lessons/git are authoritative. Never merge to main/release, never deploy/publish. Phase-1 STOP-THE-LINE if the live net isn't 4.2.0-compatible or the FeeAssetHandler isn't wired.</code></pre>
+    </div>
+
+    <h3>Alternative: /goal (durable across sessions)</h3>
+    <pre><code>/goal All phases done in implementations-plan/faucet-bridge/plan.md; each printed LESSONS_FILE=...; /code-review max --fix applied + committed; codex post-impl audit done with high/critical addressed; bun run audit:vue + bun run lint:actions + the contract tests (forge test, nargo test) + bun run e2e:agent all report exit 0. Hard stop + surface if Phase-1 finds the live net isn't 4.2.0-compatible or the FeeAssetHandler isn't wired.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./research/">Research artifacts</a> · <a href="./lessons/">Lessons logs</a> · audits: <a href="audit-codex.md">codex</a>, <a href="audit-opus.md">opus R1</a>, <a href="audit-opus-r2.md">opus R2</a></p>
+</body>
+</html>
