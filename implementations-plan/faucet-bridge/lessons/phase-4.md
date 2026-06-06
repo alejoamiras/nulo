@@ -26,5 +26,11 @@ API (from Holonym `bridge-script/index-testnet.ts`):
 - Deployer: an aztec.js account funded via the sandbox (`getInitialTestAccounts`).
 - Reference closest to bridge-core's node layer: Holonym `bridge-sdk/src/l1.ts`.
 
+**Confirmed constructors/APIs (compiled artifacts + faucet `scripts/deploy.ts`):**
+- `token_minter_proxy`: constructor `()` (owner=deployer); `set_token(token)`, `set_minter(minter, allowed)`, `mint_to_public|private(recipient, amount)`. Artifact `token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json`.
+- `token_bridge`: constructor `(token_minter_proxy: AztecAddress, portal: EthAddress)`. Artifact `token_bridge/target/token_bridge_contract-TokenBridge.json`.
+- aztec-standards `Token`: deploy with `constructorArtifact: "constructor_with_minter"`, **minter = the proxy** (faucet sets minter=Dripper; Nulo sets minter=proxy and allow-lists BOTH Dripper + bridge via `set_minter`). `Contract.deploy(deployer, TokenContractArtifact, args, "constructor_with_minter")` + `getContractInstanceFromInstantiationParams`.
+- **Full aztec.js plumbing to replicate (PXE client, deployer wallet, deploy helper, instance registration): `packages/faucet/scripts/deploy.ts`.** Sandbox deployer: a funded test account (`getInitialTestAccounts`).
+
 ## Config (from recon)
 feeJuice `0x762c…` · feeJuicePortal `0xd336…` · registry `0xa0bf…` · feeAssetHandler `0x5602…` (mintAmount 1000 FJ). See `research/recon-testnet.md`.
