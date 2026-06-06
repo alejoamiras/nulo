@@ -13,6 +13,11 @@ dist
 dist-ssr
 *.local
 
+# Secrets / env (committed templates are .env.example only)
+.env
+.env.*
+!.env.example
+
 # Storybook build output (M6 phase 2)
 storybook-static/
 
