@@ -8,9 +8,9 @@ import { useTokenBalance, type UseTokenBalanceHandle } from "@/composables/useTo
 import { useToast } from "@/composables/useToast"
 import type { FaucetToken } from "@/constants/tokens"
 import { explorerTxUrl } from "@/lib/explorer"
+import { formatBigInt } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
-import { Card, DisclaimerTag, DripButton } from "@nulo/design"
-import BalanceRow from "./composite/BalanceRow.vue"
+import { BalanceRow, Card, DisclaimerTag, DripButton } from "@nulo/design"
 
 const props = defineProps<{
 	token: FaucetToken
@@ -28,6 +28,16 @@ const balance: UseTokenBalanceHandle | null =
 const drip = connected && props.wallet && props.account ? useFaucetDrip(props.wallet, props.account) : null
 const addToken = useFaucetAddToken()
 const { push, dismiss } = useToast()
+
+// Balance display strings. The presentational BalanceRow takes formatted text
+// + testids; this card owns the bigint formatting + loading state.
+const balanceLoading = computed(() => balance?.loading.value ?? false)
+function renderBalance(value: bigint | null): string {
+	if (value === null) return balanceLoading.value ? "…" : "—"
+	return formatBigInt(value, props.token.decimals)
+}
+const publicText = computed(() => renderBalance(balance?.publicBalance.value ?? null))
+const privateText = computed(() => renderBalance(balance?.privateBalance.value ?? null))
 
 // Per-card "last drip" — single source of recency. Without this, a
 // global-keyed lookup like `publicLast ?? privateLast` permanently
@@ -167,10 +177,10 @@ onBeforeUnmount(() => {
 			<p class="sub">Fixed drip: {{ token.displayAmount }} {{ token.symbol }}</p>
 		</header>
 		<BalanceRow
-			:public-balance="balance?.publicBalance.value ?? null"
-			:private-balance="balance?.privateBalance.value ?? null"
-			:decimals="token.decimals"
-			:loading="balance?.loading.value ?? false"
+			:public-text="publicText"
+			:private-text="privateText"
+			:public-test-id="TESTIDS.balancePublic"
+			:private-test-id="TESTIDS.balancePrivate"
 		/>
 		<div class="actions">
 			<!-- Order matches the wallet popup convention: private first, public second. -->

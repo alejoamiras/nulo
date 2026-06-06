@@ -21,8 +21,10 @@ export { default as Toast } from "./ui/Toast.vue"
 
 /** Composites */
 export { default as AddressDisplay } from "./composite/AddressDisplay.vue"
+export { default as BalanceRow } from "./composite/BalanceRow.vue"
 export { default as DisclaimerTag } from "./composite/DisclaimerTag.vue"
 export { default as DripButton } from "./composite/DripButton.vue"
+export { default as EmojiGrid } from "./composite/EmojiGrid.vue"
 
 /** Tokens */
 export * from "./tokens"

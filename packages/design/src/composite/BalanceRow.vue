@@ -1,22 +1,14 @@
 <script setup lang="ts">
-import { computed } from "vue"
-import { formatBigInt } from "@/lib/format"
-import { TESTIDS } from "@/lib/testids"
-
-const props = defineProps<{
-	publicBalance: bigint | null
-	privateBalance: bigint | null
-	decimals: number
-	loading?: boolean
+/**
+ * Presentational balance row. Receives already-formatted strings + the
+ * data-testids to emit; the parent owns the bigint formatting + loading state.
+ */
+defineProps<{
+	publicText: string
+	privateText: string
+	publicTestId?: string
+	privateTestId?: string
 }>()
-
-const publicText = computed(() => render(props.publicBalance))
-const privateText = computed(() => render(props.privateBalance))
-
-function render(value: bigint | null): string {
-	if (value === null) return props.loading ? "…" : "—"
-	return formatBigInt(value, props.decimals)
-}
 </script>
 
 <template>
@@ -24,11 +16,11 @@ function render(value: bigint | null): string {
 		<!-- Order matches the wallet popup convention: private first, public second. -->
 		<div class="cell">
 			<span class="label">balance · private</span>
-			<span class="value" :data-testid="TESTIDS.balancePrivate">{{ privateText }}</span>
+			<span class="value" :data-testid="privateTestId">{{ privateText }}</span>
 		</div>
 		<div class="cell">
 			<span class="label">balance · public</span>
-			<span class="value" :data-testid="TESTIDS.balancePublic">{{ publicText }}</span>
+			<span class="value" :data-testid="publicTestId">{{ publicText }}</span>
 		</div>
 	</div>
 </template>

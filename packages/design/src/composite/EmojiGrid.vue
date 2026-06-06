@@ -1,20 +1,23 @@
 <script setup lang="ts">
-import { computed } from "vue"
-import { toGrid } from "@/lib/emoji"
-import { TESTIDS } from "@/lib/testids"
-
-const props = defineProps<{ emojis: string }>()
-
-const cells = computed(() => toGrid(props.emojis))
+/**
+ * Presentational verification grid. The parent splits the emoji string into
+ * `cells` (e.g. via the app's `toGrid`) and supplies the data-testids to emit.
+ * This component owns no app utilities or testid registry.
+ */
+defineProps<{
+	cells: string[]
+	testId?: string
+	cellTestId?: (i: number) => string
+}>()
 </script>
 
 <template>
-	<div class="emoji-grid" :data-testid="TESTIDS.emojiGrid" role="img" aria-label="Verification grid">
+	<div class="emoji-grid" :data-testid="testId" role="img" aria-label="Verification grid">
 		<span
 			v-for="(cell, i) in cells"
 			:key="i"
 			class="cell"
-			:data-testid="TESTIDS.emojiCell(i)"
+			:data-testid="cellTestId ? cellTestId(i) : undefined"
 		>{{ cell }}</span>
 	</div>
 </template>

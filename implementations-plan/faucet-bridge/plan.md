@@ -100,7 +100,7 @@ packages/
 
 `[∥]` = parallelizable. Critical path: **P0.5/P1 (front-load) → P2 → P6 → P7 → P8 → P9.**
 
-**P0 — Workspace skeleton + `@nulo/design` extraction.** `[∥ P1]` LOW. Five packages; move tokens + 5 ui + 5 composite → `@nulo/design`; biome override; faucet rewired; fonts consumer-owned. Keep `nulo-schema-patch` the first import. **Validate:** faucet builds + smoke e2e + lint green, byte-identical render.
+**P0 — Workspace skeleton + `@nulo/design` extraction. ✅ DONE** (`cbd2797`+`433b279`+followup; **10/10 components** — `EmojiGrid`+`BalanceRow` decoupled to presentational props, testid values preserved; consumers run `toGrid`/`formatBigInt`). `[∥ P1]` LOW. Five packages; move tokens + ui + composite → `@nulo/design`; biome override; faucet rewired; fonts consumer-owned. **Validated:** lint 0 errors · 51 design tests · 143 faucet tests · faucet build · design+faucet typecheck all green.
 
 **P0.5 — Runtime/integration spike (in the real bridge-frontend).** `[∥ P1]` HIGH (de-risks the stack). Prove, end-to-end in a throwaway page: (a) the chosen L1 wallet stack (`@wagmi/core`/`@wagmi/vue`) actually works against the `@aztec/viem` fork — Permit2 EIP-712 sign + a Sepolia tx; else fall back to hand-rolled aliased composables; (b) Wonderland import mode mirroring the extension (tarball + vite alias) loads in the static app; (c) browser poseidon2 + the `additionalScopes:[fpc]` path runs a private FPC call; (d) derive the PrivateFPC address at `salt=Fr.zero()` and match the extension's. **Validate:** a committed spike note + a one-specifier lint rule; STOP if the wallet stack can't drive the fork.
 
