@@ -16,11 +16,17 @@
 
 - ✅ `SwapBridgeRouter` mock tests: 8 (bridgeWithFuel + bridge × public/private, balance-mismatch guard, Permit2 rejection, invalid-fuelAmount, sweep-onlyOwner) via inline MockPermit2/MockSwap/MockTokenPortal/MockFeeJuicePortal. **24 forge tests total** (keystone 3 + MintableERC20 7 + RouteValidation 6 + SwapBridgeRouter 8).
 
-## Next (authoring — live-net-independent)
-- Canonical-`TokenPortal` deploy script (`forge script` that deploys a TokenPortal instance + `initialize(registry, underlying, l2Bridge)` + the router/swap wiring). Authorable; running it is operator-gated (Sepolia deployer key). After it, the P2 contract layer is complete (on-chain deploy is the operator step).
+## Deploy (P2 deploy orchestration — ✅ L1 layer fork-validated)
+- ✅ `script/DeployBridge.s.sol` — deploys MintableERC20 (our USDC) + UniswapFuelSwap + SwapBridgeRouter; seeds the ETH/feeJuice + USDC/WETH V4 pools via the generic `PoolSetupHelper` (FeeAssetHandler.mint × N + unlock/modifyLiquidity/settle). Adapted from the Human-Tech deploy, minus the trusted-forwarder.
+- ✅ `test/DeployBridge.fork.t.sol` — forks Sepolia (opt-in via `SEPOLIA_RPC_URL`; skips in CI) and runs the WHOLE deploy + both pool seeds against the **real PoolManager `0xE03A1074…` + the permissionless FeeAssetHandler**. **25 forge tests green.** Validates the L1 deploy/seed end-to-end without a broadcast.
+- **Currency ordering:** `require(usdc < WETH)` — WETH `0xfFf9…` is near the top of the address space, so a CREATE-deployed token sorts below it ~always → USDC=currency0, reuse the reference price/ticks. The ETH/feeJuice pool already exists live (initialize no-ops, add can be single-sided); USDC/WETH is new (our token → initialize creates it, PM gains our USDC).
+- Test gotcha: a Foundry `Test` contract needs `receive() external payable {}` to accept ETH swept back by the helper.
+
+## Next
+- TokenPortal + L2 token/bridge deploy via aztec.js (task #4); swap-path integration test (USDC→WETH→ETH→feeJuice through the router) alongside the bridge-core l1 layer (task #3); local sandbox harness (task #2).
 
 ## Gotcha
 - Don't write `@aztec/...` inside `///`/`/** */` NatSpec — solc parses `@aztec` as a doc tag ("Documentation tag ... not valid"). Use "aztec" without the `@` in prose comments.
 
-## Operator-gated (NOT runnable in sandbox)
-- Actual on-chain **deploys** (Sepolia deployer key) + L2 token redeploy behind `token_minter_proxy` + V4 pool seeding (`FeeAssetHandler.mint` × N for ~1000 FJ each).
+## Operator-gated (the live broadcast only — deploy LOGIC is fork-validated)
+- The live-net **broadcast** of DeployBridge + the L2 deploys. The deployer key is now wired (`bridge-evm/.env`, `0xFcc2…`, 0.187 ETH). The deploy + seed logic itself is proven by the Sepolia fork test, so the broadcast is a mechanical step, not a risk.
