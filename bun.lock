@@ -43,7 +43,13 @@
       "dependencies": {
         "@aztec/accounts": "4.2.0",
         "@aztec/aztec.js": "4.2.0",
+        "@aztec/constants": "4.2.0",
         "@aztec/foundation": "4.2.0",
+        "@aztec/l1-artifacts": "4.2.0",
+        "@aztec/noir-contracts.js": "4.2.0",
+        "@aztec/stdlib": "4.2.0",
+        "@aztec/wallets": "4.2.0",
+        "@defi-wonderland/aztec-standards": "4.2.0-aztecnr-rc.2",
         "@nulo/wallet-crypto": "workspace:*",
         "viem": "npm:@aztec/viem@2.38.2",
       },
