@@ -49,6 +49,13 @@ export const TESTIDS = {
 	tabFaucet: "fa-tab-faucet",
 	tabBridge: "fa-tab-bridge",
 	bridgeView: "fa-bridge-view",
+
+	// Bridge — L1 (Ethereum) wallet
+	l1Status: "fa-l1-status",
+	l1Connect: "fa-l1-connect",
+	l1Account: "fa-l1-account",
+	l1Disconnect: "fa-l1-disconnect",
+	l1SwitchChain: "fa-l1-switch-chain",
 } as const
 
 export type Testid = (typeof TESTIDS)[keyof typeof TESTIDS]

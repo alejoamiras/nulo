@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import L1WalletPanel from "@/components/L1WalletPanel.vue"
 import { TESTIDS } from "@/lib/testids"
 </script>
 
@@ -12,7 +13,9 @@ import { TESTIDS } from "@/lib/testids"
 			</p>
 		</header>
 
-		<div class="placeholder">Bridge flows land here next.</div>
+		<L1WalletPanel />
+
+		<div class="placeholder">Deposit / withdraw / swap flows land here next.</div>
 	</div>
 </template>
 

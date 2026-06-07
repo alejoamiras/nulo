@@ -31,6 +31,7 @@
 		"@aztec/wallets": "4.2.0",
 		"@defi-wonderland/aztec-standards": "4.2.0-aztecnr-rc.2",
 		"@nulo/design": "workspace:*",
+		"viem": "^2.43.0",
 		"vue": "^3.5.18"
 	},
 	"devDependencies": {
