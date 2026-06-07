@@ -45,3 +45,4 @@ wallet_data_*/
 
 # sandbox deploy output (instance-specific)
 packages/bridge-app/public/sandbox.json
+packages/bridge-app/public/token_bridge.json

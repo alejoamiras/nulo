@@ -11,7 +11,7 @@
  *
  * Run: bun run deploy:sandbox   (from packages/bridge-core)
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { getInitialTestAccountsData } from "@aztec/accounts/testing"
@@ -399,7 +399,8 @@ async function main() {
 	const outDir = join(here, "..", "..", "bridge-app", "public")
 	mkdirSync(outDir, { recursive: true })
 	writeFileSync(join(outDir, "sandbox.json"), `${JSON.stringify(deployment, null, 2)}\n`)
-	console.log("\n✅ FULL sandbox deploy OK — wrote bridge-app/public/sandbox.json")
+	copyFileSync(join(AZTEC, "token_bridge/target/token_bridge_contract-TokenBridge.json"), join(outDir, "token_bridge.json"))
+	console.log("\n✅ FULL sandbox deploy OK — wrote bridge-app/public/{sandbox,token_bridge}.json")
 	console.log(JSON.stringify(deployment, null, 2))
 }
 

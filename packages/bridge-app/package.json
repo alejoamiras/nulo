@@ -11,8 +11,17 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
+		"@aztec/accounts": "4.2.0",
+		"@aztec/aztec.js": "4.2.0",
+		"@aztec/constants": "4.2.0",
+		"@aztec/foundation": "4.2.0",
+		"@aztec/l1-artifacts": "4.2.0",
+		"@aztec/noir-contracts.js": "4.2.0",
+		"@aztec/wallets": "4.2.0",
+		"@defi-wonderland/aztec-standards": "4.2.0-aztecnr-rc.2",
 		"@nulo/bridge-core": "workspace:*",
 		"@nulo/design": "workspace:*",
+		"viem": "npm:@aztec/viem@2.38.2",
 		"vue": "^3.5.18"
 	},
 	"devDependencies": {
