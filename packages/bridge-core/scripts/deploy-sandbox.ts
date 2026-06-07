@@ -18,6 +18,7 @@ import { getInitialTestAccountsData } from "@aztec/accounts/testing"
 import { loadContractArtifact } from "@aztec/aztec.js/abi"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
+import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
@@ -182,6 +183,63 @@ async function main() {
 		console.log("funded mock with feeJuice")
 	} catch (e) {
 		console.warn("feeJuice mint failed (fallback: anvil_setStorageAt):", (e as Error).message)
+	}
+
+	if (process.argv.includes("--smoke")) {
+		console.log("\n=== deposit-public smoke (L1 deposit → L2 claim) ===")
+		const amount = 100n * 10n ** 6n
+		const l2recipient = from
+		const secret = Fr.random()
+		const secretHash = await computeSecretHash(secret)
+		const usdcAbi = usdcArt.abi as never
+
+		await pub.waitForTransactionReceipt({
+			hash: await wallet.writeContract({
+				address: usdc,
+				abi: usdcAbi,
+				functionName: "mint",
+				args: [account.address, amount] as never,
+			}),
+		})
+		await pub.waitForTransactionReceipt({
+			hash: await wallet.writeContract({ address: usdc, abi: usdcAbi, functionName: "approve", args: [portal, amount] as never }),
+		})
+		const depositArgs = [l2recipient.toString(), amount, secretHash.toString()]
+		const sim = await pub.simulateContract({
+			address: portal,
+			abi: TokenPortalAbi as never,
+			functionName: "depositToAztecPublic",
+			args: depositArgs as never,
+			account,
+		})
+		const leafIndex = BigInt((sim.result as [string, bigint])[1])
+		await pub.waitForTransactionReceipt({
+			hash: await wallet.writeContract({
+				address: portal,
+				abi: TokenPortalAbi as never,
+				functionName: "depositToAztecPublic",
+				args: depositArgs as never,
+			}),
+		})
+		console.log("deposited 100 USDC → L2, leafIndex:", leafIndex.toString())
+
+		let claimed = false
+		for (let i = 0; i < 20 && !claimed; i++) {
+			try {
+				await bridge.methods.claim_public(l2recipient, amount, secret, new Fr(leafIndex)).send(sendOpts)
+				claimed = true
+			} catch {
+				await new Promise((r) => setTimeout(r, 3000))
+			}
+		}
+		if (!claimed) throw new Error("claim_public never succeeded (L1→L2 message not synced)")
+
+		// aztec.js 4.2.0 simulate() wraps the value in { result, offchainEffects, offchainMessages }.
+		const bal = ((await token.methods.balance_of_public(l2recipient).simulate({ from })) as { result: bigint }).result
+		console.log("L2 public USDC balance:", bal.toString())
+		if (bal < amount) throw new Error(`balance ${bal} < deposited ${amount}`)
+		console.log("✅ deposit-public balance assertion OK (100 USDC minted on L2)")
+		console.log("✅ deposit-public smoke PASSED")
 	}
 
 	console.log("\n✅ FULL sandbox deploy OK")
