@@ -1,6 +1,6 @@
 /**
- * Live-testnet bridge DEPOSIT (the goal's live-testnet smoke). Deposit-only — no swap /
- * Permit2 / pools (those are fork-proven in bridge-evm).
+ * Live-testnet bridge DEPOSIT + WITHDRAW (the goal's live-testnet smoke, bidirectional).
+ * No swap / Permit2 / pools (those are fork-proven in bridge-evm).
  *
  * L1 (Sepolia, real PRIVATE_KEY via viem): MintableERC20 USDC + canonical TokenPortal.
  * L2 (testnet aztec, EmbeddedWallet with REAL proofs + sponsored FPC): a fresh Schnorr
@@ -17,6 +17,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { loadContractArtifact } from "@aztec/aztec.js/abi"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { SetPublicAuthwitContractInteraction } from "@aztec/aztec.js/authorization"
 import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
@@ -33,6 +34,7 @@ import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
 import { createPublicClient, createWalletClient, defineChain, getContract, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
+import { consumeWithdrawal } from "../src/flows"
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://rpc.testnet.aztec-labs.com"
@@ -223,6 +225,42 @@ async function main() {
 	console.log(`L2 public USDC balance: ${bal} (${mins()})`)
 	if (bal < amount) throw new Error(`balance ${bal} < deposited ${amount}`)
 	console.log(`\n✅ LIVE-TESTNET deposit PASSED — 100 USDC bridged Sepolia → testnet L2 in ${mins()}`)
+
+	// ─── Withdraw (L2 → L1) — bidirectional proof + live-validates consumeWithdrawal ──
+	console.log("\n=== withdraw smoke (L2 burn → L1 release) ===")
+	const wAmount = 40n * 10n ** 6n
+	const wNonce = Fr.random()
+	const authwit = await SetPublicAuthwitContractInteraction.create(
+		ewallet as never,
+		from,
+		{ caller: proxy.address, action: token.methods.burn_public(from, wAmount, wNonce) } as never,
+		true,
+	)
+	await authwit.send(sendOpts)
+	const { receipt: exitReceipt } = (await bridge.methods
+		.exit_to_l1_public(EthAddress.fromString(account.address), wAmount, EthAddress.ZERO, wNonce)
+		.send(sendOpts)) as { receipt: { txHash: unknown } }
+	console.log(`exit_to_l1 sent (${mins()}); waiting for proven epoch (slow on testnet)…`)
+	const balOf = async (): Promise<bigint> =>
+		(await pub.readContract({
+			address: usdc,
+			abi: usdcAbi as never,
+			functionName: "balanceOf",
+			args: [account.address] as never,
+		})) as bigint
+	const usdcBefore = await balOf()
+	await consumeWithdrawal(
+		{ pub, wallet, account } as never,
+		node as never,
+		exitReceipt,
+		{ recipientL1: account.address, amount: wAmount, portal, portalAbi: TokenPortalAbi as never },
+		(s) => console.log(`withdraw: ${s} (${mins()})`),
+	)
+	const withdrawn = (await balOf()) - usdcBefore
+	console.log(`L1 USDC withdrawn: ${withdrawn} (${mins()})`)
+	if (withdrawn < wAmount) throw new Error(`withdrew ${withdrawn} < ${wAmount}`)
+	console.log(`✅ LIVE-TESTNET withdraw PASSED — 40 USDC L2 → Sepolia in ${mins()}`)
+
 	console.log(
 		JSON.stringify(
 			{ usdc, portal, proxy: proxy.address.toString(), token: token.address.toString(), bridge: bridge.address.toString() },
