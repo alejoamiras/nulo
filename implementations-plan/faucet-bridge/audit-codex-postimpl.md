@@ -26,4 +26,6 @@
 
 ## LOW
 
-6. **Replay/expiry test coverage weak** — `SwapBridgeRouter.t.sol` uses a mock Permit2 + `deadline=max`; no real `InvalidNonce`/expiry regression. **Fix:** a real Permit2 fork test (the fork harness already exists in `DeployBridge.fork.t.sol`). **Status:** ☐ pending.
+6. **Replay/expiry test coverage weak** — `SwapBridgeRouter.t.sol` uses a mock Permit2 + `deadline=max`; no real `InvalidNonce`/expiry regression. **Fix:** a real Permit2 fork test (the fork harness already exists in `DeployBridge.fork.t.sol`). **Status:** ☑ FIXED — `SwapBridgeRouterPermit2Fork.t.sol` forks Sepolia + drives the REAL Permit2 + REAL Uniswap V4 through `bridgeWithFuel`: `test_bridgeWithFuel_realSwapAndPermit2` (signed witness transfer → swap USDC→WETH→ETH→FeeJuice → bridge), `test_permit2NonceReplayReverts`, `test_permit2ExpiredDeadlineReverts`. All 3 green on-fork; full forge suite 30 tests.
+
+**All 6 findings addressed.** HIGH ×3 + MEDIUM ×2 fixed during implementation; LOW #6 closed by the fork test above.
