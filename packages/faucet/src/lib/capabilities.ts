@@ -38,7 +38,7 @@ interface ScopedFunction {
 interface AccountsCapability {
 	type: "accounts"
 	canGet: true
-	canCreateAuthWit: false
+	canCreateAuthWit: boolean
 }
 
 interface ContractsCapability {
@@ -59,13 +59,13 @@ interface TransactionCapability {
 	scope: ReadonlyArray<ScopedFunction>
 }
 
-export interface FaucetManifest {
+export interface AppManifest {
 	version: "1.0"
 	metadata: { name: string; version: string; description: string; url: string }
 	capabilities: ReadonlyArray<AccountsCapability | ContractsCapability | SimulationCapability | TransactionCapability>
 }
 
-export function buildFaucetManifest(input: FaucetManifestInput): FaucetManifest {
+export function buildFaucetManifest(input: FaucetManifestInput): AppManifest {
 	const { dripperAddress, usdcAddress, ethAddress, sponsoredFpcAddress } = input
 	return {
 		version: "1.0",
@@ -103,6 +103,64 @@ export function buildFaucetManifest(input: FaucetManifestInput): FaucetManifest 
 				scope: [
 					{ contract: dripperAddress, function: "drip_to_public" },
 					{ contract: dripperAddress, function: "drip_to_private" },
+					{ contract: sponsoredFpcAddress, function: "sponsor_unconditionally" },
+				],
+			},
+		],
+	}
+}
+
+export interface BridgeManifestInput {
+	readonly bridgeAddress: AztecAddress
+	readonly tokenAddress: AztecAddress
+	readonly proxyAddress: AztecAddress
+	readonly sponsoredFpcAddress: AztecAddress
+	readonly appUrl?: string
+}
+
+/**
+ * Build the wallet-sdk capability manifest for the Bridge tab. Wider than the faucet's:
+ *  - `accounts.canCreateAuthWit: true` — `exit_to_l1` needs a public burn auth-wit.
+ *  - `contracts` = [bridge, token, proxy] (token_bridge, the bridged token, the minter proxy).
+ *  - `transaction.scope` covers claim + exit (both privacies), the token burns the exit auth-wit
+ *    drives, and the SponsoredFPC sponsor call (Nulo enforces every `exec.calls` entry vs scope).
+ *  - `simulation` scopes the token balance reads.
+ *
+ * Scope is refined in F4 once the flows run through the app (a missing entry surfaces as
+ * "Function artifact not found").
+ */
+export function buildBridgeManifest(input: BridgeManifestInput): AppManifest {
+	const { bridgeAddress, tokenAddress, proxyAddress, sponsoredFpcAddress } = input
+	return {
+		version: "1.0",
+		metadata: {
+			name: "nulo-bridge",
+			version: "0.1.0",
+			description: "Bridge assets between Ethereum (L1) and Aztec (L2) — Nulo",
+			url: input.appUrl ?? defaultUrl(),
+		},
+		capabilities: [
+			{ type: "accounts", canGet: true, canCreateAuthWit: true },
+			{
+				type: "contracts",
+				contracts: [bridgeAddress, tokenAddress, proxyAddress],
+				canRegister: true,
+				canGetMetadata: true,
+			},
+			{
+				type: "simulation",
+				utilities: { scope: [{ contract: tokenAddress, function: "balance_of_private" }] },
+				transactions: { scope: [{ contract: tokenAddress, function: "balance_of_public" }] },
+			},
+			{
+				type: "transaction",
+				scope: [
+					{ contract: bridgeAddress, function: "claim_public" },
+					{ contract: bridgeAddress, function: "claim_private" },
+					{ contract: bridgeAddress, function: "exit_to_l1_public" },
+					{ contract: bridgeAddress, function: "exit_to_l1_private" },
+					{ contract: tokenAddress, function: "burn_public" },
+					{ contract: tokenAddress, function: "burn_private" },
 					{ contract: sponsoredFpcAddress, function: "sponsor_unconditionally" },
 				],
 			},
