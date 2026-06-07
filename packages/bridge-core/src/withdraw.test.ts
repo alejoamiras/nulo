@@ -13,7 +13,7 @@ import { consumeWithdrawal } from "./flows"
 const makeL1 = () => ({
 	account: { address: "0xL1ACC" },
 	pub: {
-		simulateContract: vi.fn(async () => ({ request: { sentinel: true } })),
+		simulateContract: vi.fn(async (_a: unknown) => ({ request: { sentinel: true } })),
 		waitForTransactionReceipt: vi.fn(async () => ({})),
 	},
 	wallet: { writeContract: vi.fn(async () => "0xhash") },

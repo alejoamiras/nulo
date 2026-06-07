@@ -13,7 +13,8 @@ import { Fr } from "@aztec/aztec.js/fields"
 import type { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
 import { InboxAbi } from "@aztec/l1-artifacts"
-import { type Abi, type Account, type Address, parseEventLogs, type PublicClient, type WalletClient } from "viem"
+import { type Abi, type Account, type Address, type Hex, parseEventLogs, type PublicClient, type WalletClient } from "viem"
+import { type BridgeWitness, bridgeWitnessPermitTypedData, hashRoute, type PoolKey } from "./l1"
 import type { SendOpts } from "./l2"
 
 /** The connected L1 surface the flows need (a viem wallet + public client + account). */
@@ -190,4 +191,135 @@ export async function consumeWithdrawal(
 	})
 	await l1.pub.waitForTransactionReceipt({ hash: await l1.wallet.writeContract(req.request as never) })
 	onStage?.("done")
+}
+
+/** One-tx swap+fuel bridge stages, surfaced to the UI for the loading bar. */
+export type SwapFlowStage = "signing" | "swapping" | "syncing" | "done"
+
+/** Inputs for the headline `bridgeWithFuel`: swap `fuelAmount` of `bridgeToken` → Fee Juice, bridge the rest. */
+export interface SwapBridgeParams {
+	router: Address
+	routerAbi: Abi
+	permit2: Address
+	tokenPortal: Address
+	bridgeToken: Address
+	totalAmount: bigint
+	fuelAmount: bigint
+	aztecRecipient: Hex
+	fuelRecipient: Hex
+	minFuelOutput: bigint
+	path: PoolKey[]
+	zeroForOnes: boolean[]
+	isPrivate: boolean
+	nonce: bigint
+	deadline: bigint
+	chainId: number
+}
+
+/** What the L2 side needs after the L1 swap+bridge lands: the two claim secrets + leaf indices. */
+export interface SwapBridgeResult {
+	tokenSecretHex: string
+	fuelSecretHex: string
+	tokenLeafIndex: bigint
+	fuelLeafIndex: bigint
+	fuelReceived: bigint
+}
+
+/** Persist BOTH claim secrets BEFORE the irreversible bridgeWithFuel; record leaf indices once it lands. */
+export interface SwapRecoveryHooks {
+	onSecrets?: (r: { tokenSecretHex: string; fuelSecretHex: string; aztecRecipient: Hex; isPrivate: boolean }) => void
+	onBridged?: (r: { tokenLeafIndex: bigint; fuelLeafIndex: bigint }) => void
+}
+
+/**
+ * The headline one-tx flow: sign a Permit2 witness-bound transfer, then call the router's
+ * `bridgeWithFuel` — which pulls the token, swaps `fuelAmount` for Fee Juice, deposits the FJ to
+ * L2, and bridges the remaining tokens, atomically. The witness binds every bridge field (the
+ * hashing is cross-pinned to the Solidity router in l1.test.ts), so a relayer can't alter
+ * recipients/amounts/route after signing. Returns the two claim secrets + the Inbox leaf indices
+ * (read from the `BridgeWithFuel` event, not guessed from deposit order) the L2 side claims with.
+ * viem-only; the L2 claims (token via claim_*, fuel via publicFeeJuicePayment) run separately.
+ */
+export async function runSwapBridge(
+	l1: L1Ctx,
+	p: SwapBridgeParams,
+	onStage?: (s: SwapFlowStage) => void,
+	recovery?: SwapRecoveryHooks,
+): Promise<SwapBridgeResult> {
+	const tokenSecret = Fr.random()
+	const fuelSecret = Fr.random()
+	const tokenSecretHash = (await computeSecretHash(tokenSecret)).toString() as Hex
+	const fuelSecretHash = (await computeSecretHash(fuelSecret)).toString() as Hex
+	// Persist BOTH secrets before the irreversible swap+bridge — a lost preimage strands the claim.
+	recovery?.onSecrets?.({
+		tokenSecretHex: tokenSecret.toString(),
+		fuelSecretHex: fuelSecret.toString(),
+		aztecRecipient: p.aztecRecipient,
+		isPrivate: p.isPrivate,
+	})
+
+	const witness: BridgeWitness = {
+		tokenPortal: p.tokenPortal,
+		bridgeToken: p.bridgeToken,
+		totalAmount: p.totalAmount,
+		fuelAmount: p.fuelAmount,
+		aztecRecipient: p.aztecRecipient,
+		fuelRecipient: p.fuelRecipient,
+		tokenSecretHash,
+		fuelSecretHash,
+		minFuelOutput: p.minFuelOutput,
+		routeHash: hashRoute(p.path, p.zeroForOnes),
+		isPrivate: p.isPrivate,
+	}
+	const typedData = bridgeWitnessPermitTypedData(
+		{ permitted: { token: p.bridgeToken, amount: p.totalAmount }, spender: p.router, nonce: p.nonce, deadline: p.deadline },
+		witness,
+		p.permit2,
+		p.chainId,
+	)
+
+	onStage?.("signing")
+	const signature = await l1.wallet.signTypedData({ account: l1.account, ...typedData } as never)
+
+	onStage?.("swapping")
+	const bridgeParams = {
+		tokenPortal: p.tokenPortal,
+		bridgeToken: p.bridgeToken,
+		totalAmount: p.totalAmount,
+		fuelAmount: p.fuelAmount,
+		aztecRecipient: p.aztecRecipient,
+		fuelRecipient: p.fuelRecipient,
+		tokenSecretHash,
+		fuelSecretHash,
+		minFuelOutput: p.minFuelOutput,
+		path: p.path,
+		zeroForOnes: p.zeroForOnes,
+		isPrivate: p.isPrivate,
+	}
+	const receipt = await l1.pub.waitForTransactionReceipt({
+		hash: await l1.wallet.writeContract({
+			address: p.router,
+			abi: p.routerAbi,
+			functionName: "bridgeWithFuel",
+			args: [bridgeParams, { nonce: p.nonce, deadline: p.deadline, signature }],
+			account: l1.account,
+			chain: l1.wallet.chain,
+		} as never),
+	})
+
+	onStage?.("syncing")
+	const events = parseEventLogs({ abi: p.routerAbi, eventName: "BridgeWithFuel", logs: receipt.logs })
+	const ev = events[0] as { args?: { tokenIndex?: bigint; fuelIndex?: bigint; fuelAmount?: bigint } } | undefined
+	if (ev?.args?.tokenIndex === undefined || ev.args.fuelIndex === undefined) {
+		throw new Error("bridgeWithFuel emitted no BridgeWithFuel event")
+	}
+	recovery?.onBridged?.({ tokenLeafIndex: ev.args.tokenIndex, fuelLeafIndex: ev.args.fuelIndex })
+	onStage?.("done")
+	return {
+		tokenSecretHex: tokenSecret.toString(),
+		fuelSecretHex: fuelSecret.toString(),
+		tokenLeafIndex: ev.args.tokenIndex,
+		fuelLeafIndex: ev.args.fuelIndex,
+		fuelReceived: ev.args.fuelAmount ?? 0n,
+	}
 }
