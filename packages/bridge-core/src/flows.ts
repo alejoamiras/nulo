@@ -157,6 +157,8 @@ export interface WithdrawConsumeParams {
 	amount: bigint
 	portal: Address
 	portalAbi: Abi
+	/** Seconds to wait for the burn's epoch to prove (aztec.js default 600 — raise for slow networks like the live testnet). */
+	provenTimeoutSec?: number
 }
 
 /**
@@ -173,7 +175,7 @@ export async function consumeWithdrawal(
 	onStage?: (s: WithdrawFlowStage) => void,
 ): Promise<void> {
 	onStage?.("proving")
-	await waitForProven(node, exitReceipt as never)
+	await waitForProven(node, exitReceipt as never, (p.provenTimeoutSec ? { provenTimeout: p.provenTimeoutSec } : undefined) as never)
 	const eff = await node.getTxEffect(exitReceipt.txHash as never)
 	if (!eff) throw new Error("no tx effect for exit")
 	const messageHash = eff.data.l2ToL1Msgs[0]

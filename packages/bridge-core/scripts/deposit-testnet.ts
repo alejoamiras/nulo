@@ -253,7 +253,7 @@ async function main() {
 		{ pub, wallet, account } as never,
 		node as never,
 		exitReceipt,
-		{ recipientL1: account.address, amount: wAmount, portal, portalAbi: TokenPortalAbi as never },
+		{ recipientL1: account.address, amount: wAmount, portal, portalAbi: TokenPortalAbi as never, provenTimeoutSec: 1800 },
 		(s) => console.log(`withdraw: ${s} (${mins()})`),
 	)
 	const withdrawn = (await balOf()) - usdcBefore
