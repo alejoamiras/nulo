@@ -344,6 +344,42 @@ async function main() {
 		console.log("L1 USDC withdrawn:", withdrawn.toString())
 		if (withdrawn < wAmount) throw new Error(`withdrew ${withdrawn} < ${wAmount}`)
 		console.log("✅ withdraw-public smoke PASSED")
+
+		// ── withdraw-private (flow #4b): exit_to_l1_private (private burn, private authwit) ──
+		console.log("\n=== withdraw-private smoke (private L2 burn → L1 consume) ===")
+		const wpAmount = 30n * 10n ** 6n
+		const wpNonce = Fr.random()
+		const ni = await node.getNodeInfo()
+		const chainInfo = { chainId: new Fr(ni.l1ChainId), version: new Fr(ni.rollupVersion) }
+		const burnAuthwit = await deployer.createAuthWit(
+			{ caller: proxy.address, action: token.methods.burn_private(from, wpAmount, wpNonce) },
+			chainInfo as never,
+		)
+		const { receipt: exitPReceipt } = await bridge.methods
+			.exit_to_l1_private(EthAddress.fromString(account.address), wpAmount, EthAddress.ZERO, wpNonce)
+			.send({ ...sendOpts, authWitnesses: [burnAuthwit] })
+		const exitPTxHash = exitPReceipt.txHash
+		await waitForProven(node, exitPReceipt)
+		const effP = await node.getTxEffect(exitPTxHash)
+		if (!effP) throw new Error("no tx effect for private exit")
+		const messageHashP = effP.data.l2ToL1Msgs[0]
+		if (!messageHashP) throw new Error("no L2→L1 message in private exit")
+		const witP = await computeL2ToL1MembershipWitness(node, messageHashP, exitPTxHash, 0)
+		if (!witP) throw new Error("private withdraw witness not available")
+		const pathP = witP.siblingPath.toBufferArray().map((b: Buffer) => `0x${b.toString("hex")}` as `0x${string}`)
+		const usdcBeforeP = await balOf()
+		const wReqP = await pub.simulateContract({
+			address: portal,
+			abi: TokenPortalAbi as never,
+			functionName: "withdraw",
+			args: [account.address, wpAmount, false, BigInt(witP.epochNumber), witP.leafIndex, pathP] as never,
+			account,
+		})
+		await pub.waitForTransactionReceipt({ hash: await wallet.writeContract(wReqP.request as never) })
+		const withdrawnP = (await balOf()) - usdcBeforeP
+		console.log("private: L1 USDC withdrawn:", withdrawnP.toString())
+		if (withdrawnP < wpAmount) throw new Error(`private withdrew ${withdrawnP} < ${wpAmount}`)
+		console.log("✅ withdraw-private smoke PASSED")
 	}
 
 	console.log("\n✅ FULL sandbox deploy OK")
