@@ -82,6 +82,7 @@ vi.mock("@/wallet/services/token/client", () => ({
 		return {
 			disconnect: vi.fn(),
 			getTokens: vi.fn().mockResolvedValue([]),
+			onTokenAdded: { add: vi.fn(), remove: vi.fn() },
 		}
 	}),
 }))

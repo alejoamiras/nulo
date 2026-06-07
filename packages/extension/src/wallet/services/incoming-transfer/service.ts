@@ -436,6 +436,22 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		if (!profile) return
 		const network = await this.resolveNetworkByChainId(token.chainId)
 		if (!network) return
+
+		// Every TokenService.addToken call is a user-explicit add path —
+		// either the in-popup "Add custom token" form or a dApp's
+		// register_token approved through the dapp-interaction modal. Both
+		// already require the user to confirm the contract address, so the
+		// first-receive trust popup that fires moments later is redundant
+		// friction. Flip trust→trusted BEFORE the per-account schedulers
+		// kick scans, so the first per-note CS reads trusted and persists
+		// records visible from the start (instead of hidden+pending).
+		// Idempotent: skip the write+emit when already trusted.
+		await this.withServiceLock(async () => {
+			const current = await this.repo.getTrust(profile.id, network.id, token.contract)
+			if (current?.state === "trusted") return
+			await this._setTrustStateLocked(profile.id, network.id, token.contract, "trusted")
+		})
+
 		const accounts = await this.accountService.getAccounts(profile.id, network.chainId)
 		for (const account of accounts) {
 			const key = this.schedulerKey(network.id, account.address)

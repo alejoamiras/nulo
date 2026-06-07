@@ -1909,4 +1909,96 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 		expect(deletedSpy).toHaveBeenCalledTimes(1)
 		expect(records.size).toBe(0)
 	})
+
+	test("(LR14 onTokenAdded auto-trusts before any scan can read unknown) → no Pending emit", async () => {
+		// Manual QA pin: a user-explicit add via TokenService.addToken
+		// (popup form OR dApp register_token) must NOT produce a redundant
+		// trust popup moments later. The handler's first step — locked
+		// trust→trusted — runs BEFORE the for-loop kicks per-account
+		// schedulers, so the first per-note CS in any scan reads "trusted"
+		// and persists records visible (not hidden+pending). Without this
+		// pre-trust step, the user sees both the add-token approval AND
+		// the subsequent first-receive popup for the same contract.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		// Start with no tokens so bootstrap hydrateSchedulers is a no-op —
+		// the test simulates a fresh first-add, not a re-hydration. Mutable
+		// array so we can register tokenA after the spy is wired.
+		const tokenList: (typeof tokenA)[] = []
+		const tokenStub = makeTokenStub(tokenList)
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note({ l2BlockNumber: 7 })] }, { 7: 1_700_000_007 })
+		const { service } = await bootService({
+			network: network(),
+			account: accountStub,
+			token: tokenStub,
+			note: noteSvc,
+		})
+
+		// Drain anything bootstrap queued before wiring spies.
+		await flushPromises()
+
+		const trustChangedSpy = vi.fn()
+		const pendingSpy = vi.fn()
+		service.onIncomingTrustChanged.add(trustChangedSpy)
+		service.onIncomingTransferPending.add(pendingSpy)
+
+		// Mirror TokenService.addToken: storage carries the new token
+		// before onTokenAdded fires.
+		tokenList.push(tokenA)
+
+		await tokenStub.onTokenAdded.invoke({
+			id: tokenA.id,
+			chainId: tokenA.chainId,
+			contract: tokenA.contract,
+			symbol: tokenA.symbol,
+			decimals: tokenA.decimals,
+			name: "Token A",
+		} as never)
+		await flushPromises()
+
+		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("trusted")
+		expect(trustChangedSpy).toHaveBeenCalledTimes(1)
+		expect(trustChangedSpy).toHaveBeenCalledWith(expect.objectContaining({ state: "trusted" }))
+		// The immediate poll kicked by startScheduler runs scanContract for
+		// the new contract. With auto-trust already set, the scan persists
+		// records visible — Pending must never fire for this contract.
+		expect(pendingSpy).not.toHaveBeenCalled()
+	})
+
+	test("(LR14 idempotent) onTokenAdded for already-trusted contract → no duplicate trustChanged emit", async () => {
+		// If the user re-adds a contract that's already trusted (e.g., a
+		// previously-imported token re-imported through a dApp's
+		// register_token), the handler must not re-emit trustChanged. The
+		// short-circuit reads getTrust first; only writes when state ≠
+		// "trusted".
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const { service } = await bootService({
+			network: network(),
+			account: accountStub,
+			token: tokenStub,
+		})
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+
+		const trustChangedSpy = vi.fn()
+		service.onIncomingTrustChanged.add(trustChangedSpy)
+
+		await tokenStub.onTokenAdded.invoke({
+			id: tokenA.id,
+			chainId: tokenA.chainId,
+			contract: tokenA.contract,
+			symbol: tokenA.symbol,
+			decimals: tokenA.decimals,
+			name: "Token A",
+		} as never)
+		await flushPromises()
+
+		expect(trustChangedSpy).not.toHaveBeenCalled()
+		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("trusted")
+	})
 })

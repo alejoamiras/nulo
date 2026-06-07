@@ -149,6 +149,12 @@ async function loadTokens() {
 	tokens.value = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
 }
 
+// Keep the tokens map fresh during this session — without this, an
+// incoming-transfer record for a just-added token renders with the
+// "Token" placeholder until the user re-opens the extension. Same
+// pattern as RecentActivityView.
+tokenService.onTokenAdded.add(loadTokens)
+
 /** Lifecycle hooks */
 onMounted(async () => {
 	if (heroRef.value) {

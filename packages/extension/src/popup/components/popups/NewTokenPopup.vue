@@ -1,6 +1,5 @@
 <script setup>
 /** Services */
-import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
 import { TaskServiceClient } from "@/wallet/services/task/client"
 import { ContentKind } from "@/wallet/services/task/spec"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
@@ -31,7 +30,6 @@ const emit = defineEmits(["onClose"])
 const tokenService = new TokenServiceClient()
 const tokenBalanceService = new TokenBalanceServiceClient()
 const taskService = new TaskServiceClient()
-const incomingTransferService = new IncomingTransferServiceClient()
 
 const tokens = ref([])
 
@@ -205,34 +203,6 @@ const handleAddToken = async () => {
 		})
 		balanceWait.setExpectedToken(newToken.id)
 
-		// Tactical C1 auto-trust: a token the user manually added via the
-		// NewTokenPopup is implicitly trusted — first-receive friction
-		// should NOT fire for it. setTrustAllow flips state to "trusted"
-		// + reveals any pre-existing hidden records + emits Added. Best-
-		// effort; transient errors don't fail the add. dApp-driven
-		// `register_token` flows through `origin: "dapp"` and bypasses
-		// this popup entirely, so the friction prompt stays for them.
-		//
-		// Boolean return contract (codex audit-3 Medium): setTrustAllow
-		// returns `false` when its stale-popup guard refuses (token not
-		// registered at lookup time). For this auto-trust path, that
-		// signals a TokenService → IncomingTransferService visibility gap
-		// — getTokensRaw didn't see the just-added token. We log but don't
-		// fail the add; the next first-receive falls through to the
-		// standard pending-prompt path.
-		try {
-			const ok = await incomingTransferService.setTrustAllow(submittingProfileId, submittingNetworkId, newToken.contract)
-			if (ok === false) {
-				console.warn(
-					`[NewTokenPopup] auto-trust refused for ${newToken.contract} — guard returned false (either token not yet visible to getTokensRaw or lookup error)`,
-				)
-			}
-		} catch {
-			// Trust write failed — proceed with token-added flow. The
-			// next first-receive will fall through to the standard
-			// pending-prompt path, which is the safe default.
-		}
-
 		// Chain mismatch — no TB for this account will ever be created on this chain.
 		if (newToken.chainId !== submittingChainId) {
 			balanceWait.abort()
@@ -304,7 +274,6 @@ watch(
 			taskService.disconnect()
 			tokenBalanceService.disconnect()
 			tokenService.disconnect()
-			incomingTransferService.disconnect()
 		} else {
 			// Reset transient state on open. The close branch already clears
 			// `error.value`, but the submit handler's catch block runs as a
