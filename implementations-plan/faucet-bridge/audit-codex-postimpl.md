@@ -6,7 +6,7 @@
 
 1. **Secret-loss strands deposits.** `flows.ts` generates the claim secret in memory; `recovery.ts` exists but isn't wired into the live path. A refresh/crash after the L1 deposit tx but before `claim_*` loses the only preimage → both public + private deposits stranded.
    **Fix:** persist `{txHash, secret, secretHash, recipient}` encrypted before broadcast; resume claim on boot.
-   **Status:** ☐ pending (recovery integration — needs the app's storage + a resume-on-boot path).
+   **Status:** ☑ FIXED — `flows.ts` `RecoveryHooks` (persist the secret before broadcast, the leaf index on deposit, clear on claim); `sandbox.ts` persists to localStorage via `recovery.ts` + exposes `pending()`/`resume()` to re-claim a stranded deposit.
 
 2. **Leaf-index derivation is race-prone.** `flows.ts` took `leafIndex` from `simulateContract()` *before* sending the deposit. A concurrent deposit changes the real index → `claim_*` retries forever against the wrong leaf.
    **Fix:** derive the actual index from the mined receipt / Inbox `MessageSent` event, not preflight simulation.

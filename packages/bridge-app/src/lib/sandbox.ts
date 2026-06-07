@@ -17,7 +17,17 @@ import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { TokenPortalAbi } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { type DepositFlowStage, depositPrivate, depositPublic } from "@nulo/bridge-core"
+import {
+	DEPOSITS_KEY,
+	type DepositFlowStage,
+	type DepositRecord,
+	depositPrivate,
+	depositPublic,
+	loadDeposits,
+	removeRecord,
+	updateRecord,
+	upsertRecord,
+} from "@nulo/bridge-core"
 import { type Abi, createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 
@@ -68,6 +78,10 @@ const USDC_ABI = [
 export interface SandboxBridge {
 	config: SandboxConfig
 	deposit: (amount: bigint, isPrivate: boolean, onStage?: (s: DepositFlowStage) => void) => Promise<bigint>
+	/** Locally-persisted in-flight deposits (survive a refresh) — the recovery surface. */
+	pending: () => DepositRecord[]
+	/** Re-run the claim for a persisted deposit after a crash (resume-on-boot). */
+	resume: (rec: DepositRecord) => Promise<void>
 }
 
 let cached: Promise<SandboxBridge> | undefined
@@ -104,10 +118,51 @@ async function buildSandbox(): Promise<SandboxBridge> {
 	const bridgeArtifact = loadContractArtifact(await (await fetch("/token_bridge.json")).json())
 	const bridge = await Contract.at(AztecAddress.fromString(config.bridge), bridgeArtifact, ewallet as never)
 
+	const kv = window.localStorage
+	const recipient = config.l2Account
+	const claimMethod = (fn: string) =>
+		(bridge.methods as Record<string, (...a: unknown[]) => { send: (o: unknown) => Promise<unknown> }>)[fn]
+
+	const resume = async (rec: DepositRecord): Promise<void> => {
+		if (!rec.messageLeafIndex) throw new Error("pending deposit has no leaf index yet — cannot resume")
+		const claim = claimMethod(rec.isPrivate ? "claim_private" : "claim_public")
+		await claim(
+			AztecAddress.fromString(rec.aztecRecipient),
+			BigInt(rec.amount),
+			Fr.fromString(rec.encryptedSecret),
+			new Fr(BigInt(rec.messageLeafIndex)),
+		).send(sendOpts as never)
+		removeRecord(kv, DEPOSITS_KEY, rec.id)
+	}
+
 	return {
 		config,
-		deposit: (amount, isPrivate, onStage) =>
-			(isPrivate ? depositPrivate : depositPublic)(
+		deposit: (amount, isPrivate, onStage) => {
+			// Persist the secret + context BEFORE the irreversible deposit so a crash/refresh
+			// can resume the claim. SANDBOX: stored plaintext (account0 is a public test key);
+			// production encrypts via recovery-crypto before storage.
+			let id = ""
+			const recovery = {
+				onSecret: ({ secretHex, secretHashHex }: { secretHex: string; secretHashHex: string }) => {
+					id = secretHashHex
+					upsertRecord(kv, {
+						id,
+						direction: "l1ToL2",
+						amount: amount.toString(),
+						encryptedSecret: secretHex,
+						isPrivate,
+						createdAt: Date.now(),
+						token: config.usdc,
+						aztecRecipient: recipient,
+						secretHashHex,
+						stage: "deposited",
+					})
+				},
+				onDeposited: (leafIndex: bigint) =>
+					updateRecord(kv, DEPOSITS_KEY, id, { messageLeafIndex: leafIndex.toString(), stage: "claiming" }),
+				onClaimed: () => removeRecord(kv, DEPOSITS_KEY, id),
+			}
+			return (isPrivate ? depositPrivate : depositPublic)(
 				{ pub: pub as never, wallet: wallet as never, account: account as never },
 				bridge as never,
 				{
@@ -115,11 +170,15 @@ async function buildSandbox(): Promise<SandboxBridge> {
 					portal: config.portal as `0x${string}`,
 					usdcAbi: USDC_ABI as Abi,
 					portalAbi: TokenPortalAbi as Abi,
-					recipient: config.l2Account,
+					recipient,
 					amount,
 				},
 				sendOpts as never,
 				onStage,
-			),
+				recovery,
+			)
+		},
+		pending: () => loadDeposits(kv),
+		resume,
 	}
 }

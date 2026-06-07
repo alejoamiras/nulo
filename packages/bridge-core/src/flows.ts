@@ -35,10 +35,17 @@ export interface DepositParams {
 export type DepositFlowStage = "approving" | "depositing" | "syncing" | "claiming" | "done"
 
 /**
- * L1→L2 public deposit: mint → approve → `depositToAztecPublic` → poll-and-
- * `claim_public` (retry until the L1→L2 message syncs into an L2 block). Returns
- * the message leaf index. Mirrors the proven deposit-public smoke.
+ * Persistence hooks so a crash/refresh between the (irreversible) deposit and the
+ * claim can't strand funds: the secret is saved BEFORE broadcast, the leaf index
+ * once the deposit lands, and the record cleared on a successful claim. The caller
+ * (the app) owns the storage + encryption via `recovery.ts`/`recovery-crypto.ts`.
  */
+export interface RecoveryHooks {
+	onSecret?: (r: { secretHex: string; secretHashHex: string; isPrivate: boolean }) => void
+	onDeposited?: (leafIndex: bigint) => void
+	onClaimed?: () => void
+}
+
 async function runDeposit(
 	l1: L1Ctx,
 	bridge: ContractBase,
@@ -46,9 +53,12 @@ async function runDeposit(
 	sendOpts: SendOpts,
 	isPrivate: boolean,
 	onStage?: (s: DepositFlowStage) => void,
+	recovery?: RecoveryHooks,
 ): Promise<bigint> {
 	const secret = Fr.random()
 	const secretHash = await computeSecretHash(secret)
+	// Persist the secret BEFORE any irreversible L1 tx — a lost preimage strands the deposit.
+	recovery?.onSecret?.({ secretHex: secret.toString(), secretHashHex: secretHash.toString(), isPrivate })
 	// Private deposits hash mint_to_private(amount) — no recipient in the deposit args.
 	const depositFn = isPrivate ? "depositToAztecPrivate" : "depositToAztecPublic"
 	const depositArgs = isPrivate ? [p.amount, secretHash.toString()] : [p.recipient, p.amount, secretHash.toString()]
@@ -95,12 +105,14 @@ async function runDeposit(
 	const event = sent[0] as { args?: { index?: bigint } } | undefined
 	if (event?.args?.index === undefined) throw new Error("deposit tx emitted no Inbox MessageSent event")
 	const leafIndex = event.args.index
+	recovery?.onDeposited?.(leafIndex)
 
 	onStage?.("syncing")
 	// Generous: a fresh PXE re-syncing a long-lived sandbox (many blocks) can lag.
 	for (let i = 0; i < 80; i++) {
 		try {
 			await claim(AztecAddress.fromString(p.recipient), p.amount, secret, new Fr(leafIndex)).send(sendOpts as never)
+			recovery?.onClaimed?.()
 			onStage?.("done")
 			return leafIndex
 		} catch {
@@ -118,7 +130,8 @@ export const depositPublic = (
 	p: DepositParams,
 	sendOpts: SendOpts,
 	onStage?: (s: DepositFlowStage) => void,
-): Promise<bigint> => runDeposit(l1, bridge, p, sendOpts, false, onStage)
+	recovery?: RecoveryHooks,
+): Promise<bigint> => runDeposit(l1, bridge, p, sendOpts, false, onStage, recovery)
 
 /** L1→L2 private deposit: depositToAztecPrivate (no recipient in the content hash) → claim_private. */
 export const depositPrivate = (
@@ -127,4 +140,5 @@ export const depositPrivate = (
 	p: DepositParams,
 	sendOpts: SendOpts,
 	onStage?: (s: DepositFlowStage) => void,
-): Promise<bigint> => runDeposit(l1, bridge, p, sendOpts, true, onStage)
+	recovery?: RecoveryHooks,
+): Promise<bigint> => runDeposit(l1, bridge, p, sendOpts, true, onStage, recovery)
