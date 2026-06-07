@@ -7,9 +7,11 @@
  * The proven reference for these sequences is `scripts/deploy-sandbox.ts --smoke`.
  */
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import type { ContractBase } from "@aztec/aztec.js/contracts"
+import { type ContractBase, waitForProven } from "@aztec/aztec.js/contracts"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { Fr } from "@aztec/aztec.js/fields"
+import type { createAztecNodeClient } from "@aztec/aztec.js/node"
+import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
 import { InboxAbi } from "@aztec/l1-artifacts"
 import { type Abi, type Account, type Address, parseEventLogs, type PublicClient, type WalletClient } from "viem"
 import type { SendOpts } from "./l2"
@@ -142,3 +144,50 @@ export const depositPrivate = (
 	onStage?: (s: DepositFlowStage) => void,
 	recovery?: RecoveryHooks,
 ): Promise<bigint> => runDeposit(l1, bridge, p, sendOpts, true, onStage, recovery)
+
+type AztecNodeClient = ReturnType<typeof createAztecNodeClient>
+
+/** L2→L1 withdraw finalization stages, surfaced to the UI for the loading bar. */
+export type WithdrawFlowStage = "proving" | "consuming" | "done"
+
+/** What the L1 Outbox `withdraw` consume needs: the L1 recipient + amount + the canonical portal. */
+export interface WithdrawConsumeParams {
+	recipientL1: Address
+	amount: bigint
+	portal: Address
+	portalAbi: Abi
+}
+
+/**
+ * Finalize an L2→L1 withdraw once the `exit_to_l1` tx has landed on L2: wait for it to be
+ * proven, build the L2→L1 membership witness, and consume it on the L1 Outbox via the portal's
+ * `withdraw`. Identical for public + private exits — only the L2 burn authwit (done by the
+ * caller before the exit) differs. The sandbox smoke runs exactly this tail for both flows.
+ */
+export async function consumeWithdrawal(
+	l1: L1Ctx,
+	node: AztecNodeClient,
+	exitReceipt: { txHash: unknown },
+	p: WithdrawConsumeParams,
+	onStage?: (s: WithdrawFlowStage) => void,
+): Promise<void> {
+	onStage?.("proving")
+	await waitForProven(node, exitReceipt as never)
+	const eff = await node.getTxEffect(exitReceipt.txHash as never)
+	if (!eff) throw new Error("no tx effect for exit")
+	const messageHash = eff.data.l2ToL1Msgs[0]
+	if (!messageHash) throw new Error("no L2→L1 message in exit tx")
+	const wit = await computeL2ToL1MembershipWitness(node, messageHash, exitReceipt.txHash as never, 0)
+	if (!wit) throw new Error("L2→L1 witness not available")
+	const path = wit.siblingPath.toBufferArray().map((b: Buffer) => `0x${b.toString("hex")}` as `0x${string}`)
+	onStage?.("consuming")
+	const req = await l1.pub.simulateContract({
+		address: p.portal,
+		abi: p.portalAbi,
+		functionName: "withdraw",
+		args: [p.recipientL1, p.amount, false, BigInt(wit.epochNumber), wit.leafIndex, path] as never,
+		account: l1.account,
+	})
+	await l1.pub.waitForTransactionReceipt({ hash: await l1.wallet.writeContract(req.request as never) })
+	onStage?.("done")
+}
