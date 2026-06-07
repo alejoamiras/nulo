@@ -17,7 +17,7 @@ import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { TokenPortalAbi } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { type DepositFlowStage, depositPublic } from "@nulo/bridge-core"
+import { type DepositFlowStage, depositPrivate, depositPublic } from "@nulo/bridge-core"
 import { type Abi, createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 
@@ -67,11 +67,19 @@ const USDC_ABI = [
 
 export interface SandboxBridge {
 	config: SandboxConfig
-	deposit: (amount: bigint, onStage?: (s: DepositFlowStage) => void) => Promise<bigint>
+	deposit: (amount: bigint, isPrivate: boolean, onStage?: (s: DepositFlowStage) => void) => Promise<bigint>
 }
 
-/** Build the sandbox dual-wallet (L1 viem account0 + in-browser L2 PXE) + a wired deposit fn. */
-export async function setupSandbox(): Promise<SandboxBridge> {
+let cached: Promise<SandboxBridge> | undefined
+
+/** Cached: the in-browser PXE is built once per session and reused, so repeated
+ * deposits don't re-sync from scratch (a fresh PXE lags on a long-lived sandbox). */
+export function setupSandbox(): Promise<SandboxBridge> {
+	cached ??= buildSandbox()
+	return cached
+}
+
+async function buildSandbox(): Promise<SandboxBridge> {
 	const config: SandboxConfig = await (await fetch("/sandbox.json")).json()
 
 	const account = privateKeyToAccount(ACCOUNT0_KEY)
@@ -98,8 +106,8 @@ export async function setupSandbox(): Promise<SandboxBridge> {
 
 	return {
 		config,
-		deposit: (amount, onStage) =>
-			depositPublic(
+		deposit: (amount, isPrivate, onStage) =>
+			(isPrivate ? depositPrivate : depositPublic)(
 				{ pub: pub as never, wallet: wallet as never, account: account as never },
 				bridge as never,
 				{

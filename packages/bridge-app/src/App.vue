@@ -41,10 +41,12 @@ async function submit(): Promise<void> {
 		const { setupSandbox } = await import("./lib/sandbox")
 		const sb = await setupSandbox()
 		const units = BigInt(Math.round(Number(amount.value) * 1e6))
-		const leafIndex = await sb.deposit(units, (s) => {
+		const leafIndex = await sb.deposit(units, isPrivate.value, (s) => {
 			stage.value = s
 		})
-		resultMsg.value = `Bridged ${amount.value} USDC to L2 (leaf ${leafIndex}).`
+		resultMsg.value = isPrivate.value
+			? `Bridged ${amount.value} USDC privately to L2 (leaf ${leafIndex}).`
+			: `Bridged ${amount.value} USDC to L2 (leaf ${leafIndex}).`
 	} catch (e) {
 		stage.value = "error"
 		resultMsg.value = (e as Error).message

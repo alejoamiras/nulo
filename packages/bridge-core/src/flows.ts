@@ -38,24 +38,21 @@ export type DepositFlowStage = "approving" | "depositing" | "syncing" | "claimin
  * `claim_public` (retry until the L1→L2 message syncs into an L2 block). Returns
  * the message leaf index. Mirrors the proven deposit-public smoke.
  */
-export async function depositPublic(
+async function runDeposit(
 	l1: L1Ctx,
 	bridge: ContractBase,
 	p: DepositParams,
 	sendOpts: SendOpts,
+	isPrivate: boolean,
 	onStage?: (s: DepositFlowStage) => void,
 ): Promise<bigint> {
 	const secret = Fr.random()
 	const secretHash = await computeSecretHash(secret)
-	const write = (functionName: string, args: unknown[]) =>
-		l1.wallet.writeContract({
-			address: p.portal,
-			abi: p.portalAbi,
-			functionName,
-			args,
-			account: l1.account,
-			chain: l1.wallet.chain,
-		} as never)
+	// Private deposits hash mint_to_private(amount) — no recipient in the deposit args.
+	const depositFn = isPrivate ? "depositToAztecPrivate" : "depositToAztecPublic"
+	const depositArgs = isPrivate ? [p.amount, secretHash.toString()] : [p.recipient, p.amount, secretHash.toString()]
+	const claimFn = isPrivate ? "claim_private" : "claim_public"
+	const claim = (bridge.methods as Record<string, (...a: unknown[]) => { send: (o: unknown) => Promise<unknown> }>)[claimFn]
 
 	onStage?.("approving")
 	await l1.pub.waitForTransactionReceipt({
@@ -80,23 +77,30 @@ export async function depositPublic(
 	})
 
 	onStage?.("depositing")
-	const args = [p.recipient, p.amount, secretHash.toString()]
 	const sim = await l1.pub.simulateContract({
 		address: p.portal,
 		abi: p.portalAbi,
-		functionName: "depositToAztecPublic",
-		args,
+		functionName: depositFn,
+		args: depositArgs,
 		account: l1.account,
 	} as never)
 	const leafIndex = BigInt((sim.result as [string, bigint])[1])
-	await l1.pub.waitForTransactionReceipt({ hash: await write("depositToAztecPublic", args) })
+	await l1.pub.waitForTransactionReceipt({
+		hash: await l1.wallet.writeContract({
+			address: p.portal,
+			abi: p.portalAbi,
+			functionName: depositFn,
+			args: depositArgs,
+			account: l1.account,
+			chain: l1.wallet.chain,
+		} as never),
+	})
 
 	onStage?.("syncing")
-	for (let i = 0; i < 40; i++) {
+	// Generous: a fresh PXE re-syncing a long-lived sandbox (many blocks) can lag.
+	for (let i = 0; i < 80; i++) {
 		try {
-			await bridge.methods
-				.claim_public(AztecAddress.fromString(p.recipient), p.amount, secret, new Fr(leafIndex))
-				.send(sendOpts as never)
+			await claim(AztecAddress.fromString(p.recipient), p.amount, secret, new Fr(leafIndex)).send(sendOpts as never)
 			onStage?.("done")
 			return leafIndex
 		} catch {
@@ -104,5 +108,23 @@ export async function depositPublic(
 			await new Promise((r) => setTimeout(r, 3000))
 		}
 	}
-	throw new Error("claim_public never succeeded (L1→L2 message not synced)")
+	throw new Error(`${claimFn} never succeeded (L1→L2 message not synced)`)
 }
+
+/** L1→L2 public deposit: mint → approve → depositToAztecPublic → poll-and-claim_public. */
+export const depositPublic = (
+	l1: L1Ctx,
+	bridge: ContractBase,
+	p: DepositParams,
+	sendOpts: SendOpts,
+	onStage?: (s: DepositFlowStage) => void,
+): Promise<bigint> => runDeposit(l1, bridge, p, sendOpts, false, onStage)
+
+/** L1→L2 private deposit: depositToAztecPrivate (no recipient in the content hash) → claim_private. */
+export const depositPrivate = (
+	l1: L1Ctx,
+	bridge: ContractBase,
+	p: DepositParams,
+	sendOpts: SendOpts,
+	onStage?: (s: DepositFlowStage) => void,
+): Promise<bigint> => runDeposit(l1, bridge, p, sendOpts, true, onStage)
