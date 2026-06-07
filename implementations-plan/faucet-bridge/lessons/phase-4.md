@@ -40,5 +40,17 @@ The rc.2 transpile blocker is fixed — **codex found the rc.2 `aztec` CLI + `bb
 - **`scripts/deploy-sandbox.ts` now deploys the FULL stack live on the sandbox**: L1 (Permit2 setCode + MintableERC20/MockSwapTarget/SwapBridgeRouter/TokenPortal via viem) + L2 (TokenMinterProxy + aztec-standards Token [minter=proxy] + token_bridge via aztec.js + EmbeddedWallet + sponsored fee) + wiring (`proxy.set_token`/`set_minter`, `portal.initialize(registry, usdc, bridge)`, mock funded with sandbox feeJuice). ✅ FULL sandbox deploy OK.
 - **aztec.js 4.2.0 deploy/call API:** NOT `.send().deployed()` / `.send().wait()`. Compute the instance (`getContractInstanceFromInstantiationParams`), `Contract.deploy(...).send({ ...opts, contractAddressSalt, universalDeploy: true, wait: { waitForStatus: TxStatus.PROPOSED } })`, then `Contract.at(instance.address, artifact, wallet)`. Method calls: `.send({ ...opts, wait: { waitForStatus } })` (wait is an OPTION). The rc.2 `target/*.json` are gitignored (`*/target/`) — regenerate via `scripts/compile.sh`.
 
+## ✅ Flows proven end-to-end on the sandbox (`deploy-sandbox.ts --smoke`)
+3 of 4 flow groups GREEN (verified balances): **deposit-public** (claim_public → 100 USDC public), **deposit-private** (claim_private → 100 USDC private), **withdraw-public** (40 USDC burned L2 → released L1).
+- **Deposit**: L1 `portal.depositToAztecPublic(l2addr, amount, secretHash)` / `depositToAztecPrivate(amount, secretHash)` — `secretHash = await computeSecretHash(secret)` (`@aztec/aztec.js/crypto`); leaf index from `pub.simulateContract(...).result[1]`; poll-and-`claim_public`/`claim_private` on L2 (retry until the L1→L2 message syncs).
+- **Withdraw (codex-unblocked the witness API; consult logged):**
+  - **Public burn authwit** — the bridge burns via `proxy.burn_public(msg_sender, amount, nonce)` → `token.burn_public`, so the owner must authorize the PROXY. `EmbeddedWallet` has NO `setPublicAuthWit`; use `SetPublicAuthwitContractInteraction.create(wallet, from, { caller: proxy.address, action: token.methods.burn_public(from, amount, nonce) }, true)` from **`@aztec/aztec.js/authorization`**, then `.send(sendOpts)`.
+  - `exit_to_l1_public(recipientL1, amount, caller_on_l1=EthAddress.ZERO, nonce)` — unrestricted case (`_withCaller=false`).
+  - **send() resolves to `{ receipt, offchainEffects, offchainMessages }`** — `const { receipt } = await ...send(sendOpts)`; `receipt.txHash`.
+  - `await waitForProven(node, receipt)` (`@aztec/aztec.js/contracts`) before the L1 consume.
+  - Witness: `messageHash = (await node.getTxEffect(txHash)).data.l2ToL1Msgs[0]`; `computeL2ToL1MembershipWitness(node, messageHash, txHash, 0)` (`@aztec/stdlib/messaging`) → `{ epochNumber, leafIndex, siblingPath }`.
+  - L1 consume: `portal.withdraw(recipient, amount, false, BigInt(epochNumber), leafIndex, siblingPath.toBufferArray().map(hex))`. (TRAP: `L1TokenPortalManager.withdrawFunds` hardcodes `_withCaller=false` — only for the unrestricted case.)
+- Remaining flow: **one-tx swap+fuel** (router `bridgeWithFuel` + Permit2 witness signing + the mock swap).
+
 ## Config (from recon)
 feeJuice `0x762c…` · feeJuicePortal `0xd336…` · registry `0xa0bf…` · feeAssetHandler `0x5602…` (mintAmount 1000 FJ). See `research/recon-testnet.md`. SANDBOX addresses are sandbox-instance-specific (read at runtime via `node_getNodeInfo`).
