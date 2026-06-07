@@ -52,3 +52,9 @@ packages/bridge-app/test-results/
 packages/bridge-app/playwright-report/
 packages/bridge-app/.playwright-mcp/
 packages/bridge-app/*.png
+
+# bridge e2e runtime artifacts (in-browser/script PXE data + MCP captures)
+.playwright-mcp/
+/deposit-public-success.png
+**/pxe_data_*/
+**/wallet_data_*/
