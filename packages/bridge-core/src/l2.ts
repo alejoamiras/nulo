@@ -57,8 +57,20 @@ export function claimPrivate(bridge: ContractBase, p: ClaimParams, send: SendOpt
 		.send(send as never)
 }
 
+/**
+ * A zero L1 recipient strands the withdraw: the L2 burn succeeds but the canonical
+ * portal's underlying transfer reverts on the zero address, so the Outbox message
+ * can never be consumed. Reject it here (mirrored by the Noir `assert` in the bridge).
+ */
+function assertExitRecipient(recipientL1: string): void {
+	if (/^0x0{40}$/i.test(recipientL1)) {
+		throw new Error("exit recipient must not be the zero address (would strand the withdraw)")
+	}
+}
+
 /** Burn PUBLICLY + create the L2→L1 withdraw message (consumed on L1 via the Outbox). */
 export function exitToL1Public(bridge: ContractBase, p: ExitParams, send: SendOpts) {
+	assertExitRecipient(p.recipientL1)
 	return bridge.methods
 		.exit_to_l1_public(EthAddress.fromString(p.recipientL1), p.amount, EthAddress.fromString(p.callerOnL1), p.authwitNonce)
 		.send(send as never)
@@ -66,6 +78,7 @@ export function exitToL1Public(bridge: ContractBase, p: ExitParams, send: SendOp
 
 /** Burn PRIVATELY + create the L2→L1 withdraw message. */
 export function exitToL1Private(bridge: ContractBase, p: ExitParams, send: SendOpts) {
+	assertExitRecipient(p.recipientL1)
 	return bridge.methods
 		.exit_to_l1_private(EthAddress.fromString(p.recipientL1), p.amount, EthAddress.fromString(p.callerOnL1), p.authwitNonce)
 		.send(send as never)

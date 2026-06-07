@@ -10,7 +10,8 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import type { ContractBase } from "@aztec/aztec.js/contracts"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { Fr } from "@aztec/aztec.js/fields"
-import type { Abi, Account, Address, PublicClient, WalletClient } from "viem"
+import { InboxAbi } from "@aztec/l1-artifacts"
+import { type Abi, type Account, type Address, parseEventLogs, type PublicClient, type WalletClient } from "viem"
 import type { SendOpts } from "./l2"
 
 /** The connected L1 surface the flows need (a viem wallet + public client + account). */
@@ -77,15 +78,7 @@ async function runDeposit(
 	})
 
 	onStage?.("depositing")
-	const sim = await l1.pub.simulateContract({
-		address: p.portal,
-		abi: p.portalAbi,
-		functionName: depositFn,
-		args: depositArgs,
-		account: l1.account,
-	} as never)
-	const leafIndex = BigInt((sim.result as [string, bigint])[1])
-	await l1.pub.waitForTransactionReceipt({
+	const depositReceipt = await l1.pub.waitForTransactionReceipt({
 		hash: await l1.wallet.writeContract({
 			address: p.portal,
 			abi: p.portalAbi,
@@ -95,6 +88,13 @@ async function runDeposit(
 			chain: l1.wallet.chain,
 		} as never),
 	})
+	// The actual leaf index comes from the mined Inbox `MessageSent` event — never a
+	// preflight simulate, which races with any concurrent deposit and yields an index
+	// the L2 message won't match (claim then retries forever against the wrong leaf).
+	const sent = parseEventLogs({ abi: InboxAbi, eventName: "MessageSent", logs: depositReceipt.logs })
+	const event = sent[0] as { args?: { index?: bigint } } | undefined
+	if (event?.args?.index === undefined) throw new Error("deposit tx emitted no Inbox MessageSent event")
+	const leafIndex = event.args.index
 
 	onStage?.("syncing")
 	// Generous: a fresh PXE re-syncing a long-lived sandbox (many blocks) can lag.

@@ -37,7 +37,9 @@ async function submit(): Promise<void> {
 	stage.value = ""
 	resultMsg.value = ""
 	try {
-		// Lazy import: the sandbox dual-wallet + in-browser PXE never ship in prod.
+		// Build-time gate: import.meta.env.DEV is statically false in prod, so this
+		// dynamic import is dead-code-eliminated — the sandbox/PXE chunk never ships.
+		if (!import.meta.env.DEV) throw new Error("Bridging runs in sandbox/dev mode only for now.")
 		const { setupSandbox } = await import("./lib/sandbox")
 		const sb = await setupSandbox()
 		const units = BigInt(Math.round(Number(amount.value) * 1e6))
