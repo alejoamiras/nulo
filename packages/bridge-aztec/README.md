@@ -18,10 +18,12 @@ it and fails with ~1299 macro errors (`cannot find self`, `Could not resolve
 
 CI must pin this toolchain version for the Noir build.
 
-## Status (P1 in progress)
-- ✅ `token_minter_proxy` compiles clean with the rc.2 nargo.
-- ⏳ `token_bridge`: strip the attestation layer (clean-hands/passport/schnorr,
-  `_validatePrivateAttestations`, the `exit_to_l1_private` gate), then compile.
-- ⏳ Keystone: content-hash equality test (Solidity `Hash.sha256ToField` vs the
-  Noir `token_portal_content_hash_lib`) for fixed vectors — the one cross-chain
-  guard the TXE can't provide.
+## Status
+- ✅ `token_minter_proxy` + `token_bridge` compile clean with the rc.2 nargo via
+  `scripts/compile.sh` (`aztec compile` + the `bb` AVM transpile → deployable `target/*.json`).
+- ✅ `token_bridge` attestation layer stripped (no clean-hands/passport/schnorr gate).
+  `claim_public`/`claim_private` + `exit_to_l1_public`/`exit_to_l1_private`, the latter with a
+  non-zero-`recipient` assert (codex HIGH #3). Proven end-to-end via
+  `bridge-core/scripts/deploy-sandbox.ts --smoke` — deposit + withdraw, both public + private.
+- ✅ Keystone content-hash equality (Solidity vs Noir vs TS) pinned in
+  `bridge-evm/test/WitnessHash.t.sol` + `bridge-core/src/l1.test.ts`.
