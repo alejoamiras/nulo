@@ -43,6 +43,12 @@ export const TESTIDS = {
 
 	// Toast
 	toast: "fa-toast",
+
+	// Shell tabs (Faucet | Bridge)
+	tabs: "fa-tabs",
+	tabFaucet: "fa-tab-faucet",
+	tabBridge: "fa-tab-bridge",
+	bridgeView: "fa-bridge-view",
 } as const
 
 export type Testid = (typeof TESTIDS)[keyof typeof TESTIDS]
