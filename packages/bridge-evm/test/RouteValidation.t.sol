@@ -85,10 +85,26 @@ contract RouteValidationTest is Test {
     function test_nativeUnwrapContinuityPasses() public view {
         PoolKey[] memory p = new PoolKey[](2);
         p[0] = _key(USDC, WETH, address(0)); // out WETH
-        p[1] = _key(address(0), FJ, address(0)); // in native ETH (WETH<->ETH allowed)
+        p[1] = _key(address(0), FJ, address(0)); // in native ETH (WETH<->ETH allowed @ last boundary)
         bool[] memory d = new bool[](2);
         d[0] = true;
         d[1] = true;
+        h.exposeValidate(USDC, p, d);
+    }
+
+    function test_midRouteUnwrapRejected() public {
+        // A 3-hop where the WETH<->ETH unwrap is at a MIDDLE boundary (0->1), not the
+        // last — _settle only handles it on the final hop, so _validateRoute must reject
+        // it (codex MED #4: validate-then-revert otherwise).
+        PoolKey[] memory p = new PoolKey[](3);
+        p[0] = _key(USDC, WETH, address(0)); // out WETH
+        p[1] = _key(address(0), WETH, address(0)); // in native ETH (unwrap @ middle), out WETH
+        p[2] = _key(WETH, FJ, address(0)); // in WETH, out FJ
+        bool[] memory d = new bool[](3);
+        d[0] = true;
+        d[1] = true;
+        d[2] = true;
+        vm.expectRevert(bytes("UniswapFuelSwap: hop discontinuity"));
         h.exposeValidate(USDC, p, d);
     }
 }
