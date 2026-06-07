@@ -161,7 +161,7 @@ contract SwapBridgeRouterPermit2ForkTest is Test {
         dirs[1] = true; // ETH  -> FeeJuice
     }
 
-    function _params(uint256 nonce, uint256 deadline)
+    function _params(bool isPrivate, uint256 nonce, uint256 deadline)
         internal
         view
         returns (SwapBridgeRouter.BridgeParams memory p, SwapBridgeRouter.PermitParams memory permit)
@@ -179,7 +179,7 @@ contract SwapBridgeRouterPermit2ForkTest is Test {
             minFuelOutput: 1,
             path: path,
             zeroForOnes: dirs,
-            isPrivate: false
+            isPrivate: isPrivate
         });
         bytes memory sig = _sign(p, nonce, deadline);
         permit = SwapBridgeRouter.PermitParams({nonce: nonce, deadline: deadline, signature: sig});
@@ -225,7 +225,7 @@ contract SwapBridgeRouterPermit2ForkTest is Test {
         usdc.approve(PERMIT2, type(uint256).max);
 
         (SwapBridgeRouter.BridgeParams memory p, SwapBridgeRouter.PermitParams memory permit) =
-            _params(0, block.timestamp + 1 hours);
+            _params(false, 0, block.timestamp + 1 hours);
 
         uint256 before = usdc.balanceOf(user);
         vm.prank(user);
@@ -242,7 +242,7 @@ contract SwapBridgeRouterPermit2ForkTest is Test {
         usdc.approve(PERMIT2, type(uint256).max);
 
         (SwapBridgeRouter.BridgeParams memory p, SwapBridgeRouter.PermitParams memory permit) =
-            _params(0, block.timestamp + 1 hours);
+            _params(false, 0, block.timestamp + 1 hours);
         vm.prank(user);
         router.bridgeWithFuel(p, permit); // consumes nonce 0
 
@@ -257,9 +257,40 @@ contract SwapBridgeRouterPermit2ForkTest is Test {
         usdc.approve(PERMIT2, type(uint256).max);
 
         (SwapBridgeRouter.BridgeParams memory p, SwapBridgeRouter.PermitParams memory permit) =
-            _params(1, block.timestamp - 1); // deadline already passed
+            _params(false, 1, block.timestamp - 1); // deadline already passed
         vm.prank(user);
         vm.expectRevert(); // Permit2 SignatureExpired
+        router.bridgeWithFuel(p, permit);
+    }
+
+    function test_bridgeWithFuelPrivate_realSwap() public {
+        usdc.mint(user, 10e6);
+        vm.prank(user);
+        usdc.approve(PERMIT2, type(uint256).max);
+
+        (SwapBridgeRouter.BridgeParams memory p, SwapBridgeRouter.PermitParams memory permit) =
+            _params(true, 0, block.timestamp + 1 hours);
+        vm.prank(user);
+        router.bridgeWithFuel(p, permit);
+
+        // Private token leg still bridges totalAmount - fuelAmount; the swap still fuels.
+        assertEq(tokenPortal.lastAmount(), 8e6, "private: bridged remainder to the token portal");
+        assertGt(fjPortal.lastAmount(), 0, "private: swapped fuel into FeeJuice");
+    }
+
+    function test_witnessTamperReverts() public {
+        usdc.mint(user, 10e6);
+        vm.prank(user);
+        usdc.approve(PERMIT2, type(uint256).max);
+
+        (SwapBridgeRouter.BridgeParams memory p, SwapBridgeRouter.PermitParams memory permit) =
+            _params(false, 0, block.timestamp + 1 hours);
+        // Tamper a witness-bound field AFTER signing — the router re-derives the witness from p,
+        // so the Permit2 signature no longer matches and the transfer reverts: no relayer can
+        // re-aim the funds (recipient/amount/route) after the user signs.
+        p.aztecRecipient = bytes32(uint256(0xDEAD));
+        vm.prank(user);
+        vm.expectRevert();
         router.bridgeWithFuel(p, permit);
     }
 }
