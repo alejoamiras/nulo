@@ -226,7 +226,7 @@ async function main() {
 		console.log("deposited 100 USDC → L2, leafIndex:", leafIndex.toString())
 
 		let claimed = false
-		for (let i = 0; i < 20 && !claimed; i++) {
+		for (let i = 0; i < 200 && !claimed; i++) {
 			try {
 				await bridge.methods.claim_public(l2recipient, amount, secret, new Fr(leafIndex)).send(sendOpts)
 				claimed = true
@@ -278,7 +278,7 @@ async function main() {
 		console.log("deposited 100 USDC → L2 (private), leafIndex:", leafIndexP.toString())
 
 		let claimedP = false
-		for (let i = 0; i < 20 && !claimedP; i++) {
+		for (let i = 0; i < 200 && !claimedP; i++) {
 			try {
 				await bridge.methods.claim_private(l2recipient, amount, secretP, new Fr(leafIndexP)).send(sendOpts)
 				claimedP = true
