@@ -126,6 +126,7 @@ self.call(TokenMinterProxy::at(config.token_minter_proxy).mint_to_private(recipi
 fn exit_to_l1_public(recipient: EthAddress, amount: u128, caller_on_l1: EthAddress, authwit_nonce: Field) {
 assert(self.storage.is_paused.read() == false, "Bridge is paused");
 assert(amount > 0, "Amount must be greater than zero");
+assert(!recipient.is_zero(), "Recipient cannot be zero");
 let config = self.storage.config.read();
 let content = get_withdraw_content_hash(recipient, amount, caller_on_l1);
 self.context.message_portal(config.portal, content);
@@ -137,6 +138,7 @@ self.call(TokenMinterProxy::at(config.token_minter_proxy).burn_public(self.msg_s
 fn exit_to_l1_private(recipient: EthAddress, amount: u128, caller_on_l1: EthAddress, authwit_nonce: Field) {
 self.enqueue_self._assert_not_paused();
 assert(amount > 0, "Amount must be greater than zero");
+assert(!recipient.is_zero(), "Recipient cannot be zero");
 let config = self.storage.config.read();
 let content = get_withdraw_content_hash(recipient, amount, caller_on_l1);
 self.context.message_portal(config.portal, content);
