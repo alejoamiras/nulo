@@ -263,8 +263,11 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
                 address inNext = zeroForOnes[i + 1]
                     ? Currency.unwrap(path[i + 1].currency0)
                     : Currency.unwrap(path[i + 1].currency1);
-                bool continuous =
-                    outI == inNext || (outI == weth && inNext == address(0)) || (outI == address(0) && inNext == weth);
+                // The WETH<->native-ETH unwrap is only settleable on the FINAL hop
+                // (_settle Case C); allowing it earlier validates a route that then
+                // reverts at settlement. Restrict the discontinuity to the last boundary.
+                bool nativeUnwrap = (outI == weth && inNext == address(0)) || (outI == address(0) && inNext == weth);
+                bool continuous = outI == inNext || (nativeUnwrap && i + 1 == path.length - 1);
                 require(continuous, "UniswapFuelSwap: hop discontinuity");
             }
         }

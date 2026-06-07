@@ -19,7 +19,7 @@
 ## MEDIUM
 
 4. **Route validation over-accepts ETH/WETH discontinuities.** `_validateRoute` allows a WETH↔native discontinuity between any adjacent hops, but `_settle` only handles a native *last* hop → some signed routes validate then revert at settlement.
-   **Fix:** allow the discontinuity only on the penultimate→last boundary. **Status:** ☐ pending.
+   **Fix:** allow the discontinuity only on the penultimate→last boundary. **Status:** ☑ FIXED — restricted to `i + 1 == path.length - 1`; 14 forge route/router tests green.
 
 5. **"Sandbox-only" code ships in prod assets.** The runtime dynamic import code-splits but still emits a fetchable chunk; `sandbox.ts` embeds the (well-known) anvil key + `public/{sandbox,token_bridge}.json` ship.
    **Fix:** build-time env gate (`import.meta.env.DEV`) or a separate sandbox entry. **Status:** ☑ FIXED (gated behind `import.meta.env.DEV`).
