@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from "vue"
+import { computeProgress } from "@nulo/bridge-core"
+import { computed, ref } from "vue"
 
 type Tab = "faucet" | "bridge"
 type Direction = "l1ToL2" | "l2ToL1"
@@ -10,10 +11,21 @@ const direction = ref<Direction>("l1ToL2")
 const asset = ref<Asset>("USDC")
 const isPrivate = ref(false)
 const amount = ref("")
+const bridging = ref(false)
 
-/** Wiring to bridge-core (progress model + l1/l2 flows) lands once the node
- * layer is unblocked; this is the building shell. */
+// Loading bar driven by bridge-core's progress model. A live flow feeds it from
+// status.ts polling (block-based "N blocks remaining" for L2→L1, time-based for
+// L1→L2); this demo state shows the bar shape until the flows are wired.
+const progress = computed(() =>
+	direction.value === "l2ToL1"
+		? computeProgress({ provenBlock: 110, neededBlock: 120, startBlock: 100, elapsedMs: 0, maxWaitMs: 0 })
+		: computeProgress({ elapsedMs: 60_000, maxWaitMs: 240_000 }),
+)
+
 const cta = (): string => (direction.value === "l1ToL2" ? "Bridge to L2" : "Withdraw to L1")
+function submit(): void {
+	bridging.value = true
+}
 </script>
 
 <template>
@@ -53,7 +65,12 @@ const cta = (): string => (direction.value === "l1ToL2" ? "Bridge to L2" : "With
 				<span>Private — claim into a private L2 balance</span>
 			</label>
 
-			<button :class="$style.cta" type="button" :disabled="!amount">{{ cta() }}</button>
+			<button :class="$style.cta" type="button" :disabled="!amount" @click="submit">{{ cta() }}</button>
+
+			<div v-if="bridging" :class="$style.progress">
+				<div :class="$style.bar"><div :class="$style.fill" :style="{ width: `${Math.round(progress.fillFraction * 100)}%` }" /></div>
+				<p :class="$style.progressLabel">{{ progress.label }}</p>
+			</div>
 		</section>
 	</main>
 </template>
@@ -138,5 +155,22 @@ const cta = (): string => (direction.value === "l1ToL2" ? "Bridge to L2" : "With
 .cta:disabled {
 	opacity: 0.5;
 	cursor: not-allowed;
+}
+.progress {
+	margin-top: 1rem;
+}
+.bar {
+	border: 2px solid var(--color-fg, #111);
+	height: 1.25rem;
+	background: var(--color-bg, #fff);
+}
+.fill {
+	height: 100%;
+	background: var(--color-fg, #111);
+	transition: width 0.3s ease;
+}
+.progressLabel {
+	margin-top: 0.4rem;
+	font-size: 0.8rem;
 }
 </style>
