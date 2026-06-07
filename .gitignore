@@ -42,3 +42,6 @@ packages/extension/.e2e-state/
 *.tsbuildinfo
 wallet_data_*/
 
+
+# sandbox deploy output (instance-specific)
+packages/bridge-app/public/sandbox.json

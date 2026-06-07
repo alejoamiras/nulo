@@ -11,7 +11,7 @@
  *
  * Run: bun run deploy:sandbox   (from packages/bridge-core)
  */
-import { readFileSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { getInitialTestAccountsData } from "@aztec/accounts/testing"
@@ -382,25 +382,25 @@ async function main() {
 		console.log("✅ withdraw-private smoke PASSED")
 	}
 
-	console.log("\n✅ FULL sandbox deploy OK")
-	console.log(
-		JSON.stringify(
-			{
-				usdc,
-				mock,
-				router,
-				portal,
-				proxy: proxy.address.toString(),
-				token: token.address.toString(),
-				bridge: bridge.address.toString(),
-				feeJuice,
-				feeJuicePortal,
-				registry,
-			},
-			null,
-			2,
-		),
-	)
+	const deployment = {
+		usdc,
+		mock,
+		router,
+		portal,
+		proxy: proxy.address.toString(),
+		token: token.address.toString(),
+		bridge: bridge.address.toString(),
+		feeJuice,
+		feeJuicePortal,
+		registry,
+		l2Account: from.toString(),
+	}
+	// The bridge-app fetches this in sandbox mode to wire its dual-wallet flows.
+	const outDir = join(here, "..", "..", "bridge-app", "public")
+	mkdirSync(outDir, { recursive: true })
+	writeFileSync(join(outDir, "sandbox.json"), `${JSON.stringify(deployment, null, 2)}\n`)
+	console.log("\n✅ FULL sandbox deploy OK — wrote bridge-app/public/sandbox.json")
+	console.log(JSON.stringify(deployment, null, 2))
 }
 
 main().catch((e) => {
