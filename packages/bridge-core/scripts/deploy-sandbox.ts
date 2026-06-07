@@ -17,12 +17,14 @@ import { fileURLToPath } from "node:url"
 import { getInitialTestAccountsData } from "@aztec/accounts/testing"
 import { loadContractArtifact } from "@aztec/aztec.js/abi"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
+import { SetPublicAuthwitContractInteraction } from "@aztec/aztec.js/authorization"
+import { Contract, getContractInstanceFromInstantiationParams, waitForProven } from "@aztec/aztec.js/contracts"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
+import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
@@ -99,7 +101,7 @@ async function main() {
 	const portal = await deployEvm("TokenPortal", TokenPortalAbi, TokenPortalBytecode as `0x${string}`, [])
 
 	// ─── L2 (aztec.js) ───────────────────────────────────────────────
-	createAztecNodeClient(NODE_URL)
+	const node = createAztecNodeClient(NODE_URL)
 	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: false } })
 	const [acct] = await getInitialTestAccountsData()
 	const manager = await ewallet.createSchnorrAccount(acct.secret, acct.salt, acct.signingKey)
@@ -290,6 +292,58 @@ async function main() {
 		console.log("L2 private USDC balance:", balP.toString())
 		if (balP < amount) throw new Error(`private balance ${balP} < deposited ${amount}`)
 		console.log("✅ deposit-private balance assertion OK (100 USDC minted privately on L2)")
+
+		// ── withdraw-public (flow #4): exit_to_l1 → proven → L1 Outbox consume ──
+		console.log("\n=== withdraw-public smoke (L2 burn → L1 Outbox consume) ===")
+		const wAmount = 40n * 10n ** 6n
+		const wNonce = Fr.random()
+		// Authorize the proxy (the direct caller of token.burn_public) to burn the deployer's public tokens.
+		const authwit = await SetPublicAuthwitContractInteraction.create(
+			ewallet as never,
+			from,
+			{ caller: proxy.address, action: token.methods.burn_public(from, wAmount, wNonce) } as never,
+			true,
+		)
+		await authwit.send(sendOpts)
+		const { receipt: exitReceipt } = await bridge.methods
+			.exit_to_l1_public(EthAddress.fromString(account.address), wAmount, EthAddress.ZERO, wNonce)
+			.send(sendOpts)
+		const exitTxHash = exitReceipt.txHash
+		console.log("exit_to_l1 sent, txHash:", exitTxHash.toString())
+
+		await waitForProven(node, exitReceipt)
+		const eff = await node.getTxEffect(exitTxHash)
+		if (!eff) throw new Error("no tx effect for exit")
+		const messageHash = eff.data.l2ToL1Msgs[0]
+		if (!messageHash) throw new Error("no L2→L1 message in exit tx")
+		const wit = await computeL2ToL1MembershipWitness(node, messageHash, exitTxHash, 0)
+		if (!wit) throw new Error("L2→L1 witness not available")
+		console.log("withdraw witness: epoch", wit.epochNumber, "leafIndex", wit.leafIndex.toString())
+
+		const path = wit.siblingPath.toBufferArray().map((b: Buffer) => `0x${b.toString("hex")}` as `0x${string}`)
+		const balOf = async (): Promise<bigint> =>
+			(
+				await pub.simulateContract({
+					address: usdc,
+					abi: usdcAbi,
+					functionName: "balanceOf",
+					args: [account.address] as never,
+					account,
+				})
+			).result as bigint
+		const usdcBefore = await balOf()
+		const wReq = await pub.simulateContract({
+			address: portal,
+			abi: TokenPortalAbi as never,
+			functionName: "withdraw",
+			args: [account.address, wAmount, false, BigInt(wit.epochNumber), wit.leafIndex, path] as never,
+			account,
+		})
+		await pub.waitForTransactionReceipt({ hash: await wallet.writeContract(wReq.request as never) })
+		const withdrawn = (await balOf()) - usdcBefore
+		console.log("L1 USDC withdrawn:", withdrawn.toString())
+		if (withdrawn < wAmount) throw new Error(`withdrew ${withdrawn} < ${wAmount}`)
+		console.log("✅ withdraw-public smoke PASSED")
 	}
 
 	console.log("\n✅ FULL sandbox deploy OK")
