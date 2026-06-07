@@ -23,17 +23,18 @@ forge build
 forge test
 ```
 
-## Status (P1 in progress)
+## Status
 
-- ✅ Scaffold + `UniswapFuelSwap.sol` + `interfaces/{ISignatureTransfer,ITokenPortal}.sol`
-  copied verbatim from the reference and **compiling** (`forge build` green).
-- ⏳ Pending: deploy an instance of the **canonical `TokenPortal`** (from
-  `@aztec/l1-artifacts` — do NOT hand-roll; it already ships the clean
-  public/private/withdraw-by-Epoch interface), `SwapBridgeRouter` (minus the
-  `isPrivate`-attestation coupling, keeping the `isPrivate` witness for private
-  token bridging per the full-parity decision), `MintableERC20` (capped mint +
-  Permit2 `allowance()` pre-approve), seed scripts, and the **keystone
-  content-hash equality test** (Solidity vs Noir — the one guard the TXE can't
-  provide). See `implementations-plan/faucet-bridge/plan.md` P1–P2.
-- 🔒 Live-net steps (recon `getNodeInfo` go/no-go, deploys, network e2e) need a
-  testnet node URL + Sepolia deployer key (operator infra) — not runnable in CI/sandbox.
+- ✅ `SwapBridgeRouter.sol` (Permit2 witness-bound `bridgeWithFuel`, keeping `isPrivate`),
+  `UniswapFuelSwap.sol` (V4 multi-hop + WETH↔ETH unwrap restricted to the last boundary),
+  `MintableERC20.sol` (capped mint), `interfaces/`, `mocks/MockSwapTarget.sol`.
+- ✅ **32 forge tests** — unit (`SwapBridgeRouter.t.sol`, `RouteValidation.t.sol`,
+  `WitnessHash.t.sol` = the Solidity/Noir/TS content-hash keystone) + **fork**
+  (`DeployBridge.fork.t.sol` deploy+seed; `SwapBridgeRouterPermit2Fork.t.sol` drives the
+  REAL Uniswap V4 + REAL Permit2 through `bridgeWithFuel`: public, private, nonce-replay,
+  expiry, witness-tamper). All codex audit findings addressed.
+- 🔒 The canonical `TokenPortal` is deployed via viem from `@aztec/l1-artifacts`
+  (`bridge-core/scripts/deploy-sandbox.ts`), not Solidity — fork tests mock that one leg
+  while the swap + Permit2 run against the real forked contracts.
+- 🔒 Fork tests are opt-in (skip without `SEPOLIA_RPC_URL` in `.env`); a live testnet
+  deploy additionally needs a funded `PRIVATE_KEY` (operator infra, not in CI).
