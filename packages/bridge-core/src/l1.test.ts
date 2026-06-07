@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest"
-import { type BridgeWitness, hashBridgeWitness, hashRoute, type PoolKey } from "./l1"
+import {
+	BRIDGE_WITNESS_PERMIT_TYPES,
+	BRIDGE_WITNESS_TYPE,
+	type BridgeWitness,
+	bridgeWitnessPermitTypedData,
+	hashBridgeWitness,
+	hashRoute,
+	type PoolKey,
+} from "./l1"
 
 // Reference values from bridge-evm/test/WitnessHash.t.sol — the Solidity router's
 // _hashRoute / _hashBridgeWitness for the SAME fixed inputs. If TS drifts from
@@ -33,5 +41,42 @@ describe("l1 witness/route hashing (pinned to the Solidity router)", () => {
 			isPrivate: false,
 		}
 		expect(hashBridgeWitness(w)).toBe(WITNESS_HASH)
+	})
+})
+
+describe("l1 Permit2 witness typed-data", () => {
+	it("BridgeWitness EIP-712 members match BRIDGE_WITNESS_TYPE (no drift)", () => {
+		const inner = BRIDGE_WITNESS_TYPE.replace(/^BridgeWitness\(/, "").replace(/\)$/, "")
+		const fromTypehash = inner.split(",").map((f) => {
+			const [type, name] = f.trim().split(/\s+/)
+			return { name, type }
+		})
+		expect(BRIDGE_WITNESS_PERMIT_TYPES.BridgeWitness).toEqual(fromTypehash)
+	})
+
+	it("bridgeWitnessPermitTypedData builds the Permit2 domain + message", () => {
+		const witness: BridgeWitness = {
+			tokenPortal: addr(0x1111),
+			bridgeToken: addr(0x2222),
+			totalAmount: 1_000_000n,
+			fuelAmount: 100_000n,
+			aztecRecipient: b32(0x1234),
+			fuelRecipient: b32(0x5678),
+			tokenSecretHash: b32(0x5ec7),
+			fuelSecretHash: b32(0xfee),
+			minFuelOutput: 1_000_000_000_000_000_000n,
+			routeHash: ROUTE_HASH,
+			isPrivate: false,
+		}
+		const td = bridgeWitnessPermitTypedData(
+			{ permitted: { token: addr(0x2222), amount: 1_000_000n }, spender: addr(0x99), nonce: 7n, deadline: 123n },
+			witness,
+			addr(0x22d3),
+			31337,
+		)
+		expect(td.domain).toEqual({ name: "Permit2", chainId: 31337, verifyingContract: addr(0x22d3) })
+		expect(td.primaryType).toBe("PermitWitnessTransferFrom")
+		expect(td.message.witness).toBe(witness)
+		expect(td.message.spender).toBe(addr(0x99))
 	})
 })

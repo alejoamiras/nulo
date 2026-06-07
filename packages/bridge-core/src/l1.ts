@@ -58,6 +58,63 @@ export function hashRoute(path: PoolKey[], zeroForOnes: boolean[]): Hex {
 	)
 }
 
+/** Permit2 `PermitWitnessTransferFrom` inputs (the SignatureTransfer half). */
+export interface Permit2Transfer {
+	permitted: { token: Address; amount: bigint }
+	spender: Address // the SwapBridgeRouter
+	nonce: bigint
+	deadline: bigint
+}
+
+/**
+ * EIP-712 types for Permit2 `PermitWitnessTransferFrom` bound to our
+ * `BridgeWitness`. The `BridgeWitness` member list MUST stay byte-identical to
+ * `BRIDGE_WITNESS_TYPE` (pinned by l1.test.ts) — Permit2 hashes the witness with
+ * this struct, and the router re-derives it via `_hashBridgeWitness`.
+ */
+export const BRIDGE_WITNESS_PERMIT_TYPES = {
+	PermitWitnessTransferFrom: [
+		{ name: "permitted", type: "TokenPermissions" },
+		{ name: "spender", type: "address" },
+		{ name: "nonce", type: "uint256" },
+		{ name: "deadline", type: "uint256" },
+		{ name: "witness", type: "BridgeWitness" },
+	],
+	TokenPermissions: [
+		{ name: "token", type: "address" },
+		{ name: "amount", type: "uint256" },
+	],
+	BridgeWitness: [
+		{ name: "tokenPortal", type: "address" },
+		{ name: "bridgeToken", type: "address" },
+		{ name: "totalAmount", type: "uint256" },
+		{ name: "fuelAmount", type: "uint256" },
+		{ name: "aztecRecipient", type: "bytes32" },
+		{ name: "fuelRecipient", type: "bytes32" },
+		{ name: "tokenSecretHash", type: "bytes32" },
+		{ name: "fuelSecretHash", type: "bytes32" },
+		{ name: "minFuelOutput", type: "uint256" },
+		{ name: "routeHash", type: "bytes32" },
+		{ name: "isPrivate", type: "bool" },
+	],
+} as const
+
+/** Build the viem `signTypedData` payload for a witness-bound Permit2 transfer. */
+export function bridgeWitnessPermitTypedData(transfer: Permit2Transfer, witness: BridgeWitness, permit2: Address, chainId: number) {
+	return {
+		domain: { name: "Permit2", chainId, verifyingContract: permit2 },
+		types: BRIDGE_WITNESS_PERMIT_TYPES,
+		primaryType: "PermitWitnessTransferFrom" as const,
+		message: {
+			permitted: transfer.permitted,
+			spender: transfer.spender,
+			nonce: transfer.nonce,
+			deadline: transfer.deadline,
+			witness,
+		},
+	}
+}
+
 /** keccak256(abi.encode(TYPEHASH, ...fields)) — matches SwapBridgeRouter._hashBridgeWitness. */
 export function hashBridgeWitness(w: BridgeWitness): Hex {
 	return keccak256(
