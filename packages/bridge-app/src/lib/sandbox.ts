@@ -37,19 +37,15 @@ export interface SandboxConfig {
 	bridge: string
 	token: string
 	l2Account: string
+	/** RPC endpoints the deploy ran against — lets the app target a fresh OR restarted sandbox. */
+	l1Rpc?: string
+	nodeUrl?: string
 }
 
 /** Well-known anvil account 0 — sandbox-only test key, never a real secret. */
 const ACCOUNT0_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const
-const L1_RPC = "http://localhost:8545"
-const NODE_URL = "http://localhost:8080"
-
-const sandboxChain = defineChain({
-	id: 31337,
-	name: "aztec-sandbox-l1",
-	nativeCurrency: { decimals: 18, name: "Ether", symbol: "ETH" },
-	rpcUrls: { default: { http: [L1_RPC] } },
-})
+const DEFAULT_L1_RPC = "http://localhost:8545"
+const DEFAULT_NODE_URL = "http://localhost:8080"
 
 /** Minimal MintableERC20 surface the deposit flow uses (mint + approve). */
 const USDC_ABI = [
@@ -95,13 +91,21 @@ export function setupSandbox(): Promise<SandboxBridge> {
 
 async function buildSandbox(): Promise<SandboxBridge> {
 	const config: SandboxConfig = await (await fetch("/sandbox.json")).json()
+	const l1Rpc = config.l1Rpc ?? DEFAULT_L1_RPC
+	const nodeUrl = config.nodeUrl ?? DEFAULT_NODE_URL
+	const sandboxChain = defineChain({
+		id: 31337,
+		name: "aztec-sandbox-l1",
+		nativeCurrency: { decimals: 18, name: "Ether", symbol: "ETH" },
+		rpcUrls: { default: { http: [l1Rpc] } },
+	})
 
 	const account = privateKeyToAccount(ACCOUNT0_KEY)
-	const wallet = createWalletClient({ account, chain: sandboxChain, transport: http(L1_RPC) })
-	const pub = createPublicClient({ chain: sandboxChain, transport: http(L1_RPC) })
+	const wallet = createWalletClient({ account, chain: sandboxChain, transport: http(l1Rpc) })
+	const pub = createPublicClient({ chain: sandboxChain, transport: http(l1Rpc) })
 
-	createAztecNodeClient(NODE_URL)
-	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: false } })
+	createAztecNodeClient(nodeUrl)
+	const ewallet = await EmbeddedWallet.create(nodeUrl, { pxeConfig: { proverEnabled: false } })
 	const [acct] = await getInitialTestAccountsData()
 	const manager = await ewallet.createSchnorrAccount(acct.secret, acct.salt, acct.signingKey)
 	const from = (await manager.getAccount()).getAddress()

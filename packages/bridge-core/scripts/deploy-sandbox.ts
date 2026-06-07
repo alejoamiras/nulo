@@ -394,6 +394,8 @@ async function main() {
 		feeJuicePortal,
 		registry,
 		l2Account: from.toString(),
+		l1Rpc: SANDBOX_RPC,
+		nodeUrl: NODE_URL,
 	}
 	// The bridge-app fetches this in sandbox mode to wire its dual-wallet flows.
 	const outDir = join(here, "..", "..", "bridge-app", "public")
