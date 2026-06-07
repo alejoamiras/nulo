@@ -19,6 +19,7 @@ declare global {
   const buildFeeEstimate: typeof import('../utils/fee-estimation').buildFeeEstimate
   const buildJournalTerminalCardProps: typeof import('../utils/journal-state').buildJournalTerminalCardProps
   const capitalize: typeof import('../utils/string').capitalize
+  const categoricalLabel: typeof import('../utils/journal-state').categoricalLabel
   const checkNotificationsForShow: typeof import('../composables/notification.js').checkNotificationsForShow
   const checkSentinel: typeof import('../utils/core').checkSentinel
   const clampDecimals: typeof import('../utils/amount').clampDecimals
@@ -220,7 +221,7 @@ declare global {
   export type { BackupFileType, BackupSelection, ProcessBackupResult } from '../utils/full-backup-helpers'
   import('../utils/full-backup-helpers')
   // @ts-ignore
-  export type { JournalTerminalVisualState, JournalTerminalDisplay, TokenForCardProps, JournalTerminalCardCtx, JournalTerminalCardProps } from '../utils/journal-state'
+  export type { JournalTerminalVisualState, JournalTerminalDisplay, CategoricalFailureLabel, TokenForCardProps, JournalTerminalCardCtx, JournalTerminalCardProps } from '../utils/journal-state'
   import('../utils/journal-state')
   // @ts-ignore
   export type { MethodCarrier } from '../utils/primary-method'
@@ -248,6 +249,7 @@ declare module 'vue' {
     readonly buildFeeEstimate: UnwrapRef<typeof import('../utils/fee-estimation')['buildFeeEstimate']>
     readonly buildJournalTerminalCardProps: UnwrapRef<typeof import('../utils/journal-state')['buildJournalTerminalCardProps']>
     readonly capitalize: UnwrapRef<typeof import('../utils/string')['capitalize']>
+    readonly categoricalLabel: UnwrapRef<typeof import('../utils/journal-state')['categoricalLabel']>
     readonly checkNotificationsForShow: UnwrapRef<typeof import('../composables/notification.js')['checkNotificationsForShow']>
     readonly checkSentinel: UnwrapRef<typeof import('../utils/core')['checkSentinel']>
     readonly clampDecimals: UnwrapRef<typeof import('../utils/amount')['clampDecimals']>

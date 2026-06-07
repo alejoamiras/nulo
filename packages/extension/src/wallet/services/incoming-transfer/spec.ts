@@ -130,9 +130,6 @@ export type Methods = {
 	/** Trust state for a (profile, network, contract) triple. Returns
 	 *  `unknown` for contracts that have never received an incoming note. */
 	getTrustState(profileId: string, networkId: string, contract: string): IncomingTrustState
-	/** Transition the trust state. Use `setTrustAllow` / `setTrustReject`
-	 *  wrappers for the canonical user-action paths. */
-	setTrustState(profileId: string, networkId: string, contract: string, state: IncomingTrustState): void
 	/** User accepted the first-receive prompt: `pending → trusted`. Flips
 	 *  all hidden records for this contract to visible; emits
 	 *  `onIncomingTransferAdded` for each. Returns `false` when the contract

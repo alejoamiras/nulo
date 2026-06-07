@@ -156,19 +156,45 @@ export async function mintPublicTokens(
 	}
 }
 
-/** Mint private tokens to an address. */
+/** Mint private tokens to an address.
+ *
+ *  `mint_to_private` is a private execution path, so the test wallet's
+ *  PXE must know the token contract (instance + artifact) before it can
+ *  simulate the call. createTestWallet returns a fresh wallet whose PXE
+ *  hasn't been told about the deployed token — `TokenContract.at(...)`
+ *  alone doesn't register. Fetch the deployed instance from the node
+ *  + register with the wallet's PXE before simulating the mint.
+ *  `mintPublicTokens` doesn't need this because `mint_to_public` is a
+ *  public call that goes straight to the node.
+ */
 export async function mintPrivateTokens(
 	wallet: InstanceType<typeof EmbeddedWallet>,
+	node: ReturnType<typeof createAztecNodeClient>,
 	tokenAddress: string,
 	toAddress: string,
 	amount: bigint,
 	minterAddress: string,
 	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
 ): Promise<void> {
-	const token = await TokenContract.at(AztecAddress.fromString(tokenAddress), wallet)
+	const addr = AztecAddress.fromString(tokenAddress)
+	const instance = await node.getContract(addr)
+	if (!instance) throw new Error(`Token instance not found at node for ${tokenAddress}`)
+	try {
+		await wallet.registerContract(instance, TokenContract.artifact)
+	} catch {
+		// Already registered — ignore.
+	}
+
+	const token = await TokenContract.at(addr, wallet)
+	// `wait: { timeout: 120 }` blocks until the tx is mined; without it the
+	// returned SentTx isn't a thenable and the outer `await` resolves
+	// immediately (mintPublicTokens hides this via a follow-up
+	// `balance_of_public.simulate` that implicitly forces a chain query —
+	// no such barrier for the private path). Worth fixing here rather than
+	// at the call site so future callers don't repeat the trap.
 	await token.methods
 		.mint_to_private(AztecAddress.fromString(toAddress), amount)
-		.send({ fee: feeOptions, from: AztecAddress.fromString(minterAddress) })
+		.send({ fee: feeOptions, from: AztecAddress.fromString(minterAddress), wait: { timeout: 120 } })
 }
 
 // ── Fee Juice L1→L2 Bridge ────────────────────────────────────────────

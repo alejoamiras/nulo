@@ -46,12 +46,6 @@ const taskServiceMock = {
 	},
 }
 
-const setTrustAllowMock = vi.fn().mockResolvedValue(undefined)
-const incomingTransferServiceMock = {
-	setTrustAllow: setTrustAllowMock,
-	disconnect: vi.fn(),
-}
-
 const openToastMock = vi.fn()
 
 // Vitest 4 requires `function` expressions (not arrow functions) for mocks
@@ -69,11 +63,6 @@ vi.mock("@/wallet/services/token-balance/client", () => ({
 vi.mock("@/wallet/services/task/client", () => ({
 	TaskServiceClient: vi.fn(function () {
 		return taskServiceMock
-	}),
-}))
-vi.mock("@/wallet/services/incoming-transfer/client", () => ({
-	IncomingTransferServiceClient: vi.fn(function () {
-		return incomingTransferServiceMock
 	}),
 }))
 // ContentKind is imported separately by the popup; mirror the enum exactly.
@@ -229,8 +218,6 @@ beforeEach(() => {
 	taskServiceMock.connect.mockReset().mockResolvedValue(undefined)
 	taskServiceMock.disconnect.mockReset()
 	openToastMock.mockReset()
-	setTrustAllowMock.mockReset().mockResolvedValue(undefined)
-	incomingTransferServiceMock.disconnect.mockReset()
 	cacheStoreState.preselectedTokenAddressToAdd = ""
 	vi.useRealTimers()
 })
@@ -299,49 +286,12 @@ describe("NewTokenPopup", () => {
 		expect(w.emitted("onClose")).toBeTruthy()
 	})
 
-	test("(P7) success path: setTrustAllow called once with (profile, network, contract) after addToken", async () => {
-		const w = await mountAndOpen()
-		tokenServiceMock.parseTokenInterface.mockResolvedValueOnce({ isComplete: true, contract: validHex, chainId: 1 })
-		tokenServiceMock.addToken.mockResolvedValueOnce(defaultTokenInfo())
-		tokenBalanceServiceMock.getTokenBalances.mockResolvedValueOnce([])
-
-		await typeAddress(w, validHex)
-		await submitBtn(w).trigger("click")
-		await flushPromises()
-
-		expect(setTrustAllowMock).toHaveBeenCalledExactlyOnceWith("p1", "net-1", validHex)
-	})
-
-	test("(P7) setTrustAllow failure does NOT fail the add: toast + onClose still fire", async () => {
-		setTrustAllowMock.mockReset().mockRejectedValueOnce(new Error("transient port hiccup"))
-		const w = await mountAndOpen()
-		tokenServiceMock.parseTokenInterface.mockResolvedValueOnce({ isComplete: true, contract: validHex, chainId: 1 })
-		tokenServiceMock.addToken.mockResolvedValueOnce(defaultTokenInfo())
-		tokenBalanceServiceMock.getTokenBalances.mockResolvedValueOnce([])
-
-		await typeAddress(w, validHex)
-		await submitBtn(w).trigger("click")
-		await flushPromises()
-
-		expect(setTrustAllowMock).toHaveBeenCalled()
-		// addToken still succeeded → balance wait flow proceeds.
-		const tb = makeTb({ id: 100, account: "0xacct" })
-		for (const h of balanceAddedHandlers) h(tb)
-		for (const h of taskUpdatedHandlers) h(makeBalanceUpdateTask(100, { finished: true }))
-		await flushPromises()
-		expect(openToastMock).toHaveBeenCalledWith({ label: "Token added" })
-		expect(w.emitted("onClose")).toBeTruthy()
-	})
-
-	test("(P7) parse-failure path does NOT call setTrustAllow", async () => {
-		const w = await mountAndOpen()
-		tokenServiceMock.parseTokenInterface.mockResolvedValueOnce({ isComplete: false })
-		await typeAddress(w, validHex)
-		await submitBtn(w).trigger("click")
-		await flushPromises()
-		expect(tokenServiceMock.addToken).not.toHaveBeenCalled()
-		expect(setTrustAllowMock).not.toHaveBeenCalled()
-	})
+	// NOTE: auto-trust on user-add was moved out of NewTokenPopup into
+	// IncomingTransferService.onTokenAdded so the in-popup AND dApp
+	// register_token paths both auto-trust uniformly. Regression coverage
+	// for "no Pending emit after onTokenAdded" lives at
+	// service.scenarios.test.ts → (LR14 onTokenAdded auto-trusts before
+	// any scan can read unknown).
 
 	test("multi-account: events for non-active accounts are ignored; only the active-account TB resolves the wait", async () => {
 		const w = await mountAndOpen()

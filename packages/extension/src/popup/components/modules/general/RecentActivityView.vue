@@ -132,6 +132,13 @@ async function loadTokens() {
 	tokens.value = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
 }
 
+// Keep the local tokens map fresh as new tokens are added during this
+// session. Without this, incoming-transfer rows for a just-added token
+// render with the "Token" placeholder until the user re-opens the
+// extension: the tokenById lookup misses because `tokens` was only
+// populated once at mount.
+tokenService.onTokenAdded.add(loadTokens)
+
 function tokenById(id) {
 	return tokens.value.find((t) => t.id === id)
 }
