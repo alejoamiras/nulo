@@ -199,7 +199,7 @@ async function main() {
 		},
 	}
 	mkdirSync(dirname(CONFIG_PATH), { recursive: true })
-	writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`)
+	writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, "\t")}\n`)
 	console.log(`\n✅ PERSISTENT testnet bridge deployed in ${mins()} — wrote faucet/public/testnet-bridge.json`)
 	console.log(JSON.stringify(config, null, 2))
 }

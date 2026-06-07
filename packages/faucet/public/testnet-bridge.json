@@ -1,0 +1,30 @@
+{
+	"network": "testnet",
+	"l1": {
+		"usdc": "0x79e74f638cd6d09e511fbcb0b62be01d0cf55012",
+		"portal": "0xde849613a79f2026b7b2209caece7a4d5879fa85"
+	},
+	"l2": {
+		"proxy": {
+			"address": "0x0c448027f1d2231a64f41fea409347b5b842ea5a8a69e96f84f9b2547c754dd0",
+			"salt": 23297,
+			"constructorArtifact": "constructor",
+			"constructorArgs": []
+		},
+		"token": {
+			"address": "0x05d884695d5072e276ee3bea7f6daba4ba96fe765de32b5b7b9e8a2c102ccf94",
+			"salt": 23298,
+			"constructorArtifact": "constructor_with_minter",
+			"constructorArgs": ["Nulo USDC", "USDC", 6, "0x0c448027f1d2231a64f41fea409347b5b842ea5a8a69e96f84f9b2547c754dd0"]
+		},
+		"bridge": {
+			"address": "0x13e5f1cde4af565fbc887c7b8ec630ddc7eba8ed1e1dce3379d4ba54e2995760",
+			"salt": 23299,
+			"constructorArtifact": "constructor",
+			"constructorArgs": [
+				"0x0c448027f1d2231a64f41fea409347b5b842ea5a8a69e96f84f9b2547c754dd0",
+				"0xde849613a79f2026b7b2209caece7a4d5879fa85"
+			]
+		}
+	}
+}
