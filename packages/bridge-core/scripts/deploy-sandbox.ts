@@ -240,6 +240,56 @@ async function main() {
 		if (bal < amount) throw new Error(`balance ${bal} < deposited ${amount}`)
 		console.log("✅ deposit-public balance assertion OK (100 USDC minted on L2)")
 		console.log("✅ deposit-public smoke PASSED")
+
+		// ── deposit-private (flow #2): claim_private mints to a private balance ──
+		console.log("\n=== deposit-private smoke (L1 deposit → L2 private claim) ===")
+		const secretP = Fr.random()
+		const secretHashP = await computeSecretHash(secretP)
+		await pub.waitForTransactionReceipt({
+			hash: await wallet.writeContract({
+				address: usdc,
+				abi: usdcAbi,
+				functionName: "mint",
+				args: [account.address, amount] as never,
+			}),
+		})
+		await pub.waitForTransactionReceipt({
+			hash: await wallet.writeContract({ address: usdc, abi: usdcAbi, functionName: "approve", args: [portal, amount] as never }),
+		})
+		const privArgs = [amount, secretHashP.toString()]
+		const simP = await pub.simulateContract({
+			address: portal,
+			abi: TokenPortalAbi as never,
+			functionName: "depositToAztecPrivate",
+			args: privArgs as never,
+			account,
+		})
+		const leafIndexP = BigInt((simP.result as [string, bigint])[1])
+		await pub.waitForTransactionReceipt({
+			hash: await wallet.writeContract({
+				address: portal,
+				abi: TokenPortalAbi as never,
+				functionName: "depositToAztecPrivate",
+				args: privArgs as never,
+			}),
+		})
+		console.log("deposited 100 USDC → L2 (private), leafIndex:", leafIndexP.toString())
+
+		let claimedP = false
+		for (let i = 0; i < 20 && !claimedP; i++) {
+			try {
+				await bridge.methods.claim_private(l2recipient, amount, secretP, new Fr(leafIndexP)).send(sendOpts)
+				claimedP = true
+			} catch {
+				await new Promise((r) => setTimeout(r, 3000))
+			}
+		}
+		if (!claimedP) throw new Error("claim_private never succeeded (L1→L2 message not synced)")
+
+		const balP = ((await token.methods.balance_of_private(l2recipient).simulate({ from })) as { result: bigint }).result
+		console.log("L2 private USDC balance:", balP.toString())
+		if (balP < amount) throw new Error(`private balance ${balP} < deposited ${amount}`)
+		console.log("✅ deposit-private balance assertion OK (100 USDC minted privately on L2)")
 	}
 
 	console.log("\n✅ FULL sandbox deploy OK")
