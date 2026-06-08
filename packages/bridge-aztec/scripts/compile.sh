@@ -20,8 +20,15 @@ export NARGO="$AZTEC_RC2/bin/nargo"
 export BB="$AZTEC_RC2/node_modules/.bin/bb"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(cd "$here/../.." && pwd)"
 for c in token_minter_proxy token_bridge; do
 	echo "=== aztec compile $c ==="
 	(cd "$here/$c" && "$AZTEC" compile)
+	# `aztec compile` embeds absolute source paths (this machine's repo root + the ~/.aztec and
+	# ~/nargo dependency caches) in the artifact's debug file_map. They are not load-bearing, but
+	# the artifact is committed (CI has no nargo), so leaving them leaks the contributor's home-dir
+	# layout and trips scripts/check-no-brand.sh. Rewrite to repo-relative so the committed artifact
+	# is identical regardless of which machine built it.
+	perl -i -pe "s{\Q$repo_root\E/}{}g; s{\Q$HOME\E/}{}g" "$here/$c"/target/*.json
 done
-echo "✅ transpiled artifacts in */target/*.json"
+echo "✅ transpiled + path-scrubbed artifacts in */target/*.json"
