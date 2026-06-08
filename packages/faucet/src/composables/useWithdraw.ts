@@ -24,6 +24,7 @@ const PROVEN_TIMEOUT_SEC = 1800
 
 // Verbose tracing while the bridge flows are being hardened — every step + value to the console.
 const log = (...args: unknown[]) => console.log("[bridge:withdraw]", ...args)
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export type WithdrawStage = "idle" | "burning" | "exiting" | "proving" | "consuming" | "done" | "error"
 
@@ -90,8 +91,18 @@ export function useWithdraw() {
 		const txHash = TxHash.fromString(p.exitTxHash)
 
 		stage.value = "proving"
-		log("step 3/4 — waiting for the proven epoch (testnet proving is slow)", { exitTxHash: p.exitTxHash, exitBlock: p.exitBlock })
-		targetBlock.value = p.exitBlock ?? null
+		log("step 3/4 — waiting for the proven epoch (testnet proving is slow)", { exitTxHash: p.exitTxHash })
+		// The exit's .send receipt has no blockNumber at PROPOSED, and waitForProven needs it — so fetch
+		// the receipt from the node (authoritative) and poll until the tx is mined into an L2 block.
+		let receipt = await node.getTxReceipt(txHash).catch(() => undefined)
+		for (let i = 0; i < 120 && !receipt?.blockNumber; i++) {
+			log(`exit not yet in an L2 block (poll ${i + 1}) — waiting 5s`)
+			await sleep(5000)
+			receipt = await node.getTxReceipt(txHash).catch(() => undefined)
+		}
+		if (!receipt?.blockNumber) throw new Error("the exit tx never landed in an L2 block — it will resume when you reopen this tab")
+		targetBlock.value = Number(receipt.blockNumber)
+		log("exit mined in L2 block", String(receipt.blockNumber), "— now waiting for it to be proven")
 		const pollTimer = setInterval(() => {
 			node.getProvenBlockNumber()
 				.then((n) => {
@@ -100,7 +111,7 @@ export function useWithdraw() {
 				.catch(() => {})
 		}, 5000)
 		try {
-			await waitForProven(node as never, { txHash } as never, { provenTimeout: PROVEN_TIMEOUT_SEC } as never)
+			await waitForProven(node as never, receipt as never, { provenTimeout: PROVEN_TIMEOUT_SEC } as never)
 		} finally {
 			clearInterval(pollTimer)
 		}
