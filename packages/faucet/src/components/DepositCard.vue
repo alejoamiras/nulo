@@ -15,7 +15,7 @@ const amount = ref("100")
 const bothConnected = computed(() => l1.isConnected.value && bridge.status.value === "connected")
 const busy = computed(() => stage.value !== "idle" && stage.value !== "done" && stage.value !== "error")
 
-const STAGES = ["minting", "approving", "depositing", "claiming", "done"] as const
+const STAGES = ["minting", "approving", "depositing", "syncing", "claiming", "done"] as const
 const progress = computed(() => {
 	const i = STAGES.indexOf(stage.value as (typeof STAGES)[number])
 	return i < 0 ? 0 : Math.round(((i + 1) / STAGES.length) * 100)
@@ -29,8 +29,10 @@ const stageLabel = computed(() => {
 			return "Step 2 of 4 · Approving the portal — confirm in your Ethereum wallet"
 		case "depositing":
 			return "Step 3 of 4 · Depositing to Aztec — confirm in your Ethereum wallet"
+		case "syncing":
+			return "Waiting for the L1→L2 message to sync on Aztec — no signature needed (~1–2 min)…"
 		case "claiming":
-			return "Step 4 of 4 · Claiming on Aztec — confirm in your Aztec wallet, then ~1 min for the proof"
+			return "Step 4 of 4 · Claiming on Aztec — confirm in your Aztec wallet"
 		case "done":
 			return "Deposit complete."
 		case "error":
