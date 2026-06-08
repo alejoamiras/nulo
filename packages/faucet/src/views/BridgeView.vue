@@ -2,6 +2,7 @@
 import BridgeWalletPanel from "@/components/BridgeWalletPanel.vue"
 import DepositCard from "@/components/DepositCard.vue"
 import L1WalletPanel from "@/components/L1WalletPanel.vue"
+import WithdrawCard from "@/components/WithdrawCard.vue"
 import { TESTIDS } from "@/lib/testids"
 </script>
 
@@ -21,6 +22,7 @@ import { TESTIDS } from "@/lib/testids"
 		</section>
 
 		<DepositCard />
+		<WithdrawCard />
 	</div>
 </template>
 
