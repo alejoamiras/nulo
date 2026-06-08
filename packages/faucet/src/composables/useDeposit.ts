@@ -14,6 +14,10 @@ import { BRIDGE, BRIDGE_TOKEN, L1_PORTAL, L1_USDC } from "@/contracts/bridge-dep
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { useL1Wallet } from "./useL1Wallet"
+import { readBalance } from "./useTokenBalance"
+
+// Verbose tracing while the bridge flows are being hardened — every step + value to the console.
+const log = (...args: unknown[]) => console.log("[bridge:deposit]", ...args)
 
 /** Minimal MintableERC20 surface (standard signatures) — mint test USDC + approve the portal. */
 const ERC20_ABI = [
@@ -97,7 +101,11 @@ export function useDeposit() {
 
 	async function readPublicBalance(wallet: unknown, recipient: AztecAddress): Promise<bigint> {
 		const token = await Contract.at(BRIDGE_TOKEN, TokenContractArtifact, wallet as never)
-		return (await token.methods.balance_of_public(recipient).simulate()) as unknown as bigint
+		// readBalance unwraps the SimulationResult to a real bigint — a raw cast yields the wrapper
+		// object, which then stringifies to "[object Object]" and blows up the later BigInt() coercion.
+		const bal = await readBalance(wallet as never, token, "balance_of_public", recipient)
+		log("balance_of_public", recipient.toString(), "=", bal.toString())
+		return bal
 	}
 
 	/** Poll claim_public until it lands, then confirm the credit (the reorg-safe clear signal). */
@@ -112,17 +120,28 @@ export function useDeposit() {
 
 		stage.value = "claiming"
 		const target = BigInt(pending.preBalance) + amount
+		log("claiming", {
+			recipient: pending.recipient,
+			amount: amount.toString(),
+			leafIndex: pending.leafIndex,
+			preBalance: pending.preBalance,
+			target: target.toString(),
+		})
 		for (let i = 0; i < 300; i++) {
 			// Already credited (e.g. a prior attempt's claim landed) — done, regardless of this send.
 			if ((await readPublicBalance(wallet, recipientAddr)) >= target) {
+				log("credited — claim complete")
 				clearPending()
 				hasPending.value = false
 				stage.value = "done"
 				return
 			}
 			try {
+				log(`claim_public attempt ${i + 1}`)
 				await bridge.methods.claim_public(recipientAddr, amount, secret, new Fr(BigInt(pending.leafIndex))).send(sendOpts as never)
-			} catch {
+				log(`claim_public attempt ${i + 1} sent OK`)
+			} catch (e) {
+				log(`claim_public attempt ${i + 1} failed (retrying in 6s):`, e instanceof Error ? e.message : e)
 				await sleep(6000)
 			}
 		}
@@ -146,6 +165,7 @@ export function useDeposit() {
 		}
 
 		try {
+			log("start", { amount: amount.toString(), recipient, from, usdc: L1_USDC, portal: L1_PORTAL })
 			const secret = Fr.random()
 			const secretHash = await computeSecretHash(secret)
 			const recipientAddr = AztecAddress.fromString(recipient)
@@ -154,6 +174,7 @@ export function useDeposit() {
 			hasPending.value = true
 
 			stage.value = "minting"
+			log("step 1/4 — minting", amount.toString(), "USDC to", from, "(confirm in your Ethereum wallet)")
 			l1TxHash.value = await wallet.writeContract({
 				address: L1_USDC,
 				abi: ERC20_ABI,
@@ -162,9 +183,11 @@ export function useDeposit() {
 				chain: sepolia,
 				account: from,
 			})
+			log("mint tx", l1TxHash.value)
 			await l1.publicClient.waitForTransactionReceipt({ hash: l1TxHash.value as `0x${string}` })
 
 			stage.value = "approving"
+			log("step 2/4 — approving portal", L1_PORTAL, "for", amount.toString(), "(confirm in your Ethereum wallet)")
 			const approveHash = await wallet.writeContract({
 				address: L1_USDC,
 				abi: ERC20_ABI,
@@ -173,9 +196,11 @@ export function useDeposit() {
 				chain: sepolia,
 				account: from,
 			})
+			log("approve tx", approveHash)
 			await l1.publicClient.waitForTransactionReceipt({ hash: approveHash })
 
 			stage.value = "depositing"
+			log("step 3/4 — depositToAztecPublic (confirm in your Ethereum wallet)")
 			const depositArgs = [recipient as `0x${string}`, amount, secretHash.toString() as `0x${string}`] as const
 			const depositReceipt = await l1.publicClient.waitForTransactionReceipt({
 				hash: await wallet.writeContract({
@@ -187,6 +212,7 @@ export function useDeposit() {
 					account: from,
 				}),
 			})
+			log("deposit tx", depositReceipt.transactionHash)
 			// The real leaf index comes from the mined Inbox MessageSent event — a preflight simulate
 			// races with any concurrent deposit and yields an index the L2 message won't match (the
 			// claim then retries forever against the wrong leaf). Mirrors bridge-core/flows.ts.
@@ -194,6 +220,7 @@ export function useDeposit() {
 			const event = sent[0] as { args?: { index?: bigint } } | undefined
 			if (event?.args?.index === undefined) throw new Error("deposit emitted no Inbox MessageSent event")
 			const leafIndex = event.args.index.toString()
+			log("L1→L2 message leaf index", leafIndex)
 			persistPending({
 				secret: secret.toString(),
 				recipient,
@@ -202,6 +229,7 @@ export function useDeposit() {
 				leafIndex,
 			})
 
+			log("step 4/4 — claiming on L2 (confirm in your Aztec wallet)")
 			await claimAndConfirm(aztec, {
 				secret: secret.toString(),
 				recipient,
@@ -209,7 +237,9 @@ export function useDeposit() {
 				preBalance: preBalance.toString(),
 				leafIndex,
 			})
+			log("deposit complete ✓")
 		} catch (e) {
+			log("FAILED:", e)
 			error.value = e instanceof Error ? e.message : "Deposit failed"
 			stage.value = "error"
 		}
@@ -220,9 +250,11 @@ export function useDeposit() {
 		const pending = loadPending()
 		const aztec = bridgeWallet.wallet.value
 		if (!pending?.leafIndex || !aztec || stage.value !== "idle") return
+		log("resuming pending claim", pending)
 		try {
 			await claimAndConfirm(aztec, pending as PendingDeposit & { leafIndex: string })
 		} catch (e) {
+			log("resume FAILED:", e)
 			error.value = e instanceof Error ? e.message : "Resume failed"
 			stage.value = "error"
 		}

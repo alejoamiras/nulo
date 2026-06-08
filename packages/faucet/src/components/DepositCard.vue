@@ -24,13 +24,13 @@ const progress = computed(() => {
 const stageLabel = computed(() => {
 	switch (stage.value) {
 		case "minting":
-			return "Minting test USDC on Sepolia…"
+			return "Step 1 of 4 · Minting test USDC — confirm in your Ethereum wallet"
 		case "approving":
-			return "Approving the portal…"
+			return "Step 2 of 4 · Approving the portal — confirm in your Ethereum wallet"
 		case "depositing":
-			return "Depositing to Aztec (L1 transaction)…"
+			return "Step 3 of 4 · Depositing to Aztec — confirm in your Ethereum wallet"
 		case "claiming":
-			return "Claiming on L2 — waiting for the L1→L2 message + a client-side proof (~1 min)…"
+			return "Step 4 of 4 · Claiming on Aztec — confirm in your Aztec wallet, then ~1 min for the proof"
 		case "done":
 			return "Deposit complete."
 		case "error":
