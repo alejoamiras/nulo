@@ -77,6 +77,35 @@ import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import type { IAccountReader, IDappInteractionRunner, IDappSessionWriter, IExecutionRunner, INetworkReader } from "./services-contract"
 
+/**
+ * Internal hooks bag the dispatcher accepts from its caller (the wallet-sdk
+ * background message handler). NOT part of `SessionContext` — codex round-3
+ * caught that putting hooks on the ctx would propagate them into recursive
+ * batch-leg dispatches and break the batch's sequential-completion contract.
+ *
+ * Currently consumed only by the `sendTx` path (forwarded to
+ * `DappInteractionService.execute` → `executionService.executeOperations`
+ * → `executeAztecSendTx` / `executeNoFromSendTx`). Other methods ignore.
+ */
+export interface DispatchHooks {
+	/**
+	 * Invoked by the wallet once the approved request has enqueued on the
+	 * per-(profileId, chainId) execution mutex. Releases the session FIFO baton
+	 * so the next pending message's popup can open — safely, because this
+	 * request is already ahead of any later one in the execution FIFO, so
+	 * message/approval order is preserved. Popup/UI concurrency without
+	 * reordering execution.
+	 */
+	onExecutionEnqueued?: () => void
+	/**
+	 * Pre-allocated journal id from `background.ts:onWalletMessage`. When
+	 * present, the handler should TRANSITION this record (queued → pending
+	 * → ...) instead of creating a new one. Lets the activity feed surface
+	 * the request immediately on message arrival.
+	 */
+	queuedJournalId?: string
+}
+
 declare const __VERSION__: string
 
 /**
@@ -195,7 +224,7 @@ export class WalletSdkDispatcher {
 	 * @returns The result value from the first (and only) operation
 	 * @throws If the method is unsupported, the operation fails, or session context is invalid
 	 */
-	async dispatch(methodName: string, args: unknown[], ctx: SessionContext): Promise<unknown> {
+	async dispatch(methodName: string, args: unknown[], ctx: SessionContext, hooks?: DispatchHooks): Promise<unknown> {
 		// Enforce capability grants (type-level) then scope (per-operation)
 		const grants = await this.enforceCapability(methodName, ctx)
 		if (grants.length) {
@@ -210,6 +239,11 @@ export class WalletSdkDispatcher {
 			return this.handleGetAccounts(ctx)
 		}
 		if (methodName === "batch") {
+			// CRITICAL: do NOT forward `hooks` into batch legs. handleBatch
+			// recurses into dispatch() per-leg; forwarding hooks would let an
+			// inner sendTx leg's `onExecutionEnqueued` release the top-level
+			// FIFO baton before the batch finishes, breaking the batch's
+			// sequential-completion contract.
 			return this.handleBatch(args[0] as Array<{ name: string; args: unknown[] }>, ctx)
 		}
 
@@ -217,7 +251,7 @@ export class WalletSdkDispatcher {
 		// confirmation popup. sendTx also drives fee selection; registerToken pre-fetches
 		// token metadata so the user sees name + symbol + decimals before approving.
 		if (methodName === "sendTx") {
-			return this.handleSendTx(args, ctx)
+			return this.handleSendTx(args, ctx, hooks)
 		}
 		if (methodName === "registerToken") {
 			return this.handleRegisterToken(args, ctx)
@@ -345,7 +379,7 @@ export class WalletSdkDispatcher {
 	 * validates the session, checks if confirmation is needed, and opens the
 	 * popup for user approval + fee method selection.
 	 */
-	private async handleSendTx(args: unknown[], ctx: SessionContext): Promise<unknown> {
+	private async handleSendTx(args: unknown[], ctx: SessionContext, hooks?: DispatchHooks): Promise<unknown> {
 		const [_network, account] = await this.resolveNetworkAndAccount(ctx)
 		const caipAccount = formatCaipAccount(ctx.chainId, account.address)
 		this.logger.log(
@@ -382,10 +416,20 @@ export class WalletSdkDispatcher {
 			...(isNoFrom ? { executionMode: "default_entrypoint" as const } : {}),
 		}
 
-		const results: ExecutionResult = await this.dappInteractionService.execute({
-			sessionId: dappSession.id,
-			operations: [sendOp],
-		})
+		const results: ExecutionResult = await this.dappInteractionService.execute(
+			{
+				sessionId: dappSession.id,
+				operations: [sendOp],
+			},
+			// Arg 2 is the existing cancellationToken slot — leave undefined when
+			// hooks are the only thing we're forwarding. Arg 3 is the hooks bag
+			// (see services-contract.ts:IDappInteractionRunner). `originKey` is
+			// ALWAYS set from ctx.origin (not gated on `hooks`) so the per-origin
+			// backpressure cap applies to every dApp sendTx, even ones that arrive
+			// without the FIFO-baton hooks.
+			undefined,
+			{ onExecutionEnqueued: hooks?.onExecutionEnqueued, queuedJournalId: hooks?.queuedJournalId, originKey: ctx.origin },
+		)
 
 		return this.unwrapResult(results[0])
 	}

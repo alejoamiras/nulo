@@ -88,3 +88,18 @@ Resurrect via `git show 1081c1b^:packages/extension/src/wallet/utils/probe.ts` e
 - Consolidated followup plan: `implementations-plan/network-followups/plan.md` §6
 - Opus's parallel plan §2.3: `implementations-plan/network-followups/audit-opus.md`
 - Codex's parallel plan §2.3: `implementations-plan/network-followups/audit-codex.md`
+
+---
+
+## Resolution (2026-05-28)
+
+**Fully resolved (revised, dated when this PR merges):** the journal-stage assertion restructure (`implementations-plan/journal-stage-restructure/`) un-quarantined all 3 deferred-slow tests by replacing the "wait on dApp's full sendTx promise" assertion (slow because of WASM kernel-prove tail) with `waitForSendTxProvingStage(walletPopup)` — asserts the wallet reached the journal `proving` stage instead of waiting for the prove to complete. The `NULO_E2E_SKIP_DEFERRED_SLOW` gate has been removed from CI.
+
+| Test | Status |
+|---|---|
+| `register-token.test.ts` (PR #63) | ✅ Resolved via pre-grant fixture |
+| `multi-account-from.test.ts` | ✅ Un-quarantined via journal-stage restructure |
+| `tx-sendTx-multicall.test.ts` (both #32 + #33) | ✅ Un-quarantined via journal-stage restructure |
+| `tx-sendTx-default.test.ts` (added in PR #66) | ✅ Un-quarantined via journal-stage restructure |
+
+H-OP-1, H-OP-2, H-OP-3 turned out to be the right characterization: the slow path WAS the WASM kernel-prove chain on slow-runner-pool members. The structural fix wasn't accelerator (which only covers `createChonkProof`) — it was **changing what the tests wait for**: stop at pipeline entry (`proving` stage) instead of pipeline completion. End-to-end mining coverage stays concentrated in `transfers.test.ts` (which uses `waitForTxConfirmation()` via the wallet-UI-driven send flow, exercising the same prove stack).

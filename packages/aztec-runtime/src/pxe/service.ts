@@ -10,6 +10,7 @@ import {
 	type CompleteAddress,
 	type PartialAddress,
 } from "@aztec/stdlib/contract"
+import { BlockParameterSchema } from "@aztec/stdlib/block"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { NoteDao } from "@aztec/stdlib/note"
 import type { NotesFilter } from "./spec"
@@ -371,6 +372,29 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 *  `BaseWallet.simulateTx`. */
 	public async getSyncedBlockHeader(network: NetworkInfo): Promise<BlockHeader> {
 		return this.withPxeRead("getSyncedBlockHeader", network, (pxe) => pxe.getSyncedBlockHeader())
+	}
+
+	/**
+	 * Chain-derived block timestamp for `blockNumber`. Falls back to
+	 * `undefined` on any failure path so the consumer can degrade to a
+	 * wall-clock fallback without crashing. Per-block lookup; callers
+	 * should memoize across batches when scanning many notes.
+	 */
+	public async getBlockTimestamp(network: NetworkInfo, blockNumber: number): Promise<number | undefined> {
+		return this.withPxeRead("getBlockTimestamp", network, async (_pxe, node) => {
+			try {
+				// `node.getBlock` expects BlockParameter which is a Zod-branded
+				// union of BlockHash | BlockNumber | "latest". We have a plain
+				// number; parse via the schema so the branded BlockNumber gets
+				// produced.
+				const blockParam = await BlockParameterSchema.parseAsync(blockNumber)
+				const block = await node.getBlock(blockParam)
+				if (!block) return undefined
+				return Number(block.header.globalVariables.timestamp)
+			} catch {
+				return undefined
+			}
+		})
 	}
 
 	/**

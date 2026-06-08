@@ -38,8 +38,16 @@ describe("onboarding tab", () => {
 		// Wait for the bootstrap to finish + route to /learn
 		await waitForHash(page, "#/onboarding/learn", 30_000)
 
-		// Continue to accelerator
+		// Continue from learn now routes into the fee-juice explainer step
+		// (was direct-to-accelerator pre-arc). Skip on learn still routes
+		// straight to /accelerator — covered by the dedicated skip test below.
 		await clickByTestId(page, "onboarding-learn-continue")
+		await waitForHash(page, "#/onboarding/fees", 10_000)
+
+		// Continue from /fees → /accelerator. Skip on /fees routes to the
+		// same destination (the explainer is short; no value in a dedicated
+		// skip-to-done shortcut).
+		await clickByTestId(page, "onboarding-fees-continue")
 		await waitForHash(page, "#/onboarding/accelerator", 10_000)
 
 		// Wait for the status card to settle (any terminal state). If 'active'
@@ -142,6 +150,33 @@ describe("onboarding tab", () => {
 		})
 		expect(state.rendered).toBe(true)
 		expect(state.disabled).toBe(false)
+
+		await page.close()
+	})
+
+	test("skip links on /learn and /fees both route to /accelerator (split-handler pin)", async ({ freshExtensionPerTest: extension }) => {
+		// Drive the two skip buttons directly. The arc redesigned the
+		// happy-path into learn → fees → accelerator; each skip is its own
+		// handler routing to /accelerator (not /done). Without this pin, a
+		// future refactor that consolidates handlers could silently fan one
+		// of them to the wrong target.
+		const page = await openOnboarding(extension)
+
+		// /learn skip → /accelerator
+		await page.evaluate(() => {
+			window.location.hash = "#/onboarding/learn"
+		})
+		await waitForHash(page, "#/onboarding/learn", 10_000)
+		await clickByTestId(page, "onboarding-learn-skip")
+		await waitForHash(page, "#/onboarding/accelerator", 10_000)
+
+		// /fees skip → /accelerator
+		await page.evaluate(() => {
+			window.location.hash = "#/onboarding/fees"
+		})
+		await waitForHash(page, "#/onboarding/fees", 10_000)
+		await clickByTestId(page, "onboarding-fees-skip")
+		await waitForHash(page, "#/onboarding/accelerator", 10_000)
 
 		await page.close()
 	})

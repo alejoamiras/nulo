@@ -20,6 +20,15 @@ export class Config {
 	// Additional
 	defaultExplorer: BlockExplorerType | null = "aztecscan"
 
+	// Activity
+	/** When OFF, IncomingTransferService records are still persisted but
+	 *  `getIncomingTransfers` returns empty — the activity feed hides all
+	 *  incoming-receive rows. Escape hatch for users running the same seed
+	 *  on multiple devices, where the other device's outgoing transfers
+	 *  arrive as PXE-synced notes here and (correctly per protocol) lack
+	 *  a local outgoing-tx record. Default ON. */
+	incomingTransfersVisible: boolean = true
+
 	// Developer
 	developerMode: boolean = false
 	debugMode: boolean = false

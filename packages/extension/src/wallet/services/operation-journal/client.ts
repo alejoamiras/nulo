@@ -9,6 +9,7 @@ import {
 	type Methods,
 	type NewOperationInput,
 	OPERATION_JOURNAL_SERVICE_NAME,
+	type OperationCountFilter,
 	type OperationFilter,
 	OperationJournalMethodSchemas,
 	type OperationRecord,
@@ -53,6 +54,12 @@ export class OperationJournalServiceClient extends ServiceClient<Methods, Events
 		validateParams(OperationJournalMethodSchemas.getOperations.params, [filter], "getOperations")
 		const result = await this.request("getOperations", filter)
 		return validateResult(OperationJournalMethodSchemas.getOperations.result, result, "getOperations")
+	}
+
+	public async countOperations(filter: OperationCountFilter): Promise<number> {
+		validateParams(OperationJournalMethodSchemas.countOperations.params, [filter], "countOperations")
+		const result = await this.request("countOperations", filter)
+		return validateResult(OperationJournalMethodSchemas.countOperations.result, result, "countOperations")
 	}
 
 	public async deleteOperation(id: string): Promise<void> {

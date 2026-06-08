@@ -47,3 +47,9 @@ The structural changes work. The residual flake is runner-pool variability that 
 Replace `tx-sendTx-default` with a journal-stage observation test. Add stage-level instrumentation (markJournal console emission for `simulating` / `proving` / `submitting` / `succeeded`) in the same PR. Once the redesign lands, drop the `skipDeferredSlow` gate.
 
 Estimate: 4-6 hours for the redesign + instrumentation. Wallet code touch (markJournal callsite) requires codex review per CLAUDE.md.
+
+---
+
+## Fully resolved (revised)
+
+`cancel-mid-prove`'s 30s post-approve selector waits were restored in PR #67 (chonk-prove is fast under accelerator). `tx-sendTx-default`'s un-quarantine was ATTEMPTED in PR #67 then REVERTED; the journal-stage redesign codex originally proposed (`implementations-plan/journal-stage-restructure/`) was implemented in a separate PR and is what finally un-quarantined it (plus its 2 quarantined siblings). The mechanism — `waitForSendTxProvingStage()` against `data-stage="proving"` on the existing `tx-awaiting-card` — exactly matches what codex recommended in this audit (~2 weeks of arc).

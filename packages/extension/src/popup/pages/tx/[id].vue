@@ -17,7 +17,7 @@ import { DateTime } from "luxon"
 
 /** Services */
 import { TokenServiceClient } from "@/wallet/services/token/client"
-import { OriginType } from "@/wallet/services/transaction/client"
+import { OriginType, TxStatus } from "@/wallet/services/transaction/client"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Utils */
@@ -59,6 +59,15 @@ const showDebugPanel = ref(false)
 const tx = computed(() => appStore.transactions.find((t) => t.hash === route.params.id))
 const call = computed(() => (tx.value?.calls ? getPrimaryCall(tx.value.calls) : undefined))
 const type = computed(() => (tx.value?.calls ? getTxCategory(tx.value.calls) : "tx"))
+
+// Mirror `TransactionCard.vue`'s isMined state machine. Used to gate the
+// explorer-link surfaces on the detail page — a pending tx has a hash but
+// no on-chain presence yet, so the explorer link would 404. Show the
+// copyable hash slice instead until the tx confirms.
+const isMined = computed(() => {
+	const s = tx.value?.status
+	return s === TxStatus.Proposed || s === TxStatus.Checkpointed || s === TxStatus.Proven || s === TxStatus.Finalized
+})
 
 const popupTitle = computed(() => (tx.value?.calls ? getTxTitle(tx.value.calls) : "Transaction"))
 const originLabel = computed(() => getOriginLabel(tx.value?.origin))
@@ -148,7 +157,7 @@ onBeforeUnmount(() => {
 					<span v-if="txTime" :class="$style.tx_time">{{ txTime }}</span>
 					<span v-if="txTime && (explorerUrl || tx?.hash)" :class="$style.meta_sep">·</span>
 					<a
-						v-if="explorerUrl"
+						v-if="explorerUrl && isMined"
 						:href="explorerUrl"
 						target="_blank"
 						rel="noopener noreferrer"
@@ -162,6 +171,7 @@ onBeforeUnmount(() => {
 						v-else-if="tx?.hash"
 						@click="handleCopy(tx.hash)"
 						:class="[$style.hero_link, 'copyable']"
+						data-testid="tx-detail-pending-copy-hash"
 					>
 						<span>Copy hash</span>
 						<Icon name="copy" size="10" color="tertiary" />
@@ -245,7 +255,7 @@ onBeforeUnmount(() => {
 					<Flex v-if="tx?.hash" wide justify="between" align="center">
 						<span :class="$style.detail_key">Tx hash</span>
 						<a
-							v-if="explorerUrl"
+							v-if="explorerUrl && isMined"
 							:href="explorerUrl"
 							target="_blank"
 							rel="noopener noreferrer"

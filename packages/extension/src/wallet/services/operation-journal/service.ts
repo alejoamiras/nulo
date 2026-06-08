@@ -3,7 +3,7 @@ import { ValidationError } from "@nulo/extension-messaging/errors"
 import { validateParams } from "@nulo/extension-messaging/zod"
 import { type JobError, type JobProgress, assertCanTransition, isTerminal } from "@nulo/wallet-core/jobs"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
-import { EventHandler } from "@nulo/wallet-core/utils"
+import { Lock, EventHandler } from "@nulo/wallet-core/utils"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import type { ILogger } from "@/wallet/logger"
 import { NetworkService } from "@/wallet/services/network/service"
@@ -14,6 +14,7 @@ import {
 	type Methods,
 	type NewOperationInput,
 	OPERATION_JOURNAL_SERVICE_NAME,
+	type OperationCountFilter,
 	type OperationFilter,
 	OperationJournalMethodSchemas,
 	type OperationRecord,
@@ -47,13 +48,48 @@ export class OperationJournalService extends Service<Methods, Events> implements
 
 	private readonly storage: EntityStorage<OperationRecord>
 
+	/**
+	 * Serializes `transitionOperation` calls across ALL records.
+	 *
+	 * `transitionOperation` does load → validate → write. Without this lock,
+	 * two concurrent transitions on the SAME record can both read the same
+	 * starting stage, both pass `assertCanTransition`, then last-write wins
+	 * at the storage layer — producing a state that doesn't match either
+	 * caller's expectation. The pathological case (caught by codex-round-5)
+	 * is claim vs. cancel: `cancelJob(queued|pending → cancelled)` racing
+	 * with a handler's `claim(queued → pending)`.
+	 *
+	 * Global rather than per-record because:
+	 *   - per-record requires a Map<id, Lock> with eviction policy headaches
+	 *   - each transition is fast (a single chrome.storage write)
+	 *   - transition volume is low (a handful per tx lifecycle)
+	 *
+	 * Other journal methods (`createOperation`, `deleteOperation`,
+	 * `getOperation`) don't need this lock — they don't load-then-write on
+	 * the same row. If a future caller introduces another load+merge+write
+	 * path (e.g. metadata updates) it MUST acquire this same lock.
+	 */
+	private readonly transitionLock: Lock
+
 	public constructor(logger: ILogger, browserApi?: BrowserApi) {
 		super(OPERATION_JOURNAL_SERVICE_NAME, logger)
-		// Session storage: records survive SW restart but clear on browser exit
-		// (stale ops post-reboot aren't actionable anyway).
+		// Local storage: records survive SW restart AND full browser exit.
+		// Originally used `chrome.storage.session` on the rationale that
+		// "stale ops post-reboot aren't actionable anyway" — true for IN-
+		// FLIGHT records, but terminal records (failed/cancelled/succeeded)
+		// ARE the user's history. Session storage's browser-exit wipe was
+		// erasing failed/cancelled history that the user expected to keep
+		// (QA feedback 2026-06-05). The reaper's boot-sweep still marks
+		// surviving non-terminal records as failed on SW restart — same
+		// behavior as before, just the durability layer changed.
 		this.storage = browserApi
-			? new EntityStorage<OperationRecord>("nulo:journal", browserApi.storage.session)
-			: new EntityStorage<OperationRecord>("nulo:journal", chrome.storage.session)
+			? new EntityStorage<OperationRecord>("nulo:journal", browserApi.storage.local)
+			: new EntityStorage<OperationRecord>("nulo:journal", chrome.storage.local)
+		// Instantiated in the constructor (not as a field initializer) so the
+		// logger reference is guaranteed to be the same instance the base
+		// Service stores on `this`. See class field comment above for the
+		// mutex contract.
+		this.transitionLock = new Lock("operation-journal:transition", logger)
 	}
 
 	protected async init(services: ServiceCollection): Promise<void> {
@@ -130,7 +166,10 @@ export class OperationJournalService extends Service<Methods, Events> implements
 
 		let id: string
 		do {
-			id = getRandomHex(8)
+			// 16 bytes / 128 bits — bumped from 8/32-bit on the recommendation of
+			// codex round-1 (defense-in-depth against requestId / journal-id
+			// collisions once concurrent dApp interactions are possible).
+			id = getRandomHex(16)
 		} while (await this.storage.contains(id))
 
 		const now = Date.now()
@@ -139,7 +178,11 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			kind: input.kind,
 			origin: input.origin,
 			profileId: input.profileId,
-			progress: { stage: "pending" },
+			sessionId: input.sessionId,
+			// `initialStage` defaults to pending — see NewOperationInput docs.
+			// Narrow type ({queued} | {pending}) at the input boundary prevents
+			// callers from skipping the FSM by passing terminal stages here.
+			progress: input.initialStage ?? { stage: "pending" },
 			error: null,
 			terminalAt: null,
 			attempts: 0,
@@ -170,6 +213,18 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		validateParams(OperationJournalMethodSchemas.transitionOperation.params, [id, progress, error ?? null], "transitionOperation")
 		await this.ensureInitialized()
 
+		// Serialize ALL transitions globally — see `transitionLock` doc for
+		// the claim-vs-cancel race this closes. Critical section is small
+		// (one load + one validate + one write), so global is acceptable.
+		await this.transitionLock.enter()
+		try {
+			return await this._transitionLocked(id, progress, error)
+		} finally {
+			this.transitionLock.leave()
+		}
+	}
+
+	private async _transitionLocked(id: string, progress: JobProgress, error?: JobError | null): Promise<OperationRecord> {
 		const existing = await this._loadValidated(id)
 		if (!existing) {
 			throw new Error(`Operation not found: ${id}`)
@@ -209,6 +264,23 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			} else if (existing.kind === "token_import") {
 				if (hasTxHash) {
 					throw new ValidationError("transitionOperation: succeeded token_import must not carry a txHash")
+				}
+			}
+
+			// v2 Layer A: pin `submitting.txHash === succeeded.txHash` when both
+			// are populated. The four execution paths emit the canonical
+			// `tx.getTxHash().toString()` at BOTH the submitting and succeeded
+			// transitions; if they ever drift the RecentActivityView per-hash
+			// pending-suppression filter (`filterPendingDoubleRender`) silently
+			// no-ops and the disappearing-card bug returns. Catch the drift here
+			// at the FSM layer rather than letting it surface as a UI
+			// regression. The check is conditional on submitting carrying a
+			// hash so older records / non-tx kinds aren't affected.
+			if (existing.progress.stage === "submitting" && existing.progress.txHash && hasTxHash) {
+				if (existing.progress.txHash !== progress.txHash) {
+					throw new ValidationError(
+						`transitionOperation: submitting.txHash !== succeeded.txHash (${existing.progress.txHash} vs ${progress.txHash}) — hash drift across the prove/submit boundary`,
+					)
 				}
 			}
 		}
@@ -257,6 +329,38 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		return updated
 	}
 
+	/**
+	 * v3: bump `updatedAt` without changing any field. SW-internal liveness
+	 * heartbeat for records actively WAITING on the ExecutionMutex — keeps the
+	 * periodic reaper (which keys on `updatedAt` vs the per-stage grace window)
+	 * from declaring a legitimately-waiting record "stuck". Deliberately does
+	 * NOT emit `onOperationUpdated`: a heartbeat changes nothing user-visible,
+	 * and emitting on every tick would churn the popup's `subscribeJob`
+	 * consumers. The boot sweep is `unconditional` (ignores `updatedAt`), so a
+	 * record whose heartbeat stopped because the SW died is still failed on
+	 * restart — exactly the desired recovery. No-ops if the record is gone.
+	 */
+	public async touchOperation(id: string): Promise<void> {
+		await this.ensureInitialized()
+		// MUST take the same global lock as `transitionOperation`: this is a
+		// load → merge → write, and without the lock a stale snapshot could
+		// clobber a concurrent `queued→pending` / `*→cancelled` / reaper
+		// `*→failed` transition (codex v3 engine-audit blocker). Re-read FRESH
+		// inside the lock so the bump applies to the current record, and skip
+		// the write entirely once the record is terminal — a heartbeat must
+		// never resurrect a just-cancelled/failed/succeeded record's updatedAt
+		// (which could briefly hide it from a terminal-state consumer).
+		await this.transitionLock.enter()
+		try {
+			const existing = await this._loadValidated(id)
+			if (!existing) return
+			if (isTerminal(existing.progress.stage)) return
+			await this.storage.set(id, { ...existing, updatedAt: Date.now() })
+		} finally {
+			this.transitionLock.leave()
+		}
+	}
+
 	public async getOperation(id: string): Promise<OperationRecord | undefined> {
 		validateParams(OperationJournalMethodSchemas.getOperation.params, [id], "getOperation")
 		await this.ensureInitialized()
@@ -276,6 +380,29 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			if (filter.kind !== undefined && op.kind !== filter.kind) return false
 			return true
 		})
+	}
+
+	/**
+	 * Lightweight count query for callers that just need a number (cap
+	 * enforcement) without materializing full records. Used by
+	 * `background.ts:tryCreateQueuedJournal` for the per-session and global
+	 * queued-record caps.
+	 *
+	 * Sessionless records (`sessionId === undefined`) are excluded whenever
+	 * a `sessionId` filter is provided — UI-initiated transfers and token
+	 * imports don't count against the per-session cap for dApp messages.
+	 */
+	public async countOperations(filter: OperationCountFilter): Promise<number> {
+		validateParams(OperationJournalMethodSchemas.countOperations.params, [filter], "countOperations")
+		await this.ensureInitialized()
+		const all = await this._loadAllValidated()
+		let n = 0
+		for (const op of all) {
+			if (filter.sessionId !== undefined && op.sessionId !== filter.sessionId) continue
+			if (filter.stage !== undefined && op.progress.stage !== filter.stage) continue
+			n++
+		}
+		return n
 	}
 
 	public async deleteOperation(id: string): Promise<void> {

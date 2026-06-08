@@ -40,6 +40,7 @@ import { TaskService } from "./services/task/service"
 import { TokenService } from "./services/token/service"
 import { TokenBalanceService } from "./services/token-balance/service"
 import { TransactionService } from "./services/transaction/service"
+import { IncomingTransferService } from "./services/incoming-transfer/service"
 import { WindowManager } from "./services/window-manager/window-manager"
 import { initWalletSdkHandler } from "./services/wallet-sdk/background"
 import { runStorageMigration } from "./storage/migrate"
@@ -126,6 +127,7 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		services.add(new TokenService(logger))
 		services.add(new TokenBalanceService(logger))
 		services.add(new TransactionService(logger))
+		services.add(new IncomingTransferService(logger))
 		services.add(new PasskeyService(logger, windowManager))
 
 		await services.start()

@@ -5,7 +5,14 @@ import type { Capability, GrantedCapabilityRecord, RejectedCapabilityRecord } fr
 import type { CapabilityResult } from "./dapp-interaction-protocol"
 import type { Operation } from "./operation"
 import type { OperationResult } from "./operation-result"
-import type { IAccountReader, IDappInteractionRunner, IDappSessionWriter, IExecutionRunner, INetworkReader } from "./services-contract"
+import type {
+	IAccountReader,
+	IDappInteractionRunner,
+	IDappSessionWriter,
+	IExecutionHooks,
+	IExecutionRunner,
+	INetworkReader,
+} from "./services-contract"
 import type { IDappSessionRef, INetworkRef } from "./session-types"
 import { LogLevel, type ILogger } from "@nulo/wallet-core/logger"
 
@@ -513,6 +520,132 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 		const accountsResult = result.granted.find((c) => c.type === "accounts")
 		expect(accountsResult?.canCreateAuthWit).toBe(false)
 		expect(accountsResult?.canGet).toBe(true)
+	})
+})
+
+/**
+ * Plan §Tests #N: hooks invariant for batch dispatch.
+ *
+ * Codex round-3 F3 + R6 confirmation: `dispatch("batch", legs, ctx, hooks)`
+ * MUST NOT forward hooks into the recursive per-leg dispatch. Otherwise a
+ * batched sendTx leg's `onExecutionEnqueued` would advance the top-level
+ * session FIFO baton before later batch legs complete, breaking batch's
+ * sequential-completion contract.
+ */
+describe("dispatcher batch hooks isolation", () => {
+	test("batch dispatch does NOT forward hooks into recursive per-leg dispatch", async () => {
+		const session = makeSession({
+			capabilityGrants: [
+				{ capability: { type: "accounts", canGet: true, canCreateAuthWit: false, accounts: [] }, grantedAt: 1 },
+				{ capability: { type: "transaction", scope: [] }, grantedAt: 1 },
+			],
+		})
+		const { writer } = makeSessionWriter(session)
+		// requestCapabilities not called in this test; pass a stub.
+		const dispatcher = makeDispatcher(writer, async () => ({}) as CapabilityResult)
+
+		// Hooks that a top-level caller might supply. We want to verify they
+		// don't leak into recursive leg dispatches.
+		let fired = 0
+		const hooks = {
+			onExecutionEnqueued: () => {
+				fired++
+			},
+			queuedJournalId: "top-level-queued-id",
+		}
+
+		// Dispatch a batch with two methods that exercise the recursive
+		// dispatch path. `getAccounts` is a simple method that completes
+		// quickly. If hooks leak into the recursive ctx, this test would
+		// observe `fired` being non-zero (no handler calls `onExecutionEnqueued`
+		// for non-sendTx ops anyway, but the safety-net would still preserve it).
+		const batchLegs = [
+			{ name: "getAccounts", args: [] },
+			{ name: "getAccounts", args: [] },
+		]
+
+		await dispatcher.dispatch("batch", [batchLegs], ctx, hooks).catch(() => {
+			// We don't care about success — only that no hook leak occurs.
+		})
+
+		// The hooks were forwarded to the OUTER dispatch but should NOT
+		// have been forwarded into the recursive per-leg dispatches. Since
+		// nothing inside the legs invokes onExecutionEnqueued, fired remains 0.
+		expect(fired).toBe(0)
+	})
+})
+
+/**
+ * Positive counterpart to the batch-isolation test: a non-batch `sendTx`
+ * MUST forward `onExecutionEnqueued` (the baton release) + `queuedJournalId`
+ * through to `DappInteractionService.execute` under the exact field names it
+ * reads. Pins the wiring whose field-name drift left the release dead before
+ * v3 — if someone renames one side of the hooks bag again, this fails.
+ */
+describe("dispatcher sendTx hook forwarding", () => {
+	test("dispatch('sendTx', ...) forwards onExecutionEnqueued + queuedJournalId to DappInteractionService.execute", async () => {
+		const session = makeSession({
+			capabilityGrants: [
+				{ capability: { type: "accounts", canGet: true, canCreateAuthWit: false, accounts: [] }, grantedAt: 1 },
+				{ capability: { type: "transaction", scope: [] }, grantedAt: 1 },
+			],
+			accounts: ["aztec:0:0xacc"],
+		})
+		const { writer } = makeSessionWriter(session)
+
+		let observedHooks: IExecutionHooks | undefined
+		const interaction: IDappInteractionRunner = {
+			execute: async (_params, _cancellationToken, hooks) => {
+				observedHooks = hooks
+				return [{ status: "ok", result: undefined }] as never
+			},
+			requestCapabilities: async () => ({}) as never,
+		}
+		const network: INetworkReader = {
+			getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
+		}
+		const account: IAccountReader = {
+			getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }],
+		}
+		const dispatcher = new WalletSdkDispatcher(network, account, stubExecution, interaction, writer, noopLogger)
+
+		const release = () => {}
+		// Empty exec.calls → scope enforcement is vacuously satisfied.
+		await dispatcher.dispatch("sendTx", [{ calls: [] }, {}], ctx, { onExecutionEnqueued: release, queuedJournalId: "q-1" })
+
+		expect(observedHooks?.onExecutionEnqueued).toBe(release)
+		expect(observedHooks?.queuedJournalId).toBe("q-1")
+		// originKey = canonical ctx.origin (the per-origin backpressure cap principal).
+		expect(observedHooks?.originKey).toBe(ctx.origin)
+	})
+
+	test("dispatch('sendTx', ...) sets originKey from ctx.origin even when no FIFO hooks are supplied", async () => {
+		const session = makeSession({
+			capabilityGrants: [
+				{ capability: { type: "accounts", canGet: true, canCreateAuthWit: false, accounts: [] }, grantedAt: 1 },
+				{ capability: { type: "transaction", scope: [] }, grantedAt: 1 },
+			],
+			accounts: ["aztec:0:0xacc"],
+		})
+		const { writer } = makeSessionWriter(session)
+		let observedHooks: IExecutionHooks | undefined
+		const interaction: IDappInteractionRunner = {
+			execute: async (_params, _cancellationToken, hooks) => {
+				observedHooks = hooks
+				return [{ status: "ok", result: undefined }] as never
+			},
+			requestCapabilities: async () => ({}) as never,
+		}
+		const network: INetworkReader = { getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
+		const account: IAccountReader = { getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }] }
+		const dispatcher = new WalletSdkDispatcher(network, account, stubExecution, interaction, writer, noopLogger)
+
+		// No 4th-arg hooks — the per-origin cap must still receive originKey so a
+		// dApp that arrives without the FIFO-baton hooks can't bypass the cap.
+		await dispatcher.dispatch("sendTx", [{ calls: [] }, {}], ctx)
+
+		expect(observedHooks?.originKey).toBe(ctx.origin)
+		expect(observedHooks?.onExecutionEnqueued).toBeUndefined()
 	})
 })
 

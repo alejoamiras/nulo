@@ -456,3 +456,9 @@ Add +1 day if Phase 1 codex review surfaces a regression needing Phase 1.5. Add 
 ---
 
 **Next step**: per CLAUDE.md Tier-A protocol § 3, this consolidated plan goes back to codex for one final critical pass before approval gate. Then ELI5 HTML companion. Then approval gate.
+
+---
+
+## Fully resolved (revised)
+
+`register-token` was un-quarantined during this plan's own execution (PR #63) via the pre-grant fixture pattern. `multi-account-from` + `tx-sendTx-multicall` + `tx-sendTx-default` (added later via PR #66) all un-quarantined by the journal-stage assertion restructure (`implementations-plan/journal-stage-restructure/`). The `NULO_E2E_SKIP_DEFERRED_SLOW` gate has been removed from CI. The restructure also opportunistically migrated 3 sibling tests (`tx-sendTx-noFrom`, `tx-sendTx-feePayer`, `tx-sendTx-sponsoredFpc`) to the same pattern. Fixture migrations + NO_WAIT improvements from PR #67 were kept as strict-better foundations.

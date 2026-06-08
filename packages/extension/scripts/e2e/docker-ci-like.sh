@@ -118,7 +118,6 @@ export PATH="/root/.aztec/current/bin:/root/.aztec/current/node_modules/.bin:$PA
 echo "::endgroup::"
 
 echo "::group::env"
-export NULO_E2E_SKIP_DEFERRED_SLOW=1
 export NULO_E2E_WALLET_PROBE=1
 env | grep -E 'NULO_E2E|AZTEC_|VITE_' | sort
 echo "::endgroup::"

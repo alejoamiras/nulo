@@ -129,7 +129,7 @@ export function bindTransactions(root: HTMLElement): void {
 			const wallet = getWallet()!
 			const { exec, fromAddr } = await buildTransferExec(3)
 			// biome-ignore lint/suspicious/noExplicitAny: structural cast
-			return wallet.sendTx(exec as any, { from: fromAddr } as any)
+			return wallet.sendTx(exec as any, { from: fromAddr, wait: "NO_WAIT" } as any)
 		}),
 	)
 
@@ -140,7 +140,7 @@ export function bindTransactions(root: HTMLElement): void {
 			// >5 calls triggers nulo-account.ts recursive chunking (CLAUDE.md mentions this).
 			const { exec, fromAddr } = await buildTransferExec(7)
 			// biome-ignore lint/suspicious/noExplicitAny: structural cast
-			return wallet.sendTx(exec as any, { from: fromAddr } as any)
+			return wallet.sendTx(exec as any, { from: fromAddr, wait: "NO_WAIT" } as any)
 		}),
 	)
 }

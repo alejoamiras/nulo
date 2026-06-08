@@ -1,7 +1,7 @@
 import type { ServiceSpec } from "@/wallet/base"
 import { ServiceClient } from "@nulo/extension-messaging/background"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
-import { type Methods, type Note, NOTE_SERVICE_NAME } from "./spec"
+import { type Methods, type Note, type RawNote, NOTE_SERVICE_NAME } from "./spec"
 
 export * from "./spec"
 
@@ -12,5 +12,13 @@ export class NoteServiceClient extends ServiceClient<Methods> implements Service
 
 	public getNotes(networkId: string, account: string, contract?: string): Promise<Note[]> {
 		return this.request("getNotes", networkId, account, contract)
+	}
+
+	public getNotesRaw(networkId: string, account: string, contract?: string): Promise<RawNote[]> {
+		return this.request("getNotesRaw", networkId, account, contract)
+	}
+
+	public getBlockTimestamp(networkId: string, blockNumber: number): Promise<number | undefined> {
+		return this.request("getBlockTimestamp", networkId, blockNumber)
 	}
 }

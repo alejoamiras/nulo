@@ -46,6 +46,22 @@ Triggers:
 
 Runs the network e2e suite (anvil + Aztec sandbox + playground + the extension build) as a **5-shard parallel matrix** — each shard owns its own sandbox + ~9 of the 45 test files (deterministic SHA-1-of-filename distribution). Wall time ~10–15 min (vs ~35–45 min unsharded). Same trigger shape as `pr-smoke-e2e`, but with the `extension-network` filter (network-touching wallet code, runtime, bridge, playground, etc.) and the `e2e:network` label. See [`packages/extension/tests/e2e/README.md`](./packages/extension/tests/e2e/README.md#ci-sharding-5-way-matrix) for the shard-design rationale + the 2 quarantined slow tests.
 
+#### Accelerator in CI
+
+Each network-e2e shard installs and starts the headless **`accelerator-server`** binary (from the [`alejoamiras/aztec-accelerator`](https://github.com/alejoamiras/aztec-accelerator) repo) before the test agent fires. The wallet build is stamped with `VITE_NULO_ACCELERATOR_REQUIRED=1` so [`chain-runtime.ts`](./packages/aztec-runtime/src/pxe/chain-runtime.ts) constructs `ProductionPxeFactory` in **required-mode** — proving traffic MUST hit accelerator-server natively, never silently fall back to in-browser WASM. Layered enforcement:
+
+- **Layer 1** (workflow) — `/health` preflight gates the run on `bb_available == true`. Server missing or unhealthy → red.
+- **Layer 2** (wallet) — `chain-runtime.ts` does an eager `checkAcceleratorStatus()` at PXE creation + installs an `onPhase` callback that throws on `"fallback"` / `"denied"` phases. This is the per-test authority.
+- **Layer 3** (workflow, advisory) — post-test step counts `Received /prove request` log lines in `/tmp/accelerator-server.log` and emits a notice + step-summary table. Does NOT gate.
+
+**Production behavior is unchanged.** `VITE_NULO_ACCELERATOR_REQUIRED` is only set in `_network-e2e.yml`. Production builds get the default (`false`) → factory constructed without `onPhase` callback or preflight → SDK's silent WASM fallback path is preserved for end users without **Aztec Accelerator** (the desktop app) installed.
+
+**Rollback flags** (both require repo write access; PR authors cannot toggle):
+- `vars.NULO_E2E_DISABLE_ACCELERATOR=1` (Settings → Variables) — the emergency kill switch, affects all PR + dispatch runs until cleared.
+- `workflow_dispatch` input `disable_accelerator: true` — single-run override for investigation.
+
+**Bumping accelerator-server**: update `version` + `expected_sha256` in `.github/workflows/_network-e2e.yml`'s `setup-accelerator-server` step together. SHA-256 must be computed locally (`shasum -a 256` on a freshly downloaded tarball); the `.sha256` sidecar from the same release is a sanity check, not a security boundary. See [SECURITY.md](./SECURITY.md#binary-dependencies).
+
 ### `actionlint.yml`
 
 Runs when any `.github/workflows/**`, `.github/actions/**`, or shell script changes. Lints the workflow YAML and shellchecks the scripts. Cheap; gate.
@@ -83,7 +99,7 @@ Everything CI runs has a local equivalent:
 | build (chrome) | `bun run --cwd packages/extension build:chrome` |
 | build (firefox) | `bun run --cwd packages/extension build:firefox` |
 | smoke e2e | `bun run --cwd packages/extension test:e2e` |
-| network e2e | `bun run e2e:agent` |
+| network e2e | `bun run e2e:agent` (NOTE: local runs do NOT use `accelerator-server`. The wallet's `AcceleratorProver` auto-detects the **Aztec Accelerator** desktop app on `127.0.0.1:59833` and uses it if available; otherwise WASM. CI specifically stamps `VITE_NULO_ACCELERATOR_REQUIRED=1` to enforce no-fallback — that's not set locally.) |
 | one-shot pre-PR | `bun run audit:vue` (typecheck + units + lint + build) |
 
 ## Releasing

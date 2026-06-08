@@ -1,57 +1,51 @@
 import { expect, inject } from "vitest"
-import { clickByTestId, test } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { waitForPopup, waitForExecuteContent, approveCapabilities, approveExecute } from "../fixtures/popups"
-import type { AztecTestConfig } from "../fixtures/aztec"
+import { clickByTestId, openPopup, test } from "../fixtures/extension"
+import { snapshotResultSeq } from "../fixtures/playground"
+import { approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxActiveStage } from "../fixtures/popups"
+import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
-// Deferred slow-test marker (see implementations-plan/network-followups/slow-tests-hypotheses.md).
-// On CI per-shard runner, this test deterministically exhausts its timeout
-// budget under cap-popup target-creation backpressure (H-OP-3). Skipped in
-// CI via NULO_E2E_SKIP_DEFERRED_SLOW=1; runs locally to retain coverage.
-const skipDeferredSlow = process.env.NULO_E2E_SKIP_DEFERRED_SLOW === "1"
 
 /**
- * Test #39 — characterization: multi-account session, sendTx ignores
- * dApp's `opts.from` and uses the first session account.
+ * Test #39 — multi-account session: sendTx settles via the first session
+ * account when granted up to 2 accounts.
  *
- * dispatcher.ts:769 + :335 always pick the first match from
- * resolveNetworkAndAccount and overwrite `opts.from`. The dApp's choice is
- * silently ignored. This test pins that current behavior — if/when fixed,
- * the assertion flips.
+ * KNOWN LIMITATION (codex post-impl finding #1): this test does NOT exercise
+ * the "wallet ignores opts.from" claim end-to-end. The playground's
+ * `pg-btn-sendTx-default` reads `opts.from = state.selectedAccount`, and
+ * `requestCapabilities()` sets `selectedAccount = granted[0]`. So
+ * `opts.from === accountAddresses[0]` regardless of how many accounts the
+ * fixture grants — the wallet's "always pick the first" matches the dApp's
+ * choice by construction. To genuinely characterize the
+ * `dispatcher.ts:769 + :335` overwrite, the playground needs a hook to set
+ * `selectedAccount = accountAddresses[1]` before the click; tracked as a
+ * follow-up (the playground change is small but lives outside this PR).
  *
- * Note: requires the wallet to have 2+ accounts AND the user to grant both
- * via the cap popup. Today's cap UI lets the user click multiple
- * cap-account-item rows.
+ * What this test currently pins:
+ *   - The cap popup successfully grants up to 2 accounts.
+ *   - sendTx with the first granted account reaches an active journal stage.
+ *   - The execute popup shows a non-empty `from` address.
+ *
+ * Uses `dappConnectedExtensionWithFirstTwoAccountsCap` so the cap-popup
+ * round-trip (which grants up to 2 accounts) happens during fixture
+ * setup (hookTimeout=300s) instead of during the test budget. Tolerates
+ * 1-or-2 accounts depending on what the wallet exposed.
+ *
+ * Asserts on `data-stage` (active stage) instead of the dApp's full
+ * sendTx promise. See implementations-plan/journal-stage-restructure/.
  */
-// Per-test retry for this file: under cumulative load (43 network files
-// back-to-back), the `dappConnectedExtension` fixture's capability popup
-// occasionally takes >15s to mount and the inner `waitForPopup` timeout
-// fires. Deterministic in isolation; retry stays scoped here.
-test.skipIf(!hasConfig || skipDeferredSlow)(
-	"multi-account-from — handleSendTx picks first session account regardless of opts.from",
-	{ timeout: 180_000, retry: 1 },
-	async ({ dappConnectedExtension }) => {
-		const page = dappConnectedExtension.playgroundPage
+test.skipIf(!hasConfig)(
+	"multi-account-from — sendTx via first session account reaches active stage",
+	{ timeout: 90_000 },
+	async ({ dappConnectedExtensionWithFirstTwoAccountsCap }) => {
+		const { playgroundPage: page, accountAddresses } = dappConnectedExtensionWithFirstTwoAccountsCap
 
-		await page.evaluate(() => {
-			const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')!
-			select.value = "transaction"
-			select.dispatchEvent(new Event("change", { bubbles: true }))
-		})
-		const seqGrant = await snapshotResultSeq(page)
-		const capPopupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
-		await clickByTestId(page, "pg-btn-requestCapabilities")
-		const capPopup = await capPopupP
-		await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 10_000 })
-		const accountIds = await capPopup.evaluate(() =>
-			[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) => r.getAttribute("data-account-id")),
-		)
-		// Grant only one account if there's only one — characterization holds either way
-		const accountsToGrant = accountIds.slice(0, Math.min(2, accountIds.length))
-		await approveCapabilities(capPopup, { accounts: accountsToGrant.filter((a): a is string => !!a) })
-		await waitForPgResult(page, "requestCapabilities", seqGrant, 30_000)
+		// Pre-mint to the first session account only. The playground always uses
+		// `selectedAccount` (= the first granted account) as `opts.from`, so the
+		// second mint would be dead work until the test grows a real second-account
+		// override hook (see docstring).
+		await mintPublicTokensForAccount(aztecConfig!, accountAddresses[0]!)
 
 		await page.evaluate(
 			({ token, recipient }: { token: string; recipient: string }) => {
@@ -69,23 +63,25 @@ test.skipIf(!hasConfig || skipDeferredSlow)(
 			{ token: aztecConfig!.tokenAddress, recipient: aztecConfig!.minterAddress },
 		)
 
-		const seqTx = await snapshotResultSeq(page)
-		const execPopupP = waitForPopup(dappConnectedExtension, "execute", { timeout: 30_000 })
+		await snapshotResultSeq(page)
+		const execPopupP = waitForPopup(dappConnectedExtensionWithFirstTwoAccountsCap, "execute", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-sendTx-default")
 		const execPopup = await execPopupP
 		await waitForExecuteContent(execPopup)
 
-		// Check the from-account on the op card via the new testid (D2: added in
-		// canonical refactor). Read data-account-address; characterization says
-		// the popup shows the FIRST session account regardless of which account
-		// the dApp set in opts.from.
+		// Read the from-account on the op card (testid added in canonical refactor).
+		// Just verifies the popup renders a from-account — the equivalence to
+		// accountAddresses[0] is incidental given the playground wiring.
 		const fromAddress = await execPopup.evaluate(
 			() => document.querySelector('[data-testid="execute-op-from-account"]')?.getAttribute("data-account-address") ?? "",
 		)
 		expect(fromAddress.length).toBeGreaterThan(0)
 
 		await approveExecute(execPopup)
-		const result = await waitForPgResult(page, "sendTx", seqTx, 120_000)
-		expect(["ok", "error"]).toContain(result.status)
+
+		// Wait for the wallet's journal to enter an active processing stage
+		// instead of the dApp's full sendTx promise.
+		const walletPopup = await openPopup(dappConnectedExtensionWithFirstTwoAccountsCap)
+		await waitForSendTxActiveStage(walletPopup)
 	},
 )

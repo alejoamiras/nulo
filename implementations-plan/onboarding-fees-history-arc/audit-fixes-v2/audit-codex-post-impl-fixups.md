@@ -1,0 +1,20 @@
+Reject.
+
+**Findings**
+- High: `packages/extension/src/popup/components/popups/PopupManager.vue:78-92`, `:95-107`, `:146-149`  
+  The new live-triple guard closes the async emit ingress only. All replay paths, including the watcher-fired `tryReplayForTriple()`, still eventually emit `onIncomingTransferPending`, so there is no second queue ingress bypassing the guard. But High #1 is still not fully closed because stale payloads already accepted before an identity switch remain live: `dequeueNextPendingTrust()` blindly opens whatever is already in `pendingTrustQueue`, and the triple watcher only replays, it never purges or auto-closes stale popup state. Concrete repro: queue/open A payload(s), switch to B, then close the current trust popup; the next queued A payload still opens under B. Fix: on `(profileId, networkId, accountAddress)` change, drop queued payloads whose triple no longer matches, close/clear an open `incoming_trust` popup if stale, and make `dequeueNextPendingTrust()` skip mismatched entries defensively.
+
+- Medium: `packages/extension/src/popup/components/popups/PopupManager.test.ts:264-300`, `implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/lessons/phase-13.md:148-150`  
+  The regression pins are not adequate. The new popup test only proves direct mismatched-payload drop; it does not cover the still-broken path where a payload is accepted on A, the user switches to B, and stale queue/open state survives into dequeue. `send.vue` still has no automated regression test at all for A→B rebinding or stale mount-vs-watcher ordering. Fix: add a PopupManager test for “accept on A, switch to B, close/dequeue => no stale A popup”, and add a focused send-page test with deferred service promises proving old resolves are dropped and `activeTokenIdx` rebinds on identity change.
+
+- Low: `implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/lessons/phase-13.md:66-69`, `:124-136`, `:152-158`, `implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/lessons/phase-7.md:33-40`  
+  The Low doc correction itself is accurate now: the immediate-kick poll wording is fixed in both `phase-7.md` and the Low section of `phase-13.md`. But `phase-13.md` still contradicts itself: the residual-risk block still describes the old C2 behavior, while the later fixup block says High #1 is addressed. Fix: rewrite the C2 residual to match the actual post-fix state, or remove it once queue invalidation/dequeue guarding is implemented.
+
+- Low: `packages/extension/src/popup/pages/send.vue:358-387`, `:395-405`  
+  High #2 itself looks closed for the stale-resolve bug: mount and identity-change fetches now share `identityFetchSeq`, so mount/watcher races collapse correctly to “latest fetch wins”, and `activeTokenIdx` is rebound when the new token set does not contain the old id. But the mount path still duplicates the fetch logic instead of actually calling `refetchIdentityScopedState()`, so it does not inherit that function’s null-triple guard. Fix: call the shared refetch from `onMounted` and keep only the query-param/token-selection post-processing in the mount block.
+
+High #1 answer: no alternate replay/live/toggle path bypasses `onIncomingTransferPending`; the watcher-fired replay emit does route through it. The remaining hole is stale queue/open state that survives after the guard.
+
+High #2 answer: the original stale-resolve issue appears closed. Mount and watcher can still overlap, but both participate in `identityFetchSeq`, and I did not find another `send.vue` identity-scoped reload path that bypasses that counter.
+
+No executed-test “What’s solid” list. Targeted run of `bunx vitest run src/popup/components/popups/PopupManager.test.ts` was blocked by the read-only sandbox with `EPERM: operation not permitted, mkdir '/tmp/.../client'`.

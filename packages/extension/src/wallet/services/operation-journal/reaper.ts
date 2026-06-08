@@ -70,6 +70,11 @@ export const REAP_PERIOD_MINUTES = 1
  *   the answer within seconds; 5 min is a safety margin for slow nodes.
  */
 const STAGE_GRACE_MS: Readonly<Record<Exclude<JobStage, "succeeded" | "failed" | "cancelled">, number>> = {
+	// Matches the wallet-sdk dApp-interaction popup timeout (INTERACTION_TIMEOUT_MS).
+	// A queued record that survives 10 minutes means background.ts either crashed
+	// or somehow lost the handler — sweep it so the activity feed doesn't show a
+	// permanently-stuck "Queued..." card.
+	queued: 10 * 60_000,
 	pending: 2 * 60_000,
 	simulating: 10 * 60_000,
 	proving: 35 * 60_000,
@@ -179,6 +184,12 @@ export class JournalReaper {
 			let kind: string
 			if (stage === "proving") {
 				kind = unconditional ? "sw_restart_post_prove" : "stuck_proving"
+			} else if (stage === "queued") {
+				// Plan §14: queued records that exceed their grace window are
+				// "stuck" rather than "stale-on-resume" — they never made it
+				// past the message-arrival surface (background.ts somehow lost
+				// the handler). Tagged distinctly for observability.
+				kind = "stuck_queued"
 			} else {
 				kind = "stale_on_resume"
 			}

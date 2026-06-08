@@ -1,6 +1,9 @@
 import { OriginType } from "@/wallet/services/transaction/spec"
 import type { TxOrigin } from "@/wallet/services/transaction/spec"
 import { trimAddress } from "@/utils/string"
+import { FEE_METHODS, pickPrimaryMethod } from "./primary-method"
+
+export { FEE_METHODS, pickPrimaryMethod }
 
 type TxCall = {
 	contract: string
@@ -24,18 +27,8 @@ const METHOD_LABELS: Record<string, string> = {
 	shield: "Shield",
 	unshield: "Unshield",
 	redeem_shield: "Redeem shield",
+	claim_and_end_setup: "Claim Fee Juice",
 }
-
-/** Fee/entrypoint methods injected by the wallet — not the user's intent.
- *  Exported so the tx detail page can share the same set when filtering
- *  the user-facing call list and when labeling the fee path. */
-export const FEE_METHODS = new Set([
-	"sponsor_unconditionally",
-	"fee_entrypoint_private",
-	"fee_entrypoint_public",
-	"pay_fee",
-	"set_authorized",
-])
 
 /**
  * Look up the wallet-curated friendly label for `method` from
@@ -72,13 +65,24 @@ export function humanizeMethodName(method: string): string {
 }
 
 /**
- * Finds the user's primary call, skipping fee/entrypoint infrastructure calls.
+ * Find the user's primary call, skipping fee/entrypoint infrastructure calls.
+ * Thin wrapper around the shared `pickPrimaryMethod` helper — the method
+ * name comes from there; this returns the matching call object so
+ * downstream consumers can read `contract` / `transfers` / `args`.
+ *
+ * Generic over the call shape so consumers (e.g. `app.store.ts` operating
+ * on `Tx['calls']`, which has `transfers`) keep their full type rather than
+ * being narrowed to the bare `{contract, method, args}` carrier.
+ *
+ * Behavior preserved exactly: empty input → undefined; an all-fee-only call
+ * list returns the first call verbatim (pinned as a BUG PIN in the helper's
+ * test file).
  */
-export function getPrimaryCall(calls: TxCall[]): TxCall | undefined {
-	const userCalls = calls.filter((c) => !FEE_METHODS.has(c.method))
-	// Preserve existing mint heuristic: if second user call is a mint, prefer it
-	if (userCalls.at(1)?.method?.startsWith("mint")) return userCalls[1]
-	return userCalls[0] ?? calls[0]
+export function getPrimaryCall<T extends { method: string }>(calls: T[]): T | undefined {
+	if (!calls?.length) return undefined
+	const primary = pickPrimaryMethod(calls)
+	if (!primary) return calls[0]
+	return calls.find((c) => c.method === primary) ?? calls[0]
 }
 
 /**

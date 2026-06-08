@@ -42,6 +42,23 @@ if ! grep -rq "$AZTEC_NODE_URL" dist/chrome 2>/dev/null; then
 fi
 echo "[e2e:agent] bundle contains $AZTEC_NODE_URL ✓"
 
+# Parallel bundle assertion for VITE_NULO_ACCELERATOR_REQUIRED. Codex post-impl
+# audit (finding #3): without this check, if the env var ever stops propagating
+# from the workflow into the build, Layer 2 (chain-runtime.ts onPhase throw)
+# silently disappears and tests can pass on WASM even when the server is up but
+# unhealthy mid-test. The stamp is emitted by packages/extension/src/accelerator/config.ts
+# and pinned into the bundle by offscreen/index.ts. Only enforced when the env
+# var is set (i.e. CI required-mode); locally the var is unset and the assertion
+# is skipped.
+if [ "${VITE_NULO_ACCELERATOR_REQUIRED:-}" = "1" ]; then
+  if ! grep -rq "NULO_ACCELERATOR_REQUIRED_BUILD_STAMP" dist/chrome 2>/dev/null; then
+    echo "[e2e:agent] FATAL: VITE_NULO_ACCELERATOR_REQUIRED=1 but build stamp absent from dist/chrome" >&2
+    echo "[e2e:agent] env didn't propagate; Layer 2 enforcement would silently disappear" >&2
+    exit 2
+  fi
+  echo "[e2e:agent] bundle contains NULO_ACCELERATOR_REQUIRED_BUILD_STAMP ✓"
+fi
+
 echo "[e2e:agent] running network e2e..."
 # `E2E_REQUIRE_SETUP=1` tells `tests/e2e/global-setup.ts` that this is the
 # real agent runner (not a contributor running vitest directly without a
