@@ -26,9 +26,6 @@ const PROVEN_TIMEOUT_SEC = 1800
 const log = (...args: unknown[]) => console.log("[bridge:withdraw]", ...args)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-// Module-level so it holds across composable instances: only one L1 consume in flight at a time.
-const consumeInFlight = false
-
 export type WithdrawStage = "idle" | "burning" | "exiting" | "proving" | "consuming" | "done" | "error"
 
 const PENDING_KEY = "nulo-bridge-pending-withdraw"
@@ -254,14 +251,11 @@ export function useWithdraw() {
 	async function resumePending(): Promise<void> {
 		const pending = loadPending()
 		if (!pending || stage.value !== "idle" || consumeInFlight) return
-		consumeInFlight = true
 		try {
 			await consumeExit(pending)
 		} catch (e) {
 			error.value = e instanceof Error ? e.message : "Resume failed"
 			stage.value = "error"
-		} finally {
-			consumeInFlight = false
 		}
 	}
 
