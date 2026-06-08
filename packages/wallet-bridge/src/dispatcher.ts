@@ -225,18 +225,25 @@ export class WalletSdkDispatcher {
 	 * @throws If the method is unsupported, the operation fails, or session context is invalid
 	 */
 	async dispatch(methodName: string, args: unknown[], ctx: SessionContext, hooks?: DispatchHooks): Promise<unknown> {
+		// F-006 / audit cross-cutting #1 / Phase 0.5: capture the dApp session
+		// ONCE at dispatch entry and thread it through every internal call.
+		// Closes the TOCTOU window where 6 separate `tryGetDappSessionByOriginAndChain`
+		// calls previously gave different handlers different views of the same
+		// session (e.g. if the session was deleted mid-dispatch).
+		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+
 		// Enforce capability grants (type-level) then scope (per-operation)
-		const grants = await this.enforceCapability(methodName, ctx)
+		const grants = this.enforceCapability(methodName, ctx, dappSession)
 		if (grants.length) {
 			enforceScope(methodName, args, grants)
 		}
 
 		// Handle methods that don't go through ExecutionService
 		if (methodName === "requestCapabilities") {
-			return this.handleRequestCapabilities(args[0] as CapabilityManifest, ctx)
+			return this.handleRequestCapabilities(args[0] as CapabilityManifest, ctx, dappSession)
 		}
 		if (methodName === "getAccounts") {
-			return this.handleGetAccounts(ctx)
+			return this.handleGetAccounts(ctx, dappSession)
 		}
 		if (methodName === "batch") {
 			// CRITICAL: do NOT forward `hooks` into batch legs. handleBatch
@@ -244,6 +251,10 @@ export class WalletSdkDispatcher {
 			// inner sendTx leg's `onExecutionEnqueued` release the top-level
 			// FIFO baton before the batch finishes, breaking the batch's
 			// sequential-completion contract.
+			//
+			// Note: batch legs re-enter dispatch(), which re-captures the
+			// session — that's intentional. Each leg is a separate dispatch;
+			// the consolidation is per-dispatch, not per-batch.
 			return this.handleBatch(args[0] as Array<{ name: string; args: unknown[] }>, ctx)
 		}
 
@@ -251,10 +262,10 @@ export class WalletSdkDispatcher {
 		// confirmation popup. sendTx also drives fee selection; registerToken pre-fetches
 		// token metadata so the user sees name + symbol + decimals before approving.
 		if (methodName === "sendTx") {
-			return this.handleSendTx(args, ctx, hooks)
+			return this.handleSendTx(args, ctx, dappSession, hooks)
 		}
 		if (methodName === "registerToken") {
-			return this.handleRegisterToken(args, ctx)
+			return this.handleRegisterToken(args, ctx, dappSession)
 		}
 
 		const kind = METHOD_TO_KIND[methodName]
@@ -262,7 +273,7 @@ export class WalletSdkDispatcher {
 			throw new Error(`Unsupported wallet method: ${methodName}`)
 		}
 
-		const operation = await this.buildOperation(kind, args, ctx)
+		const operation = await this.buildOperation(kind, args, ctx, dappSession)
 		const origin: LocalTxOrigin = { type: OriginType.DAPP, name: ctx.origin }
 
 		const results = await this.executionService.executeOperations([operation], origin)
@@ -285,8 +296,8 @@ export class WalletSdkDispatcher {
 	 *    fallback catches it and sends the full manifest. See wallet-bridge README
 	 *    for the dApp-side parse recipe.
 	 */
-	private async handleGetAccounts(ctx: SessionContext): Promise<unknown> {
-		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+	private async handleGetAccounts(ctx: SessionContext, dappSession: IDappSessionRef | undefined): Promise<unknown> {
+		// Phase 0.5: dappSession captured at dispatch entry, not re-looked-up here.
 		if (!dappSession) {
 			throw new Error(`No dApp session found for origin ${ctx.origin}`)
 		}
@@ -379,8 +390,14 @@ export class WalletSdkDispatcher {
 	 * validates the session, checks if confirmation is needed, and opens the
 	 * popup for user approval + fee method selection.
 	 */
-	private async handleSendTx(args: unknown[], ctx: SessionContext, hooks?: DispatchHooks): Promise<unknown> {
-		const [_network, account] = await this.resolveNetworkAndAccount(ctx)
+	private async handleSendTx(
+		args: unknown[],
+		ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+		hooks?: DispatchHooks,
+	): Promise<unknown> {
+		// Phase 0.5: dappSession captured at dispatch entry.
+		const [_network, account] = await this.resolveNetworkAndAccount(ctx, dappSession)
 		const caipAccount = formatCaipAccount(ctx.chainId, account.address)
 		this.logger.log(
 			"wallet-sdk",
@@ -388,7 +405,6 @@ export class WalletSdkDispatcher {
 			`handleSendTx: account=${account.address}, chainId=${ctx.chainId}, origin=${ctx.origin}`,
 		)
 
-		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
 		if (!dappSession) {
 			throw new Error(`No dApp session found for origin ${ctx.origin}`)
 		}
@@ -453,8 +469,8 @@ export class WalletSdkDispatcher {
 	 * refuses with a clear error instead of silently substituting a different
 	 * authorized account.
 	 */
-	private async handleRegisterToken(args: unknown[], ctx: SessionContext): Promise<unknown> {
-		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+	private async handleRegisterToken(args: unknown[], ctx: SessionContext, dappSession: IDappSessionRef | undefined): Promise<unknown> {
+		// Phase 0.5: dappSession captured at dispatch entry.
 		if (!dappSession) {
 			throw new Error(`No dApp session found for origin ${ctx.origin}`)
 		}
@@ -501,8 +517,12 @@ export class WalletSdkDispatcher {
 	 * 3. Show popup for delta → user approves → merge and store
 	 *    - Track rejected types for future re-request detection
 	 */
-	private async handleRequestCapabilities(manifest: CapabilityManifest, ctx: SessionContext): Promise<unknown> {
-		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+	private async handleRequestCapabilities(
+		manifest: CapabilityManifest,
+		ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+	): Promise<unknown> {
+		// Phase 0.5: dappSession captured at dispatch entry.
 		if (!dappSession) {
 			throw new Error(`No dApp session found for origin ${ctx.origin}`)
 		}
@@ -726,13 +746,20 @@ export class WalletSdkDispatcher {
 	 * - Sessions without grants (new or pre-migration) are treated as having no grants,
 	 *   so non-exempt methods are blocked until requestCapabilities() is called.
 	 */
-	private async enforceCapability(methodName: string, ctx: SessionContext): Promise<GrantedCapabilityRecord[]> {
+	private enforceCapability(
+		methodName: string,
+		_ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+	): GrantedCapabilityRecord[] {
+		// Phase 0.5: dappSession captured at dispatch entry; no async lookup
+		// here. Method is now synchronous; callers that did `await this.enforceCapability(...)`
+		// can drop the await (no behavior change because the promise resolved
+		// synchronously when the inner lookup was the only async point).
 		if (isCapabilityExempt(methodName)) return []
 
 		const requiredType = getRequiredCapability(methodName)
 		if (!requiredType) return [] // Unknown method — let dispatch() handle it
 
-		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
 		if (!dappSession) return [] // No session yet — let the method handler deal with it
 
 		const grants = dappSession.capabilityGrants ?? []
@@ -751,14 +778,20 @@ export class WalletSdkDispatcher {
 	 * to the operation fields. For Nulo custom methods, we unpack them
 	 * according to the schema_patch.ts definitions.
 	 */
-	private async buildOperation(kind: Operation["kind"], args: unknown[], ctx: SessionContext): Promise<Operation> {
+	private async buildOperation(
+		kind: Operation["kind"],
+		args: unknown[],
+		ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+	): Promise<Operation> {
+		// Phase 0.5: dappSession threaded through from dispatch() entry.
 		if (NETWORK_ONLY_KINDS.has(kind)) {
 			const network = await this.resolveNetwork(ctx)
 			return this.buildNetworkOperation(kind, args, network.id)
 		}
 
 		if (ACCOUNT_KINDS.has(kind)) {
-			const [network, account] = await this.resolveNetworkAndAccount(ctx)
+			const [network, account] = await this.resolveNetworkAndAccount(ctx, dappSession)
 			return this.buildAccountOperation(kind, args, network.id, account.address)
 		}
 
@@ -894,14 +927,17 @@ export class WalletSdkDispatcher {
 	 * operations (simulateTx, sendTx, etc.) use session-authorized accounts,
 	 * not just the first global account.
 	 */
-	private async resolveNetworkAndAccount(ctx: SessionContext): Promise<[INetworkRef, IAccountRef]> {
+	private async resolveNetworkAndAccount(
+		ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+	): Promise<[INetworkRef, IAccountRef]> {
+		// Phase 0.5: dappSession captured at dispatch entry; no inline lookup here.
 		const network = await this.resolveNetwork(ctx)
 		const allAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
 		if (allAccounts.length === 0) {
 			throw new Error(`No accounts found for profile ${ctx.profileId} on chainId ${ctx.chainId}`)
 		}
 
-		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
 		if (dappSession?.accounts && dappSession.accounts.length > 0) {
 			const sessionAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
 			const sessionAccount = allAccounts.find((acc) => sessionAddresses.has(acc.address))

@@ -820,3 +820,95 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		expect(getRequiredCapability("simulateViews")).toBeNull()
 	})
 })
+
+/**
+ * Phase 0.5: dispatcher session-lookup consolidation.
+ *
+ * Pre-refactor: 6 separate `tryGetDappSessionByOriginAndChain` calls in
+ * dispatcher.ts (handleGetAccounts, handleSendTx, handleRegisterToken,
+ * handleRequestCapabilities, enforceCapability, resolveNetworkAndAccount).
+ * Each gave its caller an independent view of the session; if the session
+ * was deleted between two handler calls inside one dispatch(), the wallet
+ * could half-apply a decision.
+ *
+ * Post-refactor: dispatch() captures the session ONCE at entry and threads
+ * it through every internal call. Pinned by counting how many times the
+ * session-lookup is invoked per dispatch() call.
+ *
+ * Audit reference: audit/security/2026-06-08-ultra-e6759a/findings/consolidated.md
+ * cross-cutting #1 + opus B-1/CC-2 + codex Round 2 B-1.
+ */
+describe("Phase 0.5: session lookup consolidation (TOCTOU defense)", () => {
+	function makeCountingWriter(initial: IDappSessionRef | null) {
+		let session: IDappSessionRef | null = initial
+		const counter = { lookups: 0 }
+		const writer: IDappSessionWriter = {
+			tryGetDappSessionByOriginAndChain: async () => {
+				counter.lookups += 1
+				return session as IDappSessionRef
+			},
+			getDappSession: async () => session as IDappSessionRef,
+			updateDappSession: async () => session as IDappSessionRef,
+			setAccountAliases: async () => session as IDappSessionRef,
+			setCapabilityGrants: async (_id, grants) => {
+				session = { ...(session as IDappSessionRef), capabilityGrants: grants } as IDappSessionRef
+				return session
+			},
+			setCapabilityRejections: async (_id, rejections) => {
+				session = { ...(session as IDappSessionRef), capabilityRejections: rejections } as IDappSessionRef
+				return session
+			},
+		}
+		const setSession = (next: IDappSessionRef | null) => {
+			session = next
+		}
+		return { writer, counter, setSession }
+	}
+
+	const networkWithChainId0: INetworkReader = {
+		getNetworks: async () => [{ id: "net-0", chainId: 0 } as INetworkRef],
+	}
+
+	function dispatcherWith(writer: IDappSessionWriter, accounts: IAccountRef[] = []): WalletSdkDispatcher {
+		const accountReader: IAccountReader = { getAccounts: async () => accounts }
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: async () => ({ granted: [] }) as CapabilityResult,
+		}
+		return new WalletSdkDispatcher(networkWithChainId0, accountReader, stubExecution, interaction, writer, noopLogger)
+	}
+
+	test("dispatch(requestCapabilities) issues exactly 1 session lookup (was 2 pre-refactor)", async () => {
+		const session = makeSession()
+		const { writer, counter } = makeCountingWriter(session)
+		const dispatcher = dispatcherWith(writer)
+		const manifest = { capabilities: [{ type: "data" }] }
+		await dispatcher.dispatch("requestCapabilities", [manifest], ctx)
+		expect(counter.lookups).toBe(1)
+	})
+
+	test("dispatch(getAccounts) issues exactly 1 session lookup (was 2 pre-refactor)", async () => {
+		const session = makeSession({
+			accounts: ["aztec:0:0xaaa"],
+			capabilityGrants: [
+				{
+					capability: { type: "accounts", canGet: true, accounts: ["aztec:0:0xaaa"] },
+					grantedAt: 1,
+				} as GrantedCapabilityRecord,
+			],
+		})
+		const { writer, counter } = makeCountingWriter(session)
+		const dispatcher = dispatcherWith(writer)
+		await dispatcher.dispatch("getAccounts", [], ctx)
+		expect(counter.lookups).toBe(1)
+	})
+
+	test("dispatch(registerToken with no session) only consults storage once before throwing", async () => {
+		const { writer, counter } = makeCountingWriter(null)
+		const dispatcher = dispatcherWith(writer)
+		await expect(dispatcher.dispatch("registerToken", ["0xaaaa", "0xbbbb"], ctx)).rejects.toThrow()
+		// Pre-refactor was 2 (enforceCapability + handleRegisterToken).
+		// Post-refactor: 1 captured at dispatch entry; no re-lookup inside the throw path.
+		expect(counter.lookups).toBe(1)
+	})
+})

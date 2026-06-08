@@ -48,7 +48,7 @@ Sequencing reconciles "cheapest wins first" + "architectural refactor first": Ph
 
 ## Phases
 
-### Phase 0.5 — Dispatcher session-lookup consolidation
+### Phase 0.5 — Dispatcher session-lookup consolidation ✓
 **Goal**: Replace 6 ad-hoc `tryGetDappSessionByOriginAndChain` calls in `dispatcher.ts` (lines 289, 391, 457, 505, 735, 904) with one entry-point capture at `dispatch()` invocation, passed through to call sites.
 
 **Why this is Phase 0.5**: This is the deeper architectural unit the audit's cross-cutting #1 was pointing at — none of the three drafts caught it. It crosses Phase 1 (which adds checkers but doesn't consolidate lookups), Phase 4 (which adds a 7th lookup via fail-closed), and Phase 5+ extensions. Closing the TOCTOU window once at entry simplifies every later phase.
