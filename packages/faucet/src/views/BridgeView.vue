@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import BridgeWalletPanel from "@/components/BridgeWalletPanel.vue"
+import DepositCard from "@/components/DepositCard.vue"
 import L1WalletPanel from "@/components/L1WalletPanel.vue"
 import { TESTIDS } from "@/lib/testids"
 </script>
@@ -8,14 +10,17 @@ import { TESTIDS } from "@/lib/testids"
 		<header class="hero">
 			<h1>BRIDGE</h1>
 			<p class="sub">
-				Move assets between Ethereum (L1) and Aztec (L2). Testnet only. Connect your Ethereum
-				wallet and your Aztec wallet to deposit, withdraw, or swap-and-fuel in one step.
+				Move assets between Ethereum (L1) and Aztec (L2). Testnet only. Connect both wallets, then
+				deposit USDC — it bridges to your Aztec account 1:1.
 			</p>
 		</header>
 
-		<L1WalletPanel />
+		<section class="wallets">
+			<L1WalletPanel />
+			<BridgeWalletPanel />
+		</section>
 
-		<div class="placeholder">Deposit / withdraw / swap flows land here next.</div>
+		<DepositCard />
 	</div>
 </template>
 
@@ -23,14 +28,14 @@ import { TESTIDS } from "@/lib/testids"
 .bridge-view {
 	display: flex;
 	flex-direction: column;
-	gap: 32px;
+	gap: 28px;
 }
 
 .hero {
 	display: flex;
 	flex-direction: column;
 	gap: 16px;
-	margin-bottom: 8px;
+	margin-bottom: 4px;
 }
 
 .hero h1 {
@@ -50,12 +55,12 @@ import { TESTIDS } from "@/lib/testids"
 	line-height: 1.55;
 }
 
-.placeholder {
-	color: var(--txt-secondary);
-	font-size: 15px;
-	padding: 24px;
-	border: 1px dashed var(--border-subtle, rgba(255, 255, 255, 0.12));
-	border-radius: 12px;
-	text-align: center;
+.wallets {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	padding: 20px 0;
+	border-top: 1px solid var(--nulo-outline);
+	border-bottom: 1px solid var(--nulo-outline);
 }
 </style>

@@ -56,6 +56,19 @@ export const TESTIDS = {
 	l1Account: "fa-l1-account",
 	l1Disconnect: "fa-l1-disconnect",
 	l1SwitchChain: "fa-l1-switch-chain",
+
+	// Bridge — L2 (Aztec) wallet
+	bridgeL2Status: "fa-bridge-l2-status",
+	bridgeL2Connect: "fa-bridge-l2-connect",
+	bridgeL2Account: "fa-bridge-l2-account",
+	bridgeL2Disconnect: "fa-bridge-l2-disconnect",
+
+	// Bridge — deposit
+	depositAmount: "fa-deposit-amount",
+	depositSubmit: "fa-deposit-submit",
+	depositStage: "fa-deposit-stage",
+	depositSuccess: "fa-deposit-success",
+	depositError: "fa-deposit-error",
 } as const
 
 export type Testid = (typeof TESTIDS)[keyof typeof TESTIDS]
