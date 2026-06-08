@@ -35,6 +35,8 @@ interface PendingWithdraw {
 	readonly recipientL1: string
 	readonly amount: string
 	readonly exitBlock?: number
+	/** The L1 consume tx, persisted once submitted — a re-run waits for it instead of re-prompting. */
+	readonly consumeTxHash?: string
 }
 
 function persistPending(p: PendingWithdraw): void {
@@ -78,6 +80,9 @@ export function useWithdraw() {
 	const provenBlock = ref<number | null>(null)
 	const targetBlock = ref<number | null>(null)
 	const hasPending = ref(loadPending() !== null)
+	// Serialize the consume so a re-armed auto-resume (e.g. an HMR/reload mid-wait) can't fire a second
+	// consume prompt for the same exit.
+	let consumeInFlight = false
 
 	/** Proven-epoch wait → witness → L1 consume, from a persisted exit. Drives stage + the countdown. */
 	async function consumeExit(p: PendingWithdraw): Promise<void> {
@@ -86,6 +91,21 @@ export function useWithdraw() {
 		if (!l1wallet || !l1addr) {
 			error.value = "Connect your Ethereum wallet to finish the withdraw."
 			return
+		}
+		// A consume tx already submitted (prior run / reload re-trigger)? Wait for it, don't re-prompt —
+		// the L2→L1 message consumes once, so a re-send just reverts (the duplicate prompt the user saw).
+		if (p.consumeTxHash) {
+			stage.value = "consuming"
+			log("consume already submitted — waiting for it instead of re-sending", p.consumeTxHash)
+			const prior = await l1.publicClient.waitForTransactionReceipt({ hash: p.consumeTxHash as `0x${string}` }).catch(() => null)
+			if (prior?.status === "success") {
+				log("prior consume succeeded — withdraw complete ✓")
+				clearPending()
+				hasPending.value = false
+				stage.value = "done"
+				return
+			}
+			log("prior consume not successful — re-deriving + retrying", prior?.status)
 		}
 		const node = createAztecNodeClient(NODE_URL)
 		const txHash = TxHash.fromString(p.exitTxHash)
@@ -139,6 +159,9 @@ export function useWithdraw() {
 		})
 		const hash = await l1wallet.writeContract({ ...(sim.request as object), chain: sepolia, account: l1addr } as never)
 		log("consume tx", hash)
+		// Persist BEFORE awaiting, so a reload/HMR mid-wait resumes by waiting for this tx (the guard at
+		// the top) instead of re-deriving the witness and prompting a second consume.
+		persistPending({ ...p, consumeTxHash: hash as string })
 		await l1.publicClient.waitForTransactionReceipt({ hash })
 
 		clearPending()
@@ -212,12 +235,15 @@ export function useWithdraw() {
 	/** Resume a withdraw whose consume never completed (tab closed during the proven-epoch wait). */
 	async function resumePending(): Promise<void> {
 		const pending = loadPending()
-		if (!pending || stage.value !== "idle") return
+		if (!pending || stage.value !== "idle" || consumeInFlight) return
+		consumeInFlight = true
 		try {
 			await consumeExit(pending)
 		} catch (e) {
 			error.value = e instanceof Error ? e.message : "Resume failed"
 			stage.value = "error"
+		} finally {
+			consumeInFlight = false
 		}
 	}
 
