@@ -26,6 +26,9 @@ const PROVEN_TIMEOUT_SEC = 1800
 const log = (...args: unknown[]) => console.log("[bridge:withdraw]", ...args)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+// Module-level so it holds across composable instances: only one L1 consume in flight at a time.
+const consumeInFlight = false
+
 export type WithdrawStage = "idle" | "burning" | "exiting" | "proving" | "consuming" | "done" | "error"
 
 const PENDING_KEY = "nulo-bridge-pending-withdraw"
@@ -84,8 +87,23 @@ export function useWithdraw() {
 	// consume prompt for the same exit.
 	let consumeInFlight = false
 
-	/** Proven-epoch wait → witness → L1 consume, from a persisted exit. Drives stage + the countdown. */
+	/** Guard against concurrent/duplicate runs — the resume watcher can fire more than once, and a
+	 * second run prompts the L1 withdraw again (the first already consumed the message). */
 	async function consumeExit(p: PendingWithdraw): Promise<void> {
+		if (consumeInFlight) {
+			log("a consume is already in flight — skipping duplicate")
+			return
+		}
+		consumeInFlight = true
+		try {
+			await doConsumeExit(p)
+		} finally {
+			consumeInFlight = false
+		}
+	}
+
+	/** Proven-epoch wait → witness → L1 consume, from a persisted exit. Drives stage + the countdown. */
+	async function doConsumeExit(p: PendingWithdraw): Promise<void> {
 		const l1wallet = l1.walletClient.value
 		const l1addr = l1.address.value
 		if (!l1wallet || !l1addr) {
@@ -247,10 +265,13 @@ export function useWithdraw() {
 		}
 	}
 
-	// Auto-resume once the L1 wallet is connected (the L2 exit is already on-chain).
+	// Auto-resume once the L1 wallet is connected (the L2 exit is already on-chain). Watch isConnected
+	// (flips true once) rather than walletClient (rebuilt on every accountsChanged → re-fires the resume).
 	watch(
-		() => l1.walletClient.value,
-		(w) => w && hasPending.value && void resumePending(),
+		() => l1.isConnected.value,
+		(c) => {
+			if (c && hasPending.value) void resumePending()
+		},
 		{ immediate: true },
 	)
 

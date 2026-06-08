@@ -88,6 +88,9 @@ function safeBigInt(s: string): bigint | null {
 
 const isMsgNotReady = (msg: string): boolean => /l1_to_l2_msg_exists|nonexistent L1-to-L2/i.test(msg)
 
+// Module-level so it holds across composable instances: only one claim in flight at a time.
+let claimInFlight = false
+
 /**
  * Drive an L1→L2 deposit through the app, faucet-side: mint test USDC + approve + depositToAztecPublic
  * on L1 (useL1Wallet, canonical viem), then — once the L1→L2 message is consumable — claim_public on L2
@@ -130,8 +133,23 @@ export function useDeposit() {
 		stage.value = "done"
 	}
 
-	/** Poll the claim SIMULATION until the message is consumable, send once, confirm the credit. */
+	/** Guard against concurrent/duplicate runs — the resume watcher can fire more than once, and a
+	 * second run prompts the claim again. */
 	async function claimAndConfirm(wallet: unknown, pending: PendingDeposit & { leafIndex: string }): Promise<void> {
+		if (claimInFlight) {
+			log("a claim is already in flight — skipping duplicate")
+			return
+		}
+		claimInFlight = true
+		try {
+			await doClaimAndConfirm(wallet, pending)
+		} finally {
+			claimInFlight = false
+		}
+	}
+
+	/** Poll the claim SIMULATION until the message is consumable, send once, confirm the credit. */
+	async function doClaimAndConfirm(wallet: unknown, pending: PendingDeposit & { leafIndex: string }): Promise<void> {
 		const recipientAddr = AztecAddress.fromString(pending.recipient)
 		const amount = BigInt(pending.amount)
 		const secret = Fr.fromString(pending.secret)
