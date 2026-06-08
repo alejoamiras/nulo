@@ -8,7 +8,7 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"typecheck": "vue-tsc --noEmit",
-		"test": "vitest run",
+		"test": "vitest run --dir src --passWithNoTests",
 		"test:e2e": "playwright test"
 	},
 	"dependencies": {
