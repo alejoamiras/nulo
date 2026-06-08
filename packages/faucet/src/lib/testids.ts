@@ -69,6 +69,7 @@ export const TESTIDS = {
 	depositStage: "fa-deposit-stage",
 	depositSuccess: "fa-deposit-success",
 	depositError: "fa-deposit-error",
+	depositPending: "fa-deposit-pending",
 
 	// Bridge — withdraw
 	withdrawAmount: "fa-withdraw-amount",
@@ -76,6 +77,7 @@ export const TESTIDS = {
 	withdrawStage: "fa-withdraw-stage",
 	withdrawSuccess: "fa-withdraw-success",
 	withdrawError: "fa-withdraw-error",
+	withdrawPending: "fa-withdraw-pending",
 } as const
 
 export type Testid = (typeof TESTIDS)[keyof typeof TESTIDS]

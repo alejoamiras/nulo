@@ -6,7 +6,7 @@ import { useL1Wallet } from "@/composables/useL1Wallet"
 import { useWithdraw } from "@/composables/useWithdraw"
 import { TESTIDS } from "@/lib/testids"
 
-const { stage, error, provenBlock, targetBlock, withdraw } = useWithdraw()
+const { stage, error, provenBlock, targetBlock, hasPending, withdraw } = useWithdraw()
 const l1 = useL1Wallet()
 const bridge = useBridgeWallet()
 
@@ -77,6 +77,10 @@ async function onWithdraw() {
 		<AppButton :loading="busy" :disabled="!bothConnected || busy" :data-testid="TESTIDS.withdrawSubmit" @click="onWithdraw">
 			{{ bothConnected ? "Withdraw" : "Connect both wallets above" }}
 		</AppButton>
+
+		<p v-if="hasPending && stage === 'idle'" class="pending-hint" :data-testid="TESTIDS.withdrawPending">
+			A pending withdraw was found — connect your Ethereum wallet to finish it.
+		</p>
 
 		<div v-if="stage !== 'idle'" class="status" :data-testid="TESTIDS.withdrawStage" :data-stage="stage">
 			<div class="bar" :class="{ pulsing: busy }">
@@ -189,5 +193,15 @@ async function onWithdraw() {
 .success {
 	color: var(--mint);
 	font: 600 14px/1 var(--font-mono);
+}
+
+.pending-hint {
+	color: var(--yellow);
+	font-size: 13px;
+	line-height: 1.4;
+	margin: 0;
+	padding: 10px 12px;
+	border: 1px solid var(--yellow);
+	border-radius: 8px;
 }
 </style>
