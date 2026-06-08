@@ -6,10 +6,11 @@ import { Fr } from "@aztec/aztec.js/fields"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { InboxAbi, TokenPortalAbi } from "@aztec/l1-artifacts"
 import { tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
+import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
 import { parseEventLogs } from "viem"
 import { sepolia } from "viem/chains"
-import { ref } from "vue"
-import { BRIDGE, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
+import { ref, watch } from "vue"
+import { BRIDGE, BRIDGE_TOKEN, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { useL1Wallet } from "./useL1Wallet"
@@ -46,6 +47,8 @@ interface PendingDeposit {
 	readonly secret: string
 	readonly recipient: string
 	readonly amount: string
+	/** Recipient's public balance before the deposit — claim is confirmed by the balance crossing this + amount. */
+	readonly preBalance: string
 	readonly leafIndex?: string
 }
 
@@ -53,6 +56,14 @@ function persistPending(p: PendingDeposit): void {
 	try {
 		localStorage.setItem(PENDING_KEY, JSON.stringify(p))
 	} catch {}
+}
+function loadPending(): PendingDeposit | null {
+	try {
+		const raw = localStorage.getItem(PENDING_KEY)
+		return raw ? (JSON.parse(raw) as PendingDeposit) : null
+	} catch {
+		return null
+	}
 }
 function clearPending(): void {
 	try {
@@ -66,8 +77,14 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
  * Drive an L1→L2 deposit through the app, faucet-side: mint test USDC + approve + depositToAztecPublic
  * on L1 (useL1Wallet, canonical viem), then poll claim_public on L2 (useBridgeWallet, the Aztec wallet).
  * The two wallets meet only at primitives (addresses / amounts / the secret + leaf index) — never by
- * sharing viem types across the canonical↔@aztec/viem line (codex). The secret is persisted BEFORE the
- * irreversible L1 deposit so a closed tab can resume the claim.
+ * sharing viem types across the canonical↔@aztec/viem line (codex).
+ *
+ * Recovery (codex 019ea4fc HIGH): the claim secret + leaf index are persisted BEFORE the irreversible
+ * L1 deposit and only cleared once the L2 balance crosses preBalance + amount (a PROPOSED claim can be
+ * reorged out before checkpoint, so PROPOSED is NOT a safe clear signal). A pending claim auto-resumes
+ * when the Aztec wallet reconnects. The secret is plaintext for now — acceptable for PUBLIC claims since
+ * claim_public binds the recipient in the message content; sealing via bridge-core recovery-crypto is a
+ * follow-up the moment private claims land (their secret is a bearer credential).
  */
 export function useDeposit() {
 	const l1 = useL1Wallet()
@@ -76,6 +93,42 @@ export function useDeposit() {
 	const stage = ref<DepositStage>("idle")
 	const error = ref<string | null>(null)
 	const l1TxHash = ref<string | null>(null)
+	const hasPending = ref(loadPending() !== null)
+
+	async function readPublicBalance(wallet: unknown, recipient: AztecAddress): Promise<bigint> {
+		const token = await Contract.at(BRIDGE_TOKEN, TokenContractArtifact, wallet as never)
+		return (await token.methods.balance_of_public(recipient).simulate()) as unknown as bigint
+	}
+
+	/** Poll claim_public until it lands, then confirm the credit (the reorg-safe clear signal). */
+	async function claimAndConfirm(wallet: unknown, pending: PendingDeposit & { leafIndex: string }): Promise<void> {
+		const recipientAddr = AztecAddress.fromString(pending.recipient)
+		const amount = BigInt(pending.amount)
+		const secret = Fr.fromString(pending.secret)
+		const fpc = await getSponsoredFpcInstance()
+		const fee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
+		const bridge = await Contract.at(BRIDGE, tokenBridgeArtifact, wallet as never)
+		const sendOpts = { from: recipientAddr, fee, wait: { waitForStatus: TxStatus.PROPOSED } }
+
+		stage.value = "claiming"
+		const target = BigInt(pending.preBalance) + amount
+		for (let i = 0; i < 300; i++) {
+			// Already credited (e.g. a prior attempt's claim landed) — done, regardless of this send.
+			if ((await readPublicBalance(wallet, recipientAddr)) >= target) {
+				clearPending()
+				hasPending.value = false
+				stage.value = "done"
+				return
+			}
+			try {
+				await bridge.methods.claim_public(recipientAddr, amount, secret, new Fr(BigInt(pending.leafIndex))).send(sendOpts as never)
+			} catch {
+				await sleep(6000)
+			}
+		}
+		// Claim attempts exhausted without an observed credit — keep the pending so a reload retries.
+		throw new Error("claim not yet credited on L2 — it will resume automatically when you reopen this tab")
+	}
 
 	async function deposit(amount: bigint): Promise<void> {
 		error.value = null
@@ -95,8 +148,10 @@ export function useDeposit() {
 		try {
 			const secret = Fr.random()
 			const secretHash = await computeSecretHash(secret)
-			// Recovery: persist the claim secret BEFORE the irreversible L1 deposit.
-			persistPending({ secret: secret.toString(), recipient, amount: amount.toString() })
+			const recipientAddr = AztecAddress.fromString(recipient)
+			const preBalance = await readPublicBalance(aztec, recipientAddr)
+			persistPending({ secret: secret.toString(), recipient, amount: amount.toString(), preBalance: preBalance.toString() })
+			hasPending.value = true
 
 			stage.value = "minting"
 			l1TxHash.value = await wallet.writeContract({
@@ -138,34 +193,47 @@ export function useDeposit() {
 			const sent = parseEventLogs({ abi: InboxAbi, eventName: "MessageSent", logs: depositReceipt.logs })
 			const event = sent[0] as { args?: { index?: bigint } } | undefined
 			if (event?.args?.index === undefined) throw new Error("deposit emitted no Inbox MessageSent event")
-			const leafIndex = event.args.index
-			persistPending({ secret: secret.toString(), recipient, amount: amount.toString(), leafIndex: leafIndex.toString() })
+			const leafIndex = event.args.index.toString()
+			persistPending({
+				secret: secret.toString(),
+				recipient,
+				amount: amount.toString(),
+				preBalance: preBalance.toString(),
+				leafIndex,
+			})
 
-			stage.value = "claiming"
-			const fpc = await getSponsoredFpcInstance()
-			const fee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
-			const recipientAddr = AztecAddress.fromString(recipient)
-			const bridge = await Contract.at(BRIDGE, tokenBridgeArtifact, aztec)
-			const sendOpts = { from: recipientAddr, fee, wait: { waitForStatus: TxStatus.PROPOSED } }
-
-			let claimed = false
-			for (let i = 0; i < 300 && !claimed; i++) {
-				try {
-					await bridge.methods.claim_public(recipientAddr, amount, secret, new Fr(leafIndex)).send(sendOpts as never)
-					claimed = true
-				} catch {
-					await sleep(6000)
-				}
-			}
-			if (!claimed) throw new Error("claim never synced — the L1→L2 message has not arrived yet")
-
-			clearPending()
-			stage.value = "done"
+			await claimAndConfirm(aztec, {
+				secret: secret.toString(),
+				recipient,
+				amount: amount.toString(),
+				preBalance: preBalance.toString(),
+				leafIndex,
+			})
 		} catch (e) {
 			error.value = e instanceof Error ? e.message : "Deposit failed"
 			stage.value = "error"
 		}
 	}
 
-	return { stage, error, l1TxHash, deposit }
+	/** Resume a deposit whose claim never confirmed (tab closed mid-claim). Safe to call repeatedly. */
+	async function resumePending(): Promise<void> {
+		const pending = loadPending()
+		const aztec = bridgeWallet.wallet.value
+		if (!pending?.leafIndex || !aztec || stage.value !== "idle") return
+		try {
+			await claimAndConfirm(aztec, pending as PendingDeposit & { leafIndex: string })
+		} catch (e) {
+			error.value = e instanceof Error ? e.message : "Resume failed"
+			stage.value = "error"
+		}
+	}
+
+	// Auto-resume a pending claim once the Aztec wallet is connected (handles a mid-claim tab close).
+	watch(
+		() => bridgeWallet.wallet.value,
+		(w) => w && hasPending.value && void resumePending(),
+		{ immediate: true },
+	)
+
+	return { stage, error, l1TxHash, hasPending, deposit, resumePending }
 }
