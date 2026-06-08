@@ -43,15 +43,8 @@ packages/extension/.e2e-state/
 wallet_data_*/
 
 
-# sandbox deploy output (instance-specific)
-packages/bridge-app/public/sandbox.json
-packages/bridge-app/public/token_bridge.json
-
-# playwright e2e artifacts
-packages/bridge-app/test-results/
-packages/bridge-app/playwright-report/
-packages/bridge-app/.playwright-mcp/
-packages/bridge-app/*.png
+# sandbox deploy output (instance-specific) — deploy-sandbox.ts writes here for manual inspection
+packages/bridge-core/sandbox-deploy/
 
 # bridge e2e runtime artifacts (in-browser/script PXE data + MCP captures)
 .playwright-mcp/

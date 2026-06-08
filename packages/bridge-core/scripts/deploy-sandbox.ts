@@ -397,12 +397,12 @@ async function main() {
 		l1Rpc: SANDBOX_RPC,
 		nodeUrl: NODE_URL,
 	}
-	// The bridge-app fetches this in sandbox mode to wire its dual-wallet flows.
-	const outDir = join(here, "..", "..", "bridge-app", "public")
+	// Written to a local dir for manual inspection of a sandbox deploy (addresses + RPC ports).
+	const outDir = join(here, "..", "sandbox-deploy")
 	mkdirSync(outDir, { recursive: true })
 	writeFileSync(join(outDir, "sandbox.json"), `${JSON.stringify(deployment, null, 2)}\n`)
 	copyFileSync(join(AZTEC, "token_bridge/target/token_bridge_contract-TokenBridge.json"), join(outDir, "token_bridge.json"))
-	console.log("\n✅ FULL sandbox deploy OK — wrote bridge-app/public/{sandbox,token_bridge}.json")
+	console.log("\n✅ FULL sandbox deploy OK — wrote sandbox-deploy/{sandbox,token_bridge}.json")
 	console.log(JSON.stringify(deployment, null, 2))
 }
 
