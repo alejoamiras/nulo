@@ -4,8 +4,9 @@ import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { TxStatus } from "@aztec/aztec.js/tx"
-import { TokenPortalAbi } from "@aztec/l1-artifacts"
+import { InboxAbi, TokenPortalAbi } from "@aztec/l1-artifacts"
 import { tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
+import { parseEventLogs } from "viem"
 import { sepolia } from "viem/chains"
 import { ref } from "vue"
 import { BRIDGE, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
@@ -121,24 +122,24 @@ export function useDeposit() {
 
 			stage.value = "depositing"
 			const depositArgs = [recipient as `0x${string}`, amount, secretHash.toString() as `0x${string}`] as const
-			const sim = await l1.publicClient.simulateContract({
-				address: L1_PORTAL,
-				abi: TokenPortalAbi,
-				functionName: "depositToAztecPublic",
-				args: depositArgs,
-				account: from,
+			const depositReceipt = await l1.publicClient.waitForTransactionReceipt({
+				hash: await wallet.writeContract({
+					address: L1_PORTAL,
+					abi: TokenPortalAbi,
+					functionName: "depositToAztecPublic",
+					args: depositArgs,
+					chain: sepolia,
+					account: from,
+				}),
 			})
-			const leafIndex = (sim.result as readonly [unknown, bigint])[1]
+			// The real leaf index comes from the mined Inbox MessageSent event — a preflight simulate
+			// races with any concurrent deposit and yields an index the L2 message won't match (the
+			// claim then retries forever against the wrong leaf). Mirrors bridge-core/flows.ts.
+			const sent = parseEventLogs({ abi: InboxAbi, eventName: "MessageSent", logs: depositReceipt.logs })
+			const event = sent[0] as { args?: { index?: bigint } } | undefined
+			if (event?.args?.index === undefined) throw new Error("deposit emitted no Inbox MessageSent event")
+			const leafIndex = event.args.index
 			persistPending({ secret: secret.toString(), recipient, amount: amount.toString(), leafIndex: leafIndex.toString() })
-			const depositHash = await wallet.writeContract({
-				address: L1_PORTAL,
-				abi: TokenPortalAbi,
-				functionName: "depositToAztecPublic",
-				args: depositArgs,
-				chain: sepolia,
-				account: from,
-			})
-			await l1.publicClient.waitForTransactionReceipt({ hash: depositHash })
 
 			stage.value = "claiming"
 			const fpc = await getSponsoredFpcInstance()

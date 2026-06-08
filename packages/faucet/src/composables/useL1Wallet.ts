@@ -30,7 +30,10 @@ const wrongChain = computed(() => isConnected.value && chainId.value !== sepolia
 
 function onAccountsChanged(accounts: readonly string[]) {
 	address.value = (accounts[0] as Address | undefined) ?? null
-	if (!address.value) walletClient.value = null
+	const provider = getProvider()
+	// Rebuild the walletClient on account change — otherwise it keeps signing as the old account.
+	walletClient.value =
+		address.value && provider ? createWalletClient({ account: address.value, chain: sepolia, transport: custom(provider) }) : null
 }
 function onChainChanged(hexChainId: string) {
 	chainId.value = Number.parseInt(hexChainId, 16)
