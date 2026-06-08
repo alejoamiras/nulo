@@ -6,7 +6,7 @@ import { useDeposit } from "@/composables/useDeposit"
 import { useL1Wallet } from "@/composables/useL1Wallet"
 import { TESTIDS } from "@/lib/testids"
 
-const { stage, error, hasPending, deposit } = useDeposit()
+const { stage, error, hasPending, deposit, discardPending } = useDeposit()
 const l1 = useL1Wallet()
 const bridge = useBridgeWallet()
 
@@ -73,9 +73,10 @@ async function onDeposit() {
 			{{ bothConnected ? "Deposit" : "Connect both wallets above" }}
 		</AppButton>
 
-		<p v-if="hasPending && stage === 'idle'" class="pending-hint" :data-testid="TESTIDS.depositPending">
-			A pending deposit claim was found — connect your Aztec wallet and it resumes automatically.
-		</p>
+		<div v-if="hasPending && stage === 'idle'" class="pending-hint" :data-testid="TESTIDS.depositPending">
+			<span>A pending deposit claim was found — connect your Aztec wallet and it resumes automatically.</span>
+			<button class="discard" type="button" @click="discardPending">Discard</button>
+		</div>
 
 		<div v-if="stage !== 'idle'" class="status" :data-testid="TESTIDS.depositStage" :data-stage="stage">
 			<div class="bar" :class="{ pulsing: busy }">
@@ -191,6 +192,9 @@ async function onDeposit() {
 }
 
 .pending-hint {
+	display: flex;
+	align-items: center;
+	gap: 10px;
 	color: var(--yellow);
 	font-size: 13px;
 	line-height: 1.4;
@@ -198,5 +202,17 @@ async function onDeposit() {
 	padding: 10px 12px;
 	border: 1px solid var(--yellow);
 	border-radius: 8px;
+}
+
+.pending-hint .discard {
+	margin-left: auto;
+	flex-shrink: 0;
+	color: var(--yellow);
+	background: transparent;
+	border: 1px solid var(--yellow);
+	border-radius: 6px;
+	padding: 4px 10px;
+	font-size: 12px;
+	cursor: pointer;
 }
 </style>

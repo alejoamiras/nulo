@@ -3,7 +3,6 @@ import { Contract } from "@aztec/aztec.js/contracts"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { InboxAbi, TokenPortalAbi } from "@aztec/l1-artifacts"
 import { tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
@@ -16,8 +15,6 @@ import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { useL1Wallet } from "./useL1Wallet"
 import { readBalance } from "./useTokenBalance"
-
-const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://rpc.testnet.aztec-labs.com"
 
 // Verbose tracing while the bridge flows are being hardened — every step + value to the console.
 const log = (...args: unknown[]) => console.log("[bridge:deposit]", ...args)
@@ -57,8 +54,6 @@ interface PendingDeposit {
 	/** Recipient's public balance before the deposit — claim is confirmed by the balance crossing this + amount. */
 	readonly preBalance: string
 	readonly leafIndex?: string
-	/** The L1→L2 message hash (Inbox MessageSent) — polled for readiness before the claim is even attempted. */
-	readonly messageHash?: string
 }
 
 function persistPending(p: PendingDeposit): void {
@@ -82,24 +77,34 @@ function clearPending(): void {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** Safe-parse a persisted bigint string — a pre-fix entry may hold "[object Object]". */
+function safeBigInt(s: string): bigint | null {
+	try {
+		return BigInt(s)
+	} catch {
+		return null
+	}
+}
+
+const isMsgNotReady = (msg: string): boolean => /l1_to_l2_msg_exists|nonexistent L1-to-L2/i.test(msg)
+
 /**
  * Drive an L1→L2 deposit through the app, faucet-side: mint test USDC + approve + depositToAztecPublic
  * on L1 (useL1Wallet, canonical viem), then — once the L1→L2 message is consumable — claim_public on L2
- * (useBridgeWallet, the Aztec wallet). The two wallets meet only at primitives (addresses / amounts /
- * the secret + leaf index) — never by sharing viem types across the canonical↔@aztec/viem line (codex).
+ * (useBridgeWallet, the Aztec wallet). The two wallets meet only at primitives (codex).
  *
- * Message-sync gate: depositToAztecPublic only QUEUES the L1→L2 message; it isn't consumable until the
- * sequencer folds it into a checkpointed L2 block. We poll `getL1ToL2MessageCheckpoint(messageHash)` —
- * which returns a checkpoint ONLY when the message is ready (the older `isL1ToL2MessageSynced` is
- * deprecated: it can read true before the message is usable) — and only THEN prompt the claim. Without
- * this gate the claim fires immediately, the wallet prompts, and the tx reverts because the message
- * isn't there yet.
+ * Sync gate (THE thing that makes the single claim prompt land): depositToAztecPublic only QUEUES the
+ * L1→L2 message; it isn't consumable until the sequencer folds it into a checkpointed L2 block AND the
+ * WALLET's own PXE syncs that block (the PXE lags the node, so a node-side `getL1ToL2MessageCheckpoint`
+ * is NOT sufficient — that was the earlier premature-claim bug). We poll `claim_public(...).simulate()`,
+ * a prompt-free local PXE dry-run, which reverts with `l1_to_l2_msg_exists` until the message is
+ * consumable BY THIS WALLET. Only once it simulates cleanly do we `.send()` — exactly one prompt, and it
+ * lands. (Confirmed against the SDK: simulate→pxe.simulateTx, no proof, no approval; send→pxe.proveTx,
+ * which is what prompts.)
  *
- * Recovery (codex 019ea4fc HIGH): the secret + leaf index + message hash persist BEFORE the irreversible
- * L1 deposit and only clear once the L2 balance crosses preBalance + amount (PROPOSED can reorg, so it's
- * not a safe clear signal). A pending claim auto-resumes when the Aztec wallet reconnects. The secret is
- * plaintext — acceptable for PUBLIC claims (claim_public binds the recipient); sealing via bridge-core
- * recovery-crypto is the follow-up for private claims (their secret is a bearer credential).
+ * Recovery: secret + leaf index + preBalance persist BEFORE the irreversible L1 deposit and clear only
+ * once the L2 balance crosses preBalance + amount. A pending claim auto-resumes when the Aztec wallet
+ * reconnects — it just re-enters the simulate-gate, so legacy entries (no message hash) recover too.
  */
 export function useDeposit() {
 	const l1 = useL1Wallet()
@@ -119,61 +124,75 @@ export function useDeposit() {
 		return bal
 	}
 
-	/** Wait for the L1→L2 message to sync, claim once, then confirm the credit (the reorg-safe clear). */
-	async function claimAndConfirm(wallet: unknown, pending: PendingDeposit & { leafIndex: string; messageHash: string }): Promise<void> {
+	function finish(): void {
+		clearPending()
+		hasPending.value = false
+		stage.value = "done"
+	}
+
+	/** Poll the claim SIMULATION until the message is consumable, send once, confirm the credit. */
+	async function claimAndConfirm(wallet: unknown, pending: PendingDeposit & { leafIndex: string }): Promise<void> {
 		const recipientAddr = AztecAddress.fromString(pending.recipient)
 		const amount = BigInt(pending.amount)
 		const secret = Fr.fromString(pending.secret)
-		const target = BigInt(pending.preBalance) + amount
+		const pre = safeBigInt(pending.preBalance)
+		const target = pre === null ? null : pre + amount
+		const isCredited = async () => target !== null && (await readPublicBalance(wallet, recipientAddr)) >= target
 
-		// Resume short-circuit: a prior attempt's claim may already have credited.
-		if ((await readPublicBalance(wallet, recipientAddr)) >= target) {
+		if (await isCredited()) {
 			log("already credited — nothing to claim")
-			clearPending()
-			hasPending.value = false
-			stage.value = "done"
+			finish()
 			return
 		}
 
-		// 1. Wait until the L1→L2 message is consumable — NO wallet prompt during this poll.
-		stage.value = "syncing"
-		const node = createAztecNodeClient(NODE_URL)
-		const msgHash = Fr.fromString(pending.messageHash)
-		let ready = false
-		for (let i = 0; i < 300; i++) {
-			const checkpoint = await node.getL1ToL2MessageCheckpoint(msgHash)
-			if (checkpoint !== undefined) {
-				log("L1→L2 message ready at checkpoint", String(checkpoint))
-				ready = true
-				break
-			}
-			log(`L1→L2 message not synced yet (poll ${i + 1}) — waiting 6s`)
-			await sleep(6000)
-		}
-		if (!ready) throw new Error("the L1→L2 message never synced — it will resume when you reopen this tab")
-
-		// 2. Claim ONCE — the message is ready, so a single wallet prompt should land.
-		stage.value = "claiming"
 		const fpc = await getSponsoredFpcInstance()
 		const fee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
 		const bridge = await Contract.at(BRIDGE, tokenBridgeArtifact, wallet as never)
-		const sendOpts = { from: recipientAddr, fee, wait: { waitForStatus: TxStatus.PROPOSED } }
+		const claim = () => bridge.methods.claim_public(recipientAddr, amount, secret, new Fr(BigInt(pending.leafIndex)))
+
+		// 1. Gate on a clean SIMULATION — prompt-free, and accurate because it runs against the wallet's
+		//    own PXE (the thing that actually executes the claim). It reverts until the message is there.
+		stage.value = "syncing"
+		let ready = false
+		for (let i = 0; i < 300; i++) {
+			try {
+				await claim().simulate({ from: recipientAddr, fee } as never)
+				log(`claim simulates cleanly (poll ${i + 1}) — L1→L2 message is consumable`)
+				ready = true
+				break
+			} catch (e) {
+				const msg = e instanceof Error ? e.message : String(e)
+				if (isMsgNotReady(msg)) {
+					log(`L1→L2 message not consumable yet (poll ${i + 1}) — waiting 6s`)
+					await sleep(6000)
+				} else {
+					log("claim simulate failed (not a sync issue):", msg)
+					throw e
+				}
+			}
+		}
+		if (!ready) throw new Error("the L1→L2 message never synced to your wallet — it will resume when you reopen this tab")
+
+		// 2. Send ONCE — the simulation passed, so this lands. The only wallet prompt of the claim.
+		stage.value = "claiming"
 		log("claiming (confirm in your Aztec wallet)", { leafIndex: pending.leafIndex })
-		await bridge.methods.claim_public(recipientAddr, amount, secret, new Fr(BigInt(pending.leafIndex))).send(sendOpts as never)
+		await claim().send({ from: recipientAddr, fee, wait: { waitForStatus: TxStatus.PROPOSED } } as never)
 		log("claim sent — confirming the L2 credit")
 
 		// 3. Confirm the credit (NO prompt) — the reorg-safe clear signal.
+		if (target === null) {
+			log("no preBalance baseline (legacy entry) — clearing on claim success")
+			finish()
+			return
+		}
 		for (let i = 0; i < 30; i++) {
-			if ((await readPublicBalance(wallet, recipientAddr)) >= target) {
+			if (await isCredited()) {
 				log("credited — deposit complete ✓")
-				clearPending()
-				hasPending.value = false
-				stage.value = "done"
+				finish()
 				return
 			}
 			await sleep(4000)
 		}
-		// Claim landed but the public credit hasn't reflected yet — keep the pending so a reload reconciles.
 		log("claim sent; L2 credit not yet observed — will reconcile on reload")
 		stage.value = "done"
 	}
@@ -242,34 +261,18 @@ export function useDeposit() {
 				}),
 			})
 			log("deposit tx", depositReceipt.transactionHash)
-			// The real leaf index + message hash come from the mined Inbox MessageSent event — a preflight
-			// simulate races with any concurrent deposit and yields an index the L2 message won't match.
+			// The real leaf index comes from the mined Inbox MessageSent event — a preflight simulate
+			// races with any concurrent deposit and yields an index the L2 message won't match.
 			const sent = parseEventLogs({ abi: InboxAbi, eventName: "MessageSent", logs: depositReceipt.logs })
-			const event = sent[0] as { args?: { index?: bigint; hash?: string } } | undefined
-			if (event?.args?.index === undefined || event.args.hash === undefined) {
-				throw new Error("deposit emitted no Inbox MessageSent event")
-			}
+			const event = sent[0] as { args?: { index?: bigint } } | undefined
+			if (event?.args?.index === undefined) throw new Error("deposit emitted no Inbox MessageSent event")
 			const leafIndex = event.args.index.toString()
-			const messageHash = event.args.hash
-			log("L1→L2 message", { leafIndex, messageHash })
-			persistPending({
-				secret: secret.toString(),
-				recipient,
-				amount: amount.toString(),
-				preBalance: preBalance.toString(),
-				leafIndex,
-				messageHash,
-			})
+			log("L1→L2 message leaf index", leafIndex)
+			const full = { secret: secret.toString(), recipient, amount: amount.toString(), preBalance: preBalance.toString(), leafIndex }
+			persistPending(full)
 
-			log("waiting for the L1→L2 message to sync, then claiming")
-			await claimAndConfirm(aztec, {
-				secret: secret.toString(),
-				recipient,
-				amount: amount.toString(),
-				preBalance: preBalance.toString(),
-				leafIndex,
-				messageHash,
-			})
+			log("waiting for the L1→L2 message to become consumable, then claiming")
+			await claimAndConfirm(aztec, full)
 			log("deposit complete ✓")
 		} catch (e) {
 			log("FAILED:", e)
@@ -278,19 +281,28 @@ export function useDeposit() {
 		}
 	}
 
-	/** Resume a deposit whose claim never confirmed (tab closed mid-flow). Safe to call repeatedly. */
+	/** Resume a deposit whose claim never confirmed (tab closed mid-flow, or a legacy entry). */
 	async function resumePending(): Promise<void> {
 		const pending = loadPending()
 		const aztec = bridgeWallet.wallet.value
-		if (!pending?.leafIndex || !pending?.messageHash || !aztec || stage.value !== "idle") return
+		if (!pending?.leafIndex || !aztec || stage.value !== "idle") return
 		log("resuming pending claim", pending)
 		try {
-			await claimAndConfirm(aztec, pending as PendingDeposit & { leafIndex: string; messageHash: string })
+			await claimAndConfirm(aztec, pending as PendingDeposit & { leafIndex: string })
 		} catch (e) {
 			log("resume FAILED:", e)
 			error.value = e instanceof Error ? e.message : "Resume failed"
 			stage.value = "error"
 		}
+	}
+
+	/** Discard a stuck pending claim (escape hatch — testnet only; abandons the unclaimed test deposit). */
+	function discardPending(): void {
+		log("discarding pending claim")
+		clearPending()
+		hasPending.value = false
+		stage.value = "idle"
+		error.value = null
 	}
 
 	// Auto-resume a pending claim once the Aztec wallet is connected (handles a mid-flow tab close).
@@ -300,5 +312,5 @@ export function useDeposit() {
 		{ immediate: true },
 	)
 
-	return { stage, error, l1TxHash, hasPending, deposit, resumePending }
+	return { stage, error, l1TxHash, hasPending, deposit, resumePending, discardPending }
 }

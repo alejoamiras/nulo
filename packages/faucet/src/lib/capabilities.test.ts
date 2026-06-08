@@ -170,4 +170,13 @@ describe("buildCombinedManifest", () => {
 			"sponsor_unconditionally",
 		])
 	})
+
+	it("puts the bridge txs in simulation.transactions too (so the claim can be simulate-gated, prompt-free)", () => {
+		const cap = m.capabilities.find((c) => c.type === "simulation")
+		if (cap?.type !== "simulation") throw new Error("simulation cap missing")
+		const fns = cap.transactions.scope.map((s) => s.function)
+		expect(fns).toContain("balance_of_public")
+		expect(fns).toContain("claim_public")
+		expect(fns).toContain("sponsor_unconditionally")
+	})
 })

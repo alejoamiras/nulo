@@ -214,11 +214,23 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 						{ contract: tokenAddress, function: "balance_of_private" },
 					],
 				},
+				// The bridge tx methods are simulatable too (a prompt-free PXE dry-run). The deposit gates
+				// its claim PROMPT on a successful claim_public SIMULATION — PXE-aware, since the simulate
+				// reverts (l1_to_l2_msg_exists) until the wallet's own PXE can consume the message, which
+				// lags the node's checkpoint. Simulations are read-only, so widening this scope is safe;
+				// the actual send is still gated by the (separate) transaction scope.
 				transactions: {
 					scope: [
 						{ contract: usdcAddress, function: "balance_of_public" },
 						{ contract: ethAddress, function: "balance_of_public" },
 						{ contract: tokenAddress, function: "balance_of_public" },
+						{ contract: bridgeAddress, function: "claim_public" },
+						{ contract: bridgeAddress, function: "claim_private" },
+						{ contract: bridgeAddress, function: "exit_to_l1_public" },
+						{ contract: bridgeAddress, function: "exit_to_l1_private" },
+						{ contract: tokenAddress, function: "burn_public" },
+						{ contract: tokenAddress, function: "burn_private" },
+						{ contract: sponsoredFpcAddress, function: "sponsor_unconditionally" },
 					],
 				},
 			},
