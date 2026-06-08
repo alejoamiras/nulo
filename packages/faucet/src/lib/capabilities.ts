@@ -168,6 +168,78 @@ export function buildBridgeManifest(input: BridgeManifestInput): AppManifest {
 	}
 }
 
+export interface CombinedManifestInput {
+	readonly dripperAddress: AztecAddress
+	readonly usdcAddress: AztecAddress
+	readonly ethAddress: AztecAddress
+	readonly bridgeAddress: AztecAddress
+	readonly tokenAddress: AztecAddress
+	readonly proxyAddress: AztecAddress
+	readonly sponsoredFpcAddress: AztecAddress
+	readonly appUrl?: string
+}
+
+/**
+ * Build ONE manifest covering both the Faucet and the Bridge. The two tabs are the same origin =
+ * the same app to the wallet, which keys the capability grant per-app — so two separate manifests
+ * collide (the second connect's grant shadows the first, and registerContract for the missing
+ * contracts hits a scope violation). One complete manifest, requested once, fixes that: connect on
+ * either tab and both work, with no second wallet prompt. `canCreateAuthWit: true` because the
+ * bridge's `exit_to_l1` needs a public burn auth-wit (the faucet simply never creates one).
+ */
+export function buildCombinedManifest(input: CombinedManifestInput): AppManifest {
+	const { dripperAddress, usdcAddress, ethAddress, bridgeAddress, tokenAddress, proxyAddress, sponsoredFpcAddress } = input
+	return {
+		version: "1.0",
+		metadata: {
+			name: "nulo-faucet",
+			version: "0.1.0",
+			description: "Faucet + Bridge on Aztec alpha-testnet — Nulo",
+			url: input.appUrl ?? defaultUrl(),
+		},
+		capabilities: [
+			{ type: "accounts", canGet: true, canCreateAuthWit: true },
+			{
+				type: "contracts",
+				contracts: [dripperAddress, usdcAddress, ethAddress, bridgeAddress, tokenAddress, proxyAddress],
+				canRegister: true,
+				canGetMetadata: true,
+			},
+			{
+				type: "simulation",
+				utilities: {
+					scope: [
+						{ contract: usdcAddress, function: "balance_of_private" },
+						{ contract: ethAddress, function: "balance_of_private" },
+						{ contract: tokenAddress, function: "balance_of_private" },
+					],
+				},
+				transactions: {
+					scope: [
+						{ contract: usdcAddress, function: "balance_of_public" },
+						{ contract: ethAddress, function: "balance_of_public" },
+						{ contract: tokenAddress, function: "balance_of_public" },
+					],
+				},
+			},
+			{
+				type: "transaction",
+				scope: [
+					{ contract: dripperAddress, function: "drip_to_public" },
+					{ contract: dripperAddress, function: "drip_to_private" },
+					{ contract: bridgeAddress, function: "claim_public" },
+					{ contract: bridgeAddress, function: "claim_private" },
+					{ contract: bridgeAddress, function: "exit_to_l1_public" },
+					{ contract: bridgeAddress, function: "exit_to_l1_private" },
+					{ contract: tokenAddress, function: "burn_public" },
+					{ contract: tokenAddress, function: "burn_private" },
+					{ contract: sponsoredFpcAddress, function: "sponsor_unconditionally" },
+				],
+			},
+		],
+	}
+}
+
 function defaultUrl(): string {
 	if (typeof window === "undefined") return "https://localhost"
 	return window.location.origin

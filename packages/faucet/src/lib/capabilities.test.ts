@@ -1,6 +1,6 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { describe, expect, it } from "vitest"
-import { buildBridgeManifest, buildFaucetManifest } from "./capabilities"
+import { buildBridgeManifest, buildCombinedManifest, buildFaucetManifest } from "./capabilities"
 
 const DRIPPER = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000001")
 const USDC = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000002")
@@ -122,5 +122,52 @@ describe("buildBridgeManifest", () => {
 		])
 		const sponsor = cap.scope.find((s) => s.function === "sponsor_unconditionally")
 		expect(sponsor?.contract.toString()).toBe(SPONSORED_FPC.toString())
+	})
+})
+
+describe("buildCombinedManifest", () => {
+	const m = buildCombinedManifest({
+		dripperAddress: DRIPPER,
+		usdcAddress: USDC,
+		ethAddress: ETH,
+		bridgeAddress: BRIDGE,
+		tokenAddress: TOKEN,
+		proxyAddress: PROXY,
+		sponsoredFpcAddress: SPONSORED_FPC,
+		appUrl: "https://app.test",
+	})
+
+	it("requests canCreateAuthWit=true (the bridge's exit needs a public burn auth-wit)", () => {
+		const cap = m.capabilities.find((c) => c.type === "accounts")
+		expect(cap).toEqual({ type: "accounts", canGet: true, canCreateAuthWit: true })
+	})
+
+	it("declares all six contracts — faucet (dripper, usdc, eth) + bridge (bridge, token, proxy)", () => {
+		const cap = m.capabilities.find((c) => c.type === "contracts")
+		if (cap?.type !== "contracts") throw new Error("contracts cap missing")
+		expect(cap.contracts.map((a) => a.toString())).toEqual([
+			DRIPPER.toString(),
+			USDC.toString(),
+			ETH.toString(),
+			BRIDGE.toString(),
+			TOKEN.toString(),
+			PROXY.toString(),
+		])
+	})
+
+	it("scopes both faucet drips and the bridge claim/exit/burn + sponsor", () => {
+		const cap = m.capabilities.find((c) => c.type === "transaction")
+		if (cap?.type !== "transaction") throw new Error("transaction cap missing")
+		expect(cap.scope.map((s) => s.function)).toEqual([
+			"drip_to_public",
+			"drip_to_private",
+			"claim_public",
+			"claim_private",
+			"exit_to_l1_public",
+			"exit_to_l1_private",
+			"burn_public",
+			"burn_private",
+			"sponsor_unconditionally",
+		])
 	})
 })
