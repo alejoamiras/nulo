@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Harden Report — Nulo wallet · security</title>
+  <style>
+    :root {
+      --bg: #fafaf8;
+      --fg: #1a1a1a;
+      --muted: #666;
+      --hairline: #e3e3e0;
+      --surface: #fff;
+      --code: #f3f3f0;
+      --link: #0366d6;
+      --high: #b71c1c;
+      --high-bg: #fdecea;
+      --med: #b2682e;
+      --med-bg: #fcf2e8;
+      --low: #555;
+      --low-bg: #ececec;
+      --green: #1e6b3b;
+      --green-bg: #e9f5ed;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1a1a1a;
+        --fg: #e8e8e6;
+        --muted: #a0a0a0;
+        --hairline: #2e2e2c;
+        --surface: #232321;
+        --code: #2a2a28;
+        --link: #5aa6f5;
+        --high: #ff7575;
+        --high-bg: #3a1f1f;
+        --med: #d8a463;
+        --med-bg: #3a2e1f;
+        --low: #b0b0b0;
+        --low-bg: #2a2a28;
+        --green: #8cd9a8;
+        --green-bg: #1e3a2a;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      max-width: 820px;
+      margin: 2rem auto;
+      padding: 0 1.25rem 6rem;
+      color: var(--fg);
+      background: var(--bg);
+      line-height: 1.55;
+      font-size: 16px;
+    }
+    h1 { font-size: 2rem; font-weight: 700; margin: 0 0 0.5rem; letter-spacing: -0.02em; }
+    h2 { font-size: 1.35rem; font-weight: 600; margin: 3rem 0 1rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--hairline); }
+    h3 { font-size: 1.1rem; font-weight: 600; margin: 2rem 0 0.5rem; }
+    h4 { font-size: 0.95rem; font-weight: 600; margin: 1rem 0 0.3rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    p { margin: 0.5rem 0 0.8rem; }
+    a { color: var(--link); }
+    code {
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.85em;
+      background: var(--code);
+      padding: 0.1em 0.35em;
+      border-radius: 3px;
+    }
+    pre {
+      background: var(--code);
+      padding: 0.9rem 1rem;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 0.82rem;
+      line-height: 1.5;
+    }
+    pre code { background: none; padding: 0; }
+    .meta {
+      color: var(--muted);
+      font-size: 0.88rem;
+      margin: 0 0 2rem;
+    }
+    .meta div { margin: 0.15rem 0; }
+    .stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      margin: 1.5rem 0 2.5rem;
+    }
+    .stat {
+      flex: 1 1 100px;
+      background: var(--surface);
+      border: 1px solid var(--hairline);
+      border-radius: 6px;
+      padding: 0.8rem 1rem;
+      text-align: center;
+    }
+    .stat-num { font-size: 1.5rem; font-weight: 700; line-height: 1; }
+    .stat-label { font-size: 0.75rem; color: var(--muted); margin-top: 0.3rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat-high .stat-num { color: var(--high); }
+    .stat-med .stat-num { color: var(--med); }
+    .callout {
+      background: var(--green-bg);
+      border-left: 3px solid var(--green);
+      padding: 0.9rem 1.1rem;
+      border-radius: 0 4px 4px 0;
+      margin: 1.2rem 0;
+    }
+    .callout-amber {
+      background: var(--med-bg);
+      border-left-color: var(--med);
+    }
+    .finding {
+      background: var(--surface);
+      border: 1px solid var(--hairline);
+      border-radius: 8px;
+      padding: 1.2rem 1.4rem;
+      margin: 1.5rem 0;
+    }
+    .finding-header {
+      display: flex;
+      align-items: baseline;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.6rem;
+    }
+    .finding-id {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+    .finding-title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin: 0;
+      flex: 1 1 auto;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 0.2rem 0.55rem;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+    .chip-high { background: var(--high-bg); color: var(--high); }
+    .chip-med { background: var(--med-bg); color: var(--med); }
+    .chip-low { background: var(--low-bg); color: var(--low); }
+    .chip-info { background: var(--low-bg); color: var(--muted); font-weight: 500; letter-spacing: 0.02em; text-transform: none; }
+    .eli5 {
+      font-size: 1rem;
+      line-height: 1.6;
+      margin: 0.6rem 0 0.8rem;
+    }
+    .eli5 strong { color: var(--fg); }
+    .meta-line {
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin: 0.7rem 0 0.4rem;
+    }
+    .meta-line code { font-size: 0.78rem; }
+    details {
+      margin-top: 1rem;
+      padding-top: 0.7rem;
+      border-top: 1px dashed var(--hairline);
+    }
+    details summary {
+      cursor: pointer;
+      font-size: 0.83rem;
+      color: var(--muted);
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      user-select: none;
+      padding: 0.2rem 0;
+    }
+    details summary:hover { color: var(--fg); }
+    details[open] summary { margin-bottom: 0.7rem; }
+    .instances {
+      font-size: 0.82rem;
+      line-height: 1.7;
+    }
+    .instances code { font-size: 0.78rem; word-break: break-all; }
+    .instances li { margin: 0.15rem 0; }
+    ul, ol { padding-left: 1.4rem; margin: 0.5rem 0 0.8rem; }
+    li { margin: 0.25rem 0; }
+    .footer {
+      margin-top: 4rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--hairline);
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+
+<h1>Harden Report · security</h1>
+
+<div class="meta">
+  <div><strong>Repo</strong>: nulo (Aztec browser-extension wallet, monorepo)</div>
+  <div><strong>Date</strong>: 2026-06-08</div>
+  <div><strong>Run ID</strong>: 2026-06-08-ultra-e6759a</div>
+  <div><strong>Scope</strong>: <code>extension</code>, <code>wallet-core</code>, <code>wallet-crypto</code>, <code>extension-messaging</code>, <code>aztec-runtime</code>, <code>wallet-bridge</code></div>
+  <div><strong>Models</strong>: Claude Opus + Codex xhigh (cross-family map) → Codex xhigh (coordinator) → Claude Opus (verifier)</div>
+</div>
+
+<div class="stats">
+  <div class="stat"><div class="stat-num">12</div><div class="stat-label">Total</div></div>
+  <div class="stat stat-high"><div class="stat-num">0</div><div class="stat-label">Critical</div></div>
+  <div class="stat stat-high"><div class="stat-num">8</div><div class="stat-label">High</div></div>
+  <div class="stat stat-med"><div class="stat-num">4</div><div class="stat-label">Medium</div></div>
+  <div class="stat"><div class="stat-num">0</div><div class="stat-label">Low</div></div>
+</div>
+
+<h2>Executive summary</h2>
+
+<p>The audit found <strong>12 verified security issues</strong> in the Nulo wallet — none classified as Critical, but <strong>8 High-severity</strong> and <strong>4 Medium</strong>. All 12 were independently re-read against current source after dedup; none were refuted.</p>
+
+<p>If you only read one thing: the recurring pattern is <strong>"coarse-grained trust is checked once, then reused too broadly."</strong> The wallet repeatedly validates a high-level identity or permission, then trusts it for finer-grained decisions later — even when the data has drifted, the session has been revoked, or the original validation never actually checked the right thing.</p>
+
+<div class="callout">
+  <h4 style="margin-top:0">Cheapest fixes first (hours each, not days)</h4>
+  <ol style="margin:0">
+    <li><strong>F-007</strong> — passkey unlock missing credential binding. Four-line patch.</li>
+    <li><strong>F-003</strong> — <code>accounts.canGet:false</code> setting is decorative. Remove the exemption + add the check.</li>
+    <li><strong>F-004</strong> — same shape: <code>data.addressBook</code> sub-grant is decorative. Add scope checkers.</li>
+  </ol>
+</div>
+
+<h3>What the audit ran</h3>
+
+<ul>
+  <li><strong>Phase 1</strong> mapped 6 packages in parallel — entrypoints, trust boundaries, dependency direction, frameworks, test surfaces, dev-only paths.</li>
+  <li><strong>Phase 2</strong> ran 8 cluster audits, each with one Claude Opus pass + one Codex xhigh pass (different model families catch different blind spots). Produced 121 raw findings.</li>
+  <li><strong>Phase 3</strong> ran a Codex coordinator to dedupe by root cause + sink + boundary, assign CVSS bands, and surface cross-cutting themes. 121 → 12.</li>
+  <li><strong>Phase 4</strong> ran a Claude Opus verifier with an anti-anchoring protocol (form an independent verdict <em>before</em> reading the coordinator's claim). All 12 confirmed.</li>
+</ul>
+
+<p class="meta-line"><strong>Methodology note</strong>: the formal <code>/harden ultra</code> spec calls for 4 agents per cluster (2 of each family). Practical implementation in this run was 2 agents per cluster (1 of each family), with the Phase 2.5 rebuttal round absorbed into the coordinator's cross-model dedup. Effective intensity sits between <code>/harden max</code> and full <code>/harden ultra</code>. The dedup ratio (121 → 12 = 90% reduction) suggests the negative list worked and remaining findings are well-grounded.</p>
+
+<h2>High findings (8)</h2>
+
+<!-- ───────────────────────── F-001 ───────────────────────── -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-high">High</span>
+    <span class="finding-id">F-001</span>
+    <span class="finding-title">Third-party iframes are credited as the top-frame origin during wallet discovery</span>
+  </div>
+
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude+Codex</span>
+    &nbsp;<span class="chip chip-info">confidence: high</span>
+    &nbsp;<span class="chip chip-info">CWE-346 · CWE-441</span>
+    &nbsp;<span class="chip chip-info">fix: days</span>
+  </div>
+
+  <div class="eli5">
+    <p><strong>What it is.</strong> Web pages can embed other pages inside themselves using iframes (think of an ad iframe on a news site — the news site is the "top frame," the ad is an "inner frame"). They have different origins (different URLs) and shouldn't share permissions. Today, when a wallet conversation starts from inside an iframe, the wallet records the <em>parent</em> page's identity instead of the iframe's. The iframe inherits any grants the user has given to the parent page.</p>
+    <p><strong>What an attacker would do.</strong> Get their malicious iframe loaded on a page where the user has already approved Nulo (a news site that runs ads, a forum, anything with third-party content). The iframe asks Nulo to do things; Nulo thinks the trusted parent page is doing them; the user sees the parent's hostname in the popup and approves.</p>
+    <p><strong>The fix.</strong> Bind the wallet session to the specific frame (URL + frameId), not the tab. Reject discovery from subframes by default unless the use case explicitly needs it.</p>
+  </div>
+
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Trace</strong>: <code>extension/manifest/manifest.config.ts:31-37</code> injects the content script into <em>all</em> frames → iframe-local discovery is relayed by the upstream <code>content_script_connection_handler.js:60-86</code> → upstream attribution uses <code>sender.tab.url</code> (top frame) instead of <code>sender.url</code> (the actual frame) at <code>background_connection_handler.ts:187-188</code> → Nulo stores/looks up the session keyed by <code>origin + chainId</code> at <code>wallet-sdk/background.ts:351-458</code> and <code>dapp-session/service.ts:73-99</code> → later RPCs run under <code>ctx.origin = session.origin</code> at <code>wallet-sdk/background.ts:516-520</code>.</p>
+    <p><strong>Note on upstream coupling</strong>: this is partially blocked on upstream <code>@aztec/wallet-sdk</code> 4.2.0 design choices. A Nulo-side defense-in-depth wrapper at <code>wallet-sdk/background.ts:121-135</code> can land today even before upstream changes.</p>
+  </details>
+</div>
+
+<!-- ───────────────────────── F-002 ───────────────────────── -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-high">High</span>
+    <span class="finding-id">F-002</span>
+    <span class="finding-title">Tab-wide discovery replies let sibling frames hijack or tear down a victim session</span>
+  </div>
+
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Codex only</span>
+    &nbsp;<span class="chip chip-info">confidence: moderate</span>
+    &nbsp;<span class="chip chip-info">CWE-668</span>
+    &nbsp;<span class="chip chip-info">fix: days</span>
+  </div>
+
+  <div class="eli5">
+    <p><strong>What it is.</strong> When the wallet says "OK, you can connect," it broadcasts that answer to the <em>entire browser tab</em>, not to the specific frame that asked. Every frame in the tab hears the approval and can race to claim it. This is the same family of issue as F-001 (the iframe pretending to be the top frame) but a separate mechanism — even after you fix F-001, this one still bites.</p>
+    <p><strong>What an attacker would do.</strong> A malicious iframe in the same tab as the legitimate dApp races to send the "key exchange" first. The first one wins. Even after the real frame has connected, the malicious iframe can still send a "disconnect" message keyed by the session ID and silently tear down the legitimate session.</p>
+    <p><strong>The fix.</strong> Target every wallet → page message to the original <code>frameId</code>, not the whole tab. Reject unsolicited "approval" messages in the content script unless a matching local request is actually pending.</p>
+  </div>
+
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Trace</strong>: Nulo sends discovery replies to the whole tab via <code>wallet-sdk/background.ts:118-135</code> → Chrome delivers them to every frame when no <code>frameId</code> is specified → every injected content script accepts <code>DISCOVERY_APPROVED</code> at upstream <code>content_script_connection_handler.js:88-156</code> → first sibling to send <code>KEY_EXCHANGE_REQUEST</code> wins at <code>background_connection_handler.js:133-166</code> → any sibling can later <code>DISCONNECT</code> by session id at <code>background_connection_handler.js:68-71,200-221</code>.</p>
+    <p>Coupled with F-001 — both should be fixed in the same change.</p>
+  </details>
+</div>
+
+<!-- ───────────────────────── F-003 ───────────────────────── -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-high">High</span>
+    <span class="finding-id">F-003</span>
+    <span class="finding-title">accounts.canGet:false is not enforced on account disclosure</span>
+  </div>
+
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude+Codex</span>
+    &nbsp;<span class="chip chip-info">confidence: high</span>
+    &nbsp;<span class="chip chip-info">CWE-862 (Missing Authorization)</span>
+    &nbsp;<span class="chip chip-info">fix: hours · CHEAPEST</span>
+  </div>
+
+  <div class="eli5">
+    <p><strong>What it is.</strong> The wallet's permission model has a flag called <code>canGet</code> on the "accounts" capability. A dApp can request "let me operate on accounts" without "let me read their addresses." The UI shows this distinction. The code ignores it.</p>
+    <p><strong>What goes wrong.</strong> A dApp asks for <code>accounts</code> with <code>canGet:false</code>. The user approves, thinking the dApp can't read addresses. The dApp immediately receives the account list anyway, in the same approval response — and can keep re-reading it forever via <code>getAccounts()</code>.</p>
+    <p><strong>The fix.</strong> Stop exempting <code>getAccounts</code> from the capability checker, and respect the <code>canGet</code> bit on the approval-response path. Hours of work.</p>
+  </div>
+
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Trace</strong>: dApp requests <code>accounts</code> capability with <code>canGet:false</code> via <code>wallet-bridge/dispatcher.ts:235-236,504-510</code> → selected accounts are persisted into <code>session.accounts</code> at <code>dispatcher.ts:614-631</code> → the grant response still includes them at <code>dispatcher.ts:658-669,689-713</code> → later <code>getAccounts()</code> returns <code>session.accounts</code> at <code>dispatcher.ts:288-317,325-337</code> because <code>capability-map.ts:14</code> exempts the method.</p>
+    <p><strong>Fix</strong>: remove <code>getAccounts</code> from the exemption set in <code>capability-map.ts</code>; enforce <code>AccountsCapability.canGet</code> on both response and handler paths.</p>
+  </details>
+</div>
+
+<!-- ───────────────────────── F-005 ───────────────────────── -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-high">High</span>
+    <span class="finding-id">F-005</span>
+    <span class="finding-title">Attacker-chosen account scope lists are forwarded to PXE without session allow-list validation</span>
+  </div>
+
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude+Codex</span>
+    &nbsp;<span class="chip chip-info">confidence: high</span>
+    &nbsp;<span class="chip chip-info">CWE-862</span>
+    &nbsp;<span class="chip chip-info">fix: days</span>
+  </div>
+
+  <div class="eli5">
+    <p><strong>What it is.</strong> The wallet's scope-enforcement checks <em>which contracts</em> a dApp can touch but ignores <em>which accounts</em> it can read private state from. Several RPC methods accept extra parameters (<code>eventFilter.scopes</code>, <code>opts.scopes</code>, <code>opts.additionalScopes</code>) — these are lists of account addresses the wallet should expose private state for, and the dApp can put anything in them.</p>
+    <p><strong>What an attacker would do.</strong> Get the user to approve one account ("read private events for account A"). Then call methods that take a scopes array and append accounts B, C, D — accounts the user has in the same wallet but never approved for this dApp. Private state for B, C, D gets exposed even though only A was approved. One granted account silently widens to all accounts.</p>
+    <p><strong>The fix.</strong> Validate every scope entry against the session's approved accounts. Reject anything outside the allow-list. Close the related fast path that skips checks when the calls array is empty.</p>
+  </div>
+
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Trace</strong>: <code>wallet-bridge/scope-enforcement.ts:90-167</code> checks only contract/function scope → attacker-controlled <code>eventFilter.scopes</code>, <code>opts.scopes</code>, <code>opts.additionalScopes</code> are forwarded unchanged by <code>dispatcher.ts:382-432,788-793,829-857</code> → execution sinks feed those addresses directly into PXE at <code>execution/service.ts:1638-1640,1803-1851,1966-1967,2098-2153</code>. Empty-<code>calls</code> fast path at <code>scope-enforcement.ts:96-97,115-116</code> makes the bypass easier.</p>
+  </details>
+</div>
+
+<!-- ───────────────────────── F-006 ───────────────────────── -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-high">High</span>
+    <span class="finding-id">F-006</span>
+    <span class="finding-title">Deleting or expiring the stored dApp session does not revoke live access</span>
+  </div>
+
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Codex only</span>
+    &nbsp;<span class="chip chip-info">confidence: high</span>
+    &nbsp;<span class="chip chip-info">CWE-613 (Insufficient Session Expiration)</span>
+    &nbsp;<span class="chip chip-info">fix: days</span>
+  </div>
+
+  <div class="eli5">
+    <p><strong>What it is.</strong> There are two parallel session concepts: the <em>stored</em> session (a record in chrome.storage) and the <em>live transport</em> session (the actual encrypted channel between the dApp's tab and the wallet). When the user clicks "Disconnect this app" in Settings, only the stored record is deleted. The live channel keeps working.</p>
+    <p><strong>What an attacker would do.</strong> Get the user to grant a dApp some permissions. Wait until the user gets nervous and disconnects the dApp from Settings (or until the stored session expires). The dApp's tab is still open, the channel is still live — so the dApp keeps calling network-only methods (<code>getPrivateEvents</code>, <code>getAddressBook</code>, <code>registerSender</code>, <code>registerContract</code>) and they all succeed. Revocation didn't actually revoke anything visible to the dApp.</p>
+    <p><strong>The fix.</strong> Tear down the live transport session when the stored record is deleted or expires. Network-only capability enforcement should fail-closed when the stored session is missing.</p>
+  </div>
+
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Trace</strong>: <code>settings/connected-apps/[id].vue:120-126</code> deletes only the stored <code>DappSession</code> via <code>dapp-session/service.ts:274-283</code> → live encrypted transport stays alive (only <code>onSessionTerminated</code> tears it down at <code>wallet-sdk/background.ts:184-245</code>) → when <code>tryGetDappSessionByOriginAndChain</code> misses, <code>enforceCapability</code> returns empty grant set at <code>dispatcher.ts:735-736</code> → dispatcher still builds network-only operations at <code>dispatcher.ts:755-814</code> → privileged sinks at <code>execution/service.ts:1578-1705</code> still execute.</p>
+  </details>
+</div>
+
+<!-- ───────────────────────── F-007 ───────────────────────── -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-high">High</span>
+    <span class="finding-id">F-007</span>
+    <span class="finding-title">Passkey unlock does not bind supplied credential data to the target profile</span>
+  </div>
+
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude+Codex</span>
+    &nbsp;<span class="chip chip-info">confidence: high</span>
+    &nbsp;<span class="chip chip-info">CWE-345</span>
+    &nbsp;<span class="chip chip-info">fix: hours · CHEAPEST</span>
+  </div>
+
+  <div class="eli5">
+    <p><strong>What it is.</strong> When you unlock a passkey profile, the popup runs a WebAuthn ceremony and hands the resulting credential data to the wallet's unlock function. The wallet uses that data to derive a master secret — but it never checks that the credential is actually the one bound to the profile you're unlocking. If the credential id doesn't match, the wallet opens the wrong profile anyway, using the wrong key material.</p>
+    <p><strong>What an attacker would do.</strong> This requires popup-side compromise or a buggy WebAuthn flow, so it's not a direct web-to-wallet vector. But the failure mode is bad: profile A opens with a session derived from profile B's credential. Downstream account derivation uses the wrong key, signing breaks, or worse — the wallet may sign for an account it doesn't think it's signing for.</p>
+    <p><strong>The fix.</strong> Four lines. The exact same check already exists in <code>exportPlain</code> at <code>profile/service.ts:641-660</code> and in the passkey-restore path. Just mirror it in <code>unlockPasskeyProfile</code>: reject unless <code>recovery.credentialId === snapshot.credentialId</code> before opening the session.</p>
+  </div>
+
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Trace</strong>: popup auth forwards <code>credentialData</code> into <code>unlockPasskeyProfile(...)</code> at <code>auth.vue:68-74</code> → snapshot of stored credential id taken at <code>profile/service.ts:281-311</code> → PATH-A recovery trusts caller-supplied data via <code>acquireRecovery</code> and <code>passkey-recovery-coordinator.ts:102-109</code> → <code>PasskeyCredential.create</code> derives master secret from supplied <code>id</code>/<code>prf</code> at <code>wallet-crypto/passkey-credential.ts:36-63</code> → phase 3 only checks the profile row didn't rotate at <code>profile/service.ts:313-327</code>, never compares against the supplied credential → session opens with unbound secret at <code>profile/service.ts:328-329</code>.</p>
+    <p><strong>Verified test template exists</strong> at <code>service.integration.test.ts:321-330</code> — the regression pin can land in the same PR.</p>
+  </details>
+</div>
+
+<!-- ───────────────────────── F-008 ───────────────────────── -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-high">High</span>
+    <span class="finding-id">F-008</span>
+    <span class="finding-title">Transaction approvals are blind to calldata and argument values</span>
+  </div>
+
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Codex only</span>
+    &nbsp;<span class="chip chip-info">confidence: high</span>
+    &nbsp;<span class="chip chip-info">CWE-451</span>
+    &nbsp;<span class="chip chip-info">fix: days</span>
+  </div>
+
+  <div class="eli5">
+    <p><strong>What it is.</strong> When a dApp wants to send a transaction, the wallet popup shows a card per call with the contract name and function name (e.g., "transfer on Token@0xabc..."). The <em>arguments</em> to that function — amounts, recipients, calldata — are hidden behind a "View JSON" link in a secondary viewer. Most users will approve based on the visible labels alone.</p>
+    <p><strong>What an attacker would do.</strong> Make the function NAME look routine while hiding the dangerous effect in the arguments. "Token.transfer" looks like a normal send; the args might say "transfer 100 to the attacker." "Vault.deposit" looks routine; the args might say "deposit at terms only the attacker benefits from." The user approves the boring-looking call.</p>
+    <p><strong>The fix.</strong> Show structured argument summaries on the PRIMARY approval surface for every popup-gated operation. Keep the raw JSON viewer as a fallback, not as the only place that exposes the actual semantics. For transfers specifically: recipient address + amount + token should be on the main card.</p>
+  </div>
+
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Trace</strong>: operation models carry argument arrays in <code>wallet-bridge/action.ts:37-54</code> and <code>operation.ts:97-183</code> → popup loads them at <code>execute/index.vue:260-266</code> → main review cards show only function labels + contract addresses at <code>OperationCard.vue:104-138,253-361,374-399</code> → real payload only visible via secondary JSON viewer at <code>execute/index.vue:391-396,456-463</code> → JSON viewer at <code>popup/windows/json/index.vue:46-57</code>.</p>
+  </details>
+</div>
+
+<!-- ───────────────────────── F-011 ───────────────────────── -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-high">High</span>
+    <span class="finding-id">F-011</span>
+    <span class="finding-title">Custom RPC endpoints accepted with no transport policy; restore bypasses re-probing</span>
+  </div>
+
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude+Codex</span>
+    &nbsp;<span class="chip chip-info">confidence: high</span>
+    &nbsp;<span class="chip chip-info">CWE-20 · CWE-184</span>
+    &nbsp;<span class="chip chip-info">fix: days</span>
+  </div>
+
+  <div class="eli5">
+    <p><strong>What it is.</strong> When you add a custom network endpoint, the URL is validated with <code>z.string().url()</code> — which accepts <em>way</em> more than you'd expect. <code>javascript:</code>, <code>data:</code>, <code>file://</code>, <code>chrome://</code>, and any HTTP URL on any domain all pass. The persisted URL field has no validation at all. The restore-from-backup path doesn't re-probe imported endpoints. Once a malicious endpoint is in the network list, the wallet uses it as the trusted authority for chain state, fees, notes, and signing inputs.</p>
+    <p><strong>What an attacker would do.</strong> Get the user to add a custom endpoint via phishing ("connect to our fast RPC for better performance") — the URL could be a server they control. Or get them to import a malicious backup. Now their wallet asks the attacker's server about the chain: gas prices (attacker can inflate them), notes (attacker can lie about what's been received), even chain ID (attacker can claim a different chain — see F-012).</p>
+    <p><strong>The fix.</strong> Central allowlist at the node-factory boundary: allow <code>https:</code> generally, allow <code>http:</code> only for loopback/dev hosts, reject other schemes outright. Re-validate restored endpoints before persisting them. Land this together with F-012.</p>
+  </div>
+
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Trace</strong>: endpoint validation is only <code>z.string().url()</code> at <code>network/spec.ts:120-145</code>; persisted <code>NetworkInfo.rpcUrl</code> is plain <code>z.string()</code> at <code>network/spec.ts:97-100</code> → <code>addNetwork</code>, <code>addEndpoint</code>, <code>updateEndpoint</code> persist user-supplied URLs at <code>network/service.ts:235-252,328-348</code> → <code>restore()</code> writes imported endpoints without re-probing at <code>network/service.ts:613-633,757-768</code> → runtime use-sites call <code>createAztecNodeClient(rpcUrl, ...)</code> at <code>aztec-runtime/adapters/aztec-node-factory-adapter.ts:15-17</code> → ultimately <code>fetch(host, ...)</code> at <code>aztec-runtime/utils/fetch.ts:42-47</code>.</p>
+  </details>
+</div>
+
+<h2>Medium findings (4)</h2>
+
+<!-- ───────────────────────── F-004 ───────────────────────── -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-med">Medium</span>
+    <span class="finding-id">F-004</span>
+    <span class="finding-title">data.addressBook is decorative; getAddressBook and registerSender ignore the sub-grant</span>
+  </div>
+
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude only</span>
+    &nbsp;<span class="chip chip-info">confidence: high</span>
+    &nbsp;<span class="chip chip-info">CWE-863</span>
+    &nbsp;<span class="chip chip-info">fix: hours · CHEAPEST</span>
+  </div>
+
+  <div class="eli5">
+    <p><strong>What it is.</strong> Same shape as F-003. The wallet has a "data" capability with a sub-toggle for "can read your address book." The toggle is decorative — the actual address-book methods only check that the dApp has <em>some</em> "data" grant, not whether the address-book sub-grant was specifically given.</p>
+    <p><strong>What goes wrong.</strong> A dApp asks for "data" access for the legitimate reason of reading private events. User approves "data" with <code>addressBook: false</code>. dApp immediately calls <code>getAddressBook()</code> and gets the full address book, plus can call <code>registerSender()</code> to inject arbitrary aliases.</p>
+    <p><strong>The fix.</strong> Add explicit scope checkers for these two methods that require <code>addressBook: true</code>. Or split them into their own capability type so the existing scope-enforcement pattern works.</p>
+  </div>
+
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Trace</strong>: <code>capability-map.ts:38-40</code> maps both methods to the <code>data</code> capability → <code>scope-enforcement.ts:269-279</code> defines no checker for either → dispatcher builds <code>aztec_getAddressBook</code> / <code>aztec_registerSender</code> operations at <code>dispatcher.ts:802-803</code> → the <code>DataCapability.addressBook?: boolean</code> field at <code>capabilities.ts:47-51</code> is never consulted.</p>
+  </details>
+</div>
+
+<!-- ───────────────────────── F-009 ───────────────────────── -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-med">Medium</span>
+    <span class="finding-id">F-009</span>
+    <span class="finding-title">Approval popups treat attacker-controlled display metadata as trustworthy</span>
+  </div>
+
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude+Codex</span>
+    &nbsp;<span class="chip chip-info">confidence: high</span>
+    &nbsp;<span class="chip chip-info">CWE-451 · CWE-1007</span>
+    &nbsp;<span class="chip chip-info">fix: days</span>
+  </div>
+
+  <div class="eli5">
+    <p><strong>What it is.</strong> The popup approval UI renders strings the dApp controls — its name, the token name/symbol, function names — without sanitizing them. There's a sanitizer in the codebase already (it's used on the capability detail screen) but the high-stakes approval surfaces don't call it. Separately, the "trusted dApp identity" gets reduced from the full URL to just the hostname, hiding scheme/port differences.</p>
+    <p><strong>What an attacker would do.</strong> Pick a deceptive dApp name or token symbol using Unicode tricks: Cyrillic <code>с</code> for Latin <code>c</code> in "USDC" (looks identical, different character); right-to-left override character (U+202E) to reverse part of the displayed text; zero-width spaces inside a name to defeat string-equality checks the user might do mentally. The user sees what looks like the real "USDC" or the real "Uniswap" and approves.</p>
+    <p><strong>The fix.</strong> Route every attacker-controlled label through <code>sanitizeWireString</code> (or equivalent canonicalization) before rendering. Display the full origin (scheme + host + port), not just the hostname. Visually mark dApp-supplied names as untrusted metadata.</p>
+  </div>
+
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Trace</strong>: dApp metadata persisted as <code>name: discovery.appName ?? discovery.appId</code> at <code>wallet-sdk/background.ts:423-427</code> → popup reduces authority to <code>new URL(url).hostname</code> in <code>useDappHostname.ts:9-25</code> and renders raw name in <code>DappIdentityBlock.vue:37-47</code>, <code>verify/index.vue:200-210</code> → execute cards render raw method/artifact labels at <code>OperationCard.vue:114,134,222-231,266,285,325,340,357,369-371,394-398</code> → on-chain token symbols/names feed <code>IncomingTrustPopup.vue:49,90,102,135-137</code> → existing sanitizer at <code>dapp-session/capability-meta.ts:104-166</code> is used in capability UI but not here.</p>
+  </details>
+</div>
+
+<!-- ───────────────────────── F-010 ───────────────────────── -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-med">Medium</span>
+    <span class="finding-id">F-010</span>
+    <span class="finding-title">Incoming-transfer persistence is unbounded, including blocked and hidden contracts</span>
+  </div>
+
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Codex only</span>
+    &nbsp;<span class="chip chip-info">confidence: high</span>
+    &nbsp;<span class="chip chip-info">CWE-400 (Uncontrolled Resource Consumption)</span>
+    &nbsp;<span class="chip chip-info">fix: days</span>
+  </div>
+
+  <div class="eli5">
+    <p><strong>What it is.</strong> The wallet stores a record for every incoming-transfer note it discovers, with no cap and no garbage collection. Even when you BLOCK a contract, the wallet keeps storing its notes — it just hides them from the UI. The "block" flag stops display, not storage.</p>
+    <p><strong>What an attacker would do.</strong> Send dust (tiny tokens) to your address from a contract they control. Repeatedly. The records pile up in <code>chrome.storage.local</code>, which has a hard ~5MB cap per extension. Eventually writes start failing for legitimate state too, breaking the wallet.</p>
+    <p><strong>The fix.</strong> Add bounded retention for incoming-transfer rows. When a contract is blocked, short-circuit persistence entirely — don't even write the row. Handle storage-quota errors gracefully.</p>
+  </div>
+
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Trace</strong>: incoming-transfer rows persisted in local storage at <code>incoming-transfer/repository.ts:20,34-35</code> with no cap/GC at <code>repository.ts:48-49,56-72,95-120</code> → once a token is watched, scans read raw notes at <code>service.ts:573-576</code> and persist every new nullifier at <code>service.ts:617-629,660-676</code> → <code>blocked</code> state only hides rows because <code>setTrustReject()</code> flips state at <code>service.ts:322-329</code>, but later scans still upsert hidden rows.</p>
+  </details>
+</div>
+
+<!-- ───────────────────────── F-012 ───────────────────────── -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-med">Medium</span>
+    <span class="finding-id">F-012</span>
+    <span class="finding-title">Live node chain identity is not rebound to the selected network before signing/proving</span>
+  </div>
+
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude+Codex</span>
+    &nbsp;<span class="chip chip-info">confidence: high</span>
+    &nbsp;<span class="chip chip-info">CWE-345</span>
+    &nbsp;<span class="chip chip-info">fix: days</span>
+  </div>
+
+  <div class="eli5">
+    <p><strong>What it is.</strong> When you sign a transaction, the wallet asks the connected Aztec node "what's your L1 chain id and rollup version?" and uses the answer in the signature. It doesn't compare that live answer to the network you actually selected. So if the node lies after you've enrolled it — or if a malicious endpoint serves drift values — your signature ends up valid for a chain you didn't mean.</p>
+    <p><strong>What an attacker would do.</strong> This is the follow-on after F-011. A malicious RPC endpoint accepted as a custom network gets to choose what chain id it reports. The wallet trusts it and signs accordingly.</p>
+    <p><strong>The fix.</strong> Before any signing or proving step, recompute the live composite from <code>node.getNodeInfo()</code> and compare it against the stored identity of the selected network. Fail-closed on mismatch. Stronger: persist <code>l1ChainId</code> and <code>rollupVersion</code> separately and compare each.</p>
+  </div>
+
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Trace</strong>: enrollment stores only the composite chain id via <code>_getChainId(rpcUrl)</code> at <code>network/service.ts:726-733</code> → later runtime code reconstructs <code>NetworkInfo</code> from stored row at <code>network/service.ts:542-547</code> and creates a node from <code>network.rpcUrl</code> at <code>aztec-runtime/pxe/chain-runtime.ts:104-105</code> → <code>NuloAccount.buildTxExecutionRequest()</code> then trusts fresh <code>node.getNodeInfo()</code> at <code>nulo-account.ts:99-103</code> without checking it still matches the selected network.</p>
+  </details>
+</div>
+
+<h2>Cross-cutting observations</h2>
+
+<p>Patterns that span multiple findings — worth tracking as architectural hygiene items beyond the per-finding fixes.</p>
+
+<h3>1. Trust is checked at the wrong granularity</h3>
+
+<p>The code repeatedly validates a coarse identity once, then skips the finer re-check that actually matters later:</p>
+
+<ul>
+  <li><strong>Frame vs tab</strong> — frame identity collapses to tab identity (F-001, F-002).</li>
+  <li><strong>Capability type vs sub-grant</strong> — type is checked, sub-grant bits ignored (F-003, F-004).</li>
+  <li><strong>Primary account vs scope lists</strong> — approved account checked, additional scope arrays not (F-005).</li>
+  <li><strong>Stored session vs live transport</strong> — revoke deletes the record, leaves the channel open (F-006).</li>
+  <li><strong>Selected network vs live node identity</strong> — network selected, live node not rebound (F-012).</li>
+  <li><strong>Profile vs credential</strong> — profile snapshot taken, credential never bound to it (F-007).</li>
+</ul>
+
+<p>The <code>enforceScope</code> primitive in <code>wallet-bridge</code> already demonstrates the right pattern. Extending it to the points above would close several findings with one architectural change.</p>
+
+<h3>2. The approval UX over-trusts metadata</h3>
+
+<p>Across discovery, execute, token, and trust popups, user decisions depend on dApp-controlled strings while the authoritative data is either hidden (full args, calldata, full origin), visually de-emphasized (contract address vs token name), or routed through lossy reductions (hostname vs full origin). The sanitizer <code>sanitizeWireString</code> exists and is correctly used in the capability UI — extending its use to every approval surface AND surfacing the authoritative data primarily would close most of F-008 + F-009 together.</p>
+
+<h3>3. Tests pin existing boundaries but not the missing ones</h3>
+
+<p>Throughout Phase 2, missing tests came up over and over: no <code>port.sender</code> validation test, no origin-spoofing test, no scope-array tampering test against <code>enforceScope</code>, no <code>canGet:false</code> enforcement test, no passkey-unlock binding test. The coordinator dropped most of these as "missing test" notes rather than findings, but the cluster of missing tests means future refactors won't catch regressions of the very issues this audit found. <strong>Recommendation</strong>: every remediation PR lands a regression test pin.</p>
+
+<h3>4. Crypto package itself is healthy</h3>
+
+<p>Phase 2 surfaced several "potential" crypto findings (unsalted passhash, non-constant-time compare, IV-derived salt). The coordinator's negative-space review showed each had no concrete exploit path beyond defense-in-depth violations. PBKDF2-SHA256 at 600,000 iterations + AES-256-GCM + HKDF-SHA256 with proper labels is correctly applied. The team should resist scope-creep into "fix the crypto" — the crypto is fine; the trust boundaries around it aren't.</p>
+
+<h3>5. Aztec ecosystem dependency surface is a meaningful coupling</h3>
+
+<p>F-001 + F-002 partially depend on upstream <code>@aztec/wallet-sdk</code> 4.2.0 design choices (<code>sender.tab.url</code> attribution, tab-scoped discovery). Nulo can ship defense-in-depth locally, but the full fix requires either upstream changes or a wholesale shadowing of upstream's connection-handler logic. Worth surfacing to upstream and tracking as a coordination item.</p>
+
+<h2>Suggested remediation order</h2>
+
+<div class="callout">
+  <p style="margin:0"><strong>Phase 1 — quick wins (1-2 days)</strong>: F-007, F-003, F-004. All three are hours-of-work fixes; closing them lifts a meaningful chunk of the High band immediately.</p>
+</div>
+
+<div class="callout callout-amber">
+  <p style="margin:0"><strong>Phase 2 — coupled pairs (1 week each)</strong>: ship F-001 + F-002 together (iframe + tab-scoping); ship F-011 + F-012 together (RPC URL allowlist + live-node chain rebind). Each pair is a single architectural change.</p>
+</div>
+
+<div class="callout callout-amber">
+  <p style="margin:0"><strong>Phase 3 — independent Highs/Mediums (2-3 weeks)</strong>: F-005 (scope arrays), F-006 (revocation kill-channel), F-008 (calldata in approval UI), F-009 (sanitize display strings), F-010 (bounded incoming storage).</p>
+</div>
+
+<p style="margin-top:1.5rem">Every remediation PR should land a regression test pin (see Cross-cutting observation #3). Several of these tests already have templates in the codebase — F-007 has <code>service.integration.test.ts:321-330</code> as the obvious model.</p>
+
+<div class="footer">
+  <p>Full audit artifacts:</p>
+  <ul>
+    <li><a href="report.md">report.md</a> — markdown version of this report</li>
+    <li><a href="findings/consolidated.md">findings/consolidated.md</a> — Phase 3 deduplicated findings (12, full traces)</li>
+    <li><a href="findings/verified.md">findings/verified.md</a> — Phase 4 verifier verdicts (independent re-read)</li>
+    <li><a href="raw/">raw/</a> — Phase 1 repo maps + Phase 2 per-cluster Claude + Codex raw findings (16 files)</li>
+  </ul>
+  <p>The audit is not idempotent — re-running may surface slightly different findings due to model rollout variance. Cross-run agreement is signal.</p>
+</div>
+
+</body>
+</html>
