@@ -305,10 +305,14 @@ export function useDeposit() {
 		error.value = null
 	}
 
-	// Auto-resume a pending claim once the Aztec wallet is connected (handles a mid-flow tab close).
+	// Auto-resume a pending claim once the Aztec wallet is fully CONNECTED — capabilities granted +
+	// contracts registered. Triggering on wallet.value races: that's set at confirmVerification, BEFORE
+	// requestCapabilities, so the resume's first simulate hits "Capability simulation not granted".
 	watch(
-		() => bridgeWallet.wallet.value,
-		(w) => w && hasPending.value && void resumePending(),
+		() => bridgeWallet.status.value,
+		(s) => {
+			if (s === "connected" && hasPending.value) void resumePending()
+		},
 		{ immediate: true },
 	)
 
