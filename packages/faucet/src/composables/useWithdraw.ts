@@ -22,6 +22,9 @@ const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://rpc.testnet.azt
 // once timed out at 30 min). Give the proven-epoch wait a generous budget.
 const PROVEN_TIMEOUT_SEC = 1800
 
+// Verbose tracing while the bridge flows are being hardened — every step + value to the console.
+const log = (...args: unknown[]) => console.log("[bridge:withdraw]", ...args)
+
 export type WithdrawStage = "idle" | "burning" | "exiting" | "proving" | "consuming" | "done" | "error"
 
 const PENDING_KEY = "nulo-bridge-pending-withdraw"
@@ -87,6 +90,7 @@ export function useWithdraw() {
 		const txHash = TxHash.fromString(p.exitTxHash)
 
 		stage.value = "proving"
+		log("step 3/4 — waiting for the proven epoch (testnet proving is slow)", { exitTxHash: p.exitTxHash, exitBlock: p.exitBlock })
 		targetBlock.value = p.exitBlock ?? null
 		const pollTimer = setInterval(() => {
 			node.getProvenBlockNumber()
@@ -107,9 +111,14 @@ export function useWithdraw() {
 		if (!messageHash) throw new Error("no L2→L1 message in the exit tx")
 		const wit = await computeL2ToL1MembershipWitness(node as never, messageHash, txHash as never, 0)
 		if (!wit) throw new Error("L2→L1 witness not available")
+		log("witness", { epochNumber: wit.epochNumber, leafIndex: wit.leafIndex })
 		const path = wit.siblingPath.toBufferArray().map((b: Buffer) => `0x${b.toString("hex")}` as `0x${string}`)
 
 		stage.value = "consuming"
+		log("step 4/4 — consuming on L1 via portal.withdraw (confirm in your Ethereum wallet)", {
+			recipientL1: p.recipientL1,
+			amount: p.amount,
+		})
 		const sim = await l1.publicClient.simulateContract({
 			address: L1_PORTAL,
 			abi: TokenPortalAbi,
@@ -118,11 +127,13 @@ export function useWithdraw() {
 			account: l1addr,
 		})
 		const hash = await l1wallet.writeContract({ ...(sim.request as object), chain: sepolia, account: l1addr } as never)
+		log("consume tx", hash)
 		await l1.publicClient.waitForTransactionReceipt({ hash })
 
 		clearPending()
 		hasPending.value = false
 		stage.value = "done"
+		log("withdraw complete ✓")
 	}
 
 	async function withdraw(amount: bigint): Promise<void> {
@@ -143,6 +154,7 @@ export function useWithdraw() {
 		}
 
 		try {
+			log("start", { amount: amount.toString(), recipient, l1addr })
 			const from = AztecAddress.fromString(recipient)
 			const nonce = Fr.random()
 			const fpc = await getSponsoredFpcInstance()
@@ -153,6 +165,7 @@ export function useWithdraw() {
 			const bridge = await Contract.at(BRIDGE, tokenBridgeArtifact, aztec)
 
 			stage.value = "burning"
+			log("step 1/4 — burn auth-wit (confirm in your Aztec wallet)")
 			const authwit = await SetPublicAuthwitContractInteraction.create(
 				aztec as never,
 				from,
@@ -162,9 +175,11 @@ export function useWithdraw() {
 			await authwit.send(sendOpts as never)
 
 			stage.value = "exiting"
+			log("step 2/4 — exit_to_l1_public (confirm in your Aztec wallet)")
 			const { receipt: exitReceipt } = (await bridge.methods
 				.exit_to_l1_public(EthAddress.fromString(l1addr), amount, EthAddress.ZERO, nonce)
 				.send(sendOpts as never)) as { receipt: { txHash: unknown; blockNumber?: number } }
+			log("exit tx", String(exitReceipt.txHash), "block", exitReceipt.blockNumber)
 
 			const pending: PendingWithdraw = {
 				exitTxHash: String(exitReceipt.txHash),
@@ -177,6 +192,7 @@ export function useWithdraw() {
 
 			await consumeExit(pending)
 		} catch (e) {
+			log("FAILED:", e)
 			error.value = e instanceof Error ? e.message : "Withdraw failed"
 			stage.value = "error"
 		}

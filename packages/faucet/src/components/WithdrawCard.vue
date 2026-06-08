@@ -29,15 +29,15 @@ const blocksRemaining = computed(() => {
 const stageLabel = computed(() => {
 	switch (stage.value) {
 		case "burning":
-			return "Authorizing the burn on L2…"
+			return "Step 1 of 4 · Authorizing the burn — confirm in your Aztec wallet"
 		case "exiting":
-			return "Exiting to L1 (L2 transaction)…"
+			return "Step 2 of 4 · Exiting to L1 — confirm in your Aztec wallet"
 		case "proving":
 			return blocksRemaining.value !== null
-				? `Waiting for the proven epoch — ${blocksRemaining.value} block${blocksRemaining.value === 1 ? "" : "s"} remaining (testnet proving can be slow)…`
-				: "Waiting for the proven epoch (testnet proving can be slow)…"
+				? `Step 3 of 4 · Waiting for the proven epoch — ${blocksRemaining.value} block${blocksRemaining.value === 1 ? "" : "s"} remaining (testnet proving is slow)…`
+				: "Step 3 of 4 · Waiting for the proven epoch (testnet proving is slow)…"
 		case "consuming":
-			return "Consuming on L1 (Ethereum transaction)…"
+			return "Step 4 of 4 · Consuming on L1 — confirm in your Ethereum wallet"
 		case "done":
 			return "Withdraw complete."
 		case "error":
