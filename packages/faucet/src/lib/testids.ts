@@ -78,6 +78,9 @@ export const TESTIDS = {
 	withdrawSuccess: "fa-withdraw-success",
 	withdrawError: "fa-withdraw-error",
 	withdrawPending: "fa-withdraw-pending",
+
+	// Bridge — add the bridged token to the wallet (registerToken, the bridge's own USDC)
+	bridgeAddToken: "fa-bridge-add-token",
 } as const
 
 export type Testid = (typeof TESTIDS)[keyof typeof TESTIDS]

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BridgeAddToken from "@/components/BridgeAddToken.vue"
 import BridgeWalletPanel from "@/components/BridgeWalletPanel.vue"
 import DepositCard from "@/components/DepositCard.vue"
 import L1WalletPanel from "@/components/L1WalletPanel.vue"
@@ -23,6 +24,7 @@ import { TESTIDS } from "@/lib/testids"
 
 		<DepositCard />
 		<WithdrawCard />
+		<BridgeAddToken />
 	</div>
 </template>
 
