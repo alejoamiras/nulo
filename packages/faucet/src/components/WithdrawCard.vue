@@ -34,7 +34,7 @@ const stageLabel = computed(() => {
 			return "Step 2 of 4 · Exiting to L1 — confirm in your Aztec wallet"
 		case "proving":
 			return blocksRemaining.value !== null
-				? `Step 3 of 4 · Waiting for the proven epoch — ${blocksRemaining.value} block${blocksRemaining.value === 1 ? "" : "s"} remaining (testnet proving is slow)…`
+				? `Step 3 of 4 · Proving — L2 proven block ${provenBlock.value} of ${targetBlock.value} needed (${blocksRemaining.value} to go). Proving lands in epoch batches, so this number sits, then jumps — testnet proving is slow.`
 				: "Step 3 of 4 · Waiting for the proven epoch (testnet proving is slow)…"
 		case "consuming":
 			return "Step 4 of 4 · Consuming on L1 — confirm in your Ethereum wallet"
