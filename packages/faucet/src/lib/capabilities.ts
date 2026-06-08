@@ -1,4 +1,5 @@
 import type { AztecAddress } from "@aztec/aztec.js/addresses"
+import { ProtocolContractAddress } from "@aztec/protocol-contracts"
 
 /**
  * Build the wallet-sdk capability manifest for the faucet.
@@ -231,6 +232,7 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 						{ contract: tokenAddress, function: "burn_public" },
 						{ contract: tokenAddress, function: "burn_private" },
 						{ contract: sponsoredFpcAddress, function: "sponsor_unconditionally" },
+						{ contract: ProtocolContractAddress.AuthRegistry, function: "set_authorized" },
 					],
 				},
 			},
@@ -246,6 +248,10 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 					{ contract: tokenAddress, function: "burn_public" },
 					{ contract: tokenAddress, function: "burn_private" },
 					{ contract: sponsoredFpcAddress, function: "sponsor_unconditionally" },
+					// exit_to_l1 needs a PUBLIC burn auth-wit, which lands on-chain as set_authorized on the
+					// canonical auth registry (ProtocolContractAddress.AuthRegistry, 0x..01). Without this the
+					// withdraw's auth-wit sendTx hits a transaction-scope violation.
+					{ contract: ProtocolContractAddress.AuthRegistry, function: "set_authorized" },
 				],
 			},
 		],

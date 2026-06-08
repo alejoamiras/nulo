@@ -168,6 +168,7 @@ describe("buildCombinedManifest", () => {
 			"burn_public",
 			"burn_private",
 			"sponsor_unconditionally",
+			"set_authorized",
 		])
 	})
 
