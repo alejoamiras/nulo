@@ -71,6 +71,7 @@ import { TooManyPendingError } from "@nulo/extension-messaging/errors"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
 import { classifyOperationCatch, maybeRethrowAsRpcCancel } from "./rpc-cancel"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
+import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import {
 	EXECUTION_SERVICE_NAME,
 	type Methods,
@@ -890,8 +891,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const authWitActions = await this.authwit.discoverPrivateAuthwits(
 			{ ...operation, actions: [...actions] } as SendTransactionOperation,
 			async (op, method) => {
-				const [txRequest, node, pxe, account] = await this.txBuilder.buildStandard(op as SendTransactionOperation, method)
-				return { txRequest, node, pxe, account }
+				const [txRequest, node, pxe, account, network] = await this.txBuilder.buildStandard(op as SendTransactionOperation, method)
+				return { txRequest, node, pxe, account, network }
 			},
 		)
 		if (authWitActions.length) {
@@ -1763,6 +1764,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const result = await runFastPath({
 			node,
 			pxe,
+			network,
 			fromAddr: AztecAddress.fromString(op.accountAddress),
 			opts: op.opts,
 			optimizableCalls,
@@ -1944,8 +1946,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			// simulation's dummy fee method.
 			if (!fee.embeddedFeePayment) {
 				const authWitActions = await this.authwit.discoverPrivateAuthwits({ ...op, actions: [...actions] }, async (o, method) => {
-					const [txRequest, node, pxe, account] = await this.txBuilder.buildStandard(o as SendTransactionOperation, method)
-					return { txRequest, node, pxe, account }
+					const [txRequest, node, pxe, account, network] = await this.txBuilder.buildStandard(
+						o as SendTransactionOperation,
+						method,
+					)
+					return { txRequest, node, pxe, account, network }
 				})
 				if (authWitActions.length) {
 					this.logDebug(`[executeAztecSendTx] Discovered ${authWitActions.length} auth witness(es) via offchain effects`)
@@ -2201,6 +2206,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 		const node = await this.networkService.getNode(network.chainId)
 		const nodeInfo = await node.getNodeInfo()
+		// F-012 / A-01 V-01: createAuthWit derives chain identity from the live
+		// node; rebind to the user-selected network before consuming.
+		assertLiveChainIdentity(network, nodeInfo)
 		const metadata = {
 			chainId: new Fr(nodeInfo.l1ChainId),
 			version: new Fr(nodeInfo.rollupVersion),

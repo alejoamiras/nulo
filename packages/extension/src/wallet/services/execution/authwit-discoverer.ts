@@ -37,6 +37,7 @@ import type { ILogger } from "@/wallet/logger"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
+import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import type { Action, AddPrivateAuthwitAction, CallAuthwitContent, EncodedCallAuthwitContent, IntentAuthwitContent } from "./spec"
 
 /** Minimal build-context the discoverer needs from `buildTxRequest`.
@@ -47,6 +48,10 @@ export type DiscoverContext = {
 	node: AztecNode
 	pxe: IPXE
 	account: IAccountContract
+	/** Stored chain identity for the user-selected network. Used to rebind
+	 *  the live node's `getNodeInfo()` before deriving the authwit
+	 *  `chainInfo` (F-012 / A-01 V-01). */
+	network: { chainId: number }
 }
 
 /** Callback provided by the caller so the discoverer can run its
@@ -68,7 +73,7 @@ export class AuthwitDiscoverer {
 		op: { networkId: string; accountAddress: string; actions: Action[] },
 		buildTxRequest: BuildTxRequestFn,
 	): Promise<AddPrivateAuthwitAction[]> {
-		const { txRequest, node, pxe, account } = await buildTxRequest(op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		const { txRequest, node, pxe, account, network } = await buildTxRequest(op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
 
 		// Kernelless simulation: stub the caller's account contract so its
 		// `verify_private_authwit` returns true unconditionally. Otherwise any
@@ -98,6 +103,9 @@ export class AuthwitDiscoverer {
 		}
 
 		const nodeInfo = await node.getNodeInfo()
+		// F-012 / A-01 V-01: refuse to derive authwit message hash from a
+		// drifted RPC. assertLiveChainIdentity is a noop for local (chainId=0).
+		assertLiveChainIdentity(network, nodeInfo)
 		const chainInfo = { chainId: new Fr(nodeInfo.l1ChainId), version: new Fr(nodeInfo.rollupVersion) }
 		const actions: AddPrivateAuthwitAction[] = []
 
