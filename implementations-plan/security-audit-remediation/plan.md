@@ -165,7 +165,7 @@ if (!session) {
 **Risk**: medium. Subframe rejection breaks legitimate iframe dApps. Feature flag mitigates. Research found NO iframe dApps in Nulo's ecosystem, but `packages/playground/` should be spot-checked (per opus S-4).
 **Effort**: 2-3 days for Nulo-side scope. **PR shape**: 1 PR + 1 upstream issue.
 
-### Phase 5 — F-011 + F-012 RPC endpoint trust
+### Phase 5 — F-011 + F-012 RPC endpoint trust ✓
 **Goal**: Scheme allowlist on RPC URL + live-node chain rebind at signing — multiple sinks.
 
 **Files**:

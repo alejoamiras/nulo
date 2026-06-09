@@ -52,6 +52,7 @@ import { LogLevel } from "@/wallet/logger"
 import type { AccountService } from "@/wallet/services/account/service"
 import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { IAccountContract, PartialGasSettingsRPC } from "@nulo/aztec-runtime/account"
+import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { networkInfoFrom, type NetworkService, type Network } from "@/wallet/services/network/service"
 import type { ProfileService } from "@/wallet/services/profile/service"
@@ -104,6 +105,11 @@ export class TxRequestBuilder {
 			const pxe = this.pxeService.getPXE(networkInfoFrom(network))
 
 			const nodeInfo = await node.getNodeInfo()
+			// F-012 / Phase 5: refuse to sign/prove if the live node's chain
+			// identity has drifted from the network the user selected. Without
+			// this, a malicious or drifted RPC endpoint can change the signing
+			// context after enrollment.
+			assertLiveChainIdentity(network, nodeInfo)
 			const contracts = this.resolver.extractContracts(op.actions)
 			const instances = await this.resolver.resolveInstances(pxe, contracts)
 			const artifacts = await this.resolver.resolveArtifacts(pxe, instances)
@@ -445,6 +451,9 @@ export class TxRequestBuilder {
 
 			const hashedArguments = [await HashedValues.fromArgs(call.args)]
 			const nodeInfo = await node.getNodeInfo()
+			// F-012 / Phase 5: refuse to sign/prove if the live node's chain
+			// identity has drifted from the network the user selected.
+			assertLiveChainIdentity(network, nodeInfo)
 			const currentMinFees = await node.getCurrentMinFees()
 			const gasSettings = GasSettings.fallback({ maxFeesPerGas: currentMinFees })
 			const txRequest = new TxExecutionRequest(
