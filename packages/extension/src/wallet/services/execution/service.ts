@@ -1644,8 +1644,12 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	private async executeAztecGetChainInfo(op: AztecGetChainInfoOperation): Promise<ChainInfo> {
 		const network = await this.networkService.getNetwork(op.networkId)
 		const node = await this.networkService.getNode(network.chainId)
-		const { l1ChainId, rollupVersion } = await node.getNodeInfo()
-		return { chainId: new Fr(l1ChainId), version: new Fr(rollupVersion) }
+		const nodeInfo = await node.getNodeInfo()
+		// F-012 / A-01 V-01: this API returns chain identity to the dApp.
+		// A drifted RPC must be reported as a mismatch rather than silently
+		// reporting whatever the RPC claims.
+		assertLiveChainIdentity(network, nodeInfo)
+		return { chainId: new Fr(nodeInfo.l1ChainId), version: new Fr(nodeInfo.rollupVersion) }
 	}
 
 	private async executeAztecRegisterSender(op: AztecRegisterSenderOperation): Promise<AztecAddress> {
@@ -2126,6 +2130,10 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			this.logDebug(`executeNoFromSendTx: offchain effects found: ${effects.length}`)
 			if (effects.length) {
 				const nodeInfo2 = await node.getNodeInfo()
+				// F-012 / A-01 V-01: NO_FROM path also derives chainInfo from
+				// live node — rebind to selected network before constructing
+				// the authwit message hash.
+				assertLiveChainIdentity(network, nodeInfo2)
 				const chainInfo = { chainId: new Fr(nodeInfo2.l1ChainId), version: new Fr(nodeInfo2.rollupVersion) }
 				for (const effect of effects) {
 					try {
