@@ -37,6 +37,8 @@ interface PendingWithdraw {
 	readonly exitBlock?: number
 	/** The L1 consume tx, persisted once submitted — a re-run waits for it instead of re-prompting. */
 	readonly consumeTxHash?: string
+	/** Private withdraw — only the L2 burn+exit differs; the L1 consume tail is identical to public. */
+	readonly isPrivate?: boolean
 }
 
 function persistPending(p: PendingWithdraw): void {
@@ -185,7 +187,7 @@ export function useWithdraw() {
 		log("withdraw complete ✓")
 	}
 
-	async function withdraw(amount: bigint): Promise<void> {
+	async function withdraw(amount: bigint, isPrivate = false): Promise<void> {
 		error.value = null
 		provenBlock.value = null
 		targetBlock.value = null
@@ -214,20 +216,42 @@ export function useWithdraw() {
 			const bridge = await Contract.at(BRIDGE, tokenBridgeArtifact, aztec)
 
 			stage.value = "burning"
-			log("step 1/4 — burn auth-wit (confirm in your Aztec wallet)")
-			const authwit = await SetPublicAuthwitContractInteraction.create(
-				aztec as never,
-				from,
-				{ caller: BRIDGE_PROXY, action: token.methods.burn_public(from, amount, nonce) } as never,
-				true,
-			)
-			await authwit.send(sendOpts as never)
-
-			stage.value = "exiting"
-			log("step 2/4 — exit_to_l1_public (confirm in your Aztec wallet)")
-			const { receipt: exitReceipt } = (await bridge.methods
-				.exit_to_l1_public(EthAddress.fromString(l1addr), amount, EthAddress.ZERO, nonce)
-				.send(sendOpts as never)) as { receipt: { txHash: unknown; blockNumber?: number } }
+			let exitReceipt: { txHash: unknown; blockNumber?: number }
+			if (isPrivate) {
+				// Private burn auth-wit is OFF-CHAIN (no tx); exit_to_l1_private burns + messages in ONE private
+				// tx with the witness attached (codex 019eac9c). No bearer secret — the L2→L1 message binds
+				// recipient + amount. caller_on_l1 = ZERO matches public (permissionless consume; no theft).
+				log("step 1/3 — private burn auth-wit (off-chain, no signature)")
+				const burnAuthwit = await aztec.createAuthWit(from, {
+					caller: BRIDGE_PROXY,
+					call: await token.methods.burn_private(from, amount, nonce).getFunctionCall(),
+				})
+				stage.value = "exiting"
+				log("step 2/3 — exit_to_l1_private (confirm in your Aztec wallet)")
+				exitReceipt = (
+					(await bridge.methods
+						.exit_to_l1_private(EthAddress.fromString(l1addr), amount, EthAddress.ZERO, nonce)
+						.send({ ...sendOpts, authWitnesses: [burnAuthwit] } as never)) as {
+						receipt: { txHash: unknown; blockNumber?: number }
+					}
+				).receipt
+			} else {
+				log("step 1/4 — burn auth-wit (confirm in your Aztec wallet)")
+				const authwit = await SetPublicAuthwitContractInteraction.create(
+					aztec as never,
+					from,
+					{ caller: BRIDGE_PROXY, action: token.methods.burn_public(from, amount, nonce) } as never,
+					true,
+				)
+				await authwit.send(sendOpts as never)
+				stage.value = "exiting"
+				log("step 2/4 — exit_to_l1_public (confirm in your Aztec wallet)")
+				exitReceipt = (
+					(await bridge.methods
+						.exit_to_l1_public(EthAddress.fromString(l1addr), amount, EthAddress.ZERO, nonce)
+						.send(sendOpts as never)) as { receipt: { txHash: unknown; blockNumber?: number } }
+				).receipt
+			}
 			log("exit tx", String(exitReceipt.txHash), "block", exitReceipt.blockNumber)
 
 			const pending: PendingWithdraw = {
@@ -235,6 +259,7 @@ export function useWithdraw() {
 				recipientL1: l1addr,
 				amount: amount.toString(),
 				exitBlock: exitReceipt.blockNumber,
+				isPrivate,
 			}
 			persistPending(pending)
 			hasPending.value = true

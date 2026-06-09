@@ -10,7 +10,16 @@ Questions sent (prompt: `/tmp/codex-pv2-design.md`):
 4. Does the private withdraw need a bearer seal? (Believed NO — the exit recipient is L1-bound.)
 5. Attacker surface (auth-wit nonce/replay, burn-vs-exit atomicity, consume front-running).
 
-**Verdict: PENDING** — codex running in the background; the next iteration reads the RESPONSE_FILE and folds it in.
+**Verdict (codex `019eac9c`):**
+- **CRITICAL** — private authwit is OFF-CHAIN: `wallet.createAuthWit(from, { caller: BRIDGE_PROXY, call: await token.methods.burn_private(from, amount, nonce).getFunctionCall() })` → attach via `bridge.methods.exit_to_l1_private(...).send({ from, fee, wait, authWitnesses: [authwit] })`. Use `call` (getFunctionCall), NOT `action`. NO `SetPublicAuthwit` for private.
+- **CRITICAL** — ONE tx: `exit_to_l1_private(recipient, amount, caller_on_l1, nonce)` burns + messages atomically inside the private fn. Never split burn + exit.
+- **HIGH** — `caller_on_l1 = ZERO` ⇒ permissionless L1 consume (front-run / grief, NOT theft — recipient+amount are committed). The PUBLIC flow already uses ZERO; keep parity for MVP (only-user-consume = set caller + L1 `withdraw(...,true,...)`, a hardening for BOTH privacies).
+- **MEDIUM** — proving→consume tail IDENTICAL to public (same `withdraw(recipient,amount,caller)` content hash) ⇒ reuse `consumeExit` unchanged.
+- **MEDIUM** — NO bearer secret (the L2→L1 message binds recipient+amount). No seal for withdraw.
+- **MEDIUM** — needs `accounts.canCreateAuthWit` + tx scope for `burn_private` + `exit_to_l1_private` (tx scopes verified in PV4; `canCreateAuthWit` to verify).
+- **Looks fine** — replay: fresh `Fr.random()` nonce + `burn_private` is `#[authorize_once]` (one-time, caller-scoped to the bridge proxy).
+
+Implementation: `useWithdraw` `isPrivate` branch (off-chain authwit + `exit_to_l1_private`, ONE tx) + `WithdrawCard` toggle; reuse `consumeExit`; verify `canCreateAuthWit`.
 
 ## Public withdraw structure (reuse — packages/faucet/src/composables/useWithdraw.ts)
 `withdraw(amount)`: `SetPublicAuthwit(burn_public)` → `exit_to_l1_public` → persist `{exitTxHash, recipientL1, amount, exitBlock}` → `consumeExit` (proven-epoch wait → L1 outbox consume, with `consumeTxHash` recovery). The consume tail + recovery are flow-agnostic; PV2 changes only the burn auth-wit + the exit call (and likely needs `isPrivate` threaded like `useDeposit`).
