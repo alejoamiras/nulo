@@ -81,6 +81,16 @@ export const TESTIDS = {
 
 	// Bridge — add the bridged token to the wallet (registerToken, the bridge's own USDC)
 	bridgeAddToken: "fa-bridge-add-token",
+
+	// Bridge — deposit privacy toggle (public ↔ private) + the bearer-secret warning
+	depositModePublic: "fa-deposit-mode-public",
+	depositModePrivate: "fa-deposit-mode-private",
+	depositBearerWarning: "fa-deposit-bearer-warning",
+
+	// Bridge — withdraw privacy toggle (public ↔ private; no bearer secret on withdraw)
+	withdrawModePublic: "fa-withdraw-mode-public",
+	withdrawModePrivate: "fa-withdraw-mode-private",
+	withdrawPrivateNote: "fa-withdraw-private-note",
 } as const
 
 export type Testid = (typeof TESTIDS)[keyof typeof TESTIDS]

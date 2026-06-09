@@ -5,6 +5,7 @@ import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { InboxAbi, TokenPortalAbi } from "@aztec/l1-artifacts"
+import { openRecordSecret, sealRecordSecret } from "@nulo/bridge-core"
 import { tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
 import { parseEventLogs } from "viem"
@@ -48,12 +49,19 @@ export type DepositStage = "idle" | "minting" | "approving" | "depositing" | "sy
 const PENDING_KEY = "nulo-bridge-pending-deposit"
 
 interface PendingDeposit {
+	/** Public deposit: the recipient-bound claim secret (plaintext is acceptable — it's bound to the
+	 *  recipient in the L1 message). Private deposits leave this empty and use `sealedSecret`. */
 	readonly secret: string
 	readonly recipient: string
 	readonly amount: string
-	/** Recipient's public balance before the deposit — claim is confirmed by the balance crossing this + amount. */
+	/** Recipient's balance before the deposit — claim is confirmed by the balance crossing this + amount. */
 	readonly preBalance: string
 	readonly leafIndex?: string
+	/** Private deposit: the BEARER claim secret sealed at rest (recovery-crypto). `secret` stays empty. */
+	readonly sealedSecret?: string
+	/** secretHash hex — rebuilds the per-record seal binding when unsealing on claim/resume. */
+	readonly secretHashHex?: string
+	readonly isPrivate?: boolean
 }
 
 function persistPending(p: PendingDeposit): void {
@@ -86,7 +94,12 @@ function safeBigInt(s: string): bigint | null {
 	}
 }
 
-const isMsgNotReady = (msg: string): boolean => /l1_to_l2_msg_exists|nonexistent L1-to-L2/i.test(msg)
+// The L1→L2 message isn't consumable until the sequencer folds it into an L2 block AND this wallet's PXE
+// syncs that block — until then the claim simulate reverts, and the wording differs by path: public
+// "l1_to_l2_msg_exists"; private "No L1 to L2 message found for message hash …" (the ACTUAL testnet
+// wording — codex's "message not in state" guess was wrong). All are transient → poll, never throw.
+const isMsgNotReady = (msg: string): boolean =>
+	/l1_to_l2_msg_exists|nonexistent L1-to-L2|message not in state|No L1 to L2 message found/i.test(msg)
 
 // Module-level so it holds across composable instances: only one claim in flight at a time.
 let claimInFlight = false
@@ -118,12 +131,14 @@ export function useDeposit() {
 	const l1TxHash = ref<string | null>(null)
 	const hasPending = ref(loadPending() !== null)
 
-	async function readPublicBalance(wallet: unknown, recipient: AztecAddress): Promise<bigint> {
+	async function readBridgeBalance(wallet: unknown, recipient: AztecAddress, isPrivate = false): Promise<bigint> {
 		const token = await Contract.at(BRIDGE_TOKEN, TokenContractArtifact, wallet as never)
-		// readBalance unwraps the SimulationResult to a real bigint — a raw cast yields the wrapper
-		// object, which then stringifies to "[object Object]" and blows up the later BigInt() coercion.
-		const bal = await readBalance(wallet as never, token, "balance_of_public", recipient)
-		log("balance_of_public", recipient.toString(), "=", bal.toString())
+		// readBalance unwraps the SimulationResult / utility result to a real bigint — a raw cast yields the
+		// wrapper object, which stringifies to "[object Object]" and blows up the later BigInt() coercion.
+		// balance_of_private is a utility read (executeUtility); balance_of_public is an on-chain view.
+		const fn = isPrivate ? "balance_of_private" : "balance_of_public"
+		const bal = await readBalance(wallet as never, token, fn, recipient)
+		log(fn, recipient.toString(), "=", bal.toString())
 		return bal
 	}
 
@@ -152,10 +167,23 @@ export function useDeposit() {
 	async function doClaimAndConfirm(wallet: unknown, pending: PendingDeposit & { leafIndex: string }): Promise<void> {
 		const recipientAddr = AztecAddress.fromString(pending.recipient)
 		const amount = BigInt(pending.amount)
-		const secret = Fr.fromString(pending.secret)
+		// Private: the bearer secret is sealed — re-derive the per-record key from an L1 signature and
+		// unseal it (needs the L1 wallet connected). Public: the secret is recipient-bound plaintext.
+		let secret: Fr
+		if (pending.isPrivate) {
+			const l1wallet = l1.walletClient.value
+			const l1addr = l1.address.value
+			if (!l1wallet || !l1addr) throw new Error("Connect your Ethereum wallet to unseal the private claim secret.")
+			if (!pending.sealedSecret || !pending.secretHashHex) throw new Error("Private pending record is missing its sealed secret.")
+			const sign = (m: string) => l1wallet.signMessage({ account: l1addr, message: m } as never)
+			const binding = { chainId: sepolia.id, portal: L1_PORTAL, bridge: BRIDGE.toString(), secretHashHex: pending.secretHashHex }
+			secret = Fr.fromString(await openRecordSecret(sign, binding, pending.sealedSecret))
+		} else {
+			secret = Fr.fromString(pending.secret)
+		}
 		const pre = safeBigInt(pending.preBalance)
 		const target = pre === null ? null : pre + amount
-		const isCredited = async () => target !== null && (await readPublicBalance(wallet, recipientAddr)) >= target
+		const isCredited = async () => target !== null && (await readBridgeBalance(wallet, recipientAddr, pending.isPrivate)) >= target
 
 		if (await isCredited()) {
 			log("already credited — nothing to claim")
@@ -166,7 +194,9 @@ export function useDeposit() {
 		const fpc = await getSponsoredFpcInstance()
 		const fee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
 		const bridge = await Contract.at(BRIDGE, tokenBridgeArtifact, wallet as never)
-		const claim = () => bridge.methods.claim_public(recipientAddr, amount, secret, new Fr(BigInt(pending.leafIndex)))
+		const claim = pending.isPrivate
+			? () => bridge.methods.claim_private(recipientAddr, amount, secret, new Fr(BigInt(pending.leafIndex)))
+			: () => bridge.methods.claim_public(recipientAddr, amount, secret, new Fr(BigInt(pending.leafIndex)))
 
 		// 1. Gate on a clean SIMULATION — prompt-free, and accurate because it runs against the wallet's
 		//    own PXE (the thing that actually executes the claim). It reverts until the message is there.
@@ -215,7 +245,7 @@ export function useDeposit() {
 		stage.value = "done"
 	}
 
-	async function deposit(amount: bigint): Promise<void> {
+	async function deposit(amount: bigint, isPrivate = false): Promise<void> {
 		error.value = null
 		const wallet = l1.walletClient.value
 		const from = l1.address.value
@@ -231,12 +261,42 @@ export function useDeposit() {
 		}
 
 		try {
+			// Single-pending storage: a 2nd deposit overwrites the 1st's recovery record — for a PRIVATE
+			// deposit that's the only sealed bearer blob + leaf index, leaving the earlier deposit
+			// unrecoverable (codex 019eacad CRITICAL). Block until the pending one is claimed or discarded.
+			if (loadPending()) {
+				error.value = "Finish or discard the pending deposit before starting another."
+				return
+			}
 			log("start", { amount: amount.toString(), recipient, from, usdc: L1_USDC, portal: L1_PORTAL })
 			const secret = Fr.random()
 			const secretHash = await computeSecretHash(secret)
+			const secretHashHex = secretHash.toString()
 			const recipientAddr = AztecAddress.fromString(recipient)
-			const preBalance = await readPublicBalance(aztec, recipientAddr)
-			persistPending({ secret: secret.toString(), recipient, amount: amount.toString(), preBalance: preBalance.toString() })
+			const preBalance = await readBridgeBalance(aztec, recipientAddr, isPrivate)
+			// Private: SEAL the bearer secret before any irreversible L1 tx (codex MEDIUM — derive the key,
+			// seal, persist the blob; never the plaintext). sealRecordSecret self-tests the round trip and
+			// throws HERE on a non-deterministic wallet — aborting before the mint rather than stranding funds.
+			let sealedSecret: string | undefined
+			if (isPrivate) {
+				log("sealing the private claim secret (2 signatures: recovery key + self-test)")
+				const sign = (m: string) => wallet.signMessage({ account: from, message: m } as never)
+				sealedSecret = await sealRecordSecret(
+					sign,
+					{ chainId: sepolia.id, portal: L1_PORTAL, bridge: BRIDGE.toString(), secretHashHex },
+					secret.toString(),
+				)
+			}
+			const base = {
+				secret: isPrivate ? "" : secret.toString(),
+				sealedSecret,
+				secretHashHex,
+				isPrivate,
+				recipient,
+				amount: amount.toString(),
+				preBalance: preBalance.toString(),
+			}
+			persistPending(base)
 			hasPending.value = true
 
 			stage.value = "minting"
@@ -266,17 +326,22 @@ export function useDeposit() {
 			await l1.publicClient.waitForTransactionReceipt({ hash: approveHash })
 
 			stage.value = "depositing"
-			log("step 3/4 — depositToAztecPublic (confirm in your Ethereum wallet)")
-			const depositArgs = [recipient as `0x${string}`, amount, secretHash.toString() as `0x${string}`] as const
+			// Private deposits OMIT the recipient — the L2 claim_private chooses it (the bearer-secret reason);
+			// the secret is sealed above. The private path is fully wired but still UI-gated until the toggle.
+			const depositFn = isPrivate ? "depositToAztecPrivate" : "depositToAztecPublic"
+			const depositArgs = isPrivate
+				? [amount, secretHash.toString()]
+				: [recipient as `0x${string}`, amount, secretHash.toString() as `0x${string}`]
+			log(`step 3/4 — ${depositFn} (confirm in your Ethereum wallet)`)
 			const depositReceipt = await l1.publicClient.waitForTransactionReceipt({
 				hash: await wallet.writeContract({
 					address: L1_PORTAL,
 					abi: TokenPortalAbi,
-					functionName: "depositToAztecPublic",
+					functionName: depositFn,
 					args: depositArgs,
 					chain: sepolia,
 					account: from,
-				}),
+				} as never),
 			})
 			log("deposit tx", depositReceipt.transactionHash)
 			// The real leaf index comes from the mined Inbox MessageSent event — a preflight simulate
@@ -286,7 +351,7 @@ export function useDeposit() {
 			if (event?.args?.index === undefined) throw new Error("deposit emitted no Inbox MessageSent event")
 			const leafIndex = event.args.index.toString()
 			log("L1→L2 message leaf index", leafIndex)
-			const full = { secret: secret.toString(), recipient, amount: amount.toString(), preBalance: preBalance.toString(), leafIndex }
+			const full = { ...base, leafIndex }
 			persistPending(full)
 
 			log("waiting for the L1→L2 message to become consumable, then claiming")
@@ -304,6 +369,14 @@ export function useDeposit() {
 		const pending = loadPending()
 		const aztec = bridgeWallet.wallet.value
 		if (!pending?.leafIndex || !aztec || stage.value !== "idle") return
+		// CRITICAL (codex 019eac7a): a private claim mints a NOTE to pending.recipient, which the L2 deposit
+		// message does NOT bind — so never auto-resume to a different connected account than the deposit
+		// targeted, or the note lands where the user isn't watching. Surface the mismatch, don't claim.
+		if (pending.isPrivate && bridgeWallet.selectedAccount.value !== pending.recipient) {
+			log("private claim targets a different account than the one connected — not auto-resuming")
+			error.value = `This private deposit was for ${pending.recipient}. Connect that Aztec account to claim it.`
+			return
+		}
 		// Never log the raw pending record — it holds the claim secret (a bearer credential for the
 		// private flow). Redact it.
 		log("resuming pending claim", { ...pending, secret: "<redacted>" })
