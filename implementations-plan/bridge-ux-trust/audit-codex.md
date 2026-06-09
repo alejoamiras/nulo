@@ -406,3 +406,35 @@ Verdict: consolidation mostly sound; 1 BLOCKER + 2 HIGH + 1 NIT, all folded into
    **Fix:** add one P2/P3 test asserting a completed private record still retains the sealed blob until `Clear`, and that `Clear` is distinct from `Discard`.
 
 Otherwise, the consolidation is mostly sound; the real misses are the legacy-leafIndex contradiction and the unimplemented stale-deployment / receipt-fallback paths.
+
+## Round 2 — double audit (resumed session 019eae00)
+
+Verdict: **conditional approve** — all six conditions folded into plan.md same-round (provider-aware trust cache + test ⑯; tx-identity verification before completedAt + test ⑰; prompt lanes scoped to one tab; MAX_RECORDS prioritized retention + test ⑱; A2/A3 elevated to explicit gate decisions; assumptions aligned to D4).
+
+1. **HIGH** — **Seal-trust cache is keyed too coarsely.**  
+   `chainId:l1addr` assumes “same address => same signer behavior” ([plan.md:60-64](implementations-plan/bridge-ux-trust/plan.md:60)). That is safe only if the injected signer implementation is stable. Switching provider/wallet for the same EOA could skip the self-test on a signer that behaves differently.  
+   **Fix:** include a signer/provider fingerprint in the cache key (wallet name / provider rdns / connector id), or revoke trust on provider change. Add a P2 test for “same address, different provider” => re-test, not trust-hit.
+
+2. **HIGH** — **Receipt-anchored completion still over-trusts localStorage tx hashes.**  
+   D4 marks `completedAt` from `claimTxHash`/`consumeTxHash` success ([plan.md:67-69](implementations-plan/bridge-ux-trust/plan.md:67)). An attacker who can tamper storage can point a record at an unrelated successful tx. Retention softens blob loss, but the record can still be falsely shown as `done`, which is stronger than deletion.  
+   **Fix:** after receipt success, verify tx identity against the record before setting `completedAt`.  
+   - L1 withdraw: fetch tx/call data and verify target + args.  
+   - L2 claim: require a second specific signal tied to the record, e.g. message no longer claimable/nullified with the record’s args; otherwise stay `unknown-outcome`.
+
+3. **MEDIUM** — **Prompt-lane safety is tab-local, not origin-wide.**  
+   `promptLanes` are module-scoped in one page session ([plan.md:73-74](implementations-plan/bridge-ux-trust/plan.md:73)). Two open tabs can still race wallet prompts. The Security section treats prompt flooding as handled ([plan.md:148](implementations-plan/bridge-ux-trust/plan.md:148)), which overstates it.  
+   **Fix:** either add a cross-tab advisory lock (`BroadcastChannel`/`localStorage` heartbeat) or explicitly scope prompt-lane guarantees to one tab and call out multi-tab as unsupported.
+
+4. **MEDIUM** — **`MAX_RECORDS=100` flood cap can hide active records.**  
+   Security says flooding is capped ([plan.md:144](implementations-plan/bridge-ux-trust/plan.md:144)), but not how live records are preserved. An attacker can inject junk and push a real unfinished record past the parse window.  
+   **Fix:** define pruning order: always retain unfinished records first, then newest done records, then drop stale/garbage. Add a P1/P2 cap-priority test.
+
+5. **HIGH** — **A2 and A3 are real approval-gate decisions, not “recommended defaults.”**  
+   A2 knowingly permits one last use of unauthenticated legacy private metadata ([plan.md:56](implementations-plan/bridge-ux-trust/plan.md:56), [plan.md:155](implementations-plan/bridge-ux-trust/plan.md:155)). A3 defers CSP even though active XSS is now the only theft-capable path left ([plan.md:145](implementations-plan/bridge-ux-trust/plan.md:145)). Those should be surfaced explicitly to the user, not silently carried as defaults.  
+   **Fix:** require explicit user sign-off on A2 and A3 before implementation starts; if A3 stays deferred, label the feature “trusted internal testnet only.”
+
+6. **NIT** — **Assumptions drift remains.**  
+   Assumptions says sustained receipt failure fallback is “treat as dropped” ([plan.md:154](implementations-plan/bridge-ux-trust/plan.md:154)), while D4 says `unknown-outcome` + manual retry ([plan.md:67](implementations-plan/bridge-ux-trust/plan.md:67)).  
+   **Fix:** align Assumptions to D4.
+
+conditional approve (with conditions: strengthen tx-identity verification before `completedAt`; make seal-trust cache provider-aware or provider-change-invalidated; either add a cross-tab prompt lock or explicitly scope prompt safety to one tab; define/prioritize active-record retention under `MAX_RECORDS`; surface A2 and A3 as explicit user approval decisions; align the receipt-fallback assumption with D4)
