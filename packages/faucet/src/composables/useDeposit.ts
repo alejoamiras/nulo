@@ -215,7 +215,7 @@ export function useDeposit() {
 		stage.value = "done"
 	}
 
-	async function deposit(amount: bigint): Promise<void> {
+	async function deposit(amount: bigint, isPrivate = false): Promise<void> {
 		error.value = null
 		const wallet = l1.walletClient.value
 		const from = l1.address.value
@@ -266,17 +266,23 @@ export function useDeposit() {
 			await l1.publicClient.waitForTransactionReceipt({ hash: approveHash })
 
 			stage.value = "depositing"
-			log("step 3/4 — depositToAztecPublic (confirm in your Ethereum wallet)")
-			const depositArgs = [recipient as `0x${string}`, amount, secretHash.toString() as `0x${string}`] as const
+			// Private deposits OMIT the recipient — the L2 claim_private chooses it, which is exactly why the
+			// claim secret is a bearer credential. PV3 seals it at rest; the UI keeps the private path gated
+			// until claim_private + the seal are wired, so isPrivate is never true from a caller yet.
+			const depositFn = isPrivate ? "depositToAztecPrivate" : "depositToAztecPublic"
+			const depositArgs = isPrivate
+				? [amount, secretHash.toString()]
+				: [recipient as `0x${string}`, amount, secretHash.toString() as `0x${string}`]
+			log(`step 3/4 — ${depositFn} (confirm in your Ethereum wallet)`)
 			const depositReceipt = await l1.publicClient.waitForTransactionReceipt({
 				hash: await wallet.writeContract({
 					address: L1_PORTAL,
 					abi: TokenPortalAbi,
-					functionName: "depositToAztecPublic",
+					functionName: depositFn,
 					args: depositArgs,
 					chain: sepolia,
 					account: from,
-				}),
+				} as never),
 			})
 			log("deposit tx", depositReceipt.transactionHash)
 			// The real leaf index comes from the mined Inbox MessageSent event — a preflight simulate
