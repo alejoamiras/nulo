@@ -109,7 +109,7 @@ try { await this.lock.enter(); ... }
 
 **Risk**: minimal. **Effort**: <1 hour. **PR shape**: 1 small PR. **Can ship in parallel with Phase 0.5/Phase 1.**
 
-### Phase 3 — F-006 session revocation teardown (cross-package, own phase)
+### Phase 3 — F-006 session revocation teardown (cross-package, own phase) ✓
 **Goal**: tear down live wallet-sdk transport when stored DappSession is deleted/expires. Make `enforceCapability` fail-closed for non-exempt methods when session missing.
 
 **Data model change** (per Round 1 audit reversal of Decision 8): use **tuple matching** `(origin, chainId)` over `handler.getActiveSessions()`, NOT a `walletSdkSessionId` field on DappSession. Reasoning: a single stored DappSession can correspond to MULTIPLE live ActiveSessions (multi-tab same-dApp case); a single-id field doesn't model that correctly. Tuple matching is O(n) where n is bounded by tabs-with-dApp-loaded — typically <10, no performance concern.

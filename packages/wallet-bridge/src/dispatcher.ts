@@ -781,7 +781,26 @@ export class WalletSdkDispatcher {
 		const requiredType = getRequiredCapability(methodName)
 		if (!requiredType) return [] // Unknown method — let dispatch() handle it
 
-		if (!dappSession) return [] // No session yet — let the method handler deal with it
+		if (!dappSession) {
+			// F-006: fail-closed when the stored DappSession is missing. Pre-fix,
+			// this returned [] and the dispatcher fell through to the sink with
+			// no grants — network-only methods (getPrivateEvents, getAddressBook,
+			// registerSender, registerContract, getContractMetadata,
+			// getContractClassMetadata) executed unchecked after the user
+			// disconnected the dApp from Settings or after session expiry.
+			//
+			// Throwing CapabilityNotGrantedError gives the dApp a structured
+			// signal to re-request capabilities (the same path used for
+			// pre-grant calls), and is paired with the live-transport teardown
+			// in wallet-sdk/background.ts that prevents the channel from
+			// staying useful after revocation.
+			this.logger.log(
+				"wallet-sdk",
+				LogLevel.Debug,
+				`${methodName} from ${_ctx.origin} — no DappSession found; throwing CAPABILITY_NOT_GRANTED (F-006 fail-closed)`,
+			)
+			throw new CapabilityNotGrantedError(requiredType)
+		}
 
 		const grants = dappSession.capabilityGrants ?? []
 		const grantedTypes = new Set(grants.map((g) => g.capability.type))

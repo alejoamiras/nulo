@@ -161,6 +161,21 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				const dappSession = await dappSessionService.tryGetDappSessionByOriginAndChain(session.origin, chainId)
 				if (dappSession) {
 					await dappSessionService.setVerificationHash(dappSession.id, session.verificationHash)
+				} else {
+					// F-006 (Round 2 B-2): if a session was established but the
+					// backing DappSession is gone, the user revoked between
+					// approveDiscovery and key-exchange. Terminate immediately
+					// so the dApp can't ride a stale approved-pending-discovery
+					// into a live ActiveSession. Without this, the upstream
+					// state machine would let the dApp re-key-exchange after
+					// revocation (see audit-codex-final.md B-2).
+					logger.log(
+						"wallet-sdk-bg",
+						LogLevel.Warn,
+						`Session established for ${session.origin} chain ${chainId} but DappSession missing — terminating to honor revocation`,
+					)
+					handler.terminateSession(session.sessionId)
+					return
 				}
 
 				const verifKey = pendingKey(session.origin, chainId)
@@ -267,6 +282,42 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 		)
 		return next
 	}
+
+	/** F-006: when a stored DappSession is deleted (settings disconnect OR
+	 *  TTL expiry — both emit the same event), tear down every matching
+	 *  live wallet-sdk ActiveSession so the dApp can't keep calling
+	 *  network-only methods over the still-open channel.
+	 *
+	 *  Tuple-match by `(origin, chainId)` — per audit Round 1 reversal of
+	 *  Decision 8, NOT a single `walletSdkSessionId` field, because a single
+	 *  stored DappSession may correspond to MULTIPLE live ActiveSessions
+	 *  (multi-tab same dApp). O(n) iteration where n is bounded by tabs-with-
+	 *  dApp-loaded — typically <10. */
+	dappSessionService.onDappSessionDeleted.add((deleted) => {
+		try {
+			const origin = deleted.dappMetadata?.url
+			const chainId = deleted.chainId
+			if (!origin || !chainId) {
+				logger.log(
+					"wallet-sdk-bg",
+					LogLevel.Warn,
+					`DappSession deleted with missing origin/chainId — cannot match active sessions; skipping teardown`,
+				)
+				return
+			}
+			const matches = handler.getActiveSessions().filter((s) => s.origin === origin && String(chainInfoToChainId(s)) === chainId)
+			for (const match of matches) {
+				logger.log(
+					"wallet-sdk-bg",
+					LogLevel.Info,
+					`Terminating live session ${match.sessionId} for revoked dApp ${origin}@${chainId}`,
+				)
+				handler.terminateSession(match.sessionId)
+			}
+		} catch (err) {
+			logger.log("wallet-sdk-bg", LogLevel.Error, `Failed to terminate live sessions on dapp-session-deleted: ${err}`)
+		}
+	})
 
 	/** On unlock, drain any queued discovery requests */
 	profileService.onActiveProfileChanged.add((profile) => {
