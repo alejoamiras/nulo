@@ -145,23 +145,32 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 								<Text color="secondary"> on </Text>
 								<AddressDisplay :address="call.to" />
 							</Text>
-							<!-- Structured args block — only for recognized intents. -->
-							<Flex
-								v-if="parseTransferIntent(call).kind !== 'unverified'"
-								data-testid="execute-op-structured-args"
-								direction="column"
-								gap="2"
-								:class="$style.structured_args"
-							>
-								<Flex gap="6">
-									<Text size="11" color="secondary">To:</Text>
-									<AddressDisplay :address="(parseTransferIntent(call) as { to: string }).to" />
+							<!-- Structured args block — only for recognized intents.
+							     For transfers we explicitly render `from` because a
+							     malicious dApp can craft transfer(other_account,
+							     attacker, amount); hiding `from` would let the user
+							     approve a different account's funds going out. -->
+							<template v-if="parseTransferIntent(call).kind !== 'unverified'">
+								<Flex
+									data-testid="execute-op-structured-args"
+									direction="column"
+									gap="2"
+									:class="$style.structured_args"
+								>
+									<Flex v-if="parseTransferIntent(call).kind === 'transfer'" gap="6">
+										<Text size="11" color="secondary">From:</Text>
+										<AddressDisplay :address="(parseTransferIntent(call) as { from: string }).from" />
+									</Flex>
+									<Flex gap="6">
+										<Text size="11" color="secondary">To:</Text>
+										<AddressDisplay :address="(parseTransferIntent(call) as { to: string }).to" />
+									</Flex>
+									<Flex gap="6">
+										<Text size="11" color="secondary">Amount:</Text>
+										<Text size="11" color="primary">{{ (parseTransferIntent(call) as { amount: string }).amount }}</Text>
+									</Flex>
 								</Flex>
-								<Flex gap="6">
-									<Text size="11" color="secondary">Amount:</Text>
-									<Text size="11" color="primary">{{ (parseTransferIntent(call) as { amount: string }).amount }}</Text>
-								</Flex>
-							</Flex>
+							</template>
 						</template>
 					</template>
 				</Flex>

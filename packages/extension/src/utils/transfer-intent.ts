@@ -28,9 +28,16 @@ const KNOWN_TRANSFER_METHODS = new Set(["transfer_in_private", "transfer_in_publ
 const KNOWN_MINT_METHODS = new Set(["mint_to_private", "mint_to_public"])
 
 /** Result of intent extraction. Discriminated on `kind` so the caller's
- *  template renders the right branch without ambiguity. */
+ *  template renders the right branch without ambiguity.
+ *
+ *  Transfers expose the contract-call `from` arg — distinct from the
+ *  wallet-account "From account" label which means "the account
+ *  submitting the tx" (often the same, but a malicious dApp can craft
+ *  `transfer(other_account, attacker, amount)` to make a user authorize
+ *  pulling funds from a non-submitter account they control). Rendering
+ *  `from` explicitly forces the user to verify it. */
 export type TransferIntent =
-	| { kind: "transfer"; to: string; amount: string }
+	| { kind: "transfer"; from: string; to: string; amount: string }
 	| { kind: "mint"; to: string; amount: string }
 	| { kind: "unverified" }
 
@@ -55,20 +62,21 @@ export function parseTransferIntent(call: CallLike | undefined): TransferIntent 
 	if (!Array.isArray(args)) return { kind: "unverified" }
 
 	if (KNOWN_TRANSFER_METHODS.has(name)) {
-		// Signature: (from, to, amount). Arity check is strict — refuse to
-		// guess if upstream changes the signature.
+		// Signature: (from, to, amount). Strict arity is the "do not guess"
+		// defense if upstream extends the signature.
 		if (args.length !== 3) return { kind: "unverified" }
-		const to = stringifyArg(args[1])
-		const amount = stringifyArg(args[2])
-		if (to === undefined || amount === undefined) return { kind: "unverified" }
-		return { kind: "transfer", to, amount }
+		const from = canonicalAddress(args[0])
+		const to = canonicalAddress(args[1])
+		const amount = canonicalAmount(args[2])
+		if (from === undefined || to === undefined || amount === undefined) return { kind: "unverified" }
+		return { kind: "transfer", from, to, amount }
 	}
 
 	if (KNOWN_MINT_METHODS.has(name)) {
 		// Signature: (to, amount).
 		if (args.length !== 2) return { kind: "unverified" }
-		const to = stringifyArg(args[0])
-		const amount = stringifyArg(args[1])
+		const to = canonicalAddress(args[0])
+		const amount = canonicalAmount(args[1])
 		if (to === undefined || amount === undefined) return { kind: "unverified" }
 		return { kind: "mint", to, amount }
 	}
@@ -76,16 +84,49 @@ export function parseTransferIntent(call: CallLike | undefined): TransferIntent 
 	return { kind: "unverified" }
 }
 
-/** Best-effort string projection of a single positional arg. Handles
- *  `AztecAddress`-like objects (via `toString`), `bigint`, `number`, and
- *  plain strings. Returns `undefined` for anything else so the caller
- *  falls through to `unverified`. */
-function stringifyArg(arg: unknown): string | undefined {
+/** Canonical 32-byte hex form — what an Aztec address serializes to.
+ *  Accepts `0x` + exactly 64 hex chars. */
+const HEX_ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/
+
+/** Canonical numeric form — pure decimal or `0x`-prefixed hex (no `e`,
+ *  no leading whitespace, no Unicode digit lookalikes, no `toString`
+ *  trickery returning attacker-controlled text). */
+const CANONICAL_NUMBER_RE = /^(0x[0-9a-fA-F]+|\d+)$/
+
+/** Address projection. Accepts a plain string in canonical hex form
+ *  OR an `AztecAddress`-like object whose `toString()` returns that
+ *  same canonical hex. Rejects anything else — including custom
+ *  `toString()` returning UI text — so attacker-controlled objects
+ *  cannot inject arbitrary characters into the structured render. */
+function canonicalAddress(arg: unknown): string | undefined {
+	const projected = projectToString(arg)
+	if (projected === undefined) return undefined
+	return HEX_ADDRESS_RE.test(projected) ? projected : undefined
+}
+
+/** Amount projection. Accepts string / number / bigint / `Fr`/`U128`-like
+ *  objects whose `toString()` returns a canonical numeric form. Rejects
+ *  custom `toString()` returning attacker-controlled text. */
+function canonicalAmount(arg: unknown): string | undefined {
+	if (typeof arg === "number" && Number.isFinite(arg)) return String(arg)
+	if (typeof arg === "bigint") return arg.toString()
+	const projected = projectToString(arg)
+	if (projected === undefined) return undefined
+	return CANONICAL_NUMBER_RE.test(projected) ? projected : undefined
+}
+
+/** Pulls a string out of `arg` without trusting attacker-defined
+ *  `toString()`. Plain strings pass through. Other shapes go through
+ *  `Object.prototype.toString.call(arg)` semantics implicitly via
+ *  `String()` — but we ALSO require the original object to expose its
+ *  OWN `toString` (rejecting `[object Object]` shaped output). */
+function projectToString(arg: unknown): string | undefined {
 	if (typeof arg === "string") return arg
-	if (typeof arg === "number" || typeof arg === "bigint") return String(arg)
-	if (arg && typeof arg === "object" && "toString" in arg && typeof (arg as { toString: unknown }).toString === "function") {
-		const s = (arg as { toString: () => string }).toString()
-		if (typeof s === "string" && s !== "[object Object]") return s
-	}
-	return undefined
+	if (arg === null || arg === undefined) return undefined
+	if (typeof arg !== "object") return String(arg)
+	if (!("toString" in arg) || typeof (arg as { toString: unknown }).toString !== "function") return undefined
+	const s = (arg as { toString: () => unknown }).toString()
+	if (typeof s !== "string") return undefined
+	if (s === "[object Object]") return undefined
+	return s
 }
