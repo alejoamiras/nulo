@@ -329,6 +329,21 @@ describe("ProfileService integration", () => {
 			await expect(service.exportPlain(profile.id, undefined, wrongCred)).rejects.toThrow(/Invalid profile id/)
 		}, 30_000)
 
+		test("F-007: unlockPasskeyProfile rejects credentialData for a different credential", async () => {
+			// Phase 2 / F-007 regression pin. Mirrors the exportPlain binding
+			// check (above). Without it, a popup-supplied credentialData whose
+			// id doesn't match the profile's stored credentialId would still
+			// open a session — using a master secret derived from the WRONG
+			// credential. Downstream account derivation then operates against
+			// the wrong key material.
+			const { service } = await makeService()
+			const profile = await service.createPasskeyProfile("PK")
+			// First lock the profile so we can attempt to unlock it.
+			await service.lockActiveProfile()
+			const wrongCred = fakeCredentialData("cred-OTHER", profile.id)
+			await expect(service.unlockPasskeyProfile(profile.id, wrongCred)).rejects.toThrow(/Invalid profile id/)
+		}, 30_000)
+
 		test("exportPlain passkey requires credentialData (no Path B fallback)", async () => {
 			const { service } = await makeService()
 			const profile = await service.createPasskeyProfile("PK")

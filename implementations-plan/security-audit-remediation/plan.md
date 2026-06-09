@@ -88,7 +88,7 @@ Sequencing reconciles "cheapest wins first" + "architectural refactor first": Ph
 **Rollback**: revert. No data migration.
 **Effort**: 1.5-2 days. **PR shape**: 1 PR (depends on Phase 0.5 landing first).
 
-### Phase 2 — F-007 passkey unlock binding (independent quick win)
+### Phase 2 — F-007 passkey unlock binding (independent quick win) ✓
 **Goal**: 4-line patch + 1 test mirror in `service.ts` to reject unlock when supplied `credentialData.id !== profile.credentialId`. Mirrors the pattern at `exportPlain:656-660`.
 
 **Files**:
