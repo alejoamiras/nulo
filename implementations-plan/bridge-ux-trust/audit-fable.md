@@ -72,3 +72,18 @@ Verified plan facts against the code first (triple-sign, balance-clear, Aztec-si
 9. **NIT — manual test 6's "leftover allowance" unreachable in the happy path** (approve is exact-amount). → Folded: setup spelled out (approve → reject deposit → retry skips approve).
 
 Critical files (repo-relative): implementations-plan/bridge-ux-trust/plan.md · packages/faucet/src/composables/useDeposit.ts · packages/faucet/src/composables/useWithdraw.ts · packages/bridge-core/src/recovery-crypto.ts · packages/faucet/src/contracts/bridge-deployments.ts
+
+
+## Round 2 — double audit (FRESH Plan subagent, no prior context, model fable, max effort)
+
+Verified all plan Facts against the code first — none misstated (incl. GCM fresh-IV-per-encrypt, making the retained-key re-seal cryptographically safe). Verdict: **conditional approve** — conditions folded same-round.
+
+1. **HIGH-1 — legacy-blob downgrade attack (re-opened HIGH-a; missed by BOTH prior rounds).** Legacy handling gated on record tags is forgeable (`migratedFromLegacy`, missing `sealerL1` are attacker-writable): copy a real legacy blob+secretHashHex into a clean-looking record with an attacker recipient ⇒ bare-secret fallback decrypts ⇒ silent normal claim redirects funds — strictly more than deletion. The ONLY unforgeable discriminator is the GCM-authenticated decrypted plaintext shape (bare hex vs v2 JSON). → Folded: D2 legacy/v2 discrimination derived solely from plaintext shape; downgrade test pin ⑲.
+2. **HIGH-2 — multi-tab journal clobbering.** Two tabs read-modify-writing the single key: a stale-snapshot write erases the other tab's just-created record (destroying a sealed blob — defeating D5's write-and-verify cross-tab). → Folded: per-record read-merge-write (latest-updatedAt-wins per record, never whole-journal overwrite) + storage-event rehydration; clobber test pin ⑳.
+3. **MEDIUM-1 — transient DROPPED ⇒ premature claimTxHash reset.** → Folded: debounce (N consecutive reads / min age) + test ⑤ extension.
+4. **MEDIUM-2 — prompt-lane ABBA deadlock** (private claim L1→Aztec vs withdraw Aztec→L1). → Folded: acquisition rule — per individual prompt, never held across the other lane's await.
+5. **MEDIUM-3 — trust cache converts per-record guarantee to per-(address,provider) assumption** (benign software change ⇒ stranded claim, no self-test to catch it). → Folded: documented as an accepted testnet residual in D3; the codex provider fingerprint catches what it can see.
+6. **NIT-1 prune caveat** → A1 gate question annotated (mooted in the forged-done case by D4 tx-identity). **NIT-2 recovery message not origin-bound** → recorded as accepted (phished signature useless without the blob). **NIT-3** → ⑥ amount-swap/leafIndex variants + seal-time amount normalization + the zombie-poll code comment requirement.
+7. **Plan quality:** P2 overloaded → commit ordering note added (journal+migration commits land before flow rewiring).
+
+Assumption buckets: Facts — none misstated. Inferences — DROPPED fencing adequate with the debounce; determinism inference under-scoped (→ MEDIUM-3 note); Aztec prompt-queueing properly deferred to manual test 4. Asks — A1 needed the prune caveat (added); A2 stands with plaintext-derived warning gating (HIGH-1 fold); A3 defensible as stated.
