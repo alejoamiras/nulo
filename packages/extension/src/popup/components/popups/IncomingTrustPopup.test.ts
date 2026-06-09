@@ -210,3 +210,21 @@ describe("IncomingTrustPopup — contract verification surface", () => {
 		expect(w.find('[data-testid="incoming-trust-contract-expand"]').attributes("aria-expanded")).toBe("false")
 	})
 })
+
+describe("F-009 / Phase 6: token symbol sanitization", () => {
+	test("strips bidi-override + zero-width chars from on-chain-supplied tokenSymbol", async () => {
+		// RTL override (U+202E) + zero-width space (U+200B) injected into a
+		// "USDC" lookalike. Pre-fix this would render with the override
+		// active, letting a phishing token visually impersonate USDC.
+		cacheStoreState.incomingTrust.tokenSymbol = "U‮SDC​"
+		const show = ref(true)
+		const w = mount(IncomingTrustPopup, { props: { show: show.value }, global: { stubs: STUBS } })
+		await flushPromises()
+		// Sanitized output should not contain the control codepoints.
+		const html = w.html()
+		expect(html).not.toMatch(/‮/)
+		expect(html).not.toMatch(/​/)
+		// Reset for other tests.
+		cacheStoreState.incomingTrust.tokenSymbol = "TST"
+	})
+})

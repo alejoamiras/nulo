@@ -6,8 +6,15 @@
  * `name` line + per-window action verb ("wants to connect", "wants to
  * call", etc.). The hostname renders next to a warning icon when it
  * contains non-ASCII or punycode segments — homograph defense.
+ *
+ * F-009 / Phase 6: the `name` field is dApp-controlled metadata from
+ * the discovery payload. Route through sanitizeWireString to strip
+ * bidi overrides, zero-width chars, etc. so a phishing dApp can't
+ * impersonate a familiar name via Unicode tricks.
  */
-defineProps({
+import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
+
+const props = defineProps({
 	/** From useDappInteractionPayload.dapp; reads `loadingLogo`,
 	 *  `logoBlobUrl`, and `name` keys. */
 	dapp: { type: Object, default: null },
@@ -22,6 +29,8 @@ defineProps({
 	hostnameTestId: { type: String, default: undefined },
 	nameTestId: { type: String, default: undefined },
 })
+
+const sanitizedName = computed(() => (props.dapp?.name ? sanitizeWireString(props.dapp.name, 64) : ""))
 </script>
 
 <template>
@@ -44,7 +53,7 @@ defineProps({
 					</template>
 				</Tooltip>
 			</Flex>
-			<span v-if="dapp?.name" :data-testid="nameTestId" :class="$style.dapp_name">{{ dapp.name }}</span>
+			<span v-if="sanitizedName" :data-testid="nameTestId" :class="$style.dapp_name">{{ sanitizedName }}</span>
 			<span :class="$style.dapp_action">{{ actionLabel }}</span>
 		</Flex>
 	</Flex>

@@ -33,6 +33,7 @@ import { usePopupStore } from "@/stores/popup.store"
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
 import { trimAddress } from "@/utils/string"
+import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 
 const cacheStore = useCacheStore()
 const popupStore = usePopupStore()
@@ -46,7 +47,11 @@ const displaceIdx = computed(() => {
 	return popupStore.len - popupStore.popups.incoming_trust?.order
 })
 
-const tokenSymbol = computed(() => cacheStore.incomingTrust.tokenSymbol ?? "Token")
+// F-009 / Phase 6: tokenSymbol comes from the on-chain contract (attacker-
+// controlled if they deployed it). Route through sanitizeWireString to strip
+// bidi overrides, zero-width chars, and other Unicode tricks that could
+// disguise a phishing token as a familiar symbol (e.g. Cyrillic "с" in "USDC").
+const tokenSymbol = computed(() => sanitizeWireString(cacheStore.incomingTrust.tokenSymbol ?? "Token", 32))
 const contractFull = computed(() => cacheStore.incomingTrust.contract ?? "")
 const contractSlice = computed(() => (contractFull.value ? trimAddress(contractFull.value, 6, 4) : ""))
 const formattedAmount = computed(() => {

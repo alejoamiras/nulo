@@ -194,7 +194,7 @@ if (!session) {
 **Risk**: medium. The scheme allowlist could trip on a non-loopback dev host. Research grep found none; opus correction: confirm with team before landing.
 **Effort**: 2-3 days. **PR shape**: 1 PR.
 
-### Phase 6 — F-009 Unicode sanitization sweep (covers all existing surfaces; precedes F-008)
+### Phase 6 — F-009 Unicode sanitization sweep (covers all existing surfaces; precedes F-008) ✓
 
 **Goal**: ensure EVERY dApp-controlled string in popup approval surfaces routes through `sanitizeWireString`. Ships BEFORE Phase 7 (F-008 UX redesign) so the new F-008 components can adopt the established sanitization pattern rather than introducing it. Establishes the helper-application discipline before the higher-risk Phase 7 PR.
 
