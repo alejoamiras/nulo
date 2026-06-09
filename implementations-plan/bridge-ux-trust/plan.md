@@ -169,4 +169,4 @@ Recipient-commitment (contract change — the decided end-state, next contract r
 - Final fresh-context codex pass: PENDING.
 
 ## Seeds
-Filled at the approval gate together with `eli5.html` (the recommended seed will be `/loop` self-paced — manual-test handoffs make completion not fully transcript-observable).
+Both seed strings live in [eli5.html](eli5.html) §Implementation seeds as copy-paste blocks. **Recommended: `/loop` self-paced** — the manual-test handoffs make completion not fully transcript-observable, so a self-pacing loop that stops at signature boundaries fits better than a `/goal` evaluator. The `/goal` alternative is also embedded there. Use exactly one per session.
