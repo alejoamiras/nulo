@@ -258,6 +258,13 @@ export function useDeposit() {
 		}
 
 		try {
+			// Single-pending storage: a 2nd deposit overwrites the 1st's recovery record — for a PRIVATE
+			// deposit that's the only sealed bearer blob + leaf index, leaving the earlier deposit
+			// unrecoverable (codex 019eacad CRITICAL). Block until the pending one is claimed or discarded.
+			if (loadPending()) {
+				error.value = "Finish or discard the pending deposit before starting another."
+				return
+			}
 			log("start", { amount: amount.toString(), recipient, from, usdc: L1_USDC, portal: L1_PORTAL })
 			const secret = Fr.random()
 			const secretHash = await computeSecretHash(secret)

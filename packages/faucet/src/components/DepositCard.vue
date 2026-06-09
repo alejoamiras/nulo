@@ -98,7 +98,7 @@ async function onDeposit() {
 			<span class="unit">USDC</span>
 		</div>
 
-		<AppButton :loading="busy" :disabled="!bothConnected || busy" :data-testid="TESTIDS.depositSubmit" @click="onDeposit">
+		<AppButton :loading="busy" :disabled="!bothConnected || busy || hasPending" :data-testid="TESTIDS.depositSubmit" @click="onDeposit">
 			{{ bothConnected ? "Deposit" : "Connect both wallets above" }}
 		</AppButton>
 
