@@ -11,6 +11,7 @@ const l1 = useL1Wallet()
 const bridge = useBridgeWallet()
 
 const amount = ref("100")
+const isPrivate = ref(false)
 
 const bothConnected = computed(() => l1.isConnected.value && bridge.status.value === "connected")
 const busy = computed(() => stage.value !== "idle" && stage.value !== "done" && stage.value !== "error")
@@ -45,7 +46,7 @@ const stageLabel = computed(() => {
 async function onDeposit() {
 	const amt = BigInt(Math.round(Number(amount.value || "0") * 1e6))
 	if (amt <= 0n) return
-	await deposit(amt)
+	await deposit(amt, isPrivate.value)
 }
 </script>
 
@@ -55,6 +56,34 @@ async function onDeposit() {
 			<h3>Deposit · Ethereum → Aztec</h3>
 			<p class="sub">Mint test USDC on Sepolia and bridge it to your Aztec account, 1:1.</p>
 		</header>
+
+		<div class="mode-row" role="radiogroup" aria-label="Deposit privacy">
+			<button
+				type="button"
+				class="mode"
+				:class="{ active: !isPrivate }"
+				:disabled="busy"
+				:data-testid="TESTIDS.depositModePublic"
+				@click="isPrivate = false"
+			>
+				Public
+			</button>
+			<button
+				type="button"
+				class="mode"
+				:class="{ active: isPrivate }"
+				:disabled="busy"
+				:data-testid="TESTIDS.depositModePrivate"
+				@click="isPrivate = true"
+			>
+				Private
+			</button>
+		</div>
+		<p v-if="isPrivate" class="bearer-warning" :data-testid="TESTIDS.depositBearerWarning">
+			⚠ Private: the claim secret is a bearer credential, sealed locally to your Ethereum signature. You'll
+			sign twice up front (recovery key + a self-test), and the funds claim to the connected Aztec account.
+			Don't clear this site's data before the claim completes, or the deposit can't be recovered.
+		</p>
 
 		<div class="amount-row">
 			<input
@@ -112,6 +141,42 @@ async function onDeposit() {
 	color: var(--txt-secondary);
 	font-size: 14px;
 	margin: 4px 0 0;
+}
+
+.mode-row {
+	display: flex;
+	gap: 8px;
+}
+
+.mode {
+	flex: 1;
+	padding: 8px 12px;
+	background: transparent;
+	border: 1px solid var(--nulo-outline);
+	border-radius: 8px;
+	color: var(--txt-secondary);
+	font: 500 13px/1.2 var(--font-mono);
+	cursor: pointer;
+	transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.mode.active {
+	border-color: var(--nulo-accent);
+	color: var(--nulo-accent);
+}
+
+.mode:disabled {
+	cursor: not-allowed;
+	opacity: 0.6;
+}
+
+.bearer-warning {
+	margin: 0;
+	padding: 10px 12px;
+	border: 1px dashed var(--yellow);
+	border-radius: 8px;
+	color: var(--txt-secondary);
+	font: 500 12px/1.5 var(--font-mono);
 }
 
 .amount-row {
