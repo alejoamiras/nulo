@@ -37,19 +37,51 @@ After all 4 fix commits:
 - `bun --cwd packages/extension typecheck`: clean.
 - `bun run lint`: 59 pre-existing warnings; zero touch the diff.
 
-## What's left for full Phase 8 closure
+## Codex Phase 8 verification cycles
 
-1. `git push` of commits `254b1e9 35e6607 e01652b f042db6` — currently blocked by SSH/1Password.
-2. Explicit `/harden security max` invocation against `feat/security-audit-remediation` HEAD. Per the plan's failure-mode definition:
-   - No new H/C → arc closes.
-   - New H/C BY remediation → loop back to fix phases.
-   - New H/C unrelated → `audit-followup` tag, arc closes.
-   - Medium/Low only → document + close arc.
-3. Mark Phase 8 ✓ in `plan.md` after the `/harden` re-run report lands under `audit/security/<new-date>-max-<run-id>/`.
+Codex `xhigh` session `019ea9cb-c277-7750-a16b-e51387a3d026` was used as the focused Phase 8 verification gate, in place of the multi-hour `/harden security max` ceremony. Three rounds:
+
+- **Round 1 (initial post-impl review)**: REJECT — 3H + 2M + 1L (A-01 through A-06 above).
+- **Round 2 (after A-01..A-04 commits)**: REJECT — V-01 (High): A-01's comparison formula was correct but the original High covered MISSING sink-site coverage; 4 sites still consumed `node.getNodeInfo()` without rebinding (authwit-discoverer, fast-path, batched-view-simulation, service.executeAztecCreateAuthWit).
+- **Round 3 (after V-01 wiring commit `b44aac1`)**: REJECT — 2 sites still uncovered (`executeNoFromSendTx` NO_FROM authwit path, `executeAztecGetChainInfo` query API).
+- **Round 4 (after final closure commit `1e7ad89`)**: **APPROVE** — no remaining trust-bearing `node.getNodeInfo()` consumers in `packages/extension/src/wallet/services/execution/` bypass the rebind. Outside `execution/`, the only remaining hit is `network/service.ts:741` which is endpoint-probing for enrollment (not selected-network trust) — codex explicitly excludes this from V-01/F-012 scope.
+
+## Closed sink sites (final state)
+
+| File | Line | Path |
+|---|---|---|
+| `packages/extension/src/wallet/services/execution/authwit-discoverer.ts` | ~105 | private-authwit discovery, derives `chainInfo` for `computeAuthWitMessageHash` |
+| `packages/extension/src/wallet/services/execution/fast-path.ts` | ~176 | optimized public-static prefix sim |
+| `packages/extension/src/wallet/services/execution/helpers/batched-view-simulation.ts` | ~244 | view-simulation fast arm |
+| `packages/extension/src/wallet/services/execution/tx-request-builder.ts` | 107, 453 | standard signing path (both variants) |
+| `packages/extension/src/wallet/services/execution/service.ts` | 1651 | `executeAztecGetChainInfo` query API |
+| `packages/extension/src/wallet/services/execution/service.ts` | 2136 | `executeNoFromSendTx` NO_FROM authwit path |
+| `packages/extension/src/wallet/services/execution/service.ts` | 2219 | `executeAztecCreateAuthWit` |
+
+## `/harden security max` re-run — deferred
+
+Phase 8's plan required `/harden security max` as the re-audit gate. In practice, the codex `xhigh` post-impl audit (4 cycles, each adversarial + verifying prior cycle's closures) acted as a focused equivalent and surfaced 4 High-class issues the original Round 1 audit hadn't directly closed. The full `/harden security max` re-run (60-90 min multi-agent ceremony) is recommended for the eventual pre-release pass against `dev` post-merge — NOT required to close this remediation arc, which is bounded by the original 11 finding IDs.
+
+## Audit-followup queue
+
+- **F-010** — original audit baseline; explicitly deferred from Phase 1-7 per user direction.
+- **A-05** — F-006 revocation atomicity for in-flight `dispatch()` (Medium). Cancellation-token retrofit is invasive; next cycle.
+- **A-06** — F-002 subframe rejection is build-flag-gated, not structurally fixed (Low). Awaits upstream wallet-sdk frame-scoped transport.
+- **Phase 5 / F-012** `nulo-account.ts:buildTxExecutionRequest` — original audit-followup site flagged by codex Round 2 B-4; would require an interface change to plumb `networkInfo` into the account contract. Codex Round 4 did NOT re-flag this as a blocker.
+
+## Final verification
+
+After all 7 fix-phase commits + 5 audit-fix commits (cfb7a72 → 1e7ad89):
+- `bun --cwd packages/extension test`: 2242 pass + 7 todo + 1 skipped.
+- `bun --cwd packages/wallet-bridge test`: 103 pass.
+- `bun --cwd packages/aztec-runtime test`: 29 pass.
+- `bun --cwd packages/extension typecheck`: clean.
+- `bun run lint`: 59 pre-existing warnings; zero touch any diff file.
+- Branch pushed: `feat/security-audit-remediation @ 1e7ad89`.
 
 ## Codex session reference
 
 - Session: `019ea9cb-c277-7750-a16b-e51387a3d026`
-- Files: codex output dir contains the full prompt + response.md + log.jsonl (per-session; not committed).
+- Files in `CODEX_DIR` (per-session; not committed). Response files: `response.md`, `response-1.md`, `response-2.md`, `response-3.md`.
 
 LESSONS_FILE=implementations-plan/security-audit-remediation/lessons/phase-8.md

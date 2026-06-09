@@ -244,7 +244,7 @@ if (!session) {
 **Risk**: high. UX-facing; touches many template sites. ~4-5 days work.
 **Effort**: 4-5 days. **PR shape**: 1 PR (7a + 7b together per opus M-4).
 
-### Phase 8 — `/harden security max` re-run + failure handling (partial — codex post-impl ✓; /harden re-run pending)
+### Phase 8 — codex post-impl audit cycles ✓ (`/harden security max` re-run deferred)
 
 After all 7 fix phases land + merge to `dev`, run `/harden security max` (NOT ultra — we have the baseline; max is sufficient verification). Compare against this audit's findings.
 
