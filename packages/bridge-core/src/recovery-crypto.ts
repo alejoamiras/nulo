@@ -13,8 +13,16 @@ import { EncryptionKey } from "@nulo/wallet-crypto"
  * the claim.
  */
 
+/** Binds a sealed record to its chain, bridge contracts, and secret hash (per-record key derivation). */
+export interface RecoveryBinding {
+	chainId: number
+	portal: string
+	bridge: string
+	secretHashHex: string
+}
+
 /** The per-record, domain-separated message the user signs to derive THIS record's recovery key. */
-export function recoveryKeyMessage(b: { chainId: number; portal: string; bridge: string; secretHashHex: string }): string {
+export function recoveryKeyMessage(b: RecoveryBinding): string {
 	return [
 		"Nulo Bridge recovery key v1 — sign to locally encrypt ONE in-flight private claim secret.",
 		"This is not a transaction and costs nothing.",
@@ -52,4 +60,34 @@ export async function sealSecret(key: EncryptionKey, secretHex: string): Promise
 /** Decrypt a blob produced by `sealSecret` back into the secret. */
 export async function openSecret(key: EncryptionKey, blob: string): Promise<string> {
 	return new TextDecoder().decode(await key.decrypt(fromBase64(blob)))
+}
+
+/**
+ * Seal a record's secret end-to-end: derive THIS record's key from the per-record signature, seal,
+ * then SELF-TEST the round trip (re-sign + open). A wallet that signs non-deterministically fails the
+ * self-test and throws HERE — before the irreversible L1 deposit — rather than stranding the claim.
+ */
+export async function sealRecordSecret(
+	sign: (message: string) => Promise<string>,
+	binding: RecoveryBinding,
+	secretHex: string,
+): Promise<string> {
+	const message = recoveryKeyMessage(binding)
+	const blob = await sealSecret(await recoveryKeyFromSignature(await sign(message)), secretHex)
+	const reopened = await openSecret(await recoveryKeyFromSignature(await sign(message)), blob).catch(() => null)
+	if (reopened !== secretHex) {
+		throw new Error(
+			"Recovery self-test failed: this wallet signs non-deterministically, so a private claim could not be recovered. Aborting before the deposit.",
+		)
+	}
+	return blob
+}
+
+/** Re-derive THIS record's key from the per-record signature and open its sealed blob. */
+export async function openRecordSecret(
+	sign: (message: string) => Promise<string>,
+	binding: RecoveryBinding,
+	blob: string,
+): Promise<string> {
+	return openSecret(await recoveryKeyFromSignature(await sign(recoveryKeyMessage(binding))), blob)
 }
