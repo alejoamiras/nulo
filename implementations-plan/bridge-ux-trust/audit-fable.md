@@ -55,3 +55,20 @@ Assets in attack-value order: bearer secret; journal metadata; seal-trust verdic
 **Facts:** all §0 items (file:line-verified), incl. `App.vue` v-show keeps both views mounted; design tokens + `computeProgress`/`withdrawStatus` available; explorer helper exists.
 **Inferences:** `node.getTxReceipt` returns DROPPED rather than throwing for unknown hashes (confirm in Phase 2; fallback = sustained-failure budget); MetaMask/Rabby EIP-191 EOA signing is deterministic (the self-test exists because it's not guaranteed); the Aztec wallet queues concurrent prompts cleanly; mismatch-classifiable simulate error for switched accounts.
 **Asks:** branch base (resolved: dev post-#78); done-card retention keep-until-Clear+prune vs auto-remove; mint fixed 100 vs user-entered; public-deposit envelopes stay signature-free (recommended); delete `recovery.ts` (recommended); CSP/security headers separate pass.
+
+
+## Round 1 — contradiction-check (fresh Plan subagent, model fable, max effort)
+
+Verified plan facts against the code first (triple-sign, balance-clear, Aztec-side-only mismatch guard, amount-only content hash, GCM-no-AAD, legacy shape without `depositTxHash`, testid blast radius, `recovery.ts` usage) — all plan facts check out. Verdict: structurally sound, no BLOCKERs, real gaps:
+
+1. **HIGH — L4 promised, nowhere implemented.** No phase wired the stale-deployment refusal; `stale` attention overloaded (garbage vs deployment-mismatch). → Folded: distinct `stale-deployment` attention; P2 bullet + test ⑪.
+2. **HIGH — L3 promptLanes adopted, never built.** Appeared in no phase file list or test; P2 ④ proves the OPPOSITE property (parallelism). → Folded: P2 scope + test ⑭ (second promptful send awaits the first per wallet lane; prompt-free polls interleave).
+3. **HIGH — D2 contradicts D5-migration on leafIndex** (overlaps codex's BLOCKER). Legacy records have no `depositTxHash`; plaintext leafIndex is their only source. → Folded: D2 rule scoped to v2 records; legacy warning explicitly covers unauthenticated recipient + leafIndex; pinned in P2 ①/⑬.
+4. **HIGH — `sealerL1` schema-only ⇒ spurious trust revocation.** Claiming with the wrong L1 account ⇒ GCM failure ⇒ would revoke the CONNECTED account's valid trust and show `unseal-failed` instead of `mismatch`. → Folded: pre-click `sealerL1` guard ⇒ L1-variant `mismatch`; revoke only when connected === `sealerL1`; P2 ⑧ extended.
+5. **L2 (disputed): KEEP retention, but the ledger's rationale was wrong.** After a GENUINE done the message is consumed — the secret is spent and worthless; scrub-on-done destroys value exactly when `done` is false (forged claimTxHash), the one case retention insures. Scrub-on-done would have MET the plan's stated "no tamper achieves more than deletion" bar; retention EXCEEDS it. → Folded: L2 rationale rewritten; decision unchanged; mainnet caveat kept.
+6. **NIT — provisional `wd-pending-*` unknown-outcome untested.** → Folded: P2 test ⑮ + manual test 5 extension (kill mid-send).
+7. **NIT — two codex migration sub-cases vanished unledgered**: journal+legacy both present ⇒ journal wins, log once; legacy public without leafIndex ⇒ discard-only, never a forever-polling Claim. → Folded into D5 migration + P2 ①.
+8. **NIT — silently-dropped codex draft items**: parameterized testids (rejected — repo uses flat `fa-*`); "unverified until claim" marker (covered by display-rewrite + a one-line copy nod). → Ledger row L13 added.
+9. **NIT — manual test 6's "leftover allowance" unreachable in the happy path** (approve is exact-amount). → Folded: setup spelled out (approve → reject deposit → retry skips approve).
+
+Critical files (repo-relative): implementations-plan/bridge-ux-trust/plan.md · packages/faucet/src/composables/useDeposit.ts · packages/faucet/src/composables/useWithdraw.ts · packages/bridge-core/src/recovery-crypto.ts · packages/faucet/src/contracts/bridge-deployments.ts
