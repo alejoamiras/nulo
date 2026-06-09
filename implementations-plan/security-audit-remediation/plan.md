@@ -62,7 +62,7 @@ Sequencing reconciles "cheapest wins first" + "architectural refactor first": Ph
 **Rollback**: revert. No data migration.
 **Effort**: 1 day. **PR shape**: 1 PR, ships before Phase 1.
 
-### Phase 1 — Scope-enforcement primitives (F-003 + F-004 + F-005)
+### Phase 1 — Scope-enforcement primitives (F-003 + F-004 + F-005) ✓
 **Goal**: enforce sub-grant bits and account-scope allow-listing in the dispatcher. Closes 3 findings via shared checker registry pattern + new session-context overload.
 
 **Bundled per audit reversal of Decision 1**: F-005 belongs in Phase 1 — same file, same registry, same review surface. Codex draft had this; consolidated plan-main wrongly split. Audit Round 1 (both codex + opus) explicitly reversed this.

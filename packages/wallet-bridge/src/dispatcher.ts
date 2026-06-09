@@ -68,7 +68,7 @@ import type {
 	Operation,
 } from "./operation"
 import type { OperationResult } from "./operation-result"
-import { enforceScope } from "./scope-enforcement"
+import { enforceScope, enforceScopeWithSession } from "./scope-enforcement"
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { OriginType, type LocalTxOrigin } from "./transaction-origin"
 import type { SessionContext } from "./types"
@@ -232,10 +232,21 @@ export class WalletSdkDispatcher {
 		// session (e.g. if the session was deleted mid-dispatch).
 		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
 
-		// Enforce capability grants (type-level) then scope (per-operation)
+		// Enforce capability grants (type-level) then scope (per-operation +
+		// per-account allow-list).
 		const grants = this.enforceCapability(methodName, ctx, dappSession)
 		if (grants.length) {
-			enforceScope(methodName, args, grants)
+			// F-005: enforceScopeWithSession includes account-scope-array
+			// validation. Build the approved-accounts set from the session.
+			// If the session is missing (shouldn't happen when grants.length>0
+			// since enforceCapability would have returned []), fall back to
+			// the plain enforceScope to avoid throwing on the wrong thing.
+			if (dappSession) {
+				const sessionAccounts = new Set(dappSession.accounts ?? [])
+				enforceScopeWithSession(methodName, args, grants, sessionAccounts)
+			} else {
+				enforceScope(methodName, args, grants)
+			}
 		}
 
 		// Handle methods that don't go through ExecutionService
@@ -721,15 +732,25 @@ export class WalletSdkDispatcher {
 					| AccountsCapability
 					| undefined
 
+				// F-003: honor canGet on the GRANT-RESPONSE path. Previously the
+				// accounts list was echoed unconditionally — a dApp could request
+				// `canGet:false` and still receive the full account list in the
+				// grant response (and later via getAccounts because that method
+				// was exempt). Both paths now require `canGet === true`.
+				const canGet = storedAccounts?.canGet === true
+				const grantedAccounts = canGet
+					? sessionAccounts.map((acc) => {
+							const caip = formatCaipAccount(ctx.chainId, acc.address)
+							const alias = dappSession.accountAliases?.[caip] ?? acc.name ?? ""
+							return { alias, item: acc.address }
+						})
+					: []
+
 				result.push({
 					...cap,
-					canGet: storedAccounts?.canGet ?? false,
+					canGet,
 					canCreateAuthWit: storedAccounts?.canCreateAuthWit ?? false,
-					accounts: sessionAccounts.map((acc) => {
-						const caip = formatCaipAccount(ctx.chainId, acc.address)
-						const alias = dappSession.accountAliases?.[caip] ?? acc.name ?? ""
-						return { alias, item: acc.address }
-					}),
+					accounts: grantedAccounts,
 				})
 			} else {
 				result.push(cap)
@@ -765,7 +786,21 @@ export class WalletSdkDispatcher {
 		const grants = dappSession.capabilityGrants ?? []
 		const grantedTypes = new Set(grants.map((g) => g.capability.type))
 		if (!grantedTypes.has(requiredType)) {
-			throw new Error(`Capability "${requiredType}" not granted. The dApp must call requestCapabilities() first.`)
+			// Debug (not Info): dApps may re-fire methods per render, so the
+			// pre-grant throw must not spam the log. The existing log-noise
+			// pattern at handleGetAccounts is preserved here for any method
+			// reaching enforceCapability without the required grant type.
+			this.logger.log(
+				"wallet-sdk",
+				LogLevel.Debug,
+				`${methodName} from ${_ctx.origin} — throwing CAPABILITY_NOT_GRANTED to nudge requestCapabilities()`,
+			)
+			// CapabilityNotGrantedError is the public contract — dApps substring-
+			// match on the error code and message. The plain `Error` form was a
+			// pre-Phase-1 mistake; F-003's removal of `getAccounts` from
+			// EXEMPT_METHODS made this code path reachable by `getAccounts`,
+			// which has an existing CapabilityNotGrantedError-pinned test.
+			throw new CapabilityNotGrantedError(requiredType)
 		}
 		return grants
 	}

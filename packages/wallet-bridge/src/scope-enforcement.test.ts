@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest"
-import { enforceScope } from "./scope-enforcement"
+import { enforceScope, enforceScopeWithSession } from "./scope-enforcement"
 import type { Capability, GrantedCapabilityRecord } from "./capabilities"
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -23,12 +23,143 @@ describe("pass-through methods", () => {
 		expect(() => enforceScope("unknownMethod", [], [])).not.toThrow()
 	})
 
-	test("registerSender has no scope checker", () => {
+	// Phase 1 / F-004: registerSender and getAddressBook are NO LONGER
+	// pass-through. They require `data.addressBook === true`. With no grants,
+	// the type-level check at enforceCapability would have thrown first, but
+	// if grants exist without the addressBook flag, the scope checker fires.
+	test("registerSender passes with empty grants (caller's enforceCapability gate handles missing grant)", () => {
 		expect(() => enforceScope("registerSender", [addr(ADDR_A)], [])).not.toThrow()
 	})
 
-	test("getAddressBook has no scope checker", () => {
+	test("getAddressBook passes with empty grants (caller's enforceCapability gate handles missing grant)", () => {
 		expect(() => enforceScope("getAddressBook", [], [])).not.toThrow()
+	})
+})
+
+// ── F-003: getAccounts canGet sub-grant ──────────────────────────────
+
+describe("F-003: getAccounts requires accounts.canGet=true", () => {
+	test("accounts grant with canGet=true passes", () => {
+		const grants = [grant({ type: "accounts", canGet: true, accounts: [] } as Capability)]
+		expect(() => enforceScope("getAccounts", [], grants)).not.toThrow()
+	})
+
+	test("accounts grant with canGet=false throws", () => {
+		const grants = [grant({ type: "accounts", canGet: false, accounts: [] } as Capability)]
+		expect(() => enforceScope("getAccounts", [], grants)).toThrow(/canGet=true/)
+	})
+
+	test("accounts grant with canGet missing (undefined) throws", () => {
+		const grants = [grant({ type: "accounts", accounts: [] } as Capability)]
+		expect(() => enforceScope("getAccounts", [], grants)).toThrow(/canGet=true/)
+	})
+})
+
+// ── F-004: data.addressBook sub-grant ─────────────────────────────────
+
+describe("F-004: getAddressBook + registerSender require data.addressBook=true", () => {
+	test("getAddressBook with addressBook=true passes", () => {
+		const grants = [grant({ type: "data", addressBook: true } as Capability)]
+		expect(() => enforceScope("getAddressBook", [], grants)).not.toThrow()
+	})
+
+	test("getAddressBook with addressBook=false throws", () => {
+		const grants = [grant({ type: "data", addressBook: false } as Capability)]
+		expect(() => enforceScope("getAddressBook", [], grants)).toThrow(/addressBook=true/)
+	})
+
+	test("getAddressBook with addressBook missing throws", () => {
+		const grants = [grant({ type: "data" } as Capability)]
+		expect(() => enforceScope("getAddressBook", [], grants)).toThrow(/addressBook=true/)
+	})
+
+	test("registerSender with addressBook=true passes", () => {
+		const grants = [grant({ type: "data", addressBook: true } as Capability)]
+		expect(() => enforceScope("registerSender", [addr(ADDR_A)], grants)).not.toThrow()
+	})
+
+	test("registerSender with addressBook=false throws", () => {
+		const grants = [grant({ type: "data", addressBook: false } as Capability)]
+		expect(() => enforceScope("registerSender", [addr(ADDR_A)], grants)).toThrow(/addressBook=true/)
+	})
+})
+
+// ── F-005: account-scope-array allow-list ─────────────────────────────
+
+describe("F-005: account-scope arrays validated against session-approved accounts", () => {
+	const sessionAccounts = new Set([`aztec:0:${ADDR_A}`])
+
+	test("simulateTx with no extra scopes passes through to base check", () => {
+		const grants = [
+			grant({
+				type: "simulation",
+				transactions: { scope: [{ contracts: "*", functions: "*" }] },
+			} as Capability),
+		]
+		const args = [{ calls: [] }, { from: ADDR_A }] // empty-calls fast-path
+		expect(() => enforceScopeWithSession("simulateTx", args, grants, sessionAccounts)).not.toThrow()
+	})
+
+	test("simulateTx with opts.additionalScopes containing un-approved account throws (empty-calls bypass closed)", () => {
+		const grants = [
+			grant({
+				type: "simulation",
+				transactions: { scope: [{ contracts: "*", functions: "*" }] },
+			} as Capability),
+		]
+		const args = [
+			{ calls: [] }, // empty calls — pre-fix, scope-enforcement returned early
+			{ from: ADDR_A, additionalScopes: [`aztec:0:${ADDR_B}`] },
+		]
+		expect(() => enforceScopeWithSession("simulateTx", args, grants, sessionAccounts)).toThrow(/not in session's approved accounts/)
+	})
+
+	test("simulateTx with opts.scopes matching approved account passes", () => {
+		const grants = [
+			grant({
+				type: "simulation",
+				transactions: { scope: [{ contracts: "*", functions: "*" }] },
+			} as Capability),
+		]
+		const args = [{ calls: [] }, { from: ADDR_A, scopes: [`aztec:0:${ADDR_A}`] }]
+		expect(() => enforceScopeWithSession("simulateTx", args, grants, sessionAccounts)).not.toThrow()
+	})
+
+	test("getPrivateEvents with eventFilter.scopes containing un-approved account throws", () => {
+		const grants = [
+			grant({
+				type: "data",
+				privateEvents: { contracts: "*" },
+			} as Capability),
+		]
+		const args = [{ eventName: "Transfer" }, { contractAddress: addr(ADDR_A), scopes: [`aztec:0:${ADDR_B}`] }]
+		expect(() => enforceScopeWithSession("getPrivateEvents", args, grants, sessionAccounts)).toThrow(
+			/not in session's approved accounts/,
+		)
+	})
+
+	test("sendTx with opts.additionalScopes containing un-approved account throws (the highest-impact path)", () => {
+		const grants = [
+			grant({
+				type: "transaction",
+				scope: [{ contracts: "*", functions: "*" }],
+			} as Capability),
+		]
+		const args = [{ calls: [] }, { from: ADDR_A, additionalScopes: [`aztec:0:${ADDR_B}`] }]
+		expect(() => enforceScopeWithSession("sendTx", args, grants, sessionAccounts)).toThrow(/not in session's approved accounts/)
+	})
+
+	test("plain enforceScope (no session) does not check account scopes — back-compat preserved", () => {
+		const grants = [
+			grant({
+				type: "transaction",
+				scope: [{ contracts: "*", functions: "*" }],
+			} as Capability),
+		]
+		const args = [{ calls: [] }, { from: ADDR_A, additionalScopes: [`aztec:0:${ADDR_B}`] }]
+		// Plain enforceScope WITHOUT session context is unchanged; dispatcher decides
+		// whether to use enforceScopeWithSession or fall back.
+		expect(() => enforceScope("sendTx", args, grants)).not.toThrow()
 	})
 })
 

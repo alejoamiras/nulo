@@ -383,13 +383,22 @@ describe("dispatcher.handleGetAccounts — plan-v3 contract", () => {
 		expect(debugCalls.some((c) => c.msg.includes("CAPABILITY_NOT_GRANTED"))).toBe(true)
 	})
 
-	test("session has 1 account → returns formatted Aliased<AztecAddress> (fast path, regression pin)", async () => {
+	test("session has 1 account + canGet=true grant → returns formatted Aliased<AztecAddress> (fast path)", async () => {
 		// CAIP account for chainId 0 on the address below.
+		// Post F-003: also requires an accounts grant with canGet=true. The
+		// legacy "accounts present without a grant" fast-path is closed; F-003's
+		// scope-enforcement now requires explicit canGet.
 		const addr = "0x1111111111111111111111111111111111111111111111111111111111111111"
 		const caip = `aztec:0:${addr}`
 		const session = makeSession({
 			accounts: [caip],
 			accountAliases: { [caip]: "my-app-alias" },
+			capabilityGrants: [
+				{
+					capability: { type: "accounts", canGet: true, accounts: [caip] } as Capability,
+					grantedAt: 1,
+				},
+			],
 		})
 		const { dispatcher } = makeGetAccountsDispatcher({
 			session,
