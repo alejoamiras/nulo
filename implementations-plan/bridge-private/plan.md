@@ -11,7 +11,7 @@ Goal: add the PRIVATE deposit + withdraw paths to the faucet bridge, testnet-val
 
 ## Phases (status = source of truth)
 - **PV1 — private deposit** ✅ CODE-COMPLETE (NEEDS MANUAL TEST — see `lessons/phase-1.md`) — `useDeposit` `isPrivate` mode: L1 `depositToAztecPrivate(amount, secretHash)` (no recipient) → seal-before-mint → `claim_private` → `balance_of_private` confirm; `DepositCard` public/private toggle + bearer warning shipped. All 6 codex findings addressed.
-- **PV2 — private withdraw** ⬜ — `useWithdraw` gains an `isPrivate` mode: `burn_private` auth-wit → `exit_to_l1_private`; the proving→consume tail is identical to public. `WithdrawCard` toggle.
+- **PV2 — private withdraw** ✅ CODE-COMPLETE (NEEDS MANUAL TEST — see `lessons/phase-2.md`) — `useWithdraw` `isPrivate` mode: OFF-CHAIN `createAuthWit(burn_private)` → `exit_to_l1_private` (ONE tx, witness attached); reuses `consumeExit` unchanged; no bearer secret; `WithdrawCard` toggle + test. codex `019eac9c`.
 - **PV3 — seal + bearer warning** ✅ (for deposit) — per-record key + sig-normalize + `sealRecordSecret`/`openRecordSecret` self-test; key-first plaintext minimization; `DepositCard` bearer warning shipped. (PV2 withdraw reuses these primitives if it needs a seal.)
 - **PV4 — scopes + tests** 🔄 (manifest scopes VERIFIED — `capabilities.ts` scopes `claim_private`/`exit_to_l1_private`/`burn_private` for sim+tx and `balance_of_private` for utilities; component tests + `audit:vue` remain) — verify the manifest private scopes; capabilities + component tests; `bun run audit:vue`.
 - **PV5 — gates** ⬜ — `/code-review max --fix` → codex post-impl audit → address high/critical → stop.

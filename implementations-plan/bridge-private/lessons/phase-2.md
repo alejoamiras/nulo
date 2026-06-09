@@ -21,5 +21,10 @@ Questions sent (prompt: `/tmp/codex-pv2-design.md`):
 
 Implementation: `useWithdraw` `isPrivate` branch (off-chain authwit + `exit_to_l1_private`, ONE tx) + `WithdrawCard` toggle; reuse `consumeExit`; verify `canCreateAuthWit`.
 
+## 2026-06-09 — PV2 IMPLEMENTED (code-complete)
+Commits: `2260b68` (wire the private withdraw — off-chain `createAuthWit(burn_private)` + `exit_to_l1_private` with `authWitnesses`, ONE tx) + `4b859bf` (WithdrawCard toggle + test). API verified against `@aztec/wallet-sdk` base_wallet (`createAuthWit(from, CallIntent)`), `CallIntent = { caller, call: FunctionCall }`, `getFunctionCall()`, and the `authWitnesses` send-option. `canCreateAuthWit: true` already in the bridge manifest (capabilities.ts:144,202). 142 faucet tests green.
+
+**NEEDS MANUAL TEST** (real Aztec signature + a private L2 balance): on testnet, select Private → ONE Aztec prompt (`exit_to_l1_private`; the burn authwit is off-chain, no separate prompt) → proven-epoch wait → consume on L1 (one Ethereum prompt). Expected: the PRIVATE L2 balance drops by `amount`; the L1 USDC balance rises by it; a refresh mid-proving resumes the consume.
+
 ## Public withdraw structure (reuse — packages/faucet/src/composables/useWithdraw.ts)
 `withdraw(amount)`: `SetPublicAuthwit(burn_public)` → `exit_to_l1_public` → persist `{exitTxHash, recipientL1, amount, exitBlock}` → `consumeExit` (proven-epoch wait → L1 outbox consume, with `consumeTxHash` recovery). The consume tail + recovery are flow-agnostic; PV2 changes only the burn auth-wit + the exit call (and likely needs `isPrivate` threaded like `useDeposit`).
