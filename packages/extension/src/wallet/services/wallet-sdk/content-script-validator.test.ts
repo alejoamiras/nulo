@@ -1,5 +1,32 @@
 import { describe, expect, it } from "vitest"
-import { validateContentScriptMessage } from "./content-script-validator"
+import { isSubframeSender, validateContentScriptMessage } from "./content-script-validator"
+
+describe("isSubframeSender (F-001 / Phase 4 defense-in-depth)", () => {
+	it("returns false for top-frame messages (frameId === 0)", () => {
+		expect(isSubframeSender({ tab: { id: 1, url: "https://app.example.com" }, frameId: 0 })).toBe(false)
+	})
+
+	it("returns true for subframe messages (frameId > 0)", () => {
+		// This is the F-001 attack signature: iframe at evil.com inside
+		// app.example.com sends a content-script message; sender.frameId
+		// is non-zero, sender.tab.url is the TOP-frame URL.
+		expect(isSubframeSender({ tab: { id: 1, url: "https://app.example.com" }, frameId: 1 })).toBe(true)
+		expect(isSubframeSender({ tab: { id: 1, url: "https://app.example.com" }, frameId: 99 })).toBe(true)
+	})
+
+	it("returns false for non-tab senders (extension internals)", () => {
+		// ServiceClient / offscreen messages have no `tab` field.
+		expect(isSubframeSender({ frameId: 0 })).toBe(false)
+		expect(isSubframeSender({})).toBe(false)
+	})
+
+	it("returns false when frameId is undefined (defensive — fail open for ambiguous cases)", () => {
+		// Some chrome runtime calls deliver MessageSender without frameId. We
+		// don't want to reject those; the upstream handler still gets to
+		// decide.
+		expect(isSubframeSender({ tab: { id: 1, url: "https://app.example.com" } })).toBe(false)
+	})
+})
 
 describe("validateContentScriptMessage", () => {
 	it("passes through non-object inputs", () => {

@@ -142,7 +142,7 @@ if (!session) {
 **Risk**: high. Cross-package wiring. Codex consult mandated before merge.
 **Effort**: 2-3 days. **PR shape**: 1 larger PR. **Independent of other phases.**
 
-### Phase 4 — F-001 + F-002 frame-vs-tab (Nulo-side defense-in-depth ONLY)
+### Phase 4 — F-001 + F-002 frame-vs-tab (Nulo-side defense-in-depth ONLY) ✓
 **Goal**: Subframe-origin attack mitigation. NOTE: per audit Round 1 (codex B-3), the originally-planned frame-targeted send is **infeasible** with the current upstream wallet-sdk transport (upstream `sendToTab` hardcodes `(tabId, message)` — no `{frameId}` option exposed). Frame-targeted send becomes an **upstream coordination item only**.
 
 **Nulo-side scope (what we can ship locally)**:

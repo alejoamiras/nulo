@@ -29,7 +29,7 @@ import "./nulo-schema-patch"
 
 import { BackgroundConnectionHandler, type PendingDiscovery, type ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
 import type { WalletMessage, WalletResponse } from "@aztec/wallet-sdk/types"
-import { validateContentScriptMessage } from "./content-script-validator"
+import { isSubframeSender, validateContentScriptMessage } from "./content-script-validator"
 import { toWalletResponseError } from "./error-envelope"
 
 import type { ServiceCollection } from "@/wallet/base"
@@ -50,6 +50,19 @@ import { LogLevel } from "@/wallet/logger"
 import type { Fr } from "@aztec/foundation/curves/bn254"
 
 declare const __VERSION__: string
+
+/**
+ * F-001 / Phase 4: feature flag to allow iframe (subframe) dApps to talk to
+ * the wallet. Default `false` — Nulo's wrapper rejects content-script
+ * messages from subframes. Override by setting
+ * `VITE_NULO_ALLOW_IFRAME_DAPPS=1` at build time (rare; research found no
+ * legitimate iframe-dApp use cases in the Nulo ecosystem).
+ *
+ * Why a build-time env flag (not a runtime config) — runtime config opens a
+ * widening primitive that an attacker could try to flip via storage poisoning
+ * or popup compromise. Build-time keeps the policy immutable per release.
+ */
+const NULO_ALLOW_IFRAME_DAPPS: boolean = import.meta.env?.VITE_NULO_ALLOW_IFRAME_DAPPS === "1"
 
 /**
  * Initialize the wallet-sdk BackgroundConnectionHandler and wire it
@@ -119,6 +132,37 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 			addContentListener: (listener) => {
 				// biome-ignore lint/suspicious/noExplicitAny: Chrome message listener provides untyped messages
 				chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.MessageSender) => {
+					// F-001: subframe rejection. Upstream `BackgroundConnectionHandler`
+					// attributes origin via `sender.tab?.url` (top-frame URL), so an
+					// iframe at https://evil.com/x.html embedded in https://app.example.com
+					// would be credited to https://app.example.com — inheriting any
+					// grants the user gave to the parent page.
+					//
+					// Nulo-side defense-in-depth: reject content-script messages
+					// from subframes at the wrapper layer. `sender.frameId === 0`
+					// is the top frame; any other value (or undefined for
+					// non-tab senders) is a subframe.
+					//
+					// Feature flag: `NULO_ALLOW_IFRAME_DAPPS` (env / build-time)
+					// disables this check. Default is "reject subframes" because
+					// research found NO legitimate iframe-dApp use cases in the
+					// Nulo ecosystem. If a counterexample surfaces, set the env
+					// var rather than removing this check.
+					//
+					// Frame-targeted send replies (F-002 full fix) require upstream
+					// `chrome.tabs.sendMessage(tabId, msg, { frameId })` support
+					// in `BackgroundConnectionHandler`'s sendToTab signature —
+					// upstream's `(tabId, msg)` interface doesn't pass frameId
+					// through, so this remains an upstream coordination item.
+					if (NULO_ALLOW_IFRAME_DAPPS !== true && isSubframeSender(sender)) {
+						logger.log(
+							"wallet-sdk-bg",
+							LogLevel.Debug,
+							`Rejected content-script message from subframe (frameId=${sender.frameId}, tab.url=${sender.tab?.url}, sender.url=${sender.url}) — F-001 defense-in-depth`,
+						)
+						return undefined
+					}
+
 					// Zod-validate content-script-originated envelopes before
 					// forwarding to the upstream handler. `passthrough` lets
 					// non-content-script messages through (ServiceClient
