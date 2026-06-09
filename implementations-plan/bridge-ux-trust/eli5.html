@@ -43,7 +43,7 @@
   </div>
   <div class="phase">
     <h3>Phase 4: Smoke, polish, handoff</h3>
-    <p>A browser-less smoke test pins the big behaviors (migration works, nothing auto-claims, selectors stable), logging is swept for secrets, then the manual testnet checklist comes to you — eight scripted walks, including "first private deposit asks exactly 2 signatures, second asks exactly 1".</p>
+    <p>A browser-less smoke test pins the big behaviors (old keys cleaned, nothing auto-claims, selectors stable), logging is swept for secrets, then the manual testnet checklist comes to you — eight scripted walks, including "first private deposit asks exactly 2 signatures, second asks exactly 1".</p>
   </div>
 
   <h2>Human context</h2>
@@ -52,7 +52,7 @@
   <h2>Open questions (your call at approval)</h2>
   <ul>
     <li><strong>A1 — finished cards keep their sealed secret until you click Clear</strong> (auto-cleaned after 7 days). Insurance against a faked "done"; the secret is spent and useless after a genuine claim. Alternative: wipe immediately on done.</li>
-    <li><strong>A2 — pre-existing private transfers (from before this arc)</strong> get a one-time "claim with unverified details" path behind a loud warning, instead of being discard-only. This knowingly trusts old unauthenticated data ONCE to avoid stranding your in-flight testnet funds.</li>
+    <li><strong>A2 — RESOLVED: no backwards compatibility.</strong> Old in-flight records are simply deleted on first load (development phase). Side benefit: with no legacy fallback, the "downgrade" attack has nothing to downgrade into.</li>
     <li><strong>A3 — web-security headers (CSP) stay deferred</strong> to the later hardening pass. Honest framing: a malicious script on the page remains the one theft-capable attacker until that lands — fine for a trusted internal testnet tool, not for promotion beyond that.</li>
   </ul>
 
