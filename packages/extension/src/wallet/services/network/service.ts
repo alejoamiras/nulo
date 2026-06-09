@@ -27,6 +27,7 @@ import {
 	type NetworkInfo,
 	NETWORK_SERVICE_NAME,
 	NetworkMethodSchemas,
+	NetworkSchema,
 	NodeStatus,
 } from "./spec"
 
@@ -621,7 +622,18 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 					if (!isNewShapeNetwork(raw)) {
 						throw new Error(`${ERR_BACKUP_TOO_OLD}: This backup was created with an older version of Nulo.`)
 					}
-					const candidate = raw as Network
+					// F-011 / A-04: enforce the RPC URL allowlist on every endpoint
+					// during restore. Pre-fix, restore went directly to storage
+					// after a shape check, so a malicious backup could re-introduce
+					// `javascript:`, `data:`, non-loopback `http:`, or userinfo
+					// URLs that the runtime adapter would later reject. Validate
+					// at the persistence boundary AND at the adapter (defense in
+					// depth).
+					const parsed = NetworkSchema.safeParse(raw)
+					if (!parsed.success) {
+						throw new Error(`Backup rejected: ${parsed.error.issues.map((i) => i.message).join("; ")}`)
+					}
+					const candidate = parsed.data
 					if (existing.some((n) => n.profileId === candidate.profileId && n.chainId === candidate.chainId)) {
 						throw new Error(`A network for chain ${candidate.chainId} already exists in profile ${candidate.profileId}.`)
 					}

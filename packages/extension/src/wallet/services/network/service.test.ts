@@ -794,6 +794,55 @@ describe("NetworkService public API (M4.10)", () => {
 			const fetched = await service.getNetwork("n1")
 			expect(fetched.name).toBe("Imported")
 		})
+
+		test("restore rejects entries with disallowed RPC schemes (A-04)", async () => {
+			// Codex post-impl A-04: pre-fix, restore() only ran a shape check
+			// and wrote directly to storage. A malicious backup could re-introduce
+			// `javascript:`/`data:`/non-loopback `http:` URLs that the adapter
+			// would later reject. Now: NetworkSchema runs on each entry.
+			const { service } = setupServiceWithStorage({})
+			const evil = [
+				{
+					id: "n1",
+					profileId: "p1",
+					chainId: 1,
+					name: "Phishing",
+					primaryEndpointId: "e1",
+					endpoints: [{ id: "e1", rpcUrl: "javascript:alert(1)" }],
+				},
+				{
+					id: "n2",
+					profileId: "p1",
+					chainId: 2,
+					name: "Plain HTTP",
+					primaryEndpointId: "e1",
+					endpoints: [{ id: "e1", rpcUrl: "http://evil.com" }],
+				},
+			] as Network[]
+			const result = await service.restore(evil)
+			expect(result).toHaveLength(2)
+			expect(result[0]!.restoreError).toBeDefined()
+			expect(result[1]!.restoreError).toBeDefined()
+		})
+
+		test("restore rejects entries with userinfo URLs (A-04)", async () => {
+			// `https://user@evil.com@safe.com` parses to host=safe.com but the
+			// userinfo is the visible part of the URL and a known phishing vector.
+			const { service } = setupServiceWithStorage({})
+			const evil = [
+				{
+					id: "n1",
+					profileId: "p1",
+					chainId: 1,
+					name: "Userinfo Phish",
+					primaryEndpointId: "e1",
+					endpoints: [{ id: "e1", rpcUrl: "https://user@evil.com@safe.com" }],
+				},
+			] as Network[]
+			const result = await service.restore(evil)
+			expect(result).toHaveLength(1)
+			expect(result[0]!.restoreError).toBeDefined()
+		})
 	})
 })
 

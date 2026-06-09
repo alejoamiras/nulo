@@ -109,6 +109,11 @@ export const RpcUrlSchema = z
 			} catch {
 				return false
 			}
+			// Reject userinfo (`user:pass@host`). WHATWG-URL parses
+			// `https://user@evil.com@safe.com` as username=`user@evil.com`,
+			// host=`safe.com` — the userinfo is the visible part of the URL
+			// and a known phishing vector. We always strip these endpoints.
+			if (parsed.username !== "" || parsed.password !== "") return false
 			const scheme = parsed.protocol.slice(0, -1) // strip trailing ":"
 			if (scheme === "https") return true
 			if (scheme === "http") {
@@ -119,7 +124,7 @@ export const RpcUrlSchema = z
 			}
 			return false
 		},
-		{ message: "RPC URL must use https:// or http://localhost / http://127.0.0.1 / http://[::1]" },
+		{ message: "RPC URL must use https:// or http://localhost / http://127.0.0.1 / http://[::1] and contain no userinfo" },
 	)
 
 export const NetworkEndpointSchema: z.ZodType<NetworkEndpoint> = z.object({
