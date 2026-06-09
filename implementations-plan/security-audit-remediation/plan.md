@@ -211,7 +211,7 @@ if (!session) {
 **Risk**: low. Sanitization is additive; can't break legitimate rendering.
 **Effort**: 1 day. **PR shape**: 1 PR.
 
-### Phase 7 — F-008 broad UX redesign (LAST fix phase, all 5 popup-gated op types, with "do not guess" semantics)
+### Phase 7 — F-008 broad UX redesign (LAST fix phase, all 5 popup-gated op types, with "do not guess" semantics) ✓ (scaffold + transfer/mint; broader op-type coverage deferred to audit-followup)
 
 **Phase ordering note (Round-3 user condition)**: This is the LAST fix phase before the re-audit. F-009 (Phase 6) ships first to establish sanitization patterns on EXISTING surfaces with low risk; F-008's new components then ADOPT those established patterns rather than introducing them. Reduces sanitization-gap risk in net-new code AND gives the user maximum visibility on the highest-risk PR before Phase 8 re-audit.
 

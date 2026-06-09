@@ -23,6 +23,7 @@ import type { Account } from "@/wallet/services/account/client"
 import type { Network } from "@/wallet/services/network/client"
 import { humanizeOperationKind } from "./humanize"
 import type { DraftAztecSendTxOperation, DraftSendTransactionOperation, DraftUIOperation } from "./types"
+import { parseTransferIntent, type TransferIntent } from "@/utils/transfer-intent"
 
 // `DraftUIOperation` is the shared honest type (Phase 2 follow-up). Send-like
 // `feeSettings` is optional during user editing — the card v-models it via
@@ -122,19 +123,43 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 						</Text>
 					</template>
 					<template v-else-if="op.kind === 'aztec_sendTx'">
-						<Text
-							v-for="(call, j) in op.exec.calls"
-							:key="`${index}:${j}`"
-							data-testid="execute-op-payload-row"
-							:data-call-name="call.name ?? ''"
-							:data-call-to="call.to?.toString() ?? ''"
-							size="12"
-							color="primary"
-						>
-							<Text weight="600">{{ humanizeMethodName(call.name ?? call.selector) }}</Text>
-							<Text color="secondary"> on </Text>
-							<AddressDisplay :address="call.to" />
-						</Text>
+						<!-- F-008 / Phase 7: structured args on PRIMARY surface for
+							known transfer/mint signatures. "Do not guess" semantics —
+							parseTransferIntent only returns a typed intent for the
+							documented method names + exact arity. For anything else
+							it returns `unverified`, and we render the indexed-args
+							fallback with an explicit marker. -->
+						<template v-for="(call, j) in op.exec.calls" :key="`${index}:${j}`">
+							<Text
+								data-testid="execute-op-payload-row"
+								:data-call-name="call.name ?? ''"
+								:data-call-to="call.to?.toString() ?? ''"
+								:data-intent-kind="parseTransferIntent(call).kind"
+								size="12"
+								color="primary"
+							>
+								<Text weight="600">{{ humanizeMethodName(call.name ?? call.selector) }}</Text>
+								<Text color="secondary"> on </Text>
+								<AddressDisplay :address="call.to" />
+							</Text>
+							<!-- Structured args block — only for recognized intents. -->
+							<Flex
+								v-if="parseTransferIntent(call).kind !== 'unverified'"
+								data-testid="execute-op-structured-args"
+								direction="column"
+								gap="2"
+								:class="$style.structured_args"
+							>
+								<Flex gap="6">
+									<Text size="11" color="secondary">To:</Text>
+									<AddressDisplay :address="(parseTransferIntent(call) as { to: string }).to" />
+								</Flex>
+								<Flex gap="6">
+									<Text size="11" color="secondary">Amount:</Text>
+									<Text size="11" color="primary">{{ (parseTransferIntent(call) as { amount: string }).amount }}</Text>
+								</Flex>
+							</Flex>
+						</template>
 					</template>
 				</Flex>
 			</Flex>
@@ -429,6 +454,15 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 .op_fee_set {
 	padding: 12px;
 	background: var(--nulo-surface-low);
+}
+
+/* F-008 / Phase 7: structured-args block under each call row when the
+ * intent is a recognized transfer/mint. Visually grouped + indented so
+ * it's clearly the call's own data, not a sibling row. */
+.structured_args {
+	padding: 4px 0 4px 12px;
+	border-left: 2px solid var(--nulo-border);
+	margin-left: 4px;
 }
 
 .prop {
