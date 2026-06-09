@@ -86,6 +86,11 @@ export const TESTIDS = {
 	depositModePublic: "fa-deposit-mode-public",
 	depositModePrivate: "fa-deposit-mode-private",
 	depositBearerWarning: "fa-deposit-bearer-warning",
+
+	// Bridge — withdraw privacy toggle (public ↔ private; no bearer secret on withdraw)
+	withdrawModePublic: "fa-withdraw-mode-public",
+	withdrawModePrivate: "fa-withdraw-mode-private",
+	withdrawPrivateNote: "fa-withdraw-private-note",
 } as const
 
 export type Testid = (typeof TESTIDS)[keyof typeof TESTIDS]

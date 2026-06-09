@@ -11,6 +11,7 @@ const l1 = useL1Wallet()
 const bridge = useBridgeWallet()
 
 const amount = ref("40")
+const isPrivate = ref(false)
 
 const bothConnected = computed(() => l1.isConnected.value && bridge.status.value === "connected")
 const busy = computed(() => stage.value !== "idle" && stage.value !== "done" && stage.value !== "error")
@@ -50,7 +51,7 @@ const stageLabel = computed(() => {
 async function onWithdraw() {
 	const amt = BigInt(Math.round(Number(amount.value || "0") * 1e6))
 	if (amt <= 0n) return
-	await withdraw(amt)
+	await withdraw(amt, isPrivate.value)
 }
 </script>
 
@@ -60,6 +61,33 @@ async function onWithdraw() {
 			<h3>Withdraw · Aztec → Ethereum</h3>
 			<p class="sub">Burn your bridged USDC on L2 and release it back to your Ethereum account.</p>
 		</header>
+
+		<div class="mode-row" role="radiogroup" aria-label="Withdraw privacy">
+			<button
+				type="button"
+				class="mode"
+				:class="{ active: !isPrivate }"
+				:disabled="busy"
+				:data-testid="TESTIDS.withdrawModePublic"
+				@click="isPrivate = false"
+			>
+				Public
+			</button>
+			<button
+				type="button"
+				class="mode"
+				:class="{ active: isPrivate }"
+				:disabled="busy"
+				:data-testid="TESTIDS.withdrawModePrivate"
+				@click="isPrivate = true"
+			>
+				Private
+			</button>
+		</div>
+		<p v-if="isPrivate" class="mode-note" :data-testid="TESTIDS.withdrawPrivateNote">
+			Burns your PRIVATE L2 balance and releases to Ethereum in one transaction. The L1 recipient is bound
+			in the message, so no recovery secret is needed.
+		</p>
 
 		<div class="amount-row">
 			<input
@@ -116,6 +144,42 @@ async function onWithdraw() {
 	color: var(--txt-secondary);
 	font-size: 14px;
 	margin: 4px 0 0;
+}
+
+.mode-row {
+	display: flex;
+	gap: 8px;
+}
+
+.mode {
+	flex: 1;
+	padding: 8px 12px;
+	background: transparent;
+	border: 1px solid var(--nulo-outline);
+	border-radius: 8px;
+	color: var(--txt-secondary);
+	font: 500 13px/1.2 var(--font-mono);
+	cursor: pointer;
+	transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.mode.active {
+	border-color: var(--nulo-accent);
+	color: var(--nulo-accent);
+}
+
+.mode:disabled {
+	cursor: not-allowed;
+	opacity: 0.6;
+}
+
+.mode-note {
+	margin: 0;
+	padding: 10px 12px;
+	border: 1px solid var(--nulo-outline);
+	border-radius: 8px;
+	color: var(--txt-secondary);
+	font: 500 12px/1.5 var(--font-mono);
 }
 
 .amount-row {
