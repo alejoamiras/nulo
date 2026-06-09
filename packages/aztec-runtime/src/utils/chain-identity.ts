@@ -36,19 +36,23 @@ export interface SelectedNetworkChainInfo {
  * Throws if the live node's chain identity drifts from the network the
  * user explicitly selected.
  *
- * `nodeInfo.l1ChainId` is the chain id reported by the live node. The
- * stored network has `chainId` (which is the same as `l1ChainId` in
- * Aztec's CAIP-2 namespace). Comparison is `number === number`.
+ * The stored `chainId` is `(l1ChainId XOR rollupVersion) >>> 0` for
+ * non-local networks, and `0` for local networks (where the trust
+ * substitute is the loopback-only RPC scheme allowlist in
+ * `network/spec.ts`). The expected live-node value is therefore the
+ * same XOR; we compute it from `nodeInfo.l1ChainId ^ rollupVersion` and
+ * compare against the stored value.
  *
- * Future: extend `SelectedNetworkChainInfo` with `rollupVersion` and
- * compare both. Today the wallet stores only `chainId`, so only
- * `chainId` can be compared. Mismatch detection on `chainId` alone
- * closes the most impactful F-012 attack vector (chain spoofing).
+ * Local networks (stored `chainId === 0`) skip the check because the
+ * stored value carries no identity information to compare against —
+ * the loopback URL allowlist is the substitute defense for local.
  */
 export function assertLiveChainIdentity(network: SelectedNetworkChainInfo, nodeInfo: LiveNodeChainInfo): void {
-	if (network.chainId !== nodeInfo.l1ChainId) {
+	if (network.chainId === 0) return
+	const liveComposite = (nodeInfo.l1ChainId ^ nodeInfo.rollupVersion) >>> 0
+	if (network.chainId !== liveComposite) {
 		throw new Error(
-			`Chain identity mismatch: selected network has chainId=${network.chainId} but live node reports l1ChainId=${nodeInfo.l1ChainId}. Refusing to sign/prove against a drifted endpoint.`,
+			`Chain identity mismatch: selected network has chainId=${network.chainId} but live node reports composite=${liveComposite} (l1ChainId=${nodeInfo.l1ChainId}, rollupVersion=${nodeInfo.rollupVersion}). Refusing to sign/prove against a drifted endpoint.`,
 		)
 	}
 }
