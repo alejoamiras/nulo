@@ -382,3 +382,27 @@ NEEDS-MANUAL-TEST:
 - Do you want `done` cards to remain visible until explicit `Discard`? My recommendation is yes.
 - For legacy private records created before metadata authentication, do you want “manual accept-and-finish with a loud warning” or “discard only”? My recommendation is manual accept-and-finish, because the task explicitly asks to handle legacy records.
 - Do you want me to add a package-local `lint` script to `packages/faucet/package.json` so the package can be gated with `bun run --cwd packages/faucet lint` literally? My recommendation is no unless your CI expects it; root `bun run lint` already exists.
+
+## Round 1 — contradiction-check (resumed session 019eae00)
+
+Verdict: consolidation mostly sound; 1 BLOCKER + 2 HIGH + 1 NIT, all folded into plan.md (D2 legacy-leafIndex exception, D4 receipt-fallback, D5/P2 stale-deployment refusal, P3 L2-retention pin). L2 dispute CONCEDED in favor of retain-until-Clear.
+
+1. **BLOCKER** — **Legacy-private migration contradicts the leafIndex trust rule.**  
+   D2 says private claims resolve `leafIndex` from `envelope -> depositTxHash receipt -> never bare localStorage` ([plan.md:56](implementations-plan/bridge-ux-trust/plan.md:56)). But D5 promises legacy private records (`sealedSecret`) are still “manual accept-and-finish” ([plan.md:79](implementations-plan/bridge-ux-trust/plan.md:79)). Current legacy records have `leafIndex` but **do not persist `depositTxHash`** (`useDeposit` only stored `leafIndex`, not deposit tx hash: [packages/faucet/src/composables/useDeposit.ts:354-355](packages/faucet/src/composables/useDeposit.ts:354)). So as written, those records have no allowed leafIndex source.  
+   **Fix:** either:
+   - explicitly allow one-time use of legacy bare `leafIndex` under `legacy-unauthenticated` with loud warning, or
+   - change A2/D5 to `discard-only unless depositTxHash exists`.
+
+2. **HIGH** — **D4 hardcodes `DROPPED`, but Assumptions says that behavior is unverified and the fallback is not planned.**  
+   D4 relies on `node.getTxReceipt` returning `dropped` for claim recovery ([plan.md:67-69](implementations-plan/bridge-ux-trust/plan.md:67)). But Assumptions immediately says this is only an inference and may throw instead ([plan.md:152](implementations-plan/bridge-ux-trust/plan.md:152)). P2’s proof list tests the `dropped` path, not the “throws/unknown forever” fallback ([plan.md:98](implementations-plan/bridge-ux-trust/plan.md:98)).  
+   **Fix:** amend D4/P2 to include a concrete fallback state machine: repeated receipt-lookup failure after budget => `attention: unknown-outcome` or manual re-claimable; add a unit test for thrown/unknown receipt lookups.
+
+3. **HIGH** — **L4 (stale-deployment refusal) made the ledger and schema, but not the phases.**  
+   The ledger adopts deployment binding + stale refusal ([plan.md:127](implementations-plan/bridge-ux-trust/plan.md:127)), and the schema carries `chainId/portal/bridge` ([plan.md:23-27](implementations-plan/bridge-ux-trust/plan.md:23)). But no phase bullet or smallest-proof item actually says “compare against current deployment and block resume/claim/finish with `attention: stale`.” It is effectively ledger-only.  
+   **Fix:** add a P2 implementation bullet and proof case: mismatched deployment tuple marks record `stale`, skips auto-resume watchers, and disables Claim/Finish.
+
+4. **NIT** — **I concede L2 (retain blob until Clear) for testnet, but it needs an explicit proof pin.**  
+   The retention rationale is coherent: it downgrades forged `claimTxHash` from blob-destruction to user-mediated loss ([plan.md:78](implementations-plan/bridge-ux-trust/plan.md:78), [plan.md:142](implementations-plan/bridge-ux-trust/plan.md:142)). I would **not** push scrub-on-done here.  
+   **Fix:** add one P2/P3 test asserting a completed private record still retains the sealed blob until `Clear`, and that `Clear` is distinct from `Discard`.
+
+Otherwise, the consolidation is mostly sound; the real misses are the legacy-leafIndex contradiction and the unimplemented stale-deployment / receipt-fallback paths.
