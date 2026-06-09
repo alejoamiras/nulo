@@ -304,7 +304,9 @@ export function useDeposit() {
 		const pending = loadPending()
 		const aztec = bridgeWallet.wallet.value
 		if (!pending?.leafIndex || !aztec || stage.value !== "idle") return
-		log("resuming pending claim", pending)
+		// Never log the raw pending record — it holds the claim secret (a bearer credential for the
+		// private flow). Redact it.
+		log("resuming pending claim", { ...pending, secret: "<redacted>" })
 		try {
 			await claimAndConfirm(aztec, pending as PendingDeposit & { leafIndex: string })
 		} catch (e) {
