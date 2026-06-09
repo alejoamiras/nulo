@@ -6,6 +6,9 @@ import EmojiGrid from "@/components/composite/general/EmojiGrid.vue"
 import { onMounted, onUnmounted } from "vue"
 import { hashToEmoji } from "@aztec/wallet-sdk/crypto"
 
+/** Utils */
+import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
+
 /** Services */
 import { DappSessionServiceClient, type DappSession, type DappMetadata } from "@/wallet/services/dapp-session/client"
 import { type Account, AccountServiceClient } from "@/wallet/services/account/client"
@@ -65,6 +68,8 @@ const hostnameHasNonAscii = computed(() => {
 	}
 	return h.split(".").some((label) => label.startsWith("xn--"))
 })
+
+const sanitizedDappName = computed(() => (dapp.value?.name ? sanitizeWireString(dapp.value.name, 64) : ""))
 
 const dappSessionService = new DappSessionServiceClient()
 
@@ -207,7 +212,7 @@ onUnmounted(() => {
 						</template>
 					</Tooltip>
 				</Flex>
-				<span v-if="dapp?.name" :class="$style.dapp_name">{{ dapp.name }}</span>
+				<span v-if="sanitizedDappName" :class="$style.dapp_name">{{ sanitizedDappName }}</span>
 				<span :class="$style.dapp_action">{{ isReconnect ? "Reconnected" : "Connection established" }}</span>
 			</Flex>
 		</Flex>

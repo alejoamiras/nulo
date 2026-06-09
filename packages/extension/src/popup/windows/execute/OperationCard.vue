@@ -24,6 +24,9 @@ import type { Network } from "@/wallet/services/network/client"
 import { humanizeOperationKind } from "./humanize"
 import type { DraftAztecSendTxOperation, DraftSendTransactionOperation, DraftUIOperation } from "./types"
 import { parseTransferIntent, type TransferIntent } from "@/utils/transfer-intent"
+import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
+
+const safe = (s: string | undefined, max: number): string => (s ? sanitizeWireString(s, max) : "")
 
 // `DraftUIOperation` is the shared honest type (Phase 2 follow-up). Send-like
 // `feeSettings` is optional during user editing — the card v-models it via
@@ -178,7 +181,7 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 			<Icon name="check-circle" size="14" color="green" />
 			<Text size="13" weight="500" color="secondary">
 				Fee payment method set by
-				<Text size="13" weight="600" color="primary">{{ dapp?.name ?? 'the app' }}</Text>
+				<Text size="13" weight="600" color="primary">{{ safe(dapp?.name, 64) || 'the app' }}</Text>
 			</Text>
 		</Flex>
 
@@ -245,7 +248,7 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 				<Flex :class="$style.prop" align="baseline">
 					<Flex align="baseline" gap="6">
 						<Text size="14" weight="600" color="primary" data-testid="register-token-symbol">
-							{{ tokenMetadata.symbol }}
+							{{ safe(tokenMetadata.symbol, 32) }}
 						</Text>
 						<Text
 							v-if="tokenMetadata.name && tokenMetadata.name.toLowerCase() !== tokenMetadata.symbol.toLowerCase()"
@@ -253,7 +256,7 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 							color="secondary"
 							data-testid="register-token-name"
 						>
-							· {{ tokenMetadata.name }}
+							· {{ safe(tokenMetadata.name, 64) }}
 						</Text>
 					</Flex>
 					<Text size="12" color="tertiary" data-testid="register-token-decimals">
@@ -393,7 +396,7 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 			</Flex>
 			<Flex v-if="op.artifact" :class="$style.prop">
 				<Text size="12" color="secondary">Artifact:</Text>
-				<Text size="12" color="primary">{{ op.artifact.name ?? "(custom)" }}</Text>
+				<Text size="12" color="primary">{{ safe(op.artifact.name, 64) || "(custom)" }}</Text>
 			</Flex>
 		</template>
 		<template v-else-if="op.kind === 'aztec_createAuthWit'">

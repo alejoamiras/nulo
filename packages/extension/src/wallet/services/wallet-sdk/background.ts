@@ -40,6 +40,7 @@ import { ProfileService } from "@/wallet/services/profile/service"
 import { DappInteractionService } from "@/wallet/services/dapp-interaction/service"
 import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
 import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/service"
+import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { type DispatchHooks, DiscoveryQueue, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
 import { jsonStringify, getErrorMessage } from "@nulo/wallet-core/utils"
@@ -514,10 +515,13 @@ async function handleDiscovery(
 			return
 		}
 
-		// New dApp → show discovery popup (Allow/Deny)
+		// New dApp → show discovery popup (Allow/Deny). Sanitize dApp-controlled
+		// strings at the persistence boundary so downstream render sites never
+		// see raw bidi / zero-width / mixed-direction payloads (F-009 A-03).
+		const rawAppName = discovery.appName ?? discovery.appId
 		const params: DiscoveryParams = {
 			dappMetadata: {
-				name: discovery.appName ?? discovery.appId,
+				name: sanitizeWireString(rawAppName, 64),
 				url: discovery.origin,
 			},
 		}
