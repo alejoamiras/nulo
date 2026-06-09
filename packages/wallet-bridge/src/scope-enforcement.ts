@@ -221,7 +221,14 @@ function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRecord[]):
 
 	const caps = grantsOfType<AccountsCapability>(grants, "accounts")
 	if (caps.length) {
-		const permitted = caps.some((c) => c.canCreateAuthWit && c.accounts.some((a) => String(a.item) === from))
+		// A granted accounts capability legitimately omits an explicit `accounts` list: a dApp can't
+		// enumerate the wallet's accounts at connect time (it connects in order to learn them). Treat a
+		// missing list as "no per-account restriction" — `canCreateAuthWit` alone permits it. The authwit
+		// stays bounded: the wallet only signs for its own account, and the call-scope check below limits
+		// what the authwit may authorize. An explicit list, when present, is still enforced.
+		const permitted = caps.some(
+			(c) => c.canCreateAuthWit && (!Array.isArray(c.accounts) || c.accounts.some((a) => String(a.item) === from)),
+		)
 		if (!permitted) {
 			throw new Error(`Scope violation: createAuthWit for account ${from}, not permitted by granted accounts scope`)
 		}
