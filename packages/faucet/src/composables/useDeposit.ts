@@ -359,6 +359,14 @@ export function useDeposit() {
 		const pending = loadPending()
 		const aztec = bridgeWallet.wallet.value
 		if (!pending?.leafIndex || !aztec || stage.value !== "idle") return
+		// CRITICAL (codex 019eac7a): a private claim mints a NOTE to pending.recipient, which the L2 deposit
+		// message does NOT bind — so never auto-resume to a different connected account than the deposit
+		// targeted, or the note lands where the user isn't watching. Surface the mismatch, don't claim.
+		if (pending.isPrivate && bridgeWallet.selectedAccount.value !== pending.recipient) {
+			log("private claim targets a different account than the one connected — not auto-resuming")
+			error.value = `This private deposit was for ${pending.recipient}. Connect that Aztec account to claim it.`
+			return
+		}
 		// Never log the raw pending record — it holds the claim secret (a bearer credential for the
 		// private flow). Redact it.
 		log("resuming pending claim", { ...pending, secret: "<redacted>" })
