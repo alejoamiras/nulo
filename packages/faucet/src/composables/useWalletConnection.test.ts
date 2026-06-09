@@ -63,6 +63,20 @@ vi.mock("@/contracts/deployments", () => ({
 	rebuildEthInstance: vi.fn(async () => ({ address: { toString: () => "0x3" } })),
 }))
 
+vi.mock("@/contracts/bridge-deployments", () => ({
+	BRIDGE: { toString: () => "0x4" },
+	BRIDGE_TOKEN: { toString: () => "0x5" },
+	BRIDGE_PROXY: { toString: () => "0x6" },
+	rebuildBridgeInstance: vi.fn(async () => ({ address: { toString: () => "0x4" } })),
+	rebuildBridgeTokenInstance: vi.fn(async () => ({ address: { toString: () => "0x5" } })),
+	rebuildBridgeProxyInstance: vi.fn(async () => ({ address: { toString: () => "0x6" } })),
+}))
+
+vi.mock("@nulo/bridge-core/artifacts", () => ({
+	bridgeProxyArtifact: { name: "BridgeProxy" },
+	tokenBridgeArtifact: { name: "TokenBridge" },
+}))
+
 vi.mock("@defi-wonderland/aztec-standards/dist/src/artifacts/Dripper.js", () => ({
 	DripperContractArtifact: { name: "Dripper" },
 }))
@@ -150,7 +164,8 @@ describe("useWalletConnection", () => {
 		expect(c.status.value).toBe("connected")
 		expect(c.selectedAccount.value).toBe("0xa1b2c3")
 		expect(c.accounts.value).toEqual([{ address: "0xa1b2c3", alias: "Main" }])
-		expect(wallet.registerContract).toHaveBeenCalledTimes(3)
+		// 6 = the combined faucet + bridge set: dripper, usdc, eth, proxy, token, bridge.
+		expect(wallet.registerContract).toHaveBeenCalledTimes(6)
 	})
 
 	it("capability rejection lands in 'error' state with the capability-rejected category", async () => {
