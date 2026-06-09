@@ -103,7 +103,7 @@ export function useWithdraw() {
 
 	/** Proven-epoch wait → witness → L1 consume, from a persisted exit. Drives stage + the countdown. */
 	async function doConsumeExit(p: PendingWithdraw): Promise<void> {
-		const l1wallet = l1.walletClient.value
+		const l1wallet = l1.ensureWalletClient()
 		const l1addr = l1.address.value
 		if (!l1wallet || !l1addr) {
 			error.value = "Connect your Ethereum wallet to finish the withdraw."
@@ -285,7 +285,8 @@ export function useWithdraw() {
 	}
 
 	// Auto-resume once the L1 wallet is connected (the L2 exit is already on-chain). Watch isConnected
-	// (flips true once) rather than walletClient (rebuilt on every accountsChanged → re-fires the resume).
+	// (flips true once) not walletClient (which rebuilds on every accountsChanged → re-fires); a
+	// transiently-null walletClient at trigger time is rebuilt by ensureWalletClient() in doConsumeExit.
 	watch(
 		() => l1.isConnected.value,
 		(c) => {

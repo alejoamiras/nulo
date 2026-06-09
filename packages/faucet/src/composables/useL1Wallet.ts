@@ -82,6 +82,18 @@ async function switchToSepolia() {
 	}
 }
 
+/** Return the L1 wallet client, rebuilding it from the live provider if a transient `accountsChanged`
+ *  nulled it while the account stayed connected (multi-wallet provider shuffling). The consume path needs
+ *  a live client, so it calls this rather than reading the (possibly transiently-null) ref directly. */
+function ensureWalletClient(): WalletClient | null {
+	if (walletClient.value) return walletClient.value
+	const provider = getProvider()
+	if (address.value && provider) {
+		walletClient.value = createWalletClient({ account: address.value, chain: sepolia, transport: custom(provider) })
+	}
+	return walletClient.value
+}
+
 export function useL1Wallet() {
 	return {
 		address,
@@ -91,6 +103,7 @@ export function useL1Wallet() {
 		isConnecting,
 		error,
 		walletClient,
+		ensureWalletClient,
 		publicClient,
 		connect,
 		disconnect,
