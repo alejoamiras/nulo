@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ref } from "vue"
 
 const depositFn = vi.fn(async (_amount: bigint, _isPrivate: boolean) => {})
+const hasPendingRef = ref(false)
 
 vi.mock("@/composables/useDeposit", () => ({
 	useDeposit: () => ({
 		stage: ref("idle"),
 		error: ref(null),
-		hasPending: ref(false),
+		hasPending: hasPendingRef,
 		deposit: depositFn,
 		discardPending: vi.fn(),
 	}),
@@ -26,7 +27,10 @@ import DepositCard from "./DepositCard.vue"
 const sel = (t: string) => `[data-testid="${t}"]`
 
 describe("DepositCard privacy toggle", () => {
-	beforeEach(() => depositFn.mockClear())
+	beforeEach(() => {
+		depositFn.mockClear()
+		hasPendingRef.value = false
+	})
 
 	it("defaults to public — the bearer warning is hidden", () => {
 		const w = mount(DepositCard)
@@ -57,5 +61,11 @@ describe("DepositCard privacy toggle", () => {
 		await w.find(sel(TESTIDS.depositModePrivate)).trigger("click")
 		await w.find(sel(TESTIDS.depositSubmit)).trigger("click")
 		expect(depositFn).toHaveBeenCalledWith(100_000_000n, true)
+	})
+
+	it("disables the deposit button while a deposit is pending (guards the recovery record)", () => {
+		hasPendingRef.value = true
+		const w = mount(DepositCard)
+		expect(w.find(sel(TESTIDS.depositSubmit)).attributes("disabled")).toBeDefined()
 	})
 })
