@@ -48,12 +48,19 @@ export type DepositStage = "idle" | "minting" | "approving" | "depositing" | "sy
 const PENDING_KEY = "nulo-bridge-pending-deposit"
 
 interface PendingDeposit {
+	/** Public deposit: the recipient-bound claim secret (plaintext is acceptable — it's bound to the
+	 *  recipient in the L1 message). Private deposits leave this empty and use `sealedSecret`. */
 	readonly secret: string
 	readonly recipient: string
 	readonly amount: string
-	/** Recipient's public balance before the deposit — claim is confirmed by the balance crossing this + amount. */
+	/** Recipient's balance before the deposit — claim is confirmed by the balance crossing this + amount. */
 	readonly preBalance: string
 	readonly leafIndex?: string
+	/** Private deposit: the BEARER claim secret sealed at rest (recovery-crypto). `secret` stays empty. */
+	readonly sealedSecret?: string
+	/** secretHash hex — rebuilds the per-record seal binding when unsealing on claim/resume. */
+	readonly secretHashHex?: string
+	readonly isPrivate?: boolean
 }
 
 function persistPending(p: PendingDeposit): void {
@@ -86,7 +93,9 @@ function safeBigInt(s: string): bigint | null {
 	}
 }
 
-const isMsgNotReady = (msg: string): boolean => /l1_to_l2_msg_exists|nonexistent L1-to-L2/i.test(msg)
+// "message not in state" is the private-claim revert wording; the public claim reverts with
+// "l1_to_l2_msg_exists" — both mean "the L1→L2 message isn't consumable by this PXE yet" (codex 019eac7a).
+const isMsgNotReady = (msg: string): boolean => /l1_to_l2_msg_exists|nonexistent L1-to-L2|message not in state/i.test(msg)
 
 // Module-level so it holds across composable instances: only one claim in flight at a time.
 let claimInFlight = false
@@ -118,12 +127,14 @@ export function useDeposit() {
 	const l1TxHash = ref<string | null>(null)
 	const hasPending = ref(loadPending() !== null)
 
-	async function readPublicBalance(wallet: unknown, recipient: AztecAddress): Promise<bigint> {
+	async function readBridgeBalance(wallet: unknown, recipient: AztecAddress, isPrivate = false): Promise<bigint> {
 		const token = await Contract.at(BRIDGE_TOKEN, TokenContractArtifact, wallet as never)
-		// readBalance unwraps the SimulationResult to a real bigint — a raw cast yields the wrapper
-		// object, which then stringifies to "[object Object]" and blows up the later BigInt() coercion.
-		const bal = await readBalance(wallet as never, token, "balance_of_public", recipient)
-		log("balance_of_public", recipient.toString(), "=", bal.toString())
+		// readBalance unwraps the SimulationResult / utility result to a real bigint — a raw cast yields the
+		// wrapper object, which stringifies to "[object Object]" and blows up the later BigInt() coercion.
+		// balance_of_private is a utility read (executeUtility); balance_of_public is an on-chain view.
+		const fn = isPrivate ? "balance_of_private" : "balance_of_public"
+		const bal = await readBalance(wallet as never, token, fn, recipient)
+		log(fn, recipient.toString(), "=", bal.toString())
 		return bal
 	}
 
@@ -155,7 +166,7 @@ export function useDeposit() {
 		const secret = Fr.fromString(pending.secret)
 		const pre = safeBigInt(pending.preBalance)
 		const target = pre === null ? null : pre + amount
-		const isCredited = async () => target !== null && (await readPublicBalance(wallet, recipientAddr)) >= target
+		const isCredited = async () => target !== null && (await readBridgeBalance(wallet, recipientAddr, pending.isPrivate)) >= target
 
 		if (await isCredited()) {
 			log("already credited — nothing to claim")
@@ -235,7 +246,7 @@ export function useDeposit() {
 			const secret = Fr.random()
 			const secretHash = await computeSecretHash(secret)
 			const recipientAddr = AztecAddress.fromString(recipient)
-			const preBalance = await readPublicBalance(aztec, recipientAddr)
+			const preBalance = await readBridgeBalance(aztec, recipientAddr, isPrivate)
 			persistPending({ secret: secret.toString(), recipient, amount: amount.toString(), preBalance: preBalance.toString() })
 			hasPending.value = true
 
