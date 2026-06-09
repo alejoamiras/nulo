@@ -23,4 +23,17 @@ Implementation order (folded): PV3-seal (per-record key + self-test) → PV1 `cl
 ## Plan once codex responds
 Implement in `useDeposit.claimAndConfirm`: `claim_private` branch + `balance_of_private` credit-confirm; wire the seal (recovery-crypto) into the private persist/resume; then the `DepositCard` public/private toggle (ungate private). Keep the private path gated until the seal lands — never persist a plaintext bearer secret.
 
-## Status: in progress (the isPrivate plumbing in useDeposit.deposit landed in b2f6ed2; the rest is gated on this consult).
+## 2026-06-09 — PV1 deposit + PV3 seal IMPLEMENTED (gated by the absent UI toggle)
+Commits on feat/bridge-private:
+- `b2f6ed2` isPrivate plumbing in deposit() (depositToAztecPrivate branch).
+- `9e9b604` per-record seal key + sig normalize (CRITICAL 1, HIGH-encoding).
+- `a35d83d` sealRecordSecret/openRecordSecret + pre-deposit self-test (HIGH 1).
+- `578f1e1` groundwork: sealed-secret type fields, balance_of_private wiring, widened classifier (HIGH 2 + MEDIUM 2).
+- `afc2632` wire the private deposit: seal-on-deposit BEFORE the mint, unseal-on-claim, claim_private (MEDIUM 1 key-first/no-plaintext).
+- `c2a8fd4` guard private auto-resume against an account mismatch (CRITICAL 2).
+
+**All 6 codex findings addressed.** The private deposit path is fully wired in `useDeposit` but UNREACHABLE from the UI (no caller passes `isPrivate=true` — the DepositCard toggle is the gate).
+
+**NEEDS MANUAL TEST** (cannot prove headless — real Aztec + Rabby signatures + a private-note claim): once the toggle lands, a testnet private deposit should: 2 Ethereum signs (seal recovery key + self-test) → mint/approve/depositToAztecPrivate → sync-gate → ONE Aztec claim_private prompt → balance_of_private credited. Expected: note lands on `pending.recipient`; a refresh resumes (re-signs to unseal); a mismatched connected account refuses to auto-claim.
+
+Next: PV1 DepositCard public/private toggle + bearer-credential warning → then PV2 (private withdraw: burn_private + exit_to_l1_private).

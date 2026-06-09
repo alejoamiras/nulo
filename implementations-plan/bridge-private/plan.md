@@ -12,7 +12,7 @@ Goal: add the PRIVATE deposit + withdraw paths to the faucet bridge, testnet-val
 ## Phases (status = source of truth)
 - **PV1 — private deposit** 🔄 — `useDeposit` gains an `isPrivate` mode: L1 `depositToAztecPrivate(amount, secretHash)` (no recipient) → `claim_private`; seal the secret on persist; confirm credit via `balance_of_private`. `DepositCard` public/private toggle.
 - **PV2 — private withdraw** ⬜ — `useWithdraw` gains an `isPrivate` mode: `burn_private` auth-wit → `exit_to_l1_private`; the proving→consume tail is identical to public. `WithdrawCard` toggle.
-- **PV3 — seal + bearer warning** ⬜ — wire `recovery-crypto` into the private deposit's persist/resume; add the bearer-credential UI warning; minimize the plaintext-secret window.
+- **PV3 — seal + bearer warning** 🔄 (seal DONE: per-record key + self-test + sealRecordSecret/openRecordSecret; bearer-warning UI lands with the PV1 toggle) — wire `recovery-crypto` into the private deposit's persist/resume; add the bearer-credential UI warning; minimize the plaintext-secret window.
 - **PV4 — scopes + tests** ⬜ — verify the manifest private scopes; capabilities + component tests; `bun run audit:vue`.
 - **PV5 — gates** ⬜ — `/code-review max --fix` → codex post-impl audit → address high/critical → stop.
 
