@@ -94,9 +94,12 @@ function safeBigInt(s: string): bigint | null {
 	}
 }
 
-// "message not in state" is the private-claim revert wording; the public claim reverts with
-// "l1_to_l2_msg_exists" — both mean "the L1→L2 message isn't consumable by this PXE yet" (codex 019eac7a).
-const isMsgNotReady = (msg: string): boolean => /l1_to_l2_msg_exists|nonexistent L1-to-L2|message not in state/i.test(msg)
+// The L1→L2 message isn't consumable until the sequencer folds it into an L2 block AND this wallet's PXE
+// syncs that block — until then the claim simulate reverts, and the wording differs by path: public
+// "l1_to_l2_msg_exists"; private "No L1 to L2 message found for message hash …" (the ACTUAL testnet
+// wording — codex's "message not in state" guess was wrong). All are transient → poll, never throw.
+const isMsgNotReady = (msg: string): boolean =>
+	/l1_to_l2_msg_exists|nonexistent L1-to-L2|message not in state|No L1 to L2 message found/i.test(msg)
 
 // Module-level so it holds across composable instances: only one claim in flight at a time.
 let claimInFlight = false
