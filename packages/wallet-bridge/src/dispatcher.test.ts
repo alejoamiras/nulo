@@ -13,7 +13,7 @@ import type {
 	IExecutionRunner,
 	INetworkReader,
 } from "./services-contract"
-import type { IDappSessionRef, INetworkRef } from "./session-types"
+import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { LogLevel, type ILogger } from "@nulo/wallet-core/logger"
 
 // __VERSION__ is a vite define-injected global at build time; provide it for tests.
@@ -397,7 +397,7 @@ describe("dispatcher.handleGetAccounts — plan-v3 contract", () => {
 			accountAliases: { [caip]: "my-app-alias" },
 			capabilityGrants: [
 				{
-					capability: { type: "accounts", canGet: true, accounts: [caip] } as Capability,
+					capability: { type: "accounts", canGet: true, accounts: [{ alias: "my-app-alias", item: caip }] } as Capability,
 					grantedAt: 1,
 				},
 			],
@@ -951,7 +951,7 @@ describe("Phase 0.5: session lookup consolidation (TOCTOU defense)", () => {
 			accounts: ["aztec:0:0xaaa"],
 			capabilityGrants: [
 				{
-					capability: { type: "accounts", canGet: true, accounts: ["aztec:0:0xaaa"] },
+					capability: { type: "accounts", canGet: true, accounts: [{ alias: "a", item: "aztec:0:0xaaa" }] },
 					grantedAt: 1,
 				} as GrantedCapabilityRecord,
 			],

@@ -93,7 +93,7 @@ describe("F-005: account-scope arrays validated against session-approved account
 		const grants = [
 			grant({
 				type: "simulation",
-				transactions: { scope: [{ contracts: "*", functions: "*" }] },
+				transactions: { scope: [{ contract: "*", function: "*" }] },
 			} as Capability),
 		]
 		const args = [{ calls: [] }, { from: ADDR_A }] // empty-calls fast-path
@@ -104,7 +104,7 @@ describe("F-005: account-scope arrays validated against session-approved account
 		const grants = [
 			grant({
 				type: "simulation",
-				transactions: { scope: [{ contracts: "*", functions: "*" }] },
+				transactions: { scope: [{ contract: "*", function: "*" }] },
 			} as Capability),
 		]
 		const args = [
@@ -118,7 +118,7 @@ describe("F-005: account-scope arrays validated against session-approved account
 		const grants = [
 			grant({
 				type: "simulation",
-				transactions: { scope: [{ contracts: "*", functions: "*" }] },
+				transactions: { scope: [{ contract: "*", function: "*" }] },
 			} as Capability),
 		]
 		const args = [{ calls: [] }, { from: ADDR_A, scopes: [`aztec:0:${ADDR_A}`] }]
@@ -142,7 +142,7 @@ describe("F-005: account-scope arrays validated against session-approved account
 		const grants = [
 			grant({
 				type: "transaction",
-				scope: [{ contracts: "*", functions: "*" }],
+				scope: [{ contract: "*", function: "*" }],
 			} as Capability),
 		]
 		const args = [{ calls: [] }, { from: ADDR_A, additionalScopes: [`aztec:0:${ADDR_B}`] }]
@@ -153,7 +153,7 @@ describe("F-005: account-scope arrays validated against session-approved account
 		const grants = [
 			grant({
 				type: "transaction",
-				scope: [{ contracts: "*", functions: "*" }],
+				scope: [{ contract: "*", function: "*" }],
 			} as Capability),
 		]
 		const args = [{ calls: [] }, { from: ADDR_A, additionalScopes: [`aztec:0:${ADDR_B}`] }]
