@@ -40,7 +40,7 @@ import { useBridgeWallet } from "./useBridgeWallet"
 import { ERC20_ABI } from "./useL1Usdc"
 import { useL1Wallet } from "./useL1Wallet"
 
-// Verbose tracing while the bridge flows are being hardened — ids, stages, tx hashes ONLY.
+// Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
 const log = (...args: unknown[]) => console.log("[bridge:deposit]", ...args)
 
 const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://rpc.testnet.aztec-labs.com"
@@ -107,13 +107,22 @@ function wireDepositDeps(): void {
 			const node = createAztecNodeClient(NODE_URL)
 			try {
 				const receipt = await node.getTxReceipt(TxHash.fromString(txHash))
+				// TxStatus (4.2.0) is BLOCK-finalization state with NO "success" value: a confirmed tx
+				// reads checkpointed -> proven -> finalized. Inclusion at ANY of those = landed; the
+				// separate executionResult carries the revert signal. Waiting for "finalized" alone
+				// stranded confirmed claims at "Confirming" for epochs.
 				const status = String(receipt?.status ?? "pending").toLowerCase()
-				if (status.includes("success") || status.includes("finalized")) return "success"
+				const included = /checkpointed|proven|finalized|success|mined/.test(status)
+				if (included) {
+					const exec = String(receipt?.executionResult ?? "success").toLowerCase()
+					return exec.includes("revert") ? "reverted" : "success"
+				}
 				if (status.includes("dropped")) return "dropped"
 				if (status.includes("reverted")) return "reverted"
 				return "pending"
-			} catch {
+			} catch (e) {
 				// A dead RPC must read as connectivity, never as a slow claim (plan D2).
+				log("receipt lookup failed:", e instanceof Error ? e.message : String(e))
 				return "unreachable"
 			}
 		},
@@ -125,7 +134,7 @@ function wireDepositDeps(): void {
  * irreversible step, then the engine's claim tail. Private deposits seal the bearer secret + its
  * metadata BEFORE the first L1 tx (trust-aware: 1 signature steady-state, 2 on a wallet's first
  * private bridge), and re-seal the finalized envelope (leafIndex) with the retained in-memory
- * key — zero extra signatures.
+ * key - zero extra signatures.
  */
 export function useDepositFlow() {
 	wireDepositDeps()
@@ -185,13 +194,13 @@ export function useDepositFlow() {
 			if (isPrivate) {
 				const provider = providerFingerprint()
 				const trusted = isSealTrusted(localStorage, sepolia.id, from, provider)
-				log(trusted ? "seal: trusted wallet — one signature" : "seal: first private bridge for this wallet — two signatures")
+				log(trusted ? "seal: trusted wallet - one signature" : "seal: first private bridge for this wallet - two signatures")
 				setRecordStep(
 					id,
 					"sealing",
 					trusted
-						? "one Ethereum signature — encrypts the recovery secret"
-						: "two Ethereum signatures — encrypt + verify determinism",
+						? "one Ethereum signature - encrypts the recovery secret"
+						: "two Ethereum signatures - encrypt + verify determinism",
 				)
 				const sign = (m: string) =>
 					runOnLane("l1", () => wallet.signMessage({ account: from, message: m } as never) as Promise<string>)
@@ -210,7 +219,7 @@ export function useDepositFlow() {
 				// storage failure here would leave a private record without its only recovery blob.
 				const sealed = journal.records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
 				if (!sealed?.sealedEnvelope) {
-					throw new Error("Could not persist the sealed recovery secret — aborting before the deposit (storage full?).")
+					throw new Error("Could not persist the sealed recovery secret - aborting before the deposit (storage full?).")
 				}
 			}
 
@@ -238,7 +247,7 @@ export function useDepositFlow() {
 				await l1.publicClient.waitForTransactionReceipt({ hash: approveHash })
 				markApproveOutcome(id, "done")
 			} else {
-				log("allowance sufficient — skipping approve")
+				log("allowance sufficient - skipping approve")
 				markApproveOutcome(id, "skipped")
 			}
 
@@ -256,7 +265,7 @@ export function useDepositFlow() {
 					account: from,
 				} as never),
 			)
-			// Persisted the moment the hash exists — leafIndex stays chain-recoverable from here on.
+			// Persisted the moment the hash exists - leafIndex stays chain-recoverable from here on.
 			updateRecord(id, { depositTxHash: depositTxHash as string })
 			setRecordStep(id, "depositing", "waiting for the Ethereum confirmation")
 			const receipt = await l1.publicClient.waitForTransactionReceipt({ hash: depositTxHash as `0x${string}` })
@@ -295,9 +304,9 @@ export function useDepositFlow() {
 				const rec = journal.records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
 				if (rec && !rec.depositTxHash && isUserRejection(e)) {
 					discard(id)
-					error.value = "Rejected in your wallet — nothing was sent."
+					error.value = "Rejected in your wallet - nothing was sent."
 				} else if (rec) {
-					flagRecordError(id, `${msg}. Your funds are not lost — this bridge stays in Pending.`)
+					flagRecordError(id, `${msg}. Your funds are not lost - this bridge stays in Pending.`)
 				}
 			}
 		} finally {

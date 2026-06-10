@@ -63,7 +63,7 @@ async function onClick() {
 		</div>
 
 		<div v-else-if="status === 'capability-approval'" class="capability">
-			<p>Approve the bridge's permissions in your wallet — claim, exit, and balance reads on the bridge contracts.</p>
+			<p>Approve the bridge's permissions in your wallet - claim, exit, and balance reads on the bridge contracts.</p>
 			<AppButton @click="retryCapabilities">Approve permissions</AppButton>
 		</div>
 
@@ -91,7 +91,7 @@ async function onClick() {
 	gap: 10px;
 	padding: 8px 12px;
 	border: 1px solid var(--nulo-outline);
-	border-radius: 999px;
+	border-radius: 0;
 }
 
 .chip .label {

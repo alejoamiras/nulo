@@ -189,7 +189,7 @@ describe("TokenCard", () => {
 		expect(row.text()).toContain("Reverted")
 	})
 
-	it("ok emphasis persists past 3s — no auto-decay timer (user-noticed-confirmation fix)", async () => {
+	it("ok emphasis persists past 3s - no auto-decay timer (user-noticed-confirmation fix)", async () => {
 		vi.useFakeTimers()
 		const w = makeCard()
 		await w.get(`[data-testid="${TESTIDS.btnDripPublic}"]`).trigger("click")
@@ -337,8 +337,8 @@ describe("TokenCard", () => {
 
 		it("balance row renders em-dash placeholders (no live data)", () => {
 			const w = makeDisconnectedCard()
-			expect(w.get(`[data-testid="${TESTIDS.balancePublic}"]`).text()).toBe("—")
-			expect(w.get(`[data-testid="${TESTIDS.balancePrivate}"]`).text()).toBe("—")
+			expect(w.get(`[data-testid="${TESTIDS.balancePublic}"]`).text()).toBe("-")
+			expect(w.get(`[data-testid="${TESTIDS.balancePrivate}"]`).text()).toBe("-")
 		})
 
 		it("carries data-connected=undefined on the card root", () => {

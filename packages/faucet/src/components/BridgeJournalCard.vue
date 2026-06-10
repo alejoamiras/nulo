@@ -42,30 +42,30 @@ const stageLabel = computed(() => {
 	if (r.direction === "deposit") {
 		switch (stage.value) {
 			case "depositing":
-				return "Depositing on Ethereum — confirm the transaction(s) in your Ethereum wallet."
+				return "Depositing on Ethereum - confirm the transaction(s) in your Ethereum wallet."
 			case "syncing":
-				return "Waiting for the message to sync to Aztec — no signature needed (~1–2 min)."
+				return "Waiting for the message to sync to Aztec - no signature needed (~1–2 min)."
 			case "claimable":
 				return r.isPrivate
 					? "Ready to resume. Claiming asks your Ethereum wallet to unseal the recovery secret, waits for sync if needed, then asks your Aztec wallet to confirm."
 					: "Ready to resume. Claiming waits for sync if needed, then asks your Aztec wallet to confirm."
 			case "claiming":
-				return "Claiming on Aztec — confirm in your Aztec wallet."
+				return "Claiming on Aztec - confirm in your Aztec wallet."
 			default:
 				return "Bridged to Aztec ✓"
 		}
 	}
 	switch (stage.value) {
 		case "exiting":
-			return "Exiting Aztec — confirm in your Aztec wallet."
+			return "Exiting Aztec - confirm in your Aztec wallet."
 		case "proving":
 			return rt.value.provenBlock !== undefined && rt.value.targetBlock !== undefined
-				? `Waiting for Aztec to prove the exit — proven block ${rt.value.provenBlock} of ${rt.value.targetBlock}. Proving lands in epoch batches: the number sits, then jumps.`
-				: "Waiting for Aztec to prove the exit — proving lands in epoch batches and can take a while."
+				? `Waiting for Aztec to prove the exit - proven block ${rt.value.provenBlock} of ${rt.value.targetBlock}. Proving lands in epoch batches: the number sits, then jumps.`
+				: "Waiting for Aztec to prove the exit - proving lands in epoch batches and can take a while."
 		case "consumable":
 			return "Proven. Finish on Ethereum to release the funds."
 		case "consuming":
-			return "Releasing on Ethereum — confirm in your Ethereum wallet."
+			return "Releasing on Ethereum - confirm in your Ethereum wallet."
 		default:
 			return "Released to Ethereum ✓"
 	}
@@ -89,7 +89,7 @@ const stepLine = computed(() => {
 	const step = rt.value.step
 	if (!step) return null
 	const detail = rt.value.stepDetail
-	return detail ? `${STEP_COPY[step]} — ${detail}` : STEP_COPY[step]
+	return detail ? `${STEP_COPY[step]} - ${detail}` : STEP_COPY[step]
 })
 
 /** A soft note (e.g. the 30-min "still confirming") renders even without an attention state. */
@@ -211,7 +211,7 @@ function onDiscard() {
 		</div>
 
 		<p v-if="discardArmed && stage !== 'done' && record.isPrivate && record.direction === 'deposit'" class="discard-warning">
-			Discarding destroys the only copy of this claim's sealed recovery secret — the deposited funds become
+			Discarding destroys the only copy of this claim's sealed recovery secret - the deposited funds become
 			unclaimable. Testnet only.
 		</p>
 	</article>

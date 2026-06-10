@@ -40,7 +40,7 @@ function wd(over: Partial<WithdrawJournalRecord> = {}): WithdrawJournalRecord {
 const states = (rec: DepositJournalRecord | WithdrawJournalRecord, rt: RecordRuntime = {}) =>
 	Object.fromEntries(stepperPhases(rec, rt).map((p) => [p.key, p.state]))
 
-describe("stepperPhases — deposit matrix", () => {
+describe("stepperPhases - deposit matrix", () => {
 	it("private fresh record mid-seal: SEAL active, the rest pending", () => {
 		expect(states(dep(), { step: "sealing" })).toEqual({
 			seal: "active",
@@ -67,7 +67,7 @@ describe("stepperPhases — deposit matrix", () => {
 		const base = dep({ depositTxHash: "0xt" })
 		expect(states(base, { approveOutcome: "skipped" }).approve).toBe("skipped")
 		expect(states(base, { approveOutcome: "done" }).approve).toBe("done")
-		expect(states(base, {}).approve).toBe("done") // absent (reload) — no false skipped badge
+		expect(states(base, {}).approve).toBe("done") // absent (reload) - no false skipped badge
 	})
 
 	it("depositTxHash without leafIndex: DEPOSIT active (waiting for Ethereum)", () => {
@@ -114,7 +114,7 @@ describe("stepperPhases — deposit matrix", () => {
 	})
 })
 
-describe("stepperPhases — withdraw matrix", () => {
+describe("stepperPhases - withdraw matrix", () => {
 	it("provisional (no exitTxHash): EXIT active", () => {
 		expect(states(wd({ exitTxHash: undefined }), { step: "exiting" }).exit).toBe("active")
 	})

@@ -112,7 +112,7 @@ export async function readBalance(
 	//   balance_of_public:  #[external("public")] #[view]   ← on-chain public view
 	//   balance_of_private: #[external("utility")]           ← off-chain utility
 	// Public views are read via `interaction.simulate({from})` and return a
-	// `SimulationResult { result, … }` — we extract `.result` not the wrapper
+	// `SimulationResult { result, … }` - we extract `.result` not the wrapper
 	// (passing the wrapper to a coercer that expects bigint silently returns 0n).
 	if (fn === "balance_of_public") {
 		const interaction = method(account)

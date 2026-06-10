@@ -133,7 +133,7 @@ describe("useBridgeJournal engine", () => {
 		kv = memKV()
 	})
 
-	it("② rediscovered claimable deposit NEVER auto-claims — zero claim/sign calls", async () => {
+	it("② rediscovered claimable deposit NEVER auto-claims - zero claim/sign calls", async () => {
 		const deps = baseDeps(kv)
 		const claim = smartClaimFake()
 		connectJournalDeps({ ...deps, claim })
@@ -199,7 +199,7 @@ describe("useBridgeJournal engine", () => {
 
 	it("⑤ a single transient dropped read does NOT clear claimTxHash; three consecutive do", async () => {
 		const deps = baseDeps(kv)
-		// The claim was already consumed (simulate reverts message-gone) — the probe verifies true.
+		// The claim was already consumed (simulate reverts message-gone) - the probe verifies true.
 		const claim = vi.fn(async () => ({
 			simulate: async () => {
 				throw new Error("No L1 to L2 message found for message hash 0xdead")
@@ -233,7 +233,7 @@ describe("useBridgeJournal engine", () => {
 
 	it("⑰ receipt success but the record's message STILL claimable ⇒ unknown-outcome, not done", async () => {
 		const deps = baseDeps(kv)
-		// simulate always succeeds — the probe sees the message still claimable.
+		// simulate always succeeds - the probe sees the message still claimable.
 		const claim = vi.fn(async () => ({
 			simulate: async () => ({}),
 			send: async () => ({ txHash: "0xclaimtx" }),
@@ -366,7 +366,7 @@ describe("useBridgeJournal engine", () => {
 		expect(deps2.signL1).toHaveBeenCalledTimes(1)
 	})
 
-	it("⑩ rediscovered consumeTxHash waits on the receipt — consume() never re-prompts", async () => {
+	it("⑩ rediscovered consumeTxHash waits on the receipt - consume() never re-prompts", async () => {
 		const deps = baseDeps(kv)
 		connectJournalDeps(deps)
 		addRecord(mkWithdraw("0xexit", { consumeTxHash: "0xprior" }))
@@ -450,7 +450,7 @@ describe("useBridgeJournal engine", () => {
 		expect(useBridgeJournal().runtime.value["wd-pending-live"]?.attention).toBeUndefined()
 	})
 
-	it("P1: the engine narrates — steps observable during the flow, cleared at exit", async () => {
+	it("P1: the engine narrates - steps observable during the flow, cleared at exit", async () => {
 		const deps = baseDeps(kv)
 		const seen: (string | undefined)[] = []
 		let sent = false
@@ -476,7 +476,7 @@ describe("useBridgeJournal engine", () => {
 		expect(useBridgeJournal().records.value.find((r) => r.id === "0xnarrate")?.completedAt).toBe(999)
 	})
 
-	it("P1: pending-forever NEVER dead-ends into unknown-outcome — soft note after the round cap", async () => {
+	it("P1: pending-forever NEVER dead-ends into unknown-outcome - soft note after the round cap", async () => {
 		const deps = baseDeps(kv)
 		deps.claimReceiptStatus = vi.fn(async () => "pending" as const)
 		connectJournalDeps({ ...deps, claim: smartClaimFake() })
@@ -495,7 +495,7 @@ describe("useBridgeJournal engine", () => {
 		const deps = baseDeps(kv)
 		const details: (string | undefined)[] = []
 		deps.claimReceiptStatus = vi.fn(async () => "unreachable" as const)
-		// The unreachable narration is set right before the inter-poll wait — sample it there.
+		// The unreachable narration is set right before the inter-poll wait - sample it there.
 		const waitMs = async () => {
 			details.push(useBridgeJournal().runtime.value["0xdeadrpc"]?.stepDetail)
 		}
@@ -507,7 +507,7 @@ describe("useBridgeJournal engine", () => {
 		expect(useBridgeJournal().runtime.value["0xdeadrpc"]?.attention).toBeUndefined()
 	})
 
-	it("P1: discard mid-wait bumps the generation — the chain dies, nothing resurrects", async () => {
+	it("P1: discard mid-wait bumps the generation - the chain dies, nothing resurrects", async () => {
 		const deps = baseDeps(kv)
 		let polls = 0
 		deps.claimReceiptStatus = vi.fn(async () => {
@@ -524,7 +524,7 @@ describe("useBridgeJournal engine", () => {
 		expect(polls).toBeLessThan(10)
 	})
 
-	it("P1: an in-session completion auto-hides (provenance) — record retained, never discarded", async () => {
+	it("P1: an in-session completion auto-hides (provenance) - record retained, never discarded", async () => {
 		const deps = baseDeps(kv)
 		connectJournalDeps({ ...deps, claim: smartClaimFake() })
 		addRecord(mkDeposit("0xhide"))
@@ -567,7 +567,7 @@ describe("useBridgeJournal engine", () => {
 		// Simulate the 30-min soft-cap note left by an earlier chain.
 		connectJournalDeps({ ...deps, claim })
 		const { runtime } = useBridgeJournal()
-		runtime.value = { "0xstale-note": { note: "Still confirming after ~30 minutes — slow testnet." } }
+		runtime.value = { "0xstale-note": { note: "Still confirming after ~30 minutes - slow testnet." } }
 		await runDepositClaim("0xstale-note")
 		expect(useBridgeJournal().records.value.find((r) => r.id === "0xstale-note")?.completedAt).toBe(999)
 		expect(useBridgeJournal().runtime.value["0xstale-note"]?.note).toBeUndefined()
@@ -587,7 +587,7 @@ describe("useBridgeJournal engine", () => {
 		const deps = baseDeps(kv)
 		const claim = vi.fn(async () => ({
 			simulate: async () => {
-				throw new Error("boom — not a sync revert")
+				throw new Error("boom - not a sync revert")
 			},
 			send: async () => ({ txHash: "0x" }),
 		}))
@@ -645,7 +645,7 @@ describe("useBridgeJournal engine", () => {
 		expect(useBridgeJournal().lastCompleted.value).toBeNull() // No local toast for a remote win.
 	})
 
-	it("S13: foreground CAS — claim suppresses the card; stale release no-ops; takeover works", async () => {
+	it("S13: foreground CAS - claim suppresses the card; stale release no-ops; takeover works", async () => {
 		const deps = baseDeps(kv)
 		connectJournalDeps(deps)
 		addRecord(mkDeposit("0xfg"))

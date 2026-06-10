@@ -84,7 +84,7 @@ describe("BridgeForm", () => {
 		expect(w.find(sel(TESTIDS.bridgeFrom)).attributes("data-chain")).toBe("ethereum")
 		expect(w.find(sel(TESTIDS.bridgeTo)).attributes("data-chain")).toBe("aztec")
 		expect(w.find(sel(TESTIDS.bridgeBalanceL1)).text()).toContain("500")
-		// Both lines visible WITHOUT touching the toggle — the user is never blind on private.
+		// Both lines visible WITHOUT touching the toggle - the user is never blind on private.
 		expect(w.find(sel(TESTIDS.bridgeBalanceL2Public)).text()).toContain("200")
 		expect(w.find(sel(TESTIDS.bridgeBalanceL2Private)).text()).toContain("50")
 		expect(w.find(sel(TESTIDS.bridgeBalanceL2Public)).attributes("data-active")).toBe("true")
@@ -163,7 +163,7 @@ describe("BridgeForm", () => {
 		depositFn.mockImplementationOnce(async (_a: bigint, _p: boolean, opts?: { onRecord?: (id: string) => void }) => {
 			addRecord(activeFixture("0xtakeover"))
 			opts?.onRecord?.("0xtakeover")
-			await new Promise(() => {}) // the flow keeps running — the stepper must not depend on it settling
+			await new Promise(() => {}) // the flow keeps running - the stepper must not depend on it settling
 		})
 		const w = mount(BridgeForm)
 		await w.find(sel(TESTIDS.bridgeAmount)).setValue("100")
@@ -207,7 +207,7 @@ describe("BridgeForm", () => {
 		await w.find(sel(TESTIDS.bridgeSubmit)).trigger("click")
 		await w.vm.$nextTick()
 		await w.vm.$nextTick()
-		// The stepper follows the NEW id (the form reads the engine's activeFlowId — no stale copy)…
+		// The stepper follows the NEW id (the form reads the engine's activeFlowId - no stale copy)…
 		expect(w.find(sel(TESTIDS.stepper)).exists()).toBe(true)
 		expect(w.find(sel(TESTIDS.stepper)).attributes("data-id")).toBe("0xexit99")
 		// …and the journal still suppresses it (exactly ONE surface for a non-completed record).
@@ -230,7 +230,7 @@ describe("BridgeForm", () => {
 		await w.vm.$nextTick()
 		expect(w.find(sel(TESTIDS.receipt)).exists()).toBe(true)
 		expect(w.findAll(sel(TESTIDS.receiptLink))).toHaveLength(2)
-		// Cross-tab discard cannot blank the receipt — it renders the snapshot.
+		// Cross-tab discard cannot blank the receipt - it renders the snapshot.
 		__resetJournalForTests()
 		await w.vm.$nextTick()
 		expect(w.find(sel(TESTIDS.receipt)).exists()).toBe(true)

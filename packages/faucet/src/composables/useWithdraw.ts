@@ -33,7 +33,7 @@ import { isUserRejection } from "@/lib/wallet-errors"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { useL1Wallet } from "./useL1Wallet"
 
-// Verbose tracing while the bridge flows are being hardened — ids, stages, tx hashes ONLY.
+// Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
 const log = (...args: unknown[]) => console.log("[bridge:withdraw]", ...args)
 
 const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://rpc.testnet.aztec-labs.com"
@@ -49,7 +49,7 @@ function wireWithdrawDeps(): void {
 	depsWired = true
 	const l1 = useL1Wallet()
 
-	/** Recompute THIS exit's witness — the identity anchor a consume tx must match. */
+	/** Recompute THIS exit's witness - the identity anchor a consume tx must match. */
 	async function expectedWitness(rec: WithdrawJournalRecord) {
 		const node = createAztecNodeClient(NODE_URL)
 		const txHash = TxHash.fromString(rec.exitTxHash as string)
@@ -73,11 +73,11 @@ function wireWithdrawDeps(): void {
 			// The exit's PROPOSED receipt has no blockNumber; poll the node until it is mined.
 			let receipt = await node.getTxReceipt(txHash).catch(() => undefined)
 			for (let i = 0; i < 120 && !receipt?.blockNumber; i++) {
-				log(`exit not yet in an L2 block (poll ${i + 1}) — waiting 5s`, rec.id)
+				log(`exit not yet in an L2 block (poll ${i + 1}) - waiting 5s`, rec.id)
 				await sleep(5000)
 				receipt = await node.getTxReceipt(txHash).catch(() => undefined)
 			}
-			if (!receipt?.blockNumber) throw new Error("the exit tx never landed in an L2 block — finish it from the journal later")
+			if (!receipt?.blockNumber) throw new Error("the exit tx never landed in an L2 block - finish it from the journal later")
 			onProgress({ targetBlock: Number(receipt.blockNumber) })
 
 			const pollTimer = setInterval(() => {
@@ -253,7 +253,7 @@ export function useWithdrawFlow() {
 			const rec = journal.records.value.find((r) => r.id === finalId) as WithdrawJournalRecord | undefined
 			if (rec && !rec.exitTxHash && isUserRejection(e)) {
 				discard(provisionalId)
-				error.value = "Rejected in your wallet — nothing was sent."
+				error.value = "Rejected in your wallet - nothing was sent."
 			} else if (rec) {
 				flagRecordError(finalId, `${msg}. If the exit never reached Aztec, nothing left your balance.`)
 			}

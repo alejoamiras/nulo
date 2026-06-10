@@ -15,7 +15,7 @@ const usdc = useL1Usdc()
 
 const status = computed(() => {
 	if (usdc.error.value) return usdc.error.value
-	if (usdc.minting.value) return "Minting — confirm in your Ethereum wallet…"
+	if (usdc.minting.value) return "Minting - confirm in your Ethereum wallet…"
 	return null
 })
 </script>
@@ -26,7 +26,7 @@ const status = computed(() => {
 			<h3>GET TEST USDC ON SEPOLIA (L1)</h3>
 			<p class="sub">
 				Mints 100 test USDC to your Ethereum account on Sepolia: the asset this bridge moves. This is not
-				the Faucet tab — the Faucet drips a different USDC directly on Aztec (L2), and this bridge cannot
+				the Faucet tab - the Faucet drips a different USDC directly on Aztec (L2), and this bridge cannot
 				move that one. No real value.
 			</p>
 		</header>

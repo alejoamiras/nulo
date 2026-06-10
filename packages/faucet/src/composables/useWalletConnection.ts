@@ -47,7 +47,7 @@ async function registerAllContracts(w: Wallet): Promise<void> {
 	await w.registerContract(bridgeInst, tokenBridgeArtifact)
 }
 
-// Module-level singleton — ONE Aztec session shared by both the Faucet and Bridge tabs. The two tabs
+// Module-level singleton - ONE Aztec session shared by both the Faucet and Bridge tabs. The two tabs
 // are the same origin = the same app to the wallet, so a single combined manifest is granted once;
 // connect on either tab and the other inherits the connection + the full grant (no second prompt).
 const session = createAztecWalletSession({

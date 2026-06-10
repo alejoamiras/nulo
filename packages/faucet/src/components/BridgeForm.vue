@@ -37,10 +37,10 @@ const amount = ref("100")
 
 const bothConnected = computed(() => l1.isConnected.value && bridge.status.value === "connected")
 
-// The takeover machine (plan S2/S7): ALL form gating keys off formStage — never the flows' busy,
+// The takeover machine (plan S2/S7): ALL form gating keys off formStage - never the flows' busy,
 // which spans the whole bridge and would make RUN IN BACKGROUND a no-op.
 const formStage = ref<"form" | "stepper" | "receipt">("form")
-// The ENGINE's foreground ref is the single owner (plan S13) — the form must not keep its own
+// The ENGINE's foreground ref is the single owner (plan S13) - the form must not keep its own
 // copy, or the withdraw provisional→exit rekey (which transfers ownership engine-side) would
 // orphan the form's stale id and hide a live record from BOTH surfaces.
 const activeId = journal.activeFlowId
@@ -52,7 +52,7 @@ const activeRecord = computed(() => (activeId.value ? journal.records.value.find
 
 // The L2 balance reader lives only while the Aztec wallet is connected; this component owns its
 // lifecycle (create on connect, dispose on change/unmount).
-// shallowRef: the handle holds its own Refs — deep unwrapping would strip their .value typing.
+// shallowRef: the handle holds its own Refs - deep unwrapping would strip their .value typing.
 const l2Handle = shallowRef<UseTokenBalanceHandle | null>(null)
 watch(
 	() => [bridge.status.value, bridge.selectedAccount.value] as const,
@@ -69,7 +69,7 @@ onBeforeUnmount(() => l2Handle.value?.dispose())
 
 const l2Public = computed(() => l2Handle.value?.publicBalance.value ?? null)
 const l2Private = computed(() => l2Handle.value?.privateBalance.value ?? null)
-/** The balance the bridge actually moves — selected by the privacy toggle. */
+/** The balance the bridge actually moves - selected by the privacy toggle. */
 const l2Balance = computed(() => (isPrivate.value ? l2Private.value : l2Public.value))
 
 const fromChain = computed(() => (direction.value === "l1-to-l2" ? "ethereum" : "aztec"))
@@ -130,7 +130,7 @@ async function onSubmit() {
 	void l2Handle.value?.refresh()
 }
 
-// The stepper→receipt transition keys off the RECORD's completion (never the flow promise — the
+// The stepper→receipt transition keys off the RECORD's completion (never the flow promise - the
 // engine detaches receipt rounds), snapshotting everything the receipt shows (plan S11).
 watch(
 	() => activeRecord.value?.completedAt,
@@ -182,7 +182,7 @@ function onNewBridge() {
 }
 
 function fmt(b: bigint | null): string {
-	if (b === null) return "—"
+	if (b === null) return "-"
 	return (Number(b) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 </script>
@@ -259,7 +259,7 @@ function fmt(b: bigint | null): string {
 			/>
 			<span class="unit">USDC</span>
 		</div>
-		<p v-if="showMintHint" class="hint">No test USDC on Sepolia yet — mint some below.</p>
+		<p v-if="showMintHint" class="hint">No test USDC on Sepolia yet - mint some below.</p>
 
 		<div class="privacy-row">
 			<button
@@ -277,18 +277,18 @@ function fmt(b: bigint | null): string {
 		</div>
 		<p v-if="isPrivate" class="privacy-note" :data-testid="TESTIDS.bridgePrivacyNote">
 			<template v-if="direction === 'l1-to-l2'">
-				Funds arrive in your PRIVATE Aztec balance. The claim secret is a bearer credential — anyone holding
+				Funds arrive in your PRIVATE Aztec balance. The claim secret is a bearer credential - anyone holding
 				it can claim these funds. It is sealed to your Ethereum signature and stored only in this browser.
 				Don't clear site data mid-flight.
 			</template>
 			<template v-else>
-				Burns from your PRIVATE Aztec balance. The Ethereum recipient is locked into the bridge message —
+				Burns from your PRIVATE Aztec balance. The Ethereum recipient is locked into the bridge message -
 				no bearer secret involved.
 			</template>
 		</p>
 		<p v-if="sealNoteVisible" class="seal-note" :data-testid="TESTIDS.bridgeSealNote" :data-first="isFirstSeal ? 'true' : 'false'">
 			<template v-if="isFirstSeal">
-				First private bridge with this Ethereum account: you'll sign the same message twice — once to seal
+				First private bridge with this Ethereum account: you'll sign the same message twice - once to seal
 				this transfer's recovery secret, once to prove your wallet signs deterministically. One-time check;
 				after it, private bridges seal with a single signature.
 			</template>

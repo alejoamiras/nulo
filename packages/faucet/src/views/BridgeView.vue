@@ -14,7 +14,7 @@ import { TESTIDS } from "@/lib/testids"
 			<h1>BRIDGE</h1>
 			<p class="sub">
 				Move test USDC between Ethereum (Sepolia) and Aztec, 1:1, public or private. Testnet only. Connect
-				both wallets, pick a direction, bridge. In-flight transfers persist in this browser — finish or
+				both wallets, pick a direction, bridge. In-flight transfers persist in this browser - finish or
 				discard them in the journal below.
 			</p>
 		</header>

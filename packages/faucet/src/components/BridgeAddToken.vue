@@ -6,13 +6,13 @@ import { useToast } from "@/composables/useToast"
 import { BRIDGE_TOKEN } from "@/contracts/bridge-deployments"
 import { TESTIDS } from "@/lib/testids"
 
-// Reuses the generic registerToken composable, pointed at the BRIDGE's USDC — a different deployment
+// Reuses the generic registerToken composable, pointed at the BRIDGE's USDC - a different deployment
 // from the faucet's USDC, so the faucet's own "Add to wallet" registers the wrong token here.
 const bridge = useBridgeWallet()
 const addToken = useFaucetAddToken()
 const { push } = useToast()
 
-// Tracked reset timer (mirrors TokenCard) — rapid clicks must not stack timers that flip the status
+// Tracked reset timer (mirrors TokenCard) - rapid clicks must not stack timers that flip the status
 // back to idle mid-submission.
 let resetTimer: ReturnType<typeof setTimeout> | null = null
 function scheduleReset() {
@@ -51,7 +51,7 @@ onBeforeUnmount(() => {
 
 <template>
 	<section v-if="bridge.status.value === 'connected'" class="bridge-add-token">
-		<p class="label">Bridged USDC on Aztec is a separate token from the faucet's — add it so your wallet shows the balance.</p>
+		<p class="label">Bridged USDC on Aztec is a separate token from the faucet's - add it so your wallet shows the balance.</p>
 		<button
 			type="button"
 			class="add-btn"

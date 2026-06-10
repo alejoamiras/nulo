@@ -4,7 +4,7 @@ import { computed } from "vue"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { TESTIDS } from "@/lib/testids"
 
-/** The snapshot is captured at the stepper→receipt transition (plan S11) — a cross-tab discard
+/** The snapshot is captured at the stepper→receipt transition (plan S11) - a cross-tab discard
  *  or the auto-hide grace cannot blank this view. */
 export interface ReceiptSnapshot {
 	direction: "deposit" | "withdraw"

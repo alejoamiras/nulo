@@ -1,9 +1,9 @@
 /**
  * Explicit user-rejection classification (plan S14). The cleanup matrix may DISCARD a pre-tx
- * record only when the user demonstrably said no — never on ambiguous failures (RPC outages,
+ * record only when the user demonstrably said no - never on ambiguous failures (RPC outages,
  * wallet crashes), which must keep the record. So this walks the error's cause chain looking for
  * EXPLICIT signals only:
- *  - EIP-1193 `code: 4001` (userRejectedRequest — MetaMask/Rabby raw errors)
+ *  - EIP-1193 `code: 4001` (userRejectedRequest - MetaMask/Rabby raw errors)
  *  - viem's `UserRejectedRequestError` (name match anywhere in the chain)
  *  - the Aztec wallet's explicit decline wordings ("rejected by user", "capability denied by user")
  */

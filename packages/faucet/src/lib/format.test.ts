@@ -32,7 +32,7 @@ describe("trimAddress", () => {
 	})
 
 	it("returns an em-dash for empty input", () => {
-		expect(trimAddress("")).toBe("—")
+		expect(trimAddress("")).toBe("-")
 	})
 
 	it("returns the original when shorter than head+tail+2", () => {

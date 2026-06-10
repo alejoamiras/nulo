@@ -82,7 +82,7 @@ describe("BridgeJournalCard", () => {
 	})
 
 	it("renders the live step narration from runtime (spinner line + detail)", () => {
-		runtime.value = { "0xdep": { step: "confirming", stepDetail: "check 12 — the claim is processing on Aztec" } }
+		runtime.value = { "0xdep": { step: "confirming", stepDetail: "check 12 - the claim is processing on Aztec" } }
 		const w = mountCard(deposit({ leafIndex: "7", claimTxHash: `0x${"ab".repeat(32)}` }))
 		const step = w.find(sel(TESTIDS.journalStep))
 		expect(step.text()).toContain("Confirming")
@@ -90,7 +90,7 @@ describe("BridgeJournalCard", () => {
 	})
 
 	it("a soft note renders without an attention state (the 30-min still-confirming case)", () => {
-		runtime.value = { "0xdep": { note: "Still confirming after ~30 minutes — slow testnet." } }
+		runtime.value = { "0xdep": { note: "Still confirming after ~30 minutes - slow testnet." } }
 		const w = mountCard(deposit({ leafIndex: "7" }))
 		expect(w.find(sel(TESTIDS.journalAttention)).text()).toContain("Still confirming")
 		expect(w.find(sel(TESTIDS.journalCard)).attributes("data-attention")).toBeUndefined()
@@ -166,7 +166,7 @@ describe("BridgeJournalCard", () => {
 		expect(discard).toHaveBeenCalledWith("0xdep")
 	})
 
-	it("a done private card retains its sealed blob and offers CLEAR — never DISCARD (retention pin)", () => {
+	it("a done private card retains its sealed blob and offers CLEAR - never DISCARD (retention pin)", () => {
 		const rec = deposit({ isPrivate: true, leafIndex: "7", claimTxHash: "0xc", completedAt: 1, sealedEnvelope: "blob" })
 		const w = mountCard(rec)
 		expect(rec.sealedEnvelope).toBe("blob")

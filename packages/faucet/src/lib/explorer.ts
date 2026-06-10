@@ -15,7 +15,7 @@ function base(): string {
 	return url.endsWith("/") ? url.slice(0, -1) : url
 }
 
-/** Only a strict 32-byte hex hash may reach a URL — journal fields are user-writable storage. */
+/** Only a strict 32-byte hex hash may reach a URL - journal fields are user-writable storage. */
 const TX_HASH_SHAPE = /^0x[0-9a-f]{64}$/i
 
 export function explorerTxUrl(hash: string): string {

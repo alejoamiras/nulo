@@ -1,7 +1,7 @@
 /**
  * Central catalog of every data-testid the faucet emits. Components
  * import from here so a rename touches one file. E2E selectors use
- * these constants verbatim — no text/role/aria/class lookups per
+ * these constants verbatim - no text/role/aria/class lookups per
  * CLAUDE.md.
  *
  * The `fa-` prefix mirrors the playground's `pg-` convention.
@@ -10,21 +10,21 @@
 export const TESTIDS = {
 	app: "fa-app",
 
-	// Wallet connection — drives WalletPanel + Hero status
+	// Wallet connection - drives WalletPanel + Hero status
 	status: "fa-status",
 	btnConnect: "fa-btn-connect",
 	btnDisconnect: "fa-btn-disconnect",
 	btnInstallNulo: "fa-btn-install-nulo",
 	account: "fa-account",
 
-	// Verification modal — 3×3 emoji grid + match/cancel
+	// Verification modal - 3×3 emoji grid + match/cancel
 	verificationModal: "fa-verification-modal",
 	emojiGrid: "fa-emoji-grid",
 	emojiCell: (i: number) => `fa-emoji-cell-${i}`,
 	btnVerifyConfirm: "fa-btn-verify-confirm",
 	btnVerifyCancel: "fa-btn-verify-cancel",
 
-	// Capability approval — second wallet interaction after verify
+	// Capability approval - second wallet interaction after verify
 	capabilityApproval: "fa-capability-approval",
 	btnCapabilityRetry: "fa-btn-capability-retry",
 	settingUp: "fa-setting-up",
@@ -37,7 +37,7 @@ export const TESTIDS = {
 	btnDripPrivate: "fa-btn-drip-private",
 	dripStatus: "fa-drip-status",
 
-	// One-click "Add to wallet" — calls registerToken on the connected wallet
+	// One-click "Add to wallet" - calls registerToken on the connected wallet
 	btnAddToWallet: "fa-btn-add-to-wallet",
 	addTokenStatus: "fa-add-token-status",
 
@@ -50,20 +50,20 @@ export const TESTIDS = {
 	tabBridge: "fa-tab-bridge",
 	bridgeView: "fa-bridge-view",
 
-	// Bridge — L1 (Ethereum) wallet
+	// Bridge - L1 (Ethereum) wallet
 	l1Status: "fa-l1-status",
 	l1Connect: "fa-l1-connect",
 	l1Account: "fa-l1-account",
 	l1Disconnect: "fa-l1-disconnect",
 	l1SwitchChain: "fa-l1-switch-chain",
 
-	// Bridge — L2 (Aztec) wallet
+	// Bridge - L2 (Aztec) wallet
 	bridgeL2Status: "fa-bridge-l2-status",
 	bridgeL2Connect: "fa-bridge-l2-connect",
 	bridgeL2Account: "fa-bridge-l2-account",
 	bridgeL2Disconnect: "fa-bridge-l2-disconnect",
 
-	// Bridge — the unified swap-style form (cards carry data-chain; the L2 balance carries data-privacy)
+	// Bridge - the unified swap-style form (cards carry data-chain; the L2 balance carries data-privacy)
 	bridgeForm: "fa-bridge-form",
 	bridgeFrom: "fa-bridge-from",
 	bridgeTo: "fa-bridge-to",
@@ -71,7 +71,7 @@ export const TESTIDS = {
 	bridgeAmount: "fa-bridge-amount",
 	bridgeBalanceL1: "fa-bridge-balance-l1",
 	// The Aztec panel stacks BOTH balances (public + private) with the toggle highlighting the
-	// active one — visibility never depends on the toggle.
+	// active one - visibility never depends on the toggle.
 	bridgeBalanceL2Public: "fa-bridge-balance-l2-public",
 	bridgeBalanceL2Private: "fa-bridge-balance-l2-private",
 	bridgePrivacyToggle: "fa-bridge-privacy-toggle",
@@ -80,7 +80,7 @@ export const TESTIDS = {
 	bridgeSubmit: "fa-bridge-submit",
 	bridgeFormError: "fa-bridge-form-error",
 
-	// Bridge — the takeover stepper + receipt (phases carry data-phase/data-state)
+	// Bridge - the takeover stepper + receipt (phases carry data-phase/data-state)
 	stepper: "fa-bridge-stepper",
 	stepperPhase: "fa-stepper-phase",
 	stepperBackground: "fa-stepper-background",
@@ -89,11 +89,11 @@ export const TESTIDS = {
 	receiptNewBridge: "fa-receipt-new-bridge",
 	receiptLink: "fa-receipt-link",
 
-	// Bridge — the explicit L1 test-USDC mint (NOT the Faucet tab's L2 drips)
+	// Bridge - the explicit L1 test-USDC mint (NOT the Faucet tab's L2 drips)
 	mintL1: "fa-mint-l1",
 	mintL1Status: "fa-mint-l1-status",
 
-	// Bridge — the in-flight journal (cards carry data-id/direction/stage/privacy/attention)
+	// Bridge - the in-flight journal (cards carry data-id/direction/stage/privacy/attention)
 	journal: "fa-bridge-journal",
 	journalEmpty: "fa-journal-empty",
 	journalCard: "fa-journal-card",
@@ -107,7 +107,7 @@ export const TESTIDS = {
 	journalStep: "fa-journal-step",
 	journalTxLink: "fa-journal-tx-link",
 
-	// Bridge — add the bridged token to the wallet (registerToken, the bridge's own USDC)
+	// Bridge - add the bridged token to the wallet (registerToken, the bridge's own USDC)
 	bridgeAddToken: "fa-bridge-add-token",
 } as const
 

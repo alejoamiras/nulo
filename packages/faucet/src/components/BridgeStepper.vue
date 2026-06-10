@@ -81,7 +81,7 @@ const headline = computed(() => {
 				RUN IN BACKGROUND
 			</button>
 		</div>
-		<p class="bg-hint">Backgrounding moves this bridge to Pending Bridges — it keeps running either way.</p>
+		<p class="bg-hint">Backgrounding moves this bridge to Pending Bridges - it keeps running either way.</p>
 	</section>
 </template>
 

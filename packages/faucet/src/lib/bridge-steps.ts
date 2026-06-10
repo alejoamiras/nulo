@@ -3,7 +3,7 @@ import type { RecordRuntime } from "@/composables/useBridgeJournal"
 
 /**
  * The ONE narration view-model (plan S3/S10): maps a record + its runtime onto the stepper's
- * phase rail. Phase STATES anchor on persisted FACTS (the monotonic latch — a transiently
+ * phase rail. Phase STATES anchor on persisted FACTS (the monotonic latch - a transiently
  * cleared runtime step between engine rounds can never regress a phase); the runtime only
  * refines WHICH phase inside the fact-bounded zone is active and what its live detail says.
  */
@@ -49,15 +49,15 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 		confirm: "CONFIRM",
 	}
 	const prompts: Record<string, string> = {
-		seal: "Sign in your Ethereum wallet — encrypts this bridge's recovery secret. No funds move.",
+		seal: "Sign in your Ethereum wallet - encrypts this bridge's recovery secret. No funds move.",
 		approve: "Confirm the allowance for the bridge portal in your Ethereum wallet. No funds move yet.",
 		deposit: rec.depositTxHash ? "Waiting for the Ethereum confirmation…" : "Confirm the deposit in your Ethereum wallet.",
-		sync: "Waiting for Aztec to sync the message — no signature needed.",
+		sync: "Waiting for Aztec to sync the message - no signature needed.",
 		claim:
 			rt.step === "unsealing"
 				? "Sign in your Ethereum wallet to unseal the recovery secret, then confirm in your Aztec wallet."
 				: "Confirm the claim in your Aztec wallet.",
-		confirm: "Confirming on Aztec — no signature needed.",
+		confirm: "Confirming on Aztec - no signature needed.",
 	}
 
 	return buildPhases(keys, labels, prompts, activeKey, rec.completedAt !== undefined, rt)
@@ -75,12 +75,12 @@ function withdrawPhases(rec: WithdrawJournalRecord, rt: RecordRuntime): BridgePh
 	const labels: Record<string, string> = { exit: "EXIT", prove: "PROVE", finish: "FINISH", confirm: "CONFIRM" }
 	const proveDetail =
 		rt.provenBlock !== undefined && rt.targetBlock !== undefined
-			? `Proven block ${rt.provenBlock} of ${rt.targetBlock} — lands in epoch batches.`
-			: "Waiting for Aztec to prove the exit — lands in epoch batches."
+			? `Proven block ${rt.provenBlock} of ${rt.targetBlock} - lands in epoch batches.`
+			: "Waiting for Aztec to prove the exit - lands in epoch batches."
 	const prompts: Record<string, string> = {
 		exit: rec.isPrivate
 			? "Confirm the exit in your Aztec wallet (one signature)."
-			: "Confirm in your Aztec wallet — two signatures: the authorization, then the exit.",
+			: "Confirm in your Aztec wallet - two signatures: the authorization, then the exit.",
 		prove: proveDetail,
 		finish: "Confirm in your Ethereum wallet to release the funds.",
 		confirm: "Waiting for the Ethereum confirmation…",
@@ -102,7 +102,7 @@ function buildPhases(
 	return keys.map((key, i) => {
 		if (completed) return { key, label: labels[key], state: "done" as const }
 		if (i < activeIndex) {
-			// APPROVE's skipped-vs-done is underivable from facts (plan S15) — the ephemeral
+			// APPROVE's skipped-vs-done is underivable from facts (plan S15) - the ephemeral
 			// approveOutcome carries it; absent (post-reload) degrades to a plain done.
 			if (key === "approve" && rt.approveOutcome === "skipped") return { key, label: labels[key], state: "skipped" as const }
 			return { key, label: labels[key], state: "done" as const }

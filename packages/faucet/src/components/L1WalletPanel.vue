@@ -37,7 +37,7 @@ const { address, isConnected, wrongChain, isConnecting, connect, disconnect, swi
 	gap: 10px;
 	padding: 8px 12px;
 	border: 1px solid var(--nulo-outline);
-	border-radius: 999px;
+	border-radius: 0;
 }
 
 .chip .label {

@@ -6,7 +6,7 @@ import { type NormalizedError, normalizeError } from "@/lib/errors"
 /**
  * Local typed augmentation matching the runtime schema patch in
  * `@/lib/nulo-schema-patch.ts`. The cast in `addToken()` is the typed
- * boundary — the patch makes it true at runtime, this declaration makes
+ * boundary - the patch makes it true at runtime, this declaration makes
  * TypeScript agree.
  */
 type WalletWithRegisterToken = Wallet & {
@@ -18,7 +18,7 @@ export type AddTokenStatus =
 	| { kind: "submitting" }
 	| { kind: "ok" }
 	/** User clicked Deny in the extension popup. Per the wallet-bridge cancel
-	 *  recipe, the UI must NOT surface an error — return to idle silently. */
+	 *  recipe, the UI must NOT surface an error - return to idle silently. */
 	| { kind: "rejected" }
 	/** Dispatcher rejected the method by string (e.g. schema patch not in place
 	 *  on the wallet side, or the wallet is too old). Distinct from a network

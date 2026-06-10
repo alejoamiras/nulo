@@ -48,7 +48,7 @@ export const ERC20_ABI = [
 
 const POLL_INTERVAL_MS = 15_000
 
-/** Fixed faucet-style mint — the bridge moves what you mint here; amount entry adds nothing on testnet. */
+/** Fixed faucet-style mint - the bridge moves what you mint here; amount entry adds nothing on testnet. */
 export const MINT_AMOUNT = 100_000_000n // 100 USDC, 6 decimals
 
 const balance = ref<bigint | null>(null)

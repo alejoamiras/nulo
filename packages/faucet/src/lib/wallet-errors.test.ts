@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { isUserRejection } from "./wallet-errors"
 
-describe("isUserRejection (plan S14 — explicit signals ONLY)", () => {
+describe("isUserRejection (plan S14 - explicit signals ONLY)", () => {
 	it("EIP-1193 code 4001, flat or nested in the cause chain", () => {
 		expect(isUserRejection({ code: 4001, message: "User rejected the request." })).toBe(true)
 		expect(isUserRejection(new Error("outer", { cause: { code: 4001 } }))).toBe(true)
@@ -18,7 +18,7 @@ describe("isUserRejection (plan S14 — explicit signals ONLY)", () => {
 		expect(isUserRejection(new Error("Capability denied by user"))).toBe(true)
 	})
 
-	it("AMBIGUOUS failures are NOT rejections — RPC outages, timeouts, generic errors", () => {
+	it("AMBIGUOUS failures are NOT rejections - RPC outages, timeouts, generic errors", () => {
 		expect(isUserRejection(new Error("fetch failed"))).toBe(false)
 		expect(isUserRejection(new Error("nonce too low"))).toBe(false)
 		expect(isUserRejection({ code: -32603, message: "Internal JSON-RPC error." })).toBe(false)
