@@ -37,3 +37,9 @@ LESSONS_FILE=implementations-plan/bridge-form-stepper/lessons/phase-3.md
 - Labor record: `lib/phase-clock.ts` (module clock, display-only, shared across surfaces; reload degrades honestly) - completed phases keep "✓ DEPOSIT - 14s"; active phases tick a live timer + deliberately OVERESTIMATED eta hints; mapper gains `progress` (SYNC blocks via new runtime.syncBlock; PROVE proven blocks - NEVER fabricated elsewhere) rendered as ▓░ bars.
 - Peak-end: receipt opens with a stamped BRIDGED ✓ / RELEASED ✓ banner + "Xm Ys end to end" (from persisted createdAt/completedAt - survives reloads); done cards show the same stamp + mint flash during their 8s grace; every phase completion plays a 220ms stamp-in.
 - Gotchas: vitest fake-timer cross-test contamination - zombie mounted components keep ticking into later tests and share the module phase-clock when record ids repeat (unique ids + unmount per test); `advanceTimersByTimeAsync` also advances `Date.now`.
+
+## 2026-06-10 - dopamine round fixes (user testnet catch)
+- Phase-clock retry honesty: backward transitions reset the phase's clock (re-activated ⇒ fresh attempt timer; regressed-to-pending ⇒ stale times forgotten). Before: a wallet-lock stall during SYNC leaked an 8m pre-failure start into CONFIRM's badge and re-runs read 0s/inflated. Durations now measure the LATEST attempt, pinned both ways.
+- RETRY moved INLINE onto the failed phase row (the rail emits; the stepper routes) - the bottom-of-card button was unintuitive. testid `stepperRetry` preserved.
+- NEW BRIDGE / RUN IN BACKGROUND clear both flows' stale `error` refs - a "Wallet locked" ghost no longer greets the fresh form (pinned).
+- Receipt de-shouted: small mint stamp (the pending-card style, 20px, no inverted block) + the meme: a one-shot CSS-only brutalist confetti burst (14 square mono bits, deterministic placement, 0.9s, zero deps - supply-chain policy respected).
