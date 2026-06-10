@@ -61,13 +61,13 @@ Files: `packages/faucet/src/composables/useBridgeJournal.ts` (+test).
 Smallest proof: step transitions observable in runtime during a fake claim (unsealing→syncing→sending→confirming→verifying→done); pending past the OLD budget keeps polling and never sets `unknown-outcome`; probe-refusal still does; transport exception ⇒ `unreachable` stepDetail, never `pending`; the lock is FREE between chunked rounds (an explicit discard lands mid-wait); in-session completion auto-hides after the grace (fake timers) while a REDISCOVERED completion and every attention record never auto-hide; auto-hide never calls `discard` (record persists for prune); `step` cleared on the error path (withRecordLock finally); `discard` clears the runtime entry.
 Validate: `bun run --cwd packages/faucet test && bun run --cwd packages/faucet typecheck && bun run lint`.
 
-### P2 — Card UI: direction, live status, links, done state, copy 🔄
+### P2 — Card UI: direction, live status, links, done state, copy ✓
 Files: `BridgeJournalCard.vue` (+test), `lib/explorer.ts` (+ etherscan helper +test), `testids.ts` (add `journalStep`, `journalTxLink`).
 - Header: both-end chips (D4). Status line: spinner + step narration (D1) above the stage label; attention notes with funds-safety lines (D7); explorer links (D6); ✓ state with link + auto-HIDE after the grace (D3 — render filter, never deletion); toast on completion.
 Smallest proof: header renders both chains per direction; step narration renders from runtime (each step → expected copy); tx links carry the right href per hash field; done card shows ✓ + link, then HIDES via the engine filter (mocked) while the record stays in storage; attention note includes the funds-safety sentence.
 Validate: same as P1 + `bun run --cwd packages/faucet test:e2e` (smoke still green — selectors unchanged except additions).
 
-### P3 — Form balance visibility (codex-arbitrated option) + gates ⬜
+### P3 — Form balance visibility (codex-arbitrated option) + gates 🔄
 Files: `BridgeForm.vue` (+test); `testids.ts` if the option adds nodes (e.g. `bridgeBalanceL2Public` / `bridgeBalanceL2Private` for option (a)).
 - Implement the arbitrated D5 option; copy reviewed; over-balance validation reads the ACTIVE balance only.
 Smallest proof: both balances visible without toggling; the active one switches with the toggle (or segment); validation still binds to the active source; flip keeps both visible on the Aztec side only.
