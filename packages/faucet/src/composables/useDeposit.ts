@@ -110,7 +110,8 @@ function wireDepositDeps(): void {
 				if (status.includes("reverted")) return "reverted"
 				return "pending"
 			} catch {
-				return "pending"
+				// A dead RPC must read as connectivity, never as a slow claim (plan D2).
+				return "unreachable"
 			}
 		},
 	})

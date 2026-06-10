@@ -18,7 +18,7 @@ import {
 	upsertRecord,
 } from "@nulo/bridge-core"
 import { sepolia } from "viem/chains"
-import { ref } from "vue"
+import { computed, ref } from "vue"
 import { BRIDGE, L1_PORTAL } from "@/contracts/bridge-deployments"
 
 // Verbose tracing while the bridge flows are being hardened — ids, stages, tx hashes ONLY.
@@ -35,11 +35,20 @@ export const isMsgNotReady = (msg: string): boolean =>
 
 export type Attention = "mismatch" | "tampered" | "unseal-failed" | "stale" | "stale-deployment" | "unknown-outcome" | "error"
 
+/** The engine's live narration of what it is doing RIGHT NOW for a record. Ephemeral display
+ *  state only — never persisted, never an input to completion logic. */
+export type BridgeStep = "unsealing" | "syncing" | "sending" | "confirming" | "verifying"
+
 export interface RecordRuntime {
 	busy?: boolean
 	attention?: Attention
 	/** Human-readable detail for the attention state. */
 	note?: string
+	/** Live narration (D1): the current engine step + a free-text detail (poll counts etc.). */
+	step?: BridgeStep
+	stepDetail?: string
+	/** Set after the post-✓ grace: the card leaves the rendered list; the RECORD stays in storage. */
+	hidden?: boolean
 	/** Withdraw proving countdown inputs. */
 	provenBlock?: number
 	targetBlock?: number
@@ -68,8 +77,9 @@ export interface JournalEngineDeps {
 		simulate: () => Promise<unknown>
 		send: () => Promise<{ txHash: string }>
 	}>
-	/** Aztec-node receipt lookup: "success" | "dropped" | "reverted" | "pending". */
-	claimReceiptStatus?: (txHash: string) => Promise<"success" | "dropped" | "reverted" | "pending">
+	/** Aztec-node receipt lookup. "unreachable" = transport failure — a dead RPC must read as a
+	 *  connectivity problem, never as a slow ("pending") claim. */
+	claimReceiptStatus?: (txHash: string) => Promise<"success" | "dropped" | "reverted" | "pending" | "unreachable">
 	/** Drive a withdraw record's proven-wait → witness → L1 consume. Returns the consume tx hash.
 	 *  onProgress streams { provenBlock, targetBlock } for the countdown. */
 	consume?: (
@@ -91,6 +101,23 @@ const runtime = ref<Record<string, RecordRuntime>>({})
 const sessionLive = new Set<string>()
 const inFlight = new Set<string>()
 const secretCache = new Map<string, { secretHex: string; envelope: DepositEnvelopeV2 }>()
+// F12: set ONLY when THIS process passed the sync gate and dispatched the claim send — the
+// forge-resistant provenance that scopes deposit auto-hide. Deliberately NOT sessionLive.
+const localClaimProvenance = new Set<string>()
+// F11: per-record generation token — every fresh runner entry and every discard bumps it, so a
+// chunked receipt round scheduled before the bump exits silently instead of racing the new owner.
+const generations = new Map<string, number>()
+// Cumulative exhausted receipt rounds per record (caps the ~30-min soft wait).
+const receiptRounds = new Map<string, number>()
+
+function bumpGen(id: string): number {
+	const next = (generations.get(id) ?? 0) + 1
+	generations.set(id, next)
+	return next
+}
+function genOf(id: string): number {
+	return generations.get(id) ?? 0
+}
 // One promptful action per wallet lane at a time; acquired per INDIVIDUAL prompt, never held
 // across the other lane's await (the ABBA rule).
 const lanes: Record<"l1" | "aztec", Promise<void>> = { l1: Promise.resolve(), aztec: Promise.resolve() }
@@ -157,6 +184,10 @@ export function __resetJournalForTests(): void {
 	sessionLive.clear()
 	inFlight.clear()
 	secretCache.clear()
+	localClaimProvenance.clear()
+	generations.clear()
+	receiptRounds.clear()
+	lastCompleted.value = null
 	lanes.l1 = Promise.resolve()
 	lanes.aztec = Promise.resolve()
 	deps = { kv: memoryKV(), now: Date.now }
@@ -198,9 +229,15 @@ export function rekeyJournalRecord(oldId: string, next: BridgeJournalRecord): vo
 }
 
 export function discard(id: string): void {
+	bumpGen(id) // Any in-flight chunked round dies at its next generation check.
 	removeRecord(deps.kv, id)
 	secretCache.delete(id)
 	sessionLive.delete(id)
+	localClaimProvenance.delete(id)
+	receiptRounds.delete(id)
+	// Drop the runtime entry entirely — a discarded card must not resurrect stale state.
+	const { [id]: _gone, ...rest } = runtime.value
+	runtime.value = rest
 	reload()
 	log("discarded", id)
 }
@@ -296,11 +333,63 @@ async function withRecordLock(id: string, fn: () => Promise<void>): Promise<void
 		await fn()
 	} finally {
 		inFlight.delete(id)
-		setRuntime(id, { busy: false })
+		// Structural step cleanup: narration never outlives the runner, success or throw — but never
+		// resurrect a runtime entry for a record that was discarded while we ran.
+		if (records.value.some((r) => r.id === id)) {
+			setRuntime(id, { busy: false, step: undefined, stepDetail: undefined })
+		}
 	}
 }
 
 const wait = (ms: number): Promise<void> => (deps.waitMs ? deps.waitMs(ms) : new Promise((r) => setTimeout(r, ms)))
+
+const HIDE_GRACE_MS = 8000
+const RECEIPT_POLLS_PER_ROUND = 45 // ×4s ≈ one ~3-minute round inside the lock.
+const RECEIPT_MAX_ROUNDS = 10 // ≈30 min soft cap; after it the card re-arms RETRY, never a dead-end.
+const INTER_ROUND_MS = 100
+
+/** The most recent verified completion — P2's toast hook. */
+export const lastCompleted = ref<{
+	id: string
+	direction: "deposit" | "withdraw"
+	amount: string
+	isPrivate: boolean
+	txHash?: string
+} | null>(null)
+
+function setStep(id: string, step?: BridgeStep, stepDetail?: string): void {
+	setRuntime(id, { step, stepDetail })
+}
+
+/** After the ✓ grace, the card leaves the rendered list. The RECORD is untouched — deletion
+ *  stays human-only or the 7-day prune (D3: hide, never destroy). */
+function scheduleAutoHide(id: string): void {
+	void wait(HIDE_GRACE_MS).then(() => {
+		const rec = records.value.find((r) => r.id === id)
+		if (rec?.completedAt) setRuntime(id, { hidden: true })
+	})
+}
+
+function completeDeposit(rec: DepositJournalRecord): void {
+	patchRecord(rec.id, { completedAt: deps.now() })
+	secretCache.delete(rec.id)
+	receiptRounds.delete(rec.id)
+	lastCompleted.value = { id: rec.id, direction: "deposit", amount: rec.amount, isPrivate: rec.isPrivate, txHash: rec.claimTxHash }
+	// F9/F12 scope: only a completion whose gate-pass + send happened in THIS process auto-hides;
+	// a rediscovered receipt-wait keeps its ✓ card for a human glance (manual CLEAR).
+	if (localClaimProvenance.has(rec.id)) scheduleAutoHide(rec.id)
+	localClaimProvenance.delete(rec.id)
+	log("deposit complete", rec.id)
+}
+
+function completeWithdraw(rec: WithdrawJournalRecord, consumeTxHash?: string): void {
+	patchRecord(rec.id, { completedAt: deps.now() })
+	receiptRounds.delete(rec.id)
+	lastCompleted.value = { id: rec.id, direction: "withdraw", amount: rec.amount, isPrivate: rec.isPrivate, txHash: consumeTxHash }
+	// Withdraw completions are witness-decode-verified — always hide-eligible.
+	scheduleAutoHide(rec.id)
+	log("withdraw complete", rec.id)
+}
 
 /**
  * The deposit claim tail: guards → secret resolution → sync-gate → ONE send → receipt-anchored,
@@ -309,7 +398,11 @@ const wait = (ms: number): Promise<void> => (deps.waitMs ? deps.waitMs(ms) : new
  */
 export async function runDepositClaim(id: string, opts: { interactive?: boolean } = {}): Promise<void> {
 	const interactive = opts.interactive !== false
+	let continueRounds = false
+	let gen = 0
 	await withRecordLock(id, async () => {
+		// F11: this runner is now the record's owner — any previously scheduled round dies silently.
+		gen = bumpGen(id)
 		const rec = records.value.find((r) => r.id === id && r.direction === "deposit") as DepositJournalRecord | undefined
 		if (!rec || rec.completedAt) return
 		if (!guardDeployment(rec)) return
@@ -326,13 +419,13 @@ export async function runDepositClaim(id: string, opts: { interactive?: boolean 
 		// An already-sent claim is finished by waiting on ITS receipt, never a re-send. Completion
 		// requires the message-consumed probe, which needs the secret — an EXPLICIT click on a
 		// rediscovered private record unseals it first (one signature); the prompt-free sweep cannot,
-		// and finishDepositByReceipt then refuses to mark done on an unverifiable receipt.
+		// and the receipt round then refuses to mark done on an unverifiable receipt.
 		if (rec.claimTxHash) {
 			if (rec.isPrivate && interactive && !secretCache.has(id) && rec.sealedEnvelope) {
 				const resolved = await resolvePrivateSecret(rec)
 				if (!resolved) return
 			}
-			await finishDepositByReceipt(rec)
+			continueRounds = (await runReceiptRound(rec, gen)) === "continue"
 			return
 		}
 
@@ -346,6 +439,7 @@ export async function runDepositClaim(id: string, opts: { interactive?: boolean 
 
 		let secretHex: string
 		if (rec.isPrivate) {
+			setStep(id, "unsealing", secretCache.has(id) ? undefined : "one Ethereum signature")
 			const resolved = await resolvePrivateSecret(rec)
 			if (!resolved) return
 			secretHex = resolved.secretHex
@@ -364,6 +458,7 @@ export async function runDepositClaim(id: string, opts: { interactive?: boolean 
 		// Sync-gate: prompt-free simulate until the message is consumable by THIS wallet's PXE.
 		let ready = false
 		for (let i = 0; i < 300; i++) {
+			setStep(id, "syncing", `sync check ${i + 1}`)
 			try {
 				await interaction.simulate()
 				ready = true
@@ -378,61 +473,94 @@ export async function runDepositClaim(id: string, opts: { interactive?: boolean 
 		if (!ready) throw new Error("the L1→L2 message never became consumable — claim it again from the journal later")
 		setRuntime(id, { claimable: true })
 
+		setStep(id, "sending", "confirm in your Aztec wallet")
 		const { txHash } = await runOnLane("aztec", () => interaction.send())
 		log("claim sent", { id, txHash })
 		patchRecord(id, { claimTxHash: txHash })
-		await finishDepositByReceipt(records.value.find((r) => r.id === id) as DepositJournalRecord)
+		receiptRounds.delete(id)
+		// F12: the forge-resistant provenance — THIS process watched claimable → sent.
+		localClaimProvenance.add(id)
+		const sent = records.value.find((r) => r.id === id) as DepositJournalRecord
+		continueRounds = (await runReceiptRound(sent, gen)) === "continue"
 	})
+	// Chunked re-entry happens OUTSIDE the lock so RETRY/DISCARD stay reachable between rounds.
+	if (continueRounds && genOf(id) === gen) {
+		await wait(INTER_ROUND_MS)
+		if (genOf(id) === gen) void runDepositClaim(id, { interactive: false })
+	}
 }
 
-/** Receipt-anchored, identity-checked deposit completion (D4). */
-async function finishDepositByReceipt(rec: DepositJournalRecord): Promise<void> {
-	if (!deps.claimReceiptStatus || !rec.claimTxHash) return
+/** One ~3-minute receipt round (D4 completion, D2 narration). Returns "continue" when the claim
+ *  is still pending and another round should be scheduled by the caller (outside the lock). */
+async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<"done" | "stop" | "continue"> {
+	if (!deps.claimReceiptStatus || !rec.claimTxHash) return "stop"
+	const roundsDone = receiptRounds.get(rec.id) ?? 0
 	let droppedStreak = 0
-	for (let i = 0; i < 45; i++) {
+	let unreachableStreak = 0
+	for (let i = 0; i < RECEIPT_POLLS_PER_ROUND; i++) {
+		if (genOf(rec.id) !== gen) return "stop" // F11: a newer owner took over (RETRY/discard/sweep).
+		const checkNo = roundsDone * RECEIPT_POLLS_PER_ROUND + i + 1
+		setStep(rec.id, "confirming", `check ${checkNo} — the claim is processing on Aztec`)
 		const status = await deps.claimReceiptStatus(rec.claimTxHash)
+		if (genOf(rec.id) !== gen) return "stop"
 		if (status === "success") {
 			// Identity check: after a successful receipt, THIS record's message must be GONE — a
 			// verifiable true is the ONLY path to done. false ⇒ the receipt wasn't ours; null (no
 			// secret / probe failure) ⇒ refuse too: a forged claimTxHash on a rediscovered private
-			// record must never auto-finish (codex post-impl HIGH-1).
+			// record must never auto-finish.
+			setStep(rec.id, "verifying", "checking the claim against this record")
 			const consumed = await recordMessageConsumed(rec)
+			if (genOf(rec.id) !== gen) return "stop"
 			if (consumed !== true) {
 				setRuntime(rec.id, {
 					attention: "unknown-outcome",
 					note:
 						consumed === false
-							? "A claim receipt succeeded but this record's message is still claimable — not marking it done."
-							: "A claim receipt succeeded but couldn't be verified against this record — press CLAIM to verify (one signature for private records).",
+							? "A claim receipt succeeded but this record's message is still claimable — not marking it done. Your funds are not lost — the claim either landed or the deposit remains claimable."
+							: "A claim receipt succeeded but couldn't be verified against this record — press CLAIM to verify (one signature for private records). Your funds are not lost.",
 				})
-				return
+				return "stop"
 			}
-			patchRecord(rec.id, { completedAt: deps.now() })
-			secretCache.delete(rec.id)
-			log("deposit complete", rec.id)
-			return
+			completeDeposit(records.value.find((r) => r.id === rec.id) as DepositJournalRecord)
+			return "done"
 		}
 		if (status === "reverted") {
-			setRuntime(rec.id, { attention: "error", note: "The claim reverted on Aztec. You can retry from this card." })
-			return
+			setRuntime(rec.id, {
+				attention: "error",
+				note: "The claim reverted on Aztec. You can retry from this card — the deposit remains claimable.",
+			})
+			return "stop"
 		}
 		if (status === "dropped") {
 			// Debounced: a freshly-proposed tx can read dropped/unknown transiently.
 			droppedStreak++
 			if (droppedStreak >= 3) {
 				patchRecord(rec.id, { claimTxHash: undefined })
-				setRuntime(rec.id, { attention: "error", note: "The claim was dropped — claim again from this card." })
-				return
+				setRuntime(rec.id, { attention: "error", note: "The claim was dropped — claim again from this card. Nothing was lost." })
+				return "stop"
 			}
 		} else {
 			droppedStreak = 0
 		}
+		if (status === "unreachable") {
+			// A dead RPC is a connectivity problem, never a slow claim (D2).
+			unreachableStreak++
+			setStep(rec.id, "confirming", `node unreachable — retrying (${unreachableStreak})`)
+		} else {
+			unreachableStreak = 0
+		}
 		await wait(4000)
 	}
-	setRuntime(rec.id, {
-		attention: "unknown-outcome",
-		note: "The claim's outcome couldn't be confirmed yet — Retry checks again (no new signature).",
-	})
+	receiptRounds.set(rec.id, roundsDone + 1)
+	if (roundsDone + 1 >= RECEIPT_MAX_ROUNDS) {
+		// Soft cap, NOT a dead-end: no attention, the card re-arms RETRY and says so.
+		setStep(rec.id, undefined, undefined)
+		setRuntime(rec.id, {
+			note: "Still confirming after ~30 minutes — slow testnet. RETRY keeps checking; your funds are safe either way.",
+		})
+		return "stop"
+	}
+	return "continue"
 }
 
 /** True/false when determinable; null when the secret isn't available for the probe (prompt-free rule). */
@@ -468,32 +596,38 @@ export async function runWithdrawConsume(id: string): Promise<void> {
 		}
 
 		if (rec.consumeTxHash) {
+			setStep(id, "verifying", "matching the finish transaction to this withdrawal")
 			const legit = (await deps.verifyConsumeIdentity?.(rec, rec.consumeTxHash)) ?? true
 			if (!legit) {
 				setRuntime(id, {
 					attention: "unknown-outcome",
-					note: "The recorded finish transaction doesn't match this withdrawal — not marking it done.",
+					note: "The recorded finish transaction doesn't match this withdrawal — not marking it done. Your exited funds stay claimable on Ethereum.",
 				})
 				return
 			}
 			log("consume already submitted — waiting on it", { id, consumeTxHash: rec.consumeTxHash })
+			setStep(id, "confirming", "waiting for the Ethereum confirmation")
 			if (await deps.waitConsumeReceipt(rec.consumeTxHash)) {
-				patchRecord(id, { completedAt: deps.now() })
+				completeWithdraw(rec, rec.consumeTxHash)
 				return
 			}
 			patchRecord(id, { consumeTxHash: undefined })
-			setRuntime(id, { attention: "error", note: "The prior finish transaction failed — finish again from this card." })
+			setRuntime(id, {
+				attention: "error",
+				note: "The prior finish transaction failed — finish again from this card. Nothing was lost.",
+			})
 			return
 		}
 
+		setStep(id, "confirming", "waiting for the proven epoch, then one Ethereum confirmation")
 		const { consumeTxHash } = await deps.consume(rec, (p) => setRuntime(id, p))
 		patchRecord(id, { consumeTxHash })
+		setStep(id, "confirming", "waiting for the Ethereum confirmation")
 		if (await deps.waitConsumeReceipt(consumeTxHash)) {
-			patchRecord(id, { completedAt: deps.now() })
-			log("withdraw complete", id)
+			completeWithdraw(records.value.find((r) => r.id === id) as WithdrawJournalRecord, consumeTxHash)
 		} else {
 			patchRecord(id, { consumeTxHash: undefined })
-			setRuntime(id, { attention: "error", note: "The finish transaction failed — finish again from this card." })
+			setRuntime(id, { attention: "error", note: "The finish transaction failed — finish again from this card. Nothing was lost." })
 		}
 	})
 }
@@ -516,11 +650,16 @@ export function resumeSessionWork(): void {
 	}
 }
 
+/** The render list: completed-and-graced cards are hidden here (D3) — records stay in storage. */
+export const visibleRecords = computed(() => records.value.filter((r) => !runtime.value[r.id]?.hidden))
+
 export function useBridgeJournal() {
 	initJournal()
 	return {
 		records,
+		visibleRecords,
 		runtime,
+		lastCompleted,
 		addRecord,
 		addRecordVerified,
 		updateRecord,

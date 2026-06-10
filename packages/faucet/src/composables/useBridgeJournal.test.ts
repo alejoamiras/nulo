@@ -20,6 +20,7 @@ import {
 	addRecordVerified,
 	cacheSecret,
 	connectJournalDeps,
+	discard,
 	markSessionLive,
 	resumeSessionWork,
 	runDepositClaim,
@@ -100,7 +101,7 @@ function baseDeps(kv: KV) {
 		connectedL1: () => SEALER,
 		connectedAztec: () => RECIPIENT,
 		signL1: vi.fn(async () => SIG),
-		claimReceiptStatus: vi.fn<() => Promise<"success" | "dropped" | "reverted" | "pending">>(async () => "success"),
+		claimReceiptStatus: vi.fn<() => Promise<"success" | "dropped" | "reverted" | "pending" | "unreachable">>(async () => "success"),
 		waitConsumeReceipt: vi.fn(async () => true),
 		verifyConsumeIdentity: vi.fn(async () => true),
 		consume: vi.fn(async () => ({ consumeTxHash: "0xconsumetx" })),
@@ -441,6 +442,135 @@ describe("useBridgeJournal engine", () => {
 		expect(deps.consume).not.toHaveBeenCalled()
 		// The live provisional record is NOT tagged unknown-outcome by the sweep.
 		expect(useBridgeJournal().runtime.value["wd-pending-live"]?.attention).toBeUndefined()
+	})
+
+	it("P1: the engine narrates — steps observable during the flow, cleared at exit", async () => {
+		const deps = baseDeps(kv)
+		const seen: (string | undefined)[] = []
+		let sent = false
+		const claim = vi.fn(async () => ({
+			simulate: async () => {
+				seen.push(useBridgeJournal().runtime.value["0xnarrate"]?.step)
+				if (sent) throw new Error("No L1 to L2 message found")
+				return {}
+			},
+			send: async () => {
+				seen.push(useBridgeJournal().runtime.value["0xnarrate"]?.step)
+				sent = true
+				return { txHash: "0xclaimtx" }
+			},
+		}))
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xnarrate"))
+		await runDepositClaim("0xnarrate")
+		expect(seen).toContain("syncing")
+		expect(seen).toContain("sending")
+		const rt = useBridgeJournal().runtime.value["0xnarrate"]
+		expect(rt?.step).toBeUndefined()
+		expect(useBridgeJournal().records.value.find((r) => r.id === "0xnarrate")?.completedAt).toBe(999)
+	})
+
+	it("P1: pending-forever NEVER dead-ends into unknown-outcome — soft note after the round cap", async () => {
+		const deps = baseDeps(kv)
+		deps.claimReceiptStatus = vi.fn(async () => "pending" as const)
+		connectJournalDeps({ ...deps, claim: smartClaimFake() })
+		addRecord(mkDeposit("0xslow", { claimTxHash: "0xclaimtx" }))
+		await runDepositClaim("0xslow", { interactive: false })
+		await vi.waitFor(() => {
+			const rt = useBridgeJournal().runtime.value["0xslow"]
+			expect(rt?.note).toMatch(/still confirming/i)
+		})
+		const rt = useBridgeJournal().runtime.value["0xslow"]
+		expect(rt?.attention).toBeUndefined()
+		expect((useBridgeJournal().records.value.find((r) => r.id === "0xslow") as DepositJournalRecord).claimTxHash).toBe("0xclaimtx")
+	})
+
+	it("P1: transport failures narrate as unreachable, never pending, never an attention", async () => {
+		const deps = baseDeps(kv)
+		const details: (string | undefined)[] = []
+		deps.claimReceiptStatus = vi.fn(async () => "unreachable" as const)
+		// The unreachable narration is set right before the inter-poll wait — sample it there.
+		const waitMs = async () => {
+			details.push(useBridgeJournal().runtime.value["0xdeadrpc"]?.stepDetail)
+		}
+		connectJournalDeps({ ...deps, claim: smartClaimFake(), waitMs })
+		addRecord(mkDeposit("0xdeadrpc", { claimTxHash: "0xclaimtx" }))
+		await runDepositClaim("0xdeadrpc", { interactive: false })
+		await vi.waitFor(() => expect(useBridgeJournal().runtime.value["0xdeadrpc"]?.note).toMatch(/still confirming/i))
+		expect(details.some((d) => d?.includes("node unreachable"))).toBe(true)
+		expect(useBridgeJournal().runtime.value["0xdeadrpc"]?.attention).toBeUndefined()
+	})
+
+	it("P1: discard mid-wait bumps the generation — the chain dies, nothing resurrects", async () => {
+		const deps = baseDeps(kv)
+		let polls = 0
+		deps.claimReceiptStatus = vi.fn(async () => {
+			polls++
+			if (polls === 3) discard("0xkilled")
+			return "pending" as const
+		})
+		connectJournalDeps({ ...deps, claim: smartClaimFake() })
+		addRecord(mkDeposit("0xkilled", { claimTxHash: "0xclaimtx" }))
+		await runDepositClaim("0xkilled", { interactive: false })
+		await new Promise((r) => setTimeout(r, 20))
+		expect(useBridgeJournal().records.value.find((r) => r.id === "0xkilled")).toBeUndefined()
+		expect(useBridgeJournal().runtime.value["0xkilled"]).toBeUndefined()
+		expect(polls).toBeLessThan(10)
+	})
+
+	it("P1: an in-session completion auto-hides (provenance) — record retained, never discarded", async () => {
+		const deps = baseDeps(kv)
+		connectJournalDeps({ ...deps, claim: smartClaimFake() })
+		addRecord(mkDeposit("0xhide"))
+		await runDepositClaim("0xhide")
+		await vi.waitFor(() => expect(useBridgeJournal().runtime.value["0xhide"]?.hidden).toBe(true))
+		const { records: recs } = useBridgeJournal()
+		expect(recs.value.find((r) => r.id === "0xhide")?.completedAt).toBe(999)
+		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xhide")).toBe(false)
+		expect(useBridgeJournal().lastCompleted.value?.id).toBe("0xhide")
+	})
+
+	it("P1: a REDISCOVERED completion stays visible with its ✓ card (no provenance, no auto-hide)", async () => {
+		const deps = baseDeps(kv)
+		const claim = vi.fn(async () => ({
+			simulate: async () => {
+				throw new Error("No L1 to L2 message found")
+			},
+			send: async () => ({ txHash: "0x" }),
+		}))
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xredisc", { claimTxHash: "0xclaimtx" }))
+		await runDepositClaim("0xredisc")
+		await new Promise((r) => setTimeout(r, 20))
+		expect(useBridgeJournal().records.value.find((r) => r.id === "0xredisc")?.completedAt).toBe(999)
+		expect(useBridgeJournal().runtime.value["0xredisc"]?.hidden).toBeUndefined()
+		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xredisc")).toBe(true)
+	})
+
+	it("P1: withdraw completions auto-hide and feed the toast hook", async () => {
+		const deps = baseDeps(kv)
+		connectJournalDeps(deps)
+		addRecord(mkWithdraw("0xwdhide"))
+		await runWithdrawConsume("0xwdhide")
+		await vi.waitFor(() => expect(useBridgeJournal().runtime.value["0xwdhide"]?.hidden).toBe(true))
+		expect(useBridgeJournal().records.value.find((r) => r.id === "0xwdhide")?.completedAt).toBe(999)
+		expect(useBridgeJournal().lastCompleted.value).toMatchObject({ id: "0xwdhide", direction: "withdraw", txHash: "0xconsumetx" })
+	})
+
+	it("P1: a throwing claim clears the step on the way out", async () => {
+		const deps = baseDeps(kv)
+		const claim = vi.fn(async () => ({
+			simulate: async () => {
+				throw new Error("boom — not a sync revert")
+			},
+			send: async () => ({ txHash: "0x" }),
+		}))
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xboom"))
+		await expect(runDepositClaim("0xboom")).rejects.toThrow(/boom/)
+		const rt = useBridgeJournal().runtime.value["0xboom"]
+		expect(rt?.step).toBeUndefined()
+		expect(rt?.busy).toBe(false)
 	})
 
 	it("runOnLane serializes one lane and leaves the other free", async () => {
