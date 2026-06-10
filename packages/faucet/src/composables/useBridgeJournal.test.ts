@@ -593,6 +593,52 @@ describe("useBridgeJournal engine", () => {
 		expect(rt?.busy).toBe(false)
 	})
 
+	it("cross-tab pin: a REMOTE discard mid-round neither crashes nor completes the stale runner", async () => {
+		const deps = baseDeps(kv)
+		let polls = 0
+		deps.claimReceiptStatus = vi.fn(async () => {
+			polls++
+			if (polls === 2) {
+				// Another tab removed the record: simulate via direct storage write + storage-event reload
+				// (NOT discard(), which would bump the tab-local generation).
+				kv.setItem("nulo-bridge:journal:v1", JSON.stringify({ schema: 1, records: [] }))
+				window.dispatchEvent(new StorageEvent("storage", { key: "nulo-bridge:journal:v1" }))
+			}
+			return polls < 2 ? ("pending" as const) : ("success" as const)
+		})
+		connectJournalDeps({ ...deps, claim: smartClaimFake() })
+		const { records: recs } = useBridgeJournal()
+		addRecord(mkDeposit("0xremote", { claimTxHash: "0xclaimtx" }))
+		await expect(runDepositClaim("0xremote", { interactive: false })).resolves.toBeUndefined()
+		await new Promise((r) => setTimeout(r, 20))
+		expect(recs.value.find((r) => r.id === "0xremote")).toBeUndefined()
+		expect(useBridgeJournal().lastCompleted.value).toBeNull()
+	})
+
+	it("cross-tab pin: a REMOTE completion makes the local finisher an idempotent no-op (no double toast)", async () => {
+		const deps = baseDeps(kv)
+		deps.claimReceiptStatus = vi.fn(async () => {
+			// Another tab completed the record while we polled.
+			const remote = { ...mkDeposit("0xracedone", { claimTxHash: "0xclaimtx" }), completedAt: 12345 }
+			kv.setItem("nulo-bridge:journal:v1", JSON.stringify({ schema: 1, records: [remote] }))
+			window.dispatchEvent(new StorageEvent("storage", { key: "nulo-bridge:journal:v1" }))
+			return "success" as const
+		})
+		const claim = vi.fn(async () => ({
+			simulate: async () => {
+				throw new Error("No L1 to L2 message found")
+			},
+			send: async () => ({ txHash: "0x" }),
+		}))
+		connectJournalDeps({ ...deps, claim })
+		useBridgeJournal() // ensure the storage listener is registered for the remote write
+		addRecord(mkDeposit("0xracedone", { claimTxHash: "0xclaimtx" }))
+		await runDepositClaim("0xracedone")
+		const rec = useBridgeJournal().records.value.find((r) => r.id === "0xracedone")
+		expect(rec?.completedAt).toBe(12345) // The remote completion stands; ours never overwrote it.
+		expect(useBridgeJournal().lastCompleted.value).toBeNull() // No local toast for a remote win.
+	})
+
 	it("runOnLane serializes one lane and leaves the other free", async () => {
 		const order: string[] = []
 		let releaseA: () => void = () => {}

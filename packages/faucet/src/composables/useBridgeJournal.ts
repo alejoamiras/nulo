@@ -370,7 +370,12 @@ function scheduleAutoHide(id: string): void {
 	})
 }
 
-function completeDeposit(rec: DepositJournalRecord): void {
+function completeDeposit(rec: DepositJournalRecord | undefined): void {
+	// Cross-tab guard: another tab may have discarded (record gone) or completed this record while
+	// we ran — generations are tab-local, so the WRITE must be existence- and idempotency-checked.
+	if (!rec) return
+	const current = records.value.find((r) => r.id === rec.id)
+	if (!current || current.completedAt) return
 	patchRecord(rec.id, { completedAt: deps.now() })
 	setRuntime(rec.id, { attention: undefined, note: undefined })
 	secretCache.delete(rec.id)
@@ -383,7 +388,10 @@ function completeDeposit(rec: DepositJournalRecord): void {
 	log("deposit complete", rec.id)
 }
 
-function completeWithdraw(rec: WithdrawJournalRecord, consumeTxHash?: string): void {
+function completeWithdraw(rec: WithdrawJournalRecord | undefined, consumeTxHash?: string): void {
+	if (!rec) return
+	const current = records.value.find((r) => r.id === rec.id)
+	if (!current || current.completedAt) return
 	patchRecord(rec.id, { completedAt: deps.now() })
 	setRuntime(rec.id, { attention: undefined, note: undefined })
 	receiptRounds.delete(rec.id)
@@ -484,7 +492,9 @@ export async function runDepositClaim(id: string, opts: { interactive?: boolean 
 		receiptRounds.delete(id)
 		// F12: the forge-resistant provenance — THIS process watched claimable → sent.
 		localClaimProvenance.add(id)
-		const sent = records.value.find((r) => r.id === id) as DepositJournalRecord
+		// Cross-tab guard: the record can vanish remotely between the send and this reread.
+		const sent = records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
+		if (!sent) return
 		continueRounds = (await runReceiptRound(sent, gen)) === "continue"
 	})
 	// Chunked re-entry happens OUTSIDE the lock so RETRY/DISCARD stay reachable between rounds.
@@ -525,7 +535,7 @@ async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<
 				})
 				return "stop"
 			}
-			completeDeposit(records.value.find((r) => r.id === rec.id) as DepositJournalRecord)
+			completeDeposit(records.value.find((r) => r.id === rec.id) as DepositJournalRecord | undefined)
 			return "done"
 		}
 		if (status === "reverted") {
@@ -560,7 +570,7 @@ async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<
 		// Soft cap, NOT a dead-end: no attention, the card re-arms RETRY and says so.
 		setStep(rec.id, undefined, undefined)
 		setRuntime(rec.id, {
-			note: "Still confirming after ~30 minutes — slow testnet. RETRY keeps checking; your funds are safe either way.",
+			note: "Still confirming after ~30 minutes — slow testnet. Press CLAIM to keep checking; your funds are safe either way.",
 		})
 		return "stop"
 	}
@@ -628,7 +638,7 @@ export async function runWithdrawConsume(id: string): Promise<void> {
 		patchRecord(id, { consumeTxHash })
 		setStep(id, "confirming", "waiting for the Ethereum confirmation")
 		if (await deps.waitConsumeReceipt(consumeTxHash)) {
-			completeWithdraw(records.value.find((r) => r.id === id) as WithdrawJournalRecord, consumeTxHash)
+			completeWithdraw(records.value.find((r) => r.id === id) as WithdrawJournalRecord | undefined, consumeTxHash)
 		} else {
 			patchRecord(id, { consumeTxHash: undefined })
 			setRuntime(id, { attention: "error", note: "The finish transaction failed — finish again from this card. Nothing was lost." })
