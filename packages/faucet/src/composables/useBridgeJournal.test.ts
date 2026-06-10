@@ -16,16 +16,22 @@ vi.mock("@/contracts/bridge-deployments", () => ({
 
 import {
 	__resetJournalForTests,
+	activeFlowId,
 	addRecord,
 	addRecordVerified,
 	cacheSecret,
+	claimForeground,
 	connectJournalDeps,
 	discard,
+	markApproveOutcome,
 	markSessionLive,
+	rekeyJournalRecord,
+	releaseForeground,
 	resumeSessionWork,
 	runDepositClaim,
 	runOnLane,
 	runWithdrawConsume,
+	setRecordStep,
 	useBridgeJournal,
 } from "./useBridgeJournal"
 
@@ -637,6 +643,52 @@ describe("useBridgeJournal engine", () => {
 		const rec = useBridgeJournal().records.value.find((r) => r.id === "0xracedone")
 		expect(rec?.completedAt).toBe(12345) // The remote completion stands; ours never overwrote it.
 		expect(useBridgeJournal().lastCompleted.value).toBeNull() // No local toast for a remote win.
+	})
+
+	it("S13: foreground CAS — claim suppresses the card; stale release no-ops; takeover works", async () => {
+		const deps = baseDeps(kv)
+		connectJournalDeps(deps)
+		addRecord(mkDeposit("0xfg"))
+		addRecord(mkDeposit("0xother"))
+		claimForeground("0xfg")
+		expect(useBridgeJournal().visibleRecords.value.map((r) => r.id)).toEqual(["0xother"])
+		// A stale owner (already superseded) cannot release the new one.
+		claimForeground("0xother")
+		releaseForeground("0xfg")
+		expect(activeFlowId.value).toBe("0xother")
+		releaseForeground("0xother")
+		expect(activeFlowId.value).toBeNull()
+		expect(useBridgeJournal().visibleRecords.value).toHaveLength(2)
+	})
+
+	it("S13: a reload-equivalent reset clears foreground (structural fail-open)", async () => {
+		const deps = baseDeps(kv)
+		connectJournalDeps(deps)
+		addRecord(mkDeposit("0xfo"))
+		claimForeground("0xfo")
+		__resetJournalForTests()
+		expect(activeFlowId.value).toBeNull()
+	})
+
+	it("S13: the provisional→exit rekey transfers foreground ownership", async () => {
+		const deps = baseDeps(kv)
+		connectJournalDeps(deps)
+		addRecord(mkWithdraw("wd-pending-z", { exitTxHash: undefined }))
+		claimForeground("wd-pending-z")
+		rekeyJournalRecord("wd-pending-z", mkWithdraw("0xexitZ"))
+		expect(activeFlowId.value).toBe("0xexitZ")
+		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xexitZ")).toBe(false)
+	})
+
+	it("S3/S15: setRecordStep + markApproveOutcome land in the per-record runtime", async () => {
+		const deps = baseDeps(kv)
+		connectJournalDeps(deps)
+		addRecord(mkDeposit("0xnarr"))
+		setRecordStep("0xnarr", "approving", "confirm the allowance")
+		markApproveOutcome("0xnarr", "skipped")
+		const rt = useBridgeJournal().runtime.value["0xnarr"]
+		expect(rt?.step).toBe("approving")
+		expect(rt?.approveOutcome).toBe("skipped")
 	})
 
 	it("runOnLane serializes one lane and leaves the other free", async () => {

@@ -35,20 +35,32 @@ export const isMsgNotReady = (msg: string): boolean =>
 
 export type Attention = "mismatch" | "tampered" | "unseal-failed" | "stale" | "stale-deployment" | "unknown-outcome" | "error"
 
-/** The engine's live narration of what it is doing RIGHT NOW for a record. Ephemeral display
- *  state only — never persisted, never an input to completion logic. */
-export type BridgeStep = "unsealing" | "syncing" | "sending" | "confirming" | "verifying"
+/** The live narration of what is happening RIGHT NOW for a record — engine steps plus the flows'
+ *  L1/L2 legs. Ephemeral display state only — never persisted, never an input to completion logic. */
+export type BridgeStep =
+	| "sealing"
+	| "approving"
+	| "depositing"
+	| "exiting"
+	| "unsealing"
+	| "syncing"
+	| "sending"
+	| "confirming"
+	| "verifying"
 
 export interface RecordRuntime {
 	busy?: boolean
 	attention?: Attention
 	/** Human-readable detail for the attention state. */
 	note?: string
-	/** Live narration (D1): the current engine step + a free-text detail (poll counts etc.). */
+	/** Live narration (D1): the current step + a free-text detail (poll counts etc.). */
 	step?: BridgeStep
 	stepDetail?: string
 	/** Set after the post-✓ grace: the card leaves the rendered list; the RECORD stays in storage. */
 	hidden?: boolean
+	/** Whether the APPROVE leg was skipped (sufficient allowance) or completed — display-only,
+	 *  underivable from facts once the flow advances (plan S15). Absent after a reload. */
+	approveOutcome?: "skipped" | "done"
 	/** Withdraw proving countdown inputs. */
 	provenBlock?: number
 	targetBlock?: number
@@ -188,6 +200,7 @@ export function __resetJournalForTests(): void {
 	generations.clear()
 	receiptRounds.clear()
 	lastCompleted.value = null
+	activeFlowId.value = null
 	lanes.l1 = Promise.resolve()
 	lanes.aztec = Promise.resolve()
 	deps = { kv: memoryKV(), now: Date.now }
@@ -221,10 +234,12 @@ export function updateRecord(id: string, patch: Partial<BridgeJournalRecord>): v
 	patchRecord(id, patch)
 }
 
-/** Provisional-withdraw upgrade: replace the `wd-pending-*` record under its real exitTxHash id. */
+/** Provisional-withdraw upgrade: replace the `wd-pending-*` record under its real exitTxHash id.
+ *  Foreground ownership follows the rekey, or the stepper would lose its record mid-watch. */
 export function rekeyJournalRecord(oldId: string, next: BridgeJournalRecord): void {
 	rekeyRecord(deps.kv, oldId, next)
 	if (sessionLive.delete(oldId)) sessionLive.add(next.id)
+	if (activeFlowId.value === oldId) activeFlowId.value = next.id
 	reload()
 }
 
@@ -359,6 +374,37 @@ export const lastCompleted = ref<{
 
 function setStep(id: string, step?: BridgeStep, stepDetail?: string): void {
 	setRuntime(id, { step, stepDetail })
+}
+
+/** The flows' narration channel into the per-record runtime (plan S3). */
+export function setRecordStep(id: string, step?: BridgeStep, stepDetail?: string): void {
+	setStep(id, step, stepDetail)
+}
+
+/** Display-only APPROVE outcome (plan S15) — written at the allowance decision. */
+export function markApproveOutcome(id: string, outcome: "skipped" | "done"): void {
+	setRuntime(id, { approveOutcome: outcome })
+}
+
+/** Surface a flow-leg failure on the record (the stepper/card render it; the engine is untouched). */
+export function flagRecordError(id: string, note: string): void {
+	setRuntime(id, { attention: "error", note })
+}
+
+/**
+ * Foreground ownership (plan S13): UI-owned, compare-and-swap. While a record is foreground, the
+ * journal list suppresses its card — the stepper/receipt is its only surface. In-memory only:
+ * a reload structurally fails open (the card appears). Flow promises never touch this.
+ */
+export const activeFlowId = ref<string | null>(null)
+
+export function claimForeground(id: string): void {
+	activeFlowId.value = id
+}
+
+/** CAS release: a stale owner (backgrounded, superseded, settled flow) cannot clear the current one. */
+export function releaseForeground(id: string): void {
+	if (activeFlowId.value === id) activeFlowId.value = null
 }
 
 /** After the ✓ grace, the card leaves the rendered list. The RECORD is untouched — deletion
@@ -664,8 +710,9 @@ export function resumeSessionWork(): void {
 	}
 }
 
-/** The render list: completed-and-graced cards are hidden here (D3) — records stay in storage. */
-export const visibleRecords = computed(() => records.value.filter((r) => !runtime.value[r.id]?.hidden))
+/** The render list: completed-and-graced cards are hidden (D3), and the FOREGROUND record is
+ *  suppressed (its stepper/receipt is the one surface — plan S12/S13). Records stay in storage. */
+export const visibleRecords = computed(() => records.value.filter((r) => !runtime.value[r.id]?.hidden && r.id !== activeFlowId.value))
 
 export function useBridgeJournal() {
 	initJournal()
@@ -674,6 +721,9 @@ export function useBridgeJournal() {
 		visibleRecords,
 		runtime,
 		lastCompleted,
+		activeFlowId,
+		claimForeground,
+		releaseForeground,
 		addRecord,
 		addRecordVerified,
 		updateRecord,
