@@ -110,7 +110,7 @@ Swap (next arc); engine/trust model; storage schema; CSP pass; Playwright real-b
 - Final fresh-context codex pass: PENDING.
 
 ## Seeds
-Drafts in [eli5.html](eli5.html) after the audits; finalized post-approval.
+Drafts in [eli5.html](eli5.html) §Implementation seeds — `/goal` recommended (transcript-observable completion); `/loop 15m` fallback. Finalized post-approval.
 
 ---
 
