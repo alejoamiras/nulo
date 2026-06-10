@@ -117,7 +117,7 @@ Swap (next arc); CSP/hardening pass (unchanged); Playwright real-browser flows; 
 - Final fresh-context codex pass: PENDING.
 
 ## Seeds
-Draft in [eli5.html](eli5.html) once the audits land; finalized post-approval.
+Drafts live in [eli5.html](eli5.html) §Implementation seeds — **`/goal` recommended** (completion is transcript-observable: three ✓ phases + gates + the 6-item manual checklist); `/loop 15m` as the interval fallback. Finalized post-approval.
 
 ---
 
