@@ -52,7 +52,7 @@ The stepper maps the phase list (each phase: pending ▢ / active ● (pulsing) 
 
 ## Phases
 
-### P1 — Runtime narration channel + suppression + mapper ⬜
+### P1 — Runtime narration channel + suppression + mapper 🔄
 Files: `useBridgeJournal.ts` (`BridgeStep` union += `sealing | approving | depositing | exiting`; `RecordRuntime.approveOutcome`; exports `setRecordStep(id, step, detail?)`, `claimForeground(id)`/`releaseForeground(id)` (CAS) + `activeFlowId`; `visibleRecords` additionally excludes the active id for NON-completed records); `useDeposit.ts`/`useWithdraw.ts` (legs call `setRecordStep`; the flows return the record id at creation; the D1 matrix with the `isUserRejection` classifier — NEW `lib/wallet-errors.ts` (EIP-1193 4001 + `UserRejectedRequestError`, tested); flows NEVER touch foreground state); NEW `lib/bridge-steps.ts` (`stepperPhases(record, runtime)` — the single mapper, monotonic latch on record facts, `approveOutcome` consumption); tests.
 Testing strategy (fable MEDIUM-4 — no flow tests exist and the flows call wallet singletons directly): the MAPPER carries the proof weight (pure unit tests over fact/runtime matrices, incl. the between-rounds no-flicker pin: step cleared + facts unchanged ⇒ phases unchanged); flow-level behavior (leg ordering, clean-reject discard, matrix rows) via a `vi.mock` harness over `useL1Wallet`/`useBridgeWallet` — NOT "existing fakes" (none exist).
 Smallest proof: suppression in/out (claim → hidden from journal; release/background → visible; reload-sim → visible); CAS pins (releaseForeground with a stale id no-ops; a second claimForeground takes over; a settled flow promise does NOT release); `isUserRejection` matrix (4001 ⇒ true; UserRejectedRequestError ⇒ true; RPC/network errors ⇒ false); mapper matrices per direction (pending/active/done/skipped/failed; `approveOutcome` ⊘/✓/undefined honest-degradation; engine steps select the active phase; cleared-step-between-rounds regression pin); EXPLICIT rejection pre-hash ⇒ record discarded (deposit AND withdraw); AMBIGUOUS pre-hash failure ⇒ record kept; post-tx failure ⇒ record kept.
@@ -110,6 +110,9 @@ Gates: `bun run audit:faucet` + `bun run audit:vue` → `/code-review max --fix`
 
 ## Out of scope
 Swap (next arc); engine/trust model; storage schema; CSP pass; Playwright real-browser flows.
+
+## Approval
+**USER VERDICT: APPROVE** (gate, this session) — scope as written incl. the PENDING BRIDGES rename. Seeds finalized; implementation begins at P1.
 
 ## Audit verdicts
 - Dual audit (parallel, both outlines; transcripts in [audit-codex.md](audit-codex.md) / [audit-fable.md](audit-fable.md)):
