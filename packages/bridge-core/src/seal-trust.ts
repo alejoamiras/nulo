@@ -28,6 +28,15 @@ interface TrustStore {
 	entries: Record<string, TrustEntry>
 }
 
+/** Fingerprints that don't identify a SPECIFIC wallet app. Two different unrecognized wallets
+ *  would collide on these, silently reusing trust across signers — so generic fingerprints never
+ *  earn a persistent verdict: those wallets self-test on every private deposit (2 signatures). */
+const GENERIC_FINGERPRINTS = new Set(["unknown", "injected", ""])
+
+export function isCacheableProvider(provider: string): boolean {
+	return !GENERIC_FINGERPRINTS.has(provider)
+}
+
 function entryKey(chainId: number, address: string): string {
 	return `${chainId}:${address.toLowerCase()}`
 }
@@ -46,14 +55,17 @@ function load(kv: KV): TrustStore {
 	}
 }
 
-/** True only when a positive verdict exists for (chainId, address) AND its provider
- *  fingerprint matches the current one — a different wallet app re-earns trust. */
+/** True only when a positive verdict exists for (chainId, address) AND its provider fingerprint
+ *  matches the current one — a different wallet app re-earns trust. Generic fingerprints are
+ *  never trusted (they can't distinguish wallet apps). */
 export function isSealTrusted(kv: KV, chainId: number, address: string, provider: string): boolean {
+	if (!isCacheableProvider(provider)) return false
 	const entry = load(kv).entries[entryKey(chainId, address)]
 	return !!entry && entry.provider === provider
 }
 
 export function markSealTrusted(kv: KV, chainId: number, address: string, provider: string): void {
+	if (!isCacheableProvider(provider)) return
 	const store = load(kv)
 	store.entries[entryKey(chainId, address)] = { verifiedAt: Date.now(), provider }
 	kv.setItem(SEAL_TRUST_KEY, JSON.stringify(store))

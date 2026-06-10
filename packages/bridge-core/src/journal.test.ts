@@ -142,16 +142,25 @@ describe("parse hardening + cap priority", () => {
 		expect(loadJournal(kv).map((r) => r.id)).toEqual(["0xa"])
 	})
 
-	it("a junk flood never evicts an unfinished record (prioritized retention)", () => {
+	it("a COMPLETED-junk flood never evicts an unfinished record (prioritized retention)", () => {
 		const live = deposit("0xlive", { updatedAt: 5 })
 		const junk: BridgeJournalRecord[] = Array.from({ length: MAX_RECORDS + 50 }, (_, i) =>
 			deposit(`0xjunk${i}`, { completedAt: 1000 + i, updatedAt: 1000 + i }),
 		)
 		const capped = capRecords([...junk, live])
-		expect(capped).toHaveLength(MAX_RECORDS)
 		expect(capped.some((r) => r.id === "0xlive")).toBe(true)
 		// The evicted ones are the OLDEST completed.
 		expect(capped.some((r) => r.id === "0xjunk0")).toBe(false)
+	})
+
+	it("an UNFINISHED-junk flood cannot evict a live record either — unfinished records are never dropped", () => {
+		const live = deposit("0xlive", { updatedAt: 1 }) // oldest of all
+		const junk: BridgeJournalRecord[] = Array.from({ length: MAX_RECORDS + 50 }, (_, i) =>
+			deposit(`0xjunk${i}`, { updatedAt: 1000 + i }),
+		)
+		const capped = capRecords([...junk, live])
+		expect(capped.some((r) => r.id === "0xlive")).toBe(true)
+		expect(capped.filter((r) => !r.completedAt)).toHaveLength(MAX_RECORDS + 51)
 	})
 })
 

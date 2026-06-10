@@ -109,13 +109,16 @@ function parseRecords(raw: string | null): BridgeJournalRecord[] {
 	}
 }
 
-/** Prioritized retention under MAX_RECORDS: unfinished first (newest-updated wins among them),
- *  then newest completed. Flooding with junk can therefore never evict a live record. */
+/** Prioritized retention under MAX_RECORDS: unfinished records are NEVER evicted — an unfinished
+ *  private deposit may hold the only sealed recovery blob, and an attacker who can flood storage
+ *  with unfinished junk could otherwise use the cap itself as an eviction tool (worse than the
+ *  deletion he can already do directly). The cap trims only completed records, newest first; a
+ *  junk flood degrades the UI, never the data. */
 export function capRecords(records: BridgeJournalRecord[]): BridgeJournalRecord[] {
 	if (records.length <= MAX_RECORDS) return records
-	const unfinished = records.filter((r) => !r.completedAt).sort((a, b) => b.updatedAt - a.updatedAt)
+	const unfinished = records.filter((r) => !r.completedAt)
 	const completed = records.filter((r) => r.completedAt).sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0))
-	return [...unfinished, ...completed].slice(0, MAX_RECORDS)
+	return [...unfinished, ...completed.slice(0, Math.max(0, MAX_RECORDS - unfinished.length))]
 }
 
 export function loadJournal(kv: KV): BridgeJournalRecord[] {

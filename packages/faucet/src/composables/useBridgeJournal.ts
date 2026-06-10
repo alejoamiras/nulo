@@ -307,7 +307,8 @@ const wait = (ms: number): Promise<void> => (deps.waitMs ? deps.waitMs(ms) : new
  * identity-checked completion. Explicit-click only for rediscovered records; the deposit flow
  * calls it directly for sessionLive ones.
  */
-export async function runDepositClaim(id: string): Promise<void> {
+export async function runDepositClaim(id: string, opts: { interactive?: boolean } = {}): Promise<void> {
+	const interactive = opts.interactive !== false
 	await withRecordLock(id, async () => {
 		const rec = records.value.find((r) => r.id === id && r.direction === "deposit") as DepositJournalRecord | undefined
 		if (!rec || rec.completedAt) return
@@ -322,8 +323,15 @@ export async function runDepositClaim(id: string): Promise<void> {
 			return
 		}
 
-		// An already-sent claim is finished by waiting on ITS receipt — prompt-free, never a re-send.
+		// An already-sent claim is finished by waiting on ITS receipt, never a re-send. Completion
+		// requires the message-consumed probe, which needs the secret — an EXPLICIT click on a
+		// rediscovered private record unseals it first (one signature); the prompt-free sweep cannot,
+		// and finishDepositByReceipt then refuses to mark done on an unverifiable receipt.
 		if (rec.claimTxHash) {
+			if (rec.isPrivate && interactive && !secretCache.has(id) && rec.sealedEnvelope) {
+				const resolved = await resolvePrivateSecret(rec)
+				if (!resolved) return
+			}
 			await finishDepositByReceipt(rec)
 			return
 		}
@@ -384,13 +392,18 @@ async function finishDepositByReceipt(rec: DepositJournalRecord): Promise<void> 
 	for (let i = 0; i < 45; i++) {
 		const status = await deps.claimReceiptStatus(rec.claimTxHash)
 		if (status === "success") {
-			// Identity check: after a successful receipt, THIS record's message must be gone. A claim
-			// that still simulates clean means the receipt belonged to some other tx ⇒ unknown-outcome.
+			// Identity check: after a successful receipt, THIS record's message must be GONE — a
+			// verifiable true is the ONLY path to done. false ⇒ the receipt wasn't ours; null (no
+			// secret / probe failure) ⇒ refuse too: a forged claimTxHash on a rediscovered private
+			// record must never auto-finish (codex post-impl HIGH-1).
 			const consumed = await recordMessageConsumed(rec)
-			if (consumed === false) {
+			if (consumed !== true) {
 				setRuntime(rec.id, {
 					attention: "unknown-outcome",
-					note: "A claim receipt succeeded but this record's message is still claimable — not marking it done.",
+					note:
+						consumed === false
+							? "A claim receipt succeeded but this record's message is still claimable — not marking it done."
+							: "A claim receipt succeeded but couldn't be verified against this record — press CLAIM to verify (one signature for private records).",
 				})
 				return
 			}
@@ -498,7 +511,7 @@ export function resumeSessionWork(): void {
 		// them here races the flow (and would tag a live provisional record unknown-outcome).
 		if (rec.direction === "deposit" && !(rec as DepositJournalRecord).leafIndex && !(rec as DepositJournalRecord).claimTxHash) continue
 		if (rec.direction === "withdraw" && !(rec as WithdrawJournalRecord).exitTxHash) continue
-		if (rec.direction === "deposit") void runDepositClaim(rec.id)
+		if (rec.direction === "deposit") void runDepositClaim(rec.id, { interactive: false })
 		else void runWithdrawConsume(rec.id)
 	}
 }

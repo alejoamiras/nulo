@@ -192,14 +192,18 @@ describe("useBridgeJournal engine", () => {
 
 	it("⑤ a single transient dropped read does NOT clear claimTxHash; three consecutive do", async () => {
 		const deps = baseDeps(kv)
-		const claim = smartClaimFake()
+		// The claim was already consumed (simulate reverts message-gone) — the probe verifies true.
+		const claim = vi.fn(async () => ({
+			simulate: async () => {
+				throw new Error("No L1 to L2 message found for message hash 0xdead")
+			},
+			send: async () => ({ txHash: "0xclaimtx" }),
+		}))
 		const statuses = ["dropped", "success"] as const
 		let i = 0
 		deps.claimReceiptStatus = vi.fn(async () => statuses[Math.min(i++, statuses.length - 1)])
 		connectJournalDeps({ ...deps, claim, connectedAztec: () => RECIPIENT })
-		addRecord(mkDeposit("0xdebounce", { claimTxHash: "0xclaimtx", secret: undefined, isPrivate: false }))
-		// Rediscovered receipt-wait is prompt-free and auto-finishes; identity probe is skipped
-		// (no secret available) ⇒ null ⇒ completes.
+		addRecord(mkDeposit("0xdebounce", { claimTxHash: "0xclaimtx" }))
 		resumeSessionWork()
 		await vi.waitFor(() => {
 			const { records } = useBridgeJournal()
@@ -233,6 +237,41 @@ describe("useBridgeJournal engine", () => {
 		const { records, runtime } = useBridgeJournal()
 		expect(records.value.find((r) => r.id === "0xspoof")?.completedAt).toBeUndefined()
 		expect(runtime.value["0xspoof"]?.attention).toBe("unknown-outcome")
+	})
+
+	it("⑰b a forged claimTxHash on a rediscovered PRIVATE record NEVER auto-finishes (sweep can't verify)", async () => {
+		const deps = baseDeps(kv)
+		// Receipt reads success, but the probe has no secret on the prompt-free path ⇒ refuse done.
+		const claim = vi.fn(async () => ({ simulate: async () => ({}), send: async () => ({ txHash: "0x" }) }))
+		connectJournalDeps({ ...deps, claim })
+		const rec = mkDeposit("0xforged", { isPrivate: true, secret: undefined, sealerL1: SEALER, claimTxHash: "0xunrelated" })
+		rec.sealedEnvelope = await sealEnvelopeFor(rec)
+		addRecord(rec)
+		resumeSessionWork()
+		await vi.waitFor(() => {
+			const { runtime } = useBridgeJournal()
+			expect(runtime.value["0xforged"]?.attention).toBe("unknown-outcome")
+		})
+		expect(useBridgeJournal().records.value.find((r) => r.id === "0xforged")?.completedAt).toBeUndefined()
+		expect(deps.signL1).not.toHaveBeenCalled()
+	})
+
+	it("⑰c an explicit CLAIM on that record verifies with ONE signature and completes", async () => {
+		const deps = baseDeps(kv)
+		// The genuine case: the message is consumed, so the probe's simulate reverts message-gone.
+		const claim = vi.fn(async () => ({
+			simulate: async () => {
+				throw new Error("No L1 to L2 message found")
+			},
+			send: async () => ({ txHash: "0x" }),
+		}))
+		connectJournalDeps({ ...deps, claim })
+		const rec = mkDeposit("0xverify", { isPrivate: true, secret: undefined, sealerL1: SEALER, claimTxHash: "0xclaimtx" })
+		rec.sealedEnvelope = await sealEnvelopeFor(rec)
+		addRecord(rec)
+		await runDepositClaim("0xverify")
+		expect(deps.signL1).toHaveBeenCalledTimes(1)
+		expect(useBridgeJournal().records.value.find((r) => r.id === "0xverify")?.completedAt).toBe(999)
 	})
 
 	it("⑥ tampered plaintext recipient on a private record: no send, display resynced from the envelope", async () => {

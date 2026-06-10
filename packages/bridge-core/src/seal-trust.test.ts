@@ -54,6 +54,17 @@ describe("seal-trust", () => {
 		expect(isSealTrusted(kv, CHAIN, ADDR, "rabby")).toBe(false)
 	})
 
+	it("generic fingerprints (unknown/injected) NEVER earn trust — even after a mark", () => {
+		const kv = memKV()
+		markSealTrusted(kv, CHAIN, ADDR, "injected")
+		expect(isSealTrusted(kv, CHAIN, ADDR, "injected")).toBe(false)
+		markSealTrusted(kv, CHAIN, ADDR, "unknown")
+		expect(isSealTrusted(kv, CHAIN, ADDR, "unknown")).toBe(false)
+		// A specific fingerprint still works on the same address.
+		markSealTrusted(kv, CHAIN, ADDR, "rabby")
+		expect(isSealTrusted(kv, CHAIN, ADDR, "rabby")).toBe(true)
+	})
+
 	it("corrupt store JSON degrades to untrusted, never crashes", () => {
 		const kv = memKV({ [SEAL_TRUST_KEY]: "{broken" })
 		expect(isSealTrusted(kv, CHAIN, ADDR, "rabby")).toBe(false)
