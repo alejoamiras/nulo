@@ -63,34 +63,38 @@ export const TESTIDS = {
 	bridgeL2Account: "fa-bridge-l2-account",
 	bridgeL2Disconnect: "fa-bridge-l2-disconnect",
 
-	// Bridge — deposit
-	depositAmount: "fa-deposit-amount",
-	depositSubmit: "fa-deposit-submit",
-	depositStage: "fa-deposit-stage",
-	depositSuccess: "fa-deposit-success",
-	depositError: "fa-deposit-error",
-	depositPending: "fa-deposit-pending",
+	// Bridge — the unified swap-style form (cards carry data-chain; the L2 balance carries data-privacy)
+	bridgeForm: "fa-bridge-form",
+	bridgeFrom: "fa-bridge-from",
+	bridgeTo: "fa-bridge-to",
+	bridgeFlip: "fa-bridge-flip",
+	bridgeAmount: "fa-bridge-amount",
+	bridgeBalanceL1: "fa-bridge-balance-l1",
+	bridgeBalanceL2: "fa-bridge-balance-l2",
+	bridgePrivacyToggle: "fa-bridge-privacy-toggle",
+	bridgePrivacyNote: "fa-bridge-privacy-note",
+	bridgeSealNote: "fa-bridge-seal-note",
+	bridgeSubmit: "fa-bridge-submit",
+	bridgeFormError: "fa-bridge-form-error",
 
-	// Bridge — withdraw
-	withdrawAmount: "fa-withdraw-amount",
-	withdrawSubmit: "fa-withdraw-submit",
-	withdrawStage: "fa-withdraw-stage",
-	withdrawSuccess: "fa-withdraw-success",
-	withdrawError: "fa-withdraw-error",
-	withdrawPending: "fa-withdraw-pending",
+	// Bridge — the explicit L1 test-USDC mint (NOT the Faucet tab's L2 drips)
+	mintL1: "fa-mint-l1",
+	mintL1Status: "fa-mint-l1-status",
+
+	// Bridge — the in-flight journal (cards carry data-id/direction/stage/privacy/attention)
+	journal: "fa-bridge-journal",
+	journalEmpty: "fa-journal-empty",
+	journalCard: "fa-journal-card",
+	journalStage: "fa-journal-stage",
+	journalClaim: "fa-journal-claim",
+	journalFinish: "fa-journal-finish",
+	journalDiscard: "fa-journal-discard",
+	journalDiscardConfirm: "fa-journal-discard-confirm",
+	journalClear: "fa-journal-clear",
+	journalAttention: "fa-journal-attention",
 
 	// Bridge — add the bridged token to the wallet (registerToken, the bridge's own USDC)
 	bridgeAddToken: "fa-bridge-add-token",
-
-	// Bridge — deposit privacy toggle (public ↔ private) + the bearer-secret warning
-	depositModePublic: "fa-deposit-mode-public",
-	depositModePrivate: "fa-deposit-mode-private",
-	depositBearerWarning: "fa-deposit-bearer-warning",
-
-	// Bridge — withdraw privacy toggle (public ↔ private; no bearer secret on withdraw)
-	withdrawModePublic: "fa-withdraw-mode-public",
-	withdrawModePrivate: "fa-withdraw-mode-private",
-	withdrawPrivateNote: "fa-withdraw-private-note",
 } as const
 
 export type Testid = (typeof TESTIDS)[keyof typeof TESTIDS]

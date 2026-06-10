@@ -278,30 +278,3 @@ export function useDepositFlow() {
 
 	return { busy, error, deposit, journal }
 }
-
-/**
- * TEMPORARY compat veneer for the old DepositCard API — dies with the card in the UI phase.
- * Coarse stage only; the journal cards are the real progress surface.
- */
-export type DepositStage = "idle" | "minting" | "approving" | "depositing" | "syncing" | "claiming" | "done" | "error"
-
-export function useDeposit() {
-	const flow = useDepositFlow()
-	const journal = useBridgeJournal()
-	const stage = ref<DepositStage>("idle")
-	const hasPending = computed(() => journal.records.value.some((r) => r.direction === "deposit" && !r.completedAt))
-
-	async function deposit(amount: bigint, isPrivate = false): Promise<void> {
-		stage.value = "depositing"
-		await flow.deposit(amount, isPrivate)
-		stage.value = flow.error.value ? "error" : "done"
-	}
-
-	function discardPending(): void {
-		const pending = journal.records.value.find((r) => r.direction === "deposit" && !r.completedAt)
-		if (pending) discard(pending.id)
-		stage.value = "idle"
-	}
-
-	return { stage, error: flow.error, hasPending, deposit, discardPending }
-}

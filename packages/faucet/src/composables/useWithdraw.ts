@@ -254,26 +254,3 @@ export function useWithdrawFlow() {
 
 	return { busy, error, withdraw, journal }
 }
-
-/**
- * TEMPORARY compat veneer for the old WithdrawCard API — dies with the card in the UI phase.
- */
-export type WithdrawStage = "idle" | "burning" | "exiting" | "proving" | "consuming" | "done" | "error"
-
-export function useWithdraw() {
-	const flow = useWithdrawFlow()
-	const journal = useBridgeJournal()
-	const stage = ref<WithdrawStage>("idle")
-	const hasPending = computed(() => journal.records.value.some((r) => r.direction === "withdraw" && !r.completedAt))
-	const active = computed(() => journal.records.value.find((r) => r.direction === "withdraw" && !r.completedAt))
-	const provenBlock = computed(() => (active.value ? (journal.runtime.value[active.value.id]?.provenBlock ?? null) : null))
-	const targetBlock = computed(() => (active.value ? (journal.runtime.value[active.value.id]?.targetBlock ?? null) : null))
-
-	async function withdraw(amount: bigint, isPrivate = false): Promise<void> {
-		stage.value = "exiting"
-		await flow.withdraw(amount, isPrivate)
-		stage.value = flow.error.value ? "error" : "done"
-	}
-
-	return { stage, error: flow.error, provenBlock, targetBlock, hasPending, withdraw }
-}
