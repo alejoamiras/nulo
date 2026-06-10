@@ -71,6 +71,7 @@ import { TooManyPendingError } from "@nulo/extension-messaging/errors"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
 import { classifyOperationCatch, maybeRethrowAsRpcCancel } from "./rpc-cancel"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
+import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import {
 	EXECUTION_SERVICE_NAME,
 	type Methods,
@@ -890,8 +891,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const authWitActions = await this.authwit.discoverPrivateAuthwits(
 			{ ...operation, actions: [...actions] } as SendTransactionOperation,
 			async (op, method) => {
-				const [txRequest, node, pxe, account] = await this.txBuilder.buildStandard(op as SendTransactionOperation, method)
-				return { txRequest, node, pxe, account }
+				const [txRequest, node, pxe, account, network] = await this.txBuilder.buildStandard(op as SendTransactionOperation, method)
+				return { txRequest, node, pxe, account, network }
 			},
 		)
 		if (authWitActions.length) {
@@ -1643,8 +1644,12 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	private async executeAztecGetChainInfo(op: AztecGetChainInfoOperation): Promise<ChainInfo> {
 		const network = await this.networkService.getNetwork(op.networkId)
 		const node = await this.networkService.getNode(network.chainId)
-		const { l1ChainId, rollupVersion } = await node.getNodeInfo()
-		return { chainId: new Fr(l1ChainId), version: new Fr(rollupVersion) }
+		const nodeInfo = await node.getNodeInfo()
+		// F-012 / A-01 V-01: this API returns chain identity to the dApp.
+		// A drifted RPC must be reported as a mismatch rather than silently
+		// reporting whatever the RPC claims.
+		assertLiveChainIdentity(network, nodeInfo)
+		return { chainId: new Fr(nodeInfo.l1ChainId), version: new Fr(nodeInfo.rollupVersion) }
 	}
 
 	private async executeAztecRegisterSender(op: AztecRegisterSenderOperation): Promise<AztecAddress> {
@@ -1763,6 +1768,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const result = await runFastPath({
 			node,
 			pxe,
+			network,
 			fromAddr: AztecAddress.fromString(op.accountAddress),
 			opts: op.opts,
 			optimizableCalls,
@@ -1944,8 +1950,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			// simulation's dummy fee method.
 			if (!fee.embeddedFeePayment) {
 				const authWitActions = await this.authwit.discoverPrivateAuthwits({ ...op, actions: [...actions] }, async (o, method) => {
-					const [txRequest, node, pxe, account] = await this.txBuilder.buildStandard(o as SendTransactionOperation, method)
-					return { txRequest, node, pxe, account }
+					const [txRequest, node, pxe, account, network] = await this.txBuilder.buildStandard(
+						o as SendTransactionOperation,
+						method,
+					)
+					return { txRequest, node, pxe, account, network }
 				})
 				if (authWitActions.length) {
 					this.logDebug(`[executeAztecSendTx] Discovered ${authWitActions.length} auth witness(es) via offchain effects`)
@@ -2121,6 +2130,10 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			this.logDebug(`executeNoFromSendTx: offchain effects found: ${effects.length}`)
 			if (effects.length) {
 				const nodeInfo2 = await node.getNodeInfo()
+				// F-012 / A-01 V-01: NO_FROM path also derives chainInfo from
+				// live node — rebind to selected network before constructing
+				// the authwit message hash.
+				assertLiveChainIdentity(network, nodeInfo2)
 				const chainInfo = { chainId: new Fr(nodeInfo2.l1ChainId), version: new Fr(nodeInfo2.rollupVersion) }
 				for (const effect of effects) {
 					try {
@@ -2201,6 +2214,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 		const node = await this.networkService.getNode(network.chainId)
 		const nodeInfo = await node.getNodeInfo()
+		// F-012 / A-01 V-01: createAuthWit derives chain identity from the live
+		// node; rebind to the user-selected network before consuming.
+		assertLiveChainIdentity(network, nodeInfo)
 		const metadata = {
 			chainId: new Fr(nodeInfo.l1ChainId),
 			version: new Fr(nodeInfo.rollupVersion),

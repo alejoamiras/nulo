@@ -10,14 +10,19 @@
 
 export type CapabilityType = "accounts" | "contracts" | "contractClasses" | "simulation" | "transaction" | "data"
 
-/** Methods that never require a capability check. */
-const EXEMPT_METHODS = new Set(["getChainInfo", "requestCapabilities", "batch", "getAccounts"])
+/** Methods that never require a capability check.
+ *  F-003: getAccounts removed. Previously exempted, which made the
+ *  `accounts.canGet` sub-grant decorative. The scope-enforcement layer's
+ *  checkGetAccounts now enforces canGet=true per the audit's recommended fix.
+ */
+const EXEMPT_METHODS = new Set(["getChainInfo", "requestCapabilities", "batch"])
 
 /** Maps each wallet-sdk method name to its required capability type. */
 const METHOD_CAPABILITY_MAP: Record<string, CapabilityType> = {
 	// accounts
 	createAuthWit: "accounts",
 	registerToken: "accounts",
+	getAccounts: "accounts", // F-003: was exempt; now requires accounts.canGet=true
 
 	// contracts
 	registerContract: "contracts",

@@ -99,6 +99,14 @@ jobs:
       # form would resolve to `'1'` in BOTH branches, completely defeating
       # the disable flag (codex post-impl audit finding #1).
       VITE_NULO_ACCELERATOR_REQUIRED: ${{ inputs.disable_accelerator == false && '1' || '' }}
+      # Widen the wallet's maxFeesPerGas envelope for e2e only. Devnet
+      # base-fees drift on loaded GHA runners; multi-prove tests
+      # (transfers, concurrent-sendtx-confirm) hit `maxFeesPerGas <
+      # gasFees` at inclusion. First attempt at 4× still missed (observed
+      # ~9× base-fee climb during a single test). Bumping to 10× to give
+      # the heavy multi-prove paths real headroom. Production stays at
+      # the upstream default of 2 (no env var set).
+      VITE_NULO_FEE_MULTIPLIER: "10"
     steps:
       - uses: actions/checkout@v6
         with:

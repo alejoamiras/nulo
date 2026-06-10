@@ -361,6 +361,60 @@ describe("NetworkService public API (M4.10)", () => {
 		// instances don't leak across cases.
 	})
 
+	describe("F-011: RPC URL scheme allowlist", () => {
+		test("rejects javascript: URL", async () => {
+			const { service } = setupServiceWithStorage({})
+			await expect(service.addNetwork("Evil", "javascript:alert(1)")).rejects.toThrow()
+		})
+
+		test("rejects data: URL", async () => {
+			const { service } = setupServiceWithStorage({})
+			await expect(service.addNetwork("Evil", "data:text/html,<script>alert(1)</script>")).rejects.toThrow()
+		})
+
+		test("rejects file:// URL", async () => {
+			const { service } = setupServiceWithStorage({})
+			await expect(service.addNetwork("Evil", "file:///etc/passwd")).rejects.toThrow()
+		})
+
+		test("rejects http://attacker.example.com (non-loopback HTTP)", async () => {
+			const { service } = setupServiceWithStorage({})
+			await expect(service.addNetwork("Bad", "http://attacker.example.com:8080")).rejects.toThrow()
+		})
+
+		test("accepts https://anywhere.example.com", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.example.com": nodeInfoForChain(999),
+			})
+			const network = await service.addNetwork("HTTPS", "https://rpc.example.com")
+			expect(network.chainId).toBe(999)
+		})
+
+		test("accepts http://localhost:8888", async () => {
+			const { service } = setupServiceWithStorage({
+				"http://localhost:8888": nodeInfoForChain(31337),
+			})
+			const network = await service.addNetwork("Local", "http://localhost:8888")
+			expect(network.chainId).toBe(31337)
+		})
+
+		test("accepts http://127.0.0.1:8888", async () => {
+			const { service } = setupServiceWithStorage({
+				"http://127.0.0.1:8888": nodeInfoForChain(31337),
+			})
+			const network = await service.addNetwork("Local-v4", "http://127.0.0.1:8888")
+			expect(network.chainId).toBe(31337)
+		})
+
+		test("accepts http://[::1]:8888 (IPv6 loopback, WHATWG-URL form)", async () => {
+			const { service } = setupServiceWithStorage({
+				"http://[::1]:8888": nodeInfoForChain(31337),
+			})
+			const network = await service.addNetwork("Local-v6", "http://[::1]:8888")
+			expect(network.chainId).toBe(31337)
+		})
+	})
+
 	describe("addNetwork", () => {
 		test("creates a Network with one initial endpoint and emits onNetworkAdded", async () => {
 			const { service } = setupServiceWithStorage({
@@ -739,6 +793,55 @@ describe("NetworkService public API (M4.10)", () => {
 			expect(result[0]!.restoreError).toBeUndefined()
 			const fetched = await service.getNetwork("n1")
 			expect(fetched.name).toBe("Imported")
+		})
+
+		test("restore rejects entries with disallowed RPC schemes (A-04)", async () => {
+			// Codex post-impl A-04: pre-fix, restore() only ran a shape check
+			// and wrote directly to storage. A malicious backup could re-introduce
+			// `javascript:`/`data:`/non-loopback `http:` URLs that the adapter
+			// would later reject. Now: NetworkSchema runs on each entry.
+			const { service } = setupServiceWithStorage({})
+			const evil = [
+				{
+					id: "n1",
+					profileId: "p1",
+					chainId: 1,
+					name: "Phishing",
+					primaryEndpointId: "e1",
+					endpoints: [{ id: "e1", rpcUrl: "javascript:alert(1)" }],
+				},
+				{
+					id: "n2",
+					profileId: "p1",
+					chainId: 2,
+					name: "Plain HTTP",
+					primaryEndpointId: "e1",
+					endpoints: [{ id: "e1", rpcUrl: "http://evil.com" }],
+				},
+			] as Network[]
+			const result = await service.restore(evil)
+			expect(result).toHaveLength(2)
+			expect(result[0]!.restoreError).toBeDefined()
+			expect(result[1]!.restoreError).toBeDefined()
+		})
+
+		test("restore rejects entries with userinfo URLs (A-04)", async () => {
+			// `https://user@evil.com@safe.com` parses to host=safe.com but the
+			// userinfo is the visible part of the URL and a known phishing vector.
+			const { service } = setupServiceWithStorage({})
+			const evil = [
+				{
+					id: "n1",
+					profileId: "p1",
+					chainId: 1,
+					name: "Userinfo Phish",
+					primaryEndpointId: "e1",
+					endpoints: [{ id: "e1", rpcUrl: "https://user@evil.com@safe.com" }],
+				},
+			] as Network[]
+			const result = await service.restore(evil)
+			expect(result).toHaveLength(1)
+			expect(result[0]!.restoreError).toBeDefined()
 		})
 	})
 })

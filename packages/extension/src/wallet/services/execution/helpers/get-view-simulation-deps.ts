@@ -40,6 +40,7 @@ export async function getViewSimulationDeps(
 	return {
 		pxe,
 		node,
+		network,
 		account,
 		contractResolver: services.contractResolver,
 		logger: services.logger,

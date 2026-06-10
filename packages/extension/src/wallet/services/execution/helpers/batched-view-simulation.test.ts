@@ -240,7 +240,9 @@ function makeDeps(opts: {
 		// biome-ignore lint/suspicious/noExplicitAny: ContractResolver structural stub
 	} as any
 
-	return { pxe, node, account, contractResolver, logger: { log: () => {} } }
+	// chainId=0 → assertLiveChainIdentity is a noop (local substrate); tests
+	// don't exercise drift here.
+	return { pxe, node, network: { chainId: 0 }, account, contractResolver, logger: { log: () => {} } }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────

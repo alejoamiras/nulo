@@ -69,6 +69,26 @@ export type ValidationResult =
  *   - `invalid`: the message claims to be from content-script but
  *     fails the shape check. The caller should drop it.
  */
+/**
+ * F-001 / Phase 4: classify a `chrome.runtime.MessageSender` as top-frame
+ * or subframe.
+ *
+ * Returns `true` if the sender is a subframe (iframe / sub-document) and the
+ * wrapper should reject the message under the default policy. Returns `false`
+ * for top-frame messages, non-tab senders (extension internals), and any case
+ * where `frameId` is undefined.
+ *
+ * Background: upstream `BackgroundConnectionHandler` attributes origin via
+ * `sender.tab?.url` (the TOP-frame URL), not `sender.url` (the actual frame
+ * URL). An iframe at `https://evil.com/x.html` embedded in
+ * `https://app.example.com` would be credited to the top-frame's origin —
+ * inheriting whatever grants the user gave the parent page. The fix is to
+ * refuse forwarding at the Nulo wrapper before the upstream handler sees it.
+ */
+export function isSubframeSender(sender: { tab?: unknown; frameId?: number }): boolean {
+	return sender.tab !== undefined && sender.frameId !== undefined && sender.frameId !== 0
+}
+
 export function validateContentScriptMessage(message: unknown): ValidationResult {
 	if (typeof message !== "object" || message === null) {
 		return { kind: "passthrough" }

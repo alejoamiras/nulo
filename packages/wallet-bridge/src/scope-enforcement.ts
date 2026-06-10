@@ -271,6 +271,78 @@ function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRecord[]):
 	// validate beyond the accounts-level check above.
 }
 
+/**
+ * F-003: enforce `AccountsCapability.canGet === true` before allowing a
+ * dApp to read its session's account addresses via `getAccounts`. Prior to
+ * this checker, the `getAccounts` method was in `EXEMPT_METHODS` and the
+ * `canGet` sub-grant was decorative — the UI exposed the toggle but the
+ * dispatcher ignored it.
+ *
+ * The `accounts` cap is "any-of": if at least one granted accounts cap has
+ * `canGet === true`, the read is permitted. (Multiple `accounts` grants
+ * exist in some legacy session shapes; `.some()` mirrors the existing
+ * pattern in `checkCreateAuthWit`.)
+ */
+function checkGetAccounts(_args: unknown[], grants: GrantedCapabilityRecord[]): void {
+	const caps = grantsOfType<AccountsCapability>(grants, "accounts")
+	if (!caps.length) return
+	if (!caps.some((c) => c.canGet === true)) {
+		throw new Error("Scope violation: getAccounts requires accounts.canGet=true")
+	}
+}
+
+/**
+ * F-004: enforce `DataCapability.addressBook === true` before allowing
+ * a dApp to read the user's address book via `getAddressBook`. Prior to
+ * this checker, the `data` capability type-check passed regardless of
+ * whether the `addressBook` sub-bit was set.
+ */
+function checkGetAddressBook(_args: unknown[], grants: GrantedCapabilityRecord[]): void {
+	const caps = grantsOfType<DataCapability>(grants, "data")
+	if (!caps.length) return
+	if (!caps.some((c) => c.addressBook === true)) {
+		throw new Error("Scope violation: getAddressBook requires data.addressBook=true")
+	}
+}
+
+/**
+ * F-004 (paired): same sub-grant check applies to `registerSender` — a
+ * dApp with only an `addressBook: false` data grant should not be able to
+ * inject sender aliases into the user's address book.
+ */
+function checkRegisterSender(_args: unknown[], grants: GrantedCapabilityRecord[]): void {
+	const caps = grantsOfType<DataCapability>(grants, "data")
+	if (!caps.length) return
+	if (!caps.some((c) => c.addressBook === true)) {
+		throw new Error("Scope violation: registerSender requires data.addressBook=true")
+	}
+}
+
+/**
+ * F-005: validate dApp-supplied account-scope arrays against the session's
+ * approved account list. The dApp can pass `eventFilter.scopes`,
+ * `opts.scopes`, or `opts.additionalScopes` — arrays of CAIP-10 accounts
+ * the wallet should expose private state for during execution. Prior to
+ * this helper, the dispatcher forwarded these arrays unchanged to PXE,
+ * silently widening one granted account into N accounts.
+ *
+ * sessionAccounts is the set of CAIP-10 account identifiers the session
+ * has approved (built from `dappSession.accounts`).
+ *
+ * Throws if any entry in the scope array is not in the approved set.
+ * Returns silently if the scope field is absent or not an array (i.e. the
+ * caller didn't pass it).
+ */
+function validateAccountScopes(scopeField: unknown, sessionAccounts: Set<string>, fieldName: string): void {
+	if (!Array.isArray(scopeField)) return
+	for (const entry of scopeField) {
+		const addr = String(entry)
+		if (!sessionAccounts.has(addr)) {
+			throw new Error(`Scope violation: ${fieldName} contains ${addr}, not in session's approved accounts`)
+		}
+	}
+}
+
 // ── Method → checker map ──────────────────────────────────────────────
 
 const METHOD_SCOPE_CHECKER: Record<string, (args: unknown[], grants: GrantedCapabilityRecord[]) => void> = {
@@ -283,6 +355,10 @@ const METHOD_SCOPE_CHECKER: Record<string, (args: unknown[], grants: GrantedCapa
 	executeUtility: checkExecuteUtility,
 	getPrivateEvents: checkGetPrivateEvents,
 	createAuthWit: checkCreateAuthWit,
+	// Phase 1 additions (F-003 + F-004):
+	getAccounts: checkGetAccounts,
+	getAddressBook: checkGetAddressBook,
+	registerSender: checkRegisterSender,
 }
 
 // ── Main entry point ──────────────────────────────────────────────────
@@ -301,4 +377,45 @@ export function enforceScope(methodName: string, args: unknown[], grants: Grante
 	const checker = METHOD_SCOPE_CHECKER[methodName]
 	if (!checker) return
 	checker(args, grants)
+}
+
+/**
+ * F-005: extended scope enforcement that ALSO validates dApp-supplied
+ * account-scope arrays against the session's approved accounts.
+ *
+ * Closes the empty-`calls` fast path: F-005's account-scope check fires
+ * even when `exec.calls = []` (which short-circuited `checkTransactionCalls`
+ * and friends). A dApp could previously pass `{ calls: [], additionalScopes: [<other-account>] }`
+ * and bypass enforcement because the contract/function checker exited
+ * early on the empty-calls branch.
+ *
+ * `sessionAccounts` is the set of CAIP-10 account identifiers approved
+ * for this session. Pass an empty set if no session — the caller (the
+ * dispatcher) decides how to handle missing sessions; this function just
+ * fails closed.
+ */
+export function enforceScopeWithSession(
+	methodName: string,
+	args: unknown[],
+	grants: GrantedCapabilityRecord[],
+	sessionAccounts: Set<string>,
+): void {
+	// First run the standard scope check.
+	enforceScope(methodName, args, grants)
+
+	// Then run the F-005 account-scope check. Runs regardless of whether
+	// the calls-array check was satisfied or short-circuited.
+	const exec = args[0] as Record<string, unknown> | undefined
+	const opts = args[1] as Record<string, unknown> | undefined
+
+	validateAccountScopes(exec?.scopes, sessionAccounts, `${methodName}.exec.scopes`)
+	validateAccountScopes(opts?.scopes, sessionAccounts, `${methodName}.opts.scopes`)
+	validateAccountScopes(opts?.additionalScopes, sessionAccounts, `${methodName}.opts.additionalScopes`)
+
+	// getPrivateEvents takes `(eventMetadata, eventFilter)` where eventFilter
+	// can also include a `scopes` array.
+	if (methodName === "getPrivateEvents") {
+		const eventFilter = args[1] as Record<string, unknown> | undefined
+		validateAccountScopes(eventFilter?.scopes, sessionAccounts, `${methodName}.eventFilter.scopes`)
+	}
 }

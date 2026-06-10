@@ -13,7 +13,7 @@ import type {
 	IExecutionRunner,
 	INetworkReader,
 } from "./services-contract"
-import type { IDappSessionRef, INetworkRef } from "./session-types"
+import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { LogLevel, type ILogger } from "@nulo/wallet-core/logger"
 
 // __VERSION__ is a vite define-injected global at build time; provide it for tests.
@@ -338,10 +338,13 @@ function makeGetAccountsDispatcher(opts: {
 }
 
 describe("dispatcher.handleGetAccounts — plan-v3 contract", () => {
-	test("no session → throws plain 'No dApp session found' Error (NOT CapabilityNotGrantedError)", async () => {
-		// Ordering pin: if a future refactor moves the session-not-found check
-		// AFTER the CapabilityNotGrantedError throw, dApps relying on the
-		// session-expired diagnostic would silently start seeing 4100.
+	test("no session → throws CapabilityNotGrantedError (F-006: fail-closed)", async () => {
+		// Phase 3 / F-006: pre-fix, this returned [] from enforceCapability
+		// and the dispatcher fell through with no grants, letting network-only
+		// methods execute unchecked after the user revoked the dApp.
+		// Post-fix: enforceCapability throws CapabilityNotGrantedError when
+		// the session is missing, paired with the live-transport teardown
+		// in wallet-sdk/background.ts.
 		const sessionWriter: IDappSessionWriter = {
 			tryGetDappSessionByOriginAndChain: async () => null as unknown as IDappSessionRef,
 			getDappSession: async () => null as unknown as IDappSessionRef,
@@ -358,8 +361,7 @@ describe("dispatcher.handleGetAccounts — plan-v3 contract", () => {
 		}
 		const dispatcher = new WalletSdkDispatcher(networkReader, stubAccount, stubExecution, interaction, sessionWriter, noopLogger)
 
-		await expect(dispatcher.dispatch("getAccounts", [], ctx)).rejects.toThrow(/No dApp session found/)
-		await expect(dispatcher.dispatch("getAccounts", [], ctx)).rejects.not.toBeInstanceOf(CapabilityNotGrantedError)
+		await expect(dispatcher.dispatch("getAccounts", [], ctx)).rejects.toBeInstanceOf(CapabilityNotGrantedError)
 	})
 
 	test("no accounts grant → throws CapabilityNotGrantedError with exact stable message + debug log", async () => {
@@ -383,13 +385,22 @@ describe("dispatcher.handleGetAccounts — plan-v3 contract", () => {
 		expect(debugCalls.some((c) => c.msg.includes("CAPABILITY_NOT_GRANTED"))).toBe(true)
 	})
 
-	test("session has 1 account → returns formatted Aliased<AztecAddress> (fast path, regression pin)", async () => {
+	test("session has 1 account + canGet=true grant → returns formatted Aliased<AztecAddress> (fast path)", async () => {
 		// CAIP account for chainId 0 on the address below.
+		// Post F-003: also requires an accounts grant with canGet=true. The
+		// legacy "accounts present without a grant" fast-path is closed; F-003's
+		// scope-enforcement now requires explicit canGet.
 		const addr = "0x1111111111111111111111111111111111111111111111111111111111111111"
 		const caip = `aztec:0:${addr}`
 		const session = makeSession({
 			accounts: [caip],
 			accountAliases: { [caip]: "my-app-alias" },
+			capabilityGrants: [
+				{
+					capability: { type: "accounts", canGet: true, accounts: [{ alias: "my-app-alias", item: caip }] } as Capability,
+					grantedAt: 1,
+				},
+			],
 		})
 		const { dispatcher } = makeGetAccountsDispatcher({
 			session,
@@ -818,5 +829,145 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		expect(getRequiredCapability("registerToken")).toBe("accounts")
 		expect(getRequiredCapability("getCompleteAddress")).toBeNull()
 		expect(getRequiredCapability("simulateViews")).toBeNull()
+	})
+})
+
+/**
+ * Phase 0.5: dispatcher session-lookup consolidation.
+ *
+ * Pre-refactor: 6 separate `tryGetDappSessionByOriginAndChain` calls in
+ * dispatcher.ts (handleGetAccounts, handleSendTx, handleRegisterToken,
+ * handleRequestCapabilities, enforceCapability, resolveNetworkAndAccount).
+ * Each gave its caller an independent view of the session; if the session
+ * was deleted between two handler calls inside one dispatch(), the wallet
+ * could half-apply a decision.
+ *
+ * Post-refactor: dispatch() captures the session ONCE at entry and threads
+ * it through every internal call. Pinned by counting how many times the
+ * session-lookup is invoked per dispatch() call.
+ *
+ * Audit reference: audit/security/2026-06-08-ultra-e6759a/findings/consolidated.md
+ * cross-cutting #1 + opus B-1/CC-2 + codex Round 2 B-1.
+ */
+describe("F-006: network-only methods fail-closed on missing session (Phase 3)", () => {
+	function dispatcherNoSession(): WalletSdkDispatcher {
+		const writer: IDappSessionWriter = {
+			tryGetDappSessionByOriginAndChain: async () => null as unknown as IDappSessionRef,
+			getDappSession: async () => null as unknown as IDappSessionRef,
+			updateDappSession: async () => null as unknown as IDappSessionRef,
+			setAccountAliases: async () => null as unknown as IDappSessionRef,
+			setCapabilityGrants: async () => null as unknown as IDappSessionRef,
+			setCapabilityRejections: async () => null as unknown as IDappSessionRef,
+		}
+		const network: INetworkRef = { id: "net-0", chainId: 0 }
+		const networkReader: INetworkReader = { getNetworks: async () => [network] }
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: async () => ({ granted: [] }) as CapabilityResult,
+		}
+		return new WalletSdkDispatcher(networkReader, stubAccount, stubExecution, interaction, writer, noopLogger)
+	}
+
+	test("getPrivateEvents throws CapabilityNotGrantedError when session is missing (was: silently succeeded)", async () => {
+		const dispatcher = dispatcherNoSession()
+		await expect(
+			dispatcher.dispatch("getPrivateEvents", [{ eventName: "x" }, { contractAddress: "0xabc" }], ctx),
+		).rejects.toBeInstanceOf(CapabilityNotGrantedError)
+	})
+
+	test("getAddressBook throws CapabilityNotGrantedError when session is missing", async () => {
+		const dispatcher = dispatcherNoSession()
+		await expect(dispatcher.dispatch("getAddressBook", [], ctx)).rejects.toBeInstanceOf(CapabilityNotGrantedError)
+	})
+
+	test("registerContract throws CapabilityNotGrantedError when session is missing", async () => {
+		const dispatcher = dispatcherNoSession()
+		await expect(dispatcher.dispatch("registerContract", [{ address: { toString: () => "0xabc" } }], ctx)).rejects.toBeInstanceOf(
+			CapabilityNotGrantedError,
+		)
+	})
+
+	test("getChainInfo (exempt) does NOT throw CapabilityNotGrantedError without a session", async () => {
+		// Exempt methods don't require a session — getChainInfo is the canonical
+		// dApp probe path. The base stubExecution returns an empty object; we
+		// only assert that the throw is NOT CapabilityNotGrantedError (the
+		// fail-closed F-006 path), not that the method succeeds end-to-end.
+		const dispatcher = dispatcherNoSession()
+		await expect(dispatcher.dispatch("getChainInfo", [], ctx)).rejects.not.toBeInstanceOf(CapabilityNotGrantedError)
+	})
+})
+
+describe("Phase 0.5: session lookup consolidation (TOCTOU defense)", () => {
+	function makeCountingWriter(initial: IDappSessionRef | null) {
+		let session: IDappSessionRef | null = initial
+		const counter = { lookups: 0 }
+		const writer: IDappSessionWriter = {
+			tryGetDappSessionByOriginAndChain: async () => {
+				counter.lookups += 1
+				return session as IDappSessionRef
+			},
+			getDappSession: async () => session as IDappSessionRef,
+			updateDappSession: async () => session as IDappSessionRef,
+			setAccountAliases: async () => session as IDappSessionRef,
+			setCapabilityGrants: async (_id, grants) => {
+				session = { ...(session as IDappSessionRef), capabilityGrants: grants } as IDappSessionRef
+				return session
+			},
+			setCapabilityRejections: async (_id, rejections) => {
+				session = { ...(session as IDappSessionRef), capabilityRejections: rejections } as IDappSessionRef
+				return session
+			},
+		}
+		const setSession = (next: IDappSessionRef | null) => {
+			session = next
+		}
+		return { writer, counter, setSession }
+	}
+
+	const networkWithChainId0: INetworkReader = {
+		getNetworks: async () => [{ id: "net-0", chainId: 0 } as INetworkRef],
+	}
+
+	function dispatcherWith(writer: IDappSessionWriter, accounts: IAccountRef[] = []): WalletSdkDispatcher {
+		const accountReader: IAccountReader = { getAccounts: async () => accounts }
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: async () => ({ granted: [] }) as CapabilityResult,
+		}
+		return new WalletSdkDispatcher(networkWithChainId0, accountReader, stubExecution, interaction, writer, noopLogger)
+	}
+
+	test("dispatch(requestCapabilities) issues exactly 1 session lookup (was 2 pre-refactor)", async () => {
+		const session = makeSession()
+		const { writer, counter } = makeCountingWriter(session)
+		const dispatcher = dispatcherWith(writer)
+		const manifest = { capabilities: [{ type: "data" }] }
+		await dispatcher.dispatch("requestCapabilities", [manifest], ctx)
+		expect(counter.lookups).toBe(1)
+	})
+
+	test("dispatch(getAccounts) issues exactly 1 session lookup (was 2 pre-refactor)", async () => {
+		const session = makeSession({
+			accounts: ["aztec:0:0xaaa"],
+			capabilityGrants: [
+				{
+					capability: { type: "accounts", canGet: true, accounts: [{ alias: "a", item: "aztec:0:0xaaa" }] },
+					grantedAt: 1,
+				} as GrantedCapabilityRecord,
+			],
+		})
+		const { writer, counter } = makeCountingWriter(session)
+		const dispatcher = dispatcherWith(writer)
+		await dispatcher.dispatch("getAccounts", [], ctx)
+		expect(counter.lookups).toBe(1)
+	})
+
+	test("dispatch(registerToken with no session) only consults storage once before throwing", async () => {
+		const { writer, counter } = makeCountingWriter(null)
+		const dispatcher = dispatcherWith(writer)
+		await expect(dispatcher.dispatch("registerToken", ["0xaaaa", "0xbbbb"], ctx)).rejects.toThrow()
+		// Pre-refactor was 2 (enforceCapability + handleRegisterToken).
+		// Post-refactor: 1 captured at dispatch entry; no re-lookup inside the throw path.
+		expect(counter.lookups).toBe(1)
 	})
 })

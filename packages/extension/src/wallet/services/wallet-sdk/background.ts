@@ -29,7 +29,7 @@ import "./nulo-schema-patch"
 
 import { BackgroundConnectionHandler, type PendingDiscovery, type ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
 import type { WalletMessage, WalletResponse } from "@aztec/wallet-sdk/types"
-import { validateContentScriptMessage } from "./content-script-validator"
+import { isSubframeSender, validateContentScriptMessage } from "./content-script-validator"
 import { toWalletResponseError } from "./error-envelope"
 
 import type { ServiceCollection } from "@/wallet/base"
@@ -40,6 +40,7 @@ import { ProfileService } from "@/wallet/services/profile/service"
 import { DappInteractionService } from "@/wallet/services/dapp-interaction/service"
 import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
 import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/service"
+import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { type DispatchHooks, DiscoveryQueue, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
 import { jsonStringify, getErrorMessage } from "@nulo/wallet-core/utils"
@@ -50,6 +51,19 @@ import { LogLevel } from "@/wallet/logger"
 import type { Fr } from "@aztec/foundation/curves/bn254"
 
 declare const __VERSION__: string
+
+/**
+ * F-001 / Phase 4: feature flag to allow iframe (subframe) dApps to talk to
+ * the wallet. Default `false` — Nulo's wrapper rejects content-script
+ * messages from subframes. Override by setting
+ * `VITE_NULO_ALLOW_IFRAME_DAPPS=1` at build time (rare; research found no
+ * legitimate iframe-dApp use cases in the Nulo ecosystem).
+ *
+ * Why a build-time env flag (not a runtime config) — runtime config opens a
+ * widening primitive that an attacker could try to flip via storage poisoning
+ * or popup compromise. Build-time keeps the policy immutable per release.
+ */
+const NULO_ALLOW_IFRAME_DAPPS: boolean = import.meta.env?.VITE_NULO_ALLOW_IFRAME_DAPPS === "1"
 
 /**
  * Initialize the wallet-sdk BackgroundConnectionHandler and wire it
@@ -119,6 +133,37 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 			addContentListener: (listener) => {
 				// biome-ignore lint/suspicious/noExplicitAny: Chrome message listener provides untyped messages
 				chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.MessageSender) => {
+					// F-001: subframe rejection. Upstream `BackgroundConnectionHandler`
+					// attributes origin via `sender.tab?.url` (top-frame URL), so an
+					// iframe at https://evil.com/x.html embedded in https://app.example.com
+					// would be credited to https://app.example.com — inheriting any
+					// grants the user gave to the parent page.
+					//
+					// Nulo-side defense-in-depth: reject content-script messages
+					// from subframes at the wrapper layer. `sender.frameId === 0`
+					// is the top frame; any other value (or undefined for
+					// non-tab senders) is a subframe.
+					//
+					// Feature flag: `NULO_ALLOW_IFRAME_DAPPS` (env / build-time)
+					// disables this check. Default is "reject subframes" because
+					// research found NO legitimate iframe-dApp use cases in the
+					// Nulo ecosystem. If a counterexample surfaces, set the env
+					// var rather than removing this check.
+					//
+					// Frame-targeted send replies (F-002 full fix) require upstream
+					// `chrome.tabs.sendMessage(tabId, msg, { frameId })` support
+					// in `BackgroundConnectionHandler`'s sendToTab signature —
+					// upstream's `(tabId, msg)` interface doesn't pass frameId
+					// through, so this remains an upstream coordination item.
+					if (NULO_ALLOW_IFRAME_DAPPS !== true && isSubframeSender(sender)) {
+						logger.log(
+							"wallet-sdk-bg",
+							LogLevel.Debug,
+							`Rejected content-script message from subframe (frameId=${sender.frameId}, tab.url=${sender.tab?.url}, sender.url=${sender.url}) — F-001 defense-in-depth`,
+						)
+						return undefined
+					}
+
 					// Zod-validate content-script-originated envelopes before
 					// forwarding to the upstream handler. `passthrough` lets
 					// non-content-script messages through (ServiceClient
@@ -161,6 +206,21 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				const dappSession = await dappSessionService.tryGetDappSessionByOriginAndChain(session.origin, chainId)
 				if (dappSession) {
 					await dappSessionService.setVerificationHash(dappSession.id, session.verificationHash)
+				} else {
+					// F-006 (Round 2 B-2): if a session was established but the
+					// backing DappSession is gone, the user revoked between
+					// approveDiscovery and key-exchange. Terminate immediately
+					// so the dApp can't ride a stale approved-pending-discovery
+					// into a live ActiveSession. Without this, the upstream
+					// state machine would let the dApp re-key-exchange after
+					// revocation (see audit-codex-final.md B-2).
+					logger.log(
+						"wallet-sdk-bg",
+						LogLevel.Warn,
+						`Session established for ${session.origin} chain ${chainId} but DappSession missing — terminating to honor revocation`,
+					)
+					handler.terminateSession(session.sessionId)
+					return
 				}
 
 				const verifKey = pendingKey(session.origin, chainId)
@@ -267,6 +327,42 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 		)
 		return next
 	}
+
+	/** F-006: when a stored DappSession is deleted (settings disconnect OR
+	 *  TTL expiry — both emit the same event), tear down every matching
+	 *  live wallet-sdk ActiveSession so the dApp can't keep calling
+	 *  network-only methods over the still-open channel.
+	 *
+	 *  Tuple-match by `(origin, chainId)` — per audit Round 1 reversal of
+	 *  Decision 8, NOT a single `walletSdkSessionId` field, because a single
+	 *  stored DappSession may correspond to MULTIPLE live ActiveSessions
+	 *  (multi-tab same dApp). O(n) iteration where n is bounded by tabs-with-
+	 *  dApp-loaded — typically <10. */
+	dappSessionService.onDappSessionDeleted.add((deleted) => {
+		try {
+			const origin = deleted.dappMetadata?.url
+			const chainId = deleted.chainId
+			if (!origin || !chainId) {
+				logger.log(
+					"wallet-sdk-bg",
+					LogLevel.Warn,
+					`DappSession deleted with missing origin/chainId — cannot match active sessions; skipping teardown`,
+				)
+				return
+			}
+			const matches = handler.getActiveSessions().filter((s) => s.origin === origin && String(chainInfoToChainId(s)) === chainId)
+			for (const match of matches) {
+				logger.log(
+					"wallet-sdk-bg",
+					LogLevel.Info,
+					`Terminating live session ${match.sessionId} for revoked dApp ${origin}@${chainId}`,
+				)
+				handler.terminateSession(match.sessionId)
+			}
+		} catch (err) {
+			logger.log("wallet-sdk-bg", LogLevel.Error, `Failed to terminate live sessions on dapp-session-deleted: ${err}`)
+		}
+	})
 
 	/** On unlock, drain any queued discovery requests */
 	profileService.onActiveProfileChanged.add((profile) => {
@@ -419,10 +515,13 @@ async function handleDiscovery(
 			return
 		}
 
-		// New dApp → show discovery popup (Allow/Deny)
+		// New dApp → show discovery popup (Allow/Deny). Sanitize dApp-controlled
+		// strings at the persistence boundary so downstream render sites never
+		// see raw bidi / zero-width / mixed-direction payloads (F-009 A-03).
+		const rawAppName = discovery.appName ?? discovery.appId
 		const params: DiscoveryParams = {
 			dappMetadata: {
-				name: discovery.appName ?? discovery.appId,
+				name: sanitizeWireString(rawAppName, 64),
 				url: discovery.origin,
 			},
 		}

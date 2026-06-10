@@ -56,9 +56,16 @@ import type { Fr } from "@aztec/foundation/curves/bn254"
 import type { Action, FeeOptions, FeeSettings } from "../spec"
 import type { TxRequestBuilder } from "../tx-request-builder"
 
-/** Default multiplier for maxFeesPerGas (backwards-compatible). Matches
- *  the value in the pre-split facade (service.ts `DEFAULT_FEE_MULTIPLIER`). */
-export const DEFAULT_FEE_MULTIPLIER = 2
+/** Default multiplier for `maxFeesPerGas`. Production default is `2`.
+ *  Overridable at build time via `VITE_NULO_FEE_MULTIPLIER` so e2e CI can
+ *  widen the envelope when devnet base-fees drift on loaded GHA runners
+ *  (a real cross-branch flake class — confirmed reproducible against
+ *  `transfers.test.ts` and `concurrent-sendtx-confirm.test.ts` on a
+ *  non-PR commit). Parsed once at module load; invalid / unset → 2. */
+const VITE_FEE_MULTIPLIER_RAW = (import.meta.env?.VITE_NULO_FEE_MULTIPLIER ?? "") as string
+const VITE_FEE_MULTIPLIER_PARSED = Number.parseFloat(VITE_FEE_MULTIPLIER_RAW)
+export const DEFAULT_FEE_MULTIPLIER: number =
+	Number.isFinite(VITE_FEE_MULTIPLIER_PARSED) && VITE_FEE_MULTIPLIER_PARSED >= 1 ? VITE_FEE_MULTIPLIER_PARSED : 2
 
 /** Tuple returned by every strategy. Matches the pre-split
  *  `buildAndEstimateTxRequest` return verbatim. */

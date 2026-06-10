@@ -310,6 +310,15 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// regardless of path.
 		const recovery = await this.acquireRecovery({ ceremony: "getById", credentialId: snapshot.credentialId }, credentialData)
 
+		// F-007: bind the recovered credential to the target profile. Mirrors
+		// the existing check in exportPlain (line ~656) and restore() (~916).
+		// Without this, a popup-supplied PasskeyCredentialData for credential
+		// B could unlock profile A using a session derived from credential B's
+		// master secret — opening a session with the wrong key material.
+		if (recovery.credentialId !== snapshot.credentialId) {
+			throw new Error("Invalid profile id")
+		}
+
 		// Phase 3 — re-enter lock, revalidate credentialId, open session.
 		try {
 			await this.lock.enter()

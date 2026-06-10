@@ -135,6 +135,7 @@ import { simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
 import { completeFeeOptions } from "@nulo/aztec-runtime/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
+import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import type { CallAction, EncodedCallAction } from "@nulo/wallet-bridge"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { type ILogger, LogLevel } from "@/wallet/logger"
@@ -146,6 +147,10 @@ const LOG_SOURCE = "batched-view-simulation"
 export interface BatchedViewSimulationDeps {
 	readonly pxe: IPXE
 	readonly node: AztecNode
+	/** Stored chain identity for the user-selected network. Passed so the
+	 *  caller's `node.getNodeInfo()` consumption can rebind via
+	 *  `assertLiveChainIdentity` before deriving `chainInfo` (F-012 / A-01). */
+	readonly network: { chainId: number }
 	readonly account: IAccountContract
 	readonly contractResolver: ContractResolver
 	readonly logger?: ILogger
@@ -167,7 +172,7 @@ export async function batchedViewSimulation(
 	const decoded: AbiDecoded[] = []
 	if (calls.length === 0) return { encoded, decoded }
 
-	const { pxe, node, account, contractResolver, logger } = deps
+	const { pxe, node, network, account, contractResolver, logger } = deps
 
 	// Resolve contract instances + artifacts up-front.
 	const contractAddresses = contractResolver.extractContracts([...calls])
@@ -237,6 +242,10 @@ export async function batchedViewSimulation(
 			// (`buildTxExecutionRequest` uses it transitively). Don't catch —
 			// propagate per plan §1c, mirroring `fast-path.ts:170`.
 			const nodeInfo = await node.getNodeInfo()
+			// F-012 / A-01 V-01: rebind live chain identity to the stored
+			// network before deriving chainInfo. A drifted RPC must be rejected
+			// before any merge/sim that depends on chainInfo runs.
+			assertLiveChainIdentity(network, nodeInfo)
 			chainInfo = {
 				chainId: new Fr(nodeInfo.l1ChainId),
 				version: new Fr(nodeInfo.rollupVersion),

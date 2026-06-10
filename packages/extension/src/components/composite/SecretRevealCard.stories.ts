@@ -19,7 +19,7 @@ type Story = StoryObj<typeof SecretRevealCard>
 
 export const SeedPhrase: Story = {}
 export const PrivateKey: Story = {
-	args: { value: "0x" + "a".repeat(64), label: "Plain Key" },
+	args: { value: `0x${"a".repeat(64)}`, label: "Plain Key" },
 }
 export const EncryptedBackup: Story = {
 	args: { value: "v1:base64-encrypted-blob...", label: "Encrypted Key" },
