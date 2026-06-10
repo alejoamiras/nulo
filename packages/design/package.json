@@ -1,0 +1,30 @@
+{
+	"name": "@nulo/design",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./tokens": "./src/tokens.ts",
+		"./base.css": "./src/base.css",
+		"./ui/*": "./src/ui/*",
+		"./composite/*": "./src/composite/*"
+	},
+	"scripts": {
+		"typecheck": "vue-tsc --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest"
+	},
+	"peerDependencies": {
+		"vue": "^3.5.18"
+	},
+	"devDependencies": {
+		"@vitejs/plugin-vue": "^6.0.1",
+		"@vue/compiler-sfc": "^3.5.18",
+		"@vue/test-utils": "^2.4.9",
+		"jsdom": "^29.1.1",
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.5",
+		"vue-tsc": "^3.0.5"
+	}
+}

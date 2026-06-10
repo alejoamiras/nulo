@@ -46,6 +46,34 @@
 	},
 	"overrides": [
 		{
+			"includes": ["packages/design/src/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@nulo/*"],
+										"message": "@nulo/design is the lowest layer — it cannot import any @nulo/* package"
+									}
+								]
+							}
+						},
+						"noRestrictedGlobals": {
+							"level": "error",
+							"options": {
+								"deniedGlobals": {
+									"chrome": "@nulo/design is platform-agnostic — no chrome.*"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		{
 			"includes": ["**/*.vue"],
 			"linter": {
 				"rules": {
