@@ -59,6 +59,21 @@ if [ "${VITE_NULO_ACCELERATOR_REQUIRED:-}" = "1" ]; then
   echo "[e2e:agent] bundle contains NULO_ACCELERATOR_REQUIRED_BUILD_STAMP ✓"
 fi
 
+# Fail loudly if VITE_NULO_FEE_MULTIPLIER didn't propagate into the bundle.
+# Without this, a silently-default 2× envelope keeps causing the heavy
+# multi-prove tests (transfers, concurrent-sendtx-confirm) to flake on
+# loaded GHA runners, but the failures look identical to the pre-fix
+# state. Asserting the bundle contains `parseFloat(\`<value>\`)` proves
+# Vite statically substituted the env var.
+if [ -n "${VITE_NULO_FEE_MULTIPLIER:-}" ]; then
+  if ! grep -rq "parseFloat(\`${VITE_NULO_FEE_MULTIPLIER}\`)" dist/chrome 2>/dev/null; then
+    echo "[e2e:agent] FATAL: VITE_NULO_FEE_MULTIPLIER=${VITE_NULO_FEE_MULTIPLIER} but bundle does not contain parseFloat(\`${VITE_NULO_FEE_MULTIPLIER}\`)" >&2
+    echo "[e2e:agent] env didn't propagate into Vite; gas-envelope widening would silently disappear" >&2
+    exit 2
+  fi
+  echo "[e2e:agent] bundle contains parseFloat(\`${VITE_NULO_FEE_MULTIPLIER}\`) ✓"
+fi
+
 echo "[e2e:agent] running network e2e..."
 # `E2E_REQUIRE_SETUP=1` tells `tests/e2e/global-setup.ts` that this is the
 # real agent runner (not a contributor running vitest directly without a
