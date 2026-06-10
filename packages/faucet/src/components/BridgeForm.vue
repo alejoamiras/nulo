@@ -183,14 +183,21 @@ watch(
 	},
 )
 
+function clearFlowErrors() {
+	depositFlow.error.value = null
+	withdrawFlow.error.value = null
+}
+
 function onBackground() {
 	if (activeId.value) journal.releaseForeground(activeId.value)
+	clearFlowErrors()
 	formStage.value = "form"
 }
 
 function onNewBridge() {
 	if (activeId.value) journal.releaseForeground(activeId.value)
 	receiptSnapshot.value = null
+	clearFlowErrors()
 	formStage.value = "form"
 	void usdc.refresh()
 	void l2Handle.value?.refresh()

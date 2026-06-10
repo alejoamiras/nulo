@@ -11,7 +11,8 @@ import { type BridgePhase, stepperPhases } from "@/lib/bridge-steps"
 import { formatElapsed, trackPhases } from "@/lib/phase-clock"
 import { TESTIDS } from "@/lib/testids"
 
-const props = defineProps<{ record: BridgeJournalRecord; compact?: boolean }>()
+const props = defineProps<{ record: BridgeJournalRecord; compact?: boolean; retryable?: boolean }>()
+const emit = defineEmits<{ retry: [] }>()
 
 const journal = useBridgeJournal()
 
@@ -92,6 +93,15 @@ function liveElapsed(startedAt?: number): string | null {
 				{{ liveElapsed(phase.startedAt) }}<template v-if="phase.eta"> · {{ phase.eta }}</template>
 			</span>
 			<p v-if="phase.detail && (phase.state === 'active' || phase.state === 'failed')" class="detail">{{ phase.detail }}</p>
+			<button
+				v-if="phase.state === 'failed' && retryable"
+				type="button"
+				class="retry"
+				:data-testid="TESTIDS.stepperRetry"
+				@click="emit('retry')"
+			>
+				RETRY
+			</button>
 			<p v-if="phase.progress" class="bar-line">
 				<span class="bar">{{ bar(phase.progress.fraction) }}</span>
 				<span class="bar-count">{{ phase.progress.current }} / {{ phase.progress.target }}</span>
@@ -233,8 +243,26 @@ function liveElapsed(startedAt?: number): string | null {
 }
 
 .phase .detail,
-.phase .bar-line {
+.phase .bar-line,
+.phase .retry {
 	grid-column: 2 / -1;
+}
+
+.retry {
+	justify-self: start;
+	margin-top: 6px;
+	padding: 6px 12px;
+	background: transparent;
+	border: 1px solid var(--red);
+	color: var(--red);
+	font: 600 11px/1 var(--font-mono);
+	letter-spacing: 0.06em;
+	cursor: pointer;
+}
+
+.retry:hover {
+	background: var(--red);
+	color: var(--nulo-bg, #000);
 }
 
 /* ---------- compact rail (journal cards) ---------- */

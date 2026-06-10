@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ref } from "vue"
 
 const depositFn = vi.fn(async (_a: bigint, _p: boolean) => {})
+const depositErr = ref<string | null>(null)
 const withdrawFn = vi.fn(async (_a: bigint, _p: boolean) => {})
 const sealTrusted = vi.fn(() => false)
 const l1Balance = ref<bigint | null>(500_000_000n)
@@ -38,7 +39,7 @@ vi.mock("@/composables/useTokenBalance", () => ({
 	}),
 }))
 vi.mock("@/composables/useDeposit", () => ({
-	useDepositFlow: () => ({ busy: ref(false), error: ref(null), deposit: depositFn }),
+	useDepositFlow: () => ({ busy: ref(false), error: depositErr, deposit: depositFn }),
 	providerFingerprint: () => "rabby",
 }))
 vi.mock("@/composables/useWithdraw", () => ({
@@ -75,6 +76,7 @@ describe("BridgeForm", () => {
 	beforeEach(() => {
 		depositFn.mockClear()
 		withdrawFn.mockClear()
+		depositErr.value = null
 		sealTrusted.mockReturnValue(false)
 		l1Balance.value = 500_000_000n
 	})
@@ -223,6 +225,26 @@ describe("BridgeForm", () => {
 		expect(w.find(sel(TESTIDS.stepper)).attributes("data-id")).toBe("0xexit99")
 		// …and the journal still suppresses it (exactly ONE surface for a non-completed record).
 		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xexit99")).toBe(false)
+	})
+
+	it("NEW BRIDGE clears stale flow errors (no 'wallet locked' ghost on the fresh form)", async () => {
+		__resetJournalForTests()
+		depositErr.value = "Wallet locked"
+		depositFn.mockImplementationOnce(async (_a: bigint, _p: boolean, opts?: { onRecord?: (id: string) => void }) => {
+			addRecord(activeFixture("0xghost"))
+			opts?.onRecord?.("0xghost")
+			await new Promise(() => {})
+		})
+		const w = mount(BridgeForm)
+		await w.find(sel(TESTIDS.bridgeAmount)).setValue("100")
+		await w.find(sel(TESTIDS.bridgeSubmit)).trigger("click")
+		await w.vm.$nextTick()
+		updateRecord("0xghost", { depositTxHash: `0x${"ab".repeat(32)}`, claimTxHash: `0x${"cd".repeat(32)}`, completedAt: Date.now() })
+		await w.vm.$nextTick()
+		await w.vm.$nextTick()
+		await w.find(sel(TESTIDS.receiptNewBridge)).trigger("click")
+		expect(depositErr.value).toBeNull()
+		expect(w.find(sel(TESTIDS.bridgeFlowError)).exists()).toBe(false)
 	})
 
 	it("completion flips stepper→receipt with a SNAPSHOT that survives the record vanishing", async () => {

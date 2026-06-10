@@ -21,6 +21,14 @@ export interface ReceiptSnapshot {
 const props = defineProps<{ snapshot: ReceiptSnapshot }>()
 const emit = defineEmits<{ "new-bridge": [] }>()
 
+// The meme: a one-shot burst of square monospace bits. Deterministic pseudo-random placement,
+// CSS-only, gone in under a second - celebration without a dependency.
+const CONFETTI = Array.from({ length: 14 }, (_, i) => ({
+	left: `${(i * 53) % 97}%`,
+	animationDelay: `${(i % 7) * 60}ms`,
+	color: i % 2 === 0 ? "var(--mint)" : "var(--nulo-accent)",
+}))
+
 const amountDisplay = computed(() => (Number(props.snapshot.amount) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 }))
 const headline = computed(() =>
 	props.snapshot.direction === "deposit" ? `${amountDisplay.value} USDC to Aztec` : `${amountDisplay.value} USDC to Ethereum`,
@@ -50,6 +58,9 @@ const links = computed(() => {
 
 <template>
 	<section class="receipt" :data-testid="TESTIDS.receipt">
+		<div class="confetti" aria-hidden="true">
+			<span v-for="(c, i) in CONFETTI" :key="i" class="bit" :style="c">{{ i % 3 === 0 ? "▓" : i % 3 === 1 ? "░" : "✓" }}</span>
+		</div>
 		<p class="stamp">{{ snapshot.direction === "deposit" ? "BRIDGED ✓" : "RELEASED ✓" }}</p>
 		<h3>{{ headline }}</h3>
 		<p class="sub">
@@ -125,27 +136,53 @@ const links = computed(() => {
 
 .stamp {
 	margin: 0;
-	padding: 14px 18px;
-	align-self: flex-start;
-	font: 700 26px/1 var(--font-mono);
-	letter-spacing: 0.14em;
-	color: var(--nulo-bg, #000);
-	background: var(--mint);
-	animation: stamp-in 0.3s ease-out;
+	font: 700 20px/1 var(--font-mono);
+	letter-spacing: 0.12em;
+	color: var(--mint);
+	animation: stamp-in 0.25s ease-out;
 }
 
 @keyframes stamp-in {
 	0% {
-		transform: scale(1.6) rotate(-3deg);
+		transform: scale(1.8);
 		opacity: 0;
 	}
-	65% {
-		transform: scale(0.95) rotate(0.5deg);
+	60% {
+		transform: scale(0.94);
 		opacity: 1;
 	}
 	100% {
-		transform: scale(1) rotate(0deg);
+		transform: scale(1);
 		opacity: 1;
+	}
+}
+
+.receipt {
+	position: relative;
+	overflow: hidden;
+}
+
+.confetti {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+
+.bit {
+	position: absolute;
+	top: -14px;
+	font: 600 11px/1 var(--font-mono);
+	animation: confetti-fall 0.9s ease-in forwards;
+}
+
+@keyframes confetti-fall {
+	0% {
+		transform: translateY(0) rotate(0deg);
+		opacity: 1;
+	}
+	100% {
+		transform: translateY(140px) rotate(200deg);
+		opacity: 0;
 	}
 }
 </style>

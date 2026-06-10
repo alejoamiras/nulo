@@ -29,6 +29,17 @@ export function trackPhases(recordId: string, phases: BridgePhase[], now: number
 			times = {}
 			clock.set(phase.key, times)
 		}
+		// Backward transitions (a RETRY re-running the gate, a failed claim re-prompting) reset the
+		// phase's clock: durations measure the LATEST attempt, never a sum across a stall. Without
+		// this, a phase re-entered after a long failure inherits its pre-failure start and lies.
+		if (phase.state === "pending" && (times.startedAt !== undefined || times.doneAt !== undefined)) {
+			times.startedAt = undefined
+			times.doneAt = undefined
+		}
+		if ((phase.state === "active" || phase.state === "failed") && times.doneAt !== undefined) {
+			times.startedAt = now
+			times.doneAt = undefined
+		}
 		if ((phase.state === "active" || phase.state === "failed") && times.startedAt === undefined) {
 			times.startedAt = now
 		}

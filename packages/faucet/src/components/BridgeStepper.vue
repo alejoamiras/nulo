@@ -53,10 +53,9 @@ const headline = computed(() => {
 			<p class="headline">{{ headline }}</p>
 		</header>
 
-		<BridgePhaseRail :record="record" />
+		<BridgePhaseRail :record="record" :retryable="canRetry" @retry="onRetry" />
 
 		<div class="actions">
-			<button v-if="canRetry" type="button" class="action" :data-testid="TESTIDS.stepperRetry" @click="onRetry">RETRY</button>
 			<button type="button" class="action subtle" :data-testid="TESTIDS.stepperBackground" @click="emit('background')">
 				RUN IN BACKGROUND
 			</button>
