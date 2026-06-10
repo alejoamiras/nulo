@@ -15,10 +15,19 @@ function base(): string {
 	return url.endsWith("/") ? url.slice(0, -1) : url
 }
 
+/** Only a strict 32-byte hex hash may reach a URL — journal fields are user-writable storage. */
+const TX_HASH_SHAPE = /^0x[0-9a-f]{64}$/i
+
 export function explorerTxUrl(hash: string): string {
 	const b = base()
-	if (!b || !hash) return ""
+	if (!b || !TX_HASH_SHAPE.test(hash)) return ""
 	return `${b}/tx-effects/${hash}`
+}
+
+/** Sepolia etherscan link for the bridge's L1 legs (deposit + consume txs). */
+export function etherscanTxUrl(hash: string): string {
+	if (!TX_HASH_SHAPE.test(hash)) return ""
+	return `https://sepolia.etherscan.io/tx/${hash}`
 }
 
 export function explorerAddressUrl(addr: string): string {

@@ -4,14 +4,31 @@ import BridgeJournalCard from "./BridgeJournalCard.vue"
 
 /** Composables */
 import { useBridgeJournal } from "@/composables/useBridgeJournal"
+import { useToast } from "@/composables/useToast"
 
 /** Utils */
-import { computed } from "vue"
+import { computed, watch } from "vue"
+import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { TESTIDS } from "@/lib/testids"
 
 const journal = useBridgeJournal()
+const { push } = useToast()
 
-const sorted = computed(() => [...journal.records.value].sort((a, b) => b.createdAt - a.createdAt))
+const sorted = computed(() => [...journal.visibleRecords.value].sort((a, b) => b.createdAt - a.createdAt))
+
+watch(
+	() => journal.lastCompleted.value,
+	(done) => {
+		if (!done) return
+		const amount = (Number(done.amount) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 })
+		const href = done.txHash ? (done.direction === "deposit" ? explorerTxUrl(done.txHash) : etherscanTxUrl(done.txHash)) : ""
+		push({
+			kind: "ok",
+			text: done.direction === "deposit" ? `Bridged ${amount} USDC to Aztec ✓` : `Released ${amount} USDC to Ethereum ✓`,
+			link: href ? { label: "view tx", href } : undefined,
+		})
+	},
+)
 </script>
 
 <template>

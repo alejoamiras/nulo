@@ -13,6 +13,7 @@ import { computed, ref } from "vue"
 import { useBridgeJournal } from "@/composables/useBridgeJournal"
 
 /** Utils */
+import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { TESTIDS } from "@/lib/testids"
 
 const props = defineProps<{ record: BridgeJournalRecord }>()
@@ -77,6 +78,38 @@ const showFinish = computed(
 	() => props.record.direction === "withdraw" && stage.value !== "done" && stage.value !== "exiting" && actionable.value,
 )
 
+const STEP_COPY: Record<string, string> = {
+	unsealing: "Unsealing the recovery secret",
+	syncing: "Waiting for Aztec to sync the message",
+	sending: "Sending the claim",
+	confirming: "Confirming",
+	verifying: "Verifying against this record",
+}
+const stepLine = computed(() => {
+	const step = rt.value.step
+	if (!step) return null
+	const detail = rt.value.stepDetail
+	return detail ? `${STEP_COPY[step]} — ${detail}` : STEP_COPY[step]
+})
+
+/** A soft note (e.g. the 30-min "still confirming") renders even without an attention state. */
+const note = computed(() => rt.value.note)
+
+const txLinks = computed(() => {
+	const links: { label: string; href: string }[] = []
+	if (props.record.direction === "deposit") {
+		const rec = props.record as DepositJournalRecord
+		if (rec.depositTxHash) links.push({ label: "deposit tx ↗", href: etherscanTxUrl(rec.depositTxHash) })
+		if (rec.claimTxHash) links.push({ label: "claim tx ↗", href: explorerTxUrl(rec.claimTxHash) })
+	} else {
+		const rec = props.record as WithdrawJournalRecord
+		if (rec.exitTxHash && !rec.exitTxHash.startsWith("wd-pending"))
+			links.push({ label: "exit tx ↗", href: explorerTxUrl(rec.exitTxHash) })
+		if (rec.consumeTxHash) links.push({ label: "finish tx ↗", href: etherscanTxUrl(rec.consumeTxHash) })
+	}
+	return links.filter((l) => l.href !== "")
+})
+
 const amountDisplay = computed(() => (Number(props.record.amount) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 }))
 
 const age = computed(() => {
@@ -112,15 +145,28 @@ function onDiscard() {
 		:data-attention="attention"
 	>
 		<header class="row">
-			<span class="dir">{{ record.direction === "deposit" ? "→ AZTEC" : "→ ETHEREUM" }}</span>
+			<span class="dir">{{ record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM" }}</span>
 			<span class="amt">{{ amountDisplay }} USDC</span>
 			<span class="tag" :class="{ private: record.isPrivate }">{{ record.isPrivate ? "PRIVATE" : "PUBLIC" }}</span>
 			<span class="age">{{ age }}</span>
 		</header>
 
+		<p v-if="stepLine" class="step" :data-testid="TESTIDS.journalStep"><span class="pulse">●</span> {{ stepLine }}</p>
+
 		<p class="stage" :data-testid="TESTIDS.journalStage">{{ stageLabel }}</p>
 
-		<p v-if="rt.note" class="attention" :data-testid="TESTIDS.journalAttention">{{ rt.note }}</p>
+		<p v-if="note" class="attention" :data-testid="TESTIDS.journalAttention">{{ note }}</p>
+
+		<div v-if="txLinks.length" class="links">
+			<a
+				v-for="link in txLinks"
+				:key="link.href"
+				:href="link.href"
+				target="_blank"
+				rel="noopener noreferrer"
+				:data-testid="TESTIDS.journalTxLink"
+			>{{ link.label }}</a>
+		</div>
 
 		<div class="actions">
 			<button
@@ -226,6 +272,43 @@ function onDiscard() {
 	margin: 0;
 	color: var(--txt-secondary);
 	font: 500 12px/1.5 var(--font-mono);
+}
+
+.step {
+	margin: 0;
+	color: var(--txt-primary);
+	font: 600 12px/1.5 var(--font-mono);
+}
+
+.pulse {
+	color: var(--nulo-accent);
+	animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+	0%,
+	100% {
+		opacity: 0.25;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+
+.links {
+	display: flex;
+	gap: 12px;
+}
+
+.links a {
+	color: var(--txt-secondary);
+	font: 500 11px/1 var(--font-mono);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
+.links a:hover {
+	color: var(--nulo-accent);
 }
 
 .attention {

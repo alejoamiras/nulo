@@ -71,9 +71,43 @@ describe("BridgeJournalCard", () => {
 		expect(card.attributes("data-direction")).toBe("deposit")
 		expect(card.attributes("data-stage")).toBe("claimable")
 		expect(card.attributes("data-privacy")).toBe("private")
-		expect(w.text()).toContain("→ AZTEC")
+		expect(w.text()).toContain("ETHEREUM → AZTEC")
 		expect(w.text()).toContain("100 USDC")
 		expect(w.text()).toContain("PRIVATE")
+	})
+
+	it("withdraw header reads AZTEC → ETHEREUM", () => {
+		const w = mountCard(withdraw())
+		expect(w.text()).toContain("AZTEC → ETHEREUM")
+	})
+
+	it("renders the live step narration from runtime (spinner line + detail)", () => {
+		runtime.value = { "0xdep": { step: "confirming", stepDetail: "check 12 — the claim is processing on Aztec" } }
+		const w = mountCard(deposit({ leafIndex: "7", claimTxHash: `0x${"ab".repeat(32)}` }))
+		const step = w.find(sel(TESTIDS.journalStep))
+		expect(step.text()).toContain("Confirming")
+		expect(step.text()).toContain("check 12")
+	})
+
+	it("a soft note renders without an attention state (the 30-min still-confirming case)", () => {
+		runtime.value = { "0xdep": { note: "Still confirming after ~30 minutes — slow testnet." } }
+		const w = mountCard(deposit({ leafIndex: "7" }))
+		expect(w.find(sel(TESTIDS.journalAttention)).text()).toContain("Still confirming")
+		expect(w.find(sel(TESTIDS.journalCard)).attributes("data-attention")).toBeUndefined()
+	})
+
+	it("explorer links render per tx hash with strict validation (junk hashes get no link)", () => {
+		const goodEth = `0x${"ab".repeat(32)}`
+		const goodAz = `0x${"cd".repeat(32)}`
+		const w = mountCard(deposit({ depositTxHash: goodEth, claimTxHash: goodAz, leafIndex: "7" }))
+		const links = w.findAll(sel(TESTIDS.journalTxLink))
+		expect(links).toHaveLength(2)
+		expect(links[0].attributes("href")).toBe(`https://sepolia.etherscan.io/tx/${goodEth}`)
+		expect(links[0].attributes("rel")).toContain("noopener")
+		expect(links[1].attributes("href")).toContain(`/tx-effects/${goodAz}`)
+
+		const junk = mountCard(deposit({ depositTxHash: "javascript:alert(1)", leafIndex: "7" }))
+		expect(junk.findAll(sel(TESTIDS.journalTxLink))).toHaveLength(0)
 	})
 
 	it("deposit stage matrix renders exactly the right action", () => {

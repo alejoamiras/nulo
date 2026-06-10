@@ -157,15 +157,22 @@ describe("bridge smoke", () => {
 		expect(signL1).not.toHaveBeenCalled()
 	})
 
-	it("an explicit CLAIM click drives the deposit to done through the engine", async () => {
+	it("an explicit CLAIM click drives the deposit to done, auto-hides the card, and RETAINS the record", async () => {
 		seedJournal([claimableDeposit()])
 		const w = mountBridge()
 		await flushPromises()
 		await w.find(sel(TESTIDS.journalClaim)).trigger("click")
 		await flushPromises()
 		expect(claimDep).toHaveBeenCalled()
-		expect(w.find(sel(TESTIDS.journalCard)).attributes("data-stage")).toBe("done")
-		expect(w.find(sel(TESTIDS.journalClear)).exists()).toBe(true)
+		// In-session completion (gate passed + sent in this process) auto-hides after the grace
+		// (waitMs is a no-op here) — the card leaves the list…
+		await flushPromises()
+		expect(w.find(sel(TESTIDS.journalCard)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.journalEmpty)).exists()).toBe(true)
+		// …but the RECORD survives in storage (hide, never destroy): completedAt set, blob intact.
+		const stored = JSON.parse(localStorage.getItem(JOURNAL_KEY) ?? "{}") as { records?: { id: string; completedAt?: number }[] }
+		const rec = stored.records?.find((r) => r.id === "0xdep1")
+		expect(rec?.completedAt).toBeDefined()
 	})
 
 	it("the form flip swaps the panels' data-chain", async () => {

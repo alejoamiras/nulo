@@ -92,6 +92,8 @@ export const TESTIDS = {
 	journalDiscardConfirm: "fa-journal-discard-confirm",
 	journalClear: "fa-journal-clear",
 	journalAttention: "fa-journal-attention",
+	journalStep: "fa-journal-step",
+	journalTxLink: "fa-journal-tx-link",
 
 	// Bridge — add the bridged token to the wallet (registerToken, the bridge's own USDC)
 	bridgeAddToken: "fa-bridge-add-token",
