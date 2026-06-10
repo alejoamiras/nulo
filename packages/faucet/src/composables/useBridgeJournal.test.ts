@@ -231,6 +231,47 @@ describe("useBridgeJournal engine", () => {
 		})
 	})
 
+	it("sync countdown: blocks tick down WITHOUT touching the PXE; the simulate gate stays the authority after arrival", async () => {
+		const deps = baseDeps(kv)
+		const order: string[] = []
+		const heights = [100, 101, 102, 103]
+		let h = 0
+		const l2BlockNumber = vi.fn(async () => {
+			order.push("block")
+			const v = heights[Math.min(h, heights.length - 1)] ?? 103
+			h++
+			return v
+		})
+		const claim = vi.fn(async () => ({
+			simulate: async () => {
+				order.push("simulate")
+				return {}
+			},
+			send: async () => ({ txHash: "0xclaimtx" }),
+		}))
+		connectJournalDeps({ ...deps, claim, l2BlockNumber })
+		addRecord(mkDeposit("0xcountdown", { depositL2Block: 100 }))
+		await runDepositClaim("0xcountdown")
+		// Heights 100..102 are below target 103 (snapshot + 3): three countdown polls, ZERO simulates.
+		expect(order.slice(0, 4)).toEqual(["block", "block", "block", "block"])
+		expect(order.indexOf("simulate")).toBeGreaterThan(3)
+		expect(useBridgeJournal().records.value.find((r) => r.id === "0xcountdown")?.completedAt).toBe(999)
+	})
+
+	it("sync countdown: no depositL2Block snapshot ⇒ straight to the simulate gate (no block polling)", async () => {
+		const deps = baseDeps(kv)
+		const l2BlockNumber = vi.fn(async () => 100)
+		const claim = vi.fn(async () => ({
+			simulate: async () => ({}),
+			send: async () => ({ txHash: "0xclaimtx" }),
+		}))
+		connectJournalDeps({ ...deps, claim, l2BlockNumber })
+		addRecord(mkDeposit("0xnosnap"))
+		await runDepositClaim("0xnosnap")
+		expect(l2BlockNumber).not.toHaveBeenCalled()
+		expect(useBridgeJournal().records.value.find((r) => r.id === "0xnosnap")?.completedAt).toBe(999)
+	})
+
 	it("⑰ a claim THIS process sent completes on the checkpointed receipt - the lagging PXE cannot block it", async () => {
 		const deps = baseDeps(kv)
 		// simulate keeps succeeding (PXE lag right after checkpoint) - local provenance wins anyway.

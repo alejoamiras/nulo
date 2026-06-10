@@ -3,7 +3,7 @@
  * cleared, multi-entry, device-local. Replaces the single-pending-per-direction records.
  *
  * Trust model (the part that must not regress):
- *  - Records persist MILESTONE FACTS only (tx hashes, leafIndex, completedAt) — display stages
+ *  - Records persist MILESTONE FACTS only (tx hashes, leafIndex, completedAt) - display stages
  *    are DERIVED at runtime, so storage cannot lie about progress, only about facts whose
  *    tampering is individually bounded (see the plan's Security section).
  *  - For PRIVATE deposits the plaintext `recipient`/`amount` are display-only; the authoritative
@@ -25,11 +25,11 @@ export interface KV {
 
 export const JOURNAL_KEY = "nulo-bridge:journal:v1"
 
-/** Parse cap — storage-flooding guard. Eviction is prioritized: unfinished records survive
+/** Parse cap - storage-flooding guard. Eviction is prioritized: unfinished records survive
  *  first, then newest completed; junk can never evict a live record. */
 export const MAX_RECORDS = 100
 
-/** Pre-journal single-pending keys. Deleted on init — no migration (dev-phase decision, plan L15). */
+/** Pre-journal single-pending keys. Deleted on init - no migration (dev-phase decision, plan L15). */
 export const LEGACY_KEYS = ["nulo-bridge-pending-deposit", "nulo-bridge-pending-withdraw"] as const
 
 interface JournalBase {
@@ -45,7 +45,7 @@ interface JournalBase {
 	updatedAt: number
 	/** Terminal: set only after the record's SPECIFIC tx passed the identity checks. */
 	completedAt?: number
-	/** Deployment binding — a record from a different deployment refuses resume (stale-deployment). */
+	/** Deployment binding - a record from a different deployment refuses resume (stale-deployment). */
 	chainId: number
 	portal: string
 	bridge: string
@@ -55,22 +55,25 @@ export interface DepositJournalRecord extends JournalBase {
 	direction: "deposit"
 	/** Display + pre-unseal guard for private; claim arg for public (self-authenticating on-chain). */
 	recipient: string
-	/** PUBLIC only — recipient-bound by the L1 content hash (tamper ⇒ claim fails, never redirects). */
+	/** PUBLIC only - recipient-bound by the L1 content hash (tamper ⇒ claim fails, never redirects). */
 	secret?: string
-	/** PRIVATE only — the AES-GCM envelope holding {secret, recipient, amount, sealerL1, leafIndex?}. */
+	/** PRIVATE only - the AES-GCM envelope holding {secret, recipient, amount, sealerL1, leafIndex?}. */
 	sealedEnvelope?: string
 	secretHashHex: string
 	/** Display copy of the sealing L1 account (authoritative copy lives inside the envelope). */
 	sealerL1?: string
-	/** Persisted the moment writeContract returns — leafIndex stays chain-recoverable. */
+	/** Persisted the moment writeContract returns - leafIndex stays chain-recoverable. */
 	depositTxHash?: string
 	leafIndex?: string
 	claimTxHash?: string
+	/** The Aztec block height when the L1 deposit confirmed - anchors the sync countdown
+	 *  (display pacing only; the claim-simulate gate stays the consumability authority). */
+	depositL2Block?: number
 }
 
 export interface WithdrawJournalRecord extends JournalBase {
 	direction: "withdraw"
-	/** Bound in the L2→L1 message — tamper makes the consume revert. */
+	/** Bound in the L2→L1 message - tamper makes the consume revert. */
 	recipientL1: string
 	exitTxHash?: string
 	exitBlock?: number
@@ -79,7 +82,7 @@ export interface WithdrawJournalRecord extends JournalBase {
 
 export type BridgeJournalRecord = DepositJournalRecord | WithdrawJournalRecord
 
-/** Canonical display stages — closed sets, stable for e2e selectors. */
+/** Canonical display stages - closed sets, stable for e2e selectors. */
 export type DepositStage = "depositing" | "syncing" | "claimable" | "claiming" | "done"
 export type WithdrawStage = "exiting" | "proving" | "consumable" | "consuming" | "done"
 
@@ -109,7 +112,7 @@ function parseRecords(raw: string | null): BridgeJournalRecord[] {
 	}
 }
 
-/** Prioritized retention under MAX_RECORDS: unfinished records are NEVER evicted — an unfinished
+/** Prioritized retention under MAX_RECORDS: unfinished records are NEVER evicted - an unfinished
  *  private deposit may hold the only sealed recovery blob, and an attacker who can flood storage
  *  with unfinished junk could otherwise use the cap itself as an eviction tool (worse than the
  *  deletion he can already do directly). The cap trims only completed records, newest first; a
@@ -129,7 +132,7 @@ function write(kv: KV, records: BridgeJournalRecord[]): void {
 	kv.setItem(JOURNAL_KEY, JSON.stringify({ schema: 1, records: capRecords(records) }))
 }
 
-/** Insert-or-replace by id — re-reads the journal first (per-record merge; see module header). */
+/** Insert-or-replace by id - re-reads the journal first (per-record merge; see module header). */
 export function upsertRecord(kv: KV, rec: BridgeJournalRecord): void {
 	const records = loadJournal(kv)
 	const next = { ...rec, updatedAt: Date.now() }
@@ -171,7 +174,7 @@ export function pruneCompleted(kv: KV, olderThanMs: number, now = Date.now()): v
 	if (next.length !== records.length) write(kv, next)
 }
 
-/** Delete the pre-journal single-pending keys. No migration — plan L15 (dev phase). */
+/** Delete the pre-journal single-pending keys. No migration - plan L15 (dev phase). */
 export function clearLegacyKeys(kv: KV): void {
 	for (const key of LEGACY_KEYS) kv.removeItem(key)
 }

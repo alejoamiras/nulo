@@ -103,6 +103,7 @@ function wireDepositDeps(): void {
 				},
 			}
 		},
+		l2BlockNumber: async () => Number(await createAztecNodeClient(NODE_URL).getBlockNumber()),
 		claimReceiptStatus: async (txHash) => {
 			const node = createAztecNodeClient(NODE_URL)
 			try {
@@ -274,8 +275,16 @@ export function useDepositFlow() {
 			const event = sent[0] as { args?: { index?: bigint } } | undefined
 			if (event?.args?.index === undefined) throw new Error("deposit emitted no Inbox MessageSent event")
 			const leafIndex = event.args.index.toString()
-			updateRecord(id, { leafIndex })
-			log("L1→L2 message leaf index", leafIndex)
+			// Snapshot the L2 height at deposit-confirm time - anchors the sync countdown. Best-effort:
+			// a dead node just means the gate narrates without the block countdown.
+			let depositL2Block: number | undefined
+			try {
+				depositL2Block = Number(await createAztecNodeClient(NODE_URL).getBlockNumber())
+			} catch {
+				depositL2Block = undefined
+			}
+			updateRecord(id, { leafIndex, depositL2Block })
+			log("L1→L2 message leaf index", leafIndex, "L2 height at confirm", depositL2Block)
 
 			// Finalized envelope: same key retained in memory ⇒ zero additional signatures.
 			const key = sealKeys.get(id)

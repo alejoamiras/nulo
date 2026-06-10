@@ -26,6 +26,8 @@ import { BRIDGE, L1_PORTAL } from "@/contracts/bridge-deployments"
 const log = (...args: unknown[]) => console.log("[bridge:journal]", ...args)
 
 const PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
+/** L2 blocks between the deposit-time snapshot and presumed message arrival (raven-style pacing). */
+export const SYNC_TARGET_MARGIN_BLOCKS = 3
 
 /** The L1→L2 message isn't consumable until the sequencer folds it into a block AND this wallet's
  *  PXE syncs it; both claim paths revert with one of these wordings until then. After a SUCCESSFUL
@@ -102,6 +104,8 @@ export interface JournalEngineDeps {
 	waitConsumeReceipt?: (txHash: string) => Promise<boolean>
 	/** Verify a rediscovered consume tx actually consumes THIS record's exit (identity check). */
 	verifyConsumeIdentity?: (rec: WithdrawJournalRecord, txHash: string) => Promise<boolean>
+	/** Current Aztec block height (latest, not proven) - drives the sync countdown. */
+	l2BlockNumber?: () => Promise<number>
 	/** Injectable wait (tests pass a no-op; production uses real timers). */
 	waitMs?: (ms: number) => Promise<void>
 }
@@ -513,10 +517,38 @@ export async function runDepositClaim(id: string, opts: { interactive?: boolean 
 		const fresh = records.value.find((r) => r.id === id) as DepositJournalRecord
 		const interaction = await deps.claim(fresh, secretHex)
 
-		// Sync-gate: prompt-free simulate until the message is consumable by THIS wallet's PXE.
+		// Sync phase, two legs sharing one iteration budget:
+		// 1. Block countdown (display pacing): the deposit-time L2 snapshot + a fixed margin gives a
+		//    LEGIBLE "blocks until arrival" - no PXE simulate churn while the rollup predictably
+		//    catches up. Best-effort: missing snapshot/dep/node falls through to the gate.
+		// 2. The claim-simulate gate stays the consumability AUTHORITY - the countdown can never
+		//    green-light a claim by itself (the wallet's PXE lags the node).
+		let i = 0
+		const target = fresh.depositL2Block !== undefined && deps.l2BlockNumber ? fresh.depositL2Block + SYNC_TARGET_MARGIN_BLOCKS : null
+		let counted = false
+		if (target !== null && deps.l2BlockNumber) {
+			while (i < 300) {
+				let current: number
+				try {
+					current = await deps.l2BlockNumber()
+				} catch {
+					break // Connectivity wobble: the gate loop narrates from here.
+				}
+				if (current >= target) break
+				counted = true
+				setStep(id, "syncing", `Aztec block ${current} of ${target} - ${target - current} until your funds arrive`)
+				await wait(6000)
+				i++
+			}
+		}
+
 		let ready = false
-		for (let i = 0; i < 300; i++) {
-			setStep(id, "syncing", `sync check ${i + 1}`)
+		for (; i < 300; i++) {
+			setStep(
+				id,
+				"syncing",
+				counted ? `message arrived - waiting for your wallet to sync it (check ${i + 1})` : `sync check ${i + 1}`,
+			)
 			try {
 				await interaction.simulate()
 				ready = true
