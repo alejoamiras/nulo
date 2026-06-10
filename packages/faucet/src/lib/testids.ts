@@ -70,7 +70,10 @@ export const TESTIDS = {
 	bridgeFlip: "fa-bridge-flip",
 	bridgeAmount: "fa-bridge-amount",
 	bridgeBalanceL1: "fa-bridge-balance-l1",
-	bridgeBalanceL2: "fa-bridge-balance-l2",
+	// The Aztec panel stacks BOTH balances (public + private) with the toggle highlighting the
+	// active one — visibility never depends on the toggle.
+	bridgeBalanceL2Public: "fa-bridge-balance-l2-public",
+	bridgeBalanceL2Private: "fa-bridge-balance-l2-private",
 	bridgePrivacyToggle: "fa-bridge-privacy-toggle",
 	bridgePrivacyNote: "fa-bridge-privacy-note",
 	bridgeSealNote: "fa-bridge-seal-note",

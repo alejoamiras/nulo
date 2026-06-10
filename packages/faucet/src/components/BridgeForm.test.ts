@@ -55,30 +55,34 @@ describe("BridgeForm", () => {
 		l1Balance.value = 500_000_000n
 	})
 
-	it("defaults to Ethereum→Aztec with both balances placed correctly", () => {
+	it("defaults to Ethereum→Aztec with BOTH Aztec balances always visible (stacked dual)", () => {
 		const w = mount(BridgeForm)
 		expect(w.find(sel(TESTIDS.bridgeFrom)).attributes("data-chain")).toBe("ethereum")
 		expect(w.find(sel(TESTIDS.bridgeTo)).attributes("data-chain")).toBe("aztec")
 		expect(w.find(sel(TESTIDS.bridgeBalanceL1)).text()).toContain("500")
-		expect(w.find(sel(TESTIDS.bridgeBalanceL2)).text()).toContain("200")
+		// Both lines visible WITHOUT touching the toggle — the user is never blind on private.
+		expect(w.find(sel(TESTIDS.bridgeBalanceL2Public)).text()).toContain("200")
+		expect(w.find(sel(TESTIDS.bridgeBalanceL2Private)).text()).toContain("50")
+		expect(w.find(sel(TESTIDS.bridgeBalanceL2Public)).attributes("data-active")).toBe("true")
 		expect(w.find(sel(TESTIDS.bridgeSubmit)).text()).toContain("BRIDGE TO AZTEC")
 	})
 
-	it("flip swaps the chains, the balance positions, and the submit copy", async () => {
+	it("flip swaps the chains, keeps the stacked pair on the Aztec side, and flips the submit copy", async () => {
 		const w = mount(BridgeForm)
 		await w.find(sel(TESTIDS.bridgeFlip)).trigger("click")
 		expect(w.find(sel(TESTIDS.bridgeFrom)).attributes("data-chain")).toBe("aztec")
 		expect(w.find(sel(TESTIDS.bridgeTo)).attributes("data-chain")).toBe("ethereum")
-		expect(w.find(sel(TESTIDS.bridgeFrom)).find(sel(TESTIDS.bridgeBalanceL2)).exists()).toBe(true)
+		expect(w.find(sel(TESTIDS.bridgeFrom)).find(sel(TESTIDS.bridgeBalanceL2Private)).exists()).toBe(true)
+		expect(w.find(sel(TESTIDS.bridgeTo)).find(sel(TESTIDS.bridgeBalanceL1)).exists()).toBe(true)
 		expect(w.find(sel(TESTIDS.bridgeSubmit)).text()).toContain("BRIDGE TO ETHEREUM")
 	})
 
-	it("privacy ON switches the Aztec balance to private (data-privacy) and shows the bearer note", async () => {
+	it("the privacy toggle highlights the ACTIVE balance (both stay visible) and shows the bearer note", async () => {
 		const w = mount(BridgeForm)
 		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
-		const l2 = w.find(sel(TESTIDS.bridgeBalanceL2))
-		expect(l2.attributes("data-privacy")).toBe("private")
-		expect(l2.text()).toContain("50")
+		expect(w.find(sel(TESTIDS.bridgeBalanceL2Private)).attributes("data-active")).toBe("true")
+		expect(w.find(sel(TESTIDS.bridgeBalanceL2Public)).attributes("data-active")).toBe("false")
+		expect(w.find(sel(TESTIDS.bridgeBalanceL2Public)).exists()).toBe(true)
 		expect(w.find(sel(TESTIDS.bridgePrivacyNote)).text()).toMatch(/bearer credential/i)
 	})
 

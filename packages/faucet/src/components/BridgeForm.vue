@@ -48,11 +48,10 @@ watch(
 )
 onBeforeUnmount(() => l2Handle.value?.dispose())
 
-const l2Balance = computed(() => {
-	const handle = l2Handle.value
-	if (!handle) return null
-	return isPrivate.value ? handle.privateBalance.value : handle.publicBalance.value
-})
+const l2Public = computed(() => l2Handle.value?.publicBalance.value ?? null)
+const l2Private = computed(() => l2Handle.value?.privateBalance.value ?? null)
+/** The balance the bridge actually moves — selected by the privacy toggle. */
+const l2Balance = computed(() => (isPrivate.value ? l2Private.value : l2Public.value))
 
 const fromChain = computed(() => (direction.value === "l1-to-l2" ? "ethereum" : "aztec"))
 const toChain = computed(() => (direction.value === "l1-to-l2" ? "aztec" : "ethereum"))
@@ -113,17 +112,23 @@ function fmt(b: bigint | null): string {
 			<div class="panel" :data-testid="TESTIDS.bridgeFrom" :data-chain="fromChain">
 				<span class="role">FROM</span>
 				<span class="chip">{{ fromChain === "ethereum" ? "ETHEREUM · SEPOLIA" : "AZTEC" }}</span>
-				<span
-					v-if="fromChain === 'ethereum'"
-					class="balance"
-					:data-testid="TESTIDS.bridgeBalanceL1"
-				>Balance: {{ fmt(usdc.balance.value) }} USDC</span>
-				<span
-					v-else
-					class="balance"
-					:data-testid="TESTIDS.bridgeBalanceL2"
-					:data-privacy="isPrivate ? 'private' : 'public'"
-				>{{ isPrivate ? "Private balance" : "Balance" }}: {{ fmt(l2Balance) }} USDC</span>
+				<template v-if="fromChain === 'ethereum'">
+					<span class="balance" :data-testid="TESTIDS.bridgeBalanceL1">Balance: {{ fmt(usdc.balance.value) }} USDC</span>
+				</template>
+				<template v-else>
+					<span
+						class="balance"
+						:class="{ active: !isPrivate, dim: isPrivate }"
+						:data-testid="TESTIDS.bridgeBalanceL2Public"
+						:data-active="!isPrivate"
+					>Public: {{ fmt(l2Public) }} USDC</span>
+					<span
+						class="balance"
+						:class="{ active: isPrivate, dim: !isPrivate }"
+						:data-testid="TESTIDS.bridgeBalanceL2Private"
+						:data-active="isPrivate"
+					>Private: {{ fmt(l2Private) }} USDC</span>
+				</template>
 			</div>
 
 			<button class="flip" type="button" aria-label="Flip direction" :disabled="busy" :data-testid="TESTIDS.bridgeFlip" @click="flip">
@@ -133,17 +138,23 @@ function fmt(b: bigint | null): string {
 			<div class="panel" :data-testid="TESTIDS.bridgeTo" :data-chain="toChain">
 				<span class="role">TO</span>
 				<span class="chip">{{ toChain === "ethereum" ? "ETHEREUM · SEPOLIA" : "AZTEC" }}</span>
-				<span
-					v-if="toChain === 'ethereum'"
-					class="balance"
-					:data-testid="TESTIDS.bridgeBalanceL1"
-				>Balance: {{ fmt(usdc.balance.value) }} USDC</span>
-				<span
-					v-else
-					class="balance"
-					:data-testid="TESTIDS.bridgeBalanceL2"
-					:data-privacy="isPrivate ? 'private' : 'public'"
-				>{{ isPrivate ? "Private balance" : "Balance" }}: {{ fmt(l2Balance) }} USDC</span>
+				<template v-if="toChain === 'ethereum'">
+					<span class="balance" :data-testid="TESTIDS.bridgeBalanceL1">Balance: {{ fmt(usdc.balance.value) }} USDC</span>
+				</template>
+				<template v-else>
+					<span
+						class="balance"
+						:class="{ active: !isPrivate, dim: isPrivate }"
+						:data-testid="TESTIDS.bridgeBalanceL2Public"
+						:data-active="!isPrivate"
+					>Public: {{ fmt(l2Public) }} USDC</span>
+					<span
+						class="balance"
+						:class="{ active: isPrivate, dim: !isPrivate }"
+						:data-testid="TESTIDS.bridgeBalanceL2Private"
+						:data-active="isPrivate"
+					>Private: {{ fmt(l2Private) }} USDC</span>
+				</template>
 			</div>
 		</div>
 
@@ -257,6 +268,15 @@ function fmt(b: bigint | null): string {
 .panel .balance {
 	font: 500 12px/1.4 var(--font-mono);
 	color: var(--txt-secondary);
+}
+
+.panel .balance.active {
+	color: var(--txt-primary);
+	font-weight: 600;
+}
+
+.panel .balance.dim {
+	opacity: 0.55;
 }
 
 .flip {
