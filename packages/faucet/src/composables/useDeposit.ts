@@ -206,6 +206,12 @@ export function useDepositFlow() {
 				sealKeys.set(id, key)
 				cacheSecret(id, secret.toString(), { v: 2, ...envelope })
 				updateRecord(id, { sealedEnvelope: blob, sealerL1: from })
+				// Write-and-verify the ENVELOPE patch too: the record was created pre-seal, so a silent
+				// storage failure here would leave a private record without its only recovery blob.
+				const sealed = journal.records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
+				if (!sealed?.sealedEnvelope) {
+					throw new Error("Could not persist the sealed recovery secret — aborting before the deposit (storage full?).")
+				}
 			}
 
 			// Allowance-skip: approve only when the portal's allowance is short.
