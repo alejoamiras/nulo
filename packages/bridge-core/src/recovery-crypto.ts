@@ -91,3 +91,100 @@ export async function openRecordSecret(
 ): Promise<string> {
 	return openSecret(await recoveryKeyFromSignature(await sign(recoveryKeyMessage(binding))), blob)
 }
+
+/**
+ * The v2 deposit envelope: the bearer secret AND its authoritative metadata, sealed together so
+ * GCM's auth tag covers all of it — browser storage cannot redirect a claim by editing plaintext
+ * fields. `sealerL1` lives inside because it gates trust revocation. This is the ONLY accepted
+ * blob shape: a decrypt that doesn't parse as v2 is rejected outright (no legacy fallback — that
+ * absence is what closes the downgrade attack).
+ */
+export interface DepositEnvelopeV2 {
+	v: 2
+	secret: string
+	recipient: string
+	/** Base units, canonical decimal string (normalized at seal time). */
+	amount: string
+	sealerL1: string
+	leafIndex?: string
+}
+
+/** Normalize an amount to its canonical decimal form so seal-time and verify-time agree. */
+export function normalizeAmount(amount: string | bigint): string {
+	return BigInt(amount).toString()
+}
+
+export async function sealDepositEnvelope(key: EncryptionKey, env: Omit<DepositEnvelopeV2, "v">): Promise<string> {
+	const payload: DepositEnvelopeV2 = { ...env, v: 2, amount: normalizeAmount(env.amount) }
+	return sealSecret(key, JSON.stringify(payload))
+}
+
+/** Decrypt + validate a v2 envelope. Throws on GCM failure AND on any non-v2 plaintext shape. */
+export async function openDepositEnvelope(key: EncryptionKey, blob: string): Promise<DepositEnvelopeV2> {
+	const plaintext = await openSecret(key, blob)
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(plaintext)
+	} catch {
+		throw new Error("Sealed blob is not a v2 envelope — refusing to use it.")
+	}
+	const env = parsed as DepositEnvelopeV2
+	if (
+		env?.v !== 2 ||
+		typeof env.secret !== "string" ||
+		typeof env.recipient !== "string" ||
+		typeof env.amount !== "string" ||
+		typeof env.sealerL1 !== "string"
+	) {
+		throw new Error("Sealed blob is not a v2 envelope — refusing to use it.")
+	}
+	return env
+}
+
+/** Compare an unsealed envelope against a record's display fields (the tamper check). */
+export function envelopeMatchesRecord(env: DepositEnvelopeV2, record: { recipient: string; amount: string; leafIndex?: string }): boolean {
+	if (env.recipient.toLowerCase() !== record.recipient.toLowerCase()) return false
+	if (normalizeAmount(env.amount) !== normalizeAmount(record.amount)) return false
+	if (env.leafIndex !== undefined && record.leafIndex !== undefined && env.leafIndex !== record.leafIndex) return false
+	return true
+}
+
+/**
+ * Trust-aware end-to-end seal for a private deposit. Returns the blob AND the in-memory key so
+ * the caller can re-seal the finalized envelope (leafIndex) after the deposit receipt with ZERO
+ * additional signatures — the key must never be persisted.
+ *
+ * `trusted: true` (seal-trust cache hit) ⇒ exactly ONE signature, no self-test.
+ * `trusted: false` ⇒ the two-signature self-test; throws before any irreversible tx on a
+ * non-deterministic wallet.
+ */
+export async function sealDepositRecord(opts: {
+	sign: (message: string) => Promise<string>
+	binding: RecoveryBinding
+	envelope: Omit<DepositEnvelopeV2, "v">
+	trusted: boolean
+}): Promise<{ blob: string; key: EncryptionKey }> {
+	const message = recoveryKeyMessage(opts.binding)
+	const key = await recoveryKeyFromSignature(await opts.sign(message))
+	const blob = await sealDepositEnvelope(key, opts.envelope)
+	if (!opts.trusted) {
+		const retestKey = await recoveryKeyFromSignature(await opts.sign(message))
+		const reopened = await openDepositEnvelope(retestKey, blob).catch(() => null)
+		if (!reopened || reopened.secret !== opts.envelope.secret) {
+			throw new Error(
+				"Recovery self-test failed: this wallet signs non-deterministically, so a private claim could not be recovered. Aborting before the deposit.",
+			)
+		}
+	}
+	return { blob, key }
+}
+
+/** Re-derive the per-record key (one signature) and open the v2 envelope. */
+export async function openDepositRecord(
+	sign: (message: string) => Promise<string>,
+	binding: RecoveryBinding,
+	blob: string,
+): Promise<{ envelope: DepositEnvelopeV2; key: EncryptionKey }> {
+	const key = await recoveryKeyFromSignature(await sign(recoveryKeyMessage(binding)))
+	return { envelope: await openDepositEnvelope(key, blob), key }
+}

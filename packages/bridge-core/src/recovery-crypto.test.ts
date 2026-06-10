@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest"
-import { openRecordSecret, openSecret, recoveryKeyFromSignature, recoveryKeyMessage, sealRecordSecret, sealSecret } from "./recovery-crypto"
+import {
+	envelopeMatchesRecord,
+	normalizeAmount,
+	openDepositEnvelope,
+	openDepositRecord,
+	openRecordSecret,
+	openSecret,
+	recoveryKeyFromSignature,
+	recoveryKeyMessage,
+	sealDepositEnvelope,
+	sealDepositRecord,
+	sealRecordSecret,
+	sealSecret,
+} from "./recovery-crypto"
 
 const SIG_A = `0x${"a".repeat(130)}`
 const SIG_B = `0x${"b".repeat(130)}`
@@ -65,5 +78,102 @@ describe("recovery-crypto", () => {
 		let n = 0
 		const sign = async () => `0x${String(n++).padEnd(130, "0")}`
 		await expect(sealRecordSecret(sign, BINDING, SECRET)).rejects.toThrow(/self-test/i)
+	})
+})
+
+const BINDING = { chainId: 11155111, portal: "0xPortal", bridge: "0xBridge", secretHashHex: "0xabc" }
+
+const ENVELOPE = {
+	secret: "0x1234deadbeefcafe",
+	recipient: "0xAzTecRecipient",
+	amount: "100000000",
+	sealerL1: "0xSealerAddr",
+}
+
+describe("v2 deposit envelope", () => {
+	it("round-trips with all fields, normalizing the amount", async () => {
+		const key = await recoveryKeyFromSignature(`0x${"a".repeat(130)}`)
+		const blob = await sealDepositEnvelope(key, { ...ENVELOPE, amount: "0100000000" as never, leafIndex: "42" })
+		expect(blob).not.toContain(ENVELOPE.secret)
+		const env = await openDepositEnvelope(key, blob)
+		expect(env).toMatchObject({ v: 2, ...ENVELOPE, amount: "100000000", leafIndex: "42" })
+	})
+
+	it("tampered ciphertext throws (GCM auth)", async () => {
+		const key = await recoveryKeyFromSignature(`0x${"a".repeat(130)}`)
+		const blob = await sealDepositEnvelope(key, ENVELOPE)
+		const i = Math.floor(blob.length / 2)
+		const flipped = blob.slice(0, i) + (blob[i] === "A" ? "B" : "A") + blob.slice(i + 1)
+		await expect(openDepositEnvelope(key, flipped)).rejects.toThrow()
+	})
+
+	it("REJECTS a bare-secret blob — no legacy fallback (the downgrade-attack pin)", async () => {
+		const key = await recoveryKeyFromSignature(`0x${"a".repeat(130)}`)
+		const bareBlob = await sealSecret(key, "0x1234deadbeefcafe")
+		await expect(openDepositEnvelope(key, bareBlob)).rejects.toThrow(/not a v2 envelope/i)
+	})
+
+	it("REJECTS valid JSON that isn't a v2 envelope shape", async () => {
+		const key = await recoveryKeyFromSignature(`0x${"a".repeat(130)}`)
+		const blob = await sealSecret(key, JSON.stringify({ v: 1, secret: "0x1" }))
+		await expect(openDepositEnvelope(key, blob)).rejects.toThrow(/not a v2 envelope/i)
+	})
+
+	it("envelopeMatchesRecord: case-insensitive recipient, normalized amount, leafIndex when both present", () => {
+		const env = { v: 2 as const, ...ENVELOPE, leafIndex: "7" }
+		expect(envelopeMatchesRecord(env, { recipient: "0xaztecrecipient", amount: "100000000", leafIndex: "7" })).toBe(true)
+		expect(envelopeMatchesRecord(env, { recipient: "0xATTACKER", amount: "100000000", leafIndex: "7" })).toBe(false)
+		expect(envelopeMatchesRecord(env, { recipient: "0xaztecrecipient", amount: "999", leafIndex: "7" })).toBe(false)
+		expect(envelopeMatchesRecord(env, { recipient: "0xaztecrecipient", amount: "100000000", leafIndex: "8" })).toBe(false)
+		expect(envelopeMatchesRecord(env, { recipient: "0xaztecrecipient", amount: "100000000" })).toBe(true)
+	})
+
+	it("normalizeAmount canonicalizes equivalent encodings", () => {
+		expect(normalizeAmount("0100")).toBe("100")
+		expect(normalizeAmount(100n)).toBe("100")
+	})
+})
+
+describe("sealDepositRecord (trust-aware signature economics)", () => {
+	const detSign = (calls: { n: number }) => async () => {
+		calls.n++
+		return `0x${"a".repeat(130)}`
+	}
+
+	it("trusted ⇒ exactly ONE signature, no self-test; blob opens with the returned key", async () => {
+		const calls = { n: 0 }
+		const { blob, key } = await sealDepositRecord({ sign: detSign(calls), binding: BINDING, envelope: ENVELOPE, trusted: true })
+		expect(calls.n).toBe(1)
+		expect((await openDepositEnvelope(key, blob)).secret).toBe(ENVELOPE.secret)
+	})
+
+	it("untrusted ⇒ exactly TWO signatures (self-test)", async () => {
+		const calls = { n: 0 }
+		await sealDepositRecord({ sign: detSign(calls), binding: BINDING, envelope: ENVELOPE, trusted: false })
+		expect(calls.n).toBe(2)
+	})
+
+	it("untrusted + non-deterministic signer ⇒ aborts before any irreversible tx", async () => {
+		let n = 0
+		const sign = async () => `0x${String(n++).padEnd(130, "0")}`
+		await expect(sealDepositRecord({ sign, binding: BINDING, envelope: ENVELOPE, trusted: false })).rejects.toThrow(/self-test/i)
+	})
+
+	it("the retained key re-seals a finalized envelope (leafIndex) with ZERO further signatures", async () => {
+		const calls = { n: 0 }
+		const { key } = await sealDepositRecord({ sign: detSign(calls), binding: BINDING, envelope: ENVELOPE, trusted: true })
+		const finalized = await sealDepositEnvelope(key, { ...ENVELOPE, leafIndex: "108239872" })
+		expect(calls.n).toBe(1)
+		expect((await openDepositEnvelope(key, finalized)).leafIndex).toBe("108239872")
+	})
+
+	it("openDepositRecord re-derives the key with one signature and returns envelope + key", async () => {
+		const calls = { n: 0 }
+		const sign = detSign(calls)
+		const { blob } = await sealDepositRecord({ sign, binding: BINDING, envelope: ENVELOPE, trusted: true })
+		const { envelope, key } = await openDepositRecord(sign, BINDING, blob)
+		expect(calls.n).toBe(2)
+		expect(envelope.recipient).toBe(ENVELOPE.recipient)
+		expect((await openDepositEnvelope(key, blob)).secret).toBe(ENVELOPE.secret)
 	})
 })
