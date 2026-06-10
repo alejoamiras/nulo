@@ -108,7 +108,7 @@ Files: `testids.ts` block swap; `BridgeForm.vue`(+test), `MintTestUsdc.vue`(+tes
 Smallest proof: flip swaps `data-chain` + balance positions + submit copy; privacy ON shows private L2 balance + bearer note; seal-note first-time vs trusted off mocked trust; submit threads `(amount, isPrivate)` per direction; disabled states (disconnect/zero/over-balance); mint fires + contrast copy renders; card stage matrix renders exactly the right action button per stage; two-step discard; mismatch disables claim; a completed private card still holds its sealed blob until Clear, and Clear ≠ Discard (distinct testids — the L2 retention pin codex asked for).
 Validate: `bun run --cwd packages/faucet test && bun run --cwd packages/faucet typecheck && bun run lint && bun run --cwd packages/faucet build`, then root `bun run audit:vue`.
 
-### P4 — e2e smoke + polish + gates ⬜
+### P4 — e2e smoke + polish + gates ✓
 Files: `packages/faucet/tests/e2e/bridge-smoke.test.ts` NEW (jsdom, mirrors faucet-smoke mock strategy + fake EIP-1193 provider): seeded legacy + journal records ⇒ migration produces cards, **no wallet call fires** (no auto-claim), explicit claim drives mocked flow to done, flip swaps `data-chain`, selectors testid-only. Logging sweep; copy proofread; lessons.
 Validate: `bun run --cwd packages/faucet test:e2e && bun run audit:faucet && bun run audit:vue`, then `/code-review max --fix` → codex post-impl audit.
 
