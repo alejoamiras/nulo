@@ -34,9 +34,10 @@ watch(
 <template>
 	<section class="journal" :data-testid="TESTIDS.journal">
 		<header>
-			<h3>IN-FLIGHT BRIDGES</h3>
+			<h3>PENDING BRIDGES</h3>
+			<p class="sub">Bridges this browser started but isn't actively driving. Resume, finish, or discard them.</p>
 		</header>
-		<p v-if="sorted.length === 0" class="empty" :data-testid="TESTIDS.journalEmpty">No bridges in flight.</p>
+		<p v-if="sorted.length === 0" class="empty" :data-testid="TESTIDS.journalEmpty">Nothing pending.</p>
 		<div v-else class="cards">
 			<BridgeJournalCard v-for="rec in sorted" :key="rec.id" :record="rec" />
 		</div>
@@ -56,6 +57,12 @@ watch(
 	font-size: 16px;
 	color: var(--txt-primary);
 	margin: 0;
+}
+
+.journal .sub {
+	margin: 4px 0 0;
+	color: var(--txt-secondary);
+	font: 500 12px/1.5 var(--font-mono);
 }
 
 .empty {

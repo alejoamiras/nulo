@@ -28,7 +28,7 @@ const connectLabel = computed(() => {
 		case "error":
 			return "Retry connection"
 		default:
-			return "Connect Aztec wallet"
+			return "Connect Aztec"
 	}
 })
 
@@ -43,11 +43,17 @@ async function onClick() {
 
 <template>
 	<section class="l2-panel" :data-testid="TESTIDS.bridgeL2Status" :data-status="status">
-		<div v-if="status === 'connected' && selectedAccount" class="connected">
+		<div v-if="status === 'connected' && selectedAccount" class="chip">
 			<span class="label">Aztec</span>
 			<AddressDisplay :address="selectedAccount" :data-testid="TESTIDS.bridgeL2Account" />
-			<button class="disconnect" type="button" :data-testid="TESTIDS.bridgeL2Disconnect" @click="disconnect">
-				Disconnect
+			<button
+				class="disconnect"
+				type="button"
+				aria-label="Disconnect"
+				:data-testid="TESTIDS.bridgeL2Disconnect"
+				@click="disconnect"
+			>
+				✕
 			</button>
 		</div>
 
@@ -74,19 +80,21 @@ async function onClick() {
 
 <style scoped>
 .l2-panel {
-	display: flex;
+	display: inline-flex;
 	flex-direction: column;
-	gap: 16px;
-}
-
-.connected {
-	display: flex;
-	align-items: center;
 	gap: 12px;
-	flex-wrap: wrap;
 }
 
-.connected .label {
+.chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+	padding: 8px 12px;
+	border: 1px solid var(--nulo-outline);
+	border-radius: 999px;
+}
+
+.chip .label {
 	color: var(--txt-secondary);
 	font: 500 11px/1 var(--font-mono);
 	letter-spacing: 0.12em;
@@ -94,18 +102,16 @@ async function onClick() {
 }
 
 .disconnect {
-	margin-left: auto;
 	color: var(--txt-secondary);
-	font-size: 13px;
-	text-decoration: underline;
-	text-underline-offset: 3px;
+	font: 600 12px/1 var(--font-mono);
 	cursor: pointer;
 	background: transparent;
 	border: none;
+	padding: 2px 4px;
 }
 
 .disconnect:hover {
-	color: var(--txt-primary);
+	color: var(--red);
 }
 
 .setting-up {

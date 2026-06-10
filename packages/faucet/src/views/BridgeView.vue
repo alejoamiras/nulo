@@ -64,9 +64,11 @@ import { TESTIDS } from "@/lib/testids"
 
 .wallets {
 	display: flex;
-	flex-direction: column;
-	gap: 28px;
-	padding: 20px 0;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px 16px;
+	padding: 16px 0;
 	border-top: 1px solid var(--nulo-outline);
 	border-bottom: 1px solid var(--nulo-outline);
 }
