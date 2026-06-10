@@ -76,8 +76,8 @@ export function useL1Usdc() {
 				functionName: "balanceOf",
 				args: [owner],
 			})) as bigint
-			error.value = null
 		} catch (err) {
+			// Set-only: a background poll succeeding must not clear an error a user ACTION just surfaced.
 			error.value = errorMessage(err, "Failed to read the Sepolia USDC balance")
 		}
 	}
