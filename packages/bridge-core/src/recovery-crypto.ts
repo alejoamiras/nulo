@@ -1,5 +1,7 @@
 import { EncryptionKey } from "@nulo/wallet-crypto"
 
+export type { EncryptionKey } from "@nulo/wallet-crypto"
+
 /**
  * Recovery-secret encryption for the no-server private bridge. The key is derived from a deterministic
  * L1 signature over a PER-RECORD message (recoveryKeyMessage) — binding chain + portal + bridge + the

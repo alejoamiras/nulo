@@ -12,6 +12,7 @@ import {
 	pruneCompleted,
 	recoveryKeyFromSignature,
 	recoveryKeyMessage,
+	rekeyRecord,
 	removeRecord,
 	revokeSealTrust,
 	upsertRecord,
@@ -186,6 +187,13 @@ export function addRecordVerified(rec: BridgeJournalRecord): void {
 
 export function updateRecord(id: string, patch: Partial<BridgeJournalRecord>): void {
 	patchRecord(id, patch)
+}
+
+/** Provisional-withdraw upgrade: replace the `wd-pending-*` record under its real exitTxHash id. */
+export function rekeyJournalRecord(oldId: string, next: BridgeJournalRecord): void {
+	rekeyRecord(deps.kv, oldId, next)
+	if (sessionLive.delete(oldId)) sessionLive.add(next.id)
+	reload()
 }
 
 export function discard(id: string): void {
