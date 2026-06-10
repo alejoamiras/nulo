@@ -58,12 +58,12 @@ Testing strategy (fable MEDIUM-4 — no flow tests exist and the flows call wall
 Smallest proof: suppression in/out (claim → hidden from journal; release/background → visible; reload-sim → visible); CAS pins (releaseForeground with a stale id no-ops; a second claimForeground takes over; a settled flow promise does NOT release); `isUserRejection` matrix (4001 ⇒ true; UserRejectedRequestError ⇒ true; RPC/network errors ⇒ false); mapper matrices per direction (pending/active/done/skipped/failed; `approveOutcome` ⊘/✓/undefined honest-degradation; engine steps select the active phase; cleared-step-between-rounds regression pin); EXPLICIT rejection pre-hash ⇒ record discarded (deposit AND withdraw); AMBIGUOUS pre-hash failure ⇒ record kept; post-tx failure ⇒ record kept.
 Validate: `bun run --cwd packages/faucet test && bun run --cwd packages/faucet typecheck && bun run lint`.
 
-### P2 — Stepper + receipt in BridgeForm 🔄
+### P2 — Stepper + receipt in BridgeForm ✓
 Files: `BridgeForm.vue` (the `formStage: form | stepper | receipt` machine — **all form gating re-keys to `formStage`, never flow `busy`** (fable HIGH-1); new `BridgeStepper.vue` + `BridgeReceipt.vue` children), `testids.ts` (`stepper`, `stepperPhase` (+`data-phase`/`data-state`), `stepperBackground`, `stepperRetry`, `receipt`, `receiptNewBridge`, `receiptLink`), component tests.
 Smallest proof: submit flips form→stepper and the journal hides the active record (mock journal); phases render from the MAPPER (mock it — the matrices live in P1); RUN IN BACKGROUND clears `activeFlowId` ⇒ card appears AND the form is immediately interactive (the HIGH-1 pin); receipt SNAPSHOT: populated at transition, survives the record being discarded cross-tab; NEW BRIDGE resets; ✕ phase shows per-phase retry routing (engine phase ⇒ engine action invoked; flow phase post-tx ⇒ no retry button, background/discard copy); the one-surface invariant pinned FOR NON-COMPLETED records (stepper xor card), plus both completed behaviors pinned explicitly: completion under the form ⇒ receipt + no card; reload-during-receipt ⇒ ✓ card visible (runtime `hidden` is gone after reload — fable MEDIUM-1).
 Validate: P1 commands + `bun run --cwd packages/faucet test:e2e` (smoke extended: submit → no card while driving → background → card appears + form usable).
 
-### P3 — Wallet chips row + rename + gates ⬜
+### P3 — Wallet chips row + rename + gates 🔄
 Files: `L1WalletPanel.vue`, `BridgeWalletPanel.vue` (chip restyle, ✕ disconnect, logic untouched), `BridgeView.vue` (`.wallets` row), `BridgeJournal.vue` (heading/sub/empty copy), tests updated.
 Smallest proof: chips render address + ✕ when connected (✕ fires disconnect with the existing testids); connect buttons when disconnected; wrong-chain switch still reachable; journal heading/empty copy pins.
 Gates: `bun run audit:faucet` + `bun run audit:vue` → `/code-review max --fix` (separate commit) → codex post-impl audit → manual checklist.
