@@ -378,6 +378,32 @@ describe("useBridgeJournal engine", () => {
 		expect(() => addRecordVerified(mkDeposit("0xlost"))).toThrow(/persist/i)
 	})
 
+	it("a claim on a record with NO leafIndex bails without building the interaction (mid-deposit race pin)", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xmidflight", { leafIndex: undefined }))
+		await runDepositClaim("0xmidflight")
+		expect(claim).not.toHaveBeenCalled()
+		expect(useBridgeJournal().runtime.value["0xmidflight"]?.attention).toBeUndefined()
+	})
+
+	it("resumeSessionWork skips mid-flight sessionLive records (no-leaf deposit, provisional withdraw)", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xnoleaf", { leafIndex: undefined }))
+		addRecord(mkWithdraw("wd-pending-live", { exitTxHash: undefined }))
+		markSessionLive("0xnoleaf")
+		markSessionLive("wd-pending-live")
+		resumeSessionWork()
+		await new Promise((r) => setTimeout(r, 10))
+		expect(claim).not.toHaveBeenCalled()
+		expect(deps.consume).not.toHaveBeenCalled()
+		// The live provisional record is NOT tagged unknown-outcome by the sweep.
+		expect(useBridgeJournal().runtime.value["wd-pending-live"]?.attention).toBeUndefined()
+	})
+
 	it("runOnLane serializes one lane and leaves the other free", async () => {
 		const order: string[] = []
 		let releaseA: () => void = () => {}

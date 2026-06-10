@@ -17,6 +17,7 @@ import {
 	revokeSealTrust,
 	upsertRecord,
 } from "@nulo/bridge-core"
+import { sepolia } from "viem/chains"
 import { ref } from "vue"
 import { BRIDGE, L1_PORTAL } from "@/contracts/bridge-deployments"
 
@@ -208,7 +209,11 @@ export const clearDone = discard
 
 /** Deployment binding: a record from another deployment never resumes (stale-deployment). */
 export function deploymentMatches(rec: BridgeJournalRecord): boolean {
-	return rec.portal?.toLowerCase() === L1_PORTAL.toLowerCase() && rec.bridge?.toLowerCase() === BRIDGE.toString().toLowerCase()
+	return (
+		rec.chainId === sepolia.id &&
+		rec.portal?.toLowerCase() === L1_PORTAL.toLowerCase() &&
+		rec.bridge?.toLowerCase() === BRIDGE.toString().toLowerCase()
+	)
 }
 
 function guardDeployment(rec: BridgeJournalRecord): boolean {
@@ -320,6 +325,14 @@ export async function runDepositClaim(id: string): Promise<void> {
 		// An already-sent claim is finished by waiting on ITS receipt — prompt-free, never a re-send.
 		if (rec.claimTxHash) {
 			await finishDepositByReceipt(rec)
+			return
+		}
+
+		// No leafIndex ⇒ the deposit leg hasn't finished. Claiming now would gate-poll on leaf 0 while
+		// HOLDING the record lock — and the deposit flow's own claim would then be skipped as a
+		// duplicate. Bail; the flow (or an explicit click once leafIndex exists) re-enters.
+		if (!rec.leafIndex) {
+			log("no leafIndex yet — the deposit leg is still running", id)
 			return
 		}
 
@@ -480,6 +493,11 @@ export function resumeSessionWork(): void {
 			(rec.direction === "deposit" && (rec as DepositJournalRecord).claimTxHash) ||
 			(rec.direction === "withdraw" && (rec as WithdrawJournalRecord).consumeTxHash)
 		if (!sessionLive.has(rec.id) && !promptFreeWait) continue
+		// Mid-flight records the flow itself is still driving aren't resumable yet: a deposit without a
+		// leafIndex is between L1 legs, a withdraw without an exitTxHash is mid-exit-prompt — re-entering
+		// them here races the flow (and would tag a live provisional record unknown-outcome).
+		if (rec.direction === "deposit" && !(rec as DepositJournalRecord).leafIndex && !(rec as DepositJournalRecord).claimTxHash) continue
+		if (rec.direction === "withdraw" && !(rec as WithdrawJournalRecord).exitTxHash) continue
 		if (rec.direction === "deposit") void runDepositClaim(rec.id)
 		else void runWithdrawConsume(rec.id)
 	}
