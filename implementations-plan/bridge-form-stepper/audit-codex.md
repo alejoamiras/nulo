@@ -62,3 +62,11 @@ I did not find a separate HIGH/CRITICAL failure in the record-before-seal secrec
 The missing real pin is the end-to-end withdraw rekey handoff. The suite pins only the journal-side transfer ([useBridgeJournal.test.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.test.ts:673)), while `BridgeForm` tests are deposit-only and mock both flows away ([BridgeForm.test.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeForm.test.ts:41), [BridgeForm.test.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeForm.test.ts:161)).
 
 reject (with blocking findings: withdraw provisional→exit rekey breaks the form’s foreground tracking and can hide a live non-completed record from both surfaces)
+
+### Round 3b — verdict flip (resume, same session)
+
+Fix confirmed at every cited line. Final verdict: **approve**.
+
+Verified in `332b27b`: `BridgeForm` now uses the engine-owned foreground ref at [BridgeForm.vue](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeForm.vue:43), `activeRecord` re-resolves through that pointer at [BridgeForm.vue](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeForm.vue:51), all exits go through CAS release instead of local nulling at [BridgeForm.vue](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeForm.vue:125), [BridgeForm.vue](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeForm.vue:166), [BridgeForm.vue](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeForm.vue:172), the rekey transfer remains at [useBridgeJournal.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:239), suppression still keys off the same ref at [useBridgeJournal.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:715), and the missing withdraw rekey pin is present at [BridgeForm.test.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeForm.test.ts:182).
+
+approve

@@ -8,6 +8,6 @@
 LESSONS_FILE=implementations-plan/bridge-form-stepper/lessons/phase-3.md
 
 ## 2026-06-10 — post-impl
-/code-review max --fix: sealed-envelope patch verification (`212078c`, separate commit). Codex post-impl: reject (rekey foreground orphan) → fixed `332b27b` (form reads engine activeFlowId; CAS-only releases; rekey pin) → flip pending. Suites 229 ✓ smoke 9 ✓.
+/code-review max --fix: sealed-envelope patch verification (`212078c`, separate commit). Codex post-impl: reject (rekey foreground orphan) → fixed `332b27b` (form reads engine activeFlowId; CAS-only releases; rekey pin) → flip: **approve** (file:line-verified). Suites 229 ✓ smoke 9 ✓.
 
 LESSONS_FILE=implementations-plan/bridge-form-stepper/lessons/phase-3.md
