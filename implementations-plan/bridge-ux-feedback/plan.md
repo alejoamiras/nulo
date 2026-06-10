@@ -16,19 +16,21 @@ Driving feedback (user, testnet session):
 
 ### D2 — Receipt waits never dead-end; `unknown-outcome` means REFUSED, not SLOW
 Today `finishDepositByReceipt` dumps to `unknown-outcome` after a silent ~3-minute budget even when the claim is merely slow. Rework:
-- While the receipt is `pending`: `step: "confirming"` with elapsed/attempt detail — the poll CONTINUES past the old budget (cap ~30 min like the sync gate), because a submitted claim resolves to success/dropped/reverted eventually; abandoning at 3 min created a false alarm.
+- While the receipt is `pending`: `step: "confirming"` with elapsed/attempt detail — the poll CONTINUES past the old budget (overall ~30 min like the sync gate), **in chunked rounds (~3-min slices): the record lock is RELEASED between rounds and the engine self-re-enters with `step` preserved** (fable MEDIUM-1 — a 30-min lock would make RETRY and DISCARD unreachable for the whole window, regressing today's 3-min hold).
 - `unknown-outcome` is reserved for VERIFICATION refusals (probe false/null, consume-identity mismatch) — the cases where the engine genuinely cannot vouch.
+- **Transport failures are not "pending"** (codex MEDIUM): `claimReceiptStatus` currently maps every lookup exception to `pending`; it gains an `unreachable` outcome, surfaced as `stepDetail: "node unreachable — retrying"` with its own counter, so a dead RPC reads as a connectivity problem, not a slow claim. The chunked rounds make the "RETRY checks now" copy TRUE (the lock is free between rounds).
 - Every attention note gains a **funds-safety line** (D7) so a refusal is informative, not terrifying.
 
-### D3 — Verified done self-resolves
-The parent arc retained done cards until manual Clear (ledger L2) to insure the false-done case. The post-impl hardening made completion **verified-only** (the probe must prove THIS record's message consumed), which moots that insurance: a verified done's secret is spent and worthless. New behavior: on `completedAt`, the card shows its ✓ state briefly (~8s, with the explorer link) and then auto-clears from the journal; a toast confirms ("Bridged 100 USDC to Aztec ✓"). No Clear button needed in the happy path (kept for any pre-existing done records). **Ledger L2 amendment recorded below** — auto-clear fires ONLY off verified completion; unverified states never auto-clear.
+### D3 — Verified done self-resolves by HIDING, never destroying (fable HIGH-1 fold)
+The parent arc retained done cards until manual Clear (ledger L2). The first draft claimed verified-only completion "moots" that insurance — **fable proved that false**: probe===true is adversarially reachable (tampered `leafIndex` + a forged `claimTxHash` to any successful tx; same-session the `secretCache` short-circuits `envelopeMatchesRecord`; the crash-before-reseal window exists on rediscovery). So the self-resolve must not delete. New behavior: on `completedAt`, the card shows its ✓ state (~8s, explorer link, toast "Bridged 100 USDC to Aztec ✓") and is then **auto-HIDDEN — filtered out of the rendered list, with the record (and blob) retained in storage for the existing 7-day `pruneCompleted`**. No `discard` call anywhere in the happy path; reload-mid-grace works for free (the filter re-applies). The L2 suspenders stay on; the user just stops seeing finished cards.
+**Scope (codex HIGH fold — consumed vs not-yet-synced share a revert wording, so the probe is a heuristic):** auto-hide applies to (i) withdraws (their completion is witness-decode-verified — strong) and (ii) deposits completed by the IN-SESSION flow (the engine watched the message become claimable, sent, and saw it vanish — forge-resistant ordering). A REDISCOVERED deposit completion (receipt-wait resumed after reload) keeps the ✓ card with a manual CLEAR — weaker evidence, human eyes on it. The parent L2 retention question stays formally OPEN for that rediscovered class.
 
 ### D4 — Direction reads as a journey
 Card header becomes `ETHEREUM → AZTEC` / `AZTEC → ETHEREUM` (chain chips at both ends, mono, matching the form's chips), with the privacy tag and amount unchanged. `data-direction` attr unchanged (e2e stability).
 
 ### D5 — Both Aztec balances visible (codex arbitrates between)
 Candidate options (exactly one ships):
-- **(a) Stacked dual balance on the Aztec panel**: the panel always shows BOTH lines — `Public: 200.00` / `Private: 50.00` — with the ACTIVE one (per the toggle) highlighted and the inactive one dimmed. The toggle keeps selecting which balance funds/receives the bridge; visibility no longer depends on it.
+- **(a) Stacked dual balance on the Aztec panel** ← **ARBITRATED: (a) wins** (codex pick; fable dissent FOR (a); main's lean — unanimous. fable additionally ruled (c) semantically wrong: the toggle governs flow privacy in BOTH directions, not which Aztec balance displays). The panel always shows BOTH lines — `Public: 200.00` / `Private: 50.00` — with the ACTIVE one (per the toggle) highlighted and the inactive one dimmed. The toggle keeps selecting which balance funds/receives the bridge; visibility no longer depends on it.
 - **(b) Single line + secondary hint**: keep one primary balance (per toggle) and render the other as a dimmed suffix — `Balance: 200.00 USDC · private: 50.00`. Minimal layout change, less scannable.
 - **(c) Toggle-as-segmented-control with balances inline**: replace the switch with two segments `PUBLIC 200.00 | PRIVATE 50.00` — selection and visibility merge into one control. Boldest change; makes the toggle's meaning unmissable but restyles a shipped control.
 Main's lean: (a) — it answers the exact complaint (can't see private before toggling) with zero interaction-model change. Codex decides (a)/(b)/(c) in the audit round; fable may dissent.
@@ -36,12 +38,18 @@ Main's lean: (a) — it answers the exact complaint (can't see private before to
 ### D6 — Explorer links on cards
 Every tx hash a record holds becomes a link: `depositTxHash`/`consumeTxHash` → Sepolia etherscan (`https://sepolia.etherscan.io/tx/<hash>`, new tiny helper); `claimTxHash`/`exitTxHash` → aztecscan via the existing `lib/explorer.ts` helper. Rendered in the card's status line and ✓ state. External links open `target="_blank" rel="noopener noreferrer"`.
 
-### D7 — Reassurance copy (funds-safety lines)
-Attention notes get a second sentence stating what is and isn't at risk, e.g.:
-- unknown-outcome (deposit): "Your funds are not lost — the claim either landed or the deposit remains claimable from this card."
-- unseal-failed: existing copy + "The deposit itself is untouched."
-- The mid-flow reload case: the card's step/stage line states exactly where the flow stands ("Claim submitted — confirming on Aztec…"), replacing the void the user reported.
-Copy is part of the review surface (frontend addendum).
+### D7 — Reassurance copy: a PER-STATE truth table, not a blanket line (fable MEDIUM-2 fold)
+Each attention state gets copy that is TRUE for that state — pinned by tests against the engine's actual guarantees:
+| State | Funds line |
+|---|---|
+| unknown-outcome (deposit) | "Your funds are not lost — the claim either landed or the deposit remains claimable from this card." |
+| unseal-failed | "The sealed secret is intact; nothing was deleted. Retry with the wallet app used at deposit time." |
+| mismatch (either kind) | "Nothing was sent. Connect the named account and claim again." |
+| tampered | "The sealed copy is authoritative and intact — review the corrected details and claim again." |
+| stale (no secret) | "This record has no usable secret — if it ever held funds, they are NOT recoverable from here." (honest, no false comfort) |
+| unknown-outcome (provisional withdraw) | "If the exit never reached Aztec, nothing left your balance; check your wallet activity before discarding." |
+| stale-deployment | "This record belongs to an older deployment and can't be resumed here." |
+The mid-flow reload case is covered by the step/stage narration ("Claim submitted — confirming on Aztec…"). Copy is part of the review surface (frontend addendum).
 
 ## Phases
 
@@ -50,7 +58,7 @@ Files: `packages/faucet/src/composables/useBridgeJournal.ts` (+test).
 - `RecordRuntime.step`/`stepDetail`; transitions set/cleared in `resolvePrivateSecret` (unsealing), the sync gate (syncing w/ poll count), send (sending), `finishDepositByReceipt` (confirming w/ attempt count → verifying), `runWithdrawConsume` (confirming).
 - Receipt poll: pending continues to a ~30-min cap with `step` detail; `unknown-outcome` only on probe false/null, reverted handling unchanged; budget-exhaustion note rewritten ("Still confirming on Aztec — slow testnet. This card keeps checking; RETRY forces a check now. Funds are safe.") and is NOT `unknown-outcome` (a new soft note via `stepDetail`).
 - Auto-clear on verified `completedAt` (a `doneAt` grace timer ~8s → `discard`), behind a small engine helper so the card stays dumb. Toast hook exposed (the faucet has `useToast`).
-Smallest proof: step transitions observable in runtime during a fake claim (unsealing→syncing→sending→confirming→verifying→done); pending past the OLD budget keeps polling and never sets `unknown-outcome`; probe-refusal still does; verified done auto-clears after the grace timer (fake timers) while an unverified/attention record never auto-clears.
+Smallest proof: step transitions observable in runtime during a fake claim (unsealing→syncing→sending→confirming→verifying→done); pending past the OLD budget keeps polling and never sets `unknown-outcome`; probe-refusal still does; transport exception ⇒ `unreachable` stepDetail, never `pending`; the lock is FREE between chunked rounds (an explicit discard lands mid-wait); in-session completion auto-hides after the grace (fake timers) while a REDISCOVERED completion and every attention record never auto-hide; auto-hide never calls `discard` (record persists for prune); `step` cleared on the error path (withRecordLock finally); `discard` clears the runtime entry.
 Validate: `bun run --cwd packages/faucet test && bun run --cwd packages/faucet typecheck && bun run lint`.
 
 ### P2 — Card UI: direction, live status, links, done state, copy ⬜
@@ -78,11 +86,14 @@ Gates: `bun run audit:faucet` + `bun run audit:vue` → `/code-review max --fix`
 |---|---|---|---|
 | F1 | Engine narrates via runtime `step` (cards stay dumb) | main | competing outline's card-side polling — rejected pending audits: duplicates engine knowledge, drifts |
 | F2 | Receipt pending ≠ unknown-outcome; 30-min soft cap with live detail | main + user pain | the 3-min dump — removed; `unknown-outcome` reserved for verification refusals |
-| F3 | Verified done auto-clears (~8s grace + toast); amends parent L2 — its insurance was mooted by verified-only completion | user ("just make it done") + main analysis | retain-until-Clear for verified dones — obsolete; unverified records still never auto-clear |
+| F3 | Done cards auto-HIDE (filter + 7-day prune retention), never auto-discard; main's "insurance mooted" claim was FALSE (probe adversarially reachable) | fable HIGH-1 (overruling main's draft) | auto-`discard` — rejected: destroys the L2 suspenders |
 | F4 | Both-end direction chips | user + main | single-arrow header |
-| F5 | Balance visibility option — **PENDING codex arbitration** among (a) stacked dual / (b) secondary hint / (c) segmented control; main leans (a) | user (delegated) | — |
-| F6 | Explorer links (aztecscan + sepolia etherscan) | user (gate add-on) | — |
-| F7 | Funds-safety copy on every attention state | user pain | — |
+| F5 | Balance visibility = **(a) stacked dual** — SETTLED (codex arbitration + fable dissent-for-(a) + main's lean, unanimous; fable ruled (c) semantically wrong) | user (delegated) → codex | (b) re-creates the scannability complaint; (c) miscommunicates the toggle's both-direction semantics |
+| F6 | Explorer links — strict `/^0x[0-9a-f]{64}$/i` hash validation, https-only fixed hosts, non-hex renders no anchor | user (gate add-on) + codex/fable LOW | naive interpolation |
+| F7 | Funds-safety copy = per-state TRUTH TABLE with test pins (stale + provisional get honest no-comfort copy) | fable MEDIUM-2 + codex MEDIUM | main's blanket "every note gains a safety line" |
+| F8 | Receipt waits: chunked ~3-min lock rounds to a ~30-min soft cap; transport failures classified `unreachable`, never `pending` | fable MEDIUM-1 + codex MEDIUM | one 30-min lock hold (RETRY/DISCARD unreachable); exception→pending mapping |
+| F9 | Auto-hide SCOPE: withdraws + in-session deposit completions; rediscovered deposit completions keep ✓ + manual CLEAR (consumed/not-synced ambiguity) | codex HIGH + main synthesis | unscoped auto-hide; "no deposit auto-resolve at all" — over-broad, the in-session ordering is forge-resistant |
+| F10 | Engine hygiene pins: `step` cleared in `withRecordLock`'s finally (all exits); `discard` clears the runtime entry | fable LOWs | — |
 
 ## Security & Adversarial Considerations
 - No new trust surface: `step` is ephemeral display state (never persisted, never an input to completion logic); auto-clear triggers ONLY off the D4-verified `completedAt` — an attacker who could forge a tx hash still cannot reach verified-done (parent-arc probe), so auto-clear cannot be weaponized to destroy a live blob.
@@ -93,14 +104,16 @@ Gates: `bun run audit:faucet` + `bun run audit:vue` → `/code-review max --fix`
 
 ## Assumptions
 **Facts (verified):** the 3-min budget + note live in `finishDepositByReceipt` (`useBridgeJournal.ts`, 45×4s loop); done cards persist until Clear (`BridgeJournalCard.vue` stage matrix); the Aztec panel renders ONE balance keyed off `isPrivate` (`BridgeForm.vue` `l2Balance`); `lib/explorer.ts` exists with an aztecscan tx helper; completion is verified-only post-`5ed9831` (probe === true); `useToast` exists (faucet composables); the smoke + 176-test suite is green at `08385f7`.
-**Inferences (attackable):** a pending Aztec claim receipt always terminalizes within ~30 min on testnet (if not, the soft cap re-arms RETRY — no dead-end either way); the ~8s done-grace doesn't race the storage event in a second tab (auto-clear is idempotent `discard`).
-**Asks:** all resolved at Phase 0 — stuck card = retention semantics (auto-clear approved, "just make it done"); explorer links in scope; balance option delegated to codex arbitration (F5). No open asks.
+**Inferences (attackable):** a pending Aztec claim receipt usually terminalizes within ~30 min on testnet (if not, the soft cap re-arms RETRY — no dead-end either way); the ~8s grace + auto-HIDE cannot race anything destructive (it is a render filter — fable-corrected from the draft's discard); ~~"verified done ⇒ secret worthless"~~ REJECTED by both auditors — the probe shares the consumed/not-synced wording, hence F3 (hide) + F9 (scope).
+**Asks:** all resolved — stuck card ⇒ auto-hide (user "just make it done", hardened per F3/F9); explorer links in scope; balance option SETTLED = (a) stacked dual (F5).
 
 ## Out of scope
 Swap (next arc); CSP/hardening pass (unchanged); Playwright real-browser flows; any engine trust-model change.
 
 ## Audit verdicts
-- Dual audit (codex + fable, parallel, both outlines): PENDING.
+- Dual audit (parallel, both outlines; transcripts in [audit-codex.md](audit-codex.md) / [audit-fable.md](audit-fable.md)):
+  - **fable: conditional approve** (conditions: auto-hide not discard; chunked lock rounds; per-state copy table + hash/step/runtime pins) — ALL folded (F3, F7, F8, F10).
+  - **codex: conditional approve** (conditions: scope deposit auto-resolve until consumed/not-synced distinguishable; classify transport failure ≠ pending + truthful retry copy; strict hash validation + provable-state copy) — ALL folded (F9, F8, F6, F7). D5 arbitration: **(a) stacked dual** — settled unanimously (F5). Outline: engine-narration, unanimous.
 - Final fresh-context codex pass: PENDING.
 
 ## Seeds
