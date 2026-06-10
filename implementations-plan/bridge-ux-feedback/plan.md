@@ -53,7 +53,7 @@ The mid-flow reload case is covered by the step/stage narration ("Claim submitte
 
 ## Phases
 
-### P1 — Engine narration + receipt-wait rework 🔄
+### P1 — Engine narration + receipt-wait rework ✓
 Files: `packages/faucet/src/composables/useBridgeJournal.ts` (+test).
 - `RecordRuntime.step`/`stepDetail`; transitions set/cleared in `resolvePrivateSecret` (unsealing), the sync gate (syncing w/ poll count), send (sending), `finishDepositByReceipt` (confirming w/ attempt count → verifying), `runWithdrawConsume` (confirming).
 - Receipt poll: pending continues to a ~30-min cap with `step` detail; `unknown-outcome` only on probe false/null, reverted handling unchanged; budget-exhaustion note rewritten ("Still confirming on Aztec — slow testnet. This card keeps checking; RETRY forces a check now. Funds are safe.") and is NOT `unknown-outcome` (a new soft note via `stepDetail`).
@@ -61,7 +61,7 @@ Files: `packages/faucet/src/composables/useBridgeJournal.ts` (+test).
 Smallest proof: step transitions observable in runtime during a fake claim (unsealing→syncing→sending→confirming→verifying→done); pending past the OLD budget keeps polling and never sets `unknown-outcome`; probe-refusal still does; transport exception ⇒ `unreachable` stepDetail, never `pending`; the lock is FREE between chunked rounds (an explicit discard lands mid-wait); in-session completion auto-hides after the grace (fake timers) while a REDISCOVERED completion and every attention record never auto-hide; auto-hide never calls `discard` (record persists for prune); `step` cleared on the error path (withRecordLock finally); `discard` clears the runtime entry.
 Validate: `bun run --cwd packages/faucet test && bun run --cwd packages/faucet typecheck && bun run lint`.
 
-### P2 — Card UI: direction, live status, links, done state, copy ⬜
+### P2 — Card UI: direction, live status, links, done state, copy 🔄
 Files: `BridgeJournalCard.vue` (+test), `lib/explorer.ts` (+ etherscan helper +test), `testids.ts` (add `journalStep`, `journalTxLink`).
 - Header: both-end chips (D4). Status line: spinner + step narration (D1) above the stage label; attention notes with funds-safety lines (D7); explorer links (D6); ✓ state with link + auto-HIDE after the grace (D3 — render filter, never deletion); toast on completion.
 Smallest proof: header renders both chains per direction; step narration renders from runtime (each step → expected copy); tx links carry the right href per hash field; done card shows ✓ + link, then HIDES via the engine filter (mocked) while the record stays in storage; attention note includes the funds-safety sentence.
