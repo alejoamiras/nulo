@@ -7,3 +7,8 @@
 - Gates: `bun run audit:faucet` exit=0 · `bun run audit:vue` exit=0 (both in the transcript).
 
 LESSONS_FILE=implementations-plan/bridge-ux-feedback/lessons/phase-3.md
+
+## 2026-06-10 — post-impl closed
+/code-review max --fix: 1 fix (stale soft notes) committed separately (`9f408dd`). Codex post-impl: reject (cross-tab stale runners) → fixed in `dacedbf` (existence+idempotency guards on completion writes, post-send bail, copy align, toast pin, 2 cross-tab pins) → verdict flip: **approve**. Suites: faucet 196 ✓ · smoke 9 ✓ · gates audit:faucet/audit:vue exit 0.
+
+LESSONS_FILE=implementations-plan/bridge-ux-feedback/lessons/phase-3.md
