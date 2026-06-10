@@ -20,13 +20,16 @@ import {
 	addRecord,
 	connectJournalDeps,
 	discard,
+	flagRecordError,
 	markSessionLive,
 	rekeyJournalRecord,
 	resumeSessionWork,
 	runOnLane,
 	runWithdrawConsume,
+	setRecordStep,
 	useBridgeJournal,
 } from "./useBridgeJournal"
+import { isUserRejection } from "@/lib/wallet-errors"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { useL1Wallet } from "./useL1Wallet"
 
@@ -147,18 +150,18 @@ export function useWithdrawFlow() {
 	const busy = ref(false)
 	const error = ref<string | null>(null)
 
-	async function withdraw(amount: bigint, isPrivate = false): Promise<void> {
+	async function withdraw(amount: bigint, isPrivate = false, opts: { onRecord?: (id: string) => void } = {}): Promise<string | null> {
 		error.value = null
 		const aztec = bridgeWallet.wallet.value
 		const from = bridgeWallet.selectedAccount.value
 		const l1addr = l1.address.value
 		if (!aztec || !from) {
 			error.value = "Connect your Aztec wallet first."
-			return
+			return null
 		}
 		if (!l1addr) {
 			error.value = "Connect your Ethereum wallet first."
-			return
+			return null
 		}
 		busy.value = true
 		const provisionalId = makeProvisionalWithdrawId()
@@ -176,10 +179,17 @@ export function useWithdrawFlow() {
 			bridge: BRIDGE.toString(),
 			recipientL1: l1addr,
 		}
+		let finalId: string = provisionalId
 		try {
 			log("start", { provisionalId, amount: amount.toString(), isPrivate })
 			addRecord(base)
 			markSessionLive(provisionalId)
+			opts.onRecord?.(provisionalId)
+			setRecordStep(
+				provisionalId,
+				"exiting",
+				isPrivate ? "confirm the exit in your Aztec wallet" : "two Aztec signatures: the authorization, then the exit",
+			)
 
 			const fromAddr = AztecAddress.fromString(from)
 			const nonce = Fr.random()
@@ -230,18 +240,27 @@ export function useWithdrawFlow() {
 				exitBlock: exitReceipt.blockNumber,
 				updatedAt: Date.now(),
 			})
+			finalId = exitTxHash
+			setRecordStep(exitTxHash, undefined, undefined) // the engine narrates from here
 			await runWithdrawConsume(exitTxHash)
 			log("withdraw flow finished", exitTxHash)
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : "Withdraw failed"
 			log("FAILED:", msg)
 			error.value = msg
-			// A clean wallet rejection means nothing was sent — drop the provisional record instead of
-			// leaving an unknown-outcome card. Anything ambiguous keeps it (check wallet activity, then discard).
-			if (/reject|denied|cancel/i.test(msg)) discard(provisionalId)
+			// The cleanup matrix (plan S8/S14): only an EXPLICIT user rejection before the exit tx
+			// discards the provisional record; ambiguous failures keep it with an error surface.
+			const rec = journal.records.value.find((r) => r.id === finalId) as WithdrawJournalRecord | undefined
+			if (rec && !rec.exitTxHash && isUserRejection(e)) {
+				discard(provisionalId)
+				error.value = "Rejected in your wallet — nothing was sent."
+			} else if (rec) {
+				flagRecordError(finalId, `${msg}. If the exit never reached Aztec, nothing left your balance.`)
+			}
 		} finally {
 			busy.value = false
 		}
+		return finalId
 	}
 
 	watch(

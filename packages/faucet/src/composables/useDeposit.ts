@@ -21,18 +21,21 @@ import { computed, ref, watch } from "vue"
 import { BRIDGE, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import {
-	addRecord,
 	addRecordVerified,
 	cacheSecret,
 	connectJournalDeps,
 	discard,
+	flagRecordError,
+	markApproveOutcome,
 	markSessionLive,
 	resumeSessionWork,
 	runDepositClaim,
 	runOnLane,
+	setRecordStep,
 	updateRecord,
 	useBridgeJournal,
 } from "./useBridgeJournal"
+import { isUserRejection } from "@/lib/wallet-errors"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { ERC20_ABI } from "./useL1Usdc"
 import { useL1Wallet } from "./useL1Wallet"
@@ -133,7 +136,7 @@ export function useDepositFlow() {
 	const busy = ref(false)
 	const error = ref<string | null>(null)
 
-	async function deposit(amount: bigint, isPrivate = false): Promise<void> {
+	async function deposit(amount: bigint, isPrivate = false, opts: { onRecord?: (id: string) => void } = {}): Promise<string | null> {
 		error.value = null
 		const wallet = l1.ensureWalletClient()
 		const from = l1.address.value
@@ -141,17 +144,18 @@ export function useDepositFlow() {
 		const recipient = bridgeWallet.selectedAccount.value
 		if (!wallet || !from) {
 			error.value = "Connect your Ethereum wallet first."
-			return
+			return null
 		}
 		if (!aztec || !recipient) {
 			error.value = "Connect your Aztec wallet first."
-			return
+			return null
 		}
 		busy.value = true
+		let id: string | null = null
 		try {
 			const secret = Fr.random()
 			const secretHash = await computeSecretHash(secret)
-			const id = secretHash.toString()
+			id = secretHash.toString()
 			const now = Date.now()
 			log("start", { id, amount: amount.toString(), isPrivate })
 
@@ -171,10 +175,24 @@ export function useDepositFlow() {
 				secret: isPrivate ? undefined : secret.toString(),
 			}
 
+			// The record exists BEFORE any signature: a storage failure aborts before the user signs
+			// anything, and the stepper has a record to narrate from the first prompt on. A clean
+			// rejection during the legs discards it (the cleanup matrix).
+			addRecordVerified(base)
+			markSessionLive(id)
+			opts.onRecord?.(id)
+
 			if (isPrivate) {
 				const provider = providerFingerprint()
 				const trusted = isSealTrusted(localStorage, sepolia.id, from, provider)
 				log(trusted ? "seal: trusted wallet — one signature" : "seal: first private bridge for this wallet — two signatures")
+				setRecordStep(
+					id,
+					"sealing",
+					trusted
+						? "one Ethereum signature — encrypts the recovery secret"
+						: "two Ethereum signatures — encrypt + verify determinism",
+				)
 				const sign = (m: string) =>
 					runOnLane("l1", () => wallet.signMessage({ account: from, message: m } as never) as Promise<string>)
 				const envelope = { secret: secret.toString(), recipient, amount: amount.toString(), sealerL1: from }
@@ -187,16 +205,11 @@ export function useDepositFlow() {
 				if (!trusted) markSealTrusted(localStorage, sepolia.id, from, provider)
 				sealKeys.set(id, key)
 				cacheSecret(id, secret.toString(), { v: 2, ...envelope })
-				base.sealedEnvelope = blob
-				base.sealerL1 = from
-				// Write-and-verify BEFORE the irreversible L1 tx — a storage failure aborts here.
-				addRecordVerified(base)
-			} else {
-				addRecord(base)
+				updateRecord(id, { sealedEnvelope: blob, sealerL1: from })
 			}
-			markSessionLive(id)
 
 			// Allowance-skip: approve only when the portal's allowance is short.
+			setRecordStep(id, "approving", "checking the portal allowance")
 			const allowance = (await l1.publicClient.readContract({
 				address: L1_USDC,
 				abi: ERC20_ABI,
@@ -205,6 +218,7 @@ export function useDepositFlow() {
 			})) as bigint
 			if (allowance < amount) {
 				log("approving the portal (confirm in your Ethereum wallet)")
+				setRecordStep(id, "approving", "confirm the allowance in your Ethereum wallet")
 				const approveHash = await runOnLane("l1", () =>
 					wallet.writeContract({
 						address: L1_USDC,
@@ -216,13 +230,16 @@ export function useDepositFlow() {
 					}),
 				)
 				await l1.publicClient.waitForTransactionReceipt({ hash: approveHash })
+				markApproveOutcome(id, "done")
 			} else {
 				log("allowance sufficient — skipping approve")
+				markApproveOutcome(id, "skipped")
 			}
 
 			const depositFn = isPrivate ? "depositToAztecPrivate" : "depositToAztecPublic"
 			const depositArgs = isPrivate ? [amount, id] : [recipient as `0x${string}`, amount, id as `0x${string}`]
 			log(`${depositFn} (confirm in your Ethereum wallet)`)
+			setRecordStep(id, "depositing", "confirm the deposit in your Ethereum wallet")
 			const depositTxHash = await runOnLane("l1", () =>
 				wallet.writeContract({
 					address: L1_PORTAL,
@@ -235,6 +252,7 @@ export function useDepositFlow() {
 			)
 			// Persisted the moment the hash exists — leafIndex stays chain-recoverable from here on.
 			updateRecord(id, { depositTxHash: depositTxHash as string })
+			setRecordStep(id, "depositing", "waiting for the Ethereum confirmation")
 			const receipt = await l1.publicClient.waitForTransactionReceipt({ hash: depositTxHash as `0x${string}` })
 
 			const sent = parseEventLogs({ abi: InboxAbi, eventName: "MessageSent", logs: receipt.logs })
@@ -258,14 +276,28 @@ export function useDepositFlow() {
 				sealKeys.delete(id)
 			}
 
+			setRecordStep(id, undefined, undefined) // the engine narrates from here
 			await runDepositClaim(id)
 			log("deposit flow finished", id)
 		} catch (e) {
-			log("FAILED:", e instanceof Error ? e.message : String(e))
-			error.value = e instanceof Error ? e.message : "Deposit failed"
+			const msg = e instanceof Error ? e.message : "Deposit failed"
+			log("FAILED:", msg)
+			error.value = msg
+			// The cleanup matrix (plan S8/S14): an EXPLICIT user rejection before any tx hash
+			// discards the record; ambiguous failures keep it with an error surface.
+			if (id) {
+				const rec = journal.records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
+				if (rec && !rec.depositTxHash && isUserRejection(e)) {
+					discard(id)
+					error.value = "Rejected in your wallet — nothing was sent."
+				} else if (rec) {
+					flagRecordError(id, `${msg}. Your funds are not lost — this bridge stays in Pending.`)
+				}
+			}
 		} finally {
 			busy.value = false
 		}
+		return id
 	}
 
 	// Receipt-waits resume prompt-free on reconnect; sessionLive records continue. Nothing else moves.
