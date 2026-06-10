@@ -96,6 +96,7 @@ declare global {
   const onWatcherCleanup: typeof import('vue').onWatcherCleanup
   const parseAmountToBaseUnits: typeof import('../utils/amount').parseAmountToBaseUnits
   const parseContactsExport: typeof import('../utils/contacts-export-format').parseContactsExport
+  const parseTransferIntent: typeof import('../utils/transfer-intent').parseTransferIntent
   const pickFile: typeof import('../utils/files').pickFile
   const pickPrimaryMethod: typeof import('../utils/tx-enrichment').pickPrimaryMethod
   const provide: typeof import('vue').provide
@@ -227,6 +228,9 @@ declare global {
   export type { MethodCarrier } from '../utils/primary-method'
   import('../utils/primary-method')
   // @ts-ignore
+  export type { TransferIntent } from '../utils/transfer-intent'
+  import('../utils/transfer-intent')
+  // @ts-ignore
   export type { AcceleratorStatus } from '../onboarding/composables/useAcceleratorStatus'
   import('../onboarding/composables/useAcceleratorStatus')
 }
@@ -326,6 +330,7 @@ declare module 'vue' {
     readonly onWatcherCleanup: UnwrapRef<typeof import('vue')['onWatcherCleanup']>
     readonly parseAmountToBaseUnits: UnwrapRef<typeof import('../utils/amount')['parseAmountToBaseUnits']>
     readonly parseContactsExport: UnwrapRef<typeof import('../utils/contacts-export-format')['parseContactsExport']>
+    readonly parseTransferIntent: UnwrapRef<typeof import('../utils/transfer-intent')['parseTransferIntent']>
     readonly pickFile: UnwrapRef<typeof import('../utils/files')['pickFile']>
     readonly pickPrimaryMethod: UnwrapRef<typeof import('../utils/tx-enrichment')['pickPrimaryMethod']>
     readonly provide: UnwrapRef<typeof import('vue')['provide']>
