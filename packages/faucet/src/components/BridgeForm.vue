@@ -40,7 +40,10 @@ const bothConnected = computed(() => l1.isConnected.value && bridge.status.value
 // The takeover machine (plan S2/S7): ALL form gating keys off formStage — never the flows' busy,
 // which spans the whole bridge and would make RUN IN BACKGROUND a no-op.
 const formStage = ref<"form" | "stepper" | "receipt">("form")
-const activeId = ref<string | null>(null)
+// The ENGINE's foreground ref is the single owner (plan S13) — the form must not keep its own
+// copy, or the withdraw provisional→exit rekey (which transfers ownership engine-side) would
+// orphan the form's stale id and hide a live record from BOTH surfaces.
+const activeId = journal.activeFlowId
 const receiptSnapshot = ref<ReceiptSnapshot | null>(null)
 // Double-click guard for the submit→onRecord window only (cleared the moment the record exists).
 const submitting = ref(false)
@@ -107,7 +110,6 @@ async function onSubmit() {
 	if (amountUnits.value === 0n || validationError.value || formStage.value !== "form" || submitting.value) return
 	submitting.value = true
 	const onRecord = (id: string) => {
-		activeId.value = id
 		journal.claimForeground(id)
 		formStage.value = "stepper"
 		submitting.value = false
@@ -122,7 +124,6 @@ async function onSubmit() {
 	const stageNow: string = formStage.value
 	if (stageNow === "stepper" && activeId.value && !journal.records.value.some((r) => r.id === activeId.value)) {
 		journal.releaseForeground(activeId.value)
-		activeId.value = null
 		formStage.value = "form"
 	}
 	void usdc.refresh()
@@ -163,20 +164,17 @@ watch(
 	(orphaned) => {
 		if (!orphaned) return
 		if (activeId.value) journal.releaseForeground(activeId.value)
-		activeId.value = null
 		formStage.value = "form"
 	},
 )
 
 function onBackground() {
 	if (activeId.value) journal.releaseForeground(activeId.value)
-	activeId.value = null
 	formStage.value = "form"
 }
 
 function onNewBridge() {
 	if (activeId.value) journal.releaseForeground(activeId.value)
-	activeId.value = null
 	receiptSnapshot.value = null
 	formStage.value = "form"
 	void usdc.refresh()

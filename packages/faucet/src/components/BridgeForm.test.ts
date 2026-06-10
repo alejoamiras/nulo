@@ -45,8 +45,8 @@ vi.mock("@/composables/useWithdraw", () => ({
 	useWithdrawFlow: () => ({ busy: ref(false), error: ref(null), withdraw: withdrawFn }),
 }))
 
-import type { DepositJournalRecord } from "@nulo/bridge-core"
-import { __resetJournalForTests, addRecord, updateRecord, useBridgeJournal } from "@/composables/useBridgeJournal"
+import type { DepositJournalRecord, WithdrawJournalRecord } from "@nulo/bridge-core"
+import { __resetJournalForTests, addRecord, rekeyJournalRecord, updateRecord, useBridgeJournal } from "@/composables/useBridgeJournal"
 import { TESTIDS } from "@/lib/testids"
 import BridgeForm from "./BridgeForm.vue"
 
@@ -177,6 +177,41 @@ describe("BridgeForm", () => {
 		expect(w.find(sel(TESTIDS.bridgeSubmit)).exists()).toBe(true)
 		expect(w.find(sel(TESTIDS.bridgeSubmit)).attributes("disabled")).toBeUndefined()
 		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xtakeover")).toBe(true)
+	})
+
+	it("CRITICAL pin: the withdraw provisional→exit rekey keeps the stepper alive (never zero surfaces)", async () => {
+		__resetJournalForTests()
+		const provisional: WithdrawJournalRecord = {
+			schema: 1,
+			id: "wd-pending-x",
+			direction: "withdraw",
+			isPrivate: false,
+			amount: "40000000",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			chainId: 11155111,
+			portal: "0xportal",
+			bridge: "0xbridge",
+			recipientL1: "0xl1addr",
+		}
+		withdrawFn.mockImplementationOnce(async (_a: bigint, _p: boolean, opts?: { onRecord?: (id: string) => void }) => {
+			addRecord(provisional)
+			opts?.onRecord?.("wd-pending-x")
+			// The flow rekeys to the exit hash mid-stepper (engine transfers foreground ownership).
+			rekeyJournalRecord("wd-pending-x", { ...provisional, id: "0xexit99", exitTxHash: "0xexit99", updatedAt: Date.now() })
+			await new Promise(() => {})
+		})
+		const w = mount(BridgeForm)
+		await w.find(sel(TESTIDS.bridgeFlip)).trigger("click")
+		await w.find(sel(TESTIDS.bridgeAmount)).setValue("40")
+		await w.find(sel(TESTIDS.bridgeSubmit)).trigger("click")
+		await w.vm.$nextTick()
+		await w.vm.$nextTick()
+		// The stepper follows the NEW id (the form reads the engine's activeFlowId — no stale copy)…
+		expect(w.find(sel(TESTIDS.stepper)).exists()).toBe(true)
+		expect(w.find(sel(TESTIDS.stepper)).attributes("data-id")).toBe("0xexit99")
+		// …and the journal still suppresses it (exactly ONE surface for a non-completed record).
+		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xexit99")).toBe(false)
 	})
 
 	it("completion flips stepper→receipt with a SNAPSHOT that survives the record vanishing", async () => {
