@@ -24,3 +24,17 @@ Plan quality:
 - Copy needs sharper anti-blind-signing wording: `APPROVE` must say “allowance for the portal; no funds move”, and private `CLAIM` resume must mention the Ethereum unseal signature before the Aztec confirmation.
 
 conditional approve (with conditions: split detached-run state from `busy`; add an explicit active-owner cleanup/fail-open matrix; centralize step mapping in one tested VM; pin mid-prompt background behavior and receipt sourcing)
+
+## Round 2 — FINAL fresh-context pass (new session, dir codex-6NT1y4Nh)
+
+Initial verdict: **reject** — 3 blockers, all folded same-round (S13 UI-owned CAS foreground, S14 isUserRejection classifier, S15 approveOutcome runtime bit). Verdict-flip appended below.
+
+- Critical: `activeFlowId` cannot stay “flow-owned”. [`deposit()`](</Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useDeposit.ts:261>) awaits [`runDepositClaim()`](</Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:409>), but that engine intentionally detaches later receipt rounds via fire-and-forget re-entry at [useBridgeJournal.ts:500](</Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:500>). So a long active deposit can hit the flow `finally` before receipt. Under D1/S8/P1, that either drops foreground ownership too early or, worse, bridge A’s `finally` clears the single global owner after bridge B has become active. S1 needs a compare-and-swap foreground token or UI-owned session state, not blind flow-finally clears.
+
+- High: the cleanup matrix still over-classifies “clean reject”. “No tx hash yet” is not the same as “user explicitly rejected”; wallet/RPC failures can throw before a hash too. The only live classifier today is a loose regex in withdraw at [useWithdraw.ts:239](</Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useWithdraw.ts:239>). If S8 is implemented that way, you will auto-discard ambiguous records. Narrow it to explicit provider rejection signals; otherwise keep the record.
+
+- High: S3/S10 overclaim what one scalar `step` can prove. The mapper can latch engine phases off facts, but pre-tx deposit history is not fact-backed. Once runtime advances to `depositing`, `(record, runtime)` cannot distinguish “APPROVE skipped” from “APPROVE completed”, yet P1 requires a tested skipped/done matrix. The current fact model in [journal.ts:189](</Users/alejoamiras/Projects/nulo/nulo-4/packages/bridge-core/src/journal.ts:189>) has no place to recover that truth. You need one extra ephemeral runtime bit/history latch.
+
+Assumptions: the VerificationModal assumption is fine; “backgrounding mid-prompt is safe” is still unproven until owner lifetime is decoupled from flow lifetime. I would revise S1 as written, narrow S8, and widen S3’s runtime shape. The 3-phase split is still workable if P1 absorbs those changes; otherwise P2 will be forced to invent state it cannot derive.
+
+reject (with blocking findings: flow-owned `activeFlowId` is race-prone/too short-lived for detached deposit completion; clean-reject discard is unsafe without explicit rejection classification; the mapper cannot truthfully render approve skipped vs done from `record + step` alone)
