@@ -81,12 +81,20 @@ describe("BridgeJournalCard", () => {
 		expect(w.text()).toContain("AZTEC → ETHEREUM")
 	})
 
-	it("renders the live step narration from runtime (spinner line + detail)", () => {
+	it("renders the compact phase rail with the live narration (one mapper, both surfaces)", () => {
 		runtime.value = { "0xdep": { step: "confirming", stepDetail: "check 12 - the claim is processing on Aztec" } }
 		const w = mountCard(deposit({ leafIndex: "7", claimTxHash: `0x${"ab".repeat(32)}` }))
-		const step = w.find(sel(TESTIDS.journalStep))
-		expect(step.text()).toContain("Confirming")
-		expect(step.text()).toContain("check 12")
+		expect(w.find(sel(TESTIDS.journalRail)).exists()).toBe(true)
+		// The fact zone puts CONFIRM active; the live detail flows through the rail's step line.
+		const confirmCell = w.findAll(sel(TESTIDS.journalPhase)).find((c) => c.attributes("data-phase") === "confirm")
+		expect(confirmCell?.attributes("data-state")).toBe("active")
+		expect(w.find(sel(TESTIDS.journalStep)).text()).toContain("check 12")
+	})
+
+	it("a done card shows the BRIDGED stamp during its grace window (peak-end)", () => {
+		const w = mountCard(deposit({ leafIndex: "7", claimTxHash: `0x${"ab".repeat(32)}`, completedAt: Date.now() }))
+		expect(w.text()).toContain("BRIDGED ✓")
+		expect(w.find(sel(TESTIDS.journalRail)).exists()).toBe(false)
 	})
 
 	it("a soft note renders without an attention state (the 30-min still-confirming case)", () => {

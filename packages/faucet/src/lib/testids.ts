@@ -85,6 +85,9 @@ export const TESTIDS = {
 	// Bridge - the takeover stepper + receipt (phases carry data-phase/data-state)
 	stepper: "fa-bridge-stepper",
 	stepperPhase: "fa-stepper-phase",
+	// The journal cards' compact phase rail (same mapper, distinct ids - surfaces must not collide).
+	journalRail: "fa-journal-rail",
+	journalPhase: "fa-journal-phase",
 	stepperBackground: "fa-stepper-background",
 	stepperRetry: "fa-stepper-retry",
 	receipt: "fa-bridge-receipt",

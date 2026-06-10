@@ -16,6 +16,9 @@ import { useBridgeJournal } from "@/composables/useBridgeJournal"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { TESTIDS } from "@/lib/testids"
 
+/** Components */
+import BridgePhaseRail from "./BridgePhaseRail.vue"
+
 const props = defineProps<{ record: BridgeJournalRecord }>()
 
 const journal = useBridgeJournal()
@@ -78,20 +81,6 @@ const showFinish = computed(
 	() => props.record.direction === "withdraw" && stage.value !== "done" && stage.value !== "exiting" && actionable.value,
 )
 
-const STEP_COPY: Record<string, string> = {
-	unsealing: "Unsealing the recovery secret",
-	syncing: "Waiting for Aztec to sync the message",
-	sending: "Sending the claim",
-	confirming: "Confirming",
-	verifying: "Verifying against this record",
-}
-const stepLine = computed(() => {
-	const step = rt.value.step
-	if (!step) return null
-	const detail = rt.value.stepDetail
-	return detail ? `${STEP_COPY[step]} - ${detail}` : STEP_COPY[step]
-})
-
 /** A soft note (e.g. the 30-min "still confirming") renders even without an attention state. */
 const note = computed(() => rt.value.note)
 
@@ -144,6 +133,7 @@ function onDiscard() {
 		:data-privacy="record.isPrivate ? 'private' : 'public'"
 		:data-attention="attention"
 	>
+		<p v-if="stage === 'done'" class="stamp">BRIDGED ✓</p>
 		<header class="row">
 			<span class="dir">{{ record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM" }}</span>
 			<span class="amt">{{ amountDisplay }} USDC</span>
@@ -151,7 +141,7 @@ function onDiscard() {
 			<span class="age">{{ age }}</span>
 		</header>
 
-		<p v-if="stepLine" class="step" :data-testid="TESTIDS.journalStep"><span class="pulse">●</span> {{ stepLine }}</p>
+		<BridgePhaseRail v-if="stage !== 'done'" :record="record" compact />
 
 		<p class="stage" :data-testid="TESTIDS.journalStage">{{ stageLabel }}</p>
 
@@ -356,5 +346,42 @@ function onDiscard() {
 	margin: 0;
 	color: var(--red);
 	font: 500 12px/1.5 var(--font-mono);
+}
+
+.stamp {
+	margin: 0 0 6px;
+	font: 700 20px/1 var(--font-mono);
+	letter-spacing: 0.12em;
+	color: var(--mint);
+	animation: stamp-in 0.25s ease-out;
+}
+
+.journal-card[data-stage="done"] {
+	border-color: var(--mint);
+	animation: flash 0.3s ease-out;
+}
+
+@keyframes stamp-in {
+	0% {
+		transform: scale(1.8);
+		opacity: 0;
+	}
+	60% {
+		transform: scale(0.94);
+		opacity: 1;
+	}
+	100% {
+		transform: scale(1);
+		opacity: 1;
+	}
+}
+
+@keyframes flash {
+	0% {
+		background: var(--mint);
+	}
+	100% {
+		background: transparent;
+	}
 }
 </style>

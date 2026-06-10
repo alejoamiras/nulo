@@ -157,6 +157,8 @@ watch(
 						isPrivate: rec.isPrivate,
 						l1TxHash: (rec as DepositJournalRecord).depositTxHash,
 						l2TxHash: (rec as DepositJournalRecord).claimTxHash,
+						startedAt: rec.createdAt,
+						completedAt: rec.completedAt,
 					}
 				: {
 						direction: "withdraw",
@@ -164,6 +166,8 @@ watch(
 						isPrivate: rec.isPrivate,
 						l1TxHash: (rec as WithdrawJournalRecord).consumeTxHash,
 						l2TxHash: (rec as WithdrawJournalRecord).exitTxHash,
+						startedAt: rec.createdAt,
+						completedAt: rec.completedAt,
 					}
 		formStage.value = "receipt"
 	},

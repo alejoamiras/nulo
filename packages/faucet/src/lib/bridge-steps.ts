@@ -2,10 +2,11 @@ import type { BridgeJournalRecord, DepositJournalRecord, WithdrawJournalRecord }
 import type { RecordRuntime } from "@/composables/useBridgeJournal"
 
 /**
- * The ONE narration view-model (plan S3/S10): maps a record + its runtime onto the stepper's
- * phase rail. Phase STATES anchor on persisted FACTS (the monotonic latch - a transiently
- * cleared runtime step between engine rounds can never regress a phase); the runtime only
- * refines WHICH phase inside the fact-bounded zone is active and what its live detail says.
+ * The ONE narration view-model (plan S3/S10): maps a record + its runtime onto the phase rail
+ * BOTH surfaces render (stepper full, journal card compact). Phase STATES anchor on persisted
+ * FACTS (the monotonic latch - a transiently cleared runtime step between engine rounds can
+ * never regress a phase); the runtime only refines WHICH phase inside the fact-bounded zone is
+ * active, its live detail, and its determinate progress.
  */
 
 export type PhaseState = "pending" | "active" | "done" | "skipped" | "failed"
@@ -16,9 +17,19 @@ export interface BridgePhase {
 	state: PhaseState
 	/** Live narration when active/failed (runtime detail or the phase's signing prompt). */
 	detail?: string
+	/** Determinate within-phase progress - ONLY where a real target exists (SYNC blocks, PROVE
+	 *  blocks). Never fabricated: an honest ticking counter beats a fake bar. */
+	progress?: { current: number; target: number; fraction: number }
+	/** Deliberately OVERESTIMATED duration hint (queue psychology: beat the estimate, never miss it). */
+	eta?: string
 }
 
+/** L2 blocks between the deposit-time snapshot and presumed message arrival (raven-style pacing). */
+export const SYNC_TARGET_MARGIN_BLOCKS = 3
+
 const FAILED_ATTENTIONS = new Set(["error", "unknown-outcome"])
+
+const clamp01 = (n: number): number => Math.max(0, Math.min(1, n))
 
 export function stepperPhases(record: BridgeJournalRecord, runtime: RecordRuntime = {}): BridgePhase[] {
 	return record.direction === "deposit"
@@ -59,8 +70,28 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 				: "Confirm the claim in your Aztec wallet.",
 		confirm: "Confirming on Aztec - no signature needed.",
 	}
+	const etas: Partial<Record<string, string>> = {
+		deposit: "usually under 1 min",
+		sync: "usually 1-4 min",
+		claim: "your signature + a few sec",
+		confirm: "usually 1-5 min",
+	}
 
-	return buildPhases(keys, labels, prompts, activeKey, rec.completedAt !== undefined, rt)
+	// SYNC progress: real blocks against the deposit-time snapshot + margin (the countdown).
+	let progress: Partial<Record<string, BridgePhase["progress"]>> = {}
+	if (activeKey === "sync" && rec.depositL2Block !== undefined && rt.syncBlock !== undefined) {
+		const target = rec.depositL2Block + SYNC_TARGET_MARGIN_BLOCKS
+		const span = target - rec.depositL2Block
+		progress = {
+			sync: {
+				current: rt.syncBlock,
+				target,
+				fraction: span > 0 ? clamp01((rt.syncBlock - rec.depositL2Block) / span) : 1,
+			},
+		}
+	}
+
+	return buildPhases(keys, labels, prompts, etas, progress, activeKey, rec.completedAt !== undefined, rt)
 }
 
 function withdrawPhases(rec: WithdrawJournalRecord, rt: RecordRuntime): BridgePhase[] {
@@ -85,14 +116,30 @@ function withdrawPhases(rec: WithdrawJournalRecord, rt: RecordRuntime): BridgePh
 		finish: "Confirm in your Ethereum wallet to release the funds.",
 		confirm: "Waiting for the Ethereum confirmation…",
 	}
+	const etas: Partial<Record<string, string>> = {
+		exit: "your signatures + a few sec",
+		prove: "tens of minutes - epoch batches",
+		finish: "your signature + ~1 min",
+		confirm: "usually under 2 min",
+	}
 
-	return buildPhases(keys, labels, prompts, activeKey, rec.completedAt !== undefined, rt)
+	// PROVE progress: real proven-block counts streamed by the engine.
+	let progress: Partial<Record<string, BridgePhase["progress"]>> = {}
+	if (activeKey === "prove" && rt.provenBlock !== undefined && rt.targetBlock !== undefined && rt.targetBlock > 0) {
+		progress = {
+			prove: { current: rt.provenBlock, target: rt.targetBlock, fraction: clamp01(rt.provenBlock / rt.targetBlock) },
+		}
+	}
+
+	return buildPhases(keys, labels, prompts, etas, progress, activeKey, rec.completedAt !== undefined, rt)
 }
 
 function buildPhases(
 	keys: BridgePhase["key"][],
 	labels: Record<string, string>,
 	prompts: Record<string, string>,
+	etas: Partial<Record<string, string>>,
+	progress: Partial<Record<string, BridgePhase["progress"]>>,
 	activeKey: BridgePhase["key"],
 	completed: boolean,
 	rt: RecordRuntime,
@@ -113,6 +160,8 @@ function buildPhases(
 				label: labels[key],
 				state: failed ? ("failed" as const) : ("active" as const),
 				detail: failed ? rt.note : (rt.stepDetail ?? prompts[key]),
+				progress: progress[key],
+				eta: failed ? undefined : etas[key],
 			}
 		}
 		return { key, label: labels[key], state: "pending" as const }

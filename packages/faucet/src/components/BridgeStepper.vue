@@ -7,8 +7,11 @@ import { computed } from "vue"
 import { useBridgeJournal } from "@/composables/useBridgeJournal"
 
 /** Utils */
-import { type BridgePhase, stepperPhases } from "@/lib/bridge-steps"
+import { stepperPhases } from "@/lib/bridge-steps"
 import { TESTIDS } from "@/lib/testids"
+
+/** Components */
+import BridgePhaseRail from "./BridgePhaseRail.vue"
 
 const props = defineProps<{ record: BridgeJournalRecord }>()
 const emit = defineEmits<{ background: [] }>()
@@ -17,14 +20,6 @@ const journal = useBridgeJournal()
 
 const rt = computed(() => journal.runtime.value[props.record.id] ?? {})
 const phases = computed(() => stepperPhases(props.record, rt.value))
-
-const GLYPH: Record<BridgePhase["state"], string> = {
-	pending: "▢",
-	active: "●",
-	done: "✓",
-	skipped: "⊘",
-	failed: "✕",
-}
 
 const failedPhase = computed(() => phases.value.find((p) => p.state === "failed"))
 
@@ -58,22 +53,7 @@ const headline = computed(() => {
 			<p class="headline">{{ headline }}</p>
 		</header>
 
-		<ol class="rail">
-			<li
-				v-for="phase in phases"
-				:key="phase.key"
-				class="phase"
-				:class="phase.state"
-				:data-testid="TESTIDS.stepperPhase"
-				:data-phase="phase.key"
-				:data-state="phase.state"
-			>
-				<span class="glyph" :class="{ pulse: phase.state === 'active' }">{{ GLYPH[phase.state] }}</span>
-				<span class="label">{{ phase.label }}</span>
-				<span v-if="phase.state === 'skipped'" class="badge">SKIPPED</span>
-				<p v-if="phase.detail && (phase.state === 'active' || phase.state === 'failed')" class="detail">{{ phase.detail }}</p>
-			</li>
-		</ol>
+		<BridgePhaseRail :record="record" />
 
 		<div class="actions">
 			<button v-if="canRetry" type="button" class="action" :data-testid="TESTIDS.stepperRetry" @click="onRetry">RETRY</button>
@@ -106,85 +86,7 @@ const headline = computed(() => {
 	font: 600 13px/1.4 var(--font-mono);
 }
 
-.rail {
-	list-style: none;
-	margin: 0;
-	padding: 0;
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-}
-
-.phase {
-	display: grid;
-	grid-template-columns: 20px auto 1fr;
-	column-gap: 10px;
-	align-items: baseline;
-	padding: 8px 10px;
-	border: 1px solid var(--nulo-outline);
-}
-
-.phase.active {
-	border-color: var(--nulo-accent);
-}
-
-.phase.failed {
-	border-color: var(--red);
-}
-
-.phase.pending {
-	opacity: 0.55;
-}
-
-.glyph {
-	font: 600 13px/1 var(--font-mono);
-	color: var(--txt-secondary);
-}
-
-.phase.active .glyph {
-	color: var(--nulo-accent);
-}
-
-.phase.failed .glyph {
-	color: var(--red);
-}
-
-.pulse {
-	animation: pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-	0%,
-	100% {
-		opacity: 0.25;
-	}
-	50% {
-		opacity: 1;
-	}
-}
-
-.label {
-	font: 600 12px/1 var(--font-mono);
-	color: var(--txt-primary);
-	letter-spacing: 0.06em;
-}
-
-.badge {
-	justify-self: start;
-	font: 600 10px/1 var(--font-mono);
-	color: var(--txt-secondary);
-	border: 1px solid var(--nulo-outline);
-	padding: 2px 5px;
-}
-
-.detail {
-	grid-column: 2 / -1;
-	margin: 4px 0 0;
-	color: var(--txt-secondary);
-	font: 500 12px/1.5 var(--font-mono);
-}
-
-.actions {
+.phase.active .phase.failed .actions {
 	display: flex;
 	gap: 8px;
 }

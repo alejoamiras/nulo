@@ -114,6 +114,43 @@ describe("stepperPhases - deposit matrix", () => {
 	})
 })
 
+describe("stepperPhases - determinate progress + ETA (only where real targets exist)", () => {
+	it("SYNC carries block progress from the snapshot + live syncBlock", () => {
+		const rec = dep({ depositTxHash: "0xt", leafIndex: "7", depositL2Block: 100 })
+		const sync = stepperPhases(rec, { step: "syncing", syncBlock: 102 }).find((p) => p.key === "sync")
+		expect(sync?.progress).toEqual({ current: 102, target: 103, fraction: 2 / 3 })
+		expect(sync?.eta).toMatch(/min/)
+	})
+
+	it("SYNC without a snapshot or live block has NO bar (never fabricate determinism)", () => {
+		expect(
+			stepperPhases(dep({ depositTxHash: "0xt", leafIndex: "7" }), { step: "syncing" }).find((p) => p.key === "sync")?.progress,
+		).toBeUndefined()
+		expect(
+			stepperPhases(dep({ depositTxHash: "0xt", leafIndex: "7", depositL2Block: 100 }), { step: "syncing" }).find(
+				(p) => p.key === "sync",
+			)?.progress,
+		).toBeUndefined()
+	})
+
+	it("PROVE carries proven-block progress; CONFIRM never gets a bar", () => {
+		const prove = stepperPhases(wd(), { provenBlock: 5, targetBlock: 10 }).find((p) => p.key === "prove")
+		expect(prove?.progress).toEqual({ current: 5, target: 10, fraction: 0.5 })
+		const confirm = stepperPhases(dep({ depositTxHash: "0xt", leafIndex: "7", claimTxHash: "0xc" }), { step: "confirming" }).find(
+			(p) => p.key === "confirm",
+		)
+		expect(confirm?.progress).toBeUndefined()
+		expect(confirm?.eta).toMatch(/min/)
+	})
+
+	it("failed phases drop the ETA (no cheery estimate on an error)", () => {
+		const sync = stepperPhases(dep({ depositTxHash: "0xt", leafIndex: "7" }), { attention: "error", note: "boom" }).find(
+			(p) => p.key === "sync",
+		)
+		expect(sync?.eta).toBeUndefined()
+	})
+})
+
 describe("stepperPhases - withdraw matrix", () => {
 	it("provisional (no exitTxHash): EXIT active", () => {
 		expect(states(wd({ exitTxHash: undefined }), { step: "exiting" }).exit).toBe("active")

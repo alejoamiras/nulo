@@ -20,14 +20,15 @@ import {
 import { sepolia } from "viem/chains"
 import { computed, ref } from "vue"
 import { BRIDGE, L1_PORTAL } from "@/contracts/bridge-deployments"
+import { SYNC_TARGET_MARGIN_BLOCKS } from "@/lib/bridge-steps"
+import { dropPhaseClock } from "@/lib/phase-clock"
 
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
 // Secrets, envelopes, signatures, and keys must never reach this log.
 const log = (...args: unknown[]) => console.log("[bridge:journal]", ...args)
 
 const PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
-/** L2 blocks between the deposit-time snapshot and presumed message arrival (raven-style pacing). */
-export const SYNC_TARGET_MARGIN_BLOCKS = 3
+export { SYNC_TARGET_MARGIN_BLOCKS }
 
 /** The L1→L2 message isn't consumable until the sequencer folds it into a block AND this wallet's
  *  PXE syncs it; both claim paths revert with one of these wordings until then. After a SUCCESSFUL
@@ -69,6 +70,8 @@ export interface RecordRuntime {
 	/** Deposit: the record's message is presumed consumable (leafIndex known). */
 	claimable?: boolean
 	proven?: boolean
+	/** Current L2 block during the sync countdown - feeds the SYNC progress bar. */
+	syncBlock?: number
 }
 
 /**
@@ -254,6 +257,7 @@ export function discard(id: string): void {
 	sessionLive.delete(id)
 	localClaimProvenance.delete(id)
 	receiptRounds.delete(id)
+	dropPhaseClock(id)
 	// Drop the runtime entry entirely - a discarded card must not resurrect stale state.
 	const { [id]: _gone, ...rest } = runtime.value
 	runtime.value = rest
@@ -534,8 +538,12 @@ export async function runDepositClaim(id: string, opts: { interactive?: boolean 
 				} catch {
 					break // Connectivity wobble: the gate loop narrates from here.
 				}
-				if (current >= target) break
+				if (current >= target) {
+					setRuntime(id, { syncBlock: current })
+					break
+				}
 				counted = true
+				setRuntime(id, { syncBlock: current })
 				setStep(id, "syncing", `Aztec block ${current} of ${target} - ${target - current} until your funds arrive`)
 				await wait(6000)
 				i++

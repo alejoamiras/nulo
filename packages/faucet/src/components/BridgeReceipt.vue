@@ -2,6 +2,7 @@
 /** Utils */
 import { computed } from "vue"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
+import { formatElapsed } from "@/lib/phase-clock"
 import { TESTIDS } from "@/lib/testids"
 
 /** The snapshot is captured at the stepper→receipt transition (plan S11) - a cross-tab discard
@@ -12,6 +13,9 @@ export interface ReceiptSnapshot {
 	isPrivate: boolean
 	l1TxHash?: string
 	l2TxHash?: string
+	/** Persisted facts (createdAt/completedAt) - the end-to-end time always survives reloads. */
+	startedAt?: number
+	completedAt?: number
 }
 
 const props = defineProps<{ snapshot: ReceiptSnapshot }>()
@@ -19,10 +23,13 @@ const emit = defineEmits<{ "new-bridge": [] }>()
 
 const amountDisplay = computed(() => (Number(props.snapshot.amount) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 }))
 const headline = computed(() =>
-	props.snapshot.direction === "deposit"
-		? `Bridged ${amountDisplay.value} USDC to Aztec ✓`
-		: `Released ${amountDisplay.value} USDC to Ethereum ✓`,
+	props.snapshot.direction === "deposit" ? `${amountDisplay.value} USDC to Aztec` : `${amountDisplay.value} USDC to Ethereum`,
 )
+const totalElapsed = computed(() => {
+	const { startedAt, completedAt } = props.snapshot
+	if (startedAt === undefined || completedAt === undefined || completedAt <= startedAt) return null
+	return formatElapsed(completedAt - startedAt)
+})
 const links = computed(() => {
 	const out: { label: string; href: string }[] = []
 	if (props.snapshot.l1TxHash) {
@@ -43,9 +50,11 @@ const links = computed(() => {
 
 <template>
 	<section class="receipt" :data-testid="TESTIDS.receipt">
+		<p class="stamp">{{ snapshot.direction === "deposit" ? "BRIDGED ✓" : "RELEASED ✓" }}</p>
 		<h3>{{ headline }}</h3>
 		<p class="sub">
 			{{ snapshot.isPrivate ? "Arrived in your PRIVATE balance." : "Arrived in your public balance." }}
+			<template v-if="totalElapsed"> {{ totalElapsed }} end to end.</template>
 		</p>
 		<div v-if="links.length" class="links">
 			<a
@@ -112,5 +121,31 @@ const links = computed(() => {
 .action:hover {
 	border-color: var(--nulo-accent);
 	color: var(--nulo-accent);
+}
+
+.stamp {
+	margin: 0;
+	padding: 14px 18px;
+	align-self: flex-start;
+	font: 700 26px/1 var(--font-mono);
+	letter-spacing: 0.14em;
+	color: var(--nulo-bg, #000);
+	background: var(--mint);
+	animation: stamp-in 0.3s ease-out;
+}
+
+@keyframes stamp-in {
+	0% {
+		transform: scale(1.6) rotate(-3deg);
+		opacity: 0;
+	}
+	65% {
+		transform: scale(0.95) rotate(0.5deg);
+		opacity: 1;
+	}
+	100% {
+		transform: scale(1) rotate(0deg);
+		opacity: 1;
+	}
 }
 </style>
