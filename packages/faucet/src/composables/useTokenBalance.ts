@@ -3,7 +3,6 @@ import { Contract } from "@aztec/aztec.js/contracts"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
 import { ref, type Ref } from "vue"
-import { normalizeError } from "@/lib/errors"
 
 const POLL_INTERVAL_MS = 15_000
 
@@ -41,17 +40,28 @@ export function useTokenBalance(wallet: Wallet, tokenAddress: AztecAddress, acco
 		loading.value = true
 		try {
 			const contract = await Contract.at(tokenAddress, TokenContractArtifact, wallet)
-			const [pub, prv] = await Promise.all([
+			// Settled independently: one failing path must not blank the other, and per-path raw
+			// errors (with stacks) are the diagnosable artifact - normalizeError produces toast copy
+			// that masks the cause ("Something went wrong"), so it is never stored here.
+			const [pub, prv] = await Promise.allSettled([
 				readBalance(wallet, contract, "balance_of_public", accountAddress),
 				readBalance(wallet, contract, "balance_of_private", accountAddress),
 			])
 			if (disposed) return
-			publicBalance.value = pub
-			privateBalance.value = prv
-			error.value = null
+			if (pub.status === "fulfilled") publicBalance.value = pub.value
+			else console.warn(`[token-balance] balance_of_public failed (${tokenAddress.toString()}):`, pub.reason)
+			if (prv.status === "fulfilled") privateBalance.value = prv.value
+			else console.warn(`[token-balance] balance_of_private failed (${tokenAddress.toString()}):`, prv.reason)
+			const firstFailure = [pub, prv].find((r): r is PromiseRejectedResult => r.status === "rejected")
+			error.value = firstFailure
+				? firstFailure.reason instanceof Error
+					? firstFailure.reason.message
+					: String(firstFailure.reason)
+				: null
 		} catch (err) {
 			if (disposed) return
-			error.value = normalizeError(err).message
+			console.warn(`[token-balance] reader failed (${tokenAddress.toString()}):`, err)
+			error.value = err instanceof Error ? err.message : String(err)
 		} finally {
 			if (!disposed) loading.value = false
 		}
