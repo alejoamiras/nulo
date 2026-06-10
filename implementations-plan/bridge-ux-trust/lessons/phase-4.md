@@ -18,6 +18,6 @@ Initial verdict: **reject** — 3 blocking findings, all real, all FIXED in `5ed
 2. **HIGH — unfinished-junk cap eviction**: `capRecords` sorted unfinished by `updatedAt` and sliced — an attacker flooding >MAX unfinished junk evicted the oldest LIVE record through the cap itself. FIX: unfinished records are never dropped; only completed trim to the remaining budget. Pin added.
 3. **HIGH — generic provider fingerprints reused trust**: every unrecognized wallet collapsed to "injected", so switching unrecognized wallet A→B reused the verdict. FIX: `isCacheableProvider` — generic fingerprints can neither mark nor pass trust (those wallets self-test every deposit). Pin added.
 Also confirmed by codex: the `4656f8f` code-review fixes hold; no ABBA lane violation; `useL1Usdc.mint` flagged as the one promptful call outside a lane (accepted: it's a standalone faucet action, not a bridge-flow prompt).
-Verdict-flip resume: see the appended round in audit-codex.md.
+Verdict-flip resume: **approve** (all three fixes file:line-confirmed) — audit-codex.md Round 4b.
 
 LESSONS_FILE=implementations-plan/bridge-ux-trust/lessons/phase-4.md

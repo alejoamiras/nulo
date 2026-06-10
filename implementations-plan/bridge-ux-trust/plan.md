@@ -169,6 +169,7 @@ Recipient-commitment (contract change — the decided end-state, next contract r
 - Round 1 contradiction-check: codex (1 BLOCKER + 2 HIGH + 1 NIT) · fable (4 HIGH + 5 NIT) — all folded.
 - Round 2 double audit: codex **conditional approve** (6 conditions, folded — provider-aware trust cache, tx-identity completion, single-tab lanes, cap priority, A2/A3 to the gate, assumptions aligned) · fresh fable **conditional approve** (3 conditions, folded — plaintext-shape legacy discrimination + downgrade pin ⑲, per-record merge + clobber pin ⑳, dropped-debounce + lane-acquisition rule).
 - **USER APPROVAL (gate): APPROVE** — A1 retain-until-Clear; A2 no-backwards-compat (L15); A3 CSP deferred. Implementation begins at P1.
+- **POST-IMPL codex audit (new session, dir codex-MLB3ytTp): initial reject (3 blockers) → all fixed in `5ed9831` (+ pins) → verdict flip: APPROVE.** Implementation closed pending the manual testnet checklist.
 - Final fresh-context codex pass (new session `019eae2a`): **conditional approve** — 4 conditions, all folded same-round: withdraw completion bound to the exact exit witness (D4 + ⑰); `sealerL1` moved inside the authenticated envelope + the seal-trust cache re-scoped as an explicit testnet risk acceptance (D2/D3/Security, ledger L14); `stale` vs `stale-deployment` unified (⑪); A2/A3 reframed as release-gate approvals. No ledger reversal; architecture confirmed executable.
 
 ## Seeds

@@ -468,3 +468,15 @@ Initial verdict: **reject** (3 blocking findings — false-done on rediscovered 
 I did not find a blocking regression in the `4656f8f` follow-up fixes: `chainId` is now checked in deployment binding ([useBridgeJournal.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:211)), no-leaf deposit claims now bail ([useBridgeJournal.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:334)), and the session sweep now skips mid-flight records ([useBridgeJournal.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:499)). I also did not find a high/critical ABBA lane violation in the bridge paths; the only promptful miss I saw is `mint()` in [useL1Usdc.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useL1Usdc.ts:97), which is outside the bridge engine.
 
 reject (with blocking findings: false-done on rediscovered private claim receipts; live-record eviction via unfinished-junk cap; generic `"injected"` trust reuse weakens the provider-aware determinism guarantee)
+
+### Round 4b — verdict flip (resume, same session)
+
+All three blockers confirmed fixed (file:line-verified). Final verdict: **approve**.
+
+- Fixed: false-done on rediscovered private claims. `finishDepositByReceipt()` now requires `consumed === true` before setting `completedAt`; `false` and `null` both route to `unknown-outcome` at [useBridgeJournal.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:394). The sweep is prompt-free via `runDepositClaim(rec.id, { interactive: false })` at [useBridgeJournal.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:514). Pins ⑰b/⑰c are present at [useBridgeJournal.test.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.test.ts:242).
+
+- Fixed: unfinished-junk cap eviction. `capRecords()` no longer trims unfinished records at all; it only slices completed records into remaining budget at [journal.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/bridge-core/src/journal.ts:112). The unfinished-flood pin is present at [journal.test.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/bridge-core/src/journal.test.ts:156).
+
+- Fixed: generic `"injected"/"unknown"` trust reuse. `isCacheableProvider()` blocks those fingerprints from both trust reads and writes at [seal-trust.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/bridge-core/src/seal-trust.ts:31). The pin is present at [seal-trust.test.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/bridge-core/src/seal-trust.test.ts:57).
+
+approve
