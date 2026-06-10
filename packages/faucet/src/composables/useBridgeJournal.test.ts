@@ -231,35 +231,52 @@ describe("useBridgeJournal engine", () => {
 		})
 	})
 
-	it("⑰ receipt success but the record's message STILL claimable ⇒ unknown-outcome, not done", async () => {
+	it("⑰ a claim THIS process sent completes on the checkpointed receipt - the lagging PXE cannot block it", async () => {
 		const deps = baseDeps(kv)
-		// simulate always succeeds - the probe sees the message still claimable.
+		// simulate keeps succeeding (PXE lag right after checkpoint) - local provenance wins anyway.
 		const claim = vi.fn(async () => ({
 			simulate: async () => ({}),
 			send: async () => ({ txHash: "0xclaimtx" }),
 		}))
 		connectJournalDeps({ ...deps, claim })
-		addRecord(mkDeposit("0xspoof"))
-		await runDepositClaim("0xspoof")
+		addRecord(mkDeposit("0xlocal"))
+		await runDepositClaim("0xlocal")
 		const { records, runtime } = useBridgeJournal()
-		expect(records.value.find((r) => r.id === "0xspoof")?.completedAt).toBeUndefined()
-		expect(runtime.value["0xspoof"]?.attention).toBe("unknown-outcome")
+		expect(records.value.find((r) => r.id === "0xlocal")?.completedAt).toBe(999)
+		expect(runtime.value["0xlocal"]?.attention).toBeUndefined()
 	})
 
-	it("⑰b a forged claimTxHash on a rediscovered PRIVATE record NEVER auto-finishes (sweep can't verify)", async () => {
+	it("⑰a a REDISCOVERED record whose message is visibly still claimable keeps polling - no completion, no dead-end", async () => {
 		const deps = baseDeps(kv)
-		// Receipt reads success, but the probe has no secret on the prompt-free path ⇒ refuse done.
+		// No provenance (claimTxHash preset), public record so the probe runs prompt-free; the PXE
+		// keeps showing the message ⇒ completion is DELAYED, never dead-ended into attention.
 		const claim = vi.fn(async () => ({ simulate: async () => ({}), send: async () => ({ txHash: "0x" }) }))
 		connectJournalDeps({ ...deps, claim })
-		const rec = mkDeposit("0xforged", { isPrivate: true, secret: undefined, sealerL1: SEALER, claimTxHash: "0xunrelated" })
+		addRecord(mkDeposit("0xlagging", { claimTxHash: "0xclaimtx" }))
+		await runDepositClaim("0xlagging")
+		// Rounds 2..cap run via detached re-entry; the soft cap ends with the gentle note.
+		await vi.waitFor(() => {
+			expect(useBridgeJournal().runtime.value["0xlagging"]?.note).toMatch(/still confirming/i)
+		})
+		const { records, runtime } = useBridgeJournal()
+		expect(records.value.find((r) => r.id === "0xlagging")?.completedAt).toBeUndefined()
+		expect(runtime.value["0xlagging"]?.attention).toBeUndefined()
+	})
+
+	it("⑰b a rediscovered private record with a checkpointed receipt completes prompt-free (owner policy: the node's word wins)", async () => {
+		const deps = baseDeps(kv)
+		// The sweep can't unseal (no signature prompt-free), so the probe is unverifiable (null) -
+		// the checkpointed receipt completes the record anyway. Residual risk accepted: planting a
+		// forged-but-checkpointed claimTxHash needs localStorage write, which already owns the journal.
+		const claim = vi.fn(async () => ({ simulate: async () => ({}), send: async () => ({ txHash: "0x" }) }))
+		connectJournalDeps({ ...deps, claim })
+		const rec = mkDeposit("0xresumed", { isPrivate: true, secret: undefined, sealerL1: SEALER, claimTxHash: "0xclaimtx" })
 		rec.sealedEnvelope = await sealEnvelopeFor(rec)
 		addRecord(rec)
 		resumeSessionWork()
 		await vi.waitFor(() => {
-			const { runtime } = useBridgeJournal()
-			expect(runtime.value["0xforged"]?.attention).toBe("unknown-outcome")
+			expect(useBridgeJournal().records.value.find((r) => r.id === "0xresumed")?.completedAt).toBe(999)
 		})
-		expect(useBridgeJournal().records.value.find((r) => r.id === "0xforged")?.completedAt).toBeUndefined()
 		expect(deps.signL1).not.toHaveBeenCalled()
 	})
 

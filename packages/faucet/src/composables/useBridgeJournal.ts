@@ -472,10 +472,10 @@ export async function runDepositClaim(id: string, opts: { interactive?: boolean 
 			return
 		}
 
-		// An already-sent claim is finished by waiting on ITS receipt, never a re-send. Completion
-		// requires the message-consumed probe, which needs the secret - an EXPLICIT click on a
-		// rediscovered private record unseals it first (one signature); the prompt-free sweep cannot,
-		// and the receipt round then refuses to mark done on an unverifiable receipt.
+		// An already-sent claim is finished by waiting on ITS receipt, never a re-send. A checkpointed
+		// receipt IS confirmation; the message probe (best-effort, needs the secret - an EXPLICIT
+		// click on a rediscovered private record unseals it first) can only DELAY completion while
+		// the PXE still shows the message as claimable.
 		if (rec.claimTxHash) {
 			if (rec.isPrivate && interactive && !secretCache.has(id) && rec.sealedEnvelope) {
 				const resolved = await resolvePrivateSecret(rec)
@@ -565,22 +565,26 @@ async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<
 		log("receipt check", { id: rec.id, checkNo, status })
 		if (genOf(rec.id) !== gen) return "stop"
 		if (status === "success") {
-			// Identity check: after a successful receipt, THIS record's message must be GONE - a
-			// verifiable true is the ONLY path to done. false ⇒ the receipt wasn't ours; null (no
-			// secret / probe failure) ⇒ refuse too: a forged claimTxHash on a rediscovered private
-			// record must never auto-finish.
+			// A checkpointed receipt for the recorded claimTxHash IS confirmation (owner decision:
+			// the node's word beats the wallet's lagging PXE). The message probe is best-effort:
+			// skipped when THIS process drove the send (forge-resistant provenance), and for
+			// rediscovered records it can only DELAY completion while the PXE still visibly shows
+			// the message as claimable - it can never dead-end a confirmed claim. Residual risk
+			// (accepted): a forged-but-checkpointed claimTxHash planted in localStorage completes a
+			// record; that attacker already has storage write and could delete the record outright.
+			if (localClaimProvenance.has(rec.id)) {
+				completeDeposit(records.value.find((r) => r.id === rec.id) as DepositJournalRecord | undefined)
+				return "done"
+			}
 			setStep(rec.id, "verifying", "checking the claim against this record")
 			const consumed = await recordMessageConsumed(rec)
 			if (genOf(rec.id) !== gen) return "stop"
-			if (consumed !== true) {
-				setRuntime(rec.id, {
-					attention: "unknown-outcome",
-					note:
-						consumed === false
-							? "A claim receipt succeeded but this record's message is still claimable - not marking it done. Your funds are not lost - the claim either landed or the deposit remains claimable."
-							: "A claim receipt succeeded but couldn't be verified against this record - press CLAIM to verify (one signature for private records). Your funds are not lost.",
-				})
-				return "stop"
+			if (consumed === false) {
+				// The PXE still sees the message - lag right after the checkpoint, or a receipt that
+				// wasn't ours. Keep polling instead of completing; the next pass re-probes.
+				setStep(rec.id, "verifying", "confirmed on the node - waiting for your wallet to sync")
+				await wait(4000)
+				continue
 			}
 			completeDeposit(records.value.find((r) => r.id === rec.id) as DepositJournalRecord | undefined)
 			return "done"
