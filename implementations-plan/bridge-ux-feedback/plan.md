@@ -67,7 +67,7 @@ Files: `BridgeJournalCard.vue` (+test), `lib/explorer.ts` (+ etherscan helper +t
 Smallest proof: header renders both chains per direction; step narration renders from runtime (each step → expected copy); tx links carry the right href per hash field; done card shows ✓ + link, then HIDES via the engine filter (mocked) while the record stays in storage; attention note includes the funds-safety sentence.
 Validate: same as P1 + `bun run --cwd packages/faucet test:e2e` (smoke still green — selectors unchanged except additions).
 
-### P3 — Form balance visibility (codex-arbitrated option) + gates 🔄
+### P3 — Form balance visibility (codex-arbitrated option) + gates ✓
 Files: `BridgeForm.vue` (+test); `testids.ts` if the option adds nodes (e.g. `bridgeBalanceL2Public` / `bridgeBalanceL2Private` for option (a)).
 - Implement the arbitrated D5 option; copy reviewed; over-balance validation reads the ACTIVE balance only.
 Smallest proof: both balances visible without toggling; the active one switches with the toggle (or segment); validation still binds to the active source; flip keeps both visible on the Aztec side only.
