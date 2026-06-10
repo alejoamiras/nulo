@@ -2,9 +2,7 @@
 import { computed } from "vue"
 import { useWalletConnection } from "@/composables/useWalletConnection"
 import { TESTIDS } from "@/lib/testids"
-import AddressDisplay from "./composite/AddressDisplay.vue"
-import AppButton from "./ui/AppButton.vue"
-import Spinner from "./ui/Spinner.vue"
+import { AddressDisplay, AppButton, Spinner } from "@nulo/design"
 import VerificationModal from "./VerificationModal.vue"
 
 const {

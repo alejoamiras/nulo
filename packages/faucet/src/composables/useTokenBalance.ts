@@ -97,7 +97,7 @@ interface SimulationResultShape {
 	result?: unknown
 }
 
-async function readBalance(
+export async function readBalance(
 	wallet: Wallet,
 	contract: unknown,
 	fn: "balance_of_public" | "balance_of_private",

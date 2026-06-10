@@ -13,6 +13,11 @@ dist
 dist-ssr
 *.local
 
+# Secrets / env (committed templates are .env.example only)
+.env
+.env.*
+!.env.example
+
 # Storybook build output (M6 phase 2)
 storybook-static/
 
@@ -37,3 +42,12 @@ packages/extension/.e2e-state/
 *.tsbuildinfo
 wallet_data_*/
 
+
+# sandbox deploy output (instance-specific) — deploy-sandbox.ts writes here for manual inspection
+packages/bridge-core/sandbox-deploy/
+
+# bridge e2e runtime artifacts (in-browser/script PXE data + MCP captures)
+.playwright-mcp/
+/deposit-public-success.png
+**/pxe_data_*/
+**/wallet_data_*/

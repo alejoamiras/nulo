@@ -6,13 +6,12 @@
  *   - Transactions live at `/tx-effects/<hash>`
  *   - Contract instances live at `/contracts/instances/<address>` (Dripper, USDC, ETH)
  *
- * Returns "" when no base URL is configured — callers suppress the link
- * in that case so the surrounding text still reads cleanly.
+ * Defaults to https://testnet.aztecscan.xyz; override via VITE_EXPLORER_BASE_URL. The helpers
+ * return "" only for an empty hash/address, so callers can still suppress a missing link.
  */
 
 function base(): string {
-	const url = import.meta.env.VITE_EXPLORER_BASE_URL
-	if (!url) return ""
+	const url = import.meta.env.VITE_EXPLORER_BASE_URL ?? "https://testnet.aztecscan.xyz"
 	return url.endsWith("/") ? url.slice(0, -1) : url
 }
 

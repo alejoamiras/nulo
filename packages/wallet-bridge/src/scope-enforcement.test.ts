@@ -392,6 +392,14 @@ describe("createAuthWit", () => {
 		expect(() => enforceScope("createAuthWit", [addr(ADDR_A), {}], grants)).not.toThrow()
 	})
 
+	test("canCreateAuthWit with NO accounts list (manifest omits it) passes — regression for the createAuthWit crash", () => {
+		// A dApp can't enumerate the wallet's accounts at connect time, so a real manifest grants
+		// canCreateAuthWit WITHOUT an `accounts` list. This must not throw "Cannot read properties of
+		// undefined (reading 'some')" — it's permitted, bounded by the wallet + the call-scope check.
+		const grants = [grant({ type: "accounts", canCreateAuthWit: true } as Capability)]
+		expect(() => enforceScope("createAuthWit", [addr(ADDR_A), {}], grants)).not.toThrow()
+	})
+
 	test("canCreateAuthWit: false throws", () => {
 		const grants = [grant(accountsCap(false, [ADDR_A]))]
 		expect(() => enforceScope("createAuthWit", [addr(ADDR_A), {}], grants)).toThrow(/Scope violation/)
