@@ -91,7 +91,6 @@ async function onClick() {
 	gap: 10px;
 	padding: 8px 12px;
 	border: 1px solid var(--nulo-outline);
-	border-radius: 0;
 }
 
 .chip .label {

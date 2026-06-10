@@ -101,34 +101,45 @@ describe("BridgeForm", () => {
 		expect(w.find(sel(TESTIDS.bridgeSubmit)).text()).toContain("BRIDGE TO ETHEREUM")
 	})
 
-	it("the privacy toggle highlights the ACTIVE balance (both stay visible) and shows the bearer note", async () => {
+	it("the privacy toggle highlights the ACTIVE balance (both stay visible) and shows ONE plain-language note", async () => {
 		const w = mount(BridgeForm)
 		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
 		expect(w.find(sel(TESTIDS.bridgeBalanceL2Private)).attributes("data-active")).toBe("true")
 		expect(w.find(sel(TESTIDS.bridgeBalanceL2Public)).attributes("data-active")).toBe("false")
 		expect(w.find(sel(TESTIDS.bridgeBalanceL2Public)).exists()).toBe(true)
-		expect(w.find(sel(TESTIDS.bridgePrivacyNote)).text()).toMatch(/bearer credential/i)
+		const note = w.find(sel(TESTIDS.bridgePrivacyNote))
+		expect(note.text()).not.toMatch(/bearer/i)
+		expect(note.text()).toMatch(/recovery key/i)
+		expect(w.findAll(sel(TESTIDS.bridgePrivacyNote))).toHaveLength(1)
 	})
 
-	it("the withdraw-direction privacy note explains there is no bearer secret", async () => {
+	it("the withdraw-direction private note says nothing extra needs backing up", async () => {
 		const w = mount(BridgeForm)
 		await w.find(sel(TESTIDS.bridgeFlip)).trigger("click")
 		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
-		expect(w.find(sel(TESTIDS.bridgePrivacyNote)).text()).toMatch(/no bearer secret/i)
+		expect(w.find(sel(TESTIDS.bridgePrivacyNote)).text()).toMatch(/nothing extra to back up/i)
 	})
 
-	it("seal note shows first-time copy on an untrusted wallet, trusted copy after", async () => {
+	it("the merged note carries the signature count: two first time, one after trust", async () => {
 		const w = mount(BridgeForm)
 		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
-		const note = w.find(sel(TESTIDS.bridgeSealNote))
+		const note = w.find(sel(TESTIDS.bridgePrivacyNote))
 		expect(note.attributes("data-first")).toBe("true")
-		expect(note.text()).toMatch(/twice/i)
+		expect(note.text()).toMatch(/two quick ethereum signatures/i)
 
 		sealTrusted.mockReturnValue(true)
 		const w2 = mount(BridgeForm)
 		await w2.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
-		expect(w2.find(sel(TESTIDS.bridgeSealNote)).attributes("data-first")).toBe("false")
-		expect(w2.find(sel(TESTIDS.bridgeSealNote)).text()).toMatch(/sign once/i)
+		expect(w2.find(sel(TESTIDS.bridgePrivacyNote)).attributes("data-first")).toBe("false")
+		expect(w2.find(sel(TESTIDS.bridgePrivacyNote)).text()).toMatch(/one ethereum signature/i)
+	})
+
+	it("no validation error on first render - only after the user touches the amount", async () => {
+		l1Balance.value = 50_000_000n // default "100" exceeds it
+		const w = mount(BridgeForm)
+		expect(w.find(sel(TESTIDS.bridgeFormError)).exists()).toBe(false)
+		await w.find(sel(TESTIDS.bridgeAmount)).setValue("100")
+		expect(w.find(sel(TESTIDS.bridgeFormError)).text()).toMatch(/exceeds/i)
 	})
 
 	it("submit threads (amount, isPrivate) to the right flow per direction", async () => {

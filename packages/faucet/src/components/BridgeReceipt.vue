@@ -103,7 +103,6 @@ const links = computed(() => {
 	padding: 10px 16px;
 	background: transparent;
 	border: 1px solid var(--nulo-outline);
-	border-radius: 8px;
 	color: var(--txt-primary);
 	font: 600 12px/1 var(--font-mono);
 	letter-spacing: 0.05em;

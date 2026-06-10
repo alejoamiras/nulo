@@ -75,10 +75,12 @@ export const TESTIDS = {
 	bridgeBalanceL2Public: "fa-bridge-balance-l2-public",
 	bridgeBalanceL2Private: "fa-bridge-balance-l2-private",
 	bridgePrivacyToggle: "fa-bridge-privacy-toggle",
+	// ONE adaptive private note (data-first carries the signature-count variant).
 	bridgePrivacyNote: "fa-bridge-privacy-note",
-	bridgeSealNote: "fa-bridge-seal-note",
 	bridgeSubmit: "fa-bridge-submit",
+	// Amount validation renders under the input; flow failures render near the button.
 	bridgeFormError: "fa-bridge-form-error",
+	bridgeFlowError: "fa-bridge-flow-error",
 
 	// Bridge - the takeover stepper + receipt (phases carry data-phase/data-state)
 	stepper: "fa-bridge-stepper",

@@ -82,6 +82,9 @@ const amountUnits = computed(() => {
 	return BigInt(Math.round(n * 1e6))
 })
 
+// Validation surfaces only after the user has engaged with the amount (or tried to submit) -
+// a freshly connected wallet must never open on an error it didn't cause.
+const amountTouched = ref(false)
 const validationError = computed(() => {
 	if (!amount.value || amountUnits.value === 0n) return null
 	if (fromBalance.value !== null && amountUnits.value > fromBalance.value) {
@@ -91,15 +94,22 @@ const validationError = computed(() => {
 	}
 	return null
 })
-const formError = computed(() => validationError.value ?? depositFlow.error.value ?? withdrawFlow.error.value)
+const amountError = computed(() => (amountTouched.value ? validationError.value : null))
+const flowError = computed(() => depositFlow.error.value ?? withdrawFlow.error.value)
 
 const showMintHint = computed(() => fromChain.value === "ethereum" && usdc.balance.value === 0n)
 
-const sealNoteVisible = computed(() => direction.value === "l1-to-l2" && isPrivate.value && l1.isConnected.value)
 const isFirstSeal = computed(() => {
 	const addr = l1.address.value
 	if (!addr) return true
 	return !isSealTrusted(localStorage, sepolia.id, addr, providerFingerprint())
+})
+
+// A failing balance reader must be VISIBLE, not an eternal "-": surface a hint + the real cause
+// in the console (ids/messages only - the reader never sees secrets).
+const l2BalanceError = computed(() => l2Handle.value?.error.value ?? null)
+watch(l2BalanceError, (msg) => {
+	if (msg) console.warn("[bridge:balances] L2 balance read failed:", msg)
 })
 
 function flip() {
@@ -107,6 +117,7 @@ function flip() {
 }
 
 async function onSubmit() {
+	amountTouched.value = true
 	if (amountUnits.value === 0n || validationError.value || formStage.value !== "form" || submitting.value) return
 	submitting.value = true
 	const onRecord = (id: string) => {
@@ -217,6 +228,7 @@ function fmt(b: bigint | null): string {
 						:data-testid="TESTIDS.bridgeBalanceL2Private"
 						:data-active="isPrivate"
 					>Private: {{ fmt(l2Private) }} USDC</span>
+					<span v-if="l2BalanceError && l2Public === null" class="balance-warn">balances unavailable - retrying</span>
 				</template>
 			</div>
 
@@ -256,9 +268,12 @@ function fmt(b: bigint | null): string {
 				step="1"
 				:disabled="submitting"
 				:data-testid="TESTIDS.bridgeAmount"
+				:data-invalid="!!amountError"
+				@input="amountTouched = true"
 			/>
 			<span class="unit">USDC</span>
 		</div>
+		<p v-if="amountError" class="err-msg" :data-testid="TESTIDS.bridgeFormError">{{ amountError }}</p>
 		<p v-if="showMintHint" class="hint">No test USDC on Sepolia yet - mint some below.</p>
 
 		<div class="privacy-row">
@@ -275,31 +290,24 @@ function fmt(b: bigint | null): string {
 			</button>
 			<span class="toggle-label">PRIVATE BRIDGING</span>
 		</div>
-		<p v-if="isPrivate" class="privacy-note" :data-testid="TESTIDS.bridgePrivacyNote">
+		<p v-if="isPrivate" class="privacy-note" :data-testid="TESTIDS.bridgePrivacyNote" :data-first="isFirstSeal ? 'true' : 'false'">
 			<template v-if="direction === 'l1-to-l2'">
-				Funds arrive in your PRIVATE Aztec balance. The claim secret is a bearer credential - anyone holding
-				it can claim these funds. It is sealed to your Ethereum signature and stored only in this browser.
-				Don't clear site data mid-flight.
+				Funds arrive in your PRIVATE Aztec balance.
+				{{ isFirstSeal ? "Two quick Ethereum signatures (first time only - afterwards just one)" : "One Ethereum signature" }}
+				lock{{ isFirstSeal ? "" : "s" }} this transfer's recovery key to your wallet. It lives only in this
+				browser - don't clear site data while a bridge is running.
 			</template>
 			<template v-else>
 				Burns from your PRIVATE Aztec balance. The Ethereum recipient is locked into the bridge message -
-				no bearer secret involved.
+				nothing extra to back up.
 			</template>
-		</p>
-		<p v-if="sealNoteVisible" class="seal-note" :data-testid="TESTIDS.bridgeSealNote" :data-first="isFirstSeal ? 'true' : 'false'">
-			<template v-if="isFirstSeal">
-				First private bridge with this Ethereum account: you'll sign the same message twice - once to seal
-				this transfer's recovery secret, once to prove your wallet signs deterministically. One-time check;
-				after it, private bridges seal with a single signature.
-			</template>
-			<template v-else>You'll sign once to seal this transfer's recovery secret. No transaction, no cost.</template>
 		</p>
 
 		<AppButton :loading="submitting" :disabled="!bothConnected || submitting" :data-testid="TESTIDS.bridgeSubmit" @click="onSubmit">
 			{{ !bothConnected ? "CONNECT BOTH WALLETS" : direction === "l1-to-l2" ? "BRIDGE TO AZTEC" : "BRIDGE TO ETHEREUM" }}
 		</AppButton>
 
-		<p v-if="formError" class="err-msg" :data-testid="TESTIDS.bridgeFormError">{{ formError }}</p>
+		<p v-if="flowError" class="err-msg" :data-testid="TESTIDS.bridgeFlowError">{{ flowError }}</p>
 		</template>
 	</section>
 </template>
@@ -311,7 +319,6 @@ function fmt(b: bigint | null): string {
 	gap: 16px;
 	padding: 24px;
 	border: 1px solid var(--nulo-outline);
-	border-radius: 12px;
 }
 
 .bridge-form h3 {
@@ -341,7 +348,6 @@ function fmt(b: bigint | null): string {
 	gap: 6px;
 	padding: 12px 14px;
 	border: 1px solid var(--nulo-outline);
-	border-radius: 8px;
 }
 
 .panel .role {
@@ -375,7 +381,6 @@ function fmt(b: bigint | null): string {
 	height: 36px;
 	background: transparent;
 	border: 1px solid var(--nulo-outline);
-	border-radius: 8px;
 	color: var(--txt-primary);
 	font-size: 16px;
 	cursor: pointer;
@@ -402,7 +407,6 @@ function fmt(b: bigint | null): string {
 	flex: 1;
 	background: transparent;
 	border: 1px solid var(--nulo-outline);
-	border-radius: 8px;
 	padding: 12px 14px;
 	color: var(--txt-primary);
 	font: 500 16px/1 var(--font-mono);
@@ -431,7 +435,6 @@ function fmt(b: bigint | null): string {
 	height: 22px;
 	background: transparent;
 	border: 1px solid var(--nulo-outline);
-	border-radius: 999px;
 	cursor: pointer;
 	transition: border-color 0.15s ease;
 }
@@ -442,7 +445,6 @@ function fmt(b: bigint | null): string {
 	left: 2px;
 	width: 16px;
 	height: 16px;
-	border-radius: 999px;
 	background: var(--txt-secondary);
 	transition: transform 0.15s ease, background 0.15s ease;
 }
@@ -471,7 +473,6 @@ function fmt(b: bigint | null): string {
 	margin: 0;
 	padding: 10px 12px;
 	border: 1px dashed var(--yellow);
-	border-radius: 8px;
 	color: var(--txt-secondary);
 	font: 500 12px/1.5 var(--font-mono);
 }
@@ -480,7 +481,6 @@ function fmt(b: bigint | null): string {
 	margin: 0;
 	padding: 10px 12px;
 	border: 1px solid var(--nulo-outline);
-	border-radius: 8px;
 	color: var(--txt-secondary);
 	font: 500 12px/1.5 var(--font-mono);
 }

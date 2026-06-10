@@ -122,7 +122,6 @@ const headline = computed(() => {
 	align-items: baseline;
 	padding: 8px 10px;
 	border: 1px solid var(--nulo-outline);
-	border-radius: 8px;
 }
 
 .phase.active {
@@ -175,7 +174,6 @@ const headline = computed(() => {
 	font: 600 10px/1 var(--font-mono);
 	color: var(--txt-secondary);
 	border: 1px solid var(--nulo-outline);
-	border-radius: 4px;
 	padding: 2px 5px;
 }
 
@@ -195,7 +193,6 @@ const headline = computed(() => {
 	padding: 8px 14px;
 	background: transparent;
 	border: 1px solid var(--nulo-outline);
-	border-radius: 8px;
 	color: var(--txt-primary);
 	font: 600 12px/1 var(--font-mono);
 	letter-spacing: 0.05em;

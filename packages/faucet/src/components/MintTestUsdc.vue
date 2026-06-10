@@ -51,7 +51,6 @@ const status = computed(() => {
 	gap: 14px;
 	padding: 24px;
 	border: 1px solid var(--nulo-outline);
-	border-radius: 12px;
 }
 
 .mint-card h3 {

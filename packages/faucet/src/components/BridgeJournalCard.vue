@@ -224,7 +224,6 @@ function onDiscard() {
 	gap: 10px;
 	padding: 16px;
 	border: 1px solid var(--nulo-outline);
-	border-radius: 10px;
 }
 
 .journal-card[data-attention] {
@@ -252,7 +251,6 @@ function onDiscard() {
 	font: 600 10px/1 var(--font-mono);
 	color: var(--txt-secondary);
 	border: 1px solid var(--nulo-outline);
-	border-radius: 4px;
 	padding: 3px 6px;
 	letter-spacing: 0.08em;
 }
@@ -315,7 +313,6 @@ function onDiscard() {
 	margin: 0;
 	padding: 8px 10px;
 	border: 1px dashed var(--yellow);
-	border-radius: 6px;
 	color: var(--txt-secondary);
 	font: 500 12px/1.5 var(--font-mono);
 }
@@ -329,7 +326,6 @@ function onDiscard() {
 	padding: 8px 14px;
 	background: transparent;
 	border: 1px solid var(--nulo-outline);
-	border-radius: 8px;
 	color: var(--txt-primary);
 	font: 600 12px/1 var(--font-mono);
 	letter-spacing: 0.05em;
