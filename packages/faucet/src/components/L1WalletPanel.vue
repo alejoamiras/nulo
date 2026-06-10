@@ -11,8 +11,7 @@ const { address, isConnected, wrongChain, isConnecting, connect, disconnect, swi
 		<div v-if="isConnected && address" class="chip">
 			<span class="label">Ethereum</span>
 			<AddressDisplay :address="address ?? ''" :data-testid="TESTIDS.l1Account" />
-			<span v-if="!wrongChain" class="chain">Sepolia</span>
-			<button v-else class="wrong-chain" type="button" :data-testid="TESTIDS.l1SwitchChain" @click="switchToSepolia">
+			<button v-if="wrongChain" class="wrong-chain" type="button" :data-testid="TESTIDS.l1SwitchChain" @click="switchToSepolia">
 				Switch to Sepolia
 			</button>
 			<button class="disconnect" type="button" aria-label="Disconnect" :data-testid="TESTIDS.l1Disconnect" @click="disconnect">
@@ -45,16 +44,6 @@ const { address, isConnected, wrongChain, isConnecting, connect, disconnect, swi
 	font: 500 11px/1 var(--font-mono);
 	letter-spacing: 0.12em;
 	text-transform: uppercase;
-}
-
-.chain {
-	color: var(--mint);
-	font: 500 10px/1 var(--font-mono);
-	letter-spacing: 0.08em;
-	text-transform: uppercase;
-	padding: 3px 6px;
-	border: 1px solid var(--mint);
-	border-radius: 4px;
 }
 
 .wrong-chain {
