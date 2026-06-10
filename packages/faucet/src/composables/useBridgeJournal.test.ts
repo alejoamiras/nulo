@@ -547,6 +547,26 @@ describe("useBridgeJournal engine", () => {
 		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xredisc")).toBe(true)
 	})
 
+	it("code-review pin: a stale soft note never survives a successful completion", async () => {
+		const deps = baseDeps(kv)
+		const claim = vi.fn(async () => ({
+			simulate: async () => {
+				throw new Error("No L1 to L2 message found")
+			},
+			send: async () => ({ txHash: "0x" }),
+		}))
+		connectJournalDeps({ ...deps, claim })
+		const rec = mkDeposit("0xstale-note", { claimTxHash: "0xclaimtx" })
+		addRecord(rec)
+		// Simulate the 30-min soft-cap note left by an earlier chain.
+		connectJournalDeps({ ...deps, claim })
+		const { runtime } = useBridgeJournal()
+		runtime.value = { "0xstale-note": { note: "Still confirming after ~30 minutes — slow testnet." } }
+		await runDepositClaim("0xstale-note")
+		expect(useBridgeJournal().records.value.find((r) => r.id === "0xstale-note")?.completedAt).toBe(999)
+		expect(useBridgeJournal().runtime.value["0xstale-note"]?.note).toBeUndefined()
+	})
+
 	it("P1: withdraw completions auto-hide and feed the toast hook", async () => {
 		const deps = baseDeps(kv)
 		connectJournalDeps(deps)

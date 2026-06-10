@@ -372,6 +372,7 @@ function scheduleAutoHide(id: string): void {
 
 function completeDeposit(rec: DepositJournalRecord): void {
 	patchRecord(rec.id, { completedAt: deps.now() })
+	setRuntime(rec.id, { attention: undefined, note: undefined })
 	secretCache.delete(rec.id)
 	receiptRounds.delete(rec.id)
 	lastCompleted.value = { id: rec.id, direction: "deposit", amount: rec.amount, isPrivate: rec.isPrivate, txHash: rec.claimTxHash }
@@ -384,6 +385,7 @@ function completeDeposit(rec: DepositJournalRecord): void {
 
 function completeWithdraw(rec: WithdrawJournalRecord, consumeTxHash?: string): void {
 	patchRecord(rec.id, { completedAt: deps.now() })
+	setRuntime(rec.id, { attention: undefined, note: undefined })
 	receiptRounds.delete(rec.id)
 	lastCompleted.value = { id: rec.id, direction: "withdraw", amount: rec.amount, isPrivate: rec.isPrivate, txHash: consumeTxHash }
 	// Withdraw completions are witness-decode-verified — always hide-eligible.
@@ -425,6 +427,8 @@ export async function runDepositClaim(id: string, opts: { interactive?: boolean 
 				const resolved = await resolvePrivateSecret(rec)
 				if (!resolved) return
 			}
+			// A fresh re-entry clears any stale soft note (the 30-min cap) before checking again.
+			setRuntime(id, { attention: undefined, note: undefined })
 			continueRounds = (await runReceiptRound(rec, gen)) === "continue"
 			return
 		}
