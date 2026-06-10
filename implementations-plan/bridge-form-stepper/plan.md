@@ -83,7 +83,7 @@ Gates: `bun run audit:faucet` + `bun run audit:vue` → `/code-review max --fix`
 | S2 | Stepper takeover + RUN IN BACKGROUND handoff; receipt stays until NEW BRIDGE | user (Phase 0) | concurrent in-form submissions; hard block; auto-return receipt |
 | S3 | Flow legs narrate into the PER-RECORD journal runtime (`BridgeStep` extended; `setRecordStep` export); ONE tested mapper feeds stepper + cards | codex CRITICAL-1/HIGH-1/HIGH-2 + fable HIGH-2 (overruling main's draft) | main's separate `flowStep` ref — rejected: dual source of truth, singleton refs break concurrency, cards blind to L1 legs (backgrounding mid-prompt unsafe) |
 | S7 | Form gating re-keyed to `formStage`, never flow `busy` | codex CRITICAL-1 + fable HIGH-1 | busy-gating — RUN IN BACKGROUND would be a no-op (busy spans the whole bridge) |
-| S8 | Cleanup matrix: clean prompt rejections discard pre-tx records (deposits gain parity with withdraws); post-tx never auto-discards; foreground clears in `finally` (fail-open) | codex CRITICAL-2 + fable HIGH-3 | the draft's "no record lingers" claim — was FALSE for approve rejections and public deposits |
+| S8 | Cleanup matrix: explicit user rejections discard pre-tx records (deposits gain parity with withdraws); post-tx never auto-discards; reload is the structural fail-open (S13 owns foreground lifecycle) | codex CRITICAL-2 + fable HIGH-3, narrowed by S14 | the draft's "no record lingers" claim — was FALSE for approve rejections and public deposits |
 | S9 | Per-phase RETRY routing; no fake retry on undriveable flow phases | fable HIGH-3 | blanket "RETRY re-invokes the engine action" |
 | S10 | Monotonic phase latch: states from record facts, runtime selects the active phase | fable MEDIUM-3 | live-step-driven states — flicker between chunked rounds |
 | S11 | Receipt snapshots its data at the stepper→receipt transition | fable MEDIUM-2 | live read by id — cross-tab discard blanks it; `lastCompleted` has one hash |
@@ -97,7 +97,7 @@ Gates: `bun run audit:faucet` + `bun run audit:vue` → `/code-review max --fix`
 
 ## Security & Adversarial Considerations
 - No engine/trust changes: `activeFlowId` and `flowStep` are display-routing state — never inputs to completion, hiding-from-the-journal does not alter record lifecycle (the engine drives identically whether the stepper or a card renders it).
-- The suppression must fail OPEN: `activeFlowId` clears in the flows' `finally` whenever the flow ends without a receipt (D1 matrix). P2 pin: a NON-COMPLETED record is visible in exactly one surface (stepper xor card); completed records follow S12 (receipt-no-card under the form; ✓ card after a reload — runtime `hidden` doesn't survive reloads by design).
+- The suppression must fail OPEN: ownership is UI-owned CAS (S13) — the form releases on its explicit paths, ambiguous failures keep the record VISIBLE in the stepper (never surfaceless), and a reload structurally clears the in-memory owner (card appears). P2 pin: a NON-COMPLETED record is visible in exactly one surface (stepper xor card); completed records follow S12 (receipt-no-card under the form; ✓ card after a reload — runtime `hidden` doesn't survive reloads by design).
 - Receipt links reuse the strict-hash helpers (no new URL surface). Chips render addresses via the existing `AddressDisplay` (no truncation-spoofing change).
 - Copy: signing prompts must say WHICH wallet signs WHAT (anti-blind-signing, consistent with the seal-note pattern); the APPROVE phase must not imply value transfer ("allowance for the bridge portal").
 - No new deps; no storage schema change.
@@ -115,7 +115,7 @@ Swap (next arc); engine/trust model; storage schema; CSP pass; Playwright real-b
 - Dual audit (parallel, both outlines; transcripts in [audit-codex.md](audit-codex.md) / [audit-fable.md](audit-fable.md)):
   - **codex: conditional approve** (split detached-run state from busy; explicit cleanup/fail-open matrix; one tested step-mapper; pin mid-prompt background + receipt sourcing) — ALL folded (S3, S7, S8, plus the D2 rewrite).
   - **fable: conditional approve** (form re-gating off busy; per-record step/error keying; per-phase RETRY routing + deposit clean-reject parity; invariant rescope + reload-during-receipt pin; receipt snapshot; monotonic phase latch + between-rounds pin; testing strategy reframe) — ALL folded (S7–S12, P1/P2 rewrites). Outline: dedicated stepper, unanimous.
-- Final fresh-context codex pass (new session): initial **reject** — 3 blocking findings (flow-owned activeFlowId race; over-broad clean-reject; underivable approve skipped-vs-done), ALL folded same-round as S13/S14/S15 (UI-owned CAS foreground; `isUserRejection` classifier; `approveOutcome` runtime bit). Verdict-flip resume: see audit-codex.md.
+- Final fresh-context codex pass (new session): initial **reject** — 3 blocking findings (flow-owned activeFlowId race; over-broad clean-reject; underivable approve skipped-vs-done), ALL folded same-round as S13/S14/S15 (UI-owned CAS foreground; `isUserRejection` classifier; `approveOutcome` runtime bit). Verdict-flip resume: **conditional approve** — condition (stale flow-finally wording) scrubbed same-commit; one ownership rule throughout. Gate-ready.
 
 ## Seeds
 Drafts in [eli5.html](eli5.html) §Implementation seeds — `/goal` recommended (transcript-observable completion); `/loop 15m` fallback. Finalized post-approval.

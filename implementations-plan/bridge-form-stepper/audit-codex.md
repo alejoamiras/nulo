@@ -38,3 +38,15 @@ Initial verdict: **reject** — 3 blockers, all folded same-round (S13 UI-owned 
 Assumptions: the VerificationModal assumption is fine; “backgrounding mid-prompt is safe” is still unproven until owner lifetime is decoupled from flow lifetime. I would revise S1 as written, narrow S8, and widen S3’s runtime shape. The 3-phase split is still workable if P1 absorbs those changes; otherwise P2 will be forced to invent state it cannot derive.
 
 reject (with blocking findings: flow-owned `activeFlowId` is race-prone/too short-lived for detached deposit completion; clean-reject discard is unsafe without explicit rejection classification; the mapper cannot truthfully render approve skipped vs done from `record + step` alone)
+
+### Round 2b — verdict flip (resume, same session)
+
+All three blockers confirmed resolved; one condition (scrub stale flow-finally wording) applied immediately — S8 + Security rewritten to the S13 ownership rule. Final verdict: **conditional approve** (condition met in the same commit).
+
+1. `activeFlowId`: D1/P1/S13 now fix the ownership bug: UI/session-owned CAS `claimForeground`/`releaseForeground`, no flow-owned lifetime, and explicit pins for stale release, takeover, and settled-promise-no-release. That resolves my race blocker. One stale contradiction remains elsewhere: Security/S8 still mention flow-`finally` clears.
+
+2. Clean reject: D1/P1/S14 now discard only on explicit `isUserRejection` (`4001` / `UserRejectedRequestError`) and keep ambiguous pre-hash failures as records with failure UI. That resolves the over-broad discard blocker.
+
+3. Approve skipped vs done: D2/P1/S15 add ephemeral `approveOutcome` with honest degradation when undefined after reload. That resolves the underivable mapper blocker.
+
+conditional approve (with conditions: scrub the stale pre-S13 wording that still says foreground clears in flow `finally`, so the plan has one ownership rule throughout)
