@@ -1,0 +1,405 @@
+import {
+	type DepositJournalRecord,
+	type KV,
+	type WithdrawJournalRecord,
+	isSealTrusted,
+	markSealTrusted,
+	recoveryKeyFromSignature,
+	sealDepositEnvelope,
+} from "@nulo/bridge-core"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+
+vi.mock("@/contracts/bridge-deployments", () => ({
+	L1_PORTAL: "0xportal",
+	BRIDGE: { toString: () => "0xbridge" },
+}))
+
+import {
+	__resetJournalForTests,
+	addRecord,
+	addRecordVerified,
+	cacheSecret,
+	connectJournalDeps,
+	markSessionLive,
+	resumeSessionWork,
+	runDepositClaim,
+	runOnLane,
+	runWithdrawConsume,
+	useBridgeJournal,
+} from "./useBridgeJournal"
+
+function memKV(): KV {
+	const store = new Map<string, string>()
+	return {
+		getItem: (k) => store.get(k) ?? null,
+		setItem: (k, v) => void store.set(k, v),
+		removeItem: (k) => void store.delete(k),
+	}
+}
+
+const DEPLOY = { chainId: 11155111, portal: "0xportal", bridge: "0xbridge" }
+const SEALER = "0xef4d9e1f4e9e2dd9e747b53f4be3d04bfa935f2d"
+const RECIPIENT = "0x1018808f2c17794badb361c02c945582b8198b495a7e8d01154f7eeb7d719c0d"
+const SIG = `0x${"a".repeat(130)}`
+
+function mkDeposit(id: string, over: Partial<DepositJournalRecord> = {}): DepositJournalRecord {
+	return {
+		schema: 1,
+		id,
+		direction: "deposit",
+		isPrivate: false,
+		amount: "100000000",
+		createdAt: 1,
+		updatedAt: 1,
+		recipient: RECIPIENT,
+		secret: "0xpublicsecret",
+		secretHashHex: id,
+		leafIndex: "7",
+		...DEPLOY,
+		...over,
+	}
+}
+
+function mkWithdraw(id: string, over: Partial<WithdrawJournalRecord> = {}): WithdrawJournalRecord {
+	return {
+		schema: 1,
+		id,
+		direction: "withdraw",
+		isPrivate: false,
+		amount: "40000000",
+		createdAt: 1,
+		updatedAt: 1,
+		recipientL1: SEALER,
+		exitTxHash: id,
+		...DEPLOY,
+		...over,
+	}
+}
+
+/** A claim fake: simulate succeeds until send fires, then reverts msg-not-found (consumed). */
+function smartClaimFake() {
+	let sent = false
+	const claim = vi.fn(async () => ({
+		simulate: async () => {
+			if (sent) throw new Error("No L1 to L2 message found for message hash 0xdead")
+			return {}
+		},
+		send: async () => {
+			sent = true
+			return { txHash: "0xclaimtx" }
+		},
+	}))
+	return claim
+}
+
+function baseDeps(kv: KV) {
+	return {
+		kv,
+		now: () => 999,
+		waitMs: async () => {},
+		connectedL1: () => SEALER,
+		connectedAztec: () => RECIPIENT,
+		signL1: vi.fn(async () => SIG),
+		claimReceiptStatus: vi.fn<() => Promise<"success" | "dropped" | "reverted" | "pending">>(async () => "success"),
+		waitConsumeReceipt: vi.fn(async () => true),
+		verifyConsumeIdentity: vi.fn(async () => true),
+		consume: vi.fn(async () => ({ consumeTxHash: "0xconsumetx" })),
+	}
+}
+
+async function sealEnvelopeFor(rec: DepositJournalRecord, over: Partial<{ recipient: string; amount: string; sealerL1: string }> = {}) {
+	const key = await recoveryKeyFromSignature(SIG)
+	return sealDepositEnvelope(key, {
+		secret: "0xprivatesecret",
+		recipient: over.recipient ?? rec.recipient,
+		amount: over.amount ?? rec.amount,
+		sealerL1: over.sealerL1 ?? SEALER,
+		leafIndex: rec.leafIndex,
+	})
+}
+
+describe("useBridgeJournal engine", () => {
+	let kv: KV
+
+	beforeEach(() => {
+		__resetJournalForTests()
+		kv = memKV()
+	})
+
+	it("② rediscovered claimable deposit NEVER auto-claims — zero claim/sign calls", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xrediscovered"))
+		resumeSessionWork()
+		await new Promise((r) => setTimeout(r, 10))
+		expect(claim).not.toHaveBeenCalled()
+		expect(deps.signL1).not.toHaveBeenCalled()
+	})
+
+	it("③ sessionLive deposit auto-continues through gate → send → receipt → done", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xlive"))
+		markSessionLive("0xlive")
+		resumeSessionWork()
+		await vi.waitFor(() => {
+			const { records } = useBridgeJournal()
+			expect(records.value.find((r) => r.id === "0xlive")?.completedAt).toBe(999)
+		})
+		expect(claim).toHaveBeenCalled()
+	})
+
+	it("④ same-id double invocation runs once; ⑭ two records' sends serialize on the aztec lane", async () => {
+		const deps = baseDeps(kv)
+		const order: string[] = []
+		let release: () => void = () => {}
+		const gate = new Promise<void>((r) => {
+			release = r
+		})
+		const claim = vi.fn(async (rec: DepositJournalRecord) => {
+			let sent = false
+			return {
+				simulate: async () => {
+					if (sent) throw new Error("No L1 to L2 message found")
+					return {}
+				},
+				send: async () => {
+					order.push(`start:${rec.id}`)
+					if (rec.id === "0xa") await gate
+					sent = true
+					order.push(`end:${rec.id}`)
+					return { txHash: `0xtx-${rec.id}` }
+				},
+			}
+		})
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xa"))
+		addRecord(mkDeposit("0xb"))
+
+		const first = runDepositClaim("0xa")
+		const dup = runDepositClaim("0xa")
+		const second = runDepositClaim("0xb")
+		await new Promise((r) => setTimeout(r, 20))
+		// The duplicate did not build a second interaction for 0xa; 0xb's send waits on the lane.
+		expect(order).toEqual(["start:0xa"])
+		release()
+		await Promise.all([first, dup, second])
+		expect(order).toEqual(["start:0xa", "end:0xa", "start:0xb", "end:0xb"])
+		expect(claim.mock.calls.filter((c) => (c[0] as DepositJournalRecord).id === "0xa").length).toBeLessThanOrEqual(2)
+	})
+
+	it("⑤ a single transient dropped read does NOT clear claimTxHash; three consecutive do", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		const statuses = ["dropped", "success"] as const
+		let i = 0
+		deps.claimReceiptStatus = vi.fn(async () => statuses[Math.min(i++, statuses.length - 1)])
+		connectJournalDeps({ ...deps, claim, connectedAztec: () => RECIPIENT })
+		addRecord(mkDeposit("0xdebounce", { claimTxHash: "0xclaimtx", secret: undefined, isPrivate: false }))
+		// Rediscovered receipt-wait is prompt-free and auto-finishes; identity probe is skipped
+		// (no secret available) ⇒ null ⇒ completes.
+		resumeSessionWork()
+		await vi.waitFor(() => {
+			const { records } = useBridgeJournal()
+			expect(records.value.find((r) => r.id === "0xdebounce")?.completedAt).toBe(999)
+		})
+
+		__resetJournalForTests()
+		kv = memKV()
+		const deps2 = baseDeps(kv)
+		deps2.claimReceiptStatus = vi.fn(async () => "dropped" as const)
+		connectJournalDeps({ ...deps2, claim: smartClaimFake() })
+		addRecord(mkDeposit("0xdropped", { claimTxHash: "0xclaimtx", secret: undefined }))
+		resumeSessionWork()
+		await vi.waitFor(() => {
+			const { records, runtime } = useBridgeJournal()
+			expect((records.value.find((r) => r.id === "0xdropped") as DepositJournalRecord).claimTxHash).toBeUndefined()
+			expect(runtime.value["0xdropped"]?.attention).toBe("error")
+		})
+	})
+
+	it("⑰ receipt success but the record's message STILL claimable ⇒ unknown-outcome, not done", async () => {
+		const deps = baseDeps(kv)
+		// simulate always succeeds — the probe sees the message still claimable.
+		const claim = vi.fn(async () => ({
+			simulate: async () => ({}),
+			send: async () => ({ txHash: "0xclaimtx" }),
+		}))
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xspoof"))
+		await runDepositClaim("0xspoof")
+		const { records, runtime } = useBridgeJournal()
+		expect(records.value.find((r) => r.id === "0xspoof")?.completedAt).toBeUndefined()
+		expect(runtime.value["0xspoof"]?.attention).toBe("unknown-outcome")
+	})
+
+	it("⑥ tampered plaintext recipient on a private record: no send, display resynced from the envelope", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		const rec = mkDeposit("0xtamper", { isPrivate: true, secret: undefined, recipient: "0xevil", sealerL1: SEALER })
+		rec.sealedEnvelope = await sealEnvelopeFor(rec, { recipient: RECIPIENT })
+		connectJournalDeps({ ...deps, claim, connectedAztec: () => "0xevil" })
+		addRecord(rec)
+		await runDepositClaim("0xtamper")
+		const { records, runtime } = useBridgeJournal()
+		expect(claim).not.toHaveBeenCalled()
+		expect(runtime.value["0xtamper"]?.attention).toBe("tampered")
+		expect((records.value.find((r) => r.id === "0xtamper") as DepositJournalRecord).recipient).toBe(RECIPIENT)
+	})
+
+	it("⑦ unseal failure revokes trust ONLY for the sealer account and keeps the record", async () => {
+		const deps = baseDeps(kv)
+		markSealTrusted(kv, DEPLOY.chainId, SEALER, "rabby")
+		const rec = mkDeposit("0xfail", { isPrivate: true, secret: undefined, sealerL1: SEALER })
+		rec.sealedEnvelope = await sealEnvelopeFor(rec)
+		// The wallet now signs DIFFERENTLY than at seal time ⇒ wrong key ⇒ GCM failure.
+		connectJournalDeps({ ...deps, claim: smartClaimFake(), signL1: vi.fn(async () => `0x${"b".repeat(130)}`) })
+		addRecord(rec)
+		await runDepositClaim("0xfail")
+		const { records, runtime } = useBridgeJournal()
+		expect(runtime.value["0xfail"]?.attention).toBe("unseal-failed")
+		expect(isSealTrusted(kv, DEPLOY.chainId, SEALER, "rabby")).toBe(false)
+		expect(records.value.find((r) => r.id === "0xfail")).toBeDefined()
+	})
+
+	it("⑧ wrong connected L1 account ⇒ pre-unseal mismatch, NO signature, trust intact", async () => {
+		const deps = baseDeps(kv)
+		markSealTrusted(kv, DEPLOY.chainId, SEALER, "rabby")
+		const rec = mkDeposit("0xwrongl1", { isPrivate: true, secret: undefined, sealerL1: SEALER })
+		rec.sealedEnvelope = await sealEnvelopeFor(rec)
+		const signL1 = vi.fn(async () => SIG)
+		connectJournalDeps({ ...deps, claim: smartClaimFake(), signL1, connectedL1: () => "0xsomeoneelse" })
+		addRecord(rec)
+		await runDepositClaim("0xwrongl1")
+		const { runtime } = useBridgeJournal()
+		expect(runtime.value["0xwrongl1"]?.attention).toBe("mismatch")
+		expect(signL1).not.toHaveBeenCalled()
+		expect(isSealTrusted(kv, DEPLOY.chainId, SEALER, "rabby")).toBe(true)
+	})
+
+	it("⑧b wrong connected AZTEC account ⇒ mismatch before anything runs", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		connectJournalDeps({ ...deps, claim, connectedAztec: () => "0xanotheraccount" })
+		addRecord(mkDeposit("0xaztecmismatch", { isPrivate: true, secret: undefined, sealedEnvelope: "blob" }))
+		await runDepositClaim("0xaztecmismatch")
+		const { runtime } = useBridgeJournal()
+		expect(runtime.value["0xaztecmismatch"]?.attention).toBe("mismatch")
+		expect(claim).not.toHaveBeenCalled()
+	})
+
+	it("⑨ same-session cached secret claims with ZERO L1 signatures; rediscovered uses exactly one", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		const rec = mkDeposit("0xsigcount", { isPrivate: true, secret: undefined, sealerL1: SEALER })
+		rec.sealedEnvelope = await sealEnvelopeFor(rec)
+		connectJournalDeps({ ...deps, claim })
+		addRecord(rec)
+		cacheSecret("0xsigcount", "0xprivatesecret", {
+			v: 2,
+			secret: "0xprivatesecret",
+			recipient: rec.recipient,
+			amount: rec.amount,
+			sealerL1: SEALER,
+			leafIndex: rec.leafIndex,
+		})
+		await runDepositClaim("0xsigcount")
+		expect(deps.signL1).not.toHaveBeenCalled()
+		expect(useBridgeJournal().records.value.find((r) => r.id === "0xsigcount")?.completedAt).toBe(999)
+
+		__resetJournalForTests()
+		kv = memKV()
+		const deps2 = baseDeps(kv)
+		const rec2 = mkDeposit("0xresume", { isPrivate: true, secret: undefined, sealerL1: SEALER })
+		rec2.sealedEnvelope = await sealEnvelopeFor(rec2)
+		connectJournalDeps({ ...deps2, claim: smartClaimFake() })
+		addRecord(rec2)
+		await runDepositClaim("0xresume")
+		expect(deps2.signL1).toHaveBeenCalledTimes(1)
+	})
+
+	it("⑩ rediscovered consumeTxHash waits on the receipt — consume() never re-prompts", async () => {
+		const deps = baseDeps(kv)
+		connectJournalDeps(deps)
+		addRecord(mkWithdraw("0xexit", { consumeTxHash: "0xprior" }))
+		await runWithdrawConsume("0xexit")
+		expect(deps.consume).not.toHaveBeenCalled()
+		expect(deps.waitConsumeReceipt).toHaveBeenCalledWith("0xprior")
+		expect(useBridgeJournal().records.value.find((r) => r.id === "0xexit")?.completedAt).toBe(999)
+	})
+
+	it("⑩b a consume tx that fails identity verification ⇒ unknown-outcome, never done", async () => {
+		const deps = baseDeps(kv)
+		deps.verifyConsumeIdentity = vi.fn(async () => false)
+		connectJournalDeps(deps)
+		addRecord(mkWithdraw("0xforged", { consumeTxHash: "0xunrelated" }))
+		await runWithdrawConsume("0xforged")
+		const { records, runtime } = useBridgeJournal()
+		expect(runtime.value["0xforged"]?.attention).toBe("unknown-outcome")
+		expect(records.value.find((r) => r.id === "0xforged")?.completedAt).toBeUndefined()
+		expect(deps.waitConsumeReceipt).not.toHaveBeenCalled()
+	})
+
+	it("withdraw happy path: consume once, consumeTxHash persisted, receipt ⇒ done", async () => {
+		const deps = baseDeps(kv)
+		connectJournalDeps(deps)
+		addRecord(mkWithdraw("0xfresh"))
+		await runWithdrawConsume("0xfresh")
+		expect(deps.consume).toHaveBeenCalledTimes(1)
+		const rec = useBridgeJournal().records.value.find((r) => r.id === "0xfresh") as WithdrawJournalRecord
+		expect(rec.consumeTxHash).toBe("0xconsumetx")
+		expect(rec.completedAt).toBe(999)
+	})
+
+	it("⑮ provisional withdraw (no exitTxHash) ⇒ unknown-outcome, nothing runs", async () => {
+		const deps = baseDeps(kv)
+		connectJournalDeps(deps)
+		addRecord(mkWithdraw("wd-pending-abc", { exitTxHash: undefined }))
+		await runWithdrawConsume("wd-pending-abc")
+		expect(useBridgeJournal().runtime.value["wd-pending-abc"]?.attention).toBe("unknown-outcome")
+		expect(deps.consume).not.toHaveBeenCalled()
+	})
+
+	it("⑪ stale-deployment record refuses to run (distinct attention)", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xstale", { portal: "0xOLDPORTAL" }))
+		await runDepositClaim("0xstale")
+		expect(useBridgeJournal().runtime.value["0xstale"]?.attention).toBe("stale-deployment")
+		expect(claim).not.toHaveBeenCalled()
+	})
+
+	it("write-and-verify aborts when storage drops the record", async () => {
+		const blackhole: KV = { getItem: () => null, setItem: () => {}, removeItem: () => {} }
+		connectJournalDeps({ ...baseDeps(blackhole), kv: blackhole })
+		expect(() => addRecordVerified(mkDeposit("0xlost"))).toThrow(/persist/i)
+	})
+
+	it("runOnLane serializes one lane and leaves the other free", async () => {
+		const order: string[] = []
+		let releaseA: () => void = () => {}
+		const gateA = new Promise<void>((r) => {
+			releaseA = r
+		})
+		const a = runOnLane("l1", async () => {
+			order.push("a-start")
+			await gateA
+			order.push("a-end")
+		})
+		const b = runOnLane("l1", async () => {
+			order.push("b-start")
+		})
+		const c = runOnLane("aztec", async () => {
+			order.push("c-start")
+		})
+		await c
+		expect(order).toContain("c-start")
+		expect(order).not.toContain("b-start")
+		releaseA()
+		await Promise.all([a, b])
+		expect(order).toEqual(["a-start", "c-start", "a-end", "b-start"])
+	})
+})
