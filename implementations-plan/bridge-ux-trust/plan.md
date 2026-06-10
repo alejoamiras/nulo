@@ -92,7 +92,7 @@ AES-GCM already authenticates its plaintext (`@nulo/wallet-crypto` `EncryptionKe
 
 ## Phases
 
-### P1 — bridge-core foundations (pure TS, no UI, no signatures) 🔄
+### P1 — bridge-core foundations (pure TS, no UI, no signatures) ✓
 Files: `journal.ts`(+test) NEW; `recovery.ts`(+test) DELETE; `recovery-crypto.ts`(+test) EXTEND (`sealDepositEnvelope`/`openDepositEnvelope` v2+legacy-fallback, `sealDepositRecord({sign, binding, meta, trusted}) → {blob, key}` — trusted ⇒ 1 sign, untrusted ⇒ 2-sign self-test); `seal-trust.ts`(+test) NEW; `index.ts` exports.
 Smallest proof: multi-record upsert isolation; parse cap; stage-derivation table (every milestone combo → canonical stage); envelope round-trip + **tamper rejection** (flipped byte ⇒ throws) + field-mismatch detection + legacy-blob fallback; trust: untrusted signs exactly 2× + aborts on the counter-signer, trusted signs exactly 1×, revoke/mark idempotent.
 Validate: `bun run --cwd packages/bridge-core test && bun run --cwd packages/bridge-core typecheck && bun run lint`.
