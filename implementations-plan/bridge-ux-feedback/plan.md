@@ -53,7 +53,7 @@ The mid-flow reload case is covered by the step/stage narration ("Claim submitte
 
 ## Phases
 
-### P1 — Engine narration + receipt-wait rework ⬜
+### P1 — Engine narration + receipt-wait rework 🔄
 Files: `packages/faucet/src/composables/useBridgeJournal.ts` (+test).
 - `RecordRuntime.step`/`stepDetail`; transitions set/cleared in `resolvePrivateSecret` (unsealing), the sync gate (syncing w/ poll count), send (sending), `finishDepositByReceipt` (confirming w/ attempt count → verifying), `runWithdrawConsume` (confirming).
 - Receipt poll: pending continues to a ~30-min cap with `step` detail; `unknown-outcome` only on probe false/null, reverted handling unchanged; budget-exhaustion note rewritten ("Still confirming on Aztec — slow testnet. This card keeps checking; RETRY forces a check now. Funds are safe.") and is NOT `unknown-outcome` (a new soft note via `stepDetail`).
@@ -111,6 +111,9 @@ Gates: `bun run audit:faucet` + `bun run audit:vue` → `/code-review max --fix`
 
 ## Out of scope
 Swap (next arc); CSP/hardening pass (unchanged); Playwright real-browser flows; any engine trust-model change.
+
+## Approval
+**USER VERDICT: APPROVE** (gate, this session) — scope as written, no conditions. Seeds finalized; implementation begins at P1.
 
 ## Audit verdicts
 - Dual audit (parallel, both outlines; transcripts in [audit-codex.md](audit-codex.md) / [audit-fable.md](audit-fable.md)):
