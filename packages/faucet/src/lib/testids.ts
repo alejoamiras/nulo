@@ -80,6 +80,15 @@ export const TESTIDS = {
 	bridgeSubmit: "fa-bridge-submit",
 	bridgeFormError: "fa-bridge-form-error",
 
+	// Bridge — the takeover stepper + receipt (phases carry data-phase/data-state)
+	stepper: "fa-bridge-stepper",
+	stepperPhase: "fa-stepper-phase",
+	stepperBackground: "fa-stepper-background",
+	stepperRetry: "fa-stepper-retry",
+	receipt: "fa-bridge-receipt",
+	receiptNewBridge: "fa-receipt-new-bridge",
+	receiptLink: "fa-receipt-link",
+
 	// Bridge — the explicit L1 test-USDC mint (NOT the Faucet tab's L2 drips)
 	mintL1: "fa-mint-l1",
 	mintL1Status: "fa-mint-l1-status",

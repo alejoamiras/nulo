@@ -7,7 +7,12 @@ import { sepolia } from "viem/chains"
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue"
 import { BRIDGE_TOKEN } from "@/contracts/bridge-deployments"
 
+/** Components */
+import BridgeReceipt, { type ReceiptSnapshot } from "./BridgeReceipt.vue"
+import BridgeStepper from "./BridgeStepper.vue"
+
 /** Composables */
+import { useBridgeJournal } from "@/composables/useBridgeJournal"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { providerFingerprint, useDepositFlow } from "@/composables/useDeposit"
 import { useL1Usdc } from "@/composables/useL1Usdc"
@@ -16,11 +21,13 @@ import { type UseTokenBalanceHandle, useTokenBalance } from "@/composables/useTo
 import { useWithdrawFlow } from "@/composables/useWithdraw"
 
 /** Utils */
+import type { DepositJournalRecord, WithdrawJournalRecord } from "@nulo/bridge-core"
 import { TESTIDS } from "@/lib/testids"
 
 const l1 = useL1Wallet()
 const bridge = useBridgeWallet()
 const usdc = useL1Usdc()
+const journal = useBridgeJournal()
 const depositFlow = useDepositFlow()
 const withdrawFlow = useWithdrawFlow()
 
@@ -29,7 +36,16 @@ const isPrivate = ref(false)
 const amount = ref("100")
 
 const bothConnected = computed(() => l1.isConnected.value && bridge.status.value === "connected")
-const busy = computed(() => depositFlow.busy.value || withdrawFlow.busy.value)
+
+// The takeover machine (plan S2/S7): ALL form gating keys off formStage — never the flows' busy,
+// which spans the whole bridge and would make RUN IN BACKGROUND a no-op.
+const formStage = ref<"form" | "stepper" | "receipt">("form")
+const activeId = ref<string | null>(null)
+const receiptSnapshot = ref<ReceiptSnapshot | null>(null)
+// Double-click guard for the submit→onRecord window only (cleared the moment the record exists).
+const submitting = ref(false)
+
+const activeRecord = computed(() => (activeId.value ? journal.records.value.find((r) => r.id === activeId.value) : undefined))
 
 // The L2 balance reader lives only while the Aztec wallet is connected; this component owns its
 // lifecycle (create on connect, dispose on change/unmount).
@@ -88,9 +104,81 @@ function flip() {
 }
 
 async function onSubmit() {
-	if (amountUnits.value === 0n || validationError.value) return
-	if (direction.value === "l1-to-l2") await depositFlow.deposit(amountUnits.value, isPrivate.value)
-	else await withdrawFlow.withdraw(amountUnits.value, isPrivate.value)
+	if (amountUnits.value === 0n || validationError.value || formStage.value !== "form" || submitting.value) return
+	submitting.value = true
+	const onRecord = (id: string) => {
+		activeId.value = id
+		journal.claimForeground(id)
+		formStage.value = "stepper"
+		submitting.value = false
+	}
+	const flow = direction.value === "l1-to-l2" ? depositFlow.deposit : withdrawFlow.withdraw
+	await flow(amountUnits.value, isPrivate.value, { onRecord })
+	submitting.value = false
+	// A clean rejection discarded the record (the cleanup matrix): release + back to the form,
+	// the flow's error renders inline. Anything else (still running / failed-but-kept / completed)
+	// keeps the stepper or already moved to the receipt. (Read through a local: TS keeps the
+	// pre-await narrowing on `.value` otherwise.)
+	const stageNow: string = formStage.value
+	if (stageNow === "stepper" && activeId.value && !journal.records.value.some((r) => r.id === activeId.value)) {
+		journal.releaseForeground(activeId.value)
+		activeId.value = null
+		formStage.value = "form"
+	}
+	void usdc.refresh()
+	void l2Handle.value?.refresh()
+}
+
+// The stepper→receipt transition keys off the RECORD's completion (never the flow promise — the
+// engine detaches receipt rounds), snapshotting everything the receipt shows (plan S11).
+watch(
+	() => activeRecord.value?.completedAt,
+	(done) => {
+		if (!done || formStage.value !== "stepper") return
+		const rec = activeRecord.value
+		if (!rec) return
+		receiptSnapshot.value =
+			rec.direction === "deposit"
+				? {
+						direction: "deposit",
+						amount: rec.amount,
+						isPrivate: rec.isPrivate,
+						l1TxHash: (rec as DepositJournalRecord).depositTxHash,
+						l2TxHash: (rec as DepositJournalRecord).claimTxHash,
+					}
+				: {
+						direction: "withdraw",
+						amount: rec.amount,
+						isPrivate: rec.isPrivate,
+						l1TxHash: (rec as WithdrawJournalRecord).consumeTxHash,
+						l2TxHash: (rec as WithdrawJournalRecord).exitTxHash,
+					}
+		formStage.value = "receipt"
+	},
+)
+
+// Fail-open guard: a stepper pointing at a vanished record (cross-tab discard) resets to the form.
+watch(
+	() => formStage.value === "stepper" && activeId.value !== null && activeRecord.value === undefined,
+	(orphaned) => {
+		if (!orphaned) return
+		if (activeId.value) journal.releaseForeground(activeId.value)
+		activeId.value = null
+		formStage.value = "form"
+	},
+)
+
+function onBackground() {
+	if (activeId.value) journal.releaseForeground(activeId.value)
+	activeId.value = null
+	formStage.value = "form"
+}
+
+function onNewBridge() {
+	if (activeId.value) journal.releaseForeground(activeId.value)
+	activeId.value = null
+	receiptSnapshot.value = null
+	formStage.value = "form"
 	void usdc.refresh()
 	void l2Handle.value?.refresh()
 }
@@ -102,10 +190,13 @@ function fmt(b: bigint | null): string {
 </script>
 
 <template>
-	<section class="bridge-form" :data-testid="TESTIDS.bridgeForm">
+	<section class="bridge-form" :data-testid="TESTIDS.bridgeForm" :data-stage="formStage">
+		<BridgeStepper v-if="formStage === 'stepper' && activeRecord" :record="activeRecord" @background="onBackground" />
+		<BridgeReceipt v-else-if="formStage === 'receipt' && receiptSnapshot" :snapshot="receiptSnapshot" @new-bridge="onNewBridge" />
+		<template v-else>
 		<header>
 			<h3>BRIDGE USDC</h3>
-			<p class="sub">Move test USDC between Ethereum (Sepolia) and Aztec, 1:1. Progress lives in the journal below.</p>
+			<p class="sub">Move test USDC between Ethereum (Sepolia) and Aztec, 1:1. Bridges you background land in Pending Bridges below.</p>
 		</header>
 
 		<div class="panels">
@@ -131,7 +222,7 @@ function fmt(b: bigint | null): string {
 				</template>
 			</div>
 
-			<button class="flip" type="button" aria-label="Flip direction" :disabled="busy" :data-testid="TESTIDS.bridgeFlip" @click="flip">
+			<button class="flip" type="button" aria-label="Flip direction" :disabled="submitting" :data-testid="TESTIDS.bridgeFlip" @click="flip">
 				⇅
 			</button>
 
@@ -165,7 +256,7 @@ function fmt(b: bigint | null): string {
 				type="number"
 				min="0"
 				step="1"
-				:disabled="busy"
+				:disabled="submitting"
 				:data-testid="TESTIDS.bridgeAmount"
 			/>
 			<span class="unit">USDC</span>
@@ -177,7 +268,7 @@ function fmt(b: bigint | null): string {
 				type="button"
 				class="toggle"
 				:class="{ on: isPrivate }"
-				:disabled="busy"
+				:disabled="submitting"
 				:data-testid="TESTIDS.bridgePrivacyToggle"
 				:aria-pressed="isPrivate"
 				@click="isPrivate = !isPrivate"
@@ -206,11 +297,12 @@ function fmt(b: bigint | null): string {
 			<template v-else>You'll sign once to seal this transfer's recovery secret. No transaction, no cost.</template>
 		</p>
 
-		<AppButton :loading="busy" :disabled="!bothConnected || busy" :data-testid="TESTIDS.bridgeSubmit" @click="onSubmit">
+		<AppButton :loading="submitting" :disabled="!bothConnected || submitting" :data-testid="TESTIDS.bridgeSubmit" @click="onSubmit">
 			{{ !bothConnected ? "CONNECT BOTH WALLETS" : direction === "l1-to-l2" ? "BRIDGE TO AZTEC" : "BRIDGE TO ETHEREUM" }}
 		</AppButton>
 
 		<p v-if="formError" class="err-msg" :data-testid="TESTIDS.bridgeFormError">{{ formError }}</p>
+		</template>
 	</section>
 </template>
 
