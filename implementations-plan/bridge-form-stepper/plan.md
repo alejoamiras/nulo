@@ -63,7 +63,7 @@ Files: `BridgeForm.vue` (the `formStage: form | stepper | receipt` machine — *
 Smallest proof: submit flips form→stepper and the journal hides the active record (mock journal); phases render from the MAPPER (mock it — the matrices live in P1); RUN IN BACKGROUND clears `activeFlowId` ⇒ card appears AND the form is immediately interactive (the HIGH-1 pin); receipt SNAPSHOT: populated at transition, survives the record being discarded cross-tab; NEW BRIDGE resets; ✕ phase shows per-phase retry routing (engine phase ⇒ engine action invoked; flow phase post-tx ⇒ no retry button, background/discard copy); the one-surface invariant pinned FOR NON-COMPLETED records (stepper xor card), plus both completed behaviors pinned explicitly: completion under the form ⇒ receipt + no card; reload-during-receipt ⇒ ✓ card visible (runtime `hidden` is gone after reload — fable MEDIUM-1).
 Validate: P1 commands + `bun run --cwd packages/faucet test:e2e` (smoke extended: submit → no card while driving → background → card appears + form usable).
 
-### P3 — Wallet chips row + rename + gates 🔄
+### P3 — Wallet chips row + rename + gates ✓
 Files: `L1WalletPanel.vue`, `BridgeWalletPanel.vue` (chip restyle, ✕ disconnect, logic untouched), `BridgeView.vue` (`.wallets` row), `BridgeJournal.vue` (heading/sub/empty copy), tests updated.
 Smallest proof: chips render address + ✕ when connected (✕ fires disconnect with the existing testids); connect buttons when disconnected; wrong-chain switch still reachable; journal heading/empty copy pins.
 Gates: `bun run audit:faucet` + `bun run audit:vue` → `/code-review max --fix` (separate commit) → codex post-impl audit → manual checklist.
