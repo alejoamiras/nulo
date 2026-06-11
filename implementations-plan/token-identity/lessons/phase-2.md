@@ -8,3 +8,7 @@
 - Suites: wallet-bridge 114 ✓ (104 + 10 new), extension typecheck ✓, root lint ✓.
 
 LESSONS_FILE=implementations-plan/token-identity/lessons/phase-2.md
+
+## 2026-06-11 - post-impl conditions folded + the foreign-extension incident
+- **Codex post-impl: conditional approve** - its condition-1 was a production-grade catch: the popup reports delta-approved capabilities as granted, but persistence only appended NEVER-granted types - a contracts re-consent (the field-diff redeploy path!) was reported granted and silently dropped. Fixed with replace-semantics (`deltaApprovedTypes` + `replacementFor`: the stored grant of a re-approved type is REPLACED by the approved delta version; echoes deduped; rejections keep the old grant). Pins: persists-and-covers (no second prompt), rejection interplay, reader profileId/chainId pass-through (stickiness), plus a dedicated 18-dec BridgeForm spec (exact-base-unit parse at 18, AZLO balance rendering). Copy strays (two hardcoded USDC sub-lines) → constant-driven.
+- **The user's persisting scope-violations after rebuild+reinstall**: NOT our wallet at all - the console's content script (`DEBUG-7f3a`, `bazaar-tf2-primus-bridge-v2`, extensionVersion 0.1.0, id plfofdpekmdgnfiohmeejpgcfhbfdbhd) matches NOTHING in this repo; a foreign extension was winning the wallet-sdk discovery race and answering with its own scope model. Resolution: disable it. Backlog note: the wrong-wallet case should be more obvious in the verification UX (the emoji modal verified a FOREIGN wallet without the user noticing).
