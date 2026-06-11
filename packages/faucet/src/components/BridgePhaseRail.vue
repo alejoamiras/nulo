@@ -26,12 +26,20 @@ onBeforeUnmount(() => clearInterval(ticker))
 const rt = computed(() => journal.runtime.value[props.record.id] ?? {})
 const phases = computed(() => trackPhases(props.record.id, stepperPhases(props.record, rt.value), now.value))
 const activePhase = computed(() => phases.value.find((p) => p.state === "active" || p.state === "failed"))
+/** Compact cards narrate only what is LIVE: a failed note, or the engine's running stepDetail -
+ *  never the static signing prompt (an idle card must not instruct "confirm in your wallet"). */
+const compactDetail = computed(() => {
+	const phase = activePhase.value
+	if (!phase?.detail) return null
+	if (phase.state === "failed") return phase.detail
+	return rt.value.stepDetail ? phase.detail : null
+})
 
 const GLYPH: Record<BridgePhase["state"], string> = {
 	pending: "▢",
 	active: "●",
 	done: "✓",
-	skipped: "⊘",
+	skipped: "✓",
 	failed: "✕",
 }
 
@@ -64,10 +72,7 @@ function liveElapsed(startedAt?: number): string | null {
 			<span v-if="activePhase" class="strip-label">{{ activePhase.label }}</span>
 			<span v-if="activePhase && liveElapsed(activePhase.startedAt)" class="strip-clock">{{ liveElapsed(activePhase.startedAt) }}</span>
 		</div>
-		<p v-if="activePhase?.detail" class="detail" :data-testid="TESTIDS.journalStep">
-			<span v-if="activePhase.state === 'active'" class="pulse">●</span>
-			{{ activePhase.detail }}
-		</p>
+		<p v-if="compactDetail" class="detail" :data-testid="TESTIDS.journalStep">{{ compactDetail }}</p>
 		<p v-if="activePhase?.progress" class="bar-line">
 			<span class="bar">{{ bar(activePhase.progress.fraction) }}</span>
 			<span class="bar-count">{{ activePhase.progress.current }} / {{ activePhase.progress.target }}</span>

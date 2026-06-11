@@ -137,6 +137,16 @@ function onDiscard() {
 		:data-privacy="record.isPrivate ? 'private' : 'public'"
 		:data-attention="attention"
 	>
+		<button
+			v-if="stage === 'done'"
+			type="button"
+			class="dismiss"
+			aria-label="Clear"
+			:data-testid="TESTIDS.journalClear"
+			@click="journal.clearDone(record.id)"
+		>
+			✕
+		</button>
 		<p v-if="stage === 'done'" class="stamp">{{ record.direction === "deposit" ? "BRIDGED ✓" : "RELEASED ✓" }}</p>
 		<header class="row">
 			<span class="dir">{{ record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM" }}</span>
@@ -182,16 +192,7 @@ function onDiscard() {
 				{{ attention === "unknown-outcome" || attention === "error" ? "RETRY" : "FINISH" }}
 			</button>
 			<button
-				v-if="stage === 'done'"
-				type="button"
-				class="action subtle"
-				:data-testid="TESTIDS.journalClear"
-				@click="journal.clearDone(record.id)"
-			>
-				CLEAR
-			</button>
-			<button
-				v-else-if="idle"
+				v-if="idle && stage !== 'done'"
 				type="button"
 				class="action danger"
 				:data-testid="discardArmed ? TESTIDS.journalDiscardConfirm : TESTIDS.journalDiscard"
@@ -210,11 +211,28 @@ function onDiscard() {
 
 <style scoped>
 .journal-card {
+	position: relative;
 	display: flex;
 	flex-direction: column;
 	gap: 10px;
 	padding: 16px;
 	border: 1px solid var(--nulo-outline);
+}
+
+.dismiss {
+	position: absolute;
+	top: 10px;
+	right: 12px;
+	background: transparent;
+	border: none;
+	color: var(--txt-secondary);
+	font: 600 13px/1 var(--font-mono);
+	cursor: pointer;
+	padding: 2px 4px;
+}
+
+.dismiss:hover {
+	color: var(--red);
 }
 
 .journal-card[data-attention] {
