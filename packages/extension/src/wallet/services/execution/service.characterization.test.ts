@@ -72,50 +72,6 @@ describe("cancelJob: journal-first ordering contract", () => {
 	})
 })
 
-// ── getGasBalances: cache + single-flight shape ────────────────────────
-
-describe("getGasBalances: cache + single-flight contract", () => {
-	const BALANCES = { publicFeeJuice: "100", privateFeeJuice: null }
-
-	test("fresh cache entry returned without recompute (deps never touched)", async () => {
-		const service = makeService()
-		// Collaborators stay null! — touching them would throw, which proves
-		// the cached path short-circuits before any dependency access.
-		inject(service, {
-			gasBalanceCache: new Map([["net-1:0xacc", { result: BALANCES, fetchedAt: Date.now() }]]),
-		})
-		expect(await service.getGasBalances("net-1", "0xacc")).toBe(BALANCES)
-	})
-
-	test("stale cache entry is NOT returned (TTL boundary)", async () => {
-		const service = makeService()
-		inject(service, {
-			gasBalanceCache: new Map([["net-1:0xacc", { result: BALANCES, fetchedAt: Date.now() - 5 * 60 * 1000 - 1 }]]),
-		})
-		// Past TTL the facade recomputes; with null! collaborators that
-		// recompute rejects — proving the cache was bypassed.
-		await expect(service.getGasBalances("net-1", "0xacc")).rejects.toThrow()
-	})
-
-	test("forceRefresh bypasses a fresh cache entry", async () => {
-		const service = makeService()
-		inject(service, {
-			gasBalanceCache: new Map([["net-1:0xacc", { result: BALANCES, fetchedAt: Date.now() }]]),
-		})
-		await expect(service.getGasBalances("net-1", "0xacc", true)).rejects.toThrow()
-	})
-
-	test("single-flight: concurrent callers share the in-flight promise", async () => {
-		const service = makeService()
-		const pending = Promise.resolve(BALANCES)
-		inject(service, {
-			gasBalanceInFlight: new Map([["net-1:0xacc", pending]]),
-		})
-		const result = await service.getGasBalances("net-1", "0xacc")
-		expect(result).toBe(BALANCES)
-	})
-})
-
 // ── R1-M2 named pin: no-slot-for-executeSendTransaction ────────────────
 
 describe("no-slot-for-executeSendTransaction (bug pin)", () => {

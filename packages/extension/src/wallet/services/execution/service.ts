@@ -105,6 +105,7 @@ import {
 import { coerceAmount } from "./coerce-amount"
 import { OperationPlanner, type TransferRequest } from "./operation-planner"
 import { fingerprintBaseFee, fingerprintFeeSettings, TransferEstimateReuse } from "./transfer-estimate-reuse"
+import { GasBalanceReader } from "./gas-balance-reader"
 import { ContractResolver, findFunctionByName } from "./contract-resolver"
 import { batchedViewSimulation } from "./helpers/batched-view-simulation"
 import { getViewSimulationDeps } from "./helpers/get-view-simulation-deps"
@@ -203,8 +204,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	private coordinator: ExecutionCoordinator = null!
 
 	/** TTL cache for gas balance queries (survives popup reopens). */
-	private static readonly GAS_BALANCE_TTL_MS = 5 * 60 * 1000 // 5 minutes
-	private gasBalanceCache = new Map<string, { result: GasBalances; fetchedAt: number }>()
+	private gasBalances: GasBalanceReader = null!
 
 	/** Reuse cache for `executeTransfer` post-confirm. The popup-side fee
 	 *  estimator (`estimateTransferFee`) writes here; `executeTransfer`
@@ -218,12 +218,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	 *  and default_entrypoint variants take divergent code paths that the
 	 *  reuse contract doesn't yet cover. */
 	private estimateReuse: TransferEstimateReuse = null!
-	/** Single-flight dedup for concurrent getGasBalances callers.
-	 *  The Send popup mounts multiple components that each call this
-	 *  simultaneously on unlock; without dedup, each request independently
-	 *  enters FpcService discovery under a shared lock, amplifying
-	 *  contention and exposing a wedged PXE call as an N-caller stall. */
-	private gasBalanceInFlight = new Map<string, Promise<GasBalances>>()
 
 	/** Phase 2 cancel surface: jobId → AbortController. SW-internal only,
 	 *  never crosses the wire. `cancelJob(id)` aborts the controller; the
@@ -278,6 +272,25 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		this.resolver = new ContractResolver(this.logger)
 		this.authwit = new AuthwitDiscoverer(this.logger)
 		this.coordinator = new ExecutionCoordinator(this.taskService, this.logger)
+		this.gasBalances = new GasBalanceReader({
+			getChainId: async (networkId) => (await this.networkService.getNetwork(networkId)).chainId,
+			getViewDeps: (networkId, accountAddress) =>
+				getViewSimulationDeps(
+					{
+						profiles: this.profileService,
+						networks: this.networkService,
+						accounts: this.accountService,
+						pxeService: this.pxeService,
+						contractResolver: this.resolver,
+						logger: this.logger,
+					},
+					networkId,
+					accountAddress,
+				),
+			getFpcs: (chainId) => this.fpcService.getFpcs(chainId),
+			logDebug: (msg, ...rest) => this.logDebug(msg, ...rest),
+			logError: (msg, ...rest) => this.logError(msg, ...rest),
+		})
 		this.estimateReuse = new TransferEstimateReuse({
 			getActiveProfile: () => this.profileService.getActiveProfile(),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
@@ -313,11 +326,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// Invalidate gas balance cache when a transaction settles
 		this.transactionService.onTransactionUpdated.add((tx) => {
 			if (tx.status !== TxStatus.Pending) {
-				for (const key of this.gasBalanceCache.keys()) {
-					if (key.endsWith(`:${tx.account}`)) {
-						this.gasBalanceCache.delete(key)
-					}
-				}
+				this.gasBalances.invalidateAccount(tx.account)
 			}
 		})
 
@@ -327,7 +336,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// private-FJ readouts for up to GAS_BALANCE_TTL_MS. Clear the cache
 		// on any PrivateFpc mutation. Coarse but correct.
 		const invalidateOnPrivateFpc = (fpc: { type: FpcType }) => {
-			if (fpc.type === FpcType.PrivateFpc) this.gasBalanceCache.clear()
+			if (fpc.type === FpcType.PrivateFpc) this.gasBalances.clear()
 		}
 		this.fpcService.onFpcUpdated.add(invalidateOnPrivateFpc)
 		this.fpcService.onFpcDeleted.add(invalidateOnPrivateFpc)
@@ -1255,103 +1264,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 	public async getGasBalances(networkId: string, accountAddress: string, forceRefresh?: boolean): Promise<GasBalances> {
 		await this.ensureInitialized()
-
-		const cacheKey = `${networkId}:${accountAddress}`
-		if (!forceRefresh) {
-			const cached = this.gasBalanceCache.get(cacheKey)
-			if (cached && Date.now() - cached.fetchedAt < ExecutionService.GAS_BALANCE_TTL_MS) {
-				return cached.result
-			}
-		}
-
-		// Single-flight: coalesce concurrent callers for the same key onto
-		// one in-flight promise. Fresh popup opens fire several of these
-		// simultaneously (FeeSettingsCard + GasBalanceCard), and each
-		// independently triggered FpcService discovery before this guard
-		// existed — see project_getgasbalances_timeout_regression memory.
-		const inFlight = this.gasBalanceInFlight.get(cacheKey)
-		if (inFlight) {
-			this.logDebug(`getGasBalances: dedup — awaiting in-flight request for ${cacheKey}`)
-			return inFlight
-		}
-		const pending = this.#computeGasBalances(cacheKey, networkId, accountAddress).finally(() => {
-			this.gasBalanceInFlight.delete(cacheKey)
-		})
-		this.gasBalanceInFlight.set(cacheKey, pending)
-		return pending
-	}
-
-	async #computeGasBalances(cacheKey: string, networkId: string, accountAddress: string): Promise<GasBalances> {
-		await this.ensureInitialized()
-		const network = await this.networkService.getNetwork(networkId)
-
-		const deps = await getViewSimulationDeps(
-			{
-				profiles: this.profileService,
-				networks: this.networkService,
-				accounts: this.accountService,
-				pxeService: this.pxeService,
-				contractResolver: this.resolver,
-				logger: this.logger,
-			},
-			networkId,
-			accountAddress,
-		)
-
-		// Public FeeJuice balance via balance_of_public on the FeeJuice contract
-		this.logDebug(`getGasBalances: networkId=${networkId}, accountAddress=${accountAddress}`)
-		let publicFeeJuice = "0"
-		try {
-			const publicResult = await batchedViewSimulation(
-				[
-					{
-						kind: "call",
-						contract: feeJuiceAddress,
-						method: "balance_of_public",
-						args: [accountAddress],
-					},
-				],
-				deps,
-			)
-			if (publicResult.encoded[0]?.[0]) {
-				publicFeeJuice = publicResult.encoded[0][0].toBigInt().toString()
-			}
-		} catch (err) {
-			this.logDebug(`getGasBalances: Failed to get public FeeJuice balance:`, getErrorMessage(err))
-			this.logError("Failed to get public FeeJuice balance", getErrorMessage(err))
-		}
-		this.logDebug(`getGasBalances: publicFeeJuice=${publicFeeJuice}`)
-
-		// Private FeeJuice balance via balance_of on PrivateFPC
-		let privateFeeJuice: string | null = null
-		try {
-			const fpcs = await this.fpcService.getFpcs(network.chainId)
-			const bridgedFpc = fpcs.find((f) => f.type === FpcType.PrivateFpc)
-			if (bridgedFpc) {
-				const privateResult = await batchedViewSimulation(
-					[
-						{
-							kind: "call",
-							contract: bridgedFpc.address,
-							method: "balance_of",
-							args: [accountAddress],
-						},
-					],
-					deps,
-				)
-				if (privateResult.encoded[0]?.[0]) {
-					privateFeeJuice = privateResult.encoded[0][0].toBigInt().toString()
-				}
-			}
-		} catch (err) {
-			this.logDebug(`getGasBalances: Failed to get private FeeJuice balance:`, getErrorMessage(err))
-			this.logError("Failed to get private FeeJuice balance", getErrorMessage(err))
-		}
-		this.logDebug(`getGasBalances: publicFeeJuice=${publicFeeJuice}, privateFeeJuice=${privateFeeJuice}`)
-
-		const result = { publicFeeJuice, privateFeeJuice }
-		this.gasBalanceCache.set(cacheKey, { result, fetchedAt: Date.now() })
-		return result
+		return this.gasBalances.get(networkId, accountAddress, forceRefresh)
 	}
 
 	// Aztec.js interface:

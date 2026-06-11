@@ -14,14 +14,11 @@
  * Shared helpers + the dispatch map live here. Per-strategy impls live
  * in `./{fee-juice,fee-juice-with-claim,fpc,embedded}-strategy.ts`.
  *
- * ## Return shape (minimal-diff)
+ * ## Return shape
  *
- * Strategies return the 8-tuple
- * `[txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod]`.
- * Callers destructure all 8. Returning a narrower `FeeEstimateResult`
- * would force callers to re-fetch `node` / `pxe` / `account`, so the
- * tuple shape is preserved verbatim. The `ExecutionCoordinator` can
- * migrate to a typed bundle when it owns the post-send flush point.
+ * Strategies return a `FeeEstimate` — the `BuiltStandardTx` bundle plus
+ * the `feePaymentMethod` the strategy resolved. Named fields are the
+ * contract; the old positional 8-tuple was a silent-transposition hazard.
  *
  * ## Action array mutation (preserved)
  *
