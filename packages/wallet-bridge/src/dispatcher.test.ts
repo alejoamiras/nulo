@@ -1134,6 +1134,45 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 		}
 	})
 
+	test("CAIP-stored session accounts accept RAW-hex scope arrays (the fresh-session balance bug)", async () => {
+		// The popup persists accounts as CAIP-10; dApps send raw addresses in executeUtility
+		// scopes. A fresh (CAIP-only) session must still validate them.
+		const session = makeSession({
+			accounts: ["aztec:0:0x1c4d2aee53b88fa9e4061ec8c673dec03aadc3cd012177d0dcf20802ea9be10a"],
+			capabilityGrants: [
+				{
+					capability: {
+						type: "simulation",
+						utilities: { scope: [{ contract: "0xtok", function: "balance_of_private" }] },
+						transactions: { scope: [] },
+					},
+					grantedAt: 1,
+				} as unknown as GrantedCapabilityRecord,
+			],
+		} as Partial<IDappSessionRef>)
+		const { writer } = makeSessionWriter(session)
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({})) as never,
+		}
+		const dispatcher = new WalletSdkDispatcher(stubNetwork, stubAccount, stubExecution, interaction, writer, noopLogger)
+		// Success = getting PAST the account-scope gate. The stub harness has no network, so the
+		// dispatch fails DOWNSTREAM - the pin is that the failure is NOT the scope violation.
+		const failure = await dispatcher
+			.dispatch(
+				"executeUtility",
+				[
+					{ to: "0xtok", name: "balance_of_private" },
+					{ scopes: ["0x1c4d2aee53b88fa9e4061ec8c673dec03aadc3cd012177d0dcf20802ea9be10a"], authWitnesses: [], capsules: [] },
+				],
+				ctx,
+			)
+			.then(() => null)
+			.catch((e: unknown) => (e instanceof Error ? e.message : String(e)))
+		expect(failure).not.toMatch(/approved accounts/)
+		expect(failure).toMatch(/No network configured/)
+	})
+
 	test("the reader receives the SESSION context's profileId and chainId verbatim (stickiness pin)", async () => {
 		const session = makeSession({
 			capabilityGrants: [

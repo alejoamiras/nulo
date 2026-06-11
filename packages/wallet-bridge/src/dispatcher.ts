@@ -264,7 +264,19 @@ export class WalletSdkDispatcher {
 			// since enforceCapability would have returned []), fall back to
 			// the plain enforceScope to avoid throwing on the wrong thing.
 			if (dappSession) {
-				const sessionAccounts = new Set(dappSession.accounts ?? [])
+				// The session stores CAIP-10 identifiers ("aztec:<chainId>:0x…") but dApps send RAW
+				// hex addresses in scope arrays (the wallet-sdk serializes AztecAddress as hex), so
+				// the set carries BOTH representations. Without this, every fresh session failed
+				// account-scope validation deterministically; pre-CAIP sessions masked the mismatch.
+				const sessionAccounts = new Set<string>()
+				for (const entry of dappSession.accounts ?? []) {
+					sessionAccounts.add(entry)
+					try {
+						sessionAccounts.add(parseCaipAccount(entry).address)
+					} catch {
+						// A raw (pre-CAIP) entry: keep it as-is; nothing extra to add.
+					}
+				}
 				enforceScopeWithSession(methodName, args, grants, sessionAccounts)
 			} else {
 				enforceScope(methodName, args, grants)
