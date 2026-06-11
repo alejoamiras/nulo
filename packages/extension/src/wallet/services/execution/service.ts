@@ -104,6 +104,7 @@ import {
 } from "./spec"
 import { coerceAmount } from "./coerce-amount"
 import { OperationPlanner, type TransferRequest } from "./operation-planner"
+import { fingerprintBaseFee, fingerprintFeeSettings, TransferEstimateReuse } from "./transfer-estimate-reuse"
 import { ContractResolver, findFunctionByName } from "./contract-resolver"
 import { batchedViewSimulation } from "./helpers/batched-view-simulation"
 import { getViewSimulationDeps } from "./helpers/get-view-simulation-deps"
@@ -145,82 +146,6 @@ function pickActionMethod(actions: readonly Action[] | undefined): string | unde
 		else if (action.kind === "encoded_call") carriers.push({ name: action.name ?? action.selector })
 	}
 	return pickPrimaryMethod(carriers)
-}
-
-/** Snapshot of the SW state at estimate time. Used by `executeTransfer` to
- *  validate that nothing relevant has drifted between estimate and confirm
- *  before reusing the prebuilt TxRequest. Each field is something the
- *  rebuilt request would have differed on — see plan-v4 Branch 5. */
-type TransferEstimateReuseEntry = {
-	/** Inputs identifying the transfer (rebuilt for cache-hit verification). */
-	readonly networkId: string
-	readonly accountAddress: string
-	readonly tokenId: number
-	readonly transferType: TransferType
-	readonly recipientAddress: string
-	readonly amount: bigint
-	readonly feeSettingsHash: string
-	/** Profile id at estimate time. Used for cleaner reject diagnostics
-	 *  (codex audit NICE-TO-HAVE #2) — drift already fails closed via
-	 *  `getNetwork` / `getAccountContract` profile-scoping, but rejecting
-	 *  early avoids confusing errors deeper in the reuse path. */
-	readonly profileId: string
-	/** Validation snapshot — what was true at estimate time. */
-	readonly baseFeeFingerprint: string
-	readonly primaryEndpointId: string
-	readonly primaryEndpointUrl: string
-	/** Pending-tx snapshot for the active account. If new pending txs
-	 *  appear between estimate and confirm, the reused TxRequest may
-	 *  conflict on private notes (private transfers select notes at
-	 *  build time; concurrent in-flight txs can consume them). Reject
-	 *  reuse in that case (codex audit SHOULD-FIX #2 partial). */
-	readonly pendingHashes: readonly string[]
-	/** Built downstream state — reused on confirm. */
-	readonly txRequest: TxExecutionRequest
-	readonly nonce: { toString(): string }
-	readonly feePaymentMethod: AccountFeePaymentMethodOptions
-	/** Inputs for the activity-feed record. We persist a transfer-only
-	 *  call shape (no FPC fee payload) so the card title stays the token
-	 *  symbol regardless of payment method. */
-	readonly token: { contract: string; name: string; symbol: string; decimals: number }
-	readonly fnName: string
-	readonly args: readonly unknown[]
-	/** Cache lifecycle. */
-	readonly builtAt: number
-}
-
-/** Stable fingerprint for `node.getCurrentMinFees()` so we can compare
- *  the snapshot taken at estimate time against the value at confirm.
- *  Exported for unit tests. */
-export function fingerprintBaseFee(min: { feePerDaGas: bigint; feePerL2Gas: bigint }): string {
-	return `${min.feePerDaGas.toString()}:${min.feePerL2Gas.toString()}`
-}
-
-/** Stable fingerprint for fee settings. Explicit per-variant — the
- *  previous JSON.stringify-with-key-array form silently dropped nested
- *  paymentMethod fields (the keys array is read as a recursive filter,
- *  so nested keys not in `Object.keys(fs)` got stripped). That made
- *  `{kind: "fj"}` and `{kind: "fpc", fpcId}` collide and could allow
- *  reuse to serve a TxRequest built for a different payment method.
- *  Codex audit BLOCKING #1. Exported for unit tests. */
-export function fingerprintFeeSettings(fs: FeeSettings): string {
-	const pm = fs.paymentMethod
-	let pmHash: string
-	switch (pm.kind) {
-		case "fj":
-			pmHash = "fj"
-			break
-		case "fjwc":
-			pmHash = `fjwc:${pm.claimAmount}:${pm.claimSecret}:${pm.messageLeafIndex}`
-			break
-		case "fpc":
-			pmHash = `fpc:${pm.fpcId}`
-			break
-		case "embedded":
-			pmHash = "embedded"
-			break
-	}
-	return `${pmHash}|${fs.priorityLevel ?? "default"}`
 }
 
 /** Extract estimated fee from finalized gas settings on a TxExecutionRequest. */
@@ -292,8 +217,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	 *  + executeAztecSendTx) carve out per audit-codex-v3 — the embedded-fee
 	 *  and default_entrypoint variants take divergent code paths that the
 	 *  reuse contract doesn't yet cover. */
-	private static readonly ESTIMATE_REUSE_TTL_MS = 5 * 60 * 1000 // 5 minutes
-	private estimateReuseCache = new Map<string, TransferEstimateReuseEntry>()
+	private estimateReuse: TransferEstimateReuse = null!
 	/** Single-flight dedup for concurrent getGasBalances callers.
 	 *  The Send popup mounts multiple components that each call this
 	 *  simultaneously on unlock; without dedup, each request independently
@@ -354,6 +278,13 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		this.resolver = new ContractResolver(this.logger)
 		this.authwit = new AuthwitDiscoverer(this.logger)
 		this.coordinator = new ExecutionCoordinator(this.taskService, this.logger)
+		this.estimateReuse = new TransferEstimateReuse({
+			getActiveProfile: () => this.profileService.getActiveProfile(),
+			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
+			getNode: (chainId) => this.networkService.getNode(chainId),
+			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),
+			logDebug: (msg) => this.logDebug(msg),
+		})
 		this.txBuilder = new TxRequestBuilder(
 			this.pxeService,
 			this.profileService,
@@ -473,7 +404,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			// Try the cached-estimate fast path first. Falls back to a fresh
 			// build if the snapshot has drifted (base fee, primary endpoint,
 			// or any input field) — conservative: any mismatch ⇒ rebuild.
-			const reused = precomputedEstimateId ? await this.tryConsumeTransferEstimate(precomputedEstimateId, transferRequest) : undefined
+			const reused = precomputedEstimateId ? await this.estimateReuse.tryConsume(precomputedEstimateId, transferRequest) : undefined
 
 			let txRequest: TxExecutionRequest
 			let node: Awaited<ReturnType<NetworkService["getNode"]>>
@@ -588,100 +519,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 	}
 
-	/** Pop a cached estimate if (a) the id exists, (b) inputs match
-	 *  byte-for-byte, (c) the SW's current view of base fee + primary
-	 *  endpoint matches the snapshot, and (d) the entry is fresh
-	 *  (TTL).  Any mismatch ⇒ delete + return undefined; caller falls
-	 *  back to a full rebuild. The popup gets a single-shot reuse: the
-	 *  entry is dropped on consumption (success or failure), preventing
-	 *  retries from racing with a fresh estimate. */
-	private async tryConsumeTransferEstimate(estimateId: string, inputs: TransferRequest): Promise<TransferEstimateReuseEntry | undefined> {
-		const entry = this.estimateReuseCache.get(estimateId)
-		this.estimateReuseCache.delete(estimateId) // single-shot
-		if (!entry) return undefined
-
-		// TTL gate
-		if (Date.now() - entry.builtAt > ExecutionService.ESTIMATE_REUSE_TTL_MS) {
-			this.logDebug(`tryConsumeTransferEstimate ${estimateId}: stale (TTL)`)
-			return undefined
-		}
-
-		// Input byte-for-byte match
-		if (
-			entry.networkId !== inputs.networkId ||
-			entry.accountAddress !== inputs.accountAddress ||
-			entry.tokenId !== inputs.tokenId ||
-			entry.transferType !== inputs.transferType ||
-			entry.recipientAddress !== inputs.recipientAddress ||
-			entry.amount !== inputs.amount ||
-			entry.feeSettingsHash !== fingerprintFeeSettings(inputs.feeSettings)
-		) {
-			this.logDebug(`tryConsumeTransferEstimate ${estimateId}: input drift`)
-			return undefined
-		}
-
-		// Active-profile drift. `getNetwork` and `getAccountContract` already
-		// fail closed for cross-profile leakage, but rejecting reuse here
-		// avoids confusing downstream errors when the user swapped profiles
-		// between estimate and confirm. (codex audit NICE-TO-HAVE #2)
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile || profile.id !== entry.profileId) {
-			this.logDebug(`tryConsumeTransferEstimate ${estimateId}: profile drift`)
-			return undefined
-		}
-
-		// Endpoint identity (codex audit gap — primary can change at runtime)
-		const network = await this.networkService.getNetwork(inputs.networkId)
-		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
-		if (!primary) {
-			this.logDebug(`tryConsumeTransferEstimate ${estimateId}: no primary endpoint`)
-			return undefined
-		}
-		if (primary.id !== entry.primaryEndpointId || primary.rpcUrl !== entry.primaryEndpointUrl) {
-			this.logDebug(`tryConsumeTransferEstimate ${estimateId}: primary endpoint changed`)
-			return undefined
-		}
-
-		// Base fee snapshot. Compare the cached entry's fingerprint
-		// (derived from the txRequest's actual `maxFeesPerGas`) against
-		// `liveMin * multiplier` — that's what a fresh build would have
-		// finalized. If the chain min hasn't drifted, they match.
-		// (codex audit SHOULD-FIX #3)
-		const node = await this.networkService.getNode(network.chainId)
-		try {
-			const currentMin = await node.getCurrentMinFees()
-			const multiplier = inputs.feeSettings.priorityLevel
-				? PRIORITY_MULTIPLIERS[inputs.feeSettings.priorityLevel]
-				: DEFAULT_FEE_MULTIPLIER
-			const expectedFingerprint = fingerprintBaseFee({
-				feePerDaGas: currentMin.feePerDaGas * BigInt(multiplier),
-				feePerL2Gas: currentMin.feePerL2Gas * BigInt(multiplier),
-			})
-			if (expectedFingerprint !== entry.baseFeeFingerprint) {
-				this.logDebug(`tryConsumeTransferEstimate ${estimateId}: base fee changed`)
-				return undefined
-			}
-		} catch (error) {
-			// Conservative: if we can't verify, don't reuse.
-			this.logDebug(`tryConsumeTransferEstimate ${estimateId}: base fee fetch failed: ${getErrorMessage(error)}`)
-			return undefined
-		}
-
-		// Pending-tx drift. New same-account pending txs since estimate
-		// can consume notes the cached private-transfer TxRequest selected.
-		// Rebuild rather than risk a note-exhaustion failure mid-flight.
-		// (codex audit SHOULD-FIX #2 partial — PXE rebuild detection
-		// remains deferred; conservative TTL bounds that risk.)
-		const currentPending = new Set(this.transactionService.getPendingForAccount(inputs.accountAddress).map((tx) => tx.hash))
-		const cachedPending = new Set(entry.pendingHashes)
-		if (currentPending.size !== cachedPending.size || [...currentPending].some((h) => !cachedPending.has(h))) {
-			this.logDebug(`tryConsumeTransferEstimate ${estimateId}: pending tx set changed`)
-			return undefined
-		}
-
-		return entry
-	}
-
 	public async estimateTransferFee(
 		networkId: string,
 		accountAddress: string,
@@ -727,7 +564,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 					if (!profile) throw new Error("Wallet locked")
 					const pendingHashes = this.transactionService.getPendingForAccount(accountAddress).map((tx) => tx.hash)
 					estimateId = crypto.randomUUID()
-					this.estimateReuseCache.set(estimateId, {
+					this.estimateReuse.stash(estimateId, {
 						networkId,
 						accountAddress,
 						tokenId,
@@ -748,7 +585,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 						args: args.map((x) => x),
 						builtAt: Date.now(),
 					})
-					this.evictStaleEstimateReuseEntries()
 				}
 			} catch (error) {
 				// Cache write is best-effort. The estimate result still goes
@@ -764,19 +600,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			maxFeeUsd: feeToUsd(maxFeeRaw),
 			gasDetails: getGasDetails(txRequest),
 			estimateId,
-		}
-	}
-
-	/** Garbage-collect estimate-reuse entries past their TTL. Called
-	 *  opportunistically on cache write so we don't grow the map
-	 *  unboundedly when the popup keeps re-estimating without ever
-	 *  consuming the entries. */
-	private evictStaleEstimateReuseEntries(): void {
-		const now = Date.now()
-		for (const [id, entry] of this.estimateReuseCache) {
-			if (now - entry.builtAt > ExecutionService.ESTIMATE_REUSE_TTL_MS) {
-				this.estimateReuseCache.delete(id)
-			}
 		}
 	}
 
