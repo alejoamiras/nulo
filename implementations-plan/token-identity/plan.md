@@ -96,7 +96,8 @@ Swap/fuel; Playwright arc; release cut; recipient-commitment; any mainnet/extens
 
 ## Audit verdicts
 - Dual audit (parallel, both outlines): **codex: reject** (accounts-gating unenforceable - no checker, type-only re-consent, no popup card; 18-dec sweep must include parse + L1 mint) · **fable: reject** (CRITICAL: new capability types are Zod-closed upstream / new fields stripped ⇒ redesign onto the `contracts` capability; HIGH: grant-upgrade dead end, popup consent gap, MINT_AMOUNT literal; MEDIUM: 3-copy drift, formatter duplication). CONVERGENT fix folded: T6-T9 + D2/D3/D5 rewrites. Both picked the redeploy outline.
-- Final fresh-context codex pass (new session): initial **reject** - 3 blockers (APP_ID bump inert under the origin-keyed session model; contracts piggyback not honest consent without copy; P1/P3 coupling), ALL folded same-round as T8-reversal/T10/T11 + the D5/D6 rewrites + P1/P2 rephasing. Verdict-flip: see audit-codex.md.
+- Final fresh-context codex pass: reject → folded → **approve**.
+- Post-impl audit (codex-GcnkMC7w): conditional approve → conditions folded (grant replace-semantics + pins, 18-dec spec, copy strays) → **approve**.
 
 ## Seeds
 Drafts in eli5.html after the audits; finalized post-approval.

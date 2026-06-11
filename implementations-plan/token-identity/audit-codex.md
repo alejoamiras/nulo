@@ -37,3 +37,28 @@ reject (with blocking findings: APP_ID bump will not force new consent on this s
 - P1/P3 coupling blocker: addressed. P1 is now deploy-and-record only; T11 defers the whole frontend/constants/name/decimal flip to P3 atomically. P2 also reflects the simplification to a direct dispatcher read, not a new execution op.
 
 approve
+
+## Round 3 - post-impl audit (new session, dir codex-GcnkMC7w)
+
+Verdict: **conditional approve** → all conditions folded → **approve**. The headline find: the popup reported delta-approved capabilities as granted while persistence dropped already-granted types - the field-diff re-consent (this arc's own feature) would have approved-then-forgotten the new contracts grant. Fixed with replace-semantics + pins (persist-and-covered, rejection interplay, reader pass-through, 18-dec regression spec). Also confirmed: no coverage-without-prompt bypass, no cross-profile reader leak, no surviving 6-dec math on live surfaces.
+
+1. I do not see a HIGH/CRITICAL “coverage without prompt” bypass in the stored-authority path: coverage is decided from persisted grants in [dispatcher.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/wallet-bridge/src/dispatcher.ts:156) and re-checked at call time in [scope-enforcement.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/wallet-bridge/src/scope-enforcement.ts:78). The real problem is different: the popup returns `approvedNew + existing` [index.vue](/Users/alejoamiras/Projects/nulo/nulo-4/packages/extension/src/popup/windows/capabilities/index.vue:190), but persistence only adds capabilities whose type was not already granted [dispatcher.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/wallet-bridge/src/dispatcher.ts:705). So extra `contracts` rows can be reported as granted without actually being appended.
+
+2. I do not see a direct cross-profile leak in `TokenService.getTokens`; it filters both axes [service.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/extension/src/wallet/services/token/service.ts:81). The seam is profile drift: production fills `SessionContext.profileId` from the current active profile on every message [background.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/extension/src/wallet/services/wallet-sdk/background.ts:620), while the type says it is session-established [types.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/wallet-bridge/src/types.ts:5). I found no HIGH/CRITICAL leak from the reader alone, but this claim is unpinned.
+
+3. I did not find a surviving HIGH/CRITICAL 6-dec math bug on the live bridge surfaces. Parsing, comparison, formatting, and mint amount all key off `BRIDGE_TOKEN_DECIMALS` in [BridgeForm.vue](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeForm.vue:84) and [useL1Usdc.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useL1Usdc.ts:54). Remaining bridge drift is copy only: hardcoded `USDC` in [BridgeForm.vue](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeForm.vue:234) and [BridgeView.vue](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/views/BridgeView.vue:16).
+
+4. Claimed behavior lacking a real pin:
+   1. `contracts` append/persist-after-approval and rejection interplay; tests only cover prompt/no-prompt [dispatcher.test.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/wallet-bridge/src/dispatcher.test.ts:1059).
+   2. Profile-stickiness across active-profile changes for wallet-sdk dispatch / `isTokenRegistered`.
+   3. 18-dec bridge regression coverage; tests still mock `BRIDGE_TOKEN_DECIMALS: 6` and 6-dec amounts in [BridgeForm.test.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeForm.test.ts:17) and [useL1Usdc.test.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useL1Usdc.test.ts:17).
+
+conditional approve (with conditions: fix or pin the `contracts` append/persist divergence, and add regression pins for profile-stickiness and the 18-dec bridge path)
+
+### Round 3b - verdict flip (resume)
+
+1. Confirmed: `dispatcher.ts` now replaces stored grants for approved delta types, and the new `dispatcher.test.ts` pins both persistence of the replacement `contracts` grant and rejection preserving the old grant.
+2. Confirmed: the new stickiness pin asserts `isTokenRegistered` receives `SessionContext.profileId` and `chainId` verbatim from the dispatcher.
+3. Confirmed: `BridgeForm.18dec.test.ts` covers exact 18-dec submit parsing and 18-dec balance rendering, and the two bridge copy lines now use `BRIDGE_TOKEN_SYMBOL`.
+
+approve
