@@ -273,6 +273,40 @@ describe("useBridgeJournal engine", () => {
 		expect(useBridgeJournal().records.value.find((r) => r.id === "0xnosnap")?.completedAt).toBe(999)
 	})
 
+	it("re-engaging an already-ready record narrates CLAIM from the first probe - no CROSSING flash", async () => {
+		const deps = baseDeps(kv)
+		const sampledSteps: (string | undefined)[] = []
+		const claim = vi.fn(async () => ({
+			simulate: async () => {
+				sampledSteps.push(useBridgeJournal().runtime.value["0xre"]?.step)
+			},
+			send: async () => ({ txHash: "0xclaimtx" }),
+		}))
+		connectJournalDeps({ ...deps, claim })
+		// Restored/reloaded: leafIndex persisted, runtime claimable LOST.
+		addRecord(mkDeposit("0xre", { depositL2Block: 100 }))
+		await runDepositClaim("0xre")
+		expect(sampledSteps[0]).toBe("sending") // never "syncing" for a ready message.
+	})
+
+	it("a genuinely-unready record drops to CROSSING narration only AFTER the first probe says not-ready", async () => {
+		const deps = baseDeps(kv)
+		const sampledSteps: (string | undefined)[] = []
+		let calls = 0
+		const claim = vi.fn(async () => ({
+			simulate: async () => {
+				sampledSteps.push(useBridgeJournal().runtime.value["0xun"]?.step)
+				if (calls++ === 0) throw new Error("No L1 to L2 message found")
+			},
+			send: async () => ({ txHash: "0xclaimtx" }),
+		}))
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xun"))
+		await runDepositClaim("0xun")
+		expect(sampledSteps[0]).toBe("sending") // optimistic first probe.
+		expect(sampledSteps[1]).toBe("syncing") // honest CROSSING once proven not-ready.
+	})
+
 	it("⑰ a claim THIS process sent completes on the checkpointed receipt - the lagging PXE cannot block it", async () => {
 		const deps = baseDeps(kv)
 		// simulate keeps succeeding (PXE lag right after checkpoint) - local provenance wins anyway.
@@ -513,9 +547,12 @@ describe("useBridgeJournal engine", () => {
 		const deps = baseDeps(kv)
 		const seen: (string | undefined)[] = []
 		let sent = false
+		let gateProbes = 0
 		const claim = vi.fn(async () => ({
 			simulate: async () => {
 				seen.push(useBridgeJournal().runtime.value["0xnarrate"]?.step)
+				// One not-ready round so the honest CROSSING narration is observable post-probe-0.
+				if (gateProbes++ === 0) throw new Error("No L1 to L2 message found")
 				if (sent) throw new Error("No L1 to L2 message found")
 				return {}
 			},
