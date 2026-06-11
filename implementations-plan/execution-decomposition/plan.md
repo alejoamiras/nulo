@@ -62,7 +62,7 @@ e2e focus: transfers (estimate-reuse path). Revert: wiring-only.
 `gas-balance-reader.ts`: cache + TTL + single-flight + `#computeGasBalances` (`service.ts:1504-1578`), preserving the `${networkId}:${account}` key and PrivateFpc invalidation. Facade wires the invalidation subscriptions (transaction.onTransactionUpdated `:383`, fpc events `:401-402`) targeting the module; registration order in `init()` unchanged.
 Tests: TTL, single-flight coalescing, invalidation per event, keying. e2e focus: fee-methods. Revert: wiring-only.
 
-### Phase 6 — Facade trim to ≤1,200 (1.5-2d)
+### Phase 6 ✓ — Facade trim to ≤1,200 (1.5-2d)
 With seams stable, move the remaining heavy bodies (ledger D4 — phase my draft missed; codex's split):
 - `transfer-executor.ts` + `transfer-executor.test.ts` (popup transfer flow); `dapp-send-executor.ts` + `dapp-send-executor.test.ts` (dApp sendTx + NO_FROM) — test files named explicitly per done-condition (d) (CC3).
 - **Executors receive slot/claim/cancel via an injected lane-shaped deps interface from day one** (`ExecutionLaneDeps`: acquireSlot, claimOrCreate, registerController, releaseAll) — Phase 7 then swaps the implementation BEHIND the interface instead of re-cutting executor control flow. This is the condition under which D3's "minor re-churn" claim is true (CC6; both contradiction checks demanded it).

@@ -125,3 +125,15 @@ Slice gates: typecheck exit 0, `bun run lint` exit 0, full unit suite
   verdict to be quoted here).
 - purged + idle `e2e:agent` run — queued after codex completes
   (machine-idle policy).
+
+## Phase gate — CLOSED ✓
+
+- **codex parity review** (`gpt-5.4`, xhigh, read-only, full `ba82b66..HEAD`
+  diff): *"No findings. … PARITY CONFIRMED"* (97k tokens, verdict verbatim).
+- **e2e:agent** (purged `.e2e-state` + `wallet_data_*`, machine idle,
+  `VITE_NULO_FEE_MULTIPLIER=10`): **67 passed | 2 skipped (69), zero
+  failures**, 790s — identical profile to the P3-P5 clean baseline.
+- `bun run lint` exit 0; `bun run test` 2,331 passed; HARD GATE A1
+  `wc -l service.ts` = 967 ≤ 1,200.
+
+Phase 6 closed. Next: Phase 7 execution-lane seam.
