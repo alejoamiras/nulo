@@ -60,3 +60,22 @@ passed** (+5) · facade now **746 lines**.
 Full e2e:agent + heavy shards (cancel-mid-prove, concurrent-sendtx,
 concurrent-sendtx-confirm) — purged, idle. Bail-out per A2 if it fails
 twice.
+
+## Gate run 1 — INVALID (idle precondition violated)
+
+Result: 63/69, 4 fails in 2 files (`concurrent-sendtx-confirm` ×2:
+detached-frame during fixture connect + page.evaluate;
+`token-management delete` ×1: ConnectionClosedError on newPage). All
+three signatures are puppeteer/browser-infra, ZERO wallet-behavior
+assertion failures (no journal-stage, FIFO-order, or nullifier errors).
+
+Post-hoc process audit found the box was NOT idle: a different worktree
+(nulo-4, another session) had 4 native `bb msgpack` prover processes
+running through the suite — the exact "heavy concurrent machine load"
+condition of baseline Run 1 (63/69, infra signatures). The run violated
+the gate's own idle precondition and is recorded as INVALID rather than
+as bail-out failure #1; the next IDLE run is the real gate. (Bail-out
+counter per A2 counts valid runs.)
+
+Watcher armed on the foreign prover processes; retry fires when they
+exit, after re-purge.
