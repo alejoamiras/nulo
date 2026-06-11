@@ -8,3 +8,7 @@
 - Gates: audit:faucet exit=0, audit:vue exit=0. Suites: faucet 264 ✓ smoke 9 ✓ bridge-core 79 ✓.
 
 LESSONS_FILE=implementations-plan/bridge-seal-backup/lessons/phase-2.md
+
+## 2026-06-11 - post-impl close
+- Codex post-impl: **approve**, no high/critical. Added its two missing pins same-round (journal RESTORE flow incl. error toast; stepper ⤓ provisional-hide). Documented LOW: cross-tab duplicate TOCTOU between the post-unseal check and the upsert - a fresher same-id record can be overwritten by a restored snapshot (stale-state resurrection only; ids are identity-bound, no fund redirection). Accept for testnet; an insert-only journal write is the fix if it ever matters.
+- jsdom gotcha: `Object.defineProperty(input, "files")` needs `configurable: true` to redefine across a test's second pick.

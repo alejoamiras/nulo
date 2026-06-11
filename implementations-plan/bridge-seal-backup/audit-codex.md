@@ -15,3 +15,19 @@ Facts: mostly right. Two exceptions: `sealerL1` is not part of the full authorit
 Light-tier: still bounded; I would not require a second auditor if the plan is tightened first.
 
 conditional approve (with conditions: first-use export must self-test or use the existing trust cache; do not export/restore provisional withdraws; make `sealerL1` optional/backup-specific; and tighten restore copy/validation to treat unauthenticated-header failures as tamper/corruption, not just “wrong wallet”.)
+
+## Round 2 - post-impl audit (new session, dir codex-epPvTbhG)
+
+Verdict: **approve** - no high/critical findings. Notes: the restore prompt adds no oracle capability (signature never leaves the app; verified the no-log discipline); restored records are correctly sweep-eligible like any rediscovered record; the cross-tab duplicate TOCTOU is LOW (stale-state resurrection, identity-bound ids, no fund path) - documented; the two missing pins (journal restore flow, stepper provisional-hide) were added same-round.
+
+No high/critical findings.
+
+1. Export/restore prompt as oracle: I do not see a high/critical oracle here. The prompt message is the same recovery-key text in `packages/bridge-core/src/recovery-crypto.ts:27-33`, but the signature is only turned into a local AES key in `packages/faucet/src/composables/useBridgeBackup.ts:55-77`; it is not logged or exported. The backup log is explicitly ids/direction only at `useBridgeBackup.ts:18-19,87,104`, and the only exported artifact is the sealed file at `useBridgeBackup.ts:25-32`. A malicious in-app page state would already be able to call `wallet.signMessage` directly via `useBridgeBackup.ts:45-52`, so restore does not add a new capability beyond local GCM success/failure at `packages/bridge-core/src/backup.ts:148-177`.
+
+2. Restore write path: no high/critical engine-corruption path found. `addRecordVerified` only persists and does not mark `sessionLive` (`packages/faucet/src/composables/useBridgeJournal.ts:233-238`), and completed records are skipped by `resumeSessionWork` (`useBridgeJournal.ts:741-747`). One correction to the stated premise: restored non-`sessionLive` records with `claimTxHash`/`consumeTxHash` are still sweep-eligible (`useBridgeJournal.ts:744-747`), and that behavior is pinned for rediscovered deposits/withdraws in `useBridgeJournal.test.ts:308-323,428-436`.
+
+3. Duplicate TOCTOU: there is a real cross-tab race after the second duplicate check and before `upsertRecord` (`packages/faucet/src/composables/useBridgeBackup.ts:99-103`; `packages/bridge-core/src/journal.ts:136-143`). A fresher same-id record can be overwritten by the restored snapshot. I do not rate it high/critical because ids are identity-bound and I do not see a fund-redirection path; this is stale-state resurrection, not asset compromise.
+
+4. Missing real pins: the RESTORE button/hidden input/toast flow in `packages/faucet/src/components/BridgeJournal.vue:20-47,73-89` is not exercised by `packages/faucet/src/components/BridgeJournal.test.ts:32-61`. Also, `packages/faucet/src/components/BridgeStepper.test.ts:73-76` only pins the backup emit; it does not pin the claimed visibility matrix/provisional-withdraw hide behavior implemented at `packages/faucet/src/components/BridgeStepper.vue:17-19,57-64`.
+
+approve

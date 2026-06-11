@@ -76,6 +76,22 @@ describe("BridgeStepper", () => {
 		expect(w.emitted("backup")?.[0]?.[0]).toMatchObject({ id: "0xd" })
 	})
 
+	it("the ⤓ hides for provisional withdraws (nothing restorable pre-exit)", () => {
+		const prov: WithdrawJournalRecord = {
+			schema: 1,
+			id: "wd-pending-x9",
+			direction: "withdraw",
+			isPrivate: false,
+			amount: "1000000",
+			createdAt: 1,
+			updatedAt: 1,
+			recipientL1: "0xe",
+			...DEPLOY,
+		}
+		const w = mount(BridgeStepper, { props: { record: prov } })
+		expect(w.find(sel(TESTIDS.stepperBackup)).exists()).toBe(false)
+	})
+
 	it("background emits", async () => {
 		const w = mount(BridgeStepper, { props: { record: dep() } })
 		await w.find(sel(TESTIDS.stepperBackground)).trigger("click")
