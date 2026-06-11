@@ -157,7 +157,7 @@ The CSP/harden pass already sits on the backlog as its own arc; no `/harden` sch
 
 ## Seeds
 
-(Drafts — finalized after the approval gate; see eli5.html.)
+Drafts (finalized after the approval gate) — full strings in [eli5.html](eli5.html). Recommended: `/goal` keyed on P1-P7 ✓ markers in this file + deployments.md + the three suite commands + the printed P7 checklist, constrained to feat/swap-fuel/testnet/unsigned-commits/key-hygiene/P2-budget-abort. Alternative: `/loop 15m` driving phases with per-gate validation, codex consults on decisions, 5-failure stop rule.
 
 ---
 
