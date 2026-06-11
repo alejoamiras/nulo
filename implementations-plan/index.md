@@ -6,4 +6,5 @@ Format: `- [plan-name](plan-name/plan.md) — status — one-line hook`
 - [bridge-ux-trust](bridge-ux-trust/plan.md) — implemented (deep), awaiting manual testnet validation — swap-style bridge form + in-flight journal + seal-trust cache; PV5 HIGHs folded in
 - [bridge-ux-feedback](bridge-ux-feedback/plan.md) — implemented (mid), awaiting manual testnet validation — live card narration, self-resolving dones, dual balances, direction chips, explorer links
 - [bridge-form-stepper](bridge-form-stepper/plan.md) — shipped in PR #80 — takeover stepper, CAS foreground, dopamine UX
-- [bridge-seal-backup](bridge-seal-backup/plan.md) — implemented (light), awaiting manual testnet validation — per-bridge sealed recovery file + restore
+- [bridge-seal-backup](bridge-seal-backup/plan.md) — shipped in PR #81 — per-bridge sealed recovery file + restore
+- [token-identity](token-identity/plan.md) — gate-ready (mid) — NULO/OLUN/AZLO renames, 18-dec sweep, capability-gated isTokenRegistered + contracts field-diff re-consent
