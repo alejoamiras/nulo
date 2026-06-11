@@ -25,7 +25,7 @@ Pin behavior where extraction will occur, beyond existing e2e:
 - Record the parity contract in `lessons/phase-0.md`: facade baseline (2,302 lines), the four tail sites' exact argument variations (scopes arrays, addTransaction args, journal-marking differences at `service.ts:550-567, 1181-1190, 1976-1986, 2166-2176`).
 Tests only; zero src change. Gate: lint + test + the recorded baseline `e2e:agent` pass as a REQUIRED P0 artifact (audit R1-M1 fixed the earlier "no e2e" contradiction). Revert: trivial.
 
-### Phase 1 — Q17: resolver seam completion (0.5-1d)
+### Phase 1 ✓ — Q17: resolver seam completion (0.5-1d)
 Extend `contract-resolver.ts` with `ensureContractsRegistered(...)`, `findFunctionByName(...)`, `findFunctionBySelector(...)`; delete the re-inlined copies (fn lookup ×7, ensure-registered sites: `tx-request-builder.ts:113-125, 279-334` AND the second prologue at `tx-request-builder.ts:412-424` (CC7), `authwit-discoverer.ts:141-225`, `helpers/batched-view-simulation.ts:177-194, 499-590`, `service.ts:1434-1463`).
 - **Error text is parameterized, not normalized** — `tx-request-builder` keeps `"Contract not found"`/`"Method not found"` verbatim; frozen strings survive.
 - Lookup order stays exactly `functions` then `nonDispatchPublicFunctions`.
