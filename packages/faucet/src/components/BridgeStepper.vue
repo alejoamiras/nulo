@@ -58,12 +58,11 @@ const headline = computed(() => {
 				v-if="exportable"
 				type="button"
 				class="backup"
-				aria-label="Download recovery file"
 				title="Download this bridge's recovery file - restores it on any browser with your Ethereum wallet."
 				:data-testid="TESTIDS.stepperBackup"
 				@click="emit('backup', record)"
 			>
-				⤓
+				BACKUP ⤓
 			</button>
 		</header>
 
@@ -137,15 +136,18 @@ const headline = computed(() => {
 }
 
 .backup {
-	background: transparent;
-	border: none;
-	color: var(--txt-secondary);
-	font: 600 15px/1 var(--font-mono);
+	background: var(--txt-primary);
+	border: 1px solid var(--txt-primary);
+	color: var(--nulo-bg, #000);
+	font: 700 11px/1 var(--font-mono);
+	letter-spacing: 0.06em;
 	cursor: pointer;
-	padding: 2px 4px;
+	padding: 8px 12px;
+	white-space: nowrap;
 }
 
 .backup:hover {
+	background: transparent;
 	color: var(--txt-primary);
 }
 </style>

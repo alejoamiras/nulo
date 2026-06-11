@@ -144,33 +144,33 @@ function onDiscard() {
 		:data-privacy="record.isPrivate ? 'private' : 'public'"
 		:data-attention="attention"
 	>
-		<button
-			v-if="stage === 'done'"
-			type="button"
-			class="dismiss"
-			aria-label="Clear"
-			:data-testid="TESTIDS.journalClear"
-			@click="journal.clearDone(record.id)"
-		>
-			✕
-		</button>
-		<button
-			v-else-if="exportable"
-			type="button"
-			class="dismiss"
-			aria-label="Download recovery file"
-			title="Download this bridge's recovery file - restores it on any browser with your Ethereum wallet."
-			:data-testid="TESTIDS.cardBackup"
-			@click="emit('backup', record)"
-		>
-			⤓
-		</button>
 		<p v-if="stage === 'done'" class="stamp">{{ record.direction === "deposit" ? "BRIDGED ✓" : "RELEASED ✓" }}</p>
 		<header class="row">
 			<span class="dir">{{ record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM" }}</span>
 			<span class="amt">{{ amountDisplay }} USDC</span>
 			<span class="tag" :class="{ private: record.isPrivate }">{{ record.isPrivate ? "PRIVATE" : "PUBLIC" }}</span>
 			<span class="age">{{ age }}</span>
+			<button
+				v-if="stage === 'done'"
+				type="button"
+				class="corner"
+				aria-label="Clear"
+				:data-testid="TESTIDS.journalClear"
+				@click="journal.clearDone(record.id)"
+			>
+				✕
+			</button>
+			<button
+				v-else-if="exportable"
+				type="button"
+				class="corner"
+				aria-label="Download recovery file"
+				title="Download this bridge's recovery file - restores it on any browser with your Ethereum wallet."
+				:data-testid="TESTIDS.cardBackup"
+				@click="emit('backup', record)"
+			>
+				⤓
+			</button>
 		</header>
 
 		<BridgePhaseRail v-if="stage !== 'done'" :record="record" compact />
@@ -237,10 +237,7 @@ function onDiscard() {
 	border: 1px solid var(--nulo-outline);
 }
 
-.dismiss {
-	position: absolute;
-	top: 10px;
-	right: 12px;
+.corner {
 	background: transparent;
 	border: none;
 	color: var(--txt-secondary);
@@ -249,7 +246,7 @@ function onDiscard() {
 	padding: 2px 4px;
 }
 
-.dismiss:hover {
+.corner:hover {
 	color: var(--txt-primary);
 }
 
