@@ -84,6 +84,8 @@ Gates: `bun run audit:faucet` + `bun run audit:vue` â†’ codex post-impl audit â†
 Whole-journal export; QR/clipboard transport; restore-time auto-claim; non-bridge records.
 
 ## Audit verdicts
+**USER VERDICT: APPROVE** (gate, this session).
+
 - Codex audit (light, single pass, dir codex-vSvstNAi): **conditional approve** - 4 conditions (trust-aware export; no provisional-withdraw export/restore; `sealerL1` backup-specific; tamper-honest restore copy + strict deep guard), ALL folded (B5-B8 + D1/D2/D3 rewrites). Confirmed sound: binding reuse, same-key inner/outer AES-GCM (random IVs), light tier (no second auditor needed once tightened).
 
 ## Seeds
