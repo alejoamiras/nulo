@@ -36,6 +36,10 @@ import { createPublicClient, createWalletClient, defineChain, getContract, http 
 import { privateKeyToAccount } from "viem/accounts"
 
 const SANDBOX_RPC = process.env.SANDBOX_L1_RPC ?? "http://localhost:8545"
+const TOKEN_NAME = "Nulo USDC"
+const TOKEN_SYMBOL = "USDC"
+const TOKEN_DECIMALS = 6
+
 const NODE_URL = process.env.SANDBOX_NODE_URL ?? "http://localhost:8080"
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const PERMIT2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3" as const
@@ -93,7 +97,7 @@ async function main() {
 	}
 
 	const usdcArt = evmArtifact("MintableERC20")
-	const usdc = await deployEvm("MintableERC20", usdcArt.abi, usdcArt.bytecode, ["Nulo USDC", "USDC", 6, 1000n])
+	const usdc = await deployEvm("MintableERC20", usdcArt.abi, usdcArt.bytecode, [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, 1000n])
 	const mockArt = evmArtifact("MockSwapTarget")
 	const mock = await deployEvm("MockSwapTarget", mockArt.abi, mockArt.bytecode, [feeJuice])
 	const routerArt = evmArtifact("SwapBridgeRouter")
@@ -146,7 +150,12 @@ async function main() {
 		[],
 		"constructor",
 	)
-	const token = await deployL2("Token", TokenContractArtifact, ["Nulo USDC", "USDC", 6, proxy.address], "constructor_with_minter")
+	const token = await deployL2(
+		"Token",
+		TokenContractArtifact,
+		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address],
+		"constructor_with_minter",
+	)
 	const bridge = await deployL2(
 		"TokenBridge",
 		nargoArtifact("token_bridge/target/token_bridge_contract-TokenBridge.json"),
