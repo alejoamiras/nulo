@@ -1,7 +1,7 @@
 /**
  * Faucet contract deployer — vendored from
  * `aztec-standards/scripts/deploy.ts` (560 lines) and adapted to our
- * 2-token catalog (USDC, ETH).
+ * 2-token catalog (NULO, OLUN).
  *
  * Run once per environment:
  *   DEPLOYER_SECRET="<32+ chars>" bun run deploy:testnet
@@ -86,7 +86,7 @@ interface TokenDeploymentRecord {
 	readonly constructorArtifact: "constructor_with_minter"
 	readonly constructorArgs: {
 		readonly name: string
-		readonly symbol: "USDC" | "ETH"
+		readonly symbol: "NULO" | "OLUN"
 		readonly decimals: number
 		readonly minter: string
 	}

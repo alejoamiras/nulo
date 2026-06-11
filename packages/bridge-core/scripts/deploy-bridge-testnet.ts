@@ -32,6 +32,11 @@ import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src
 import { createPublicClient, createWalletClient, defineChain, getContract, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 
+// The bridged pair's identity - ONE source for both chains; the deploy asserts L1==L2 below.
+const TOKEN_NAME = "Aztec Nulo"
+const TOKEN_SYMBOL = "AZLO"
+const TOKEN_DECIMALS = 18
+
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://rpc.testnet.aztec-labs.com"
 const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}` | undefined
@@ -95,7 +100,11 @@ async function main() {
 	}
 
 	const usdcArt = evmArtifact("MintableERC20")
-	const usdc = await deployEvm("MintableERC20", usdcArt.abi, usdcArt.bytecode, ["Nulo USDC", "USDC", 6, 1000n])
+	const l1Decimals = TOKEN_DECIMALS
+	const usdc = await deployEvm("MintableERC20", usdcArt.abi, usdcArt.bytecode, [TOKEN_NAME, TOKEN_SYMBOL, l1Decimals, 1000n])
+	// The portal moves RAW units between chains: an L1/L2 decimals mismatch mints wrong
+	// magnitudes. Both sides read TOKEN_DECIMALS; this assert keeps future edits honest.
+	if (l1Decimals !== TOKEN_DECIMALS) throw new Error(`decimals asymmetry: L1=${l1Decimals} L2=${TOKEN_DECIMALS}`)
 	const portal = await deployEvm("TokenPortal", TokenPortalAbi, TokenPortalBytecode as `0x${string}`, [])
 
 	// ─── L2 (testnet aztec.js — REAL proofs) ─────────────────────────
@@ -156,7 +165,7 @@ async function main() {
 	const token = await deployL2(
 		"Token",
 		TokenContractArtifact,
-		["Nulo USDC", "USDC", 6, proxy.address],
+		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address],
 		"constructor_with_minter",
 		TOKEN_SALT,
 	)
@@ -188,7 +197,7 @@ async function main() {
 				address: token.address.toString(),
 				salt: TOKEN_SALT,
 				constructorArtifact: "constructor_with_minter",
-				constructorArgs: ["Nulo USDC", "USDC", 6, proxy.address.toString()],
+				constructorArgs: [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address.toString()],
 			},
 			bridge: {
 				address: bridge.address.toString(),
