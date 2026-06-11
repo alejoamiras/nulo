@@ -40,7 +40,7 @@ The contracts capability card says "Register and read contract metadata" - silen
 
 ## Phases
 
-### P1 - Deploy scripts + testnet deploys (constants NOT flipped - final-pass decoupling) ⬜
+### P1 - Deploy scripts + testnet deploys (constants NOT flipped - final-pass decoupling) 🔄
 Files: `packages/faucet/scripts/deploy-config.ts`/`deploy.ts` (NULO/OLUN entries), `packages/bridge-core/scripts/deploy-bridge-testnet.ts` (DECIMALS param + L1==L2 symmetry assert), run both against testnet, RECORD the new addresses in `implementations-plan/token-identity/deployments.md` (the frontend constants flip atomically in P3 - flipping here would break every build between phases).
 Smallest proof: deploy scripts run green on testnet with the new names/decimals; the symmetry assert fires on an intentionally mismatched dry-run; addresses recorded.
 Validate: script runs + the suites stay green UNTOUCHED (`bun run --cwd packages/faucet test && typecheck`).
@@ -90,6 +90,9 @@ Gates: `bun run audit:faucet` + `bun run audit:vue` + extension `audit:vue` scop
 
 ## Out of scope
 Swap/fuel; Playwright arc; release cut; recipient-commitment; any mainnet/extension-release work.
+
+## Approval
+**USER VERDICT: APPROVE** (gate, this session). Implementation begins at P1.
 
 ## Audit verdicts
 - Dual audit (parallel, both outlines): **codex: reject** (accounts-gating unenforceable - no checker, type-only re-consent, no popup card; 18-dec sweep must include parse + L1 mint) · **fable: reject** (CRITICAL: new capability types are Zod-closed upstream / new fields stripped ⇒ redesign onto the `contracts` capability; HIGH: grant-upgrade dead end, popup consent gap, MINT_AMOUNT literal; MEDIUM: 3-copy drift, formatter duplication). CONVERGENT fix folded: T6-T9 + D2/D3/D5 rewrites. Both picked the redeploy outline.
