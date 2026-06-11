@@ -1,20 +1,7 @@
-import { type IntentInnerHash, type CallIntent, computeAuthWitMessageHash, CallAuthorizationRequest } from "@aztec/aztec.js/authorization"
-import { type InteractionWaitOptions, type SendReturn, extractOffchainOutput } from "@aztec/aztec.js/contracts"
+import { type IntentInnerHash, type CallIntent, computeAuthWitMessageHash } from "@aztec/aztec.js/authorization"
 import { Fr } from "@aztec/foundation/curves/bn254"
-import {
-	type AbiDecoded,
-	type AbiType,
-	AbiTypeSchema,
-	type ContractArtifact,
-	ContractArtifactSchema,
-	encodeArguments,
-	type FunctionAbi,
-	FunctionSelector,
-	FunctionType,
-	FunctionCall,
-	decodeFromAbi,
-} from "@aztec/stdlib/abi"
-import { AuthWitness } from "@aztec/stdlib/auth-witness"
+import { AbiTypeSchema, type ContractArtifact, ContractArtifactSchema, FunctionSelector, FunctionCall } from "@aztec/stdlib/abi"
+import type { AuthWitness } from "@aztec/stdlib/auth-witness"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import {
 	computeContractAddressFromInstance,
@@ -23,37 +10,18 @@ import {
 	getContractClassFromArtifact,
 	computePartialAddress,
 } from "@aztec/stdlib/contract"
-import type { ChainInfo } from "@aztec/entrypoints/interfaces"
-import {
-	ExecutionPayload,
-	type TxExecutionRequest,
-	type TxProfileResult,
-	type TxSimulationResult,
-	type UtilityExecutionResult,
-	collectOffchainEffects,
-} from "@aztec/stdlib/tx"
 import z from "zod"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { AccountService } from "@/wallet/services/account/service"
-import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import { ContactService } from "@/wallet/services/contact/service"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { TokenService } from "@/wallet/services/token/service"
 import { FpcService, FpcType } from "@/wallet/services/fpc/service"
-import {
-	TransactionService,
-	OriginType,
-	type TransferType,
-	type LocalTxOrigin,
-	TxStatus,
-	type TxGasDetails,
-} from "@/wallet/services/transaction/service"
-import { feeJuiceAddress } from "@/wallet/utils/fee-juice"
-import { computeMaxFee, formatFeeJuice, feeToUsd } from "@/utils/fee-estimation"
+import { TransactionService, OriginType, type TransferType, type LocalTxOrigin, TxStatus } from "@/wallet/services/transaction/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
-import type { OperationContext, OperationRecord } from "@/wallet/services/operation-journal/spec"
+import type { OperationContext } from "@/wallet/services/operation-journal/spec"
 import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import { claimOrCreateDappExecuteJournal as claimOrCreateDappExecuteJournalImpl } from "./claim-helper"
 import {
@@ -63,13 +31,13 @@ import {
 	ExecutionMutexCapacityError,
 	type ExecutionMutexRelease,
 } from "./execution-mutex"
-import { TaskService, type WrappedTask, ExecuteOperationContent, TransferContent } from "@/wallet/services/task/service"
+import { TaskService, type WrappedTask, ExecuteOperationContent } from "@/wallet/services/task/service"
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import { TooManyPendingError } from "@nulo/extension-messaging/errors"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
-import { classifyOperationCatch, maybeRethrowAsRpcCancel } from "./rpc-cancel"
+import { classifyOperationCatch } from "./rpc-cancel"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import {
@@ -77,26 +45,14 @@ import {
 	type Methods,
 	type Operation,
 	type RegisterSenderOperation,
-	type RegisterTokenOperation,
 	type RegisterContractOperation,
 	type SendTransactionOperation,
-	type SimulateTransactionOperation,
-	type SimulateUtilityOperation,
 	type OperationResult,
 	type Action,
 	type FeeSettings,
 	PRIORITY_MULTIPLIERS,
-	type AztecGetContractClassMetadataOperation,
-	type AztecGetContractMetadataOperation,
-	type AztecGetPrivateEventsOperation,
-	type AztecGetChainInfoOperation,
 	type AztecRegisterSenderOperation,
-	type AztecGetAddressBookOperation,
 	type AztecRegisterContractOperation,
-	type AztecSimulateTxOperation,
-	type AztecExecuteUtilityOperation,
-	type AztecProfileTxOperation,
-	type AztecSendTxOperation,
 	type AztecCreateAuthWitOperation,
 	type FeeOptions,
 	type GasBalances,
@@ -107,33 +63,19 @@ import { OperationPlanner } from "./operation-planner"
 import { TransferEstimateReuse } from "./transfer-estimate-reuse"
 import { TransferExecutor } from "./transfer-executor"
 import { DappSendExecutor } from "./dapp-send-executor"
+import { ViewExecutor } from "./view-executor"
 import { GasBalanceReader } from "./gas-balance-reader"
-import { getEstimatedFee, getGasDetails } from "./tx-fee-details"
-import { ContractResolver, findFunctionByName } from "./contract-resolver"
-import { batchedViewSimulation } from "./helpers/batched-view-simulation"
+import { ContractResolver } from "./contract-resolver"
 import { getViewSimulationDeps } from "./helpers/get-view-simulation-deps"
 import type { MaterializedRegisterTokenOperation } from "./models"
 import { AuthwitDiscoverer } from "./authwit-discoverer"
 import { TxRequestBuilder } from "./tx-request-builder"
-import {
-	type FeeEstimate,
-	type FeeStrategy,
-	type FeeStrategyContext,
-	type FeeStrategyDeps,
-	DEFAULT_FEE_MULTIPLIER,
-	finalizeGasLimits,
-	suggestGasLimits,
-} from "./fee/fee-strategy"
+import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee/fee-strategy"
 import { FeeJuiceStrategy } from "./fee/fee-juice-strategy"
 import { FeeJuiceWithClaimStrategy } from "./fee/fee-juice-with-claim-strategy"
 import { FpcStrategy } from "./fee/fpc-strategy"
 import { EmbeddedStrategy } from "./fee/embedded-strategy"
-import { applyEmbeddedFpcGasCap } from "./fee/embedded-fpc-cap"
-import { detectEmbeddedFeePayment } from "./utils/fee-detection"
 import { ExecutionCoordinator } from "./execution-coordinator"
-import { type Aliased, ContractInitializationStatus } from "@aztec/aztec.js/wallet"
-import { rehydrateOptimizablePrefix, runFastPath } from "./fast-path"
-import type { PackedPrivateEvent } from "@aztec/pxe/client/bundle"
 import { pickPrimaryMethod } from "@/utils/primary-method"
 
 export * from "./spec"
@@ -186,6 +128,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	private estimateReuse: TransferEstimateReuse = null!
 	private transferExecutor: TransferExecutor = null!
 	private dappSendExecutor: DappSendExecutor = null!
+	private viewExecutor: ViewExecutor = null!
 
 	/** Phase 2 cancel surface: jobId → AbortController. SW-internal only,
 	 *  never crosses the wire. `cancelJob(id)` aborts the controller; the
@@ -318,6 +261,18 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			buildAndEstimate: (op, feeSettings, parentTask) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask),
 			addTransaction: (...args) => this.transactionService.addTransaction(...args),
 			logDebug: (msg) => this.logDebug(msg),
+		})
+		this.viewExecutor = new ViewExecutor({
+			planner: this.planner,
+			resolver: this.resolver,
+			txBuilder: this.txBuilder,
+			pxeService: this.pxeService,
+			profileService: this.profileService,
+			networkService: this.networkService,
+			accountService: this.accountService,
+			contactService: this.contactService,
+			logDebug: (msg, ...rest) => this.logDebug(msg, ...rest),
+			logError: (msg, ...rest) => this.logError(msg, ...rest),
 		})
 		const feeDeps: FeeStrategyDeps = {
 			txBuilder: this.txBuilder,
@@ -481,28 +436,28 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 						break
 					}
 					case "simulate_transaction": {
-						result = await this.executeSimulateTransaction(operation)
+						result = await this.viewExecutor.executeSimulateTransaction(operation)
 						break
 					}
 					case "simulate_utility": {
-						result = await this.executeSimulateUtility(operation)
+						result = await this.viewExecutor.executeSimulateUtility(operation)
 						break
 					}
 					// Aztec.js interface:
 					case "aztec_getContractClassMetadata": {
-						result = await this.executeAztecGetContractClassMetadata(operation)
+						result = await this.viewExecutor.executeAztecGetContractClassMetadata(operation)
 						break
 					}
 					case "aztec_getContractMetadata": {
-						result = await this.executeAztecGetContractMetadata(operation)
+						result = await this.viewExecutor.executeAztecGetContractMetadata(operation)
 						break
 					}
 					case "aztec_getPrivateEvents": {
-						result = await this.executeAztecGetPrivateEvents(operation)
+						result = await this.viewExecutor.executeAztecGetPrivateEvents(operation)
 						break
 					}
 					case "aztec_getChainInfo": {
-						result = await this.executeAztecGetChainInfo(operation)
+						result = await this.viewExecutor.executeAztecGetChainInfo(operation)
 						break
 					}
 					case "aztec_registerSender": {
@@ -510,7 +465,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 						break
 					}
 					case "aztec_getAddressBook": {
-						result = await this.executeAztecGetAddressBook(operation)
+						result = await this.viewExecutor.executeAztecGetAddressBook(operation)
 						break
 					}
 					case "aztec_registerContract": {
@@ -518,15 +473,15 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 						break
 					}
 					case "aztec_simulateTx": {
-						result = await this.executeAztecSimulateTx(operation)
+						result = await this.viewExecutor.executeAztecSimulateTx(operation)
 						break
 					}
 					case "aztec_executeUtility": {
-						result = await this.executeAztecExecuteUtility(operation)
+						result = await this.viewExecutor.executeAztecExecuteUtility(operation)
 						break
 					}
 					case "aztec_profileTx": {
-						result = await this.executeAztecProfileTx(operation)
+						result = await this.viewExecutor.executeAztecProfileTx(operation)
 						break
 					}
 					case "aztec_sendTx": {
@@ -857,71 +812,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 	}
 
-	private async executeSimulateTransaction(op: SimulateTransactionOperation): Promise<unknown> {
-		const { txRequest, pxe, account } = await this.txBuilder.buildStandard(op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
-		const simulatedTx = await pxe.simulateTx(txRequest, {
-			simulatePublic: op.simulatePublic ?? false,
-			skipFeeEnforcement: true,
-			scopes: [account.address],
-		})
-		return {
-			gasUsed: simulatedTx.gasUsed,
-			privateReturn: simulatedTx.getPrivateReturnValues(),
-			publicReturn: simulatedTx.getPublicReturnValues(),
-		}
-	}
-
-	private async executeSimulateUtility(op: SimulateUtilityOperation): Promise<AbiDecoded> {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet locked")
-		}
-		const network = await this.networkService.getNetwork(op.networkId)
-		const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
-
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
-
-		const registeredContracts = new Set<string>((await pxe.getContracts()).map((x) => x.toString()))
-		if (!registeredContracts.has(op.contract)) {
-			const [_, instance] = await this.resolver.resolveInstance(pxe, op.contract)
-			const [__, artifact] = await this.resolver.resolveArtifact(pxe, instance.currentContractClassId.toString())
-			this.logDebug("Register contract")
-			await pxe.registerContract({ instance, artifact })
-		}
-
-		const [_, instance] = await this.resolver.resolveInstance(pxe, op.contract)
-		const [__, artifact] = await this.resolver.resolveArtifact(pxe, instance.currentContractClassId.toString())
-
-		const fn = findFunctionByName(artifact, op.method)
-		if (!fn) {
-			throw new Error("Method not found")
-		}
-		const fnSelector = await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)
-		const encodedArgs = encodeArguments(fn, op.args)
-		const call = new FunctionCall(
-			fn.name,
-			AztecAddress.fromString(op.contract),
-			fnSelector,
-			fn.functionType,
-			false,
-			fn.isStatic,
-			encodedArgs,
-			fn.returnTypes,
-		)
-
-		await account.ensureRegistered(pxe)
-		const { result } = await pxe.executeUtility(call, {
-			scopes: [account.address],
-		})
-
-		try {
-			return decodeFromAbi(fn.returnTypes, result)
-		} catch (error) {
-			this.logError("Failed to decode simulation results", fn.returnTypes, result, getErrorMessage(error))
-			return result as AbiDecoded
-		}
-	}
-
 	public async getGasBalances(networkId: string, accountAddress: string, forceRefresh?: boolean): Promise<GasBalances> {
 		await this.ensureInitialized()
 		return this.gasBalances.get(networkId, accountAddress, forceRefresh)
@@ -929,93 +819,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 	// Aztec.js interface:
 
-	private async executeAztecGetContractClassMetadata(
-		op: AztecGetContractClassMetadataOperation,
-	): Promise<{ isContractClassPubliclyRegistered: boolean; isArtifactRegistered: boolean }> {
-		const network = await this.networkService.getNetwork(op.networkId)
-		const artifact = await this.pxeService.getContractArtifact(networkInfoFrom(network), op.id, { pxeOnly: true })
-		return {
-			isContractClassPubliclyRegistered: !!artifact,
-			isArtifactRegistered: !!artifact,
-		}
-	}
-
-	private async executeAztecGetContractMetadata(op: AztecGetContractMetadataOperation): Promise<{
-		instance?: ContractInstanceWithAddress
-		initializationStatus: ContractInitializationStatus
-		isContractPublished: boolean
-		isContractUpdated: boolean
-		updatedContractClassId?: Fr
-	}> {
-		const network = await this.networkService.getNetwork(op.networkId)
-
-		// Check PXE-local only: simulation requires both instance AND artifact
-		// registered in PXE. The full cascade (node/known/registry) finds on-chain
-		// data that PXE can't use for simulation.
-		const localInstance = await this.pxeService.getContractInstance(networkInfoFrom(network), op.address, { pxeOnly: true })
-
-		let hasArtifact = false
-		if (localInstance) {
-			try {
-				const artifact = await this.pxeService.getContractArtifact(networkInfoFrom(network), localInstance.currentContractClassId, {
-					pxeOnly: true,
-				})
-				hasArtifact = !!artifact
-			} catch {
-				hasArtifact = false
-			}
-		}
-
-		const isLocallyRegistered = !!localInstance && hasArtifact
-
-		// `isContractPublished` is a best-effort flag — the wallet-sdk doc treats
-		// it as a hint, not a guarantee. `nodeBestEffort: true` keeps a transient
-		// node failure (testnet RPC noise) from failing the whole metadata call;
-		// the local known-bundle fallback still runs underneath.
-		let isPublished = isLocallyRegistered
-		if (!isPublished) {
-			const fullInstance = await this.pxeService.getContractInstance(networkInfoFrom(network), op.address, {
-				nodeBestEffort: true,
-			})
-			isPublished = !!fullInstance
-		}
-
-		return {
-			instance: isLocallyRegistered ? localInstance : undefined,
-			initializationStatus: isLocallyRegistered ? ContractInitializationStatus.INITIALIZED : ContractInitializationStatus.UNKNOWN,
-			isContractPublished: isPublished,
-			isContractUpdated: false,
-			updatedContractClassId: undefined,
-		}
-	}
-
-	private async executeAztecGetPrivateEvents(op: AztecGetPrivateEventsOperation): Promise<PackedPrivateEvent[]> {
-		const network = await this.networkService.getNetwork(op.networkId)
-		return this.pxeService.getPrivateEvents(networkInfoFrom(network), op.eventMetadata.eventSelector, op.eventFilter)
-	}
-
-	private async executeAztecGetChainInfo(op: AztecGetChainInfoOperation): Promise<ChainInfo> {
-		const network = await this.networkService.getNetwork(op.networkId)
-		const node = await this.networkService.getNode(network.chainId)
-		const nodeInfo = await node.getNodeInfo()
-		// F-012 / A-01 V-01: this API returns chain identity to the dApp.
-		// A drifted RPC must be reported as a mismatch rather than silently
-		// reporting whatever the RPC claims.
-		assertLiveChainIdentity(network, nodeInfo)
-		return { chainId: new Fr(nodeInfo.l1ChainId), version: new Fr(nodeInfo.rollupVersion) }
-	}
-
 	private async executeAztecRegisterSender(op: AztecRegisterSenderOperation): Promise<AztecAddress> {
 		const network = await this.networkService.getNetwork(op.networkId)
 		return this.pxeService.registerSender(networkInfoFrom(network), op.address)
-	}
-
-	private async executeAztecGetAddressBook(_op: AztecGetAddressBookOperation): Promise<Aliased<AztecAddress>[]> {
-		// TODO: filter by chainId
-		return (await this.contactService.getContacts()).map((x) => ({
-			alias: x.name,
-			item: AztecAddress.fromString(x.address),
-		}))
 	}
 
 	private async executeAztecRegisterContract(op: AztecRegisterContractOperation): Promise<ContractInstanceWithAddress> {
@@ -1061,153 +867,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 
 		return instance
-	}
-
-	private async executeAztecSimulateTx(op: AztecSimulateTxOperation): Promise<TxSimulationResult> {
-		if (op.accountAddress !== op.opts?.from?.toString()) {
-			throw new Error("Invalid `opts.from`")
-		}
-
-		// Mixed-payload fast path. The public-static *prefix* of
-		// `op.exec.calls` runs directly against the node via
-		// `simulateViaNode`; the remainder goes through PXE in parallel;
-		// upstream's `buildMergedSimulationResult` stitches them back in
-		// payload order. Mirrors `BaseWallet.simulateTx`.
-		//
-		// First-tx multicall init exception: when the user's account
-		// hasn't sent its first tx yet, `nulo-account.buildTxExecutionRequest`
-		// wraps `[ctor, entrypoint(appCalls)]` via `DefaultMultiCallEntrypoint`,
-		// producing a doubly-nested execution tree. Upstream's flat
-		// `appCallOffset` model can't express that. For mixed-with-remainder
-		// payloads in this state, route entirely to the standard path; pure-
-		// prefix is still optimized because `simulateViaNode` bypasses the
-		// account entirely.
-		const split = rehydrateOptimizablePrefix(op.exec?.calls)
-		if (split === null) {
-			return this.executeAztecSimulateTxStandard(op)
-		}
-		const { optimizableCalls, remainingRaw } = split
-
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet locked")
-		}
-		const network = await this.networkService.getNetwork(op.networkId)
-		const node = await this.networkService.getNode(network.chainId)
-
-		if (remainingRaw.length > 0) {
-			const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
-			const needsInit = await account.requiresInitialization(node)
-			if (needsInit) {
-				// Mixed + first-tx → don't try to merge. The naive "normalize
-				// the standard arm's private-execution tree onto the inner
-				// entrypoint subtree" approach was audited (codex 019e1912
-				// + opus 4.7, 2026-05-12) and rejected because:
-				//   • publicInputs.gasUsed IS dApp-visible via
-				//     TxSimulationResult.gasUsed and would over-report
-				//     (ctor gas leaks into the projected result).
-				//   • firstNullifier of the multicall result IS the account
-				//     init nullifier; carrying it onto an entrypoint-rooted
-				//     tree is semantically wrong.
-				// See wallets-architecture-research/synthesis/
-				// implementation-plan-p1-p3.md "Tracked follow-ups" §4 for
-				// the trigger conditions to revisit.
-				return this.executeAztecSimulateTxStandard(op)
-			}
-		}
-
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
-
-		const result = await runFastPath({
-			node,
-			pxe,
-			network,
-			fromAddr: AztecAddress.fromString(op.accountAddress),
-			opts: op.opts,
-			optimizableCalls,
-			remainingRaw,
-			runStandardArm: async (rawCalls) =>
-				this.executeAztecSimulateTxStandard({ ...op, exec: { ...op.exec, calls: rawCalls as never } }),
-			// Naive — upstream uses it only for error contextualization;
-			// no functional impact on sim correctness.
-			getContractName: async () => undefined,
-			logError: (msg, err) => this.logError(msg, err),
-		})
-		if (result === null) {
-			return this.executeAztecSimulateTxStandard(op)
-		}
-		return result
-	}
-
-	/** Standard path: full PXE simulation through the account entrypoint
-	 *  (with stub-account override). Used when the fast path's
-	 *  `tryRehydratePureStaticPayload` returns `null` (any non-public-
-	 *  static call disqualifies the fast path), when no node block is
-	 *  synced, or when a fast-path-exclusive operation throws and signals
-	 *  fallback. */
-	private async executeAztecSimulateTxStandard(op: AztecSimulateTxOperation): Promise<TxSimulationResult> {
-		const [actions, feePaymentMethod, fee] = await this.planner.processAztecJsPayload(op.exec, op.opts)
-		// Thread the dApp's `opts.fee.gasSettings` (including
-		// `maxPriorityFeesPerGas`) so `nulo-account.ts`'s
-		// `completeFeeOptions` call uses the dApp-supplied values rather
-		// than silently defaulting from `node.getCurrentMinFees() * 1.5`.
-		const { txRequest, node, pxe, account } = await this.txBuilder.buildStandard(
-			{ ...op, actions },
-			feePaymentMethod,
-			undefined,
-			op.opts.fee?.gasSettings,
-		)
-		suggestGasLimits(txRequest, fee)
-		await applyEmbeddedFpcGasCap(txRequest, fee, node)
-		const additionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
-		// Thread `stubAccountAddresses` so the simulated account contract
-		// is the stubbed pass-through one (override path at
-		// `pxe/service.ts:233-246`). Real signing keys never enter PXE
-		// during a dApp `simulateTx` — defense-in-depth for read-heavy
-		// dApp flows. The third-arg pattern matches `executeNoFromSendTx`'s
-		// kernelless discovery sim, so the override mechanism is exercised
-		// identically across all dApp-facing sim paths.
-		return pxe.simulateTx(
-			txRequest,
-			{
-				simulatePublic: true,
-				skipTxValidation: op.opts.skipTxValidation,
-				skipFeeEnforcement: op.opts.skipFeeEnforcement ?? true,
-				scopes: [account.address, ...additionalScopes],
-			},
-			[account.address.toString()],
-		)
-	}
-
-	private async executeAztecExecuteUtility(op: AztecExecuteUtilityOperation): Promise<UtilityExecutionResult> {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet locked")
-		}
-		const network = await this.networkService.getNetwork(op.networkId)
-		const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
-		await account.ensureRegistered(pxe)
-		return pxe.executeUtility(op.call, {
-			authwits: await z.array(AuthWitness.schema).optional().parseAsync(op.opts.authWitnesses),
-			scopes: await z.array(AztecAddress.schema).parseAsync(op.opts.scopes),
-		})
-	}
-
-	private async executeAztecProfileTx(op: AztecProfileTxOperation): Promise<TxProfileResult> {
-		if (op.accountAddress !== op.opts?.from?.toString()) {
-			throw new Error("Invalid `opts.from`")
-		}
-		const [actions, feePaymentMethod, fee] = await this.planner.processAztecJsPayload(op.exec, op.opts)
-		const { txRequest, node, pxe } = await this.txBuilder.buildStandard({ ...op, actions }, feePaymentMethod)
-		suggestGasLimits(txRequest, fee)
-		await applyEmbeddedFpcGasCap(txRequest, fee, node)
-		const additionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
-		return pxe.profileTx(txRequest, {
-			profileMode: op.opts.profileMode,
-			skipProofGeneration: op.opts.skipProofGeneration,
-			scopes: [AztecAddress.fromString(op.accountAddress), ...additionalScopes],
-		})
 	}
 
 	public async executeAztecCreateAuthWit(op: AztecCreateAuthWitOperation): Promise<AuthWitness> {
