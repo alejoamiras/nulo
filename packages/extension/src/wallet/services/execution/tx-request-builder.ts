@@ -30,14 +30,11 @@
  * `ExecutionCoordinator` to own the post-send flush point; until then,
  * keep the inline call.
  *
- * ## Return-shape parity
+ * ## Return shape
  *
- * `buildStandard` returns the 7-tuple
- * `[txRequest, node, pxe, account, network, nonce, txCalls]`.
- * `buildNoFrom` returns the 6-tuple
- * `[txRequest, node, pxe, account, network, txCalls]` — no nonce, since
- * `DefaultEntrypoint` doesn't use one. These tuples feed the
- * fee-strategy branches.
+ * `buildStandard` returns a `BuiltStandardTx`; `buildNoFrom` returns a
+ * `BuiltNoFromTx` (same fields minus `nonce`, since `DefaultEntrypoint`
+ * doesn't use one). These feed the fee-strategy branches.
  */
 
 import { Fr } from "@aztec/foundation/curves/bn254"
@@ -66,8 +63,18 @@ import type { Action, AztecSendTxOperation } from "./spec"
 
 const LOG_SOURCE = "TxRequestBuilder"
 
-export type StandardTxRequestResult = [TxExecutionRequest, AztecNode, IPXE, IAccountContract, Network, Fr, TxCall[]]
-export type NoFromTxRequestResult = [TxExecutionRequest, AztecNode, IPXE, IAccountContract, Network, TxCall[]]
+export interface BuiltStandardTx {
+	txRequest: TxExecutionRequest
+	node: AztecNode
+	pxe: IPXE
+	account: IAccountContract
+	network: Network
+	nonce: Fr
+	txCalls: TxCall[]
+}
+
+/** NO_FROM (DefaultEntrypoint) variant — no account nonce exists on that path. */
+export type BuiltNoFromTx = Omit<BuiltStandardTx, "nonce">
 
 export class TxRequestBuilder {
 	public constructor(
@@ -90,7 +97,7 @@ export class TxRequestBuilder {
 		feePaymentMethod: AccountFeePaymentMethodOptions,
 		parentTask?: WrappedTask,
 		gasSettings?: PartialGasSettingsRPC,
-	): Promise<StandardTxRequestResult> {
+	): Promise<BuiltStandardTx> {
 		const step = new StepContent("Processing transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.taskService.startNewTask(step)
 
@@ -342,7 +349,7 @@ export class TxRequestBuilder {
 			)
 
 			task.complete()
-			return [txRequest, node, pxe, account, network, nonce, txCalls]
+			return { txRequest, node, pxe, account, network, nonce, txCalls }
 		} catch (error) {
 			task.fail(error)
 			throw error
@@ -354,7 +361,7 @@ export class TxRequestBuilder {
 	 *  wrapper, inlined `DefaultEntrypoint` logic. Cannot import
 	 *  `@aztec/entrypoints/default` in the service worker (upstream
 	 *  references `window`). */
-	public async buildNoFrom(op: AztecSendTxOperation, parentTask?: WrappedTask): Promise<NoFromTxRequestResult> {
+	public async buildNoFrom(op: AztecSendTxOperation, parentTask?: WrappedTask): Promise<BuiltNoFromTx> {
 		const step = new StepContent("Processing transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.taskService.startNewTask(step)
 
@@ -438,7 +445,7 @@ export class TxRequestBuilder {
 			}))
 
 			task.complete()
-			return [txRequest, node, pxe, account, network, txCalls]
+			return { txRequest, node, pxe, account, network, txCalls }
 		} catch (error) {
 			task.fail(error)
 			throw error

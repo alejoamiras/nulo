@@ -54,7 +54,7 @@ import { StepContent, type TaskService, type WrappedTask } from "@/wallet/servic
 import type { TxCall } from "@/wallet/services/transaction/service"
 import type { Fr } from "@aztec/foundation/curves/bn254"
 import type { Action, FeeOptions, FeeSettings } from "../spec"
-import type { TxRequestBuilder } from "../tx-request-builder"
+import type { BuiltStandardTx, TxRequestBuilder } from "../tx-request-builder"
 
 /** Default multiplier for `maxFeesPerGas`. Production default is `2`.
  *  Overridable at build time via `VITE_NULO_FEE_MULTIPLIER` so e2e CI can
@@ -67,18 +67,13 @@ const VITE_FEE_MULTIPLIER_PARSED = Number.parseFloat(VITE_FEE_MULTIPLIER_RAW)
 export const DEFAULT_FEE_MULTIPLIER: number =
 	Number.isFinite(VITE_FEE_MULTIPLIER_PARSED) && VITE_FEE_MULTIPLIER_PARSED >= 1 ? VITE_FEE_MULTIPLIER_PARSED : 2
 
-/** Tuple returned by every strategy. Matches the pre-split
- *  `buildAndEstimateTxRequest` return verbatim. */
-export type FeeEstimateResult = [
-	TxExecutionRequest,
-	AztecNode,
-	IPXE,
-	IAccountContract,
-	Network,
-	Fr,
-	TxCall[],
-	AccountFeePaymentMethodOptions,
-]
+/** Result returned by every strategy: the built tx plus the payment
+ *  method the strategy resolved. Field names — not positions — are the
+ *  contract; same-typed slots (gas/teardown/fee) made the old tuple a
+ *  silent-transposition hazard. */
+export interface FeeEstimate extends BuiltStandardTx {
+	feePaymentMethod: AccountFeePaymentMethodOptions
+}
 
 /** Simulate callback — facade owns the TaskService wrapping so that
  *  strategies stay decoupled from task bookkeeping. */
@@ -121,7 +116,7 @@ export type FeeStrategyDeps = {
 /** Strategy contract. Each impl owns one fee kind end-to-end. */
 export interface FeeStrategy {
 	readonly kind: FeeSettings["paymentMethod"]["kind"]
-	buildAndEstimate(ctx: FeeStrategyContext): Promise<FeeEstimateResult>
+	buildAndEstimate(ctx: FeeStrategyContext): Promise<FeeEstimate>
 }
 
 /** Override gas limits on a pre-built tx request from a pending FeeOptions

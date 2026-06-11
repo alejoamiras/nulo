@@ -103,7 +103,7 @@ import {
 	type TransferFeeEstimate,
 } from "./spec"
 import { coerceAmount } from "./coerce-amount"
-import { OperationPlanner } from "./operation-planner"
+import { OperationPlanner, type TransferRequest } from "./operation-planner"
 import { ContractResolver, findFunctionByName } from "./contract-resolver"
 import { batchedViewSimulation } from "./helpers/batched-view-simulation"
 import { getViewSimulationDeps } from "./helpers/get-view-simulation-deps"
@@ -111,7 +111,7 @@ import type { MaterializedRegisterTokenOperation } from "./models"
 import { AuthwitDiscoverer } from "./authwit-discoverer"
 import { TxRequestBuilder } from "./tx-request-builder"
 import {
-	type FeeEstimateResult,
+	type FeeEstimate,
 	type FeeStrategy,
 	type FeeStrategyContext,
 	type FeeStrategyDeps,
@@ -414,6 +414,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	): Promise<string> {
 		await this.ensureInitialized()
 		amount = coerceAmount(amount)
+		const transferRequest: TransferRequest = { networkId, accountAddress, tokenId, transferType, recipientAddress, amount, feeSettings }
 		const origin: LocalTxOrigin = { type: OriginType.UI }
 		const transferContent = new TransferContent(tokenId, transferType, accountAddress, recipientAddress, amount)
 		const transferTask = this.taskService.startNewTask(transferContent, undefined, origin)
@@ -472,17 +473,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			// Try the cached-estimate fast path first. Falls back to a fresh
 			// build if the snapshot has drifted (base fee, primary endpoint,
 			// or any input field) — conservative: any mismatch ⇒ rebuild.
-			const reused = precomputedEstimateId
-				? await this.tryConsumeTransferEstimate(precomputedEstimateId, {
-						networkId,
-						accountAddress,
-						tokenId,
-						transferType,
-						recipientAddress,
-						amount,
-						feeSettings,
-					})
-				: undefined
+			const reused = precomputedEstimateId ? await this.tryConsumeTransferEstimate(precomputedEstimateId, transferRequest) : undefined
 
 			let txRequest: TxExecutionRequest
 			let node: Awaited<ReturnType<NetworkService["getNode"]>>
@@ -522,27 +513,19 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				if (!profile) throw new Error("Wallet locked")
 				account = await this.accountService.getAccountContract(profile.id, network.chainId, accountAddress)
 			} else {
-				const { op, token, fn, args } = await this.planner.buildTransferOperation(
-					networkId,
-					accountAddress,
-					tokenId,
-					transferType,
-					recipientAddress,
-					amount,
-					feeSettings,
-				)
+				const { op, token, fn, args } = await this.planner.buildTransferOperation(transferRequest)
 				activityToken = { contract: token.contract, name: token.name, symbol: token.symbol, decimals: token.decimals }
 				activityFnName = fn.name
 				activityArgs = args
 
 				const built = await this.buildAndEstimateTxRequest(op, op.feeSettings, transferTask)
-				txRequest = built[0]
-				node = built[1]
-				pxe = built[2]
-				account = built[3]
-				network = built[4]
-				nonce = built[5]
-				feePaymentMethod = built[7]
+				txRequest = built.txRequest
+				node = built.node
+				pxe = built.pxe
+				account = built.account
+				network = built.network
+				nonce = built.nonce
+				feePaymentMethod = built.feePaymentMethod
 			}
 
 			checkCancelled()
@@ -616,18 +599,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	 *  back to a full rebuild. The popup gets a single-shot reuse: the
 	 *  entry is dropped on consumption (success or failure), preventing
 	 *  retries from racing with a fresh estimate. */
-	private async tryConsumeTransferEstimate(
-		estimateId: string,
-		inputs: {
-			networkId: string
-			accountAddress: string
-			tokenId: number
-			transferType: TransferType
-			recipientAddress: string
-			amount: bigint
-			feeSettings: FeeSettings
-		},
-	): Promise<TransferEstimateReuseEntry | undefined> {
+	private async tryConsumeTransferEstimate(estimateId: string, inputs: TransferRequest): Promise<TransferEstimateReuseEntry | undefined> {
 		const entry = this.estimateReuseCache.get(estimateId)
 		this.estimateReuseCache.delete(estimateId) // single-shot
 		if (!entry) return undefined
@@ -725,21 +697,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	): Promise<TransferFeeEstimate> {
 		await this.ensureInitialized()
 		amount = coerceAmount(amount)
+		const transferRequest: TransferRequest = { networkId, accountAddress, tokenId, transferType, recipientAddress, amount, feeSettings }
 
-		const { op, token, fn, args } = await this.planner.buildTransferOperation(
-			networkId,
-			accountAddress,
-			tokenId,
-			transferType,
-			recipientAddress,
-			amount,
-			feeSettings,
-		)
+		const { op, token, fn, args } = await this.planner.buildTransferOperation(transferRequest)
 
-		const [txRequest, _node, _pxe, _account, network, nonce, _txCalls, feePaymentMethod] = await this.buildAndEstimateTxRequest(
-			op,
-			op.feeSettings,
-		)
+		const { txRequest, network, nonce, feePaymentMethod } = await this.buildAndEstimateTxRequest(op, op.feeSettings)
 
 		const maxFeeRaw = BigInt(getEstimatedFee(txRequest))
 
@@ -891,7 +853,10 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const authWitActions = await this.authwit.discoverPrivateAuthwits(
 			{ ...operation, actions: [...actions] } as SendTransactionOperation,
 			async (op, method) => {
-				const [txRequest, node, pxe, account, network] = await this.txBuilder.buildStandard(op as SendTransactionOperation, method)
+				const { txRequest, node, pxe, account, network } = await this.txBuilder.buildStandard(
+					op as SendTransactionOperation,
+					method,
+				)
 				return { txRequest, node, pxe, account, network }
 			},
 		)
@@ -900,7 +865,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		}
 
 		const op = { ...operation, actions: [...actions], ...(detectedFee ? { fee: detectedFee } : {}) } as SendTransactionOperation
-		const [txRequest] = await this.buildAndEstimateTxRequest(op, feeSettings)
+		const { txRequest } = await this.buildAndEstimateTxRequest(op, feeSettings)
 
 		const maxFeeRaw = BigInt(getEstimatedFee(txRequest))
 		return {
@@ -1170,7 +1135,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			await this.markJournal(journalId, { stage: "simulating" })
 			checkCancelled()
 
-			const [txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod] = await this.buildAndEstimateTxRequest(
+			const { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod } = await this.buildAndEstimateTxRequest(
 				op,
 				op.feeSettings,
 				parentTask,
@@ -1408,7 +1373,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	}
 
 	private async executeSimulateTransaction(op: SimulateTransactionOperation): Promise<unknown> {
-		const [txRequest, _, pxe, account] = await this.txBuilder.buildStandard(op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		const { txRequest, pxe, account } = await this.txBuilder.buildStandard(op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
 		const simulatedTx = await pxe.simulateTx(txRequest, {
 			simulatePublic: op.simulatePublic ?? false,
 			skipFeeEnforcement: true,
@@ -1797,7 +1762,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// `maxPriorityFeesPerGas`) so `nulo-account.ts`'s
 		// `completeFeeOptions` call uses the dApp-supplied values rather
 		// than silently defaulting from `node.getCurrentMinFees() * 1.5`.
-		const [txRequest, node, pxe, account] = await this.txBuilder.buildStandard(
+		const { txRequest, node, pxe, account } = await this.txBuilder.buildStandard(
 			{ ...op, actions },
 			feePaymentMethod,
 			undefined,
@@ -1845,7 +1810,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			throw new Error("Invalid `opts.from`")
 		}
 		const [actions, feePaymentMethod, fee] = await this.planner.processAztecJsPayload(op.exec, op.opts)
-		const [txRequest, node, pxe] = await this.txBuilder.buildStandard({ ...op, actions }, feePaymentMethod)
+		const { txRequest, node, pxe } = await this.txBuilder.buildStandard({ ...op, actions }, feePaymentMethod)
 		suggestGasLimits(txRequest, fee)
 		await applyEmbeddedFpcGasCap(txRequest, fee, node)
 		const additionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
@@ -1949,7 +1914,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			// simulation's dummy fee method.
 			if (!fee.embeddedFeePayment) {
 				const authWitActions = await this.authwit.discoverPrivateAuthwits({ ...op, actions: [...actions] }, async (o, method) => {
-					const [txRequest, node, pxe, account, network] = await this.txBuilder.buildStandard(
+					const { txRequest, node, pxe, account, network } = await this.txBuilder.buildStandard(
 						o as SendTransactionOperation,
 						method,
 					)
@@ -1963,7 +1928,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 			checkCancelled()
 
-			const [txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod] = await this.buildAndEstimateTxRequest(
+			const { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod } = await this.buildAndEstimateTxRequest(
 				{ ...op, actions, fee },
 				op.feeSettings,
 				parentTask,
@@ -2077,7 +2042,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 			await this.markJournal(journalId, { stage: "simulating" })
 
-			const [txRequest, node, pxe, account, network, txCalls] = await this.txBuilder.buildNoFrom(op, parentTask)
+			const { txRequest, node, pxe, account, network, txCalls } = await this.txBuilder.buildNoFrom(op, parentTask)
 			this.logDebug(
 				`executeNoFromSendTx: buildNoFromTxRequest completed, txCalls=${txCalls.length}, account=${account.address.toString()}`,
 			)
@@ -2270,7 +2235,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		},
 		feeSettings: FeeSettings,
 		parentTask?: WrappedTask,
-	): Promise<FeeEstimateResult> {
+	): Promise<FeeEstimate> {
 		// Clone the op + its actions array. fjwc / fpc branches mutate
 		// `op.actions` (unshift / splice) to prepend fee payloads; leaking
 		// those mutations back to the caller breaks repeat estimates and
