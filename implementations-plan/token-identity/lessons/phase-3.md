@@ -15,3 +15,10 @@ LESSONS_FILE=implementations-plan/token-identity/lessons/phase-3.md
 - Remaining for the flip (deploy-gated): deployment jsons/addresses, the two constants → AZLO/18, tokens.ts NULO/OLUN + FaucetView copy, footer symbols, faucet manifest addresses, sandbox/deposit harness scripts.
 
 LESSONS_FILE=implementations-plan/token-identity/lessons/phase-3.md
+
+## 2026-06-11 - P3 COMPLETE (the atomic flip, in two coherent halves)
+- Faucet half (forced the moment the deploy rewrote deployments.json - the module-load lookups went red exactly as the final pass predicted): deployments.ts (NULO/OLUN lookups + renamed exports/rebuilds), tokens.ts catalog, FaucetView, Footer, manifest copy, verify script, test fixtures + smoke. On-chain verify green.
+- Bridge half (after the AZLO deploy): the TWO-LINE flip (BRIDGE_TOKEN_SYMBOL/DECIMALS → AZLO/18 - the parameterization made it exactly that) + BridgeAddToken copy + 18-dec test fixtures (amounts gained 12 zeros; pins exercising REAL constants needed AZLO strings; mock-based pins stayed at their mocked USDC/6 intentionally - they test parameterized logic).
+- Gotchas: blanket `" ETH"→" OLUN"` replace nearly ate ETHEREUM (word-boundary regexes after the first bite); biome's earlier reformat broke a multi-line replace anchor silently (the receipt headline kept "USDC" with the import sitting unused - caught by pins).
+
+LESSONS_FILE=implementations-plan/token-identity/lessons/phase-3.md
