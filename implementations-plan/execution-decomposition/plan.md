@@ -32,7 +32,7 @@ Extend `contract-resolver.ts` with `ensureContractsRegistered(...)`, `findFuncti
 - Execution-owned closure only: token/fpc PXE-preamble adoption belongs to the service-fleet arc (decision ledger D6).
 e2e focus: register-token, contracts-getClassMetadata, sim-methods. Revert: pure helper extraction, single-checkpoint drop.
 
-### Phase 2 — Q18: internal objectification (1-1.5d)
+### Phase 2 ✓ — Q18: internal objectification (1-1.5d)
 Kill positional consumption BEFORE the dangerous extraction (ledger D1):
 - `StandardTxRequestResult` 7-tuple + `NoFromTxRequestResult` 6-tuple (`tx-request-builder.ts:69-70`) + `FeeEstimateResult` 8-tuple (`fee/fee-strategy.ts:72-81`) → named result objects (`BuiltStandardTx` / `BuiltNoFromTx` / `FeeEstimate`).
 - Update all index-consumers (`service.ts:538-545, 739-742, 1173-1177, 1967-1971, 2081`; fee strategies; `operation-planner.ts`). Kill every `built[N]` + `_`-placeholder destructure. Rationale: positional slots are same-typed (gas/teardown/fee) — a silent transposition costs user funds; named fields make it compiler-impossible AFTER the conversion.
