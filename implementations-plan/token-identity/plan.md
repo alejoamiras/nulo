@@ -40,7 +40,7 @@ The contracts capability card says "Register and read contract metadata" - silen
 
 ## Phases
 
-### P1 - Deploy scripts + testnet deploys (constants NOT flipped - final-pass decoupling) 🔄
+### P1 - Deploy scripts + testnet deploys (constants NOT flipped - final-pass decoupling) ✓
 Files: `packages/faucet/scripts/deploy-config.ts`/`deploy.ts` (NULO/OLUN entries), `packages/bridge-core/scripts/deploy-bridge-testnet.ts` (DECIMALS param + L1==L2 symmetry assert), run both against testnet, RECORD the new addresses in `implementations-plan/token-identity/deployments.md` (the frontend constants flip atomically in P3 - flipping here would break every build between phases).
 Smallest proof: deploy scripts run green on testnet with the new names/decimals; the symmetry assert fires on an intentionally mismatched dry-run; addresses recorded.
 Validate: script runs + the suites stay green UNTOUCHED (`bun run --cwd packages/faucet test && typecheck`).
@@ -50,7 +50,7 @@ Files: wallet-bridge (`scope-enforcement.ts` `checkIsTokenRegistered` mirroring 
 Smallest proof: reachability; gating matrix (granted ⇒ boolean, ungranted ⇒ scope-violation, no grant ⇒ refusal); field-diff matrix; 3-copy equality; consent copy snapshot mentions the registration check.
 Validate: `bun run --cwd packages/wallet-bridge test` + extension typecheck + `bun run lint`.
 
-### P3 - Frontends + footer ⬜
+### P3 - Frontends + footer ✓
 Files: `lib/amount.ts` (+tests incl. 18-dec precision pins), the 1e6 sweep across bridge surfaces, `constants/tokens.ts` (NULO/OLUN), copy sweep USDC→AZLO, `useFaucetAddToken` registration check + button hiding (fail-open pin), `Footer.vue`, component test updates.
 Smallest proof: amount round-trip pins (18-dec edge: "1.5" ⇒ 1500000000000000000n; sub-unit truncation; bigint-safe formatting of >2^53 units); add-token button hidden when registered / shown when not / shown on RPC failure; bridge copy pins updated; footer renders the three tokens.
 Gates: `bun run audit:faucet` + `bun run audit:vue` + extension `audit:vue` scope as applicable → codex post-impl audit → manual checklist.

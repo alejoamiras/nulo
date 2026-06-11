@@ -33,7 +33,9 @@ const CONFETTI = Array.from({ length: 14 }, (_, i) => ({
 
 const amountDisplay = computed(() => formatBigInt(BigInt(props.snapshot.amount), BRIDGE_TOKEN_DECIMALS))
 const headline = computed(() =>
-	props.snapshot.direction === "deposit" ? `${amountDisplay.value} USDC to Aztec` : `${amountDisplay.value} USDC to Ethereum`,
+	props.snapshot.direction === "deposit"
+		? `${amountDisplay.value} ${BRIDGE_TOKEN_SYMBOL} to Aztec`
+		: `${amountDisplay.value} ${BRIDGE_TOKEN_SYMBOL} to Ethereum`,
 )
 const totalElapsed = computed(() => {
 	const { startedAt, completedAt } = props.snapshot

@@ -26,7 +26,7 @@ function deposit(over: Partial<DepositJournalRecord> = {}): DepositJournalRecord
 		id: "0xdep",
 		direction: "deposit",
 		isPrivate: false,
-		amount: "100000000",
+		amount: "100000000000000000000",
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
 		recipient: "0xaztec",
@@ -42,7 +42,7 @@ function withdraw(over: Partial<WithdrawJournalRecord> = {}): WithdrawJournalRec
 		id: "0xwd",
 		direction: "withdraw",
 		isPrivate: false,
-		amount: "40000000",
+		amount: "40000000000000000000",
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
 		recipientL1: "0xeth",
@@ -72,7 +72,7 @@ describe("BridgeJournalCard", () => {
 		expect(card.attributes("data-stage")).toBe("claimable")
 		expect(card.attributes("data-privacy")).toBe("private")
 		expect(w.text()).toContain("ETHEREUM → AZTEC")
-		expect(w.text()).toContain("100.00 USDC")
+		expect(w.text()).toContain("100.00 AZLO")
 		expect(w.text()).toContain("PRIVATE")
 	})
 

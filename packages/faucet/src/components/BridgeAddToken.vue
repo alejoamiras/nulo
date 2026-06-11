@@ -3,11 +3,11 @@ import { onBeforeUnmount, ref, watch } from "vue"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { useFaucetAddToken } from "@/composables/useFaucetAddToken"
 import { useToast } from "@/composables/useToast"
-import { BRIDGE_TOKEN } from "@/contracts/bridge-deployments"
+import { BRIDGE_TOKEN, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
 import { TESTIDS } from "@/lib/testids"
 
-// Reuses the generic registerToken composable, pointed at the BRIDGE's USDC - a different deployment
-// from the faucet's USDC, so the faucet's own "Add to wallet" registers the wrong token here.
+// Reuses the generic registerToken composable, pointed at the BRIDGE token - a different deployment
+// from the faucet's drips, so the faucet's own "Add to wallet" registers the wrong token here.
 const bridge = useBridgeWallet()
 const addToken = useFaucetAddToken()
 const { push } = useToast()
@@ -46,7 +46,7 @@ async function handleAdd() {
 	const final = addToken.status.value
 	if (final.kind === "ok") {
 		registered.value = true
-		push({ kind: "ok", text: "Bridged USDC added to your wallet." })
+		push({ kind: "ok", text: `${BRIDGE_TOKEN_SYMBOL} added to your wallet.` })
 	} else if (final.kind === "error") {
 		push({ kind: "error", text: final.error.message })
 	} else if (final.kind === "unsupported") {
@@ -63,19 +63,19 @@ onBeforeUnmount(() => {
 
 <template>
 	<section v-if="bridge.status.value === 'connected' && !registered" class="bridge-add-token">
-		<p class="label">Bridged USDC on Aztec is a separate token from the faucet's - add it so your wallet shows the balance.</p>
+		<p class="label">{{ BRIDGE_TOKEN_SYMBOL }} on Aztec is a separate token from the faucet's - add it so your wallet shows the balance.</p>
 		<button
 			type="button"
 			class="add-btn"
 			:disabled="addToken.status.value.kind === 'submitting'"
 			:data-testid="TESTIDS.bridgeAddToken"
 			:data-add-status="addToken.status.value.kind"
-			aria-label="Add bridged USDC to your wallet"
+			aria-label="Add the bridged token to your wallet"
 			@click="handleAdd"
 		>
 			<template v-if="addToken.status.value.kind === 'submitting'">Adding…</template>
 			<template v-else-if="addToken.status.value.kind === 'ok'">Added ✓</template>
-			<template v-else>Add bridged USDC to wallet</template>
+			<template v-else>Add {{ BRIDGE_TOKEN_SYMBOL }} to wallet</template>
 		</button>
 	</section>
 </template>

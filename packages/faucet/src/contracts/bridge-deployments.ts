@@ -22,8 +22,8 @@ export const BRIDGE_TOKEN = AztecAddress.fromString(config.l2.token.address)
 
 /** The bridged pair's display identity - ONE source for every surface. The token-identity flip
  *  (AZLO/18) changes these two lines + the deployment config; nothing else. */
-export const BRIDGE_TOKEN_SYMBOL = "USDC"
-export const BRIDGE_TOKEN_DECIMALS = 6
+export const BRIDGE_TOKEN_SYMBOL = "AZLO"
+export const BRIDGE_TOKEN_DECIMALS = 18
 export const BRIDGE = AztecAddress.fromString(config.l2.bridge.address)
 
 const common = { publicKeys: PublicKeys.default(), deployer: AztecAddress.ZERO } as const
