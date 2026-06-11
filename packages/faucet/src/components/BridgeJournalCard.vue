@@ -40,45 +40,49 @@ const stage = computed(() => {
 const attention = computed(() => rt.value.attention)
 const actionable = computed(() => !attention.value || attention.value === "unknown-outcome" || attention.value === "error")
 
+/** Guidance for an IDLE card only: while the engine drives (busy) the rail narrates live, and a
+ *  done card's stamp says everything - a parallel stage line would just repeat them. */
+/** Guidance for an IDLE card only: while the engine drives (busy) the rail narrates live, and a
+ *  done card's stamp says everything - a parallel stage line would just repeat them. */
 const stageLabel = computed(() => {
+	if (rt.value.busy || stage.value === "done") return null
 	const r = props.record
 	if (r.direction === "deposit") {
 		switch (stage.value) {
 			case "depositing":
-				return "Depositing on Ethereum - confirm the transaction(s) in your Ethereum wallet."
+				return "The deposit never confirmed on Ethereum. Check your wallet activity, then discard if it never landed."
 			case "syncing":
-				return "Waiting for the message to sync to Aztec - no signature needed (~1–2 min)."
 			case "claimable":
 				return r.isPrivate
-					? "Ready to resume. Claiming asks your Ethereum wallet to unseal the recovery secret, waits for sync if needed, then asks your Aztec wallet to confirm."
-					: "Ready to resume. Claiming waits for sync if needed, then asks your Aztec wallet to confirm."
+					? "Press CLAIM: one Ethereum signature unseals the recovery secret, then your Aztec wallet confirms."
+					: "Press CLAIM, then confirm in your Aztec wallet."
 			case "claiming":
-				return "Claiming on Aztec - confirm in your Aztec wallet."
+				return "Claim sent - press CLAIM to keep watching it confirm."
 			default:
-				return "Bridged to Aztec ✓"
+				return null
 		}
 	}
 	switch (stage.value) {
 		case "exiting":
-			return "Exiting Aztec - confirm in your Aztec wallet."
+			return "The exit was interrupted. Check your wallet activity, then discard if nothing was sent."
 		case "proving":
-			return rt.value.provenBlock !== undefined && rt.value.targetBlock !== undefined
-				? `Waiting for Aztec to prove the exit - proven block ${rt.value.provenBlock} of ${rt.value.targetBlock}. Proving lands in epoch batches: the number sits, then jumps.`
-				: "Waiting for Aztec to prove the exit - proving lands in epoch batches and can take a while."
+			return "Press FINISH to resume - proving lands in epoch batches and can take a while."
 		case "consumable":
-			return "Proven. Finish on Ethereum to release the funds."
+			return "Proven. Press FINISH: one Ethereum signature releases the funds."
 		case "consuming":
-			return "Releasing on Ethereum - confirm in your Ethereum wallet."
+			return "Finish sent - press FINISH to keep watching it confirm."
 		default:
-			return "Released to Ethereum ✓"
+			return null
 	}
 })
 
+// Buttons appear only when PRESSING them does something: never while the engine is driving.
+const idle = computed(() => !rt.value.busy)
 const showClaim = computed(
-	() => props.record.direction === "deposit" && stage.value !== "done" && stage.value !== "depositing" && actionable.value,
+	() => props.record.direction === "deposit" && stage.value !== "done" && stage.value !== "depositing" && actionable.value && idle.value,
 )
 const showFinish = computed(
-	() => props.record.direction === "withdraw" && stage.value !== "done" && stage.value !== "exiting" && actionable.value,
+	() => props.record.direction === "withdraw" && stage.value !== "done" && stage.value !== "exiting" && actionable.value && idle.value,
 )
 
 /** A soft note (e.g. the 30-min "still confirming") renders even without an attention state. */
@@ -133,7 +137,7 @@ function onDiscard() {
 		:data-privacy="record.isPrivate ? 'private' : 'public'"
 		:data-attention="attention"
 	>
-		<p v-if="stage === 'done'" class="stamp">BRIDGED ✓</p>
+		<p v-if="stage === 'done'" class="stamp">{{ record.direction === "deposit" ? "BRIDGED ✓" : "RELEASED ✓" }}</p>
 		<header class="row">
 			<span class="dir">{{ record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM" }}</span>
 			<span class="amt">{{ amountDisplay }} USDC</span>
@@ -143,7 +147,7 @@ function onDiscard() {
 
 		<BridgePhaseRail v-if="stage !== 'done'" :record="record" compact />
 
-		<p class="stage" :data-testid="TESTIDS.journalStage">{{ stageLabel }}</p>
+		<p v-if="stageLabel" class="stage" :data-testid="TESTIDS.journalStage">{{ stageLabel }}</p>
 
 		<p v-if="note" class="attention" :data-testid="TESTIDS.journalAttention">{{ note }}</p>
 
@@ -163,7 +167,6 @@ function onDiscard() {
 				v-if="showClaim && stage !== 'done'"
 				type="button"
 				class="action"
-				:disabled="busy"
 				:data-testid="TESTIDS.journalClaim"
 				@click="onAction"
 			>
@@ -173,7 +176,6 @@ function onDiscard() {
 				v-if="showFinish && stage !== 'done'"
 				type="button"
 				class="action"
-				:disabled="busy"
 				:data-testid="TESTIDS.journalFinish"
 				@click="onAction"
 			>
@@ -189,10 +191,9 @@ function onDiscard() {
 				CLEAR
 			</button>
 			<button
-				v-else
+				v-else-if="idle"
 				type="button"
 				class="action danger"
-				:disabled="busy"
 				:data-testid="discardArmed ? TESTIDS.journalDiscardConfirm : TESTIDS.journalDiscard"
 				@click="onDiscard"
 			>

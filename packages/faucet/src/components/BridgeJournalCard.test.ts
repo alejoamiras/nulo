@@ -141,7 +141,8 @@ describe("BridgeJournalCard", () => {
 		runtime.value = { "0xwd": { provenBlock: 5, targetBlock: 9 } }
 		const proving = mountCard(withdraw())
 		expect(proving.find(sel(TESTIDS.journalCard)).attributes("data-stage")).toBe("proving")
-		expect(proving.find(sel(TESTIDS.journalStage)).text()).toContain("proven block 5 of 9")
+		// The countdown lives in the rail's bar now; the idle stage line gives the resume action.
+		expect(proving.find(sel(TESTIDS.journalStage)).text()).toMatch(/press finish/i)
 		expect(proving.find(sel(TESTIDS.journalFinish)).text()).toBe("FINISH")
 
 		runtime.value = {}
@@ -196,9 +197,18 @@ describe("BridgeJournalCard", () => {
 		expect(w.find(sel(TESTIDS.journalFinish)).text()).toBe("RETRY")
 	})
 
-	it("busy disables the action buttons", () => {
+	it("a DRIVING card hides its buttons + stage line (the rail narrates); idle brings them back", () => {
 		runtime.value = { "0xdep": { busy: true } }
-		const w = mountCard(deposit({ leafIndex: "7" }))
-		expect(w.find(sel(TESTIDS.journalClaim)).attributes("disabled")).toBeDefined()
+		const driving = mountCard(deposit({ leafIndex: "7" }))
+		expect(driving.find(sel(TESTIDS.journalClaim)).exists()).toBe(false)
+		expect(driving.find(sel(TESTIDS.journalDiscard)).exists()).toBe(false)
+		expect(driving.find(sel(TESTIDS.journalStage)).exists()).toBe(false)
+
+		runtime.value = {}
+		const idle = mountCard(deposit({ leafIndex: "7" }))
+		expect(idle.find(sel(TESTIDS.journalClaim)).exists()).toBe(true)
+		expect(idle.find(sel(TESTIDS.journalClaim)).attributes("disabled")).toBeUndefined()
+		expect(idle.find(sel(TESTIDS.journalDiscard)).exists()).toBe(true)
+		expect(idle.find(sel(TESTIDS.journalStage)).text()).toMatch(/press claim/i)
 	})
 })

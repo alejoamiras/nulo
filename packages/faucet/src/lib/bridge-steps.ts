@@ -55,7 +55,7 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 		seal: "SEAL",
 		approve: "APPROVE",
 		deposit: "DEPOSIT",
-		sync: "SYNC",
+		sync: "CROSSING",
 		claim: "CLAIM",
 		confirm: "CONFIRM",
 	}
@@ -63,7 +63,7 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 		seal: "Sign in your Ethereum wallet - encrypts this bridge's recovery secret. No funds move.",
 		approve: "Confirm the allowance for the bridge portal in your Ethereum wallet. No funds move yet.",
 		deposit: rec.depositTxHash ? "Waiting for the Ethereum confirmation…" : "Confirm the deposit in your Ethereum wallet.",
-		sync: "Waiting for Aztec to sync the message - no signature needed.",
+		sync: "The message is crossing to Aztec - no signature needed.",
 		claim:
 			rt.step === "unsealing"
 				? "Sign in your Ethereum wallet to unseal the recovery secret, then confirm in your Aztec wallet."

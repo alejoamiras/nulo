@@ -85,7 +85,7 @@ describe("BridgePhaseRail", () => {
 		const w = mount(BridgePhaseRail, { props: { record: dep({ id: "0xt4", depositTxHash: "0xt", leafIndex: "7" }), compact: true } })
 		vi.setSystemTime(73_000)
 		await vi.advanceTimersByTimeAsync(1000)
-		expect(w.text()).toContain("SYNC")
+		expect(w.text()).toContain("CROSSING")
 		expect(w.text()).toMatch(/1m 0[34]s/)
 		w.unmount()
 	})

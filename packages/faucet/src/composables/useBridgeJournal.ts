@@ -527,10 +527,13 @@ export async function runDepositClaim(id: string, opts: { interactive?: boolean 
 		//    catches up. Best-effort: missing snapshot/dep/node falls through to the gate.
 		// 2. The claim-simulate gate stays the consumability AUTHORITY - the countdown can never
 		//    green-light a claim by itself (the wallet's PXE lags the node).
+		// A retry on an already-gate-passed record must NOT visually re-run the crossing: narrate the
+		// quick revalidation under the CLAIM phase instead (the simulate still guards consumability).
+		const preGated = runtime.value[id]?.claimable === true
 		let i = 0
 		const target = fresh.depositL2Block !== undefined && deps.l2BlockNumber ? fresh.depositL2Block + SYNC_TARGET_MARGIN_BLOCKS : null
 		let counted = false
-		if (target !== null && deps.l2BlockNumber) {
+		if (!preGated && target !== null && deps.l2BlockNumber) {
 			while (i < 300) {
 				let current: number
 				try {
@@ -544,7 +547,8 @@ export async function runDepositClaim(id: string, opts: { interactive?: boolean 
 				}
 				counted = true
 				setRuntime(id, { syncBlock: current })
-				setStep(id, "syncing", `Aztec block ${current} of ${target} - ${target - current} until your funds arrive`)
+				const left = target - current
+				setStep(id, "syncing", `${left} ${left === 1 ? "block" : "blocks"} until your funds arrive`)
 				await wait(6000)
 				i++
 			}
@@ -552,11 +556,13 @@ export async function runDepositClaim(id: string, opts: { interactive?: boolean 
 
 		let ready = false
 		for (; i < 300; i++) {
-			setStep(
-				id,
-				"syncing",
-				counted ? `message arrived - waiting for your wallet to sync it (check ${i + 1})` : `sync check ${i + 1}`,
-			)
+			if (preGated) setStep(id, "sending", "re-checking the message")
+			else
+				setStep(
+					id,
+					"syncing",
+					counted ? "message arrived - waiting for your wallet to sync it" : "waiting for your wallet to sync the message",
+				)
 			try {
 				await interaction.simulate()
 				ready = true
@@ -600,7 +606,7 @@ async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<
 	for (let i = 0; i < RECEIPT_POLLS_PER_ROUND; i++) {
 		if (genOf(rec.id) !== gen) return "stop" // F11: a newer owner took over (RETRY/discard/sweep).
 		const checkNo = roundsDone * RECEIPT_POLLS_PER_ROUND + i + 1
-		setStep(rec.id, "confirming", `check ${checkNo} - the claim is processing on Aztec`)
+		setStep(rec.id, "confirming", "the claim is processing on Aztec")
 		const status = await deps.claimReceiptStatus(rec.claimTxHash)
 		log("receipt check", { id: rec.id, checkNo, status })
 		if (genOf(rec.id) !== gen) return "stop"
