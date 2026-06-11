@@ -12,7 +12,7 @@ import BridgeReceipt, { type ReceiptSnapshot } from "./BridgeReceipt.vue"
 import BridgeStepper from "./BridgeStepper.vue"
 
 /** Composables */
-import { useBridgeJournal } from "@/composables/useBridgeJournal"
+import { hideCompleted, useBridgeJournal } from "@/composables/useBridgeJournal"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { providerFingerprint, useDepositFlow } from "@/composables/useDeposit"
 import { useL1Usdc } from "@/composables/useL1Usdc"
@@ -195,7 +195,11 @@ function onBackground() {
 }
 
 function onNewBridge() {
-	if (activeId.value) journal.releaseForeground(activeId.value)
+	// The receipt WAS the result - hide the completed card instead of re-surfacing it below.
+	if (activeId.value) {
+		hideCompleted(activeId.value)
+		journal.releaseForeground(activeId.value)
+	}
 	receiptSnapshot.value = null
 	clearFlowErrors()
 	formStage.value = "form"

@@ -157,19 +157,20 @@ describe("bridge smoke", () => {
 		expect(signL1).not.toHaveBeenCalled()
 	})
 
-	it("an explicit CLAIM click drives the deposit to done, auto-hides the card, and RETAINS the record", async () => {
+	it("an explicit CLAIM click drives the deposit to done - the ✓ card STAYS until the user dismisses it", async () => {
 		seedJournal([claimableDeposit()])
 		const w = mountBridge()
 		await flushPromises()
 		await w.find(sel(TESTIDS.journalClaim)).trigger("click")
 		await flushPromises()
 		expect(claimDep).toHaveBeenCalled()
-		// In-session completion (gate passed + sent in this process) auto-hides after the grace
-		// (waitMs is a no-op here) — the card leaves the list…
 		await flushPromises()
-		expect(w.find(sel(TESTIDS.journalCard)).exists()).toBe(false)
-		expect(w.find(sel(TESTIDS.journalEmpty)).exists()).toBe(true)
-		// …but the RECORD survives in storage (hide, never destroy): completedAt set, blob intact.
+		// No auto-hide: the done card remains for a human glance, with the ✕ as the exit…
+		const card = w.find(sel(TESTIDS.journalCard))
+		expect(card.exists()).toBe(true)
+		expect(card.attributes("data-stage")).toBe("done")
+		expect(w.find(sel(TESTIDS.journalClear)).exists()).toBe(true)
+		// …and the RECORD survives in storage: completedAt set, blob intact.
 		const stored = JSON.parse(localStorage.getItem(JOURNAL_KEY) ?? "{}") as { records?: { id: string; completedAt?: number }[] }
 		const rec = stored.records?.find((r) => r.id === "0xdep1")
 		expect(rec?.completedAt).toBeDefined()

@@ -24,6 +24,7 @@ import {
 	connectJournalDeps,
 	discard,
 	markApproveOutcome,
+	hideCompleted,
 	markSessionLive,
 	rekeyJournalRecord,
 	releaseForeground,
@@ -582,19 +583,31 @@ describe("useBridgeJournal engine", () => {
 		expect(polls).toBeLessThan(10)
 	})
 
-	it("P1: an in-session completion auto-hides (provenance) - record retained, never discarded", async () => {
+	it("completed cards STAY visible (no auto-hide) - hideCompleted is the receipt path's explicit act", async () => {
 		const deps = baseDeps(kv)
 		connectJournalDeps({ ...deps, claim: smartClaimFake() })
 		addRecord(mkDeposit("0xhide"))
 		await runDepositClaim("0xhide")
-		await vi.waitFor(() => expect(useBridgeJournal().runtime.value["0xhide"]?.hidden).toBe(true))
 		const { records: recs } = useBridgeJournal()
 		expect(recs.value.find((r) => r.id === "0xhide")?.completedAt).toBe(999)
-		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xhide")).toBe(false)
+		// The card remains until the user (or the receipt flow) says otherwise.
+		expect(useBridgeJournal().runtime.value["0xhide"]?.hidden).toBeUndefined()
+		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xhide")).toBe(true)
 		expect(useBridgeJournal().lastCompleted.value?.id).toBe("0xhide")
+		hideCompleted("0xhide")
+		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xhide")).toBe(false)
+		expect(useBridgeJournal().records.value.find((r) => r.id === "0xhide")?.completedAt).toBe(999)
 	})
 
-	it("P1: a REDISCOVERED completion stays visible with its ✓ card (no provenance, no auto-hide)", async () => {
+	it("hideCompleted refuses non-completed records (a live card can never be hidden)", async () => {
+		const deps = baseDeps(kv)
+		connectJournalDeps(deps)
+		addRecord(mkDeposit("0xlive"))
+		hideCompleted("0xlive")
+		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xlive")).toBe(true)
+	})
+
+	it("a REDISCOVERED completion stays visible with its ✓ card", async () => {
 		const deps = baseDeps(kv)
 		const claim = vi.fn(async () => ({
 			simulate: async () => {
@@ -631,13 +644,14 @@ describe("useBridgeJournal engine", () => {
 		expect(useBridgeJournal().runtime.value["0xstale-note"]?.note).toBeUndefined()
 	})
 
-	it("P1: withdraw completions auto-hide and feed the toast hook", async () => {
+	it("withdraw completions stay visible and feed the toast hook", async () => {
 		const deps = baseDeps(kv)
 		connectJournalDeps(deps)
 		addRecord(mkWithdraw("0xwdhide"))
 		await runWithdrawConsume("0xwdhide")
-		await vi.waitFor(() => expect(useBridgeJournal().runtime.value["0xwdhide"]?.hidden).toBe(true))
 		expect(useBridgeJournal().records.value.find((r) => r.id === "0xwdhide")?.completedAt).toBe(999)
+		expect(useBridgeJournal().runtime.value["0xwdhide"]?.hidden).toBeUndefined()
+		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xwdhide")).toBe(true)
 		expect(useBridgeJournal().lastCompleted.value).toMatchObject({ id: "0xwdhide", direction: "withdraw", txHash: "0xconsumetx" })
 	})
 

@@ -366,7 +366,6 @@ async function withRecordLock(id: string, fn: () => Promise<void>): Promise<void
 
 const wait = (ms: number): Promise<void> => (deps.waitMs ? deps.waitMs(ms) : new Promise((r) => setTimeout(r, ms)))
 
-const HIDE_GRACE_MS = 8000
 const RECEIPT_POLLS_PER_ROUND = 45 // ×4s ≈ one ~3-minute round inside the lock.
 const RECEIPT_MAX_ROUNDS = 10 // ≈30 min soft cap; after it the card re-arms RETRY, never a dead-end.
 const INTER_ROUND_MS = 100
@@ -415,13 +414,11 @@ export function releaseForeground(id: string): void {
 	if (activeFlowId.value === id) activeFlowId.value = null
 }
 
-/** After the ✓ grace, the card leaves the rendered list. The RECORD is untouched - deletion
- *  stays human-only or the 7-day prune (D3: hide, never destroy). */
-function scheduleAutoHide(id: string): void {
-	void wait(HIDE_GRACE_MS).then(() => {
-		const rec = records.value.find((r) => r.id === id)
-		if (rec?.completedAt) setRuntime(id, { hidden: true })
-	})
+/** Hide a COMPLETED record's card (the receipt flow ends, the user saw the result). The RECORD
+ *  is untouched - deletion stays human-only (the ✕) or the 7-day prune. */
+export function hideCompleted(id: string): void {
+	const rec = records.value.find((r) => r.id === id)
+	if (rec?.completedAt) setRuntime(id, { hidden: true })
 }
 
 function completeDeposit(rec: DepositJournalRecord | undefined): void {
@@ -435,9 +432,8 @@ function completeDeposit(rec: DepositJournalRecord | undefined): void {
 	secretCache.delete(rec.id)
 	receiptRounds.delete(rec.id)
 	lastCompleted.value = { id: rec.id, direction: "deposit", amount: rec.amount, isPrivate: rec.isPrivate, txHash: rec.claimTxHash }
-	// F9/F12 scope: only a completion whose gate-pass + send happened in THIS process auto-hides;
-	// a rediscovered receipt-wait keeps its ✓ card for a human glance (manual CLEAR).
-	if (localClaimProvenance.has(rec.id)) scheduleAutoHide(rec.id)
+	// Completed cards STAY (✓ + the ✕ dismiss) - auto-hide was provenance-scoped and read as
+	// "sometimes my card vanishes". The foreground receipt path hides via hideCompleted instead.
 	localClaimProvenance.delete(rec.id)
 	log("deposit complete", rec.id)
 }
@@ -450,8 +446,6 @@ function completeWithdraw(rec: WithdrawJournalRecord | undefined, consumeTxHash?
 	setRuntime(rec.id, { attention: undefined, note: undefined })
 	receiptRounds.delete(rec.id)
 	lastCompleted.value = { id: rec.id, direction: "withdraw", amount: rec.amount, isPrivate: rec.isPrivate, txHash: consumeTxHash }
-	// Withdraw completions are witness-decode-verified - always hide-eligible.
-	scheduleAutoHide(rec.id)
 	log("withdraw complete", rec.id)
 }
 
