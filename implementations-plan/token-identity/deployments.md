@@ -23,3 +23,12 @@ Verified: `bun run verify:deployments` - all committed addresses match the rebui
 Verified: the offline rebuild probe - TOKEN/BRIDGE/PROXY instances all MATCH the committed constants.
 
 Deploy time: bridge end-to-end 4.8m (real proofs). Salt-generation lesson: the proxy's constructor args don't change across token renames - ALL L2 salts must bump together per generation or the deterministic address collides with the live deployment (duplicate siloed nullifier).
+
+## L1 source verification (Sepolia Etherscan)
+
+Both L1 contracts are source-verified (exact match, first submit):
+
+- MintableERC20 (AZLO): https://sepolia.etherscan.io/address/0xa40a2fe147b7e96325d7c7d974b1f11c3ed82c68#code (solc 0.8.28, via-ir, from `packages/bridge-evm`)
+- TokenPortal: https://sepolia.etherscan.io/address/0x9c41d1dd627ed53e25702590ab974d9dfa0c11ea#code (solc 0.8.30, optimizer 200, from the `@aztec/l1-artifacts` shipped project + the hash-pinned vendored source `packages/bridge-evm/upstream/TokenPortal.sol`)
+
+Re-verify after any redeploy with `bun run verify:l1` (bridge-core; needs `ETHERSCAN_API_KEY` in `packages/bridge-core/.env`) — the deploy script auto-runs it when the key is present. Aztecscan has no verification tooling yet, so the L2 set stays unverified upstream.
