@@ -106,6 +106,7 @@ import { coerceAmount } from "./coerce-amount"
 import { OperationPlanner, type TransferRequest } from "./operation-planner"
 import { fingerprintBaseFee, fingerprintFeeSettings, TransferEstimateReuse } from "./transfer-estimate-reuse"
 import { GasBalanceReader } from "./gas-balance-reader"
+import { getEstimatedFee, getGasDetails } from "./tx-fee-details"
 import { ContractResolver, findFunctionByName } from "./contract-resolver"
 import { batchedViewSimulation } from "./helpers/batched-view-simulation"
 import { getViewSimulationDeps } from "./helpers/get-view-simulation-deps"
@@ -147,29 +148,6 @@ function pickActionMethod(actions: readonly Action[] | undefined): string | unde
 		else if (action.kind === "encoded_call") carriers.push({ name: action.name ?? action.selector })
 	}
 	return pickPrimaryMethod(carriers)
-}
-
-/** Extract estimated fee from finalized gas settings on a TxExecutionRequest. */
-function getEstimatedFee(txRequest: TxExecutionRequest): string {
-	const gs = txRequest.txContext.gasSettings
-	return computeMaxFee(
-		{ daGas: gs.gasLimits.daGas, l2Gas: gs.gasLimits.l2Gas },
-		{ daGas: gs.teardownGasLimits.daGas, l2Gas: gs.teardownGasLimits.l2Gas },
-		{ feePerDaGas: gs.maxFeesPerGas.feePerDaGas, feePerL2Gas: gs.maxFeesPerGas.feePerL2Gas },
-	).toString()
-}
-
-/** Extract gas breakdown from finalized gas settings. */
-function getGasDetails(txRequest: TxExecutionRequest): TxGasDetails {
-	const gs = txRequest.txContext.gasSettings
-	return {
-		l2GasLimit: gs.gasLimits.l2Gas,
-		daGasLimit: gs.gasLimits.daGas,
-		teardownL2GasLimit: gs.teardownGasLimits.l2Gas,
-		teardownDaGasLimit: gs.teardownGasLimits.daGas,
-		feePerL2Gas: gs.maxFeesPerGas.feePerL2Gas.toString(),
-		feePerDaGas: gs.maxFeesPerGas.feePerDaGas.toString(),
-	}
 }
 
 export class ExecutionService extends Service<Methods> implements ServiceSpec<Methods> {
