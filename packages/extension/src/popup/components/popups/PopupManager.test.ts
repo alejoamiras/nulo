@@ -91,25 +91,27 @@ const setTrustReject = vi.fn().mockResolvedValue(undefined)
 const replayPendingPrompts = vi.fn().mockResolvedValue(undefined)
 
 vi.mock("@/wallet/services/incoming-transfer/client", () => ({
-	IncomingTransferServiceClient: vi.fn(() => ({
-		onIncomingTransferPending: {
-			add: (h: (p: PendingPayload) => void | Promise<void>) => incomingPendingHandlers.push(h),
-			remove: () => {},
-		},
-		onIncomingTrustChanged: {
-			add: (h: (p: TrustChangedPayload) => void | Promise<void>) => incomingTrustChangedHandlers.push(h),
-			remove: () => {},
-		},
-		onConnected: {
-			add: (h: () => void | Promise<void>) => incomingConnectedHandlers.push(h),
-			remove: () => {},
-		},
-		connect: vi.fn().mockResolvedValue(undefined),
-		disconnect: vi.fn(),
-		setTrustAllow,
-		setTrustReject,
-		replayPendingPrompts,
-	})),
+	IncomingTransferServiceClient: vi.fn(function () {
+		return {
+			onIncomingTransferPending: {
+				add: (h: (p: PendingPayload) => void | Promise<void>) => incomingPendingHandlers.push(h),
+				remove: () => {},
+			},
+			onIncomingTrustChanged: {
+				add: (h: (p: TrustChangedPayload) => void | Promise<void>) => incomingTrustChangedHandlers.push(h),
+				remove: () => {},
+			},
+			onConnected: {
+				add: (h: () => void | Promise<void>) => incomingConnectedHandlers.push(h),
+				remove: () => {},
+			},
+			connect: vi.fn().mockResolvedValue(undefined),
+			disconnect: vi.fn(),
+			setTrustAllow,
+			setTrustReject,
+			replayPendingPrompts,
+		}
+	}),
 }))
 
 // Controllable getValue resolver for P6 seed-race tests. Tests can swap
@@ -117,19 +119,21 @@ vi.mock("@/wallet/services/incoming-transfer/client", () => ({
 let configGetValueImpl: () => Promise<boolean> = () => Promise.resolve(true)
 const configUpdateRemoveSpy = vi.fn()
 vi.mock("@/wallet/services/config/client", () => ({
-	ConfigServiceClient: vi.fn(() => ({
-		onUpdate: {
-			add: (h: (p: { key: string; value: unknown }) => void) => configUpdateHandlers.push(h),
-			remove: (h: (p: { key: string; value: unknown }) => void) => {
-				configUpdateRemoveSpy(h)
-				const idx = configUpdateHandlers.indexOf(h)
-				if (idx >= 0) configUpdateHandlers.splice(idx, 1)
+	ConfigServiceClient: vi.fn(function () {
+		return {
+			onUpdate: {
+				add: (h: (p: { key: string; value: unknown }) => void) => configUpdateHandlers.push(h),
+				remove: (h: (p: { key: string; value: unknown }) => void) => {
+					configUpdateRemoveSpy(h)
+					const idx = configUpdateHandlers.indexOf(h)
+					if (idx >= 0) configUpdateHandlers.splice(idx, 1)
+				},
 			},
-		},
-		connect: vi.fn().mockResolvedValue(undefined),
-		disconnect: vi.fn(),
-		getValue: vi.fn().mockImplementation(() => configGetValueImpl()),
-	})),
+			connect: vi.fn().mockResolvedValue(undefined),
+			disconnect: vi.fn(),
+			getValue: vi.fn().mockImplementation(() => configGetValueImpl()),
+		}
+	}),
 }))
 
 vi.mock("@/stores/cache.store.ts", () => ({

@@ -143,7 +143,7 @@ export function sanitizeJournalSubtitle(raw: string | undefined | null): string 
 	// callers only pass dApp-controlled origin fields here, where bracketing
 	// noise is safer than missing a real link-shaped value.
 	// RFC 3986 scheme grammar: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ).
-	if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return `[${raw}]`
+	if (/^[a-z][a-z0-9+.\-]*:/i.test(raw)) return `[${raw}]`
 	return raw
 }
 

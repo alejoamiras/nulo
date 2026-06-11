@@ -93,20 +93,24 @@ vi.mock("@/composables/useDappHostname", () => ({
 // instantiated with `new`. Arrow factories error: "Reflect.construct requires
 // the first argument be a constructor". Matches NewTokenPopup.test.ts pattern.
 vi.mock("@/wallet/services/profile/client", () => ({
-	ProfileServiceClient: vi.fn(() => ({
-		getActiveProfile: getActiveProfileMock,
-		connect: profileServiceConnectMock,
-		disconnect: profileServiceDisconnectMock,
-		onActiveProfileChanged: { add: onActiveProfileChangedAddMock },
-	})),
+	ProfileServiceClient: vi.fn(function () {
+		return {
+			getActiveProfile: getActiveProfileMock,
+			connect: profileServiceConnectMock,
+			disconnect: profileServiceDisconnectMock,
+			onActiveProfileChanged: { add: onActiveProfileChangedAddMock },
+		}
+	}),
 }))
 
 vi.mock("@/wallet/services/dapp-interaction/client", () => ({
-	DappInteractionServiceClient: vi.fn(() => ({
-		connect: interactionServiceConnectMock,
-		disconnect: interactionServiceDisconnectMock,
-		resolveInteraction: resolveInteractionMock,
-	})),
+	DappInteractionServiceClient: vi.fn(function () {
+		return {
+			connect: interactionServiceConnectMock,
+			disconnect: interactionServiceDisconnectMock,
+			resolveInteraction: resolveInteractionMock,
+		}
+	}),
 }))
 
 vi.mock("@/stores/app.store", () => ({
