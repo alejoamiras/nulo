@@ -528,58 +528,54 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				feePaymentMethod = built.feePaymentMethod
 			}
 
-			checkCancelled()
-			await markJournal({ stage: "proving", enteredProveAt: Date.now() })
-			const provedTx = await this.coordinator.proveTxTask(pxe, txRequest, [account.address], transferTask)
-			// Key checkpoint: if cancel fired during prove, this prevents submission.
-			// The proof artifact is dropped silently when this throws.
-			checkCancelled()
-
-			const tx = await provedTx.toTx()
-			await markJournal({ stage: "submitting", txHash: tx.getTxHash().toString() })
-			checkCancelled()
-			await this.coordinator.sendTxTask(node, tx, transferTask)
-
-			const txHash = tx.getTxHash().toString()
 			// Activity-feed shape is always transfer-only (no FPC fee payload).
 			// `txCalls` from `buildAndEstimateTxRequest` carries the FPC mutation
 			// (`pay_fee` for Private FPC, `fee_entrypoint_*` for Default FPC),
 			// which would surface as the card title via `getPrimaryCall`. The
 			// hardcoded shape preserves the pre-reuse behavior: card shows
 			// token symbol + transfer type, regardless of fee payment method.
-			await this.transactionService.addTransaction(
-				origin,
-				network.chainId,
-				accountAddress,
-				[
-					{
-						contract: activityToken.contract,
-						method: activityFnName,
-						args: activityArgs.map((x) => String(x)),
-						transfers: [
+			const { txHash } = await this.coordinator.proveAndSend({
+				pxe,
+				node,
+				txRequest,
+				scopes: [account.address],
+				parentTask: transferTask,
+				checkCancelled,
+				markJournal: (patch) => markJournal(patch),
+				recordTransaction: (hash) =>
+					this.transactionService.addTransaction(
+						origin,
+						network.chainId,
+						accountAddress,
+						[
 							{
-								token: {
-									name: activityToken.name,
-									symbol: activityToken.symbol,
-									decimals: activityToken.decimals,
-								},
-								type: transferType,
-								from: accountAddress,
-								to: recipientAddress,
-								amount: amount.toString(),
+								contract: activityToken.contract,
+								method: activityFnName,
+								args: activityArgs.map((x) => String(x)),
+								transfers: [
+									{
+										token: {
+											name: activityToken.name,
+											symbol: activityToken.symbol,
+											decimals: activityToken.decimals,
+										},
+										type: transferType,
+										from: accountAddress,
+										to: recipientAddress,
+										amount: amount.toString(),
+									},
+								],
 							},
 						],
-					},
-				],
-				nonce.toString(),
-				feePaymentMethod,
-				txHash,
-				getEstimatedFee(txRequest),
-				getGasDetails(txRequest),
-			)
-			await markJournal({ stage: "succeeded", txHash })
+						nonce.toString(),
+						feePaymentMethod,
+						hash,
+						getEstimatedFee(txRequest),
+						getGasDetails(txRequest),
+					),
+			})
 			transferTask.complete()
-			return txHash
+			return txHash.toString()
 		} catch (error) {
 			// Journal already in `cancelled` (cancelJob did it); convert the
 			// internal sentinel to the structured RPC-boundary error here.
@@ -1141,31 +1137,28 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				parentTask,
 			)
 
-			checkCancelled()
-			await this.markJournal(journalId, { stage: "proving", enteredProveAt: Date.now() })
-			const provedTx = await this.coordinator.proveTxTask(pxe, txRequest, [account.address], parentTask)
-			checkCancelled()
-
-			const tx = await provedTx.toTx()
-			await this.markJournal(journalId, { stage: "submitting", txHash: tx.getTxHash().toString() })
-			checkCancelled()
-			await this.coordinator.sendTxTask(node, tx, parentTask)
-
-			const txHash = tx.getTxHash().toString()
-			await this.transactionService.addTransaction(
-				origin,
-				network.chainId,
-				account.address.toString(),
-				txCalls,
-				nonce.toString(),
-				feePaymentMethod,
-				txHash,
-				getEstimatedFee(txRequest),
-				getGasDetails(txRequest),
-			)
-
-			await this.markJournal(journalId, { stage: "succeeded", txHash })
-			return txHash
+			const { txHash } = await this.coordinator.proveAndSend({
+				pxe,
+				node,
+				txRequest,
+				scopes: [account.address],
+				parentTask,
+				checkCancelled,
+				markJournal: (patch) => this.markJournal(journalId, patch),
+				recordTransaction: (hash) =>
+					this.transactionService.addTransaction(
+						origin,
+						network.chainId,
+						account.address.toString(),
+						txCalls,
+						nonce.toString(),
+						feePaymentMethod,
+						hash,
+						getEstimatedFee(txRequest),
+						getGasDetails(txRequest),
+					),
+			})
+			return txHash.toString()
 		} catch (error) {
 			if (error instanceof JobCancelledSentinel) {
 				throw error
@@ -1934,32 +1927,32 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				parentTask,
 			)
 
-			checkCancelled()
-			await this.markJournal(journalId, { stage: "proving", enteredProveAt: Date.now() })
 			const sendAdditionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
-			const provedTx = await this.coordinator.proveTxTask(pxe, txRequest, [account.address, ...sendAdditionalScopes], parentTask)
-			checkCancelled()
-			const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
-			const offchainOutput = extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
-			const tx = await provedTx.toTx()
-			await this.markJournal(journalId, { stage: "submitting", txHash: tx.getTxHash().toString() })
-			checkCancelled()
-			await this.coordinator.sendTxTask(node, tx, parentTask)
-
-			const txHash = tx.getTxHash()
-			await this.transactionService.addTransaction(
-				origin,
-				network.chainId,
-				account.address.toString(),
-				txCalls,
-				nonce.toString(),
-				feePaymentMethod,
-				txHash.toString(),
-				getEstimatedFee(txRequest),
-				getGasDetails(txRequest),
-			)
-
-			await this.markJournal(journalId, { stage: "succeeded", txHash: txHash.toString() })
+			const { txHash, offchainOutput } = await this.coordinator.proveAndSend({
+				pxe,
+				node,
+				txRequest,
+				scopes: [account.address, ...sendAdditionalScopes],
+				parentTask,
+				checkCancelled,
+				markJournal: (patch) => this.markJournal(journalId, patch),
+				wantOffchainOutput: (provedTx) => {
+					const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
+					return extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
+				},
+				recordTransaction: (hash) =>
+					this.transactionService.addTransaction(
+						origin,
+						network.chainId,
+						account.address.toString(),
+						txCalls,
+						nonce.toString(),
+						feePaymentMethod,
+						hash,
+						getEstimatedFee(txRequest),
+						getGasDetails(txRequest),
+					),
+			})
 
 			if (op.opts.wait === "NO_WAIT") {
 				return { txHash, ...offchainOutput } as SendReturn<InteractionWaitOptions>
@@ -2125,31 +2118,31 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			await finalizeGasLimits(node, txRequest, simulatedTx, 1, undefined, feeOpts, 1)
 
 			// Prove with account in scope
-			checkCancelled()
-			await this.markJournal(journalId, { stage: "proving", enteredProveAt: Date.now() })
-			const provedTx = await this.coordinator.proveTxTask(pxe, txRequest, scopesWithAccount, parentTask)
-			checkCancelled()
-			const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
-			const offchainOutput = extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
-			const tx = await provedTx.toTx()
-			await this.markJournal(journalId, { stage: "submitting", txHash: tx.getTxHash().toString() })
-			checkCancelled()
-			await this.coordinator.sendTxTask(node, tx, parentTask)
-
-			const txHash = tx.getTxHash()
-			await this.transactionService.addTransaction(
-				origin,
-				network.chainId,
-				account.address.toString(),
-				txCalls,
-				Fr.ZERO.toString(),
-				AccountFeePaymentMethodOptions.EXTERNAL,
-				txHash.toString(),
-				getEstimatedFee(txRequest),
-				getGasDetails(txRequest),
-			)
-
-			await this.markJournal(journalId, { stage: "succeeded", txHash: txHash.toString() })
+			const { txHash, offchainOutput } = await this.coordinator.proveAndSend({
+				pxe,
+				node,
+				txRequest,
+				scopes: scopesWithAccount,
+				parentTask,
+				checkCancelled,
+				markJournal: (patch) => this.markJournal(journalId, patch),
+				wantOffchainOutput: (provedTx) => {
+					const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
+					return extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
+				},
+				recordTransaction: (hash) =>
+					this.transactionService.addTransaction(
+						origin,
+						network.chainId,
+						account.address.toString(),
+						txCalls,
+						Fr.ZERO.toString(),
+						AccountFeePaymentMethodOptions.EXTERNAL,
+						hash,
+						getEstimatedFee(txRequest),
+						getGasDetails(txRequest),
+					),
+			})
 
 			if (op.opts.wait === "NO_WAIT") {
 				return { txHash, ...offchainOutput } as SendReturn<InteractionWaitOptions>
