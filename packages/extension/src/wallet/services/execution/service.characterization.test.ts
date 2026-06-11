@@ -18,6 +18,7 @@ import { describe, expect, test, vi } from "vitest"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { OriginType } from "@/wallet/services/transaction/spec"
+import { DappSendExecutor } from "./dapp-send-executor"
 import { ExecutionService } from "./service"
 
 function makeService(): ExecutionService {
@@ -75,53 +76,53 @@ describe("cancelJob: journal-first ordering contract", () => {
 // ── R1-M2 named pin: no-slot-for-executeSendTransaction ────────────────
 
 describe("no-slot-for-executeSendTransaction (bug pin)", () => {
-	test("executeSendTransaction acquires ZERO execution-lane slots — preserve verbatim; do NOT harmonize in P6/P7", async () => {
-		const service = makeService()
+	test("executeSendTransaction acquires ZERO execution-lane slots — preserve verbatim; do NOT harmonize", async () => {
+		// The flow now lives on DappSendExecutor; the lane interface carries
+		// acquireSlot for the aztec_sendTx paths, so the pin asserts this
+		// path never calls it even though it CAN.
 		const acquireSpy = vi.fn()
 		const proveAndSendCtxs: unknown[] = []
-		const journalPatches: unknown[] = []
-		inject(service, {
-			// The quirk under pin: the mutex must never be touched on this path.
-			executionMutex: {
-				acquire: acquireSpy,
-				enter: acquireSpy,
-				run: acquireSpy,
-			},
-			profileService: { getActiveProfile: async () => ({ id: "p1" }) },
-			operationJournal: {
-				createOperation: async () => ({ id: "job-1" }),
-				transitionOperation: async (_id: string, patch: unknown) => {
-					journalPatches.push(patch)
-				},
-			},
-			transactionService: { addTransaction: vi.fn(async () => ({})) },
-			coordinator: {
-				proveAndSend: vi.fn(async (ctx: { scopes: unknown; recordTransaction: (h: string) => Promise<unknown> }) => {
-					proveAndSendCtxs.push(ctx)
-					await ctx.recordTransaction("0xhash")
-					return { txHash: { toString: () => "0xhash" } }
-				}),
-			},
-		})
-		// Stub the build step — strategies are out of scope for this pin.
 		const account = { address: { toString: () => "0xacc" } }
 		const gasSettings = {
 			gasLimits: { daGas: 1, l2Gas: 2 },
 			teardownGasLimits: { daGas: 3, l2Gas: 4 },
 			maxFeesPerGas: { feePerDaGas: 5n, feePerL2Gas: 6n },
 		}
-		;(service as unknown as Record<string, unknown>).buildAndEstimateTxRequest = vi.fn(async () => ({
-			txRequest: { txContext: { gasSettings } },
-			node: {},
-			pxe: {},
-			account,
-			network: { chainId: 0 },
-			nonce: { toString: () => "1" },
-			txCalls: [],
-			feePaymentMethod: 0,
-		}))
+		const executor = new DappSendExecutor({
+			planner: {} as never,
+			authwit: {} as never,
+			txBuilder: {} as never,
+			coordinator: {
+				proveAndSend: vi.fn(async (ctx: { scopes: unknown; recordTransaction: (h: string) => Promise<unknown> }) => {
+					proveAndSendCtxs.push(ctx)
+					await ctx.recordTransaction("0xhash")
+					return { txHash: { toString: () => "0xhash" } }
+				}),
+			} as never,
+			lane: {
+				registerController: vi.fn(),
+				deleteController: vi.fn(),
+				// The quirk under pin: the slot must never be touched on this path.
+				acquireSlot: acquireSpy as never,
+				claimOrCreateJournal: acquireSpy as never,
+				beginJournal: vi.fn(async () => "job-1"),
+				markJournal: vi.fn(async () => {}),
+			},
+			buildAndEstimate: vi.fn(async () => ({
+				txRequest: { txContext: { gasSettings } },
+				node: {},
+				pxe: {},
+				account,
+				network: { chainId: 0 },
+				nonce: { toString: () => "1" },
+				txCalls: [],
+				feePaymentMethod: 0,
+			})) as never,
+			addTransaction: vi.fn(async () => ({})) as never,
+			logDebug: () => {},
+		})
 
-		const result = await service.executeSendTransaction(
+		const result = await executor.executeSendTransaction(
 			{
 				kind: "send_transaction",
 				networkId: "net-1",
