@@ -2,7 +2,13 @@
 	"network": "testnet",
 	"l1": {
 		"usdc": "0xa40a2fe147b7e96325d7c7d974b1f11c3ed82c68",
-		"portal": "0x9c41d1dd627ed53e25702590ab974d9dfa0c11ea"
+		"portal": "0x9c41d1dd627ed53e25702590ab974d9dfa0c11ea",
+		"token": {
+			"name": "Aztec Nulo",
+			"symbol": "AZLO",
+			"decimals": 18,
+			"maxWholePerTx": 1000
+		}
 	},
 	"l2": {
 		"proxy": {

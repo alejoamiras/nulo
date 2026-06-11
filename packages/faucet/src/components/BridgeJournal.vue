@@ -89,7 +89,6 @@ watch(
 				@change="onRestorePick"
 			/>
 		</header>
-		<p class="sub">Bridges this browser started but isn't actively driving. Resume, finish, or discard them.</p>
 		<div v-if="sorted.length === 0" class="empty-state" :data-testid="TESTIDS.journalEmpty">
 			<span class="empty-headline">NOTHING PENDING YET</span>
 			<span class="empty-sub">
@@ -122,12 +121,6 @@ watch(
 	font-size: 16px;
 	color: var(--txt-primary);
 	margin: 0;
-}
-
-.journal .sub {
-	margin: 4px 0 0;
-	color: var(--txt-secondary);
-	font: 500 12px/1.5 var(--font-mono);
 }
 
 .cards {

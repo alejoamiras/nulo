@@ -11,6 +11,7 @@
  * set). From packages/bridge-core: `bun run scripts/deploy-bridge-testnet.ts`. Needs PRIVATE_KEY +
  * SEPOLIA_RPC_URL in packages/bridge-evm/.env; AZTEC_NODE_URL defaults to the public testnet RPC.
  */
+import { spawnSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -30,7 +31,7 @@ import { deriveSigningKey } from "@aztec/stdlib/keys"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
 import { createPublicClient, createWalletClient, defineChain, getContract, http } from "viem"
-import { privateKeyToAccount } from "viem/accounts"
+import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts"
 
 // The bridged pair's identity - ONE source for both chains; the deploy asserts L1==L2 below.
 const TOKEN_NAME = "Aztec Nulo"
@@ -40,13 +41,17 @@ const TOKEN_DECIMALS = 18
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://rpc.testnet.aztec-labs.com"
 const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}` | undefined
-if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-evm/.env)")
+const MNEMONIC = process.env.MNEMONIC
+if (!PRIVATE_KEY && !MNEMONIC) throw new Error("PRIVATE_KEY or MNEMONIC required (packages/bridge-core/.env)")
 
 // Fixed salts → deterministic L2 addresses (stable in the written config). Mirrors the faucet's
 // small-integer salt convention (deployments.json: 4242 / 1337).
-const PROXY_SALT = 0x5b01
-const TOKEN_SALT = 0x5b02
-const BRIDGE_SALT = 0x5b03
+// Salt generation 2 (the AZLO redeploy): the proxy's constructor args don't change across token
+// renames, so reusing generation-1 salts collides with the LIVE deployment's deterministic
+// address (duplicate siloed nullifier). Bump ALL THREE together for every fresh generation.
+const PROXY_SALT = 0x5b11
+const TOKEN_SALT = 0x5b12
+const BRIDGE_SALT = 0x5b13
 
 const here = dirname(fileURLToPath(import.meta.url))
 const OUT = join(here, "..", "..", "bridge-evm", "out")
@@ -85,7 +90,7 @@ async function main() {
 	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
 
 	// ─── L1 (Sepolia) ────────────────────────────────────────────────
-	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)
+	const account = PRIVATE_KEY ? privateKeyToAccount(PRIVATE_KEY) : mnemonicToAccount(MNEMONIC as string)
 	console.log("L1 deployer", account.address)
 	const wallet = createWalletClient({ account, chain: sepolia, transport: http(SEPOLIA_RPC) })
 	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
@@ -190,7 +195,11 @@ async function main() {
 	// ─── Persist the config the app rebuilds instances from ──────────
 	const config = {
 		network: "testnet",
-		l1: { usdc, portal },
+		l1: {
+			usdc,
+			portal,
+			token: { name: TOKEN_NAME, symbol: TOKEN_SYMBOL, decimals: TOKEN_DECIMALS, maxWholePerTx: 1000 },
+		},
 		l2: {
 			proxy: { address: proxy.address.toString(), salt: PROXY_SALT, constructorArtifact: "constructor", constructorArgs: [] },
 			token: {
@@ -210,6 +219,14 @@ async function main() {
 	mkdirSync(dirname(CONFIG_PATH), { recursive: true })
 	writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, "\t")}\n`)
 	console.log(`\n✅ PERSISTENT testnet bridge deployed in ${mins()} — wrote faucet/public/testnet-bridge.json`)
+
+	if (process.env.ETHERSCAN_API_KEY) {
+		console.log("\nETHERSCAN_API_KEY set — verifying L1 sources on Etherscan…")
+		const v = spawnSync("bun", [join(here, "verify-l1.ts")], { stdio: "inherit" })
+		if (v.status !== 0) console.log("⚠ verification failed — retry with `bun run verify:l1`.")
+	} else {
+		console.log("\nETHERSCAN_API_KEY not set — run `bun run verify:l1` to verify L1 sources on Etherscan.")
+	}
 	console.log(JSON.stringify(config, null, 2))
 }
 

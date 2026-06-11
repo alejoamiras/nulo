@@ -92,17 +92,19 @@ onBeforeUnmount(() => {
 		<p class="label">{{ BRIDGE_TOKEN_SYMBOL }} exists on BOTH chains - add it to each wallet so balances show.</p>
 		<div class="buttons">
 			<button
-				v-if="bridge.status.value === 'connected' && !registered"
+				v-if="bridge.status.value === 'connected'"
 				type="button"
 				class="add-btn"
-				:disabled="addToken.status.value.kind === 'submitting'"
+				:class="{ checked: registered }"
+				:disabled="registered || addToken.status.value.kind === 'submitting'"
 				:data-testid="TESTIDS.bridgeAddToken"
-				:data-add-status="addToken.status.value.kind"
+				:data-add-status="registered ? 'registered' : addToken.status.value.kind"
+				:title="registered ? 'Your Aztec wallet confirmed this token is registered - Ethereum wallets cannot answer that.' : undefined"
 				aria-label="Add the bridged token to your Aztec wallet"
 				@click="handleAdd"
 			>
-				<template v-if="addToken.status.value.kind === 'submitting'">Adding…</template>
-				<template v-else-if="addToken.status.value.kind === 'ok'">Added ✓</template>
+				<template v-if="registered">{{ BRIDGE_TOKEN_SYMBOL }} in Aztec wallet ✓</template>
+				<template v-else-if="addToken.status.value.kind === 'submitting'">Adding…</template>
 				<template v-else>Add {{ BRIDGE_TOKEN_SYMBOL }} to Aztec wallet</template>
 			</button>
 			<button
@@ -164,5 +166,12 @@ onBeforeUnmount(() => {
 	display: flex;
 	gap: 8px;
 	flex-wrap: wrap;
+}
+
+.add-btn.checked {
+	border-color: var(--mint);
+	color: var(--mint);
+	cursor: default;
+	opacity: 1;
 }
 </style>
