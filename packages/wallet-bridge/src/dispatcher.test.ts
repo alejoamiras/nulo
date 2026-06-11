@@ -971,3 +971,243 @@ describe("Phase 0.5: session lookup consolidation (TOCTOU defense)", () => {
 		expect(counter.lookups).toBe(1)
 	})
 })
+
+// ── isTokenRegistered (Nulo-custom) — reachability + gating + routing ───
+
+describe("dispatcher — isTokenRegistered reachability + gating", () => {
+	const contractsSession = (contracts: "*" | string[], canGetMetadata = true) =>
+		makeSession({
+			capabilityGrants: [
+				{
+					capability: { type: "contracts", contracts, canRegister: true, canGetMetadata },
+					grantedAt: 1,
+				} as unknown as GrantedCapabilityRecord,
+			],
+		})
+
+	function makeReaderDispatcher(session: IDappSessionRef, registered: boolean) {
+		const { writer } = makeSessionWriter(session)
+		const reader = { isTokenRegistered: async () => registered }
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({})) as never,
+		}
+		return new WalletSdkDispatcher(stubNetwork, stubAccount, stubExecution, interaction, writer, noopLogger, reader)
+	}
+
+	test("schema patch extends WalletSchema with a 1-arg boolean `isTokenRegistered` entry", async () => {
+		await import("../../extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
+		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
+		expect("isTokenRegistered" in WalletSchema).toBe(true)
+		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
+		const entry = (WalletSchema as any).isTokenRegistered
+		const params = entry.parameters()
+		expect(params.items.length).toBe(1)
+	})
+
+	test("the three schema-patch copies are content-identical (drift pin)", async () => {
+		const { readFileSync } = await import("node:fs")
+		const { resolve } = await import("node:path")
+		const root = resolve(__dirname, "../../..")
+		const read = (p: string) => readFileSync(resolve(root, p), "utf8")
+		const ext = read("packages/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts")
+		const faucet = read("packages/faucet/src/lib/nulo-schema-patch.ts")
+		const playground = read("packages/playground/src/lib/nulo-schema-patch.ts")
+		// Identical Zod surface: compare with the per-file header comments stripped (comments may
+		// name their own mirror paths) - every CODE line must match.
+		const code = (s: string) =>
+			s
+				.split("\n")
+				.filter((l) => !l.trim().startsWith("*") && !l.trim().startsWith("//") && !l.trim().startsWith("/*"))
+				.join("\n")
+		expect(code(faucet)).toBe(code(ext))
+		expect(code(playground)).toBe(code(ext))
+	})
+
+	test("granted address ⇒ boolean from the reader, NO interaction service involved", async () => {
+		const dispatcher = makeReaderDispatcher(contractsSession(["0xtok"]), true)
+		const result = await dispatcher.dispatch("isTokenRegistered", ["0xtok"], ctx)
+		expect(result).toBe(true)
+	})
+
+	test("ungranted address ⇒ scope violation (never a silent false)", async () => {
+		const dispatcher = makeReaderDispatcher(contractsSession(["0xtok"]), true)
+		await expect(dispatcher.dispatch("isTokenRegistered", ["0xother"], ctx)).rejects.toThrow(/Scope violation: isTokenRegistered/)
+	})
+
+	test("contracts grant without canGetMetadata ⇒ scope violation", async () => {
+		const dispatcher = makeReaderDispatcher(contractsSession(["0xtok"], false), true)
+		await expect(dispatcher.dispatch("isTokenRegistered", ["0xtok"], ctx)).rejects.toThrow(/Scope violation/)
+	})
+
+	test("no contracts grant at all ⇒ capability refusal", async () => {
+		const dispatcher = makeReaderDispatcher(makeSession(), true)
+		await expect(dispatcher.dispatch("isTokenRegistered", ["0xtok"], ctx)).rejects.toThrow()
+	})
+
+	test("a build without the reader refuses explicitly", async () => {
+		const { writer } = makeSessionWriter(contractsSession(["0xtok"]))
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({})) as never,
+		}
+		const dispatcher = new WalletSdkDispatcher(stubNetwork, stubAccount, stubExecution, interaction, writer, noopLogger)
+		await expect(dispatcher.dispatch("isTokenRegistered", ["0xtok"], ctx)).rejects.toThrow(/not available/)
+	})
+})
+
+describe("dispatcher — contracts field-diff re-consent", () => {
+	const grant = (
+		contracts: string[],
+		flags: { canRegister?: boolean; canGetMetadata?: boolean } = { canRegister: true, canGetMetadata: true },
+	) => ({ capability: { type: "contracts", contracts, ...flags }, grantedAt: 1 }) as unknown as GrantedCapabilityRecord
+
+	const manifest = (contracts: string[]) => ({
+		capabilities: [{ type: "contracts", contracts, canRegister: true, canGetMetadata: true }],
+	})
+
+	test("a request covered by the stored grant does NOT re-prompt", async () => {
+		const session = makeSession({ capabilityGrants: [grant(["0xa", "0xb"])] })
+		const { writer } = makeSessionWriter(session)
+		let prompted = false
+		const dispatcher = makeDispatcher(writer, async () => {
+			prompted = true
+			return { granted: [] } as never
+		})
+		await dispatcher.dispatch("requestCapabilities", [manifest(["0xa"])], ctx)
+		expect(prompted).toBe(false)
+	})
+
+	test("a request with NEW addresses re-prompts (the redeploy path)", async () => {
+		const session = makeSession({ capabilityGrants: [grant(["0xold"])] })
+		const { writer } = makeSessionWriter(session)
+		let prompted = false
+		const dispatcher = makeDispatcher(writer, async () => {
+			prompted = true
+			return { granted: [{ type: "contracts", contracts: ["0xnew"], canRegister: true, canGetMetadata: true }] } as never
+		})
+		await dispatcher.dispatch("requestCapabilities", [manifest(["0xnew"])], ctx)
+		expect(prompted).toBe(true)
+	})
+
+	test("an approved contracts re-consent PERSISTS the replacement grant (codex post-impl condition)", async () => {
+		const session = makeSession({ capabilityGrants: [grant(["0xold"])] })
+		const { writer, calls } = makeSessionWriter(session)
+		// The popup echoes the existing cap alongside the newly approved delta (approvedNew + existing).
+		const dispatcher = makeDispatcher(
+			writer,
+			async () =>
+				({
+					granted: [
+						{ type: "contracts", contracts: ["0xold", "0xnew"], canRegister: true, canGetMetadata: true },
+						{ type: "contracts", contracts: ["0xold"], canRegister: true, canGetMetadata: true },
+					],
+				}) as never,
+		)
+		await dispatcher.dispatch("requestCapabilities", [manifest(["0xold", "0xnew"])], ctx)
+		const stored = calls.setGrants.at(-1) ?? []
+		const contractsGrants = stored.filter((g) => g.capability.type === "contracts")
+		expect(contractsGrants).toHaveLength(1) // replaced, not duplicated
+		const addrs = (contractsGrants[0].capability as { contracts: string[] }).contracts
+		expect(addrs).toContain("0xnew")
+
+		// And the follow-up request is now COVERED - no second prompt.
+		let promptedAgain = false
+		const dispatcher2 = makeDispatcher(writer, async () => {
+			promptedAgain = true
+			return { granted: [] } as never
+		})
+		await dispatcher2.dispatch("requestCapabilities", [manifest(["0xold", "0xnew"])], ctx)
+		expect(promptedAgain).toBe(false)
+	})
+
+	test("a REJECTED contracts re-consent keeps the old grant intact (rejection interplay)", async () => {
+		const session = makeSession({ capabilityGrants: [grant(["0xold"])] })
+		const { writer, calls } = makeSessionWriter(session)
+		const dispatcher = makeDispatcher(writer, async () => ({ granted: [] }) as never)
+		await dispatcher.dispatch("requestCapabilities", [manifest(["0xold", "0xnew"])], ctx).catch(() => {})
+		const stored = calls.setGrants.at(-1)
+		if (stored) {
+			const contractsGrants = stored.filter((g) => g.capability.type === "contracts")
+			expect(contractsGrants).toHaveLength(1)
+			expect((contractsGrants[0].capability as { contracts: string[] }).contracts).toEqual(["0xold"])
+		}
+	})
+
+	test("CAIP-stored session accounts accept RAW-hex scope arrays (the fresh-session balance bug)", async () => {
+		// The popup persists accounts as CAIP-10; dApps send raw addresses in executeUtility
+		// scopes. A fresh (CAIP-only) session must still validate them.
+		const session = makeSession({
+			accounts: ["aztec:0:0x1c4d2aee53b88fa9e4061ec8c673dec03aadc3cd012177d0dcf20802ea9be10a"],
+			capabilityGrants: [
+				{
+					capability: {
+						type: "simulation",
+						utilities: { scope: [{ contract: "0xtok", function: "balance_of_private" }] },
+						transactions: { scope: [] },
+					},
+					grantedAt: 1,
+				} as unknown as GrantedCapabilityRecord,
+			],
+		} as Partial<IDappSessionRef>)
+		const { writer } = makeSessionWriter(session)
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({})) as never,
+		}
+		const dispatcher = new WalletSdkDispatcher(stubNetwork, stubAccount, stubExecution, interaction, writer, noopLogger)
+		// Success = getting PAST the account-scope gate. The stub harness has no network, so the
+		// dispatch fails DOWNSTREAM - the pin is that the failure is NOT the scope violation.
+		const failure = await dispatcher
+			.dispatch(
+				"executeUtility",
+				[
+					{ to: "0xtok", name: "balance_of_private" },
+					{ scopes: ["0x1c4d2aee53b88fa9e4061ec8c673dec03aadc3cd012177d0dcf20802ea9be10a"], authWitnesses: [], capsules: [] },
+				],
+				ctx,
+			)
+			.then(() => null)
+			.catch((e: unknown) => (e instanceof Error ? e.message : String(e)))
+		expect(failure).not.toMatch(/approved accounts/)
+		expect(failure).toMatch(/No network configured/)
+	})
+
+	test("the reader receives the SESSION context's profileId and chainId verbatim (stickiness pin)", async () => {
+		const session = makeSession({
+			capabilityGrants: [
+				{
+					capability: { type: "contracts", contracts: ["0xtok"], canGetMetadata: true },
+					grantedAt: 1,
+				} as unknown as GrantedCapabilityRecord,
+			],
+		})
+		const { writer } = makeSessionWriter(session)
+		const seen: unknown[] = []
+		const reader = {
+			isTokenRegistered: async (address: string, profileId: string, chainId: number) => {
+				seen.push([address, profileId, chainId])
+				return false
+			},
+		}
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({})) as never,
+		}
+		const dispatcher = new WalletSdkDispatcher(stubNetwork, stubAccount, stubExecution, interaction, writer, noopLogger, reader)
+		await dispatcher.dispatch("isTokenRegistered", ["0xtok"], { ...ctx, profileId: "profile-A", chainId: 42 })
+		expect(seen[0]).toEqual(["0xtok", "profile-A", 42])
+	})
+
+	test("a flag upgrade re-prompts even with the same addresses", async () => {
+		const session = makeSession({ capabilityGrants: [grant(["0xa"], { canRegister: true, canGetMetadata: false })] })
+		const { writer } = makeSessionWriter(session)
+		let prompted = false
+		const dispatcher = makeDispatcher(writer, async () => {
+			prompted = true
+			return { granted: [] } as never
+		})
+		await dispatcher.dispatch("requestCapabilities", [manifest(["0xa"])], ctx)
+		expect(prompted).toBe(true)
+	})
+})

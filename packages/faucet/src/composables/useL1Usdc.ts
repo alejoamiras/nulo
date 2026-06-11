@@ -1,6 +1,6 @@
 import { sepolia } from "viem/chains"
 import { ref, watch } from "vue"
-import { L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
+import { BRIDGE_TOKEN_DECIMALS, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
 import { useL1Wallet } from "./useL1Wallet"
 
 const errorMessage = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback)
@@ -49,7 +49,9 @@ export const ERC20_ABI = [
 const POLL_INTERVAL_MS = 15_000
 
 /** Fixed faucet-style mint - the bridge moves what you mint here; amount entry adds nothing on testnet. */
-export const MINT_AMOUNT = 100_000_000n // 100 USDC, 6 decimals
+// 100 whole tokens in base units - derived from the bridged pair's decimals so a redeploy at a
+// different precision can never mint dust (the 6-dec literal would be 1e-10 of an 18-dec token).
+export const MINT_AMOUNT = 100n * 10n ** BigInt(BRIDGE_TOKEN_DECIMALS)
 
 const balance = ref<bigint | null>(null)
 const minting = ref(false)

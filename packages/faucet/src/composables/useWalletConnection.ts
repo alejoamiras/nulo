@@ -10,7 +10,7 @@ import {
 	rebuildBridgeProxyInstance,
 	rebuildBridgeTokenInstance,
 } from "@/contracts/bridge-deployments"
-import { DRIPPER, ETH, rebuildDripperInstance, rebuildEthInstance, rebuildUsdcInstance, USDC } from "@/contracts/deployments"
+import { DRIPPER, NULO, OLUN, rebuildDripperInstance, rebuildNuloInstance, rebuildOlunInstance } from "@/contracts/deployments"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import { buildCombinedManifest } from "@/lib/capabilities"
 import { createAztecWalletSession } from "./createAztecWalletSession"
@@ -21,8 +21,8 @@ async function buildCapabilityManifest() {
 	const sponsoredFpc = await getSponsoredFpcInstance()
 	return buildCombinedManifest({
 		dripperAddress: DRIPPER,
-		usdcAddress: USDC,
-		ethAddress: ETH,
+		usdcAddress: NULO,
+		ethAddress: OLUN,
 		bridgeAddress: BRIDGE,
 		tokenAddress: BRIDGE_TOKEN,
 		proxyAddress: BRIDGE_PROXY,
@@ -31,17 +31,17 @@ async function buildCapabilityManifest() {
 }
 
 async function registerAllContracts(w: Wallet): Promise<void> {
-	const [dripperInst, usdcInst, ethInst, proxyInst, tokenInst, bridgeInst] = await Promise.all([
+	const [dripperInst, nuloInst, olunInst, proxyInst, tokenInst, bridgeInst] = await Promise.all([
 		rebuildDripperInstance(),
-		rebuildUsdcInstance(),
-		rebuildEthInstance(),
+		rebuildNuloInstance(),
+		rebuildOlunInstance(),
 		rebuildBridgeProxyInstance(),
 		rebuildBridgeTokenInstance(),
 		rebuildBridgeInstance(),
 	])
 	await w.registerContract(dripperInst, DripperContractArtifact)
-	await w.registerContract(usdcInst, TokenContractArtifact)
-	await w.registerContract(ethInst, TokenContractArtifact)
+	await w.registerContract(nuloInst, TokenContractArtifact)
+	await w.registerContract(olunInst, TokenContractArtifact)
 	await w.registerContract(proxyInst, bridgeProxyArtifact)
 	await w.registerContract(tokenInst, TokenContractArtifact)
 	await w.registerContract(bridgeInst, tokenBridgeArtifact)

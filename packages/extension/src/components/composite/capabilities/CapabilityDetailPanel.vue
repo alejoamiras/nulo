@@ -95,7 +95,7 @@ function fnLabel(fn: string): string {
 					</Flex>
 					<Flex v-if="capability.canGetMetadata" align="center" gap="6">
 						<Text size="12" color="tertiary" :class="$style.bullet">&#x2022;</Text>
-						<Text size="12" color="secondary">Read contract metadata</Text>
+						<Text size="12" color="secondary">Read contract metadata and token-registration state</Text>
 					</Flex>
 				</Flex>
 			</Flex>

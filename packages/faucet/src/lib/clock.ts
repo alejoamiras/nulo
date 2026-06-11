@@ -11,6 +11,7 @@ let started = false
 export function useNow() {
 	if (!started && typeof window !== "undefined") {
 		started = true
+		now.value = Date.now() // the ref may have sat frozen since module load - refresh before first use.
 		setInterval(() => {
 			now.value = Date.now()
 		}, 1000)

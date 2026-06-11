@@ -29,6 +29,14 @@ const drip = connected && props.wallet && props.account ? useFaucetDrip(props.wa
 const addToken = useFaucetAddToken()
 const { push, dismiss } = useToast()
 
+// Hidden once the wallet reports this token registered (fail-open: failures show the button).
+const registered = ref(false)
+if (connected && props.wallet && props.account) {
+	void addToken.isRegistered(props.wallet, props.tokenAddress).then((r) => {
+		registered.value = r
+	})
+}
+
 // Balance display strings. The presentational BalanceRow takes formatted text
 // + testids; this card owns the bigint formatting + loading state.
 const balanceLoading = computed(() => balance?.loading.value ?? false)
@@ -149,6 +157,7 @@ async function handleAddToWallet() {
 	await addToken.addToken(props.wallet, props.account.toString(), props.tokenAddress)
 	const final = addToken.status.value
 	if (final.kind === "ok") {
+		registered.value = true
 		push({ kind: "ok", text: `${props.token.symbol} added to your wallet.` })
 	} else if (final.kind === "error") {
 		push({ kind: "error", text: final.error.message })
@@ -201,7 +210,7 @@ onBeforeUnmount(() => {
 				@click="handleDrip('public')"
 			/>
 		</div>
-		<div v-if="connected" class="add-to-wallet">
+		<div v-if="connected && !registered" class="add-to-wallet">
 			<button
 				type="button"
 				class="add-to-wallet-btn"

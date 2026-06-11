@@ -1,7 +1,7 @@
 /**
  * Faucet contract deployer — vendored from
  * `aztec-standards/scripts/deploy.ts` (560 lines) and adapted to our
- * 2-token catalog (USDC, ETH).
+ * 2-token catalog (NULO, OLUN).
  *
  * Run once per environment:
  *   DEPLOYER_SECRET="<32+ chars>" bun run deploy:testnet
@@ -86,7 +86,7 @@ interface TokenDeploymentRecord {
 	readonly constructorArtifact: "constructor_with_minter"
 	readonly constructorArgs: {
 		readonly name: string
-		readonly symbol: "USDC" | "ETH"
+		readonly symbol: "NULO" | "OLUN"
 		readonly decimals: number
 		readonly minter: string
 	}
@@ -357,6 +357,10 @@ async function run(): Promise<void> {
 // helpers above so tests (if added later) can import them.
 type DeployerKeys = { kind: "hex"; secret: Fr; salt: Fr; signingKey: ReturnType<typeof deriveSigningKey> } | { kind: "utf8"; secret: Fr }
 
+function frFromHexReduce(hex: string): Fr {
+	return Fr.fromBufferReduce(Buffer.from(hex.replace(/^0x/, "").padStart(64, "0"), "hex"))
+}
+
 async function resolveDeployerKeys(): Promise<DeployerKeys> {
 	// Prefer the holonym-style hex+salt pair: if a project already has a
 	// funded testnet account under (secretKey, salt, derivedSigningKey),
@@ -365,8 +369,10 @@ async function resolveDeployerKeys(): Promise<DeployerKeys> {
 	const hexSecret = process.env.DEPLOYER_SECRET_KEY
 	const hexSalt = process.env.DEPLOYER_SALT
 	if (hexSecret && hexSalt) {
-		const secret = Fr.fromString(hexSecret)
-		const salt = Fr.fromString(hexSalt)
+		// An Ethereum secp256k1 key can exceed the BN254 field modulus - reduce instead of
+		// throwing (deterministic: the same input always derives the same account).
+		const secret = frFromHexReduce(hexSecret)
+		const salt = frFromHexReduce(hexSalt)
 		return { kind: "hex", secret, salt, signingKey: deriveSigningKey(secret) }
 	}
 	// Fallback: a free-form string that gets poseidon-hashed. Original

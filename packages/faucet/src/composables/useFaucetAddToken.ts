@@ -11,6 +11,7 @@ import { type NormalizedError, normalizeError } from "@/lib/errors"
  */
 type WalletWithRegisterToken = Wallet & {
 	registerToken(account: AztecAddress, token: AztecAddress): Promise<void>
+	isTokenRegistered?(token: AztecAddress): Promise<boolean>
 }
 
 export type AddTokenStatus =
@@ -71,5 +72,20 @@ export function useFaucetAddToken() {
 		status.value = { kind: "idle" }
 	}
 
-	return { status, addToken, reset }
+	/**
+	 * Whether the wallet already has this token registered (the capability-gated
+	 * `isTokenRegistered` custom RPC). FAIL OPEN on any failure - older wallet builds,
+	 * scope refusals, or transport errors must show the Add button, never hide it.
+	 */
+	async function isRegistered(wallet: Wallet, tokenAddress: AztecAddress): Promise<boolean> {
+		try {
+			const w = wallet as WalletWithRegisterToken
+			if (typeof w.isTokenRegistered !== "function") return false
+			return (await w.isTokenRegistered(tokenAddress)) === true
+		} catch {
+			return false
+		}
+	}
+
+	return { status, addToken, isRegistered, reset }
 }

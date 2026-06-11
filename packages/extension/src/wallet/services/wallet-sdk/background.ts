@@ -38,6 +38,7 @@ import { AccountService } from "@/wallet/services/account/service"
 import { ExecutionService } from "@/wallet/services/execution/service"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { DappInteractionService } from "@/wallet/services/dapp-interaction/service"
+import { TokenService } from "@/wallet/services/token/service"
 import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
 import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/service"
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
@@ -79,6 +80,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	const dappInteractionService: DappInteractionService = services.get(DappInteractionService.name)
 	const dappSessionService: DappSessionService = services.get(DappSessionService.name)
 	const operationJournal: OperationJournalService = services.get(OperationJournalService.name)
+	const tokenService: TokenService = services.get(TokenService.name)
 
 	const dispatcher = new WalletSdkDispatcher(
 		networkService,
@@ -87,6 +89,14 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 		dappInteractionService,
 		dappSessionService,
 		logger,
+		{
+			// The isTokenRegistered custom RPC: a wallet-local registry read, scope-gated upstream.
+			isTokenRegistered: async (address, profileId, chainId) => {
+				const tokens = await tokenService.getTokens(profileId, chainId)
+				const target = address.toLowerCase()
+				return tokens.some((t) => t.contract.toLowerCase() === target)
+			},
+		},
 	)
 
 	/**

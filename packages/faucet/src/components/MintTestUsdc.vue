@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
 /** Services */
 import { AppButton } from "@nulo/design"
 import { computed } from "vue"
@@ -23,10 +24,10 @@ const status = computed(() => {
 <template>
 	<section class="mint-card">
 		<header>
-			<h3>GET TEST USDC ON SEPOLIA (L1)</h3>
+			<h3>GET TEST {{ BRIDGE_TOKEN_SYMBOL }} ON SEPOLIA (L1)</h3>
 			<p class="sub">
-				Mints 100 test USDC to your Ethereum account on Sepolia: the asset this bridge moves. This is not
-				the Faucet tab - the Faucet drips a different USDC directly on Aztec (L2), and this bridge cannot
+				Mints 100 test {{ BRIDGE_TOKEN_SYMBOL }} to your Ethereum account on Sepolia: the asset this bridge
+				moves. This is not the Faucet tab - the Faucet drips its own tokens directly on Aztec (L2), and this bridge cannot
 				move that one. No real value.
 			</p>
 		</header>
@@ -37,7 +38,7 @@ const status = computed(() => {
 			:data-testid="TESTIDS.mintL1"
 			@click="usdc.mint"
 		>
-			{{ l1.isConnected.value ? "MINT 100 USDC ON SEPOLIA" : "CONNECT YOUR ETHEREUM WALLET" }}
+			{{ l1.isConnected.value ? `MINT 100 ${BRIDGE_TOKEN_SYMBOL} ON SEPOLIA` : "CONNECT YOUR ETHEREUM WALLET" }}
 		</AppButton>
 
 		<p v-if="status" class="status" :data-testid="TESTIDS.mintL1Status">{{ status }}</p>
