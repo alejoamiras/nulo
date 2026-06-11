@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — bridge-seal-backup</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>bridge-seal-backup</h1>
+  <p>An in-flight bridge lives only in your browser's storage - wipe the site data mid-bridge and the claim is stranded. This adds a tiny escape hatch: every pending bridge card (and the live stepper) gets a small ⤓ icon that downloads that ONE bridge as an encrypted recovery file, and the PENDING BRIDGES header gets a quiet RESTORE button that loads such a file back - on any browser, as long as you hold the same Ethereum wallet. The file is always sealed: stolen or leaked, it's useless without your wallet's signature.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><code>light</code>, your call, rubric-consistent: one bounded feature, no new cryptography (it reuses the audited recovery-key scheme from the private seal), one package + a small bridge-core module. The single codex audit earned its keep anyway - it caught that a first-time export needed the same sign-twice determinism check the private seal does (otherwise a quirky wallet could export a file that can never be opened again), and that half-started withdraws have nothing restorable in them yet.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: The file format (bridge-core)</h3>
+    <p>A small module that seals a whole bridge record into a versioned JSON file and opens it again: encrypt-everything (public bridges' claim secret never touches disk readable), tamper = refuses, wrong wallet = refuses, unknown version = honest "newer app needed". Proven by round-trip and sabotage tests.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: The two buttons (faucet)</h3>
+    <p>The ⤓ on unfinished cards + the stepper (tooltip explains it; withdraws only once they have their exit transaction - before that there's nothing worth saving). RESTORE in the journal header opens a file picker, validates hard (right deployment, not already tracked, your wallet's signature opens it, the contents check out), then the bridge appears as a normal pending card - you press CLAIM like always; nothing fires automatically.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>The trick making this cheap and safe: your Ethereum wallet always signs the same secret message for a given bridge, and that signature IS the encryption key. So the file needs no password, no server, no account - just the wallet that made it. Exports of bridges you sealed this session cost zero extra signatures (the key is still in memory); otherwise one signature to save, one to load. First-time wallets sign twice once (a determinism check the private seal already does) so we never produce a file that can't be reopened.</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li>None - your Phase-0 answers (seal everything; icons on cards + stepper with tooltips; header RESTORE + picker; light tier) plus the four folded audit conditions closed the space.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: per-bridge sealed file + restore; NO whole-journal backup, no auto-claim on restore, withdraws export only post-exit.</li>
+      <li>Confirm the export prompt cost: first-ever export on a wallet signs twice (the determinism check), then once - same trust cache as private deposits.</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p class="warning">Use exactly ONE per session. They don't compose.</p>
+    <div class="phase recommended">
+      <h3>Recommended: /goal</h3>
+      <pre><code>/goal Both phases marked ✓ in implementations-plan/bridge-seal-backup/plan.md; LESSONS_FILE=implementations-plan/bridge-seal-backup/lessons/phase-N.md printed per phase; bun run audit:faucet and bun run audit:vue exit 0 in the transcript; codex post-impl audit complete with high/critical findings addressed; the 4-item manual checklist printed verbatim. Constraints: branch feat/bridge-backup only, testnet only, unsigned commits via git -c commit.gpgsign=false, secrets/blobs/signatures never logged.</code></pre>
+    </div>
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/bridge-seal-backup on feat/bridge-backup. Each firing: read plan.md + lessons, git log -3; fix red suites first; else next phase (P1 bridge-core backup module → P2 faucet icons+restore); validate (package test + typecheck, root lint); commit small conventional via git -c commit.gpgsign=false; push origin. Phase green ⇒ mark ✓ + LESSONS_FILE line. All ✓ ⇒ audit:faucet + audit:vue → codex post-impl → address high/critical → STOP with the manual checklist. Testnet only; this branch only; secrets/blobs never logged.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="audit-codex.md">codex transcript</a> · <a href="./lessons/">Lessons</a></p>
+</body>
+</html>

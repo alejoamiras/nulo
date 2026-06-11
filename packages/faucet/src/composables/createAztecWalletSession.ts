@@ -5,7 +5,7 @@ import "@/lib/nulo-schema-patch"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { WalletManager } from "@aztec/wallet-sdk/manager"
 import type { PendingConnection, WalletProvider } from "@aztec/wallet-sdk/manager"
-import { ref } from "vue"
+import { ref, shallowRef } from "vue"
 import { readChainInfo } from "@/lib/chain-info"
 import { hashToEmoji } from "@/lib/emoji"
 import { type NormalizedError, normalizeError } from "@/lib/errors"
@@ -42,7 +42,9 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	const accounts = ref<GrantedAccount[]>([])
 	const selectedAccount = ref<string | null>(null)
 	const error = ref<NormalizedError | null>(null)
-	const wallet = ref<Wallet | null>(null)
+	// shallowRef: the SDK wallet handle must not be deep-proxied (same rationale as the balance
+	// handles - deep reactivity over a class instance is waste and can break identity checks).
+	const wallet = shallowRef<Wallet | null>(null)
 
 	let provider: WalletProvider | null = null
 	let pending: PendingConnection | null = null

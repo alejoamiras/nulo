@@ -1,13 +1,14 @@
 <script setup lang="ts">
 /** Services */
 import type { BridgeJournalRecord } from "@nulo/bridge-core"
-import { computed, onBeforeUnmount, ref } from "vue"
+import { computed } from "vue"
 
 /** Composables */
 import { useBridgeJournal } from "@/composables/useBridgeJournal"
 
 /** Utils */
 import { type BridgePhase, stepperPhases } from "@/lib/bridge-steps"
+import { useNow } from "@/lib/clock"
 import { formatElapsed, trackPhases } from "@/lib/phase-clock"
 import { TESTIDS } from "@/lib/testids"
 
@@ -16,12 +17,8 @@ const emit = defineEmits<{ retry: [] }>()
 
 const journal = useBridgeJournal()
 
-// 1s heartbeat for the live elapsed timer on the active phase (display only).
-const now = ref(Date.now())
-const ticker = setInterval(() => {
-	now.value = Date.now()
-}, 1000)
-onBeforeUnmount(() => clearInterval(ticker))
+// Shared 1s heartbeat (one app-wide interval - N cards must not mean N timers).
+const now = useNow()
 
 const rt = computed(() => journal.runtime.value[props.record.id] ?? {})
 const phases = computed(() => trackPhases(props.record.id, stepperPhases(props.record, rt.value), now.value))

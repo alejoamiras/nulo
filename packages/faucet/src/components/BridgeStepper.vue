@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Services */
-import type { BridgeJournalRecord, DepositJournalRecord } from "@nulo/bridge-core"
+import { type BridgeJournalRecord, type DepositJournalRecord, isProvisionalWithdrawId } from "@nulo/bridge-core"
 import { computed } from "vue"
 
 /** Composables */
@@ -14,7 +14,13 @@ import { TESTIDS } from "@/lib/testids"
 import BridgePhaseRail from "./BridgePhaseRail.vue"
 
 const props = defineProps<{ record: BridgeJournalRecord }>()
-const emit = defineEmits<{ background: [] }>()
+const emit = defineEmits<{ background: []; backup: [record: BridgeJournalRecord] }>()
+const exportable = computed(() => {
+	if (isProvisionalWithdrawId(props.record.id)) return false
+	const r = props.record
+	if (r.direction === "deposit" && r.isPrivate && !(r as DepositJournalRecord).sealedEnvelope) return false
+	return true
+})
 
 const journal = useBridgeJournal()
 
@@ -48,9 +54,21 @@ const headline = computed(() => {
 
 <template>
 	<section class="stepper" :data-testid="TESTIDS.stepper" :data-id="record.id">
-		<header>
-			<h3>BRIDGING</h3>
-			<p class="headline">{{ headline }}</p>
+		<header class="head-row">
+			<div>
+				<h3>BRIDGING</h3>
+				<p class="headline">{{ headline }}</p>
+			</div>
+			<button
+				v-if="exportable"
+				type="button"
+				class="backup"
+				title="Download this bridge's recovery file - restores it on any browser with your Ethereum wallet."
+				:data-testid="TESTIDS.stepperBackup"
+				@click="emit('backup', record)"
+			>
+				BACKUP ⤓
+			</button>
 		</header>
 
 		<BridgePhaseRail :record="record" :retryable="canRetry" @retry="onRetry" />
@@ -85,7 +103,7 @@ const headline = computed(() => {
 	font: 600 13px/1.4 var(--font-mono);
 }
 
-.phase.active .phase.failed .actions {
+.actions {
 	display: flex;
 	gap: 8px;
 }
@@ -113,5 +131,28 @@ const headline = computed(() => {
 	margin: 0;
 	color: var(--txt-secondary);
 	font: 500 11px/1.5 var(--font-mono);
+}
+
+.head-row {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.backup {
+	background: var(--txt-primary);
+	border: 1px solid var(--txt-primary);
+	color: var(--nulo-bg, #000);
+	font: 700 11px/1 var(--font-mono);
+	letter-spacing: 0.06em;
+	cursor: pointer;
+	padding: 8px 12px;
+	white-space: nowrap;
+}
+
+.backup:hover {
+	background: transparent;
+	color: var(--txt-primary);
 }
 </style>

@@ -27,7 +27,9 @@ export interface BridgePhase {
 /** L2 blocks between the deposit-time snapshot and presumed message arrival (raven-style pacing). */
 export const SYNC_TARGET_MARGIN_BLOCKS = 3
 
-const FAILED_ATTENTIONS = new Set(["error", "unknown-outcome"])
+// Every attention fails the active phase: the rail is where the note + the fix-instruction live
+// (mismatch/stale states used to render a calm "active" prompt with no note at all).
+const FAILED_ATTENTIONS = new Set(["error", "unknown-outcome", "mismatch", "tampered", "unseal-failed", "stale", "stale-deployment"])
 
 const clamp01 = (n: number): number => Math.max(0, Math.min(1, n))
 

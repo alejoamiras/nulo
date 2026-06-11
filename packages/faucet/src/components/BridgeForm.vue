@@ -12,12 +12,14 @@ import BridgeReceipt, { type ReceiptSnapshot } from "./BridgeReceipt.vue"
 import BridgeStepper from "./BridgeStepper.vue"
 
 /** Composables */
+import { useBridgeBackup } from "@/composables/useBridgeBackup"
 import { hideCompleted, useBridgeJournal } from "@/composables/useBridgeJournal"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { providerFingerprint, useDepositFlow } from "@/composables/useDeposit"
 import { useL1Usdc } from "@/composables/useL1Usdc"
 import { useL1Wallet } from "@/composables/useL1Wallet"
 import { type UseTokenBalanceHandle, useTokenBalance } from "@/composables/useTokenBalance"
+import { useToast } from "@/composables/useToast"
 import { useWithdrawFlow } from "@/composables/useWithdraw"
 
 /** Utils */
@@ -28,6 +30,8 @@ const l1 = useL1Wallet()
 const bridge = useBridgeWallet()
 const usdc = useL1Usdc()
 const journal = useBridgeJournal()
+const backup = useBridgeBackup()
+const { push: pushToast } = useToast()
 const depositFlow = useDepositFlow()
 const withdrawFlow = useWithdrawFlow()
 
@@ -102,6 +106,9 @@ const showMintHint = computed(() => fromChain.value === "ethereum" && usdc.balan
 const isFirstSeal = computed(() => {
 	const addr = l1.address.value
 	if (!addr) return true
+	// Recompute when the journal changes: the first private bridge marks trust mid-session, and
+	// the note must stop promising "two signatures" for the second one.
+	void journal.records.value.length
 	return !isSealTrusted(localStorage, sepolia.id, addr, providerFingerprint())
 })
 
@@ -188,6 +195,8 @@ function clearFlowErrors() {
 	withdrawFlow.error.value = null
 }
 
+const onBackup = backup.exportBridgeWithToast
+
 function onBackground() {
 	if (activeId.value) journal.releaseForeground(activeId.value)
 	clearFlowErrors()
@@ -215,7 +224,12 @@ function fmt(b: bigint | null): string {
 
 <template>
 	<section class="bridge-form" :data-testid="TESTIDS.bridgeForm" :data-stage="formStage">
-		<BridgeStepper v-if="formStage === 'stepper' && activeRecord" :record="activeRecord" @background="onBackground" />
+		<BridgeStepper
+			v-if="formStage === 'stepper' && activeRecord"
+			:record="activeRecord"
+			@background="onBackground"
+			@backup="onBackup"
+		/>
 		<BridgeReceipt v-else-if="formStage === 'receipt' && receiptSnapshot" :snapshot="receiptSnapshot" @new-bridge="onNewBridge" />
 		<template v-else>
 		<header>
@@ -279,6 +293,7 @@ function fmt(b: bigint | null): string {
 				v-model="amount"
 				class="amount"
 				type="number"
+				aria-label="Amount in USDC"
 				min="0"
 				step="1"
 				:disabled="submitting"

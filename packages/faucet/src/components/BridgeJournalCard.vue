@@ -6,13 +6,15 @@ import {
 	type WithdrawJournalRecord,
 	deriveDepositStage,
 	deriveWithdrawStage,
+	isProvisionalWithdrawId,
 } from "@nulo/bridge-core"
-import { computed, ref } from "vue"
+import { computed, ref, watch } from "vue"
 
 /** Composables */
 import { useBridgeJournal } from "@/composables/useBridgeJournal"
 
 /** Utils */
+import { useNow } from "@/lib/clock"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { TESTIDS } from "@/lib/testids"
 
@@ -20,10 +22,28 @@ import { TESTIDS } from "@/lib/testids"
 import BridgePhaseRail from "./BridgePhaseRail.vue"
 
 const props = defineProps<{ record: BridgeJournalRecord }>()
+const emit = defineEmits<{ backup: [record: BridgeJournalRecord] }>()
 
 const journal = useBridgeJournal()
+const exportable = computed(() => {
+	if (isProvisionalWithdrawId(props.record.id)) return false
+	const r = props.record
+	// A private deposit pre-seal has no recovery material - a file now would be a false promise.
+	if (r.direction === "deposit" && r.isPrivate && !(r as DepositJournalRecord).sealedEnvelope) return false
+	return true
+})
 
 const discardArmed = ref(false)
+// An armed CONFIRM DISCARD that never fires must disarm - a stale armed state turns a later
+// stray click into destroying a private deposit's only sealed secret.
+let disarmTimer: ReturnType<typeof setTimeout> | undefined
+watch(discardArmed, (armed) => {
+	clearTimeout(disarmTimer)
+	if (armed)
+		disarmTimer = setTimeout(() => {
+			discardArmed.value = false
+		}, 6000)
+})
 
 const rt = computed(() => journal.runtime.value[props.record.id] ?? {})
 const busy = computed(() => !!rt.value.busy)
@@ -38,7 +58,10 @@ const stage = computed(() => {
 })
 
 const attention = computed(() => rt.value.attention)
-const actionable = computed(() => !attention.value || attention.value === "unknown-outcome" || attention.value === "error")
+// Every attention except a deployment mismatch is retryable: the runs re-validate all guards
+// idempotently, so pressing CLAIM/FINISH after fixing the cause (switching accounts, etc.) is
+// exactly the recovery path - hiding the button stranded those states until a reload.
+const actionable = computed(() => attention.value !== "stale-deployment")
 
 /** Guidance for an IDLE card only: while the engine drives (busy) the rail narrates live, and a
  *  done card's stamp says everything - a parallel stage line would just repeat them. */
@@ -85,12 +108,9 @@ const showFinish = computed(
 	() => props.record.direction === "withdraw" && stage.value !== "done" && stage.value !== "exiting" && actionable.value && idle.value,
 )
 
-/** A soft note (e.g. the 30-min "still confirming") renders even without an attention state.
- *  error/unknown-outcome notes are EXCLUDED: the rail's failed phase already displays them. */
-const note = computed(() => {
-	if (attention.value === "error" || attention.value === "unknown-outcome") return null
-	return rt.value.note
-})
+/** Soft notes only (e.g. the 30-min "still confirming"): ANY attention's note renders in the
+ *  rail's failed phase - a parallel line here would double it. */
+const note = computed(() => (attention.value ? null : rt.value.note))
 
 const txLinks = computed(() => {
 	const links: { label: string; href: string }[] = []
@@ -109,8 +129,9 @@ const txLinks = computed(() => {
 
 const amountDisplay = computed(() => (Number(props.record.amount) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 }))
 
+const now = useNow()
 const age = computed(() => {
-	const mins = Math.max(0, Math.round((Date.now() - props.record.createdAt) / 60_000))
+	const mins = Math.max(0, Math.round((now.value - props.record.createdAt) / 60_000))
 	if (mins < 1) return "just now"
 	if (mins < 60) return `${mins}m ago`
 	const hours = Math.round(mins / 60)
@@ -141,22 +162,33 @@ function onDiscard() {
 		:data-privacy="record.isPrivate ? 'private' : 'public'"
 		:data-attention="attention"
 	>
-		<button
-			v-if="stage === 'done'"
-			type="button"
-			class="dismiss"
-			aria-label="Clear"
-			:data-testid="TESTIDS.journalClear"
-			@click="journal.clearDone(record.id)"
-		>
-			✕
-		</button>
 		<p v-if="stage === 'done'" class="stamp">{{ record.direction === "deposit" ? "BRIDGED ✓" : "RELEASED ✓" }}</p>
 		<header class="row">
 			<span class="dir">{{ record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM" }}</span>
 			<span class="amt">{{ amountDisplay }} USDC</span>
 			<span class="tag" :class="{ private: record.isPrivate }">{{ record.isPrivate ? "PRIVATE" : "PUBLIC" }}</span>
 			<span class="age">{{ age }}</span>
+			<button
+				v-if="stage === 'done'"
+				type="button"
+				class="corner"
+				aria-label="Clear"
+				:data-testid="TESTIDS.journalClear"
+				@click="journal.clearDone(record.id)"
+			>
+				✕
+			</button>
+			<button
+				v-else-if="exportable"
+				type="button"
+				class="corner"
+				aria-label="Download recovery file"
+				title="Download this bridge's recovery file - restores it on any browser with your Ethereum wallet."
+				:data-testid="TESTIDS.cardBackup"
+				@click="emit('backup', record)"
+			>
+				⤓
+			</button>
 		</header>
 
 		<BridgePhaseRail v-if="stage !== 'done'" :record="record" compact />
@@ -178,7 +210,7 @@ function onDiscard() {
 
 		<div class="actions">
 			<button
-				v-if="showClaim && stage !== 'done'"
+				v-if="showClaim"
 				type="button"
 				class="action"
 				:data-testid="TESTIDS.journalClaim"
@@ -187,7 +219,7 @@ function onDiscard() {
 				{{ attention === "unknown-outcome" || attention === "error" ? "RETRY" : "CLAIM" }}
 			</button>
 			<button
-				v-if="showFinish && stage !== 'done'"
+				v-if="showFinish"
 				type="button"
 				class="action"
 				:data-testid="TESTIDS.journalFinish"
@@ -223,10 +255,7 @@ function onDiscard() {
 	border: 1px solid var(--nulo-outline);
 }
 
-.dismiss {
-	position: absolute;
-	top: 10px;
-	right: 12px;
+.corner {
 	background: transparent;
 	border: none;
 	color: var(--txt-secondary);
@@ -235,7 +264,7 @@ function onDiscard() {
 	padding: 2px 4px;
 }
 
-.dismiss:hover {
+.corner:hover {
 	color: var(--txt-primary);
 }
 

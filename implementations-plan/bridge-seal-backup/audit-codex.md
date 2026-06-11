@@ -1,0 +1,33 @@
+# Codex audit transcript - bridge-seal-backup
+
+## Round 1 (light tier, single pass, new session)
+
+Verdict: **conditional approve** - all 4 conditions folded same-round (B5 trust-aware export, B6 no provisional-withdraw export, B7 backup-specific sealerL1 + tamper-honest copy, B8 strict deep restore guard). Confirmed sound: binding reuse, same-key inner/outer AES-GCM (random IVs), light tier sufficient once tightened.
+
+1. The “otherwise export costs ONE Ethereum signature” claim is unsound for first-use wallets and makes the recovery promise unreliable. The current recovery scheme only becomes safe after a sign-twice self-test or an existing trust verdict ([plan.md](/Users/alejoamiras/Projects/nulo/nulo-4/implementations-plan/bridge-seal-backup/plan.md:18), [recovery-crypto.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/bridge-core/src/recovery-crypto.ts:67), [recovery-crypto.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/bridge-core/src/recovery-crypto.ts:163), [seal-trust.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/bridge-core/src/seal-trust.ts:1)). Private deposits already do that; public deposits and withdraw backups would not. On a non-deterministic signer, you can export a file that later cannot be restored.
+
+2. Withdraw export is over-promised. The plan enables stepper export “the moment the record exists”, but withdraw records start with provisional `wd-pending-*` ids and are later rekeyed to `exitTxHash` ([plan.md](/Users/alejoamiras/Projects/nulo/nulo-4/implementations-plan/bridge-seal-backup/plan.md:23), [useWithdraw.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useWithdraw.ts:167), [useWithdraw.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useWithdraw.ts:234)). Restoring a provisional withdraw just lands in `unknown-outcome` and cannot resume ([useBridgeJournal.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:695)). That violates the core “restore an in-flight bridge” promise for that state.
+
+3. The signature-prompt story is under-specified. Reusing the exact deposit recovery message means the single signature is record-specific decryption capability for both the inner envelope and the outer backup if exfiltrated; it is not a tx, but it is more than a generic login-like prompt ([recovery-crypto.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/bridge-core/src/recovery-crypto.ts:27)). The current text says “encrypt ONE in-flight private claim secret”, which is misleading for public deposits, withdraws, and restore. Also, header fields are not AEAD-bound; swaps are theft-resistant but can induce false stale/duplicate/wrong-wallet failures ([encryption-key.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/wallet-crypto/src/encryption-key.ts:34)).
+
+Facts: mostly right. Two exceptions: `sealerL1` is not part of the full authoritative journal record for withdraws/public deposits ([journal.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/bridge-core/src/journal.ts:54)), and “journal record parse” needs a stricter guard than the current shallow parser ([journal.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/bridge-core/src/journal.ts:97)). Binding reuse itself is cryptographically fine; same-key inner/outer AES-GCM is acceptable here because IVs are random per seal.
+
+Light-tier: still bounded; I would not require a second auditor if the plan is tightened first.
+
+conditional approve (with conditions: first-use export must self-test or use the existing trust cache; do not export/restore provisional withdraws; make `sealerL1` optional/backup-specific; and tighten restore copy/validation to treat unauthenticated-header failures as tamper/corruption, not just “wrong wallet”.)
+
+## Round 2 - post-impl audit (new session, dir codex-epPvTbhG)
+
+Verdict: **approve** - no high/critical findings. Notes: the restore prompt adds no oracle capability (signature never leaves the app; verified the no-log discipline); restored records are correctly sweep-eligible like any rediscovered record; the cross-tab duplicate TOCTOU is LOW (stale-state resurrection, identity-bound ids, no fund path) - documented; the two missing pins (journal restore flow, stepper provisional-hide) were added same-round.
+
+No high/critical findings.
+
+1. Export/restore prompt as oracle: I do not see a high/critical oracle here. The prompt message is the same recovery-key text in `packages/bridge-core/src/recovery-crypto.ts:27-33`, but the signature is only turned into a local AES key in `packages/faucet/src/composables/useBridgeBackup.ts:55-77`; it is not logged or exported. The backup log is explicitly ids/direction only at `useBridgeBackup.ts:18-19,87,104`, and the only exported artifact is the sealed file at `useBridgeBackup.ts:25-32`. A malicious in-app page state would already be able to call `wallet.signMessage` directly via `useBridgeBackup.ts:45-52`, so restore does not add a new capability beyond local GCM success/failure at `packages/bridge-core/src/backup.ts:148-177`.
+
+2. Restore write path: no high/critical engine-corruption path found. `addRecordVerified` only persists and does not mark `sessionLive` (`packages/faucet/src/composables/useBridgeJournal.ts:233-238`), and completed records are skipped by `resumeSessionWork` (`useBridgeJournal.ts:741-747`). One correction to the stated premise: restored non-`sessionLive` records with `claimTxHash`/`consumeTxHash` are still sweep-eligible (`useBridgeJournal.ts:744-747`), and that behavior is pinned for rediscovered deposits/withdraws in `useBridgeJournal.test.ts:308-323,428-436`.
+
+3. Duplicate TOCTOU: there is a real cross-tab race after the second duplicate check and before `upsertRecord` (`packages/faucet/src/composables/useBridgeBackup.ts:99-103`; `packages/bridge-core/src/journal.ts:136-143`). A fresher same-id record can be overwritten by the restored snapshot. I do not rate it high/critical because ids are identity-bound and I do not see a fund-redirection path; this is stale-state resurrection, not asset compromise.
+
+4. Missing real pins: the RESTORE button/hidden input/toast flow in `packages/faucet/src/components/BridgeJournal.vue:20-47,73-89` is not exercised by `packages/faucet/src/components/BridgeJournal.test.ts:32-61`. Also, `packages/faucet/src/components/BridgeStepper.test.ts:73-76` only pins the backup emit; it does not pin the claimed visibility matrix/provisional-withdraw hide behavior implemented at `packages/faucet/src/components/BridgeStepper.vue:17-19,57-64`.
+
+approve

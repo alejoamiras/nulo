@@ -70,6 +70,33 @@ describe("BridgeStepper", () => {
 		expect(w2.find(sel(TESTIDS.stepperRetry)).exists()).toBe(false)
 	})
 
+	it("the ⤓ export icon emits backup with the record (sealed private records only)", async () => {
+		const w = mount(BridgeStepper, { props: { record: dep({ sealedEnvelope: "blob" }) } })
+		await w.find(sel(TESTIDS.stepperBackup)).trigger("click")
+		expect(w.emitted("backup")?.[0]?.[0]).toMatchObject({ id: "0xd" })
+	})
+
+	it("the ⤓ hides for a private deposit whose envelope isn't sealed yet (no false recovery promise)", () => {
+		const w = mount(BridgeStepper, { props: { record: dep() } }) // isPrivate, no sealedEnvelope.
+		expect(w.find(sel(TESTIDS.stepperBackup)).exists()).toBe(false)
+	})
+
+	it("the ⤓ hides for provisional withdraws (nothing restorable pre-exit)", () => {
+		const prov: WithdrawJournalRecord = {
+			schema: 1,
+			id: "wd-pending-x9",
+			direction: "withdraw",
+			isPrivate: false,
+			amount: "1000000",
+			createdAt: 1,
+			updatedAt: 1,
+			recipientL1: "0xe",
+			...DEPLOY,
+		}
+		const w = mount(BridgeStepper, { props: { record: prov } })
+		expect(w.find(sel(TESTIDS.stepperBackup)).exists()).toBe(false)
+	})
+
 	it("background emits", async () => {
 		const w = mount(BridgeStepper, { props: { record: dep() } })
 		await w.find(sel(TESTIDS.stepperBackground)).trigger("click")
