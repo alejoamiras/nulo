@@ -971,3 +971,134 @@ describe("Phase 0.5: session lookup consolidation (TOCTOU defense)", () => {
 		expect(counter.lookups).toBe(1)
 	})
 })
+
+// ── isTokenRegistered (Nulo-custom) — reachability + gating + routing ───
+
+describe("dispatcher — isTokenRegistered reachability + gating", () => {
+	const contractsSession = (contracts: "*" | string[], canGetMetadata = true) =>
+		makeSession({
+			capabilityGrants: [
+				{
+					capability: { type: "contracts", contracts, canRegister: true, canGetMetadata },
+					grantedAt: 1,
+				} as unknown as GrantedCapabilityRecord,
+			],
+		})
+
+	function makeReaderDispatcher(session: IDappSessionRef, registered: boolean) {
+		const { writer } = makeSessionWriter(session)
+		const reader = { isTokenRegistered: async () => registered }
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({})) as never,
+		}
+		return new WalletSdkDispatcher(stubNetwork, stubAccount, stubExecution, interaction, writer, noopLogger, reader)
+	}
+
+	test("schema patch extends WalletSchema with a 1-arg boolean `isTokenRegistered` entry", async () => {
+		await import("../../extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
+		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
+		expect("isTokenRegistered" in WalletSchema).toBe(true)
+		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
+		const entry = (WalletSchema as any).isTokenRegistered
+		const params = entry.parameters()
+		expect(params.items.length).toBe(1)
+	})
+
+	test("the three schema-patch copies are content-identical (drift pin)", async () => {
+		const { readFileSync } = await import("node:fs")
+		const { resolve } = await import("node:path")
+		const root = resolve(__dirname, "../../..")
+		const read = (p: string) => readFileSync(resolve(root, p), "utf8")
+		const ext = read("packages/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts")
+		const faucet = read("packages/faucet/src/lib/nulo-schema-patch.ts")
+		const playground = read("packages/playground/src/lib/nulo-schema-patch.ts")
+		// Identical Zod surface: compare with the per-file header comments stripped (comments may
+		// name their own mirror paths) - every CODE line must match.
+		const code = (s: string) =>
+			s
+				.split("\n")
+				.filter((l) => !l.trim().startsWith("*") && !l.trim().startsWith("//") && !l.trim().startsWith("/*"))
+				.join("\n")
+		expect(code(faucet)).toBe(code(ext))
+		expect(code(playground)).toBe(code(ext))
+	})
+
+	test("granted address ⇒ boolean from the reader, NO interaction service involved", async () => {
+		const dispatcher = makeReaderDispatcher(contractsSession(["0xtok"]), true)
+		const result = await dispatcher.dispatch("isTokenRegistered", ["0xtok"], ctx)
+		expect(result).toBe(true)
+	})
+
+	test("ungranted address ⇒ scope violation (never a silent false)", async () => {
+		const dispatcher = makeReaderDispatcher(contractsSession(["0xtok"]), true)
+		await expect(dispatcher.dispatch("isTokenRegistered", ["0xother"], ctx)).rejects.toThrow(/Scope violation: isTokenRegistered/)
+	})
+
+	test("contracts grant without canGetMetadata ⇒ scope violation", async () => {
+		const dispatcher = makeReaderDispatcher(contractsSession(["0xtok"], false), true)
+		await expect(dispatcher.dispatch("isTokenRegistered", ["0xtok"], ctx)).rejects.toThrow(/Scope violation/)
+	})
+
+	test("no contracts grant at all ⇒ capability refusal", async () => {
+		const dispatcher = makeReaderDispatcher(makeSession(), true)
+		await expect(dispatcher.dispatch("isTokenRegistered", ["0xtok"], ctx)).rejects.toThrow()
+	})
+
+	test("a build without the reader refuses explicitly", async () => {
+		const { writer } = makeSessionWriter(contractsSession(["0xtok"]))
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({})) as never,
+		}
+		const dispatcher = new WalletSdkDispatcher(stubNetwork, stubAccount, stubExecution, interaction, writer, noopLogger)
+		await expect(dispatcher.dispatch("isTokenRegistered", ["0xtok"], ctx)).rejects.toThrow(/not available/)
+	})
+})
+
+describe("dispatcher — contracts field-diff re-consent", () => {
+	const grant = (
+		contracts: string[],
+		flags: { canRegister?: boolean; canGetMetadata?: boolean } = { canRegister: true, canGetMetadata: true },
+	) => ({ capability: { type: "contracts", contracts, ...flags }, grantedAt: 1 }) as unknown as GrantedCapabilityRecord
+
+	const manifest = (contracts: string[]) => ({
+		capabilities: [{ type: "contracts", contracts, canRegister: true, canGetMetadata: true }],
+	})
+
+	test("a request covered by the stored grant does NOT re-prompt", async () => {
+		const session = makeSession({ capabilityGrants: [grant(["0xa", "0xb"])] })
+		const { writer } = makeSessionWriter(session)
+		let prompted = false
+		const dispatcher = makeDispatcher(writer, async () => {
+			prompted = true
+			return { granted: [] } as never
+		})
+		await dispatcher.dispatch("requestCapabilities", [manifest(["0xa"])], ctx)
+		expect(prompted).toBe(false)
+	})
+
+	test("a request with NEW addresses re-prompts (the redeploy path)", async () => {
+		const session = makeSession({ capabilityGrants: [grant(["0xold"])] })
+		const { writer } = makeSessionWriter(session)
+		let prompted = false
+		const dispatcher = makeDispatcher(writer, async () => {
+			prompted = true
+			return { granted: [{ type: "contracts", contracts: ["0xnew"], canRegister: true, canGetMetadata: true }] } as never
+		})
+		await dispatcher.dispatch("requestCapabilities", [manifest(["0xnew"])], ctx)
+		expect(prompted).toBe(true)
+	})
+
+	test("a flag upgrade re-prompts even with the same addresses", async () => {
+		const session = makeSession({ capabilityGrants: [grant(["0xa"], { canRegister: true, canGetMetadata: false })] })
+		const { writer } = makeSessionWriter(session)
+		let prompted = false
+		const dispatcher = makeDispatcher(writer, async () => {
+			prompted = true
+			return { granted: [] } as never
+		})
+		await dispatcher.dispatch("requestCapabilities", [manifest(["0xa"])], ctx)
+		expect(prompted).toBe(true)
+	})
+})

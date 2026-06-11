@@ -52,7 +52,7 @@
 // package-name import (`@nulo/wallet-bridge`) would resolve at runtime but
 // wires an unnecessary self-reference through the barrel.
 import { formatCaipAccount, formatCaipChain, parseCaipAccount, resolveNetworkByChainId } from "./caip"
-import type { AccountsCapability, Capability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
+import type { AccountsCapability, Capability, ContractsCapability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
 import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
 import type { AztecSendTxRequest, CapabilityResult, ExecutionResult, RegisterTokenRequest } from "./dapp-interaction-protocol"
 import type {
@@ -75,7 +75,14 @@ import type { SessionContext } from "./types"
 import { CapabilityNotGrantedError, JobCancelledError } from "@nulo/extension-messaging/errors"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
-import type { IAccountReader, IDappInteractionRunner, IDappSessionWriter, IExecutionRunner, INetworkReader } from "./services-contract"
+import type {
+	IAccountReader,
+	IDappInteractionRunner,
+	IDappSessionWriter,
+	IExecutionRunner,
+	INetworkReader,
+	ITokenRegistryReader,
+} from "./services-contract"
 
 /**
  * Internal hooks bag the dispatcher accepts from its caller (the wallet-sdk
@@ -143,6 +150,20 @@ function isNoFromRequest(from: unknown): boolean {
  *  scope-enforcement: missing flag = no permission). The `accounts` array
  *  field is dispatcher-emitted, not dApp-controlled, and is excluded from
  *  the comparison. */
+/** Whether every address+flag the request needs is already covered by the UNION of stored
+ *  contracts grants. NOT equality: shrinking requests must not re-prompt; growing ones must
+ *  (the type-only delta silently stranded new addresses after redeploys). */
+function contractsRequestCovered(existing: ContractsCapability[], requested: ContractsCapability): boolean {
+	const flagCovered = (flag: "canRegister" | "canGetMetadata"): boolean => {
+		if (!requested[flag]) return true
+		if (requested.contracts === "*") return existing.some((e) => e[flag] && e.contracts === "*")
+		return requested.contracts.every((addr) =>
+			existing.some((e) => e[flag] && (e.contracts === "*" || e.contracts.some((x) => String(x) === String(addr)))),
+		)
+	}
+	return flagCovered("canRegister") && flagCovered("canGetMetadata")
+}
+
 function accountsCapsEqual(a: AccountsCapability, b: AccountsCapability): boolean {
 	return Boolean(a.canGet) === Boolean(b.canGet) && Boolean(a.canCreateAuthWit) === Boolean(b.canCreateAuthWit)
 }
@@ -212,6 +233,7 @@ export class WalletSdkDispatcher {
 		private readonly dappInteractionService: IDappInteractionRunner,
 		private readonly dappSessionService: IDappSessionWriter,
 		private readonly logger: ILogger,
+		private readonly tokenRegistryReader?: ITokenRegistryReader,
 	) {}
 
 	/**
@@ -255,6 +277,12 @@ export class WalletSdkDispatcher {
 		}
 		if (methodName === "getAccounts") {
 			return this.handleGetAccounts(ctx, dappSession)
+		}
+		if (methodName === "isTokenRegistered") {
+			// A wallet-local registry read: no prompt, no execution op. Scope enforcement above
+			// already required a contracts grant covering args[0].
+			if (!this.tokenRegistryReader) throw new Error("isTokenRegistered is not available in this wallet build")
+			return this.tokenRegistryReader.isTokenRegistered(String(args[0]), ctx.profileId, ctx.chainId)
 		}
 		if (methodName === "batch") {
 			// CRITICAL: do NOT forward `hooks` into batch legs. handleBatch
@@ -566,6 +594,15 @@ export class WalletSdkDispatcher {
 			if (cap.type === "accounts") {
 				const existing = existingGrants.find((g) => g.capability.type === "accounts")
 				return !existing || !accountsCapsEqual(existing.capability as AccountsCapability, cap as unknown as AccountsCapability)
+			}
+			if (cap.type === "contracts") {
+				// Field-level delta (closes wallet-sdk-capability-field-diff for contracts): a request
+				// listing addresses/flags beyond the stored grants re-prompts; approval APPENDS a new
+				// grant, and scope checkers union across grants - so coverage grows monotonically.
+				const existing = existingGrants
+					.filter((g) => g.capability.type === "contracts")
+					.map((g) => g.capability as ContractsCapability)
+				return existing.length === 0 || !contractsRequestCovered(existing, cap as unknown as ContractsCapability)
 			}
 			return !grantedTypes.has(cap.type as Capability["type"])
 		})

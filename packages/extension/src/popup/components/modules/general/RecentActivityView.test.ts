@@ -19,72 +19,60 @@ const configConnect = vi.fn().mockResolvedValue(undefined)
 const noopEvent = { add: vi.fn(), remove: vi.fn() }
 
 vi.mock("@/wallet/services/incoming-transfer/client", () => ({
-	IncomingTransferServiceClient: vi.fn(function () {
-		return {
-			connect: incomingTransferConnect,
-			disconnect: vi.fn(),
-			onIncomingTransferAdded: noopEvent,
-			onIncomingTransferUpdated: noopEvent,
-			onIncomingTransferDeleted: noopEvent,
-			onConnected: noopEvent,
-			getIncomingTransfers: vi.fn().mockResolvedValue([]),
-		}
-	}),
+	IncomingTransferServiceClient: vi.fn(() => ({
+		connect: incomingTransferConnect,
+		disconnect: vi.fn(),
+		onIncomingTransferAdded: noopEvent,
+		onIncomingTransferUpdated: noopEvent,
+		onIncomingTransferDeleted: noopEvent,
+		onConnected: noopEvent,
+		getIncomingTransfers: vi.fn().mockResolvedValue([]),
+	})),
 }))
 
 vi.mock("@/wallet/services/config/client", () => ({
-	ConfigServiceClient: vi.fn(function () {
-		return {
-			connect: configConnect,
-			disconnect: vi.fn(),
-			onUpdate: noopEvent,
-			getValue: vi.fn().mockResolvedValue(true),
-		}
-	}),
+	ConfigServiceClient: vi.fn(() => ({
+		connect: configConnect,
+		disconnect: vi.fn(),
+		onUpdate: noopEvent,
+		getValue: vi.fn().mockResolvedValue(true),
+	})),
 }))
 
 vi.mock("@/wallet/services/task/client", () => ({
-	TaskServiceClient: vi.fn(function () {
-		return {
-			disconnect: vi.fn(),
-			onTaskCreated: noopEvent,
-			onTaskUpdated: noopEvent,
-			onTaskDeleted: noopEvent,
-			getTasks: vi.fn().mockResolvedValue([]),
-		}
-	}),
+	TaskServiceClient: vi.fn(() => ({
+		disconnect: vi.fn(),
+		onTaskCreated: noopEvent,
+		onTaskUpdated: noopEvent,
+		onTaskDeleted: noopEvent,
+		getTasks: vi.fn().mockResolvedValue([]),
+	})),
 }))
 
 vi.mock("@/wallet/services/operation-journal/client", () => ({
-	OperationJournalServiceClient: vi.fn(function () {
-		return {
-			disconnect: vi.fn(),
-			onConnected: noopEvent,
-			onOperationAdded: noopEvent,
-			onOperationUpdated: noopEvent,
-			onOperationDeleted: noopEvent,
-			getOperations: vi.fn().mockResolvedValue([]),
-		}
-	}),
+	OperationJournalServiceClient: vi.fn(() => ({
+		disconnect: vi.fn(),
+		onConnected: noopEvent,
+		onOperationAdded: noopEvent,
+		onOperationUpdated: noopEvent,
+		onOperationDeleted: noopEvent,
+		getOperations: vi.fn().mockResolvedValue([]),
+	})),
 }))
 
 vi.mock("@/wallet/services/execution/client", () => ({
-	ExecutionServiceClient: vi.fn(function () {
-		return {
-			disconnect: vi.fn(),
-			cancelOperation: vi.fn().mockResolvedValue(undefined),
-		}
-	}),
+	ExecutionServiceClient: vi.fn(() => ({
+		disconnect: vi.fn(),
+		cancelOperation: vi.fn().mockResolvedValue(undefined),
+	})),
 }))
 
 vi.mock("@/wallet/services/token/client", () => ({
-	TokenServiceClient: vi.fn(function () {
-		return {
-			disconnect: vi.fn(),
-			getTokens: vi.fn().mockResolvedValue([]),
-			onTokenAdded: { add: vi.fn(), remove: vi.fn() },
-		}
-	}),
+	TokenServiceClient: vi.fn(() => ({
+		disconnect: vi.fn(),
+		getTokens: vi.fn().mockResolvedValue([]),
+		onTokenAdded: { add: vi.fn(), remove: vi.fn() },
+	})),
 }))
 
 vi.mock("@/wallet/services/task/spec", () => ({

@@ -41,7 +41,7 @@ export const CAPABILITY_LABELS: Record<string, CapabilityInfo> = {
 	contracts: {
 		label: "Contract registration",
 		shortLabel: "Contracts",
-		description: "Register and read contract metadata on this network.",
+		description: "Register contracts, read their metadata, and check whether listed tokens are registered in your wallet.",
 		risk: "low",
 	},
 	contractClasses: {

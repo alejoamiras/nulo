@@ -1,6 +1,6 @@
 /**
  * Runtime extension of `@aztec/wallet-sdk`'s `WalletSchema` with the Nulo-custom
- * `registerToken` method.
+ * `registerToken` and `isTokenRegistered` methods.
  *
  * Mirrored verbatim by:
  *   - packages/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts
@@ -35,4 +35,24 @@ if ("registerToken" in WalletSchema) {
 } else {
 	// biome-ignore lint/suspicious/noExplicitAny: see above
 	;(WalletSchema as any).registerToken = PATCHED_SCHEMA
+}
+
+const REGISTERED_QUERY_SCHEMA = z.function().args(schemas.AztecAddress).returns(z.boolean())
+
+if ("isTokenRegistered" in WalletSchema) {
+	// biome-ignore lint/suspicious/noExplicitAny: see above
+	const existing = (WalletSchema as any).isTokenRegistered
+	if (existing !== REGISTERED_QUERY_SCHEMA) {
+		const existingParamCount = existing?.parameters?.()?.items?.length
+		if (existingParamCount !== 1) {
+			throw new Error(
+				`Nulo schema-patch: upstream WalletSchema.isTokenRegistered signature changed ` +
+					`(expected 1 param, found ${existingParamCount}). Update the patch or ` +
+					`remove it if upstream now provides isTokenRegistered natively.`,
+			)
+		}
+	}
+} else {
+	// biome-ignore lint/suspicious/noExplicitAny: see above
+	;(WalletSchema as any).isTokenRegistered = REGISTERED_QUERY_SCHEMA
 }

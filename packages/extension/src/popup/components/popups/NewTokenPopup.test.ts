@@ -51,19 +51,13 @@ const openToastMock = vi.fn()
 // Vitest 4 requires `function` expressions (not arrow functions) for mocks
 // instantiated with `new`. Arrow factories error: "() => ... is not a constructor".
 vi.mock("@/wallet/services/token/client", () => ({
-	TokenServiceClient: vi.fn(function () {
-		return tokenServiceMock
-	}),
+	TokenServiceClient: vi.fn(() => tokenServiceMock),
 }))
 vi.mock("@/wallet/services/token-balance/client", () => ({
-	TokenBalanceServiceClient: vi.fn(function () {
-		return tokenBalanceServiceMock
-	}),
+	TokenBalanceServiceClient: vi.fn(() => tokenBalanceServiceMock),
 }))
 vi.mock("@/wallet/services/task/client", () => ({
-	TaskServiceClient: vi.fn(function () {
-		return taskServiceMock
-	}),
+	TaskServiceClient: vi.fn(() => taskServiceMock),
 }))
 // ContentKind is imported separately by the popup; mirror the enum exactly.
 vi.mock("@/wallet/services/task/spec", () => ({

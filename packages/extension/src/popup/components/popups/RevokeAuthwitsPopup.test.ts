@@ -24,9 +24,7 @@ const openToastMock = vi.fn()
 const preselected = { preselectedAuthwits: [] as { id: string; content: string }[] }
 
 vi.mock("@/wallet/services/auth-registry/client", () => ({
-	AuthRegistryServiceClient: vi.fn(function () {
-		return authwitsServiceMock
-	}),
+	AuthRegistryServiceClient: vi.fn(() => authwitsServiceMock),
 	MAX_REVOKES_PER_TX: 8,
 }))
 
