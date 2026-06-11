@@ -43,3 +43,10 @@ LESSONS_FILE=implementations-plan/bridge-form-stepper/lessons/phase-3.md
 - RETRY moved INLINE onto the failed phase row (the rail emits; the stepper routes) - the bottom-of-card button was unintuitive. testid `stepperRetry` preserved.
 - NEW BRIDGE / RUN IN BACKGROUND clear both flows' stale `error` refs - a "Wallet locked" ghost no longer greets the fresh form (pinned).
 - Receipt de-shouted: small mint stamp (the pending-card style, 20px, no inverted block) + the meme: a one-shot CSS-only brutalist confetti burst (14 square mono bits, deterministic placement, 0.9s, zero deps - supply-chain policy respected).
+
+## 2026-06-11 - polish round (user testnet feedback)
+- De-duplicated CROSSING (ex-SYNC): the bar owns the numbers ("111508 / 111510" + ▓░), the detail owns the words ("2 blocks until your funds arrive"). Label SYNC → CROSSING (journey language, key/data-phase unchanged for e2e).
+- Dropped all visible "check N" counters (gate + receipt rounds) - they read as "retry until we hit the nail". Logs keep the counts; the unreachable streak stays (genuine connectivity signal).
+- Cards: stage line + CLAIM/FINISH/DISCARD are IDLE-ONLY now (shown ⇒ pressable; while the engine drives, the rail narrates alone - the stale "confirm in your Aztec wallet" during CONFIRM is gone); copy adapts per stage (claiming = "Claim sent - press CLAIM to keep watching it confirm"); done cards show ONE tick (the direction-aware stamp; stage line gone).
+- RETRY on a failed claim no longer revisits CROSSING: `runtime.claimable` (gate already passed) short-circuits the countdown and narrates the single revalidation simulate under CLAIM ("re-checking the message").
+- The all-cards-disappeared report: almost certainly Vite HMR re-instancing module state (engine refs) when commits were pushed to the watched branch mid-test - records stay in storage; a reload restores. Watching for a repro on a quiet dev server before treating it as a product bug.
