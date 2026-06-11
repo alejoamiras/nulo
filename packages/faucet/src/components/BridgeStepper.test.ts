@@ -70,6 +70,12 @@ describe("BridgeStepper", () => {
 		expect(w2.find(sel(TESTIDS.stepperRetry)).exists()).toBe(false)
 	})
 
+	it("the ⤓ export icon emits backup with the record", async () => {
+		const w = mount(BridgeStepper, { props: { record: dep() } })
+		await w.find(sel(TESTIDS.stepperBackup)).trigger("click")
+		expect(w.emitted("backup")?.[0]?.[0]).toMatchObject({ id: "0xd" })
+	})
+
 	it("background emits", async () => {
 		const w = mount(BridgeStepper, { props: { record: dep() } })
 		await w.find(sel(TESTIDS.stepperBackground)).trigger("click")

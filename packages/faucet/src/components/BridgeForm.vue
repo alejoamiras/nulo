@@ -12,12 +12,14 @@ import BridgeReceipt, { type ReceiptSnapshot } from "./BridgeReceipt.vue"
 import BridgeStepper from "./BridgeStepper.vue"
 
 /** Composables */
+import { useBridgeBackup } from "@/composables/useBridgeBackup"
 import { hideCompleted, useBridgeJournal } from "@/composables/useBridgeJournal"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { providerFingerprint, useDepositFlow } from "@/composables/useDeposit"
 import { useL1Usdc } from "@/composables/useL1Usdc"
 import { useL1Wallet } from "@/composables/useL1Wallet"
 import { type UseTokenBalanceHandle, useTokenBalance } from "@/composables/useTokenBalance"
+import { useToast } from "@/composables/useToast"
 import { useWithdrawFlow } from "@/composables/useWithdraw"
 
 /** Utils */
@@ -28,6 +30,8 @@ const l1 = useL1Wallet()
 const bridge = useBridgeWallet()
 const usdc = useL1Usdc()
 const journal = useBridgeJournal()
+const backup = useBridgeBackup()
+const { push: pushToast } = useToast()
 const depositFlow = useDepositFlow()
 const withdrawFlow = useWithdrawFlow()
 
@@ -188,6 +192,15 @@ function clearFlowErrors() {
 	withdrawFlow.error.value = null
 }
 
+async function onBackup(rec: import("@nulo/bridge-core").BridgeJournalRecord) {
+	try {
+		await backup.exportBridge(rec)
+		pushToast({ kind: "ok", text: "Recovery file downloaded. Keep it with your wallet." })
+	} catch (e) {
+		pushToast({ kind: "error", text: e instanceof Error ? e.message : "Export failed." })
+	}
+}
+
 function onBackground() {
 	if (activeId.value) journal.releaseForeground(activeId.value)
 	clearFlowErrors()
@@ -215,7 +228,12 @@ function fmt(b: bigint | null): string {
 
 <template>
 	<section class="bridge-form" :data-testid="TESTIDS.bridgeForm" :data-stage="formStage">
-		<BridgeStepper v-if="formStage === 'stepper' && activeRecord" :record="activeRecord" @background="onBackground" />
+		<BridgeStepper
+			v-if="formStage === 'stepper' && activeRecord"
+			:record="activeRecord"
+			@background="onBackground"
+			@backup="onBackup"
+		/>
 		<BridgeReceipt v-else-if="formStage === 'receipt' && receiptSnapshot" :snapshot="receiptSnapshot" @new-bridge="onNewBridge" />
 		<template v-else>
 		<header>

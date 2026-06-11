@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Services */
-import type { BridgeJournalRecord, DepositJournalRecord } from "@nulo/bridge-core"
+import { type BridgeJournalRecord, isProvisionalWithdrawId } from "@nulo/bridge-core"
 import { computed } from "vue"
 
 /** Composables */
@@ -14,7 +14,8 @@ import { TESTIDS } from "@/lib/testids"
 import BridgePhaseRail from "./BridgePhaseRail.vue"
 
 const props = defineProps<{ record: BridgeJournalRecord }>()
-const emit = defineEmits<{ background: [] }>()
+const emit = defineEmits<{ background: []; backup: [record: BridgeJournalRecord] }>()
+const exportable = computed(() => !isProvisionalWithdrawId(props.record.id))
 
 const journal = useBridgeJournal()
 
@@ -48,9 +49,22 @@ const headline = computed(() => {
 
 <template>
 	<section class="stepper" :data-testid="TESTIDS.stepper" :data-id="record.id">
-		<header>
-			<h3>BRIDGING</h3>
-			<p class="headline">{{ headline }}</p>
+		<header class="head-row">
+			<div>
+				<h3>BRIDGING</h3>
+				<p class="headline">{{ headline }}</p>
+			</div>
+			<button
+				v-if="exportable"
+				type="button"
+				class="backup"
+				aria-label="Download recovery file"
+				title="Download this bridge's recovery file - restores it on any browser with your Ethereum wallet."
+				:data-testid="TESTIDS.stepperBackup"
+				@click="emit('backup', record)"
+			>
+				⤓
+			</button>
 		</header>
 
 		<BridgePhaseRail :record="record" :retryable="canRetry" @retry="onRetry" />
@@ -113,5 +127,25 @@ const headline = computed(() => {
 	margin: 0;
 	color: var(--txt-secondary);
 	font: 500 11px/1.5 var(--font-mono);
+}
+
+.head-row {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.backup {
+	background: transparent;
+	border: none;
+	color: var(--txt-secondary);
+	font: 600 15px/1 var(--font-mono);
+	cursor: pointer;
+	padding: 2px 4px;
+}
+
+.backup:hover {
+	color: var(--txt-primary);
 }
 </style>

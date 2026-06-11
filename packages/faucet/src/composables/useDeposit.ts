@@ -59,6 +59,11 @@ export function providerFingerprint(): string {
 // The finalized-envelope re-seal key, held in memory only for records this session sealed.
 const sealKeys = new Map<string, EncryptionKey>()
 
+/** Same-session retained seal key (pre-finalize window) - lets a backup export skip the signature. */
+export function getRetainedSealKey(id: string): EncryptionKey | undefined {
+	return sealKeys.get(id)
+}
+
 let depsWired = false
 
 /** Wire the journal engine's deposit-side chain deps (idempotent; real clients only). */

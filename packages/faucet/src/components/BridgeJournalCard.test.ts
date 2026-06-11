@@ -182,6 +182,25 @@ describe("BridgeJournalCard", () => {
 		expect(discard).toHaveBeenCalledWith("0xdep")
 	})
 
+	it("the ⤓ export icon: unfinished cards show it, done cards swap to ✕, provisional withdraws hide it", () => {
+		expect(
+			mountCard(deposit({ leafIndex: "7" }))
+				.find(sel(TESTIDS.cardBackup))
+				.exists(),
+		).toBe(true)
+		const done = mountCard(deposit({ leafIndex: "7", claimTxHash: "0xc", completedAt: 1 }))
+		expect(done.find(sel(TESTIDS.cardBackup)).exists()).toBe(false)
+		expect(done.find(sel(TESTIDS.journalClear)).exists()).toBe(true)
+		const prov = mountCard(withdraw({ id: "wd-pending-x1", exitTxHash: undefined }))
+		expect(prov.find(sel(TESTIDS.cardBackup)).exists()).toBe(false)
+	})
+
+	it("the ⤓ emits the backup event with the record", async () => {
+		const w = mountCard(deposit({ leafIndex: "7" }))
+		await w.find(sel(TESTIDS.cardBackup)).trigger("click")
+		expect(w.emitted("backup")?.[0]?.[0]).toMatchObject({ id: "0xdep" })
+	})
+
 	it("a done private card retains its sealed blob and offers CLEAR - never DISCARD (retention pin)", () => {
 		const rec = deposit({ isPrivate: true, leafIndex: "7", claimTxHash: "0xc", completedAt: 1, sealedEnvelope: "blob" })
 		const w = mountCard(rec)

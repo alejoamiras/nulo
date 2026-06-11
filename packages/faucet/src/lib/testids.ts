@@ -88,6 +88,11 @@ export const TESTIDS = {
 	// The journal cards' compact phase rail (same mapper, distinct ids - surfaces must not collide).
 	journalRail: "fa-journal-rail",
 	journalPhase: "fa-journal-phase",
+	// Per-bridge sealed recovery files: export icons + the journal-header restore flow.
+	cardBackup: "fa-card-backup",
+	stepperBackup: "fa-stepper-backup",
+	journalRestore: "fa-journal-restore",
+	journalRestoreInput: "fa-journal-restore-input",
 	stepperBackground: "fa-stepper-background",
 	stepperRetry: "fa-stepper-retry",
 	receipt: "fa-bridge-receipt",

@@ -6,6 +6,7 @@ import {
 	type WithdrawJournalRecord,
 	deriveDepositStage,
 	deriveWithdrawStage,
+	isProvisionalWithdrawId,
 } from "@nulo/bridge-core"
 import { computed, ref } from "vue"
 
@@ -20,8 +21,10 @@ import { TESTIDS } from "@/lib/testids"
 import BridgePhaseRail from "./BridgePhaseRail.vue"
 
 const props = defineProps<{ record: BridgeJournalRecord }>()
+const emit = defineEmits<{ backup: [record: BridgeJournalRecord] }>()
 
 const journal = useBridgeJournal()
+const exportable = computed(() => !isProvisionalWithdrawId(props.record.id))
 
 const discardArmed = ref(false)
 
@@ -150,6 +153,17 @@ function onDiscard() {
 			@click="journal.clearDone(record.id)"
 		>
 			✕
+		</button>
+		<button
+			v-else-if="exportable"
+			type="button"
+			class="dismiss"
+			aria-label="Download recovery file"
+			title="Download this bridge's recovery file - restores it on any browser with your Ethereum wallet."
+			:data-testid="TESTIDS.cardBackup"
+			@click="emit('backup', record)"
+		>
+			⤓
 		</button>
 		<p v-if="stage === 'done'" class="stamp">{{ record.direction === "deposit" ? "BRIDGED ✓" : "RELEASED ✓" }}</p>
 		<header class="row">
