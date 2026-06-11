@@ -10,7 +10,9 @@ import { useToast } from "@/composables/useToast"
 /** Utils */
 import type { BridgeJournalRecord } from "@nulo/bridge-core"
 import { computed, ref, watch } from "vue"
+import { BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
+import { formatBigInt } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
 
 const journal = useBridgeJournal()
@@ -30,8 +32,11 @@ async function onRestorePick(event: Event) {
 	restoring.value = true
 	try {
 		const rec = await backup.restoreFile(await file.text())
-		const amount = (Number(rec.amount) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 })
-		push({ kind: "ok", text: `Restored: ${amount} USDC ${rec.direction === "deposit" ? "to Aztec" : "to Ethereum"}.` })
+		const amount = formatBigInt(BigInt(rec.amount), BRIDGE_TOKEN_DECIMALS)
+		push({
+			kind: "ok",
+			text: `Restored: ${amount} ${BRIDGE_TOKEN_SYMBOL} ${rec.direction === "deposit" ? "to Aztec" : "to Ethereum"}.`,
+		})
 	} catch (e) {
 		push({ kind: "error", text: e instanceof Error ? e.message : "Restore failed." })
 	} finally {
@@ -47,11 +52,14 @@ watch(
 		if (!done) return
 		// The foreground stepper shows the receipt for this completion - a toast would double it.
 		if (journal.activeFlowId.value === done.id) return
-		const amount = (Number(done.amount) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 })
+		const amount = formatBigInt(BigInt(done.amount), BRIDGE_TOKEN_DECIMALS)
 		const href = done.txHash ? (done.direction === "deposit" ? explorerTxUrl(done.txHash) : etherscanTxUrl(done.txHash)) : ""
 		push({
 			kind: "ok",
-			text: done.direction === "deposit" ? `Bridged ${amount} USDC to Aztec ✓` : `Released ${amount} USDC to Ethereum ✓`,
+			text:
+				done.direction === "deposit"
+					? `Bridged ${amount} ${BRIDGE_TOKEN_SYMBOL} to Aztec ✓`
+					: `Released ${amount} ${BRIDGE_TOKEN_SYMBOL} to Ethereum ✓`,
 			link: href ? { label: "view tx", href } : undefined,
 		})
 	},

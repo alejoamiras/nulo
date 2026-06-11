@@ -72,7 +72,7 @@ describe("BridgeJournalCard", () => {
 		expect(card.attributes("data-stage")).toBe("claimable")
 		expect(card.attributes("data-privacy")).toBe("private")
 		expect(w.text()).toContain("ETHEREUM → AZTEC")
-		expect(w.text()).toContain("100 USDC")
+		expect(w.text()).toContain("100.00 USDC")
 		expect(w.text()).toContain("PRIVATE")
 	})
 

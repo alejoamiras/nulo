@@ -7,6 +7,8 @@ const signMessage = vi.fn(async ({ message }: { message: string }) => `0xsig-for
 const retainedKey = vi.fn((_id: string) => undefined as unknown)
 
 vi.mock("@/contracts/bridge-deployments", () => ({
+	BRIDGE_TOKEN_SYMBOL: "USDC",
+	BRIDGE_TOKEN_DECIMALS: 6,
 	L1_PORTAL: "0xportal",
 	BRIDGE: { toString: () => "0xbridge" },
 }))

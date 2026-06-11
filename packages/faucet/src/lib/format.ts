@@ -34,8 +34,8 @@ export function formatBigInt(value: bigint, decimals: number, displayPlaces = 2)
  * 18-decimal base units exceed at ~9.01 tokens. Excess fractional digits
  * truncate (never round up someone's spend); junk returns 0n.
  */
-export function parseAmount(text: string, decimals: number): bigint {
-	const trimmed = text.trim()
+export function parseAmount(text: string | number, decimals: number): bigint {
+	const trimmed = String(text ?? "").trim()
 	if (!/^\d*(\.\d*)?$/.test(trimmed) || trimmed === "" || trimmed === ".") return 0n
 	const [whole = "0", fraction = ""] = trimmed.split(".")
 	const fractionPadded = fraction.slice(0, decimals).padEnd(decimals, "0")

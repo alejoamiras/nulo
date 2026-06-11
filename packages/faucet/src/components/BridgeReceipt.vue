@@ -1,7 +1,9 @@
 <script setup lang="ts">
 /** Utils */
 import { computed } from "vue"
+import { BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
+import { formatBigInt } from "@/lib/format"
 import { formatElapsed } from "@/lib/phase-clock"
 import { TESTIDS } from "@/lib/testids"
 
@@ -29,7 +31,7 @@ const CONFETTI = Array.from({ length: 14 }, (_, i) => ({
 	color: i % 2 === 0 ? "var(--mint)" : "var(--nulo-accent)",
 }))
 
-const amountDisplay = computed(() => (Number(props.snapshot.amount) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 }))
+const amountDisplay = computed(() => formatBigInt(BigInt(props.snapshot.amount), BRIDGE_TOKEN_DECIMALS))
 const headline = computed(() =>
 	props.snapshot.direction === "deposit" ? `${amountDisplay.value} USDC to Aztec` : `${amountDisplay.value} USDC to Ethereum`,
 )

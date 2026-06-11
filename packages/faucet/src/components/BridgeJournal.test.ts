@@ -45,7 +45,7 @@ describe("BridgeJournal", () => {
 		await input.trigger("change")
 		await vi.waitFor(() => expect(restoreFile).toHaveBeenCalled())
 		await nextTick()
-		expect(push).toHaveBeenCalledWith(expect.objectContaining({ kind: "ok", text: expect.stringContaining("Restored: 5 USDC") }))
+		expect(push).toHaveBeenCalledWith(expect.objectContaining({ kind: "ok", text: expect.stringContaining("Restored: 5.00 USDC") }))
 
 		push.mockClear()
 		restoreFile.mockRejectedValueOnce(new Error("This bridge is already tracked here - nothing to restore."))
@@ -76,7 +76,7 @@ describe("BridgeJournal", () => {
 		expect(push).toHaveBeenCalledWith(
 			expect.objectContaining({
 				kind: "ok",
-				text: expect.stringContaining("Bridged 100 USDC to Aztec"),
+				text: expect.stringContaining("Bridged 100.00 USDC to Aztec"),
 				link: expect.objectContaining({ href: expect.stringContaining(GOOD_HASH) }),
 			}),
 		)
@@ -89,7 +89,7 @@ describe("BridgeJournal", () => {
 		await nextTick()
 		expect(push).toHaveBeenCalledWith(
 			expect.objectContaining({
-				text: expect.stringContaining("Released 40 USDC to Ethereum"),
+				text: expect.stringContaining("Released 40.00 USDC to Ethereum"),
 				link: expect.objectContaining({ href: `https://sepolia.etherscan.io/tx/${GOOD_HASH}` }),
 			}),
 		)

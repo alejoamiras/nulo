@@ -19,6 +19,11 @@ export const L1_PORTAL = config.l1.portal as `0x${string}`
 
 export const BRIDGE_PROXY = AztecAddress.fromString(config.l2.proxy.address)
 export const BRIDGE_TOKEN = AztecAddress.fromString(config.l2.token.address)
+
+/** The bridged pair's display identity - ONE source for every surface. The token-identity flip
+ *  (AZLO/18) changes these two lines + the deployment config; nothing else. */
+export const BRIDGE_TOKEN_SYMBOL = "USDC"
+export const BRIDGE_TOKEN_DECIMALS = 6
 export const BRIDGE = AztecAddress.fromString(config.l2.bridge.address)
 
 const common = { publicKeys: PublicKeys.default(), deployer: AztecAddress.ZERO } as const

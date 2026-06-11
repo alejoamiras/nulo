@@ -64,6 +64,8 @@ vi.mock("@/contracts/deployments", () => ({
 }))
 
 vi.mock("@/contracts/bridge-deployments", () => ({
+	BRIDGE_TOKEN_SYMBOL: "USDC",
+	BRIDGE_TOKEN_DECIMALS: 6,
 	BRIDGE: { toString: () => "0x4" },
 	BRIDGE_TOKEN: { toString: () => "0x5" },
 	BRIDGE_PROXY: { toString: () => "0x6" },

@@ -23,7 +23,7 @@ describe("BridgeReceipt", () => {
 			},
 		})
 		expect(w.text()).toContain("BRIDGED ✓")
-		expect(w.text()).toContain("100 USDC to Aztec")
+		expect(w.text()).toContain("100.00 USDC to Aztec")
 		expect(w.text()).toContain("PRIVATE")
 		expect(w.text()).toContain("3m 42s end to end.")
 		const links = w.findAll(sel(TESTIDS.receiptLink))
@@ -41,7 +41,7 @@ describe("BridgeReceipt", () => {
 			},
 		})
 		expect(w.text()).toContain("RELEASED ✓")
-		expect(w.text()).toContain("40 USDC to Ethereum")
+		expect(w.text()).toContain("40.00 USDC to Ethereum")
 		expect(w.findAll(sel(TESTIDS.receiptLink))).toHaveLength(1)
 	})
 })
