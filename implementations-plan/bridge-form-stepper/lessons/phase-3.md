@@ -55,3 +55,9 @@ LESSONS_FILE=implementations-plan/bridge-form-stepper/lessons/phase-3.md
 - Compact rail: ONE pulse (the strip's active cell); the detail line lost its dot AND idle cards no longer show the static signing prompt as if live ("Confirm the deposit in your Ethereum wallet" on a dead record) - compact detail renders only for live stepDetail or a failed note.
 - Skipped glyph ⊘ → ✓ (an allowance that suffices IS approval satisfied); the full rail's SKIPPED badge keeps the nuance.
 - CLEAR button → ✕ dismiss in the done card's top-right (testid journalClear preserved). Gotcha: removing a v-if button from a v-if/v-else-if chain silently re-chains the v-else-if to the PREVIOUS sibling - DISCARD leaked onto done cards until made standalone.
+
+## 2026-06-11 - window-timeout round (user report)
+- "Timed out waiting for window" = OUR extension's window-manager (packages/extension window-manager.ts) settling an unanswered confirmation popup - the claim prompt expired, the bridge itself was fine (the crossing bar was full). Three fixes:
+  - `humanizeWalletError` at the flow boundary: the timeout reads "The wallet's confirmation window timed out before you could sign. Reopen your wallet and retry." Unknown messages pass through.
+  - Phase attribution: `rt.claimable` (gate passed) now selects CLAIM as the active/failed phase - a post-gate failure can no longer plant its X on a visibly-complete CROSSING.
+  - Error notes render ONCE: error/unknown-outcome notes live in the rail's failed phase; the card's separate note line keeps only non-failing attentions (mismatch/stale) + soft notes.
