@@ -7,3 +7,11 @@
 - Suites: faucet 274 ✓ smoke 9 ✓ typecheck ✓.
 
 LESSONS_FILE=implementations-plan/token-identity/lessons/phase-3.md
+
+## 2026-06-11 - P3b: decimals/symbol parameterization at CURRENT values (behavior-identical)
+- `BRIDGE_TOKEN_SYMBOL`/`BRIDGE_TOKEN_DECIMALS` constants added beside the deployment config (USDC/6 today - the flip changes the two lines + deployment json). Every bridge surface swept onto them: form parse (`parseAmount`) + balances + unit + headline + validation copy, receipt, stepper headline, journal toasts (completion + restore), card amount, MINT_AMOUNT (decimals-derived: `100n * 10n ** BigInt(...)` - the dust bug class is structurally gone), mint-card copy. Zero `1e6` remains in src.
+- Display normalization rode along: amounts render via `formatBigInt` everywhere ("100.00" not "100") - consistent with the faucet tab's columns; pins updated.
+- Gotchas: v-model on a `type="number"` input can hand a NUMBER to parseAmount (defensive `String(text ?? "")`); five test files mock `@/contracts/bridge-deployments` and each needed the two new exports (a mocked module is a CLOSED set - new real exports are undefined in every existing mock).
+- Remaining for the flip (deploy-gated): deployment jsons/addresses, the two constants → AZLO/18, tokens.ts NULO/OLUN + FaucetView copy, footer symbols, faucet manifest addresses, sandbox/deposit harness scripts.
+
+LESSONS_FILE=implementations-plan/token-identity/lessons/phase-3.md
