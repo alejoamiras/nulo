@@ -9,8 +9,9 @@ const lastCompleted = ref<{ id: string; direction: "deposit" | "withdraw"; amoun
 )
 const push = vi.fn()
 
+const activeFlowId = ref<string | null>(null)
 vi.mock("@/composables/useBridgeJournal", () => ({
-	useBridgeJournal: () => ({ visibleRecords, lastCompleted, runtime: ref({}) }),
+	useBridgeJournal: () => ({ visibleRecords, lastCompleted, runtime: ref({}), activeFlowId }),
 }))
 vi.mock("@/composables/useToast", () => ({
 	useToast: () => ({ push }),
@@ -31,6 +32,7 @@ describe("BridgeJournal", () => {
 	beforeEach(() => {
 		visibleRecords.value = []
 		lastCompleted.value = null
+		activeFlowId.value = null
 		push.mockClear()
 	})
 
@@ -52,6 +54,14 @@ describe("BridgeJournal", () => {
 		await vi.waitFor(() =>
 			expect(push).toHaveBeenCalledWith(expect.objectContaining({ kind: "error", text: expect.stringContaining("already tracked") })),
 		)
+	})
+
+	it("a FOREGROUND completion does not toast (the receipt already announced it)", async () => {
+		mount(BridgeJournal, { global: { stubs: { BridgeJournalCard: true } } })
+		activeFlowId.value = "0xfg"
+		lastCompleted.value = { id: "0xfg", direction: "deposit", amount: "100000000", isPrivate: false, txHash: GOOD_HASH }
+		await nextTick()
+		expect(push).not.toHaveBeenCalled()
 	})
 
 	it("renders the empty state from visibleRecords (the hide filter feeds this list)", () => {

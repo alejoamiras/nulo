@@ -125,10 +125,15 @@ interface BackupPayload {
 	record: BridgeJournalRecord
 }
 
-/** Seal ONE record into a recovery file. Provisional withdraws refuse (nothing restorable). */
+/** Seal ONE record into a recovery file. Refuses records with nothing restorable in them:
+ *  provisional withdraws, and private deposits whose envelope hasn't been sealed yet - a file
+ *  without the recovery material would toast success today and strand the claim later. */
 export async function sealBridgeBackup(key: EncryptionKey, record: BridgeJournalRecord, sealerL1: string): Promise<BridgeBackupFile> {
 	if (isProvisionalWithdrawId(record.id)) {
 		throw new Error("This withdraw has not reached its exit transaction yet - there is nothing restorable to save.")
+	}
+	if (record.direction === "deposit" && record.isPrivate && !record.sealedEnvelope) {
+		throw new Error("This private deposit hasn't sealed its recovery secret yet - try again in a moment.")
 	}
 	const payload: BackupPayload = { bk: 1, record }
 	return {
@@ -163,14 +168,16 @@ export async function openBridgeBackup(key: EncryptionKey, file: BridgeBackupFil
 		throw new Error("The sealed contents are not a valid bridge record.")
 	}
 	const record = validateBackupRecord(payload.record)
-	// The header is unauthenticated routing data - the SEALED copies are authoritative. Any
-	// mismatch means the header was edited; refuse rather than trust either side.
+	// The header is unauthenticated routing data - the SEALED copies are authoritative. Every
+	// header field with a sealed counterpart is re-checked (sealerL1 only exists inside private
+	// deposit records); refuse on any edit rather than trust either side.
 	if (
 		record.id !== file.id ||
 		record.direction !== file.direction ||
 		record.chainId !== file.chainId ||
 		record.portal !== file.portal ||
-		record.bridge !== file.bridge
+		record.bridge !== file.bridge ||
+		(record.direction === "deposit" && record.sealerL1 !== undefined && record.sealerL1 !== file.sealerL1)
 	) {
 		throw new Error("This file's label doesn't match its sealed contents - it was modified. Refusing to restore.")
 	}

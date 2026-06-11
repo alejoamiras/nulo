@@ -209,11 +209,14 @@ describe("BridgeJournalCard", () => {
 		expect(w.find(sel(TESTIDS.journalDiscard)).exists()).toBe(false)
 	})
 
-	it("mismatch attention hides the action and shows the note", () => {
+	it("mismatch attention keeps the action (fix the cause, press it) and the rail carries the note", () => {
 		runtime.value = { "0xdep": { attention: "mismatch", note: "Connect that Aztec account." } }
 		const w = mountCard(deposit({ leafIndex: "7" }))
-		expect(w.find(sel(TESTIDS.journalClaim)).exists()).toBe(false)
-		expect(w.find(sel(TESTIDS.journalAttention)).text()).toContain("Connect that Aztec account")
+		// The run re-validates guards idempotently - hiding the button stranded this state.
+		expect(w.find(sel(TESTIDS.journalClaim)).exists()).toBe(true)
+		// The note lives in the rail's failed phase; the parallel note line stays empty.
+		expect(w.find(sel(TESTIDS.journalAttention)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.journalStep)).text()).toContain("Connect that Aztec account")
 		expect(w.find(sel(TESTIDS.journalCard)).attributes("data-attention")).toBe("mismatch")
 	})
 

@@ -14,6 +14,7 @@ import { BRIDGE, L1_PORTAL } from "@/contracts/bridge-deployments"
 import { addRecordVerified, runOnLane, useBridgeJournal } from "./useBridgeJournal"
 import { getRetainedSealKey, providerFingerprint } from "./useDeposit"
 import { useL1Wallet } from "./useL1Wallet"
+import { useToast } from "./useToast"
 
 // Ids, directions, and copy only - blobs, signatures, and keys never reach this log.
 const log = (...args: unknown[]) => console.log("[bridge:backup]", ...args)
@@ -28,7 +29,8 @@ function triggerDownload(file: BridgeBackupFile, name: string): void {
 	a.href = url
 	a.download = name
 	a.click()
-	URL.revokeObjectURL(url)
+	// Deferred: Safari has canceled downloads when the URL is revoked synchronously after click.
+	setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
 /**
@@ -38,9 +40,12 @@ function triggerDownload(file: BridgeBackupFile, name: string): void {
  * wallet proves signature determinism ONCE (two signatures, then cached), a trusted one signs
  * once. A non-deterministic signer must fail HERE, never produce an unrestorable file.
  */
+const exportsInFlight = new Set<string>()
+
 export function useBridgeBackup() {
 	const l1 = useL1Wallet()
 	const journal = useBridgeJournal()
+	const toast = useToast()
 
 	function signer(): { sign: (m: string) => Promise<string>; from: string } {
 		const wallet = l1.ensureWalletClient()
@@ -77,20 +82,40 @@ export function useBridgeBackup() {
 		return recoveryKeyFromSignature(sig)
 	}
 
-	/** Seal + download ONE bridge. Provisional withdraws are refused by the module. */
+	/** Seal + download ONE bridge. Refusals (provisional, unsealed-private) come from the module. */
 	async function exportBridge(rec: BridgeJournalRecord): Promise<void> {
-		const from = l1.address.value
-		if (!from) throw new Error("Connect your Ethereum wallet first.")
-		const key = await deriveKey(rec, "export")
-		const file = await sealBridgeBackup(key, rec, from)
-		triggerDownload(file, backupFileName(rec))
-		log("exported", { id: rec.id, direction: rec.direction })
+		if (exportsInFlight.has(rec.id)) return // a double-click must not queue a second prompt.
+		exportsInFlight.add(rec.id)
+		try {
+			const from = l1.address.value
+			if (!from) throw new Error("Connect your Ethereum wallet first.")
+			const key = await deriveKey(rec, "export")
+			const file = await sealBridgeBackup(key, rec, from)
+			triggerDownload(file, backupFileName(rec))
+			log("exported", { id: rec.id, direction: rec.direction })
+		} finally {
+			exportsInFlight.delete(rec.id)
+		}
+	}
+
+	/** The shared surface handler: both the card and the stepper export with the same toasts. */
+	async function exportBridgeWithToast(rec: BridgeJournalRecord): Promise<void> {
+		try {
+			await exportBridge(rec)
+			toast.push({ kind: "ok", text: "Recovery file downloaded. Keep it with your wallet." })
+		} catch (e) {
+			toast.push({ kind: "error", text: e instanceof Error ? e.message : "Export failed." })
+		}
 	}
 
 	/** The restore ladder (plan D3). Returns the restored record; throws user-facing copy per step. */
 	async function restoreFile(raw: string): Promise<BridgeJournalRecord> {
 		const file = parseBackupFile(raw)
-		if (file.chainId !== sepolia.id || file.portal !== L1_PORTAL || file.bridge !== BRIDGE.toString()) {
+		if (
+			file.chainId !== sepolia.id ||
+			file.portal.toLowerCase() !== L1_PORTAL.toLowerCase() ||
+			file.bridge.toLowerCase() !== BRIDGE.toString().toLowerCase()
+		) {
 			throw new Error("This file belongs to a different bridge deployment - it cannot be restored here.")
 		}
 		if (journal.records.value.some((r) => r.id === file.id)) {
@@ -105,5 +130,5 @@ export function useBridgeBackup() {
 		return record
 	}
 
-	return { exportBridge, restoreFile }
+	return { exportBridge, exportBridgeWithToast, restoreFile }
 }

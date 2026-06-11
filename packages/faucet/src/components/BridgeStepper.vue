@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Services */
-import { type BridgeJournalRecord, isProvisionalWithdrawId } from "@nulo/bridge-core"
+import { type BridgeJournalRecord, type DepositJournalRecord, isProvisionalWithdrawId } from "@nulo/bridge-core"
 import { computed } from "vue"
 
 /** Composables */
@@ -15,7 +15,12 @@ import BridgePhaseRail from "./BridgePhaseRail.vue"
 
 const props = defineProps<{ record: BridgeJournalRecord }>()
 const emit = defineEmits<{ background: []; backup: [record: BridgeJournalRecord] }>()
-const exportable = computed(() => !isProvisionalWithdrawId(props.record.id))
+const exportable = computed(() => {
+	if (isProvisionalWithdrawId(props.record.id)) return false
+	const r = props.record
+	if (r.direction === "deposit" && r.isPrivate && !(r as DepositJournalRecord).sealedEnvelope) return false
+	return true
+})
 
 const journal = useBridgeJournal()
 
@@ -98,7 +103,7 @@ const headline = computed(() => {
 	font: 600 13px/1.4 var(--font-mono);
 }
 
-.phase.active .phase.failed .actions {
+.actions {
 	display: flex;
 	gap: 8px;
 }

@@ -20,14 +20,7 @@ const { push } = useToast()
 const restoreInput = ref<HTMLInputElement | null>(null)
 const restoring = ref(false)
 
-async function onBackup(rec: BridgeJournalRecord) {
-	try {
-		await backup.exportBridge(rec)
-		push({ kind: "ok", text: "Recovery file downloaded. Keep it with your wallet." })
-	} catch (e) {
-		push({ kind: "error", text: e instanceof Error ? e.message : "Export failed." })
-	}
-}
+const onBackup = backup.exportBridgeWithToast
 
 async function onRestorePick(event: Event) {
 	const input = event.target as HTMLInputElement
@@ -52,6 +45,8 @@ watch(
 	() => journal.lastCompleted.value,
 	(done) => {
 		if (!done) return
+		// The foreground stepper shows the receipt for this completion - a toast would double it.
+		if (journal.activeFlowId.value === done.id) return
 		const amount = (Number(done.amount) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 })
 		const href = done.txHash ? (done.direction === "deposit" ? explorerTxUrl(done.txHash) : etherscanTxUrl(done.txHash)) : ""
 		push({

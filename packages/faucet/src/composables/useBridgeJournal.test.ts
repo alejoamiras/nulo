@@ -692,7 +692,7 @@ describe("useBridgeJournal engine", () => {
 		expect(useBridgeJournal().lastCompleted.value).toMatchObject({ id: "0xwdhide", direction: "withdraw", txHash: "0xconsumetx" })
 	})
 
-	it("P1: a throwing claim clears the step on the way out", async () => {
+	it("a throwing claim SURFACES on the record (UI call sites void the promise) and clears the step", async () => {
 		const deps = baseDeps(kv)
 		const claim = vi.fn(async () => ({
 			simulate: async () => {
@@ -702,8 +702,10 @@ describe("useBridgeJournal engine", () => {
 		}))
 		connectJournalDeps({ ...deps, claim })
 		addRecord(mkDeposit("0xboom"))
-		await expect(runDepositClaim("0xboom")).rejects.toThrow(/boom/)
+		await runDepositClaim("0xboom") // resolves - the failure lands on the record instead.
 		const rt = useBridgeJournal().runtime.value["0xboom"]
+		expect(rt?.attention).toBe("error")
+		expect(rt?.note).toMatch(/boom.*funds are not lost/i)
 		expect(rt?.step).toBeUndefined()
 		expect(rt?.busy).toBe(false)
 	})

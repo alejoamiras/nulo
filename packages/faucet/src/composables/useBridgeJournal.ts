@@ -21,6 +21,7 @@ import { sepolia } from "viem/chains"
 import { computed, ref } from "vue"
 import { BRIDGE, L1_PORTAL } from "@/contracts/bridge-deployments"
 import { SYNC_TARGET_MARGIN_BLOCKS } from "@/lib/bridge-steps"
+import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import { dropPhaseClock } from "@/lib/phase-clock"
 
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
@@ -311,7 +312,13 @@ async function resolvePrivateSecret(rec: DepositJournalRecord): Promise<{ secret
 			await runOnLane("l1", () => deps.signL1?.(recoveryKeyMessage(binding)) as Promise<string>),
 		)
 		envelope = await openDepositEnvelope(key, rec.sealedEnvelope)
-	} catch {
+	} catch (e) {
+		// A REJECTED signature prompt is not an unseal failure: no key was derived, nothing tested -
+		// revoking trust here would re-impose the 2-signature self-test for a change of mind.
+		if (isUserRejection(e)) {
+			setRuntime(rec.id, { attention: "error", note: "Signature request declined - press CLAIM when you're ready." })
+			return null
+		}
 		// Revoke trust ONLY for the account that claims to have sealed this record - a wrong-account
 		// attempt must not destroy the connected account's valid verdict.
 		if (connected && rec.sealerL1 && connected === rec.sealerL1.toLowerCase()) {
@@ -455,6 +462,22 @@ function completeWithdraw(rec: WithdrawJournalRecord | undefined, consumeTxHash?
  * calls it directly for sessionLive ones.
  */
 export async function runDepositClaim(id: string, opts: { interactive?: boolean } = {}): Promise<void> {
+	try {
+		await runDepositClaimInner(id, opts)
+	} catch (e) {
+		surfaceRunFailure(id, e)
+	}
+}
+
+/** Failures from the run entrypoints land on the RECORD (every UI call site voids the promise). */
+function surfaceRunFailure(id: string, e: unknown): void {
+	const msg = humanizeWalletError(e instanceof Error ? e.message : String(e))
+	log("run failed:", id, msg)
+	if (!records.value.some((r) => r.id === id)) return
+	setRuntime(id, { attention: "error", note: `${msg}. Your funds are not lost - retry from this card.` })
+}
+
+async function runDepositClaimInner(id: string, opts: { interactive?: boolean } = {}): Promise<void> {
 	const interactive = opts.interactive !== false
 	let continueRounds = false
 	let gen = 0
@@ -512,7 +535,8 @@ export async function runDepositClaim(id: string, opts: { interactive?: boolean 
 		}
 		setRuntime(id, { attention: undefined, note: undefined })
 
-		const fresh = records.value.find((r) => r.id === id) as DepositJournalRecord
+		const fresh = records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
+		if (!fresh) return // Cross-tab discard while the unseal signature waited.
 		const interaction = await deps.claim(fresh, secretHex)
 
 		// Sync phase, two legs sharing one iteration budget:
@@ -691,6 +715,14 @@ async function recordMessageConsumed(rec: DepositJournalRecord): Promise<boolean
 /** The withdraw consume tail: rediscovered consumeTxHash waits (with identity check) instead of
  *  re-prompting; otherwise the proven-wait → witness → ONE L1 consume runs on the L1 lane. */
 export async function runWithdrawConsume(id: string): Promise<void> {
+	try {
+		await runWithdrawConsumeInner(id)
+	} catch (e) {
+		surfaceRunFailure(id, e)
+	}
+}
+
+async function runWithdrawConsumeInner(id: string): Promise<void> {
 	await withRecordLock(id, async () => {
 		const rec = records.value.find((r) => r.id === id && r.direction === "withdraw") as WithdrawJournalRecord | undefined
 		if (!rec || rec.completedAt) return
@@ -730,7 +762,14 @@ export async function runWithdrawConsume(id: string): Promise<void> {
 		}
 
 		setStep(id, "confirming", "waiting for the proven epoch, then one Ethereum confirmation")
-		const { consumeTxHash } = await deps.consume(rec, (p) => setRuntime(id, p))
+		const { consumeTxHash } = await deps.consume(rec, (p) => {
+			const provenBlock = p.provenBlock ?? runtime.value[id]?.provenBlock
+			const targetBlock = p.targetBlock ?? runtime.value[id]?.targetBlock
+			setRuntime(id, {
+				...p,
+				proven: provenBlock !== undefined && targetBlock !== undefined ? provenBlock >= targetBlock : undefined,
+			})
+		})
 		patchRecord(id, { consumeTxHash })
 		setStep(id, "confirming", "waiting for the Ethereum confirmation")
 		if (await deps.waitConsumeReceipt(consumeTxHash)) {

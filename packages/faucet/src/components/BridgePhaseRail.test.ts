@@ -11,6 +11,12 @@ vi.mock("@/composables/useBridgeJournal", () => ({
 	useBridgeJournal: () => ({ runtime }),
 }))
 
+// The shared app clock is driven manually here (fake timers don't reach the module interval).
+const mockNow = ref(10_000)
+vi.mock("@/lib/clock", () => ({
+	useNow: () => mockNow,
+}))
+
 import { TESTIDS } from "@/lib/testids"
 import BridgePhaseRail from "./BridgePhaseRail.vue"
 
@@ -37,6 +43,7 @@ describe("BridgePhaseRail", () => {
 	beforeEach(() => {
 		vi.useFakeTimers()
 		vi.setSystemTime(10_000)
+		mockNow.value = 10_000
 		runtime.value = {}
 		__resetPhaseClockForTests()
 	})
@@ -59,13 +66,13 @@ describe("BridgePhaseRail", () => {
 	it("full rail: a completed phase keeps its duration (labor record) after the transition", async () => {
 		runtime.value = { "0xt2": { step: "sealing" } }
 		const w = mount(BridgePhaseRail, { props: { record: dep({ id: "0xt2", secretHashHex: "0xt2" }) } })
-		vi.setSystemTime(24_000)
-		await vi.advanceTimersByTimeAsync(1000) // the ticker refreshes `now`
+		mockNow.value = 24_000
 		runtime.value = { "0xt2": { step: "approving" } }
 		await w.vm.$nextTick()
 		const seal = w.findAll(sel(TESTIDS.stepperPhase)).find((p) => p.attributes("data-phase") === "seal")
 		expect(seal?.attributes("data-state")).toBe("done")
-		expect(seal?.text()).toMatch(/1[45]s/)
+		await w.vm.$nextTick()
+		expect(seal?.text()).toMatch(/14s/)
 		w.unmount()
 	})
 
@@ -83,10 +90,10 @@ describe("BridgePhaseRail", () => {
 	it("compact rail: active phase shows its label + a ticking clock", async () => {
 		runtime.value = { "0xt4": { step: "syncing" } }
 		const w = mount(BridgePhaseRail, { props: { record: dep({ id: "0xt4", depositTxHash: "0xt", leafIndex: "7" }), compact: true } })
-		vi.setSystemTime(73_000)
-		await vi.advanceTimersByTimeAsync(1000)
+		mockNow.value = 73_000
+		await w.vm.$nextTick()
 		expect(w.text()).toContain("CROSSING")
-		expect(w.text()).toMatch(/1m 0[34]s/)
+		expect(w.text()).toMatch(/1m 03s/)
 		w.unmount()
 	})
 })

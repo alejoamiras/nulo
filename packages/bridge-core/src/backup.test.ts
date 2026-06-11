@@ -91,6 +91,16 @@ describe("bridge backup files", () => {
 		expect(openBridgeBackup(key, { ...file, direction: "withdraw" })).rejects.toThrow(/label doesn't match/)
 	})
 
+	it("a private deposit without its sealed envelope refuses to export (no false recovery promise)", async () => {
+		const unsealed = publicDeposit({ id: "0xunsealed", secretHashHex: "0xunsealed", isPrivate: true, secret: undefined })
+		expect(sealBridgeBackup(key, unsealed, SEALER)).rejects.toThrow(/hasn't sealed its recovery secret/)
+	})
+
+	it("a swapped sealerL1 header on a private deposit is caught against the sealed copy", async () => {
+		const file = await sealBridgeBackup(key, privateDeposit(), SEALER)
+		await expect(openBridgeBackup(key, { ...file, sealerL1: "0xevil" })).rejects.toThrow(/label doesn't match/)
+	})
+
 	it("provisional withdraws refuse at seal AND at parse", async () => {
 		const prov = withdraw({ id: "wd-pending-abc12345", exitTxHash: undefined })
 		expect(sealBridgeBackup(key, prov, SEALER)).rejects.toThrow(/nothing restorable/)

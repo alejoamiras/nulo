@@ -106,6 +106,9 @@ const showMintHint = computed(() => fromChain.value === "ethereum" && usdc.balan
 const isFirstSeal = computed(() => {
 	const addr = l1.address.value
 	if (!addr) return true
+	// Recompute when the journal changes: the first private bridge marks trust mid-session, and
+	// the note must stop promising "two signatures" for the second one.
+	void journal.records.value.length
 	return !isSealTrusted(localStorage, sepolia.id, addr, providerFingerprint())
 })
 
@@ -192,14 +195,7 @@ function clearFlowErrors() {
 	withdrawFlow.error.value = null
 }
 
-async function onBackup(rec: import("@nulo/bridge-core").BridgeJournalRecord) {
-	try {
-		await backup.exportBridge(rec)
-		pushToast({ kind: "ok", text: "Recovery file downloaded. Keep it with your wallet." })
-	} catch (e) {
-		pushToast({ kind: "error", text: e instanceof Error ? e.message : "Export failed." })
-	}
-}
+const onBackup = backup.exportBridgeWithToast
 
 function onBackground() {
 	if (activeId.value) journal.releaseForeground(activeId.value)
@@ -297,6 +293,7 @@ function fmt(b: bigint | null): string {
 				v-model="amount"
 				class="amount"
 				type="number"
+				aria-label="Amount in USDC"
 				min="0"
 				step="1"
 				:disabled="submitting"
