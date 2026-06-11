@@ -41,7 +41,7 @@ Kill positional consumption BEFORE the dangerous extraction (ledger D1):
 - Bug pins required: FPC two-pass action mutation ordering, embedded-fee gas-cap behavior, `Unauthorized`/`Wallet locked` strings.
 e2e focus: transfers, fee-methods, tx-sendTx-default. Revert: type-level churn, drop cleanly.
 
-### Phase 3 — Q5: `proveAndSend` (1.5-2d) — the keystone
+### Phase 3 ✓ — Q5: `proveAndSend` (1.5-2d) — the keystone
 Make `execution-coordinator.ts` truthful (docblock :14-19 promises it): extract the `proveTxTask → toTx → sendTxTask → addTransaction → journal(submitted)` tail from the four sites into `coordinator.proveAndSend(ctx)`.
 - The helper owns: stage transitions (`simulating/proving/submitting/succeeded|failed`), `checkCancelled` checkpoints, prove/send task wrappers, an **offchain-output extraction hook** (`wantOffchainOutput` callback receiving `provedTx` BETWEEN prove and `toTx()` — offchain extraction sits there on the dApp paths at `service.ts:1978-1980` and callers cannot reach `provedTx` otherwise; restored from fable draft, CC5), transaction-persistence callback, terminal journal update, cleanup callback.
 - **Receipt handling stays caller-side** (CC5): the helper returns the txHash + hook outputs; wait-for-receipt shaping exists on only 2 of 4 paths (`service.ts:2000-2004, 2190-2194`) and remains in those callers. Helper contract test covers the return shape; receipt behavior is covered by e2e.
@@ -53,12 +53,12 @@ Make `execution-coordinator.ts` truthful (docblock :14-19 promises it): extract 
 - New `execution-coordinator.test.ts`: ordering, cancel-before-send means no broadcast, journal hash parity, helper return-shape contract (txHash + hook outputs).
 e2e focus: transfers, tx-sendTx-default, tx-sendTx-feePayer, tx-sendTx-noFrom. Revert: `proveAndSend` is additive; callers re-inline (Phase 2 already gave them named shapes).
 
-### Phase 4 — Q4a: estimate-reuse module (1d)
+### Phase 4 ✓ — Q4a: estimate-reuse module (1d)
 `transfer-estimate-reuse.ts`: `TransferEstimateReuseEntry` (inline at `service.ts:154-190`), cache map + TTL, `tryConsumeTransferEstimate` validation, fingerprint functions. Facade keeps thin delegation. Injected lazy lookups preserve rejection-branch laziness (fable).
 Tests mirror the ACTUAL rejection branches characterized in Phase 0 — TTL expiry, input-field drift, **profile drift (`service.ts:659-663` — security-adjacent: an extraction dropping it passes every outcome-identical gate; audit R1-fable M1)**, no-primary-endpoint, primary-endpoint change, base-fee fingerprint drift, **base-fee fetch failure**, pending-hash drift, single-shot reuse, happy path. (CC4: the earlier draft listed an "actions-hash drift" test — the current contract has NO actions-hash check (`service.ts:641` area); adding one would be a silent behavior change. Characterize what exists; if the missing actions-hash check matters, it's a separate finding for a future arc, not this one.) CONSTRAINT: fingerprint strings byte-stable (Phase-0 pin is the lock).
 e2e focus: transfers (estimate-reuse path). Revert: wiring-only.
 
-### Phase 5 — Q4b: gas-balance module (1d)
+### Phase 5 ✓ — Q4b: gas-balance module (1d)
 `gas-balance-reader.ts`: cache + TTL + single-flight + `#computeGasBalances` (`service.ts:1504-1578`), preserving the `${networkId}:${account}` key and PrivateFpc invalidation. Facade wires the invalidation subscriptions (transaction.onTransactionUpdated `:383`, fpc events `:401-402`) targeting the module; registration order in `init()` unchanged.
 Tests: TTL, single-flight coalescing, invalidation per event, keying. e2e focus: fee-methods. Revert: wiring-only.
 
