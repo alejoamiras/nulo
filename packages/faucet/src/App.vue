@@ -2,6 +2,7 @@
 import { ref } from "vue"
 import { TESTIDS } from "@/lib/testids"
 import AppToastRegion from "./components/AppToastRegion.vue"
+import BridgeFooter from "./components/BridgeFooter.vue"
 import Footer from "./components/Footer.vue"
 import BridgeView from "./views/BridgeView.vue"
 import FaucetView from "./views/FaucetView.vue"
@@ -47,7 +48,8 @@ const tab = ref<Tab>(defaultTab())
 		<FaucetView v-show="tab === 'faucet'" />
 		<BridgeView v-show="tab === 'bridge'" />
 
-		<Footer />
+		<Footer v-if="tab === 'faucet'" />
+		<BridgeFooter v-else />
 		<AppToastRegion />
 	</main>
 </template>

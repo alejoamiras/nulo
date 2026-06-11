@@ -69,10 +69,7 @@ watch(
 <template>
 	<section class="journal" :data-testid="TESTIDS.journal">
 		<header class="head-row">
-			<div>
-				<h3>PENDING BRIDGES</h3>
-				<p class="sub">Bridges this browser started but isn't actively driving. Resume, finish, or discard them.</p>
-			</div>
+			<h3>PENDING BRIDGES</h3>
 			<button
 				type="button"
 				class="restore"
@@ -81,7 +78,7 @@ watch(
 				:data-testid="TESTIDS.journalRestore"
 				@click="restoreInput?.click()"
 			>
-				{{ restoring ? "RESTORING…" : "RESTORE" }}
+				{{ restoring ? "RESTORING…" : "RESTORE ⤒" }}
 			</button>
 			<input
 				ref="restoreInput"
@@ -92,9 +89,20 @@ watch(
 				@change="onRestorePick"
 			/>
 		</header>
-		<p v-if="sorted.length === 0" class="empty" :data-testid="TESTIDS.journalEmpty">
-			Nothing pending. Lost a bridge to a wiped browser? RESTORE loads its recovery file.
-		</p>
+		<p class="sub">Bridges this browser started but isn't actively driving. Resume, finish, or discard them.</p>
+		<div v-if="sorted.length === 0" class="empty-state" :data-testid="TESTIDS.journalEmpty">
+			<span class="empty-headline">NOTHING PENDING YET</span>
+			<span class="empty-sub">
+				Bridges you background or lose track of land here.
+				<button
+					type="button"
+					class="empty-link"
+					:data-testid="TESTIDS.journalRestoreLink"
+					@click="restoreInput?.click()"
+				>Restore</button>
+				a saved bridge from its recovery file.
+			</span>
+		</div>
 		<div v-else class="cards">
 			<BridgeJournalCard v-for="rec in sorted" :key="rec.id" :record="rec" @backup="onBackup" />
 		</div>
@@ -122,12 +130,6 @@ watch(
 	font: 500 12px/1.5 var(--font-mono);
 }
 
-.empty {
-	margin: 0;
-	color: var(--txt-secondary);
-	font: 500 13px/1.5 var(--font-mono);
-}
-
 .cards {
 	display: flex;
 	flex-direction: column;
@@ -136,24 +138,75 @@ watch(
 
 .head-row {
 	display: flex;
-	align-items: flex-start;
+	align-items: center;
 	justify-content: space-between;
-	gap: 8px;
+	gap: 12px;
 }
 
+/* The backup button's sibling: same white-block treatment, inverse on hover. */
 .restore {
-	padding: 6px 12px;
-	background: transparent;
-	border: 1px solid var(--nulo-outline);
-	color: var(--txt-secondary);
-	font: 600 11px/1 var(--font-mono);
+	padding: 8px 12px;
+	background: var(--txt-primary);
+	border: 1px solid var(--txt-primary);
+	color: var(--nulo-bg, #000);
+	font: 700 11px/1 var(--font-mono);
 	letter-spacing: 0.06em;
 	cursor: pointer;
+	white-space: nowrap;
 }
 
 .restore:hover {
+	background: transparent;
 	color: var(--txt-primary);
-	border-color: var(--txt-primary);
+}
+
+.restore:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
+
+/* The extension's empty-state pattern: dashed box, centered, with an inline link-button
+   (a real button for native a11y - focusable, Enter/Space). */
+.empty-state {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	padding: 32px 16px;
+	border: 1px dashed var(--nulo-outline);
+	text-align: center;
+}
+
+.empty-headline {
+	font-family: var(--font-headline);
+	font-size: 14px;
+	font-weight: 700;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: var(--txt-secondary);
+}
+
+.empty-sub {
+	font: 500 12px/1.6 var(--font-mono);
+	color: var(--txt-secondary);
+	max-width: 48ch;
+}
+
+.empty-link {
+	display: inline;
+	padding: 0;
+	margin: 0;
+	border: 0;
+	background: transparent;
+	font: inherit;
+	color: var(--txt-secondary);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	cursor: pointer;
+}
+
+.empty-link:hover {
+	color: var(--txt-primary);
 }
 
 .hidden-input {

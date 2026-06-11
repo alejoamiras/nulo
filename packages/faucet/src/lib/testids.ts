@@ -90,8 +90,10 @@ export const TESTIDS = {
 	journalPhase: "fa-journal-phase",
 	// Per-bridge sealed recovery files: export icons + the journal-header restore flow.
 	cardBackup: "fa-card-backup",
+	bridgeAddTokenEvm: "fa-bridge-add-token-evm",
 	stepperBackup: "fa-stepper-backup",
 	journalRestore: "fa-journal-restore",
+	journalRestoreLink: "fa-journal-restore-link",
 	journalRestoreInput: "fa-journal-restore-input",
 	stepperBackground: "fa-stepper-background",
 	stepperRetry: "fa-stepper-retry",

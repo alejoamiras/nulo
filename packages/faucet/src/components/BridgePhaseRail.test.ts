@@ -66,6 +66,7 @@ describe("BridgePhaseRail", () => {
 	it("full rail: a completed phase keeps its duration (labor record) after the transition", async () => {
 		runtime.value = { "0xt2": { step: "sealing" } }
 		const w = mount(BridgePhaseRail, { props: { record: dep({ id: "0xt2", secretHashHex: "0xt2" }) } })
+		vi.setSystemTime(24_000) // stamps read the real (faked) clock; mockNow only drives renders.
 		mockNow.value = 24_000
 		runtime.value = { "0xt2": { step: "approving" } }
 		await w.vm.$nextTick()
