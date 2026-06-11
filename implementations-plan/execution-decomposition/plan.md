@@ -16,7 +16,7 @@ Arc: decompose `packages/extension/src/wallet/services/execution/` per quality-a
 
 ## Phases
 
-### Phase 0 — Characterization safety net (0.5-1d)
+### Phase 0 ✓ — Characterization safety net (0.5-1d)
 Pin behavior where extraction will occur, beyond existing e2e:
 - Verify e2e journal-stage assertions (commit `989e4be`) cover all four send paths; add path coverage only if a gap exists.
 - Baseline e2e run on the untouched branch tip (flake profile): one full `e2e:agent` pass recorded in `lessons/phase-0.md` so later phase failures can be triaged against a known-good baseline (restored from fable draft — CC7).

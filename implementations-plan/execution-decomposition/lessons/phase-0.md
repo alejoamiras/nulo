@@ -40,6 +40,9 @@ Confirmed divergences (helper must NOT absorb these — success-path-only owners
 
 - Facade: 2,302 lines (`wc -l service.ts`).
 - Suite before: 2,242 extension tests; after Phase 0: +32 (21 characterization + 11 structural parity).
-- Baseline e2e:agent: PENDING_RESULT_PLACEHOLDER
+- Baseline e2e:agent (flake profile), two runs against the untouched tree:
+  - Run 1 (under heavy concurrent machine load): 63/69 pass, 4 fail in 3 files; identified `tx-sendTx-noFrom` fixture-undefined (infra flake: `dappConnectedExtensionWithTransactionCap` undefined → sandbox readiness); full file list lost to truncated capture.
+  - Run 2 (clean tree, full log at the orchestrator's session scratch): **66/69 pass, 1 fail** — `concurrent-sendtx-confirm` (2nd sendTx returned dApp-side `error` after 300s, retry ×2). This is the documented cross-branch gas-envelope/load flake class (see quality-audit + CI history). NOTE: local e2e builds use fee multiplier 2× — `VITE_NULO_FEE_MULTIPLIER=10` exists only in the CI workflow env.
+  - **Gate policy decision**: phase-gate e2e runs export `VITE_NULO_FEE_MULTIPLIER=10` to match the enforced CI gate environment, and avoid running heavy concurrent work during proving. Failures in `concurrent-sendtx-confirm` / `transfers` matching this profile are triaged as flake against this baseline (one retry), not attributed to the refactor by default — a SECOND consecutive failure of the same test triggers real investigation.
 
 LESSONS_FILE=implementations-plan/execution-decomposition/lessons/phase-0.md
