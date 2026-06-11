@@ -1,0 +1,59 @@
+## F1: Parallel Serialization Policies
+1. Title: Parallel serialization policies in `wallet-core`.
+2. Smell name: Serialization policy sprawl (named analog to Fowler's Divergent Change): one concern, "turn odd JS values into stable strings," is implemented three different ways.
+3. Maintenance impact bucket: structural; blast radius is 3 shared helpers consumed by jobs and downstream transport code; change frequency is low in the available 3-month history (these files only show the initial-import commit), which makes drift easy to miss.
+4. Concrete evidence: `packages/wallet-core/src/utils/arrays.ts:23` `safeStringify()` handles `bigint`, `Date`, sorted objects, and falls back to `"[Unserializable Object]"`; `packages/wallet-core/src/utils/serialization.ts:24` `jsonStringify()` handles `bigint`, `Buffer`, `Map`, `Set`, and structured `Error` payloads; `packages/wallet-core/src/jobs/error.ts:71` `jsonReplacer()` re-encodes `bigint` as `"123n"` and `Error` as `{ __error, name, message, stack }`.
+5. Why it harms future change: changing how one exotic value is represented now requires auditing key-comparison code, RPC sanitization, and persisted job errors separately, so the same runtime value can silently serialize differently across surfaces.
+6. Smallest safe refactoring: Extract Function into a single serialization-policy module in `utils/serialization.ts`, then replace `safeStringify()` and `jsonReplacer()` with thin adapters over that shared core.
+7. What disappears: duplicated `bigint`/`Error`/unserializable-object handling and the manual sync burden across three encodings.
+8. Instances: `packages/wallet-core/src/utils/arrays.ts:23`, `packages/wallet-core/src/utils/serialization.ts:24`, `packages/wallet-core/src/jobs/error.ts:71`.
+
+## F2: Entry Logger Bootstrap Copied Across Shells
+1. Title: Entry-shell logger bootstrap is copied across runtime shells.
+2. Smell name: Duplicate Code.
+3. Maintenance impact bucket: structural; blast radius is 4 runtime entry files plus test setup; change frequency is medium in the available history (3 commits touched this family).
+4. Concrete evidence: `packages/extension/src/wallet/index.ts:49-67`, `packages/extension/src/popup/index.ts:6-17`, `packages/extension/src/offscreen/index.ts:21-47`, and `packages/extension/src/onboarding/index.ts:13-23` all construct a logger, loop `consoleMethods`, assign `self.on<method>`, and wire `self.onunhandledrejection`; `packages/extension/tests/vitest.setup.ts:9-13` then reimplements the console alias side of that bootstrap for tests.
+5. Why it harms future change: adding log metadata, changing forwarding behavior, or adjusting rejection policy requires synchronized edits across every shell and the test shim, so drift becomes environment-specific and hard to notice.
+6. Smallest safe refactoring: Extract Function into a shared `installEntryLogger(...)` helper, plus a tiny `installConsoleAliasesForTests()` helper for vitest.
+7. What disappears: four near-identical logger bootstraps and the separate knowledge of how tests must mimic runtime console aliasing.
+8. Instances: `packages/extension/src/wallet/index.ts:49`, `packages/extension/src/popup/index.ts:6`, `packages/extension/src/offscreen/index.ts:21`, `packages/extension/src/onboarding/index.ts:13`, `packages/extension/tests/vitest.setup.ts:9`.
+
+## F3: Build/Test Config Forks Require Manual Sync
+1. Title: Vite/Vitest config is forked into manually synchronized copies.
+2. Smell name: Config sprawl (named analog to Shotgun Surgery): one build-policy change requires touching several config files because shared knobs are re-declared instead of composed.
+3. Maintenance impact bucket: architectural; blast radius is 7 config files plus 2 browser wrappers; change frequency is medium-high in the available history (4 commits touched this surface).
+4. Concrete evidence: `resolvePackageFile()` is duplicated verbatim in `packages/extension/vite.config.ts:8-17` and `packages/extension/vitest.config.ts:13-22` with a literal "Keep in sync" comment; the package `define` block is duplicated in `packages/extension/vite.config.ts:310-321` and `packages/extension/vitest.config.ts:46-52`; the `@` alias is re-declared in `packages/extension/vite.config.ts:44`, `packages/extension/vitest.config.ts:38`, `packages/extension/vitest.e2e.config.ts:7`, `packages/extension/vitest.e2e.network.config.ts:7`, and `packages/extension/vitest.e2e.all.config.ts:7`; the browser wrappers mutate imported base config in place in `packages/extension/vite.chrome.config.mts:7-18` and `packages/extension/vite.firefox.config.mts:7-18`.
+5. Why it harms future change: alias, define, retry, or wrapper changes can easily land in one runner but not the others, producing build-only, unit-only, or e2e-only failures that come from config drift rather than code drift.
+6. Smallest safe refactoring: Extract Shared Config Module for base Vite, base Vitest, and base e2e Vitest config, then compose wrappers from immutable copies instead of mutating imported config objects.
+7. What disappears: manual "keep in sync" contracts, copy-pasted alias/define/retry blocks, and side-effectful wrapper mutation.
+8. Instances: `packages/extension/vite.config.ts:8`, `packages/extension/vite.config.ts:44`, `packages/extension/vite.config.ts:310`, `packages/extension/vite.chrome.config.mts:7`, `packages/extension/vite.firefox.config.mts:7`, `packages/extension/vitest.config.ts:13`, `packages/extension/vitest.config.ts:38`, `packages/extension/vitest.config.ts:46`, `packages/extension/vitest.e2e.config.ts:7`, `packages/extension/vitest.e2e.config.ts:33`, `packages/extension/vitest.e2e.network.config.ts:7`, `packages/extension/vitest.e2e.network.config.ts:39`, `packages/extension/vitest.e2e.network.config.ts:51`, `packages/extension/vitest.e2e.all.config.ts:7`, `packages/extension/vitest.e2e.all.config.ts:27`.
+
+## F4: Active-Profile Handoff Split Across Two Helpers
+1. Title: Active-profile handoff is split across independent storage helpers.
+2. Smell name: Temporal coupling (named analog to Shotgun Surgery): one logical state change, "a profile became active," only works when callers remember the right combination and sequence of helper calls.
+3. Maintenance impact bucket: architectural; blast radius is 2 helper modules plus 6 activation flows; change frequency is medium-high in the available history (5 commits touched this family).
+4. Concrete evidence: the state is stored via separate helpers in `packages/extension/src/utils/core.ts:141-148` (`setSentinel`/`checkSentinel`) and `packages/extension/src/utils/lastActiveProfile.ts:5-13` (`setLastActiveProfileId`); four flows manually do both writes in `packages/extension/src/onboarding/pages/create.vue:130-132`, `packages/extension/src/onboarding/pages/import.vue:121-123`, `packages/extension/src/popup/pages/profile/new.vue:160-170`, and `packages/extension/src/popup/pages/import.vue:148-150`; other activation paths only write the profile id in `packages/extension/src/popup/pages/auth.vue:101-103` and `packages/extension/src/popup/components/popups/SelectProfilePopup.vue:30-33`, so the "one key or both?" rule lives only in caller knowledge.
+5. Why it harms future change: adding a new activation or restore path, or changing the activation contract, requires auditing every call site instead of changing one abstraction, and the current partial pairing already makes the contract non-obvious.
+6. Smallest safe refactoring: Extract Function into a single `markProfileActivated(profileId, options?)` helper that owns both writes and any required ordering.
+7. What disappears: hand-written two-step activation sequences and the implicit rulebook for when `setSentinel()` must accompany `setLastActiveProfileId()`.
+8. Instances: `packages/extension/src/utils/core.ts:141`, `packages/extension/src/utils/lastActiveProfile.ts:12`, `packages/extension/src/onboarding/pages/create.vue:130`, `packages/extension/src/onboarding/pages/import.vue:121`, `packages/extension/src/popup/pages/profile/new.vue:160`, `packages/extension/src/popup/pages/import.vue:148`, `packages/extension/src/popup/pages/auth.vue:101`, `packages/extension/src/popup/components/popups/SelectProfilePopup.vue:30`.
+
+## F5: Dead Public API Surface in Core Libraries
+1. Title: Core libraries expose dead public API surface.
+2. Smell name: Speculative Generality, with Dead Code mapping: public members are exported or implemented for consumers that do not exist.
+3. Maintenance impact bucket: structural; blast radius is 2 shared packages and their API/docs/test surface; change frequency is low in the available history (2 commits touched this area).
+4. Concrete evidence: non-test/non-README search only finds definitions for `getRandomElement` at `packages/wallet-core/src/utils/random.ts:18`, `IEventHandler` at `packages/wallet-core/src/utils/event-handler.ts:1-6`, `Queue.dequeueBatch` at `packages/wallet-core/src/utils/queue.ts:47`, and `EntityStorage.getVersion`/`setVersion`/`findByPredicate` at `packages/wallet-core/src/storage/entity_storage.ts:62/80/137`; separately, non-test imports from `@nulo/wallet-crypto` only use `EncryptionKey`, `PasswordSecretBox`, `PasskeyCredential`, `PasskeyCredentialData`, `PASSKEY_PRF_LABEL`, and `zeroize`, leaving the extra barrel exports at `packages/wallet-crypto/src/index.ts:19` unconsumed.
+5. Why it harms future change: every unused public member enlarges the perceived compatibility surface, so refactors carry needless semver anxiety, docs noise, and test obligations for APIs that nobody actually uses.
+6. Smallest safe refactoring: Remove Dead Code: delete unused methods/functions/interfaces and stop re-exporting unused wallet-crypto barrel symbols; keep internal-only types/constants private to their implementation file.
+7. What disappears: unused API contracts, misleading affordances for future callers, and unnecessary review work around "breaking" changes to dead surface area.
+8. Instances: `packages/wallet-core/src/utils/random.ts:18`, `packages/wallet-core/src/utils/event-handler.ts:1`, `packages/wallet-core/src/utils/queue.ts:47`, `packages/wallet-core/src/storage/entity_storage.ts:62`, `packages/wallet-core/src/storage/entity_storage.ts:80`, `packages/wallet-core/src/storage/entity_storage.ts:137`, `packages/wallet-crypto/src/index.ts:19`, `packages/wallet-crypto/src/password-secret-box.ts:49`, `packages/wallet-crypto/src/password-secret-box.ts:57`, `packages/wallet-crypto/src/password-secret-box.ts:71`.
+
+## Non-findings
+- `packages/wallet-core/src/utils/mnemonic.ts` is a size outlier, but most of that file is the embedded BIP-39 wordlist; I did not find a concrete duplication or change-amplification smell stronger than data volume.
+- `packages/extension/src/utils/tx-enrichment.ts` re-exporting `FEE_METHODS`/`pickPrimaryMethod` from `primary-method.ts` looks redundant at first glance, but the implementation is shared and the consumers are split by layer, so this is not duplicate logic.
+- `packages/extension/src/setup/*` looks placeholder-ish, but `packages/extension/vite.config.ts:295-299` still wires it as an explicit build input, so I could not prove dead registration from within this cluster.
+- The e2e fixture slice is large, but within the scoped files I saw real reuse (`helpers.ts` imports base DOM helpers from `extension.ts`) rather than a crisp harness-duplication root cause stronger than the findings above.
+- `packages/wallet-core/src/storage/entity_storage.ts` has local duplication between `parseOrDelete()` and `getVersion()`, but it is a dormant single-file smell with much lower blast radius than the cross-file findings above.
+
+## Out-of-scope observations
+- `packages/wallet-core/src/utils/event-handler.ts:22-26` swallows subscriber exceptions with `catch {}`; that may hide runtime failures, but it is primarily a behavior/observability issue rather than a maintainability-only finding.
