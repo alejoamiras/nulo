@@ -39,12 +39,12 @@ No auto-claim on restore (the no-auto-claim invariant holds - the restored card 
 
 ## Phases
 
-### P1 - bridge-core: the backup module ⬜
+### P1 - bridge-core: the backup module ✓
 Files: `packages/bridge-core/src/backup.ts` (`sealBridgeBackup(key, record) → file-json`, `openBridgeBackup(key, file) → record`, `parseBackupHeader(json)` + types/guards), exported from the package index; tests colocated.
 Smallest proof: round-trip (seal → open = deep-equal record, public + private + withdraw variants); tampered blob ⇒ throws (AES-GCM auth); wrong key ⇒ throws; header/blob binding mismatch ⇒ refuse; unknown `v` ⇒ explicit version error; header validation matrix.
 Validate: `bun run --cwd packages/bridge-core test && bun run --cwd packages/bridge-core typecheck && bun run lint`.
 
-### P2 - faucet: export icons + restore flow ⬜
+### P2 - faucet: export icons + restore flow 🔄
 Files: `useBridgeBackup.ts` composable (export: resolve key from retained `sealKeys`/`secretCache` or one `runOnLane("l1")` signature, then object-URL download; restore: picker → ladder → upsert → toast); ⤓ icon in `BridgeJournalCard` (unfinished only) + `BridgeStepper` headline; RESTORE button + hidden input in `BridgeJournal` header + empty-state hint; testids `cardBackup`, `stepperBackup`, `journalRestore`, `journalRestoreInput`; component tests.
 Smallest proof: card shows ⤓ only while unfinished; stepper shows ⤓; export invokes the seal with the right binding (mock) and triggers a download (anchor click spied); restore ladder pins - bad format / stale deployment / duplicate id / wrong key each refuse with their copy and write NOTHING; happy path upserts + the card appears; no auto-claim after restore (engine untouched).
 Gates: `bun run audit:faucet` + `bun run audit:vue` → codex post-impl audit → manual checklist.
