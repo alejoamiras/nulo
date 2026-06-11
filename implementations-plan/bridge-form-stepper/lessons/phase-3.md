@@ -50,3 +50,8 @@ LESSONS_FILE=implementations-plan/bridge-form-stepper/lessons/phase-3.md
 - Cards: stage line + CLAIM/FINISH/DISCARD are IDLE-ONLY now (shown ⇒ pressable; while the engine drives, the rail narrates alone - the stale "confirm in your Aztec wallet" during CONFIRM is gone); copy adapts per stage (claiming = "Claim sent - press CLAIM to keep watching it confirm"); done cards show ONE tick (the direction-aware stamp; stage line gone).
 - RETRY on a failed claim no longer revisits CROSSING: `runtime.claimable` (gate already passed) short-circuits the countdown and narrates the single revalidation simulate under CLAIM ("re-checking the message").
 - The all-cards-disappeared report: almost certainly Vite HMR re-instancing module state (engine refs) when commits were pushed to the watched branch mid-test - records stay in storage; a reload restores. Watching for a repro on a quiet dev server before treating it as a product bug.
+
+## 2026-06-11 - final card polish (user)
+- Compact rail: ONE pulse (the strip's active cell); the detail line lost its dot AND idle cards no longer show the static signing prompt as if live ("Confirm the deposit in your Ethereum wallet" on a dead record) - compact detail renders only for live stepDetail or a failed note.
+- Skipped glyph ⊘ → ✓ (an allowance that suffices IS approval satisfied); the full rail's SKIPPED badge keeps the nuance.
+- CLEAR button → ✕ dismiss in the done card's top-right (testid journalClear preserved). Gotcha: removing a v-if button from a v-if/v-else-if chain silently re-chains the v-else-if to the PREVIOUS sibling - DISCARD leaked onto done cards until made standalone.
