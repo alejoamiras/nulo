@@ -22,3 +22,9 @@ LESSONS_FILE=implementations-plan/token-identity/lessons/phase-3.md
 - Gotchas: blanket `" ETH"→" OLUN"` replace nearly ate ETHEREUM (word-boundary regexes after the first bite); biome's earlier reformat broke a multi-line replace anchor silently (the receipt headline kept "USDC" with the import sitting unused - caught by pins).
 
 LESSONS_FILE=implementations-plan/token-identity/lessons/phase-3.md
+
+## 2026-06-11 - UX feedback round (post-deploy)
+- SEAL timer counted from page load: `useNow()`'s ref initialized at MODULE LOAD but only started ticking on first use, and the rail stamped phase starts with that ref - a stepper mounting minutes after load recorded the frozen load-time as SEAL's start. Fix: stamps always come from the real clock inside trackPhases (the shared ref drives renders only) + the ref refreshes on first use. Test gotcha: the rail specs must drive STAMP time via vi.setSystemTime and RENDER time via the mocked ref - two clocks now.
+- BridgeFooter (contextual): App renders the faucet footer on the faucet tab, the new bridge footer (Sepolia AZLO/Portal + Aztec token/bridge/minter links, testnet tagline) on the bridge tab.
+- Add-to-wallet covers BOTH chains: the Aztec button (registered-gated) + an EVM `wallet_watchAsset` button (EIP-747 is fire-and-forget - no introspection exists, so it only hides after a successful add this session).
+- Journal header decrowded (title + white-block RESTORE ⤒ on one row - the backup button's sibling style - sub-line below) + the extension's empty-state pattern (dashed box, NOTHING PENDING YET headline, inline link-button "Restore" with native a11y mirroring TokensView's empty-import link).
