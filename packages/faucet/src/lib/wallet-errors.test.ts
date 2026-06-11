@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isUserRejection } from "./wallet-errors"
+import { humanizeWalletError, isUserRejection } from "./wallet-errors"
 
 describe("isUserRejection (plan S14 - explicit signals ONLY)", () => {
 	it("EIP-1193 code 4001, flat or nested in the cause chain", () => {
@@ -25,5 +25,12 @@ describe("isUserRejection (plan S14 - explicit signals ONLY)", () => {
 		expect(isUserRejection(new Error("HTTP request failed: 503"))).toBe(false)
 		expect(isUserRejection(undefined)).toBe(false)
 		expect(isUserRejection("rejected")).toBe(false) // strings aren't provider errors
+	})
+})
+
+describe("humanizeWalletError", () => {
+	it("translates the wallet window timeout; passes unknown messages through", () => {
+		expect(humanizeWalletError("Timed out waiting for window")).toMatch(/confirmation window timed out.*retry/i)
+		expect(humanizeWalletError("nonce too low")).toBe("nonce too low")
 	})
 })

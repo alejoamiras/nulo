@@ -29,7 +29,7 @@ import {
 	setRecordStep,
 	useBridgeJournal,
 } from "./useBridgeJournal"
-import { isUserRejection } from "@/lib/wallet-errors"
+import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { useL1Wallet } from "./useL1Wallet"
 
@@ -245,7 +245,7 @@ export function useWithdrawFlow() {
 			await runWithdrawConsume(exitTxHash)
 			log("withdraw flow finished", exitTxHash)
 		} catch (e) {
-			const msg = e instanceof Error ? e.message : "Withdraw failed"
+			const msg = humanizeWalletError(e instanceof Error ? e.message : "Withdraw failed")
 			log("FAILED:", msg)
 			error.value = msg
 			// The cleanup matrix (plan S8/S14): only an EXPLICIT user rejection before the exit tx

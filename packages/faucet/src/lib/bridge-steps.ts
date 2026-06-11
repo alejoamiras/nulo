@@ -45,8 +45,11 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 	// The fact-bounded zone (the latch): runtime can only refine WITHIN it.
 	let activeKey: BridgePhase["key"]
 	if (rec.claimTxHash) activeKey = "confirm"
-	else if (rec.leafIndex) activeKey = rt.step === "unsealing" || rt.step === "sending" ? "claim" : "sync"
-	else if (rec.depositTxHash) activeKey = "deposit"
+	else if (rec.leafIndex) {
+		// Once the gate passed (claimable) the bridge is AT the claim - structurally cleared steps
+		// or a post-gate failure must not point back at a visibly-complete crossing.
+		activeKey = rt.step === "unsealing" || rt.step === "sending" || rt.claimable === true ? "claim" : "sync"
+	} else if (rec.depositTxHash) activeKey = "deposit"
 	else if (rt.step === "sealing") activeKey = "seal"
 	else if (rt.step === "approving") activeKey = "approve"
 	else activeKey = "deposit"

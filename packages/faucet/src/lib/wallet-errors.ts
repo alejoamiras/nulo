@@ -20,3 +20,11 @@ export function isUserRejection(err: unknown): boolean {
 	}
 	return false
 }
+
+/** Translate wallet-plumbing errors into human copy; unknown messages pass through untouched. */
+export function humanizeWalletError(message: string): string {
+	if (/timed out waiting for window/i.test(message)) {
+		return "The wallet's confirmation window timed out before you could sign. Reopen your wallet and retry."
+	}
+	return message
+}

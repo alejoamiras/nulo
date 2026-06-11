@@ -35,7 +35,7 @@ import {
 	updateRecord,
 	useBridgeJournal,
 } from "./useBridgeJournal"
-import { isUserRejection } from "@/lib/wallet-errors"
+import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { ERC20_ABI } from "./useL1Usdc"
 import { useL1Wallet } from "./useL1Wallet"
@@ -304,7 +304,7 @@ export function useDepositFlow() {
 			await runDepositClaim(id)
 			log("deposit flow finished", id)
 		} catch (e) {
-			const msg = e instanceof Error ? e.message : "Deposit failed"
+			const msg = humanizeWalletError(e instanceof Error ? e.message : "Deposit failed")
 			log("FAILED:", msg)
 			error.value = msg
 			// The cleanup matrix (plan S8/S14): an EXPLICIT user rejection before any tx hash

@@ -85,8 +85,12 @@ const showFinish = computed(
 	() => props.record.direction === "withdraw" && stage.value !== "done" && stage.value !== "exiting" && actionable.value && idle.value,
 )
 
-/** A soft note (e.g. the 30-min "still confirming") renders even without an attention state. */
-const note = computed(() => rt.value.note)
+/** A soft note (e.g. the 30-min "still confirming") renders even without an attention state.
+ *  error/unknown-outcome notes are EXCLUDED: the rail's failed phase already displays them. */
+const note = computed(() => {
+	if (attention.value === "error" || attention.value === "unknown-outcome") return null
+	return rt.value.note
+})
 
 const txLinks = computed(() => {
 	const links: { label: string; href: string }[] = []

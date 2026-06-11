@@ -97,6 +97,13 @@ describe("BridgeJournalCard", () => {
 		expect(w.find(sel(TESTIDS.journalRail)).exists()).toBe(false)
 	})
 
+	it("an error note renders ONCE (the rail's failed phase owns it; the note line stays empty)", () => {
+		runtime.value = { "0xdep": { attention: "error", note: "boom - funds safe", claimable: true } }
+		const w = mountCard(deposit({ leafIndex: "7" }))
+		expect(w.find(sel(TESTIDS.journalAttention)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.journalStep)).text()).toContain("boom - funds safe")
+	})
+
 	it("a soft note renders without an attention state (the 30-min still-confirming case)", () => {
 		runtime.value = { "0xdep": { note: "Still confirming after ~30 minutes - slow testnet." } }
 		const w = mountCard(deposit({ leafIndex: "7" }))

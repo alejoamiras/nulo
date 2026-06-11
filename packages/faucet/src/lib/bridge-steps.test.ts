@@ -84,6 +84,13 @@ describe("stepperPhases - deposit matrix", () => {
 		expect(states(rec, { step: "unsealing" }).claim).toBe("active")
 	})
 
+	it("a post-gate failure lands its X on CLAIM, never on a completed CROSSING (claimable attribution)", () => {
+		const rec = dep({ depositTxHash: "0xt", leafIndex: "7" })
+		const s = states(rec, { claimable: true, attention: "error", note: "the prompt timed out" })
+		expect(s.claim).toBe("failed")
+		expect(s.sync).toBe("done")
+	})
+
 	it("monotonic latch: a cleared step between engine rounds cannot regress the phase", () => {
 		const rec = dep({ depositTxHash: "0xt", leafIndex: "7", claimTxHash: "0xc" })
 		const withStep = states(rec, { step: "confirming" })
