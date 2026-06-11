@@ -12,3 +12,7 @@ LESSONS_FILE=implementations-plan/bridge-seal-backup/lessons/phase-2.md
 ## 2026-06-11 - post-impl close
 - Codex post-impl: **approve**, no high/critical. Added its two missing pins same-round (journal RESTORE flow incl. error toast; stepper ⤓ provisional-hide). Documented LOW: cross-tab duplicate TOCTOU between the post-unseal check and the upsert - a fresher same-id record can be overwritten by a restored snapshot (stale-state resurrection only; ids are identity-bound, no fund redirection). Accept for testnet; an insert-only journal write is the fix if it ever matters.
 - jsdom gotcha: `Object.defineProperty(input, "files")` needs `configurable: true` to redefine across a test's second pick.
+
+## 2026-06-11 - CROSSING-flash audit (user report: re-engage/restore briefly shows CROSSING then CLAIM)
+- ROOT CAUSE: `runtime.claimable` (gate-passed) is runtime-only - restored/reloaded records lose it, so pressing CLAIM re-entered the sync gate whose FIRST probe narrated `syncing` (CROSSING) for one simulate round-trip before flipping to CLAIM. Same mechanics on the form at probe boundaries (the AFK observation).
+- FIX: the first gate probe is OPTIMISTIC - narrates `sending` ("checking the message", CLAIM active); narration drops to CROSSING only after a probe actually returns not-ready (at which point CROSSING is true). Pinned both ways (ready record ⇒ never syncing; unready ⇒ sending then syncing). The phase clock handles the rare honest regression via its backward-transition reset.
