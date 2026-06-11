@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount } from "vue"
+import { onBeforeUnmount, ref, watch } from "vue"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { useFaucetAddToken } from "@/composables/useFaucetAddToken"
 import { useToast } from "@/composables/useToast"
@@ -11,6 +11,17 @@ import { TESTIDS } from "@/lib/testids"
 const bridge = useBridgeWallet()
 const addToken = useFaucetAddToken()
 const { push } = useToast()
+
+// Hidden once the wallet says the token is registered (the capability-gated probe). Fail-open:
+// any failure keeps the button - a broken probe must never remove functionality.
+const registered = ref(false)
+watch(
+	() => [bridge.status.value, bridge.wallet.value] as const,
+	async ([status, wallet]) => {
+		registered.value = status === "connected" && wallet ? await addToken.isRegistered(wallet, BRIDGE_TOKEN) : false
+	},
+	{ immediate: true },
+)
 
 // Tracked reset timer (mirrors TokenCard) - rapid clicks must not stack timers that flip the status
 // back to idle mid-submission.
@@ -34,6 +45,7 @@ async function handleAdd() {
 	await addToken.addToken(wallet, account, BRIDGE_TOKEN)
 	const final = addToken.status.value
 	if (final.kind === "ok") {
+		registered.value = true
 		push({ kind: "ok", text: "Bridged USDC added to your wallet." })
 	} else if (final.kind === "error") {
 		push({ kind: "error", text: final.error.message })
@@ -50,7 +62,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<section v-if="bridge.status.value === 'connected'" class="bridge-add-token">
+	<section v-if="bridge.status.value === 'connected' && !registered" class="bridge-add-token">
 		<p class="label">Bridged USDC on Aztec is a separate token from the faucet's - add it so your wallet shows the balance.</p>
 		<button
 			type="button"
