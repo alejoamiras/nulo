@@ -39,3 +39,26 @@ reject (with blocking findings: owner-settable-target theft path remains after t
 - CRITICAL → L1 gained require (b): router token-balance delta across the swap == fuelAmount (slice actually consumed); P1 unit pin "prefunding target without pulling AZLO reverts". L2's "availability-only" reworded as conditioned on the fix.
 - HIGH → L14 v2: positive-evidence triggers only (claimTxHash receipt inclusion; public-FJ balance probe); simulate-failure never infers consumption; no-evidence ⇒ wait.
 - MEDs → P2 idempotent deploy-only/seed-only split + runbook; Ask 3 reworded (owner sweep powers explicit); pure `fuel-claim-state.ts` helper with truth-table pins (P6).
+
+## Round 4 — FINAL fresh-context gate (NEW session; verdict: reject → L14 v3 → re-verdict pending)
+
+- [CRITICAL] L14’s “`balance_of_public(FeeJuice, user) >= fuel.received` while token unclaimed” is not positive evidence for **this record**. It false-positives if the user already has public FJ, or receives unrelated FJ later, yet P6’s `decideFuelClaim` only takes aggregate `fjBalance`/`fuelReceived` and no baseline or provenance ([plan.md](implementations-plan/swap-fuel/plan.md:43), [plan.md](implementations-plan/swap-fuel/plan.md:91)). Result: premature sponsored fallback can still orphan the current FJ message. This is the main fresh miss.
+
+- [HIGH] The owner trust surface is understated. After the L1 hardening, a malicious owner-set `swapTarget` still need not honor the signed route economically; it can ignore route intent, consume the AZLO slice, return only `minFuelOutput`, and keep the spread. That is bounded value extraction, not “economically-pointless substitution” ([plan.md](implementations-plan/swap-fuel/plan.md:30), [plan.md](implementations-plan/swap-fuel/plan.md:114), [SwapBridgeRouter.sol](packages/bridge-evm/src/SwapBridgeRouter.sol:142), [SwapBridgeRouter.sol](packages/bridge-evm/src/SwapBridgeRouter.sol:190)).
+
+- Assumption attack:
+  - [HIGH][Facts] “fuel already landed is monotone truth” is misstated; public FJ balance is aggregate, not message-specific ([plan.md](implementations-plan/swap-fuel/plan.md:43)).
+  - [HIGH][Inferences] “fjwc graceful degradation” is unsafe as written because the contingency depends on that unsound balance probe ([plan.md](implementations-plan/swap-fuel/plan.md:148)).
+  - [MED][Asks] Missing ask: explicit human acceptance of frontend/config trust over `testnet-bridge.json` and of owner ability to skim down to the signed floor, not just set target/sweep dust ([plan.md](implementations-plan/swap-fuel/plan.md:65), [plan.md](implementations-plan/swap-fuel/plan.md:153)).
+
+- Ledger / executability:
+  - [HIGH] L3 + L14 do not cohere until third-party-trigger detection is record-specific.
+  - [MED] The documented rejections are sound final calls, including rejecting the differential-simulation probe; the unsound part is the replacement.
+  - [HIGH] P6 is under-specified: an autonomous agent cannot implement `decideFuelClaim` soundly from the stated inputs without inventing a missing per-record baseline/provenance rule.
+
+reject (with blocking findings: L14’s balance-probe trigger is not record-specific and P6 cannot implement the recovery ladder soundly without unstated state/provenance rules)
+### Resolution (L14 v3)
+- CRITICAL → the balance probe is WITHDRAWN. v3 triggers are per-record only: own claimTxHash receipt inclusion; fee-insufficiency (fuel.received vs current min fee × margin) ⇒ sponsored + standalone FJ claim; leaked-secret edge = explicit user "Claim without fuel" action after N persistent failures (no automation). Optional non-load-bearing P3 stretch: message-nullifier probe if the pinned aztec.js exposes the helper.
+- HIGH owner-skim → stated plainly in Security: bounded extraction ≤ the signed slippage spread; the bound IS the slippage parameter.
+- HIGH P6 under-spec → decideFuelClaim inputs fully specified { attempt, receiptStatus, fuelReceived, currentMinFee, persistentFailureCount, userOverride }; truth-table pins include "user already holding FJ changes nothing".
+- MED missing ask → Ask 3 widened to owner + frontend/config trust acceptance.
