@@ -19,6 +19,7 @@ import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { OriginType } from "@/wallet/services/transaction/spec"
 import { DappSendExecutor } from "./dapp-send-executor"
+import { ExecutionLane } from "./execution-lane"
 import { ExecutionService } from "./service"
 
 function makeService(): ExecutionService {
@@ -38,38 +39,43 @@ function inject(service: ExecutionService, fields: Record<string, unknown>): voi
 // ── cancelJob: transition-first, abort-second contract ─────────────────
 
 describe("cancelJob: journal-first ordering contract", () => {
+	function makeLane(transitionOperation: (id: string, patch: unknown) => Promise<unknown>) {
+		return new ExecutionLane({
+			operationJournal: { transitionOperation } as never,
+			getActiveProfile: async () => undefined,
+			getNetwork: async () => ({}) as never,
+			createFreshRecord: async () => undefined,
+			logDebug: () => {},
+			logInfo: () => {},
+			logError: () => {},
+		})
+	}
+
 	test("FSM accepts cancel → controller aborted and removed", async () => {
-		const service = makeService()
 		const controller = new AbortController()
 		const transitions: unknown[] = []
-		inject(service, {
-			operationJournal: {
-				transitionOperation: async (id: string, patch: unknown) => {
-					transitions.push([id, patch])
-				},
-			},
-			activeControllers: new Map([["job-1", controller]]),
+		const lane = makeLane(async (id, patch) => {
+			transitions.push([id, patch])
+			return {}
 		})
-		await service.cancelJob("job-1")
+		lane.registerController("job-1", controller)
+		await lane.cancelJob("job-1")
 		expect(transitions).toEqual([["job-1", { stage: "cancelled" }]])
 		expect(controller.signal.aborted).toBe(true)
-		expect((service as unknown as { activeControllers: Map<string, AbortController> }).activeControllers.size).toBe(0)
+		const registry = (lane as unknown as { activeControllers: Map<string, AbortController> }).activeControllers
+		expect(registry.size).toBe(0)
 	})
 
 	test("FSM rejects cancel (too late) → signal dropped, controller NOT aborted", async () => {
-		const service = makeService()
 		const controller = new AbortController()
-		inject(service, {
-			operationJournal: {
-				transitionOperation: async () => {
-					throw new Error("illegal transition: succeeded → cancelled")
-				},
-			},
-			activeControllers: new Map([["job-1", controller]]),
+		const lane = makeLane(async () => {
+			throw new Error("illegal transition: succeeded → cancelled")
 		})
-		await service.cancelJob("job-1")
+		lane.registerController("job-1", controller)
+		await lane.cancelJob("job-1")
 		expect(controller.signal.aborted).toBe(false)
-		expect((service as unknown as { activeControllers: Map<string, AbortController> }).activeControllers.size).toBe(1)
+		const registry = (lane as unknown as { activeControllers: Map<string, AbortController> }).activeControllers
+		expect(registry.size).toBe(1)
 	})
 })
 

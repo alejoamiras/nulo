@@ -23,20 +23,10 @@ import { TransactionService, OriginType, type TransferType, type LocalTxOrigin, 
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import type { OperationContext } from "@/wallet/services/operation-journal/spec"
 import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
-import { claimOrCreateDappExecuteJournal as claimOrCreateDappExecuteJournalImpl } from "./claim-helper"
-import {
-	type AcquireCaps,
-	ExecutionMutex,
-	ExecutionMutexAbortError,
-	ExecutionMutexCapacityError,
-	type ExecutionMutexRelease,
-} from "./execution-mutex"
 import { TaskService, type WrappedTask, ExecuteOperationContent } from "@/wallet/services/task/service"
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
-import { TooManyPendingError } from "@nulo/extension-messaging/errors"
-import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
 import { classifyOperationCatch } from "./rpc-cancel"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
@@ -64,6 +54,7 @@ import { TransferEstimateReuse } from "./transfer-estimate-reuse"
 import { TransferExecutor } from "./transfer-executor"
 import { DappSendExecutor } from "./dapp-send-executor"
 import { ViewExecutor } from "./view-executor"
+import { ExecutionLane } from "./execution-lane"
 import { GasBalanceReader } from "./gas-balance-reader"
 import { ContractResolver } from "./contract-resolver"
 import { getViewSimulationDeps } from "./helpers/get-view-simulation-deps"
@@ -129,39 +120,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	private transferExecutor: TransferExecutor = null!
 	private dappSendExecutor: DappSendExecutor = null!
 	private viewExecutor: ViewExecutor = null!
-
-	/** Phase 2 cancel surface: jobId → AbortController. SW-internal only,
-	 *  never crosses the wire. `cancelJob(id)` aborts the controller; the
-	 *  in-flight prove pipeline checks `signal.aborted` at each stage
-	 *  boundary and short-circuits with {@link JobCancelledSentinel}. */
-	private activeControllers = new Map<string, AbortController>()
-
-	/** v3: per-(profileId, chainId) FIFO mutex serializing dApp sendTx
-	 *  EXECUTION (build → simulate → prove → submit). Once the session-FIFO
-	 *  baton releases at popup approval, two approved sendTx can both reach
-	 *  execution; this mutex keeps them sequential so T2 doesn't simulate
-	 *  against T1's not-yet-spent private notes (which would get T2 rejected
-	 *  on-chain). Keyed to match PXE's own `chainGuard` scope. Held from
-	 *  before authwit discovery through submit, both send paths. */
-	private readonly executionMutex = new ExecutionMutex()
-
-	/** v3: journal ids currently WAITING on `executionMutex.acquire` (not yet
-	 *  holding). While non-empty, `executionHeartbeatTimer` bumps each record's
-	 *  `updatedAt` so the periodic reaper doesn't false-declare a legitimately-
-	 *  waiting record "stuck" — the Nth concurrent sendTx can wait (N-1)×per-tx
-	 *  while queued, which can exceed the 10-min queued / 2-min pending grace.
-	 *  Membership spans only the acquire wait: a holder uses its stage-transition
-	 *  `updatedAt` bumps (proving grace is 35 min). Stage-agnostic by design —
-	 *  silent-path waiters fast-forward to `pending` before executing. */
-	private readonly executionWaiters = new Set<string>()
-	private executionHeartbeatTimer?: ReturnType<typeof setInterval>
-	private static readonly EXECUTION_WAIT_HEARTBEAT_MS = 30_000
-	/** Backpressure caps on the per-(profileId, chainId) execution lane. The
-	 *  per-origin cap stops one dApp monopolizing the shared lane and starving
-	 *  another; the lane cap is a coarse total ceiling. Mirror the journal
-	 *  in-flight visibility caps (8 / 32). */
-	private static readonly EXECUTION_ORIGIN_CAP = 8
-	private static readonly EXECUTION_LANE_CAP = 32
+	private lane: ExecutionLane = null!
 
 	public constructor(logger: ILogger) {
 		super(EXECUTION_SERVICE_NAME, logger)
@@ -209,14 +168,24 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),
 			logDebug: (msg) => this.logDebug(msg),
 		})
+		this.lane = new ExecutionLane({
+			operationJournal: this.operationJournal,
+			getActiveProfile: () => this.profileService.getActiveProfile(),
+			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
+			createFreshRecord: (networkId, accountAddress, origin, calls) =>
+				this.beginDappExecuteJournal(networkId, accountAddress, origin, calls),
+			logDebug: (msg, ...rest) => this.logDebug(msg, ...rest),
+			logInfo: (msg, ...rest) => this.logInfo(msg, ...rest),
+			logError: (msg, ...rest) => this.logError(msg, ...rest),
+		})
 		this.transferExecutor = new TransferExecutor({
 			tasks: this.taskService,
 			planner: this.planner,
 			estimateReuse: this.estimateReuse,
 			coordinator: this.coordinator,
 			lane: {
-				registerController: (journalId, controller) => this.activeControllers.set(journalId, controller),
-				deleteController: (journalId) => this.activeControllers.delete(journalId),
+				registerController: (journalId, controller) => this.lane.registerController(journalId, controller),
+				deleteController: (journalId) => this.lane.deleteController(journalId),
 			},
 			getActiveProfile: () => this.profileService.getActiveProfile(),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
@@ -248,15 +217,15 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			txBuilder: this.txBuilder,
 			coordinator: this.coordinator,
 			lane: {
-				registerController: (journalId, controller) => this.activeControllers.set(journalId, controller),
-				deleteController: (journalId) => this.activeControllers.delete(journalId),
+				registerController: (journalId, controller) => this.lane.registerController(journalId, controller),
+				deleteController: (journalId) => this.lane.deleteController(journalId),
 				acquireSlot: (networkId, queuedJournalId, onEnqueued, originKey) =>
-					this.acquireExecutionSlot(networkId, queuedJournalId, onEnqueued, originKey),
+					this.lane.acquireSlot(networkId, queuedJournalId, onEnqueued, originKey),
 				claimOrCreateJournal: (networkId, accountAddress, origin, calls, hooks, reuseController) =>
-					this.claimOrCreateDappExecuteJournal(networkId, accountAddress, origin, calls, hooks, reuseController),
+					this.lane.claimOrCreateJournal(networkId, accountAddress, origin, calls, hooks, reuseController),
 				beginJournal: (networkId, accountAddress, origin, calls) =>
 					this.beginDappExecuteJournal(networkId, accountAddress, origin, calls),
-				markJournal: (journalId, progress, error) => this.markJournal(journalId, progress, error),
+				markJournal: (journalId, progress, error) => this.lane.markJournal(journalId, progress, error),
 			},
 			buildAndEstimate: (op, feeSettings, parentTask) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask),
 			addTransaction: (...args) => this.transactionService.addTransaction(...args),
@@ -347,48 +316,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		})
 	}
 
-	/**
-	 * Cancel an in-flight job (Phase 2 lossy-cancel).
-	 *
-	 * Transitions the journal record to `cancelled` synchronously, then
-	 * fires the SW-internal AbortController so the running prove pipeline
-	 * unwinds at its next stage boundary. The underlying offscreen prove
-	 * may still complete (BB.wasm can't be preempted); its result is
-	 * dropped silently when it arrives.
-	 *
-	 * No-op for unknown jobIds or jobs that already terminated (idempotent).
-	 */
+	/** Cancel an in-flight job. Semantics live on {@link ExecutionLane.cancelJob}
+	 *  (journal-transition-first, abort-second; idempotent). */
 	public async cancelJob(jobId: string): Promise<void> {
 		await this.ensureInitialized()
-
-		// Try the journal transition first. If the FSM accepts it, the job
-		// is in a pre-submit stage and cancel is meaningful — abort the
-		// in-flight controller so the prove pipeline unwinds.
-		//
-		// If the FSM REJECTS the transition (job already terminal, or past
-		// `submitting` where the tx is mid-broadcast and on-chain effect is
-		// no longer preventable), drop the cancel signal silently and do
-		// NOT abort the controller. The in-flight flow continues to its
-		// natural `succeeded` or `failed` terminal — preserving consistency
-		// between journal stage and on-chain state.
-		//
-		// This is the codex-W1W2-review fix for the cancel-after-submit
-		// race: previously the journal would flip to `cancelled` and the
-		// tx-was-already-broadcast path would log a swallowed illegal
-		// `cancelled → succeeded` transition, leaving the journal saying
-		// "cancelled" while a real tx existed in chain history.
-		try {
-			await this.operationJournal.transitionOperation(jobId, { stage: "cancelled" })
-		} catch (err) {
-			this.logDebug("cancelJob: too late to cancel — dropping signal", getErrorMessage(err))
-			return
-		}
-
-		const controller = this.activeControllers.get(jobId)
-		if (controller) {
-			controller.abort()
-			this.activeControllers.delete(jobId)
-		}
+		return this.lane.cancelJob(jobId)
 	}
 
 	public async estimateOperationFee(operation: Operation, feeSettings: FeeSettings): Promise<TransferFeeEstimate> {
@@ -658,159 +590,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	 * This thin wrapper just binds `this.*` dependencies into the helper's
 	 * dependency injection shape.
 	 */
-	/** Resolve the execution-mutex key for a dApp sendTx: `(profileId, chainId)`,
-	 *  matching PXE's `chainGuard` scope exactly. Both lookups are metadata-only
-	 *  (no PXE call), so calling them before acquiring the mutex is safe — they
-	 *  don't contend on the chain guard. `getNetwork` is re-resolved inside
-	 *  `buildAndEstimateTxRequest` later; the duplicate lookup is a negligible
-	 *  in-memory cost paid for keying correctness. */
-	private async resolveExecutionMutexKey(networkId: string): Promise<string> {
-		const profile = await this.profileService.getActiveProfile()
-		const network = await this.networkService.getNetwork(networkId)
-		return `${profile?.id ?? "noprofile"}:${network.chainId}`
-	}
-
-	/**
-	 * Acquire the per-(profileId, chainId) execution slot for a dApp sendTx,
-	 * FIFO. When a `queuedJournalId` exists (a "Queued" record the user can see
-	 * + cancel), an AbortController is registered under it BEFORE the acquire so
-	 * a user-cancel during the wait aborts `acquire` → surfaces as
-	 * `JobCancelledSentinel` → the dApp sees EIP-1193 4001. That same controller
-	 * is reused by the journal claim (claimed id === queuedJournalId), so it
-	 * lives in `activeControllers` continuously from before the wait through
-	 * execution — strictly safer for the cancel-vs-claim race than registering
-	 * one only after the claim transition.
-	 *
-	 * The waiting record is heartbeated (updatedAt bumped) for the duration of
-	 * the wait so the periodic reaper doesn't declare it stuck.
-	 *
-	 * Returns the mutex release callback (call in `finally`) and the
-	 * pre-acquire controller to thread into the claim.
-	 */
-	private async acquireExecutionSlot(
-		networkId: string,
-		queuedJournalId: string | undefined,
-		onEnqueued?: () => void,
-		originKey?: string,
-	): Promise<{ release: ExecutionMutexRelease; preController: AbortController | undefined }> {
-		const mutexKey = await this.resolveExecutionMutexKey(networkId)
-		// Per-origin + total-lane backpressure cap. `originKey` is the canonical
-		// dApp origin (threaded from ctx.origin); the sentinel keeps an unexpected
-		// absent origin capped under one bucket rather than bypassing the cap.
-		const caps: AcquireCaps = {
-			originKey: originKey ?? "__no_origin__",
-			maxOriginDepth: ExecutionService.EXECUTION_ORIGIN_CAP,
-			maxLaneDepth: ExecutionService.EXECUTION_LANE_CAP,
-		}
-
-		let preController: AbortController | undefined
-		if (queuedJournalId) {
-			preController = new AbortController()
-			this.activeControllers.set(queuedJournalId, preController)
-			this.beginExecutionWait(queuedJournalId)
-		}
-
-		try {
-			// `acquire` installs this request as the FIFO tail SYNCHRONOUSLY, before
-			// its first await (execution-mutex.ts). The instant we've called it we
-			// are enqueued ahead of anyone who calls `acquire` later. Fire the baton
-			// release HERE — before awaiting the grant — so the next session
-			// message's popup opens immediately WHILE execution order is preserved:
-			// that later request can only reach its own `acquire` after the baton
-			// advances, i.e. strictly behind us in the FIFO. Releasing at popup
-			// approval (before this point) would let a faster successor overtake us.
-			// (On a capacity reject `acquire`'s synchronous cap-check rejects before
-			// enqueue; onEnqueued still fires, which is a harmless early baton-advance
-			// for a request that has just failed.)
-			const acquirePromise = this.executionMutex.acquire(mutexKey, preController?.signal, caps)
-			onEnqueued?.()
-			const release = await acquirePromise
-			return { release, preController }
-		} catch (err) {
-			// Clean the pre-acquire controller for any non-grant exit.
-			if (queuedJournalId) this.activeControllers.delete(queuedJournalId)
-			if (err instanceof ExecutionMutexCapacityError) {
-				// Lane/origin backpressure. Terminalize the journal record HERE: the
-				// caller's claim never runs, and the background safety-net only
-				// terminalizes records still at `queued` — but the silent path
-				// fast-forwards to `pending` before executing, so without this an
-				// over-cap silent sendTx would leave a stuck `pending` card until the
-				// reaper grace expires. Surface to the dApp as -32005.
-				await this.markJournal(queuedJournalId, { stage: "failed" }, normalizeError(err, "dapp_execute"))
-				throw new TooManyPendingError()
-			}
-			// Aborted while waiting (user cancelled the Queued record) — surface via
-			// the cancelled pipeline.
-			if (err instanceof ExecutionMutexAbortError) throw new JobCancelledSentinel(queuedJournalId ?? "")
-			throw err
-		} finally {
-			// Wait is over (granted, aborted, or capacity-rejected). A holder no
-			// longer needs the heartbeat — its stage transitions bump updatedAt;
-			// proving grace is 35 min.
-			if (queuedJournalId) this.endExecutionWait(queuedJournalId)
-		}
-	}
-
-	private beginExecutionWait(journalId: string): void {
-		this.executionWaiters.add(journalId)
-		if (!this.executionHeartbeatTimer) {
-			this.executionHeartbeatTimer = setInterval(() => {
-				void this.heartbeatExecutionWaiters()
-			}, ExecutionService.EXECUTION_WAIT_HEARTBEAT_MS)
-		}
-	}
-
-	private endExecutionWait(journalId: string): void {
-		this.executionWaiters.delete(journalId)
-		if (this.executionWaiters.size === 0 && this.executionHeartbeatTimer) {
-			clearInterval(this.executionHeartbeatTimer)
-			this.executionHeartbeatTimer = undefined
-		}
-	}
-
-	private async heartbeatExecutionWaiters(): Promise<void> {
-		// Snapshot — touchOperation awaits and the set can mutate mid-iteration.
-		for (const id of [...this.executionWaiters]) {
-			try {
-				await this.operationJournal.touchOperation(id)
-			} catch {
-				// Record gone (reaped / cancelled / completed) — harmless; the next
-				// settle removes it from the wait-set.
-			}
-		}
-	}
-
-	private async claimOrCreateDappExecuteJournal(
-		networkId: string,
-		accountAddress: string,
-		origin: LocalTxOrigin,
-		calls: { method?: string }[] | undefined,
-		hooks: ExecutionHooks | undefined,
-		reuseController?: AbortController,
-	): Promise<{ journalId: string | undefined; controller: AbortController | undefined }> {
-		return claimOrCreateDappExecuteJournalImpl(
-			{
-				operationJournal: this.operationJournal,
-				activeControllers: this.activeControllers,
-				createFreshRecord: (n, a, o, c) => this.beginDappExecuteJournal(n, a, o, c),
-				logger: {
-					debug: (msg) => this.logDebug(msg),
-					info: (msg) => this.logInfo(msg),
-					error: (msg, raw) => this.logError(msg, raw),
-				},
-			},
-			{ networkId, accountAddress, origin, calls, queuedJournalId: hooks?.queuedJournalId, reuseController },
-		)
-	}
-
-	private async markJournal(journalId: string | undefined, progress: JobProgress, error?: JobError | null): Promise<void> {
-		if (!journalId) return
-		try {
-			await this.operationJournal.transitionOperation(journalId, progress, error)
-		} catch (err) {
-			this.logError("Failed to update journal operation", getErrorMessage(err))
-		}
-	}
 
 	public async getGasBalances(networkId: string, accountAddress: string, forceRefresh?: boolean): Promise<GasBalances> {
 		await this.ensureInitialized()
