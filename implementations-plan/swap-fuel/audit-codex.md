@@ -62,3 +62,9 @@ reject (with blocking findings: L14’s balance-probe trigger is not record-spec
 - HIGH owner-skim → stated plainly in Security: bounded extraction ≤ the signed slippage spread; the bound IS the slippage parameter.
 - HIGH P6 under-spec → decideFuelClaim inputs fully specified { attempt, receiptStatus, fuelReceived, currentMinFee, persistentFailureCount, userOverride }; truth-table pins include "user already holding FJ changes nothing".
 - MED missing ask → Ask 3 widened to owner + frontend/config trust acceptance.
+
+## Round 5 — final-gate re-verdict on v3
+
+Yes on the three prior blockers. v3 closes the orphaning path (aggregate-balance inference gone; remaining automated triggers record-specific; ambiguous states stay at wait — no premature fallback can orphan an unconsumed FJ message). Leaked-secret edge acceptable as manual-only for testnet (requires compromise of material already inside the local trust boundary; the manual action is non-destructive — the right place to stop automating). P6 implementable by an autonomous agent without inventing rules.
+
+conditional approve (with conditions: align the stale Security leaked-secret bullet to L14 v3/manual-only semantics) — condition addressed in the same commit (Security bullet aligned).
