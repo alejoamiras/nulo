@@ -1,0 +1,209 @@
+import { describe, expect, it } from "vitest"
+import {
+	type BridgeJournalRecord,
+	type DepositJournalRecord,
+	type KV,
+	type WithdrawJournalRecord,
+	JOURNAL_KEY,
+	LEGACY_KEYS,
+	MAX_RECORDS,
+	capRecords,
+	clearLegacyKeys,
+	deriveDepositStage,
+	deriveWithdrawStage,
+	loadJournal,
+	patchRecord,
+	pruneCompleted,
+	rekeyRecord,
+	removeRecord,
+	upsertRecord,
+} from "./journal"
+
+function memKV(initial: Record<string, string> = {}): KV & { store: Map<string, string> } {
+	const store = new Map(Object.entries(initial))
+	return {
+		store,
+		getItem: (k) => store.get(k) ?? null,
+		setItem: (k, v) => void store.set(k, v),
+		removeItem: (k) => void store.delete(k),
+	}
+}
+
+const DEPLOY = { chainId: 11155111, portal: "0xportal", bridge: "0xbridge" }
+
+function deposit(id: string, over: Partial<DepositJournalRecord> = {}): DepositJournalRecord {
+	return {
+		schema: 1,
+		id,
+		direction: "deposit",
+		isPrivate: false,
+		amount: "100",
+		createdAt: 1,
+		updatedAt: 1,
+		recipient: "0xaztec",
+		secretHashHex: id,
+		...DEPLOY,
+		...over,
+	}
+}
+
+function withdraw(id: string, over: Partial<WithdrawJournalRecord> = {}): WithdrawJournalRecord {
+	return {
+		schema: 1,
+		id,
+		direction: "withdraw",
+		isPrivate: false,
+		amount: "40",
+		createdAt: 1,
+		updatedAt: 1,
+		recipientL1: "0xeth",
+		exitTxHash: id,
+		...DEPLOY,
+		...over,
+	}
+}
+
+describe("journal CRUD", () => {
+	it("upserts multiple records and patches one without touching the others", () => {
+		const kv = memKV()
+		upsertRecord(kv, deposit("0xaaa"))
+		upsertRecord(kv, deposit("0xbbb"))
+		patchRecord(kv, "0xaaa", { leafIndex: "42" })
+		const records = loadJournal(kv)
+		expect(records).toHaveLength(2)
+		expect((records.find((r) => r.id === "0xaaa") as DepositJournalRecord).leafIndex).toBe("42")
+		expect((records.find((r) => r.id === "0xbbb") as DepositJournalRecord).leafIndex).toBeUndefined()
+	})
+
+	it("upsert replaces by id instead of duplicating", () => {
+		const kv = memKV()
+		upsertRecord(kv, deposit("0xaaa"))
+		upsertRecord(kv, deposit("0xaaa", { amount: "999" }))
+		const records = loadJournal(kv)
+		expect(records).toHaveLength(1)
+		expect(records[0].amount).toBe("999")
+	})
+
+	it("patch on a missing id is a no-op", () => {
+		const kv = memKV()
+		upsertRecord(kv, deposit("0xaaa"))
+		expect(patchRecord(kv, "0xnope", { leafIndex: "1" })).toBeUndefined()
+		expect(loadJournal(kv)).toHaveLength(1)
+	})
+
+	it("rekey upgrades a provisional withdraw to its exitTxHash id", () => {
+		const kv = memKV()
+		upsertRecord(kv, withdraw("wd-pending-x", { exitTxHash: undefined }))
+		rekeyRecord(kv, "wd-pending-x", withdraw("0xexit1"))
+		const records = loadJournal(kv)
+		expect(records).toHaveLength(1)
+		expect(records[0].id).toBe("0xexit1")
+	})
+
+	it("remove deletes only the targeted record", () => {
+		const kv = memKV()
+		upsertRecord(kv, deposit("0xaaa"))
+		upsertRecord(kv, withdraw("0xexit"))
+		removeRecord(kv, "0xaaa")
+		expect(loadJournal(kv).map((r) => r.id)).toEqual(["0xexit"])
+	})
+})
+
+describe("multi-tab safety (per-record merge)", () => {
+	it("a writer with a stale in-memory snapshot cannot erase a record another writer just added", () => {
+		const kv = memKV()
+		// Tab A creates record A. Tab B, which read the journal BEFORE A existed (stale snapshot),
+		// now writes record B — upsert re-reads at write time, so A must survive.
+		upsertRecord(kv, deposit("0xfromA"))
+		upsertRecord(kv, deposit("0xfromB"))
+		expect(
+			loadJournal(kv)
+				.map((r) => r.id)
+				.sort(),
+		).toEqual(["0xfromA", "0xfromB"])
+	})
+})
+
+describe("parse hardening + cap priority", () => {
+	it("corrupt JSON yields an empty journal, never a crash", () => {
+		const kv = memKV({ [JOURNAL_KEY]: "{not json" })
+		expect(loadJournal(kv)).toEqual([])
+	})
+
+	it("wrong schema or non-array records yields empty", () => {
+		const kv = memKV({ [JOURNAL_KEY]: JSON.stringify({ schema: 2, records: [deposit("0xa")] }) })
+		expect(loadJournal(kv)).toEqual([])
+	})
+
+	it("garbage entries inside the array are dropped", () => {
+		const kv = memKV({
+			[JOURNAL_KEY]: JSON.stringify({ schema: 1, records: [deposit("0xa"), null, 7, { direction: "deposit" }] }),
+		})
+		expect(loadJournal(kv).map((r) => r.id)).toEqual(["0xa"])
+	})
+
+	it("a COMPLETED-junk flood never evicts an unfinished record (prioritized retention)", () => {
+		const live = deposit("0xlive", { updatedAt: 5 })
+		const junk: BridgeJournalRecord[] = Array.from({ length: MAX_RECORDS + 50 }, (_, i) =>
+			deposit(`0xjunk${i}`, { completedAt: 1000 + i, updatedAt: 1000 + i }),
+		)
+		const capped = capRecords([...junk, live])
+		expect(capped.some((r) => r.id === "0xlive")).toBe(true)
+		// The evicted ones are the OLDEST completed.
+		expect(capped.some((r) => r.id === "0xjunk0")).toBe(false)
+	})
+
+	it("an UNFINISHED-junk flood cannot evict a live record either — unfinished records are never dropped", () => {
+		const live = deposit("0xlive", { updatedAt: 1 }) // oldest of all
+		const junk: BridgeJournalRecord[] = Array.from({ length: MAX_RECORDS + 50 }, (_, i) =>
+			deposit(`0xjunk${i}`, { updatedAt: 1000 + i }),
+		)
+		const capped = capRecords([...junk, live])
+		expect(capped.some((r) => r.id === "0xlive")).toBe(true)
+		expect(capped.filter((r) => !r.completedAt)).toHaveLength(MAX_RECORDS + 51)
+	})
+})
+
+describe("prune + legacy cleanup", () => {
+	it("pruneCompleted drops only old completed records", () => {
+		const kv = memKV()
+		upsertRecord(kv, deposit("0xold", { completedAt: 1000 }))
+		upsertRecord(kv, deposit("0xfresh", { completedAt: 9000 }))
+		upsertRecord(kv, deposit("0xinflight"))
+		pruneCompleted(kv, 5000, 10_000)
+		expect(
+			loadJournal(kv)
+				.map((r) => r.id)
+				.sort(),
+		).toEqual(["0xfresh", "0xinflight"])
+	})
+
+	it("clearLegacyKeys deletes the pre-journal single-pending keys (no migration)", () => {
+		const kv = memKV({
+			[LEGACY_KEYS[0]]: JSON.stringify({ secret: "0x1", recipient: "0xr", amount: "5" }),
+			[LEGACY_KEYS[1]]: JSON.stringify({ exitTxHash: "0xe" }),
+		})
+		clearLegacyKeys(kv)
+		expect(kv.getItem(LEGACY_KEYS[0])).toBeNull()
+		expect(kv.getItem(LEGACY_KEYS[1])).toBeNull()
+	})
+})
+
+describe("stage derivation (never persisted)", () => {
+	it("deposit milestone table", () => {
+		expect(deriveDepositStage(deposit("a"))).toBe("depositing")
+		expect(deriveDepositStage(deposit("a", { depositTxHash: "0xd" }))).toBe("depositing")
+		expect(deriveDepositStage(deposit("a", { leafIndex: "7" }))).toBe("syncing")
+		expect(deriveDepositStage(deposit("a", { leafIndex: "7" }), { claimable: true })).toBe("claimable")
+		expect(deriveDepositStage(deposit("a", { leafIndex: "7", claimTxHash: "0xc" }))).toBe("claiming")
+		expect(deriveDepositStage(deposit("a", { leafIndex: "7", claimTxHash: "0xc", completedAt: 1 }))).toBe("done")
+	})
+
+	it("withdraw milestone table", () => {
+		expect(deriveWithdrawStage(withdraw("a", { exitTxHash: undefined }))).toBe("exiting")
+		expect(deriveWithdrawStage(withdraw("a"))).toBe("proving")
+		expect(deriveWithdrawStage(withdraw("a"), { proven: true })).toBe("consumable")
+		expect(deriveWithdrawStage(withdraw("a", { consumeTxHash: "0xc" }))).toBe("consuming")
+		expect(deriveWithdrawStage(withdraw("a", { consumeTxHash: "0xc", completedAt: 1 }))).toBe("done")
+	})
+})

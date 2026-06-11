@@ -6,7 +6,7 @@ const TOKEN_ADDR = AztecAddress.fromString("0x0000000000000000000000000000000000
 const ACCOUNT = "0x000000000000000000000000000000000000000000000000000000000000000a"
 
 /**
- * Minimal Wallet mock — only `registerToken` is exercised. The composable
+ * Minimal Wallet mock - only `registerToken` is exercised. The composable
  * casts the wallet to `Wallet & { registerToken }` at the typed boundary,
  * so a partial mock is sufficient.
  */
@@ -76,7 +76,7 @@ describe("useFaucetAddToken", () => {
 	})
 
 	it("re-entrancy guard: second call during submitting is ignored", async () => {
-		// `let resolveFn: ... | null = null` — TS narrows the local to `never`
+		// `let resolveFn: ... | null = null` - TS narrows the local to `never`
 		// after the closure assignment. The explicit non-null cast below at
 		// the call site is the simplest workaround.
 		let resolveFn: (() => void) | null = null
@@ -91,7 +91,7 @@ describe("useFaucetAddToken", () => {
 		const first = addToken(wallet as any, ACCOUNT, TOKEN_ADDR)
 		expect(status.value.kind).toBe("submitting")
 
-		// Second call should be a no-op — status stays submitting, no extra
+		// Second call should be a no-op - status stays submitting, no extra
 		// promise to await on the wallet side.
 		// biome-ignore lint/suspicious/noExplicitAny: typed mock
 		await addToken(wallet as any, ACCOUNT, TOKEN_ADDR)

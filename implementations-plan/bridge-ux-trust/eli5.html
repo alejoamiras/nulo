@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — bridge-ux-trust</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>bridge-ux-trust</h1>
+  <p>The bridge works, but it feels rough: private transfers ask you to sign the same thing over and over, deposits and withdrawals live in two separate clunky forms with no balances, and if you refresh mid-bridge you can't tell what's still in flight — worse, the app might silently fire a wallet prompt at you for an old transfer. This arc fixes all three: <strong>fewer signatures</strong> (a one-time "your wallet signs predictably" check is remembered per wallet), <strong>one swap-style form</strong> (From Ethereum ⇄ To Aztec, live balances, one-click flip, a private toggle), and <strong>a visible journal</strong> of every in-flight bridge as a card with an explicit Claim / Finish / Discard button — nothing auto-fires after a refresh. Along the way it structurally closes the two storage-trust issues the last security audit flagged.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><code>deep</code>, picked by you and confirmed by the rubric: this rewrites the bridge's persistence layer (migration cost HIGH), touches a bearer credential — a secret that IS the money (security sensitivity HIGH), and redesigns the whole bridge UI (blast radius HIGH). Three HIGH dimensions ⇒ deep: three independent plans (me + codex + a fresh Fable agent), consolidation with a decision ledger, two contradiction-check rounds, two double audits, and a final fresh-context codex pass. The ceremony paid for itself: round 1 caught a contradiction that would have stranded every pre-existing private transfer, and the fresh-eyes round 2 found a genuine fund-redirect attack (the "legacy downgrade") that every earlier round missed.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: Foundations (pure logic, no UI)</h3>
+    <p>Build the journal (the structured list of in-flight bridges), the sealed "envelope" (the claim secret AND who it belongs to, encrypted together so browser storage can't lie about the owner), and the per-wallet trust memory (remembers your wallet passed the sign-twice check so it never asks twice again). All unit-tested, including the attack cases.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: Rewire the flows</h3>
+    <p>Deposits and withdrawals read/write journal records instead of one fragile slot. A bridge is "done" only when ITS OWN transaction is confirmed on-chain — never because a balance moved. Nothing rediscovered after a refresh ever fires a wallet prompt by itself. The old UI keeps working through this phase, so every commit ships.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: The new face</h3>
+    <p>The two old cards die. One swap-style form: From/To with live balances on both sides, a flip arrow, a PRIVATE BRIDGING toggle, and a separate "GET TEST USDC ON SEPOLIA (L1)" button whose copy explicitly says it is NOT the Faucet tab (that one drips a different token inside Aztec). Below it, the journal: one card per in-flight bridge with its stage and one explicit action button.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: Smoke, polish, handoff</h3>
+    <p>A browser-less smoke test pins the big behaviors (old keys cleaned, nothing auto-claims, selectors stable), logging is swept for secrets, then the manual testnet checklist comes to you — eight scripted walks, including "first private deposit asks exactly 2 signatures, second asks exactly 1".</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>Two facts drive most decisions. First: a private deposit's claim secret is a <em>bearer</em> credential — whoever holds it can take the funds — so it's encrypted ("sealed") to your Ethereum signature before anything irreversible happens, and now its owner and amount are sealed WITH it, so tampering with browser storage can't redirect a claim. Second: your wallet must sign the same message identically every time for that recovery to work — that's what the sign-twice self-test proves, and what the new per-wallet memory makes a one-time event. The journal exists because bridges are slow (minutes of proving): you WILL close the tab mid-bridge, and what you find when you come back should be an honest list of cards, not a surprise wallet popup.</p>
+
+  <h2>Open questions (your call at approval)</h2>
+  <ul>
+    <li><strong>A1 — finished cards keep their sealed secret until you click Clear</strong> (auto-cleaned after 7 days). Insurance against a faked "done"; the secret is spent and useless after a genuine claim. Alternative: wipe immediately on done.</li>
+    <li><strong>A2 — RESOLVED: no backwards compatibility.</strong> Old in-flight records are simply deleted on first load (development phase). Side benefit: with no legacy fallback, the "downgrade" attack has nothing to downgrade into.</li>
+    <li><strong>A3 — web-security headers (CSP) stay deferred</strong> to the later hardening pass. Honest framing: a malicious script on the page remains the one theft-capable attacker until that lands — fine for a trusted internal testnet tool, not for promotion beyond that.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: the three features + the two security fixes; NO contract changes, NO swap (next arc), CSP deferred.</li>
+      <li>Sign off A1, A2, A3 above (recommended defaults are the ones described).</li>
+      <li>Confirm tier <code>deep</code> outcome: 2× conditional-approve double audits, all conditions folded; final fresh codex verdict recorded in plan.md §Audit verdicts.</li>
+      <li>Approve / conditionally approve / reject.</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds</h2>
+    <p>Pick exactly one per session. <code>/goal</code> survives <code>claude --resume</code>; <code>/loop</code> self-paces within a session and expires after 7 days.</p>
+    <p class="warning">Use exactly ONE per session. They don't compose — setting one replaces the other.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /loop (self-paced)</h3>
+      <pre><code>/loop Drive the bridge-ux-trust arc on feat/bridge-ux-trust. Each turn, in order: (1) confirm HEAD == feat/bridge-ux-trust; read implementations-plan/bridge-ux-trust/plan.md (phase status = source of truth) + lessons/; git log --oneline -5; fold any pending codex RESPONSE_FILE. (2) Failing lint/typecheck/test? fix first; /codex xhigh if non-trivial; after 5 failures on one step STOP + reassess. (3) Idle? take the next pending phase (P1 foundations → P2 flows → P3 UI → P4 smoke+gates) and implement the next slice: edit → bun run --cwd packages/bridge-core test (P1) or bun run --cwd packages/faucet test + typecheck → root bun run lint → commit small + conventional via git -c commit.gpgsign=false → push via gh HTTPS. (4) Signature-gated step? finish code + tests, commit, STOP that thread with "NEEDS MANUAL TEST: &lt;action + expected&gt;" — never fake a pass. (5) Non-trivial call? /codex xhigh; log consult + verdict in lessons/phase-N.md; print LESSONS_FILE=. (6) Phase green? mark ✓ in plan.md, file the lesson, advance. (7) All phases ✓? run bun run audit:faucet + audit:vue → /code-review max --fix → commit those separately → codex post-impl audit with the net diff → address high/critical → STOP with the manual-test checklist. Discipline: TESTNET only; feat/bridge-ux-trust only; unsigned commits; the journal stores milestone facts only; secrets/envelopes/signatures never in logs.</code></pre>
+    </div>
+
+    <h3>Alternative: /goal</h3>
+    <pre><code>/goal All four phases marked ✓ in implementations-plan/bridge-ux-trust/plan.md (the per-phase headers in the file); for each phase LESSONS_FILE=implementations-plan/bridge-ux-trust/lessons/phase-N.md printed in the transcript; bun run audit:faucet and bun run audit:vue both exit 0 in the transcript; /code-review max --fix complete with fixes committed separately; codex post-impl audit complete with high/critical findings addressed; the NEEDS-MANUAL-TEST checklist (8 items) printed verbatim as the final handoff. Constraints: branch feat/bridge-ux-trust only, testnet only, unsigned commits via git -c commit.gpgsign=false.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="audit-codex.md">codex transcript</a> · <a href="audit-fable.md">fable transcript</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

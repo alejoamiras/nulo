@@ -9,7 +9,7 @@ import config from "../../public/testnet-bridge.json"
 
 /*
  * testnet-bridge.json is DEPLOY METADATA, not registerable instances. We rebuild each L2
- * instance here via getContractInstanceFromInstantiationParams — same salt + args + universal
+ * instance here via getContractInstanceFromInstantiationParams - same salt + args + universal
  * deploy (deployer = ZERO) as deploy-bridge-testnet.ts, so the addresses agree by construction.
  * Mirrors src/contracts/deployments.ts for the faucet's own contracts.
  */

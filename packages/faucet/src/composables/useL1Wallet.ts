@@ -3,13 +3,13 @@ import { sepolia } from "viem/chains"
 import { computed, ref, shallowRef } from "vue"
 
 /**
- * Thin canonical-viem L1 (Sepolia) wallet — connect an injected wallet (Rabby / MetaMask),
+ * Thin canonical-viem L1 (Sepolia) wallet - connect an injected wallet (Rabby / MetaMask),
  * track account + chain, switch to Sepolia. Canonical viem ON PURPOSE: the Aztec stack's
  * `@aztec/viem` fork lacks exports wagmi needs, so the L1 side stays on stock viem. It meets
  * `@nulo/bridge-core` only at the PRIMITIVE boundary (addresses / amounts), never by sharing
  * viem `WalletClient` / `Chain` types across the canonical↔fork line.
  *
- * Module-level singleton — one L1 connection shared across the Bridge tab's components
+ * Module-level singleton - one L1 connection shared across the Bridge tab's components
  * (L1WalletPanel connects; useDeposit + DepositCard read the same state).
  */
 function getProvider(): EIP1193Provider | undefined {
@@ -31,7 +31,7 @@ const wrongChain = computed(() => isConnected.value && chainId.value !== sepolia
 function onAccountsChanged(accounts: readonly string[]) {
 	address.value = (accounts[0] as Address | undefined) ?? null
 	const provider = getProvider()
-	// Rebuild the walletClient on account change — otherwise it keeps signing as the old account.
+	// Rebuild the walletClient on account change - otherwise it keeps signing as the old account.
 	walletClient.value =
 		address.value && provider ? createWalletClient({ account: address.value, chain: sepolia, transport: custom(provider) }) : null
 }

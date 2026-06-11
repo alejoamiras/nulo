@@ -1,5 +1,5 @@
 /**
- * Formatting helpers. Tiny and stable — no Aztec deps.
+ * Formatting helpers. Tiny and stable - no Aztec deps.
  */
 
 /**
@@ -10,7 +10,7 @@
  *   formatBigInt(0n, 18) === "0.00"
  *
  * `displayPlaces` clamps the fractional digits shown (default 2).
- * Trailing zeros within `displayPlaces` are kept — predictable column
+ * Trailing zeros within `displayPlaces` are kept - predictable column
  * alignment matters more than terse output for a faucet.
  */
 export function formatBigInt(value: bigint, decimals: number, displayPlaces = 2): string {
@@ -25,7 +25,7 @@ export function formatBigInt(value: bigint, decimals: number, displayPlaces = 2)
 }
 
 export function trimAddress(addr: string, head = 6, tail = 4): string {
-	if (!addr) return "—"
+	if (!addr) return "-"
 	if (addr.length <= head + tail + 2) return addr
 	return `${addr.slice(0, head)}…${addr.slice(-tail)}`
 }

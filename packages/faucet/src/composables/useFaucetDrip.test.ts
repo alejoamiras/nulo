@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
  * Mock the SDK boundary so the composable can be exercised end-to-end
  * without a live wallet. The contract proxy's `.request({ fee })`
  * receives the SponsoredFeePaymentMethod and returns an ExecutionPayload
- * that already has feePayer + the sponsor call merged — that's what
+ * that already has feePayer + the sponsor call merged - that's what
  * aztec.js does in real usage. We mimic the shape here.
  *
  * SponsoredFeePaymentMethod is also mocked so the test doesn't try to

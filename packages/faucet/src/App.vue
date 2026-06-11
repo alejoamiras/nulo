@@ -68,7 +68,6 @@ const tab = ref<Tab>(defaultTab())
 	gap: 4px;
 	padding: 4px;
 	background: var(--surface-raised, rgba(255, 255, 255, 0.04));
-	border-radius: 12px;
 	align-self: flex-start;
 }
 
@@ -80,7 +79,6 @@ const tab = ref<Tab>(defaultTab())
 	color: var(--txt-secondary);
 	background: transparent;
 	border: none;
-	border-radius: 8px;
 	padding: 10px 20px;
 	cursor: pointer;
 	transition: background 0.15s ease, color 0.15s ease;

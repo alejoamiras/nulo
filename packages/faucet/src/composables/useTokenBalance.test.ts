@@ -152,13 +152,24 @@ describe("useTokenBalance", () => {
 		handle.dispose()
 	})
 
-	it("surfaces a normalized error when a read fails", async () => {
+	it("surfaces the RAW error message when a read fails (toast copy would mask the cause)", async () => {
 		publicSimulateImpl.mockRejectedValue(new Error("Network unreachable"))
 		const w = makeWallet({ throwsOnUtility: new Error("Network unreachable") })
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
 		const handle = useTokenBalance(w as any, TOKEN, ACCOUNT)
 		await vi.waitFor(() => expect(handle.error.value).not.toBeNull())
-		expect(handle.error.value).toMatch(/alpha-testnet is not responding/i)
+		expect(handle.error.value).toMatch(/network unreachable/i)
+		handle.dispose()
+	})
+
+	it("one failing path never blanks the other (settled independently)", async () => {
+		publicSimulateImpl.mockResolvedValue({ result: 7_000_000n })
+		const w = makeWallet({ throwsOnUtility: new Error("utility denied") })
+		// biome-ignore lint/suspicious/noExplicitAny: test stub
+		const handle = useTokenBalance(w as any, TOKEN, ACCOUNT)
+		await vi.waitFor(() => expect(handle.publicBalance.value).toBe(7_000_000n))
+		expect(handle.privateBalance.value).toBeNull()
+		expect(handle.error.value).toMatch(/utility denied/i)
 		handle.dispose()
 	})
 
