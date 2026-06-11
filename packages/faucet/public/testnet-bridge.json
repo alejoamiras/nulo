@@ -1,29 +1,29 @@
 {
 	"network": "testnet",
 	"l1": {
-		"usdc": "0x79e74f638cd6d09e511fbcb0b62be01d0cf55012",
-		"portal": "0xde849613a79f2026b7b2209caece7a4d5879fa85"
+		"usdc": "0xa40a2fe147b7e96325d7c7d974b1f11c3ed82c68",
+		"portal": "0x9c41d1dd627ed53e25702590ab974d9dfa0c11ea"
 	},
 	"l2": {
 		"proxy": {
-			"address": "0x0c448027f1d2231a64f41fea409347b5b842ea5a8a69e96f84f9b2547c754dd0",
-			"salt": 23297,
+			"address": "0x265f078bbf8ee55520c46df595c036a66b7b20301128ba4f100e1e1bd6fdc973",
+			"salt": 23313,
 			"constructorArtifact": "constructor",
 			"constructorArgs": []
 		},
 		"token": {
-			"address": "0x05d884695d5072e276ee3bea7f6daba4ba96fe765de32b5b7b9e8a2c102ccf94",
-			"salt": 23298,
+			"address": "0x05e80c537c6a7c50563e5ba7bc333d6c6728ddc6290c8a8a910df3a0ba15ac20",
+			"salt": 23314,
 			"constructorArtifact": "constructor_with_minter",
-			"constructorArgs": ["Nulo USDC", "USDC", 6, "0x0c448027f1d2231a64f41fea409347b5b842ea5a8a69e96f84f9b2547c754dd0"]
+			"constructorArgs": ["Aztec Nulo", "AZLO", 18, "0x265f078bbf8ee55520c46df595c036a66b7b20301128ba4f100e1e1bd6fdc973"]
 		},
 		"bridge": {
-			"address": "0x13e5f1cde4af565fbc887c7b8ec630ddc7eba8ed1e1dce3379d4ba54e2995760",
-			"salt": 23299,
+			"address": "0x0e31670a54cac23d4d74b0d83c44797369a4a2d08a375aab1514283623e2748e",
+			"salt": 23315,
 			"constructorArtifact": "constructor",
 			"constructorArgs": [
-				"0x0c448027f1d2231a64f41fea409347b5b842ea5a8a69e96f84f9b2547c754dd0",
-				"0xde849613a79f2026b7b2209caece7a4d5879fa85"
+				"0x265f078bbf8ee55520c46df595c036a66b7b20301128ba4f100e1e1bd6fdc973",
+				"0x9c41d1dd627ed53e25702590ab974d9dfa0c11ea"
 			]
 		}
 	}

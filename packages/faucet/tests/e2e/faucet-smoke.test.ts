@@ -5,7 +5,7 @@
  *   1. empty state (no wallet detected when discovery times out)
  *   2. discover → emoji modal → confirm → capability approval → connected
  *   3. balances render (0.00 / 0.00 across both tokens)
- *   4. click 'Drip 1,000 USDC to public' → loading → success toast
+ *   4. click 'Drip 1,000 NULO to public' → loading → success toast
  *   5. disconnect → resets to empty state
  *
  * No real browser, no aztec network. The mock provider satisfies every
@@ -57,11 +57,11 @@ vi.mock("@aztec/aztec.js/node", () => ({
 
 vi.mock("@/contracts/deployments", () => ({
 	DRIPPER: { toString: () => "0xdripper", equals: () => false },
-	USDC: { toString: () => "0xusdc", equals: () => false },
-	ETH: { toString: () => "0xeth", equals: () => false },
+	NULO: { toString: () => "0xusdc", equals: () => false },
+	OLUN: { toString: () => "0xeth", equals: () => false },
 	rebuildDripperInstance: vi.fn(async () => ({ address: { toString: () => "0xdripper" } })),
-	rebuildUsdcInstance: vi.fn(async () => ({ address: { toString: () => "0xusdc" } })),
-	rebuildEthInstance: vi.fn(async () => ({ address: { toString: () => "0xeth" } })),
+	rebuildNuloInstance: vi.fn(async () => ({ address: { toString: () => "0xusdc" } })),
+	rebuildOlunInstance: vi.fn(async () => ({ address: { toString: () => "0xeth" } })),
 }))
 
 vi.mock("@/contracts/sponsored-fpc", () => ({
@@ -196,8 +196,8 @@ describe("faucet smoke", () => {
 
 		const cards = wrapper.findAll(`[data-testid="${TESTIDS.tokenCard}"]`)
 		expect(cards).toHaveLength(2)
-		expect(cards[0].attributes("data-symbol")).toBe("USDC")
-		expect(cards[1].attributes("data-symbol")).toBe("ETH")
+		expect(cards[0].attributes("data-symbol")).toBe("NULO")
+		expect(cards[1].attributes("data-symbol")).toBe("OLUN")
 	})
 
 	it("4. clicking 'Drip … to public' fires sendTx and shows a success toast", async () => {
@@ -213,8 +213,8 @@ describe("faucet smoke", () => {
 		await flushPromises()
 		await flushPromises()
 
-		const usdcCard = wrapper.findAll(`[data-testid="${TESTIDS.tokenCard}"]`).find((c) => c.attributes("data-symbol") === "USDC")
-		const dripBtn = usdcCard?.find(`[data-testid="${TESTIDS.btnDripPublic}"]`)
+		const nuloCard = wrapper.findAll(`[data-testid="${TESTIDS.tokenCard}"]`).find((c) => c.attributes("data-symbol") === "NULO")
+		const dripBtn = nuloCard?.find(`[data-testid="${TESTIDS.btnDripPublic}"]`)
 		expect(dripBtn?.exists()).toBe(true)
 		await dripBtn?.trigger("click")
 		await flushPromises()
@@ -223,7 +223,7 @@ describe("faucet smoke", () => {
 		// Toast pushed; rendered via AppToastRegion + Toast component.
 		const toasts = wrapper.findAll(`[data-testid="${TESTIDS.toast}"]`)
 		expect(toasts.length).toBeGreaterThan(0)
-		expect(toasts[0].text()).toContain("Dripped 1,000 USDC to public")
+		expect(toasts[0].text()).toContain("Dripped 1,000 NULO to public")
 	})
 
 	it("5. clicking disconnect resets back to the connect button", async () => {

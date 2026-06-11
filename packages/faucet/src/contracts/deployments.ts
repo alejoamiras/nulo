@@ -24,7 +24,7 @@ interface TokenDeployment {
 	readonly constructorArtifact: "constructor_with_minter"
 	readonly constructorArgs: {
 		readonly name: string
-		readonly symbol: "USDC" | "ETH"
+		readonly symbol: "NULO" | "OLUN"
 		readonly decimals: number
 		readonly minter: string
 	}
@@ -44,23 +44,23 @@ interface DeploymentsJson {
 
 const data = deploymentsJson as DeploymentsJson
 
-function findToken(symbol: "USDC" | "ETH"): TokenDeployment {
+function findToken(symbol: "NULO" | "OLUN"): TokenDeployment {
 	const t = data.tokens.find((t) => t.constructorArgs.symbol === symbol)
 	if (!t) throw new Error(`deployments.json missing token: ${symbol}`)
 	return t
 }
 
-const USDC_RECORD = findToken("USDC")
-const ETH_RECORD = findToken("ETH")
+const NULO_RECORD = findToken("NULO")
+const OLUN_RECORD = findToken("OLUN")
 
 export const DRIPPER = AztecAddress.fromString(data.dripper.address)
-export const USDC = AztecAddress.fromString(USDC_RECORD.address)
-export const ETH = AztecAddress.fromString(ETH_RECORD.address)
+export const NULO = AztecAddress.fromString(NULO_RECORD.address)
+export const OLUN = AztecAddress.fromString(OLUN_RECORD.address)
 
 export const DEPLOYMENT_RECORDS = {
 	dripper: data.dripper,
-	usdc: USDC_RECORD,
-	eth: ETH_RECORD,
+	nulo: NULO_RECORD,
+	olun: OLUN_RECORD,
 } as const
 
 type ReconstructedInstance = Awaited<ReturnType<typeof getContractInstanceFromInstantiationParams>>
@@ -86,10 +86,10 @@ async function rebuildTokenInstance(record: TokenDeployment): Promise<Reconstruc
 	})
 }
 
-export async function rebuildUsdcInstance(): Promise<ReconstructedInstance> {
-	return rebuildTokenInstance(USDC_RECORD)
+export async function rebuildNuloInstance(): Promise<ReconstructedInstance> {
+	return rebuildTokenInstance(NULO_RECORD)
 }
 
-export async function rebuildEthInstance(): Promise<ReconstructedInstance> {
-	return rebuildTokenInstance(ETH_RECORD)
+export async function rebuildOlunInstance(): Promise<ReconstructedInstance> {
+	return rebuildTokenInstance(OLUN_RECORD)
 }

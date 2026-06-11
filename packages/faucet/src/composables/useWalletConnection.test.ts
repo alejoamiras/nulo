@@ -56,11 +56,11 @@ vi.mock("@aztec/aztec.js/node", () => ({
 
 vi.mock("@/contracts/deployments", () => ({
 	DRIPPER: { toString: () => "0x1" },
-	USDC: { toString: () => "0x2" },
-	ETH: { toString: () => "0x3" },
+	NULO: { toString: () => "0x2" },
+	OLUN: { toString: () => "0x3" },
 	rebuildDripperInstance: vi.fn(async () => ({ address: { toString: () => "0x1" } })),
-	rebuildUsdcInstance: vi.fn(async () => ({ address: { toString: () => "0x2" } })),
-	rebuildEthInstance: vi.fn(async () => ({ address: { toString: () => "0x3" } })),
+	rebuildNuloInstance: vi.fn(async () => ({ address: { toString: () => "0x2" } })),
+	rebuildOlunInstance: vi.fn(async () => ({ address: { toString: () => "0x3" } })),
 }))
 
 vi.mock("@/contracts/bridge-deployments", () => ({

@@ -6,7 +6,7 @@
  * to u128 internally.
  */
 
-export type TokenSymbol = "USDC" | "ETH"
+export type TokenSymbol = "NULO" | "OLUN"
 
 export interface FaucetToken {
 	readonly symbol: TokenSymbol
@@ -16,8 +16,8 @@ export interface FaucetToken {
 }
 
 export const FAUCET_TOKENS: readonly FaucetToken[] = [
-	{ symbol: "USDC", decimals: 6, displayAmount: "1,000", onchainAmount: 1_000_000_000n },
-	{ symbol: "ETH", decimals: 18, displayAmount: "1", onchainAmount: 1_000_000_000_000_000_000n },
+	{ symbol: "NULO", decimals: 6, displayAmount: "1,000", onchainAmount: 1_000_000_000n },
+	{ symbol: "OLUN", decimals: 18, displayAmount: "1", onchainAmount: 1_000_000_000_000_000_000n },
 ] as const
 
 export function findFaucetToken(symbol: TokenSymbol): FaucetToken {

@@ -1,25 +1,25 @@
 {
 	"tokens": [
 		{
-			"address": "0x2af7c3bdd0bee3d825ec40786dc479bfd85f749b45da78a20ddca8ec3e4347c5",
-			"salt": 4242,
+			"address": "0x08625297b24fe09d467506c8c83082c4cbefb215e1e084365e126594ce3d944a",
+			"salt": 4244,
 			"deployer": "0x0000000000000000000000000000000000000000000000000000000000000000",
 			"constructorArtifact": "constructor_with_minter",
 			"constructorArgs": {
-				"name": "USDC",
-				"symbol": "USDC",
+				"name": "NULO",
+				"symbol": "NULO",
 				"decimals": 6,
 				"minter": "0x172684be7d86acff9c0e16b15e3f34647e5c8c26f0838a0872df7f61ddcb7070"
 			}
 		},
 		{
-			"address": "0x060e0d2735b8e7d39fabe8c02b46535b33a7d4e685fa7e31e833b2edfdc26224",
-			"salt": 4243,
+			"address": "0x24f292d7c6c1d0a56b56a83d387c3046e5b211688049d132281f3e9f3d8240a7",
+			"salt": 4245,
 			"deployer": "0x0000000000000000000000000000000000000000000000000000000000000000",
 			"constructorArtifact": "constructor_with_minter",
 			"constructorArgs": {
-				"name": "ETH",
-				"symbol": "ETH",
+				"name": "OLUN",
+				"symbol": "OLUN",
 				"decimals": 18,
 				"minter": "0x172684be7d86acff9c0e16b15e3f34647e5c8c26f0838a0872df7f61ddcb7070"
 			}

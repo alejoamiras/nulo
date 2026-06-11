@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest"
 
 vi.mock("@/contracts/deployments", () => ({
 	DRIPPER: { toString: () => "0xdripper" },
-	USDC: { toString: () => "0xusdc" },
-	ETH: { toString: () => "0xeth" },
+	NULO: { toString: () => "0xusdc" },
+	OLUN: { toString: () => "0xeth" },
 }))
 
 // VITE_EXPLORER_BASE_URL may be set via .env.local on a dev's machine,
@@ -19,10 +19,10 @@ vi.mock("@/lib/explorer", () => ({
 import Footer from "./Footer.vue"
 
 describe("Footer", () => {
-	it("renders the contract labels (USDC, ETH, Dripper)", () => {
+	it("renders the contract labels (NULO, OLUN, Dripper)", () => {
 		const w = mount(Footer)
-		expect(w.text()).toContain("USDC")
-		expect(w.text()).toContain("ETH")
+		expect(w.text()).toContain("NULO")
+		expect(w.text()).toContain("OLUN")
 		expect(w.text()).toContain("Dripper")
 	})
 
@@ -49,7 +49,7 @@ describe("Footer", () => {
 		// returns "". Footer falls back to plain text labels.
 		const w = mount(Footer)
 		const contractsLine = w.find(".contracts")
-		// Should have NO anchor tag for USDC/ETH/Dripper labels (only
+		// Should have NO anchor tag for NULO/ETH/Dripper labels (only
 		// the external "Wonderland" / "Aztec" links).
 		const anchors = contractsLine.findAll("a")
 		expect(anchors.length).toBe(0)
