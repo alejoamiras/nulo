@@ -1090,6 +1090,76 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 		expect(prompted).toBe(true)
 	})
 
+	test("an approved contracts re-consent PERSISTS the replacement grant (codex post-impl condition)", async () => {
+		const session = makeSession({ capabilityGrants: [grant(["0xold"])] })
+		const { writer, calls } = makeSessionWriter(session)
+		// The popup echoes the existing cap alongside the newly approved delta (approvedNew + existing).
+		const dispatcher = makeDispatcher(
+			writer,
+			async () =>
+				({
+					granted: [
+						{ type: "contracts", contracts: ["0xold", "0xnew"], canRegister: true, canGetMetadata: true },
+						{ type: "contracts", contracts: ["0xold"], canRegister: true, canGetMetadata: true },
+					],
+				}) as never,
+		)
+		await dispatcher.dispatch("requestCapabilities", [manifest(["0xold", "0xnew"])], ctx)
+		const stored = calls.setGrants.at(-1) ?? []
+		const contractsGrants = stored.filter((g) => g.capability.type === "contracts")
+		expect(contractsGrants).toHaveLength(1) // replaced, not duplicated
+		const addrs = (contractsGrants[0].capability as { contracts: string[] }).contracts
+		expect(addrs).toContain("0xnew")
+
+		// And the follow-up request is now COVERED - no second prompt.
+		let promptedAgain = false
+		const dispatcher2 = makeDispatcher(writer, async () => {
+			promptedAgain = true
+			return { granted: [] } as never
+		})
+		await dispatcher2.dispatch("requestCapabilities", [manifest(["0xold", "0xnew"])], ctx)
+		expect(promptedAgain).toBe(false)
+	})
+
+	test("a REJECTED contracts re-consent keeps the old grant intact (rejection interplay)", async () => {
+		const session = makeSession({ capabilityGrants: [grant(["0xold"])] })
+		const { writer, calls } = makeSessionWriter(session)
+		const dispatcher = makeDispatcher(writer, async () => ({ granted: [] }) as never)
+		await dispatcher.dispatch("requestCapabilities", [manifest(["0xold", "0xnew"])], ctx).catch(() => {})
+		const stored = calls.setGrants.at(-1)
+		if (stored) {
+			const contractsGrants = stored.filter((g) => g.capability.type === "contracts")
+			expect(contractsGrants).toHaveLength(1)
+			expect((contractsGrants[0].capability as { contracts: string[] }).contracts).toEqual(["0xold"])
+		}
+	})
+
+	test("the reader receives the SESSION context's profileId and chainId verbatim (stickiness pin)", async () => {
+		const session = makeSession({
+			capabilityGrants: [
+				{
+					capability: { type: "contracts", contracts: ["0xtok"], canGetMetadata: true },
+					grantedAt: 1,
+				} as unknown as GrantedCapabilityRecord,
+			],
+		})
+		const { writer } = makeSessionWriter(session)
+		const seen: unknown[] = []
+		const reader = {
+			isTokenRegistered: async (address: string, profileId: string, chainId: number) => {
+				seen.push([address, profileId, chainId])
+				return false
+			},
+		}
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({})) as never,
+		}
+		const dispatcher = new WalletSdkDispatcher(stubNetwork, stubAccount, stubExecution, interaction, writer, noopLogger, reader)
+		await dispatcher.dispatch("isTokenRegistered", ["0xtok"], { ...ctx, profileId: "profile-A", chainId: 42 })
+		expect(seen[0]).toEqual(["0xtok", "profile-A", 42])
+	})
+
 	test("a flag upgrade re-prompts even with the same addresses", async () => {
 		const session = makeSession({ capabilityGrants: [grant(["0xa"], { canRegister: true, canGetMetadata: false })] })
 		const { writer } = makeSessionWriter(session)

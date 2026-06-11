@@ -702,12 +702,37 @@ export class WalletSdkDispatcher {
 		const approvedTypes = new Set(grantedResults.map((cap) => cap.type as string))
 		const now = Date.now()
 
-		// New grants: approved delta items that weren't already granted
-		const newGrants: GrantedCapabilityRecord[] = grantedResults
-			.filter((cap) => !grantedTypes.has(cap.type as Capability["type"]) || rejectedTypes.has(cap.type as string))
-			.map((cap) => ({ capability: cap as Capability, grantedAt: now }))
-		// Merge: keep existing grants (excluding re-approved types) + new grants
-		const mergedGrants = [...existingGrants.filter((g) => !rejectedTypes.has(g.capability.type)), ...newGrants]
+		// Approved DELTA types REPLACE their stored grant (never-granted types simply append).
+		// The old type-only filter silently dropped re-approved types: a contracts re-consent
+		// (field-diff, e.g. after a redeploy adds token addresses) was REPORTED granted but never
+		// persisted - every later call still refused on the stale grant. Same hole applied to
+		// accounts upgrades. The popup echoes existing caps alongside the newly approved delta,
+		// so for replaced types we take the LAST result entry of that type that differs from the
+		// stored capability (falling back to the delta's requested shape).
+		const deltaApprovedTypes = new Set(delta.filter((cap) => approvedTypes.has(cap.type as string)).map((cap) => cap.type as string))
+		const replacementFor = (type: string): Capability | undefined => {
+			const stored = existingGrants.find((g) => g.capability.type === type)?.capability
+			const candidates = grantedResults.filter((cap) => cap.type === type)
+			const changed = candidates.filter((cap) => JSON.stringify(cap) !== JSON.stringify(stored))
+			return (changed[changed.length - 1] ?? candidates[candidates.length - 1]) as Capability | undefined
+		}
+		const newGrants: GrantedCapabilityRecord[] = []
+		for (const cap of grantedResults) {
+			const type = cap.type as string
+			if (deltaApprovedTypes.has(type)) continue // handled via replacement below (dedupes echoes).
+			if (!grantedTypes.has(type as Capability["type"]) || rejectedTypes.has(type)) {
+				newGrants.push({ capability: cap as Capability, grantedAt: now })
+			}
+		}
+		for (const type of deltaApprovedTypes) {
+			const replacement = replacementFor(type) ?? (delta.find((c) => c.type === type) as unknown as Capability)
+			newGrants.push({ capability: replacement, grantedAt: now })
+		}
+		// Merge: keep existing grants minus rejected AND minus replaced types, then the new records.
+		const mergedGrants = [
+			...existingGrants.filter((g) => !rejectedTypes.has(g.capability.type) && !deltaApprovedTypes.has(g.capability.type)),
+			...newGrants,
+		]
 
 		await this.dappSessionService.setCapabilityGrants(dappSession.id, mergedGrants)
 

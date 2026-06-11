@@ -231,7 +231,7 @@ function fmt(b: bigint | null): string {
 		<template v-else>
 		<header>
 			<h3>BRIDGE {{ BRIDGE_TOKEN_SYMBOL }}</h3>
-			<p class="sub">Move test USDC between Ethereum (Sepolia) and Aztec, 1:1. Bridges you background land in Pending Bridges below.</p>
+			<p class="sub">Move test {{ BRIDGE_TOKEN_SYMBOL }} between Ethereum (Sepolia) and Aztec, 1:1. Bridges you background land in Pending Bridges below.</p>
 		</header>
 
 		<div class="panels">
