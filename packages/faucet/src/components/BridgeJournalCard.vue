@@ -236,7 +236,7 @@ function onDiscard() {
 }
 
 .dismiss:hover {
-	color: var(--red);
+	color: var(--txt-primary);
 }
 
 .journal-card[data-attention] {
