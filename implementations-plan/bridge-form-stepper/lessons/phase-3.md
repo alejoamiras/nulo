@@ -61,3 +61,7 @@ LESSONS_FILE=implementations-plan/bridge-form-stepper/lessons/phase-3.md
   - `humanizeWalletError` at the flow boundary: the timeout reads "The wallet's confirmation window timed out before you could sign. Reopen your wallet and retry." Unknown messages pass through.
   - Phase attribution: `rt.claimable` (gate passed) now selects CLAIM as the active/failed phase - a post-gate failure can no longer plant its X on a visibly-complete CROSSING.
   - Error notes render ONCE: error/unknown-outcome notes live in the rail's failed phase; the card's separate note line keeps only non-failing attentions (mismatch/stale) + soft notes.
+
+## 2026-06-11 - vanishing-done-cards audit (user report: "sometimes disappears after re-engaging")
+- ROOT CAUSE: not a race - the F12 provenance-scoped auto-hide. A re-engaged card whose claim SEND happened in this tab gained provenance ⇒ auto-hid after the 8s grace; a pure receipt-resume (claimTxHash from an earlier session) had no provenance ⇒ stayed. "Sometimes" = which path the re-engagement took.
+- FIX: auto-hide retired (it predates the ✕ dismiss). Completed cards stay until (a) the user's ✕ or (b) the foreground receipt path closes via NEW BRIDGE (`hideCompleted` - refuses non-completed records, pinned). `localClaimProvenance` keeps its TRUST role (checkpoint completion without the probe); only the hide side-effect went. Engine + smoke pins rewritten to the new contract.
