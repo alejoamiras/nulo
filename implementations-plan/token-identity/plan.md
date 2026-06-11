@@ -45,7 +45,7 @@ Files: `packages/faucet/scripts/deploy-config.ts`/`deploy.ts` (NULO/OLUN entries
 Smallest proof: deploy scripts run green on testnet with the new names/decimals; the symmetry assert fires on an intentionally mismatched dry-run; addresses recorded.
 Validate: script runs + the suites stay green UNTOUCHED (`bun run --cwd packages/faucet test && typecheck`).
 
-### P2 - The capability-gated RPC + contracts field-diff + consent copy ⬜
+### P2 - The capability-gated RPC + contracts field-diff + consent copy ✓
 Files: wallet-bridge (`scope-enforcement.ts` `checkIsTokenRegistered` mirroring `checkGetContractMetadata`; a direct dispatcher read handler; `capability-map.ts` entry → `contracts`; the CONTRACTS FIELD-DIFF in the re-consent delta (D5) - request-list ⊄ grant-list ⇒ re-prompt, approval replaces the grant), the background wiring for the `TokenService.getTokens` reader, consent copy (`capability-meta.ts` + `CapabilityDetailPanel.vue` - D6), schema patch ×3, `dispatcher.test.ts` (reachability + gating matrix + 3-copy content-equality + FIELD-DIFF pins: superset request re-prompts, subset/equal does not, approval merges), faucet manifest `capabilities.ts` (new token addresses), playground schema-patch copy.
 Smallest proof: reachability; gating matrix (granted ⇒ boolean, ungranted ⇒ scope-violation, no grant ⇒ refusal); field-diff matrix; 3-copy equality; consent copy snapshot mentions the registration check.
 Validate: `bun run --cwd packages/wallet-bridge test` + extension typecheck + `bun run lint`.
