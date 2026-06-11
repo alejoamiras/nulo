@@ -104,7 +104,7 @@ import {
 } from "./spec"
 import { coerceAmount } from "./coerce-amount"
 import { OperationPlanner } from "./operation-planner"
-import { ContractResolver } from "./contract-resolver"
+import { ContractResolver, findFunctionByName } from "./contract-resolver"
 import { batchedViewSimulation } from "./helpers/batched-view-simulation"
 import { getViewSimulationDeps } from "./helpers/get-view-simulation-deps"
 import type { MaterializedRegisterTokenOperation } from "./models"
@@ -1442,8 +1442,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		const [_, instance] = await this.resolver.resolveInstance(pxe, op.contract)
 		const [__, artifact] = await this.resolver.resolveArtifact(pxe, instance.currentContractClassId.toString())
 
-		const fn =
-			artifact.functions.find((x) => x.name === op.method) ?? artifact.nonDispatchPublicFunctions.find((x) => x.name === op.method)
+		const fn = findFunctionByName(artifact, op.method)
 		if (!fn) {
 			throw new Error("Method not found")
 		}

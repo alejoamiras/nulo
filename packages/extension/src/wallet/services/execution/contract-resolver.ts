@@ -26,7 +26,7 @@
  */
 
 import { Fr } from "@aztec/foundation/curves/bn254"
-import type { ContractArtifact } from "@aztec/stdlib/abi"
+import { type ContractArtifact, type FunctionAbi, FunctionSelector } from "@aztec/stdlib/abi"
 import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { type ILogger, LogLevel } from "@/wallet/logger"
@@ -34,6 +34,30 @@ import type { IPXE } from "@nulo/aztec-runtime/pxe"
 import type { Action, AddPrivateAuthwitAction, AddPublicAuthwitAction, CallAuthwitContent, EncodedCallAuthwitContent } from "./spec"
 
 const LOG_SOURCE = "ContractResolver"
+
+/** Find a function ABI by name. Lookup order is FROZEN: `functions[]`
+ *  first, then `nonDispatchPublicFunctions[]` — callers across the
+ *  execution layer depend on a name collision resolving to the
+ *  dispatch-able entry. Returns `undefined` when absent; callers own
+ *  their (frozen) error text. */
+export function findFunctionByName(artifact: ContractArtifact, name: string): FunctionAbi | undefined {
+	return artifact.functions.find((x) => x.name === name) ?? artifact.nonDispatchPublicFunctions.find((x) => x.name === name)
+}
+
+/** Find a function ABI by selector string. Same frozen lookup order as
+ *  `findFunctionByName`. Async because selector derivation is. Returns
+ *  `undefined` when absent; callers own their error text. */
+export async function findFunctionBySelector(artifact: ContractArtifact, selector: string): Promise<FunctionAbi | undefined> {
+	for (const fn of artifact.functions) {
+		const sel = await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)
+		if (sel.toString() === selector) return fn
+	}
+	for (const fn of artifact.nonDispatchPublicFunctions) {
+		const sel = await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)
+		if (sel.toString() === selector) return fn
+	}
+	return undefined
+}
 
 export class ContractResolver {
 	public constructor(private readonly logger: ILogger) {}
@@ -101,6 +125,33 @@ export class ContractResolver {
 			throw new Error(`Contract artifact not found for class ${classId}`)
 		}
 		return [classId, artifact]
+	}
+
+	/** Register every instance PXE doesn't already know about. One
+	 *  `getContracts()` snapshot, then per-instance `registerContract`
+	 *  with the matching artifact. Log messages differ per call site, so
+	 *  sites pass hooks instead of the helper guessing. */
+	public async ensureContractsRegistered(
+		pxe: IPXE,
+		instances: Map<string, ContractInstanceWithAddress>,
+		artifacts: Map<string, ContractArtifact>,
+		hooks?: {
+			onRegister?: (contract: string, instance: ContractInstanceWithAddress) => void
+			onSkip?: (contract: string) => void
+		},
+	): Promise<void> {
+		const registered = new Set<string>((await pxe.getContracts()).map((x) => x.toString()))
+		for (const [contract, instance] of instances) {
+			if (!registered.has(contract)) {
+				hooks?.onRegister?.(contract, instance)
+				await pxe.registerContract({
+					instance,
+					artifact: artifacts.get(instance.currentContractClassId.toString()),
+				})
+			} else {
+				hooks?.onSkip?.(contract)
+			}
+		}
 	}
 
 	/** Fetch artifacts for every UNIQUE class id referenced by `instances`.

@@ -139,7 +139,7 @@ import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import type { CallAction, EncodedCallAction } from "@nulo/wallet-bridge"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { type ILogger, LogLevel } from "@/wallet/logger"
-import type { ContractResolver } from "../contract-resolver"
+import { type ContractResolver, findFunctionByName, findFunctionBySelector } from "../contract-resolver"
 import { getBlockHeaderAnchor } from "./block-header-anchor"
 
 const LOG_SOURCE = "batched-view-simulation"
@@ -180,16 +180,9 @@ export async function batchedViewSimulation(
 	const artifacts = await contractResolver.resolveArtifacts(pxe, instances)
 
 	// Register any contract PXE doesn't already know about.
-	const registeredContracts = new Set<string>((await pxe.getContracts()).map((x) => x.toString()))
-	for (const [contract, instance] of instances) {
-		if (!registeredContracts.has(contract)) {
-			logger?.log(LOG_SOURCE, LogLevel.Debug, `Register contract ${contract}`)
-			await pxe.registerContract({
-				instance,
-				artifact: artifacts.get(instance.currentContractClassId.toString()),
-			})
-		}
-	}
+	await contractResolver.ensureContractsRegistered(pxe, instances, artifacts, {
+		onRegister: (contract) => logger?.log(LOG_SOURCE, LogLevel.Debug, `Register contract ${contract}`),
+	})
 
 	await account.ensureRegistered(pxe)
 
@@ -572,20 +565,4 @@ async function classifyCall(
 		),
 		returnTypes: fn.returnTypes,
 	}
-}
-
-function findFunctionByName(artifact: ContractArtifact, name: string): FunctionAbi | undefined {
-	return artifact.functions.find((x) => x.name === name) ?? artifact.nonDispatchPublicFunctions.find((x) => x.name === name)
-}
-
-async function findFunctionBySelector(artifact: ContractArtifact, selector: string): Promise<FunctionAbi | undefined> {
-	for (const fn of artifact.functions) {
-		const sel = await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)
-		if (sel.toString() === selector) return fn
-	}
-	for (const fn of artifact.nonDispatchPublicFunctions) {
-		const sel = await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters)
-		if (sel.toString() === selector) return fn
-	}
-	return undefined
 }

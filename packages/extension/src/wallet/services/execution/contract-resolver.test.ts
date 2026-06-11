@@ -181,3 +181,115 @@ describe("ContractResolver.resolveArtifacts", () => {
 		expect(result.size).toBe(0)
 	})
 })
+
+// ── Q17 additions: function lookups + ensure-registered ────────────────
+
+import { findFunctionByName, findFunctionBySelector } from "./contract-resolver"
+import { FunctionSelector } from "@aztec/stdlib/abi"
+
+// Selector derivation hits Barretenberg's poseidon hash, which isn't
+// booted in the unit environment. Stub ONLY fromNameAndParameters with a
+// deterministic shape; the lookup logic under test is order/equality, not
+// hashing. (vi.mock hoists above all imports.)
+vi.mock("@aztec/stdlib/abi", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@aztec/stdlib/abi")>()
+	return {
+		...actual,
+		FunctionSelector: {
+			fromNameAndParameters: async (name: string, parameters: unknown[]) => ({
+				toString: () => `sel:${name}:${parameters.length}`,
+			}),
+		},
+	}
+})
+
+/** Minimal FunctionAbi-shaped entries. Empty parameter lists keep
+ *  selector derivation deterministic without pulling real artifacts. */
+function fakeFn(name: string): { name: string; parameters: never[] } {
+	return { name, parameters: [] }
+}
+
+function fakeArtifactWithFns(functions: { name: string }[], nonDispatch: { name: string }[]): ContractArtifact {
+	return { functions, nonDispatchPublicFunctions: nonDispatch } as unknown as ContractArtifact
+}
+
+describe("findFunctionByName: frozen lookup order", () => {
+	test("functions[] wins over nonDispatchPublicFunctions[] on a name collision", () => {
+		const inFunctions = { name: "transfer", marker: "dispatch" }
+		const inNonDispatch = { name: "transfer", marker: "non-dispatch" }
+		const artifact = fakeArtifactWithFns([inFunctions], [inNonDispatch])
+		expect(findFunctionByName(artifact, "transfer")).toBe(inFunctions)
+	})
+
+	test("falls through to nonDispatchPublicFunctions[] when absent from functions[]", () => {
+		const target = { name: "view_balance" }
+		const artifact = fakeArtifactWithFns([{ name: "other" }], [target])
+		expect(findFunctionByName(artifact, "view_balance")).toBe(target)
+	})
+
+	test("returns undefined when the name exists in neither list", () => {
+		const artifact = fakeArtifactWithFns([{ name: "a" }], [{ name: "b" }])
+		expect(findFunctionByName(artifact, "missing")).toBeUndefined()
+	})
+})
+
+describe("findFunctionBySelector: frozen lookup order", () => {
+	test("matches in functions[] by derived selector", async () => {
+		const fnA = fakeFn("alpha")
+		const fnB = fakeFn("beta")
+		const artifact = fakeArtifactWithFns([fnA, fnB], [])
+		const selB = (await FunctionSelector.fromNameAndParameters(fnB.name, fnB.parameters)).toString()
+		expect(await findFunctionBySelector(artifact, selB)).toBe(fnB)
+	})
+
+	test("falls through to nonDispatchPublicFunctions[]", async () => {
+		const fnA = fakeFn("alpha")
+		const fnNd = fakeFn("gamma")
+		const artifact = fakeArtifactWithFns([fnA], [fnNd])
+		const selNd = (await FunctionSelector.fromNameAndParameters(fnNd.name, fnNd.parameters)).toString()
+		expect(await findFunctionBySelector(artifact, selNd)).toBe(fnNd)
+	})
+
+	test("returns undefined for an unknown selector", async () => {
+		const artifact = fakeArtifactWithFns([fakeFn("alpha")], [fakeFn("beta")])
+		expect(await findFunctionBySelector(artifact, "0xdeadbeef")).toBeUndefined()
+	})
+})
+
+describe("ContractResolver.ensureContractsRegistered", () => {
+	function makeRegistrationFixture() {
+		const artifactX = { name: "X" } as unknown as ContractArtifact
+		const instances = new Map<string, ContractInstanceWithAddress>([
+			["0xregistered", fakeInstance("0xclassA")],
+			["0xmissing", fakeInstance("0xclassX")],
+		])
+		const artifacts = new Map<string, ContractArtifact>([["0xclassX", artifactX]])
+		const registerContract = vi.fn(async () => {})
+		const pxe = {
+			getContracts: async () => [{ toString: () => "0xregistered" }],
+			registerContract,
+		} as unknown as IPXE
+		return { instances, artifacts, registerContract, pxe, artifactX }
+	}
+
+	test("registers only instances PXE doesn't know, with the matching artifact", async () => {
+		const { instances, artifacts, registerContract, pxe, artifactX } = makeRegistrationFixture()
+		const resolver = new ContractResolver(fakeLogger())
+		await resolver.ensureContractsRegistered(pxe, instances, artifacts)
+		expect(registerContract).toHaveBeenCalledTimes(1)
+		expect(registerContract).toHaveBeenCalledWith({ instance: instances.get("0xmissing"), artifact: artifactX })
+	})
+
+	test("hooks: onRegister fires for missing, onSkip for already-registered", async () => {
+		const { instances, artifacts, pxe } = makeRegistrationFixture()
+		const resolver = new ContractResolver(fakeLogger())
+		const registered: string[] = []
+		const skipped: string[] = []
+		await resolver.ensureContractsRegistered(pxe, instances, artifacts, {
+			onRegister: (contract) => registered.push(contract),
+			onSkip: (contract) => skipped.push(contract),
+		})
+		expect(registered).toEqual(["0xmissing"])
+		expect(skipped).toEqual(["0xregistered"])
+	})
+})
