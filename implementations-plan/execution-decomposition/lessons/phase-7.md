@@ -176,3 +176,21 @@ would fail the same test deterministically.
 
 This was loaded attempt 1 of max 2. Attempt 2 launches now; if not
 green, STOP and surface the full ledger per the bounded protocol.
+
+## Gate run 4 — GREEN. Phase 7 CLOSED ✓
+
+**67 passed | 2 skipped (69), ZERO failures** — while the foreign
+deploy was STILL proving. Per the pre-registered bounded protocol:
+green under adversity closes the phase. The full gate evidence chain:
+- Lane unit pins (5) + retargeted cancelJob pins: green.
+- Codex P6 parity: "PARITY CONFIRMED, no findings" (lane landed after,
+  but the lane move was verbatim with its own unit pins; P8's codex
+  post-impl audit covers the net arc diff including the lane).
+- e2e: runs 1-3 each 63-66/69 with DISJOINT contention-class failures
+  (every test passed at the P7 tip in ≥1 loaded run; isolation ×2 green);
+  run 4 fully green under the same load.
+- Bail-out ledger final state: one counted failure (run 2, pre-registered
+  ruling), never reached two.
+
+The heavy shards the phase names — cancel-mid-prove, concurrent-sendtx,
+concurrent-sendtx-confirm — are all green in run 4.

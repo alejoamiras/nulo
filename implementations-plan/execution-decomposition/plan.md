@@ -72,7 +72,7 @@ With seams stable, move the remaining heavy bodies (ledger D4 — phase my draft
 - This checkpoint is where old private helpers die — no compatibility shims left behind. Gate adds `wc -l service.ts` ≤ 1,200 (see Ask A1).
 e2e focus: full suite. Revert: bodies inline again; public methods are thin delegates.
 
-### Phase 7 — Q23: execution-lane seam (1.5-2d, bounded)
+### Phase 7 ✓ — Q23: execution-lane seam (1.5-2d, bounded)
 The riskiest semantics, deliberately last (ledger D3): new `execution-lane.ts` owning `activeControllers`, `executionMutex`, `executionWaiters`, begin/end/heartbeat of execution waits, `acquireExecutionSlot`, the `claimOrCreateDappExecuteJournal` wrapper, and `cancelJob`. Facade consumes a handle; executors adopt it.
 - CONSTRAINTS (registry, verbatim): mutex no-timeout/no-force-release; FIFO baton release point (`onExecutionEnqueued`) unchanged; "transition journal first, abort second" preserved exactly; `JobCancelledSentinel` never crosses RPC (`rpc-cancel.ts` stays the boundary); journal FSM transition table untouched; sync-register invariant (controller registered before first await).
 - Microtask-level race tests in `execution-lane.test.ts` + existing `claim-helper`/`execution-mutex`/journal race suites stay green untouched.
