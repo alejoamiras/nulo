@@ -1,4 +1,8 @@
-import type { AztecAddress } from "@aztec/aztec.js/addresses"
+import { feeJuiceAddress } from "@nulo/bridge-core"
+
+/** The canonical L2 FeeJuice protocol contract (identical on every network). */
+const FEE_JUICE_L2 = AztecAddress.fromString(feeJuiceAddress)
+import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { ProtocolContractAddress } from "@aztec/protocol-contracts"
 
 /**
@@ -151,7 +155,14 @@ export function buildBridgeManifest(input: BridgeManifestInput): AppManifest {
 			{
 				type: "simulation",
 				utilities: { scope: [{ contract: tokenAddress, function: "balance_of_private" }] },
-				transactions: { scope: [{ contract: tokenAddress, function: "balance_of_public" }] },
+				// The fuel claim (canonical FeeJuice, a protocol contract) must be simulatable: the
+				// engine's claim gate dry-runs the token claim WITH the embedded fjwc fee payment.
+				transactions: {
+					scope: [
+						{ contract: tokenAddress, function: "balance_of_public" },
+						{ contract: FEE_JUICE_L2, function: "claim_and_end_setup" },
+					],
+				},
 			},
 			{
 				type: "transaction",
@@ -163,6 +174,8 @@ export function buildBridgeManifest(input: BridgeManifestInput): AppManifest {
 					{ contract: tokenAddress, function: "burn_public" },
 					{ contract: tokenAddress, function: "burn_private" },
 					{ contract: sponsoredFpcAddress, function: "sponsor_unconditionally" },
+					// The gas claim riding inside a fueled deposit's claim tx (fjwc embedded payment).
+					{ contract: FEE_JUICE_L2, function: "claim_and_end_setup" },
 				],
 			},
 		],
@@ -233,6 +246,7 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 						{ contract: tokenAddress, function: "burn_private" },
 						{ contract: sponsoredFpcAddress, function: "sponsor_unconditionally" },
 						{ contract: ProtocolContractAddress.AuthRegistry, function: "set_authorized" },
+						{ contract: FEE_JUICE_L2, function: "claim_and_end_setup" },
 					],
 				},
 			},
@@ -241,6 +255,7 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 				scope: [
 					{ contract: dripperAddress, function: "drip_to_public" },
 					{ contract: dripperAddress, function: "drip_to_private" },
+					{ contract: FEE_JUICE_L2, function: "claim_and_end_setup" },
 					{ contract: bridgeAddress, function: "claim_public" },
 					{ contract: bridgeAddress, function: "claim_private" },
 					{ contract: bridgeAddress, function: "exit_to_l1_public" },
