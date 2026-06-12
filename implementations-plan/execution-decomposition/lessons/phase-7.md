@@ -95,3 +95,29 @@ following pre-registered classification:
 - **FAIL, any wallet-behavior assertion** (journal stage, FIFO order,
   nullifier, balance) → REAL failure #1 regardless of load — behavior
   failures are not load artifacts.
+
+## Gate run 2 — RESULT: 66/69, classified REAL failure #1
+
+`concurrent-sendtx` (reject variant: two queued sendTx, both popups
+rejected, both dApp promises must error — "neither hangs" is the
+contract) timed out ×3 retries at the FIRST `waitForPgResult` (30s)
+after both rejects. Everything upstream passed: queued journal stages,
+≥2 awaiting cards, second popup opened after first reject (baton OK),
+second reject clicked.
+
+Classification per the pre-registered rule: a dApp promise that never
+settles is a BEHAVIORAL symptom (hang), not an infra signature → REAL
+failure #1. Counterweights recorded honestly:
+- The reject path never reaches `acquireSlot`/the execution mutex —
+  rejection happens at the approval layer, upstream of execution. No
+  obvious lane involvement.
+- The same test PASSED in run 1 under heavier load, and the sibling
+  `concurrent-sendtx-confirm` (same mutex machinery, full prove+confirm)
+  PASSED in run 2 — the lane serializes and releases end-to-end.
+- The nulo-4 deploy was still proving during run 2 (~1-2 cores).
+
+Investigation in flight: isolated `e2e:agent
+tests/e2e/network/concurrent-sendtx.test.ts` at the P7 tip. Plan:
+isolated PASS ×2 → environmental/page-starvation flake, next full gate
+decides; isolated FAIL → bisect P6-tip vs P7-tip (same discrimination
+matrix as the phase-3 nullifier investigation).
