@@ -81,11 +81,11 @@ What does NOT exist: a live deployment of router/swapper, an AZLO/WETH pool, quo
 - Expect NO `contracts` registration for FeeJuice (protocol contract pre-known to PXE) — manual smoke confirms; registration is the documented fallback.
 **Gate MET 2026-06-12** (code-side): wallet-bridge 124 (6 new scope-diff pins incl. the split-across-grants enforcement-mirror case), faucet 284 (manifest pins), extension typecheck 0. The manual dev-build smoke (fresh + pre-existing grant) is P7 item 1 — the popup already renders the DELTA as the consent subject by construction (the dispatcher sends only the delta caps for approval, existing ones as context).
 
-### P5 — Live headless validation + MIN_FUEL_FJ calibration (moved before UI per L15)
+### P5 ✓ — Live headless validation + MIN_FUEL_FJ calibration (moved before UI per L15)
 **Goal:** the whole loop proven on live testnet — and the floor calibrated — before any UI ships.
 - `packages/bridge-core/scripts/fuel-testnet.ts` (modeled on `deposit-testnet.ts`): mint live AZLO → `runSwapBridge` against the live router (live-validates the pinned flow) → EmbeddedWallet with real proofs: fresh account deployed via sponsored FPC, then `claim_public` paid via `publicFeeJuicePayment` (the claim pays for itself from the claimed FJ), assert L2 AZLO + FJ balances; repeat the private variant.
 - Calibrate `MIN_FUEL_FJ` from the observed claim fee (≈ 2× a real claim's max fee); finalize the provisional config value from P2.
-**Gate:** both variants pass end-to-end (~30-60 min with real proofs); `minFuelFj` finalized in `testnet-bridge.json`; lessons + `deployments.md` updated.
+**Gate MET 2026-06-12:** BOTH variants passed in 6.7m (far under budget — the live testnet was fast). The self-paying claim is REAL: fresh account, one tx claims fuel (as fee) + tokens; private variant banked 462.5 FJ after fees. Observed claim fees: public 5.50 FJ, private 3.03 FJ ⇒ `minFuelFj` finalized at 11.0 FJ (2× worst); a 487-FJ design fill carries ~88× headroom.
 
 ### P6 — Faucet UI: fuel toggle, fueled deposit, claim tail, stepper
 **Goal:** the one-flow fuel experience.

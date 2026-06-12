@@ -29,8 +29,7 @@
 				}
 			},
 			"slippageBps": 300,
-			"minFuelFj": "100000000000000000000",
-			"minFuelFjProvisional": true
+			"minFuelFj": "11001040559015000000"
 		}
 	},
 	"l2": {
