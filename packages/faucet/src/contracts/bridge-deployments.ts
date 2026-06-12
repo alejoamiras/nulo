@@ -21,6 +21,7 @@ export const L1_PORTAL = config.l1.portal as `0x${string}`
 export interface FuelDeployment {
 	router: `0x${string}`
 	swapTarget: `0x${string}`
+	permit2: `0x${string}`
 	poolManager: `0x${string}`
 	quoter: `0x${string}`
 	weth: `0x${string}`
@@ -38,6 +39,7 @@ export const BRIDGE_FUEL: FuelDeployment | undefined = fuelCfg
 	? {
 			router: fuelCfg.router as `0x${string}`,
 			swapTarget: fuelCfg.swapTarget as `0x${string}`,
+			permit2: fuelCfg.permit2 as `0x${string}`,
 			poolManager: fuelCfg.poolManager as `0x${string}`,
 			quoter: fuelCfg.quoter as `0x${string}`,
 			weth: fuelCfg.weth as `0x${string}`,
