@@ -5,14 +5,14 @@ import TokenCard from "@/components/TokenCard.vue"
 import WalletPanel from "@/components/WalletPanel.vue"
 import { useWalletConnection } from "@/composables/useWalletConnection"
 import { FAUCET_TOKENS } from "@/constants/tokens"
-import { ETH, USDC } from "@/contracts/deployments"
+import { NULO, OLUN } from "@/contracts/deployments"
 
 const { status, wallet, selectedAccount } = useWalletConnection()
 
 const tokenEntries = computed(() =>
 	FAUCET_TOKENS.map((token) => ({
 		token,
-		address: token.symbol === "USDC" ? USDC : ETH,
+		address: token.symbol === "NULO" ? NULO : OLUN,
 	})),
 )
 
@@ -24,7 +24,7 @@ const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.from
 		<header class="hero">
 			<h1>DRIP TEST ASSETS</h1>
 			<p class="sub">
-				Alpha-testnet only. Connect an Aztec wallet and mint fixed USDC or ETH into a public or
+				Alpha-testnet only. Connect an Aztec wallet and mint fixed NULO or OLUN into a public or
 				private balance. Internal faucet. No real value.
 			</p>
 		</header>

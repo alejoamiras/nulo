@@ -35,3 +35,8 @@ export function explorerAddressUrl(addr: string): string {
 	if (!b || !addr) return ""
 	return `${b}/contracts/instances/${addr}`
 }
+
+/** Sepolia etherscan address page (no validation needed - addresses are public routing data). */
+export function etherscanAddressUrl(addr: string): string {
+	return addr ? `https://sepolia.etherscan.io/address/${addr}` : ""
+}

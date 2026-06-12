@@ -5,7 +5,7 @@ import { isSealTrusted } from "@nulo/bridge-core"
 import { AppButton } from "@nulo/design"
 import { sepolia } from "viem/chains"
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue"
-import { BRIDGE_TOKEN } from "@/contracts/bridge-deployments"
+import { BRIDGE_TOKEN, BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
 
 /** Components */
 import BridgeReceipt, { type ReceiptSnapshot } from "./BridgeReceipt.vue"
@@ -24,6 +24,7 @@ import { useWithdrawFlow } from "@/composables/useWithdraw"
 
 /** Utils */
 import type { DepositJournalRecord, WithdrawJournalRecord } from "@nulo/bridge-core"
+import { formatBigInt, parseAmount } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
 
 const l1 = useL1Wallet()
@@ -80,11 +81,7 @@ const fromChain = computed(() => (direction.value === "l1-to-l2" ? "ethereum" : 
 const toChain = computed(() => (direction.value === "l1-to-l2" ? "aztec" : "ethereum"))
 const fromBalance = computed(() => (fromChain.value === "ethereum" ? usdc.balance.value : l2Balance.value))
 
-const amountUnits = computed(() => {
-	const n = Number(amount.value || "0")
-	if (!Number.isFinite(n) || n <= 0) return 0n
-	return BigInt(Math.round(n * 1e6))
-})
+const amountUnits = computed(() => parseAmount(amount.value || "0", BRIDGE_TOKEN_DECIMALS))
 
 // Validation surfaces only after the user has engaged with the amount (or tried to submit) -
 // a freshly connected wallet must never open on an error it didn't cause.
@@ -93,7 +90,7 @@ const validationError = computed(() => {
 	if (!amount.value || amountUnits.value === 0n) return null
 	if (fromBalance.value !== null && amountUnits.value > fromBalance.value) {
 		return fromChain.value === "ethereum"
-			? "Amount exceeds your Sepolia USDC balance."
+			? `Amount exceeds your Sepolia ${BRIDGE_TOKEN_SYMBOL} balance.`
 			: `Amount exceeds your Aztec ${isPrivate.value ? "private" : "public"} balance.`
 	}
 	return null
@@ -218,7 +215,7 @@ function onNewBridge() {
 
 function fmt(b: bigint | null): string {
 	if (b === null) return "-"
-	return (Number(b) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 })
+	return formatBigInt(b, BRIDGE_TOKEN_DECIMALS)
 }
 </script>
 
@@ -233,8 +230,8 @@ function fmt(b: bigint | null): string {
 		<BridgeReceipt v-else-if="formStage === 'receipt' && receiptSnapshot" :snapshot="receiptSnapshot" @new-bridge="onNewBridge" />
 		<template v-else>
 		<header>
-			<h3>BRIDGE USDC</h3>
-			<p class="sub">Move test USDC between Ethereum (Sepolia) and Aztec, 1:1. Bridges you background land in Pending Bridges below.</p>
+			<h3>BRIDGE {{ BRIDGE_TOKEN_SYMBOL }}</h3>
+			<p class="sub">Move test {{ BRIDGE_TOKEN_SYMBOL }} between Ethereum (Sepolia) and Aztec, 1:1. Bridges you background land in Pending Bridges below.</p>
 		</header>
 
 		<div class="panels">
@@ -242,7 +239,7 @@ function fmt(b: bigint | null): string {
 				<span class="role">FROM</span>
 				<span class="chip">{{ fromChain === "ethereum" ? "ETHEREUM · SEPOLIA" : "AZTEC" }}</span>
 				<template v-if="fromChain === 'ethereum'">
-					<span class="balance" :data-testid="TESTIDS.bridgeBalanceL1">Balance: {{ fmt(usdc.balance.value) }} USDC</span>
+					<span class="balance" :data-testid="TESTIDS.bridgeBalanceL1">Balance: {{ fmt(usdc.balance.value) }} {{ BRIDGE_TOKEN_SYMBOL }}</span>
 				</template>
 				<template v-else>
 					<span
@@ -250,13 +247,13 @@ function fmt(b: bigint | null): string {
 						:class="{ active: !isPrivate, dim: isPrivate }"
 						:data-testid="TESTIDS.bridgeBalanceL2Public"
 						:data-active="!isPrivate"
-					>Public: {{ fmt(l2Public) }} USDC</span>
+					>Public: {{ fmt(l2Public) }} {{ BRIDGE_TOKEN_SYMBOL }}</span>
 					<span
 						class="balance"
 						:class="{ active: isPrivate, dim: !isPrivate }"
 						:data-testid="TESTIDS.bridgeBalanceL2Private"
 						:data-active="isPrivate"
-					>Private: {{ fmt(l2Private) }} USDC</span>
+					>Private: {{ fmt(l2Private) }} {{ BRIDGE_TOKEN_SYMBOL }}</span>
 					<span v-if="l2BalanceError && l2Public === null" class="balance-warn">balances unavailable - retrying</span>
 				</template>
 			</div>
@@ -269,7 +266,7 @@ function fmt(b: bigint | null): string {
 				<span class="role">TO</span>
 				<span class="chip">{{ toChain === "ethereum" ? "ETHEREUM · SEPOLIA" : "AZTEC" }}</span>
 				<template v-if="toChain === 'ethereum'">
-					<span class="balance" :data-testid="TESTIDS.bridgeBalanceL1">Balance: {{ fmt(usdc.balance.value) }} USDC</span>
+					<span class="balance" :data-testid="TESTIDS.bridgeBalanceL1">Balance: {{ fmt(usdc.balance.value) }} {{ BRIDGE_TOKEN_SYMBOL }}</span>
 				</template>
 				<template v-else>
 					<span
@@ -277,13 +274,13 @@ function fmt(b: bigint | null): string {
 						:class="{ active: !isPrivate, dim: isPrivate }"
 						:data-testid="TESTIDS.bridgeBalanceL2Public"
 						:data-active="!isPrivate"
-					>Public: {{ fmt(l2Public) }} USDC</span>
+					>Public: {{ fmt(l2Public) }} {{ BRIDGE_TOKEN_SYMBOL }}</span>
 					<span
 						class="balance"
 						:class="{ active: isPrivate, dim: !isPrivate }"
 						:data-testid="TESTIDS.bridgeBalanceL2Private"
 						:data-active="isPrivate"
-					>Private: {{ fmt(l2Private) }} USDC</span>
+					>Private: {{ fmt(l2Private) }} {{ BRIDGE_TOKEN_SYMBOL }}</span>
 				</template>
 			</div>
 		</div>
@@ -301,10 +298,10 @@ function fmt(b: bigint | null): string {
 				:data-invalid="!!amountError"
 				@input="amountTouched = true"
 			/>
-			<span class="unit">USDC</span>
+			<span class="unit">{{ BRIDGE_TOKEN_SYMBOL }}</span>
 		</div>
 		<p v-if="amountError" class="err-msg" :data-testid="TESTIDS.bridgeFormError">{{ amountError }}</p>
-		<p v-if="showMintHint" class="hint">No test USDC on Sepolia yet - mint some below.</p>
+		<p v-if="showMintHint" class="hint">No test {{ BRIDGE_TOKEN_SYMBOL }} on Sepolia yet - mint some below.</p>
 
 		<div class="privacy-row">
 			<button

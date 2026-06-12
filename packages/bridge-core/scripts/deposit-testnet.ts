@@ -36,6 +36,10 @@ import { createPublicClient, createWalletClient, defineChain, getContract, http 
 import { privateKeyToAccount } from "viem/accounts"
 import { consumeWithdrawal } from "../src/flows"
 
+const TOKEN_NAME = "Nulo USDC"
+const TOKEN_SYMBOL = "USDC"
+const TOKEN_DECIMALS = 6
+
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://rpc.testnet.aztec-labs.com"
 const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}` | undefined
@@ -93,7 +97,7 @@ async function main() {
 	}
 
 	const usdcArt = evmArtifact("MintableERC20")
-	const usdc = await deployEvm("MintableERC20", usdcArt.abi, usdcArt.bytecode, ["Nulo USDC", "USDC", 6, 1000n])
+	const usdc = await deployEvm("MintableERC20", usdcArt.abi, usdcArt.bytecode, [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, 1000n])
 	const portal = await deployEvm("TokenPortal", TokenPortalAbi, TokenPortalBytecode as `0x${string}`, [])
 
 	// ─── L2 (testnet aztec.js — REAL proofs) ─────────────────────────
@@ -150,7 +154,12 @@ async function main() {
 		[],
 		"constructor",
 	)
-	const token = await deployL2("Token", TokenContractArtifact, ["Nulo USDC", "USDC", 6, proxy.address], "constructor_with_minter")
+	const token = await deployL2(
+		"Token",
+		TokenContractArtifact,
+		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address],
+		"constructor_with_minter",
+	)
 	const bridge = await deployL2(
 		"TokenBridge",
 		nargoArtifact("token_bridge/target/token_bridge_contract-TokenBridge.json"),

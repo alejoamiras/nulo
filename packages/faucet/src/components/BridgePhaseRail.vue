@@ -21,7 +21,13 @@ const journal = useBridgeJournal()
 const now = useNow()
 
 const rt = computed(() => journal.runtime.value[props.record.id] ?? {})
-const phases = computed(() => trackPhases(props.record.id, stepperPhases(props.record, rt.value), now.value))
+// `now` drives RENDER ticks only; trackPhases stamps with the real clock internally - stamping
+// with the shared ref once recorded a stale page-load time as a phase start (SEAL showing 5m
+// the instant a bridge began, when the wallet connected long after load).
+const phases = computed(() => {
+	void now.value // re-evaluate every tick so live timers advance.
+	return trackPhases(props.record.id, stepperPhases(props.record, rt.value))
+})
 const activePhase = computed(() => phases.value.find((p) => p.state === "active" || p.state === "failed"))
 /** Compact cards narrate only what is LIVE: a failed note, or the engine's running stepDetail -
  *  never the static signing prompt (an idle card must not instruct "confirm in your wallet"). */

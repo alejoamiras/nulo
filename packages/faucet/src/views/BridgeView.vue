@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
 import BridgeAddToken from "@/components/BridgeAddToken.vue"
 import BridgeForm from "@/components/BridgeForm.vue"
 import BridgeJournal from "@/components/BridgeJournal.vue"
@@ -13,7 +14,7 @@ import { TESTIDS } from "@/lib/testids"
 		<header class="hero">
 			<h1>BRIDGE</h1>
 			<p class="sub">
-				Move test USDC between Ethereum (Sepolia) and Aztec, 1:1, public or private. Testnet only. Connect
+				Move test {{ BRIDGE_TOKEN_SYMBOL }} between Ethereum (Sepolia) and Aztec, 1:1, public or private. Testnet only. Connect
 				both wallets, pick a direction, bridge. In-flight transfers persist in this browser - finish or
 				discard them in the journal below.
 			</p>

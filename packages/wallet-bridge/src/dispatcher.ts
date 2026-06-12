@@ -52,7 +52,7 @@
 // package-name import (`@nulo/wallet-bridge`) would resolve at runtime but
 // wires an unnecessary self-reference through the barrel.
 import { formatCaipAccount, formatCaipChain, parseCaipAccount, resolveNetworkByChainId } from "./caip"
-import type { AccountsCapability, Capability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
+import type { AccountsCapability, Capability, ContractsCapability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
 import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
 import type { AztecSendTxRequest, CapabilityResult, ExecutionResult, RegisterTokenRequest } from "./dapp-interaction-protocol"
 import type {
@@ -75,7 +75,14 @@ import type { SessionContext } from "./types"
 import { CapabilityNotGrantedError, JobCancelledError } from "@nulo/extension-messaging/errors"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
-import type { IAccountReader, IDappInteractionRunner, IDappSessionWriter, IExecutionRunner, INetworkReader } from "./services-contract"
+import type {
+	IAccountReader,
+	IDappInteractionRunner,
+	IDappSessionWriter,
+	IExecutionRunner,
+	INetworkReader,
+	ITokenRegistryReader,
+} from "./services-contract"
 
 /**
  * Internal hooks bag the dispatcher accepts from its caller (the wallet-sdk
@@ -143,6 +150,20 @@ function isNoFromRequest(from: unknown): boolean {
  *  scope-enforcement: missing flag = no permission). The `accounts` array
  *  field is dispatcher-emitted, not dApp-controlled, and is excluded from
  *  the comparison. */
+/** Whether every address+flag the request needs is already covered by the UNION of stored
+ *  contracts grants. NOT equality: shrinking requests must not re-prompt; growing ones must
+ *  (the type-only delta silently stranded new addresses after redeploys). */
+function contractsRequestCovered(existing: ContractsCapability[], requested: ContractsCapability): boolean {
+	const flagCovered = (flag: "canRegister" | "canGetMetadata"): boolean => {
+		if (!requested[flag]) return true
+		if (requested.contracts === "*") return existing.some((e) => e[flag] && e.contracts === "*")
+		return requested.contracts.every((addr) =>
+			existing.some((e) => e[flag] && (e.contracts === "*" || e.contracts.some((x) => String(x) === String(addr)))),
+		)
+	}
+	return flagCovered("canRegister") && flagCovered("canGetMetadata")
+}
+
 function accountsCapsEqual(a: AccountsCapability, b: AccountsCapability): boolean {
 	return Boolean(a.canGet) === Boolean(b.canGet) && Boolean(a.canCreateAuthWit) === Boolean(b.canCreateAuthWit)
 }
@@ -212,6 +233,7 @@ export class WalletSdkDispatcher {
 		private readonly dappInteractionService: IDappInteractionRunner,
 		private readonly dappSessionService: IDappSessionWriter,
 		private readonly logger: ILogger,
+		private readonly tokenRegistryReader?: ITokenRegistryReader,
 	) {}
 
 	/**
@@ -242,7 +264,19 @@ export class WalletSdkDispatcher {
 			// since enforceCapability would have returned []), fall back to
 			// the plain enforceScope to avoid throwing on the wrong thing.
 			if (dappSession) {
-				const sessionAccounts = new Set(dappSession.accounts ?? [])
+				// The session stores CAIP-10 identifiers ("aztec:<chainId>:0x…") but dApps send RAW
+				// hex addresses in scope arrays (the wallet-sdk serializes AztecAddress as hex), so
+				// the set carries BOTH representations. Without this, every fresh session failed
+				// account-scope validation deterministically; pre-CAIP sessions masked the mismatch.
+				const sessionAccounts = new Set<string>()
+				for (const entry of dappSession.accounts ?? []) {
+					sessionAccounts.add(entry)
+					try {
+						sessionAccounts.add(parseCaipAccount(entry).address)
+					} catch {
+						// A raw (pre-CAIP) entry: keep it as-is; nothing extra to add.
+					}
+				}
 				enforceScopeWithSession(methodName, args, grants, sessionAccounts)
 			} else {
 				enforceScope(methodName, args, grants)
@@ -255,6 +289,12 @@ export class WalletSdkDispatcher {
 		}
 		if (methodName === "getAccounts") {
 			return this.handleGetAccounts(ctx, dappSession)
+		}
+		if (methodName === "isTokenRegistered") {
+			// A wallet-local registry read: no prompt, no execution op. Scope enforcement above
+			// already required a contracts grant covering args[0].
+			if (!this.tokenRegistryReader) throw new Error("isTokenRegistered is not available in this wallet build")
+			return this.tokenRegistryReader.isTokenRegistered(String(args[0]), ctx.profileId, ctx.chainId)
 		}
 		if (methodName === "batch") {
 			// CRITICAL: do NOT forward `hooks` into batch legs. handleBatch
@@ -567,6 +607,15 @@ export class WalletSdkDispatcher {
 				const existing = existingGrants.find((g) => g.capability.type === "accounts")
 				return !existing || !accountsCapsEqual(existing.capability as AccountsCapability, cap as unknown as AccountsCapability)
 			}
+			if (cap.type === "contracts") {
+				// Field-level delta (closes wallet-sdk-capability-field-diff for contracts): a request
+				// listing addresses/flags beyond the stored grants re-prompts; approval APPENDS a new
+				// grant, and scope checkers union across grants - so coverage grows monotonically.
+				const existing = existingGrants
+					.filter((g) => g.capability.type === "contracts")
+					.map((g) => g.capability as ContractsCapability)
+				return existing.length === 0 || !contractsRequestCovered(existing, cap as unknown as ContractsCapability)
+			}
 			return !grantedTypes.has(cap.type as Capability["type"])
 		})
 		// Track which delta items are re-requests (previously rejected)
@@ -665,12 +714,37 @@ export class WalletSdkDispatcher {
 		const approvedTypes = new Set(grantedResults.map((cap) => cap.type as string))
 		const now = Date.now()
 
-		// New grants: approved delta items that weren't already granted
-		const newGrants: GrantedCapabilityRecord[] = grantedResults
-			.filter((cap) => !grantedTypes.has(cap.type as Capability["type"]) || rejectedTypes.has(cap.type as string))
-			.map((cap) => ({ capability: cap as Capability, grantedAt: now }))
-		// Merge: keep existing grants (excluding re-approved types) + new grants
-		const mergedGrants = [...existingGrants.filter((g) => !rejectedTypes.has(g.capability.type)), ...newGrants]
+		// Approved DELTA types REPLACE their stored grant (never-granted types simply append).
+		// The old type-only filter silently dropped re-approved types: a contracts re-consent
+		// (field-diff, e.g. after a redeploy adds token addresses) was REPORTED granted but never
+		// persisted - every later call still refused on the stale grant. Same hole applied to
+		// accounts upgrades. The popup echoes existing caps alongside the newly approved delta,
+		// so for replaced types we take the LAST result entry of that type that differs from the
+		// stored capability (falling back to the delta's requested shape).
+		const deltaApprovedTypes = new Set(delta.filter((cap) => approvedTypes.has(cap.type as string)).map((cap) => cap.type as string))
+		const replacementFor = (type: string): Capability | undefined => {
+			const stored = existingGrants.find((g) => g.capability.type === type)?.capability
+			const candidates = grantedResults.filter((cap) => cap.type === type)
+			const changed = candidates.filter((cap) => JSON.stringify(cap) !== JSON.stringify(stored))
+			return (changed[changed.length - 1] ?? candidates[candidates.length - 1]) as Capability | undefined
+		}
+		const newGrants: GrantedCapabilityRecord[] = []
+		for (const cap of grantedResults) {
+			const type = cap.type as string
+			if (deltaApprovedTypes.has(type)) continue // handled via replacement below (dedupes echoes).
+			if (!grantedTypes.has(type as Capability["type"]) || rejectedTypes.has(type)) {
+				newGrants.push({ capability: cap as Capability, grantedAt: now })
+			}
+		}
+		for (const type of deltaApprovedTypes) {
+			const replacement = replacementFor(type) ?? (delta.find((c) => c.type === type) as unknown as Capability)
+			newGrants.push({ capability: replacement, grantedAt: now })
+		}
+		// Merge: keep existing grants minus rejected AND minus replaced types, then the new records.
+		const mergedGrants = [
+			...existingGrants.filter((g) => !rejectedTypes.has(g.capability.type) && !deltaApprovedTypes.has(g.capability.type)),
+			...newGrants,
+		]
 
 		await this.dappSessionService.setCapabilityGrants(dappSession.id, mergedGrants)
 

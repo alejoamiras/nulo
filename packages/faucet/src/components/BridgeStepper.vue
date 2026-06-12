@@ -7,7 +7,9 @@ import { computed } from "vue"
 import { useBridgeJournal } from "@/composables/useBridgeJournal"
 
 /** Utils */
+import { BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
 import { stepperPhases } from "@/lib/bridge-steps"
+import { formatBigInt } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
 
 /** Components */
@@ -46,9 +48,9 @@ function onRetry() {
 }
 
 const headline = computed(() => {
-	const amount = (Number(props.record.amount) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 })
+	const amount = formatBigInt(BigInt(props.record.amount), BRIDGE_TOKEN_DECIMALS)
 	const dir = props.record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM"
-	return `${dir} · ${amount} USDC · ${props.record.isPrivate ? "PRIVATE" : "PUBLIC"}`
+	return `${dir} · ${amount} ${BRIDGE_TOKEN_SYMBOL} · ${props.record.isPrivate ? "PRIVATE" : "PUBLIC"}`
 })
 </script>
 

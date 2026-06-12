@@ -15,6 +15,8 @@ vi.mock("@/composables/useL1Wallet", () => ({
 	}),
 }))
 vi.mock("@/contracts/bridge-deployments", () => ({
+	BRIDGE_TOKEN_SYMBOL: "USDC",
+	BRIDGE_TOKEN_DECIMALS: 6,
 	L1_USDC: "0xusdc",
 	L1_PORTAL: "0xportal",
 }))

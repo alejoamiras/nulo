@@ -13,7 +13,7 @@ describe("BridgeReceipt", () => {
 			props: {
 				snapshot: {
 					direction: "deposit" as const,
-					amount: "100000000",
+					amount: "100000000000000000000",
 					isPrivate: true,
 					l1TxHash: L1,
 					l2TxHash: L2,
@@ -23,7 +23,7 @@ describe("BridgeReceipt", () => {
 			},
 		})
 		expect(w.text()).toContain("BRIDGED ✓")
-		expect(w.text()).toContain("100 USDC to Aztec")
+		expect(w.text()).toContain("100.00 AZLO to Aztec")
 		expect(w.text()).toContain("PRIVATE")
 		expect(w.text()).toContain("3m 42s end to end.")
 		const links = w.findAll(sel(TESTIDS.receiptLink))
@@ -37,11 +37,17 @@ describe("BridgeReceipt", () => {
 	it("withdraw receipt: Ethereum wording; junk hashes render no link", () => {
 		const w = mount(BridgeReceipt, {
 			props: {
-				snapshot: { direction: "withdraw" as const, amount: "40000000", isPrivate: false, l1TxHash: "junk", l2TxHash: L2 },
+				snapshot: {
+					direction: "withdraw" as const,
+					amount: "40000000000000000000",
+					isPrivate: false,
+					l1TxHash: "junk",
+					l2TxHash: L2,
+				},
 			},
 		})
 		expect(w.text()).toContain("RELEASED ✓")
-		expect(w.text()).toContain("40 USDC to Ethereum")
+		expect(w.text()).toContain("40.00 AZLO to Ethereum")
 		expect(w.findAll(sel(TESTIDS.receiptLink))).toHaveLength(1)
 	})
 })

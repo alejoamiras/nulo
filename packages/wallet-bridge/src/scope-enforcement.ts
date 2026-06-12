@@ -75,6 +75,20 @@ function checkGetContractMetadata(args: unknown[], grants: GrantedCapabilityReco
 	}
 }
 
+function checkIsTokenRegistered(args: unknown[], grants: GrantedCapabilityRecord[]): void {
+	const address = String(args[0])
+
+	const caps = grantsOfType<ContractsCapability>(grants, "contracts")
+	if (!caps.length) return
+
+	// Registration state is wallet-local metadata about a granted contract - the same consent
+	// surface as getContractMetadata; the capability copy names the check explicitly.
+	const permitted = caps.some((c) => c.canGetMetadata && inAddressList(address, c.contracts))
+	if (!permitted) {
+		throw new Error(`Scope violation: isTokenRegistered targets ${address}, not permitted by granted contracts scope`)
+	}
+}
+
 function checkGetContractClassMetadata(args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	const id = String(args[0])
 
@@ -348,6 +362,7 @@ function validateAccountScopes(scopeField: unknown, sessionAccounts: Set<string>
 const METHOD_SCOPE_CHECKER: Record<string, (args: unknown[], grants: GrantedCapabilityRecord[]) => void> = {
 	registerContract: checkRegisterContract,
 	getContractMetadata: checkGetContractMetadata,
+	isTokenRegistered: checkIsTokenRegistered,
 	getContractClassMetadata: checkGetContractClassMetadata,
 	sendTx: (args, grants) => checkTransactionCalls("sendTx", args, grants),
 	simulateTx: (args, grants) => checkSimulationTransactions("simulateTx", args, grants),

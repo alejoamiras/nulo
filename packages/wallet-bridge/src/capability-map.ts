@@ -22,6 +22,8 @@ const METHOD_CAPABILITY_MAP: Record<string, CapabilityType> = {
 	// accounts
 	createAuthWit: "accounts",
 	registerToken: "accounts",
+	// Wallet-local registration probe - gated by the contracts grant (need-to-know address list).
+	isTokenRegistered: "contracts",
 	getAccounts: "accounts", // F-003: was exempt; now requires accounts.canGet=true
 
 	// contracts

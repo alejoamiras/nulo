@@ -14,7 +14,9 @@ import { computed, ref, watch } from "vue"
 import { useBridgeJournal } from "@/composables/useBridgeJournal"
 
 /** Utils */
+import { BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
 import { useNow } from "@/lib/clock"
+import { formatBigInt } from "@/lib/format"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { TESTIDS } from "@/lib/testids"
 
@@ -127,7 +129,7 @@ const txLinks = computed(() => {
 	return links.filter((l) => l.href !== "")
 })
 
-const amountDisplay = computed(() => (Number(props.record.amount) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 }))
+const amountDisplay = computed(() => formatBigInt(BigInt(props.record.amount), BRIDGE_TOKEN_DECIMALS))
 
 const now = useNow()
 const age = computed(() => {
@@ -165,7 +167,7 @@ function onDiscard() {
 		<p v-if="stage === 'done'" class="stamp">{{ record.direction === "deposit" ? "BRIDGED ✓" : "RELEASED ✓" }}</p>
 		<header class="row">
 			<span class="dir">{{ record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM" }}</span>
-			<span class="amt">{{ amountDisplay }} USDC</span>
+			<span class="amt">{{ amountDisplay }} {{ BRIDGE_TOKEN_SYMBOL }}</span>
 			<span class="tag" :class="{ private: record.isPrivate }">{{ record.isPrivate ? "PRIVATE" : "PUBLIC" }}</span>
 			<span class="age">{{ age }}</span>
 			<button

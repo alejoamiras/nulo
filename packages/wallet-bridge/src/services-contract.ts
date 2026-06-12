@@ -73,6 +73,11 @@ export interface IDappInteractionRunner {
 	requestCapabilities(params: CapabilityParams, cancellationToken?: string): Promise<CapabilityResult>
 }
 
+/** Wallet-local token-registry read for the `isTokenRegistered` custom RPC (no prompt). */
+export interface ITokenRegistryReader {
+	isTokenRegistered(address: string, profileId: string, chainId: number): Promise<boolean>
+}
+
 export interface IDappSessionWriter {
 	/** Look up a remembered session by `(origin, chainId)`. Sessions are
 	 *  per-`(origin, chainId, profileId)` — a `chainId` is REQUIRED so a

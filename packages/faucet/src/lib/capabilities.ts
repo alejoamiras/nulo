@@ -6,7 +6,7 @@ import { ProtocolContractAddress } from "@aztec/protocol-contracts"
  *
  * Scope is tight:
  *  - `accounts.canCreateAuthWit: false` (Dripper has no auth guards).
- *  - `contracts` lists [DRIPPER, USDC, ETH]. SponsoredFPC stays OUT of
+ *  - `contracts` lists [DRIPPER, NULO, OLUN]. SponsoredFPC stays OUT of
  *    `contracts` (we don't `wallet.registerContract` it) but its sponsor
  *    call must be in `transaction.scope` because Nulo enforces every
  *    `exec.calls` entry against the granted tx scope.
@@ -73,7 +73,7 @@ export function buildFaucetManifest(input: FaucetManifestInput): AppManifest {
 		metadata: {
 			name: "nulo-faucet",
 			version: "0.1.0",
-			description: "Test USDC + ETH on Aztec alpha-testnet - Nulo",
+			description: "Test NULO + OLUN on Aztec alpha-testnet - Nulo",
 			url: input.appUrl ?? defaultUrl(),
 		},
 		capabilities: [

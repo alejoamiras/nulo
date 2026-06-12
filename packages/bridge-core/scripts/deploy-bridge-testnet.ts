@@ -11,6 +11,7 @@
  * set). From packages/bridge-core: `bun run scripts/deploy-bridge-testnet.ts`. Needs PRIVATE_KEY +
  * SEPOLIA_RPC_URL in packages/bridge-evm/.env; AZTEC_NODE_URL defaults to the public testnet RPC.
  */
+import { spawnSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -30,18 +31,27 @@ import { deriveSigningKey } from "@aztec/stdlib/keys"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
 import { createPublicClient, createWalletClient, defineChain, getContract, http } from "viem"
-import { privateKeyToAccount } from "viem/accounts"
+import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts"
+
+// The bridged pair's identity - ONE source for both chains; the deploy asserts L1==L2 below.
+const TOKEN_NAME = "Aztec Nulo"
+const TOKEN_SYMBOL = "AZLO"
+const TOKEN_DECIMALS = 18
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://rpc.testnet.aztec-labs.com"
 const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}` | undefined
-if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-evm/.env)")
+const MNEMONIC = process.env.MNEMONIC
+if (!PRIVATE_KEY && !MNEMONIC) throw new Error("PRIVATE_KEY or MNEMONIC required (packages/bridge-core/.env)")
 
 // Fixed salts → deterministic L2 addresses (stable in the written config). Mirrors the faucet's
 // small-integer salt convention (deployments.json: 4242 / 1337).
-const PROXY_SALT = 0x5b01
-const TOKEN_SALT = 0x5b02
-const BRIDGE_SALT = 0x5b03
+// Salt generation 2 (the AZLO redeploy): the proxy's constructor args don't change across token
+// renames, so reusing generation-1 salts collides with the LIVE deployment's deterministic
+// address (duplicate siloed nullifier). Bump ALL THREE together for every fresh generation.
+const PROXY_SALT = 0x5b11
+const TOKEN_SALT = 0x5b12
+const BRIDGE_SALT = 0x5b13
 
 const here = dirname(fileURLToPath(import.meta.url))
 const OUT = join(here, "..", "..", "bridge-evm", "out")
@@ -80,7 +90,7 @@ async function main() {
 	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
 
 	// ─── L1 (Sepolia) ────────────────────────────────────────────────
-	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)
+	const account = PRIVATE_KEY ? privateKeyToAccount(PRIVATE_KEY) : mnemonicToAccount(MNEMONIC as string)
 	console.log("L1 deployer", account.address)
 	const wallet = createWalletClient({ account, chain: sepolia, transport: http(SEPOLIA_RPC) })
 	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
@@ -95,7 +105,11 @@ async function main() {
 	}
 
 	const usdcArt = evmArtifact("MintableERC20")
-	const usdc = await deployEvm("MintableERC20", usdcArt.abi, usdcArt.bytecode, ["Nulo USDC", "USDC", 6, 1000n])
+	const l1Decimals = TOKEN_DECIMALS
+	const usdc = await deployEvm("MintableERC20", usdcArt.abi, usdcArt.bytecode, [TOKEN_NAME, TOKEN_SYMBOL, l1Decimals, 1000n])
+	// The portal moves RAW units between chains: an L1/L2 decimals mismatch mints wrong
+	// magnitudes. Both sides read TOKEN_DECIMALS; this assert keeps future edits honest.
+	if (l1Decimals !== TOKEN_DECIMALS) throw new Error(`decimals asymmetry: L1=${l1Decimals} L2=${TOKEN_DECIMALS}`)
 	const portal = await deployEvm("TokenPortal", TokenPortalAbi, TokenPortalBytecode as `0x${string}`, [])
 
 	// ─── L2 (testnet aztec.js — REAL proofs) ─────────────────────────
@@ -156,7 +170,7 @@ async function main() {
 	const token = await deployL2(
 		"Token",
 		TokenContractArtifact,
-		["Nulo USDC", "USDC", 6, proxy.address],
+		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address],
 		"constructor_with_minter",
 		TOKEN_SALT,
 	)
@@ -181,14 +195,18 @@ async function main() {
 	// ─── Persist the config the app rebuilds instances from ──────────
 	const config = {
 		network: "testnet",
-		l1: { usdc, portal },
+		l1: {
+			usdc,
+			portal,
+			token: { name: TOKEN_NAME, symbol: TOKEN_SYMBOL, decimals: TOKEN_DECIMALS, maxWholePerTx: 1000 },
+		},
 		l2: {
 			proxy: { address: proxy.address.toString(), salt: PROXY_SALT, constructorArtifact: "constructor", constructorArgs: [] },
 			token: {
 				address: token.address.toString(),
 				salt: TOKEN_SALT,
 				constructorArtifact: "constructor_with_minter",
-				constructorArgs: ["Nulo USDC", "USDC", 6, proxy.address.toString()],
+				constructorArgs: [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address.toString()],
 			},
 			bridge: {
 				address: bridge.address.toString(),
@@ -201,6 +219,14 @@ async function main() {
 	mkdirSync(dirname(CONFIG_PATH), { recursive: true })
 	writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, "\t")}\n`)
 	console.log(`\n✅ PERSISTENT testnet bridge deployed in ${mins()} — wrote faucet/public/testnet-bridge.json`)
+
+	if (process.env.ETHERSCAN_API_KEY) {
+		console.log("\nETHERSCAN_API_KEY set — verifying L1 sources on Etherscan…")
+		const v = spawnSync("bun", [join(here, "verify-l1.ts")], { stdio: "inherit" })
+		if (v.status !== 0) console.log("⚠ verification failed — retry with `bun run verify:l1`.")
+	} else {
+		console.log("\nETHERSCAN_API_KEY not set — run `bun run verify:l1` to verify L1 sources on Etherscan.")
+	}
 	console.log(JSON.stringify(config, null, 2))
 }
 
