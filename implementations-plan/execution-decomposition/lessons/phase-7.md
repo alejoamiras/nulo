@@ -79,3 +79,19 @@ counter per A2 counts valid runs.)
 
 Watcher armed on the foreign prover processes; retry fires when they
 exit, after re-purge.
+
+## Gate run 2 — pre-registered decision rule (recorded BEFORE launch)
+
+The nulo-4 deploy looks hung (log silent 3.5h, bb provers still hot) and
+may block "true idle" indefinitely. Quantified load: ~2 of 14 cores
+(load avg ~4). Run 2 launches under this bounded foreign load with the
+following pre-registered classification:
+- **PASS** → valid green (a pass under adverse load is strictly
+  stronger evidence than an idle pass). Phase 7 closes.
+- **FAIL, infra-only signatures** (detached frame / connection closed /
+  fixture-connect) → load-confounded, uninformative for the lane
+  question; does NOT count toward A2's two-failure threshold; wait for
+  true idle resumes.
+- **FAIL, any wallet-behavior assertion** (journal stage, FIFO order,
+  nullifier, balance) → REAL failure #1 regardless of load — behavior
+  failures are not load artifacts.
