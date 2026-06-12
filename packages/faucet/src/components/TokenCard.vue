@@ -20,7 +20,7 @@ const props = defineProps<{
 }>()
 
 // The card is always visible. Composables only activate when both wallet
-// and account are present — keys the parent component on connection
+// and account are present - keys the parent component on connection
 // state so the card re-mounts cleanly on connect/disconnect.
 const connected = !!(props.wallet && props.account)
 const balance: UseTokenBalanceHandle | null =
@@ -33,13 +33,13 @@ const { push, dismiss } = useToast()
 // + testids; this card owns the bigint formatting + loading state.
 const balanceLoading = computed(() => balance?.loading.value ?? false)
 function renderBalance(value: bigint | null): string {
-	if (value === null) return balanceLoading.value ? "…" : "—"
+	if (value === null) return balanceLoading.value ? "…" : "-"
 	return formatBigInt(value, props.token.decimals)
 }
 const publicText = computed(() => renderBalance(balance?.publicBalance.value ?? null))
 const privateText = computed(() => renderBalance(balance?.privateBalance.value ?? null))
 
-// Per-card "last drip" — single source of recency. Without this, a
+// Per-card "last drip" - single source of recency. Without this, a
 // global-keyed lookup like `publicLast ?? privateLast` permanently
 // prefers public over private and shows the wrong outcome after a
 // later private drip.
@@ -54,7 +54,7 @@ const lastDrip = ref<CardDripState | null>(null)
 const emphasized = ref(false)
 // The card pushes a toast with a "view tx" link on every successful drip.
 // We track its id so that if the user re-drips before the toast TTL, we
-// dismiss the prior toast — otherwise its (now-stale) link is still
+// dismiss the prior toast - otherwise its (now-stale) link is still
 // clickable during the new inflight state. Closes the toast-path mirror
 // of the inline-row stale-link bug.
 let lastTxToastId: number | null = null
@@ -125,7 +125,7 @@ async function handleDrip(target: DripTarget) {
 }
 
 // Single tracked reset timer. Without this, rapid clicks (button only
-// disabled during `submitting`) stack untracked setTimeouts — an older
+// disabled during `submitting`) stack untracked setTimeouts - an older
 // timer can fire DURING a newer submission and flip the composable back
 // to `idle`, defeating the re-entrancy guard in `useFaucetAddToken`.
 // Track + clear before re-setting.
@@ -155,7 +155,7 @@ async function handleAddToWallet() {
 	} else if (final.kind === "unsupported") {
 		push({ kind: "error", text: "Your wallet doesn't support adding tokens. Update Nulo and reload." })
 	}
-	// `rejected` is silent per the wallet-bridge cancel recipe — no toast.
+	// `rejected` is silent per the wallet-bridge cancel recipe - no toast.
 
 	// Schedule the auto-reset so the button label returns to "Add to wallet".
 	scheduleAddTokenReset()

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
  * transition under controlled SDK responses.
  *
  * The pure helper `extractGrantedAccounts` is unit-tested directly without
- * any mocking — it's import-stable.
+ * any mocking - it's import-stable.
  */
 
 const mockEstablishSecureChannel = vi.fn()
@@ -28,7 +28,7 @@ async function* yieldOne() {
 }
 
 async function* yieldNone(): AsyncGenerator<typeof mockProvider, void, unknown> {
-	// no providers — empty discovery
+	// no providers - empty discovery
 }
 
 const mockGetAvailableWallets = vi.fn(() => ({

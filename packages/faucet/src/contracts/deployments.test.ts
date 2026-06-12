@@ -36,7 +36,7 @@ describe("deployments.json invariants", () => {
 
 	// The reconstructed-address invariant (each rebuild*Instance() address ===
 	// the committed JSON address) is verified by `scripts/verify-deployments.ts`,
-	// NOT here — bb.js's sync poseidon hasher needs the WASM runtime to be
+	// NOT here - bb.js's sync poseidon hasher needs the WASM runtime to be
 	// initialized at process boot, which jsdom doesn't do. Running it as a
 	// bun script (Node) is the reliable path; called from `audit:faucet`.
 })

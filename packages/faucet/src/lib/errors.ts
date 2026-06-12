@@ -29,7 +29,7 @@ const TOAST_COPY: Record<ErrorCategory, string> = {
 	"capability-rejected": "You denied the permissions. Click Approve to try again.",
 	"no-wallet": "No wallet found. Install Nulo and reload.",
 	network: "Alpha-testnet is not responding. Try again.",
-	"tx-reverted": "Drip transaction reverted — view tx.",
+	"tx-reverted": "Drip transaction reverted - view tx.",
 	"no-fee-asset": "No sponsored fee route available. Wait or report.",
 	"account-uninitialized": "Selected account isn't deployed on alpha-testnet. Send any tx from your wallet first.",
 	"contract-not-registered": "Couldn't register the faucet contracts with your wallet. Reconnect.",
@@ -42,7 +42,7 @@ export function normalizeError(err: unknown): NormalizedError {
 
 	// Capability rejections are checked BEFORE generic user-rejection because
 	// the wallet phrases the capability-denied error as "Capability denied by
-	// user" — without this ordering the generic match wins and the UI shows
+	// user" - without this ordering the generic match wins and the UI shows
 	// the wrong toast / hides the retry path.
 	if (lc.includes("capability") && (lc.includes("denied") || lc.includes("rejected"))) {
 		return {

@@ -9,11 +9,11 @@ import deploymentsJson from "./deployments.json"
 /*
  * deployments.json is DEPLOY METADATA, not a registerable ContractInstance.
  * `wallet.registerContract` needs the full instance with publicKeys + the
- * derived address — we reconstruct each one here via
+ * derived address - we reconstruct each one here via
  * `getContractInstanceFromInstantiationParams` (matches what the deploy
  * script does on its side, so addresses agree by construction).
  *
- * Tokens are looked up by `constructorArgs.symbol` — the deploy script writes
+ * Tokens are looked up by `constructorArgs.symbol` - the deploy script writes
  * an array; we never rely on its order.
  */
 

@@ -1,0 +1,139 @@
+import { sepolia } from "viem/chains"
+import { ref, watch } from "vue"
+import { L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
+import { useL1Wallet } from "./useL1Wallet"
+
+const errorMessage = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback)
+
+/** Minimal test-USDC surface: faucet mint + portal approve + the reads the bridge form needs. */
+export const ERC20_ABI = [
+	{
+		type: "function",
+		name: "mint",
+		stateMutability: "nonpayable",
+		inputs: [
+			{ name: "to", type: "address" },
+			{ name: "amount", type: "uint256" },
+		],
+		outputs: [],
+	},
+	{
+		type: "function",
+		name: "approve",
+		stateMutability: "nonpayable",
+		inputs: [
+			{ name: "spender", type: "address" },
+			{ name: "amount", type: "uint256" },
+		],
+		outputs: [{ type: "bool" }],
+	},
+	{
+		type: "function",
+		name: "balanceOf",
+		stateMutability: "view",
+		inputs: [{ name: "owner", type: "address" }],
+		outputs: [{ type: "uint256" }],
+	},
+	{
+		type: "function",
+		name: "allowance",
+		stateMutability: "view",
+		inputs: [
+			{ name: "owner", type: "address" },
+			{ name: "spender", type: "address" },
+		],
+		outputs: [{ type: "uint256" }],
+	},
+] as const
+
+const POLL_INTERVAL_MS = 15_000
+
+/** Fixed faucet-style mint - the bridge moves what you mint here; amount entry adds nothing on testnet. */
+export const MINT_AMOUNT = 100_000_000n // 100 USDC, 6 decimals
+
+const balance = ref<bigint | null>(null)
+const minting = ref(false)
+const error = ref<string | null>(null)
+let timer: ReturnType<typeof setInterval> | null = null
+
+/**
+ * Module-singleton L1 test-USDC state (the useL1Wallet pattern): one Sepolia balance poll shared
+ * by the form, plus the explicit mint that replaced the deposit-embedded one. Canonical viem only.
+ */
+export function useL1Usdc() {
+	const l1 = useL1Wallet()
+
+	async function refresh(): Promise<void> {
+		const owner = l1.address.value
+		if (!owner) {
+			balance.value = null
+			return
+		}
+		try {
+			balance.value = (await l1.publicClient.readContract({
+				address: L1_USDC,
+				abi: ERC20_ABI,
+				functionName: "balanceOf",
+				args: [owner],
+			})) as bigint
+		} catch (err) {
+			// Set-only: a background poll succeeding must not clear an error a user ACTION just surfaced.
+			error.value = errorMessage(err, "Failed to read the Sepolia USDC balance")
+		}
+	}
+
+	async function allowance(): Promise<bigint> {
+		const owner = l1.address.value
+		if (!owner) return 0n
+		return (await l1.publicClient.readContract({
+			address: L1_USDC,
+			abi: ERC20_ABI,
+			functionName: "allowance",
+			args: [owner, L1_PORTAL],
+		})) as bigint
+	}
+
+	/** Mint MINT_AMOUNT test USDC to the connected L1 account (one wallet prompt). */
+	async function mint(): Promise<void> {
+		const wallet = l1.ensureWalletClient()
+		const owner = l1.address.value
+		if (!wallet || !owner) {
+			error.value = "Connect your Ethereum wallet first."
+			return
+		}
+		minting.value = true
+		error.value = null
+		try {
+			const hash = await wallet.writeContract({
+				address: L1_USDC,
+				abi: ERC20_ABI,
+				functionName: "mint",
+				args: [owner, MINT_AMOUNT],
+				chain: sepolia,
+				account: owner,
+			})
+			await l1.publicClient.waitForTransactionReceipt({ hash })
+			await refresh()
+		} catch (err) {
+			error.value = errorMessage(err, "Mint failed")
+		} finally {
+			minting.value = false
+		}
+	}
+
+	function ensurePolling(): void {
+		if (timer !== null) return
+		timer = setInterval(() => void refresh(), POLL_INTERVAL_MS)
+	}
+
+	watch(
+		() => l1.address.value,
+		(addr) => {
+			void refresh()
+			if (addr) ensurePolling()
+		},
+		{ immediate: true },
+	)
+
+	return { balance, minting, error, refresh, allowance, mint }
+}

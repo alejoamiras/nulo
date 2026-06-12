@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import BridgeAddToken from "@/components/BridgeAddToken.vue"
+import BridgeForm from "@/components/BridgeForm.vue"
+import BridgeJournal from "@/components/BridgeJournal.vue"
 import BridgeWalletPanel from "@/components/BridgeWalletPanel.vue"
-import DepositCard from "@/components/DepositCard.vue"
 import L1WalletPanel from "@/components/L1WalletPanel.vue"
-import WithdrawCard from "@/components/WithdrawCard.vue"
+import MintTestUsdc from "@/components/MintTestUsdc.vue"
 import { TESTIDS } from "@/lib/testids"
 </script>
 
@@ -12,8 +13,9 @@ import { TESTIDS } from "@/lib/testids"
 		<header class="hero">
 			<h1>BRIDGE</h1>
 			<p class="sub">
-				Move assets between Ethereum (L1) and Aztec (L2). Testnet only. Connect both wallets, then
-				deposit USDC — it bridges to your Aztec account 1:1.
+				Move test USDC between Ethereum (Sepolia) and Aztec, 1:1, public or private. Testnet only. Connect
+				both wallets, pick a direction, bridge. In-flight transfers persist in this browser - finish or
+				discard them in the journal below.
 			</p>
 		</header>
 
@@ -22,8 +24,9 @@ import { TESTIDS } from "@/lib/testids"
 			<BridgeWalletPanel />
 		</section>
 
-		<DepositCard />
-		<WithdrawCard />
+		<BridgeForm />
+		<BridgeJournal />
+		<MintTestUsdc />
 		<BridgeAddToken />
 	</div>
 </template>
@@ -61,9 +64,11 @@ import { TESTIDS } from "@/lib/testids"
 
 .wallets {
 	display: flex;
-	flex-direction: column;
-	gap: 16px;
-	padding: 20px 0;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px 16px;
+	padding: 16px 0;
 	border-top: 1px solid var(--nulo-outline);
 	border-bottom: 1px solid var(--nulo-outline);
 }

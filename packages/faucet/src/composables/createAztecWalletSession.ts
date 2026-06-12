@@ -1,11 +1,11 @@
 // Patch WalletSchema before wallet-sdk reads it (Nulo-custom `registerToken`).
-// Must be the first import in this module — see nulo-schema-patch.ts header.
+// Must be the first import in this module - see nulo-schema-patch.ts header.
 import "@/lib/nulo-schema-patch"
 
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { WalletManager } from "@aztec/wallet-sdk/manager"
 import type { PendingConnection, WalletProvider } from "@aztec/wallet-sdk/manager"
-import { ref } from "vue"
+import { ref, shallowRef } from "vue"
 import { readChainInfo } from "@/lib/chain-info"
 import { hashToEmoji } from "@/lib/emoji"
 import { type NormalizedError, normalizeError } from "@/lib/errors"
@@ -20,11 +20,11 @@ export interface GrantedAccount {
 /**
  * Per-feature config for an Aztec wallet session. The faucet and the bridge each create ONE
  * session (a module-level singleton) with their own appId, capability manifest, and contract
- * registration — the codex finding: two independent sessions, not one shared connection.
+ * registration - the codex finding: two independent sessions, not one shared connection.
  */
 export interface AztecWalletSessionConfig {
 	readonly appId: string
-	/** Build the wallet-sdk capability manifest at connect time (async — needs the SponsoredFPC). */
+	/** Build the wallet-sdk capability manifest at connect time (async - needs the SponsoredFPC). */
 	// biome-ignore lint/suspicious/noExplicitAny: SDK manifest type is zod-inferred, not exported usably.
 	readonly buildManifest: () => Promise<any>
 	/** Register the feature's contracts with the wallet's PXE after capabilities are granted. */
@@ -34,7 +34,7 @@ export interface AztecWalletSessionConfig {
 /**
  * Create an Aztec wallet session: discover → verify (emoji match) → request capabilities →
  * register contracts → connected. Returns reactive state + the connection methods. Call ONCE
- * per feature at module scope (singleton) — `useWalletConnection` / `useBridgeWallet` wrap it.
+ * per feature at module scope (singleton) - `useWalletConnection` / `useBridgeWallet` wrap it.
  */
 export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	const status = ref<ConnectStatus>("idle")
@@ -42,7 +42,9 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	const accounts = ref<GrantedAccount[]>([])
 	const selectedAccount = ref<string | null>(null)
 	const error = ref<NormalizedError | null>(null)
-	const wallet = ref<Wallet | null>(null)
+	// shallowRef: the SDK wallet handle must not be deep-proxied (same rationale as the balance
+	// handles - deep reactivity over a class instance is waste and can break identity checks).
+	const wallet = shallowRef<Wallet | null>(null)
 
 	let provider: WalletProvider | null = null
 	let pending: PendingConnection | null = null
@@ -77,7 +79,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 			}
 			provider = firstProvider
 			// Wallet-side disconnect (extension reload, user revokes session) must reset the dApp
-			// state too — otherwise we hold a stale Wallet handle and the next call silently does nothing.
+			// state too - otherwise we hold a stale Wallet handle and the next call silently does nothing.
 			unsubscribeDisconnect = firstProvider.onDisconnect(() => {
 				cleanupSession()
 				status.value = "idle"
@@ -164,7 +166,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 				throw new Error("No accounts granted by wallet")
 			}
 
-			// The user already clicked Approve — we're now doing post-approval setup (registering
+			// The user already clicked Approve - we're now doing post-approval setup (registering
 			// contracts with the wallet's PXE). This can take 2-4s, so a dedicated state keeps the
 			// UI from saying "Awaiting permissions".
 			status.value = "setting-up"

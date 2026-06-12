@@ -27,7 +27,7 @@ describe("buildFaucetManifest", () => {
 		expect(cap).toEqual({ type: "accounts", canGet: true, canCreateAuthWit: false })
 	})
 
-	it("declares contracts scope = [DRIPPER, USDC, ETH] only — no SponsoredFPC", () => {
+	it("declares contracts scope = [DRIPPER, USDC, ETH] only - no SponsoredFPC", () => {
 		const cap = m.capabilities.find((c) => c.type === "contracts")
 		if (cap?.type !== "contracts") throw new Error("contracts cap missing")
 		const addrs = cap.contracts.map((a) => a.toString())
@@ -142,7 +142,7 @@ describe("buildCombinedManifest", () => {
 		expect(cap).toEqual({ type: "accounts", canGet: true, canCreateAuthWit: true })
 	})
 
-	it("declares all six contracts — faucet (dripper, usdc, eth) + bridge (bridge, token, proxy)", () => {
+	it("declares all six contracts - faucet (dripper, usdc, eth) + bridge (bridge, token, proxy)", () => {
 		const cap = m.capabilities.find((c) => c.type === "contracts")
 		if (cap?.type !== "contracts") throw new Error("contracts cap missing")
 		expect(cap.contracts.map((a) => a.toString())).toEqual([

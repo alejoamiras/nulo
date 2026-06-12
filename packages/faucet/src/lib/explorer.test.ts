@@ -41,3 +41,18 @@ describe("explorer URLs (aztecscan testnet)", () => {
 		expect(explorerTxUrl(TX)).toBe(`https://testnet.aztecscan.xyz/tx-effects/${TX}`)
 	})
 })
+
+describe("tx-hash validation (journal fields are user-writable storage)", () => {
+	const GOOD = `0x${"ab".repeat(32)}`
+	it("etherscanTxUrl links only strict 32-byte hex", async () => {
+		const { etherscanTxUrl } = await import("./explorer")
+		expect(etherscanTxUrl(GOOD)).toBe(`https://sepolia.etherscan.io/tx/${GOOD}`)
+		expect(etherscanTxUrl("0xabc")).toBe("")
+		expect(etherscanTxUrl(`javascript:alert(1)//${"a".repeat(50)}`)).toBe("")
+	})
+	it("explorerTxUrl rejects non-hash shapes too", async () => {
+		const { explorerTxUrl } = await import("./explorer")
+		expect(explorerTxUrl(GOOD)).toContain(`/tx-effects/${GOOD}`)
+		expect(explorerTxUrl("not-a-hash")).toBe("")
+	})
+})

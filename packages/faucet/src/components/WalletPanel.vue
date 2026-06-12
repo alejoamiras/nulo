@@ -82,7 +82,7 @@ function openInstall() {
 			<h3>Awaiting permissions</h3>
 			<p>
 				Approve this faucet's permissions in your wallet. We're asking to read your balances and
-				submit drip transactions to the Dripper contract — nothing else.
+				submit drip transactions to the Dripper contract - nothing else.
 			</p>
 			<p v-if="showCapabilityError" class="hint">You denied the permissions. Click to try again.</p>
 			<AppButton :data-testid="TESTIDS.btnCapabilityRetry" @click="retryCapabilities">
@@ -94,7 +94,7 @@ function openInstall() {
 			<h3>No Aztec wallet detected on this browser.</h3>
 			<p>
 				This faucet works with any wallet that speaks the Aztec Wallet SDK. Nulo is the fastest
-				way to start — it's an extension, takes 30 seconds.
+				way to start - it's an extension, takes 30 seconds.
 			</p>
 			<AppButton :data-testid="TESTIDS.btnInstallNulo" @click="openInstall">
 				Install Nulo

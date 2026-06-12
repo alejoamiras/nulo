@@ -10,13 +10,13 @@ import { ProtocolContractAddress } from "@aztec/protocol-contracts"
  *    `contracts` (we don't `wallet.registerContract` it) but its sponsor
  *    call must be in `transaction.scope` because Nulo enforces every
  *    `exec.calls` entry against the granted tx scope.
- *  - `simulation.utilities.scope` — `#[external("utility")]` functions only.
+ *  - `simulation.utilities.scope` - `#[external("utility")]` functions only.
  *    `balance_of_private` lives here.
- *  - `simulation.transactions.scope` — `#[external("public")] #[view]`
+ *  - `simulation.transactions.scope` - `#[external("public")] #[view]`
  *    functions are routed through public_dispatch as tx-shaped
  *    simulations, even when they don't write state. `balance_of_public`
  *    lives here. Mis-scoping surfaces as "Function artifact not found".
- *  - `transaction.scope` — actual sendTx calls + the SponsoredFPC's
+ *  - `transaction.scope` - actual sendTx calls + the SponsoredFPC's
  *    sponsor_unconditionally so the embedded sponsor call passes scope
  *    enforcement.
  *
@@ -73,7 +73,7 @@ export function buildFaucetManifest(input: FaucetManifestInput): AppManifest {
 		metadata: {
 			name: "nulo-faucet",
 			version: "0.1.0",
-			description: "Test USDC + ETH on Aztec alpha-testnet — Nulo",
+			description: "Test USDC + ETH on Aztec alpha-testnet - Nulo",
 			url: input.appUrl ?? defaultUrl(),
 		},
 		capabilities: [
@@ -121,7 +121,7 @@ export interface BridgeManifestInput {
 
 /**
  * Build the wallet-sdk capability manifest for the Bridge tab. Wider than the faucet's:
- *  - `accounts.canCreateAuthWit: true` — `exit_to_l1` needs a public burn auth-wit.
+ *  - `accounts.canCreateAuthWit: true` - `exit_to_l1` needs a public burn auth-wit.
  *  - `contracts` = [bridge, token, proxy] (token_bridge, the bridged token, the minter proxy).
  *  - `transaction.scope` covers claim + exit (both privacies), the token burns the exit auth-wit
  *    drives, and the SponsoredFPC sponsor call (Nulo enforces every `exec.calls` entry vs scope).
@@ -137,7 +137,7 @@ export function buildBridgeManifest(input: BridgeManifestInput): AppManifest {
 		metadata: {
 			name: "nulo-bridge",
 			version: "0.1.0",
-			description: "Bridge assets between Ethereum (L1) and Aztec (L2) — Nulo",
+			description: "Bridge assets between Ethereum (L1) and Aztec (L2) - Nulo",
 			url: input.appUrl ?? defaultUrl(),
 		},
 		capabilities: [
@@ -182,7 +182,7 @@ export interface CombinedManifestInput {
 
 /**
  * Build ONE manifest covering both the Faucet and the Bridge. The two tabs are the same origin =
- * the same app to the wallet, which keys the capability grant per-app — so two separate manifests
+ * the same app to the wallet, which keys the capability grant per-app - so two separate manifests
  * collide (the second connect's grant shadows the first, and registerContract for the missing
  * contracts hits a scope violation). One complete manifest, requested once, fixes that: connect on
  * either tab and both work, with no second wallet prompt. `canCreateAuthWit: true` because the
@@ -195,7 +195,7 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 		metadata: {
 			name: "nulo-faucet",
 			version: "0.1.0",
-			description: "Faucet + Bridge on Aztec alpha-testnet — Nulo",
+			description: "Faucet + Bridge on Aztec alpha-testnet - Nulo",
 			url: input.appUrl ?? defaultUrl(),
 		},
 		capabilities: [
@@ -216,7 +216,7 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 					],
 				},
 				// The bridge tx methods are simulatable too (a prompt-free PXE dry-run). The deposit gates
-				// its claim PROMPT on a successful claim_public SIMULATION — PXE-aware, since the simulate
+				// its claim PROMPT on a successful claim_public SIMULATION - PXE-aware, since the simulate
 				// reverts (l1_to_l2_msg_exists) until the wallet's own PXE can consume the message, which
 				// lags the node's checkpoint. Simulations are read-only, so widening this scope is safe;
 				// the actual send is still gated by the (separate) transaction scope.

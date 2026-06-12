@@ -9,7 +9,7 @@ let cached: SponsoredFpcInstance | null = null
 
 /**
  * Computes the deterministic SponsoredFPC contract instance from the
- * protocol-pinned salt. The result is cached per-tab — the salt is constant
+ * protocol-pinned salt. The result is cached per-tab - the salt is constant
  * across all Aztec environments and the computation is hash-only (no I/O),
  * so a single warm-up is sufficient.
  *
