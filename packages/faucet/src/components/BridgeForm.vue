@@ -228,6 +228,7 @@ watch(
 						l2TxHash: (rec as DepositJournalRecord).claimTxHash,
 						startedAt: rec.createdAt,
 						completedAt: rec.completedAt,
+						fuelReceived: (rec as DepositJournalRecord).fuel?.received,
 					}
 				: {
 						direction: "withdraw",
@@ -402,6 +403,10 @@ function fmt(b: bigint | null): string {
 				<template v-else-if="fuelQuote.state === 'ok'">
 					≈ {{ formatBigInt(fuelQuote.fj ?? 0n, 18) }} FJ as gas (min {{ formatBigInt(fuelQuote.min ?? 0n, 18) }} after slippage).
 					One claim transaction lands your tokens AND your gas.
+					<template v-if="isPrivate">
+						Heads up: the gas leg is PUBLIC - it writes your Aztec address on Ethereum, which a
+						private bridge alone never does. Your tokens stay private either way.
+					</template>
 				</template>
 				<template v-else-if="fuelQuote.state === 'error'">{{ fuelError ?? fuelQuote.message }}</template>
 				<template v-else>The swap rides inside your deposit - no extra transaction on Ethereum.</template>

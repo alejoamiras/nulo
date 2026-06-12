@@ -19,6 +19,7 @@ import { useNow } from "@/lib/clock"
 import { formatBigInt } from "@/lib/format"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { TESTIDS } from "@/lib/testids"
+import { overrideFuelClaim } from "@/composables/useDeposit"
 
 /** Components */
 import BridgePhaseRail from "./BridgePhaseRail.vue"
@@ -48,6 +49,28 @@ watch(discardArmed, (armed) => {
 })
 
 const rt = computed(() => journal.runtime.value[props.record.id] ?? {})
+
+/** Fuel surface (schema-2 deposits): the received-FJ line + the L14 manual escape. */
+const fuel = computed(() => {
+	const r = props.record
+	return r.direction === "deposit" ? (r as DepositJournalRecord).fuel : undefined
+})
+const fuelLine = computed(() => {
+	const f = fuel.value
+	if (!f) return null
+	if (f.received)
+		return `fuel: ${formatBigInt(BigInt(f.amount), BRIDGE_TOKEN_DECIMALS)} ${BRIDGE_TOKEN_SYMBOL} → ${formatBigInt(BigInt(f.received), 18)} FJ`
+	return `fuel: ${formatBigInt(BigInt(f.amount), BRIDGE_TOKEN_DECIMALS)} ${BRIDGE_TOKEN_SYMBOL} (swap pending)`
+})
+// The explicit, non-destructive escape: claim the tokens sponsored; the FJ message (if
+// unconsumed) stays claimable later. Offered only when a fueled claim is stuck on an error.
+const showClaimWithoutFuel = computed(
+	() => fuel.value !== undefined && !props.record.completedAt && (attention.value === "error" || attention.value === "unknown-outcome"),
+)
+function onClaimWithoutFuel() {
+	overrideFuelClaim(props.record.id)
+	onAction()
+}
 const busy = computed(() => !!rt.value.busy)
 
 const stage = computed(() => {
@@ -192,6 +215,7 @@ function onDiscard() {
 				⤓
 			</button>
 		</header>
+		<p v-if="fuelLine" class="fuel-line" :data-testid="TESTIDS.journalFuelLine">{{ fuelLine }}</p>
 
 		<BridgePhaseRail v-if="stage !== 'done'" :record="record" compact />
 
@@ -228,6 +252,16 @@ function onDiscard() {
 				@click="onAction"
 			>
 				{{ attention === "unknown-outcome" || attention === "error" ? "RETRY" : "FINISH" }}
+			</button>
+			<button
+				v-if="showClaimWithoutFuel"
+				type="button"
+				class="action"
+				:data-testid="TESTIDS.journalClaimWithoutFuel"
+				title="Claims your tokens with the sponsored fee instead. The fuel stays claimable later - nothing is abandoned."
+				@click="onClaimWithoutFuel"
+			>
+				CLAIM WITHOUT FUEL
 			</button>
 			<button
 				v-if="idle && stage !== 'done'"

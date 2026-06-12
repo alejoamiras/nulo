@@ -143,4 +143,18 @@ describe("BridgeForm fuel surface", () => {
 		await w.find(sel(TESTIDS.bridgeSubmit)).trigger("click")
 		expect(depositFn).not.toHaveBeenCalled()
 	})
+
+	it("private + fuel discloses the public gas-leg linkability (tokens stay private)", async () => {
+		const w = mount(BridgeForm)
+		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
+		await w.find(sel(TESTIDS.bridgeFuelToggle)).trigger("click")
+		await settleQuote()
+		const quote = w.find(sel(TESTIDS.bridgeFuelQuote))
+		expect(quote.text()).toMatch(/gas leg is PUBLIC/)
+		expect(quote.text()).toMatch(/tokens stay private/)
+		// Public bridging: no disclosure noise.
+		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
+		await settleQuote()
+		expect(w.find(sel(TESTIDS.bridgeFuelQuote)).text()).not.toMatch(/gas leg is PUBLIC/)
+	})
 })
