@@ -398,6 +398,20 @@ export const test = base.extend<{
 			// real second account in the cap popup, so create it here where the
 			// cost lands in hookTimeout.
 			await phase("createSecondAccount", () => createAccount(setupPage, "Second"))
+			// Persistence assertion: the row rendering proves only the optimistic
+			// appStore push; verify the SERVICE write landed before moving on.
+			await phase("assertSecondAccountPersisted", async () => {
+				const stored = await setupPage.evaluate(async () => {
+					const all = await chrome.storage.local.get(null)
+					return Object.entries(all)
+						.filter(([k]) => k.startsWith("nulo:core:accounts"))
+						.map(([, v]) => (typeof v === "string" ? v : JSON.stringify(v)))
+						.join(" ||| ")
+				})
+				if (!stored.includes('"Second"')) {
+					throw new Error(`account "Second" not in storage immediately after creation. Stored: ${stored.slice(0, 600)}`)
+				}
+			})
 			await setupPage.close()
 			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
 			await use(Object.assign(ctx, { playgroundPage }))
