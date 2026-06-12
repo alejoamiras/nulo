@@ -181,3 +181,21 @@ describe("ExecutionLane.acquireSlot", () => {
 		expect(deps.getNetwork).toHaveBeenCalledTimes(2)
 	})
 })
+
+describe("ExecutionLane.cancelJob ownership", () => {
+	test("(BUG PIN — replaced in Phase 1) cancels jobs regardless of profile ownership", async () => {
+		// Current behavior: any caller with any journal id can cancel any
+		// in-flight job — no profile check. Phase 1 of the authwit-lifecycle
+		// arc deliberately replaces this with a profile-scoped silent no-op
+		// (plan ledger D6: the profile is the sole security principal).
+		const { lane, transitions } = makeLane({
+			// Active profile is p1; the record under cancel belongs to p2.
+			getActiveProfile: vi.fn(async () => ({ id: "p1" }) as never),
+		})
+		const controller = new AbortController()
+		lane.registerController("foreign-job", controller)
+		await lane.cancelJob("foreign-job")
+		expect(transitions.find((t) => t[0] === "foreign-job")?.[1]).toEqual({ stage: "cancelled" })
+		expect(controller.signal.aborted).toBe(true)
+	})
+})

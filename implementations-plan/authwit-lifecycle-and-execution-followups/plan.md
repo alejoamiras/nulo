@@ -51,7 +51,7 @@ Funding: the dedicated account receives minted tokens + uses sponsored-FPC fees;
 
 ## Phases
 
-### Phase 0 — Housekeeping + baselines (0.25d)
+### Phase 0 ✓ — Housekeeping + baselines (0.25d)
 - Add missing `incoming-trust-state-machine-refactor` entry to `implementations-plan/index.md` (shipped PR #75).
 - Pin CURRENT cancelJob accepts-any-id behavior as `(BUG PIN — replaced in Phase 1)` in `execution-lane.test.ts`.
 - **Gate**: `bun run lint` exit 0; `bun run --cwd packages/extension vitest run src/wallet/services/execution/execution-lane.test.ts` green (lint · unit). (Gate commands cwd-explicit — fable F12.)
