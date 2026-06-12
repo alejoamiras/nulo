@@ -149,7 +149,7 @@ describe("ContractResolver.resolveArtifact", () => {
 		expect((art as unknown as { name: string }).name).toBe("Token")
 	})
 
-	test("throws the FORMATTED 'Contract artifact not found for class ${classId}' on miss", async () => {
+	test("throws the FORMATTED 'Contract artifact not found for class <classId>' on miss", async () => {
 		const pxe = fakePxe({ getContractArtifact: async () => undefined })
 		await expect(resolver.resolveArtifact(pxe, classId)).rejects.toThrow(/Contract artifact not found for class 0x0a/)
 	})

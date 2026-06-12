@@ -117,7 +117,6 @@ import {
 	type AbiDecoded,
 	type AbiType,
 	type ContractArtifact,
-	type FunctionAbi,
 	FunctionCall,
 	FunctionSelector,
 	FunctionType,

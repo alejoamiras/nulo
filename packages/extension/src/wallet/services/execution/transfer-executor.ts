@@ -28,7 +28,7 @@ import type { Network } from "@/wallet/services/network/service"
 import type { NewOperationInput, OperationRecord } from "@/wallet/services/operation-journal/spec"
 import type { ProfileInfo } from "@/wallet/services/profile/service"
 import { type TaskService, type WrappedTask, TransferContent } from "@/wallet/services/task/service"
-import { OriginType, type LocalTxOrigin, type Tx, type TxCall, type TxGasDetails } from "@/wallet/services/transaction/service"
+import { OriginType, type LocalTxOrigin, type TransactionService, type Tx } from "@/wallet/services/transaction/service"
 import type { IPXE } from "@/wallet/services/pxe/client"
 import type { ExecutionCoordinator } from "./execution-coordinator"
 import type { FeeEstimate } from "./fee/fee-strategy"
@@ -56,17 +56,9 @@ export interface TransferExecutorDeps {
 	getPXE(network: Network): IPXE
 	getAccountContract(profileId: string, chainId: number, accountAddress: string): Promise<IAccountContract>
 	getPendingForAccount(account: string): Tx[]
-	addTransaction(
-		origin: LocalTxOrigin,
-		chainId: number,
-		account: string,
-		calls: TxCall[],
-		nonce: string,
-		feePaymentMethod: AccountFeePaymentMethodOptions,
-		hash: string,
-		estimatedFee?: string,
-		gasDetails?: TxGasDetails,
-	): Promise<Tx>
+	/** Mirrors `TransactionService.addTransaction` — indexed type keeps the
+	 *  seam in sync with the source signature. */
+	addTransaction: TransactionService["addTransaction"]
 	buildAndEstimate(
 		inputOp: { networkId: string; accountAddress: string; actions: Action[]; fee?: FeeOptions },
 		feeSettings: FeeSettings,

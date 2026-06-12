@@ -17,7 +17,7 @@ vi.mock("./helpers/batched-view-simulation", () => ({
 	batchedViewSimulation: bvsMock,
 }))
 
-const BALANCES = { publicFeeJuice: "100", privateFeeJuice: null }
+const _BALANCES = { publicFeeJuice: "100", privateFeeJuice: null }
 
 function makeDeps(overrides: Partial<GasBalanceReaderDeps> = {}): GasBalanceReaderDeps {
 	return {

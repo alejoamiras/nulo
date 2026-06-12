@@ -34,7 +34,6 @@ function initialGasSettings(): GasSettings {
 
 function fakeNode(minFees: GasFees = new GasFees(100n, 200n)): AztecNode & { getCurrentMinFees: ReturnType<typeof vi.fn> } {
 	return {
-		// biome-ignore lint/suspicious/noExplicitAny: fake covers only the surface the helper touches
 		getCurrentMinFees: vi.fn(async () => minFees),
 	} as unknown as AztecNode & { getCurrentMinFees: ReturnType<typeof vi.fn> }
 }

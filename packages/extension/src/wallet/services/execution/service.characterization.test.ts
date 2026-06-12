@@ -15,26 +15,9 @@
  */
 
 import { describe, expect, test, vi } from "vitest"
-import { ConfigStore } from "@/wallet/config"
-import { LoggerStore } from "@/wallet/logger"
 import { OriginType } from "@/wallet/services/transaction/spec"
 import { DappSendExecutor } from "./dapp-send-executor"
 import { ExecutionLane } from "./execution-lane"
-import { ExecutionService } from "./service"
-
-function makeService(): ExecutionService {
-	const logger = new LoggerStore(new ConfigStore())
-	const service = new ExecutionService(logger)
-	;(service as unknown as { initialized: boolean }).initialized = true
-	return service
-}
-
-/** Loose injection helper — the facade's collaborators are private fields. */
-function inject(service: ExecutionService, fields: Record<string, unknown>): void {
-	for (const [k, v] of Object.entries(fields)) {
-		;(service as unknown as Record<string, unknown>)[k] = v
-	}
-}
 
 // ── cancelJob: transition-first, abort-second contract ─────────────────
 

@@ -38,7 +38,7 @@ import { feeToUsd, formatFeeJuice } from "@/utils/fee-estimation"
 import { pickPrimaryMethod } from "@/utils/primary-method"
 import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import type { WrappedTask } from "@/wallet/services/task/service"
-import type { LocalTxOrigin, Tx, TxCall, TxGasDetails } from "@/wallet/services/transaction/service"
+import type { LocalTxOrigin, TransactionService } from "@/wallet/services/transaction/service"
 import type { AuthwitDiscoverer } from "./authwit-discoverer"
 import type { ExecutionCoordinator } from "./execution-coordinator"
 import type { ExecutionMutexRelease } from "./execution-mutex"
@@ -112,17 +112,9 @@ export interface DappSendExecutorDeps {
 		feeSettings: FeeSettings,
 		parentTask?: WrappedTask,
 	): Promise<FeeEstimate>
-	addTransaction(
-		origin: LocalTxOrigin,
-		chainId: number,
-		account: string,
-		calls: TxCall[],
-		nonce: string,
-		feePaymentMethod: AccountFeePaymentMethodOptions,
-		hash: string,
-		estimatedFee?: string,
-		gasDetails?: TxGasDetails,
-	): Promise<Tx>
+	/** Mirrors `TransactionService.addTransaction` — indexed type keeps the
+	 *  seam in sync with the source signature. */
+	addTransaction: TransactionService["addTransaction"]
 	logDebug(msg: string): void
 }
 

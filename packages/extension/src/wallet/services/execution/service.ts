@@ -507,7 +507,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// it's extension-internal data — but we still validate it identifies
 		// the same on-chain contract the dApp asked us to register, in case of
 		// popup-side bugs.
-		let ti
+		let ti: Awaited<ReturnType<TokenService["parseTokenInterface"]>>
 		if (
 			op.previewedInterface &&
 			op.previewedInterface.contract.toLowerCase() === op.address.toLowerCase() &&
