@@ -94,7 +94,6 @@ export type FeeStrategyContext = {
 	/** From op.fee?.gasPadding, defaulted to 1.05 by caller. */
 	gasPadding: number
 	parentTask?: WrappedTask
-	deps: FeeStrategyDeps
 }
 
 /** Dependencies injected once at construction. */
