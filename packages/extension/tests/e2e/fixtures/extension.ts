@@ -400,16 +400,17 @@ export const test = base.extend<{
 			await phase("createSecondAccount", () => createAccount(setupPage, "Second"))
 			// Persistence assertion: the row rendering proves only the optimistic
 			// appStore push; verify the SERVICE write landed before moving on.
+			let postCreateDump = ""
 			await phase("assertSecondAccountPersisted", async () => {
-				const stored = await setupPage.evaluate(async () => {
+				postCreateDump = await setupPage.evaluate(async () => {
 					const all = await chrome.storage.local.get(null)
 					return Object.entries(all)
 						.filter(([k]) => k.startsWith("nulo:core:accounts"))
 						.map(([, v]) => (typeof v === "string" ? v : JSON.stringify(v)))
 						.join(" ||| ")
 				})
-				if (!stored.includes('"Second"')) {
-					throw new Error(`account "Second" not in storage immediately after creation. Stored: ${stored.slice(0, 600)}`)
+				if (!postCreateDump.includes('"Second"')) {
+					throw new Error(`account "Second" not in storage immediately after creation. Stored: ${postCreateDump.slice(0, 600)}`)
 				}
 			})
 			await setupPage.close()
@@ -602,7 +603,7 @@ export const test = base.extend<{
 						return out.join(" ||| ")
 					})
 					throw new Error(
-						`capabilities popup exposed only [${accountIds.join(", ")}] — expected the created second account. Stored: ${storedAccounts}`,
+						`capabilities popup exposed only [${accountIds.join(", ")}] — expected the created second account.\nAT-CAP-TIME: ${storedAccounts}\nPOST-CREATE: ${postCreateDump}`,
 					)
 				}
 				await approveCapabilities(capPopup, { accounts: granted })
