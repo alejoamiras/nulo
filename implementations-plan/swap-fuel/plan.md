@@ -56,7 +56,7 @@ What does NOT exist: a live deployment of router/swapper, an AZLO/WETH pool, quo
 - Tests: unit (malicious target returning < minFuelOutput reverts in the ROUTER; malicious target that prefunds FJ without pulling the AZLO slice reverts on the token-delta require — the residue-theft pin), `DeployFuelLive.fork.t.sol` (mint live AZLO permissionlessly, seed with production constants, assert band straddles init tick + both sides consumed, run the production two-hop `bridgeWithFuel` incl. `isPrivate=true`, assert AZLO's Permit2 allowance override, probe the LIVE ETH/FJ pool with a production-size quote — the L2 evidence gate).
 **Gate MET 2026-06-12:** `forge test` 38/38 (unit + fork); `WitnessHash.t.sol` unchanged; bridge-core 81 green. Live findings folded: FJ tier moved to fee 987 (fee-500 key squatted at ~8e9 FJ/ETH on live Sepolia; shared fee-3000 pool drifted to ~191 FJ/ETH), fills are product-sized 0.25 AZLO ≈ 500 FJ (P6 gains a MAX fuel cap), ~4.5%/fill decay at the chosen depth with 5 consecutive fills clearing a 380-FJ floor.
 
-### P2 — LIVE Sepolia deployment + pool seeding + verification + config
+### P2 ✓ — LIVE Sepolia deployment + pool seeding + verification + config
 **Goal:** router/swapper live, AZLO/WETH seeded, everything verified and recorded.
 - **Pre-flight (user dependency)**: deployer `0xFcc2238319aC360e985f1736aBB3df6251DAF6F5` topped up to ~0.5 Sepolia ETH (gate decision). ABORT the broadcast if balance < seed+gas margin.
 - Broadcast `DeployFuelLive.s.sol` (budget per L2: `WETH_SEED≈0.25+`, liquidity sized to the ≥20-purchase depth target; `SEED_ETH_FJ` per P1's probe — free FJ batching + ETH as needed). Deployer key from `packages/bridge-core/.env`, never printed.
@@ -64,7 +64,7 @@ What does NOT exist: a live deployment of router/swapper, an AZLO/WETH pool, quo
 - **Pool-init front-run guard** (fable double audit): V4 `initialize` is permissionless — the script ASSERTS pre-seed that the pool is uninitialized OR initialized within tolerance of the target sqrtPrice; far-off price ⇒ abort with runbook note (never seed into a garbage-priced pool); post-seed on-chain assertion of sqrtPrice + currency ordering.
 - `verify-l1.ts`: add SwapBridgeRouter + UniswapFuelSwap (our foundry root, constructor args from config).
 - `testnet-bridge.json` gains `l1.fuel = { router, swapTarget, poolManager, quoter, weth, feeJuice, pools: { azloWeth, ethFj }, slippageBps, minFuelFj }` — `minFuelFj` is PROVISIONAL until P5 calibrates it (L15); `bridge-deployments.ts` exports; bridge footer gains the router link; `deployments.md` records addresses/tx-hashes/seed amounts/sweeps.
-**Gate:** Etherscan verified ✓ both; `cast` quoter probe for 10 AZLO returns ~9.9 FJ ± band; `cast` wiring probes (router.swapTarget == deployed UniswapFuelSwap, router portals == canonical pair, owner == deploy EOA); leftovers swept; remaining balance recorded.
+**Gate MET 2026-06-12:** UniswapFuelSwap `0xE223…823e` + SwapBridgeRouter `0x8394…2206` deployed, both pools seeded at target prices (guards passed), both Etherscan-verified; wiring probes exact; live quote 0.25 AZLO → 487.67 FJ (band [450,510]); spend ≈0.45 ETH, leftover ≈9.67. Record: [deployments.md](deployments.md).
 
 ### P3 ✓ — bridge-core fuel plumbing (route/quote/persistence)
 **Goal:** framework-agnostic helpers + versioned persistence, fully unit-tested.

@@ -17,6 +17,37 @@ import config from "../../public/testnet-bridge.json"
 export const L1_USDC = config.l1.usdc as `0x${string}`
 export const L1_PORTAL = config.l1.portal as `0x${string}`
 
+/** The fuel (swap-to-FeeJuice) deployment. Optional: absent config ⇒ the fuel UI never renders. */
+export interface FuelDeployment {
+	router: `0x${string}`
+	swapTarget: `0x${string}`
+	poolManager: `0x${string}`
+	quoter: `0x${string}`
+	weth: `0x${string}`
+	feeJuice: `0x${string}`
+	pools: {
+		azloWeth: { fee: number; tickSpacing: number }
+		ethFj: { fee: number; tickSpacing: number }
+	}
+	slippageBps: number
+	minFuelFj: bigint
+}
+
+const fuelCfg = (config.l1 as { fuel?: Record<string, unknown> }).fuel
+export const BRIDGE_FUEL: FuelDeployment | undefined = fuelCfg
+	? {
+			router: fuelCfg.router as `0x${string}`,
+			swapTarget: fuelCfg.swapTarget as `0x${string}`,
+			poolManager: fuelCfg.poolManager as `0x${string}`,
+			quoter: fuelCfg.quoter as `0x${string}`,
+			weth: fuelCfg.weth as `0x${string}`,
+			feeJuice: fuelCfg.feeJuice as `0x${string}`,
+			pools: fuelCfg.pools as FuelDeployment["pools"],
+			slippageBps: fuelCfg.slippageBps as number,
+			minFuelFj: BigInt(fuelCfg.minFuelFj as string),
+		}
+	: undefined
+
 export const BRIDGE_PROXY = AztecAddress.fromString(config.l2.proxy.address)
 export const BRIDGE_TOKEN = AztecAddress.fromString(config.l2.token.address)
 

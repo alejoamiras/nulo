@@ -17,3 +17,8 @@ NEXT: `DeployFuelLive.fork.t.sol` (fork-proof the production topology end-to-end
 - **Fuel fills must be PRODUCT-SIZED**: a 2-AZLO slice (~4000 FJ) craters these depths (12.9% + 25% price moves per hop, -27% second fill); a 0.25-AZLO slice (~500 FJ — the 200-500 FJ design band) sees ~2-3% total slippage. Consequence for P6: the form needs a MAX fuel cap (sibling of MIN_FUEL_FJ), enforced at validation — oversize slices are a self-rug.
 - **Honest depth economics at (L_azloWeth=3.2e18, L_ethFj=70e18)**: ~4.5% output decay per consecutive design-band fill, every one of 5 consecutive fills clears a 380-FJ floor with no re-seed. P2 tuning option recorded: narrowing the FJ band (e.g. [115000,130000]) roughly doubles in-range liquidity per ETH (impact → ~2%/fill) at the cost of earlier band-exit under one-way flow.
 - Gate: `forge test` 38/38 (all unit + fork suites), WitnessHash byte-pins unchanged, bridge-core 81 green.
+
+## 2026-06-12 — P2 live broadcast (recorded here with the P1/P2 contract work)
+- Broadcast clean on first run: both contracts + both pools, ~0.45 ETH, all guards green. The live quoter probe returned 487.67 FJ for 0.25 AZLO — within a fraction of the fork rehearsal's 487 (the rehearsal's predictive power held exactly).
+- verify:l1 extended to the fuel pair (constructor args from config.l1.fuel incl. permit2/feeJuicePortal added to the json for this purpose); exact-match verification first-submit again.
+- minFuelFj in config carries `minFuelFjProvisional: true` until P5 calibrates from a real claim fee.
