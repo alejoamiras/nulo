@@ -25,6 +25,9 @@ function makeLane(overrides: Partial<ExecutionLaneDeps> = {}) {
 	const touches: string[] = []
 	const deps: ExecutionLaneDeps = {
 		operationJournal: {
+			// Default: every record exists and belongs to the active profile,
+			// so the ownership gate passes — choreography tests stay focused.
+			getOperation: vi.fn(async (id: string) => ({ id, profileId: "p1" }) as never),
 			transitionOperation: vi.fn(async (...args: unknown[]) => {
 				transitions.push(args)
 				return {}
@@ -35,7 +38,6 @@ function makeLane(overrides: Partial<ExecutionLaneDeps> = {}) {
 		} as never,
 		getActiveProfile: vi.fn(async () => ({ id: "p1" }) as never),
 		getNetwork: vi.fn(async () => ({ chainId: 7 }) as never),
-		createFreshRecord: vi.fn(async () => "fresh-id"),
 		logDebug: vi.fn(),
 		logInfo: vi.fn(),
 		logError: vi.fn(),
@@ -182,20 +184,56 @@ describe("ExecutionLane.acquireSlot", () => {
 	})
 })
 
-describe("ExecutionLane.cancelJob ownership", () => {
-	test("(BUG PIN — replaced in Phase 1) cancels jobs regardless of profile ownership", async () => {
-		// Current behavior: any caller with any journal id can cancel any
-		// in-flight job — no profile check. Phase 1 of the authwit-lifecycle
-		// arc deliberately replaces this with a profile-scoped silent no-op
-		// (plan ledger D6: the profile is the sole security principal).
-		const { lane, transitions } = makeLane({
-			// Active profile is p1; the record under cancel belongs to p2.
-			getActiveProfile: vi.fn(async () => ({ id: "p1" }) as never),
+describe("ExecutionLane.cancelJob ownership (ledger D6: profile is the sole principal)", () => {
+	function makeOwnershipLane(opts: { activeProfile?: string; recordProfile?: string }) {
+		const transitions: unknown[][] = []
+		const harness = makeLane({
+			getActiveProfile: vi.fn(async () => (opts.activeProfile ? ({ id: opts.activeProfile } as never) : undefined)),
+			operationJournal: {
+				getOperation: vi.fn(async () =>
+					opts.recordProfile ? ({ id: "job-1", profileId: opts.recordProfile } as never) : undefined,
+				),
+				transitionOperation: vi.fn(async (...args: unknown[]) => {
+					transitions.push(args)
+					return {}
+				}),
+				touchOperation: vi.fn(async () => {}),
+			} as never,
 		})
+		return { ...harness, transitions }
+	}
+
+	test("matching profile → cancels: transition + abort + controller removed", async () => {
+		const { lane, transitions } = makeOwnershipLane({ activeProfile: "p1", recordProfile: "p1" })
 		const controller = new AbortController()
-		lane.registerController("foreign-job", controller)
-		await lane.cancelJob("foreign-job")
-		expect(transitions.find((t) => t[0] === "foreign-job")?.[1]).toEqual({ stage: "cancelled" })
+		lane.registerController("job-1", controller)
+		await lane.cancelJob("job-1")
+		expect(transitions.find((t) => t[0] === "job-1")?.[1]).toEqual({ stage: "cancelled" })
 		expect(controller.signal.aborted).toBe(true)
+		expect(controllers(lane).has("job-1")).toBe(false)
+	})
+
+	test("foreign profile → silent drop: no transition, no abort (indistinguishable from unknown id)", async () => {
+		const { lane, transitions } = makeOwnershipLane({ activeProfile: "p1", recordProfile: "p2" })
+		const controller = new AbortController()
+		lane.registerController("job-1", controller)
+		await lane.cancelJob("job-1")
+		expect(transitions).toEqual([])
+		expect(controller.signal.aborted).toBe(false)
+	})
+
+	test("record absent → silent drop before any journal write", async () => {
+		const { lane, transitions } = makeOwnershipLane({ activeProfile: "p1", recordProfile: undefined })
+		await lane.cancelJob("ghost")
+		expect(transitions).toEqual([])
+	})
+
+	test("locked wallet (no active profile) → silent drop, even for a real record", async () => {
+		const { lane, transitions } = makeOwnershipLane({ activeProfile: undefined, recordProfile: "p1" })
+		const controller = new AbortController()
+		lane.registerController("job-1", controller)
+		await lane.cancelJob("job-1")
+		expect(transitions).toEqual([])
+		expect(controller.signal.aborted).toBe(false)
 	})
 })

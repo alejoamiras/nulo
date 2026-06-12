@@ -67,7 +67,6 @@ import { FeeJuiceWithClaimStrategy } from "./fee/fee-juice-with-claim-strategy"
 import { FpcStrategy } from "./fee/fpc-strategy"
 import { EmbeddedStrategy } from "./fee/embedded-strategy"
 import { ExecutionCoordinator } from "./execution-coordinator"
-import { pickPrimaryMethod } from "@/utils/primary-method"
 
 export * from "./spec"
 
@@ -172,8 +171,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			operationJournal: this.operationJournal,
 			getActiveProfile: () => this.profileService.getActiveProfile(),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
-			createFreshRecord: (networkId, accountAddress, origin, calls) =>
-				this.beginDappExecuteJournal(networkId, accountAddress, origin, calls),
 			logDebug: (msg, ...rest) => this.logDebug(msg, ...rest),
 			logInfo: (msg, ...rest) => this.logInfo(msg, ...rest),
 			logError: (msg, ...rest) => this.logError(msg, ...rest),
@@ -224,7 +221,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				claimOrCreateJournal: (networkId, accountAddress, origin, calls, hooks, reuseController) =>
 					this.lane.claimOrCreateJournal(networkId, accountAddress, origin, calls, hooks, reuseController),
 				beginJournal: (networkId, accountAddress, origin, calls) =>
-					this.beginDappExecuteJournal(networkId, accountAddress, origin, calls),
+					this.lane.beginJournal(networkId, accountAddress, origin, calls),
 				markJournal: (journalId, progress, error) => this.lane.markJournal(journalId, progress, error),
 			},
 			buildAndEstimate: (op, feeSettings, parentTask) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask),
@@ -547,38 +544,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	public async executeSendTransaction(op: SendTransactionOperation, origin: LocalTxOrigin, parentTask?: WrappedTask): Promise<string> {
 		await this.ensureInitialized()
 		return this.dappSendExecutor.executeSendTransaction(op, origin, parentTask)
-	}
-
-	/** Open a `dapp_execute` journal record covering an in-flight dApp send.
-	 *  Returns the journal id (or `undefined` on failure — non-fatal). The
-	 *  record carries the signing account, network, and the dApp identity
-	 *  for activity-feed rendering. Method name lives in `title` so the
-	 *  in-flight card shows the same value the settled card derives from
-	 *  the tx history. */
-	private async beginDappExecuteJournal(
-		networkId: string,
-		accountAddress: string,
-		origin: LocalTxOrigin,
-		calls?: { method?: string }[],
-	): Promise<string | undefined> {
-		try {
-			const profile = await this.profileService.getActiveProfile()
-			if (!profile) return undefined
-			const primaryMethod = pickPrimaryMethod(calls)
-			const op = await this.operationJournal.createOperation({
-				kind: "dapp_execute",
-				origin: "dapp",
-				profileId: profile.id,
-				accountAddress,
-				networkId,
-				title: primaryMethod ?? "Transaction",
-				subtitle: origin.name,
-			})
-			return op.id
-		} catch (error) {
-			this.logError("Failed to create dapp_execute journal record", getErrorMessage(error))
-			return undefined
-		}
 	}
 
 	/**

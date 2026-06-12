@@ -6,9 +6,9 @@
  * wrapper, and `cancelJob`.
  *
  * The facade consumes this as a handle and wires the executors' lane-
- * shaped deps to it. Journal-record CREATION stays facade-side
- * (`beginDappExecuteJournal` → injected here as `createFreshRecord` for
- * the claim path only).
+ * shaped deps to it. The lane also owns `dapp_execute` record CREATION
+ * (`beginJournal`) — the single start path shared by the direct
+ * `send_transaction` flow and the queued-claim flow.
  *
  * Frozen invariants (constraint registry — do not "fix" any of these):
  *   - The mutex has NO timeout and NO force-release. A wedged holder
@@ -28,6 +28,7 @@
 import { JobCancelledSentinel, type JobError, type JobProgress, normalizeError } from "@nulo/wallet-core/jobs"
 import { TooManyPendingError } from "@nulo/extension-messaging/errors"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
+import { pickPrimaryMethod } from "@/utils/primary-method"
 import type { LocalTxOrigin } from "@/wallet/services/transaction/service"
 import type { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
@@ -46,14 +47,6 @@ export interface ExecutionLaneDeps {
 	operationJournal: OperationJournalService
 	getActiveProfile(): Promise<ProfileInfo | undefined>
 	getNetwork(networkId: string): Promise<Network>
-	/** Fresh `dapp_execute` record creator — `beginDappExecuteJournal` on
-	 *  the facade. Used by the claim path when no queued record exists. */
-	createFreshRecord(
-		networkId: string,
-		accountAddress: string,
-		origin: LocalTxOrigin,
-		calls?: { method?: string }[],
-	): Promise<string | undefined>
 	logDebug(msg: string, ...rest: unknown[]): void
 	logInfo(msg: string, ...rest: unknown[]): void
 	logError(msg: string, ...rest: unknown[]): void
@@ -97,6 +90,38 @@ export class ExecutionLane {
 		this.activeControllers.delete(journalId)
 	}
 
+	/** Open a `dapp_execute` journal record covering an in-flight dApp send.
+	 *  Returns the journal id (or `undefined` on failure — non-fatal). The
+	 *  record carries the signing account, network, and the dApp identity
+	 *  for activity-feed rendering. Method name lives in `title` so the
+	 *  in-flight card shows the same value the settled card derives from
+	 *  the tx history. */
+	public async beginJournal(
+		networkId: string,
+		accountAddress: string,
+		origin: LocalTxOrigin,
+		calls?: { method?: string }[],
+	): Promise<string | undefined> {
+		try {
+			const profile = await this.deps.getActiveProfile()
+			if (!profile) return undefined
+			const primaryMethod = pickPrimaryMethod(calls)
+			const op = await this.deps.operationJournal.createOperation({
+				kind: "dapp_execute",
+				origin: "dapp",
+				profileId: profile.id,
+				accountAddress,
+				networkId,
+				title: primaryMethod ?? "Transaction",
+				subtitle: origin.name,
+			})
+			return op.id
+		} catch (error) {
+			this.deps.logError("Failed to create dapp_execute journal record", getErrorMessage(error))
+			return undefined
+		}
+	}
+
 	/**
 	 * Cancel an in-flight job (lossy-cancel).
 	 *
@@ -109,6 +134,21 @@ export class ExecutionLane {
 	 * No-op for unknown jobIds or jobs that already terminated (idempotent).
 	 */
 	public async cancelJob(jobId: string): Promise<void> {
+		// Ownership gate: the PROFILE is the sole security principal for
+		// cancel (an explicit product decision — one profile is one human,
+		// who may cancel their own jobs from any of their accounts;
+		// accountAddress/sessionId are deliberately not checked). A missing
+		// record, a foreign profile, or a locked wallet (no active profile)
+		// all drop the signal EXACTLY like an unknown id — existence
+		// non-disclosure: callers cannot probe which job ids exist. The
+		// read-then-transition window is benign: the FSM transition below
+		// remains the arbiter of WHETHER cancel applies; this gate only
+		// decides WHO may ask.
+		const record = await this.deps.operationJournal.getOperation(jobId)
+		if (!record) return
+		const profile = await this.deps.getActiveProfile()
+		if (!profile || record.profileId !== profile.id) return
+
 		// Try the journal transition first. If the FSM accepts it, the job
 		// is in a pre-submit stage and cancel is meaningful — abort the
 		// in-flight controller so the prove pipeline unwinds.
@@ -282,7 +322,7 @@ export class ExecutionLane {
 			{
 				operationJournal: this.deps.operationJournal,
 				activeControllers: this.activeControllers,
-				createFreshRecord: (n, a, o, c) => this.deps.createFreshRecord(n, a, o, c),
+				createFreshRecord: (n, a, o, c) => this.beginJournal(n, a, o, c),
 				logger: {
 					debug: (msg) => this.deps.logDebug(msg),
 					info: (msg) => this.deps.logInfo(msg),

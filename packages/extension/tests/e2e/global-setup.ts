@@ -289,6 +289,12 @@ export default async function setup(project: TestProject) {
 			console.error("[e2e-setup] Failed to start anvil:", error)
 			await killProcessGroup(anvilProcess, "anvil", weStartedAnvil)
 			anvilProcess = null
+			// Under the real agent runner a dead sandbox MUST be a loud
+			// failure, not a silent pass-by-skip — a green run where every
+			// suite skipped hides exactly the breakage the gate exists for.
+			if (process.env.E2E_REQUIRE_SETUP === "1") {
+				throw new Error("[e2e-setup] FATAL: anvil failed to become healthy and E2E_REQUIRE_SETUP=1 is set.")
+			}
 			project.provide("aztecTestConfig", undefined)
 			project.provide("playgroundUrl", PLAYGROUND_URL)
 			project.provide("faucetUrl", FAUCET_URL)
@@ -378,6 +384,12 @@ export default async function setup(project: TestProject) {
 			nodeProcess = null
 			await killProcessGroup(anvilProcess, "anvil", weStartedAnvil)
 			anvilProcess = null
+			// Same loud-failure contract as the anvil path: a node that never
+			// became healthy (e.g. native bb SIGILL) must fail the run, not
+			// skip it green.
+			if (process.env.E2E_REQUIRE_SETUP === "1") {
+				throw new Error("[e2e-setup] FATAL: local Aztec node failed to become healthy and E2E_REQUIRE_SETUP=1 is set.")
+			}
 			project.provide("aztecTestConfig", undefined)
 			project.provide("playgroundUrl", PLAYGROUND_URL)
 			project.provide("faucetUrl", FAUCET_URL)

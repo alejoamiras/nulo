@@ -24,10 +24,13 @@ import { ExecutionLane } from "./execution-lane"
 describe("cancelJob: journal-first ordering contract", () => {
 	function makeLane(transitionOperation: (id: string, patch: unknown) => Promise<unknown>) {
 		return new ExecutionLane({
-			operationJournal: { transitionOperation } as never,
-			getActiveProfile: async () => undefined,
+			// Ownership gate satisfied: record belongs to the active profile.
+			operationJournal: {
+				transitionOperation,
+				getOperation: async () => ({ id: "job-1", profileId: "p1" }) as never,
+			} as never,
+			getActiveProfile: async () => ({ id: "p1" }) as never,
 			getNetwork: async () => ({}) as never,
-			createFreshRecord: async () => undefined,
 			logDebug: () => {},
 			logInfo: () => {},
 			logError: () => {},
