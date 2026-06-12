@@ -41,3 +41,8 @@ modules + the six load-bearing invariants.
 
 Version 0.23.0-rc.9; `bun run audit:vue` exit 0 (typecheck:all → unit +
 component tests → lint → build). Final unit count 2,336.
+
+## Close
+
+PR #83 to dev (single final PR; NOT merged — manual QA gates it).
+Phase 8 ✓. Arc complete: all phases 0-8 ✓.

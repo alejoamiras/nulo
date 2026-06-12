@@ -80,7 +80,7 @@ The riskiest semantics, deliberately last (ledger D3): new `execution-lane.ts` o
 - **Bail-out (pre-defined)**: all four done-conditions already hold after Phase 6. If Phase 7's gate fails twice, STOP, surface to user with findings — do not force. Shipping without Phase 7 is a recorded outcome, not a failure.
 Gate: full + heavy shards (cancel-mid-prove, concurrent-sendtx, concurrent-sendtx-confirm). Revert: checkpoint drop; `Methods.cancelJob` + journal shapes unchanged.
 
-### Phase 8 — Arc close (1-1.5d)
+### Phase 8 ✓ — Arc close (1-1.5d)
 `/code-review max --fix` (separate commits) → codex post-impl audit (net diff from arc baseline + code-review commit summary + this plan + adversarial ask) → fix loop → milestone-comment cleanup in touched regions only → docs (execution README/file map, coordinator docblock) → RC bump + build → **manual QA script**: popup transfer (public+private), standard dApp sendTx, embedded fee payer, NO_FROM path, **authwit revoke AND registry enable/disable toggle (the auth-registry slice of the `send_transaction` path — zero e2e coverage exists for these callers, so manual QA is their behavioral gate; audit R1-fable H1 as reframed by the final codex pass)**, cancel-mid-prove, concurrent sendTx FIFO, one SW-restart resume → final PR to dev.
 
 **Total: ~9-12 focused days.** Schedule risk concentrated in Phases 3 and 7.
