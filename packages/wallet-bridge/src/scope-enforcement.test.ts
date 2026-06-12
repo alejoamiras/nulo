@@ -529,3 +529,40 @@ describe("edge cases", () => {
 		expect(() => enforceScope("sendTx", [{ noCallsField: true }], grants)).toThrow(/exec\.calls/)
 	})
 })
+
+// ── grantPublicAuthwit: gated by the transaction scope ────────────────
+//
+// Granting an authwit for method@contract authorizes a FUTURE call with
+// the user's funds — same power as sending the call, same scope gate.
+
+describe("grantPublicAuthwit transaction-scope gate", () => {
+	const content = (contract: string, method: string) => ({ caller: ADDR_B, contract, method, args: [] })
+
+	test("in-scope contract+method passes", () => {
+		const grants = [grant({ type: "transaction", scope: [{ contract: ADDR_A, function: "transfer_public_to_public" }] } as Capability)]
+		expect(() => enforceScope("grantPublicAuthwit", ["0xacc", content(ADDR_A, "transfer_public_to_public")], grants)).not.toThrow()
+	})
+
+	test("wildcard scope passes", () => {
+		const grants = [grant({ type: "transaction", scope: [{ contract: "*", function: "*" }] } as Capability)]
+		expect(() => enforceScope("grantPublicAuthwit", ["0xacc", content(ADDR_A, "anything")], grants)).not.toThrow()
+	})
+
+	test("out-of-scope contract throws", () => {
+		const grants = [grant({ type: "transaction", scope: [{ contract: ADDR_A, function: "*" }] } as Capability)]
+		expect(() => enforceScope("grantPublicAuthwit", ["0xacc", content(ADDR_B, "transfer_public_to_public")], grants)).toThrow(
+			/Scope violation: grantPublicAuthwit/,
+		)
+	})
+
+	test("out-of-scope method throws", () => {
+		const grants = [grant({ type: "transaction", scope: [{ contract: ADDR_A, function: "mint" }] } as Capability)]
+		expect(() => enforceScope("grantPublicAuthwit", ["0xacc", content(ADDR_A, "transfer_public_to_public")], grants)).toThrow(
+			/Scope violation: grantPublicAuthwit/,
+		)
+	})
+
+	test("no transaction grants → pass-through (type-level enforcement handles it)", () => {
+		expect(() => enforceScope("grantPublicAuthwit", ["0xacc", content(ADDR_A, "m")], [])).not.toThrow()
+	})
+})

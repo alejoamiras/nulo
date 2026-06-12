@@ -120,6 +120,23 @@ function checkTransactionCalls(methodName: string, args: unknown[], grants: Gran
 	}
 }
 
+function checkGrantPublicAuthwit(args: unknown[], grants: GrantedCapabilityRecord[]): void {
+	// Granting a public authwit for method@contract authorizes a FUTURE
+	// call with the user's funds — at least as powerful as sending that
+	// call now, so it is gated by the same transaction scope.
+	const content = args[1] as { contract?: unknown; method?: unknown } | undefined
+	const contract = String(content?.contract)
+	const method = String(content?.method)
+
+	const caps = grantsOfType<TransactionCapability>(grants, "transaction")
+	if (!caps.length) return
+
+	const permitted = caps.some((c) => matchesScope(contract, method, c.scope))
+	if (!permitted) {
+		throw new Error(`Scope violation: grantPublicAuthwit authorizes ${method}@${contract}, not permitted by granted transaction scope`)
+	}
+}
+
 function checkSimulationTransactions(methodName: string, args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	const exec = args[0] as WireExecPayload
 	const calls = exec?.calls
@@ -365,6 +382,7 @@ const METHOD_SCOPE_CHECKER: Record<string, (args: unknown[], grants: GrantedCapa
 	isTokenRegistered: checkIsTokenRegistered,
 	getContractClassMetadata: checkGetContractClassMetadata,
 	sendTx: (args, grants) => checkTransactionCalls("sendTx", args, grants),
+	grantPublicAuthwit: checkGrantPublicAuthwit,
 	simulateTx: (args, grants) => checkSimulationTransactions("simulateTx", args, grants),
 	profileTx: (args, grants) => checkSimulationTransactions("profileTx", args, grants),
 	executeUtility: checkExecuteUtility,

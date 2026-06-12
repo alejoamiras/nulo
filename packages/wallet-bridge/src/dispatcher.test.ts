@@ -1211,3 +1211,110 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 		expect(prompted).toBe(true)
 	})
 })
+
+// ── grantPublicAuthwit (Nulo-custom) — schema-patch reachability + routing ──
+//
+// Same contract as registerToken: three identical schema-patch copies
+// (extension / faucet / playground) pinned by importing the extension's,
+// routing through DappInteractionService.execute (popup gate), and the
+// dApp-supplied account validated against the session's authorized set.
+
+describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
+	test("schema patch extends WalletSchema with a 2-arg `grantPublicAuthwit` entry", async () => {
+		await import("../../extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
+		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
+		expect("grantPublicAuthwit" in WalletSchema).toBe(true)
+		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
+		const entry = (WalletSchema as any).grantPublicAuthwit
+		expect(typeof entry?.parameters).toBe("function")
+		expect(entry.parameters().items.length).toBe(2)
+	})
+
+	test("dispatch('grantPublicAuthwit', ...) routes a send_transaction with ONE add_public_authwit call-content action through DappInteractionService.execute", async () => {
+		const session = makeSession({
+			capabilityGrants: [
+				{
+					capability: {
+						type: "accounts",
+						canGet: true,
+						canCreateAuthWit: false,
+						accounts: [{ alias: "main", item: "0xacc" }],
+					} as Capability,
+					grantedAt: 1,
+				},
+			],
+			accounts: ["aztec:0:0xacc"],
+		})
+		const { writer } = makeSessionWriter(session)
+
+		const executeCalls: unknown[] = []
+		const executionCalls: unknown[] = []
+		const interaction: IDappInteractionRunner = {
+			execute: async (params: unknown) => {
+				executeCalls.push(params)
+				return [{ status: "ok", result: "0xtxhash" }] as never
+			},
+			requestCapabilities: async () => ({}) as never,
+		}
+		const execution: IExecutionRunner = {
+			executeOperations: async (ops) => {
+				executionCalls.push(ops)
+				return [{ status: "ok", result: undefined }] as OperationResult[]
+			},
+		}
+		const network: INetworkReader = {
+			getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
+		}
+		const account: IAccountReader = {
+			getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }],
+		}
+		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
+
+		const grantContent = {
+			caller: "0xcaller",
+			contract: "0xtoken",
+			method: "transfer_public_to_public",
+			args: ["0xacc", "0xcaller", "5", "1"],
+		}
+		const result = await dispatcher.dispatch("grantPublicAuthwit", ["0xacc", grantContent], ctx)
+
+		expect(result).toBe("0xtxhash")
+		expect(executeCalls).toHaveLength(1)
+		expect(executionCalls).toHaveLength(0)
+		const params = executeCalls[0] as {
+			operations: Array<{ kind: string; account: string; actions: Array<{ kind: string; content: Record<string, unknown> }> }>
+		}
+		const op = params.operations[0]
+		expect(op.kind).toBe("send_transaction")
+		expect(op.account).toBe("aztec:0:0xacc")
+		expect(op.actions).toHaveLength(1)
+		expect(op.actions[0].kind).toBe("add_public_authwit")
+		expect(op.actions[0].content).toEqual({
+			kind: "call",
+			caller: "0xcaller",
+			contract: "0xtoken",
+			method: "transfer_public_to_public",
+			args: ["0xacc", "0xcaller", "5", "1"],
+		})
+	})
+
+	test("dispatch('grantPublicAuthwit', ...) rejects an account outside the session's authorized list", async () => {
+		const session = makeSession({
+			capabilityGrants: [],
+			accounts: ["aztec:0:0xacc"],
+		})
+		const { writer } = makeSessionWriter(session)
+		const interaction: IDappInteractionRunner = {
+			execute: async () => [{ status: "ok", result: undefined }] as never,
+			requestCapabilities: async () => ({}) as never,
+		}
+		const execution: IExecutionRunner = { executeOperations: async () => [] as OperationResult[] }
+		const network: INetworkReader = { getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
+		const account: IAccountReader = { getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }] }
+		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
+
+		await expect(
+			dispatcher.dispatch("grantPublicAuthwit", ["0xother", { caller: "0xc", contract: "0xt", method: "m", args: [] }], ctx),
+		).rejects.toThrow(/not authorized for this dApp session/)
+	})
+})
