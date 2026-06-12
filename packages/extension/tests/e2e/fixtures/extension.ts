@@ -573,7 +573,23 @@ export const test = base.extend<{
 				// exposes fewer, fail HERE with the ids so the discriminator
 				// (creation failed vs popup filtered) is in the error itself.
 				if (granted.length < 2) {
-					throw new Error(`capabilities popup exposed only [${accountIds.join(", ")}] — expected the created second account`)
+					// Ground truth from the wallet's own storage: every account row
+					// with its chainId, so the failure discriminates wrong-chain
+					// creation from popup-side filtering.
+					const storedAccounts = await capPopup.evaluate(async () => {
+						const all = await chrome.storage.local.get(null)
+						const out: string[] = []
+						for (const [k, v] of Object.entries(all)) {
+							if (k.startsWith("nulo:core:accounts") || k.startsWith("nulo:core:networks")) {
+								// Raw, no shape assumptions — values may be serialized strings.
+								out.push(`${k} => ${(typeof v === "string" ? v : JSON.stringify(v)).slice(0, 400)}`)
+							}
+						}
+						return out.join(" ||| ")
+					})
+					throw new Error(
+						`capabilities popup exposed only [${accountIds.join(", ")}] — expected the created second account. Stored: ${storedAccounts}`,
+					)
 				}
 				await approveCapabilities(capPopup, { accounts: granted })
 				await waitForPgResult(playgroundPage, "requestCapabilities", seqGrant, 30_000)
