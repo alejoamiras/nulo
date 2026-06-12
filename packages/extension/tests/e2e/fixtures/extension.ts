@@ -569,6 +569,12 @@ export const test = base.extend<{
 				)
 				const granted = accountIds.slice(0, Math.min(2, accountIds.length)).filter((a): a is string => !!a)
 				if (granted.length === 0) throw new Error("capabilities popup returned no accounts")
+				// The fixture creates a second account upstream; if the cap popup
+				// exposes fewer, fail HERE with the ids so the discriminator
+				// (creation failed vs popup filtered) is in the error itself.
+				if (granted.length < 2) {
+					throw new Error(`capabilities popup exposed only [${accountIds.join(", ")}] — expected the created second account`)
+				}
 				await approveCapabilities(capPopup, { accounts: granted })
 				await waitForPgResult(playgroundPage, "requestCapabilities", seqGrant, 30_000)
 				return granted
