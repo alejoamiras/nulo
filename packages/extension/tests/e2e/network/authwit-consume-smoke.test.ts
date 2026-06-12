@@ -1,0 +1,94 @@
+import { expect, inject } from "vitest"
+import { clickByTestId, test } from "../fixtures/extension"
+import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
+import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
+
+const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
+const hasConfig = aztecConfig !== undefined
+
+/**
+ * Phase-2 gate smoke: the public-authwit GRANT surface works end-to-end
+ * once, and the granted approval is CONSUMABLE by the named caller.
+ *
+ *   1. Account A grants caller B a public authwit for
+ *      `transfer_public_to_public(A, B, 1, nonce)` via the Nulo-custom
+ *      `grantPublicAuthwit` RPC (approval popup → on-chain
+ *      `set_authorized` → wallet `trackAuthwit`).
+ *   2. After the grant MINES (the consume's public simulation reads the
+ *      registry), account B sends the transfer-from AS B. The build's
+ *      public simulation passing the registry check IS the consumption
+ *      proof at smoke level — a missing/false approval reverts the
+ *      simulation and the dApp gets an error row instead of ok.
+ *
+ * The full lifecycle (fresh-grant-per-step, revoke, registry toggle,
+ * non-vacuity) is authwit-lifecycle.test.ts (Phase 3).
+ */
+test.skipIf(!hasConfig)(
+	"authwit-consume-smoke — grant public authwit, then consume as the named caller",
+	{ timeout: 240_000 },
+	async ({ dappConnectedExtensionWithFirstTwoAccountsCap }) => {
+		const ctx = dappConnectedExtensionWithFirstTwoAccountsCap
+		const { playgroundPage: page, accountAddresses } = ctx
+		// The fixture creates + grants a second account; the consume flow is
+		// meaningless without it.
+		expect(accountAddresses.length).toBe(2)
+		const [ownerA, callerB] = accountAddresses as [string, string]
+
+		// Owner needs public balance to transfer from.
+		await mintPublicTokensForAccount(aztecConfig!, ownerA)
+
+		await page.evaluate(
+			({ token, owner, caller }: { token: string; owner: string; caller: string }) => {
+				const setVal = (sel: string, v: string) => {
+					const input = document.querySelector<HTMLInputElement>(sel)
+					if (!input) return
+					const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set
+					setter?.call(input, v)
+					input.dispatchEvent(new Event("input", { bubbles: true }))
+				}
+				setVal('[data-testid="pg-input-tokenAddress"]', token)
+				setVal('[data-testid="pg-input-authwitOwner"]', owner)
+				setVal('[data-testid="pg-input-authwitCaller"]', caller)
+				setVal('[data-testid="pg-input-authwitAmount"]', "1")
+				setVal('[data-testid="pg-input-authwitNonce"]', "1")
+			},
+			{ token: aztecConfig!.tokenAddress, owner: ownerA, caller: callerB },
+		)
+
+		// ── Grant (as A — the fixture's selectedAccount is granted[0]) ──
+		const seqGrant = await snapshotResultSeq(page)
+		const grantPopupP = waitForPopup(ctx, "execute", { timeout: 30_000 })
+		await clickByTestId(page, "pg-btn-grantPublicAuthwit")
+		const grantPopup = await grantPopupP
+		await waitForExecuteContent(grantPopup)
+		await approveExecute(grantPopup)
+		const grantResult = await waitForPgResult(page, "grantPublicAuthwit", seqGrant, 120_000)
+		expect(grantResult.status).toBe("ok")
+
+		// The RPC resolves at SUBMIT; the consume's public simulation reads
+		// the registry, so the grant must be MINED first.
+		const grantTxHash = JSON.parse(String(grantResult.resultJson)) as string
+		expect(grantTxHash).toMatch(/^0x/)
+		await waitForTxMined(aztecConfig!, grantTxHash)
+
+		// ── Consume (as B — switch the acting account) ──
+		await page.evaluate((caller: string) => {
+			const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-select-account"]')
+			if (!select) throw new Error("pg-select-account not present")
+			select.value = caller
+			select.dispatchEvent(new Event("change", { bubbles: true }))
+		}, callerB)
+
+		const seqConsume = await snapshotResultSeq(page)
+		const consumePopupP = waitForPopup(ctx, "execute", { timeout: 30_000 })
+		await clickByTestId(page, "pg-btn-consumeAuthwit")
+		const consumePopup = await consumePopupP
+		await waitForExecuteContent(consumePopup)
+		await approveExecute(consumePopup)
+		const consumeResult = await waitForPgResult(page, "sendTx", seqConsume, 120_000)
+		// ok ⇒ the build's public simulation passed the AuthRegistry check —
+		// the approval existed and B was the authorized caller.
+		expect(consumeResult.status).toBe("ok")
+	},
+)

@@ -1,6 +1,6 @@
 import puppeteer, { TimeoutError, type Browser, type Page, type ConsoleMessage } from "puppeteer"
 import { test as base, inject } from "vitest"
-import { switchToLocalNetwork, importToken, getAccountAddress, refreshBalances } from "./helpers"
+import { switchToLocalNetwork, importToken, getAccountAddress, refreshBalances, createAccount } from "./helpers"
 import { snapshotResultSeq, waitForPgResult } from "./playground"
 import { waitForPopup, approveCapabilities } from "./popups"
 import type { AztecTestConfig } from "./aztec"
@@ -393,6 +393,11 @@ export const test = base.extend<{
 			const setupPage = await phase("openPopup", () => openPopup(ctx))
 			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
 			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
+			// A fresh profile exposes ONE account; multi-account consumers (the
+			// from-characterization + the authwit consume-as-caller flow) need a
+			// real second account in the cap popup, so create it here where the
+			// cost lands in hookTimeout.
+			await phase("createSecondAccount", () => createAccount(setupPage, "Second"))
 			await setupPage.close()
 			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
 			await use(Object.assign(ctx, { playgroundPage }))

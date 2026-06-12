@@ -10,6 +10,7 @@ import { randomBytes } from "node:crypto"
 import { rmSync } from "node:fs"
 
 import { createAztecNodeClient, waitForNode } from "@aztec/aztec.js/node"
+import { TxHash } from "@aztec/stdlib/tx"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Fr } from "@aztec/aztec.js/fields"
 import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
@@ -469,5 +470,28 @@ export async function mintPublicTokensForAccount(
 		await mintPublicTokens(wallet, aztecConfig.tokenAddress, accountAddress, amount, aztecConfig.minterAddress, feeOptions)
 	} finally {
 		await cleanup()
+	}
+}
+
+/** Poll the node until a tx (by hash string, as returned to the dApp) is
+ *  MINED successfully. Needed when a flow's NEXT step reads on-chain state
+ *  the tx wrote (e.g. a public-authwit grant's `set_authorized` must be
+ *  mined before a consume's public simulation can see it) — the wallet's
+ *  `send_transaction` path resolves the dApp promise at SUBMIT, not at
+ *  mine. Throws on revert/drop so failures attribute to the right tx. */
+export async function waitForTxMined(aztecConfig: AztecTestConfig, txHash: string, timeoutMs = 120_000): Promise<void> {
+	const node = createAztecNodeClient(aztecConfig.nodeUrl)
+	const deadline = Date.now() + timeoutMs
+	for (;;) {
+		const receipt = await node.getTxReceipt(TxHash.fromString(txHash)).catch(() => undefined)
+		const status = receipt ? String(receipt.status) : undefined
+		if (status === "success") return
+		if (status === "app_logic_reverted" || status === "teardown_reverted" || status === "dropped") {
+			throw new Error(`waitForTxMined: tx ${txHash} terminal as "${status}"`)
+		}
+		if (Date.now() > deadline) {
+			throw new Error(`waitForTxMined: timeout waiting for ${txHash} (last status: ${status ?? "pending"})`)
+		}
+		await new Promise((r) => setTimeout(r, 1_000))
 	}
 }
