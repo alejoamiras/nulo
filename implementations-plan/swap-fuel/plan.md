@@ -66,13 +66,13 @@ What does NOT exist: a live deployment of router/swapper, an AZLO/WETH pool, quo
 - `testnet-bridge.json` gains `l1.fuel = { router, swapTarget, poolManager, quoter, weth, feeJuice, pools: { azloWeth, ethFj }, slippageBps, minFuelFj }` — `minFuelFj` is PROVISIONAL until P5 calibrates it (L15); `bridge-deployments.ts` exports; bridge footer gains the router link; `deployments.md` records addresses/tx-hashes/seed amounts/sweeps.
 **Gate:** Etherscan verified ✓ both; `cast` quoter probe for 10 AZLO returns ~9.9 FJ ± band; `cast` wiring probes (router.swapTarget == deployed UniswapFuelSwap, router portals == canonical pair, owner == deploy EOA); leftovers swept; remaining balance recorded.
 
-### P3 — bridge-core fuel plumbing (route/quote/persistence)
+### P3 ✓ — bridge-core fuel plumbing (route/quote/persistence)
 **Goal:** framework-agnostic helpers + versioned persistence, fully unit-tested.
 - `src/route.ts`: `buildFuelRoute(azlo, weth, feeJuice, fee, tickSpacing)` — address-sorted PoolKeys + zeroForOnes (both hops `zeroForOne=true` for live addresses).
 - `src/quote.ts`: chained V4 Quoter `quoteExactInputSingle` per hop (Holonym recipe); slippage math (`minFuelOutput = quote × (1 − 300bps)`); revert mapping to honest copy.
 - `journal.ts`: per-record `schema: 1 | 2`; optional `fuel` block `{ amount, secret, secretHashHex, minOutput, leafIndex?, received?, claimAttempt?, claimTxHash?, consumed? }` — `received` comes ONLY from the `BridgeWithFuel` event (content-hash law); `claimAttempt` latches journal-first before any fjwc-embedded wallet call (L14); schema-1 records load untouched.
 - `backup.ts`: schema-2 validation branch (strict; malformed fuel rejects restore); backup file stays `v:1`; schema-1 golden fixture still restores.
-**Gate:** `bun run --cwd packages/bridge-core test` + typecheck; a serialized PRE-ARC journal/backup fixture loads byte-identically.
+**Gate MET 2026-06-12** (pulled ahead of P2, which waits on the deployer top-up): 97 tests + typecheck + lint; schema-1 records load untouched beside schema-2 (modulo the upsert's updatedAt stamp) and the pre-arc backup fixtures still restore.
 
 ### P4 — Wallet manifest scope + scope-delta re-consent (wallet-bridge + faucet)
 **Goal:** the FJ claim passes scope enforcement for new AND existing grants.
