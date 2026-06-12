@@ -63,7 +63,7 @@ export type Methods = {
 	/**
 	 * Cancel an in-flight job by its operation-journal id.
 	 *
-	 * Phase 2 lossy-cancel semantics: the journal is transitioned to
+	 * Lossy-cancel semantics: the journal is transitioned to
 	 * `cancelled` synchronously and the SW-side AbortSignal for that job
 	 * is fired. The underlying prove call may still be running in the
 	 * offscreen document (BB.wasm can't be preempted); its result is

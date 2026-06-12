@@ -1,0 +1,21 @@
+### a) Claude misses vs codex catches; new miss after cross-read
+- There is strong convergence; I do not see a major codex-only *code* smell that both Claude reports missed outright. The main codex advantage was thresholding: c5-codex-1/2 correctly kept tiny/local items like `NetworkInfo` duplication and `OFFSCREEN_KEEPALIVE` duplication as supporting evidence, not lead findings.
+- One thing three of the four reports missed is the stale `ArtifactRegistry.clear()` comment: it still says “Called during onProfileDeleted” at [packages/aztec-runtime/src/pxe/artifact-registry.ts](packages/aztec-runtime/src/pxe/artifact-registry.ts:127), but `PxeService` explicitly documents the opposite decision at [packages/aztec-runtime/src/pxe/service.ts](packages/aztec-runtime/src/pxe/service.ts:482). Claude 2 caught this; Claude 1 and both codex reports did not.
+- The main new issue I see is report-quality, not code-quality: Claude 1’s rebuttal against the repo map on `walletErrorFromPayload` is factually wrong.
+
+### b) Claude findings/rebuttals that are wrong, overconfident, or scope-sloppy
+- **Claude 1 non-finding is factually wrong about `walletErrorFromPayload` non-test consumers.** It claims consumers in `popup/utils/cancellable-rejection.ts` and `wallet-core/src/jobs/fsm.ts`. Source shows only comments there, not imports or calls: [packages/extension/src/popup/utils/cancellable-rejection.ts](packages/extension/src/popup/utils/cancellable-rejection.ts:17) and [packages/wallet-core/src/jobs/fsm.ts](packages/wallet-core/src/jobs/fsm.ts:83). The real non-test consumer is the background client at [packages/extension-messaging/src/background/client.ts](packages/extension-messaging/src/background/client.ts:7) and [packages/extension-messaging/src/background/client.ts](packages/extension-messaging/src/background/client.ts:112).
+- **Claude 1 F4 overreaches scope when it leans on “live hand re-implementations.”** C5 scope is limited to `packages/aztec-runtime/src/**`, `packages/extension-messaging/src/**`, `packages/extension/src/wallet/services/pxe/client.ts`, `packages/extension/src/wallet/utils/offscreen.ts`, and `packages/extension/src/wallet/base/**` per [clusters.md](audit/quality/2026-06-11-ultra-50b45d/raw/clusters.md:25). Its extra evidence comes from `operation-journal/client.ts` and `profile/client.test.ts`, both outside that scope. The dead-subpath claim still stands; the extra duplication evidence is just out-of-scope.
+- **Claude 2 F9 is the weakest threshold call.** The duplicated `NetworkInfo` types are real at [chain-runtime.ts](packages/aztec-runtime/src/pxe/chain-runtime.ts:42) and [artifact-registry.ts](packages/aztec-runtime/src/pxe/artifact-registry.ts:13), with an unused `_network` parameter at [artifact-registry.ts](packages/aztec-runtime/src/pxe/artifact-registry.ts:162), but the report overstates the maintenance cost relative to the stronger transport-layer duplications.
+
+### c) Claude findings I confirm
+- **F1 / codex F1:** five hand-maintained PXE surfaces are real and already drifting (`getBlockTimestamp` / `clearChainState` absent from `IPXE` and `PXEProxy`).
+- **F2 + F3 / codex F2:** background vs offscreen transport duplication is the strongest cluster smell; the divergent error contracts are verified in source.
+- **F3/F4 / codex F3 + F4:** dead exported subpaths and test-location inversion are both real and well-supported.
+- **Claude 1 F5 / codex F5:** `PxeService` is a legitimate Large Class hotspot.
+
+### d) Contradictions across the four documents
+- **Direct contradiction with source:** Claude 1 says `walletErrorFromPayload` has non-test consumers in popup utils and wallet-core FSM; source shows comments only there.
+- **Threshold contradiction:** Claude 2 elevates `NetworkInfo` duplication to F9, while c5-codex-1 explicitly demotes it to a non-finding.
+- **Threshold contradiction:** Claude 2 elevates the dead-export family including `OFFSCREEN_KEEPALIVE`, `peek()`, and `clear()`; codex reports demote those as too minor relative to the bigger transport smells.
+- **Count mismatch:** Claude 1 reports 23 background subclasses, Claude 2 reports 42, codex reports 43 production background consumers. These are different measurement bases and should not be compared as if they were the same metric.

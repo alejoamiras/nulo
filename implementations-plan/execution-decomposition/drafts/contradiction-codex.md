@@ -1,0 +1,14 @@
+## Contradictions
+- Phase 6 says `ExecutionService` ends as “RPC facade + executeOperations dispatcher + collaborator wiring” ([plan.md](implementations-plan/execution-decomposition/plan.md:61)). But Phase 7 still plans to move `cancelJob`, `activeControllers`, mutex/waiter state, `acquireExecutionSlot`, and the claim wrapper into `execution-lane.ts` ([plan.md](implementations-plan/execution-decomposition/plan.md:67)). Today that is substantial service-owned logic, not wiring ([service.ts](packages/extension/src/wallet/services/execution/service.ts:836), [service.ts](packages/extension/src/wallet/services/execution/service.ts:1262)). One of those phase descriptions is overstating its end state.
+- The arc scope says Q23 is in-scope ([plan.md](implementations-plan/execution-decomposition/plan.md:3)), but Phase 7’s bail-out says shipping without Phase 7 is “not a failure” because all done-conditions already hold after Phase 6 ([plan.md](implementations-plan/execution-decomposition/plan.md:70)). That makes Q23 optional without saying so in scope.
+
+## Silently dropped
+- The explicit Phase 6 colocated tests for the new executors died silently. Done-condition `(d)` requires every extracted module to ship tests ([plan.md](implementations-plan/execution-decomposition/plan.md:11)), but Phase 6 names `transfer-executor.ts` and `dapp-send-executor.ts` without naming their paired test files ([plan.md](implementations-plan/execution-decomposition/plan.md:59)). That should be explicit.
+- Phase 4 adds `actions-hash drift` as a required test ([plan.md](implementations-plan/execution-decomposition/plan.md:50)), but the current estimate-reuse contract does not store or compare any action hash; it checks input fields, endpoint, base-fee fingerprint, and pending hashes only ([service.ts](packages/extension/src/wallet/services/execution/service.ts:641)). That is a silent behavior change, not just characterization, and it has no ledger entry.
+
+## D1-D3 re-examination
+- D1: no concrete new contradiction. In the consolidated design, Phase 2 remains internal and wire-stable ([plan.md](implementations-plan/execution-decomposition/plan.md:35)), so doing tuples first looks like churn, not a new semantic trap.
+- D3: the accepted “minor mechanical re-churn of executor call sites” is too weak. If Phase 6 extracts `dapp-send-executor.ts` first ([plan.md](implementations-plan/execution-decomposition/plan.md:59)), then Phase 7 still has to cut through executor-local slot acquire, queued-journal claim, cancel checks, stage marks, and finally cleanup in both dApp send flows ([service.ts](packages/extension/src/wallet/services/execution/service.ts:1894), [service.ts](packages/extension/src/wallet/services/execution/service.ts:2042)). That is control-flow surgery, not minor call-site churn.
+
+## Verdict
+`ledger needs fixes: P6 end-state wording vs P7 ownership, Q23 optionality vs arc scope, explicit P6 colocated tests, Phase-4 actions-hash test/contract`

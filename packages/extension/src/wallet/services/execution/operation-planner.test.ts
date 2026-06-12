@@ -87,15 +87,15 @@ function makeTokenService(token: Token): TokenService {
 describe("OperationPlanner.buildTransferOperation", () => {
 	test("builds a SendTransactionOperation for TransferType.Public", async () => {
 		const planner = new OperationPlanner(makeProfile(), makeTokenService(makeToken()))
-		const { op, token, fn, args } = await planner.buildTransferOperation(
-			"net-1",
-			"0xabc",
-			1,
-			TransferType.Public,
-			"0xdef",
-			100n,
-			DEFAULT_FEE_SETTINGS,
-		)
+		const { op, token, fn, args } = await planner.buildTransferOperation({
+			networkId: "net-1",
+			accountAddress: "0xabc",
+			tokenId: 1,
+			transferType: TransferType.Public,
+			recipientAddress: "0xdef",
+			amount: 100n,
+			feeSettings: DEFAULT_FEE_SETTINGS,
+		})
 		expect(op.kind).toBe("send_transaction")
 		expect(op.networkId).toBe("net-1")
 		expect(op.accountAddress).toBe("0xabc")
@@ -108,48 +108,104 @@ describe("OperationPlanner.buildTransferOperation", () => {
 
 	test("builds a SendTransactionOperation for TransferType.Private", async () => {
 		const planner = new OperationPlanner(makeProfile(), makeTokenService(makeToken()))
-		const { op } = await planner.buildTransferOperation("net-1", "0xa", 1, TransferType.Private, "0xb", 1n, DEFAULT_FEE_SETTINGS)
+		const { op } = await planner.buildTransferOperation({
+			networkId: "net-1",
+			accountAddress: "0xa",
+			tokenId: 1,
+			transferType: TransferType.Private,
+			recipientAddress: "0xb",
+			amount: 1n,
+			feeSettings: DEFAULT_FEE_SETTINGS,
+		})
 		expect(op.actions[0].kind).toBe("encoded_call")
 	})
 
 	test("builds a SendTransactionOperation for TransferType.PrivateToPublic", async () => {
 		const planner = new OperationPlanner(makeProfile(), makeTokenService(makeToken()))
-		const { op } = await planner.buildTransferOperation("n", "0xa", 1, TransferType.PrivateToPublic, "0xb", 1n, DEFAULT_FEE_SETTINGS)
+		const { op } = await planner.buildTransferOperation({
+			networkId: "n",
+			accountAddress: "0xa",
+			tokenId: 1,
+			transferType: TransferType.PrivateToPublic,
+			recipientAddress: "0xb",
+			amount: 1n,
+			feeSettings: DEFAULT_FEE_SETTINGS,
+		})
 		expect(op.actions[0].kind).toBe("encoded_call")
 	})
 
 	test("builds a SendTransactionOperation for TransferType.PublicToPrivate", async () => {
 		const planner = new OperationPlanner(makeProfile(), makeTokenService(makeToken()))
-		const { op } = await planner.buildTransferOperation("n", "0xa", 1, TransferType.PublicToPrivate, "0xb", 1n, DEFAULT_FEE_SETTINGS)
+		const { op } = await planner.buildTransferOperation({
+			networkId: "n",
+			accountAddress: "0xa",
+			tokenId: 1,
+			transferType: TransferType.PublicToPrivate,
+			recipientAddress: "0xb",
+			amount: 1n,
+			feeSettings: DEFAULT_FEE_SETTINGS,
+		})
 		expect(op.actions[0].kind).toBe("encoded_call")
 	})
 
 	test("throws 'Unauthorized' when no active profile", async () => {
 		const planner = new OperationPlanner(makeProfile(false), makeTokenService(makeToken()))
-		await expect(planner.buildTransferOperation("n", "0xa", 1, TransferType.Public, "0xb", 1n, DEFAULT_FEE_SETTINGS)).rejects.toThrow(
-			/Unauthorized/,
-		)
+		await expect(
+			planner.buildTransferOperation({
+				networkId: "n",
+				accountAddress: "0xa",
+				tokenId: 1,
+				transferType: TransferType.Public,
+				recipientAddress: "0xb",
+				amount: 1n,
+				feeSettings: DEFAULT_FEE_SETTINGS,
+			}),
+		).rejects.toThrow(/Unauthorized/)
 	})
 
 	test("throws 'Transfer type not supported' when token missing private fn", async () => {
 		const planner = new OperationPlanner(makeProfile(), makeTokenService(makeToken({ transferPrivateFn: undefined })))
-		await expect(planner.buildTransferOperation("n", "0xa", 1, TransferType.Private, "0xb", 1n, DEFAULT_FEE_SETTINGS)).rejects.toThrow(
-			/Transfer type not supported/,
-		)
+		await expect(
+			planner.buildTransferOperation({
+				networkId: "n",
+				accountAddress: "0xa",
+				tokenId: 1,
+				transferType: TransferType.Private,
+				recipientAddress: "0xb",
+				amount: 1n,
+				feeSettings: DEFAULT_FEE_SETTINGS,
+			}),
+		).rejects.toThrow(/Transfer type not supported/)
 	})
 
 	test("throws 'Transfer type not supported' when token missing public-to-private fn", async () => {
 		const planner = new OperationPlanner(makeProfile(), makeTokenService(makeToken({ transferPublicToPrivateFn: undefined })))
 		await expect(
-			planner.buildTransferOperation("n", "0xa", 1, TransferType.PublicToPrivate, "0xb", 1n, DEFAULT_FEE_SETTINGS),
+			planner.buildTransferOperation({
+				networkId: "n",
+				accountAddress: "0xa",
+				tokenId: 1,
+				transferType: TransferType.PublicToPrivate,
+				recipientAddress: "0xb",
+				amount: 1n,
+				feeSettings: DEFAULT_FEE_SETTINGS,
+			}),
 		).rejects.toThrow(/Transfer type not supported/)
 	})
 
 	test("throws 'Invalid transfer type' for an unknown enum value", async () => {
 		const planner = new OperationPlanner(makeProfile(), makeTokenService(makeToken()))
-		await expect(planner.buildTransferOperation("n", "0xa", 1, 99 as TransferType, "0xb", 1n, DEFAULT_FEE_SETTINGS)).rejects.toThrow(
-			/Invalid transfer type/,
-		)
+		await expect(
+			planner.buildTransferOperation({
+				networkId: "n",
+				accountAddress: "0xa",
+				tokenId: 1,
+				transferType: 99 as TransferType,
+				recipientAddress: "0xb",
+				amount: 1n,
+				feeSettings: DEFAULT_FEE_SETTINGS,
+			}),
+		).rejects.toThrow(/Invalid transfer type/)
 	})
 })
 

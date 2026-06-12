@@ -24,7 +24,7 @@
 
 import { GasSettings } from "@aztec/stdlib/gas"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import type { FeeEstimateResult, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
+import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
 import { DEFAULT_FEE_MULTIPLIER, finalizeGasLimits, startEstimateTask, suggestGasLimits } from "./fee-strategy"
 
 export class FpcStrategy implements FeeStrategy {
@@ -32,7 +32,7 @@ export class FpcStrategy implements FeeStrategy {
 
 	public constructor(private readonly deps: FeeStrategyDeps) {}
 
-	public async buildAndEstimate(ctx: FeeStrategyContext): Promise<FeeEstimateResult> {
+	public async buildAndEstimate(ctx: FeeStrategyContext): Promise<FeeEstimate> {
 		if (ctx.feeSettings.paymentMethod.kind !== "fpc") {
 			throw new Error("FpcStrategy called with non-fpc payment method")
 		}
@@ -44,45 +44,39 @@ export class FpcStrategy implements FeeStrategy {
 
 		try {
 			// first approach
-			let [txRequest, node, pxe, account, network, nonce, txCalls] = await this.deps.txBuilder.buildStandard(
-				ctx.op,
-				AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
-				task,
-			)
-			suggestGasLimits(txRequest, ctx.op.fee)
+			let built = await this.deps.txBuilder.buildStandard(ctx.op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE, task)
+			suggestGasLimits(built.txRequest, ctx.op.fee)
 			let simulatedTx = await this.deps.simulateTxTask(
-				pxe,
-				txRequest,
-				{ simulatePublic: true, skipFeeEnforcement: true, scopes: [account.address] },
+				built.pxe,
+				built.txRequest,
+				{ simulatePublic: true, skipFeeEnforcement: true, scopes: [built.account.address] },
 				task,
 			)
 			// Fetch actual fees for FPC fee payload (with priority multiplier)
-			const baseFees = (await node.getCurrentMinFees()).mul(multiplier)
+			const baseFees = (await built.node.getCurrentMinFees()).mul(multiplier)
 			let maxFee = simulatedTx.gasUsed.totalGas.add(fpc.getTotalGas()).computeFee(baseFees)
 			ctx.op.actions.unshift(...fpc.getFeePayload(ctx.op.accountAddress, maxFee))
-			// precise estimation
-			;[txRequest, node, pxe, account, network, nonce, txCalls] = await this.deps.txBuilder.buildStandard(
-				ctx.op,
-				AccountFeePaymentMethodOptions.EXTERNAL,
-				task,
-			)
-			txRequest.txContext.gasSettings = new GasSettings(
+			// precise estimation (rebuild — the rebinding of `built` is the
+			// two-pass shape the byte-parity constraint freezes; the
+			// gasSettings below deliberately reads the FIRST pass's sim)
+			built = await this.deps.txBuilder.buildStandard(ctx.op, AccountFeePaymentMethodOptions.EXTERNAL, task)
+			built.txRequest.txContext.gasSettings = new GasSettings(
 				simulatedTx.gasUsed.totalGas.add(fpc.getTotalGas()),
 				simulatedTx.gasUsed.teardownGas.add(fpc.getTeardownGas()),
 				baseFees,
-				txRequest.txContext.gasSettings.maxPriorityFeesPerGas,
+				built.txRequest.txContext.gasSettings.maxPriorityFeesPerGas,
 			)
 			simulatedTx = await this.deps.simulateTxTask(
-				pxe,
-				txRequest,
-				{ simulatePublic: true, skipFeeEnforcement: true, scopes: [account.address] },
+				built.pxe,
+				built.txRequest,
+				{ simulatePublic: true, skipFeeEnforcement: true, scopes: [built.account.address] },
 				task,
 			)
 			maxFee = simulatedTx.gasUsed.totalGas.mul(ctx.gasPadding).computeFee(baseFees)
 			ctx.op.actions.splice(0, ctx.op.actions.length, ...fpc.getFeePayload(ctx.op.accountAddress, maxFee), ...originalActions)
-			await finalizeGasLimits(node, txRequest, simulatedTx, ctx.gasPadding, baseFees)
+			await finalizeGasLimits(built.node, built.txRequest, simulatedTx, ctx.gasPadding, baseFees)
 			task.complete()
-			return [txRequest, node, pxe, account, network, nonce, txCalls, AccountFeePaymentMethodOptions.EXTERNAL]
+			return { ...built, feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL }
 		} catch (error) {
 			task.fail(error)
 			throw error

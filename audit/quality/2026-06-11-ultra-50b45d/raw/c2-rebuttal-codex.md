@@ -1,0 +1,20 @@
+## a) Misses
+- The codex side caught one major module-level smell neither Claude report elevated: `ProfileService` is a true `Large Class`, not just a few duplicated method pairs. It mixes session restore, password unlock, passkey ceremonies, import/export, backup restore, and finalize flows in one facade (`packages/extension/src/wallet/services/profile/service.ts:22-67`, `:144-202`, `:564-746`, `:830-1045`).
+- What everyone still missed: `NetworkService` is the second large-class hotspot in scope. One file owns seed bootstrapping, endpoint validation, node caches, active-network persistence, backup/restore, and profile/chain purge (`packages/extension/src/wallet/services/network/service.ts:143-166`, `:169-544`, `:604-690`, `:751-758`).
+
+## b) Refutations / overreach
+- Claude1 F3 and Claude2 F3 overcount the “active-profile guard” family by including `account/service.ts:189`. That throw is inside `deriveAccountSecret()` and follows `getProfileSecret(profileId)`, not `getActiveProfile()` (`packages/extension/src/wallet/services/account/service.ts:186-191`). It is a different contract.
+- Claude2 F1’s strongest “missing guard” counterexamples do not actually prove collaborator-initialization risk. `auth-registry.trackAuthwit()` touches only `lock` and `authwits` (`packages/extension/src/wallet/services/auth-registry/service.ts:73-86`), `dapp-session.getDappSession()` touches only `storage` and expiry helpers (`packages/extension/src/wallet/services/dapp-session/service.ts:53-69`), and `account.changeAccountName/changeAccountVisibility()` touch only `storage` (`packages/extension/src/wallet/services/account/service.ts:138-167`). Those lines are weak evidence for the claimed `null!`-collaborator startup hazard.
+- Claude2 F9 is real code, but it violates the cluster’s scope boundary: the finding depends on `packages/extension/src/wallet/services/execution/service.ts:42`, which is outside C2. The cycle exists (`auth-registry/service.ts:5` and `execution/service.ts:42`), but it is not a clean in-scope C2 finding.
+- Claude2 F5’s “other 66 sites are a footgun because `enter()` is inside `try`” is overstated. The concrete dead/no-op cleanup in `account/service.ts:130-134` is valid, but `Lock.enter()` itself is just queueing/resolution code with no explicit throw path (`packages/wallet-core/src/utils/lock.ts:19-28`), so the blanket footgun claim is speculative.
+
+## c) Confirmed Claude findings
+- Claude1 F1 / Claude2 F4 are confirmed: restore scaffolding is duplicated and already drifted, especially `contact`’s raw `restoreError: err` vs string normalization elsewhere (`packages/extension/src/wallet/services/contact/service.ts:297-312` vs `account/service.ts:221-229`, `network/service.ts:646-650`).
+- Claude1 F2 / Claude2 F6 are confirmed: profile/chain purge loops are duplicated with inconsistent lock policy (`account/service.ts:194-202`, `contact/service.ts:256-270`, `fpc/service.ts:447-461`, `network/service.ts:671-690`, `token/service.ts:515-521`).
+- Claude1 F4 / Claude2 F1 are directionally confirmed: startup/readiness policy is split between declarative deps and polling fallback (`contact/service.ts:18-19`; `packages/extension-messaging/src/background/service.ts:187-199`; `packages/wallet-core/src/base/index.ts:21-31,55-70`).
+- Claude1 F6 / Claude2 F2 are confirmed on the storage seam specifically: constructor/storage provisioning is half-migrated and duplicated (`contact/service.ts:35-39`, `profile/repository.ts:42-45`, `profile/session-manager.ts:130-132`, `network/service.ts:751-758`).
+
+## d) Contradictions
+- `c2-codex-2` treats sparse `dependencies` as a non-finding, while `c2-claude-1` F4, `c2-claude-2` F1, and `c2-codex-1` F1 all elevate startup-order coupling.
+- `c2-codex-1` explicitly keeps standalone `new PxeServiceClient(this.logger)` below threshold, while `c2-claude-1` F5 and `c2-claude-2` F2 promote PXE construction to a top-level finding.
+- Claude F3s broaden the “active-profile guard” family to include `account/service.ts:189`; the codex reports do not, and the source supports the codex reading.
