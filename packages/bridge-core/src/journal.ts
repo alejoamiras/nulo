@@ -71,6 +71,9 @@ export interface DepositFuelBlock {
 	claimTxHash?: string
 	/** Set when an fjwc-embedded claim tx reads INCLUDED (success OR app-revert) - the FJ message is consumed. */
 	consumed?: boolean
+	/** Set when a standalone sponsored FJ claim landed (the fee-spike path or the card's recovery
+	 *  action). Distinguishes "fuel recovered separately" from "still stranded". */
+	standaloneClaimed?: boolean
 }
 
 export interface DepositJournalRecord extends JournalBase {

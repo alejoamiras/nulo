@@ -98,6 +98,7 @@ export const TESTIDS = {
 	journalFuelLine: "fa-journal-fuel-line",
 	journalClaimWithoutFuel: "fa-journal-claim-without-fuel",
 	receiptFuel: "fa-receipt-fuel",
+	journalClaimGas: "fa-journal-claim-gas",
 	stepperBackup: "fa-stepper-backup",
 	journalRestore: "fa-journal-restore",
 	journalRestoreLink: "fa-journal-restore-link",

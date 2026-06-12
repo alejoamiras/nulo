@@ -19,7 +19,7 @@ import { useNow } from "@/lib/clock"
 import { formatBigInt } from "@/lib/format"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { TESTIDS } from "@/lib/testids"
-import { overrideFuelClaim } from "@/composables/useDeposit"
+import { claimFuelStandalone, overrideFuelClaim } from "@/composables/useDeposit"
 
 /** Components */
 import BridgePhaseRail from "./BridgePhaseRail.vue"
@@ -70,6 +70,29 @@ const showClaimWithoutFuel = computed(
 function onClaimWithoutFuel() {
 	overrideFuelClaim(props.record.id)
 	onAction()
+}
+
+// Post-completion fuel recovery: the token side finished but the FJ was neither consumed by an
+// fjwc claim nor landed standalone - offer to claim it now (sponsored, safe to retry; a
+// reverting "already claimed" just clears the affordance). Closes both stranding paths the
+// post-impl audit flagged.
+const fuelRecoverable = computed(() => {
+	const f = fuel.value
+	return f !== undefined && !!f.received && props.record.completedAt !== undefined && f.consumed !== true && f.standaloneClaimed !== true
+})
+const fuelRecovering = ref(false)
+const fuelRecoverError = ref<string | null>(null)
+async function onClaimGas() {
+	if (fuelRecovering.value) return
+	fuelRecovering.value = true
+	fuelRecoverError.value = null
+	try {
+		await claimFuelStandalone(props.record.id)
+	} catch (e) {
+		fuelRecoverError.value = e instanceof Error ? e.message : "Could not claim your gas - try again."
+	} finally {
+		fuelRecovering.value = false
+	}
 }
 const busy = computed(() => !!rt.value.busy)
 
@@ -216,6 +239,19 @@ function onDiscard() {
 			</button>
 		</header>
 		<p v-if="fuelLine" class="fuel-line" :data-testid="TESTIDS.journalFuelLine">{{ fuelLine }}</p>
+		<div v-if="fuelRecoverable" class="fuel-recover">
+			<button
+				type="button"
+				class="action"
+				:disabled="fuelRecovering"
+				:data-testid="TESTIDS.journalClaimGas"
+				title="Your tokens arrived but the gas is still unclaimed - this claims it (sponsored, no cost)."
+				@click="onClaimGas"
+			>
+				{{ fuelRecovering ? "CLAIMING GAS…" : "CLAIM YOUR GAS" }}
+			</button>
+			<span v-if="fuelRecoverError" class="fuel-recover-err">{{ fuelRecoverError }}</span>
+		</div>
 
 		<BridgePhaseRail v-if="stage !== 'done'" :record="record" compact />
 

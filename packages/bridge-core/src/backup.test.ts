@@ -125,6 +125,7 @@ describe("bridge backup files", () => {
 			received: "487000000000000000000",
 			claimAttempt: true,
 			consumed: false,
+			standaloneClaimed: false,
 		}
 		const fueled = publicDeposit({ schema: 2, fuel } as never)
 		expect(validateBackupRecord(fueled)).toEqual(fueled)

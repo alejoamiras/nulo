@@ -80,6 +80,40 @@ export function overrideFuelClaim(id: string): void {
 	fuelOverrides.add(id)
 }
 
+/** Claim a fueled deposit's Fee Juice as a standalone, sponsored, durable tx. The FJ message is
+ *  recipient-bound, so this is safe to call whenever the fuel isn't known-consumed; if it was
+ *  already consumed the node reverts harmlessly. On success it latches `fuel.standaloneClaimed`,
+ *  which clears the card's recovery affordance. Shared by the fee-spike path and the manual
+ *  post-completion "CLAIM YOUR GAS" action (closes the two stranding paths the post-impl audit
+ *  flagged: a dropped fjwc tx and a failed fire-and-forget standalone). */
+async function sendStandaloneFjClaim(
+	aztec: unknown,
+	recipientAddr: AztecAddress,
+	fuel: NonNullable<DepositJournalRecord["fuel"]>,
+	id: string,
+): Promise<void> {
+	const fpc = await getSponsoredFpcInstance()
+	const sponsored = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
+	const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
+	const fj = await Contract.at(AztecAddress.fromString(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
+	await fj.methods
+		.claim_and_end_setup(recipientAddr, BigInt(fuel.received ?? "0"), Fr.fromString(fuel.secret), new Fr(BigInt(fuel.leafIndex ?? "0")))
+		.send({ from: recipientAddr, fee: sponsored, wait: { waitForStatus: TxStatus.PROPOSED } } as never)
+	updateRecord(id, { fuel: { ...fuel, standaloneClaimed: true } })
+	log("standalone FJ claim landed", id)
+}
+
+/** The card's "CLAIM YOUR GAS" recovery: claims a stranded fuel message after the token side
+ *  already completed. Throws so the caller can surface the failure (never silent). */
+export async function claimFuelStandalone(id: string): Promise<void> {
+	const bridgeWallet = useBridgeWallet()
+	const aztec = bridgeWallet.wallet.value
+	if (!aztec) throw new Error("Connect your Aztec wallet first.")
+	const rec = useBridgeJournal().records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
+	if (!rec?.fuel?.received || !rec.fuel.leafIndex) throw new Error("This bridge has no fuel to claim.")
+	await sendStandaloneFjClaim(aztec, AztecAddress.fromString(rec.recipient), rec.fuel, id)
+}
+
 /** Probe an fjwc attempt's receipt - record-specific ground truth for the recovery ladder. */
 async function fuelReceiptStatus(txHash: string): Promise<"included" | "dropped" | "pending"> {
 	try {
@@ -128,11 +162,18 @@ function wireDepositDeps(): void {
 			let fjwcAttempt = false
 			let standaloneFj = false
 			if (fuel?.received && fuel.leafIndex) {
+				const receiptStatus = fuel.claimTxHash ? await fuelReceiptStatus(fuel.claimTxHash) : undefined
+				// Promote a prior attempt to INCLUSION-GRADE durable evidence: only an `included`
+				// receipt sets `consumed`, so a later unreachable node can trust it - a PROPOSED-time
+				// latch would wrongly survive a dropped tx (post-impl audit HIGH).
+				if (receiptStatus === "included" && fuel.consumed !== true) {
+					updateRecord(rec.id, { fuel: { ...fuel, consumed: true } })
+				}
 				const decision = decideFuelClaim({
 					attempt: fuel.claimAttempt === true,
 					txHashKnown: typeof fuel.claimTxHash === "string",
-					receiptStatus: fuel.claimTxHash ? await fuelReceiptStatus(fuel.claimTxHash) : undefined,
-					consumed: fuel.consumed === true,
+					receiptStatus,
+					consumed: fuel.consumed === true || receiptStatus === "included",
 					fuelReceived: BigInt(fuel.received),
 					// v1 reads the calibrated floor (config) as the fee reference; a live min-fee query
 					// is a refinement, not a correctness need - the floor is 2x a real observed fee.
@@ -179,33 +220,18 @@ function wireDepositDeps(): void {
 						wait: { waitForStatus: TxStatus.PROPOSED },
 					} as never)) as { receipt: { txHash: unknown } }
 					const txHash = String(receipt.txHash)
+					// PROPOSED is NOT inclusion: latch the attempt + hash only. `consumed` is set later,
+					// inclusion-grade, from the receipt probe (post-impl audit HIGH). If this fjwc tx is
+					// later dropped, the card's "CLAIM YOUR GAS" recovery still surfaces the stranded FJ.
 					if (fjwcAttempt && fuel) {
-						updateRecord(rec.id, { fuel: { ...fuel, claimAttempt: true, claimTxHash: txHash, consumed: true } })
+						updateRecord(rec.id, { fuel: { ...fuel, claimAttempt: true, claimTxHash: txHash } })
 					}
 					if (standaloneFj && fuel) {
-						// Land the FJ as balance in a separate best-effort tx (recipient-bound; the token
-						// claim above is sponsored and does not depend on this one).
-						void (async () => {
-							try {
-								const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
-								const fj = await Contract.at(
-									AztecAddress.fromString(feeJuiceAddress),
-									FeeJuiceContractArtifact,
-									aztec as never,
-								)
-								await fj.methods
-									.claim_and_end_setup(
-										recipientAddr,
-										BigInt(fuel.received ?? "0"),
-										Fr.fromString(fuel.secret),
-										new Fr(BigInt(fuel.leafIndex ?? "0")),
-									)
-									.send({ from: recipientAddr, fee: sponsored, wait: { waitForStatus: TxStatus.PROPOSED } } as never)
-								log("standalone FJ claim sent", rec.id)
-							} catch (e) {
-								log("standalone FJ claim failed (stays claimable later):", e instanceof Error ? e.message : String(e))
-							}
-						})()
+						// Best-effort inline standalone claim; a FAILURE leaves standaloneClaimed unset, so
+						// the card surfaces "CLAIM YOUR GAS" once the record completes (no silent strand).
+						void sendStandaloneFjClaim(aztec, recipientAddr, fuel, rec.id).catch((e) =>
+							log("standalone FJ claim failed (recoverable via CLAIM YOUR GAS):", e instanceof Error ? e.message : String(e)),
+						)
 					}
 					return { txHash }
 				},

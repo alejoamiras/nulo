@@ -120,7 +120,8 @@ export function validateBackupRecord(rec: unknown): BridgeJournalRecord {
 				!isOptionalDecimalString(f.received) ||
 				!isOptionalBoolean(f.claimAttempt) ||
 				!isOptionalString(f.claimTxHash) ||
-				!isOptionalBoolean(f.consumed)
+				!isOptionalBoolean(f.consumed) ||
+				!isOptionalBoolean(f.standaloneClaimed)
 			) {
 				throw new Error("The sealed contents are not a valid bridge record.")
 			}
