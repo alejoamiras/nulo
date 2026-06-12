@@ -158,3 +158,21 @@ p-hacking, the following is fixed BEFORE run 3:
   neither is green, STOP and surface the full ledger to the user
   anyway — repeated contention flakes are themselves a finding.
 Every run + ruling is committed to lessons before/after each attempt.
+
+## Gate run 3 — 66/69, NON-COUNTING (contention-class)
+
+Single failure `batch-mixed`, ×3 retries, all in FIXTURE SETUP:
+`connectPlayground:awaitDiscoverPopup — detached Frame` — the exact
+signature class pre-registered as contention noise (run-1's class). The
+test body never executed. Foreign deploy verified still proving at
+launch and completion.
+
+Cross-run pattern (the strongest environmental evidence so far): the
+failing sets across runs 1/2/3 are DISJOINT — {concurrent-sendtx-confirm,
+token-management} → {concurrent-sendtx} → {batch-mixed} — and every
+failure passes in the other runs. Every test in the suite has now
+passed at the P7 tip in at least one loaded run. A real lane regression
+would fail the same test deterministically.
+
+This was loaded attempt 1 of max 2. Attempt 2 launches now; if not
+green, STOP and surface the full ledger per the bounded protocol.
