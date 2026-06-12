@@ -19,7 +19,7 @@ import { useNow } from "@/lib/clock"
 import { formatBigInt } from "@/lib/format"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { TESTIDS } from "@/lib/testids"
-import { claimFuelStandalone, overrideFuelClaim } from "@/composables/useDeposit"
+import { claimFuelStandalone, overrideFuelClaim, reconcileFuelConsumed } from "@/composables/useDeposit"
 
 /** Components */
 import BridgePhaseRail from "./BridgePhaseRail.vue"
@@ -82,6 +82,17 @@ const fuelRecoverable = computed(() => {
 })
 const fuelRecovering = ref(false)
 const fuelRecoverError = ref<string | null>(null)
+
+// Reconcile the consumed flag from chain truth when a completed fueled record is shown: the happy
+// fjwc path latches `consumed` here (inclusion-grade) so `fuelRecoverable` stays false without the
+// button flashing. Best-effort - a failure just leaves the (safe, idempotent) recovery offered.
+watch(
+	() => props.record.completedAt !== undefined && fuel.value?.received !== undefined && fuel.value?.consumed !== true,
+	(needsReconcile) => {
+		if (needsReconcile) void reconcileFuelConsumed(props.record.id).catch(() => {})
+	},
+	{ immediate: true },
+)
 async function onClaimGas() {
 	if (fuelRecovering.value) return
 	fuelRecovering.value = true

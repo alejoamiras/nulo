@@ -80,12 +80,53 @@ export function overrideFuelClaim(id: string): void {
 	fuelOverrides.add(id)
 }
 
-/** Claim a fueled deposit's Fee Juice as a standalone, sponsored, durable tx. The FJ message is
- *  recipient-bound, so this is safe to call whenever the fuel isn't known-consumed; if it was
- *  already consumed the node reverts harmlessly. On success it latches `fuel.standaloneClaimed`,
- *  which clears the card's recovery affordance. Shared by the fee-spike path and the manual
- *  post-completion "CLAIM YOUR GAS" action (closes the two stranding paths the post-impl audit
- *  flagged: a dropped fjwc tx and a failed fire-and-forget standalone). */
+/** Probe a claim tx's receipt - record-specific ground truth. "included" covers success AND
+ *  app-reverted: both are checkpointed block-status (the app revert lives in executionResult, not
+ *  status), and an INCLUDED claim consumes the FJ message regardless of app-phase outcome. */
+async function fuelReceiptStatus(txHash: string): Promise<"included" | "dropped" | "pending"> {
+	try {
+		const receipt = await createAztecNodeClient(NODE_URL).getTxReceipt(TxHash.fromString(txHash))
+		const status = String(receipt?.status ?? "pending").toLowerCase()
+		if (/checkpointed|proven|finalized|success|mined/.test(status)) return "included"
+		if (status.includes("dropped")) return "dropped"
+		return "pending"
+	} catch {
+		return "pending" // unreachable node reads as not-yet-evidence, never as consumed.
+	}
+}
+
+/** Poll a just-sent claim tx to INCLUSION (bounded). PROPOSED is not consumption; only an included
+ *  receipt confirms the FJ message is settled. Returns "pending" on timeout so the caller leaves
+ *  the record unsettled and the recovery action stays offered. */
+async function waitForFuelInclusion(txHash: string, tries = 40): Promise<"included" | "dropped" | "pending"> {
+	for (let i = 0; i < tries; i++) {
+		const s = await fuelReceiptStatus(txHash)
+		if (s !== "pending") return s
+		await new Promise((r) => setTimeout(r, 6000))
+	}
+	return "pending"
+}
+
+/** Reconcile a fueled record's `consumed` flag from chain truth: if the fjwc attempt tx is
+ *  INCLUDED (success OR app-reverted - both consumed the FJ message), persist `consumed`. Probing
+ *  `fuel.claimTxHash` directly (not the completing claim) covers every path: the happy fjwc
+ *  success, an fjwc included-but-reverted before a sponsored retry, and leaves a genuinely DROPPED
+ *  fjwc unsettled so the recovery affordance surfaces. Idempotent; the card calls it on completed
+ *  fueled records so the happy path suppresses the button without it ever flashing. */
+export async function reconcileFuelConsumed(id: string): Promise<void> {
+	const rec = useBridgeJournal().records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
+	const fuel = rec?.fuel
+	if (!fuel?.claimTxHash || fuel.consumed === true) return
+	if ((await fuelReceiptStatus(fuel.claimTxHash)) === "included") {
+		updateRecord(id, { fuel: { ...fuel, consumed: true } })
+	}
+}
+
+/** Claim a fueled deposit's Fee Juice as a standalone, sponsored tx, INCLUSION-GATED. The FJ
+ *  message is recipient-bound, so this is safe whenever fuel isn't known-consumed; an
+ *  already-consumed message reverts but still reads INCLUDED (its nullifier exists), which settles
+ *  it just the same. `standaloneClaimed` latches ONLY after inclusion - a dropped/timed-out tx
+ *  leaves it unset so the card re-offers the action (closes the PROPOSED-latch false-negative). */
 async function sendStandaloneFjClaim(
 	aztec: unknown,
 	recipientAddr: AztecAddress,
@@ -96,11 +137,16 @@ async function sendStandaloneFjClaim(
 	const sponsored = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
 	const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
 	const fj = await Contract.at(AztecAddress.fromString(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
-	await fj.methods
+	const { receipt } = (await fj.methods
 		.claim_and_end_setup(recipientAddr, BigInt(fuel.received ?? "0"), Fr.fromString(fuel.secret), new Fr(BigInt(fuel.leafIndex ?? "0")))
-		.send({ from: recipientAddr, fee: sponsored, wait: { waitForStatus: TxStatus.PROPOSED } } as never)
+		.send({ from: recipientAddr, fee: sponsored, wait: { waitForStatus: TxStatus.PROPOSED } } as never)) as {
+		receipt: { txHash: unknown }
+	}
+	if ((await waitForFuelInclusion(String(receipt.txHash))) !== "included") {
+		throw new Error("The gas claim was sent but hasn't confirmed yet - try CLAIM YOUR GAS again in a moment.")
+	}
 	updateRecord(id, { fuel: { ...fuel, standaloneClaimed: true } })
-	log("standalone FJ claim landed", id)
+	log("standalone FJ claim confirmed", id)
 }
 
 /** The card's "CLAIM YOUR GAS" recovery: claims a stranded fuel message after the token side
@@ -112,19 +158,6 @@ export async function claimFuelStandalone(id: string): Promise<void> {
 	const rec = useBridgeJournal().records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
 	if (!rec?.fuel?.received || !rec.fuel.leafIndex) throw new Error("This bridge has no fuel to claim.")
 	await sendStandaloneFjClaim(aztec, AztecAddress.fromString(rec.recipient), rec.fuel, id)
-}
-
-/** Probe an fjwc attempt's receipt - record-specific ground truth for the recovery ladder. */
-async function fuelReceiptStatus(txHash: string): Promise<"included" | "dropped" | "pending"> {
-	try {
-		const receipt = await createAztecNodeClient(NODE_URL).getTxReceipt(TxHash.fromString(txHash))
-		const status = String(receipt?.status ?? "pending").toLowerCase()
-		if (/checkpointed|proven|finalized|success|mined/.test(status)) return "included"
-		if (status.includes("dropped")) return "dropped"
-		return "pending"
-	} catch {
-		return "pending" // unreachable node reads as not-yet-evidence, never as consumed.
-	}
 }
 
 let depsWired = false

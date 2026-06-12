@@ -17,6 +17,7 @@ const claimFuelStandalone = vi.fn(async () => {})
 vi.mock("@/composables/useDeposit", () => ({
 	claimFuelStandalone: (...a: unknown[]) => claimFuelStandalone(...(a as [])),
 	overrideFuelClaim: vi.fn(),
+	reconcileFuelConsumed: vi.fn(async () => {}),
 }))
 
 import { TESTIDS } from "@/lib/testids"
