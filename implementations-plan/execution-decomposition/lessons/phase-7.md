@@ -121,3 +121,24 @@ tests/e2e/network/concurrent-sendtx.test.ts` at the P7 tip. Plan:
 isolated PASS ×2 → environmental/page-starvation flake, next full gate
 decides; isolated FAIL → bisect P6-tip vs P7-tip (same discrimination
 matrix as the phase-3 nullifier investigation).
+
+## Isolation evidence (post run 2)
+
+`e2e:agent tests/e2e/network/concurrent-sendtx.test.ts` at the P7 tip:
+**PASS ×2**, both runs while the nulo-4 deploy was STILL proving
+(~1-2 cores). The run-2 failure does not reproduce in isolation —
+mechanism attributed to parallel-shard + foreign-prover contention
+starving the playground page (the 30s `waitForPgResult` budget is the
+tightest wait in the suite).
+
+Ledger discipline: run 2's REAL-failure-#1 classification STANDS (it
+was pre-registered; no retroactive un-counting). The isolation evidence
+informs the NEXT step, not the last ruling: the decisive full gate run
+waits for true idle (watcher on the foreign deploy's exit), because a
+second valid failure triggers the A2 bail-out and must not be spent on
+reproducible-only-under-contention noise.
+
+Score so far: full-suite 66-69/69 across two loaded runs with zero
+wallet-behavior assertion failures; heavy shards cancel-mid-prove +
+concurrent-sendtx-confirm green on run 2; lane unit pins + codex parity
+green.
