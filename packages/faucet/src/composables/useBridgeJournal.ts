@@ -43,6 +43,7 @@ export type Attention = "mismatch" | "tampered" | "unseal-failed" | "stale" | "s
  *  L1/L2 legs. Ephemeral display state only - never persisted, never an input to completion logic. */
 export type BridgeStep =
 	| "sealing"
+	| "signing"
 	| "approving"
 	| "depositing"
 	| "exiting"

@@ -185,3 +185,43 @@ describe("stepperPhases - withdraw matrix", () => {
 		expect(Object.values(s).every((v) => v === "done")).toBe(true)
 	})
 })
+
+describe("fueled deposit rail", () => {
+	const fuel = { amount: "250000000000000000", secret: "0xs", secretHashHex: "0xsh", minOutput: "450" }
+
+	it("fuel keys: SIGN replaces APPROVE, FUEL sits between DEPOSIT and CROSSING", () => {
+		const phases = stepperPhases(dep({ schema: 2, fuel, isPrivate: false }))
+		expect(phases.map((p) => p.key)).toEqual(["sign", "deposit", "fuel", "sync", "claim", "confirm"])
+	})
+
+	it("private fueled rail keeps SEAL first", () => {
+		const phases = stepperPhases(dep({ schema: 2, fuel, isPrivate: true }))
+		expect(phases.map((p) => p.key)).toEqual(["seal", "sign", "deposit", "fuel", "sync", "claim", "confirm"])
+	})
+
+	it("rt.step signing activates SIGN", () => {
+		const phases = stepperPhases(dep({ schema: 2, fuel, isPrivate: false }), { step: "signing" })
+		expect(phases.find((p) => p.key === "sign")?.state).toBe("active")
+	})
+
+	it("FUEL latches done exactly when the crossing starts (leafIndex + fuel.received land together)", () => {
+		const phases = stepperPhases(
+			dep({ schema: 2, fuel: { ...fuel, received: "487", leafIndex: "7" }, depositTxHash: "0xd", leafIndex: "7", isPrivate: false }),
+		)
+		expect(phases.find((p) => p.key === "fuel")?.state).toBe("done")
+		expect(phases.find((p) => p.key === "sync")?.state).toBe("active")
+	})
+
+	it("a fueled CLAIM names the one-tx token+gas confirmation", () => {
+		const phases = stepperPhases(
+			dep({ schema: 2, fuel: { ...fuel, received: "487", leafIndex: "7" }, depositTxHash: "0xd", leafIndex: "7", isPrivate: false }),
+			{ claimable: true },
+		)
+		expect(phases.find((p) => p.key === "claim")?.detail).toMatch(/tokens and your gas/)
+	})
+
+	it("a NON-fueled record's rail is byte-identical to before (no fuel keys leak)", () => {
+		const phases = stepperPhases(dep({ isPrivate: false }))
+		expect(phases.map((p) => p.key)).toEqual(["approve", "deposit", "sync", "claim", "confirm"])
+	})
+})
