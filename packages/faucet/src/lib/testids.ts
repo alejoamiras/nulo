@@ -95,7 +95,6 @@ export const TESTIDS = {
 	bridgeFuelSlice: "fa-bridge-fuel-slice",
 	bridgeFuelQuote: "fa-bridge-fuel-quote",
 	bridgeFuelError: "fa-bridge-fuel-error",
-	journalFuelLine: "fa-journal-fuel-line",
 	journalClaimWithoutFuel: "fa-journal-claim-without-fuel",
 	receiptFuel: "fa-receipt-fuel",
 	journalClaimGas: "fa-journal-claim-gas",

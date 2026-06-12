@@ -369,7 +369,30 @@ function fmt(b: bigint | null): string {
 		<p v-if="amountError" class="err-msg" :data-testid="TESTIDS.bridgeFormError">{{ amountError }}</p>
 		<p v-if="showMintHint" class="hint">No test {{ BRIDGE_TOKEN_SYMBOL }} on Sepolia yet - mint some below.</p>
 
-		<div v-if="fuelAvailable" class="fuel-row">
+		<!-- HOW you bridge: privacy is a property of the bridge itself, decided before the fuel add-on. -->
+		<div class="opt-row">
+			<button
+				type="button"
+				class="toggle"
+				:class="{ on: isPrivate }"
+				:disabled="submitting"
+				:data-testid="TESTIDS.bridgePrivacyToggle"
+				:aria-pressed="isPrivate"
+				@click="isPrivate = !isPrivate"
+			>
+				<span class="knob" />
+			</button>
+			<span class="toggle-label">PRIVATE</span>
+		</div>
+		<p v-if="isPrivate" class="opt-note" :data-testid="TESTIDS.bridgePrivacyNote" :data-first="isFirstSeal ? 'true' : 'false'">
+			<template v-if="direction === 'l1-to-l2'">
+				Lands in your private Aztec balance. {{ isFirstSeal ? "Two quick Ethereum signatures (then one)" : "One Ethereum signature" }} lock the recovery key - it lives only in this browser.
+			</template>
+			<template v-else>Burns from your private Aztec balance - nothing extra to back up.</template>
+		</p>
+
+		<!-- ADD-ON: fuel (gas on arrival), only on L1->L2. -->
+		<div v-if="fuelAvailable" class="opt-row">
 			<button
 				type="button"
 				class="toggle"
@@ -381,7 +404,7 @@ function fmt(b: bigint | null): string {
 			>
 				<span class="knob" />
 			</button>
-			<span class="toggle-label">ARRIVE WITH GAS (FUEL)</span>
+			<span class="toggle-label">ARRIVE WITH GAS</span>
 		</div>
 		<div v-if="fuelOn && fuelAvailable" class="fuel-config">
 			<div class="fuel-slice-row">
@@ -396,50 +419,20 @@ function fmt(b: bigint | null): string {
 					:data-testid="TESTIDS.bridgeFuelSlice"
 					:data-invalid="!!fuelError"
 				/>
-				<span class="unit">{{ BRIDGE_TOKEN_SYMBOL }} → Fee Juice</span>
+				<span class="unit">{{ BRIDGE_TOKEN_SYMBOL }}</span>
+				<span class="fuel-arrow" aria-hidden="true">&rarr;</span>
+				<span class="fuel-out" :data-testid="TESTIDS.bridgeFuelQuote" :data-state="fuelQuote.state">
+					<template v-if="fuelQuote.state === 'loading'">quoting&hellip;</template>
+					<template v-else-if="fuelQuote.state === 'ok'">&asymp; {{ formatBigInt(fuelQuote.fj ?? 0n, 18) }} FJ gas</template>
+					<template v-else-if="fuelQuote.state === 'error'">{{ fuelError ?? fuelQuote.message }}</template>
+					<template v-else>Fee Juice</template>
+				</span>
 			</div>
-			<p class="fuel-quote" :data-testid="TESTIDS.bridgeFuelQuote" :data-state="fuelQuote.state">
-				<template v-if="fuelQuote.state === 'loading'">Quoting…</template>
-				<template v-else-if="fuelQuote.state === 'ok'">
-					≈ {{ formatBigInt(fuelQuote.fj ?? 0n, 18) }} FJ as gas (min {{ formatBigInt(fuelQuote.min ?? 0n, 18) }} after slippage).
-					One claim transaction lands your tokens AND your gas.
-					<template v-if="isPrivate">
-						Heads up: the gas leg is PUBLIC - it writes your Aztec address on Ethereum, which a
-						private bridge alone never does. Your tokens stay private either way.
-					</template>
-				</template>
-				<template v-else-if="fuelQuote.state === 'error'">{{ fuelError ?? fuelQuote.message }}</template>
-				<template v-else>The swap rides inside your deposit - no extra transaction on Ethereum.</template>
+			<p v-if="fuelQuote.state === 'ok'" class="opt-note">
+				Claimed with your tokens in one transaction.<template v-if="isPrivate"> Gas leg is public; your tokens stay private.</template>
 			</p>
 			<p v-if="fuelError && fuelQuote.state !== 'error'" class="err-msg" :data-testid="TESTIDS.bridgeFuelError">{{ fuelError }}</p>
 		</div>
-
-		<div class="privacy-row">
-			<button
-				type="button"
-				class="toggle"
-				:class="{ on: isPrivate }"
-				:disabled="submitting"
-				:data-testid="TESTIDS.bridgePrivacyToggle"
-				:aria-pressed="isPrivate"
-				@click="isPrivate = !isPrivate"
-			>
-				<span class="knob" />
-			</button>
-			<span class="toggle-label">PRIVATE BRIDGING</span>
-		</div>
-		<p v-if="isPrivate" class="privacy-note" :data-testid="TESTIDS.bridgePrivacyNote" :data-first="isFirstSeal ? 'true' : 'false'">
-			<template v-if="direction === 'l1-to-l2'">
-				Funds arrive in your PRIVATE Aztec balance.
-				{{ isFirstSeal ? "Two quick Ethereum signatures (first time only - afterwards just one)" : "One Ethereum signature" }}
-				lock{{ isFirstSeal ? "" : "s" }} this transfer's recovery key to your wallet. It lives only in this
-				browser - don't clear site data while a bridge is running.
-			</template>
-			<template v-else>
-				Burns from your PRIVATE Aztec balance. The Ethereum recipient is locked into the bridge message -
-				nothing extra to back up.
-			</template>
-		</p>
 
 		<AppButton :loading="submitting" :disabled="!bothConnected || submitting" :data-testid="TESTIDS.bridgeSubmit" @click="onSubmit">
 			{{ !bothConnected ? "CONNECT BOTH WALLETS" : direction === "l1-to-l2" ? "BRIDGE TO AZTEC" : "BRIDGE TO ETHEREUM" }}
@@ -561,18 +554,17 @@ function fmt(b: bigint | null): string {
 	font: 500 12px/1.5 var(--font-mono);
 }
 
-.fuel-row {
+.opt-row {
 	display: flex;
 	align-items: center;
 	gap: 10px;
-	margin-top: 10px;
 }
 
 .fuel-config {
-	margin: 8px 0 0 2px;
+	margin: 2px 0 0 2px;
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+	gap: 8px;
 }
 
 .fuel-slice-row {
@@ -582,23 +574,21 @@ function fmt(b: bigint | null): string {
 }
 
 .fuel-slice {
-	max-width: 110px;
+	max-width: 96px;
 }
 
-.fuel-quote {
-	font: 500 11px/1.5 var(--font-mono);
+.fuel-arrow {
 	color: var(--txt-secondary);
-	margin: 0;
 }
 
-.fuel-quote[data-state="error"] {
+.fuel-out {
+	font: 600 12px/1 var(--font-mono);
+	color: var(--txt-primary);
+}
+
+.fuel-out[data-state="error"] {
 	color: var(--warn, #e0a020);
-}
-
-.privacy-row {
-	display: flex;
-	align-items: center;
-	gap: 10px;
+	font-weight: 500;
 }
 
 .toggle {
@@ -641,12 +631,10 @@ function fmt(b: bigint | null): string {
 	letter-spacing: 0.06em;
 }
 
-.privacy-note {
-	margin: 0;
-	padding: 10px 12px;
-	border: 1px dashed var(--yellow);
+.opt-note {
+	margin: -4px 0 0 2px;
 	color: var(--txt-secondary);
-	font: 500 12px/1.5 var(--font-mono);
+	font: 500 11px/1.5 var(--font-mono);
 }
 
 .seal-note {

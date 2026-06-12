@@ -131,7 +131,7 @@ describe("BridgeForm", () => {
 		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
 		const note = w.find(sel(TESTIDS.bridgePrivacyNote))
 		expect(note.attributes("data-first")).toBe("true")
-		expect(note.text()).toMatch(/two quick ethereum signatures/i)
+		expect(note.text()).toMatch(/two quick ethereum signatures/i) // terse copy keeps the phrase
 
 		sealTrusted.mockReturnValue(true)
 		const w2 = mount(BridgeForm)

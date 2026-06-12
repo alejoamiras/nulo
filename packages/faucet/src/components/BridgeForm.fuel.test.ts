@@ -94,7 +94,7 @@ describe("BridgeForm fuel surface", () => {
 		const quote = w.find(sel(TESTIDS.bridgeFuelQuote))
 		expect(quote.attributes("data-state")).toBe("ok")
 		expect(quote.text()).toMatch(/487/)
-		expect(quote.text()).toMatch(/tokens AND your gas/)
+		expect(quote.text()).toMatch(/FJ gas/)
 	})
 
 	it("submit passes the fuel slice in base units; toggle-off passes none", async () => {
@@ -149,12 +149,11 @@ describe("BridgeForm fuel surface", () => {
 		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
 		await w.find(sel(TESTIDS.bridgeFuelToggle)).trigger("click")
 		await settleQuote()
-		const quote = w.find(sel(TESTIDS.bridgeFuelQuote))
-		expect(quote.text()).toMatch(/gas leg is PUBLIC/)
-		expect(quote.text()).toMatch(/tokens stay private/)
+		expect(w.text()).toMatch(/Gas leg is public/)
+		expect(w.text()).toMatch(/tokens stay private/)
 		// Public bridging: no disclosure noise.
 		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
 		await settleQuote()
-		expect(w.find(sel(TESTIDS.bridgeFuelQuote)).text()).not.toMatch(/gas leg is PUBLIC/)
+		expect(w.text()).not.toMatch(/Gas leg is public/)
 	})
 })

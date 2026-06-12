@@ -55,12 +55,10 @@ const fuel = computed(() => {
 	const r = props.record
 	return r.direction === "deposit" ? (r as DepositJournalRecord).fuel : undefined
 })
-const fuelLine = computed(() => {
+const fuelAmount = computed(() => {
 	const f = fuel.value
 	if (!f) return null
-	if (f.received)
-		return `fuel: ${formatBigInt(BigInt(f.amount), BRIDGE_TOKEN_DECIMALS)} ${BRIDGE_TOKEN_SYMBOL} → ${formatBigInt(BigInt(f.received), 18)} FJ`
-	return `fuel: ${formatBigInt(BigInt(f.amount), BRIDGE_TOKEN_DECIMALS)} ${BRIDGE_TOKEN_SYMBOL} (swap pending)`
+	return f.received ? `+ ${formatBigInt(BigInt(f.received), 18)} FJ` : "+ FJ gas"
 })
 // The explicit, non-destructive escape: claim the tokens sponsored; the FJ message (if
 // unconsumed) stays claimable later. Offered only when a fueled claim is stuck on an error.
@@ -224,7 +222,7 @@ function onDiscard() {
 		<p v-if="stage === 'done'" class="stamp">{{ record.direction === "deposit" ? "BRIDGED ✓" : "RELEASED ✓" }}</p>
 		<header class="row">
 			<span class="dir">{{ record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM" }}</span>
-			<span class="amt">{{ amountDisplay }} {{ BRIDGE_TOKEN_SYMBOL }}</span>
+			<span class="amt">{{ amountDisplay }} {{ BRIDGE_TOKEN_SYMBOL }}<span v-if="fuelAmount" class="amt-fuel">{{ fuelAmount }}</span></span>
 			<span class="tag" :class="{ private: record.isPrivate }">{{ record.isPrivate ? "PRIVATE" : "PUBLIC" }}</span>
 			<span class="age">{{ age }}</span>
 			<button
@@ -249,7 +247,6 @@ function onDiscard() {
 				⤓
 			</button>
 		</header>
-		<p v-if="fuelLine" class="fuel-line" :data-testid="TESTIDS.journalFuelLine">{{ fuelLine }}</p>
 		<div v-if="fuelRecoverable" class="fuel-recover">
 			<button
 				type="button"
@@ -370,6 +367,12 @@ function onDiscard() {
 .amt {
 	font: 600 13px/1 var(--font-mono);
 	color: var(--txt-primary);
+}
+
+.amt-fuel {
+	margin-left: 6px;
+	color: var(--mint);
+	font-weight: 500;
 }
 
 .tag {
