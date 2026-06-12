@@ -142,3 +142,19 @@ Score so far: full-suite 66-69/69 across two loaded runs with zero
 wallet-behavior assertion failures; heavy shards cancel-mid-prove +
 concurrent-sendtx-confirm green on run 2; lane unit pins + codex parity
 green.
+
+## Bounded protocol for the decisive gate (pre-registered, run 3+)
+
+The foreign deploy is hung (6h, log frozen, provers hot); "true idle"
+may never arrive. To avoid both an unbounded stall AND run-until-green
+p-hacking, the following is fixed BEFORE run 3:
+- Run the full gate under the documented foreign load (~1-2.5 cores).
+- **GREEN → Phase 7 closes** (pass under adversity is strong evidence).
+- **FAIL with any wallet-behavior assertion → REAL failure #2 → A2
+  bail-out package to the user.** No exceptions.
+- **FAIL with contention-class signatures only** (waitFor timeout /
+  detached frame / connection closed, foreign load verified at run
+  time) → non-counting, but at MOST 2 such loaded attempts total; if
+  neither is green, STOP and surface the full ledger to the user
+  anyway — repeated contention flakes are themselves a finding.
+Every run + ruling is committed to lessons before/after each attempt.
