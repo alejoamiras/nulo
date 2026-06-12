@@ -91,6 +91,10 @@ export const TESTIDS = {
 	// Per-bridge sealed recovery files: export icons + the journal-header restore flow.
 	cardBackup: "fa-card-backup",
 	bridgeAddTokenEvm: "fa-bridge-add-token-evm",
+	bridgeFuelToggle: "fa-bridge-fuel-toggle",
+	bridgeFuelSlice: "fa-bridge-fuel-slice",
+	bridgeFuelQuote: "fa-bridge-fuel-quote",
+	bridgeFuelError: "fa-bridge-fuel-error",
 	stepperBackup: "fa-stepper-backup",
 	journalRestore: "fa-journal-restore",
 	journalRestoreLink: "fa-journal-restore-link",
