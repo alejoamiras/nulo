@@ -67,8 +67,8 @@ export class ExecutionServiceClient extends ServiceClient<Methods> implements Se
 	}
 
 	/**
-	 * Cancel an in-flight job by its operation-journal id. Phase 2
-	 * lossy-cancel semantics — see {@link Methods.cancelJob}.
+	 * Cancel an in-flight job by its operation-journal id. Lossy-cancel
+	 * semantics — see {@link Methods.cancelJob}.
 	 *
 	 * Idempotent: no-op for unknown ids or already-terminated jobs.
 	 */

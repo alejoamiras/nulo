@@ -110,7 +110,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	 *  consumes when the caller passes a `precomputedEstimateId` AND the
 	 *  validation snapshot matches the SW's current view. Skips the
 	 *  `buildAndEstimateTxRequest` round-trip on the happy path — saves
-	 *  1-3s of post-confirm "estimating fee" UX delay (plan-v4 Branch 5).
+	 *  1-3s of post-confirm "estimating fee" UX delay.
 	 *
 	 *  Scope: Send-page transfer flow only. dApp paths (estimateOperationFee
 	 *  + executeAztecSendTx) carve out per audit-codex-v3 — the embedded-fee
@@ -733,13 +733,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			feeMultiplier,
 			gasPadding,
 			parentTask,
-			deps: {
-				txBuilder: this.txBuilder,
-				simulateTxTask: (pxe, req, opts, task) => this.coordinator.simulateTxTask(pxe, req, opts, task),
-				fpcService: this.fpcService,
-				tasks: this.taskService,
-				logger: this.logger,
-			},
 		}
 		return strategy.buildAndEstimate(ctx)
 	}

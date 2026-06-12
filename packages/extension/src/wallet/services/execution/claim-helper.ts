@@ -59,7 +59,7 @@ export interface ClaimHelperInput {
 	origin: LocalTxOrigin
 	calls?: { method?: string }[]
 	queuedJournalId?: string
-	/** v3: a controller pre-registered (under `queuedJournalId`) BEFORE the
+	/** A controller pre-registered (under `queuedJournalId`) BEFORE the
 	 *  ExecutionMutex acquire, so a user-cancel can abort the acquire wait. On
 	 *  the normal claim path the helper REUSES it (the claimed id ===
 	 *  `queuedJournalId`), so `activeControllers[id]` already holds the right
@@ -146,7 +146,7 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 	// a controller to abort; if it lands during this microtask window,
 	// it would find no controller. The next sync line closes the gap.
 	//
-	// v3: when a `reuseController` was pre-registered (under queuedJournalId,
+	// When a `reuseController` was pre-registered (under queuedJournalId,
 	// before the ExecutionMutex acquire), reuse it. Because queuedJournalId ===
 	// this claimed id, the controller has been in `activeControllers` since
 	// before the acquire wait — so cancelJob always finds it, which is strictly

@@ -120,9 +120,9 @@ export class ExecutionLane {
 		// natural `succeeded` or `failed` terminal — preserving consistency
 		// between journal stage and on-chain state.
 		//
-		// This is the codex-W1W2-review fix for the cancel-after-submit
-		// race: previously the journal would flip to `cancelled` and the
-		// tx-was-already-broadcast path would log a swallowed illegal
+		// This guards the cancel-after-submit race: previously the journal
+		// would flip to `cancelled` and the tx-was-already-broadcast path
+		// would log a swallowed illegal
 		// `cancelled → succeeded` transition, leaving the journal saying
 		// "cancelled" while a real tx existed in chain history.
 		try {
