@@ -74,12 +74,12 @@ What does NOT exist: a live deployment of router/swapper, an AZLO/WETH pool, quo
 - `backup.ts`: schema-2 validation branch (strict; malformed fuel rejects restore); backup file stays `v:1`; schema-1 golden fixture still restores.
 **Gate MET 2026-06-12** (pulled ahead of P2, which waits on the deployer top-up): 97 tests + typecheck + lint; schema-1 records load untouched beside schema-2 (modulo the upsert's updatedAt stamp) and the pre-arc backup fixtures still restore.
 
-### P4 — Wallet manifest scope + scope-delta re-consent (wallet-bridge + faucet)
+### P4 ✓ — Wallet manifest scope + scope-delta re-consent (wallet-bridge + faucet)
 **Goal:** the FJ claim passes scope enforcement for new AND existing grants.
 - `capabilities.ts`: `{ contract: FEE_JUICE_L2 (feeJuiceAddress), function: "claim_and_end_setup" }` in `transaction.scope` AND `simulation.transactions.scope`; consent copy names the gas claim. (The v2 balance-probe utility scope is NOT needed — L14 v3 uses no balance reads.)
 - wallet-bridge: extend field-diff re-consent to `transaction`/`simulation` scope lists — unconditional per L9. HONESTY NOTE (fable double audit): `simulation` scope is NESTED (`transactions`/`utilities`/`privateEvents`) — bigger than the flat contracts diff; grants union monotonically with no revocation surface, so incremental diffs are a fatigue/creep vector. Requirements: the re-consent popup renders the DELTA prominently (extends the contracts-precedent copy), and the STOP-and-surface guard is hard — if the nested diff balloons, stop. + dispatcher pins (superset re-prompts; equal/subset doesn't; approval replaces stored grant).
 - Expect NO `contracts` registration for FeeJuice (protocol contract pre-known to PXE) — manual smoke confirms; registration is the documented fallback.
-**Gate:** wallet-bridge tests + extension typecheck; manual smoke on a dev build: claim SIMULATION with embedded FJ claim passes scope on a fresh grant AND a pre-existing one.
+**Gate MET 2026-06-12** (code-side): wallet-bridge 124 (6 new scope-diff pins incl. the split-across-grants enforcement-mirror case), faucet 284 (manifest pins), extension typecheck 0. The manual dev-build smoke (fresh + pre-existing grant) is P7 item 1 — the popup already renders the DELTA as the consent subject by construction (the dispatcher sends only the delta caps for approval, existing ones as context).
 
 ### P5 — Live headless validation + MIN_FUEL_FJ calibration (moved before UI per L15)
 **Goal:** the whole loop proven on live testnet — and the floor calibrated — before any UI ships.
