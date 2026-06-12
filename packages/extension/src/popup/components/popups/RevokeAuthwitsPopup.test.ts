@@ -72,7 +72,7 @@ const STUBS = {
 	},
 	Button: {
 		props: ["loading", "disabled"],
-		template: `<button data-testid="revoke-btn" :disabled="disabled || loading"><slot /></button>`,
+		template: `<button data-testid="revoke-authwits-submit" :disabled="disabled || loading"><slot /></button>`,
 	},
 	Tooltip: { template: "<div><slot /><slot name='content' /></div>" },
 	Icon: { template: "<i />" },
@@ -142,7 +142,7 @@ describe("RevokeAuthwitsPopup — Enter-key gate", () => {
 		pressEnter()
 		await flushPromises()
 		expect(authwitsServiceMock.revokeAuthwits).not.toHaveBeenCalled()
-		expect(w.find('[data-testid="revoke-btn"]').attributes("disabled")).toBeDefined()
+		expect(w.find('[data-testid="revoke-authwits-submit"]').attributes("disabled")).toBeDefined()
 	})
 
 	test("(REGRESSION-PIN) Enter is a no-op while in-flight (isLoading)", async () => {
@@ -193,7 +193,7 @@ describe("RevokeAuthwitsPopup — Enter-key gate", () => {
 		// breaks click while leaving Enter working, this fails alongside test 1.
 		const w = await mountAndOpen([{ id: "aw-1", content: "c1" }])
 		await setAllFees(w)
-		await w.find('[data-testid="revoke-btn"]').trigger("click")
+		await w.find('[data-testid="revoke-authwits-submit"]').trigger("click")
 		await flushPromises()
 		expect(authwitsServiceMock.revokeAuthwits).toHaveBeenCalledTimes(1)
 	})
