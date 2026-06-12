@@ -132,6 +132,7 @@ function wireDepositDeps(): void {
 					attempt: fuel.claimAttempt === true,
 					txHashKnown: typeof fuel.claimTxHash === "string",
 					receiptStatus: fuel.claimTxHash ? await fuelReceiptStatus(fuel.claimTxHash) : undefined,
+					consumed: fuel.consumed === true,
 					fuelReceived: BigInt(fuel.received),
 					// v1 reads the calibrated floor (config) as the fee reference; a live min-fee query
 					// is a refinement, not a correctness need - the floor is 2x a real observed fee.

@@ -31,6 +31,10 @@ export interface FuelClaimEvidence {
 	fuelReceived?: bigint
 	/** The network's current minimum claim fee (base units), when known. */
 	currentMinFee?: bigint
+	/** Durable "the FJ message was consumed by our attempt" - persisted once seen, so a later
+	 *  UNREACHABLE node (receiptStatus probe returns `pending`) cannot strand a known consumption
+	 *  in `wait` forever. A conclusive `dropped` receipt still overrides it. */
+	consumed?: boolean
 	/** Consecutive fjwc gate/simulate failures observed for this record. */
 	persistentFailureCount: number
 	/** The user explicitly chose "Claim without fuel". */
@@ -59,16 +63,18 @@ export function decideFuelClaim(e: FuelClaimEvidence): FuelClaimDecision {
 	// Trigger 1 - our own receipt is ground truth: an INCLUDED fjwc attempt consumed the FJ
 	// message regardless of app-phase outcome. Never re-embed a consumed claim.
 	if (e.attempt && e.txHashKnown) {
-		if (e.receiptStatus === "included") return { action: "sponsored", offerManual: false }
+		// A conclusive `dropped` overrides even a (prematurely) persisted consumed flag: a dropped
+		// tx consumed nothing, so retry fjwc.
 		if (e.receiptStatus === "dropped") return { action: "fjwc", offerManual }
-		// Pending or unprobed: the tx may still land - wait, never guess.
+		if (e.receiptStatus === "included" || e.consumed) return { action: "sponsored", offerManual: false }
+		// Pending or unprobed (incl. an unreachable node): the tx may still land - wait, never guess.
 		return { action: "wait", offerManual }
 	}
 
 	// Attempt latched but the wallet never returned a hash (crash mid-prompt): the tx MAY have
-	// been sent. Unknowable record-locally ⇒ wait; the manual escape resolves it safely either
-	// way (sponsored token claim works whether or not the unknown tx consumed the fuel).
-	if (e.attempt) return { action: "wait", offerManual }
+	// been sent. A durable consumed flag still settles it; otherwise unknowable ⇒ wait (the manual
+	// escape resolves it safely - sponsored works whether or not the unknown tx consumed the fuel).
+	if (e.attempt) return e.consumed ? { action: "sponsored", offerManual: false } : { action: "wait", offerManual }
 
 	// Trigger 2 - fee insufficiency from two record-local quantities: the claimed fuel cannot
 	// cover its own claim tx. Claim the token sponsored AND land the FJ as balance standalone.

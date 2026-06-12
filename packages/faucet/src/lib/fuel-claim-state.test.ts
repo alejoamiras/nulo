@@ -71,6 +71,19 @@ describe("decideFuelClaim (L14 v3 truth table)", () => {
 		})
 	})
 
+	it("durable consumed=true settles to sponsored when the node is UNREACHABLE (receipt pending)", () => {
+		// The unreachable-node stranding the live-only probe introduced: consumed is the fallback.
+		expect(decideFuelClaim({ ...base, attempt: true, txHashKnown: true, receiptStatus: "pending", consumed: true }).action).toBe(
+			"sponsored",
+		)
+		// And even with no hash (crash mid-prompt) a durable consumed flag settles it.
+		expect(decideFuelClaim({ ...base, attempt: true, consumed: true }).action).toBe("sponsored")
+	})
+
+	it("a conclusive dropped receipt OVERRIDES a stale consumed flag (dropped consumed nothing)", () => {
+		expect(decideFuelClaim({ ...base, attempt: true, txHashKnown: true, receiptStatus: "dropped", consumed: true }).action).toBe("fjwc")
+	})
+
 	it("a user already holding FJ changes NOTHING (no balance input exists)", () => {
 		// The v2 aggregate-balance probe was withdrawn (final-gate codex CRITICAL): the decision
 		// surface has no balance parameter at all - this pin keeps it that way.
