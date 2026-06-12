@@ -393,26 +393,6 @@ export const test = base.extend<{
 			const setupPage = await phase("openPopup", () => openPopup(ctx))
 			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
 			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
-			// A fresh profile exposes ONE account; multi-account consumers (the
-			// from-characterization + the authwit consume-as-caller flow) need a
-			// real second account in the cap popup, so create it here where the
-			// cost lands in hookTimeout.
-			await phase("createSecondAccount", () => createAccount(setupPage, "Second"))
-			// Persistence assertion: the row rendering proves only the optimistic
-			// appStore push; verify the SERVICE write landed before moving on.
-			let postCreateDump = ""
-			await phase("assertSecondAccountPersisted", async () => {
-				postCreateDump = await setupPage.evaluate(async () => {
-					const all = await chrome.storage.local.get(null)
-					return Object.entries(all)
-						.filter(([k]) => k.startsWith("nulo:core:accounts"))
-						.map(([, v]) => (typeof v === "string" ? v : JSON.stringify(v)))
-						.join(" ||| ")
-				})
-				if (!postCreateDump.includes('"Second"')) {
-					throw new Error(`account "Second" not in storage immediately after creation. Stored: ${postCreateDump.slice(0, 600)}`)
-				}
-			})
 			await setupPage.close()
 			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
 			await use(Object.assign(ctx, { playgroundPage }))
@@ -554,6 +534,26 @@ export const test = base.extend<{
 			const setupPage = await phase("openPopup", () => openPopup(ctx))
 			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
 			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
+			// A fresh profile exposes ONE account; multi-account consumers (the
+			// from-characterization + the authwit consume-as-caller flow) need a
+			// real second account in the cap popup, so create it here where the
+			// cost lands in hookTimeout.
+			await phase("createSecondAccount", () => createAccount(setupPage, "Second"))
+			// Persistence assertion: the row rendering proves only the optimistic
+			// appStore push; verify the SERVICE write landed before moving on.
+			let postCreateDump = ""
+			await phase("assertSecondAccountPersisted", async () => {
+				postCreateDump = await setupPage.evaluate(async () => {
+					const all = await chrome.storage.local.get(null)
+					return Object.entries(all)
+						.filter(([k]) => k.startsWith("nulo:core:accounts"))
+						.map(([, v]) => (typeof v === "string" ? v : JSON.stringify(v)))
+						.join(" ||| ")
+				})
+				if (!postCreateDump.includes('"Second"')) {
+					throw new Error(`account "Second" not in storage immediately after creation. Stored: ${postCreateDump.slice(0, 600)}`)
+				}
+			})
 			await setupPage.close()
 			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
 
