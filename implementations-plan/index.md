@@ -8,4 +8,4 @@ Format: `- [plan-name](plan-name/plan.md) — status — one-line hook`
 - [bridge-form-stepper](bridge-form-stepper/plan.md) — shipped in PR #80 — takeover stepper, CAS foreground, dopamine UX
 - [bridge-seal-backup](bridge-seal-backup/plan.md) — shipped in PR #81 — per-bridge sealed recovery file + restore
 - [token-identity](token-identity/plan.md) — implemented + deployed (mid), awaiting manual testnet validation — NULO/OLUN/AZLO live, isTokenRegistered + contracts field-diff re-consent
-- [swap-fuel](swap-fuel/plan.md) — approved (deep), implementing — bridge-and-fuel: atomic AZLO deposit + V4 two-hop slice→FeeJuice (cheap-FJ pools), fjwc self-paying claim
+- [swap-fuel](swap-fuel/plan.md) — implemented (deep), awaiting P7 manual testnet validation — bridge-and-fuel: atomic AZLO deposit + V4 two-hop slice→FeeJuice (live fee-987 pools), fjwc self-paying claim + inclusion-grade recovery

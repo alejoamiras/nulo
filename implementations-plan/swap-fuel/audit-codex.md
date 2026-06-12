@@ -68,3 +68,15 @@ reject (with blocking findings: L14’s balance-probe trigger is not record-spec
 Yes on the three prior blockers. v3 closes the orphaning path (aggregate-balance inference gone; remaining automated triggers record-specific; ambiguous states stay at wait — no premature fallback can orphan an unconsumed FJ message). Leaked-secret edge acceptable as manual-only for testnet (requires compromise of material already inside the local trust boundary; the manual action is non-destructive — the right place to stop automating). P6 implementable by an autonomous agent without inventing rules.
 
 conditional approve (with conditions: align the stale Security leaked-secret bullet to L14 v3/manual-only semantics) — condition addressed in the same commit (Security bullet aligned).
+
+## Round 6-9 — post-implementation audit (session 019ebcc3)
+
+R6 (post-impl, net diff + code-review summary): REJECT — HIGH consumed@PROPOSED (dropped tx + unreachable node strands retry); HIGH standalone fire-and-forget strands fuel silently after completion.
+R7 (re-verify first fix): REJECT — the fix moved the PROPOSED-latch onto standaloneClaimed (false-negative) and the happy fjwc path never persists consumed (false-positive button).
+R8 (DESIGN reassess, not code — the loop's stop-after-3-misses): "design flawed" → one refinement: latch consumed on ANY included receipt (success OR app-reverted), not success-only; inclusion-gate standaloneClaimed.
+R9 (implementation confirm): "conditional approve (with conditions: accept the conservative false-positive CLAIM YOUR GAS cases, or add retry/polling for exactness)". No hide-while-unclaimed hole found.
+
+### Resolution
+- consumed: NO PROPOSED-latch anywhere; `reconcileFuelConsumed(id)` promotes it from an INCLUDED receipt on `fuel.claimTxHash` (covers happy fjwc + included-reverted fjwc; a dropped fjwc stays unsettled → recovery surfaces). Card runs it on completed fueled records (no button flash).
+- standaloneClaimed: inclusion-gated via `waitForFuelInclusion`; dropped/timeout leaves it unset → re-offered.
+- Self-settle (f86aeeb): an already-consumed standalone claim (isMsgNotReady) settles instead of erroring → the residual false-positive resolves cleanly on click. The condition is met; dangerous direction (hide-while-stranded) is closed.
