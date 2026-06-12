@@ -32,7 +32,10 @@ Why B beat A (v1's primary, the custom `AuthwitGate` Noir contract):
 
 Nothing auto-injects public-authwit grants. The ONLY trigger is the `add_public_authwit` action inside a `send_transaction` operation (`tx-request-builder.ts:197-265`), an Azguard-shape action (`wallet-bridge/src/action.ts:33`) with **zero current users**; the planner maps dApp authwits to `add_private_authwit` only (`operation-planner.ts:178-188`). The playground speaks wallet-sdk (`aztec_sendTx`) which cannot express it. `trackAuthwit` (`service.ts:73`) — the thing that populates the revoke settings UI — fires only on this path.
 
-**Phase 2 designs and lands this surface** (it gates everything): the playground gains a small wallet-bridge (Azguard-shape) client used ONLY by the authwit panel to send `send_transaction` with `[{ add_public_authwit: { consumer: token, innerHash } }]`, mirroring how the bridge dispatcher already accepts it. Permission-gating per action kind already exists (`dapp-interaction/service.ts:376-382`) — the e2e choreographs the approval popup like any sendTx. ALTERNATIVE if the bridge client proves awkward (recorded, pre-authorized): extend the Nulo schema patch with a custom grant RPC — but bridge-first, since the action path is the one real dApps would use.
+**Phase 2 opens with a timeboxed proof-of-life spike** (final-pass condition — it gates everything): the dApp-callable surface today is ONLY the wallet-sdk `Wallet` proxy plus the schema-patched custom RPCs (`registerToken`/`isTokenRegistered` — `nulo-schema-patch.ts`, dispatcher `:184-199`); there is no repo-backed path for a page to emit Azguard-shape actions directly. The spike decides between two CO-PRIMARY designs, each with an explicit scope model:
+- (a) **Schema-patched custom RPC** (`grantPublicAuthwit`): follows the established three-copy patch pattern + paired dispatcher reachability test (the documented contract in `wallet-bridge/README.md` "Custom RPC methods") + its OWN entry in the scope-checker table (`scope-enforcement.ts:362-377`) — hard-coding panel defaults is NOT the control; the granted capability is.
+- (b) **Azguard-shape `send_transaction` action path**: only if the dispatcher demonstrably accepts it from a page origin with a scoped capability — must show the popup approval choreography end-to-end.
+Whichever passes proof-of-life with the cleaner scope story wins; the spike result is logged in lessons before any panel code. STOP-and-surface if neither works.
 
 ## Single-use semantics drive the e2e script (fable F1 — the v1 plan was vacuous)
 
@@ -61,6 +64,7 @@ Funding: the dedicated account receives minted tokens + uses sponsored-FPC fees;
 
 ### Phase 2 — Grant-emission surface + playground panel (0.5-1d)
 - Wallet-bridge client in the playground's authwit section (grant-only scope); panel: "grant public authwit" (consumer = test token, caller = account B, explicit amount/nonce — **hard-scoped to the fixture token**, codex #4) and "consume (transfer-from)" (switches/uses account B → `transfer_public_to_public(A, B, amount, nonce)` via normal wallet-sdk sendTx). Grant and consume are SEPARATE buttons — never bundled in one tx (fable F3).
+- **Account-B selection hook** (final-pass LOW, named scope): the playground auto-selects `granted[0]` (`lib/wallet.ts:134-137`) — the panel gains an explicit account selector so the consume tx can be sent AS account B (`multi-account-from.test.ts` documents the current limitation).
 - Prove the tracking link: after grant approval, the authwit appears in settings (`getAuthwits`) — unit/integration assert `trackAuthwit` fired.
 - **Gate**: minimal consume-once e2e (`bun run e2e:agent tests/e2e/network/authwit-consume-smoke.test.ts`) green; lint + unit green (lint · unit · e2e-network). **Outline-A reconsideration point**: if the bridge-action path is unworkable here, STOP and surface — do not improvise scope (replaces v1's compile-attempts bail-out; fable F9).
 
@@ -109,15 +113,15 @@ Funding: the dedicated account receives minted tokens + uses sponsored-FPC fees;
 | D3 | (v1: fixture-contracts package) — MOOT under D1v2 | — | — |
 | D4 | `beginDappExecuteJournal` moves into the lane | PR #83 follow-up | Two start paths = codex LOW finding. |
 | D5 | Follow-ups FRONT-LOADED as Phase 1, PR-splittable | fable F8 | v1 held them hostage behind the riskiest phases. |
-| D6 | Ownership check = profileId only; accountAddress NOT checked | main, vs codex #5 | Profile = the human boundary; same-profile cross-account cancel is the user cancelling their own job from another account view. Codex's "if IDs escape" concern is real but the escape vector is cross-PROFILE, which IS checked. Documented for the final pass to contest. |
-| D7 | Grant emission via wallet-bridge action path, schema-patch RPC as recorded fallback | main + codex #1/fable F2 | Action path is what real dApps use; a custom RPC would test wallet-internal plumbing instead of the dApp surface. |
+| D6 | **Product decision (explicit, final-pass-required wording): the profile is the SOLE security principal for cancel.** Ownership check = profileId only; accountAddress/sessionId NOT checked | main + user-approved scope, vs codex #5 + final-pass #2 | Same-profile cross-account cancel is the one human cancelling their own job from another account view — an ACCEPTED tradeoff, not an oversight. Revisit only if profiles ever become multi-principal. |
+| D7v2 | Grant emission decided by a Phase-2 proof-of-life spike; schema-patch RPC and action path are CO-PRIMARY, each with an explicit scope model | final-pass #1 (overruled v2's bridge-first) | v2's "small wallet-bridge client" sat on the wrong side of the security architecture (dispatch-time capability boundary). |
 | D8 | v1's compile bail-out replaced by a Phase-2 STOP-and-surface gate | fable F9 | The deduced risks land at the consume smoke, not at compile (and B has no compile). |
 
 ## Audit verdicts
 
 - **Fable (round 1, v1)**: conditional approve — 7 conditions, ALL adopted in v2 (single-use redesign; grant-path design; aztec-standards correction; bail-out window; anvil gate; lockfile [moot]; front-load Phase 4→1).
 - **Codex (round 1, v1)**: reject — blockers #1 (grant path) and #2 (artifact delivery) both dissolved by v2 (Phase 2 design + Outline B flip). #3 artifacts (moot under B), #4 confused-deputy (hard-scoping adopted), #5 accountAddress (contested — D6), #6 residue (cleanup adopted).
-- **Codex (final fresh-context pass, v2)**: _pending._
+- **Codex (final fresh-context pass, v2)**: conditional approve — conditions: (1) D7 rewritten as Phase-2 proof-of-life with schema-patch RPC co-primary + explicit scope model; (2) D6 documented as an explicit product tradeoff; (3) Phase 2 names the scoped-capability path + account-B selection hook. ALL THREE ADOPTED (this revision). Also CONFIRMS the single-use lifecycle script is non-vacuous as specified (finding 5, with on-chain + wallet-side hash-path receipts).
 
 ## Seeds (DRAFT — finalized post-approval)
 
