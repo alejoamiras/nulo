@@ -16,3 +16,12 @@ REMAINING for P6: bridge-deployments `l1.fuel` exports (guarded - fuel UI render
 - The user asked "how does one bridge private fee juice?" mid-arc — the answer (there is no protocol-private FJ; private fuel = FPC-paid fees, deferred) exposed a REAL copy gap: private+fuel's gas leg writes the recipient's Aztec address on L1, which a pure private deposit never does. Disclosure added to the quote line when both toggles are on, pinned. The linkability fact was implicit in the plan's Security section but absent from user-facing copy - copy IS part of the threat-model surface.
 - Journal cards: fuel line (slice → received FJ) + CLAIM WITHOUT FUEL (shown only on stuck fueled claims; routes through overrideFuelClaim → sponsored, non-destructive). Receipt: "+ N FJ landed as gas ⛽" from the snapshot.
 - Mock-maintenance lesson again: adding exports to a heavily-mocked module (bridge-deployments) broke 7 test files' mocks at once; two already HAD the key I injected (duplicate-property TS error). The vi.mock factories are closed sets - grep for every mock of a module before extending it.
+
+## 2026-06-13 — post-impl audit: the fuel-settlement state machine (3 misses → design reassess)
+
+Codex post-impl REJECTED twice on the same conceptual surface: tracking whether a fueled deposit's FJ message is consumed. The trap I kept falling into: **PROPOSED is not inclusion.** Each patch latched a boolean (consumed, then standaloneClaimed) at TxStatus.PROPOSED, which survives a later DROPPED tx and lies.
+- Attempt 1 (code-review): made `consumed` load-bearing but still set at PROPOSED.
+- Attempt 2 (audit fix): moved consumed to an inclusion probe in the claim BUILDER — but that only runs on RETRY, so the happy first-try fjwc success never sets it (false-positive button) AND I reintroduced the PROPOSED-latch on the new standaloneClaimed (false-negative).
+- 3 misses on one step ⇒ STOP, reassess design with codex (the loop's 5-fail rule, escalated early since it's the same root each time).
+
+The insight that unlocks it: the engine ALREADY has an inclusion-grade signal (`claimReceiptStatus(rec.claimTxHash) === "success"` before completing). For fjwc, the fuel claim is EMBEDDED in the token claim tx, so `rec.claimTxHash === fuel.claimTxHash` exactly when fjwc paid — promote `consumed` THERE (engine completion), on the happy path. And `claim_and_end_setup` is idempotent-safe (reverts if already consumed), so the recovery action can be self-correcting rather than precisely tracked. Design sent to codex for validation before implementing a 4th time.
