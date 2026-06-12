@@ -50,8 +50,8 @@ contract DeployFuelLive is Script {
 
     // ── AZLO/WETH pool: 100 AZLO per WETH (cheap-FJ economics, plan ledger L10) ──
     // currency0 = AZLO (0xa40a… < 0xfFf9…), price c1/c0 = 0.01, sqrt(0.01)·2^96:
-    uint24 constant AZLO_WETH_FEE = 3000;
-    int24 constant AZLO_WETH_SPACING = 60;
+    uint24 constant AZLO_WETH_FEE = 500;
+    int24 constant AZLO_WETH_SPACING = 10;
     uint160 constant AZLO_WETH_SQRT_PRICE = 7922816251426433759354395033;
     int24 constant AZLO_WETH_TICK_LOWER = -69060; // init tick ≈ -46054, wide straddle
     int24 constant AZLO_WETH_TICK_UPPER = -23040;
@@ -101,8 +101,8 @@ contract DeployFuelLive is Script {
             });
             _guardPrice(key, AZLO_WETH_SQRT_PRICE);
 
-            uint256 wethSeed = vm.envOr("WETH_SEED", uint256(0.2 ether));
-            int256 liquidity = int256(vm.envOr("AZLO_WETH_LIQUIDITY", uint256(29e17)));
+            uint256 wethSeed = vm.envOr("WETH_SEED", uint256(0.22 ether));
+            int256 liquidity = int256(vm.envOr("AZLO_WETH_LIQUIDITY", uint256(32e17)));
             // Over-provision AZLO via the permissionless capped mint; leftovers swept back.
             uint256 mintCalls = vm.envOr("AZLO_MINT_CALLS", uint256(1));
             MintableERC20 azlo = MintableERC20(token);
