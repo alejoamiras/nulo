@@ -56,7 +56,7 @@ Funding: the dedicated account receives minted tokens + uses sponsored-FPC fees;
 - Pin CURRENT cancelJob accepts-any-id behavior as `(BUG PIN — replaced in Phase 1)` in `execution-lane.test.ts`.
 - **Gate**: `bun run lint` exit 0; `bun run --cwd packages/extension vitest run src/wallet/services/execution/execution-lane.test.ts` green (lint · unit). (Gate commands cwd-explicit — fable F12.)
 
-### Phase 1 — Execution follow-ups batch (0.5d) — FRONT-LOADED (fable F8: zero deps on authwit work; cheapest, pure-unit, immediate value)
+### Phase 1 ✓ — Execution follow-ups batch (0.5d) — FRONT-LOADED (fable F8: zero deps on authwit work; cheapest, pure-unit, immediate value)
 - **cancelJob ownership**: lane loads `operationJournal.getOperation(id)`; `record.profileId !== activeProfile.id` → silent drop (identical to unknown-id). Pins: match cancels / mismatch drops / record-absent drops / **locked wallet (no active profile) drops** (fable F10a). accountAddress NOT checked — ledger D6.
 - **`dapp_execute` start-path unification**: `beginDappExecuteJournal` moves into `ExecutionLane`; facade delegate + executor `beginJournal` wiring point at the lane. Zero behavior change; claim-helper/executor tests untouched.
 - **Setup-gate hardening**: loud failure under `E2E_REQUIRE_SETUP=1` for BOTH ungated soft-skip paths — node-health (`global-setup.ts:375-384`) AND anvil-start (`:288-296`) (fable F5).
