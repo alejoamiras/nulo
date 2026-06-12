@@ -49,12 +49,12 @@ What does NOT exist: a live deployment of router/swapper, an AZLO/WETH pool, quo
 
 ## Phases
 
-### P1 — Router hardening + live-shape deploy script + fork proof (bridge-evm)
+### P1 ✓ — Router hardening + live-shape deploy script + fork proof (bridge-evm)
 **Goal:** the exact bytes we will deploy, proven on a Sepolia fork against the REAL PoolManager/Permit2/FeeJuice/live-AZLO.
 - `src/SwapBridgeRouter.sol`: the L1 `require(fuelReceived >= p.minFuelOutput, ...)` (one line, witness untouched).
 - `script/DeployFuelLive.s.sol` (new): env-driven token (default live AZLO), deploys `UniswapFuelSwap` + `SwapBridgeRouter`, seeds AZLO/WETH with L10 constants, `SEED_ETH_FJ` flag (default false), runtime `require(AZLO < WETH)`, sweeps leftovers.
 - Tests: unit (malicious target returning < minFuelOutput reverts in the ROUTER; malicious target that prefunds FJ without pulling the AZLO slice reverts on the token-delta require — the residue-theft pin), `DeployFuelLive.fork.t.sol` (mint live AZLO permissionlessly, seed with production constants, assert band straddles init tick + both sides consumed, run the production two-hop `bridgeWithFuel` incl. `isPrivate=true`, assert AZLO's Permit2 allowance override, probe the LIVE ETH/FJ pool with a production-size quote — the L2 evidence gate).
-**Gate:** `forge test` green (unit + fork via `SEPOLIA_RPC_URL`); `WitnessHash.t.sol` values unchanged; `bun run --cwd packages/bridge-core test` still green.
+**Gate MET 2026-06-12:** `forge test` 38/38 (unit + fork); `WitnessHash.t.sol` unchanged; bridge-core 81 green. Live findings folded: FJ tier moved to fee 987 (fee-500 key squatted at ~8e9 FJ/ETH on live Sepolia; shared fee-3000 pool drifted to ~191 FJ/ETH), fills are product-sized 0.25 AZLO ≈ 500 FJ (P6 gains a MAX fuel cap), ~4.5%/fill decay at the chosen depth with 5 consecutive fills clearing a 380-FJ floor.
 
 ### P2 — LIVE Sepolia deployment + pool seeding + verification + config
 **Goal:** router/swapper live, AZLO/WETH seeded, everything verified and recorded.

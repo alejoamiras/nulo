@@ -50,17 +50,19 @@ contract DeployFuelLive is Script {
 
     // ── AZLO/WETH pool: 100 AZLO per WETH (cheap-FJ economics, plan ledger L10) ──
     // currency0 = AZLO (0xa40a… < 0xfFf9…), price c1/c0 = 0.01, sqrt(0.01)·2^96:
-    uint24 constant AZLO_WETH_FEE = 500;
-    int24 constant AZLO_WETH_SPACING = 10;
-    uint160 constant AZLO_WETH_SQRT_PRICE = 7922816251426433759354395033;
-    int24 constant AZLO_WETH_TICK_LOWER = -69060; // init tick ≈ -46054, wide straddle
-    int24 constant AZLO_WETH_TICK_UPPER = -23040;
+    uint24 public constant AZLO_WETH_FEE = 500;
+    int24 public constant AZLO_WETH_SPACING = 10;
+    uint160 public constant AZLO_WETH_SQRT_PRICE = 7922816251426433759354395033;
+    int24 public constant AZLO_WETH_TICK_LOWER = -69060; // init tick ≈ -46054, wide straddle
+    int24 public constant AZLO_WETH_TICK_UPPER = -23040;
 
     // ── OUR ETH/FeeJuice tier (decision: own pool, never skew the shared fee-3000 one).
-    // Price + fee/spacing are env-tunable; defaults = 200,000 FJ per ETH at fee 500. ──
-    uint160 constant ETH_FJ_SQRT_PRICE_200K = 35431911422859141528926554161152;
-    int24 constant ETH_FJ_TICK_LOWER_200K = 99060; // init tick ≈ 122067
-    int24 constant ETH_FJ_TICK_UPPER_200K = 145140;
+    // Fee 987: the conventional 500 tier is already squatted on live Sepolia at tick ~227931
+    // (~8e9 FJ/ETH) and the shared 3000 tier drifted to ~191 FJ/ETH - an eccentric fee value
+    // avoids convention collisions. Price + fee/spacing env-tunable; default 200,000 FJ/ETH. ──
+    uint160 public constant ETH_FJ_SQRT_PRICE_200K = 35431911422859141528926554161152;
+    int24 public constant ETH_FJ_TICK_LOWER_200K = 99060; // init tick ≈ 122067
+    int24 public constant ETH_FJ_TICK_UPPER_200K = 145140;
 
     // Default liquidity derivations (validated empirically by the fork test):
     //   AZLO/WETH  L=2.9e18 → ~0.20 WETH + ~20 AZLO in range; each 500-FJ purchase
@@ -69,7 +71,7 @@ contract DeployFuelLive is Script {
     //   ~40 purchases before the FJ side thins.
     // Abort threshold for an already-initialized pool: sqrtPrice within ±10% of target
     // (≈ ±21% in price terms) counts as "ours from a prior partial run".
-    uint256 constant SQRT_TOLERANCE_BPS = 1000;
+    uint256 public constant SQRT_TOLERANCE_BPS = 1000;
 
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
@@ -124,7 +126,7 @@ contract DeployFuelLive is Script {
             PoolKey memory fjKey = PoolKey({
                 currency0: Currency.wrap(address(0)),
                 currency1: Currency.wrap(FEE_JUICE),
-                fee: uint24(vm.envOr("FJ_POOL_FEE", uint256(500))),
+                fee: uint24(vm.envOr("FJ_POOL_FEE", uint256(987))),
                 tickSpacing: int24(int256(vm.envOr("FJ_POOL_SPACING", uint256(10)))),
                 hooks: IHooks(address(0))
             });

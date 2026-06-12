@@ -9,3 +9,11 @@
 - 1Password SSH agent intermittently locked → pushes queue locally; retry each firing.
 
 NEXT: `DeployFuelLive.fork.t.sol` (fork-proof the production topology end-to-end: seed with production constants, two-hop bridgeWithFuel incl. private variant, live-AZLO Permit2 allowance override assert, quoter probe) — then P1 gate.
+
+## 2026-06-12 — fork rehearsal (P1 gate)
+
+- **DeployFuelLive.fork.t.sol** rehearses the EXACT live topology: LIVE AZLO (permissionless mint + the Permit2 allowance override asserted on deployed bytecode), LIVE canonical Token/FeeJuice portals (real deposits on fork, both isPrivate variants), our two pools seeded with the production constants read FROM the script instance (no constant drift).
+- **The front-run scenario is LIVE REALITY, not theory**: the ETH/FJ fee-500 key is already squatted on Sepolia at tick 227931 (~8e9 FJ/ETH) — our first fork run seeded single-sided into it (the band demanded 89k FJ = the full-range-token1 signature). AND the shared fee-3000 pool has drifted from Holonym's ~10,000 FJ/ETH to ~191 FJ/ETH (FJ 50x more expensive) — the recon-era price is stale, which retroactively strengthens the own-pool decision. Our tier moved to **fee 987/spacing 10** (eccentric value, no convention collisions; probe shows 987/1313/10000 free).
+- **Fuel fills must be PRODUCT-SIZED**: a 2-AZLO slice (~4000 FJ) craters these depths (12.9% + 25% price moves per hop, -27% second fill); a 0.25-AZLO slice (~500 FJ — the 200-500 FJ design band) sees ~2-3% total slippage. Consequence for P6: the form needs a MAX fuel cap (sibling of MIN_FUEL_FJ), enforced at validation — oversize slices are a self-rug.
+- **Honest depth economics at (L_azloWeth=3.2e18, L_ethFj=70e18)**: ~4.5% output decay per consecutive design-band fill, every one of 5 consecutive fills clears a 380-FJ floor with no re-seed. P2 tuning option recorded: narrowing the FJ band (e.g. [115000,130000]) roughly doubles in-range liquidity per ETH (impact → ~2%/fill) at the cost of earlier band-exit under one-way flow.
+- Gate: `forge test` 38/38 (all unit + fork suites), WitnessHash byte-pins unchanged, bridge-core 81 green.
