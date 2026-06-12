@@ -38,6 +38,7 @@ import {
 	flagRecordError,
 	markApproveOutcome,
 	markSessionLive,
+	isMsgNotReady,
 	resumeSessionWork,
 	runDepositClaim,
 	runOnLane,
@@ -137,12 +138,31 @@ async function sendStandaloneFjClaim(
 	const sponsored = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
 	const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
 	const fj = await Contract.at(AztecAddress.fromString(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
-	const { receipt } = (await fj.methods
-		.claim_and_end_setup(recipientAddr, BigInt(fuel.received ?? "0"), Fr.fromString(fuel.secret), new Fr(BigInt(fuel.leafIndex ?? "0")))
-		.send({ from: recipientAddr, fee: sponsored, wait: { waitForStatus: TxStatus.PROPOSED } } as never)) as {
-		receipt: { txHash: unknown }
+	let receiptTxHash: string
+	try {
+		const { receipt } = (await fj.methods
+			.claim_and_end_setup(
+				recipientAddr,
+				BigInt(fuel.received ?? "0"),
+				Fr.fromString(fuel.secret),
+				new Fr(BigInt(fuel.leafIndex ?? "0")),
+			)
+			.send({ from: recipientAddr, fee: sponsored, wait: { waitForStatus: TxStatus.PROPOSED } } as never)) as {
+			receipt: { txHash: unknown }
+		}
+		receiptTxHash = String(receipt.txHash)
+	} catch (e) {
+		// The FJ message is already gone ⇒ the gas is already in the wallet. Self-correct: settle
+		// rather than error, so a false-positive CLAIM YOUR GAS click resolves cleanly (the affordance
+		// becomes exact, not just safe - the post-impl audit's residual false-positive).
+		if (isMsgNotReady(e instanceof Error ? e.message : String(e))) {
+			updateRecord(id, { fuel: { ...fuel, standaloneClaimed: true } })
+			log("standalone FJ claim: message already consumed - gas already in wallet", id)
+			return
+		}
+		throw e
 	}
-	if ((await waitForFuelInclusion(String(receipt.txHash))) !== "included") {
+	if ((await waitForFuelInclusion(receiptTxHash)) !== "included") {
 		throw new Error("The gas claim was sent but hasn't confirmed yet - try CLAIM YOUR GAS again in a moment.")
 	}
 	updateRecord(id, { fuel: { ...fuel, standaloneClaimed: true } })
