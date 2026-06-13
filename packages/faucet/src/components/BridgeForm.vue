@@ -148,6 +148,9 @@ async function refreshFuelQuote() {
 	}
 }
 
+watch(isPrivate, (priv) => {
+	if (priv) fuelOn.value = false
+})
 watch([fuelOn, fuelSlice, direction], () => {
 	if (quoteTimer) clearTimeout(quoteTimer)
 	if (!fuelOn.value || !fuelAvailable.value) return
@@ -191,7 +194,7 @@ async function onSubmit() {
 	if (direction.value === "l1-to-l2") {
 		await depositFlow.deposit(amountUnits.value, isPrivate.value, {
 			onRecord,
-			...(fuelOn.value && fuelAvailable.value ? { fuelSlice: fuelSliceUnits.value } : {}),
+			...(fuelOn.value && fuelAvailable.value && !isPrivate.value ? { fuelSlice: fuelSliceUnits.value } : {}),
 		})
 	} else {
 		await withdrawFlow.withdraw(amountUnits.value, isPrivate.value, { onRecord })
@@ -392,7 +395,7 @@ function fmt(b: bigint | null): string {
 		</p>
 
 		<!-- ADD-ON: fuel (gas on arrival), only on L1->L2. -->
-		<div v-if="fuelAvailable" class="opt-row">
+		<div v-if="fuelAvailable && !isPrivate" class="opt-row">
 			<button
 				type="button"
 				class="toggle"
@@ -406,7 +409,10 @@ function fmt(b: bigint | null): string {
 			</button>
 			<span class="toggle-label">ARRIVE WITH GAS</span>
 		</div>
-		<div v-if="fuelOn && fuelAvailable" class="fuel-config">
+		<p v-if="fuelAvailable && isPrivate" class="opt-note" :data-testid="TESTIDS.bridgeFuelPrivateNote">
+			Gas on arrival is available on public bridges — private gas is coming with private Fee Juice.
+		</p>
+		<div v-if="fuelOn && fuelAvailable && !isPrivate" class="fuel-config">
 			<div class="fuel-slice-row">
 				<input
 					v-model="fuelSlice"
@@ -429,7 +435,7 @@ function fmt(b: bigint | null): string {
 				</span>
 			</div>
 			<p v-if="fuelQuote.state === 'ok'" class="opt-note">
-				Claimed with your tokens in one transaction.<template v-if="isPrivate"> Gas leg is public; your tokens stay private.</template>
+				Claimed with your tokens in one transaction.
 			</p>
 			<p v-if="fuelError && fuelQuote.state !== 'error'" class="err-msg" :data-testid="TESTIDS.bridgeFuelError">{{ fuelError }}</p>
 		</div>

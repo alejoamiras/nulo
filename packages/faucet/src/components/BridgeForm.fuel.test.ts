@@ -144,16 +144,27 @@ describe("BridgeForm fuel surface", () => {
 		expect(depositFn).not.toHaveBeenCalled()
 	})
 
-	it("private + fuel discloses the public gas-leg linkability (tokens stay private)", async () => {
+	it("PRIVATE bridges cannot carry public gas (the banned combo): fuel toggle is withheld, replaced by a note", async () => {
 		const w = mount(BridgeForm)
+		// public default: the fuel toggle is offered.
+		expect(w.find(sel(TESTIDS.bridgeFuelToggle)).exists()).toBe(true)
 		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
+		// private: no fuel toggle, an explanatory note instead - never the private-tokens + public-gas leak.
+		expect(w.find(sel(TESTIDS.bridgeFuelToggle)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.bridgeFuelPrivateNote)).exists()).toBe(true)
+		expect(w.text()).toMatch(/private gas is coming/i)
+	})
+
+	it("toggling PRIVATE while fuel is ON turns fuel off (no stale fueled private submit)", async () => {
+		const w = mount(BridgeForm)
 		await w.find(sel(TESTIDS.bridgeFuelToggle)).trigger("click")
 		await settleQuote()
-		expect(w.text()).toMatch(/Gas leg is public/)
-		expect(w.text()).toMatch(/tokens stay private/)
-		// Public bridging: no disclosure noise.
+		expect(w.find(sel(TESTIDS.bridgeFuelQuote)).exists()).toBe(true)
 		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
-		await settleQuote()
-		expect(w.text()).not.toMatch(/Gas leg is public/)
+		// fuel config gone; a later submit cannot carry a fuel slice.
+		expect(w.find(sel(TESTIDS.bridgeFuelQuote)).exists()).toBe(false)
+		await w.find(sel(TESTIDS.bridgeSubmit)).trigger("click")
+		expect(depositFn).toHaveBeenCalledTimes(1)
+		expect((depositFn.mock.calls[0][2] as { fuelSlice?: bigint })?.fuelSlice).toBeUndefined()
 	})
 })
