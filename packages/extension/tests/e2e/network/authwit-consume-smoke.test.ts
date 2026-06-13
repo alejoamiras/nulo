@@ -34,7 +34,9 @@ test.skipIf(!hasConfig)(
 		// meaningless without it.
 		expect(accountAddresses.length).toBe(2)
 		const [ownerA, callerB] = accountAddresses as [string, string]
+		const step = (m: string) => console.log(`[authwit-smoke] ${m}`)
 
+		step("minting to owner")
 		// Owner needs public balance to transfer from.
 		await mintPublicTokensForAccount(aztecConfig!, ownerA)
 
@@ -56,6 +58,7 @@ test.skipIf(!hasConfig)(
 			{ token: aztecConfig!.tokenAddress, owner: ownerA, caller: callerB },
 		)
 
+		step("inputs set; clicking grant")
 		// ── Grant (as A — the fixture's selectedAccount is granted[0]) ──
 		const seqGrant = await snapshotResultSeq(page)
 		const grantPopupP = waitForPopup(ctx, "execute", { timeout: 30_000 })
@@ -63,6 +66,7 @@ test.skipIf(!hasConfig)(
 		const grantPopup = await grantPopupP
 		await waitForExecuteContent(grantPopup)
 		await approveExecute(grantPopup)
+		step("grant popup approved; awaiting grant result")
 		const grantResult = await waitForPgResult(page, "grantPublicAuthwit", seqGrant, 120_000)
 		expect(grantResult.status).toBe("ok")
 
@@ -70,6 +74,7 @@ test.skipIf(!hasConfig)(
 		// the registry, so the grant must be MINED first.
 		const grantTxHash = JSON.parse(String(grantResult.resultJson)) as string
 		expect(grantTxHash).toMatch(/^0x/)
+		step(`grant result ${grantResult.status}; mining ${grantTxHash}`)
 		await waitForTxMined(aztecConfig!, grantTxHash)
 
 		// ── Consume (as B — switch the acting account) ──
@@ -80,12 +85,14 @@ test.skipIf(!hasConfig)(
 			select.dispatchEvent(new Event("change", { bubbles: true }))
 		}, callerB)
 
+		step("grant mined; switched to caller; clicking consume")
 		const seqConsume = await snapshotResultSeq(page)
 		const consumePopupP = waitForPopup(ctx, "execute", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-consumeAuthwit")
 		const consumePopup = await consumePopupP
 		await waitForExecuteContent(consumePopup)
 		await approveExecute(consumePopup)
+		step("consume popup approved; awaiting consume result")
 		const consumeResult = await waitForPgResult(page, "sendTx", seqConsume, 120_000)
 		// ok ⇒ the build's public simulation passed the AuthRegistry check —
 		// the approval existed and B was the authorized caller.
