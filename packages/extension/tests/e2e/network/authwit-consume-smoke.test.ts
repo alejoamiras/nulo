@@ -72,7 +72,9 @@ test.skipIf(!hasConfig)(
 
 		// The RPC resolves at SUBMIT; the consume's public simulation reads
 		// the registry, so the grant must be MINED first.
-		const grantTxHash = JSON.parse(String(grantResult.resultJson)) as string
+		// resultJson is the raw attribute string — a tx hash is a plain `0x…`
+		// (not JSON-encoded), so strip surrounding quotes if present rather than JSON.parse.
+		const grantTxHash = String(grantResult.resultJson).replace(/^"(.*)"$/, "$1")
 		expect(grantTxHash).toMatch(/^0x/)
 		step(`grant result ${grantResult.status}; mining ${grantTxHash}`)
 		await waitForTxMined(aztecConfig!, grantTxHash)
