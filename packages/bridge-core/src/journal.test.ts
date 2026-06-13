@@ -109,6 +109,48 @@ describe("journal CRUD", () => {
 	})
 })
 
+describe("schema-2 fuel records", () => {
+	const fuel = {
+		amount: "250000000000000000",
+		secret: "0xf00d",
+		secretHashHex: "0xfeed",
+		minOutput: "450000000000000000000",
+	}
+
+	it("a fueled deposit round-trips through the journal with its fuel block intact", () => {
+		const kv = memKV()
+		upsertRecord(kv, deposit("0xfueled", { schema: 2, fuel }))
+		const [rec] = loadJournal(kv) as DepositJournalRecord[]
+		expect(rec.schema).toBe(2)
+		expect(rec.fuel).toEqual(fuel)
+	})
+
+	it("schema-1 and schema-2 records coexist in one journal; schema-1 loads byte-identically", () => {
+		const kv = memKV()
+		const legacy = deposit("0xlegacy")
+		upsertRecord(kv, legacy)
+		upsertRecord(kv, deposit("0xfueled", { schema: 2, fuel }))
+		const records = loadJournal(kv)
+		expect(records).toHaveLength(2)
+		// upsert stamps updatedAt; every OTHER field of the schema-1 record is untouched.
+		const { updatedAt: _, ...loaded } = records.find((r) => r.id === "0xlegacy") as DepositJournalRecord
+		const { updatedAt: __, ...expected } = legacy
+		expect(loaded).toEqual(expected)
+	})
+
+	it("updating fuel progress (received/claimAttempt/consumed) persists via updateRecord", () => {
+		const kv = memKV()
+		upsertRecord(kv, deposit("0xfueled", { schema: 2, fuel }))
+		patchRecord(kv, "0xfueled", {
+			fuel: { ...fuel, leafIndex: "7", received: "487000000000000000000", claimAttempt: true, consumed: true },
+		} as Partial<DepositJournalRecord>)
+		const [rec] = loadJournal(kv) as DepositJournalRecord[]
+		expect(rec.fuel?.received).toBe("487000000000000000000")
+		expect(rec.fuel?.claimAttempt).toBe(true)
+		expect(rec.fuel?.consumed).toBe(true)
+	})
+})
+
 describe("multi-tab safety (per-record merge)", () => {
 	it("a writer with a stale in-memory snapshot cannot erase a record another writer just added", () => {
 		const kv = memKV()

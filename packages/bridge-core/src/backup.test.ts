@@ -115,6 +115,36 @@ describe("bridge backup files", () => {
 		expect(() => parseBackupFile({ format: "nulo-bridge-backup", v: 1, chainId: "nope" })).toThrow(/malformed/)
 	})
 
+	it("schema-2 fuel records validate strictly; malformed fuel rejects restore", () => {
+		const fuel = {
+			amount: "250000000000000000",
+			secret: "0xf00d",
+			secretHashHex: "0xfeed",
+			minOutput: "450000000000000000000",
+			leafIndex: "7",
+			received: "487000000000000000000",
+			claimAttempt: true,
+			consumed: false,
+			standaloneClaimed: false,
+		}
+		const fueled = publicDeposit({ schema: 2, fuel } as never)
+		expect(validateBackupRecord(fueled)).toEqual(fueled)
+		// Tampered fuel amount (non-decimal) rejects.
+		expect(() => validateBackupRecord(publicDeposit({ schema: 2, fuel: { ...fuel, amount: "12.5" } } as never))).toThrow(
+			/not a valid bridge record/,
+		)
+		// Missing secret rejects.
+		expect(() => validateBackupRecord(publicDeposit({ schema: 2, fuel: { ...fuel, secret: "" } } as never))).toThrow(
+			/not a valid bridge record/,
+		)
+		// Schema 2 without a fuel block is a contradiction.
+		expect(() => validateBackupRecord(publicDeposit({ schema: 2 } as never))).toThrow(/not a valid bridge record/)
+		// Schema 1 carrying fuel is a contradiction.
+		expect(() => validateBackupRecord(publicDeposit({ fuel } as never))).toThrow(/not a valid bridge record/)
+		// Withdraws never carry schema 2.
+		expect(() => validateBackupRecord({ ...withdraw(), schema: 2 })).toThrow(/not a valid bridge record/)
+	})
+
 	it("validateBackupRecord rejects junk shapes the journal's shallow parser would let through", () => {
 		expect(() => validateBackupRecord({ id: "0x1", direction: "deposit" })).toThrow(/not a valid bridge record/)
 		expect(() => validateBackupRecord(publicDeposit({ amount: "12.5" as never }))).toThrow(/not a valid bridge record/)

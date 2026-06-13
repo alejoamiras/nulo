@@ -15,6 +15,8 @@ vi.mock("@nulo/bridge-core", async (importOriginal) => ({
 	isSealTrusted: (...args: unknown[]) => sealTrusted(...(args as [])),
 }))
 vi.mock("@/contracts/bridge-deployments", () => ({
+	BRIDGE_FUEL: undefined,
+	L1_USDC: "0xl1token",
 	BRIDGE_TOKEN_SYMBOL: "USDC",
 	BRIDGE_TOKEN_DECIMALS: 6,
 	BRIDGE_TOKEN: { toString: () => "0xtoken" },
@@ -129,7 +131,7 @@ describe("BridgeForm", () => {
 		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
 		const note = w.find(sel(TESTIDS.bridgePrivacyNote))
 		expect(note.attributes("data-first")).toBe("true")
-		expect(note.text()).toMatch(/two quick ethereum signatures/i)
+		expect(note.text()).toMatch(/two quick ethereum signatures/i) // terse copy keeps the phrase
 
 		sealTrusted.mockReturnValue(true)
 		const w2 = mount(BridgeForm)

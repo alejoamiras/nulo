@@ -10,6 +10,7 @@ const l1Connected = ref(true)
 const pushToast = vi.fn()
 
 vi.mock("@/contracts/bridge-deployments", () => ({
+	BRIDGE_FUEL: undefined,
 	BRIDGE_TOKEN_SYMBOL: "AZLO",
 	BRIDGE_TOKEN_DECIMALS: 18,
 	BRIDGE_TOKEN: { toString: () => "0xtoken" },

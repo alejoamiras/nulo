@@ -1056,6 +1056,128 @@ describe("dispatcher — isTokenRegistered reachability + gating", () => {
 	})
 })
 
+describe("dispatcher — scope-list field-diff re-consent (transaction/simulation/data)", () => {
+	const txGrant = (scope: { contract: string; function: string }[]) =>
+		({ capability: { type: "transaction", scope }, grantedAt: 1 }) as unknown as GrantedCapabilityRecord
+	const simGrant = (tx: { contract: string; function: string }[], util: { contract: string; function: string }[]) =>
+		({
+			capability: { type: "simulation", transactions: { scope: tx }, utilities: { scope: util } },
+			grantedAt: 1,
+		}) as unknown as GrantedCapabilityRecord
+	const FJ = { contract: "0xfeejuice", function: "claim_and_end_setup" }
+	const CLAIM = { contract: "0xbridge", function: "claim_public" }
+
+	const promptTracking = (granted: unknown[]) => {
+		const state = { prompted: false }
+		const popup = async () => {
+			state.prompted = true
+			return { granted } as never
+		}
+		return { state, popup }
+	}
+
+	test("equal/subset transaction scope does NOT re-prompt", async () => {
+		const session = makeSession({ capabilityGrants: [txGrant([CLAIM, FJ])] })
+		const { writer } = makeSessionWriter(session)
+		const { state, popup } = promptTracking([])
+		const dispatcher = makeDispatcher(writer, popup)
+		await dispatcher.dispatch("requestCapabilities", [{ capabilities: [{ type: "transaction", scope: [CLAIM] }] }], ctx)
+		expect(state.prompted).toBe(false)
+	})
+
+	test("a transaction scope adding a NEW function re-prompts and approval REPLACES the stored grant", async () => {
+		const session = makeSession({ capabilityGrants: [txGrant([CLAIM])] })
+		const { writer, calls } = makeSessionWriter(session)
+		const { state, popup } = promptTracking([{ type: "transaction", scope: [CLAIM, FJ] }])
+		const dispatcher = makeDispatcher(writer, popup)
+		await dispatcher.dispatch("requestCapabilities", [{ capabilities: [{ type: "transaction", scope: [CLAIM, FJ] }] }], ctx)
+		expect(state.prompted).toBe(true)
+		const persisted = calls.setGrants.at(-1) ?? []
+		const txGrants = persisted.filter((g: GrantedCapabilityRecord) => g.capability.type === "transaction")
+		expect(txGrants).toHaveLength(1)
+		expect((txGrants[0].capability as { scope: unknown[] }).scope).toHaveLength(2)
+		// Follow-up with the SAME scope is now covered - no second prompt.
+		const second = promptTracking([])
+		const dispatcher2 = makeDispatcher(makeSessionWriter({ ...session, capabilityGrants: persisted }).writer, second.popup)
+		await dispatcher2.dispatch("requestCapabilities", [{ capabilities: [{ type: "transaction", scope: [FJ] }] }], ctx)
+		expect(second.state.prompted).toBe(false)
+	})
+
+	test("coverage mirrors enforcement: split-across-grants does NOT count as covered", async () => {
+		// Two stored grants each covering ONE pattern - enforcement requires a single cap to
+		// cover every call, so a request needing both MUST re-prompt.
+		const session = makeSession({ capabilityGrants: [txGrant([CLAIM]), txGrant([FJ])] })
+		const { writer } = makeSessionWriter(session)
+		const { state, popup } = promptTracking([{ type: "transaction", scope: [CLAIM, FJ] }])
+		const dispatcher = makeDispatcher(writer, popup)
+		await dispatcher.dispatch("requestCapabilities", [{ capabilities: [{ type: "transaction", scope: [CLAIM, FJ] }] }], ctx)
+		expect(state.prompted).toBe(true)
+	})
+
+	test("simulation sub-scopes diff independently; an added transactions entry re-prompts", async () => {
+		const session = makeSession({ capabilityGrants: [simGrant([CLAIM], [{ contract: "0xtoken", function: "balance_of_public" }])] })
+		const { writer } = makeSessionWriter(session)
+		const { state, popup } = promptTracking([])
+		const dispatcher = makeDispatcher(writer, popup)
+		// Same utilities, superset transactions -> prompt.
+		await dispatcher.dispatch(
+			"requestCapabilities",
+			[
+				{
+					capabilities: [
+						{
+							type: "simulation",
+							transactions: { scope: [CLAIM, FJ] },
+							utilities: { scope: [{ contract: "0xtoken", function: "balance_of_public" }] },
+						},
+					],
+				},
+			],
+			ctx,
+		)
+		expect(state.prompted).toBe(true)
+	})
+
+	test("a covered simulation request (subset of both sub-scopes) does NOT re-prompt", async () => {
+		const session = makeSession({
+			capabilityGrants: [simGrant([CLAIM, FJ], [{ contract: "0xtoken", function: "balance_of_public" }])],
+		})
+		const { writer } = makeSessionWriter(session)
+		const { state, popup } = promptTracking([])
+		const dispatcher = makeDispatcher(writer, popup)
+		await dispatcher.dispatch("requestCapabilities", [{ capabilities: [{ type: "simulation", transactions: { scope: [FJ] } }] }], ctx)
+		expect(state.prompted).toBe(false)
+	})
+
+	test("a data request widening privateEvents re-prompts; a subset does not", async () => {
+		const dataGrant = {
+			capability: { type: "data", privateEvents: { contracts: ["0xtoken"] } },
+			grantedAt: 1,
+		} as unknown as GrantedCapabilityRecord
+		const session = makeSession({ capabilityGrants: [dataGrant] })
+		const { writer } = makeSessionWriter(session)
+		const widen = promptTracking([])
+		const dispatcher = makeDispatcher(writer, widen.popup)
+		await dispatcher.dispatch(
+			"requestCapabilities",
+			[{ capabilities: [{ type: "data", privateEvents: { contracts: ["0xtoken", "0xother"] } }] }],
+			ctx,
+		)
+		expect(widen.state.prompted).toBe(true)
+		// Fresh session for the subset case - the widen dispatch above recorded a rejection,
+		// and re-requesting a rejected type re-prompts by design.
+		const subset = promptTracking([])
+		const fresh = makeSessionWriter(makeSession({ capabilityGrants: [dataGrant] }))
+		const dispatcher2 = makeDispatcher(fresh.writer, subset.popup)
+		await dispatcher2.dispatch(
+			"requestCapabilities",
+			[{ capabilities: [{ type: "data", privateEvents: { contracts: ["0xtoken"] } }] }],
+			ctx,
+		)
+		expect(subset.state.prompted).toBe(false)
+	})
+})
+
 describe("dispatcher — contracts field-diff re-consent", () => {
 	const grant = (
 		contracts: string[],

@@ -7,6 +7,8 @@ const USDC = AztecAddress.fromString("0x0000000000000000000000000000000000000000
 const ETH = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000003")
 const SPONSORED_FPC = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000004")
 
+import { feeJuiceAddress } from "@nulo/bridge-core"
+
 describe("buildFaucetManifest", () => {
 	const m = buildFaucetManifest({
 		dripperAddress: DRIPPER,
@@ -67,7 +69,7 @@ describe("buildFaucetManifest", () => {
 	})
 })
 
-const BRIDGE = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000005")
+const BRIDGE = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000007")
 const TOKEN = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000006")
 const PROXY = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000007")
 
@@ -105,6 +107,7 @@ describe("buildBridgeManifest", () => {
 		])
 		expect(cap.transactions.scope.map((s) => `${s.contract.toString()}::${s.function}`)).toEqual([
 			`${TOKEN.toString()}::balance_of_public`,
+			`${feeJuiceAddress}::claim_and_end_setup`,
 		])
 	})
 
@@ -119,6 +122,7 @@ describe("buildBridgeManifest", () => {
 			"burn_public",
 			"burn_private",
 			"sponsor_unconditionally",
+			"claim_and_end_setup",
 		])
 		const sponsor = cap.scope.find((s) => s.function === "sponsor_unconditionally")
 		expect(sponsor?.contract.toString()).toBe(SPONSORED_FPC.toString())
@@ -161,6 +165,7 @@ describe("buildCombinedManifest", () => {
 		expect(cap.scope.map((s) => s.function)).toEqual([
 			"drip_to_public",
 			"drip_to_private",
+			"claim_and_end_setup",
 			"claim_public",
 			"claim_private",
 			"exit_to_l1_public",
@@ -179,5 +184,55 @@ describe("buildCombinedManifest", () => {
 		expect(fns).toContain("balance_of_public")
 		expect(fns).toContain("claim_public")
 		expect(fns).toContain("sponsor_unconditionally")
+	})
+})
+
+describe("fuel claim scope (canonical FeeJuice)", () => {
+	const BRIDGE = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000007")
+	const PROXY = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000008")
+	const bridgeInput = () => ({
+		bridgeAddress: BRIDGE,
+		tokenAddress: USDC,
+		proxyAddress: PROXY,
+		sponsoredFpcAddress: SPONSORED_FPC,
+	})
+	const combinedInput = () => ({
+		dripperAddress: DRIPPER,
+		usdcAddress: USDC,
+		ethAddress: ETH,
+		sponsoredFpcAddress: SPONSORED_FPC,
+		bridgeAddress: BRIDGE,
+		tokenAddress: USDC,
+		proxyAddress: PROXY,
+	})
+	const txScope = (m: ReturnType<typeof buildBridgeManifest>) => {
+		const cap = m.capabilities.find((c) => c.type === "transaction")
+		if (cap?.type !== "transaction") throw new Error("transaction cap missing")
+		return cap.scope as { contract: unknown; function: string }[]
+	}
+	const simTxScope = (m: ReturnType<typeof buildBridgeManifest>) => {
+		const cap = m.capabilities.find((c) => c.type === "simulation")
+		if (cap?.type !== "simulation") throw new Error("simulation cap missing")
+		return cap.transactions?.scope as { contract: unknown; function: string }[]
+	}
+	const hasFjClaim = (scope: { contract: unknown; function: string }[]) =>
+		scope.some((s) => String(s.contract) === feeJuiceAddress && s.function === "claim_and_end_setup")
+
+	it("bridge manifest scopes the FJ claim for BOTH send and simulate (the fjwc dry-run)", () => {
+		const m = buildBridgeManifest(bridgeInput())
+		expect(hasFjClaim(txScope(m))).toBe(true)
+		expect(hasFjClaim(simTxScope(m))).toBe(true)
+	})
+
+	it("combined manifest scopes the FJ claim identically", () => {
+		const m = buildCombinedManifest(combinedInput())
+		expect(hasFjClaim(txScope(m))).toBe(true)
+		expect(hasFjClaim(simTxScope(m))).toBe(true)
+	})
+
+	it("the FJ entry is exactly one function on one protocol contract - no wildcards", () => {
+		const m = buildBridgeManifest(bridgeInput())
+		const fj = txScope(m).filter((s) => String(s.contract) === feeJuiceAddress)
+		expect(fj.map((s) => `${String(s.contract)}::${s.function}`)).toEqual([`${feeJuiceAddress}::claim_and_end_setup`])
 	})
 })

@@ -6,10 +6,19 @@ import { Fr } from "@aztec/aztec.js/fields"
 import { TxHash, TxStatus } from "@aztec/aztec.js/tx"
 import { InboxAbi, TokenPortalAbi } from "@aztec/l1-artifacts"
 import {
+	type BridgeWitness,
 	type DepositJournalRecord,
 	type EncryptionKey,
+	SWAP_BRIDGE_ROUTER_ABI,
+	bridgeWitnessPermitTypedData,
+	buildFuelRoute,
+	feeJuiceAddress,
+	hashRoute,
 	isSealTrusted,
 	markSealTrusted,
+	minOutputForSlippage,
+	publicFeeJuicePayment,
+	quoteFuelPath,
 	sealDepositEnvelope,
 	sealDepositRecord,
 } from "@nulo/bridge-core"
@@ -18,7 +27,8 @@ import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { parseEventLogs } from "viem"
 import { sepolia } from "viem/chains"
 import { computed, ref, watch } from "vue"
-import { BRIDGE, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
+import { BRIDGE, BRIDGE_FUEL, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
+import { FUEL_FEE_MARGIN, decideFuelClaim } from "@/lib/fuel-claim-state"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import {
 	addRecordVerified,
@@ -28,6 +38,7 @@ import {
 	flagRecordError,
 	markApproveOutcome,
 	markSessionLive,
+	isMsgNotReady,
 	resumeSessionWork,
 	runDepositClaim,
 	runOnLane,
@@ -64,6 +75,111 @@ export function getRetainedSealKey(id: string): EncryptionKey | undefined {
 	return sealKeys.get(id)
 }
 
+// The user's explicit "Claim without fuel" choices (L14 trigger 3); set by the journal UI.
+const fuelOverrides = new Set<string>()
+export function overrideFuelClaim(id: string): void {
+	fuelOverrides.add(id)
+}
+
+/** Probe a claim tx's receipt - record-specific ground truth. "included" covers success AND
+ *  app-reverted: both are checkpointed block-status (the app revert lives in executionResult, not
+ *  status), and an INCLUDED claim consumes the FJ message regardless of app-phase outcome. */
+async function fuelReceiptStatus(txHash: string): Promise<"included" | "dropped" | "pending"> {
+	try {
+		const receipt = await createAztecNodeClient(NODE_URL).getTxReceipt(TxHash.fromString(txHash))
+		const status = String(receipt?.status ?? "pending").toLowerCase()
+		if (/checkpointed|proven|finalized|success|mined/.test(status)) return "included"
+		if (status.includes("dropped")) return "dropped"
+		return "pending"
+	} catch {
+		return "pending" // unreachable node reads as not-yet-evidence, never as consumed.
+	}
+}
+
+/** Poll a just-sent claim tx to INCLUSION (bounded). PROPOSED is not consumption; only an included
+ *  receipt confirms the FJ message is settled. Returns "pending" on timeout so the caller leaves
+ *  the record unsettled and the recovery action stays offered. */
+async function waitForFuelInclusion(txHash: string, tries = 40): Promise<"included" | "dropped" | "pending"> {
+	for (let i = 0; i < tries; i++) {
+		const s = await fuelReceiptStatus(txHash)
+		if (s !== "pending") return s
+		await new Promise((r) => setTimeout(r, 6000))
+	}
+	return "pending"
+}
+
+/** Reconcile a fueled record's `consumed` flag from chain truth: if the fjwc attempt tx is
+ *  INCLUDED (success OR app-reverted - both consumed the FJ message), persist `consumed`. Probing
+ *  `fuel.claimTxHash` directly (not the completing claim) covers every path: the happy fjwc
+ *  success, an fjwc included-but-reverted before a sponsored retry, and leaves a genuinely DROPPED
+ *  fjwc unsettled so the recovery affordance surfaces. Idempotent; the card calls it on completed
+ *  fueled records so the happy path suppresses the button without it ever flashing. */
+export async function reconcileFuelConsumed(id: string): Promise<void> {
+	const rec = useBridgeJournal().records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
+	const fuel = rec?.fuel
+	if (!fuel?.claimTxHash || fuel.consumed === true) return
+	if ((await fuelReceiptStatus(fuel.claimTxHash)) === "included") {
+		updateRecord(id, { fuel: { ...fuel, consumed: true } })
+	}
+}
+
+/** Claim a fueled deposit's Fee Juice as a standalone, sponsored tx, INCLUSION-GATED. The FJ
+ *  message is recipient-bound, so this is safe whenever fuel isn't known-consumed; an
+ *  already-consumed message reverts but still reads INCLUDED (its nullifier exists), which settles
+ *  it just the same. `standaloneClaimed` latches ONLY after inclusion - a dropped/timed-out tx
+ *  leaves it unset so the card re-offers the action (closes the PROPOSED-latch false-negative). */
+async function sendStandaloneFjClaim(
+	aztec: unknown,
+	recipientAddr: AztecAddress,
+	fuel: NonNullable<DepositJournalRecord["fuel"]>,
+	id: string,
+): Promise<void> {
+	const fpc = await getSponsoredFpcInstance()
+	const sponsored = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
+	const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
+	const fj = await Contract.at(AztecAddress.fromString(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
+	let receiptTxHash: string
+	try {
+		const { receipt } = (await fj.methods
+			.claim_and_end_setup(
+				recipientAddr,
+				BigInt(fuel.received ?? "0"),
+				Fr.fromString(fuel.secret),
+				new Fr(BigInt(fuel.leafIndex ?? "0")),
+			)
+			.send({ from: recipientAddr, fee: sponsored, wait: { waitForStatus: TxStatus.PROPOSED } } as never)) as {
+			receipt: { txHash: unknown }
+		}
+		receiptTxHash = String(receipt.txHash)
+	} catch (e) {
+		// The FJ message is already gone ⇒ the gas is already in the wallet. Self-correct: settle
+		// rather than error, so a false-positive CLAIM YOUR GAS click resolves cleanly (the affordance
+		// becomes exact, not just safe - the post-impl audit's residual false-positive).
+		if (isMsgNotReady(e instanceof Error ? e.message : String(e))) {
+			updateRecord(id, { fuel: { ...fuel, standaloneClaimed: true } })
+			log("standalone FJ claim: message already consumed - gas already in wallet", id)
+			return
+		}
+		throw e
+	}
+	if ((await waitForFuelInclusion(receiptTxHash)) !== "included") {
+		throw new Error("The gas claim was sent but hasn't confirmed yet - try CLAIM YOUR GAS again in a moment.")
+	}
+	updateRecord(id, { fuel: { ...fuel, standaloneClaimed: true } })
+	log("standalone FJ claim confirmed", id)
+}
+
+/** The card's "CLAIM YOUR GAS" recovery: claims a stranded fuel message after the token side
+ *  already completed. Throws so the caller can surface the failure (never silent). */
+export async function claimFuelStandalone(id: string): Promise<void> {
+	const bridgeWallet = useBridgeWallet()
+	const aztec = bridgeWallet.wallet.value
+	if (!aztec) throw new Error("Connect your Aztec wallet first.")
+	const rec = useBridgeJournal().records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
+	if (!rec?.fuel?.received || !rec.fuel.leafIndex) throw new Error("This bridge has no fuel to claim.")
+	await sendStandaloneFjClaim(aztec, AztecAddress.fromString(rec.recipient), rec.fuel, id)
+}
+
 let depsWired = false
 
 /** Wire the journal engine's deposit-side chain deps (idempotent; real clients only). */
@@ -90,8 +206,58 @@ function wireDepositDeps(): void {
 			const secret = Fr.fromString(secretHex)
 			const leaf = new Fr(BigInt(rec.leafIndex ?? "0"))
 			const fpc = await getSponsoredFpcInstance()
-			const fee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
+			const sponsored = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
 			const bridge = await Contract.at(BRIDGE, tokenBridgeArtifact, aztec as never)
+
+			// Fueled records pick their payment via the L14 ladder (record-specific evidence only).
+			const fuel = rec.fuel
+			let fee: { paymentMethod: unknown } = sponsored
+			let fjwcAttempt = false
+			let standaloneFj = false
+			if (fuel?.received && fuel.leafIndex) {
+				const receiptStatus = fuel.claimTxHash ? await fuelReceiptStatus(fuel.claimTxHash) : undefined
+				// Promote a prior attempt to INCLUSION-GRADE durable evidence: only an `included`
+				// receipt sets `consumed`, so a later unreachable node can trust it - a PROPOSED-time
+				// latch would wrongly survive a dropped tx (post-impl audit HIGH).
+				if (receiptStatus === "included" && fuel.consumed !== true) {
+					updateRecord(rec.id, { fuel: { ...fuel, consumed: true } })
+				}
+				const decision = decideFuelClaim({
+					attempt: fuel.claimAttempt === true,
+					txHashKnown: typeof fuel.claimTxHash === "string",
+					receiptStatus,
+					consumed: fuel.consumed === true || receiptStatus === "included",
+					fuelReceived: BigInt(fuel.received),
+					// v1 reads the calibrated floor (config) as the fee reference; a live min-fee query
+					// is a refinement, not a correctness need - the floor is 2x a real observed fee.
+					currentMinFee: BRIDGE_FUEL ? BRIDGE_FUEL.minFuelFj / FUEL_FEE_MARGIN : undefined,
+					persistentFailureCount: 0,
+					userOverride: fuelOverrides.has(rec.id),
+				})
+				log("fuel claim decision", { id: rec.id, action: decision.action })
+				if (decision.action === "fjwc") {
+					fee = {
+						paymentMethod: publicFeeJuicePayment(recipientAddr, {
+							claimAmount: BigInt(fuel.received),
+							claimSecret: Fr.fromString(fuel.secret),
+							messageLeafIndex: BigInt(fuel.leafIndex),
+						}),
+					}
+					fjwcAttempt = true
+				} else if (decision.action === "sponsored-plus-standalone-fj") {
+					standaloneFj = true
+				} else if (decision.action === "wait") {
+					return {
+						simulate: async () => {
+							throw new Error("fuel claim attempt pending - waiting for its receipt before retrying")
+						},
+						send: async () => {
+							throw new Error("fuel claim attempt pending")
+						},
+					}
+				}
+			}
+
 			const interaction = () =>
 				rec.isPrivate
 					? bridge.methods.claim_private(recipientAddr, amount, secret, leaf)
@@ -99,12 +265,28 @@ function wireDepositDeps(): void {
 			return {
 				simulate: () => interaction().simulate({ from: recipientAddr, fee } as never),
 				send: async () => {
+					// L14 trigger-1 precondition: latch the attempt JOURNAL-FIRST, before the wallet call.
+					if (fjwcAttempt && fuel) updateRecord(rec.id, { fuel: { ...fuel, claimAttempt: true } })
 					const { receipt } = (await interaction().send({
 						from: recipientAddr,
 						fee,
 						wait: { waitForStatus: TxStatus.PROPOSED },
 					} as never)) as { receipt: { txHash: unknown } }
-					return { txHash: String(receipt.txHash) }
+					const txHash = String(receipt.txHash)
+					// PROPOSED is NOT inclusion: latch the attempt + hash only. `consumed` is set later,
+					// inclusion-grade, from the receipt probe (post-impl audit HIGH). If this fjwc tx is
+					// later dropped, the card's "CLAIM YOUR GAS" recovery still surfaces the stranded FJ.
+					if (fjwcAttempt && fuel) {
+						updateRecord(rec.id, { fuel: { ...fuel, claimAttempt: true, claimTxHash: txHash } })
+					}
+					if (standaloneFj && fuel) {
+						// Best-effort inline standalone claim; a FAILURE leaves standaloneClaimed unset, so
+						// the card surfaces "CLAIM YOUR GAS" once the record completes (no silent strand).
+						void sendStandaloneFjClaim(aztec, recipientAddr, fuel, rec.id).catch((e) =>
+							log("standalone FJ claim failed (recoverable via CLAIM YOUR GAS):", e instanceof Error ? e.message : String(e)),
+						)
+					}
+					return { txHash }
 				},
 			}
 		},
@@ -151,7 +333,11 @@ export function useDepositFlow() {
 	const busy = ref(false)
 	const error = ref<string | null>(null)
 
-	async function deposit(amount: bigint, isPrivate = false, opts: { onRecord?: (id: string) => void } = {}): Promise<string | null> {
+	async function deposit(
+		amount: bigint,
+		isPrivate = false,
+		opts: { onRecord?: (id: string) => void; fuelSlice?: bigint } = {},
+	): Promise<string | null> {
 		error.value = null
 		const wallet = l1.ensureWalletClient()
 		const from = l1.address.value
@@ -168,18 +354,48 @@ export function useDepositFlow() {
 		busy.value = true
 		let id: string | null = null
 		try {
+			// Fuel pre-flight BEFORE any record exists: quote-required (a missing quote must never
+			// sign away the slice with a junk floor), floor from config slippage.
+			const fuelSlice = opts.fuelSlice && opts.fuelSlice > 0n ? opts.fuelSlice : undefined
+			let fuelPre: { secret: Fr; secretHashHex: string; minOutput: bigint; route: ReturnType<typeof buildFuelRoute> } | undefined
+			if (fuelSlice) {
+				if (!BRIDGE_FUEL) throw new Error("Fuel is not configured for this deployment.")
+				if (fuelSlice >= amount) throw new Error("The fuel slice must be smaller than the total amount.")
+				const route = buildFuelRoute({
+					token: L1_USDC,
+					weth: BRIDGE_FUEL.weth,
+					feeJuice: BRIDGE_FUEL.feeJuice,
+					tokenWeth: BRIDGE_FUEL.pools.azloWeth,
+					ethFj: BRIDGE_FUEL.pools.ethFj,
+				})
+				const quote = await quoteFuelPath(l1.publicClient as never, BRIDGE_FUEL.quoter, route, fuelSlice)
+				if (quote < BRIDGE_FUEL.minFuelFj) {
+					throw new Error("That fuel slice buys too little gas to cover its own claim - increase it or bridge without fuel.")
+				}
+				const fuelSecret = Fr.random()
+				fuelPre = {
+					secret: fuelSecret,
+					secretHashHex: (await computeSecretHash(fuelSecret)).toString(),
+					minOutput: minOutputForSlippage(quote, BRIDGE_FUEL.slippageBps),
+					route,
+				}
+			}
+
 			const secret = Fr.random()
 			const secretHash = await computeSecretHash(secret)
 			id = secretHash.toString()
 			const now = Date.now()
-			log("start", { id, amount: amount.toString(), isPrivate })
+			// record.amount is the TOKEN CLAIM amount (total minus fuel) - the claim machinery and
+			// the sealed envelope consume it unchanged (plan L11).
+			const tokenAmount = fuelSlice ? amount - fuelSlice : amount
+			log("start", { id, amount: amount.toString(), fuelSlice: fuelSlice?.toString(), isPrivate })
 
 			const base: DepositJournalRecord = {
-				schema: 1,
+				schema: fuelPre ? 2 : 1,
 				id,
 				direction: "deposit",
 				isPrivate,
-				amount: amount.toString(),
+				amount: tokenAmount.toString(),
 				createdAt: now,
 				updatedAt: now,
 				chainId: sepolia.id,
@@ -188,6 +404,16 @@ export function useDepositFlow() {
 				recipient,
 				secretHashHex: id,
 				secret: isPrivate ? undefined : secret.toString(),
+				...(fuelPre && fuelSlice
+					? {
+							fuel: {
+								amount: fuelSlice.toString(),
+								secret: fuelPre.secret.toString(),
+								secretHashHex: fuelPre.secretHashHex,
+								minOutput: fuelPre.minOutput.toString(),
+							},
+						}
+					: {}),
 			}
 
 			// The record exists BEFORE any signature: a storage failure aborts before the user signs
@@ -210,7 +436,7 @@ export function useDepositFlow() {
 				)
 				const sign = (m: string) =>
 					runOnLane("l1", () => wallet.signMessage({ account: from, message: m } as never) as Promise<string>)
-				const envelope = { secret: secret.toString(), recipient, amount: amount.toString(), sealerL1: from }
+				const envelope = { secret: secret.toString(), recipient, amount: tokenAmount.toString(), sealerL1: from }
 				const { blob, key } = await sealDepositRecord({
 					sign,
 					binding: { chainId: sepolia.id, portal: L1_PORTAL, bridge: BRIDGE.toString(), secretHashHex: id },
@@ -227,6 +453,124 @@ export function useDepositFlow() {
 				if (!sealed?.sealedEnvelope) {
 					throw new Error("Could not persist the sealed recovery secret - aborting before the deposit (storage full?).")
 				}
+			}
+
+			if (fuelPre && fuelSlice && BRIDGE_FUEL) {
+				const fuelCfg = BRIDGE_FUEL
+				// Fueled leg: ONE Permit2 witness signature + ONE router tx. No approve - the live
+				// token pre-approves Permit2 for every holder (asserted, fail-closed).
+				const permit2Allowance = (await l1.publicClient.readContract({
+					address: L1_USDC,
+					abi: ERC20_ABI,
+					functionName: "allowance",
+					args: [from, fuelCfg.permit2],
+				})) as bigint
+				if (permit2Allowance < amount) {
+					throw new Error("This token does not pre-approve Permit2 - fueled bridging is unavailable for it.")
+				}
+
+				setRecordStep(id, "signing", "sign the bridge intent in your Ethereum wallet - one signature covers swap + deposit")
+				const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
+				const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800)
+				const witness: BridgeWitness = {
+					tokenPortal: L1_PORTAL,
+					bridgeToken: L1_USDC,
+					totalAmount: amount,
+					fuelAmount: fuelSlice,
+					aztecRecipient: recipient as `0x${string}`,
+					fuelRecipient: recipient as `0x${string}`,
+					tokenSecretHash: id as `0x${string}`,
+					fuelSecretHash: fuelPre.secretHashHex as `0x${string}`,
+					minFuelOutput: fuelPre.minOutput,
+					routeHash: hashRoute(fuelPre.route.path, fuelPre.route.zeroForOnes),
+					isPrivate,
+				}
+				const typed = bridgeWitnessPermitTypedData(
+					{ permitted: { token: L1_USDC, amount }, spender: fuelCfg.router, nonce, deadline },
+					witness,
+					fuelCfg.permit2,
+					sepolia.id,
+				)
+				const signature = await runOnLane("l1", () => wallet.signTypedData({ account: from, ...typed } as never))
+
+				log("bridgeWithFuel (confirm in your Ethereum wallet)")
+				setRecordStep(id, "depositing", "confirm the fueled deposit in your Ethereum wallet")
+				const fuelTxHash = await runOnLane("l1", () =>
+					wallet.writeContract({
+						address: fuelCfg.router,
+						abi: SWAP_BRIDGE_ROUTER_ABI,
+						functionName: "bridgeWithFuel",
+						args: [
+							{
+								tokenPortal: witness.tokenPortal,
+								bridgeToken: witness.bridgeToken,
+								totalAmount: witness.totalAmount,
+								fuelAmount: witness.fuelAmount,
+								aztecRecipient: witness.aztecRecipient,
+								fuelRecipient: witness.fuelRecipient,
+								tokenSecretHash: witness.tokenSecretHash,
+								fuelSecretHash: witness.fuelSecretHash,
+								minFuelOutput: witness.minFuelOutput,
+								path: fuelPre.route.path,
+								zeroForOnes: fuelPre.route.zeroForOnes,
+								isPrivate,
+							},
+							{ nonce, deadline, signature },
+						],
+						chain: sepolia,
+						account: from,
+					} as never),
+				)
+				updateRecord(id, { depositTxHash: fuelTxHash as string })
+				setRecordStep(id, "depositing", "waiting for the Ethereum confirmation")
+				const fuelReceipt = await l1.publicClient.waitForTransactionReceipt({ hash: fuelTxHash as `0x${string}` })
+				const fuelEvents = parseEventLogs({ abi: SWAP_BRIDGE_ROUTER_ABI, eventName: "BridgeWithFuel", logs: fuelReceipt.logs })
+				const fe = fuelEvents[0] as { args?: { tokenIndex?: bigint; fuelIndex?: bigint; fuelAmount?: bigint } } | undefined
+				if (fe?.args?.tokenIndex === undefined || fe.args.fuelIndex === undefined || fe.args.fuelAmount === undefined) {
+					throw new Error("bridgeWithFuel emitted no BridgeWithFuel event")
+				}
+				let fuelL2Block: number | undefined
+				try {
+					fuelL2Block = Number(await createAztecNodeClient(NODE_URL).getBlockNumber())
+				} catch {
+					fuelL2Block = undefined
+				}
+				// fuel.received comes from the EVENT - the content-hash law; the quote was display-only.
+				updateRecord(id, {
+					leafIndex: fe.args.tokenIndex.toString(),
+					depositL2Block: fuelL2Block,
+					fuel: {
+						amount: fuelSlice.toString(),
+						secret: fuelPre.secret.toString(),
+						secretHashHex: fuelPre.secretHashHex,
+						minOutput: fuelPre.minOutput.toString(),
+						leafIndex: fe.args.fuelIndex.toString(),
+						received: fe.args.fuelAmount.toString(),
+					},
+				})
+				log("BridgeWithFuel", {
+					tokenLeaf: fe.args.tokenIndex.toString(),
+					fuelLeaf: fe.args.fuelIndex.toString(),
+					received: fe.args.fuelAmount.toString(),
+				})
+
+				const key = sealKeys.get(id)
+				if (isPrivate && key) {
+					const finalized = await sealDepositEnvelope(key, {
+						secret: secret.toString(),
+						recipient,
+						amount: tokenAmount.toString(),
+						sealerL1: from,
+						leafIndex: fe.args.tokenIndex.toString(),
+					})
+					updateRecord(id, { sealedEnvelope: finalized })
+					sealKeys.delete(id)
+				}
+
+				setRecordStep(id, undefined, undefined)
+				await runDepositClaim(id)
+				log("fueled deposit flow finished", id)
+				return id
 			}
 
 			// Allowance-skip: approve only when the portal's allowance is short.
@@ -258,7 +602,7 @@ export function useDepositFlow() {
 			}
 
 			const depositFn = isPrivate ? "depositToAztecPrivate" : "depositToAztecPublic"
-			const depositArgs = isPrivate ? [amount, id] : [recipient as `0x${string}`, amount, id as `0x${string}`]
+			const depositArgs = isPrivate ? [tokenAmount, id] : [recipient as `0x${string}`, tokenAmount, id as `0x${string}`]
 			log(`${depositFn} (confirm in your Ethereum wallet)`)
 			setRecordStep(id, "depositing", "confirm the deposit in your Ethereum wallet")
 			const depositTxHash = await runOnLane("l1", () =>
@@ -297,7 +641,7 @@ export function useDepositFlow() {
 				const finalized = await sealDepositEnvelope(key, {
 					secret: secret.toString(),
 					recipient,
-					amount: amount.toString(),
+					amount: tokenAmount.toString(),
 					sealerL1: from,
 					leafIndex,
 				})

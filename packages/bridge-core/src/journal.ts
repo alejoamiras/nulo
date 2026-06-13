@@ -33,7 +33,8 @@ export const MAX_RECORDS = 100
 export const LEGACY_KEYS = ["nulo-bridge-pending-deposit", "nulo-bridge-pending-withdraw"] as const
 
 interface JournalBase {
-	schema: 1
+	/** 1 = original shape; 2 = carries the optional fuel block (fueled deposits only). */
+	schema: 1 | 2
 	/** Deposits: secretHashHex (exists before any irreversible tx). Withdraws: exitTxHash, or a
 	 *  provisional `wd-pending-<rand>` between send and receipt. */
 	id: string
@@ -49,6 +50,30 @@ interface JournalBase {
 	chainId: number
 	portal: string
 	bridge: string
+}
+
+/** The fuel side of a fueled deposit (plan ledger L11/L14). All amounts base-unit decimal strings. */
+export interface DepositFuelBlock {
+	/** The AZLO slice swapped on L1 (display + total reconstruction; record.amount stays the TOKEN claim amount). */
+	amount: string
+	/** FJ claim secret - recipient-bound (gates WHO TRIGGERS the claim, never where funds land). Plaintext like public deposit secrets. */
+	secret: string
+	secretHashHex: string
+	/** The SIGNED slippage floor that was in the witness. */
+	minOutput: string
+	/** From the BridgeWithFuel event. */
+	leafIndex?: string
+	/** fuelReceived from the event - the EXACT content-hash amount; the claim MUST use this, never a quote. */
+	received?: string
+	/** Latched journal-first BEFORE any fjwc-embedded wallet call (L14 trigger 1 precondition). */
+	claimAttempt?: boolean
+	/** The fjwc attempt's tx hash, persisted as soon as the wallet returns it. */
+	claimTxHash?: string
+	/** Set when an fjwc-embedded claim tx reads INCLUDED (success OR app-revert) - the FJ message is consumed. */
+	consumed?: boolean
+	/** Set when a standalone sponsored FJ claim landed (the fee-spike path or the card's recovery
+	 *  action). Distinguishes "fuel recovered separately" from "still stranded". */
+	standaloneClaimed?: boolean
 }
 
 export interface DepositJournalRecord extends JournalBase {
@@ -69,6 +94,8 @@ export interface DepositJournalRecord extends JournalBase {
 	/** The Aztec block height when the L1 deposit confirmed - anchors the sync countdown
 	 *  (display pacing only; the claim-simulate gate stays the consumability authority). */
 	depositL2Block?: number
+	/** Present ⟺ schema 2: the deposit bought fuel on the way in. */
+	fuel?: DepositFuelBlock
 }
 
 export interface WithdrawJournalRecord extends JournalBase {

@@ -19,6 +19,7 @@ import { useNow } from "@/lib/clock"
 import { formatBigInt } from "@/lib/format"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { TESTIDS } from "@/lib/testids"
+import { claimFuelStandalone, overrideFuelClaim, reconcileFuelConsumed } from "@/composables/useDeposit"
 
 /** Components */
 import BridgePhaseRail from "./BridgePhaseRail.vue"
@@ -48,6 +49,60 @@ watch(discardArmed, (armed) => {
 })
 
 const rt = computed(() => journal.runtime.value[props.record.id] ?? {})
+
+/** Fuel surface (schema-2 deposits): the received-FJ line + the L14 manual escape. */
+const fuel = computed(() => {
+	const r = props.record
+	return r.direction === "deposit" ? (r as DepositJournalRecord).fuel : undefined
+})
+const fuelAmount = computed(() => {
+	const f = fuel.value
+	if (!f) return null
+	return f.received ? `+ ${formatBigInt(BigInt(f.received), 18)} FJ` : "+ FJ gas"
+})
+// The explicit, non-destructive escape: claim the tokens sponsored; the FJ message (if
+// unconsumed) stays claimable later. Offered only when a fueled claim is stuck on an error.
+const showClaimWithoutFuel = computed(
+	() => fuel.value !== undefined && !props.record.completedAt && (attention.value === "error" || attention.value === "unknown-outcome"),
+)
+function onClaimWithoutFuel() {
+	overrideFuelClaim(props.record.id)
+	onAction()
+}
+
+// Post-completion fuel recovery: the token side finished but the FJ was neither consumed by an
+// fjwc claim nor landed standalone - offer to claim it now (sponsored, safe to retry; a
+// reverting "already claimed" just clears the affordance). Closes both stranding paths the
+// post-impl audit flagged.
+const fuelRecoverable = computed(() => {
+	const f = fuel.value
+	return f !== undefined && !!f.received && props.record.completedAt !== undefined && f.consumed !== true && f.standaloneClaimed !== true
+})
+const fuelRecovering = ref(false)
+const fuelRecoverError = ref<string | null>(null)
+
+// Reconcile the consumed flag from chain truth when a completed fueled record is shown: the happy
+// fjwc path latches `consumed` here (inclusion-grade) so `fuelRecoverable` stays false without the
+// button flashing. Best-effort - a failure just leaves the (safe, idempotent) recovery offered.
+watch(
+	() => props.record.completedAt !== undefined && fuel.value?.received !== undefined && fuel.value?.consumed !== true,
+	(needsReconcile) => {
+		if (needsReconcile) void reconcileFuelConsumed(props.record.id).catch(() => {})
+	},
+	{ immediate: true },
+)
+async function onClaimGas() {
+	if (fuelRecovering.value) return
+	fuelRecovering.value = true
+	fuelRecoverError.value = null
+	try {
+		await claimFuelStandalone(props.record.id)
+	} catch (e) {
+		fuelRecoverError.value = e instanceof Error ? e.message : "Could not claim your gas - try again."
+	} finally {
+		fuelRecovering.value = false
+	}
+}
 const busy = computed(() => !!rt.value.busy)
 
 const stage = computed(() => {
@@ -167,7 +222,7 @@ function onDiscard() {
 		<p v-if="stage === 'done'" class="stamp">{{ record.direction === "deposit" ? "BRIDGED ✓" : "RELEASED ✓" }}</p>
 		<header class="row">
 			<span class="dir">{{ record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM" }}</span>
-			<span class="amt">{{ amountDisplay }} {{ BRIDGE_TOKEN_SYMBOL }}</span>
+			<span class="amt">{{ amountDisplay }} {{ BRIDGE_TOKEN_SYMBOL }}<span v-if="fuelAmount" class="amt-fuel">{{ fuelAmount }}</span></span>
 			<span class="tag" :class="{ private: record.isPrivate }">{{ record.isPrivate ? "PRIVATE" : "PUBLIC" }}</span>
 			<span class="age">{{ age }}</span>
 			<button
@@ -192,6 +247,19 @@ function onDiscard() {
 				⤓
 			</button>
 		</header>
+		<div v-if="fuelRecoverable" class="fuel-recover">
+			<button
+				type="button"
+				class="action"
+				:disabled="fuelRecovering"
+				:data-testid="TESTIDS.journalClaimGas"
+				title="Your tokens arrived but the gas is still unclaimed - this claims it (sponsored, no cost)."
+				@click="onClaimGas"
+			>
+				{{ fuelRecovering ? "CLAIMING GAS…" : "CLAIM YOUR GAS" }}
+			</button>
+			<span v-if="fuelRecoverError" class="fuel-recover-err">{{ fuelRecoverError }}</span>
+		</div>
 
 		<BridgePhaseRail v-if="stage !== 'done'" :record="record" compact />
 
@@ -228,6 +296,16 @@ function onDiscard() {
 				@click="onAction"
 			>
 				{{ attention === "unknown-outcome" || attention === "error" ? "RETRY" : "FINISH" }}
+			</button>
+			<button
+				v-if="showClaimWithoutFuel"
+				type="button"
+				class="action"
+				:data-testid="TESTIDS.journalClaimWithoutFuel"
+				title="Claims your tokens with the sponsored fee instead. The fuel stays claimable later - nothing is abandoned."
+				@click="onClaimWithoutFuel"
+			>
+				CLAIM WITHOUT FUEL
 			</button>
 			<button
 				v-if="idle && stage !== 'done'"
@@ -289,6 +367,12 @@ function onDiscard() {
 .amt {
 	font: 600 13px/1 var(--font-mono);
 	color: var(--txt-primary);
+}
+
+.amt-fuel {
+	margin-left: 6px;
+	color: var(--mint);
+	font-weight: 500;
 }
 
 .tag {

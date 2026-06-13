@@ -11,6 +11,8 @@ vi.mock("@nulo/bridge-core", async (importOriginal) => ({
 	isSealTrusted: () => true,
 }))
 vi.mock("@/contracts/bridge-deployments", () => ({
+	BRIDGE_FUEL: undefined,
+	L1_USDC: "0xl1token",
 	BRIDGE_TOKEN: { toString: () => "0xtoken" },
 	L1_PORTAL: "0xportal",
 	BRIDGE: { toString: () => "0xbridge" },

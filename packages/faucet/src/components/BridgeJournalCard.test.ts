@@ -13,6 +13,12 @@ const clearDone = vi.fn()
 vi.mock("@/composables/useBridgeJournal", () => ({
 	useBridgeJournal: () => ({ runtime, runDepositClaim, runWithdrawConsume, discard, clearDone }),
 }))
+const claimFuelStandalone = vi.fn(async () => {})
+vi.mock("@/composables/useDeposit", () => ({
+	claimFuelStandalone: (...a: unknown[]) => claimFuelStandalone(...(a as [])),
+	overrideFuelClaim: vi.fn(),
+	reconcileFuelConsumed: vi.fn(async () => {}),
+}))
 
 import { TESTIDS } from "@/lib/testids"
 import BridgeJournalCard from "./BridgeJournalCard.vue"
@@ -239,5 +245,41 @@ describe("BridgeJournalCard", () => {
 		expect(idle.find(sel(TESTIDS.journalClaim)).attributes("disabled")).toBeUndefined()
 		expect(idle.find(sel(TESTIDS.journalDiscard)).exists()).toBe(true)
 		expect(idle.find(sel(TESTIDS.journalStage)).text()).toMatch(/press claim/i)
+	})
+
+	const fuel = {
+		amount: "250000000000000000",
+		secret: "0xs",
+		secretHashHex: "0xsh",
+		minOutput: "11",
+		received: "487000000000000000000",
+		leafIndex: "9",
+	}
+
+	it("shows CLAIM YOUR GAS when a COMPLETED fueled record has unconsumed, unclaimed fuel", () => {
+		const w = mountCard(deposit({ schema: 2, fuel, completedAt: Date.now(), claimTxHash: "0xc" }))
+		expect(w.find(sel(TESTIDS.journalClaimGas)).exists()).toBe(true)
+	})
+
+	it("hides CLAIM YOUR GAS once the fuel was consumed by an fjwc claim", () => {
+		const w = mountCard(deposit({ schema: 2, fuel: { ...fuel, consumed: true }, completedAt: Date.now(), claimTxHash: "0xc" }))
+		expect(w.find(sel(TESTIDS.journalClaimGas)).exists()).toBe(false)
+	})
+
+	it("hides CLAIM YOUR GAS once the fuel landed standalone", () => {
+		const w = mountCard(deposit({ schema: 2, fuel: { ...fuel, standaloneClaimed: true }, completedAt: Date.now(), claimTxHash: "0xc" }))
+		expect(w.find(sel(TESTIDS.journalClaimGas)).exists()).toBe(false)
+	})
+
+	it("a non-fueled completed record never shows CLAIM YOUR GAS", () => {
+		const w = mountCard(deposit({ completedAt: Date.now(), claimTxHash: "0xc" }))
+		expect(w.find(sel(TESTIDS.journalClaimGas)).exists()).toBe(false)
+	})
+
+	it("CLAIM YOUR GAS triggers the standalone recovery claim", async () => {
+		claimFuelStandalone.mockClear()
+		const w = mountCard(deposit({ schema: 2, fuel, completedAt: Date.now(), claimTxHash: "0xc" }))
+		await w.find(sel(TESTIDS.journalClaimGas)).trigger("click")
+		expect(claimFuelStandalone).toHaveBeenCalledWith("0xdep")
 	})
 })

@@ -18,6 +18,8 @@ export interface ReceiptSnapshot {
 	/** Persisted facts (createdAt/completedAt) - the end-to-end time always survives reloads. */
 	startedAt?: number
 	completedAt?: number
+	/** Fueled deposits: the FJ that landed as gas (base units). */
+	fuelReceived?: string
 }
 
 const props = defineProps<{ snapshot: ReceiptSnapshot }>()
@@ -32,6 +34,7 @@ const CONFETTI = Array.from({ length: 14 }, (_, i) => ({
 }))
 
 const amountDisplay = computed(() => formatBigInt(BigInt(props.snapshot.amount), BRIDGE_TOKEN_DECIMALS))
+const fuelDisplay = computed(() => (props.snapshot.fuelReceived ? formatBigInt(BigInt(props.snapshot.fuelReceived), 18) : null))
 const headline = computed(() =>
 	props.snapshot.direction === "deposit"
 		? `${amountDisplay.value} ${BRIDGE_TOKEN_SYMBOL} to Aztec`
@@ -67,6 +70,7 @@ const links = computed(() => {
 		</div>
 		<p class="stamp">{{ snapshot.direction === "deposit" ? "BRIDGED ✓" : "RELEASED ✓" }}</p>
 		<h3>{{ headline }}</h3>
+		<p v-if="fuelDisplay" class="fuel-stamp" :data-testid="TESTIDS.receiptFuel">+ {{ fuelDisplay }} FJ landed as gas ⛽</p>
 		<p class="sub">
 			{{ snapshot.isPrivate ? "Arrived in your PRIVATE balance." : "Arrived in your public balance." }}
 			<template v-if="totalElapsed"> {{ totalElapsed }} end to end.</template>
@@ -188,5 +192,11 @@ const links = computed(() => {
 		transform: translateY(140px) rotate(200deg);
 		opacity: 0;
 	}
+}
+
+.fuel-stamp {
+	font: 600 12px/1.4 var(--font-mono);
+	color: var(--mint);
+	margin: 2px 0 0;
 }
 </style>

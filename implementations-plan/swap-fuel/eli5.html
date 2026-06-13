@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — swap-fuel</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>swap-fuel — arrive on Aztec with gas in your pocket</h1>
+  <p>Today, bridging AZLO from Sepolia to Aztec leaves you with tokens you might not be able to claim — claiming costs gas (Fee Juice), and a fresh account has none. This arc adds a "fuel" toggle to the deposit form: a small slice of your deposit gets swapped into Fee Juice on the Ethereum side (through Uniswap), rides the same bridge transaction, and your one claim transaction on Aztec <em>pays for itself</em> from the fuel it claims. Private deposits get fuel too — the tokens stay private; only the gas part is public.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>deep</strong> — two HIGH risk dimensions: security sensitivity (an atomic multi-step flow moving real value, a signed permission system, an owner-controlled swap contract, public pools anyone can trade against) and external coupling (Uniswap V4, Aztec's fee system, Permit2). Novelty is NOT high — the earlier mega-deep bridge arc already researched and fork-tested most of the machinery, so no research phase was needed. Three independent plans were drafted (me + codex + a fresh Claude planner), merged with a decision ledger, then attacked in three audit rounds. Two audits initially <em>failed/rejected</em> the plan — they found a real theft path and a flawed recovery design — both fixed before this gate.</p>
+
+  <h2>Phases</h2>
+  <div class="phase"><h3>P1 — Harden, then prove on a rehearsal copy</h3>
+  <p>Before deploying anything, two safety checks go INTO the swap-router contract (one prevents a malicious swap component from under-delivering fuel; the other proves your slice was actually consumed, closing a theft loophole an audit found). A new deploy script targets the real, live AZLO token with correctly computed pool prices (the old script assumed a different token format). Everything runs against a "fork" — a perfect copy of Sepolia — before real money moves.</p></div>
+  <div class="phase"><h3>P2 — Deploy and seed for real</h3>
+  <p>Deploy the two contracts to Sepolia, create the AZLO/WETH trading pool and fill it deep (you top the deployer up to ~0.5 ETH first; the Fee-Juice side of the second pool is free to mint). Guards against someone front-running our pool creation at a garbage price, and the script can resume safely if it fails halfway. Both contracts get source-verified on Etherscan automatically.</p></div>
+  <div class="phase"><h3>P3 — The plumbing (no UI yet)</h3>
+  <p>Library helpers: build the swap route, ask Uniswap's quoter "how much fuel would N AZLO buy right now", and extend the bridge's journal/backup formats so fuel info survives reloads, backups, and restores — while every old record keeps working untouched.</p></div>
+  <div class="phase"><h3>P4 — Teach the wallet consent system about fuel</h3>
+  <p>The Nulo wallet only allows what you've approved. The gas-claim call gets added to the app's permission manifest — and a real gap gets fixed: today, adding a NEW permission to an app you already approved never re-asks you, it just fails forever. The re-consent mechanism we built last arc for contract lists gets extended to permission lists, with the change shown prominently.</p></div>
+  <div class="phase"><h3>P5 — Prove it live, headlessly, before any UI</h3>
+  <p>A script runs the full loop on the real testnet: mint, swap+bridge in one transaction, then claim on Aztec where the claim pays for itself. This also measures the real cost of claiming, which calibrates the minimum-fuel floor the UI will enforce (an audit caught that the UI would otherwise ship an uncalibrated guess).</p></div>
+  <div class="phase"><h3>P6 — The UI</h3>
+  <p>A fuel toggle in the deposit form: pick a slice, pick 200–500 FJ worth (≈ 2–5 AZLO), see the live quote, submit with one signature. The progress rail gains a FUEL step. A small pure function decides, from hard evidence only, whether the claim should pay-for-itself or fall back to the sponsored option — never guessing from ambiguous errors (the design two audits forced).</p></div>
+  <div class="phase"><h3>P7 — Manual checklist</h3>
+  <p>You click through it on the live testnet: public + fuel, private + fuel, fuel-off regression, kill-the-tab recovery, backup/restore of a fueled bridge. Item 2 is historic: the first dApp ever to use the wallet's pay-by-claiming feature.</p></div>
+
+  <h2>Human context</h2>
+  <p>Three details shaped everything. (1) Your wallet already supports "pay this transaction by claiming bridged Fee Juice in the same transaction" — built last year, never used by any app; this arc is its first customer, which is why no wallet execution code changes. (2) The Fee Juice deposit is always public and always lands at the recipient's address — its claim secret only controls <em>when</em> the claim happens, not <em>where</em> the money goes, so it doesn't need the heavy seal machinery private token deposits use. (3) The pools are public infrastructure on a testnet: anyone can trade against them or grief them. The plan's stance is that user funds must never be stealable (fixed in-contract), while "fuel temporarily unavailable" is acceptable and honestly surfaced.</p>
+
+  <h2>Open questions — resolved at the approval gate</h2>
+  <ul>
+    <li><strong>Budget</strong>: TOP-UP — you fund the deployer to ~0.5 Sepolia ETH; pools get seeded deep enough to absorb ~20 max-fuel purchases between re-seeds.</li>
+    <li><strong>Rate + preset</strong>: CHEAP FJ — 100 AZLO per WETH, so 1 AZLO buys ≈ 100 Fee Juice; the normal fuel purchase is 200–500 FJ for ≈ 2–5 AZLO. Presets denominated in FJ.</li>
+    <li><strong>Owner model</strong>: accepted — deploy EOA stays owner on testnet; its powers (re-point swap target bounded to the ~3% signed spread, sweep dust) recorded in deployments.md.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: deploy script + live deployment, pool seeding, bridge-core plumbing, wallet re-consent extension, deposit-form fuel UI, headless live validation + manual checklist. Playwright stays a separate arc; paying gas FROM private Fee Juice notes stays out.</li>
+      <li>Confirm tier <code>deep</code> (rubric above).</li>
+      <li>Answer the 3 Asks (or accept the recommendations).</li>
+      <li>Hardening note: no <code>/harden</code> scheduled from this plan — the CSP/harden pass is already its own backlog arc.</li>
+      <li>Verdict: approve | conditional approve (with conditions) | reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (FINAL — approved scope)</h2>
+    <p><code>/goal</code> survives <code>claude --resume</code> and fits transcript-observable completion; <code>/loop</code> fires on a fixed interval. Pick one.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose; setting one replaces the other.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended: /goal</h3>
+      <pre><code>/goal All phases P1-P7 marked ✓ in implementations-plan/swap-fuel/plan.md (the per-phase headers in the file, not just the chat); for each phase `LESSONS_FILE=implementations-plan/swap-fuel/lessons/phase-N.md` printed in the transcript; the P2 live deployment recorded in implementations-plan/swap-fuel/deployments.md with both contracts Etherscan-verified; the P5 headless script passed both variants on live testnet; /code-review max --fix complete with fixes committed separately; codex post-impl audit complete with high/critical findings addressed; `bun run audit:vue` and `bun run --cwd packages/bridge-core test` and `cd packages/bridge-evm && forge test` all report success in the transcript; the P7 manual checklist printed for me. Constraints: branch feat/swap-fuel only; testnet only; never merge to main; commits unsigned via git -c commit.gpgsign=false; deployer key never printed or persisted beyond .env use; abort the P2 broadcast if the deployer balance is below seed+gas with margin (user tops up to ~0.5 ETH first — if unfunded when P2 arrives, work on P3/P4 and surface the dependency); pool economics per L10: 100 AZLO/WETH, fuel presets 200-500 FJ.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/swap-fuel on feat/swap-fuel. Each firing: read plan.md + lessons + git log -3 (repo state is authoritative, not chat); fix red suites first; else next pending phase P1→P7 honoring each phase's validation gate before advancing; validate (forge test / bridge-core test / audit:vue per phase); commit small conventional unsigned via git -c commit.gpgsign=false; push origin feat/swap-fuel. Decisions you'd bring to me → /codex xhigh, log consult + verdict in lessons/phase-N.md, proceed on the stronger argument. Phase green ⇒ mark ✓ in plan.md + print LESSONS_FILE=implementations-plan/swap-fuel/lessons/phase-N.md. All ✓ ⇒ /code-review max --fix (separate commits) → codex post-impl audit (net diff + code-review summary + adversarial ask) → address high/critical → STOP with the P7 manual checklist. Hard limits: testnet only; this branch only; never main; deployer key never printed; P2 broadcast aborts if balance < seed+gas margin (if unfunded, advance P3/P4 and surface); 5 failures on one step ⇒ stop and reassess with codex.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="audit-codex.md">codex audits</a> · <a href="audit-fable.md">fable audits</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

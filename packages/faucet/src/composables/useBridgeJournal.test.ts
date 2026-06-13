@@ -10,6 +10,8 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/contracts/bridge-deployments", () => ({
+	BRIDGE_FUEL: undefined,
+	L1_USDC: "0xl1token",
 	BRIDGE_TOKEN_SYMBOL: "USDC",
 	BRIDGE_TOKEN_DECIMALS: 6,
 	L1_PORTAL: "0xportal",
