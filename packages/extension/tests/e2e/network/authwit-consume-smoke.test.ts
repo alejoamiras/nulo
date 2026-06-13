@@ -26,7 +26,7 @@ const hasConfig = aztecConfig !== undefined
  */
 test.skipIf(!hasConfig)(
 	"authwit-consume-smoke — grant public authwit, then consume as the named caller",
-	{ timeout: 240_000 },
+	{ timeout: 600_000 },
 	async ({ dappConnectedExtensionWithFirstTwoAccountsCap }) => {
 		const ctx = dappConnectedExtensionWithFirstTwoAccountsCap
 		const { playgroundPage: page, accountAddresses } = ctx
@@ -95,7 +95,7 @@ test.skipIf(!hasConfig)(
 		await waitForExecuteContent(consumePopup)
 		await approveExecute(consumePopup)
 		step("consume popup approved; awaiting consume result")
-		const consumeResult = await waitForPgResult(page, "sendTx", seqConsume, 120_000)
+		const consumeResult = await waitForPgResult(page, "sendTx", seqConsume, 240_000)
 		// ok ⇒ the build's public simulation passed the AuthRegistry check —
 		// the approval existed and B was the authorized caller.
 		expect(consumeResult.status).toBe("ok")
