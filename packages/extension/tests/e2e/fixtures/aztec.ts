@@ -485,8 +485,11 @@ export async function waitForTxMined(aztecConfig: AztecTestConfig, txHash: strin
 	for (;;) {
 		const receipt = await node.getTxReceipt(TxHash.fromString(txHash)).catch(() => undefined)
 		const status = receipt ? String(receipt.status) : undefined
-		if (status === "success") return
-		if (status === "app_logic_reverted" || status === "teardown_reverted" || status === "dropped") {
+		// Aztec terminal-success statuses: "success" (mined) and "finalized"
+		// / "proven" (block settled). Any of them means the tx's public
+		// effects (e.g. a set_authorized write) are live and readable.
+		if (status === "success" || status === "finalized" || status === "proven") return
+		if (status === "app_logic_reverted" || status === "teardown_reverted" || status === "dropped" || status === "reverted") {
 			throw new Error(`waitForTxMined: tx ${txHash} terminal as "${status}"`)
 		}
 		if (Date.now() > deadline) {
