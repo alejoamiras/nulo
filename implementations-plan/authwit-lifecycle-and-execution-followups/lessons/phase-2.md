@@ -102,3 +102,20 @@ flakes locally, the honest gate for the full lifecycle is CI (native
 accelerator proving) — local WASM on constrained hardware is the wrong
 place to chase a 6-prove serial e2e. The feature is proven by the green
 consume smoke + the unit/reachability/scope suite.
+
+## Lifecycle local-run STOPPED — CDP starvation under WASM proving
+
+Run 2 (360s budget) failed with puppeteer `ProtocolError:
+Runtime.callFunctionOn timed out` at the G1 consume — the CDP channel to
+the page starved because serial WASM proving saturates the machine (plane,
+no accelerator). This is protocol-level starvation, NOT a logical timeout
+or a code bug; raising waitFor budgets cannot fix it. Two consecutive
+environment-bound failures (latency, then CDP starvation) → stopping the
+local lifecycle grind per the reassess rule.
+
+Decision (surfaced to user): the full lifecycle e2e's natural gate is CI
+(native accelerator proving — fast + CDP-stable), not local WASM on
+constrained hardware. The feature is proven by the green consume smoke +
+the unit/reachability/scope suites. Remaining to fully close Phase 3:
+(a) add the registry enable/disable leg to the lifecycle test;
+(b) validate the lifecycle file in CI (where it can actually run).
