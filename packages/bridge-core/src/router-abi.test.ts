@@ -22,23 +22,24 @@ const shape = (p: AbiParam): unknown => ({
 	...(p.components ? { components: p.components.map(shape) } : {}),
 })
 
-// The minimal const must match the COMPILED router - drift fails here, not at runtime.
-describe.skipIf(!existsSync(ARTIFACT))("router-abi pin (forge artifact)", () => {
-	const artifact = JSON.parse(readFileSync(ARTIFACT, "utf8")) as { abi: (AbiParam & { type: string })[] }
+// The minimal const must match the COMPILED router - drift fails here, not at runtime. The read is
+// LAZY (inside each `it`), never at the describe-factory top level: `skipIf` still runs the factory
+// at collection time, so a top-level readFileSync would ENOENT-crash collection wherever forge's
+// `out/` isn't built (CI's unit-test job - it doesn't compile contracts). Skipped its never read.
+const loadArtifact = () => JSON.parse(readFileSync(ARTIFACT, "utf8")) as { abi: (AbiParam & { type: string })[] }
+const inputsOf = (abi: AbiParam[], name: string) =>
+	(abi.find((e) => (e as { name?: string }).name === name) as unknown as { inputs: AbiParam[] }).inputs
 
+describe.skipIf(!existsSync(ARTIFACT))("router-abi pin (forge artifact)", () => {
 	it("bridgeWithFuel inputs match the artifact", () => {
-		const real = artifact.abi.find((e) => (e as { name?: string }).name === "bridgeWithFuel") as unknown as {
-			inputs: AbiParam[]
-		}
-		const ours = SWAP_BRIDGE_ROUTER_ABI.find((e) => e.name === "bridgeWithFuel") as unknown as { inputs: AbiParam[] }
-		expect(ours.inputs.map(shape)).toEqual(real.inputs.map(shape))
+		const real = inputsOf(loadArtifact().abi, "bridgeWithFuel")
+		const ours = inputsOf(SWAP_BRIDGE_ROUTER_ABI as unknown as AbiParam[], "bridgeWithFuel")
+		expect(ours.map(shape)).toEqual(real.map(shape))
 	})
 
 	it("BridgeWithFuel event matches the artifact", () => {
-		const real = artifact.abi.find((e) => (e as { name?: string }).name === "BridgeWithFuel") as unknown as {
-			inputs: AbiParam[]
-		}
-		const ours = SWAP_BRIDGE_ROUTER_ABI.find((e) => e.name === "BridgeWithFuel") as unknown as { inputs: AbiParam[] }
-		expect(ours.inputs.map(shape)).toEqual(real.inputs.map(shape))
+		const real = inputsOf(loadArtifact().abi, "BridgeWithFuel")
+		const ours = inputsOf(SWAP_BRIDGE_ROUTER_ABI as unknown as AbiParam[], "BridgeWithFuel")
+		expect(ours.map(shape)).toEqual(real.map(shape))
 	})
 })
