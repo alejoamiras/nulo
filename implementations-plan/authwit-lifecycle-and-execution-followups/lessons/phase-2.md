@@ -62,3 +62,31 @@ Lessons:
   should be positively confirmed, not inferred from absence of failure.
 - Genuine side-finding kept: createAccount helper's input-disappearance
   wait replaced with row-wait (headless transition stick) — real fix.
+
+## Gate CLOSED ✓ — consume smoke green
+
+`authwit-consume-smoke.test.ts`: 1 passed. Step markers confirmed the full
+chain live: mint → grant (popup approved, result ok, tx mined) → switch to
+caller B → consume (transfer_public_to_public from B with A's public
+authwit) → ok. The proof-of-life design (a) — schema-patched
+`grantPublicAuthwit` RPC — is validated end-to-end against the local
+network.
+
+The gate took 7 runs; EVERY failure was a test-harness defect, never the
+feature (which worked from first execution):
+1. createAccount helper's input-disappearance wait (headless-Chrome
+   transition stick) → row-wait.
+2. second-account creation anchored into the WRONG fixture (two share
+   verbatim phase blocks; `replace(…,1)` hit dappConnectedExtensionPerTest
+   not TwoAccountsCap) → codex consult caught it.
+3. tx-hash parsed with JSON.parse (a raw `0x…` is not JSON) → strip-quotes.
+4. waitForTxMined accepted only "success"; Aztec returns "finalized" →
+   widened the terminal-success set.
+5. consume prove latency > 120s under WASM + fee-mult 10 → raised budgets.
+Plus several seconds-long launch misfires (running the root `e2e:agent`
+script from a drifted cwd). Lesson reinforced: instrument to localize
+BEFORE editing; confirm a run actually executed (line count) before
+reading its verdict.
+
+Gate: lint 0, tsc 0, full unit suite green earlier (2,362); e2e
+authwit-consume-smoke 1 passed.

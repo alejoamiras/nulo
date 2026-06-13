@@ -62,7 +62,7 @@ Funding: the dedicated account receives minted tokens + uses sponsored-FPC fees;
 - **Setup-gate hardening**: loud failure under `E2E_REQUIRE_SETUP=1` for BOTH ungated soft-skip paths — node-health (`global-setup.ts:375-384`) AND anvil-start (`:288-296`) (fable F5).
 - **Gate**: `bun run lint` + `bun run test` exit 0 incl. new pins (lint · unit). Ships as its own commit block, PR-splittable if the arc stalls.
 
-### Phase 2 — Grant-emission surface + playground panel (0.5-1d)
+### Phase 2 ✓ — Grant-emission surface + playground panel (0.5-1d)
 - Wallet-bridge client in the playground's authwit section (grant-only scope); panel: "grant public authwit" (consumer = test token, caller = account B, explicit amount/nonce — **hard-scoped to the fixture token**, codex #4) and "consume (transfer-from)" (switches/uses account B → `transfer_public_to_public(A, B, amount, nonce)` via normal wallet-sdk sendTx). Grant and consume are SEPARATE buttons — never bundled in one tx (fable F3).
 - **Account-B selection hook** (final-pass LOW, named scope): the playground auto-selects `granted[0]` (`lib/wallet.ts:134-137`) — the panel gains an explicit account selector so the consume tx can be sent AS account B (`multi-account-from.test.ts` documents the current limitation).
 - Prove the tracking link: after grant approval, the authwit appears in settings (`getAuthwits`) — unit/integration assert `trackAuthwit` fired.
