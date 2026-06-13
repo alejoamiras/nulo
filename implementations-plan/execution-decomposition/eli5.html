@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — execution-decomposition</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Execution Decomposition</h1>
+  <p>The wallet's biggest, hottest file — the one that builds, proves, and sends every transaction — is 2,302 lines and contains four copies of the same "prove it, send it, write it down" sequence. This plan splits it into small, individually tested pieces <strong>without changing what it does</strong>. Every step is checked three ways: the automated test suite, a full end-to-end run on a local network, and a second AI model re-reading the diff for drift.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><code>deep</code>: blast radius is HIGH (every send flow in the wallet passes through this file) and the surface is security-adjacent (signing, proving, fees). Novelty and migration cost are LOW — it's our own code and no stored data changes shape. Two HIGH dimensions → deep per the rubric. Three independent plans were drafted (Claude main + Codex + Fable), consolidated with a decision ledger, contradiction-checked (7 fixes), double-audited, and finished with a fresh-context Codex pass. All three auditors: conditional approve, all conditions applied.</p>
+
+  <h2>Phases</h2>
+  <div class="phase"><h3>Phase 0: Take fingerprints before surgery (½–1 day)</h3>
+  <p>Before touching anything, write tests that pin exactly how the current code behaves — including the weird corners (all 8+ reasons a cached fee estimate gets rejected, the exact text of cache fingerprints, fee-shape fixtures with distinct sentinel numbers in every slot). Also record one full green end-to-end run as the "known good" baseline. If a later phase changes behavior by accident, these tests scream.</p></div>
+
+  <div class="phase"><h3>Phase 1: Finish the contract-lookup helper (½–1 day)</h3>
+  <p>A helper for "find this contract function / make sure this contract is registered" was started long ago, and the same lookup code got copy-pasted into 5+ places anyway. Finish the helper, delete the copies. Error messages stay byte-identical.</p></div>
+
+  <div class="phase"><h3>Phase 2: Name the boxes (1–1.5 days)</h3>
+  <p>Functions currently return values as numbered lists — callers write <code>built[7]</code> and just have to know slot 7 is the fee. Several slots have the same type, so silently swapping two (say gas and fee) would compile fine and cost users money. This phase gives every slot a name (<code>built.txRequest</code>, <code>built.nonce</code>…) so mix-ups become impossible — plus a tripwire test with distinct values per slot to catch any swap made <em>during</em> the renaming itself.</p></div>
+
+  <div class="phase"><h3>Phase 3: One pipeline instead of four (1.5–2 days) — the keystone</h3>
+  <p>The "prove → send → record → journal" tail exists four times. A helper file even promises a shared <code>proveAndSend</code> in its documentation — it was never written. This phase writes it for real and points all four paths at it. Differences between the paths (which accounts sign, how results are recorded) stay as explicit per-path data. Failure handling deliberately stays per-path — the audits proved the four paths fail differently today, and we're not changing behavior.</p></div>
+
+  <div class="phase"><h3>Phase 4 + 5: Move the two caches out (2 days)</h3>
+  <p>Two self-contained subsystems live inside the big file: the fee-estimate reuse cache and the gas-balance cache. Each moves to its own file with its own tests (expiry, one-use rules, every rejection reason — including a security-relevant "wrong profile" check that today's tests would not notice losing).</p></div>
+
+  <div class="phase"><h3>Phase 6: Slim the big file to ≤1,200 lines (1.5–2 days)</h3>
+  <p>Move the two big flow bodies (popup transfers; dApp sends) into their own executor modules with their own tests. Crucially, they receive their concurrency controls through an interface from day one, so Phase 7 can swap the machinery underneath without re-cutting them open. Tests also pin that the chain-identity safety checks still run on every moved path — the kind of deletion the local test network can't catch.</p></div>
+
+  <div class="phase"><h3>Phase 7: The concurrency seam (1.5–2 days, bounded)</h3>
+  <p>The trickiest part — the choreography that queues transactions, lets you cancel mid-prove, and survives a service-worker restart — moves behind one "execution lane" module. Order-sensitive and unforgiving, so it goes last, when the gate pipeline is most proven. It carries a pre-agreed bail-out: if its gate fails twice, work STOPS and the decision comes back to you — the arc is already shippable without it.</p></div>
+
+  <div class="phase"><h3>Phase 8: Close (1–1.5 days)</h3>
+  <p>Automated code review, a fresh adversarial Codex audit of the whole diff, docs, an RC build, and a manual QA script for you — including the authwit-revoke and registry-toggle flows, because that slice of the code has no automated end-to-end test today (your hands are its safety net).</p></div>
+
+  <h2>Human context</h2>
+  <p>The quality audit's number-one warning: this repo's most expensive pattern is the <em>half-done migration</em> — refactors that started, stopped midway, and left two ways of doing everything. This plan is designed against that fate: phases land as independent checkpoints, each leaves the code strictly better, and the riskiest piece is last so abandoning it orphans nothing. Total: ~9–12 focused days. One branch, one final PR, RC build + your manual QA before merge.</p>
+
+  <h2>Open questions (the 4 Asks)</h2>
+  <ul>
+    <li><strong>A1 — Is "≤1,200 lines" a hard rule?</strong> Recommendation: yes — if the leftover dispatcher keeps it over, the dispatcher moves too.</li>
+    <li><strong>A2 — What evidence must a Phase-7 bail-out bring you?</strong> Recommendation: two failing gate logs, the parity findings, a root-cause hypothesis, and a recommendation.</li>
+    <li><strong>A3 — Accept the byte-level residual?</strong> Structural fee tests cover shapes/amounts/ordering, but not literal byte-equality of every built transaction across every fee strategy. Recommendation: accept — a golden-byte harness is its own project.</li>
+    <li><strong>A4 — The uncovered corner.</strong> The auth-registry flows (revoke, registry toggle) ride the generic send path but have zero end-to-end tests. Recommendation: unit pins + your manual QA cover them this arc; a dedicated e2e is a follow-up.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: full arc (Q5+Q4+Q18+Q17+Q23), stacked checkpoints → one final PR, RC + manual QA before merge.</li>
+      <li>Confirm tier <code>deep</code> (rubric above).</li>
+      <li>Answer Asks A1–A4 (or accept all four recommendations).</li>
+      <li>Post-arc hardening: none scheduled — per-phase parity reviews + post-impl audit are the substitute (recorded in plan).</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (FINAL — approved 2026-06-11)</h2>
+    <p>Completion here is transcript-observable (plan.md checkmarks, gate exit codes, LESSONS_FILE lines), so <code>/goal</code> is recommended; it also survives <code>claude --resume</code> across a multi-day arc. <code>/loop 15m</code> is the cadence-driven fallback.</p>
+    <p class="warning">Use exactly ONE per session. They don't compose — setting one replaces the other.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <pre><code>/goal All phases 0-8 marked ✓ in implementations-plan/execution-decomposition/plan.md; for each phase the transcript shows LESSONS_FILE=implementations-plan/execution-decomposition/lessons/phase-N.md AND its gate results (bun run lint + bun run test exit 0; e2e:agent pass recorded for phases 1-7); every extracted module's colocated test file landed in the same checkpoint; /code-review max --fix applied and committed separately; codex post-impl audit complete with high/critical findings addressed; wc -l on execution/service.ts ≤ 1200 shown in transcript; RC built and the manual QA script (incl. authwit revoke + registry toggle) delivered in chat. Constraints: zero behavior change (bug-pin rule), no storage migrations, single final PR to dev (never merge it autonomously), Phase 7 bail-out surfaces to me with A2 evidence instead of forcing.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/execution-decomposition forward. Never idle. Each firing: 1) Read plan.md + lessons/ (authoritative), git status, git log -5; PR exists? gh pr view --json statusCheckRollup. 2) CI in flight: gh run watch up to 10 min, use the wait to prep the next phase. 3) No task? Pick the next pending phase step (edit → bun run lint → bun run test → e2e:agent when the phase gate demands → commit checkpoint). 4) Non-trivial decision or stuck? /codex xhigh, decide together, log in lessons/phase-N.md; hard limits: never merge to dev/main, never publish, no scope beyond plan.md, Phase 7 bail-out goes to the user with A2 evidence. 5) Same step failed 5×? Stop and reassess with codex. 6) Phase gate green? Mark ✓ in plan.md, write lessons, print LESSONS_FILE=..., advance. 7) All phases ✓? /code-review max --fix → commit separately → codex post-impl audit → fix loop → RC build + manual QA script → wrap-up report with every contentious decision ELI5'd → surface and stop.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a> · audits: <a href="audit-codex.md">codex</a>, <a href="audit-fable.md">fable</a></p>
+</body>
+</html>

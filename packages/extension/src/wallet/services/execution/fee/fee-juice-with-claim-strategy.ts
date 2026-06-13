@@ -9,7 +9,7 @@
 
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import { getFeeJuiceClaimPayload } from "@/wallet/utils/fee-juice"
-import type { FeeEstimateResult, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
+import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
 import { finalizeGasLimits, startEstimateTask, suggestGasLimits } from "./fee-strategy"
 
 export class FeeJuiceWithClaimStrategy implements FeeStrategy {
@@ -17,7 +17,7 @@ export class FeeJuiceWithClaimStrategy implements FeeStrategy {
 
 	public constructor(private readonly deps: FeeStrategyDeps) {}
 
-	public async buildAndEstimate(ctx: FeeStrategyContext): Promise<FeeEstimateResult> {
+	public async buildAndEstimate(ctx: FeeStrategyContext): Promise<FeeEstimate> {
 		if (ctx.feeSettings.paymentMethod.kind !== "fjwc") {
 			throw new Error("FeeJuiceWithClaimStrategy called with non-fjwc payment method")
 		}
@@ -25,7 +25,7 @@ export class FeeJuiceWithClaimStrategy implements FeeStrategy {
 		const task = startEstimateTask(this.deps.tasks, ctx.parentTask)
 		try {
 			ctx.op.actions.unshift(...getFeeJuiceClaimPayload(ctx.op.accountAddress, claimAmount, claimSecret, messageLeafIndex))
-			const [txRequest, node, pxe, account, network, nonce, txCalls] = await this.deps.txBuilder.buildStandard(
+			const { txRequest, node, pxe, account, network, nonce, txCalls } = await this.deps.txBuilder.buildStandard(
 				ctx.op,
 				AccountFeePaymentMethodOptions.FEE_JUICE_WITH_CLAIM,
 				task,
@@ -39,7 +39,16 @@ export class FeeJuiceWithClaimStrategy implements FeeStrategy {
 			)
 			await finalizeGasLimits(node, txRequest, simulatedTx, ctx.gasPadding, undefined, ctx.op.fee, ctx.feeMultiplier)
 			task.complete()
-			return [txRequest, node, pxe, account, network, nonce, txCalls, AccountFeePaymentMethodOptions.FEE_JUICE_WITH_CLAIM]
+			return {
+				txRequest,
+				node,
+				pxe,
+				account,
+				network,
+				nonce,
+				txCalls,
+				feePaymentMethod: AccountFeePaymentMethodOptions.FEE_JUICE_WITH_CLAIM,
+			}
 		} catch (error) {
 			task.fail(error)
 			throw error

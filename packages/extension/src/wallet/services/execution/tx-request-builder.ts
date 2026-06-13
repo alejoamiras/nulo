@@ -30,14 +30,11 @@
  * `ExecutionCoordinator` to own the post-send flush point; until then,
  * keep the inline call.
  *
- * ## Return-shape parity
+ * ## Return shape
  *
- * `buildStandard` returns the 7-tuple
- * `[txRequest, node, pxe, account, network, nonce, txCalls]`.
- * `buildNoFrom` returns the 6-tuple
- * `[txRequest, node, pxe, account, network, txCalls]` — no nonce, since
- * `DefaultEntrypoint` doesn't use one. These tuples feed the
- * fee-strategy branches.
+ * `buildStandard` returns a `BuiltStandardTx`; `buildNoFrom` returns a
+ * `BuiltNoFromTx` (same fields minus `nonce`, since `DefaultEntrypoint`
+ * doesn't use one). These feed the fee-strategy branches.
  */
 
 import { Fr } from "@aztec/foundation/curves/bn254"
@@ -61,13 +58,23 @@ import { StepContent, type TaskService, type WrappedTask } from "@/wallet/servic
 import type { TxCall } from "@/wallet/services/transaction/service"
 import { getAuthRegistryAddress, getSetAuthorizedFn, getSetAuthorizedSelector } from "@/wallet/utils/auth-registry"
 import type { AuthwitDiscoverer } from "./authwit-discoverer"
-import type { ContractResolver } from "./contract-resolver"
+import { type ContractResolver, findFunctionByName, findFunctionBySelector } from "./contract-resolver"
 import type { Action, AztecSendTxOperation } from "./spec"
 
 const LOG_SOURCE = "TxRequestBuilder"
 
-export type StandardTxRequestResult = [TxExecutionRequest, AztecNode, IPXE, IAccountContract, Network, Fr, TxCall[]]
-export type NoFromTxRequestResult = [TxExecutionRequest, AztecNode, IPXE, IAccountContract, Network, TxCall[]]
+export interface BuiltStandardTx {
+	txRequest: TxExecutionRequest
+	node: AztecNode
+	pxe: IPXE
+	account: IAccountContract
+	network: Network
+	nonce: Fr
+	txCalls: TxCall[]
+}
+
+/** NO_FROM (DefaultEntrypoint) variant — no account nonce exists on that path. */
+export type BuiltNoFromTx = Omit<BuiltStandardTx, "nonce">
 
 export class TxRequestBuilder {
 	public constructor(
@@ -90,7 +97,7 @@ export class TxRequestBuilder {
 		feePaymentMethod: AccountFeePaymentMethodOptions,
 		parentTask?: WrappedTask,
 		gasSettings?: PartialGasSettingsRPC,
-	): Promise<StandardTxRequestResult> {
+	): Promise<BuiltStandardTx> {
 		const step = new StepContent("Processing transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.taskService.startNewTask(step)
 
@@ -114,16 +121,9 @@ export class TxRequestBuilder {
 			const instances = await this.resolver.resolveInstances(pxe, contracts)
 			const artifacts = await this.resolver.resolveArtifacts(pxe, instances)
 
-			const registeredContracts = new Set<string>((await pxe.getContracts()).map((x) => x.toString()))
-			for (const [contract, instance] of instances) {
-				if (!registeredContracts.has(contract)) {
-					this.log("Register contract")
-					await pxe.registerContract({
-						instance,
-						artifact: artifacts.get(instance.currentContractClassId.toString()),
-					})
-				}
-			}
+			await this.resolver.ensureContractsRegistered(pxe, instances, artifacts, {
+				onRegister: () => this.log("Register contract"),
+			})
 
 			const capsules: Capsule[] = []
 			const authwits: AuthWitness[] = []
@@ -276,9 +276,7 @@ export class TxRequestBuilder {
 						if (!artifact) {
 							throw new Error("Contract artifact not found")
 						}
-						const fn =
-							artifact.functions.find((x) => x.name === action.method) ??
-							artifact.nonDispatchPublicFunctions.find((x) => x.name === action.method)
+						const fn = findFunctionByName(artifact, action.method)
 						if (!fn) {
 							throw new Error("Method not found")
 						}
@@ -309,26 +307,7 @@ export class TxRequestBuilder {
 							if (!artifact) {
 								throw new Error("Contract artifact not found")
 							}
-							// Union of artifact.functions[] and nonDispatchPublicFunctions[]
-							// element types — both expose `name`/`parameters`/`functionType`/`isStatic`
-							// which is all this loop reads.
-							let fn: (typeof artifact.functions)[number] | (typeof artifact.nonDispatchPublicFunctions)[number] | undefined
-							for (const _fn of artifact.functions) {
-								const selector = await FunctionSelector.fromNameAndParameters(_fn.name, _fn.parameters)
-								if (selector.toString() === action.selector) {
-									fn = _fn
-									break
-								}
-							}
-							if (!fn) {
-								for (const _fn of artifact.nonDispatchPublicFunctions) {
-									const selector = await FunctionSelector.fromNameAndParameters(_fn.name, _fn.parameters)
-									if (selector.toString() === action.selector) {
-										fn = _fn
-										break
-									}
-								}
-							}
+							const fn = await findFunctionBySelector(artifact, action.selector)
 							if (!fn) {
 								throw new Error("Method not found")
 							}
@@ -370,7 +349,7 @@ export class TxRequestBuilder {
 			)
 
 			task.complete()
-			return [txRequest, node, pxe, account, network, nonce, txCalls]
+			return { txRequest, node, pxe, account, network, nonce, txCalls }
 		} catch (error) {
 			task.fail(error)
 			throw error
@@ -382,7 +361,7 @@ export class TxRequestBuilder {
 	 *  wrapper, inlined `DefaultEntrypoint` logic. Cannot import
 	 *  `@aztec/entrypoints/default` in the service worker (upstream
 	 *  references `window`). */
-	public async buildNoFrom(op: AztecSendTxOperation, parentTask?: WrappedTask): Promise<NoFromTxRequestResult> {
+	public async buildNoFrom(op: AztecSendTxOperation, parentTask?: WrappedTask): Promise<BuiltNoFromTx> {
 		const step = new StepContent("Processing transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.taskService.startNewTask(step)
 
@@ -409,19 +388,11 @@ export class TxRequestBuilder {
 			this.log(`buildNoFrom: got ${instances.size} instances`)
 			const artifacts = await this.resolver.resolveArtifacts(pxe, instances)
 			this.log(`buildNoFrom: got ${artifacts.size} artifacts`)
-			const registeredContracts = new Set<string>((await pxe.getContracts()).map((x) => x.toString()))
-			this.log(`buildNoFrom: ${registeredContracts.size} already registered contracts`)
-			for (const [contract, instance] of instances) {
-				if (!registeredContracts.has(contract)) {
-					this.log(`buildNoFrom: registering contract ${contract} with classId ${instance.currentContractClassId.toString()}`)
-					await pxe.registerContract({
-						instance,
-						artifact: artifacts.get(instance.currentContractClassId.toString()),
-					})
-				} else {
-					this.log(`buildNoFrom: contract ${contract} already registered`)
-				}
-			}
+			await this.resolver.ensureContractsRegistered(pxe, instances, artifacts, {
+				onRegister: (contract, instance) =>
+					this.log(`buildNoFrom: registering contract ${contract} with classId ${instance.currentContractClassId.toString()}`),
+				onSkip: (contract) => this.log(`buildNoFrom: contract ${contract} already registered`),
+			})
 
 			// Inline DefaultEntrypoint logic — calls the function directly, msg_sender = None.
 			// Cannot import @aztec/entrypoints/default in service worker (references `window`).
@@ -474,7 +445,7 @@ export class TxRequestBuilder {
 			}))
 
 			task.complete()
-			return [txRequest, node, pxe, account, network, txCalls]
+			return { txRequest, node, pxe, account, network, txCalls }
 		} catch (error) {
 			task.fail(error)
 			throw error

@@ -122,6 +122,13 @@ export NULO_E2E_WALLET_PROBE=1
 env | grep -E 'NULO_E2E|AZTEC_|VITE_' | sort
 echo "::endgroup::"
 
-echo "::group::e2e:agent --shard=$SHARD"
-bun run e2e:agent --shard="$SHARD"
+# A path-looking arg targets specific test FILE(s) (mirrors the CI heavy
+# jobs, e.g. fee-methods); an N/M arg is a vitest shard expression.
+if [[ "$SHARD" == *.test.ts ]]; then
+	echo "::group::e2e:agent $SHARD"
+	bun run e2e:agent "$SHARD"
+else
+	echo "::group::e2e:agent --shard=$SHARD"
+	bun run e2e:agent --shard="$SHARD"
+fi
 echo "::endgroup::"

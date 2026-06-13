@@ -25,7 +25,7 @@
  */
 
 import { Fr } from "@aztec/foundation/curves/bn254"
-import { AbiTypeSchema, FunctionSelector, type FunctionType, type FunctionAbi, FunctionCall, encodeArguments } from "@aztec/stdlib/abi"
+import { AbiTypeSchema, FunctionSelector, type FunctionType, FunctionCall, encodeArguments } from "@aztec/stdlib/abi"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { computeAuthWitMessageHash, CallAuthorizationRequest, computeInnerAuthWitHash } from "@aztec/aztec.js/authorization"
 import type { ContractArtifact } from "@aztec/stdlib/abi"
@@ -36,6 +36,7 @@ import z from "zod"
 import type { ILogger } from "@/wallet/logger"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
+import { findFunctionByName, findFunctionBySelector } from "./contract-resolver"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import type { Action, AddPrivateAuthwitAction, CallAuthwitContent, EncodedCallAuthwitContent, IntentAuthwitContent } from "./spec"
@@ -146,9 +147,7 @@ export class AuthwitDiscoverer {
 		if (!artifact) {
 			throw new Error("Contract artifact not found")
 		}
-		const fn =
-			artifact.functions.find((x) => x.name === content.method) ??
-			artifact.nonDispatchPublicFunctions.find((x) => x.name === content.method)
+		const fn = findFunctionByName(artifact, content.method)
 		if (!fn) {
 			throw new Error("Method not found")
 		}
@@ -198,23 +197,7 @@ export class AuthwitDiscoverer {
 			if (!artifact) {
 				throw new Error("Contract artifact not found")
 			}
-			let fn: FunctionAbi | undefined
-			for (const _fn of artifact.functions) {
-				const selector = await FunctionSelector.fromNameAndParameters(_fn.name, _fn.parameters)
-				if (selector.toString() === content.selector) {
-					fn = _fn
-					break
-				}
-			}
-			if (!fn) {
-				for (const _fn of artifact.nonDispatchPublicFunctions) {
-					const selector = await FunctionSelector.fromNameAndParameters(_fn.name, _fn.parameters)
-					if (selector.toString() === content.selector) {
-						fn = _fn
-						break
-					}
-				}
-			}
+			const fn = await findFunctionBySelector(artifact, content.selector)
 			if (!fn) {
 				throw new Error("Method not found")
 			}

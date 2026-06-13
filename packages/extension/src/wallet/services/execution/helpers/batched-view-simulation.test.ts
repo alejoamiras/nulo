@@ -20,6 +20,7 @@
  */
 
 import { beforeEach, describe, expect, test, vi } from "vitest"
+import { ContractResolver } from "../contract-resolver"
 
 // Mock the heavy Aztec stdlib parts the helper composes with. The unit
 // tests are about classification + batching + ordering — NOT about whether
@@ -237,6 +238,9 @@ function makeDeps(opts: {
 			m.set("class-B", artifact(allFns))
 			return m
 		}),
+		// Stateless on the real class — borrow the actual implementation so
+		// registration behavior in these tests matches production exactly.
+		ensureContractsRegistered: ContractResolver.prototype.ensureContractsRegistered,
 		// biome-ignore lint/suspicious/noExplicitAny: ContractResolver structural stub
 	} as any
 
