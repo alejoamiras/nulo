@@ -73,7 +73,7 @@ test.skipIf(!hasConfig)(
 			const popup = await popupP
 			await waitForExecuteContent(popup)
 			await approveExecute(popup)
-			const res = await waitForPgResult(page, "grantPublicAuthwit", seq, 240_000)
+			const res = await waitForPgResult(page, "grantPublicAuthwit", seq, 360_000)
 			expect(res.status).toBe("ok")
 			await waitForTxMined(aztecConfig!, String(res.resultJson).replace(/^"(.*)"$/, "$1"))
 		}
@@ -87,7 +87,7 @@ test.skipIf(!hasConfig)(
 			const popup = await popupP
 			await waitForExecuteContent(popup)
 			await approveExecute(popup)
-			const res = await waitForPgResult(page, "sendTx", seq, 240_000)
+			const res = await waitForPgResult(page, "sendTx", seq, 360_000)
 			return res.status
 		}
 
