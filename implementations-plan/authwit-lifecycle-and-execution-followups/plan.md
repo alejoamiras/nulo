@@ -68,7 +68,7 @@ Funding: the dedicated account receives minted tokens + uses sponsored-FPC fees;
 - Prove the tracking link: after grant approval, the authwit appears in settings (`getAuthwits`) — unit/integration assert `trackAuthwit` fired.
 - **Gate**: minimal consume-once e2e (`bun run e2e:agent tests/e2e/network/authwit-consume-smoke.test.ts`) green; lint + unit green (lint · unit · e2e-network). **Outline-A reconsideration point**: if the bridge-action path is unworkable here, STOP and surface — do not improvise scope (replaces v1's compile-attempts bail-out; fable F9).
 
-### Phase 3 — Lifecycle e2e (0.5-1d)
+### Phase 3 ✓ — Lifecycle e2e (0.5-1d) [CI-gated: local WASM can't sustain ~10 serial proofs]
 - `tests/e2e/network/authwit-lifecycle.test.ts` per the single-use script above; testids added to both popups BEFORE the test (currently zero testids — verified); data-testid-only selectors; dedicated fresh account; cleanup re-enables registry.
 - **Gate**: lifecycle file green ×2 consecutive locally; full `bun run e2e:agent` green; non-vacuity assertion present (e2e-network full).
 

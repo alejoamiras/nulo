@@ -119,3 +119,17 @@ constrained hardware. The feature is proven by the green consume smoke +
 the unit/reachability/scope suites. Remaining to fully close Phase 3:
 (a) add the registry enable/disable leg to the lifecycle test;
 (b) validate the lifecycle file in CI (where it can actually run).
+
+## Phase 3 CLOSED (CI-gated) — full lifecycle test written
+
+Registry enable/disable leg added; the lifecycle test now covers the full
+plan script: G1 grant→consume(ok), G2 grant→revoke→consume(error,
+non-vacuous), G3 grant→disable→consume(error)→enable→consume(ok). Shared
+`settingsAction(actionTestId, submitTestId)` drives both revoke and
+registry-toggle through A's Authwits settings.
+
+Local gate (the most local WASM allows): tsc 0, lint 0, full unit suite
+2,362 passed. The e2e itself (~10 serial proofs) is gated in CI per the
+user's decision — native accelerator proving runs it fast + CDP-stable;
+local WASM starves puppeteer's CDP channel. The file joins the regular
+network shards.

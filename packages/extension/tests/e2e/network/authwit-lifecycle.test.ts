@@ -97,25 +97,49 @@ test.skipIf(!hasConfig)(
 		step("G1 consume (expect ok)")
 		expect(await consume("1")).toBe("ok")
 
+		// Open A's Authwits settings, trigger a dropdown action (revoke-all or
+		// registry-toggle), pick fee + submit the in-page overlay, wait for the
+		// settings sendTx to leave the popup (submitted), close. Each is a
+		// proving sendTx — hence the wide settle budget.
+		const settingsAction = async (actionTestId: string, submitTestId: string) => {
+			const walletPopup = await openPopup(ctx)
+			await switchAccount(walletPopup, "Account") // active wallet account = owner A
+			await navigateToSettings(walletPopup, "advanced", "account-state", "authwits")
+			await clickByTestId(walletPopup, "authwits-actions-btn")
+			await clickByTestId(walletPopup, actionTestId)
+			// The popup is a Vue overlay inside the wallet page (popupStore.open),
+			// not a separate browser window — submit in place.
+			await walletPopup.waitForSelector(`[data-testid="${submitTestId}"]`, { visible: true, timeout: 15_000 })
+			await pickFeeAndSubmitAuthwitPopup(walletPopup, submitTestId)
+			await walletPopup.waitForFunction(
+				(id: string) => !document.querySelector(`[data-testid="${id}"]`),
+				{ timeout: 360_000 },
+				submitTestId,
+			)
+			await walletPopup.close()
+		}
+
 		// ── Step 2: G2 grant → revoke (as A) → consume FAILS (never consumed) ──
 		step("G2 grant")
 		await grant("2")
 		step("revoke all of A's authwits via settings")
-		const walletPopup = await openPopup(ctx)
-		await switchAccount(walletPopup, "Account") // ensure active wallet account = owner A
-		await navigateToSettings(walletPopup, "advanced", "account-state", "authwits")
-		await clickByTestId(walletPopup, "authwits-actions-btn")
-		await clickByTestId(walletPopup, "authwits-revoke-all")
-		// RevokeAuthwitsPopup is a Vue overlay inside the wallet popup page
-		// (popupStore.open), not a separate browser window — wait for its
-		// submit testid to mount, then pick fee + submit in place.
-		await walletPopup.waitForSelector('[data-testid="revoke-authwits-submit"]', { visible: true, timeout: 15_000 })
-		await pickFeeAndSubmitAuthwitPopup(walletPopup, "revoke-authwits-submit")
-		// Revoke is a sendTx; give it time to settle on-chain before the consume.
-		await walletPopup.waitForFunction(() => !document.querySelector('[data-testid="revoke-authwits-submit"]'), { timeout: 240_000 })
-		await walletPopup.close()
+		await settingsAction("authwits-revoke-all", "revoke-authwits-submit")
 		step("G2 consume (expect error — revoked)")
 		expect(await consume("2")).toBe("error")
+
+		// ── Step 3: G3 grant → registry DISABLE → consume FAILS → ENABLE → consume OK ──
+		// reject_all is checked before the approval, so a disabled-registry
+		// consume reverts WITHOUT burning G3 — re-enabling restores it.
+		step("G3 grant")
+		await grant("3")
+		step("disable registry via settings")
+		await settingsAction("authwits-toggle-registry", "registry-toggle-submit")
+		step("G3 consume (expect error — registry disabled)")
+		expect(await consume("3")).toBe("error")
+		step("re-enable registry via settings")
+		await settingsAction("authwits-toggle-registry", "registry-toggle-submit")
+		step("G3 consume again (expect ok — approval survived the reverted consume)")
+		expect(await consume("3")).toBe("ok")
 
 		step("DONE")
 	},
