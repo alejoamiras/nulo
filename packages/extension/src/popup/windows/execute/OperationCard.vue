@@ -138,8 +138,25 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 										<Text data-testid="execute-authwit-args">{{ action.content.args.map((a) => String(a)).join(", ") }}</Text>
 									</template>
 								</template>
+								<!-- Non-`call` authwit content kinds: unreachable from the current
+									grant producer (hardcodes `call`), but render their identifying
+									fields defensively so a future producer can never hide a spend
+									target behind an opaque label (verification-audit condition). -->
+								<template v-else-if="action.content.kind === 'encoded_call'">
+									<Text color="secondary"> — spender </Text>
+									<AddressDisplay data-testid="execute-authwit-spender" :address="action.content.caller" />
+									<Text color="secondary"> for </Text>
+									<Text weight="600">{{ humanizeMethodName(action.content.name ?? action.content.selector) }}</Text>
+									<Text color="secondary"> on </Text>
+									<AddressDisplay :address="action.content.to" />
+								</template>
+								<template v-else-if="action.content.kind === 'intent'">
+									<Text color="secondary"> — consumer </Text>
+									<AddressDisplay data-testid="execute-authwit-spender" :address="action.content.consumer" />
+								</template>
 								<template v-else>
-									<Text color="secondary"> ({{ action.content.kind }}) </Text>
+									<Text color="secondary"> — message hash </Text>
+									<Text data-testid="execute-authwit-spender">{{ action.content.messageHash }}</Text>
 								</template>
 							</template>
 							<template v-else>

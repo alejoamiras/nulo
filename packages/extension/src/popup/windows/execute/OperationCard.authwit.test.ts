@@ -75,4 +75,31 @@ describe("OperationCard — add_public_authwit (audit F2)", () => {
 		// And the opaque fallback label is NOT used.
 		expect(html).not.toContain("add public authwit")
 	})
+
+	test("encoded_call content still surfaces the spender (defensive, no opaque label)", () => {
+		const op = authwitOp()
+		;(op.actions[0] as { content: unknown }).content = {
+			kind: "encoded_call",
+			caller: SPENDER,
+			to: TOKEN,
+			selector: "0xdeadbeef",
+			args: [],
+		}
+		const w = mount(OperationCard, {
+			props: { op: op as never, index: 0 },
+			global: {
+				stubs,
+				mocks: {
+					trimAddress: (a: string) => a,
+					humanizeMethodName: (m: string) => m,
+					humanizeOperationKind: (k: string) => k,
+					parseTransferIntent: () => ({ kind: "unverified" }),
+				},
+			},
+		})
+		const html = w.html()
+		expect(w.find('[data-testid="execute-authwit-spender"]').exists()).toBe(true)
+		expect(html).toContain(SPENDER)
+		expect(html).not.toContain("(encoded_call)")
+	})
 })

@@ -66,3 +66,17 @@ corroborated by the plan's own D7v2 design intent.
     popup-confirmed. Consistent with the existing checkCreateAuthWit precedent
     (contract+function only). Recorded as a deliberate decision; a
     transaction-capability `allowedCallers` field is a possible future feature.
+
+## Verification audit — F1/F2/F3 all CLOSED; one condition addressed
+
+Re-audit of the fixes: F1 CLOSED (enforcement path live; accounts-only +
+out-of-scope rejected; tests drive the real path), F2 CLOSED (spender/method/
+contract/args on the primary surface; opaque fallback unreachable for the
+grant; regression-pinned), F3 CLOSED (funds-bound-to-signer VERIFIED via the
+registry storage keying — approval keyed by owner account, not dApp-
+controllable; caller-scope-binding deferral sound). Verdict: conditional
+approve — one latent (non-live) gap: non-`call` authwit content kinds
+(encoded_call/intent/message_hash) rendered opaquely at OperationCard.vue.
+ADDRESSED: added defensive per-kind render branches (spender/consumer/
+message-hash surfaced) + an encoded_call regression test. Unreachable today
+(producer hardcodes `call`), now future-proofed.
