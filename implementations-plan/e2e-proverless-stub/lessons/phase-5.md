@@ -20,4 +20,9 @@ The prod-guard holds: one-flag builds fail closed, two-flag release artifacts ar
 - Prod-guard two-build grep ✓ (gate absent in prod, present proverless) — re-confirmed after the static-import revert.
 - `concurrent-sendtx-approve` proverless re-run after the timing fix: see below.
 
+## CI verdict (PR #86)
+- **Quality / Status (REQUIRED on dev): SUCCESS** ✓ — Build chrome (incl. the `_build-extension.yml` negative grep → no proverless leak in the shipped artifact), Commitlint, Lint+Typecheck, Unit tests.
+- **Network e2e: SUCCESS** ✓ — the whole proverless split end-to-end: all 5 proverless shards + `heavy/fee-methods` (PLAIN) + `heavy/concurrent-confirm` (STUB barrier) + **`canary/real-proving`** (prover-ON: transfers + tx-sendTx-default with REAL BB proving + accelerator). The canary's real-prove timing — the one thing un-runnable locally — passes in CI.
+- **Smoke e2e: FAILURE (advisory, pre-existing flake, NOT this arc).** `accounts.test.ts > "switch between accounts"`: `consoleErrors.toEqual([])` caught a benign `Error: Client disconnected` (SW port-close cascade) under CI runner load. My diff touches none of the account-switch / port-disconnect path; dev's own smoke runs flake; the brittle `consoleErrors.toEqual([])` (5 instances) is pre-existing. Advisory on dev (not the required check). Not fixed — out of arc scope; candidate for the same smoke fixture-cleanup follow-up CLAUDE.md already tracks.
+
 LESSONS_FILE=implementations-plan/e2e-proverless-stub/lessons/phase-5.md
