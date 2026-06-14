@@ -1,7 +1,11 @@
-import { feeJuiceAddress } from "@nulo/bridge-core"
+import { PRIVATE_FPC_ADDRESS, feeJuiceAddress } from "@nulo/bridge-core"
 
 /** The canonical L2 FeeJuice protocol contract (identical on every network). */
 const FEE_JUICE_L2 = AztecAddress.fromString(feeJuiceAddress)
+/** The Wonderland PrivateFPC L2 address (pinned from the installed artifact). Like the SponsoredFPC it
+ *  is auto-registered by the wallet (`fpc/service.ts`), so it stays OUT of `contracts` (the faucet never
+ *  loads its artifact) — only its `mint_and_pay_fee` call is scoped, mirroring the sponsor-call pattern. */
+const PRIVATE_FPC_L2 = AztecAddress.fromString(PRIVATE_FPC_ADDRESS)
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { ProtocolContractAddress } from "@aztec/protocol-contracts"
 
@@ -247,6 +251,11 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 						{ contract: sponsoredFpcAddress, function: "sponsor_unconditionally" },
 						{ contract: ProtocolContractAddress.AuthRegistry, function: "set_authorized" },
 						{ contract: FEE_JUICE_L2, function: "claim_and_end_setup" },
+						// Private fuel (gas-follows-token): the 2-call cold-start payment — FeeJuice.claim
+						// then PrivateFPC.mint_and_pay_fee — run verbatim by the wallet's EXTERNAL path.
+						// Simulatable so the private claim can be simulate-gated like the public fjwc one.
+						{ contract: FEE_JUICE_L2, function: "claim" },
+						{ contract: PRIVATE_FPC_L2, function: "mint_and_pay_fee" },
 					],
 				},
 			},
@@ -256,6 +265,10 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 					{ contract: dripperAddress, function: "drip_to_public" },
 					{ contract: dripperAddress, function: "drip_to_private" },
 					{ contract: FEE_JUICE_L2, function: "claim_and_end_setup" },
+					// Private fuel: FeeJuice.claim + PrivateFPC.mint_and_pay_fee (the public path uses
+					// claim_and_end_setup above; the private path claims then ends setup via the FPC).
+					{ contract: FEE_JUICE_L2, function: "claim" },
+					{ contract: PRIVATE_FPC_L2, function: "mint_and_pay_fee" },
 					{ contract: bridgeAddress, function: "claim_public" },
 					{ contract: bridgeAddress, function: "claim_private" },
 					{ contract: bridgeAddress, function: "exit_to_l1_public" },
