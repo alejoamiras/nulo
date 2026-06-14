@@ -15,6 +15,7 @@
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { ServiceCollection } from "@nulo/wallet-core/base"
 import type { PxeFactory } from "../pxe/chain-runtime"
+import type { ProofGate } from "../pxe/proof-gate"
 import { PxeService, type IProfileReader } from "../pxe/service"
 
 export interface PxeOffscreenDeps {
@@ -33,6 +34,14 @@ export interface PxeOffscreenDeps {
 	 * `@/accelerator/config` module.
 	 */
 	factory?: PxeFactory
+	/**
+	 * Optional `ProofGate` (e2e-only). When omitted, `PxeService` uses the
+	 * no-op gate and proving runs unimpeded — production behavior. The
+	 * extension shell injects a `chrome.storage`-backed gate behind the
+	 * `VITE_NULO_E2E_PROVERLESS` build flag; threaded as the seam (not
+	 * `chrome.*` here) so this package stays chrome-free.
+	 */
+	proofGate?: ProofGate
 }
 
 /**
@@ -42,6 +51,6 @@ export interface PxeOffscreenDeps {
  */
 export async function createPxeOffscreen(deps: PxeOffscreenDeps): Promise<void> {
 	const services = new ServiceCollection()
-	services.add(new PxeService(deps.profiles, deps.logger, deps.factory))
+	services.add(new PxeService(deps.profiles, deps.logger, deps.factory, deps.proofGate))
 	await services.start()
 }

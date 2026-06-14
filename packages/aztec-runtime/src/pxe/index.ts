@@ -1,4 +1,5 @@
 export { ChainRuntime, ChainRuntimeRegistry, ProductionPxeFactory, type NetworkInfo, type PxeFactory } from "./chain-runtime"
+export { type ProofGate, NOOP_PROOF_GATE } from "./proof-gate"
 export { type KnownArtifacts, type KnownArtifactsLoader, loadProductionKnownArtifacts } from "./known-artifacts"
 export { ArtifactRegistry, defaultPolicy, type ArtifactPolicy, type ArtifactSource } from "./artifact-registry"
 export {

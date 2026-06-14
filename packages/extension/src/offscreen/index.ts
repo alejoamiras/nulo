@@ -1,4 +1,6 @@
 import { ACCELERATOR_HOST, ACCELERATOR_PORT, ACCELERATOR_REQUIRED, ACCELERATOR_REQUIRED_BUILD_STAMP } from "@/accelerator/config"
+import { E2E_PROVERLESS, E2E_PROVERLESS_BUILD_STAMP } from "@/e2e/config"
+import { ChromeStorageProofGate } from "@/e2e/chrome-storage-proof-gate"
 import { consoleMethods, LogLevel } from "@/wallet/logger"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
@@ -55,6 +57,19 @@ if (ACCELERATOR_REQUIRED_BUILD_STAMP) {
 		ACCELERATOR_REQUIRED_BUILD_STAMP
 }
 
+// Mutually exclusive: a build cannot be both proverless (skip proving) and
+// accelerator-required (enforce native proving). Fail fast if misbuilt.
+if (E2E_PROVERLESS && ACCELERATOR_REQUIRED) {
+	throw new Error("[e2e] VITE_NULO_E2E_PROVERLESS and VITE_NULO_ACCELERATOR_REQUIRED are mutually exclusive.")
+}
+
+// Pin the proverless build stamp (same anti-tree-shake reason as above).
+// Present ONLY in proverless e2e builds; the negative grep in
+// _build-extension.yml asserts its absence from production bundles.
+if (E2E_PROVERLESS_BUILD_STAMP) {
+	;(globalThis as { __NULO_E2E_PROVERLESS_BUILD_STAMP__?: string }).__NULO_E2E_PROVERLESS_BUILD_STAMP__ = E2E_PROVERLESS_BUILD_STAMP
+}
+
 // run services — await initialization before signaling ready.
 // Bootstrap lives in @nulo/aztec-runtime/offscreen/entry; this shell
 // wires the concrete Chrome-backed clients and keeps the READY send
@@ -67,13 +82,19 @@ const t0 = Date.now()
 await createPxeOffscreen({
 	profiles: new ProfileServiceClient(),
 	logger: new LoggerServiceClient(),
-	factory: ACCELERATOR_REQUIRED
-		? new ProductionPxeFactory(undefined, {
-				required: true,
-				host: ACCELERATOR_HOST,
-				port: ACCELERATOR_PORT,
-			})
-		: undefined,
+	// E2E_PROVERLESS and the ChromeStorageProofGate are referenced ONLY
+	// inside these flag-gated branches so DCE strips them — and the gate's
+	// chrome.storage listener — from every non-proverless build.
+	factory: E2E_PROVERLESS
+		? new ProductionPxeFactory(undefined, { proverless: true })
+		: ACCELERATOR_REQUIRED
+			? new ProductionPxeFactory(undefined, {
+					required: true,
+					host: ACCELERATOR_HOST,
+					port: ACCELERATOR_PORT,
+				})
+			: undefined,
+	proofGate: E2E_PROVERLESS ? new ChromeStorageProofGate() : undefined,
 })
 logger.log("pxe", LogLevel.Info, `Offscreen services initialized (${Date.now() - t0}ms)`)
 

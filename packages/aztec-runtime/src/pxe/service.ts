@@ -33,6 +33,7 @@ import type { ILogger } from "@nulo/wallet-core/logger"
 import { ReadWriteGuard } from "@nulo/wallet-core/utils"
 import type { NetworkInfo } from "./chain-runtime"
 import { ChainRuntimeRegistry, ProductionPxeFactory, type PxeFactory } from "./chain-runtime"
+import { type ProofGate, NOOP_PROOF_GATE } from "./proof-gate"
 import { ArtifactRegistry } from "./artifact-registry"
 import { loadProductionKnownArtifacts } from "./known-artifacts"
 import { loadProductionNoteSchemas, type NoteSchema } from "./note-schemas"
@@ -90,13 +91,16 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	private readonly guardLogger: ILogger
 	private readonly registry: ChainRuntimeRegistry
 	private readonly artifacts: ArtifactRegistry
+	/** E2E-only proving hold-point; the no-op default never blocks (prod). */
+	private readonly proofGate: ProofGate
 
-	public constructor(profiles: IProfileReader, logger: ILogger, factory?: PxeFactory) {
+	public constructor(profiles: IProfileReader, logger: ILogger, factory?: PxeFactory, proofGate?: ProofGate) {
 		super(PXE_SERVICE_NAME, logger)
 		this.profiles = profiles
 		this.guardLogger = logger
 		this.artifacts = new ArtifactRegistry(loadProductionKnownArtifacts, { logger, logSource: PXE_SERVICE_NAME })
 		this.registry = new ChainRuntimeRegistry(factory ?? new ProductionPxeFactory())
+		this.proofGate = proofGate ?? NOOP_PROOF_GATE
 	}
 
 	private chainKey(profileId: string, chainId: number): string {
@@ -275,6 +279,12 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			} catch (e) {
 				this.logDebug(`[SYNC-DEBUG] proveTx: failed to read sync state: ${e}`)
 			}
+
+			// E2E-only hold-point. No-op in production (default gate resolves
+			// immediately). Awaited HERE — inside the per-chain write lock,
+			// after the coordinator journaled `proving` — so the hold replaces
+			// prove duration without adding a cancel checkpoint. See ProofGate.
+			await this.proofGate.wait()
 
 			return pxe.proveTx(await TxExecutionRequest.schema.parseAsync(txRequest), await z.array(AztecAddress.schema).parseAsync(scopes))
 		})
