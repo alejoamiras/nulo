@@ -1242,6 +1242,13 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 					} as Capability,
 					grantedAt: 1,
 				},
+				{
+					capability: {
+						type: "transaction",
+						scope: [{ contract: "0xtoken", function: "transfer_public_to_public" }],
+					} as Capability,
+					grantedAt: 1,
+				},
 			],
 			accounts: ["aztec:0:0xacc"],
 		})
@@ -1300,7 +1307,12 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 
 	test("dispatch('grantPublicAuthwit', ...) rejects an account outside the session's authorized list", async () => {
 		const session = makeSession({
-			capabilityGrants: [],
+			capabilityGrants: [
+				{
+					capability: { type: "transaction", scope: [{ contract: "0xt", function: "m" }] } as Capability,
+					grantedAt: 1,
+				},
+			],
 			accounts: ["aztec:0:0xacc"],
 		})
 		const { writer } = makeSessionWriter(session)
@@ -1316,5 +1328,96 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 		await expect(
 			dispatcher.dispatch("grantPublicAuthwit", ["0xother", { caller: "0xc", contract: "0xt", method: "m", args: [] }], ctx),
 		).rejects.toThrow(/not authorized for this dApp session/)
+	})
+
+	// ── audit F1 regression guards: the scope gate MUST run ──
+	// grantPublicAuthwit requires the `transaction` capability (capability-map.ts).
+	// Without the map entry these would have passed silently (dead scope gate).
+
+	test("dispatch('grantPublicAuthwit', ...) REJECTS a session with NO transaction capability (F1 — gate must run)", async () => {
+		const session = makeSession({
+			// Only an accounts grant — the standard connect grant. Must NOT be
+			// enough to mint an on-chain authwit.
+			capabilityGrants: [
+				{
+					capability: {
+						type: "accounts",
+						canGet: true,
+						canCreateAuthWit: false,
+						accounts: [{ alias: "main", item: "0xacc" }],
+					} as Capability,
+					grantedAt: 1,
+				},
+			],
+			accounts: ["aztec:0:0xacc"],
+		})
+		const { writer } = makeSessionWriter(session)
+		const interaction: IDappInteractionRunner = {
+			execute: async () => [{ status: "ok", result: undefined }] as never,
+			requestCapabilities: async () => ({}) as never,
+		}
+		const execution: IExecutionRunner = { executeOperations: async () => [] as OperationResult[] }
+		const network: INetworkReader = { getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
+		const account: IAccountReader = { getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }] }
+		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
+
+		await expect(
+			dispatcher.dispatch(
+				"grantPublicAuthwit",
+				[
+					"0xacc",
+					{
+						caller: "0xattacker",
+						contract: "0xtoken",
+						method: "transfer_public_to_public",
+						args: ["0xacc", "0xattacker", "999", "1"],
+					},
+				],
+				ctx,
+			),
+		).rejects.toThrow()
+	})
+
+	test("dispatch('grantPublicAuthwit', ...) REJECTS a contract@method outside the granted transaction scope (F1 — scope check runs)", async () => {
+		const session = makeSession({
+			// Transaction scope permits transfer on 0xtoken ONLY.
+			capabilityGrants: [
+				{
+					capability: {
+						type: "transaction",
+						scope: [{ contract: "0xtoken", function: "transfer_public_to_public" }],
+					} as Capability,
+					grantedAt: 1,
+				},
+				{
+					capability: {
+						type: "accounts",
+						canGet: true,
+						canCreateAuthWit: false,
+						accounts: [{ alias: "main", item: "0xacc" }],
+					} as Capability,
+					grantedAt: 1,
+				},
+			],
+			accounts: ["aztec:0:0xacc"],
+		})
+		const { writer } = makeSessionWriter(session)
+		const interaction: IDappInteractionRunner = {
+			execute: async () => [{ status: "ok", result: undefined }] as never,
+			requestCapabilities: async () => ({}) as never,
+		}
+		const execution: IExecutionRunner = { executeOperations: async () => [] as OperationResult[] }
+		const network: INetworkReader = { getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
+		const account: IAccountReader = { getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }] }
+		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
+
+		// Grant for a DIFFERENT contract — must be scope-rejected.
+		await expect(
+			dispatcher.dispatch(
+				"grantPublicAuthwit",
+				["0xacc", { caller: "0xc", contract: "0xOTHER", method: "transfer_public_to_public", args: [] }],
+				ctx,
+			),
+		).rejects.toThrow(/[Ss]cope/)
 	})
 })
