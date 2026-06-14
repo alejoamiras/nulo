@@ -103,3 +103,19 @@ at the FORM + re-check at claim — but **"omit fee" alone does NOT guarantee ne
 sponsored + block cold; funded accounts = the wallet chooses, may auto-sponsor) vs cross-package (also stop
 the extension auto-sponsoring the dApp no-fuel claim). The private-fuel HEADLINE is DONE + green (329/329);
 no-fuel L7 + the sandbox-gated P2/P4 all need the user. Loop paused here pending that decision + the sandbox.
+
+## No-fuel L7 DONE (faucet-only — user decision)
+Per the user's choice (faucet-only, not the cross-package strict variant):
+- Claim dep: no-fuel records OMIT the embedded fee (wallet self-pays via PREEXISTING_FEE_JUICE) instead of
+  forcing Sponsored; isolated to the no-fuel `else` (the fueled fallback + shared default untouched — codex).
+- Cold (zero public-FJ) accounts: blocked PRE-DEPOSIT in `deposit()` (so tokens aren't bridged unclaimable)
+  AND re-checked at claim (the simulate gate doesn't enforce fees) — both via `readPublicFeeJuiceBalance`
+  (reuses `readBalance` from useTokenBalance; `FeeJuice.balance_of_public` now scoped in the manifest sim).
+- Read errors don't block (fail-safe; the other gate backstops). Funded accounts: the wallet may still
+  auto-pick Sponsored — accepted as "the wallet chooses" (the cross-package strict variant was declined).
+- typecheck clean; faucet 330/330. **P3 code is COMPLETE.**
+
+## P3 COMPLETE — remaining is sandbox-gated
+Private fuel is implemented end-to-end (deposit→FPC→self-paying claim, never public/Sponsored) + B-presets UI
++ no-fuel L7. Remaining: P2 playground+network-e2e + P4 live dust-canary (need `e2e:agent`/testnet) + P5 harden.
+The claim-dep wiring (private branch + no-fuel) is live-validated (no useDeposit unit test; the pure deciders ARE tested).
