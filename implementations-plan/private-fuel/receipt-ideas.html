@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bridge receipt — improvement directions (rev 2)</title>
+<title>Bridge receipt — directions (rev 3, naming fixed)</title>
 <style>
   :root{
     --bg:#0a0d0c; --panel:#101614; --line:#232b28; --line-soft:#1a201e;
@@ -14,7 +14,9 @@
   *{box-sizing:border-box}
   body{background:var(--bg);color:var(--fg);font-family:var(--mono);margin:0;padding:32px;line-height:1.5}
   h1{font-family:var(--head);font-weight:600;font-size:22px;margin:0 0 4px}
-  .lede{color:var(--muted);font-size:13px;max-width:780px;margin:0 0 28px}
+  .lede{color:var(--muted);font-size:13px;max-width:800px;margin:0 0 8px}
+  .conv{font-size:12px;color:var(--muted);max-width:800px;margin:0 0 26px}
+  .conv b{color:var(--fg)}
   .grid{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
   .col{width:430px;max-width:100%}
   .label{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--mint);margin:0 0 8px}
@@ -23,7 +25,6 @@
 
   .r{border:1px solid var(--line);background:var(--panel);padding:24px}
   .stamp{color:var(--mint);font-weight:700;letter-spacing:.14em;font-size:18px;margin:0}
-  .amt{font-family:var(--head);font-weight:600;font-size:22px;margin:10px 0 0}
   .gas{color:var(--mint);font-size:14px;margin:8px 0 0}
   .sub{color:var(--muted);font-size:13px;margin:10px 0 0}
   .links{display:flex;gap:16px;margin:16px 0 0;font-size:13px}
@@ -31,7 +32,6 @@
   .btn{margin-top:18px;display:inline-block;border:1px solid var(--line);padding:11px 18px;font-size:13px;letter-spacing:.08em;color:var(--fg);cursor:pointer}
   .btn.primary{border-color:var(--mint);color:var(--mint)}
 
-  /* A — journey */
   .flow{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;margin:18px 0 4px}
   .node{border:1px solid var(--line);padding:14px 12px}
   .node .chain{font-size:10px;letter-spacing:.1em;color:var(--muted)}
@@ -41,16 +41,14 @@
   .arrow{color:var(--mint);text-align:center;font-size:13px;letter-spacing:.05em}
   .arrow .t{display:block;color:var(--muted);font-size:10px;margin-top:3px;letter-spacing:.08em}
 
-  /* B — privacy hero (kept; not in this round's edits) */
   .hero{text-align:center;padding:8px 0 0}
   .hero .lock{font-size:30px}
   .hero h2{font-family:var(--head);font-weight:600;font-size:17px;margin:8px 0 0}
-  .checks{list-style:none;padding:0;margin:16px auto 0;max-width:330px;text-align:left}
+  .checks{list-style:none;padding:0;margin:16px auto 0;max-width:340px;text-align:left}
   .checks li{font-size:12.5px;color:var(--fg);margin:7px 0;display:flex;gap:8px}
   .checks li .ck{color:var(--mint)}
   .checks li .d{color:var(--muted)}
 
-  /* C — ledger */
   .ledger{margin:14px 0 0;font-size:13px}
   .ledger .row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line-soft)}
   .ledger .row .k{color:var(--muted)}
@@ -58,7 +56,6 @@
   .banked .big{color:var(--mint);font-size:15px;font-weight:600}
   .banked .note{color:var(--muted);font-size:12px;margin-top:4px}
 
-  /* D — boarding pass (no notches; real CTA) */
   .pass{border:1px solid var(--mint);background:var(--panel)}
   .pass .top{padding:16px 18px;display:flex;justify-content:space-between;align-items:center}
   .pass .top .brand{letter-spacing:.16em;font-size:12px;color:var(--mint)}
@@ -75,12 +72,13 @@
 </style>
 </head>
 <body>
-  <h1>Bridge receipt — directions (rev 2)</h1>
-  <p class="lede">Revised per your notes: A & C & D dropped the emojis and use <b>$AZTEC</b> for the gas (consistent across all cards). Real numbers: 0.15 AZLO + 87.70 $AZTEC bought, 2.88 used, 84.82 banked, 5m 02s. <span style="color:var(--warn)">Reminder: the gas is protocol "Fee Juice" — "$AZTEC" is a display brand choice.</span></p>
+  <h1>Bridge receipt — directions (rev 3)</h1>
+  <p class="lede">Naming fixed throughout. Real numbers: 0.15 AZLO + 87.70 PFJ landed, 2.88 used, 84.82 banked, 5m 02s.</p>
+  <p class="conv">Convention: gas is <b>$AZTEC</b> on Ethereum (L1) → <b>Fee Juice (FJ)</b> on Aztec (L2) → <b>Private Fee Juice (PFJ)</b> when held privately. This was a private bridge, so the gas lands as <b>PFJ</b>; the journey shows it cross <b>$AZTEC → PFJ</b>. (A public bridge's would land as FJ.)</p>
 
   <div class="grid">
 
-    <!-- A — JOURNEY (revised: serious, $AZTEC, no emojis) -->
+    <!-- A — JOURNEY -->
     <div class="col">
       <p class="label">A · The Journey</p>
       <div class="r">
@@ -88,15 +86,15 @@
         <div class="flow">
           <div class="node"><div class="chain">ETHEREUM</div><div class="val">0.15 AZLO<br><span class="g">+ $AZTEC</span></div></div>
           <div class="arrow">━━━▶<span class="t">5m 02s</span></div>
-          <div class="node dest"><div class="chain">AZTEC · PRIVATE</div><div class="val">0.15 AZLO<br><span class="g">+ 87.70 $AZTEC</span></div></div>
+          <div class="node dest"><div class="chain">AZTEC · PRIVATE</div><div class="val">0.15 AZLO<br><span class="g">+ 87.70 PFJ</span></div></div>
         </div>
         <div class="links"><a>deposit tx ↗</a><a>claim tx ↗</a></div>
         <span class="btn primary">NEW BRIDGE</span>
       </div>
-      <p class="why"><b>Shows what moved where.</b> The L1→L2 motion, the token + gas, and the private landing in one read — a bridge is a movement, so draw it. Serious, no ornament.</p>
+      <p class="why"><b>Shows what moved where</b> — and the gas changing name ($AZTEC → PFJ) as it crosses tells the story for free.</p>
     </div>
 
-    <!-- C — LEDGER (revised: no emoji, reworded, no "(this claim)") -->
+    <!-- C — LEDGER -->
     <div class="col">
       <p class="label">C · The Ledger</p>
       <div class="r">
@@ -105,41 +103,41 @@
         </div>
         <div class="ledger">
           <div class="row"><span class="k">Tokens</span><span>0.15 AZLO → private ✓</span></div>
-          <div class="row"><span class="k">Gas bought</span><span>87.70 $AZTEC</span></div>
-          <div class="row"><span class="k">Gas used</span><span>− 2.88 $AZTEC</span></div>
+          <div class="row"><span class="k">Gas bought</span><span>87.70 PFJ</span></div>
+          <div class="row"><span class="k">Gas used</span><span>− 2.88 PFJ</span></div>
         </div>
         <div class="banked">
-          <div class="big">84.82 $AZTEC banked</div>
+          <div class="big">84.82 PFJ banked</div>
           <div class="note">Sits in your private balance, ready to spend.</div>
         </div>
         <div class="links"><a>deposit tx ↗</a><a>claim tx ↗</a></div>
         <span class="btn primary">NEW BRIDGE</span>
       </div>
-      <p class="why"><b>Reframes leftover gas as yours.</b> Bought / used / banked makes the value concrete — most users won't realize the surplus is theirs to spend. <span style="color:var(--warn)">Needs one new number plumbed: gas-used (the claim fee).</span></p>
+      <p class="why"><b>Reframes leftover gas as yours.</b> Bought / used / banked makes the value concrete. <span style="color:var(--warn)">Needs one new number plumbed: gas-used (the claim fee).</span></p>
     </div>
 
-    <!-- D — BOARDING PASS (revised: no notches, clear CTA, $AZTEC) -->
+    <!-- D — BOARDING PASS -->
     <div class="col">
       <p class="label">D · Boarding Pass</p>
       <div class="pass">
         <div class="top"><span class="brand">NULO · PRIVATE BRIDGE</span><span class="done">✓ ARRIVED</span></div>
         <div class="mid">
           <div class="route"><span>ETHEREUM</span><span class="mint">━━━━━━━━▶</span><span class="mint">AZTEC</span><span class="tag">PRIVATE</span></div>
-          <div class="stats"><span>TOKEN <b>0.15 AZLO</b></span><span>GAS <b>87.70 $AZTEC</b></span><span>TIME <b>5m 02s</b></span></div>
+          <div class="stats"><span>TOKEN <b>0.15 AZLO</b></span><span>GAS <b>87.70 PFJ</b></span><span>TIME <b>5m 02s</b></span></div>
         </div>
         <div class="foot"><span><a>deposit ↗</a><a>claim ↗</a></span><span class="cta">NEW BRIDGE</span></div>
       </div>
-      <p class="why"><b>Delight + keepsake.</b> Leans into the surprising speed with a ticket aesthetic. Notches gone (cleaner), and NEW BRIDGE is now a bordered button, not a text arrow.</p>
+      <p class="why"><b>Delight + keepsake.</b> Ticket aesthetic, leans into the speed. Notches gone, NEW BRIDGE is a real bordered button.</p>
     </div>
 
-    <!-- B — kept for reference (not in this round's edits) -->
+    <!-- B — kept for reference -->
     <div class="col">
-      <p class="label">B · Privacy Hero <span style="color:var(--muted)">(unchanged — not in your list)</span></p>
+      <p class="label">B · Privacy Hero <span style="color:var(--muted)">(reference)</span></p>
       <div class="r">
         <div class="hero">
           <div class="lock">🔒</div>
           <h2>Private bridge complete</h2>
-          <p class="sub" style="margin-top:6px">0.15 AZLO + 87.70 $AZTEC gas, in your private balance.</p>
+          <p class="sub" style="margin-top:6px">0.15 AZLO + 87.70 PFJ, in your private balance.</p>
         </div>
         <ul class="checks">
           <li><span class="ck">✓</span><span>Public balance <span class="d">untouched</span></span></li>
@@ -149,13 +147,13 @@
         <div class="links" style="justify-content:center"><a>deposit ↗</a><a>claim ↗</a><a>5m 02s</a></div>
         <div style="text-align:center"><span class="btn primary">NEW BRIDGE</span></div>
       </div>
-      <p class="why">Its three checks are the privacy proof. Could fold them into A or C as a single line instead of a full hero.</p>
+      <p class="why">Its three checks are the privacy proof — could fold into A or C as one line instead of a full hero.</p>
     </div>
 
   </div>
 
-  <p class="why" style="max-width:780px;margin-top:28px">
-    Still my lean: <b>C's ledger as the spine</b> + <b>A's ETH▶AZTEC strip up top</b> + <b>one privacy line</b> lifted from B ("public balance untouched · you paid your own gas") — gives "what moved · that it's private · the gas you banked" without a separate hero. <b>D</b> stands alone well if you want delight over information.
+  <p class="why" style="max-width:800px;margin-top:28px">
+    Lean: <b>C's ledger spine</b> + <b>A's $AZTEC ▶ PFJ strip</b> on top + <b>one privacy line</b> from B. Also worth doing app-wide: private bridges should say <b>PFJ</b> (the receipt + journal cards currently say "FJ" for everything; public stays FJ).
   </p>
 </body>
 </html>
