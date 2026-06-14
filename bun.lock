@@ -51,6 +51,7 @@
         "@aztec/wallets": "4.2.0",
         "@defi-wonderland/aztec-standards": "4.2.0-aztecnr-rc.2",
         "@nulo/wallet-crypto": "workspace:*",
+        "@wonderland/aztec-fee-payment": "https://github.com/defi-wonderland/aztec-fee-payment/releases/download/prerelease-215fd08/wonderland-aztec-fee-payment-4.2.0-prerelease.215fd08.tgz",
         "viem": "npm:@aztec/viem@2.38.2",
       },
       "devDependencies": {
@@ -77,7 +78,7 @@
     },
     "packages/extension": {
       "name": "@nulo/extension",
-      "version": "0.23.0-rc.7",
+      "version": "0.23.0-rc.9",
       "dependencies": {
         "@alejoamiras/aztec-accelerator": "4.2.0",
         "@aztec/accounts": "4.2.0",

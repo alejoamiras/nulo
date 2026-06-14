@@ -33,7 +33,11 @@ export const MAX_RECORDS = 100
 export const LEGACY_KEYS = ["nulo-bridge-pending-deposit", "nulo-bridge-pending-withdraw"] as const
 
 interface JournalBase {
-	/** 1 = original shape; 2 = carries the optional fuel block (fueled deposits only). */
+	/** Record-shape version, distinct from the storage ENVELOPE version (which `write()` keeps at 1).
+	 *  1 = original; 2 = carries the optional `fuel` block. For deposits it is redundant with `!!fuel`
+	 *  (kept explicit for back-compat); withdraws are always 1. Private-fuel fields are additive WITHIN
+	 *  schema 2 — no bump: an old client reads a private record as a public schema-2 record minus the
+	 *  optional private fields. */
 	schema: 1 | 2
 	/** Deposits: secretHashHex (exists before any irreversible tx). Withdraws: exitTxHash, or a
 	 *  provisional `wd-pending-<rand>` between send and receipt. */
@@ -72,8 +76,17 @@ export interface DepositFuelBlock {
 	/** Set when an fjwc-embedded claim tx reads INCLUDED (success OR app-revert) - the FJ message is consumed. */
 	consumed?: boolean
 	/** Set when a standalone sponsored FJ claim landed (the fee-spike path or the card's recovery
-	 *  action). Distinguishes "fuel recovered separately" from "still stranded". */
+	 *  action). Distinguishes "fuel recovered separately" from "still stranded".
+	 *  PUBLIC fuel only — the private path NEVER uses a sponsored/public standalone claim (privacy). */
 	standaloneClaimed?: boolean
+	/** PRIVATE fuel only — the per-deposit salt fed to `deriveBridgeSecret(salt, claimer)`; the claim
+	 *  rebuilds the FJ secret from it. Random per deposit (the PrivateFPC nullifier binds it, so reuse
+	 *  collides). DISTINCT from the FPC-ADDRESS salt (always `Fr.zero()`). For private records the
+	 *  authoritative copy is sealed (recovery-crypto); this plaintext copy is a display/recovery hint. */
+	bridgeSecretSalt?: string
+	/** PRIVATE fuel only — the PrivateFPC L2 address the FJ was deposited to (`fuelRecipient`).
+	 *  Persisted for post-hoc address-drift detection and to rebuild the claim. */
+	fpc?: string
 }
 
 export interface DepositJournalRecord extends JournalBase {
