@@ -8,7 +8,13 @@ import { loadContractArtifact } from "@aztec/stdlib/abi"
 import { getContractInstanceFromInstantiationParams } from "@aztec/stdlib/contract"
 import { describe, expect, it } from "vitest"
 
-import { DOM_SEP__FPC_BRIDGE_SECRET, PRIVATE_FPC_ADDRESS, deriveBridgeSecret, privateFuelSecretHash } from "./private-fuel"
+import {
+	DOM_SEP__FPC_BRIDGE_SECRET,
+	PRIVATE_FPC_ADDRESS,
+	deriveBridgeSecret,
+	privateFuelSecretHash,
+	privateMintAndPayFee,
+} from "./private-fuel"
 
 /**
  * KEYSTONE — the irreversible-loss gate. These vectors are the single source of truth that the
@@ -79,5 +85,16 @@ describe("private-fuel keystone", () => {
 			deployer: AztecAddress.ZERO,
 		})
 		expect(instance.address.toString()).toBe(PRIVATE_FPC_ADDRESS)
+	})
+})
+
+describe("privateMintAndPayFee", () => {
+	it("builds a method paying via the FPC with a two-call setup payload", async () => {
+		const fpc = AztecAddress.fromString(PRIVATE_FPC_ADDRESS)
+		const method = privateMintAndPayFee(fpc, 1_000n, new Fr(123n), Fr.zero(), new Fr(7n))
+		expect((await method.getFeePayer()).toString()).toBe(PRIVATE_FPC_ADDRESS)
+		// FeeJuice.claim + PrivateFPC.mint_and_pay_fee, run verbatim by the wallet's EXTERNAL path.
+		const payload = await method.getExecutionPayload()
+		expect(payload.calls).toHaveLength(2)
 	})
 })

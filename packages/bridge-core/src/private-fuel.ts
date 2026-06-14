@@ -11,6 +11,7 @@
  * (`private-fuel.test.ts`) pins both against fixed vectors so an `@aztec` crypto change
  * can never silently strand funds.
  */
+import { PrivateMintAndPayFeePaymentMethod } from "@wonderland/aztec-fee-payment/fee-payment-methods"
 import { poseidon2HashBytes, poseidon2HashWithSeparator } from "@aztec/foundation/crypto/sync"
 import type { Fr } from "@aztec/aztec.js/fields"
 import type { AztecAddress } from "@aztec/aztec.js/addresses"
@@ -50,3 +51,19 @@ export const deriveBridgeSecret = (salt: Fr, claimer: AztecAddress): Fr =>
 
 /** The `secretHash` for the L1 `depositToAztecPublic` call — `computeSecretHash` of the bridge secret. */
 export const privateFuelSecretHash = (salt: Fr, claimer: AztecAddress): Promise<Fr> => computeSecretHash(deriveBridgeSecret(salt, claimer))
+
+/**
+ * The L2 fee-payment method for a private-fuel claim: Wonderland's `PrivateMintAndPayFeePaymentMethod`,
+ * whose `getExecutionPayload()` bundles two PRIVATE setup calls in one tx — `FeeJuice.claim(fpc, …)`
+ * then `PrivateFPC.mint_and_pay_fee(amount, salt, leafIndex)` — and whose `getFeePayer()` is the FPC.
+ * `secret` is the bridge secret ({@link deriveBridgeSecret}); `salt` is the per-deposit bridge-secret
+ * salt (NOT the FPC-address salt). The wallet runs this verbatim via the EXTERNAL embedded path; the
+ * faucet + the headless script both build it through this one wrapper (the only Wonderland coupling).
+ */
+export const privateMintAndPayFee = (
+	fpc: AztecAddress,
+	amount: bigint,
+	secret: Fr,
+	salt: Fr,
+	leafIndex: Fr,
+): PrivateMintAndPayFeePaymentMethod => new PrivateMintAndPayFeePaymentMethod(fpc, amount, secret, salt, leafIndex)

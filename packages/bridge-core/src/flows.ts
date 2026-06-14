@@ -213,6 +213,11 @@ export interface SwapBridgeParams {
 	path: PoolKey[]
 	zeroForOnes: boolean[]
 	isPrivate: boolean
+	/** PRIVATE fuel only — the injected bridge secret `deriveBridgeSecret(salt, claimer)`. Omitted ⇒
+	 *  `Fr.random()` (correct for recipient-bound PUBLIC fuel). A random secret on the private path
+	 *  would strand the Fee Juice forever: the claimer must reconstruct it from `msg_sender` inside
+	 *  `PrivateFPC.mint_and_pay_fee`. The caller derives it (it owns the salt + claimer + persistence). */
+	fuelSecret?: Fr
 	nonce: bigint
 	deadline: bigint
 	chainId: number
@@ -249,7 +254,9 @@ export async function runSwapBridge(
 	recovery?: SwapRecoveryHooks,
 ): Promise<SwapBridgeResult> {
 	const tokenSecret = Fr.random()
-	const fuelSecret = Fr.random()
+	// PUBLIC fuel: recipient-bound, random is correct. PRIVATE fuel: the caller injects the derived
+	// bridge secret so the FPC claimer can reconstruct it (a random one would strand the FJ — L3).
+	const fuelSecret = p.fuelSecret ?? Fr.random()
 	const tokenSecretHash = (await computeSecretHash(tokenSecret)).toString() as Hex
 	const fuelSecretHash = (await computeSecretHash(fuelSecret)).toString() as Hex
 	// Persist BOTH secrets before the irreversible swap+bridge — a lost preimage strands the claim.
