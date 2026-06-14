@@ -23,14 +23,21 @@ family) works in the faucet because it's CALLED at runtime (post-init), not at i
 constants as LITERALS, verify them in a node test (the drift tripwire). Never compute an `@aztec` hash at
 TS module-load time in code that a browser/jsdom bundle imports. Fixed in `fix(bridge-core)` edaa345.
 
-## Remaining P2
-1. Gas-cap parity test (extension `embedded-fpc-cap.test.ts`): dApp-supplied explicit `maxFeesPerGas` +
-   `teardownGas=0` survives `applyEmbeddedFpcGasCap` for the 2-call payload (L9/L14).
-2. Playground extension (L16): teach `packages/playground` to construct the
-   `PrivateMintAndPayFeePaymentMethod` payload so the network-e2e can drive it through the real extension.
-3. Network-e2e (L12/L13): a `tests/e2e/network` cold-start private-fuel claim through the REAL extension
-   (EXTERNAL transport carries both setup calls, feePayer=FPC, no scope violation) + a FUNDED-account no-fuel
-   claim (wallet self-pays). **Needs the sandbox harness (`e2e:agent`).**
+## Gas-cap parity ✓ (already covered, minimally extended)
+`applyEmbeddedFpcGasCap` is mode-driven (fpc/fjwc/default), not payload-shape-driven. The private claim is
+an `embedded="fpc"` payment (feePayer=FPC≠from), so the EXISTING test 3 ("fpc + dApp explicit maxFeesPerGas
+→ pass through, node not consulted") already proves the private-fuel gas behavior — a duplicate test would
+be bloat. Extended test 3 with a `teardownGasLimits` pass-through assertion (L14: explicit teardownGas=0
+survives) + labelled it the private-fuel path. extension `embedded-fpc-cap` 3/3.
+
+## Playground extension + network-e2e — DEFERRED to the sandbox session (coupled, unrunnable solo)
+On reading `packages/playground/sections/transactions.ts`, the private-fuel hook's shape is coupled to the
+e2e's setup (bridge FJ to the FPC → derive secret/leafIndex/amount → drive the claim → assert the result),
+and neither the hook nor the e2e can be validated without the `e2e:agent` sandbox. Building the hook blind
+risks rework once the real integration is exercised. So the playground hook + the network-e2e (L12/L13/L16)
+are built TOGETHER as the sandbox-gated tail of P2 — not speculatively now. The manifest scope + gas-cap
+(the code the e2e will exercise) are in place. **Remaining (sandbox): the playground private-fuel hook + the
+cold-start private network-e2e + the FUNDED-account no-fuel e2e.**
 
 ## Gate (partial)
 - `bun run --cwd packages/faucet test capabilities` → 21/21.
