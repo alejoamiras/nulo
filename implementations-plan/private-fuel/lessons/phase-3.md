@@ -71,3 +71,17 @@ PRIVATE (default) + PUBLIC — with fuel as a shared add-on below (now enabled f
   `isPrivateFuelInsufficiency` for the retry; pre-claim budget `fuel.received >= minFuelFj`. Plus no-fuel L7
   (omit fee + balance_of_public cold-block). Edge: included-but-app-reverted leaves FJ credited at the FPC →
   recover via the FPC `pay_fee` (documented follow-up, not first-pass).
+
+## P3-B claim branch WIRED (loop fire 4)
+- The Option-A private path is live in `useDeposit.ts`'s `claim` dep (separate early-return for
+  `rec.isPrivate && fuel.received && fuel.leafIndex && fuel.bridgeSecretSalt`): builds `privateMintAndPayFee`
+  (feePayer=FPC) + `gasSettings.teardownGasLimits = Gas.from({daGas:0,l2Gas:0})` (maxFeesPerGas omitted →
+  wallet fills current-min); `decidePrivateFuelClaim` drives action; FPC-drift FAIL-STOP (L15) + budget floor
+  (received ≥ minFuelFj) + narrow setup-insufficiency retry; NEVER public/Sponsored. Journal gained
+  `setupInsufficiency`. faucet typecheck + biome clean; bridge-core 107/107; faucet 68/68 (no regressions).
+- The claim-dep wiring isn't unit-tested (it's a chain-dep closure, like the public ladder — only the pure
+  `decidePrivateFuelClaim` is unit-tested); the integration is proven by typecheck + P4 live + the P2 network-e2e.
+- **NEXT (last P3-B piece): no-fuel L7.** The claim dep still defaults `fee = sponsored` for NO-fuel records
+  (`:216`). Change to OMIT fee (→ wallet self-pays via PREEXISTING_FEE_JUICE) for FUNDED accounts + BLOCK cold
+  (zero-FJ) accounts. Research item: how to read the FeeJuice public balance to detect "cold" (a scoped
+  balance_of_public sim, or a node storage read) — may need a manifest scope addition. Then P4 (live) + P5.
