@@ -48,7 +48,7 @@ Sources: [draft-main.md](draft-main.md) · [draft-codex.md](draft-codex.md) · [
 - `flows.ts`: add `fuelSecret?: Fr` to `SwapBridgeParams`; private path sets `fuelRecipient = derivePrivateFpcAddress()` + injected derived secret; public path byte-identical. Persist `bridgeSecretSalt` + `fpc` via the existing `onSecrets` ordering (before the irreversible tx).
 **Validation gate:** `bun run --cwd packages/bridge-core typecheck && bun run --cwd packages/bridge-core test`. Pins: private witness `fuelSecretHash === computeSecretHash(deriveBridgeSecret(salt, claimer))`; public witness bytes unchanged (golden vs `l1.test.ts`). Layers: unit. **PASSED** (107/107; injected secret binds the on-chain `fuelSecretHash`; public path byte-identical; `privateMintAndPayFee` feePayer=FPC + 2-call payload).
 
-### P2 — wallet: scope + simulate the cold-start private EXTERNAL payload (NO new mode — L5)
+### P2 (in progress — manifest ✓) — wallet: scope + simulate the cold-start private EXTERNAL payload (NO new mode — L5)
 - `faucet/src/lib/capabilities.ts` bridge manifest: add the PrivateFPC to `contracts`; scope `{ FeeJuice, "claim" }` + `{ FPC, "mint_and_pay_fee" }` in BOTH `transaction.scope` and `simulation.transactions.scope` (the existing `claim_and_end_setup` stays for public fjwc).
 - Bridge session: explicit `registerContract` for the PrivateFPC (belt-and-suspenders so the EXTERNAL sim never hits "Function artifact not found", even though `FpcService` auto-discovers it).
 - Gas: confirm dApp-supplied explicit `maxFeesPerGas`/`teardownGas=0` survives `applyEmbeddedFpcGasCap` for the 2-call payload (extend `embedded-fpc-cap.test.ts`).
