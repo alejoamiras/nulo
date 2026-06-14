@@ -36,3 +36,22 @@ PRIVATE (default) + PUBLIC — with fuel as a shared add-on below (now enabled f
 - Test migration (~9 cases across `BridgeForm.test.ts` + `BridgeForm.fuel.test.ts`): public→private default
   inverts; `bridgePrivacyToggle` clicks → card clicks; the two guard tests (private→fuel-off, private→no-fuel-note)
   invert to "private CAN carry private fuel".
+
+## P3-B progress (loop fire 2)
+- **Deposit leg DONE** (74baa9b): private fuel routes `fuelRecipient=PRIVATE_FPC_ADDRESS`, the secret is
+  `deriveBridgeSecret(salt, claimer)` (not random), and `bridgeSecretSalt`/`fpc` are written to the journal
+  fuel block. Public path byte-identical. faucet typecheck + biome green.
+- **Claim branch NEXT** (the Option-A private path in `useDeposit.ts`'s `claim` dep). Two research items to
+  resolve FIRST (don't guess — L14-critical per codex):
+  1. **gasSettings passing:** how does the faucet supply explicit `maxFeesPerGas` (current-min) + `teardownGas=0`
+     through `bridge.methods.claim_private(...).send({ from, fee })`? Wonderland's method `getGasSettings()` is
+     undefined; the extension's `applyEmbeddedFpcGasCap` fills `maxFeesPerGas` from node min-fees when omitted but
+     does NOT zero teardown. Verify the SendOptions/fee gasSettings shape (check the extension's send path +
+     aztec.js). A non-zero teardown can break `mint_and_pay_fee`'s `gasLimits*maxFeesPerGas <= amount` assert.
+  2. **insufficiency classifier:** the narrow retry allow-list needs the exact error shape of a pre-inclusion
+     `mint_and_pay_fee` insufficiency (no typed selector exists — string-match). Find the failure form; default
+     fail-closed to `wait` otherwise. NEVER public/Sponsored.
+- Budget gate: use `fuel.received >= BRIDGE_FUEL.minFuelFj` (calibrated 2x-fee floor) as the conservative
+  pre-claim fail-closed proxy; refine to `requiredBudget = maxGasCostFor(explicit gas)` once (1) is known.
+- WIP note: until the claim branch lands, a private+fuel deposit writes to the FPC but the claim still hits the
+  public ladder (would fail, not leak — the FJ is FPC-bound). Branch-only intermediate; not shippable yet.
