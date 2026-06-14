@@ -85,3 +85,21 @@ PRIVATE (default) + PUBLIC — with fuel as a shared add-on below (now enabled f
   (`:216`). Change to OMIT fee (→ wallet self-pays via PREEXISTING_FEE_JUICE) for FUNDED accounts + BLOCK cold
   (zero-FJ) accounts. Research item: how to read the FeeJuice public balance to detect "cold" (a scoped
   balance_of_public sim, or a node storage read) — may need a manifest scope addition. Then P4 (live) + P5.
+
+## No-fuel L7 — codex verdict (session Hg9e0Nid) + SCOPE FINDING (loop fire 5)
+Codex: faucet-side `FeeJuice.balance_of_public` (scope it in `simulation.transactions`), hard-block no-fuel
+at the FORM + re-check at claim — but **"omit fee" alone does NOT guarantee never-sponsored end-to-end**:
+- [CRIT] the extension popup AUTO-SELECTS sponsored when available (`FeeSettingsCard.vue:249`, pinned in
+  `FeeSettingsCard.test.ts:233`). So omit-fee → PREEXISTING_FEE_JUICE is true at the account layer but the
+  wallet UX still auto-picks sponsored. Strict end-to-end never-sponsored needs an EXTENSION change too.
+- [HIGH] the claim simulate gate is NOT a cold detector (`view-executor.ts:329` defaults skipFeeEnforcement
+  true; the journal gate treats simulate-success as ready) → a cold account passes simulate, fails at send.
+- [HIGH] do NOT change the shared `fee` default (`useDeposit.ts:304`) — it also mutates the FUELED sponsored
+  fallback + the journal UI advertises sponsored recovery. Isolate the no-fuel path explicitly.
+- [OK] balance_of_public is the right source (mirror `gas-balance-reader.ts:83`); omission syntax is fine
+  (planner maps no-embedded-fee → PREEXISTING_FEE_JUICE, `operation-planner.test.ts:213`).
+
+**Scope fork (USER decision needed):** "strictly never sponsored" — faucet-only (faucet never SENDS
+sponsored + block cold; funded accounts = the wallet chooses, may auto-sponsor) vs cross-package (also stop
+the extension auto-sponsoring the dApp no-fuel claim). The private-fuel HEADLINE is DONE + green (329/329);
+no-fuel L7 + the sandbox-gated P2/P4 all need the user. Loop paused here pending that decision + the sandbox.
