@@ -120,6 +120,28 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 								<Text color="secondary"> on </Text>
 								<AddressDisplay :address="action.kind === 'call' ? action.contract : action.to" />
 							</template>
+							<!-- add_public_authwit grants a PERSISTED on-chain spend
+								authorization to a named caller. Surface the spender +
+								method + contract + args so the user SEES who they are
+								authorizing and to do what — not a generic label (audit F2). -->
+							<template v-else-if="action.kind === 'add_public_authwit'">
+								<Text weight="600">Authorize public spend</Text>
+								<template v-if="action.content.kind === 'call'">
+									<Text color="secondary"> — spender </Text>
+									<AddressDisplay data-testid="execute-authwit-spender" :address="action.content.caller" />
+									<Text color="secondary"> for </Text>
+									<Text weight="600">{{ humanizeMethodName(action.content.method) }}</Text>
+									<Text color="secondary"> on </Text>
+									<AddressDisplay :address="action.content.contract" />
+									<template v-if="action.content.args?.length">
+										<Text color="secondary"> args </Text>
+										<Text data-testid="execute-authwit-args">{{ action.content.args.map((a) => String(a)).join(", ") }}</Text>
+									</template>
+								</template>
+								<template v-else>
+									<Text color="secondary"> ({{ action.content.kind }}) </Text>
+								</template>
+							</template>
 							<template v-else>
 								{{ action.kind.replace("_", " ") }}
 							</template>

@@ -42,3 +42,27 @@ aggravation.
 ## 4. Codex retry (offline→reconnected) — no usable verdict (echoed context,
 did not complete). The Opus audit is the audit of record; its F1 finding is
 corroborated by the plan's own D7v2 design intent.
+
+## F2/F3 resolution (user: fix both)
+
+- **F2 FIXED (HIGH):** OperationCard.vue now renders an `add_public_authwit`
+  action's spender (caller) / method / contract / args on the primary
+  approval surface (testids `execute-authwit-spender`, `execute-authwit-args`),
+  replacing the opaque "add public authwit" label. Regression-pinned by
+  OperationCard.authwit.test.ts (asserts spender+token+args render, opaque
+  label absent).
+- **F3 RESOLVED (MED):** the audit's stated minimum ("render caller+args") is
+  satisfied by F2. Literal "scope-bind the caller" is NOT implemented, by
+  analysis:
+  - `TransactionCapability.scope` is `Scope` = `"*"` | `{contract,function}[]`
+    — there is NO caller dimension (capabilities.ts:42-45). Adding one is a
+    capability-schema extension (types + cap-request UI + enforcement), not a
+    quick fix, and would BREAK the legitimate case (a DEX/contract spender is
+    never in an allowlist).
+  - The authwit binds funds to the SIGNER: on-chain `_validate_from_public`
+    requires `from == authwit signer`, so a dApp can only grant authority over
+    the GRANTER's OWN funds — no third-party theft. Residual risk ("authorize
+    spender X to move MY funds to Y for Z") is now fully VISIBLE via F2 +
+    popup-confirmed. Consistent with the existing checkCreateAuthWit precedent
+    (contract+function only). Recorded as a deliberate decision; a
+    transaction-capability `allowedCallers` field is a possible future feature.
