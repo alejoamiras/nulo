@@ -37,11 +37,11 @@ Sources: [draft-main.md](draft-main.md) · [draft-codex.md](draft-codex.md) · [
 
 ## Phases
 
-### P0 ✓ (code green; ⚠ live-reconcile BLOCKED) — Safety keystone (determinism + secret parity + schema; RISKIEST FIRST, moves no funds)
+### P0 ✓ — Safety keystone (determinism + secret parity + schema; RISKIEST FIRST, moves no funds)
 - bridge-core shared helper: `deriveBridgeSecret(salt, claimer)`, `privateFuelSecretHash(salt, claimer)`, pinned `PRIVATE_FPC_ADDRESS` (test re-derives from the bundled `215fd08` artifact — see the design note below). Journal `DepositFuelBlock` gains optional `bridgeSecretSalt?`/`fpc?` (`fuelPrivacy` dropped — `record.isPrivate` is the single source of truth per L10); schema-semantics comment made coherent.
 - Keystone test: `deriveBridgeSecret` byte-equals the Noir constant (`DOM_SEP === 3952304070`, verified) + pinned secret/secretHash vectors for 3 cases incl. `salt=0`/`claimer=0`. Address tripwire re-derives from the installed artifact and pins the string; `scripts/check-fpc-version.ts` records + reconciles live `node_getNodeInfo.nodeVersion`.
 - **Design (L2/L15):** the FPC address is a PINNED CONSTANT + a CI re-derivation tripwire, NOT a runtime re-derive — bridge-core bundles into the faucet browser build, the raw 2.2 MB artifact is outside the package `exports`, and Wonderland's JS wrapper pulls `@aztec/aztec.js` (`document`/`window`). Pinning is strictly fail-closed: the runtime never reads the mutable artifact, so it can't silently drift; a Wonderland bump fails the tripwire → conscious re-pin + re-canary. See `lessons/phase-0.md`.
-**Validation gate:** `bun run --cwd packages/bridge-core test` (keystone + address-tripwire green) — **PASSED** (104/104; `DOM_SEP=3952304070`, `PRIVATE_FPC_ADDRESS=0x1b1706cc0947eca1de6527562af65d43e95540f9009a896dcd847afea92ede1e`, matches the wallet's derivation by construction). Live `nodeVersion` reconcile — **BLOCKED: testnet 4.3.1 vs artifact 4.2.0 (mismatch ⇒ STOP per Ask 1).** Address pinned + tripwire-guarded; canary-or-rebump decision is a user gate before P4. Layers: unit + read-only live RPC.
+**Validation gate:** `bun run --cwd packages/bridge-core test` (keystone + address-tripwire green) — **PASSED** (104/104; `DOM_SEP=3952304070`, `PRIVATE_FPC_ADDRESS=0x1b1706cc0947eca1de6527562af65d43e95540f9009a896dcd847afea92ede1e`, matches the wallet's derivation by construction). Live `nodeVersion` reconcile — **RESOLVED: testnet 4.3.1, user-confirmed backward-compatible with the 4.2.0 artifact (Ask 1); no re-pin.** Address pinned + tripwire-guarded; the P4 dust canary stays the on-network proof. Layers: unit + read-only live RPC.
 
 ### P1 — bridge-core private-fuel plumbing + headless proof scaffolding
 - `fee-juice.ts`/new `fpc.ts`: `privateMintAndPayFee(fpc, amount, secret, salt, leafIndex)` wrapping Wonderland's method (keeps the dependency in one place). Add `@wonderland/aztec-fee-payment` to `bridge-core/package.json` (same tarball pin).
@@ -100,7 +100,7 @@ Sources: [draft-main.md](draft-main.md) · [draft-codex.md](draft-codex.md) · [
 - Testnet's Aztec version matches the `215fd08` bytecode → the derived address is the network's (P0 verifies).
 
 **Asks** (gate decisions):
-1. **Version reconciliation (BLOCKING before P4):** confirm live testnet `nodeVersion` ↔ the `215fd08` tarball yields the address the network recognizes; who owns the version pin?
+1. **Version reconciliation — RESOLVED (user, 2026-06-14):** testnet runs nodeVersion 4.3.1; the user confirmed 4.3.1 is backward-compatible and has DEPLOYED everything 4.2.0 has, so the 4.2.0-derived `PRIVATE_FPC_ADDRESS` is valid on testnet — no re-pin / no stack bump. `check-fpc-version.ts` now guards only MAJOR drift; the P4 dust canary stays the on-network proof.
 2. **No-fuel cold-start — RESOLVED (user chose BLOCK):** a cold zero-FJ account cannot self-pay a no-fuel claim on the dApp path; rather than a Sponsored fallback, the faucet BLOCKS the no-fuel claim for cold accounts with guidance (enable fuel, or fund first) and NEVER sends Sponsored — honoring the original "never send Sponsored" rule. The forced-Sponsored branch is deleted (L7/L13).
 3. **FPC address home:** deployment config vs generated snapshot/test-only? (Sufficiency source-of-truth — quote vs floor vs received — is RESOLVED in L11: the gate binds to `minFuelOutput` + `fuel.received`, never the quote.)
 4. **Dust-canary policy:** every promote vs only on artifact/version change?

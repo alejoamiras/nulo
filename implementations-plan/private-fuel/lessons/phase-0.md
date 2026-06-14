@@ -1,6 +1,6 @@
 # Phase 0 — safety keystone (determinism + secret parity + schema)
 
-Status: **code green, live-version reconciliation RED (surfaced — Ask 1).** Moves no funds.
+Status: **code green; Ask 1 (version gap) RESOLVED — testnet 4.3.1 backward-compatible with the 4.2.0 artifact (see foot).** Moves no funds.
 
 ## What shipped
 - `packages/bridge-core/src/private-fuel.ts` — `deriveBridgeSecret`, `privateFuelSecretHash`, `DOM_SEP__FPC_BRIDGE_SECRET`, pinned `PRIVATE_FPC_ADDRESS`.
@@ -27,7 +27,7 @@ This is **strictly stronger** than literal runtime re-derivation for fail-closed
 ## Schema refinement over plan L8
 Plan L8 listed `bridgeSecretSalt?`/`fpc?`/`fuelPrivacy?`. **Dropped `fuelPrivacy`** — gas-follows-token (L10) makes `record.isPrivate` the single source of truth for fuel privacy; a separate field would be denormalized and could disagree. Added only `bridgeSecretSalt?` + `fpc?`. The codex "root-schema bug" (L8 condition) addressed by clarifying that the per-record `schema` (1|2) is distinct from the storage envelope version (always 1), is redundant with `!!fuel` for deposits, and that private-fuel fields are additive WITHIN schema 2 (no bump).
 
-## ⚠ HEADLINE FINDING — live version mismatch (Ask 1, BLOCKING before P4)
+## Version finding (Ask 1) — as-discovered (RESOLVED at foot)
 `check-fpc-version.ts` against `https://rpc.testnet.aztec-labs.com`:
 - **network `nodeVersion = 4.3.1`** (l1ChainId 11155111, rollupVersion 4127419662)
 - **our pin = 4.2.0** (whole stack + the Wonderland artifact)
@@ -45,4 +45,13 @@ Analysis (moderate confidence):
 ## Gate result
 - `bun run --cwd packages/bridge-core typecheck` → exit 0.
 - `bun run --cwd packages/bridge-core test` → 16 files, **104/104** green (private-fuel 5/5 + no journal regressions).
-- `check-fpc-version.ts` → **mismatch reported, exits non-zero** (fail-closed, as designed).
+- `check-fpc-version.ts` → records versions; MAJOR-only fail-closed guard (minor 4.2↔4.3 is backward-compatible).
+
+## Ask 1 RESOLVED (user, 2026-06-14)
+The version gap is NOT a blocker. The user confirmed the live testnet (4.3.1) is backward-compatible
+with — and has DEPLOYED — everything 4.2.0 has, including the PrivateFPC class. So the 4.2.0-derived
+`PRIVATE_FPC_ADDRESS` is the address the network recognizes; no re-pin, no stack bump. This matches the
+independent evidence (the public-fuel bridge already runs a 4.2.0 client against this 4.3.1 testnet).
+`check-fpc-version.ts` softened from a major.minor-equality hard-fail to a MAJOR-only guard (minor diffs
+are backward-compatible); the P4 dust canary remains the cheap belt-and-suspenders on-network proof.
+P1–P5 proceed on the 4.2.0 pin.

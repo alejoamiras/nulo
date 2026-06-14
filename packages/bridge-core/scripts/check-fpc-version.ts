@@ -29,6 +29,7 @@ function resolvePackageFile(pkg: string, file: string): string {
 }
 
 const majorMinor = (v: string): string => v.replace(/^v/, "").split(".").slice(0, 2).join(".")
+const major = (v: string): number => Number(v.replace(/^v/, "").split(".")[0])
 
 async function main() {
 	const pkg = JSON.parse(readFileSync(resolvePackageFile("@wonderland/aztec-fee-payment", "package.json"), "utf8"))
@@ -47,16 +48,28 @@ async function main() {
 	console.log("artifact @aztec    :", artifactAztecVersion, `(@wonderland/aztec-fee-payment ${pkg.version})`)
 	console.log("pinned FPC address :", PRIVATE_FPC_ADDRESS)
 
-	if (majorMinor(info.nodeVersion) !== majorMinor(artifactAztecVersion)) {
+	// Aztec testnet is backward-compatible across MINOR bumps — a 4.2.0-compiled contract class is
+	// supported + deployed on 4.3.x (confirmed for the live testnet, 2026-06-14). Only a MAJOR bump
+	// risks changing the contract-class-id / private-proving so the pinned address or the class is
+	// rejected; that is the fail-closed gate. The P4 dust canary stays the authoritative on-net proof.
+	if (major(info.nodeVersion) !== major(artifactAztecVersion)) {
 		console.error(
-			`\n✗ VERSION MISMATCH — network ${majorMinor(info.nodeVersion)} vs artifact ${majorMinor(artifactAztecVersion)}.\n` +
-				"  The pinned FPC address may not be the one the network recognizes. Do NOT deposit real Fee Juice\n" +
-				"  until: (1) a matching Wonderland artifact is pinned + the bridge-core address tripwire re-greened,\n" +
-				"  OR (2) a live dust-canary round-trips a minimal claim against this exact address (see plan P4).",
+			`\n✗ MAJOR VERSION MISMATCH — network ${majorMinor(info.nodeVersion)} vs artifact ${majorMinor(artifactAztecVersion)}.\n` +
+				"  A major bump can change contract-class-id / private proving, so the pinned FPC address and the\n" +
+				"  4.x-compiled class may not be accepted. Do NOT deposit real Fee Juice until either a matching\n" +
+				"  Wonderland artifact is pinned (re-green the bridge-core address tripwire) OR a live dust canary\n" +
+				"  round-trips a minimal claim against this address (plan P4).",
 		)
 		process.exit(1)
 	}
-	console.log("\n✓ network and artifact major.minor agree.")
+	if (majorMinor(info.nodeVersion) !== majorMinor(artifactAztecVersion)) {
+		console.log(
+			`\n✓ same major; network ${majorMinor(info.nodeVersion)} vs artifact ${majorMinor(artifactAztecVersion)} (minor diff,\n` +
+				"  backward-compatible). The dust canary (plan P4) remains the on-network proof before scaling.",
+		)
+	} else {
+		console.log("\n✓ network and artifact major.minor agree.")
+	}
 }
 
 main().catch((e) => {
