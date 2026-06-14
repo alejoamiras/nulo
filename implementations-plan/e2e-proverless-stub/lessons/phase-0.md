@@ -59,8 +59,12 @@ Two standalone builds:
   because DCE already removed everything. ✓
 
 ### On-chain validation (0a / 0b)
-- 0a (proverless `transfers` mines through the full extension RPC path): _running_.
-- 0a (one dApp `sendTx` mined; `multi-account-from` ×3 → D7): _pending_.
+- 0a via `transfers.test.ts`: **stalls — but NOT a proverless fault.** Diagnosed (journal+logs dumped to `/tmp/spike-result.json`): the wallet **send form crashes** before any tx is created — `AmountCard.handleAmountInput` calls `purgeNumber(model.value)` (`AmountCard.vue:33`) with NO null guard (unlike the guarded `:91`/`:105`), and `model.value` is null when the e2e helper dispatches the synthetic `input` event → `TypeError: Cannot read properties of null (reading 'replace')` (`amount.ts:43`). The journal stays EMPTY (`progression: ["t=0.0s []"]`); the tx is never built. This is a pre-existing UI null-gap, structurally UPSTREAM of proving (proverEnabled:false only affects the offscreen `proveTx` step, after simulate/submit). `transfers` passes in CI, so the send form works there — this is a local input-timing artifact. **`transfers` is therefore a poor LOCAL 0a probe** (depends on the fragile wallet send form, which also has a real latent NPE worth a separate fix).
+  - **Pivot:** validate the proverless tx path via a **dApp `sendTx`** flow (playground → execute popup), which bypasses AmountCard entirely — exactly what the canaries + `cancel-mid-prove` use, and what 0a's "dApp sendTx mined" item requires.
+- 0a (dApp `sendTx` mined; `multi-account-from` ×3 → D7): _running (pivoted spike)_.
 - 0b (barrier hold/release end-to-end + semantics through the offscreen): _pending_.
+
+### Side-finding (out of arc scope, logged for a follow-up)
+`AmountCard.vue:33` `purgeNumber(model.value)` is a latent NPE when `model.value` is null (the input handler fires before the model is a string). Trivially fixable (`model.value ?? ""`). Not fixing here (no scope beyond plan.md); CI is unaffected (transfers green there). Worth a standalone `fix(send):` PR.
 
 LESSONS_FILE=implementations-plan/e2e-proverless-stub/lessons/phase-0.md

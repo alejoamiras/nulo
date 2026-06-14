@@ -2,6 +2,7 @@ import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { waitForPopup, waitForExecuteContent, approveCapabilities, approveExecute } from "../fixtures/popups"
+import { holdProofGate, releaseProofGate } from "../fixtures/proof-gate"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -100,21 +101,35 @@ test.skipIf(!hasConfig)(
 		await clickByTestId(page, "pg-btn-sendTx-default")
 		const execPopup = await execPopupP
 		await waitForExecuteContent(execPopup)
+		// Hold the proof gate BEFORE approving so the tx parks in `proving`
+		// deterministically. No-op under real proving (no offscreen listener
+		// in non-proverless builds); load-bearing under proverless, where prove
+		// otherwise collapses to sub-second and the cancel would land post-submit.
+		await holdProofGate(execPopup)
 		await approveExecute(execPopup)
 
 		// Open the wallet popup; wait for the in-flight awaiting card to render.
-		// 30s budget covers the wallet's journal `awaiting` UI transition after
-		// approve — with accelerator-server doing native bb proving, prove-start
-		// is ≤2s on CI runners (vs >90s on slow runners under the WASM baseline
-		// that motivated the prior 90s bump).
 		const walletPopup = await openPopup(dappConnectedExtension)
 		await walletPopup.waitForSelector('[data-testid="tx-awaiting-card"]', { timeout: 30_000 })
+
+		// D13 prove-entered marker: with the gate holding, the in-flight card is
+		// parked at `proving` (the coordinator journals `proving` at :156, BEFORE
+		// proveTx). Asserting it here proves the cancel below is honored AFTER
+		// prove-start — the structured 4001 alone cannot distinguish a cancel that
+		// fired before prove from one dropped after it.
+		await walletPopup.waitForFunction(
+			() => document.querySelector('[data-testid="tx-awaiting-card"]')?.getAttribute("data-stage") === "proving",
+			{ timeout: 30_000 },
+		)
+
 		// The cancel button is hidden during `submitting` (FSM forbids that
 		// transition). It's present during `pending` / `simulating` / `proving`.
-		// On a sandbox network the prove phase dominates; this selector should
-		// be live well before submit.
 		await walletPopup.waitForSelector('[data-testid="tx-awaiting-cancel"]', { visible: true, timeout: 30_000 })
 		await clickByTestId(walletPopup, "tx-awaiting-cancel")
+
+		// Release the gate so proveTx returns; the coordinator's post-prove
+		// checkCancelled (:160) then honors the cancel, dropping the proof → 4001.
+		await releaseProofGate(walletPopup)
 
 		// dApp-side rejection arrives once the SW catches the cancel.
 		const result = await waitForPgResult(page, "sendTx", seqTx, 60_000)
