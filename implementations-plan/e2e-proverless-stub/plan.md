@@ -63,7 +63,9 @@ The controllable stub MUST be a first-class, typed, single-responsibility collab
 - Implement the D1-winning approach (proveTx-wrap or stub prover) in `aztec-runtime`, barrier injected from the shell; `fixtures/proofGate.ts` (`holdProofGate`/`releaseProofGate`); event-driven + safety-timeout.
 - **Gate**: `bun run lint` + `bun run test` (stub unit: instant-by-default, holds-on-gate, releases, times-out-loud) + `bun run e2e:agent tests/e2e/network/cancel-mid-prove.test.ts tests/e2e/network/concurrent-sendtx-approve.test.ts` green deterministically. (lint · unit · e2e-network)
 
-### Phase 3 — confirm ordering assert + reclassification + drop authwit gate (0.5d)
+### Phase 3 — confirm ordering assert + reclassification + drop authwit gate (0.5d) — ✓ COMPLETE
+**Outcome (lessons/phase-3.md):** concurrent-sendtx-confirm gains the deterministic ordering assert (T1 held at `proving` + T2 `queued` → both confirm), green proverless. Authwit-gate drop is N/A on dev (cross-arc dep on the unmerged PR #85; deferred). Reclassification (multi-account-from, tx-sendTx-noFrom → PLAIN) folded into Phase 4's canary set.
+
 - `concurrent-sendtx-confirm`: hold T1 mid-prove → assert T2 `queued` while T1 active (new deterministic ordering assert) → release → both `ok`, `r2.seq>r1.seq`.
 - Drop `!authwitE2eEnabled` from `authwit-consume-smoke.test.ts` + `authwit-lifecycle.test.ts` (rejoin the pool).
 - **Gate**: `bun run e2e:agent` on confirm + both authwit files → green, not skipped, fast. (e2e-network)
