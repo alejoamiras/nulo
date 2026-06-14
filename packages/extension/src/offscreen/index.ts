@@ -1,6 +1,5 @@
 import { ACCELERATOR_HOST, ACCELERATOR_PORT, ACCELERATOR_REQUIRED, ACCELERATOR_REQUIRED_BUILD_STAMP } from "@/accelerator/config"
 import { E2E_PROVERLESS, E2E_PROVERLESS_BUILD_STAMP } from "@/e2e/config"
-import { ChromeStorageProofGate } from "@/e2e/chrome-storage-proof-gate"
 import { consoleMethods, LogLevel } from "@/wallet/logger"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
@@ -82,9 +81,10 @@ const t0 = Date.now()
 await createPxeOffscreen({
 	profiles: new ProfileServiceClient(),
 	logger: new LoggerServiceClient(),
-	// E2E_PROVERLESS and the ChromeStorageProofGate are referenced ONLY
-	// inside these flag-gated branches so DCE strips them — and the gate's
-	// chrome.storage listener — from every non-proverless build.
+	// E2E_PROVERLESS builds the proverless PXE (proverEnabled:false, no
+	// AcceleratorProver) — referenced only in this flag-gated branch so DCE
+	// strips it from prod. The controllable barrier lives SW-side (the
+	// offscreen has no chrome.storage); see ExecutionCoordinator's ProofGate.
 	factory: E2E_PROVERLESS
 		? new ProductionPxeFactory(undefined, { proverless: true })
 		: ACCELERATOR_REQUIRED
@@ -94,7 +94,6 @@ await createPxeOffscreen({
 					port: ACCELERATOR_PORT,
 				})
 			: undefined,
-	proofGate: E2E_PROVERLESS ? new ChromeStorageProofGate() : undefined,
 })
 logger.log("pxe", LogLevel.Info, `Offscreen services initialized (${Date.now() - t0}ms)`)
 

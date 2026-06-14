@@ -1,4 +1,4 @@
-import type { ProofGate } from "@nulo/aztec-runtime/pxe"
+import type { ProofGate } from "./proof-gate"
 
 /**
  * Storage key the e2e proof gate watches. A test sets it (any value) to

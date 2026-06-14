@@ -26,6 +26,8 @@ import { ContactService } from "./services/contact/service"
 import { DappInteractionService } from "./services/dapp-interaction/service"
 import { DappSessionService } from "./services/dapp-session/service"
 import { ExecutionService } from "./services/execution/service"
+import { E2E_PROVERLESS } from "@/e2e/config"
+import { ChromeStorageProofGate } from "@/e2e/chrome-storage-proof-gate"
 import { FpcService } from "./services/fpc/service"
 import { LogViewerService } from "./services/log-viewer/service"
 import { LoggerService } from "./services/logger/service"
@@ -115,7 +117,10 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		services.add(new ContactService(logger, browserApi))
 		services.add(new DappInteractionService(logger, windowManager))
 		services.add(new DappSessionService(logger))
-		services.add(new ExecutionService(logger))
+		// E2E_PROVERLESS injects the chrome.storage-backed proof gate here (the
+		// SW has chrome.storage; the offscreen does not). Referenced ONLY in
+		// this flag-gated expression so DCE strips the gate from prod builds.
+		services.add(new ExecutionService(logger, E2E_PROVERLESS ? new ChromeStorageProofGate() : undefined))
 		services.add(new FpcService(logger))
 		services.add(new LogViewerService(logger))
 		services.add(new LoggerService(logger))
