@@ -55,3 +55,19 @@ PRIVATE (default) + PUBLIC — with fuel as a shared add-on below (now enabled f
   pre-claim fail-closed proxy; refine to `requiredBudget = maxGasCostFor(explicit gas)` once (1) is known.
 - WIP note: until the claim branch lands, a private+fuel deposit writes to the FPC but the claim still hits the
   public ladder (would fail, not leak — the FJ is FPC-bound). Branch-only intermediate; not shippable yet.
+
+## P3-B research RESOLVED + decider done (loop fire 3)
+- **Classifier:** the insufficiency assert is `"Amount too low to cover gas cost"` — CONFIRMED present in the
+  INSTALLED 215fd08 artifact (not just the clone). `isPrivateFuelInsufficiency()` string-matches it; fail-closed.
+- **gasSettings:** aztec.js `interaction_options.d.ts:33` — the send `fee.gasSettings?: Partial<FieldsOf<GasSettings>>`.
+  So the private claim passes `fee: { paymentMethod, gasSettings: { teardownGasLimits: Gas.empty() } }` and OMITS
+  maxFeesPerGas → the extension's `applyEmbeddedFpcGasCap` fills it with node current-min (1.0×, no padding =
+  exactly L14); teardownGasLimits passes through untouched. (Live-honored teardown=0 is validated at P4.)
+- **Decider DONE** (tested, 10 cases): `decidePrivateFuelClaim` + the classifier in `fuel-claim-state.ts`.
+  Its action type (`private-fpc`|`consumed`|`wait`) makes L11 structural — it CANNOT return sponsored/public.
+- **NEXT:** wire it into `useDeposit.ts`'s `claim` dep (Option-A branch at the top for private fueled records):
+  build `privateMintAndPayFee(fpc, fuel.received, deriveBridgeSecret(salt, claimer), salt, fuelLeaf)` + the
+  gasSettings above; latch claimAttempt journal-first; receipt-inclusion ⇒ consumed; on send-error run
+  `isPrivateFuelInsufficiency` for the retry; pre-claim budget `fuel.received >= minFuelFj`. Plus no-fuel L7
+  (omit fee + balance_of_public cold-block). Edge: included-but-app-reverted leaves FJ credited at the FPC →
+  recover via the FPC `pay_fee` (documented follow-up, not first-pass).
