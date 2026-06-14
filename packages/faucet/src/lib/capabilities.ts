@@ -256,6 +256,8 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 						// Simulatable so the private claim can be simulate-gated like the public fjwc one.
 						{ contract: FEE_JUICE_L2, function: "claim" },
 						{ contract: PRIVATE_FPC_L2, function: "mint_and_pay_fee" },
+						// No-fuel L7 cold-check: read the account's public Fee Juice balance to detect a cold account.
+						{ contract: FEE_JUICE_L2, function: "balance_of_public" },
 					],
 				},
 			},

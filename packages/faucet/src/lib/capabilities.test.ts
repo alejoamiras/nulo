@@ -249,6 +249,15 @@ describe("fuel claim scope (canonical FeeJuice)", () => {
 		expect(cap.contracts.map(String)).not.toContain(PRIVATE_FPC_ADDRESS)
 	})
 
+	it("scopes FeeJuice.balance_of_public for the no-fuel L7 cold-check (simulate only)", () => {
+		const m = buildCombinedManifest(combinedInput())
+		const hasFjBalance = (scope: { contract: unknown; function: string }[]) =>
+			scope.some((s) => String(s.contract) === feeJuiceAddress && s.function === "balance_of_public")
+		expect(hasFjBalance(simTxScope(m))).toBe(true)
+		// It is a read — NOT a send-scoped function.
+		expect(hasFjBalance(txScope(m))).toBe(false)
+	})
+
 	it("the FJ entry is exactly one function on one protocol contract - no wildcards", () => {
 		const m = buildBridgeManifest(bridgeInput())
 		const fj = txScope(m).filter((s) => String(s.contract) === feeJuiceAddress)

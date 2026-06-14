@@ -54,6 +54,7 @@ import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { ERC20_ABI } from "./useL1Usdc"
 import { useL1Wallet } from "./useL1Wallet"
+import { readBalance } from "./useTokenBalance"
 
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
 const log = (...args: unknown[]) => console.log("[bridge:deposit]", ...args)
@@ -184,6 +185,16 @@ export async function claimFuelStandalone(id: string): Promise<void> {
 	await sendStandaloneFjClaim(aztec, AztecAddress.fromString(rec.recipient), rec.fuel, id)
 }
 
+/** Read the account's PUBLIC Fee Juice balance — the cold-account detector for no-fuel claims. Uses the
+ *  FeeJuice contract's `balance_of_public` via the connected wallet (scoped in the bridge manifest's
+ *  simulation); mirrors the wallet's own gas-balance-reader. */
+async function readPublicFeeJuiceBalance(aztec: unknown, recipient: AztecAddress): Promise<bigint> {
+	const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
+	const fj = await Contract.at(AztecAddress.fromString(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
+	// readBalance unwraps the SDK's SimulationResult { result } + coerces to bigint (cf. useTokenBalance).
+	return readBalance(aztec as never, fj, "balance_of_public", recipient)
+}
+
 let depsWired = false
 
 /** Wire the journal engine's deposit-side chain deps (idempotent; real clients only). */
@@ -212,6 +223,15 @@ function wireDepositDeps(): void {
 			const fpc = await getSponsoredFpcInstance()
 			const sponsored = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
 			const bridge = await Contract.at(BRIDGE, tokenBridgeArtifact, aztec as never)
+			// A fail-stop {simulate, send} pair that surfaces `why` (used by the private + no-fuel guards).
+			const stop = (why: string) => ({
+				simulate: async () => {
+					throw new Error(why)
+				},
+				send: async () => {
+					throw new Error(why)
+				},
+			})
 
 			// Fueled records pick their payment via the L14 ladder (record-specific evidence only).
 			const fuel = rec.fuel
@@ -224,14 +244,6 @@ function wireDepositDeps(): void {
 				const fuelReceived = BigInt(fuel.received)
 				const fuelLeaf = new Fr(BigInt(fuel.leafIndex))
 				const salt = Fr.fromString(fuel.bridgeSecretSalt)
-				const stop = (why: string) => ({
-					simulate: async () => {
-						throw new Error(why)
-					},
-					send: async () => {
-						throw new Error(why)
-					},
-				})
 				// L15 kill-switch: the FJ landed at the pinned FPC. A drifted persisted address ⇒ FAIL-STOP
 				// (never claim to / trust a version-drifted FPC, never silently downgrade to public).
 				if (fb.fpc && fb.fpc !== PRIVATE_FPC_ADDRESS) {
@@ -301,7 +313,7 @@ function wireDepositDeps(): void {
 				}
 			}
 
-			let fee: { paymentMethod: unknown } = sponsored
+			let fee: { paymentMethod: unknown } | undefined = sponsored
 			let fjwcAttempt = false
 			let standaloneFj = false
 			if (fuel?.received && fuel.leafIndex) {
@@ -346,6 +358,25 @@ function wireDepositDeps(): void {
 						},
 					}
 				}
+			} else {
+				// NO-fuel (faucet-only L7): the faucet never SENDS Sponsored — OMIT the fee so the wallet
+				// self-pays from existing Fee Juice (PREEXISTING_FEE_JUICE). Cold (zero-FJ) accounts are
+				// blocked at the FORM; re-check here (the simulate gate doesn't enforce fees) for a clear
+				// message. A read error doesn't block — the form is the primary gate. (A funded account's
+				// wallet may still auto-pick Sponsored — "let the wallet choose", per the fee matrix.)
+				try {
+					if ((await readPublicFeeJuiceBalance(aztec, recipientAddr)) === 0n) {
+						return stop(
+							'You have no gas (Fee Juice) to claim this bridge. Enable "arrive with gas", or fund your account first.',
+						)
+					}
+				} catch (e) {
+					log(
+						"no-fuel cold-check read failed (proceeding; the form is the primary gate):",
+						e instanceof Error ? e.message : String(e),
+					)
+				}
+				fee = undefined
 			}
 
 			const interaction = () =>
@@ -353,13 +384,13 @@ function wireDepositDeps(): void {
 					? bridge.methods.claim_private(recipientAddr, amount, secret, leaf)
 					: bridge.methods.claim_public(recipientAddr, amount, secret, leaf)
 			return {
-				simulate: () => interaction().simulate({ from: recipientAddr, fee } as never),
+				simulate: () => interaction().simulate({ from: recipientAddr, ...(fee ? { fee } : {}) } as never),
 				send: async () => {
 					// L14 trigger-1 precondition: latch the attempt JOURNAL-FIRST, before the wallet call.
 					if (fjwcAttempt && fuel) updateRecord(rec.id, { fuel: { ...fuel, claimAttempt: true } })
 					const { receipt } = (await interaction().send({
 						from: recipientAddr,
-						fee,
+						...(fee ? { fee } : {}),
 						wait: { waitForStatus: TxStatus.PROPOSED },
 					} as never)) as { receipt: { txHash: unknown } }
 					const txHash = String(receipt.txHash)
@@ -447,6 +478,25 @@ export function useDepositFlow() {
 			// Fuel pre-flight BEFORE any record exists: quote-required (a missing quote must never
 			// sign away the slice with a junk floor), floor from config slippage.
 			const fuelSlice = opts.fuelSlice && opts.fuelSlice > 0n ? opts.fuelSlice : undefined
+
+			// No-fuel L7 (faucet-only): a cold (zero public-FJ) account can't claim a no-fuel bridge (the
+			// faucet never sends Sponsored) — BLOCK before depositing so tokens aren't bridged unclaimable.
+			// Funded ⇒ proceed (the wallet self-pays the claim). A read error doesn't block (the claim
+			// re-checks); never blocks a FUELED bridge (it brings its own gas).
+			if (!fuelSlice) {
+				try {
+					if ((await readPublicFeeJuiceBalance(aztec, AztecAddress.fromString(recipient))) === 0n) {
+						error.value =
+							'No gas (Fee Juice) to claim a no-fuel bridge. Turn on "arrive with gas", or fund your Aztec account first.'
+						return null
+					}
+				} catch (e) {
+					log(
+						"no-fuel cold-check (pre-deposit) read failed; proceeding (the claim re-checks):",
+						e instanceof Error ? e.message : String(e),
+					)
+				}
+			}
 			let fuelPre:
 				| { secret: Fr; secretHashHex: string; minOutput: bigint; route: ReturnType<typeof buildFuelRoute>; salt?: Fr }
 				| undefined
