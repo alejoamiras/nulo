@@ -46,7 +46,7 @@ const fuelQuote = ref<{ state: "idle" | "loading" | "ok" | "error"; fj?: bigint;
 	state: "idle",
 })
 let quoteTimer: ReturnType<typeof setTimeout> | null = null
-const isPrivate = ref(false)
+const isPrivate = ref(true)
 const amount = ref("100")
 
 const bothConnected = computed(() => l1.isConnected.value && bridge.status.value === "connected")
@@ -148,9 +148,9 @@ async function refreshFuelQuote() {
 	}
 }
 
-watch(isPrivate, (priv) => {
-	if (priv) fuelOn.value = false
-})
+// No isPrivate→fuel guard: gas follows the token (private fuel ships via the PrivateFPC), so a private
+// bridge CAN arrive with private gas. The impossible combo (private tokens + public gas) can't occur —
+// fuel privacy is driven solely by isPrivate, never an independent control.
 watch([fuelOn, fuelSlice, direction], () => {
 	if (quoteTimer) clearTimeout(quoteTimer)
 	if (!fuelOn.value || !fuelAvailable.value) return
@@ -194,7 +194,7 @@ async function onSubmit() {
 	if (direction.value === "l1-to-l2") {
 		await depositFlow.deposit(amountUnits.value, isPrivate.value, {
 			onRecord,
-			...(fuelOn.value && fuelAvailable.value && !isPrivate.value ? { fuelSlice: fuelSliceUnits.value } : {}),
+			...(fuelOn.value && fuelAvailable.value ? { fuelSlice: fuelSliceUnits.value } : {}),
 		})
 	} else {
 		await withdrawFlow.withdraw(amountUnits.value, isPrivate.value, { onRecord })
@@ -372,21 +372,18 @@ function fmt(b: bigint | null): string {
 		<p v-if="amountError" class="err-msg" :data-testid="TESTIDS.bridgeFormError">{{ amountError }}</p>
 		<p v-if="showMintHint" class="hint">No test {{ BRIDGE_TOKEN_SYMBOL }} on Sepolia yet - mint some below.</p>
 
-		<!-- HOW you bridge: privacy is a property of the bridge itself, decided before the fuel add-on. -->
-		<div class="opt-row">
-			<button
-				type="button"
-				class="toggle"
-				:class="{ on: isPrivate }"
-				:disabled="submitting"
-				:data-testid="TESTIDS.bridgePrivacyToggle"
-				:aria-pressed="isPrivate"
-				@click="isPrivate = !isPrivate"
-			>
-				<span class="knob" />
-			</button>
-			<span class="toggle-label">PRIVATE</span>
-		</div>
+		<!-- HOW it arrives: privacy presets (gas-follows-token); PRIVATE is the default. -->
+			<div class="flabel">How it arrives</div>
+			<div class="modes">
+				<button type="button" class="mode" :class="{ sel: isPrivate }" :disabled="submitting" :data-testid="TESTIDS.bridgePresetPrivate" :aria-pressed="isPrivate" @click="isPrivate = true">
+					<span class="mt">PRIVATE <span class="badge2">default</span></span>
+					<span class="md">Your tokens — and the gas, if you add it — land in your private Aztec balance, hidden from everyone.</span>
+				</button>
+				<button type="button" class="mode" :class="{ sel: !isPrivate }" :disabled="submitting" :data-testid="TESTIDS.bridgePresetPublic" :aria-pressed="!isPrivate" @click="isPrivate = false">
+					<span class="mt">PUBLIC</span>
+					<span class="md">Tokens and gas arrive visible on Aztec — anyone can see the amount and recipient. Cheapest and simplest.</span>
+				</button>
+			</div>
 		<p v-if="isPrivate" class="opt-note" :data-testid="TESTIDS.bridgePrivacyNote" :data-first="isFirstSeal ? 'true' : 'false'">
 			<template v-if="direction === 'l1-to-l2'">
 				Lands in your private Aztec balance. {{ isFirstSeal ? "Two quick Ethereum signatures (then one)" : "One Ethereum signature" }} lock the recovery key - it lives only in this browser.
@@ -395,7 +392,7 @@ function fmt(b: bigint | null): string {
 		</p>
 
 		<!-- ADD-ON: fuel (gas on arrival), only on L1->L2. -->
-		<div v-if="fuelAvailable && !isPrivate" class="opt-row">
+		<div v-if="fuelAvailable" class="opt-row">
 			<button
 				type="button"
 				class="toggle"
@@ -409,10 +406,7 @@ function fmt(b: bigint | null): string {
 			</button>
 			<span class="toggle-label">ARRIVE WITH GAS</span>
 		</div>
-		<p v-if="fuelAvailable && isPrivate" class="opt-note" :data-testid="TESTIDS.bridgeFuelPrivateNote">
-			Gas on arrival is available on public bridges — private gas is coming with private Fee Juice.
-		</p>
-		<div v-if="fuelOn && fuelAvailable && !isPrivate" class="fuel-config">
+		<div v-if="fuelOn && fuelAvailable" class="fuel-config">
 			<div class="fuel-slice-row">
 				<input
 					v-model="fuelSlice"
@@ -434,14 +428,15 @@ function fmt(b: bigint | null): string {
 					<template v-else>Fee Juice</template>
 				</span>
 			</div>
-			<p v-if="fuelQuote.state === 'ok'" class="opt-note">
-				Claimed with your tokens in one transaction.
-			</p>
+			<p v-if="fuelQuote.state === 'ok'" class="opt-note" :data-testid="isPrivate ? TESTIDS.bridgeFuelPrivateNote : undefined">
+					<template v-if="isPrivate">+ private gas — claimed with your tokens, fully private.</template>
+					<template v-else>Claimed with your tokens in one transaction.</template>
+				</p>
 			<p v-if="fuelError && fuelQuote.state !== 'error'" class="err-msg" :data-testid="TESTIDS.bridgeFuelError">{{ fuelError }}</p>
 		</div>
 
 		<AppButton :loading="submitting" :disabled="!bothConnected || submitting" :data-testid="TESTIDS.bridgeSubmit" @click="onSubmit">
-			{{ !bothConnected ? "CONNECT BOTH WALLETS" : direction === "l1-to-l2" ? "BRIDGE TO AZTEC" : "BRIDGE TO ETHEREUM" }}
+			{{ !bothConnected ? "CONNECT BOTH WALLETS" : direction === "l1-to-l2" ? (isPrivate ? "BRIDGE PRIVATELY TO AZTEC" : "BRIDGE TO AZTEC") : "BRIDGE TO ETHEREUM" }}
 		</AppButton>
 
 		<p v-if="flowError" class="err-msg" :data-testid="TESTIDS.bridgeFlowError">{{ flowError }}</p>
@@ -564,6 +559,63 @@ function fmt(b: bigint | null): string {
 	display: flex;
 	align-items: center;
 	gap: 10px;
+}
+
+.flabel {
+	font: 600 11px/1 var(--font-mono);
+	color: var(--txt-secondary);
+	letter-spacing: 0.06em;
+	margin-top: 2px;
+}
+
+.modes {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 8px;
+}
+
+.mode {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	padding: 11px 12px;
+	text-align: left;
+	background: transparent;
+	border: 1px solid var(--nulo-outline);
+	color: var(--txt-primary);
+	cursor: pointer;
+	transition: border-color 0.15s ease;
+}
+
+.mode.sel {
+	border-color: var(--nulo-accent);
+}
+
+.mode:disabled {
+	cursor: not-allowed;
+	opacity: 0.6;
+}
+
+.mode .mt {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font: 600 13px/1 var(--font-mono);
+	letter-spacing: 0.06em;
+}
+
+.mode .md {
+	font: 500 11px/1.5 var(--font-mono);
+	color: var(--txt-secondary);
+}
+
+.badge2 {
+	font: 600 9px/1 var(--font-mono);
+	letter-spacing: 0.08em;
+	color: var(--nulo-accent);
+	border: 1px solid var(--nulo-accent);
+	padding: 2px 4px;
+	text-transform: uppercase;
 }
 
 .fuel-config {
