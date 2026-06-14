@@ -45,6 +45,11 @@ if [ "${NULO_E2E_PROVERLESS:-}" = "1" ]; then
   VITE_NULO_E2E_PROVERLESS_CONFIRM=1 \
     bun run build:chrome
 else
+  # Scrub any inherited proverless flags so a non-proverless build (e.g. the
+  # prover-ON canary job) can't silently build proverless from leaked runner
+  # env — the double-opt-in would otherwise arm if both vars are already set
+  # (codex post-impl audit).
+  unset VITE_NULO_E2E_PROVERLESS VITE_NULO_E2E_PROVERLESS_CONFIRM
   VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" bun run build:chrome
 fi
 

@@ -9,20 +9,20 @@ import { PROOF_GATE_KEY } from "@/e2e/chrome-storage-proof-gate"
  * `chrome.storage.session`. The key literal is imported from the source so
  * the two halves of the contract can never drift.
  *
- * The gate holds inside `PxeService.proveTx` — after the execution
- * coordinator has journaled `proving` — so "held" means the transaction is
- * deterministically parked in its proving stage. Use it to snapshot ordering
- * / cancel behaviour, then release.
+ * The gate holds inside the SW `ExecutionCoordinator.proveTxTask` — after the
+ * coordinator has journaled `proving`, immediately before `pxe.proveTx` — so
+ * "held" means the transaction is deterministically parked in its proving
+ * stage. Use it to snapshot ordering / cancel behaviour, then release.
  *
- * Pass any extension-context page (popup, offscreen); `chrome.storage` is
- * shared across all extension contexts, so a write from the popup is seen by
- * the offscreen listener.
+ * Pass any extension-context page (popup, SW); `chrome.storage` is shared
+ * across extension contexts, so a write from the popup is seen by the SW
+ * coordinator's gate listener.
  */
 export async function holdProofGate(extensionPage: Page): Promise<void> {
 	await extensionPage.evaluate((key) => chrome.storage.session.set({ [key]: { held: true } }), PROOF_GATE_KEY)
 }
 
-/** Release a held gate; the offscreen listener resolves `proveTx` immediately. */
+/** Release a held gate; the SW coordinator's gate listener resolves `proveTx`. */
 export async function releaseProofGate(extensionPage: Page): Promise<void> {
 	await extensionPage.evaluate((key) => chrome.storage.session.remove(key), PROOF_GATE_KEY)
 }

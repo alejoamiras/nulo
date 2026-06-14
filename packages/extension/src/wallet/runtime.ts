@@ -117,9 +117,15 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		services.add(new ContactService(logger, browserApi))
 		services.add(new DappInteractionService(logger, windowManager))
 		services.add(new DappSessionService(logger))
-		// E2E_PROVERLESS injects the chrome.storage-backed proof gate here (the
-		// SW has chrome.storage; the offscreen does not). Referenced ONLY in
-		// this flag-gated expression so DCE strips the gate from prod builds.
+		// E2E_PROVERLESS injects a chrome.storage-backed proof gate into the SW
+		// ExecutionCoordinator (the SW has chrome.storage; the offscreen does not).
+		// `E2E_PROVERLESS` is a statically-false constant in prod builds, so this
+		// dead branch — and the otherwise-unused ChromeStorageProofGate import —
+		// is tree-shaken out (verified: prod dist contains neither the gate class
+		// nor the nulo:e2e:proof-gate key). NOTE: a dynamic `import()` here was
+		// tried and REJECTED — rollup emits a code-split chunk for it that SHIPS
+		// even when the call is dead, leaking the gate into prod dist. The
+		// _build-extension.yml negative grep is the enforcement that caught that.
 		services.add(new ExecutionService(logger, E2E_PROVERLESS ? new ChromeStorageProofGate() : undefined))
 		services.add(new FpcService(logger))
 		services.add(new LogViewerService(logger))

@@ -77,7 +77,9 @@ The controllable stub MUST be a first-class, typed, single-responsibility collab
 - `pr-network-e2e.yml`: shard matrix → `proverless:true`; `exclude_files` → the **explicit canary file list** (codex — NOT a count): `transfers.test.ts` + the dApp `sendTx` files that actually prove + mine (determined in Phase 0a; `tx-sendTx-noFrom` is excluded from the canary set and stays in the proverless pool). Replace the heavy jobs with prover-ON canary jobs built from that list; update `status` aggregation `needs` + loop.
 - **Gate**: `bun run lint:actions`; a full PR network-e2e run green — shard pool materially faster + no CDP timeouts; canary jobs show real `/prove` (BB SNARK) activity. (actionlint · e2e-network-CI)
 
-### Phase 5 — Arc close (0.5d)
+### Phase 5 — Arc close (0.5d) — ✓ COMPLETE
+**Outcome (lessons/phase-5.md):** docs (CI.md + e2e README) + self-review + codex post-impl audit (NO BLOCKER; 4 findings addressed — incl. a High where codex's dynamic-import suggestion was empirically rejected because rollup ships a code-split chunk → the negative grep caught the leak; kept the static import). PR to dev opened.
+
 - `/code-review max --fix` → codex post-impl audit (adversarial on the prod-guard) → fix loop → docs (CI.md/e2e README: proverless model + barrier protocol; update the accelerator-required notes) → single PR to dev.
 
 ## Security & Adversarial Considerations

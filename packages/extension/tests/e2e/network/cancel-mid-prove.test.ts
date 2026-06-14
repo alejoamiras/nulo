@@ -102,9 +102,9 @@ test.skipIf(!hasConfig)(
 		const execPopup = await execPopupP
 		await waitForExecuteContent(execPopup)
 		// Hold the proof gate BEFORE approving so the tx parks in `proving`
-		// deterministically. No-op under real proving (no offscreen listener
-		// in non-proverless builds); load-bearing under proverless, where prove
-		// otherwise collapses to sub-second and the cancel would land post-submit.
+		// deterministically. No-op under real proving (the SW gate listener isn't
+		// built in non-proverless builds); load-bearing under proverless, where
+		// prove collapses to sub-second and the cancel would land post-submit.
 		await holdProofGate(execPopup)
 		await approveExecute(execPopup)
 

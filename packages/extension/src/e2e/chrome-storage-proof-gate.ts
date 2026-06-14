@@ -33,10 +33,14 @@ const SAFETY_TIMEOUT_MS = 20_000
  *   forgotten hold can't bleed into a later test in the same session.
  *
  * Lives in the extension shell (touches `chrome.*`), NOT
- * `@nulo/aztec-runtime`. Constructed strictly inside the `if
- * (E2E_PROVERLESS)` branch in `offscreen/index.ts` so DCE removes it — and
- * its `onChanged` listener — from every non-proverless build. That absence
- * (not storage write-access) is the production trust boundary.
+ * `@nulo/aztec-runtime`, and runs in the SERVICE WORKER — the offscreen
+ * document has no `chrome.storage`. Constructed only inside the static-false
+ * `if (E2E_PROVERLESS)` branch in `wallet/runtime.ts` (a normal top-level
+ * import), so prod builds tree-shake this module — its `onChanged` listener +
+ * the `nulo:e2e:proof-gate` key — out entirely. (A dynamic `import()` was
+ * tried and rejected: rollup ships a code-split chunk for it even when dead.)
+ * That absence (not storage write-access) is the production trust boundary,
+ * enforced by the `_build-extension.yml` negative grep.
  */
 export class ChromeStorageProofGate implements ProofGate {
 	public async wait(): Promise<void> {

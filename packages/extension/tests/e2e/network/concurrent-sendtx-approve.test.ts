@@ -110,10 +110,9 @@ test.skipIf(!hasConfig)(
 				(el) => el.getAttribute("data-stage") ?? "?",
 			),
 		)
-		// Snapshot captured; release T1 so it isn't parked until the gate's
-		// safety timeout (no-op under real proving).
-		await releaseProofGate(walletPopup)
-		await walletPopup.close()
+		// Keep T1 HELD through the reject+assert below — otherwise (proverless) T1
+		// could settle `ok` first and the helper would catch it instead of T2's
+		// error (codex post-impl audit). walletPopup stays open for the release.
 
 		// Two in-flight cards at once: T1 active + T2 still queued behind it on the
 		// execution mutex. (≥2 tolerates any stray prior in-flight op.)
@@ -127,10 +126,15 @@ test.skipIf(!hasConfig)(
 		// jitter; the journal assertion above is the load-bearing one.
 		expect(elapsedMs).toBeLessThan(30_000)
 
-		// Reject popup #2 → T2's dApp promise settles as an error. T1 is left
-		// mid-prove and reaped at teardown (see header).
+		// Reject popup #2 while T1 is still held → T2's error is the FIRST sendTx
+		// result after seqBefore (T1 hasn't settled), so the helper can't catch
+		// T1's ok by mistake.
 		await rejectExecute(secondPopup)
 		const r = await waitForPgResult(page, "sendTx", seqBefore, 30_000)
 		expect(r.status).toBe("error")
+
+		// Release T1 (cleanup) so it isn't parked until the gate's safety timeout.
+		await releaseProofGate(walletPopup)
+		await walletPopup.close()
 	},
 )
