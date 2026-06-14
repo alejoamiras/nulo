@@ -12,17 +12,19 @@
  * can never silently strand funds.
  */
 import { PrivateMintAndPayFeePaymentMethod } from "@wonderland/aztec-fee-payment/fee-payment-methods"
-import { poseidon2HashBytes, poseidon2HashWithSeparator } from "@aztec/foundation/crypto/sync"
+import { poseidon2HashWithSeparator } from "@aztec/foundation/crypto/sync"
 import type { Fr } from "@aztec/aztec.js/fields"
 import type { AztecAddress } from "@aztec/aztec.js/addresses"
 import { computeSecretHash } from "@aztec/stdlib/hash"
 
 /**
- * Domain separator: `poseidon2_hash_bytes("az_dom_sep__fpc_bridge_secret") as u32`. Mirrors the
- * Noir constant `DOM_SEP__FPC_BRIDGE_SECRET`. Computed at load (cheap, sync) rather than pinned
- * as a literal so the keystone test's equality assertion is the single drift tripwire.
+ * Domain separator: `poseidon2_hash_bytes("az_dom_sep__fpc_bridge_secret") as u32`. Mirrors the Noir
+ * constant `DOM_SEP__FPC_BRIDGE_SECRET`. PINNED as a literal (NOT computed at load): a poseidon call at
+ * module-load time crashes non-node consumers — the faucet's jsdom test env throws `std::bad_cast`
+ * before Barretenberg is initialized, and merely importing this module would trigger it. The keystone
+ * test re-derives this in node (where bb is ready) and asserts equality — that is the drift tripwire.
  */
-export const DOM_SEP__FPC_BRIDGE_SECRET = Number(poseidon2HashBytes(Buffer.from("az_dom_sep__fpc_bridge_secret")).toBigInt() & 0xffff_ffffn)
+export const DOM_SEP__FPC_BRIDGE_SECRET = 3952304070
 
 /**
  * The PrivateFPC L2 address — deterministic from the INSTALLED Wonderland artifact

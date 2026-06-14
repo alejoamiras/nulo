@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { poseidon2HashBytes } from "@aztec/foundation/crypto/sync"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { loadContractArtifact } from "@aztec/stdlib/abi"
@@ -38,8 +39,11 @@ function resolvePackageFile(pkg: string, file: string): string {
 }
 
 describe("private-fuel keystone", () => {
-	it("DOM_SEP matches the Noir constant DOM_SEP__FPC_BRIDGE_SECRET", () => {
+	it("DOM_SEP literal equals the runtime poseidon derivation (drift tripwire) + the Noir constant", () => {
 		expect(DOM_SEP__FPC_BRIDGE_SECRET).toBe(3952304070)
+		// Re-derive in node (where bb is ready) — the literal in private-fuel.ts must match this.
+		const derived = Number(poseidon2HashBytes(Buffer.from("az_dom_sep__fpc_bridge_secret")).toBigInt() & 0xffff_ffffn)
+		expect(DOM_SEP__FPC_BRIDGE_SECRET).toBe(derived)
 	})
 
 	// Fixed (salt, claimer) → (secret, secretHash) vectors. Regenerated only by a conscious re-pin.
