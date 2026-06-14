@@ -67,7 +67,19 @@ Two standalone builds:
   - **FIX (D8): relocate the barrier to where `chrome.storage` lives** — the SW-side `proveTxTask` boundary in `execution-coordinator.ts` (runs in the SW, has chrome.storage), exactly the "SW for a2" topology the audit prescribed. Alternative: keep the offscreen gate but read the barrier via an RPC client to a SW service. Codex consulted (below).
 - **0a VALIDATED ✓** — with the gate neutralized, a proverless dApp sendTx **mines through the extension**: `pgResult.status:"ok"`, `txHash:0x189fe0a0…` (the playground's sendTx only resolves after the node accepts the fake-proven tx). The full `proveTx→toTx→node.sendTx` path is behaviorally sound proverless. (The journal read empty because proverless is sub-second — the 1.5s poll missed the lifecycle; that's exactly WHY the STUB tests need the barrier to hold `proving` observably.)
 - **Contention flake note:** an earlier neutralized-gate run hit `reading 'session'` ONLY while a codex consult ran concurrently (CPU starvation); the clean run succeeded. Lesson: run network e2e SEQUENTIALLY, never alongside other heavy processes. Watch-item: if `reading 'session'` recurs on a CLEAN run, dig (would indicate a real init race), else it's contention noise.
-- 0b (barrier hold/release end-to-end + semantics): _next, after the SW-side gate relocation_.
+- **0b VALIDATED ✓** — `cancel-mid-prove` **passes proverless** with the relocated SW-side barrier (`Tests 1 passed`). One pass confirms the whole 0b contract: the barrier HOLDS `proving` (the test's `data-stage="proving"` waitForFunction passed = prove-entered marker), RELEASES (proveTx proceeds), and the cancel→structured-4001 semantics hold (cancel honored only at the existing post-prove checkpoint → **D13 confirmed**). Also re-confirms 0a end-to-end with the REAL gate (no `'session'` crash — the SW has chrome.storage). The safety-timeout-loud path is covered at unit level (`chrome-storage-proof-gate.test.ts`).
+- **D7 RESOLVED → PLAIN ✓** — `multi-account-from` passed **3/3 consecutive** plain proverless runs (no barrier). The `waitForSendTxActiveStage` allowlist (`simulating|proving|submitting`) tolerates a collapsed `proving`; `simulating`/`submitting` stay observable. The Plan subagent's "safe PLAIN" position was correct; codex's race concern (terminalize-before-observable) did not materialize across 3 runs. → `multi-account-from` stays in the PLAIN bucket.
+
+## Phase 0 — COMPLETE ✓
+- **0a ✓** proverless prove→submit→mine works through the extension (dApp sendTx → real txHash).
+- **0b ✓** SW-side barrier holds `proving` deterministically (prove-entered marker via `data-stage="proving"`), releases, preserves cancel→4001 (D13). Safety-timeout-loud covered at unit level.
+- **D7 ✓** → PLAIN.
+- **No real BB-SNARK proving runs** proverless by construction (`proverEnabled:false` → fakeProofs); confirmed by the fast wall-times vs the WASM-proving baseline.
+- **D1 ✓** → approach 2 (gate at the SW `proveTxTask` boundary). **D8 ✓** → barrier is SW-side (offscreen has no chrome.storage — empirically confirmed + fixed via relocation).
+- Gates met: `bun run lint` ✓, `bun run test` (2360) ✓, factory unit test ✓, prod-guard two-build grep ✓, cancel-mid-prove + multi-account-from proverless e2e ✓.
+- **Deviation from plan's 0a wording:** `transfers.test.ts` was NOT used as the 0a probe (it stalls locally on a pre-existing AmountCard null-gap, unrelated to proverless; green in CI). Substituted a dApp sendTx mining probe + cancel-mid-prove, which exercise the same proverless tx path without the flaky wallet send form. `transfers` remains a KEEP-real-proving canary for CI.
+
+LESSONS_FILE=implementations-plan/e2e-proverless-stub/lessons/phase-0.md
 
 ### Codex consult — gate relocation (offscreen has no chrome.storage) → Option A
 Codex (xhigh, read-only) recommended **Option A**, refined:
