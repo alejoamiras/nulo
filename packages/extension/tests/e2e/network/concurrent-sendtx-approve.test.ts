@@ -2,6 +2,7 @@ import { expect, inject } from "vitest"
 import { openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, rejectExecute, waitForExecuteContent, waitForPopup, waitForSendTxActiveStage } from "../fixtures/popups"
+import { holdProofGate, releaseProofGate } from "../fixtures/proof-gate"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -82,6 +83,11 @@ test.skipIf(!hasConfig)(
 		// T1 enqueues on the execution mutex (inside acquireExecutionSlot, just
 		// after approval), so popup #2 opens promptly — not after T1's prove+submit.
 		const secondPopupP = waitForPopup(ctx, "execute", { timeout: 60_000 })
+		// Hold the proof gate so T1 parks deterministically at `proving` for the
+		// boundary snapshot. No-op under real proving (the slow prove phase keeps
+		// T1 active on its own); load-bearing under proverless, where T1 would
+		// otherwise blow through prove+submit before the snapshot is read.
+		await holdProofGate(firstPopup)
 		const tApprove = Date.now()
 		await approveExecute(firstPopup, { feeMethod: "sponsored" })
 
@@ -104,6 +110,9 @@ test.skipIf(!hasConfig)(
 				(el) => el.getAttribute("data-stage") ?? "?",
 			),
 		)
+		// Snapshot captured; release T1 so it isn't parked until the gate's
+		// safety timeout (no-op under real proving).
+		await releaseProofGate(walletPopup)
 		await walletPopup.close()
 
 		// Two in-flight cards at once: T1 active + T2 still queued behind it on the

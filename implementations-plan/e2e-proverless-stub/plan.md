@@ -57,7 +57,9 @@ The controllable stub MUST be a first-class, typed, single-responsibility collab
 - `agent.sh`: positive stamp assertion (present when flagged, mirror `agent.sh:53-59`). `_build-extension.yml`: **negative** assertion (codex D5) — stamp + `nulo:e2e:proof-gate` literal ABSENT from any non-proverless `dist/chrome`+`dist/firefox`. **Coverage note (audit S1):** `release.yml`/`pr-quick.yml`/`pr-smoke-e2e.yml` all build via `_build-extension.yml` (covered, incl. release's smoke-against-artifact). `_smoke-e2e.yml:56` builds `bun run build:chrome` directly — leak risk is zero (it never sets the flag) but to keep "every prod build path is grep-guarded" literally true, add the negative grep there too OR document the exemption in §Security.
 - **Gate**: `bun run lint` + `bun run test` (unit: proverless config yields `proverEnabled:false`, no AcceleratorProver) + a prod build with the flag UNSET → `grep` proves stamp ABSENT. `bun run e2e:agent` on one public-state + one private-flow file green. (lint · unit · build-grep · e2e-network)
 
-### Phase 2 — Controllable stub + barrier (1d)
+### Phase 2 — Controllable stub + barrier (1d) — ✓ COMPLETE
+**Outcome (lessons/phase-2.md):** ProofGate + ChromeStorageProofGate + SW-side injection (proveTxTask) + fixture; stub unit tests (4) + cancel-mid-prove + concurrent-sendtx-approve all green proverless. D13 preserved by construction.
+
 - Implement the D1-winning approach (proveTx-wrap or stub prover) in `aztec-runtime`, barrier injected from the shell; `fixtures/proofGate.ts` (`holdProofGate`/`releaseProofGate`); event-driven + safety-timeout.
 - **Gate**: `bun run lint` + `bun run test` (stub unit: instant-by-default, holds-on-gate, releases, times-out-loud) + `bun run e2e:agent tests/e2e/network/cancel-mid-prove.test.ts tests/e2e/network/concurrent-sendtx-approve.test.ts` green deterministically. (lint · unit · e2e-network)
 
