@@ -4,6 +4,7 @@ import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { TxHash, TxStatus } from "@aztec/aztec.js/tx"
+import { Gas } from "@aztec/stdlib/gas"
 import { InboxAbi, TokenPortalAbi } from "@aztec/l1-artifacts"
 import {
 	type BridgeWitness,
@@ -19,6 +20,7 @@ import {
 	markSealTrusted,
 	minOutputForSlippage,
 	PRIVATE_FPC_ADDRESS,
+	privateMintAndPayFee,
 	publicFeeJuicePayment,
 	quoteFuelPath,
 	sealDepositEnvelope,
@@ -30,7 +32,7 @@ import { parseEventLogs } from "viem"
 import { sepolia } from "viem/chains"
 import { ref, watch } from "vue"
 import { BRIDGE, BRIDGE_FUEL, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
-import { FUEL_FEE_MARGIN, decideFuelClaim } from "@/lib/fuel-claim-state"
+import { FUEL_FEE_MARGIN, decideFuelClaim, decidePrivateFuelClaim, isPrivateFuelInsufficiency } from "@/lib/fuel-claim-state"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import {
 	addRecordVerified,
@@ -213,6 +215,92 @@ function wireDepositDeps(): void {
 
 			// Fueled records pick their payment via the L14 ladder (record-specific evidence only).
 			const fuel = rec.fuel
+
+			// PRIVATE fuel (Option A — codex 019ec69a): a fully SEPARATE path. The fee is ALWAYS the
+			// Wonderland PrivateFPC method (feePayer=FPC); recovery retries ONLY that method. It NEVER
+			// touches the public sponsored/fjwc/standalone ladder below — the L11 privacy invariant.
+			if (rec.isPrivate && fuel?.received && fuel.leafIndex && fuel.bridgeSecretSalt) {
+				const fb = fuel
+				const fuelReceived = BigInt(fuel.received)
+				const fuelLeaf = new Fr(BigInt(fuel.leafIndex))
+				const salt = Fr.fromString(fuel.bridgeSecretSalt)
+				const stop = (why: string) => ({
+					simulate: async () => {
+						throw new Error(why)
+					},
+					send: async () => {
+						throw new Error(why)
+					},
+				})
+				// L15 kill-switch: the FJ landed at the pinned FPC. A drifted persisted address ⇒ FAIL-STOP
+				// (never claim to / trust a version-drifted FPC, never silently downgrade to public).
+				if (fb.fpc && fb.fpc !== PRIVATE_FPC_ADDRESS) {
+					return stop("Private fuel FPC address mismatch (version drift) — refusing to claim. Reselect a mode.")
+				}
+				// Fail-closed budget: the bridged FJ must clear the calibrated floor (≈2× a real claim fee);
+				// below it the mint_and_pay_fee `amount >= max_gas_cost` assert fails anyway.
+				if (BRIDGE_FUEL && fuelReceived < BRIDGE_FUEL.minFuelFj) {
+					return stop("The bridged gas is below the safe claim floor — the private fuel claim can't self-pay.")
+				}
+				const fpcAddr = AztecAddress.fromString(fb.fpc ?? PRIVATE_FPC_ADDRESS)
+				const receiptStatus = fb.claimTxHash ? await fuelReceiptStatus(fb.claimTxHash) : undefined
+				if (receiptStatus === "included" && fb.consumed !== true) {
+					updateRecord(rec.id, { fuel: { ...fb, consumed: true } })
+				}
+				const decision = decidePrivateFuelClaim({
+					attempt: fb.claimAttempt === true,
+					txHashKnown: typeof fb.claimTxHash === "string",
+					receiptStatus,
+					consumed: fb.consumed === true || receiptStatus === "included",
+					setupInsufficiency: fb.setupInsufficiency === true,
+				})
+				log("private fuel claim decision", { id: rec.id, action: decision.action })
+				if (decision.action !== "private-fpc") {
+					// consumed (FJ burned at the FPC; token-reclaim via the FPC pay_fee is a follow-up) or wait —
+					// never re-mint (a second claim double-spends the FJ message), never public.
+					return stop(
+						decision.action === "consumed"
+							? "private fuel already consumed - not re-minting (recover via the FPC balance)"
+							: "private fuel claim pending - waiting for its receipt before retrying",
+					)
+				}
+				// teardownGas=0 keeps max_gas_cost within the bridged amount; maxFeesPerGas omitted ⇒ the wallet
+				// fills current-min (embedded-fpc cap). The method's feePayer=FPC ⇒ the wallet runs the 2 setup
+				// calls (FeeJuice.claim + mint_and_pay_fee) then this claim_private, all in one tx (EXTERNAL).
+				const privateFee = {
+					paymentMethod: privateMintAndPayFee(fpcAddr, fuelReceived, deriveBridgeSecret(salt, recipientAddr), salt, fuelLeaf),
+					gasSettings: { teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }) },
+				}
+				const claimPriv = () => bridge.methods.claim_private(recipientAddr, amount, secret, leaf)
+				return {
+					simulate: () => claimPriv().simulate({ from: recipientAddr, fee: privateFee } as never),
+					send: async () => {
+						// Latch the attempt JOURNAL-FIRST (before the wallet call), clearing any stale insufficiency.
+						updateRecord(rec.id, { fuel: { ...fb, claimAttempt: true, setupInsufficiency: false } })
+						try {
+							const { receipt } = (await claimPriv().send({
+								from: recipientAddr,
+								fee: privateFee,
+								wait: { waitForStatus: TxStatus.PROPOSED },
+							} as never)) as { receipt: { txHash: unknown } }
+							const txHash = String(receipt.txHash)
+							// PROPOSED is NOT inclusion; `consumed` is set inclusion-grade later from the receipt probe.
+							updateRecord(rec.id, { fuel: { ...fb, claimAttempt: true, claimTxHash: txHash, setupInsufficiency: false } })
+							return { txHash }
+						} catch (e) {
+							const msg = e instanceof Error ? e.message : String(e)
+							// A setup-insufficiency throw ⇒ the tx was INVALID (FJ unconsumed) ⇒ authorise a retry.
+							// Any OTHER throw leaves setupInsufficiency unset ⇒ the next decision WAITS (fail-closed).
+							// NEVER fall back to public/Sponsored on the private path (L11).
+							if (isPrivateFuelInsufficiency(msg)) {
+								updateRecord(rec.id, { fuel: { ...fb, claimAttempt: true, setupInsufficiency: true } })
+							}
+							throw e
+						}
+					},
+				}
+			}
+
 			let fee: { paymentMethod: unknown } = sponsored
 			let fjwcAttempt = false
 			let standaloneFj = false
