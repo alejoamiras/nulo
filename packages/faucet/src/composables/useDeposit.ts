@@ -12,11 +12,13 @@ import {
 	SWAP_BRIDGE_ROUTER_ABI,
 	bridgeWitnessPermitTypedData,
 	buildFuelRoute,
+	deriveBridgeSecret,
 	feeJuiceAddress,
 	hashRoute,
 	isSealTrusted,
 	markSealTrusted,
 	minOutputForSlippage,
+	PRIVATE_FPC_ADDRESS,
 	publicFeeJuicePayment,
 	quoteFuelPath,
 	sealDepositEnvelope,
@@ -26,7 +28,7 @@ import { tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { parseEventLogs } from "viem"
 import { sepolia } from "viem/chains"
-import { computed, ref, watch } from "vue"
+import { ref, watch } from "vue"
 import { BRIDGE, BRIDGE_FUEL, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
 import { FUEL_FEE_MARGIN, decideFuelClaim } from "@/lib/fuel-claim-state"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
@@ -357,7 +359,9 @@ export function useDepositFlow() {
 			// Fuel pre-flight BEFORE any record exists: quote-required (a missing quote must never
 			// sign away the slice with a junk floor), floor from config slippage.
 			const fuelSlice = opts.fuelSlice && opts.fuelSlice > 0n ? opts.fuelSlice : undefined
-			let fuelPre: { secret: Fr; secretHashHex: string; minOutput: bigint; route: ReturnType<typeof buildFuelRoute> } | undefined
+			let fuelPre:
+				| { secret: Fr; secretHashHex: string; minOutput: bigint; route: ReturnType<typeof buildFuelRoute>; salt?: Fr }
+				| undefined
 			if (fuelSlice) {
 				if (!BRIDGE_FUEL) throw new Error("Fuel is not configured for this deployment.")
 				if (fuelSlice >= amount) throw new Error("The fuel slice must be smaller than the total amount.")
@@ -372,12 +376,19 @@ export function useDepositFlow() {
 				if (quote < BRIDGE_FUEL.minFuelFj) {
 					throw new Error("That fuel slice buys too little gas to cover its own claim - increase it or bridge without fuel.")
 				}
-				const fuelSecret = Fr.random()
+				// PRIVATE fuel: the secret MUST be deriveBridgeSecret(salt, claimer) so the claimer can
+				// reconstruct it from msg_sender inside PrivateFPC.mint_and_pay_fee — a random secret would
+				// strand the FJ forever (L3/L4). The per-deposit BRIDGE-SECRET salt is random + persisted;
+				// it is DISTINCT from the FPC-ADDRESS salt (Fr.zero()). Public fuel stays recipient-bound random.
+				const claimer = AztecAddress.fromString(recipient)
+				const bridgeSecretSalt = isPrivate ? Fr.random() : undefined
+				const fuelSecret = bridgeSecretSalt ? deriveBridgeSecret(bridgeSecretSalt, claimer) : Fr.random()
 				fuelPre = {
 					secret: fuelSecret,
 					secretHashHex: (await computeSecretHash(fuelSecret)).toString(),
 					minOutput: minOutputForSlippage(quote, BRIDGE_FUEL.slippageBps),
 					route,
+					salt: bridgeSecretSalt,
 				}
 			}
 
@@ -411,6 +422,9 @@ export function useDepositFlow() {
 								secret: fuelPre.secret.toString(),
 								secretHashHex: fuelPre.secretHashHex,
 								minOutput: fuelPre.minOutput.toString(),
+								// PRIVATE fuel: persist the bridge-secret salt + the FPC the FJ lands at, so the
+								// claim can rebuild the Wonderland method. (Sealing parity follow-up: TODO seal salt.)
+								...(isPrivate ? { bridgeSecretSalt: fuelPre.salt?.toString(), fpc: PRIVATE_FPC_ADDRESS } : {}),
 							},
 						}
 					: {}),
@@ -478,7 +492,9 @@ export function useDepositFlow() {
 					totalAmount: amount,
 					fuelAmount: fuelSlice,
 					aztecRecipient: recipient as `0x${string}`,
-					fuelRecipient: recipient as `0x${string}`,
+					// PRIVATE fuel lands at the PrivateFPC (claimer-bound by the secret); PUBLIC fuel at the user.
+					// A bug here either leaks (user addr on L1) or strands (FJ to a non-FPC) — the headline invariant.
+					fuelRecipient: (isPrivate ? PRIVATE_FPC_ADDRESS : recipient) as `0x${string}`,
 					tokenSecretHash: id as `0x${string}`,
 					fuelSecretHash: fuelPre.secretHashHex as `0x${string}`,
 					minFuelOutput: fuelPre.minOutput,
@@ -546,6 +562,7 @@ export function useDepositFlow() {
 						minOutput: fuelPre.minOutput.toString(),
 						leafIndex: fe.args.fuelIndex.toString(),
 						received: fe.args.fuelAmount.toString(),
+						...(isPrivate ? { bridgeSecretSalt: fuelPre.salt?.toString(), fpc: PRIVATE_FPC_ADDRESS } : {}),
 					},
 				})
 				log("BridgeWithFuel", {
