@@ -72,7 +72,7 @@ Funding: the dedicated account receives minted tokens + uses sponsored-FPC fees;
 - `tests/e2e/network/authwit-lifecycle.test.ts` per the single-use script above; testids added to both popups BEFORE the test (currently zero testids — verified); data-testid-only selectors; dedicated fresh account; cleanup re-enables registry.
 - **Gate**: lifecycle file green ×2 consecutive locally; full `bun run e2e:agent` green; non-vacuity assertion present (e2e-network full).
 
-### Phase 4 — Arc close (0.5d)
+### Phase 4 ✓ — Arc close (0.5d)
 - `/code-review max --fix` (separate commit) → codex post-impl audit (net diff + code-review summary + plan + adversarial ask) → fix loop → docs (playground README authwit note) → single PR to dev → **user's manual playground pass** gates merge.
 - **Gate**: PR CI green (Quality required; Network e2e shards incl. both new files); codex verdict with high/critical addressed.
 
