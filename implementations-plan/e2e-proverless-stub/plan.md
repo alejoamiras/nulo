@@ -70,7 +70,9 @@ The controllable stub MUST be a first-class, typed, single-responsibility collab
 - Drop `!authwitE2eEnabled` from `authwit-consume-smoke.test.ts` + `authwit-lifecycle.test.ts` (rejoin the pool).
 - **Gate**: `bun run e2e:agent` on confirm + both authwit files → green, not skipped, fast. (e2e-network)
 
-### Phase 4 — CI two-build split (0.5-1d)
+### Phase 4 — CI two-build split (0.5-1d) — ✓ CODE-COMPLETE (CI gate validates at the PR)
+**Outcome (lessons/phase-4.md):** `_network-e2e.yml` gains a `proverless` input (NULO_E2E_PROVERLESS=1, accelerator forced off via guarded `&&/||`); `pr-network-e2e.yml` shard pool + both heavy jobs → proverless, new `network-e2e-canary` (prover-ON: `transfers` + upgraded `tx-sendTx-default`), `status` aggregates the canary in both `needs` + the loop. actionlint ✓. The upgraded canary's assertion logic validated proverless locally; real-prove timing + "shard pool faster, no CDP timeouts" validate on the PR's CI run (can't run the full split locally — no accelerator).
+
 - `_network-e2e.yml`: `proverless` workflow input → sets `VITE_NULO_E2E_PROVERLESS` and disables accelerator setup for proverless jobs (mind the `&&/||` short-circuit footgun at `_network-e2e.yml:95-100`; PROVERLESS⊥ACCELERATOR). Note (codex): each job rebuilds via `agent.sh`, so "two builds" = two configs; coordinate CI ports.
 - `pr-network-e2e.yml`: shard matrix → `proverless:true`; `exclude_files` → the **explicit canary file list** (codex — NOT a count): `transfers.test.ts` + the dApp `sendTx` files that actually prove + mine (determined in Phase 0a; `tx-sendTx-noFrom` is excluded from the canary set and stays in the proverless pool). Replace the heavy jobs with prover-ON canary jobs built from that list; update `status` aggregation `needs` + loop.
 - **Gate**: `bun run lint:actions`; a full PR network-e2e run green — shard pool materially faster + no CDP timeouts; canary jobs show real `/prove` (BB SNARK) activity. (actionlint · e2e-network-CI)
