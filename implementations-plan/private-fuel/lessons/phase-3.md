@@ -119,3 +119,12 @@ Per the user's choice (faucet-only, not the cross-package strict variant):
 Private fuel is implemented end-to-end (deposit→FPC→self-paying claim, never public/Sponsored) + B-presets UI
 + no-fuel L7. Remaining: P2 playground+network-e2e + P4 live dust-canary (need `e2e:agent`/testnet) + P5 harden.
 The claim-dep wiring (private branch + no-fuel) is live-validated (no useDeposit unit test; the pure deciders ARE tested).
+
+## Manual P4 canary PASSED (live testnet) — private fuel VALIDATED
+Real run: 0.15 AZLO bridged + a slice that bought 87.70 FJ, PRIVATE, 5m02s end-to-end; the claim self-paid
+via the PrivateFPC. PRIVACY CONFIRMED — the user's PUBLIC Fee Juice stayed ZERO (the 87.70 went private,
+credited at the FPC; no sponsor). The headline feature works live.
+Calibration: the private claim cost 2878299568939200000 = 2.878 FJ. So minFuelFj=11 is SAFE (~3.8× the real
+private fee) — NO raise needed (the worry that private needs a higher floor is disproved; could even tighten
+to ~6). Banked ≈ 84.8 FJ private (87.70 − 2.88), usable for future txs via the FPC pay_fee path (follow-up).
+UI: "Pending Bridges" → "Your Bridges". Receipt-improvement directions drafted in receipt-ideas.html.
