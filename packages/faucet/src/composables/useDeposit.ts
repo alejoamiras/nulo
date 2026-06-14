@@ -113,6 +113,19 @@ async function waitForFuelInclusion(txHash: string, tries = 40): Promise<"includ
 	return "pending"
 }
 
+/** Read a claim tx's fee (the gas it used), base units — for the receipt's "gas used / available"
+ *  ledger. Best-effort: a missing fee or unreachable node returns undefined, so the receipt falls back
+ *  to showing gas bought without the used/available split. Read post-completion (claim flow untouched). */
+export async function readClaimFee(txHash: string): Promise<bigint | undefined> {
+	try {
+		const receipt = await createAztecNodeClient(NODE_URL).getTxReceipt(TxHash.fromString(txHash))
+		const fee = (receipt as { transactionFee?: bigint } | undefined)?.transactionFee
+		return fee === undefined || fee === null ? undefined : BigInt(fee as never)
+	} catch {
+		return undefined
+	}
+}
+
 /** Reconcile a fueled record's `consumed` flag from chain truth: if the fjwc attempt tx is
  *  INCLUDED (success OR app-reverted - both consumed the FJ message), persist `consumed`. Probing
  *  `fuel.claimTxHash` directly (not the completing claim) covers every path: the happy fjwc

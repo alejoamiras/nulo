@@ -15,7 +15,7 @@ import BridgeStepper from "./BridgeStepper.vue"
 import { useBridgeBackup } from "@/composables/useBridgeBackup"
 import { hideCompleted, useBridgeJournal } from "@/composables/useBridgeJournal"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
-import { providerFingerprint, useDepositFlow } from "@/composables/useDeposit"
+import { providerFingerprint, readClaimFee, useDepositFlow } from "@/composables/useDeposit"
 import { useL1Usdc } from "@/composables/useL1Usdc"
 import { useL1Wallet } from "@/composables/useL1Wallet"
 import { type UseTokenBalanceHandle, useTokenBalance } from "@/composables/useTokenBalance"
@@ -243,6 +243,18 @@ watch(
 						completedAt: rec.completedAt,
 					}
 		formStage.value = "receipt"
+		// Fueled deposits: read the claim tx fee (gas used) post-completion + patch the snapshot so the
+		// receipt's "gas used / available" ledger fills in. Claim flow untouched; best-effort (a failed
+		// read just leaves the used row hidden + available = bought).
+		const dep = rec as DepositJournalRecord
+		if (dep.direction === "deposit" && dep.fuel?.received && dep.claimTxHash) {
+			void readClaimFee(dep.claimTxHash).then((fee) => {
+				const snap = receiptSnapshot.value
+				if (fee !== undefined && snap && snap.completedAt === rec.completedAt) {
+					receiptSnapshot.value = { ...snap, fuelUsed: fee.toString() }
+				}
+			})
+		}
 	},
 )
 
