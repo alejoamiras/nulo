@@ -13,23 +13,9 @@
  */
 
 import type { GrantedCapabilityRecord } from "./capabilities"
-import {
-	type ScopeCheck,
-	checkRegisterContract,
-	checkGetContractMetadata,
-	checkIsTokenRegistered,
-	checkGetContractClassMetadata,
-	checkSendTx,
-	checkGrantPublicAuthwit,
-	checkSimulateTx,
-	checkProfileTx,
-	checkExecuteUtility,
-	checkGetPrivateEvents,
-	checkCreateAuthWit,
-	checkGetAccounts,
-	checkGetAddressBook,
-	checkRegisterSender,
-} from "./method-scope-checkers"
+// The method→checker map is DERIVED from the method-descriptors registry (the
+// single source of truth) — no longer a hand-maintained literal here.
+import { METHOD_SCOPE_CHECKER } from "./method-descriptors"
 
 // ── F-005 session-account-scope helper ────────────────────────────────
 
@@ -56,26 +42,6 @@ function validateAccountScopes(scopeField: unknown, sessionAccounts: Set<string>
 			throw new Error(`Scope violation: ${fieldName} contains ${addr}, not in session's approved accounts`)
 		}
 	}
-}
-
-// ── Method → checker map ──────────────────────────────────────────────
-
-const METHOD_SCOPE_CHECKER: Record<string, ScopeCheck> = {
-	registerContract: checkRegisterContract,
-	getContractMetadata: checkGetContractMetadata,
-	isTokenRegistered: checkIsTokenRegistered,
-	getContractClassMetadata: checkGetContractClassMetadata,
-	sendTx: checkSendTx,
-	grantPublicAuthwit: checkGrantPublicAuthwit,
-	simulateTx: checkSimulateTx,
-	profileTx: checkProfileTx,
-	executeUtility: checkExecuteUtility,
-	getPrivateEvents: checkGetPrivateEvents,
-	createAuthWit: checkCreateAuthWit,
-	// Phase 1 additions (F-003 + F-004):
-	getAccounts: checkGetAccounts,
-	getAddressBook: checkGetAddressBook,
-	registerSender: checkRegisterSender,
 }
 
 // ── Main entry point ──────────────────────────────────────────────────

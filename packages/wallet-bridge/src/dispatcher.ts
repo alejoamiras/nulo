@@ -64,6 +64,7 @@ import type {
 	TransactionCapability,
 } from "./capabilities"
 import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
+import { METHOD_TO_KIND, NETWORK_ONLY_KINDS, ACCOUNT_KINDS, METHOD_REGISTRY } from "./method-descriptors"
 import type {
 	AztecSendTxRequest,
 	CapabilityResult,
@@ -241,56 +242,14 @@ type CapabilityManifest = {
 	[key: string]: unknown
 }
 
-/**
- * Maps wallet-sdk method names to internal Operation kinds.
- *
- * The wallet-sdk ExtensionWallet proxy calls methods by their WalletSchema key name.
- * On the dApp side these are camelCase method names (e.g. `sendTx`, `simulateTx`).
- * We map each to the corresponding `Operation.kind` that `ExecutionService` understands.
- */
-const METHOD_TO_KIND: Record<string, Operation["kind"]> = {
-	// --- Standard Wallet interface (from @aztec/aztec.js/wallet WalletSchema) ---
-	getChainInfo: "aztec_getChainInfo",
-	getContractClassMetadata: "aztec_getContractClassMetadata",
-	getContractMetadata: "aztec_getContractMetadata",
-	getPrivateEvents: "aztec_getPrivateEvents",
-	registerSender: "aztec_registerSender",
-	getAddressBook: "aztec_getAddressBook",
-	registerContract: "aztec_registerContract",
-	simulateTx: "aztec_simulateTx",
-	executeUtility: "aztec_executeUtility",
-	profileTx: "aztec_profileTx",
-	// sendTx and registerToken are handled directly in dispatch() via
-	// DappInteractionService — both need the confirmation popup.
-	createAuthWit: "aztec_createAuthWit",
-}
-
-/**
- * Operations that only need a network (no account context).
- * These map chainId → networkId.
- */
-const NETWORK_ONLY_KINDS = new Set<Operation["kind"]>([
-	"aztec_getChainInfo",
-	"aztec_getContractClassMetadata",
-	"aztec_getContractMetadata",
-	"aztec_getPrivateEvents",
-	"aztec_registerSender",
-	"aztec_getAddressBook",
-	"aztec_registerContract",
-])
-
-/**
- * Operations that need both network AND account context.
- * These map chainId → networkId AND resolve the first session account.
- */
-const ACCOUNT_KINDS = new Set<Operation["kind"]>(["aztec_simulateTx", "aztec_executeUtility", "aztec_profileTx", "aztec_createAuthWit"])
-
-// Note: sendTx and registerToken are handled separately via DappInteractionService
-// (handleSendTx / handleRegisterToken). simulate_views and get_complete_address are
-// fully retired — both dApp-facing wire surfaces and the `simulate_views` op kind
-// itself were removed. The batching logic that previously lived behind
-// `simulate_views` now lives in `extension/src/wallet/services/execution/helpers/
-// batched-view-simulation.ts`, called directly by balance-projector + gas-balance.
+// `METHOD_TO_KIND`, `NETWORK_ONLY_KINDS`, and `ACCOUNT_KINDS` are DERIVED from
+// the method-descriptors registry (the single source of truth) and imported at
+// the top of this file. sendTx / registerToken / grantPublicAuthwit are handled
+// directly in dispatch() via DappInteractionService (popup); they carry no
+// METHOD_TO_KIND entry (routing: "handler"). simulate_views and
+// get_complete_address are fully retired (no descriptor → dispatch rejects them);
+// the batching logic that lived behind `simulate_views` now lives in
+// extension/.../execution/helpers/batched-view-simulation.ts.
 
 export class WalletSdkDispatcher {
 	constructor(
@@ -320,6 +279,17 @@ export class WalletSdkDispatcher {
 		// calls previously gave different handlers different views of the same
 		// session (e.g. if the session was deleted mid-dispatch).
 		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+
+		// Resolve the method's descriptor up front. A method that reaches dispatch()
+		// without a registry row is unsupported (retired, or never-supported) —
+		// reject it before any enforcement/routing. This is the RUNTIME half of the
+		// silent-omission guard (the build-time exhaustiveness test is the other
+		// half): "supported but missing metadata" is impossible in both. Preserves
+		// the historical "Unsupported wallet method" string (pinned by the
+		// retired-method guards in dispatcher.test.ts).
+		if (!METHOD_REGISTRY[methodName]) {
+			throw new Error(`Unsupported wallet method: ${methodName}`)
+		}
 
 		// Enforce capability grants (type-level) then scope (per-operation +
 		// per-account allow-list).
@@ -984,7 +954,8 @@ export class WalletSdkDispatcher {
 	/**
 	 * Enforce capability grants before dispatching a method call.
 	 *
-	 * - Exempt methods (getChainInfo, requestCapabilities, batch, getAccounts) skip enforcement.
+	 * - Exempt methods (getChainInfo, requestCapabilities, batch) skip enforcement.
+	 *   NOTE: getAccounts is NOT exempt — F-003 made it require accounts.canGet=true.
 	 * - The method's required capability type must be in the session's grants.
 	 * - Sessions without grants (new or pre-migration) are treated as having no grants,
 	 *   so non-exempt methods are blocked until requestCapabilities() is called.
