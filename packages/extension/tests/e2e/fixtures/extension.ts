@@ -121,7 +121,12 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	ctx.pageErrors = []
 
 	page.on("console", (msg: ConsoleMessage) => {
-		if (msg.type() === "error") {
+		// "Client disconnected" is the benign SW-port-close cascade — pending
+		// background-port RPCs reject en-masse when the SW restarts (e.g. during
+		// account switch). Prod already treats it as benign (offscreen
+		// `isBenignSwDisconnect`); filter it here too so the `consoleErrors`
+		// assertions only catch UNEXPECTED errors, not this known noise.
+		if (msg.type() === "error" && !msg.text().includes("Client disconnected")) {
 			ctx.consoleErrors.push(msg.text())
 		}
 	})
@@ -1008,7 +1013,12 @@ async function openPopupOnce(ctx: ExtensionContext): Promise<Page> {
 	ctx.pageErrors = []
 
 	page.on("console", (msg: ConsoleMessage) => {
-		if (msg.type() === "error") {
+		// "Client disconnected" is the benign SW-port-close cascade — pending
+		// background-port RPCs reject en-masse when the SW restarts (e.g. during
+		// account switch). Prod already treats it as benign (offscreen
+		// `isBenignSwDisconnect`); filter it here too so the `consoleErrors`
+		// assertions only catch UNEXPECTED errors, not this known noise.
+		if (msg.type() === "error" && !msg.text().includes("Client disconnected")) {
 			ctx.consoleErrors.push(msg.text())
 		}
 	})
