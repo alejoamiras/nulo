@@ -1,18 +1,28 @@
 /**
- * PERSISTENT testnet bridge deploy for the faucet's Bridge tab (F4, decision A).
+ * PERSISTENT testnet bridge deploy for the faucet's Bridge tab - the SECURITY-FORK generation.
  *
- * Deploys the bridge's OWN set — L1: MintableERC20 USDC + canonical TokenPortal (Sepolia);
- * L2: token_minter_proxy + Token(minter=proxy) + token_bridge(proxy, portal) — with FIXED salts
- * (deterministic L2 addresses), wires them, and writes the addresses + L2 instantiation params
- * to `packages/faucet/public/testnet-bridge.json`, which the app rebuilds into registerable
- * instances (mirrors faucet/src/contracts/deployments.ts).
+ * Deploys the bridge's OWN set - L1: MintableERC20 USDC + the F-001 fork NuloTokenPortal (deployed
+ * uninitialized from committed reviewed bytes, then `initialize`d once); L2: token_minter_proxy +
+ * Token(minter=proxy) + token_bridge(proxy, portal) with per-generation random salts. It wires them
+ * (set_token + the one-time set_bridge), runs expanded on-chain read-backs, and writes a CANDIDATE
+ * manifest (`testnet-bridge.candidate.json`) - never the live `testnet-bridge.json`. Promotion of the
+ * candidate to live is the deliberate cutover step (after smoke).
  *
- * Run ONCE (real proofs → ~8 min; L1 addresses are non-deterministic so re-running makes a fresh
- * set). From packages/bridge-core: `bun run scripts/deploy-bridge-testnet.ts`. Needs PRIVATE_KEY +
- * SEPOLIA_RPC_URL in packages/bridge-evm/.env; AZTEC_NODE_URL defaults to the public testnet RPC.
+ * Durability (per codex 019ecbee): a write-ahead journal records every step submitted (txHash, before
+ * the receipt) then confirmed (address). A one-shot cutover must not start fresh salts over a partial
+ * landing, so if a journal already exists this refuses to run unless `--from-journal` is passed:
+ *   - clean start (no journal): full deploy + journal + candidate.
+ *   - `--from-journal`: validate a FULLY-landed recorded generation (read-backs) and write the
+ *     candidate from it. A partial landing HARD-STOPS - this never continues a partial deploy with a
+ *     new L2 account (the proxy owner is the original deployer, so a fresh account can't wire it).
+ *
+ * Run ONCE (real proofs -> ~8 min; L1 addresses are non-deterministic). From packages/bridge-core:
+ * `bun run scripts/deploy-bridge-testnet.ts`. Needs PRIVATE_KEY + SEPOLIA_RPC_URL in
+ * packages/bridge-core/.env; AZTEC_NODE_URL defaults to the public testnet RPC.
  */
+import { randomInt } from "node:crypto"
 import { spawnSync } from "node:child_process"
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { loadContractArtifact } from "@aztec/aztec.js/abi"
@@ -25,13 +35,15 @@ import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
-import { TokenPortalAbi, TokenPortalBytecode } from "@aztec/l1-artifacts"
+import { RegistryAbi } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveSigningKey } from "@aztec/stdlib/keys"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
-import { createPublicClient, createWalletClient, defineChain, getContract, http } from "viem"
+import { createPublicClient, createWalletClient, defineChain, getContract, http, keccak256 } from "viem"
 import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts"
+import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
+import { loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
 
 // The bridged pair's identity - ONE source for both chains; the deploy asserts L1==L2 below.
 const TOKEN_NAME = "Aztec Nulo"
@@ -44,19 +56,15 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}` | undefined
 const MNEMONIC = process.env.MNEMONIC
 if (!PRIVATE_KEY && !MNEMONIC) throw new Error("PRIVATE_KEY or MNEMONIC required (packages/bridge-core/.env)")
 
-// Fixed salts → deterministic L2 addresses (stable in the written config). Mirrors the faucet's
-// small-integer salt convention (deployments.json: 4242 / 1337).
-// Salt generation 2 (the AZLO redeploy): the proxy's constructor args don't change across token
-// renames, so reusing generation-1 salts collides with the LIVE deployment's deterministic
-// address (duplicate siloed nullifier). Bump ALL THREE together for every fresh generation.
-const PROXY_SALT = 0x5b11
-const TOKEN_SALT = 0x5b12
-const BRIDGE_SALT = 0x5b13
+const fromJournalMode = process.argv.includes("--from-journal")
 
 const here = dirname(fileURLToPath(import.meta.url))
 const OUT = join(here, "..", "..", "bridge-evm", "out")
 const AZTEC = join(here, "..", "..", "bridge-aztec")
-const CONFIG_PATH = join(here, "..", "..", "faucet", "public", "testnet-bridge.json")
+const PUBLIC_DIR = join(here, "..", "..", "faucet", "public")
+const LIVE_PATH = join(PUBLIC_DIR, "testnet-bridge.json")
+const CANDIDATE_PATH = join(PUBLIC_DIR, "testnet-bridge.candidate.json")
+const JOURNAL_PATH = join(PUBLIC_DIR, "testnet-bridge.journal.jsonl")
 
 const sepolia = defineChain({
 	id: 11155111,
@@ -85,9 +93,37 @@ async function nodeRegistry(): Promise<`0x${string}`> {
 	return pick(a.registryAddress)
 }
 
+const lc = (v: unknown) => String(v).toLowerCase()
+function assertSame(actual: unknown, expected: unknown, label: string): void {
+	if (lc(actual) !== lc(expected)) throw new Error(`read-back FAILED: ${label} - on-chain ${lc(actual)} != expected ${lc(expected)}`)
+	console.log(`  ✓ ${label}`)
+}
+
 async function main() {
 	const t0 = Date.now()
 	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
+
+	// ─── 0. Reviewed bytes + drift alarm ─────────────────────────────
+	// Rebuild the fork from source and assert it still matches the reviewed pins, then deploy the
+	// COMMITTED bytes (exact reviewed bytes, not "whatever builds today").
+	rebuildAndVerifyPortal()
+	const portalArt = loadForkedPortalArtifact()
+
+	// ─── 1. Resume gate (never fresh salts over a partial landing) ───
+	const recorded = resolveResume(readJournal(JOURNAL_PATH))
+	if (recorded && !fromJournalMode) {
+		throw new Error(
+			`a prior generation journal exists at ${JOURNAL_PATH}. Pass --from-journal to validate + write the ` +
+				"candidate from it, or archive the journal for a clean start. This never starts fresh salts over a partial landing.",
+		)
+	}
+	if (!recorded && fromJournalMode) throw new Error("--from-journal given but no generation journal to read.")
+
+	const salts = recorded?.salts ?? {
+		proxy: randomInt(2, 2 ** 40),
+		token: randomInt(2, 2 ** 40),
+		bridge: randomInt(2, 2 ** 40),
+	}
 
 	// ─── L1 (Sepolia) ────────────────────────────────────────────────
 	const account = PRIVATE_KEY ? privateKeyToAccount(PRIVATE_KEY) : mnemonicToAccount(MNEMONIC as string)
@@ -96,23 +132,42 @@ async function main() {
 	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
 	const registry = await nodeRegistry()
 
-	const deployEvm = async (name: string, abi: unknown, bytecode: `0x${string}`, args: unknown[]): Promise<`0x${string}`> => {
+	// In --from-journal mode we never send L1/L2 deploys; we reuse the recorded addresses and only
+	// re-run the read-backs before writing the candidate. A missing step => partial landing => stop.
+	const recordedAddr = (step: string): `0x${string}` => {
+		const a = recorded?.confirmed[step]
+		if (!a || a === "done") {
+			throw new Error(
+				`--from-journal: step "${step}" never confirmed - partial landing. Finish manually with the original deployer or archive for a clean start.`,
+			)
+		}
+		return a as `0x${string}`
+	}
+
+	const deployEvm = async (
+		step: string,
+		name: string,
+		abi: unknown,
+		bytecode: `0x${string}`,
+		args: unknown[],
+	): Promise<`0x${string}`> => {
+		if (fromJournalMode) return recordedAddr(step)
 		const hash = await wallet.deployContract({ abi: abi as never, bytecode, args: args as never })
+		appendJournal(JOURNAL_PATH, { phase: "submitted", step, txHash: hash })
 		const r = await pub.waitForTransactionReceipt({ hash })
 		if (!r.contractAddress) throw new Error(`${name}: no contractAddress`)
+		appendJournal(JOURNAL_PATH, { phase: "confirmed", step, address: r.contractAddress })
 		console.log(`${name}:`, r.contractAddress, `(${mins()})`)
 		return r.contractAddress
 	}
 
-	const usdcArt = evmArtifact("MintableERC20")
-	const l1Decimals = TOKEN_DECIMALS
-	const usdc = await deployEvm("MintableERC20", usdcArt.abi, usdcArt.bytecode, [TOKEN_NAME, TOKEN_SYMBOL, l1Decimals, 1000n])
-	// The portal moves RAW units between chains: an L1/L2 decimals mismatch mints wrong
-	// magnitudes. Both sides read TOKEN_DECIMALS; this assert keeps future edits honest.
-	if (l1Decimals !== TOKEN_DECIMALS) throw new Error(`decimals asymmetry: L1=${l1Decimals} L2=${TOKEN_DECIMALS}`)
-	const portal = await deployEvm("TokenPortal", TokenPortalAbi, TokenPortalBytecode as `0x${string}`, [])
+	if (!recorded) appendJournal(JOURNAL_PATH, { phase: "generation", salts })
 
-	// ─── L2 (testnet aztec.js — REAL proofs) ─────────────────────────
+	const usdcArt = evmArtifact("MintableERC20")
+	const usdc = await deployEvm("usdc", "MintableERC20", usdcArt.abi, usdcArt.bytecode, [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, 1000n])
+	const portal = await deployEvm("portal", "NuloTokenPortal", portalArt.abi, portalArt.bytecode, [])
+
+	// ─── L2 (testnet aztec.js - REAL proofs) ─────────────────────────
 	const node = createAztecNodeClient(NODE_URL)
 	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
 	const secret = Fr.random()
@@ -137,7 +192,16 @@ async function main() {
 		console.log(`L2 account deployed (${mins()})`)
 	}
 
-	const deployL2 = async (label: string, art: unknown, args: unknown[], ctor: string, saltNum: number): Promise<Contract> => {
+	// Deploy (or, in --from-journal mode, re-bind) a universal-deploy L2 contract. The deterministic
+	// address is recomputed from the recorded salt/args; a resume mismatch is a hard stop.
+	const deployL2 = async (
+		step: string,
+		label: string,
+		art: unknown,
+		args: unknown[],
+		ctor: string,
+		saltNum: number,
+	): Promise<Contract> => {
 		const salt = new Fr(saltNum)
 		const instance = await getContractInstanceFromInstantiationParams(
 			art as never,
@@ -149,85 +213,146 @@ async function main() {
 				constructorArtifact: ctor,
 			} as never,
 		)
-		await Contract.deploy(ewallet as never, art as never, args as never, ctor).send({
-			...opts,
-			contractAddressSalt: salt,
-			universalDeploy: true,
-			wait: { waitForStatus: TxStatus.PROPOSED },
-		} as never)
+		if (fromJournalMode) {
+			assertSame(instance.address.toString(), recordedAddr(step), `${label} recompute == recorded`)
+		} else {
+			const sent = Contract.deploy(ewallet as never, art as never, args as never, ctor).send({
+				...opts,
+				contractAddressSalt: salt,
+				universalDeploy: true,
+			} as never)
+			const txHash = await sent.getTxHash()
+			appendJournal(JOURNAL_PATH, { phase: "submitted", step, txHash: txHash.toString() })
+			await sent.wait({ waitForStatus: TxStatus.PROPOSED })
+			appendJournal(JOURNAL_PATH, { phase: "confirmed", step, address: instance.address.toString() })
+		}
 		const c = await Contract.at(instance.address, art as never, ewallet as never)
 		console.log(`${label}:`, c.address.toString(), `(${mins()})`)
 		return c
 	}
 
 	const proxy = await deployL2(
+		"proxy",
 		"TokenMinterProxy",
 		nargoArtifact("token_minter_proxy/target/token_minter_proxy-TokenMinterProxy.json"),
 		[],
 		"constructor",
-		PROXY_SALT,
+		salts.proxy,
 	)
 	const token = await deployL2(
+		"token",
 		"Token",
 		TokenContractArtifact,
 		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address],
 		"constructor_with_minter",
-		TOKEN_SALT,
+		salts.token,
 	)
 	const bridge = await deployL2(
+		"bridge",
 		"TokenBridge",
 		nargoArtifact("token_bridge/target/token_bridge_contract-TokenBridge.json"),
 		[proxy.address, EthAddress.fromString(portal)],
 		"constructor",
-		BRIDGE_SALT,
+		salts.bridge,
 	)
 
-	await proxy.methods.set_token(token.address).send(sendOpts)
-	await proxy.methods.set_bridge(bridge.address).send(sendOpts)
-	console.log(`proxy wired (${mins()})`)
+	if (!fromJournalMode) {
+		if (!recorded?.confirmed["set-token"]) {
+			await proxy.methods.set_token(token.address).send(sendOpts)
+			appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "set-token", address: "done" })
+		}
+		if (!recorded?.confirmed["set-bridge"]) {
+			await proxy.methods.set_bridge(bridge.address).send(sendOpts)
+			appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "set-bridge", address: "done" })
+		}
+		console.log(`proxy wired (${mins()})`)
 
-	const portalC = getContract({ address: portal, abi: TokenPortalAbi as never, client: wallet as never })
-	// biome-ignore lint/suspicious/noExplicitAny: viem contract write typing
-	const initHash = await (portalC as any).write.initialize([registry, usdc, bridge.address.toString()])
-	await pub.waitForTransactionReceipt({ hash: initHash })
-	console.log(`portal initialized (${mins()})`)
+		const portalC = getContract({ address: portal, abi: portalArt.abi as never, client: wallet as never })
+		// biome-ignore lint/suspicious/noExplicitAny: viem contract write typing
+		const initHash = await (portalC as any).write.initialize([registry, usdc, bridge.address.toString()])
+		appendJournal(JOURNAL_PATH, { phase: "submitted", step: "portal-init", txHash: initHash })
+		await pub.waitForTransactionReceipt({ hash: initHash })
+		appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "portal-init", address: "done" })
+		console.log(`portal initialized (${mins()})`)
+	} else if (!recorded?.confirmed["portal-init"]) {
+		throw new Error("--from-journal: portal-init never confirmed - partial landing. Finish manually or archive for a clean start.")
+	}
 
-	// ─── Persist the config the app rebuilds instances from ──────────
-	const config = {
+	// ─── Read-backs (codex 019ecbee #6): abort on any mismatch ───────
+	console.log("read-backs:")
+	const portalR = getContract({ address: portal, abi: portalArt.abi as never, client: pub as never })
+	const reg = getContract({ address: registry, abi: RegistryAbi as never, client: pub as never })
+	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+	const pr = portalR.read as any
+	assertSame(await pr.registry(), registry, "portal.registry")
+	assertSame(await pr.underlying(), usdc, "portal.underlying")
+	assertSame(await pr.l2Bridge(), bridge.address.toString(), "portal.l2Bridge")
+	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+	assertSame(await pr.rollup(), await (reg.read as any).getCanonicalRollup(), "portal.rollup == registry canonical")
+	if ((await pr.rollupVersion()) <= 0n) throw new Error("read-back FAILED: portal.rollupVersion is 0")
+	const onchain = await pub.getCode({ address: portal })
+	if (!onchain) throw new Error("read-back FAILED: portal has no deployed code")
+	assertSame(keccak256(onchain), portalArt.runtimeCodeHash, "portal runtime code hash == pin")
+
+	assertSame((await proxy.methods.get_token().simulate({ from })).toString(), token.address.toString(), "proxy.get_token")
+	assertSame((await proxy.methods.get_bridge().simulate({ from })).toString(), bridge.address.toString(), "proxy.get_bridge")
+	const cfg = await bridge.methods.get_config_public().simulate({ from })
+	assertSame(cfg.token_minter_proxy.toString(), proxy.address.toString(), "bridge.config.token_minter_proxy")
+	assertSame(cfg.portal.toString(), portal, "bridge.config.portal")
+
+	// ─── Carry forward the fuel arc (independent of the bridge set) ──
+	// SwapBridgeRouter's ctor is (permit2, feeJuicePortal, swapTarget) - it never references the
+	// portal or L2 bridge, so a bridge redeploy reuses the existing router/swap unchanged.
+	const prior = existsSync(LIVE_PATH) ? JSON.parse(readFileSync(LIVE_PATH, "utf8")) : null
+	const fuel = prior?.l1?.fuel as Record<string, unknown> | undefined
+	if (fuel?.router && fuel?.swapTarget) {
+		const router = getContract({
+			address: fuel.router as `0x${string}`,
+			abi: [{ type: "function", name: "swapTarget", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] }] as never,
+			client: pub as never,
+		})
+		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+		assertSame(await (router.read as any).swapTarget(), fuel.swapTarget, "router.swapTarget (carried-forward)")
+	}
+
+	// ─── Write the CANDIDATE (never the live file) ───────────────────
+	const manifest: CandidateManifest = {
 		network: "testnet",
 		l1: {
 			usdc,
 			portal,
+			portalSource: "forked-v1",
 			token: { name: TOKEN_NAME, symbol: TOKEN_SYMBOL, decimals: TOKEN_DECIMALS, maxWholePerTx: 1000 },
+			...(fuel ? { fuel } : {}),
 		},
 		l2: {
-			proxy: { address: proxy.address.toString(), salt: PROXY_SALT, constructorArtifact: "constructor", constructorArgs: [] },
+			proxy: { address: proxy.address.toString(), salt: salts.proxy, constructorArtifact: "constructor", constructorArgs: [] },
 			token: {
 				address: token.address.toString(),
-				salt: TOKEN_SALT,
+				salt: salts.token,
 				constructorArtifact: "constructor_with_minter",
 				constructorArgs: [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address.toString()],
 			},
 			bridge: {
 				address: bridge.address.toString(),
-				salt: BRIDGE_SALT,
+				salt: salts.bridge,
 				constructorArtifact: "constructor",
 				constructorArgs: [proxy.address.toString(), portal],
 			},
 		},
 	}
-	mkdirSync(dirname(CONFIG_PATH), { recursive: true })
-	writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, "\t")}\n`)
-	console.log(`\n✅ PERSISTENT testnet bridge deployed in ${mins()} — wrote faucet/public/testnet-bridge.json`)
+	writeCandidateAtomic(CANDIDATE_PATH, manifest)
+	console.log(`\n✅ candidate written to faucet/public/testnet-bridge.candidate.json in ${mins()}.`)
+	console.log("   Promote it to testnet-bridge.json at cutover, AFTER the candidate passes smoke.")
 
 	if (process.env.ETHERSCAN_API_KEY) {
-		console.log("\nETHERSCAN_API_KEY set — verifying L1 sources on Etherscan…")
-		const v = spawnSync("bun", [join(here, "verify-l1.ts")], { stdio: "inherit" })
-		if (v.status !== 0) console.log("⚠ verification failed — retry with `bun run verify:l1`.")
+		console.log("\nETHERSCAN_API_KEY set — verifying the candidate's L1 sources on Etherscan…")
+		const v = spawnSync("bun", [join(here, "verify-l1.ts"), "--config", CANDIDATE_PATH], { stdio: "inherit" })
+		if (v.status !== 0) console.log("⚠ verification failed — retry with `bun run verify:l1 --config <candidate>`.")
 	} else {
-		console.log("\nETHERSCAN_API_KEY not set — run `bun run verify:l1` to verify L1 sources on Etherscan.")
+		console.log("\nETHERSCAN_API_KEY not set — run `bun run verify:l1 --config <candidate>` to verify L1 sources.")
 	}
-	console.log(JSON.stringify(config, null, 2))
+	console.log(JSON.stringify(manifest, null, 2))
 }
 
 main().catch((e) => {
