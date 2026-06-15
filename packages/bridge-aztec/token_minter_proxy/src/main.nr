@@ -1,15 +1,16 @@
 use aztec::macros::aztec;
 
+// F-002 fix: immutable single-minter. The proxy authorizes EXACTLY ONE minter (the bridge), fixed
+// once at bootstrap via the owner-gated, single-shot `set_bridge` (a `PublicImmutable` can only be
+// initialized once). There is no `set_minter` and no owner mint power, so after `set_token` +
+// `set_bridge` the owner has zero standing authority: a compromised owner key can neither mint nor
+// add a minter. Mint/burn assert the caller is the bridge.
 #[aztec]
 pub contract TokenMinterProxy {
     use aztec::{
         macros::{functions::{external, initializer, only_self, view}, storage::storage},
         protocol::address::AztecAddress,
-        state_vars::{
-            Map,
-            PublicImmutable,
-            PublicMutable,
-        },
+        state_vars::PublicImmutable,
     };
     use token::Token;
 
@@ -17,7 +18,7 @@ pub contract TokenMinterProxy {
     struct Storage<Context> {
         owner: PublicImmutable<AztecAddress, Context>,
         token: PublicImmutable<AztecAddress, Context>,
-        can_mint: Map<AztecAddress, PublicMutable<bool, Context>, Context>,
+        bridge: PublicImmutable<AztecAddress, Context>,
     }
 
     #[external("public")]
@@ -31,6 +32,15 @@ pub contract TokenMinterProxy {
         let sender = self.msg_sender();
         assert(self.storage.owner.read().eq(sender), "not owner");
         self.storage.token.initialize(token_address);
+    }
+
+    // One-time, owner-gated. `PublicImmutable.initialize` reverts on a second call, so the sole
+    // minter is locked to the bridge at bootstrap and can never be changed or added to.
+    #[external("public")]
+    fn set_bridge(bridge_address: AztecAddress) {
+        let sender = self.msg_sender();
+        assert(self.storage.owner.read().eq(sender), "not owner");
+        self.storage.bridge.initialize(bridge_address);
     }
 
     #[external("public")]
@@ -47,51 +57,40 @@ pub contract TokenMinterProxy {
 
     #[external("public")]
     #[view]
-    fn is_minter(minter: AztecAddress) -> bool {
-        self.storage.can_mint.at(minter).read()
-    }
-
-    #[external("public")]
-    fn set_minter(minter: AztecAddress, allowed: bool) {
-        let sender = self.msg_sender();
-        assert(self.storage.owner.read().eq(sender), "not owner");
-        self.storage.can_mint.at(minter).write(allowed);
+    fn get_bridge() -> AztecAddress {
+        self.storage.bridge.read()
     }
 
     #[external("public")]
     #[only_self]
-    fn assert_minter(minter: AztecAddress) {
-        assert(self.storage.can_mint.at(minter).read(), "not authorized minter");
+    fn assert_bridge(caller: AztecAddress) {
+        assert(self.storage.bridge.read().eq(caller), "not the bridge");
     }
 
     #[external("public")]
     fn mint_to_public(recipient: AztecAddress, amount: u128) {
-        let sender = self.msg_sender();
-        assert(self.storage.can_mint.at(sender).read(), "not authorized minter");
+        assert(self.storage.bridge.read().eq(self.msg_sender()), "not the bridge");
         let token = Token::at(self.storage.token.read());
         self.call(token.mint_to_public(recipient, amount));
     }
 
     #[external("public")]
     fn burn_public(user_address: AztecAddress, amount: u128, authwit_nonce: Field) {
-        let sender = self.msg_sender();
-        assert(self.storage.can_mint.at(sender).read(), "not authorized minter");
+        assert(self.storage.bridge.read().eq(self.msg_sender()), "not the bridge");
         let token = Token::at(self.storage.token.read());
         self.call(token.burn_public(user_address, amount, authwit_nonce));
     }
 
     #[external("private")]
     fn mint_to_private(recipient: AztecAddress, amount: u128) {
-        let sender = self.msg_sender();
-        self.enqueue_self.assert_minter(sender);
+        self.enqueue_self.assert_bridge(self.msg_sender());
         let token = Token::at(self.storage.token.read());
         self.call(token.mint_to_private(recipient, amount));
     }
 
     #[external("private")]
     fn burn_private(user_address: AztecAddress, amount: u128, authwit_nonce: Field) {
-        let sender = self.msg_sender();
-        self.enqueue_self.assert_minter(sender);
+        self.enqueue_self.assert_bridge(self.msg_sender());
         let token = Token::at(self.storage.token.read());
         self.call(token.burn_private(user_address, amount, authwit_nonce));
     }

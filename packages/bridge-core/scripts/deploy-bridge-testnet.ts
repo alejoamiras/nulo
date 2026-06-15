@@ -183,7 +183,7 @@ async function main() {
 	)
 
 	await proxy.methods.set_token(token.address).send(sendOpts)
-	await proxy.methods.set_minter(bridge.address, true).send(sendOpts)
+	await proxy.methods.set_bridge(bridge.address).send(sendOpts)
 	console.log(`proxy wired (${mins()})`)
 
 	const portalC = getContract({ address: portal, abi: TokenPortalAbi as never, client: wallet as never })
