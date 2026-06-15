@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
-import { snapshotResultSeq } from "../fixtures/playground"
+import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxActiveStage } from "../fixtures/popups"
 import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
 
@@ -28,8 +28,8 @@ const hasConfig = aztecConfig !== undefined
  * implementations-plan/journal-stage-restructure/plan.md.
  */
 test.skipIf(!hasConfig)(
-	"tx-sendTx-default — popup opens, fee picker shown, confirm reaches journal active stage",
-	{ timeout: 60_000 },
+	"tx-sendTx-default — popup opens, fee picker shown, confirm submits with real proof (prover-ON canary)",
+	{ timeout: 360_000 },
 	async ({ dappConnectedExtensionWithTransactionCap }) => {
 		const { playgroundPage: page, accountAddress } = dappConnectedExtensionWithTransactionCap
 
@@ -56,7 +56,7 @@ test.skipIf(!hasConfig)(
 		)
 
 		// Fire sendTx + drive the execute popup
-		await snapshotResultSeq(page)
+		const seqTx = await snapshotResultSeq(page)
 		const execPopupP = waitForPopup(dappConnectedExtensionWithTransactionCap, "execute", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-sendTx-default")
 		const execPopup = await execPopupP
@@ -78,5 +78,18 @@ test.skipIf(!hasConfig)(
 		// full sendTx promise. See waitForSendTxActiveStage for rationale.
 		const walletPopup = await openPopup(dappConnectedExtensionWithTransactionCap)
 		await waitForSendTxActiveStage(walletPopup)
+
+		// Prover-ON canary (this file runs in the real-proving canary job, NOT the
+		// proverless pool): wait through the REAL prove to submit and assert the
+		// node accepted the real proof. The playground hard-codes `wait: "NO_WAIT"`
+		// (transactions.ts), so the dApp result settles at submit — `txHash`
+		// present is the direct signal the node validated a real BB proof at
+		// `node.sendTx` (block-mine is not awaited). 300s budget covers the real
+		// prove on a dedicated runner. Under proverless this still passes (fast
+		// submit) — that's the local assertion-logic check; the real-prove timing
+		// is exercised in CI.
+		const result = await waitForPgResult(page, "sendTx", seqTx, 300_000)
+		expect(result.status).toBe("ok")
+		expect(typeof (result.resultJson as { txHash?: string } | undefined)?.txHash).toBe("string")
 	},
 )

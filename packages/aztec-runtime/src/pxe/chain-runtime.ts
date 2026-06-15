@@ -27,6 +27,16 @@ export interface ProductionPxeFactoryOptions {
 	required?: boolean
 	host?: string
 	port?: number
+	/**
+	 * E2E-only: build the PXE with `proverEnabled: false` so the BB SNARK is
+	 * never generated (kernel simulation + on-chain submission stay real; the
+	 * default bundle prover's fakeProofs path emits a random chonk proof the
+	 * local network accepts). No `AcceleratorProver` is constructed in this
+	 * mode. Set ONLY from the extension shell behind the double-opt-in
+	 * `VITE_NULO_E2E_PROVERLESS` build flag; mutually exclusive with
+	 * `required`. NEVER reaches a production build.
+	 */
+	proverless?: boolean
 }
 
 /**
@@ -93,12 +103,17 @@ export class ProductionPxeFactory implements PxeFactory {
 	private readonly required: boolean
 	private readonly host: string | undefined
 	private readonly port: number | undefined
+	private readonly proverless: boolean
 
 	public constructor(nodeFactory?: NodeFactory, options?: ProductionPxeFactoryOptions) {
 		this.nodeFactory = nodeFactory ?? new AztecNodeFactoryAdapter()
 		this.required = options?.required ?? false
 		this.host = options?.host
 		this.port = options?.port
+		this.proverless = options?.proverless ?? false
+		if (this.proverless && this.required) {
+			throw new Error("ProductionPxeFactory: `proverless` and `required` are mutually exclusive.")
+		}
 	}
 
 	public async createChainRuntime(network: NetworkInfo): Promise<ChainRuntime> {
@@ -106,7 +121,7 @@ export class ProductionPxeFactory implements PxeFactory {
 		const config = {
 			...getPXEConfig(),
 			dataDirectory: `pxe/${network.profileId}/${network.chainId}`,
-			proverEnabled: true,
+			proverEnabled: !this.proverless,
 		} as PXEConfig
 		// Pass an explicit WASMSimulator into both the prover AND the PXE
 		// config so neither falls back to dynamic-import
@@ -117,6 +132,17 @@ export class ProductionPxeFactory implements PxeFactory {
 		// could not be loaded." during `proveTx`. Static import makes the
 		// simulator part of the main bundle graph and avoids that path.
 		const simulator = new WASMSimulator()
+
+		// E2E-only proverless: skip the BB SNARK. The PXE still runs kernel
+		// simulation (real public inputs / nullifiers) and emits a random
+		// chonk proof via the default bundle prover's fakeProofs path; the
+		// local network accepts it. No AcceleratorProver, no onPhase, no
+		// preflight. The `simulator` is still passed so kernel sim stays on
+		// the bundled WASM path (same MV3 reason as above).
+		if (this.proverless) {
+			const pxe = await createPXE(node, config, { simulator })
+			return new ChainRuntime(network.chainId, node, pxe, network.rpcUrl)
+		}
 
 		// Required-mode (CI only): the onPhase callback throws synchronously
 		// when the SDK would silently fall back to WASM. "downloading" is a

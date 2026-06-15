@@ -30,7 +30,28 @@ PLAYGROUND_URL=$(jq -r .playgroundUrl "$PORTS_JSON")
 FAUCET_URL=$(jq -r .faucetUrl "$PORTS_JSON")
 
 echo "[e2e:agent] building wallet with VITE_LOCAL_NETWORK_RPC_URL=$AZTEC_NODE_URL"
-VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" bun run build:chrome
+# NULO_E2E_PROVERLESS=1 builds a proverless wallet (skips BB-SNARK generation;
+# kernel simulation + on-chain submission stay real). Arms the double-opt-in
+# flags so packages/extension/src/e2e/config.ts enables the proverless PXE +
+# ChromeStorageProofGate. Mutually exclusive with accelerator-required.
+if [ "${NULO_E2E_PROVERLESS:-}" = "1" ]; then
+  if [ "${VITE_NULO_ACCELERATOR_REQUIRED:-}" = "1" ]; then
+    echo "[e2e:agent] FATAL: NULO_E2E_PROVERLESS and VITE_NULO_ACCELERATOR_REQUIRED are mutually exclusive" >&2
+    exit 2
+  fi
+  echo "[e2e:agent] PROVERLESS build — BB-SNARK generation skipped (double opt-in)"
+  VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" \
+  VITE_NULO_E2E_PROVERLESS=1 \
+  VITE_NULO_E2E_PROVERLESS_CONFIRM=1 \
+    bun run build:chrome
+else
+  # Scrub any inherited proverless flags so a non-proverless build (e.g. the
+  # prover-ON canary job) can't silently build proverless from leaked runner
+  # env — the double-opt-in would otherwise arm if both vars are already set
+  # (codex post-impl audit).
+  unset VITE_NULO_E2E_PROVERLESS VITE_NULO_E2E_PROVERLESS_CONFIRM
+  VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" bun run build:chrome
+fi
 
 # Bundle assertion — if the URL didn't actually land in dist, abort before the
 # tests waste cycles. This catches the silent failure mode where vi.stubEnv-
@@ -57,6 +78,20 @@ if [ "${VITE_NULO_ACCELERATOR_REQUIRED:-}" = "1" ]; then
     exit 2
   fi
   echo "[e2e:agent] bundle contains NULO_ACCELERATOR_REQUIRED_BUILD_STAMP ✓"
+fi
+
+# Positive proverless stamp assertion (mirror the accelerator stamp). If the
+# double-opt-in flags didn't propagate into the build, the suite would
+# silently run with REAL proving — defeating the speed/CDP-stability goal and
+# masking the proverless path entirely. Emitted by src/e2e/config.ts, pinned
+# by offscreen/index.ts.
+if [ "${NULO_E2E_PROVERLESS:-}" = "1" ]; then
+  if ! grep -rq "NULO_E2E_PROVERLESS_BUILD_STAMP" dist/chrome 2>/dev/null; then
+    echo "[e2e:agent] FATAL: NULO_E2E_PROVERLESS=1 but proverless build stamp absent from dist/chrome" >&2
+    echo "[e2e:agent] double-opt-in flags didn't propagate; suite would silently run with real proving" >&2
+    exit 2
+  fi
+  echo "[e2e:agent] bundle contains NULO_E2E_PROVERLESS_BUILD_STAMP ✓"
 fi
 
 # Fail loudly if VITE_NULO_FEE_MULTIPLIER didn't propagate into the bundle.

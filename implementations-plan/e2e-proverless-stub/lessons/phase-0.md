@@ -1,0 +1,96 @@
+# Phase 0 — Feasibility spike
+
+Goal: de-risk the seam before any CI churn. 0a = proverless mines through the
+full extension path; 0b = the barrier holds/releases/times-out and preserves
+cancel semantics; decide D1.
+
+## D1 decision → Approach 2 (gate at the offscreen `proveTx` boundary)
+
+Chosen during wiring, grounded in the code (not guessed):
+
+- `execution-coordinator.ts:152-170` `proveAndSend` is a FROZEN sequence:
+  `checkCancelled → journal(proving) → prove → checkCancelled(:160) → … → send`.
+  The post-prove `checkCancelled` at `:160` is what `cancel-mid-prove` pins.
+- A gate awaited inside `PxeService.proveTx` (`service.ts`, offscreen) holds
+  AFTER the SW has journaled `proving` and BEFORE `pxe.proveTx` returns. So it
+  replaces prove *duration* while the SW's existing pre/post `checkCancelled`
+  pair is untouched — **no new cancel checkpoint** (satisfies D13 by
+  construction). The production `execution-coordinator` is not modified at all.
+- Approach 1 (stub `PrivateKernelProver`) was rejected for the spike: createPXE
+  passes the injected prover as the `proofCreator` and the execution prover
+  calls `simulate*` on it, so a1 would need a real WASM-backed delegate
+  (audit I2's MV3 risk). Approach 2 needs no delegate.
+
+Prove-entered marker (D13): the journal already carries
+`progress: { stage: "proving", enteredProveAt }` (set at coordinator `:156`,
+before the gate). That existing field is the marker — no new instrumentation
+in the runtime.
+
+## Quality bar (user directive: "very pretty and lovely, not a monkey patch")
+
+Built as first-class injected collaborators, mirroring the `AcceleratorProver`
++ `onPhase` seam:
+- `ProofGate` interface + `NOOP_PROOF_GATE` in `@nulo/aztec-runtime` (chrome-free),
+  threaded `PxeOffscreenDeps.proofGate → PxeService`.
+- `ProductionPxeFactory { proverless }` for the proverEnabled:false build.
+- `ChromeStorageProofGate` + double-opt-in `e2e/config.ts` in the extension
+  shell, constructed strictly inside `if (E2E_PROVERLESS)` (source-structure
+  invariant) so DCE strips it from prod.
+
+## Results
+
+### Code gates (✓)
+- `bun run typecheck:all` → all 12 packages exit 0.
+- `bun run lint` → exit 0.
+- Gate unit tests (`chrome-storage-proof-gate.test.ts`) → 4/4 pass:
+  instant-by-default, hold→release, **safety-timeout-loud** (covers 0b's
+  timeout requirement at unit level), and the check-then-subscribe race.
+- Existing pxe tests (service/chain-runtime) → green after constructor changes
+  (backward-compatible optional params).
+
+### Prod-guard validation (✓ — the security-critical axis, cheaply de-risked)
+Two standalone builds:
+- **Proverless build** (`VITE_NULO_E2E_PROVERLESS=1 + _CONFIRM=1`): stamp
+  `NULO_E2E_PROVERLESS_BUILD_STAMP` PRESENT, gate key `nulo:e2e:proof-gate`
+  PRESENT. ✓
+- **Production build** (no flags): stamp ABSENT, gate key ABSENT,
+  `ChromeStorageProofGate` class ABSENT. DCE (layer 2) + double-opt-in
+  (layer 1) confirmed; the negative grep (layer 3) has nothing to catch
+  because DCE already removed everything. ✓
+
+### On-chain validation (0a / 0b)
+- 0a via `transfers.test.ts`: **stalls — but NOT a proverless fault.** Diagnosed (journal+logs dumped to `/tmp/spike-result.json`): the wallet **send form crashes** before any tx is created — `AmountCard.handleAmountInput` calls `purgeNumber(model.value)` (`AmountCard.vue:33`) with NO null guard (unlike the guarded `:91`/`:105`), and `model.value` is null when the e2e helper dispatches the synthetic `input` event → `TypeError: Cannot read properties of null (reading 'replace')` (`amount.ts:43`). The journal stays EMPTY (`progression: ["t=0.0s []"]`); the tx is never built. This is a pre-existing UI null-gap, structurally UPSTREAM of proving (proverEnabled:false only affects the offscreen `proveTx` step, after simulate/submit). `transfers` passes in CI, so the send form works there — this is a local input-timing artifact. **`transfers` is therefore a poor LOCAL 0a probe** (depends on the fragile wallet send form, which also has a real latent NPE worth a separate fix).
+  - **Pivot:** validate the proverless tx path via a **dApp `sendTx`** flow (playground → execute popup), which bypasses AmountCard entirely — exactly what the canaries + `cancel-mid-prove` use, and what 0a's "dApp sendTx mined" item requires.
+- 0a (dApp `sendTx` mined): **proverless path REACHES proveTx and would mine — but my gate crashes it.** The dApp spike got `status:"error"`, journal empty, dApp message `Cannot read properties of undefined (reading 'session')`. Logs: `context:"sw" source:"pxe" "[WRITE] proveTx failed after 2ms" "Cannot read properties of undefined (reading 'session')"`.
+  - **ROOT CAUSE (audit C1/D8 predicted this):** `PxeService.proveTx` (where I injected `gate.wait()`) runs in the **OFFSCREEN document**, which has a RESTRICTED chrome API surface — **no `chrome.storage`** (the whole reason the offscreen uses `ProfileServiceClient`/`LoggerServiceClient` RPC instead of direct storage). `ChromeStorageProofGate.isHeld()` → `chrome.storage.session` → `chrome.storage` undefined → throws → every proverless proveTx fails (the gate is injected on EVERY proverless build, so it breaks plain bulk txs too, not just STUB).
+  - **Good news:** simulate succeeded and proveTx was reached (failed at the gate after 2ms) → the proverless prove→submit→mine path is sound; the gate is the only blocker. Fixing the gate's location validates 0a.
+  - **FIX (D8): relocate the barrier to where `chrome.storage` lives** — the SW-side `proveTxTask` boundary in `execution-coordinator.ts` (runs in the SW, has chrome.storage), exactly the "SW for a2" topology the audit prescribed. Alternative: keep the offscreen gate but read the barrier via an RPC client to a SW service. Codex consulted (below).
+- **0a VALIDATED ✓** — with the gate neutralized, a proverless dApp sendTx **mines through the extension**: `pgResult.status:"ok"`, `txHash:0x189fe0a0…` (the playground's sendTx only resolves after the node accepts the fake-proven tx). The full `proveTx→toTx→node.sendTx` path is behaviorally sound proverless. (The journal read empty because proverless is sub-second — the 1.5s poll missed the lifecycle; that's exactly WHY the STUB tests need the barrier to hold `proving` observably.)
+- **Contention flake note:** an earlier neutralized-gate run hit `reading 'session'` ONLY while a codex consult ran concurrently (CPU starvation); the clean run succeeded. Lesson: run network e2e SEQUENTIALLY, never alongside other heavy processes. Watch-item: if `reading 'session'` recurs on a CLEAN run, dig (would indicate a real init race), else it's contention noise.
+- **0b VALIDATED ✓** — `cancel-mid-prove` **passes proverless** with the relocated SW-side barrier (`Tests 1 passed`). One pass confirms the whole 0b contract: the barrier HOLDS `proving` (the test's `data-stage="proving"` waitForFunction passed = prove-entered marker), RELEASES (proveTx proceeds), and the cancel→structured-4001 semantics hold (cancel honored only at the existing post-prove checkpoint → **D13 confirmed**). Also re-confirms 0a end-to-end with the REAL gate (no `'session'` crash — the SW has chrome.storage). The safety-timeout-loud path is covered at unit level (`chrome-storage-proof-gate.test.ts`).
+- **D7 RESOLVED → PLAIN ✓** — `multi-account-from` passed **3/3 consecutive** plain proverless runs (no barrier). The `waitForSendTxActiveStage` allowlist (`simulating|proving|submitting`) tolerates a collapsed `proving`; `simulating`/`submitting` stay observable. The Plan subagent's "safe PLAIN" position was correct; codex's race concern (terminalize-before-observable) did not materialize across 3 runs. → `multi-account-from` stays in the PLAIN bucket.
+
+## Phase 0 — COMPLETE ✓
+- **0a ✓** proverless prove→submit→mine works through the extension (dApp sendTx → real txHash).
+- **0b ✓** SW-side barrier holds `proving` deterministically (prove-entered marker via `data-stage="proving"`), releases, preserves cancel→4001 (D13). Safety-timeout-loud covered at unit level.
+- **D7 ✓** → PLAIN.
+- **No real BB-SNARK proving runs** proverless by construction (`proverEnabled:false` → fakeProofs); confirmed by the fast wall-times vs the WASM-proving baseline.
+- **D1 ✓** → approach 2 (gate at the SW `proveTxTask` boundary). **D8 ✓** → barrier is SW-side (offscreen has no chrome.storage — empirically confirmed + fixed via relocation).
+- Gates met: `bun run lint` ✓, `bun run test` (2360) ✓, factory unit test ✓, prod-guard two-build grep ✓, cancel-mid-prove + multi-account-from proverless e2e ✓.
+- **Deviation from plan's 0a wording:** `transfers.test.ts` was NOT used as the 0a probe (it stalls locally on a pre-existing AmountCard null-gap, unrelated to proverless; green in CI). Substituted a dApp sendTx mining probe + cancel-mid-prove, which exercise the same proverless tx path without the flaky wallet send form. `transfers` remains a KEEP-real-proving canary for CI.
+
+LESSONS_FILE=implementations-plan/e2e-proverless-stub/lessons/phase-0.md
+
+### Codex consult — gate relocation (offscreen has no chrome.storage) → Option A
+Codex (xhigh, read-only) recommended **Option A**, refined:
+- Hold in `proveTxTask` immediately before `pxe.proveTx` (`execution-coordinator.ts:116`), NOT in `proveAndSend` — keeps `proveTxTask` the exact measured prove boundary. D13 holds: the frozen `checkCancelled → journal(proving) → proveTxTask → checkCancelled(:160)` is unchanged; cancel during the hold is still observed only at `:160`. No new checkpoint.
+- **Make `ProofGate` extension-local** (not `@nulo/aztec-runtime`). Delete the offscreen seam from `offscreen/index.ts`, `aztec-runtime/offscreen/entry.ts`, `aztec-runtime/pxe/service.ts`.
+- Build path: construct the real gate behind `E2E_PROVERLESS` in the background composition root (`wallet/runtime.ts`), thread `ExecutionService` (`execution/service.ts:144`) → `ExecutionCoordinator` (NOOP default → existing 2-arg callers + `execution-coordinator.test.ts:25` untouched). Executors unchanged (only depend on `coordinator`).
+- **Concurrency confirmed:** T2 stays `queued` via the SW execution mutex (`execution-lane.ts:69`), NOT the PXE per-chain write lock — so moving the hold off the offscreen write lock is safe.
+- Rejected B (new SW session-storage service + client + event path — no reusable one exists; `ProfileService` session storage is internal) and C (popup/alarms — worse).
+Verdict adopted (matches audit D8). Proceeding.
+
+### Side-finding (out of arc scope, logged for a follow-up)
+`AmountCard.vue:33` `purgeNumber(model.value)` is a latent NPE when `model.value` is null (the input handler fires before the model is a string). Trivially fixable (`model.value ?? ""`). Not fixing here (no scope beyond plan.md); CI is unaffected (transfers green there). Worth a standalone `fix(send):` PR.
+
+LESSONS_FILE=implementations-plan/e2e-proverless-stub/lessons/phase-0.md

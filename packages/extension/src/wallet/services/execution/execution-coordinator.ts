@@ -39,6 +39,7 @@ import type { Tx, TxExecutionRequest, TxHash, TxProvingResult, TxSimulationResul
 import type { ILogger } from "@/wallet/logger"
 import type { IPXE } from "@/wallet/services/pxe/client"
 import { StepContent, type TaskService, type WrappedTask } from "@/wallet/services/task/service"
+import { type ProofGate, NOOP_PROOF_GATE } from "@/e2e/proof-gate"
 
 /** Journal patches the shared pipeline tail emits. Structural subset of
  *  the operation-journal patch shape — callers bind their own journal id
@@ -81,6 +82,9 @@ export class ExecutionCoordinator {
 	public constructor(
 		private readonly tasks: TaskService,
 		readonly _logger: ILogger,
+		/** E2E-only proving hold-point. The no-op default never blocks, so
+		 *  production proving is unimpeded. See {@link ProofGate}. */
+		private readonly proofGate: ProofGate = NOOP_PROOF_GATE,
 	) {}
 
 	/** Wrap `pxe.simulateTx` in a TaskService step. Fee strategies pass
@@ -113,6 +117,11 @@ export class ExecutionCoordinator {
 		const step = new StepContent("Generating proof")
 		const task = parentTask ? parentTask.startSubtask(step) : this.tasks.startNewTask(step)
 		try {
+			// E2E-only hold-point. No-op in production. Awaited HERE — after the
+			// coordinator journaled `proving`, immediately before `pxe.proveTx`,
+			// between the existing pre-/post-prove cancel checkpoints — so the
+			// hold replaces prove duration without adding a cancel checkpoint.
+			await this.proofGate.wait()
 			const provedTx = await pxe.proveTx(txRequest, scopes)
 			task.complete()
 			return provedTx

@@ -57,8 +57,11 @@ vi.mock("@alejoamiras/aztec-accelerator", () => ({
 	},
 }))
 
+import { createPXE } from "@aztec/pxe/client/bundle"
 import { ProductionPxeFactory } from "./chain-runtime"
 import type { NodeFactory } from "../ports/node-factory-port"
+
+const createPXEMock = vi.mocked(createPXE)
 
 const fakeNodeFactory: NodeFactory = {
 	createNode: () => ({}) as never,
@@ -182,5 +185,30 @@ describe("ProductionPxeFactory required mode", () => {
 			host: "127.0.0.1",
 			port: 59833,
 		})
+	})
+})
+
+describe("ProductionPxeFactory proverless mode (e2e-only)", () => {
+	test("does NOT construct an AcceleratorProver", async () => {
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { proverless: true })
+		await factory.createChainRuntime(fakeNetwork)
+		expect(acceleratorProverInstances).toHaveLength(0)
+	})
+
+	test("sets proverEnabled:false and omits proverOrOptions (default fakeProofs prover)", async () => {
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { proverless: true })
+		await factory.createChainRuntime(fakeNetwork)
+		const lastCall = createPXEMock.mock.calls.at(-1)!
+		const config = lastCall[1] as { proverEnabled?: boolean }
+		const options = lastCall[2] as { proverOrOptions?: unknown; simulator?: unknown }
+		expect(config.proverEnabled).toBe(false)
+		expect(options.proverOrOptions).toBeUndefined()
+		// The simulator is still passed so kernel simulation stays on the
+		// bundled WASM path (the MV3 dynamic-import fallback fails offscreen).
+		expect(options.simulator).toBeDefined()
+	})
+
+	test("proverless + required is mutually exclusive (constructor throws)", () => {
+		expect(() => new ProductionPxeFactory(fakeNodeFactory, { proverless: true, required: true })).toThrow(/mutually exclusive/)
 	})
 })

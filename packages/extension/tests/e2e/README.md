@@ -50,6 +50,12 @@ The terminology gap matters: **Aztec Accelerator** is the desktop app a user ins
 
 **Caveat for local devs running e2e while Aztec Accelerator is running**: both compete on `127.0.0.1:59833`. The wallet probes `/health` and routes to whichever responds first — usually the one that started first. No crash, but proves may be routed to the desktop app instead of being explicitly absent. If this matters for a specific test, quit the desktop app before `bun run e2e:agent`.
 
+### Proverless mode
+
+`NULO_E2E_PROVERLESS=1 bun run e2e:agent <file>` builds the wallet with `proverEnabled:false` (skips BB-SNARK generation; kernel simulation + on-chain submission stay real — the local node accepts the fake proof). Much faster than real proving, and accelerator-independent (it's forced off). The agent arms the double-opt-in flags + asserts the proverless build stamp. Most CI shards run this way.
+
+The **STUB** tests (`cancel-mid-prove`, `concurrent-sendtx-{approve,confirm}`) hold the tx at `proving` via a `ProofGate` barrier (`holdProofGate`/`releaseProofGate` in `fixtures/proof-gate.ts`, backed by `chrome.storage.session` key `nulo:e2e:proof-gate`) so the sub-second proverless prove still gives a deterministic window. Real BB proving is guarded by the prover-ON `network-e2e-canary` CI job (`transfers` + `tx-sendTx-default`); see [CI.md § Proverless network e2e](../../../../CI.md). Full design: [`implementations-plan/e2e-proverless-stub/`](../../../../implementations-plan/e2e-proverless-stub/plan.md).
+
 ## Running multiple agents in parallel
 
 Open one terminal per worktree and run `bun run e2e:agent` in each. Each agent allocates fresh ports and owns its own anvil + aztec + playground:
