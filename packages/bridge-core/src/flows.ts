@@ -16,6 +16,7 @@ import { InboxAbi } from "@aztec/l1-artifacts"
 import { type Abi, type Account, type Address, type Hex, parseEventLogs, type PublicClient, type WalletClient } from "viem"
 import { type BridgeWitness, bridgeWitnessPermitTypedData, hashRoute, type PoolKey } from "./l1"
 import type { SendOpts } from "./l2"
+import { PRIVATE_FPC_ADDRESS } from "./private-fuel"
 
 /** The connected L1 surface the flows need (a viem wallet + public client + account). */
 export interface L1Ctx {
@@ -253,6 +254,23 @@ export async function runSwapBridge(
 	onStage?: (s: SwapFlowStage) => void,
 	recovery?: SwapRecoveryHooks,
 ): Promise<SwapBridgeResult> {
+	// Fail closed on the private-fuel invariants BEFORE any secret generation or signing. Without
+	// this, a missing fuelSecret silently falls back to Fr.random() below and strands the Fee Juice
+	// (the PrivateFPC claimer reconstructs the secret from msg_sender — a random one is unrecoverable),
+	// and a non-FPC fuelRecipient deposits the gas publicly to the wrong L2 address. The shipping
+	// faucet always passes both; this guards every other caller of the exported helper.
+	if (p.isPrivate) {
+		if (!p.fuelSecret) {
+			throw new Error(
+				"runSwapBridge: private fuel requires an injected fuelSecret (deriveBridgeSecret(salt, claimer)) — a random secret strands the Fee Juice",
+			)
+		}
+		if (p.fuelRecipient.toLowerCase() !== PRIVATE_FPC_ADDRESS.toLowerCase()) {
+			throw new Error(
+				`runSwapBridge: private fuel must target the PrivateFPC (${PRIVATE_FPC_ADDRESS}); got fuelRecipient=${p.fuelRecipient}`,
+			)
+		}
+	}
 	const tokenSecret = Fr.random()
 	// PUBLIC fuel: recipient-bound, random is correct. PRIVATE fuel: the caller injects the derived
 	// bridge secret so the FPC claimer can reconstruct it (a random one would strand the FJ — L3).
