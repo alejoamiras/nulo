@@ -8,7 +8,7 @@
 		"./artifacts": "./src/artifacts.ts"
 	},
 	"scripts": {
-		"typecheck": "tsc --noEmit",
+		"typecheck": "tsc --noEmit -p tsconfig.scripts.json",
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"deploy:sandbox": "bun scripts/deploy-sandbox.ts",

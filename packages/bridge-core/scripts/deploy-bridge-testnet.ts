@@ -40,7 +40,7 @@ import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveSigningKey } from "@aztec/stdlib/keys"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
-import { createPublicClient, createWalletClient, defineChain, getContract, http, keccak256 } from "viem"
+import { type Abi, createPublicClient, createWalletClient, defineChain, getContract, http, keccak256 } from "viem"
 import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts"
 import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
 import { loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
@@ -282,8 +282,8 @@ async function main() {
 
 	// ─── Read-backs (codex 019ecbee #6): abort on any mismatch ───────
 	console.log("read-backs:")
-	const portalR = getContract({ address: portal, abi: portalArt.abi as never, client: pub as never })
-	const reg = getContract({ address: registry, abi: RegistryAbi as never, client: pub as never })
+	const portalR = getContract({ address: portal, abi: portalArt.abi as Abi, client: pub })
+	const reg = getContract({ address: registry, abi: RegistryAbi as Abi, client: pub })
 	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
 	const pr = portalR.read as any
 	assertSame(await pr.registry(), registry, "portal.registry")
@@ -313,19 +313,46 @@ async function main() {
 	await l2Check("proxy.get_token", proxy.methods.get_token().simulate({ from }), token.address.toString())
 	await l2Check("proxy.get_bridge", proxy.methods.get_bridge().simulate({ from }), bridge.address.toString())
 
-	// ─── Carry forward the fuel arc (independent of the bridge set) ──
-	// SwapBridgeRouter's ctor is (permit2, feeJuicePortal, swapTarget) - it never references the
-	// portal or L2 bridge, so a bridge redeploy reuses the existing router/swap unchanged.
+	// ─── Fuel arc: carry the POOL config forward, but the router/swap must be the F-004/F-006 build ──
+	// The router/swap addresses are bridge-independent, BUT they carry the security fixes (F-004 binds
+	// swapTarget into the Permit2 witness; F-006 the non-zero minOutput). A pre-B2 router would reject
+	// the wallet's signature (Permit2 InvalidSigner) AND leave F-004/F-006 unshipped. So a cutover
+	// deploys fresh fuel (DeployFuelLive) and passes FUEL_ROUTER + FUEL_SWAP; the pool config (pools,
+	// quoter, slippage, …) carries forward from the live manifest. Pre-B2 fuel is a hard abort.
 	const prior = existsSync(LIVE_PATH) ? JSON.parse(readFileSync(LIVE_PATH, "utf8")) : null
-	const fuel = prior?.l1?.fuel as Record<string, unknown> | undefined
+	const priorFuel = prior?.l1?.fuel as Record<string, unknown> | undefined
+	const fuel = priorFuel
+		? {
+				...priorFuel,
+				...(process.env.FUEL_ROUTER ? { router: process.env.FUEL_ROUTER.toLowerCase() } : {}),
+				...(process.env.FUEL_SWAP ? { swapTarget: process.env.FUEL_SWAP.toLowerCase() } : {}),
+			}
+		: undefined
 	if (fuel?.router && fuel?.swapTarget) {
 		const router = getContract({
 			address: fuel.router as `0x${string}`,
-			abi: [{ type: "function", name: "swapTarget", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] }] as never,
-			client: pub as never,
+			abi: [
+				{ type: "function", name: "swapTarget", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
+				{
+					type: "function",
+					name: "BRIDGE_WITNESS_TYPE_STRING",
+					stateMutability: "view",
+					inputs: [],
+					outputs: [{ type: "string" }],
+				},
+			] as Abi,
+			client: pub,
 		})
 		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
-		assertSame(await (router.read as any).swapTarget(), fuel.swapTarget, "router.swapTarget (carried-forward)")
+		const rr = router.read as any
+		assertSame(await rr.swapTarget(), fuel.swapTarget, "router.swapTarget")
+		const witnessType = (await rr.BRIDGE_WITNESS_TYPE_STRING()) as string
+		if (!witnessType.includes("swapTarget")) {
+			throw new Error(
+				"fuel router is PRE-B2 (witness type string lacks swapTarget) - F-004/F-006 not shipped. Deploy fresh fuel " +
+					"(packages/bridge-evm DeployFuelLive.s.sol, no-reuse) and pass FUEL_ROUTER + FUEL_SWAP.",
+			)
+		}
 	}
 
 	// ─── Write the CANDIDATE (never the live file) ───────────────────
