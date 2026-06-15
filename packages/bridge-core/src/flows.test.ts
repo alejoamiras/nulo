@@ -164,4 +164,21 @@ describe("flows — runSwapBridge injectable fuel secret (L3)", () => {
 		expect(res.fuelSecretHex).toMatch(/^0x[0-9a-f]{64}$/)
 		expect(res.tokenSecretHex).not.toBe(res.fuelSecretHex) // token still random, distinct from fuel
 	})
+
+	it("F-005: private fuel with no injected secret is rejected BEFORE signing", async () => {
+		const l1 = makeL1()
+		// isPrivate (baseParams) + no fuelSecret: the silent Fr.random() fallback would strand the FJ.
+		await expect(runSwapBridge(l1 as never, { ...baseParams } as never)).rejects.toThrow(/private fuel requires an injected fuelSecret/)
+		expect(l1.wallet.signTypedData).not.toHaveBeenCalled()
+	})
+
+	it("F-005: private fuel to a non-FPC recipient is rejected BEFORE signing", async () => {
+		const l1 = makeL1()
+		const injected = deriveBridgeSecret(Fr.zero(), AztecAddress.fromString(AZTEC_RECIPIENT))
+		const evil = `0x${"de".repeat(32)}` as `0x${string}`
+		await expect(runSwapBridge(l1 as never, { ...baseParams, fuelSecret: injected, fuelRecipient: evil } as never)).rejects.toThrow(
+			/must target the PrivateFPC/,
+		)
+		expect(l1.wallet.signTypedData).not.toHaveBeenCalled()
+	})
 })
