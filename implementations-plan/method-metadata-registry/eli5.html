@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — method-metadata-registry (Q1)</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.85rem; margin: 1rem 0; }
+    th, td { border: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; }
+    th { background: #f0f0f0; }
+  </style>
+</head>
+<body>
+  <h1>One place to declare a wallet method</h1>
+  <p>The browser-extension wallet exposes ~18 RPC methods to dApps (send a transaction, read a contract, grant an authorization, …). Today, the <em>facts</em> about each method — what permission it needs, how it's routed, how its scope is checked — are scattered across <strong>six separate hand-kept lists in three files</strong>. Adding or changing one method means editing up to six places, and forgetting one is a silent security hole (it already happened once: the "F1" bug, where a method skipped its permission check because it was missing from one list). This plan folds those six lists into <strong>one table — a <code>MethodDescriptor</code> registry</strong> — and rebuilds the old lists from it automatically. A method becomes one row. A forgotten method becomes a <em>build failure</em>, not a security hole.</p>
+
+  <h2>Why this tier was chosen (deep)</h2>
+  <p>Two risk dimensions scored HIGH: <strong>security sensitivity</strong> (this is the exact boundary that decides what a dApp is allowed to do) and <strong>blast radius</strong> (every dApp RPC call flows through here). Single-package doesn't downgrade an authz refactor. So: three independent plans (mine + a fresh opus + cross-family codex) → a contradiction-check → a double audit → a final fresh codex pass. The audits earned their keep — they caught a real flaw in the first draft (see "Human context").</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 0 — Safety net first</h3>
+    <p>Set up an isolated test workspace and write down the current six lists exactly as they are today (the "frozen snapshot"). Nothing changes yet — this is the baseline everything is measured against.</p>
+    <p class="muted">Proves itself by: typecheck + lint + the wallet-bridge test suite all green before any edit.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 1 — Build the new table beside the old ones</h3>
+    <p>Add the one registry + the functions that rebuild each old list from it. Add two guard tests: a <strong>parity test</strong> (the rebuilt lists exactly match the frozen snapshot) and an <strong>exhaustiveness test</strong> (every real method has a row — a missing one fails the build). The old lists are still in place; the new table just has to match them in isolation.</p>
+    <p class="muted">Proves itself by: parity test exact against the snapshot + exhaustiveness green + every existing test still green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2 — Switch over and delete the old lists</h3>
+    <p>Point the code at the rebuilt lists, delete the six originals, and add a runtime guard: if a method reaches the dispatcher without a registry row, it's rejected immediately. This is the zero-change gate — every pre-existing test must still pass <em>unchanged</em>.</p>
+    <p class="muted">Proves itself by: all existing dispatcher + scope tests green and untouched + parity + exhaustiveness green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3 — Look for (and fix) any hidden inconsistency</h3>
+    <p>With everything in one view, check for a genuine bug the old scatter was hiding. The audits found the current setup is actually consistent, so this is expected to be a documented "nothing found." If something <em>is</em> found, it's fixed carefully: first a test pinning the old (wrong) behavior, then the fix, then a test for the right behavior — so a real fix is never confused with an accidental break.</p>
+    <p class="muted">Proves itself by: any fix is bug-pinned + tested; or a recorded "no inconsistency surfaced."</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4 — Prove it live</h3>
+    <p>Run the real end-to-end suites against a live network: a dApp transaction routes, a permission-violating call is rejected, an authorization is scope-checked, and the permission-free method still works.</p>
+    <p class="muted">Proves itself by: smoke e2e + network e2e green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5 — Docs</h3>
+    <p>Update the README so the next person knows the registry is the one place to edit.</p>
+    <p class="muted">Proves itself by: lint + the full pre-PR audit (typecheck→test→lint→build) green.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>This is a <em>refactor of a security boundary</em>, so the whole game is "change the shape without changing the behavior — except where the old behavior was a bug." The proof is a test that says the rebuilt lists are byte-for-byte identical to the old ones. The interesting part is the safety guarantee: today the six lists are kept in sync by a <em>comment</em> ("must be kept in sync"). After this, they're kept in sync by the compiler and a build-failing test — forgetting a method can't ship.</p>
+  <p>The audits caught a real flaw in the first draft: the test that's supposed to catch a forgotten method was going to enumerate the wrong "universe" of methods (it referenced an upstream symbol that isn't even public). The fix anchors the check to the wallet's own dispatcher plus the upstream schema, so the guarantee actually holds. That's exactly what the deep ceremony is for.</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li><strong>None blocking.</strong> The one open design question (which set of methods the "forgotten method" guard checks against) was resolved during the audits.</li>
+    <li><strong>Deferred, on purpose:</strong> a separate observation — that a raw protocol client can put certain methods inside a <code>batch</code> — is noted but explicitly out of scope (the methods are still permission-checked; whether they should be batchable at all is a different hardening task).</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm <strong>scope</strong>: fold the six method-name lists into one registry; leave the two operation-build switches + the three schema-patch copies alone; fix latent bugs inline with bug-pin discipline (expected: none).</li>
+      <li>Confirm <strong>tier = deep</strong>.</li>
+      <li>Confirm the <strong>validation plan</strong>: parity + exhaustiveness unit tests every phase; smoke + network e2e at Phase 4; typecheck/lint throughout.</li>
+      <li>Hardening: relying on the built-in codex post-impl adversarial audit (no separate <code>/harden security</code>) — confirm.</li>
+      <li>Approve / conditionally approve / reject.</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>Two options for the autonomous implementation session. <code>/goal</code> survives <code>claude --resume</code> and checks a completion condition each turn; <code>/loop 15m</code> re-fires on a fixed cadence (good for the long network-e2e gate). Pick the one matching how you want to run it.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose (setting one replaces the other).</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /loop 15m</h3>
+      <p class="muted">Multi-phase with a long live-network gate — a fixed 15m cadence handles CI/e2e waits cleanly and matches how this repo's arcs have been driven.</p>
+      <pre><code>/loop 15m Drive implementations-plan/method-metadata-registry forward. Never idle. Each firing: read plan.md + lessons/ (authoritative state), git status/log; PR? gh pr view --json statusCheckRollup; CI in flight on HEAD → gh run watch up to 10 min. No task in hand? take the next pending phase step (edit → bun run typecheck:all → bun run lint → bun run --filter @nulo/wallet-bridge test → the phase's e2e gate). Phase gate (exactly as written in plan.md) green? mark it ✓ in plan.md, file the lessons entry, print LESSONS_FILE=implementations-plan/method-metadata-registry/lessons/phase-N.md, advance. Stuck or a non-trivial decision? /codex xhigh, log the consult+verdict in lessons/. Hard limits: never merge to dev/main, never publish, no scope beyond plan.md (the batch-recursion observation stays deferred); STOP and surface if parity isn't exact or if a Phase-3 bug balloons. Same step failing 5×? stop+reassess. All phases ✓? /code-review max --fix → commit → codex post-impl audit (/codex xhigh, adversarial on the authz boundary + the exhaustiveness guard) → address high/critical → PR to dev → wrap-up with contentious decisions ELI5'd → stop.</code></pre>
+    </div>
+
+    <h3>Alternative: /goal</h3>
+    <pre><code>/goal All phases 0-5 ✓ in implementations-plan/method-metadata-registry/plan.md, each ✓ backed by its validation gate reported passing in the transcript (parity test exact + exhaustiveness green; existing dispatcher.test.ts + scope-enforcement.test.ts UNCHANGED and green; smoke + network e2e green); the six old tables deleted and derived from METHOD_REGISTRY; LESSONS_FILE printed per phase; /code-review max --fix applied + committed; codex post-impl audit complete with high/critical findings addressed (adversarial on the authz boundary); bun run typecheck:all + bun run lint + bun run test all exit 0; single PR opened to dev (never merged autonomously). Constraints: zero behavior change except ledgered + bug-pinned fixes; never weaken authz; no scope beyond plan.md.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a> · <a href="draft-main.md">draft-main</a> · <a href="draft-opus.md">draft-opus</a> · <a href="draft-codex.md">draft-codex</a> · <a href="audit-codex.md">audit-codex</a> · <a href="audit-opus.md">audit-opus</a></p>
+</body>
+</html>
