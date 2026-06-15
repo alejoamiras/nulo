@@ -118,23 +118,31 @@ Two new test files (validation infra):
 
 ## Phases
 
-### Phase 0 — Worktree + frozen baseline
+### Phase 0 — Worktree + frozen baseline ✓
 Create a parallel-safe e2e worktree (per repo e2e rules). Capture the current six tables as the snapshot literals (from the 18-method table). No production change.
+**Done (2026-06-15):** baseline green — wallet-bridge 134/134, `typecheck:all` ✓, `lint` ✓. Working in-place on `feat/method-metadata-registry` (no separate git worktree — single agent; `e2e:agent` provides its own parallel-safe isolation at Phase 4). Snapshot literals deferred to the Phase 1 parity test (where they live). See `lessons/phase-0.md`.
 **Gate:** `bun run typecheck:all` + `bun run lint` + `bun run --filter @nulo/wallet-bridge test` + `bun run test` all exit 0 (baseline green). Layers: typecheck/lint + unit.
 
-### Phase 1 — Shadow registry + harness (ADDITIVE; old tables still present)
+### Phase 1 — Shadow registry + harness (ADDITIVE; old tables still present) ✓
 Add `method-scope-checkers.ts` (lift checker bodies + helpers out of scope-enforcement.ts; **lift the inline `sendTx`/`simulateTx`/`profileTx` arrows into named fns** — D6). Add `method-descriptors.ts` (18 rows, AUDIT/notes verbatim) + the six `derive*` fns. Add the parity + exhaustiveness tests. Do NOT rewire consumers — parity compares derived-vs-snapshot in isolation.
+**Done (2026-06-15, `4ee43a8`):** leaf + registry + harness landed; `CapabilityType` relocated to the registry (capability-map re-exports). **147 tests** (134 existing UNCHANGED + 13 new); parity EXACT against the frozen snapshots; exhaustiveness green (18 patched-WalletSchema methods ↔ 18 descriptors, both directions); `typecheck:all` + `lint` green. See `lessons/phase-1.md`.
 **Gate:** `bun run --filter @nulo/wallet-bridge test` (old tests green + parity + exhaustiveness green) + `bun run typecheck:all` (`noExplicitAny` clean) + `bun run lint`. Pass: parity EXACT against snapshots; exhaustiveness green. **STOP if parity not exact — the transcription is wrong; fix the data, not the test.** Layers: typecheck/lint + unit.
 
-### Phase 2 — Swap consumers to derived maps; delete the six literals (the zero-change gate)
+### Phase 2 — Swap consumers to derived maps; delete the six literals (the zero-change gate) ✓
+**Done (2026-06-15, `f6ba8ed`):** six literals deleted; capability-map/scope-enforcement/dispatcher read the registry-derived maps; dispatch-entry descriptor guard added (preserves `Unsupported wallet method`); stale getAccounts-exempt comment corrected. **147 wallet-bridge green UNCHANGED** + extension suite **2392 green** + typecheck:all + lint green. No latent inconsistency surfaced — parity held through the deletion. See `lessons/phase-2.md`.
+
 Rewire `capability-map.ts` / `dispatcher.ts` / `scope-enforcement.ts` to the derived exports; delete the six literals; keep `getRequiredCapability`/`isCapabilityExempt`/`enforceScope`/`enforceScopeWithSession` bodies + signatures stable; build switches untouched. Add the **dispatch-entry descriptor resolution** (D5) — placed after session capture (`:322`), before `enforceCapability` (`:326`), replacing the old `if(!kind)` throw (`:392`) — reproducing the exact `Unsupported wallet method: ${methodName}` string. Delete the dead sync comments (scope-enforcement.ts:9, :406); **correct the WRONG `getAccounts`-exempt comment at dispatcher.ts:987** (D9).
 **Gate:** `bun run --filter @nulo/wallet-bridge test` — ALL existing `dispatcher.test.ts` (incl. F1 guards :1459-1544, **retired-method guards :813/:817/:824**, getRequiredCapability assertions :830-831) + `scope-enforcement.test.ts` green **UNCHANGED** + parity + exhaustiveness green. `bun run typecheck:all` + `bun run lint` + full `bun run test`. Pass: not one existing test modified; all green (== derived maps reproduce every entry of all six tables). Layers: typecheck/lint + unit. If a genuine bug surfaces here → Phase 3 discipline fires.
 
-### Phase 3 — Latent-inconsistency lane (conditional) + add-a-method proof
+### Phase 3 — Latent-inconsistency lane (conditional) + add-a-method proof ✓
+**Done (2026-06-15, `8a23b43`):** NO latent inconsistency surfaced — the 18-method matrix was consistent and Phase-2 parity held exact, so the bug-pin lane went unused (matrix prediction confirmed; no snapshot deltas, no `fix(...)` commits). Added the metadata-scoped add-a-method proof (149 tests). `typecheck:all` + `lint` green. See `lessons/phase-3.md`.
+
 Default expectation: clean (record "parity exact; no inconsistency" in the ledger). IF a real bug surfaces: (a) bug-pin test of OLD behavior, (b) fix the descriptor row, (c) corrected-behavior test, (d) `AUDIT Qx` marker + ledger entry; commit as `fix(wallet-bridge):` distinct from the `refactor:` commits. Every frozen-snapshot delta maps to a ledger entry (keeps real-fix vs regression auditable). D8 (registerToken) is a documented non-example — do not "fix." Add the add-a-method meta-proof, **scoped strictly to METADATA** (codex final-pass condition): adding one descriptor row centralizes a method's capability + routing-classification + scope FACTS in ONE place — that is the entire claim. It does NOT make a method "fully routable" in one edit: a sink method that introduces a NEW `Operation` kind still needs a case in the out-of-scope `buildNetworkOperation`/`buildAccountOperation` switches (dispatcher.ts:1089/1138), and a new HANDLER method still needs its own `dispatch()` branch. The win is "the authz/routing METADATA is single-edit + a forgotten method fails the build," not "method wiring is single-edit." Omitting the descriptor fails exhaustiveness + throws at the D5 runtime guard.
 **Gate:** `bun run --filter @nulo/wallet-bridge test` (bug-pin + corrected tests green; snapshot deltas all ledgered) + `typecheck:all` + `lint`. Layers: typecheck/lint + unit.
 
-### Phase 4 — Live validation (smoke + network e2e)
+### Phase 4 — Live validation (smoke + network e2e) ✓ (local portion; full network → CI)
+**Done (2026-06-15):** smoke e2e **67 passed** (fresh build boots); targeted live dispatcher path green — `cap-request-basic` PASSED + the `grantPublicAuthwit`/`sendTx` dispatcher legs passed live in the `authwit-lifecycle` run. **No local failure is attributable to this refactor** (codex consult `environmental — proceed to PR`; see `lessons/phase-4.md`). Three local proverless timeouts (`authwit-lifecycle` *revoke* = UI-originated path, `concurrent-sendtx-confirm` = execution-coordinator barrier, `authwit-consume-smoke` = flaky `waitForPgResult` — passed in lifecycle minutes earlier) are environmental (waits tuned for CI Linux; the full suite is 6-16 min/test locally, not viable). **The full network-e2e verdict is delegated to the PR's required CI gate** (Linux + sharded + tuned), where the proverless arc (PR #86) validated these exact tests pass. **Caveat (codex):** if CI reproduces these failures on Linux, reopen the attribution question immediately.
+
 **Gate:** `bun run test:e2e` (smoke) green; `bun run e2e:agent` (network) green — at minimum a dApp `sendTx`/`simulateTx` routes, a scope-violating call is rejected, `grantPublicAuthwit` scope-checks, and the exempt `getChainInfo` path works. Layers: smoke e2e + network e2e (parallel-safe per worktree).
 
 ### Phase 5 — Docs + cleanup
