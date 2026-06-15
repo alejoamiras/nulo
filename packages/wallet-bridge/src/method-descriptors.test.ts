@@ -258,7 +258,3 @@ describe("method-descriptors — add-a-method proof (metadata only)", () => {
 		expect(missing).toEqual(["sendTx"])
 	})
 })
-
-// Type-only usage to keep the type import live.
-const _typeProbe: MethodDescriptor | undefined = METHOD_REGISTRY.getChainInfo
-void _typeProbe
