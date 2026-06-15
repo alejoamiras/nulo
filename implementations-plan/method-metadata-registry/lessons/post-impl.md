@@ -23,4 +23,20 @@ Two hardening gaps (not lost gates) — all addressed in `68fcc62`:
 - Disk-reading unit tests are config-fragile — `import.meta.url` resolution differs across vitest configs (`--filter` package config vs the root extension config). Avoid reading source files in unit tests; prefer importing values or relying on runtime guards.
 
 ## Final state
-149 wallet-bridge tests (green under both `--filter` and root configs); the full extension suite + typecheck:all + lint green (the dropped fragile test removed the only failure). Ready for PR to dev.
+149 wallet-bridge tests (green under both `--filter` and root configs); the full extension suite + typecheck:all + lint green (the dropped fragile test removed the only failure). PR #91 opened to dev.
+
+## Network-e2e attribution investigation (PR #91 CI)
+
+PR #91's **Quality gate (required on dev) is GREEN**. The **Network e2e (advisory on dev)** failed 3 of 5 Aztec-agent shards — and **failed the same shards again on a `--failed` re-run** (consistent, NOT random flake; shard 1 ran 21m6s = a hung sandbox). Shards 2/4 + heavy(`concurrent-sendtx-confirm`,`fee-methods`) + canary(`real-proving`) + smoke PASSED.
+
+**All failures are TIMEOUTS** (`waitForPopup` 30s, `waitForPgResult`/`waitForSendTxActiveStage` 120s/240s) — ZERO `Scope violation`/`CapabilityNotGranted`/assertion errors. Concrete failing test (shard 5): `multi-account-from — sendTx via first session account reaches active stage`, hanging at `waitForSendTxActiveStage` (popups.ts:408) — a sendTx proving-stage wait. Failing set spans unrelated tests (multi-account-from, meta-getChainInfo, sim-methods, tokens, transfers).
+
+**Critical context:** the proverless network suite (PR #86) + the un-gating of authwit tests to proverless (PR #85) landed on `dev` TODAY. The last GREEN dev network-e2e runs are from May (pre-proverless). So current-dev proverless network behavior was never validated by a clean run — this PR may just be the first to exercise the freshly-landed proverless suite at full breadth.
+
+**Codex consult #2 (`/tmp/codex-q1-network-help.md`, xhigh) — verdict: `not your change` (85%).** Reasoning:
+- The `Object.hasOwn` sites are not hang primitives: a miss → `null`/`[]`/no-op + dispatch CONTINUES (capability-map.ts:23-27, scope-enforcement.ts:59-64). `METHOD_TO_KIND`/kind-sets don't affect the popup methods (their handler branches run before the kind lookup). Module-load is synchronous (no async/IO/cycle) — a broken import would fail from the FIRST call, not mid-shard after passes.
+- The guard does NOT false-negative `sendTx`/`registerToken`/`grantPublicAuthwit` (own properties; exact spellings match the schema-patch + playground callers).
+- **The decisive point:** the only refactor-specific timeout mechanism (popup rejected before handler → `waitForPopup` hangs) fits ONLY popup tests. The no-popup failures (`meta-getChainInfo`, `sim-methods`) wait on the result row directly → a bad registry/guard would surface as a FAST error, not a 120s hang. And `concurrent-sendtx-confirm` PASSED on CI — impossible if `sendTx` were mis-keyed at dispatch entry.
+
+**Sharpest experiment (codex):** run `register-token.test.ts` via `bun run e2e:agent` on the branch vs `dev` — the cheapest direct probe of the one plausible refactor-specific mechanism (popup-open). Branch-arm in progress.
+
