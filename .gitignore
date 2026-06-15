@@ -51,3 +51,7 @@ packages/bridge-core/sandbox-deploy/
 /deposit-public-success.png
 **/pxe_data_*/
 **/wallet_data_*/
+
+# Bridge cutover deploy artifacts (transient; the promoted manifest is testnet-bridge.json)
+packages/faucet/public/testnet-bridge.candidate.json
+packages/faucet/public/testnet-bridge.journal*.jsonl
