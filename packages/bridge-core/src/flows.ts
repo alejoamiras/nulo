@@ -43,6 +43,12 @@ export type DepositFlowStage = "approving" | "depositing" | "syncing" | "claimin
  * claim can't strand funds: the secret is saved BEFORE broadcast, the leaf index
  * once the deposit lands, and the record cleared on a successful claim. The caller
  * (the app) owns the storage + encryption via `recovery.ts`/`recovery-crypto.ts`.
+ *
+ * SECURITY (F-007): a PRIVATE claim is BEARER — whoever holds `secretHex` can claim the deposit
+ * to any recipient (the private content hash omits the recipient). Integrators MUST seal `secretHex`
+ * at rest and MUST NEVER log it, place it in a URL, or persist it in plaintext; a leak makes the
+ * deposit→claim window front-runnable. (Recipient-commitment, which would bind the recipient on-chain
+ * and remove the bearer property, is backlog.)
  */
 export interface RecoveryHooks {
 	onSecret?: (r: { secretHex: string; secretHashHex: string; isPrivate: boolean }) => void
@@ -233,7 +239,12 @@ export interface SwapBridgeResult {
 	fuelReceived: bigint
 }
 
-/** Persist BOTH claim secrets BEFORE the irreversible bridgeWithFuel; record leaf indices once it lands. */
+/**
+ * Persist BOTH claim secrets BEFORE the irreversible bridgeWithFuel; record leaf indices once it lands.
+ *
+ * SECURITY (F-007): same bearer contract as {@link RecoveryHooks} — `tokenSecretHex`/`fuelSecretHex`
+ * are bearer for the PRIVATE path. Seal at rest; NEVER log/URL/plaintext-persist them.
+ */
 export interface SwapRecoveryHooks {
 	onSecrets?: (r: { tokenSecretHex: string; fuelSecretHex: string; aztecRecipient: Hex; isPrivate: boolean }) => void
 	onBridged?: (r: { tokenLeafIndex: bigint; fuelLeafIndex: bigint }) => void
