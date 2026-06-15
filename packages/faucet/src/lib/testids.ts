@@ -75,6 +75,9 @@ export const TESTIDS = {
 	bridgeBalanceL2Public: "fa-bridge-balance-l2-public",
 	bridgeBalanceL2Private: "fa-bridge-balance-l2-private",
 	bridgePrivacyToggle: "fa-bridge-privacy-toggle",
+	// "How it arrives" preset cards (private default) — they replace the single privacy toggle.
+	bridgePresetPrivate: "fa-bridge-preset-private",
+	bridgePresetPublic: "fa-bridge-preset-public",
 	// ONE adaptive private note (data-first carries the signature-count variant).
 	bridgePrivacyNote: "fa-bridge-privacy-note",
 	bridgeSubmit: "fa-bridge-submit",

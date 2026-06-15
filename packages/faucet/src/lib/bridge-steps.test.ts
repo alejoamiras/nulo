@@ -189,14 +189,21 @@ describe("stepperPhases - withdraw matrix", () => {
 describe("fueled deposit rail", () => {
 	const fuel = { amount: "250000000000000000", secret: "0xs", secretHashHex: "0xsh", minOutput: "450" }
 
-	it("fuel keys: SIGN replaces APPROVE, FUEL sits between DEPOSIT and CROSSING", () => {
+	it("fueled rail merges the swap into DEPOSIT: SIGN replaces APPROVE, no separate FUEL phase", () => {
 		const phases = stepperPhases(dep({ schema: 2, fuel, isPrivate: false }))
-		expect(phases.map((p) => p.key)).toEqual(["sign", "deposit", "fuel", "sync", "claim", "confirm"])
+		expect(phases.map((p) => p.key)).toEqual(["sign", "deposit", "sync", "claim", "confirm"])
+		const deposit = phases.find((p) => p.key === "deposit")
+		expect(deposit?.label).toBe("DEPOSIT + FUEL")
+		expect(deposit?.detail).toMatch(/fuel swap rides along/i)
 	})
 
-	it("private fueled rail keeps SEAL first", () => {
+	it("private fueled rail keeps SEAL first, still no FUEL phase", () => {
 		const phases = stepperPhases(dep({ schema: 2, fuel, isPrivate: true }))
-		expect(phases.map((p) => p.key)).toEqual(["seal", "sign", "deposit", "fuel", "sync", "claim", "confirm"])
+		expect(phases.map((p) => p.key)).toEqual(["seal", "sign", "deposit", "sync", "claim", "confirm"])
+	})
+
+	it("a non-fueled deposit keeps the plain DEPOSIT label", () => {
+		expect(stepperPhases(dep({ isPrivate: false })).find((p) => p.key === "deposit")?.label).toBe("DEPOSIT")
 	})
 
 	it("rt.step signing activates SIGN", () => {
@@ -204,11 +211,13 @@ describe("fueled deposit rail", () => {
 		expect(phases.find((p) => p.key === "sign")?.state).toBe("active")
 	})
 
-	it("FUEL latches done exactly when the crossing starts (leafIndex + fuel.received land together)", () => {
+	it("the merged DEPOSIT+FUEL completes when the crossing starts; the swap never flips on its own", () => {
 		const phases = stepperPhases(
 			dep({ schema: 2, fuel: { ...fuel, received: "487", leafIndex: "7" }, depositTxHash: "0xd", leafIndex: "7", isPrivate: false }),
 		)
-		expect(phases.find((p) => p.key === "fuel")?.state).toBe("done")
+		// The swap is not independently observable - no FUEL cell in the rail to latch on its own.
+		expect(phases.map((p) => p.key)).toEqual(["sign", "deposit", "sync", "claim", "confirm"])
+		expect(phases.find((p) => p.key === "deposit")?.state).toBe("done")
 		expect(phases.find((p) => p.key === "sync")?.state).toBe("active")
 	})
 

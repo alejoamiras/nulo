@@ -62,7 +62,8 @@ describe("BridgeForm at 18 decimals (AZLO)", () => {
 		const w = mount(BridgeForm)
 		await w.find(sel(TESTIDS.bridgeAmount)).setValue("1.5")
 		await w.find(sel(TESTIDS.bridgeSubmit)).trigger("click")
-		expect(depositFn).toHaveBeenCalledWith(1_500_000_000_000_000_000n, false, expect.anything())
+		// PRIVATE is the default preset now; this test pins amount parsing, privacy is incidental.
+		expect(depositFn).toHaveBeenCalledWith(1_500_000_000_000_000_000n, true, expect.anything())
 	})
 
 	it("renders 18-dec balances + the AZLO symbol", () => {

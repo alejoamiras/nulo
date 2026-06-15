@@ -574,12 +574,14 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 		}
 
 		let ready = false
-		let probes = 0
 		for (; i < 300; i++) {
-			// The FIRST probe is optimistic: re-engaging an already-ready record (restore/reload lost
-			// the runtime claimable flag) must not flash CROSSING for one round-trip - narrate under
-			// CLAIM until a probe actually says "not ready", which makes CROSSING true again.
-			if (preGated || probes === 0) setStep(id, "sending", "checking the message")
+			// Only a record already known-claimable (preGated - a retry within the same session) narrates
+			// under CLAIM up front. A FRESH claim stays on CROSSING until a probe actually says the
+			// message is consumable: an optimistic first probe used to flash CLAIM and then regress to
+			// CROSSING on the not-ready answer (the "goes back to crossing" bug). Reload of an
+			// already-ready record shows one brief CROSSING tick before CLAIM - forward, and the
+			// ready-simulate returns immediately, so no 6s stall.
+			if (preGated) setStep(id, "sending", "checking the message")
 			else
 				setStep(
 					id,
@@ -593,7 +595,6 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e)
 				if (!isMsgNotReady(msg)) throw e
-				probes++
 				log(`message not consumable yet (poll ${i + 1}) - waiting 6s`, id)
 				await wait(6000)
 			}

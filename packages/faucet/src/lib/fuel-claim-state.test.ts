@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest"
-import { decideFuelClaim, type FuelClaimEvidence, MANUAL_OFFER_THRESHOLD } from "./fuel-claim-state"
+import {
+	decideFuelClaim,
+	decidePrivateFuelClaim,
+	type FuelClaimEvidence,
+	isPrivateFuelInsufficiency,
+	MANUAL_OFFER_THRESHOLD,
+	PRIVATE_FUEL_INSUFFICIENCY_MSG,
+	type PrivateFuelClaimEvidence,
+} from "./fuel-claim-state"
 
 const base: FuelClaimEvidence = {
 	attempt: false,
@@ -90,5 +98,53 @@ describe("decideFuelClaim (L14 v3 truth table)", () => {
 		const keys = Object.keys({ ...base, fuelReceived: 0n, currentMinFee: 0n, receiptStatus: "pending" })
 		expect(keys).not.toContain("fjBalance")
 		expect(keys).not.toContain("balance")
+	})
+})
+
+const privBase: PrivateFuelClaimEvidence = { attempt: false, txHashKnown: false, setupInsufficiency: false }
+
+describe("decidePrivateFuelClaim (Option A — never public/Sponsored)", () => {
+	it("fresh record (no attempt) ⇒ private-fpc", () => {
+		expect(decidePrivateFuelClaim(privBase).action).toBe("private-fpc")
+	})
+	it("included attempt ⇒ consumed (no re-mint)", () => {
+		expect(decidePrivateFuelClaim({ ...privBase, attempt: true, txHashKnown: true, receiptStatus: "included" }).action).toBe("consumed")
+	})
+	it("durable consumed flag ⇒ consumed", () => {
+		expect(decidePrivateFuelClaim({ ...privBase, attempt: true, txHashKnown: true, consumed: true }).action).toBe("consumed")
+	})
+	it("dropped attempt (not included ⇒ FJ unconsumed) ⇒ private-fpc retry", () => {
+		expect(decidePrivateFuelClaim({ ...privBase, attempt: true, txHashKnown: true, receiptStatus: "dropped" }).action).toBe(
+			"private-fpc",
+		)
+	})
+	it("pending receipt ⇒ wait (never guess)", () => {
+		expect(decidePrivateFuelClaim({ ...privBase, attempt: true, txHashKnown: true, receiptStatus: "pending" }).action).toBe("wait")
+	})
+	it("attempt, no hash, setup-insufficiency ⇒ private-fpc (the narrow retry allow-list)", () => {
+		expect(decidePrivateFuelClaim({ ...privBase, attempt: true, txHashKnown: false, setupInsufficiency: true }).action).toBe(
+			"private-fpc",
+		)
+	})
+	it("attempt, no hash, NOT insufficiency, not consumed ⇒ wait (fail-closed)", () => {
+		expect(decidePrivateFuelClaim({ ...privBase, attempt: true, txHashKnown: false, setupInsufficiency: false }).action).toBe("wait")
+	})
+	it("attempt, no hash, consumed ⇒ consumed", () => {
+		expect(decidePrivateFuelClaim({ ...privBase, attempt: true, txHashKnown: false, consumed: true }).action).toBe("consumed")
+	})
+	it("INVARIANT (L11): no evidence EVER yields a public/Sponsored action", () => {
+		const cases: PrivateFuelClaimEvidence[] = [
+			privBase,
+			{ ...privBase, attempt: true, txHashKnown: true, receiptStatus: "included" },
+			{ ...privBase, attempt: true, txHashKnown: true, receiptStatus: "dropped" },
+			{ ...privBase, attempt: true, txHashKnown: true, receiptStatus: "pending" },
+			{ ...privBase, attempt: true, setupInsufficiency: true },
+			{ ...privBase, attempt: true, consumed: true },
+		]
+		for (const c of cases) expect(["private-fpc", "consumed", "wait"]).toContain(decidePrivateFuelClaim(c).action)
+	})
+	it("the insufficiency classifier matches the installed assert + fails closed otherwise", () => {
+		expect(isPrivateFuelInsufficiency(`Tx invalid: ${PRIVATE_FUEL_INSUFFICIENCY_MSG}`)).toBe(true)
+		expect(isPrivateFuelInsufficiency("some other revert")).toBe(false)
 	})
 })

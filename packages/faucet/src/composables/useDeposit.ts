@@ -4,6 +4,7 @@ import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { TxHash, TxStatus } from "@aztec/aztec.js/tx"
+import { Gas } from "@aztec/stdlib/gas"
 import { InboxAbi, TokenPortalAbi } from "@aztec/l1-artifacts"
 import {
 	type BridgeWitness,
@@ -12,11 +13,14 @@ import {
 	SWAP_BRIDGE_ROUTER_ABI,
 	bridgeWitnessPermitTypedData,
 	buildFuelRoute,
+	deriveBridgeSecret,
 	feeJuiceAddress,
 	hashRoute,
 	isSealTrusted,
 	markSealTrusted,
 	minOutputForSlippage,
+	PRIVATE_FPC_ADDRESS,
+	privateMintAndPayFee,
 	publicFeeJuicePayment,
 	quoteFuelPath,
 	sealDepositEnvelope,
@@ -26,9 +30,9 @@ import { tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { parseEventLogs } from "viem"
 import { sepolia } from "viem/chains"
-import { computed, ref, watch } from "vue"
+import { ref, watch } from "vue"
 import { BRIDGE, BRIDGE_FUEL, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
-import { FUEL_FEE_MARGIN, decideFuelClaim } from "@/lib/fuel-claim-state"
+import { FUEL_FEE_MARGIN, decideFuelClaim, decidePrivateFuelClaim, isPrivateFuelInsufficiency } from "@/lib/fuel-claim-state"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import {
 	addRecordVerified,
@@ -50,6 +54,7 @@ import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { ERC20_ABI } from "./useL1Usdc"
 import { useL1Wallet } from "./useL1Wallet"
+import { readBalance } from "./useTokenBalance"
 
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
 const log = (...args: unknown[]) => console.log("[bridge:deposit]", ...args)
@@ -106,6 +111,19 @@ async function waitForFuelInclusion(txHash: string, tries = 40): Promise<"includ
 		await new Promise((r) => setTimeout(r, 6000))
 	}
 	return "pending"
+}
+
+/** Read a claim tx's fee (the gas it used), base units — for the receipt's "gas used / available"
+ *  ledger. Best-effort: a missing fee or unreachable node returns undefined, so the receipt falls back
+ *  to showing gas bought without the used/available split. Read post-completion (claim flow untouched). */
+export async function readClaimFee(txHash: string): Promise<bigint | undefined> {
+	try {
+		const receipt = await createAztecNodeClient(NODE_URL).getTxReceipt(TxHash.fromString(txHash))
+		const fee = (receipt as { transactionFee?: bigint } | undefined)?.transactionFee
+		return fee === undefined || fee === null ? undefined : BigInt(fee as never)
+	} catch {
+		return undefined
+	}
 }
 
 /** Reconcile a fueled record's `consumed` flag from chain truth: if the fjwc attempt tx is
@@ -180,6 +198,16 @@ export async function claimFuelStandalone(id: string): Promise<void> {
 	await sendStandaloneFjClaim(aztec, AztecAddress.fromString(rec.recipient), rec.fuel, id)
 }
 
+/** Read the account's PUBLIC Fee Juice balance — the cold-account detector for no-fuel claims. Uses the
+ *  FeeJuice contract's `balance_of_public` via the connected wallet (scoped in the bridge manifest's
+ *  simulation); mirrors the wallet's own gas-balance-reader. */
+async function readPublicFeeJuiceBalance(aztec: unknown, recipient: AztecAddress): Promise<bigint> {
+	const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
+	const fj = await Contract.at(AztecAddress.fromString(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
+	// readBalance unwraps the SDK's SimulationResult { result } + coerces to bigint (cf. useTokenBalance).
+	return readBalance(aztec as never, fj, "balance_of_public", recipient)
+}
+
 let depsWired = false
 
 /** Wire the journal engine's deposit-side chain deps (idempotent; real clients only). */
@@ -208,10 +236,97 @@ function wireDepositDeps(): void {
 			const fpc = await getSponsoredFpcInstance()
 			const sponsored = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
 			const bridge = await Contract.at(BRIDGE, tokenBridgeArtifact, aztec as never)
+			// A fail-stop {simulate, send} pair that surfaces `why` (used by the private + no-fuel guards).
+			const stop = (why: string) => ({
+				simulate: async () => {
+					throw new Error(why)
+				},
+				send: async () => {
+					throw new Error(why)
+				},
+			})
 
 			// Fueled records pick their payment via the L14 ladder (record-specific evidence only).
 			const fuel = rec.fuel
-			let fee: { paymentMethod: unknown } = sponsored
+
+			// PRIVATE fuel (Option A — codex 019ec69a): a fully SEPARATE path. The fee is ALWAYS the
+			// Wonderland PrivateFPC method (feePayer=FPC); recovery retries ONLY that method. It NEVER
+			// touches the public sponsored/fjwc/standalone ladder below — the L11 privacy invariant.
+			if (rec.isPrivate && fuel?.received && fuel.leafIndex && fuel.bridgeSecretSalt) {
+				const fb = fuel
+				const fuelReceived = BigInt(fuel.received)
+				const fuelLeaf = new Fr(BigInt(fuel.leafIndex))
+				const salt = Fr.fromString(fuel.bridgeSecretSalt)
+				// L15 kill-switch: the FJ landed at the pinned FPC. A drifted persisted address ⇒ FAIL-STOP
+				// (never claim to / trust a version-drifted FPC, never silently downgrade to public).
+				if (fb.fpc && fb.fpc !== PRIVATE_FPC_ADDRESS) {
+					return stop("Private fuel FPC address mismatch (version drift) — refusing to claim. Reselect a mode.")
+				}
+				// Fail-closed budget: the bridged FJ must clear the calibrated floor (≈2× a real claim fee);
+				// below it the mint_and_pay_fee `amount >= max_gas_cost` assert fails anyway.
+				if (BRIDGE_FUEL && fuelReceived < BRIDGE_FUEL.minFuelFj) {
+					return stop("The bridged gas is below the safe claim floor — the private fuel claim can't self-pay.")
+				}
+				const fpcAddr = AztecAddress.fromString(fb.fpc ?? PRIVATE_FPC_ADDRESS)
+				const receiptStatus = fb.claimTxHash ? await fuelReceiptStatus(fb.claimTxHash) : undefined
+				if (receiptStatus === "included" && fb.consumed !== true) {
+					updateRecord(rec.id, { fuel: { ...fb, consumed: true } })
+				}
+				const decision = decidePrivateFuelClaim({
+					attempt: fb.claimAttempt === true,
+					txHashKnown: typeof fb.claimTxHash === "string",
+					receiptStatus,
+					consumed: fb.consumed === true || receiptStatus === "included",
+					setupInsufficiency: fb.setupInsufficiency === true,
+				})
+				log("private fuel claim decision", { id: rec.id, action: decision.action })
+				if (decision.action !== "private-fpc") {
+					// consumed (FJ burned at the FPC; token-reclaim via the FPC pay_fee is a follow-up) or wait —
+					// never re-mint (a second claim double-spends the FJ message), never public.
+					return stop(
+						decision.action === "consumed"
+							? "private fuel already consumed - not re-minting (recover via the FPC balance)"
+							: "private fuel claim pending - waiting for its receipt before retrying",
+					)
+				}
+				// teardownGas=0 keeps max_gas_cost within the bridged amount; maxFeesPerGas omitted ⇒ the wallet
+				// fills current-min (embedded-fpc cap). The method's feePayer=FPC ⇒ the wallet runs the 2 setup
+				// calls (FeeJuice.claim + mint_and_pay_fee) then this claim_private, all in one tx (EXTERNAL).
+				const privateFee = {
+					paymentMethod: privateMintAndPayFee(fpcAddr, fuelReceived, deriveBridgeSecret(salt, recipientAddr), salt, fuelLeaf),
+					gasSettings: { teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }) },
+				}
+				const claimPriv = () => bridge.methods.claim_private(recipientAddr, amount, secret, leaf)
+				return {
+					simulate: () => claimPriv().simulate({ from: recipientAddr, fee: privateFee } as never),
+					send: async () => {
+						// Latch the attempt JOURNAL-FIRST (before the wallet call), clearing any stale insufficiency.
+						updateRecord(rec.id, { fuel: { ...fb, claimAttempt: true, setupInsufficiency: false } })
+						try {
+							const { receipt } = (await claimPriv().send({
+								from: recipientAddr,
+								fee: privateFee,
+								wait: { waitForStatus: TxStatus.PROPOSED },
+							} as never)) as { receipt: { txHash: unknown } }
+							const txHash = String(receipt.txHash)
+							// PROPOSED is NOT inclusion; `consumed` is set inclusion-grade later from the receipt probe.
+							updateRecord(rec.id, { fuel: { ...fb, claimAttempt: true, claimTxHash: txHash, setupInsufficiency: false } })
+							return { txHash }
+						} catch (e) {
+							const msg = e instanceof Error ? e.message : String(e)
+							// A setup-insufficiency throw ⇒ the tx was INVALID (FJ unconsumed) ⇒ authorise a retry.
+							// Any OTHER throw leaves setupInsufficiency unset ⇒ the next decision WAITS (fail-closed).
+							// NEVER fall back to public/Sponsored on the private path (L11).
+							if (isPrivateFuelInsufficiency(msg)) {
+								updateRecord(rec.id, { fuel: { ...fb, claimAttempt: true, setupInsufficiency: true } })
+							}
+							throw e
+						}
+					},
+				}
+			}
+
+			let fee: { paymentMethod: unknown } | undefined = sponsored
 			let fjwcAttempt = false
 			let standaloneFj = false
 			if (fuel?.received && fuel.leafIndex) {
@@ -256,6 +371,25 @@ function wireDepositDeps(): void {
 						},
 					}
 				}
+			} else {
+				// NO-fuel (faucet-only L7): the faucet never SENDS Sponsored — OMIT the fee so the wallet
+				// self-pays from existing Fee Juice (PREEXISTING_FEE_JUICE). Cold (zero-FJ) accounts are
+				// blocked at the FORM; re-check here (the simulate gate doesn't enforce fees) for a clear
+				// message. A read error doesn't block — the form is the primary gate. (A funded account's
+				// wallet may still auto-pick Sponsored — "let the wallet choose", per the fee matrix.)
+				try {
+					if ((await readPublicFeeJuiceBalance(aztec, recipientAddr)) === 0n) {
+						return stop(
+							'You have no gas (Fee Juice) to claim this bridge. Enable "arrive with gas", or fund your account first.',
+						)
+					}
+				} catch (e) {
+					log(
+						"no-fuel cold-check read failed (proceeding; the form is the primary gate):",
+						e instanceof Error ? e.message : String(e),
+					)
+				}
+				fee = undefined
 			}
 
 			const interaction = () =>
@@ -263,13 +397,13 @@ function wireDepositDeps(): void {
 					? bridge.methods.claim_private(recipientAddr, amount, secret, leaf)
 					: bridge.methods.claim_public(recipientAddr, amount, secret, leaf)
 			return {
-				simulate: () => interaction().simulate({ from: recipientAddr, fee } as never),
+				simulate: () => interaction().simulate({ from: recipientAddr, ...(fee ? { fee } : {}) } as never),
 				send: async () => {
 					// L14 trigger-1 precondition: latch the attempt JOURNAL-FIRST, before the wallet call.
 					if (fjwcAttempt && fuel) updateRecord(rec.id, { fuel: { ...fuel, claimAttempt: true } })
 					const { receipt } = (await interaction().send({
 						from: recipientAddr,
-						fee,
+						...(fee ? { fee } : {}),
 						wait: { waitForStatus: TxStatus.PROPOSED },
 					} as never)) as { receipt: { txHash: unknown } }
 					const txHash = String(receipt.txHash)
@@ -357,7 +491,28 @@ export function useDepositFlow() {
 			// Fuel pre-flight BEFORE any record exists: quote-required (a missing quote must never
 			// sign away the slice with a junk floor), floor from config slippage.
 			const fuelSlice = opts.fuelSlice && opts.fuelSlice > 0n ? opts.fuelSlice : undefined
-			let fuelPre: { secret: Fr; secretHashHex: string; minOutput: bigint; route: ReturnType<typeof buildFuelRoute> } | undefined
+
+			// No-fuel L7 (faucet-only): a cold (zero public-FJ) account can't claim a no-fuel bridge (the
+			// faucet never sends Sponsored) — BLOCK before depositing so tokens aren't bridged unclaimable.
+			// Funded ⇒ proceed (the wallet self-pays the claim). A read error doesn't block (the claim
+			// re-checks); never blocks a FUELED bridge (it brings its own gas).
+			if (!fuelSlice) {
+				try {
+					if ((await readPublicFeeJuiceBalance(aztec, AztecAddress.fromString(recipient))) === 0n) {
+						error.value =
+							'No gas (Fee Juice) to claim a no-fuel bridge. Turn on "arrive with gas", or fund your Aztec account first.'
+						return null
+					}
+				} catch (e) {
+					log(
+						"no-fuel cold-check (pre-deposit) read failed; proceeding (the claim re-checks):",
+						e instanceof Error ? e.message : String(e),
+					)
+				}
+			}
+			let fuelPre:
+				| { secret: Fr; secretHashHex: string; minOutput: bigint; route: ReturnType<typeof buildFuelRoute>; salt?: Fr }
+				| undefined
 			if (fuelSlice) {
 				if (!BRIDGE_FUEL) throw new Error("Fuel is not configured for this deployment.")
 				if (fuelSlice >= amount) throw new Error("The fuel slice must be smaller than the total amount.")
@@ -372,12 +527,19 @@ export function useDepositFlow() {
 				if (quote < BRIDGE_FUEL.minFuelFj) {
 					throw new Error("That fuel slice buys too little gas to cover its own claim - increase it or bridge without fuel.")
 				}
-				const fuelSecret = Fr.random()
+				// PRIVATE fuel: the secret MUST be deriveBridgeSecret(salt, claimer) so the claimer can
+				// reconstruct it from msg_sender inside PrivateFPC.mint_and_pay_fee — a random secret would
+				// strand the FJ forever (L3/L4). The per-deposit BRIDGE-SECRET salt is random + persisted;
+				// it is DISTINCT from the FPC-ADDRESS salt (Fr.zero()). Public fuel stays recipient-bound random.
+				const claimer = AztecAddress.fromString(recipient)
+				const bridgeSecretSalt = isPrivate ? Fr.random() : undefined
+				const fuelSecret = bridgeSecretSalt ? deriveBridgeSecret(bridgeSecretSalt, claimer) : Fr.random()
 				fuelPre = {
 					secret: fuelSecret,
 					secretHashHex: (await computeSecretHash(fuelSecret)).toString(),
 					minOutput: minOutputForSlippage(quote, BRIDGE_FUEL.slippageBps),
 					route,
+					salt: bridgeSecretSalt,
 				}
 			}
 
@@ -411,6 +573,9 @@ export function useDepositFlow() {
 								secret: fuelPre.secret.toString(),
 								secretHashHex: fuelPre.secretHashHex,
 								minOutput: fuelPre.minOutput.toString(),
+								// PRIVATE fuel: persist the bridge-secret salt + the FPC the FJ lands at, so the
+								// claim can rebuild the Wonderland method. (Sealing parity follow-up: TODO seal salt.)
+								...(isPrivate ? { bridgeSecretSalt: fuelPre.salt?.toString(), fpc: PRIVATE_FPC_ADDRESS } : {}),
 							},
 						}
 					: {}),
@@ -478,7 +643,9 @@ export function useDepositFlow() {
 					totalAmount: amount,
 					fuelAmount: fuelSlice,
 					aztecRecipient: recipient as `0x${string}`,
-					fuelRecipient: recipient as `0x${string}`,
+					// PRIVATE fuel lands at the PrivateFPC (claimer-bound by the secret); PUBLIC fuel at the user.
+					// A bug here either leaks (user addr on L1) or strands (FJ to a non-FPC) — the headline invariant.
+					fuelRecipient: (isPrivate ? PRIVATE_FPC_ADDRESS : recipient) as `0x${string}`,
 					tokenSecretHash: id as `0x${string}`,
 					fuelSecretHash: fuelPre.secretHashHex as `0x${string}`,
 					minFuelOutput: fuelPre.minOutput,
@@ -546,6 +713,7 @@ export function useDepositFlow() {
 						minOutput: fuelPre.minOutput.toString(),
 						leafIndex: fe.args.fuelIndex.toString(),
 						received: fe.args.fuelAmount.toString(),
+						...(isPrivate ? { bridgeSecretSalt: fuelPre.salt?.toString(), fpc: PRIVATE_FPC_ADDRESS } : {}),
 					},
 				})
 				log("BridgeWithFuel", {

@@ -58,7 +58,9 @@ const fuel = computed(() => {
 const fuelAmount = computed(() => {
 	const f = fuel.value
 	if (!f) return null
-	return f.received ? `+ ${formatBigInt(BigInt(f.received), 18)} FJ` : "+ FJ gas"
+	// Gas naming by surface: private bridges land "Private FJ", public land "FJ".
+	const label = props.record.isPrivate ? "Private FJ" : "FJ"
+	return f.received ? `+ ${formatBigInt(BigInt(f.received), 18)} ${label}` : `+ ${label} gas`
 })
 // The explicit, non-destructive escape: claim the tokens sponsored; the FJ message (if
 // unconsumed) stays claimable later. Offered only when a fueled claim is stuck on an error.

@@ -277,23 +277,25 @@ describe("useBridgeJournal engine", () => {
 		expect(useBridgeJournal().records.value.find((r) => r.id === "0xnosnap")?.completedAt).toBe(999)
 	})
 
-	it("re-engaging an already-ready record narrates CLAIM from the first probe - no CROSSING flash", async () => {
+	it("a preGated record (same-session retry, gate already passed) narrates CLAIM from the first probe", async () => {
 		const deps = baseDeps(kv)
 		const sampledSteps: (string | undefined)[] = []
 		const claim = vi.fn(async () => ({
 			simulate: async () => {
-				sampledSteps.push(useBridgeJournal().runtime.value["0xre"]?.step)
+				sampledSteps.push(useBridgeJournal().runtime.value["0xpg"]?.step)
 			},
 			send: async () => ({ txHash: "0xclaimtx" }),
 		}))
 		connectJournalDeps({ ...deps, claim })
-		// Restored/reloaded: leafIndex persisted, runtime claimable LOST.
-		addRecord(mkDeposit("0xre", { depositL2Block: 100 }))
-		await runDepositClaim("0xre")
-		expect(sampledSteps[0]).toBe("sending") // never "syncing" for a ready message.
+		addRecord(mkDeposit("0xpg", { depositL2Block: 100 }))
+		// A retry within the same session keeps the prior gate's claimable flag - stay on CLAIM.
+		const { runtime } = useBridgeJournal()
+		runtime.value = { ...runtime.value, "0xpg": { claimable: true } }
+		await runDepositClaim("0xpg")
+		expect(sampledSteps[0]).toBe("sending") // known-claimable: optimistic CLAIM, never CROSSING.
 	})
 
-	it("a genuinely-unready record drops to CROSSING narration only AFTER the first probe says not-ready", async () => {
+	it("a fresh (not preGated) claim stays on CROSSING through a not-ready probe - never flashes CLAIM then back", async () => {
 		const deps = baseDeps(kv)
 		const sampledSteps: (string | undefined)[] = []
 		let calls = 0
@@ -307,8 +309,10 @@ describe("useBridgeJournal engine", () => {
 		connectJournalDeps({ ...deps, claim })
 		addRecord(mkDeposit("0xun"))
 		await runDepositClaim("0xun")
-		expect(sampledSteps[0]).toBe("sending") // optimistic first probe.
-		expect(sampledSteps[1]).toBe("syncing") // honest CROSSING once proven not-ready.
+		// The reported bug: CLAIM ("sending") flashed first, then regressed to CROSSING on not-ready.
+		// A fresh claim now narrates CROSSING from the very first probe and never moves backward.
+		expect(sampledSteps[0]).toBe("syncing")
+		expect(sampledSteps.includes("sending")).toBe(false)
 	})
 
 	it("⑰ a claim THIS process sent completes on the checkpointed receipt - the lagging PXE cannot block it", async () => {
@@ -555,7 +559,7 @@ describe("useBridgeJournal engine", () => {
 		const claim = vi.fn(async () => ({
 			simulate: async () => {
 				seen.push(useBridgeJournal().runtime.value["0xnarrate"]?.step)
-				// One not-ready round so the honest CROSSING narration is observable post-probe-0.
+				// A not-ready round then a ready one: CROSSING narrates while waiting, CLAIM once consumable.
 				if (gateProbes++ === 0) throw new Error("No L1 to L2 message found")
 				if (sent) throw new Error("No L1 to L2 message found")
 				return {}

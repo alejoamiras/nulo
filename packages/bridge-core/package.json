@@ -25,6 +25,7 @@
 		"@aztec/stdlib": "4.2.0",
 		"@aztec/wallets": "4.2.0",
 		"@defi-wonderland/aztec-standards": "4.2.0-aztecnr-rc.2",
+		"@wonderland/aztec-fee-payment": "https://github.com/defi-wonderland/aztec-fee-payment/releases/download/prerelease-215fd08/wonderland-aztec-fee-payment-4.2.0-prerelease.215fd08.tgz",
 		"viem": "npm:@aztec/viem@2.38.2"
 	},
 	"devDependencies": {
