@@ -52,7 +52,17 @@
 // package-name import (`@nulo/wallet-bridge`) would resolve at runtime but
 // wires an unnecessary self-reference through the barrel.
 import { formatCaipAccount, formatCaipChain, parseCaipAccount, resolveNetworkByChainId } from "./caip"
-import type { AccountsCapability, Capability, ContractsCapability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
+import type {
+	AccountsCapability,
+	Capability,
+	ContractsCapability,
+	DataCapability,
+	GrantedCapabilityRecord,
+	RejectedCapabilityRecord,
+	Scope,
+	SimulationCapability,
+	TransactionCapability,
+} from "./capabilities"
 import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
 import type {
 	AztecSendTxRequest,
@@ -168,6 +178,57 @@ function contractsRequestCovered(existing: ContractsCapability[], requested: Con
 		)
 	}
 	return flagCovered("canRegister") && flagCovered("canGetMetadata")
+}
+
+/** Pattern-list coverage: every requested pattern is satisfied by ONE existing scope. Coverage
+ *  deliberately mirrors enforcement's shape (`checkTransactionCalls` requires a SINGLE cap to
+ *  cover every call of a tx) - union-coverage here would approve requests enforcement then
+ *  refuses. */
+function scopeCovers(existing: Scope, requested: Scope): boolean {
+	if (existing === "*") return true
+	if (requested === "*") return false
+	return requested.every((rp) =>
+		existing.some(
+			(ep) =>
+				(ep.contract === "*" || String(ep.contract) === String(rp.contract)) &&
+				(ep.function === "*" || ep.function === rp.function),
+		),
+	)
+}
+
+function transactionRequestCovered(existing: TransactionCapability[], requested: TransactionCapability): boolean {
+	if (!requested.scope) return existing.length > 0
+	return existing.some((e) => scopeCovers(e.scope, requested.scope))
+}
+
+/** Sub-scopes (transactions / utilities) check independently - enforcement's per-sub `caps.some`
+ *  lets different caps cover different sub-scopes. */
+function simulationRequestCovered(existing: SimulationCapability[], requested: SimulationCapability): boolean {
+	for (const sub of ["transactions", "utilities"] as const) {
+		const rs = requested[sub]?.scope
+		if (!rs) continue
+		if (
+			!existing.some((e) => {
+				const es = e[sub]?.scope
+				return es !== undefined && scopeCovers(es, rs)
+			})
+		) {
+			return false
+		}
+	}
+	return true
+}
+
+function dataRequestCovered(existing: DataCapability[], requested: DataCapability): boolean {
+	const rc = requested.privateEvents?.contracts
+	if (!rc) return existing.length > 0
+	if (rc === "*") return existing.some((e) => e.privateEvents?.contracts === "*")
+	return rc.every((addr) =>
+		existing.some((e) => {
+			const list = e.privateEvents?.contracts
+			return list === "*" || (Array.isArray(list) && list.some((x) => String(x) === String(addr)))
+		}),
+	)
 }
 
 function accountsCapsEqual(a: AccountsCapability, b: AccountsCapability): boolean {
@@ -614,10 +675,17 @@ export class WalletSdkDispatcher {
 			],
 		}
 
-		const results: ExecutionResult = await this.dappInteractionService.execute({
-			sessionId: dappSession.id,
-			operations: [grantOp],
-		})
+		const results: ExecutionResult = await this.dappInteractionService.execute(
+			{
+				sessionId: dappSession.id,
+				operations: [grantOp],
+			},
+			// `originKey` applies the per-origin backpressure cap to grants too,
+			// matching sendTx; without it the execution lane buckets the grant
+			// under "__no_origin__" and loses per-origin fairness.
+			undefined,
+			{ originKey: ctx.origin },
+		)
 
 		return this.unwrapResult(results[0])
 	}
@@ -677,6 +745,24 @@ export class WalletSdkDispatcher {
 					.filter((g) => g.capability.type === "contracts")
 					.map((g) => g.capability as ContractsCapability)
 				return existing.length === 0 || !contractsRequestCovered(existing, cap as unknown as ContractsCapability)
+			}
+			if (cap.type === "transaction") {
+				// Scope-list field diff (the rest of wallet-sdk-capability-field-diff): a request whose
+				// scope exceeds every stored grant re-prompts; approval REPLACES the stored grant.
+				const existing = existingGrants
+					.filter((g) => g.capability.type === "transaction")
+					.map((g) => g.capability as TransactionCapability)
+				return existing.length === 0 || !transactionRequestCovered(existing, cap as unknown as TransactionCapability)
+			}
+			if (cap.type === "simulation") {
+				const existing = existingGrants
+					.filter((g) => g.capability.type === "simulation")
+					.map((g) => g.capability as SimulationCapability)
+				return existing.length === 0 || !simulationRequestCovered(existing, cap as unknown as SimulationCapability)
+			}
+			if (cap.type === "data") {
+				const existing = existingGrants.filter((g) => g.capability.type === "data").map((g) => g.capability as DataCapability)
+				return existing.length === 0 || !dataRequestCovered(existing, cap as unknown as DataCapability)
 			}
 			return !grantedTypes.has(cap.type as Capability["type"])
 		})

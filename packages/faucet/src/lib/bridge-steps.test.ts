@@ -185,3 +185,52 @@ describe("stepperPhases - withdraw matrix", () => {
 		expect(Object.values(s).every((v) => v === "done")).toBe(true)
 	})
 })
+
+describe("fueled deposit rail", () => {
+	const fuel = { amount: "250000000000000000", secret: "0xs", secretHashHex: "0xsh", minOutput: "450" }
+
+	it("fueled rail merges the swap into DEPOSIT: SIGN replaces APPROVE, no separate FUEL phase", () => {
+		const phases = stepperPhases(dep({ schema: 2, fuel, isPrivate: false }))
+		expect(phases.map((p) => p.key)).toEqual(["sign", "deposit", "sync", "claim", "confirm"])
+		const deposit = phases.find((p) => p.key === "deposit")
+		expect(deposit?.label).toBe("DEPOSIT + FUEL")
+		expect(deposit?.detail).toMatch(/fuel swap rides along/i)
+	})
+
+	it("private fueled rail keeps SEAL first, still no FUEL phase", () => {
+		const phases = stepperPhases(dep({ schema: 2, fuel, isPrivate: true }))
+		expect(phases.map((p) => p.key)).toEqual(["seal", "sign", "deposit", "sync", "claim", "confirm"])
+	})
+
+	it("a non-fueled deposit keeps the plain DEPOSIT label", () => {
+		expect(stepperPhases(dep({ isPrivate: false })).find((p) => p.key === "deposit")?.label).toBe("DEPOSIT")
+	})
+
+	it("rt.step signing activates SIGN", () => {
+		const phases = stepperPhases(dep({ schema: 2, fuel, isPrivate: false }), { step: "signing" })
+		expect(phases.find((p) => p.key === "sign")?.state).toBe("active")
+	})
+
+	it("the merged DEPOSIT+FUEL completes when the crossing starts; the swap never flips on its own", () => {
+		const phases = stepperPhases(
+			dep({ schema: 2, fuel: { ...fuel, received: "487", leafIndex: "7" }, depositTxHash: "0xd", leafIndex: "7", isPrivate: false }),
+		)
+		// The swap is not independently observable - no FUEL cell in the rail to latch on its own.
+		expect(phases.map((p) => p.key)).toEqual(["sign", "deposit", "sync", "claim", "confirm"])
+		expect(phases.find((p) => p.key === "deposit")?.state).toBe("done")
+		expect(phases.find((p) => p.key === "sync")?.state).toBe("active")
+	})
+
+	it("a fueled CLAIM names the one-tx token+gas confirmation", () => {
+		const phases = stepperPhases(
+			dep({ schema: 2, fuel: { ...fuel, received: "487", leafIndex: "7" }, depositTxHash: "0xd", leafIndex: "7", isPrivate: false }),
+			{ claimable: true },
+		)
+		expect(phases.find((p) => p.key === "claim")?.detail).toMatch(/tokens and your gas/)
+	})
+
+	it("a NON-fueled record's rail is byte-identical to before (no fuel keys leak)", () => {
+		const phases = stepperPhases(dep({ isPrivate: false }))
+		expect(phases.map((p) => p.key)).toEqual(["approve", "deposit", "sync", "claim", "confirm"])
+	})
+})

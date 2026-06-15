@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /** Services */
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { isSealTrusted } from "@nulo/bridge-core"
+import { buildFuelRoute, isSealTrusted, minOutputForSlippage, quoteFuelPath } from "@nulo/bridge-core"
 import { AppButton } from "@nulo/design"
 import { sepolia } from "viem/chains"
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue"
-import { BRIDGE_TOKEN, BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
+import { BRIDGE_FUEL, BRIDGE_TOKEN, BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL, L1_USDC } from "@/contracts/bridge-deployments"
 
 /** Components */
 import BridgeReceipt, { type ReceiptSnapshot } from "./BridgeReceipt.vue"
@@ -15,7 +15,7 @@ import BridgeStepper from "./BridgeStepper.vue"
 import { useBridgeBackup } from "@/composables/useBridgeBackup"
 import { hideCompleted, useBridgeJournal } from "@/composables/useBridgeJournal"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
-import { providerFingerprint, useDepositFlow } from "@/composables/useDeposit"
+import { providerFingerprint, readClaimFee, useDepositFlow } from "@/composables/useDeposit"
 import { useL1Usdc } from "@/composables/useL1Usdc"
 import { useL1Wallet } from "@/composables/useL1Wallet"
 import { type UseTokenBalanceHandle, useTokenBalance } from "@/composables/useTokenBalance"
@@ -37,7 +37,16 @@ const depositFlow = useDepositFlow()
 const withdrawFlow = useWithdrawFlow()
 
 const direction = ref<"l1-to-l2" | "l2-to-l1">("l1-to-l2")
-const isPrivate = ref(false)
+
+/** Fuel (arrive-with-gas): exact-input AZLO slice, quoted to FJ live. Renders only when the
+ *  deployment configures fuel and the direction is L1→L2. */
+const fuelOn = ref(false)
+const fuelSlice = ref("0.25")
+const fuelQuote = ref<{ state: "idle" | "loading" | "ok" | "error"; fj?: bigint; min?: bigint; message?: string }>({
+	state: "idle",
+})
+let quoteTimer: ReturnType<typeof setTimeout> | null = null
+const isPrivate = ref(true)
 const amount = ref("100")
 
 const bothConnected = computed(() => l1.isConnected.value && bridge.status.value === "connected")
@@ -96,6 +105,58 @@ const validationError = computed(() => {
 	return null
 })
 const amountError = computed(() => (amountTouched.value ? validationError.value : null))
+
+const fuelAvailable = computed(() => BRIDGE_FUEL !== undefined && direction.value === "l1-to-l2")
+const fuelSliceUnits = computed(() => parseAmount(fuelSlice.value || "0", BRIDGE_TOKEN_DECIMALS))
+/** Oversize fuel slices crater the (deliberately small) pools - the fork rehearsal measured a
+ *  2-AZLO fill moving prices ~25%. Cap at 1 AZLO ≈ ~2,000 FJ. */
+const MAX_FUEL_SLICE = 10n ** 18n
+const fuelError = computed(() => {
+	if (!fuelOn.value || !fuelAvailable.value) return null
+	if (fuelSliceUnits.value === 0n) return "Enter a fuel slice."
+	if (fuelSliceUnits.value >= amountUnits.value) return "The fuel slice must be smaller than the amount."
+	if (fuelSliceUnits.value > MAX_FUEL_SLICE) return "Max fuel is 1 AZLO - bigger slices just move the pool price against you."
+	if (fuelQuote.value.state === "error") return fuelQuote.value.message ?? "No fuel route available right now."
+	return null
+})
+const fuelBlocksSubmit = computed(() => fuelOn.value && fuelAvailable.value && (fuelError.value !== null || fuelQuote.value.state !== "ok"))
+
+async function refreshFuelQuote() {
+	if (!fuelOn.value || !fuelAvailable.value || !BRIDGE_FUEL) return
+	if (fuelSliceUnits.value === 0n || fuelSliceUnits.value > MAX_FUEL_SLICE) return
+	fuelQuote.value = { state: "loading" }
+	try {
+		const route = buildFuelRoute({
+			token: L1_USDC,
+			weth: BRIDGE_FUEL.weth,
+			feeJuice: BRIDGE_FUEL.feeJuice,
+			tokenWeth: BRIDGE_FUEL.pools.azloWeth,
+			ethFj: BRIDGE_FUEL.pools.ethFj,
+		})
+		const fj = await quoteFuelPath(l1.publicClient as never, BRIDGE_FUEL.quoter, route, fuelSliceUnits.value)
+		if (fj < BRIDGE_FUEL.minFuelFj) {
+			fuelQuote.value = { state: "error", message: "That slice buys too little gas to cover its own claim - increase it." }
+			return
+		}
+		fuelQuote.value = { state: "ok", fj, min: minOutputForSlippage(fj, BRIDGE_FUEL.slippageBps) }
+	} catch (e) {
+		fuelQuote.value = {
+			state: "error",
+			message:
+				e instanceof Error && e.name === "QuoteUnavailableError" ? e.message : "Quote failed - bridging without fuel still works.",
+		}
+	}
+}
+
+// No isPrivate→fuel guard: gas follows the token (private fuel ships via the PrivateFPC), so a private
+// bridge CAN arrive with private gas. The impossible combo (private tokens + public gas) can't occur —
+// fuel privacy is driven solely by isPrivate, never an independent control.
+watch([fuelOn, fuelSlice, direction], () => {
+	if (quoteTimer) clearTimeout(quoteTimer)
+	if (!fuelOn.value || !fuelAvailable.value) return
+	fuelQuote.value = { state: "loading" }
+	quoteTimer = setTimeout(() => void refreshFuelQuote(), 500)
+})
 const flowError = computed(() => depositFlow.error.value ?? withdrawFlow.error.value)
 
 const showMintHint = computed(() => fromChain.value === "ethereum" && usdc.balance.value === 0n)
@@ -123,14 +184,21 @@ function flip() {
 async function onSubmit() {
 	amountTouched.value = true
 	if (amountUnits.value === 0n || validationError.value || formStage.value !== "form" || submitting.value) return
+	if (fuelBlocksSubmit.value) return
 	submitting.value = true
 	const onRecord = (id: string) => {
 		journal.claimForeground(id)
 		formStage.value = "stepper"
 		submitting.value = false
 	}
-	const flow = direction.value === "l1-to-l2" ? depositFlow.deposit : withdrawFlow.withdraw
-	await flow(amountUnits.value, isPrivate.value, { onRecord })
+	if (direction.value === "l1-to-l2") {
+		await depositFlow.deposit(amountUnits.value, isPrivate.value, {
+			onRecord,
+			...(fuelOn.value && fuelAvailable.value ? { fuelSlice: fuelSliceUnits.value } : {}),
+		})
+	} else {
+		await withdrawFlow.withdraw(amountUnits.value, isPrivate.value, { onRecord })
+	}
 	submitting.value = false
 	// A clean rejection discarded the record (the cleanup matrix): release + back to the form,
 	// the flow's error renders inline. Anything else (still running / failed-but-kept / completed)
@@ -163,6 +231,7 @@ watch(
 						l2TxHash: (rec as DepositJournalRecord).claimTxHash,
 						startedAt: rec.createdAt,
 						completedAt: rec.completedAt,
+						fuelReceived: (rec as DepositJournalRecord).fuel?.received,
 					}
 				: {
 						direction: "withdraw",
@@ -174,6 +243,18 @@ watch(
 						completedAt: rec.completedAt,
 					}
 		formStage.value = "receipt"
+		// Fueled deposits: read the claim tx fee (gas used) post-completion + patch the snapshot so the
+		// receipt's "gas used / available" ledger fills in. Claim flow untouched; best-effort (a failed
+		// read just leaves the used row hidden + available = bought).
+		const dep = rec as DepositJournalRecord
+		if (dep.direction === "deposit" && dep.fuel?.received && dep.claimTxHash) {
+			void readClaimFee(dep.claimTxHash).then((fee) => {
+				const snap = receiptSnapshot.value
+				if (fee !== undefined && snap && snap.completedAt === rec.completedAt) {
+					receiptSnapshot.value = { ...snap, fuelUsed: fee.toString() }
+				}
+			})
+		}
 	},
 )
 
@@ -231,7 +312,7 @@ function fmt(b: bigint | null): string {
 		<template v-else>
 		<header>
 			<h3>BRIDGE {{ BRIDGE_TOKEN_SYMBOL }}</h3>
-			<p class="sub">Move test {{ BRIDGE_TOKEN_SYMBOL }} between Ethereum (Sepolia) and Aztec, 1:1. Bridges you background land in Pending Bridges below.</p>
+			<p class="sub">Move test {{ BRIDGE_TOKEN_SYMBOL }} between Ethereum (Sepolia) and Aztec, 1:1. Bridges you background land in Your Bridges below.</p>
 		</header>
 
 		<div class="panels">
@@ -303,35 +384,71 @@ function fmt(b: bigint | null): string {
 		<p v-if="amountError" class="err-msg" :data-testid="TESTIDS.bridgeFormError">{{ amountError }}</p>
 		<p v-if="showMintHint" class="hint">No test {{ BRIDGE_TOKEN_SYMBOL }} on Sepolia yet - mint some below.</p>
 
-		<div class="privacy-row">
+		<!-- HOW it arrives: privacy presets (gas-follows-token); PRIVATE is the default. -->
+			<div class="flabel">How it arrives</div>
+			<div class="modes">
+				<button type="button" class="mode" :class="{ sel: isPrivate }" :disabled="submitting" :data-testid="TESTIDS.bridgePresetPrivate" :aria-pressed="isPrivate" @click="isPrivate = true">
+					<span class="mt">PRIVATE <span class="badge2">default</span></span>
+					<span class="md">Your tokens — and the gas, if you add it — land in your private Aztec balance, hidden from everyone.</span>
+				</button>
+				<button type="button" class="mode" :class="{ sel: !isPrivate }" :disabled="submitting" :data-testid="TESTIDS.bridgePresetPublic" :aria-pressed="!isPrivate" @click="isPrivate = false">
+					<span class="mt">PUBLIC</span>
+					<span class="md">Tokens and gas arrive visible on Aztec — anyone can see the amount and recipient. Cheapest and simplest.</span>
+				</button>
+			</div>
+		<p v-if="isPrivate" class="opt-note" :data-testid="TESTIDS.bridgePrivacyNote" :data-first="isFirstSeal ? 'true' : 'false'">
+			<template v-if="direction === 'l1-to-l2'">
+				Lands in your private Aztec balance. {{ isFirstSeal ? "Two quick Ethereum signatures (then one)" : "One Ethereum signature" }} lock the recovery key - it lives only in this browser.
+			</template>
+			<template v-else>Burns from your private Aztec balance - nothing extra to back up.</template>
+		</p>
+
+		<!-- ADD-ON: fuel (gas on arrival), only on L1->L2. -->
+		<div v-if="fuelAvailable" class="opt-row">
 			<button
 				type="button"
 				class="toggle"
-				:class="{ on: isPrivate }"
+				:class="{ on: fuelOn }"
 				:disabled="submitting"
-				:data-testid="TESTIDS.bridgePrivacyToggle"
-				:aria-pressed="isPrivate"
-				@click="isPrivate = !isPrivate"
+				:data-testid="TESTIDS.bridgeFuelToggle"
+				:aria-pressed="fuelOn"
+				@click="fuelOn = !fuelOn"
 			>
 				<span class="knob" />
 			</button>
-			<span class="toggle-label">PRIVATE BRIDGING</span>
+			<span class="toggle-label">ARRIVE WITH GAS</span>
 		</div>
-		<p v-if="isPrivate" class="privacy-note" :data-testid="TESTIDS.bridgePrivacyNote" :data-first="isFirstSeal ? 'true' : 'false'">
-			<template v-if="direction === 'l1-to-l2'">
-				Funds arrive in your PRIVATE Aztec balance.
-				{{ isFirstSeal ? "Two quick Ethereum signatures (first time only - afterwards just one)" : "One Ethereum signature" }}
-				lock{{ isFirstSeal ? "" : "s" }} this transfer's recovery key to your wallet. It lives only in this
-				browser - don't clear site data while a bridge is running.
-			</template>
-			<template v-else>
-				Burns from your PRIVATE Aztec balance. The Ethereum recipient is locked into the bridge message -
-				nothing extra to back up.
-			</template>
-		</p>
+		<div v-if="fuelOn && fuelAvailable" class="fuel-config">
+			<div class="fuel-slice-row">
+				<input
+					v-model="fuelSlice"
+					class="amount fuel-slice"
+					type="number"
+					aria-label="Fuel slice in AZLO"
+					min="0"
+					step="0.05"
+					:disabled="submitting"
+					:data-testid="TESTIDS.bridgeFuelSlice"
+					:data-invalid="!!fuelError"
+				/>
+				<span class="unit">{{ BRIDGE_TOKEN_SYMBOL }}</span>
+				<span class="fuel-arrow" aria-hidden="true">&rarr;</span>
+				<span class="fuel-out" :data-testid="TESTIDS.bridgeFuelQuote" :data-state="fuelQuote.state">
+					<template v-if="fuelQuote.state === 'loading'">quoting&hellip;</template>
+					<template v-else-if="fuelQuote.state === 'ok'">&asymp; {{ formatBigInt(fuelQuote.fj ?? 0n, 18) }} FJ gas</template>
+					<template v-else-if="fuelQuote.state === 'error'">{{ fuelError ?? fuelQuote.message }}</template>
+					<template v-else>Fee Juice</template>
+				</span>
+			</div>
+			<p v-if="fuelQuote.state === 'ok'" class="opt-note" :data-testid="isPrivate ? TESTIDS.bridgeFuelPrivateNote : undefined">
+					<template v-if="isPrivate">+ private gas — claimed with your tokens, fully private.</template>
+					<template v-else>Claimed with your tokens in one transaction.</template>
+				</p>
+			<p v-if="fuelError && fuelQuote.state !== 'error'" class="err-msg" :data-testid="TESTIDS.bridgeFuelError">{{ fuelError }}</p>
+		</div>
 
 		<AppButton :loading="submitting" :disabled="!bothConnected || submitting" :data-testid="TESTIDS.bridgeSubmit" @click="onSubmit">
-			{{ !bothConnected ? "CONNECT BOTH WALLETS" : direction === "l1-to-l2" ? "BRIDGE TO AZTEC" : "BRIDGE TO ETHEREUM" }}
+			{{ !bothConnected ? "CONNECT BOTH WALLETS" : direction === "l1-to-l2" ? (isPrivate ? "BRIDGE PRIVATELY TO AZTEC" : "BRIDGE TO AZTEC") : "BRIDGE TO ETHEREUM" }}
 		</AppButton>
 
 		<p v-if="flowError" class="err-msg" :data-testid="TESTIDS.bridgeFlowError">{{ flowError }}</p>
@@ -450,10 +567,98 @@ function fmt(b: bigint | null): string {
 	font: 500 12px/1.5 var(--font-mono);
 }
 
-.privacy-row {
+.opt-row {
 	display: flex;
 	align-items: center;
 	gap: 10px;
+}
+
+.flabel {
+	font: 600 11px/1 var(--font-mono);
+	color: var(--txt-secondary);
+	letter-spacing: 0.06em;
+	margin-top: 2px;
+}
+
+.modes {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 8px;
+}
+
+.mode {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	padding: 11px 12px;
+	text-align: left;
+	background: transparent;
+	border: 1px solid var(--nulo-outline);
+	color: var(--txt-primary);
+	cursor: pointer;
+	transition: border-color 0.15s ease;
+}
+
+.mode.sel {
+	border-color: var(--nulo-accent);
+}
+
+.mode:disabled {
+	cursor: not-allowed;
+	opacity: 0.6;
+}
+
+.mode .mt {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font: 600 13px/1 var(--font-mono);
+	letter-spacing: 0.06em;
+}
+
+.mode .md {
+	font: 500 11px/1.5 var(--font-mono);
+	color: var(--txt-secondary);
+}
+
+.badge2 {
+	font: 600 9px/1 var(--font-mono);
+	letter-spacing: 0.08em;
+	color: var(--nulo-accent);
+	border: 1px solid var(--nulo-accent);
+	padding: 2px 4px;
+	text-transform: uppercase;
+}
+
+.fuel-config {
+	margin: 2px 0 0 2px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.fuel-slice-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.fuel-slice {
+	max-width: 96px;
+}
+
+.fuel-arrow {
+	color: var(--txt-secondary);
+}
+
+.fuel-out {
+	font: 600 12px/1 var(--font-mono);
+	color: var(--txt-primary);
+}
+
+.fuel-out[data-state="error"] {
+	color: var(--warn, #e0a020);
+	font-weight: 500;
 }
 
 .toggle {
@@ -496,12 +701,10 @@ function fmt(b: bigint | null): string {
 	letter-spacing: 0.06em;
 }
 
-.privacy-note {
-	margin: 0;
-	padding: 10px 12px;
-	border: 1px dashed var(--yellow);
+.opt-note {
+	margin: -4px 0 0 2px;
 	color: var(--txt-secondary);
-	font: 500 12px/1.5 var(--font-mono);
+	font: 500 11px/1.5 var(--font-mono);
 }
 
 .seal-note {

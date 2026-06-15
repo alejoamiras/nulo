@@ -3,12 +3,13 @@
 import { computed } from "vue"
 
 /** Utils */
-import { BRIDGE, BRIDGE_PROXY, BRIDGE_TOKEN, BRIDGE_TOKEN_SYMBOL, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
+import { BRIDGE, BRIDGE_FUEL, BRIDGE_PROXY, BRIDGE_TOKEN, BRIDGE_TOKEN_SYMBOL, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
 import { etherscanAddressUrl, explorerAddressUrl } from "@/lib/explorer"
 
 const links = computed(() => ({
 	l1Token: etherscanAddressUrl(L1_USDC),
 	portal: etherscanAddressUrl(L1_PORTAL),
+	router: BRIDGE_FUEL ? etherscanAddressUrl(BRIDGE_FUEL.router) : "",
 	l2Token: explorerAddressUrl(BRIDGE_TOKEN.toString()),
 	bridge: explorerAddressUrl(BRIDGE.toString()),
 	proxy: explorerAddressUrl(BRIDGE_PROXY.toString()),
@@ -23,6 +24,10 @@ const links = computed(() => ({
 			<span v-else>{{ BRIDGE_TOKEN_SYMBOL }}</span>
 			<span class="sep">·</span>
 			<a v-if="links.portal" :href="links.portal" target="_blank" rel="noopener noreferrer">Portal</a>
+			<template v-if="links.router">
+				·
+				<a :href="links.router" target="_blank" rel="noopener noreferrer">Fuel router</a>
+			</template>
 			<span v-else>Portal</span>
 			<span class="gap" />
 			<span class="label">Aztec:</span>

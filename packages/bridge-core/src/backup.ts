@@ -1,5 +1,5 @@
 import type { EncryptionKey } from "@nulo/wallet-crypto"
-import type { BridgeJournalRecord, DepositJournalRecord, WithdrawJournalRecord } from "./journal"
+import type { BridgeJournalRecord, DepositFuelBlock, DepositJournalRecord, WithdrawJournalRecord } from "./journal"
 import { isProvisionalWithdrawId } from "./journal"
 import { openSecret, sealSecret } from "./recovery-crypto"
 
@@ -65,6 +65,8 @@ export function parseBackupFile(raw: unknown): BridgeBackupFile {
 const isDecimalString = (v: unknown): v is string => typeof v === "string" && /^\d+$/.test(v)
 const isOptionalString = (v: unknown): v is string | undefined => v === undefined || typeof v === "string"
 const isOptionalNumber = (v: unknown): v is number | undefined => v === undefined || typeof v === "number"
+const isOptionalBoolean = (v: unknown): v is boolean | undefined => v === undefined || typeof v === "boolean"
+const isOptionalDecimalString = (v: unknown): v is string | undefined => v === undefined || isDecimalString(v)
 
 /** STRICT per-direction guard for foreign input - the journal's shallow parse filter is for OUR
  *  own storage, never for a file someone handed us. */
@@ -73,7 +75,7 @@ export function validateBackupRecord(rec: unknown): BridgeJournalRecord {
 	if (
 		!r ||
 		typeof r !== "object" ||
-		r.schema !== 1 ||
+		(r.schema !== 1 && r.schema !== 2) ||
 		typeof r.id !== "string" ||
 		r.id.length === 0 ||
 		typeof r.isPrivate !== "boolean" ||
@@ -102,9 +104,34 @@ export function validateBackupRecord(rec: unknown): BridgeJournalRecord {
 		) {
 			throw new Error("The sealed contents are not a valid bridge record.")
 		}
+		// Schema 2 ⟺ fuel present, validated strictly; schema 1 must NOT carry fuel. Malformed
+		// fuel metadata rejects the restore outright - never guessed through.
+		if (d.schema === 2) {
+			const f = d.fuel as Partial<DepositFuelBlock> | undefined
+			if (
+				!f ||
+				typeof f !== "object" ||
+				!isDecimalString(f.amount) ||
+				typeof f.secret !== "string" ||
+				f.secret.length === 0 ||
+				typeof f.secretHashHex !== "string" ||
+				!isDecimalString(f.minOutput) ||
+				!isOptionalDecimalString(f.leafIndex) ||
+				!isOptionalDecimalString(f.received) ||
+				!isOptionalBoolean(f.claimAttempt) ||
+				!isOptionalString(f.claimTxHash) ||
+				!isOptionalBoolean(f.consumed) ||
+				!isOptionalBoolean(f.standaloneClaimed)
+			) {
+				throw new Error("The sealed contents are not a valid bridge record.")
+			}
+		} else if (d.fuel !== undefined) {
+			throw new Error("The sealed contents are not a valid bridge record.")
+		}
 		return d as DepositJournalRecord
 	}
 	if (r.direction === "withdraw") {
+		if (r.schema !== 1) throw new Error("The sealed contents are not a valid bridge record.")
 		const w = r as Partial<WithdrawJournalRecord>
 		if (
 			typeof w.recipientL1 !== "string" ||

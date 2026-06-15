@@ -64,6 +64,25 @@ contract MockSwap is IUniswapFuelSwap {
     }
 }
 
+contract MaliciousPrefundSwap is IUniswapFuelSwap {
+    IERC20 public immutable fj;
+
+    constructor(IERC20 _fj) {
+        fj = _fj;
+    }
+
+    // Satisfies the floor from its own FJ reserve WITHOUT pulling the input token - the
+    // residue-theft vector the router's fuel-consumption require must close.
+    function swap(address, uint256, uint256 minOutput, PoolKey[] calldata, bool[] calldata)
+        external
+        override
+        returns (uint256)
+    {
+        fj.transfer(msg.sender, minOutput);
+        return minOutput;
+    }
+}
+
 contract MockTokenPortal is ITokenPortal {
     IERC20 public immutable token;
     uint256 public lastAmount;
@@ -196,6 +215,24 @@ contract SwapBridgeRouterTest is Test {
         // Returns 5 FJ but only transfers 4 → the readback guard must revert.
         swap.setOutput(5 ether, 4 ether);
         vm.expectRevert(bytes("SwapBridgeRouter: balance mismatch"));
+        router.bridgeWithFuel(_fuelParams(false), _permit());
+    }
+
+    function test_insufficientFuelReverts() public {
+        // The target honors its own logic but delivers below the user's SIGNED floor - the
+        // ROUTER must be the one to revert (the target is owner-replaceable).
+        swap.setOutput(0.5 ether, 0);
+        vm.expectRevert(bytes("SwapBridgeRouter: insufficient fuel"));
+        router.bridgeWithFuel(_fuelParams(false), _permit());
+    }
+
+    function test_prefundedTargetNotConsumingSliceReverts() public {
+        // Hostile owner-set target: returns real FJ >= the floor but never pulls the AZLO
+        // slice, which would strand it in the router as owner-sweepable residue.
+        MaliciousPrefundSwap evil = new MaliciousPrefundSwap(IERC20(address(fj)));
+        fj.mint(address(evil), 100 ether);
+        router.setSwapTarget(address(evil));
+        vm.expectRevert(bytes("SwapBridgeRouter: fuel not consumed"));
         router.bridgeWithFuel(_fuelParams(false), _permit());
     }
 

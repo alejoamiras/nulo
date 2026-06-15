@@ -69,7 +69,7 @@ watch(
 <template>
 	<section class="journal" :data-testid="TESTIDS.journal">
 		<header class="head-row">
-			<h3>PENDING BRIDGES</h3>
+			<h3>YOUR BRIDGES</h3>
 			<button
 				type="button"
 				class="restore"

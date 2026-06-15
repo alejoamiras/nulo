@@ -7,12 +7,11 @@ import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
-// These tests run many proofs serially; on the shared shard pool they
-// exhaust puppeteer's protocolTimeout under proving load AND add enough
-// contention to flake neighbors. Opt-in only (idle box / dedicated job).
-// Revoke + registry-toggle behavioral coverage stays the manual-QA gate
-// (resolved Ask A4). Run with: RUN_AUTHWIT_E2E=1 bun run e2e:agent <file>.
-const authwitE2eEnabled = process.env.RUN_AUTHWIT_E2E === "1"
+// Runs in the proverless shard pool (NULO_E2E_PROVERLESS=1): the many serial
+// proofs that previously exhausted puppeteer's protocolTimeout collapse to
+// fake-proof speed (kernel sim + on-chain mining stay real), so the
+// RUN_AUTHWIT_E2E opt-in gate is removed and this rejoins the standard suite.
+// Lifecycle is grant→consume/revoke (not sequencing/cancel) — PLAIN proverless, no barrier.
 
 /**
  * Public-authwit LIFECYCLE: grant → consume / revoke → registry-toggle,
@@ -30,7 +29,7 @@ const authwitE2eEnabled = process.env.RUN_AUTHWIT_E2E === "1"
  * THEN step 2 revokes a fresh, never-consumed G2 and shows its consume
  * fails — the failure is attributable to the revoke, not prior use.
  */
-test.skipIf(!hasConfig || !authwitE2eEnabled)(
+test.skipIf(!hasConfig)(
 	"authwit-lifecycle — grant/consume, revoke blocks, registry toggle blocks then restores",
 	{ timeout: 1_200_000 },
 	async ({ dappConnectedExtensionWithFirstTwoAccountsCap }) => {

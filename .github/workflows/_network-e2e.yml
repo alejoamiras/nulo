@@ -69,6 +69,16 @@ on:
         required: false
         type: boolean
         default: false
+      proverless:
+        description: |
+          Build the wallet with NULO_E2E_PROVERLESS=1 (skip BB-SNARK
+          generation; kernel sim + on-chain submission stay real). Implies
+          accelerator OFF (proverless ⊥ accelerator-required). Used by the
+          shard pool + STUB barrier jobs; the prover-ON canary jobs leave it
+          false. See implementations-plan/e2e-proverless-stub.
+        required: false
+        type: boolean
+        default: false
     secrets:
       SPONSORED_FPC_SALT:
         required: false
@@ -98,7 +108,13 @@ jobs:
       # falls through to `'1'` because empty string is falsy. So the inverted
       # form would resolve to `'1'` in BOTH branches, completely defeating
       # the disable flag (codex post-impl audit finding #1).
-      VITE_NULO_ACCELERATOR_REQUIRED: ${{ inputs.disable_accelerator == false && '1' || '' }}
+      # Accelerator-required ONLY when not disabled AND not proverless (proverless
+      # ⊥ accelerator — the offscreen would FATAL on both). Same short-circuit
+      # shape as the disable flag (`(A && B) && '1' || ''` → '1' iff both true).
+      VITE_NULO_ACCELERATOR_REQUIRED: ${{ (inputs.disable_accelerator == false && inputs.proverless == false) && '1' || '' }}
+      # Proverless build flag, read by agent.sh (arms the double-opt-in VITE
+      # flags + asserts the positive build stamp). '1' iff proverless.
+      NULO_E2E_PROVERLESS: ${{ inputs.proverless && '1' || '' }}
       # Widen the wallet's maxFeesPerGas envelope for e2e only. Devnet
       # base-fees drift on loaded GHA runners; multi-prove tests
       # (transfers, concurrent-sendtx-confirm) hit `maxFeesPerGas <
@@ -125,7 +141,7 @@ jobs:
       # VITE_NULO_ACCELERATOR_REQUIRED is also empty so chain-runtime.ts
       # behaves like production (silent WASM fallback).
       - uses: ./.github/actions/setup-accelerator-server
-        if: '!inputs.disable_accelerator'
+        if: '${{ !inputs.disable_accelerator && !inputs.proverless }}'
         with:
           version: "1.0.1"
           # SHA-256 of the EXTRACTED binary (not the tarball — different
@@ -139,7 +155,7 @@ jobs:
           expected_sha256: d701837047429334a19cc0d75d8723615c367a9d9d8a531e72fd5e66ccc9a664
 
       - name: Start accelerator-server
-        if: '!inputs.disable_accelerator'
+        if: '${{ !inputs.disable_accelerator && !inputs.proverless }}'
         shell: bash
         env:
           # tracing-subscriber default = info; emits "Received /prove request"
@@ -175,7 +191,7 @@ jobs:
           echo "ACCELERATOR_PID=$!" >> "$GITHUB_ENV"
 
       - name: Wait for accelerator-server ready (Layer 1 preflight)
-        if: '!inputs.disable_accelerator'
+        if: '${{ !inputs.disable_accelerator && !inputs.proverless }}'
         shell: bash
         run: |
           set -euo pipefail
@@ -252,7 +268,7 @@ jobs:
       # activity counts in the run summary for measurement / debugging.
       # See plan §8 for layer design.
       - name: Surface accelerator activity (advisory)
-        if: always() && !inputs.disable_accelerator
+        if: ${{ always() && !inputs.disable_accelerator && !inputs.proverless }}
         shell: bash
         run: |
           set -euo pipefail
@@ -275,7 +291,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Shut down accelerator-server
-        if: always() && !inputs.disable_accelerator
+        if: ${{ always() && !inputs.disable_accelerator && !inputs.proverless }}
         shell: bash
         run: |
           if [ -n "${ACCELERATOR_PID:-}" ]; then

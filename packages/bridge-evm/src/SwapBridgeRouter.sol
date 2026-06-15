@@ -185,14 +185,23 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
         IERC20 token = IERC20(p.bridgeToken);
         IERC20 feeJuiceToken = feeJuicePortal.UNDERLYING();
         uint256 fjBalBefore = feeJuiceToken.balanceOf(address(this));
+        uint256 tokenBalBefore = token.balanceOf(address(this));
 
         token.forceApprove(address(swapTarget), p.fuelAmount);
         uint256 fuelReceived = swapTarget.swap(p.bridgeToken, p.fuelAmount, p.minFuelOutput, p.path, p.zeroForOnes);
         token.forceApprove(address(swapTarget), 0);
 
+        // The user's SIGNED slippage floor is enforced by the router itself - the swap target is
+        // owner-replaceable, so its own minOutput check cannot be the binding one.
+        require(fuelReceived >= p.minFuelOutput, "SwapBridgeRouter: insufficient fuel");
         // Defense-in-depth against swap bugs: verify the actual balance change.
         uint256 fjBalAfter = feeJuiceToken.balanceOf(address(this));
         require(fjBalAfter - fjBalBefore >= fuelReceived, "SwapBridgeRouter: balance mismatch");
+        // The slice must actually have been CONSUMED by the swap. Without this, a hostile target
+        // can satisfy the floor from prefunded FeeJuice without pulling the input token, stranding
+        // the user's slice in the router as owner-sweepable residue (theft, not slippage). The
+        // approval caps the pull at fuelAmount, so strict equality is sound.
+        require(tokenBalBefore - token.balanceOf(address(this)) == p.fuelAmount, "SwapBridgeRouter: fuel not consumed");
 
         // 3. Deposit FeeJuice to L2 via the canonical FeeJuicePortal (always public deposit).
         bytes32 fuelKey;

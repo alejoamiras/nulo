@@ -8,6 +8,28 @@
 			"symbol": "AZLO",
 			"decimals": 18,
 			"maxWholePerTx": 1000
+		},
+		"fuel": {
+			"router": "0x8394d4e792e5b9dd881829bb55f4956cc64a2206",
+			"swapTarget": "0xe223f59a8b0375afea25c7eccf537bc18867823e",
+			"poolManager": "0xe03a1074c86cfedd5c142c4f04f1a1536e203543",
+			"quoter": "0x61b3f2011a92d183c7dbadbda940a7555ccf9227",
+			"permit2": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+			"weth": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
+			"feeJuice": "0x762c132040fda6183066fa3b14d985ee55aa3c18",
+			"feeJuicePortal": "0xd3361019e40026ce8a9745c19e67fd3acc10d596",
+			"pools": {
+				"azloWeth": {
+					"fee": 500,
+					"tickSpacing": 10
+				},
+				"ethFj": {
+					"fee": 987,
+					"tickSpacing": 10
+				}
+			},
+			"slippageBps": 300,
+			"minFuelFj": "11001040559015000000"
 		}
 	},
 	"l2": {

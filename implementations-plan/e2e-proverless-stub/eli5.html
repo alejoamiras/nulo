@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — e2e-proverless-stub</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.9rem; margin: 1rem 0; }
+    th, td { border: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
+    th { background: #f6f6f6; }
+  </style>
+</head>
+<body>
+  <h1>e2e-proverless-stub</h1>
+  <p>Our browser-extension wallet's network end-to-end (e2e) tests are slow and flaky because each test makes the wallet build a <strong>real zero-knowledge proof</strong> — the expensive cryptographic step that, in production, proves a transaction is valid without revealing its secrets. Building that proof in the browser eats CPU for seconds-to-minutes per transaction, which starves the test driver's connection to Chrome and causes timeouts. The insight: <strong>the local test blockchain doesn't actually check the proof</strong>, and almost none of our tests are <em>about</em> proving — they're about menus, approvals, balances, and ordering. So we build a special test-only version of the wallet that <strong>skips making the real proof</strong> (it still does everything else — simulation, on-chain submission). For the handful of tests that genuinely need to catch the wallet "mid-proof" (cancel, queueing), we add a <strong>controllable pause</strong>: a switch the test flips to hold the fake-proof step open, look at what it needs, then release it. Real proving stays ON for a few "canary" tests that guard the real proof path.</p>
+
+  <p class="warning">⚠ The danger this plan takes seriously: a wallet that skips proving is a catastrophe if it ever ships to real users — it would broadcast unproven transactions. The entire design is built around making that <em>impossible to leak into production</em>.</p>
+
+  <h2>Why this tier was chosen (deep)</h2>
+  <p>Rubric: <strong>Novelty HIGH</strong> (a controllable prover seam is first-of-its-kind here), <strong>Security sensitivity HIGH</strong> (a leaked proverless build = unproven txs in production). Two HIGH dimensions → <code>deep</code>, even though it's mostly one package. The deep ceremony ran three independent plans (me + a planning subagent + codex), consolidated them with a decision ledger, then a fresh-context audit round (a new subagent + codex) and a final fresh codex pass. That ceremony already paid off: it caught a real production-guard hole, a real timeout-sizing bug, and a genuine disagreement between the two reviewers about one test — all before any code was written.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 0: Feasibility spike (mandatory, no CI changes)</h3>
+    <p>Prove the two risky assumptions before touching anything else. (0a) Build one proverless wallet; confirm a normal wallet transfer AND a dApp transaction both still land on-chain. (0b) Wire a minimal pause-switch; confirm the test can hold the proof step, release it, and that a forgotten release fails <em>loudly</em> instead of hanging. If either fails, STOP and tell the human — the whole plan rests on these.</p>
+    <p class="muted">Proves itself by: a proverless transfer + a dApp transaction both mine on the local chain; the pause-switch holds/releases across the process boundary; a missing release trips a loud safety timeout (not the generic test timeout). Must run with the Accelerator desktop app OFF.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 1: Build flag + plain proverless + production-leak guard</h3>
+    <p>Add the test-only build flag and make it impossible to ship. The flag needs <strong>two</strong> separate switches both turned on, or the build throws. Production builds are checked (by reading the shipped bundle) to confirm the proverless code and the pause-switch key simply aren't in there.</p>
+    <p class="muted">Proves itself by: unit tests (flag off → real proving wired); a production build with the flag off, then grepping the bundle to prove the test-only markers are absent; one bulk test green proverless.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: The controllable pause (barrier + stub)</h3>
+    <p>Build the real pause mechanism the spike validated, with a helper the tests call (hold / release) and a safety timeout so it can never deadlock CI.</p>
+    <p class="muted">Proves itself by: unit tests (instant by default, holds when told, releases, times-out-loud) + the cancel + concurrent-approve tests green and deterministic.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: Ordering test + reclassify + drop the authwit gate</h3>
+    <p>Use the pause to add a deterministic "second transaction waits while the first is held" assertion, and re-enable the authorization tests that were previously skipped because they were too slow.</p>
+    <p class="muted">Proves itself by: the confirm-ordering test + both authwit tests run, pass, and are fast (not skipped).</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: CI two-build split</h3>
+    <p>CI builds the wallet twice: a fast proverless build for the big shared pool of tests, and a real-proving build for the few "canary" tests that guard the actual proof path.</p>
+    <p class="muted">Proves itself by: workflow lint (actionlint) + a full CI run — pool materially faster, no Chrome-connection timeouts, canary jobs show real proof activity.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5: Close the arc</h3>
+    <p>Self-review (<code>/code-review max --fix</code>), a codex post-implementation audit focused on the production guard, docs update, single PR to <code>dev</code>.</p>
+    <p class="muted">Proves itself by: review applied + committed; codex audit clean; PR opened (never merged autonomously).</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>A "proof" here is the client-side zk-SNARK the wallet generates before sending a private transaction. Generating it is the slow part; <em>simulating</em> the transaction (working out its effects, nullifiers, balances) is separate and stays ON — that's what almost every test actually checks. The local test chain runs in a mode that accepts transactions without verifying their proofs, which is exactly why skipping proof-generation is safe <em>in the test environment only</em>. The "barrier" is just a flag in the extension's session storage that a test flips; the wallet's proof step waits for it. The reason this is a <code>deep</code> plan and not a quick hack is the blast radius if the test-only behavior ever escaped into a shipped build.</p>
+
+  <h2>Open questions (all resolved during the audit; here for transparency)</h2>
+  <ul>
+    <li><strong>Which pause mechanism?</strong> Two options (wrap the proof call in the service worker, vs a stub prover in the offscreen document). The two reviewers leaned different ways; we deferred the choice to the Phase-0 spike, which will pick empirically. Both audits confirmed nothing else depends on the choice beforehand.</li>
+    <li><strong>One specific test (multi-account-from)</strong>: the two reviewers <em>disagreed</em> on whether it's safe in the fast mode. We default it to the safe (paused) bucket until the spike proves otherwise.</li>
+    <li><strong>Does fast mode behave identically for dApp transactions, not just wallet transfers?</strong> Only proven for transfers so far — Phase 0 now explicitly pins one dApp transaction end-to-end before trusting the rest.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm <strong>scope</strong>: fast (proverless) builds for the bulk of network e2e + a controllable pause for 3 sequencing/cancel tests + real-proving canaries; remove the temporary <code>RUN_AUTHWIT_E2E</code> skip. Out of scope: any change to production proving.</li>
+      <li>Confirm <strong>tier</strong>: <code>deep</code> (Novelty + Security both HIGH).</li>
+      <li>Confirm the <strong>validation plan</strong>: every phase gated by lint + unit where applicable; Phases 0–4 gated by real network e2e (<code>e2e:agent</code>); Phase 4 also by actionlint. Phase 0 is a hard STOP-gate.</li>
+      <li>Confirm the <strong>production-guard posture</strong>: source-level double-opt-in hard fail as the primary guard, DCE + bundle-grep as backstops. (No <code>/harden</code> scheduled — the guard is built into the plan; say if you want a <code>/harden security</code> pass at the end anyway.)</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds</h2>
+    <p>Pick <strong>one</strong> for the implementation session. <span class="warning">Use exactly one per session — they don't compose.</span></p>
+
+    <h3 class="recommended">/loop — Recommended for this plan</h3>
+    <p class="muted">Recommended because completion here is gated on long-running, external signals (network e2e + CI) that aren't fully transcript-observable turn-to-turn — a self-paced loop that watches CI and advances phase-by-phase fits better than a single completion check.</p>
+    <pre><code>/loop 15m Drive implementations-plan/e2e-proverless-stub forward. Never idle. Each firing: read plan.md + lessons/ (authoritative), git status/log, PR? gh pr view --json statusCheckRollup. CI in flight: watch up to 10 min, prep next phase. No task? next pending phase step (edit &rarr; bun run lint &rarr; bun run test &rarr; e2e:agent per gate &rarr; commit). Stuck/non-trivial? /codex xhigh, log in lessons/. Hard limits: never merge dev/main, never publish, never set the proverless flag in any prod/release path, no scope beyond plan.md; Phase-0 spike fail &rarr; STOP and surface. Same step 5&times;? stop+reassess. Phase gate green (as written)? mark &check;, lessons, print LESSONS_FILE=..., advance. All &check;? /code-review max --fix &rarr; commit &rarr; codex post-impl audit &rarr; fix loop &rarr; PR to dev &rarr; wrap-up with contentious decisions ELI5'd &rarr; stop.</code></pre>
+
+    <h3>/goal (alternative)</h3>
+    <pre><code>/goal All phases 0-5 &check; in implementations-plan/e2e-proverless-stub/plan.md, each &check; backed by its validation gate reported passing; Phase 0 spike (0a transfers+dApp sendTx mine proverless + 0b barrier hold/release/timeout/semantics) green BEFORE any CI change; LESSONS_FILE printed per phase; /code-review max --fix applied+committed; codex post-impl audit clean (adversarial on the prod-guard); bun run lint + bun run test exit 0; prod build proven free of the proverless stamp + nulo:e2e:proof-gate; single PR to dev (never merged autonomously). Constraints: never weaken prod proving; Phase-0 STOP-and-surface if the seam doesn't hold.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

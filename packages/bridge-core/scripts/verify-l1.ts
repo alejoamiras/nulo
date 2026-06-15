@@ -66,8 +66,8 @@ function placePortalSource() {
 }
 
 function runForge(root: string, label: string, args: string[]): boolean {
-	const env = { ...process.env }
-	delete env.FOUNDRY_PROFILE // the shipped artifacts were built with each project's default profile.
+	// The shipped artifacts were built with each project's default profile.
+	const { FOUNDRY_PROFILE: _omitted, ...env } = process.env
 	const res = spawnSync(forgeBin(), args, { cwd: root, env, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
 	const out = `${res.stdout ?? ""}${res.stderr ?? ""}`
 	if (dryRun) {
@@ -124,8 +124,41 @@ const okPortal = runForge(L1_ARTIFACTS_ROOT, `TokenPortal @ ${config.l1.portal}`
 	...common,
 ])
 
-if (!dryRun && okToken && okPortal) {
+// The fuel arc's contracts (our own foundry project; args mirror DeployFuelLive.s.sol).
+const fuel = config.l1.fuel
+let okFuel = true
+if (fuel) {
+	const swapArgs = encodeAbiParameters(parseAbiParameters("address, address, address"), [fuel.poolManager, fuel.feeJuice, fuel.weth])
+	const routerArgs = encodeAbiParameters(parseAbiParameters("address, address, address"), [
+		fuel.permit2,
+		fuel.feeJuicePortal,
+		fuel.swapTarget,
+	])
+	const okSwap = runForge(EVM_ROOT, `UniswapFuelSwap @ ${fuel.swapTarget}`, [
+		"verify-contract",
+		fuel.swapTarget,
+		"src/UniswapFuelSwap.sol:UniswapFuelSwap",
+		"--constructor-args",
+		swapArgs,
+		...common,
+	])
+	const okRouter = runForge(EVM_ROOT, `SwapBridgeRouter @ ${fuel.router}`, [
+		"verify-contract",
+		fuel.router,
+		"src/SwapBridgeRouter.sol:SwapBridgeRouter",
+		"--constructor-args",
+		routerArgs,
+		...common,
+	])
+	okFuel = okSwap && okRouter
+}
+
+if (!dryRun && okToken && okPortal && okFuel) {
 	console.log(`\nhttps://sepolia.etherscan.io/address/${config.l1.usdc}#code`)
 	console.log(`https://sepolia.etherscan.io/address/${config.l1.portal}#code`)
+	if (fuel) {
+		console.log(`https://sepolia.etherscan.io/address/${fuel.swapTarget}#code`)
+		console.log(`https://sepolia.etherscan.io/address/${fuel.router}#code`)
+	}
 }
-process.exit(okToken && okPortal ? 0 : 1)
+process.exit(okToken && okPortal && okFuel ? 0 : 1)

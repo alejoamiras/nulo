@@ -1,7 +1,8 @@
 import { expect, inject } from "vitest"
-import { test } from "../fixtures/extension"
+import { openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
+import { holdProofGate, releaseProofGate } from "../fixtures/proof-gate"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -69,12 +70,40 @@ test.skipIf(!hasConfig)(
 		const firstPopup = await firstPopupP
 		await waitForExecuteContent(firstPopup)
 		const secondPopupP = waitForPopup(ctx, "execute", { timeout: 60_000 })
+		// Hold the proof gate first so T1 parks at `proving`, making the ordering
+		// snapshot below deterministic (no-op under real proving).
+		await holdProofGate(firstPopup)
 		await approveExecute(firstPopup, { feeMethod: "sponsored" })
 
 		// Approve popup #2 → T2 queues behind T1 on the execution mutex.
 		const secondPopup = await secondPopupP
 		await waitForExecuteContent(secondPopup)
 		await approveExecute(secondPopup, { feeMethod: "sponsored" })
+
+		// Deterministic ordering assert: with T1 held mid-prove, the two in-flight
+		// cards must show T1 active at `proving` AND T2 still `queued` behind it on
+		// the execution mutex — the direct, non-timing signal that serialization holds.
+		const orderingPopup = await openPopup(ctx)
+		// Wait until T1 actually reaches `proving` (where the gate holds it) before
+		// snapshotting — `waitForSendTxActiveStage` returns at the FIRST active
+		// stage (`simulating`), which precedes the held `proving` stage.
+		await orderingPopup.waitForFunction(
+			() =>
+				[...document.querySelectorAll('[data-testid="tx-awaiting-card"]')].some(
+					(el) => el.getAttribute("data-stage") === "proving",
+				),
+			{ timeout: 30_000 },
+		)
+		const orderingStages = await orderingPopup.evaluate(() =>
+			[...document.querySelectorAll<HTMLElement>('[data-testid="tx-awaiting-card"]')].map(
+				(el) => el.getAttribute("data-stage") ?? "?",
+			),
+		)
+		expect(orderingStages).toContain("proving")
+		expect(orderingStages).toContain("queued")
+		// Release T1 → it completes, T2 dequeues and proves, both settle.
+		await releaseProofGate(orderingPopup)
+		await orderingPopup.close()
 
 		// Both dApp promises must settle ok, as two distinct result rows. The
 		// long timeout covers two sequential proves on a loaded runner.

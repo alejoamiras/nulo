@@ -67,6 +67,7 @@ import { FeeJuiceWithClaimStrategy } from "./fee/fee-juice-with-claim-strategy"
 import { FpcStrategy } from "./fee/fpc-strategy"
 import { EmbeddedStrategy } from "./fee/embedded-strategy"
 import { ExecutionCoordinator } from "./execution-coordinator"
+import { type ProofGate, NOOP_PROOF_GATE } from "@/e2e/proof-gate"
 
 export * from "./spec"
 
@@ -121,7 +122,12 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	private viewExecutor: ViewExecutor = null!
 	private lane: ExecutionLane = null!
 
-	public constructor(logger: ILogger) {
+	public constructor(
+		logger: ILogger,
+		/** E2E-only proving hold-point, forwarded to the coordinator. The
+		 *  no-op default keeps production proving unimpeded. */
+		private readonly proofGate: ProofGate = NOOP_PROOF_GATE,
+	) {
 		super(EXECUTION_SERVICE_NAME, logger)
 	}
 
@@ -140,7 +146,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		this.planner = new OperationPlanner(this.profileService, this.tokenService)
 		this.resolver = new ContractResolver(this.logger)
 		this.authwit = new AuthwitDiscoverer(this.logger)
-		this.coordinator = new ExecutionCoordinator(this.taskService, this.logger)
+		this.coordinator = new ExecutionCoordinator(this.taskService, this.logger, this.proofGate)
 		this.gasBalances = new GasBalanceReader({
 			getChainId: async (networkId) => (await this.networkService.getNetwork(networkId)).chainId,
 			getViewDeps: (networkId, accountAddress) =>

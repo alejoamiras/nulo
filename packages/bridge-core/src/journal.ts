@@ -33,7 +33,12 @@ export const MAX_RECORDS = 100
 export const LEGACY_KEYS = ["nulo-bridge-pending-deposit", "nulo-bridge-pending-withdraw"] as const
 
 interface JournalBase {
-	schema: 1
+	/** Record-shape version, distinct from the storage ENVELOPE version (which `write()` keeps at 1).
+	 *  1 = original; 2 = carries the optional `fuel` block. For deposits it is redundant with `!!fuel`
+	 *  (kept explicit for back-compat); withdraws are always 1. Private-fuel fields are additive WITHIN
+	 *  schema 2 — no bump: an old client reads a private record as a public schema-2 record minus the
+	 *  optional private fields. */
+	schema: 1 | 2
 	/** Deposits: secretHashHex (exists before any irreversible tx). Withdraws: exitTxHash, or a
 	 *  provisional `wd-pending-<rand>` between send and receipt. */
 	id: string
@@ -49,6 +54,43 @@ interface JournalBase {
 	chainId: number
 	portal: string
 	bridge: string
+}
+
+/** The fuel side of a fueled deposit (plan ledger L11/L14). All amounts base-unit decimal strings. */
+export interface DepositFuelBlock {
+	/** The AZLO slice swapped on L1 (display + total reconstruction; record.amount stays the TOKEN claim amount). */
+	amount: string
+	/** FJ claim secret - recipient-bound (gates WHO TRIGGERS the claim, never where funds land). Plaintext like public deposit secrets. */
+	secret: string
+	secretHashHex: string
+	/** The SIGNED slippage floor that was in the witness. */
+	minOutput: string
+	/** From the BridgeWithFuel event. */
+	leafIndex?: string
+	/** fuelReceived from the event - the EXACT content-hash amount; the claim MUST use this, never a quote. */
+	received?: string
+	/** Latched journal-first BEFORE any fjwc-embedded wallet call (L14 trigger 1 precondition). */
+	claimAttempt?: boolean
+	/** The fjwc attempt's tx hash, persisted as soon as the wallet returns it. */
+	claimTxHash?: string
+	/** Set when an fjwc-embedded claim tx reads INCLUDED (success OR app-revert) - the FJ message is consumed. */
+	consumed?: boolean
+	/** Set when a standalone sponsored FJ claim landed (the fee-spike path or the card's recovery
+	 *  action). Distinguishes "fuel recovered separately" from "still stranded".
+	 *  PUBLIC fuel only — the private path NEVER uses a sponsored/public standalone claim (privacy). */
+	standaloneClaimed?: boolean
+	/** PRIVATE fuel only — the per-deposit salt fed to `deriveBridgeSecret(salt, claimer)`; the claim
+	 *  rebuilds the FJ secret from it. Random per deposit (the PrivateFPC nullifier binds it, so reuse
+	 *  collides). DISTINCT from the FPC-ADDRESS salt (always `Fr.zero()`). For private records the
+	 *  authoritative copy is sealed (recovery-crypto); this plaintext copy is a display/recovery hint. */
+	bridgeSecretSalt?: string
+	/** PRIVATE fuel only — the PrivateFPC L2 address the FJ was deposited to (`fuelRecipient`).
+	 *  Persisted for post-hoc address-drift detection and to rebuild the claim. */
+	fpc?: string
+	/** PRIVATE fuel only — set when the last claim send threw the `mint_and_pay_fee` insufficiency assert
+	 *  (the tx is INVALID pre-inclusion, so the FJ stays unconsumed). The ONE signal that authorises a
+	 *  retry of the private claim without a tx hash (the narrow allow-list); cleared once a hash lands. */
+	setupInsufficiency?: boolean
 }
 
 export interface DepositJournalRecord extends JournalBase {
@@ -69,6 +111,8 @@ export interface DepositJournalRecord extends JournalBase {
 	/** The Aztec block height when the L1 deposit confirmed - anchors the sync countdown
 	 *  (display pacing only; the claim-simulate gate stays the consumability authority). */
 	depositL2Block?: number
+	/** Present ⟺ schema 2: the deposit bought fuel on the way in. */
+	fuel?: DepositFuelBlock
 }
 
 export interface WithdrawJournalRecord extends JournalBase {

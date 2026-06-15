@@ -62,6 +62,16 @@ Each network-e2e shard installs and starts the headless **`accelerator-server`**
 
 **Bumping accelerator-server**: update `version` + `expected_sha256` in `.github/workflows/_network-e2e.yml`'s `setup-accelerator-server` step together. SHA-256 must be computed locally (`shasum -a 256` on a freshly downloaded tarball); the `.sha256` sidecar from the same release is a sanity check, not a security boundary. See [SECURITY.md](./SECURITY.md#binary-dependencies).
 
+#### Proverless network e2e (the two-build split)
+
+Most network-e2e files run against a **proverless** wallet build (`_network-e2e.yml` input `proverless: true` → `NULO_E2E_PROVERLESS=1`): [`chain-runtime.ts`](./packages/aztec-runtime/src/pxe/chain-runtime.ts) sets `proverEnabled:false`, so the PXE skips BB-SNARK generation — kernel simulation + on-chain submission stay real, and the local node accepts the fake `ChonkProof.random()` proof. This makes the shard pool fast and CDP-stable. Accelerator is forced OFF for proverless jobs (`proverless` ⊥ `VITE_NULO_ACCELERATOR_REQUIRED`).
+
+A few **STUB** tests (`cancel-mid-prove`, `concurrent-sendtx-{approve,confirm}`) need a controllable prove window — proverless prove collapses to sub-second, too fast to observe sequencing/cancel. They run proverless and drive a `ProofGate` (a `chrome.storage.session` barrier, key `nulo:e2e:proof-gate`, injected into the **SW** `ExecutionCoordinator.proveTxTask` — the offscreen document has no `chrome.storage`) to hold the tx at `proving` deterministically, then release.
+
+**Real BB proving stays covered** by the `network-e2e-canary` job (prover-ON, accelerator): `transfers` (wallet UI, waits through real prove → mine) + `tx-sendTx-default` (dApp, waits through real prove → submit — the node validates a real proof at `node.sendTx`; playground hard-codes `wait: "NO_WAIT"` so block-mine isn't awaited).
+
+**Production safety.** `NULO_E2E_PROVERLESS` is a **double-opt-in** build flag (`VITE_NULO_E2E_PROVERLESS` + `VITE_NULO_E2E_PROVERLESS_CONFIRM`; fail-closed throw if exactly one is set). The proverless branch + barrier are dead-code-eliminated from prod (referenced only inside `if (E2E_PROVERLESS)`); [`_build-extension.yml`](./.github/workflows/_build-extension.yml) asserts the build stamp + `nulo:e2e:proof-gate` key are ABSENT from every shipped `dist/{chrome,firefox}`. See [`implementations-plan/e2e-proverless-stub/`](./implementations-plan/e2e-proverless-stub/plan.md).
+
 ### `actionlint.yml`
 
 Runs when any `.github/workflows/**`, `.github/actions/**`, or shell script changes. Lints the workflow YAML and shellchecks the scripts. Cheap; gate.

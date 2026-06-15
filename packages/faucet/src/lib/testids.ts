@@ -75,6 +75,9 @@ export const TESTIDS = {
 	bridgeBalanceL2Public: "fa-bridge-balance-l2-public",
 	bridgeBalanceL2Private: "fa-bridge-balance-l2-private",
 	bridgePrivacyToggle: "fa-bridge-privacy-toggle",
+	// "How it arrives" preset cards (private default) — they replace the single privacy toggle.
+	bridgePresetPrivate: "fa-bridge-preset-private",
+	bridgePresetPublic: "fa-bridge-preset-public",
 	// ONE adaptive private note (data-first carries the signature-count variant).
 	bridgePrivacyNote: "fa-bridge-privacy-note",
 	bridgeSubmit: "fa-bridge-submit",
@@ -91,6 +94,14 @@ export const TESTIDS = {
 	// Per-bridge sealed recovery files: export icons + the journal-header restore flow.
 	cardBackup: "fa-card-backup",
 	bridgeAddTokenEvm: "fa-bridge-add-token-evm",
+	bridgeFuelToggle: "fa-bridge-fuel-toggle",
+	bridgeFuelSlice: "fa-bridge-fuel-slice",
+	bridgeFuelQuote: "fa-bridge-fuel-quote",
+	bridgeFuelError: "fa-bridge-fuel-error",
+	bridgeFuelPrivateNote: "fa-bridge-fuel-private-note",
+	journalClaimWithoutFuel: "fa-journal-claim-without-fuel",
+	receiptFuel: "fa-receipt-fuel",
+	journalClaimGas: "fa-journal-claim-gas",
 	stepperBackup: "fa-stepper-backup",
 	journalRestore: "fa-journal-restore",
 	journalRestoreLink: "fa-journal-restore-link",
