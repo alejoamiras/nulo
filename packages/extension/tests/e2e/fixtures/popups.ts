@@ -388,25 +388,39 @@ export async function getCapItems(page: Page): Promise<Array<{ id: string; grant
  * WASM. The broader "simulating|proving|submitting" matcher catches the
  * wallet reliably regardless of which stage it lingers in.
  *
- * The selector is an EXPLICIT ALLOWLIST of the three non-terminal active
- * stages — not a `:not(pending):not(queued)` negation that would
- * accidentally match terminal states if the UI ever kept awaiting cards
- * mounted through `failed`/`cancelled`/`succeeded`. RecentActivityView
- * currently unmounts on `terminalAt`, but the helper contract should not
- * silently depend on that invariant (codex post-impl finding #3).
+ * Polls the journal RECORD in `chrome.storage.local` (`nulo:journal`), NOT the
+ * rendered `tx-awaiting-card`. The card approach raced fatally under proverless:
+ * fake-proofs collapse the proving delay so the whole sendTx completes in ~3s,
+ * the active-stage window is too short for a post-approve popup-open + render to
+ * catch, AND RecentActivityView filters terminal ops to tx history
+ * (`RecentActivityView.vue:310`) so the card is GONE on `succeeded`. The journal
+ * record persists, so polling it is robust to both the fast completion and the
+ * card unmount. (Pre-proverless this watched `data-stage` on the card; that
+ * raced once fake-proofs landed — the regression behind the dev network-e2e red.)
  *
- * Intentionally NOT a generic `waitForJournalStage(walletPopup, stage)`
- * helper: codex audit defensive design. Future tests wanting a specific
- * stage must add a new named helper, which is visible in PR review.
+ * EXPLICIT ALLOWLIST: the three active stages PLUS `succeeded` (the proverless
+ * fast-path terminal). NEVER `failed`/`cancelled` — a tx that errored must not
+ * satisfy "reached an active stage" (codex post-impl finding #3, preserved).
  *
- * Default timeout: 30s. The transition from pending to simulating is
- * fast (<5s typical even on slow hardware); 30s absorbs popup-mount
- * latency on slow runners.
+ * Default timeout: 30s — absorbs popup-mount + the (now ~3s) proverless flow.
  */
 export async function waitForSendTxActiveStage(walletPopup: Page, options: { timeout?: number } = {}): Promise<void> {
 	const { timeout = 30_000 } = options
-	await walletPopup.waitForSelector(
-		'[data-testid="tx-awaiting-card"][data-stage="simulating"], [data-testid="tx-awaiting-card"][data-stage="proving"], [data-testid="tx-awaiting-card"][data-stage="submitting"]',
-		{ timeout },
+	await walletPopup.waitForFunction(
+		async () => {
+			const ACTIVE = new Set(["simulating", "proving", "submitting", "succeeded"])
+			const all = await chrome.storage.local.get(null)
+			for (const [k, v] of Object.entries(all)) {
+				if (!k.startsWith("nulo:journal")) continue
+				try {
+					const r = (typeof v === "string" ? JSON.parse(v) : v) as { kind?: string; progress?: { stage?: string } }
+					if (r?.kind === "dapp_execute" && r.progress?.stage && ACTIVE.has(r.progress.stage)) return true
+				} catch {
+					// Skip unparseable / non-record entries.
+				}
+			}
+			return false
+		},
+		{ timeout, polling: 250 },
 	)
 }
