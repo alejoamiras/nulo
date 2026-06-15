@@ -84,3 +84,62 @@ export function decideFuelClaim(e: FuelClaimEvidence): FuelClaimDecision {
 
 	return { action: "fjwc", offerManual }
 }
+
+/**
+ * The PRIVATE fuel-claim ladder (plan L11, codex 019ec69a "Option A"): a fully SEPARATE decider from
+ * the public one above. Its action type makes the privacy invariant structural — it can NEVER return
+ * `sponsored` / `sponsored-plus-standalone-fj` (those would link the user). The private claim's fee is
+ * always the Wonderland PrivateFPC method; recovery retries that method only, never public.
+ *
+ * Positive-evidence-only, same as the public ladder:
+ *  - an INCLUDED attempt (or a durable `consumed`) burned the FJ at the FPC (the `mint_and_pay_fee`
+ *    setup is non-revertible) ⇒ `consumed`: do NOT re-mint (a second claim double-spends the message);
+ *  - a conclusively `dropped` attempt landed nothing ⇒ retry the private claim;
+ *  - the ONE retryable no-hash case is a pre-inclusion `mint_and_pay_fee` setup-insufficiency (the
+ *    "Amount too low to cover gas cost" assert makes the bundled tx invalid, so the FJ stays unconsumed);
+ *  - everything else ambiguous WAITS. Never public/Sponsored on any branch.
+ */
+export type PrivateFuelClaimAction =
+	| "private-fpc" // attempt (or retry) the PrivateFPC mint_and_pay_fee claim.
+	| "consumed" // the FJ was burned by an included attempt - do NOT re-mint (recover the credited balance via pay_fee, a follow-up).
+	| "wait" // no positive evidence yet - keep waiting; never fall back to public.
+
+export interface PrivateFuelClaimEvidence {
+	/** A private mint_and_pay_fee claim was invoked for this record (journal-first latch). */
+	attempt: boolean
+	/** The attempt's tx hash was persisted (the wallet returned). */
+	txHashKnown: boolean
+	/** The attempt tx's receipt state, when a hash is known and probed. */
+	receiptStatus?: FuelReceiptStatus
+	/** Durable "the FJ message was consumed by our included attempt". */
+	consumed?: boolean
+	/** The last send threw the exact `mint_and_pay_fee` insufficiency assert (pre-inclusion, no hash).
+	 *  This is the ONLY retryable no-hash signal - the narrow allow-list (string-matched, no typed selector). */
+	setupInsufficiency: boolean
+}
+
+export function decidePrivateFuelClaim(e: PrivateFuelClaimEvidence): { action: PrivateFuelClaimAction } {
+	if (e.attempt && e.txHashKnown) {
+		if (e.receiptStatus === "included" || e.consumed) return { action: "consumed" }
+		if (e.receiptStatus === "dropped") return { action: "private-fpc" } // not included ⇒ FJ unconsumed ⇒ retry
+		return { action: "wait" } // pending / unprobed / unreachable node - never guess
+	}
+	if (e.attempt) {
+		// Attempt latched but NO tx hash. Durable consumption still settles it; the setup-insufficiency
+		// assert is the one retryable case; anything else is unknowable ⇒ wait. NEVER public/Sponsored.
+		if (e.consumed) return { action: "consumed" }
+		if (e.setupInsufficiency) return { action: "private-fpc" }
+		return { action: "wait" }
+	}
+	return { action: "private-fpc" } // fresh record ⇒ first private claim attempt
+}
+
+/** The exact PrivateFPC `mint_and_pay_fee` insufficiency assert (verified in the installed 215fd08
+ *  artifact). The narrow retry allow-list string-matches this — there is no typed selector. */
+export const PRIVATE_FUEL_INSUFFICIENCY_MSG = "Amount too low to cover gas cost"
+
+/** Classify a private-claim send error as the retryable setup-insufficiency (fail-closed: anything that
+ *  doesn't match is NOT retryable). */
+export function isPrivateFuelInsufficiency(message: string): boolean {
+	return message.includes(PRIVATE_FUEL_INSUFFICIENCY_MSG)
+}

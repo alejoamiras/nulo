@@ -144,27 +144,35 @@ describe("BridgeForm fuel surface", () => {
 		expect(depositFn).not.toHaveBeenCalled()
 	})
 
-	it("PRIVATE bridges cannot carry public gas (the banned combo): fuel toggle is withheld, replaced by a note", async () => {
+	it("PRIVATE bridges CAN carry private gas (gas-follows-token): fuel offered under either preset", async () => {
 		const w = mount(BridgeForm)
-		// public default: the fuel toggle is offered.
+		// private is the DEFAULT preset now - the fuel toggle is offered (no "coming soon" block).
 		expect(w.find(sel(TESTIDS.bridgeFuelToggle)).exists()).toBe(true)
-		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
-		// private: no fuel toggle, an explanatory note instead - never the private-tokens + public-gas leak.
-		expect(w.find(sel(TESTIDS.bridgeFuelToggle)).exists()).toBe(false)
+		await w.find(sel(TESTIDS.bridgeFuelToggle)).trigger("click")
+		await settleQuote()
+		// the quote note carries the private-gas wording.
 		expect(w.find(sel(TESTIDS.bridgeFuelPrivateNote)).exists()).toBe(true)
-		expect(w.text()).toMatch(/private gas is coming/i)
+		expect(w.find(sel(TESTIDS.bridgeFuelPrivateNote)).text()).toMatch(/private gas/i)
+		// switching to PUBLIC keeps fuel available (the note just drops the private wording).
+		await w.find(sel(TESTIDS.bridgePresetPublic)).trigger("click")
+		expect(w.find(sel(TESTIDS.bridgeFuelToggle)).exists()).toBe(true)
+		expect(w.find(sel(TESTIDS.bridgeFuelPrivateNote)).exists()).toBe(false)
 	})
 
-	it("toggling PRIVATE while fuel is ON turns fuel off (no stale fueled private submit)", async () => {
+	it("switching presets keeps fuel ON (no guard) and a private+fuel submit passes the slice", async () => {
 		const w = mount(BridgeForm)
 		await w.find(sel(TESTIDS.bridgeFuelToggle)).trigger("click")
 		await settleQuote()
 		expect(w.find(sel(TESTIDS.bridgeFuelQuote)).exists()).toBe(true)
-		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
-		// fuel config gone; a later submit cannot carry a fuel slice.
-		expect(w.find(sel(TESTIDS.bridgeFuelQuote)).exists()).toBe(false)
+		// public→private round-trip: fuel stays configured (no stale-state reset / guard).
+		await w.find(sel(TESTIDS.bridgePresetPublic)).trigger("click")
+		await w.find(sel(TESTIDS.bridgePresetPrivate)).trigger("click")
+		await settleQuote()
+		expect(w.find(sel(TESTIDS.bridgeFuelQuote)).exists()).toBe(true)
 		await w.find(sel(TESTIDS.bridgeSubmit)).trigger("click")
 		expect(depositFn).toHaveBeenCalledTimes(1)
-		expect((depositFn.mock.calls[0][2] as { fuelSlice?: bigint })?.fuelSlice).toBeUndefined()
+		// private (default) + fuel: the slice IS passed (gas-follows-token).
+		expect(depositFn.mock.calls[0][1]).toBe(true)
+		expect((depositFn.mock.calls[0][2] as { fuelSlice?: bigint })?.fuelSlice).toBe(25n * 10n ** 16n)
 	})
 })

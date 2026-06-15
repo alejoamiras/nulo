@@ -7,7 +7,7 @@ const USDC = AztecAddress.fromString("0x0000000000000000000000000000000000000000
 const ETH = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000003")
 const SPONSORED_FPC = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000004")
 
-import { feeJuiceAddress } from "@nulo/bridge-core"
+import { PRIVATE_FPC_ADDRESS, feeJuiceAddress } from "@nulo/bridge-core"
 
 describe("buildFaucetManifest", () => {
 	const m = buildFaucetManifest({
@@ -166,6 +166,8 @@ describe("buildCombinedManifest", () => {
 			"drip_to_public",
 			"drip_to_private",
 			"claim_and_end_setup",
+			"claim",
+			"mint_and_pay_fee",
 			"claim_public",
 			"claim_private",
 			"exit_to_l1_public",
@@ -228,6 +230,32 @@ describe("fuel claim scope (canonical FeeJuice)", () => {
 		const m = buildCombinedManifest(combinedInput())
 		expect(hasFjClaim(txScope(m))).toBe(true)
 		expect(hasFjClaim(simTxScope(m))).toBe(true)
+	})
+
+	const hasPrivateFuel = (scope: { contract: unknown; function: string }[]) =>
+		scope.some((s) => String(s.contract) === feeJuiceAddress && s.function === "claim") &&
+		scope.some((s) => String(s.contract) === PRIVATE_FPC_ADDRESS && s.function === "mint_and_pay_fee")
+
+	it("combined manifest scopes private fuel (FeeJuice.claim + mint_and_pay_fee) for send AND simulate", () => {
+		const m = buildCombinedManifest(combinedInput())
+		expect(hasPrivateFuel(txScope(m))).toBe(true)
+		expect(hasPrivateFuel(simTxScope(m))).toBe(true)
+	})
+
+	it("keeps the PrivateFPC OUT of contracts (wallet auto-registers it, like the SponsoredFPC)", () => {
+		const m = buildCombinedManifest(combinedInput())
+		const cap = m.capabilities.find((c) => c.type === "contracts")
+		if (cap?.type !== "contracts") throw new Error("contracts cap missing")
+		expect(cap.contracts.map(String)).not.toContain(PRIVATE_FPC_ADDRESS)
+	})
+
+	it("scopes FeeJuice.balance_of_public for the no-fuel L7 cold-check (simulate only)", () => {
+		const m = buildCombinedManifest(combinedInput())
+		const hasFjBalance = (scope: { contract: unknown; function: string }[]) =>
+			scope.some((s) => String(s.contract) === feeJuiceAddress && s.function === "balance_of_public")
+		expect(hasFjBalance(simTxScope(m))).toBe(true)
+		// It is a read — NOT a send-scoped function.
+		expect(hasFjBalance(txScope(m))).toBe(false)
 	})
 
 	it("the FJ entry is exactly one function on one protocol contract - no wildcards", () => {

@@ -12,7 +12,7 @@ import type { RecordRuntime } from "@/composables/useBridgeJournal"
 export type PhaseState = "pending" | "active" | "done" | "skipped" | "failed"
 
 export interface BridgePhase {
-	key: "seal" | "approve" | "sign" | "deposit" | "fuel" | "sync" | "claim" | "confirm" | "exit" | "prove" | "finish"
+	key: "seal" | "approve" | "sign" | "deposit" | "sync" | "claim" | "confirm" | "exit" | "prove" | "finish"
 	label: string
 	state: PhaseState
 	/** Live narration when active/failed (runtime detail or the phase's signing prompt). */
@@ -41,15 +41,16 @@ export function stepperPhases(record: BridgeJournalRecord, runtime: RecordRuntim
 
 function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhase[] {
 	// Fueled deposits SIGN a Permit2 witness instead of APPROVING (the live token pre-approves
-	// Permit2), and gain a FUEL phase that latches on the event-sourced fuel.received - which
-	// lands together with leafIndex, so FUEL completes exactly when the crossing starts.
+	// Permit2). The fuel swap executes INSIDE the deposit transaction, so it is not independently
+	// observable (fuel.received lands together with leafIndex) - there is no separate FUEL phase to
+	// flip on its own; DEPOSIT is relabeled "DEPOSIT + FUEL" to name the one atomic step.
 	const fueled = rec.fuel !== undefined
 	const keys: BridgePhase["key"][] = rec.isPrivate
 		? fueled
-			? ["seal", "sign", "deposit", "fuel", "sync", "claim", "confirm"]
+			? ["seal", "sign", "deposit", "sync", "claim", "confirm"]
 			: ["seal", "approve", "deposit", "sync", "claim", "confirm"]
 		: fueled
-			? ["sign", "deposit", "fuel", "sync", "claim", "confirm"]
+			? ["sign", "deposit", "sync", "claim", "confirm"]
 			: ["approve", "deposit", "sync", "claim", "confirm"]
 
 	// The fact-bounded zone (the latch): runtime can only refine WITHIN it.
@@ -69,8 +70,7 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 		seal: "SEAL",
 		approve: "APPROVE",
 		sign: "SIGN",
-		deposit: "DEPOSIT",
-		fuel: "FUEL",
+		deposit: fueled ? "DEPOSIT + FUEL" : "DEPOSIT",
 		sync: "CROSSING",
 		claim: "CLAIM",
 		confirm: "CONFIRM",
@@ -78,10 +78,13 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 	const prompts: Record<string, string> = {
 		seal: "Sign in your Ethereum wallet - encrypts this bridge's recovery secret. No funds move.",
 		approve: "Confirm the allowance for the bridge portal in your Ethereum wallet. No funds move yet.",
-		deposit: rec.depositTxHash ? "Waiting for the Ethereum confirmation…" : "Confirm the deposit in your Ethereum wallet.",
+		deposit: rec.depositTxHash
+			? "Waiting for the Ethereum confirmation…"
+			: fueled
+				? "Confirm the deposit in your Ethereum wallet - the fuel swap rides along in the same transaction."
+				: "Confirm the deposit in your Ethereum wallet.",
 		sync: "The message is crossing to Aztec - no signature needed.",
 		sign: "Sign the bridge intent in your Ethereum wallet - one signature covers the swap and the deposit.",
-		fuel: "Swapping the fuel slice into Fee Juice inside the deposit transaction…",
 		claim:
 			rt.step === "unsealing"
 				? "Sign in your Ethereum wallet to unseal the recovery secret, then confirm in your Aztec wallet."
@@ -92,7 +95,6 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 	}
 	const etas: Partial<Record<string, string>> = {
 		sign: "your signature - instant",
-		fuel: "same transaction as the deposit",
 		deposit: "usually under 1 min",
 		sync: "usually 1-4 min",
 		claim: "your signature + a few sec",

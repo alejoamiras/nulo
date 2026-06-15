@@ -85,15 +85,25 @@ describe("BridgeForm", () => {
 		l1Balance.value = 500_000_000n
 	})
 
-	it("defaults to Ethereum→Aztec with BOTH Aztec balances always visible (stacked dual)", () => {
+	it("defaults to Ethereum→Aztec, PRIVATE preset, with BOTH Aztec balances always visible", () => {
 		const w = mount(BridgeForm)
 		expect(w.find(sel(TESTIDS.bridgeFrom)).attributes("data-chain")).toBe("ethereum")
 		expect(w.find(sel(TESTIDS.bridgeTo)).attributes("data-chain")).toBe("aztec")
 		expect(w.find(sel(TESTIDS.bridgeBalanceL1)).text()).toContain("500")
-		// Both lines visible WITHOUT touching the toggle - the user is never blind on private.
+		// Both lines visible regardless of preset - the user is never blind.
 		expect(w.find(sel(TESTIDS.bridgeBalanceL2Public)).text()).toContain("200")
 		expect(w.find(sel(TESTIDS.bridgeBalanceL2Private)).text()).toContain("50")
+		// PRIVATE is the default preset: the private balance is the active one.
+		expect(w.find(sel(TESTIDS.bridgeBalanceL2Private)).attributes("data-active")).toBe("true")
+		expect(w.find(sel(TESTIDS.bridgeBalanceL2Public)).attributes("data-active")).toBe("false")
+		expect(w.find(sel(TESTIDS.bridgeSubmit)).text()).toContain("BRIDGE PRIVATELY TO AZTEC")
+	})
+
+	it("selecting the PUBLIC preset switches the active balance + submit copy", async () => {
+		const w = mount(BridgeForm)
+		await w.find(sel(TESTIDS.bridgePresetPublic)).trigger("click")
 		expect(w.find(sel(TESTIDS.bridgeBalanceL2Public)).attributes("data-active")).toBe("true")
+		expect(w.find(sel(TESTIDS.bridgeBalanceL2Private)).attributes("data-active")).toBe("false")
 		expect(w.find(sel(TESTIDS.bridgeSubmit)).text()).toContain("BRIDGE TO AZTEC")
 	})
 
@@ -109,7 +119,7 @@ describe("BridgeForm", () => {
 
 	it("the privacy toggle highlights the ACTIVE balance (both stay visible) and shows ONE plain-language note", async () => {
 		const w = mount(BridgeForm)
-		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
+		await w.find(sel(TESTIDS.bridgePresetPrivate)).trigger("click")
 		expect(w.find(sel(TESTIDS.bridgeBalanceL2Private)).attributes("data-active")).toBe("true")
 		expect(w.find(sel(TESTIDS.bridgeBalanceL2Public)).attributes("data-active")).toBe("false")
 		expect(w.find(sel(TESTIDS.bridgeBalanceL2Public)).exists()).toBe(true)
@@ -122,20 +132,20 @@ describe("BridgeForm", () => {
 	it("the withdraw-direction private note says nothing extra needs backing up", async () => {
 		const w = mount(BridgeForm)
 		await w.find(sel(TESTIDS.bridgeFlip)).trigger("click")
-		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
+		await w.find(sel(TESTIDS.bridgePresetPrivate)).trigger("click")
 		expect(w.find(sel(TESTIDS.bridgePrivacyNote)).text()).toMatch(/nothing extra to back up/i)
 	})
 
 	it("the merged note carries the signature count: two first time, one after trust", async () => {
 		const w = mount(BridgeForm)
-		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
+		await w.find(sel(TESTIDS.bridgePresetPrivate)).trigger("click")
 		const note = w.find(sel(TESTIDS.bridgePrivacyNote))
 		expect(note.attributes("data-first")).toBe("true")
 		expect(note.text()).toMatch(/two quick ethereum signatures/i) // terse copy keeps the phrase
 
 		sealTrusted.mockReturnValue(true)
 		const w2 = mount(BridgeForm)
-		await w2.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
+		await w2.find(sel(TESTIDS.bridgePresetPrivate)).trigger("click")
 		expect(w2.find(sel(TESTIDS.bridgePrivacyNote)).attributes("data-first")).toBe("false")
 		expect(w2.find(sel(TESTIDS.bridgePrivacyNote)).text()).toMatch(/one ethereum signature/i)
 	})
@@ -151,7 +161,7 @@ describe("BridgeForm", () => {
 	it("submit threads (amount, isPrivate) to the right flow per direction", async () => {
 		const w = mount(BridgeForm)
 		await w.find(sel(TESTIDS.bridgeAmount)).setValue("100")
-		await w.find(sel(TESTIDS.bridgePrivacyToggle)).trigger("click")
+		await w.find(sel(TESTIDS.bridgePresetPrivate)).trigger("click")
 		await w.find(sel(TESTIDS.bridgeSubmit)).trigger("click")
 		expect(depositFn).toHaveBeenCalledWith(100_000_000n, true, expect.objectContaining({ onRecord: expect.any(Function) }))
 
