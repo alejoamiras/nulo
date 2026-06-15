@@ -145,7 +145,9 @@ Default expectation: clean (record "parity exact; no inconsistency" in the ledge
 
 **Gate:** `bun run test:e2e` (smoke) green; `bun run e2e:agent` (network) green — at minimum a dApp `sendTx`/`simulateTx` routes, a scope-violating call is rejected, `grantPublicAuthwit` scope-checks, and the exempt `getChainInfo` path works. Layers: smoke e2e + network e2e (parallel-safe per worktree).
 
-### Phase 5 — Docs + cleanup
+### Phase 5 — Docs + cleanup ✓
+**Done (2026-06-15, `1ffd5f5`):** README reconciled (registry as the single edit point; file map; dispatch-entry guard principle; Custom-RPC table → all 3 customs). `bun run audit:vue` (typecheck:all → test → lint → build) **EXIT=0**. (Info-level FIXABLE lint findings remain in pre-existing test files I didn't touch — non-blocking, out of scope.) See `lessons/phase-5.md`.
+
 Update `packages/wallet-bridge/README.md` "Custom RPC methods" / "Adding a capability" to name the registry as the single edit point (preserve the schema-patch ×3 contract verbatim). Update `CLAUDE.md`'s custom-RPC note if it references the old tables. Update `implementations-plan/index.md`.
 **Gate:** `bun run lint` + `bun run audit:vue` (typecheck→test→lint→build) exit 0. Layers: typecheck/lint + unit + build.
 
