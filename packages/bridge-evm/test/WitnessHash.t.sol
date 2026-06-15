@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity >=0.8.27;
 
-import {Test, console2} from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 import {SwapBridgeRouter, IUniswapFuelSwap} from "../src/SwapBridgeRouter.sol";
 
 /// Exposes the internal witness/route hashing so the TS side (bridge-core/l1.ts)
@@ -20,7 +20,7 @@ contract WitnessHarness is SwapBridgeRouter {
 }
 
 contract WitnessHashTest is Test {
-    function test_logFixedHashes() public {
+    function test_witnessHashPinned() public {
         WitnessHarness h = new WitnessHarness();
 
         IUniswapFuelSwap.PoolKey[] memory path = new IUniswapFuelSwap.PoolKey[](1);
@@ -46,13 +46,14 @@ contract WitnessHashTest is Test {
             fuelSecretHash: bytes32(uint256(0xFEE)),
             minFuelOutput: 1 ether,
             routeHash: routeHash,
-            isPrivate: false
+            isPrivate: false,
+            swapTarget: address(uint160(0x9ABC))
         });
         bytes32 witnessHash = h.hWitness(w);
 
-        console2.log("ROUTE_HASH");
-        console2.logBytes32(routeHash);
-        console2.log("WITNESS_HASH");
-        console2.logBytes32(witnessHash);
+        // Pinned, cross-checked against bridge-core/l1.test.ts for the SAME fixed witness — a drift on
+        // either side means the JS-signed Permit2 witness won't match what the router hashes (12 fields).
+        assertEq(routeHash, 0x01441be25b5060664969cc7926ae553da9e9393d5f4f83ce732e294df7578340, "ROUTE_HASH drift");
+        assertEq(witnessHash, 0xf910b94139aa6f65c9a6ffe6a9b4a03f07a28928fe9b82a15834c3056160313b, "WITNESS_HASH drift");
     }
 }

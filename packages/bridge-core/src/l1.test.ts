@@ -14,7 +14,7 @@ import {
 // Solidity, the Permit2 witness signature won't verify and the bridge reverts.
 // (The L1 analogue of the content-hash keystone.)
 const ROUTE_HASH = "0x01441be25b5060664969cc7926ae553da9e9393d5f4f83ce732e294df7578340"
-const WITNESS_HASH = "0x6805573f2fe416a67bc9ae4c73dffe7ba578e322fda468d923c5f16be60209d2"
+const WITNESS_HASH = "0xf910b94139aa6f65c9a6ffe6a9b4a03f07a28928fe9b82a15834c3056160313b"
 
 const addr = (n: number) => `0x${n.toString(16).padStart(40, "0")}` as `0x${string}`
 const b32 = (n: number) => `0x${n.toString(16).padStart(64, "0")}` as `0x${string}`
@@ -39,6 +39,7 @@ describe("l1 witness/route hashing (pinned to the Solidity router)", () => {
 			minFuelOutput: 1_000_000_000_000_000_000n,
 			routeHash: ROUTE_HASH,
 			isPrivate: false,
+			swapTarget: addr(0x9abc),
 		}
 		expect(hashBridgeWitness(w)).toBe(WITNESS_HASH)
 	})
@@ -67,6 +68,7 @@ describe("l1 Permit2 witness typed-data", () => {
 			minFuelOutput: 1_000_000_000_000_000_000n,
 			routeHash: ROUTE_HASH,
 			isPrivate: false,
+			swapTarget: addr(0x9abc),
 		}
 		const td = bridgeWitnessPermitTypedData(
 			{ permitted: { token: addr(0x2222), amount: 1_000_000n }, spender: addr(0x99), nonce: 7n, deadline: 123n },
