@@ -38,5 +38,13 @@ PR #91's **Quality gate (required on dev) is GREEN**. The **Network e2e (advisor
 - The guard does NOT false-negative `sendTx`/`registerToken`/`grantPublicAuthwit` (own properties; exact spellings match the schema-patch + playground callers).
 - **The decisive point:** the only refactor-specific timeout mechanism (popup rejected before handler → `waitForPopup` hangs) fits ONLY popup tests. The no-popup failures (`meta-getChainInfo`, `sim-methods`) wait on the result row directly → a bad registry/guard would surface as a FAST error, not a 120s hang. And `concurrent-sendtx-confirm` PASSED on CI — impossible if `sendTx` were mis-keyed at dispatch entry.
 
-**Sharpest experiment (codex):** run `register-token.test.ts` via `bun run e2e:agent` on the branch vs `dev` — the cheapest direct probe of the one plausible refactor-specific mechanism (popup-open). Branch-arm in progress.
+**Sharpest experiment (codex):** run `register-token.test.ts` via `bun run e2e:agent` on the branch vs `dev` — the cheapest direct probe of the one plausible refactor-specific mechanism (popup-open).
+
+### Local A/B — DECISIVE: not my change
+- **`register-token` PASSED on my branch** (proverless, local) — the popup method that exercises the schema-patch + the registry `registerToken` descriptor + the `Object.hasOwn` guard + `handleRegisterToken` popup. Directly rules out codex's only refactor-specific mechanism: the popup opens, the test passes. (`cap-request-basic` also passed on my branch.)
+- **`multi-account-from` — the concrete CI-failing test — FAILS on `dev` HEAD too** (`origin/dev` `1dccc4c`, proverless, WITHOUT my change): `× … reaches active stage 93787ms (retry x2)`, `TimeoutError: 30000ms exceeded`. Reproduced the exact CI failure on dev without the refactor.
+
+**Conclusion:** the network-e2e shard failures are **pre-existing fragility in the freshly-landed proverless network suite** (PR #86 converted the bulk suite to proverless + PR #85 un-gated authwit tests, both landed on dev TODAY; last clean dev network runs are May, pre-proverless). They are **NOT caused by this refactor** — proven by (1) reproducing the exact failing test on dev HEAD without the change, (2) the refactor's popup/capability paths passing locally, (3) parity-exact unit + Quality (required) gate green, (4) codex #2's mechanism analysis. Branch round-trip verified clean (149 wallet-bridge tests pass after returning from dev).
+
+**Disposition:** PR #91 — required **Quality gate GREEN**, mergeable on dev (network e2e advisory there). The network-e2e red is a **separate, pre-existing proverless-suite stabilization follow-up** (the 30s `waitForPopup` / proving-stage CI waits are tuned for the old real-proving timing and are too tight / sandbox-fragile under the new proverless flow). NOT in scope for this PR.
 
