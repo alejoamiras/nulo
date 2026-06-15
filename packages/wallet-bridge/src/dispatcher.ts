@@ -287,7 +287,10 @@ export class WalletSdkDispatcher {
 		// half): "supported but missing metadata" is impossible in both. Preserves
 		// the historical "Unsupported wallet method" string (pinned by the
 		// retired-method guards in dispatcher.test.ts).
-		if (!METHOD_REGISTRY[methodName]) {
+		// `Object.hasOwn`, not a truthy index, so prototype names (`toString`,
+		// `constructor`, …) are rejected here rather than slipping into capability
+		// handling and failing with a misleading CapabilityNotGrantedError.
+		if (!Object.hasOwn(METHOD_REGISTRY, methodName)) {
 			throw new Error(`Unsupported wallet method: ${methodName}`)
 		}
 

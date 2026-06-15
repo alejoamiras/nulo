@@ -57,7 +57,9 @@ function validateAccountScopes(scopeField: unknown, sessionAccounts: Set<string>
  * are silently skipped.
  */
 export function enforceScope(methodName: string, args: unknown[], grants: GrantedCapabilityRecord[]): void {
-	const checker = METHOD_SCOPE_CHECKER[methodName]
+	// `Object.hasOwn` so prototype names can't resolve to a truthy prototype member
+	// (which would be invoked as a "checker") on the derived plain object.
+	const checker = Object.hasOwn(METHOD_SCOPE_CHECKER, methodName) ? METHOD_SCOPE_CHECKER[methodName] : undefined
 	if (!checker) return
 	checker(args, grants)
 }

@@ -21,7 +21,9 @@ export type { CapabilityType }
  * Returns `null` for exempt or unknown methods.
  */
 export function getRequiredCapability(method: string): CapabilityType | null {
-	return METHOD_CAPABILITY_MAP[method] ?? null
+	// `Object.hasOwn` guards against prototype names (`toString`, `constructor`)
+	// resolving to a truthy prototype member on the derived plain object.
+	return Object.hasOwn(METHOD_CAPABILITY_MAP, method) ? METHOD_CAPABILITY_MAP[method] : null
 }
 
 /**

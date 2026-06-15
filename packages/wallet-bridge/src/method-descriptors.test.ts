@@ -100,8 +100,12 @@ const FROZEN_SCOPE_CHECKER: Record<string, unknown> = {
 }
 
 // The method-name literals dispatch() special-cases (the local choke-point
-// surface, independent of any schema). Must match the branches in
-// dispatcher.ts dispatch()/handleSendTx/handleRegisterToken/handleGrantPublicAuthwit.
+// surface, independent of any schema). Hand-maintained: test (ii) cross-checks
+// that each has a descriptor. A future handler branch added to dispatch() that
+// is forgotten here is still caught operationally by the RUNTIME dispatch-entry
+// guard (`Object.hasOwn(METHOD_REGISTRY, methodName)` throws "Unsupported wallet
+// method" on first call) — that guard, not this list, is the real catch for a
+// dispatchable method lacking a descriptor.
 const DISPATCH_HANDLER_LITERALS = [
 	"requestCapabilities",
 	"getAccounts",
@@ -111,6 +115,15 @@ const DISPATCH_HANDLER_LITERALS = [
 	"grantPublicAuthwit",
 	"batch",
 ]
+
+// Non-exempt methods that legitimately have NO scope checker, by design. An
+// explicit allowlist (not a free-text `note`) so adding one is a deliberate,
+// reviewable edit — a future method cannot skip scope coverage silently.
+const SCOPE_EXEMPT_BY_DESIGN = new Set([
+	// registerToken's session-account authz is enforced inline in
+	// handleRegisterToken() (D8), not via a METHOD_SCOPE_CHECKER entry.
+	"registerToken",
+])
 
 // ── Parity: derived maps reproduce the frozen tables EXACTLY ───────────
 
@@ -210,15 +223,25 @@ describe("method-descriptors — exhaustiveness (the silent-omission killer)", (
 
 	test("(ii) every dispatch() handler literal has a descriptor", () => {
 		for (const m of DISPATCH_HANDLER_LITERALS) {
-			expect(METHOD_REGISTRY[m], `dispatch() handles "${m}" but it has no MethodDescriptor`).toBeDefined()
+			expect(Object.hasOwn(METHOD_REGISTRY, m), `dispatch() handles "${m}" but it has no MethodDescriptor`).toBe(true)
 		}
 	})
 
-	test("scope-or-note invariant: every NON-exempt method has a scopeCheck OR an explicit note", () => {
+	test("scope coverage: every NON-exempt method has a scopeCheck OR is explicitly allowlisted", () => {
 		for (const [method, d] of Object.entries(METHOD_REGISTRY)) {
 			if (d.exemptReason !== undefined) continue // exempt methods have no scope dimension
-			const hasGuardOrJustification = d.scopeCheck !== undefined || d.note !== undefined
-			expect(hasGuardOrJustification, `non-exempt "${method}" has neither a scopeCheck nor a note explaining why`).toBe(true)
+			// An explicit allowlist (not a free-text note) makes skipping scope a
+			// deliberate, reviewable edit — a bogus `note` can no longer pass CI.
+			const covered = d.scopeCheck !== undefined || SCOPE_EXEMPT_BY_DESIGN.has(method)
+			expect(covered, `non-exempt "${method}" has no scopeCheck and is not in SCOPE_EXEMPT_BY_DESIGN`).toBe(true)
+		}
+		// And the allowlist itself must not rot: every allowlisted method must exist,
+		// be non-exempt, and genuinely lack a scopeCheck (else remove it from the list).
+		for (const method of SCOPE_EXEMPT_BY_DESIGN) {
+			const d = METHOD_REGISTRY[method]
+			expect(d, `SCOPE_EXEMPT_BY_DESIGN names "${method}" which has no descriptor`).toBeDefined()
+			expect(d.exemptReason, `allowlisted "${method}" is capability-exempt — it shouldn't be in the scope allowlist`).toBeUndefined()
+			expect(d.scopeCheck, `allowlisted "${method}" HAS a scopeCheck — remove it from SCOPE_EXEMPT_BY_DESIGN`).toBeUndefined()
 		}
 	})
 })
