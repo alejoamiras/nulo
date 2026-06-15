@@ -40,6 +40,12 @@ const METHOD_CAPABILITY_MAP: Record<string, CapabilityType> = {
 
 	// transaction
 	sendTx: "transaction",
+	// Granting a public authwit authorizes a FUTURE token spend by the named
+	// caller — at least as powerful as sending that call — so it requires the
+	// `transaction` capability and is scope-checked by checkGrantPublicAuthwit.
+	// WITHOUT this entry, enforceCapability returns [] and the scope-enforcement
+	// block is skipped entirely: the gate would be dead code (audit F1).
+	grantPublicAuthwit: "transaction",
 
 	// data
 	getPrivateEvents: "data",

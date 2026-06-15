@@ -235,10 +235,14 @@ export async function createAccount(page: Page, name: string): Promise<void> {
 
 	await clickByTestId(page, "new-account-submit")
 
-	// Wait for popup to close (the input is gone) — confirms account creation finished
-	await page.waitForFunction(() => !document.querySelector('[data-testid="account-name-input"]'), {
+	// Wait for the new ROW (the post-create signal) — NOT the popup input
+	// vanishing: Vue's <Transition> can stick mid-leave in headless Chrome
+	// (rAF throttling). Mirrors the proven flow in accounts.test.ts.
+	await page.waitForSelector(`[data-testid="manage-accounts-row"][data-account-name="${name}"]`, {
+		visible: true,
 		timeout: 10_000,
 	})
+	await closeStuckPopup(page)
 }
 
 /** Switch to an account by name via the AccountsPopup in header. */

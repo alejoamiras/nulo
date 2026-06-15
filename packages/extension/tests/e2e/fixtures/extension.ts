@@ -1,6 +1,6 @@
 import puppeteer, { TimeoutError, type Browser, type Page, type ConsoleMessage } from "puppeteer"
 import { test as base, inject } from "vitest"
-import { switchToLocalNetwork, importToken, getAccountAddress, refreshBalances } from "./helpers"
+import { switchToLocalNetwork, importToken, getAccountAddress, refreshBalances, createAccount } from "./helpers"
 import { snapshotResultSeq, waitForPgResult } from "./playground"
 import { waitForPopup, approveCapabilities } from "./popups"
 import type { AztecTestConfig } from "./aztec"
@@ -539,6 +539,26 @@ export const test = base.extend<{
 			const setupPage = await phase("openPopup", () => openPopup(ctx))
 			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
 			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
+			// A fresh profile exposes ONE account; multi-account consumers (the
+			// from-characterization + the authwit consume-as-caller flow) need a
+			// real second account in the cap popup, so create it here where the
+			// cost lands in hookTimeout.
+			await phase("createSecondAccount", () => createAccount(setupPage, "Second"))
+			// Persistence assertion: the row rendering proves only the optimistic
+			// appStore push; verify the SERVICE write landed before moving on.
+			let postCreateDump = ""
+			await phase("assertSecondAccountPersisted", async () => {
+				postCreateDump = await setupPage.evaluate(async () => {
+					const all = await chrome.storage.local.get(null)
+					return Object.entries(all)
+						.filter(([k]) => k.startsWith("nulo:core:accounts"))
+						.map(([, v]) => (typeof v === "string" ? v : JSON.stringify(v)))
+						.join(" ||| ")
+				})
+				if (!postCreateDump.includes('"Second"')) {
+					throw new Error(`account "Second" not in storage immediately after creation. Stored: ${postCreateDump.slice(0, 600)}`)
+				}
+			})
 			await setupPage.close()
 			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
 
@@ -569,6 +589,28 @@ export const test = base.extend<{
 				)
 				const granted = accountIds.slice(0, Math.min(2, accountIds.length)).filter((a): a is string => !!a)
 				if (granted.length === 0) throw new Error("capabilities popup returned no accounts")
+				// The fixture creates a second account upstream; if the cap popup
+				// exposes fewer, fail HERE with the ids so the discriminator
+				// (creation failed vs popup filtered) is in the error itself.
+				if (granted.length < 2) {
+					// Ground truth from the wallet's own storage: every account row
+					// with its chainId, so the failure discriminates wrong-chain
+					// creation from popup-side filtering.
+					const storedAccounts = await capPopup.evaluate(async () => {
+						const all = await chrome.storage.local.get(null)
+						const out: string[] = []
+						for (const [k, v] of Object.entries(all)) {
+							if (k.startsWith("nulo:core:accounts") || k.startsWith("nulo:core:networks")) {
+								// Raw, no shape assumptions — values may be serialized strings.
+								out.push(`${k} => ${(typeof v === "string" ? v : JSON.stringify(v)).slice(0, 400)}`)
+							}
+						}
+						return out.join(" ||| ")
+					})
+					throw new Error(
+						`capabilities popup exposed only [${accountIds.join(", ")}] — expected the created second account.\nAT-CAP-TIME: ${storedAccounts}\nPOST-CREATE: ${postCreateDump}`,
+					)
+				}
 				await approveCapabilities(capPopup, { accounts: granted })
 				await waitForPgResult(playgroundPage, "requestCapabilities", seqGrant, 30_000)
 				return granted

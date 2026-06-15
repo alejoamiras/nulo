@@ -149,6 +149,7 @@ const onKeydown = (e) => {
 
 				<Flex align="center" direction="column" gap="12">
 					<Button
+						data-testid="registry-toggle-submit"
 						@click="handleChangeRegistry"
 						variant="primary"
 						size="medium"

@@ -267,6 +267,7 @@ const onKeydown = (e) => {
 
 				<Flex align="center" direction="column" gap="12">
 					<Button
+						data-testid="revoke-authwits-submit"
 						@click="handleRevokeAuthwits"
 						variant="primary"
 						size="medium"

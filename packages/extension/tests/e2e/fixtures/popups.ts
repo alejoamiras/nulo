@@ -263,6 +263,37 @@ export async function approveExecute(page: Page, opts: { feeMethod?: "sponsored"
 	await clickByTestId(page, "execute-confirm-btn")
 }
 
+/** Pick a fee method + submit one of the authwit settings popups
+ *  (RevokeAuthwitsPopup / ChangeAuthwitsRegistryPopup). Both embed the
+ *  shared FeeSettingsCard (`send-fee-method-*` testids) and carry a
+ *  distinct submit testid. Mirrors approveExecute's fee-pick step.
+ *  `submitTestId`: "revoke-authwits-submit" | "registry-toggle-submit". */
+export async function pickFeeAndSubmitAuthwitPopup(
+	page: Page,
+	submitTestId: string,
+	feeMethod: "sponsored" | "fj" | "fpc" = "sponsored",
+): Promise<void> {
+	await page.waitForSelector('[data-testid="send-fee-method-trigger"]', { visible: true, timeout: 30_000 })
+	await page.evaluate(() => {
+		;(document.querySelector('[data-testid="send-fee-method-trigger"]') as HTMLElement)?.click()
+	})
+	await page.waitForSelector(`[data-testid="send-fee-method-${feeMethod}"]`, { visible: true, timeout: 30_000 })
+	await page.evaluate((kind: string) => {
+		;(document.querySelector(`[data-testid="send-fee-method-${kind}"]`) as HTMLElement)?.click()
+	}, feeMethod)
+	await page.waitForFunction(
+		(id: string) => {
+			const b = document.querySelector(`[data-testid="${id}"]`) as HTMLButtonElement | null
+			return !!b && !b.disabled
+		},
+		{ timeout: 30_000, polling: 200 },
+		submitTestId,
+	)
+	await page.evaluate((id: string) => {
+		;(document.querySelector(`[data-testid="${id}"]`) as HTMLElement)?.click()
+	}, submitTestId)
+}
+
 export async function rejectExecute(page: Page): Promise<void> {
 	await clickByTestId(page, "execute-reject-btn")
 }

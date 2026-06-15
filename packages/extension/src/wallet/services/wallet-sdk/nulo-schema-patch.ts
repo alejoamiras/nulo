@@ -1,6 +1,6 @@
 /**
  * Runtime extension of `@aztec/wallet-sdk`'s `WalletSchema` with the Nulo-custom
- * `registerToken` and `isTokenRegistered` methods.
+ * `registerToken`, `isTokenRegistered`, and `grantPublicAuthwit` methods.
  *
  * Mirrored verbatim by:
  *   - packages/faucet/src/lib/nulo-schema-patch.ts
@@ -72,4 +72,30 @@ if ("isTokenRegistered" in WalletSchema) {
 } else {
 	// biome-ignore lint/suspicious/noExplicitAny: see above
 	;(WalletSchema as any).isTokenRegistered = REGISTERED_QUERY_SCHEMA
+}
+
+const GRANT_CONTENT_SCHEMA = z.object({
+	caller: z.string(),
+	contract: z.string(),
+	method: z.string(),
+	args: z.array(z.unknown()),
+})
+const GRANT_AUTHWIT_SCHEMA = z.function().args(schemas.AztecAddress, GRANT_CONTENT_SCHEMA).returns(z.string())
+
+if ("grantPublicAuthwit" in WalletSchema) {
+	// biome-ignore lint/suspicious/noExplicitAny: see above
+	const existing = (WalletSchema as any).grantPublicAuthwit
+	if (existing !== GRANT_AUTHWIT_SCHEMA) {
+		const existingParamCount = existing?.parameters?.()?.items?.length
+		if (existingParamCount !== 2) {
+			throw new Error(
+				`Nulo schema-patch: upstream WalletSchema.grantPublicAuthwit signature changed ` +
+					`(expected 2 params, found ${existingParamCount}). Update the patch or ` +
+					`remove it if upstream now provides grantPublicAuthwit natively.`,
+			)
+		}
+	}
+} else {
+	// biome-ignore lint/suspicious/noExplicitAny: see above
+	;(WalletSchema as any).grantPublicAuthwit = GRANT_AUTHWIT_SCHEMA
 }

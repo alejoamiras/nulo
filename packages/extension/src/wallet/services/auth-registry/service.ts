@@ -10,7 +10,7 @@ import type { WrappedTask } from "@/wallet/services/task/wrapped-task"
 import { TaskService, RevokeAuthwitsContent, StepContent } from "@/wallet/services/task/service"
 import { TransactionService, OriginType } from "@/wallet/services/transaction/service"
 import { EntityStorage } from "@/wallet/storage"
-import { array_max, Lock } from "@/wallet/utils"
+import { array_max, Lock, sleep } from "@/wallet/utils"
 import { getAuthRegistryAddress, isAuthRegistryEnabled, isAuthwitConsumable } from "@/wallet/utils/auth-registry"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { AUTH_REGISTRY_SERVICE_NAME, type Authwit, type Events, MAX_REVOKES_PER_TX, type Methods } from "./spec"
@@ -96,7 +96,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			throw new Error(`Cannot revoke more than ${MAX_REVOKES_PER_TX} authwits per single tx`)
 		}
 
-		const authwits = []
+		const authwits: Authwit[] = []
 		for (const id of ids) {
 			const authwit = await this.authwits.get(`${id}`)
 			if (!authwit) {
@@ -129,6 +129,14 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 
 			const network = await this.networkService.getNetwork(networkId)
 			const node = await this.networkService.getNode(network.chainId)
+			// `waitForTx` only confirms the tx left the pending queue (submitted),
+			// not that its PUBLIC effect is mined + visible. Poll the on-chain state
+			// so a fast (proverless) follow-up consume can't race a not-yet-mined
+			// revoke. See waitForOnChainState.
+			await this.waitForOnChainState(
+				async () => (await Promise.all(authwits.map((a) => isAuthwitConsumable(node, a.account, a.hash)))).every((c) => !c),
+				"revoke: authwits no longer consumable",
+			)
 			await this.syncAuthwits(node, account, task, authwits)
 
 			task.complete()
@@ -173,6 +181,12 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 
 			const network = await this.networkService.getNetwork(networkId)
 			const node = await this.networkService.getNode(network.chainId)
+			// Ensure the registry toggle is mined + visible before returning, so a
+			// fast follow-up consume reads the new state (see waitForOnChainState).
+			await this.waitForOnChainState(
+				async () => (await isAuthRegistryEnabled(node, account)) === enabled,
+				`registry enabled=${enabled}`,
+			)
 			await this.syncStatus(node, account, task)
 
 			task.complete()
@@ -198,6 +212,26 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			task.fail(error)
 			throw error
 		}
+	}
+
+	/** Poll an on-chain predicate until it holds (the just-submitted settings
+	 *  tx's public effect is mined + visible) or the timeout elapses.
+	 *
+	 *  `transactionService.waitForTx` only blocks while the tx is in the local
+	 *  `pending` queue (i.e. until it's submitted), NOT until its public state
+	 *  is mined — so a one-shot read right after it can observe stale state. The
+	 *  gap is masked under real proving (the prove duration absorbs it) but
+	 *  exposed under proverless e2e, where a follow-up `consume` would race the
+	 *  registry. Polling the actual on-chain predicate closes the race for both.
+	 *  On timeout we proceed (the caller's sync reads whatever is current) rather
+	 *  than fail the settings op. */
+	private async waitForOnChainState(check: () => Promise<boolean>, label: string, timeoutMs = 120_000): Promise<void> {
+		const start = Date.now()
+		while (Date.now() - start < timeoutMs) {
+			if (await check()) return
+			await sleep(500)
+		}
+		this.logWarn(`waitForOnChainState timed out (${label}); proceeding with current on-chain read`)
 	}
 
 	private async syncAuthwits(node: AztecNode, account: string, parentTask: WrappedTask, authwits?: Authwit[]) {

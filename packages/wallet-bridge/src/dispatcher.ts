@@ -64,7 +64,13 @@ import type {
 	TransactionCapability,
 } from "./capabilities"
 import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
-import type { AztecSendTxRequest, CapabilityResult, ExecutionResult, RegisterTokenRequest } from "./dapp-interaction-protocol"
+import type {
+	AztecSendTxRequest,
+	CapabilityResult,
+	ExecutionResult,
+	RegisterTokenRequest,
+	SendTransactionRequest,
+} from "./dapp-interaction-protocol"
 import type {
 	AztecCreateAuthWitOperation,
 	AztecExecuteUtilityOperation,
@@ -379,6 +385,9 @@ export class WalletSdkDispatcher {
 		if (methodName === "registerToken") {
 			return this.handleRegisterToken(args, ctx, dappSession)
 		}
+		if (methodName === "grantPublicAuthwit") {
+			return this.handleGrantPublicAuthwit(args, ctx, dappSession)
+		}
 
 		const kind = METHOD_TO_KIND[methodName]
 		if (!kind) {
@@ -617,6 +626,66 @@ export class WalletSdkDispatcher {
 			sessionId: dappSession.id,
 			operations: [registerOp],
 		})
+
+		return this.unwrapResult(results[0])
+	}
+
+	/** Nulo-custom `grantPublicAuthwit`: writes a public authwit for
+	 *  `method@contract` (caller = the authorized spender) into the on-chain
+	 *  AuthRegistry via a `send_transaction` carrying a single
+	 *  `add_public_authwit` action. Routed through DappInteractionService so
+	 *  the user approves (and selects the fee for) the registry write like
+	 *  any other dApp transaction; `buildStandard` computes the message
+	 *  hash, records it via `trackAuthwit` (settings revoke UI), and injects
+	 *  the `set_authorized` call. Returns the tx hash. */
+	private async handleGrantPublicAuthwit(
+		args: unknown[],
+		ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+	): Promise<unknown> {
+		if (!dappSession) {
+			throw new Error(`No dApp session found for origin ${ctx.origin}`)
+		}
+
+		const requestedAccount = String(args[0])
+		const network = await this.resolveNetwork(ctx)
+		const allAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
+		const sessionAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
+		const account = allAccounts.find((acc) => sessionAddresses.has(acc.address) && acc.address === requestedAccount)
+		if (!account) {
+			throw new Error(`grantPublicAuthwit: account ${requestedAccount} is not authorized for this dApp session`)
+		}
+		const caipAccount = formatCaipAccount(ctx.chainId, account.address)
+
+		const content = args[1] as { caller: string; contract: string; method: string; args: unknown[] }
+		const grantOp: SendTransactionRequest = {
+			kind: "send_transaction" as const,
+			account: caipAccount,
+			actions: [
+				{
+					kind: "add_public_authwit" as const,
+					content: {
+						kind: "call" as const,
+						caller: content.caller,
+						contract: content.contract,
+						method: content.method,
+						args: content.args,
+					},
+				},
+			],
+		}
+
+		const results: ExecutionResult = await this.dappInteractionService.execute(
+			{
+				sessionId: dappSession.id,
+				operations: [grantOp],
+			},
+			// `originKey` applies the per-origin backpressure cap to grants too,
+			// matching sendTx; without it the execution lane buckets the grant
+			// under "__no_origin__" and loses per-origin fairness.
+			undefined,
+			{ originKey: ctx.origin },
+		)
 
 		return this.unwrapResult(results[0])
 	}

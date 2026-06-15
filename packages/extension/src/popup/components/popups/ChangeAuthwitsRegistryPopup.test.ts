@@ -66,7 +66,7 @@ const STUBS = {
 	},
 	Button: {
 		props: ["loading", "disabled"],
-		template: `<button data-testid="send-btn" :disabled="disabled || loading"><slot /></button>`,
+		template: `<button data-testid="registry-toggle-submit" :disabled="disabled || loading"><slot /></button>`,
 	},
 	Tooltip: { template: "<div><slot /><slot name='content' /></div>" },
 	Icon: { template: "<i />" },
@@ -118,7 +118,7 @@ describe("ChangeAuthwitsRegistryPopup — Enter-key gate", () => {
 		await flushPromises()
 		expect(authwitsServiceMock.setRegistryEnabled).not.toHaveBeenCalled()
 		// Send button mirrors the gate
-		expect(w.find('[data-testid="send-btn"]').attributes("disabled")).toBeDefined()
+		expect(w.find('[data-testid="registry-toggle-submit"]').attributes("disabled")).toBeDefined()
 	})
 
 	test("(REGRESSION-PIN) Enter is a no-op while in-flight (isLoading)", async () => {
@@ -160,7 +160,7 @@ describe("ChangeAuthwitsRegistryPopup — Enter-key gate", () => {
 		// breaks click while leaving Enter working, this fails alongside test 1.
 		const w = await mountAndOpen()
 		await setFee(w)
-		await w.find('[data-testid="send-btn"]').trigger("click")
+		await w.find('[data-testid="registry-toggle-submit"]').trigger("click")
 		await flushPromises()
 		expect(authwitsServiceMock.setRegistryEnabled).toHaveBeenCalledTimes(1)
 	})
