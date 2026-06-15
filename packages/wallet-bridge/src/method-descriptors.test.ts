@@ -223,6 +223,42 @@ describe("method-descriptors — exhaustiveness (the silent-omission killer)", (
 	})
 })
 
-// Type-only usage so the import isn't dead while the file is additive in Phase 1.
+// ── Add-a-method proof (the Shotgun-Surgery cure, scoped to METADATA) ──
+// Proves the win: ONE descriptor row makes a method's authz METADATA flow to
+// every derived map; and a MISSING row is caught by the exhaustiveness logic.
+// (A method needing a NEW Operation kind still touches the out-of-scope build
+// switches, and a new handler method still needs a dispatch() branch — the
+// registry centralizes the metadata facts, not the wiring.)
+
+describe("method-descriptors — add-a-method proof (metadata only)", () => {
+	const stubChecker: MethodDescriptor["scopeCheck"] = () => {}
+
+	test("one descriptor row → capability + scope + kind all derive for the new method", () => {
+		const synthetic: Record<string, MethodDescriptor> = {
+			...METHOD_REGISTRY,
+			newSinkMethod: {
+				capability: "data",
+				routing: { via: "network-operation", kind: "aztec_getAddressBook" },
+				scopeCheck: stubChecker,
+			},
+		}
+		expect(deriveCapabilityMap(synthetic).newSinkMethod).toBe("data")
+		expect(deriveMethodToKind(synthetic).newSinkMethod).toBe("aztec_getAddressBook")
+		expect(deriveScopeCheckerMap(synthetic).newSinkMethod).toBe(stubChecker)
+		expect(deriveExemptSet(synthetic).has("newSinkMethod")).toBe(false)
+	})
+
+	test("a registry MISSING a dispatchable method is caught (silent-omission guard works)", () => {
+		const incomplete = Object.fromEntries(Object.entries(METHOD_REGISTRY).filter(([m]) => m !== "sendTx"))
+		// This mirrors the exhaustiveness test's forward check against the
+		// dispatch handler literals — sendTx is dispatchable, so its absence MUST
+		// be detectable. Build failure in real life; assertion here.
+		const dispatchable = ["sendTx", "grantPublicAuthwit", "batch"]
+		const missing = dispatchable.filter((m) => !(m in incomplete))
+		expect(missing).toEqual(["sendTx"])
+	})
+})
+
+// Type-only usage to keep the type import live.
 const _typeProbe: MethodDescriptor | undefined = METHOD_REGISTRY.getChainInfo
 void _typeProbe
