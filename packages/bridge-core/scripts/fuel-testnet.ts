@@ -177,6 +177,7 @@ async function main() {
 				router: fuel.router,
 				routerAbi: evmAbi("SwapBridgeRouter"),
 				permit2: fuel.permit2,
+				swapTarget: fuel.swapTarget,
 				tokenPortal: CONFIG.l1.portal,
 				bridgeToken: azlo,
 				totalAmount: TOTAL,
