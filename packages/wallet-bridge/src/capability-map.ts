@@ -8,7 +8,11 @@
  * any capability grant — they are either meta-protocol or infrastructure.
  */
 
-export type CapabilityType = "accounts" | "contracts" | "contractClasses" | "simulation" | "transaction" | "data"
+// `CapabilityType` is defined in `./method-descriptors` (the registry that is the
+// single source of truth) so the dependency seam stays one-directional. Imported
+// for local use + re-exported to preserve the public `@nulo/wallet-bridge` path.
+import type { CapabilityType } from "./method-descriptors"
+export type { CapabilityType }
 
 /** Methods that never require a capability check.
  *  F-003: getAccounts removed. Previously exempted, which made the
