@@ -11,6 +11,7 @@
 import type { Page } from "puppeteer"
 import { inject } from "vitest"
 import { clickByTestId, patchPagePolling, replaceInputValue, type ExtensionContext } from "./extension"
+import { dumpDeepDiagnostics } from "./journal"
 
 export const PLAYGROUND_TEST_URL = (() => {
 	try {
@@ -65,27 +66,38 @@ export type PgResult = { seq: number; method: string; status: "ok" | "error"; re
  * with the same method. Returns the parsed JSON result/error.
  */
 export async function waitForPgResult(page: Page, method: string, fromSeq: number, timeout = 30_000): Promise<PgResult> {
-	const handle = await page.waitForFunction(
-		(m: string, after: number) => {
-			const rows = [...document.querySelectorAll<HTMLElement>(`[data-testid="pg-result"][data-method="${m}"]`)]
-			for (const r of rows) {
-				const seq = Number(r.getAttribute("data-result-seq") ?? "0")
-				const status = r.getAttribute("data-status") ?? ""
-				if (seq > after && (status === "ok" || status === "error")) {
-					return {
-						seq,
-						method: m,
-						status,
-						resultJson: r.getAttribute("data-result-json") ?? "",
+	const handle = await page
+		.waitForFunction(
+			(m: string, after: number) => {
+				const rows = [...document.querySelectorAll<HTMLElement>(`[data-testid="pg-result"][data-method="${m}"]`)]
+				for (const r of rows) {
+					const seq = Number(r.getAttribute("data-result-seq") ?? "0")
+					const status = r.getAttribute("data-status") ?? ""
+					if (seq > after && (status === "ok" || status === "error")) {
+						return {
+							seq,
+							method: m,
+							status,
+							resultJson: r.getAttribute("data-result-json") ?? "",
+						}
 					}
 				}
-			}
-			return null
-		},
-		{ timeout, polling: 200 },
-		method,
-		fromSeq,
-	)
+				return null
+			},
+			{ timeout, polling: 200 },
+			method,
+			fromSeq,
+		)
+		.catch(async (err) => {
+			// F1 (CDP freeze) and F2 (settle-timeout) both fail HERE — the playground
+			// result-row waiter — NOT in a journal waiter, so the journal instrument
+			// would otherwise miss them. Fire the deep dump: out-of-band targets +
+			// resources for the F1 freeze (the in-page reads bound-out), and the
+			// journal op-state (a page-DOM-independent second signal, audit D9) for
+			// the F2 settle-timeout — did the op terminalize while the row never rendered?
+			await dumpDeepDiagnostics(page, `waitForPgResult(${method})`)
+			throw err
+		})
 	const raw = (await handle.jsonValue()) as { seq: number; method: string; status: "ok" | "error"; resultJson: string }
 	const parsed: PgResult = {
 		seq: raw.seq,
