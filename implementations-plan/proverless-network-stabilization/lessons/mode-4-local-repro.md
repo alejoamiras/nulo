@@ -24,6 +24,27 @@ Running `NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/concurrent-se
    than rejecting it (we got a 300s timeout, not an `error` result). On CI Mode 4 surfaced as
    `expected 'error' to be 'ok'` — possibly the same root with different timing.
 
+## Refined root-cause hypothesis (from reading the execution code, 2026-06-16)
+
+The per-(profileId,chainId) FIFO execution mutex (`execution-lane.ts`, `execution-mutex.ts`)
+serializes "build → simulate → prove → **submit**" (execution-lane.ts:62-65). But
+`dapp-send-executor` releases the slot after `coordinator.proveAndSend(...)` returns a `txHash` —
+i.e. after **submit (broadcast)**, NOT after the tx is **mined**. So when T1 releases, T2 acquires
+the mutex and simulates while T1 is *submitted-but-not-yet-mined*. If T1 and T2 spend the same
+public/private note, T2's simulate does not observe T1's nullifier → produces a colliding one →
+`Attempted to emit duplicate siloed nullifier` when it lands.
+
+This is a **submit-vs-mine serialization gap**. Likely **proverless-exposed**: under real proving
+(minutes) T1 is usually mined before T2 simulates, masking it; under proverless (sub-second) the
+window is wide open. Open questions for Phase 4 (codex — Aztec PXE specifics):
+- Does the PXE track T1's submitted-but-unmined nullifiers as *pending* during T2's simulate? If
+  not, that's the gap. If yes, why didn't T2 see it (PXE sync timing between the two sends)?
+- Fix space: (a) hold the mutex until T1 is MINED (kills concurrency — probably too costly); (b)
+  make T2's simulate account for pending submitted txs; (c) TEST-side: this may be an inherent
+  property — concurrent same-note sends CAN'T both succeed without waiting for mine, so the test
+  should either await T1's mine before approving T2, or use distinct notes/recipients per tx.
+- DECIDE test-fix vs execution-fix with codex BEFORE changing production execution code.
+
 ## Scope note
 
 The Phase-1 assertion migration is **NOT implicated** — the test reaches `:101-102` (past the
