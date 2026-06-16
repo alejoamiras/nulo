@@ -57,26 +57,26 @@ These exist because the last attempt jumped to "resource starvation" with zero m
 
 **Validation gate:** `bun run typecheck` + `bun run lint` exit 0; a local run captures F3's correlated worker/claim state; **a fault-injection case (deliberately wedged target) shows the dump degrades gracefully within a bounded budget** (audit M3) rather than hanging. Layers: typecheck · lint · e2e-live-network (local trigger).
 
-### Phase 2 — F3 root cause (tractable + intermittent)
+### Phase 2 — F3 root cause (tractable + intermittent) ✓ DONE (`lessons/phase-2.md`)
 - Repro F3 across axes: local `NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0 bun run e2e:agent tests/e2e/network/multi-account-from.test.ts` (+ exact-predecessor sequence); `docker-ci-like.sh` (Linux); CI soak `mode=files` (exact list, `retry=0`) **with a no-instrument control arm at equal N**.
 - Measure failure rate per arm; confirm instrumentation is non-perturbing before trusting dumps. With `/codex xhigh`: confirm the baton/claim mechanism, name root cause + fix direction, classify (race; proverless-specific?).
 
 **Validation gate:** F3 root-cause + fix-direction writeup citing artifacts; instrumented-vs-control failure rates recorded; codex consult logged (`lessons/phase-2.md`). Layers: e2e-live-network (local + docker + CI).
 
-### Phase 3 — F1 root cause (CDP freeze; out-of-band + bisection)
+### Phase 3 — F1 root cause (CDP freeze; out-of-band + bisection) ✓ DONE (`lessons/phase-3.md`)
 - Replay the **exact** shard-1 file list (`mode=files`, `retry=0`) locally + `docker-ci-like` + CI. Resolve the F1 discriminator: run `register-token` **in isolation** (freezes alone?) vs **after the exact heavy predecessor**; **bisect** the shard file list to localize any contaminating predecessor.
 - Collect **out-of-band** evidence (`DEBUG=puppeteer:protocol`, Chrome stderr/liveness, runner process snapshot, pre-hang `Performance.getMetrics`). Resource snapshot **over time** (Chrome + Bun + Aztec procs) settles starvation-vs-not with DATA — neither assuming nor inverting it (audit M1).
 - With `/codex xhigh`: name root cause + fix direction.
 
 **Validation gate:** F1 root-cause + fix-direction writeup citing artifacts; the contamination-vs-shared-path discriminator resolved by evidence; codex consult logged. Layers: e2e-live-network (local + docker + CI) + out-of-band capture.
 
-### Phase 4 — F2 root cause (settle timeout; second signal)
+### Phase 4 — F2 root cause (settle timeout; second signal) ✓ DONE (`lessons/phase-4.md`)
 - Replay the exact shard-3 file list (`retry=0`). Add a second signal that is **independent of the playground page DOM** (final-pass — `waitForPgResult` is itself same-page DOM observation, `playground.ts:67`): read the wallet **operation-journal op-state** (durable source of truth, a different channel) **and query the Aztec node directly for the tx's mine status**. This separates three cases: page-wedged (CDP/console) vs promise-unresolved (journal op never reaches `worked`) vs mine-too-slow (op submitted + node shows tx still pending past budget). Compare proverless vs **real-proving** for the same test.
 - With `/codex xhigh`: root cause + fix direction; classify.
 
 **Validation gate:** F2 root-cause + fix-direction writeup citing artifacts; promise-vs-budget distinguished with the second signal; codex consult logged. Layers: e2e-live-network.
 
-### Phase 5 — Breadth synthesis, report, handoff
+### Phase 5 — Breadth synthesis, report, handoff ✓ DONE (`DIAGNOSIS.md`, `lessons/phase-5.md`)
 - Compare F3/F1/F2 dumps **side-by-side** → confirm or kill the common-root (offscreen/worker lifecycle) hypothesis (the breadth payoff, preserved despite depth-first sequencing — dumps are committed artifacts).
 - Write `DIAGNOSIS.md` (per-failure root cause · evidence · fix direction · confidence high/moderate/low). Correct the "resource starvation" wording in **`run-summary.md` + `phase-3.md` only**. Scope the successor **fix** blueprint. Update `implementations-plan/index.md`.
 

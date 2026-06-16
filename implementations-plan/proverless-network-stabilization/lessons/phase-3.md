@@ -13,7 +13,7 @@ changes, before applying any Class-B fix (observe-first).
 
 - **shard 1 — Mode 2 (CDP freeze).** `authwit-lifecycle`, `register-token`:
   `Caused by: ProtocolError: Runtime.callFunctionOn timed out` + `waitForHashGeneral 30000ms`.
-  The browser/CDP is unresponsive (resource starvation). protocolTimeout already 300s. Phase 3 target.
+  The browser/CDP is unresponsive (~~resource starvation~~ — **DISPROVEN**; actually offscreen-PXE-block-sync SW backpressure stalling execution-start, see [`proverless-e2e-diagnosis/DIAGNOSIS.md`](../../proverless-e2e-diagnosis/DIAGNOSIS.md)). protocolTimeout already 300s.
 - **shard 3 — Mode 3 (settle timeout).** `authwit-consume-smoke:75,103`: `waitForPgResult` 120/240s.
   The dApp promise never settles in budget. Phase 4.
 - **shard 5 — NEW, revealed by journal-diag.** `multi-account-from:86` `waitForDappExecuteWorked`

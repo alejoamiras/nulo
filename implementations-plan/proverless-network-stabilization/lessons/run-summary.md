@@ -1,5 +1,7 @@
 # Autonomous run summary (2026-06-16) — proverless network stabilization
 
+> **⚠ CORRECTION (2026-06-16, superseding):** every "resource starvation on the 4-core runner" call below was an **UNVERIFIED INFERENCE** and is now **DISPROVEN**. The follow-up diagnosis ([`proverless-e2e-diagnosis/DIAGNOSIS.md`](../../proverless-e2e-diagnosis/DIAGNOSIS.md)) captured runner-process snapshots showing **idle cores** at every stall + a service-worker trail proving the real root cause: **execution-start starved by offscreen-PXE-block-sync backpressure** (single-context event-loop starvation, proverless-exposed) — NOT machine resource starvation. Read the wording below as "what was hypothesized at the time", not fact.
+
 ## Delivered (committed + pushed on `fix/proverless-network-stabilization`)
 
 - **Phase 0** — pinned the proverless prod-safety guard (`config.test.ts`).
