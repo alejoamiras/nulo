@@ -12,6 +12,15 @@
 - **Phase 4 (Mode 4 part)** — re-scoped `concurrent-sendtx-confirm` to the mutex-serialization
   contract + T1-confirms; dropped the architecturally-impossible T2-also-confirms. Passes locally.
 
+## CI confirmation (run 27638447273, with Mode-1 + Mode-4 fixes)
+
+- `concurrent-confirm`: **SUCCESS** (was FAILURE in the baseline) — Mode-4 re-scope validated on CI.
+- `shard 4`: **SUCCESS** — Mode-1 fix holds. `canary` + `fee-methods`: SUCCESS.
+- `shard 1` (Mode 2), `shard 3` (Mode 3), `shard 5` (queued-stall): still FAILURE — the resource
+  modes, exactly as expected (the user's runner/coverage decision).
+
+Both cleanly-fixable modes are CI-proven. The remaining red is the documented resource class.
+
 ## The 4 failure modes — final status
 
 | Mode | Status |
