@@ -60,7 +60,7 @@ does **not** fix Mode 2 (a frozen CDP channel breaks the in-`page.evaluate` jour
 
 Layer legend: **TC**=typecheck · **L**=lint · **U**=unit · **EP**=e2e-proverless(local Mac) · **EPc**=e2e-proverless(CI-container) · **EPr**=e2e-proverless(real-runner soak) · **ER**=e2e-real-proving-canary.
 
-### Phase 0 — Lock the proverless prod-safety invariants (first; we're about to touch proverless-adjacent surfaces)
+### Phase 0 ✓ — Lock the proverless prod-safety invariants (first; we're about to touch proverless-adjacent surfaces)
 
 - Add/confirm a **unit test** that the double-opt-in fails closed: default build (no env) → proverless OFF (`src/e2e/config.ts`); extend `chrome-storage-proof-gate.test.ts` if uncovered.
 - Confirm the **production negative-grep** (`_build-extension.yml:72`: `PROOF_GATE_KEY`/`NULO_E2E_PROVERLESS_BUILD_STAMP` ABSENT from prod builds) is wired on the release path. Read-only verify; add a test if a guard is missing.
