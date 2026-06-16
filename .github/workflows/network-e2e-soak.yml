@@ -43,13 +43,9 @@ on:
         type: string
         default: "0"
 
-# Unique per run so multiple manual soak campaigns (e.g. isolation vs in-sequence
-# arms, or instrumented vs control) can run in PARALLEL on the same branch instead
-# of cancelling each other. Manual soaks are operator-controlled; auto-cancel only
-# got in the way of running comparison arms side by side.
 concurrency:
-  group: network-e2e-soak-${{ github.ref }}-${{ github.run_id }}
-  cancel-in-progress: false
+  group: network-e2e-soak-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

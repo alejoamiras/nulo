@@ -70,7 +70,7 @@ async function swEvaluate<A extends unknown[], R>(page: Page, fn: (...a: A) => R
 	const target = page
 		.browser()
 		.targets()
-		.find((t) => t.type() === "service_worker")
+		.find((t) => t.type() === "service_worker" && t.url().includes("chrome-extension://"))
 	if (!target) return "<no service_worker target>"
 	const worker = await target.worker()
 	if (!worker) return "<service_worker has no worker handle>"
@@ -91,8 +91,36 @@ export async function readDappExecuteRecordsFull(page: Page): Promise<unknown[] 
 		for (const [k, raw] of Object.entries(all)) {
 			if (!k.startsWith("nulo:journal@")) continue
 			try {
-				const r = (typeof raw === "string" ? JSON.parse(raw) : raw) as { kind?: string }
-				if (r?.kind === "dapp_execute") out.push(r)
+				const r = (typeof raw === "string" ? JSON.parse(raw) : raw) as {
+					kind?: string
+					id?: string
+					sessionId?: string
+					progress?: { stage?: string }
+					error?: { code?: unknown }
+					attempts?: number
+					createdAt?: number
+					updatedAt?: number
+					terminalAt?: number | null
+					title?: string
+				}
+				if (r?.kind === "dapp_execute") {
+					// Project DIAGNOSTIC fields only — never accountAddress / txHash /
+					// profileId / networkId / error body. Keeps the queued-stall
+					// disambiguators (stage + createdAt/updatedAt + attempts/terminalAt)
+					// + a truncated sessionId for correlation; keeps identifiers/PII out
+					// of CI artifacts (the dump is uploaded on failure).
+					out.push({
+						id: r.id,
+						stage: r.progress?.stage,
+						attempts: r.attempts,
+						createdAt: r.createdAt,
+						updatedAt: r.updatedAt,
+						terminalAt: r.terminalAt,
+						title: r.title,
+						errorCode: r.error?.code,
+						sid8: typeof r.sessionId === "string" ? r.sessionId.slice(0, 8) : undefined,
+					})
+				}
 			} catch {
 				// Skip unparseable entries.
 			}
@@ -136,7 +164,7 @@ export function captureTargetInventory(page: Page): string[] | string {
 		return page
 			.browser()
 			.targets()
-			.map((t) => `${t.type()} ${t.url().slice(0, 90)}`)
+			.map((t) => `${t.type()} ${t.url().split("?")[0].slice(0, 90)}`) // drop query params (requestId/sessionId)
 	} catch (err) {
 		return `target inventory FAILED: ${err instanceof Error ? err.message : String(err)}`
 	}
@@ -192,22 +220,24 @@ export async function dumpJournal(page: Page, label: string): Promise<void> {
  * and the whole thing is capped well under the runner budget. Failure-path only.
  */
 export async function dumpDeepDiagnostics(page: Page, label: string): Promise<void> {
-	const full = await withTimeout(
-		readDappExecuteRecordsFull(page).catch((e) => `<full read failed: ${e instanceof Error ? e.message : String(e)}>`),
-		10_000,
-		"full records",
-	)
-	console.error(`[diag-deep] ${label} full dapp_execute: ${typeof full === "string" ? full : JSON.stringify(full)}`)
-
-	const trail = await withTimeout(
-		readSwLogTrail(page, { match: "exec|dapp|lane|mutex|claim|baton|offscreen|slot|queue" }).catch(
-			(e) => `<sw-log read failed: ${e instanceof Error ? e.message : String(e)}>`,
+	// The two in-page reads run CONCURRENTLY so the whole deep dump is bounded by a
+	// SINGLE ~10s window (not summed) — a frozen CDP can't stretch the failure budget.
+	const [full, trail] = await Promise.all([
+		withTimeout(
+			readDappExecuteRecordsFull(page).catch((e) => `<full read failed: ${e instanceof Error ? e.message : String(e)}>`),
+			10_000,
+			"full records",
 		),
-		10_000,
-		"sw-log trail",
-	)
+		withTimeout(
+			readSwLogTrail(page, { match: "exec|dapp|lane|mutex|claim|baton|offscreen|slot|queue" }).catch(
+				(e) => `<sw-log read failed: ${e instanceof Error ? e.message : String(e)}>`,
+			),
+			10_000,
+			"sw-log trail",
+		),
+	])
+	console.error(`[diag-deep] ${label} full dapp_execute: ${typeof full === "string" ? full : JSON.stringify(full)}`)
 	console.error(`[diag-deep] ${label} sw-log trail: ${typeof trail === "string" ? trail : JSON.stringify(trail)}`)
-
 	console.error(`[diag-deep] ${label} targets: ${JSON.stringify(captureTargetInventory(page))}`)
 	console.error(`[diag-deep] ${label} resources:\n${captureResourceSnapshot()}`)
 }
