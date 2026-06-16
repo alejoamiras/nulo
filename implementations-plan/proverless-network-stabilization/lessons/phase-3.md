@@ -50,3 +50,18 @@ DEEP, and decision-laden:
 
 "Zero flakiness → make required" requires ALL of these resolved — a substantial, multi-round,
 decision-laden effort beyond the core Class-A fix already delivered.
+
+## queued-stall (shard 5) — NOT a Phase-1 regression (decision-free finding)
+
+Full shard-5 log: multi-account-from is the ONLY failure there — **8 other shard-5 tests passed**,
+the pre-mint succeeded ("Verified on-chain public balance"), so the sandbox + browser are healthy
+(NOT a Mode-2 freeze). The record sits at `queued` 30s after `approveExecute` — the wallet's
+claim/execution (queued→pending) never fires. **My migration cannot cause this**: the new helper
+only OBSERVES the journal; the wallet's execution-start is independent of which helper watches it.
+The old DOM helper would have failed identically had the record stalled (it needs an active card =
+claimed). The original run passed because the wallet advanced then; this run stalled (CI variance,
+or a latent 2-account-fixture claim issue under load). So:
+- **Option A (ship Phases 0-2) is SAFE** — no regression introduced.
+- The queued-stall is its own latent execution-start issue (Mode-3-like), newly VISIBLE thanks to
+  the instrument — needs its own investigation (likely the dapp_execute claim under the 2-account
+  session / CI load), not part of the Class-A fix.

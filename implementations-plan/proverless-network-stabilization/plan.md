@@ -1,10 +1,19 @@
 # Proverless Network E2E Stabilization
 
-> **Status:** APPROVED — ready to implement (`/blueprint deep` complete: 3 plans → consolidation →
-> contradiction-check → double audit [codex *reject* + fresh-opus *conditional*] → final
-> fresh-context codex pass [*conditional approve*]; every blocking finding + all 3 final
-> conditions folded in). User decisions at the gate: D7 broaden-allowlist (gaps closed), D9
-> retry:1 live, `/harden` deferred to pre-release. Implementation is user-triggered (paste a seed).
+> **Status:** IN PROGRESS — Phases 0-2 ✓ (committed + pushed; the Class-A journal-truth fix is
+> CI-VALIDATED: shard 4, which carried Mode 1, is now green on a real runner). Phase 3 baseline
+> (run 27635146678) observed all remaining modes precisely via the new instrument. **Autonomous run
+> paused at a decision gate** — the remaining modes are blocked on user/team calls:
+>   - Mode 4 (concurrent-confirm): codex-confirmed ARCHITECTURAL (submit-vs-mine; PXE pending-cache
+>     is per-execution). Clean test-fix (distinct spend sources) blocked by the playground's
+>     single-sender; execution-fix is product/design work. → accept-the-limit vs file-a-prod-issue.
+>   - Mode 2 (shard 1): CDP freeze (resource); protocolTimeout already 300s → may need paid larger runners.
+>   - queued-stall (shard 5, multi-account-from): NOT a Phase-1 regression (helper only observes;
+>     8 other shard-5 tests passed) — a separate latent execution-start stall, newly visible.
+>   - Mode 3 (shard 3): settle timeouts — needs investigation.
+> THE CHOICE (awaiting user): A = ship Phases 0-2 as a standalone PR (validated; suite stays
+> advisory), tackle the rest as a follow-up [recommended]; B = keep grinding all modes; C = pause.
+> (Original gate decisions: D7 broaden-allowlist, D9 retry:1 live, /harden deferred.)
 > **Outcome:** one well-validated PR to `dev` (opened only after the real-runner soak is green),
 > then a separate user-gated admin step to flip `Network e2e / Status` to required.
 
