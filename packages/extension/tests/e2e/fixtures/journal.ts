@@ -60,13 +60,32 @@ export async function readDappExecuteRecords(page: Page): Promise<DappExecuteVie
 }
 
 /**
+ * Evaluate in the SERVICE-WORKER context (always an extension context, so
+ * `chrome.storage` is defined) rather than the passed page. Critical because the
+ * `waitForPgResult` callers (F1/F2) pass the PLAYGROUND page — a plain web page
+ * where `chrome.storage` is undefined — and because the SW survives a wedged
+ * playground renderer (F1). Returns a marker string if there's no live SW worker.
+ */
+async function swEvaluate<A extends unknown[], R>(page: Page, fn: (...a: A) => R | Promise<R>, ...args: A): Promise<R | string> {
+	const target = page
+		.browser()
+		.targets()
+		.find((t) => t.type() === "service_worker")
+	if (!target) return "<no service_worker target>"
+	const worker = await target.worker()
+	if (!worker) return "<service_worker has no worker handle>"
+	return worker.evaluate(fn, ...args)
+}
+
+/**
  * Full `dapp_execute` records (every field), trimmed only by JSON. The lean
  * `{id,stage,sessionId}` view hides the claim metadata the F3 queued-stall
- * diagnosis needs — `queuedJournalId`, stage timestamps, any `error`. Allowlisted
- * to `dapp_execute` (NOT a `get(null)` dump), so no account/session keys leak.
+ * diagnosis needs — `queuedJournalId`, stage timestamps, any `error`. Read from
+ * the SW context (via {@link swEvaluate}) so it works for the playground-page
+ * callers (F1/F2) too. Allowlisted to `dapp_execute` (NOT a `get(null)` dump).
  */
-export async function readDappExecuteRecordsFull(page: Page): Promise<unknown[]> {
-	return page.evaluate(async () => {
+export async function readDappExecuteRecordsFull(page: Page): Promise<unknown[] | string> {
+	return swEvaluate(page, async () => {
 		const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
 		const out: unknown[] = []
 		for (const [k, raw] of Object.entries(all)) {
@@ -90,9 +109,10 @@ export async function readDappExecuteRecordsFull(page: Page): Promise<unknown[]>
  * the F3 stall whose state otherwise lives only in SW memory. NO production change.
  * `match` filters to execution-relevant sources/data (allowlist, not a full dump).
  */
-export async function readSwLogTrail(page: Page, opts: { limit?: number; match?: string } = {}): Promise<unknown[]> {
+export async function readSwLogTrail(page: Page, opts: { limit?: number; match?: string } = {}): Promise<unknown[] | string> {
 	const { limit = 50, match = "" } = opts
-	return page.evaluate(
+	return swEvaluate(
+		page,
 		async (lim: number, m: string) => {
 			const res = (await chrome.storage.session.get("nulo:logs")) as Record<string, unknown>
 			const logs = (res["nulo:logs"] as { source?: string; data?: unknown[]; timestamp?: number }[] | undefined) ?? []
