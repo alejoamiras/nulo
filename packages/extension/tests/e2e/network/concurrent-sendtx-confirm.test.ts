@@ -2,6 +2,7 @@ import { expect, inject } from "vitest"
 import { openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
+import { readDappExecuteRecords, waitForDappExecuteStagesPresent } from "../fixtures/journal"
 import { holdProofGate, releaseProofGate } from "../fixtures/proof-gate"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -80,25 +81,15 @@ test.skipIf(!hasConfig)(
 		await waitForExecuteContent(secondPopup)
 		await approveExecute(secondPopup, { feeMethod: "sponsored" })
 
-		// Deterministic ordering assert: with T1 held mid-prove, the two in-flight
-		// cards must show T1 active at `proving` AND T2 still `queued` behind it on
-		// the execution mutex — the direct, non-timing signal that serialization holds.
+		// Deterministic ordering assert, read from the JOURNAL (source of truth),
+		// not the rendered cards: with T1 held by the proof gate, the journal must
+		// hold a `dapp_execute` record at `proving` (T1) AND one at `queued` (T2
+		// behind it on the execution mutex) — the non-timing signal that
+		// serialization holds. Waiting on the specific `proving` stage (where the
+		// gate parks T1) is why we can't use the generic "reached active" wait.
 		const orderingPopup = await openPopup(ctx)
-		// Wait until T1 actually reaches `proving` (where the gate holds it) before
-		// snapshotting — `waitForSendTxActiveStage` returns at the FIRST active
-		// stage (`simulating`), which precedes the held `proving` stage.
-		await orderingPopup.waitForFunction(
-			() =>
-				[...document.querySelectorAll('[data-testid="tx-awaiting-card"]')].some(
-					(el) => el.getAttribute("data-stage") === "proving",
-				),
-			{ timeout: 30_000 },
-		)
-		const orderingStages = await orderingPopup.evaluate(() =>
-			[...document.querySelectorAll<HTMLElement>('[data-testid="tx-awaiting-card"]')].map(
-				(el) => el.getAttribute("data-stage") ?? "?",
-			),
-		)
+		await waitForDappExecuteStagesPresent(orderingPopup, ["proving", "queued"], { timeout: 30_000 })
+		const orderingStages = (await readDappExecuteRecords(orderingPopup)).map((r) => r.stage)
 		expect(orderingStages).toContain("proving")
 		expect(orderingStages).toContain("queued")
 		// Release T1 → it completes, T2 dequeues and proves, both settle.

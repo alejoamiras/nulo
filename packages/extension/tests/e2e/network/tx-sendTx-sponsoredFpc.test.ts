@@ -1,7 +1,8 @@
 import { inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq } from "../fixtures/playground"
-import { approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxActiveStage } from "../fixtures/popups"
+import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
+import { waitForDappExecuteWorked } from "../fixtures/journal"
 import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -58,6 +59,6 @@ test.skipIf(!hasConfig)(
 		// instead of the dApp's full sendTx promise. The popup-shape +
 		// fee-method override flow is what this test verifies.
 		const walletPopup = await openPopup(dappConnectedExtensionWithTransactionCap)
-		await waitForSendTxActiveStage(walletPopup)
+		await waitForDappExecuteWorked(walletPopup)
 	},
 )

@@ -62,8 +62,9 @@ describe("composite/TransactionAwaitingCard", () => {
 	})
 
 	test("forwards every JobStage literal through to the layout (e2e selector contract)", () => {
-		// E2E tests select on `[data-testid="tx-awaiting-card"][data-stage=...]`
-		// via waitForSendTxActiveStage (matches simulating|proving|submitting).
+		// E2E concurrency tests cross-check `[data-testid="tx-awaiting-card"]`
+		// rendering as a secondary UI check; the primary oracle is the journal
+		// (tests/e2e/fixtures/journal.ts).
 		// Contract: this card threads each `stage` literal through to
 		// TransactionCardLayout verbatim. Canonical type:
 		// packages/wallet-core/src/jobs/types.ts JobStage.

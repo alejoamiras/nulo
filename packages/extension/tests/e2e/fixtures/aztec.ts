@@ -455,7 +455,7 @@ export async function setupPreFundedAccount(
  * before exercising the wallet's sendTx flow in popup-shape tests. Without this,
  * the wallet's simulate step fails ("not enough balance"), the journal advances
  * straight to `failed`, and the `tx-awaiting-card` never reaches an active
- * stage — which breaks waitForSendTxActiveStage(). cancel-mid-prove.test.ts
+ * stage — which breaks waitForDappExecuteWorked(). cancel-mid-prove.test.ts
  * uses an identical inline block; this helper consolidates it for the 6 tests
  * restructured in implementations-plan/journal-stage-restructure/.
  */

@@ -1,7 +1,8 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq } from "../fixtures/playground"
-import { approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxActiveStage } from "../fixtures/popups"
+import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
+import { waitForDappExecuteWorked } from "../fixtures/journal"
 import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -82,6 +83,6 @@ test.skipIf(!hasConfig)(
 		// Wait for the wallet's journal to enter an active processing stage
 		// instead of the dApp's full sendTx promise.
 		const walletPopup = await openPopup(dappConnectedExtensionWithFirstTwoAccountsCap)
-		await waitForSendTxActiveStage(walletPopup)
+		await waitForDappExecuteWorked(walletPopup)
 	},
 )
