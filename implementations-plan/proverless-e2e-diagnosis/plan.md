@@ -44,7 +44,7 @@ These exist because the last attempt jumped to "resource starvation" with zero m
 
 ## Phases (depth-first: harden the instrument on F3, then the hard ones)
 
-### Phase 0 — Evidence baseline, exact file lists, code grounding
+### Phase 0 — Evidence baseline, exact file lists, code grounding ✓ DONE (`lessons/phase-0.md`)
 - Pull failing shard-1/3/5 CI logs (#94 + 27638447273). Extract: exact error + stack, the failing test, **and the exact ordered file list of each failing shard** (the H1 fix — save to `lessons/raw/`).
 - Read each failing test + its real shard-mates; ground hypotheses in code: the baton/`releaseFifo` claim (`background.ts:300`), reaper grace (`reaper.ts:77`), offscreen lifecycle (`ARCHITECTURE.md`), the CDP regression (`extension.ts:1148`), `waitForPgResult`'s DOM-only signal (`playground.ts:67`).
 - Write an **evidence sheet per failure** with explicit **discriminators**: F1 contamination ⇒ `register-token` freezes only after a heavy predecessor + passes in isolation + correlates with a left-behind artifact; shared-path ⇒ freezes in isolation too. F2 ⇒ promise-never-resolves vs mine-exceeds-budget.
