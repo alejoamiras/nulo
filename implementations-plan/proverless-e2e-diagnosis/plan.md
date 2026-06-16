@@ -51,7 +51,7 @@ These exist because the last attempt jumped to "resource starvation" with zero m
 
 **Validation gate:** `gh run view <id> --log-failed` excerpts + exact file lists saved to `lessons/raw/`; evidence sheets (with discriminators) in `lessons/`. No mechanism asserted yet. Layers: recon.
 
-### Phase 1 — Harden the instrument ON F3 (with observer-effect control)
+### Phase 1 — Harden the instrument ON F3 (with observer-effect control) ✓ DONE (`lessons/phase-1.md`)
 - Extend `tests/e2e/fixtures/journal.ts` `dumpJournal`/hang-hook to capture, on timeout: **request/session/op-id-correlated** journal state *(audit M-codex)*, durable-job worker + baton state, offscreen-doc health, CDP target inventory (bounded-timeout), console (**key-allowlist redaction**, not a salt denylist — `get(null)` exposes `nulo:core:*` + session mirrors, audit L3), and a resource snapshot **off the CDP thread**.
 - Prove it on F3 first (the only journal-visible, intermittent failure — the safe place to design probes; codex Medium).
 

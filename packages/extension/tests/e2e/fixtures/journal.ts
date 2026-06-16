@@ -21,6 +21,7 @@
  * The string sets are duplicated inside `page.evaluate`/`waitForFunction`
  * closures because those run in the browser and cannot close over module scope.
  */
+import { execSync } from "node:child_process"
 import type { Page } from "puppeteer"
 
 /** Non-terminal, claimed stages — "an op is in flight right now". */
@@ -59,23 +60,136 @@ export async function readDappExecuteRecords(page: Page): Promise<DappExecuteVie
 }
 
 /**
- * Best-effort diagnostic: dump the current `dapp_execute` journal records to the
- * console with a label. The journal waiters below call this when they time out,
- * so a CI failure shows the journal state at the moment of the hang ("T2 stuck at
- * queued" vs "all terminalized but the dApp promise never settled") instead of a
- * bare TimeoutError — instrument-first, so Phase 3/4 triage doesn't blind-bisect.
- * If the read itself throws (a frozen CDP channel — Mode 2), that is logged too,
- * which distinguishes a browser freeze from a journal-visible hang.
+ * Full `dapp_execute` records (every field), trimmed only by JSON. The lean
+ * `{id,stage,sessionId}` view hides the claim metadata the F3 queued-stall
+ * diagnosis needs — `queuedJournalId`, stage timestamps, any `error`. Allowlisted
+ * to `dapp_execute` (NOT a `get(null)` dump), so no account/session keys leak.
+ */
+export async function readDappExecuteRecordsFull(page: Page): Promise<unknown[]> {
+	return page.evaluate(async () => {
+		const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
+		const out: unknown[] = []
+		for (const [k, raw] of Object.entries(all)) {
+			if (!k.startsWith("nulo:journal@")) continue
+			try {
+				const r = (typeof raw === "string" ? JSON.parse(raw) : raw) as { kind?: string }
+				if (r?.kind === "dapp_execute") out.push(r)
+			} catch {
+				// Skip unparseable entries.
+			}
+		}
+		return out
+	})
+}
+
+/**
+ * The service-worker's own log trail — `LoggerStore` debounce-flushes it to
+ * `chrome.storage.session["nulo:logs"]` every 2s (`wallet/logger/store.ts:80`).
+ * Reading it from the test side surfaces HOW FAR execution got — did `acquireSlot`
+ * run, did `executionMutex.acquire` resolve, was the journal claim attempted — for
+ * the F3 stall whose state otherwise lives only in SW memory. NO production change.
+ * `match` filters to execution-relevant sources/data (allowlist, not a full dump).
+ */
+export async function readSwLogTrail(page: Page, opts: { limit?: number; match?: string } = {}): Promise<unknown[]> {
+	const { limit = 50, match = "" } = opts
+	return page.evaluate(
+		async (lim: number, m: string) => {
+			const res = (await chrome.storage.session.get("nulo:logs")) as Record<string, unknown>
+			const logs = (res["nulo:logs"] as { source?: string; data?: unknown[]; timestamp?: number }[] | undefined) ?? []
+			const re = m ? new RegExp(m, "i") : null
+			const hit = re ? logs.filter((l) => re.test(l.source ?? "") || re.test(JSON.stringify(l.data ?? []))) : logs
+			return hit.slice(-lim)
+		},
+		limit,
+		match,
+	)
+}
+
+/**
+ * OUT-OF-BAND target inventory (SW alive? offscreen doc present? page count?),
+ * read from the BROWSER-level target cache (`page.browser().targets()`), which
+ * survives a wedged PAGE renderer — the F1 case where every in-page `page.evaluate`
+ * read hangs the full `protocolTimeout`. Synchronous + cached, so it cannot hang.
+ */
+export function captureTargetInventory(page: Page): string[] | string {
+	try {
+		return page
+			.browser()
+			.targets()
+			.map((t) => `${t.type()} ${t.url().slice(0, 90)}`)
+	} catch (err) {
+		return `target inventory FAILED: ${err instanceof Error ? err.message : String(err)}`
+	}
+}
+
+/**
+ * Off-CDP-thread resource snapshot (top processes by CPU). Settles the
+ * resource-starvation question with DATA instead of assumption (the prior arc's
+ * mistake) — and runs via Node `child_process`, NOT CDP, so it works regardless
+ * of browser/page state. Bounded (5s) + best-effort.
+ */
+export function captureResourceSnapshot(): string {
+	try {
+		return execSync("ps -A -o %cpu,%mem,rss,comm | sort -rn | head -12", { timeout: 5_000, encoding: "utf8" })
+	} catch (err) {
+		return `resource snapshot FAILED: ${err instanceof Error ? err.message : String(err)}`
+	}
+}
+
+/** Race a promise against a bounded timeout, resolving to a marker string on
+ *  timeout so a wedged in-page read (frozen CDP) can never extend the dump past
+ *  `ms` (audit M4 — the hang-hook must not turn a 30s failure into a job-killer). */
+async function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T | string> {
+	return Promise.race([p, new Promise<string>((res) => setTimeout(() => res(`<${what} timed out after ${ms}ms>`), ms))])
+}
+
+/**
+ * Best-effort diagnostic: dump the `dapp_execute` journal records to the console
+ * with a label. The journal waiters below call this ONLY when they time out (via
+ * {@link awaitOrDump}), so the success path is never perturbed (observer-effect
+ * safe). A CI failure then shows the journal state at the hang ("stuck at queued"
+ * vs "all terminalized but the dApp promise never settled") instead of a bare
+ * TimeoutError. If the read itself throws (frozen CDP — F1/Mode 2), that is logged
+ * too, distinguishing a browser freeze from a journal-visible hang. Always
+ * followed by {@link dumpDeepDiagnostics} for the worker/target/resource picture.
  */
 export async function dumpJournal(page: Page, label: string): Promise<void> {
 	try {
-		const recs = await readDappExecuteRecords(page)
-		console.error(`[journal-diag] ${label}: ${recs.length} dapp_execute record(s): ${JSON.stringify(recs)}`)
+		const recs = await withTimeout(readDappExecuteRecords(page), 10_000, "journal read")
+		console.error(`[journal-diag] ${label}: ${typeof recs === "string" ? recs : `${recs.length} record(s): ${JSON.stringify(recs)}`}`)
 	} catch (err) {
 		console.error(
 			`[journal-diag] ${label}: journal read FAILED (likely frozen CDP / Mode 2): ${err instanceof Error ? err.message : String(err)}`,
 		)
 	}
+	await dumpDeepDiagnostics(page, label)
+}
+
+/**
+ * The deep timeout dump: full records + SW log trail (in-page, bounded so a frozen
+ * CDP can't hang it) + out-of-band target inventory + off-thread resource snapshot.
+ * Every part is independently guarded — a failure in one never blocks the others,
+ * and the whole thing is capped well under the runner budget. Failure-path only.
+ */
+export async function dumpDeepDiagnostics(page: Page, label: string): Promise<void> {
+	const full = await withTimeout(
+		readDappExecuteRecordsFull(page).catch((e) => `<full read failed: ${e instanceof Error ? e.message : String(e)}>`),
+		10_000,
+		"full records",
+	)
+	console.error(`[diag-deep] ${label} full dapp_execute: ${typeof full === "string" ? full : JSON.stringify(full)}`)
+
+	const trail = await withTimeout(
+		readSwLogTrail(page, { match: "exec|dapp|lane|mutex|claim|baton|offscreen|slot|queue" }).catch(
+			(e) => `<sw-log read failed: ${e instanceof Error ? e.message : String(e)}>`,
+		),
+		10_000,
+		"sw-log trail",
+	)
+	console.error(`[diag-deep] ${label} sw-log trail: ${typeof trail === "string" ? trail : JSON.stringify(trail)}`)
+
+	console.error(`[diag-deep] ${label} targets: ${JSON.stringify(captureTargetInventory(page))}`)
+	console.error(`[diag-deep] ${label} resources:\n${captureResourceSnapshot()}`)
 }
 
 /** Await a journal-wait promise; on rejection (e.g. TimeoutError) dump the
