@@ -1,7 +1,8 @@
 import { expect, inject } from "vitest"
 import { openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { approveExecute, rejectExecute, waitForExecuteContent, waitForPopup, waitForSendTxActiveStage } from "../fixtures/popups"
+import { approveExecute, rejectExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
+import { countInFlight, waitForInFlight } from "../fixtures/journal"
 import { holdProofGate, releaseProofGate } from "../fixtures/proof-gate"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -95,31 +96,25 @@ test.skipIf(!hasConfig)(
 		await waitForExecuteContent(secondPopup)
 		const elapsedMs = Date.now() - tApprove
 
-		// Discriminator, read via the journal-stage convention dev standardized:
-		// each in-flight awaiting card exposes its stage as `data-stage`. Open the
-		// wallet and wait until a card reaches an active stage — i.e. T1 claimed
-		// its mutex slot and is mid-execution (this also skips the sub-second
-		// window where T1 is briefly still `queued` right after popup #2 opens).
-		// Pre-v3, popup #2 could only open AFTER T1 terminalized, so T1 would be in
-		// history (not an awaiting card) and only T2's queued card would be in
-		// flight — the opposite of the two-card state asserted below.
+		// Discriminator read from the JOURNAL (the source of truth), NOT the
+		// rendered cards: a freshly-opened popup paints its cards asynchronously,
+		// and RecentActivityView unmounts a card the instant its op terminalizes,
+		// so a DOM read races both. With T1 held at `proving`, the journal must
+		// show >=1 dapp_execute record ACTIVE (T1 claimed its mutex slot) AND >=1
+		// still `queued` (T2 blocked behind it on the FIFO baton). Pre-v3, popup #2
+		// could only open after T1 terminalized — there'd be no active+queued pair.
 		const walletPopup = await openPopup(ctx)
-		await waitForSendTxActiveStage(walletPopup)
-		const stages = await walletPopup.evaluate(() =>
-			[...document.querySelectorAll<HTMLElement>('[data-testid="tx-awaiting-card"]')].map(
-				(el) => el.getAttribute("data-stage") ?? "?",
-			),
-		)
+		await waitForInFlight(walletPopup, { minActive: 1, minQueued: 1, timeout: 30_000 })
+		const counts = await countInFlight(walletPopup)
 		// Keep T1 HELD through the reject+assert below — otherwise (proverless) T1
-		// could settle `ok` first and the helper would catch it instead of T2's
-		// error (codex post-impl audit). walletPopup stays open for the release.
+		// could settle `ok` first and waitForPgResult would catch it instead of
+		// T2's error (codex post-impl audit). walletPopup stays open for the release.
 
-		// Two in-flight cards at once: T1 active + T2 still queued behind it on the
-		// execution mutex. (≥2 tolerates any stray prior in-flight op.)
-		expect(stages.length).toBeGreaterThanOrEqual(2)
-		expect(stages).toContain("queued")
-		const activeStages = new Set(["pending", "simulating", "proving", "submitting"])
-		expect(stages.some((s) => activeStages.has(s))).toBe(true)
+		// Two in-flight records at once: T1 active + T2 still queued behind it on
+		// the execution mutex. (>= tolerates any stray prior in-flight op.)
+		expect(counts.total).toBeGreaterThanOrEqual(2)
+		expect(counts.queued).toBeGreaterThanOrEqual(1)
+		expect(counts.active).toBeGreaterThanOrEqual(1)
 
 		// Sanity on the wall-clock: popup #2 opened far sooner than a full T1
 		// prove+submit (tens of seconds on the sandbox). Generous to absorb CI
@@ -127,8 +122,8 @@ test.skipIf(!hasConfig)(
 		expect(elapsedMs).toBeLessThan(30_000)
 
 		// Reject popup #2 while T1 is still held → T2's error is the FIRST sendTx
-		// result after seqBefore (T1 hasn't settled), so the helper can't catch
-		// T1's ok by mistake.
+		// result after seqBefore (T1 hasn't settled), so we can't catch T1's ok by
+		// mistake.
 		await rejectExecute(secondPopup)
 		const r = await waitForPgResult(page, "sendTx", seqBefore, 30_000)
 		expect(r.status).toBe("error")
