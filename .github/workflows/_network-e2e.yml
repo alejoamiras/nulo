@@ -79,6 +79,14 @@ on:
         required: false
         type: boolean
         default: false
+      retry:
+        description: |
+          Override the vitest `retry` count via NULO_E2E_RETRY. Empty = config
+          default (3 attempts). The soak workflow passes "0" so a test that
+          passes only on a retry FAILS the iteration ("zero retries consumed").
+        required: false
+        type: string
+        default: ""
     secrets:
       SPONSORED_FPC_SALT:
         required: false
@@ -115,6 +123,10 @@ jobs:
       # Proverless build flag, read by agent.sh (arms the double-opt-in VITE
       # flags + asserts the positive build stamp). '1' iff proverless.
       NULO_E2E_PROVERLESS: ${{ inputs.proverless && '1' || '' }}
+      # Override vitest retry. Empty leaves the config default (3 attempts; the
+      # vitest config treats "" as default). The soak passes "0" so a retry-passed
+      # test FAILS the iteration — the "zero retries consumed" acceptance gate.
+      NULO_E2E_RETRY: ${{ inputs.retry }}
       # Widen the wallet's maxFeesPerGas envelope for e2e only. Devnet
       # base-fees drift on loaded GHA runners; multi-prove tests
       # (transfers, concurrent-sendtx-confirm) hit `maxFeesPerGas <

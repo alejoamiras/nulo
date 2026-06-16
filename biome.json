@@ -3,7 +3,7 @@
 	"vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "dev" },
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["packages/**", "!**/node_modules", "!**/dist", "!**/packages/extension/src/types"]
+		"includes": ["packages/**", "!**/node_modules", "!**/dist", "!**/target", "!**/packages/extension/src/types"]
 	},
 	"formatter": {
 		"enabled": true,

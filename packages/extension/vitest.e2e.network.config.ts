@@ -45,7 +45,11 @@ export default defineConfig({
 		// when clicked before init completed). That race is fixed at the source
 		// (see implementations-plan/network-followups/audit-codex-rootcause.md
 		// for the investigation + fix); retry is just belt-and-suspenders now.
-		retry: 2,
+		// Default 3 attempts (transient-CI-flake absorber). Parameterized via
+		// NULO_E2E_RETRY so the Phase-5 soak can run with retry:0 — a soak that
+		// passes only on retries is not zero-flake, so the soak sets NULO_E2E_RETRY=0
+		// to make any flake fail an iteration (the "zero retries consumed" gate).
+		retry: process.env.NULO_E2E_RETRY ? Number(process.env.NULO_E2E_RETRY) : 2,
 		// Node v24 enforces JSON import attributes; @aztec/accounts imports JSON without them.
 		// Use the unstable loader to relax this check in the global setup process.
 		server: {

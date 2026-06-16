@@ -59,6 +59,37 @@ export async function readDappExecuteRecords(page: Page): Promise<DappExecuteVie
 }
 
 /**
+ * Best-effort diagnostic: dump the current `dapp_execute` journal records to the
+ * console with a label. The journal waiters below call this when they time out,
+ * so a CI failure shows the journal state at the moment of the hang ("T2 stuck at
+ * queued" vs "all terminalized but the dApp promise never settled") instead of a
+ * bare TimeoutError — instrument-first, so Phase 3/4 triage doesn't blind-bisect.
+ * If the read itself throws (a frozen CDP channel — Mode 2), that is logged too,
+ * which distinguishes a browser freeze from a journal-visible hang.
+ */
+export async function dumpJournal(page: Page, label: string): Promise<void> {
+	try {
+		const recs = await readDappExecuteRecords(page)
+		console.error(`[journal-diag] ${label}: ${recs.length} dapp_execute record(s): ${JSON.stringify(recs)}`)
+	} catch (err) {
+		console.error(
+			`[journal-diag] ${label}: journal read FAILED (likely frozen CDP / Mode 2): ${err instanceof Error ? err.message : String(err)}`,
+		)
+	}
+}
+
+/** Await a journal-wait promise; on rejection (e.g. TimeoutError) dump the
+ *  journal state via {@link dumpJournal}, then re-throw unchanged. */
+async function awaitOrDump(page: Page, label: string, p: Promise<unknown>): Promise<void> {
+	try {
+		await p
+	} catch (err) {
+		await dumpJournal(page, label)
+		throw err
+	}
+}
+
+/**
  * Snapshot in-flight counts over `dapp_execute` records (optionally scoped to a
  * `sessionId`). `active` excludes terminal + queued; `queued` is the FIFO-blocked
  * count. Use for exact-count assertions; use {@link waitForInFlight} to wait.
@@ -76,8 +107,8 @@ export async function countInFlight(page: Page, opts: { sessionId?: string } = {
 
 /**
  * Wait until in-flight counts over `dapp_execute` records meet `minActive` /
- * `minQueued` thresholds. Runs the count IN the browser via `waitForFunction`
- * (robust to frame-readiness + fast polling), unlike a Node-side poll loop.
+ * `minQueued` / `minInFlight` thresholds. Runs the count IN the browser via
+ * `waitForFunction` (robust to frame-readiness + fast polling).
  *
  * Thresholds:
  *   - `minActive`  : records in a CLAIMED, working stage (pending/simulating/proving/submitting).
@@ -97,7 +128,7 @@ export async function waitForInFlight(
 	opts: { minActive?: number; minQueued?: number; minInFlight?: number; sessionId?: string; timeout?: number } = {},
 ): Promise<void> {
 	const { minActive = 0, minQueued = 0, minInFlight = 0, sessionId, timeout = 30_000 } = opts
-	await page.waitForFunction(
+	const wait = page.waitForFunction(
 		async (sid: string | null, minA: number, minQ: number, minIF: number) => {
 			const active = new Set(["pending", "simulating", "proving", "submitting"])
 			const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
@@ -128,6 +159,7 @@ export async function waitForInFlight(
 		minQueued,
 		minInFlight,
 	)
+	await awaitOrDump(page, `waitForInFlight(minActive=${minActive},minQueued=${minQueued},minInFlight=${minInFlight})`, wait)
 }
 
 /**
@@ -139,7 +171,7 @@ export async function waitForInFlight(
  */
 export async function waitForDappExecuteStagesPresent(page: Page, stages: string[], opts: { timeout?: number } = {}): Promise<void> {
 	const { timeout = 30_000 } = opts
-	await page.waitForFunction(
+	const wait = page.waitForFunction(
 		async (required: string[]) => {
 			const present = new Set<string>()
 			const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
@@ -157,6 +189,7 @@ export async function waitForDappExecuteStagesPresent(page: Page, stages: string
 		{ timeout, polling: 200 },
 		stages,
 	)
+	await awaitOrDump(page, `waitForDappExecuteStagesPresent(${stages.join(",")})`, wait)
 }
 
 /**
@@ -171,7 +204,7 @@ export async function waitForDappExecuteStagesPresent(page: Page, stages: string
  */
 export async function waitForDappExecuteWorked(page: Page, options: { timeout?: number } = {}): Promise<void> {
 	const { timeout = 30_000 } = options
-	await page.waitForFunction(
+	const wait = page.waitForFunction(
 		async () => {
 			const workedOrDone = new Set(["simulating", "proving", "submitting", "succeeded"])
 			const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
@@ -188,4 +221,5 @@ export async function waitForDappExecuteWorked(page: Page, options: { timeout?: 
 		},
 		{ timeout, polling: 250 },
 	)
+	await awaitOrDump(page, "waitForDappExecuteWorked", wait)
 }
