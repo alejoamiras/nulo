@@ -20,4 +20,12 @@ A clean, unit-testable unit (NOT inline in offscreen): `createBatchingForwarder(
 - `offscreen/index.ts:25-26` routes the console hook through the forwarder.
 
 ## Status
-Phase 0 design DONE; **gate PENDING the falsifier soak (27676912669).** Phase 1 (build the batcher) is blocked until the falsifier passes. Watcher armed.
+Phase 0 design DONE. Batcher BUILT as prep (commit 58b1388, unit-green) — but its efficacy is gated on the falsifier.
+
+### ⚠ FALSIFIER EARLY RESULT — hypothesis AT RISK (run 27676912669)
+At 2/12 iterations, **1 failed — and the failure is the IDENTICAL queued-stall** with the flood ENTIRELY removed:
+`{"stage":"queued","createdAt===updatedAt,"attempts":0,"title":"transfer_public_to_public"}` (job 81855076148).
+So F3 stalls even with **zero** offscreen→SW Info/Debug forwarding. Logical consequence: if removing 100% of the flood doesn't eliminate the stall, **batching it can't reliably eliminate it** either — and zero-flake-required tolerates no residual stall. The diagnosis's "SW-log-flood backpressure" mechanism is at least partly WRONG; the real cause is elsewhere (other SW-loop load, or offscreen-side PXE contention the SW-local reads still wait on).
+**Decision pending the full 12-iteration no-flood rate** (watcher `bv4nh50oe`): if ≈ baseline ~33% → **STOP + surface + re-diagnose** (the test-side throttle approach is dead); if ≪33% (the 1 was a tail) → flood is a major contributor, reconsider. NOT proceeding to Phase 2+ until this resolves.
+
+LESSONS_FILE=implementations-plan/proverless-e2e-fix/lessons/phase-0.md
