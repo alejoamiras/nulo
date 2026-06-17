@@ -54,3 +54,15 @@ export function shouldHandleEnter(e: KeyboardEvent): boolean {
 	const target = e.target
 	return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
 }
+
+/**
+ * Builds popup-create's document-level keydown handler: submit only when the
+ * Enter originates from a text field (see `shouldHandleEnter`). Extracted so the
+ * page WIRING — not just the predicate — is unit-tested, without mounting the
+ * whole page.
+ */
+export function makeCreateKeydownHandler(onSubmit: () => void): (e: KeyboardEvent) => void {
+	return (e) => {
+		if (shouldHandleEnter(e)) onSubmit()
+	}
+}

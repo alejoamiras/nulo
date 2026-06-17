@@ -15,7 +15,7 @@ import { useProfileCreateFlow } from "@/composables/useProfileCreateFlow"
 /** Utils */
 import { capitalize } from "@/utils/string"
 import { redirectToOnboardingTabIfNeeded } from "@/wallet/utils/onboarding-tab"
-import { activateCreatedProfile, shouldHandleEnter } from "./new-profile-helpers"
+import { activateCreatedProfile, makeCreateKeydownHandler } from "./new-profile-helpers"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -84,9 +84,7 @@ const {
 
 // Quirk 2: only submit on Enter from a text field, so Enter on a focused
 // button doesn't double-fire alongside its native click.
-const onKeydown = (e) => {
-	if (shouldHandleEnter(e)) handleCreate()
-}
+const onKeydown = makeCreateKeydownHandler(handleCreate)
 
 const handleScroll = () => {
 	if (!scrollEl) return

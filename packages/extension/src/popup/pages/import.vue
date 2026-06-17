@@ -20,6 +20,7 @@ import { setSentinel } from "@/utils/core"
 /** Utils */
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { redirectToOnboardingTabIfNeeded } from "@/wallet/utils/onboarding-tab"
+import { resolveFullBackupEnterAction } from "./import-helpers"
 
 /** Stores */
 import { useAppStore } from "@/stores/app.store"
@@ -137,15 +138,15 @@ const {
 
 /** Listeners — popup-only full-backup Enter shortcut. */
 const onKeydown = (e) => {
-	if (e.key === "Enter") {
-		if (selectedBackup.value?.type === "encrypted" && !selectedBackup.value?.profileType) {
-			decryptBackup()
-		} else if (selectedBackup.value?.profileType && restoreStatus.value !== "finished") {
-			restoreBackup()
-		} else if (restoreStatus.value === "finished" && isRestoreHasErrors.value) {
-			completeImport(importedProfile.value)
-		}
-	}
+	if (e.key !== "Enter") return
+	const action = resolveFullBackupEnterAction({
+		selectedBackup: selectedBackup.value,
+		restoreStatus: restoreStatus.value,
+		isRestoreHasErrors: isRestoreHasErrors.value,
+	})
+	if (action === "decrypt") decryptBackup()
+	else if (action === "restore") restoreBackup()
+	else if (action === "continue") completeImport(importedProfile.value)
 }
 
 const handleScroll = () => {
