@@ -23,7 +23,7 @@ const hasConfig = aztecConfig !== undefined
  */
 test.skipIf(!hasConfig)(
 	"meta-getAccounts-pregrant — throws CAPABILITY_NOT_GRANTED (4100) before accounts cap granted",
-	{ timeout: 60_000, retry: 1 },
+	{ timeout: 60_000 },
 	async ({ dappConnectedExtension }) => {
 		const result = await callExpectingNoPopup(
 			dappConnectedExtension,
