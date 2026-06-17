@@ -110,6 +110,15 @@ test.skipIf(!hasConfig)(
 			const walletPopup = await openPopup(ctx)
 			await switchAccount(walletPopup, "Account") // active wallet account = owner A
 			await navigateToSettings(walletPopup, "advanced", "account-state", "authwits")
+			// "Revoke all" preselects the LOADED authwit list, but its dropdown item is
+			// gated on `authwits.length` while rendering as a <div> (no native disabled),
+			// so clickByTestId can't wait it out — clicking before the async getAuthwits
+			// resolves selects an empty set, and the revoke popup then renders no fee card
+			// (chunksCount===0). Wait for the list to render first. Registry-toggle does
+			// not read the authwit list, so it doesn't need this gate.
+			if (actionTestId === "authwits-revoke-all") {
+				await walletPopup.waitForSelector('[data-testid="authwit-card"]', { visible: true, timeout: 30_000 })
+			}
 			await clickByTestId(walletPopup, "authwits-actions-btn")
 			await clickByTestId(walletPopup, actionTestId)
 			// The popup is a Vue overlay inside the wallet page (popupStore.open),
