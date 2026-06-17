@@ -5,7 +5,7 @@
 <script setup lang="ts">
 /** Components — popup-shared passkey ceremony dialog (teleports to #popup
 	which the onboarding shell declares too). */
-import PasskeyCeremonyDialog from "@/popup/components/popups/PasskeyCeremonyDialog.vue"
+import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vue"
 
 /** Composables */
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"

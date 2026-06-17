@@ -30,7 +30,7 @@ import { onBeforeUnmount, onMounted } from "vue"
 import { PasskeyServiceClient } from "@/wallet/services/passkey/client"
 import type { PasskeyRequest } from "@/wallet/services/passkey/spec"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
-import { runPasskeyCeremony } from "@/popup/utils/passkey-ceremony"
+import { runPasskeyCeremony } from "@/wallet/utils/passkey-ceremony"
 
 const route = useRoute()
 

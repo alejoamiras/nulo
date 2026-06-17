@@ -32,7 +32,9 @@ Record the green baseline so each later gate is a true delta. Run typecheck + li
 
 **Validation gate** — Commands: `bun run typecheck && bun run lint && bun run test` (+ one `bun run test:e2e`). Pass: all green; baseline recorded. Layers: measurement only.
 
-### Phase 1 — Relocate `PasskeyCeremonyDialog` + `runPasskeyCeremony` (mechanical, lowest risk)
+### Phase 1 — Relocate `PasskeyCeremonyDialog` + `runPasskeyCeremony` (mechanical, lowest risk) ✓
+**DONE** — dialog → `src/components/passkey/`, util → `src/wallet/utils/`; 6 importers + PATH B + test mock + 3 doc-comments rewritten; "Used by" enumerations deleted. Gate: grep clean, typecheck 0, lint 0, full suite 2398 (no regression), dialog test 11/11. `LESSONS_FILE=implementations-plan/profile-flow-dedup-q2/lessons/phase-1.md`
+
 - `git mv src/popup/utils/passkey-ceremony.ts → src/wallet/utils/passkey-ceremony.ts`. **Rationale:** it imports `@/wallet/services/passkey/spec` (`PasskeyRequest`, `RP_ID`, `PASSKEY_TIMEOUT`) + `@nulo/wallet-crypto` — wallet-domain-coupled, so `src/wallet/utils/` (alongside `create-passkey-profile.ts`), NOT pure `src/utils/` (which must not depend on `wallet/services`).
 - `git mv src/popup/components/popups/PasskeyCeremonyDialog.{vue,test.ts} → src/components/passkey/`. Service-bound visual component → its own `components/` subdir per the layer model (not core/ui/composite). Covered by `vitest run src/components` (recursive).
 - Rewrite imports: dialog's util import (`@/popup/utils/passkey-ceremony` → `@/wallet/utils/passkey-ceremony`); **6** dialog consumers (`popup/pages/import.vue`, `popup/pages/auth.vue`, `popup/pages/settings/security/export/full.vue`, `popup/pages/profile/new.vue`, `onboarding/pages/create.vue`, `onboarding/pages/import.vue`) → `@/components/passkey/PasskeyCeremonyDialog.vue`; PATH B (`popup/windows/passkey/index.vue:33`) util import (the window file itself does **not** move — its path is baked into `passkey/service.ts:113` `getURL`); the dialog test's `vi.mock` target.

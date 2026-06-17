@@ -32,7 +32,7 @@ import { usePopupStore } from "@/stores/popup.store"
 import ImportFullBackupForm from "@/components/composite/import/ImportFullBackupForm.vue"
 import ImportMethodPicker from "@/components/composite/import/ImportMethodPicker.vue"
 import ImportSecretForm from "@/components/composite/import/ImportSecretForm.vue"
-import PasskeyCeremonyDialog from "@/popup/components/popups/PasskeyCeremonyDialog.vue"
+import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vue"
 
 /** Errors */
 import { UserRejectedError } from "@nulo/extension-messaging/errors"

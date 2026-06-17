@@ -7,7 +7,7 @@
 import ImportFullBackupForm from "@/components/composite/import/ImportFullBackupForm.vue"
 import ImportMethodPicker from "@/components/composite/import/ImportMethodPicker.vue"
 import ImportSecretForm from "@/components/composite/import/ImportSecretForm.vue"
-import PasskeyCeremonyDialog from "@/popup/components/popups/PasskeyCeremonyDialog.vue"
+import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vue"
 
 /** Composables */
 import { useToast } from "@/composables/toast"

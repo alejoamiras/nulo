@@ -12,7 +12,7 @@
 /** Components */
 import NewProfileCredentials from "@/popup/components/modules/settings/new-profile/NewProfileCredentials.vue"
 import NewProfileMethodTabs from "@/popup/components/modules/settings/new-profile/NewProfileMethodTabs.vue"
-import PasskeyCeremonyDialog from "@/popup/components/popups/PasskeyCeremonyDialog.vue"
+import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vue"
 
 /** Composables */
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
