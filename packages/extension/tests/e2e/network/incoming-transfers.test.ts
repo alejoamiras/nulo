@@ -138,13 +138,15 @@ test.skipIf(!hasConfig)("C2 — trust prompt re-fires after popup close + reopen
 
 	// Network id comes from the first registered network. EntityStorage
 	// keys are `${root}@${id}`; the networks repo uses `nulo:core:networks`.
-	const networkId = await seedPage.evaluate(async () => {
+	const network = await seedPage.evaluate(async () => {
 		const all = await chrome.storage.local.get(null)
-		const networkKeys = Object.keys(all).filter((k) => k.startsWith("nulo:core:networks@"))
-		if (networkKeys.length === 0) return null
-		return networkKeys[0].slice("nulo:core:networks@".length)
+		const key = Object.keys(all).find((k) => k.startsWith("nulo:core:networks@"))
+		if (!key) return null
+		const chainId = (JSON.parse(all[key] as string) as { chainId: number }).chainId
+		return { id: key.slice("nulo:core:networks@".length), chainId }
 	})
-	if (!networkId) throw new Error("could not resolve a network id")
+	if (!network) throw new Error("could not resolve a network id")
+	const networkId = network.id
 
 	const contract = `0x${"cc".repeat(32)}`
 	const siloedNullifier = `0x${"aa".repeat(32)}`
@@ -152,10 +154,24 @@ test.skipIf(!hasConfig)("C2 — trust prompt re-fires after popup close + reopen
 	// Pre-seed pending trust + hidden incoming record matching the
 	// active triple. EntityStorage stores values as JSON.stringify(entity).
 	await seedPage.evaluate(
-		async ([profileId, nid, addr, contract, siloedNullifier]) => {
+		async ([profileId, nid, chainId, addr, contract, siloedNullifier]) => {
 			const trustKey = `nulo:core:incoming-trust@${profileId}|${nid}|${contract}`
 			const recordKey = `nulo:core:incoming-transfers@${siloedNullifier}`
+			// `replayPendingPrompts` skips a pending row whose contract has no
+			// matching token registration (service.ts: `tokens.find` by contract +
+			// chainId). Seed the token so the replay actually fires the prompt —
+			// without this the first prompt never opens and the regression is moot.
+			const tokenKey = "nulo:core:tokens@1"
 			await chrome.storage.local.set({
+				[tokenKey]: JSON.stringify({
+					id: 1,
+					profileId,
+					chainId: Number(chainId),
+					contract,
+					name: "C2 Token",
+					symbol: "C2",
+					decimals: 18,
+				}),
 				[trustKey]: JSON.stringify({
 					profileId,
 					networkId: nid,
@@ -182,7 +198,7 @@ test.skipIf(!hasConfig)("C2 — trust prompt re-fires after popup close + reopen
 				}),
 			})
 		},
-		[triple.profileId, networkId, triple.account, contract, siloedNullifier] as const,
+		[triple.profileId, networkId, network.chainId, triple.account, contract, siloedNullifier] as const,
 	)
 	await seedPage.close()
 
