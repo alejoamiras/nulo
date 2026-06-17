@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — profile-flow-dedup (Q2)</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; }
+    th { background: #f6f6f6; }
+  </style>
+</head>
+<body>
+  <h1>Q2 — Profile-flow dedup + passkey-UI relocation</h1>
+  <p>Two screens create and import wallet profiles: the small toolbar <strong>popup</strong> and the full-tab <strong>onboarding</strong> page. They do almost the same work with copy-pasted code. A month ago the low-level helpers (name field, passkey ceremony, backup import) were already shared — what's left is the <em>glue</em> that strings them together, still duplicated. This plan pulls that glue into two shared composables (<code>useProfileImportFlow</code>, <code>useProfileCreateFlow</code>) and moves the shared passkey dialog out of the "popup-only" folder into a neutral home both screens can use. It changes <strong>no behavior</strong> except two small, deliberately-chosen fixes.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>Deep.</strong> Rubric: 2 dimensions are HIGH — <em>blast radius</em> (onboarding/import is the wallet's fund-access critical path; a broken import locks users out of their funds) and <em>security sensitivity</em> (passkey/WebAuthn ceremony + raw secret material in memory). Two HIGH → deep regardless of it being one package. The plan went through 3 independent drafts (me + a Claude planner + Codex), a consolidation, a contradiction-check, a fresh hostile audit, and a final Codex pass. <span class="muted">(Note: Fable 5 was unavailable, so the second planner + one audit slot used a Claude <code>Plan</code> subagent instead — cross-family rigor preserved via Codex.)</span></p>
+
+  <h2>The one big design decision</h2>
+  <p>The two screens "wake up" a freshly created/imported profile <em>differently</em>: the popup waits for a background service-worker signal to do the heavy setup; onboarding has no such signal so it does the setup itself. These aren't cosmetic differences — they're different sequences. So the shared composable owns everything <em>up to</em> activation, and each screen plugs in its own "finish" step (<code>onComplete(profile)</code>). This reuses a pattern the codebase already has, and it makes the first quirk-fix disappear for free.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 0: Snapshot the baseline</h3>
+    <p>Record "everything is green" before touching anything, so any later breakage is obvious.</p>
+    <p class="muted">Proves itself by: typecheck + lint + the full test suite + one smoke run all pass; numbers written down.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 1: Relocate the shared passkey dialog + helper</h3>
+    <p>Move the passkey dialog and its WebAuthn helper from the popup-only folder to shared folders, and repoint all 6+2 importers (+ fix 3 stale doc comments). Pure move, no behavior change. The dialog's careful cancel/abort logic is untouched.</p>
+    <p class="muted">Proves itself by: typecheck + lint + tests green; the dialog's own test still passes; zero files point at the old paths.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: Extract <code>useProfileImportFlow</code> (+ Quirk 1)</h3>
+    <p>Pull the duplicated "import a profile" logic into one shared composable; each screen plugs in its own finish/error-surface steps. Removes onboarding's redundant double-setup (Quirk 1) — it simply vanishes once the logic is shared.</p>
+    <p class="muted">Proves itself by: a new ≥10-case test (incl. a "setup runs exactly once" check) + both import screens compile + all prior tests green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: Extract <code>useProfileCreateFlow</code> (+ Quirk 2)</h3>
+    <p>Same for the "create a profile" screens. Fixes the popup's Enter key so it submits from text fields, not from method-tab buttons (Quirk 2) — matching the rest of the app. Onboarding's create screen (which has its own form) is left exactly as-is.</p>
+    <p class="muted">Proves itself by: a new ≥10-case test (incl. the precise Enter-key behavior, asserted by event target) + both create screens compile + green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: End-to-end smoke + final sweep</h3>
+    <p>Run the full build and the browser smoke tests to prove the real import + create journeys still work end-to-end in both screens. Update the plan index + a docs note.</p>
+    <p class="muted">Proves itself by: full <code>audit:vue</code> + smoke e2e green; no orphaned old paths; no testid changed.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>"Composable" = a reusable bundle of Vue logic (like a custom hook). "Quirk fix" = a small pre-existing bug we're allowed to fix while we're in here. Everything else is preserved exactly. One small, clearly-correct cleanup rides along (your call): the popup's broken <code>[object Object]</code> error message gets the real message, and the failure-notification wording is made consistent across both screens — this is actually <em>simpler</em> than preserving two different versions. The riskiest single step is the most boring one: when the passkey dialog moves, its test's mock must be repointed or the test would silently call real WebAuthn and hang.</p>
+
+  <h2>Ratification items (resolved with safe defaults — veto any at approval)</h2>
+  <table>
+    <tr><th>Item</th><th>Default</th></tr>
+    <tr><td><strong>A1</strong> — popup's <code>[object Object]</code> error + per-screen notification casing</td><td><strong>Fixed inline (your call).</strong> Unify the error shape + notification wording across both screens — actually simpler than preserving two versions.</td></tr>
+    <tr><td><strong>A2</strong> — new homes for the moved files</td><td><code>src/components/passkey/</code> (dialog) + <code>src/wallet/utils/</code> (helper).</td></tr>
+    <tr><td><strong>A4</strong> — Quirk 2 side-effect: popup Enter no longer submits from a focused method-tab button</td><td>Accept (it's the house-standard guard; more correct). Veto → drop Quirk 2 entirely (the latch already absorbs the double-fire).</td></tr>
+  </table>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm <strong>scope</strong> (full Q2: both composables + relocation) and <strong>tier</strong> (deep).</li>
+      <li>Confirm the <strong>validation plan</strong>: typecheck + lint + full unit tests gate every phase; smoke e2e once at the end; no network e2e.</li>
+      <li>Ratify or veto <strong>A1 / A2 / A4</strong> above.</li>
+      <li><strong>Hardening:</strong> no <code>/harden</code> pass scheduled (behavior-preserving refactor; the post-impl Codex audit covers the credential surface). Say so if you want one.</li>
+      <li><strong>Approve</strong>, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (final — approved)</h2>
+    <p><code>/goal</code> survives <code>claude --resume</code> and runs turn-after-turn until a condition holds; <code>/loop</code> re-fires on an interval. Q2's completion is transcript-observable (phases ✓ in plan.md, gates reported green), so <strong>/goal is recommended</strong>.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose; setting one replaces the other. Start the session in the permission mode you intend so the run isn't blocked on a prompt.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <pre><code>/goal All 4 phases marked ✓ in implementations-plan/profile-flow-dedup-q2/plan.md (the per-phase headers in the file, not just chat), each ✓ backed by its phase's validation gate reported passing in the transcript; for each phase the agent printed LESSONS_FILE=implementations-plan/profile-flow-dedup-q2/lessons/phase-N.md; `/code-review max --fix` complete with findings applied and committed separately; codex post-impl audit (xhigh, adversarial/security) complete with high/critical findings addressed; from packages/extension `bun run typecheck && bun run lint && bun run test` all report exit 0 and `bun run test:e2e` smoke is green, all shown in the transcript.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop</h3>
+    <pre><code>/loop 15m Drive implementations-plan/profile-flow-dedup-q2 forward. Never idle waiting for input. Each firing: (1) read plan.md + lessons/ (authoritative state), run `git status` and `git log --oneline -5`; if a PR exists, `gh pr view --json statusCheckRollup`. (2) CI in flight? Confirm it's progressing; use the wait to review the diff / prep the next phase. (3) No task in hand? Take the next pending phase from plan.md; after each meaningful edit run `bun run typecheck && bun run lint && bun run test` from packages/extension for the touched code; commit → push. (4) Stuck or facing a decision you'd bring to me? Call `/codex xhigh` with full context, reach a defensible call, log it in lessons/phase-N.md. Hard limits stay hard: never merge to main/release, never publish, never expand scope past plan.md. (5) Same step failed 5×? Stop, reassess with codex. (6) Phase green = its plan.md validation gate passes (commands + criteria, not vibes): paste the result, mark ✓ in plan.md, file the lessons entry, print LESSONS_FILE=implementations-plan/profile-flow-dedup-q2/lessons/phase-N.md, advance. (7) All phases ✓? Run `/code-review max --fix` → commit separately → codex xhigh post-impl audit (adversarial/security) → address high/critical → run `bun run test:e2e` smoke → write the wrap-up (what shipped, every codex decision with ELI5 context, open items) → surface and stop. Keep the ASCII checklist visible each firing.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a> · <a href="draft-main.md">draft-main</a> · <a href="draft-codex.md">draft-codex</a> · <a href="draft-claude.md">draft-claude</a></p>
+</body>
+</html>
