@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — proverless-e2e-fix</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.4rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.3rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>proverless-e2e-fix</h1>
+  <p>The diagnosis found <strong>one</strong> reason our three flaky tests fail: a background helper thread gets <em>drowned in log-messages</em> from a separate component catching up on the blockchain, so transactions stall in a waiting room. This plan <strong>stops the flood</strong> — batch those log-messages so the thread stays free — plus adds a "smoke alarm" so a future stall fails fast instead of freezing for 5 minutes, proves it with repeated cloud runs, and makes the suite a required check.</p>
+
+  <h2>Why this tier (mid) — and why it changed shape</h2>
+  <p>It's a contained change touching one shared path (logging transport) — 1 high-ish risk dimension → <code>mid</code>. <strong>The first version was rejected by both auditors:</strong> a "test-only" fix turned out unbuildable (the signal it needed isn't readable from tests and didn't even track the real problem). So — with your OK — v2 makes a <em>minimal production change</em> at the real source. That also helps real users, not just the tests.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 0: Prove the flood is really the cause (before building anything)</h3>
+    <p>Measure the log-message flood, and check the make-or-break question: if we batch it, does the stall actually go away? <strong>If batching the logs doesn't help, we stop — we'd be wrong.</strong> Also design the batching (how often to flush, never lose error logs).</p>
+    <p class="muted">Proves itself by: a measurement showing the flood drops AND an early sign the stall eases (the built-in falsifier).</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 1: Batch the log-messages (the actual fix)</h3>
+    <p>Buffer the background helper's log-messages and ship them in bundles instead of one-at-a-time, so the thread isn't drowned. Same content; errors/warnings still sent instantly; the receiving side processes a whole bundle in one go.</p>
+    <p class="muted">Proves itself by: unit tests for the batcher (bundles, flushes, never loses errors) + lint + typecheck, all green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: Add a smoke alarm (so a future stall can't hide)</h3>
+    <p>A watchdog: if a transaction ever stalls again, the test fails in <em>seconds</em> with a snapshot of what happened — instead of a 5-minute freeze. Carefully scoped so it never false-alarms on the legitimately-slow real-proving test.</p>
+    <p class="muted">Proves itself by: a forced-stall test fails fast with the snapshot; a normal run and a slow-proving run are NOT false-failed.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: Run it locally a few times</h3>
+    <p>Confirm the three tests pass and nothing regressed, on the real build.</p>
+    <p class="muted">Proves itself by: 3 clean local runs of each test (retries off) + a clean full build.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: Prove it in the cloud (the real test)</h3>
+    <p>A soak: run each fixed test 20×, repeat the historically-failing shards, and run the whole suite 3× — all with retries OFF. All green = genuinely fixed.</p>
+    <p class="muted">Proves itself by: the soak coming back all-green at zero retries.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5: Make the suite a required gate</h3>
+    <p>Change the suite to run on every <em>code</em> PR (not just ones touching a hand-listed set of files, which a sneaky change could dodge), skipping only doc-only PRs. Then — after we watch the CI cost for a bit — flip it to a required check (that switch is yours to pull).</p>
+    <p class="muted">Proves itself by: the workflow change passes lint + a dry-run (doc-only PR skips, a code PR runs); the required-flip is a written runbook for you.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>Picture a receptionist (one background thread) who must do a quick check-in for your transaction, but a back-office clerk (the blockchain sync) keeps shouting an update for every page they process — so the receptionist never gets to you, and you sit in the waiting room. <strong>The fix: stop the clerk from shouting every single page — bundle it.</strong> Then the receptionist is free, your transaction starts, and the test passes. The earlier idea ("just make the test wait for the clerk to finish") couldn't be built without reading something the tests can't see — so we fix the actual noise instead.</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li>None blocking — your four earlier calls (minimal production OK, soak bar, watchdog yes, fix+flip) are locked in. Phase 0's falsifier is a built-in checkpoint: if batching doesn't ease the stall, the plan stops itself rather than building on a wrong premise.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: minimal <strong>production</strong> log-batching + test watchdog + CI gate changes (no transaction-logic changes).</li>
+      <li>Confirm tier: <code>mid</code>.</li>
+      <li>Confirm validation: unit (batcher) · local agent.sh · CI soak (20× isolated + shard repeats + full 3×, retry=0) · the soak is the acceptance gate.</li>
+      <li>Note: the required-check flip stays <strong>user-gated</strong> and data-gated (we watch CI cost first).</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>One drives the autonomous session. <code>/goal</code> works until a condition holds and survives <code>--resume</code>; <code>/loop</code> re-fires on an interval. Every phase here ends in a committed artifact / a soak result, so <code>/goal</code> is recommended.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose.</p>
+    <div class="phase recommended">
+      <h3>Recommended: /goal</h3>
+      <pre><code>/goal All phases 0-5 marked ✓ in implementations-plan/proverless-e2e-fix/plan.md (the per-phase headers), each ✓ backed by its phase's Validation gate reported passing in the transcript; for each phase the agent printed LESSONS_FILE=implementations-plan/proverless-e2e-fix/lessons/phase-N.md; the Phase-0 FALSIFIER passed (batching measurably reduces the F3 stall — else STOP and surface); the Phase-4 soak is all-green at retry=0 (F1/F2/F3 20× isolated + shards 1/3/5 repeated + full-matrix 3×); /code-review max --fix complete with findings applied + committed; codex post-impl audit complete with high/critical addressed; bun run audit:vue reports exit 0. STOP before merging to dev and before flipping Network e2e to required — both user-gated.</code></pre>
+    </div>
+    <h3>Alternative: /loop</h3>
+    <pre><code>/loop 20m Drive implementations-plan/proverless-e2e-fix forward. Never idle. Each firing: read plan.md + lessons/ + git status; in-flight CI soak? gh run view (no --watch), use the wait to prep the next phase; no task? take the next pending phase step exactly as written (Phase-0 falsifier FIRST — if batching doesn't ease the stall, STOP); decision/fork? /codex xhigh + log it; phase gate green? mark ✓, file lessons, print LESSONS_FILE=..., advance; same step 5× failing? stop+reassess. HARD LIMITS: never merge to dev, never flip the required check — surface + stop. All phases ✓? /code-review max --fix → codex post-impl → wrap-up ELI5'd + STOP.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="audit-codex.md">codex audits (v1 reject + v2 conditional)</a> · <a href="audit-fable.md">planner audit (v1)</a> · <a href="../proverless-e2e-diagnosis/DIAGNOSIS.md">the diagnosis</a> · <a href="./lessons/">lessons</a></p>
+</body>
+</html>
