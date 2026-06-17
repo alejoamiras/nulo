@@ -78,6 +78,41 @@ async function swEvaluate<A extends unknown[], R>(page: Page, fn: (...a: A) => R
 }
 
 /**
+ * Evaluate in ANY live extension context that exposes `chrome.storage`, preferring
+ * a real extension PAGE over the MV3 service-worker handle. The journal
+ * (`chrome.storage.local`) and the SW log trail (`chrome.storage.session`) are
+ * shared across trusted extension contexts (popup/onboarding/SW), so a live page
+ * sees the same data the SW wrote. This is robust where {@link swEvaluate} is NOT:
+ * at a stall the service worker may be suspended/replaced, and `worker.evaluate`
+ * then runs in a context where `chrome.storage` is UNBOUND — observed in CI as
+ * "Cannot read properties of undefined (reading 'local'/'session')", which silently
+ * emptied every prior deep-dump. Order: passed page (if an ext ctx — F3 passes the
+ * popup) -> any other ext-page target -> SW worker (last resort; its own failure is
+ * a service-worker-liveness signal, surfaced separately by the sw-liveness probe).
+ */
+async function extCtxEvaluate<A extends unknown[], R>(page: Page, fn: (...a: A) => R | Promise<R>, ...args: A): Promise<R | string> {
+	const isExtCtx = (p: Page): Promise<boolean> =>
+		p.evaluate(() => typeof chrome !== "undefined" && typeof chrome.storage?.local !== "undefined").catch(() => false)
+	if (await isExtCtx(page)) {
+		try {
+			return await page.evaluate(fn, ...args)
+		} catch {
+			// Passed page is an ext ctx but the read threw — fall through to siblings.
+		}
+	}
+	for (const t of page.browser().targets()) {
+		if (t.type() !== "page" || !t.url().includes("chrome-extension://")) continue
+		try {
+			const p = await t.page()
+			if (p && (await isExtCtx(p))) return await p.evaluate(fn, ...args)
+		} catch {
+			// Try the next extension page.
+		}
+	}
+	return swEvaluate(page, fn, ...args)
+}
+
+/**
  * Full `dapp_execute` records (every field), trimmed only by JSON. The lean
  * `{id,stage,sessionId}` view hides the claim metadata the F3 queued-stall
  * diagnosis needs — `queuedJournalId`, stage timestamps, any `error`. Read from
@@ -85,7 +120,7 @@ async function swEvaluate<A extends unknown[], R>(page: Page, fn: (...a: A) => R
  * callers (F1/F2) too. Allowlisted to `dapp_execute` (NOT a `get(null)` dump).
  */
 export async function readDappExecuteRecordsFull(page: Page): Promise<unknown[] | string> {
-	return swEvaluate(page, async () => {
+	return extCtxEvaluate(page, async () => {
 		const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
 		const out: unknown[] = []
 		for (const [k, raw] of Object.entries(all)) {
@@ -139,7 +174,7 @@ export async function readDappExecuteRecordsFull(page: Page): Promise<unknown[] 
  */
 export async function readSwLogTrail(page: Page, opts: { limit?: number; match?: string } = {}): Promise<unknown[] | string> {
 	const { limit = 50, match = "" } = opts
-	return swEvaluate(
+	return extCtxEvaluate(
 		page,
 		async (lim: number, m: string) => {
 			const res = (await chrome.storage.session.get("nulo:logs")) as Record<string, unknown>
@@ -236,8 +271,23 @@ export async function dumpDeepDiagnostics(page: Page, label: string): Promise<vo
 			"sw-log trail",
 		),
 	])
+	// Probe the SERVICE-WORKER context directly (not via extCtxEvaluate's page
+	// fallback): if `chrome.storage` is unbound here while the page-based reads above
+	// SUCCEEDED, the MV3 SW was suspended/replaced at stall time — the direct signal
+	// for the "execution-start handoff lost its SW" hypothesis. All-defined = SW alive.
+	const swLive = await withTimeout(
+		swEvaluate(page, () => ({
+			chrome: typeof chrome,
+			storage: typeof chrome?.storage,
+			local: typeof chrome?.storage?.local,
+			session: typeof chrome?.storage?.session,
+		})).catch((e) => `<sw-liveness probe failed: ${e instanceof Error ? e.message : String(e)}>`),
+		5_000,
+		"sw-liveness",
+	)
 	console.error(`[diag-deep] ${label} full dapp_execute: ${typeof full === "string" ? full : JSON.stringify(full)}`)
 	console.error(`[diag-deep] ${label} sw-log trail: ${typeof trail === "string" ? trail : JSON.stringify(trail)}`)
+	console.error(`[diag-deep] ${label} sw-liveness: ${typeof swLive === "string" ? swLive : JSON.stringify(swLive)}`)
 	console.error(`[diag-deep] ${label} targets: ${JSON.stringify(captureTargetInventory(page))}`)
 	console.error(`[diag-deep] ${label} resources:\n${captureResourceSnapshot()}`)
 }
