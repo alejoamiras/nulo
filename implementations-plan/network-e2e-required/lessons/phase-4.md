@@ -71,3 +71,18 @@ yet node/PXE-visible reads `approved_actions=0` → `syncAuthwit` deletes it
 directly (the only context that KNOWS they're gone). **Capture re-armed
 (afc4e32) + 3× soak running to confirm storage-empty (bucket B) vs page-issue
 before implementing.**
+
+### Bug 3 RESOLVED — it was a TEST account-targeting bug, NOT bucket B
+The capture (run 27720888158) REFUTED bucket B: at the revoke step the storage
+had BOTH authwits present under ownerA `0x15bb`, but the page showed
+`emptyState:true` / revoke-all `aria-disabled:true`. The accounts dump:
+`0x22ec`="Account"(chainId 0), `0x15bb`="Second"(chainId 0), `0x11d1`="Account"
+(chainId 4138294185). The granter ownerA=accountAddresses[0]=`0x15bb` is named
+"Second" this run, but `settingsAction` hardcoded `switchAccount("Account")` →
+viewed the wrong account → `getAuthwits` returned [] → empty page. The dApp
+exposure order (accountAddresses) ≠ wallet creation/naming order, so ownerA's
+NAME varies per run (Phase-3 it was "Account" → matched; this run "Second" →
+mismatch). FIX: `switchAccountByAddress(walletPopup, ownerA)` (+ data-account-address
+on the AccountsPopup item). My app fixes (slot swap + PXE barrier) were correct
+and necessary — they removed the consume-race mode that previously masked this
+test bug. Validation: re-soak 27721713670 (10/10).
