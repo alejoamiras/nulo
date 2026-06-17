@@ -91,29 +91,48 @@ export async function navigateToSettings(page: Page, ...segments: string[]): Pro
 		// segments: fall back to the SettingItem's `to` prop since child
 		// pages don't yet have a consistent testid naming convention.
 		const testidSelector = `[data-testid="setting-nav-${pathSoFar.join("-")}"]`
-		const clicked = await page.evaluate(
-			({ id, hash }: { id: string; hash: string }) => {
-				const byTestId = document.querySelector<HTMLElement>(id)
-				if (byTestId) {
-					byTestId.click()
-					return "testid"
-				}
-				const a = [...document.querySelectorAll("a")].find(
-					(el) => el.getAttribute("href") === hash || el.getAttribute("to") === hash.slice(1),
-				)
-				if (a) {
-					a.click()
-					return "href"
-				}
-				// Final fallback: router-link renders `<a>` with no href, but Vue Router
-				// listens on 'to'. Dispatch a synthetic click on the element whose
-				// textContent matches our segment title — this is the weakest path.
-				return null
-			},
-			{ id: testidSelector, hash: href },
-		)
+		// Poll for the nav target to RENDER, then click it. The destination route
+		// component mounts asynchronously AFTER the hash changes, so finding the
+		// next segment's link immediately (the prior `waitForFunction` only
+		// confirmed the hash, not the DOM) races the mount — and on a slow CI box
+		// that race is reliably lost: the page is still blank, the link absent.
+		// `waitForFunction` retries the find+click until the element exists; the
+		// click is the side effect that resolves it.
+		const clicked = await page
+			.waitForFunction(
+				({ id, hash }: { id: string; hash: string }) => {
+					const byTestId = document.querySelector<HTMLElement>(id)
+					if (byTestId) {
+						byTestId.click()
+						return "testid"
+					}
+					const a = [...document.querySelectorAll("a")].find(
+						(el) => el.getAttribute("href") === hash || el.getAttribute("to") === hash.slice(1),
+					)
+					if (a) {
+						a.click()
+						return "href"
+					}
+					return null
+				},
+				{ timeout: 10_000, polling: 200 },
+				{ id: testidSelector, hash: href },
+			)
+			.then((h) => h.jsonValue())
+			.catch(() => null)
 
 		if (!clicked) {
+			// Should be rare now that we wait for render. If it still fails, show
+			// what the page actually held so a regression (stale path vs genuinely
+			// absent target) is diagnosable instead of a bare throw.
+			const diag = await page
+				.evaluate(() => ({
+					hash: window.location.hash,
+					navTestids: [...document.querySelectorAll('[data-testid^="setting-nav"]')].map((e) => e.getAttribute("data-testid")),
+					anchors: [...document.querySelectorAll("a")].map((a) => a.getAttribute("href") || a.getAttribute("to")).filter(Boolean),
+				}))
+				.catch(() => "nav diag read failed")
+			console.error(`[nav-diag] navigateToSettings FAIL for ${href} (want ${testidSelector}): ${JSON.stringify(diag)}`)
 			throw new Error(`navigateToSettings: no setting nav target for ${href} (expected testid ${testidSelector})`)
 		}
 
