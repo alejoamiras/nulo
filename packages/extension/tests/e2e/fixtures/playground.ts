@@ -11,6 +11,7 @@
 import type { Page } from "puppeteer"
 import { inject } from "vitest"
 import { clickByTestId, patchPagePolling, replaceInputValue, type ExtensionContext } from "./extension"
+import { dumpDeepDiagnostics } from "./journal"
 
 export const PLAYGROUND_TEST_URL = (() => {
 	try {
@@ -65,27 +66,46 @@ export type PgResult = { seq: number; method: string; status: "ok" | "error"; re
  * with the same method. Returns the parsed JSON result/error.
  */
 export async function waitForPgResult(page: Page, method: string, fromSeq: number, timeout = 30_000): Promise<PgResult> {
-	const handle = await page.waitForFunction(
-		(m: string, after: number) => {
-			const rows = [...document.querySelectorAll<HTMLElement>(`[data-testid="pg-result"][data-method="${m}"]`)]
-			for (const r of rows) {
-				const seq = Number(r.getAttribute("data-result-seq") ?? "0")
-				const status = r.getAttribute("data-status") ?? ""
-				if (seq > after && (status === "ok" || status === "error")) {
-					return {
-						seq,
-						method: m,
-						status,
-						resultJson: r.getAttribute("data-result-json") ?? "",
+	const handle = await page
+		.waitForFunction(
+			(m: string, after: number) => {
+				const rows = [...document.querySelectorAll<HTMLElement>(`[data-testid="pg-result"][data-method="${m}"]`)]
+				for (const r of rows) {
+					const seq = Number(r.getAttribute("data-result-seq") ?? "0")
+					const status = r.getAttribute("data-status") ?? ""
+					if (seq > after && (status === "ok" || status === "error")) {
+						return {
+							seq,
+							method: m,
+							status,
+							resultJson: r.getAttribute("data-result-json") ?? "",
+						}
 					}
 				}
-			}
-			return null
-		},
-		{ timeout, polling: 200 },
-		method,
-		fromSeq,
-	)
+				return null
+			},
+			{ timeout, polling: 200 },
+			method,
+			fromSeq,
+		)
+		.catch(async (err) => {
+			// DIAGNOSTIC (throwaway soak): the dApp result never settled. Capture the
+			// playground rows present + the journal/SW trail so a settle-timeout shows
+			// WHETHER the reject/exec terminalized the journal but never reached the
+			// dApp promise, vs never terminalized at all.
+			const rows = await page
+				.evaluate(() =>
+					[...document.querySelectorAll('[data-testid="pg-result"]')].map((r) => ({
+						seq: r.getAttribute("data-result-seq"),
+						method: r.getAttribute("data-method"),
+						status: r.getAttribute("data-status"),
+					})),
+				)
+				.catch(() => "pg rows read failed")
+			console.error(`[pg-diag] waitForPgResult(${method}, after ${fromSeq}) TIMEOUT — pg rows: ${JSON.stringify(rows)}`)
+			await dumpDeepDiagnostics(page, `waitForPgResult(${method})`)
+			throw err
+		})
 	const raw = (await handle.jsonValue()) as { seq: number; method: string; status: "ok" | "error"; resultJson: string }
 	const parsed: PgResult = {
 		seq: raw.seq,

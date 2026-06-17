@@ -114,6 +114,20 @@ export async function navigateToSettings(page: Page, ...segments: string[]): Pro
 		)
 
 		if (!clicked) {
+			// DIAGNOSTIC (throwaway soak): show whether the page under-rendered (the
+			// expected nav target absent = render race) or the testid/href is wrong —
+			// dump current hash + all setting-nav testids + anchors actually present.
+			const diag = await page
+				.evaluate(() => ({
+					hash: window.location.hash,
+					navTestids: [...document.querySelectorAll('[data-testid^="setting-nav"]')].map((e) => e.getAttribute("data-testid")),
+					anchors: [...document.querySelectorAll("a")]
+						.map((a) => a.getAttribute("href") || a.getAttribute("to"))
+						.filter(Boolean)
+						.slice(0, 40),
+				}))
+				.catch(() => "nav diag read failed")
+			console.error(`[nav-diag] navigateToSettings FAIL for ${href} (want ${testidSelector}): ${JSON.stringify(diag)}`)
 			throw new Error(`navigateToSettings: no setting nav target for ${href} (expected testid ${testidSelector})`)
 		}
 
