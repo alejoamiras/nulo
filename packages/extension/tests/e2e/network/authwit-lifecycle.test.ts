@@ -5,6 +5,12 @@ import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, pickFeeAndSubmitAuthwitPopup, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 import { dumpAuthwitMeasurement } from "../fixtures/journal"
+/** DIAGNOSTIC (codex #7) imports — remove with the [revoke-slot-check] block once F1 is green. */
+import { createAztecNodeClient } from "@aztec/aztec.js/node"
+import { Fr } from "@aztec/foundation/curves/bn254"
+import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { deriveStorageSlotInMap } from "@aztec/stdlib/hash"
+import { getAuthRegistryAddress } from "@/wallet/utils/auth-registry"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
@@ -152,8 +158,28 @@ test.skipIf(!hasConfig)(
 		// ── Step 2: G2 grant → revoke (as A) → consume FAILS (never consumed) ──
 		step("G2 grant")
 		await grant("2")
+		// DIAGNOSTIC (codex #7): capture the stored authwit hashes BEFORE revoke (the
+		// rows may be pruned after), to read their on-chain approved_actions slots after.
+		const diagPopup = await openPopup(ctx)
+		const storedHashes = await diagPopup.evaluate(async () => {
+			const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
+			return Object.entries(all)
+				.filter(([k]) => k.startsWith("nulo:core:auth-registry@"))
+				.map(([, v]) => JSON.parse(v as string) as { account: string; hash: string })
+				.map((a) => ({ account: a.account, hash: a.hash }))
+		})
+		await diagPopup.close()
 		step("revoke all of A's authwits via settings")
 		await settingsAction("authwits-revoke-all", "revoke-authwits-submit")
+		// DIAGNOSTIC (codex #7): is the consumed slot actually cleared after revoke?
+		const diagNode = createAztecNodeClient(aztecConfig!.nodeUrl)
+		const provenBlock = (await diagNode.getL2Tips()).proven.block.number
+		for (const { account, hash } of storedHashes) {
+			const outer = await deriveStorageSlotInMap(new Fr(2n), AztecAddress.fromString(account))
+			const slot = await deriveStorageSlotInMap(outer, Fr.fromString(hash))
+			const word = await diagNode.getPublicStorageAt(provenBlock, getAuthRegistryAddress(), slot)
+			console.log(`[revoke-slot-check] account=${account} hash=${hash} approved=${word.toString()} proven=${provenBlock}`)
+		}
 		step("G2 consume (expect error — revoked)")
 		expect(await consume("2")).toBe("error")
 
