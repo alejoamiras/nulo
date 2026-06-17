@@ -1,51 +1,56 @@
-# Phase 3 — Measure F1 (capture-first, NO fix)
+# Phase 3 — Measure F1 (capture-first) — ROOT CAUSE FOUND + VERIFIED
 
-**Status: DRAFT — awaiting measure-soak confirmation before classifying + advancing to Phase 4.**
+**Status: DONE.** Root cause classified + independently verified. (Fix = Phase 4.)
 
-F1 = `authwit-lifecycle.test.ts` fails at the revoke step: `settingsAction` clicks
-`authwits-revoke-all`, which is `:disabled="!authwits.length"` (authwits view
-`index.vue:140`). If the page's authwit list loads empty, the button stays
-disabled, `clickByTestId` (which waits out `aria-disabled`) times out → fail.
+## The measurement overturned the plan's premise
+The plan assumed F1 = "authwits page empty at revoke" (buckets A/B/C/D). The
+capture (`dumpAuthwitMeasurement`, test-side) REFUTES that. iter-1 `[authwit-measure]`
+at the revoke step (all 3 soak iterations failed identically, run 27716251879):
+- `nulo:core:auth-registry@1`+`@2`: TWO authwit rows present, both
+  `account: 0x16a6…263e`, with the granted hashes. **Page not empty.**
+- `nulo:core:accounts`: the active "Account" is `0x16a6…263e` with **chainId 0**,
+  which is the LEGITIMATE Local Network chainId (`network/service.ts:91`; the
+  playground passes Fr.ZERO = chainId 0). So the read key (active account) MATCHES
+  the write key — **bucket A refuted.** (The `0x0f78…cc86` chainId-4138294185
+  "Account" is a different-network account — a red herring.)
+- DOM: cards present, revoke-all clickable, `settingsAction` COMPLETED.
+- Failure is the NEXT step: `G2 consume` returns `'ok'`, test expects `'error'`
+  → `AssertionError: expected 'ok' to be 'error'`. **A revoked public authwit is
+  still consumable** — a real security bug.
 
-## Capture (shipped: dc778b3)
-Test-side `dumpAuthwitMeasurement(page, label)` in `tests/e2e/fixtures/journal.ts`
-(reuses `extCtxEvaluate`), wired into `authwit-lifecycle.test.ts` `settingsAction`
-right after the actions-btn click, before the action click. Dumps under
-`[authwit-measure]`:
-- stored `nulo:core:auth-registry` rows (write-side `account` keys + hashes),
-- stored `nulo:core:accounts` rows (read-side queried address),
-- page render state (FETCHING / NO AUTHWITS YET / error / cards) + revoke-all
-  `aria-disabled`.
-Test-side ⇒ never ships in a build (obviates the plan's app-side probe + the
-bundle-grep concern entirely).
+## Root cause (verified) — swapped storage-slot constants
+`src/wallet/utils/auth-registry.ts` had the two AuthRegistry storage-slot
+constants SWAPPED:
+- was `APPROVED_ACTIONS_SLOT = 1`, `REJECT_ALL_SLOT = 2`.
+- **Upstream `AuthRegistry` `#[storage]` declares `reject_all` FIRST (slot 1) then
+  `approved_actions` SECOND (slot 2)** — verified directly from the contract source
+  embedded in `node_modules/@aztec/noir-contracts.js/artifacts/auth_registry_contract-AuthRegistry.json`
+  `file_map` (`reject_all: Map<…>` then `approved_actions: Map<Field, …>`).
 
-Measure soak: `network-e2e-soak.yml` `mode=files authwit-lifecycle repeats=3
-retry=0 proverless` (run 27716251879). Expected RED (F1 unfixed) — the VALUE is
-the `[authwit-measure]` logs, not a pass.
+Mechanism: `isAuthwitConsumable` derived its slot from the WRONG constant → read
+a meaningless slot → effectively always returned not-consumable. So
+`revokeAuthwits`'s `waitForOnChainState(() => every authwit not consumable)` check
+passed on the FIRST poll (the slot read never reflected reality) and returned
+immediately — before the revoke tx mined. `waitForTx` only confirms *submitted*,
+so the fast (proverless) follow-up consume raced the not-yet-mined revoke →
+consume succeeded. (`waitForOnChainState` also silently proceed-on-timeout —
+a latent compounding bug.) `isAuthRegistryEnabled` read the wrong slot too.
 
-## Static analysis (the comparison the capture targets)
-- **Write key** — `tx-request-builder.ts:204`: `trackAuthwit(account.address.toString(), …)`
-  ⇒ stored `auth-registry` row `.account` = `AztecAddress.toString()`.
-- **Read key** — authwits view `index.vue:47`: `getAuthwits(appStore.account.address)`;
-  `appStore.account` is `Account` and `Account.address` is a **string**
-  (`account/spec.ts:15`).
-- `getAuthwits` filters `x.account === account` (string `===`, `service.ts:90`).
-- **Bucket A is plausible IFF** the `Account.address` string differs in format
-  from `AztecAddress.toString()`. The capture dumps BOTH strings side-by-side, so
-  the soak log resolves this decisively. (Static analysis alone can't — exactly
-  why the plan mandates measure-before-fix.)
+## Codex consult (fork — authorized by the loop)
+Session `019ed742-544e-7372-ab68-f99420f0ba0e` (`/var/folders/.../codex-KtoU4X3e`).
+Verdict: the slot swap is THE bug (NOT a hash mismatch, NOT page-empty);
+`set_authorized(hash,false)` IS the correct public-authwit revoke; the chainId-0
+measurement is a red herring; this is a wallet bug (the consume doesn't re-grant);
+and `waitForOnChainState` should throw, not silently proceed. I INDEPENDENTLY
+verified the slot order against the artifact source before acting (codex is
+advisory). My own prior hash-divergence hypothesis was WRONG — codex caught it.
 
-## Buckets (to select from the soak log)
-- **A** — auth-registry rows present, but their `.account` ≠ the accounts row's
-  `address` (format mismatch). Fix (Phase 4): canonicalize the key in the service
-  (`AztecAddress.fromString().toString()` both sides). Lowest blast radius.
-- **B** — rows absent AFTER a successful grant (synced-deleted by `syncAuthwit`
-  on not-yet-consumable). Fix: gate deletion on a positive "gone" signal.
-- **C** — never persisted (no rows ever). Fix: the write path.
-- **D** — rows present AND `.account` === queried address, but page still empty
-  (render/bootstrap race). Fix: page-side account watch / explicit first refresh.
+## Fix (Phase 4, this branch)
+1. Swap the constants → `REJECT_ALL_SLOT = 1`, `APPROVED_ACTIONS_SLOT = 2`
+   (`auth-registry.ts`, with a WHY comment citing the contract).
+2. `waitForOnChainState` THROWS on timeout (`service.ts`) — never treat an
+   unverifiable security mutation as success.
+3. Regression: `src/wallet/utils/auth-registry.test.ts` pins the read slots
+   (BB-free; mocks `deriveStorageSlotInMap`, asserts the map-slot constant). 3/3.
 
-## Decisive evidence (TO FILL from run 27716251879 `[authwit-measure]` logs)
-_pending soak — record here: the auth-registry row `.account` value, the accounts
-row `address` value, whether they are `===`, and the page state. Then select the
-bucket (must agree across the 3 iterations) and only THEN implement Phase 4._
+LESSONS_FILE=implementations-plan/network-e2e-required/lessons/phase-3.md

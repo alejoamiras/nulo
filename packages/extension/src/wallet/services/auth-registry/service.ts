@@ -231,7 +231,11 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			if (await check()) return
 			await sleep(500)
 		}
-		this.logWarn(`waitForOnChainState timed out (${label}); proceeding with current on-chain read`)
+		// Throw — never treat an unverifiable security mutation (revoke / registry
+		// toggle) as success. Silently proceeding let a not-yet-effected revoke
+		// report "done", so a fast follow-up consume could still spend a grant the
+		// user believes is revoked.
+		throw new Error(`waitForOnChainState timed out (${label}); on-chain effect not confirmed`)
 	}
 
 	private async syncAuthwits(node: AztecNode, account: string, parentTask: WrappedTask, authwits?: Authwit[]) {
