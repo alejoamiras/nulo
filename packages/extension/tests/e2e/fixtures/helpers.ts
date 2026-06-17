@@ -128,8 +128,10 @@ export async function navigateToSettings(page: Page, ...segments: string[]): Pro
 			const diag = await page
 				.evaluate(() => ({
 					hash: window.location.hash,
-					navTestids: [...document.querySelectorAll('[data-testid^="setting-nav"]')].map((e) => e.getAttribute("data-testid")),
-					anchors: [...document.querySelectorAll("a")].map((a) => a.getAttribute("href") || a.getAttribute("to")).filter(Boolean),
+					allTestids: [...document.querySelectorAll("[data-testid]")].map((e) => e.getAttribute("data-testid")).slice(0, 60),
+					anchorCount: document.querySelectorAll("a").length,
+					buttonCount: document.querySelectorAll("button").length,
+					bodyText: (document.body.innerText || "").replace(/\s+/g, " ").slice(0, 400),
 				}))
 				.catch(() => "nav diag read failed")
 			console.error(`[nav-diag] navigateToSettings FAIL for ${href} (want ${testidSelector}): ${JSON.stringify(diag)}`)
