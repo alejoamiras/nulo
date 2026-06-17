@@ -134,3 +134,35 @@ poll `node.getL2Tips().proven.block.number >= revokeReceipt.blockNumber` (throws
 on timeout). Proven advances normally here (grants prove within the test's step
 timing, which is why their consumes already worked). Applied to revoke + toggle.
 This + bug-4 (mined-outcome assertion) together make revoke→consume deterministic.
+
+### Bug 5 — DEFINITIVE on-chain finding + UNRESOLVED ANOMALY (codex #7 diagnostic)
+The `[revoke-slot-check]` diagnostic (e0c3560) read, at the PROVEN block after
+revoke, `approved_actions[storedAccount][storedHash]` for BOTH stored authwits:
+both `= 0x000…0` (cleared). YET the G2 consume mines SUCCESSFULLY (status ok).
+
+Code facts (codex #6/#7-verified): `computeCallMessageHash` (tx-request-builder
+→ the stored/granted/revoked hash) calls the SAME upstream `computeAuthWitMessageHash`
+(authwit-discoverer.ts:154) the consume path uses — same `caller=B`, `call=token
+.transfer_public_to_public(args)`, `chainId`, `version`. So storedHash SHOULD ==
+the consume's recomputed hash. storedAccount (= granter A, via trackAuthwit) ==
+the consume's `on_behalf_of` (= A). AuthRegistry.consume reads
+`approved_actions[A][hash]` unconditionally (no fallback).
+
+**ANOMALY (unresolved):** the revoke provably zeroes the consume's exact slot at
+the proven block, the consume reads that slot, yet it does not revert. This
+violates the apparent logic and survived 9 fixes + 7 codex consults. Possible
+deeper causes NOT pinned: (a) sequencer public-state snapshot differs from the
+proven `getPublicStorageAt` read; (b) the consume's args encoding (grant uses
+string args, consume BigInt) yields a different inner hash than the diagnostic's
+storedHash despite the same function; (c) a sandbox/version semantic. Needs
+interactive protocol debugging or Aztec-team input — beyond autonomous e2e iteration.
+
+**Real, KEEP fixes from this arc (all codex-validated, lint/typecheck/unit green):**
+swapped AuthRegistry slot constants (SECURITY — revoked authwits read as
+unrevokable), `auth-registry.test.ts` slot regression, `switchAccountByAddress`
+(+data-account-address), `waitForTxProven` (proven-finality barrier), mined-outcome
+consume assertion. Diagnostic instrumentation ([revoke-slot-check],
+[consume-result], dumpAuthwitMeasurement) is TEMPORARY — remove when resolved.
+
+STATUS: Phase 4 BLOCKED on the anomaly. Decision required (see plan.md).
+LESSONS_FILE=implementations-plan/network-e2e-required/lessons/phase-4.md
