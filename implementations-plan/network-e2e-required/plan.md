@@ -1,0 +1,116 @@
+# network-e2e-required (deep)
+
+**Goal:** `Network e2e` PR check reliably green on every PR, then flipped to a **required** check on `dev` — fixing root causes, never masking with retries. Tier `deep` (auth-registry trust-surface change + required-gate blast radius; a prior `mid` draft was rejected by dual audit for a wrong premise). Consolidated from 3 independent plans (main + codex + planning subagent); the trust-point design + measure-first were arrived at independently by all three.
+
+## Verified corrected facts (a prior plan was rejected for getting these wrong)
+1. dApp grants ARE recorded today — `grantPublicAuthwit` → `tx-request-builder.ts:204` `trackAuthwit(account.address.toString(), …)`; `getAuthwits` filters `x.account === account` (`auth-registry/service.ts:90`).
+2. **Recording is at the WRONG trust point** — the build/fee-estimate path (`estimateOperationFee` → `buildStandard` → `trackAuthwit`), so it records before approval and even on reject / failed send. The file + coordinator JSDocs already name post-send as the intended home (`tx-request-builder.ts:26-32`, `execution-coordinator.ts:24-26`).
+3. **F1's real cause is UNMEASURED.** The authwits page DOES fetch on mount (`useEntityCrud` `void refresh()` → `getAuthwits(appStore.account.address)`, `authwits/index.vue:46-48`) and returns `[]`. The storage-migration wipe-list does NOT include `nulo:core:auth-registry` (`migrate.ts:41-64`) — so "SW-restart wipe" is demoted. `EntityStorage.getValues` is a durable prefix-scan, no index to desync. Top suspects: **(A) account-key/format mismatch** (`account.address.toString()` at write vs `appStore.account.address` at read), **(B) `syncAuthwit` self-deletes a not-yet-mined grant** (`service.ts:252-259` deletes any row `isAuthwitConsumable` reports false for), then (C) never-persisted, (D) page/bootstrap race. **Measure before fixing.**
+4. The PR Network e2e is **proverless** (5 shards + 2 heavy: `pr-network-e2e.yml:140,160,180`); only a separate canary does real proving. Proverless soaks are representative of the gate.
+5. The gate **masks app flakes**: `_network-e2e.yml` leaves `retry` empty → vitest `retry: 2` (`vitest.e2e.network.config.ts:52`); the PR caller passes no `retry`. The soak passes `retry=0`. Must set the PR check to `retry: 0`.
+6. **Infra-boot retry can't be a step retry** — the sandbox boots in-process in `global-setup.ts`; boot failure ≡ test failure at the workflow level. Need an explicit boot-vs-test signal.
+7. **Paths-filter under-scoped** — `extension-network` omits the grant-approval + revoke surfaces (`windows/execute/**`, `pages/settings/advanced/**`, the authwit popups/modules).
+8. `bun run lint:actions` is NOT a repo script — use `actionlint.yml` (reviewdog/actionlint + shellcheck). `bun run test:components` only runs `src/components` (shared primitives) — the auth tests run under `bun run --cwd packages/extension vitest run`.
+9. Already fixed on `fix/deflake-authwit-nav-concurrent-settle` (unmerged): F2 (order-independent `waitForPgResults`), F1a (`setting-nav-*` testids + `navigateToSettings` poll), `DropdownItem aria-disabled` + `clickByTestId`, `[nav-diag]`/`[pg-diag]`. Merged: #95 (instrument), #96 (F3 fee gate).
+10. **The "only F1+F2 red" picture is masked.** ~8 network tests **hardcode per-test `retry: 1`/`2`** (override the config): `authwit-variants`, `meta-getAccounts-pregrant`, `concurrency-rapid-fire` (retry:2), `meta-batch`, `session-reconnect`, `meta-getChainInfo`, `data-addressBook`, `err-scope-and-cap`. Plus a **quarantined `test.skip`** (`incoming-transfers.test.ts:115` "C2 — trust prompt re-fires…"). These pass only because they retry/skip — under true zero-retry the real flaky set is **F1 + this retry-masked set**. So setting workflow `retry: 0` is necessary but NOT sufficient; the in-test overrides must be removed and the revealed flakes root-caused. The user's "fix everything" includes these.
+
+## Decisions (user)
+- **Fix the wallet**: measure + fix F1's real cause; fix the record-too-early trust-point bug. NOT "add grant recording."
+- **Flake bar**: app/test flakes → 0; ONE retry for pure infra (sandbox boot) via an explicit sentinel; flip required after; no quarantine.
+
+## Phases
+
+### Phase 1 — Land the in-flight deflake fixes
+Review + merge `fix/deflake-authwit-nav-concurrent-settle` (F2 + F1a nav + `DropdownItem`/`clickByTestId` + `[nav-diag]`/`[pg-diag]` diagnostics) to `dev`. Ships F2 green + the diagnostics Phase 3 needs. (F2 is already soak-proven, so the old retry:2 gate is harmless for it.)
+- **Gate.** `bun run audit:vue` exit 0; `gh workflow run network-e2e-soak.yml --ref fix/deflake-authwit-nav-concurrent-settle -f mode=files -f test_files="tests/e2e/network/concurrent-sendtx.test.ts" -f repeats=7 -f retry=0 -f proverless=true` → concurrent-sendtx **7/7**. Layers: typecheck/lint · unit · component · network-e2e (soak).
+
+### Phase 2 — Gate plumbing: strict signal + sentinel + filter (no app-behavior change)
+Make the gate's signal trustworthy BEFORE touching app code (so the F1/trust-point work runs under a strict, honest gate).
+- **2a `retry: 0`** on every `_network-e2e.yml` call in `pr-network-e2e.yml` (matrix + 2 heavy + canary). (Recommend 0, not 1 — a test-dimension retry re-masks app flakes; infra is handled separately.)
+- **2b Boot-failure sentinel (explicit STATE, not log-grep).** `global-setup.ts` writes `.e2e-state/boot-started` then `.e2e-state/boot-ready`; the first executed test writes `.e2e-state/tests-started`. `scripts/e2e/agent.sh` maps "boot-started ∧ ¬boot-ready ∧ ¬tests-started" → distinct exit code **86**. In `_network-e2e.yml`, retry the agent **once** iff exit==86; any other non-zero fails immediately. Cap = 1. **Marker placement is the safety:** write `boot-ready` the instant the sandbox is confirmed healthy in `global-setup.ts` and BEFORE any fixture/test runs — so a first-file fixture/import/setup regression (which occurs *after* `boot-ready`) has `boot-ready` set ⇒ classifier returns NOT-86 ⇒ no retry. The 86 window is narrowly the anvil/node/deploy bring-up only (not manifest-validate/orphan-reap, which run before `boot-started`, nor fixtures, which run after `boot-ready`).
+- **2c Widen `extension-network`** to include `src/popup/windows/execute/**`, `src/popup/pages/settings/advanced/**`, `src/popup/components/modules/settings/authwits/**`, `src/popup/components/popups/{RevokeAuthwitsPopup,ChangeAuthwitsRegistryPopup}.vue`, `src/composables/useEntityCrud.ts`. Keep pass-when-skipped for true docs-only PRs; keep `permissions: contents/pull-requests: read`. Do NOT widen to `src/**`.
+- **2d Remove in-test retry masking.** Inventory + remove every per-test `retry: 1`/`2` in `tests/e2e/network/` (the ~8 files in fact 10) so the config `retry: 0` actually takes effect; un-skip `incoming-transfers.test.ts:115` (C2) or convert it to a real assertion (no quarantine). Each removed retry is a flake to root-cause in Phase 6, NOT to silently re-add.
+- **Gate.** `bun run lint`; `gh workflow run actionlint.yml --ref <branch>` green; sentinel state-machine test (boot-fail+no-tests ⇒ 86; test-fail ⇒ original code; fixture-fail-after-boot-ready ⇒ not 86); paths-filter dry-run (a `windows/execute` diff ⇒ `extension-network=true`; a `*.md`-only diff still skips); a strict baseline soak `-f mode=full -f repeats=5 -f retry=0 -f proverless=true` **runs** (sentinel works) and **enumerates the TRUE flaky set** — F1 + the de-retried tests (fact 10) + any others — recorded in `lessons/phase-2.md` as the input to Phases 3–6. Layers: workflow/shell lint · CI-config behavior · network-e2e (strict baseline).
+
+### Phase 3 — Measure F1 (capture-first; NO fix)
+At the `authwit-lifecycle` revoke step (after `navigateToSettings(...authwits)`, before `authwits-revoke-all`) AND right after a successful `grant()`, capture: the authwits page state (cards / "NO AUTHWITS YET" / fetching / error), the `nulo:core:auth-registry*` storage rows (`{key, account, hash, contentKind}`), the active account (`appStore.account.address`) + the live `getAuthwits(active)` result. Classify: storage-present/page-empty (D), storage-empty/account-mismatch (A), storage-empty/post-grant-gone (B/wipe), never-persisted (C). Capture behind the probe flag (the bundle-grep guard `_network-e2e.yml:263-276` keeps it out of shipped builds). Write the diagnosis to `lessons/phase-3.md`.
+- **Gate.** `gh workflow run network-e2e-soak.yml --ref <branch> -f mode=files -f test_files="tests/e2e/network/authwit-lifecycle.test.ts" -f repeats=3 -f retry=0 -f proverless=true`; pass = all 3 captures agree on ONE bucket (recorded in `lessons/phase-3.md`, `LESSONS_FILE=…` printed); probe-grep finds 0 hits in a normal `build:chrome`. **No code fix.** Layers: network-e2e (soak) + analysis.
+
+### Phase 4 — Fix F1's measured cause (scoped to the diagnosis)
+Implement only the fix Phase 3 selected. If **(A)**: canonicalize the account key in the service (compare via `AztecAddress.fromString().toString()` both sides) — lowest blast radius. If **(B)**: gate `syncAuthwit` deletion on a positive "grant is gone" signal (not "not-yet-consumable"); reuse `waitForOnChainState`. If **(D)**: page/bootstrap — immediate account-address watch, gate on `isLogined`+`account`, make the first refresh explicit. Do NOT paper over storage-empty with `syncRegistry()` on mount (it only prunes, can't repopulate). Drive `authwit-lifecycle` fully green incl. G3 registry-toggle (measure any remaining step; `waitForOnChainState` proceed-on-timeout is a candidate root, not assumed test-race).
+- **Gate.** `bun run --cwd packages/extension vitest run` (auth-registry + page units, incl. the (A)/(B) regression); `bun run lint && bun run typecheck`; soak `authwit-lifecycle` **10/10** retry=0 proverless. Layers: unit · component · network-e2e (soak).
+
+### Phase 5 — Trust-point redesign: record post-send, pending + reconciled (security)
+`buildStandard` STOPS calling `trackAuthwit`; instead returns `pendingPublicAuthwits: {account,hash,content}[]` on the built tx (build becomes pure — kills the estimate/reject-records-grant leak). Recording moves downstream with three corrections the final audit demanded:
+- **Cap enforced PRE-send**, not post-send. Once `sendTx` is accepted the grant is already on-chain and can't be blocked, so the `MAX_TRACKED_AUTHWITS_PER_ACCOUNT = 256` check runs at the approval/build gate: if the active account is at the cap, block the approval with an explicit overflow message. Never auto-evict — eviction destroys the only local revocation index.
+- **Record at the post-send tail of `execution-coordinator.proveAndSend`** (after `sendTxTask` resolves, after the cancel checkpoint `:169`) as a **pending, tx-linked** row — `sendTx` acceptance is NOT mining. Reconcile: mined-confirm → durable; tx-drop/fail → remove the pending row (reuse the durable-journal / `waitForOnChainState` machinery; no new waiter).
+- **Write failure is loud + recoverable, not silent** — a failed index write after a successful send surfaces (logged error + retry). Recovery is backed by **durable, tx-linked pending-authwit metadata** (journal-backed): the pending row IS that durable record, so a write that fails (even across a SW restart) is repaired by retrying from the wallet's own stored metadata — NOT by on-chain enumeration. (The auth-registry only checks *known* hashes; it cannot discover authwits from chain, so "sync-from-chain ADD" is not available and must not be assumed.)
+NO_FROM path records nothing (no `add_public_authwit`). Negative pins: estimate/build, reject, send-failure each record NOTHING; one successful+mined grant records exactly once; an accepted-but-dropped grant leaves no false confirmed row; granting at the cap is blocked pre-send.
+- **Gate.** `bun run --cwd packages/extension vitest run src/wallet/services/execution/{tx-request-builder,execution-coordinator,dapp-send-executor}.test.ts src/popup/windows/execute/{operation-validation,OperationCard.authwit}.test.ts src/wallet/services/auth-registry/service.test.ts` (incl. estimate/reject/fail = no record; cap blocks pre-send; dropped-tx reconciliation removes the pending row); soak `authwit-lifecycle` + new `authwit-grant-reject` + send-pipeline canary (`tx-sendTx-default`, `concurrent-sendtx-confirm`) **green** retry=0 proverless; real-proving canary (`transfers`, `tx-sendTx-default`) 3/3 `proverless=false`. Layers: unit · network-e2e (proverless + real-proving canary).
+
+### Phase 6 — De-flake the revealed set (every retry-masked test to green, no retries)
+For each test in the Phase-2 flaky set (the de-retried ~8 + the un-skipped C2 + anything else the strict baseline surfaced), apply the F1 discipline — measure → root-cause → fix, retries removed, no assumptions. A test that's robust once root-caused needs no retry; one that can't be made deterministic is a real bug to fix or an explicit, surfaced decision, NOT a silently re-added retry.
+- **Gate.** Each fixed file soaks green retry=0 proverless (per-file); then `grep -rnE "retry:\s*[12]" packages/extension/tests/e2e/network` returns nothing (only `retry: 0`/none remain); the full sharded strict soak is per-shard green. Layers: network-e2e (per-file + sharded strict soak).
+
+### Phase 7 — Prove stability + flip required (LAST)
+Run the **real sharded PR workflow** (not the soak) **5×** on the same SHA. Only after 5 consecutive green, add `Network e2e / Status` (the `status` aggregate context — passes-when-skipped; NOT individual shards) to `dev`'s ruleset/branch-protection (admin, out-of-band). Document a **time-boxed rollback** escape hatch: accelerator incident → `vars.NULO_E2E_DISABLE_ACCELERATOR=1` (suite still runs honestly); upstream/Aztec outage → temporarily remove the required context for ≤24h, leave the workflow advisory, file an incident, restore on recovery. Never a `.skip`/quarantine.
+- **Gate.** 5 consecutive green real `pr-network-e2e.yml` runs on one SHA (if the sentinel fires in >1 of 5, stop + investigate); `gh api repos/alejoamiras/nulo/rulesets` shows `Network e2e / Status` required on `dev`, individual shards absent; rollback procedure written in `CI.md`. Layers: real sharded PR gate · CI admin config.
+
+### Post-implementation
+`/code-review max --fix` (per phase + final, separate commits) → **narrow `/harden security`** scoped to the auth-registry trust-point change (Phases 4–5) ONLY — not a whole-repo pass → codex `xhigh` post-impl audit (net diff + code-review summary + adversarial ask).
+
+## Security & Adversarial Considerations
+- **Bogus/unsent grants (core fix, Phase 5).** Pre-fix a dApp records a public-authwit row by merely triggering fee-estimate — no approval, no send. The revoke UI then offers to revoke a grant that never happened (wasted fees, corrupted authorization model). Fix: record only at the post-`sendTx` seam (inherits the cancel-checkpoint guarantee). Pinned by estimate/reject/fail negative tests.
+- **Build-vs-send principle.** Persisted side effects key off send-success, never build/estimate. Comment the now-empty former `trackAuthwit` site so reviewers flag any new build-time persistence.
+- **Registry flood.** Non-evicting per-account cap (256) + block/overflow; never evict (the index is the only local revocation record). Cap value/UX is an Ask.
+- **Sentinel spoofing.** Explicit state files + "zero tests started" guard; a test that ran can't masquerade as infra. Cap = 1 retry.
+- **CI least privilege.** Gate changes add no permissions (shell + exit codes); the required-flip is repo-admin/ruleset, not a write-scoped token. SHA-pinned accelerator binary + `SPONSORED_FPC_SALT` scope unchanged. Probe-leak guard keeps Phase-3 capture out of shipped builds.
+- **Fork-PR secrets — N/A.** `dev` does not take fork PRs (confirmed at approval), so a required check needing `SPONSORED_FPC_SALT` has no fork-gating problem.
+- **No crypto changes; `assertLiveChainIdentity` untouched** (canary still exercises it).
+
+## Assumptions
+**Facts (verified):** items 1–9 above (cited to file:line / workflow); both fable + codex independently verified the trackAuthwit-on-build path, the proveAndSend post-send seam, the proverless gate, the retry:2 default, the in-process boot, the migrate wipe-list, the missing `lint:actions`.
+
+**Inferences (attack):**
+- F1 is fixable in the auth-registry/settings layer (not deeper PXE). Phase 3 measures; (A) ~50% / (B) ~30% priors.
+- `execution-coordinator.proveAndSend` is the only shared post-send seam across dApp send paths and is reached for the grant path — verify in Phase 5.
+- A single infra-retry covers the ~1/8 boot flake adequately (residual ~1/64 per shard; ~12% of PRs may still hit one across all jobs — verify acceptable or widen).
+- The `status` job reports neutral/success-on-skip to branch protection (standard `if: always()`+exit-0) — confirm on a docs-only dry-run before the flip.
+
+**Asks (ALL RESOLVED at approval, 2026-06-17):**
+- Authwit fix = measure + fix F1 + post-send trust point. Flake bar = app-flakes-0 + infra-sentinel.
+- PR check `retry: 0`. Flood cap = **256/account, non-evicting, block PRE-send** (explicit overflow). Required-check rollback **≤24h** (time-boxed, not quarantine). **`/harden security` is NARROW — scoped to the auth-registry trust-point change (Phases 4–5) ONLY, not a whole-repo pass.** `dev` does **not** take fork PRs (so a required check needing `SPONSORED_FPC_SALT` has no fork-gating problem). Repo-admin **available**; `dev` is enforced via a **ruleset** (the Phase-7 flip edits the ruleset).
+
+## Decision ledger
+- **Phase ordering** — chose "land done F2 → gate-plumbing strict-signal early → measure → fix → trust-point → flip last" (planning-subagent's strict-signal-first insight). Rejected codex's "fix app first, harden gate later": running the F1/trust-point work under a strict (retry:0) advisory gate catches regressions during the fix, not after.
+- **Trust-point design** — CONVERGENT across codex + fable (build emits `pendingPublicAuthwits`; `proveAndSend` post-send tail flushes via `recordAuthwits`). Adopted with high confidence (independent agreement). Rejected the naive "call trackAuthwit from the coordinator" (coordinator only sees an opaque txRequest).
+- **Sentinel** — chose codex's explicit STATE FILES (exit 86) over the subagent's log-grep+zero-tests. More robust; "explicit state, not log-grep."
+- **Flood cap** — chose codex's NON-EVICTING cap (256, block/overflow) over the subagent's evict-oldest. Eviction would destroy the only local revocation index.
+- **Flip proof** — chose codex's 5 consecutive green REAL sharded PR runs over a soak-only proof. The real gate is the representative signal.
+- **F1** — measure-first (unanimous); combined the subagent's decision table + codex's buckets; don't use `syncRegistry` as the fix (unanimous).
+- **Final fresh-context codex pass REJECTED the first consolidated draft and caught 2 real holes the consolidation missed** — proving the final pass was load-bearing, not skippable: (B1) workflow `retry: 0` is insufficient because ~8 tests hardcode in-test retries + a `test.skip` ⇒ scope expanded to de-retry + root-cause the revealed set (Phase 2d + new Phase 6); (B2/H1) the post-send trust-point was internally inconsistent ⇒ cap enforced PRE-send, record as pending + reconcile (accept ≠ mined), write-fail loud not silent (Phase 5). All folded; a confirming re-pass follows.
+
+## Audit verdicts
+- **Prior `mid` dual audit (codex + fable): `reject`** — wrong F1 premise (grants ARE recorded), weak gate (retry-masking), un-implementable infra-retry. Corrected in this deep plan.
+- **Deep final fresh-context codex pass: `reject` (round 1)** — B1 (in-test retries / expanded flaky set) + B2 (trust-point inconsistency) + H2 (sentinel marker placement). All addressed in Phases 2/5/6.
+- **Deep final codex re-pass: `conditional approve`** — one condition: Phase 5 recovery must use durable tx-linked metadata (journal-backed retries), not nonexistent on-chain authwit enumeration. **Folded** into Phase 5's write-failure bullet. Plan is gate-ready.
+- **Planning subagent (fable role):** co-authored the consolidated plan (its strict-baseline-first ordering + the build-emits/post-send-flush trust point were adopted); the prior `mid` fable audit produced the F1-premise reversal that reframed the whole plan.
+
+## Seeds (finalized at approval — use exactly ONE per session; they don't compose)
+
+**Recommended — /loop (CI-heavy, long async soaks):**
+```
+/loop 20m Drive implementations-plan/network-e2e-required forward. Never idle. Each firing:
+1. Reality check: read plan.md + lessons/ (authoritative, not chat); git status + git log --oneline -5; if a soak/PR run is in flight, gh run view (no --watch) and use the wait to prep the next phase / review the diff.
+2. No task in hand? Take the next pending phase step EXACTLY as written. Phase 3 (measure F1) MUST produce a written root-cause classification BEFORE any Phase 4 fix; Phase 6 root-causes every revealed flake (no re-added retries). After each edit run the fast layers (bun run lint + the touched vitest run); commit then push.
+3. Decision/fork or stuck? /codex xhigh with full context; log the consult + verdict in lessons/phase-N.md; act on the stronger argument. HARD LIMITS: never flip Network e2e required until app-flakes are 0 via 5 green real pr-network-e2e runs on one SHA; never .skip / quarantine a flaky APP test (infra-boot exit-86 sentinel only); never re-add an in-test retry to mask a flake; never merge to main; never broaden CI token scope or secret exposure.
+4. Same step failing 5x? Stop, reassess with codex, continue.
+5. Phase green = THE PHASE'S validation gate in plan.md passes (commands + criteria). Paste the result, mark the header in plan.md, file lessons, print LESSONS_FILE=implementations-plan/network-e2e-required/lessons/phase-N.md, advance.
+6. All 7 phases done? /code-review max --fix then commit; NARROW /harden security on the auth-registry change (Phases 4-5) only; codex xhigh post-impl audit; address high/critical; wrap-up report; STOP.
+Keep an ASCII checklist visible each firing.
+```
+
+**Alternative — /goal (completion-condition):**
+```
+/goal All 7 phases marked done in implementations-plan/network-e2e-required/plan.md, each backed by its validation gate reported passing in the transcript with LESSONS_FILE=implementations-plan/network-e2e-required/lessons/phase-N.md printed; Phase 3 produced a written F1 root-cause classification before any Phase 4 fix; in-test retries removed (grep "retry:\s*[12]" in tests/e2e/network returns nothing) and revealed flakes root-caused; trust-point negative tests (estimate/reject/send-fail/dropped record nothing; one mined grant records once; cap blocks pre-send) pass; 5 consecutive green real pr-network-e2e runs on one SHA; Network e2e / Status confirmed required on dev (gh api rulesets); /code-review max --fix applied+committed; NARROW /harden security (auth-registry change) done; codex post-impl audit high/critical addressed; bun run audit:vue exit 0. HARD LIMITS: never flip required before the 5 green runs; never .skip or re-add a retry to mask a flaky app test; never merge to main.
+```
