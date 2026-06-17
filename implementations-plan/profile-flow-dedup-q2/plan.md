@@ -70,7 +70,9 @@ Record the green baseline so each later gate is a true delta. Run typecheck + li
 
 **Validation gate** — Commands: `bun run typecheck && bun run lint && bun run test`. Pass: `useProfileCreateFlow.test.ts` green (≥10, composable-level); the NEW `popup/pages/profile/new.test.ts` green (Quirk-2 event-target pin + popup `onComplete` manual-sequence ordering — `setLastActiveProfileId`-before-`getAccounts`, `chrome.storage` write, `setSentinel` last); both create pages compile; prior suites green. Layers: typecheck · lint · unit. **Sequentially shippable — standalone PR after Phases 1-2.**
 
-### Phase 4 — Integration + smoke e2e + docs
+### Phase 4 — Integration + smoke e2e + docs ✓
+**DONE** — extension build green; smoke e2e green for ALL Q2 flows (registration/import-paths/onboarding-tab/passkey-paths/passkey-backup/security-backup); the one smoke failure (`settings-crud` manage-fpcs FPC row) is PRE-EXISTING — verified failing identically on clean `dev` (`DEV_FPC_EXIT=1`), zero Q2 dependency, out of scope. `audit:vue` red is pre-existing `@nulo/faucet` (missing `@nulo/bridge-core`), also unrelated. Docs (CLAUDE.md) + auto-import types updated. `LESSONS_FILE=implementations-plan/profile-flow-dedup-q2/lessons/phase-4.md`
+
 - Root `bun run audit:vue` (typecheck:all → test → lint → build).
 - `cd packages/extension && bun run test:e2e` (smoke). Note (hostile #5): the smoke config includes ALL top-level `tests/e2e/*.test.ts` (passkey-paths, auth-flows, security-backup, onboarding-tab, …), so it also exercises the **relocated dialog** and the out-of-scope `auth.vue`/`export/full.vue` consumers — a bonus regression net for Phase 1. Drives import/create by testid only — since every testid is preserved, smoke proves listener-based popup activation AND onboarding bootstrap end-to-end. **Caveat:** e2e drives create via click, never Enter, so Quirk-2/A4 are guarded by the unit pins ONLY — do not rely on e2e to catch an Enter-guard regression.
 - Verify no orphaned old paths (grep); confirm no testid changed (diff against Phase 0 set).
