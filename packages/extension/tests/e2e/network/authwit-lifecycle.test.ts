@@ -94,13 +94,20 @@ test.skipIf(!hasConfig)(
 			await waitForExecuteContent(popup)
 			await approveExecute(popup)
 			const res = await waitForPgResult(page, "sendTx", seq, 360_000)
-			// The dApp's sendTx resolves at SUBMIT (NO_WAIT), and the submit-ack is
-			// racy for a revoked authwit (the node may or may not pre-validate at
-			// sendTx). Assert on the MINED outcome instead: a revoked public-authwit
-			// consume reverts at sequencing, so waitForTxMined throws → "error".
+			console.log(`[consume-result] nonce=${nonce} status=${res.status} resultJson=${JSON.stringify(res.resultJson)}`)
+			// The dApp's sendTx resolves at SUBMIT (NO_WAIT), not mine, and the
+			// submit-ack is racy for a revoked authwit. Assert on the MINED outcome:
+			// a revoked public-authwit consume reverts at sequencing. The NO_WAIT
+			// dApp result is `{ txHash, ... }` (an object) — unlike the grant's bare
+			// hash string — so pull the hash out of either shape.
 			if (res.status !== "ok") return "error"
+			const rj = res.resultJson
+			const inner = rj && typeof rj === "object" && "txHash" in rj ? (rj as { txHash: unknown }).txHash : rj
+			const hashSrc = inner && typeof inner === "object" && "hash" in inner ? (inner as { hash: unknown }).hash : inner
+			const txHash = String(hashSrc ?? "").replace(/^"(.*)"$/, "$1")
+			if (!/^0x[0-9a-fA-F]+$/.test(txHash)) return "error"
 			try {
-				await waitForTxMined(aztecConfig!, String(res.resultJson).replace(/^"(.*)"$/, "$1"))
+				await waitForTxMined(aztecConfig!, txHash)
 				return "ok"
 			} catch {
 				return "error"
