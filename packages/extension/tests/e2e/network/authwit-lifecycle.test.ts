@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
-import { navigateToSettings, switchAccount } from "../fixtures/helpers"
+import { navigateToSettings, switchAccountByAddress } from "../fixtures/helpers"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, pickFeeAndSubmitAuthwitPopup, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
@@ -109,7 +109,7 @@ test.skipIf(!hasConfig)(
 		// proving sendTx — hence the wide settle budget.
 		const settingsAction = async (actionTestId: string, submitTestId: string) => {
 			const walletPopup = await openPopup(ctx)
-			await switchAccount(walletPopup, "Account") // active wallet account = owner A
+			await switchAccountByAddress(walletPopup, ownerA) // view the GRANTER's registry (ownerA = accountAddresses[0], name varies)
 			await navigateToSettings(walletPopup, "advanced", "account-state", "authwits")
 			await clickByTestId(walletPopup, "authwits-actions-btn")
 			// MEASURE (re-armed): the revoke-all click started timing out after the
