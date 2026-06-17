@@ -119,7 +119,6 @@ export function useProfileCreateFlow(opts: UseProfileCreateFlowOptions) {
 
 	return {
 		profileName,
-		trimmedName,
 		nameError,
 		shakeName,
 		nameInputRef,

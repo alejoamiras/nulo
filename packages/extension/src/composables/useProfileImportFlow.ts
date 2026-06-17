@@ -316,7 +316,6 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 		handleCopyError,
 		clearError,
 		handleBack,
-		completeImport: opts.completeImport,
 		// lifecycle
 		dispose,
 	}
