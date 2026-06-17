@@ -12,7 +12,7 @@ const emit = defineEmits(["open", "revoke"])
 </script>
 
 <template>
-	<div @click="emit('open', authwit)" :class="$style.card" data-testid="authwit-card">
+	<div @click="emit('open', authwit)" :class="$style.card">
 		<div :class="$style.header">
 			<span :class="$style.type">{{ authwit.kindName ?? "Custom Authwit" }}</span>
 
