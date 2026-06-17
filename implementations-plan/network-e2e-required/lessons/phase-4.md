@@ -118,3 +118,19 @@ tx to MINE (`waitForTxMined` — throws on `app_logic_reverted`/dropped) and ret
 (not proven) read, but that was NOT the failure — the seam was.
 Net F1 fix set: slot constants (security) + waitForOnChainState (kept) +
 switchAccountByAddress + mined-outcome consume assertion. NO PXE barrier.
+
+### Bug 5 (THE finality root cause) — revoke confirmed at `latest`, not PROVEN (codex #6)
+With the mined-outcome assertion (bug 4), the dump showed G2 consume MINES
+SUCCESSFULLY despite the revoke — so the revoke is a genuine no-op on the grant
+the consume uses. codex #6 verified it is NOT a hash mismatch (grantPublicAuthwit
+routes one add_public_authwit; the SAME messageHash is stored via trackAuthwit
+AND written via set_authorized AND recomputed by AuthRegistry.consume — identical
+across grant/track/revoke/consume). It IS a FINALITY barrier bug: the sequencer
+executes public functions against PROVEN state, but `waitForOnChainState` only
+confirmed `getPublicStorageAt("latest")` (the PROPOSED tip). So a revoke visible
+at `latest` but not yet PROVEN is invisible to the consume's sequencer execution.
+FIX: replace the latest-based `waitForOnChainState` with `waitForTxProven` —
+poll `node.getL2Tips().proven.block.number >= revokeReceipt.blockNumber` (throws
+on timeout). Proven advances normally here (grants prove within the test's step
+timing, which is why their consumes already worked). Applied to revoke + toggle.
+This + bug-4 (mined-outcome assertion) together make revoke→consume deterministic.

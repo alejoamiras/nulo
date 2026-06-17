@@ -15,6 +15,7 @@ import { getAuthRegistryAddress, isAuthRegistryEnabled, isAuthwitConsumable } fr
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { AUTH_REGISTRY_SERVICE_NAME, type Authwit, type Events, MAX_REVOKES_PER_TX, type Methods } from "./spec"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { TxHash } from "@aztec/stdlib/tx"
 
 export * from "./spec"
 
@@ -133,10 +134,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			// not that its PUBLIC effect is mined + visible. Poll the on-chain state
 			// so a fast (proverless) follow-up consume can't race a not-yet-mined
 			// revoke. See waitForOnChainState.
-			await this.waitForOnChainState(
-				async () => (await Promise.all(authwits.map((a) => isAuthwitConsumable(node, a.account, a.hash)))).every((c) => !c),
-				"revoke: authwits no longer consumable",
-			)
+			await this.waitForTxProven(node, txHash)
 			await this.syncAuthwits(node, account, task, authwits)
 
 			task.complete()
@@ -183,10 +181,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			const node = await this.networkService.getNode(network.chainId)
 			// Ensure the registry toggle is mined + visible before returning, so a
 			// fast follow-up consume reads the new state (see waitForOnChainState).
-			await this.waitForOnChainState(
-				async () => (await isAuthRegistryEnabled(node, account)) === enabled,
-				`registry enabled=${enabled}`,
-			)
+			await this.waitForTxProven(node, txHash)
 			await this.syncStatus(node, account, task)
 
 			task.complete()
@@ -225,17 +220,26 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	 *  registry. Polling the actual on-chain predicate closes the race for both.
 	 *  On timeout we proceed (the caller's sync reads whatever is current) rather
 	 *  than fail the settings op. */
-	private async waitForOnChainState(check: () => Promise<boolean>, label: string, timeoutMs = 120_000): Promise<void> {
+	/**
+	 * Wait until the mutation tx's block is PROVEN, not merely at the proposed
+	 * `latest` tip. The sequencer executes public functions — e.g. a follow-up
+	 * authwit consume's `AuthRegistry.consume` — against PROVEN state, so a
+	 * revoke/toggle visible only at `latest` is invisible to that execution and a
+	 * fast consume can still spend a "revoked" grant. Poll the proven tip past the
+	 * tx's receipt block. Throws on timeout — never report an unverifiable
+	 * security mutation as success. (Proven advances normally here: grants reach
+	 * proven within the test's own step timing, which is why their consumes work.)
+	 */
+	private async waitForTxProven(node: AztecNode, txHash: string, timeoutMs = 120_000): Promise<void> {
+		const receipt = await node.getTxReceipt(TxHash.fromString(txHash))
+		const target = receipt.blockNumber
+		if (target === undefined) throw new Error(`waitForTxProven: tx ${txHash} has no block number`)
 		const start = Date.now()
 		while (Date.now() - start < timeoutMs) {
-			if (await check()) return
-			await sleep(500)
+			if ((await node.getL2Tips()).proven.block.number >= target) return
+			await sleep(1_000)
 		}
-		// Throw — never treat an unverifiable security mutation (revoke / registry
-		// toggle) as success. Silently proceeding let a not-yet-effected revoke
-		// report "done", so a fast follow-up consume could still spend a grant the
-		// user believes is revoked.
-		throw new Error(`waitForOnChainState timed out (${label}); on-chain effect not confirmed`)
+		throw new Error(`waitForTxProven: tx ${txHash} (block ${target}) not proven within ${timeoutMs}ms`)
 	}
 
 	private async syncAuthwits(node: AztecNode, account: string, parentTask: WrappedTask, authwits?: Authwit[]) {
