@@ -102,3 +102,19 @@ FIX: remove `waitForPxeSyncedPastTx` + its deps; keep the raw-node
 the correct primitive is exposing `pxe.debug.sync()` as a real `sync(network)`
 RPC and calling it once — NOT a passive poll. Re-soak to test whether
 slot-fix + waitForOnChainState + the consume's own self-sync is deterministic.
+
+### Bug 4 (THE actual remaining cause) — assertion seam: submit-ack vs mined (codex #5)
+The 5th re-soak still failed at `G2 consume → expected 'ok' to be 'error'` with
+the barrier removed. codex #5: the playground consume uses `sendTx(...,
+{wait:"NO_WAIT"})`; the dApp executor (`dapp-send-executor.ts:391`) resolves the
+promise at SUBMIT, not mine (documented at `fixtures/aztec.ts:476`). So
+`consume()` returned the SUBMIT-ack `res.status`, which is racy for a revoked
+authwit (the node may or may not pre-validate at sendTx) — NOT the mined outcome.
+The revoke was working all along (the slot fix fixed it); the test asserted at
+the wrong seam, which is what produced the ~50% "consume-race" + sent me chasing
+a phantom PXE race for 3 iterations. FIX: `consume()` now waits for the consume
+tx to MINE (`waitForTxMined` — throws on `app_logic_reverted`/dropped) and returns
+"ok"/"error" on the MINED outcome. `getPublicStorageAt("latest")` is a proposed-tip
+(not proven) read, but that was NOT the failure — the seam was.
+Net F1 fix set: slot constants (security) + waitForOnChainState (kept) +
+switchAccountByAddress + mined-outcome consume assertion. NO PXE barrier.

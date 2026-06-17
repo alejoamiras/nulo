@@ -94,7 +94,17 @@ test.skipIf(!hasConfig)(
 			await waitForExecuteContent(popup)
 			await approveExecute(popup)
 			const res = await waitForPgResult(page, "sendTx", seq, 360_000)
-			return res.status
+			// The dApp's sendTx resolves at SUBMIT (NO_WAIT), and the submit-ack is
+			// racy for a revoked authwit (the node may or may not pre-validate at
+			// sendTx). Assert on the MINED outcome instead: a revoked public-authwit
+			// consume reverts at sequencing, so waitForTxMined throws → "error".
+			if (res.status !== "ok") return "error"
+			try {
+				await waitForTxMined(aztecConfig!, String(res.resultJson).replace(/^"(.*)"$/, "$1"))
+				return "ok"
+			} catch {
+				return "error"
+			}
 		}
 
 		// ── Step 1: G1 grant → consume OK (burns G1) ──
