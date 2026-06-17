@@ -4,6 +4,7 @@ import { navigateToSettings, switchAccount } from "../fixtures/helpers"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, pickFeeAndSubmitAuthwitPopup, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
+import { dumpAuthwitMeasurement } from "../fixtures/journal"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
@@ -111,6 +112,10 @@ test.skipIf(!hasConfig)(
 			await switchAccount(walletPopup, "Account") // active wallet account = owner A
 			await navigateToSettings(walletPopup, "advanced", "account-state", "authwits")
 			await clickByTestId(walletPopup, "authwits-actions-btn")
+			// MEASURE (re-armed): the revoke-all click started timing out after the
+			// slot+barrier fix — dump storage rows + page state to see if the authwit
+			// list is empty (syncAuthwit deleting a not-yet-visible grant) before the click.
+			await dumpAuthwitMeasurement(walletPopup, actionTestId)
 			// revoke-all is gated on the async authwit list (`:disabled="!authwits.length"`);
 			// clickByTestId now waits out aria-disabled, so this auto-waits for the list to
 			// load before clicking — no action-specific wait needed.
