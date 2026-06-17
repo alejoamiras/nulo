@@ -21,7 +21,7 @@ export interface ReceiptSnapshot {
 	/** Fueled deposits: the FJ that landed as gas (base units). */
 	fuelReceived?: string
 	/** The claim tx's fee (gas used), base units — read post-completion. Undefined ⇒ omit the used row
-	 *  and treat `available` as the full bought amount. */
+	 *  and treat `available` as the full received amount. */
 	fuelUsed?: string
 }
 
@@ -45,8 +45,8 @@ const gasLabel = computed(() => (props.snapshot.isPrivate ? "Private FJ" : "FJ")
 const amountDisplay = computed(() => formatBigInt(BigInt(props.snapshot.amount), BRIDGE_TOKEN_DECIMALS))
 // Fuel only ever rides IN on a deposit; a withdraw never carries gas back to Ethereum.
 const hasFuel = computed(() => isDeposit.value && !!props.snapshot.fuelReceived)
-const boughtDisplay = computed(() => (props.snapshot.fuelReceived ? formatBigInt(BigInt(props.snapshot.fuelReceived), 18) : null))
 const usedDisplay = computed(() => (props.snapshot.fuelUsed ? formatBigInt(BigInt(props.snapshot.fuelUsed), 18) : null))
+/** Gas READY = received − used (the net the user can spend next); used unknown ⇒ the full received. */
 const availableDisplay = computed(() => {
 	if (!props.snapshot.fuelReceived) return null
 	const available = BigInt(props.snapshot.fuelReceived) - (props.snapshot.fuelUsed ? BigInt(props.snapshot.fuelUsed) : 0n)
@@ -83,26 +83,22 @@ const links = computed(() => {
 			<span v-for="(c, i) in CONFETTI" :key="i" class="bit" :style="c">{{ i % 3 === 0 ? "▓" : i % 3 === 1 ? "░" : "✓" }}</span>
 		</div>
 
-		<div class="rhead">
-			<p class="stamp">{{ isDeposit ? "BRIDGED ✓" : "RELEASED ✓" }}</p>
-			<span class="meta"><template v-if="totalElapsed">{{ totalElapsed }} · </template>{{ privacyWord }}</span>
-		</div>
-		<p class="route">{{ route }}</p>
-
+		<!-- The mint left-rule is the ONLY green AND the single success mark; the bridged TOKENS are the
+		     hero (cream, large). Fee Juice is demoted to dim rows that vanish on plain/withdraw. -->
 		<div class="ledger">
-			<template v-if="isDeposit">
-				<div class="row"><span class="k">Tokens</span><span>{{ amountDisplay }} {{ BRIDGE_TOKEN_SYMBOL }}</span></div>
-				<template v-if="hasFuel">
-					<div class="row" :data-testid="TESTIDS.receiptFuel"><span class="k">Gas bought</span><span>{{ boughtDisplay }} {{ gasLabel }}</span></div>
-					<div v-if="usedDisplay" class="row"><span class="k">Gas used</span><span>&minus; {{ usedDisplay }} {{ gasLabel }}</span></div>
-				</template>
+			<p class="eyebrow">{{ route }} · {{ privacyWord }}<template v-if="totalElapsed"> · {{ totalElapsed }}</template></p>
+			<div class="row primary">
+				<span class="k">{{ isDeposit ? "Bridged" : "Released" }}</span>
+				<span class="v">{{ amountDisplay }} {{ BRIDGE_TOKEN_SYMBOL }}</span>
+			</div>
+			<template v-if="hasFuel">
+				<div class="row" :data-testid="TESTIDS.receiptFuel">
+					<span class="k">Gas ready</span><span class="v">{{ availableDisplay }} {{ gasLabel }}</span>
+				</div>
+				<div v-if="usedDisplay" class="row">
+					<span class="k">Gas used</span><span class="v">&minus; {{ usedDisplay }} {{ gasLabel }}</span>
+				</div>
 			</template>
-			<div v-else class="row"><span class="k">Released</span><span>{{ amountDisplay }} {{ BRIDGE_TOKEN_SYMBOL }} &rarr; Ethereum</span></div>
-		</div>
-
-		<div v-if="hasFuel && availableDisplay" class="reserve">
-			<div class="big">{{ availableDisplay }} {{ gasLabel }} available</div>
-			<div class="note">Ready to power your next {{ snapshot.isPrivate ? "private " : "" }}transaction</div>
 		</div>
 
 		<div v-if="links.length" class="links">
@@ -125,63 +121,53 @@ const links = computed(() => {
 	overflow: hidden;
 	display: flex;
 	flex-direction: column;
-	gap: 12px;
+	gap: 14px;
 }
 
-.rhead {
+.ledger {
+	border-left: 2px solid var(--mint);
+	padding-left: 14px;
+	display: flex;
+	flex-direction: column;
+}
+
+.eyebrow {
+	margin: 0 0 5px;
+	color: var(--txt-secondary);
+	font: 600 10px/1.5 var(--font-mono);
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+}
+
+.row {
 	display: flex;
 	justify-content: space-between;
 	align-items: baseline;
+	padding: 5px 0;
 }
 
-.meta {
+.row .k {
+	color: var(--txt-secondary);
+	font: 500 12px/1 var(--font-mono);
+}
+
+.row .v {
 	color: var(--txt-secondary);
 	font: 500 13px/1 var(--font-mono);
 }
 
-.route {
-	margin: 0;
-	font-family: var(--font-headline);
-	font-weight: 600;
-	font-size: 17px;
+/* The bridged tokens are the hero: cream + large, the only thing that draws the eye. */
+.row.primary {
+	padding-top: 7px;
+}
+
+.row.primary .k {
 	color: var(--txt-primary);
 }
 
-.ledger {
-	display: flex;
-	flex-direction: column;
-	font: 500 13px/1.5 var(--font-mono);
-}
-
-.ledger .row {
-	display: flex;
-	justify-content: space-between;
-	padding: 6px 0;
-	border-bottom: 1px solid var(--nulo-outline);
-}
-
-.ledger .row:last-child {
-	border-bottom: none;
-}
-
-.ledger .row .k {
-	color: var(--txt-secondary);
-}
-
-.reserve {
-	border: 1px solid var(--mint);
-	padding: 12px 14px;
-}
-
-.reserve .big {
-	color: var(--mint);
-	font: 600 15px/1.2 var(--font-mono);
-}
-
-.reserve .note {
-	color: var(--txt-secondary);
-	font: 500 12px/1.4 var(--font-mono);
-	margin-top: 4px;
+.row.primary .v {
+	color: var(--txt-primary);
+	font: 600 19px/1.1 var(--font-mono);
 }
 
 .links {
@@ -214,29 +200,6 @@ const links = computed(() => {
 .action:hover {
 	border-color: var(--nulo-accent);
 	color: var(--nulo-accent);
-}
-
-.stamp {
-	margin: 0;
-	font: 700 20px/1 var(--font-mono);
-	letter-spacing: 0.12em;
-	color: var(--mint);
-	animation: stamp-in 0.25s ease-out;
-}
-
-@keyframes stamp-in {
-	0% {
-		transform: scale(1.8);
-		opacity: 0;
-	}
-	60% {
-		transform: scale(0.94);
-		opacity: 1;
-	}
-	100% {
-		transform: scale(1);
-		opacity: 1;
-	}
 }
 
 .confetti {

@@ -8,7 +8,7 @@ const L1 = `0x${"ab".repeat(32)}`
 const L2 = `0x${"cd".repeat(32)}`
 
 describe("BridgeReceipt", () => {
-	it("deposit receipt: route, tokens, both validated links, NEW BRIDGE emits", async () => {
+	it("deposit receipt: header (route · privacy · time), tokens hero, both links, NEW BRIDGE emits", async () => {
 		const w = mount(BridgeReceipt, {
 			props: {
 				snapshot: {
@@ -22,9 +22,10 @@ describe("BridgeReceipt", () => {
 				},
 			},
 		})
-		expect(w.text()).toContain("BRIDGED ✓")
-		expect(w.text()).toContain("Ethereum → Aztec")
+		expect(w.text()).toContain("Bridged")
 		expect(w.text()).toContain("100.00 AZLO")
+		// Route · privacy · time now all live in the one mini-header (time moved up off the bottom).
+		expect(w.text()).toContain("Ethereum → Aztec")
 		expect(w.text()).toContain("private")
 		expect(w.text()).toContain("3m 42s")
 		const links = w.findAll(sel(TESTIDS.receiptLink))
@@ -47,7 +48,7 @@ describe("BridgeReceipt", () => {
 				},
 			},
 		})
-		expect(w.text()).toContain("RELEASED ✓")
+		expect(w.text()).toContain("Released")
 		expect(w.text()).toContain("Aztec → Ethereum")
 		expect(w.text()).toContain("40.00 AZLO")
 		// A withdraw never carries gas back to Ethereum — no FJ anywhere.
@@ -55,7 +56,7 @@ describe("BridgeReceipt", () => {
 		expect(w.findAll(sel(TESTIDS.receiptLink))).toHaveLength(1)
 	})
 
-	it("private fueled deposit: the ledger + reserve (bought/used/available, Private FJ)", () => {
+	it("private fueled deposit: tokens hero + dim gas rows (ready = received − used, Private FJ)", () => {
 		const w = mount(BridgeReceipt, {
 			props: {
 				snapshot: {
@@ -69,16 +70,14 @@ describe("BridgeReceipt", () => {
 				},
 			},
 		})
-		expect(w.text()).toContain("Gas bought")
-		expect(w.text()).toContain("87.70 Private FJ")
+		expect(w.text()).toContain("Gas ready")
+		// ready = 87.70 − 2.88 = 84.82
+		expect(w.text()).toContain("84.82 Private FJ")
 		expect(w.text()).toContain("Gas used")
 		expect(w.text()).toContain("2.88")
-		// available = 87.70 − 2.88 = 84.82
-		expect(w.text()).toContain("84.82 Private FJ available")
-		expect(w.text()).toContain("Ready to power your next private transaction")
 	})
 
-	it("public fueled deposit: gas reads FJ (not Private FJ); note drops 'private'", () => {
+	it("public fueled deposit: gas reads FJ (not Private FJ)", () => {
 		const w = mount(BridgeReceipt, {
 			props: {
 				snapshot: {
@@ -89,22 +88,20 @@ describe("BridgeReceipt", () => {
 				},
 			},
 		})
-		expect(w.text()).toContain("53.00 FJ available")
+		expect(w.text()).toContain("Gas ready")
+		expect(w.text()).toContain("53.00 FJ")
 		expect(w.text()).not.toContain("Private FJ")
-		expect(w.text()).toContain("Ready to power your next transaction")
-		expect(w.text()).not.toContain("next private")
 	})
 
-	it("no-fuel deposit: no gas rows, no reserve box", () => {
+	it("no-fuel deposit: tokens only, no gas rows", () => {
 		const w = mount(BridgeReceipt, {
 			props: { snapshot: { direction: "deposit" as const, amount: "100000000000000000000", isPrivate: true } },
 		})
 		expect(w.text()).toContain("100.00 AZLO")
-		expect(w.text()).not.toContain("Gas bought")
-		expect(w.text()).not.toContain("available")
+		expect(w.text()).not.toContain("Gas")
 	})
 
-	it("fueled deposit without a known claim fee: available = bought, no 'used' row", () => {
+	it("fueled deposit without a known claim fee: ready = received, no 'used' row", () => {
 		const w = mount(BridgeReceipt, {
 			props: {
 				snapshot: {
@@ -115,7 +112,8 @@ describe("BridgeReceipt", () => {
 				},
 			},
 		})
-		expect(w.text()).toContain("87.70 Private FJ available")
+		expect(w.text()).toContain("Gas ready")
+		expect(w.text()).toContain("87.70 Private FJ")
 		expect(w.text()).not.toContain("Gas used")
 	})
 })
