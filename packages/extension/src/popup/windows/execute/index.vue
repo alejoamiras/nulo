@@ -388,6 +388,16 @@ const stripStatus = computed<"ready" | "loading" | "cancelled">(() => {
 	return "ready"
 })
 
+// Mirrors the `requiresFeeSelection` early-return inside approve(): a send-like op
+// with no chosen fee can't execute yet. Gating the Confirm button's disabled state
+// on it (not just approve()'s guard) makes the button authoritative — a click while
+// the fee is still auto-selecting can no longer no-op into the "select a fee"
+// warning. e2e clicks wait for the button to enable, so this also removes the race
+// where approval is clicked before the default fee resolves (slow PXE / cold start).
+const needsFeeSelection = computed(() =>
+	operations.value.some((op) => requiresFeeSelection(op as unknown as import("./types").DraftOperation)),
+)
+
 const showJson = () => {
 	if (!requestId.value) return
 	const url = new URL(chrome.runtime.getURL("src/popup/index.html#/windows/json"))
@@ -512,7 +522,7 @@ onUnmounted(() => {
 					variant="primary"
 					size="medium"
 					:loading="isLoading"
-					:disabled="processingError?.type === 'error' || tokenMetadataLoading || !initComplete || operations.length === 0"
+					:disabled="processingError?.type === 'error' || tokenMetadataLoading || !initComplete || operations.length === 0 || needsFeeSelection"
 				>
 					<Text size="13" color="inverse">{{ isLoading ? "EXECUTING" : "Confirm" }}</Text>
 				</Button>
