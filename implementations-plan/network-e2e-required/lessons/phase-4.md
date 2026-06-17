@@ -86,3 +86,19 @@ mismatch). FIX: `switchAccountByAddress(walletPopup, ownerA)` (+ data-account-ad
 on the AccountsPopup item). My app fixes (slot swap + PXE barrier) were correct
 and necessary — they removed the consume-race mode that previously masked this
 test bug. Validation: re-soak 27721713670 (10/10).
+
+### Bug 2 (PXE barrier) was WRONG — removed (codex consult #4)
+codex read the upstream PXE source: `getSyncedBlockHeader()` is PASSIVE (returns
+the stored header; never drives sync — `@aztec/pxe block_synchronizer.ts:138`
+sync is user-driven). So `waitForPxeSyncedPastTx`'s poll could never advance →
+120s timeout per mutation → 344s total → CDP `Runtime.callFunctionOn timed out`
+(the revoke RPC never resolved, popup overlay never left). CRITICAL CORRECTION:
+the dApp consume's `simulateTx`/`proveTx` ALREADY forces a PXE sync before
+execution (`@aztec/pxe pxe.ts:747,937`), so there is no PXE-lag race at the
+consume seam — the barrier solved the wrong seam with the wrong primitive.
+`block-header-anchor.ts` is the fast view path only, not the send/consume path.
+FIX: remove `waitForPxeSyncedPastTx` + its deps; keep the raw-node
+`waitForOnChainState` (throws on timeout). If a residual consume-race remains,
+the correct primitive is exposing `pxe.debug.sync()` as a real `sync(network)`
+RPC and calling it once — NOT a passive poll. Re-soak to test whether
+slot-fix + waitForOnChainState + the consume's own self-sync is deterministic.

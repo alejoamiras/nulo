@@ -4,9 +4,8 @@ import { Service } from "@nulo/extension-messaging/background"
 import { maybeRethrowAsRpcCancel } from "@/wallet/services/execution/rpc-cancel"
 import { ExecutionService, type FeeSettings, type AuthwitContent } from "@/wallet/services/execution/service"
 import { ProfileService } from "@/wallet/services/profile/service"
-import { NetworkService, networkInfoFrom, type Network } from "@/wallet/services/network/service"
+import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
-import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import type { WrappedTask } from "@/wallet/services/task/wrapped-task"
 import { TaskService, RevokeAuthwitsContent, StepContent } from "@/wallet/services/task/service"
 import { TransactionService, OriginType } from "@/wallet/services/transaction/service"
@@ -16,7 +15,6 @@ import { getAuthRegistryAddress, isAuthRegistryEnabled, isAuthwitConsumable } fr
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { AUTH_REGISTRY_SERVICE_NAME, type Authwit, type Events, MAX_REVOKES_PER_TX, type Methods } from "./spec"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { TxHash } from "@aztec/stdlib/tx"
 
 export * from "./spec"
 
@@ -38,7 +36,6 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	private executionService: ExecutionService = null!
 	private transactionService: TransactionService = null!
 	private taskService: TaskService = null!
-	private pxeService: PxeServiceClient = null!
 
 	public constructor(logger: ILogger) {
 		super(AUTH_REGISTRY_SERVICE_NAME, logger)
@@ -51,7 +48,6 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		this.executionService = services.get(ExecutionService.name)
 		this.transactionService = services.get(TransactionService.name)
 		this.taskService = services.get(TaskService.name)
-		this.pxeService = new PxeServiceClient(this.logger)
 
 		// Authwits + registry-enabled flags are keyed per-account. When an
 		// account is deleted (e.g. as part of a chain purge), wipe its
@@ -141,7 +137,6 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 				async () => (await Promise.all(authwits.map((a) => isAuthwitConsumable(node, a.account, a.hash)))).every((c) => !c),
 				"revoke: authwits no longer consumable",
 			)
-			await this.waitForPxeSyncedPastTx(node, network, txHash)
 			await this.syncAuthwits(node, account, task, authwits)
 
 			task.complete()
@@ -192,7 +187,6 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 				async () => (await isAuthRegistryEnabled(node, account)) === enabled,
 				`registry enabled=${enabled}`,
 			)
-			await this.waitForPxeSyncedPastTx(node, network, txHash)
 			await this.syncStatus(node, account, task)
 
 			task.complete()
@@ -242,28 +236,6 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		// report "done", so a fast follow-up consume could still spend a grant the
 		// user believes is revoked.
 		throw new Error(`waitForOnChainState timed out (${label}); on-chain effect not confirmed`)
-	}
-
-	/**
-	 * The raw-node `waitForOnChainState` confirms the mutation is visible at the
-	 * node's `latest`, but the offscreen PXE — which the dApp consume path
-	 * simulates + proves against — can lag the node by a block (see
-	 * execution/helpers/block-header-anchor.ts). Without this barrier a fast
-	 * follow-up consume anchors PRE-mutation state and `node.sendTx` accepts the
-	 * stale-proved tx, so a revoked authwit still spends. Wait until the PXE has
-	 * synced PAST the mutation tx's block before returning.
-	 */
-	private async waitForPxeSyncedPastTx(node: AztecNode, network: Network, txHash: string, timeoutMs = 120_000): Promise<void> {
-		const receipt = await node.getTxReceipt(TxHash.fromString(txHash))
-		const target = receipt.blockNumber
-		if (target === undefined) return
-		const netInfo = networkInfoFrom(network)
-		const start = Date.now()
-		while (Date.now() - start < timeoutMs) {
-			if ((await this.pxeService.getSyncedBlockHeader(netInfo)).getBlockNumber() >= target) return
-			await sleep(500)
-		}
-		throw new Error(`PXE did not sync past block ${target} (auth-registry mutation barrier); the dApp consume view would be stale`)
 	}
 
 	private async syncAuthwits(node: AztecNode, account: string, parentTask: WrappedTask, authwits?: Authwit[]) {
