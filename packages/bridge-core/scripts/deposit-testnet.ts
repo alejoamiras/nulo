@@ -5,7 +5,7 @@
  * L1 (Sepolia, real PRIVATE_KEY via viem): MintableERC20 USDC + canonical TokenPortal.
  * L2 (testnet aztec, EmbeddedWallet with REAL proofs + sponsored FPC): a fresh Schnorr
  *     account, token_minter_proxy, aztec-standards Token (minter = proxy), our token_bridge.
- * Wire: portal.initialize(registry, usdc, bridge); proxy.set_token + set_minter(bridge).
+ * Wire: portal.initialize(registry, usdc, bridge); proxy.set_token + set_bridge(bridge).
  * Flow: mint USDC → approve → depositToAztecPublic → poll claim_public → assert L2 balance.
  *
  * Real proofs make every L2 tx take minutes — expect ~15-30 min end to end.
@@ -168,7 +168,7 @@ async function main() {
 	)
 
 	await proxy.methods.set_token(token.address).send(sendOpts)
-	await proxy.methods.set_minter(bridge.address, true).send(sendOpts)
+	await proxy.methods.set_bridge(bridge.address).send(sendOpts)
 	console.log(`proxy wired (${mins()})`)
 
 	const portalC = getContract({ address: portal, abi: TokenPortalAbi as never, client: wallet as never })

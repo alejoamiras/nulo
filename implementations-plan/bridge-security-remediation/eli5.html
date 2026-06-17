@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — bridge-security-remediation</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .danger { background:#fdecea; border-left-color:#b3261e; }
+  </style>
+</head>
+<body>
+  <h1>Bridge Security Remediation</h1>
+  <p>The security audit found 8 issues in the bridge contracts — one <strong>critical and live</strong> (anyone can re-point the deployed L1 portal and drain it). This plan fixes all 8 across two PRs: a quick no-redeploy PR (CI gate + a JS guard + docs), then a heavier PR that ships new, hardened contracts and <strong>migrates the live testnet bridge onto them</strong>. The chosen fixes were locked one-by-one with you earlier; this plan is purely <em>how</em> to implement + migrate safely.</p>
+
+  <h2>Why this tier was chosen (deep)</h2>
+  <p>HIGH on blast radius (real bridge funds), irreversibility (a one-way live cutover), migration cost (full L2-stack redeploy), and security sensitivity (it IS the security fix) — 4+ HIGH ⇒ <code>deep</code>. The process earned it: three independent plans → a contradiction-check → a double audit that <strong>rejected a keystone</strong> (a CREATE2 factory would have shipped stub bytecode to production) — caught and corrected before you ever saw a gate.</p>
+
+  <h2>Phases</h2>
+  <div class="phase"><h3>PR A · A1 — JS guard (F-005)</h3><p>Make the shared bridge helper refuse a private-fuel bridge that's missing its secret/recipient, instead of silently stranding the gas.</p><p class="muted">Proves itself by: bridge-core unit tests (the bad inputs throw before signing), green.</p></div>
+  <div class="phase"><h3>PR A · A2 — docs (F-007)</h3><p>Verify the bearer-secret is never logged/stored in plaintext and document that contract for integrators.</p><p class="muted">Proves itself by: bridge-core tests + lint, green.</p></div>
+  <div class="phase"><h3>PR A · (F-003 — NOT done, your call)</h3><p>Contract tests are NOT wired into CI. They run locally only (via the PR-B phase gates). F-003 stays an open, documented finding — a future Aztec bump could silently strand deposits, caught only by local discipline.</p></div>
+  <div class="phase"><h3>PR B · B1 — forked, init-locked portal (F-001)</h3><p>A copy of the portal with a one-line "already set up? stop" guard, compiled with the <em>real</em> Aztec interfaces so the deployed code can't subtly diverge. (A throwaway stub copy exists only to run the regression test.)</p><p class="muted">Proves itself by: the guard reverts a second init (unit test); the content-hash test still matches (no drift).</p></div>
+  <div class="phase"><h3>PR B · B2 — sign the swap target + slippage floor (F-004/F-006) + regression test</h3><p>Bind which swap contract runs into the user's signature; require a non-zero minimum. Move the critical PoC in as a permanent regression test.</p><p class="muted">Proves itself by: a signature for one swap target reverts after the target changes; witness hashes match L1↔JS.</p></div>
+  <div class="phase"><h3>PR B · B3 — lock the minter (F-002)</h3><p>Rebuild the L2 minter so the bridge is the <em>only</em> minter, fixed at setup with no owner backdoor. (Forces a fresh L2 token too — the old token's minter can't be changed.) Also updates the sandbox/deposit wiring so its own test passes.</p><p class="muted">Proves itself by: Noir compile + sandbox end-to-end (mint-on-claim, burn-on-exit) on the new wiring.</p></div>
+  <div class="phase"><h3>PR B · B4 — deploy-script rework</h3><p>Deploy-then-init the portal; per-attempt fresh salts + a resume rule (so a failed attempt can't half-brick a generation); write the new addresses to a private temp file (never the live config directly); add an "existing-deployment" smoke script.</p><p class="muted">Proves itself by: the candidate-manifest writer/readers round-trip; faucet unit tests green.</p></div>
+  <div class="phase"><h3>PR B · B5 — pre-live logic gate</h3><p>Prove the new contracts on a Sepolia fork (L1) + a local sandbox (L2) before any real transaction.</p><p class="muted">Proves itself by: fork tests + sandbox deposit/withdraw + the staged portal compiling, all green. Hard gate.</p></div>
+  <div class="phase danger"><h3>PR B · B-canary — throwaway testnet rehearsal</h3><p>Deploy a <em>disposable</em> generation to the real testnet and run a full deposit→claim against it — the first real-network proof — without touching the app.</p><p class="muted">Proves itself by: canary deposit→claim + fueled bridge round-trip on testnet; canary portal refuses re-init.</p></div>
+  <div class="phase danger"><h3>PR B · B6 — the real cutover (irreversible)</h3><p>Deploy the real generation, read everything back on-chain (abort on any mismatch), then atomically point the app at it; rollback = don't re-point. The old contracts are abandoned.</p><p class="muted">Proves itself by: on-chain read-backs match; portal re-init reverts on-chain; faucet build+test green; a live deposit→claim works.</p></div>
+  <div class="phase"><h3>PR B · B7 — re-audit</h3><p>Run <code>/harden security</code> over the new contracts to confirm the 8 findings are closed and nothing new opened.</p><p class="muted">Proves itself by: a clean harden report; the regression pins stay green.</p></div>
+
+  <h2>Human context</h2>
+  <p>The portal is the L1 "vault + mailbox" to Aztec; the minter proxy controls who can create the L2 token. The critical fix can't be patched in place (the live portal is fixed bytecode), so we deploy fresh, hardened contracts and move the app onto them. Because the L2 token's minter is permanently fixed at creation, a new minter means a new token — so old testnet balances are left behind (your call: fresh start).</p>
+
+  <h2>Open questions / residuals (already decided, noted for the record)</h2>
+  <ul>
+    <li>Old testnet AZLO balances are <strong>abandoned</strong> (fresh start, no notice).</li>
+    <li>F-003 (contract CI) is <strong>NOT done</strong> — contract tests run locally only; the silent-strand-on-Aztec-bump risk stays open (caught only by local discipline).</li>
+    <li>A <strong>throwaway testnet canary</strong> runs before the real cutover.</li>
+    <li>Multisig ownership is <strong>deferred</strong> — the cutover is single-hot-key; tracked as a follow-up.</li>
+    <li>The deploy→init step has a small (testnet, tightly-sequenced) window, closed by the guard + read-back-abort.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope + the two-PR split + the 10 phases above.</li>
+      <li>Confirm tier (<code>deep</code>).</li>
+      <li>Confirm the validation plan: unit/lint (PR A); contract-unit + content-hash + Sepolia-fork + sandbox (B1–B5); live-network e2e (B-canary, B6).</li>
+      <li>Confirm <code>/harden security</code> as the post-impl re-audit (B7).</li>
+      <li><strong>Decide the cutover autonomy:</strong> should the implementation run autonomously through B5 + the canary and then <em>pause for your explicit "go"</em> before the irreversible B6 cutover (recommended), or run fully autonomously including B6?</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>One drives the autonomous implementation session. <code>/goal</code> works turn-after-turn until a condition holds and survives <code>--resume</code>; <code>/loop</code> fires on an interval. This plan ends in an <strong>irreversible live cutover</strong>, so the recommended seed stops before B6 for your go-ahead.</p>
+    <p class="warning">Use exactly ONE per session. They don't compose.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended: /goal (stops before the irreversible cutover)</h3>
+      <pre><code>/goal Drive implementations-plan/bridge-security-remediation. Done = PR A merged to dev (F-005/F-007, Quality/Status green) AND PR B phases B1–B5 + B-canary marked ✓ in plan.md with each phase's validation gate reported passing in the transcript AND a LESSONS_FILE printed per phase — then STOP and surface for explicit go-ahead before B6 (the live cutover). Hard limits: testnet only; never main; deployer key never printed; B5 must be green before B-canary; do NOT run B6 without my explicit "go".</code></pre>
+    </div>
+
+    <h3>Alternative: /loop 15m (self-driving cadence)</h3>
+    <pre><code>/loop 15m Drive implementations-plan/bridge-security-remediation. Each firing: reality-check plan.md + lessons + git; fix red gates; else advance the next pending phase honoring its validation gate; commit small/conventional; push; decisions → /codex xhigh, log in lessons. STOP before B6 (live cutover) for my explicit go. Hard limits: testnet only; never main; deployer key never printed; 5 failures on one step ⇒ stop + reassess with codex.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="brief.md">brief.md</a> · <a href="./lessons/">Lessons logs</a> · <a href="../../audit/security/2026-06-14-bridge-redteam/report.html">source audit report</a></p>
+</body>
+</html>

@@ -523,7 +523,12 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 
 		let secretHex: string
 		if (rec.isPrivate) {
-			setStep(id, "unsealing", secretCache.has(id) ? undefined : "one Ethereum signature")
+			// Only narrate UNSEALING when a real signature is needed (a rediscovered record). A fresh
+			// in-session deposit has its secret cached, so the unseal is instant - setting "unsealing"
+			// (which the rail maps to CLAIM) flashes CLAIM and then regresses to CROSSING when the sync
+			// gate below runs (the "instant green then rollback" bug). Cached ⇒ stay quiet; the gate
+			// narrates CROSSING until the simulate probe says the message is consumable.
+			if (!secretCache.has(id)) setStep(id, "unsealing", "one Ethereum signature")
 			const resolved = await resolvePrivateSecret(rec)
 			if (!resolved) return
 			secretHex = resolved.secretHex

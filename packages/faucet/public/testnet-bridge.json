@@ -1,8 +1,9 @@
 {
 	"network": "testnet",
 	"l1": {
-		"usdc": "0xa40a2fe147b7e96325d7c7d974b1f11c3ed82c68",
-		"portal": "0x9c41d1dd627ed53e25702590ab974d9dfa0c11ea",
+		"usdc": "0x764a16d2098021bb89c2fab0b23c352b115991bb",
+		"portal": "0xf2f1619abd4b4d0a330de35b4b3d22fce5d30fa0",
+		"portalSource": "forked-v1",
 		"token": {
 			"name": "Aztec Nulo",
 			"symbol": "AZLO",
@@ -10,8 +11,8 @@
 			"maxWholePerTx": 1000
 		},
 		"fuel": {
-			"router": "0x8394d4e792e5b9dd881829bb55f4956cc64a2206",
-			"swapTarget": "0xe223f59a8b0375afea25c7eccf537bc18867823e",
+			"router": "0xabc21f50a7a55c1a86bbc86562e4b828b4f0d5c0",
+			"swapTarget": "0x439543810874bf927538a7054cac7e139e16b732",
 			"poolManager": "0xe03a1074c86cfedd5c142c4f04f1a1536e203543",
 			"quoter": "0x61b3f2011a92d183c7dbadbda940a7555ccf9227",
 			"permit2": "0x000000000022d473030f116ddee9f6b43ac78ba3",
@@ -34,24 +35,24 @@
 	},
 	"l2": {
 		"proxy": {
-			"address": "0x265f078bbf8ee55520c46df595c036a66b7b20301128ba4f100e1e1bd6fdc973",
-			"salt": 23313,
+			"address": "0x0148e5b4c2b85325976da039ad641efc110a793685ea118714fe1befebcd8db9",
+			"salt": 159662759693,
 			"constructorArtifact": "constructor",
 			"constructorArgs": []
 		},
 		"token": {
-			"address": "0x05e80c537c6a7c50563e5ba7bc333d6c6728ddc6290c8a8a910df3a0ba15ac20",
-			"salt": 23314,
+			"address": "0x1a8ba6694070db378cc04ebe1076975841317059c88042cc3eef9b26d1757411",
+			"salt": 200911740871,
 			"constructorArtifact": "constructor_with_minter",
-			"constructorArgs": ["Aztec Nulo", "AZLO", 18, "0x265f078bbf8ee55520c46df595c036a66b7b20301128ba4f100e1e1bd6fdc973"]
+			"constructorArgs": ["Aztec Nulo", "AZLO", 18, "0x0148e5b4c2b85325976da039ad641efc110a793685ea118714fe1befebcd8db9"]
 		},
 		"bridge": {
-			"address": "0x0e31670a54cac23d4d74b0d83c44797369a4a2d08a375aab1514283623e2748e",
-			"salt": 23315,
+			"address": "0x2ac163ce12faadfeb7f504077dfd18b24eab1f95f9214b19b36b34200baeaa8f",
+			"salt": 310287137504,
 			"constructorArtifact": "constructor",
 			"constructorArgs": [
-				"0x265f078bbf8ee55520c46df595c036a66b7b20301128ba4f100e1e1bd6fdc973",
-				"0x9c41d1dd627ed53e25702590ab974d9dfa0c11ea"
+				"0x0148e5b4c2b85325976da039ad641efc110a793685ea118714fe1befebcd8db9",
+				"0xf2f1619abd4b4d0a330de35b4b3d22fce5d30fa0"
 			]
 		}
 	}

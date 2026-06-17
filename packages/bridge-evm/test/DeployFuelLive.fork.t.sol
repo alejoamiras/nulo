@@ -163,7 +163,8 @@ contract DeployFuelLiveForkTest is Test {
                 fuelSecretHash: p.fuelSecretHash,
                 minFuelOutput: p.minFuelOutput,
                 routeHash: keccak256(abi.encode(p.path, p.zeroForOnes)),
-                isPrivate: p.isPrivate
+                isPrivate: p.isPrivate,
+                swapTarget: address(router.swapTarget())
             })
         );
         bytes32 permitTypehash = keccak256(

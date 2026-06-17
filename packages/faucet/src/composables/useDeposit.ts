@@ -651,6 +651,8 @@ export function useDepositFlow() {
 					minFuelOutput: fuelPre.minOutput,
 					routeHash: hashRoute(fuelPre.route.path, fuelPre.route.zeroForOnes),
 					isPrivate,
+					// F-004: bind the router's swap target into the witness; a setSwapTarget voids this signature.
+					swapTarget: fuelCfg.swapTarget,
 				}
 				const typed = bridgeWitnessPermitTypedData(
 					{ permitted: { token: L1_USDC, amount }, spender: fuelCfg.router, nonce, deadline },

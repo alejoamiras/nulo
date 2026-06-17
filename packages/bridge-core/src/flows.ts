@@ -220,6 +220,8 @@ export interface SwapBridgeParams {
 	path: PoolKey[]
 	zeroForOnes: boolean[]
 	isPrivate: boolean
+	/** The router's current swap target — witness-bound (F-004); a setSwapTarget voids this signature. */
+	swapTarget: Address
 	/** PRIVATE fuel only — the injected bridge secret `deriveBridgeSecret(salt, claimer)`. Omitted ⇒
 	 *  `Fr.random()` (correct for recipient-bound PUBLIC fuel). A random secret on the private path
 	 *  would strand the Fee Juice forever: the claimer must reconstruct it from `msg_sender` inside
@@ -308,6 +310,7 @@ export async function runSwapBridge(
 		minFuelOutput: p.minFuelOutput,
 		routeHash: hashRoute(p.path, p.zeroForOnes),
 		isPrivate: p.isPrivate,
+		swapTarget: p.swapTarget,
 	}
 	const typedData = bridgeWitnessPermitTypedData(
 		{ permitted: { token: p.bridgeToken, amount: p.totalAmount }, spender: p.router, nonce: p.nonce, deadline: p.deadline },

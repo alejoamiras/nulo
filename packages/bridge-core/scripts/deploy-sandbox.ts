@@ -6,7 +6,7 @@
  * L2: token_minter_proxy, aztec-standards Token (minter = proxy), our token_bridge
  *     (proxy, portal) — via aztec.js, mirroring faucet/scripts/deploy.ts plumbing
  *     (EmbeddedWallet + sponsored fee). The mock stands in for V4 (codex verdict c).
- * Wire: portal.initialize(registry, usdc, bridge); proxy.set_token + set_minter(bridge);
+ * Wire: portal.initialize(registry, usdc, bridge); proxy.set_token + set_bridge(bridge);
  *     fund the mock with sandbox feeJuice.
  *
  * Run: bun run deploy:sandbox   (from packages/bridge-core)
@@ -164,8 +164,8 @@ async function main() {
 	)
 
 	await proxy.methods.set_token(token.address).send(sendOpts)
-	await proxy.methods.set_minter(bridge.address, true).send(sendOpts)
-	console.log("proxy wired (token + bridge minter)")
+	await proxy.methods.set_bridge(bridge.address).send(sendOpts)
+	console.log("proxy wired (token + sole bridge minter)")
 
 	// ─── Wire L1 portal + fund mock (viem) ───────────────────────────
 	const portalC = getContract({ address: portal, abi: TokenPortalAbi as never, client: wallet as never })

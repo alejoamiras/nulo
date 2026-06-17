@@ -78,6 +78,7 @@ const params = (): SwapBridgeParams => ({
 	path: PATH,
 	zeroForOnes: [true],
 	isPrivate: false,
+	swapTarget: "0x00000000000000000000000000000000000000bb",
 	nonce: 1n,
 	deadline: 2n ** 64n,
 	chainId: 31337,

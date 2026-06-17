@@ -9,7 +9,7 @@ import { type Address, type Hex, encodeAbiParameters, keccak256, toHex } from "v
 
 /** Mirrors SwapBridgeRouter.BRIDGE_WITNESS_TYPEHASH. */
 export const BRIDGE_WITNESS_TYPE =
-	"BridgeWitness(address tokenPortal,address bridgeToken,uint256 totalAmount,uint256 fuelAmount,bytes32 aztecRecipient,bytes32 fuelRecipient,bytes32 tokenSecretHash,bytes32 fuelSecretHash,uint256 minFuelOutput,bytes32 routeHash,bool isPrivate)"
+	"BridgeWitness(address tokenPortal,address bridgeToken,uint256 totalAmount,uint256 fuelAmount,bytes32 aztecRecipient,bytes32 fuelRecipient,bytes32 tokenSecretHash,bytes32 fuelSecretHash,uint256 minFuelOutput,bytes32 routeHash,bool isPrivate,address swapTarget)"
 
 export const BRIDGE_WITNESS_TYPEHASH = keccak256(toHex(BRIDGE_WITNESS_TYPE))
 
@@ -34,6 +34,7 @@ export interface BridgeWitness {
 	minFuelOutput: bigint
 	routeHash: Hex // bytes32
 	isPrivate: boolean
+	swapTarget: Address // the router's current swap target — witness-bound (F-004)
 }
 
 /** keccak256(abi.encode(path, zeroForOnes)) — matches SwapBridgeRouter._hashRoute. */
@@ -96,6 +97,7 @@ export const BRIDGE_WITNESS_PERMIT_TYPES = {
 		{ name: "minFuelOutput", type: "uint256" },
 		{ name: "routeHash", type: "bytes32" },
 		{ name: "isPrivate", type: "bool" },
+		{ name: "swapTarget", type: "address" },
 	],
 } as const
 
@@ -132,6 +134,7 @@ export function hashBridgeWitness(w: BridgeWitness): Hex {
 				{ type: "uint256" }, // minFuelOutput
 				{ type: "bytes32" }, // routeHash
 				{ type: "bool" }, // isPrivate
+				{ type: "address" }, // swapTarget
 			],
 			[
 				BRIDGE_WITNESS_TYPEHASH,
@@ -146,6 +149,7 @@ export function hashBridgeWitness(w: BridgeWitness): Hex {
 				w.minFuelOutput,
 				w.routeHash,
 				w.isPrivate,
+				w.swapTarget,
 			],
 		),
 	)

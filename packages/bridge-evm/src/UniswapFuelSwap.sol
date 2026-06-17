@@ -95,6 +95,7 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
         require(path.length > 0, "UniswapFuelSwap: empty path");
         require(path.length == zeroForOnes.length, "UniswapFuelSwap: path/direction mismatch");
         require(inputAmount > 0, "UniswapFuelSwap: zero input");
+        require(minOutput > 0, "UniswapFuelSwap: zero minOutput");
         require(inputAmount <= uint256(type(int256).max), "UniswapFuelSwap: input overflow");
         _validateRoute(inputToken, path, zeroForOnes);
 

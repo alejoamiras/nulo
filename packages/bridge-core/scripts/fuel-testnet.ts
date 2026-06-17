@@ -41,7 +41,10 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}` | undefined
 if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-core/.env)")
 
 const here = dirname(fileURLToPath(import.meta.url))
-const CONFIG = JSON.parse(readFileSync(join(here, "..", "..", "faucet", "public", "testnet-bridge.json"), "utf8"))
+const configArg = process.argv.indexOf("--config")
+const CONFIG_PATH =
+	configArg !== -1 ? (process.argv[configArg + 1] as string) : join(here, "..", "..", "faucet", "public", "testnet-bridge.json")
+const CONFIG = JSON.parse(readFileSync(CONFIG_PATH, "utf8"))
 const OUT = join(here, "..", "..", "bridge-evm", "out")
 const fuel = CONFIG.l1.fuel
 if (!fuel) throw new Error("testnet-bridge.json has no l1.fuel - run the P2 deploy first")
@@ -174,6 +177,7 @@ async function main() {
 				router: fuel.router,
 				routerAbi: evmAbi("SwapBridgeRouter"),
 				permit2: fuel.permit2,
+				swapTarget: fuel.swapTarget,
 				tokenPortal: CONFIG.l1.portal,
 				bridgeToken: azlo,
 				totalAmount: TOTAL,

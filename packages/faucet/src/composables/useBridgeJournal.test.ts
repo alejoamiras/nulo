@@ -1,4 +1,5 @@
 import {
+	type DepositEnvelopeV2,
 	type DepositJournalRecord,
 	type KV,
 	type WithdrawJournalRecord,
@@ -313,6 +314,37 @@ describe("useBridgeJournal engine", () => {
 		// A fresh claim now narrates CROSSING from the very first probe and never moves backward.
 		expect(sampledSteps[0]).toBe("syncing")
 		expect(sampledSteps.includes("sending")).toBe(false)
+	})
+
+	it("a fresh PRIVATE claim (secret cached) stays on CROSSING - no UNSEALING/CLAIM flash before the gate", async () => {
+		const deps = baseDeps(kv)
+		// The claim is built AFTER the (private) unseal step and BEFORE the sync gate. A fresh in-session
+		// deposit has its secret CACHED, so the unseal is instant - a stray UNSEALING step here is the
+		// "instant green then rollback" flash (the rail maps UNSEALING → CLAIM). Sample the step there.
+		const stepWhenClaimBuilt: (string | undefined)[] = []
+		const sampledSteps: (string | undefined)[] = []
+		const claim = vi.fn(async () => {
+			stepWhenClaimBuilt.push(useBridgeJournal().runtime.value["0xfreshpriv"]?.step)
+			return {
+				simulate: async () => {
+					sampledSteps.push(useBridgeJournal().runtime.value["0xfreshpriv"]?.step)
+				},
+				send: async () => ({ txHash: "0xclaimtx" }),
+			}
+		})
+		cacheSecret("0xfreshpriv", "0xprivatesecret", {
+			secret: "0xprivatesecret",
+			recipient: RECIPIENT,
+			amount: "100000000",
+			sealerL1: SEALER,
+			leafIndex: "7",
+			v: 2,
+		} as unknown as DepositEnvelopeV2)
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xfreshpriv", { isPrivate: true }))
+		await runDepositClaim("0xfreshpriv")
+		expect(stepWhenClaimBuilt).not.toContain("unsealing") // cached unseal is silent - no CLAIM flash
+		expect(sampledSteps[0]).toBe("syncing") // the rail stayed on CROSSING through the gate
 	})
 
 	it("⑰ a claim THIS process sent completes on the checkpointed receipt - the lagging PXE cannot block it", async () => {

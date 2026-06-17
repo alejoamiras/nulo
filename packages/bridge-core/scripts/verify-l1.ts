@@ -4,15 +4,15 @@
  * Two contracts, two compile roots:
  * - MintableERC20 - our own foundry project (packages/bridge-evm); forge reconstructs the
  *   standard-json from the same foundry.toml that produced the deployed bytecode.
- * - TokenPortal - deployed from @aztec/l1-artifacts' PRECOMPILED bytecode. The npm package
- *   ships the full l1-contracts foundry project EXCEPT the compilation target itself
- *   (test/portals/TokenPortal.sol is pruned), so the source is vendored at
- *   packages/bridge-evm/upstream/TokenPortal.sol and keccak-checked against the artifact
- *   metadata before every run - a hash mismatch means an Aztec bump changed the portal and
- *   the vendored copy must be re-fetched from the matching aztec-packages tag.
+ * - the portal - compiled from source in the l1-contracts root (the npm package ships the full
+ *   foundry project EXCEPT the target source). A `l1.portalSource: "forked-v1"` config verifies the
+ *   F-001 fork NuloTokenPortal, staged + self-pinned by source keccak (see portal-artifact.ts);
+ *   otherwise the canonical TokenPortal is verified, keccak-checked against the artifact metadata.
+ *   Both sources are vendored under packages/bridge-evm/upstream/.
  *
- * Requires ETHERSCAN_API_KEY (bun auto-loads packages/bridge-core/.env). Pass --dry-run to
- * build + print source-graph stats without submitting (no key needed).
+ * Requires ETHERSCAN_API_KEY (bun auto-loads packages/bridge-core/.env). Pass --dry-run to build +
+ * print source-graph stats without submitting (no key needed). Pass --config <path> to verify a
+ * candidate manifest instead of the live testnet-bridge.json.
  */
 
 import { spawnSync } from "node:child_process"
@@ -22,9 +22,12 @@ import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { encodeAbiParameters, keccak256, parseAbiParameters } from "viem"
+import { stageForkSource } from "./portal-artifact"
 
 const here = dirname(fileURLToPath(import.meta.url))
-const CONFIG_PATH = join(here, "..", "..", "faucet", "public", "testnet-bridge.json")
+const configArg = process.argv.indexOf("--config")
+const CONFIG_PATH =
+	configArg !== -1 ? (process.argv[configArg + 1] as string) : join(here, "..", "..", "faucet", "public", "testnet-bridge.json")
 const EVM_ROOT = join(here, "..", "..", "bridge-evm")
 const L1_ARTIFACTS_ROOT = join(dirname(createRequire(import.meta.url).resolve("@aztec/l1-artifacts/package.json")), "l1-contracts")
 const PORTAL_SOURCE_REL = join("test", "portals", "TokenPortal.sol")
@@ -103,7 +106,11 @@ const tokenArgs = encodeAbiParameters(parseAbiParameters("string, string, uint8,
 	BigInt(token.maxWholePerTx),
 ])
 
-placePortalSource()
+// `forked-v1` (the F-001 security fork) verifies NuloTokenPortal from the l1-root with a self-pinned
+// source hash; a legacy/absent marker verifies the canonical TokenPortal against the artifact metadata.
+const forkedPortal = config.l1.portalSource === "forked-v1"
+if (forkedPortal) stageForkSource(L1_ARTIFACTS_ROOT)
+else placePortalSource()
 
 const common = dryRun
 	? ["--chain-id", CHAIN_ID, "--show-standard-json-input"]
@@ -117,10 +124,11 @@ const okToken = runForge(EVM_ROOT, `MintableERC20 @ ${config.l1.usdc}`, [
 	tokenArgs,
 	...common,
 ])
-const okPortal = runForge(L1_ARTIFACTS_ROOT, `TokenPortal @ ${config.l1.portal}`, [
+const portalTarget = forkedPortal ? "test/portals/NuloTokenPortal.sol:NuloTokenPortal" : "test/portals/TokenPortal.sol:TokenPortal"
+const okPortal = runForge(L1_ARTIFACTS_ROOT, `${forkedPortal ? "NuloTokenPortal" : "TokenPortal"} @ ${config.l1.portal}`, [
 	"verify-contract",
 	config.l1.portal,
-	"test/portals/TokenPortal.sol:TokenPortal",
+	portalTarget,
 	...common,
 ])
 

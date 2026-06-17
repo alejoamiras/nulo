@@ -50,10 +50,10 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     bytes32 internal constant BRIDGE_WITNESS_TYPEHASH = keccak256(
-        "BridgeWitness(address tokenPortal,address bridgeToken,uint256 totalAmount,uint256 fuelAmount,bytes32 aztecRecipient,bytes32 fuelRecipient,bytes32 tokenSecretHash,bytes32 fuelSecretHash,uint256 minFuelOutput,bytes32 routeHash,bool isPrivate)"
+        "BridgeWitness(address tokenPortal,address bridgeToken,uint256 totalAmount,uint256 fuelAmount,bytes32 aztecRecipient,bytes32 fuelRecipient,bytes32 tokenSecretHash,bytes32 fuelSecretHash,uint256 minFuelOutput,bytes32 routeHash,bool isPrivate,address swapTarget)"
     );
     string public constant BRIDGE_WITNESS_TYPE_STRING =
-        "BridgeWitness witness)BridgeWitness(address tokenPortal,address bridgeToken,uint256 totalAmount,uint256 fuelAmount,bytes32 aztecRecipient,bytes32 fuelRecipient,bytes32 tokenSecretHash,bytes32 fuelSecretHash,uint256 minFuelOutput,bytes32 routeHash,bool isPrivate)TokenPermissions(address token,uint256 amount)";
+        "BridgeWitness witness)BridgeWitness(address tokenPortal,address bridgeToken,uint256 totalAmount,uint256 fuelAmount,bytes32 aztecRecipient,bytes32 fuelRecipient,bytes32 tokenSecretHash,bytes32 fuelSecretHash,uint256 minFuelOutput,bytes32 routeHash,bool isPrivate,address swapTarget)TokenPermissions(address token,uint256 amount)";
 
     // ─── State ───────────────────────────────────────────────────────
     ISignatureTransfer public immutable permit2;
@@ -122,6 +122,7 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
         uint256 minFuelOutput;
         bytes32 routeHash;
         bool isPrivate;
+        address swapTarget;
     }
 
     // ─── Constructor ─────────────────────────────────────────────────
@@ -176,7 +177,8 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
                     fuelSecretHash: p.fuelSecretHash,
                     minFuelOutput: p.minFuelOutput,
                     routeHash: _hashRoute(p.path, p.zeroForOnes),
-                    isPrivate: p.isPrivate
+                    isPrivate: p.isPrivate,
+                    swapTarget: address(swapTarget)
                 })
             )
         );
@@ -260,7 +262,8 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
                     fuelSecretHash: bytes32(0),
                     minFuelOutput: 0,
                     routeHash: bytes32(0),
-                    isPrivate: p.isPrivate
+                    isPrivate: p.isPrivate,
+                    swapTarget: address(swapTarget)
                 })
             )
         );
@@ -336,7 +339,8 @@ contract SwapBridgeRouter is Ownable2Step, ReentrancyGuard {
                 witness.fuelSecretHash,
                 witness.minFuelOutput,
                 witness.routeHash,
-                witness.isPrivate
+                witness.isPrivate,
+                witness.swapTarget
             )
         );
     }

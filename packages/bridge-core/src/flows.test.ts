@@ -133,6 +133,7 @@ describe("flows — runSwapBridge injectable fuel secret (L3)", () => {
 		path: [],
 		zeroForOnes: [],
 		isPrivate: true,
+		swapTarget: ADDR,
 		nonce: 0n,
 		deadline: 9_999_999_999n,
 		chainId: 31337,

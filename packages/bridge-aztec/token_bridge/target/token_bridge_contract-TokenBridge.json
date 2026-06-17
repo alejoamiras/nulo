@@ -7133,7 +7133,7 @@
                     }
                   },
                   {
-                    "name": "can_mint",
+                    "name": "bridge",
                     "value": {
                       "fields": [
                         {
