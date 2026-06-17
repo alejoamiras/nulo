@@ -94,5 +94,32 @@ clean tree (pre-Phase-2) lints at exit 0 with 53 pre-existing warnings, so the
 - paths-filter behaviour confirmed on the Phase-2 PR run (it touches workflows +
   tests ⇒ `extension-network=true`).
 
-### Enumerated flaky/failing set (TO FILL after the baseline soak)
-_pending soak run_
+### Enumerated flaky/failing set (de-retry soak 27715586770: 8 files ×7, retry=0, proverless)
+
+**Result: 6/7 iterations GREEN; iter 3 RED — but iter 3 was a pure INFRA boot
+failure, NOT an app/test flake.** iter 3 log:
+```
+[e2e-setup] Failed to start local node: ... did not become healthy within 90000ms
+Error: [e2e-setup] FATAL: local Aztec node failed to become healthy ...
+error: script "e2e:agent" exited with code 86   ← sentinel fired
+```
+then the workflow retried once (per 2b) and the retry ALSO boot-failed (a ~1/64
+double-boot; matches the plan's ~1/8 boot-flake inference). So:
+
+1. **The boot sentinel is VALIDATED on real CI** — it classified a node-unhealthy
+   boot failure as exit 86 and triggered the single infra-retry. (Plus the #98
+   `heavy/concurrent-confirm` job passed end-to-end through the new classify path,
+   and the classifier unit test is 7/7.)
+2. **The 8 de-retried files are NOT app-flaky** — 6 clean retry:0 iterations; the
+   only red was infra. The removed `retry:1/2` overrides were over-cautious.
+   ⇒ **Phase 6 has no confirmed app-flake among these 8** (the broader #98 sharded
+   strict run + future soaks remain the final confirmation; C2 is still expected
+   red until its fixture is seeded).
+
+Remaining Phase-6 candidates: the un-quarantined `incoming-transfers` C2 (known
+broken fixture — seed a Token row), plus anything the full #98 sharded strict run
+surfaces beyond these 8.
+
+Caveat: cap=1 infra-retry did NOT save iter 3 (two boots failed in a row). That is
+the expected ~1/64 residual; acceptable per plan Inference (verify the per-PR
+residual before the Phase-7 flip).
