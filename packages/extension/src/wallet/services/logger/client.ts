@@ -1,6 +1,7 @@
 import { ServiceClient } from "@nulo/extension-messaging/background"
 import { DummyLogger, type ILogger, type LogLevel } from "@/wallet/logger"
 import { LOGGER_SERVICE_NAME, type Methods } from "./spec"
+import type { BatchEntry } from "./batching-forwarder"
 
 export * from "./spec"
 
@@ -19,5 +20,10 @@ export class LoggerServiceClient extends ServiceClient<Methods> implements ILogg
 
 	public log(source: string, level: LogLevel, ...data: unknown[]) {
 		return this.request("log", this.context, source, level, ...data)
+	}
+
+	/** Ship a batch of buffered entries in one RPC (see {@link BatchEntry}). */
+	public logBatch(entries: BatchEntry[]) {
+		return this.request("logBatch", this.context, entries)
 	}
 }

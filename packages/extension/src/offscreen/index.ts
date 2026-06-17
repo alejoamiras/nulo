@@ -2,6 +2,7 @@ import { ACCELERATOR_HOST, ACCELERATOR_PORT, ACCELERATOR_REQUIRED, ACCELERATOR_R
 import { E2E_PROVERLESS, E2E_PROVERLESS_BUILD_STAMP } from "@/e2e/config"
 import { consoleMethods, LogLevel } from "@/wallet/logger"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
+import { createBatchingForwarder } from "@/wallet/services/logger/batching-forwarder"
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { createPxeOffscreen } from "@nulo/aztec-runtime/offscreen/entry"
 import { ProductionPxeFactory } from "@nulo/aztec-runtime/pxe"
@@ -18,12 +19,18 @@ chrome.runtime.onMessage.addListener((message) => {
 	return false
 })
 
-// catch console
+// catch console — buffer + BATCH the forwarding so a high-volume producer (the
+// offscreen PXE block-synchronizer's per-block output) can't flood the single SW
+// event loop with one RPC per line, which starved dApp-tx execution-start (see
+// implementations-plan/proverless-e2e-fix). Warn/Error flush immediately; Info/Debug
+// are debounced into batches; teardown flush is best-effort (MV3 offscreen).
 const logger = new LoggerServiceClient("offscreen")
+const logForwarder = createBatchingForwarder((entries) => logger.logBatch(entries))
+self.addEventListener("beforeunload", () => logForwarder.dispose())
 for (const [method, level] of consoleMethods) {
 	// biome-ignore lint/suspicious/noExplicitAny: dynamic global property + console varargs
 	;(self as any)[`on${method}`] = (...args: any[]) => {
-		logger.log("pxe", level, ...args)
+		logForwarder.forward("pxe", level, ...args)
 	}
 }
 

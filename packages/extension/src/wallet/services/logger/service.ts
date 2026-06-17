@@ -2,6 +2,7 @@ import type { ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import { DummyLogger, type LogLevel, type LoggerStore } from "@/wallet/logger"
 import { LOGGER_SERVICE_NAME, type Methods } from "./spec"
+import type { BatchEntry } from "./batching-forwarder"
 
 export * from "./spec"
 
@@ -20,5 +21,10 @@ export class LoggerService extends Service<Methods> implements ServiceSpec<Metho
 
 	public async log(context: string | undefined, source: string, level: LogLevel, ...data: unknown[]) {
 		this._logger.logWithContext(context, source, level, ...data)
+	}
+
+	/** Process a batch in ONE handler turn — N entries, one event-loop wake. */
+	public async logBatch(context: string | undefined, entries: BatchEntry[]) {
+		for (const e of entries) this._logger.logWithContext(context, e.source, e.level, ...e.data)
 	}
 }
