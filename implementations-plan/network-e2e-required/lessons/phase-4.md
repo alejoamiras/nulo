@@ -56,3 +56,18 @@ the PXE barrier). **← record 10/10 here, then mark Phase 4 done.**
 _pending re-soak_
 
 LESSONS_FILE=implementations-plan/network-e2e-required/lessons/phase-4.md
+
+## Bug 3 (round 3) — empty authwit list at revoke step (codex consult 019e... #3)
+After bug-1+2 fixes, authwit-lifecycle flipped to failing 4/4 at the REVOKE step:
+`clickByTestId("authwits-revoke-all")` times out because the list is empty
+(`:disabled="!authwits.length"`). codex (`/tmp/codex-f1-syncdelete.md`) could NOT
+find a sync trigger on the popup/switchAccount/navigateToSettings path — so it
+cannot prove what empties the list, but by elimination it is `syncAuthwit`'s
+bucket-B prune: with the now-correct slots, a freshly-granted authwit that isn't
+yet node/PXE-visible reads `approved_actions=0` → `syncAuthwit` deletes it
+(service.ts:281). Recommended fix: (a) `syncAuthwit` must NOT delete on a bare
+`!isConsumable` read (can't tell revoked/consumed from not-yet-visible); (b) in
+`revokeAuthwits`, after positive confirmation, delete the exact revoked ids
+directly (the only context that KNOWS they're gone). **Capture re-armed
+(afc4e32) + 3× soak running to confirm storage-empty (bucket B) vs page-issue
+before implementing.**
