@@ -1,7 +1,8 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
-import { approveExecute, waitForExecuteContent, waitForPopup, waitForSendTxActiveStage } from "../fixtures/popups"
+import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
+import { waitForDappExecuteWorked } from "../fixtures/journal"
 import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -35,7 +36,7 @@ test.skipIf(!hasConfig)(
 
 		// Pre-mint tokens to the dApp account so simulate succeeds (otherwise
 		// the journal goes straight to `failed` and the awaiting card never
-		// reaches an active stage — breaks waitForSendTxActiveStage).
+		// reaches an active stage — breaks waitForDappExecuteWorked).
 		await mintPublicTokensForAccount(aztecConfig!, accountAddress)
 
 		// Set inputs
@@ -74,10 +75,10 @@ test.skipIf(!hasConfig)(
 
 		await approveExecute(execPopup)
 
-		// Wait for the wallet's journal to enter `proving` instead of the dApp's
-		// full sendTx promise. See waitForSendTxActiveStage for rationale.
+		// Wait for the wallet's journal to reach real work instead of the dApp's
+		// full sendTx promise. See waitForDappExecuteWorked for rationale.
 		const walletPopup = await openPopup(dappConnectedExtensionWithTransactionCap)
-		await waitForSendTxActiveStage(walletPopup)
+		await waitForDappExecuteWorked(walletPopup)
 
 		// Prover-ON canary (this file runs in the real-proving canary job, NOT the
 		// proverless pool): wait through the REAL prove to submit and assert the

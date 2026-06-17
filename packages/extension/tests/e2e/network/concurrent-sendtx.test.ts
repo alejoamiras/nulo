@@ -1,7 +1,8 @@
 import { expect, inject } from "vitest"
-import { clickByTestId, openPopup, test, waitForHash } from "../fixtures/extension"
+import { openPopup, test, waitForHash } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { waitForPopup, waitForExecuteContent, rejectExecute } from "../fixtures/popups"
+import { readDappExecuteRecords, waitForInFlight } from "../fixtures/journal"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -38,13 +39,7 @@ const hasConfig = aztecConfig !== undefined
  *   — popup #1 is rejected BEFORE approval, so the wallet's
  *   `buildAndEstimateTxRequest` never runs. The baton-release boundary
  *   (background.ts: queued → pending → baton.release) is unverified at
- *   e2e level. Add an approval-path companion test that:
- *     - Approves popup #1 and lets T1's tx-build complete
- *     - Asserts popup #2 opens precisely at T1's tx-build boundary, not after
- *       T1's full proving/submit cycle
- *     - Asserts both txs eventually confirm
- *   Lands with v3 (Layer B — parallel popup UX refactor), where the new
- *   boundary is what the test pins. Codex audit `019e6abf` P2 flagged this.
+ *   e2e level. The approval-path companion is concurrent-sendtx-approve.test.ts.
  */
 test.skipIf(!hasConfig)(
 	"concurrent-sendtx — two queued sendTx requests serialize FIFO and both settle",
@@ -99,68 +94,38 @@ test.skipIf(!hasConfig)(
 		const executeTargetsDuringFirst = ctx.browser.targets().filter((t) => t.type() === "page" && t.url().includes("#/windows/execute"))
 		expect(executeTargetsDuringFirst.length).toBe(1)
 
-		// Journal-state snapshot: BEFORE rejecting the first popup, both records
-		// must exist — one claimed by execution, one still queued behind the
-		// FIFO baton. If the pre-fix bug returned, this snapshot would have
-		// only one record. Use a popup tab on the SW host so chrome.storage
-		// is readable from page context.
+		// Journal-state assertion (the source of truth): BEFORE rejecting popup #1,
+		// the journal must hold both records (a single record = the pre-fix lost-tx
+		// bug). Wait on the journal so we don't race record-creation ordering.
 		const walletPopup = await openPopup(ctx)
 		await waitForHash(walletPopup, "#/popup/general", 30_000)
-		const journalRecords = await walletPopup.evaluate(async () => {
-			// Records are persisted under `nulo:journal@<id>` in chrome.storage.local
-			// (see OperationJournalService EntityStorage construction; storage was
-			// moved from session → local on 2026-06-05 so failed/cancelled history
-			// survives browser exit).
-			const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
-			const keys = Object.keys(all).filter((k) => k.startsWith("nulo:journal@"))
-			return keys
-				.map((k) => {
-					const raw = all[k]
-					try {
-						return typeof raw === "string"
-							? (JSON.parse(raw) as { id: string; kind: string; progress?: { stage?: string }; sessionId?: string })
-							: null
-					} catch {
-						return null
-					}
-				})
-				.filter(
-					(r): r is { id: string; kind: string; progress?: { stage?: string }; sessionId?: string } =>
-						!!r && r.kind === "dapp_execute",
-				)
-				.map((r) => ({ id: r.id, stage: r.progress?.stage ?? "?", sessionId: r.sessionId }))
-		})
+		// Pre-approval BOTH records are `queued` (the queued->pending claim happens at
+		// execution start, not popup-open), so assert >=2 in-flight + >=1 queued, NOT
+		// an active record. The approval-boundary variant (concurrent-sendtx-approve)
+		// is where one record reaches an active stage.
+		await waitForInFlight(walletPopup, { minInFlight: 2, minQueued: 1, timeout: 30_000 })
+		const journalRecords = await readDappExecuteRecords(walletPopup)
 
-		// UI cross-check: the wallet popup's RecentActivityView must render a
-		// `tx-awaiting-card` per in-flight journal op. Two cards = the
-		// bug-fix is user-visible in the wallet UI, not just internally in
-		// storage. RecentActivityView renders one TransactionAwaitingCard
-		// per renderedInFlightOps entry; pre-fix it would have rendered one.
-		// Wait briefly for the journal subscription to settle the cards.
+		// UI cross-check (secondary to the journal above): RecentActivityView must
+		// render a `tx-awaiting-card` per in-flight op, so the fix is user-visible
+		// in the wallet UI, not just in storage. The journal is the primary oracle;
+		// this only confirms the render projection. Generous wait — the cards paint
+		// from the journal subscription that waitForInFlight already confirmed.
 		await walletPopup.waitForFunction(() => document.querySelectorAll('[data-testid="tx-awaiting-card"]').length >= 2, {
-			timeout: 10_000,
+			timeout: 15_000,
 			polling: 200,
 		})
-		const awaitingCardCount = await walletPopup.evaluate(() => {
-			return document.querySelectorAll('[data-testid="tx-awaiting-card"]').length
-		})
+		const awaitingCardCount = await walletPopup.evaluate(() => document.querySelectorAll('[data-testid="tx-awaiting-card"]').length)
 		await walletPopup.close()
 
-		// Expect TWO dapp_execute records both bound to the same dApp session.
-		// First should be in pending/simulating/proving (claimed by execution);
-		// second should still be in `queued` (FIFO blocked behind first).
+		// Two dapp_execute records, both bound to the same dApp session. At least
+		// one must be `queued` (FIFO blocked); the other is a live-claim stage.
 		expect(journalRecords.length).toBeGreaterThanOrEqual(2)
 		const sessionIds = new Set(journalRecords.map((r) => r.sessionId).filter(Boolean))
 		expect(sessionIds.size).toBe(1)
 		const stages = journalRecords.map((r) => r.stage).sort()
-		// At least one record must be `queued` (FIFO blocked); the other can
-		// be any of the live-claim stages depending on how far the wallet's
-		// pipeline progressed before our reject lands. Pinning the queued
-		// presence is the direct anti-bug invariant.
 		expect(stages).toContain("queued")
-		// RecentActivityView shows at least both dapp_execute rows; older
-		// records from prior fixture activity may add extras, so use ≥ rather
-		// than exact match.
+		// Older records from prior fixture activity may add extras, so use >= not exact.
 		expect(awaitingCardCount).toBeGreaterThanOrEqual(2)
 
 		// Arm wait for SECOND popup BEFORE rejecting the first. preExisting
