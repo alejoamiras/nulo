@@ -166,3 +166,35 @@ consume assertion. Diagnostic instrumentation ([revoke-slot-check],
 
 STATUS: Phase 4 BLOCKED on the anomaly. Decision required (see plan.md).
 LESSONS_FILE=implementations-plan/network-e2e-required/lessons/phase-4.md
+
+---
+
+## Resumed (new-angle): read approved_actions AT the consume's execution block
+
+Un-parked with an explicit "genuinely new approach, not another blind fix"
+mandate. Every prior diagnostic read `approved_actions[A][storedHash]` at the
+PROVEN tip (always 0). The one value never captured: that slot AT the consume's
+OWN execution block. Crux from `waitForTxMined` (fixtures/aztec.ts:491) — it
+returns at `status="success"` (the PROPOSED tip), so the consume executes against
+the proposed block's state, which need not equal the proven tip.
+
+Experiment (`327b8d1`, `[consume-vs-revoke]` log): capture the consume tx's block
+(`lastConsumeBlock`), then read `approved_actions[A][storedHash]` at THAT block.
+
+Decision tree:
+- **slotAtConsumeBlock == 0 AND outcome == ok** → HASH DIVERGENCE. The consume
+  read a slot the revoke cleared, yet didn't revert — impossible if it read THIS
+  slot. So its recomputed hash ≠ storedHash; it read a different (still-granted)
+  slot. Contradicts codex #6/#7 ("identical computation") → the static trace
+  missed an input delta (prime suspect: grant passes STRING args `"1"`, consume
+  passes `BigInt(1)` — inner-hash arg encoding). Fix: align grant/track hashing
+  with the consume's encoding; pin with a unit test on the two hashes.
+- **slotAtConsumeBlock != 0** → SNAPSHOT/ORDERING. The proven revoke is absent at
+  the consume's execution block. If consumeBlock <= revoke's effective block →
+  ordering race (consume sequenced onto a pre-revoke state-base); fix = barrier
+  that waits for a proposed block strictly AFTER the revoke before submitting the
+  consume. If consumeBlock > revoke block yet slot!=0 → genuine sequencer
+  public-state-base-vs-proven-tip anomaly → precise Aztec-team question (with the
+  exact block numbers + slot from this run).
+
+RESULT: PENDING — soak `bbexi2wj0` (NULO_E2E_PROVERLESS=1 e2e:agent authwit-lifecycle).
