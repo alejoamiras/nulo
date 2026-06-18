@@ -111,6 +111,9 @@ test.skipIf(!hasConfig)(
 			await switchAccount(walletPopup, "Account") // active wallet account = owner A
 			await navigateToSettings(walletPopup, "advanced", "account-state", "authwits")
 			await clickByTestId(walletPopup, "authwits-actions-btn")
+			// revoke-all is gated on the async authwit list (`:disabled="!authwits.length"`);
+			// clickByTestId now waits out aria-disabled, so this auto-waits for the list to
+			// load before clicking — no action-specific wait needed.
 			await clickByTestId(walletPopup, actionTestId)
 			// The popup is a Vue overlay inside the wallet page (popupStore.open),
 			// not a separate browser window — submit in place.

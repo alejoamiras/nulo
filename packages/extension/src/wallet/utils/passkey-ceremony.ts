@@ -4,18 +4,10 @@
  * `PasskeyService.materializeCredential` consumes.
  *
  * Single source of truth for the WebAuthn parameter shape and PRF
- * extension wiring. Both ceremony hosts in the codebase use this:
- *
- *   - PATH A (active): `src/popup/components/popups/PasskeyCeremonyDialog.vue`
- *     — in-page modal opened by popup-originated flows (auth, register,
- *     import).
- *   - PATH B (transport, no current callers): `src/popup/windows/passkey/index.vue`
- *     — kept for future SW-driven flows where the popup isn't open. The
- *     SW spawns the window via `WindowManager`, the window calls this
- *     helper, posts the result back via `PasskeyService.resolvePasskeyRequest`.
- *
- * Sharing the helper guarantees the two paths never diverge in WebAuthn
- * shape — a regression in either calls the same code.
+ * extension wiring: the in-page dialog (PATH A) and the SW-driven window
+ * (PATH B, kept for flows where the popup isn't open) both call this, so
+ * the two ceremony hosts never diverge — a regression in either calls the
+ * same code.
  */
 
 import { type PasskeyCredentialData, PASSKEY_PRF_LABEL } from "@nulo/wallet-crypto"

@@ -142,3 +142,31 @@ describe("AccountStateService.getSendersAcrossActiveNetworks", () => {
 		expect(getSendersSpy).toHaveBeenCalledTimes(2)
 	})
 })
+
+describe("AccountStateService.restore (nested restoreError normalization)", () => {
+	let accountStateService: AccountStateService
+	let services: ServiceCollectionType
+
+	beforeEach(async () => {
+		services = new ServiceCollection()
+		services.add(new FakeNetworkService())
+		accountStateService = new AccountStateService(new LoggerStore(new ConfigStore()))
+		services.add(accountStateService)
+		await services.start()
+	})
+
+	test("normalizes nested sender + contract restore errors to message strings", async () => {
+		// A backup item whose networkId is absent from `networks` makes both
+		// inner loops throw "Network not found"; the per-item catch stores the
+		// normalized message STRING (via toRestoreError) at the nested
+		// sender/contract level — not a raw Error object.
+		const backup = [{ networkId: "missing", senders: [{ address: "0x1" }], contracts: [{ address: "0x2" }] }] as unknown as Parameters<
+			typeof accountStateService.restore
+		>[0]
+
+		const restored = await accountStateService.restore(backup, [])
+		expect(restored[0]!.senders[0]!.restoreError).toBe("Network not found")
+		expect(restored[0]!.contracts[0]!.restoreError).toBe("Network not found")
+		expect(typeof restored[0]!.senders[0]!.restoreError).toBe("string")
+	})
+})

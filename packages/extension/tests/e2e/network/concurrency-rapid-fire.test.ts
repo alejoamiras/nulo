@@ -15,10 +15,7 @@ const hasConfig = aztecConfig !== undefined
  */
 test.skipIf(!hasConfig)(
 	"concurrency-rapid-fire — 5 concurrent silent calls settle FIFO",
-	// retry: 2 — load-induced flake under full-suite state. retry: 1 has been
-	// observed to also drop, so accepting one extra retry budget. Passes
-	// deterministically in isolation.
-	{ timeout: 60_000, retry: 2 },
+	{ timeout: 60_000 },
 	async ({ dappConnectedExtension }) => {
 		const page = dappConnectedExtension.playgroundPage
 		const seqBefore = await snapshotResultSeq(page)

@@ -1,4 +1,5 @@
 import type { ILogger } from "@/wallet/logger"
+import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import { getTokenInfo } from "@/wallet/services/token/utils"
@@ -264,7 +265,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			} catch (err) {
 				result.push({
 					...tb,
-					restoreError: err instanceof Error ? err.message : err,
+					restoreError: toRestoreError(err),
 				})
 			}
 		}

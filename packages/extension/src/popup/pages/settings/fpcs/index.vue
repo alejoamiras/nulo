@@ -118,16 +118,12 @@ onBeforeUnmount(() => {
 		<SubPageHeader title="Manage FPCs" :backTo="'/popup/settings'" />
 
 		<Flex direction="column" gap="20" :class="$style.content">
-			<LoadingState v-if="isLoading" label="FETCHING FPCS" />
-
-			<Tooltip v-else-if="error" wide>
-				<Banner :action="{ name: 'Try again', callback: () => refreshFpcs() }" variant="error" wide>
-					Something went wrong
-				</Banner>
-				<template #content>{{ error }}</template>
-			</Tooltip>
-
-			<Flex v-else direction="column" gap="16">
+			<!-- The synthetic Public Fee Juice anchor is hardcoded + network-
+				independent, so the list (anchor first) always renders. Loading /
+				error apply only to the storage/protocol-backed rows and show
+				below — without this, no PXE (smoke / offline) left the whole list,
+				including the always-present anchor, hidden behind the spinner. -->
+			<Flex direction="column" gap="16">
 				<SectionLabel label="FPCs" :count="displayedRows.length" />
 
 				<ItemsContainer>
@@ -143,6 +139,15 @@ onBeforeUnmount(() => {
 						@delete="handleDelete"
 					/>
 				</ItemsContainer>
+
+				<LoadingState v-if="isLoading" label="FETCHING FPCS" />
+
+				<Tooltip v-else-if="error" wide>
+					<Banner :action="{ name: 'Try again', callback: () => refreshFpcs() }" variant="error" wide>
+						Something went wrong
+					</Banner>
+					<template #content>{{ error }}</template>
+				</Tooltip>
 			</Flex>
 
 			<Button @click="popupStore.open('new_fpc')" wide variant="primary" size="large" data-testid="fpc-new-btn">

@@ -7,10 +7,9 @@
  * security key) appears on top of the overlay; the overlay itself is
  * just visual context.
  *
- * Used by: auth.vue, profile/new.vue, import.vue (popup-originated
- * passkey flows). PATH B (`src/popup/windows/passkey/index.vue`) is the
- * SW-driven equivalent that runs in a chrome.windows.create popup; both
- * call the same `runPasskeyCeremony` helper to keep WebAuthn shape
+ * This is PATH A (in-page). PATH B (`src/popup/windows/passkey/index.vue`)
+ * is the SW-driven equivalent that runs in a chrome.windows.create popup;
+ * both call the same `runPasskeyCeremony` helper to keep WebAuthn shape
  * consistent.
  *
  * Cancel paths (all abort the same AbortController):
@@ -28,7 +27,7 @@ import { onBeforeUnmount, onMounted } from "vue"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import type { PasskeyRequest } from "@/wallet/services/passkey/spec"
 import { UserRejectedError } from "@nulo/extension-messaging/errors"
-import { runPasskeyCeremony } from "@/popup/utils/passkey-ceremony"
+import { runPasskeyCeremony } from "@/wallet/utils/passkey-ceremony"
 
 const props = defineProps<{
 	request: PasskeyRequest

@@ -491,7 +491,14 @@ export class WalletSdkDispatcher {
 		hooks?: DispatchHooks,
 	): Promise<unknown> {
 		// Phase 0.5: dappSession captured at dispatch entry.
-		const [_network, account] = await this.resolveNetworkAndAccount(ctx, dappSession)
+		const rawOpts = (args[1] as Record<string, unknown>) ?? {}
+		const isNoFrom = isNoFromRequest(rawOpts.from)
+		// An explicit `from` (a real address — not the NO_FROM sentinel, not omitted) names
+		// the account the dApp wants to send from. Resolve to THAT account (validated against
+		// the session) instead of defaulting to the first session account, which silently
+		// ignored a multi-account dApp's choice and could send from the wrong account.
+		const requestedFrom = isNoFrom || rawOpts.from == null ? undefined : String(rawOpts.from)
+		const [_network, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedFrom)
 		const caipAccount = formatCaipAccount(ctx.chainId, account.address)
 		this.logger.log(
 			"wallet-sdk",
@@ -508,8 +515,6 @@ export class WalletSdkDispatcher {
 			`handleSendTx: session=${dappSession.id}, sessionAccounts=${JSON.stringify(dappSession.accounts)}`,
 		)
 
-		const rawOpts = (args[1] as Record<string, unknown>) ?? {}
-		const isNoFrom = isNoFromRequest(rawOpts.from)
 		const opts = isNoFrom ? rawOpts : { ...rawOpts, from: account.address }
 		const execPayload = args[0] as Record<string, unknown> | undefined
 		this.logger.log(
@@ -1180,6 +1185,7 @@ export class WalletSdkDispatcher {
 	private async resolveNetworkAndAccount(
 		ctx: SessionContext,
 		dappSession: IDappSessionRef | undefined,
+		requestedFrom?: string,
 	): Promise<[INetworkRef, IAccountRef]> {
 		// Phase 0.5: dappSession captured at dispatch entry; no inline lookup here.
 		const network = await this.resolveNetwork(ctx)
@@ -1190,6 +1196,19 @@ export class WalletSdkDispatcher {
 
 		if (dappSession?.accounts && dappSession.accounts.length > 0) {
 			const sessionAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
+			// Honor an explicit, session-authorized `requestedFrom`: a dApp connected to
+			// multiple accounts may send from any of them. Match it against the
+			// session-authorized set and REJECT anything outside it — never silently fall
+			// back to the first account (that both ignores the dApp's choice and would let a
+			// tx be sent from an account the request did not name). Mirrors the resolution in
+			// `handleGrantPublicAuthwit`.
+			if (requestedFrom !== undefined) {
+				const requested = allAccounts.find((acc) => sessionAddresses.has(acc.address) && acc.address === requestedFrom)
+				if (requested) {
+					return [network, requested]
+				}
+				throw new Error(`Requested account ${requestedFrom} is not authorized for this dApp session`)
+			}
 			const sessionAccount = allAccounts.find((acc) => sessionAddresses.has(acc.address))
 			if (sessionAccount) {
 				return [network, sessionAccount]
