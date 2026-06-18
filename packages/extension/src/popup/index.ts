@@ -21,7 +21,7 @@ import { createApp } from "vue"
 import { createRouter, createWebHashHistory, type RouteLocationNormalized, type NavigationGuardNext } from "vue-router"
 import App from "./app.vue"
 import routes from "~pages"
-import "@/assets/styles/_base.scss"
+import "@nulo/design/base.css"
 import "./index.scss"
 
 import { initAppServiceContext, managers } from "@/utils/core"

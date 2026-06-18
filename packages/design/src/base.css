@@ -1,16 +1,19 @@
 /*
- * Vendored from packages/extension/src/assets/styles/_base.scss.
- * Dark theme only (the faucet has no light/dark toggle per plan-v2 non-goals).
- * Dropped: ClashDisplay legacy font, Material Symbols, JSON-viewer + logs-viewer
- * vars, SCSS nesting (flattened to plain CSS), theme="light" overrides.
+ * @nulo/design — the wallet's base stylesheet, relocated verbatim from the extension's
+ * _base.scss + _flex.scss + _text.scss (round-1 Phase 2 takeover). Import once at app entry:
+ * `import "@nulo/design/base.css"`. Fonts are package-owned (./fonts); the utility layer is
+ * generated (./utilities.css). Token VALUES are kept byte-faithful to the extension's prior CSS so
+ * both apps render identically (see implementations-plan/design-system-externalization/plan.md §2.0).
  */
 
+@import "./utilities.css";
+
 @font-face {
-	font-family: "InterVariable";
+	font-family: InterVariable;
 	font-style: normal;
 	font-weight: 100 900;
 	font-display: swap;
-	src: url("/fonts/InterVariable.woff2") format("woff2");
+	src: url("./fonts/InterVariable.woff2") format("woff2");
 }
 
 @font-face {
@@ -19,8 +22,8 @@
 	font-weight: 300 700;
 	font-display: swap;
 	src:
-		url("/fonts/SpaceGrotesk-latin.woff2") format("woff2"),
-		url("/fonts/SpaceGrotesk-latin-ext.woff2") format("woff2");
+		url("./fonts/SpaceGrotesk-latin.woff2") format("woff2"),
+		url("./fonts/SpaceGrotesk-latin-ext.woff2") format("woff2");
 }
 
 @font-face {
@@ -28,16 +31,53 @@
 	font-style: normal;
 	font-weight: 400 700;
 	font-display: swap;
-	src: url("/fonts/JetBrainsMono-latin.woff2") format("woff2");
+	src: url("./fonts/JetBrainsMono-latin.woff2") format("woff2");
+}
+
+@font-face {
+	font-family: "Material Symbols Outlined";
+	font-style: normal;
+	font-weight: 100 700;
+	font-display: block;
+	src: url("./fonts/MaterialSymbolsOutlined.woff2") format("woff2");
+}
+
+.material-symbols-outlined {
+	/* biome-ignore lint/a11y/useGenericFontNames: icon font — a generic fallback would render ligature text, not icons (verbatim from the prior _base.scss) */
+	font-family: "Material Symbols Outlined";
+	font-weight: normal;
+	font-style: normal;
+	font-size: 24px;
+	line-height: 1;
+	letter-spacing: normal;
+	text-transform: none;
+	display: inline-block;
+	white-space: nowrap;
+	word-wrap: normal;
+	direction: ltr;
+	-webkit-font-smoothing: antialiased;
+	font-variation-settings:
+		"FILL" 0,
+		"wght" 300,
+		"GRAD" 0,
+		"opsz" 24;
+}
+
+:root[data-has-nav="true"] {
+	--nav-clearance: 96px;
 }
 
 :root {
-	/** fonts */
+	--base-width: 360px;
+	--base-height: 600px;
+
+	/* nav clearance: 24px default (no nav), 96px when bottom nav is present */
+	--nav-clearance: 24px;
+
 	--font-headline: "Space Grotesk", system-ui, sans-serif;
 	--font-body: "InterVariable", system-ui, sans-serif;
 	--font-mono: "JetBrains Mono", monospace;
 
-	/** general */
 	--app-bg: #0a0908;
 	--card-bg: #141312;
 	--tooltip-bg: #0f0e0d;
@@ -45,7 +85,6 @@
 	--border: rgba(74, 70, 63, 0.5);
 	--border-hovered: rgba(74, 70, 63, 0.8);
 
-	/** nulo surfaces */
 	--nulo-surface: #141312;
 	--nulo-surface-low: #1d1b1a;
 	--nulo-surface-high: #2b2a28;
@@ -55,20 +94,17 @@
 	--nulo-border: #231f1c;
 	--nulo-secondary: #999187;
 
-	/** text */
 	--txt-primary: #f5f0e6;
 	--txt-secondary: #999187;
-	--txt-body: rgba(245, 240, 230, 0.45);
-	--txt-tertiary: rgba(245, 240, 230, 0.3);
-	--txt-support: rgba(245, 240, 230, 0.25);
-	--txt-white: rgba(255, 255, 255, 0.95);
-	--txt-inverse: rgba(0, 0, 0, 0.9);
+	--txt-body: rgba(245, 240, 230, 45%);
+	--txt-tertiary: rgba(245, 240, 230, 30%);
+	--txt-support: rgba(245, 240, 230, 25%);
+	--txt-white: rgba(255, 255, 255, 95%);
+	--txt-inverse: rgba(0, 0, 0, 90%);
 
-	/** buttons */
 	--btn-primary-bg: #f8f1e7;
 	--btn-red-bg: #c33636;
 
-	/** semantic */
 	--white: #fff;
 	--black: #000;
 	--blue: #027cfc;
@@ -78,8 +114,109 @@
 	--orange: #ff5500;
 	--yellow: #e6c525;
 	--red: #f03c3c;
+	--purple: #5856de;
 	--gray: #8e8e93;
 	--sand: #b88555;
+
+	--bezier: cubic-bezier(0.19, 1, 0.22, 1);
+}
+
+[theme="light"] {
+	--base-width: 360px;
+	--base-height: 600px;
+
+	--app-bg: #f5f5f7;
+	--card-bg: #fff;
+	--tooltip-bg: #f3f3f3;
+	--dropdown-bg: #fff;
+	--border: var(--nulo-surface-highest);
+	--border-hovered: var(--nulo-surface-highest);
+
+	--txt-primary: rgba(0, 0, 0, 88%);
+	--txt-secondary: rgba(0, 0, 0, 60%);
+	--txt-body: rgba(0, 0, 0, 45%);
+	--txt-tertiary: rgba(0, 0, 0, 35%);
+	--txt-support: rgba(0, 0, 0, 25%);
+	--txt-white: rgba(255, 255, 255, 95%);
+	--txt-inverse: rgba(255, 255, 255, 90%);
+
+	--btn-primary-bg: #0c8bfe;
+	--btn-red-bg: #c33636;
+
+	--white: #fff;
+	--black: #000;
+	--blue: #027cfc;
+	--green: #14ae5c;
+	--mint: #18d2a5;
+	--neutral-mint: #109373;
+	--orange: #ff5500;
+	--yellow: #e6c525;
+	--red: #f03c3c;
+	--purple: #5856de;
+	--gray: #8e8e93;
+	--sand: #b88555;
+
+	--json-property-name: #998418;
+	--json-string: #b56959;
+	--json-number: #2f798a;
+	--json-bool: #1e754f;
+
+	--log-background: #f5f5f7;
+	--log-warn-color: #c38700;
+	--log-warn-background: #fff8e1;
+	--log-error-color: #e53935;
+	--log-error-background: #ffebee;
+	--log-inactive-filter: 1.03;
+
+	--bezier: cubic-bezier(0.19, 1, 0.22, 1);
+}
+
+[theme="dark"] {
+	--base-width: 360px;
+	--base-height: 600px;
+
+	--white: #fff;
+	--black: #000;
+	--app-bg: #0a0908;
+	--card-bg: #141312;
+	--tooltip-bg: #0f0e0d;
+	--dropdown-bg: #1d1b1a;
+	--border: rgba(74, 70, 63, 0.5);
+	--border-hovered: rgba(74, 70, 63, 0.8);
+
+	--txt-primary: #f5f0e6;
+	--txt-secondary: #999187;
+	--txt-body: rgba(245, 240, 230, 45%);
+	--txt-tertiary: rgba(245, 240, 230, 30%);
+	--txt-support: rgba(245, 240, 230, 25%);
+	--txt-white: rgba(255, 255, 255, 95%);
+	--txt-inverse: rgba(0, 0, 0, 90%);
+
+	--btn-primary-bg: #f8f1e7;
+	--btn-red-bg: #c33636;
+
+	--blue: #027cfc;
+	--green: #14ae5c;
+	--mint: #18d2a5;
+	--neutral-mint: #109373;
+	--orange: #ff5500;
+	--yellow: #e6c525;
+	--red: #f03c3c;
+	--purple: #5856de;
+	--gray: #8e8e93;
+	--sand: #b88555;
+
+	--json-property-name: #a99d5e;
+	--json-string: #bd8276;
+	--json-number: #4c9a91;
+	--json-bool: #4d9375;
+
+	--log-background: #1e1e1e;
+	--log-warn-color: #a99d5e;
+	--log-warn-background: #3a2a0f;
+	--log-error-color: #c34f38;
+	--log-error-background: #3a1f1e;
+	--log-inactive-filter: 0.8;
 
 	--bezier: cubic-bezier(0.19, 1, 0.22, 1);
 }
@@ -91,30 +228,17 @@
 	margin: 0;
 }
 
-html,
-body {
-	background: var(--app-bg);
-	color: var(--txt-primary);
-	min-height: 100vh;
-}
-
-body {
-	font-family: var(--font-body);
-	font-size: 16px;
-	line-height: 1.5;
-	text-rendering: optimizeLegibility;
-	-webkit-font-smoothing: antialiased;
-	-moz-osx-font-smoothing: grayscale;
+*::-webkit-scrollbar {
+	display: none;
 }
 
 a {
-	color: var(--blue);
 	text-decoration: none;
+	color: var(--blue);
 }
 
-a:focus-visible {
-	outline: 2px solid var(--nulo-accent);
-	outline-offset: 2px;
+a:focus {
+	outline: none;
 }
 
 button {
@@ -122,29 +246,52 @@ button {
 	padding: 0;
 	border: none;
 	outline: none;
-	background: none;
-	color: inherit;
-	cursor: pointer;
-}
-
-button:focus-visible {
-	outline: 2px solid var(--nulo-accent);
-	outline-offset: 2px;
-}
-
-button:disabled {
-	cursor: not-allowed;
 }
 
 input {
 	font: inherit;
-	color: inherit;
 	border: none;
 	outline: none;
 	background: transparent;
 }
 
-/* Transition primitives used by Toast + Modal */
+body {
+	font-family:
+		"InterVariable", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans",
+		"Helvetica Neue", sans-serif;
+	text-rendering: optimizeLegibility;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	user-select: none;
+}
+
+.slide-enter-active {
+	transition: all 0.3s var(--bezier);
+}
+
+.slide-leave-active {
+	transition: all 0.15s var(--bezier);
+}
+
+.slide-enter-from,
+.slide-leave-to {
+	transform: translateY(40px);
+	opacity: 0;
+}
+
+.slideopacity-enter-active {
+	transition: all 0.3s ease;
+}
+
+.slideopacity-leave-active {
+	transition: all 0.15s ease;
+}
+
+.slideopacity-enter-from,
+.slideopacity-leave-to {
+	opacity: 0;
+}
+
 .fade-enter-active,
 .fade-leave-active {
 	transition: all 0.15s var(--bezier);
@@ -164,5 +311,89 @@ input {
 .toast-enter-from,
 .toast-leave-to {
 	opacity: 0;
-	transform: translateY(-20px);
+	transform: translateX(-50%) translateY(-20px);
+}
+
+.opacity-enter-active,
+.opacity-leave-active {
+	transition: all 0.2s ease;
+}
+
+.opacity-enter-from,
+.opacity-leave-to {
+	opacity: 0;
+}
+
+.navigation-enter-active,
+.navigation-leave-active {
+	transition: all 0.2s var(--bezier);
+}
+
+.navigation-enter-from,
+.navigation-leave-to {
+	opacity: 0.3;
+	transform: translateY(2px);
+}
+
+.dropdown-enter-active,
+.dropdown-leave-active {
+	transition: opacity 80ms linear;
+}
+
+.dropdown-enter-from,
+.dropdown-leave-to {
+	opacity: 0;
+}
+
+.clickable {
+	cursor: pointer;
+}
+
+.copyable {
+	cursor: copy;
+}
+
+.capitalize {
+	text-transform: capitalize;
+}
+
+.noanimations * {
+	/* biome-ignore lint/complexity/noImportantStyles: deliberate animation kill-switch toggled at runtime (verbatim from _base.scss) */
+	transition: none !important;
+}
+
+.no-wrap {
+	white-space: nowrap;
+}
+
+.mono {
+	font-family: var(--font-mono);
+}
+
+.font-headline {
+	font-family: var(--font-headline);
+}
+
+.font-mono {
+	font-family: var(--font-mono);
+}
+
+.uppercase {
+	text-transform: uppercase;
+}
+
+.tracking-wide {
+	letter-spacing: 0.05em;
+}
+
+.tracking-widest {
+	letter-spacing: 0.1em;
+}
+
+.tabular {
+	font-variant: tabular-nums;
+}
+
+.selectable {
+	user-select: text;
 }

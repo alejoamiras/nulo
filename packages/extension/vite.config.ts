@@ -100,7 +100,6 @@ export default defineConfig({
 	css: {
 		preprocessorOptions: {
 			scss: {
-				loadPaths: [fileURLToPath(new URL("./src/assets/styles", import.meta.url))],
 				quietDeps: true,
 			},
 		},
