@@ -197,4 +197,41 @@ Decision tree:
   public-state-base-vs-proven-tip anomaly → precise Aztec-team question (with the
   exact block numbers + slot from this run).
 
-RESULT: PENDING — soak `bbexi2wj0` (NULO_E2E_PROVERLESS=1 e2e:agent authwit-lifecycle).
+RESULT (soak `bbexi2wj0`, 2 independent runs — DECISIVE):
+- Run 1: revoke proven @ block 69, `storedHash` slot = 0. Consume executed @ block
+  **75** (> 69); `slotAtConsumeBlock(75)` = **0**; outcome = **ok**.
+- Run 2: revoke proven @ 119; consume @ block **126** (> 119); slot = **0**; ok.
+
+The consume's OWN execution block is AFTER the proven revoke, `storedHash`'s slot
+IS 0 at that block, yet the consume succeeds. This DEFINITIVELY rules out
+snapshot/ordering (the slot is genuinely 0 at the consume's block) and proves the
+consume's effective authorization ≠ `storedHash`.
+
+Code map (all read this round): the dApp `grantPublicAuthwit` (dispatcher.ts:614)
+emits ONE `add_public_authwit` action → `buildStandard` (tx-request-builder.ts:203)
+computes `messageHash = computeCallMessageHash(content)` and passes the SAME value
+to BOTH `trackAuthwit` (storedHash) AND `set_authorized` (grantHash). So
+`storedHash == grantHash` by construction; G1 (grant→consume) proves
+`grantHash == consumeHash`. `revokeAuthwits` (service.ts:122) clears `storedHash`.
+At the code level all three hashes are equal — so a revoke that clears that slot
+SHOULD block the consume. It doesn't. The only code-consistent escape: the consume
+does NOT reach `AuthRegistry.consume` at all.
+
+REFINED HYPOTHESIS: the e2e wallet holds BOTH the granter (A) and consumer (B)
+(`dappConnectedExtensionWithFirstTwoAccountsCap`). The consume is sent `from: B`
+with `authWitnesses: []` (playground authwit.ts:175), but the FROM-path executor
+can auto-discover the transfer's authwit requirement and create A's PRIVATE witness
+(the wallet has A's key), satisfying the token WITHOUT the public registry. If so,
+F1 is a TEST-DESIGN flaw — public-registry revoke is unobservable when one wallet
+owns granter+consumer — NOT a wallet revoke bug. The wallet's revoke is provably
+correct (`[revoke-slot-check]` = 0 at the granted/revoked slot).
+
+ARBITER: matrix soak `b5ayj11df` — `reject_all` (slot 1) is checked by
+`AuthRegistry.consume` before the approval, so registry-DISABLE blocks the consume
+IFF the consume actually calls `AuthRegistry.consume`. `[F1-MATRIX] disableBlocks`:
+- false → consume bypasses the registry (auto-created private witness) → TEST-DESIGN
+  flaw → fix = assert the on-chain slot state after revoke (already read by
+  `[revoke-slot-check]`), OR isolate the consumer into a wallet that lacks A's key.
+- true  → registry IS consulted yet revoke misses → deeper bug (then escalate to
+  codex with the full matrix + this code map).
+RESULT: PENDING — soak `b5ayj11df`.
