@@ -108,11 +108,14 @@ test.skipIf(!hasConfig)(
 //      service.ts:731). The test seeds the trust row + record but does
 //      NOT seed a token under `nulo:core:tokens@<id>`, so the skip ALWAYS
 //      fires and the first prompt never opens.
-// Skipping until someone re-seeds the test with a full Token row OR
-// converts it to a unit test against `replayPendingPrompts` directly.
-// The P8 (triple-ready replay) + the audit-4 live-recheck behavior are
-// covered by the unit tests in `service.scenarios.test.ts`.
-test.skip("C2 — trust prompt re-fires after popup close + reopen", { timeout: 90_000, retry: 0 }, async ({ registeredExtension }) => {
+// Un-quarantined — this runs under the standard config gate (no hard `.skip`).
+// It currently fails because the fixture seeds the trust row + record but NOT a
+// token row under `nulo:core:tokens@<id>`, so `replayPendingPrompts` skips it
+// (service.ts:731) and the first prompt never opens. Fixing the seeding to add a
+// full Token row is tracked as a de-flake follow-up; the P8 (triple-ready
+// replay) + audit-4 live-recheck behavior is also covered by the unit tests in
+// `service.scenarios.test.ts`.
+test.skipIf(!hasConfig)("C2 — trust prompt re-fires after popup close + reopen", { timeout: 90_000 }, async ({ registeredExtension }) => {
 	const seedPage = await openPopup(registeredExtension)
 	await waitForHash(seedPage, "#/popup/general", 30_000)
 
@@ -135,13 +138,15 @@ test.skip("C2 — trust prompt re-fires after popup close + reopen", { timeout: 
 
 	// Network id comes from the first registered network. EntityStorage
 	// keys are `${root}@${id}`; the networks repo uses `nulo:core:networks`.
-	const networkId = await seedPage.evaluate(async () => {
+	const network = await seedPage.evaluate(async () => {
 		const all = await chrome.storage.local.get(null)
-		const networkKeys = Object.keys(all).filter((k) => k.startsWith("nulo:core:networks@"))
-		if (networkKeys.length === 0) return null
-		return networkKeys[0].slice("nulo:core:networks@".length)
+		const key = Object.keys(all).find((k) => k.startsWith("nulo:core:networks@"))
+		if (!key) return null
+		const chainId = (JSON.parse(all[key] as string) as { chainId: number }).chainId
+		return { id: key.slice("nulo:core:networks@".length), chainId }
 	})
-	if (!networkId) throw new Error("could not resolve a network id")
+	if (!network) throw new Error("could not resolve a network id")
+	const networkId = network.id
 
 	const contract = `0x${"cc".repeat(32)}`
 	const siloedNullifier = `0x${"aa".repeat(32)}`
@@ -149,10 +154,24 @@ test.skip("C2 — trust prompt re-fires after popup close + reopen", { timeout: 
 	// Pre-seed pending trust + hidden incoming record matching the
 	// active triple. EntityStorage stores values as JSON.stringify(entity).
 	await seedPage.evaluate(
-		async ([profileId, nid, addr, contract, siloedNullifier]) => {
+		async ([profileId, nid, chainId, addr, contract, siloedNullifier]) => {
 			const trustKey = `nulo:core:incoming-trust@${profileId}|${nid}|${contract}`
 			const recordKey = `nulo:core:incoming-transfers@${siloedNullifier}`
+			// `replayPendingPrompts` skips a pending row whose contract has no
+			// matching token registration (service.ts: `tokens.find` by contract +
+			// chainId). Seed the token so the replay actually fires the prompt —
+			// without this the first prompt never opens and the regression is moot.
+			const tokenKey = "nulo:core:tokens@1"
 			await chrome.storage.local.set({
+				[tokenKey]: JSON.stringify({
+					id: 1,
+					profileId,
+					chainId: Number(chainId),
+					contract,
+					name: "C2 Token",
+					symbol: "C2",
+					decimals: 18,
+				}),
 				[trustKey]: JSON.stringify({
 					profileId,
 					networkId: nid,
@@ -179,7 +198,7 @@ test.skip("C2 — trust prompt re-fires after popup close + reopen", { timeout: 
 				}),
 			})
 		},
-		[triple.profileId, networkId, triple.account, contract, siloedNullifier] as const,
+		[triple.profileId, networkId, network.chainId, triple.account, contract, siloedNullifier] as const,
 	)
 	await seedPage.close()
 

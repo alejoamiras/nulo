@@ -11,6 +11,7 @@
 import type { Page } from "puppeteer"
 import { inject } from "vitest"
 import { clickByTestId, patchPagePolling, replaceInputValue, type ExtensionContext } from "./extension"
+import { dumpDeepDiagnostics } from "./journal"
 
 export const PLAYGROUND_TEST_URL = (() => {
 	try {
@@ -103,6 +104,56 @@ export async function waitForPgResult(page: Page, method: string, fromSeq: numbe
 		else parsed.errorJson = json
 	}
 	return parsed
+}
+
+/**
+ * Like {@link waitForPgResult} but collects `count` settled results with
+ * `seq > fromSeq`, ORDER-INDEPENDENTLY (returned ascending by seq). Concurrent
+ * dApp calls (eg. two sendTx fired together) can settle in EITHER seq order, so
+ * the sequential "wait for seq > the previous result" pattern deadlocks when the
+ * higher seq settles first: the first wait grabs it, the second then waits for an
+ * even-higher seq that never comes. Collecting both regardless of order avoids
+ * that. Dumps diagnostics on timeout.
+ */
+export async function waitForPgResults(page: Page, method: string, fromSeq: number, count: number, timeout = 30_000): Promise<PgResult[]> {
+	const handle = await page
+		.waitForFunction(
+			(m: string, after: number, n: number) => {
+				const out: { seq: number; method: string; status: string; resultJson: string }[] = []
+				for (const r of document.querySelectorAll<HTMLElement>(`[data-testid="pg-result"][data-method="${m}"]`)) {
+					const seq = Number(r.getAttribute("data-result-seq") ?? "0")
+					const status = r.getAttribute("data-status") ?? ""
+					if (seq > after && (status === "ok" || status === "error")) {
+						out.push({ seq, method: m, status, resultJson: r.getAttribute("data-result-json") ?? "" })
+					}
+				}
+				return out.length >= n ? out : null
+			},
+			{ timeout, polling: 200 },
+			method,
+			fromSeq,
+			count,
+		)
+		.catch(async (err) => {
+			console.error(`[pg-diag] waitForPgResults(${method}, after ${fromSeq}, want ${count}) TIMEOUT`)
+			await dumpDeepDiagnostics(page, `waitForPgResults(${method})`)
+			throw err
+		})
+	const raws = (await handle.jsonValue()) as { seq: number; method: string; status: "ok" | "error"; resultJson: string }[]
+	return raws
+		.map((raw) => {
+			const parsed: PgResult = { seq: raw.seq, method: raw.method, status: raw.status }
+			try {
+				const value = raw.resultJson ? JSON.parse(raw.resultJson) : undefined
+				if (raw.status === "ok") parsed.resultJson = value
+				else parsed.errorJson = value
+			} catch {
+				if (raw.status === "ok") parsed.resultJson = raw.resultJson
+				else parsed.errorJson = raw.resultJson
+			}
+			return parsed
+		})
+		.sort((a, b) => a.seq - b.seq)
 }
 
 /**

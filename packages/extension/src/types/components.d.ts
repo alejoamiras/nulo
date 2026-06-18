@@ -48,6 +48,7 @@ declare module 'vue' {
     MaterialIcon: typeof import('@nulo/design')['MaterialIcon']
     NotificationManager: typeof import('./../components/NotificationManager.vue')['default']
     OnboardingPage: typeof import('./../onboarding/components/OnboardingPage.vue')['default']
+    PasskeyCeremonyDialog: typeof import('./../components/passkey/PasskeyCeremonyDialog.vue')['default']
     Popover: typeof import('./../components/ui/Popover.vue')['default']
     Popup: typeof import('./../components/Popup/Popup.vue')['default']
     PopupCard: typeof import('./../components/Popup/PopupCard.vue')['default']
