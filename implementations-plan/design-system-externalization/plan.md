@@ -213,7 +213,12 @@ See `lessons/phase-4.md`.
 Same mechanic. Ghost cleanup allowed here (snapshot-gated; not `--nulo-error`).
 **Gate:** typecheck:all + lint + unit + build + build:faucet + storybook + smoke.
 
-### Phase 5 — Cleanup, docs, full e2e, round-2 backlog · MILESTONE (final gate) · **final human glance**
+### Phase 5 — Cleanup, docs, round-2 backlog · MILESTONE · machine ✓, PENDING: user visual sign-off (2 + 5) + network e2e (CI)
+**Machine ✓** (branch `feat/design-system-p5-cleanup`): CLAUDE.md L0–L6 split documented +
+`round-2-backlog.md` + `bun run audit:vue` green (ext 2368 + design 136 · lint 0 · build 0). PENDING:
+the user's visual sign-off (Phase 2 + 5) and the network e2e (deferred to the `pr-network-e2e` CI gate,
+which now watches `packages/design/**`). `/code-review max --fix` + codex post-impl audit also pending.
+See `lessons/phase-5.md`.
 Finalize resolver; update `ARCHITECTURE.md` + CLAUDE.md L0–L6 + README; write the round-2 backlog.
 **Gate (machine):** `audit:vue` + build:faucet + smoke + `e2e:agent` (network ~25 min) + storybook.
 **Gate (human):** final visual confirmation of both apps.
