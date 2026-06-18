@@ -10,9 +10,9 @@ import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 // `approved_actions` SECOND (slot 2) — see @aztec/noir-contracts.js
 // auth_registry_contract `main.nr`. These were previously swapped, so
 // `isAuthwitConsumable` + `isAuthRegistryEnabled` read the wrong public storage:
-// a granted/revoked authwit read as the reject_all map and vice-versa, so the
-// wallet could not tell whether a public authwit was actually consumable.
-// AUDIT F1: pinned by auth-registry.test.ts.
+// a granted/revoked authwit read as the reject_all map and vice-versa, so a revoke
+// could never be confirmed on-chain and a fast follow-up consume raced the
+// not-yet-mined revoke. AUDIT F1: pinned by auth-registry.test.ts.
 const REJECT_ALL_SLOT = new Fr(1)
 const APPROVED_ACTIONS_SLOT = new Fr(2)
 

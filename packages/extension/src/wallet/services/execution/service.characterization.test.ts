@@ -109,8 +109,10 @@ describe("no-slot-for-executeSendTransaction (bug pin)", () => {
 				nonce: { toString: () => "1" },
 				txCalls: [],
 				feePaymentMethod: 0,
+				pendingPublicAuthwits: [],
 			})) as never,
 			addTransaction: vi.fn(async () => ({})) as never,
+			recordPendingAuthwits: vi.fn(async () => {}) as never,
 			logDebug: () => {},
 		})
 

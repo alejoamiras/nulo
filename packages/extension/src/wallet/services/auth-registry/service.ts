@@ -10,12 +10,21 @@ import { AccountService } from "@/wallet/services/account/service"
 import type { WrappedTask } from "@/wallet/services/task/wrapped-task"
 import { TaskService, RevokeAuthwitsContent, StepContent } from "@/wallet/services/task/service"
 import { TransactionService, OriginType } from "@/wallet/services/transaction/service"
+import { type Tx, TxExecutionResult, TxStatus } from "@/wallet/services/transaction/spec"
 import { EntityStorage } from "@/wallet/storage"
 import { array_max, Lock, sleep } from "@/wallet/utils"
 import { getAuthRegistryAddress, isAuthRegistryEnabled, isAuthwitConsumable } from "@/wallet/utils/auth-registry"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import { AUTH_REGISTRY_SERVICE_NAME, type Authwit, type Events, MAX_REVOKES_PER_TX, type Methods } from "./spec"
+import {
+	AUTH_REGISTRY_SERVICE_NAME,
+	type Authwit,
+	type Events,
+	MAX_REVOKES_PER_TX,
+	MAX_TRACKED_AUTHWITS_PER_ACCOUNT,
+	type Methods,
+} from "./spec"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { TxHash } from "@aztec/stdlib/tx"
 
 export * from "./spec"
 
@@ -69,26 +78,102 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 				this.lock.leave()
 			}
 		})
+
+		// Reconcile pending public-authwit rows by their tx's on-chain outcome: a row is
+		// written `pending` at the post-send tail, then confirmed here once its tx is proven
+		// successful, or removed if the tx dropped/reverted — so the local revocation index
+		// never claims a grant that never landed. Best-effort + idempotent: a failed pass is
+		// retried on the next tx update (or by sync). See lessons/phase-5.md.
+		this.transactionService.onTransactionUpdated.add((tx) => {
+			void this.reconcileFromTx(tx).catch(() => {})
+		})
 	}
 
-	public async trackAuthwit(account: string, hash: string, content: AuthwitContent) {
-		try {
-			await this.lock.enter()
-			const authwits = await this.authwits.getValues()
-			if (authwits.some((x) => x.account === account && x.hash === hash)) {
-				return
-			}
-			const nextId = array_max(authwits.map((x) => x.id)) + 1
-			const authwit: Authwit = { id: nextId, account, hash, content }
-			await this.authwits.set(`${authwit.id}`, authwit)
-			this.emit("onAuthwitAdded", authwit)
-		} finally {
-			this.lock.leave()
+	/** Map a tx's settled on-chain outcome to a pending-authwit reconcile. Proven/Finalized
+	 *  + Success ⇒ confirm; Dropped or any settled non-success (reverted) ⇒ remove. Other
+	 *  (non-terminal) statuses are ignored — `set_authorized` only takes effect once mined. */
+	private async reconcileFromTx(tx: Tx): Promise<void> {
+		const settled = tx.status === TxStatus.Proven || tx.status === TxStatus.Finalized
+		if (settled && tx.executionResult === TxExecutionResult.Success) {
+			await this.reconcileAuthwits(tx.hash, "mined")
+			return
+		}
+		const reverted = settled && tx.executionResult !== undefined && tx.executionResult !== TxExecutionResult.Success
+		if (tx.status === TxStatus.Dropped || reverted) {
+			await this.reconcileAuthwits(tx.hash, "dropped")
 		}
 	}
 
 	public async getAuthwits(account: string): Promise<Authwit[]> {
 		return (await this.authwits.getValues()).filter((x) => x.account === account)
+	}
+
+	/** Whether the account is at the tracked-authwit ceiling. Checked PRE-send at
+	 *  the build/approval gate; granting beyond the cap is blocked (never evicted). */
+	public async isAtCap(account: string): Promise<boolean> {
+		const count = (await this.authwits.getValues()).filter((x) => x.account === account).length
+		return count >= MAX_TRACKED_AUTHWITS_PER_ACCOUNT
+	}
+
+	/** PRE-send cap gate: throw if granting `newHashes` would push `account` past the
+	 *  tracked-authwit ceiling. Counts existing tracked rows (incl. pending) PLUS the unique
+	 *  NEW hashes not already tracked — a per-action check would let e.g. 255 existing + 2 new
+	 *  slip through and miscount intra-tx duplicates. Never auto-evict (that destroys the
+	 *  only local revocation index). Called by `buildStandard` for each `add_public_authwit`. */
+	public async assertWithinCap(account: string, newHashes: string[]): Promise<void> {
+		const existing = (await this.authwits.getValues()).filter((x) => x.account === account)
+		const existingHashes = new Set(existing.map((a) => a.hash))
+		const newUnique = new Set(newHashes.filter((h) => !existingHashes.has(h)))
+		if (existing.length + newUnique.size > MAX_TRACKED_AUTHWITS_PER_ACCOUNT) {
+			throw new Error(
+				`Cannot grant: account ${account} would exceed the ${MAX_TRACKED_AUTHWITS_PER_ACCOUNT} tracked public-authwit limit. Revoke some first.`,
+			)
+		}
+	}
+
+	/** Record public authwits at the POST-send tail as `pending`, tx-linked rows.
+	 *  Acceptance of `sendTx` is NOT mining — these stay pending until
+	 *  `reconcileAuthwits` confirms (mined) or removes (dropped) them. Idempotent:
+	 *  an account+hash already tracked (pending or confirmed) is skipped, so a
+	 *  retry after a partial write does not duplicate. */
+	public async recordPendingAuthwits(account: string, items: { hash: string; content: AuthwitContent }[], txHash: string): Promise<void> {
+		if (items.length === 0) return
+		try {
+			await this.lock.enter()
+			const existing = await this.authwits.getValues()
+			const seen = new Set(existing.filter((x) => x.account === account).map((x) => x.hash))
+			let nextId = array_max(existing.map((x) => x.id)) + 1
+			for (const { hash, content } of items) {
+				if (seen.has(hash)) continue
+				seen.add(hash)
+				const authwit: Authwit = { id: nextId++, account, hash, content, pending: true, txHash }
+				await this.authwits.set(`${authwit.id}`, authwit)
+				this.emit("onAuthwitAdded", authwit)
+			}
+		} finally {
+			this.lock.leave()
+		}
+	}
+
+	/** Reconcile pending rows for a tx once its outcome is known: `mined` clears
+	 *  the pending flag (the grant is durable + revocable); `dropped` removes the
+	 *  rows (the grant never landed, so the local index must not claim it exists).
+	 *  Confirmed (non-pending) rows are untouched. */
+	public async reconcileAuthwits(txHash: string, outcome: "mined" | "dropped"): Promise<void> {
+		try {
+			await this.lock.enter()
+			const rows = (await this.authwits.getValues()).filter((x) => x.pending && x.txHash === txHash)
+			for (const row of rows) {
+				if (outcome === "mined") {
+					await this.authwits.set(`${row.id}`, { ...row, pending: false })
+				} else {
+					await this.authwits.delete(`${row.id}`)
+					this.emit("onAuthwitDeleted", row)
+				}
+			}
+		} finally {
+			this.lock.leave()
+		}
 	}
 
 	public async revokeAuthwits(networkId: string, account: string, ids: number[], feeSettings: FeeSettings): Promise<void> {
@@ -134,10 +219,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			// not that its PUBLIC effect is mined + visible. Poll the on-chain state
 			// so a fast (proverless) follow-up consume can't race a not-yet-mined
 			// revoke. See waitForOnChainState.
-			await this.waitForOnChainState(
-				async () => (await Promise.all(authwits.map((a) => isAuthwitConsumable(node, a.account, a.hash)))).every((c) => !c),
-				"revoke: authwits no longer consumable",
-			)
+			await this.waitForTxProven(node, txHash)
 			await this.syncAuthwits(node, account, task, authwits)
 
 			task.complete()
@@ -184,10 +266,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			const node = await this.networkService.getNode(network.chainId)
 			// Ensure the registry toggle is mined + visible before returning, so a
 			// fast follow-up consume reads the new state (see waitForOnChainState).
-			await this.waitForOnChainState(
-				async () => (await isAuthRegistryEnabled(node, account)) === enabled,
-				`registry enabled=${enabled}`,
-			)
+			await this.waitForTxProven(node, txHash)
 			await this.syncStatus(node, account, task)
 
 			task.complete()
@@ -226,13 +305,26 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	 *  registry. Polling the actual on-chain predicate closes the race for both.
 	 *  On timeout we proceed (the caller's sync reads whatever is current) rather
 	 *  than fail the settings op. */
-	private async waitForOnChainState(check: () => Promise<boolean>, label: string, timeoutMs = 120_000): Promise<void> {
+	/**
+	 * Wait until the mutation tx's block is PROVEN, not merely at the proposed
+	 * `latest` tip. The sequencer executes public functions — e.g. a follow-up
+	 * authwit consume's `AuthRegistry.consume` — against PROVEN state, so a
+	 * revoke/toggle visible only at `latest` is invisible to that execution and a
+	 * fast consume can still spend a "revoked" grant. Poll the proven tip past the
+	 * tx's receipt block. Throws on timeout — never report an unverifiable
+	 * security mutation as success. (Proven advances normally here: grants reach
+	 * proven within the test's own step timing, which is why their consumes work.)
+	 */
+	private async waitForTxProven(node: AztecNode, txHash: string, timeoutMs = 120_000): Promise<void> {
+		const receipt = await node.getTxReceipt(TxHash.fromString(txHash))
+		const target = receipt.blockNumber
+		if (target === undefined) throw new Error(`waitForTxProven: tx ${txHash} has no block number`)
 		const start = Date.now()
 		while (Date.now() - start < timeoutMs) {
-			if (await check()) return
-			await sleep(500)
+			if ((await node.getL2Tips()).proven.block.number >= target) return
+			await sleep(1_000)
 		}
-		this.logWarn(`waitForOnChainState timed out (${label}); proceeding with current on-chain read`)
+		throw new Error(`waitForTxProven: tx ${txHash} (block ${target}) not proven within ${timeoutMs}ms`)
 	}
 
 	private async syncAuthwits(node: AztecNode, account: string, parentTask: WrappedTask, authwits?: Authwit[]) {
@@ -248,10 +340,16 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	}
 
 	private async syncAuthwit(node: AztecNode, authwit: Authwit, parentTask: WrappedTask) {
+		// Skip no-op syncs BEFORE starting a subtask: a started-but-unfinished subtask blocks
+		// the PARENT task from completing (TaskService refuses a parent with open children),
+		// which is exactly what wedged `revokeAuthwits`' syncAuthwits when the revoked grants
+		// were still `pending`. A `pending` row is reconciled by its tx outcome
+		// (onTransactionUpdated), not by sync; a still-consumable row is live. Sync only prunes
+		// confirmed-but-vanished rows.
+		if (authwit.pending) return
+		if (await isAuthwitConsumable(node, authwit.account, authwit.hash)) return
 		const task = parentTask.startSubtask(new StepContent(`Sync authwit #${authwit.id}`))
 		try {
-			const isConsumable = await isAuthwitConsumable(node, authwit.account, authwit.hash)
-			if (isConsumable) return
 			try {
 				await this.lock.enter()
 				if (await this.authwits.get(`${authwit.id}`)) {
