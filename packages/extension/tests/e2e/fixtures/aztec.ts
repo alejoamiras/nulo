@@ -11,6 +11,7 @@ import { rmSync } from "node:fs"
 
 import { createAztecNodeClient, waitForNode } from "@aztec/aztec.js/node"
 import { TxHash } from "@aztec/stdlib/tx"
+import { GasFees } from "@aztec/stdlib/gas"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Fr } from "@aztec/aztec.js/fields"
 import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
@@ -91,6 +92,15 @@ export async function createTestWallet(url = LOCAL_NODE_URL) {
 	return { wallet, accounts, node, cleanup }
 }
 
+/**
+ * Generous `maxFeesPerGas` ceiling for SponsoredFPC-paid setup txs. The SDK otherwise pins
+ * maxFeesPerGas to the ESTIMATION-time gas fee with no headroom, so an L2-fee spike between
+ * estimate and inclusion rejects the tx (observed in CI: estimate feePerL2Gas=5.5e7 <
+ * inclusion 1.1e8). maxFeesPerGas is only a ceiling and the FPC pays the ACTUAL network fee,
+ * so a high cap can't overpay — it just stops spike-rejection flakes. See lessons/phase-6.md.
+ */
+const E2E_FEE_GAS = { maxFeesPerGas: new GasFees(10n ** 11n, 10n ** 11n) }
+
 /** Deploy a Token contract with a minter address. Returns the token contract address. */
 export async function deployTestToken(
 	wallet: InstanceType<typeof EmbeddedWallet>,
@@ -103,7 +113,7 @@ export async function deployTestToken(
 		"TST",
 		18,
 		minterAddress,
-	).send({ fee: feeOptions, from: minterAddress })
+	).send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: minterAddress })
 
 	return contract.address.toString()
 }
@@ -145,7 +155,7 @@ export async function mintPublicTokens(
 	const token = await TokenContract.at(AztecAddress.fromString(tokenAddress), wallet)
 	await token.methods
 		.mint_to_public(AztecAddress.fromString(toAddress), amount)
-		.send({ fee: feeOptions, from: AztecAddress.fromString(minterAddress) })
+		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: AztecAddress.fromString(minterAddress) })
 
 	// Verify the mint is visible by reading the balance from the test wallet's PXE.
 	// This ensures the state has settled before the extension tries to read it.
@@ -195,7 +205,7 @@ export async function mintPrivateTokens(
 	// at the call site so future callers don't repeat the trap.
 	await token.methods
 		.mint_to_private(AztecAddress.fromString(toAddress), amount)
-		.send({ fee: feeOptions, from: AztecAddress.fromString(minterAddress), wait: { timeout: 120 } })
+		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: AztecAddress.fromString(minterAddress), wait: { timeout: 120 } })
 }
 
 // ── Fee Juice L1→L2 Bridge ────────────────────────────────────────────
@@ -264,7 +274,7 @@ export async function claimFeeJuice(
 	const feeJuice = await Contract.at(ProtocolContractAddress.FeeJuice, FeeJuiceArtifact, wallet)
 	await feeJuice.methods
 		.claim(AztecAddress.fromString(toAddress), claim.claimAmount, claim.claimSecret, claim.messageLeafIndex)
-		.send({ fee: feeOptions, from: fromAddress })
+		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: fromAddress })
 	console.log(`[claimFeeJuice] Claimed ${claim.claimAmount} FJ for ${toAddress}`)
 }
 
