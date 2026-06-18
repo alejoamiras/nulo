@@ -10,6 +10,7 @@ import {
 	type BridgeWitness,
 	type DepositJournalRecord,
 	type EncryptionKey,
+	assetKindOf,
 	SWAP_BRIDGE_ROUTER_ABI,
 	bridgeWitnessPermitTypedData,
 	buildFuelRoute,
@@ -31,7 +32,7 @@ import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { parseEventLogs } from "viem"
 import { sepolia } from "viem/chains"
 import { ref, watch } from "vue"
-import { BRIDGE, BRIDGE_FUEL, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
+import { BRIDGE, BRIDGE_FUEL, FUEL_MIN_FJ, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
 import { FUEL_FEE_MARGIN, decideFuelClaim, decidePrivateFuelClaim, isPrivateFuelInsufficiency } from "@/lib/fuel-claim-state"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import {
@@ -51,6 +52,7 @@ import {
 	useBridgeJournal,
 } from "./useBridgeJournal"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
+import { buildFuelClaimInteraction } from "./fuelClaim"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { ERC20_ABI } from "./useL1Usdc"
 import { useL1Wallet } from "./useL1Wallet"
@@ -210,8 +212,10 @@ async function readPublicFeeJuiceBalance(aztec: unknown, recipient: AztecAddress
 
 let depsWired = false
 
-/** Wire the journal engine's deposit-side chain deps (idempotent; real clients only). */
-function wireDepositDeps(): void {
+/** Wire the journal engine's deposit-side chain deps (idempotent; real clients only). Exported as
+ *  ensureDepositJournalDeps so the Fuel flow guarantees wiring WITHOUT useDepositFlow's
+ *  resumeSessionWork side-effect (codex Option C, lessons/phase-3.md). */
+export function ensureDepositJournalDeps(): void {
 	if (depsWired) return
 	depsWired = true
 	const l1 = useL1Wallet()
@@ -229,6 +233,24 @@ function wireDepositDeps(): void {
 		claim: async (rec, secretHex) => {
 			const aztec = bridgeWallet.wallet.value
 			if (!aztec) throw new Error("Connect your Aztec wallet first.")
+			// Fee-juice (Fuel) records claim via a different, no-token-leg path — dispatch to the dedicated
+			// builder; the token claim below never runs for them (codex Option C, lessons/phase-3.md).
+			if (assetKindOf(rec) === "fee-juice") {
+				const fpcInst = await getSponsoredFpcInstance()
+				const latchFuel = (patch: Record<string, unknown>) => {
+					const f = rec.fuel
+					if (f) updateRecord(rec.id, { fuel: { ...f, ...patch } })
+				}
+				return buildFuelClaimInteraction(rec, {
+					aztec,
+					recipient: AztecAddress.fromString(rec.recipient),
+					sponsoredFpc: fpcInst.address,
+					minFloorFj: FUEL_MIN_FJ,
+					onAttempt: () => latchFuel({ claimAttempt: true, setupInsufficiency: false }),
+					onTxHash: (txHash) => latchFuel({ claimAttempt: true, claimTxHash: txHash }),
+					onSetupInsufficiency: () => latchFuel({ setupInsufficiency: true }),
+				})
+			}
 			const recipientAddr = AztecAddress.fromString(rec.recipient)
 			const amount = BigInt(rec.amount)
 			const secret = Fr.fromString(secretHex)
@@ -459,7 +481,7 @@ function wireDepositDeps(): void {
  * key - zero extra signatures.
  */
 export function useDepositFlow() {
-	wireDepositDeps()
+	ensureDepositJournalDeps()
 	const l1 = useL1Wallet()
 	const bridgeWallet = useBridgeWallet()
 	const journal = useBridgeJournal()
