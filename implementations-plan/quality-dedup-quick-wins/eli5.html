@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — quality-dedup-quick-wins</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    .dropped { background: #fbecec; border-left: 3px solid #c0392b; padding: 0.75rem 1.25rem; margin: 1rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; }
+    th { background: #f6f6f6; }
+  </style>
+</head>
+<body>
+  <h1>Quality dedup quick-wins (batch)</h1>
+  <p>A batch of small, independent "remove duplicate code" cleanups from the quality audit — each its own PR, merged one at a time, validated by CI before the next starts. The goal: less copy-pasted code that has to be kept in sync by hand, with zero behavior change.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>Mid.</strong> Each cleanup is low-novelty, low-risk, and per-PR revertible — but they span 4 packages and each carries one small "don't break this" rule, so the dual audit (two independent reviewers) is worth it. <strong>That audit paid for itself immediately:</strong> it caught that the week-old audit list was stale and two of the original seven weren't actually quick (details below).</p>
+
+  <div class="dropped">
+    <h3>Scope changed after the audit: 7 → 5</h3>
+    <ul>
+      <li><strong>Q21 (scope-enforcement dedup) — dropped.</strong> A PR that merged after the audit (#91) already did this dedup; the code the audit described has moved and is mostly cleaned up.</li>
+      <li><strong>Q19 (active-profile guards) — demoted to its own plan.</strong> It's 90 call sites, ~37 of which deliberately <em>don't</em> error — telling those apart is careful auth work, not a "quick win". Doing it mechanically could silently weaken a lock check. It deserves its own focused plan.</li>
+    </ul>
+  </div>
+
+  <h2>Phases (each = one PR, merged before the next)</h2>
+  <div class="phase">
+    <h3>Phase 1 — Q16: delete dead code</h3>
+    <p>Remove exports/files nothing imports anymore (a couple of helper subpaths, a few unused functions, one unused dependency).</p>
+    <p class="muted">Proves itself by: each deletion gated by a search proving nothing uses it + the package's unit tests stay green. (No network e2e — it's dead-code removal.)</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2 — Q22: share the serializer helper</h3>
+    <p>Two helpers turn BigInts/Errors into JSON in overlapping ways. Share only the truly-common part — keeping each one's <em>deliberately different</em> output exactly as-is (one feeds the wire protocol; the other a job log). First we add tests pinning both outputs, then refactor.</p>
+    <p class="muted">Proves itself by: the wire-shape tests + the new job-error tests stay green; network e2e confirms the RPC wire format is unchanged.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3 — Q20: one home for the CAIP helpers</h3>
+    <p>Two copies of the same chain/address-string functions. Make the bridge package the single owner; the extension re-exports. (The shared <em>types</em> are already centralized — only the functions are duplicated.)</p>
+    <p class="muted">Proves itself by: a parity test (both sides produce identical output) + unit tests green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4 — Q7: de-duplicate the test/build configs</h3>
+    <p>Several Vite/Vitest configs copy the same settings under "keep in sync" comments — and the sync already broke (the "all" e2e config lost some settings). Extract a shared helper and fix the drift.</p>
+    <p class="muted">Proves itself by: build + unit green, resolved-config diff shows no unintended change, and network e2e confirms the e2e configs still work on CI. (This is the only cleanup with an already-shipped bug.)</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5 — Q14: share the restore-result loop</h3>
+    <p>14 services hand-roll the same "collect each restored item + its error" loop. Extract one helper; each service keeps its own validation/locking. Preserve every existing quirk exactly (including one service's odd error shape — pinned by a test, fixed in a later follow-up).</p>
+    <p class="muted">Proves itself by: each service's restore test + a helper test green, and the smoke backup-import test exercises the restore path end-to-end.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>"Dedup" = the same code copy-pasted in N places, which rots when someone updates one copy and forgets the others. Each phase replaces N copies with one shared piece. The risk in dedup is accidentally changing behavior while consolidating — so every phase preserves the existing quirks verbatim (pinning surprising ones with a test) and re-verifies the code against the latest <code>dev</code> before touching it (the lesson from the stale audit list). Two cleanups touch sensitive surfaces — the wire format (Q22) and chain-address strings crossing the dapp boundary (Q20) — so those keep their output byte-identical.</p>
+
+  <h2>Open questions (ratify at approval)</h2>
+  <p>These three are the only decisions I need from you — "R" just means "ratification item." Each has a sensible default (in <strong>bold</strong>); you can accept all three by approving, or override any.</p>
+
+  <h3>R1 — Is the 5-arc scope OK? <span class="muted">(default: yes)</span></h3>
+  <p>We started with 7 cleanups. The two-reviewer audit found 2 of them aren't actually safe quick wins anymore:</p>
+  <ul>
+    <li><strong>Q21</strong> (de-duplicate the permission-check functions) — a PR that merged <em>after</em> the audit (#91) already did this; the code the audit pointed at has moved and is mostly cleaned up. <strong>Drop it.</strong></li>
+    <li><strong>Q19</strong> (de-duplicate the "is the wallet unlocked?" guard) — turned out to be <strong>90 call sites, ~37 of which deliberately behave differently</strong> (they intentionally don't error). Merging them mechanically could silently weaken a lock/permission check — that's careful security work, not a quick win. <strong>Give it its own focused plan.</strong></li>
+  </ul>
+  <p>Decision: ship the 5 safe ones now and handle Q19 separately (default), or insist on keeping all 7 (Q19 then becomes a bigger, careful phase).</p>
+
+  <h3>R2 — How much testing per cleanup? <span class="muted">(default: selective)</span></h3>
+  <p>Your original ask was "run the full <strong>network e2e</strong> suite on every cleanup." The reviewers pushed back: that suite is slow, is <em>currently being de-flaked by another agent</em>, and most of these cleanups don't touch anything it actually exercises. Proposal: run network e2e only on the 2 cleanups that touch live/config paths (<strong>Q7</strong> and <strong>Q22</strong>), run the lighter browser "smoke" test on <strong>Q14</strong>, and unit tests for the rest (Q16, Q20). Plus a safety fix the reviewer caught: <strong>CI can falsely report "e2e passed" when it actually skipped the suite</strong> — so before any auto-merge we explicitly verify the test job really ran. Decision: selective testing (default) vs your original network-e2e-every-cycle.</p>
+
+  <h3>R3 — Q14 error-shape quirk <span class="muted">DECIDED: fix it now</span></h3>
+  <p>Q14 merges <strong>14 copies</strong> of the same "restore each item, collect any errors" loop into one shared helper. Thirteen store a readable error <em>message</em>; one — the <strong>contacts</strong> service — stored the raw error <em>object</em> instead. <strong>You chose to fix it:</strong> normalize contacts to the message shape so all 14 are consistent (and contacts stops being a special case, which makes the merge cleaner). It's a small, ratified behavior change (object→string); we grep for any test pinning the old shape and update it as part of the phase.</p>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm the <strong>5-arc scope</strong> (R1) — drop Q21, demote Q19.</li>
+      <li>Confirm <strong>selective network-e2e</strong> (R2) and the <strong>auto-merge</strong> rule (squash <code>--admin</code> when Quality is green AND, for network-gated arcs, the network shards actually <em>ran</em> + passed; a network-red gets one re-run then surfaces to you).</li>
+      <li>Confirm <strong>R3</strong> (preserve the Q14 error quirk).</li>
+      <li>Hardening: no <code>/harden</code> pass (mechanical dedup; the demoted Q19 auth work would get its own scrutiny).</li>
+      <li>Approve / conditionally approve / reject.</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (final — approved)</h2>
+    <p>This is a multi-PR autonomous run (create → CI → auto-merge → next), so <strong>/loop</strong> fits best — it re-fires to check CI and advance. <code>/goal</code> (work until all 5 are merged) is the alternative.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose. Start the session in the permission/AFK mode you intend so the loop isn't blocked on a prompt.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /loop</h3>
+      <pre><code>/loop 15m Drive implementations-plan/quality-dedup-quick-wins forward, one arc per PR, in plan.md order (Q16→Q22→Q20→Q7→Q14). Never idle. Each firing: (1) read plan.md + lessons/ (authoritative); `git status`; `git log --oneline -5`; if a PR is open, `gh pr view <n> --json statusCheckRollup`. (2) CI in flight? Confirm progress (`gh run watch` up to 10m); use the wait to prep the next arc. (3) No arc in hand? Take the next pending phase: FIRST re-verify the arc against current dev (grep the cited symbols/sites — the audit snapshot is stale), then dedup + tests; run `bun run lint` + the touched packages' typecheck+test; commit → push → for network-gated arcs (Q7,Q22) add the `e2e:network` label. (4) Phase green = its plan.md gate passes (commands+criteria): for network-gated arcs confirm the `Run / shard *` jobs ACTUALLY RAN (not skipped — the reducer reports green-when-skipped) and are green; then `gh pr merge <n> --squash --admin --delete-branch`, mark ✓ in plan.md, file lessons, print LESSONS_FILE=implementations-plan/quality-dedup-quick-wins/lessons/phase-N.md, advance to the next arc off freshly-merged dev. (5) Network-e2e red? Re-run once; still red → STOP and surface (I judge flake-vs-real). (6) Stuck/decision? `/codex xhigh`, reach a defensible call, log it. Hard limits: never merge to main/release, never publish, never expand scope past plan.md (Q19/Q21 are out). (7) All 5 arcs ✓+merged? Run `/code-review max --fix` on the batch → codex xhigh post-impl audit → address high/critical → wrap-up + stop. Keep the ASCII checklist visible.</code></pre>
+    </div>
+
+    <h3>Alternative: /goal</h3>
+    <pre><code>/goal All 5 phases (Q16,Q22,Q20,Q7,Q14) marked ✓ in implementations-plan/quality-dedup-quick-wins/plan.md, each backed by its plan.md validation gate reported green AND its PR squash-merged to dev (gh pr view shows MERGED); for each phase the agent printed LESSONS_FILE=implementations-plan/quality-dedup-quick-wins/lessons/phase-N.md; `/code-review max --fix` + codex post-impl audit complete with high/critical addressed; `bun run lint` exit 0 in the transcript. Per-arc network-e2e (Q7,Q22) must be confirmed to have actually run (not skipped) before its merge.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a> · <a href="audit-codex.md">codex audit</a> · <a href="audit-fable.md">fable-slot audit</a></p>
+</body>
+</html>

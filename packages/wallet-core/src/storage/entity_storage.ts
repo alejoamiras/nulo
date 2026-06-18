@@ -59,28 +59,6 @@ export class EntityStorage<T> {
 		}
 	}
 
-	public async getVersion(): Promise<number> {
-		const res = await this.storage.get(this.root)
-		if (!(this.root in res)) return 0
-		try {
-			return JSON.parse(res[this.root] as string) as number
-		} catch (err) {
-			const raw = res[this.root]
-			const preview = typeof raw === "string" ? raw.slice(0, PARSE_FAILURE_PREVIEW_MAX) : String(raw)
-			const msg = err instanceof Error ? err.message : String(err)
-			console.error(`EntityStorage[${this.root}]: dropping malformed version key — ${msg} — payload preview: ${preview}`)
-			void this.storage.remove(this.root).catch((removeErr) => {
-				const rmsg = removeErr instanceof Error ? removeErr.message : String(removeErr)
-				console.error(`EntityStorage[${this.root}]: failed to delete malformed version key — ${rmsg}`)
-			})
-			return 0
-		}
-	}
-
-	public setVersion(version: number): Promise<void> {
-		return this.storage.set({ [this.root]: JSON.stringify(version) })
-	}
-
 	public async contains(id: string): Promise<boolean> {
 		const key = `${this.root}@${id}`
 		const res = await this.storage.get(key)
@@ -132,12 +110,5 @@ export class EntityStorage<T> {
 			if (entity !== undefined) out.push(entity)
 		}
 		return out
-	}
-
-	public async findByPredicate(predicate: (entity: T) => boolean): Promise<Array<{ key: string; entity: T }>> {
-		const allEntities = await this.getAll()
-		const foundEntities = allEntities.filter(([, entity]) => predicate(entity)).map(([key, entity]) => ({ key, entity }))
-
-		return foundEntities
 	}
 }
