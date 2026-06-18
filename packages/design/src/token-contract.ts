@@ -100,3 +100,59 @@ export const durations = {
 	medium: "200ms",
 	long: "300ms",
 } as const
+
+/**
+ * Utility-class inputs — drive the generated `utilities.css` (the relocated `_text.scss`/`_flex.scss`
+ * utility layer). Kept verbatim from the originals so the generated CSS is byte-faithful.
+ */
+
+/** `.color--*` / `.fill--*` color-name → CSS-var map (verbatim from the old `_text.scss`). NOTE:
+ *  `dark` → `--gray-15` is a pre-existing ghost (var declared nowhere) preserved verbatim; it renders
+ *  as inherited today and must keep doing so (look-same). The fix is tracked for the Phase-3 Text rewrite. */
+export const textColors = {
+	primary: "--txt-primary",
+	body: "--txt-body",
+	secondary: "--txt-secondary",
+	tertiary: "--txt-tertiary",
+	support: "--txt-support",
+	dark: "--gray-15",
+	inverse: "--txt-inverse",
+	white: "--txt-white",
+	blue: "--blue",
+	orange: "--orange",
+	purple: "--purple",
+	green: "--green",
+	red: "--red",
+	yellow: "--yellow",
+	amber: "--yellow",
+	gray: "--gray",
+	"neutral-mint": "--neutral-mint",
+	sand: "--sand",
+} as const
+
+/** Text-align utilities (`.ta--*`). */
+export const textAligns = { center: "center", left: "left", right: "right" } as const
+
+/** `.gap--N` scale (px) — verbatim from `_flex.scss`. */
+export const flexGaps = [2, 3, 4, 6, 8, 10, 12, 14, 16, 20, 24, 32, 40, 48, 60] as const
+
+/** `.justify-*` / `.items-*` / `.justify-items-*` / `.content-*` value map — verbatim from `_flex.scss`. */
+export const flexAlignments = {
+	center: "center",
+	between: "space-between",
+	around: "space-around",
+	evenly: "space-evenly",
+	start: "flex-start",
+	end: "flex-end",
+} as const
+
+/** `.wrap-*` value map. */
+export const flexWraps = { nowrap: "nowrap", wrap: "wrap", wrapReverse: "wrap-reverse" } as const
+
+/** `.flex-direction-*` value map. */
+export const flexDirections = {
+	row: "row",
+	column: "column",
+	rowReversed: "row-reverse",
+	columnReversed: "column-reverse",
+} as const

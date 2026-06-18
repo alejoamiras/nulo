@@ -27,7 +27,7 @@ import { createApp } from "vue"
 import { createRouter, createWebHashHistory } from "vue-router"
 import App from "./app.vue"
 import routes from "~pages"
-import "@/assets/styles/_base.scss"
+import "@nulo/design/base.css"
 import "./onboarding.scss"
 
 import { initAppServiceContext } from "@/utils/core"
