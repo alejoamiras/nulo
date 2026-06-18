@@ -660,6 +660,77 @@ describe("dispatcher sendTx hook forwarding", () => {
 	})
 })
 
+describe("dispatcher.handleSendTx — opts.from resolution (multi-account session)", () => {
+	// Regression: a dApp connected to MULTIPLE accounts that sends `from: B` must have the
+	// tx sent from B — not silently from the first session account (A). Pre-fix, handleSendTx
+	// clobbered opts.from to the first session account. See
+	// implementations-plan/network-e2e-required/FOLLOWUP-opts-from-clobber.md.
+	const grants = [
+		{ capability: { type: "accounts", canGet: true, canCreateAuthWit: false, accounts: [] }, grantedAt: 1 },
+		{ capability: { type: "transaction", scope: [] }, grantedAt: 1 },
+	]
+	const accounts = [
+		{ address: "0xaaa", name: "A", chainId: 0 },
+		{ address: "0xbbb", name: "B", chainId: 0 },
+	]
+	// Empty exec.calls → scope enforcement is vacuously satisfied (mirrors the hook tests).
+	const exec = { calls: [] }
+
+	function makeSendTxDispatcher(): { dispatcher: WalletSdkDispatcher; captured: { account?: string; executionMode?: string } } {
+		const session = makeSession({ capabilityGrants: grants as never, accounts: ["aztec:0:0xaaa", "aztec:0:0xbbb"] })
+		const { writer } = makeSessionWriter(session)
+		const captured: { account?: string; executionMode?: string } = {}
+		const interaction: IDappInteractionRunner = {
+			execute: async (params) => {
+				const op = (params as { operations: Array<{ account?: string; executionMode?: string }> }).operations?.[0]
+				captured.account = op?.account
+				captured.executionMode = op?.executionMode
+				return [{ status: "ok", result: "0xtx" }] as never
+			},
+			requestCapabilities: async () => ({}) as never,
+		}
+		const network: INetworkReader = { getNetworks: async () => [{ id: "net-0", chainId: 0 }] as INetworkRef[] }
+		const account: IAccountReader = { getAccounts: async () => accounts }
+		return {
+			dispatcher: new WalletSdkDispatcher(network, account, stubExecution, interaction, writer, noopLogger),
+			captured,
+		}
+	}
+
+	test("honors an explicit session-authorized `from` (B), not the first account (A)", async () => {
+		const { dispatcher, captured } = makeSendTxDispatcher()
+		await dispatcher.dispatch("sendTx", [exec, { from: "0xbbb" }], ctx)
+		expect(captured.account).toBe("aztec:0:0xbbb")
+	})
+
+	test("honors `from: A` when A is explicitly requested", async () => {
+		const { dispatcher, captured } = makeSendTxDispatcher()
+		await dispatcher.dispatch("sendTx", [exec, { from: "0xaaa" }], ctx)
+		expect(captured.account).toBe("aztec:0:0xaaa")
+	})
+
+	test("rejects a `from` outside the session — no silent fallback to the first account", async () => {
+		const { dispatcher, captured } = makeSendTxDispatcher()
+		await expect(dispatcher.dispatch("sendTx", [exec, { from: "0xstranger" }], ctx)).rejects.toThrow(
+			/not authorized for this dApp session/,
+		)
+		expect(captured.account).toBeUndefined() // resolution threw BEFORE execute
+	})
+
+	test("no `from` → first session account (unchanged behavior)", async () => {
+		const { dispatcher, captured } = makeSendTxDispatcher()
+		await dispatcher.dispatch("sendTx", [exec, {}], ctx)
+		expect(captured.account).toBe("aztec:0:0xaaa")
+	})
+
+	test("NO_FROM → first account + default_entrypoint (unchanged behavior)", async () => {
+		const { dispatcher, captured } = makeSendTxDispatcher()
+		await dispatcher.dispatch("sendTx", [exec, { from: "NO_FROM" }], ctx)
+		expect(captured.account).toBe("aztec:0:0xaaa")
+		expect(captured.executionMode).toBe("default_entrypoint")
+	})
+})
+
 // ── registerToken (Nulo-custom) — schema-patch reachability + routing ───
 //
 // These tests pin the BLOCKER fixes from the dual audit:
