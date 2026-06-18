@@ -3,7 +3,7 @@ import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { navigateToSettings, switchAccountByAddress } from "../fixtures/helpers"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, pickFeeAndSubmitAuthwitPopup, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
-import { waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
+import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { isAuthRegistryEnabled, isAuthwitConsumable } from "@/wallet/utils/auth-registry"
 
@@ -40,6 +40,11 @@ test.skipIf(!hasConfig)(
 		const [ownerA, callerB] = accountAddresses as [string, string]
 		const step = (m: string) => console.log(`[authwit-lifecycle] ${m}`)
 		const node = createAztecNodeClient(aztecConfig!.nodeUrl)
+
+		// A is the transfer `from` in each consume — fund A so a non-revoked consume
+		// can actually move tokens (otherwise it reverts on insufficient balance,
+		// masking the authwit-enforcement signal).
+		await mintPublicTokensForAccount(aztecConfig!, ownerA)
 
 		const setInputs = async (nonce: string) => {
 			await page.evaluate(
