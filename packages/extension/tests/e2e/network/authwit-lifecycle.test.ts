@@ -126,10 +126,7 @@ test.skipIf(!hasConfig)(
 					const dn = createAztecNodeClient(aztecConfig!.nodeUrl)
 					const rcpt = await dn.getTxReceipt(TxHash.fromString(txHash))
 					lastConsumeBlock = rcpt.blockNumber
-					const tips = await dn.getL2Tips()
-					console.log(
-						`[consume-block] nonce=${nonce} block=${rcpt.blockNumber} status=${String(rcpt.status)} proven=${tips.proven.block.number} latest=${tips.latest.block.number}`,
-					)
+					console.log(`[consume-block] nonce=${nonce} block=${rcpt.blockNumber} status=${String(rcpt.status)}`)
 				} catch (e) {
 					console.log(`[consume-block] nonce=${nonce} diag-failed: ${String(e)}`)
 				}
@@ -217,7 +214,14 @@ test.skipIf(!hasConfig)(
 				)
 			}
 		}
-		expect(g2outcome).toBe("error")
+		// DIAGNOSTIC (new-angle): do NOT throw on the revoke check here — proceed to
+		// step 3 to observe whether registry-DISABLE blocks the consume. That splits
+		// the two remaining hypotheses in ONE soak:
+		//   disableBlocks=true  → the registry IS consulted; revoke cleared the wrong
+		//                         slot (storedHash != on-chain grant hash) — wallet bug.
+		//   disableBlocks=false → the consume bypasses the registry entirely (one
+		//                         wallet holds granter+consumer) — test-design flaw.
+		// The final assertion below keeps the test red until the behavior is correct.
 
 		// ── Step 3: G3 grant → registry DISABLE → consume FAILS → ENABLE → consume OK ──
 		// reject_all is checked before the approval, so a disabled-registry
@@ -227,12 +231,20 @@ test.skipIf(!hasConfig)(
 		step("disable registry via settings")
 		await settingsAction("authwits-toggle-registry", "registry-toggle-submit")
 		step("G3 consume (expect error — registry disabled)")
-		expect(await consume("3")).toBe("error")
+		const g3disabled = await consume("3")
 		step("re-enable registry via settings")
 		await settingsAction("authwits-toggle-registry", "registry-toggle-submit")
 		step("G3 consume again (expect ok — approval survived the reverted consume)")
-		expect(await consume("3")).toBe("ok")
+		const g3reenabled = await consume("3")
 
+		console.log(
+			`[F1-MATRIX] revokeBlocks=${g2outcome === "error"} disableBlocks=${g3disabled === "error"} reenableOk=${g3reenabled === "ok"}`,
+		)
 		step("DONE")
+		expect({ revoke: g2outcome, disable: g3disabled, reenable: g3reenabled }).toEqual({
+			revoke: "error",
+			disable: "error",
+			reenable: "ok",
+		})
 	},
 )
