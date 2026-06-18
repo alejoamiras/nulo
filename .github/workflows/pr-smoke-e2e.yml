@@ -39,6 +39,8 @@ jobs:
               - 'packages/extension/src/composables/**'
               - 'packages/extension/src/stores/**'
               - 'packages/extension/src/design/**'
+              - 'packages/design/**'
+              - '!packages/design/**/*.md'
               - 'packages/extension/src/assets/styles/**'
               - 'packages/extension/manifest/**'
               # Wallet services smoke actually exercises

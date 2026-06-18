@@ -32,3 +32,28 @@ Branch: `feat/design-system-p1-tokens`. Machine-gated (autonomous).
 - biome formatting: `render-tokens.ts` emits tab-indented / double-quoted / trailing-comma output to
   match the existing `tokens.ts`; verified `biome check` is a no-op on the generated file so the
   byte-pin and lint agree.
+
+## Result — Phase 1 COMPLETE ✓
+
+All sub-tasks done. Validation gate (all green):
+- `bun run typecheck:all` → exit 0, all 12 `@nulo/*` packages (extension re-export resolves).
+- `bun run lint` → exit 0 (53 pre-existing advisory warnings; none in the new files).
+- Tests: `packages/design` 69 (incl. `tokens.drift` byte-pin + `boundary` chrome/floor guards) ·
+  `bun run test:faucet` 336 · `bun run test` (extension) 2398. All green.
+- `bun run build` (extension, crxjs chrome) + `bun run build:faucet` → both exit 0.
+
+Implementation notes vs the plan's loose wording:
+- Token source is `src/token-contract.ts`; the pure renderer is `src/internal/render-tokens.ts`; the
+  Bun CLI is `scripts/gen-tokens.ts` (kept out of `src/**` so `Bun.write`/top-level-await don't reach
+  vue-tsc). `src/tokens.ts` is the generated, byte-pinned artifact.
+- The extension's `src/design/tokens.ts` is now `export * from "@nulo/design/tokens"` — the full token
+  surface matched the package's generated one, so there were NO ext-only members to keep (zero churn).
+- Drift test reads the generated file via Vite `?raw` (jsdom `import.meta.url` isn't a `file://` URL);
+  a one-line `*?raw` + `import.meta.glob` shim lives in `src/raw.d.ts`.
+- Core/ui layer enforcement is a self-contained biome override (re-includes the `@nulo/*` + chrome
+  floor) so override-merge can't drop the floor for `core/**`.
+- CI: added `packages/design/**` to the `extension` + `faucet` filters in `pr-quick.yml`, and to the
+  `pr-smoke-e2e.yml` + `pr-network-e2e.yml` filters (design feeds both apps now). actionlint runs in CI.
+
+Commits on the branch: blueprint docs · token core · seam re-export · boundary guards · (this) CI+docs.
+Next: Phase 2 (base/theme/font takeover) — SUPERVISED, needs the user's visual sign-off.

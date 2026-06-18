@@ -58,6 +58,7 @@ jobs:
               - 'packages/aztec-runtime/**'
               - 'packages/wallet-bridge/**'
               - 'packages/playground/**'
+              - 'packages/design/**'
               - '.github/workflows/_network-e2e.yml'
               - '.github/workflows/pr-network-e2e.yml'
               - '.github/actions/setup-aztec/**'

@@ -174,12 +174,16 @@ change a snapshot or the human-verified appearance.
 > Cheap layers EVERY phase: `typecheck:all` + `lint` + tests. Build at milestones. Smoke
 > (light+dark) on move phases. Network e2e once (Phase 5).
 
-### Phase 1 — Seam + single-source contract + drift + CI · MILESTONE (machine-only; AFK-fine)
+### Phase 1 ✓ — Seam + single-source contract + drift + CI · MILESTONE (machine-only; AFK-fine)
 Add dep + `./core`/`./ui` exports; author `contract.ts` (from the extension's current surface) +
 `gen-tokens.ts`; generate `tokens.ts`; repoint extension tokens to re-export; add `tokens.drift.test.ts`;
 biome rules + chrome-indirection + floor meta-test; patch the 3 CI workflows; README. No base switch,
 no moves.
 **Gate:** typecheck:all + lint + tests (byte-pin) + `build` + `build:faucet`.
+**✓ COMPLETE** (branch `feat/design-system-p1-tokens`): typecheck:all green (12 pkgs) · lint exit 0 ·
+tests green (design 69 · faucet 336 · extension 2398) · `build` + `build:faucet` green. Implemented
+as `src/token-contract.ts` (+ `src/internal/render-tokens.ts`) per the package's `src/**`-only
+tsconfig — see `lessons/phase-1.md`.
 
 ### Phase 2 — Base/theme/font takeover (RELOCATE) · MILESTONE · **SUPERVISED — human sign-off required**
 Port the extension's full `_base.scss`+`_text.scss` into the package `base.css` (tokens generated;
