@@ -1,9 +1,11 @@
-# Follow-up finding: `sendTx` ignores `opts.from` for multi-account dApp sessions
+# RESOLVED finding: `sendTx` ignored `opts.from` for multi-account dApp sessions
 
-**Status:** filed, NOT yet fixed. Surfaced while resolving F1 (authwit-lifecycle e2e).
+**Status:** ✅ FIXED in-arc (`5d09ca3`) — user chose to fix the bug rather than defer it.
+`resolveNetworkAndAccount` now honors a session-authorized `opts.from` and rejects anything
+outside the session; 5 dispatcher unit tests pin it; F1's `authwit-lifecycle` e2e was
+upgraded to a true revoke proof (consume from B is blocked after revoke). The original
+filing is preserved below for the record.
 **Severity:** correctness + mild trust-boundary/UX. Confined to **multi-account** dApp sessions.
-**Owner of decision:** user chose to land the F1 e2e fix via on-chain-state assertions and
-file this separately rather than bundle a trust-boundary change into the e2e arc.
 
 ## What
 
@@ -59,8 +61,12 @@ authorized for the session, and the per-tx confirmation popup still shows the se
   (consume sent by B is blocked after revoke / while disabled), on top of the on-chain-state
   assertions it already makes.
 
-## Why filed, not fixed here
+## Resolution (fixed in-arc)
 
-Trust-boundary change to the dApp RPC surface → warrants its own focused PR + review
-(blueprint), not bundling into the network-e2e-stabilization arc. See
-[lessons/phase-4.md](lessons/phase-4.md) for the full classification trail.
+Initially filed for a separate PR (trust-boundary change to the dApp RPC surface). The user
+elected to fix it in-arc instead. The guarded fix is safe under any security reading — it
+only ever resolves to a session-authorized account and rejects anything else — so it could
+not be the wrong call on the sensitive surface. Landed in `5d09ca3` with 5 dispatcher unit
+tests; F1's e2e became a true revoke proof. The post-impl narrow `/harden security` + codex
+audit (already in the plan) cover the change. See [lessons/phase-4.md](lessons/phase-4.md)
+for the full classification trail.

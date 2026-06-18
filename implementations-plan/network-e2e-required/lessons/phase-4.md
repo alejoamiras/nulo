@@ -292,17 +292,27 @@ becomes observable: revoke/disable BLOCK the consume. Keep the on-chain-state as
 (`isAuthwitConsumable`/`isAuthRegistryEnabled`) as belt-and-suspenders. This is a
 trust-boundary change → covered by the post-impl narrow /harden security + codex audit.
 
-═══ RESOLUTION (option 2 — user flagged the trust boundary; kept the e2e arc clean) ═══
+═══ RESOLUTION — FIXED IN-ARC (user chose to fix the bug, not defer it) ═══
 The user questioned whether the `opts.from` override was a deliberate security measure.
 Investigated: both lines are from `5ee8ec1 "chore: open-source initial import"` (no
 security commit/comment/AUDIT marker; nothing in ARCHITECTURE/SECURITY docs frames it as
 intentional). Conclusion: OUR bug, not a deliberate block; aztec.nr self-send semantics
-are correct. The guarded fix (honor `opts.from` iff session-authorized) is safe under any
-security reading. Rather than bundle a trust-boundary change into this e2e arc, chose
-option 2: rewrote `authwit-lifecycle` to assert the on-chain registry WRITES
-(`isAuthwitConsumable` grant→true/revoke→false; `isAuthRegistryEnabled` disable→false/
-enable→true), dropped the vacuous consume + all diagnostics. Deterministic — soaked with
-`NULO_E2E_RETRY=0`. The `opts.from` wallet fix is filed in
-[FOLLOWUP-opts-from-clobber.md](../FOLLOWUP-opts-from-clobber.md) for its own focused PR;
-a true end-to-end revoke proof (consume blocked post-revoke) is gated on that fix.
+are correct. An interim option-2 rewrite (assert on-chain WRITES only) was landed +
+soaked green, THEN the user directed fixing the actual bug.
+
+FIX (`5d09ca3`): `handleSendTx` computes `requestedFrom` from `opts.from` (skipping the
+NO_FROM sentinel + omitted-from) and passes it to `resolveNetworkAndAccount`, which now
+returns the session account matching `requestedFrom` and THROWS if it is not
+session-authorized (never silently falls back to the first account). Mirrors
+`handleGrantPublicAuthwit`. 5 dispatcher unit tests pin it (B→B, A→A, unauthorized→throw,
+no-from + NO_FROM unchanged) — `bun run --cwd packages/wallet-bridge test` 154 pass.
+
+With the consume now genuinely sent from B, `authwit-lifecycle` was upgraded to a TRUE
+end-to-end revoke proof: assert BOTH the on-chain writes AND enforcement (G1 consume ok;
+G2 consume FAILS after revoke, non-vacuous; toggle writes via reject_all state). Soaked
+`NULO_E2E_RETRY=0`. NOTE the first upgrade soak failed at G1 consume because the option-2
+rewrite had dropped `mintPublicTokensForAccount` (A had 0 tokens → transfer reverts on
+balance, not authwit) — re-added; the soak catches missing funding, not a fix defect.
+[FOLLOWUP-opts-from-clobber.md](../FOLLOWUP-opts-from-clobber.md) marked resolved. Covered
+by the post-impl narrow /harden security + codex audit.
 LESSONS_FILE=implementations-plan/network-e2e-required/lessons/phase-4.md
