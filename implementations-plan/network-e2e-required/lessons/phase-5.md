@@ -149,3 +149,17 @@ CONCLUSION (both codex + static agree): the revoke page-hang is a PRE-EXISTING /
 EXPOSED by the cutover's SW-timing delta — NOT a cutover code bug. ⇒ This is a PHASE 6 revealed
 flake (root-cause-by-measurement), entangled with Phase 5's soak gate. Phase 5 cutover CODE is
 correct (codex-exonerated + 7 unit pins green); its soak gate is blocked by this Phase-6 flake.
+
+═══ audit:vue caught a cutover-commit regression (biome auto-fix) ═══
+The Phase-5 post-impl `audit:vue` (run during a CI-soak wait) failed: 50 tests in
+incoming-transfer/service.scenarios.test.ts threw `TypeError: () => ({...}) is not a constructor`
+at service.ts:85 (`new IncomingTransferRepository()`). Root cause: commit c5ef0bf (cutover core)
+inadvertently included a `biome check --write` `useArrowFunction` auto-fix that rewrote
+`vi.fn(function(){...})` repository/store mocks to `vi.fn(() => ({...}))` — arrow functions are
+NOT constructors. Biome can't see the mock is later `new`-ed (it's passed to vi.fn then
+constructed in service.ts), so it "safely" converted it. Fix: `git checkout 8438868 -- <file>`
+(restore to the last good pre-cutover version); 50/50 pass. Verified c5ef0bf had NO other
+accidental conversions (only this file). Runtime untouched (CI e2e build was always green).
+LESSON: review `biome check --write` diffs before committing — useArrowFunction silently breaks
+constructor-functions used via `new`. audit:vue (full cross-package unit suite) is the gate that
+catches this; run it before considering a phase done.
