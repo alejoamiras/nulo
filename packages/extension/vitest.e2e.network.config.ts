@@ -24,6 +24,10 @@ export default defineConfig({
 		include: ["tests/e2e/network/**/*.test.ts"],
 		environment: "node",
 		globalSetup: "./tests/e2e/global-setup.ts",
+		// Per-worker: marks `.e2e-state/tests-started` so the boot-failure
+		// classifier never misclassifies a run that reached test execution as an
+		// infra-boot failure (exit 86).
+		setupFiles: ["./tests/e2e/network-setup.ts"],
 		testTimeout: 30_000,
 		hookTimeout: 300_000, // 5min — tokenReadyExtension creates EmbeddedWallet + mints tokens
 		fileParallelism: false,

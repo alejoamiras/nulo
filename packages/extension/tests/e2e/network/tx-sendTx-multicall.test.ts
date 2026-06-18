@@ -24,7 +24,7 @@ const hasConfig = aztecConfig !== undefined
  *
  * Asserts on `data-stage="proving"` (wallet popup) instead of the dApp's
  * full sendTx promise. See implementations-plan/journal-stage-restructure/.
- * `retry: 1` removed (per audit "zero retries" acceptance gate).
+ * Per-test retry removed (per audit "zero retries" acceptance gate).
  */
 const cases: Array<{ id: number; name: string; btn: string }> = [
 	{ id: 32, name: "multicall", btn: "pg-btn-sendTx-multicall" },

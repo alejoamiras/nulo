@@ -16,7 +16,7 @@ const hasConfig = aztecConfig !== undefined
  */
 test.skipIf(!hasConfig)(
 	"meta-batch — meta-only batch silent, returns named results",
-	{ timeout: 60_000, retry: 1 },
+	{ timeout: 60_000 },
 	async ({ dappConnectedExtension }) => {
 		const result = await callExpectingNoPopup(dappConnectedExtension, dappConnectedExtension.playgroundPage, "batch", async () => {
 			await clickByTestId(dappConnectedExtension.playgroundPage, "pg-btn-batch-meta")

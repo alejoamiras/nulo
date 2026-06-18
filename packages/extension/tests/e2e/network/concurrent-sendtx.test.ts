@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { openPopup, test, waitForHash } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { snapshotResultSeq, waitForPgResults } from "../fixtures/playground"
 import { waitForPopup, waitForExecuteContent, rejectExecute } from "../fixtures/popups"
 import { readDappExecuteRecords, waitForInFlight } from "../fixtures/journal"
 import type { AztecTestConfig } from "../fixtures/aztec"
@@ -138,12 +138,14 @@ test.skipIf(!hasConfig)(
 		await waitForExecuteContent(secondPopup)
 		await rejectExecute(secondPopup)
 
-		// Both dApp promises must settle. waitForPgResult with `seqBefore`
-		// captures the FIRST result row after the snapshot; calling it twice
-		// captures both. The seqs must be distinct (= two settled rows on
-		// the playground = direct refutation of "only one tx visible").
-		const r1 = await waitForPgResult(page, "sendTx", seqBefore, 30_000)
-		const r2 = await waitForPgResult(page, "sendTx", r1.seq, 30_000)
+		// Both dApp promises must settle. The two sendTx run CONCURRENTLY, so their
+		// reject results can land on the playground in EITHER seq order — collect
+		// both with seq > seqBefore regardless of order (returned ascending), then
+		// assert. The previous `waitForPgResult` twice ("wait for seq > r1.seq")
+		// deadlocked when the higher seq settled first: r1 grabbed it, r2 then
+		// waited for an even-higher seq that never came. Distinct seqs = two settled
+		// rows = direct refutation of "only one tx visible".
+		const [r1, r2] = await waitForPgResults(page, "sendTx", seqBefore, 2, 30_000)
 		expect(r1.status).toBe("error")
 		expect(r2.status).toBe("error")
 		expect(r2.seq).toBeGreaterThan(r1.seq)

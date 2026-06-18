@@ -1,4 +1,5 @@
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { toRestoreError } from "@/utils/restore-error"
 import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
@@ -508,7 +509,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 				} catch (err) {
 					result.push({
 						...fpc,
-						restoreError: err instanceof Error ? err.message : err,
+						restoreError: toRestoreError(err),
 					})
 				}
 			}

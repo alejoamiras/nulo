@@ -147,6 +147,8 @@ declare global {
   const usePasskeyCeremony: typeof import('../composables/usePasskeyCeremony').usePasskeyCeremony
   const usePopupStore: typeof import('../stores/popup.store').usePopupStore
   const useProfileBootstrap: typeof import('../composables/useProfileBootstrap').useProfileBootstrap
+  const useProfileCreateFlow: typeof import('../composables/useProfileCreateFlow').useProfileCreateFlow
+  const useProfileImportFlow: typeof import('../composables/useProfileImportFlow').useProfileImportFlow
   const useProfileNameField: typeof import('../composables/useProfileNameField').useProfileNameField
   const useRoute: typeof import('vue-router').useRoute
   const useRouter: typeof import('vue-router').useRouter
@@ -188,6 +190,12 @@ declare global {
   // @ts-ignore
   export type { RestoreStatus, UseFullBackupImportOptions, UseFullBackupImportResult } from '../composables/useFullBackupImport'
   import('../composables/useFullBackupImport')
+  // @ts-ignore
+  export type { UseProfileCreateFlowOptions } from '../composables/useProfileCreateFlow'
+  import('../composables/useProfileCreateFlow')
+  // @ts-ignore
+  export type { UseProfileImportFlowOptions } from '../composables/useProfileImportFlow'
+  import('../composables/useProfileImportFlow')
   // @ts-ignore
   export type { ProfileNameFieldOptions, ValidateOptions, ProfileNameField } from '../composables/useProfileNameField'
   import('../composables/useProfileNameField')
@@ -381,6 +389,8 @@ declare module 'vue' {
     readonly usePasskeyCeremony: UnwrapRef<typeof import('../composables/usePasskeyCeremony')['usePasskeyCeremony']>
     readonly usePopupStore: UnwrapRef<typeof import('../stores/popup.store')['usePopupStore']>
     readonly useProfileBootstrap: UnwrapRef<typeof import('../composables/useProfileBootstrap')['useProfileBootstrap']>
+    readonly useProfileCreateFlow: UnwrapRef<typeof import('../composables/useProfileCreateFlow')['useProfileCreateFlow']>
+    readonly useProfileImportFlow: UnwrapRef<typeof import('../composables/useProfileImportFlow')['useProfileImportFlow']>
     readonly useProfileNameField: UnwrapRef<typeof import('../composables/useProfileNameField')['useProfileNameField']>
     readonly useRoute: UnwrapRef<typeof import('vue-router')['useRoute']>
     readonly useRouter: UnwrapRef<typeof import('vue-router')['useRouter']>

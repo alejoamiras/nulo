@@ -23,6 +23,7 @@
 					description="View all notes"
 					materialIcon="note_alt"
 					chevron
+					data-testid="setting-nav-advanced-account-state-notes"
 				/>
 				<SettingItem
 					size="large"
@@ -31,6 +32,7 @@
 					description="View all authwits"
 					materialIcon="verified_user"
 					chevron
+					data-testid="setting-nav-advanced-account-state-authwits"
 				/>
 				<SettingItem
 					size="large"
@@ -39,6 +41,7 @@
 					description="View all contracts"
 					materialIcon="receipt_long"
 					chevron
+					data-testid="setting-nav-advanced-account-state-contracts"
 				/>
 				<SettingItem
 					size="large"
@@ -47,6 +50,7 @@
 					description="View all senders"
 					materialIcon="inbox"
 					chevron
+					data-testid="setting-nav-advanced-account-state-senders"
 				/>
 			</ItemsContainer>
 		</Flex>

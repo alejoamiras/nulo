@@ -1,4 +1,5 @@
 import type { Restored, ServiceSpec } from "@/wallet/base"
+import { toRestoreError } from "@/utils/restore-error"
 import { Service } from "@nulo/extension-messaging/background"
 import type { IConfigStore } from "@/wallet/config"
 import type { ILogger } from "@/wallet/logger"
@@ -50,7 +51,7 @@ export class ConfigService extends Service<Methods, Events> implements ServiceSp
 			} catch (err) {
 				result.push({
 					...cp,
-					restoreError: err instanceof Error ? err.message : err,
+					restoreError: toRestoreError(err),
 				})
 			}
 		}
