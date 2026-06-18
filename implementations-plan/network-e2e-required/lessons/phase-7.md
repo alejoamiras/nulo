@@ -45,3 +45,26 @@ Both e2e files resolve to == HEAD (verified: no dev-unique loss beyond the buggy
 Run 1 = `27786314393` (pull_request synchronize). Runs 2–5 via `gh workflow run pr-network-e2e.yml
 --ref fix/measure-f1-authwits`, one at a time. After 5/5 green: `--admin` squash-merge PR #115 →
 dev, then POST `Network e2e / Status` to dev `required_status_checks/contexts` + verify.
+
+## Revealed flake during re-prove — contacts-sender (run 3/5 on 3ef52a3)
+The re-prove did its job: it SURFACED a latent flake the original `1394574` 5× got lucky on.
+Runs 1+2 green; run 3 shard 2/5 failed (everything else green) —
+`contacts-sender.test.ts > "edit contact address with sender ON migrates the sender registration"`,
+`clickByTestId(edit-contact-submit)` TimeoutError 10000ms (line 171). Root cause: `EditContactPopup`
+submit is `:submitDisabled` on `isLoadingSenderState`, which `loadSenderState()` holds true while
+awaiting `accountStateService.getSenders()` (PXE init + read). The test clicked submit before that
+load settled; 10s was too tight under 2-core CI load right after a sender-registration tx.
+
+CODEX CONSULT (xhigh, session 019edc78): VERDICT **slow-not-hang** — transport is deadline-bounded
+end-to-end (SW RPC 60s, offscreen RPC 90s, node HTTP AbortController), so `getSenders` always
+settles via `loadSenderState`'s `finally`. FIX = patch the TEST, wait on the real readiness
+contract. REJECTED: app-side timeout on `loadSenderState` (would submit with wrong/default sender
+state = masking) and a bare `clickByTestId` timeout bump (derivative symptom). Codex strengthened
+my draft — also assert `data-toggle-active=true`, proving the scenario is still genuinely sender-ON
+rather than a load that defaulted false. Acted on codex's stronger argument.
+
+FIX (`contacts-sender.test.ts:171`): before clicking submit, `page.waitForFunction` for
+`[data-testid=edit-contact-sender-toggle]` `data-toggle-disabled=false` AND `data-toggle-active=true`
+(30s, mirrors the readiness wait already used later in the file). NOT a retry/skip — an explicit
+wait on the app's own load-gate signal. lint + typecheck exit 0. New sha → **restart 5× from
+scratch** (run-3 failure broke the consecutive streak).
