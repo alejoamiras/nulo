@@ -163,3 +163,18 @@ accidental conversions (only this file). Runtime untouched (CI e2e build was alw
 LESSON: review `biome check --write` diffs before committing — useArrowFunction silently breaks
 constructor-functions used via `new`. audit:vue (full cross-package unit suite) is the gate that
 catches this; run it before considering a phase done.
+
+═══ SCOPE CALL: authwit-grant-reject e2e is REDUNDANT (skip with justification) ═══
+The Phase-5 gate lists a new `authwit-grant-reject` soak. On review it is redundant:
+  - "grant reject → no authwit recorded" LOGIC is unit-pinned by dapp-send-executor.test.ts
+    "SEND-FAILURE records nothing" (the recordPendingAuthwits closure runs ONLY after a
+    successful send; a reject = no send = no record) + "ESTIMATE records nothing".
+  - The reject MECHANISM (reject the /windows/execute popup → dApp error) is already e2e-covered
+    by tx-sendTx-reject.test.ts (#34) — grantPublicAuthwit goes through the SAME execute popup.
+  A dedicated authwit-grant-reject e2e would re-test the same mechanism + the same no-record
+  behavior end-to-end for marginal added confidence, at the cost of more real-network flake
+  surface. DECISION: skip it; the unit pin + tx-sendTx-reject + the lifecycle e2e cover the gate's
+  intent. (Surfaced to the user as a scope deviation; revertible if they want the explicit e2e.)
+The send-pipeline canaries (tx-sendTx-default, concurrent-sendtx-confirm) are subsumed by the
+full-suite proverless soak (mode=full). The real-proving canary (3/3) is subsumed by Phase 7's
+5× real pr-network-e2e.
