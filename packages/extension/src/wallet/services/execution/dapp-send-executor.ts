@@ -211,11 +211,8 @@ export class DappSendExecutor {
 			await this.deps.lane.markJournal(journalId, { stage: "simulating" })
 			checkCancelled()
 
-			const { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod } = await this.deps.buildAndEstimate(
-				op,
-				op.feeSettings,
-				parentTask,
-			)
+			const { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } =
+				await this.deps.buildAndEstimate(op, op.feeSettings, parentTask)
 
 			const { txHash } = await this.deps.coordinator.proveAndSend({
 				pxe,
@@ -225,8 +222,11 @@ export class DappSendExecutor {
 				parentTask,
 				checkCancelled,
 				markJournal: (patch) => this.deps.lane.markJournal(journalId, patch),
-				recordTransaction: (hash) =>
-					this.deps.addTransaction(
+				// One post-send closure owns BOTH the activity record AND the public-authwit
+				// index write. grantPublicAuthwit routes here (kind: send_transaction), so this
+				// is where a granted authwit is recorded — pending, reconciled by tx outcome.
+				recordTransaction: async (hash) => {
+					await this.deps.addTransaction(
 						origin,
 						network.chainId,
 						account.address.toString(),
@@ -236,7 +236,11 @@ export class DappSendExecutor {
 						hash,
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
-					),
+					)
+					if (pendingPublicAuthwits.length > 0) {
+						await this.deps.recordPendingAuthwits(account.address.toString(), pendingPublicAuthwits, hash)
+					}
+				},
 			})
 			return txHash.toString()
 		} catch (error) {
