@@ -93,3 +93,37 @@ FIX: move BOTH no-op guards (pending + isConsumable) BEFORE `startSubtask` — a
 starts no subtask, so nothing wedges the parent. (Also fixed a latent typecheck error in the
 estimate pin + added `pendingPublicAuthwits:[]` to the service.characterization mock.)
 typecheck + 276 execution units green. Re-soaking to validate the revoke completes e2e.
+
+═══ CORRECTION — r10 WAS A MISDIAGNOSIS (symptom mismatch) ═══
+The "REVOKE-HANG ROOT CAUSE — FIXED (codex r10)" entry above is WRONG as a root-cause claim.
+Re-read the red soak's actual error frame: `Error: Waiting failed` **Caused by: `ProtocolError:
+Runtime.callFunctionOn timed out`**. The failing wait is `walletPopup.waitForFunction(() =>
+!document.querySelector(submitTestId))` — a PURE-DOM poll. A ProtocolError on that = the popup
+page's JS MAIN THREAD is BLOCKED/unresponsive (CDP can't even evaluate the predicate).
+
+A TaskService subtask-wedge (r10's mechanism) makes `revokeAuthwits` REJECT → the popup shows an
+error and KEEPS the button, but the page stays RESPONSIVE → that's a NORMAL waitForFunction
+timeout, NOT a ProtocolError. So r10's task-wedge does NOT explain the observed symptom. The
+syncAuthwit subtask-wedge IS a real latent bug (worth fixing, kept), but it is NOT the cause of
+this hang. The "2 green after the fix" were almost certainly luck on a ~1/3 intermittent
+page-block (1 red returned after a revoke-irrelevant cap refactor — strong evidence the fix was
+a no-op on the actual flake).
+
+STATIC ANALYSIS (thorough) FOUND NO MAIN-THREAD BLOCKER:
+  - useEntityCrud is NOT a feedback loop: `refresh()` sets entities.value but emits nothing, so
+    it can't re-trigger its own add/delete handlers. Incremental mode = O(n) splices.
+  - authwits settings page (index.vue): incremental useEntityCrud; only `watch` is on
+    appStore.account (does NOT change during the revoke — the switchAccount happens BEFORE it).
+  - RevokeAuthwitsPopup.vue: handleRevokeAuthwits just `await`s the RPC per chunk (main thread
+    free); on success emit("onClose") removes the submit button. No busy-loop / heavy computed /
+    watcher cycle. Subscribes only to onRegistryEnabled/Disabled.
+  - During the revoke the popup receives ~2 onAuthwitDeleted (from syncAuthwit) — not a storm.
+
+CONCLUSION: the residual is a HARD, INTERMITTENT (~1/3), CROSS-PROCESS popup-main-thread block,
+cutover-EXPOSED (Phase-4 baseline ran the revoke green at 76s). It will NOT yield to more static
+reading — it needs soak-driven MEASUREMENT (capture what pegs the popup thread when it repros).
+That is Phase-6 (de-flake) work by nature. Re-consulting codex with the corrected symptom
+(session bgdfjnsjb) for a second opinion before committing to instrumentation.
+
+STILL-VALID, KEPT (independent of this flake): opts.from fix (MERGED to dev), syncAuthwit
+hardening (real latent task-wedge), cap refactor → assertWithinCap, 7 auth-registry unit pins.
