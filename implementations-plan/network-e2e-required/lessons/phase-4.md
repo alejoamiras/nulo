@@ -260,3 +260,35 @@ protocol's consume enforcement:
 Keep G1 grant→consume as a "grant yields a consumable authwit" smoke. This tests
 `revokeAuthwits` + `setRegistryEnabled` (the two zero-coverage flows) at the layer the
 wallet OWNS. Codex consult pending to validate the verdict + fix shape.
+
+═══ CORRECTION (codex round 8, session 019ed98f) — REAL ROOT CAUSE IS A WALLET BUG ═══
+Codex rejected the "private-witness substitution" mechanism and was RIGHT (verified
+in code). My theory was wrong: `discoverPrivateAuthwits` → `createAuthWit` signs for the
+tx SENDER, which would be B — and B's witness cannot authorize A's transfer (the token
+authenticates `from`=A). The actual mechanism:
+
+`handleSendTx` (dispatcher.ts:511-513) — when `from` is set (not NO_FROM) it CLOBBERS it:
+`opts = { ...rawOpts, from: account.address }`. And `account` comes from
+`resolveNetworkAndAccount` (dispatcher.ts:1191-1196), which returns the FIRST
+session-authorized account, IGNORING `opts.from`. The session holds [A, B] (A first), so
+the consume — playground sends `{from: B}` — is actually sent AS A. Then
+`transfer_public_to_public(from=A, to=B)` with msg_sender=A is a SELF-SEND: `from ==
+msg_sender` ⇒ NO authwit required ⇒ grant/revoke/disable are all irrelevant. That
+explains the full matrix (revokeBlocks=false, disableBlocks=false, reenableOk=true) AND
+makes the G1 "consume" vacuous (A moving its own tokens).
+
+This is a genuine WALLET BUG, not just a test artifact: `sendTx` ignores `opts.from` for
+multi-account sessions and always uses the first account — even though the sibling
+`handleGrantPublicAuthwit` (dispatcher.ts:627: `find(acc => ... && acc.address ===
+requestedAccount)`) resolves the requested account CORRECTLY. A dApp with 2 authorized
+accounts sending `from: B` silently gets a tx sent from A. Trust-boundary asymmetry.
+
+FIX (revised): make `handleSendTx` honor `opts.from` when it is session-authorized —
+resolve the account to `opts.from` (mirror `handleGrantPublicAuthwit`), and REJECT an
+`opts.from` that is not in the session (never silently fall back to the first account —
+that's both the bug and a security hole). Then the consume is genuinely sent BY B,
+`from=A != msg_sender=B` forces the public-registry authwit check, and the lifecycle
+becomes observable: revoke/disable BLOCK the consume. Keep the on-chain-state assertions
+(`isAuthwitConsumable`/`isAuthRegistryEnabled`) as belt-and-suspenders. This is a
+trust-boundary change → covered by the post-impl narrow /harden security + codex audit.
+Resuming codex on the concrete fix before the soak.
