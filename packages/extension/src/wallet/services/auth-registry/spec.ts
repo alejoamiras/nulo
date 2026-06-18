@@ -4,6 +4,11 @@ export const AUTH_REGISTRY_SERVICE_NAME = "auth-registry"
 
 export const MAX_REVOKES_PER_TX = 28 // Aztec protocol limitation
 
+/** Per-account ceiling on tracked public authwits. Enforced PRE-send (at the
+ *  build/approval gate): granting beyond this is blocked, NEVER auto-evicted —
+ *  eviction would destroy the only local revocation index. */
+export const MAX_TRACKED_AUTHWITS_PER_ACCOUNT = 256
+
 export type Authwit = {
 	/** Internal id. */
 	id: number
@@ -13,6 +18,14 @@ export type Authwit = {
 	hash: string
 	/** Plain content. */
 	content: AuthwitContent
+	/** Recording state. A `pending` row was written at the post-send tail but is
+	 *  not yet mine-confirmed; it is reconciled once its tx mines (→ confirmed,
+	 *  `pending` cleared) or drops (→ removed). Absent ⇒ confirmed/legacy. The
+	 *  pending row IS the durable record — recovery retries from it, never from
+	 *  on-chain enumeration (the registry can't discover authwits from chain). */
+	pending?: boolean
+	/** The tx that wrote this authwit on-chain — the reconcile key. */
+	txHash?: string
 }
 
 export type Methods = {

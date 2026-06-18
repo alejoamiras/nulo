@@ -13,7 +13,14 @@ import { EntityStorage } from "@/wallet/storage"
 import { array_max, Lock, sleep } from "@/wallet/utils"
 import { getAuthRegistryAddress, isAuthRegistryEnabled, isAuthwitConsumable } from "@/wallet/utils/auth-registry"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import { AUTH_REGISTRY_SERVICE_NAME, type Authwit, type Events, MAX_REVOKES_PER_TX, type Methods } from "./spec"
+import {
+	AUTH_REGISTRY_SERVICE_NAME,
+	type Authwit,
+	type Events,
+	MAX_REVOKES_PER_TX,
+	MAX_TRACKED_AUTHWITS_PER_ACCOUNT,
+	type Methods,
+} from "./spec"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { TxHash } from "@aztec/stdlib/tx"
 
@@ -89,6 +96,58 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 
 	public async getAuthwits(account: string): Promise<Authwit[]> {
 		return (await this.authwits.getValues()).filter((x) => x.account === account)
+	}
+
+	/** Whether the account is at the tracked-authwit ceiling. Checked PRE-send at
+	 *  the build/approval gate; granting beyond the cap is blocked (never evicted). */
+	public async isAtCap(account: string): Promise<boolean> {
+		const count = (await this.authwits.getValues()).filter((x) => x.account === account).length
+		return count >= MAX_TRACKED_AUTHWITS_PER_ACCOUNT
+	}
+
+	/** Record public authwits at the POST-send tail as `pending`, tx-linked rows.
+	 *  Acceptance of `sendTx` is NOT mining — these stay pending until
+	 *  `reconcileAuthwits` confirms (mined) or removes (dropped) them. Idempotent:
+	 *  an account+hash already tracked (pending or confirmed) is skipped, so a
+	 *  retry after a partial write does not duplicate. */
+	public async recordPendingAuthwits(account: string, items: { hash: string; content: AuthwitContent }[], txHash: string): Promise<void> {
+		if (items.length === 0) return
+		try {
+			await this.lock.enter()
+			const existing = await this.authwits.getValues()
+			const seen = new Set(existing.filter((x) => x.account === account).map((x) => x.hash))
+			let nextId = array_max(existing.map((x) => x.id)) + 1
+			for (const { hash, content } of items) {
+				if (seen.has(hash)) continue
+				seen.add(hash)
+				const authwit: Authwit = { id: nextId++, account, hash, content, pending: true, txHash }
+				await this.authwits.set(`${authwit.id}`, authwit)
+				this.emit("onAuthwitAdded", authwit)
+			}
+		} finally {
+			this.lock.leave()
+		}
+	}
+
+	/** Reconcile pending rows for a tx once its outcome is known: `mined` clears
+	 *  the pending flag (the grant is durable + revocable); `dropped` removes the
+	 *  rows (the grant never landed, so the local index must not claim it exists).
+	 *  Confirmed (non-pending) rows are untouched. */
+	public async reconcileAuthwits(txHash: string, outcome: "mined" | "dropped"): Promise<void> {
+		try {
+			await this.lock.enter()
+			const rows = (await this.authwits.getValues()).filter((x) => x.pending && x.txHash === txHash)
+			for (const row of rows) {
+				if (outcome === "mined") {
+					await this.authwits.set(`${row.id}`, { ...row, pending: false })
+				} else {
+					await this.authwits.delete(`${row.id}`)
+					this.emit("onAuthwitDeleted", row)
+				}
+			}
+		} finally {
+			this.lock.leave()
+		}
 	}
 
 	public async revokeAuthwits(networkId: string, account: string, ids: number[], feeSettings: FeeSettings): Promise<void> {
