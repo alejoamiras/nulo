@@ -23,12 +23,14 @@
  *   - `"DefaultEntrypoint requires exactly 1 call, got ${n}"`
  *   - `"DefaultEntrypoint only supports private functions"`
  *
- * ## `trackAuthwit` stays inside `buildStandard`
+ * ## Public authwits: collected here, recorded POST-send
  *
- * `authRegistryService.trackAuthwit` is called inline during assembly.
- * Moving it to after-send (cleaner architecturally) requires
- * `ExecutionCoordinator` to own the post-send flush point; until then,
- * keep the inline call.
+ * `buildStandard` is PURE w.r.t. the authwit index — it does not write to
+ * `authRegistryService`. Each `add_public_authwit` action is collected into
+ * `pendingPublicAuthwits` (returned on the result) and a per-build cap is
+ * enforced. The post-send tail (`dapp-send-executor` → `recordPendingAuthwits`)
+ * writes them as pending rows, reconciled by the tx's on-chain outcome. This is
+ * what keeps a fee-estimate or a rejected approval from leaking a tracked grant.
  *
  * ## Return shape
  *
@@ -51,6 +53,7 @@ import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { IAccountContract, PartialGasSettingsRPC } from "@nulo/aztec-runtime/account"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
+import { MAX_TRACKED_AUTHWITS_PER_ACCOUNT } from "@/wallet/services/auth-registry/spec"
 import { networkInfoFrom, type NetworkService, type Network } from "@/wallet/services/network/service"
 import type { ProfileService } from "@/wallet/services/profile/service"
 import type { IPXE, PxeServiceClient } from "@/wallet/services/pxe/client"
@@ -59,7 +62,7 @@ import type { TxCall } from "@/wallet/services/transaction/service"
 import { getAuthRegistryAddress, getSetAuthorizedFn, getSetAuthorizedSelector } from "@/wallet/utils/auth-registry"
 import type { AuthwitDiscoverer } from "./authwit-discoverer"
 import { type ContractResolver, findFunctionByName, findFunctionBySelector } from "./contract-resolver"
-import type { Action, AztecSendTxOperation } from "./spec"
+import type { Action, AuthwitContent, AztecSendTxOperation } from "./spec"
 
 const LOG_SOURCE = "TxRequestBuilder"
 
@@ -71,6 +74,11 @@ export interface BuiltStandardTx {
 	network: Network
 	nonce: Fr
 	txCalls: TxCall[]
+	/** Public authwits this build will write on-chain (`set_authorized`). Recording
+	 *  is DEFERRED to the post-send tail (pending → reconcile) so a pure build —
+	 *  during fee estimate, or a rejected approval — records nothing. NO_FROM builds
+	 *  carry an empty array (they emit no `add_public_authwit`). */
+	pendingPublicAuthwits: { account: string; hash: string; content: AuthwitContent }[]
 }
 
 /** NO_FROM (DefaultEntrypoint) variant — no account nonce exists on that path. */
@@ -131,6 +139,7 @@ export class TxRequestBuilder {
 			const calls: FunctionCall[] = []
 			const nonce = Fr.random()
 			const txCalls: TxCall[] = []
+			const pendingPublicAuthwits: { account: string; hash: string; content: AuthwitContent }[] = []
 
 			for (const action of op.actions) {
 				switch (action.kind) {
@@ -201,11 +210,6 @@ export class TxRequestBuilder {
 						switch (action.content.kind) {
 							case "call": {
 								messageHash = await this.authwit.computeCallMessageHash(action.content, nodeInfo, instances, artifacts)
-								await this.authRegistryService.trackAuthwit(
-									account.address.toString(),
-									messageHash.toString(),
-									action.content,
-								)
 								break
 							}
 							case "encoded_call": {
@@ -215,35 +219,28 @@ export class TxRequestBuilder {
 									instances,
 									artifacts,
 								)
-								await this.authRegistryService.trackAuthwit(
-									account.address.toString(),
-									messageHash.toString(),
-									action.content,
-								)
 								break
 							}
 							case "intent": {
 								messageHash = await this.authwit.computeIntentMessageHash(action.content, nodeInfo)
-								await this.authRegistryService.trackAuthwit(
-									account.address.toString(),
-									messageHash.toString(),
-									action.content,
-								)
 								break
 							}
 							case "message_hash": {
 								messageHash = Fr.fromString(action.content.messageHash)
-								await this.authRegistryService.trackAuthwit(
-									account.address.toString(),
-									messageHash.toString(),
-									action.content,
-								)
 								break
 							}
 							default: {
 								throw new Error("Invalid authwit content kind")
 							}
 						}
+						// Collect for POST-send recording (pending → reconcile). Build stays PURE:
+						// no trackAuthwit side-effect, so a fee-estimate or a rejected approval
+						// records nothing. The post-send tail persists these as pending rows.
+						pendingPublicAuthwits.push({
+							account: account.address.toString(),
+							hash: messageHash.toString(),
+							content: action.content,
+						})
 
 						const fn = getSetAuthorizedFn()
 						calls.push(
@@ -335,6 +332,23 @@ export class TxRequestBuilder {
 				}
 			}
 
+			// Per-BUILD cap (pre-send gate): block a grant that would push the account past
+			// the tracked-authwit ceiling. Count existing tracked rows (incl. pending) PLUS
+			// the unique NEW hashes not already tracked — a per-action check would let e.g.
+			// 255 existing + 2 new slip through and miscount intra-tx duplicates. Never
+			// auto-evict: that would destroy the only local revocation index.
+			if (pendingPublicAuthwits.length > 0) {
+				const accountAddress = account.address.toString()
+				const existing = await this.authRegistryService.getAuthwits(accountAddress)
+				const existingHashes = new Set(existing.map((a) => a.hash))
+				const newUnique = new Set(pendingPublicAuthwits.filter((p) => !existingHashes.has(p.hash)).map((p) => p.hash))
+				if (existing.length + newUnique.size > MAX_TRACKED_AUTHWITS_PER_ACCOUNT) {
+					throw new Error(
+						`Cannot grant: account ${accountAddress} would exceed the ${MAX_TRACKED_AUTHWITS_PER_ACCOUNT} tracked public-authwit limit. Revoke some first.`,
+					)
+				}
+			}
+
 			const payload = new ExecutionPayload(calls, authwits, capsules, extraHashedArgs)
 			const txRequest = await account.buildTxExecutionRequest(
 				node,
@@ -349,7 +363,7 @@ export class TxRequestBuilder {
 			)
 
 			task.complete()
-			return { txRequest, node, pxe, account, network, nonce, txCalls }
+			return { txRequest, node, pxe, account, network, nonce, txCalls, pendingPublicAuthwits }
 		} catch (error) {
 			task.fail(error)
 			throw error
@@ -445,7 +459,8 @@ export class TxRequestBuilder {
 			}))
 
 			task.complete()
-			return { txRequest, node, pxe, account, network, txCalls }
+			// NO_FROM emits no add_public_authwit, so there is nothing to record.
+			return { txRequest, node, pxe, account, network, txCalls, pendingPublicAuthwits: [] }
 		} catch (error) {
 			task.fail(error)
 			throw error

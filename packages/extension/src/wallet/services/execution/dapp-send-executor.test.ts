@@ -78,6 +78,7 @@ function makeHarness(overrides: Partial<DappSendExecutorDeps> = {}) {
 		nonce: { toString: () => "42" },
 		txCalls: [{ contract: "0xc", method: "dapp_method", args: [] }],
 		feePaymentMethod: { kind: "fee_juice" },
+		pendingPublicAuthwits: [],
 	}
 	const releaseSlot = vi.fn()
 	const proveAndSend = vi.fn(async (ctx: { recordTransaction: (h: string) => Promise<unknown> }) => {
@@ -104,6 +105,7 @@ function makeHarness(overrides: Partial<DappSendExecutorDeps> = {}) {
 		},
 		buildAndEstimate: vi.fn(async () => built as never),
 		addTransaction: vi.fn(async () => ({}) as never),
+		recordPendingAuthwits: vi.fn(async () => {}),
 		logDebug: vi.fn(),
 		...overrides,
 	}

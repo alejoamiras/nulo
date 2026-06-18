@@ -17,11 +17,8 @@ export class FeeJuiceStrategy implements FeeStrategy {
 	public async buildAndEstimate(ctx: FeeStrategyContext): Promise<FeeEstimate> {
 		const task = startEstimateTask(this.deps.tasks, ctx.parentTask)
 		try {
-			const { txRequest, node, pxe, account, network, nonce, txCalls } = await this.deps.txBuilder.buildStandard(
-				ctx.op,
-				AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
-				task,
-			)
+			const { txRequest, node, pxe, account, network, nonce, txCalls, pendingPublicAuthwits } =
+				await this.deps.txBuilder.buildStandard(ctx.op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE, task)
 			suggestGasLimits(txRequest, ctx.op.fee)
 			const simulatedTx = await this.deps.simulateTxTask(
 				pxe,
@@ -39,6 +36,7 @@ export class FeeJuiceStrategy implements FeeStrategy {
 				network,
 				nonce,
 				txCalls,
+				pendingPublicAuthwits,
 				feePaymentMethod: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
 			}
 		} catch (error) {

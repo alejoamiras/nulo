@@ -9,6 +9,7 @@ import { AccountService } from "@/wallet/services/account/service"
 import type { WrappedTask } from "@/wallet/services/task/wrapped-task"
 import { TaskService, RevokeAuthwitsContent, StepContent } from "@/wallet/services/task/service"
 import { TransactionService, OriginType } from "@/wallet/services/transaction/service"
+import { type Tx, TxExecutionResult, TxStatus } from "@/wallet/services/transaction/spec"
 import { EntityStorage } from "@/wallet/storage"
 import { array_max, Lock, sleep } from "@/wallet/utils"
 import { getAuthRegistryAddress, isAuthRegistryEnabled, isAuthwitConsumable } from "@/wallet/utils/auth-registry"
@@ -76,21 +77,29 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 				this.lock.leave()
 			}
 		})
+
+		// Reconcile pending public-authwit rows by their tx's on-chain outcome: a row is
+		// written `pending` at the post-send tail, then confirmed here once its tx is proven
+		// successful, or removed if the tx dropped/reverted — so the local revocation index
+		// never claims a grant that never landed. Best-effort + idempotent: a failed pass is
+		// retried on the next tx update (or by sync). See lessons/phase-5.md.
+		this.transactionService.onTransactionUpdated.add((tx) => {
+			void this.reconcileFromTx(tx).catch(() => {})
+		})
 	}
 
-	public async trackAuthwit(account: string, hash: string, content: AuthwitContent) {
-		try {
-			await this.lock.enter()
-			const authwits = await this.authwits.getValues()
-			if (authwits.some((x) => x.account === account && x.hash === hash)) {
-				return
-			}
-			const nextId = array_max(authwits.map((x) => x.id)) + 1
-			const authwit: Authwit = { id: nextId, account, hash, content }
-			await this.authwits.set(`${authwit.id}`, authwit)
-			this.emit("onAuthwitAdded", authwit)
-		} finally {
-			this.lock.leave()
+	/** Map a tx's settled on-chain outcome to a pending-authwit reconcile. Proven/Finalized
+	 *  + Success ⇒ confirm; Dropped or any settled non-success (reverted) ⇒ remove. Other
+	 *  (non-terminal) statuses are ignored — `set_authorized` only takes effect once mined. */
+	private async reconcileFromTx(tx: Tx): Promise<void> {
+		const settled = tx.status === TxStatus.Proven || tx.status === TxStatus.Finalized
+		if (settled && tx.executionResult === TxExecutionResult.Success) {
+			await this.reconcileAuthwits(tx.hash, "mined")
+			return
+		}
+		const reverted = settled && tx.executionResult !== undefined && tx.executionResult !== TxExecutionResult.Success
+		if (tx.status === TxStatus.Dropped || reverted) {
+			await this.reconcileAuthwits(tx.hash, "dropped")
 		}
 	}
 

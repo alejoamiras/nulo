@@ -111,6 +111,7 @@ describe("no-slot-for-executeSendTransaction (bug pin)", () => {
 				feePaymentMethod: 0,
 			})) as never,
 			addTransaction: vi.fn(async () => ({})) as never,
+			recordPendingAuthwits: vi.fn(async () => {}) as never,
 			logDebug: () => {},
 		})
 
