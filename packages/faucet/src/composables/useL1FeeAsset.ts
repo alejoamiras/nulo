@@ -1,3 +1,4 @@
+import { FeeJuicePortalAbi } from "@nulo/bridge-core"
 import { sepolia } from "viem/chains"
 import { ref, watch } from "vue"
 import { FUEL_ASSET, FUEL_PORTAL } from "@/contracts/bridge-deployments"
@@ -15,6 +16,9 @@ const balance = ref<bigint | null>(null)
 const approving = ref(false)
 const error = ref<string | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
+// Session cache: only the VERIFIED-good verdict is memoised (a mismatch throws every call). The bundled
+// portal/asset pair can't change mid-session, so one on-chain read suffices.
+let portalAssetVerified = false
 
 /**
  * Module-singleton L1 fee-asset state for the Fuel flow (the useL1Usdc pattern): one Sepolia balance
@@ -53,6 +57,26 @@ export function useL1FeeAsset() {
 			functionName: "allowance",
 			args: [owner, FUEL_PORTAL],
 		})) as bigint
+	}
+
+	/** Hard-block before approve/deposit: confirm the bundled FeeJuicePortal actually accepts the configured
+	 *  fee asset by reading its on-chain `UNDERLYING()`. A tampered or stale `FUEL_ASSET`/`FUEL_PORTAL` pair
+	 *  would otherwise route an approve + deposit at the wrong contract; refuse (fail-closed) on mismatch.
+	 *  L1 view call only — no L2 network, so it runs under the local-gates-only constraint. */
+	async function verifyPortalAsset(): Promise<void> {
+		if (portalAssetVerified) return
+		if (!FUEL_ASSET || !FUEL_PORTAL) throw new Error("Fuel is not configured for this deployment.")
+		const underlying = (await l1.publicClient.readContract({
+			address: FUEL_PORTAL,
+			abi: FeeJuicePortalAbi,
+			functionName: "UNDERLYING",
+		})) as string
+		if (underlying.toLowerCase() !== FUEL_ASSET.toLowerCase()) {
+			throw new Error(
+				"Fuel portal/asset mismatch — refusing to deposit. The FeeJuicePortal's UNDERLYING() doesn't match the configured fee asset.",
+			)
+		}
+		portalAssetVerified = true
 	}
 
 	/** Approve the FeeJuicePortal to pull `amount` of the fee asset (one wallet prompt). */
@@ -100,5 +124,5 @@ export function useL1FeeAsset() {
 		{ immediate: true },
 	)
 
-	return { balance, approving, error, refresh, allowance, approve }
+	return { balance, approving, error, refresh, allowance, approve, verifyPortalAsset }
 }

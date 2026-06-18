@@ -102,4 +102,22 @@ describe("useL1FeeAsset", () => {
 		expect(fa.error.value).toMatch(/rejected/i)
 		expect(fa.approving.value).toBe(false)
 	})
+
+	it("verifyPortalAsset passes when the portal's UNDERLYING() matches the fee asset, then caches", async () => {
+		const { useL1FeeAsset } = await freshModule()
+		const fa = useL1FeeAsset()
+		readContract.mockResolvedValueOnce("0xfjasset" as never)
+		await expect(fa.verifyPortalAsset()).resolves.toBeUndefined()
+		expect(readContract).toHaveBeenCalledWith(expect.objectContaining({ address: "0xfjportal", functionName: "UNDERLYING" }))
+		const reads = readContract.mock.calls.length
+		await fa.verifyPortalAsset() // verified — served from the session cache, no second read
+		expect(readContract.mock.calls.length).toBe(reads)
+	})
+
+	it("verifyPortalAsset REFUSES (throws) when UNDERLYING() doesn't match the configured fee asset", async () => {
+		const { useL1FeeAsset } = await freshModule()
+		const fa = useL1FeeAsset()
+		readContract.mockResolvedValueOnce("0xWRONGASSET" as never)
+		await expect(fa.verifyPortalAsset()).rejects.toThrow(/mismatch/i)
+	})
 })
