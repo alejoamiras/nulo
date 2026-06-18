@@ -230,7 +230,7 @@ export function ensureDepositJournalDeps(): void {
 			if (!wallet || !account) throw new Error("Connect your Ethereum wallet first.")
 			return wallet.signMessage({ account, message } as never) as Promise<string>
 		},
-		claim: async (rec, secretHex) => {
+		claim: async (rec, secretHex, envelope) => {
 			const aztec = bridgeWallet.wallet.value
 			if (!aztec) throw new Error("Connect your Aztec wallet first.")
 			// Fee-juice (Fuel) records claim via a different, no-token-leg path — dispatch to the dedicated
@@ -246,6 +246,10 @@ export function ensureDepositJournalDeps(): void {
 					recipient: AztecAddress.fromString(rec.recipient),
 					sponsoredFpc: fpcInst.address,
 					minFloorFj: FUEL_MIN_FJ,
+					// Authoritative claim material from the engine: the unsealed `envelope.salt` (private) and
+					// the gated top-level secret (public) — never the plaintext journal copy (codex HIGH/LOW).
+					resolvedSalt: rec.isPrivate ? envelope?.salt : undefined,
+					resolvedSecret: rec.isPrivate ? undefined : secretHex,
 					onAttempt: () => latchFuel({ claimAttempt: true, setupInsufficiency: false }),
 					onTxHash: (txHash) => latchFuel({ claimAttempt: true, claimTxHash: txHash }),
 					onSetupInsufficiency: () => latchFuel({ setupInsufficiency: true }),

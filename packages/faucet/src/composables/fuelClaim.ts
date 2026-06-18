@@ -37,6 +37,14 @@ export interface FuelClaimDeps {
 	sponsoredFpc: AztecAddress
 	/** The fail-CLOSED self-pay floor (FUEL_MIN_FJ). Undefined/zero ⇒ the private claim refuses. */
 	minFloorFj: bigint | undefined
+	/** PRIVATE: the AUTHORITATIVE salt the engine unsealed from the envelope (the sole recovery input).
+	 *  Used in preference to the journal's plaintext `fuel.bridgeSecretSalt` display copy, which can be
+	 *  missing or corrupted while the sealed copy is intact — trusting it would strand a recoverable
+	 *  deposit (codex post-impl HIGH). The plaintext is a fallback only (legacy records with no salt seal). */
+	resolvedSalt?: string
+	/** PUBLIC: the AUTHORITATIVE claim secret the engine gated on (top-level `rec.secret`). Used in
+	 *  preference to `fuel.secret` so the gate and the claim never read different copies (codex LOW). */
+	resolvedSecret?: string
 	/** Journal-latch callbacks (the wrapper supplies these; this module stays journal-agnostic). */
 	onAttempt?: () => void
 	onTxHash?: (txHash: string) => void
@@ -72,8 +80,11 @@ export async function buildFuelClaimInteraction(rec: DepositJournalRecord, deps:
 		if (fuel.fpc && fuel.fpc !== PRIVATE_FPC_ADDRESS) {
 			return stop("Private fuel FPC address mismatch (version drift) — refusing to claim. Reselect a mode.")
 		}
-		if (!fuel.bridgeSecretSalt) return stop("This private Fuel bridge is missing its recovery salt — cannot claim.")
-		const salt = Fr.fromString(fuel.bridgeSecretSalt)
+		// Authoritative-first: the engine-unsealed salt wins over the plaintext journal copy (which can be
+		// missing/corrupted while the seal is intact). Plaintext is a fallback only (no-envelope legacy).
+		const saltHex = deps.resolvedSalt ?? fuel.bridgeSecretSalt
+		if (!saltHex) return stop("This private Fuel bridge is missing its recovery salt — cannot claim.")
+		const salt = Fr.fromString(saltHex)
 		const fpcAddr = AztecAddress.fromString(fuel.fpc ?? PRIVATE_FPC_ADDRESS)
 		// teardownGas=0 keeps max_gas_cost within the bridged amount; the wallet fills maxFeesPerGas
 		// (current-min, embedded-fpc cap) — mirrors the proven swap-private-fuel path (useDeposit.ts).
@@ -106,11 +117,14 @@ export async function buildFuelClaimInteraction(rec: DepositJournalRecord, deps:
 	}
 
 	// PUBLIC: claim straight to the public Fee Juice balance, paid by the Sponsored FPC.
-	if (!fuel.secret) return stop("This Fuel bridge is missing its claim secret.")
+	// Authoritative-first: the engine-gated `rec.secret` wins over the `fuel.secret` display copy so the
+	// gate and the claim can never read divergent secrets (codex LOW). Plaintext is a fallback only.
+	const secretHex = deps.resolvedSecret ?? fuel.secret
+	if (!secretHex) return stop("This Fuel bridge is missing its claim secret.")
 	const sponsored = { paymentMethod: new SponsoredFeePaymentMethod(deps.sponsoredFpc) }
 	const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
 	const fj = await Contract.at(AztecAddress.fromString(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
-	const secret = Fr.fromString(fuel.secret)
+	const secret = Fr.fromString(secretHex)
 	const claim = () => fj.methods.claim_and_end_setup(recipient, received, secret, leaf)
 	return {
 		simulate: () => claim().simulate({ from: recipient, fee: sponsored } as never),

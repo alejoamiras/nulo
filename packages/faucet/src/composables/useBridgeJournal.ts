@@ -90,10 +90,13 @@ export interface JournalEngineDeps {
 	signL1?: (message: string) => Promise<string>
 	connectedL1?: () => string | null
 	connectedAztec?: () => string | null
-	/** Build the claim interaction for a deposit record; returns simulate/send handles. */
+	/** Build the claim interaction for a deposit record; returns simulate/send handles. `envelope` is the
+	 *  private record's UNSEALED authoritative copy (the fee-juice claim treats `envelope.salt` as the
+	 *  recovery source of truth rather than the plaintext journal copy — codex post-impl HIGH). */
 	claim?: (
 		rec: DepositJournalRecord,
 		secretHex: string,
+		envelope?: DepositEnvelopeV2,
 	) => Promise<{
 		simulate: () => Promise<unknown>
 		send: () => Promise<{ txHash: string }>
@@ -531,6 +534,9 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 		}
 
 		let secretHex: string
+		// The private record's unsealed authoritative copy — forwarded to the claim dep so the fee-juice
+		// path reads `envelope.salt` (source of truth) over the plaintext journal copy (codex post-impl HIGH).
+		let resolvedEnvelope: DepositEnvelopeV2 | undefined
 		if (rec.isPrivate) {
 			// Only narrate UNSEALING when a real signature is needed (a rediscovered record). A fresh
 			// in-session deposit has its secret cached, so the unseal is instant - setting "unsealing"
@@ -541,6 +547,7 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 			const resolved = await resolvePrivateSecret(rec)
 			if (!resolved) return
 			secretHex = resolved.secretHex
+			resolvedEnvelope = resolved.envelope
 		} else {
 			if (!rec.secret) {
 				setRuntime(id, { attention: "stale", note: "This record has no claim secret - it cannot be claimed." })
@@ -552,7 +559,7 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 
 		const fresh = records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
 		if (!fresh) return // Cross-tab discard while the unseal signature waited.
-		const interaction = await deps.claim(fresh, secretHex)
+		const interaction = await deps.claim(fresh, secretHex, resolvedEnvelope)
 
 		// Sync phase, two legs sharing one iteration budget:
 		// 1. Block countdown (display pacing): the deposit-time L2 snapshot + a fixed margin gives a
