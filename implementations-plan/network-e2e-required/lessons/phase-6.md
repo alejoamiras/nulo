@@ -59,3 +59,25 @@ authwit-lifecycle soak flake is a Phase-6 INFRA/resource flake, not a cutover bu
 (a) reduce the cutover's SW-side per-tx-update work (lock+getValues on every onTransactionUpdated
 → cheap no-op skip) as a contention-reducing optimization, and/or (b) characterize on CI where
 the flake is more frequent + representative.
+
+═══ REVEALED FLAKE #2: mint fee-spike (CI soak iter 9) — ROOT-CAUSED + FIXED ═══
+The 10× CI soak (run 27756356928) on authwit-lifecycle: 9 green / 1 red = ~10%. CRUCIAL: the 1
+red was NOT the revoke freeze (that was 0/10 on CI — far rarer than the local ~10%). It was a
+GAS-FEE-SPIKE rejection at the MINT setup (authwit-lifecycle.test.ts:47 → mintPublicTokensForAccount):
+  `Error: maxFeesPerGas.feePerL2Gas must be >= gasFees.feePerL2Gas, but got
+   maxFeesPerGas.feePerL2Gas=55650000 and gasFees.feePerL2Gas=111700000`
+ROOT CAUSE: the test SDK helpers send with only `{ paymentMethod: SponsoredFeePaymentMethod }` and
+no gasSettings. Aztec.js then pins maxFeesPerGas to the ESTIMATION-time gas fee with NO spike
+headroom (there is no `baseFeePadding` in this SDK version; padding via `estimatedGasPadding`
+covers gas LIMITS, not fee-per-gas). When the network L2 fee rose ~2× between estimate and
+inclusion, the tx was rejected.
+FIX (Phase 6, root-cause not retry): added a generous `maxFeesPerGas` ceiling (`new GasFees(1e11,
+1e11)`) to the 4 SponsoredFPC setup sends (deployTestToken, mintPublicTokens, mintPrivateTokens,
+claimFeeJuice) via a shared `E2E_FEE_GAS` const. The SponsoredFPC pays the ACTUAL network fee and
+maxFeesPerGas is only a ceiling, so a high cap can't overpay — it only stops spike-rejection. (de0846c)
+
+INSIGHT for the retry question: the "~10% flake" is NOT one irreducible floor — it's a MIX of
+distinct rare flakes (fee-spike [FIXED], revoke popup-freeze [0/10 CI, very rare], "Connection
+closed" SW-lifecycle, transient RPC). Phase 6 = fix the fixable ones (fee-spike done) + size a
+minimal retry-budget ONLY for the genuinely-irreducible residual. Re-soak pending to confirm the
+fee flake is gone + measure the true residual rate.
