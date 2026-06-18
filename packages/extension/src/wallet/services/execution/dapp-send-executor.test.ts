@@ -194,7 +194,7 @@ describe("DappSendExecutor — public-authwit recording (Phase 5 trust-point)", 
 		const { executor, deps, built } = makeHarness({
 			buildAndEstimate: vi.fn(async () => ({ ...built, pendingPublicAuthwits: [grant] }) as never),
 		})
-		await executor.estimateOperationFee(grantOp, grantOp.feeSettings)
+		await executor.estimateOperationFee(grantOp, { paymentMethod: { kind: "fj" } } as never)
 		expect(deps.recordPendingAuthwits).not.toHaveBeenCalled()
 	})
 

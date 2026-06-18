@@ -76,3 +76,20 @@ NOT done: cap-blocks pin (needs tx-request-builder harness), reconcile pin (need
 service harness), journal-backed crash-recovery (codex #4).
 STATUS: Phase 5 reproducibly RED. opts.from fix (5d09ca3) is done + proven (2× green) and
 independent. Awaiting user: land opts.from + park/revert Phase 5, vs debug the revoke hang.
+
+═══ REVOKE-HANG ROOT CAUSE — FIXED (codex r10, session bn67m59dw) ═══
+The 3× reproducible revoke hang was NOT lock contention (codex ruled that out) and NOT
+machine load (reproduced on a light machine). Root cause: my `syncAuthwit` pending-exclusion
+(`if (authwit.pending) return`) was placed AFTER `parentTask.startSubtask(...)`, so it
+returned leaving the subtask UNFINISHED. `TaskService` refuses to complete/fail a parent
+with open children (task/service.ts:95), so `revokeAuthwits`' `syncAuthwits` wedged its own
+task tree → revokeAuthwits never resolved → the popup's submit never cleared → e2e
+`waitForFunction` hung ~5min → protocolTimeout. The revoked grants are still `pending` at
+revoke time because the e2e's `waitForTxMined` advances on node receipt, not wallet reconcile
+(reconcile "mined" fires on Proven/Finalized, later). The pre-existing `if (isConsumable)
+return` had the same latent shape but never bit (revoked rows are non-consumable → took the
+delete path → completed).
+FIX: move BOTH no-op guards (pending + isConsumable) BEFORE `startSubtask` — a no-op sync now
+starts no subtask, so nothing wedges the parent. (Also fixed a latent typecheck error in the
+estimate pin + added `pendingPublicAuthwits:[]` to the service.characterization mock.)
+typecheck + 276 execution units green. Re-soaking to validate the revoke completes e2e.

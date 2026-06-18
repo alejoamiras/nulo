@@ -323,15 +323,16 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	}
 
 	private async syncAuthwit(node: AztecNode, authwit: Authwit, parentTask: WrappedTask) {
+		// Skip no-op syncs BEFORE starting a subtask: a started-but-unfinished subtask blocks
+		// the PARENT task from completing (TaskService refuses a parent with open children),
+		// which is exactly what wedged `revokeAuthwits`' syncAuthwits when the revoked grants
+		// were still `pending`. A `pending` row is reconciled by its tx outcome
+		// (onTransactionUpdated), not by sync; a still-consumable row is live. Sync only prunes
+		// confirmed-but-vanished rows.
+		if (authwit.pending) return
+		if (await isAuthwitConsumable(node, authwit.account, authwit.hash)) return
 		const task = parentTask.startSubtask(new StepContent(`Sync authwit #${authwit.id}`))
 		try {
-			// A `pending` row is reconciled by its tx's outcome (onTransactionUpdated),
-			// NOT by on-chain consumability: a pending grant is not consumable until
-			// mined, so sync-prune would delete it prematurely. Reconcile owns the
-			// pending lifecycle; sync only prunes confirmed-but-vanished rows.
-			if (authwit.pending) return
-			const isConsumable = await isAuthwitConsumable(node, authwit.account, authwit.hash)
-			if (isConsumable) return
 			try {
 				await this.lock.enter()
 				if (await this.authwits.get(`${authwit.id}`)) {
