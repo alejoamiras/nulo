@@ -53,3 +53,16 @@ calibrated Medium — rare crash-durability, not an attacker breach). The authz 
   row can render in account A's list. UI-integrity only (storage is per-account-keyed; revoke acts
   on the correct account). FIX: filter incoming events by `entity.account === appStore.account.address`.
 Full report: audit/security/2026-06-18-authregistry/report.md.
+
+## /code-review max (quality) — findings (deferred to this follow-up PR, behavior-neutral)
+Diff is surprise-free (no skip/only/masking-retry/accidental) + codex+harden security-clean. Quality nits:
+- **Q1 — dead code: `isAtCap` (service.ts:112-115)** has ZERO production callers (only its own
+  service.test.ts uses it; the cap GATE is `assertWithinCap`). Remove it + its test (touches the
+  auth-registry RPC schema/client if exposed). Fowler: Dead Code.
+- **Q2 — fee-strategy shotgun-surgery.** 3 of 4 fee strategies (embedded, fee-juice,
+  fee-juice-with-claim) cherry-pick `built` fields by hand; only fpc-strategy spreads `...built`.
+  Adding a BuiltStandardTx field (like `pendingPublicAuthwits`) forces touching all 3 — the cutover
+  did exactly that. Fix: spread `...built` in all 4 (mirror fpc-strategy). Fowler: Shotgun Surgery.
+DEFERRED (not applied now): both are behavior-neutral; applying them drifts the landed code off the
+Phase-7-proven SHA 1394574 for zero behavior gain. They land in this follow-up PR (with M1-M5),
+which gets its own 5× re-prove. Documented deviation from "/code-review --fix applied now."
