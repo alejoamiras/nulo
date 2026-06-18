@@ -106,6 +106,7 @@
         "@defi-wonderland/aztec-standards": "4.2.0-aztecnr-rc.2",
         "@lezer/highlight": "^1.0.0",
         "@nulo/aztec-runtime": "workspace:*",
+        "@nulo/design": "workspace:*",
         "@nulo/extension-messaging": "workspace:*",
         "@nulo/wallet-bridge": "workspace:*",
         "@nulo/wallet-core": "workspace:*",
@@ -277,7 +278,6 @@
       "version": "0.1.0",
       "dependencies": {
         "@aztec/foundation": "4.2.0",
-        "@aztec/stdlib": "4.2.0",
         "@nulo/wallet-core": "workspace:*",
       },
       "devDependencies": {

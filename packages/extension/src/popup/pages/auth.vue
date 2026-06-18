@@ -9,7 +9,7 @@
 <script setup>
 /** Components */
 import AuthProfilePill from "@/popup/components/modules/auth/AuthProfilePill.vue"
-import PasskeyCeremonyDialog from "@/popup/components/popups/PasskeyCeremonyDialog.vue"
+import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vue"
 
 /** Composables */
 import { checkNotificationsForShow } from "@/composables/notification"

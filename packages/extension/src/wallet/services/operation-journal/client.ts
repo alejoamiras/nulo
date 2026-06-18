@@ -87,7 +87,7 @@ export class OperationJournalServiceClient extends ServiceClient<Methods, Events
 	public async subscribeJob(id: string, handler: (op: OperationRecord | undefined) => void): Promise<() => void> {
 		// Late-snapshot guard: a Vue consumer that unsubscribes while a
 		// snapshot fetch is in flight should NOT receive the final stale
-		// tick when the fetch resolves. Same pattern as `subscribeWithSnapshot`.
+		// tick when the fetch resolves. Same snapshot-then-subscribe guard pattern.
 		let unsubscribed = false
 
 		const onAnyChange = (op: OperationRecord) => {

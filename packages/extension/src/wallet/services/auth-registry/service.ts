@@ -1,4 +1,5 @@
 import type { ILogger } from "@/wallet/logger"
+import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import { maybeRethrowAsRpcCancel } from "@/wallet/services/execution/rpc-cancel"
@@ -431,7 +432,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 				} catch (err) {
 					result.push({
 						...authwit,
-						restoreError: err instanceof Error ? err.message : err,
+						restoreError: toRestoreError(err),
 					})
 				}
 			}
