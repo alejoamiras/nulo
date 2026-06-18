@@ -10,9 +10,11 @@
  * the L2 claim comes from the portal's own `DepositToAztecPublic` event, NOT the Inbox.
  */
 import type { AztecAddress } from "@aztec/aztec.js/addresses"
+import type { FeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { FeeJuicePortalAbi } from "@aztec/l1-artifacts"
 import { computeSecretHash } from "@aztec/stdlib/hash"
+import { ExecutionPayload, mergeExecutionPayloads } from "@aztec/stdlib/tx"
 import { type Hex, type Log, parseEventLogs } from "viem"
 import { PRIVATE_FPC_ADDRESS, deriveBridgeSecret, privateFuelSecretHash } from "./private-fuel"
 
@@ -82,4 +84,13 @@ export function assertFuelClearsFloor(received: bigint, floorFj: bigint | undefi
 	if (received < floorFj) {
 		throw new Error("The bridged gas is below the safe claim floor — it can't cover its own claim. Increase the amount.")
 	}
+}
+
+/** Build the carrier-less private-fuel claim payload: the FPC fee-setup (FeeJuice.claim +
+ *  PrivateFPC.mint_and_pay_fee) as the ENTIRE tx body — no app call. The empty app payload is explicit
+ *  (mirrors `new BatchCall(wallet, [])`, which merges the same way); the wallet sends it with
+ *  feePayer = the FPC. The live sequencer's acceptance of a zero-app-call tx is the deferred risk I2
+ *  (provable only on a live network — not by any local gate). */
+export async function buildCarrierlessFuelClaimPayload(feeMethod: FeePaymentMethod): Promise<ExecutionPayload> {
+	return mergeExecutionPayloads([ExecutionPayload.empty(), await feeMethod.getExecutionPayload()])
 }

@@ -2,8 +2,15 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Fr } from "@aztec/aztec.js/fields"
 import { computeSecretHash } from "@aztec/stdlib/hash"
 import { describe, expect, it } from "vitest"
-import { assertFuelClearsFloor, feeJuiceDepositArgs, parseFeeJuiceDeposit, planPrivateFuelDeposit, planPublicFuelDeposit } from "./fuel"
-import { PRIVATE_FPC_ADDRESS, deriveBridgeSecret } from "./private-fuel"
+import {
+	assertFuelClearsFloor,
+	buildCarrierlessFuelClaimPayload,
+	feeJuiceDepositArgs,
+	parseFeeJuiceDeposit,
+	planPrivateFuelDeposit,
+	planPublicFuelDeposit,
+} from "./fuel"
+import { PRIVATE_FPC_ADDRESS, deriveBridgeSecret, privateMintAndPayFee } from "./private-fuel"
 
 const recipient = AztecAddress.fromNumber(0x1234)
 
@@ -53,5 +60,28 @@ describe("fuel — fail-closed floor", () => {
 	it("received at or above the floor passes", () => {
 		expect(() => assertFuelClearsFloor(10n, 10n)).not.toThrow()
 		expect(() => assertFuelClearsFloor(11n, 10n)).not.toThrow()
+	})
+})
+
+// Phase 1 STOP-gate: proves the carrier-less private claim is CONSTRUCTABLE + correctly shaped/scoped
+// locally. It does NOT (cannot) prove the live sequencer accepts a zero-app-call tx — that is the
+// deferred risk I2. If any assertion here fails, STOP before UI work (plan §6 Phase 1).
+describe("fuel — carrierless private claim spike (Phase 1 STOP-gate)", () => {
+	const fpc = AztecAddress.fromString(PRIVATE_FPC_ADDRESS)
+
+	it("payload is carrier-less: exactly the 2 FPC setup calls (no app call), feePayer = FPC", async () => {
+		const salt = new Fr(99n)
+		const method = privateMintAndPayFee(fpc, 12_000n, deriveBridgeSecret(salt, recipient), salt, new Fr(7n))
+		const payload = await buildCarrierlessFuelClaimPayload(method)
+		// Empty app payload contributes nothing ⇒ exactly FeeJuice.claim + PrivateFPC.mint_and_pay_fee.
+		expect(payload.calls).toHaveLength(2)
+		expect((await method.getFeePayer()).toString()).toBe(PRIVATE_FPC_ADDRESS)
+	})
+
+	it("routes to the embedded 'fpc' fee path: feePayer (FPC) is never the claimer (from)", async () => {
+		const salt = new Fr(1n)
+		const method = privateMintAndPayFee(fpc, 12_000n, deriveBridgeSecret(salt, recipient), salt, new Fr(0n))
+		// detectEmbeddedFeePayment classifies "fpc" exactly when feePayer !== from; the claimer is `from`.
+		expect((await method.getFeePayer()).toString()).not.toBe(recipient.toString())
 	})
 })
