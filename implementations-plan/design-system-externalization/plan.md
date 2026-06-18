@@ -185,7 +185,7 @@ tests green (design 69 · faucet 336 · extension 2398) · `build` + `build:fauc
 as `src/token-contract.ts` (+ `src/internal/render-tokens.ts`) per the package's `src/**`-only
 tsconfig — see `lessons/phase-1.md`.
 
-### Phase 2 — Base/theme/font takeover (RELOCATE) · MILESTONE · **SUPERVISED** — machine gate ✓, VISUAL SIGN-OFF PENDING (user) · PR #103
+### Phase 2 ✓ — Base/theme/font takeover (RELOCATE) · MILESTONE · **SUPERVISED** — machine gate ✓, VISUAL SIGN-OFF ✓ (user, 2026-06-18: "no deltas") · PR #103
 Port the extension's full `_base.scss`+`_text.scss` into the package `base.css` (tokens generated;
 non-token globals verbatim); bundle fonts (package-relative, drop ClashDisplay); switch
 `popup/index.ts` + `onboarding/index.ts` to import `@nulo/design/base.css`; delete extension
@@ -213,11 +213,12 @@ See `lessons/phase-4.md`.
 Same mechanic. Ghost cleanup allowed here (snapshot-gated; not `--nulo-error`).
 **Gate:** typecheck:all + lint + unit + build + build:faucet + storybook + smoke.
 
-### Phase 5 — Cleanup, docs, round-2 backlog · MILESTONE · machine ✓, PENDING: user visual sign-off (2 + 5) + network e2e (CI)
+### Phase 5 ✓ — Cleanup, docs, round-2 backlog · MILESTONE · machine ✓, visual sign-off ✓ (2 + 5, user 2026-06-18) · network e2e → CI
 **Machine ✓** (branch `feat/design-system-p5-cleanup`): CLAUDE.md L0–L6 split documented +
-`round-2-backlog.md` + `bun run audit:vue` green (ext 2368 + design 136 · lint 0 · build 0). PENDING:
-the user's visual sign-off (Phase 2 + 5) and the network e2e (deferred to the `pr-network-e2e` CI gate,
-which now watches `packages/design/**`). `/code-review max --fix` + codex post-impl audit also pending.
+`round-2-backlog.md` + `bun run audit:vue` green (ext 2368 + design 138 · lint 0 · build 0). Visual
+sign-off ✓ (user, 2026-06-18 — both apps, "no deltas"). Codex post-impl audit ✓ (no blocking; 2
+Mediums folded in: Checkbox disabled-gating + base.css pin). Network e2e deferred to the
+`pr-network-e2e` CI gate (watches `packages/design/**`). `/code-review max --fix` + final gates pending.
 See `lessons/phase-5.md`.
 Finalize resolver; update `ARCHITECTURE.md` + CLAUDE.md L0–L6 + README; write the round-2 backlog.
 **Gate (machine):** `audit:vue` + build:faucet + smoke + `e2e:agent` (network ~25 min) + storybook.

@@ -49,15 +49,15 @@ for Phase 2. The new base.css pin guards the file going forward, but a faucet-si
 (or a faucet base.css parity test) is the real round-2 follow-up.
 
 ## Pending (require the user / heavy / CI)
-- **Human visual sign-off (Phase 2 + Phase 5)** — the supervised gates. Load
-  `packages/extension/dist/{chrome,firefox}` + the faucet; verify light/dark + nav/no-nav + key
-  screens render identically. NOT self-certifiable.
+- **Human visual sign-off (Phase 2 + Phase 5)** — ✓ RECEIVED (user, 2026-06-18): walked the extension
+  (chrome+firefox, rc.11) + both apps and reported "no deltas / looks good". Phase 2 + 5 marked ✓.
 - **Network e2e (`bun run e2e:agent`, ~25 min)** — deferred to CI: the `pr-network-e2e` workflow now
   watches `packages/design/**` (patched in Phase 1) and runs on the PRs. The design changes are
   CSS/component-only (no network/transaction-logic impact), and the accelerator-server is a Linux
   x86_64 binary (CI), so local macOS runs aren't the right venue. CI is the gate.
-- **`/code-review max --fix` + codex post-impl audit** — the post-implementation review passes; best
-  run with the user able to review their output across the 5-PR stack.
+- **Codex post-impl audit** — ✓ DONE (no blocking; 2 Mediums folded in). **`/code-review max --fix`**
+  + final gates (`audit:vue`, `test:e2e`; `e2e:agent` is CI-only — Linux accelerator) + the 5-PR
+  stack merge remain.
 
 ## Cleanup deferred to round-2 (low-risk, noted in round-2-backlog.md)
 - Faucet `public/fonts/` orphaned (base.css now uses package-bundled fonts) — kept this round to
