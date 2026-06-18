@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — network-e2e-required</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>network-e2e-required</h1>
+  <p>Make the <strong>Network e2e</strong> check on every pull request reliably green, then make it a <strong>required</strong> check on <code>dev</code> — so broken dApp-transaction behavior can't merge. We fix the <em>real</em> bugs, never paper over them with retries.</p>
+
+  <h2>Why "deep"</h2>
+  <p>A lighter (<code>mid</code>) plan was drafted first and <strong>rejected by audit</strong> — it was built on a wrong guess about the bug. Deep was chosen because two risk dimensions are HIGH: <strong>blast radius</strong> (a required check gates <em>every</em> PR) and <strong>security sensitivity</strong> (we're changing how the wallet records authorizations — a trust boundary). Three independent plans were drafted (me + codex + a planning subagent); they <em>independently agreed</em> on the core design, which is a strong confidence signal.</p>
+
+  <h2>The story (plain version)</h2>
+  <p>Three flaky tests blocked making the gate required. Two (F2, F3) are already fixed. The third (authwit-lifecycle) sent me down a rabbit hole — I assumed "the wallet doesn't record granted authorizations." The audit proved me wrong: it <em>does</em> record them. I never actually looked at the screen that was failing. Two real things turned up instead: (1) the bug behind that empty screen is still <strong>unmeasured</strong> — so we measure before fixing; and (2) the wallet records authorizations <strong>too early</strong> (when it estimates a fee, before you approve, even if you reject) — a genuine security bug worth fixing. Plus the gate itself is weak: it currently retries failures twice, so it would hide the very flakes we're fixing.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: Land the finished fixes</h3>
+    <p>Merge the branch that already fixes F2 (concurrent sends) + the settings-nav fix + a dropdown-disabled fix + the diagnostic tooling we'll need next.</p>
+    <p class="muted">Proves itself by: full pre-PR gate green + concurrent-sendtx 7/7 in a strict soak.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: Make the gate honest (no app changes)</h3>
+    <p>Turn off the gate's automatic retries (so a flake = a red, not a hidden pass). Add a precise "the sandbox failed to boot" detector so <em>only</em> that one infrastructure hiccup gets a single retry — a real test failure never does. Widen which file changes trigger the gate (the approve/revoke screens were slipping through).</p>
+    <p class="muted">Proves itself by: actionlint green; the boot-detector unit-tests correctly tell infra-fail from test-fail; a UI change now triggers the gate, a docs-only change still skips.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: Measure the real authwit bug (no fix yet)</h3>
+    <p>Capture what's actually on the failing screen + what's in storage + which account it's asking about, and classify the cause. No code change — just an evidence-backed diagnosis written down.</p>
+    <p class="muted">Proves itself by: three runs agree on one root-cause bucket, recorded in the lessons file.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: Fix the measured cause</h3>
+    <p>Fix exactly what Phase 3 found (most likely an address-format mismatch or an over-eager "delete not-yet-confirmed" sync) — not the guessed one. Then drive the whole authwit-lifecycle test green.</p>
+    <p class="muted">Proves itself by: new unit/regression tests + authwit-lifecycle 10/10 in a strict soak.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5: Fix the "record too early" security bug</h3>
+    <p>Stop recording an authorization while merely estimating a fee. The build step <em>describes</em> the would-be grant; the wallet only writes it down <strong>after the transaction actually sends</strong> — and as <em>pending</em> until it's mined (so a sent-but-dropped grant doesn't leave a false entry). The "you've hit the limit" cap is checked <strong>before</strong> sending (you can't un-send), and a failed write is loud, never silently dropping a grant.</p>
+    <p class="muted">Proves itself by: tests proving estimate/reject/failed-send/dropped record nothing, one mined grant records once, the cap blocks before sending; send pipeline + real-proving canary still green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 6: De-flake the rest (the part the audit uncovered)</h3>
+    <p>The audit found the suite was hiding flakes: ~8 tests quietly retry themselves 1–2× and one is skipped outright. Turning retries off (Phase 2) exposes the real flaky set. Here we root-cause each one to green — the same "measure, don't guess" discipline — with no retries left.</p>
+    <p class="muted">Proves itself by: each test green with zero retries; a grep confirms no <code>retry:1/2</code> remains; the full sharded suite green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 7: Prove it's stable, then flip required</h3>
+    <p>Run the real PR gate 5 times in a row, all green, on one commit. Only then make it required on <code>dev</code>. Document a time-boxed rollback for upstream outages (not a quarantine).</p>
+    <p class="muted">Proves itself by: 5 consecutive green real PR runs; the ruleset shows the check required.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>The PR network check is <em>proverless</em> (fast fake-proving) — so the quick soaks we iterate with are representative of the real gate. "Required" means a red check blocks merging. The auth-registry is the wallet's local list of "authorizations you've granted," shown in Settings so you can revoke them; recording it at the wrong moment makes that list lie.</p>
+  <p><strong>Scope grew (honestly).</strong> The final audit revealed the suite was hiding flakes: ~8 tests pass only because they retry themselves, and one is skipped. So "green on every PR" means fixing those too — not just the three flakes we started with. That's more work, but it's exactly the "fix everything, no patches" you asked for.</p>
+
+  <h2>Decisions (resolved at approval)</h2>
+  <ul>
+    <li><strong>Gate retries:</strong> 0 (strict).</li>
+    <li><strong>Flood cap:</strong> 256/account, non-evicting, blocked <em>before</em> sending.</li>
+    <li><strong>Rollback window:</strong> ≤24h time-boxed (not quarantine).</li>
+    <li><strong>Fork PRs:</strong> <code>dev</code> doesn't take them — no secret-gating problem. Repo-admin available; flip via ruleset.</li>
+    <li><strong>/harden security:</strong> yes, but <strong>narrow</strong> — scoped to the auth-registry change only.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Status: APPROVED (2026-06-17)</h2>
+    <p>Tier <code>deep</code>; 7 phases; codex <code>conditional approve</code> (condition folded). Implementation runs via the recommended <code>/loop</code> below.</p>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (finalized at approval)</h2>
+    <p class="warning">Use exactly ONE per session — they don't compose; setting one replaces the other.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /loop (CI-heavy, long async soaks)</h3>
+      <pre><code>/loop 20m Drive implementations-plan/network-e2e-required forward. Never idle. Each firing:
+1. Reality check: read plan.md + lessons/ (authoritative, not chat); git status + git log --oneline -5; if a soak/PR run is in flight, gh run view (no --watch) and use the wait to prep the next phase / review the diff.
+2. No task in hand? Take the next pending phase step EXACTLY as written. Phase 3 (measure F1) MUST produce a written root-cause classification BEFORE any Phase 4 fix; Phase 6 root-causes every revealed flake (no re-added retries). After each edit run the fast layers (bun run lint + the touched vitest run); commit then push.
+3. Decision/fork or stuck? /codex xhigh with full context; log the consult + verdict in lessons/phase-N.md; act on the stronger argument. HARD LIMITS: never flip Network e2e required until app-flakes are 0 via 5 green real pr-network-e2e runs on one SHA; never .skip / quarantine a flaky APP test (infra-boot exit-86 sentinel only); never re-add an in-test retry to mask a flake; never merge to main; never broaden CI token scope or secret exposure.
+4. Same step failing 5x? Stop, reassess with codex, continue.
+5. Phase green = THE PHASE'S validation gate in plan.md passes (commands + criteria). Paste the result, mark the header in plan.md, file lessons, print LESSONS_FILE=implementations-plan/network-e2e-required/lessons/phase-N.md, advance.
+6. All 7 phases done? /code-review max --fix then commit; NARROW /harden security on the auth-registry change (Phases 4-5) only; codex xhigh post-impl audit; address high/critical; wrap-up report; STOP.
+Keep an ASCII checklist visible each firing.</code></pre>
+    </div>
+
+    <h3>Alternative: /goal (completion-condition)</h3>
+    <pre><code>/goal All 7 phases marked done in implementations-plan/network-e2e-required/plan.md, each backed by its validation gate reported passing in the transcript with LESSONS_FILE=implementations-plan/network-e2e-required/lessons/phase-N.md printed; Phase 3 produced a written F1 root-cause classification before any Phase 4 fix; in-test retries removed (grep "retry:\s*[12]" in tests/e2e/network returns nothing) and revealed flakes root-caused; trust-point negative tests (estimate/reject/send-fail/dropped record nothing; one mined grant records once; cap blocks pre-send) pass; 5 consecutive green real pr-network-e2e runs on one SHA; Network e2e / Status confirmed required on dev (gh api rulesets); /code-review max --fix applied+committed; NARROW /harden security (auth-registry change) done; codex post-impl audit high/critical addressed; bun run audit:vue exit 0. HARD LIMITS: never flip required before the 5 green runs; never .skip or re-add a retry to mask a flaky app test; never merge to main.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>
