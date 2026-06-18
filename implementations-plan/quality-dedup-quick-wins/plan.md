@@ -39,7 +39,7 @@ Delete proven-dead exports/subpaths (all in `"private": true` pkgs, none auto-im
 
 **Validation gate** — `bun run lint` + typecheck+test for `wallet-core` + `bun run --cwd packages/extension test wallet/utils/serialization.test.ts` + the new `jobs/error.test.ts` pins green. Push → label `e2e:network` → CI Quality + network-e2e. Auto-merge when Quality green AND network shards ran+green. Layers: typecheck · lint · unit · network-e2e.
 
-## Phase 3 — Q20: single-own the CAIP runtime helpers  *(network-e2e: no)*
+## Phase 3 — Q20: single-own the CAIP runtime helpers  *(network-e2e: no)* ✓
 **Corrected scope (audits):** the bridge **already owns the CAIP types** (`wallet-bridge/src/index.ts:11` exports them; the extension imports them via `dapp-interaction/spec` re-export). Only the **runtime functions** (`formatCaipChain`/`formatCaipAccount`/`parseCaipAccount`/`resolveNetworkByChainId`) are duplicated. Make the bridge the single owner of the functions; extension re-exports. Preserve the extension's extra `parseCaipChain`.
 - **Constraint (registry #15):** ownership moves **downward** only (bridge ← extension). Add a small **parity test** (both sides produce identical output for a fixed vector) — codex. **There is NO "Used by: dispatcher" header to fix** (the original plan's instruction was wrong — neither `caip.ts` contains it).
 
