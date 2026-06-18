@@ -23,6 +23,25 @@ NO Critical/High. opts.from authz triple-confirmed solid. 7 Medium/Low/quality f
 Q1-Q2) → FOLLOWUP-authregistry-persistence.md for a dedicated follow-up PR (behavior-neutral /
 rare-edge; not flip-blockers).
 
-## Flip (the LAST sub-step) — pending user
-The flip (add `Network e2e / Status` to dev branch-protection required checks) + the
-`measure-f1 → dev` landing are outward-facing/shared-branch admin actions — left to the user.
+## Re-prove on the MERGED SHA (dev moved → 1394574 proof stale)
+PR #115 (measure-f1 → dev) came back CONFLICTING: dev advanced 10 commits / 87 extension files
+(the `design-system-externalization` + `quality-dedup-quick-wins` + `profile-flow-dedup-q2` arcs)
+since the branch was cut. That invalidates the `1394574` 5× for dev's actual HEAD, so the gate must
+be re-proven on the post-merge SHA. **User authorized the FULL autonomous landing** (resolve +
+re-prove + --admin merge + flip), accepting the moving-target risk (re-merge if dev moves again
+before the flip).
+
+Merged dev → measure-f1 = **`9be2eff`**. 7 conflicts resolved:
+- `auth-registry.ts` + `.test.ts`: comment-only — dev INDEPENDENTLY fixed the same F1 slot-swap
+  (`REJECT_ALL=1`/`APPROVED_ACTIONS=2`); kept ours (more precise consume-race comment).
+- `incoming-transfers.test.ts`: kept ours — dev also un-quarantined C2 + added the same token-row
+  seed, but kept the BUGGY first-key network resolver; our active-network-pointer fix supersedes it.
+- `authwit-lifecycle.test.ts`: comment-only convergent; kept ours.
+- `index.md`: kept theirs (dev's 2 new plan entries). `plan.md` + `phase-2.md`: kept ours (superset).
+Both e2e files resolve to == HEAD (verified: no dev-unique loss beyond the buggy resolver).
+`bun run audit:vue` exit 0 on the merged tree (2400+ tests + build).
+
+**Re-prove: 5× green real pr-network-e2e on `9be2eff` (sequential — concurrency cancels parallel).**
+Run 1 = `27786314393` (pull_request synchronize). Runs 2–5 via `gh workflow run pr-network-e2e.yml
+--ref fix/measure-f1-authwits`, one at a time. After 5/5 green: `--admin` squash-merge PR #115 →
+dev, then POST `Network e2e / Status` to dev `required_status_checks/contexts` + verify.
