@@ -390,12 +390,14 @@ const RECEIPT_POLLS_PER_ROUND = 45 // ×4s ≈ one ~3-minute round inside the lo
 const RECEIPT_MAX_ROUNDS = 10 // ≈30 min soft cap; after it the card re-arms RETRY, never a dead-end.
 const INTER_ROUND_MS = 100
 
-/** The most recent verified completion - P2's toast hook. */
+/** The most recent verified completion - P2's toast hook. `assetKind` lets the (always-mounted, bridge-tab)
+ *  toast format a fee-juice completion as Fee Juice rather than mislabelling it as the token (codex MEDIUM). */
 export const lastCompleted = ref<{
 	id: string
 	direction: "deposit" | "withdraw"
 	amount: string
 	isPrivate: boolean
+	assetKind: "bridge-token" | "fee-juice"
 	txHash?: string
 } | null>(null)
 
@@ -451,7 +453,14 @@ function completeDeposit(rec: DepositJournalRecord | undefined): void {
 	setRuntime(rec.id, { attention: undefined, note: undefined })
 	secretCache.delete(rec.id)
 	receiptRounds.delete(rec.id)
-	lastCompleted.value = { id: rec.id, direction: "deposit", amount: rec.amount, isPrivate: rec.isPrivate, txHash: rec.claimTxHash }
+	lastCompleted.value = {
+		id: rec.id,
+		direction: "deposit",
+		amount: rec.amount,
+		isPrivate: rec.isPrivate,
+		assetKind: assetKindOf(rec),
+		txHash: rec.claimTxHash,
+	}
 	// Completed cards STAY (✓ + the ✕ dismiss) - auto-hide was provenance-scoped and read as
 	// "sometimes my card vanishes". The foreground receipt path hides via hideCompleted instead.
 	localClaimProvenance.delete(rec.id)
@@ -465,7 +474,14 @@ function completeWithdraw(rec: WithdrawJournalRecord | undefined, consumeTxHash?
 	patchRecord(rec.id, { completedAt: deps.now() })
 	setRuntime(rec.id, { attention: undefined, note: undefined })
 	receiptRounds.delete(rec.id)
-	lastCompleted.value = { id: rec.id, direction: "withdraw", amount: rec.amount, isPrivate: rec.isPrivate, txHash: consumeTxHash }
+	lastCompleted.value = {
+		id: rec.id,
+		direction: "withdraw",
+		amount: rec.amount,
+		isPrivate: rec.isPrivate,
+		assetKind: assetKindOf(rec),
+		txHash: consumeTxHash,
+	}
 	log("withdraw complete", rec.id)
 }
 

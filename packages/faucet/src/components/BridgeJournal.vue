@@ -11,6 +11,7 @@ import { useToast } from "@/composables/useToast"
 import type { BridgeJournalRecord } from "@nulo/bridge-core"
 import { computed, ref, watch } from "vue"
 import { BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
+import { assetDecimals, assetSymbol } from "@/lib/asset-label"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { formatBigInt } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
@@ -52,14 +53,19 @@ watch(
 		if (!done) return
 		// The foreground stepper shows the receipt for this completion - a toast would double it.
 		if (journal.activeFlowId.value === done.id) return
-		const amount = formatBigInt(BigInt(done.amount), BRIDGE_TOKEN_DECIMALS)
+		// A fee-juice (Fuel) completion is 18-dec Fee Juice, not the token bridge's asset - format + label it
+		// as such so a background Fuel completion isn't announced as the wrong amount of AZLO (codex MEDIUM).
+		const sym = assetSymbol(done.assetKind, done.isPrivate)
+		const amount = formatBigInt(BigInt(done.amount), assetDecimals(done.assetKind))
 		const href = done.txHash ? (done.direction === "deposit" ? explorerTxUrl(done.txHash) : etherscanTxUrl(done.txHash)) : ""
 		push({
 			kind: "ok",
 			text:
 				done.direction === "deposit"
-					? `Bridged ${amount} ${BRIDGE_TOKEN_SYMBOL} to Aztec ✓`
-					: `Released ${amount} ${BRIDGE_TOKEN_SYMBOL} to Ethereum ✓`,
+					? done.assetKind === "fee-juice"
+						? `Fueled Aztec with ${amount} ${sym} ✓`
+						: `Bridged ${amount} ${sym} to Aztec ✓`
+					: `Released ${amount} ${sym} to Ethereum ✓`,
 			link: href ? { label: "view tx", href } : undefined,
 		})
 	},

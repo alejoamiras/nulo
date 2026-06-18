@@ -37,7 +37,7 @@ vi.mock("@/composables/useFuel", () => ({
 	useFuelFlow: () => ({ busy: ref(false), error: ref(null), deposit: depositFn, journal: {} }),
 }))
 
-import { __resetJournalForTests, addRecord, connectJournalDeps, runDepositClaim } from "@/composables/useBridgeJournal"
+import { __resetJournalForTests, addRecord, connectJournalDeps, lastCompleted, runDepositClaim } from "@/composables/useBridgeJournal"
 import { FUEL_PORTAL } from "@/contracts/bridge-deployments"
 import { TESTIDS } from "@/lib/testids"
 import FuelView from "@/views/FuelView.vue"
@@ -145,5 +145,7 @@ describe("fuel smoke", () => {
 		expect(claim).toHaveBeenCalled()
 		const stored = JSON.parse(localStorage.getItem(JOURNAL_KEY) ?? "{}") as { records?: { id: string; completedAt?: number }[] }
 		expect(stored.records?.find((r) => r.id === "0xfj1")?.completedAt).toBeDefined()
+		// The completion carries the fee-juice kind so the (bridge-tab) toast labels it as Fee Juice, not the token.
+		expect(lastCompleted.value).toMatchObject({ id: "0xfj1", assetKind: "fee-juice" })
 	})
 })
