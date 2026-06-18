@@ -29,3 +29,33 @@ flakes.
   the re-soak confirmation.
 
 LESSONS_FILE=implementations-plan/network-e2e-required/lessons/phase-6.md
+
+═══ REVEALED FLAKE: authwit-lifecycle revoke "freeze" — ROOT-CAUSE PROGRESS ═══
+Symptom: `Error: Waiting failed` Caused by `ProtocolError: Runtime.callFunctionOn timed out` on
+the popup's pure-DOM `waitForFunction` at the revoke settle ⇒ the popup PAGE PROCESS loses CDP
+responsiveness (not a task reject — that stays responsive).
+
+NOT the Phase-5 cutover code (THREE independent exonerations):
+  1. codex ×2 (sessions bn67m59dw, 019eda56) + static: revoke emits no cutover events; reconcile
+     "mined" has no emit; useEntityCrud is incremental (no refresh-loop); popup/page code is
+     UNCHANGED vs the green baseline 6b2075e (only data-testid attrs differ).
+  2. 10× CPU-throttle of the POPUP renderer during the post-submit wait (SW target unaffected) ⇒
+     2/2 reached-revoke runs PASSED (95s, 97s). If the popup were busy-looping or doing
+     main-thread work post-submit, 10× would amplify it into a freeze. It did NOT ⇒ the popup is
+     genuinely IDLE post-submit (just awaiting the SW). Rules out popup busy-loop AND popup-CPU
+     starvation.
+  3. The earlier syncAuthwit task-wedge fix (real latent bug, kept) took the rate from 3/3 RED
+     (pre-fix) to ~1/10 (9 green / 1 red post-fix).
+
+Flake characterization: RARE (~10% on a beefy Mac; 7 consecutive green in one batch), and
+DIVERSE — also observed a `Connection closed during registerProfile` SW-lifecycle SETUP flake
+(distinct from the revoke ProtocolError). Both are cross-process / resource / lifecycle infra
+flakes, consistent with BRIEF Class-B resource-starvation: rare on a many-core Mac, expected
+WORSE on 2-core CI. Local reproduction is too rare to CPU-profile efficiently; the flake is
+environment-sensitive, so CI (the real pr-network-e2e) is the representative measurement surface.
+
+CONCLUSION: Phase-5 cutover CODE is correct/complete (exonerated 3 ways + 7 unit pins). The
+authwit-lifecycle soak flake is a Phase-6 INFRA/resource flake, not a cutover bug. Next: either
+(a) reduce the cutover's SW-side per-tx-update work (lock+getValues on every onTransactionUpdated
+→ cheap no-op skip) as a contention-reducing optimization, and/or (b) characterize on CI where
+the flake is more frequent + representative.
