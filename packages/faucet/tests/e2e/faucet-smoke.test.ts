@@ -200,6 +200,18 @@ describe("faucet smoke", () => {
 		expect(cards[1].attributes("data-symbol")).toBe("OLUN")
 	})
 
+	it("3b. the Fuel tab renders its form with NO second journal mount (single foreground owner)", async () => {
+		wrapper = mount(App, { attachTo: document.body })
+		await flushPromises()
+		await wrapper.get(`[data-testid="${TESTIDS.tabFuel}"]`).trigger("click")
+		await flushPromises()
+		expect(wrapper.find(`[data-testid="${TESTIDS.fuelView}"]`).isVisible()).toBe(true)
+		expect(wrapper.find(`[data-testid="${TESTIDS.fuelForm}"]`).exists()).toBe(true)
+		// Integrity (codex/Opus Phase-4 concern): exactly ONE journal in the whole app — FuelView mounts
+		// none, so Bridge+Fuel never double-own activeFlowId and a completion can never double-toast.
+		expect(wrapper.findAll(`[data-testid="${TESTIDS.journalEmpty}"]`)).toHaveLength(1)
+	})
+
 	it("4. clicking 'Drip … to public' fires sendTx and shows a success toast", async () => {
 		const wallet = makeWalletStub()
 		const pending = { verificationHash: "deadbeef", confirm: async () => wallet, cancel: async () => {} }
