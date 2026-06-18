@@ -1,7 +1,10 @@
-<script setup>
-import { computed } from "vue"
+<script setup lang="ts">
+import { computed, type CSSProperties } from "vue"
 
-import icons from "@/assets/icons.json"
+import iconsJson from "../internal/icons.json"
+
+type IconPath = { path: string; opacity?: number; color?: string }
+const icons = iconsJson as Record<string, string | IconPath[]>
 
 const props = defineProps({
 	name: { type: String, required: true, default: "warning" },
@@ -14,8 +17,8 @@ const props = defineProps({
 	loading: { type: Boolean, default: false },
 })
 
-const styles = computed(() => {
-	const s = {
+const styles = computed<CSSProperties>(() => {
+	const s: CSSProperties = {
 		minWidth: `${props.size}px`,
 		minHeight: `${props.size}px`,
 		transformBox: "view-box",
@@ -23,39 +26,29 @@ const styles = computed(() => {
 		transform: "",
 	}
 
-	const ops = []
+	const ops: string[] = []
 	if (props.rotate) ops.push(`rotate(${props.rotate}deg)`)
 	if (props.scale !== 1) ops.push(`scale(${props.scale})`)
 	if (ops.length) s.transform = ops.join(" ")
 
-	// When no `color` prop is set, default fill to currentColor so the
-	// icon inherits the parent's text color (e.g., the button's `color`).
-	// Callers that need a specific brand color still pass color="primary"
-	// etc., which routes through the .fill--* class system.
+	// When no `color` prop is set, default fill to currentColor so the icon inherits the parent's
+	// text color. Callers needing a brand color pass color="primary" etc. → the .fill--* class (base.css).
 	if (!props.color) s.fill = "currentColor"
 
 	return s
 })
 
 const classes = computed(() => {
-	const iconClasses = []
-
+	const iconClasses: string[] = []
 	if (props.color) iconClasses.push(`fill--${props.color}`)
-
 	return iconClasses
 })
 
-const hoverColorVar = computed(() => {
-	return `var(--txt-${props.hoverColor})`
-})
+const hoverColorVar = computed(() => `var(--txt-${props.hoverColor})`)
 
-const getIcon = () => {
-	return icons[props.name.charAt(0).toLowerCase() + props.name.slice(1)]
-}
-
-const isSplitted = () => {
-	return typeof icons[props.name.charAt(0).toLowerCase() + props.name.slice(1)] === "object"
-}
+const iconData = computed(() => icons[props.name.charAt(0).toLowerCase() + props.name.slice(1)])
+const singlePath = computed(() => (typeof iconData.value === "string" ? iconData.value : ""))
+const multiPath = computed(() => (Array.isArray(iconData.value) ? iconData.value : []))
 </script>
 
 <template>
@@ -67,21 +60,14 @@ const isSplitted = () => {
 		:class="[...classes, props.hoverColor && $style.hovered, loading && $style.loading]"
 		role="img"
 	>
-		<path v-if="!isSplitted(name)" :d="getIcon(name)" />
+		<path v-if="!Array.isArray(iconData)" :d="singlePath" />
 		<template v-else>
-			<path v-if="!Array.isArray(getIcon(name))" :d="getIcon(name)" :style="{ opacity: path.opacity }" />
-
-			<template v-else>
-				<path
-					v-for="(icon, i) in getIcon(name)"
-					:key="i"
-					:d="icon.path"
-					:style="{
-						opacity: fill ? 1 : icon.opacity,
-						fill: icon.color && icon.color,
-					}"
-				/>
-			</template>
+			<path
+				v-for="(icon, i) in multiPath"
+				:key="i"
+				:d="icon.path"
+				:style="{ opacity: fill ? 1 : icon.opacity, fill: icon.color && icon.color }"
+			/>
 		</template>
 	</svg>
 </template>

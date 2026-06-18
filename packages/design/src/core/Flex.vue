@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 /** Vendor */
 import { ref, computed } from "vue"
 
@@ -16,25 +16,25 @@ const props = defineProps({
 	align: {
 		type: String,
 		validator(value) {
-			return ["center", "between", "around", "evenly", "start", "end"].includes(value)
+			return ["center", "between", "around", "evenly", "start", "end"].includes(value as string)
 		},
 	},
 	justify: {
 		type: String,
 		validator(value) {
-			return ["center", "between", "around", "evenly", "start", "end"].includes(value)
+			return ["center", "between", "around", "evenly", "start", "end"].includes(value as string)
 		},
 	},
 	wrap: {
 		type: String,
 		validator(value) {
-			return ["nowrap", "wrap", "wrapReverse"].includes(value)
+			return ["nowrap", "wrap", "wrapReverse"].includes(value as string)
 		},
 	},
 	direction: {
 		type: String,
 		validator(value) {
-			return ["column", "columnReversed", "row", "rowReversed"].includes(value)
+			return ["column", "columnReversed", "row", "rowReversed"].includes(value as string)
 		},
 	},
 	gap: {
@@ -73,12 +73,7 @@ const classes = computed(() => {
 </script>
 
 <template>
-	<component
-		:is="tag"
-		v-bind="{ to: to ? to : null }"
-		ref="wrapper"
-		:class="classes"
-	>
+	<component :is="tag" v-bind="{ to: to ? to : null }" ref="wrapper" :class="classes">
 		<slot />
 	</component>
 </template>

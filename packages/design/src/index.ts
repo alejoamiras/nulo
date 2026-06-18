@@ -5,12 +5,19 @@
  * Import the global stylesheet once at app entry: `import "@nulo/design/base.css"`.
  * Components are exported as Vue SFC source; the consumer's Vite pipeline compiles them.
  *
- * Fonts are NOT bundled — each consumer ships the woff2 files under its own
- * `public/fonts/` (base.css references them by absolute `/fonts/...` URL).
+ * Fonts are package-owned (`src/fonts`, referenced package-relative from base.css); the consumer's
+ * Vite bundles them. There is NO auto-import in this package — every component, Vue API, and helper
+ * uses explicit imports (consumers like the faucet have no unplugin-auto-import).
  *
  * Presentational only: components take their data + any `data-testid` via props.
  * They never import app-specific utilities, stores, or service clients.
  */
+
+/** Core (L1) primitives */
+export { default as Flex } from "./core/Flex.vue"
+export { default as Icon } from "./core/Icon.vue"
+export { default as MaterialIcon } from "./core/MaterialIcon.vue"
+export { default as Text } from "./core/Text.vue"
 
 /** UI primitives */
 export { default as AppButton } from "./ui/AppButton.vue"
