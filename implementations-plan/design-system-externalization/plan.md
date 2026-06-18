@@ -205,7 +205,11 @@ Co-migrate `icons.json` + `colorVar.ts`; rewrite self-contained + explicit impor
 template-tag audit; style-snapshots.
 **Gate:** typecheck:all + lint + unit (mount-all + snapshots) + build + storybook + smoke (light+dark).
 
-### Phase 4 — Pure L2 (`Badge`, `BrutalistTitle`, `Checkbox`, `SectionLabel`, `Toggle`) · MILESTONE
+### Phase 4 ✓ — Pure L2 (`Badge`, `BrutalistTitle`, `Checkbox`, `SectionLabel`, `Toggle`) · MILESTONE (machine-gated, done)
+**✓ COMPLETE** (branch `feat/design-system-p4-l2`): 5 components + tests moved via the resolver
+(explicit child imports; orphaned stories repointed to `@nulo/design`); typecheck:all + lint + design
+136 + extension 2398 + build chrome/firefox/faucet green; smoke 66/67 (pre-existing FPC flake only).
+See `lessons/phase-4.md`.
 Same mechanic. Ghost cleanup allowed here (snapshot-gated; not `--nulo-error`).
 **Gate:** typecheck:all + lint + unit + build + build:faucet + storybook + smoke.
 

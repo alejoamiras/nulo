@@ -5,6 +5,11 @@ import Flex from "./core/Flex.vue"
 import Icon from "./core/Icon.vue"
 import MaterialIcon from "./core/MaterialIcon.vue"
 import Text from "./core/Text.vue"
+import Badge from "./ui/Badge.vue"
+import BrutalistTitle from "./ui/BrutalistTitle.vue"
+import Checkbox from "./ui/Checkbox.vue"
+import SectionLabel from "./ui/SectionLabel.vue"
+import Toggle from "./ui/Toggle.vue"
 
 /**
  * Producer-side gate: every migrated SFC must mount with EXPLICIT imports — no reliance on the
@@ -17,6 +22,11 @@ const cases: Array<[string, Component, Record<string, unknown>]> = [
 	["Icon", Icon, { name: "external-link" }],
 	["Text", Text, {}],
 	["MaterialIcon", MaterialIcon, { name: "settings" }],
+	["Badge", Badge, {}],
+	["BrutalistTitle", BrutalistTitle, { main: "A", sub: "B" }],
+	["Checkbox", Checkbox, {}],
+	["SectionLabel", SectionLabel, { label: "X" }],
+	["Toggle", Toggle, {}],
 ]
 
 describe("@nulo/design components mount without auto-import", () => {

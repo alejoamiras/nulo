@@ -1,4 +1,6 @@
-<script setup>
+<script setup lang="ts">
+import Flex from "../core/Flex.vue"
+
 const props = defineProps({
 	variant: {
 		type: String,

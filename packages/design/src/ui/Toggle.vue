@@ -1,8 +1,11 @@
-<script setup>
+<script setup lang="ts">
+import Icon from "../core/Icon.vue"
+
 const props = defineProps({
 	modelValue: { type: Boolean, default: false },
 	disabled: { type: Boolean, default: false },
 	protected: { type: Boolean, default: false },
+	color: { type: String, required: false },
 })
 const emit = defineEmits(["update:modelValue"])
 

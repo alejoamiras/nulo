@@ -1,4 +1,7 @@
-<script setup>
+<script setup lang="ts">
+import Flex from "../core/Flex.vue"
+import Icon from "../core/Icon.vue"
+
 const props = defineProps(["modelValue", "checked", "disabled"])
 const emit = defineEmits(["update:modelValue"])
 </script>

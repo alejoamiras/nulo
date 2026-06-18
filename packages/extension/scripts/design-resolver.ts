@@ -7,7 +7,17 @@ import type { ComponentResolver } from "unplugin-vue-components"
  * Shared by the build (`vite.config.ts`) and Storybook (`.storybook/main.ts`) so the list can't drift.
  * Grows as later phases migrate more components.
  */
-export const NULO_DESIGN_COMPONENTS = new Set(["Flex", "Icon", "Text", "MaterialIcon"])
+export const NULO_DESIGN_COMPONENTS = new Set([
+	"Flex",
+	"Icon",
+	"Text",
+	"MaterialIcon",
+	"Badge",
+	"BrutalistTitle",
+	"Checkbox",
+	"SectionLabel",
+	"Toggle",
+])
 
 export function nuloDesignResolver(): ComponentResolver {
 	return (name: string) => {

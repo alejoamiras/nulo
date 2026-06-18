@@ -21,10 +21,15 @@ export { default as Text } from "./core/Text.vue"
 
 /** UI primitives */
 export { default as AppButton } from "./ui/AppButton.vue"
+export { default as Badge } from "./ui/Badge.vue"
+export { default as BrutalistTitle } from "./ui/BrutalistTitle.vue"
 export { default as Card } from "./ui/Card.vue"
+export { default as Checkbox } from "./ui/Checkbox.vue"
+export { default as SectionLabel } from "./ui/SectionLabel.vue"
 export { default as Spinner } from "./ui/Spinner.vue"
 export { default as Tag } from "./ui/Tag.vue"
 export { default as Toast } from "./ui/Toast.vue"
+export { default as Toggle } from "./ui/Toggle.vue"
 
 /** Composites */
 export { default as AddressDisplay } from "./composite/AddressDisplay.vue"
