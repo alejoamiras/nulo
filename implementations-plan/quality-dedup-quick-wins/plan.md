@@ -23,7 +23,9 @@
 
 ---
 
-## Phase 1 — Q16: remove dead symbol-level surface  *(network-e2e: no)*
+## Phase 1 — Q16: remove dead symbol-level surface  *(network-e2e: no)* ✓
+**DONE** — re-verified each symbol's call-sites (incl. tests) before deleting; removed 2 dead modules+tests, `getRandomElement`, `dequeueBatch`, `getVersion`/`setVersion`/`findByPredicate`+their tests, the `@aztec/stdlib` dep (bun.lock synced), and the dead `ENCRYPTION_GUARD` index re-export. Gate: typecheck 0, lint 0, wallet-core/wallet-crypto/extension-messaging tests green. `LESSONS_FILE=implementations-plan/quality-dedup-quick-wins/lessons/phase-1.md`
+
 Delete proven-dead exports/subpaths (all in `"private": true` pkgs, none auto-imported):
 - `extension-messaging/src/lazy-listener.ts` + `subscribe-with-snapshot.ts` (zero importers; operation-journal references are *comments*, verified); `wallet-core` `utils/random.ts` `getRandomElement`, `utils/queue.ts` `Queue.dequeueBatch`, `storage/entity_storage.ts` `getVersion`/`setVersion`/`findByPredicate` (no prod callers); `wallet-crypto/package.json` unused `@aztec/stdlib` dep; `wallet-crypto/src/index.ts` dead `ENCRYPTION_GUARD` **index re-export only** (it's used internally in `password-secret-box.ts` — remove only the re-export).
 - **Constraint:** do NOT touch the `ENCRYPTION_GUARD` canary tripwire test, `IllegalTransitionError`'s subpath export (operation-journal test consumes it), the `src/setup/*` vite entry, or any live export. Per-symbol removal, each gated by `! grep -rn "<symbol>" packages/*/src` (excluding the def + its test) + a test run.
