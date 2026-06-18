@@ -234,4 +234,29 @@ IFF the consume actually calls `AuthRegistry.consume`. `[F1-MATRIX] disableBlock
   `[revoke-slot-check]`), OR isolate the consumer into a wallet that lacks A's key.
 - true  → registry IS consulted yet revoke misses → deeper bug (then escalate to
   codex with the full matrix + this code map).
-RESULT: PENDING — soak `b5ayj11df`.
+RESULT (matrix soak `b5ayj11df`) — `[F1-MATRIX] revokeBlocks=false disableBlocks=false
+reenableOk=true`. DECISIVE: registry-DISABLE does NOT block the consume, so the
+consume never calls `AuthRegistry.consume` (reject_all is its first gate). All three
+consumes succeed regardless of registry state.
+
+═══ VERDICT: F1 IS A TEST-DESIGN FLAW, NOT A WALLET BUG ═══
+The consume (`sendTx {from: B}`, transfer_public_to_public(A,B,..)) runs the FROM-path
+`discoverPrivateAuthwits` (dapp-send-executor.ts:340) which mints A's PRIVATE authwit —
+the e2e wallet holds BOTH A (granter) and B (consumer) via
+`dappConnectedExtensionWithFirstTwoAccountsCap`, so it can sign for A. That private
+witness satisfies the token WITHOUT the public registry, making revoke/disable
+unobservable through the consume outcome. The wallet's revoke + disable WRITES are
+provably correct: `[revoke-slot-check]` = 0 (granted slot cleared on-chain),
+`storedHash == grantHash` by construction (tx-request-builder.ts:203 single messageHash).
+The slot-swap fix (already landed on dev, #101) was the real bug; this remaining
+"anomaly" is the test asserting protocol enforcement the harness cannot isolate.
+
+FIX (Phase 4): assert the WALLET's observable on-chain registry WRITES, not the
+protocol's consume enforcement:
+  - after grant   → approved_actions[A][hash] == 1 (isAuthwitConsumable true)
+  - after revoke  → approved_actions[A][hash] == 0 (isAuthwitConsumable false)
+  - after disable → isAuthRegistryEnabled(A) == false
+  - after enable  → isAuthRegistryEnabled(A) == true
+Keep G1 grant→consume as a "grant yields a consumable authwit" smoke. This tests
+`revokeAuthwits` + `setRegistryEnabled` (the two zero-coverage flows) at the layer the
+wallet OWNS. Codex consult pending to validate the verdict + fix shape.
