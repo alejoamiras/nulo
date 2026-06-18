@@ -114,6 +114,22 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		return count >= MAX_TRACKED_AUTHWITS_PER_ACCOUNT
 	}
 
+	/** PRE-send cap gate: throw if granting `newHashes` would push `account` past the
+	 *  tracked-authwit ceiling. Counts existing tracked rows (incl. pending) PLUS the unique
+	 *  NEW hashes not already tracked — a per-action check would let e.g. 255 existing + 2 new
+	 *  slip through and miscount intra-tx duplicates. Never auto-evict (that destroys the
+	 *  only local revocation index). Called by `buildStandard` for each `add_public_authwit`. */
+	public async assertWithinCap(account: string, newHashes: string[]): Promise<void> {
+		const existing = (await this.authwits.getValues()).filter((x) => x.account === account)
+		const existingHashes = new Set(existing.map((a) => a.hash))
+		const newUnique = new Set(newHashes.filter((h) => !existingHashes.has(h)))
+		if (existing.length + newUnique.size > MAX_TRACKED_AUTHWITS_PER_ACCOUNT) {
+			throw new Error(
+				`Cannot grant: account ${account} would exceed the ${MAX_TRACKED_AUTHWITS_PER_ACCOUNT} tracked public-authwit limit. Revoke some first.`,
+			)
+		}
+	}
+
 	/** Record public authwits at the POST-send tail as `pending`, tx-linked rows.
 	 *  Acceptance of `sendTx` is NOT mining — these stay pending until
 	 *  `reconcileAuthwits` confirms (mined) or removes (dropped) them. Idempotent:

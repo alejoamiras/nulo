@@ -92,4 +92,13 @@ describe("AuthRegistryService — pending/reconcile/cap (Phase 5)", () => {
 		expect(await svc.getAuthwits(A)).toHaveLength(MAX_TRACKED_AUTHWITS_PER_ACCOUNT)
 		expect(await svc.isAtCap(A)).toBe(true)
 	})
+
+	test("assertWithinCap blocks pre-send: existing + unique-new over the ceiling throws (per-build, deduped)", async () => {
+		const existing = Array.from({ length: MAX_TRACKED_AUTHWITS_PER_ACCOUNT - 1 }, (_, i) => ({ hash: `0xe${i}`, content }))
+		await svc.recordPendingAuthwits(A, existing, "0xtxe") // 255 tracked
+		// 255 existing + 2 unique-new = 257 > 256 ⇒ blocked (the per-action bug would pass this).
+		await expect(svc.assertWithinCap(A, ["0xnew1", "0xnew2"])).rejects.toThrow(/exceed the .* tracked public-authwit limit/)
+		// 255 existing + 1 unique-new ("0xe0" is already tracked → deduped) = 256 ≤ 256 ⇒ ok.
+		await expect(svc.assertWithinCap(A, ["0xe0", "0xnew1"])).resolves.toBeUndefined()
+	})
 })

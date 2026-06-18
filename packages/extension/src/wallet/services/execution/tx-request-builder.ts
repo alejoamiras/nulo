@@ -53,7 +53,6 @@ import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { IAccountContract, PartialGasSettingsRPC } from "@nulo/aztec-runtime/account"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
-import { MAX_TRACKED_AUTHWITS_PER_ACCOUNT } from "@/wallet/services/auth-registry/spec"
 import { networkInfoFrom, type NetworkService, type Network } from "@/wallet/services/network/service"
 import type { ProfileService } from "@/wallet/services/profile/service"
 import type { IPXE, PxeServiceClient } from "@/wallet/services/pxe/client"
@@ -332,21 +331,14 @@ export class TxRequestBuilder {
 				}
 			}
 
-			// Per-BUILD cap (pre-send gate): block a grant that would push the account past
-			// the tracked-authwit ceiling. Count existing tracked rows (incl. pending) PLUS
-			// the unique NEW hashes not already tracked — a per-action check would let e.g.
-			// 255 existing + 2 new slip through and miscount intra-tx duplicates. Never
-			// auto-evict: that would destroy the only local revocation index.
+			// Per-BUILD cap (pre-send gate): block a grant that would push the account past the
+			// tracked-authwit ceiling. Delegated to the auth-registry service so the
+			// existing+pending+unique-new ceiling logic is unit-testable in isolation.
 			if (pendingPublicAuthwits.length > 0) {
-				const accountAddress = account.address.toString()
-				const existing = await this.authRegistryService.getAuthwits(accountAddress)
-				const existingHashes = new Set(existing.map((a) => a.hash))
-				const newUnique = new Set(pendingPublicAuthwits.filter((p) => !existingHashes.has(p.hash)).map((p) => p.hash))
-				if (existing.length + newUnique.size > MAX_TRACKED_AUTHWITS_PER_ACCOUNT) {
-					throw new Error(
-						`Cannot grant: account ${accountAddress} would exceed the ${MAX_TRACKED_AUTHWITS_PER_ACCOUNT} tracked public-authwit limit. Revoke some first.`,
-					)
-				}
+				await this.authRegistryService.assertWithinCap(
+					account.address.toString(),
+					pendingPublicAuthwits.map((p) => p.hash),
+				)
 			}
 
 			const payload = new ExecutionPayload(calls, authwits, capsules, extraHashedArgs)
