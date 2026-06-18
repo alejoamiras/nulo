@@ -185,7 +185,7 @@ tests green (design 69 · faucet 336 · extension 2398) · `build` + `build:fauc
 as `src/token-contract.ts` (+ `src/internal/render-tokens.ts`) per the package's `src/**`-only
 tsconfig — see `lessons/phase-1.md`.
 
-### Phase 2 — Base/theme/font takeover (RELOCATE) · MILESTONE · **SUPERVISED — human sign-off required**
+### Phase 2 — Base/theme/font takeover (RELOCATE) · MILESTONE · **SUPERVISED** — machine gate ✓, VISUAL SIGN-OFF PENDING (user) · PR #103
 Port the extension's full `_base.scss`+`_text.scss` into the package `base.css` (tokens generated;
 non-token globals verbatim); bundle fonts (package-relative, drop ClashDisplay); switch
 `popup/index.ts` + `onboarding/index.ts` to import `@nulo/design/base.css`; delete extension
@@ -195,7 +195,11 @@ non-token globals verbatim); bundle fonts (package-relative, drop ClashDisplay);
 **Gate (human — blocking):** user confirms extension (chrome+firefox, light+dark, nav+no-nav, key
 screens) **and** faucet look identical. **Do NOT mark ✓ or proceed without this sign-off.**
 
-### Phase 3 — L1 core (`Flex`, `Icon`, `Text`, `MaterialIcon`) · MILESTONE
+### Phase 3 ✓ — L1 core (`Flex`, `Icon`, `Text`, `MaterialIcon`) · MILESTONE (machine-gated, done)
+**✓ COMPLETE** (branch `feat/design-system-p3-core`): resolver migration validated (zero template
+churn; `components.d.ts` → `@nulo/design`); typecheck:all + lint + design 101 + extension 2398 +
+build chrome/firefox/faucet green; smoke isolated-clean (pre-existing FPC flake only). `build-storybook`
+pre-broken (storybook+rolldown alias, identical on p2 — not a regression). See `lessons/phase-3.md`.
 Co-migrate `icons.json` + `colorVar.ts`; rewrite self-contained + explicit imports + fidelity pins +
 `Icon.vue:72` fix; mount-all gate; resolver (app+storybook) + atomic delete + d.ts regen +
 template-tag audit; style-snapshots.
