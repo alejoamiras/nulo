@@ -81,3 +81,12 @@ distinct rare flakes (fee-spike [FIXED], revoke popup-freeze [0/10 CI, very rare
 closed" SW-lifecycle, transient RPC). Phase 6 = fix the fixable ones (fee-spike done) + size a
 minimal retry-budget ONLY for the genuinely-irreducible residual. Re-soak pending to confirm the
 fee flake is gone + measure the true residual rate.
+
+═══ FEE FIX VALIDATED ON CI: authwit-lifecycle 10/10 GREEN ═══
+Post-fee-fix 10× CI re-soak (run 27758721372, retry=0 proverless): 10/10 GREEN (conclusion:
+success). vs the pre-fix soak 9/10 (1 fee-spike flake). The fee fix eliminated the dominant
+flake; the revoke freeze did NOT recur (0/10) — confirming it's a much-rarer residual, not a
+~10% rate. NET: the authwit-lifecycle "~10% flake" was dominated by the FIXABLE fee-spike, now
+killed. Retry-budget likely UNNEEDED for this test. Remaining before flip: confirm the BROADER
+suite (full sharded proverless soak — only authwit-lifecycle has been soaked so far), then
+Phase 7's 5× real pr-network-e2e.
