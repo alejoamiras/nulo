@@ -55,16 +55,21 @@ GATE MET. retry-grep clean (`grep -rnE "retry:\s*[12]" packages/extension/tests/
 For each test in the Phase-2 flaky set (the de-retried ~8 + the un-skipped C2 + anything else the strict baseline surfaced), apply the F1 discipline — measure → root-cause → fix, retries removed, no assumptions. A test that's robust once root-caused needs no retry; one that can't be made deterministic is a real bug to fix or an explicit, surfaced decision, NOT a silently re-added retry.
 - **Gate.** Each fixed file soaks green retry=0 proverless (per-file); then `grep -rnE "retry:\s*[12]" packages/extension/tests/e2e/network` returns nothing (only `retry: 0`/none remain); the full sharded strict soak is per-shard green. Layers: network-e2e (per-file + sharded strict soak).
 
-### Phase 7 — Prove stability + flip required (LAST) — ◑ 5× GREEN on 1394574; RE-PROVING on merged 9be2eff (dev moved 87 files); user authorized full autonomous landing
+### Phase 7 — Prove stability + flip required (LAST) — ✓ GATE MET: 5/5 green on 169ae05, merged to dev (e344435), Network e2e/Status REQUIRED on dev
 GATE: **5/5 consecutive green** real `pr-network-e2e.yml` runs on ONE SHA (`1394574`): runs
 27775893971, 27776262246, 27776722898, 27777086996, 27777444247 — all `success`, all `headSha
 13945746`, INCLUDING the heavy `concurrent-confirm` + `concurrent-approve` jobs + all 5 shards.
 A prior 4/5 (003ff063) failed on run 5's `concurrent-confirm` fee-spike at a `.simulate()` site
 the first fee fix missed — fixed completely (all 9 fixture SDK fee-sites carry the ceiling), then
-re-proven 5/5 here. UPDATE: dev then advanced 87 extension files (PR #115 conflicted), so the
-proof is being RE-RUN 5× on the post-merge SHA `9be2eff`; user authorized the full autonomous
-landing (resolve + re-prove + `--admin` squash-merge PR #115 + flip). Re-prove + merge details in
-lessons/phase-7.md. Rollback escape hatch documented.
+re-proven 5/5 here. dev then advanced 87 extension files (PR #115 conflicted); the re-prove on the
+merged SHA REVEALED a latent contacts-sender flake (edit-contact-submit gated on a slow getSenders
+load) — root-caused + FIXED (test waits for the sender toggle to settle; codex-confirmed
+slow-not-hang; NOT masked), then re-proven **5/5 green on the final SHA `169ae05`** (runs
+27788434322 / 27788849626 / 27789198484 / 27789535309 / 27789918867). Merged to dev via PR #115
+(squash `e344435`); `Network e2e / Status` ADDED to dev required status checks (verified
+`{contexts:[Quality / Status, Network e2e / Status], strict:false}`). Re-prove + merge details in
+lessons/phase-7.md. Rollback escape hatch documented (CI.md). Follow-up: /code-review Q1/Q2 +
+harden M1–M5 land in a dedicated follow-up PR (now gated by the required Network e2e).
 LESSONS_FILE=implementations-plan/network-e2e-required/lessons/phase-7.md
 
 Run the **real sharded PR workflow** (not the soak) **5×** on the same SHA. Only after 5 consecutive green, add `Network e2e / Status` (the `status` aggregate context — passes-when-skipped; NOT individual shards) to `dev`'s ruleset/branch-protection (admin, out-of-band). Document a **time-boxed rollback** escape hatch: accelerator incident → `vars.NULO_E2E_DISABLE_ACCELERATOR=1` (suite still runs honestly); upstream/Aztec outage → temporarily remove the required context for ≤24h, leave the workflow advisory, file an incident, restore on recovery. Never a `.skip`/quarantine.

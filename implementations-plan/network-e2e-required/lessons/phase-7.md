@@ -68,3 +68,21 @@ FIX (`contacts-sender.test.ts:171`): before clicking submit, `page.waitForFuncti
 (30s, mirrors the readiness wait already used later in the file). NOT a retry/skip — an explicit
 wait on the app's own load-gate signal. lint + typecheck exit 0. New sha → **restart 5× from
 scratch** (run-3 failure broke the consecutive streak).
+
+## GATE MET — 5/5 green on 169ae05 + flipped (Phase 7 DONE)
+Fresh 5× on `169ae05` (contacts-sender fix included): runs `27788434322` (synchronize),
+`27788849626`, `27789198484`, `27789535309`, `27789918867` — **all success**, including the heavy
+concurrent jobs + all 5 shards. The previously-flaky run-3 position passed clean. Quality / Status
+green on the sha; dev drift 0 at merge time.
+
+Landed: `gh pr merge 115 --squash --admin --delete-branch` → dev squash `e344435`
+("feat(auth-registry): build-pure trust-point cutover + network-e2e de-flake (#115)"). `--admin`
+because the AFK commits were unsigned (gpgsign=false) and dev enforces signed commits — the
+documented CLI path (CLAUDE.md). **Signature backfill on the AFK commits is a return-time decision.**
+
+Flipped: `POST .../branches/dev/protection/required_status_checks/contexts` +`Network e2e / Status`.
+Verified `{contexts:[Quality / Status, Network e2e / Status], strict:false}`. Additive (Quality +
+strict untouched). The `status` aggregate context is pass-when-skipped, so doc-only PRs still pass.
+
+Hard limits honored: flipped only after 5 green on one SHA; the revealed flake was FIXED not
+.skip/quarantined; no in-test retry re-added; merged to dev (NOT main); no CI token/secret scope change.
