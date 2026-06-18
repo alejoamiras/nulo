@@ -54,7 +54,7 @@ calibrated Medium — rare crash-durability, not an attacker breach). The authz 
   on the correct account). FIX: filter incoming events by `entity.account === appStore.account.address`.
 Full report: audit/security/2026-06-18-authregistry/report.md.
 
-## /code-review max (quality) — findings (deferred to this follow-up PR, behavior-neutral)
+## /code-review max (quality) — findings — ✓ APPLIED (post-flip follow-up PR)
 Diff is surprise-free (no skip/only/masking-retry/accidental) + codex+harden security-clean. Quality nits:
 - **Q1 — dead code: `isAtCap` (service.ts:112-115)** has ZERO production callers (only its own
   service.test.ts uses it; the cap GATE is `assertWithinCap`). Remove it + its test (touches the
@@ -63,6 +63,12 @@ Diff is surprise-free (no skip/only/masking-retry/accidental) + codex+harden sec
   fee-juice-with-claim) cherry-pick `built` fields by hand; only fpc-strategy spreads `...built`.
   Adding a BuiltStandardTx field (like `pendingPublicAuthwits`) forces touching all 3 — the cutover
   did exactly that. Fix: spread `...built` in all 4 (mirror fpc-strategy). Fowler: Shotgun Surgery.
-DEFERRED (not applied now): both are behavior-neutral; applying them drifts the landed code off the
-Phase-7-proven SHA 1394574 for zero behavior gain. They land in this follow-up PR (with M1-M5),
-which gets its own 5× re-prove. Documented deviation from "/code-review --fix applied now."
+APPLIED (post-flip): both done in the `/code-review --fix` follow-up. Q1 — `isAtCap` removed (it had
+no RPC client/spec exposure, so removal was localized to `service.ts` + its test). Q2 — `embedded`,
+`fee-juice`, `fee-juice-with-claim` now capture `built` and `return { ...built, feePaymentMethod }`,
+mirroring `fpc-strategy`. PROVEN behavior-neutral: `BuiltStandardTx` has exactly the 8 fields the
+strategies cherry-picked and `FeeEstimate extends BuiltStandardTx`, so the spread yields the
+identical object; the fee structural-parity tests + auth-registry units pass (25/25), lint +
+typecheck exit 0. Deferred earlier only to avoid disturbing the proven flip SHA; now landed as its
+own PR gated by the (now-required) Network e2e. **M1–M5 (harden Mediums) remain open** — separate
+follow-up; none are high/critical, so out of the network-e2e-required goal's scope.
