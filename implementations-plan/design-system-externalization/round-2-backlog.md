@@ -36,6 +36,12 @@ Everything below was deliberately deferred — each item has a concrete reason r
   branches): Storybook v10 + Vite 8 rolldown `ViteAlias StringExpected` on the `{find:"@"}`
   alias-merge in `.storybook/main.ts`. Fix the alias config to a rolldown-compatible form.
 - **Faucet `public/fonts/`** is now orphaned (base.css uses the package-bundled fonts) — remove.
+- **Faucet base.css parity guard**: the round-1 faucet light-bg regression (five globals the
+  extension's leaner base dropped vs the faucet's old package base; fixed faucet-locally in
+  `packages/faucet/src/app.css` — see `lessons/phase-5.md`) was caught only by the human eye. The
+  token drift tests passed because VALUES were identical; the gap was *missing rules*. Add a
+  faucet-side guard (a render smoke asserting a dark computed `background-color` on `body`, or a
+  parity test that the faucet's effective element globals match its pre-migration set).
 - **Move primitive stories into the package** + expand the Storybook `stories` glob to
   `../../design/src/**/*.stories.*` (round 1 kept them in the extension, repointed to `@nulo/design`).
 - **Round-2 visual gate**: when the base/theme/font takeover collapses further, consider real
