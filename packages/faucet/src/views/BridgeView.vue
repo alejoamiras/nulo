@@ -26,7 +26,7 @@ import { TESTIDS } from "@/lib/testids"
 		</section>
 
 		<BridgeForm />
-		<BridgeJournal />
+		<BridgeJournal kind="bridge-token" />
 		<MintTestUsdc />
 		<BridgeAddToken />
 	</div>

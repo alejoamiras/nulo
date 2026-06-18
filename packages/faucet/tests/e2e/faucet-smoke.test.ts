@@ -200,16 +200,18 @@ describe("faucet smoke", () => {
 		expect(cards[1].attributes("data-symbol")).toBe("OLUN")
 	})
 
-	it("3b. the Fuel tab renders its form with NO second journal mount (single foreground owner)", async () => {
+	it("3b. the Fuel tab has its OWN bridges list (so backgrounded Fuel bridges surface there)", async () => {
 		wrapper = mount(App, { attachTo: document.body })
 		await flushPromises()
 		await wrapper.get(`[data-testid="${TESTIDS.tabFuel}"]`).trigger("click")
 		await flushPromises()
 		expect(wrapper.find(`[data-testid="${TESTIDS.fuelView}"]`).isVisible()).toBe(true)
 		expect(wrapper.find(`[data-testid="${TESTIDS.fuelForm}"]`).exists()).toBe(true)
-		// Integrity (codex/Opus Phase-4 concern): exactly ONE journal in the whole app — FuelView mounts
-		// none, so Bridge+Fuel never double-own activeFlowId and a completion can never double-toast.
-		expect(wrapper.findAll(`[data-testid="${TESTIDS.journalEmpty}"]`)).toHaveLength(1)
+		// The Fuel tab now mounts its own (fee-juice-filtered) journal so a backgrounded Fuel bridge doesn't
+		// vanish until you visit the Bridge tab. Both tabs are always-mounted (v-show) → two lists app-wide.
+		// The single-toast-owner integrity (only the Bridge mount emits completion toasts; the Fuel mount is
+		// toast-silent) is unit-pinned in BridgeJournal.test.ts.
+		expect(wrapper.findAll(`[data-testid="${TESTIDS.journalEmpty}"]`)).toHaveLength(2)
 	})
 
 	it("4. clicking 'Drip … to public' fires sendTx and shows a success toast", async () => {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BridgeJournal from "@/components/BridgeJournal.vue"
 import BridgeWalletPanel from "@/components/BridgeWalletPanel.vue"
 import FuelForm from "@/components/FuelForm.vue"
 import L1WalletPanel from "@/components/L1WalletPanel.vue"
@@ -21,6 +22,7 @@ import { TESTIDS } from "@/lib/testids"
 		</section>
 
 		<FuelForm />
+		<BridgeJournal kind="fee-juice" :toasts="false" />
 	</div>
 </template>
 

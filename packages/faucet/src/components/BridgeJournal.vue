@@ -8,13 +8,17 @@ import { useBridgeJournal } from "@/composables/useBridgeJournal"
 import { useToast } from "@/composables/useToast"
 
 /** Utils */
-import type { BridgeJournalRecord } from "@nulo/bridge-core"
+import { type BridgeJournalRecord, assetKindOf } from "@nulo/bridge-core"
 import { computed, ref, watch } from "vue"
-import { BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
 import { assetDecimals, assetSymbol } from "@/lib/asset-label"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { formatBigInt } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
+
+// `kind` scopes the list to one asset (the Fuel tab shows fee-juice, the Bridge tab shows the token) so a
+// backgrounded Fuel bridge surfaces under its own tab. `toasts` keeps a SINGLE completion-toast owner across
+// the two mounts (the Bridge instance owns it; the Fuel instance is list-only) — no double toast.
+const props = withDefaults(defineProps<{ kind?: "bridge-token" | "fee-juice"; toasts?: boolean }>(), { toasts: true })
 
 const journal = useBridgeJournal()
 const backup = useBridgeBackup()
@@ -33,10 +37,11 @@ async function onRestorePick(event: Event) {
 	restoring.value = true
 	try {
 		const rec = await backup.restoreFile(await file.text())
-		const amount = formatBigInt(BigInt(rec.amount), BRIDGE_TOKEN_DECIMALS)
+		const kind = assetKindOf(rec)
+		const amount = formatBigInt(BigInt(rec.amount), assetDecimals(kind))
 		push({
 			kind: "ok",
-			text: `Restored: ${amount} ${BRIDGE_TOKEN_SYMBOL} ${rec.direction === "deposit" ? "to Aztec" : "to Ethereum"}.`,
+			text: `Restored: ${amount} ${assetSymbol(kind, rec.isPrivate)} ${rec.direction === "deposit" ? "to Aztec" : "to Ethereum"}.`,
 		})
 	} catch (e) {
 		push({ kind: "error", text: e instanceof Error ? e.message : "Restore failed." })
@@ -45,11 +50,15 @@ async function onRestorePick(event: Event) {
 	}
 }
 
-const sorted = computed(() => [...journal.visibleRecords.value].sort((a, b) => b.createdAt - a.createdAt))
+const sorted = computed(() => {
+	const recs = props.kind ? journal.visibleRecords.value.filter((r) => assetKindOf(r) === props.kind) : journal.visibleRecords.value
+	return [...recs].sort((a, b) => b.createdAt - a.createdAt)
+})
 
 watch(
 	() => journal.lastCompleted.value,
 	(done) => {
+		if (!props.toasts) return // List-only mount (the Fuel tab) — the Bridge mount owns the single toast.
 		if (!done) return
 		// The foreground stepper shows the receipt for this completion - a toast would double it.
 		if (journal.activeFlowId.value === done.id) return
