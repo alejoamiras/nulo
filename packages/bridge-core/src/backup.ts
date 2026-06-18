@@ -100,7 +100,8 @@ export function validateBackupRecord(rec: unknown): BridgeJournalRecord {
 			!isOptionalString(d.depositTxHash) ||
 			!isOptionalString(d.leafIndex) ||
 			!isOptionalString(d.claimTxHash) ||
-			!isOptionalNumber(d.depositL2Block)
+			!isOptionalNumber(d.depositL2Block) ||
+			(d.assetKind !== undefined && d.assetKind !== "bridge-token" && d.assetKind !== "fee-juice")
 		) {
 			throw new Error("The sealed contents are not a valid bridge record.")
 		}
@@ -121,7 +122,12 @@ export function validateBackupRecord(rec: unknown): BridgeJournalRecord {
 				!isOptionalBoolean(f.claimAttempt) ||
 				!isOptionalString(f.claimTxHash) ||
 				!isOptionalBoolean(f.consumed) ||
-				!isOptionalBoolean(f.standaloneClaimed)
+				!isOptionalBoolean(f.standaloneClaimed) ||
+				// PRIVATE-fuel extras — validated strictly too (these are recovery inputs for a private
+				// Fuel claim; a malformed salt/fpc must reject the restore, never be guessed through).
+				!isOptionalString(f.bridgeSecretSalt) ||
+				!isOptionalString(f.fpc) ||
+				!isOptionalBoolean(f.setupInsufficiency)
 			) {
 				throw new Error("The sealed contents are not a valid bridge record.")
 			}

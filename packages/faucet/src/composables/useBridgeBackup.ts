@@ -1,6 +1,7 @@
 import {
 	type BridgeBackupFile,
 	type BridgeJournalRecord,
+	feeJuiceAddress,
 	isSealTrusted,
 	markSealTrusted,
 	openBridgeBackup,
@@ -10,7 +11,7 @@ import {
 	sealBridgeBackup,
 } from "@nulo/bridge-core"
 import { sepolia } from "viem/chains"
-import { BRIDGE, L1_PORTAL } from "@/contracts/bridge-deployments"
+import { BRIDGE, FUEL_PORTAL, L1_PORTAL } from "@/contracts/bridge-deployments"
 import { addRecordVerified, runOnLane, useBridgeJournal } from "./useBridgeJournal"
 import { getRetainedSealKey, providerFingerprint } from "./useDeposit"
 import { useL1Wallet } from "./useL1Wallet"
@@ -111,11 +112,12 @@ export function useBridgeBackup() {
 	/** The restore ladder (plan D3). Returns the restored record; throws user-facing copy per step. */
 	async function restoreFile(raw: string): Promise<BridgeJournalRecord> {
 		const file = parseBackupFile(raw)
-		if (
-			file.chainId !== sepolia.id ||
-			file.portal.toLowerCase() !== L1_PORTAL.toLowerCase() ||
-			file.bridge.toLowerCase() !== BRIDGE.toString().toLowerCase()
-		) {
+		const portal = file.portal.toLowerCase()
+		const bridge = file.bridge.toLowerCase()
+		const matchesToken = portal === L1_PORTAL.toLowerCase() && bridge === BRIDGE.toString().toLowerCase()
+		// A Fuel recovery file binds to the canonical FeeJuicePortal + the L2 Fee Juice address (plan §5 DQ2).
+		const matchesFuel = !!FUEL_PORTAL && portal === FUEL_PORTAL.toLowerCase() && bridge === feeJuiceAddress.toLowerCase()
+		if (file.chainId !== sepolia.id || (!matchesToken && !matchesFuel)) {
 			throw new Error("This file belongs to a different bridge deployment - it cannot be restored here.")
 		}
 		if (journal.records.value.some((r) => r.id === file.id)) {

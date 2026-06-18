@@ -145,6 +145,42 @@ describe("bridge backup files", () => {
 		expect(() => validateBackupRecord({ ...withdraw(), schema: 2 })).toThrow(/not a valid bridge record/)
 	})
 
+	it("fee-juice + private-fuel extras: assetKind + bridgeSecretSalt/fpc/setupInsufficiency validate strictly", async () => {
+		const fuel = {
+			amount: "250000000000000000",
+			secret: "0xf00d",
+			secretHashHex: "0xfeed",
+			minOutput: "450000000000000000000",
+			bridgeSecretSalt: "0x5a17",
+			fpc: "0x1b1706cc0947eca1de6527562af65d43e95540f9009a896dcd847afea92ede1e",
+			setupInsufficiency: false,
+		}
+		const fjPriv = publicDeposit({
+			assetKind: "fee-juice",
+			isPrivate: true,
+			secret: undefined,
+			sealedEnvelope: "blob",
+			sealerL1: SEALER,
+			schema: 2,
+			fuel,
+		} as never)
+		// Round-trips with the variant + private extras intact.
+		const file = await sealBridgeBackup(key, fjPriv, SEALER)
+		expect(await openBridgeBackup(key, file)).toEqual(fjPriv)
+		// Malformed private-fuel extras reject the restore (recovery inputs — never guessed through).
+		expect(() => validateBackupRecord(publicDeposit({ schema: 2, fuel: { ...fuel, bridgeSecretSalt: 7 } } as never))).toThrow(
+			/not a valid bridge record/,
+		)
+		expect(() => validateBackupRecord(publicDeposit({ schema: 2, fuel: { ...fuel, fpc: 7 } } as never))).toThrow(
+			/not a valid bridge record/,
+		)
+		expect(() => validateBackupRecord(publicDeposit({ schema: 2, fuel: { ...fuel, setupInsufficiency: "nope" } } as never))).toThrow(
+			/not a valid bridge record/,
+		)
+		// A bad assetKind rejects.
+		expect(() => validateBackupRecord(publicDeposit({ assetKind: "garbage" } as never))).toThrow(/not a valid bridge record/)
+	})
+
 	it("validateBackupRecord rejects junk shapes the journal's shallow parser would let through", () => {
 		expect(() => validateBackupRecord({ id: "0x1", direction: "deposit" })).toThrow(/not a valid bridge record/)
 		expect(() => validateBackupRecord(publicDeposit({ amount: "12.5" as never }))).toThrow(/not a valid bridge record/)

@@ -74,7 +74,9 @@ Keep `direction: "deposit"`. Add `assetKind: "bridge-token" | "fee-juice"` as an
 - **Explicit limit:** there is no sequencer in jsdom — this gate proves *construction + faucet capability-scope + planner-routing*, **not** prover/sequencer acceptance. It **cannot retire I2** (§8); it only catches a constructable-but-misscoped failure early.
 - **Validation gate.** `B && FT && FU && TA && L` (`FU` runs the new construction + capability-scope unit tests — the gate now executes every layer its pass-criteria claim). Layers: unit (bridge-core + faucet) · typecheck · lint.
 
-### Phase 2 — Journal/engine generalization (`assetKind`, envelope stays 1) + strict validation
+### Phase 2 — ✅ DONE — Journal/engine generalization (`assetKind`, envelope stays 1) + strict validation
+<!-- Gate passed: bridge-core 127 · faucet 341 · e2e smoke 9 · typecheck:all exit 0 · lint exit 0. assetKind (additive) + deploymentMatches branch + backup restore/validator generalized; recovery-crypto binding-agnostic (no change); runDepositClaim variant deferred to Phase 3. Lessons: lessons/phase-2.md -->
+
 - Add `assetKind` (additive optional; absent ⇒ `"bridge-token"`). Generalize `deploymentMatches`, backup restore/export, and recovery-key derivation to the fee-juice binding (§5 DQ2). Refactor `runDepositClaim` to resolve claim material by variant; generalize receipt snapshot, phase rail, toasts.
 - **Tighten the backup validator now (not Phase 5):** validate the existing-but-currently-unvalidated private-fuel extras (`bridgeSecretSalt`, `fpc`, `setupInsufficiency`, `backup.ts:111-127`) plus the new fields — don't ship a generalized-but-loose validator (N2).
 - **Validation gate.** `B && FT && FU && FE && TA && L`. Pass: schema/backup/journal/recovery-binding tests green; **existing Bridge flow unchanged** (unit + component + smoke-e2e); a regression test loads an existing (pre-Fuel) journal and recovers every record. Layers: unit · component · smoke-e2e · typecheck · lint.
