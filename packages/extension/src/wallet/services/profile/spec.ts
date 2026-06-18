@@ -102,7 +102,7 @@ export type Methods = {
 	 * @param name Display name.
 	 * @param credentialData OPTIONAL — PATH A. When present, the caller has
 	 *   already collected the WebAuthn credential via the in-page modal
-	 *   (`src/popup/utils/passkey-ceremony.ts:runPasskeyCeremony`); the SW
+	 *   (`src/wallet/utils/passkey-ceremony.ts:runPasskeyCeremony`); the SW
 	 *   skips its window-opening dance and uses the supplied data.
 	 *   When absent, falls through to the legacy PATH B (SW opens a popup
 	 *   window). PATH B currently has no production callers but the

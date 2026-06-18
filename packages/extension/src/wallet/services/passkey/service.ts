@@ -20,7 +20,7 @@ const PASSKEY_TIMEOUT_MS = 5 * 60 * 1000
  *
  *   - PATH A — popup-driven in-page modal. Active path for register / unlock
  *     / import. The popup runs WebAuthn in its own frame via
- *     `src/popup/utils/passkey-ceremony.ts:runPasskeyCeremony`, then hands
+ *     `src/wallet/utils/passkey-ceremony.ts:runPasskeyCeremony`, then hands
  *     the resulting `PasskeyCredentialData` to `ProfileService.{create,unlock,import}*`
  *     which call `materializeCredential` to wrap it back into a
  *     `PasskeyCredential`. NO window opens for Path A.
