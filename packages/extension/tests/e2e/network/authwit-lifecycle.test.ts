@@ -10,6 +10,7 @@ import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { deriveStorageSlotInMap } from "@aztec/stdlib/hash"
+import { TxHash } from "@aztec/stdlib/tx"
 import { getAuthRegistryAddress } from "@/wallet/utils/auth-registry"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -45,6 +46,10 @@ test.skipIf(!hasConfig)(
 		expect(accountAddresses.length).toBe(2)
 		const [ownerA, callerB] = accountAddresses as [string, string]
 		const step = (m: string) => console.log(`[authwit-lifecycle] ${m}`)
+		// DIAGNOSTIC (new-angle): the execution block of the most recent consume tx,
+		// so step 2 can read approved_actions AT that block (not just the proven tip)
+		// and split hash-divergence from a snapshot/ordering anomaly. Remove with F1.
+		let lastConsumeBlock: number | undefined
 
 		await mintPublicTokensForAccount(aztecConfig!, ownerA)
 
@@ -114,6 +119,20 @@ test.skipIf(!hasConfig)(
 			if (!/^0x[0-9a-fA-F]+$/.test(txHash)) return "error"
 			try {
 				await waitForTxMined(aztecConfig!, txHash)
+				// DIAGNOSTIC (new-angle): capture the consume's execution block + the
+				// current tips. waitForTxMined returns at "success" (proposed tip), so
+				// block is the proposed block the sequencer executed consume against.
+				try {
+					const dn = createAztecNodeClient(aztecConfig!.nodeUrl)
+					const rcpt = await dn.getTxReceipt(TxHash.fromString(txHash))
+					lastConsumeBlock = rcpt.blockNumber
+					const tips = await dn.getL2Tips()
+					console.log(
+						`[consume-block] nonce=${nonce} block=${rcpt.blockNumber} status=${String(rcpt.status)} proven=${tips.proven.block.number} latest=${tips.latest.block.number}`,
+					)
+				} catch (e) {
+					console.log(`[consume-block] nonce=${nonce} diag-failed: ${String(e)}`)
+				}
 				return "ok"
 			} catch {
 				return "error"
@@ -181,7 +200,24 @@ test.skipIf(!hasConfig)(
 			console.log(`[revoke-slot-check] account=${account} hash=${hash} approved=${word.toString()} proven=${provenBlock}`)
 		}
 		step("G2 consume (expect error — revoked)")
-		expect(await consume("2")).toBe("error")
+		const g2outcome = await consume("2")
+		// DIAGNOSTIC (new-angle): read storedHash's slot AT the consume's execution
+		// block (lastConsumeBlock), not just the proven tip. This is the decisive split:
+		//   slotAtConsumeBlock==0 + outcome=ok → consume's recomputed hash ≠ storedHash
+		//                                        (hash divergence — a wallet-side fix).
+		//   slotAtConsumeBlock!=0              → the proven revoke is absent at the
+		//                                        consume's block (snapshot/ordering anomaly).
+		if (lastConsumeBlock !== undefined) {
+			for (const { account, hash } of storedHashes) {
+				const outer = await deriveStorageSlotInMap(new Fr(2n), AztecAddress.fromString(account))
+				const slot = await deriveStorageSlotInMap(outer, Fr.fromString(hash))
+				const word = await diagNode.getPublicStorageAt(lastConsumeBlock, getAuthRegistryAddress(), slot)
+				console.log(
+					`[consume-vs-revoke] outcome=${g2outcome} account=${account} hash=${hash} slotAtConsumeBlock(${lastConsumeBlock})=${word.toString()} revokeProven=${provenBlock}`,
+				)
+			}
+		}
+		expect(g2outcome).toBe("error")
 
 		// ── Step 3: G3 grant → registry DISABLE → consume FAILS → ENABLE → consume OK ──
 		// reject_all is checked before the approval, so a disabled-registry
