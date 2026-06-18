@@ -39,3 +39,17 @@ flow as `executeAztecSendTx()`, OR an auth-registry reservation lock spanning ca
 Loop bar is "address high/critical" — none found. The 3 Mediums are documented follow-ups (a
 separate PR), NOT blockers for the Network-e2e-required flip (they're wallet-behavior edges that
 don't affect the e2e gate's reliability). M2 was already a known deferral from the Phase-5 design.
+
+## /harden security (narrow) — corroboration + 2 new findings (2026-06-18)
+The narrow /harden (2 Claude agents + prior codex) CONFIRMED M1/M2/M3 (M2: Claude argued High, I
+calibrated Medium — rare crash-durability, not an attacker breach). The authz (opts.from) is SOLID
+(triple-confirmed). Two NEW items:
+- **M4 (Medium) — restore inflates the index with stuck pending rows.** `restore` (service.ts:417)
+  writes `pending:true`/`txHash` verbatim; a backup taken mid-in-flight-grant restores a row that
+  never reconciles (no matching onTransactionUpdated), is invisible to syncAuthwit (skips pending),
+  yet counts toward the cap. FIX: restore should reject pending rows OR immediately re-verify them.
+- **M5 (Low) — cross-account UI event leak.** `onAuthwitAdded` emits the full Authwit; `useEntityCrud`
+  (authwits/index.vue:50-51) adds any emitted row without filtering by active account → account B's
+  row can render in account A's list. UI-integrity only (storage is per-account-keyed; revoke acts
+  on the correct account). FIX: filter incoming events by `entity.account === appStore.account.address`.
+Full report: audit/security/2026-06-18-authregistry/report.md.
