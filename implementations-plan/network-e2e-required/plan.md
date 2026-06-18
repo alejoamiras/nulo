@@ -55,7 +55,16 @@ GATE MET. retry-grep clean (`grep -rnE "retry:\s*[12]" packages/extension/tests/
 For each test in the Phase-2 flaky set (the de-retried ~8 + the un-skipped C2 + anything else the strict baseline surfaced), apply the F1 discipline — measure → root-cause → fix, retries removed, no assumptions. A test that's robust once root-caused needs no retry; one that can't be made deterministic is a real bug to fix or an explicit, surfaced decision, NOT a silently re-added retry.
 - **Gate.** Each fixed file soaks green retry=0 proverless (per-file); then `grep -rnE "retry:\s*[12]" packages/extension/tests/e2e/network` returns nothing (only `retry: 0`/none remain); the full sharded strict soak is per-shard green. Layers: network-e2e (per-file + sharded strict soak).
 
-### Phase 7 — Prove stability + flip required (LAST)
+### Phase 7 — Prove stability + flip required (LAST) — ✓ 5× GREEN MET (flip = pending USER admin step)
+GATE: **5/5 consecutive green** real `pr-network-e2e.yml` runs on ONE SHA (`1394574`): runs
+27775893971, 27776262246, 27776722898, 27777086996, 27777444247 — all `success`, all `headSha
+13945746`, INCLUDING the heavy `concurrent-confirm` + `concurrent-approve` jobs + all 5 shards.
+A prior 4/5 (003ff063) failed on run 5's `concurrent-confirm` fee-spike at a `.simulate()` site
+the first fee fix missed — fixed completely (all 9 fixture SDK fee-sites carry the ceiling), then
+re-proven 5/5 here. The flip itself (add `Network e2e / Status` to dev branch-protection
+required checks) is an OUTWARD-FACING repo-admin action → left to the user (command prepped below).
+Rollback escape hatch documented. LESSONS_FILE=implementations-plan/network-e2e-required/lessons/phase-6.md
+
 Run the **real sharded PR workflow** (not the soak) **5×** on the same SHA. Only after 5 consecutive green, add `Network e2e / Status` (the `status` aggregate context — passes-when-skipped; NOT individual shards) to `dev`'s ruleset/branch-protection (admin, out-of-band). Document a **time-boxed rollback** escape hatch: accelerator incident → `vars.NULO_E2E_DISABLE_ACCELERATOR=1` (suite still runs honestly); upstream/Aztec outage → temporarily remove the required context for ≤24h, leave the workflow advisory, file an incident, restore on recovery. Never a `.skip`/quarantine.
 - **Gate.** 5 consecutive green real `pr-network-e2e.yml` runs on one SHA (if the sentinel fires in >1 of 5, stop + investigate); `gh api repos/alejoamiras/nulo/rulesets` shows `Network e2e / Status` required on `dev`, individual shards absent; rollback procedure written in `CI.md`. Layers: real sharded PR gate · CI admin config.
 

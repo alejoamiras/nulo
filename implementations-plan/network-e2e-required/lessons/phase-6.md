@@ -141,3 +141,11 @@ maxFeesPerGas>=gasFees validation on reads too. biome + typecheck green.
 ⇒ Phase 7's 5× must RESTART on the new SHA (prior 4/5 were on the incomplete fix). LESSON: a fee
 ceiling must cover EVERY direct-SDK fee-checking call (send AND simulate), not just sends; and
 "green" on a spike-intermittent flake is not proof unless a spike actually occurred.
+
+═══ PHASE 7 — 5/5 GREEN on one SHA (gate proven; flip pending user) ═══
+Real pr-network-e2e.yml 5× on SHA 1394574 (complete fee fix): 27775893971, 27776262246,
+27776722898, 27777086996, 27777444247 — ALL success, all headSha 13945746, including the heavy
+concurrent-confirm/concurrent-approve jobs + 5 shards. The complete fee fix held (the
+concurrent-confirm fee-spike that broke the prior 4/5 on 003ff063 did NOT recur). 5-consecutive-
+green-on-one-SHA hard-limit satisfied. Flip (add `Network e2e / Status` to dev branch-protection
+required checks) left to the user as an outward-facing repo-admin action.
