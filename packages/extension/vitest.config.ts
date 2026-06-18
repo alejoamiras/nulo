@@ -59,6 +59,10 @@ export default defineConfig({
 		// config, extension remains the single test runner).
 		include: [
 			"src/**/*.test.ts",
+			// e2e infra helpers that are pure TS (no sandbox) — e.g. the
+			// boot-failure classifier. The sandbox-bound specs under tests/e2e/**
+			// stay excluded below; only co-located script unit tests run here.
+			"scripts/**/*.test.ts",
 			"../wallet-core/src/**/*.test.ts",
 			"../wallet-crypto/src/**/*.test.ts",
 			"../extension-messaging/src/**/*.test.ts",
