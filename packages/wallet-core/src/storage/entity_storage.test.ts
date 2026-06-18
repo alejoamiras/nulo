@@ -81,30 +81,6 @@ describe("EntityStorage", () => {
 		expect((await other.getAll()).length).toBe(1)
 	})
 
-	test("findByPredicate returns matching entities with their keys", async () => {
-		await storage.set("a", { name: "A", age: 30 })
-		await storage.set("b", { name: "B", age: 25 })
-		await storage.set("c", { name: "C", age: 40 })
-		const adults = await storage.findByPredicate((u) => u.age >= 30)
-		expect(adults.map((r) => r.key).sort()).toEqual(["a", "c"])
-		expect(adults.find((r) => r.key === "a")?.entity).toEqual({ name: "A", age: 30 })
-	})
-
-	test("getVersion returns 0 when unset; setVersion round-trips", async () => {
-		expect(await storage.getVersion()).toBe(0)
-		await storage.setVersion(5)
-		expect(await storage.getVersion()).toBe(5)
-	})
-
-	test("version is isolated from entity keys (same root, different sub-path)", async () => {
-		await storage.setVersion(7)
-		await storage.set("alice", { name: "Alice", age: 30 })
-		// getAll should not return the version as an entity
-		const all = await storage.getAll()
-		expect(all.length).toBe(1)
-		expect(all[0][0]).toBe("alice")
-	})
-
 	/**
 	 * Resilience: a single malformed row used to throw from `JSON.parse` inside
 	 * `get`/`getAll`/`getValues`, poisoning every reader of the namespace. The

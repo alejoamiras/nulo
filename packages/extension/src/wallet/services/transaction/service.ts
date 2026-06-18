@@ -1,4 +1,5 @@
 import { TxHash, TxStatus as AztecTxStatus, TxExecutionResult as AztecTxExecutionResult } from "@aztec/stdlib/tx"
+import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
@@ -315,7 +316,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			} catch (err) {
 				result.push({
 					...tx,
-					restoreError: err instanceof Error ? err.message : err,
+					restoreError: toRestoreError(err),
 				})
 			}
 		}

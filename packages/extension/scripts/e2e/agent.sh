@@ -15,6 +15,10 @@ cd "$(dirname "$0")/../.."
 
 PORTS_JSON=".e2e-state/ports.json"
 
+# Clear stale boot-sentinel markers from a prior run so the boot-failure
+# classifier (scripts/e2e/classify-exit.ts) sees only THIS run's state.
+rm -f .e2e-state/boot-started .e2e-state/boot-ready .e2e-state/tests-started
+
 echo "[e2e:agent] resolving ports..."
 bun run scripts/e2e/resolve-ports.ts
 
@@ -117,6 +121,8 @@ echo "[e2e:agent] running network e2e..."
 # pass-by-skip. Without this gate, every test gets `describe.skipIf(!config)`
 # and vitest exits 0 with `61 skipped` — which is what hid this entire suite
 # from CI for weeks.
+# Capture vitest's exit without `set -e` aborting, so the boot classifier runs.
+set +e
 E2E_REQUIRE_SETUP=1 \
 ANVIL_URL="$ANVIL_URL" \
 ANVIL_PORT="$ANVIL_PORT" \
@@ -129,3 +135,12 @@ PLAYGROUND_PORT="$PLAYGROUND_PORT" \
 FAUCET_URL="$FAUCET_URL" \
 FAUCET_DEV_PORT="$FAUCET_PORT" \
   bun run vitest run --config vitest.e2e.network.config.ts "$@"
+VITEST_EXIT=$?
+set -e
+
+# Map an infra-boot failure (sandbox never became ready AND no test ran) to exit
+# 86 so _network-e2e.yml retries the agent ONCE. Any other non-zero — including a
+# real test failure — passes through unchanged and is never retried. The
+# classifier reads the .e2e-state boot markers written by global-setup + the
+# network setupFile.
+exec bun run scripts/e2e/classify-exit.ts "$VITEST_EXIT"

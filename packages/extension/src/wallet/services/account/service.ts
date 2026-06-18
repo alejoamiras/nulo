@@ -1,4 +1,5 @@
 import type { Fr } from "@aztec/foundation/curves/bn254"
+import { toRestoreError } from "@/utils/restore-error"
 import { poseidon2Hash } from "@aztec/foundation/crypto/poseidon"
 import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
@@ -225,7 +226,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			} catch (err) {
 				result.push({
 					...account,
-					restoreError: err instanceof Error ? err.message : err,
+					restoreError: toRestoreError(err),
 				})
 			}
 		}

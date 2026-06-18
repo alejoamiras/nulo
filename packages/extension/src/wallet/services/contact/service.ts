@@ -1,4 +1,5 @@
 import type { BrowserApi } from "@nulo/wallet-core/ports"
+import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
@@ -307,7 +308,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 				} catch (err) {
 					result.push({
 						...contact,
-						restoreError: err,
+						restoreError: toRestoreError(err),
 					})
 				}
 			}
