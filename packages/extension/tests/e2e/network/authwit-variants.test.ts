@@ -20,7 +20,7 @@ const hasConfig = aztecConfig !== undefined
 for (const variant of ["callIntent", "innerHash"] as const) {
 	test.skipIf(!hasConfig)(
 		`authwit-${variant} (#27) — silent path under accounts cap`,
-		{ timeout: 90_000, retry: 1 },
+		{ timeout: 90_000 },
 		async ({ dappConnectedExtensionPerTest: dappConnectedExtension }) => {
 			const page = dappConnectedExtension.playgroundPage
 

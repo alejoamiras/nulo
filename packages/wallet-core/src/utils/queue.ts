@@ -44,16 +44,6 @@ export class Queue<TKey, TValue> {
 		return item
 	}
 
-	public dequeueBatch(size: number): TValue[] {
-		const res = []
-		while (size-- > 0) {
-			const item = this.dequeue()
-			if (!item) break
-			res.push(item)
-		}
-		return res
-	}
-
 	public peek(): TValue | undefined {
 		return this.items.at(0)
 	}

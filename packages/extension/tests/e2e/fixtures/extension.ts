@@ -1259,7 +1259,11 @@ export async function clickByTestId(page: Page, testId: string, timeout = 10_000
 		await page.waitForFunction(
 			(id: string) => {
 				const candidates = [...document.querySelectorAll<HTMLElement>(`[data-testid="${id}"]`)].filter((el) => {
-					if ((el as HTMLButtonElement).disabled) return false
+					// Skip natively-disabled AND aria-disabled elements (eg. DropdownItem,
+					// which is a <div> that can't carry native `disabled`). Both mean "not
+					// clickable yet" — wait for the element to enable rather than firing a
+					// programmatic click that bypasses CSS `pointer-events: none`.
+					if ((el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true") return false
 					const style = window.getComputedStyle(el)
 					if (style.display === "none" || style.visibility === "hidden") return false
 					const rect = el.getBoundingClientRect()

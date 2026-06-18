@@ -90,7 +90,7 @@ Six layers, low → high. A layer can import only from layers below it. Enforced
                        Orchestration. May own service-client lifecycle.
 ```
 
-Service-bound visual components (Header, AddressDisplay, GlobalLoader, NotificationManager, Popup, PopupCard, JsonViewer, LogsViewer) live flat in `src/components/` or in their own subdir, NOT in `core/`, `ui/`, or `composite/`.
+Service-bound visual components (Header, AddressDisplay, GlobalLoader, NotificationManager, Popup, PopupCard, JsonViewer, LogsViewer, PasskeyCeremonyDialog in `components/passkey/`) live flat in `src/components/` or in their own subdir, NOT in `core/`, `ui/`, or `composite/`. Cross-shell ones (e.g. `PasskeyCeremonyDialog`, consumed by both the popup and onboarding shells) MUST live under `src/components/`, never `src/popup/**`, so onboarding can import them without crossing the `@/popup/**` layer ban.
 
 ## Composables (C0 / C1)
 

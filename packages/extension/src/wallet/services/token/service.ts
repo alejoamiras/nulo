@@ -1,4 +1,5 @@
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import { normalizeError } from "@nulo/wallet-core/jobs"
@@ -546,7 +547,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				} catch (err) {
 					result.push({
 						...token,
-						restoreError: err instanceof Error ? err.message : err,
+						restoreError: toRestoreError(err),
 					})
 				}
 			}

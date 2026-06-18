@@ -10,11 +10,11 @@ import { UserRejectedError } from "@nulo/extension-messaging/errors"
 import PasskeyCeremonyDialog from "./PasskeyCeremonyDialog.vue"
 
 // Mock the helper module — we don't want a real WebAuthn call.
-vi.mock("@/popup/utils/passkey-ceremony", () => ({
+vi.mock("@/wallet/utils/passkey-ceremony", () => ({
 	runPasskeyCeremony: vi.fn(),
 }))
 
-import { runPasskeyCeremony } from "@/popup/utils/passkey-ceremony"
+import { runPasskeyCeremony } from "@/wallet/utils/passkey-ceremony"
 const runPasskeyCeremonyMock = vi.mocked(runPasskeyCeremony)
 
 const fakeRequest = { mode: "create" as const, userHandle: "uh" }

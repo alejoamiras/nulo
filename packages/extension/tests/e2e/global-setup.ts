@@ -15,6 +15,7 @@ import {
 	LOCAL_NODE_URL,
 } from "./fixtures/aztec"
 import { type OwnedState, clearLock, isPidAlive, killOrphanByPid, readLock, writeLock } from "./lockfile"
+import { markBootReady, markBootStarted } from "./sentinel"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const EXTENSION_PATH = path.resolve(__dirname, "../../dist/chrome")
@@ -204,6 +205,7 @@ export default async function setup(project: TestProject) {
 					project.provide("playgroundUrl", PLAYGROUND_URL)
 					project.provide("faucetUrl", FAUCET_URL)
 					await deployContractsAndProvide(project)
+					markBootReady()
 					return
 				}
 				console.warn("[e2e-setup] prior sandbox identity mismatch — tearing down and starting fresh")
@@ -231,6 +233,12 @@ export default async function setup(project: TestProject) {
 		}
 		clearLock()
 	}
+
+	// Sandbox bring-up begins here — this opens the boot-failure (exit 86)
+	// window. Manifest validation + orphan reap above are deliberately OUTSIDE
+	// it: a failure there is a build/env problem, not an infra-boot flake, so it
+	// must NOT be retried.
+	markBootStarted()
 
 	// ── Anvil (L1) ─────────────────────────────────────────────────────
 	const anvilAlreadyRunning = await probeAnvil(ANVIL_URL)
@@ -492,6 +500,10 @@ export default async function setup(project: TestProject) {
 	project.provide("faucetUrl", FAUCET_URL)
 
 	await deployContractsAndProvide(project)
+	// Sandbox healthy + contracts deployed, BEFORE any test worker starts —
+	// this closes the boot-failure (exit 86) window. Any failure from here on
+	// (fixture, import, test body) is a real failure, never an infra-boot flake.
+	markBootReady()
 }
 
 /**

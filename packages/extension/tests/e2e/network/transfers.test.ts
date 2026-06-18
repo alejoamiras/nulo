@@ -22,7 +22,7 @@ const hasConfig = aztecConfig !== undefined
  * file-scoped fixture's browser stayed broken for subsequent tests. As
  * one scenario test, a single detach now surfaces as one honest fail.
  *
- * NO retry:1 here on purpose. The file-scoped `tokenReadyExtension`
+ * NO per-test retry here on purpose. The file-scoped `tokenReadyExtension`
  * initializes once per file (vitest fixture-scope semantics); a retry
  * would re-run the scenario against partially-mutated on-chain state
  * from the failed attempt, so step 1 ("balance shows 1,000") would fail

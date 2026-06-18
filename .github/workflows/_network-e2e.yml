@@ -244,15 +244,38 @@ jobs:
             [ -n "$f" ] && EXCLUDE_ARGS+=(--exclude "$f")
           done
 
-          if [ "${#TEST_FILE_LIST[@]}" -gt 0 ] && [ -n "${TEST_FILE_LIST[0]}" ]; then
-            # Dedicated mode: caller specified explicit test files. Ignore shard;
-            # the file list IS the workload.
-            bun run e2e:agent "${TEST_FILE_LIST[@]}" "${EXCLUDE_ARGS[@]}"
-          elif [ -n "$SHARD" ]; then
-            bun run e2e:agent --shard="$SHARD" "${EXCLUDE_ARGS[@]}"
-          else
-            bun run e2e:agent "${EXCLUDE_ARGS[@]}"
+          run_agent() {
+            if [ "${#TEST_FILE_LIST[@]}" -gt 0 ] && [ -n "${TEST_FILE_LIST[0]}" ]; then
+              # Dedicated mode: caller specified explicit test files. Ignore shard;
+              # the file list IS the workload.
+              bun run e2e:agent "${TEST_FILE_LIST[@]}" "${EXCLUDE_ARGS[@]}"
+            elif [ -n "$SHARD" ]; then
+              bun run e2e:agent --shard="$SHARD" "${EXCLUDE_ARGS[@]}"
+            else
+              bun run e2e:agent "${EXCLUDE_ARGS[@]}"
+            fi
+          }
+
+          # Boot-failure sentinel: agent.sh exits 86 ONLY when the sandbox
+          # (anvil/node/deploy bring-up) never became ready AND no test ran.
+          # Retry the agent ONCE for that narrow infra window; any other non-zero
+          # is a real failure and fails immediately. Cap = 1. No test-dimension
+          # retry — the PR gate runs retry: 0 so app flakes surface honestly.
+          set +e
+          run_agent
+          CODE=$?
+          set -e
+          if [ "$CODE" -eq 86 ]; then
+            echo "::warning::Infra boot failure (exit 86) — retrying the agent once."
+            set +e
+            run_agent
+            CODE=$?
+            set -e
+            if [ "$CODE" -eq 86 ]; then
+              echo "::error::Infra boot failed again on retry (exit 86)."
+            fi
           fi
+          exit "$CODE"
 
       # Permanent guard: PR #46's lessons doc flagged bundle-grep as the actual
       # leak guarantee for diagnostic probes (compile-time gate is design intent,

@@ -5,7 +5,7 @@ defineProps({
 </script>
 
 <template>
-	<div :class="[$style.wrapper, disabled && $style.disabled]" tabindex="1">
+	<div :class="[$style.wrapper, disabled && $style.disabled]" :aria-disabled="disabled || undefined" tabindex="1">
 		<slot />
 	</div>
 </template>

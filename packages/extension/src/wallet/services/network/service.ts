@@ -1,4 +1,5 @@
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import { validateParams } from "@nulo/extension-messaging/zod"
@@ -646,7 +647,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 				} catch (err) {
 					result.push({
 						...(raw && typeof raw === "object" ? (raw as Partial<Network>) : {}),
-						restoreError: err instanceof Error ? err.message : err,
+						restoreError: toRestoreError(err),
 					} as Restored<Network>)
 				}
 			}

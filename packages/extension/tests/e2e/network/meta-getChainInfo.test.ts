@@ -19,7 +19,7 @@ const hasConfig = aztecConfig !== undefined
 // timeout. Each invocation passes deterministically in isolation, so the
 // retry stays scoped to this test rather than landing as a suite-wide
 // vitest `retry` option (which would mask real regressions elsewhere).
-test.skipIf(!hasConfig)("meta-getChainInfo — silent path, no popup", { timeout: 60_000, retry: 1 }, async ({ dappConnectedExtension }) => {
+test.skipIf(!hasConfig)("meta-getChainInfo — silent path, no popup", { timeout: 60_000 }, async ({ dappConnectedExtension }) => {
 	const result = await callExpectingNoPopup(dappConnectedExtension, dappConnectedExtension.playgroundPage, "getChainInfo", async () => {
 		await clickByTestId(dappConnectedExtension.playgroundPage, "pg-btn-getChainInfo")
 	})
