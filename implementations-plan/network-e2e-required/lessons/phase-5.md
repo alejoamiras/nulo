@@ -60,3 +60,19 @@ recovery metadata lives only in the row whose write may fail.
 7. Tests: per-build cap (255+2 blocked), estimate/reject/fail record nothing, one mined
    records once, dropped reconciles to absent, sync does not prune pending.
 LESSONS_FILE=implementations-plan/network-e2e-required/lessons/phase-5.md
+
+═══ REGRESSION (post-cutover) — BLOCKED pending user decision ═══
+The cutover compiles + 16 unit tests pass, but the F1 e2e soak fails REPRODUCIBLY (2×):
+- bt9eze2fn: 329s, "Waiting failed" at the revoke settingsAction submit-disappears wait.
+- bseja9x1z: 364s, identical.
+Baseline (Phase 4, pre-cutover): 76s/80s green. So the cutover introduced a ~4× slowdown
++ a revoke-completion hang (protocolTimeout — SW/page unresponsive). NOT a flake (2 identical).
+Recording itself WORKS: G1 recorded→consumed, G2 granted, revoke-all enabled+clicked — the
+hang is the revoke sendTx not completing. Prime suspect: the new onTransactionUpdated
+reconcile subscription firing per-tx-update + contending on `this.lock` with revokeAuthwits'
+syncAuthwit, or general SW load; needs SW-side timing diagnostics to confirm.
+Executor negative pins landed (dc61a92): record-once-on-send, none-on-estimate, none-on-fail.
+NOT done: cap-blocks pin (needs tx-request-builder harness), reconcile pin (needs auth-registry
+service harness), journal-backed crash-recovery (codex #4).
+STATUS: Phase 5 reproducibly RED. opts.from fix (5d09ca3) is done + proven (2× green) and
+independent. Awaiting user: land opts.from + park/revert Phase 5, vs debug the revoke hang.
