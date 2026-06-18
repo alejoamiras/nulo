@@ -1,4 +1,4 @@
-import type { BridgeJournalRecord, DepositJournalRecord, WithdrawJournalRecord } from "@nulo/bridge-core"
+import { type BridgeJournalRecord, type DepositJournalRecord, type WithdrawJournalRecord, assetKindOf } from "@nulo/bridge-core"
 import type { RecordRuntime } from "@/composables/useBridgeJournal"
 
 /**
@@ -44,7 +44,11 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 	// Permit2). The fuel swap executes INSIDE the deposit transaction, so it is not independently
 	// observable (fuel.received lands together with leafIndex) - there is no separate FUEL phase to
 	// flip on its own; DEPOSIT is relabeled "DEPOSIT + FUEL" to name the one atomic step.
-	const fueled = rec.fuel !== undefined
+	// A direct Fuel record (assetKind "fee-juice") carries a `fuel` block but is NOT swap-fueled: it
+	// APPROVES the FeeJuicePortal (no Permit2 SIGN) and its claim is gas-only — so it uses the plain
+	// approve-based phases with fuel-specific labels, never the "DEPOSIT + FUEL" / SIGN swap shape.
+	const isFuel = assetKindOf(rec) === "fee-juice"
+	const fueled = rec.fuel !== undefined && !isFuel
 	const keys: BridgePhase["key"][] = rec.isPrivate
 		? fueled
 			? ["seal", "sign", "deposit", "sync", "claim", "confirm"]
@@ -72,7 +76,7 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 		sign: "SIGN",
 		deposit: fueled ? "DEPOSIT + FUEL" : "DEPOSIT",
 		sync: "CROSSING",
-		claim: "CLAIM",
+		claim: isFuel ? "CLAIM GAS" : "CLAIM",
 		confirm: "CONFIRM",
 	}
 	const prompts: Record<string, string> = {
