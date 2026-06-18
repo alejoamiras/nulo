@@ -14,7 +14,7 @@ const hasConfig = aztecConfig !== undefined
  */
 test.skipIf(!hasConfig)(
 	"data-addressBook — silent path after data cap granted",
-	{ timeout: 90_000, retry: 1 },
+	{ timeout: 90_000 },
 	async ({ dappConnectedExtension }) => {
 		const page = dappConnectedExtension.playgroundPage
 

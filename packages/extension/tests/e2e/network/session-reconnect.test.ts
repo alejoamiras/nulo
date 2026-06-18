@@ -26,7 +26,6 @@ for (const alwaysTrust of [false, true]) {
 		`session-reconnect — alwaysTrust=${alwaysTrust} reconnect ${alwaysTrust ? "skips" : "shows"} verify`,
 		{
 			timeout: 120_000,
-			retry: 1,
 		},
 		async ({ registeredExtensionPerTest }) => {
 			// Switch to Local Network so the playground's chainInfo (Fr.ZERO = 0)
