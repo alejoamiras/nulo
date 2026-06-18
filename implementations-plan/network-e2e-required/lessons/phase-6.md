@@ -116,3 +116,28 @@ the identical fix. storage-shape-agent correctly disambiguated line 234=firstPro
 guessed token-id collision (downstream). caller-race-agent found the immediate:false watcher
 (real but stale — test fails at the first prompt). Lesson: parallel cross-model fan-out cracked
 in minutes what serial debugging circled for hours.
+
+═══ PHASE 6 GATE MET — full sharded strict soak 3/3 GREEN ═══
+After the 3 flake fixes (incoming-transfer mocks, mint fee-spike, incoming-transfers:234 networkId),
+the full-suite proverless soak (run 27765252224, mode=full repeats=3 retry=0 proverless) is
+3/3 GREEN — conclusion: success, ZERO failing tests across all 3 full-suite iterations
+(20m40s / 19m24s / 20m55s). retry-grep clean. The residual rare infra flakes (revoke popup-freeze,
+"Connection closed" SW-lifecycle) did NOT recur in any of the 3 full-suite runs. Phase 6 gate met.
+Advancing to Phase 7 (5× real pr-network-e2e on SHA 003ff06 — sequential due to
+cancel-in-progress concurrency; real proving via accelerator).
+
+═══ CORRECTION — the fee-spike fix was INCOMPLETE (sends only); Phase 7 revealed a 2nd site ═══
+The earlier "fee fix validated — 10/10 green" was PREMATURE: those green runs were SPIKE-FREE LUCK,
+not the fix working. The first fee fix (de0846c) added E2E_FEE_GAS (maxFeesPerGas 1e11 ceiling) only
+to the `.send({ fee })` calls. But the test fixtures ALSO make fee-validating `.simulate()` reads
+(balance_of_public/balance_of at aztec.ts:163,419,453) and multi-line sponsored `.send()` calls
+(369,432,442) — all using the SDK DEFAULT maxFeesPerGas. Phase 7 run 5 (the HEAVY concurrent-confirm
+job, which the proverless full-soak does NOT exercise) hit a node fee spike: the mint's balance-verify
+simulate (aztec.ts:163) failed `maxFeesPerGas=6.8e7 < gasFees=1.4e8`. So 4/5 Phase-7 runs green + the
+full-soak 3/3 were all spike-free, not spike-immune.
+COMPLETE FIX: E2E_FEE_GAS now on ALL 9 fee-checking SDK sites (sends + simulates).
+`SimulateInteractionOptions.fee` accepts gasSettings (SDK d.ts confirmed), so the ceiling passes the
+maxFeesPerGas>=gasFees validation on reads too. biome + typecheck green.
+⇒ Phase 7's 5× must RESTART on the new SHA (prior 4/5 were on the incomplete fix). LESSON: a fee
+ceiling must cover EVERY direct-SDK fee-checking call (send AND simulate), not just sends; and
+"green" on a spike-intermittent flake is not proof unless a spike actually occurred.
