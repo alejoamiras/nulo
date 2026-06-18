@@ -291,4 +291,18 @@ that's both the bug and a security hole). Then the consume is genuinely sent BY 
 becomes observable: revoke/disable BLOCK the consume. Keep the on-chain-state assertions
 (`isAuthwitConsumable`/`isAuthRegistryEnabled`) as belt-and-suspenders. This is a
 trust-boundary change → covered by the post-impl narrow /harden security + codex audit.
-Resuming codex on the concrete fix before the soak.
+
+═══ RESOLUTION (option 2 — user flagged the trust boundary; kept the e2e arc clean) ═══
+The user questioned whether the `opts.from` override was a deliberate security measure.
+Investigated: both lines are from `5ee8ec1 "chore: open-source initial import"` (no
+security commit/comment/AUDIT marker; nothing in ARCHITECTURE/SECURITY docs frames it as
+intentional). Conclusion: OUR bug, not a deliberate block; aztec.nr self-send semantics
+are correct. The guarded fix (honor `opts.from` iff session-authorized) is safe under any
+security reading. Rather than bundle a trust-boundary change into this e2e arc, chose
+option 2: rewrote `authwit-lifecycle` to assert the on-chain registry WRITES
+(`isAuthwitConsumable` grant→true/revoke→false; `isAuthRegistryEnabled` disable→false/
+enable→true), dropped the vacuous consume + all diagnostics. Deterministic — soaked with
+`NULO_E2E_RETRY=0`. The `opts.from` wallet fix is filed in
+[FOLLOWUP-opts-from-clobber.md](../FOLLOWUP-opts-from-clobber.md) for its own focused PR;
+a true end-to-end revoke proof (consume blocked post-revoke) is gated on that fix.
+LESSONS_FILE=implementations-plan/network-e2e-required/lessons/phase-4.md

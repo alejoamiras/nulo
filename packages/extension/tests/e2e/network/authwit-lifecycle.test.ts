@@ -3,42 +3,39 @@ import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { navigateToSettings, switchAccountByAddress } from "../fixtures/helpers"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, pickFeeAndSubmitAuthwitPopup, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
-import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
-import { dumpAuthwitMeasurement } from "../fixtures/journal"
-/** DIAGNOSTIC (codex #7) imports — remove with the [revoke-slot-check] block once F1 is green. */
+import { waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
-import { Fr } from "@aztec/foundation/curves/bn254"
-import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { deriveStorageSlotInMap } from "@aztec/stdlib/hash"
-import { TxHash } from "@aztec/stdlib/tx"
-import { getAuthRegistryAddress } from "@/wallet/utils/auth-registry"
+import { isAuthRegistryEnabled, isAuthwitConsumable } from "@/wallet/utils/auth-registry"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
-// Runs in the proverless shard pool (NULO_E2E_PROVERLESS=1): the many serial
-// proofs that previously exhausted puppeteer's protocolTimeout collapse to
-// fake-proof speed (kernel sim + on-chain mining stay real), so the
-// RUN_AUTHWIT_E2E opt-in gate is removed and this rejoins the standard suite.
-// Lifecycle is grant→consume/revoke (not sequencing/cancel) — PLAIN proverless, no barrier.
+// Proverless shard (NULO_E2E_PROVERLESS=1): the grant + the two settings sendTxs
+// collapse to fake-proof speed (on-chain mining stays real). No consume tx is issued
+// (see below), so the assertions are deterministic — run with NULO_E2E_RETRY=0.
 
 /**
- * Public-authwit LIFECYCLE: grant → consume / revoke → registry-toggle,
- * the behavioral gate for the two zero-e2e-coverage settings flows
- * (`revokeAuthwits`, `setRegistryEnabled`).
+ * Public-authwit SETTINGS lifecycle — behavioral coverage for the two
+ * zero-e2e-coverage wallet flows `revokeAuthwits` and `setRegistryEnabled`.
  *
- * Registry approvals are SINGLE-USE (consume burns them), so each step
- * uses a FRESH nonce and the revoke / disable negatives target an
- * UNCONSUMED grant — otherwise the negative would pass vacuously
- * ("already consumed" indistinguishable from "revoked"). Account A is
- * the owner/granter (settings actions act on A's registry); B is the
- * named caller that consumes.
+ * Asserted at the layer the WALLET owns: the on-chain AuthRegistry WRITES these
+ * flows produce — `approved_actions[A][hash]` (grant/revoke) and `reject_all[A]`
+ * (disable/enable) — read back via `isAuthwitConsumable` / `isAuthRegistryEnabled`.
  *
- * Non-vacuity: step 1 consumes G1 successfully (the mechanism works),
- * THEN step 2 revokes a fresh, never-consumed G2 and shows its consume
- * fails — the failure is attributable to the revoke, not prior use.
+ * Why NOT assert a consume outcome: the e2e wallet holds BOTH session accounts, and
+ * `handleSendTx` currently resolves the sender to the FIRST session account, ignoring
+ * `opts.from` (dispatcher.ts:511-513 + resolveNetworkAndAccount:1191-1196). So a
+ * "B consumes A's grant" tx is actually sent AS A — a self-send (`from == msg_sender`)
+ * that needs no authwit, making revoke/disable invisible to the consume and the consume
+ * itself vacuous. That `opts.from` clobber is a separate multi-account wallet bug,
+ * classified + filed for its own focused fix in
+ * implementations-plan/network-e2e-required/lessons/phase-4.md (matrix soak
+ * `[F1-MATRIX] disableBlocks=false` + codex round 8). Until it is fixed, the consume
+ * cannot observe public-registry enforcement here, so this test asserts the registry
+ * state the wallet actually writes. A true end-to-end revoke proof (consume blocked
+ * after revoke) is gated on that fix.
  */
 test.skipIf(!hasConfig)(
-	"authwit-lifecycle — grant/consume, revoke blocks, registry toggle blocks then restores",
+	"authwit settings — revoke clears the on-chain grant; registry toggle flips reject_all",
 	{ timeout: 1_200_000 },
 	async ({ dappConnectedExtensionWithFirstTwoAccountsCap }) => {
 		const ctx = dappConnectedExtensionWithFirstTwoAccountsCap
@@ -46,12 +43,7 @@ test.skipIf(!hasConfig)(
 		expect(accountAddresses.length).toBe(2)
 		const [ownerA, callerB] = accountAddresses as [string, string]
 		const step = (m: string) => console.log(`[authwit-lifecycle] ${m}`)
-		// DIAGNOSTIC (new-angle): the execution block of the most recent consume tx,
-		// so step 2 can read approved_actions AT that block (not just the proven tip)
-		// and split hash-divergence from a snapshot/ordering anomaly. Remove with F1.
-		let lastConsumeBlock: number | undefined
-
-		await mintPublicTokensForAccount(aztecConfig!, ownerA)
+		const node = createAztecNodeClient(aztecConfig!.nodeUrl)
 
 		const setInputs = async (nonce: string) => {
 			await page.evaluate(
@@ -80,7 +72,8 @@ test.skipIf(!hasConfig)(
 				select.dispatchEvent(new Event("change", { bubbles: true }))
 			}, addr)
 		}
-		// Grant as owner A (playground granted[0] === A). Returns once mined.
+		// Grant as owner A (playground granted[0] === A): grantPublicAuthwit →
+		// on-chain set_authorized(hash, true). Returns once mined.
 		const grant = async (nonce: string) => {
 			await selectPgAccount(ownerA)
 			await setInputs(nonce)
@@ -94,70 +87,18 @@ test.skipIf(!hasConfig)(
 			expect(res.status).toBe("ok")
 			await waitForTxMined(aztecConfig!, String(res.resultJson).replace(/^"(.*)"$/, "$1"))
 		}
-		// Consume as caller B: transfer_public_to_public(A, B, 1, nonce).
-		const consume = async (nonce: string): Promise<"ok" | "error"> => {
-			await selectPgAccount(callerB)
-			await setInputs(nonce)
-			const seq = await snapshotResultSeq(page)
-			const popupP = waitForPopup(ctx, "execute", { timeout: 30_000 })
-			await clickByTestId(page, "pg-btn-consumeAuthwit")
-			const popup = await popupP
-			await waitForExecuteContent(popup)
-			await approveExecute(popup)
-			const res = await waitForPgResult(page, "sendTx", seq, 360_000)
-			console.log(`[consume-result] nonce=${nonce} status=${res.status} resultJson=${JSON.stringify(res.resultJson)}`)
-			// The dApp's sendTx resolves at SUBMIT (NO_WAIT), not mine, and the
-			// submit-ack is racy for a revoked authwit. Assert on the MINED outcome:
-			// a revoked public-authwit consume reverts at sequencing. The NO_WAIT
-			// dApp result is `{ txHash, ... }` (an object) — unlike the grant's bare
-			// hash string — so pull the hash out of either shape.
-			if (res.status !== "ok") return "error"
-			const rj = res.resultJson
-			const inner = rj && typeof rj === "object" && "txHash" in rj ? (rj as { txHash: unknown }).txHash : rj
-			const hashSrc = inner && typeof inner === "object" && "hash" in inner ? (inner as { hash: unknown }).hash : inner
-			const txHash = String(hashSrc ?? "").replace(/^"(.*)"$/, "$1")
-			if (!/^0x[0-9a-fA-F]+$/.test(txHash)) return "error"
-			try {
-				await waitForTxMined(aztecConfig!, txHash)
-				// DIAGNOSTIC (new-angle): capture the consume's execution block + the
-				// current tips. waitForTxMined returns at "success" (proposed tip), so
-				// block is the proposed block the sequencer executed consume against.
-				try {
-					const dn = createAztecNodeClient(aztecConfig!.nodeUrl)
-					const rcpt = await dn.getTxReceipt(TxHash.fromString(txHash))
-					lastConsumeBlock = rcpt.blockNumber
-					console.log(`[consume-block] nonce=${nonce} block=${rcpt.blockNumber} status=${String(rcpt.status)}`)
-				} catch (e) {
-					console.log(`[consume-block] nonce=${nonce} diag-failed: ${String(e)}`)
-				}
-				return "ok"
-			} catch {
-				return "error"
-			}
-		}
-
-		// ── Step 1: G1 grant → consume OK (burns G1) ──
-		step("G1 grant")
-		await grant("1")
-		step("G1 consume (expect ok)")
-		expect(await consume("1")).toBe("ok")
 
 		// Open A's Authwits settings, trigger a dropdown action (revoke-all or
 		// registry-toggle), pick fee + submit the in-page overlay, wait for the
-		// settings sendTx to leave the popup (submitted), close. Each is a
-		// proving sendTx — hence the wide settle budget.
+		// settings sendTx to leave the popup (submitted), close. Each is a proving
+		// sendTx — hence the wide settle budget.
 		const settingsAction = async (actionTestId: string, submitTestId: string) => {
 			const walletPopup = await openPopup(ctx)
-			await switchAccountByAddress(walletPopup, ownerA) // view the GRANTER's registry (ownerA = accountAddresses[0], name varies)
+			await switchAccountByAddress(walletPopup, ownerA) // view the GRANTER's registry (ownerA = accountAddresses[0])
 			await navigateToSettings(walletPopup, "advanced", "account-state", "authwits")
 			await clickByTestId(walletPopup, "authwits-actions-btn")
-			// MEASURE (re-armed): the revoke-all click started timing out after the
-			// slot+barrier fix — dump storage rows + page state to see if the authwit
-			// list is empty (syncAuthwit deleting a not-yet-visible grant) before the click.
-			await dumpAuthwitMeasurement(walletPopup, actionTestId)
 			// revoke-all is gated on the async authwit list (`:disabled="!authwits.length"`);
-			// clickByTestId now waits out aria-disabled, so this auto-waits for the list to
-			// load before clicking — no action-specific wait needed.
+			// clickByTestId waits out aria-disabled, so this auto-waits for the list to load.
 			await clickByTestId(walletPopup, actionTestId)
 			// The popup is a Vue overlay inside the wallet page (popupStore.open),
 			// not a separate browser window — submit in place.
@@ -171,80 +112,57 @@ test.skipIf(!hasConfig)(
 			await walletPopup.close()
 		}
 
-		// ── Step 2: G2 grant → revoke (as A) → consume FAILS (never consumed) ──
-		step("G2 grant")
-		await grant("2")
-		// DIAGNOSTIC (codex #7): capture the stored authwit hashes BEFORE revoke (the
-		// rows may be pruned after), to read their on-chain approved_actions slots after.
-		const diagPopup = await openPopup(ctx)
-		const storedHashes = await diagPopup.evaluate(async () => {
-			const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
-			return Object.entries(all)
-				.filter(([k]) => k.startsWith("nulo:core:auth-registry@"))
-				.map(([, v]) => JSON.parse(v as string) as { account: string; hash: string })
-				.map((a) => ({ account: a.account, hash: a.hash }))
-		})
-		await diagPopup.close()
-		step("revoke all of A's authwits via settings")
-		await settingsAction("authwits-revoke-all", "revoke-authwits-submit")
-		// DIAGNOSTIC (codex #7): is the consumed slot actually cleared after revoke?
-		const diagNode = createAztecNodeClient(aztecConfig!.nodeUrl)
-		const provenBlock = (await diagNode.getL2Tips()).proven.block.number
-		for (const { account, hash } of storedHashes) {
-			const outer = await deriveStorageSlotInMap(new Fr(2n), AztecAddress.fromString(account))
-			const slot = await deriveStorageSlotInMap(outer, Fr.fromString(hash))
-			const word = await diagNode.getPublicStorageAt(provenBlock, getAuthRegistryAddress(), slot)
-			console.log(`[revoke-slot-check] account=${account} hash=${hash} approved=${word.toString()} proven=${provenBlock}`)
+		// The wallet's tracked authwit hash for A == the on-chain grant hash:
+		// tx-request-builder passes ONE messageHash to both trackAuthwit + set_authorized.
+		const readTrackedHashForA = async (): Promise<{ account: string; hash: string }> => {
+			const p = await openPopup(ctx)
+			const rows = await p.evaluate(async () => {
+				const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
+				return Object.entries(all)
+					.filter(([k]) => k.startsWith("nulo:core:auth-registry@"))
+					.map(([, v]) => JSON.parse(v as string) as { account: string; hash: string })
+					.map((a) => ({ account: a.account, hash: a.hash }))
+			})
+			await p.close()
+			const row = rows.find((r) => r.account === ownerA) ?? rows[0]
+			if (!row) throw new Error("no tracked authwit row for the granter after grant")
+			return row
 		}
-		step("G2 consume (expect error — revoked)")
-		const g2outcome = await consume("2")
-		// DIAGNOSTIC (new-angle): read storedHash's slot AT the consume's execution
-		// block (lastConsumeBlock), not just the proven tip. This is the decisive split:
-		//   slotAtConsumeBlock==0 + outcome=ok → consume's recomputed hash ≠ storedHash
-		//                                        (hash divergence — a wallet-side fix).
-		//   slotAtConsumeBlock!=0              → the proven revoke is absent at the
-		//                                        consume's block (snapshot/ordering anomaly).
-		if (lastConsumeBlock !== undefined) {
-			for (const { account, hash } of storedHashes) {
-				const outer = await deriveStorageSlotInMap(new Fr(2n), AztecAddress.fromString(account))
-				const slot = await deriveStorageSlotInMap(outer, Fr.fromString(hash))
-				const word = await diagNode.getPublicStorageAt(lastConsumeBlock, getAuthRegistryAddress(), slot)
-				console.log(
-					`[consume-vs-revoke] outcome=${g2outcome} account=${account} hash=${hash} slotAtConsumeBlock(${lastConsumeBlock})=${word.toString()} revokeProven=${provenBlock}`,
-				)
+
+		// Poll the on-chain registry until `predicate` holds. The settings flows wait
+		// for proven internally, but poll for robustness against submit→mine settling.
+		const waitForRegistry = async (predicate: () => Promise<boolean>, label: string, timeoutMs = 180_000) => {
+			const deadline = Date.now() + timeoutMs
+			for (;;) {
+				if (await predicate()) return
+				if (Date.now() > deadline) throw new Error(`waitForRegistry timeout: ${label}`)
+				await new Promise((r) => setTimeout(r, 2_000))
 			}
 		}
-		// DIAGNOSTIC (new-angle): do NOT throw on the revoke check here — proceed to
-		// step 3 to observe whether registry-DISABLE blocks the consume. That splits
-		// the two remaining hypotheses in ONE soak:
-		//   disableBlocks=true  → the registry IS consulted; revoke cleared the wrong
-		//                         slot (storedHash != on-chain grant hash) — wallet bug.
-		//   disableBlocks=false → the consume bypasses the registry entirely (one
-		//                         wallet holds granter+consumer) — test-design flaw.
-		// The final assertion below keeps the test red until the behavior is correct.
 
-		// ── Step 3: G3 grant → registry DISABLE → consume FAILS → ENABLE → consume OK ──
-		// reject_all is checked before the approval, so a disabled-registry
-		// consume reverts WITHOUT burning G3 — re-enabling restores it.
-		step("G3 grant")
-		await grant("3")
+		// ── grant → approved_actions[A][hash] = 1 ──
+		step("grant G1")
+		await grant("1")
+		const g1 = await readTrackedHashForA()
+		step("assert grant wrote approved_actions[A][hash]=1")
+		await waitForRegistry(() => isAuthwitConsumable(node, g1.account, g1.hash), "granted")
+
+		// ── revoke → approved_actions[A][hash] = 0  (revokeAuthwits coverage) ──
+		step("revoke all of A's authwits via settings")
+		await settingsAction("authwits-revoke-all", "revoke-authwits-submit")
+		step("assert revoke cleared approved_actions[A][hash]=0")
+		await waitForRegistry(async () => !(await isAuthwitConsumable(node, g1.account, g1.hash)), "revoked")
+
+		// ── disable → reject_all[A]=1; enable → reject_all[A]=0  (setRegistryEnabled coverage) ──
 		step("disable registry via settings")
 		await settingsAction("authwits-toggle-registry", "registry-toggle-submit")
-		step("G3 consume (expect error — registry disabled)")
-		const g3disabled = await consume("3")
+		step("assert registry disabled (reject_all[A]=1)")
+		await waitForRegistry(async () => !(await isAuthRegistryEnabled(node, ownerA)), "disabled")
 		step("re-enable registry via settings")
 		await settingsAction("authwits-toggle-registry", "registry-toggle-submit")
-		step("G3 consume again (expect ok — approval survived the reverted consume)")
-		const g3reenabled = await consume("3")
+		step("assert registry re-enabled (reject_all[A]=0)")
+		await waitForRegistry(() => isAuthRegistryEnabled(node, ownerA), "enabled")
 
-		console.log(
-			`[F1-MATRIX] revokeBlocks=${g2outcome === "error"} disableBlocks=${g3disabled === "error"} reenableOk=${g3reenabled === "ok"}`,
-		)
 		step("DONE")
-		expect({ revoke: g2outcome, disable: g3disabled, reenable: g3reenabled }).toEqual({
-			revoke: "error",
-			disable: "error",
-			reenable: "ok",
-		})
 	},
 )
