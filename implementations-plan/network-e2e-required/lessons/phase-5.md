@@ -127,3 +127,25 @@ That is Phase-6 (de-flake) work by nature. Re-consulting codex with the correcte
 
 STILL-VALID, KEPT (independent of this flake): opts.from fix (MERGED to dev), syncAuthwit
 hardening (real latent task-wedge), cap refactor → assertWithinCap, 7 auth-registry unit pins.
+
+═══ codex r11 (session 019eda56, corrected-symptom re-diagnosis) — CUTOVER CODE EXONERATED ═══
+codex independently CONFIRMS the static analysis: the Phase 5 auth-registry cutover does NOT
+explain the `Runtime.callFunctionOn timed out` popup page-hang.
+  1. revokeAuthwits sends only set_authorized(false); never recordPendingAuthwits → zero new
+     client events for the revoke tx. reconcile "mined" has NO emit.
+  2. authwits page is incremental useEntityCrud (no resync); onAdded/onDeleted splice only.
+  3. refresh() is pure fetch-and-set (no emit/resubscribe); getAuthwits/getRegistryEnabled
+     are pure reads.
+  4. SW lock contention can stall RPCs but the client wait path is async (no sync retry loop),
+     so it cannot FREEZE the popup JS thread.
+  5. vs the green baseline 6b2075e, the popup/page changed ONLY by data-testid attrs — the
+     behavioral delta is entirely in auth-registry/service.ts, which can't form a popup
+     main-thread loop.
+codex's verdict: "Smallest fix: none in this auth-registry popup path. The next real target is
+an always-mounted popup component outside this surface, or a browser/runtime issue."
+
+CONCLUSION (both codex + static agree): the revoke page-hang is a PRE-EXISTING / runtime flake
+(popup code unchanged since green; F1 investigation already noted revoke-all timing out),
+EXPOSED by the cutover's SW-timing delta — NOT a cutover code bug. ⇒ This is a PHASE 6 revealed
+flake (root-cause-by-measurement), entangled with Phase 5's soak gate. Phase 5 cutover CODE is
+correct (codex-exonerated + 7 unit pins green); its soak gate is blocked by this Phase-6 flake.
