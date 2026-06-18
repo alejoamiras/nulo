@@ -316,6 +316,11 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	private async syncAuthwit(node: AztecNode, authwit: Authwit, parentTask: WrappedTask) {
 		const task = parentTask.startSubtask(new StepContent(`Sync authwit #${authwit.id}`))
 		try {
+			// A `pending` row is reconciled by its tx's outcome (onTransactionUpdated),
+			// NOT by on-chain consumability: a pending grant is not consumable until
+			// mined, so sync-prune would delete it prematurely. Reconcile owns the
+			// pending lifecycle; sync only prunes confirmed-but-vanished rows.
+			if (authwit.pending) return
 			const isConsumable = await isAuthwitConsumable(node, authwit.account, authwit.hash)
 			if (isConsumable) return
 			try {
