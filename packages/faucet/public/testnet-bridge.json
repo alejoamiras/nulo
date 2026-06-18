@@ -4,6 +4,11 @@
 		"usdc": "0x764a16d2098021bb89c2fab0b23c352b115991bb",
 		"portal": "0xf2f1619abd4b4d0a330de35b4b3d22fce5d30fa0",
 		"portalSource": "forked-v1",
+		"feeJuice": {
+			"portal": "0xd3361019e40026ce8a9745c19e67fd3acc10d596",
+			"asset": "0x762c132040fda6183066fa3b14d985ee55aa3c18",
+			"minFj": "11001040559015000000"
+		},
 		"token": {
 			"name": "Aztec Nulo",
 			"symbol": "AZLO",

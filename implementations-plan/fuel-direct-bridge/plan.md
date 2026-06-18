@@ -58,7 +58,9 @@ Keep `direction: "deposit"`. Add `assetKind: "bridge-token" | "fee-juice"` as an
 
 > Command vocabulary (project-real): `B=bun run --cwd packages/bridge-core test` · `FT=bun run --cwd packages/faucet typecheck` · `FU=bun run --cwd packages/faucet test` · `FE=bun run --cwd packages/faucet test:e2e` · `FB=bun run --cwd packages/faucet build` · `L=bun run lint` · `TA=bun run typecheck:all`. **No live-network gate exists.** Note: root `bun run audit:vue`'s `test`/`build` are *extension* commands — it does NOT run faucet tests/build, so it is NOT used as a Fuel gate.
 
-### Phase 0 — Config seam + bridge-core Fuel primitives + fail-closed floor (pure, no UI)
+### Phase 0 — ✅ DONE — Config seam + bridge-core Fuel primitives + fail-closed floor (pure, no UI)
+<!-- Gate passed: bridge-core 121 tests · typecheck:all (12 workspaces) exit 0 · lint exit 0. Lessons: lessons/phase-0.md -->
+
 - New Fuel config decoupled from `BRIDGE_FUEL`: canonical `FeeJuicePortal` + L1 fee-asset addresses from `node getNodeInfo().l1ContractAddresses.{feeJuicePortalAddress,feeJuiceAddress}`; pinned-in-config **plus** a runtime `UNDERLYING()` cross-check that **hard-blocks on mismatch**.
 - **Floor as a mandatory, non-optional Fuel config value** with a hard guard (`if (received < FUEL_MIN_FJ) stop(...)` — no `&&`-shortcircuit escape). Re-home off `BRIDGE_FUEL` (B3: today's `if (BRIDGE_FUEL && …)` fails OPEN when `BRIDGE_FUEL` is absent).
 - bridge-core: re-export `FeeJuicePortalAbi` (`@aztec/l1-artifacts`); pure arg builders `publicFuelDepositArgs` / `privateFuelDepositArgs` (both → `depositToAztecPublic` args); `parseDepositToAztecPublic(logs)` → `{ leafIndex, amount, secretHash }` (portal event). Reuse `private-fuel.ts` verbatim.
