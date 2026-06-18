@@ -81,7 +81,9 @@ Keep `direction: "deposit"`. Add `assetKind: "bridge-token" | "fee-juice"` as an
 - **Tighten the backup validator now (not Phase 5):** validate the existing-but-currently-unvalidated private-fuel extras (`bridgeSecretSalt`, `fpc`, `setupInsufficiency`, `backup.ts:111-127`) plus the new fields — don't ship a generalized-but-loose validator (N2).
 - **Validation gate.** `B && FT && FU && FE && TA && L`. Pass: schema/backup/journal/recovery-binding tests green; **existing Bridge flow unchanged** (unit + component + smoke-e2e); a regression test loads an existing (pre-Fuel) journal and recovers every record. Layers: unit · component · smoke-e2e · typecheck · lint.
 
-### Phase 3 — Direct fee-asset deposit + standalone claims (public + private)
+### Phase 3 — ✅ DONE — Direct fee-asset deposit + standalone claims (public + private)
+<!-- Gate passed: bridge-core 128 · faucet 354 · smoke 13 (fuel-smoke: renders, sub-floor rejection, public+private submit, engine drives a fee-juice record to done) · typecheck:all + lint exit 0. useL1FeeAsset + salt-seal + fuelClaim + engine wiring (Option C) + useFuel. Lessons: lessons/phase-3.md -->
+
 - `useL1FeeAsset` (module-singleton, mirrors `useL1Usdc`: `balanceOf`/`allowance`/`approve`/`refresh`; no `mint`).
 - `useFuel().deposit`: approve-if-short → `depositToAztecPublic` on the canonical portal → parse portal event → journal record → sync gate (`claim_*.simulate()`, PXE-aware) → claim via `runDepositClaim`.
 - Public claim: generalize `sendStandaloneFjClaim` (`claim_and_end_setup`, sponsored, inclusion-gated, "already consumed ⇒ settle"). Private claim: carrierless embedded-FPC payload; the fail-CLOSED floor guard; FPC-drift kill-switch; the L11 no-public-fallback separation; `setupInsufficiency` retry; durably persist + **seal the salt** (the 4-file envelope change, §5). **Set explicit `maxFeesPerGas` + `teardownGas=0`** on the private claim — the existing fueled path *omits* explicit max fees (`useDeposit.ts:292`); the embedded-fpc gas-cap invariant only holds when they are supplied, so this is a required new implementation detail, not an inherited behavior.

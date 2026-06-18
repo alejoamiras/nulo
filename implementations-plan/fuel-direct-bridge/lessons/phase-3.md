@@ -18,5 +18,12 @@ A **direct fuel record is a deposit whose asset is Fee Juice** — top-level cla
 - **Salt recovery:** unlike swap-fuel (plaintext salt + a TODO), the direct private-fuel salt is the SOLE recovery input, so it IS sealed into `DepositEnvelopeV2.salt` (this slice) in addition to the plaintext same-session copy.
 - Next slice adds the top-level `bridgeSecretSalt?`/`fpc?` fields to `DepositJournalRecord` + their `validateBackupRecord` coverage.
 
-## Salt-seal (this commit)
+## Salt-seal
 `DepositEnvelopeV2` gains an optional `salt`; `openDepositEnvelope` validates it (optional string, rejects non-string); a no-salt envelope still opens (back-compat). bridge-core 128 green.
+
+## Closing — wiring + useFuel + UI + smoke (Phase 3 complete)
+- **Wiring (codex Option C):** `useDeposit`'s claim dep dispatches `assetKind === "fee-juice"` → `buildFuelClaimInteraction`; `wireDepositDeps` renamed/exported as `ensureDepositJournalDeps` (`useFuel` calls it, NOT `useDepositFlow` — avoids the `resumeSessionWork` watch). Acyclic.
+- **Engine secret-resolution finding:** `runDepositClaimInner` bails for a PUBLIC record with no top-level `rec.secret` ("stale - no claim secret"). So `useFuel` sets `rec.secret` on PUBLIC fuel records (the builder still reads `fuel.secret`). PRIVATE unseals the envelope (1 sig) which the builder IGNORES (it re-derives from the salt) — a wasted signature noted as a future engine optimization (skip the unseal for fee-juice records).
+- **Record shape = Approach A** (revised from the earlier top-level idea): a direct fuel record reuses the `fuel` `DepositFuelBlock` (received / secret / secretHashHex / leafIndex + private `bridgeSecretSalt`/`fpc`), `minOutput:"0"` (no swap), `assetKind:"fee-juice"`. Reuses the Phase-2-generalized validator/backup with ZERO new record fields. The salt is BOTH plaintext (`fuel.bridgeSecretSalt`, same-session) AND sealed (`DepositEnvelopeV2.salt`, recovery).
+- **UI:** third Fuel tab + `FuelView` (NO per-view journal — sidesteps the double-mount toast bug for v1) + `FuelForm` (balance / amount / preset / submit; stepper handoff scoped to fee-juice via `assetKindOf`). `v-show` retained; the shared-shell + App-level multi-tab smoke are Phase 4.
+- **Gate GREEN:** bridge-core 128 · faucet 354 · smoke 13 (incl. `fuel-smoke`: renders, sub-floor rejection, public+private submit, engine drives a fee-juice record to done) · typecheck:all + lint exit 0.
