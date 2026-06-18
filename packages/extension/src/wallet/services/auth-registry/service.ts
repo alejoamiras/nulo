@@ -108,13 +108,6 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		return (await this.authwits.getValues()).filter((x) => x.account === account)
 	}
 
-	/** Whether the account is at the tracked-authwit ceiling. Checked PRE-send at
-	 *  the build/approval gate; granting beyond the cap is blocked (never evicted). */
-	public async isAtCap(account: string): Promise<boolean> {
-		const count = (await this.authwits.getValues()).filter((x) => x.account === account).length
-		return count >= MAX_TRACKED_AUTHWITS_PER_ACCOUNT
-	}
-
 	/** PRE-send cap gate: throw if granting `newHashes` would push `account` past the
 	 *  tracked-authwit ceiling. Counts existing tracked rows (incl. pending) PLUS the unique
 	 *  NEW hashes not already tracked — a per-action check would let e.g. 255 existing + 2 new

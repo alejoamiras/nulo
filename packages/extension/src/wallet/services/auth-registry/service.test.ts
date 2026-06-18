@@ -1,6 +1,6 @@
 /**
  * Unit pins for the Phase 5 trust-point primitives on `AuthRegistryService`:
- * `recordPendingAuthwits` / `reconcileAuthwits` / `isAtCap`. These touch only the
+ * `recordPendingAuthwits` / `reconcileAuthwits` / `assertWithinCap`. These touch only the
  * `authwits` EntityStorage + the internal lock, so the service is constructed
  * directly (no `init()`/deps) over an in-memory `chrome.storage.local` stub.
  *
@@ -83,14 +83,6 @@ describe("AuthRegistryService — pending/reconcile/cap (Phase 5)", () => {
 		const rows = await svc.getAuthwits(A)
 		expect(rows).toHaveLength(1)
 		expect(rows[0].hash).toBe("0xh2")
-	})
-
-	test("isAtCap is false below the ceiling, true at it", async () => {
-		expect(await svc.isAtCap(A)).toBe(false)
-		const items = Array.from({ length: MAX_TRACKED_AUTHWITS_PER_ACCOUNT }, (_, i) => ({ hash: `0xh${i}`, content }))
-		await svc.recordPendingAuthwits(A, items, "0xtxbulk")
-		expect(await svc.getAuthwits(A)).toHaveLength(MAX_TRACKED_AUTHWITS_PER_ACCOUNT)
-		expect(await svc.isAtCap(A)).toBe(true)
 	})
 
 	test("assertWithinCap blocks pre-send: existing + unique-new over the ceiling throws (per-build, deduped)", async () => {
