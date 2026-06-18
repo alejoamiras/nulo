@@ -157,6 +157,15 @@ See [`implementations-plan/faucet/plan-v2.md`](../../implementations-plan/faucet
 for the full file-by-file walkthrough and the rationale for every
 non-obvious decision.
 
+## Fuel tab
+
+A third tab — **Fuel** — bridges your L1 fee asset ($AZTEC) directly into Aztec **Fee Juice** (gas),
+public or private, with **no swap**. It reuses the bridge's journal/engine (an additive `assetKind`
+discriminant) and the canonical `FeeJuicePortal`; the L2 claim is sponsored (public) or a carrier-less
+Wonderland-FPC tx (private). Composables: `useFuel` (deposit + claim) + `useL1FeeAsset` (L1 balance).
+Local-gates-only today — a full bridge needs the live L2 network (deferred live sign-off). See
+[`implementations-plan/fuel-direct-bridge/`](../../implementations-plan/fuel-direct-bridge/plan.md).
+
 ## What this is NOT
 
 Non-goals (from plan-v2 §12):

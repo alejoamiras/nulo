@@ -13,6 +13,7 @@ and the sandbox deploy script drive these functions; the proven reference for ev
 | `l2.ts` | L2 bridge wrappers — `claimPublic`/`claimPrivate` (consume an L1→L2 deposit) + `exitToL1Public`/`exitToL1Private` (start an L2→L1 withdraw). |
 | `flows.ts` | Cross-chain orchestrations: `runDeposit` (mint→approve→deposit→poll-claim), `consumeWithdrawal` (proven→witness→Outbox consume), `runSwapBridge` (sign Permit2 witness→`bridgeWithFuel`→read leaf indices). Stage callbacks drive the loading bar; `RecoveryHooks` persist secrets before irreversible txs. |
 | `fee-juice.ts` | `publicFeeJuicePayment` (`FeeJuicePaymentMethodWithClaim` — claim bridged FJ + pay gas in one tx) + `sponsoredFeePayment` (bootstrap FPC) + `feeJuiceAddress`. |
+| `fuel.ts` | Direct Fee-Juice bridge primitives (the **Fuel** flow): `FeeJuicePortalAbi` re-export, `planPublic`/`planPrivateFuelDeposit` (deposit args + secret derivation), `parseFeeJuiceDeposit` (the portal's `DepositToAztecPublic` event), `buildCarrierlessFuelClaimPayload` (the zero-app-call private claim), and the fail-CLOSED `assertFuelClearsFloor`. |
 | `status.ts` | Deposit (time-based) + withdraw (proven-block polling) progress for the blocks-remaining bar. |
 | `recovery.ts` / `recovery-crypto.ts` | Persist + resume in-flight deposits (the secret is the only claim preimage); AES-GCM/PBKDF2 reused from `@nulo/wallet-crypto`. |
 | `content-hash.ts` | 3-toolchain (Solidity/Noir/TS) content-hash keystone vectors. |
