@@ -90,3 +90,29 @@ flake; the revoke freeze did NOT recur (0/10) — confirming it's a much-rarer r
 killed. Retry-budget likely UNNEEDED for this test. Remaining before flip: confirm the BROADER
 suite (full sharded proverless soak — only authwit-lifecycle has been soaked so far), then
 Phase 7's 5× real pr-network-e2e.
+
+═══ REVEALED FLAKE #3: incoming-transfers:234 — ROOT-CAUSED (6-agent fleet) + FIXED + VERIFIED ═══
+The full-suite soak revealed ONE consistently-failing test: incoming-transfers.test.ts:234 (C2
+trust-prompt re-fire), failing 3/3 (isolated 10s + 30s, + CI 3/3). NOT a flake — a consistent
+test-fixture bug.
+
+ROOT CAUSE (found by a 6-investigator parallel fleet — user-requested when serial debugging had
+circled it for ~4h; 4 of 6 converged independently): the test seeds the pending trust/record/token
+under the FIRST `nulo:core:networks@*` key (Alpha Mainnet — seeded first), but the popup's
+`replayPendingPrompts` runs against the ACTIVE network (Testnet — the isPrimaryActive seed). The
+filter `pending.filter(t => t.networkId === networkId)` (service.ts:712) found 0 rows → early
+return at service.ts:713 → the FIRST prompt never fired. Line 234 IS the `firstPromptVisible`
+assertion (the test never reached the reopen assertion). This is why commit 5f31955's token-seed
+didn't help — the skip is at 713, BEFORE the token guard at 729-731.
+⇒ TEST-FIXTURE bug, NOT a product bug. The incoming-transfer P8 re-fire LOGIC is correct.
+
+FIX: read the per-profile active-network pointer `nulo:core:active-network@<profileId>` and seed
+trust/record/token under THAT networkId+chainId (not the first key). VERIFIED: incoming-transfers
+now 2/2 GREEN (was firstPromptVisible=false).
+
+FLEET NOTE: 4 Claude subagents + 2 codex auditors in parallel. codex-holistic + codex-skiptrace +
+unit-divergence-agent + token-type-agent all independently nailed the networkId value-mismatch +
+the identical fix. storage-shape-agent correctly disambiguated line 234=firstPromptVisible but
+guessed token-id collision (downstream). caller-race-agent found the immediate:false watcher
+(real but stale — test fails at the first prompt). Lesson: parallel cross-model fan-out cracked
+in minutes what serial debugging circled for hours.
