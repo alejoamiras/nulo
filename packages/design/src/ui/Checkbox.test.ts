@@ -53,4 +53,11 @@ describe("ui/Checkbox", () => {
 		const w = mountCheckbox({ disabled: true })
 		expect(w.html()).toMatch(/disabled/)
 	})
+
+	test("disabled blocks click and Enter from emitting", async () => {
+		const w = mountCheckbox({ disabled: true, modelValue: false })
+		await w.trigger("click")
+		await w.trigger("keydown.enter")
+		expect(w.emitted("update:modelValue")).toBeUndefined()
+	})
 })

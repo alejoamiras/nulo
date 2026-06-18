@@ -8,8 +8,8 @@ const emit = defineEmits(["update:modelValue"])
 
 <template>
 	<Flex
-		@click="emit('update:modelValue', !modelValue)"
-		@keydown.enter="emit('update:modelValue', !modelValue)"
+		@click="!disabled && emit('update:modelValue', !modelValue)"
+		@keydown.enter="!disabled && emit('update:modelValue', !modelValue)"
 		gap="10"
 		align="center"
 		:class="[$style.wrapper, disabled && $style.disabled]"
