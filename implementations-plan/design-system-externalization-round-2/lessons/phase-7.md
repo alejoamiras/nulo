@@ -39,8 +39,10 @@ faucet look entirely**, leaving PR1–6 (the extension externalization) intact.
   Button aria-busy pinned). `bun run test` → 2391. `bun run test:faucet` → 343 (migration + H2 +
   aria-busy). `bun run lint` → 0. `bun run build` + `bun run build:faucet` (fonts still emit) +
   `bun run --cwd packages/extension build-storybook` → all built.
-- `bun run test:e2e` (smoke): <filled on completion> — extension suite, orthogonal to the faucet
-  cutover (only the Button aria-busy touches the extension, validated by `bun run test`).
+- `bun run test:e2e` (smoke): one failure — `onboarding-tab.test.ts:25` → the same `ctx.browser`
+  browser-context-setup cascade (a DIFFERENT file than P5/P6's passkey-backup — the flaky-suite
+  signature). Pre-existing flake: P7 changed 0 e2e files, passes on **isolated retry (6/6)**. No NEW
+  smoke failures (A1).
 - **REMAINING (gate the PR/merge, not the local commit):** `bun run e2e:agent` network suite
   (CI-gated) + the **both-app human visual sign-off** — extension "no deltas", faucet "intentional
   restyle looks right". Cannot be done autonomously; surfaced to the user.
