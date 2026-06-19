@@ -1,4 +1,5 @@
 import { Fr } from "@aztec/foundation/curves/bn254"
+import { toRestoreError } from "@/utils/restore-error"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import type { IConfig } from "@/wallet/config"
 import type { ILogger } from "@/wallet/logger"
@@ -898,7 +899,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				} catch (err) {
 					return {
 						...profile,
-						restoreError: err instanceof Error ? err.message : err,
+						restoreError: toRestoreError(err),
 					}
 				} finally {
 					this.lock.leave()
@@ -959,7 +960,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				} catch (err) {
 					return {
 						...profile,
-						restoreError: err instanceof Error ? err.message : err,
+						restoreError: toRestoreError(err),
 					}
 				} finally {
 					this.lock.leave()

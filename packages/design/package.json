@@ -7,10 +7,12 @@
 		".": "./src/index.ts",
 		"./tokens": "./src/tokens.ts",
 		"./base.css": "./src/base.css",
+		"./core/*": "./src/core/*",
 		"./ui/*": "./src/ui/*",
 		"./composite/*": "./src/composite/*"
 	},
 	"scripts": {
+		"gen:tokens": "bun scripts/gen-tokens.ts",
 		"typecheck": "vue-tsc --noEmit",
 		"test": "vitest run",
 		"test:watch": "vitest"

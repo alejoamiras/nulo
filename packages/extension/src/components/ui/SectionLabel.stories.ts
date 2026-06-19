@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/vue3-vite"
-import SectionLabel from "./SectionLabel.vue"
+import { SectionLabel } from "@nulo/design"
 
 const meta: Meta<typeof SectionLabel> = {
 	title: "UI / SectionLabel",

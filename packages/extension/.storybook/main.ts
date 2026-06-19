@@ -11,6 +11,8 @@ import type { StorybookConfig } from "@storybook/vue3-vite"
 import { fileURLToPath, URL } from "node:url"
 import useAutoImport from "unplugin-auto-import/vite"
 import useComponents from "unplugin-vue-components/vite"
+// Storybook v10's main.ts loader requires explicit .ts extensions on relative imports.
+import { nuloDesignResolver } from "../scripts/design-resolver.ts"
 
 const config: StorybookConfig = {
 	framework: {
@@ -52,6 +54,7 @@ const config: StorybookConfig = {
 			}),
 			useComponents({
 				dirs: ["../src/components"],
+				resolvers: [nuloDesignResolver()],
 				dts: false,
 			}),
 		)

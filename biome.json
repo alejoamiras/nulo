@@ -74,6 +74,38 @@
 			}
 		},
 		{
+			"includes": ["packages/design/src/core/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@nulo/*"],
+										"message": "@nulo/design is the lowest layer — it cannot import any @nulo/* package"
+									},
+									{
+										"group": ["../ui/*", "../ui/**"],
+										"message": "@nulo/design core (L1) cannot import ui (L2) — core is the lower layer"
+									}
+								]
+							}
+						},
+						"noRestrictedGlobals": {
+							"level": "error",
+							"options": {
+								"deniedGlobals": {
+									"chrome": "@nulo/design is platform-agnostic — no chrome.*"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		{
 			"includes": ["**/*.vue"],
 			"linter": {
 				"rules": {
