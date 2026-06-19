@@ -189,7 +189,7 @@ extension-render phases. `build-storybook` gates P1 (the fix), P6, and P7 (advis
 Network e2e + both-app human sign-off gate P7. Pre-existing FPC smoke flake → "no NEW smoke failures"
 with base-branch reproduction recorded (Ask A1).
 
-### P1 — Foundation / guardrails (no component moves)
+### P1 — Foundation / guardrails (no component moves) ✓ DONE
 
 1. Reproduce + fix the Storybook rolldown break (F8); **fallback**: descope to known-broken follow-up
    if not a pure config fix within budget. ADD `../../design/src/**/*.stories.@(ts|vue)` to the glob.
