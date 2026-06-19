@@ -695,7 +695,9 @@ export const test = base.extend<{
 				if (i === maxRetries - 1) {
 					console.warn("[tokenReady] Balance not visible after all retries (~60s) — tests may fail")
 				}
-				await new Promise((r) => setTimeout(r, 1_500))
+				await page
+					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 1_500, polling: 200 })
+					.catch(() => {})
 			}
 
 			await page.close()
@@ -774,7 +776,9 @@ export const test = base.extend<{
 				if (i === maxRetries - 1) {
 					console.warn("[feeJuiceReady] Balance not visible after all retries")
 				}
-				await new Promise((r) => setTimeout(r, 1_500))
+				await page
+					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 1_500, polling: 200 })
+					.catch(() => {})
 			}
 
 			await page.close()
@@ -914,7 +918,9 @@ export const test = base.extend<{
 				if (i === maxRetries - 1) {
 					console.warn("[feeJuiceImported] token balance not visible after all retries")
 				}
-				await new Promise((r) => setTimeout(r, 1_500))
+				await page
+					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 1_500, polling: 200 })
+					.catch(() => {})
 			}
 
 			await page.close()
