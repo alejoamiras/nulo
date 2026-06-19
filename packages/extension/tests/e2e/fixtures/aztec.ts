@@ -249,9 +249,12 @@ export async function waitForL1ToL2Message(
 ): Promise<void> {
 	const start = Date.now()
 	while (Date.now() - start < timeoutMs) {
-		// 5.0 removed isL1ToL2MessageSynced; the membership witness is present iff the message synced.
-		const synced = await node.getL1ToL2MessageMembershipWitness("latest", Fr.fromString(messageHash))
-		if (synced) {
+		// 5.0 removed isL1ToL2MessageSynced. A message is synced once it lands in a checkpoint;
+		// getL1ToL2MessageCheckpoint is the hash-only presence poll (returns the checkpoint number,
+		// or undefined when not yet synced). NOT getL1ToL2MessageMembershipWitness — that computes
+		// a claim Merkle-proof against a reference block and hangs when the message isn't in the tree.
+		const synced = await node.getL1ToL2MessageCheckpoint(Fr.fromString(messageHash))
+		if (synced !== undefined) {
 			console.log(`[waitForL1ToL2Message] Message synced after ${Date.now() - start}ms`)
 			break
 		}
