@@ -263,7 +263,7 @@ build.
 `bun run build:faucet` · `bun run test:e2e`. Pass: all exit 0; no NEW smoke failures; **faucet
 unchanged.** Layers: typecheck · lint · unit · both builds · smoke.
 
-### P5 — Host-DOM (useOutside + Tooltip + Popover)
+### P5 — Host-DOM (useOutside + Tooltip + Popover) ✓ DONE
 
 1. Port `outside.js` → `packages/design/src/composables/outside.ts` (TS, behavior verbatim incl.
    iPad `touchstart` + `data-outside` collision; ≥10 tests). Extension `composables/outside.js` STAYS

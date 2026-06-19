@@ -30,6 +30,10 @@ const props = defineProps({
 	 *  padding. Callers with a short trigger + long copy should pass an
 	 *  explicit value to avoid the tooltip rendering full-popup-width. */
 	maxWidth: { type: String, default: undefined },
+	// Host-DOM contract: the consuming app must declare this teleport root (the extension declares
+	// `#tooltip` in its popup/onboarding shells). The tooltip text also clamps to
+	// `calc(var(--base-width) - 40px)`, so the host must define the `--base-width` CSS var.
+	teleportTo: { type: String, default: "#tooltip" },
 })
 
 defineSlots<{
@@ -182,7 +186,7 @@ const handleMouseLeave = () => {
 			<slot />
 		</div>
 
-		<teleport to="#tooltip">
+		<teleport :to="teleportTo">
 			<Transition
 				:enter-from-class="$style['fade-from']"
 				:enter-active-class="$style['fade-active']"

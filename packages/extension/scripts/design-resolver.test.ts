@@ -26,7 +26,10 @@ const EXPECTED_MIGRATED = [
 	"Spinner",
 	"Banner",
 	"LoadingState",
-	// later phases add: P5 → Tooltip, Popover · P6 → Input
+	// round 2 — P5 host-DOM family (local SFCs deleted)
+	"Tooltip",
+	"Popover",
+	// later phases add: P6 → Input
 ]
 
 // Wrapper-backed: the extension keeps a LOCAL SFC of this name, so the bare tag must resolve to that

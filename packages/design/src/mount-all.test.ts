@@ -11,10 +11,12 @@ import BrutalistTitle from "./ui/BrutalistTitle.vue"
 import Button from "./ui/Button.vue"
 import Checkbox from "./ui/Checkbox.vue"
 import LoadingState from "./ui/LoadingState.vue"
+import Popover from "./ui/Popover.vue"
 import SectionLabel from "./ui/SectionLabel.vue"
 import Spinner from "./ui/Spinner.vue"
 import SubPageHeaderBase from "./ui/SubPageHeaderBase.vue"
 import ToastManagerBase from "./ui/ToastManagerBase.vue"
+import Tooltip from "./ui/Tooltip.vue"
 import Toggle from "./ui/Toggle.vue"
 
 /**
@@ -41,6 +43,8 @@ const cases: Array<[string, Component, Record<string, unknown>]> = [
 	["ToastManagerBase", ToastManagerBase, {}],
 	["Button", Button, {}],
 	["SubPageHeaderBase", SubPageHeaderBase, { title: "X" }],
+	["Tooltip", Tooltip, {}],
+	["Popover", Popover, {}],
 ]
 
 describe("@nulo/design components mount without auto-import", () => {
