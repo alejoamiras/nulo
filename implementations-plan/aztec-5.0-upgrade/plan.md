@@ -82,7 +82,9 @@ Five reasons shape the phasing (all verified):
 - `bun run build` reaches the bb-wasm emit step (extract-bb-wasm self-reports via a clear throw if bb.js@5.0 moved its `dest/{node,browser}/...` layout — fix the path constants if so).
 - `bun run typecheck:all` RUNS; errors catalogued into Phases 2–5 (this gate does not require zero typecheck). Layers: install/build/resolution.
 
-### Phase 2 — aztec-runtime core migration
+### Phase 2 — aztec-runtime core migration ✓ DONE
+
+> Gate passed: aztec-runtime typecheck 0 errors; 32 tests pass (incl. 2 new fee `txsLimits` cases); lint clean. Headline: **zod v3→v4 bump** (repo pinned `^3.23.8`; @aztec 5.0 needs `^4`) cleared 44/53 errors. Fee fallback re-derived (defaults gasLimits from `txsLimits.gas`); auth-registry/mce/public-checks artifacts moved to `@aztec/standard-contracts/*`; `proveTx` options-bag; `accounts/schnorr/stub` path; initializer-undefined guards. See `lessons/phase-2.md`.
 
 **Objective.** Green the core runtime; re-derive fee logic with real coverage of the new 5.0 path.
 

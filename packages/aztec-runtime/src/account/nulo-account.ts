@@ -54,7 +54,11 @@ export class NuloAccount implements IAccountContract {
 		const signingKey = deriveSigningKey(secret)
 		const keys = await deriveKeys(secret)
 		const accountContract = new SchnorrAccountContract(signingKey)
-		const { constructorName, constructorArgs } = await accountContract.getInitializationFunctionAndArgs()
+		const init = await accountContract.getInitializationFunctionAndArgs()
+		if (!init) {
+			throw new Error("Schnorr account contract is missing its initializer")
+		}
+		const { constructorName, constructorArgs } = init
 		const instance = await getContractInstanceFromInstantiationParams(SchnorrAccountContractArtifact, {
 			constructorArgs,
 			constructorArtifact: constructorName,
@@ -187,7 +191,11 @@ export class NuloAccount implements IAccountContract {
 		}
 		const ctorSelector = await FunctionSelector.fromNameAndParameters(ctorFn.name, ctorFn.parameters)
 		const schnorr = new SchnorrAccountContract(deriveSigningKey(this.secret))
-		const { constructorArgs } = await schnorr.getInitializationFunctionAndArgs()
+		const schnorrInit = await schnorr.getInitializationFunctionAndArgs()
+		if (!schnorrInit) {
+			throw new Error("Schnorr account contract is missing its initializer")
+		}
+		const { constructorArgs } = schnorrInit
 
 		const ctorCall = new FunctionCall(
 			ctorFn.name,

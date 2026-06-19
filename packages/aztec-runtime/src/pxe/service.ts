@@ -276,7 +276,9 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				this.logDebug(`[SYNC-DEBUG] proveTx: failed to read sync state: ${e}`)
 			}
 
-			return pxe.proveTx(await TxExecutionRequest.schema.parseAsync(txRequest), await z.array(AztecAddress.schema).parseAsync(scopes))
+			return pxe.proveTx(await TxExecutionRequest.schema.parseAsync(txRequest), {
+				scopes: await z.array(AztecAddress.schema).parseAsync(scopes),
+			})
 		})
 	}
 
@@ -306,9 +308,9 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// `@aztec/accounts/src/stub/schnorr/index.ts:7-12` does
 			// `loadContractArtifact(SimulatedSchnorrAccountJson)`). ECDSA
 			// support comes for free when Nulo grows it (sibling import:
-			// `@aztec/accounts/stub/ecdsa`).
+			// `@aztec/accounts/ecdsa/stub`).
 			if (stubAccountAddresses?.length) {
-				const { StubSchnorrAccountContractArtifact } = await import("@aztec/accounts/stub/schnorr")
+				const { StubSchnorrAccountContractArtifact } = await import("@aztec/accounts/schnorr/stub")
 				const contracts: Record<string, { instance: ContractInstanceWithAddress; artifact: ContractArtifact }> = {}
 				for (const addr of stubAccountAddresses) {
 					const instance = await getContractInstanceFromInstantiationParams(StubSchnorrAccountContractArtifact, {
