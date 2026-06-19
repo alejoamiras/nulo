@@ -103,7 +103,18 @@ function wireWithdrawDeps(): void {
 				address: L1_PORTAL,
 				abi: TokenPortalAbi,
 				functionName: "withdraw",
-				args: [rec.recipientL1 as `0x${string}`, BigInt(rec.amount), false, BigInt(wit.epochNumber), wit.leafIndex, path] as never,
+				// 5.0 portal `withdraw` is 7-arg: (recipient, amount, withCaller, epoch,
+				// numCheckpointsInEpoch, leafIndex, path). The decode path at L131 was updated but this
+				// encode was missed — omitting numCheckpointsInEpoch mis-encodes + reverts on finalize.
+				args: [
+					rec.recipientL1 as `0x${string}`,
+					BigInt(rec.amount),
+					false,
+					BigInt(wit.epochNumber),
+					BigInt(wit.numCheckpointsInEpoch),
+					wit.leafIndex,
+					path,
+				] as never,
 				account: l1addr,
 			})
 			const hash = await runOnLane("l1", () =>

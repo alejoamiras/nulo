@@ -281,6 +281,12 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// tx (e.g. public→private shield) fails in witness-gen. The SDK's BaseWallet derives this from
 			// `from`; we call proveTx directly, so mirror it: the first scope is the tx sender by our
 			// convention (callers build scopes as `[account.address, ...]`).
+			// INVARIANT: scopes[0] === the tx sender. Holds for every account-backed path (transfer,
+			// dapp-send, view, authwit-discovery). The ONE exception is the NO_FROM discovery path
+			// (dapp-send-executor's executeNoFromSendTx), which simulates with dapp-only scopes and no
+			// signing account — there senderForTags is not the real sender. That path is public-only
+			// today; a private-log-emitting NO_FROM flow must plumb an explicit sender first (codex
+			// post-impl audit MEDIUM — tracked for a follow-up).
 			const provedScopes = await z.array(AztecAddress.schema).parseAsync(scopes)
 			return pxe.proveTx(await TxExecutionRequest.schema.parseAsync(txRequest), {
 				scopes: provedScopes,
