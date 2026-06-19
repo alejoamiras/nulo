@@ -314,7 +314,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		if (target === undefined) throw new Error(`waitForTxProven: tx ${txHash} has no block number`)
 		const start = Date.now()
 		while (Date.now() - start < timeoutMs) {
-			if ((await node.getL2Tips()).proven.block.number >= target) return
+			if ((await node.getChainTips()).proven.block.number >= target) return
 			await sleep(1_000)
 		}
 		throw new Error(`waitForTxProven: tx ${txHash} (block ${target}) not proven within ${timeoutMs}ms`)
