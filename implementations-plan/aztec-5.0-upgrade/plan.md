@@ -64,7 +64,9 @@ Five reasons shape the phasing (all verified):
 
 **Validation gate.** Against a 5.0 sandbox, the pinned binary `/health` reports `bb_available=true` (after any on-demand download) and a native-proving canary tx proves successfully. Layers: CI config (folds into Phase 6B in practice). Can run anytime — does not block Phases 1–5.
 
-### Phase 1 — Dependency bump + install hygiene + verification gates
+### Phase 1 — Dependency bump + install hygiene + verification gates ✓ DONE
+
+> Gate passed: `bun install --frozen-lockfile` exit 0; noir patches re-keyed to @5.0.0-rc.1 + apply (5.0 still needs them); import-resolution probes pass (WalletSchema/schemas/base-wallet exports/AcceleratorProver); bb.js extract paths intact; `typecheck:all` runs (106 errors catalogued → P2–P5). Notes: min-age glob unsupported → enumerated the 30-pkg @aztec closure; `checkAcceleratorStatus` gone from the 5.0 accelerator API (→ P2). See `lessons/phase-1.md`.
 
 **Objective.** Move pins; make `bun install --frozen-lockfile` pass under the min-age gate; verify the patch + import-path + bb.js-extract + AcceleratorProver assumptions early (these are runtime/build failures invisible to typecheck).
 
