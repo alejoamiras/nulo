@@ -23,7 +23,8 @@ const PLAYGROUND_DIR = path.resolve(__dirname, "../../../playground")
 const FAUCET_DIR = path.resolve(__dirname, "../../../faucet")
 const CONFIG_PATH = path.resolve(__dirname, ".test-config.json")
 const AZTEC_BIN = path.resolve(process.env.HOME || "~", ".aztec/current/node_modules/.bin/aztec")
-const ANVIL_BIN = path.resolve(process.env.HOME || "~", ".aztec/current/bin/anvil")
+// 5.0 renamed bundled bare binaries to aztec-* on PATH: `anvil` → `aztec-anvil` (drop-in).
+const ANVIL_BIN = path.resolve(process.env.HOME || "~", ".aztec/current/bin/aztec-anvil")
 
 /**
  * Port resolution. Falls back to today's defaults if the agent wrapper
