@@ -260,13 +260,17 @@ export async function waitForL1ToL2Message(
 		}
 		await new Promise((r) => setTimeout(r, 2_000))
 	}
-	// Wait 2 more L2 blocks for the message tree to update
+	// Wait 2 more L2 blocks for the message tree to settle — BOUNDED. 5.0 doesn't mint empty
+	// blocks, so with no pending L2 txs after the bridge the height stalls and this would hang
+	// forever. The checkpoint poll above already confirms the message is claimable, so cap the
+	// wait and proceed regardless.
 	const currentBlock = await node.getBlockNumber()
 	const target = currentBlock + 2
-	while ((await node.getBlockNumber()) < target) {
+	const blockWaitStart = Date.now()
+	while ((await node.getBlockNumber()) < target && Date.now() - blockWaitStart < 30_000) {
 		await new Promise((r) => setTimeout(r, 2_000))
 	}
-	console.log("[waitForL1ToL2Message] +2 L2 blocks confirmed")
+	console.log("[waitForL1ToL2Message] +2 L2 blocks wait done")
 }
 
 /** Claim bridged FeeJuice on L2. Uses SponsoredFPC to pay for the claim tx itself.
