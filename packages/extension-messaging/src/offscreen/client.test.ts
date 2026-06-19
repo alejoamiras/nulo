@@ -1,32 +1,22 @@
+/**
+ * Contract tests for the offscreen (SW ↔ offscreen sendMessage) ServiceClient.
+ *
+ * Relocated from the extension package into the package that owns the code.
+ * Uses the local `transport-harness` (`captureMessage` / `emitMessage`).
+ *
+ * The string-reject contract (offscreen rejects with raw strings, not typed
+ * errors) is pinned VERBATIM here — it is the current behavior and is flipped
+ * to typed errors in a later phase. The timer-cleanup tripwires at the bottom
+ * are the leak guards the shared-correlator phase depends on.
+ */
+
 import { describe, test, expect, vi, beforeEach } from "vitest"
-import type { ILogger } from "@/wallet/logger"
+import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
-import { captureMessage, emitMessage } from "@/../tests/vitest.setup"
-import { MessageType } from "@nulo/extension-messaging/messages"
-import {
-	LoggingTelemetrySink,
-	MemoryTelemetrySink,
-	ServiceClient,
-	type RequestTelemetry,
-	type TelemetrySink,
-} from "@nulo/extension-messaging/offscreen"
-
-const silentLogger: ILogger = {
-	log: async () => {},
-} as unknown as ILogger
-
-/** Spy logger that records every log call. Used to verify that the
- *  default `LoggingTelemetrySink` actually fires through the wallet's
- *  `ILogger` rather than discarding events. */
-function makeSpyLogger(): { logger: ILogger; calls: Array<[string, LogLevel, ...unknown[]]> } {
-	const calls: Array<[string, LogLevel, ...unknown[]]> = []
-	const logger: ILogger = {
-		log: (source: string, level: LogLevel, ...data: unknown[]): void => {
-			calls.push([source, level, ...data])
-		},
-	}
-	return { logger, calls }
-}
+import { captureMessage, emitMessage, makeSpyLogger, silentLogger } from "../testing/transport-harness"
+import { MessageType } from "../messages"
+import { LoggingTelemetrySink, MemoryTelemetrySink, type RequestTelemetry, type TelemetrySink } from "./telemetry"
+import { ServiceClient } from "./client"
 
 type Methods = {
 	echo(val: string): Promise<string>
@@ -89,7 +79,8 @@ function makeError(requestId: number, clientUid: string, error: string) {
 
 describe("ServiceClient.request (offscreen transport base)", () => {
 	beforeEach(() => {
-		// nothing to reset — fake-browser is reset globally in tests/vitest.setup
+		// nothing to reset — fake-browser is reset globally + the harness
+		// re-stubs chrome per test.
 	})
 
 	test("calls onReady hook before sending the request", async () => {
@@ -167,6 +158,8 @@ describe("ServiceClient telemetry + send-failure", () => {
 		await flush()
 		const { requestId, fromUid } = getLastRequest()
 		emitMessage(makeError(requestId, fromUid, "remote_failed"))
+		// PINNED: offscreen rejects with the raw error STRING (not a typed
+		// error). This is the current contract; flipped in a later phase.
 		await expect(promise).resolves.toBe("remote_failed")
 
 		expect(sink.records).toHaveLength(1)
@@ -180,6 +173,7 @@ describe("ServiceClient telemetry + send-failure", () => {
 		// Make sendMessage reject — typical cause: offscreen document gone.
 		sendMessageMock.mockRejectedValueOnce(new Error("offscreen closed before fully loading"))
 
+		// PINNED: rejects with the raw "Offscreen send failed: …" STRING.
 		await expect(client.echo("hi")).rejects.toMatch(/Offscreen send failed: echo/)
 
 		// Telemetry was emitted synchronously by the catch branch — no
@@ -198,6 +192,8 @@ describe("ServiceClient telemetry + send-failure", () => {
 		expect(sink.records).toHaveLength(0) // not yet terminal
 
 		client.disconnect()
+		// PINNED: offscreen rejects pending requests with the raw
+		// "Client disconnected" STRING.
 		await expect(p1).resolves.toBe("Client disconnected")
 		await expect(p2).resolves.toBe("Client disconnected")
 
@@ -215,6 +211,7 @@ describe("ServiceClient telemetry + send-failure", () => {
 			await vi.advanceTimersByTimeAsync(0) // flush onReady microtasks
 
 			await vi.advanceTimersByTimeAsync(90_000 + 100)
+			// PINNED: raw "Offscreen request timed out: …" STRING.
 			await expect(promise).resolves.toMatch(/Offscreen request timed out: echo/)
 
 			expect(sink.records).toHaveLength(1)
@@ -324,7 +321,7 @@ describe("ServiceClient telemetry + send-failure", () => {
 		expect(sink.records[1].method).toBe("echo")
 	})
 
-	test("default sink (LoggingTelemetrySink, M4.4-followup): emits via logger when no explicit sink", async () => {
+	test("default sink (LoggingTelemetrySink): emits via logger when no explicit sink", async () => {
 		// No telemetry sink param — production callers rely on this default.
 		const { logger, calls } = makeSpyLogger()
 		const client = new TestClient(undefined, logger)
@@ -383,5 +380,89 @@ describe("ServiceClient telemetry + send-failure", () => {
 		expect(calls[2][1]).toBe(LogLevel.Info) // timeout
 		expect(calls[3][1]).toBe(LogLevel.Info) // disconnected
 		expect(calls[4][1]).toBe(LogLevel.Info) // send_failed
+	})
+})
+
+/**
+ * Timer-cleanup tripwires.
+ *
+ * These pin the invariant the shared-correlator phase depends on: every
+ * terminal path (success, remote error, timeout, late-drop, send_failed,
+ * disconnect) leaves BOTH the pending-request map AND the request-timer map
+ * empty. The current offscreen client keeps the timer map (`requestTimers`)
+ * as a sidecar separate from the pending map; the unification must not let
+ * either leak. Probing private state is intentional — these are structural
+ * leak guards, not behavior assertions.
+ */
+describe("timer-cleanup tripwires (leak guards for unification)", () => {
+	// biome-ignore lint/suspicious/noExplicitAny: probing private maps to assert no leak
+	const pending = (c: TestClient) => (c as any).requests as Map<number, unknown>
+	// biome-ignore lint/suspicious/noExplicitAny: probing private maps to assert no leak
+	const timers = (c: TestClient) => (c as any).requestTimers as Map<number, unknown>
+
+	test("success leaves both pending + timer maps empty", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		const promise = client.echo("hi")
+		await flush()
+		const { requestId, fromUid } = getLastRequest()
+		emitMessage(makeResponse(requestId, fromUid, "ok"))
+		await promise
+
+		expect(pending(client).size).toBe(0)
+		expect(timers(client).size).toBe(0)
+	})
+
+	test("remote error leaves both maps empty", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		const promise = client.echo("hi").catch(() => undefined)
+		await flush()
+		const { requestId, fromUid } = getLastRequest()
+		emitMessage(makeError(requestId, fromUid, "boom"))
+		await promise
+
+		expect(pending(client).size).toBe(0)
+		expect(timers(client).size).toBe(0)
+	})
+
+	test("send_failed clears the timer synchronously (no leak, no orphaned 90s timer)", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		captureMessage().mockRejectedValueOnce(new Error("offscreen gone"))
+
+		await expect(client.echo("hi")).rejects.toBeDefined()
+
+		// The whole point of the synchronous send_failed cleanup: no timer is
+		// left armed to fire a false timeout 90s later.
+		expect(pending(client).size).toBe(0)
+		expect(timers(client).size).toBe(0)
+	})
+
+	test("disconnect clears the timer map for all in-flight requests", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		const p1 = client.echo("a").catch(() => undefined)
+		const p2 = client.multiply(1, 2).catch(() => undefined)
+		await flush()
+		expect(timers(client).size).toBe(2)
+
+		client.disconnect()
+		await Promise.all([p1, p2])
+
+		expect(pending(client).size).toBe(0)
+		expect(timers(client).size).toBe(0)
+	})
+
+	test("timeout fire clears the timer map (no stale entry behind the fired timer)", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		vi.useFakeTimers()
+		try {
+			const promise = client.echo("hi").catch(() => undefined)
+			await vi.advanceTimersByTimeAsync(0)
+			await vi.advanceTimersByTimeAsync(90_000 + 100)
+			await promise
+
+			expect(pending(client).size).toBe(0)
+			expect(timers(client).size).toBe(0)
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 })

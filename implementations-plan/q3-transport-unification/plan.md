@@ -14,7 +14,9 @@ Template-method extraction with transport seams as hooks. Two shared bases — a
 
 ---
 
-## Phase 0 — Characterize the transports inside the owning package
+## Phase 0 — Characterize the transports inside the owning package ✓
+**Status:** ✓ complete (gate green, zero prod code touched). 71 extension-messaging tests (67 new + 4); offscreen leak-tripwires + service-side suites added; bg/offscreen error-payload + A6-tier divergences pinned. See `lessons/phase-0.md`.
+
 Port the substance of the existing contract suites (`packages/extension/src/wallet/base/{background,offscreen}/client.test.ts`, 449+387 lines) INTO `packages/extension-messaging/src/{background,offscreen}/*.test.ts` (uses `src/testing/setup.ts` + a small local fake-port/sendMessage harness). Add the MISSING service-side coverage: envelope validation/routing, success, flat-error, A6 JSON-fallback (3-tier bg vs swallow offscreen), event emit, `ensureInitialized` timeout, late/duplicate-response, **and the offscreen `disconnect()` + `send_failed` timer-cleanup paths (the leak tripwires P2 needs).** Pin the current offscreen string-reject contract verbatim (flipped in P4). Do NOT pin hang/throw bugs.
 **Validation gate:** standard (no network). Pass: new suites green reproducing today's forked behavior incl. offscreen string rejections + the disconnect/send_failed timer-clear; zero production code touched. Layers: typecheck·lint·unit. Trivially revertible.
 

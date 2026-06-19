@@ -1,5 +1,5 @@
 /**
- * Contract tests for BackgroundServiceClient.
+ * Contract tests for the background (popup ↔ SW Port) ServiceClient.
  *
  * Exercises:
  *  - Response correlation (resolve / reject by requestId)
@@ -8,18 +8,18 @@
  *  - Flat-string error wrapping (upgraded to Error instance)
  *  - Disconnect cleanup (pending requests reject, timers clear)
  *
- * Uses the shared harness in tests/vitest.setup.ts — `capturePortMessage`
- * grabs what the client just sent, `emitPortMessage` simulates a server
- * response without booting a real port broker.
+ * Relocated from the extension package into the package that owns the code.
+ * Uses the local `transport-harness` — `capturePortMessage` grabs what the
+ * client just sent, `emitPortMessage` simulates a server response without
+ * booting a real port broker.
  */
 
 import { describe, expect, test, vi } from "vitest"
-import { LoggerStore } from "@/wallet/logger"
-import { ConfigStore } from "@/wallet/config"
-import { RpcDisconnectedError, RpcTimeoutError, UserRejectedError, ValidationError, WalletError } from "@nulo/extension-messaging/errors"
-import { MessageType, type ResponseMessage } from "@nulo/extension-messaging/messages"
-import { capturePortMessage, emitPortMessage } from "../../../../tests/vitest.setup"
-import { ServiceClient, DEFAULT_RPC_TIMEOUT_MS } from "@nulo/extension-messaging/background"
+import type { ILogger } from "@nulo/wallet-core/logger"
+import { RpcDisconnectedError, RpcTimeoutError, UserRejectedError, ValidationError, WalletError } from "../errors"
+import { MessageType, type ResponseMessage } from "../messages"
+import { capturePortMessage, emitPortMessage, silentLogger } from "../testing/transport-harness"
+import { ServiceClient, DEFAULT_RPC_TIMEOUT_MS } from "./client"
 
 const SERVICE = "test-svc"
 
@@ -29,7 +29,7 @@ type TestMethods = {
 }
 
 class TestClient extends ServiceClient<TestMethods> {
-	public constructor(logger: LoggerStore, timeoutMs?: number) {
+	public constructor(logger: ILogger, timeoutMs?: number) {
 		super(SERVICE, logger, undefined, timeoutMs ? { requestTimeoutMs: timeoutMs } : undefined)
 	}
 
@@ -43,7 +43,7 @@ class TestClient extends ServiceClient<TestMethods> {
 }
 
 function newClient(timeoutMs?: number): TestClient {
-	return new TestClient(new LoggerStore(new ConfigStore()), timeoutMs)
+	return new TestClient(silentLogger, timeoutMs)
 }
 
 function responseMessage(requestId: number, result?: unknown, error?: string, errorPayload?: unknown): ResponseMessage<TestMethods> {
@@ -279,7 +279,7 @@ describe("error deserialization", () => {
 	})
 })
 
-// ── Disconnect cleanup ────────────────────────────────────────────────
+// ── resultIsJson fallback (AUDIT A6) ──────────────────────────────────
 
 describe("resultIsJson fallback (AUDIT A6)", () => {
 	test("client JSON.parses the result when resultIsJson is true", async () => {
