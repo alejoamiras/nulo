@@ -15,6 +15,8 @@
  * Buffer onto globalThis — it only wires the identifier-rewrite.
  */
 
+import { baseErrorJson } from "./error-json"
+
 declare const Buffer: {
 	from(data: unknown, encoding?: string): { toString(encoding: string): string }
 	isBuffer(x: unknown): boolean
@@ -34,19 +36,13 @@ export function jsonStringify(obj: unknown): string {
 		} else if (typeof value === "object" && value instanceof Set) {
 			return Array.from(value.values())
 		} else if (value instanceof Error) {
-			// Error's `name`, `message`, and `stack` are non-enumerable, so
-			// JSON.stringify silently drops them and returns `{}`. Serialize
-			// them explicitly. WalletError subclasses (from base/errors.ts)
-			// add `code` + optional `details` which we also preserve.
-			// Reconstruction on the receiving side is deserializer-agnostic:
-			// consumers that check `x instanceof Error` will now at least
-			// see `{ name, message, stack?, code?, details? }` and can
-			// format it usefully.
+			// `baseErrorJson` projects the non-enumerable name/message/stack
+			// that JSON.stringify otherwise drops. WalletError subclasses
+			// (base/errors.ts) add `code` + optional `details`, layered on
+			// here so `instanceof Error` consumers see the full shape.
 			const err = value as Error & { code?: unknown; details?: unknown }
 			return {
-				name: err.name,
-				message: err.message,
-				...(err.stack !== undefined ? { stack: err.stack } : {}),
+				...baseErrorJson(err),
 				...(err.code !== undefined ? { code: err.code } : {}),
 				...(err.details !== undefined ? { details: err.details } : {}),
 			}

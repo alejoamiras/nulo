@@ -22,4 +22,15 @@ Grepped every symbol's call-sites (incl. tests) before deleting:
 
 Network-e2e: NOT gated (dead-code in `private` pkgs). Auto-merge on Quality green.
 
+## PR #105 result — required gate green, advisory network red = known flakiness
+- `Quality / Status` = SUCCESS (Commitlint, Lint+Typecheck, Unit, Build chrome/firefox/faucet, smoke Vitest+Puppeteer all green).
+- `Network e2e / Status` = FAILURE (advisory on dev). 2/5 shards red:
+  - shard 1/5: `authwit-lifecycle.test.ts:136` — `expected 'ok' to be 'error'` (post-revoke state-propagation race).
+  - shard 5/5: `multi-account-from.test.ts:49` — "sendTx … reaches active stage" (proving-progress race).
+- **Confirmed pre-existing flakiness, NOT a Q16 regression:**
+  - `authwit-lifecycle` is under active de-flaking — `#97` (200dd3f) just landed; my base 7a3b373 already contains it, yet it still flaked → de-flake incomplete, test still flaky.
+  - Recent network-e2e failed on unrelated branches too (`fix/measure-f1-authwits`, `fix/network-e2e-gate-plumbing`) — systemic.
+  - Q16 removed only provably-dead code (zero call-sites) in private pkgs not exercised by these network tests; removing an unused dep / dead re-export cannot alter the bundle. Build green confirms.
+- Decision: merged on Quality green per the approved auto-merge rule (network advisory for Q16).
+
 LESSONS_FILE=implementations-plan/quality-dedup-quick-wins/lessons/phase-1.md
