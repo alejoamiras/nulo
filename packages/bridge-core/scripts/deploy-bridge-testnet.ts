@@ -182,7 +182,11 @@ async function main() {
 	} catch {}
 	const fee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
 	const opts = { from, fee }
-	const sendOpts = { ...opts, wait: { waitForStatus: TxStatus.PROPOSED } }
+	// V5 finalization ladder is PROPOSED → CHECKPOINTED → PROVEN → FINALIZED. A merely-PROPOSED
+	// contract is not yet served for public simulation, so a dependent step (the proxy wiring below, or
+	// a later deploy referencing an earlier one) sees "Contract not deployed". Wait for CHECKPOINTED —
+	// the first state the node publicly simulates against. PROPOSED sufficed on V4 (no checkpoint stage).
+	const sendOpts = { ...opts, wait: { waitForStatus: TxStatus.CHECKPOINTED } }
 
 	if (!(await node.getContract(from))) {
 		console.log(`deploying L2 account (real proof, ~minutes)… (${mins()})`)
@@ -224,7 +228,7 @@ async function main() {
 				...opts,
 				contractAddressSalt: salt,
 				universalDeploy: true,
-				wait: { waitForStatus: TxStatus.PROPOSED },
+				wait: { waitForStatus: TxStatus.CHECKPOINTED },
 			} as never)
 			appendJournal(JOURNAL_PATH, { phase: "confirmed", step, address: instance.address.toString() })
 		}
