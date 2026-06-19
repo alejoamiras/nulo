@@ -6,9 +6,12 @@ import Icon from "./core/Icon.vue"
 import MaterialIcon from "./core/MaterialIcon.vue"
 import Text from "./core/Text.vue"
 import Badge from "./ui/Badge.vue"
+import Banner from "./ui/Banner.vue"
 import BrutalistTitle from "./ui/BrutalistTitle.vue"
 import Checkbox from "./ui/Checkbox.vue"
+import LoadingState from "./ui/LoadingState.vue"
 import SectionLabel from "./ui/SectionLabel.vue"
+import Spinner from "./ui/Spinner.vue"
 import Toggle from "./ui/Toggle.vue"
 
 /**
@@ -27,6 +30,10 @@ const cases: Array<[string, Component, Record<string, unknown>]> = [
 	["Checkbox", Checkbox, {}],
 	["SectionLabel", SectionLabel, { label: "X" }],
 	["Toggle", Toggle, {}],
+	["Spinner", Spinner, {}],
+	// isLoading:true exercises Banner's <Spinner> branch — the missing-import trap mount-all guards.
+	["Banner", Banner, { isLoading: true }],
+	["LoadingState", LoadingState, { label: "Loading" }],
 ]
 
 describe("@nulo/design components mount without auto-import", () => {

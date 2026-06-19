@@ -17,6 +17,10 @@ export const NULO_DESIGN_COMPONENTS = new Set([
 	"Checkbox",
 	"SectionLabel",
 	"Toggle",
+	// round 2 — P2 Spinner family
+	"Spinner",
+	"Banner",
+	"LoadingState",
 ])
 
 export function nuloDesignResolver(): ComponentResolver {

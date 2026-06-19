@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { AddressDisplay, AppButton, Spinner } from "@nulo/design"
+// SpinnerLegacy keeps the faucet's spinner visually frozen until the P7 cutover (D-FAUCET-DEFER).
+import { AddressDisplay, AppButton, SpinnerLegacy as Spinner } from "@nulo/design"
 import { computed } from "vue"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { TESTIDS } from "@/lib/testids"

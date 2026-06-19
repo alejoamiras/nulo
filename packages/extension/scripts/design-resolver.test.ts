@@ -22,8 +22,11 @@ const EXPECTED_MIGRATED = [
 	"Checkbox",
 	"SectionLabel",
 	"Toggle",
-	// round 2 adds deleted-local names here as they migrate:
-	//   P2 → Spinner, Banner, LoadingState · P5 → Tooltip, Popover · P6 → Input
+	// round 2 — P2 Spinner family (local SFCs deleted)
+	"Spinner",
+	"Banner",
+	"LoadingState",
+	// later phases add: P5 → Tooltip, Popover · P6 → Input
 ]
 
 // Wrapper-backed: the extension keeps a LOCAL SFC of this name, so the bare tag must resolve to that

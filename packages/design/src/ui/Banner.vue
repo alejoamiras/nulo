@@ -1,5 +1,11 @@
 <script setup>
-const props = defineProps({
+/** Components */
+import Flex from "../core/Flex.vue"
+import Icon from "../core/Icon.vue"
+import Text from "../core/Text.vue"
+import Spinner from "./Spinner.vue"
+
+defineProps({
 	variant: {
 		type: String,
 		default: "info",

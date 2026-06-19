@@ -206,7 +206,7 @@ ui-layer + resolver-inventory green) · `bun run test` · `bun run test:faucet` 
 `bun run --cwd packages/extension build-storybook` (exit 0, OR explicitly descoped). Pass: all exit 0.
 Layers: typecheck · lint · unit · both builds · storybook.
 
-### P2 — Spinner family (superset + Banner + LoadingState)
+### P2 — Spinner family (superset + Banner + LoadingState) ✓ DONE
 
 1. Replace `packages/design/src/ui/Spinner.vue` with the superset (F6); rewrite `Spinner.test.ts`
    (≥5: size string+number, `--var`/raw/`currentColor` color, `role="status"`, correct class

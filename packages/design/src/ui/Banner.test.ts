@@ -1,7 +1,9 @@
-import { describe, expect, test } from "vitest"
 import { mount } from "@vue/test-utils"
+import { describe, expect, test } from "vitest"
 import Banner from "./Banner.vue"
 
+// Stub the child primitives by name — vue-test-utils matches `global.stubs` keys against the
+// component name even for the package's explicit imports. Keeps these cases focused on Banner.
 const STUBS = {
 	Flex: { template: '<div :class="$attrs.class"><slot /></div>', inheritAttrs: false },
 	Text: { template: "<span><slot /></span>" },
@@ -12,27 +14,22 @@ const STUBS = {
 const mountBanner = (props: Record<string, unknown> = {}, slots: Record<string, string> = { default: "Body" }) =>
 	mount(Banner, { props, slots, global: { stubs: STUBS } })
 
-describe("ui/Banner", () => {
+describe("Banner", () => {
 	test("renders default slot content", () => {
-		const w = mountBanner({}, { default: "Welcome banner" })
-		expect(w.text()).toContain("Welcome banner")
+		expect(mountBanner({}, { default: "Welcome banner" }).text()).toContain("Welcome banner")
 	})
 
 	test("default variant is `info` and applies the info class", () => {
-		const w = mountBanner()
-		expect(w.html()).toMatch(/info/)
+		expect(mountBanner().html()).toMatch(/info/)
 	})
 
 	test("variant=warning applies the warning class", () => {
-		const w = mountBanner({ variant: "warning" })
-		expect(w.html()).toMatch(/warning/)
+		expect(mountBanner({ variant: "warning" }).html()).toMatch(/warning/)
 	})
 
 	test("isLoading replaces the info icon with a Spinner", () => {
-		const wIdle = mountBanner({ isLoading: false })
-		expect(wIdle.find('[data-testid="stub-spinner"]').exists()).toBe(false)
-		const wLoading = mountBanner({ isLoading: true })
-		expect(wLoading.find('[data-testid="stub-spinner"]').exists()).toBe(true)
+		expect(mountBanner({ isLoading: false }).find('[data-testid="stub-spinner"]').exists()).toBe(false)
+		expect(mountBanner({ isLoading: true }).find('[data-testid="stub-spinner"]').exists()).toBe(true)
 	})
 
 	test("description slot renders alongside title", () => {
@@ -43,14 +40,7 @@ describe("ui/Banner", () => {
 
 	test("action object renders a button that fires the callback on click", async () => {
 		let fired = 0
-		const w = mountBanner({
-			action: {
-				name: "Click",
-				callback: () => {
-					fired++
-				},
-			},
-		})
+		const w = mountBanner({ action: { name: "Click", callback: () => fired++ } })
 		const btn = w.find("button")
 		expect(btn.exists()).toBe(true)
 		expect(btn.text()).toBe("Click")
@@ -59,7 +49,6 @@ describe("ui/Banner", () => {
 	})
 
 	test("no action prop → no button rendered", () => {
-		const w = mountBanner()
-		expect(w.find("button").exists()).toBe(false)
+		expect(mountBanner().find("button").exists()).toBe(false)
 	})
 })

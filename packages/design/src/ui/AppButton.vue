@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import Spinner from "./Spinner.vue"
+// Frozen on SpinnerLegacy through round-2 (D-FAUCET-DEFER): AppButton is faucet-only (faucet direct
+// buttons + DripButton); keeping its spinner on the legacy 0.75s look avoids a faucet visual change
+// before the P7 cutover. Flips to the canonical Spinner in P7.
+import Spinner from "./SpinnerLegacy.vue"
 
 type Variant = "primary" | "outline" | "ghost"
 
