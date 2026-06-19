@@ -1,6 +1,7 @@
 import { type ILogger, LogLevel } from "@nulo/wallet-core/logger"
 import { jsonSanitize } from "@nulo/wallet-core/utils"
-import type { EventsMap, EventsSpec, MethodsMap } from "@nulo/wallet-core/base"
+import { EventHandler } from "@nulo/wallet-core/utils"
+import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { decodeResult } from "./decode"
 import { wrapParams } from "../utils"
 import type { RequestTerminalStatus } from "../offscreen/telemetry"
@@ -177,9 +178,17 @@ export abstract class BaseServiceClient<TRequests extends MethodsMap, TEvents ex
 		}
 	}
 
-	/** Invoke the local handler for a received event. */
+	/** Invoke the local handler for a received event. Hardened: only a real
+	 *  `EventHandler` property is invoked, so a hostile message naming an
+	 *  arbitrary `event` (e.g. `toString`, `constructor`) can't reach an
+	 *  unrelated property or crash the listener. */
 	protected handleEvent(event: keyof TEvents, payload: TEvents[keyof TEvents]): void {
-		;(this as unknown as EventsSpec<TEvents>)[event].invoke(payload)
+		const handler = (this as unknown as Record<PropertyKey, unknown>)[event]
+		if (!(handler instanceof EventHandler)) {
+			this.logWarn("Unknown event received", event)
+			return
+		}
+		handler.invoke(payload)
 	}
 
 	/** Reject every in-flight request — used by the subclass `disconnect`. */

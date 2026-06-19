@@ -81,11 +81,16 @@ export abstract class BaseService<TRequests extends MethodsMap, TEvents extends 
 	protected async handleRequest(content: RequestContentLike, ctx: TCtx): Promise<void> {
 		const { requestId, method, params: wrappedParams } = content
 		const methodName = String(method)
-		// D10: only explicitly-registered method names are callable — the
-		// service's own `rpcMethods` plus the base-level framework RPCs
-		// (backup/restore). Everything else — inherited/prototype/non-RPC
-		// framework/helper methods — is dropped.
-		if (!requestId || (!this.rpcMethods.has(methodName) && !this.frameworkRpcMethods.has(methodName))) {
+		// Strict envelope: requestId must be a positive number (hostile string /
+		// object ids are dropped, not echoed). D10: only explicitly-registered
+		// method names are callable — the service's own `rpcMethods` plus the
+		// base-level framework RPCs (backup/restore). Everything else —
+		// inherited/prototype/non-RPC framework/helper methods — is dropped.
+		if (
+			typeof requestId !== "number" ||
+			requestId <= 0 ||
+			(!this.rpcMethods.has(methodName) && !this.frameworkRpcMethods.has(methodName))
+		) {
 			this.logWarn("Invalid request received", content)
 			return
 		}

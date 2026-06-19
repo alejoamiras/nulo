@@ -46,7 +46,9 @@ Shared service base owns envelope validation, param unwrap, method invocation, `
 - **B4 note (audit):** post-flip, offscreen rejections are real Errors with `.stack`, so `getErrorData` / SW `wallet/index.ts:66` unhandledrejection will log STACK TRACES where they logged one-liners — accepted (richer logs), but verify the telemetry sanitizer still passes only static `detail` (test `offscreen/client.test.ts:347` `not.toContain("rm -rf")`).
 **Validation gate:** standard + smoke + **network incl. an explicit dApp-error-contract check** (prove/simulate timeout → intended `response.error`). Pass: offscreen unit tests assert typed errors; dApp envelope cases green; PXE network flows correct. Layers: all + dApp-contract. **RISK: HIGH (behavioral + dApp-reaching).**
 
-## Phase 5 — `/harden security` sweep on the unified seam
+## Phase 5 — `/harden security` sweep on the unified seam ◐
+**Status:** code + standard gate ✓ (extension-messaging 137 incl. 33 hardening, extension 2566, aztec-runtime 32, lint 0, typecheck clean). Closed the unknown-event hole (client handleEvent now requires an EventHandler instance), tightened requestId to a positive number, pinned replayed-response idempotency, added `hardening.test.ts` (hostile events/ids/methods/malformed). `/harden` isn't an installed skill here — its intent is met by these items + the codex adversarial post-impl audit (wrap-up). Network leg in CI. See `lessons/phase-5.md`.
+
 Thin hardening over the shared core (the RPC-surface guard already landed in P3): strict envelope shape checks, unknown-EVENT rejection, null-safe guards, explicit duplicate-request-id + replayed-response handling, hostile/malformed cross-context message tests. Run `/harden security` scoped to extension-messaging.
 **Validation gate:** standard + network. Pass: malformed/hostile messages dropped safely (not executed, listener doesn't crash). Layers: all.
 
