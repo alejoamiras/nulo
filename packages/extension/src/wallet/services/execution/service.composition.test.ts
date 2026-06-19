@@ -14,7 +14,7 @@
  * never in the production bundle (Phase-2 gate greps `dist/` for this marker;
  * it must be absent).
  */
-import { beforeEach, describe, expect, test, vi } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import { Gas } from "@aztec/stdlib/gas"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { ConfigStore } from "@/wallet/config"
@@ -65,8 +65,6 @@ function makeControllableGate() {
 
 // ── Dumb fakes (cast to the real surfaces — only the reuse-cancel path is hit) ─
 const MIN_FEES = { feePerDaGas: 1n, feePerL2Gas: 1n }
-const sendTx = vi.fn(async () => {})
-const fakeNode = { getCurrentMinFees: async () => MIN_FEES, sendTx } as unknown as never
 
 // proveTx returns a stub TxProvingResult; the post-prove cancel checkpoint drops
 // it before `toTx`, so contents don't matter.
@@ -83,16 +81,16 @@ const NETWORK = {
 	endpoints: [{ id: "ep1", rpcUrl: "http://fake" }],
 }
 
-// Records every journal transition so the test can assert the FSM directly.
-const transitions: { stage: string; error: unknown }[] = []
-
 function svc(name: string, methods: Record<string, unknown>) {
 	return { name, dependencies: [], async start() {}, ...methods } as never
 }
 
 async function makeHarness() {
-	transitions.length = 0
-	sendTx.mockClear()
+	// Per-harness state — no module-level mutable singletons, so the rollout can
+	// call makeHarness() in many tests without cross-contamination.
+	const transitions: { stage: string; error: unknown }[] = []
+	const sendTx = vi.fn(async () => {})
+	const fakeNode = { getCurrentMinFees: async () => MIN_FEES, sendTx } as unknown as never
 	const logger = new LoggerStore(new ConfigStore())
 	const ctrl = makeControllableGate()
 
@@ -166,7 +164,7 @@ async function makeHarness() {
 	const reuse = (service as unknown as { estimateReuse: TransferEstimateReuse }).estimateReuse
 	reuse.stash("estimate-1", entry)
 
-	return { service, ctrl, req, estimateId: "estimate-1" }
+	return { service, ctrl, req, estimateId: "estimate-1", transitions, sendTx }
 }
 
 const waitFor = async (pred: () => boolean, timeoutMs = 2000) => {
@@ -178,10 +176,8 @@ const waitFor = async (pred: () => boolean, timeoutMs = 2000) => {
 }
 
 describe("ExecutionService composition — cancel-mid-prove (in-process, no sandbox)", () => {
-	beforeEach(() => transitions.splice(0))
-
 	test("cancel while proving: journal → cancelled, proof dropped, never sent", async () => {
-		const { service, ctrl, req, estimateId } = await makeHarness()
+		const { service, ctrl, req, estimateId, transitions, sendTx } = await makeHarness()
 
 		const p = service
 			.executeTransfer(
