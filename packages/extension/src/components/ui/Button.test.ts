@@ -4,7 +4,7 @@
  * base, forwards props, and preserves the legacy `link` prop via RouterLink (custom) → base anchor.
  */
 import { mount } from "@vue/test-utils"
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import Button from "./Button.vue"
 
 // The wrapper renders the REAL @nulo/design ButtonBase; only the base's Spinner/Icon + RouterLink are
@@ -42,5 +42,33 @@ describe("ui/Button (wrapper → @nulo/design ButtonBase)", () => {
 		// rel hygiene is asserted in @nulo/design's Button.test.ts.
 		const w = mountButton({ link: "/popup/general" }, { default: "Home" })
 		expect(w.element.tagName).not.toBe("BUTTON")
+	})
+
+	// Attribute fallthrough must reach the real element in BOTH branches. The wrapper is a v-if/v-else
+	// template; the `link` branch renders RouterLink in `custom` mode (slot-only fragment root), which
+	// without inheritAttrs:false + v-bind="$attrs" silently DROPS undeclared attrs like data-testid onto
+	// the fragment (Vue warns) — breaking e2e selectors that the pre-round-2 single-root contract carried
+	// onto the <a>. These pin the seam so a regression can't slip past unit gates again.
+	test("non-link: data-testid + @click + :style fall through to the <button> root", async () => {
+		const onClick = vi.fn()
+		const w = mount(Button, {
+			attrs: { "data-testid": "btn-x", onClick, style: "width: 50%;" },
+			slots: { default: "Go" },
+			global: { stubs: STUBS },
+		})
+		expect(w.get("button").attributes("data-testid")).toBe("btn-x")
+		expect(w.get("button").attributes("style") ?? "").toContain("width: 50%")
+		await w.get("button").trigger("click")
+		expect(onClick).toHaveBeenCalledTimes(1)
+	})
+
+	test("link: data-testid falls through to the anchor root (not dropped by the custom RouterLink)", () => {
+		const w = mount(Button, {
+			props: { link: "/popup/general" },
+			attrs: { "data-testid": "link-x" },
+			slots: { default: "Home" },
+			global: { stubs: STUBS },
+		})
+		expect(w.get("a").attributes("data-testid")).toBe("link-x")
 	})
 })
