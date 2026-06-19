@@ -37,10 +37,10 @@ export const DOM_SEP__FPC_BRIDGE_SECRET = 3952304070
  * fail-closed — the runtime can never deposit to a silently-drifted address.
  *
  * INVARIANT: never deposit private Fee Juice to any address other than this for the pinned version.
- * The address is `@aztec`-version + bytecode specific; see `lessons/phase-0.md` for the version-pin
- * reconciliation (the testnet ran nodeVersion 4.3.1 at pin time vs this 4.2.0 artifact — Ask 1).
+ * The address is `@aztec`-version + bytecode specific. Re-derived from the
+ * `@wonderland/aztec-fee-payment` prerelease-fb6f196 (5.0.0-rc.1) artifact via the test tripwire.
  */
-export const PRIVATE_FPC_ADDRESS = "0x1b1706cc0947eca1de6527562af65d43e95540f9009a896dcd847afea92ede1e"
+export const PRIVATE_FPC_ADDRESS = "0x1fa8746eff0ce58d72d4d60ecc22ed6ebbd99247178e679dc9c8fee3f44c5c4c"
 
 /**
  * The bridge secret a private-fuel L1 deposit binds to: `poseidon2([salt, claimer], DOM_SEP)`.
