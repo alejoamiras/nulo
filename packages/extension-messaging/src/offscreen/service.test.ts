@@ -1,15 +1,14 @@
 /**
  * Contract tests for the offscreen (SW ↔ offscreen sendMessage) Service.
  *
- * New coverage (no offscreen service-side suite existed before). The point of
- * this suite is to pin the CURRENT behavior — including the two divergences
- * from the background service that the unification work will resolve:
+ * New coverage (no offscreen service-side suite existed before). Pins the
+ * CURRENT behavior, including the error-payload divergence the unification
+ * resolves: error responses carry a flat `error` string ONLY — never the
+ * structured `errorPayload`, even for a WalletError subclass. (Background emits
+ * errorPayload; offscreen does not — fixed additively in a later phase.)
  *
- *  1. Error responses carry a flat `error` string ONLY — never the structured
- *     `errorPayload`, even when a WalletError subclass is thrown. (Background
- *     emits errorPayload; offscreen does not — fixed additively in a later phase.)
- *  2. The A6 send fallback is 2-tier then SWALLOW (success → jsonStringify →
- *     give up), where the background side has a 3rd error-response tier.
+ * The A6 send fallback was 2-tier-then-swallow; the Phase 1 fix (a) brought it
+ * to the background's 3-tier (success → jsonStringify → error-response → drop).
  *
  * Drives the service by feeding `chrome.runtime.onMessage` via `emitMessage`
  * and reading responses via `captureMessage`.
@@ -161,9 +160,9 @@ describe("error path (no structured payload — pinned divergence)", () => {
 	})
 })
 
-// ── A6 send fallback (offscreen — 2-tier then SWALLOW) ────────────────
+// ── A6 send fallback (offscreen — 3-tier after the P1 fix) ────────────
 
-describe("A6 send fallback (offscreen — 2-tier then swallow)", () => {
+describe("A6 send fallback (offscreen — 3-tier, matches background after the P1 fix)", () => {
 	test("tier 1: sendMessage succeeds — single response, no resultIsJson", async () => {
 		new TestService()
 		emitMessage(request(1, "echo", ["hi"]))
@@ -187,15 +186,58 @@ describe("A6 send fallback (offscreen — 2-tier then swallow)", () => {
 		expect(JSON.parse(fallback.content.result as string)).toBe("echo:hi")
 	})
 
-	test("tier 3 (swallow): every send rejects → gives up with NO error response", async () => {
+	test("tier 3 (D12 fix): response + fallback sends reject → sends a clean error response", async () => {
 		new TestService()
-		captureMessage().mockRejectedValue(new Error("SW dead"))
+		captureMessage().mockRejectedValueOnce(new Error("send1")).mockRejectedValueOnce(new Error("send2"))
 		emitMessage(request(1, "echo", ["hi"]))
 		await flush()
 
-		// Exactly two attempts (original + jsonStringify fallback), then
-		// swallow — the background side would send a 3rd error response here.
-		expect(captureMessage()).toHaveBeenCalledTimes(2)
+		// original + jsonStringify fallback both rejected; the 3rd send is the
+		// structured error response (previously the offscreen side swallowed,
+		// leaving the client to hang until its full timeout).
+		expect(captureMessage()).toHaveBeenCalledTimes(3)
+		const last = responses().at(-1)!
+		expect(last.content.result).toBeUndefined()
+		expect(String(last.content.error)).toMatch(/Response not serializable/)
+	})
+
+	test("tier 4 (swallow): every send rejects → 3 attempts then gives up cleanly", async () => {
+		new TestService()
+		captureMessage().mockRejectedValue(new Error("SW dead"))
+		// Must not throw out of the handler even when all sends fail.
+		expect(() => emitMessage(request(1, "echo", ["hi"]))).not.toThrow()
+		await flush()
+
+		expect(captureMessage()).toHaveBeenCalledTimes(3)
+	})
+})
+
+// ── Fix (c): malformed params reply with a clean error (no hang) ───────
+
+describe("malformed params (fix c — no silent hang)", () => {
+	test("null params for a valid method replies with a flat error response", async () => {
+		new TestService()
+		emitMessage({ type: MessageType.Request, from: CLIENT, to: SERVICE, content: { requestId: 9, method: "echo", params: null } })
+		await flush()
+
+		const resp = responses().at(-1)!
+		expect(resp.content.requestId).toBe(9)
+		expect(resp.content.error).toBe("Invalid request params")
+		// Offscreen does not emit errorPayload yet (lands in a later phase).
+		expect(resp.content.errorPayload).toBeUndefined()
+	})
+
+	test("non-object params (e.g. a string) replies with a flat error response", async () => {
+		new TestService()
+		emitMessage({
+			type: MessageType.Request,
+			from: CLIENT,
+			to: SERVICE,
+			content: { requestId: 10, method: "echo", params: "oops" as unknown as [] },
+		})
+		await flush()
+
+		expect(responses().at(-1)!.content.error).toBe("Invalid request params")
 	})
 })
 

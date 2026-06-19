@@ -103,6 +103,16 @@ describe("response correlation", () => {
 		// No in-flight requests. Spurious response should not crash.
 		expect(() => emitPortMessage(SERVICE, responseMessage(999, "stale"))).not.toThrow()
 	})
+
+	test("null / malformed inbound messages are ignored without throwing (fix b)", async () => {
+		const client = newClient()
+		await client.connect()
+		// Previously `message.type` (non-optional) deref'd null and threw.
+		expect(() => emitPortMessage(SERVICE, null)).not.toThrow()
+		expect(() => emitPortMessage(SERVICE, undefined)).not.toThrow()
+		expect(() => emitPortMessage(SERVICE, {})).not.toThrow()
+		expect(() => emitPortMessage(SERVICE, { type: MessageType.Response })).not.toThrow()
+	})
 })
 
 // ── Hard timeout ──────────────────────────────────────────────────────

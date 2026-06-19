@@ -102,6 +102,15 @@ describe("ServiceClient.request (offscreen transport base)", () => {
 		await expect(promise).resolves.toBe("echo:hi")
 	})
 
+	test("null / malformed inbound messages are ignored without throwing (fix b)", () => {
+		const client = new TestClient()
+		client.connect()
+		// onMessageListener previously deref'd `message.to` on a null message.
+		expect(() => emitMessage(null)).not.toThrow()
+		expect(() => emitMessage(undefined)).not.toThrow()
+		expect(() => emitMessage({})).not.toThrow()
+	})
+
 	test("each request re-runs onReady (no memoization)", async () => {
 		const client = new TestClient()
 		const p1 = client.echo("a")

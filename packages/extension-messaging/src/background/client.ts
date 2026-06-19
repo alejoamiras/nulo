@@ -4,6 +4,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { jsonSanitize } from "@nulo/wallet-core/utils"
 import type { EventsMap, EventsSpec, MethodsMap } from "@nulo/wallet-core/base"
+import { decodeResult } from "../core/decode"
 import { RpcDisconnectedError, RpcTimeoutError, walletErrorFromPayload } from "../errors"
 import { MessageType, type EventMessage, type RequestMessage, type ResponseMessage } from "../messages"
 import { wrapParams } from "../utils"
@@ -92,7 +93,7 @@ export abstract class ServiceClient<TRequests extends MethodsMap, TEvents extend
 	}
 
 	private readonly onMessage = (message: ResponseMessage<TRequests> | EventMessage<TEvents>) => {
-		if ((message?.type !== MessageType.Response && message.type !== MessageType.Event) || !message.content) {
+		if (!message || (message.type !== MessageType.Response && message.type !== MessageType.Event) || !message.content) {
 			this.logWarn("Invalid message received", message)
 			return
 		}
@@ -113,13 +114,10 @@ export abstract class ServiceClient<TRequests extends MethodsMap, TEvents extend
 				entry.reject(rejection)
 				this.logDebug("Request rejected", message.content)
 			} else {
-				// AUDIT plan A6 fallback: when the service's structured-clone
-				// path failed and it retried with `jsonStringify`, `result` is
-				// a JSON string. Parse it here so callers get the same shape
-				// they would have on the success path. Safe regardless of
-				// content because both paths produce plain JSON-safe values
-				// (the success path because `jsonSanitize` runs upstream).
-				const parsed = resultIsJson && typeof result === "string" ? (JSON.parse(result) as typeof result) : result
+				// AUDIT plan A6 fallback: when the service retried with
+				// `jsonStringify` (setting `resultIsJson`), `result` is a JSON
+				// string — parse it back so callers get the success-path shape.
+				const parsed = decodeResult(result, resultIsJson)
 				entry.resolve(parsed)
 				this.logDebug("Request resolved", message.content)
 			}

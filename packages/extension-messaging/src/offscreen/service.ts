@@ -1,8 +1,8 @@
 import { type ILogger, LogLevel } from "@nulo/wallet-core/logger"
-import { sleep } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { jsonSanitize, jsonStringify } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap, MethodsSpec, IService, EventsSpec, ServiceCollection } from "@nulo/wallet-core/base"
+import { awaitInitialized } from "../core/initialization"
 import { MessageType } from "../messages"
 import { unwrapParams } from "../utils"
 import type { EventMessage, RequestMessage, ResponseMessage } from "./messages"
@@ -55,8 +55,25 @@ export abstract class Service<TRequests extends MethodsMap, TEvents extends Even
 			return
 		}
 		const { requestId, method, params: wrappedParams } = message.content
-		if (!requestId || !(method in this.requests) || typeof wrappedParams !== "object") {
+		if (!requestId || !(method in this.requests)) {
 			this.logWarn("Invalid request received", message)
+			return
+		}
+		if (typeof wrappedParams !== "object" || wrappedParams === null) {
+			// Valid requestId + method but malformed params. Reply with a clean
+			// error so the client rejects immediately instead of hanging until
+			// its timeout (the prior `typeof null === "object"` let null through
+			// and `unwrapParams(null)` threw — silent hang). Flat error only;
+			// structured errorPayload for the offscreen transport lands later.
+			this.logWarn("Invalid request params", message)
+			chrome.runtime
+				.sendMessage({
+					type: MessageType.Response,
+					content: { requestId, error: "Invalid request params" },
+					from: this.name,
+					to: message.from,
+				})
+				.catch(() => {})
 			return
 		}
 		const params = unwrapParams(wrappedParams)
@@ -130,12 +147,32 @@ export abstract class Service<TRequests extends MethodsMap, TEvents extends Even
 						`originalError=${getErrorMessage(error)}`,
 					)
 					return
-				} catch {
-					// Either jsonStringify itself failed or SW is dead.
-					// Fall through to the legacy swallow.
+				} catch (fallbackError) {
+					// jsonStringify itself failed (typically circular refs that
+					// escaped jsonSanitize), or the fallback send threw. Send a
+					// structured error so the caller rejects immediately instead
+					// of hanging for the full request timeout. This matches the
+					// background service's 3rd tier — previously the offscreen
+					// side silently swallowed here (D12, user-visible change).
+					try {
+						const errResponse: ResponseMessage<TRequests> = {
+							type: MessageType.Response,
+							content: {
+								...response.content,
+								result: undefined as ResponseMessage<TRequests>["content"]["result"],
+								error: `Response not serializable: ${getErrorMessage(fallbackError)}`,
+							},
+							from: this.name,
+							to: message.from,
+						}
+						await chrome.runtime.sendMessage(errResponse)
+						return
+					} catch {
+						// Truly disconnected — caller's request timeout will fire.
+					}
 				}
 			}
-			// Legacy: SW likely dead; client-side timeout will reject.
+			// SW likely dead; client-side timeout will reject.
 		}
 	}
 
@@ -156,17 +193,7 @@ export abstract class Service<TRequests extends MethodsMap, TEvents extends Even
 	}
 
 	protected async ensureInitialized() {
-		if (this.initialized) {
-			return
-		}
-		let restMs = 30_000
-		while (!this.initialized && restMs > 0) {
-			await sleep(500)
-			restMs -= 500
-		}
-		if (!this.initialized) {
-			throw new Error("Service not initialized")
-		}
+		await awaitInitialized(() => this.initialized)
 	}
 
 	protected logDebug(...data: unknown[]) {

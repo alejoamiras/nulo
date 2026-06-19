@@ -1,6 +1,7 @@
 import { type ILogger, LogLevel } from "@nulo/wallet-core/logger"
 import { getRandomHex } from "@nulo/wallet-core/utils"
 import { jsonSanitize } from "@nulo/wallet-core/utils"
+import { decodeResult } from "../core/decode"
 import { MessageType } from "../messages"
 import type { EventsMap, EventsSpec, MethodsMap } from "@nulo/wallet-core/base"
 import type { EventMessage, RequestMessage, ResponseMessage } from "./messages"
@@ -79,6 +80,7 @@ export abstract class ServiceClient<TRequests extends MethodsMap, TEvents extend
 	}
 
 	private readonly onMessageListener = (message: ResponseMessage<TRequests> | EventMessage<TEvents>): boolean => {
+		if (!message) return false
 		if (message.to === this.uid || (message.type === MessageType.Event && message.from === this.service && message.to === undefined)) {
 			this.onMessage(message) // fire and forget
 		}
@@ -87,7 +89,8 @@ export abstract class ServiceClient<TRequests extends MethodsMap, TEvents extend
 
 	private readonly onMessage = (message: ResponseMessage<TRequests> | EventMessage<TEvents>) => {
 		if (
-			(message?.type !== MessageType.Response && message.type !== MessageType.Event) ||
+			!message ||
+			(message.type !== MessageType.Response && message.type !== MessageType.Event) ||
 			message.from !== this.service ||
 			!message.content
 		) {
@@ -111,13 +114,10 @@ export abstract class ServiceClient<TRequests extends MethodsMap, TEvents extend
 				this.recordTerminal(requestId, endedAtMs, "rejected")
 				this.logDebug("Request rejected", message.content)
 			} else {
-				// AUDIT plan A6 fallback: when the offscreen service's
-				// structured-clone path failed and it retried with
-				// `jsonStringify`, `result` is a JSON string. Parse it back
-				// here so callers get the same shape they would on the
-				// success path. Both paths produce plain JSON-safe values
-				// (the success path via `jsonSanitize` upstream).
-				const parsed = resultIsJson && typeof result === "string" ? (JSON.parse(result) as typeof result) : result
+				// AUDIT plan A6 fallback: when the offscreen service retried
+				// with `jsonStringify` (setting `resultIsJson`), `result` is a
+				// JSON string — parse it back to the success-path shape.
+				const parsed = decodeResult(result, resultIsJson)
 				resolve(parsed)
 				this.recordTerminal(requestId, endedAtMs, "success")
 				this.logDebug("Request resolved", message.content)

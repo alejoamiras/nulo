@@ -1,9 +1,10 @@
 import { type ILogger, LogLevel } from "@nulo/wallet-core/logger"
-import { sleep } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { jsonSanitize, jsonStringify } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap, MethodsSpec, IService, EventsSpec, ServiceCollection } from "@nulo/wallet-core/base"
-import { WalletError } from "../errors"
+import { buildErrorResponseContent } from "../core/error-response"
+import { awaitInitialized } from "../core/initialization"
+import { ValidationError } from "../errors"
 import { MessageType, type EventMessage, type RequestMessage, type ResponseMessage } from "../messages"
 import { unwrapParams } from "../utils"
 
@@ -65,8 +66,23 @@ export abstract class Service<TRequests extends MethodsMap, TEvents extends Even
 			return
 		}
 		const { requestId, method, params: wrappedParams } = message.content
-		if (!requestId || !(method in this.requests) || typeof wrappedParams !== "object") {
+		if (!requestId || !(method in this.requests)) {
 			this.logWarn("Invalid request received", message)
+			return
+		}
+		if (typeof wrappedParams !== "object" || wrappedParams === null) {
+			// Valid requestId + method but malformed params. Reply with a clean
+			// error so the client rejects immediately instead of hanging until
+			// its timeout (the prior `typeof null === "object"` let null through
+			// and `unwrapParams(null)` threw — silent hang).
+			this.logWarn("Invalid request params", message)
+			this.send(
+				{
+					type: MessageType.Response,
+					content: { requestId, ...buildErrorResponseContent(new ValidationError("Invalid request params")) },
+				},
+				client,
+			)
 			return
 		}
 		const params = unwrapParams(wrappedParams)
@@ -83,18 +99,10 @@ export abstract class Service<TRequests extends MethodsMap, TEvents extends Even
 				},
 			}
 		} catch (error) {
-			const errorMessage = getErrorMessage(error)
-			this.logDebug("Request failed", requestId, errorMessage)
-			// WalletError subclasses round-trip as structured payloads so the
-			// client can reconstruct the original class + code + details.
-			const errorPayload = error instanceof WalletError ? error.toPayload() : undefined
+			this.logDebug("Request failed", requestId, getErrorMessage(error))
 			response = {
 				type: MessageType.Response,
-				content: {
-					requestId,
-					error: errorMessage,
-					...(errorPayload ? { errorPayload } : {}),
-				},
+				content: { requestId, ...buildErrorResponseContent(error) },
 			}
 		}
 		this.send(response, client)
@@ -185,17 +193,7 @@ export abstract class Service<TRequests extends MethodsMap, TEvents extends Even
 	}
 
 	protected async ensureInitialized() {
-		if (this.initialized) {
-			return
-		}
-		let restMs = 30_000
-		while (!this.initialized && restMs > 0) {
-			await sleep(500)
-			restMs -= 500
-		}
-		if (!this.initialized) {
-			throw new Error("Service not initialized")
-		}
+		await awaitInitialized(() => this.initialized)
 	}
 
 	protected logDebug(...data: unknown[]) {

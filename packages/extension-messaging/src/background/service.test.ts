@@ -200,7 +200,27 @@ describe("A6 send fallback (background — 3-tier)", () => {
 		expect(JSON.parse(fallback.content.result as string)).toBe("echo:hi")
 	})
 
-	test("tier 3: every postMessage throws → degrades to log-and-drop without escaping", async () => {
+	test("tier 3: postMessage throws twice then succeeds → sends a clean error response", async () => {
+		new TestService()
+		const client = connectServiceClient(SERVICE)
+		client
+			.captureResponse()
+			.mockImplementationOnce(() => {
+				throw new Error("send1")
+			})
+			.mockImplementationOnce(() => {
+				throw new Error("send2")
+			})
+		client.sendToService(request(1, "echo", ["hi"]))
+		await flush()
+
+		expect(client.captureResponse()).toHaveBeenCalledTimes(3)
+		const last = lastResponse(client)
+		expect(last.content.result).toBeUndefined()
+		expect(String(last.content.error)).toMatch(/Response not serializable/)
+	})
+
+	test("tier 3 (all throw): every postMessage throws → degrades to log-and-drop without escaping", async () => {
 		new TestService()
 		const client = connectServiceClient(SERVICE)
 		client.captureResponse().mockImplementation(() => {
@@ -212,6 +232,32 @@ describe("A6 send fallback (background — 3-tier)", () => {
 
 		// original + jsonStringify fallback + error-response attempt = 3 tries.
 		expect(client.captureResponse()).toHaveBeenCalledTimes(3)
+	})
+})
+
+// ── Fix (c): malformed params reply with a structured error (no hang) ──
+
+describe("malformed params (fix c — no silent hang)", () => {
+	test("null params for a valid method replies with a structured ValidationError", async () => {
+		new TestService()
+		const client = connectServiceClient(SERVICE)
+		client.sendToService({ type: MessageType.Request, content: { requestId: 9, method: "echo", params: null } })
+		await flush()
+
+		const resp = lastResponse(client)
+		expect(resp.content.requestId).toBe(9)
+		expect(resp.content.error).toBe("Invalid request params")
+		// Background emits the structured payload so the client can instanceof it.
+		expect((resp.content.errorPayload as { code: string }).code).toBe("VALIDATION")
+	})
+
+	test("non-object params replies with a structured ValidationError", async () => {
+		new TestService()
+		const client = connectServiceClient(SERVICE)
+		client.sendToService({ type: MessageType.Request, content: { requestId: 10, method: "echo", params: "oops" } })
+		await flush()
+
+		expect(lastResponse(client).content.error).toBe("Invalid request params")
 	})
 })
 
