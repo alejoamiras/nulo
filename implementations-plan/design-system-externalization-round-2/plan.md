@@ -230,7 +230,7 @@ visually UNCHANGED (frozen on `SpinnerLegacy`).** **+ human visual: extension Sp
 only (faucet is frozen — no faucet sign-off needed here).** Layers: typecheck · lint · unit · both
 builds · smoke · human-visual (extension).
 
-### P3 — Toast substrate (composable + ToastManagerBase + extension wrapper)
+### P3 — Toast substrate (composable + ToastManagerBase + extension wrapper) ✓ DONE
 
 1. Port `toast.js` → `packages/design/src/composables/toast.ts` (TS; ≥10 cases incl. timer-reset/
    close/dispose/singleton-identity). Extension `composables/toast.js` STAYS as a file, becomes an
@@ -324,6 +324,12 @@ while leaving the extension externalization (PR1–PR6) intact.
 4s spinner, fonts render). **Do NOT mark ✓ without sign-off.** Layers: full stack.
 
 ## PR / sequencing strategy
+
+**Implementation note (autonomous run):** P1–P6 (all faucet-frozen extension/package work) land on one
+integration branch `chore/design-r2-holdouts` with clean per-phase commits (granularity preserved in
+history); **P7 (faucet cutover) gets its OWN branch/PR** so dev's squash-merge keeps it independently
+revertible — that revertibility is the entire point of the deferral, so it MUST stay separate. The
+"7 PRs" below is the original phase plan; the revertibility constraint only requires P7 isolated.
 
 7 stacked PRs into `dev` (squash; PR title = Conventional Commit subject; signed): **PR1** guardrails ·
 **PR2** Spinner family (faucet frozen on `SpinnerLegacy`) · **PR3** toast substrate · **PR4** router

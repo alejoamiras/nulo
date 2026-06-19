@@ -4,7 +4,7 @@ import LoadingState from "./LoadingState.vue"
 
 // Spinner is explicitly imported by LoadingState.vue (no auto-import in the package), so the real
 // Spinner renders — its role="status" is the probe.
-const mountLoadingState = (props: Record<string, unknown> = { label: "Loading…" }) => mount(LoadingState, { props })
+const mountLoadingState = (props: { label: string; sub?: string } = { label: "Loading…" }) => mount(LoadingState, { props })
 
 describe("LoadingState", () => {
 	test("renders the label prop", () => {

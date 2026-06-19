@@ -1,4 +1,7 @@
-<script setup>
+<script setup lang="ts">
+/** Vendor */
+import type { PropType } from "vue"
+
 /** Components */
 import Flex from "../core/Flex.vue"
 import Icon from "../core/Icon.vue"
@@ -21,7 +24,7 @@ defineProps({
 		type: Boolean,
 	},
 	action: {
-		type: Object,
+		type: Object as PropType<{ name: string; callback: () => void }>,
 	},
 	isLoading: {
 		type: Boolean,

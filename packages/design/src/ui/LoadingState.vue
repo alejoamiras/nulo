@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 /** Components */
 import Spinner from "./Spinner.vue"
 

@@ -1,13 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/vue3-vite"
-import ToastManager from "./ToastManager.vue"
-import { useToast } from "@/composables/toast"
+import { useToast } from "../composables/toast"
+import ToastManagerBase from "./ToastManagerBase.vue"
 
-const meta: Meta<typeof ToastManager> = {
+const meta: Meta<typeof ToastManagerBase> = {
 	title: "UI / ToastManager",
-	component: ToastManager,
+	component: ToastManagerBase,
 	tags: ["autodocs"],
 	render: () => ({
-		components: { ToastManager },
+		components: { ToastManagerBase },
 		setup() {
 			const { openToast } = useToast()
 			return {
@@ -23,13 +23,13 @@ const meta: Meta<typeof ToastManager> = {
 					<button @click="show('Something went wrong', 'red', 'warning')">Show red</button>
 					<button @click="show('Heads up', 'orange', 'info')">Show orange</button>
 				</div>
-				<ToastManager />
+				<ToastManagerBase />
 			</div>
 		`,
 	}),
 }
 export default meta
 
-type Story = StoryObj<typeof ToastManager>
+type Story = StoryObj<typeof ToastManagerBase>
 
 export const Default: Story = {}
