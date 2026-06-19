@@ -10,9 +10,7 @@
 		"./errors": "./src/errors.ts",
 		"./messages": "./src/messages.ts",
 		"./utils": "./src/utils.ts",
-		"./zod": "./src/zod-helpers.ts",
-		"./lazy-listener": "./src/lazy-listener.ts",
-		"./subscribe-with-snapshot": "./src/subscribe-with-snapshot.ts"
+		"./zod": "./src/zod-helpers.ts"
 	},
 	"scripts": {
 		"test": "vitest run --passWithNoTests",
