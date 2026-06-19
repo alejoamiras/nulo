@@ -98,7 +98,9 @@ Five reasons shape the phasing (all verified):
 
 **Validation gate.** `bun run --cwd packages/aztec-runtime typecheck` exit 0; `bun run --cwd packages/aztec-runtime test` green (esp. `fee-options.test.ts` incl. new cases); `bun run lint`. Layers: typecheck + unit + lint.
 
-### Phase 3 — wallet-bridge + extension + schema patch + storage wipe
+### Phase 3 — wallet-bridge + extension + schema patch + storage wipe — ✓ DONE
+
+> Gate: extension/wallet-bridge/extension-messaging typecheck 0 + tests green; schema-patch v4 (3 copies + dispatcher drift-test); registerContractClass neutralized (codex); storage v8. Part of the workspace `audit:vue` (typecheck:all 0 + test:all + lint + build all green). See `lessons/phase-3.md`.
 
 **Objective.** Green the extension + wallet-bridge; preserve the custom RPC contract; bump storage version with documented wipe.
 
@@ -111,7 +113,9 @@ Five reasons shape the phasing (all verified):
 
 **Validation gate.** `bun run audit:vue` (typecheck:all → extension test → lint → build) exit 0 **AND** `bun run test:all` green so the wallet-bridge suite runs — specifically `dispatcher.test.ts` + `method-descriptors.test.ts`; plus the extension slot tripwire `note/note-schemas.test.ts`. Layers: typecheck + unit (all pkgs) + component + lint + build.
 
-### Phase 4 — faucet + playground migration
+### Phase 4 — faucet + playground migration — ✓ DONE
+
+> Gate: faucet + playground typecheck 0 + faucet 336 tests + lint + build; `verify:deployments` green (deployments.json re-pinned to 5.0 deterministic addresses). See `lessons/phase-4.md`.
 
 **Objective.** Green faucet + playground; re-pin deterministic deploy addresses offline; migrate faucet bridge runtime sites.
 
@@ -124,7 +128,9 @@ Five reasons shape the phasing (all verified):
 
 **Validation gate.** `bun run audit:faucet` (typecheck:all → test:faucet → lint → **verify:deployments** → build:faucet) exit 0; `bun run --cwd packages/playground typecheck` **and** `build`. Layers: typecheck + unit + lint + build + offline deploy-verify.
 
-### Phase 5 — Noir bridge recompile + bridge TS + manifests
+### Phase 5 — Noir bridge recompile + bridge TS + manifests — ✓ DONE (code); bridge `--smoke` pending a 5.0 sandbox
+
+> Gate: 3 Noir crates' deployable artifacts recompiled against aztec-nr v5.0.0-rc.1 (no source changes — message-API insulated); bridge-core typecheck 0 + 112 tests (incl. the 7-arg withdraw fix + PrivateFPC tripwire). Remaining: bridge `--smoke` (deposit/claim/withdraw/consume) on a live 5.0 sandbox + keystone full compile (timed out locally; non-critical-path). See `lessons/phase-5.md`.
 
 **Objective.** Recompile the Noir crates against aztec-nr 5.0; green bridge-core TS; validate bridge end-to-end incl. its manifest + L1 verification surface.
 
