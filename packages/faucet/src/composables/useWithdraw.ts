@@ -37,7 +37,7 @@ import { useL1Wallet } from "./useL1Wallet"
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
 const log = (...args: unknown[]) => console.log("[bridge:withdraw]", ...args)
 
-const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://rpc.testnet.aztec-labs.com"
+const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 const PROVEN_TIMEOUT_SEC = 1800
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))

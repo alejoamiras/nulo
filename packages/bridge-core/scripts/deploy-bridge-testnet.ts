@@ -51,7 +51,7 @@ const TOKEN_SYMBOL = "AZLO"
 const TOKEN_DECIMALS = 18
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
-const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://rpc.testnet.aztec-labs.com"
+const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}` | undefined
 const MNEMONIC = process.env.MNEMONIC
 if (!PRIVATE_KEY && !MNEMONIC) throw new Error("PRIVATE_KEY or MNEMONIC required (packages/bridge-core/.env)")

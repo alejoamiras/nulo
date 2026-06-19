@@ -4,7 +4,7 @@
  * specific — depositing real Fee Juice to an address derived from the wrong version is an
  * UNRECOVERABLE loss. Run this (read-only, no keys) before any fund-moving private-fuel run.
  *
- *   AZTEC_NODE_URL=https://rpc.testnet.aztec-labs.com bun packages/bridge-core/scripts/check-fpc-version.ts
+ *   AZTEC_NODE_URL=https://v5.testnet.rpc.aztec-labs.com bun packages/bridge-core/scripts/check-fpc-version.ts
  *
  * Exit 0 = the network's major.minor matches the artifact pin. Exit 1 = mismatch (STOP: re-pin via
  * the bridge-core address tripwire + dust-canary on the live net before trusting the address).
@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url"
 
 import { PRIVATE_FPC_ADDRESS } from "../src/private-fuel"
 
-const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://rpc.testnet.aztec-labs.com"
+const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 
 function resolvePackageFile(pkg: string, file: string): string {
 	const parts = pkg.startsWith("@") ? pkg.split("/").slice(0, 2) : [pkg.split("/")[0]]
