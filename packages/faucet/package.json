@@ -20,6 +20,7 @@
 		"@aztec/aztec.js": "5.0.0-rc.1",
 		"@aztec/bb.js": "5.0.0-rc.1",
 		"@aztec/constants": "5.0.0-rc.1",
+		"@aztec/ethereum": "5.0.0-rc.1",
 		"@aztec/foundation": "5.0.0-rc.1",
 		"@aztec/noir-acvm_js": "5.0.0-rc.1",
 		"@aztec/noir-contracts.js": "5.0.0-rc.1",
