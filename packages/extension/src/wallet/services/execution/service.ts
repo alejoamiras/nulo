@@ -71,6 +71,11 @@ import { type ProofGate, NOOP_PROOF_GATE } from "@/e2e/proof-gate"
 
 export * from "./spec"
 
+/** Default PXE-client factory: the real RPC-backed client. Exported so the
+ *  construction seam (real client vs the composition-test fake) is unit-testable
+ *  without spinning up `init()` + a full ServiceCollection. */
+export const DEFAULT_PXE_CLIENT_FACTORY = (logger: ILogger): PxeServiceClient => new PxeServiceClient(logger)
+
 export class ExecutionService extends Service<Methods> implements ServiceSpec<Methods> {
 	public static name = EXECUTION_SERVICE_NAME
 
@@ -127,12 +132,18 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		/** E2E-only proving hold-point, forwarded to the coordinator. The
 		 *  no-op default keeps production proving unimpeded. */
 		private readonly proofGate: ProofGate = NOOP_PROOF_GATE,
+		/** PXE-client factory — the seam for in-process composition tests. The
+		 *  default builds the real RPC-backed client, so production is unchanged;
+		 *  tests inject a fake to drive the graph without the offscreen PXE /
+		 *  Aztec sandbox. (Rollout: extract an `ExecutionPxePort` interface to
+		 *  drop the test-side cast — deferred per the spike's codex audit.) */
+		private readonly pxeClientFactory: (logger: ILogger) => PxeServiceClient = DEFAULT_PXE_CLIENT_FACTORY,
 	) {
 		super(EXECUTION_SERVICE_NAME, logger)
 	}
 
 	protected async init(services: ServiceCollection) {
-		this.pxeService = new PxeServiceClient(this.logger)
+		this.pxeService = this.pxeClientFactory(this.logger)
 		this.profileService = services.get(ProfileService.name)
 		this.networkService = services.get(NetworkService.name)
 		this.accountService = services.get(AccountService.name)
