@@ -81,8 +81,15 @@ const getStyles = () => {
 	]
 }
 
-// rel hygiene on external-target anchors (reverse-tabnabbing protection).
-const rel = computed(() => (props.tag === "a" && props.target === "_blank" ? "noopener noreferrer" : undefined))
+// rel hygiene on anchors that open/reuse a SEPARATE browsing context (reverse-tabnabbing
+// protection). _self/_parent/_top reuse an existing context — no new window.opener to leak. _blank
+// AND any named target are opener-capable, so both get noopener noreferrer. Modern browsers default
+// _blank to noopener, but named targets do NOT — the primitive hardens both rather than trusting the UA.
+const rel = computed(() => {
+	if (props.tag !== "a" || !props.target) return undefined
+	const reusesContext = props.target === "_self" || props.target === "_parent" || props.target === "_top"
+	return reusesContext ? undefined : "noopener noreferrer"
+})
 </script>
 
 <template>
