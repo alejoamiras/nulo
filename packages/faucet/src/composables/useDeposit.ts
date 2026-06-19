@@ -425,6 +425,13 @@ function wireDepositDeps(): void {
 			}
 		},
 		l2BlockNumber: async () => Number(await createAztecNodeClient(NODE_URL).getBlockNumber()),
+		messageReadiness: async (messageHash) => {
+			const node = createAztecNodeClient(NODE_URL)
+			const cp = await node.getL1ToL2MessageCheckpoint(Fr.fromString(messageHash))
+			if (cp === undefined || cp === null) return null
+			const latest = await node.getBlockData("latest")
+			return { checkpoint: Number(cp), anchor: Number(latest?.checkpointNumber ?? 0) }
+		},
 		claimReceiptStatus: async (txHash) => {
 			const node = createAztecNodeClient(NODE_URL)
 			try {
@@ -694,7 +701,17 @@ export function useDepositFlow() {
 				setRecordStep(id, "depositing", "waiting for the Ethereum confirmation")
 				const fuelReceipt = await l1.publicClient.waitForTransactionReceipt({ hash: fuelTxHash as `0x${string}` })
 				const fuelEvents = parseEventLogs({ abi: SWAP_BRIDGE_ROUTER_ABI, eventName: "BridgeWithFuel", logs: fuelReceipt.logs })
-				const fe = fuelEvents[0] as { args?: { tokenIndex?: bigint; fuelIndex?: bigint; fuelAmount?: bigint } } | undefined
+				const fe = fuelEvents[0] as
+					| {
+							args?: {
+								tokenKey?: `0x${string}`
+								tokenIndex?: bigint
+								fuelKey?: `0x${string}`
+								fuelIndex?: bigint
+								fuelAmount?: bigint
+							}
+					  }
+					| undefined
 				if (fe?.args?.tokenIndex === undefined || fe.args.fuelIndex === undefined || fe.args.fuelAmount === undefined) {
 					throw new Error("bridgeWithFuel emitted no BridgeWithFuel event")
 				}
@@ -707,6 +724,7 @@ export function useDepositFlow() {
 				// fuel.received comes from the EVENT - the content-hash law; the quote was display-only.
 				updateRecord(id, {
 					leafIndex: fe.args.tokenIndex.toString(),
+					messageHash: fe.args.tokenKey,
 					depositL2Block: fuelL2Block,
 					fuel: {
 						amount: fuelSlice.toString(),
@@ -714,6 +732,7 @@ export function useDepositFlow() {
 						secretHashHex: fuelPre.secretHashHex,
 						minOutput: fuelPre.minOutput.toString(),
 						leafIndex: fe.args.fuelIndex.toString(),
+						messageHash: fe.args.fuelKey,
 						received: fe.args.fuelAmount.toString(),
 						...(isPrivate ? { bridgeSecretSalt: fuelPre.salt?.toString(), fpc: PRIVATE_FPC_ADDRESS } : {}),
 					},
