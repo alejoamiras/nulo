@@ -37,7 +37,7 @@ declare module 'vue' {
     ImportFullBackupForm: typeof import('./../components/composite/import/ImportFullBackupForm.vue')['default']
     ImportMethodPicker: typeof import('./../components/composite/import/ImportMethodPicker.vue')['default']
     ImportSecretForm: typeof import('./../components/composite/import/ImportSecretForm.vue')['default']
-    Input: typeof import('./../components/ui/Input.vue')['default']
+    Input: typeof import('@nulo/design')['Input']
     Install: typeof import('./../components/install.vue')['default']
     ItemsContainer: typeof import('./../components/ui/Settings/ItemsContainer.vue')['default']
     JsonViewer: typeof import('./../components/JsonViewer/JsonViewer.vue')['default']

@@ -279,7 +279,7 @@ override `teleportTo`) · `bun run test` (Dropdown still resolves `useOutside`) 
 `bun run build` · `bun run test:e2e` (tooltip/popover/dropdown; no teleport-resolution console
 errors). Pass: all exit 0; no NEW smoke failures. Layers: typecheck · lint · unit · build · smoke.
 
-### P6 — Input (EXTENSION ONLY)
+### P6 — Input (EXTENSION ONLY) ✓ DONE
 
 1. `Input` → `src/ui/` rendering the package `Tooltip`. **Full explicit-import set** (`ref`, `watch`,
    `computed`, `onMounted`, `nextTick` + `Tooltip`, `Icon`, `Text`, `Flex`). `sanitizeString` →

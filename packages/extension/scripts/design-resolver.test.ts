@@ -29,7 +29,8 @@ const EXPECTED_MIGRATED = [
 	// round 2 — P5 host-DOM family (local SFCs deleted)
 	"Tooltip",
 	"Popover",
-	// later phases add: P6 → Input
+	// round 2 — P6 Input (local SFC deleted)
+	"Input",
 ]
 
 // Wrapper-backed: the extension keeps a LOCAL SFC of this name, so the bare tag must resolve to that

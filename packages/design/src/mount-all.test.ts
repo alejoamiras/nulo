@@ -10,6 +10,7 @@ import Banner from "./ui/Banner.vue"
 import BrutalistTitle from "./ui/BrutalistTitle.vue"
 import Button from "./ui/Button.vue"
 import Checkbox from "./ui/Checkbox.vue"
+import Input from "./ui/Input.vue"
 import LoadingState from "./ui/LoadingState.vue"
 import Popover from "./ui/Popover.vue"
 import SectionLabel from "./ui/SectionLabel.vue"
@@ -45,6 +46,8 @@ const cases: Array<[string, Component, Record<string, unknown>]> = [
 	["SubPageHeaderBase", SubPageHeaderBase, { title: "X" }],
 	["Tooltip", Tooltip, {}],
 	["Popover", Popover, {}],
+	// placeholder is required; exercises the explicit Tooltip/Icon/Text/Flex + onMounted/nextTick imports.
+	["Input", Input, { placeholder: "x" }],
 ]
 
 describe("@nulo/design components mount without auto-import", () => {

@@ -24,6 +24,8 @@ export const NULO_DESIGN_COMPONENTS = new Set([
 	// round 2 — P5 host-DOM family
 	"Tooltip",
 	"Popover",
+	// round 2 — P6 Input
+	"Input",
 ])
 
 export function nuloDesignResolver(): ComponentResolver {
