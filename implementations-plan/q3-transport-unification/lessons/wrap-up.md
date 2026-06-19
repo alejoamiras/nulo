@@ -30,7 +30,7 @@ The two forked transport stacks are gone: one `BaseServiceClient` + one `BaseSer
 ## Validation
 
 - **Standard (final):** `bun run lint` exit 0; `bun run --cwd packages/extension-messaging test` 143; `bun run --cwd packages/extension test` 2572; aztec-runtime 32; all typechecks clean.
-- **Network (real-Chrome lifecycle):** per-phase runs P1 (11 jobs), P2/P3 (8 jobs) each green with jobs CONFIRMED RUN (not skipped) on a latest-dev base. P4's standalone run was superseded by P5; the P5 cumulative run (27828443110) and the audit-fix run (27829413459) validate P1–P5 end-to-end. Exactly-once correlator properties are unit-proven (not e2e-hoped); lifecycle (SW-death/reconnect, keepalive, structured-clone) is real-Chrome-e2e.
+- **Network (real-Chrome lifecycle):** per-phase runs P1 (11 jobs), P2/P3 (8 jobs) each green with jobs CONFIRMED RUN (not skipped) on a latest-dev base. P4's standalone run was superseded by P5; the cumulative runs validate P1–P5 end-to-end. **Final run 426b00a / 27829569434: completed/success, 8 jobs ran (not skipped), latest-dev base** — the authoritative green. Exactly-once correlator properties are unit-proven (not e2e-hoped); lifecycle (SW-death/reconnect, keepalive, structured-clone) is real-Chrome-e2e.
 
 ## Open items
 
