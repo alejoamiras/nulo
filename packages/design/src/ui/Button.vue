@@ -286,11 +286,8 @@ const rel = computed(() => (props.tag === "a" && props.target === "_blank" ? "no
 	line-height: 1;
 }
 
-/** CTA — full-width brutalist call-to-action used for primary
- *  page-level submits (Continue, Decrypt Backup, Import, Confirm).
- *  Replaces 22 raw `<button class="cta">` sites that bypassed
- *  Button.vue across import.vue, security/export/*, change-password,
- *  reset, profile/new. */
+/** CTA — full-width brutalist call-to-action for primary page-level
+ *  submits (Continue, Decrypt Backup, Import, Confirm). */
 .wrapper.cta {
 	width: 100%;
 	background: var(--nulo-accent);
@@ -314,8 +311,7 @@ const rel = computed(() => (props.tag === "a" && props.target === "_blank" ? "no
 }
 
 /** Outlined CTA flavor — transparent + nulo-outline border + secondary
- *  text. Used as a Cancel / Back partner to a primary CTA. Replaces
- *  the legacy `cta + cta_outline` class combo (6 sites). */
+ *  text. Used as a Cancel / Back partner to a primary CTA. */
 .wrapper.cta_outline {
 	width: 100%;
 	background: transparent;
@@ -336,8 +332,7 @@ const rel = computed(() => (props.tag === "a" && props.target === "_blank" ? "no
 }
 
 /** Destructive CTA flavor — red bg + white text. Reserved for
- *  irreversible actions (Delete Profile, Wipe Wallet). Replaces the
- *  legacy `cta + cta_red` class combo (1 site: settings/security/reset). */
+ *  irreversible actions (Delete Profile, Wipe Wallet). */
 .wrapper.cta_destructive {
 	width: 100%;
 	background: var(--red);
