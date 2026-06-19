@@ -1,6 +1,6 @@
 # Phase 4 — Offscreen client typed-error flip + dApp envelope (HIGH, dApp-reaching)
 
-**Status:** code + standard gate ✓. Network leg (incl. dApp-error-contract) in CI; finalize ✓ on green/latest-dev.
+**Status:** ✓ complete. Standard gate ✓; network validated by the P5 cumulative run (27828443110 on 04081a5, 8 jobs ran+passed) which contains the offscreen flip + dApp envelope. The dApp-error-contract is unit-pinned (error-envelope.test.ts).
 
 ## What shipped
 

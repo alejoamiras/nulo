@@ -173,19 +173,38 @@ export abstract class BaseServiceClient<TRequests extends MethodsMap, TEvents ex
 		}
 		if (content.error !== undefined || content.errorPayload !== undefined) {
 			this.settle(content.requestId, { reject: this.makeRemoteError(content) }, "rejected")
-		} else {
-			this.settle(content.requestId, { resolve: decodeResult(content.result, content.resultIsJson) }, "success")
+			return
 		}
+		let decoded: unknown
+		try {
+			decoded = decodeResult(content.result, content.resultIsJson)
+		} catch (cause) {
+			// Malformed `resultIsJson` payload. Fail closed: settle (which clears
+			// the pending entry) with an error, rather than letting the throw
+			// escape this listener and leak the request until its timeout.
+			const message = cause instanceof Error ? cause.message : String(cause)
+			this.settle(content.requestId, { reject: new Error(`Malformed response payload: ${message}`) }, "rejected")
+			return
+		}
+		this.settle(content.requestId, { resolve: decoded }, "success")
 	}
 
-	/** Invoke the local handler for a received event. Hardened: only a real
-	 *  `EventHandler` property is invoked, so a hostile message naming an
-	 *  arbitrary `event` (e.g. `toString`, `constructor`) can't reach an
-	 *  unrelated property or crash the listener. */
+	/** Framework-reserved property names that are EventHandlers but NEVER wire
+	 *  events — invoked locally by lifecycle, never dispatched from a message.
+	 *  The background transport reserves `onConnected`/`onDisconnected`. */
+	protected readonly reservedEventNames: ReadonlySet<string> = new Set()
+
+	/** Invoke the local handler for a received event. Hardened two ways: the
+	 *  named property must be a real `EventHandler` (so `toString`/`constructor`/
+	 *  etc. can't reach an unrelated property or crash the listener), AND it must
+	 *  not be a framework-reserved lifecycle handler (so a forged message can't
+	 *  drive reconnect/subscription logic via `onConnected`/`onDisconnected`).
+	 *  Since every client's other EventHandlers are exactly its declared TEvents
+	 *  events, this is the declared-event allowlist in practice. */
 	protected handleEvent(event: keyof TEvents, payload: TEvents[keyof TEvents]): void {
 		const handler = (this as unknown as Record<PropertyKey, unknown>)[event]
-		if (!(handler instanceof EventHandler)) {
-			this.logWarn("Unknown event received", event)
+		if (this.reservedEventNames.has(String(event)) || !(handler instanceof EventHandler)) {
+			this.logWarn("Unknown or reserved event received", event)
 			return
 		}
 		handler.invoke(payload)

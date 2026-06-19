@@ -149,3 +149,54 @@ describe("service — hostile requests", () => {
 		expect(resp.content.result).toBe("echo:ok")
 	})
 })
+
+// ── Post-audit hardening (codex post-impl findings) ───────────────────
+
+describe("post-audit hardening", () => {
+	test("forged framework lifecycle events (onConnected/onDisconnected) are dropped — no reconnect hijack", async () => {
+		const c = new HClient()
+		await c.connect()
+		const connected: unknown[] = []
+		const disconnected: unknown[] = []
+		c.onConnected.add(() => connected.push(1))
+		c.onDisconnected.add(() => disconnected.push(1))
+		// A message naming a reserved lifecycle handler must NOT invoke it.
+		emitPortMessage(SERVICE, { type: MessageType.Event, content: { event: "onConnected", payload: undefined } })
+		emitPortMessage(SERVICE, { type: MessageType.Event, content: { event: "onDisconnected", payload: undefined } })
+		expect(connected).toHaveLength(0)
+		expect(disconnected).toHaveLength(0)
+	})
+
+	test("malformed resultIsJson response fails closed (rejects, does not hang)", async () => {
+		const c = new HClient()
+		await c.connect()
+		const promise = c.echo("hi")
+		const id = lastRequestId()
+		// resultIsJson=true but the result is not valid JSON → decode throws.
+		emitPortMessage(SERVICE, {
+			type: MessageType.Response,
+			content: { requestId: id, result: "{not json", resultIsJson: true },
+		} as ResponseMessage<Methods>)
+		await expect(promise).rejects.toThrow(/Malformed response payload/)
+		// biome-ignore lint/suspicious/noExplicitAny: probing the correlator's pending count
+		expect((c as any).pendingCount).toBe(0)
+	})
+
+	test.each([Number.NaN, Number.POSITIVE_INFINITY, 1.5])("non-safe-integer requestId %s → no response", async (requestId) => {
+		new HService()
+		const client = connectServiceClient(SERVICE)
+		client.sendToService({ type: MessageType.Request, content: { requestId, method: "echo", params: wrapParams(["x"]) } })
+		await flush()
+		expect(client.captureResponse()).not.toHaveBeenCalled()
+	})
+
+	test("sparse/oversized params object does not DoS (responds fast, bounded unwrap)", async () => {
+		new HService()
+		const client = connectServiceClient(SERVICE)
+		// A single huge key used to drive a ~10^9-iteration unwrap loop.
+		client.sendToService({ type: MessageType.Request, content: { requestId: 1, method: "echo", params: { 999999999: "x" } } })
+		await flush()
+		// It replies (no hang/crash); the sparse object unwraps to no args.
+		expect(client.captureResponse()).toHaveBeenCalled()
+	})
+})

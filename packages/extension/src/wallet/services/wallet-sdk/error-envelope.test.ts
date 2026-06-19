@@ -72,12 +72,12 @@ describe("toWalletResponseError", () => {
 		expect(JSON.stringify(env)).not.toContain("Offscreen")
 	})
 
-	test("RpcDisconnectedError → {code:4900, walletErrorCode} with a generic, leak-free message", () => {
+	test("RpcDisconnectedError → {code:-32603, walletErrorCode} (transient; NOT 4900) with a leak-free message", () => {
 		const env = toWalletResponseError(
 			new RpcDisconnectedError("Offscreen send failed: simulateTx", { requestId: 8, methodName: "simulateTx" }),
 		)
 		expect(env).toEqual({
-			code: 4900,
+			code: -32603,
 			message: "The wallet was disconnected while processing the request.",
 			data: { walletErrorCode: "RPC_DISCONNECTED" },
 		})

@@ -32,6 +32,10 @@ export abstract class ServiceClient<
 	public onConnected: EventHandler<void> = new EventHandler()
 	public onDisconnected: EventHandler<void> = new EventHandler()
 
+	/** onConnected/onDisconnected are local lifecycle signals — never wire
+	 *  events. Reserve them so a forged event message can't invoke them. */
+	protected override readonly reservedEventNames: ReadonlySet<string> = new Set(["onConnected", "onDisconnected"])
+
 	private state: ClientState = ClientState.Disconnected
 	private port?: chrome.runtime.Port
 

@@ -1,6 +1,6 @@
 # Phase 5 — security hardening sweep on the unified seam
 
-**Status:** code + standard gate ✓. Network leg in CI; finalize ✓ on green/latest-dev.
+**Status:** ✓ complete. Standard + network both green (cumulative run 27828443110 on 04081a5, 8 jobs ran+passed).
 
 ## Note on `/harden`
 

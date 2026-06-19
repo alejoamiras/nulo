@@ -59,10 +59,13 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 	}
 	if (error instanceof RpcDisconnectedError) {
 		// The wallet's internal transport (popup↔SW / SW↔offscreen) dropped
-		// before the request was answered. 4900 = EIP-1193 "Disconnected".
-		// Transient — the dApp should retry. Generic message; no internal detail.
+		// before the request was answered. This is TRANSIENT (the worker
+		// reconnects) — deliberately NOT EIP-1193 4900 "Disconnected", which dApp
+		// libraries treat as a hard provider disconnect and may use to tear down
+		// session state. -32603 (JSON-RPC Internal error) + the walletErrorCode
+		// discriminator lets a dApp recognise + retry without nuking the session.
 		return {
-			code: 4900,
+			code: -32603,
 			message: "The wallet was disconnected while processing the request.",
 			data: { walletErrorCode: RpcDisconnectedError.CODE },
 		}
