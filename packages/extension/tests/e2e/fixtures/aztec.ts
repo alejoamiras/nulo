@@ -249,7 +249,8 @@ export async function waitForL1ToL2Message(
 ): Promise<void> {
 	const start = Date.now()
 	while (Date.now() - start < timeoutMs) {
-		const synced = await node.isL1ToL2MessageSynced(Fr.fromString(messageHash))
+		// 5.0 removed isL1ToL2MessageSynced; the membership witness is present iff the message synced.
+		const synced = await node.getL1ToL2MessageMembershipWitness("latest", Fr.fromString(messageHash))
 		if (synced) {
 			console.log(`[waitForL1ToL2Message] Message synced after ${Date.now() - start}ms`)
 			break

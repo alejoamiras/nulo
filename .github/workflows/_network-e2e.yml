@@ -176,15 +176,18 @@ jobs:
           # tracing-subscriber default = info; emits "Received /prove request"
           # for each prove + version-cache info we tail in the advisory step.
           RUST_LOG: "info"
-          # ALLOWED_ORIGINS deliberately unset:
-          #   - upstream accelerator-server.rs:32-49 documents that when
-          #     unset, auth_manager=None → server.rs:210 auto-approves all
-          #     origins (headless-mode contract). Confirmed in lessons/phase-1.md.
-          #   - the README's example `ALLOWED_ORIGINS=http://localhost:5173`
-          #     is WRONG for our extension (our offscreen origin is
-          #     chrome-extension://<id>, not the playground origin).
-          #     Setting it to that would 403 every /prove → silent WASM
-          #     fallback (which Layer 2 catches but as a confusing error).
+          # ACCEL_ALLOW_ALL approves every browser origin. accelerator-server v1.0.6
+          # (SEC-01c) flipped the headless default to deny-by-default: with ALLOWED_ORIGINS
+          # unset, localhost is auto-approved but every NON-localhost origin is DENIED. Our
+          # offscreen prover calls /prove from chrome-extension://<id> (non-localhost) with
+          # no popup available in headless CI → request denied → no proof → the canary tx
+          # errors / times out (NOT a silent WASM fallback — the required-mode build throws).
+          # We can't pre-list the origin in ALLOWED_ORIGINS because the unpacked-extension id
+          # isn't known until Chrome loads it, so allow-all is the headless contract (it is
+          # mutually exclusive with ALLOWED_ORIGINS, which stays unset). Safe per SECURITY.md:
+          # loopback-only (127.0.0.1:59833), single-tenant runner, fork PRs receive no secrets,
+          # and the only /prove traffic originates from the wallet we just built.
+          ACCEL_ALLOW_ALL: "1"
         run: |
           set -euo pipefail
           # BB_BINARY_PATH is defined INSIDE the script, not in `env:`, because

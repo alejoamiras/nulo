@@ -78,3 +78,26 @@ gasFees.feePerL2Gas=924043800000
 Note the wallet's **runtime** fee path was already 5.0-safe — it derives `maxFeesPerGas` from `node.getCurrentMinFees()` (× 1.5 padding generally; ×1.0 for embedded-FPC via `embedded-fpc-cap.ts`), so it auto-tracks the network. Only the e2e fixture's *flat hardcoded* ceiling needed bumping.
 
 The `Address already in use (os error 98)` line still prints on boot but remains non-fatal noise — setup now proceeds well past it (L1 deploy → health → fixture deploy).
+
+With Blockers 1–3 fixed the suite actually ran: **5/5 bulk shards + heavy/concurrent-confirm passed**. Two test-level failures remained — one deterministic 5.0 API rename, one accelerator-config regression from the Phase-0 pin bump.
+
+## Blocker 4 — `node.isL1ToL2MessageSynced` removed in 5.0 (FIXED)
+
+`heavy/fee-methods` (the Fee Juice claim flow) died: `TypeError: node.isL1ToL2MessageSynced is not a function`. The e2e helper `waitForL1ToL2Message` polled that method (gone in 5.0). The fixtures aren't in the `tsconfig` `include`, so this slipped past `typecheck:all` and only surfaced at runtime.
+
+**Fix** (`fixtures/aztec.ts`): poll `getL1ToL2MessageMembershipWitness("latest", hash)` instead — the witness is present iff the message synced (returns `[index, path] | undefined`). Verified on the 5.0 `AztecNode` interface (`@aztec/stdlib/.../aztec-node.d.ts`); `BlockParameter` accepts `"latest"`.
+
+## Blocker 5 — accelerator-server v1.0.6 deny-by-default origin gating denied the canary's /prove (FIXED)
+
+`canary/real-proving` failed both tests (transfers timed out on the success toast; tx-sendTx-default got `'error'`). The build was correctly required-mode-stamped and `bb_available=true`, and the accelerator received 2 `/prove` requests — but its own log (artifact `/tmp/accelerator-server.log`) showed:
+
+```
+INFO accelerator_core::server::auth: Origin not approved (no popup available),
+     denying origin=chrome-extension://<id>
+```
+
+**Root cause:** the Phase-0 pin bump (v1.0.1 → v1.0.6) crossed accelerator-server's **SEC-01c** change. v1.0.1 with `ALLOWED_ORIGINS` unset → `auth_manager=None` → approve-all (the headless contract our CI + SECURITY.md relied on). v1.0.6 flipped unset to **deny-by-default**: localhost auto-approved, every non-localhost origin denied. Our offscreen prover calls from `chrome-extension://<id>` (non-localhost) and headless CI has no popup to approve → `/prove` denied → no proof → required-mode tx errors/timeouts.
+
+**Fix** (`_network-e2e.yml`): set `ACCEL_ALLOW_ALL: "1"` on the start step (per the v1.0.6 README — `--allow-all`/`ACCEL_ALLOW_ALL=1` opts back into approving every origin; mutually exclusive with `ALLOWED_ORIGINS`, which stays unset). We can't pre-list the origin because the unpacked-extension id isn't known until Chrome loads it. Safe per the unchanged SECURITY.md threat model (loopback-only, single-tenant runner, fork PRs get no secrets). SECURITY.md "Origin authorization" updated to match.
+
+**Lesson:** when bumping an external binary pin, diff its release notes for default-behavior changes — a version bump silently changed an auth default that our "deliberately unset" config depended on. The `bb_available=true` preflight passed (proving was *capable*), masking that requests were being *denied* — the decisive signal was in the binary's own log, not the health endpoint.
