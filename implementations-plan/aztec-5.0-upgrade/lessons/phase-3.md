@@ -18,4 +18,13 @@ Bottom-up: `extension-messaging` (zod v4 issue-path widening) committed first �
 ## Notes
 - wallet-bridge had 4 line-count "errors" — likely the schema-patch via the extension copy (dispatcher.test imports it). Re-check after the schema-patch fix.
 
+## Resolved
+- **Schema patch → zod v4** (codex `019edfc5`): `z.function({input:z.tuple([...]),output})`; proxy reads `schema.def.input/.def.output`. Applied to all 3 copies + dispatcher.test (`.def` shape) with a stronger arg-type+output-type guard (closes the earlier audit hardening condition). 633aa1ca.
+- **`registerContractClass`** (new in 5.0 WalletSchema; codex `vEEG6mIc`): **neutralized** — NOT dApp-exposed. It's an unbound PXE artifact write (no chain check) and Nulo's authz can't scope it yet (`contractClasses` read-only, no `canRegister`; sync ScopeCheck vs async class-id derivation). `handler`-routed descriptor + `checkRegisterContractClassDisabled` deny-checker (throws at scope-enforcement = single source of truth). Skipped codex's suggested dispatcher throw — it'd be unreachable dead code (scope runs before routing). Frozen parity snapshots 14→15. 63dbd1a1.
+  - **Follow-up if ever exposed:** add `contractClasses.canRegister`, `requestCapabilities` delta coverage, popup/settings copy, `aztec_registerContractClass` op plumbing + an async class-id scope gate.
+- **Storage v8** + ARCHITECTURE doc. 633aa1ca.
+
+## P3 status: package-level DONE
+extension / extension-messaging / wallet-bridge / aztec-runtime all typecheck 0 + tests green. The plan's `audit:vue` gate is workspace-wide (`typecheck:all`), so the formal P3 ✓ runs together with P4/P5 once faucet/playground/bridge are green too.
+
 LESSONS_FILE=implementations-plan/aztec-5.0-upgrade/lessons/phase-3.md
