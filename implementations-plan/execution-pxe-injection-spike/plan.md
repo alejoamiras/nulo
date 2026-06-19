@@ -67,6 +67,13 @@ Verdict: **conditional approve.** All 3 conditions ADOPTED (verified against cod
 Plus codex's finding that the existing suite bypasses the construction seam → ADOPTED: added the Phase-1 default-wiring test. Rejected: none. (Rollout-only suggestion — a dedicated `ExecutionPxePort` instead of the client — noted for the rollout, NOT the spike.)
 Transcript: `audit-codex.md`.
 
+## Post-implementation audit (codex xhigh, session 019ee18e)
+
+Verdict: **production safety intact** — no runtime path for production to reach a fake PXE (prod builds `ExecutionService` only in `runtime.ts`; `init()` uses the default factory; `*.test.ts` are test-runner inputs only). Findings:
+- **High (test confidence) — ADDRESSED.** The composition test originally faked the journal + had loose assertions, so it didn't exercise the real FSM and could pass even if cancel fired at a later checkpoint. Fixed: it now uses the REAL `OperationJournalService` (FakeBrowserApi-backed FSM + transition lock), asserts the op ends terminally `cancelled` and NEVER reaches `submitting`/`succeeded`, and spies `toTx` to prove the proof artifact was dropped at the post-PROVE checkpoint (never converted to a tx, never sent). (Bonus: using the real journal surfaced that `TransferType` is a numeric enum — the stub had masked an invalid string.)
+- **Medium (scope) — ADDRESSED (doc).** The test seeds private `estimateReuse` + skips the fresh-build path. Re-documented narrowly in the test header + lessons: it proves the REUSED-prepared-tx cancel path, not the full execution path. Rollout: extract a narrower preparation seam.
+- **Low (wiring) — covered.** The pxe-seam unit pins the default factory's type; the composition test now exercises the injected factory end-to-end (the real graph runs against the fake via the constructor seam), so `init()` using the seam is proven.
+
 ## Seeds (draft — finalized after approval)
 
 See `eli5.html`. `/goal` recommended (completion fully transcript-observable: 3 phases ✓ + fast-layer gates).

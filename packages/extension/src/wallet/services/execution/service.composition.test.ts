@@ -1,14 +1,16 @@
 /**
  * Composition test (integration-test spike, Phases 2+3): drives the REAL
- * ExecutionService → coordinator → journal/lane graph in-process against fakes,
- * with NO Aztec sandbox / offscreen worker / proving / browser. Proves the
- * cancel-mid-prove journal contract through the real executeTransfer + cancelJob
- * public API (codex condition).
+ * ExecutionService → coordinator → lane graph + the REAL OperationJournalService
+ * FSM in-process, with NO Aztec sandbox / offscreen worker / proving / browser.
+ * Proves the cancel-mid-prove contract through the real executeTransfer +
+ * cancelJob public API (codex condition).
  *
- * It uses the precomputed-estimate fast path (seed `estimateReuse`) to SKIP
- * buildStandard's deep chain (node chain-identity validation, contract
- * resolution, account-contract request-building). That fresh-build path is the
- * heavy boundary deferred to the rollout — see lessons/phase-2.md.
+ * SCOPE (narrow, on purpose): this exercises the REUSED-prepared-tx cancel path.
+ * It seeds `estimateReuse` so executeTransfer takes the fast path and SKIPS
+ * buildStandard (whose deep chain — node chain-identity, contract resolution,
+ * account-contract request-building — would be "a second wallet" to fake). The
+ * FRESH-build path is NOT covered here; it's the heavy boundary deferred to the
+ * rollout — see lessons/phase-2.md.
  *
  * FAKE_IPXE_BUNDLE_MARKER — the fakes live in this `*.test.ts`, so they are
  * never in the production bundle (Phase-2 gate greps `dist/` for this marker;
@@ -17,6 +19,7 @@
 import { describe, expect, test, vi } from "vitest"
 import { Gas } from "@aztec/stdlib/gas"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { ServiceCollection } from "@/wallet/base"
@@ -26,7 +29,7 @@ import { AccountService } from "@/wallet/services/account/service"
 import { ContactService } from "@/wallet/services/contact/service"
 import { TokenService } from "@/wallet/services/token/service"
 import { FpcService } from "@/wallet/services/fpc/service"
-import { TransactionService } from "@/wallet/services/transaction/service"
+import { TransactionService, TransferType } from "@/wallet/services/transaction/service"
 import { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { TaskService } from "@/wallet/services/task/service"
@@ -63,16 +66,7 @@ function makeControllableGate() {
 	}
 }
 
-// ── Dumb fakes (cast to the real surfaces — only the reuse-cancel path is hit) ─
 const MIN_FEES = { feePerDaGas: 1n, feePerL2Gas: 1n }
-
-// proveTx returns a stub TxProvingResult; the post-prove cancel checkpoint drops
-// it before `toTx`, so contents don't matter.
-const fakeIPXE = {
-	proveTx: vi.fn(async () => ({ toTx: async () => ({ getTxHash: () => ({ toString: () => "0xhash" }) }) })),
-} as unknown as ReturnType<PxeServiceClient["getPXE"]>
-const fakePxeClient = { getPXE: () => fakeIPXE } as unknown as PxeServiceClient
-
 const ACCOUNT = AztecAddress.fromNumber(0x1234)
 const NETWORK = {
 	id: "net1",
@@ -88,11 +82,27 @@ function svc(name: string, methods: Record<string, unknown>) {
 async function makeHarness() {
 	// Per-harness state — no module-level mutable singletons, so the rollout can
 	// call makeHarness() in many tests without cross-contamination.
-	const transitions: { stage: string; error: unknown }[] = []
+	const stages: string[] = []
 	const sendTx = vi.fn(async () => {})
+	// proveTx returns a stub TxProvingResult whose `toTx` is spied: the post-prove
+	// cancel checkpoint must drop the proof BEFORE `toTx`, so `toTx` proves submission.
+	const toTx = vi.fn(async () => ({ getTxHash: () => ({ toString: () => "0xhash" }) }))
 	const fakeNode = { getCurrentMinFees: async () => MIN_FEES, sendTx } as unknown as never
+	const fakeIPXE = { proveTx: vi.fn(async () => ({ toTx })) } as unknown as ReturnType<PxeServiceClient["getPXE"]>
+	const fakePxeClient = { getPXE: () => fakeIPXE } as unknown as PxeServiceClient
+
 	const logger = new LoggerStore(new ConfigStore())
 	const ctrl = makeControllableGate()
+
+	// REAL journal (FakeBrowserApi-backed) so the actual FSM + transition lock run.
+	const api = new FakeBrowserApi()
+	api.reset()
+	const journal = new OperationJournalService(logger, api)
+	let journalId = ""
+	journal.onOperationAdded.add((rec) => {
+		journalId = rec.id
+	})
+	journal.onOperationUpdated.add((rec) => stages.push(rec.progress.stage))
 
 	const collection = new ServiceCollection()
 	collection.add(svc(ProfileService.name, { getActiveProfile: async () => ({ id: "p1" }) }))
@@ -109,15 +119,7 @@ async function makeHarness() {
 	collection.add(svc(FpcService.name, { onFpcUpdated: { add: () => {} }, onFpcDeleted: { add: () => {} } }))
 	collection.add(svc(ContactService.name, {}))
 	collection.add(svc(AuthRegistryService.name, { assertWithinCap: async () => {} }))
-	collection.add(
-		svc(OperationJournalService.name, {
-			createOperation: async () => ({ id: "op1" }),
-			getOperation: async () => ({ id: "op1", profileId: "p1" }),
-			transitionOperation: async (_id: string, progress: { stage: string }, error: unknown) => {
-				transitions.push({ stage: progress.stage, error })
-			},
-		}),
-	)
+	collection.add(journal)
 	const fakeTask = { complete: vi.fn(), fail: vi.fn(), startSubtask: vi.fn() }
 	fakeTask.startSubtask.mockReturnValue(fakeTask)
 	collection.add(svc(TaskService.name, { startNewTask: () => fakeTask }))
@@ -132,7 +134,7 @@ async function makeHarness() {
 		networkId: NETWORK.id,
 		accountAddress: ACCOUNT.toString(),
 		tokenId: 1,
-		transferType: "public_to_public",
+		transferType: TransferType.Public,
 		recipientAddress: AztecAddress.fromNumber(0x5678).toString(),
 		amount: 10n,
 		feeSettings,
@@ -141,7 +143,7 @@ async function makeHarness() {
 		networkId: req.networkId,
 		accountAddress: req.accountAddress,
 		tokenId: req.tokenId,
-		transferType: req.transferType as never,
+		transferType: req.transferType,
 		recipientAddress: req.recipientAddress,
 		amount: req.amount,
 		feeSettingsHash: fingerprintFeeSettings(feeSettings),
@@ -164,7 +166,7 @@ async function makeHarness() {
 	const reuse = (service as unknown as { estimateReuse: TransferEstimateReuse }).estimateReuse
 	reuse.stash("estimate-1", entry)
 
-	return { service, ctrl, req, estimateId: "estimate-1", transitions, sendTx }
+	return { service, ctrl, req, estimateId: "estimate-1", journal, stages, sendTx, toTx, getJournalId: () => journalId }
 }
 
 const waitFor = async (pred: () => boolean, timeoutMs = 2000) => {
@@ -176,15 +178,15 @@ const waitFor = async (pred: () => boolean, timeoutMs = 2000) => {
 }
 
 describe("ExecutionService composition — cancel-mid-prove (in-process, no sandbox)", () => {
-	test("cancel while proving: journal → cancelled, proof dropped, never sent", async () => {
-		const { service, ctrl, req, estimateId, transitions, sendTx } = await makeHarness()
+	test("cancel while proving: real journal → cancelled, proof dropped before submit, never sent", async () => {
+		const { service, ctrl, req, estimateId, journal, stages, sendTx, toTx, getJournalId } = await makeHarness()
 
 		const p = service
 			.executeTransfer(
 				req.networkId,
 				req.accountAddress,
 				req.tokenId,
-				req.transferType as never,
+				req.transferType,
 				req.recipientAddress,
 				req.amount,
 				req.feeSettings,
@@ -192,15 +194,21 @@ describe("ExecutionService composition — cancel-mid-prove (in-process, no sand
 			)
 			.catch((e) => e)
 
-		// Wait until the coordinator has journalled `proving` and parked on the gate.
-		await waitFor(() => ctrl.entered && transitions.some((t) => t.stage === "proving"))
+		// Wait until the real journal recorded `proving` and the coordinator parked on the gate.
+		await waitFor(() => ctrl.entered && stages.includes("proving"))
 
-		// Cancel while held at prove, then let prove complete → post-prove checkpoint fires.
-		await service.cancelJob("op1")
+		// Cancel while held at prove, then release so prove finishes → post-prove checkpoint fires.
+		await service.cancelJob(getJournalId())
 		ctrl.release()
 		await p
 
-		expect(transitions.map((t) => t.stage)).toContain("cancelled")
+		// Real FSM: the op is terminally `cancelled`, and NEVER advanced past prove.
+		const final = await journal.getOperation(getJournalId())
+		expect(final?.progress.stage).toBe("cancelled")
+		expect(stages).not.toContain("submitting")
+		expect(stages).not.toContain("succeeded")
+		// Proof artifact dropped at the post-PROVE checkpoint — never converted to a tx, never sent.
+		expect(toTx).not.toHaveBeenCalled()
 		expect(sendTx).not.toHaveBeenCalled()
 	})
 })
