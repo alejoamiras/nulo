@@ -58,8 +58,19 @@ describe("Button (router-free base)", () => {
 		expect(w.attributes("rel")).toBe("noopener noreferrer")
 	})
 
-	test('tag="a" without target=_blank has no rel', () => {
+	test('tag="a" without a target has no rel', () => {
 		expect(mountButton({ tag: "a", href: "/x" }, { default: "Link" }).attributes("rel")).toBeUndefined()
+	})
+
+	test('tag="a" with a NAMED target also gets rel hygiene (named contexts are opener-capable)', () => {
+		const w = mountButton({ tag: "a", href: "/x", target: "report" }, { default: "Link" })
+		expect(w.attributes("rel")).toBe("noopener noreferrer")
+	})
+
+	test('tag="a" target=_self/_parent/_top reuse an existing context → no rel', () => {
+		for (const t of ["_self", "_parent", "_top"]) {
+			expect(mountButton({ tag: "a", href: "/x", target: t }, { default: "Link" }).attributes("rel")).toBeUndefined()
+		}
 	})
 
 	test("(BUG PIN) disabled applies only in button mode, never on an anchor", () => {

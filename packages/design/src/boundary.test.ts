@@ -4,7 +4,8 @@ import biome from "../../../biome.json"
 /**
  * Belt-and-suspenders for the `@nulo/design` platform-agnostic floor:
  *  1. No chrome.* reaches the source, including the indirections Biome's `noRestrictedGlobals`
- *     misses (`window.chrome`, `globalThis["chrome"]`, `webextension-polyfill`).
+ *     misses: dot + bracket access on any host global (`window`/`self`/`globalThis`) +
+ *     `webextension-polyfill`.
  *  2. The Biome floor for `packages/design/src/**` still bans `@nulo/*` + `chrome` — so a PR can't
  *     silently weaken the boundary in the same diff that exploits it.
  *  3. No `vue-router` import — router purity is a locked design-system decision (router seams live in
@@ -28,14 +29,19 @@ type BiomeOverride = {
 	}
 }
 
-const sources = import.meta.glob("./**/*.{ts,vue}", { query: "?raw", eager: true, import: "default" }) as Record<string, string>
+const sources = import.meta.glob("./**/*.{ts,tsx,js,mjs,cjs,vue}", { query: "?raw", eager: true, import: "default" }) as Record<
+	string,
+	string
+>
 
 describe("@nulo/design platform-agnostic boundary", () => {
 	test("source has no chrome.* access (direct or via window/globalThis/webextension-polyfill)", () => {
 		const banned: Array<[string, RegExp]> = [
 			["chrome.", /\bchrome\s*\./],
-			["window.chrome", /\bwindow\s*\.\s*chrome\b/],
-			["globalThis[chrome]", /globalThis\s*\[\s*["']chrome["']\s*\]/],
+			// dot access on any host global: window/self/globalThis.chrome
+			["host.chrome (dot)", /\b(?:window|self|globalThis)\s*\.\s*chrome\b/],
+			// bracket access on any host global: window/self/globalThis["chrome"]
+			["host[chrome] (bracket)", /\b(?:window|self|globalThis)\s*\[\s*["']chrome["']\s*\]/],
 			["webextension-polyfill", /webextension-polyfill/],
 		]
 		const offenders: string[] = []
@@ -61,7 +67,7 @@ describe("@nulo/design platform-agnostic boundary", () => {
 		const offenders: string[] = []
 		for (const [path, src] of Object.entries(sources)) {
 			if (path.includes(".test.")) continue
-			if (/\bfrom\s+["']vue-router["']|require\(\s*["']vue-router["']\s*\)/.test(src)) offenders.push(path)
+			if (/\bfrom\s+["']vue-router["']|(?:require|import)\(\s*["']vue-router["']\s*\)/.test(src)) offenders.push(path)
 		}
 		expect(offenders).toEqual([])
 	})

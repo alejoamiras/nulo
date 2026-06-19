@@ -3,13 +3,19 @@ import { NULO_DESIGN_COMPONENTS, nuloDesignResolver } from "./design-resolver"
 
 /**
  * Resolver-inventory pin (design-system round-2, D-SEAM). `NULO_DESIGN_COMPONENTS` must equal EXACTLY
- * the set of component names whose extension-local SFC was DELETED and now resolves via `@nulo/design`
- * — NOT "every package export" (the package also exports names the extension keeps LOCAL +
- * service-bound, e.g. `AddressDisplay`/`EmojiGrid`, which must never enter the resolver). Wrapper-backed
- * names (`Button`/`SubPageHeader`/`ToastManager`) stay local and must be ABSENT (else the bare tag
- * resolves to the package base instead of the wrapper). Typecheck catches a missing export; only this
- * pins against a wrong or extra remap. Grow `EXPECTED_MIGRATED` in the SAME PR that deletes a local
- * SFC + adds its name to the resolver.
+ * the set of names the extension routes to `@nulo/design` — NOT "every package export" (the package
+ * also exports names the extension keeps LOCAL + service-bound, e.g. `AddressDisplay`/`EmojiGrid`,
+ * which must never enter the resolver). Wrapper-backed names (`Button`/`SubPageHeader`/`ToastManager`)
+ * stay local and must be ABSENT (else the bare tag resolves to the package base instead of the wrapper).
+ *
+ * Round-1 vs round-2 split (don't overclaim "deleted"): the ROUND-2 names (Spinner/Banner/LoadingState/
+ * Tooltip/Popover/Input) had their extension-local SFC DELETED, so `components.d.ts` resolves them to
+ * `@nulo/design`. The ROUND-1 names (Flex/Icon/Text/MaterialIcon/Badge/BrutalistTitle/Checkbox/
+ * SectionLabel/Toggle) are in the resolver but their local SFCs were NOT deleted in round 1 — the
+ * dir-scan still SHADOWS them to local files, so for those names this set is ASPIRATIONAL pending the
+ * round-3 local-SFC cleanup (see round-2-backlog.md). Typecheck catches a missing export; only this
+ * pins against a wrong or extra remap. Grow `EXPECTED_MIGRATED` in the SAME PR that deletes a local SFC
+ * + adds its name to the resolver.
  */
 const EXPECTED_MIGRATED = [
 	// round 1 — L1 core + the pure L2 subset
