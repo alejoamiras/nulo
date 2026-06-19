@@ -279,6 +279,21 @@ export async function switchAccount(page: Page, name: string): Promise<void> {
 	await closeStuckPopup(page)
 }
 
+/** Switch the wallet's active account by ADDRESS — stable across runs, unlike the
+ *  display name, which depends on creation order vs the dApp's account-exposure
+ *  order (e.g. `accountAddresses[0]` may be the "Second"-named account). */
+export async function switchAccountByAddress(page: Page, address: string): Promise<void> {
+	await clickByTestId(page, "account-selector")
+	await page.waitForSelector('[data-testid="accounts-popup"]', { visible: true, timeout: 5_000 })
+
+	const selector = `[data-testid="account-item"][data-account-address="${address}"]`
+	await page.waitForSelector(selector, { visible: true, timeout: 5_000 })
+	await clickSelector(page, selector)
+
+	// Vue Transition can stick mid-leave; force-close.
+	await closeStuckPopup(page)
+}
+
 // ── Contact ────────────────────────────────────────────────────────────
 
 /** Add a contact via the NewContactPopup.

@@ -71,6 +71,7 @@ const handleManageAccounts = () => {
 						:iconFillColor="account.address === acc.address ? 'primary' : 'tertiary'"
 						data-testid="account-item"
 						:data-account-name="acc.name"
+						:data-account-address="acc.address"
 					>
 						<template #right>
 							<Flex align="center" gap="8">
