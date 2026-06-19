@@ -95,11 +95,14 @@ export async function createTestWallet(url = LOCAL_NODE_URL) {
 /**
  * Generous `maxFeesPerGas` ceiling for SponsoredFPC-paid setup txs. The SDK otherwise pins
  * maxFeesPerGas to the ESTIMATION-time gas fee with no headroom, so an L2-fee spike between
- * estimate and inclusion rejects the tx (observed in CI: estimate feePerL2Gas=5.5e7 <
- * inclusion 1.1e8). maxFeesPerGas is only a ceiling and the FPC pays the ACTUAL network fee,
- * so a high cap can't overpay — it just stops spike-rejection flakes. See lessons/phase-6.md.
+ * estimate and inclusion rejects the tx. maxFeesPerGas is only a ceiling and the FPC pays the
+ * ACTUAL network fee, so a high cap can't overpay — it just stops spike-rejection flakes.
+ * 5.0 raised the sandbox L2 base fee ~4 orders of magnitude (observed inclusion feePerL2Gas
+ * ≈9.24e11 vs 4.2.0's ~1.1e8), so the old 1e11 cap fell BELOW the live fee and rejected every
+ * setup tx with "maxFeesPerGas.feePerL2Gas must be >= gasFees.feePerL2Gas". 1e13 restores ~10x
+ * headroom while staying under the SponsoredFPC fee-juice balance (cap × gasLimit). See lessons/phase-6.md.
  */
-const E2E_FEE_GAS = { maxFeesPerGas: new GasFees(10n ** 11n, 10n ** 11n) }
+const E2E_FEE_GAS = { maxFeesPerGas: new GasFees(10n ** 13n, 10n ** 13n) }
 
 /** Deploy a Token contract with a minter address. Returns the token contract address. */
 export async function deployTestToken(

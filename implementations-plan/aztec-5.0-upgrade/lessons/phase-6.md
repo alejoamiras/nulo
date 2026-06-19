@@ -58,3 +58,23 @@ PATH="$HOME/.aztec/current/internal-bin:/tmp/badforge:$PATH" ~/.aztec/current/no
 ```
 
 Confirmed: A fails with the exact CI error, B succeeds. Definitive proof before pushing.
+
+## Blocker 3 — 5.0 raised the L2 base fee ~4 orders of magnitude → hardcoded e2e fee ceiling too low (FIXED)
+
+With Blockers 1+2 fixed, the node booted, deployed L1 contracts, and became healthy — then setup died one step later, deploying the **test fixture contracts**:
+
+```
+[e2e-setup] Failed to deploy test contracts: Error: maxFeesPerGas.feePerL2Gas must be greater
+than or equal to gasFees.feePerL2Gas, but got maxFeesPerGas.feePerL2Gas=100000000000 and
+gasFees.feePerL2Gas=924043800000
+```
+
+**Root cause:** `fixtures/aztec.ts` pins a flat `maxFeesPerGas` ceiling (`E2E_FEE_GAS`) for SponsoredFPC-paid setup txs — `new GasFees(1e11, 1e11)` (100 gwei). That was a *generous* cap in 4.2.0 (inclusion `feePerL2Gas` ≈ 1.1e8). 5.0 raised the sandbox L2 base fee to ≈ **9.24e11** (~924 gwei), so the cap fell BELOW the live fee and the protocol rejected every setup tx (`maxFeesPerGas` must be ≥ `gasFees`).
+
+**Fix:** bump the ceiling to `1e13` (`new GasFees(10n ** 13n, 10n ** 13n)`). Bounded on both sides:
+- **Floor:** must exceed the live ≈9.24e11 → 1e13 gives ~11× headroom for fee variation.
+- **Ceiling:** the SponsoredFPC asserts `gasLimits × maxFeesPerGas ≤ budget`; the sandbox fee-juice balance is ~5e22, so `1e13 × (deploy gasLimit ~1e9) = 1e22` stays comfortably under. Going to 1e14+ would risk the balance assertion.
+
+Note the wallet's **runtime** fee path was already 5.0-safe — it derives `maxFeesPerGas` from `node.getCurrentMinFees()` (× 1.5 padding generally; ×1.0 for embedded-FPC via `embedded-fpc-cap.ts`), so it auto-tracks the network. Only the e2e fixture's *flat hardcoded* ceiling needed bumping.
+
+The `Address already in use (os error 98)` line still prints on boot but remains non-fatal noise — setup now proceeds well past it (L1 deploy → health → fixture deploy).
