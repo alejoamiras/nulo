@@ -145,7 +145,9 @@ Five reasons shape the phasing (all verified):
 
 **Validation gate.** `packages/bridge-aztec/scripts/compile.sh` compiles token_minter_proxy + token_bridge; `aztec test` green in keystone; `bun run --cwd packages/bridge-core typecheck` + `test` (incl. `private-fuel.test.ts` address tripwire + `DOM_SEP__FPC_BRIDGE_SECRET`); bridge `--smoke` (deposit/claim/withdraw/consume, per `bridge-aztec/README.md`) green on a 5.0 sandbox; `verify-l1` clean. Layers: noir-compile + typecheck + unit + bridge-e2e + L1-verify.
 
-### Phase 6 — Network-e2e on real 5.0 (6A interim · 6B ship gate; unblocked — Phase 0 is just a pin refresh)
+### Phase 6 — Network-e2e on real 5.0 (6A interim · 6B ship gate) — ✓ DONE
+
+**Gate passed (CI run 27839983521, commit `fdd52e31`): full `Network e2e / Status` GREEN — all 5 shards + heavy/concurrent-confirm + heavy/fee-methods + canary/real-proving + Status all `success`.** 6B native-proving DoD confirmed on the canary: `Accelerator ready … "bb_available":true … "version":"1.0.6"`, `bundle contains NULO_ACCELERATOR_REQUIRED_BUILD_STAMP ✓`, `✓ tx-sendTx-default … real proof (prover-ON canary) 35472ms`, `accelerator-server log shows 5 /prove requests` — required-mode build + real proving + zero WASM fallback (required-mode throws on WASM, so a green canary proves no fallback). The nine 5.0 CI-adaptation fixes (below) are what got here.
 
 **6A — proverless interim validation (available now; NOT the ship gate).** With `vars.NULO_E2E_DISABLE_ACCELERATOR=1` / proverless, run `bun run e2e:agent` against a 5.0 sandbox (auto-derived from the `@aztec/aztec.js` pin via `setup-aztec`; the rc install endpoint is confirmed). Validates the protocol migration + sandbox compat + bridge flows without the binary. **Passing 6A does not satisfy the definition of done.**
 
