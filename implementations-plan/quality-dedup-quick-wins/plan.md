@@ -32,7 +32,7 @@ Delete proven-dead exports/subpaths (all in `"private": true` pkgs, none auto-im
 
 **Validation gate** — `bun run lint` + typecheck+test for `wallet-core`, `extension-messaging`, `wallet-crypto` + per-symbol zero-importer grep. `bun.lock` updates for the `@aztec/stdlib` removal (frozen-lockfile-safe). Push → CI Quality. Auto-merge on Quality green. Layers: typecheck · lint · unit.
 
-## Phase 2 — Q22: share the BigInt/Error replacer (constraint-bounded)  *(network-e2e: yes)*
+## Phase 2 — Q22: share the BigInt/Error replacer (constraint-bounded)  *(network-e2e: yes)* ✓
 `wallet-core/src/utils/serialization.ts` (bigint→`"123"`, Error→`{name,message,stack?,code?,details?}`) and `jobs/error.ts` (bigint→`"123n"`, Error→`{__error:true,…}`, truncation) duplicate overlapping logic. Extract a low-level replacer **only for the genuinely-common Error-shaping subset**.
 - **Constraints:** `serialization.ts:1-4` mirrors `@aztec/foundation/json-rpc` — **wire shape frozen**; `jobs/error.ts` divergences (`"123n"`, `__error`, truncation) are **deliberate** — preserve; **the never-throw fallback at `jobs/error.ts:37` is load-bearing** (codex) — preserve + name it. `arrays.ts` untouched. Do NOT force one core across both.
 - **Test fix (codex):** the real `jsonStringify` wire-pins live in **extension** `wallet/utils/serialization.test.ts` — keep green. `jobs/error.test.ts` does NOT currently pin `__error`/`"123n"`/never-throw → **add those pins** as part of this phase before refactoring. The never-throw pin must assert the **exact fallback envelope** emitted at `jobs/error.ts:37` (not merely "the function didn't throw").
@@ -45,7 +45,7 @@ Delete proven-dead exports/subpaths (all in `"private": true` pkgs, none auto-im
 
 **Validation gate** — `bun run lint` + typecheck+test for `wallet-bridge` + `extension` (`caip.test.ts` + the new parity test green). Push → CI Quality. Auto-merge on Quality green. Layers: typecheck · lint · unit.
 
-## Phase 4 — Q7: de-fork the Vite/Vitest config sprawl  *(network-e2e: yes — it validates the change)*
+## Phase 4 — Q7: de-fork the Vite/Vitest config sprawl  *(network-e2e: yes — it validates the change)* ✓
 `resolvePackageFile`, aliases, define blocks, e2e runner settings duplicated under "Keep in sync" comments across the configs — and **the sync already failed**: `vitest.e2e.all.config.ts` lacks the noir aliases + `retry`/`pool:"forks"`/`isolate` that `vitest.e2e.network.config.ts:17,43,44` has (verified live). Extract shared config helpers; compose wrappers via `mergeConfig`/factories; **fix the `e2e:all` drift**.
 - **Constraint (registry #16):** the host-specific noir-alias comment travels with the shared helper. Browser wrappers must stop mutating the imported base in place. Diff resolved configs before/after to prove no unintended change.
 

@@ -28,4 +28,20 @@ Behavioral proof (stronger than a config-object dump — proves actual build/tes
 
 Network-e2e: GATED (proves the network config still resolves on CI). Push → label `e2e:network`.
 
+## MERGED — and the base-staleness lesson (applies to Q22 too)
+Q7 (#113) + Q22 (#108) initially went RED on network-e2e across multiple runs — always on the
+suite's flaky tests (authwit-lifecycle, incoming-transfers, cancel-mid-prove, heavy jobs), a
+moving target on tests neither arc touches. Root cause was NOT the arcs: both branches were
+synced to dev@`4d245bb` (#114), which is **before #115** (`feat(auth-registry): … + network-e2e
+de-flake`). #115 de-flaked exactly those tests. dev had advanced to `fb8f61d` (#117) — #117
+"passed everything" because it sits on top of #115. Re-syncing both branches onto the **real
+current dev** (`merge origin/dev` → fb8f61d) brought #115's de-flake into their base; the very
+next CI run was **fully green** (8/8 network jobs on each). Then `gh pr merge --squash --admin`:
+Q7 → `9e76a83`, Q22 → `67b613c`.
+
+**Lesson:** a network-gated PR must be synced to the LATEST dev *including any de-flake commits*
+before trusting (or judging) its network result. A stale base silently re-introduces already-fixed
+flakes and looks like a fresh flake. Always `git merge-base --is-ancestor <de-flake-sha> HEAD`
+before concluding "flaky."
+
 LESSONS_FILE=implementations-plan/quality-dedup-quick-wins/lessons/phase-4.md
