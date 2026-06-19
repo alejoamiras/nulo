@@ -38,40 +38,47 @@ function trustKey(profileId: string, networkId: string, contract: string): strin
 }
 
 vi.mock("./repository", () => ({
-	IncomingTransferRepository: vi.fn(function () {
-		return {
-			getRecord: async (k: string) => records.get(k),
-			hasRecord: async (k: string) => records.has(k),
-			upsertRecord: async (r: IncomingTransferRecord) => {
-				records.set(r.siloedNullifier, r)
-			},
-			deleteRecord: async (k: string) => {
-				records.delete(k)
-			},
-			listRecords: async () => [...records.values()],
-			listForAccount: async (p: string, n: string, a: string) =>
-				[...records.values()].filter((r) => r.profileId === p && r.networkId === n && r.accountAddress === a),
-			listByTxHash: async (p: string, n: string, h: string) =>
-				[...records.values()].filter((r) => r.profileId === p && r.networkId === n && r.txHash === h),
-			listByContract: async (p: string, n: string, c: string) =>
-				[...records.values()].filter((r) => r.profileId === p && r.networkId === n && r.contract === c),
-			getTrust: async (p: string, n: string, c: string) => trust.get(trustKey(p, n, c)),
-			setTrust: async (p: string, n: string, c: string, state: IncomingTrustState) => {
-				const rec: IncomingTrustRecord = { profileId: p, networkId: n, contract: c, state, updatedAt: 0 }
-				trust.set(trustKey(p, n, c), rec)
-				return rec
-			},
-			listTrust: async () => [...trust.values()],
-			clearProfile: async (p: string) => {
-				for (const [k, v] of records) if (v.profileId === p) records.delete(k)
-				for (const [k, v] of trust) if (v.profileId === p) trust.delete(k)
-			},
-			clearChain: async (p: string, n: string) => {
-				for (const [k, v] of records) if (v.profileId === p && v.networkId === n) records.delete(k)
-				for (const [k, v] of trust) if (v.profileId === p && v.networkId === n) trust.delete(k)
-			},
+	// A constructable class — Vitest 4 refuses to `new` a vi.fn whose impl is an
+	// arrow, and Biome rewrites a `function` impl back to an arrow. The mock's
+	// call-tracking isn't asserted, so a plain class returning the in-memory
+	// fake is the robust form.
+	IncomingTransferRepository: class {
+		constructor() {
+			// biome-ignore lint/correctness/noConstructorReturn: mock ctor returns the in-memory fake
+			return {
+				getRecord: async (k: string) => records.get(k),
+				hasRecord: async (k: string) => records.has(k),
+				upsertRecord: async (r: IncomingTransferRecord) => {
+					records.set(r.siloedNullifier, r)
+				},
+				deleteRecord: async (k: string) => {
+					records.delete(k)
+				},
+				listRecords: async () => [...records.values()],
+				listForAccount: async (p: string, n: string, a: string) =>
+					[...records.values()].filter((r) => r.profileId === p && r.networkId === n && r.accountAddress === a),
+				listByTxHash: async (p: string, n: string, h: string) =>
+					[...records.values()].filter((r) => r.profileId === p && r.networkId === n && r.txHash === h),
+				listByContract: async (p: string, n: string, c: string) =>
+					[...records.values()].filter((r) => r.profileId === p && r.networkId === n && r.contract === c),
+				getTrust: async (p: string, n: string, c: string) => trust.get(trustKey(p, n, c)),
+				setTrust: async (p: string, n: string, c: string, state: IncomingTrustState) => {
+					const rec: IncomingTrustRecord = { profileId: p, networkId: n, contract: c, state, updatedAt: 0 }
+					trust.set(trustKey(p, n, c), rec)
+					return rec
+				},
+				listTrust: async () => [...trust.values()],
+				clearProfile: async (p: string) => {
+					for (const [k, v] of records) if (v.profileId === p) records.delete(k)
+					for (const [k, v] of trust) if (v.profileId === p) trust.delete(k)
+				},
+				clearChain: async (p: string, n: string) => {
+					for (const [k, v] of records) if (v.profileId === p && v.networkId === n) records.delete(k)
+					for (const [k, v] of trust) if (v.profileId === p && v.networkId === n) trust.delete(k)
+				},
+			}
 		}
-	}),
+	},
 	trustKey,
 }))
 

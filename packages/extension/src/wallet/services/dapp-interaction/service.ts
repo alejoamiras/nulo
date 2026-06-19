@@ -1,6 +1,6 @@
 import type { AztecAddress } from "@aztec/stdlib/aztec-address"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { NetworkService } from "@/wallet/services/network/service"
@@ -47,6 +47,12 @@ export * from "./spec"
 const INTERACTION_TIMEOUT_MS = 10 * 60 * 1000
 
 export class DappInteractionService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()(
+		"getInteractionPayload",
+		"approveInteraction",
+		"resolveInteraction",
+		"rejectInteraction",
+	)
 	public static name = DAPP_INTERACTION_SERVICE_NAME
 
 	public readonly onInteractionCancelled = new EventHandler<string>()

@@ -1,6 +1,6 @@
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { EventHandler, Lock, getErrorMessage } from "@nulo/wallet-core/utils"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { NetworkService, type Network } from "@/wallet/services/network/service"
@@ -63,6 +63,15 @@ const DEFAULT_POLL_INTERVAL_MS = 30_000
  * arrived via PXE before the local tx was journalled.
  */
 export class IncomingTransferService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()(
+		"getIncomingTransfers",
+		"getTrustState",
+		"setTrustAllow",
+		"setTrustReject",
+		"clearProfile",
+		"clearChain",
+		"replayPendingPrompts",
+	)
 	public static name = INCOMING_TRANSFER_SERVICE_NAME
 
 	public readonly dependencies: readonly string[] = [

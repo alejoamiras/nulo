@@ -18,6 +18,7 @@
 import { describe, expect, test, vi } from "vitest"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { ServiceCollection } from "@nulo/wallet-core/base"
+import { defineRpcMethods } from "../core/rpc-methods"
 import { UserRejectedError } from "../errors"
 import { MessageType } from "../messages"
 import { wrapParams } from "../utils"
@@ -36,6 +37,8 @@ type Events = {
 }
 
 class TestService extends Service<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()("echo", "walletFail", "plainFail")
+
 	public ping = new EventHandler<{ n: number }>()
 
 	public constructor() {
@@ -110,6 +113,26 @@ describe("envelope validation", () => {
 		client.sendToService(request(1, "nonexistent" as keyof Methods, []))
 		await flush()
 		expect(client.captureResponse()).not.toHaveBeenCalled()
+	})
+
+	// D10: only explicitly-registered methods are callable. These all EXIST as
+	// invokable properties on the service instance but are NOT in rpcMethods.
+	test.each([
+		"toString",
+		"constructor",
+		"__proto__",
+		"start",
+		"emit",
+		"emitPing",
+		"callEnsureInitialized",
+	])("rejects the non-registered callable %s (RPC-surface guard)", async (method) => {
+		const svc = new TestService()
+		const spy = vi.spyOn(svc as unknown as Record<string, () => void>, "emitPing")
+		const client = connectServiceClient(SERVICE)
+		client.sendToService(request(1, method as keyof Methods, []))
+		await flush()
+		expect(client.captureResponse()).not.toHaveBeenCalled()
+		expect(spy).not.toHaveBeenCalled()
 	})
 
 	test("ignores a request with falsy requestId (no response)", async () => {

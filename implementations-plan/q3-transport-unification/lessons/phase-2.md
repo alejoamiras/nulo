@@ -1,6 +1,6 @@
 # Phase 2 — Shared client request-correlator core (the riskiest)
 
-**Status:** code + standard gate ✓. Network leg in CI (re-run on the P2 push); finalize ✓ on green/latest-dev.
+**Status:** ✓ complete. Standard gate + network leg both green. Network: PR #121 run 27825563285 on commit 931577a (base = origin/dev #120), 8 network jobs RAN + passed (not skipped).
 
 ## What shipped
 

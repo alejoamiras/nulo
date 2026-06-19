@@ -1,5 +1,5 @@
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import type { TxOrigin } from "@/wallet/services/transaction/service"
@@ -22,6 +22,7 @@ export * from "./spec"
 export * from "./wrapped-task"
 
 export class TaskService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()("getTask", "getTasks")
 	public static name = TASK_SERVICE_NAME
 
 	public readonly onTaskCreated = new EventHandler<Task>()

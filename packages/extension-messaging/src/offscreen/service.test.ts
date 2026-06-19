@@ -1,11 +1,11 @@
 /**
  * Contract tests for the offscreen (SW ↔ offscreen sendMessage) Service.
  *
- * New coverage (no offscreen service-side suite existed before). Pins the
- * CURRENT behavior, including the error-payload divergence the unification
- * resolves: error responses carry a flat `error` string ONLY — never the
- * structured `errorPayload`, even for a WalletError subclass. (Background emits
- * errorPayload; offscreen does not — fixed additively in a later phase.)
+ * New coverage (no offscreen service-side suite existed before). After the
+ * service-core unification both transports share one error projection, so the
+ * offscreen service now emits the structured `errorPayload` too (D9 —
+ * wire-additive; the offscreen client still rejects with the flat string until
+ * the phase-4 flip).
  *
  * The A6 send fallback was 2-tier-then-swallow; the Phase 1 fix (a) brought it
  * to the background's 3-tier (success → jsonStringify → error-response → drop).
@@ -17,6 +17,7 @@
 import { describe, expect, test, vi } from "vitest"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { ServiceCollection } from "@nulo/wallet-core/base"
+import { defineRpcMethods } from "../core/rpc-methods"
 import { UserRejectedError } from "../errors"
 import { MessageType } from "../messages"
 import { wrapParams } from "../utils"
@@ -36,6 +37,8 @@ type Events = {
 }
 
 class TestService extends Service<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()("echo", "walletFail", "plainFail")
+
 	public ping = new EventHandler<{ n: number }>()
 
 	public constructor() {
@@ -115,6 +118,22 @@ describe("envelope validation", () => {
 		await flush()
 		expect(responses()).toHaveLength(0)
 	})
+
+	// D10: non-registered callables (inherited, framework, public non-RPC) rejected.
+	test.each([
+		"toString",
+		"constructor",
+		"start",
+		"emit",
+		"emitPing",
+	])("rejects the non-registered callable %s (RPC-surface guard)", async (method) => {
+		const svc = new TestService()
+		const spy = vi.spyOn(svc as unknown as Record<string, () => void>, "emitPing")
+		emitMessage(request(1, method as keyof Methods, []))
+		await flush()
+		expect(responses()).toHaveLength(0)
+		expect(spy).not.toHaveBeenCalled()
+	})
 })
 
 // ── Success path ──────────────────────────────────────────────────────
@@ -136,20 +155,21 @@ describe("success path", () => {
 
 // ── Error path (offscreen emits NO errorPayload — divergence) ─────────
 
-describe("error path (no structured payload — pinned divergence)", () => {
-	test("WalletError throw still serializes ONLY a flat error string (no errorPayload)", async () => {
+describe("error path (now emits structured errorPayload — D9 additive)", () => {
+	test("WalletError throw serializes errorPayload (additive; offscreen client ignores it until the flip)", async () => {
 		new TestService()
 		emitMessage(request(1, "walletFail", []))
 		await flush()
 
 		const resp = responses().at(-1)!
 		expect(resp.content.error).toBe("user said no")
-		// PINNED divergence: unlike the background service, offscreen does not
-		// attach errorPayload even for a WalletError subclass.
-		expect(resp.content.errorPayload).toBeUndefined()
+		// D9: after the service-core unification the offscreen service attaches
+		// the structured payload too — wire-ADDITIVE: the offscreen client still
+		// rejects with the flat string until the phase-4 flip.
+		expect((resp.content.errorPayload as { code: string }).code).toBe("USER_REJECTED")
 	})
 
-	test("plain Error throw replies with the flat error string", async () => {
+	test("plain Error throw replies with the flat error string and no payload", async () => {
 		new TestService()
 		emitMessage(request(1, "plainFail", []))
 		await flush()
@@ -215,7 +235,7 @@ describe("A6 send fallback (offscreen — 3-tier, matches background after the P
 // ── Fix (c): malformed params reply with a clean error (no hang) ───────
 
 describe("malformed params (fix c — no silent hang)", () => {
-	test("null params for a valid method replies with a flat error response", async () => {
+	test("null params for a valid method replies with a structured ValidationError", async () => {
 		new TestService()
 		emitMessage({ type: MessageType.Request, from: CLIENT, to: SERVICE, content: { requestId: 9, method: "echo", params: null } })
 		await flush()
@@ -223,8 +243,9 @@ describe("malformed params (fix c — no silent hang)", () => {
 		const resp = responses().at(-1)!
 		expect(resp.content.requestId).toBe(9)
 		expect(resp.content.error).toBe("Invalid request params")
-		// Offscreen does not emit errorPayload yet (lands in a later phase).
-		expect(resp.content.errorPayload).toBeUndefined()
+		// D9: the offscreen service now emits errorPayload too (additive; the
+		// offscreen client still ignores it until the phase-4 flip).
+		expect((resp.content.errorPayload as { code: string }).code).toBe("VALIDATION")
 	})
 
 	test("non-object params (e.g. a string) replies with a flat error response", async () => {
