@@ -296,7 +296,7 @@ errors). Pass: all exit 0; no NEW smoke failures. Layers: typecheck · lint · u
 smoke failures; **faucet still frozen/unchanged.** Layers: typecheck · lint · unit · both builds ·
 storybook · smoke.
 
-### P7 — Faucet cutover + closeout (the ONE faucet-visual PR — fully revertible)
+### P7 — Faucet cutover + closeout (the ONE faucet-visual PR — fully revertible) ✓ MACHINE-GREEN (network e2e + both-app human visual sign-off PENDING)
 
 This is the only phase that changes the faucet's look. Reverting this PR restores the faucet entirely
 while leaving the extension externalization (PR1–PR6) intact.

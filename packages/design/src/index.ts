@@ -33,8 +33,6 @@ export { default as LoadingState } from "./ui/LoadingState.vue"
 export { default as Popover } from "./ui/Popover.vue"
 export { default as SectionLabel } from "./ui/SectionLabel.vue"
 export { default as Spinner } from "./ui/Spinner.vue"
-/** TEMPORARY (round-2 D-FAUCET-DEFER): faucet-frozen legacy spinner; removed in P7. */
-export { default as SpinnerLegacy } from "./ui/SpinnerLegacy.vue"
 /** Router-free base; the extension keeps a local <SubPageHeader> wrapper that injects useRouter. */
 export { default as SubPageHeaderBase } from "./ui/SubPageHeaderBase.vue"
 export { default as Tag } from "./ui/Tag.vue"

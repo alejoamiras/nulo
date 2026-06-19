@@ -91,6 +91,7 @@ const rel = computed(() => (props.tag === "a" && props.target === "_blank" ? "no
 		v-bind="tag === 'a' ? { href, target, rel } : null"
 		:tabindex="disabled ? -1 : 0"
 		:disabled="tag === 'button' && disabled ? true : null"
+		:aria-busy="loading || undefined"
 		:class="[...getStyles(), loading && $style.loading]"
 	>
 		<!--
