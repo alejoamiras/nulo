@@ -16,7 +16,13 @@
  * `JSON.parse(err.message).code` (see wallet-bridge README for the recipe).
  */
 
-import { CapabilityNotGrantedError, JobCancelledError, TooManyPendingError } from "@nulo/extension-messaging/errors"
+import {
+	CapabilityNotGrantedError,
+	JobCancelledError,
+	RpcDisconnectedError,
+	RpcTimeoutError,
+	TooManyPendingError,
+} from "@nulo/extension-messaging/errors"
 import type { WalletResponse } from "@aztec/wallet-sdk/types"
 
 export function toWalletResponseError(error: unknown): WalletResponse["error"] {
@@ -38,6 +44,27 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 				walletErrorCode: CapabilityNotGrantedError.CODE,
 				capabilityType: (error.details as { capabilityType?: string } | undefined)?.capabilityType,
 			},
+		}
+	}
+	if (error instanceof RpcTimeoutError) {
+		// An internal RPC (e.g. offscreen prove/simulate) exceeded its timeout.
+		// -32603 = JSON-RPC "Internal error". Generic message — never the raw
+		// internal "Offscreen request timed out: <method>" detail (no oracle on
+		// internal method names). dApps discriminate via data.walletErrorCode.
+		return {
+			code: -32603,
+			message: "The wallet timed out while processing the request.",
+			data: { walletErrorCode: RpcTimeoutError.CODE },
+		}
+	}
+	if (error instanceof RpcDisconnectedError) {
+		// The wallet's internal transport (popup↔SW / SW↔offscreen) dropped
+		// before the request was answered. 4900 = EIP-1193 "Disconnected".
+		// Transient — the dApp should retry. Generic message; no internal detail.
+		return {
+			code: 4900,
+			message: "The wallet was disconnected while processing the request.",
+			data: { walletErrorCode: RpcDisconnectedError.CODE },
 		}
 	}
 	if (error instanceof TooManyPendingError) {

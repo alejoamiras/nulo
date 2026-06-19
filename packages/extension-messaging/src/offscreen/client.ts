@@ -2,6 +2,7 @@ import type { ILogger } from "@nulo/wallet-core/logger"
 import { getRandomHex } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { BaseServiceClient, type RequestErrorMeta, type ResponseContentLike, type TerminalRecord } from "../core/base-client"
+import { RpcDisconnectedError, RpcTimeoutError, walletErrorFromPayload } from "../errors"
 import { MessageType } from "../messages"
 import type { EventMessage, ResponseMessage } from "./messages"
 import { type RequestTelemetry, type TelemetrySink, LoggingTelemetrySink } from "./telemetry"
@@ -103,23 +104,35 @@ export abstract class ServiceClient<
 		await chrome.runtime.sendMessage({ type: MessageType.Request, content, from: this.uid, to: this.service })
 	}
 
-	// Error shaping is intentionally string-valued — the current offscreen
-	// contract. The string→typed flip is a later, localized change to these
-	// four hooks only.
+	// Typed error shaping — parity with the background transport. The offscreen
+	// service emits `errorPayload` (P3), so remote errors reconstruct the
+	// original WalletError subclass; timeout/send-failure/disconnect become the
+	// same typed errors the Port transport already used. Rejections that reach a
+	// connected dApp via prove/simulate are mapped to a stable response.error in
+	// `error-envelope.ts` (the Rpc* cases added in this phase).
 	protected makeRemoteError(content: ResponseContentLike): unknown {
-		return content.error
+		return content.errorPayload
+			? walletErrorFromPayload(content.errorPayload as Parameters<typeof walletErrorFromPayload>[0])
+			: new Error(content.error ?? "Unknown error")
 	}
 
 	protected makeTimeoutError(meta: RequestErrorMeta): unknown {
-		return `Offscreen request timed out: ${meta.methodName}`
+		return new RpcTimeoutError(`Offscreen request timed out: ${meta.methodName}`, {
+			requestId: meta.requestId,
+			methodName: meta.methodName,
+		})
 	}
 
 	protected makeSendFailureError(meta: RequestErrorMeta): unknown {
-		return `Offscreen send failed: ${meta.methodName}`
+		return new RpcDisconnectedError(`Offscreen send failed: ${meta.methodName}`, {
+			requestId: meta.requestId,
+			methodName: meta.methodName,
+			cause: meta.cause === undefined ? undefined : String(meta.cause),
+		})
 	}
 
 	protected makeDisconnectError(): unknown {
-		return "Client disconnected"
+		return new Error("Client disconnected")
 	}
 
 	protected onTerminal(record: TerminalRecord): void {

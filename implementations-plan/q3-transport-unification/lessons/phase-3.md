@@ -1,6 +1,6 @@
 # Phase 3 — Shared service core + RPC-surface guard + additive errorPayload
 
-**Status:** code + standard gate ✓. Network leg in CI; finalize ✓ on green/latest-dev.
+**Status:** ✓ complete. Standard gate + network both green (PR #121 run 27827688449 on d56c1d7, 8 network jobs ran+passed on latest-dev base).
 
 ## Execution summary
 

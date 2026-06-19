@@ -4,16 +4,18 @@
  * Relocated from the extension package into the package that owns the code.
  * Uses the local `transport-harness` (`captureMessage` / `emitMessage`).
  *
- * The string-reject contract (offscreen rejects with raw strings, not typed
- * errors) is pinned VERBATIM here — it is the current behavior and is flipped
- * to typed errors in a later phase. The timer-cleanup tripwires at the bottom
- * are the leak guards the shared-correlator phase depends on.
+ * As of the phase-4 flip the offscreen client rejects with TYPED errors (parity
+ * with the Port transport): remote errors reconstruct the WalletError subclass
+ * from `errorPayload`, timeouts → RpcTimeoutError, send failures →
+ * RpcDisconnectedError, disconnect → Error("Client disconnected"). The
+ * timer-cleanup tripwires at the bottom are the unified-correlator leak guards.
  */
 
 import { describe, test, expect, vi, beforeEach } from "vitest"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import { captureMessage, emitMessage, makeSpyLogger, silentLogger } from "../testing/transport-harness"
+import { RpcDisconnectedError, RpcTimeoutError, UserRejectedError, WalletError } from "../errors"
 import { MessageType } from "../messages"
 import { LoggingTelemetrySink, MemoryTelemetrySink, type RequestTelemetry, type TelemetrySink } from "./telemetry"
 import { ServiceClient } from "./client"
@@ -167,11 +169,33 @@ describe("ServiceClient telemetry + send-failure", () => {
 		await flush()
 		const { requestId, fromUid } = getLastRequest()
 		emitMessage(makeError(requestId, fromUid, "remote_failed"))
-		// PINNED: offscreen rejects with the raw error STRING (not a typed
-		// error). This is the current contract; flipped in a later phase.
-		await expect(promise).resolves.toBe("remote_failed")
+		// FLIPPED (phase 4): a flat-error response (no errorPayload) rejects with
+		// a plain Error instance, not the raw string.
+		const err = await promise
+		expect(err).toBeInstanceOf(Error)
+		expect((err as Error).message).toBe("remote_failed")
 
 		expect(sink.records).toHaveLength(1)
+		expect(sink.records[0].status).toBe("rejected")
+	})
+
+	test("rejected terminal: errorPayload reconstructs the typed WalletError subclass", async () => {
+		const sink = new MemoryTelemetrySink()
+		const client = new TestClient(sink)
+		const promise = client.echo("hi").catch((e) => e)
+		await flush()
+		const { requestId, fromUid } = getLastRequest()
+		emitMessage({
+			type: MessageType.Response,
+			from: "test-service",
+			to: fromUid,
+			content: { requestId, error: "user said no", errorPayload: { code: "USER_REJECTED", message: "user said no" } },
+		})
+
+		const err = await promise
+		expect(err).toBeInstanceOf(UserRejectedError)
+		expect(err).toBeInstanceOf(WalletError)
+		expect((err as WalletError).code).toBe("USER_REJECTED")
 		expect(sink.records[0].status).toBe("rejected")
 	})
 
@@ -182,8 +206,10 @@ describe("ServiceClient telemetry + send-failure", () => {
 		// Make sendMessage reject — typical cause: offscreen document gone.
 		sendMessageMock.mockRejectedValueOnce(new Error("offscreen closed before fully loading"))
 
-		// PINNED: rejects with the raw "Offscreen send failed: …" STRING.
-		await expect(client.echo("hi")).rejects.toMatch(/Offscreen send failed: echo/)
+		// FLIPPED (phase 4): rejects with a typed RpcDisconnectedError.
+		const err = await client.echo("hi").catch((e) => e)
+		expect(err).toBeInstanceOf(RpcDisconnectedError)
+		expect((err as Error).message).toMatch(/Offscreen send failed: echo/)
 
 		// Telemetry was emitted synchronously by the catch branch — no
 		// 90s timeout wait needed.
@@ -201,10 +227,11 @@ describe("ServiceClient telemetry + send-failure", () => {
 		expect(sink.records).toHaveLength(0) // not yet terminal
 
 		client.disconnect()
-		// PINNED: offscreen rejects pending requests with the raw
-		// "Client disconnected" STRING.
-		await expect(p1).resolves.toBe("Client disconnected")
-		await expect(p2).resolves.toBe("Client disconnected")
+		// FLIPPED (phase 4): rejects pending requests with Error("Client disconnected").
+		const [e1, e2] = await Promise.all([p1, p2])
+		expect(e1).toBeInstanceOf(Error)
+		expect((e1 as Error).message).toBe("Client disconnected")
+		expect((e2 as Error).message).toBe("Client disconnected")
 
 		expect(sink.records).toHaveLength(2)
 		expect(sink.records.every((r) => r.status === "disconnected")).toBe(true)
@@ -220,8 +247,10 @@ describe("ServiceClient telemetry + send-failure", () => {
 			await vi.advanceTimersByTimeAsync(0) // flush onReady microtasks
 
 			await vi.advanceTimersByTimeAsync(90_000 + 100)
-			// PINNED: raw "Offscreen request timed out: …" STRING.
-			await expect(promise).resolves.toMatch(/Offscreen request timed out: echo/)
+			// FLIPPED (phase 4): rejects with a typed RpcTimeoutError.
+			const err = await promise
+			expect(err).toBeInstanceOf(RpcTimeoutError)
+			expect((err as Error).message).toMatch(/Offscreen request timed out: echo/)
 
 			expect(sink.records).toHaveLength(1)
 			expect(sink.records[0].status).toBe("timeout")
@@ -265,7 +294,9 @@ describe("ServiceClient telemetry + send-failure", () => {
 
 			// Advance to the custom timeout — now it fires.
 			await vi.advanceTimersByTimeAsync(CUSTOM_TIMEOUT_MS - 90_000)
-			await expect(longPromise).resolves.toMatch(/Offscreen request timed out: multiply/)
+			const longErr = await longPromise
+			expect(longErr).toBeInstanceOf(RpcTimeoutError)
+			expect((longErr as Error).message).toMatch(/Offscreen request timed out: multiply/)
 			expect(sink.records).toHaveLength(1)
 			expect(sink.records[0].status).toBe("timeout")
 
@@ -273,7 +304,9 @@ describe("ServiceClient telemetry + send-failure", () => {
 			const echoPromise = client.echo("hi").catch((e) => e)
 			await vi.advanceTimersByTimeAsync(0)
 			await vi.advanceTimersByTimeAsync(90_000 + 100)
-			await expect(echoPromise).resolves.toMatch(/Offscreen request timed out: echo/)
+			const echoErr = await echoPromise
+			expect(echoErr).toBeInstanceOf(RpcTimeoutError)
+			expect((echoErr as Error).message).toMatch(/Offscreen request timed out: echo/)
 			expect(sink.records).toHaveLength(2)
 		} finally {
 			vi.useRealTimers()
