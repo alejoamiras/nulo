@@ -17,11 +17,8 @@ export class FeeJuiceStrategy implements FeeStrategy {
 	public async buildAndEstimate(ctx: FeeStrategyContext): Promise<FeeEstimate> {
 		const task = startEstimateTask(this.deps.tasks, ctx.parentTask)
 		try {
-			const { txRequest, node, pxe, account, network, nonce, txCalls } = await this.deps.txBuilder.buildStandard(
-				ctx.op,
-				AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
-				task,
-			)
+			const built = await this.deps.txBuilder.buildStandard(ctx.op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE, task)
+			const { txRequest, node, pxe, account } = built
 			suggestGasLimits(txRequest, ctx.op.fee)
 			const simulatedTx = await this.deps.simulateTxTask(
 				pxe,
@@ -31,16 +28,7 @@ export class FeeJuiceStrategy implements FeeStrategy {
 			)
 			await finalizeGasLimits(node, txRequest, simulatedTx, ctx.gasPadding, undefined, ctx.op.fee, ctx.feeMultiplier)
 			task.complete()
-			return {
-				txRequest,
-				node,
-				pxe,
-				account,
-				network,
-				nonce,
-				txCalls,
-				feePaymentMethod: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
-			}
+			return { ...built, feePaymentMethod: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE }
 		} catch (error) {
 			task.fail(error)
 			throw error

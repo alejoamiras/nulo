@@ -39,6 +39,7 @@ import { pickPrimaryMethod } from "@/utils/primary-method"
 import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import type { WrappedTask } from "@/wallet/services/task/service"
 import type { LocalTxOrigin, TransactionService } from "@/wallet/services/transaction/service"
+import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import type { AuthwitDiscoverer } from "./authwit-discoverer"
 import type { ExecutionCoordinator } from "./execution-coordinator"
 import type { ExecutionMutexRelease } from "./execution-mutex"
@@ -115,6 +116,9 @@ export interface DappSendExecutorDeps {
 	/** Mirrors `TransactionService.addTransaction` — indexed type keeps the
 	 *  seam in sync with the source signature. */
 	addTransaction: TransactionService["addTransaction"]
+	/** Mirrors `AuthRegistryService.recordPendingAuthwits` — records the build's
+	 *  public authwits at the post-send tail as pending, tx-linked rows. */
+	recordPendingAuthwits: AuthRegistryService["recordPendingAuthwits"]
 	logDebug(msg: string): void
 }
 
@@ -207,11 +211,8 @@ export class DappSendExecutor {
 			await this.deps.lane.markJournal(journalId, { stage: "simulating" })
 			checkCancelled()
 
-			const { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod } = await this.deps.buildAndEstimate(
-				op,
-				op.feeSettings,
-				parentTask,
-			)
+			const { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } =
+				await this.deps.buildAndEstimate(op, op.feeSettings, parentTask)
 
 			const { txHash } = await this.deps.coordinator.proveAndSend({
 				pxe,
@@ -221,8 +222,11 @@ export class DappSendExecutor {
 				parentTask,
 				checkCancelled,
 				markJournal: (patch) => this.deps.lane.markJournal(journalId, patch),
-				recordTransaction: (hash) =>
-					this.deps.addTransaction(
+				// One post-send closure owns BOTH the activity record AND the public-authwit
+				// index write. grantPublicAuthwit routes here (kind: send_transaction), so this
+				// is where a granted authwit is recorded — pending, reconciled by tx outcome.
+				recordTransaction: async (hash) => {
+					await this.deps.addTransaction(
 						origin,
 						network.chainId,
 						account.address.toString(),
@@ -232,7 +236,11 @@ export class DappSendExecutor {
 						hash,
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
-					),
+					)
+					if (pendingPublicAuthwits.length > 0) {
+						await this.deps.recordPendingAuthwits(account.address.toString(), pendingPublicAuthwits, hash)
+					}
+				},
 			})
 			return txHash.toString()
 		} catch (error) {
@@ -355,11 +363,8 @@ export class DappSendExecutor {
 
 			checkCancelled()
 
-			const { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod } = await this.deps.buildAndEstimate(
-				{ ...op, actions, fee },
-				op.feeSettings,
-				parentTask,
-			)
+			const { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } =
+				await this.deps.buildAndEstimate({ ...op, actions, fee }, op.feeSettings, parentTask)
 
 			const sendAdditionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
 			const { txHash, offchainOutput } = await this.deps.coordinator.proveAndSend({
@@ -374,8 +379,12 @@ export class DappSendExecutor {
 					const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
 					return extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
 				},
-				recordTransaction: (hash) =>
-					this.deps.addTransaction(
+				// One post-send closure owns BOTH the activity record AND the public-authwit
+				// index write, so ordering is explicit. Recording here (not at build) is what
+				// keeps estimate/reject from leaking a grant; the rows land `pending` and are
+				// reconciled by the tx's on-chain outcome (onTransactionUpdated).
+				recordTransaction: async (hash) => {
+					await this.deps.addTransaction(
 						origin,
 						network.chainId,
 						account.address.toString(),
@@ -385,7 +394,11 @@ export class DappSendExecutor {
 						hash,
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
-					),
+					)
+					if (pendingPublicAuthwits.length > 0) {
+						await this.deps.recordPendingAuthwits(account.address.toString(), pendingPublicAuthwits, hash)
+					}
+				},
 			})
 
 			if (op.opts.wait === "NO_WAIT") {
