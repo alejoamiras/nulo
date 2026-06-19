@@ -393,73 +393,89 @@ describe("ServiceClient telemetry + send-failure", () => {
 })
 
 /**
- * Timer-cleanup tripwires.
+ * Leak guards for the unified correlator.
  *
- * These pin the invariant the shared-correlator phase depends on: every
- * terminal path (success, remote error, timeout, late-drop, send_failed,
- * disconnect) leaves BOTH the pending-request map AND the request-timer map
- * empty. The current offscreen client keeps the timer map (`requestTimers`)
- * as a sidecar separate from the pending map; the unification must not let
- * either leak. Probing private state is intentional — these are structural
- * leak guards, not behavior assertions.
+ * The two transports used to track timers differently (background: a timer
+ * handle inside the pending entry; offscreen: a separate `requestTimers`
+ * sidecar). The shared core folds both into ONE pending entry whose timer is
+ * cleared whenever the entry is settled. These guards pin the invariant the
+ * unification depends on: every terminal path leaves the pending map empty AND
+ * leaves no armed timer behind that could fire a second, false terminal later.
+ * Probing `pendingCount` is intentional — a structural leak guard, not a
+ * behavior assertion. (D7: the offscreen sidecar is removed here, in the same
+ * change as these guards.)
  */
-describe("timer-cleanup tripwires (leak guards for unification)", () => {
-	// biome-ignore lint/suspicious/noExplicitAny: probing private maps to assert no leak
-	const pending = (c: TestClient) => (c as any).requests as Map<number, unknown>
-	// biome-ignore lint/suspicious/noExplicitAny: probing private maps to assert no leak
-	const timers = (c: TestClient) => (c as any).requestTimers as Map<number, unknown>
+describe("leak guards for the unified correlator (single pending entry)", () => {
+	// biome-ignore lint/suspicious/noExplicitAny: probing the correlator's pending count
+	const pendingCount = (c: TestClient) => (c as any).pendingCount as number
 
-	test("success leaves both pending + timer maps empty", async () => {
+	test("success leaves the pending map empty", async () => {
 		const client = new TestClient(new MemoryTelemetrySink())
 		const promise = client.echo("hi")
 		await flush()
 		const { requestId, fromUid } = getLastRequest()
 		emitMessage(makeResponse(requestId, fromUid, "ok"))
 		await promise
-
-		expect(pending(client).size).toBe(0)
-		expect(timers(client).size).toBe(0)
+		expect(pendingCount(client)).toBe(0)
 	})
 
-	test("remote error leaves both maps empty", async () => {
+	test("remote error leaves the pending map empty", async () => {
 		const client = new TestClient(new MemoryTelemetrySink())
 		const promise = client.echo("hi").catch(() => undefined)
 		await flush()
 		const { requestId, fromUid } = getLastRequest()
 		emitMessage(makeError(requestId, fromUid, "boom"))
 		await promise
-
-		expect(pending(client).size).toBe(0)
-		expect(timers(client).size).toBe(0)
+		expect(pendingCount(client)).toBe(0)
 	})
 
-	test("send_failed clears the timer synchronously (no leak, no orphaned 90s timer)", async () => {
+	test("send_failed evicts the entry synchronously", async () => {
 		const client = new TestClient(new MemoryTelemetrySink())
 		captureMessage().mockRejectedValueOnce(new Error("offscreen gone"))
-
 		await expect(client.echo("hi")).rejects.toBeDefined()
-
-		// The whole point of the synchronous send_failed cleanup: no timer is
-		// left armed to fire a false timeout 90s later.
-		expect(pending(client).size).toBe(0)
-		expect(timers(client).size).toBe(0)
+		expect(pendingCount(client)).toBe(0)
 	})
 
-	test("disconnect clears the timer map for all in-flight requests", async () => {
-		const client = new TestClient(new MemoryTelemetrySink())
-		const p1 = client.echo("a").catch(() => undefined)
-		const p2 = client.multiply(1, 2).catch(() => undefined)
-		await flush()
-		expect(timers(client).size).toBe(2)
-
-		client.disconnect()
-		await Promise.all([p1, p2])
-
-		expect(pending(client).size).toBe(0)
-		expect(timers(client).size).toBe(0)
+	test("send_failed leaves NO armed timer — no false timeout fires 90s later (D7)", async () => {
+		const sink = new MemoryTelemetrySink()
+		const client = new TestClient(sink)
+		vi.useFakeTimers()
+		try {
+			captureMessage().mockRejectedValueOnce(new Error("offscreen gone"))
+			await client.echo("hi").catch(() => undefined)
+			expect(sink.records).toHaveLength(1)
+			expect(sink.records[0].status).toBe("send_failed")
+			// A leaked timer would fire a SECOND terminal (timeout) here.
+			await vi.advanceTimersByTimeAsync(90_000 + 100)
+			expect(sink.records).toHaveLength(1)
+			expect(pendingCount(client)).toBe(0)
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
-	test("timeout fire clears the timer map (no stale entry behind the fired timer)", async () => {
+	test("disconnect leaves NO armed timers — no false timeouts fire later (D7)", async () => {
+		const sink = new MemoryTelemetrySink()
+		const client = new TestClient(sink)
+		vi.useFakeTimers()
+		try {
+			const p1 = client.echo("a").catch(() => undefined)
+			const p2 = client.multiply(1, 2).catch(() => undefined)
+			await vi.advanceTimersByTimeAsync(0)
+			client.disconnect()
+			await Promise.all([p1, p2])
+			expect(sink.records).toHaveLength(2)
+			expect(sink.records.every((r) => r.status === "disconnected")).toBe(true)
+			// Both timers must be cleared — advancing past the ceiling adds nothing.
+			await vi.advanceTimersByTimeAsync(90_000 + 100)
+			expect(sink.records).toHaveLength(2)
+			expect(pendingCount(client)).toBe(0)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("timeout fire evicts the entry (no stale entry behind the fired timer)", async () => {
 		const client = new TestClient(new MemoryTelemetrySink())
 		vi.useFakeTimers()
 		try {
@@ -467,9 +483,7 @@ describe("timer-cleanup tripwires (leak guards for unification)", () => {
 			await vi.advanceTimersByTimeAsync(0)
 			await vi.advanceTimersByTimeAsync(90_000 + 100)
 			await promise
-
-			expect(pending(client).size).toBe(0)
-			expect(timers(client).size).toBe(0)
+			expect(pendingCount(client)).toBe(0)
 		} finally {
 			vi.useRealTimers()
 		}

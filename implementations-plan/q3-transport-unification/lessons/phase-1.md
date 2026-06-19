@@ -1,6 +1,6 @@
 # Phase 1 — Extract pure helpers + fix the bugs they expose
 
-**Status:** code + standard gate ✓. Network leg (liveness) triggered in CI — see "Network" below; phase marked ✓ only once that run is confirmed green on a latest-dev base.
+**Status:** ✓ complete. Standard gate + network leg both green.
 
 ## What shipped
 
@@ -48,13 +48,14 @@ New `src/core/` helpers (the genuinely-pure, genuinely-shared pieces):
   pinned biome via `bun run lint` does not flag it, and those lines were not
   touched).
 
-## Network (liveness)
+## Network (liveness) — GREEN
 
-Triggered via the `e2e:network` label on the PR (covers Phase 0 + Phase 1). The
-suite exercises the real popup↔SW↔offscreen wire, so a green run confirms the
-helper extraction + the three fixes did not break the happy path. Must be judged
-on a branch synced to latest dev incl. de-flake commits (Q22/Q7 base-staleness
-lesson). Run id + verdict recorded here once it completes.
+PR #121, `e2e:network` label. Run **27824758018** on commit f935f12 (base
+verified an ancestor of origin/dev@43f8707 / #120, incl. de-flake commits).
+**All 11 network jobs RAN and succeeded** (5 shards + heavy/fee-methods +
+heavy/concurrent-confirm + canary/real-proving + setup) — zero skipped, so this
+is genuine liveness, not a green-when-skipped reducer artifact. Confirms the
+helper extraction + the three fixes did not break the real wire.
 
 No codex consult needed — each fix was small + audit-blessed (D9/D12 + fable's
 "reply, don't drop" for (c)).

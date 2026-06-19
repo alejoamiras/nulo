@@ -1,13 +1,11 @@
-import { type ILogger, LogLevel } from "@nulo/wallet-core/logger"
+import type { ILogger } from "@nulo/wallet-core/logger"
 import { sleep } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
-import { jsonSanitize } from "@nulo/wallet-core/utils"
-import type { EventsMap, EventsSpec, MethodsMap } from "@nulo/wallet-core/base"
-import { decodeResult } from "../core/decode"
+import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
+import { BaseServiceClient, type RequestErrorMeta, type ResponseContentLike } from "../core/base-client"
 import { RpcDisconnectedError, RpcTimeoutError, walletErrorFromPayload } from "../errors"
-import { MessageType, type EventMessage, type RequestMessage, type ResponseMessage } from "../messages"
-import { wrapParams } from "../utils"
+import { MessageType, type EventMessage, type ResponseMessage } from "../messages"
 
 /** Default upper bound on any RPC request. Individual calls can override.
  *
@@ -18,32 +16,27 @@ import { wrapParams } from "../utils"
  *  while still surfacing a hang. */
 export const DEFAULT_RPC_TIMEOUT_MS = 60_000
 
-/** Stored per-request resolver set. The timeout handle is cleared on terminal state. */
-type PendingRequest = {
-	resolve: (result: unknown) => void
-	reject: (error: unknown) => void
-	timeoutHandle?: ReturnType<typeof setTimeout>
-}
+/** Warn (don't fail) when a request has been pending unusually long. */
+const WARN_AFTER_MS = 10_000
 
-export abstract class ServiceClient<TRequests extends MethodsMap, TEvents extends EventsMap = Record<string, never>> {
+/**
+ * Popup ↔ service-worker client over a long-lived `chrome.runtime.Port`.
+ * Correlation, timeout, and terminal cleanup live in `BaseServiceClient`; this
+ * subclass owns the Port lifecycle (connect / reconnect / disconnect) and the
+ * typed-error shaping.
+ */
+export abstract class ServiceClient<
+	TRequests extends MethodsMap,
+	TEvents extends EventsMap = Record<string, never>,
+> extends BaseServiceClient<TRequests, TEvents> {
 	public onConnected: EventHandler<void> = new EventHandler()
 	public onDisconnected: EventHandler<void> = new EventHandler()
 
-	private readonly name: string
-	private readonly service: string
-	private readonly logger: ILogger
-	private readonly defaultTimeoutMs: number
-
 	private state: ClientState = ClientState.Disconnected
-	private readonly requests: Map<number, PendingRequest> = new Map()
-	private nextRequestId = 1
 	private port?: chrome.runtime.Port
 
 	protected constructor(service: string, logger: ILogger, name?: string, options?: { requestTimeoutMs?: number }) {
-		this.name = name ?? `${service}-client`
-		this.service = service
-		this.logger = logger
-		this.defaultTimeoutMs = options?.requestTimeoutMs ?? DEFAULT_RPC_TIMEOUT_MS
+		super(service, logger, name, { defaultTimeoutMs: options?.requestTimeoutMs ?? DEFAULT_RPC_TIMEOUT_MS, warnAfterMs: WARN_AFTER_MS })
 	}
 
 	public async connect() {
@@ -75,13 +68,7 @@ export abstract class ServiceClient<TRequests extends MethodsMap, TEvents extend
 			this.port.disconnect()
 			this.port = undefined
 		}
-		if (this.requests.size) {
-			this.requests.forEach((entry) => {
-				if (entry.timeoutHandle) clearTimeout(entry.timeoutHandle)
-				entry.reject(new Error("Client disconnected"))
-			})
-			this.requests.clear()
-		}
+		this.rejectAllPending(() => this.makeDisconnectError(), "disconnected", "client_disconnect")
 		this.state = ClientState.Disconnected
 		this.logDebug("Disconnected")
 		this.onDisconnected.invoke()
@@ -98,151 +85,77 @@ export abstract class ServiceClient<TRequests extends MethodsMap, TEvents extend
 			return
 		}
 		if (message.type === MessageType.Response) {
-			const { requestId, result, error, errorPayload, resultIsJson } = message.content
-			const entry = this.requests.get(requestId)
-			if (!entry) {
-				this.logWarn("Invalid response received", message.content)
-				return
-			}
-			if (entry.timeoutHandle) clearTimeout(entry.timeoutHandle)
-			this.requests.delete(requestId)
-			if (error !== undefined || errorPayload !== undefined) {
-				// Structured payload takes precedence so `instanceof WalletError`
-				// (and subclass) checks work on the client. Fall back to a plain
-				// Error when the service threw something that wasn't a WalletError.
-				const rejection = errorPayload ? walletErrorFromPayload(errorPayload) : new Error(error ?? "Unknown error")
-				entry.reject(rejection)
-				this.logDebug("Request rejected", message.content)
-			} else {
-				// AUDIT plan A6 fallback: when the service retried with
-				// `jsonStringify` (setting `resultIsJson`), `result` is a JSON
-				// string — parse it back so callers get the success-path shape.
-				const parsed = decodeResult(result, resultIsJson)
-				entry.resolve(parsed)
-				this.logDebug("Request resolved", message.content)
-			}
-			this.logDebug("Pending requests", this.requests.size)
+			this.handleResponse(message.content)
 		} else {
 			const { event, payload } = message.content
 			this.logDebug("Event received", event, payload)
-			;(this as EventsSpec<TEvents>)[event].invoke(payload)
+			this.handleEvent(event, payload)
 		}
 	}
 
-	protected async request<T extends keyof TRequests>(
-		method: T,
-		...params: Parameters<TRequests[T]>
-	): Promise<Awaited<ReturnType<TRequests[T]>>> {
+	// ── Transport hooks ─────────────────────────────────────────────────
+
+	protected ensureTransportReady(): void | Promise<void> {
+		// `connect()` runs synchronously in the common case — `chrome.runtime.connect`
+		// returns a Port immediately; the only `await` inside `connect()` is the
+		// retry-after-failure path. So kick it off and, if it brought us to
+		// Connected without suspending, return void so the request runs straight
+		// through to the synchronous Port send with no intervening microtask
+		// (preserving the Port transport's long-standing synchronous-send timing).
+		if (this.state === ClientState.Disconnected) void this.connect()
+		if (this.state === ClientState.Connected) return
+		return this.waitForConnection()
+	}
+
+	private async waitForConnection(): Promise<void> {
 		while (this.state !== ClientState.Connected) {
 			if (this.state === ClientState.Disconnected) {
-				this.connect()
+				void this.connect()
 				continue
 			}
 			await sleep(300)
 		}
-		// AUDIT A5 fix: capture the connected port to a local reference so a
-		// concurrent `onDisconnect` (which sets `this.port = undefined` via
-		// `disconnect()`) can't turn the upcoming `postMessage` into a null
-		// deref. The `while`-loop exits with state=Connected, but state can
-		// flip between the loop and the `postMessage` below; the captured
-		// reference is what we send through, and the null-check covers the
-		// rare microtask-ordered race where disconnect ran before the local
-		// capture saw a non-undefined `this.port`.
-		const connectedPort = this.port
-		const requestId = this.getRequestId()
-		const request: RequestMessage<TRequests> = {
-			type: MessageType.Request,
-			content: {
-				requestId,
-				method: method,
-				params: jsonSanitize(wrapParams(params)) as Parameters<TRequests[T]>,
-			},
-		}
+	}
 
-		const methodName = String(method)
-		const timeoutMs = this.defaultTimeoutMs
-		const start = Date.now()
-		this.logDebug(`→ ${methodName}`)
+	protected sendEnvelope(content: unknown): void {
+		// AUDIT A5: capture the connected port locally so a concurrent
+		// onDisconnect (which sets `this.port = undefined` via `disconnect()`)
+		// can't turn this `postMessage` into a null deref. A throw here (port
+		// torn down) is caught by the core and surfaced as a send failure.
+		const port = this.port
+		if (!port) throw new Error("port reference cleared between connect and send")
+		port.postMessage({ type: MessageType.Request, content })
+	}
 
-		const warnTimer = setTimeout(() => {
-			this.logWarn(`Request pending >10s: ${methodName} (id: ${requestId})`)
-		}, 10_000)
+	protected makeRemoteError(content: ResponseContentLike): unknown {
+		// Structured payload takes precedence so `instanceof WalletError` (and
+		// subclass) checks work on the client. Fall back to a plain Error when
+		// the service threw something that wasn't a WalletError.
+		return content.errorPayload
+			? walletErrorFromPayload(content.errorPayload as Parameters<typeof walletErrorFromPayload>[0])
+			: new Error(content.error ?? "Unknown error")
+	}
 
-		const promise = new Promise<Awaited<ReturnType<TRequests[T]>>>((resolve, reject) => {
-			// Hard timeout — rejects the pending request with a typed error so
-			// callers can distinguish "the service worker is wedged" from
-			// "the service worker replied with an error". Clears itself on
-			// terminal state (response / disconnect).
-			const timeoutHandle = setTimeout(() => {
-				const entry = this.requests.get(requestId)
-				if (!entry) return
-				this.requests.delete(requestId)
-				entry.reject(new RpcTimeoutError(`RPC '${methodName}' timed out after ${timeoutMs}ms`, { requestId, methodName }))
-				this.logWarn(`Request timed out: ${methodName} (id: ${requestId}, ${timeoutMs}ms)`)
-			}, timeoutMs)
-
-			this.requests.set(requestId, {
-				resolve: resolve as (result: unknown) => void,
-				reject,
-				timeoutHandle,
-			})
-		})
-
-		// Two failure modes the legacy `port!.postMessage(request)` couldn't
-		// distinguish from a hang: (a) the local port reference is undefined
-		// because disconnect raced us, (b) postMessage throws synchronously
-		// because the port was already torn down. Both reject with a typed
-		// `RpcDisconnectedError` so callers can retry without conflating
-		// with service-side failures.
-		const fail = (cause?: unknown) => {
-			const entry = this.requests.get(requestId)
-			if (!entry) return
-			if (entry.timeoutHandle) clearTimeout(entry.timeoutHandle)
-			this.requests.delete(requestId)
-			entry.reject(
-				new RpcDisconnectedError(`RPC '${methodName}' aborted: port disconnected`, {
-					requestId,
-					methodName,
-					cause: cause === undefined ? undefined : String(cause),
-				}),
-			)
-		}
-
-		if (!connectedPort) {
-			fail("port reference cleared between connect and send")
-		} else {
-			try {
-				connectedPort.postMessage(request)
-			} catch (error) {
-				fail(error)
-			}
-		}
-
-		return promise.finally(() => {
-			clearTimeout(warnTimer)
-			this.logDebug(`← ${methodName} (${Date.now() - start}ms)`)
+	protected makeTimeoutError(meta: RequestErrorMeta): unknown {
+		return new RpcTimeoutError(`RPC '${meta.methodName}' timed out after ${meta.timeoutMs}ms`, {
+			requestId: meta.requestId,
+			methodName: meta.methodName,
 		})
 	}
 
-	private getRequestId() {
-		return this.nextRequestId++
+	protected makeSendFailureError(meta: RequestErrorMeta): unknown {
+		return new RpcDisconnectedError(`RPC '${meta.methodName}' aborted: port disconnected`, {
+			requestId: meta.requestId,
+			methodName: meta.methodName,
+			cause: meta.cause === undefined ? undefined : String(meta.cause),
+		})
 	}
 
-	protected logDebug(...data: unknown[]) {
-		this.logger.log(this.name, LogLevel.Debug, ...data)
+	protected makeDisconnectError(): unknown {
+		return new Error("Client disconnected")
 	}
 
-	protected logInfo(...data: unknown[]) {
-		this.logger.log(this.name, LogLevel.Info, ...data)
-	}
-
-	protected logWarn(...data: unknown[]) {
-		this.logger.log(this.name, LogLevel.Warn, ...data)
-	}
-
-	protected logError(...data: unknown[]) {
-		this.logger.log(this.name, LogLevel.Error, ...data)
-	}
+	// ── Convenience RPCs ────────────────────────────────────────────────
 
 	public async backup(): Promise<unknown> {
 		return this.request("backup" as keyof TRequests, ...([] as unknown as Parameters<TRequests[keyof TRequests]>))

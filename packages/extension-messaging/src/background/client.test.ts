@@ -408,8 +408,8 @@ describe("port disconnect race (AUDIT A5)", () => {
 		await expect(client.echo("ping")).rejects.toBeInstanceOf(RpcDisconnectedError)
 		// The request must be evicted; otherwise a future timeout fire would
 		// double-reject or a late response would resolve a stale promise.
-		// biome-ignore lint/suspicious/noExplicitAny: probing private state to assert cleanup
-		expect(((client as any).requests as Map<number, unknown>).size).toBe(0)
+		// biome-ignore lint/suspicious/noExplicitAny: probing the correlator's pending count
+		expect((client as any).pendingCount).toBe(0)
 	})
 })
 
