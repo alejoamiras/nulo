@@ -50,3 +50,10 @@ use `lang="ts"`.
   (toast composable 10 + ToastManagerBase 9). `bun run test` → 2429 passed (extension; shim + wrapper
   + 55 useToast consumers resolve). `bun run test:faucet` → 343 passed (untouched). `bun run lint` → 0.
   `bun run build` → built.
+
+## Push: transient SSH blip (resolved)
+After committing P3 (19eb84a), `git push` first failed with `Permission denied (publickey)` (SSH agent
+hiccup mid-session) — did NOT attempt to re-add the key (one-off auth flow = hard limit). A later
+retry succeeded on its own (transient, not a persistent eviction): **P1–P3 are on origin**
+(`1b0b88a..19eb84a`). Takeaway: on a push `publickey` failure, just retry on a later loop tick rather
+than touching auth.

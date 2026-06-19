@@ -8,10 +8,12 @@ import Text from "./core/Text.vue"
 import Badge from "./ui/Badge.vue"
 import Banner from "./ui/Banner.vue"
 import BrutalistTitle from "./ui/BrutalistTitle.vue"
+import Button from "./ui/Button.vue"
 import Checkbox from "./ui/Checkbox.vue"
 import LoadingState from "./ui/LoadingState.vue"
 import SectionLabel from "./ui/SectionLabel.vue"
 import Spinner from "./ui/Spinner.vue"
+import SubPageHeaderBase from "./ui/SubPageHeaderBase.vue"
 import ToastManagerBase from "./ui/ToastManagerBase.vue"
 import Toggle from "./ui/Toggle.vue"
 
@@ -37,6 +39,8 @@ const cases: Array<[string, Component, Record<string, unknown>]> = [
 	["LoadingState", LoadingState, { label: "Loading" }],
 	// No toast open → renders the empty Transition; still exercises the explicit Flex/Icon/useToast imports.
 	["ToastManagerBase", ToastManagerBase, {}],
+	["Button", Button, {}],
+	["SubPageHeaderBase", SubPageHeaderBase, { title: "X" }],
 ]
 
 describe("@nulo/design components mount without auto-import", () => {

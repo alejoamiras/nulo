@@ -245,7 +245,7 @@ builds · smoke · human-visual (extension).
 exit 0; extension shells mount the local `<ToastManager>` unchanged. Layers: typecheck · lint · unit ·
 build.
 
-### P4 — Router seams (Button + SubPageHeader — EXTENSION ONLY; faucet flip deferred to P7)
+### P4 — Router seams (Button + SubPageHeader — EXTENSION ONLY; faucet flip deferred to P7) ✓ DONE
 
 1. Package router-free `Button.vue` (F1; closed `tag`, anchor `rel` hygiene + RouterLink preservation,
    renders package Spinner+Icon). Test ≥5 (variants/sizes/wide/loading-shows-Spinner/icons/`tag="a"`
