@@ -16,7 +16,7 @@ import { setup } from "@storybook/vue3-vite"
 import { createPinia } from "pinia"
 
 // (1) Global CSS — same imports as src/popup/index.ts:30-31
-import "@/assets/styles/_base.scss"
+import "@nulo/design/base.css"
 import "@/popup/index.scss"
 
 const TELEPORT_ROOTS = ["popup", "tooltip", "dropdown", "popover", "toast"] as const

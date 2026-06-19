@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — design-system externalization</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .supervised { background: #eef6ff; border-left-color: #0366d6; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .defer { background: #f4f4f4; padding: 0.75rem 1rem; border-left: 3px solid #bbb; font-size: 0.95rem; }
+    .cleared { background: #eaf7ee; padding: 0.75rem 1rem; border-left: 3px solid #2da44e; font-size: 0.95rem; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Externalizing the shared component library</h1>
+  <p class="muted">Round 1 — the ambitious version, run supervised. Approved, ready to implement.</p>
+
+  <p>We have three Vue frontends (the wallet <strong>extension</strong>, the <strong>faucet</strong>,
+  and a vanilla-JS playground that's out of scope). A shared UI package, <code>@nulo/design</code>,
+  already exists and the faucet uses it — but the <strong>extension uses none of it</strong> and
+  keeps its own copies, including a drifted <em>copy</em> of the design tokens. This round makes
+  <code>@nulo/design</code> the <strong>one true home</strong> for the tokens, the wallet's whole base
+  stylesheet + fonts, and 9 basic building blocks — so both apps share one source.</p>
+
+  <div class="cleared"><strong>Status: approved.</strong> Three independent plans + two hostile
+  reviews + a final pass + a targeted re-check of the risky part. The reviews caught real defects
+  each time; the plan was rewritten to fix them. The end-goal is a hard rule: <strong>the extension
+  must look exactly the same as it does today.</strong></div>
+
+  <h2>The two big decisions you made</h2>
+  <p><strong>1. Go ambitious.</strong> Instead of leaving the deeper unification for later, this round
+  moves the wallet's entire base stylesheet + fonts + theme system into the shared package, so there's
+  a single source for everything — not just token names.</p>
+  <p><strong>2. Run it supervised.</strong> The risky part (rewriting the global stylesheet) has no
+  cheap automated way to prove "still looks identical" in this repo — the test tools here can't read
+  resolved colors, and screenshot infra would be overkill. So instead of building that, <strong>you
+  are the check</strong>: at the takeover step you open the wallet and confirm it looks right. That
+  removes the need for any new visual-testing machinery.</p>
+
+  <div class="supervised"><strong>The key safety idea: relocate, don't drop.</strong> The takeover
+  does NOT delete the extension's global styles — the whole app still depends on them. It <em>moves
+  them verbatim</em> into the shared package (tokens regenerated from one source; everything else
+  copied exactly), and the extension imports them back. Nothing disappears, so the icons/scrollbars/
+  utilities/animations all keep working. Your visual check confirms the move was faithful.</p>
+
+  <h2>What we're moving (and what we're NOT)</h2>
+  <p><strong>Moving this round:</strong> the tokens + the full base stylesheet + fonts, plus
+  <code>Flex</code>, <code>Icon</code>, <code>Text</code>, <code>MaterialIcon</code> and
+  <code>Badge</code>, <code>BrutalistTitle</code>, <code>Checkbox</code>, <code>SectionLabel</code>,
+  <code>Toggle</code> (9 components).</p>
+  <div class="defer"><strong>Deferred to round 2:</strong> <code>Button</code>/<code>SubPageHeader</code>
+  (router), <code>ToastManager</code> (app state), <code>Spinner</code>+<code>Banner</code>+
+  <code>LoadingState</code> (clashing Spinner versions), <code>Tooltip</code>/<code>Popover</code>/
+  <code>Input</code> (need page-level mount points the faucet lacks), and the faucet's button cleanup.</div>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1 — One true token source + drift alarm + CI wiring (automated)</h3>
+    <p>Build a single source for the tokens, generate the typed list from it, add a test that fails if
+    anyone hand-edits a copy, and point CI at the shared package. No styles or components change yet.</p>
+    <p class="muted">Proves itself by: regen byte-match + both apps build; CI watches the package.</p>
+  </div>
+  <div class="phase supervised">
+    <h3>Phase 2 — Base/theme/font takeover — YOUR SIGN-OFF REQUIRED</h3>
+    <p>Move the extension's entire base stylesheet + fonts into the package (verbatim, tokens
+    regenerated), have the extension import it and delete its local copy. Automated checks: it builds
+    for Chrome AND Firefox, every font actually loads, nothing crashes, and the ported stylesheet
+    text-matches the original. Then it <strong>stops and asks you</strong> to open the extension
+    (Chrome + Firefox, light + dark, with/without the bottom nav) and the faucet, and confirm both
+    look identical. It will not proceed until you say so.</p>
+    <p class="muted">Proves itself by: machine checks green + <strong>your visual confirmation</strong>.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3 — The 4 core building blocks (automated)</h3>
+    <p>Move <code>Flex</code>, <code>Icon</code>, <code>Text</code>, <code>MaterialIcon</code>;
+    rewrite them to stand alone with explicit imports; fix one latent <code>Icon</code> bug; a test
+    actually renders + clicks through each (catches the "forgot an import" crash the type-checker
+    misses).</p>
+    <p class="muted">Proves itself by: render/branch tests + style snapshots + build + smoke test.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4 — Five simple UI bits (automated)</h3>
+    <p>Move <code>Badge</code>, <code>BrutalistTitle</code>, <code>Checkbox</code>,
+    <code>SectionLabel</code>, <code>Toggle</code> the same way.</p>
+    <p class="muted">Proves itself by: render/branch tests + build (both apps) + smoke test.</p>
+  </div>
+  <div class="phase supervised">
+    <h3>Phase 5 — Tidy up, docs, full test — final glance</h3>
+    <p>Remove scaffolding, write docs + the round-2 to-do list, run the full 25-minute network test,
+    and a final visual confirmation from you.</p>
+    <p class="muted">Proves itself by: full audit + smoke + network e2e + your final look.</p>
+  </div>
+
+  <h2>Why no visual-regression harness</h2>
+  <p>A harness is only needed for one combination: rewriting the global stylesheet <em>unattended</em>
+  (no human to eyeball it). You're supervising the takeover, so your eyes are the gate — exactly how a
+  CSS refactor is normally verified. The automated checks still cover everything machine-checkable
+  (token drift, faithful-port text match, both-browser builds, font loading, crashes, component
+  output). The harness would be redundant.</p>
+
+  <div class="approval">
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds</h2>
+    <p>Paste ONE to start the supervised build. Both stop at Phase 2 and Phase 5 for your visual
+    sign-off and won't proceed without it.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose.</p>
+    <div class="phase recommended">
+      <h3>Recommended: /goal</h3>
+      <pre><code>/goal Round 1 of implementations-plan/design-system-externalization is complete: all 5 phases marked ✓ in plan.md (the per-phase headers in the file, not just chat), each ✓ backed by its phase's Validation gate reported passing in the transcript; for each phase the agent printed `LESSONS_FILE=implementations-plan/design-system-externalization/lessons/phase-N.md`. SUPERVISED: Phase 2 (base/theme/font takeover) and Phase 5 are NOT self-certifiable — after the MACHINE gate passes, STOP and explicitly request my visual sign-off (extension in chrome+firefox, light+dark, nav+no-nav, key screens + the faucet) and only mark those phases ✓ after I confirm in-session; machine-gated phases (1,3,4) proceed autonomously. The branch-aware un-stubbed mount-all gate + tokens.drift + base.parity + the font-load assertion are green; `/code-review max --fix` complete with findings applied and committed; codex post-impl audit complete with high/critical findings addressed; final `bun run audit:vue` AND `bun run test:e2e` AND `bun run e2e:agent` all report exit 0 in the transcript.</code></pre>
+    </div>
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/design-system-externalization (round 1, SUPERVISED). Never idle on machine-gated work. Each firing: read plan.md + lessons/ (authoritative) + git state; take the next pending plan.md step; after each edit run `bun run lint` + touched-package tests; commit → push. Stuck/decision? `/codex xhigh`, log it, never merge to main / publish / expand scope. Same step failed 5× → reassess with codex. Phase green = its plan.md Validation gate passes (run it, paste output, mark ✓, file lessons, print LESSONS_FILE=...). Phase 2 (takeover) and Phase 5: after the MACHINE gate passes, STOP and request my visual sign-off (extension chrome+firefox, light+dark, nav+no-nav + faucet); do NOT mark ✓ or proceed until I confirm. All phases ✓ → `/code-review max --fix` → commit → codex post-impl audit → wrap-up + round-2 backlog → stop. Keep an ASCII checklist visible.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="brief.md">Shared brief</a> ·
+  <a href="audit-codex.md">Codex audits</a> · <a href="audit-fable.md">Fable-slot audits</a> ·
+  <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

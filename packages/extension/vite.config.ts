@@ -4,6 +4,7 @@ import vue from "@vitejs/plugin-vue"
 import usePages from "vite-plugin-pages"
 import useAutoImport from "unplugin-auto-import/vite"
 import useComponents from "unplugin-vue-components/vite"
+import { nuloDesignResolver } from "./scripts/design-resolver"
 import { defineConfig } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import packageJson from "./package.json"
@@ -80,7 +81,6 @@ export default defineConfig({
 	css: {
 		preprocessorOptions: {
 			scss: {
-				loadPaths: [fileURLToPath(new URL("./src/assets/styles", import.meta.url))],
 				quietDeps: true,
 			},
 		},
@@ -153,6 +153,7 @@ export default defineConfig({
 
 		useComponents({
 			dirs: ["src/components", "src/onboarding/components"],
+			resolvers: [nuloDesignResolver()],
 			dts: "src/types/components.d.ts",
 		}),
 
