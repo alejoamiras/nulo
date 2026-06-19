@@ -81,7 +81,7 @@ function wireWithdrawDeps(): void {
 			onProgress({ targetBlock: Number(receipt.blockNumber) })
 
 			const pollTimer = setInterval(() => {
-				node.getProvenBlockNumber()
+				node.getBlockNumber("proven")
 					.then((n) => onProgress({ provenBlock: Number(n) }))
 					.catch(() => {})
 			}, 5000)

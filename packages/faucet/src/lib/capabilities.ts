@@ -7,7 +7,7 @@ const FEE_JUICE_L2 = AztecAddress.fromString(feeJuiceAddress)
  *  loads its artifact) — only its `mint_and_pay_fee` call is scoped, mirroring the sponsor-call pattern. */
 const PRIVATE_FPC_L2 = AztecAddress.fromString(PRIVATE_FPC_ADDRESS)
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { ProtocolContractAddress } from "@aztec/protocol-contracts"
+import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-registry/constants"
 
 /**
  * Build the wallet-sdk capability manifest for the faucet.
@@ -249,7 +249,7 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 						{ contract: tokenAddress, function: "burn_public" },
 						{ contract: tokenAddress, function: "burn_private" },
 						{ contract: sponsoredFpcAddress, function: "sponsor_unconditionally" },
-						{ contract: ProtocolContractAddress.AuthRegistry, function: "set_authorized" },
+						{ contract: STANDARD_AUTH_REGISTRY_ADDRESS, function: "set_authorized" },
 						{ contract: FEE_JUICE_L2, function: "claim_and_end_setup" },
 						// Private fuel (gas-follows-token): the 2-call cold-start payment — FeeJuice.claim
 						// then PrivateFPC.mint_and_pay_fee — run verbatim by the wallet's EXTERNAL path.
@@ -279,9 +279,10 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 					{ contract: tokenAddress, function: "burn_private" },
 					{ contract: sponsoredFpcAddress, function: "sponsor_unconditionally" },
 					// exit_to_l1 needs a PUBLIC burn auth-wit, which lands on-chain as set_authorized on the
-					// canonical auth registry (ProtocolContractAddress.AuthRegistry, 0x..01). Without this the
+					// standard auth registry (STANDARD_AUTH_REGISTRY_ADDRESS — derived from the artifact in 5.0,
+					// no longer protocol slot 0x..01). Without this the
 					// withdraw's auth-wit sendTx hits a transaction-scope violation.
-					{ contract: ProtocolContractAddress.AuthRegistry, function: "set_authorized" },
+					{ contract: STANDARD_AUTH_REGISTRY_ADDRESS, function: "set_authorized" },
 				],
 			},
 		],
