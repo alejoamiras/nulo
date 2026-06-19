@@ -224,10 +224,16 @@ async function main() {
 			// send - that is the durable recovery key (DeploySentTx exposes no pre-wait txHash accessor;
 			// `.send({ wait })` is the proven inclusion path, mirroring deposit-testnet.ts).
 			appendJournal(JOURNAL_PATH, { phase: "submitted", step, address: instance.address.toString() })
-			await Contract.deploy(ewallet as never, art as never, args as never, ctor).send({
-				...opts,
-				contractAddressSalt: salt,
+			// 5.0: salt + universalDeploy are construction-time DeployInstantiationOptions (the deployer is
+			// locked at construction), NOT send options. Passing them to .send() is silently ignored, so the
+			// deploy lands at the wallet-as-deployer / default-salt address — DIFFERENT from the deployer=ZERO
+			// instance computed above — and the wiring + read-backs then target a never-deployed address.
+			// Mirrors the faucet deploy (faucet/scripts/deploy.ts), which gets this right on V5.
+			await Contract.deploy(ewallet as never, art as never, args as never, ctor, {
+				salt,
 				universalDeploy: true,
+			} as never).send({
+				...opts,
 				wait: { waitForStatus: TxStatus.CHECKPOINTED },
 			} as never)
 			appendJournal(JOURNAL_PATH, { phase: "confirmed", step, address: instance.address.toString() })
