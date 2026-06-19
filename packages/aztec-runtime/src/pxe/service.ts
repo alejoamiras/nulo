@@ -276,8 +276,15 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				this.logDebug(`[SYNC-DEBUG] proveTx: failed to read sync state: ${e}`)
 			}
 
+			// 5.0 tags private-log messages with the sender; PXE throws "Sender for tags is not set"
+			// during private execution (before proving) when it is absent — so any private-note-emitting
+			// tx (e.g. public→private shield) fails in witness-gen. The SDK's BaseWallet derives this from
+			// `from`; we call proveTx directly, so mirror it: the first scope is the tx sender by our
+			// convention (callers build scopes as `[account.address, ...]`).
+			const provedScopes = await z.array(AztecAddress.schema).parseAsync(scopes)
 			return pxe.proveTx(await TxExecutionRequest.schema.parseAsync(txRequest), {
-				scopes: await z.array(AztecAddress.schema).parseAsync(scopes),
+				scopes: provedScopes,
+				senderForTags: provedScopes[0],
 			})
 		})
 	}
@@ -328,13 +335,17 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// but riding a default is fragile: a future upstream change
 			// could flip it and silently break overrides. Pass it
 			// explicitly when we know we need it.
+			const simScopes = await AccessScopesSchema.parseAsync(opts.scopes)
 			return await pxe.simulateTx(await TxExecutionRequest.schema.parseAsync(txRequest), {
 				simulatePublic: opts.simulatePublic,
 				skipTxValidation: opts.skipTxValidation,
 				skipFeeEnforcement: opts.skipFeeEnforcement,
 				overrides,
 				...(overrides ? { skipKernels: true } : {}),
-				scopes: await AccessScopesSchema.parseAsync(opts.scopes),
+				scopes: simScopes,
+				// See proveTx: 5.0 requires the private-log sender or PXE throws "Sender for tags is not
+				// set" during private execution. First scope is the tx sender by our convention.
+				senderForTags: simScopes[0],
 			})
 		})
 	}
