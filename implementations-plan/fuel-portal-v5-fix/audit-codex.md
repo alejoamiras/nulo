@@ -64,3 +64,20 @@ Cheaper/better than pure defer:
 - Do **not** pin an old block. That restores greenness by dodging reality.
 
 If that salvage is not obviously small, skip it and proceed candidate-first.
+# Codex post-impl audit (session 019ee648)
+
+Verdict: `no high/critical`
+
+**Correctness**
+- No helper-guard bug found. `helper` is only touched inside the same seeded branches that justify constructing it, so there is no path where `helper == address(0)` is called and “succeeds” silently. Full-seed behavior is unchanged because both defaults are still `true`. See [DeployFuelLive.s.sol](packages/bridge-evm/script/DeployFuelLive.s.sol:93) lines 93-151.
+- Separate low-grade footgun remains in the reuse matrix: if an operator sets `ROUTER_ADDRESS` but forgets matching `FUEL_SWAP_ADDRESS`, the script will deploy a fresh `UniswapFuelSwap` and then reuse the old router, orphaning the new swap. That predates/exists outside the helper guard, but it is still a bad env combination. See [DeployFuelLive.s.sol](packages/bridge-evm/script/DeployFuelLive.s.sol:84) lines 84-89.
+
+**Security**
+- The new router owner EOA is a real trust surface, but not a high-severity theft surface. `setSwapTarget()` can DoS users or force a config rotation, and `sweep()` can recover residue, but the router only approves `fuelAmount`, witness-binds the live `swapTarget`, checks actual FeeJuice balance increase, and checks exact fuel-slice consumption before bridging the remainder. That prevents “steal the whole deposit” and “sweep mid-flight” failure modes. See [SwapBridgeRouter.sol](packages/bridge-evm/src/SwapBridgeRouter.sol:143), [SwapBridgeRouter.sol](packages/bridge-evm/src/SwapBridgeRouter.sol:181), [SwapBridgeRouter.sol](packages/bridge-evm/src/SwapBridgeRouter.sol:290).
+
+**Live-state**
+- I found no runtime consumer in repo still pointing at `0x697bdb88` or the V4 portal. The live faucet manifest is on the new router, and the faucet/runtime reads from that manifest. See [testnet-bridge.json](packages/faucet/public/testnet-bridge.json:14), [bridge-deployments.ts](packages/faucet/src/contracts/bridge-deployments.ts:21), [useDeposit.ts](packages/faucet/src/composables/useDeposit.ts:647).
+- Leaving the old router deployed is acceptable on testnet, but it is not the best possible state. You can effectively neutralize it by changing its `swapTarget` to a nonfunctional address/reverter: stale faucet clients will then fail closed because `swapTarget` is witness-bound, instead of burning FJ into the dead V4 portal.
+
+**Missed**
+- `router` is not the only runtime-critical fuel field. `swapTarget` is also runtime-critical because the frontend signs it into the Permit2 witness; if `setSwapTarget()` changes on-chain and the manifest is not updated, fueled deposits fail. `feeJuicePortal` is metadata-only for faucet runtime, but still required by verification tooling. See [bridge-deployments.ts](packages/faucet/src/contracts/bridge-deployments.ts:21), [flows.ts](packages/bridge-core/src/flows.ts:230), [verify-l1.ts](packages/bridge-core/scripts/verify-l1.ts:136).

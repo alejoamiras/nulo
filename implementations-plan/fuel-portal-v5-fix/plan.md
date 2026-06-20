@@ -1,6 +1,6 @@
 # Fuel-bridge Fee-Juice portal V5 fix
 
-**Status:** IMPLEMENTED — all 3 phases ✓; candidate smoke self-paying claim PASSED + promoted live (pending `/code-review` + post-impl codex audit) · **Tier:** light · **Parent:** [aztec-5.0-upgrade](../aztec-5.0-upgrade/plan.md) (testnet bring-up follow-up)
+**Status:** ✅ COMPLETE — all 3 phases ✓; candidate smoke self-paying claim PASSED + promoted live; `/code-review` clean; codex post-impl `no high/critical`. · **Tier:** light · **Parent:** [aztec-5.0-upgrade](../aztec-5.0-upgrade/plan.md) (testnet bring-up follow-up)
 
 ## Summary
 
@@ -124,6 +124,11 @@ No `/harden` pass warranted — this corrects one constructor argument; it doesn
 - **Guard `PoolSetupHelper` (codex).** Make `DeployFuelLive` genuinely router-only when not seeding, rather than tolerating a wasted helper deploy — keeps Phase 2's pass criterion honest and the redeploy minimal.
 
 ## Audit verdicts
+
+- **Codex post-impl (xhigh, session `019ee648-1b14-…`): `no high/critical`.** Confirmed the fix is sound: helper guard has no `address(0)` path + full-seed behavior unchanged; no runtime consumer still points at the old router `0x697bdb88` / V4 portal; the router's per-call checks (approves only `fuelAmount`, witness-binds `swapTarget`, verifies FJ balance increase + exact fuel-slice consumption) prevent steal-whole-deposit / sweep-mid-flight. Three LOW/optional findings, logged as follow-ups (none mandatory, none triggered by this deploy):
+  1. **Reuse-matrix footgun** (pre-existing, outside this change): `ROUTER_ADDRESS` set without `FUEL_SWAP_ADDRESS` would deploy a fresh swap then reuse the old router, orphaning the swap. Not triggered here (we set `FUEL_SWAP_ADDRESS`, not `ROUTER_ADDRESS`). Optional: guard the env matrix.
+  2. **Old-router neutralization** (optional testnet hardening): the orphaned old router `0x697bdb88` could be made fail-closed by setting its `swapTarget` to a reverter, so stale clients revert instead of burning FJ into the dead V4 portal. Acceptable as-is on testnet; surfaced to the user as an optional follow-up.
+  3. **`swapTarget` is also runtime-critical** (clarification, not a bug): the frontend signs it into the Permit2 witness, so a future `setSwapTarget()` must be mirrored to the manifest. Unchanged here (`0x459ea79d`), so the manifest is correct.
 
 - **Codex (light, xhigh, session `019ee564-406f-…`): conditional approve.** Conditions (all folded in): (1) fix the Phase 2 router-only assumption — `PoolSetupHelper` deploys unconditionally → guard it (Phase 1); (2) candidate-first via `smoke-swap-existing-testnet.ts` before promoting live (Phase 3); (3) correct the stale-address inventory (7 sites, +`.env.example`) and the fork-test claim (only `DeployFuelLive.fork.t.sol` exercises the portal) (Facts 6/9); (4) drop the brittle absolute-index heuristic → gate on defined checkpoint for the exact key + claim success (Phase 3). Also adopted: `owner()` read-back (Phase 2), hardened old-router security note, weakened I2 framing. Codex confirmed the core thesis: no wallet-side change needed (Fact 11), reusing the swap is portal-safe, and redeploying only the router is functionally sufficient. Transcript: `audit-codex.md`.
 
