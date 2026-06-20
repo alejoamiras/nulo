@@ -65,7 +65,7 @@ Three codex agents + this audit (`019ee67b`) all confirm: don't touch Wonderland
 - Pass criteria: bridge-core typecheck + unit green; the **private** self-paying claim SETTLES (included, not just sent) on V5 on every run under the `getPredictedMinFees` cap basis; the per-run log shows gasLimit + maxFeesPerGas + getFeeLimit + actual fee separately; the derived `minFuelFj` is stable and ≥ the worst observed committed ceiling. A single inclusion-reject OR `amount >= max_gas_cost` revert is a hard fail → revisit the predicted-fee basis (worst predicted slot / small pad) and re-run.
 - Layers: typecheck + unit + live-network e2e (real private self-paying claim, repeated).
 
-### Phase 3 — Apply calibration + manifest + embedded-feePayer settlement e2e
+### Phase 3 — Apply calibration + manifest + settlement gate — ✓ DONE (minFuelFj 5.085 FJ promoted live; settlement proven 3× live; CI e2e = follow-up)
 
 **Objective.** Land the calibrated `RELIABILITY_MULT` + `minFuelFj`, then prove no regression with an e2e that actually settles an embedded-`feePayer` tx (the path that regressed) — NOT `fee-methods.test.ts`.
 
