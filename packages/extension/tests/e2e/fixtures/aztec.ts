@@ -11,6 +11,7 @@ import { rmSync } from "node:fs"
 
 import { createAztecNodeClient, waitForNode } from "@aztec/aztec.js/node"
 import { TxHash } from "@aztec/stdlib/tx"
+import { GasFees } from "@aztec/stdlib/gas"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Fr } from "@aztec/aztec.js/fields"
 import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
@@ -91,6 +92,15 @@ export async function createTestWallet(url = LOCAL_NODE_URL) {
 	return { wallet, accounts, node, cleanup }
 }
 
+/**
+ * Generous `maxFeesPerGas` ceiling for SponsoredFPC-paid setup txs. The SDK otherwise pins
+ * maxFeesPerGas to the ESTIMATION-time gas fee with no headroom, so an L2-fee spike between
+ * estimate and inclusion rejects the tx (observed in CI: estimate feePerL2Gas=5.5e7 <
+ * inclusion 1.1e8). maxFeesPerGas is only a ceiling and the FPC pays the ACTUAL network fee,
+ * so a high cap can't overpay — it just stops spike-rejection flakes. See lessons/phase-6.md.
+ */
+const E2E_FEE_GAS = { maxFeesPerGas: new GasFees(10n ** 11n, 10n ** 11n) }
+
 /** Deploy a Token contract with a minter address. Returns the token contract address. */
 export async function deployTestToken(
 	wallet: InstanceType<typeof EmbeddedWallet>,
@@ -103,7 +113,7 @@ export async function deployTestToken(
 		"TST",
 		18,
 		minterAddress,
-	).send({ fee: feeOptions, from: minterAddress })
+	).send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: minterAddress })
 
 	return contract.address.toString()
 }
@@ -145,12 +155,14 @@ export async function mintPublicTokens(
 	const token = await TokenContract.at(AztecAddress.fromString(tokenAddress), wallet)
 	await token.methods
 		.mint_to_public(AztecAddress.fromString(toAddress), amount)
-		.send({ fee: feeOptions, from: AztecAddress.fromString(minterAddress) })
+		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: AztecAddress.fromString(minterAddress) })
 
 	// Verify the mint is visible by reading the balance from the test wallet's PXE.
 	// This ensures the state has settled before the extension tries to read it.
 	const to = AztecAddress.fromString(toAddress)
-	const balance = await token.methods.balance_of_public(to).simulate({ from: AztecAddress.fromString(minterAddress) })
+	const balance = await token.methods
+		.balance_of_public(to)
+		.simulate({ from: AztecAddress.fromString(minterAddress), fee: { gasSettings: E2E_FEE_GAS } })
 	console.log(`[mintPublicTokens] Verified on-chain public balance: ${balance}`)
 	if (balance === 0n) {
 		throw new Error(`Mint appeared to succeed but balance_of_public returned 0 for ${toAddress}`)
@@ -195,7 +207,7 @@ export async function mintPrivateTokens(
 	// at the call site so future callers don't repeat the trap.
 	await token.methods
 		.mint_to_private(AztecAddress.fromString(toAddress), amount)
-		.send({ fee: feeOptions, from: AztecAddress.fromString(minterAddress), wait: { timeout: 120 } })
+		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: AztecAddress.fromString(minterAddress), wait: { timeout: 120 } })
 }
 
 // ── Fee Juice L1→L2 Bridge ────────────────────────────────────────────
@@ -264,7 +276,7 @@ export async function claimFeeJuice(
 	const feeJuice = await Contract.at(ProtocolContractAddress.FeeJuice, FeeJuiceArtifact, wallet)
 	await feeJuice.methods
 		.claim(AztecAddress.fromString(toAddress), claim.claimAmount, claim.claimSecret, claim.messageLeafIndex)
-		.send({ fee: feeOptions, from: fromAddress })
+		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: fromAddress })
 	console.log(`[claimFeeJuice] Claimed ${claim.claimAmount} FJ for ${toAddress}`)
 }
 
@@ -358,11 +370,13 @@ export async function setupPreFundedAccount(
 	const deployMethod = await accountManager.getDeployMethod()
 	await deployMethod.send({
 		from: NO_FROM,
-		fee: { paymentMethod: sponsoredFee.paymentMethod },
+		fee: { paymentMethod: sponsoredFee.paymentMethod, gasSettings: E2E_FEE_GAS },
 		wait: { timeout: 120 },
 	})
 	logger.info(`Script-side account deployed: ${accountManager.address.toString()}`)
-	const derivedWallet = await accountManager.getAccount()
+	// getAccount() registers the derived account in the wallet (side effect); the value itself
+	// is unused — the subsequent mint targets `expectedAddress` (== the derived account address).
+	const _derivedWallet = await accountManager.getAccount()
 
 	// Step 4 — Public FJ: bridge + claim. Recipient-bound (sender-agnostic), so we
 	// reuse the existing helpers with the test sandbox wallet for fee payment.
@@ -406,7 +420,7 @@ export async function setupPreFundedAccount(
 			const feeJuice = await Contract.at(ProtocolContractAddress.FeeJuice, FeeJuiceArtifact, wallet)
 			await feeJuice.methods
 				.balance_of_public(expectedAddress)
-				.simulate({ from: feePayerAddress })
+				.simulate({ from: feePayerAddress, fee: { gasSettings: E2E_FEE_GAS } })
 				.catch(() => undefined)
 		},
 	)
@@ -420,7 +434,7 @@ export async function setupPreFundedAccount(
 		const { FeeJuiceArtifact } = await import("@aztec/protocol-contracts/fee-juice")
 		const feeJuice = await Contract.at(ProtocolContractAddress.FeeJuice, FeeJuiceArtifact, wallet)
 		await feeJuice.methods.claim(fpc.address, privateAmount, bridgeSecret, leafIndex).send({
-			fee: { paymentMethod: sponsoredFee.paymentMethod },
+			fee: { paymentMethod: sponsoredFee.paymentMethod, gasSettings: E2E_FEE_GAS },
 			from: feePayerAddress,
 			wait: { timeout: 120 },
 		})
@@ -432,7 +446,7 @@ export async function setupPreFundedAccount(
 	await fpc.methods.mint(privateAmount, bridgeSalt, leafIndex).send({
 		from: expectedAddress,
 		additionalScopes: [fpc.address],
-		fee: { paymentMethod: sponsoredFee.paymentMethod },
+		fee: { paymentMethod: sponsoredFee.paymentMethod, gasSettings: E2E_FEE_GAS },
 		wait: { timeout: 120 },
 	})
 	logger.info("PrivateFPC.mint succeeded")
@@ -440,7 +454,9 @@ export async function setupPreFundedAccount(
 	// Sanity assertion: balance landed before fixture returns.
 	// `balance_of(...).simulate(...)` returns `{ result: bigint }` per @wonderland's
 	// canonical pattern (private.test.ts:101-103).
-	const { result: privateBal } = await fpc.methods.balance_of(expectedAddress).simulate({ from: expectedAddress })
+	const { result: privateBal } = await fpc.methods
+		.balance_of(expectedAddress)
+		.simulate({ from: expectedAddress, fee: { gasSettings: E2E_FEE_GAS } })
 	if (typeof privateBal !== "bigint" || privateBal === 0n) {
 		throw new Error(`PrivateFPC.balance_of returned ${privateBal} after mint — claim/mint flow broken`)
 	}

@@ -23,6 +23,7 @@
  * worst case), `normalizedRaw` is JSON-or-`null`.
  */
 
+import { baseErrorJson } from "../utils/error-json"
 import { NORMALIZED_RAW_MAX_CHARS } from "./types"
 import type { JobError } from "./types"
 
@@ -70,8 +71,9 @@ function trySerialize(raw: unknown): string | null {
 
 function jsonReplacer(_key: string, value: unknown): unknown {
 	if (typeof value === "bigint") return `${value.toString()}n`
-	if (value instanceof Error) {
-		return { __error: true, name: value.name, message: value.message, stack: value.stack }
-	}
+	// `__error` is jobs/error's discriminant; bigint keeps the trailing-`n`
+	// suffix — both deliberate divergences from `utils/serialization`. Only the
+	// name/message/stack projection is shared via `baseErrorJson`.
+	if (value instanceof Error) return { __error: true, ...baseErrorJson(value) }
 	return value
 }

@@ -113,6 +113,56 @@ async function extCtxEvaluate<A extends unknown[], R>(page: Page, fn: (...a: A) 
 }
 
 /**
+ * F1 measurement capture (measure, NO fix). Test-side, so it can never ship in
+ * a build. At the authwits settings step it dumps the decisive bucket evidence
+ * under `[authwit-measure]`:
+ *   - stored `nulo:core:auth-registry` rows (their `account` keys + hashes),
+ *   - stored `nulo:core:accounts` rows (the address the page queries with),
+ *   - the authwits page render state + the revoke-all disabled state.
+ * Classifies bucket A (rows exist but their `account` ≠ the queried address —
+ * format mismatch) vs B/C (no rows after a grant) vs D (rows match the address
+ * but the page is still empty). Never throws — measurement must not change the
+ * test's pass/fail.
+ */
+export async function dumpAuthwitMeasurement(page: Page, label: string): Promise<void> {
+	try {
+		const storage = await extCtxEvaluate(page, async () => {
+			const all = (await chrome.storage.local.get(null)) as Record<string, unknown>
+			const pick = (match: (k: string) => boolean) =>
+				Object.entries(all)
+					.filter(([k]) => match(k))
+					.map(([key, value]) => ({ key, value }))
+			return {
+				authwits: pick((k) => k.startsWith("nulo:core:auth-registry") && !k.startsWith("nulo:core:auth-registry-enabled")),
+				authwitsEnabled: pick((k) => k.startsWith("nulo:core:auth-registry-enabled")),
+				accounts: pick((k) => k.startsWith("nulo:core:accounts")),
+			}
+		})
+		const dom = await page
+			.evaluate(() => {
+				const body = document.body.textContent ?? ""
+				const fetching = body.includes("FETCHING AUTHWITS")
+				const emptyState = body.includes("NO AUTHWITS YET")
+				const noMatches = body.includes("NO MATCHES")
+				const errorBanner = body.includes("Something went wrong")
+				const revokeAll = document.querySelector('[data-testid="authwits-revoke-all"]')
+				return {
+					fetching,
+					emptyState,
+					noMatches,
+					errorBanner,
+					cardsLikelyPresent: !fetching && !emptyState && !noMatches && !errorBanner,
+					revokeAllAriaDisabled: revokeAll?.getAttribute("aria-disabled") ?? "(not in DOM)",
+				}
+			})
+			.catch((e) => `dom-scrape-failed: ${String(e)}`)
+		console.log(`[authwit-measure] ${label}: ${JSON.stringify({ storage, dom })}`)
+	} catch (e) {
+		console.log(`[authwit-measure] ${label}: capture failed: ${String(e)}`)
+	}
+}
+
+/**
  * Full `dapp_execute` records (every field), trimmed only by JSON. The lean
  * `{id,stage,sessionId}` view hides the claim metadata the F3 queued-stall
  * diagnosis needs — `queuedJournalId`, stage timestamps, any `error`. Read from

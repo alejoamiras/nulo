@@ -14,6 +14,18 @@ describe("normalizeError", () => {
 		expect(result.normalizedRaw).toContain("boom")
 	})
 
+	test("Error envelope carries the __error discriminant + standard fields", () => {
+		const parsed = JSON.parse(normalizeError(new Error("boom"), "prover").normalizedRaw!) as Record<string, unknown>
+		expect(parsed.__error).toBe(true)
+		expect(parsed.name).toBe("Error")
+		expect(parsed.message).toBe("boom")
+		expect(typeof parsed.stack).toBe("string")
+	})
+
+	test("bigint serializes with the trailing-n suffix (diverges from wire serialization's plain string)", () => {
+		expect(normalizeError({ value: 123n }, "unknown").normalizedRaw).toBe('{"value":"123n"}')
+	})
+
 	test("handles BigInt and circular refs without throwing", () => {
 		const cyclic: { self?: unknown; value: bigint } = { value: 99n }
 		cyclic.self = cyclic
@@ -35,7 +47,7 @@ describe("normalizeError", () => {
 		expect(result.normalizedRaw).toMatch(/…\[truncated\]$/)
 	})
 
-	test("never throws — hostile Proxy that throws on .message access still returns a fallback", () => {
+	test("never throws — hostile Proxy hits the exact outer-catch fallback envelope", () => {
 		const hostile = new Proxy(
 			{},
 			{
@@ -45,14 +57,15 @@ describe("normalizeError", () => {
 			},
 		)
 
-		const result = normalizeError(hostile, "unknown")
-
-		// Outer try/catch fallback is reachable; envelope is still valid
-		expect(result.kind).toBe("unknown")
-		expect(typeof result.message).toBe("string")
-		// normalizedRaw may be null OR the inner trySerialize succeeded — both fine
-		// What we care about: function did not throw.
-		expect(result).toHaveProperty("normalizedRaw")
+		// `extractMessage` calls `String(hostile)`, whose ToPrimitive triggers the
+		// throwing `get` trap before `trySerialize` runs, so the OUTER try/catch is
+		// the only thing between that and a re-throw. Pin the EXACT fallback
+		// envelope (the load-bearing never-throw guarantee), not merely "didn't throw".
+		expect(normalizeError(hostile, "unknown")).toEqual({
+			kind: "unknown",
+			message: "<unrenderable error>",
+			normalizedRaw: null,
+		})
 	})
 
 	test("non-Error values (strings, numbers, null, undefined) round-trip safely", () => {

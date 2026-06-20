@@ -232,6 +232,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			},
 			buildAndEstimate: (op, feeSettings, parentTask) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask),
 			addTransaction: (...args) => this.transactionService.addTransaction(...args),
+			recordPendingAuthwits: (...args) => this.authRegistryService.recordPendingAuthwits(...args),
 			logDebug: (msg) => this.logDebug(msg),
 		})
 		this.viewExecutor = new ViewExecutor({
