@@ -310,9 +310,17 @@ async function main() {
 		if (committedMaxFees && receipt.gasUsed?.totalGas) {
 			const g = receipt.gasUsed.totalGas
 			ceiling = BigInt(g.daGas) * committedMaxFees.feePerDaGas + BigInt(g.l2Gas) * committedMaxFees.feePerL2Gas
+		} else if (committedMaxFees && actualFee > 0n) {
+			// The receipt doesn't expose gasUsed, so derive the FPC ceiling from the fee ratio: actual fee =
+			// gasUsed·liveBaseFee, the FPC ceiling = gasLimit·committedMaxFees, and gasLimit≈gasUsed (gasPadding≈1,
+			// teardown=0). So ceiling ≈ actualFee · (committedMaxFees / liveBaseFee), using the L2-gas component
+			// (it dominates; committed da-fee is 0). Conservative: if predicted-worst > current, the ceiling
+			// scales up exactly as the committed cap does.
+			const live = await node.getCurrentMinFees()
+			ceiling = live.feePerL2Gas > 0n ? (actualFee * committedMaxFees.feePerL2Gas) / live.feePerL2Gas : undefined
 		}
 		console.log(
-			`${label}: actual fee ${actualFee}${ceiling !== undefined ? ` | getFeeLimit (FPC ceiling) ${ceiling}` : " | getFeeLimit n/a (no gasUsed on receipt)"}`,
+			`${label}: actual fee ${actualFee}${ceiling !== undefined ? ` | getFeeLimit (FPC ceiling) ≈ ${ceiling}` : " | getFeeLimit n/a"}`,
 		)
 
 		const tokenBal = await tokenBalance(isPrivate ? "private" : "public")

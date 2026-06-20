@@ -22,4 +22,25 @@ Once deployed: register it in `fuel-testnet.ts` via `getContractInstanceFromInst
 
 `LESSONS_FILE=implementations-plan/private-fuel-fee-fix/lessons/phase-2.md`
 
-## Phase 2: ⏸ HELD (prerequisite: deploy PrivateFPC on V5 — awaiting user go-ahead)
+## RESOLVED: register-only (codex 019ee697) — no deploy needed
+
+Codex corrected the "must deploy" reading: the PrivateFPC has no public functions / no init, so 5.0 uses it **without any deployment tx**. `node.getContract(0x1fa8746e)==nothing` only means it's not *published for public execution* — irrelevant to this private path. Locally: `registerContract(instance, artifact)` at salt 0 (instance + class — the private-kernel oracle needs both). On-chain: the only requirement is the FPC's public FeeJuice balance, which `FeeJuice.claim(fpc,…)` credits — and `mint_and_pay_fee` does that claim as its first setup call. So the claim produces its own settlement state. The hold is lifted; no deploy, no authorization needed.
+
+## VALIDATION RUN (PRIVATE_RUNS=1) — the private-FPC claim SETTLES ✓
+
+`fuel-testnet.ts` extended with a true private-FPC variant (register FPC at salt 0 — drift-check passed, rebuilt == pinned; bridge fuel to the FPC via deriveBridgeSecret; claim via `privateMintAndPayFee` with `maxFeesPerGas = predictedWorstMinFees`). Result:
+
+```
+live contracts registered (+ PrivateFPC 0x1fa8746e…)
+PRIVATE+FPC-fuel: committed maxFeesPerGas da=0 l2=1961518510052 (predicted-worst)
+PRIVATE+FPC-fuel: claim SETTLED - one tx claimed tokens AND gas (7.2m)
+PRIVATE+FPC-fuel: actual fee 1636667184031626240 (~1.64 FJ) | token balance 9.75 AZLO ✓
+```
+
+**The full fix chain works on V5:** Phase-1 pin (no refetch-drift) + predicted-worst committed cap + register-only FPC → the private fueled claim SETTLES. This is exactly what was reverting with `amount >= max_gas_cost`. The original failure was the OLD inflated ceiling (post-sim refetch × DEFAULT_FEE_MULTIPLIER); the pin makes the committed cap tight (predicted-worst) so the FPC ceiling drops below the bridged FJ.
+
+Calibration note: actual fee ~1.64 FJ (private), ~2.56 FJ (public) — well under the current 11 FJ floor, consistent with the prior ~2.878 FJ canary. So the floor was never too low for the *actual* fee; the bug was the inflated *ceiling*. The receipt doesn't expose gasUsed, so the decompose now derives the FPC ceiling from the fee ratio `actualFee × (committedMaxFees.l2 / liveMinFees.l2)` (grounded; committed da-fee is 0). Full ≥3-run calibration in flight to confirm settlement stability + a stable minFuelFj from the derived ceiling.
+
+`LESSONS_FILE=implementations-plan/private-fuel-fee-fix/lessons/phase-2.md`
+
+## Phase 2: ▶ private claim SETTLES (validated 1×); ≥3-run calibration in flight
