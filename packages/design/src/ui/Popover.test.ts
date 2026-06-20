@@ -1,8 +1,8 @@
+import { flushPromises, mount } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { mount, flushPromises } from "@vue/test-utils"
 import Popover from "./Popover.vue"
 
-vi.mock("@/composables/outside", () => ({
+vi.mock("../composables/outside", () => ({
 	useOutside: vi.fn(() => () => {}),
 }))
 
@@ -20,7 +20,7 @@ const mountPopover = (props: Record<string, unknown> = {}, slots: Record<string,
 		},
 	})
 
-describe("ui/Popover", () => {
+describe("Popover", () => {
 	beforeEach(() => {
 		popoverRoot = document.createElement("div")
 		popoverRoot.id = "popover"
@@ -32,8 +32,7 @@ describe("ui/Popover", () => {
 	})
 
 	test("renders the default slot (trigger)", () => {
-		const w = mountPopover()
-		expect(w.find("button").text()).toBe("trigger")
+		expect(mountPopover().find("button").text()).toBe("trigger")
 	})
 
 	test("does NOT teleport content when open=false", () => {
@@ -58,7 +57,21 @@ describe("ui/Popover", () => {
 	})
 
 	test("disabled prop applies the disabled CSS class on the wrapper", () => {
-		const w = mountPopover({ disabled: true })
-		expect(w.html()).toMatch(/disabled/)
+		expect(mountPopover({ disabled: true }).html()).toMatch(/disabled/)
+	})
+
+	test("teleportTo overrides the target root", async () => {
+		const custom = document.createElement("div")
+		custom.id = "custom-pop"
+		document.body.appendChild(custom)
+		try {
+			const w = mountPopover({ open: false, teleportTo: "#custom-pop" })
+			await w.setProps({ open: true })
+			await flushPromises()
+			expect(custom.textContent).toContain("Popover body")
+			expect(popoverRoot.textContent).not.toContain("Popover body")
+		} finally {
+			custom.remove()
+		}
 	})
 })

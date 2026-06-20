@@ -2,7 +2,9 @@
 import { computed } from "vue"
 import { useWalletConnection } from "@/composables/useWalletConnection"
 import { TESTIDS } from "@/lib/testids"
-import { AddressDisplay, AppButton, Spinner } from "@nulo/design"
+// SpinnerLegacy keeps the faucet's spinner visually frozen until the P7 cutover (D-FAUCET-DEFER);
+// aliased to `Spinner` so the template is unchanged. P7 swaps this back to the canonical `Spinner`.
+import { AddressDisplay, AppButton, SpinnerLegacy as Spinner } from "@nulo/design"
 import VerificationModal from "./VerificationModal.vue"
 
 const {

@@ -1,9 +1,17 @@
-<script setup>
-/**
- * Composable
- */
-import { useOutside } from "@/composables/outside"
-let removeOutside = null
+<script setup lang="ts">
+/** Vendor */
+import { nextTick, reactive, ref, watch } from "vue"
+
+/** Composables */
+import { useOutside } from "../composables/outside"
+
+/** Components */
+import Flex from "../core/Flex.vue"
+
+// (BUG PIN) Initialised to null and assigned only inside the open-branch `nextTick`. If `open` flips
+// to false BEFORE that nextTick runs, the else-branch calls `removeOutside()` on null → throws.
+// Preserved verbatim from the extension.
+let removeOutside: (() => void) | null = null
 
 const props = defineProps({
 	open: {
@@ -26,19 +34,25 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	// Host-DOM contract: the consuming app must declare this teleport root (the extension declares
+	// `#popover` in its popup/onboarding shells).
+	teleportTo: {
+		type: String,
+		default: "#popover",
+	},
 })
 const emit = defineEmits(["onClose"])
 
-const triggerEl = ref()
-const cardEl = ref()
+const triggerEl = ref<HTMLElement>()
+const cardEl = ref<HTMLElement>()
 
-const popoverStyles = reactive({})
+const popoverStyles = reactive<Record<string, string>>({})
 
 const onClose = () => {
 	emit("onClose")
 }
 
-const onKeydown = (e) => {
+const onKeydown = (e: KeyboardEvent) => {
 	if (e.code === "Escape") onClose()
 }
 
@@ -46,15 +60,15 @@ watch(
 	() => props.open,
 	() => {
 		if (props.open) {
-			const triggerRect = triggerEl.value.getBoundingClientRect()
+			const triggerRect = (triggerEl.value as HTMLElement).getBoundingClientRect()
 
 			popoverStyles.top = `${triggerRect.y + triggerRect.height + 8}px`
 			switch (props.side) {
 				case "left":
-					popoverStyles[props.side] = `${triggerRect.x + triggerRect.width - props.width}px`
+					popoverStyles[props.side] = `${triggerRect.x + triggerRect.width - Number(props.width)}px`
 					break
 				case "right":
-					popoverStyles[props.side] = `${props.width - triggerRect.x - triggerRect.width}px`
+					popoverStyles[props.side] = `${Number(props.width) - triggerRect.x - triggerRect.width}px`
 					break
 			}
 
@@ -67,7 +81,7 @@ watch(
 		} else {
 			document.removeEventListener("scroll", onClose)
 			document.removeEventListener("keydown", onKeydown)
-			removeOutside()
+			;(removeOutside as () => void)()
 		}
 	},
 )
@@ -79,7 +93,7 @@ watch(
 			<slot />
 		</div>
 
-		<teleport to="#popover">
+		<teleport :to="teleportTo">
 			<div v-if="open" :class="$style.canvas" />
 
 			<Transition name="fastfade">

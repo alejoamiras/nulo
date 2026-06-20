@@ -1,9 +1,15 @@
-<script setup>
+<script setup lang="ts">
 /** Vendor */
-import { ref, watch, computed } from "vue"
+import { computed, nextTick, onMounted, ref, watch } from "vue"
+
+/** Components */
+import Flex from "../core/Flex.vue"
+import Icon from "../core/Icon.vue"
+import Text from "../core/Text.vue"
+import Tooltip from "./Tooltip.vue"
 
 /** Utils */
-import { sanitizeString } from "@/utils/string"
+import { sanitizeString } from "../internal/sanitize"
 
 const emit = defineEmits(["update:modelValue", "focus", "blur", "maxLengthReached", "clear"])
 const props = defineProps({
@@ -88,16 +94,18 @@ const props = defineProps({
 
 const isFocused = ref(false)
 
-const inputEl = ref(null)
+const inputEl = ref<HTMLInputElement | null>(null)
 const focus = () => inputEl.value?.focus()
 defineExpose({ inputEl, focus })
 
-const text = ref(props.modelValue ? props.modelValue : "")
+// `text` is intentionally a string|number|null union — the original binds modelValue ([String,Number])
+// and assigns numbers/null in the int/clear branches. Casts at string-op sites preserve that.
+const text = ref<string | number | null | undefined>(props.modelValue ? props.modelValue : "")
 const warning = ref({
 	show: false,
 	text: "",
 })
-const fillWarning = (text) => {
+const fillWarning = (text?: string) => {
 	if (text) {
 		warning.value = {
 			show: true,
@@ -110,7 +118,7 @@ const fillWarning = (text) => {
 
 onMounted(() => {
 	if (props.autofocus) {
-		inputEl.value.focus()
+		inputEl.value?.focus()
 	}
 })
 
@@ -126,30 +134,33 @@ const getInputType = computed(() => {
 	return "text"
 })
 
-const handleInput = (event) => {
+const handleInput = (event?: Event) => {
 	if (props.disabled) return
 
-	text.value = props.sanitize ? sanitizeString(text.value, props.maxLength) : text.value
+	text.value = props.sanitize ? sanitizeString(text.value as string, props.maxLength) : text.value
 
 	if (!!props.maxLength) {
 		fillWarning()
 		emit("maxLengthReached", false)
 
-		if (text.value.length > props.maxLength) {
-			text.value = text.value.slice(0, props.maxLength)
+		if ((text.value as string).length > props.maxLength) {
+			text.value = (text.value as string).slice(0, props.maxLength)
 		}
 
-		if (text.value.length === props.maxLength) {
+		if ((text.value as string).length === props.maxLength) {
 			fillWarning(`You can’t enter more than ${props.maxLength} characters`)
 			emit("maxLengthReached", true)
 		}
 	}
 
 	if (props.type === "number") {
-		emit("update:modelValue", Number.isNaN(Number.parseFloat(text.value)) ? text.value : Number.parseFloat(text.value))
+		emit(
+			"update:modelValue",
+			Number.isNaN(Number.parseFloat(text.value as string)) ? text.value : Number.parseFloat(text.value as string),
+		)
 	} else if (props.subtype === "int") {
-		const value = event.target.value.replace(/[^\d]/g, "")
-		let res = value ? Number.parseInt(text.value, 10) : 0
+		const value = (event!.target as HTMLInputElement).value.replace(/[^\d]/g, "")
+		let res = value ? Number.parseInt(text.value as string, 10) : 0
 		text.value = value ? value : 0
 
 		if (props.max) {
@@ -166,7 +177,7 @@ const handleInput = (event) => {
 	}
 }
 
-const handleKeydown = (e) => {
+const handleKeydown = (e: KeyboardEvent) => {
 	if (props.disabled && e.key !== "Tab") e.preventDefault()
 	if (props.type === "number") {
 		if (e.key === "-") e.preventDefault()
@@ -187,7 +198,7 @@ const handleBlur = () => {
 	emit("blur")
 }
 
-const handlePaste = (e) => {
+const handlePaste = (e: ClipboardEvent) => {
 	if (props.disablePaste) {
 		e.preventDefault()
 		return
@@ -195,12 +206,14 @@ const handlePaste = (e) => {
 
 	if (!!props.maxLength) {
 		e.preventDefault()
-		const paste = (e.clipboardData || window.clipboardData).getData("text") || ""
-		const el = inputEl.value
-		const start = el.selectionStart ?? text.value.length
+		// `window.clipboardData` is the legacy IE fallback — cast to read it without `any`.
+		const clip = e.clipboardData || (window as unknown as { clipboardData?: DataTransfer }).clipboardData
+		const paste = (clip as DataTransfer).getData("text") || ""
+		const el = inputEl.value as HTMLInputElement
+		const start = el.selectionStart ?? (text.value as string).length
 		const end = el.selectionEnd ?? start
-		const before = text.value.slice(0, start)
-		const after = text.value.slice(end)
+		const before = (text.value as string).slice(0, start)
+		const after = (text.value as string).slice(end)
 		let newText = before + paste + after
 
 		if (newText.length > props.maxLength) {
@@ -211,7 +224,7 @@ const handlePaste = (e) => {
 		handleInput()
 
 		nextTick(() => {
-			const pos = Math.min(start + paste.length, props.maxLength)
+			const pos = Math.min(start + paste.length, props.maxLength as number)
 			el.setSelectionRange(pos, pos)
 		})
 
