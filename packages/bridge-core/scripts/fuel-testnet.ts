@@ -30,7 +30,7 @@ import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src
 import { type Abi, createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { loadContractArtifact } from "@aztec/aztec.js/abi"
-import { Gas } from "@aztec/stdlib/gas"
+import { Gas, type GasFees } from "@aztec/stdlib/gas"
 import { bridgeProxyArtifact, tokenBridgeArtifact } from "../src/artifacts"
 import { feeJuiceAddress, predictedWorstMinFees, publicFeeJuicePayment } from "../src/fee-juice"
 import { runSwapBridge } from "../src/flows"
@@ -65,6 +65,10 @@ function evmAbi(name: string): Abi {
 
 const TOTAL = 10n * 10n ** 18n // 10 AZLO per variant
 const FUEL_SLICE = 25n * 10n ** 16n // 0.25 AZLO ≈ ~487 FJ at the live rate (the design fill)
+// Headroom on the committed maxFeesPerGas (over predicted-worst) so a single attempt survives base-fee
+// drift during its proving window. Matches base_wallet's general 1.5× minFeePadding. The FPC ceiling
+// scales with it, but the bridged FJ (~hundreds) dwarfs the few-FJ ceiling, so it never strands the budget.
+const RELIABILITY_PAD = Number(process.env.RELIABILITY_PAD ?? 1.5)
 
 async function main() {
 	const t0 = Date.now()
@@ -247,34 +251,14 @@ async function main() {
 		)
 
 		// The self-paying claim: ONE tx claims the fuel (fee) AND the tokens.
-		// PUBLIC fuel: FeeJuicePaymentMethodWithClaim (pays ACTUAL fee, no upfront budget gate).
-		// PRIVATE-FPC fuel: Wonderland mint_and_pay_fee, which asserts amount >= getFeeLimit (gasLimit ×
-		// committed maxFeesPerGas) UPFRONT. We commit maxFeesPerGas = predictedWorstMinFees (inclusion-safe;
-		// explicit ⇒ committed verbatim) so the ceiling is stable + the bridged FJ covers it.
-		const committedMaxFees = fuelViaPrivateFpc ? await predictedWorstMinFees(node) : undefined
-		const claimFee = fuelViaPrivateFpc
-			? {
-					paymentMethod: privateMintAndPayFee(
-						AztecAddress.fromString(PRIVATE_FPC_ADDRESS),
-						result.fuelReceived,
-						deriveBridgeSecret(bridgeSalt as Fr, from),
-						bridgeSalt as Fr,
-						new Fr(result.fuelLeafIndex),
-					),
-					gasSettings: { teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }), maxFeesPerGas: committedMaxFees },
-				}
-			: {
-					paymentMethod: publicFeeJuicePayment(from, {
-						claimAmount: result.fuelReceived,
-						claimSecret: Fr.fromHexString(result.fuelSecretHex),
-						messageLeafIndex: result.fuelLeafIndex,
-					}),
-				}
-		if (committedMaxFees) {
-			console.log(
-				`${label}: committed maxFeesPerGas da=${committedMaxFees.feePerDaGas} l2=${committedMaxFees.feePerL2Gas} (predicted-worst)`,
-			)
-		}
+		// PUBLIC fuel: FeeJuicePaymentMethodWithClaim (pays ACTUAL fee, no upfront budget gate) — fee is static.
+		// PRIVATE-FPC fuel: Wonderland mint_and_pay_fee asserts amount >= getFeeLimit (gasLimit × committed
+		// maxFeesPerGas) UPFRONT, AND the protocol rejects the tx if committed maxFeesPerGas < live base fee at
+		// inclusion. The claim builds+proves minutes before it lands, so a build-time cap can fall below the
+		// risen live fee (observed: a 4% rise broke a static cap, and the retry reused it → stranded). So
+		// RE-PRICE per attempt: fresh predictedWorstMinFees × RELIABILITY_PAD. Repricing tracks the rising base
+		// fee across the sync wait; the pad absorbs intra-attempt drift during proving. The bridged FJ
+		// (~hundreds of FJ) dwarfs the few-FJ ceiling, so the larger cap never strands the FPC budget.
 		const bridgedAmount = TOTAL - FUEL_SLICE
 		const tokenSecret = Fr.fromHexString(result.tokenSecretHex)
 		const claimMethod = () =>
@@ -282,26 +266,61 @@ async function main() {
 				? bridge.methods.claim_private(from, bridgedAmount, tokenSecret, new Fr(result.tokenLeafIndex))
 				: bridge.methods.claim_public(from, bridgedAmount, tokenSecret, new Fr(result.tokenLeafIndex))
 
+		const buildClaimFee = async (): Promise<{ fee: unknown; maxFees?: GasFees }> => {
+			if (!fuelViaPrivateFpc) {
+				return {
+					fee: {
+						paymentMethod: publicFeeJuicePayment(from, {
+							claimAmount: result.fuelReceived,
+							claimSecret: Fr.fromHexString(result.fuelSecretHex),
+							messageLeafIndex: result.fuelLeafIndex,
+						}),
+					},
+				}
+			}
+			const maxFees = (await predictedWorstMinFees(node)).mul(RELIABILITY_PAD)
+			return {
+				fee: {
+					paymentMethod: privateMintAndPayFee(
+						AztecAddress.fromString(PRIVATE_FPC_ADDRESS),
+						result.fuelReceived,
+						deriveBridgeSecret(bridgeSalt as Fr, from),
+						bridgeSalt as Fr,
+						new Fr(result.fuelLeafIndex),
+					),
+					gasSettings: { teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }), maxFeesPerGas: maxFees },
+				},
+				maxFees,
+			}
+		}
+
 		const fjBefore = await fjBalance()
 		type ClaimReceipt = { transactionFee?: bigint; gasUsed?: { totalGas?: { daGas: number; l2Gas: number } } }
 		let receipt: ClaimReceipt | undefined
+		let committedMaxFees: GasFees | undefined
 		for (let i = 0; i < 300 && !receipt; i++) {
 			try {
-				const sent = (await claimMethod().send({ from, fee: claimFee, wait: { waitForStatus: TxStatus.PROPOSED } } as never)) as {
+				const built = await buildClaimFee() // RE-PRICE each attempt: tracks the rising live base fee over the wait
+				committedMaxFees = built.maxFees
+				const sent = (await claimMethod().send({ from, fee: built.fee, wait: { waitForStatus: TxStatus.PROPOSED } } as never)) as {
 					receipt?: ClaimReceipt
 				}
 				receipt = sent.receipt ?? {}
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e)
-				// "Amount too low to cover gas cost" is the FPC budget assert — a real fail, NOT a sync wait.
+				// FPC budget assert = a real fail (bridged FJ < ceiling), NOT a sync/fee-drift wait.
 				if (/Amount too low to cover gas cost|max_gas_cost/.test(msg)) {
 					throw new Error(`${label}: FPC budget assert — bridged FJ ${result.fuelReceived} < committed getFeeLimit. ${msg}`)
 				}
-				if (i % 10 === 0) console.log(`claim not ready yet (messages syncing)… (${mins()})`)
+				// "maxFeesPerGas < gasFees" (base fee rose) is now self-healing: the next attempt re-prices.
+				if (i % 10 === 0) console.log(`claim not ready / re-pricing… (${mins()})`)
 				await new Promise((r) => setTimeout(r, 6000))
 			}
 		}
 		if (!receipt) throw new Error(`${label}: self-paying claim never SETTLED within budget`)
+		if (committedMaxFees) {
+			console.log(`${label}: committed maxFeesPerGas l2=${committedMaxFees.feePerL2Gas} (predicted-worst × ${RELIABILITY_PAD})`)
+		}
 		console.log(`${label}: claim SETTLED - one tx claimed tokens AND gas (${mins()})`)
 
 		// Decompose the fee: actual (post-inclusion) vs the FPC ceiling (committed gasLimit × maxFeesPerGas).

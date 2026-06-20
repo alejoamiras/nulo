@@ -297,7 +297,10 @@ function wireDepositDeps(): void {
 				// fixes the FPC ceiling so the bridged amount can cover it. Explicit ⇒ the wallet commits it
 				// verbatim (no embedded-fpc-cap refetch drift). feePayer=FPC ⇒ FeeJuice.claim + mint_and_pay_fee
 				// + claim_private run as one EXTERNAL tx.
-				const claimMaxFees = await predictedWorstMinFees(createAztecNodeClient(NODE_URL))
+				// × 1.5 headroom (matches base_wallet's minFeePadding) so the committed cap survives base-fee drift
+				// during the claim's proving window — a static predicted-worst snapshot can fall below the live fee
+				// by inclusion time and get rejected. Each journal-driven claim retry rebuilds this (re-prices).
+				const claimMaxFees = (await predictedWorstMinFees(createAztecNodeClient(NODE_URL))).mul(1.5)
 				const privateFee = {
 					paymentMethod: privateMintAndPayFee(fpcAddr, fuelReceived, deriveBridgeSecret(salt, recipientAddr), salt, fuelLeaf),
 					gasSettings: {

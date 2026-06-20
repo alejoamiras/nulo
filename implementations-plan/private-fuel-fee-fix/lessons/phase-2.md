@@ -43,4 +43,21 @@ Calibration note: actual fee ~1.64 FJ (private), ~2.56 FJ (public) — well unde
 
 `LESSONS_FILE=implementations-plan/private-fuel-fee-fix/lessons/phase-2.md`
 
-## Phase 2: ▶ private claim SETTLES (validated 1×); ≥3-run calibration in flight
+## INCLUSION-REJECT caught by the ≥3-run calibration (codex round-2 condition 1, validated live)
+
+The first ≥3-run calibration FAILED at private run 1 with a repeating:
+```
+maxFeesPerGas.feePerL2Gas (1912527385103) < gasFees.feePerL2Gas (1988808156268)
+```
+Root cause: `predictedWorstMinFees` was computed ONCE at claim-build time and committed; but the claim submits minutes later (after the message-sync wait), by which point the live base fee had risen ~4% ABOVE the committed cap → the protocol rejects (`maxFeesPerGas < gasFees`). Worse, the retry loop reused the SAME stale `claimFee` object → every retry re-rejected → stranded. This is EXACTLY codex round-2's inclusion-reject risk (distinct from budget-fail) and the user's "multiply for leeway" instinct — both vindicated by a live failure.
+
+**Fix (commit after this finding):**
+1. **Re-price per attempt** — `fuel-testnet.ts` now recomputes `predictedWorstMinFees × RELIABILITY_PAD` inside the retry loop, so the committed cap tracks the rising base fee across the long sync wait (self-healing, vs the stranded static cap).
+2. **`RELIABILITY_PAD = 1.5×`** (matches base_wallet's minFeePadding) on the committed cap, absorbing intra-attempt base-fee drift during proving. The FPC ceiling scales with it but stays far below the bridged FJ (~hundreds of FJ vs a few-FJ ceiling), so it never strands the budget.
+3. Faucet `useDeposit` applies the same 1.5× pad (it re-prices per journal-driven claim retry).
+
+This is why the gate is "≥3 runs" — a single run hid the drift; the calibration sweep exposed it. Re-running PRIVATE_RUNS=3 with the fix.
+
+`LESSONS_FILE=implementations-plan/private-fuel-fee-fix/lessons/phase-2.md`
+
+## Phase 2: ▶ private claim settled 1× (static cap); inclusion-reject found+fixed (reprice+pad); ≥3-run re-validation in flight
