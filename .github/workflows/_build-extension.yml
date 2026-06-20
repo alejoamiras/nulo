@@ -64,17 +64,19 @@ jobs:
       #   - proverless: this build never sets VITE_NULO_E2E_PROVERLESS, so the
       #     build stamp + barrier key are DCE-stripped (positive stamp grep lives
       #     in scripts/e2e/agent.sh).
-      #   - composition-test fakes: shared fakes live under src/ (so typecheck +
-      #     lint cover them) but must only ever be imported by *.test.ts. If a
-      #     fake is ever imported by production code it ships here — a wallet
-      #     that "succeeds" without a real PXE. This fails the build loudly.
+      #   - composition-test fake: the shared shallow-PXE fake lives under src/
+      #     (so typecheck + lint cover it) but must only ever be imported by
+      #     *.test.ts. Its marker is carried as LIVE DATA on the factory's
+      #     returned object, so it survives tree-shaking whenever the factory is
+      #     bundled — if the fake ever ships, this grep catches it. (A wallet
+      #     that "succeeds" without a real PXE.) Fails the build loudly.
       # See packages/extension/tests/COMPOSITION-TESTS.md.
       - name: Assert test-only markers absent (production guard)
         run: |
           fail=0
           for d in packages/extension/dist/chrome packages/extension/dist/firefox; do
             [ -d "$d" ] || continue
-            for marker in "NULO_E2E_PROVERLESS_BUILD_STAMP" "nulo:e2e:proof-gate" "SHALLOW_PXE_FAKE_BUNDLE_MARKER" "FAKE_IPXE_BUNDLE_MARKER"; do
+            for marker in "NULO_E2E_PROVERLESS_BUILD_STAMP" "nulo:e2e:proof-gate" "SHALLOW_PXE_FAKE_BUNDLE_MARKER"; do
               if grep -rq "$marker" "$d"; then
                 echo "::error::test-only marker '$marker' leaked into $d" >&2
                 fail=1

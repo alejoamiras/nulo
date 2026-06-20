@@ -13,12 +13,9 @@ import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { ServiceCollection } from "@/wallet/base"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { svc } from "@/wallet/services/composition-harness"
 import { DappSessionService } from "./service"
 import { AccessLevel, type GrantedCapabilityRecord } from "./spec"
-
-function svc(name: string, methods: Record<string, unknown>) {
-	return { name, dependencies: [], async start() {}, ...methods } as never
-}
 
 const waitFor = async (pred: () => Promise<boolean>, ms = 1000) => {
 	const deadline = Date.now() + ms

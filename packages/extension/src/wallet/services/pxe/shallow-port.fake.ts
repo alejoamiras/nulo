@@ -6,7 +6,8 @@
  * because it `implements ShallowPxe` structurally, a shape change on the real
  * `IPXE` breaks `typecheck` here — that is the compile-time drift guard. It is
  * imported ONLY by `*.composition.test.ts` files; the production build never
- * imports it, and a CI step greps `dist/chrome` for the marker below and fails
+ * imports it, and a CI step greps `dist/chrome|firefox` for the marker (carried
+ * as live data on the factory's return, so it survives tree-shaking) and fails
  * on any hit (bundle hygiene). See `packages/extension/tests/COMPOSITION-TESTS.md`.
  *
  * DUMB BY CONTRACT: canned returns + a registered-address set. No Aztec

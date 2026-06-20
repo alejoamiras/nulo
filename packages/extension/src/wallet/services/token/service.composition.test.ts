@@ -28,15 +28,12 @@ import { AccountService } from "@/wallet/services/account/service"
 import { TaskService } from "@/wallet/services/task/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { makeShallowPxeFake, type ShallowPxeFakeConfig } from "@/wallet/services/pxe/shallow-port.fake"
+import { svc } from "@/wallet/services/composition-harness"
 import { TokenService } from "./service"
 
 const NETWORK = { id: "net1", chainId: 1, primaryEndpointId: "ep1", endpoints: [{ id: "ep1", rpcUrl: "http://fake" }] }
 const CONTRACT = AztecAddress.fromNumber(0x1234).toString()
 const CLASS_ID = "0xc1a55"
-
-function svc(name: string, methods: Record<string, unknown>) {
-	return { name, dependencies: [], async start() {}, ...methods } as never
-}
 
 /** Hardcoded fake instance — deriving a real one needs the bb WASM (not loaded in vitest). */
 function fakeTokenInstance(): ContractInstanceWithAddress {

@@ -24,11 +24,8 @@ import { ServiceCollection } from "@/wallet/base"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { makeShallowPxeFake } from "@/wallet/services/pxe/shallow-port.fake"
+import { svc } from "@/wallet/services/composition-harness"
 import { FpcService } from "./service"
-
-function svc(name: string, methods: Record<string, unknown>) {
-	return { name, dependencies: [], async start() {}, ...methods } as never
-}
 
 async function makeHarness() {
 	const fake = makeShallowPxeFake()
