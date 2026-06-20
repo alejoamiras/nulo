@@ -29,6 +29,7 @@ type Fn = (...args: unknown[]) => void
 
 // ── Background CLIENT side (chrome.runtime.connect → Port) ──────────────
 const portMessageListeners = new Map<string, Fn[]>()
+const portDisconnectListeners = new Map<string, Fn[]>()
 const sendPortMessageMocks = new Map<string, Mock<Fn>>()
 
 /** Invoke the client's port.onMessage listeners for `service` — simulates the
@@ -37,6 +38,17 @@ export const emitPortMessage = (service: string, message: unknown) => {
 	const listeners = portMessageListeners.get(service)
 	if (listeners) {
 		for (const listener of [...listeners]) listener(message)
+	}
+}
+
+/** Fire the client's port.onDisconnect listeners for `service` — simulates the
+ *  service worker dying while the popup is open (the live-reconnect path). The
+ *  port's `disconnect()` clears this service's broker state, so the client's
+ *  reconnect can re-mock a fresh port. */
+export const emitPortDisconnect = (service: string) => {
+	const listeners = portDisconnectListeners.get(service)
+	if (listeners) {
+		for (const listener of [...listeners]) listener()
 	}
 }
 
@@ -55,7 +67,14 @@ const mockClientPort = (service: string) => {
 	const postMessageMock = vi.fn()
 	sendPortMessageMocks.set(service, postMessageMock)
 	return {
-		disconnect: vi.fn(),
+		// Tear down this service's broker state so a subsequent connect() can
+		// re-mock a fresh port (the reconnect path). Real Chrome ports are
+		// single-use; the client makes a new one on reconnect.
+		disconnect: vi.fn(() => {
+			sendPortMessageMocks.delete(service)
+			portMessageListeners.delete(service)
+			portDisconnectListeners.delete(service)
+		}),
 		onMessage: {
 			addListener: (listener: Fn) => {
 				let listeners = portMessageListeners.get(service)
@@ -74,7 +93,24 @@ const mockClientPort = (service: string) => {
 				}
 			},
 		},
-		onDisconnect: { addListener: vi.fn(), removeListener: vi.fn() },
+		onDisconnect: {
+			addListener: (listener: Fn) => {
+				let listeners = portDisconnectListeners.get(service)
+				if (!listeners) {
+					listeners = []
+					portDisconnectListeners.set(service, listeners)
+				}
+				listeners.push(listener)
+			},
+			removeListener: (listener: Fn) => {
+				const listeners = portDisconnectListeners.get(service)
+				if (listeners) {
+					for (let i = listeners.length - 1; i >= 0; i--) {
+						if (listeners[i] === listener) listeners.splice(i, 1)
+					}
+				}
+			},
+		},
 		postMessage: postMessageMock,
 	}
 }
@@ -194,6 +230,7 @@ afterEach(() => {
 	vi.unstubAllGlobals()
 	vi.clearAllMocks()
 	portMessageListeners.clear()
+	portDisconnectListeners.clear()
 	sendPortMessageMocks.clear()
 	messageListeners.splice(0)
 	connectListeners.splice(0)
