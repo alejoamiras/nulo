@@ -34,7 +34,7 @@ import { Gas, type GasFees } from "@aztec/stdlib/gas"
 import { bridgeProxyArtifact, tokenBridgeArtifact } from "../src/artifacts"
 import { feeJuiceAddress, predictedWorstMinFees, publicFeeJuicePayment } from "../src/fee-juice"
 import { runSwapBridge } from "../src/flows"
-import { PRIVATE_FPC_ADDRESS, deriveBridgeSecret, privateMintAndPayFee } from "../src/private-fuel"
+import { PRIVATE_FPC_ADDRESS, deriveBridgeSecret, privateFeeJuicePayment, privateMintAndPayFee } from "../src/private-fuel"
 import { minOutputForSlippage, quoteFuelPath } from "../src/quote"
 import { buildFuelRoute } from "../src/route"
 
@@ -83,7 +83,10 @@ async function main() {
 	console.log("L1 sender", account.address, "| AZLO", azlo, "| router", fuel.router)
 
 	// Mint enough AZLO for both variants (permissionless, Permit2 pre-approved by the token).
-	const MINT = 5n * TOTAL // 1 public sanity + ≥3 private-FPC calibration runs, with headroom
+	const PRIVATE_RUNS = Number(process.env.PRIVATE_RUNS ?? 3) // ≥3 for calibration stability; env-tunable
+	const NOFUEL_SPEND_RUNS = Number(process.env.NOFUEL_SPEND_RUNS ?? 0) // Phase-3 pay_fee proof; each seeds one FPC-fuel run
+	// 1 public sanity + PRIVATE_RUNS calibration + NOFUEL_SPEND_RUNS seed runs + 1 TOTAL headroom.
+	const MINT = BigInt(2 + PRIVATE_RUNS + NOFUEL_SPEND_RUNS) * TOTAL
 	await pub.waitForTransactionReceipt({
 		hash: await wallet.writeContract({
 			address: azlo,
@@ -356,7 +359,6 @@ async function main() {
 	}
 
 	const rndNonce = () => BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
-	const PRIVATE_RUNS = Number(process.env.PRIVATE_RUNS ?? 3) // ≥3 for calibration stability; env-tunable
 
 	// Public fuel = sanity (works pre-fix); the PRIVATE-FPC path is what regressed — run it ≥3× for a
 	// stable getFeeLimit/minFuelFj across fee conditions.
@@ -385,6 +387,53 @@ async function main() {
 	console.log(
 		`MIN_FUEL_FJ calibration: ${minFuelFj} (${FUEL_FEE_MARGIN}× worst ${worstCeiling !== undefined ? "getFeeLimit" : "actual×4 proxy"}) - update testnet-bridge.json l1.fuel.minFuelFj`,
 	)
+
+	// --- Phase 3: NO-FUEL-SPEND proof - a tx self-pays from EXISTING private FJ at the FPC via pay_fee. ---
+	if (NOFUEL_SPEND_RUNS > 0) {
+		const fpcContract = await Contract.at(privateFpcInstance.address, privateFpcArtifact as never, ewallet as never)
+		const readFpcBalance = async (): Promise<bigint> => {
+			const r = (await fpcContract.methods.balance_of(from).simulate({ from })) as { result?: bigint } | bigint
+			return typeof r === "bigint" ? r : (r.result ?? 0n)
+		}
+		for (let i = 0; i < NOFUEL_SPEND_RUNS; i++) {
+			console.log(`\n--- no-fuel-spend run ${i + 1}/${NOFUEL_SPEND_RUNS} ---`)
+			// Seed: a PUBLIC-token + private-FPC-fuel bridge credits the FPC with private FJ AND gives `from`
+			// public tokens to move. The remainder mint_and_pay_fee credits is exactly what pay_fee then spends.
+			await runVariant(false, rndNonce(), true)
+			const before = await readFpcBalance()
+			console.log(`NO-FUEL-SPEND: FPC private FJ before = ${before}`)
+			if (before <= 0n) throw new Error("NO-FUEL-SPEND: FPC balance 0 after a private fuel run - nothing to spend")
+			// Spend it: a 1-unit public self-transfer paying via PrivateFPC.pay_fee, repriced per attempt.
+			let settled = false
+			for (let a = 0; a < 100 && !settled; a++) {
+				try {
+					const maxFees = (await predictedWorstMinFees(node)).mul(RELIABILITY_PAD)
+					await token.methods.transfer_public_to_public(from, from, 1n, 0).send({
+						from,
+						fee: {
+							paymentMethod: privateFeeJuicePayment(AztecAddress.fromString(PRIVATE_FPC_ADDRESS)),
+							gasSettings: { teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }), maxFeesPerGas: maxFees },
+						},
+						wait: { waitForStatus: TxStatus.PROPOSED },
+					} as never)
+					settled = true
+				} catch (e) {
+					const msg = e instanceof Error ? e.message : String(e)
+					if (/Amount too low to cover gas cost|max_gas_cost|insufficient/i.test(msg)) {
+						throw new Error(`NO-FUEL-SPEND: pay_fee insufficiency - FPC balance ${before} < reserved cost. ${msg}`)
+					}
+					if (a % 10 === 0) console.log(`no-fuel-spend re-pricing... (${mins()})`)
+					await new Promise((r) => setTimeout(r, 6000))
+				}
+			}
+			if (!settled) throw new Error("NO-FUEL-SPEND: pay_fee tx never SETTLED within budget")
+			const after = await readFpcBalance()
+			if (after >= before) throw new Error(`NO-FUEL-SPEND: FPC balance did not drop (${before} -> ${after}) - pay_fee did not charge`)
+			console.log(
+				`OK NO-FUEL-SPEND run ${i + 1}: tx self-paid from EXISTING private FJ via pay_fee on V5 (FPC ${before} -> ${after}, spent ${before - after}) (${mins()})`,
+			)
+		}
+	}
 }
 
 main().catch((e) => {
