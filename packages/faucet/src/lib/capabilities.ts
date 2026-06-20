@@ -230,6 +230,9 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 						{ contract: usdcAddress, function: "balance_of_private" },
 						{ contract: ethAddress, function: "balance_of_private" },
 						{ contract: tokenAddress, function: "balance_of_private" },
+						// No-fuel claim fee source: read the user's PRIVATE Fee Juice held at the PrivateFPC
+						// (abi_utility) to decide whether a no-fuel claim can self-pay from it.
+						{ contract: PRIVATE_FPC_L2, function: "balance_of" },
 					],
 				},
 				// The bridge tx methods are simulatable too (a prompt-free PXE dry-run). The deposit gates
@@ -256,7 +259,11 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 						// Simulatable so the private claim can be simulate-gated like the public fjwc one.
 						{ contract: FEE_JUICE_L2, function: "claim" },
 						{ contract: PRIVATE_FPC_L2, function: "mint_and_pay_fee" },
-						// No-fuel L7 cold-check: read the account's public Fee Juice balance to detect a cold account.
+						// No-fuel claim paid from EXISTING private FJ: PrivateFPC.pay_fee. Simulatable so the
+						// no-fuel claim can be simulate-gated (with the FPC payment) like the fuel paths.
+						{ contract: PRIVATE_FPC_L2, function: "pay_fee" },
+						// No-fuel cold-check: read the account's public Fee Juice balance (private FJ is read via
+						// PrivateFPC.balance_of in the utilities scope above).
 						{ contract: FEE_JUICE_L2, function: "balance_of_public" },
 					],
 				},
@@ -271,6 +278,8 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 					// claim_and_end_setup above; the private path claims then ends setup via the FPC).
 					{ contract: FEE_JUICE_L2, function: "claim" },
 					{ contract: PRIVATE_FPC_L2, function: "mint_and_pay_fee" },
+					// No-fuel claim self-paying from the user's existing private FJ balance at the FPC.
+					{ contract: PRIVATE_FPC_L2, function: "pay_fee" },
 					{ contract: bridgeAddress, function: "claim_public" },
 					{ contract: bridgeAddress, function: "claim_private" },
 					{ contract: bridgeAddress, function: "exit_to_l1_public" },

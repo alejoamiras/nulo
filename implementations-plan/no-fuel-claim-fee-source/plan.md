@@ -23,7 +23,7 @@ But you can't yet **spend** that earned private gas on a later **no-fuel** bridg
 
 A no-fuel bridge claim is **not** blocked when the account holds enough Fee Juice in **either** balance, and it pays from that balance on V5:
 
-1. **Private FJ ≥ reserved cost** → the claim is sent with `FPCFeePaymentMethod(privateFpcAddr)` + explicit gas settings the gate computed against (private-first, deterministic, **binding**).
+1. **Private FJ ≥ reserved cost** → the claim is sent with `FPCFeePaymentMethod(privateFpcAddr)` (private-first, deterministic), committing exact gasLimits learned on the journal's first successful post-sync simulate (codex C — see I3).
 2. **Private insufficient, public FJ ≥ reserved cost** → the claim is **unblocked + wallet-chosen** — i.e. the wallet's fee picker handles payment (user selects Public Fee Juice; the wallet owns the gas settings). This is explicitly **NOT** "guaranteed public self-pay" (codex round-2 condition 2): the extension exposes no dApp-supplied public-FJ method, so the faucet only stops blocking and lets the wallet decide. The default in that picker is Sponsored unless the user picks Public Fee Juice (or has a saved preference).
 3. **A required balance read fails** → blocked with a **retry** message (fail-closed), never a false "no gas".
 4. **Both known-zero / neither covers** → blocked with a message naming both balances + the shortfall.
@@ -60,7 +60,9 @@ A no-fuel bridge claim is **not** blocked when the account holds enough Fee Juic
 12. **(verified)** The extension's dApp-supplied fee surface has discriminators `"fjwc" | "fpc"` only (`wallet-bridge/src/operation.ts:60`); there is **no** "pay from existing public FJ" dApp method. Public-FJ self-pay is the wallet picker's job (`FeeSettingsCard.vue`), shown for no-`feePayer` dApp sends (`execute/index.vue:230`, gated by `requiresFeeSelection`).
 
 ### Inferences (unverified — attack these)
-- **I3.** The pre-flight `max_gas_cost` for the private branch, computed as `maxGasCostFor({ gasLimits: from the FPC-attached claim simulate's `gasUsed` (includeMetadata, with `privateFeeJuicePayment` attached — condition 1) + padding, teardownGasLimits: 0, maxFeesPerGas: predictedWorstMinFees(node).mul(1.5) })` and then **committed verbatim on send**, is a true binding bound: a passing gate ⇒ the FPC `pay_fee` assert (`balance ≥ gasLimits·maxFeesPerGas`) holds at inclusion. Validated by the live Phase-3 proof. *(Replaces the rejected `minFuelFj/FUEL_FEE_MARGIN` static reference, which was calibrated for `mint_and_pay_fee` and ignores current state.)*
+- **I3 (resolved → codex C, see lessons/phase-2.md).** The fee path is TWO-stage, because the claim simulate reverts until PXE-sync (`capabilities.ts:235`) and the fee is built before that:
+  1. **Conservative pre-flight gate** (fee-build time, no simulate): `maxGasCostFor(predictedWorstMinFees×1.5, NO_FUEL_CLAIM_GAS_BOUND)` sizes ONLY the SOURCE decision (private/public/none/unverifiable). State-aware (live `maxFeesPerGas`); never under-budgets the source choice.
+  2. **Exact pricing on send**: the private tentative fee uses the proven fuel-claim shape (float gasLimits) for the simulate; the journal's first successful (post-sync) simulate yields `gasUsed`, cached as exact padded gasLimits and committed on send — so the no-refund `pay_fee` reserves a tight amount, not the network's per-tx admission max (`interaction_options.d.ts:174`). Opportunistic: falls back to the tentative shape if `gasUsed` doesn't cross the dApp simulate boundary. Validated by the live Phase-3 proof. *(This replaces the rejected `minFuelFj/FUEL_FEE_MARGIN` static reference AND the round-2 "build-time binding gate," which the PXE-sync timing made infeasible.)*
 
 ### Asks (surfaced — none silent)
 - **A1 (confirm at gate).** Private-first means **no gas refund**: `FPCFeePaymentMethod` doesn't refund unused gas, so each private-paid no-fuel claim costs the **full reserved `max_gas_cost`** (≈ `1.5 × actual`, the inclusion-safety pad, with no change returned). Public FJ would refund — but the faucet can't deterministically force public self-pay (Fact 12), so the trade is really "deterministic private self-pay (overpay, private)" vs "defer to the wallet picker (you choose, may pick sponsored)". You chose private-first; this confirms the cost. Flip to "always defer to the wallet picker" if you'd rather choose per-claim.
@@ -91,7 +93,9 @@ Unit tests (`private-fuel.test.ts`): `privateFeeJuicePayment(addr).getFeePayer()
 - Pass: typecheck exit 0; bridge-core vitest green (incl. new cases); biome exit 0.
 - Layers: typecheck · lint · unit.
 
-### Phase 2 — faucet no-fuel fee-source selection
+### Phase 2 — faucet no-fuel fee-source selection ✓
+
+**Done.** `decideNoFuelFeeSource` (private-first / public-defer / fail-closed) + the fail-closed private-FJ reader (lazy `@nulo/bridge-core/private-fpc-artifact`) + the binding-via-cache wiring (codex C) + manifest `balance_of`/`pay_fee` + both no-fuel cold-checks now consider private FJ. **Estimate-timing fork resolved by codex C** (conservative pre-flight source gate; exact gasLimits learned on the journal's first successful post-sync simulate, committed on send — NOT a build-time "binding gate"; see lessons/phase-2.md). Gate green: faucet typecheck clean · 347 tests (+10) · bridge-core 116 · `bun run lint` exit 0. `LESSONS_FILE=implementations-plan/no-fuel-claim-fee-source/lessons/phase-2.md`
 
 1. **Pure decision function** — `decideNoFuelFeeSource` in `packages/faucet/src/lib/fuel-claim-state.ts`:
    ```
@@ -146,6 +150,7 @@ Unit tests (`fuel-claim-state.test.ts`, ≥7): `decideNoFuelFeeSource` — priva
   1. **Gas estimate must simulate WITH the tentative `FPCFeePaymentMethod` attached** (not a bare claim) so `gasUsed` includes the `pay_fee` setup overhead → folded into Phase 2 step 3 + I3.
   2. **Criterion 2 must read "public = unblocked + wallet-chosen," not "guaranteed public self-pay"** → folded into success criterion 2 + the decision log + the ELI5 copy.
   - Codex confirmed: the private-deterministic / public-deferred split resolves blocker 1; the binding gate holds (no wallet override of supplied `gasLimits`/`maxFeesPerGas` for embedded payments — `embedded-fpc-cap.ts` + `fee-strategy.ts`); the Phase-3 `skipIf`-not-hard-gate pushback is defensible for a `light` fix; no new blockers beyond condition 1.
+- **Implementation consult (resumed, response-2): the estimate-timing fork → verdict `C`.** Condition-1's build-time binding gate was infeasible (the claim simulate reverts until PXE-sync; the fee is built before). Codex C: conservative pre-flight source gate + exact gasLimits learned on the journal's first successful post-sync simulate, committed on send (reject A = duplicate retry loop; B alone = not exact pricing). Folded into I3 + success criterion 1 + Phase 2. Full log: lessons/phase-2.md.
 
 ## Seeds
 

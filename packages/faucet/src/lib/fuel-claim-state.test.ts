@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
 	decideFuelClaim,
+	decideNoFuelFeeSource,
 	decidePrivateFuelClaim,
 	type FuelClaimEvidence,
 	isPrivateFuelInsufficiency,
@@ -146,5 +147,46 @@ describe("decidePrivateFuelClaim (Option A — never public/Sponsored)", () => {
 	it("the insufficiency classifier matches the installed assert + fails closed otherwise", () => {
 		expect(isPrivateFuelInsufficiency(`Tx invalid: ${PRIVATE_FUEL_INSUFFICIENCY_MSG}`)).toBe(true)
 		expect(isPrivateFuelInsufficiency("some other revert")).toBe(false)
+	})
+})
+
+describe("decideNoFuelFeeSource (private-first, fail-closed)", () => {
+	const COST = 100n
+
+	it("private balance that covers wins (private-first), even when public also covers", () => {
+		expect(decideNoFuelFeeSource({ privateFeeJuice: 100n, publicFeeJuice: 999n, maxGasCost: COST })).toEqual({ source: "private" })
+	})
+
+	it("private-only covers → private", () => {
+		expect(decideNoFuelFeeSource({ privateFeeJuice: 150n, publicFeeJuice: 0n, maxGasCost: COST })).toEqual({ source: "private" })
+	})
+
+	it("private insufficient, public covers → public (defer to wallet picker)", () => {
+		expect(decideNoFuelFeeSource({ privateFeeJuice: 50n, publicFeeJuice: 200n, maxGasCost: COST })).toEqual({ source: "public" })
+	})
+
+	it("exact boundary (balance === maxGasCost) covers — pay_fee asserts >=", () => {
+		expect(decideNoFuelFeeSource({ privateFeeJuice: 100n, publicFeeJuice: null, maxGasCost: COST })).toEqual({ source: "private" })
+		expect(decideNoFuelFeeSource({ privateFeeJuice: 0n, publicFeeJuice: 100n, maxGasCost: COST })).toEqual({ source: "public" })
+	})
+
+	it("both known, neither covers → none with shortfall against the larger balance", () => {
+		expect(decideNoFuelFeeSource({ privateFeeJuice: 30n, publicFeeJuice: 70n, maxGasCost: COST })).toEqual({
+			source: "none",
+			shortfall: 30n,
+		})
+	})
+
+	it("FAIL-CLOSED: private read failed (null) + public can't cover → unverifiable, NOT a false 'no gas'", () => {
+		expect(decideNoFuelFeeSource({ privateFeeJuice: null, publicFeeJuice: 10n, maxGasCost: COST })).toEqual({ source: "unverifiable" })
+	})
+
+	it("FAIL-CLOSED: both reads failed → unverifiable", () => {
+		expect(decideNoFuelFeeSource({ privateFeeJuice: null, publicFeeJuice: null, maxGasCost: COST })).toEqual({ source: "unverifiable" })
+	})
+
+	it("a KNOWN covering balance overrides the other read failing (no false unverifiable)", () => {
+		// public read failed, but private definitively covers - decide private, don't fail closed.
+		expect(decideNoFuelFeeSource({ privateFeeJuice: 200n, publicFeeJuice: null, maxGasCost: COST })).toEqual({ source: "private" })
 	})
 })

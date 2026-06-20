@@ -134,6 +134,49 @@ export function decidePrivateFuelClaim(e: PrivateFuelClaimEvidence): { action: P
 	return { action: "private-fpc" } // fresh record ⇒ first private claim attempt
 }
 
+/**
+ * Which Fee Juice balance pays a NO-fuel bridge claim (the "arrive with gas" toggle OFF), as a pure
+ * decision. A no-fuel claim has no fresh L1→L2 Fee-Juice message to consume, so it must self-pay from
+ * gas the account already holds — public Fee Juice OR the private balance a prior private fuel claim
+ * credited at the PrivateFPC.
+ *
+ * **Private-first** (user-chosen, privacy priority): when the private balance covers the reserved cost,
+ * the faucet supplies `privateFeeJuicePayment` deterministically (feePayer = FPC). Public is the
+ * fallback — but the extension exposes NO dApp-supplied "pay from my public FJ" method, so `public`
+ * means "unblock + let the wallet's own fee picker choose," NOT a faucet-forced public self-pay.
+ *
+ * **Fail-closed reads:** a balance is `bigint | null` where `null` = the read THREW (≠ a real zero). A
+ * transient read failure must never fabricate spendable balance NOR a false "no gas": when no KNOWN
+ * balance covers the cost and either input is `null`, the decision is `unverifiable` (surface "couldn't
+ * check — retry"), not `none`.
+ */
+export type NoFuelFeeSource =
+	| { source: "private" } // pay deterministically via the PrivateFPC (FPCFeePaymentMethod.pay_fee).
+	| { source: "public" } // unblock; defer to the wallet's fee picker (no dApp public-FJ method exists).
+	| { source: "unverifiable" } // a required balance read failed and no known balance covers - fail closed.
+	| { source: "none"; shortfall: bigint } // both balances known; neither covers - definitive shortfall.
+
+export interface NoFuelFeeSourceInputs {
+	/** Public Fee Juice balance (base units), or `null` if the `balance_of_public` read FAILED. */
+	publicFeeJuice: bigint | null
+	/** Private Fee Juice at the PrivateFPC (base units, via `balance_of`), or `null` if that read FAILED. */
+	privateFeeJuice: bigint | null
+	/** The claim's reserved `max_gas_cost` (`gasLimits·maxFeesPerGas`) — what `pay_fee` asserts against. */
+	maxGasCost: bigint
+}
+
+export function decideNoFuelFeeSource(i: NoFuelFeeSourceInputs): NoFuelFeeSource {
+	// Private-first: a KNOWN private balance that covers wins outright (its readability is independent
+	// of public's). `>=` because pay_fee asserts `balance >= max_gas_cost` (equality covers).
+	if (i.privateFeeJuice !== null && i.privateFeeJuice >= i.maxGasCost) return { source: "private" }
+	if (i.publicFeeJuice !== null && i.publicFeeJuice >= i.maxGasCost) return { source: "public" }
+	// No KNOWN balance covers. If either read failed, the unknown one might have - fail closed.
+	if (i.privateFeeJuice === null || i.publicFeeJuice === null) return { source: "unverifiable" }
+	// Both known, neither covers: definitive. Shortfall is measured against the larger balance.
+	const best = i.publicFeeJuice > i.privateFeeJuice ? i.publicFeeJuice : i.privateFeeJuice
+	return { source: "none", shortfall: i.maxGasCost - best }
+}
+
 /** The exact PrivateFPC `mint_and_pay_fee` insufficiency assert (verified in the installed 215fd08
  *  artifact). The narrow retry allow-list string-matches this — there is no typed selector. */
 export const PRIVATE_FUEL_INSUFFICIENCY_MSG = "Amount too low to cover gas cost"
