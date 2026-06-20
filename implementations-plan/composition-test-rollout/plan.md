@@ -163,5 +163,24 @@ Rejected: **per-service canaries** (duplicate the same four shapes ×3; miss the
 - **(b) assumption-attack:** "shallow" is shallow at the *client boundary the fake replaces*, deep behind the RPC — the fake reproduces return shape, not the cascade; cascade-dependent behavior → canary/e2e. Token's metadata path IS deep (simulate) → scoped out (verified). DappSession verified PXE-free. The port is a real abstraction (narrowed both levels; D1 tripwire).
 - **(c) doc:** enforceable via D1 (count), D2 (bright line), D3 (no tx/account build), D4 (state cap), fake-under-`src/` + CI grep, + the taxonomy + paste-in checklist.
 
+## Post-implementation audits
+
+Two independent reviews of the net diff (`git diff dev...HEAD`) after all 5 phases. **Both: no Critical, no Blocking — "solid, careful work"; production behavior independently verified preserved.**
+
+### Codex (xhigh, session 019ee72c) — no Critical; all findings fixed
+- **High — marker-grep guard overstated. FIXED.** `SHALLOW_PXE_FAKE_BUNDLE_MARKER` was an unused export → Rollup could tree-shake the string while keeping the factory (no present prod path; defaults intact). Fix: the marker is now carried as LIVE DATA on the factory's returned object → survives tree-shaking → the `dist/chrome` grep is reliable.
+- **Medium — Fpc test overclaimed seam coverage. FIXED.** Both bb-free paths return before `getPXE`. Added an explicit seam-pin (spy the injected factory; assert `init()` called it once) + reworded.
+- **Medium — doc D1 vs the execution spike's `proveTx` fake. FIXED.** Added a D1 carve-out (cancel spike's `proveTx` allowed only as a was-it-called spy per D2).
+
+### Fresh Opus reviewer (no prior context) — no Blocking; findings fixed
+- **Major — `FAKE_IPXE_BUNDLE_MARKER` was a dead grep entry (comment-only, never fires). FIXED** — dropped from CI; the executable `SHALLOW_PXE_FAKE_BUNDLE_MARKER` is the real guard.
+- **Minor — `svc` duplicated across the composition tests. FIXED** — extracted to `services/composition-harness.ts`.
+- **Minor — comment/scope nits. FIXED** (`dist/chrome` → `dist/chrome|firefox`).
+- Independently VERIFIED: production behavior preserved (`runtime.ts` constructs all services logger-only → defaults); storage field→ctor move behavior-identical; narrowing `pxeService` safe; the fake can't reach prod; all 3 composition tests are real orchestration (pass the doc's own theatre test); the doc + its line citations accurate.
+- Deferred (belong to the EXECUTION SPIKE's files, not this rollout): a one-line comment on the spike's separate factory + a ctor-param-order note — for the spike's own PR.
+
+### ⚠ Branch-base note (resolve before the PR)
+`feat/composition-test-rollout` was branched off `feat/execution-pxe-injection-spike`, NOT `dev` — so its `dev..HEAD` diff includes 4 spike commits (`6553f29`, `364f136`, `fbaeff2`, `e042dd5`). A squash-merge to `dev` would fold the spike into the rollout commit. RESOLVE first: either merge the spike's own PR to `dev` (then this branch's diff is clean), or rebase the 6 rollout commits onto `dev`.
+
 ## Seeds (draft — finalized after approval)
 See `eli5.html`. `/goal` recommended (completion fully transcript-observable: 5 phases ✓ + fast-layer gates + CI grep + the doc + CLAUDE pointer).
