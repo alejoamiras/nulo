@@ -1,6 +1,6 @@
 # Fuel-bridge Fee-Juice portal V5 fix
 
-**Status:** AWAITING APPROVAL (codex: conditional approve, all conditions folded in) · **Tier:** light · **Parent:** [aztec-5.0-upgrade](../aztec-5.0-upgrade/plan.md) (testnet bring-up follow-up)
+**Status:** IMPLEMENTED — all 3 phases ✓; candidate smoke self-paying claim PASSED + promoted live (pending `/code-review` + post-impl codex audit) · **Tier:** light · **Parent:** [aztec-5.0-upgrade](../aztec-5.0-upgrade/plan.md) (testnet bring-up follow-up)
 
 ## Summary
 
@@ -61,7 +61,7 @@ It's a one-address correction + a targeted redeploy of a single contract — no 
 - Pass criteria: dry-run shows exactly ONE new contract deployment (the `SwapBridgeRouter` — no `UniswapFuelSwap`, no `PoolSetupHelper`, no pool `initialize`/liquidity txs); broadcast prints `ONCHAIN EXECUTION COMPLETE & SUCCESSFUL`; all three read-backs equal the expected addresses.
 - Layers: live-network deploy + on-chain read-back.
 
-### Phase 3 — Candidate-first smoke → promote → verify
+### Phase 3 — Candidate-first smoke → promote → verify — ✓ DONE (smoke PASSED, promoted live)
 
 **Objective.** Prove a fueled deposit's FJ claim completes against the **candidate** manifest, then promote candidate→live — the definition of done. (codex: candidate-first is the repo's cutover discipline; `fuel-testnet.ts` defaults to the LIVE manifest, so it's the wrong gate for a not-yet-promoted change.)
 
