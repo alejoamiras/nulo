@@ -7,12 +7,15 @@ import { Fr } from "@aztec/foundation/curves/bn254"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { loadContractArtifact } from "@aztec/stdlib/abi"
 import { getContractInstanceFromInstantiationParams } from "@aztec/stdlib/contract"
+import { Gas, GasFees } from "@aztec/stdlib/gas"
 import { describe, expect, it } from "vitest"
 
+import { maxGasCostFor } from "./fee-juice"
 import {
 	DOM_SEP__FPC_BRIDGE_SECRET,
 	PRIVATE_FPC_ADDRESS,
 	deriveBridgeSecret,
+	privateFeeJuicePayment,
 	privateFuelSecretHash,
 	privateMintAndPayFee,
 } from "./private-fuel"
@@ -100,5 +103,26 @@ describe("privateMintAndPayFee", () => {
 		// FeeJuice.claim + PrivateFPC.mint_and_pay_fee, run verbatim by the wallet's EXTERNAL path.
 		const payload = await method.getExecutionPayload()
 		expect(payload.calls).toHaveLength(2)
+	})
+})
+
+describe("privateFeeJuicePayment", () => {
+	it("pays via the FPC with a SINGLE pay_fee setup call (the manifest-scope assumption)", async () => {
+		const fpc = AztecAddress.fromString(PRIVATE_FPC_ADDRESS)
+		const method = privateFeeJuicePayment(fpc)
+		expect((await method.getFeePayer()).toString()).toBe(PRIVATE_FPC_ADDRESS)
+		// FPCFeePaymentMethod emits exactly ONE private setup call — PrivateFPC.pay_fee. The faucet
+		// manifest therefore scopes `pay_fee` alone; a Wonderland change that adds a setup call would
+		// break that scope assumption and is meant to trip here.
+		const payload = await method.getExecutionPayload()
+		expect(payload.calls).toHaveLength(1)
+	})
+})
+
+describe("maxGasCostFor re-export", () => {
+	it("computes daGas·feePerDaGas + l2Gas·feePerL2Gas (pins the Wonderland arg order the gate relies on)", () => {
+		// The no-fuel fee-source gate sizes itself with this against the committed gas settings, so the
+		// (maxFeesPerGas, gasLimits) order + semantics are load-bearing: 0·0 + 100·2 = 200.
+		expect(maxGasCostFor(new GasFees(0n, 2n), Gas.from({ daGas: 0, l2Gas: 100 }))).toBe(200n)
 	})
 })

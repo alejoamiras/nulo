@@ -19,6 +19,14 @@ import { FEE_JUICE_ADDRESS } from "@aztec/constants"
 /** The canonical L2 Fee Juice contract address — a protocol constant (identical on every network). */
 export const feeJuiceAddress: string = AztecAddress.fromNumber(FEE_JUICE_ADDRESS).toString()
 
+/**
+ * Re-exported from Wonderland: `maxGasCostFor(maxFeesPerGas, gasLimits)` → the `gasLimits·maxFeesPerGas`
+ * bigint the FPC's `pay_fee` asserts the internal balance against. Surfaced here so the faucet's no-fuel
+ * fee-source gate sizes itself against the EXACT committed gas settings without importing `@wonderland/*`
+ * directly (the Wonderland coupling stays in bridge-core).
+ */
+export { maxGasCostFor } from "@wonderland/aztec-fee-payment/utils"
+
 /** Minimal node shape for fee prediction (avoids a hard dep on the full node client type). */
 type MinFeeNode = {
 	getPredictedMinFees?: () => Promise<GasFees[]>
