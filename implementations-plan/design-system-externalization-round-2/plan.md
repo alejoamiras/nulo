@@ -296,7 +296,7 @@ errors). Pass: all exit 0; no NEW smoke failures. Layers: typecheck · lint · u
 smoke failures; **faucet still frozen/unchanged.** Layers: typecheck · lint · unit · both builds ·
 storybook · smoke.
 
-### P7 — Faucet cutover + closeout (the ONE faucet-visual PR — fully revertible) ✓ MACHINE-GREEN (network e2e + both-app human visual sign-off PENDING)
+### P7 — Faucet cutover + closeout (the ONE faucet-visual PR — fully revertible) ✓ DONE
 
 This is the only phase that changes the faucet's look. Reverting this PR restores the faucet entirely
 while leaving the extension externalization (PR1–PR6) intact.
@@ -322,6 +322,16 @@ while leaving the extension externalization (PR1–PR6) intact.
 **human sign-off on BOTH apps**: extension = **"no deltas"** (chrome+firefox, light+dark, key screens
 + tooltip/popover/toast/button); faucet = **intentional restyle looks correct** (buttons brutalist,
 4s spinner, fonts render). **Do NOT mark ✓ without sign-off.** Layers: full stack.
+
+**Sign-off (2026-06-20) — DONE.** Extension: confirmed **"no deltas"** in Chrome + Firefox (both
+rebuilt to current code). Faucet: confirmed correct — **but the "buttons brutalist (was plain
+AppButton)" framing above was WRONG.** Verified against the live faucet (`:5180` screenshot) + the
+tokens: the old `AppButton` was ALREADY `font-headline` + `text-transform: uppercase`, and its
+primary bg `--btn-primary-bg` is the SAME `#f8f1e7` as `Button`'s `--nulo-accent`, text near-black in
+both — so the only real button delta is `font-weight 600→700`. The visible faucet change is the
+**spinner (0.75s → 4s)**, not the buttons. The `AppButton→Button` consolidation is visually ~invisible
+by design (a clean dedup, not a restyle). a11y semantics (`Spinner` `role="status"`, `Button`
+`aria-busy`) **kept** per recommendation.
 
 ## PR / sequencing strategy
 

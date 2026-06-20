@@ -17,7 +17,7 @@
 | P4 | Router-free `Button` base (closed `tag:button\|a`, no arbitrary component) + extension wrapper preserving RouterLink-SPA; `SubPageHeaderBase` + wrapper | + smoke ✓ |
 | P5 | `useOutside` → package (+ Dropdown shim); `Tooltip` + `Popover` (teleportTo prop) | + smoke ✓ |
 | P6 | `Input` → package (`lang=ts` port) + internal `sanitizeString` copy; renders the package `Tooltip` | + smoke ✓ |
-| P7 | **Faucet cutover** (un-freeze): 10 AppButton→Button, Spinner→canonical, delete `SpinnerLegacy`, drop orphaned fonts, docs sweep | machine ✓; **network e2e + human sign-off PENDING** |
+| P7 | **Faucet cutover** (un-freeze): 10 AppButton→Button, Spinner→canonical, delete `SpinnerLegacy`, drop orphaned fonts, docs sweep | ✓ DONE — sign-off 2026-06-20 (ext no-deltas chrome+firefox; faucet correct); network e2e via CI |
 
 Final tallies: `typecheck:all` 0 · design tests 247 · extension 2391 · faucet 343 · lint 0 · ext+faucet
 builds + storybook all built. Smoke: only the recurring pre-existing `ctx.browser` cross-file flake
@@ -35,17 +35,46 @@ builds + storybook all built. Smoke: only the recurring pre-existing `ctx.browse
 - **Round-1 cleanup debt found:** round 1 left its migrated local SFCs (`core/Flex.vue`, …) in place;
   the dir-scan still picks them, so its committed `components.d.ts` is aspirational. Out of round-2 scope.
 
+## Post-impl review + codex audit — DONE (loop step 7)
+
+`/code-review max --fix` + `/codex xhigh` complete (full write-up in `lessons/phase-7.md`). Codex
+verdict: **ship-with-fixes, no high/critical** — it independently confirmed the fallthrough fix, the
+Spinner-color audit, and port fidelity. Two review/audit commits on `chore/design-r2-faucet-cutover`
+(NOT yet pushed):
+
+- `f8f29ee` — fix the extension Button wrapper's link-branch attr-fallthrough (dropped data-testid/
+  @click/style/class on `<Button link=…>` via RouterLink's custom slot-only root; latent — zero call
+  sites today, but a regression vs the pre-round-2 single-root contract + a testid-rule breach) +
+  trim misplaced migration-narrative CSS comments now living inside `@nulo/design`. 2 new tests.
+- `7fb6bfe` — codex LOW/doc: `rel` hygiene on named anchor targets (not just `_blank`); widened
+  boundary tripwires (chrome dot/bracket on any host global + dynamic `import("vue-router")`);
+  corrected the resolver-inventory comment (round-1 names are aspirational, not deleted).
+
+Final tree green: `bun run audit:vue` EXIT 0 (2393 extension tests), design suite 249, `bun run lint`
+EXIT 0, chrome+firefox builds OK. Both fix commits touch ONLY P1–P6 code (Button wrapper = P4;
+boundary/resolver tests = P1) sitting on the P7 branch atop `d297782`; the fixed bug is latent so
+merge order is functionally safe either way, but for a clean PR-A, cherry-pick them onto
+`chore/design-r2-holdouts` before opening it.
+
+## Sign-off — DONE (2026-06-20)
+
+- **Both-app visual sign-off (the round's locked gate): PASSED.** Extension = **"no deltas"** in
+  Chrome + Firefox (both rebuilt to current code). Faucet = correct.
+- **CORRECTION to the faucet framing:** the "buttons now brutalist/UPPERCASE (was the plain AppButton
+  look)" claim was WRONG. The old `AppButton` was ALREADY `font-headline` + uppercase, and its primary
+  bg `--btn-primary-bg` == `Button`'s `--nulo-accent` (`#f8f1e7`), text near-black in both — so the
+  only real button delta is `font-weight 600→700`. The one visible faucet change is the **spinner
+  (0.75s → 4s)**. `AppButton→Button` is a visually ~invisible consolidation, not a restyle. (Verified
+  against a live `:5180` screenshot + the tokens.)
+- **a11y decision: KEEP** `Spinner` `role="status"` + `Button` `aria-busy` (per recommendation).
+
 ## Remaining before merge (need you / CI)
 
-1. **Both-app human visual sign-off** (the round's locked gate): extension = "no deltas" (chrome +
-   firefox, light+dark, key screens + tooltip/popover/toast/button); faucet = the **intentional
-   restyle** looks right (buttons now brutalist/UPPERCASE, spinner now 4s).
-2. **Network e2e** (`bun run e2e:agent` or CI `Network e2e`) — orthogonal to the faucet cutover but the
-   round's final-phase gate.
-3. **Open the 2 PRs** into `dev` (squash): PR-A `chore/design-r2-holdouts` (P1–P6), then PR-B
-   `chore/design-r2-faucet-cutover` (P7). Merge A before B.
-4. **Post-impl review** (loop step 7, fires once P7 is ✓): `/code-review max --fix` + a codex post-impl
-   audit on the 82-file diff.
+1. **Network e2e** (`bun run e2e:agent` or CI `Network e2e`) — orthogonal (round-2 touches no network
+   code); rides on CI on the PR.
+2. **Push + open the 2 PRs** into `dev` (squash): PR-A `chore/design-r2-holdouts` (P1–P6, plus the
+   review fixes if cherry-picked), then PR-B `chore/design-r2-faucet-cutover` (P7). Merge A before B.
+   The local commits (2 fixes + the docs/sign-off commits) are NOT pushed yet — awaiting your go.
 
 ## Round-3 backlog (deferred)
 
