@@ -39,14 +39,27 @@ async function makeHarness() {
 	const collection = new ServiceCollection()
 	collection.add(svc(ProfileService.name, { getActiveProfile: async () => ({ id: "p1" }), onProfileDeleted: { add: () => {} } }))
 	collection.add(svc(NetworkService.name, { registerChainPurgeSubscriber: () => {} }))
-	const fpcService = new FpcService(logger, () => fake.client, api)
+	let factoryCalls = 0
+	const fpcService = new FpcService(
+		logger,
+		() => {
+			factoryCalls++
+			return fake.client
+		},
+		api,
+	)
 	collection.add(fpcService)
 	await collection.start()
-	return { fpcService, fake }
+	return { fpcService, fake, factoryCalls: () => factoryCalls }
 }
 
 describe("FpcService composition — seam + bb-free paths (discovery is e2e; see header)", () => {
-	test("constructs against the injected fake seam + serves the bb-free chainless list", async () => {
+	test("init() wires the injected PXE factory (the seam itself)", async () => {
+		const { factoryCalls } = await makeHarness()
+		expect(factoryCalls()).toBe(1) // FpcService.init() built its PXE from the injected factory, not `new PxeServiceClient`
+	})
+
+	test("serves the bb-free chainless list (early-return path, no PXE)", async () => {
 		const { fpcService, fake } = await makeHarness()
 		// chainId undefined → the early-return list path; no protocol derivation, no PXE.
 		const all = await fpcService.getFpcs()

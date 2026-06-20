@@ -37,6 +37,15 @@ export interface ShallowPxeFake {
 	registerCalls: { instance: ContractInstanceWithAddress; artifact?: ContractArtifact }[]
 	/** Live registered-address set (seeded + appended on register) — the dedup lever. */
 	registeredAddresses: AztecAddress[]
+	/**
+	 * The bundle marker, carried as live data on the returned object (NOT just
+	 * the exported const above). This guarantees the marker string survives
+	 * tree-shaking whenever the factory is bundled — so the `dist/chrome` grep
+	 * in `_build-extension.yml` reliably catches a fake that leaked into prod.
+	 * (An unused exported const could be tree-shaken away while the factory
+	 * ships — codex post-impl audit High.)
+	 */
+	marker: typeof SHALLOW_PXE_FAKE_BUNDLE_MARKER
 }
 
 /** Build a dumb `ShallowPxeClient` whose `getPXE()` returns canned registry data. */
@@ -59,5 +68,11 @@ export function makeShallowPxeFake(config: ShallowPxeFakeConfig = {}): ShallowPx
 	// The ONE cast: widen the 4-method ShallowPxe to the full IPXE the port
 	// returns. The fake's surface is capped at ShallowPxe (it has no simulateTx/
 	// proveTx), so a test that reaches a deep path throws loudly at runtime.
-	return { client: { getPXE: () => pxe as unknown as IPXE }, pxe, registerCalls, registeredAddresses }
+	return {
+		client: { getPXE: () => pxe as unknown as IPXE },
+		pxe,
+		registerCalls,
+		registeredAddresses,
+		marker: SHALLOW_PXE_FAKE_BUNDLE_MARKER,
+	}
 }

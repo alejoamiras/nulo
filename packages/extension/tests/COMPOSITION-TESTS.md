@@ -18,7 +18,7 @@ Drive the REAL wallet service graph (`ServiceCollection.start()` + the real serv
 
 ## When NOT to — escalate to Network e2e (any ONE triggers)
 
-> **D1 — surface cap.** A PXE fake may implement `getPXE` + at most the **4** `ShallowPxe` registry methods (`getContractInstance`, `getContractArtifact`, `getContracts`, `registerContract`). Need a 5th PXE method? STOP — wrong layer.
+> **D1 — surface cap (the shared shallow-PXE fake).** The SHARED fake (`shallow-port.fake.ts`) may implement `getPXE` + at most the **4** `ShallowPxe` registry methods (`getContractInstance`, `getContractArtifact`, `getContracts`, `registerContract`). Need a 5th? STOP — wrong layer. **Carve-out:** the execution cancel spike (`execution/service.composition.test.ts`) uses a separate inline fake with `proveTx` — allowed ONLY because the test asserts `proveTx` was-or-wasn't-CALLED, never its output (D2), to prove the post-prove cancel checkpoint.
 
 > **D2 — semantics tripwire.** If an assertion depends on `simulateTx`/`proveTx`/`profileTx`/`executeUtility` returning something *internally consistent* (real gas, public inputs, nullifiers, a proof) → e2e. A canned `proveTx` checked only for *was-it-called* is fine (the cancel spike); a canned `simulateTx` whose decoded result is asserted is theatre.
 
@@ -34,7 +34,7 @@ Drive the REAL wallet service graph (`ServiceCollection.start()` + the real serv
 
 ## Always
 
-- **One shared PXE fake**, `services/pxe/shallow-port.fake.ts`, under `src/` (so `vue-tsc` + `biome` cover it — that under-`src/` location IS the compile-time drift guard, because the fake's `ShallowPxe` surface is `Pick<IPXE, …>`; an `IPXE` shape change breaks `typecheck`). No per-service PXE fakes.
+- **One shared shallow-PXE fake**, `services/pxe/shallow-port.fake.ts`, under `src/` (so `vue-tsc` + `biome` cover it — that under-`src/` location IS the compile-time drift guard, because the fake's `ShallowPxe` surface is `Pick<IPXE, …>`; an `IPXE` shape change breaks `typecheck`). No per-service shallow-PXE fakes — the cancel spike's proving fake (D1 carve-out) is the lone exception. Its marker is carried as live data on the returned object so the `dist/chrome` grep survives tree-shaking.
 - **Real artifacts.** Seed with real compiled artifacts (`TokenContractArtifact`, `SponsoredFPCContractArtifact`), never hand-written ABI.
 - **Assert real state.** ≥1 assertion on real-collaborator state (storage rows, journal stage, emitted events), never on the fake's own canned return.
 - **Bundle hygiene.** Every fake carries a unique marker (`SHALLOW_PXE_FAKE_BUNDLE_MARKER`); the `_build-extension.yml` "Assert test-only markers absent" CI step greps `dist/chrome|firefox` and fails on any hit. A fake reaching production = a wallet that "succeeds" without a real PXE.
