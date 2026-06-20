@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — composition-test-rollout</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .win { background: #f0fbf2; border-left: 3px solid #28a745; padding: 0.75rem 1rem; margin: 1rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Composition / PXE-injection test rollout (+ limits doc)</h1>
+  <p>We have a gap between fast-but-fake unit tests and slow-but-real network e2e tests. A recent spike proved a middle layer: run the <em>real</em> wallet service code in-process against <em>dumb</em> fakes — no Aztec sandbox, no proving, no browser — in about a second. This plan rolls that pattern out to the three highest-value services that currently have almost no fast tests (<strong>Fpc</strong>, <strong>Token</strong>, <strong>DappSession</strong>), extracts a shared seam so it isn't copy-pasted, adds the CI guard that keeps the test fakes out of the shipped extension, and — most importantly — writes a <strong>rulebook</strong> so nobody (human or AI) accidentally rebuilds the PXE inside a fake.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p>By the strict rubric this scores around <em>mid</em>: novelty is low (the spike already proved the pattern), blast radius is moderate (it touches three production service constructors + adds a CI step), and irreversibility/migration/external-coupling are low. You explicitly chose <strong>deep</strong> anyway — and it paid off. Deep runs three independent planners plus a <em>fresh, un-anchored</em> hostile auditor. That fresh auditor caught two real High-severity blind spots that the other reviewers (and the spike's own framing) had silently inherited — a single-audit <em>mid</em> would have shipped both.</p>
+  <div class="win">The two catches a "mid" would have missed: <strong>(1)</strong> the bundle-hygiene "guard" we leaned on didn't actually exist in CI (only a manual local grep), and <strong>(2)</strong> putting the shared fake in the <code>tests/</code> folder would have silently disabled the very type-check that's supposed to stop the fake from drifting. Both are now fixed in the plan.</p></div>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: Shared seam + the real CI guard</h3>
+    <p>Create the tiny shared "port" (one method: <code>getPXE</code>) that Token and Fpc will accept as an injectable dependency, and one shared dumb fake that lives <em>inside</em> <code>src/</code> so the compiler checks it. Wire the seam into Token and Fpc without changing how they behave in production. Add a CI step that builds the extension and fails if any test-fake marker shows up in the shipped code.</p>
+    <p class="muted">Proves itself by: lint + typecheck clean, three exact new tests green (the port conforms both ways; Token and Fpc still build the real client by default), the workflow lints clean, and the production build contains zero fake markers.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: Fpc composition test (the easiest target, first)</h3>
+    <p>Fpc is the cleanest case — it only ever does shallow contract lookups/registration, no simulation. Drive its real auto-discovery + registration logic (including the "don't register twice" dedup and the lock that prevents duplicates) against the shared fake.</p>
+    <p class="muted">Proves itself by: a green Fpc composition test asserting real stored state + events, plus lint/typecheck/build-grep.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: Token composition test (carefully scoped)</h3>
+    <p>Token has two halves: a shallow "resolve + register the contract" half (safe to fake) and a deep "simulate the token's name/symbol/decimals" half (which needs the real PXE — that stays in e2e). The test drives only the shallow half, deliberately.</p>
+    <p class="muted">Proves itself by: a green Token composition test on the shallow path (never touching simulation), plus lint/typecheck/build-grep.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: DappSession harness (no PXE; last + droppable)</h3>
+    <p>DappSession touches no PXE at all — it's about session storage and scoping. Different fakes (storage only). Test the real lifecycle: create, scope-by-network (a security guard against cross-network trust bleed), mutate, upgrade, expire, and cascade-delete when a profile is removed. If time runs out, this is the phase to drop.</p>
+    <p class="muted">Proves itself by: a green DappSession lifecycle test, plus lint/typecheck.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5: The rulebook + drift guard</h3>
+    <p>Write <code>COMPOSITION-TESTS.md</code> — the normative "when to use this, when to stop, never rebuild the PXE" doc — and link it from CLAUDE.md so it's a rule, not a suggestion. Finalize the drift guard (the compile-time conformance from Phase 1, plus one optional real-network seam smoke-test).</p>
+    <p class="muted">Proves itself by: the full pre-PR gate (<code>audit:vue</code>) green, smoke e2e green, the optional seam canary green in the network lane, and a final build-grep at zero.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>The PXE is the wallet's private-execution engine (it resolves contracts, simulates, and proves transactions). The danger with faking it is the "second wallet" trap: a fake that grows until it re-implements Aztec's logic — at which point the test only proves the fake agrees with itself. The whole design here is built to make that trap <em>impossible</em>: the shared port is deliberately too narrow to even express simulation/proving, so a fake literally can't reach those methods through it. The rulebook then writes that discipline down with countable limits (e.g. "a fake may model at most 4 PXE methods; if you need a 5th, you're in the wrong test layer").</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li>None blocking. The four scoping decisions were answered up front; the one you were unsure about (how to stop the fakes drifting from the real PXE) was resolved by all three planners independently landing on the same answer: let the compiler catch shape drift (the fake lives under <code>src/</code> and structurally implements the port), and let the existing network e2e catch behavioral drift.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: Fpc + Token (shared PXE seam) + DappSession (no-PXE, last/droppable) + the normative doc + the CI bundle-grep guard.</li>
+      <li>Confirm tier: <code>deep</code> (your call; the rubric alone says ~mid, but deep caught two real Highs).</li>
+      <li>Confirm the validation plan: fast layers (lint/typecheck/unit/composition/build-grep) gate every phase; smoke e2e + one network seam canary only at Phase 5. No sandbox in the per-phase gates.</li>
+      <li>No <code>/harden</code> scheduled (test-infra + DI/storage seams; no security-posture surface).</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p><code>/goal</code> keeps the session working turn after turn until a condition holds and survives <code>claude --resume</code>; <code>/loop</code> re-fires a prompt on an interval. Completion here is fully observable in the transcript (phase checkmarks + gates), so <code>/goal</code> is the better fit.</p>
+    <p class="warning">Use exactly ONE per session. They don't compose — setting one replaces the other.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <pre><code>/goal All 5 phases marked ✓ in implementations-plan/composition-test-rollout/plan.md (the per-phase headers in the file, not just chat), each ✓ backed by its phase's validation gate reported passing in the transcript; the new CI step greps dist/chrome for SHALLOW_PXE_FAKE_BUNDLE_MARKER + FAKE_IPXE_BUNDLE_MARKER and a local build-grep reports 0 hits; the shared fake lives under packages/extension/src/ (typechecked + linted); FpcService, TokenService, and DappSessionService each have a green composition test driving real orchestration with NO Aztec sandbox; packages/extension/tests/COMPOSITION-TESTS.md exists and is linked normatively from CLAUDE.md; for each phase the agent has printed LESSONS_FILE=implementations-plan/composition-test-rollout/lessons/phase-N.md; `/code-review max --fix` complete with findings applied and committed; codex post-impl audit complete with high/critical addressed; `bun run lint` and `bun run --cwd packages/extension typecheck` both report exit 0 in the transcript.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop</h3>
+    <pre><code>/loop 15m Drive implementations-plan/composition-test-rollout forward. Never idle. Each firing: read plan.md + lessons/ (authoritative) and git status; take the next pending phase EXACTLY as written; after each edit run `bun run lint` + the touched `bun run --cwd packages/extension vitest run <path>`; commit then push; phase green = the plan.md validation gate passes → mark ✓, file LESSONS_FILE=…/lessons/phase-N.md, advance; decision or stuck → `/codex xhigh`, log verdict, act on the stronger argument (HARD LIMITS: production default stays the real PxeServiceClient; fakes live under src/ but are NEVER imported by prod and the CI grep proves dist/chrome is clean; no sandbox in the fast gates); same step failing 5× → reassess with codex; all 5 phases ✓ → `/code-review max --fix` + commit, codex post-impl audit, address high/critical, wrap-up, STOP. Keep an ASCII checklist visible.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a> · <a href="VERIFICATION.md">Verification notes</a> · <a href="audit-codex.md">Codex audit</a> · <a href="audit-fable.md">Fresh hostile audit</a></p>
+</body>
+</html>
