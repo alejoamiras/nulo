@@ -9,11 +9,12 @@ import { OperationJournalService } from "@/wallet/services/operation-journal/ser
 import type { OperationContext } from "@/wallet/services/operation-journal/spec"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { AccountService } from "@/wallet/services/account/service"
-import { PxeServiceClient } from "@/wallet/services/pxe/client"
+import { DEFAULT_SHALLOW_PXE_CLIENT_FACTORY, type ShallowPxeClient, type ShallowPxeClientFactory } from "@/wallet/services/pxe/shallow-port"
 import { TaskService, StepContent, type WrappedTask } from "@/wallet/services/task/service"
 import { EntityStorage } from "@/wallet/storage"
 import { array_max, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
+import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { feeJuiceAddress, feeJuiceName, feeJuiceSymbol } from "@/wallet/utils/fee-juice"
 import { simulate } from "@/wallet/utils/fn"
 import { type Token, type TokenInfo, TOKEN_SERVICE_NAME, type TokenInterface, type Methods, type Events } from "./spec"
@@ -40,22 +41,29 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	public readonly onTokenUpdated = new EventHandler<TokenInfo>()
 	public readonly onTokenDeleted = new EventHandler<TokenInfo>()
 
-	private readonly tokens = new EntityStorage<Token>("nulo:core:tokens", chrome.storage.local)
+	private readonly tokens: EntityStorage<Token>
 	private readonly lock = new Lock()
 
-	private pxeService: PxeServiceClient = null!
+	private pxeService: ShallowPxeClient = null!
 	private profiles: ProfileService = null!
 	private networks: NetworkService = null!
 	private accounts: AccountService = null!
 	private tasks: TaskService = null!
 	private journal: OperationJournalService = null!
 
-	public constructor(logger: ILogger) {
+	public constructor(
+		logger: ILogger,
+		private readonly pxeClientFactory: ShallowPxeClientFactory = DEFAULT_SHALLOW_PXE_CLIENT_FACTORY,
+		browserApi?: BrowserApi,
+	) {
 		super(TOKEN_SERVICE_NAME, logger)
+		this.tokens = browserApi
+			? new EntityStorage<Token>("nulo:core:tokens", browserApi.storage.local)
+			: new EntityStorage<Token>("nulo:core:tokens", chrome.storage.local)
 	}
 
 	protected async init(services: ServiceCollection) {
-		this.pxeService = new PxeServiceClient(this.logger)
+		this.pxeService = this.pxeClientFactory(this.logger)
 		this.profiles = services.get(ProfileService.name)
 		this.networks = services.get(NetworkService.name)
 		this.accounts = services.get(AccountService.name)
