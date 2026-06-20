@@ -92,13 +92,15 @@ test.skipIf(!hasConfig)(
 		// importToken).
 		await importToken(page, aztecConfig!.tokenAddress)
 
-		// Bug 1 pin. Pre-fix, the IncomingTrustPopup could surface here
-		// (the scan's first per-note CS won the lock race against the
-		// popup's setTrustAllow). Wait a generous beat for any delayed
-		// open before asserting absence.
-		await new Promise((r) => setTimeout(r, 6_000))
-		const trustPromptVisible = await page.$('[data-testid="incoming-trust-contract"]').then((el) => !!el)
-		expect(trustPromptVisible).toBe(false)
+		// Bug 1 pin. Pre-fix, the IncomingTrustPopup could surface here (the scan's first
+		// per-note CS won the lock race against the popup's setTrustAllow). Fail-fast — watch
+		// for the trust prompt for up to 6s instead of a blind sleep: if it appears that's the
+		// bug (fail at once); if the window elapses with no prompt, absence is confirmed.
+		const trustPromptAppeared = await page
+			.waitForSelector('[data-testid="incoming-trust-contract"]', { timeout: 6_000 })
+			.then(() => true)
+			.catch(() => false)
+		expect(trustPromptAppeared).toBe(false)
 
 		// Positive proof of the auto-trust step. Even if no notes ever
 		// reach the scanner (e.g. PXE sync didn't catch up before this

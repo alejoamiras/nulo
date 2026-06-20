@@ -32,11 +32,8 @@ export class EmbeddedStrategy implements FeeStrategy {
 		const task = startEstimateTask(this.deps.tasks, ctx.parentTask)
 
 		try {
-			const { txRequest, node, pxe, account, network, nonce, txCalls } = await this.deps.txBuilder.buildStandard(
-				ctx.op,
-				embeddedMethod,
-				task,
-			)
+			const built = await this.deps.txBuilder.buildStandard(ctx.op, embeddedMethod, task)
+			const { txRequest, node, pxe, account } = built
 			suggestGasLimits(txRequest, ctx.op.fee)
 			await applyEmbeddedFpcGasCap(txRequest, ctx.op.fee, node)
 			const simulatedTx = await this.deps.simulateTxTask(
@@ -48,7 +45,7 @@ export class EmbeddedStrategy implements FeeStrategy {
 			// Use 1x multiplier so max_gas_cost stays within the dApp's embedded amount.
 			await finalizeGasLimits(node, txRequest, simulatedTx, ctx.gasPadding, undefined, ctx.op.fee, 1)
 			task.complete()
-			return { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod: embeddedMethod }
+			return { ...built, feePaymentMethod: embeddedMethod }
 		} catch (error) {
 			task.fail(error)
 			throw error

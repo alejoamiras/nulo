@@ -136,16 +136,23 @@ test.skipIf(!hasConfig)("C2 — trust prompt re-fires after popup close + reopen
 		throw new Error("could not resolve active (profile, account) from chrome.storage.local")
 	}
 
-	// Network id comes from the first registered network. EntityStorage
-	// keys are `${root}@${id}`; the networks repo uses `nulo:core:networks`.
-	const network = await seedPage.evaluate(async () => {
-		const all = await chrome.storage.local.get(null)
-		const key = Object.keys(all).find((k) => k.startsWith("nulo:core:networks@"))
-		if (!key) return null
-		const chainId = (JSON.parse(all[key] as string) as { chainId: number }).chainId
-		return { id: key.slice("nulo:core:networks@".length), chainId }
-	})
-	if (!network) throw new Error("could not resolve a network id")
+	// The seed MUST use the ACTIVE network — the one the popup resolves via
+	// `appStore.network.id` and passes to `replayPendingPrompts` (filtered at
+	// service.ts:712). Taking the first `nulo:core:networks@*` key picks the
+	// first-SEEDED network (Alpha Mainnet), not the active one (Testnet), so the
+	// pending-trust filter found 0 rows and the prompt never fired. Read the
+	// per-profile active-network pointer instead.
+	const network = await seedPage.evaluate(async (profileId: string) => {
+		const activeKey = `nulo:core:active-network@${profileId}`
+		const activeId = (await chrome.storage.local.get(activeKey))[activeKey]
+		if (typeof activeId !== "string") return null
+		const rowKey = `nulo:core:networks@${activeId}`
+		const raw = (await chrome.storage.local.get(rowKey))[rowKey]
+		if (typeof raw !== "string") return null
+		const chainId = (JSON.parse(raw) as { chainId: number }).chainId
+		return { id: activeId, chainId }
+	}, triple.profileId)
+	if (!network) throw new Error("could not resolve the active network id")
 	const networkId = network.id
 
 	const contract = `0x${"cc".repeat(32)}`

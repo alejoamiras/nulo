@@ -17,8 +17,8 @@ import { isAuthRegistryEnabled, isAuthwitConsumable } from "./auth-registry"
 // AUDIT F1: the AuthRegistry `#[storage]` struct declares `reject_all` FIRST
 // (slot 1) then `approved_actions` SECOND (slot 2). These were once swapped, so
 // isAuthwitConsumable + isAuthRegistryEnabled read the wrong public storage and a
-// revoked authwit read as still-unknown. Pin the read slots so a re-swap fails
-// here, not in a flaky network e2e.
+// revoke could never be confirmed on-chain (a fast consume raced the unmined
+// revoke). Pin the read slots so a re-swap fails here, not in a flaky e2e.
 describe("auth-registry read slots (AUDIT F1)", () => {
 	const account = AztecAddress.fromNumber(0x1234).toString()
 	const messageHash = new Fr(0x5678n).toString()
