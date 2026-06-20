@@ -41,3 +41,26 @@ Session `019ee564-406f-74f3-b046-b7815fbafcd4`, xhigh, read-only. Prompt: critic
 ## Disposition
 
 All conditions adopted — see `plan.md` Phases 1-3 + Audit verdicts. Path references above rewritten repo-relative for the committed record.
+# Codex consult — Phase 1 gate decision (session 019ee5b2)
+
+Question: the approved Phase 1 fork-test gate is unachievable (PoolAlreadyInitialized drift, proven innocent via git stash). Adjust the gate + proceed?
+
+## Verdict: proceed with changes
+
+Verdict: `proceed with changes (downgrade Phase 1 from “acceptance gate” to “non-regression evidence”; keep candidate-only until Phase 3 smoke is green; optionally add a portal-only fork probe if it’s <30 min).`
+
+Your innocence argument is sound on attribution, not on acceptance. `git stash` equivalence proves the 3 fork failures are pre-existing and unrelated to the re-pin. It does **not** prove the new portal path works.
+
+The important part: this specific fork test is not uniquely valuable anymore. In its current form it dies before `depositToAztecPublic`, so treating it as a blocker is fake rigor. Also, even when green, it only proves `router.feeJuicePortal()==...` plus FJ balance moved into the portal. It does **not** prove message/claim semantics. Phase 3’s real self-paying claim is stronger than this fork test, not weaker.
+
+So yes: Phase 2 is acceptable **if** you keep strict candidate-first discipline. Redeploy router, update candidate only, run the real smoke, and do not promote live until that passes. What you are risking is testnet deploy gas/time, not a user-facing cutover.
+
+What I would change in your proposal:
+- Do **not** describe `forge build + 34/34 + stash-equivalence` as a replacement acceptance gate. Call it what it is: compile/regression evidence plus proof the old gate is invalidated by live drift.
+- Log the fork test as broken-by-environment and explicitly move portal acceptance to Phase 3.
+
+Cheaper/better than pure defer:
+- Best cheap salvage: make the fork test idempotent against already-initialized pools. If `slot0 != 0` and price is within tolerance, skip init/reseed and use existing live liquidity; fail only if initialized at garbage price.
+- Do **not** pin an old block. That restores greenness by dodging reality.
+
+If that salvage is not obviously small, skip it and proceed candidate-first.

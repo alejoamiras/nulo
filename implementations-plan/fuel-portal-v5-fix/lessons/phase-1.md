@@ -18,8 +18,15 @@ The 3 failures (`test_productionTopology_publicAndPrivate_realPortals`, `test_re
 
 **Why my change didn't make it worse**: the fork test never reaches the portal, so the V5-vs-V4 portal address is untested by it either way. The portal-acceptance evidence comes from: (a) live `cast` — V5 portal `0x7c4176bf` has code + `UNDERLYING()==0x762c` (the FJ the swap outputs); (b) ABI match — `FeeJuicePortal.depositToAztecPublic(bytes32,uint256,bytes32)→(bytes32,uint256)` == the router's `IFeeJuicePortal`; (c) the authoritative proof is Phase 3's REAL self-paying claim (codex round-1: "the e2e self-paying claim remains the real proof").
 
-## Decision (codex-consulted)
-_Codex consult session pending — verdict folded in below before marking Phase 1 ✓._
+## Decision (codex-consulted, session `019ee5b2`)
+Verdict: **proceed with changes.** Codex sharpened the framing: the `git stash` equivalence proves *attribution* (not my change) but NOT *acceptance* (that the V5 path works). Crucially, this fork test isn't uniquely valuable — it dies in pool-seeding setup *before* `depositToAztecPublic`, so treating it as a blocker is "fake rigor"; and even green it would only prove `router.feeJuicePortal()==…` + FJ balance moved, not message/claim semantics. **Phase 3's real self-paying claim is strictly stronger.** Adopted:
+1. Reframed the Phase 1 gate as **compile + non-regression evidence** (forge build + 34/34 non-fork + stash-equivalence), NOT a portal-acceptance gate. Portal acceptance explicitly moved to Phase 3.
+2. Strict candidate-first in Phase 2/3: redeploy router → update CANDIDATE only → real smoke → promote live ONLY after it's green. Risk is testnet gas/time, not a user-facing cutover.
+3. **Skipped** codex's optional salvage (make the fork test idempotent vs already-init pools): it requires changing the shared `PoolSetupHelper` used by the live deploy — not "obviously small" on security-reviewed bridge infra, and codex said skip-if-not-small. Did NOT pin an old fork block (codex: "restores greenness by dodging reality").
+
+`LESSONS_FILE=implementations-plan/fuel-portal-v5-fix/lessons/phase-1.md`
 
 ## Follow-up (out of scope here)
-The `.fork.t.sol` pool-seeding tests assume uninitialized pools and are broken by live seeding. Fix later by making the test reuse already-initialized pools (or pin a clean fork block). Tracked, not fixed in this portal-address fix.
+`DeployFuelLive.fork.t.sol` (+ `DeployBridge.fork.t.sol`) pool-seeding assumes uninitialized pools, broken by live seeding. Fix later: make the helper/test idempotent — if `slot0 != 0` and price within tolerance, skip init/reseed and use existing live liquidity; fail only on garbage-price init. NOT a fork-block pin.
+
+## Phase 1: ✓ (gate = compile + 34/34 non-fork green + stash non-regression; portal acceptance → Phase 3)

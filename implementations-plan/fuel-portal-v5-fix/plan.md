@@ -27,7 +27,7 @@ It's a one-address correction + a targeted redeploy of a single contract — no 
 
 ## Phases
 
-### Phase 1 — Re-pin the V5 fee-juice portal (source + fixtures) + make the deploy router-only + fork-validate
+### Phase 1 — Re-pin the V5 fee-juice portal (source + fixtures) + make the deploy router-only — ✓ DONE
 
 **Objective.** Replace the stale V4 portal constant with the V5 address everywhere it's pinned in Solidity, make `DeployFuelLive` genuinely router-only when reusing the swap, and prove the V5 portal⇄router interaction on a Sepolia fork *before* spending anything on-chain.
 
@@ -40,10 +40,12 @@ It's a one-address correction + a targeted redeploy of a single contract — no 
 
 **Script correctness (codex BLOCKER).** `DeployFuelLive.s.sol:93` constructs `PoolSetupHelper` **unconditionally** — it's only used inside the two `SEED_*` blocks, so with both seed flags false it's a wasted deploy and "router-only" is false. Guard it: read `SEED_AZLO_WETH`/`SEED_ETH_FJ` up front and only `new PoolSetupHelper(...)` if either is true (`helper` is referenced only at `:112-144`, all inside seed blocks, so the guard is safe). This makes Phase 2's "router-only" pass criterion literally achievable.
 
-**Validation gate.**
-- Commands: `forge build` (fuel script + tests compile) AND `SEPOLIA_RPC_URL=<rpc> forge test --match-path 'test/DeployFuelLive.fork.t.sol' -vv` (the fork test that actually exercises the portal claim path).
-- Pass criteria: `forge build` exit 0; `DeployFuelLive.fork.t.sol` green — `router.feeJuicePortal() == 0x7c4176bf` asserts true AND the FJ-at-portal balance-delta checks (`:198-242`) pass, proving the **V5 portal accepts the router's `depositToAztecPublic`** with real FJ custody. A revert/balance-mismatch here is a hard stop (the V5 portal behaves differently than V4 — escalate, do not redeploy). `DeployBridge.fork.t.sol` also re-run for compile/wiring regression but is not the portal-path proof.
-- Layers: solidity-compile + fork-test (live-network read).
+**Validation gate** (reframed per codex consult `019ee5b2`, after the fork test proved environment-broken — see below).
+- Commands: `forge build` (fuel script + tests compile) AND `forge test --no-match-path 'test/*.fork.t.sol'` (non-fork suite).
+- Pass criteria: `forge build` exit 0; **34/34 non-fork forge tests green**; AND the `git stash` non-regression proof — the re-pin introduces zero fork-test delta (identical pass/fail set on stashed-V4 vs my code). This gate is **compile + non-regression evidence, NOT a portal-acceptance gate.**
+- **Portal acceptance is deferred to Phase 3's real self-paying claim** (codex: the fork test dies in pool-seeding setup *before* `depositToAztecPublic`, so even green it wouldn't prove message/claim semantics — Phase 3's live claim is strictly stronger). Standalone portal evidence already gathered: live `cast` shows the V5 portal `0x7c4176bf` has code + `UNDERLYING()==0x762c` (Fact 10), and the ABI matches (Fact 3).
+- **`DeployFuelLive.fork.t.sol` is broken-by-environment** (3 fails, all `PoolAlreadyInitialized` — its `LIVE_AZLO` pools are already seeded live, so its fresh `initialize` reverts). Logged as a follow-up (make the test idempotent against already-init pools); NOT fixed here — the salvage touches the shared `PoolSetupHelper` used by the live deploy, out of scope for an address re-pin.
+- Layers: solidity-compile + non-fork unit.
 
 ### Phase 2 — Redeploy the SwapBridgeRouter against the V5 portal (reuse swap + pools)
 
