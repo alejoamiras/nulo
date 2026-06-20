@@ -47,7 +47,7 @@ It's a one-address correction + a targeted redeploy of a single contract — no 
 - **`DeployFuelLive.fork.t.sol` is broken-by-environment** (3 fails, all `PoolAlreadyInitialized` — its `LIVE_AZLO` pools are already seeded live, so its fresh `initialize` reverts). Logged as a follow-up (make the test idempotent against already-init pools); NOT fixed here — the salvage touches the shared `PoolSetupHelper` used by the live deploy, out of scope for an address re-pin.
 - Layers: solidity-compile + non-fork unit.
 
-### Phase 2 — Redeploy the SwapBridgeRouter against the V5 portal (reuse swap + pools)
+### Phase 2 — Redeploy the SwapBridgeRouter against the V5 portal (reuse swap + pools) — ✓ DONE (router `0xa2003149`)
 
 **Objective.** Deploy a fresh `SwapBridgeRouter` wired to the V5 portal; reuse everything else.
 
