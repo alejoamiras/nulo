@@ -19,6 +19,7 @@ import {
 	isSealTrusted,
 	markSealTrusted,
 	minOutputForSlippage,
+	predictedWorstMinFees,
 	PRIVATE_FPC_ADDRESS,
 	privateMintAndPayFee,
 	publicFeeJuicePayment,
@@ -289,12 +290,20 @@ function wireDepositDeps(): void {
 							: "private fuel claim pending - waiting for its receipt before retrying",
 					)
 				}
-				// teardownGas=0 keeps max_gas_cost within the bridged amount; maxFeesPerGas omitted ⇒ the wallet
-				// fills current-min (embedded-fpc cap). The method's feePayer=FPC ⇒ the wallet runs the 2 setup
-				// calls (FeeJuice.claim + mint_and_pay_fee) then this claim_private, all in one tx (EXTERNAL).
+				// teardownGas=0 keeps max_gas_cost within the bridged amount. We pin maxFeesPerGas to the
+				// PREDICTED worst-case min fee (not current-min): the FPC asserts amount >= gasLimits*maxFeesPerGas,
+				// and the claim lands seconds-to-minutes after it's built, so a current-min cap risks an
+				// inclusion-time reject if base fee rises in that window. Predicted-worst bounds the window AND
+				// fixes the FPC ceiling so the bridged amount can cover it. Explicit ⇒ the wallet commits it
+				// verbatim (no embedded-fpc-cap refetch drift). feePayer=FPC ⇒ FeeJuice.claim + mint_and_pay_fee
+				// + claim_private run as one EXTERNAL tx.
+				const claimMaxFees = await predictedWorstMinFees(createAztecNodeClient(NODE_URL))
 				const privateFee = {
 					paymentMethod: privateMintAndPayFee(fpcAddr, fuelReceived, deriveBridgeSecret(salt, recipientAddr), salt, fuelLeaf),
-					gasSettings: { teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }) },
+					gasSettings: {
+						teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
+						maxFeesPerGas: { feePerDaGas: claimMaxFees.feePerDaGas, feePerL2Gas: claimMaxFees.feePerL2Gas },
+					},
 				}
 				const claimPriv = () => bridge.methods.claim_private(recipientAddr, amount, secret, leaf)
 				return {
