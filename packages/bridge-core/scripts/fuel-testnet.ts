@@ -374,7 +374,10 @@ async function main() {
 	const worstCeiling = ceilings.length ? ceilings.reduce((a, b) => (a > b ? a : b)) : undefined
 	const worstActual = [pubRun, ...privRuns].map((r) => r.actualFee).reduce((a, b) => (a > b ? a : b), 0n)
 	const basis = worstCeiling ?? worstActual * 4n
-	const FUEL_FEE_MARGIN = 2n
+	// 4× the worst measured ceiling — matches the old V4-era floor's forgiveness (~4× headroom) but now
+	// GROUNDED in the real V5 ceiling, rather than 2× which codex flagged as a conservatism regression
+	// (the ceiling already bakes in the 1.5× fee pad, so 4× tolerates a further ~4× base-fee surge).
+	const FUEL_FEE_MARGIN = 4n
 	const minFuelFj = basis * FUEL_FEE_MARGIN
 	console.log(`\n✅ public + ${PRIVATE_RUNS} private-FPC runs SETTLED in ${mins()}`)
 	console.log(`private getFeeLimits : ${privRuns.map((r) => r.ceiling ?? "n/a").join(", ")}`)

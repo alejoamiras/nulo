@@ -13,7 +13,7 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import type { L2AmountClaim } from "@aztec/aztec.js/ethereum"
 import { FeeJuicePaymentMethodWithClaim, SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
-import type { GasFees } from "@aztec/stdlib/gas"
+import { GasFees } from "@aztec/stdlib/gas"
 import { FEE_JUICE_ADDRESS } from "@aztec/constants"
 
 /** The canonical L2 Fee Juice contract address — a protocol constant (identical on every network). */
@@ -36,15 +36,29 @@ type MinFeeNode = {
  * (`gasLimits·maxFeesPerGas`), so the bridged amount can be sized against a stable, known number.
  */
 export async function predictedWorstMinFees(node: MinFeeNode): Promise<GasFees> {
+	if (!node.getPredictedMinFees) return node.getCurrentMinFees()
+	let predicted: GasFees[]
 	try {
-		const predicted = await node.getPredictedMinFees?.()
-		if (predicted && predicted.length > 0) {
-			return predicted.reduce((worst, fees) => (fees.feePerL2Gas > worst.feePerL2Gas ? fees : worst))
-		}
-	} catch {
-		// Old nodes without getPredictedMinFees fall through to current min fees.
+		predicted = await node.getPredictedMinFees()
+	} catch (e) {
+		// Only fall back for old nodes that don't implement the method — NOT for transient RPC errors,
+		// which must propagate (a silent fallback to current-min would under-price the inclusion-safe cap).
+		const msg = e instanceof Error ? e.message : String(e)
+		if (/not found|not supported|unknown method|unimplemented|method.*not/i.test(msg)) return node.getCurrentMinFees()
+		throw e
 	}
-	return node.getCurrentMinFees()
+	if (!predicted || predicted.length === 0) return node.getCurrentMinFees()
+	// Component-wise worst across slots (max each fee independently) — a true upper bound even if the DA
+	// and L2 fees peak in different slots, so the committed cap is never under-priced on either axis.
+	const first = predicted[0]
+	if (!first) return node.getCurrentMinFees()
+	let worstDa = first.feePerDaGas
+	let worstL2 = first.feePerL2Gas
+	for (const f of predicted) {
+		if (f.feePerDaGas > worstDa) worstDa = f.feePerDaGas
+		if (f.feePerL2Gas > worstL2) worstL2 = f.feePerL2Gas
+	}
+	return new GasFees(worstDa, worstL2)
 }
 
 /** The L1→L2 claim a Fee-Juice bridge deposit produced; the preimage the L2 claim consumes. */
