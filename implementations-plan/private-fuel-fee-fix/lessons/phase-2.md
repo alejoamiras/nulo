@@ -60,4 +60,19 @@ This is why the gate is "≥3 runs" — a single run hid the drift; the calibrat
 
 `LESSONS_FILE=implementations-plan/private-fuel-fee-fix/lessons/phase-2.md`
 
-## Phase 2: ▶ private claim settled 1× (static cap); inclusion-reject found+fixed (reprice+pad); ≥3-run re-validation in flight
+## ≥3-run calibration GREEN (with reprice+pad)
+
+All 3 private-FPC runs SETTLED; the reprice-per-attempt resolved the inclusion-reject (the `re-pricing…` retries tracked the rising base fee). Stable results:
+
+```
+private getFeeLimits (FPC ceiling): 2.543, 2.487, 2.428 FJ
+private actual fees               : 1.678, 1.642, 1.619 FJ
+committed maxFeesPerGas           : predicted-worst × 1.5 (e.g. l2≈3.0e12)
+MIN_FUEL_FJ calibration           : 5085327059071520768 (5.085 FJ = 2× worst getFeeLimit)
+```
+
+Conclusion: the FPC ceiling is ~2.5 FJ (stable, with the 1.5× pad baked in); the calibrated `minFuelFj` is **5.085 FJ**. The current manifest floor (11 FJ) is therefore already safe (~4× the worst ceiling, ~2× the calibrated floor). Phase 3 sets the manifest to the calibrated 5.085 FJ (grounded; the old 11 FJ was a V4-era guess).
+
+`LESSONS_FILE=implementations-plan/private-fuel-fee-fix/lessons/phase-2.md`
+
+## Phase 2: ✓ (3/3 private-FPC claims SETTLED on V5 + reprice+pad fix + stable getFeeLimit ~2.5 FJ + minFuelFj 5.085 FJ)

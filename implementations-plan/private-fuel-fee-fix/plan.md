@@ -49,7 +49,7 @@ Three codex agents + this audit (`019ee67b`) all confirm: don't touch Wonderland
 - Pass criteria: fee-strategy / fee-structural-parity / embedded-fpc-cap unit suites green, incl. NEW cases: (i) an embedded payment with explicit `maxFeesPerGas` commits exactly that (no refetch/overwrite); (ii) an embedded payment WITHOUT explicit fees reuses the capped value (no drift); (iii) a NON-embedded payment still gets the 1.5× general default. typecheck + lint exit 0.
 - Layers: typecheck + lint + unit.
 
-### Phase 2 — Private FPC claim in `fuel-testnet.ts` + empirical calibration (the heart of "very good quality")
+### Phase 2 — Private FPC claim in `fuel-testnet.ts` + empirical calibration — ✓ DONE (3/3 SETTLED · ceiling ~2.5 FJ · minFuelFj 5.085 FJ)
 
 **Objective.** Exercise the private self-paying claim on live V5, **decompose** the ceiling, find `RELIABILITY_MULT` + `minFuelFj` empirically, and prove the claim settles reliably across fee conditions. Run as many times as needed.
 
