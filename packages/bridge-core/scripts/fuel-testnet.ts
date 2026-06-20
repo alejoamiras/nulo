@@ -29,9 +29,12 @@ import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
 import { type Abi, createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
+import { loadContractArtifact } from "@aztec/aztec.js/abi"
+import { Gas } from "@aztec/stdlib/gas"
 import { bridgeProxyArtifact, tokenBridgeArtifact } from "../src/artifacts"
-import { feeJuiceAddress, publicFeeJuicePayment } from "../src/fee-juice"
+import { feeJuiceAddress, predictedWorstMinFees, publicFeeJuicePayment } from "../src/fee-juice"
 import { runSwapBridge } from "../src/flows"
+import { PRIVATE_FPC_ADDRESS, deriveBridgeSecret, privateMintAndPayFee } from "../src/private-fuel"
 import { minOutputForSlippage, quoteFuelPath } from "../src/quote"
 import { buildFuelRoute } from "../src/route"
 
@@ -76,15 +79,16 @@ async function main() {
 	console.log("L1 sender", account.address, "| AZLO", azlo, "| router", fuel.router)
 
 	// Mint enough AZLO for both variants (permissionless, Permit2 pre-approved by the token).
+	const MINT = 5n * TOTAL // 1 public sanity + ≥3 private-FPC calibration runs, with headroom
 	await pub.waitForTransactionReceipt({
 		hash: await wallet.writeContract({
 			address: azlo,
 			abi: erc20 as never,
 			functionName: "mint",
-			args: [account.address, 2n * TOTAL] as never,
+			args: [account.address, MINT] as never,
 		}),
 	})
-	console.log(`minted ${(2n * TOTAL) / 10n ** 18n} AZLO (${mins()})`)
+	console.log(`minted ${MINT / 10n ** 18n} AZLO (${mins()})`)
 
 	const route = buildFuelRoute({
 		token: azlo,
@@ -151,7 +155,44 @@ async function main() {
 	const bridge = await registerLive("bridge", tokenBridgeArtifact, bridgeMeta)
 	await registerLive("proxy", bridgeProxyArtifact, CONFIG.l2.proxy)
 	const feeJuice = await Contract.at(AztecAddress.fromString(feeJuiceAddress), FeeJuiceContractArtifact, ewallet as never)
-	console.log(`live contracts registered (${mins()})`)
+
+	// Register the Wonderland PrivateFPC locally (instance + class). It has no public functions / no
+	// init, so 5.0 needs NO on-chain deploy (codex 019ee697); the private-kernel oracle DOES need both
+	// the instance + class preimages, so registerContract (not just the class). Salt 0 reproduces the
+	// pinned PRIVATE_FPC_ADDRESS from the 5.0 artifact.
+	const privateFpcArtifact = loadContractArtifact(
+		JSON.parse(
+			readFileSync(
+				join(
+					here,
+					"..",
+					"..",
+					"..",
+					"node_modules",
+					"@wonderland",
+					"aztec-fee-payment",
+					"target",
+					"private_contract-PrivateFPC.json",
+				),
+				"utf8",
+			),
+		),
+	)
+	const privateFpcInstance = await getContractInstanceFromInstantiationParams(
+		privateFpcArtifact as never,
+		{
+			salt: new Fr(0),
+			publicKeys: PublicKeys.default(),
+			deployer: AztecAddress.ZERO,
+		} as never,
+	)
+	if (privateFpcInstance.address.toString() !== PRIVATE_FPC_ADDRESS) {
+		throw new Error(`PrivateFPC rebuilt ${privateFpcInstance.address} != pinned ${PRIVATE_FPC_ADDRESS} (artifact/version drift)`)
+	}
+	try {
+		await ewallet.registerContract(privateFpcInstance, privateFpcArtifact as never)
+	} catch {}
+	console.log(`live contracts registered (+ PrivateFPC ${PRIVATE_FPC_ADDRESS.slice(0, 12)}…) (${mins()})`)
 
 	const fjBalance = async (): Promise<bigint> =>
 		((await feeJuice.methods.balance_of_public(from).simulate({ from })) as { result?: bigint }).result ??
@@ -163,9 +204,14 @@ async function main() {
 	}
 
 	// ─── One variant = L1 swap+bridge → self-paying L2 claim ─────────
-	const runVariant = async (isPrivate: boolean, nonce: bigint) => {
-		const label = isPrivate ? "PRIVATE" : "PUBLIC"
+	const runVariant = async (isPrivate: boolean, nonce: bigint, fuelViaPrivateFpc = false) => {
+		const label = `${isPrivate ? "PRIVATE" : "PUBLIC"}${fuelViaPrivateFpc ? "+FPC-fuel" : ""}`
 		console.log(`\n=== ${label} fueled bridge ===`)
+
+		// Private-FPC fuel: the FJ is bridged to the FPC with a claimer-bound secret (deriveBridgeSecret),
+		// so the FPC can reconstruct it inside mint_and_pay_fee. Public fuel lands at the user (random secret).
+		const bridgeSalt = fuelViaPrivateFpc ? Fr.random() : undefined
+		const fuelSecret = bridgeSalt ? deriveBridgeSecret(bridgeSalt, from) : undefined
 
 		const quote = await quoteFuelPath(pub as never, fuel.quoter, route, FUEL_SLICE)
 		const minOut = minOutputForSlippage(quote, fuel.slippageBps)
@@ -183,15 +229,16 @@ async function main() {
 				totalAmount: TOTAL,
 				fuelAmount: FUEL_SLICE,
 				aztecRecipient: from.toString() as `0x${string}`,
-				fuelRecipient: from.toString() as `0x${string}`,
+				fuelRecipient: (fuelViaPrivateFpc ? PRIVATE_FPC_ADDRESS : from.toString()) as `0x${string}`,
 				minFuelOutput: minOut,
 				path: route.path,
 				zeroForOnes: route.zeroForOnes,
 				isPrivate,
+				...(fuelSecret ? { fuelSecret } : {}),
 				nonce,
 				deadline: BigInt(Math.floor(Date.now() / 1000) + 1800),
 				chainId: 11155111,
-			},
+			} as never,
 			(s) => console.log(`l1: ${s} (${mins()})`),
 			{ onSecrets: () => console.log("secrets persisted (in-memory for the smoke)") },
 		)
@@ -200,12 +247,33 @@ async function main() {
 		)
 
 		// The self-paying claim: ONE tx claims the fuel (fee) AND the tokens.
-		const fjwcFee = {
-			paymentMethod: publicFeeJuicePayment(from, {
-				claimAmount: result.fuelReceived,
-				claimSecret: Fr.fromHexString(result.fuelSecretHex),
-				messageLeafIndex: result.fuelLeafIndex,
-			}),
+		// PUBLIC fuel: FeeJuicePaymentMethodWithClaim (pays ACTUAL fee, no upfront budget gate).
+		// PRIVATE-FPC fuel: Wonderland mint_and_pay_fee, which asserts amount >= getFeeLimit (gasLimit ×
+		// committed maxFeesPerGas) UPFRONT. We commit maxFeesPerGas = predictedWorstMinFees (inclusion-safe;
+		// explicit ⇒ committed verbatim) so the ceiling is stable + the bridged FJ covers it.
+		const committedMaxFees = fuelViaPrivateFpc ? await predictedWorstMinFees(node) : undefined
+		const claimFee = fuelViaPrivateFpc
+			? {
+					paymentMethod: privateMintAndPayFee(
+						AztecAddress.fromString(PRIVATE_FPC_ADDRESS),
+						result.fuelReceived,
+						deriveBridgeSecret(bridgeSalt as Fr, from),
+						bridgeSalt as Fr,
+						new Fr(result.fuelLeafIndex),
+					),
+					gasSettings: { teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }), maxFeesPerGas: committedMaxFees },
+				}
+			: {
+					paymentMethod: publicFeeJuicePayment(from, {
+						claimAmount: result.fuelReceived,
+						claimSecret: Fr.fromHexString(result.fuelSecretHex),
+						messageLeafIndex: result.fuelLeafIndex,
+					}),
+				}
+		if (committedMaxFees) {
+			console.log(
+				`${label}: committed maxFeesPerGas da=${committedMaxFees.feePerDaGas} l2=${committedMaxFees.feePerL2Gas} (predicted-worst)`,
+			)
 		}
 		const bridgedAmount = TOTAL - FUEL_SLICE
 		const tokenSecret = Fr.fromHexString(result.tokenSecretHex)
@@ -215,41 +283,78 @@ async function main() {
 				: bridge.methods.claim_public(from, bridgedAmount, tokenSecret, new Fr(result.tokenLeafIndex))
 
 		const fjBefore = await fjBalance()
-		let receipt: { transactionFee?: bigint } | undefined
+		type ClaimReceipt = { transactionFee?: bigint; gasUsed?: { totalGas?: { daGas: number; l2Gas: number } } }
+		let receipt: ClaimReceipt | undefined
 		for (let i = 0; i < 300 && !receipt; i++) {
 			try {
-				const sent = (await claimMethod().send({
-					from,
-					fee: fjwcFee,
-					wait: { waitForStatus: TxStatus.PROPOSED },
-				} as never)) as { receipt?: { transactionFee?: bigint } }
+				const sent = (await claimMethod().send({ from, fee: claimFee, wait: { waitForStatus: TxStatus.PROPOSED } } as never)) as {
+					receipt?: ClaimReceipt
+				}
 				receipt = sent.receipt ?? {}
-			} catch {
+			} catch (e) {
+				const msg = e instanceof Error ? e.message : String(e)
+				// "Amount too low to cover gas cost" is the FPC budget assert — a real fail, NOT a sync wait.
+				if (/Amount too low to cover gas cost|max_gas_cost/.test(msg)) {
+					throw new Error(`${label}: FPC budget assert — bridged FJ ${result.fuelReceived} < committed getFeeLimit. ${msg}`)
+				}
 				if (i % 10 === 0) console.log(`claim not ready yet (messages syncing)… (${mins()})`)
 				await new Promise((r) => setTimeout(r, 6000))
 			}
 		}
-		if (!receipt) throw new Error(`${label}: self-paying claim never landed within budget`)
-		console.log(`claim landed - one tx claimed tokens AND gas (${mins()})`)
+		if (!receipt) throw new Error(`${label}: self-paying claim never SETTLED within budget`)
+		console.log(`${label}: claim SETTLED - one tx claimed tokens AND gas (${mins()})`)
+
+		// Decompose the fee: actual (post-inclusion) vs the FPC ceiling (committed gasLimit × maxFeesPerGas).
+		const actualFee = receipt.transactionFee ?? 0n
+		let ceiling: bigint | undefined
+		if (committedMaxFees && receipt.gasUsed?.totalGas) {
+			const g = receipt.gasUsed.totalGas
+			ceiling = BigInt(g.daGas) * committedMaxFees.feePerDaGas + BigInt(g.l2Gas) * committedMaxFees.feePerL2Gas
+		}
+		console.log(
+			`${label}: actual fee ${actualFee}${ceiling !== undefined ? ` | getFeeLimit (FPC ceiling) ${ceiling}` : " | getFeeLimit n/a (no gasUsed on receipt)"}`,
+		)
 
 		const tokenBal = await tokenBalance(isPrivate ? "private" : "public")
-		const fjAfter = await fjBalance()
-		const feePaid = receipt.transactionFee ?? result.fuelReceived - (fjAfter - fjBefore)
-		console.log(`${label}: token balance ${tokenBal}, FJ gained ${fjAfter - fjBefore}, fee paid ≈ ${feePaid}`)
+		console.log(`${label}: token balance ${tokenBal}`)
 		if (tokenBal < bridgedAmount) throw new Error(`${label}: token balance ${tokenBal} < ${bridgedAmount}`)
-		if (fjAfter <= fjBefore) throw new Error(`${label}: no FJ landed as balance (fee ate everything?)`)
-		return feePaid
+		if (!fuelViaPrivateFpc) {
+			// PUBLIC fuel credits the user's PUBLIC FJ balance. PRIVATE-FPC fuel credits the remainder as a
+			// PRIVATE note (not the public balance), so this assert only applies to the public path.
+			const fjAfter = await fjBalance()
+			if (fjAfter <= fjBefore) throw new Error(`${label}: no FJ landed as balance (fee ate everything?)`)
+			console.log(`${label}: FJ gained ${fjAfter - fjBefore}`)
+		}
+		return { actualFee, ceiling }
 	}
 
-	const fee1 = await runVariant(false, BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`))
-	const fee2 = await runVariant(true, BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`))
+	const rndNonce = () => BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
+	const PRIVATE_RUNS = Number(process.env.PRIVATE_RUNS ?? 3) // ≥3 for calibration stability; env-tunable
 
-	// ─── MIN_FUEL_FJ calibration: 2× the worst observed claim fee ────
-	const worst = fee1 > fee2 ? fee1 : fee2
-	const minFuelFj = worst * 2n
-	console.log(`\n✅ BOTH variants PASSED in ${mins()}`)
-	console.log(`observed claim fees: public ${fee1}, private ${fee2}`)
-	console.log(`MIN_FUEL_FJ calibration: ${minFuelFj} (2× worst fee) - update testnet-bridge.json l1.fuel.minFuelFj`)
+	// Public fuel = sanity (works pre-fix); the PRIVATE-FPC path is what regressed — run it ≥3× for a
+	// stable getFeeLimit/minFuelFj across fee conditions.
+	const pubRun = await runVariant(false, rndNonce())
+	const privRuns: { actualFee: bigint; ceiling?: bigint }[] = []
+	for (let i = 0; i < PRIVATE_RUNS; i++) {
+		console.log(`\n--- private-FPC run ${i + 1}/${PRIVATE_RUNS} ---`)
+		privRuns.push(await runVariant(true, rndNonce(), true))
+	}
+
+	// ─── MIN_FUEL_FJ calibration: 2× the worst FPC CEILING (getFeeLimit), not the actual fee (codex
+	// 019ee66b-01a4) — the FPC asserts amount >= getFeeLimit. Fall back to a conservative actual×4 proxy
+	// only if no receipt exposed gasUsed (so the ceiling couldn't be computed). ──
+	const ceilings = privRuns.map((r) => r.ceiling).filter((c): c is bigint => c !== undefined)
+	const worstCeiling = ceilings.length ? ceilings.reduce((a, b) => (a > b ? a : b)) : undefined
+	const worstActual = [pubRun, ...privRuns].map((r) => r.actualFee).reduce((a, b) => (a > b ? a : b), 0n)
+	const basis = worstCeiling ?? worstActual * 4n
+	const FUEL_FEE_MARGIN = 2n
+	const minFuelFj = basis * FUEL_FEE_MARGIN
+	console.log(`\n✅ public + ${PRIVATE_RUNS} private-FPC runs SETTLED in ${mins()}`)
+	console.log(`private getFeeLimits : ${privRuns.map((r) => r.ceiling ?? "n/a").join(", ")}`)
+	console.log(`private actual fees  : ${privRuns.map((r) => r.actualFee).join(", ")}`)
+	console.log(
+		`MIN_FUEL_FJ calibration: ${minFuelFj} (${FUEL_FEE_MARGIN}× worst ${worstCeiling !== undefined ? "getFeeLimit" : "actual×4 proxy"}) - update testnet-bridge.json l1.fuel.minFuelFj`,
+	)
 }
 
 main().catch((e) => {
