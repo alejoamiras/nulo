@@ -7,6 +7,7 @@ import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/serv
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { purgeRows } from "@/wallet/services/purge-rows"
+import { ensureRegistered } from "@/wallet/services/execution/contract-resolver"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import { resolveNetworkByChainId } from "@/wallet/utils/caip"
@@ -256,13 +257,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 			throw new Error("Contract artifact not found")
 		}
 
-		const registeredContracts = await pxe.getContracts()
-		if (!registeredContracts.find((x) => x.toString() === address)) {
-			await pxe.registerContract({
-				instance: fpcInstance,
-				artifact: fpcArtifact,
-			})
-		}
+		await ensureRegistered(pxe, address, fpcInstance, fpcArtifact)
 
 		const fpcHandler = getFpcHandler(type)
 		fpcHandler.validateArtifact(fpcArtifact)
@@ -356,10 +351,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		if (!fpcArtifact) {
 			throw new Error("Couldn't load the contract artifact. This address is not a Sponsored FPC.")
 		}
-		const registered = await pxe.getContracts()
-		if (!registered.find((x) => x.toString() === address)) {
-			await pxe.registerContract({ instance: fpcInstance, artifact: fpcArtifact })
-		}
+		await ensureRegistered(pxe, address, fpcInstance, fpcArtifact)
 
 		// Hard-validate that the new address still implements the same FPC type.
 		const handler = getFpcHandler(existing.type)
