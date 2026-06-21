@@ -42,7 +42,7 @@ contract DeployFuelLive is Script {
     address constant WETH = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
     address constant FEE_JUICE = 0x762C132040fdA6183066Fa3B14d985ee55aA3C18;
     address constant FEE_ASSET_HANDLER = 0x5602c39A6E9C5AcE589F64F754927bcDa4f4BFc9;
-    address constant FEE_JUICE_PORTAL = 0xd3361019E40026ce8a9745c19e67Fd3ACC10d596;
+    address constant FEE_JUICE_PORTAL = 0x7C4176bFF969c9417e42F9CB921100145911CC84;
     address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
     // ── The live AZLO (18 dec, permissionless capped mint, Permit2 pre-approved) ──
@@ -90,10 +90,17 @@ contract DeployFuelLive is Script {
         console.log("UniswapFuelSwap:", address(swapTarget));
         console.log("SwapBridgeRouter:", address(router));
 
-        PoolSetupHelper helper = new PoolSetupHelper(POOL_MANAGER, FEE_ASSET_HANDLER);
+        // Only deploy the seeding helper when at least one pool is actually being seeded — otherwise a
+        // reuse-the-swap re-run (FUEL_SWAP_ADDRESS set, both SEED_* false) is genuinely router-only.
+        bool seedAzloWeth = vm.envOr("SEED_AZLO_WETH", true);
+        bool seedEthFj = vm.envOr("SEED_ETH_FJ", true);
+        PoolSetupHelper helper;
+        if (seedAzloWeth || seedEthFj) {
+            helper = new PoolSetupHelper(POOL_MANAGER, FEE_ASSET_HANDLER);
+        }
 
         // 2. AZLO/WETH pool.
-        if (vm.envOr("SEED_AZLO_WETH", true)) {
+        if (seedAzloWeth) {
             PoolKey memory key = PoolKey({
                 currency0: Currency.wrap(token),
                 currency1: Currency.wrap(WETH),
@@ -122,7 +129,7 @@ contract DeployFuelLive is Script {
         }
 
         // 3. OUR ETH/FeeJuice tier (FJ side free via FeeAssetHandler; ETH side small).
-        if (vm.envOr("SEED_ETH_FJ", true)) {
+        if (seedEthFj) {
             PoolKey memory fjKey = PoolKey({
                 currency0: Currency.wrap(address(0)),
                 currency1: Currency.wrap(FEE_JUICE),

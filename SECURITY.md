@@ -348,14 +348,18 @@ extension, or expose it on a public network. The binary writes to
 `~/.aztec-accelerator/versions/` on the runner (transient — destroyed
 with the VM) and listens on `127.0.0.1:59833` only.
 
-**Origin authorization.** The binary's `ALLOWED_ORIGINS` env var is
-deliberately left unset, which (per upstream `accelerator-server.rs:32-49`
-+ `server.rs:210`) auto-approves all origins. Safe in our threat model
-because (a) CI runners are single-tenant, (b) `pull_request` workflows
-from forks do not receive repo secrets, (c) the only call traffic on
-the runner originates from the wallet we built. See
+**Origin authorization.** accelerator-server v1.0.6 (SEC-01c) is
+deny-by-default: with `ALLOWED_ORIGINS` unset it denies every non-localhost
+browser origin (localhost stays auto-approved). Our offscreen prover calls
+from `chrome-extension://<id>`, whose unpacked-extension id isn't known until
+Chrome loads it, so CI sets `ACCEL_ALLOW_ALL=1` to approve all origins (the
+pre-SEC-01 behavior; mutually exclusive with `ALLOWED_ORIGINS`). Safe in our
+threat model because (a) CI runners are single-tenant, (b) `pull_request`
+workflows from forks do not receive repo secrets, (c) the server is
+loopback-only (`127.0.0.1:59833`) and the only call traffic originates from
+the wallet we built. See
 [`implementations-plan/accelerator-server-ci/lessons/phase-1.md`](./implementations-plan/accelerator-server-ci/lessons/phase-1.md)
-for the full source-read.
+for the original (pre-v1.0.6) source-read.
 
 **License posture.** The `@alejoamiras/aztec-accelerator` npm SDK is
 AGPL-3.0-only; the server binary inherits the same license. We invoke

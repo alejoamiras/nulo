@@ -92,21 +92,21 @@ echo "anvil: $(command -v anvil) ($(anvil --version 2>&1 | head -1))"
 # Force re-install if the bin dir is empty (previous failed installs left
 # stub directories that pass `-d` but contain no binaries).
 AZTEC_BIN_DIR="/root/.aztec/versions/$AZTEC_VERSION/bin"
-if [ ! -x "$AZTEC_BIN_DIR/anvil" ]; then
+if [ ! -x "$AZTEC_BIN_DIR/aztec-anvil" ]; then
 	echo "::warning::aztec install absent or stale at $AZTEC_BIN_DIR; reinstalling"
 	rm -rf "/root/.aztec/versions/$AZTEC_VERSION"
 	export CI=1
 	export FOUNDRY_DIR="$HOME/.foundry"
 	curl -fsSL "https://install.aztec.network/${AZTEC_VERSION}/install" | VERSION="$AZTEC_VERSION" bash
 fi
-# global-setup.ts looks at ~/.aztec/current/bin/anvil exactly. The aztec
-# installer SHOULD have put anvil there; if it didn't (foundry already in PATH,
-# or partial install), symlink our foundry anvil so the test stack finds it.
-if [ ! -x "$AZTEC_BIN_DIR/anvil" ]; then
+# global-setup.ts looks at ~/.aztec/current/bin/aztec-anvil exactly (5.0 renamed the bundled
+# bare `anvil` to `aztec-anvil`). The aztec installer SHOULD have put it there; if it didn't
+# (foundry already in PATH, or partial install), symlink foundry's anvil so the test stack finds it.
+if [ ! -x "$AZTEC_BIN_DIR/aztec-anvil" ]; then
 	if [ -x /root/.foundry/bin/anvil ]; then
 		echo "::warning::aztec install didn't place anvil; symlinking foundry's"
 		mkdir -p "$AZTEC_BIN_DIR"
-		ln -sfn /root/.foundry/bin/anvil "$AZTEC_BIN_DIR/anvil"
+		ln -sfn /root/.foundry/bin/anvil "$AZTEC_BIN_DIR/aztec-anvil"
 	else
 		echo "::error::no anvil available anywhere"
 		exit 2

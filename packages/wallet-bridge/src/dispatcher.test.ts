@@ -755,9 +755,9 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		expect("registerToken" in WalletSchema).toBe(true)
 		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
 		const entry = (WalletSchema as any).registerToken
-		expect(typeof entry?.parameters).toBe("function")
-		const params = entry.parameters()
-		expect(params.items.length).toBe(2)
+		// zod v4: entries are `z.function({ input: z.tuple([...]), output })`; the proxy reads `schema.def`.
+		expect(entry?.def?.input?.def?.items?.length).toBe(2)
+		expect(entry?.def?.output?.def?.type).toBe("void")
 	})
 
 	test("dispatch('registerToken', ...) routes through DappInteractionService.execute (NOT executeOperations)", async () => {
@@ -1072,8 +1072,8 @@ describe("dispatcher — isTokenRegistered reachability + gating", () => {
 		expect("isTokenRegistered" in WalletSchema).toBe(true)
 		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
 		const entry = (WalletSchema as any).isTokenRegistered
-		const params = entry.parameters()
-		expect(params.items.length).toBe(1)
+		expect(entry?.def?.input?.def?.items?.length).toBe(1)
+		expect(entry?.def?.output?.def?.type).toBe("boolean")
 	})
 
 	test("the three schema-patch copies are content-identical (drift pin)", async () => {
@@ -1419,8 +1419,8 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 		expect("grantPublicAuthwit" in WalletSchema).toBe(true)
 		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
 		const entry = (WalletSchema as any).grantPublicAuthwit
-		expect(typeof entry?.parameters).toBe("function")
-		expect(entry.parameters().items.length).toBe(2)
+		expect(entry?.def?.input?.def?.items?.length).toBe(2)
+		expect(entry?.def?.output?.def?.type).toBe("string")
 	})
 
 	test("dispatch('grantPublicAuthwit', ...) routes a send_transaction with ONE add_public_authwit call-content action through DappInteractionService.execute", async () => {

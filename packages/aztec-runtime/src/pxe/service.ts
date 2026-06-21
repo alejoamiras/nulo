@@ -276,7 +276,22 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				this.logDebug(`[SYNC-DEBUG] proveTx: failed to read sync state: ${e}`)
 			}
 
-			return pxe.proveTx(await TxExecutionRequest.schema.parseAsync(txRequest), await z.array(AztecAddress.schema).parseAsync(scopes))
+			// 5.0 tags private-log messages with the sender; PXE throws "Sender for tags is not set"
+			// during private execution (before proving) when it is absent — so any private-note-emitting
+			// tx (e.g. public→private shield) fails in witness-gen. The SDK's BaseWallet derives this from
+			// `from`; we call proveTx directly, so mirror it: the first scope is the tx sender by our
+			// convention (callers build scopes as `[account.address, ...]`).
+			// INVARIANT: scopes[0] === the tx sender. Holds for every account-backed path (transfer,
+			// dapp-send, view, authwit-discovery). The ONE exception is the NO_FROM discovery path
+			// (dapp-send-executor's executeNoFromSendTx), which simulates with dapp-only scopes and no
+			// signing account — there senderForTags is not the real sender. That path is public-only
+			// today; a private-log-emitting NO_FROM flow must plumb an explicit sender first (codex
+			// post-impl audit MEDIUM — tracked for a follow-up).
+			const provedScopes = await z.array(AztecAddress.schema).parseAsync(scopes)
+			return pxe.proveTx(await TxExecutionRequest.schema.parseAsync(txRequest), {
+				scopes: provedScopes,
+				senderForTags: provedScopes[0],
+			})
 		})
 	}
 
@@ -306,9 +321,9 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// `@aztec/accounts/src/stub/schnorr/index.ts:7-12` does
 			// `loadContractArtifact(SimulatedSchnorrAccountJson)`). ECDSA
 			// support comes for free when Nulo grows it (sibling import:
-			// `@aztec/accounts/stub/ecdsa`).
+			// `@aztec/accounts/ecdsa/stub`).
 			if (stubAccountAddresses?.length) {
-				const { StubSchnorrAccountContractArtifact } = await import("@aztec/accounts/stub/schnorr")
+				const { StubSchnorrAccountContractArtifact } = await import("@aztec/accounts/schnorr/stub")
 				const contracts: Record<string, { instance: ContractInstanceWithAddress; artifact: ContractArtifact }> = {}
 				for (const addr of stubAccountAddresses) {
 					const instance = await getContractInstanceFromInstantiationParams(StubSchnorrAccountContractArtifact, {
@@ -326,13 +341,17 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// but riding a default is fragile: a future upstream change
 			// could flip it and silently break overrides. Pass it
 			// explicitly when we know we need it.
+			const simScopes = await AccessScopesSchema.parseAsync(opts.scopes)
 			return await pxe.simulateTx(await TxExecutionRequest.schema.parseAsync(txRequest), {
 				simulatePublic: opts.simulatePublic,
 				skipTxValidation: opts.skipTxValidation,
 				skipFeeEnforcement: opts.skipFeeEnforcement,
 				overrides,
 				...(overrides ? { skipKernels: true } : {}),
-				scopes: await AccessScopesSchema.parseAsync(opts.scopes),
+				scopes: simScopes,
+				// See proveTx: 5.0 requires the private-log sender or PXE throws "Sender for tags is not
+				// set" during private execution. First scope is the tx sender by our convention.
+				senderForTags: simScopes[0],
 			})
 		})
 	}

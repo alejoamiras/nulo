@@ -1,4 +1,4 @@
-import { CANONICAL_AUTH_REGISTRY_ADDRESS } from "@aztec/constants"
+import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-registry/constants"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { type FunctionAbi, FunctionSelector, FunctionType } from "@aztec/stdlib/abi"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
@@ -16,7 +16,9 @@ import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 const REJECT_ALL_SLOT = new Fr(1)
 const APPROVED_ACTIONS_SLOT = new Fr(2)
 
-export const getAuthRegistryAddress = () => AztecAddress.fromNumber(CANONICAL_AUTH_REGISTRY_ADDRESS)
+// 5.0 demoted auth_registry from a protocol contract (hardcoded slot 1) to a standard contract;
+// its address is now derived from the artifact and shipped as a precomputed AztecAddress.
+export const getAuthRegistryAddress = () => STANDARD_AUTH_REGISTRY_ADDRESS
 
 export const getSetAuthorizedFn = () =>
 	({

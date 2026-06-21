@@ -144,6 +144,7 @@ contract NuloTokenPortal {
     uint256 _amount,
     bool _withCaller,
     Epoch _epoch,
+    uint256 _numCheckpointsInEpoch,
     uint256 _leafIndex,
     bytes32[] calldata _path
   ) external {
@@ -159,7 +160,7 @@ contract NuloTokenPortal {
       )
     });
 
-    outbox.consume(message, _epoch, _leafIndex, _path);
+    outbox.consume(message, _epoch, _numCheckpointsInEpoch, _leafIndex, _path);
 
     underlying.safeTransfer(_recipient, _amount);
   }

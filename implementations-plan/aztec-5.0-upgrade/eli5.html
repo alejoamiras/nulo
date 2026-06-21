@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — aztec-5.0-upgrade</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.25rem 0; padding: 0.75rem 1.1rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .blocker { border-left-color: #c0392b; background: #fdf1f0; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.88rem; margin: 0.5rem 0; }
+    th, td { border: 1px solid #ddd; padding: 0.35rem 0.5rem; text-align: left; vertical-align: top; }
+    th { background: #f0f0f0; }
+  </style>
+</head>
+<body>
+  <h1>Aztec 4.2.0 → 5.0.0-rc.1 upgrade</h1>
+  <p class="muted">Protocol hard fork · mega-deep blueprint · awaiting your approval</p>
+
+  <p>We're moving the whole wallet (and the faucet, playground, and the L1↔L2 bridge) from Aztec <strong>4.2.0</strong> to <strong>5.0.0-rc.1</strong>. This isn't a routine version bump — 5.0 is a <em>hard fork</em>: the way account addresses are computed changes, the signature math changes, and the wallet's local database gets wiped on first open. So existing test wallets and accounts on the test network <strong>stop working by design</strong>. We agreed to <em>document</em> that reset rather than build migration screens (it's a release candidate on a test network).</p>
+
+  <h2>Status: approved (2026-06-19)</h2>
+  <div class="phase">
+    <p>You chose the strictest proof: <strong>full network end-to-end tests on a real 5.0 network with native (fast) proving</strong>. Earlier this looked blocked on a 5.0-specific build of the <code>accelerator-server</code> helper. <strong>It isn't</strong> — you confirmed the helper <em>downloads the requested proving backend (<code>bb</code>) on demand</em>, so the existing one proves 5.0 by fetching 5.0's <code>bb</code> on first use. So there's no external release to wait on; CI just needs its version pin refreshed (Phase 0, small). Native proving stays the bar, and it's reachable now.</p>
+  </div>
+
+  <h2>Why mega-deep</h2>
+  <p>All six risk dials are HIGH: it's the first 5.0 hard-fork bump (novelty), it touches every package (blast radius), the test-network reset can't be undone (irreversibility), the local DB + Noir contracts must be migrated (migration cost), it pulls 3 external prerelease libraries + a pinned binary (external coupling), and it changes signature + key crypto (security). So we did the heaviest planning: deep research, a second independent plan, and an adversarial codex audit (which rejected the first draft and forced real fixes).</p>
+
+  <h2>Phases (plain language + how each proves itself)</h2>
+
+  <div class="phase">
+    <h3>Phase 0 — Refresh the CI proving-helper pin (small; not a blocker)</h3>
+    <p>The helper downloads 5.0's proving backend on demand, so no new release is needed. Just bump the CI version pin (v1.0.1 → current) + its checksum, and make sure the CI machine can do the one-time download.</p>
+    <p class="muted">Proves itself by: against a 5.0 network the pinned helper reports <code>bb_available=true</code> and a native-proving test transaction succeeds.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 1 — Bump dependencies + unblock the install</h3>
+    <p>Change all the version numbers, temporarily allow the brand-new 5.0 packages past the 7-day supply-chain delay, re-key the two patches, and prove the risky-but-invisible assumptions early (do the import paths still exist? does the WASM extractor still find its files?).</p>
+    <p class="muted">Proves itself by: a clean frozen-lockfile install + the build reaching the WASM step + import-resolution probes passing.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 2 — Core runtime (fees, PXE, accounts)</h3>
+    <p>Re-derive the copied fee logic from 5.0 (and add tests for the new gas-limit path), fix the PXE setup so it loads the AuthRegistry, and update the tx-building calls.</p>
+    <p class="muted">Proves itself by: aztec-runtime typecheck + unit tests (incl. new fee cases) + lint, all green.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 3 — Extension + the custom RPC patch + DB wipe</h3>
+    <p>Fix the receipt/gas call sites, carefully re-check the 3-copy schema patch against 5.0, and bump the storage version (which re-triggers the PXE database wipe).</p>
+    <p class="muted">Proves itself by: <code>audit:vue</code> + <code>test:all</code> (so the wallet-bridge registry tests actually run) + the note-slot tripwire test, all green.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 4 — Faucet + playground</h3>
+    <p>Mirror the schema-patch edits, resolve the wallet-creation option name, migrate the faucet's bridge screens, and re-pin the deterministic contract addresses (computed offline — no live deploy needed).</p>
+    <p class="muted">Proves itself by: <code>audit:faucet</code> (incl. offline deploy-verify) + playground typecheck &amp; build.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 5 — Recompile the Noir bridge contracts + bridge code</h3>
+    <p>Bump the 3 Noir crates to 5.0, migrate the message-passing API, recompile, and fix the bridge TypeScript + its deploy manifests.</p>
+    <p class="muted">Proves itself by: Noir compile + keystone <code>aztec test</code> + bridge-core tests (incl. the address tripwire) + a bridge deposit/withdraw smoke run on a 5.0 network.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 6 — Network end-to-end on real 5.0</h3>
+    <p><strong>6A (now):</strong> proverless run to validate the migration without the binary. <strong>6B (the real bar, blocked on Phase 0):</strong> native-proving run that <em>cannot</em> silently fall back to slow WASM proving.</p>
+    <p class="muted">Proves itself by: 6B — the network-e2e suite green with the canary shards running native proving (required-mode build stamp + accelerator up + zero WASM fallback). Bulk shards stay proverless by design. <strong>This is the definition of done.</strong></p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 7 — Docs + supply-chain cleanup</h3>
+    <p>Document the reset, then a follow-up PR removes the temporary supply-chain exception once 5.0.0-rc.1 ages past 7 days (~2026-06-22).</p>
+    <p class="muted">Proves itself by: Quality check green + actionlint clean + docs reviewed.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>The wallet doesn't ship its own account contract — it rides Aztec's SDK — so the scary "Schnorr signature scheme changed" item is mostly absorbed by the dependency bump. The genuinely fiddly bits are: a <em>copied</em> fee file that can be wrong without the compiler noticing; a runtime patch that fails at startup (not at compile time) if an import moved; and the Noir contracts, which are a separate compiler toolchain. The codex audit's most important catch was that running the network tests the obvious way would <em>silently</em> use slow WASM proving and look green without actually proving anything on 5.0 — so the final gate now explicitly demands the native-proving stamp.</p>
+
+  <h2>Decisions (resolved 2026-06-19)</h2>
+  <ul>
+    <li><strong>Proving-helper sequencing</strong> — dissolved (downloads <code>bb</code> on demand; native proving unblocked now).</li>
+    <li><strong>Supply-chain delay</strong> — add the temporary 7-day-gate exemption for first-party <code>@aztec/*</code> now; a follow-up PR removes it once 5.0.0-rc.1 ages out (~2026-06-22).</li>
+    <li><strong>PR shape</strong> — one feature-branch PR. A green-per-step stack into <code>dev</code> isn't viable: the single lockfile means a deps-only intermediate state doesn't compile.</li>
+    <li><strong><code>/harden security</code></strong> — recommended at pre-release time (crypto + supply chain); not scheduled now.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approved — scope, tier, and validation confirmed</h2>
+    <p>Everything (incl. Noir + bridge), mega-deep, documented-reset posture; definition of done = native proving enforced on the canary shards (6B). Implementation drives via the <code>/loop</code> seed below.</p>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (finalized — approved 2026-06-19)</h2>
+    <p>Two ways to drive the autonomous build session. Use <strong>exactly one</strong>.</p>
+    <p class="warning">They don't compose — setting one replaces the other. Start the session in your intended permission mode (+ AFK auth) so the loop doesn't stall on a prompt.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /loop</h3>
+      <p class="muted">This migration has long CI / network-e2e waits across many phases. A 15-minute loop drives phases, uses CI-wait time productively, and consults codex on forks — a better fit than a single completion condition.</p>
+      <pre><code>/loop 15m Drive implementations-plan/aztec-5.0-upgrade forward. Never idle waiting for my input. Each firing:
+1. Reality check: read plan.md + lessons/ (authoritative, not the chat); run `git status` and `git log --oneline -5`. PR exists? `gh pr view --json statusCheckRollup`. Else with CI: `gh run list --branch $(git branch --show-current) --limit 1 --json status,databaseId`.
+2. Waiting on CI / network-e2e is fine — confirm it's progressing (`gh run watch &lt;id&gt;` up to 10 min); use the wait to prep the next phase / strengthen tests. Don't start work that conflicts with the in-flight change.
+3. No task in hand? Pick the next pending phase from plan.md. After each meaningful edit run the fast layers (`bun run lint` + the touched package's `typecheck`/`test`). Then commit → push.
+4. Stuck or facing a decision you'd bring to me? Don't wait — `/codex xhigh` with full context, reach a defensible call, act, log it in lessons/phase-N.md. Hard limits stay hard: never merge to main/release, never publish/deploy, never expand scope; if a call needs crossing one, surface and hold.
+5. Same step failed 5 times? Stop; reassess with codex; continue down the agreed path.
+6. Phase green = THE phase's validation gate in plan.md passes (commands + pass criteria). Run the full gate, paste the result, mark ✓ in plan.md, file lessons, print `LESSONS_FILE=implementations-plan/aztec-5.0-upgrade/lessons/phase-N.md`, advance.
+7. Phase 6B (native-proving) uses the existing accelerator-server (downloads 5.0 `bb` on demand). Never fake it with WASM — if the canary preflight shows `bb_available=false`, fix the CI pin/egress (Phase 0), don't disable proving.
+8. All phases ✓? Run `/code-review max --fix` → commit separately → codex post-impl audit (`/codex xhigh`, net diff + adversarial/security ask) → address high/critical → write the wrap-up (what shipped, every codex-debated decision with ELI5 context, open items). Surface and stop.
+Keep the ASCII checklist visible each firing (human readability; plan.md is source of truth).</code></pre>
+    </div>
+
+    <h3>Alternative: /goal</h3>
+    <pre><code>/goal All phases marked ✓ in plan.md, each ✓ backed by its phase's validation gate reported passing in the transcript; for each phase the agent printed `LESSONS_FILE=implementations-plan/aztec-5.0-upgrade/lessons/phase-N.md`; `/code-review max --fix` complete + committed; codex post-impl audit complete with high/critical findings addressed; `bun run test:all` and `bun run lint` both exit 0 in the transcript; Phase 6B native-proving network-e2e green — canary shards with required-mode build stamp + accelerator preflight `bb_available=true` + zero WASM fallback.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./research/">Research artifacts</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

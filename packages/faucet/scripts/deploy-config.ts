@@ -17,7 +17,7 @@
 export type Network = "testnet" | "local-network"
 
 export const NETWORK_URLS: Record<Network, string> = {
-	testnet: "https://rpc.testnet.aztec-labs.com",
+	testnet: "https://v5.testnet.rpc.aztec-labs.com",
 	"local-network": "http://localhost:8080",
 }
 

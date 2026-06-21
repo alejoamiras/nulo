@@ -1,7 +1,7 @@
 {
 	"tokens": [
 		{
-			"address": "0x08625297b24fe09d467506c8c83082c4cbefb215e1e084365e126594ce3d944a",
+			"address": "0x071bb9bc29cd871f3df9ec76fe8df1bf7b30efb2a2a739df1c8251e5d5aa3b91",
 			"salt": 4244,
 			"deployer": "0x0000000000000000000000000000000000000000000000000000000000000000",
 			"constructorArtifact": "constructor_with_minter",
@@ -9,11 +9,11 @@
 				"name": "NULO",
 				"symbol": "NULO",
 				"decimals": 6,
-				"minter": "0x172684be7d86acff9c0e16b15e3f34647e5c8c26f0838a0872df7f61ddcb7070"
+				"minter": "0x0d27e525fcca2dbf4fd1ac3e2e586a47cd3b5b16b79f7f273c8ff23d7254354f"
 			}
 		},
 		{
-			"address": "0x24f292d7c6c1d0a56b56a83d387c3046e5b211688049d132281f3e9f3d8240a7",
+			"address": "0x1a246cb5510329f175e417f1f3f5496b6ad3c7ca026090e21890f77b21579d5f",
 			"salt": 4245,
 			"deployer": "0x0000000000000000000000000000000000000000000000000000000000000000",
 			"constructorArtifact": "constructor_with_minter",
@@ -21,12 +21,12 @@
 				"name": "OLUN",
 				"symbol": "OLUN",
 				"decimals": 18,
-				"minter": "0x172684be7d86acff9c0e16b15e3f34647e5c8c26f0838a0872df7f61ddcb7070"
+				"minter": "0x0d27e525fcca2dbf4fd1ac3e2e586a47cd3b5b16b79f7f273c8ff23d7254354f"
 			}
 		}
 	],
 	"dripper": {
-		"address": "0x172684be7d86acff9c0e16b15e3f34647e5c8c26f0838a0872df7f61ddcb7070",
+		"address": "0x0d27e525fcca2dbf4fd1ac3e2e586a47cd3b5b16b79f7f273c8ff23d7254354f",
 		"salt": 1337,
 		"deployer": "0x0000000000000000000000000000000000000000000000000000000000000000",
 		"constructorArtifact": "constructor"

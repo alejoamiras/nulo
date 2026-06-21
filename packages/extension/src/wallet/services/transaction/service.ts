@@ -266,12 +266,11 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		switch (result) {
 			case AztecTxExecutionResult.SUCCESS:
 				return TxExecutionResult.Success
-			case AztecTxExecutionResult.APP_LOGIC_REVERTED:
+			// 5.0 collapsed the three revert variants (app-logic / teardown / both) into one
+			// REVERTED. Map it to AppLogicReverted as the catch-all "reverted" label; the Nulo
+			// enum's TeardownReverted/BothReverted are now unreachable (follow-up: collapse + UI review).
+			case AztecTxExecutionResult.REVERTED:
 				return TxExecutionResult.AppLogicReverted
-			case AztecTxExecutionResult.TEARDOWN_REVERTED:
-				return TxExecutionResult.TeardownReverted
-			case AztecTxExecutionResult.BOTH_REVERTED:
-				return TxExecutionResult.BothReverted
 			default:
 				return undefined
 		}
