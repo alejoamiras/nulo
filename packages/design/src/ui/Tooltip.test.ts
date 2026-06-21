@@ -1,10 +1,9 @@
 /**
- * Tooltip teleports its content to `#tooltip`, so observability relies on
- * the document, not the wrapper. Tests use a teleport target appended to
- * `document.body` and assert on its contents after the relevant trigger.
+ * Tooltip teleports its content to `teleportTo` (default `#tooltip`), so observability relies on the
+ * document, not the wrapper. Tests append a teleport target to `document.body` and assert its contents.
  */
+import { flushPromises, mount } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { mount, flushPromises } from "@vue/test-utils"
 import Tooltip from "./Tooltip.vue"
 
 let tooltipRoot: HTMLDivElement
@@ -16,7 +15,7 @@ const mountTooltip = (props: Record<string, unknown> = {}, slots: Record<string,
 		attachTo: document.body,
 	})
 
-describe("ui/Tooltip", () => {
+describe("Tooltip", () => {
 	beforeEach(() => {
 		tooltipRoot = document.createElement("div")
 		tooltipRoot.id = "tooltip"
@@ -30,11 +29,10 @@ describe("ui/Tooltip", () => {
 	})
 
 	test("renders the default slot (trigger) inside the wrapper", () => {
-		const w = mountTooltip()
-		expect(w.find("button").text()).toBe("trigger")
+		expect(mountTooltip().find("button").text()).toBe("trigger")
 	})
 
-	test("does not render content slot until mouse enters", () => {
+	test("does not render the content slot until mouse enters", () => {
 		mountTooltip()
 		expect(tooltipRoot.textContent).not.toContain("Tip body")
 	})
@@ -80,5 +78,20 @@ describe("ui/Tooltip", () => {
 		vi.advanceTimersByTime(300)
 		await flushPromises()
 		expect(tooltipRoot.textContent).toContain("Tip body")
+	})
+
+	test("teleportTo overrides the target root", async () => {
+		const custom = document.createElement("div")
+		custom.id = "custom-tip"
+		document.body.appendChild(custom)
+		try {
+			const w = mountTooltip({ teleportTo: "#custom-tip" })
+			await w.trigger("mouseenter")
+			await flushPromises()
+			expect(custom.textContent).toContain("Tip body")
+			expect(tooltipRoot.textContent).not.toContain("Tip body")
+		} finally {
+			custom.remove()
+		}
 	})
 })

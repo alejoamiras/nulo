@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AddressDisplay, AppButton, Spinner } from "@nulo/design"
+import { AddressDisplay, Button, Spinner } from "@nulo/design"
 import { computed } from "vue"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { TESTIDS } from "@/lib/testids"
@@ -64,13 +64,13 @@ async function onClick() {
 
 		<div v-else-if="status === 'capability-approval'" class="capability">
 			<p>Approve the bridge's permissions in your wallet - claim, exit, and balance reads on the bridge contracts.</p>
-			<AppButton @click="retryCapabilities">Approve permissions</AppButton>
+			<Button @click="retryCapabilities">Approve permissions</Button>
 		</div>
 
 		<div v-else class="connect">
-			<AppButton :loading="status === 'discovering'" :data-testid="TESTIDS.bridgeL2Connect" @click="onClick">
+			<Button :loading="status === 'discovering'" :disabled="status === 'discovering'" :data-testid="TESTIDS.bridgeL2Connect" @click="onClick">
 				{{ connectLabel }}
-			</AppButton>
+			</Button>
 			<p v-if="status === 'error' && error" class="error-hint">{{ error.message }}</p>
 		</div>
 

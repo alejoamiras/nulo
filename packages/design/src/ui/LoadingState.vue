@@ -1,4 +1,7 @@
-<script setup>
+<script setup lang="ts">
+/** Components */
+import Spinner from "./Spinner.vue"
+
 defineProps({
 	label: { type: String, required: true },
 	sub: { type: String, default: "" },

@@ -85,14 +85,19 @@ test.skipIf(!hasConfig)(
 		const firstPopup = await firstPopupP
 		await waitForExecuteContent(firstPopup)
 
-		// FIFO assertion #1: while popup #1 is still open, popup #2 must NOT
-		// exist as a target. The bug pre-fix would have either dropped the
-		// second sendTx silently (no popup ever) or raced into a duplicate
-		// popup. Allow a generous settle window — if popup #2 is going to
-		// appear early, it shows up within 2-3s of the second click landing.
-		await new Promise((r) => setTimeout(r, 3_000))
-		const executeTargetsDuringFirst = ctx.browser.targets().filter((t) => t.type() === "page" && t.url().includes("#/windows/execute"))
-		expect(executeTargetsDuringFirst.length).toBe(1)
+		// FIFO assertion #1: while popup #1 is still open + unresolved, the discovery baton
+		// keeps popup #2 from opening. Fail-fast race-detector — poll up to 3s for a 2nd
+		// execute target: a clean run stays at 1, the duplicate-popup regression (pre-fix:
+		// silent-drop or duplicate popup) trips it at once instead of after a blind 3s sleep.
+		const countExecuteTargets = () =>
+			ctx.browser.targets().filter((t) => t.type() === "page" && t.url().includes("#/windows/execute")).length
+		let executeTargetCount = countExecuteTargets()
+		const noSecondPopupDeadline = Date.now() + 3_000
+		while (executeTargetCount <= 1 && Date.now() < noSecondPopupDeadline) {
+			await new Promise((r) => setTimeout(r, 200))
+			executeTargetCount = countExecuteTargets()
+		}
+		expect(executeTargetCount).toBe(1)
 
 		// Journal-state assertion (the source of truth): BEFORE rejecting popup #1,
 		// the journal must hold both records (a single record = the pre-fix lost-tx
