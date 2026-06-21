@@ -1,7 +1,7 @@
 import type { ILogger } from "@/wallet/logger"
 import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { maybeRethrowAsRpcCancel } from "@/wallet/services/execution/rpc-cancel"
 import { ExecutionService, type FeeSettings, type AuthwitContent } from "@/wallet/services/execution/service"
 import { ProfileService } from "@/wallet/services/profile/service"
@@ -29,6 +29,13 @@ import { TxHash } from "@aztec/stdlib/tx"
 export * from "./spec"
 
 export class AuthRegistryService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()(
+		"getAuthwits",
+		"revokeAuthwits",
+		"getRegistryEnabled",
+		"setRegistryEnabled",
+		"syncRegistry",
+	)
 	public static name = AUTH_REGISTRY_SERVICE_NAME
 
 	public readonly onAuthwitAdded = new EventHandler<Authwit>()

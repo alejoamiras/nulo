@@ -1,5 +1,5 @@
 /**
- * Contract tests for BackgroundServiceClient.
+ * Contract tests for the background (popup ↔ SW Port) ServiceClient.
  *
  * Exercises:
  *  - Response correlation (resolve / reject by requestId)
@@ -8,18 +8,18 @@
  *  - Flat-string error wrapping (upgraded to Error instance)
  *  - Disconnect cleanup (pending requests reject, timers clear)
  *
- * Uses the shared harness in tests/vitest.setup.ts — `capturePortMessage`
- * grabs what the client just sent, `emitPortMessage` simulates a server
- * response without booting a real port broker.
+ * Relocated from the extension package into the package that owns the code.
+ * Uses the local `transport-harness` — `capturePortMessage` grabs what the
+ * client just sent, `emitPortMessage` simulates a server response without
+ * booting a real port broker.
  */
 
 import { describe, expect, test, vi } from "vitest"
-import { LoggerStore } from "@/wallet/logger"
-import { ConfigStore } from "@/wallet/config"
-import { RpcDisconnectedError, RpcTimeoutError, UserRejectedError, ValidationError, WalletError } from "@nulo/extension-messaging/errors"
-import { MessageType, type ResponseMessage } from "@nulo/extension-messaging/messages"
-import { capturePortMessage, emitPortMessage } from "../../../../tests/vitest.setup"
-import { ServiceClient, DEFAULT_RPC_TIMEOUT_MS } from "@nulo/extension-messaging/background"
+import type { ILogger } from "@nulo/wallet-core/logger"
+import { RpcDisconnectedError, RpcTimeoutError, UserRejectedError, ValidationError, WalletError } from "../errors"
+import { MessageType, type ResponseMessage } from "../messages"
+import { capturePortMessage, emitPortDisconnect, emitPortMessage, silentLogger } from "../testing/transport-harness"
+import { ServiceClient, DEFAULT_RPC_TIMEOUT_MS } from "./client"
 
 const SERVICE = "test-svc"
 
@@ -29,7 +29,7 @@ type TestMethods = {
 }
 
 class TestClient extends ServiceClient<TestMethods> {
-	public constructor(logger: LoggerStore, timeoutMs?: number) {
+	public constructor(logger: ILogger, timeoutMs?: number) {
 		super(SERVICE, logger, undefined, timeoutMs ? { requestTimeoutMs: timeoutMs } : undefined)
 	}
 
@@ -43,7 +43,7 @@ class TestClient extends ServiceClient<TestMethods> {
 }
 
 function newClient(timeoutMs?: number): TestClient {
-	return new TestClient(new LoggerStore(new ConfigStore()), timeoutMs)
+	return new TestClient(silentLogger, timeoutMs)
 }
 
 function responseMessage(requestId: number, result?: unknown, error?: string, errorPayload?: unknown): ResponseMessage<TestMethods> {
@@ -102,6 +102,16 @@ describe("response correlation", () => {
 		await client.connect()
 		// No in-flight requests. Spurious response should not crash.
 		expect(() => emitPortMessage(SERVICE, responseMessage(999, "stale"))).not.toThrow()
+	})
+
+	test("null / malformed inbound messages are ignored without throwing (fix b)", async () => {
+		const client = newClient()
+		await client.connect()
+		// Previously `message.type` (non-optional) deref'd null and threw.
+		expect(() => emitPortMessage(SERVICE, null)).not.toThrow()
+		expect(() => emitPortMessage(SERVICE, undefined)).not.toThrow()
+		expect(() => emitPortMessage(SERVICE, {})).not.toThrow()
+		expect(() => emitPortMessage(SERVICE, { type: MessageType.Response })).not.toThrow()
 	})
 })
 
@@ -279,7 +289,7 @@ describe("error deserialization", () => {
 	})
 })
 
-// ── Disconnect cleanup ────────────────────────────────────────────────
+// ── resultIsJson fallback (AUDIT A6) ──────────────────────────────────
 
 describe("resultIsJson fallback (AUDIT A6)", () => {
 	test("client JSON.parses the result when resultIsJson is true", async () => {
@@ -398,8 +408,8 @@ describe("port disconnect race (AUDIT A5)", () => {
 		await expect(client.echo("ping")).rejects.toBeInstanceOf(RpcDisconnectedError)
 		// The request must be evicted; otherwise a future timeout fire would
 		// double-reject or a late response would resolve a stale promise.
-		// biome-ignore lint/suspicious/noExplicitAny: probing private state to assert cleanup
-		expect(((client as any).requests as Map<number, unknown>).size).toBe(0)
+		// biome-ignore lint/suspicious/noExplicitAny: probing the correlator's pending count
+		expect((client as any).pendingCount).toBe(0)
 	})
 })
 
@@ -445,5 +455,62 @@ describe("disconnect", () => {
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+})
+
+// ── Live reconnect (SW dies while the popup is open) ───────────────────
+//
+// The port's onDisconnect handler (`this.disconnect(); this.connect()`) is the
+// production path when the MV3 service worker is recycled mid-session. e2e
+// only covers fresh-connect-after-death (a new popup); the live-reconnect
+// handler had no direct coverage. These pin: in-flight requests reject, the
+// client transparently reconnects, and a fresh request round-trips on the new
+// port.
+
+describe("port onDisconnect → reconnect", () => {
+	test("rejects in-flight requests, reconnects, and serves new requests on the fresh port", async () => {
+		const client = newClient()
+		await client.connect()
+
+		// Listener added AFTER the initial connect, so it only catches the reconnect.
+		const reconnected = vi.fn()
+		client.onConnected.add(reconnected)
+		const disconnected = vi.fn()
+		client.onDisconnected.add(disconnected)
+
+		const inflight = client.echo("inflight").catch((e: unknown) => e)
+
+		// SW dies: the Port fires onDisconnect → disconnect() rejects pending →
+		// connect() re-establishes against a fresh port.
+		emitPortDisconnect(SERVICE)
+
+		const err = await inflight
+		expect(err).toBeInstanceOf(Error)
+		expect((err as Error).message).toBe("Client disconnected")
+		expect(disconnected).toHaveBeenCalledTimes(1)
+		expect(reconnected).toHaveBeenCalledTimes(1)
+		// biome-ignore lint/suspicious/noExplicitAny: probing the correlator's pending count
+		expect((client as any).pendingCount).toBe(0)
+
+		// A request issued after the reconnect goes out on the NEW port and resolves.
+		const afterReconnect = client.echo("after")
+		const id = lastRequestId()
+		emitPortMessage(SERVICE, responseMessage(id, "ok-again"))
+		await expect(afterReconnect).resolves.toBe("ok-again")
+	})
+
+	test("repeated disconnect/reconnect cycles keep working (no leaked port state)", async () => {
+		const client = newClient()
+		await client.connect()
+
+		for (let cycle = 0; cycle < 3; cycle++) {
+			emitPortDisconnect(SERVICE)
+			const p = client.echo(`cycle-${cycle}`)
+			const id = lastRequestId()
+			emitPortMessage(SERVICE, responseMessage(id, `r-${cycle}`))
+			await expect(p).resolves.toBe(`r-${cycle}`)
+		}
+		// biome-ignore lint/suspicious/noExplicitAny: probing the correlator's pending count
+		expect((client as any).pendingCount).toBe(0)
 	})
 })

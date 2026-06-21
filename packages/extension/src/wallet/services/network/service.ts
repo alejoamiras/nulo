@@ -1,7 +1,7 @@
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { validateParams } from "@nulo/extension-messaging/zod"
 import { AztecNodeFactoryAdapter } from "@nulo/aztec-runtime/adapters"
 import type { NodeFactory } from "@nulo/aztec-runtime/ports"
@@ -132,6 +132,21 @@ function normalizeRpcUrl(raw: string): string {
 }
 
 export class NetworkService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()(
+		"getOrInitNetworks",
+		"getNetworks",
+		"getNetwork",
+		"addNetwork",
+		"renameNetwork",
+		"deleteNetwork",
+		"setActiveNetwork",
+		"getActiveNetwork",
+		"addEndpoint",
+		"updateEndpoint",
+		"deleteEndpoint",
+		"setPrimaryEndpoint",
+		"getNodeStatus",
+	)
 	public static name = NETWORK_SERVICE_NAME
 
 	public readonly onNetworkAdded = new EventHandler<Network>()
