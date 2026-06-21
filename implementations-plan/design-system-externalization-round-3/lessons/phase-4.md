@@ -57,4 +57,15 @@ Dropped the round-2 "round-1 names are aspirational" caveat (they're now genuine
   (icons, Flex layouts, Text colors incl. the P2 `dark`→tertiary/secondary, Checkbox/Toggle/Badge);
   faucet DripButton. Cannot be done autonomously; surfaced to the user.
 
+## Closeout (blueprint step 8)
+- **`/code-review max`:** NO findings. The diff was codex-pre-audited (all conditions folded) + carefully
+  implemented; split + DripButton-test re-points verified correct (equivalent-or-better, not weakened).
+- **Codex post-impl (`/codex xhigh`): ship-with-fixes, no high/critical.** Confirmed all pins (Checkbox
+  guard, Toggle color), the DripButton disable, the full `dark` removal, icons.json byte-identical, no
+  missed reconciliation among the 7 ports. **One MEDIUM (FIXED, `6ece24d`):** the no-shadow guard only
+  globbed `src/components/**` but Vite auto-registers from `src/components` AND `src/onboarding/
+  components` (`vite.config.ts:155`) — widened the guard's glob to mirror Vite's scope. LOW nits (left):
+  the DripButton variant pin via `/primary_outline/` hashed-class is adequate; `Badge` absent from
+  components.d.ts is benign (no bare `<Badge>` call sites).
+
 LESSONS_FILE=implementations-plan/design-system-externalization-round-3/lessons/phase-4.md
