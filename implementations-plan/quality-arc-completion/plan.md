@@ -2,7 +2,7 @@
 
 **STATUS: IN PROGRESS (`/goal` active, fully autonomous).** Branch `dev-quality` off dev `65961f1` (post-Q3 + aztec 5.0 + design round 2).
 
-**Arc progress:** Q12 ✓ (`6a8f673`) · Q15 ✓ (`a20f8fd`) · Q17 ✓ (`54d0b39`) · Q6 ✓ merged (squash `d519b33`, PR #131; net 27914290541 = 8/8 green after 1 canary/real-proving flake re-run; smoke+quality CI green) · **Q13 in progress (re-ordered ahead of Q8 — lightest/type-only)** · Q8/Q9/Q18 pending. **(4 of 8 done; 4 remain: Q13/Q8/Q9/Q18)**
+**Arc progress:** Q12 ✓ (`6a8f673`) · Q15 ✓ (`a20f8fd`) · Q17 ✓ (`54d0b39`) · Q6 ✓ (`d519b33`) · Q13 ✓ merged (squash `a7d0c6f`, PR #132; net 27914901918 = 8/8 green, quality+smoke green; drift-guard proven) · **Q8 in progress (last big arc; codex consult in flight)** · Q9/Q18 pending. **(5 of 8 done; 3 remain: Q8/Q9/Q18)**
 
 **Origin:** finish the remaining `/harden quality` arc (run `2026-06-11-ultra-50b45d`, `audit/quality/.../findings/verified.md`, 23 findings) on an isolated integration branch `dev-quality`. This is a META-blueprint: it sequences the arc; each finding gets its OWN `/blueprint` (light/mid) when the loop reaches it.
 
@@ -42,8 +42,8 @@
 | 2 ✓ | **Q15** lifecycle purge-cascade helper | mid | **DONE** — squash `a20f8fd`, net 27911901417 (8/8). `purgeRows` + 12 sites/8 svcs. `lessons/q15.md`. |
 | 3 ✓ | **Q17** extend `ContractResolver` | SHRUNK | **DONE** — squash `54d0b39`, net 27913404523 (8/8). Added single-contract `ensureRegistered` + migrated 4 prologue sites (token/fpc). findFunction* were already done by prior work. `lessons/q17.md`. |
 | 4 ✓ | **Q6** activity-feed extraction | codex-narrowed | **DONE** — squash `d519b33`, net 27914290541 (8/8 after 1 canary flake re-run). Shipped `useIncomingTransfers` (cross-surface composable dedup, 13 tests). **#2/#3/#4 DEFERRED** per codex 019eeb77 (low-value / hot-widget tie-break + fallback risk — see `lessons/q6.md`). |
-| 5 (next) | **Q13** PXE subset key-list + type-level `IPXE`/`PXEProxy`↔`Methods` assertions | light/mid | **Re-ordered ahead of Q8 (type-only, lowest risk).** Re-verified: IPXE=18 methods, Methods=21 (omits getNoteSchemas/getBlockTimestamp/clearChainState); 4-file manual sync, no drift test. #14: smallest-safe = canonical key-list + `keyof`-equality assertions (NOT full mapped-type derivation; `client.ts` zod can't be generated). |
-| 6 | **Q8** popup form abstractions (`useFormState.rebase()` + `FormPopup` Enter/error ownership; `useEntityCrud` adoption) | mid (big) | #18: `NewContactPopup` Enter double-fire hazard must be handled by any FormPopup-level fix. Two tracks; likely codex consult on track 1. |
+| 5 ✓ | **Q13** PXE subset key-list + type assertions | light/mid | **DONE** — squash `a7d0c6f`, net 27914901918 (8/8). Type-only `PXE_SUBSET_METHODS` + IPXE/PXEProxy↔Methods assertions; drift-guard proven (TS2344). `lessons/q13.md`. |
+| 6 (next) | **Q8** popup form abstractions | mid (big) | Track-1a `useFormState.rebase()` (mutable baseline) designed. Track-1b FormPopup Enter (#18 double-fire) + track-2 `useEntityCrud` adoption → **codex consult bethad5m4** for scope/Enter-guard. |
 | 7 | **Q9** centralize transport-side readiness in the base service + expand declared `dependencies` | mid | NOT dispatch-boundary gating (in-process callers). **Re-verify**: Q3 unified extension-messaging `ensureInitialized`→`awaitInitialized`; confirm what's left on the extension service fleet. |
 | 8 | **Q18** internal execution tuples → named result objects (step-1 intra-extension only) | mid | #3: `FpcStrategy` byte-parity-sensitive — never normalize into the family. Internal-only (both ends ship together); NOT the public RPC param-object (that's step 2, out of scope). |
 
