@@ -2,7 +2,7 @@
 
 **STATUS: IN PROGRESS (`/goal` active, fully autonomous).** Branch `dev-quality` off dev `65961f1` (post-Q3 + aztec 5.0 + design round 2).
 
-**Arc progress:** Q12 ⏳ implementing on `q12/e2e-fixture-dedup` (lint+typecheck green; smoke running; network pending) · Q15/Q17/Q6/Q8/Q13/Q9/Q18 pending.
+**Arc progress:** Q12 ✓ merged (squash `6a8f673`, PR #128 → dev-quality; network run 27911369853 = 8/8 jobs green incl. canary/real-proving) · **Q15 in progress** · Q17/Q6/Q8/Q13/Q9/Q18 pending.
 
 **Origin:** finish the remaining `/harden quality` arc (run `2026-06-11-ultra-50b45d`, `audit/quality/.../findings/verified.md`, 23 findings) on an isolated integration branch `dev-quality`. This is a META-blueprint: it sequences the arc; each finding gets its OWN `/blueprint` (light/mid) when the loop reaches it.
 
@@ -38,7 +38,7 @@
 
 | # | Finding | Tier | Key constraints (registry) / re-verify note |
 |---|---------|------|----------------------------------------------|
-| 1 | **Q12** e2e fixture dedup (`phase`, connected-playground setup, cap-grant helper, single `TEST_PASSWORD`) | light | Test-infra only, zero prod runtime. Threshold (≥3 cap-grant fixtures) now met. |
+| 1 ✓ | **Q12** e2e fixture dedup (`phase`, connected-playground setup, cap-grant helper, single `TEST_PASSWORD`) | light | **DONE** — squash `6a8f673`, net run 27911369853 (8/8 green). Test-infra only. `lessons/q12.md`. |
 | 2 | **Q15** lifecycle purge-cascade helper | mid | #10: preserve per-service emit order + lock-vs-lockless discipline; service-owned side effects. |
 | 3 | **Q17** extend `ContractResolver` (`ensureRegistered`/`findFunctionByName`/`findFunctionBySelector`) | mid | #6: frozen per-caller error strings (parameterize messages); re-verify vs aztec 5.0 pxe. |
 | 4 | **Q6** activity-feed extraction (`useIncomingTransfers`, `buildJournalAwaitingCardProps`, collapse template branches) | mid | Reuse `buildActivityRows` w/ params; don't touch the already-good shared helpers. |
