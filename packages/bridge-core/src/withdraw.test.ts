@@ -5,6 +5,9 @@ import { describe, expect, it, vi } from "vitest"
 // (erased), so a full mock of /contracts only needs waitForProven.
 vi.mock("@aztec/aztec.js/contracts", () => ({ waitForProven: vi.fn() }))
 vi.mock("@aztec/stdlib/messaging", () => ({ computeL2ToL1MembershipWitness: vi.fn() }))
+// 5.0: consumeWithdrawal constructs an OutboxContract (L1 roots reader) — mock it; getRoots is
+// only invoked inside the mocked computeL2ToL1MembershipWitness, so a bare mock suffices.
+vi.mock("@aztec/ethereum/contracts", () => ({ OutboxContract: vi.fn() }))
 
 import { waitForProven } from "@aztec/aztec.js/contracts"
 import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
@@ -22,9 +25,13 @@ const makeL1 = () => ({
 describe("flows — consumeWithdrawal (L2→L1 finalization)", () => {
 	it("waits for proof, builds the witness, consumes on L1 with the witness args", async () => {
 		vi.mocked(waitForProven).mockResolvedValue(undefined as never)
-		const node = { getTxEffect: vi.fn(async () => ({ data: { l2ToL1Msgs: ["0xMSG"] } })) }
+		const node = {
+			getTxEffect: vi.fn(async () => ({ data: { l2ToL1Msgs: ["0xMSG"] } })),
+			getNodeInfo: vi.fn(async () => ({ l1ContractAddresses: { outboxAddress: "0xOUTBOX" } })),
+		}
 		vi.mocked(computeL2ToL1MembershipWitness).mockResolvedValue({
 			epochNumber: 5,
+			numCheckpointsInEpoch: 3,
 			leafIndex: 9n,
 			siblingPath: { toBufferArray: () => [Buffer.from("aa", "hex"), Buffer.from("bb", "hex")] },
 		} as never)
@@ -39,11 +46,12 @@ describe("flows — consumeWithdrawal (L2→L1 finalization)", () => {
 			(s) => stages.push(s),
 		)
 
-		expect(vi.mocked(computeL2ToL1MembershipWitness)).toHaveBeenCalledWith(node, "0xMSG", "0xTX", 0)
+		// 5.0: OutboxRootsReader (OutboxContract) is the new 2nd arg.
+		expect(vi.mocked(computeL2ToL1MembershipWitness)).toHaveBeenCalledWith(node, expect.anything(), "0xMSG", "0xTX", 0)
 		const sim = vi.mocked(l1.pub.simulateContract).mock.calls[0][0] as unknown as { args: unknown[]; functionName: string }
 		expect(sim.functionName).toBe("withdraw")
-		// epoch coerced to bigint, leaf passed through, sibling path hex-encoded.
-		expect(sim.args).toEqual(["0xRECIP", 40n, false, 5n, 9n, ["0xaa", "0xbb"]])
+		// 5.0 withdraw args: (recipient, amount, withCaller, epoch, numCheckpointsInEpoch, leafIndex, path).
+		expect(sim.args).toEqual(["0xRECIP", 40n, false, 5n, 3n, 9n, ["0xaa", "0xbb"]])
 		expect(l1.wallet.writeContract).toHaveBeenCalledWith({ sentinel: true })
 		expect(stages).toEqual(["proving", "consuming", "done"])
 	})

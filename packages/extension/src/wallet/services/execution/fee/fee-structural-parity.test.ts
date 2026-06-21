@@ -171,4 +171,50 @@ describe("finalizeGasLimits: exact slot projection", () => {
 		const s = shape(tx)
 		expect([s.feeDa, s.feeL2]).toEqual([555n, 666n])
 	})
+
+	// A node whose CURRENT min fee differs from the committed cap — so a refetch is observable as drift.
+	const DRIFT_NODE = { getCurrentMinFees: async () => new GasFees(999n, 1_111n) } as unknown as AztecNode
+
+	test("embedded (no explicit fee): reuses the committed cap, does NOT refetch (drift fix)", async () => {
+		const tx = makeTxRequest() // committed cap = 555/666 (set by applyEmbeddedFpcGasCap upstream)
+		await finalizeGasLimits(
+			DRIFT_NODE,
+			tx,
+			makeSimulated(31_000, 32_000, 3_500, 3_600),
+			1,
+			undefined,
+			{ embeddedFeePayment: "fjwc" } as never,
+			1,
+		)
+		const s = shape(tx)
+		// Reused the committed cap (555/666) — NOT the post-sim node refetch (999/1111). The FPC budget is
+		// reasoned against exactly what gets committed.
+		expect([s.feeDa, s.feeL2]).toEqual([555n, 666n])
+	})
+
+	test("embedded WITH explicit customLimits.maxFeesPerGas: commits exactly that (predicted-worst headroom)", async () => {
+		const tx = makeTxRequest()
+		await finalizeGasLimits(
+			DRIFT_NODE,
+			tx,
+			makeSimulated(31_000, 32_000, 3_500, 3_600),
+			1,
+			undefined,
+			{
+				embeddedFeePayment: "fjwc",
+				maxFeesPerGas: { feePerDaGas: 1_500n, feePerL2Gas: 1_800n },
+			} as never,
+			1,
+		)
+		const s = shape(tx)
+		expect([s.feeDa, s.feeL2]).toEqual([1_500n, 1_800n])
+	})
+
+	test("NON-embedded (no explicit fee): still refetches node min × multiplier (general default preserved)", async () => {
+		const tx = makeTxRequest()
+		await finalizeGasLimits(DRIFT_NODE, tx, makeSimulated(31_000, 32_000, 3_500, 3_600), 1, undefined, undefined, 2)
+		const s = shape(tx)
+		// Non-embedded path is unchanged: refetch (999/1111) × 2 — proves the drift fix is embedded-gated.
+		expect([s.feeDa, s.feeL2]).toEqual([1_998n, 2_222n])
+	})
 })

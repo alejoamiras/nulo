@@ -58,7 +58,8 @@ runs:
         echo "$HOME/.aztec/versions/${AZTEC_VERSION}/bin" >> "$GITHUB_PATH"
         echo "$HOME/.aztec/versions/${AZTEC_VERSION}/node_modules/.bin" >> "$GITHUB_PATH"
 
-    # global-setup.ts probes ~/.aztec/current/bin/anvil + ~/.aztec/current/node_modules/.bin/aztec.
+    # global-setup.ts probes ~/.aztec/current/bin/aztec-anvil + ~/.aztec/current/node_modules/.bin/aztec.
+    # (5.0 renamed bundled bare binaries to aztec-* on PATH — `anvil` is now `aztec-anvil`.)
     # The install above writes to ~/.aztec/versions/<version>/ but does NOT create
     # a `current` symlink (locally, `aztec-up` would). Without this, every CI
     # network-e2e run silently skips because global-setup falls through the
@@ -70,4 +71,4 @@ runs:
         AZTEC_VERSION: ${{ steps.detect.outputs.version }}
       run: |
         ln -sfn "$HOME/.aztec/versions/${AZTEC_VERSION}" "$HOME/.aztec/current"
-        ls -la "$HOME/.aztec/current/bin/anvil" "$HOME/.aztec/current/node_modules/.bin/aztec"
+        ls -la "$HOME/.aztec/current/bin/aztec-anvil" "$HOME/.aztec/current/node_modules/.bin/aztec"

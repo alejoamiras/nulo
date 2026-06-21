@@ -1,7 +1,7 @@
 import { TxHash, TxStatus as AztecTxStatus, TxExecutionResult as AztecTxExecutionResult } from "@aztec/stdlib/tx"
 import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { AccountService, type Account } from "@/wallet/services/account/service"
 import { NetworkService } from "@/wallet/services/network/service"
@@ -28,6 +28,7 @@ import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 export * from "./spec"
 
 export class TransactionService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()("getTransactions", "getTransaction")
 	public static name = TRANSACTION_SERVICE_NAME
 
 	public readonly onTransactionAdded = new EventHandler<Tx>()
@@ -266,12 +267,11 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		switch (result) {
 			case AztecTxExecutionResult.SUCCESS:
 				return TxExecutionResult.Success
-			case AztecTxExecutionResult.APP_LOGIC_REVERTED:
+			// 5.0 collapsed the three revert variants (app-logic / teardown / both) into one
+			// REVERTED. Map it to AppLogicReverted as the catch-all "reverted" label; the Nulo
+			// enum's TeardownReverted/BothReverted are now unreachable (follow-up: collapse + UI review).
+			case AztecTxExecutionResult.REVERTED:
 				return TxExecutionResult.AppLogicReverted
-			case AztecTxExecutionResult.TEARDOWN_REVERTED:
-				return TxExecutionResult.TeardownReverted
-			case AztecTxExecutionResult.BOTH_REVERTED:
-				return TxExecutionResult.BothReverted
 			default:
 				return undefined
 		}

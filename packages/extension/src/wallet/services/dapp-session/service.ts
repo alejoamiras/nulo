@@ -1,5 +1,5 @@
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { EntityStorage } from "@/wallet/storage"
@@ -20,6 +20,20 @@ import {
 export * from "./spec"
 
 export class DappSessionService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()(
+		"getDappSessions",
+		"getDappSession",
+		"addDappSession",
+		"updateDappSession",
+		"deleteDappSession",
+		"setVerificationHash",
+		"setTrustedVerification",
+		"setAccountAliases",
+		"setCapabilityGrants",
+		"getCapabilityGrants",
+		"setCapabilityRejections",
+		"getCapabilityRejections",
+	)
 	public static name = DAPP_SESSION_SERVICE_NAME
 
 	public readonly onDappSessionAdded = new EventHandler<DappSession>()

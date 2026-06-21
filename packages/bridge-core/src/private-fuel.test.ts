@@ -13,6 +13,7 @@ import {
 	DOM_SEP__FPC_BRIDGE_SECRET,
 	PRIVATE_FPC_ADDRESS,
 	deriveBridgeSecret,
+	privateFeeJuicePayment,
 	privateFuelSecretHash,
 	privateMintAndPayFee,
 } from "./private-fuel"
@@ -100,5 +101,18 @@ describe("privateMintAndPayFee", () => {
 		// FeeJuice.claim + PrivateFPC.mint_and_pay_fee, run verbatim by the wallet's EXTERNAL path.
 		const payload = await method.getExecutionPayload()
 		expect(payload.calls).toHaveLength(2)
+	})
+})
+
+describe("privateFeeJuicePayment", () => {
+	it("pays via the FPC with a SINGLE pay_fee setup call (the manifest-scope assumption)", async () => {
+		const fpc = AztecAddress.fromString(PRIVATE_FPC_ADDRESS)
+		const method = privateFeeJuicePayment(fpc)
+		expect((await method.getFeePayer()).toString()).toBe(PRIVATE_FPC_ADDRESS)
+		// FPCFeePaymentMethod emits exactly ONE private setup call — PrivateFPC.pay_fee. The faucet
+		// manifest therefore scopes `pay_fee` alone; a Wonderland change that adds a setup call would
+		// break that scope assumption and is meant to trip here.
+		const payload = await method.getExecutionPayload()
+		expect(payload.calls).toHaveLength(1)
 	})
 })

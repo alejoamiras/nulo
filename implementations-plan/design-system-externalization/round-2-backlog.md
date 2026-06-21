@@ -1,5 +1,12 @@
 # Round-2 backlog — design-system externalization
 
+> **✓ IMPLEMENTED** in `implementations-plan/design-system-externalization-round-2/` (all 7 phases
+> green). The 9 component holdouts + the `toast`/`outside` composables are externalized; the storybook
+> rolldown build is fixed + primitive stories relocated; the orphaned faucet `public/fonts/` removed +
+> the faucet `base.css` parity guard added. Still deferred to **round 3**: the faucet toast-region
+> unification (`AppToastRegion`/faucet `useToast`), retiring the `AppButton` alias + migrating
+> `DripButton` off it, and the pre-existing visual-quirk fixes (`--gray-15`, the `dark` color name).
+
 Round 1 (this plan) externalized L0 tokens + the base/theme/font takeover + L1 core (4) + the pure L2
 subset (5) into `@nulo/design`, consumed by the extension via an `unplugin-vue-components` resolver.
 Everything below was deliberately deferred — each item has a concrete reason recorded during round 1.

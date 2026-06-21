@@ -12,6 +12,7 @@ import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { Fr } from "@aztec/aztec.js/fields"
 import type { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
+import { OutboxContract } from "@aztec/ethereum/contracts"
 import { InboxAbi } from "@aztec/l1-artifacts"
 import { type Abi, type Account, type Address, type Hex, parseEventLogs, type PublicClient, type WalletClient } from "viem"
 import { type BridgeWitness, bridgeWitnessPermitTypedData, hashRoute, type PoolKey } from "./l1"
@@ -187,7 +188,11 @@ export async function consumeWithdrawal(
 	if (!eff) throw new Error("no tx effect for exit")
 	const messageHash = eff.data.l2ToL1Msgs[0]
 	if (!messageHash) throw new Error("no L2→L1 message in exit tx")
-	const wit = await computeL2ToL1MembershipWitness(node, messageHash, exitReceipt.txHash as never, 0)
+	// 5.0: computeL2ToL1MembershipWitness needs the L1 Outbox roots reader (2nd arg) to pick the
+	// partial-proof root covering the tx's checkpoint. OutboxContract.getRoots satisfies OutboxRootsReader.
+	const { l1ContractAddresses } = await node.getNodeInfo()
+	const outbox = new OutboxContract(l1.pub as never, l1ContractAddresses.outboxAddress)
+	const wit = await computeL2ToL1MembershipWitness(node, outbox, messageHash, exitReceipt.txHash as never, 0)
 	if (!wit) throw new Error("L2→L1 witness not available")
 	const path = wit.siblingPath.toBufferArray().map((b: Buffer) => `0x${b.toString("hex")}` as `0x${string}`)
 	onStage?.("consuming")
@@ -195,7 +200,9 @@ export async function consumeWithdrawal(
 		address: p.portal,
 		abi: p.portalAbi,
 		functionName: "withdraw",
-		args: [p.recipientL1, p.amount, false, BigInt(wit.epochNumber), wit.leafIndex, path] as never,
+		// 5.0 portal `withdraw` args: (recipient, amount, withCaller, epoch, numCheckpointsInEpoch, leafIndex, path).
+		// numCheckpointsInEpoch is new (sits BEFORE leafIndex) — the witness now carries it.
+		args: [p.recipientL1, p.amount, false, BigInt(wit.epochNumber), BigInt(wit.numCheckpointsInEpoch), wit.leafIndex, path] as never,
 		account: l1.account,
 	})
 	await l1.pub.waitForTransactionReceipt({ hash: await l1.wallet.writeContract(req.request as never) })

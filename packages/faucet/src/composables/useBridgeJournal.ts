@@ -111,6 +111,11 @@ export interface JournalEngineDeps {
 	verifyConsumeIdentity?: (rec: WithdrawJournalRecord, txHash: string) => Promise<boolean>
 	/** Current Aztec block height (latest, not proven) - drives the sync countdown. */
 	l2BlockNumber?: () => Promise<number>
+	/** 5.0 L1→L2 readiness for a real inbox message key: its checkpoint + the node anchor's current
+	 *  checkpoint, or null if the message hasn't folded into the L2 tree yet. The claim is consumable
+	 *  only once anchor >= checkpoint (else the claim-simulate throws "No L1 to L2 message found").
+	 *  Absent dep / record without a messageHash ⇒ the engine falls back to simulate-only polling. */
+	messageReadiness?: (messageHash: string) => Promise<{ checkpoint: number; anchor: number } | null>
 	/** Injectable wait (tests pass a no-op; production uses real timers). */
 	waitMs?: (ms: number) => Promise<void>
 }
@@ -575,6 +580,38 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 				setStep(id, "syncing", `${left} ${left === 1 ? "block" : "blocks"} until your funds arrive`)
 				await wait(6000)
 				i++
+			}
+		}
+
+		// 5.0 checkpoint gate — the consumability AUTHORITY for records that captured the real inbox
+		// message key(s). An L1→L2 message is claimable only once the node anchor's checkpoint >= the
+		// message's checkpoint (the claim builds its membership witness against the anchor; before that
+		// the claim-simulate throws "No L1 to L2 message found"). We poll the REAL keys the inbox emitted
+		// — the token claim AND, for a fueled deposit, the FJ message that pays for it. Legacy records
+		// with no messageHash fall through to the simulate-only loop below.
+		const gateHashes = [fresh.messageHash, fresh.fuel?.messageHash].filter((h): h is string => !!h)
+		if (!preGated && deps.messageReadiness && gateHashes.length > 0) {
+			for (let g = 0; g < 300; g++) {
+				let blocked: { checkpoint: number; anchor: number } | "unfolded" | null = null
+				for (const h of gateHashes) {
+					const st = await deps.messageReadiness(h).catch(() => null)
+					if (st === null) {
+						blocked = "unfolded"
+						break
+					}
+					if (st.anchor < st.checkpoint) {
+						blocked = st
+						break
+					}
+				}
+				if (blocked === null) break
+				counted = true
+				if (blocked === "unfolded") setStep(id, "syncing", "waiting for the message to reach the L2")
+				else {
+					const left = Math.max(blocked.checkpoint - blocked.anchor, 0)
+					setStep(id, "syncing", `${left} ${left === 1 ? "checkpoint" : "checkpoints"} until your funds arrive`)
+				}
+				await wait(6000)
 			}
 		}
 

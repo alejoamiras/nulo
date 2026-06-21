@@ -1,119 +1,74 @@
 /**
- * Component test for `Button.vue`.
- *
- * Pattern reference for L2 primitive tests:
- *   - Colocated next to the SFC.
- *   - jsdom env (configured in `vitest.config.ts`).
- *   - `@vue/test-utils` `mount` + global stubs for auto-registered children
- *     (`Spinner`, `Icon`, `RouterLink` — these aren't auto-resolved in tests
- *     because `unplugin-vue-components` is a Vite plugin, not a vitest one).
- *
- * Conventions enforced here (see `CLAUDE.md`):
- *   - ≥5 cases for L2 primitives.
- *   - Test prop reactivity, event emission, slot rendering, edge cases.
- *   - No reach-into private internals; assert on rendered DOM + emitted events.
+ * Shell-integration coverage for the extension's <Button> wrapper. The full variant/size/loading/icon
+ * matrix lives in @nulo/design's Button.test.ts (the base); here we assert the wrapper renders the
+ * base, forwards props, and preserves the legacy `link` prop via RouterLink (custom) → base anchor.
  */
-import { describe, expect, test } from "vitest"
 import { mount } from "@vue/test-utils"
+import { describe, expect, test, vi } from "vitest"
 import Button from "./Button.vue"
 
+// The wrapper renders the REAL @nulo/design ButtonBase; only the base's Spinner/Icon + RouterLink are
+// stubbed. RouterLink is stubbed in `custom` mode (renders only the slot, providing href + navigate).
 const STUBS = {
 	Spinner: { template: '<span data-testid="stub-spinner" />' },
 	Icon: { template: '<span data-testid="stub-icon" />' },
-	RouterLink: { template: "<a><slot /></a>", props: ["to"] },
+	RouterLink: { props: ["to", "custom"], template: '<slot :href="to" :navigate="() => {}" />' },
 }
 
 const mountButton = (props: Record<string, unknown> = {}, slots: Record<string, string> = {}) =>
 	mount(Button, { props, slots, global: { stubs: STUBS } })
 
-describe("ui/Button", () => {
-	test("renders default slot content inside a <button>", () => {
+describe("ui/Button (wrapper → @nulo/design ButtonBase)", () => {
+	test("renders a <button> with the slot when no link is set", () => {
 		const w = mountButton({}, { default: "Click me" })
 		expect(w.element.tagName).toBe("BUTTON")
 		expect(w.text()).toBe("Click me")
 	})
 
-	test("emits click when not disabled", async () => {
-		const w = mountButton({}, { default: "Go" })
-		await w.trigger("click")
-		expect(w.emitted("click")).toHaveLength(1)
-	})
-
-	test("disabled prop sets the native disabled attribute", () => {
-		const w = mountButton({ disabled: true }, { default: "X" })
-		expect(w.attributes("disabled")).toBeDefined()
-		// tabindex=-1 keeps disabled buttons out of the keyboard cycle
-		expect(w.attributes("tabindex")).toBe("-1")
-	})
-
-	test("loading prop renders a Spinner inside the button", () => {
-		const w = mountButton({ loading: true }, { default: "Saving" })
+	test("forwards variant + loading through to the base", () => {
+		const w = mountButton({ variant: "secondary", loading: true }, { default: "Go" })
+		expect(w.attributes("class") ?? "").toMatch(/secondary/)
 		expect(w.find('[data-testid="stub-spinner"]').exists()).toBe(true)
 	})
 
-	test("leftIcon + rightIcon props render Icon stubs flanking the slot", () => {
+	test("forwards leftIcon + rightIcon through to the base", () => {
 		const w = mountButton({ leftIcon: "arrow-left", rightIcon: "arrow-right" }, { default: "Continue" })
 		expect(w.findAll('[data-testid="stub-icon"]')).toHaveLength(2)
 	})
 
-	test("link prop renders a non-button element (RouterLink swap)", () => {
-		// Full RouterLink resolution requires installing vue-router with a
-		// real route config — overkill for a unit test. We assert on the
-		// observable contract: when `link` is set, the root is no longer
-		// a native <button>. RouterLink rendering correctness is covered
-		// by e2e (every navigation in the app exercises this path).
+	test("link prop renders a non-button element (RouterLink branch, not the plain <button>)", () => {
+		// Observable contract: with `link` set, the root is no longer a native <button> (it goes through
+		// RouterLink). Full RouterLink/SPA correctness is covered by e2e; the base's tag="a" anchor +
+		// rel hygiene is asserted in @nulo/design's Button.test.ts.
 		const w = mountButton({ link: "/popup/general" }, { default: "Home" })
 		expect(w.element.tagName).not.toBe("BUTTON")
 	})
 
-	test("size prop applies the matching size CSS module class", () => {
-		// CSS modules in jsdom resolve to plain class names (no hash by default
-		// when running through @vitejs/plugin-vue test compile). The wrapper
-		// element should carry a class containing the size keyword.
-		const w = mountButton({ size: "large" }, { default: "Big" })
-		const cls = w.attributes("class") ?? ""
-		expect(cls).toMatch(/large/)
+	// Attribute fallthrough must reach the real element in BOTH branches. The wrapper is a v-if/v-else
+	// template; the `link` branch renders RouterLink in `custom` mode (slot-only fragment root), which
+	// without inheritAttrs:false + v-bind="$attrs" silently DROPS undeclared attrs like data-testid onto
+	// the fragment (Vue warns) — breaking e2e selectors that the pre-round-2 single-root contract carried
+	// onto the <a>. These pin the seam so a regression can't slip past unit gates again.
+	test("non-link: data-testid + @click + :style fall through to the <button> root", async () => {
+		const onClick = vi.fn()
+		const w = mount(Button, {
+			attrs: { "data-testid": "btn-x", onClick, style: "width: 50%;" },
+			slots: { default: "Go" },
+			global: { stubs: STUBS },
+		})
+		expect(w.get("button").attributes("data-testid")).toBe("btn-x")
+		expect(w.get("button").attributes("style") ?? "").toContain("width: 50%")
+		await w.get("button").trigger("click")
+		expect(onClick).toHaveBeenCalledTimes(1)
 	})
 
-	test("variant prop applies the matching variant CSS module class", () => {
-		const w = mountButton({ variant: "secondary" }, { default: "Less prominent" })
-		const cls = w.attributes("class") ?? ""
-		expect(cls).toMatch(/secondary/)
-	})
-
-	test("variant=cta applies the cta class (full-width brutalist primary)", () => {
-		const w = mountButton({ variant: "cta" }, { default: "Continue" })
-		const cls = w.attributes("class") ?? ""
-		expect(cls).toMatch(/cta/)
-	})
-
-	test("variant=cta_outline applies the cta_outline class (outlined CTA)", () => {
-		const w = mountButton({ variant: "cta_outline" }, { default: "Cancel" })
-		const cls = w.attributes("class") ?? ""
-		expect(cls).toMatch(/cta_outline/)
-	})
-
-	test("variant=cta_destructive applies the destructive cta class", () => {
-		const w = mountButton({ variant: "cta_destructive" }, { default: "Delete" })
-		const cls = w.attributes("class") ?? ""
-		expect(cls).toMatch(/cta_destructive/)
-	})
-
-	test("variant=ghost applies the ghost class (renamed from tertiary)", () => {
-		const w = mountButton({ variant: "ghost" }, { default: "Skip" })
-		const cls = w.attributes("class") ?? ""
-		expect(cls).toMatch(/ghost/)
-	})
-
-	test("wide prop applies the wide modifier class", () => {
-		const w = mountButton({ wide: true }, { default: "Full" })
-		const cls = w.attributes("class") ?? ""
-		expect(cls).toMatch(/wide/)
-	})
-
-	test("loading prop applies the loading modifier class", () => {
-		const w = mountButton({ loading: true }, { default: "Saving" })
-		const cls = w.attributes("class") ?? ""
-		expect(cls).toMatch(/loading/)
+	test("link: data-testid falls through to the anchor root (not dropped by the custom RouterLink)", () => {
+		const w = mount(Button, {
+			props: { link: "/popup/general" },
+			attrs: { "data-testid": "link-x" },
+			slots: { default: "Home" },
+			global: { stubs: STUBS },
+		})
+		expect(w.get("a").attributes("data-testid")).toBe("link-x")
 	})
 })

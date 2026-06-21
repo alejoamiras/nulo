@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
 /** Services */
-import { AppButton } from "@nulo/design"
+import { Button } from "@nulo/design"
 import { computed } from "vue"
 
 /** Composables */
@@ -32,14 +32,14 @@ const status = computed(() => {
 			</p>
 		</header>
 
-		<AppButton
+		<Button
 			:loading="usdc.minting.value"
 			:disabled="!l1.isConnected.value || usdc.minting.value"
 			:data-testid="TESTIDS.mintL1"
 			@click="usdc.mint"
 		>
 			{{ l1.isConnected.value ? `MINT 100 ${BRIDGE_TOKEN_SYMBOL} ON SEPOLIA` : "CONNECT YOUR ETHEREUM WALLET" }}
-		</AppButton>
+		</Button>
 
 		<p v-if="status" class="status" :data-testid="TESTIDS.mintL1Status">{{ status }}</p>
 	</section>

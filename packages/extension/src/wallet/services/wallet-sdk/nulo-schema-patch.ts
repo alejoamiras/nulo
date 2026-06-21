@@ -22,49 +22,62 @@
  * importing this file before any wallet-sdk code constructs a wallet) makes
  * the patched method routable.
  *
+ * ## zod v4 entry shape (5.0)
+ *
+ * Upstream emits `WalletSchema` entries as `z.function({ input: z.tuple([...]),
+ * output })` (plain `ZodFunction`); the proxy routes via `schema.def.input` /
+ * `schema.def.output` (no `.parameters()`/`.returnType()` anymore). The patch
+ * mirrors that exact shape so our custom methods route identically.
+ *
  * ## Signature-drift guard
  *
- * If a future upstream `@aztec/wallet-sdk` ships its own `registerToken`, we
- * throw at SW init rather than silently no-op. The pinned upstream version is
- * `@aztec/wallet-sdk == 4.2.0`; revisit on bump.
+ * If a future upstream `@aztec/wallet-sdk` ships its own `registerToken` (etc.),
+ * we throw at SW init rather than silently no-op. The guard checks arg types +
+ * output type (not just arity), so a same-arity-but-different-shape upstream
+ * method is caught. Pinned upstream version: `@aztec/wallet-sdk == 5.0.0-rc.1`;
+ * revisit on bump.
  */
 
 import { WalletSchema } from "@aztec/aztec.js/wallet"
 import { schemas } from "@aztec/stdlib/schemas"
 import { z } from "zod"
 
-const PATCHED_SCHEMA = z.function().args(schemas.AztecAddress, schemas.AztecAddress).returns(z.void())
+const PATCHED_SCHEMA = z.function({ input: z.tuple([schemas.AztecAddress, schemas.AztecAddress]), output: z.void() })
 
 if ("registerToken" in WalletSchema) {
 	// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entries are upstream-typed but the per-key shape is internal to @aztec/aztec.js.
 	const existing = (WalletSchema as any).registerToken
 	if (existing !== PATCHED_SCHEMA) {
-		const existingParamCount = existing?.parameters?.()?.items?.length
-		if (existingParamCount !== 2) {
+		const items = existing?.def?.input?.def?.items
+		if (
+			items?.length !== 2 ||
+			items[0] !== schemas.AztecAddress ||
+			items[1] !== schemas.AztecAddress ||
+			existing?.def?.output?.def?.type !== "void"
+		) {
 			throw new Error(
 				`Nulo schema-patch: upstream WalletSchema.registerToken signature changed ` +
-					`(expected 2 params, found ${existingParamCount}). Update the patch or ` +
+					`(expected (AztecAddress, AztecAddress) => void). Update the patch or ` +
 					`remove it if upstream now provides registerToken natively.`,
 			)
 		}
-		// Upstream shape matches the patch shape — leave the upstream entry as-is.
 	}
 } else {
 	// biome-ignore lint/suspicious/noExplicitAny: see above
 	;(WalletSchema as any).registerToken = PATCHED_SCHEMA
 }
 
-const REGISTERED_QUERY_SCHEMA = z.function().args(schemas.AztecAddress).returns(z.boolean())
+const REGISTERED_QUERY_SCHEMA = z.function({ input: z.tuple([schemas.AztecAddress]), output: z.boolean() })
 
 if ("isTokenRegistered" in WalletSchema) {
 	// biome-ignore lint/suspicious/noExplicitAny: see above
 	const existing = (WalletSchema as any).isTokenRegistered
 	if (existing !== REGISTERED_QUERY_SCHEMA) {
-		const existingParamCount = existing?.parameters?.()?.items?.length
-		if (existingParamCount !== 1) {
+		const items = existing?.def?.input?.def?.items
+		if (items?.length !== 1 || items[0] !== schemas.AztecAddress || existing?.def?.output?.def?.type !== "boolean") {
 			throw new Error(
 				`Nulo schema-patch: upstream WalletSchema.isTokenRegistered signature changed ` +
-					`(expected 1 param, found ${existingParamCount}). Update the patch or ` +
+					`(expected (AztecAddress) => boolean). Update the patch or ` +
 					`remove it if upstream now provides isTokenRegistered natively.`,
 			)
 		}
@@ -80,17 +93,22 @@ const GRANT_CONTENT_SCHEMA = z.object({
 	method: z.string(),
 	args: z.array(z.unknown()),
 })
-const GRANT_AUTHWIT_SCHEMA = z.function().args(schemas.AztecAddress, GRANT_CONTENT_SCHEMA).returns(z.string())
+const GRANT_AUTHWIT_SCHEMA = z.function({ input: z.tuple([schemas.AztecAddress, GRANT_CONTENT_SCHEMA]), output: z.string() })
 
 if ("grantPublicAuthwit" in WalletSchema) {
 	// biome-ignore lint/suspicious/noExplicitAny: see above
 	const existing = (WalletSchema as any).grantPublicAuthwit
 	if (existing !== GRANT_AUTHWIT_SCHEMA) {
-		const existingParamCount = existing?.parameters?.()?.items?.length
-		if (existingParamCount !== 2) {
+		const items = existing?.def?.input?.def?.items
+		if (
+			items?.length !== 2 ||
+			items[0] !== schemas.AztecAddress ||
+			items[1]?.def?.type !== "object" ||
+			existing?.def?.output?.def?.type !== "string"
+		) {
 			throw new Error(
 				`Nulo schema-patch: upstream WalletSchema.grantPublicAuthwit signature changed ` +
-					`(expected 2 params, found ${existingParamCount}). Update the patch or ` +
+					`(expected (AztecAddress, content) => string). Update the patch or ` +
 					`remove it if upstream now provides grantPublicAuthwit natively.`,
 			)
 		}

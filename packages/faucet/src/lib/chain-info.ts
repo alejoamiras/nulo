@@ -20,10 +20,10 @@ import { Fr } from "@aztec/aztec.js/fields"
  *
  * Values mirror the wallet's `DEFAULT_SEEDS` testnet entry:
  *   L1 chain ID: 11155111 (Sepolia)
- *   Rollup version: 4127419662 (alpha-testnet)
+ *   Rollup version: 4239416255 (V5 testnet)
  */
 const TESTNET_CHAIN_ID = "11155111"
-const TESTNET_ROLLUP_VERSION = "4127419662"
+const TESTNET_ROLLUP_VERSION = "4239416255"
 
 export function readChainInfo(url: URL = new URL(window.location.href)): ChainInfo {
 	const queryChainId = url.searchParams.get("chainId")

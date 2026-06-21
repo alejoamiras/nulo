@@ -51,7 +51,7 @@ const TOKEN_SYMBOL = "AZLO"
 const TOKEN_DECIMALS = 18
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
-const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://rpc.testnet.aztec-labs.com"
+const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}` | undefined
 const MNEMONIC = process.env.MNEMONIC
 if (!PRIVATE_KEY && !MNEMONIC) throw new Error("PRIVATE_KEY or MNEMONIC required (packages/bridge-core/.env)")
@@ -182,7 +182,11 @@ async function main() {
 	} catch {}
 	const fee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
 	const opts = { from, fee }
-	const sendOpts = { ...opts, wait: { waitForStatus: TxStatus.PROPOSED } }
+	// V5 finalization ladder is PROPOSED → CHECKPOINTED → PROVEN → FINALIZED. A merely-PROPOSED
+	// contract is not yet served for public simulation, so a dependent step (the proxy wiring below, or
+	// a later deploy referencing an earlier one) sees "Contract not deployed". Wait for CHECKPOINTED —
+	// the first state the node publicly simulates against. PROPOSED sufficed on V4 (no checkpoint stage).
+	const sendOpts = { ...opts, wait: { waitForStatus: TxStatus.CHECKPOINTED } }
 
 	if (!(await node.getContract(from))) {
 		console.log(`deploying L2 account (real proof, ~minutes)… (${mins()})`)
@@ -220,11 +224,17 @@ async function main() {
 			// send - that is the durable recovery key (DeploySentTx exposes no pre-wait txHash accessor;
 			// `.send({ wait })` is the proven inclusion path, mirroring deposit-testnet.ts).
 			appendJournal(JOURNAL_PATH, { phase: "submitted", step, address: instance.address.toString() })
-			await Contract.deploy(ewallet as never, art as never, args as never, ctor).send({
-				...opts,
-				contractAddressSalt: salt,
+			// 5.0: salt + universalDeploy are construction-time DeployInstantiationOptions (the deployer is
+			// locked at construction), NOT send options. Passing them to .send() is silently ignored, so the
+			// deploy lands at the wallet-as-deployer / default-salt address — DIFFERENT from the deployer=ZERO
+			// instance computed above — and the wiring + read-backs then target a never-deployed address.
+			// Mirrors the faucet deploy (faucet/scripts/deploy.ts), which gets this right on V5.
+			await Contract.deploy(ewallet as never, art as never, args as never, ctor, {
+				salt,
 				universalDeploy: true,
-				wait: { waitForStatus: TxStatus.PROPOSED },
+			} as never).send({
+				...opts,
+				wait: { waitForStatus: TxStatus.CHECKPOINTED },
 			} as never)
 			appendJournal(JOURNAL_PATH, { phase: "confirmed", step, address: instance.address.toString() })
 		}

@@ -20,7 +20,7 @@
 		"@nulo/wallet-core": "workspace:*"
 	},
 	"peerDependencies": {
-		"zod": "^3.23.8"
+		"zod": "^4"
 	},
 	"peerDependenciesMeta": {
 		"zod": {
@@ -33,6 +33,6 @@
 		"jsdom": "^29.1.1",
 		"typescript": "^6.0.3",
 		"vitest": "^4.1.5",
-		"zod": "^3.23.8"
+		"zod": "^4"
 	}
 }

@@ -11,7 +11,7 @@
  * (`private-fuel.test.ts`) pins both against fixed vectors so an `@aztec` crypto change
  * can never silently strand funds.
  */
-import { PrivateMintAndPayFeePaymentMethod } from "@wonderland/aztec-fee-payment/fee-payment-methods"
+import { FPCFeePaymentMethod, PrivateMintAndPayFeePaymentMethod } from "@wonderland/aztec-fee-payment/fee-payment-methods"
 import { poseidon2HashWithSeparator } from "@aztec/foundation/crypto/sync"
 import type { Fr } from "@aztec/aztec.js/fields"
 import type { AztecAddress } from "@aztec/aztec.js/addresses"
@@ -37,10 +37,10 @@ export const DOM_SEP__FPC_BRIDGE_SECRET = 3952304070
  * fail-closed — the runtime can never deposit to a silently-drifted address.
  *
  * INVARIANT: never deposit private Fee Juice to any address other than this for the pinned version.
- * The address is `@aztec`-version + bytecode specific; see `lessons/phase-0.md` for the version-pin
- * reconciliation (the testnet ran nodeVersion 4.3.1 at pin time vs this 4.2.0 artifact — Ask 1).
+ * The address is `@aztec`-version + bytecode specific. Re-derived from the
+ * `@wonderland/aztec-fee-payment` prerelease-fb6f196 (5.0.0-rc.1) artifact via the test tripwire.
  */
-export const PRIVATE_FPC_ADDRESS = "0x1b1706cc0947eca1de6527562af65d43e95540f9009a896dcd847afea92ede1e"
+export const PRIVATE_FPC_ADDRESS = "0x1fa8746eff0ce58d72d4d60ecc22ed6ebbd99247178e679dc9c8fee3f44c5c4c"
 
 /**
  * The bridge secret a private-fuel L1 deposit binds to: `poseidon2([salt, claimer], DOM_SEP)`.
@@ -69,3 +69,17 @@ export const privateMintAndPayFee = (
 	salt: Fr,
 	leafIndex: Fr,
 ): PrivateMintAndPayFeePaymentMethod => new PrivateMintAndPayFeePaymentMethod(fpc, amount, secret, salt, leafIndex)
+
+/**
+ * Pay a tx's gas from an EXISTING private Fee Juice balance already held at the PrivateFPC — the
+ * "spend the gas you earned" path. Wonderland's `FPCFeePaymentMethod` emits one private `pay_fee`
+ * setup call with `getFeePayer()` = the FPC, so the extension routes it through the embedded path
+ * exactly like {@link privateMintAndPayFee}. Use this (not `privateMintAndPayFee`) when there is no
+ * fresh L1→L2 Fee-Juice claim to consume — e.g. a no-fuel bridge claim funded by the remainder a
+ * prior private fuel claim credited to the user's FPC balance.
+ *
+ * INVARIANT (no refund): `FPCFeePaymentMethod` deducts the FULL `max_gas_cost`
+ * (`gasLimits·maxFeesPerGas`) and does NOT refund the unused portion. Commit a tight, inclusion-safe
+ * `maxFeesPerGas` and gate on `maxGasCostFor` against the same gas settings, or the caller overpays.
+ */
+export const privateFeeJuicePayment = (fpc: AztecAddress): FPCFeePaymentMethod => new FPCFeePaymentMethod(fpc)

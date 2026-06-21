@@ -10,6 +10,7 @@ import { TokenPortalAbi } from "@aztec/l1-artifacts"
 import { type WithdrawJournalRecord, makeProvisionalWithdrawId } from "@nulo/bridge-core"
 import { tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
+import { OutboxContract } from "@aztec/ethereum/contracts"
 import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
 import { decodeFunctionData } from "viem"
 import { sepolia } from "viem/chains"
@@ -36,7 +37,7 @@ import { useL1Wallet } from "./useL1Wallet"
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
 const log = (...args: unknown[]) => console.log("[bridge:withdraw]", ...args)
 
-const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://rpc.testnet.aztec-labs.com"
+const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 const PROVEN_TIMEOUT_SEC = 1800
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -57,7 +58,10 @@ function wireWithdrawDeps(): void {
 		if (!eff) throw new Error("no tx effect for the exit")
 		const messageHash = eff.data.l2ToL1Msgs[0]
 		if (!messageHash) throw new Error("no L2→L1 message in the exit tx")
-		const wit = await computeL2ToL1MembershipWitness(node as never, messageHash, txHash as never, 0)
+		// 5.0: pass the L1 Outbox roots reader (OutboxContract) as the new 2nd arg.
+		const { l1ContractAddresses } = await node.getNodeInfo()
+		const outbox = new OutboxContract(l1.publicClient as never, l1ContractAddresses.outboxAddress)
+		const wit = await computeL2ToL1MembershipWitness(node as never, outbox, messageHash, txHash as never, 0)
 		if (!wit) throw new Error("L2→L1 witness not available")
 		return wit
 	}
@@ -81,7 +85,7 @@ function wireWithdrawDeps(): void {
 			onProgress({ targetBlock: Number(receipt.blockNumber) })
 
 			const pollTimer = setInterval(() => {
-				node.getProvenBlockNumber()
+				node.getBlockNumber("proven")
 					.then((n) => onProgress({ provenBlock: Number(n) }))
 					.catch(() => {})
 			}, 5000)
@@ -99,7 +103,18 @@ function wireWithdrawDeps(): void {
 				address: L1_PORTAL,
 				abi: TokenPortalAbi,
 				functionName: "withdraw",
-				args: [rec.recipientL1 as `0x${string}`, BigInt(rec.amount), false, BigInt(wit.epochNumber), wit.leafIndex, path] as never,
+				// 5.0 portal `withdraw` is 7-arg: (recipient, amount, withCaller, epoch,
+				// numCheckpointsInEpoch, leafIndex, path). The decode path at L131 was updated but this
+				// encode was missed — omitting numCheckpointsInEpoch mis-encodes + reverts on finalize.
+				args: [
+					rec.recipientL1 as `0x${string}`,
+					BigInt(rec.amount),
+					false,
+					BigInt(wit.epochNumber),
+					BigInt(wit.numCheckpointsInEpoch),
+					wit.leafIndex,
+					path,
+				] as never,
 				account: l1addr,
 			})
 			const hash = await runOnLane("l1", () =>
@@ -122,7 +137,17 @@ function wireWithdrawDeps(): void {
 				if (!tx || tx.to?.toLowerCase() !== L1_PORTAL.toLowerCase()) return false
 				const decoded = decodeFunctionData({ abi: TokenPortalAbi, data: tx.input })
 				if (decoded.functionName !== "withdraw") return false
-				const [recipient, amount, , epoch, leafIndex] = decoded.args as readonly [string, bigint, boolean, bigint, bigint, unknown]
+				// 5.0 withdraw args: (recipient, amount, withCaller, epoch, numCheckpointsInEpoch, leafIndex, path).
+				// leafIndex moved to position 5 (numCheckpointsInEpoch was inserted at 4).
+				const [recipient, amount, , epoch, , leafIndex] = decoded.args as readonly [
+					string,
+					bigint,
+					boolean,
+					bigint,
+					bigint,
+					bigint,
+					unknown,
+				]
 				if (recipient.toLowerCase() !== rec.recipientL1.toLowerCase() || amount !== BigInt(rec.amount)) return false
 				// Bind to THIS exit, not just same-recipient-same-amount: the witness recomputed from the
 				// record's exitTxHash must match the tx's epoch + leafIndex.

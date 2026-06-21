@@ -21,13 +21,13 @@ import { fileURLToPath } from "node:url"
 import { keccak256 } from "viem"
 
 /** keccak256 of upstream/NuloTokenPortal.sol (the reviewed fork source). */
-export const FORKED_PORTAL_KECCAK = "0x60de7c44d3ef606778e85ad41979f5675ddbe8cc461c049d451d05c09efc673b"
+export const FORKED_PORTAL_KECCAK = "0x36f5678622ae2250ec749afe4699690c40a567180a943be3636ab7cec781a3c0"
 
 /** Creation/runtime code hashes + solc version of the reviewed fork build. */
 export const PORTAL_PIN = {
 	solc: "0.8.30",
-	initCodeHash: "0x1fa7f11e7068259979c66ac7868cabc32887a89bb2a7677f2c12973d35b9de2e",
-	runtimeCodeHash: "0xe10a45ac6cf13426bf6db3c01757b51e2384de10e66912c5450695de0d15b06f",
+	initCodeHash: "0xca81e8f30728b76508c3bcaea82c7d455831a831818dea7bd15a5ab30f6caed8",
+	runtimeCodeHash: "0xcaff5f62114d1f4829a5ac9c74f582e77e1ee298191aecc5cf3d27fde7febf4c",
 } as const
 
 const here = dirname(fileURLToPath(import.meta.url))

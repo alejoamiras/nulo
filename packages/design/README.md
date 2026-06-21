@@ -42,6 +42,26 @@ extension keeps `<Tag>` templates working by mapping `@nulo/design` component na
 Import the global stylesheet once at app entry: `import "@nulo/design/base.css"`. Fonts are
 package-owned (round-1 Phase 2).
 
+## Host-DOM contract (teleport roots + `--base-width`)
+
+Some primitives teleport into host-provided roots and read a host CSS var. The consuming app MUST
+declare these (the extension declares all of them in its `popup`/`onboarding` app shells):
+
+- **`Tooltip`** → teleports to the `teleportTo` prop (default `#tooltip`) and clamps its text to
+  `calc(var(--base-width) - 40px)`, so the host must also define a `--base-width` CSS var.
+- **`Popover`** → teleports to `teleportTo` (default `#popover`).
+- **`ToastManagerBase`** → teleports to `teleportTo` (default `#toast`).
+
+A missing root means the teleported content silently fails to mount (it is NOT a no-op fallback).
+`teleportTo` is developer config — never bind it to user/chain data.
+
+## Composables
+
+`@nulo/design/composables/*` (explicit-import, no auto-import): `useToast`/`TOAST_DURATION`
+(transient single-toast singleton driving `ToastManagerBase`) and `useOutside`/`useEvent`
+(outside-press detection used by `Popover`). The extension re-exports both from its local
+`composables/{toast,outside}.js` shims so its existing auto-import call sites are untouched.
+
 ## Scripts
 
 - `bun run gen:tokens` — regenerate `src/tokens.ts` from the contract.
@@ -50,4 +70,4 @@ package-owned (round-1 Phase 2).
 
 ## Exports
 
-`.` (barrel) · `./tokens` · `./base.css` · `./core/*` · `./ui/*` · `./composite/*`.
+`.` (barrel) · `./tokens` · `./base.css` · `./core/*` · `./ui/*` · `./composite/*` · `./composables/*`.
