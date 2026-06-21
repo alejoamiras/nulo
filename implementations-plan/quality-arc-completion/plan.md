@@ -2,7 +2,7 @@
 
 **STATUS: IN PROGRESS (`/goal` active, fully autonomous).** Branch `dev-quality` off dev `65961f1` (post-Q3 + aztec 5.0 + design round 2).
 
-**Arc progress:** Q12 ✓ (`6a8f673`) · Q15 ✓ (`a20f8fd`) · Q17 ✓ merged (squash `54d0b39`, PR #130; net 27913404523 = 8/8 green, smoke+quality CI green) · **Q6 in progress** · Q8/Q13/Q9/Q18 pending. **(4 of 8 done)**
+**Arc progress:** Q12 ✓ (`6a8f673`) · Q15 ✓ (`a20f8fd`) · Q17 ✓ merged (squash `54d0b39`, PR #130; net 27913404523 = 8/8 green, smoke+quality CI green) · **Q6 in progress** · Q8/Q13/Q9/Q18 pending. **(3 of 8 done; 5 remain: Q6/Q8/Q13/Q9/Q18)**
 
 **Origin:** finish the remaining `/harden quality` arc (run `2026-06-11-ultra-50b45d`, `audit/quality/.../findings/verified.md`, 23 findings) on an isolated integration branch `dev-quality`. This is a META-blueprint: it sequences the arc; each finding gets its OWN `/blueprint` (light/mid) when the loop reaches it.
 
