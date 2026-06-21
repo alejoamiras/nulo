@@ -1,8 +1,9 @@
 # Design-system externalization — ROUND 3 (close-out cleanups)
 
-**Status:** APPROVED 2026-06-21 — `/blueprint light`; codex `conditional approve` (conditions folded);
-both gate decisions resolved (`dark`→split: `tertiary` dots / `secondary` metadata; P4 keep-with-rigor).
-Implementing.
+**Status:** ✓ COMPLETE 2026-06-21 — all 4 phases ✓; codex pre-audit (`conditional approve`) +
+post-impl (`ship-with-fixes`, 1 MEDIUM fixed) folded; `/code-review max` clean. PR #127 → dev: network
+e2e green + both-app human visual no-deltas sign-off received (on a v5/aztec-5.0 rebuild + v5 smoke).
+Both gate decisions resolved (`dark`→split tertiary/secondary; P4 keep-with-rigor). Ready to merge.
 **Tier:** `light`. Phase 0.5 rubric = 0/6 high for P1–P3; **P4 (round-1 shadow cleanup) is the elevated-
 blast-radius phase** (Flex/Icon/Text everywhere) and — per codex — is a RECONCILIATION (Checkbox/Toggle
 diverged), not pure TS-port adoption, so a visual gate alone won't catch semantic drift. P4 now carries
@@ -113,7 +114,7 @@ no `AppButton` refs remain) · `bun run test:faucet` (TokenCard/DripButton rende
 `bun run lint` · `bun run build:faucet` · `bun run build`. Pass: all exit 0;
 `! grep -rn AppButton packages/*/src` (except this plan). Layers: typecheck · lint · unit · both builds.
 
-### P4 — Delete the 9 round-1 local SFC shadows (the risk-bearing phase) ✓ MACHINE-GREEN (network e2e + visual sign-off PENDING)
+### P4 — Delete the 9 round-1 local SFC shadows (the risk-bearing phase) ✓ DONE
 
 Round 1 externalized 9 primitives but **left the extension-local copies in place**, and `components.d.ts`
 + the dir-scan resolve the bare tags to those LOCALS — so the round-1 externalization is inert. The

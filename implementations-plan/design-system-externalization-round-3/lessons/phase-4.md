@@ -1,7 +1,8 @@
 # Phase 4 — Delete the 9 round-1 local SFC shadows (the risk-bearing phase)
 
-**Status:** machine-green; **network e2e (CI) + both-app human visual no-deltas sign-off PENDING** (the
-locked gate — do NOT mark ✓ without it).
+**Status:** ✓ DONE. Network e2e **green on PR #127** (forced via `e2e:network`); **human visual
+no-deltas sign-off received 2026-06-21** — extension chrome+firefox (round-3 changes + the v5/aztec-5.0
+rebuild) + the faucet DripButton, plus a v5-testnet smoke pass ("everything looks super").
 
 ## Per-component classification (codex condition — before deleting)
 Diffed each local shadow vs its `@nulo/design` counterpart:
@@ -52,10 +53,10 @@ Dropped the round-2 "round-1 names are aspirational" caveat (they're now genuine
   `bun run lint` → 0 (auto-formatted the no-shadow test) · `bun run audit:vue`/`build` → 0 ·
   `bun run --cwd packages/extension build-storybook` → 0.
 - `bun run test:e2e` (smoke): **70 passed, 0 failures** (clean — no `ctx.browser` flake this run).
-- **REMAINING (gate the ✓):** `bun run e2e:agent` network suite (CI on the PR, forced via `e2e:network`
-  label like round 2) + the **both-app human visual no-deltas sign-off** — extension chrome+firefox
-  (icons, Flex layouts, Text colors incl. the P2 `dark`→tertiary/secondary, Checkbox/Toggle/Badge);
-  faucet DripButton. Cannot be done autonomously; surfaced to the user.
+- **GATE CLEARED:** network e2e **green on PR #127** (forced via `e2e:network`); **human visual
+  no-deltas sign-off received 2026-06-21** — extension chrome+firefox (icons, Flex layouts, the
+  `dark`→tertiary/secondary metadata, Checkbox/Toggle/Badge) + faucet DripButton confirmed, on a v5
+  rebuild (aztec 5.0.0-rc.1) with a v5-testnet smoke pass. P4 ✓.
 
 ## Closeout (blueprint step 8)
 - **`/code-review max`:** NO findings. The diff was codex-pre-audited (all conditions folded) + carefully
