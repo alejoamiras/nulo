@@ -695,7 +695,9 @@ export const test = base.extend<{
 				if (i === maxRetries - 1) {
 					console.warn("[tokenReady] Balance not visible after all retries (~60s) — tests may fail")
 				}
-				await new Promise((r) => setTimeout(r, 1_500))
+				await page
+					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 1_500, polling: 200 })
+					.catch(() => {})
 			}
 
 			await page.close()
@@ -745,9 +747,15 @@ export const test = base.extend<{
 				console.log("[feeJuiceReady] Bridging FeeJuice from L1...")
 				const claim = await bridgeFeeJuice(node, accountAddress)
 
-				// Wait for L1→L2 message to arrive on L2
+				// Wait for the L1→L2 message to be CLAIMABLE. 5.0 mints no empty blocks, so force L2
+				// blocks (a tiny sponsored mint) until the anchor covers the message's checkpoint.
 				console.log("[feeJuiceReady] Waiting for L1→L2 message...")
-				await waitForL1ToL2Message(node, claim.messageHash.toString(), 90_000)
+				await waitForL1ToL2Message(
+					node,
+					claim.messageHash.toString(),
+					() => mintPublicTokens(wallet, aztecConfig.tokenAddress, accountAddress, 1n, minterAddress, feeOptions),
+					90_000,
+				)
 
 				// Claim FeeJuice on L2 (use SponsoredFPC to pay for the claim tx)
 				console.log("[feeJuiceReady] Claiming FeeJuice on L2...")
@@ -774,7 +782,9 @@ export const test = base.extend<{
 				if (i === maxRetries - 1) {
 					console.warn("[feeJuiceReady] Balance not visible after all retries")
 				}
-				await new Promise((r) => setTimeout(r, 1_500))
+				await page
+					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 1_500, polling: 200 })
+					.catch(() => {})
 			}
 
 			await page.close()
@@ -797,12 +807,17 @@ export const test = base.extend<{
 			try {
 				const feePayer = accounts[0]
 				if (!feePayer) throw new Error("expected at least one sandbox-deployed test account")
-				prefunded = await setupPreFundedAccount(wallet, node, feePayer)
+				const feeOptions = await createSponsoredFeeOptions(wallet)
+				// forceBlock: 5.0 mints no empty blocks, so FJ-claim readiness only advances on a real
+				// tx. A tiny sponsored mint is the cheapest block-producer available here.
+				prefunded = await setupPreFundedAccount(wallet, node, feePayer, {
+					forceBlock: () =>
+						mintPublicTokens(wallet, aztecConfig.tokenAddress, feePayer.toString(), 1n, aztecConfig.minterAddress, feeOptions),
+				})
 				console.log(`[feeJuiceImported] pre-funded account: ${prefunded.accountAddress.toString()}`)
 
 				// Mint test tokens for the imported account so transfer flows have
 				// something to send (matches feeJuiceReadyExtension's pattern at :330).
-				const feeOptions = await createSponsoredFeeOptions(wallet)
 				await mintPublicTokens(
 					wallet,
 					aztecConfig.tokenAddress,
@@ -914,7 +929,9 @@ export const test = base.extend<{
 				if (i === maxRetries - 1) {
 					console.warn("[feeJuiceImported] token balance not visible after all retries")
 				}
-				await new Promise((r) => setTimeout(r, 1_500))
+				await page
+					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 1_500, polling: 200 })
+					.catch(() => {})
 			}
 
 			await page.close()
@@ -1259,7 +1276,11 @@ export async function clickByTestId(page: Page, testId: string, timeout = 10_000
 		await page.waitForFunction(
 			(id: string) => {
 				const candidates = [...document.querySelectorAll<HTMLElement>(`[data-testid="${id}"]`)].filter((el) => {
-					if ((el as HTMLButtonElement).disabled) return false
+					// Skip natively-disabled AND aria-disabled elements (eg. DropdownItem,
+					// which is a <div> that can't carry native `disabled`). Both mean "not
+					// clickable yet" — wait for the element to enable rather than firing a
+					// programmatic click that bypasses CSS `pointer-events: none`.
+					if ((el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true") return false
 					const style = window.getComputedStyle(el)
 					if (style.display === "none" || style.visibility === "hidden") return false
 					const rect = el.getBoundingClientRect()

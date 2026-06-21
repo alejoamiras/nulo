@@ -134,6 +134,41 @@ export function decidePrivateFuelClaim(e: PrivateFuelClaimEvidence): { action: P
 	return { action: "private-fpc" } // fresh record ⇒ first private claim attempt
 }
 
+/**
+ * Whether to UNBLOCK a NO-fuel bridge claim (the "arrive with gas" toggle OFF), as a pure decision. A
+ * no-fuel claim has no fresh L1→L2 Fee-Juice message to consume, so it self-pays from gas the account
+ * already holds — public Fee Juice OR the private balance a prior private fuel claim credited at the
+ * PrivateFPC. The faucet does NOT pre-select a method: it only decides whether the account has gas to
+ * reach the wallet's fee picker, which then selects Public OR Private Fee Juice (or Sponsored). This
+ * mirrors the long-standing public path (`fee = undefined` → wallet chooses), now extended so PRIVATE
+ * FJ also counts as "has gas" (it's selectable in the picker via `pay_fee`).
+ *
+ * **Fail-closed reads:** a balance is `bigint | null` where `null` = the read THREW (≠ a real zero). A
+ * transient read failure must never fabricate spendable balance NOR a false "no gas": with no KNOWN gas
+ * in either balance, `null` in either input yields `unverifiable` (surface "couldn't check — retry"),
+ * not `none`.
+ */
+export type NoFuelClaimGate =
+	| "allow" // the account holds gas in at least one balance - unblock; the wallet's picker selects the method.
+	| "unverifiable" // a balance read failed and no KNOWN balance holds gas - fail closed ("couldn't check").
+	| "none" // both balances known + zero - a truly cold account.
+
+export interface NoFuelClaimGateInputs {
+	/** Public Fee Juice balance (base units), or `null` if the `balance_of_public` read FAILED. */
+	publicFeeJuice: bigint | null
+	/** Private Fee Juice at the PrivateFPC (base units, via `balance_of`), or `null` if that read FAILED. */
+	privateFeeJuice: bigint | null
+}
+
+export function decideNoFuelClaimGate(i: NoFuelClaimGateInputs): NoFuelClaimGate {
+	// Any KNOWN gas (in either balance) unblocks — the wallet's fee picker handles selection + the real
+	// sufficiency check, exactly as the public path always has. `> 0` matches the original cold-check.
+	if ((i.publicFeeJuice ?? 0n) > 0n || (i.privateFeeJuice ?? 0n) > 0n) return "allow"
+	// No KNOWN gas. If either read failed, the unknown balance might hold gas - fail closed, don't block.
+	if (i.publicFeeJuice === null || i.privateFeeJuice === null) return "unverifiable"
+	return "none" // both known + zero.
+}
+
 /** The exact PrivateFPC `mint_and_pay_fee` insufficiency assert (verified in the installed 215fd08
  *  artifact). The narrow retry allow-list string-matches this — there is no typed selector. */
 export const PRIVATE_FUEL_INSUFFICIENCY_MSG = "Amount too low to cover gas cost"

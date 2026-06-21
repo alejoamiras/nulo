@@ -1,5 +1,6 @@
 import type { Restored, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { toRestoreError } from "@/utils/restore-error"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { IConfigStore } from "@/wallet/config"
 import type { ILogger } from "@/wallet/logger"
 import { EventHandler } from "@nulo/wallet-core/utils"
@@ -8,6 +9,7 @@ import { CONFIG_SERVICE_NAME, type Config, type ConfigKey, type ConfigProp, type
 export * from "./spec"
 
 export class ConfigService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()("getProps", "getValue", "setValue", "reset")
 	public static name = CONFIG_SERVICE_NAME
 
 	public readonly onUpdate = new EventHandler<ConfigProp>()
@@ -50,7 +52,7 @@ export class ConfigService extends Service<Methods, Events> implements ServiceSp
 			} catch (err) {
 				result.push({
 					...cp,
-					restoreError: err instanceof Error ? err.message : err,
+					restoreError: toRestoreError(err),
 				})
 			}
 		}

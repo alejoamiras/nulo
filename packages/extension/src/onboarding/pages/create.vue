@@ -3,66 +3,70 @@
 </route>
 
 <script setup lang="ts">
-/** Components — popup-shared passkey ceremony dialog (teleports to #popup
-	which the onboarding shell declares too). */
-import PasskeyCeremonyDialog from "@/popup/components/popups/PasskeyCeremonyDialog.vue"
-
 /** Composables */
-import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
-import { useProfileNameField } from "@/composables/useProfileNameField"
+import { useProfileCreateFlow } from "@/composables/useProfileCreateFlow"
 
 /** Services */
 import type { ProfileInfo } from "@/wallet/services/profile/spec"
-import { managers, setSentinel } from "@/utils/core"
+import { setSentinel } from "@/utils/core"
 
 /** Utils */
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
-import { createPasskeyProfileWithRetry } from "@/wallet/utils/create-passkey-profile"
-import { UserRejectedError } from "@nulo/extension-messaging/errors"
 
 /** Stores */
 import { useNotificationStore } from "@/stores/notification.store"
+
+/** Components — shared passkey ceremony dialog (teleports to #popup, which the
+	onboarding shell declares too). */
+import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vue"
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
 const { bootstrapActiveProfile } = useProfileBootstrap()
 
-const authMethod = ref<"password" | "passkey">("password")
-const password = ref("")
-const confirm = ref("")
-const isCreating = ref(false)
 const maxPasswordLength = 128
 
-// Profile name is required. Validated at submit time (not via :disabled) so
-// the user gets a visible shake + inline error instead of a silently-disabled
-// button. nameError clears on input.
 const {
 	profileName,
-	trimmedName,
 	nameError,
 	shakeName,
 	nameInputRef,
-	validate: validateName,
-	handleInput: handleNameInput,
-	dispose: disposeNameField,
-} = useProfileNameField()
-
-const passwordStrengthHint = computed(() => {
-	if (authMethod.value === "passkey") return ""
-	if (!password.value || password.value.length < 8) return "At least 8 characters"
-	if (password.value !== confirm.value) return "Passwords don't match"
-	if (password.value.length > 24) return "Long enough. Don't forget it."
-	return "Strong password"
-})
-
-// Excludes the name check on purpose — name is validated at submit time so
-// an empty name shakes instead of leaving the button silently disabled.
-const isAllowedToContinue = computed(() => {
-	if (authMethod.value === "passkey") return true
-	if (!password.value || password.value.length < 8) return false
-	if (password.value !== confirm.value) return false
-	return true
+	handleNameInput,
+	ceremonyRequest,
+	onCeremonyResolve,
+	onCeremonyReject,
+	authMethod,
+	password,
+	repeatedPassword: confirm,
+	isCreating,
+	strengthHint: passwordStrengthHint,
+	isAllowedToContinue,
+	handleCreate: handleSubmit,
+	dispose,
+} = useProfileCreateFlow({
+	// Onboarding has no popup app.vue listener, so it bootstraps the freshly
+	// created profile itself, then routes.
+	onCreated: async (profile) => {
+		await bootstrapActiveProfile(profile as ProfileInfo)
+		await setLastActiveProfileId((profile as ProfileInfo).id)
+		await setSentinel()
+		router.push("/onboarding/learn")
+	},
+	notifyCreateFailed: (isPasskey) => {
+		notificationStore.create({
+			type: "warning",
+			payload: {
+				title: "Profile creation failed",
+				description: isPasskey
+					? "An error occurred while creating the profile. This authenticator may not be supported or encountered an issue. Try again or use another one."
+					: "An error occurred while creating the profile. Please try again.",
+				note: isPasskey ? "Windows Hello may not work correctly with some versions of Windows." : undefined,
+				confirmText: "OK",
+				onConfirm: () => {},
+			},
+		})
+	},
 })
 
 const submitLabel = computed(() => {
@@ -70,71 +74,8 @@ const submitLabel = computed(() => {
 	return authMethod.value === "passkey" ? "Create with passkey" : "Create profile"
 })
 
-const { request: ceremonyRequest, runCeremony, onResolve: onCeremonyResolve, onReject: onCeremonyReject } = usePasskeyCeremony()
-
-/** Delegates to the shared helper at @/wallet/utils/create-passkey-profile.
- *  Same retry-on-ProfileIdConflictError contract as popup/profile/new.vue. */
-function createPasskeyProfileViaModal(name: string) {
-	return createPasskeyProfileWithRetry(name, {
-		runCeremony,
-		generateProfileId: () => managers.profile.generateProfileId(),
-		createPasskeyProfile: (n, c) => managers.profile.createPasskeyProfile(n, c),
-	})
-}
-
-async function handleSubmit() {
-	if (isCreating.value) return
-	if (!isAllowedToContinue.value) return
-	// Latch FIRST so the async getProfiles() fetch can't race a second click
-	// past the validate check before the lock is set.
-	isCreating.value = true
-
-	const existingNames = (await managers.profile.getProfiles()).map((p) => p.name)
-	if (!validateName({ existingNames })) {
-		isCreating.value = false
-		return
-	}
-
-	let profile: ProfileInfo
-	try {
-		profile =
-			authMethod.value === "passkey"
-				? await createPasskeyProfileViaModal(trimmedName.value)
-				: await managers.profile.createProfile(trimmedName.value, password.value)
-	} catch (e) {
-		if (e instanceof UserRejectedError) {
-			isCreating.value = false
-			return
-		}
-		const description =
-			authMethod.value === "passkey"
-				? "An error occurred while creating the profile. This authenticator may not be supported or encountered an issue. Try again or use another one."
-				: "An error occurred while creating the profile. Please try again."
-		const note = authMethod.value === "passkey" ? "Windows Hello may not work correctly with some versions of Windows." : undefined
-
-		notificationStore.create({
-			type: "warning",
-			payload: {
-				title: "Profile creation failed",
-				description,
-				note,
-				confirmText: "OK",
-				onConfirm: () => {},
-			},
-		})
-		console.error("Failed to create profile:", e)
-		isCreating.value = false
-		return
-	}
-
-	await bootstrapActiveProfile(profile)
-	await setLastActiveProfileId(profile.id)
-	await setSentinel()
-
-	isCreating.value = false
-	router.push("/onboarding/learn")
-}
-
+// Onboarding keeps its own document-level Enter handler alongside the
+// `<form @submit.prevent>`; both are latch-protected by `isCreating`.
 function onKeydown(e: KeyboardEvent) {
 	if (e.key === "Enter" && !isCreating.value) handleSubmit()
 }
@@ -144,7 +85,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-	disposeNameField()
+	dispose()
 	document.removeEventListener("keydown", onKeydown)
 	// Defense-in-depth: zero out secret material on unmount.
 	password.value = ""

@@ -1,6 +1,7 @@
 import type { ILogger } from "@/wallet/logger"
+import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { getTokenInfo } from "@/wallet/services/token/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { AccountService, type Account } from "@/wallet/services/account/service"
@@ -22,6 +23,7 @@ import { TOKEN_BALANCE_SERVICE_NAME, type TokenBalanceRaw, type TokenBalanceInfo
 export * from "./spec"
 
 export class TokenBalanceService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()("getTokenBalance", "getTokenBalances", "refreshTokenBalance")
 	public static name = TOKEN_BALANCE_SERVICE_NAME
 
 	public readonly onTokenBalanceAdded = new EventHandler<TokenBalanceInfo>()
@@ -264,7 +266,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			} catch (err) {
 				result.push({
 					...tb,
-					restoreError: err instanceof Error ? err.message : err,
+					restoreError: toRestoreError(err),
 				})
 			}
 		}

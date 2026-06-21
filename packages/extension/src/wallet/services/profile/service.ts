@@ -1,9 +1,10 @@
 import { Fr } from "@aztec/foundation/curves/bn254"
+import { toRestoreError } from "@/utils/restore-error"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import type { IConfig } from "@/wallet/config"
 import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
 import { Lock } from "@/wallet/utils"
 import { ProfileRepository } from "./repository"
@@ -20,6 +21,31 @@ import { PROFILE_SERVICE_NAME, type ProfileInfo, type Profile, type Events, type
 export * from "./spec"
 
 export class ProfileService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()(
+		"getActiveProfile",
+		"getProfiles",
+		"generateProfileId",
+		"createProfile",
+		"createPasskeyProfile",
+		"unlockProfile",
+		"unlockPasskeyProfile",
+		"getPasskeyCredentialId",
+		"lockActiveProfile",
+		"refreshSession",
+		"changeProfileName",
+		"changeProfilePassword",
+		"confirmProfileOperation",
+		"deleteProfile",
+		"importEncrypted",
+		"importPlain",
+		"importPasskey",
+		"importMnemonic",
+		"exportEncrypted",
+		"exportPlain",
+		"exportMnemonic",
+		"restore",
+		"finalizeRestore",
+	)
 	public static name = PROFILE_SERVICE_NAME
 
 	public readonly onProfileAdded = new EventHandler<ProfileInfo>()
@@ -898,7 +924,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				} catch (err) {
 					return {
 						...profile,
-						restoreError: err instanceof Error ? err.message : err,
+						restoreError: toRestoreError(err),
 					}
 				} finally {
 					this.lock.leave()
@@ -959,7 +985,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				} catch (err) {
 					return {
 						...profile,
-						restoreError: err instanceof Error ? err.message : err,
+						restoreError: toRestoreError(err),
 					}
 				} finally {
 					this.lock.leave()

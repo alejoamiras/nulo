@@ -49,6 +49,16 @@ jobs:
               # lives in tokens/[id].vue + balance service code.
               - 'packages/extension/src/wallet/services/token-balance/**'
               - 'packages/extension/src/popup/pages/tokens/**'
+              # Grant-approval + revoke surfaces (the authwit trust point). Added
+              # so a PR touching the execute window, advanced settings, the
+              # authwits module/popups, or the entity-CRUD composable triggers the
+              # network gate instead of silently skipping it.
+              - 'packages/extension/src/popup/windows/execute/**'
+              - 'packages/extension/src/popup/pages/settings/advanced/**'
+              - 'packages/extension/src/popup/components/modules/settings/authwits/**'
+              - 'packages/extension/src/popup/components/popups/RevokeAuthwitsPopup.vue'
+              - 'packages/extension/src/popup/components/popups/ChangeAuthwitsRegistryPopup.vue'
+              - 'packages/extension/src/composables/useEntityCrud.ts'
               - 'packages/extension/src/offscreen/**'
               - 'packages/extension/tests/e2e/network/**'
               - 'packages/extension/tests/e2e/fixtures/**'
@@ -58,6 +68,7 @@ jobs:
               - 'packages/aztec-runtime/**'
               - 'packages/wallet-bridge/**'
               - 'packages/playground/**'
+              - 'packages/design/**'
               - '.github/workflows/_network-e2e.yml'
               - '.github/workflows/pr-network-e2e.yml'
               - '.github/actions/setup-aztec/**'
@@ -132,6 +143,10 @@ jobs:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       shard: ${{ matrix.shard.id }}
       shard_label: ${{ matrix.shard.label }}
+      # retry: 0 — the PR gate is the honest acceptance signal. A test-dimension
+      # retry would re-mask app flakes; pure infra-boot flakes are handled by the
+      # agent's exit-86 sentinel (one infra-retry in _network-e2e.yml).
+      retry: "0"
       # Proverless shard pool (fast, accelerator OFF). Exclude, on top of the
       # fee-methods + concurrent-confirm heavy jobs (which run proverless too),
       # the prover-ON canary files transfers + tx-sendTx-default — they run with
@@ -154,6 +169,7 @@ jobs:
     with:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       shard_label: "heavy"
+      retry: "0"
       test_files: "tests/e2e/network/fee-methods.test.ts"
       # fee-methods is PLAIN proverless (no barrier; the fee flows don't depend
       # on prove duration). Proverless implies accelerator OFF.
@@ -174,6 +190,7 @@ jobs:
     with:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       shard_label: "heavy-concurrent"
+      retry: "0"
       test_files: "tests/e2e/network/concurrent-sendtx-confirm.test.ts"
       # STUB + barrier: proverless makes prove sub-second, so the test holds T1
       # at `proving` via the ProofGate to keep the ordering assert deterministic.
@@ -196,6 +213,7 @@ jobs:
     with:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       shard_label: "canary"
+      retry: "0"
       test_files: "tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts"
       # Real proving — accelerator ON unless the emergency kill switch is set.
       disable_accelerator: ${{ github.event.inputs.disable_accelerator == 'true' || vars.NULO_E2E_DISABLE_ACCELERATOR == '1' }}

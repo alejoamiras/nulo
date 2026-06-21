@@ -34,9 +34,19 @@
  *   would silently render `0 USDC` via `balanceFormatted(undefined, …)`
  *   which returns "0" (codex audit catch). Wipe to avoid the fake
  *   "0 USDC" ghost. Reuses the existing `nulo:journal@` session-wipe path.
+ * v8 (Aztec 5.0.0-rc.1 hard fork) is a full reset. The protocol changed how
+ *   account/contract addresses are derived (PublicKeys point→hash + immutables
+ *   hash) and Schnorr's signature scheme moved to Poseidon2 — so every stored
+ *   account address is now wrong and old Schnorr accounts are uncontrollable,
+ *   and the PXE deletes its pre-v6 databases on first open. The existing wipe
+ *   lists already cover the blast radius — `nulo:core:accounts`, `token-balances`
+ *   (class-ids change), the `pxe/` IndexedDB + `keyval-store`, and journal
+ *   sessions — so the bump re-fires them. Users must re-register accounts and
+ *   re-sync; documented in release notes (no in-app migration UX) per the
+ *   aztec-5.0-upgrade plan's "document the reset" decision.
  */
 const STORAGE_VERSION_KEY = "nulo:core:storage-version"
-const CURRENT_VERSION = 7
+const CURRENT_VERSION = 8
 
 const KEYS_TO_WIPE = [
 	"nulo:core:accounts",

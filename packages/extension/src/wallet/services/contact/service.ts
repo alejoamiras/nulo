@@ -1,6 +1,7 @@
 import type { BrowserApi } from "@nulo/wallet-core/ports"
+import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { EntityStorage } from "@/wallet/storage"
@@ -13,6 +14,16 @@ import { type Contact, CONTACT_SERVICE_NAME, type Events, type Methods } from ".
 export * from "./spec"
 
 export class ContactService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()(
+		"getContacts",
+		"getContact",
+		"getContactByAddress",
+		"addContact",
+		"updateContact",
+		"deleteContact",
+		"exportContacts",
+		"importContacts",
+	)
 	public static name = CONTACT_SERVICE_NAME
 
 	/** Declared startup deps — ensures ProfileService is fully started before we touch it. */
@@ -307,7 +318,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 				} catch (err) {
 					result.push({
 						...contact,
-						restoreError: err,
+						restoreError: toRestoreError(err),
 					})
 				}
 			}

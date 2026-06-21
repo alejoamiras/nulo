@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** Services */
 import { assetKindOf } from "@nulo/bridge-core"
-import { AppButton } from "@nulo/design"
+import { Button } from "@nulo/design"
 import { computed, ref } from "vue"
 import { FUEL_MIN_FJ } from "@/contracts/bridge-deployments"
 
@@ -125,9 +125,9 @@ function fmt(b: bigint | null): string {
 				</button>
 			</div>
 
-			<AppButton :loading="submitting" :disabled="!bothConnected || submitting" :data-testid="TESTIDS.fuelSubmit" @click="onSubmit">
+			<Button :loading="submitting" :disabled="!bothConnected || submitting" :data-testid="TESTIDS.fuelSubmit" @click="onSubmit">
 				{{ !bothConnected ? "CONNECT BOTH WALLETS" : isPrivate ? "GET PRIVATE GAS" : "GET GAS" }}
-			</AppButton>
+			</Button>
 
 			<p v-if="flowError" class="err-msg" :data-testid="TESTIDS.fuelFlowError">{{ flowError }}</p>
 		</template>

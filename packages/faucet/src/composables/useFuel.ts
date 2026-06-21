@@ -35,7 +35,7 @@ import { useL1Wallet } from "./useL1Wallet"
 
 const log = (...args: unknown[]) => console.log("[bridge:fuel]", ...args)
 
-const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://rpc.testnet.aztec-labs.com"
+const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 
 /**
  * The Fuel flow: deposit the L1 fee asset straight into the canonical FeeJuicePortal and claim it as

@@ -370,3 +370,17 @@ export function checkSimulateTx(args: unknown[], grants: GrantedCapabilityRecord
 export function checkProfileTx(args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	checkSimulationTransactions("profileTx", args, grants)
 }
+
+/**
+ * `registerContractClass` (added to WalletSchema in @aztec 5.0) is intentionally NOT dApp-exposed:
+ * it's an unbound PXE artifact write with no chain check, and Nulo's authz cannot scope it correctly
+ * yet — `contractClasses` is read-only (no `canRegister`), and ScopeCheck is synchronous while the
+ * artifact's class-id derivation is async. Deny it at scope-enforcement (the single source of truth;
+ * scope runs before routing, so no dispatcher branch is needed). Revisit when canRegister + a
+ * class-id-scoped async gate land. (codex audit, aztec-5.0-upgrade.)
+ */
+export function checkRegisterContractClassDisabled(): never {
+	throw new Error(
+		"registerContractClass is intentionally disabled in Nulo pending contractClasses.canRegister support and class-id-scoped enforcement.",
+	)
+}

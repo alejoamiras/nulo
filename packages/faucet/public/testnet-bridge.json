@@ -1,13 +1,13 @@
 {
 	"network": "testnet",
 	"l1": {
-		"usdc": "0x764a16d2098021bb89c2fab0b23c352b115991bb",
-		"portal": "0xf2f1619abd4b4d0a330de35b4b3d22fce5d30fa0",
+		"usdc": "0xad6890e9c332de7c951809438d5cd7c8ed8eece5",
+		"portal": "0x75f83c81dd9b127fb063f6750a6e329cf2acda35",
 		"portalSource": "forked-v1",
 		"feeJuice": {
-			"portal": "0xd3361019e40026ce8a9745c19e67fd3acc10d596",
+			"portal": "0x7c4176bff969c9417e42f9cb921100145911cc84",
 			"asset": "0x762c132040fda6183066fa3b14d985ee55aa3c18",
-			"minFj": "11001040559015000000"
+			"minFj": "10170654118143041536"
 		},
 		"token": {
 			"name": "Aztec Nulo",
@@ -16,14 +16,14 @@
 			"maxWholePerTx": 1000
 		},
 		"fuel": {
-			"router": "0xabc21f50a7a55c1a86bbc86562e4b828b4f0d5c0",
-			"swapTarget": "0x439543810874bf927538a7054cac7e139e16b732",
+			"router": "0xa20031498aef326773c6001fabbf5fb4b9d36b8e",
+			"swapTarget": "0x459ea79dde33b415974a8355f551d0c750fa6411",
 			"poolManager": "0xe03a1074c86cfedd5c142c4f04f1a1536e203543",
 			"quoter": "0x61b3f2011a92d183c7dbadbda940a7555ccf9227",
 			"permit2": "0x000000000022d473030f116ddee9f6b43ac78ba3",
 			"weth": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
 			"feeJuice": "0x762c132040fda6183066fa3b14d985ee55aa3c18",
-			"feeJuicePortal": "0xd3361019e40026ce8a9745c19e67fd3acc10d596",
+			"feeJuicePortal": "0x7c4176bff969c9417e42f9cb921100145911cc84",
 			"pools": {
 				"azloWeth": {
 					"fee": 500,
@@ -35,29 +35,29 @@
 				}
 			},
 			"slippageBps": 300,
-			"minFuelFj": "11001040559015000000"
+			"minFuelFj": "10170654118143041536"
 		}
 	},
 	"l2": {
 		"proxy": {
-			"address": "0x0148e5b4c2b85325976da039ad641efc110a793685ea118714fe1befebcd8db9",
-			"salt": 159662759693,
+			"address": "0x2e8bf619f2a019de2efb9049789747339335d84fbc0a82e5969875d86ff5303b",
+			"salt": 386076131833,
 			"constructorArtifact": "constructor",
 			"constructorArgs": []
 		},
 		"token": {
-			"address": "0x1a8ba6694070db378cc04ebe1076975841317059c88042cc3eef9b26d1757411",
-			"salt": 200911740871,
+			"address": "0x16f064e0c8d763758c395a50dbebf9a068f345c631905d62b8811738d8f7ca25",
+			"salt": 674073244495,
 			"constructorArtifact": "constructor_with_minter",
-			"constructorArgs": ["Aztec Nulo", "AZLO", 18, "0x0148e5b4c2b85325976da039ad641efc110a793685ea118714fe1befebcd8db9"]
+			"constructorArgs": ["Aztec Nulo", "AZLO", 18, "0x2e8bf619f2a019de2efb9049789747339335d84fbc0a82e5969875d86ff5303b"]
 		},
 		"bridge": {
-			"address": "0x2ac163ce12faadfeb7f504077dfd18b24eab1f95f9214b19b36b34200baeaa8f",
-			"salt": 310287137504,
+			"address": "0x1a90f8c35f1ccb03b3ab0009349393b92938c649ed378b4066aa824e93af0a57",
+			"salt": 777954585164,
 			"constructorArtifact": "constructor",
 			"constructorArgs": [
-				"0x0148e5b4c2b85325976da039ad641efc110a793685ea118714fe1befebcd8db9",
-				"0xf2f1619abd4b4d0a330de35b4b3d22fce5d30fa0"
+				"0x2e8bf619f2a019de2efb9049789747339335d84fbc0a82e5969875d86ff5303b",
+				"0x75f83c81dd9b127fb063f6750a6e329cf2acda35"
 			]
 		}
 	}

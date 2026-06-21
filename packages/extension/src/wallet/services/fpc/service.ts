@@ -1,7 +1,8 @@
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { toRestoreError } from "@/utils/restore-error"
 import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
@@ -34,6 +35,7 @@ type ProtocolAddresses = { sponsored: string; private: string }
 type StoredFpc = Omit<FpcInfo, "isProtocol">
 
 export class FpcService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()("getFpcs", "getFpc", "addFpc", "updateFpc", "updateFpcAddress", "deleteFpc")
 	public static name = FPC_SERVICE_NAME
 
 	public readonly onFpcAdded = new EventHandler<FpcInfo>()
@@ -508,7 +510,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 				} catch (err) {
 					result.push({
 						...fpc,
-						restoreError: err instanceof Error ? err.message : err,
+						restoreError: toRestoreError(err),
 					})
 				}
 			}

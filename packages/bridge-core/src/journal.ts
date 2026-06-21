@@ -67,6 +67,10 @@ export interface DepositFuelBlock {
 	minOutput: string
 	/** From the BridgeWithFuel event. */
 	leafIndex?: string
+	/** The L1→L2 message key (inbox leaf hash) from `BridgeWithFuel.fuelKey`. The 5.0 readiness gate polls
+	 *  `getL1ToL2MessageCheckpoint(messageHash)` on this — recomputing the leaf locally is fragile, and the
+	 *  real key is exactly what the inbox inserted. */
+	messageHash?: string
 	/** fuelReceived from the event - the EXACT content-hash amount; the claim MUST use this, never a quote. */
 	received?: string
 	/** Latched journal-first BEFORE any fjwc-embedded wallet call (L14 trigger 1 precondition). */
@@ -112,6 +116,9 @@ export interface DepositJournalRecord extends JournalBase {
 	/** Persisted the moment writeContract returns - leafIndex stays chain-recoverable. */
 	depositTxHash?: string
 	leafIndex?: string
+	/** The token L1→L2 message key (inbox leaf hash) from `BridgeWithFuel.tokenKey` / the DepositToAztec
+	 *  event. The 5.0 readiness gate polls `getL1ToL2MessageCheckpoint` on this before simulating the claim. */
+	messageHash?: string
 	claimTxHash?: string
 	/** The Aztec block height when the L1 deposit confirmed - anchors the sync countdown
 	 *  (display pacing only; the claim-simulate gate stays the consumability authority). */

@@ -91,29 +91,50 @@ export async function navigateToSettings(page: Page, ...segments: string[]): Pro
 		// segments: fall back to the SettingItem's `to` prop since child
 		// pages don't yet have a consistent testid naming convention.
 		const testidSelector = `[data-testid="setting-nav-${pathSoFar.join("-")}"]`
-		const clicked = await page.evaluate(
-			({ id, hash }: { id: string; hash: string }) => {
-				const byTestId = document.querySelector<HTMLElement>(id)
-				if (byTestId) {
-					byTestId.click()
-					return "testid"
-				}
-				const a = [...document.querySelectorAll("a")].find(
-					(el) => el.getAttribute("href") === hash || el.getAttribute("to") === hash.slice(1),
-				)
-				if (a) {
-					a.click()
-					return "href"
-				}
-				// Final fallback: router-link renders `<a>` with no href, but Vue Router
-				// listens on 'to'. Dispatch a synthetic click on the element whose
-				// textContent matches our segment title — this is the weakest path.
-				return null
-			},
-			{ id: testidSelector, hash: href },
-		)
+		// Poll for the nav target to RENDER, then click it. The destination route
+		// component mounts asynchronously AFTER the hash changes, so finding the
+		// next segment's link immediately (the prior `waitForFunction` only
+		// confirmed the hash, not the DOM) races the mount — and on a slow CI box
+		// that race is reliably lost: the page is still blank, the link absent.
+		// `waitForFunction` retries the find+click until the element exists; the
+		// click is the side effect that resolves it.
+		const clicked = await page
+			.waitForFunction(
+				({ id, hash }: { id: string; hash: string }) => {
+					const byTestId = document.querySelector<HTMLElement>(id)
+					if (byTestId) {
+						byTestId.click()
+						return "testid"
+					}
+					const a = [...document.querySelectorAll("a")].find(
+						(el) => el.getAttribute("href") === hash || el.getAttribute("to") === hash.slice(1),
+					)
+					if (a) {
+						a.click()
+						return "href"
+					}
+					return null
+				},
+				{ timeout: 10_000, polling: 200 },
+				{ id: testidSelector, hash: href },
+			)
+			.then((h) => h.jsonValue())
+			.catch(() => null)
 
 		if (!clicked) {
+			// Should be rare now that we wait for render. If it still fails, show
+			// what the page actually held so a regression (stale path vs genuinely
+			// absent target) is diagnosable instead of a bare throw.
+			const diag = await page
+				.evaluate(() => ({
+					hash: window.location.hash,
+					allTestids: [...document.querySelectorAll("[data-testid]")].map((e) => e.getAttribute("data-testid")).slice(0, 60),
+					anchorCount: document.querySelectorAll("a").length,
+					buttonCount: document.querySelectorAll("button").length,
+					bodyText: (document.body.innerText || "").replace(/\s+/g, " ").slice(0, 400),
+				}))
+				.catch(() => "nav diag read failed")
+			console.error(`[nav-diag] navigateToSettings FAIL for ${href} (want ${testidSelector}): ${JSON.stringify(diag)}`)
 			throw new Error(`navigateToSettings: no setting nav target for ${href} (expected testid ${testidSelector})`)
 		}
 
@@ -251,6 +272,21 @@ export async function switchAccount(page: Page, name: string): Promise<void> {
 	await page.waitForSelector('[data-testid="accounts-popup"]', { visible: true, timeout: 5_000 })
 
 	const selector = `[data-testid="account-item"][data-account-name="${name}"]`
+	await page.waitForSelector(selector, { visible: true, timeout: 5_000 })
+	await clickSelector(page, selector)
+
+	// Vue Transition can stick mid-leave; force-close.
+	await closeStuckPopup(page)
+}
+
+/** Switch the wallet's active account by ADDRESS — stable across runs, unlike the
+ *  display name, which depends on creation order vs the dApp's account-exposure
+ *  order (e.g. `accountAddresses[0]` may be the "Second"-named account). */
+export async function switchAccountByAddress(page: Page, address: string): Promise<void> {
+	await clickByTestId(page, "account-selector")
+	await page.waitForSelector('[data-testid="accounts-popup"]', { visible: true, timeout: 5_000 })
+
+	const selector = `[data-testid="account-item"][data-account-address="${address}"]`
 	await page.waitForSelector(selector, { visible: true, timeout: 5_000 })
 	await clickSelector(page, selector)
 
@@ -642,8 +678,11 @@ export async function sendTransfer(page: Page, opts: SendTransferOptions): Promi
 	})
 	await clickByTestId(page, "send-submit")
 
-	// Wait for submission toast + popup auto-close
-	await waitForToast(page, "Transaction submitted", 60_000)
+	// Wait for submission toast + popup auto-close. The toast only appears AFTER client-side
+	// proving; native proving (the prover-ON canary) adds tens of seconds to that pipeline —
+	// especially the shield (public→private) path — so give it real headroom there. Proverless
+	// bulk shards stay tight to keep failures honest-fast.
+	await waitForToast(page, "Transaction submitted", process.env.NULO_E2E_PROVERLESS === "1" ? 60_000 : 300_000)
 	// Wait for popup to fully close
 	await page.waitForFunction(() => !document.querySelector('[data-testid="send-destination-field"]'), { timeout: 10_000 })
 }

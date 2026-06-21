@@ -1,6 +1,7 @@
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { validateParams } from "@nulo/extension-messaging/zod"
 import { AztecNodeFactoryAdapter } from "@nulo/aztec-runtime/adapters"
 import type { NodeFactory } from "@nulo/aztec-runtime/ports"
@@ -73,8 +74,8 @@ const DEFAULT_SEEDS: DefaultSeed[] = [
 	},
 	{
 		name: "Testnet",
-		rpcUrl: "https://rpc.testnet.aztec-labs.com",
-		chainId: 4138294185, // (11155111 ^ 4127419662) >>> 0
+		rpcUrl: "https://v5.testnet.rpc.aztec-labs.com",
+		chainId: 4229590296, // (11155111 ^ 4239416255) >>> 0 — V5 testnet rollup version
 		kind: "testnet",
 		isPrimaryActive: true,
 	},
@@ -131,6 +132,21 @@ function normalizeRpcUrl(raw: string): string {
 }
 
 export class NetworkService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()(
+		"getOrInitNetworks",
+		"getNetworks",
+		"getNetwork",
+		"addNetwork",
+		"renameNetwork",
+		"deleteNetwork",
+		"setActiveNetwork",
+		"getActiveNetwork",
+		"addEndpoint",
+		"updateEndpoint",
+		"deleteEndpoint",
+		"setPrimaryEndpoint",
+		"getNodeStatus",
+	)
 	public static name = NETWORK_SERVICE_NAME
 
 	public readonly onNetworkAdded = new EventHandler<Network>()
@@ -646,7 +662,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 				} catch (err) {
 					result.push({
 						...(raw && typeof raw === "object" ? (raw as Partial<Network>) : {}),
-						restoreError: err instanceof Error ? err.message : err,
+						restoreError: toRestoreError(err),
 					} as Restored<Network>)
 				}
 			}

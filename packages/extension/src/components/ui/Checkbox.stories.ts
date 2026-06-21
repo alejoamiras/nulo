@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/vue3-vite"
-import Checkbox from "./Checkbox.vue"
+import { Checkbox } from "@nulo/design"
 
 const meta: Meta<typeof Checkbox> = {
 	title: "UI / Checkbox",

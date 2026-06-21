@@ -128,7 +128,7 @@ contract DeployBridge is Script {
     address constant WETH = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
     address constant FEE_JUICE = 0x762C132040fdA6183066Fa3B14d985ee55aA3C18;
     address constant FEE_ASSET_HANDLER = 0x5602c39A6E9C5AcE589F64F754927bcDa4f4BFc9;
-    address constant FEE_JUICE_PORTAL = 0xd3361019E40026ce8a9745c19e67Fd3ACC10d596;
+    address constant FEE_JUICE_PORTAL = 0x7C4176bFF969c9417e42F9CB921100145911CC84;
     address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
     // ── ETH/feeJuice pool (~10,000 FJ per ETH), from the reference ────

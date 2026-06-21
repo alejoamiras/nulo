@@ -169,6 +169,29 @@ describe("useBridgeJournal engine", () => {
 		expect(claim).toHaveBeenCalled()
 	})
 
+	it("5.0 checkpoint gate: waits until the anchor checkpoint reaches the message's before claiming", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		// The node anchor sits BELOW the message's checkpoint for the first polls, then catches up — the
+		// gate must not let the claim simulate until anchor >= checkpoint (else "No L1 to L2 message found").
+		const messageReadiness = vi.fn(async (_hash: string) => {
+			const n = messageReadiness.mock.calls.length
+			return n < 3 ? { checkpoint: 10, anchor: 7 } : { checkpoint: 10, anchor: 10 }
+		})
+		connectJournalDeps({ ...deps, claim, messageReadiness })
+		addRecord(mkDeposit("0xgate", { messageHash: "0xMSG" }))
+		markSessionLive("0xgate")
+		resumeSessionWork()
+		await vi.waitFor(() => {
+			const { records } = useBridgeJournal()
+			expect(records.value.find((r) => r.id === "0xgate")?.completedAt).toBe(999)
+		})
+		// Polled the REAL inbox key until the anchor caught up, THEN claimed.
+		expect(messageReadiness).toHaveBeenCalledWith("0xMSG")
+		expect(messageReadiness.mock.calls.length).toBeGreaterThanOrEqual(3)
+		expect(claim).toHaveBeenCalled()
+	})
+
 	it("④ same-id double invocation runs once; ⑭ two records' sends serialize on the aztec lane", async () => {
 		const deps = baseDeps(kv)
 		const order: string[] = []

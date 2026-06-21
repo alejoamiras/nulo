@@ -1,27 +1,15 @@
-import { existsSync } from "node:fs"
-import { dirname, join, relative } from "node:path"
+import { dirname, relative } from "node:path"
 import { fileURLToPath, URL } from "node:url"
 import vue from "@vitejs/plugin-vue"
-
-/** Resolve a file inside an npm package, bypassing its `exports` field.
- *  Walks up from this config file to find the package in any node_modules. */
-function resolvePackageFile(pkg: string, file: string): string {
-	const parts = pkg.startsWith("@") ? pkg.split("/").slice(0, 2) : [pkg.split("/")[0]]
-	let dir = fileURLToPath(new URL(".", import.meta.url))
-	while (dir !== dirname(dir)) {
-		const candidate = join(dir, "node_modules", ...parts, file)
-		if (existsSync(candidate)) return candidate
-		dir = dirname(dir)
-	}
-	throw new Error(`Cannot find ${pkg}/${file} in any node_modules`)
-}
 import usePages from "vite-plugin-pages"
 import useAutoImport from "unplugin-auto-import/vite"
 import useComponents from "unplugin-vue-components/vite"
+import { nuloDesignResolver } from "./scripts/design-resolver"
 import { defineConfig } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 import packageJson from "./package.json"
 import { extractBbWasm } from "./scripts/extract-bb-wasm"
+import { artifactAliases, resolvePackageFile, sharedDefine, srcDir } from "./vite.shared"
 
 export default defineConfig({
 	server: {
@@ -41,18 +29,11 @@ export default defineConfig({
 		// at the bottom need anchored regex `find` patterns. Vite forwards this
 		// to @rollup/plugin-alias which only matches RegExp via array entries.
 		alias: [
-			{ find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) },
-			{ find: "~", replacement: fileURLToPath(new URL("./src", import.meta.url)) },
-			{ find: "src", replacement: fileURLToPath(new URL("./src", import.meta.url)) },
+			{ find: "@", replacement: srcDir },
+			{ find: "~", replacement: srcDir },
+			{ find: "src", replacement: srcDir },
 			{ find: "@assets", replacement: fileURLToPath(new URL("src/assets", import.meta.url)) },
-			{
-				find: "@private-fpc-artifact",
-				replacement: resolvePackageFile("@wonderland/aztec-fee-payment", "target/private_contract-PrivateFPC.json"),
-			},
-			{
-				find: "@wonderland-token-artifact",
-				replacement: resolvePackageFile("@defi-wonderland/aztec-standards", "artifacts/target/token_contract-Token.json"),
-			},
+			...Object.entries(artifactAliases).map(([find, replacement]) => ({ find, replacement })),
 			{
 				find: "@alejoamiras/aztec-accelerator",
 				replacement: resolvePackageFile("@alejoamiras/aztec-accelerator", "dist/index.js"),
@@ -100,7 +81,6 @@ export default defineConfig({
 	css: {
 		preprocessorOptions: {
 			scss: {
-				loadPaths: [fileURLToPath(new URL("./src/assets/styles", import.meta.url))],
 				quietDeps: true,
 			},
 		},
@@ -173,6 +153,7 @@ export default defineConfig({
 
 		useComponents({
 			dirs: ["src/components", "src/onboarding/components"],
+			resolvers: [nuloDesignResolver()],
 			dts: "src/types/components.d.ts",
 		}),
 
@@ -308,11 +289,7 @@ export default defineConfig({
 		},
 	},
 	define: {
-		__VERSION__: JSON.stringify(packageJson.version),
-		__SENTINEL__: JSON.stringify(packageJson.sentinel),
-		__AZTEC_VERSION__: JSON.stringify(packageJson.dependencies["@aztec/pxe"] ?? "unknown"),
-		__NAME__: JSON.stringify(packageJson.name),
-		__DISPLAY_NAME__: JSON.stringify(packageJson.displayName),
+		...sharedDefine,
 		"import.meta.env.HTML_TITLE": JSON.stringify(packageJson.displayName),
 		"process.browser": true,
 		"process.env": JSON.stringify({

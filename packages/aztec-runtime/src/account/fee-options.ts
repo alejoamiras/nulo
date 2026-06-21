@@ -9,8 +9,10 @@
  * max fees while the fast path defaulted to
  * `getCurrentMinFees().mul(1.5)`.
  *
- * Mirrors upstream `BaseWallet.completeFeeOptions({forEstimation, ...})`
- * byte-for-byte (`@aztec/wallet-sdk/base-wallet/base_wallet.js:128-160`).
+ * Re-derived from upstream `BaseWallet.completeFeeOptions({forEstimation, ...})`
+ * (`@aztec/wallet-sdk/base-wallet/base_wallet.js`). 5.0 split the branches: estimation
+ * uses high internal limits; the real-send fallback fills `gasLimits` from the node's
+ * per-tx admission limit (`txsLimits.gas`) when the dApp declared none.
  */
 import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
@@ -73,5 +75,16 @@ export async function completeFeeOptions(config: CompleteFeeOptionsConfig): Prom
 			: GasFees.empty(),
 	}
 
-	return forEstimation ? GasSettings.forEstimation(overrides) : GasSettings.fallback(overrides)
+	// Estimation uses high internal limits + skips tx validation, so no gasLimits needed.
+	if (forEstimation) {
+		return GasSettings.forEstimation(overrides)
+	}
+
+	// Sending for real: 5.0's `GasSettings.fallback` requires explicit `gasLimits`. When the
+	// dApp declared none, fill in the network's per-tx admission limit (node-advertised
+	// `txsLimits.gas`) so the proposer does not skip the tx for over-declaring. Mirrors 5.0
+	// `base_wallet.completeFeeOptions`; the node's GasLimitsValidator is the over-declaration backstop.
+	const { txsLimits } = await node.getNodeInfo()
+	const maxTxGasLimits = new Gas(txsLimits.gas.daGas, txsLimits.gas.l2Gas)
+	return GasSettings.fallback({ ...overrides, gasLimits: overrides.gasLimits ?? maxTxGasLimits })
 }

@@ -37,6 +37,11 @@ export interface FuelClaimDeps {
 	sponsoredFpc: AztecAddress
 	/** The fail-CLOSED self-pay floor (FUEL_MIN_FJ). Undefined/zero ⇒ the private claim refuses. */
 	minFloorFj: bigint | undefined
+	/** V5: the PINNED worst-case maxFeesPerGas (predictedWorstMinFees×1.5), computed by the caller (which
+	 *  owns the node). The FPC asserts amount >= gasLimits*maxFeesPerGas, and the protocol rejects a cap
+	 *  below the live base fee at inclusion — so a current-min cap risks rejection in the claim's proving
+	 *  window. Absent ⇒ the wallet fills current-min (pre-V5 behavior). Public uses the Sponsored FPC. */
+	maxFeesPerGas?: { feePerDaGas: bigint; feePerL2Gas: bigint }
 	/** PRIVATE: the AUTHORITATIVE salt the engine unsealed from the envelope (the sole recovery input).
 	 *  Used in preference to the journal's plaintext `fuel.bridgeSecretSalt` display copy, which can be
 	 *  missing or corrupted while the sealed copy is intact — trusting it would strand a recoverable
@@ -86,11 +91,16 @@ export async function buildFuelClaimInteraction(rec: DepositJournalRecord, deps:
 		if (!saltHex) return stop("This private Fuel bridge is missing its recovery salt — cannot claim.")
 		const salt = Fr.fromString(saltHex)
 		const fpcAddr = AztecAddress.fromString(fuel.fpc ?? PRIVATE_FPC_ADDRESS)
-		// teardownGas=0 keeps max_gas_cost within the bridged amount; the wallet fills maxFeesPerGas
-		// (current-min, embedded-fpc cap) — mirrors the proven swap-private-fuel path (useDeposit.ts).
+		// teardownGas=0 keeps max_gas_cost within the bridged amount. V5: pin maxFeesPerGas to the caller's
+		// predicted-worst×1.5 snapshot — the FPC asserts amount >= gasLimits*maxFeesPerGas and the protocol
+		// rejects a cap below the live base fee at inclusion, so a wallet-filled current-min cap risks
+		// rejection in the claim's proving window. Mirrors the swap-private-fuel path (useDeposit.ts).
 		const privateFee = {
 			paymentMethod: privateMintAndPayFee(fpcAddr, received, deriveBridgeSecret(salt, recipient), salt, leaf),
-			gasSettings: { teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }) },
+			gasSettings: {
+				teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
+				...(deps.maxFeesPerGas ? { maxFeesPerGas: deps.maxFeesPerGas } : {}),
+			},
 		}
 		const carrier = () => new BatchCall(aztec as never, [])
 		return {

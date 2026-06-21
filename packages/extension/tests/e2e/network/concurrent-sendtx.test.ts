@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { openPopup, test, waitForHash } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { snapshotResultSeq, waitForPgResults } from "../fixtures/playground"
 import { waitForPopup, waitForExecuteContent, rejectExecute } from "../fixtures/popups"
 import { readDappExecuteRecords, waitForInFlight } from "../fixtures/journal"
 import type { AztecTestConfig } from "../fixtures/aztec"
@@ -85,14 +85,19 @@ test.skipIf(!hasConfig)(
 		const firstPopup = await firstPopupP
 		await waitForExecuteContent(firstPopup)
 
-		// FIFO assertion #1: while popup #1 is still open, popup #2 must NOT
-		// exist as a target. The bug pre-fix would have either dropped the
-		// second sendTx silently (no popup ever) or raced into a duplicate
-		// popup. Allow a generous settle window — if popup #2 is going to
-		// appear early, it shows up within 2-3s of the second click landing.
-		await new Promise((r) => setTimeout(r, 3_000))
-		const executeTargetsDuringFirst = ctx.browser.targets().filter((t) => t.type() === "page" && t.url().includes("#/windows/execute"))
-		expect(executeTargetsDuringFirst.length).toBe(1)
+		// FIFO assertion #1: while popup #1 is still open + unresolved, the discovery baton
+		// keeps popup #2 from opening. Fail-fast race-detector — poll up to 3s for a 2nd
+		// execute target: a clean run stays at 1, the duplicate-popup regression (pre-fix:
+		// silent-drop or duplicate popup) trips it at once instead of after a blind 3s sleep.
+		const countExecuteTargets = () =>
+			ctx.browser.targets().filter((t) => t.type() === "page" && t.url().includes("#/windows/execute")).length
+		let executeTargetCount = countExecuteTargets()
+		const noSecondPopupDeadline = Date.now() + 3_000
+		while (executeTargetCount <= 1 && Date.now() < noSecondPopupDeadline) {
+			await new Promise((r) => setTimeout(r, 200))
+			executeTargetCount = countExecuteTargets()
+		}
+		expect(executeTargetCount).toBe(1)
 
 		// Journal-state assertion (the source of truth): BEFORE rejecting popup #1,
 		// the journal must hold both records (a single record = the pre-fix lost-tx
@@ -138,12 +143,14 @@ test.skipIf(!hasConfig)(
 		await waitForExecuteContent(secondPopup)
 		await rejectExecute(secondPopup)
 
-		// Both dApp promises must settle. waitForPgResult with `seqBefore`
-		// captures the FIRST result row after the snapshot; calling it twice
-		// captures both. The seqs must be distinct (= two settled rows on
-		// the playground = direct refutation of "only one tx visible").
-		const r1 = await waitForPgResult(page, "sendTx", seqBefore, 30_000)
-		const r2 = await waitForPgResult(page, "sendTx", r1.seq, 30_000)
+		// Both dApp promises must settle. The two sendTx run CONCURRENTLY, so their
+		// reject results can land on the playground in EITHER seq order — collect
+		// both with seq > seqBefore regardless of order (returned ascending), then
+		// assert. The previous `waitForPgResult` twice ("wait for seq > r1.seq")
+		// deadlocked when the higher seq settled first: r1 grabbed it, r2 then
+		// waited for an even-higher seq that never came. Distinct seqs = two settled
+		// rows = direct refutation of "only one tx visible".
+		const [r1, r2] = await waitForPgResults(page, "sendTx", seqBefore, 2, 30_000)
 		expect(r1.status).toBe("error")
 		expect(r2.status).toBe("error")
 		expect(r2.seq).toBeGreaterThan(r1.seq)

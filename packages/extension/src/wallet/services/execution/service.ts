@@ -26,7 +26,7 @@ import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import { TaskService, type WrappedTask, ExecuteOperationContent } from "@/wallet/services/task/service"
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { classifyOperationCatch } from "./rpc-cancel"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
@@ -72,6 +72,14 @@ import { type ProofGate, NOOP_PROOF_GATE } from "@/e2e/proof-gate"
 export * from "./spec"
 
 export class ExecutionService extends Service<Methods> implements ServiceSpec<Methods> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()(
+		"executeTransfer",
+		"executeOperations",
+		"getGasBalances",
+		"estimateTransferFee",
+		"estimateOperationFee",
+		"cancelJob",
+	)
 	public static name = EXECUTION_SERVICE_NAME
 
 	private pxeService: PxeServiceClient = null!
@@ -232,6 +240,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			},
 			buildAndEstimate: (op, feeSettings, parentTask) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask),
 			addTransaction: (...args) => this.transactionService.addTransaction(...args),
+			recordPendingAuthwits: (...args) => this.authRegistryService.recordPendingAuthwits(...args),
 			logDebug: (msg) => this.logDebug(msg),
 		})
 		this.viewExecutor = new ViewExecutor({

@@ -42,6 +42,7 @@ function makeExecutor(): DappSendExecutor {
 		},
 		buildAndEstimate: unreachable as never,
 		addTransaction: unreachable as never,
+		recordPendingAuthwits: unreachable as never,
 		logDebug: () => {},
 	} satisfies DappSendExecutorDeps)
 }

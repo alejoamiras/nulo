@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/vue3-vite"
-import BrutalistTitle from "./BrutalistTitle.vue"
+import { BrutalistTitle } from "@nulo/design"
 
 const meta: Meta<typeof BrutalistTitle> = {
 	title: "UI / BrutalistTitle",

@@ -73,12 +73,19 @@ test.skipIf(!hasConfig)(
 		const firstPopup = await firstPopupP
 		await waitForExecuteContent(firstPopup)
 
-		// Gate assertion: while popup #1 is open and UNAPPROVED, popup #2 must
-		// NOT exist — the baton is still held by T1's handler. (Pre-v3 this was
-		// also true; the difference is what happens AFTER approval, below.)
-		await new Promise((r) => setTimeout(r, 3_000))
-		const targetsBeforeApproval = ctx.browser.targets().filter((t) => t.type() === "page" && t.url().includes("#/windows/execute"))
-		expect(targetsBeforeApproval.length).toBe(1)
+		// Gate assertion: while popup #1 is open and UNAPPROVED, popup #2 must NOT exist —
+		// the baton is still held by T1's handler. (Pre-v3 this was also true; the difference
+		// is what happens AFTER approval, below.) Fail-fast race-detector — poll up to 3s for
+		// a 2nd execute target instead of a blind sleep; the held baton should keep it at 1.
+		const countExecuteTargets = () =>
+			ctx.browser.targets().filter((t) => t.type() === "page" && t.url().includes("#/windows/execute")).length
+		let targetsBeforeApproval = countExecuteTargets()
+		const noSecondPopupDeadline = Date.now() + 3_000
+		while (targetsBeforeApproval <= 1 && Date.now() < noSecondPopupDeadline) {
+			await new Promise((r) => setTimeout(r, 200))
+			targetsBeforeApproval = countExecuteTargets()
+		}
+		expect(targetsBeforeApproval).toBe(1)
 
 		// Arm popup #2 wait, then APPROVE popup #1. The baton releases the instant
 		// T1 enqueues on the execution mutex (inside acquireExecutionSlot, just

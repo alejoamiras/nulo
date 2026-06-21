@@ -1,29 +1,23 @@
-import { fileURLToPath, URL } from "node:url"
 import { defineConfig } from "vitest/config"
+import { noirAliases, srcDir } from "./vite.shared"
 
 export default defineConfig({
 	resolve: {
 		alias: {
-			"@": fileURLToPath(new URL("./src", import.meta.url)),
-			// Force the node variant of the noir wasm wrappers. The patched
-			// `exports.node` field works for Node's native resolver but
-			// vite's SSR bundler picks the `module: "./web/..."` field on
-			// darwin arm64 hosts, which throws `__wbindgen_malloc undefined`
-			// the first time the simulator runs a private circuit. Direct
-			// alias to the nodejs entry sidesteps vite's resolution entirely;
-			// on hosts where vite's resolver works correctly (the CI Linux
-			// runners) this is a no-op (alias points to the same file the
-			// resolver would have picked anyway).
-			"@aztec/noir-acvm_js": fileURLToPath(new URL("../../node_modules/@aztec/noir-acvm_js/nodejs/acvm_js.js", import.meta.url)),
-			"@aztec/noir-noirc_abi": fileURLToPath(
-				new URL("../../node_modules/@aztec/noir-noirc_abi/nodejs/noirc_abi_wasm.js", import.meta.url),
-			),
+			"@": srcDir,
+			// The noir-wasm node-variant aliases (+ the why) are single-owned in
+			// vite.shared.ts so this config and vitest.e2e.all stay in sync.
+			...noirAliases,
 		},
 	},
 	test: {
 		include: ["tests/e2e/network/**/*.test.ts"],
 		environment: "node",
 		globalSetup: "./tests/e2e/global-setup.ts",
+		// Per-worker: marks `.e2e-state/tests-started` so the boot-failure
+		// classifier never misclassifies a run that reached test execution as an
+		// infra-boot failure (exit 86).
+		setupFiles: ["./tests/e2e/network-setup.ts"],
 		testTimeout: 30_000,
 		hookTimeout: 300_000, // 5min — tokenReadyExtension creates EmbeddedWallet + mints tokens
 		fileParallelism: false,

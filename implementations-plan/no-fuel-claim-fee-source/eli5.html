@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — No-fuel claim fee source</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    .flag { background: #fff4f4; padding: 0.75rem 1rem; border-left: 3px solid #d04040; margin: 1rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>No-fuel claim fee source — spend the gas you earned</h1>
+  <p>You proved the private fueled bridge works: a fresh wallet bridges + fuels privately, and the claim pays its own gas. That leaves you with <strong>private Fee Juice</strong> — gas held privately at the PrivateFPC. This plan lets you <em>spend</em> it: when you do a later bridge <strong>without</strong> "arrive with gas", the claim should pay its fee from whatever gas you have — <strong>private first, public as fallback</strong> — instead of saying "no gas" because it only ever looked at your public balance.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>/blueprint light.</strong> Rubric: novelty LOW (we just shipped the private claim; the <code>FPCFeePaymentMethod</code> "pay from your FPC balance" primitive already exists), blast radius LOW (one path — the faucet's no-fuel claim — testnet only), irreversibility / migration NONE, external coupling + security MODERATE (the PrivateFPC is already integrated and trusted). 0 dimensions HIGH → bounded, single-surface → light.</p>
+
+  <h2>Review outcome (codex)</h2>
+  <p>The first draft was <strong>rejected</strong> — and rightly so. Codex caught that my original design tried to make the faucet reimplement fee selection it can't actually control (the wallet auto-defaults to a sponsor, and the "are you sure you have enough gas?" check wasn't tied to what actually gets charged). That pushed a rewrite to the simpler, correct shape (private = faucet pays automatically; public = hand to the wallet's own fee screen). Round 2: <strong>conditional approve</strong>, with two precision conditions now folded in (estimate the fee with the fee-payment attached so it's not under-counted; keep the wording honest that "public" means "unblocked, you choose in the wallet"). Full trail in <a href="plan.md">plan.md → Audit verdicts</a>.</p>
+
+  <h2>What's actually broken (plain version)</h2>
+  <p>Think of two wallets for gas: a <em>public</em> jar and a <em>private</em> jar. The private fuel claim fills your <em>private</em> jar. But the no-fuel bridge claim only checks the <em>public</em> jar — sees it empty — and refuses, even though your private jar has plenty. The fix teaches the claim to look in both jars and spend from the private one first.</p>
+
+  <div class="flag">
+    <strong>One real trade-off you're choosing (private-first):</strong> paying from the private jar via the FPC <strong>does not give change back</strong> — you pay the full reserved gas amount each time (≈ 1.5× the actual fee, the safety margin), even if the real fee was smaller. You picked private-first for privacy; this is the cost. The alternative is "always let the wallet ask me per claim" (you pick public/private/sponsored each time). Confirm at approval.
+  </div>
+
+  <div class="flag" style="border-left-color:#0366d6;background:#eef6ff;color:#0b3d66;">
+    <strong>A subtlety the review (codex) caught:</strong> the wallet has <em>no</em> way for an app to say "pay from my public gas jar" — only "use this private fee contract." So the fix splits cleanly: when you have <strong>private</strong> gas, the faucet pays from it automatically; when you only have <strong>public</strong> gas, the faucet simply stops blocking and lets the <em>wallet's own</em> fee screen handle it (you pick "Public Fee Juice" there — the wallet already supports this). Either way you're unblocked.
+  </div>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: bridge-core gets the "pay from private gas" tool</h3>
+    <p>Add the thin wrapper (<code>FPCFeePaymentMethod</code>) + the private-balance reader bits in bridge-core, right next to the existing fee-payment wrappers it already owns. Nothing user-facing yet — just the building block.</p>
+    <p class="muted">Proves itself by: bridge-core typecheck + a small unit test (the wrapper points at the right FPC) + lint, all green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: the no-fuel claim looks in both jars</h3>
+    <p>A small, pure decision function — "given public balance, private balance, and the fee, which jar do I spend?" (private first; public → hand to the wallet's picker; "couldn't read a balance" → say "try again", never a false "no gas"; truly empty → a clear shortfall message). For the private case the faucet supplies the fee <em>with the exact gas amount it checked</em>, so the pre-flight check actually matches what gets charged. Plus: widen the wallet permission list (two narrow, named functions) so the claim is allowed to read the private balance and pay from it.</p>
+    <p class="muted">Proves itself by: faucet typecheck + 7+ unit tests on the decision function (private-only, public-only, both→private, neither, exact-boundary, unreadable→retry) + a manifest-scope test + lint, all green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: prove it on the real testnet</h3>
+    <p>Extend the existing testnet script: earn private gas via a fuel claim, then do a no-fuel claim that pays from that earned private gas — and confirm it settles on V5 and the private balance went down. Same way we proved the private claim itself.</p>
+    <p class="muted">Proves itself by: the script prints settlement (✅) for a no-fuel claim paid from private gas + the FPC balance dropped, on live testnet. (The faucet→wallet wiring is proven by your manual UI test, like last time.)</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>The "PrivateFPC" is a small fee-payment contract (from Wonderland) that the wallet already knows about and already uses to pay your private fuel claim. It can hold a private gas balance for you and pay future fees from it via a function called <code>pay_fee</code>. The only reason the no-fuel claim couldn't use it yet is that (1) the faucet never read that balance, and (2) the wallet's permission list for this app didn't include the two functions needed (<code>balance_of</code> to read it, <code>pay_fee</code> to spend it). Both are narrow, named permissions on one pinned contract — no broad access.</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li><strong>Private-first no-refund (confirm at approval):</strong> you pay full reserved gas each time, no change back. Keep private-first, or flip to public-first? (See the red box above.)</li>
+    <li><strong>Fee-estimate basis (I'll resolve):</strong> the pre-flight "do you have enough?" check uses the same grounded fee reference the claim already uses (~2.5 FJ observed). With ~10 FJ private after a fuel claim, there's a big cushion, so exactness isn't critical; the live test confirms a passing check means a settling claim.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: <strong>faucet no-fuel claim only</strong> (the extension wallet's general send paying from private gas is explicitly OUT — a separate, bigger arc).</li>
+      <li>Confirm tier: <strong>light</strong>.</li>
+      <li>Confirm the private-first / no-refund trade-off (or flip to public-first).</li>
+      <li>Confirm validation: unit + lint/typecheck + the live testnet proof.</li>
+      <li>Approve · conditionally approve (with conditions) · or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>One drives the implementation session. <code>/goal</code> works until a condition holds and survives <code>--resume</code>; <code>/loop</code> re-fires on an interval. Here completion is fully transcript-observable (phase ✓'s + gate output + the live ✅), so <code>/goal</code> is the better fit.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose; setting one replaces the other.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended: /goal</h3>
+      <pre><code>/goal All 3 phases marked ✓ in implementations-plan/no-fuel-claim-fee-source/plan.md (the per-phase headers, not just chat), each ✓ backed by its phase's validation gate reported passing in the transcript; for each phase the agent printed `LESSONS_FILE=implementations-plan/no-fuel-claim-fee-source/lessons/phase-N.md`; the live Phase-3 fuel-testnet no-fuel-spend variant printed settlement (✅) on V5; `/code-review max --fix` complete with findings applied + committed; codex post-impl audit complete with high/critical addressed; `bun run --cwd packages/faucet test`, `bun run --cwd packages/bridge-core test`, and `bun run lint` all exit 0 in the transcript. Hard limits: testnet only, never mainnet, never expand scope beyond the faucet no-fuel claim (the wallet's general send is OUT).</code></pre>
+    </div>
+
+    <h3>Alternative: /loop</h3>
+    <pre><code>/loop 15m Drive implementations-plan/no-fuel-claim-fee-source forward. Never idle. Each firing: read plan.md + lessons/; git status; next pending phase; after each edit run `bun run lint` + the phase's gate; commit→push; mark ✓ only when the gate passes + print LESSONS_FILE=…/lessons/phase-N.md. Stuck/decision? /codex xhigh, decide, log it. Hard limits: testnet only, never mainnet, never expand scope (faucet no-fuel claim only; wallet general send is OUT). All phases ✓ → /code-review max --fix → codex post-impl audit → wrap-up + stop.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

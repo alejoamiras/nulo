@@ -110,7 +110,9 @@ interface SimulationResultShape {
 export async function readBalance(
 	wallet: Wallet,
 	contract: unknown,
-	fn: "balance_of_public" | "balance_of_private",
+	// `balance_of` is the Wonderland PrivateFPC's `abi_utility` private-FJ read — it takes the same
+	// utility path as `balance_of_private` (the `else` branch below), NOT the public-view path.
+	fn: "balance_of_public" | "balance_of_private" | "balance_of",
 	account: AztecAddress,
 ): Promise<bigint> {
 	const c = contract as ContractWithMethods

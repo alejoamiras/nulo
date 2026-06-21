@@ -3,7 +3,7 @@ import { NoteStatus, type NoteDao } from "@aztec/stdlib/note"
 import { canonicalSlotHex, type NoteFieldType, type NoteSchema } from "@nulo/aztec-runtime/pxe"
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { NetworkService, networkInfoFrom, type Network } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
@@ -33,6 +33,7 @@ function decodeField(value: { toString: () => string }, type: NoteFieldType): st
 }
 
 export class NoteService extends Service<Methods> implements ServiceSpec<Methods> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()("getNotes", "getNotesRaw", "getBlockTimestamp")
 	public static name = NOTE_SERVICE_NAME
 
 	private pxeService: PxeServiceClient = null!

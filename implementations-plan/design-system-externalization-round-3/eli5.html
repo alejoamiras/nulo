@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — design-system round 3</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.25rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .risk { border-left-color: #d97706; background: #fff8ef; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    .decision { background: #fdf2f8; padding: 0.75rem 1rem; border-left: 3px solid #db2777; margin: 1rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Design system — round 3 (close-out cleanups)</h1>
+  <p>Round 1 and round 2 moved the wallet's UI building blocks into a shared <code>@nulo/design</code>
+  package. Round 3 sweeps up what was deliberately left behind: a settled <strong>decision to keep the
+  faucet and extension toasts separate</strong> (they're genuinely different things), dropping a broken
+  <code>dark</code> color name, retiring the last duplicate button (<code>AppButton</code>), and deleting
+  9 dead "shadow" copies of primitives that the extension was still secretly using instead of the
+  shared ones.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>Light.</strong> Three of the four pieces are tiny and low-risk (rubric: 0/6 high). The
+  fourth — deleting the 9 shadow copies — touches building blocks used <em>everywhere</em>, and codex's
+  audit found it's actually a <strong>reconciliation</strong>, not a clean delete: the shared versions
+  quietly gained real behavior (a disabled-Checkbox guard, a Toggle color option) the old copies lack.
+  So that phase carries extra rigor (component-by-component checks + targeted tests + a real-network
+  test run + a human eyeball), and whether it stays in this light arc or splits into its own follow-up
+  is one of two decisions for you below. Codex's verdict: <strong>conditional approve</strong>.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1 — Record the toast decision (no code)</h3>
+    <p>Write down, once and for all, that the faucet's toast (a <em>queue</em> of up to 4 messages with
+    links) and the extension's toast (one quick popup message) stay separate — they're different by
+    design because a web app and a 360px extension popup need different things. Removes "unify toasts"
+    from the future-work list.</p>
+    <p class="muted">Proves itself by: lint + no-brand guard green; no broken doc links.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2 — Drop the broken <code>dark</code> color</h3>
+    <p><code>color="dark"</code> never worked (it points at an undeclared variable), so 8 places in the
+    extension silently show full-strength text instead of the muted gray they intended. We remove the
+    broken color name and repoint those 8 sites to a real muted token (proposed: <code>tertiary</code>).</p>
+    <p class="muted">Proves itself by: typecheck + design/extension unit tests + builds; zero traces of
+    <code>dark</code>/<code>--gray-15</code> left.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3 — Retire <code>AppButton</code></h3>
+    <p>The old <code>AppButton</code> has only one user left (<code>DripButton</code>). Point DripButton at
+    the canonical <code>Button</code> and delete AppButton. One catch codex caught: the new Button doesn't
+    auto-disable while loading, so we explicitly disable-on-loading to keep drip buttons from re-firing
+    mid-request.</p>
+    <p class="muted">Proves itself by: typecheck + design + faucet tests + builds; no <code>AppButton</code>
+    references remain.</p>
+  </div>
+  <div class="phase risk">
+    <h3>Phase 4 — Delete the 9 shadow copies (the careful one)</h3>
+    <p>The extension still renders its own local copies of Flex/Icon/Text/etc. instead of the shared
+    package versions. Delete the copies so the shared versions take over. Most are byte-identical ports;
+    the icon set is identical (verified). But Checkbox and Toggle <em>diverged</em> — the shared versions
+    are better (guard disabled clicks; add a color option) — so adopting them is a real behavior change.
+    Each of the 9 gets a port-vs-reconciliation verdict, the changed ones get pinned with tests, then a
+    network test run + a human "looks the same" check.</p>
+    <p class="muted">Proves itself by: typecheck + all units + builds + storybook + smoke + <strong>network
+    e2e</strong> + a human no-deltas sign-off (icons, layouts, the Checkbox/Toggle behavior, the dark→muted
+    change). Not marked done without the sign-off.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>"Shadow copies" exist because round 1 moved primitives into the package but didn't delete the
+  originals, so the extension kept using the originals. They've drifted apart since. Deleting them is
+  mostly safe, but it's the one place a mistake would be visible everywhere — hence the heavier checks.
+  The toast decision matters because the obvious "unify everything" instinct is wrong here: forcing one
+  toast system would either crowd the tiny popup or strip the web app's queue.</p>
+
+  <h2>Open questions — your call at the gate</h2>
+  <div class="decision">
+    <strong>1. What color do the 8 <code>dark</code> sites become?</strong> They currently show
+    full-strength text (the bug). Proposed: <code>tertiary</code> (muted) — likely the original intent.
+    Alternatives: <code>secondary</code> (lighter mute), or keep full-strength (true no-change).
+  </div>
+  <div class="decision">
+    <strong>2. Phase 4 — keep it in this arc, or split it out?</strong> Codex flagged it as heavier than
+    a "delete dead code" job. (A) Keep it here with the added rigor (per-component checks + targeted
+    tests + network e2e + visual sign-off), or (B) ship phases 1–3 now and do phase 4 as its own focused
+    follow-up.
+  </div>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope (4 phases) + the two decisions above.</li>
+      <li>Confirm tier <code>light</code> (with the P4 keep-vs-split choice).</li>
+      <li>Confirm validation: design + faucet + builds on P1–P3; + network e2e + human no-deltas on P4.</li>
+      <li><code>/harden</code>: not recommended — presentational only, no trust boundary / secrets / CI surface.</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>Two options for the autonomous session. <code>/goal</code> works until a condition holds and
+    survives <code>--resume</code>; <code>/loop</code> fires on an interval until cleared (7-day expiry).</p>
+    <p class="warning">Use exactly ONE per session — they don't compose.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended: /goal (completion is observable in plan.md + gates)</h3>
+      <pre><code>/goal All 4 phases marked ✓ in implementations-plan/design-system-externalization-round-3/plan.md, each ✓ backed by its phase's Validation gate reported passing; LESSONS_FILE printed per phase; toast keep-separate recorded; no color="dark"/AppButton/.color--dark/--gray-15 left in packages/*/src; the 9 round-1 shadows deleted + resolver-inventory asserts none remain; /code-review max --fix applied + committed; codex post-impl audit high/critical addressed; bun run audit:vue and bun run lint exit 0. P4 visual no-deltas sign-off recorded in lessons.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop (fixed 15m cadence)</h3>
+    <pre><code>/loop 15m Drive implementations-plan/design-system-externalization-round-3 forward. Never idle. Read plan.md + lessons/ first; take the next pending step; lint + touched-package tests after each edit; commit → push; phase green = its plan.md gate passes (mark ✓, file lessons, print LESSONS_FILE); stuck → /codex xhigh; all 4 ✓ → /code-review max --fix → codex post-impl → wrap up. P4 holds for the human visual sign-off.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="audit-codex.md">Codex audit</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

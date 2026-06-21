@@ -1,6 +1,7 @@
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { normalizeError } from "@nulo/wallet-core/jobs"
 import type { ILogger } from "@/wallet/logger"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
@@ -33,6 +34,16 @@ export * from "./functions"
 export * from "./spec"
 
 export class TokenService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()(
+		"getTokens",
+		"getToken",
+		"addToken",
+		"updateToken",
+		"deleteToken",
+		"getTokenInterface",
+		"parseTokenInterface",
+		"previewTokenMetadata",
+	)
 	public static name = TOKEN_SERVICE_NAME
 
 	public readonly onTokenAdded = new EventHandler<TokenInfo>()
@@ -546,7 +557,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				} catch (err) {
 					result.push({
 						...token,
-						restoreError: err instanceof Error ? err.message : err,
+						restoreError: toRestoreError(err),
 					})
 				}
 			}

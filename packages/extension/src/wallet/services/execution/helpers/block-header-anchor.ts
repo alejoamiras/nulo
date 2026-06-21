@@ -25,7 +25,7 @@ export async function getBlockHeaderAnchor(pxe: IPXE, node: AztecNode): Promise<
 		return await pxe.getSyncedBlockHeader()
 	} catch {
 		try {
-			return (await node.getBlockHeader()) ?? undefined
+			return (await node.getBlock("latest"))?.header ?? undefined
 		} catch {
 			return undefined
 		}

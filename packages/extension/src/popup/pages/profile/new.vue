@@ -9,30 +9,23 @@
 </route>
 
 <script setup>
-/** Components */
-import NewProfileCredentials from "@/popup/components/modules/settings/new-profile/NewProfileCredentials.vue"
-import NewProfileMethodTabs from "@/popup/components/modules/settings/new-profile/NewProfileMethodTabs.vue"
-import PasskeyCeremonyDialog from "@/popup/components/popups/PasskeyCeremonyDialog.vue"
-
 /** Composables */
-import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
-import { useProfileNameField } from "@/composables/useProfileNameField"
-
-/** Services */
-import { AccountServiceClient } from "@/wallet/services/account/client"
+import { useProfileCreateFlow } from "@/composables/useProfileCreateFlow"
 
 /** Utils */
-import { managers, setSentinel, initTransactionService } from "@/utils/core"
-import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { capitalize } from "@/utils/string"
-import { sleep } from "@/wallet/utils"
-import { createPasskeyProfileWithRetry } from "@/wallet/utils/create-passkey-profile"
 import { redirectToOnboardingTabIfNeeded } from "@/wallet/utils/onboarding-tab"
-import { UserRejectedError } from "@nulo/extension-messaging/errors"
+import { activateCreatedProfile, makeCreateKeydownHandler } from "./new-profile-helpers"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 import { useNotificationStore } from "@/stores/notification.store"
+
+/** Components */
+import NewProfileCredentials from "@/popup/components/modules/settings/new-profile/NewProfileCredentials.vue"
+import NewProfileMethodTabs from "@/popup/components/modules/settings/new-profile/NewProfileMethodTabs.vue"
+import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vue"
+
 const appStore = useAppStore()
 const notificationStore = useNotificationStore()
 
@@ -40,8 +33,7 @@ const route = useRoute()
 const router = useRouter()
 
 // Deep-link bypass: redirect to onboarding tab when no profile exists AND
-// onboarding hasn't been completed. Same predicate as register + import,
-// shared via @/wallet/utils/onboarding-tab.
+// onboarding hasn't been completed. Same predicate as register + import.
 onBeforeMount(() => redirectToOnboardingTabIfNeeded(appStore))
 
 const backTo = computed(() => String(route.query.from || "/popup/register"))
@@ -50,133 +42,49 @@ const wrapperRef = useTemplateRef("wrapperRef")
 const heroVisible = ref(true)
 let scrollEl = null
 
-const type = ref("password")
-const password = ref("")
-const repeatedPassword = ref("")
 const maxPasswordLength = 128
 
-// Profile name is required. Validated at submit time (not via :disabled) so
-// the user gets a visible shake + inline error instead of a silently-disabled
-// button. nameError clears on input.
 const {
 	profileName,
-	trimmedName,
 	nameError,
 	shakeName,
 	nameInputRef,
-	validate: validateName,
-	handleInput: handleNameInput,
-	dispose: disposeNameField,
-} = useProfileNameField()
-
-const isAllowedToContinue = computed(() => {
-	// Name validation runs at submit time (shake + inline error); excluded
-	// here on purpose so an empty name doesn't silently disable the button.
-	if (type.value === "passkey") return true
-	if (!password.value.length || password.value.length < 8) return false
-	if (!repeatedPassword.value || password.value !== repeatedPassword.value) return false
-	return true
-})
-
-const strengthHint = computed(() => {
-	if (type.value === "passkey") return ""
-	if (!password.value || password.value.length < 8) return "At least 8 characters"
-	if (password.value !== repeatedPassword.value) return "Passwords don't match"
-	if (password.value.length > 24) return "Long enough. Don't forget it."
-	return "Strong password"
-})
-
-// Path A: in-page passkey ceremony for create flow.
-const { request: ceremonyRequest, runCeremony, onResolve: onCeremonyResolve, onReject: onCeremonyReject } = usePasskeyCeremony()
-
-/** Run the passkey-create ceremony in-page, then call the SW with the
- *  collected credential. Retries ONCE on ProfileIdConflictError via the
- *  shared helper at @/wallet/utils/create-passkey-profile. */
-function createPasskeyProfileViaModal(name) {
-	return createPasskeyProfileWithRetry(name, {
-		runCeremony,
-		generateProfileId: () => managers.profile.generateProfileId(),
-		createPasskeyProfile: (n, c) => managers.profile.createPasskeyProfile(n, c),
-	})
-}
-
-const isCreating = ref(false)
-const handleCreate = async () => {
-	if (!isAllowedToContinue.value || isCreating.value) return
-
-	// Latch FIRST, before the async getProfiles() fetch: two rapid clicks
-	// both hit the pre-check on the same tick, and without an early latch
-	// they'd race past it and create two profiles.
-	isCreating.value = true
-
-	const existingNames = (await managers.profile.getProfiles()).map((p) => p.name)
-	if (!validateName({ existingNames })) {
-		isCreating.value = false
-		return
-	}
-	const name = trimmedName.value
-
-	let profile
-	try {
-		profile =
-			type.value === "passkey" ? await createPasskeyProfileViaModal(name) : await managers.profile.createProfile(name, password.value)
-	} catch (e) {
-		// Path A user cancel: silent return (matches prior behavior of
-		// skipping the warning toast for "user closed" / "timed out or not
-		// allowed" — now via typed boundary instead of string-matching).
-		if (e instanceof UserRejectedError) {
-			isCreating.value = false
-			return
-		}
-		const description =
-			type.value === "passkey"
-				? "An error occurred while creating the profile. This authenticator may not be supported or encountered an issue. Try again or use another one."
-				: "An error occurred while creating the profile. Please try again."
-		const note = type.value === "passkey" ? "Windows Hello may not work correctly with some versions of Windows." : undefined
-
+	handleNameInput,
+	ceremonyRequest,
+	onCeremonyResolve,
+	onCeremonyReject,
+	authMethod: type,
+	password,
+	repeatedPassword,
+	isCreating,
+	strengthHint,
+	isAllowedToContinue,
+	handleCreate,
+	dispose,
+} = useProfileCreateFlow({
+	// Popup activation is listener-based (app.vue's onActiveProfileChanged runs
+	// the bootstrap); this manual tail waits for it, loads accounts, persists
+	// the active account, and routes. Extracted to a testable page helper.
+	onCreated: (profile) => activateCreatedProfile(profile, { appStore, router }),
+	notifyCreateFailed: (isPasskey) => {
 		notificationStore.create({
 			type: "warning",
 			payload: {
-				title: "Profile Creation Failed",
-				description,
-				note,
+				title: "Profile creation failed",
+				description: isPasskey
+					? "An error occurred while creating the profile. This authenticator may not be supported or encountered an issue. Try again or use another one."
+					: "An error occurred while creating the profile. Please try again.",
+				note: isPasskey ? "Windows Hello may not work correctly with some versions of Windows." : undefined,
 				confirmText: "OK",
 				onConfirm: () => {},
 			},
 		})
+	},
+})
 
-		console.error("Failed to create profile:", e)
-		isCreating.value = false
-		return
-	}
-
-	while (!appStore.isLogined) {
-		await sleep(100)
-	}
-
-	managers.account = new AccountServiceClient()
-
-	appStore.profile = profile
-	await setLastActiveProfileId(profile.id)
-	if (!appStore.network) throw new Error("Network not set")
-	appStore.accounts = await managers.account.getAccounts(profile.id, appStore.network.chainId, true)
-
-	initTransactionService(appStore.onTxAdded, appStore.onTxUpdated)
-
-	await chrome.storage.local.set({
-		"nulo:ui:activeAccount": appStore.account?.address,
-	})
-
-	await setSentinel()
-
-	isCreating.value = false
-
-	router.push("/popup/general")
-}
-
-const onKeydown = (e) => {
-	if (e.key === "Enter") handleCreate()
-}
+// Quirk 2: only submit on Enter from a text field, so Enter on a focused
+// button doesn't double-fire alongside its native click.
+const onKeydown = makeCreateKeydownHandler(handleCreate)
 
 const handleScroll = () => {
 	if (!scrollEl) return
@@ -193,7 +101,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-	disposeNameField()
+	dispose()
 	document.removeEventListener("keydown", onKeydown)
 	scrollEl?.removeEventListener("scroll", handleScroll)
 	scrollEl = null

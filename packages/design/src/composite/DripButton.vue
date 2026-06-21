@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import AppButton from "../ui/AppButton.vue"
+import Button from "../ui/Button.vue"
 
 const props = withDefaults(
 	defineProps<{
@@ -19,14 +19,16 @@ function onClick() {
 </script>
 
 <template>
-	<AppButton
-		variant="outline"
+	<!-- `Button` does NOT disable-on-loading, so disable explicitly on `disabled || loading` to keep a
+	     drip button from re-firing mid-request. `data-loading` is the e2e probe. -->
+	<Button
+		variant="primary_outline"
 		:loading="loading"
-		:disabled="disabled"
+		:disabled="disabled || loading"
 		:data-loading="loading"
 		:aria-label="ariaLabel || label"
 		@click="onClick"
 	>
 		{{ label }}
-	</AppButton>
+	</Button>
 </template>

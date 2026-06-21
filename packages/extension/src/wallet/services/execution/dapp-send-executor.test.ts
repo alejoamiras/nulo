@@ -78,6 +78,7 @@ function makeHarness(overrides: Partial<DappSendExecutorDeps> = {}) {
 		nonce: { toString: () => "42" },
 		txCalls: [{ contract: "0xc", method: "dapp_method", args: [] }],
 		feePaymentMethod: { kind: "fee_juice" },
+		pendingPublicAuthwits: [],
 	}
 	const releaseSlot = vi.fn()
 	const proveAndSend = vi.fn(async (ctx: { recordTransaction: (h: string) => Promise<unknown> }) => {
@@ -104,6 +105,7 @@ function makeHarness(overrides: Partial<DappSendExecutorDeps> = {}) {
 		},
 		buildAndEstimate: vi.fn(async () => built as never),
 		addTransaction: vi.fn(async () => ({}) as never),
+		recordPendingAuthwits: vi.fn(async () => {}),
 		logDebug: vi.fn(),
 		...overrides,
 	}
@@ -163,6 +165,51 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 			expect.objectContaining({ message: expect.stringContaining("build broke") }),
 		)
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
+	})
+})
+
+describe("DappSendExecutor — public-authwit recording (Phase 5 trust-point)", () => {
+	const grant = { account: "0xacct", hash: "0xgrant", content: { kind: "call" } as never }
+	const grantOp = {
+		kind: "send_transaction",
+		networkId: "net-1",
+		accountAddress: "0xacct",
+		feeSettings: { paymentMethod: { kind: "fj" } },
+		actions: [{ kind: "add_public_authwit", content: { kind: "call" } }],
+	} as never
+
+	test("records a built public authwit ONCE at the post-send tail, tx-linked", async () => {
+		const { executor, deps, built } = makeHarness({
+			buildAndEstimate: vi.fn(async () => ({ ...built, pendingPublicAuthwits: [grant] }) as never),
+		})
+		await executor.executeSendTransaction(grantOp, ORIGIN)
+		const rec = deps.recordPendingAuthwits as ReturnType<typeof vi.fn>
+		expect(rec).toHaveBeenCalledTimes(1)
+		const args = rec.mock.calls[0] as unknown[]
+		expect(args[1]).toEqual([grant]) // the pending items
+		expect(args[2]).toBe("0xhash") // keyed by the tx that wrote them
+	})
+
+	test("ESTIMATE records nothing (build is pure; no send → no recording)", async () => {
+		const { executor, deps, built } = makeHarness({
+			buildAndEstimate: vi.fn(async () => ({ ...built, pendingPublicAuthwits: [grant] }) as never),
+		})
+		await executor.estimateOperationFee(grantOp, { paymentMethod: { kind: "fj" } } as never)
+		expect(deps.recordPendingAuthwits).not.toHaveBeenCalled()
+	})
+
+	test("SEND-FAILURE records nothing (the closure runs only after a successful send)", async () => {
+		const { executor, deps, built } = makeHarness({
+			buildAndEstimate: vi.fn(async () => ({ ...built, pendingPublicAuthwits: [grant] }) as never),
+			coordinator: {
+				proveAndSend: vi.fn(async () => {
+					throw new Error("send broke")
+				}),
+				simulateTxTask: vi.fn(async () => ({})),
+			} as never,
+		})
+		await expect(executor.executeSendTransaction(grantOp, ORIGIN)).rejects.toThrow("send broke")
+		expect(deps.recordPendingAuthwits).not.toHaveBeenCalled()
 	})
 })
 
