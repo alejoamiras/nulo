@@ -8,14 +8,13 @@ import { NULO_DESIGN_COMPONENTS, nuloDesignResolver } from "./design-resolver"
  * which must never enter the resolver). Wrapper-backed names (`Button`/`SubPageHeader`/`ToastManager`)
  * stay local and must be ABSENT (else the bare tag resolves to the package base instead of the wrapper).
  *
- * Round-1 vs round-2 split (don't overclaim "deleted"): the ROUND-2 names (Spinner/Banner/LoadingState/
- * Tooltip/Popover/Input) had their extension-local SFC DELETED, so `components.d.ts` resolves them to
- * `@nulo/design`. The ROUND-1 names (Flex/Icon/Text/MaterialIcon/Badge/BrutalistTitle/Checkbox/
- * SectionLabel/Toggle) are in the resolver but their local SFCs were NOT deleted in round 1 — the
- * dir-scan still SHADOWS them to local files, so for those names this set is ASPIRATIONAL pending the
- * round-3 local-SFC cleanup (see round-2-backlog.md). Typecheck catches a missing export; only this
- * pins against a wrong or extra remap. Grow `EXPECTED_MIGRATED` in the SAME PR that deletes a local SFC
- * + adds its name to the resolver.
+ * All 15 names are genuinely DELETED-and-migrated: round 2's 6 (Spinner/Banner/LoadingState/Tooltip/
+ * Popover/Input) in round 2, and round 1's 9 (Flex/Icon/Text/MaterialIcon/Badge/BrutalistTitle/Checkbox/
+ * SectionLabel/Toggle) in round-3 P4 — closing the round-1 cleanup debt (those shadows had previously
+ * WON the bare tag over the package version; Checkbox/Toggle were reconciliations, see round-3 plan).
+ * The "no local shadow" test below ENFORCES it. Typecheck catches a missing export; this pins against a
+ * wrong/extra remap AND a re-introduced shadow. Grow `EXPECTED_MIGRATED` in the SAME PR that deletes a
+ * local SFC + adds the name to the resolver.
  */
 const EXPECTED_MIGRATED = [
 	// round 1 — L1 core + the pure L2 subset
@@ -63,5 +62,14 @@ describe("nuloDesignResolver inventory", () => {
 		const resolve = nuloDesignResolver() as ResolveFn
 		expect(resolve("Flex")).toEqual({ name: "Flex", from: "@nulo/design" })
 		expect(resolve("NotAThing")).toBeUndefined()
+	})
+
+	test("no extension-local SFC shadows a resolver name (round-1/2 cleanup invariant)", () => {
+		// A local <Name>.vue matching a NULO_DESIGN_COMPONENTS entry would be dir-scan-registered and WIN
+		// the bare tag over the package version (the round-1 debt P4 closed). Pin that none re-appears.
+		const basename = (p: string) => p.replace(/^.*\//, "").replace(/\.vue$/, "")
+		const localComponentNames = Object.keys(import.meta.glob("../src/components/**/*.vue")).map(basename)
+		const shadows = localComponentNames.filter((name) => NULO_DESIGN_COMPONENTS.has(name))
+		expect(shadows).toEqual([])
 	})
 })

@@ -113,7 +113,7 @@ no `AppButton` refs remain) · `bun run test:faucet` (TokenCard/DripButton rende
 `bun run lint` · `bun run build:faucet` · `bun run build`. Pass: all exit 0;
 `! grep -rn AppButton packages/*/src` (except this plan). Layers: typecheck · lint · unit · both builds.
 
-### P4 — Delete the 9 round-1 local SFC shadows (the risk-bearing phase) ☐
+### P4 — Delete the 9 round-1 local SFC shadows (the risk-bearing phase) ✓ MACHINE-GREEN (network e2e + visual sign-off PENDING)
 
 Round 1 externalized 9 primitives but **left the extension-local copies in place**, and `components.d.ts`
 + the dir-scan resolve the bare tags to those LOCALS — so the round-1 externalization is inert. The
