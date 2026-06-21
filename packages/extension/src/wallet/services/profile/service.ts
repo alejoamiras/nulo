@@ -224,7 +224,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// Generate the id BEFORE entering the lock so the passkey UI
 		// prompt below doesn't hold the facade lock for minutes.
 		const id = credentialData?.userHandle ?? (await this.repo.generateUniqueId())
-		const recovery = await this.acquireRecovery({ ceremony: "create", userHandle: id }, credentialData)
+		const recovery = await this.acquireRecovery({ ceremony: "create", userHandle: id, name }, credentialData)
 
 		try {
 			await this.lock.enter()
@@ -363,7 +363,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * logic.
 	 */
 	private async acquireRecovery(
-		opts: { ceremony: "create"; userHandle: string } | { ceremony: "getById"; credentialId: string } | { ceremony: "getAny" },
+		opts:
+			| { ceremony: "create"; userHandle: string; name: string }
+			| { ceremony: "getById"; credentialId: string }
+			| { ceremony: "getAny" },
 		credentialData: PasskeyCredentialData | undefined,
 	): Promise<PasskeyRecovery> {
 		if (credentialData) {
@@ -371,7 +374,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		}
 		switch (opts.ceremony) {
 			case "create":
-				return await this.passkeyCoordinator.createForNewProfile(opts.userHandle)
+				return await this.passkeyCoordinator.createForNewProfile(opts.userHandle, opts.name)
 			case "getById":
 				return await this.passkeyCoordinator.recoverByCredentialId(opts.credentialId)
 			case "getAny":

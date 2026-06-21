@@ -17,7 +17,7 @@ vi.mock("@/wallet/utils/passkey-ceremony", () => ({
 import { runPasskeyCeremony } from "@/wallet/utils/passkey-ceremony"
 const runPasskeyCeremonyMock = vi.mocked(runPasskeyCeremony)
 
-const fakeRequest = { mode: "create" as const, userHandle: "uh" }
+const fakeRequest = { mode: "create" as const, userHandle: "uh", name: "Test" }
 const fakeData = { id: "cred-x", prf: "prf-bytes" }
 
 beforeEach(() => {

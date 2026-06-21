@@ -30,6 +30,9 @@ export type PasskeyRequest =
 	| {
 			mode: "create"
 			userHandle: string
+			/** Profile name — slugified into the WebAuthn credential label
+			 *  (`user.name`/`displayName`) at registration. Cosmetic only. */
+			name: string
 	  }
 	| {
 			mode: "get"

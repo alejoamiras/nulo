@@ -52,8 +52,8 @@ export class PasskeyRecoveryCoordinator {
 	 *  derive the master secret from the PRF output. Caller (the
 	 *  facade) pre-picked `profileId` via `ProfileRepository.generateUniqueId()`
 	 *  and will re-verify it under the lock after this returns. */
-	public async createForNewProfile(profileId: string): Promise<PasskeyRecovery> {
-		const credential = await this.passkeys.createKey(profileId)
+	public async createForNewProfile(profileId: string, name: string): Promise<PasskeyRecovery> {
+		const credential = await this.passkeys.createKey(profileId, name)
 		const secret = await credential.deriveMasterSecret()
 		return {
 			credentialId: credential.id,

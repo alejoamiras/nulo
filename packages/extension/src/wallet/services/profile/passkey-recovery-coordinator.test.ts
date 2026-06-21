@@ -61,9 +61,9 @@ describe("PasskeyRecoveryCoordinator", () => {
 			const passkeys = makeFakePasskeyService({ create: createKey as never })
 			const coord = newCoordinator(passkeys)
 
-			const result = await coord.createForNewProfile("profile-123")
+			const result = await coord.createForNewProfile("profile-123", "Test")
 
-			expect(createKey).toHaveBeenCalledWith("profile-123")
+			expect(createKey).toHaveBeenCalledWith("profile-123", "Test")
 			expect(result.credentialId).toBe("cred-profile-123")
 			expect(result.userHandle).toBe("profile-123")
 			expect(result.secret.toString("hex")).toBe(frBytes("02").toString("hex"))
@@ -77,7 +77,7 @@ describe("PasskeyRecoveryCoordinator", () => {
 			})
 			const coord = newCoordinator(passkeys)
 
-			await expect(coord.createForNewProfile("profile-123")).rejects.toThrow(/user cancelled/)
+			await expect(coord.createForNewProfile("profile-123", "Test")).rejects.toThrow(/user cancelled/)
 		})
 	})
 

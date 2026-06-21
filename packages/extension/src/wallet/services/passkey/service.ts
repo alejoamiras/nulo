@@ -57,9 +57,12 @@ export class PasskeyService extends Service<Methods> implements ServiceSpec<Meth
 		super(PASSKEY_SERVICE_NAME, logger)
 	}
 
-	/** PATH B — SW-driven window flow for create. No current callers. */
-	public async createKey(userHandle: string): Promise<PasskeyCredential> {
-		return await this.openWindowAndWait({ mode: "create", userHandle })
+	/** PATH B — SW-driven window flow for create. No current PRODUCTION callers,
+	 *  but reachable via `ProfileService.createPasskeyProfile` when no
+	 *  `credentialData` is supplied. `name` is the profile name, slugified into
+	 *  the credential label by `buildCreateOptions`. */
+	public async createKey(userHandle: string, name: string): Promise<PasskeyCredential> {
+		return await this.openWindowAndWait({ mode: "create", userHandle, name })
 	}
 
 	/** PATH B — SW-driven window flow for get. No current callers. */

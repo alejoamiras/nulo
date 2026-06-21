@@ -97,7 +97,7 @@ Create the sanitizing formatter as a **pure, WebAuthn-free** module so all the e
 - **Pass criteria:** typecheck exit 0; biome clean; all new unit cases green (incl. the accent-fold case 4b).
 - **Layers:** typecheck/lint · unit.
 
-## Phase 2 — Thread the name + wire the formatter + regression test + manual smoke
+## Phase 2 — Thread the name + wire the formatter + regression test + manual smoke ✓ (automated gates; manual smoke deferred to human)
 
 **Type-driven threading (make `name` required so the compiler finds every site):**
 - `packages/extension/src/wallet/services/passkey/spec.ts`: `PasskeyRequest` create variant → `{ mode: "create"; userHandle: string; name: string }`.
