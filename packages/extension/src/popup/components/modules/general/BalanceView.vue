@@ -163,6 +163,9 @@ function onBalanceUpdated(tb) {
 	}
 }
 function onBalanceDeleted(tb) {
+	// Q8 drift fix: maintain the list like onBalanceAdded/Updated do — without
+	// this the deleted balance lingered until the next full fetch.
+	tokenBalances.value = tokenBalances.value.filter((_tb) => _tb.id !== tb.id)
 	if (!props.tokenBalance && tokenToDisplay.value?.id === tb.token.id) {
 		appStore.displayOption = "total_account_value"
 	}
