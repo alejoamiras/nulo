@@ -163,10 +163,15 @@ function onBalanceUpdated(tb) {
 	}
 }
 function onBalanceDeleted(tb) {
-	// Q8 drift fix: maintain the list like onBalanceAdded/Updated do — without
-	// this the deleted balance lingered until the next full fetch.
+	// tokenToDisplay is computed from tokenBalances, so the selected-token check
+	// must read the pre-delete list — capture it BEFORE filtering, otherwise the
+	// recompute returns undefined and the displayOption reset never fires
+	// (deleting the displayed balance would leave the home view stuck on a stale
+	// selection). Maintaining the list here also stops the deleted row lingering
+	// until the next full fetch.
+	const wasDisplayed = !props.tokenBalance && tokenToDisplay.value?.id === tb.token.id
 	tokenBalances.value = tokenBalances.value.filter((_tb) => _tb.id !== tb.id)
-	if (!props.tokenBalance && tokenToDisplay.value?.id === tb.token.id) {
+	if (wasDisplayed) {
 		appStore.displayOption = "total_account_value"
 	}
 }
