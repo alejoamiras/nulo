@@ -43,7 +43,7 @@ import { Fr } from "@aztec/foundation/curves/bn254"
 import { type AbiType, encodeArguments, FunctionCall, FunctionSelector, FunctionType } from "@aztec/stdlib/abi"
 import { AuthWitness } from "@aztec/stdlib/auth-witness"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { GasSettings } from "@aztec/stdlib/gas"
+import { Gas, GasSettings } from "@aztec/stdlib/gas"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { Capsule, ExecutionPayload, HashedValues, TxContext, TxExecutionRequest } from "@aztec/stdlib/tx"
 import type { ILogger } from "@/wallet/logger"
@@ -432,7 +432,11 @@ export class TxRequestBuilder {
 			// identity has drifted from the network the user selected.
 			assertLiveChainIdentity(network, nodeInfo)
 			const currentMinFees = await node.getCurrentMinFees()
-			const gasSettings = GasSettings.fallback({ maxFeesPerGas: currentMinFees })
+			// 5.0: `fallback` requires explicit gasLimits — fill the network's per-tx admission limit.
+			const gasSettings = GasSettings.fallback({
+				maxFeesPerGas: currentMinFees,
+				gasLimits: new Gas(nodeInfo.txsLimits.gas.daGas, nodeInfo.txsLimits.gas.l2Gas),
+			})
 			const txRequest = new TxExecutionRequest(
 				call.to,
 				call.selector,

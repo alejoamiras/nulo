@@ -28,6 +28,7 @@ import {
 	checkGetContractMetadata,
 	checkIsTokenRegistered,
 	checkGetContractClassMetadata,
+	checkRegisterContractClassDisabled,
 	checkSendTx,
 	checkGrantPublicAuthwit,
 	checkSimulateTx,
@@ -149,6 +150,12 @@ export const METHOD_REGISTRY: Record<string, MethodDescriptor> = {
 		capability: "contractClasses",
 		routing: { via: "network-operation", kind: "aztec_getContractClassMetadata" },
 		scopeCheck: checkGetContractClassMetadata,
+	},
+	registerContractClass: {
+		capability: "contractClasses",
+		routing: { via: "handler" },
+		scopeCheck: checkRegisterContractClassDisabled,
+		note: "Neutralized: unbound PXE artifact registration (5.0-new) is NOT dApp-exposed until contractClasses.canRegister + UI disclosure + class-id-scoped async enforcement exist. Denied at scope-check (codex audit).",
 	},
 
 	// ── simulation ──

@@ -168,6 +168,7 @@ describe("buildCombinedManifest", () => {
 			"claim_and_end_setup",
 			"claim",
 			"mint_and_pay_fee",
+			"pay_fee",
 			"claim_public",
 			"claim_private",
 			"exit_to_l1_public",
@@ -247,6 +248,26 @@ describe("fuel claim scope (canonical FeeJuice)", () => {
 		const cap = m.capabilities.find((c) => c.type === "contracts")
 		if (cap?.type !== "contracts") throw new Error("contracts cap missing")
 		expect(cap.contracts.map(String)).not.toContain(PRIVATE_FPC_ADDRESS)
+	})
+
+	it("scopes PrivateFPC.balance_of for the no-fuel private-FJ read (utilities only — it is abi_utility)", () => {
+		const m = buildCombinedManifest(combinedInput())
+		const cap = m.capabilities.find((c) => c.type === "simulation")
+		if (cap?.type !== "simulation") throw new Error("simulation cap missing")
+		const inUtil = (scope: { contract: unknown; function: string }[]) =>
+			scope.some((s) => String(s.contract) === PRIVATE_FPC_ADDRESS && s.function === "balance_of")
+		expect(inUtil(cap.utilities.scope as never)).toBe(true)
+		// It is a utility read — NOT a tx-shaped simulation NOR a send.
+		expect(inUtil(cap.transactions.scope as never)).toBe(false)
+		expect(inUtil(txScope(m))).toBe(false)
+	})
+
+	it("scopes PrivateFPC.pay_fee for the no-fuel private self-pay — BOTH simulate AND send (mirrors mint_and_pay_fee)", () => {
+		const m = buildCombinedManifest(combinedInput())
+		const hasPayFee = (scope: { contract: unknown; function: string }[]) =>
+			scope.some((s) => String(s.contract) === PRIVATE_FPC_ADDRESS && s.function === "pay_fee")
+		expect(hasPayFee(simTxScope(m))).toBe(true)
+		expect(hasPayFee(txScope(m))).toBe(true)
 	})
 
 	it("scopes FeeJuice.balance_of_public for the no-fuel L7 cold-check (simulate only)", () => {

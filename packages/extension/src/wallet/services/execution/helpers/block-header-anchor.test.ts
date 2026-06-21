@@ -19,10 +19,11 @@ function makeFakes(opts: { pxe?: "ok" | "throw"; node?: "ok" | "null" | "throw";
 	}
 	// biome-ignore lint/suspicious/noExplicitAny: duck-typed node stub
 	const node: any = {
-		getBlockHeader: vi.fn(async () => {
+		// 5.0: getBlockHeader removed → anchor falls back to getBlock("latest").header.
+		getBlock: vi.fn(async () => {
 			if (opts.node === "throw") throw new Error("node rpc error")
 			if (opts.node === "null") return null
-			return nodeSentinel
+			return { header: nodeSentinel }
 		}),
 	}
 	return { pxe, node, headerSentinel, nodeSentinel }
@@ -34,14 +35,14 @@ describe("getBlockHeaderAnchor", () => {
 		const result = await getBlockHeaderAnchor(pxe, node)
 		expect(result).toBe(headerSentinel)
 		expect(pxe.getSyncedBlockHeader).toHaveBeenCalledOnce()
-		expect(node.getBlockHeader).not.toHaveBeenCalled()
+		expect(node.getBlock).not.toHaveBeenCalled()
 	})
 
-	test("PXE throws → node.getBlockHeader returned", async () => {
+	test("PXE throws → node.getBlock returned", async () => {
 		const { pxe, node, nodeSentinel } = makeFakes({ pxe: "throw", node: "ok" })
 		const result = await getBlockHeaderAnchor(pxe, node)
 		expect(result).toBe(nodeSentinel)
-		expect(node.getBlockHeader).toHaveBeenCalledOnce()
+		expect(node.getBlock).toHaveBeenCalledOnce()
 	})
 
 	test("PXE throws + node returns null → undefined", async () => {

@@ -2,7 +2,7 @@
 import { computed } from "vue"
 import { toGrid } from "@/lib/emoji"
 import { TESTIDS } from "@/lib/testids"
-import { AppButton, EmojiGrid } from "@nulo/design"
+import { Button, EmojiGrid } from "@nulo/design"
 
 const props = defineProps<{ emojis: string | null }>()
 
@@ -32,20 +32,20 @@ function onKey(evt: KeyboardEvent) {
 				<p class="secondary">This check is for the secure channel. It is not decorative.</p>
 				<EmojiGrid :cells="cells" :test-id="TESTIDS.emojiGrid" :cell-test-id="TESTIDS.emojiCell" class="grid" />
 				<div class="actions">
-					<AppButton
-						variant="outline"
+					<Button
+						variant="primary_outline"
 						:data-testid="TESTIDS.btnVerifyCancel"
 						@click="emit('cancel')"
 					>
 						Cancel
-					</AppButton>
-					<AppButton
+					</Button>
+					<Button
 						variant="primary"
 						:data-testid="TESTIDS.btnVerifyConfirm"
 						@click="emit('confirm')"
 					>
 						They match
-					</AppButton>
+					</Button>
 				</div>
 			</div>
 		</div>

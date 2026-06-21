@@ -214,11 +214,14 @@ async function deployIfMissing(
 	}
 	logger.info(`Deploying ${label}…`)
 	try {
-		const method = Contract.deploy(deployer, artifact, constructorArgs, constructorArtifact)
+		// 5.0: salt + universalDeploy move to construction-time DeployInstantiationOptions
+		// (removed from send options; the deployer is locked at construction).
+		const method = Contract.deploy(deployer, artifact, constructorArgs, constructorArtifact, {
+			salt,
+			universalDeploy: true,
+		})
 		await method.send({
 			...options,
-			contractAddressSalt: salt,
-			universalDeploy: true,
 			wait: { waitForStatus: TxStatus.PROPOSED },
 		})
 	} catch (err: unknown) {

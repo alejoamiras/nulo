@@ -63,7 +63,7 @@ Each package can import only the layers below it. `wallet-bridge` deliberately d
 
 Six layers, low → high. A layer can import only from layers below it. Enforced via `biome.json` `noRestrictedImports` overrides.
 
-**L0–L2 are being externalized to `@nulo/design`** (round 1 — see `implementations-plan/design-system-externalization/`). The framework-/host-agnostic primitives live in the shared package and are consumed by the extension via a custom `unplugin-vue-components` resolver (`packages/extension/scripts/design-resolver.ts`), so templates use `<Flex>`/`<Text>`/`<Badge>` unchanged. `src/design/tokens.ts` re-exports `@nulo/design/tokens`; `_base.scss`/`_flex.scss`/`_text.scss` are gone — the wallet's base stylesheet is now `@nulo/design/base.css`. The package has NO auto-import, so its SFCs use explicit imports.
+**L0–L2 are externalized to `@nulo/design`** (round 1 + round 2 — see `implementations-plan/design-system-externalization/` and `implementations-plan/design-system-externalization-round-2/`). The framework-/host-agnostic primitives live in the shared package and are consumed by the extension via a custom `unplugin-vue-components` resolver (`packages/extension/scripts/design-resolver.ts`), so templates use `<Flex>`/`<Text>`/`<Badge>` unchanged. `src/design/tokens.ts` re-exports `@nulo/design/tokens`; `_base.scss`/`_flex.scss`/`_text.scss` are gone — the wallet's base stylesheet is now `@nulo/design/base.css`. The package has NO auto-import, so its SFCs use explicit imports. **Resolver discipline:** a name enters `NULO_DESIGN_COMPONENTS` only when its extension-local SFC is DELETED; the three host-coupled holdouts (`Button` → RouterLink, `SubPageHeader` → router/history, `ToastManager` → app-shell toast root) keep a thin LOCAL extension wrapper that renders the package base (`Button`/`SubPageHeaderBase`/`ToastManagerBase`), so their bare tags resolve to the wrapper, NOT the resolver. The `toast`/`outside` composables live in `@nulo/design/composables/*`; the extension keeps `composables/{toast,outside}.js` as named re-export shims so its explicit + auto-import call sites are untouched.
 
 ```
 [L0] design tokens     @nulo/design (token-contract.ts → generated tokens.ts + base.css + fonts).
@@ -71,9 +71,11 @@ Six layers, low → high. A layer can import only from layers below it. Enforced
 
 [L1] core primitives   @nulo/design/core: Flex, Icon, MaterialIcon, Text. No chrome.*.
 
-[L2] ui primitives     @nulo/design/ui (migrated: Badge, BrutalistTitle, Checkbox, SectionLabel,
-                       Toggle) + src/components/ui/ (round-2 holdouts: Button, Input, Tooltip,
-                       Popover, Banner, LoadingState, Spinner, ToastManager, SubPageHeader).
+[L2] ui primitives     @nulo/design/ui — ALL migrated: Badge, Banner, BrutalistTitle, Button,
+                       Checkbox, Input, LoadingState, Popover, SectionLabel, Spinner, SubPageHeaderBase,
+                       Toggle, Tooltip, ToastManagerBase (+ AppButton/Card/Tag/Toast faucet primitives).
+                       The 3 host-coupled ones keep a thin LOCAL extension wrapper in src/components/ui/
+                       (Button, SubPageHeader, ToastManager) rendering the package base.
                        Cannot import service clients, stores, or @/utils/core.
 
 [L3] composites        src/components/composite/

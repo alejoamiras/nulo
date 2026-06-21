@@ -95,11 +95,14 @@ export async function createTestWallet(url = LOCAL_NODE_URL) {
 /**
  * Generous `maxFeesPerGas` ceiling for SponsoredFPC-paid setup txs. The SDK otherwise pins
  * maxFeesPerGas to the ESTIMATION-time gas fee with no headroom, so an L2-fee spike between
- * estimate and inclusion rejects the tx (observed in CI: estimate feePerL2Gas=5.5e7 <
- * inclusion 1.1e8). maxFeesPerGas is only a ceiling and the FPC pays the ACTUAL network fee,
- * so a high cap can't overpay — it just stops spike-rejection flakes. See lessons/phase-6.md.
+ * estimate and inclusion rejects the tx. maxFeesPerGas is only a ceiling and the FPC pays the
+ * ACTUAL network fee, so a high cap can't overpay — it just stops spike-rejection flakes.
+ * 5.0 raised the sandbox L2 base fee ~4 orders of magnitude (observed inclusion feePerL2Gas
+ * ≈9.24e11 vs 4.2.0's ~1.1e8), so the old 1e11 cap fell BELOW the live fee and rejected every
+ * setup tx with "maxFeesPerGas.feePerL2Gas must be >= gasFees.feePerL2Gas". 1e13 restores ~10x
+ * headroom while staying under the SponsoredFPC fee-juice balance (cap × gasLimit). See lessons/phase-6.md.
  */
-const E2E_FEE_GAS = { maxFeesPerGas: new GasFees(10n ** 11n, 10n ** 11n) }
+const E2E_FEE_GAS = { maxFeesPerGas: new GasFees(10n ** 13n, 10n ** 13n) }
 
 /** Deploy a Token contract with a minter address. Returns the token contract address. */
 export async function deployTestToken(
@@ -238,28 +241,52 @@ export async function bridgeFeeJuice(node: ReturnType<typeof createAztecNodeClie
 	return claim
 }
 
-/** Wait for an L1→L2 message to be synced on the Aztec node, then wait 2 more blocks. */
+/** Wait until a bridged L1→L2 message is CLAIMABLE.
+ *
+ *  5.0 readiness is NOT "the message is in a checkpoint" — it's "the node/PXE anchor block sits in
+ *  a checkpoint >= the message's checkpoint" (the claim builds a membership witness against the
+ *  anchor; otherwise `getL1ToL2MessageMembershipWitness` returns nothing and the claim throws
+ *  "No L1 to L2 message found"). 5.0 only mints an L2 block when txs are pending (no empty blocks,
+ *  and `SEQ_MIN_TX_PER_BLOCK=0` does not change that), so after the bridge the anchor stalls below
+ *  the message's checkpoint forever. `forceBlock` submits one cheap tx to advance the chain past
+ *  it. Callers without a handy tx fall back to best-effort. See lessons/phase-6.md. */
 export async function waitForL1ToL2Message(
 	node: ReturnType<typeof createAztecNodeClient>,
 	messageHash: string,
+	forceBlock?: () => Promise<unknown>,
 	timeoutMs = 90_000,
 ): Promise<void> {
+	const hash = Fr.fromString(messageHash)
 	const start = Date.now()
+	let msgCheckpoint: bigint | undefined
 	while (Date.now() - start < timeoutMs) {
-		const synced = await node.isL1ToL2MessageSynced(Fr.fromString(messageHash))
-		if (synced) {
-			console.log(`[waitForL1ToL2Message] Message synced after ${Date.now() - start}ms`)
+		const cp = await node.getL1ToL2MessageCheckpoint(hash)
+		if (cp !== undefined) {
+			msgCheckpoint = BigInt(cp)
+			console.log(`[waitForL1ToL2Message] message in checkpoint ${msgCheckpoint} after ${Date.now() - start}ms`)
 			break
 		}
 		await new Promise((r) => setTimeout(r, 2_000))
 	}
-	// Wait 2 more L2 blocks for the message tree to update
-	const currentBlock = await node.getBlockNumber()
-	const target = currentBlock + 2
-	while ((await node.getBlockNumber()) < target) {
-		await new Promise((r) => setTimeout(r, 2_000))
+	if (msgCheckpoint === undefined) throw new Error(`[waitForL1ToL2Message] ${messageHash} not checkpointed within ${timeoutMs}ms`)
+
+	// 5.0 mints no empty L2 blocks (SEQ_MIN_TX_PER_BLOCK=0 does not change that), so after the
+	// bridge the node/PXE anchor stalls below the message's checkpoint and the claim's membership
+	// witness can't be built ("No L1 to L2 message found"). The node-admin `mineBlock` is not
+	// RPC-exposed, so callers pass `forceBlock` — a cheap sponsored tx — which we run until the
+	// anchor's checkpoint covers the message (the real claimability condition).
+	while (Date.now() - start < timeoutMs) {
+		const latest = await node.getBlockData("latest")
+		if (latest && BigInt(latest.checkpointNumber) >= msgCheckpoint) {
+			console.log(
+				`[waitForL1ToL2Message] claimable after ${Date.now() - start}ms: anchor checkpoint ${latest.checkpointNumber} >= ${msgCheckpoint}`,
+			)
+			return
+		}
+		if (forceBlock) await forceBlock().catch((err) => console.warn(`[waitForL1ToL2Message] forceBlock failed: ${err}`))
+		await new Promise((r) => setTimeout(r, 1_500))
 	}
-	console.log("[waitForL1ToL2Message] +2 L2 blocks confirmed")
+	console.warn(`[waitForL1ToL2Message] anchor did not reach checkpoint ${msgCheckpoint} within ${timeoutMs}ms — proceeding best-effort`)
 }
 
 /** Claim bridged FeeJuice on L2. Uses SponsoredFPC to pay for the claim tx itself.
@@ -318,6 +345,10 @@ export async function setupPreFundedAccount(
 	opts: {
 		publicAmount?: bigint
 		privateAmount?: bigint
+		/** A cheap sponsored state-changing tx that mints one L2 block. 5.0 mints no empty blocks,
+		 *  so FJ-claim readiness (anchor checkpoint >= message checkpoint) only advances when a real
+		 *  tx is sent. Provided by callers that have a token to transfer/mint. */
+		forceBlock?: () => Promise<unknown>
 	} = {},
 ): Promise<PreFundedAccount> {
 	// Mirrors Nulo's derivation exactly. Constants verified against source-of-truth:
@@ -381,7 +412,7 @@ export async function setupPreFundedAccount(
 	// Step 4 — Public FJ: bridge + claim. Recipient-bound (sender-agnostic), so we
 	// reuse the existing helpers with the test sandbox wallet for fee payment.
 	const publicClaim = await bridgeFeeJuice(node, expectedAddress.toString(), publicAmount)
-	await waitForL1ToL2Message(node, publicClaim.messageHash.toString())
+	await waitForL1ToL2Message(node, publicClaim.messageHash.toString(), opts.forceBlock)
 	await claimFeeJuice(wallet, expectedAddress.toString(), feePayerAddress, publicClaim, sponsoredFee)
 	logger.info(`Public FJ claimed: amount=${publicAmount}`)
 
@@ -393,16 +424,21 @@ export async function setupPreFundedAccount(
 	const { bridgeForMint } = await import("./aztec-private-fpc-bridge")
 
 	// PrivateFPC instance salt MUST be Fr.zero() to match Nulo's auto-discovery
-	// (fpc/service.ts:104-110: salt=Fr.zero(), deployer=AztecAddress.ZERO).
-	// Mirrors @wonderland's registerPrivateContract (utils/deploy.ts) inline.
-	// `register` calls `wallet.registerContract` which lives on the parent
-	// EmbeddedWallet, not on per-account AccountWithSecretKey.
+	// (fpc/service.ts:91-94: salt=Fr.zero(), deployer=AztecAddress.ZERO). 5.0 rejects the old
+	// `deploy().register()` path here ("deployer is not yet locked" — a ZERO deployer isn't
+	// locked, and 5.0 moved salt/deployer to construction-time options). Compute + register the
+	// instance the SAME way the wallet does, which both sidesteps that and guarantees the address
+	// matches the wallet's auto-discovery.
 	// biome-ignore lint/suspicious/noExplicitAny: aztec-stdlib instance mismatch between @wonderland's pinned version and Nulo's
-	const fpc = await PrivateFPCContract.deploy(wallet as any).register({
-		contractAddressSalt: Fr.ZERO,
-		skipInitialization: true,
+	const fpcArtifact = (PrivateFPCContract as any).artifact
+	const fpcInstance = await getContractInstanceFromInstantiationParams(fpcArtifact, {
+		salt: Fr.ZERO,
 		deployer: AztecAddress.ZERO,
 	})
+	// biome-ignore lint/suspicious/noExplicitAny: see above
+	await (wallet as any).registerContract(fpcInstance, fpcArtifact)
+	// biome-ignore lint/suspicious/noExplicitAny: see above
+	const fpc = await PrivateFPCContract.at(fpcInstance.address, wallet as any)
 	logger.info(`PrivateFPC registered: ${fpc.address.toString()}`)
 
 	// Bridge salt must be RANDOM per invocation (avoids nullifier collision on reruns).
@@ -413,16 +449,9 @@ export async function setupPreFundedAccount(
 		expectedAddress,
 		bridgeSalt,
 		privateAmount,
-		// produceL2Block: send a no-op via SponsoredFPC to advance the chain
-		async () => {
-			const { Contract } = await import("@aztec/aztec.js/contracts")
-			const { FeeJuiceArtifact } = await import("@aztec/protocol-contracts/fee-juice")
-			const feeJuice = await Contract.at(ProtocolContractAddress.FeeJuice, FeeJuiceArtifact, wallet)
-			await feeJuice.methods
-				.balance_of_public(expectedAddress)
-				.simulate({ from: feePayerAddress, fee: { gasSettings: E2E_FEE_GAS } })
-				.catch(() => undefined)
-		},
+		// produceL2Block: a REAL state-changing tx to advance the chain. The predecessor used
+		// `.simulate()` (read-only — mines nothing), which never advanced the anchor on 5.0.
+		opts.forceBlock ?? (async () => {}),
 	)
 	logger.info(`PrivateFPC bridge ready: leafIndex=${leafIndex.toString()}`)
 

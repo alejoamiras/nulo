@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — Private-fuel claim fee fix</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Private-fuel claim fee fix</h1>
+  <p>When you bridge tokens "with fuel" privately, the arriving Fee Juice is supposed to pay for its own claim transaction. On V5 that claim reverts with "Amount too low to cover gas cost." Three independent codex reviews proved this is <strong>not</strong> a bug in Wonderland's contract (your hunch) and not a V5 gas-model break — the contract's check is correct. The real causes are in <em>our</em> code: the wallet commits a fee ceiling that drifts from what it budgeted, and our "is this enough fuel?" floor is measured against the wrong number. The fix pins the ceiling, recalibrates the floor from real on-chain measurements, and proves it with a live private claim run repeatedly until stable.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>Light</strong> (you chose it). Rubric: blast radius MODERATE (the fix touches the wallet's shared fee finalizer, used by all embedded-FPC payments) and security-sensitivity MODERATE (under-fund → tx fails; over-fund → you forfeit unused fuel to the FPC) — borderline <code>mid</code>, but the diagnosis is precise (3 codex agents pinned exact lines) and you chose the strong fee-methods network-e2e gate, so light-with-that-gate is sound.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: A reliable, pinned fee cap for the claim (wallet)</h3>
+    <p>Two things can fail: the fuel contract rejects the claim if the bridged fuel is below the fee <em>ceiling</em> (budget), AND the protocol rejects the tx if the committed max-fee is below the live fee at inclusion (timing). The claim needs a max-fee with <em>headroom</em> (so it survives fee rises during the minutes-long proving window — your instinct), and that value must be <em>pinned</em> (today the wallet re-fetches and overwrites it). We add the headroom for the private fuel claim specifically, and pin it — without changing the cap other apps rely on.</p>
+    <p class="muted">Proves itself by: wallet fee unit tests (explicit-fee commits exactly that; embedded-without-fees reuses the cap with no drift; non-embedded keeps the 1.5× default) + typecheck + lint.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: Measure the real private claim + find the right headroom (run it ’til stable)</h3>
+    <p>Our test script only exercised the <em>public</em> claim. Add the <em>private</em> one and, per run, log the gas limit, the committed max-fee, the resulting ceiling, and the actual fee — <em>separately</em>, so we know whether the ceiling is driven by the fee cap or by the two-call bundle's gas. Find the smallest headroom multiplier where the claim <em>settles</em> (lands on-chain) every time, across 3+ runs in different fee conditions, then set the minimum-fuel floor from the resulting ceiling.</p>
+    <p class="muted">Proves itself by: the private claim SETTLING (included) on V5 every run at the chosen multiplier; per-run logs decomposing the ceiling; a stable floor ≥ the worst observed ceiling.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: Apply it + manifest + the RIGHT e2e gate</h3>
+    <p>Bake in the calibrated headroom + floor (candidate → promote). Then gate on an e2e that actually <em>sends an embedded fee-payer claim to inclusion</em> and checks the committed cap — the path that regressed. (The fee-methods suite we first picked turned out not to exercise this path.)</p>
+    <p class="muted">Proves itself by: faucet typecheck + unit + lint green; the embedded fee-payer settlement e2e green; a fresh private fueled deposit self-pays end-to-end.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>Two fee numbers matter: the <em>actual</em> fee a tx costs, and the <em>ceiling</em> (gas limit × max fee-per-gas) — the most it could cost. Wonderland's private FPC must be solvent for the <em>ceiling</em> before it pays, then refunds the difference — so the bridged fuel must cover the ceiling, not just the actual fee (our old floor used the actual fee — too low). Separately, the committed max-fee must stay ≥ the network's live fee at inclusion, or the protocol rejects the tx — and the claim lands minutes after it's built (proving), so the fee can move. <strong>Your instinct was right and codex's first review confirmed it:</strong> the max-fee needs headroom, not a rock-bottom value — otherwise it's underpriced by the time it lands. We give the private claim that headroom (smallest reliable amount, measured on real V5), pin it so it can't drift, and size the bridged fuel to cover the resulting ceiling. Headroom is scoped to this claim so other apps that rely on the tight cap aren't disturbed.</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li>The exact headroom multiplier + fuel-floor margin — set empirically in Phase 2 (smallest multiplier that settles every run).</li>
+    <li>Codex round-1 REJECTED the first draft (it kept the cap tight); this revision adds the headroom. The round-2 re-audit verdict folds in here before you approve.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: pin the wallet fee ceiling (general embedded fix) + extend fuel-testnet with the private claim + recalibrate minFuelFj from the ceiling + apply to the manifest. Out: changing Wonderland's contract (it's correct), per-claim fee padding.</li>
+      <li>Confirm tier: <strong>light</strong> + the fee-methods network-e2e gate.</li>
+      <li>Confirm the validation plan: Phase 1 wallet unit, Phase 2 live private-claim (≥3 runs), Phase 3 fee-methods network-e2e.</li>
+      <li><code>/harden</code>: not recommended (testnet fee calibration + scoped wallet fix).</li>
+      <li>Approve / conditionally approve / reject.</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>This plan has a clear transcript-observable finish line (all phase gates green incl. the live private claim) plus long live-claim + e2e steps, so <code>/goal</code> fits better than interval polling.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose; setting one replaces the other.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <pre><code>/goal All 3 phases in implementations-plan/private-fuel-fee-fix/plan.md marked ✓ (per-phase headers), each backed by its validation gate reported passing in the transcript: Phase 1 extension fee unit tests + typecheck + lint green (explicit-fee commits exactly that; embedded-without-fees reuses the cap, no drift; non-embedded keeps 1.5×); Phase 2 fuel-testnet.ts private claim SETTLES on V5 ≥3 runs at the chosen RELIABILITY_MULT + per-run gasLimit/maxFeesPerGas/getFeeLimit/actual logged + stable minFuelFj; Phase 3 faucet unit/lint + the embedded-feePayer settlement e2e green + manifest minFuelFj/RELIABILITY_MULT updated. For each phase print LESSONS_FILE=implementations-plan/private-fuel-fee-fix/lessons/phase-N.md. Then /code-review max --fix, commit separately, codex post-impl audit (xhigh, adversarial), address high/critical. `bun run lint` exit 0. Hard limits: testnet only, never mainnet, surface before promoting the manifest live.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop (fallback)</h3>
+    <pre><code>/loop 15m Drive implementations-plan/private-fuel-fee-fix forward. Never idle. Each firing: read plan.md + lessons/; git status; next pending phase; after each edit run bun run lint + the phase's gate; commit→push; mark ✓ only when the gate passes + print LESSONS_FILE=…/lessons/phase-N.md. Stuck/decision? /codex xhigh, decide, log it. Hard limits: testnet only, never mainnet, never expand scope. All phases ✓ → /code-review max --fix → codex post-impl audit → wrap-up + stop.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a> · parent: <a href="../fuel-portal-v5-fix/plan.md">fuel-portal-v5-fix</a></p>
+</body>
+</html>

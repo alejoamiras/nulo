@@ -155,7 +155,10 @@ jobs:
       - uses: ./.github/actions/setup-accelerator-server
         if: '${{ !inputs.disable_accelerator && !inputs.proverless }}'
         with:
-          version: "1.0.1"
+          # v1.0.6 (Aztec 4.3.1-bundled bb). The 5.0 proving stack is fetched on demand
+          # on first /prove (bb is downloaded per the SDK-requested version), so this binary
+          # proves 5.0.0-rc.1 txs without a 5.0-specific release. Bump again when a newer line ships.
+          version: "1.0.6"
           # SHA-256 of the EXTRACTED binary (not the tarball — different
           # hashes; the binary is what `actions/cache` restores, so it's
           # the trust anchor on every run). Computed locally via:
@@ -164,7 +167,7 @@ jobs:
           # tarball; we don't trust the sidecar as a security boundary
           # anyway (release-origin compromise would replace both).
           # See SECURITY.md "Binary dependencies" for the bump procedure.
-          expected_sha256: d701837047429334a19cc0d75d8723615c367a9d9d8a531e72fd5e66ccc9a664
+          expected_sha256: 995d13a4d877c06ccdb457de3c54ac13f85a8ceb6f3b3ddf13aecbb026b8c3d3
 
       - name: Start accelerator-server
         if: '${{ !inputs.disable_accelerator && !inputs.proverless }}'
@@ -173,15 +176,18 @@ jobs:
           # tracing-subscriber default = info; emits "Received /prove request"
           # for each prove + version-cache info we tail in the advisory step.
           RUST_LOG: "info"
-          # ALLOWED_ORIGINS deliberately unset:
-          #   - upstream accelerator-server.rs:32-49 documents that when
-          #     unset, auth_manager=None → server.rs:210 auto-approves all
-          #     origins (headless-mode contract). Confirmed in lessons/phase-1.md.
-          #   - the README's example `ALLOWED_ORIGINS=http://localhost:5173`
-          #     is WRONG for our extension (our offscreen origin is
-          #     chrome-extension://<id>, not the playground origin).
-          #     Setting it to that would 403 every /prove → silent WASM
-          #     fallback (which Layer 2 catches but as a confusing error).
+          # ACCEL_ALLOW_ALL approves every browser origin. accelerator-server v1.0.6
+          # (SEC-01c) flipped the headless default to deny-by-default: with ALLOWED_ORIGINS
+          # unset, localhost is auto-approved but every NON-localhost origin is DENIED. Our
+          # offscreen prover calls /prove from chrome-extension://<id> (non-localhost) with
+          # no popup available in headless CI → request denied → no proof → the canary tx
+          # errors / times out (NOT a silent WASM fallback — the required-mode build throws).
+          # We can't pre-list the origin in ALLOWED_ORIGINS because the unpacked-extension id
+          # isn't known until Chrome loads it, so allow-all is the headless contract (it is
+          # mutually exclusive with ALLOWED_ORIGINS, which stays unset). Safe per SECURITY.md:
+          # loopback-only (127.0.0.1:59833), single-tenant runner, fork PRs receive no secrets,
+          # and the only /prove traffic originates from the wallet we just built.
+          ACCEL_ALLOW_ALL: "1"
         run: |
           set -euo pipefail
           # BB_BINARY_PATH is defined INSIDE the script, not in `env:`, because
