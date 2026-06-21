@@ -45,7 +45,7 @@ settled non-goal across the backlog + round-2 wrap-up, and remove "toast unifica
 
 ## Phases (sequenced low → high risk)
 
-### P1 — Toast: record the keep-separate decision (docs only) ☐
+### P1 — Toast: record the keep-separate decision (docs only) ✓ DONE
 
 No code. Document the verdict + its grounded reasoning (the model/context table above) in:
 - `implementations-plan/design-system-externalization/round-2-backlog.md` — flip the "Tooling /
