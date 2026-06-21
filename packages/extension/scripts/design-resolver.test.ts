@@ -67,8 +67,12 @@ describe("nuloDesignResolver inventory", () => {
 	test("no extension-local SFC shadows a resolver name (round-1/2 cleanup invariant)", () => {
 		// A local <Name>.vue matching a NULO_DESIGN_COMPONENTS entry would be dir-scan-registered and WIN
 		// the bare tag over the package version (the round-1 debt P4 closed). Pin that none re-appears.
+		// Scope MUST mirror unplugin-vue-components' dirs in vite.config.ts (`src/components` AND
+		// `src/onboarding/components`) — else an onboarding shadow would bypass this guard (codex).
 		const basename = (p: string) => p.replace(/^.*\//, "").replace(/\.vue$/, "")
-		const localComponentNames = Object.keys(import.meta.glob("../src/components/**/*.vue")).map(basename)
+		const localComponentNames = Object.keys(
+			import.meta.glob(["../src/components/**/*.vue", "../src/onboarding/components/**/*.vue"]),
+		).map(basename)
 		const shadows = localComponentNames.filter((name) => NULO_DESIGN_COMPONENTS.has(name))
 		expect(shadows).toEqual([])
 	})
