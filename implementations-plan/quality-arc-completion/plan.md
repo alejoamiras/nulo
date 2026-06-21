@@ -2,7 +2,7 @@
 
 **STATUS: IN PROGRESS (`/goal` active, fully autonomous).** Branch `dev-quality` off dev `65961f1` (post-Q3 + aztec 5.0 + design round 2).
 
-**Arc progress:** Q12 ✓ · Q15 ✓ · Q17 ✓ · Q6 ✓ · Q13 ✓ · Q8 ✓ merged (squash `5de5f0a`, PR #133; net 27915441247 = 8/8 green, smoke green after 1 accounts "Client disconnected" SW-restart flake re-run) · **Q9 in progress** · Q18 pending. **(6 of 8 done; 2 remain: Q9, Q18)**
+**Arc progress:** Q12 ✓ · Q15 ✓ · Q17 ✓ · Q6 ✓ · Q13 ✓ · Q8 ✓ · Q9 ✓ merged (squash `5b5f34e`, PR #134; net 27916092215 = 8/8 green, quality+smoke green) · **Q18 in progress (LAST arc)**. **(7 of 8 done; 1 remains: Q18)**
 
 **Origin:** finish the remaining `/harden quality` arc (run `2026-06-11-ultra-50b45d`, `audit/quality/.../findings/verified.md`, 23 findings) on an isolated integration branch `dev-quality`. This is a META-blueprint: it sequences the arc; each finding gets its OWN `/blueprint` (light/mid) when the loop reaches it.
 
@@ -44,8 +44,8 @@
 | 4 ✓ | **Q6** activity-feed extraction | codex-narrowed | **DONE** — squash `d519b33`, net 27914290541 (8/8 after 1 canary flake re-run). Shipped `useIncomingTransfers` (cross-surface composable dedup, 13 tests). **#2/#3/#4 DEFERRED** per codex 019eeb77 (low-value / hot-widget tie-break + fallback risk — see `lessons/q6.md`). |
 | 5 ✓ | **Q13** PXE subset key-list + type assertions | light/mid | **DONE** — squash `a7d0c6f`, net 27914901918 (8/8). Type-only `PXE_SUBSET_METHODS` + IPXE/PXEProxy↔Methods assertions; drift-guard proven (TS2344). `lessons/q13.md`. |
 | 6 ✓ | **Q8** popup form abstractions | codex-narrowed | **DONE** — squash `5de5f0a`. useFormState rebase + field.isDirty (5 tests) + EditEndpoint/EditNetwork adopt + SelectToken/BalanceView drift fixes. #18 FormPopup-Enter + EditContact + broad useEntityCrud deferred. `lessons/q8.md`. |
-| 7 (in progress) | **Q9** centralize transport-side readiness | mid → **codex-narrowed** (sess bguESCDM) | **SHIP (phase 1):** central RPC readiness gate in `base-service.ts handleRequest` (inside the `try`, AFTER `beforeInvoke`, before `invoke` — preserves error-response + offscreen keepalive; double-await harmless) + expand startup `dependencies` on the clear init-time caller `TokenBalanceService` (calls getActiveProfile/getTokensRaw). **KEEP all per-method preambles** — bulk removal unsafe (no reliable RPC-only signal; token-balance + incoming-transfer call peers in-process) + it's drift, not a live null-deref. Test: handleRequest gates on init. |
-| 8 | **Q18** internal execution tuples → named result objects (step-1 intra-extension only) | mid | #3: `FpcStrategy` byte-parity-sensitive — never normalize into the family. Internal-only (both ends ship together); NOT the public RPC param-object (that's step 2, out of scope). |
+| 7 ✓ | **Q9** centralize transport-side readiness | codex-narrowed | **DONE** — squash `5b5f34e`. Shipped the safe deps lever (declared `TokenBalanceService` deps — the only init-time peer-awaiter missing one); KEPT preambles; DEFERRED the transport gate (base-class behaviour change + breaks 14 base-service tests for non-bug drift). `lessons/q9.md`. |
+| 8 (in progress) | **Q18** internal execution tuples → named result objects | mid → **SHRUNK** | #83 + aztec 5.0 already converted the big tuples (StandardTxRequestResult/FeeEstimateResult/built[0..7]/fee-strategy → named FeeEstimate/BuiltStandardTx). **Only remnant:** `operation-planner.processAztecJsPayload` 3-tuple `[Action[], AccountFeePaymentMethodOptions, FeeOptions]` → named object; 4 consumers (dapp-send-executor×2, view-executor×2) + 3 test mocks. #3: FpcStrategy NOT touched (already named). Intra-extension, behaviour-preserving. |
 
 The loop may re-order/re-tier on re-verification; record any change here.
 
