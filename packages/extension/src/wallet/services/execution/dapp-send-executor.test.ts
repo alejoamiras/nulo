@@ -87,7 +87,11 @@ function makeHarness(overrides: Partial<DappSendExecutorDeps> = {}) {
 	})
 	const deps: DappSendExecutorDeps = {
 		planner: {
-			processAztecJsPayload: vi.fn(async () => [[{ kind: "call", method: "dapp_method" }], undefined, {}]),
+			processAztecJsPayload: vi.fn(async () => ({
+				actions: [{ kind: "call", method: "dapp_method" }],
+				feePaymentMethod: undefined,
+				feeOptions: {},
+			})),
 		} as never,
 		authwit: { discoverPrivateAuthwits: vi.fn(async () => []) } as never,
 		txBuilder: {
@@ -256,7 +260,13 @@ describe("DappSendExecutor.executeAztecSendTx (standard path)", () => {
 
 	test("embedded fee payment skips authwit discovery; non-embedded runs it", async () => {
 		const embedded = makeHarness({
-			planner: { processAztecJsPayload: vi.fn(async () => [[], undefined, { embeddedFeePayment: "dapp" }]) } as never,
+			planner: {
+				processAztecJsPayload: vi.fn(async () => ({
+					actions: [],
+					feePaymentMethod: undefined,
+					feeOptions: { embeddedFeePayment: "dapp" },
+				})),
+			} as never,
 		})
 		await embedded.executor.executeAztecSendTx(makeAztecOp(), ORIGIN)
 		expect(embedded.deps.authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
