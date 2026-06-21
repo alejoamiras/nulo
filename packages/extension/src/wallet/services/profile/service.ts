@@ -220,7 +220,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// modal opened).
 		// PATH B: no credentialData provided → SW opens a window via
 		// `passkeyCoordinator.createForNewProfile`, which calls
-		// `passkey.createKey(id)` → `openWindowAndWait`.
+		// `passkey.createKey(id, name)` → `openWindowAndWait`.
 		// Generate the id BEFORE entering the lock so the passkey UI
 		// prompt below doesn't hold the facade lock for minutes.
 		const id = credentialData?.userHandle ?? (await this.repo.generateUniqueId())

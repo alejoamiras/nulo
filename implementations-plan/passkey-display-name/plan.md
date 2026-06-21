@@ -147,5 +147,11 @@ Create the sanitizing formatter as a **pure, WebAuthn-free** module so all the e
 
 **Net effect:** all three conditions resolved in-plan; no High/Critical left open. Re-audit not required for a light-tier doc change of this size, but the post-impl codex pass (Phase 5) will see the final diff.
 
+### Post-impl codex audit (session `019eebcc`-derived `L12b4hB5`)
+**Verdict:** `no high/critical`. Confirmed the sanitizer is sound (no bidi/zero-width survival, no doubled/edge hyphens, linear regex / no ReDoS), threading complete on both create paths (vue-tsc passed), cosmetic-only invariant holds (`user.id` / PRF input / HKDF salt / account-secret derivation untouched), privacy scope correct (only the sanitized slug leaves), and `mode:"get"` unlock/import/restore untouched. Three minor findings, all fixed:
+- **Low** — length-cap test didn't exercise the slice-lands-on-hyphen path → added a dedicated case (`passkey-label.test.ts`, 23×`a` + sep).
+- **Low** — the PATH B integration fake ignored the new `name` arg → `FakePasskeyService.createKey` now records it + a new test asserts `createPasskeyProfile("My Wallet")` threads `"My Wallet"` to `createKey` (`service.integration.test.ts`).
+- **Nit** — comment drift `createKey(id)` → `createKey(id, name)` (`service.ts`).
+
 ## Seeds
 _Finalized post-approval. Draft `/goal` + `/loop` in `eli5.html`._

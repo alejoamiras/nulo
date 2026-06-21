@@ -71,7 +71,12 @@ class FakePasskeyService extends Service<Record<string, never>> {
 		await super.start(services)
 	}
 
-	public async createKey(userHandle: string): Promise<PasskeyCredential> {
+	/** Records the name PATH B threads in, so a service-level test can assert
+	 *  the credential label was derived from the right profile name. */
+	public lastCreateKeyName?: string
+
+	public async createKey(userHandle: string, name?: string): Promise<PasskeyCredential> {
+		this.lastCreateKeyName = name
 		return this.credential(`cred-${userHandle}`, userHandle)
 	}
 
@@ -115,6 +120,7 @@ async function makeService(ttlOrInit: number | { sessionTtl?: number; strict?: b
 	config: ReturnType<typeof fakeConfig>
 	logger: LoggerStore
 	service: ProfileService
+	passkeys: FakePasskeyService
 }> {
 	const init = typeof ttlOrInit === "number" ? { sessionTtl: ttlOrInit } : ttlOrInit
 	const api = new FakeBrowserApi()
@@ -130,7 +136,7 @@ async function makeService(ttlOrInit: number | { sessionTtl?: number; strict?: b
 	services.add(service)
 
 	await services.start()
-	return { api, config, logger, service }
+	return { api, config, logger, service, passkeys }
 }
 
 /** Constructs a fresh `ProfileService` bound to a pre-existing
@@ -316,6 +322,16 @@ describe("ProfileService integration", () => {
 			const credData = fakeCredentialData(`cred-${profile.id}`, profile.id)
 			const exported = await service.exportPlain(profile.id, undefined, credData)
 			expect(exported).toMatch(/^cred-/)
+		}, 30_000)
+
+		test("PATH B threads the profile name through to createKey for the label", async () => {
+			// createPasskeyProfile with no credentialData drives PATH B:
+			// acquireRecovery → createForNewProfile → createKey(id, name). Pin
+			// that the profile NAME (not the id) reaches createKey, so the
+			// nulo-{name}-{id} label is derived from the right value.
+			const { service, passkeys } = await makeService()
+			await service.createPasskeyProfile("My Wallet")
+			expect(passkeys.lastCreateKeyName).toBe("My Wallet")
 		}, 30_000)
 
 		test("exportPlain passkey rejects credentialData for a different credential", async () => {

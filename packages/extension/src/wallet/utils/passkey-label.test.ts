@@ -48,6 +48,14 @@ describe("formatPasskeyUserName", () => {
 		expect(formatPasskeyUserName("-x-", ID)).toBe("nulo-x-a3f29b14")
 	})
 
+	it("trims a hyphen the length-cap lands on (slice-on-hyphen path)", () => {
+		// 23 'a's then a separator: slug is "aaa…(23)-bbb"; slice(0,24) keeps the
+		// 23 a's plus the hyphen at index 23, and the final trailing-trim removes
+		// it. Without that final trim the label would end "…aaa-" before the id.
+		const out = formatPasskeyUserName(`${"a".repeat(23)} bbb`, ID)
+		expect(out).toBe(`nulo-${"a".repeat(23)}-a3f29b14`)
+	})
+
 	it("falls back to nulo-profile-{id} for an empty name", () => {
 		expect(formatPasskeyUserName("", ID)).toBe("nulo-profile-a3f29b14")
 	})
