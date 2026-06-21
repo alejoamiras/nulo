@@ -40,7 +40,7 @@ const form = useFormState({
 const nameTerm = form.fields.name.value
 const urlTerm = form.fields.url.value
 
-const isStartedEditingName = computed(() => Boolean(networkToEdit.value) && nameTerm.value !== networkToEdit.value?.name)
+const isStartedEditingName = form.fields.name.isDirty
 const isNameAlreadyExist = computed(() => form.fields.name.error.value === "Already exists" && isStartedEditingName.value)
 
 const isAvailableToUpdateNetwork = computed(() => {
@@ -51,9 +51,10 @@ const isAvailableToUpdateNetwork = computed(() => {
 })
 
 const handleFillFieldsWithDefaultValues = () => {
-	nameTerm.value = networkToEdit.value?.name ?? ""
 	const primary = networkToEdit.value?.endpoints.find((e) => e.id === networkToEdit.value.primaryEndpointId)
-	urlTerm.value = primary?.rpcUrl ?? ""
+	// rebase() loads values + sets the dirty-baseline so `field.isDirty` drives
+	// the "Already exists" warning gating (isStartedEditingName) above.
+	form.rebase({ name: networkToEdit.value?.name ?? "", url: primary?.rpcUrl ?? "" })
 }
 
 const isNetworkUpdateInProgress = ref(false)

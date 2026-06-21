@@ -35,15 +35,13 @@ const errorText = ref("")
 const isSubmitting = ref(false)
 
 const fillFromEndpoint = () => {
-	labelTerm.value = endpoint.value?.label ?? ""
-	urlTerm.value = endpoint.value?.rpcUrl ?? ""
+	// rebase() loads the values AND sets the dirty-baseline, so `form.isDirty`
+	// below replaces the hand-rolled per-field comparison.
+	form.rebase({ label: endpoint.value?.label ?? "", url: endpoint.value?.rpcUrl ?? "" })
 	errorText.value = ""
 }
 
-const isDirty = computed(() => {
-	if (!endpoint.value) return false
-	return labelTerm.value !== (endpoint.value.label ?? "") || urlTerm.value !== endpoint.value.rpcUrl
-})
+const isDirty = form.isDirty
 
 const isAvailableToSave = computed(() => {
 	if (!endpoint.value || !network.value) return false
