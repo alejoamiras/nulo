@@ -29,7 +29,10 @@
 2. **Blueprint** at its tier (`/blueprint light|mid`). Open questions → **codex xhigh** (no user gate; codex resolves; log the consult + verdict in lessons).
 3. **Implement inline**, preserving every constraints-registry invariant **verbatim**; pin surprising preserved behavior with a BUG-PIN test. Tests inline with the change.
 4. **Gate:** `bun run lint` + touched-package typecheck + units + smoke + **full network e2e** — all green, jobs-confirmed-run, latest-`dev-quality` base.
-5. **Merge** squash `--admin` into `dev-quality`; mark `✓` + merge SHA + network run id in this plan; file `lessons/<arc>.md`; print `LESSONS_FILE=…`; advance.
+5. **Merge** squash into `dev-quality`; mark `✓` + merge SHA + network run id in this plan; file `lessons/<arc>.md`; print `LESSONS_FILE=…`; advance.
+
+### ⚠ CI mechanics on `dev-quality` (discovered Q12 — applies to EVERY arc)
+`pr-quick`/`pr-smoke-e2e`/`pr-network-e2e` filter `pull_request: branches: [main, dev]` → **a PR based on `dev-quality` triggers NO CI** (only Cloudflare). Do NOT wait for PR checks that never appear. **Run the gates via `workflow_dispatch`:** `gh workflow run pr-network-e2e.yml --ref <arc-branch> -f disable_accelerator=false` (+ `pr-quick.yml`), then read the run conclusion with `gh run view <id>`. Dispatch bypasses the `changes` paths-filter, so every network shard runs. `dev-quality` has NO branch protection → merge the arc on validated dispatch results (squash; no `--admin`/required-check needed).
 
 ## Ordered arcs (safest/cheapest → most invasive)
 
