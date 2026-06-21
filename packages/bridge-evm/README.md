@@ -10,11 +10,15 @@ repo's pinned `@aztec/* 4.2.0`).
 `lib/` is gitignored. Install before building:
 
 ```bash
-forge install foundry-rs/forge-std OpenZeppelin/openzeppelin-contracts Uniswap/v4-core
+forge install foundry-rs/forge-std OpenZeppelin/openzeppelin-contracts Uniswap/v4-core@v4.0.0
 ```
 
-> Follow-up: pin exact versions (these were vendored from the reference bridge
-> for the initial scaffold). Decide submodules vs vendored-and-committed for CI.
+> **v4-core MUST be `@v4.0.0`** (commit `e50237c4…`, matching the holonym reference
+> bridge). The fuel contracts (`UniswapFuelSwap.sol`, `DeployBridge.s.sol`'s
+> `PoolSetupHelper`) use the pre-1.0 `IPoolManager.SwapParams` / `ModifyLiquidityParams`
+> API; v4-core ≥1.0.0 moved those structs to `types/PoolOperation.sol`, so an unpinned
+> `Uniswap/v4-core` install pulls latest and fails to compile. forge-std + OZ track
+> latest (fine for these contracts).
 
 ## Build / test
 

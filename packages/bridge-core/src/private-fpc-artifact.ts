@@ -1,0 +1,12 @@
+/**
+ * Lazy, dynamic-import-ONLY entry for the 2.2 MB Wonderland PrivateFPC `ContractArtifact`. It is kept
+ * out of BOTH the main `@nulo/bridge-core` barrel and the eager `./artifacts` barrel (which the faucet
+ * statically imports for the bridge/proxy artifacts) so this JSON never lands in the main bundle.
+ *
+ * Consume it ONLY via `await import("@nulo/bridge-core/private-fpc-artifact")` — mirroring the faucet's
+ * lazy `import("@aztec/noir-contracts.js/FeeJuice")` for the public-FJ read. The sole use is building a
+ * `Contract.at(PRIVATE_FPC_ADDRESS, …)` to read `PrivateFPC.balance_of` (the user's private Fee Juice).
+ * This is the only place the faucet reaches the Wonderland artifact; the address + payment-method
+ * coupling stays in `private-fuel.ts`.
+ */
+export { PrivateFPCContractArtifact } from "@wonderland/aztec-fee-payment/artifacts/private"

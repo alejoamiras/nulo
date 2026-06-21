@@ -282,7 +282,7 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 		<template v-else-if="op.kind === 'register_token'">
 			<template v-if="tokenMetadataLoading">
 				<Flex :class="$style.prop" align="center" gap="6">
-					<Spinner size="14" />
+					<Spinner size="14" color="--txt-inverse" />
 					<Text size="12" color="secondary">Loading token metadata…</Text>
 				</Flex>
 			</template>

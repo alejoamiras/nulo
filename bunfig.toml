@@ -41,4 +41,23 @@ minimumReleaseAge = 604800
 #   @puppeteer/browsers 3.x, puppeteer-core 25.x) are inside the 7-day window
 #   (25.0.0 = 2026-05-12). Once 25.0.0 ages out (~2026-05-19 16:08 UTC),
 #   remove these entries in a follow-up.
-minimumReleaseAgeExcludes = ["puppeteer", "puppeteer-core", "@puppeteer/browsers", "chromium-bidi"]
+# TEMPORARY (aztec-5.0-upgrade): all @aztec/* 5.0.0-rc.1 (published 2026-06-15) sit inside
+# the 7-day window until ~2026-06-22, and this repo's Bun gates frozen-lockfile installs of
+# pinned <min-age versions. Glob excludes are NOT supported, so the full first-party closure
+# is enumerated below (incl. transitives surfaced by Bun #25305: builder, key-store, native,
+# world-state, standard-contracts, …). The Phase-7 follow-up PR removes this @aztec/@alejoamiras
+# block once 5.0.0-rc.1 ages out. @aztec/viem (2.38.2, not bumped) is intentionally omitted.
+minimumReleaseAgeExcludes = [
+	"puppeteer", "puppeteer-core", "@puppeteer/browsers", "chromium-bidi",
+	"@alejoamiras/aztec-accelerator",
+	"@aztec/accounts", "@aztec/aztec.js", "@aztec/bb-prover", "@aztec/bb.js",
+	"@aztec/blob-lib", "@aztec/builder", "@aztec/constants", "@aztec/entrypoints",
+	"@aztec/ethereum", "@aztec/foundation", "@aztec/key-store", "@aztec/kv-store",
+	"@aztec/l1-artifacts", "@aztec/native", "@aztec/noir-acvm_js",
+	"@aztec/noir-contracts.js", "@aztec/noir-noir_codegen", "@aztec/noir-noirc_abi",
+	"@aztec/noir-protocol-circuits-types", "@aztec/noir-types",
+	"@aztec/protocol-contracts", "@aztec/pxe", "@aztec/simulator",
+	"@aztec/sqlite3mc-wasm", "@aztec/standard-contracts", "@aztec/stdlib",
+	"@aztec/telemetry-client", "@aztec/wallet-sdk", "@aztec/wallets",
+	"@aztec/world-state",
+]

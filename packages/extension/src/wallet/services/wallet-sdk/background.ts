@@ -28,7 +28,7 @@
 import "./nulo-schema-patch"
 
 import { BackgroundConnectionHandler, type PendingDiscovery, type ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
-import type { WalletMessage, WalletResponse } from "@aztec/wallet-sdk/types"
+import { NOOP_LOGGER, type WalletMessage, type WalletResponse } from "@aztec/wallet-sdk/types"
 import { isSubframeSender, validateContentScriptMessage } from "./content-script-validator"
 import { toWalletResponseError } from "./error-envelope"
 
@@ -137,6 +137,9 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 			walletName: "Nulo",
 			walletVersion: __VERSION__,
 			walletIcon: chrome.runtime.getURL("/src/assets/logo.png"),
+			// 5.0 added a required `logger`; NOOP preserves the prior no-SDK-logging behavior.
+			// (Follow-up: route to the @nulo logger to surface channel/heartbeat diagnostics.)
+			logger: NOOP_LOGGER,
 		},
 		{
 			sendToTab: (tabId, message) => chrome.tabs.sendMessage(tabId, message),

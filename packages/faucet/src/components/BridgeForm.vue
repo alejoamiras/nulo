@@ -2,7 +2,7 @@
 /** Services */
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { buildFuelRoute, isSealTrusted, minOutputForSlippage, quoteFuelPath } from "@nulo/bridge-core"
-import { AppButton } from "@nulo/design"
+import { Button } from "@nulo/design"
 import { sepolia } from "viem/chains"
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue"
 import { BRIDGE_FUEL, BRIDGE_TOKEN, BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL, L1_USDC } from "@/contracts/bridge-deployments"
@@ -447,9 +447,9 @@ function fmt(b: bigint | null): string {
 			<p v-if="fuelError && fuelQuote.state !== 'error'" class="err-msg" :data-testid="TESTIDS.bridgeFuelError">{{ fuelError }}</p>
 		</div>
 
-		<AppButton :loading="submitting" :disabled="!bothConnected || submitting" :data-testid="TESTIDS.bridgeSubmit" @click="onSubmit">
+		<Button :loading="submitting" :disabled="!bothConnected || submitting" :data-testid="TESTIDS.bridgeSubmit" @click="onSubmit">
 			{{ !bothConnected ? "CONNECT BOTH WALLETS" : direction === "l1-to-l2" ? (isPrivate ? "BRIDGE PRIVATELY TO AZTEC" : "BRIDGE TO AZTEC") : "BRIDGE TO ETHEREUM" }}
-		</AppButton>
+		</Button>
 
 		<p v-if="flowError" class="err-msg" :data-testid="TESTIDS.bridgeFlowError">{{ flowError }}</p>
 		</template>

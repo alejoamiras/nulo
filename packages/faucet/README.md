@@ -136,7 +136,6 @@ Three composables (no Pinia):
 packages/faucet/
 ├── README.md                 ← you are here
 ├── public/_headers           ← COOP/COEP/CSP for cloudflare pages
-├── public/fonts/             ← self-hosted (no Google Fonts)
 ├── scripts/deploy.ts         ← one-time deployer; idempotent
 ├── src/
 │   ├── App.vue               ← single page
