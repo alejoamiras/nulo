@@ -29,3 +29,8 @@ A *meaningful* dApp-supplied-`FPCFeePaymentMethod` SETTLEMENT e2e needs the test
 `LESSONS_FILE=implementations-plan/no-fuel-claim-fee-source/lessons/phase-3.md`
 
 ## Phase 3: ✓ (live pay_fee spend SETTLED on V5; balance_of read + spend + decrease all proven; wiring e2e = follow-up)
+
+## Post-impl
+- **`/code-review max`** (autonomous self-review of all 12 changed files): no correctness bugs, no fixes to commit. Deliberate trade-offs documented (conservative gate ≈2.6× actual — fine, users hold hundreds of FJ post-claim; `fmtFj` Number precision on huge bigints — cosmetic). Biome auto-fixes were applied inline during implementation.
+- **Goal gates re-run green**: `bun run --cwd packages/faucet test` 347 · `bun run --cwd packages/bridge-core test` 116 · `bun run lint` exit 0.
+- **Codex post-impl audit hang (logged-as-blocked):** the first `codex exec --json … xhigh` run (session PMO6C7nV) read most files then STALLED mid-synthesis — the process lingered 1h27m with no log write after the first ~17 min (the response.md was never produced). Killed the hung PID tree + retried with a tighter prompt (4 vectors, ≤350 words) to avoid the long-final-turn stall. Verdict folded into the wrap-up once the retry returns.
