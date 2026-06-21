@@ -2,7 +2,7 @@
 
 **STATUS: IN PROGRESS (`/goal` active, fully autonomous).** Branch `dev-quality` off dev `65961f1` (post-Q3 + aztec 5.0 + design round 2).
 
-**Arc progress:** Q12 ✓ · Q15 ✓ · Q17 ✓ · Q6 ✓ · Q13 ✓ · Q8 ✓ · Q9 ✓ merged (squash `5b5f34e`, PR #134; net 27916092215 = 8/8 green, quality+smoke green) · **Q18 in progress (LAST arc)**. **(7 of 8 done; 1 remains: Q18)**
+**Arc progress:** Q12 ✓ · Q15 ✓ · Q17 ✓ · Q6 ✓ · Q13 ✓ · Q8 ✓ · Q9 ✓ · Q18 ✓ merged (squash `16c5e6e`, PR #135; net 27916454771 = 8/8 green, quality 27916455252 green, smoke 27916455796 green on 1 sanctioned re-run that cleared the recurring accounts SW-restart flake). **ALL 8 IN-SCOPE ARCS MERGED (8 of 8). Final integration sweep on dev-quality HEAD (`16c5e6e`) next → then WRAP-UP.**
 
 **Origin:** finish the remaining `/harden quality` arc (run `2026-06-11-ultra-50b45d`, `audit/quality/.../findings/verified.md`, 23 findings) on an isolated integration branch `dev-quality`. This is a META-blueprint: it sequences the arc; each finding gets its OWN `/blueprint` (light/mid) when the loop reaches it.
 
@@ -45,7 +45,7 @@
 | 5 ✓ | **Q13** PXE subset key-list + type assertions | light/mid | **DONE** — squash `a7d0c6f`, net 27914901918 (8/8). Type-only `PXE_SUBSET_METHODS` + IPXE/PXEProxy↔Methods assertions; drift-guard proven (TS2344). `lessons/q13.md`. |
 | 6 ✓ | **Q8** popup form abstractions | codex-narrowed | **DONE** — squash `5de5f0a`. useFormState rebase + field.isDirty (5 tests) + EditEndpoint/EditNetwork adopt + SelectToken/BalanceView drift fixes. #18 FormPopup-Enter + EditContact + broad useEntityCrud deferred. `lessons/q8.md`. |
 | 7 ✓ | **Q9** centralize transport-side readiness | codex-narrowed | **DONE** — squash `5b5f34e`. Shipped the safe deps lever (declared `TokenBalanceService` deps — the only init-time peer-awaiter missing one); KEPT preambles; DEFERRED the transport gate (base-class behaviour change + breaks 14 base-service tests for non-bug drift). `lessons/q9.md`. |
-| 8 (in progress) | **Q18** internal execution tuples → named result objects | mid → **SHRUNK** | #83 + aztec 5.0 already converted the big tuples (StandardTxRequestResult/FeeEstimateResult/built[0..7]/fee-strategy → named FeeEstimate/BuiltStandardTx). **Only remnant:** `operation-planner.processAztecJsPayload` 3-tuple `[Action[], AccountFeePaymentMethodOptions, FeeOptions]` → named object; 4 consumers (dapp-send-executor×2, view-executor×2) + 3 test mocks. #3: FpcStrategy NOT touched (already named). Intra-extension, behaviour-preserving. |
+| 8 ✓ | **Q18** internal execution tuples → named result objects | mid → **SHRUNK** | **DONE** — squash `16c5e6e`, net 27916454771 (8/8; smoke green on 1 sanctioned re-run). Shipped `ProcessedAztecJsPayload` named object for `processAztecJsPayload`; migrated 4 consumers (dapp-send-executor×2, view-executor×2) + test mocks. #83 + aztec 5.0 had already named the big tuples; #3 FpcStrategy untouched (already named). Behaviour-preserving (281 execution units green). `lessons/q18.md`. |
 
 The loop may re-order/re-tier on re-verification; record any change here.
 
