@@ -2,7 +2,7 @@
 
 **STATUS: IN PROGRESS (`/goal` active, fully autonomous).** Branch `dev-quality` off dev `65961f1` (post-Q3 + aztec 5.0 + design round 2).
 
-**Arc progress:** Q12 ✓ merged (squash `6a8f673`, net 27911369853) · Q15 ✓ merged (squash `a20f8fd`, PR #129; net 27911901417 = 8/8 green, smoke CI 27912949134 green) · **Q17 in progress (SHRUNK)** · Q6/Q8/Q13/Q9/Q18 pending.
+**Arc progress:** Q12 ✓ (`6a8f673`) · Q15 ✓ (`a20f8fd`) · Q17 ✓ merged (squash `54d0b39`, PR #130; net 27913404523 = 8/8 green, smoke+quality CI green) · **Q6 in progress** · Q8/Q13/Q9/Q18 pending. **(4 of 8 done)**
 
 **Origin:** finish the remaining `/harden quality` arc (run `2026-06-11-ultra-50b45d`, `audit/quality/.../findings/verified.md`, 23 findings) on an isolated integration branch `dev-quality`. This is a META-blueprint: it sequences the arc; each finding gets its OWN `/blueprint` (light/mid) when the loop reaches it.
 
@@ -40,8 +40,8 @@
 |---|---------|------|----------------------------------------------|
 | 1 ✓ | **Q12** e2e fixture dedup (`phase`, connected-playground setup, cap-grant helper, single `TEST_PASSWORD`) | light | **DONE** — squash `6a8f673`, net run 27911369853 (8/8 green). Test-infra only. `lessons/q12.md`. |
 | 2 ✓ | **Q15** lifecycle purge-cascade helper | mid | **DONE** — squash `a20f8fd`, net 27911901417 (8/8). `purgeRows` + 12 sites/8 svcs. `lessons/q15.md`. |
-| 3 | **Q17** extend `ContractResolver` | mid→**SHRUNK** | `findFunctionByName`/`findFunctionBySelector` ALREADY extracted (contract-resolver.ts:43/50) + migrated (tx-request-builder:275/306); `ensureContractsRegistered` exists (134, batch). **Remaining:** add single-contract `ensureRegistered` + migrate ~4 prologue sites (token:312/397, fpc:259/359). #6: artifact-fetch + error strings stay caller-side. |
-| 4 | **Q6** activity-feed extraction (`useIncomingTransfers`, `buildJournalAwaitingCardProps`, collapse template branches) | mid | Reuse `buildActivityRows` w/ params; don't touch the already-good shared helpers. |
+| 3 ✓ | **Q17** extend `ContractResolver` | SHRUNK | **DONE** — squash `54d0b39`, net 27913404523 (8/8). Added single-contract `ensureRegistered` + migrated 4 prologue sites (token/fpc). findFunction* were already done by prior work. `lessons/q17.md`. |
+| 4 | **Q6** activity-feed extraction (`useIncomingTransfers`, `buildJournalAwaitingCardProps`, collapse template branches) | mid | Reuse `buildActivityRows` w/ NEW params (limit + tokenId). **RISK (codex it):** widget's `recentlyTerminalJournalOps` + `sortKey: op.terminalAt ?? 0` may include terminalAt-null ops that `buildActivityRows` drops — verify behaviour-preserving. Don't touch the good helpers (`activity-rows.ts:42-76`, `journal-state.ts:324-352`). useIncomingTransfers = C1 composable (≥10 tests). |
 | 5 | **Q8** popup form abstractions (`useFormState.rebase()` + `FormPopup` Enter/error ownership; `useEntityCrud` adoption) | mid | #18: `NewContactPopup` Enter double-fire hazard must be handled by any FormPopup-level fix. |
 | 6 | **Q13** PXE subset key-list + type-level `IPXE`/`PXEProxy`↔`Methods` assertions | light/mid | #14: derivation drops `network` + promisifies; `client.ts` zod can't be generated. **Re-verify vs aztec 5.0** (Methods unchanged by Q3, but 5.0 churned bodies). |
 | 7 | **Q9** centralize transport-side readiness in the base service + expand declared `dependencies` | mid | NOT dispatch-boundary gating (in-process callers). **Re-verify**: Q3 unified extension-messaging `ensureInitialized`→`awaitInitialized`; confirm what's left on the extension service fleet. |
