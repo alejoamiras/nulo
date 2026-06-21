@@ -2,7 +2,7 @@
 
 **STATUS: IN PROGRESS (`/goal` active, fully autonomous).** Branch `dev-quality` off dev `65961f1` (post-Q3 + aztec 5.0 + design round 2).
 
-**Arc progress:** Q12 ✓ merged (squash `6a8f673`, PR #128 → dev-quality; network run 27911369853 = 8/8 jobs green incl. canary/real-proving) · **Q15 in progress** · Q17/Q6/Q8/Q13/Q9/Q18 pending.
+**Arc progress:** Q12 ✓ merged (squash `6a8f673`, net 27911369853) · Q15 ✓ merged (squash `a20f8fd`, PR #129; net 27911901417 = 8/8 green, smoke CI 27912949134 green) · **Q17 in progress (SHRUNK)** · Q6/Q8/Q13/Q9/Q18 pending.
 
 **Origin:** finish the remaining `/harden quality` arc (run `2026-06-11-ultra-50b45d`, `audit/quality/.../findings/verified.md`, 23 findings) on an isolated integration branch `dev-quality`. This is a META-blueprint: it sequences the arc; each finding gets its OWN `/blueprint` (light/mid) when the loop reaches it.
 
@@ -39,8 +39,8 @@
 | # | Finding | Tier | Key constraints (registry) / re-verify note |
 |---|---------|------|----------------------------------------------|
 | 1 ✓ | **Q12** e2e fixture dedup (`phase`, connected-playground setup, cap-grant helper, single `TEST_PASSWORD`) | light | **DONE** — squash `6a8f673`, net run 27911369853 (8/8 green). Test-infra only. `lessons/q12.md`. |
-| 2 | **Q15** lifecycle purge-cascade helper | mid | #10: preserve per-service emit order + lock-vs-lockless discipline; service-owned side effects. |
-| 3 | **Q17** extend `ContractResolver` (`ensureRegistered`/`findFunctionByName`/`findFunctionBySelector`) | mid | #6: frozen per-caller error strings (parameterize messages); re-verify vs aztec 5.0 pxe. |
+| 2 ✓ | **Q15** lifecycle purge-cascade helper | mid | **DONE** — squash `a20f8fd`, net 27911901417 (8/8). `purgeRows` + 12 sites/8 svcs. `lessons/q15.md`. |
+| 3 | **Q17** extend `ContractResolver` | mid→**SHRUNK** | `findFunctionByName`/`findFunctionBySelector` ALREADY extracted (contract-resolver.ts:43/50) + migrated (tx-request-builder:275/306); `ensureContractsRegistered` exists (134, batch). **Remaining:** add single-contract `ensureRegistered` + migrate ~4 prologue sites (token:312/397, fpc:259/359). #6: artifact-fetch + error strings stay caller-side. |
 | 4 | **Q6** activity-feed extraction (`useIncomingTransfers`, `buildJournalAwaitingCardProps`, collapse template branches) | mid | Reuse `buildActivityRows` w/ params; don't touch the already-good shared helpers. |
 | 5 | **Q8** popup form abstractions (`useFormState.rebase()` + `FormPopup` Enter/error ownership; `useEntityCrud` adoption) | mid | #18: `NewContactPopup` Enter double-fire hazard must be handled by any FormPopup-level fix. |
 | 6 | **Q13** PXE subset key-list + type-level `IPXE`/`PXEProxy`↔`Methods` assertions | light/mid | #14: derivation drops `network` + promisifies; `client.ts` zod can't be generated. **Re-verify vs aztec 5.0** (Methods unchanged by Q3, but 5.0 churned bodies). |
