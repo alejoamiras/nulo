@@ -60,7 +60,7 @@ No code. Document the verdict + its grounded reasoning (the model/context table 
 **Validation gate** — `bun run lint` (exit 0); `scripts/check-no-brand.sh` clean (pre-commit);
 no broken intra-repo doc links (manual scan). Layers: lint + docs. (No app code touched.)
 
-### P2 — Drop the `dark` color name ☐
+### P2 — Drop the `dark` color name ✓ DONE
 
 `.color--dark` (`packages/design/src/utilities.css:152`) references the undeclared `--gray-15`, so
 `color="dark"` silently INHERITS instead of rendering gray — a pre-existing bug. **8 live call sites**
