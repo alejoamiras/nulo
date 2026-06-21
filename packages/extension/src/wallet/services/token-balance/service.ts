@@ -26,6 +26,12 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	protected readonly rpcMethods = defineRpcMethods<Methods>()("getTokenBalance", "getTokenBalances", "refreshTokenBalance")
 	public static name = TOKEN_BALANCE_SERVICE_NAME
 
+	/** Declared startup deps (Q9): init() awaits ProfileService.getActiveProfile()
+	 *  + TokenService.getTokensRaw(), so topological start guarantees both are
+	 *  started first rather than relying on those callees' ensureInitialized
+	 *  poll. Was the only init-time peer-awaiter still missing a declaration. */
+	public readonly dependencies = [ProfileService.name, TokenService.name] as const
+
 	public readonly onTokenBalanceAdded = new EventHandler<TokenBalanceInfo>()
 	public readonly onTokenBalanceUpdated = new EventHandler<TokenBalanceInfo>()
 	public readonly onTokenBalanceDeleted = new EventHandler<TokenBalanceInfo>()
