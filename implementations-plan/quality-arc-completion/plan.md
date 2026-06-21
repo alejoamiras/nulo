@@ -1,6 +1,8 @@
 # Plan — Quality-arc completion on `dev-quality` (meta-orchestration)
 
-**STATUS: scaffolded — awaiting kickoff (`/loop` or `/goal`).** Branch `dev-quality` created off dev `65961f1` (post-Q3 + aztec 5.0 + design round 2), pushed.
+**STATUS: IN PROGRESS (`/goal` active, fully autonomous).** Branch `dev-quality` off dev `65961f1` (post-Q3 + aztec 5.0 + design round 2).
+
+**Arc progress:** Q12 ⏳ implementing on `q12/e2e-fixture-dedup` (lint+typecheck green; smoke running; network pending) · Q15/Q17/Q6/Q8/Q13/Q9/Q18 pending.
 
 **Origin:** finish the remaining `/harden quality` arc (run `2026-06-11-ultra-50b45d`, `audit/quality/.../findings/verified.md`, 23 findings) on an isolated integration branch `dev-quality`. This is a META-blueprint: it sequences the arc; each finding gets its OWN `/blueprint` (light/mid) when the loop reaches it.
 

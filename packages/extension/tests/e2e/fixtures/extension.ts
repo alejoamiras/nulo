@@ -3,6 +3,7 @@ import { test as base, inject } from "vitest"
 import { switchToLocalNetwork, importToken, getAccountAddress, refreshBalances, createAccount } from "./helpers"
 import { snapshotResultSeq, waitForPgResult } from "./playground"
 import { waitForPopup, approveCapabilities } from "./popups"
+import { TEST_PASSWORD } from "./constants"
 import type { AztecTestConfig } from "./aztec"
 
 export interface ExtensionContext {
@@ -172,9 +173,8 @@ export async function registerProfile(ctx: ExtensionContext): Promise<void> {
 		timeout: 30_000,
 	})
 
-	const testPassword = "TestPassword123!"
-	await typeIntoInput(page, "Strong password", testPassword)
-	await typeIntoInput(page, "Repeat password", testPassword)
+	await typeIntoInput(page, "Strong password", TEST_PASSWORD)
+	await typeIntoInput(page, "Repeat password", TEST_PASSWORD)
 
 	// Submit (waitForFunction inside clickByTestId gates on :disabled)
 	await clickByTestId(page, "register-submit-btn")
@@ -244,6 +244,88 @@ export async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
 		dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 30_000 }),
 	)
 	return dappPage
+}
+
+// ── Fixture setup helpers ─────────────────────────────────────────────────
+
+/** Wraps each setup step so a throw carries a `[<prefix>:<step>]` tag. Without
+ *  it a failure deep in fixture setup surfaces downstream as an opaque
+ *  `Cannot read properties of undefined (reading 'playgroundPage')` (the test
+ *  body destructures a fixture result that `use()` never produced because setup
+ *  threw). The tag converts that collapse into a precise origin line. */
+type PhaseTagger = <T>(name: string, fn: () => Promise<T>) => Promise<T>
+
+function makePhase(prefix: string) {
+	return async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+		try {
+			return await fn()
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err)
+			throw new Error(`[${prefix}:${name}] ${msg}`)
+		}
+	}
+}
+
+/** Drive a fresh browser through register → Local Network → playground-connect,
+ *  the shared spine of every dapp-connected fixture. `beforeClose` runs after
+ *  the network switch but before the setup popup closes (used to create extra
+ *  accounts whose cost must land in the fixture hookTimeout, not the test
+ *  budget). Returns the connected context plus the `phase` tagger so the caller
+ *  can keep tagging its own follow-up steps under the same prefix. */
+async function setupConnectedPlayground(
+	prefix: string,
+	beforeClose?: (page: Page, phase: PhaseTagger) => Promise<void>,
+): Promise<{ ctx: ExtensionContext; playgroundPage: Page; phase: PhaseTagger }> {
+	const phase = makePhase(prefix)
+	const ctx = await phase("launchExtension", () => launchExtension())
+	await phase("registerProfile", () => registerProfile(ctx))
+	const setupPage = await phase("openPopup", () => openPopup(ctx))
+	await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
+	await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
+	if (beforeClose) await beforeClose(setupPage, phase)
+	await setupPage.close()
+	const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
+	return { ctx, playgroundPage, phase }
+}
+
+/** Drive the playground's requestCapabilities flow for `bundle`, then approve
+ *  the cap popup for whichever accounts `pick` selects; returns the granted
+ *  addresses. All timeouts match the cold-shard budget (60s for the popup
+ *  target + the account-row render — chrome.windows.create + SW handler boot +
+ *  loadInteractionPayload's PXE/accountService warmup can each exceed 30s on a
+ *  cold CI runner; 30s for the dApp result). `pick` owns the per-fixture
+ *  selection + its failure messages (single account vs first-two). */
+async function grantCapBundle(
+	ctx: ExtensionContext,
+	playgroundPage: Page,
+	bundle: "accounts" | "transaction",
+	pick: (accountIds: (string | null)[], capPopup: Page) => Promise<string[]>,
+): Promise<string[]> {
+	await playgroundPage.evaluate((b) => {
+		const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
+		if (!select) throw new Error("pg-bundle-select not present on playground page")
+		select.value = b
+		select.dispatchEvent(new Event("change", { bubbles: true }))
+	}, bundle)
+	const seqGrant = await snapshotResultSeq(playgroundPage)
+	const capPopupP = waitForPopup(ctx, "capabilities", { timeout: 60_000 })
+	await clickByTestId(playgroundPage, "pg-btn-requestCapabilities")
+	const capPopup = await capPopupP
+	await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 60_000 })
+	const accountIds = await capPopup.evaluate(() =>
+		[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) => r.getAttribute("data-account-id")),
+	)
+	const granted = await pick(accountIds, capPopup)
+	await approveCapabilities(capPopup, { accounts: granted })
+	await waitForPgResult(playgroundPage, "requestCapabilities", seqGrant, 30_000)
+	return granted
+}
+
+/** Select the first exposed account; throws the canonical empty-popup message. */
+const pickFirstAccount = async (accountIds: (string | null)[]): Promise<string[]> => {
+	const address = accountIds[0]
+	if (!address) throw new Error("capabilities popup returned no accounts")
+	return [address]
 }
 
 // ── Fixtures ────────────────────────────────────────────────────────────
@@ -380,26 +462,7 @@ export const test = base.extend<{
 	dappConnectedExtensionPerTest: [
 		// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
 		async ({}, use) => {
-			// Phase-tag each setup step. A failure here previously surfaced
-			// downstream as `Cannot read properties of undefined (reading
-			// 'playgroundPage')` — the test body destructured the fixture
-			// result, but use() never ran because setup threw. The tag
-			// converts that opaque collapse into a precise origin line.
-			const phase = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
-				try {
-					return await fn()
-				} catch (err) {
-					const msg = err instanceof Error ? err.message : String(err)
-					throw new Error(`[dappConnectedExtensionPerTest:${name}] ${msg}`)
-				}
-			}
-			const ctx = await phase("launchExtension", () => launchExtension())
-			await phase("registerProfile", () => registerProfile(ctx))
-			const setupPage = await phase("openPopup", () => openPopup(ctx))
-			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
-			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
-			await setupPage.close()
-			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
+			const { ctx, playgroundPage } = await setupConnectedPlayground("dappConnectedExtensionPerTest")
 			await use(Object.assign(ctx, { playgroundPage }))
 			await ctx.browser.close()
 		},
@@ -409,58 +472,15 @@ export const test = base.extend<{
 	dappConnectedExtensionWithAccountsCap: [
 		// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
 		async ({}, use) => {
-			const phase = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
-				try {
-					return await fn()
-				} catch (err) {
-					const msg = err instanceof Error ? err.message : String(err)
-					throw new Error(`[dappConnectedExtensionWithAccountsCap:${name}] ${msg}`)
-				}
-			}
-			const ctx = await phase("launchExtension", () => launchExtension())
-			await phase("registerProfile", () => registerProfile(ctx))
-			const setupPage = await phase("openPopup", () => openPopup(ctx))
-			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
-			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
-			await setupPage.close()
-			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
-
+			const { ctx, playgroundPage, phase } = await setupConnectedPlayground("dappConnectedExtensionWithAccountsCap")
 			// Pre-grant ONLY the `accounts` capability for the playground origin
-			// (NOT the wider `basic` bundle). Scoped per audit-codex-final-pass §1
-			// and plan.md §8.4. Runs inside the fixture's hookTimeout (300s) so
-			// the cold-shard cap-popup work doesn't eat into any consumer's
-			// per-test budget. The selected account address is returned to the
-			// consumer so it doesn't have to re-derive it from popup rows.
-			const accountAddress = await phase("grantAccountsCap", async () => {
-				await playgroundPage.evaluate(() => {
-					const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
-					if (!select) throw new Error("pg-bundle-select not present on playground page")
-					select.value = "accounts"
-					select.dispatchEvent(new Event("change", { bubbles: true }))
-				})
-				const seqGrant = await snapshotResultSeq(playgroundPage)
-				// 60s waitForPopup because this is THE first cap popup on a cold shard;
-				// chrome.windows.create + SW handler boot can push popup-target
-				// appearance past 30s on CI runners.
-				const capPopupP = waitForPopup(ctx, "capabilities", { timeout: 60_000 })
-				await clickByTestId(playgroundPage, "pg-btn-requestCapabilities")
-				const capPopup = await capPopupP
-				// 60s here too — loadInteractionPayload() round-trips through the SW
-				// to resolve availableAccounts (PXE + accountService warmup) which
-				// can also exceed 30s on cold shard.
-				await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 60_000 })
-				const accountIds = await capPopup.evaluate(() =>
-					[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) =>
-						r.getAttribute("data-account-id"),
-					),
-				)
-				const address = accountIds[0]
-				if (!address) throw new Error("capabilities popup returned no accounts")
-				await approveCapabilities(capPopup, { accounts: [address] })
-				await waitForPgResult(playgroundPage, "requestCapabilities", seqGrant, 30_000)
-				return address
-			})
-
+			// (NOT the wider `basic` bundle). Runs inside the fixture hookTimeout
+			// (300s) so the cold cap-popup work doesn't eat any consumer's per-test
+			// budget. The selected address is returned so consumers needn't
+			// re-derive it from popup rows.
+			const [accountAddress] = await phase("grantAccountsCap", () =>
+				grantCapBundle(ctx, playgroundPage, "accounts", pickFirstAccount),
+			)
 			await use(Object.assign(ctx, { playgroundPage, accountAddress }))
 			await ctx.browser.close()
 		},
@@ -470,53 +490,13 @@ export const test = base.extend<{
 	dappConnectedExtensionWithTransactionCap: [
 		// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
 		async ({}, use) => {
-			const phase = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
-				try {
-					return await fn()
-				} catch (err) {
-					const msg = err instanceof Error ? err.message : String(err)
-					throw new Error(`[dappConnectedExtensionWithTransactionCap:${name}] ${msg}`)
-				}
-			}
-			const ctx = await phase("launchExtension", () => launchExtension())
-			await phase("registerProfile", () => registerProfile(ctx))
-			const setupPage = await phase("openPopup", () => openPopup(ctx))
-			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
-			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
-			await setupPage.close()
-			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
-
+			const { ctx, playgroundPage, phase } = await setupConnectedPlayground("dappConnectedExtensionWithTransactionCap")
 			// Pre-grant the `transaction` bundle (accounts + transaction caps).
-			// Tx-cap-gated tests (sendTx, multicall) opt into this fixture to
-			// push the cold cap-popup round-trip into hookTimeout (300s) instead
-			// of paying it during the test budget. Same scope rules as the
-			// accounts-cap fixture above: per-test, playground origin only,
-			// no state leak to siblings.
-			const accountAddress = await phase("grantTransactionCap", async () => {
-				await playgroundPage.evaluate(() => {
-					const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
-					if (!select) throw new Error("pg-bundle-select not present on playground page")
-					select.value = "transaction"
-					select.dispatchEvent(new Event("change", { bubbles: true }))
-				})
-				const seqGrant = await snapshotResultSeq(playgroundPage)
-				// 60s timeouts because this is THE first cap popup on a cold shard.
-				const capPopupP = waitForPopup(ctx, "capabilities", { timeout: 60_000 })
-				await clickByTestId(playgroundPage, "pg-btn-requestCapabilities")
-				const capPopup = await capPopupP
-				await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 60_000 })
-				const accountIds = await capPopup.evaluate(() =>
-					[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) =>
-						r.getAttribute("data-account-id"),
-					),
-				)
-				const address = accountIds[0]
-				if (!address) throw new Error("capabilities popup returned no accounts")
-				await approveCapabilities(capPopup, { accounts: [address] })
-				await waitForPgResult(playgroundPage, "requestCapabilities", seqGrant, 30_000)
-				return address
-			})
-
+			// Same scope rules as the accounts-cap fixture: per-test, playground
+			// origin only, cold cap-popup round-trip paid in hookTimeout (300s).
+			const [accountAddress] = await phase("grantTransactionCap", () =>
+				grantCapBundle(ctx, playgroundPage, "transaction", pickFirstAccount),
+			)
 			await use(Object.assign(ctx, { playgroundPage, accountAddress }))
 			await ctx.browser.close()
 		},
@@ -526,95 +506,71 @@ export const test = base.extend<{
 	dappConnectedExtensionWithFirstTwoAccountsCap: [
 		// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
 		async ({}, use) => {
-			const phase = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
-				try {
-					return await fn()
-				} catch (err) {
-					const msg = err instanceof Error ? err.message : String(err)
-					throw new Error(`[dappConnectedExtensionWithFirstTwoAccountsCap:${name}] ${msg}`)
-				}
-			}
-			const ctx = await phase("launchExtension", () => launchExtension())
-			await phase("registerProfile", () => registerProfile(ctx))
-			const setupPage = await phase("openPopup", () => openPopup(ctx))
-			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
-			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
-			// A fresh profile exposes ONE account; multi-account consumers (the
-			// from-characterization + the authwit consume-as-caller flow) need a
-			// real second account in the cap popup, so create it here where the
-			// cost lands in hookTimeout.
-			await phase("createSecondAccount", () => createAccount(setupPage, "Second"))
-			// Persistence assertion: the row rendering proves only the optimistic
-			// appStore push; verify the SERVICE write landed before moving on.
+			// Captured in the second-account setup step and referenced by the
+			// cap-pick failure message below, so a "<2 accounts exposed" failure
+			// discriminates wrong-chain creation from popup-side filtering.
 			let postCreateDump = ""
-			await phase("assertSecondAccountPersisted", async () => {
-				postCreateDump = await setupPage.evaluate(async () => {
-					const all = await chrome.storage.local.get(null)
-					return Object.entries(all)
-						.filter(([k]) => k.startsWith("nulo:core:accounts"))
-						.map(([, v]) => (typeof v === "string" ? v : JSON.stringify(v)))
-						.join(" ||| ")
-				})
-				if (!postCreateDump.includes('"Second"')) {
-					throw new Error(`account "Second" not in storage immediately after creation. Stored: ${postCreateDump.slice(0, 600)}`)
-				}
-			})
-			await setupPage.close()
-			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
+			const { ctx, playgroundPage, phase } = await setupConnectedPlayground(
+				"dappConnectedExtensionWithFirstTwoAccountsCap",
+				async (setupPage, phase) => {
+					// A fresh profile exposes ONE account; multi-account consumers (the
+					// from-characterization + the authwit consume-as-caller flow) need a
+					// real second account in the cap popup, so create it here where the
+					// cost lands in hookTimeout.
+					await phase("createSecondAccount", () => createAccount(setupPage, "Second"))
+					// Persistence assertion: the row rendering proves only the optimistic
+					// appStore push; verify the SERVICE write landed before moving on.
+					await phase("assertSecondAccountPersisted", async () => {
+						postCreateDump = await setupPage.evaluate(async () => {
+							const all = await chrome.storage.local.get(null)
+							return Object.entries(all)
+								.filter(([k]) => k.startsWith("nulo:core:accounts"))
+								.map(([, v]) => (typeof v === "string" ? v : JSON.stringify(v)))
+								.join(" ||| ")
+						})
+						if (!postCreateDump.includes('"Second"')) {
+							throw new Error(
+								`account "Second" not in storage immediately after creation. Stored: ${postCreateDump.slice(0, 600)}`,
+							)
+						}
+					})
+				},
+			)
 
 			// Pre-grant the `transaction` bundle to the first 1-or-2 accounts the
-			// cap popup exposes. Multi-account-session tests opt into this fixture
-			// to push the cold cap-popup work into hookTimeout (300s) instead of
-			// paying it during the test budget. Tests that need to characterize
-			// "wallet picks first session account regardless of opts.from" rely on
-			// having 2+ accounts granted — but tolerate 1 if that's what the wallet
-			// exposed (characterization holds either way).
-			const accountAddresses = await phase("grantFirstTwoAccountsTransactionCap", async () => {
-				await playgroundPage.evaluate(() => {
-					const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
-					if (!select) throw new Error("pg-bundle-select not present on playground page")
-					select.value = "transaction"
-					select.dispatchEvent(new Event("change", { bubbles: true }))
-				})
-				const seqGrant = await snapshotResultSeq(playgroundPage)
-				// 60s timeouts because this is THE first cap popup on a cold shard.
-				const capPopupP = waitForPopup(ctx, "capabilities", { timeout: 60_000 })
-				await clickByTestId(playgroundPage, "pg-btn-requestCapabilities")
-				const capPopup = await capPopupP
-				await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 60_000 })
-				const accountIds = await capPopup.evaluate(() =>
-					[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) =>
-						r.getAttribute("data-account-id"),
-					),
-				)
-				const granted = accountIds.slice(0, Math.min(2, accountIds.length)).filter((a): a is string => !!a)
-				if (granted.length === 0) throw new Error("capabilities popup returned no accounts")
-				// The fixture creates a second account upstream; if the cap popup
-				// exposes fewer, fail HERE with the ids so the discriminator
-				// (creation failed vs popup filtered) is in the error itself.
-				if (granted.length < 2) {
-					// Ground truth from the wallet's own storage: every account row
-					// with its chainId, so the failure discriminates wrong-chain
-					// creation from popup-side filtering.
-					const storedAccounts = await capPopup.evaluate(async () => {
-						const all = await chrome.storage.local.get(null)
-						const out: string[] = []
-						for (const [k, v] of Object.entries(all)) {
-							if (k.startsWith("nulo:core:accounts") || k.startsWith("nulo:core:networks")) {
-								// Raw, no shape assumptions — values may be serialized strings.
-								out.push(`${k} => ${(typeof v === "string" ? v : JSON.stringify(v)).slice(0, 400)}`)
+			// cap popup exposes. Tests that characterize "wallet picks first session
+			// account regardless of opts.from" rely on 2+ accounts granted — but
+			// tolerate 1 if that's what the wallet exposed (characterization holds
+			// either way).
+			const accountAddresses = await phase("grantFirstTwoAccountsTransactionCap", () =>
+				grantCapBundle(ctx, playgroundPage, "transaction", async (accountIds, capPopup) => {
+					const granted = accountIds.slice(0, Math.min(2, accountIds.length)).filter((a): a is string => !!a)
+					if (granted.length === 0) throw new Error("capabilities popup returned no accounts")
+					// The fixture creates a second account upstream; if the cap popup
+					// exposes fewer, fail HERE with the ids so the discriminator
+					// (creation failed vs popup filtered) is in the error itself.
+					if (granted.length < 2) {
+						// Ground truth from the wallet's own storage: every account row
+						// with its chainId, so the failure discriminates wrong-chain
+						// creation from popup-side filtering.
+						const storedAccounts = await capPopup.evaluate(async () => {
+							const all = await chrome.storage.local.get(null)
+							const out: string[] = []
+							for (const [k, v] of Object.entries(all)) {
+								if (k.startsWith("nulo:core:accounts") || k.startsWith("nulo:core:networks")) {
+									// Raw, no shape assumptions — values may be serialized strings.
+									out.push(`${k} => ${(typeof v === "string" ? v : JSON.stringify(v)).slice(0, 400)}`)
+								}
 							}
-						}
-						return out.join(" ||| ")
-					})
-					throw new Error(
-						`capabilities popup exposed only [${accountIds.join(", ")}] — expected the created second account.\nAT-CAP-TIME: ${storedAccounts}\nPOST-CREATE: ${postCreateDump}`,
-					)
-				}
-				await approveCapabilities(capPopup, { accounts: granted })
-				await waitForPgResult(playgroundPage, "requestCapabilities", seqGrant, 30_000)
-				return granted
-			})
+							return out.join(" ||| ")
+						})
+						throw new Error(
+							`capabilities popup exposed only [${accountIds.join(", ")}] — expected the created second account.\nAT-CAP-TIME: ${storedAccounts}\nPOST-CREATE: ${postCreateDump}`,
+						)
+					}
+					return granted
+				}),
+			)
 
 			await use(Object.assign(ctx, { playgroundPage, accountAddresses }))
 			await ctx.browser.close()
@@ -867,7 +823,7 @@ export const test = base.extend<{
 					setVal('[data-testid="import-password-input"] input', pwd)
 					setVal('[data-testid="import-password-confirm-input"] input', pwd)
 				},
-				{ secretKey: prefunded.masterBase64, pwd: "TestPassword123!" },
+				{ secretKey: prefunded.masterBase64, pwd: TEST_PASSWORD },
 			)
 
 			await page.waitForFunction(
