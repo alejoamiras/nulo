@@ -134,7 +134,7 @@ export class DappSendExecutor {
 		let actions: Action[]
 		let detectedFee: FeeOptions | undefined
 		if (operation.kind === "aztec_sendTx") {
-			const [processedActions, , fee] = await this.deps.planner.processAztecJsPayload(
+			const { actions: processedActions, feeOptions: fee } = await this.deps.planner.processAztecJsPayload(
 				(operation as AztecSendTxOperation).exec,
 				(operation as AztecSendTxOperation).opts ?? {},
 			)
@@ -330,7 +330,7 @@ export class DappSendExecutor {
 				throw new Error("Invalid `opts.from`")
 			}
 
-			const [actions, _, fee] = await this.deps.planner.processAztecJsPayload(op.exec, op.opts)
+			const { actions, feeOptions: fee } = await this.deps.planner.processAztecJsPayload(op.exec, op.opts)
 
 			// Enter `simulating` BEFORE authwit discovery (which runs real
 			// `pxe.simulateTx`). Keeps the holder out of the short-grace `pending`
