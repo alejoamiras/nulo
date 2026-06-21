@@ -1,10 +1,42 @@
 # Plan — Quality-arc completion on `dev-quality` (meta-orchestration)
 
-**STATUS: IN PROGRESS (`/goal` active, fully autonomous).** Branch `dev-quality` off dev `65961f1` (post-Q3 + aztec 5.0 + design round 2).
+**STATUS: ✅ COMPLETE.** All 8 in-scope arcs + the codex-found Q8 fix merged into `dev-quality` and validated by a green capstone full-network sweep on dev-quality HEAD. Branch `dev-quality` off dev `65961f1` (post-Q3 + aztec 5.0 + design round 2). Promotion `dev-quality → dev` is the user's call (never auto-merged, per hard limits).
 
 **Arc progress:** Q12 ✓ · Q15 ✓ · Q17 ✓ · Q6 ✓ · Q13 ✓ · Q8 ✓ · Q9 ✓ · Q18 ✓ merged (squash `16c5e6e`, PR #135; net 27916454771 = 8/8 green, quality 27916455252 green, smoke 27916455796 green on 1 sanctioned re-run that cleared the recurring accounts SW-restart flake). **ALL 8 IN-SCOPE ARCS MERGED (8 of 8).** Final integration sweep on dev-quality HEAD (`3d0624d`): Quality ✓ (27917057135) · Network ✓ 8/8 jobs RUN (27917056616) · Smoke ✓ (27917057676, 1 sanctioned re-run cleared a lockWallet→auth 60s timing flake — path not touched by any arc).
 
-**Post-integration confidence pass (2 codex audits over `65961f1..3d0624d`):** both converged on ONE real finding — Q8 `BalanceView.onBalanceDeleted` reordered the row-filter ahead of the selected-token guard, so deleting the displayed token left `displayOption` stale (home balance stuck at $0.00). Everything else cleared by both (Q15 purge order/authz, Q9 no-cycle, Q18 feePaymentMethod mapping + error strings, Q6 listener teardown, Q12/Q13/Q17). Codex behavior `019eebfa-df96-7db1-8379-1fa22af12688`; adversarial `019eebfa-e322-7281-becf-c1bfbfd2089d`. **Q8-fix follow-up: PR #136 MERGED (squash `c41a2928`)** — capture-before-filter + new `BalanceView.test.ts` (2 cases, proven to fail vs the old ordering). Full sweep on the fix GREEN first-try: net 27917781709 (8/8 jobs RUN) · quality 27917782283 · smoke 27917782821. dev-quality HEAD now `c41a2928` (all 8 arcs + the Q8 fix). Capstone full-network sweep on `c41a2928` dispatched → on green, WRAP-UP.
+**Post-integration confidence pass (2 codex audits over `65961f1..3d0624d`):** both converged on ONE real finding — Q8 `BalanceView.onBalanceDeleted` reordered the row-filter ahead of the selected-token guard, so deleting the displayed token left `displayOption` stale (home balance stuck at $0.00). Everything else cleared by both (Q15 purge order/authz, Q9 no-cycle, Q18 feePaymentMethod mapping + error strings, Q6 listener teardown, Q12/Q13/Q17). Codex behavior `019eebfa-df96-7db1-8379-1fa22af12688`; adversarial `019eebfa-e322-7281-becf-c1bfbfd2089d`. **Q8-fix follow-up: PR #136 MERGED (squash `c41a2928`)** — capture-before-filter + new `BalanceView.test.ts` (2 cases, proven to fail vs the old ordering). Full sweep on the fix GREEN first-try: net 27917781709 (8/8 jobs RUN) · quality 27917782283 · smoke 27917782821. dev-quality HEAD now `64e57a4` (all 8 arcs + the Q8 fix + docs). **Capstone full-network sweep on dev-quality HEAD GREEN first-try: Network 27918108499 (8/8 jobs RUN, none skipped) · Quality 27918109324 · Smoke 27918109874.**
+
+---
+
+## WRAP-UP — quality-arc COMPLETE on `dev-quality`
+
+All 8 in-scope `/harden quality` findings implemented behavior-preserving, validated (units + smoke + full network e2e, every job confirmed RUN), and squash-merged into `dev-quality`. Two independent post-integration codex audits caught one regression (Q8 display-reset), fixed + tested + re-validated. Capstone sweep on dev-quality HEAD green.
+
+### The 8 arcs (each: lint + typecheck + units + smoke + network 8/8, then squash-merge)
+| Arc | Squash | Net run | Shipped |
+|-----|--------|---------|---------|
+| Q12 e2e fixture dedup | `6a8f673` | 27911369853 | `phase`/`setupConnectedPlayground`/`grantCapBundle` + single `TEST_PASSWORD`. Test-infra only. |
+| Q15 lifecycle purge cascade | `a20f8fd` | 27911901417 | `purgeRows(rows, remove, emitDeleted)` at 12 sites / 8 services; lock + emit-order preserved. |
+| Q17 ContractResolver | `54d0b39` | 27913404523 | single-contract `ensureRegistered`; 4 token/fpc prologues migrated. |
+| Q6 activity-feed | `d519b33` | 27914290541 | `useIncomingTransfers` composable (13 tests). #2/#3/#4 deferred (codex). |
+| Q13 PXE subset | `a7d0c6f` | 27914901918 | `PXE_SUBSET_METHODS` + IPXE/PXEProxy↔Methods assertions; drift-guard proven (TS2344). Type-only. |
+| Q8 popup forms | `5de5f0a` (+fix `c41a2928`) | 27915441247 | `useFormState.rebase()`/`isDirty` + 2 adopters + 2 drift fixes. Audit-found display-reset regression fixed. 1b/EditContact/useEntityCrud deferred. |
+| Q9 transport readiness | `5b5f34e` | 27916092215 | declared `TokenBalanceService` startup deps. Central gate deferred (base-class behaviour change). |
+| Q18 execution tuples | `16c5e6e` | 27916454771 | `processAztecJsPayload` → named `ProcessedAztecJsPayload`; 4 consumers. Big tuples already done by #83. |
+
+### Confidence pass (2 codex audits, `xhigh`, over the integrated diff)
+Both converged on ONE real finding — the Q8 `BalanceView.onBalanceDeleted` ordering regression (fixed `c41a2928`, pinned by `BalanceView.test.ts`). Both cleared everything else, including the highest-risk arcs: Q15 purge lock/emit-order + authz, Q9 startup-dep (no cycle), Q18 feePaymentMethod mapping + error strings, Q6 listener teardown. Sessions: behavior `019eebfa-df96-7db1-8379-1fa22af12688`, adversarial `019eebfa-e322-7281-becf-c1bfbfd2089d`.
+
+### Honest scope note
+Q6/Q8/Q9 shipped the safe sliver of their finding (rest deferred, documented in lessons + the `verified.md` resolution table). Q12/Q13/Q15/Q17/Q18 fully resolved. These are contained dedups — the architectural findings that drive the audit's quality verdict (Q4 `ExecutionService`, Q5, Q10, Q11) are **deferred, never touched**, along with Q19 (authz) and Q23.
+
+### Deferred (out of scope, untouched)
+Q4, Q5, Q10, Q11, Q19, Q23.
+
+### Notes
+- No new flakes introduced: the three smoke reds during the marathon (accounts SW-restart ×2, lockWallet→auth ×1) were all pre-existing timing flakes on paths no arc touched; each cleared on the single sanctioned re-run. Both `c41a2928` and `64e57a4` capstone sweeps were green first-try.
+- `verified.md` marked: resolution-status table (all 23) + inline status on the 8 in-scope headers.
+- **`dev-quality → dev` promotion is the user's call** — not auto-merged (hard limit).
 
 **Origin:** finish the remaining `/harden quality` arc (run `2026-06-11-ultra-50b45d`, `audit/quality/.../findings/verified.md`, 23 findings) on an isolated integration branch `dev-quality`. This is a META-blueprint: it sequences the arc; each finding gets its OWN `/blueprint` (light/mid) when the loop reaches it.
 
