@@ -4,7 +4,7 @@ import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { TxHash, TxStatus } from "@aztec/aztec.js/tx"
-import { Gas, type GasFees } from "@aztec/stdlib/gas"
+import { Gas } from "@aztec/stdlib/gas"
 import { InboxAbi, TokenPortalAbi } from "@aztec/l1-artifacts"
 import {
 	type BridgeWitness,
@@ -18,11 +18,9 @@ import {
 	hashRoute,
 	isSealTrusted,
 	markSealTrusted,
-	maxGasCostFor,
 	minOutputForSlippage,
 	predictedWorstMinFees,
 	PRIVATE_FPC_ADDRESS,
-	privateFeeJuicePayment,
 	privateMintAndPayFee,
 	publicFeeJuicePayment,
 	quoteFuelPath,
@@ -38,7 +36,7 @@ import { BRIDGE, BRIDGE_FUEL, L1_PORTAL, L1_USDC } from "@/contracts/bridge-depl
 import {
 	FUEL_FEE_MARGIN,
 	decideFuelClaim,
-	decideNoFuelFeeSource,
+	decideNoFuelClaimGate,
 	decidePrivateFuelClaim,
 	isPrivateFuelInsufficiency,
 } from "@/lib/fuel-claim-state"
@@ -71,12 +69,6 @@ const log = (...args: unknown[]) => console.log("[bridge:deposit]", ...args)
 const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 
 /**
- * Conservative pre-flight gas bound for a no-fuel claim + `PrivateFPC.pay_fee` setup (l2Gas ≈ 1.6× the
- * ~1.25M observed for the private fuel claim; daGas slack in case `feePerDaGas` is non-zero). It sizes
- * ONLY the fee-SOURCE decision (private / public / none); the EXACT gasLimits are learned from the
- * journal's first post-PXE-sync simulate and committed on send, so this bound never sets the price.
- */
-const NO_FUEL_CLAIM_GAS_BOUND = Gas.from({ daGas: 100_000, l2Gas: 2_000_000 })
 
 /** Human Fee Juice (18 decimals) for user-facing balance/shortfall messages; `null` = unread. */
 const fmtFj = (x: bigint | null): string => (x === null ? "?" : `${(Number(x) / 1e18).toFixed(3)} FJ`)
@@ -382,10 +374,6 @@ function wireDepositDeps(): void {
 			let fee: { paymentMethod: unknown; gasSettings?: unknown } | undefined = sponsored
 			let fjwcAttempt = false
 			let standaloneFj = false
-			// No-fuel private self-pay (PrivateFPC.pay_fee): set when the fee source resolves to "private".
-			// They let the shared simulate/send below cache the EXACT post-sync gasLimits + reuse the FPC.
-			let noFuelPrivateFpc: AztecAddress | null = null
-			let noFuelClaimMaxFees: GasFees | null = null
 			if (fuel?.received && fuel.leafIndex) {
 				const receiptStatus = fuel.claimTxHash ? await fuelReceiptStatus(fuel.claimTxHash) : undefined
 				// Promote a prior attempt to INCLUSION-GRADE durable evidence: only an `included`
@@ -429,81 +417,35 @@ function wireDepositDeps(): void {
 					}
 				}
 			} else {
-				// NO-fuel: the bridge claim has no fresh FJ message to consume, so it must self-pay from gas
-				// the account ALREADY holds. Pay from EITHER balance - PRIVATE first (deterministic, via the
-				// PrivateFPC's pay_fee), else PUBLIC by unblocking and deferring to the wallet's own fee picker
-				// (the extension exposes no dApp "pay from my public FJ" method; capabilities.ts Fact 12). Reads
-				// are fail-closed (null = unread != a real zero), so a transient RPC error never falsely says
-				// "no gas" NOR fabricates spendable balance.
-				const claimMaxFees = (await predictedWorstMinFees(createAztecNodeClient(NODE_URL))).mul(1.5)
-				const conservativeCost = maxGasCostFor(claimMaxFees, NO_FUEL_CLAIM_GAS_BOUND)
+				// NO-fuel: the bridge claim has no fresh FJ message to consume, so it self-pays from gas the
+				// account ALREADY holds. The faucet does NOT pre-select a method - it omits the fee and lets
+				// the WALLET's fee picker choose Public OR Private Fee Juice (or Sponsored), exactly as the
+				// public path always has. We only UNBLOCK when there is gas in either balance; private FJ at
+				// the PrivateFPC now counts (selectable via pay_fee). Reads are fail-closed (null = unread).
 				const [pub, priv] = await Promise.all([
 					readFeeJuiceOrNull("public FJ", () => readPublicFeeJuiceBalance(aztec, recipientAddr)),
 					readFeeJuiceOrNull("private FJ", () => readPrivateFeeJuiceBalance(aztec, recipientAddr)),
 				])
-				const fjSource = decideNoFuelFeeSource({ publicFeeJuice: pub, privateFeeJuice: priv, maxGasCost: conservativeCost })
-				log("no-fuel fee source", { id: rec.id, source: fjSource.source, pub: fmtFj(pub), priv: fmtFj(priv) })
-				if (fjSource.source === "unverifiable") {
-					return stop("Couldn't check your Fee Juice balance - please try again in a moment.")
-				}
-				if (fjSource.source === "none") {
-					return stop(
-						`No gas (Fee Juice) to claim this no-fuel bridge - you have ${fmtFj(pub)} public + ${fmtFj(priv)} private, the claim needs ~${fmtFj(conservativeCost)}. Enable "arrive with gas", or fund your account first.`,
-					)
-				}
-				if (fjSource.source === "private") {
-					// Tentative private fee = the proven fuel-claim shape (float gasLimits for the simulate). The
-					// send commits the EXACT padded gasLimits cached from the first successful (post-PXE-sync)
-					// simulate, so the no-refund pay_fee reserves a tight amount, not the network's per-tx max.
-					noFuelPrivateFpc = AztecAddress.fromString(PRIVATE_FPC_ADDRESS)
-					noFuelClaimMaxFees = claimMaxFees
-					fee = {
-						paymentMethod: privateFeeJuicePayment(noFuelPrivateFpc),
-						gasSettings: {
-							teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
-							maxFeesPerGas: { feePerDaGas: claimMaxFees.feePerDaGas, feePerL2Gas: claimMaxFees.feePerL2Gas },
-						},
-					}
-				} else {
-					fee = undefined // public -> unblock; the wallet's fee picker chooses (Public Fee Juice / sponsored).
-				}
+				const gate = decideNoFuelClaimGate({ publicFeeJuice: pub, privateFeeJuice: priv })
+				log("no-fuel claim gate", { id: rec.id, gate, pub: fmtFj(pub), priv: fmtFj(priv) })
+				if (gate === "unverifiable") return stop("Couldn't check your Fee Juice balance - please try again in a moment.")
+				if (gate === "none")
+					return stop('No gas (Fee Juice) to claim this no-fuel bridge. Enable "arrive with gas", or fund your account first.')
+				fee = undefined // "allow": the wallet's fee picker selects the method (Public/Private FJ or Sponsored).
 			}
 
 			const interaction = () =>
 				rec.isPrivate
 					? bridge.methods.claim_private(recipientAddr, amount, secret, leaf)
 					: bridge.methods.claim_public(recipientAddr, amount, secret, leaf)
-			// codex round-2 C: cache the EXACT padded gasLimits learned on the FIRST successful
-			// (post-PXE-sync) private simulate, so the no-refund pay_fee send reserves a tight
-			// amount, not the network's per-tx max.
-			let exactNoFuelFee: typeof fee
 			return {
-				simulate: async () => {
-					const res = (await interaction().simulate({
-						from: recipientAddr,
-						...(fee ? { fee } : {}),
-						...(noFuelPrivateFpc ? { includeMetadata: true } : {}),
-					} as never)) as { gasUsed?: { totalGas: Gas } }
-					if (noFuelPrivateFpc && noFuelClaimMaxFees && !exactNoFuelFee && res?.gasUsed?.totalGas) {
-						exactNoFuelFee = {
-							paymentMethod: privateFeeJuicePayment(noFuelPrivateFpc),
-							gasSettings: {
-								gasLimits: res.gasUsed.totalGas.mul(1.2),
-								teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
-								maxFeesPerGas: { feePerDaGas: noFuelClaimMaxFees.feePerDaGas, feePerL2Gas: noFuelClaimMaxFees.feePerL2Gas },
-							},
-						}
-					}
-					return res
-				},
+				simulate: () => interaction().simulate({ from: recipientAddr, ...(fee ? { fee } : {}) } as never),
 				send: async () => {
-					// The private no-fuel send commits the cached EXACT gasLimits (else the tentative fee).
-					const sendFee = exactNoFuelFee ?? fee
 					// L14 trigger-1 precondition: latch the attempt JOURNAL-FIRST, before the wallet call.
 					if (fjwcAttempt && fuel) updateRecord(rec.id, { fuel: { ...fuel, claimAttempt: true } })
 					const { receipt } = (await interaction().send({
 						from: recipientAddr,
-						...(sendFee ? { fee: sendFee } : {}),
+						...(fee ? { fee } : {}),
 						wait: { waitForStatus: TxStatus.PROPOSED },
 					} as never)) as { receipt: { txHash: unknown } }
 					const txHash = String(receipt.txHash)

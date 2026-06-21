@@ -1,6 +1,17 @@
 # No-fuel claim fee source — pay from public OR private Fee Juice
 
-**Tier:** `/blueprint light` · **Status:** draft (pre-approval; revised after codex round-1 reject) · **Scope:** faucet no-fuel bridge claim (+ its bridge-core fee-payment primitives) · **Network:** testnet only.
+**Tier:** `/blueprint light` · **Status:** COMPLETE · **Scope:** faucet no-fuel bridge claim (+ its bridge-core fee-payment primitives) · **Network:** testnet only.
+
+> ## ⚠️ Post-completion simplification (user-directed) — supersedes the "private-first deterministic" design below
+>
+> After live testing, the user asked to **NOT pre-select private FJ**: the faucet should just **unblock** the no-fuel claim when there is gas in EITHER balance and let the **wallet's own fee picker** select the method (Public OR Private Fee Juice, or Sponsored) — exactly how the public path always worked. So the faucet **no longer supplies `privateFeeJuicePayment`** and the whole **codex-C estimate/cache machinery is removed**. Net effect:
+> - `decideNoFuelFeeSource` (private/public/none/unverifiable + `maxGasCost`) → **`decideNoFuelClaimGate`** (`"allow" | "none" | "unverifiable"`, no gas-cost math): unblock if either balance has gas (`> 0`), fail-closed on unread, `none` if both known-zero.
+> - The no-fuel branch sets `fee = undefined` on `allow` (wallet picks); the shared simulate/send reverted to the simple form (no `exactNoFuelFee` cache, no `includeMetadata`).
+> - Removed: `NO_FUEL_CLAIM_GAS_BOUND`, the `maxGasCostFor` re-export (+ its test), the `fee`-side `gasSettings`/cache. Kept: `readPrivateFeeJuiceBalance`, the fail-closed reads, the manifest `balance_of` + **`pay_fee`** scopes (the WALLET still calls `pay_fee` when the user picks Private Fee Juice on a faucet tx — so the scope is still required), `privateFeeJuicePayment` in bridge-core (used by the `fuel-testnet.ts` proof), `private-fpc-artifact`.
+> - **A1 (no-refund) is now moot as a forced cost**: the user chooses the method in the wallet (can pick Sponsored/free), so the no-refund overpay is only incurred if THEY pick Private Fee Juice.
+> - **The estimate-timing fork (codex C) no longer applies** — there is no faucet-committed fee to size. Gates after the change: faucet typecheck 0 · **345 tests** · bridge-core **115** · lint 0.
+>
+> The original design (private-first deterministic supply + codex-C cache) is preserved below as the historical record of the reasoning; the shipped behavior is the simpler gate above.
 
 ## Summary
 
