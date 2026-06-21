@@ -31,3 +31,12 @@ All 12 changed files reviewed at max effort: **no correctness bugs, no fixes to 
 
 ## Outcome
 No high/critical. No code changes required. The feature is unit-tested (8 decision + 2 manifest + primitive pins), live-proven (pay_fee settles on V5), and gate-green (faucet 347 · bridge-core 116 · lint 0). Open item: re-run codex post-impl when the service recovers (vectors above).
+
+## Post-simplification + dev-merge eval (codex session 019ee94f — `no high/critical`)
+After the user-directed simplification (drop pre-selection → `decideNoFuelClaimGate`, `fee = undefined`; remove the codex-C cache) AND merging `origin/dev` (design round-2 #123/#124 + e2e #120), codex re-evaluated the final state — `no high/critical`:
+- The `> 0` unblock gate is sound, NOT a regression — it mirrors the original public cold-check and now extends it to private FJ; real fee sufficiency is still enforced by the wallet/tx path.
+- Claim-time fail-closed (read throw → `null` → `unverifiable`/`none`) is correct; pre-deposit fail-open is an intentional UX caveat (a cold user can bridge during a transient RPC blip, then gets blocked at claim time), not a correctness/security bug.
+- Keeping `PrivateFPC.pay_fee` in both simulate + transaction scope is correct + STILL necessary — the wallet calls it when the user picks Private Fee Juice on a faucet tx; removing it would break that wallet-built no-fuel self-pay. No dead scope (`balance_of` feeds the gate; `mint_and_pay_fee`/`claim`/`claim_and_end_setup` serve the fueled paths).
+- Merge sanity: the only in-range extension fee change is embedded-FPC cap reuse (not the `fee = undefined` picker path), so no non-obvious interaction risk.
+
+Full-repo gates post-merge: typecheck:all green (12 pkgs) · 2412 unit tests · lint 0 · faucet + extension builds ✓ · zero file overlap between this feature and dev's 3 commits.
