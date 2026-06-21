@@ -2,9 +2,7 @@
 import { computed } from "vue"
 import { useWalletConnection } from "@/composables/useWalletConnection"
 import { TESTIDS } from "@/lib/testids"
-// SpinnerLegacy keeps the faucet's spinner visually frozen until the P7 cutover (D-FAUCET-DEFER);
-// aliased to `Spinner` so the template is unchanged. P7 swaps this back to the canonical `Spinner`.
-import { AddressDisplay, AppButton, SpinnerLegacy as Spinner } from "@nulo/design"
+import { AddressDisplay, Button, Spinner } from "@nulo/design"
 import VerificationModal from "./VerificationModal.vue"
 
 const {
@@ -87,9 +85,9 @@ function openInstall() {
 				submit drip transactions to the Dripper contract - nothing else.
 			</p>
 			<p v-if="showCapabilityError" class="hint">You denied the permissions. Click to try again.</p>
-			<AppButton :data-testid="TESTIDS.btnCapabilityRetry" @click="retryCapabilities">
+			<Button :data-testid="TESTIDS.btnCapabilityRetry" @click="retryCapabilities">
 				Approve permissions
-			</AppButton>
+			</Button>
 		</div>
 
 		<div v-else-if="showNoWalletCta" class="no-wallet">
@@ -98,20 +96,21 @@ function openInstall() {
 				This faucet works with any wallet that speaks the Aztec Wallet SDK. Nulo is the fastest
 				way to start - it's an extension, takes 30 seconds.
 			</p>
-			<AppButton :data-testid="TESTIDS.btnInstallNulo" @click="openInstall">
+			<Button :data-testid="TESTIDS.btnInstallNulo" @click="openInstall">
 				Install Nulo
-			</AppButton>
+			</Button>
 		</div>
 
 		<div v-else class="connect">
-			<AppButton
+			<Button
 				v-if="showConnectButton"
 				:loading="status === 'discovering'"
+				:disabled="status === 'discovering'"
 				:data-testid="TESTIDS.btnConnect"
 				@click="onClick"
 			>
 				{{ connectLabel }}
-			</AppButton>
+			</Button>
 			<p v-if="status === 'error' && error?.category !== 'no-wallet' && error?.category !== 'capability-rejected'" class="error-hint">
 				{{ error?.message }}
 			</p>

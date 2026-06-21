@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AddressDisplay, AppButton } from "@nulo/design"
+import { AddressDisplay, Button } from "@nulo/design"
 import { useL1Wallet } from "@/composables/useL1Wallet"
 import { TESTIDS } from "@/lib/testids"
 
@@ -19,9 +19,9 @@ const { address, isConnected, wrongChain, isConnecting, connect, disconnect, swi
 			</button>
 		</div>
 
-		<AppButton v-else :loading="isConnecting" :data-testid="TESTIDS.l1Connect" @click="connect">
+		<Button v-else :loading="isConnecting" :disabled="isConnecting" :data-testid="TESTIDS.l1Connect" @click="connect">
 			Connect Ethereum
-		</AppButton>
+		</Button>
 	</section>
 </template>
 

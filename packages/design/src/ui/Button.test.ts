@@ -23,10 +23,11 @@ describe("Button (router-free base)", () => {
 		expect(w.attributes("tabindex")).toBe("-1")
 	})
 
-	test("loading renders a Spinner + applies the loading class", () => {
+	test("loading renders a Spinner + applies the loading class + sets aria-busy", () => {
 		const w = mountButton({ loading: true }, { default: "Saving" })
 		expect(w.find('[data-testid="stub-spinner"]').exists()).toBe(true)
 		expect(w.attributes("class") ?? "").toMatch(/loading/)
+		expect(w.attributes("aria-busy")).toBe("true")
 	})
 
 	test("leftIcon + rightIcon render two Icon stubs flanking the slot", () => {
