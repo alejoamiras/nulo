@@ -90,7 +90,7 @@ no broken intra-repo doc links (manual scan). Layers: lint + docs. (No app code 
 empty, excluding this plan). **Visible change → covered by P4's visual sign-off (per-context
 screenshots of the 8 sites).** Layers: typecheck · lint · unit · both builds.
 
-### P3 — Retire `AppButton` + migrate `DripButton` ☐
+### P3 — Retire `AppButton` + migrate `DripButton` ✓ DONE
 
 `AppButton` (`packages/design/src/ui/AppButton.vue`) is consumed **only** by `DripButton`
 (`packages/design/src/composite/DripButton.vue` — its last consumer; verified: no other importer).
