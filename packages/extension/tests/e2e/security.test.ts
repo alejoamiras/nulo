@@ -1,8 +1,9 @@
 import { expect } from "vitest"
+import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue } from "./fixtures/extension"
 import { changePassword, lockWallet, navigateByHash, waitForToast } from "./fixtures/helpers"
 
-const ORIGINAL_PASSWORD = "TestPassword123!"
+const ORIGINAL_PASSWORD = TEST_PASSWORD
 const NEW_PASSWORD = "NewTestPassword456!"
 
 /** During a password rotation the SW re-issues the session encryption key,

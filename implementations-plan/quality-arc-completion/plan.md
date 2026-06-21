@@ -1,6 +1,8 @@
 # Plan — Quality-arc completion on `dev-quality` (meta-orchestration)
 
-**STATUS: scaffolded — awaiting kickoff (`/loop` or `/goal`).** Branch `dev-quality` created off dev `65961f1` (post-Q3 + aztec 5.0 + design round 2), pushed.
+**STATUS: IN PROGRESS (`/goal` active, fully autonomous).** Branch `dev-quality` off dev `65961f1` (post-Q3 + aztec 5.0 + design round 2).
+
+**Arc progress:** Q12 ⏳ implementing on `q12/e2e-fixture-dedup` (lint+typecheck green; smoke running; network pending) · Q15/Q17/Q6/Q8/Q13/Q9/Q18 pending.
 
 **Origin:** finish the remaining `/harden quality` arc (run `2026-06-11-ultra-50b45d`, `audit/quality/.../findings/verified.md`, 23 findings) on an isolated integration branch `dev-quality`. This is a META-blueprint: it sequences the arc; each finding gets its OWN `/blueprint` (light/mid) when the loop reaches it.
 
@@ -27,7 +29,10 @@
 2. **Blueprint** at its tier (`/blueprint light|mid`). Open questions → **codex xhigh** (no user gate; codex resolves; log the consult + verdict in lessons).
 3. **Implement inline**, preserving every constraints-registry invariant **verbatim**; pin surprising preserved behavior with a BUG-PIN test. Tests inline with the change.
 4. **Gate:** `bun run lint` + touched-package typecheck + units + smoke + **full network e2e** — all green, jobs-confirmed-run, latest-`dev-quality` base.
-5. **Merge** squash `--admin` into `dev-quality`; mark `✓` + merge SHA + network run id in this plan; file `lessons/<arc>.md`; print `LESSONS_FILE=…`; advance.
+5. **Merge** squash into `dev-quality`; mark `✓` + merge SHA + network run id in this plan; file `lessons/<arc>.md`; print `LESSONS_FILE=…`; advance.
+
+### ⚠ CI mechanics on `dev-quality` (discovered Q12 — applies to EVERY arc)
+`pr-quick`/`pr-smoke-e2e`/`pr-network-e2e` filter `pull_request: branches: [main, dev]` → **a PR based on `dev-quality` triggers NO CI** (only Cloudflare). Do NOT wait for PR checks that never appear. **Run the gates via `workflow_dispatch`:** `gh workflow run pr-network-e2e.yml --ref <arc-branch> -f disable_accelerator=false` (+ `pr-quick.yml`), then read the run conclusion with `gh run view <id>`. Dispatch bypasses the `changes` paths-filter, so every network shard runs. `dev-quality` has NO branch protection → merge the arc on validated dispatch results (squash; no `--admin`/required-check needed).
 
 ## Ordered arcs (safest/cheapest → most invasive)
 
