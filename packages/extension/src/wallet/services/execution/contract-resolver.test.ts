@@ -19,7 +19,7 @@ import { LoggerStore } from "@/wallet/logger"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { Action } from "./spec"
-import { ContractResolver } from "./contract-resolver"
+import { ContractResolver, ensureRegistered } from "./contract-resolver"
 
 /** Minimal IConfig stand-in — avoids ConfigStore's chrome.storage touch
  *  which fires at construction time, before vitest's chrome stub is installed. */
@@ -291,5 +291,31 @@ describe("ContractResolver.ensureContractsRegistered", () => {
 		})
 		expect(registered).toEqual(["0xmissing"])
 		expect(skipped).toEqual(["0xregistered"])
+	})
+})
+
+describe("ensureRegistered", () => {
+	const instance = fakeInstance("0xclass")
+	const artifact = {} as ContractArtifact
+
+	test("registers the contract when PXE doesn't already know it", async () => {
+		const registerContract = vi.fn(async () => {})
+		const pxe = {
+			getContracts: async () => [{ toString: () => "0xother" }],
+			registerContract,
+		} as unknown as IPXE
+		await ensureRegistered(pxe, "0xnew", instance, artifact)
+		expect(registerContract).toHaveBeenCalledOnce()
+		expect(registerContract).toHaveBeenCalledWith({ instance, artifact })
+	})
+
+	test("skips registration when the contract is already registered", async () => {
+		const registerContract = vi.fn(async () => {})
+		const pxe = {
+			getContracts: async () => [{ toString: () => "0xexisting" }],
+			registerContract,
+		} as unknown as IPXE
+		await ensureRegistered(pxe, "0xexisting", instance, artifact)
+		expect(registerContract).not.toHaveBeenCalled()
 	})
 })
