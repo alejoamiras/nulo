@@ -4,6 +4,7 @@ import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import { sanitizeString } from "@/utils"
@@ -269,12 +270,14 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 		try {
 			await this.lock.enter()
 			const contacts = (await this.storage.getValues()).filter((c) => c.profileId === profile.id)
-			for (const contact of contacts) {
-				this.logDebug(`Remove contact #${contact.id} - ${contact.name}`)
-
-				await this.storage.delete(contact.id)
-				this.emit("onContactDeleted", contact)
-			}
+			await purgeRows(
+				contacts,
+				(contact) => {
+					this.logDebug(`Remove contact #${contact.id} - ${contact.name}`)
+					return this.storage.delete(contact.id)
+				},
+				(contact) => this.emit("onContactDeleted", contact),
+			)
 		} finally {
 			this.lock.leave()
 		}
