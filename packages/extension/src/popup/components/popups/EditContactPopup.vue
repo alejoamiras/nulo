@@ -474,7 +474,6 @@ const onKeydown = (e) => {
 .sender_row {
 	margin-top: -12px;
 	padding: 12px 0;
-	border-top: 1px solid var(--nulo-border);
 }
 
 .sender_text {

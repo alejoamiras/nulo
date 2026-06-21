@@ -30,7 +30,7 @@ network e2e — clarifying answer).
 
 ## Phases (sequenced low → high risk)
 
-### P1 — Copy + border quick fixes (#1, #6) ☐
+### P1 — Copy + border quick fixes (#1, #6) ✓
 1. **#1 Settings "Identity" row label.** `settings/index.vue:55` renders the row title as
    `:title="appStore.profile.name"`. Change to a static `title="Profile"`. The profile name still shows
    on the profile detail page the row links to — intended per the user (the name leaving this row is the
