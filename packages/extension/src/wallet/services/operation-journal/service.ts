@@ -1,4 +1,4 @@
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { ValidationError } from "@nulo/extension-messaging/errors"
 import { validateParams } from "@nulo/extension-messaging/zod"
 import { type JobError, type JobProgress, assertCanTransition, isTerminal } from "@nulo/wallet-core/jobs"
@@ -40,6 +40,15 @@ export * from "./spec"
  *   #6  attempts counter defaults to 0; consumers increment on retry
  */
 export class OperationJournalService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()(
+		"createOperation",
+		"transitionOperation",
+		"setOperationMeta",
+		"getOperation",
+		"getOperations",
+		"countOperations",
+		"deleteOperation",
+	)
 	public static name = OPERATION_JOURNAL_SERVICE_NAME
 
 	public readonly onOperationAdded = new EventHandler<OperationRecord>()

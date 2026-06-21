@@ -1,32 +1,24 @@
+/**
+ * Contract tests for the offscreen (SW ↔ offscreen sendMessage) ServiceClient.
+ *
+ * Relocated from the extension package into the package that owns the code.
+ * Uses the local `transport-harness` (`captureMessage` / `emitMessage`).
+ *
+ * As of the phase-4 flip the offscreen client rejects with TYPED errors (parity
+ * with the Port transport): remote errors reconstruct the WalletError subclass
+ * from `errorPayload`, timeouts → RpcTimeoutError, send failures →
+ * RpcDisconnectedError, disconnect → Error("Client disconnected"). The
+ * timer-cleanup tripwires at the bottom are the unified-correlator leak guards.
+ */
+
 import { describe, test, expect, vi, beforeEach } from "vitest"
-import type { ILogger } from "@/wallet/logger"
+import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
-import { captureMessage, emitMessage } from "@/../tests/vitest.setup"
-import { MessageType } from "@nulo/extension-messaging/messages"
-import {
-	LoggingTelemetrySink,
-	MemoryTelemetrySink,
-	ServiceClient,
-	type RequestTelemetry,
-	type TelemetrySink,
-} from "@nulo/extension-messaging/offscreen"
-
-const silentLogger: ILogger = {
-	log: async () => {},
-} as unknown as ILogger
-
-/** Spy logger that records every log call. Used to verify that the
- *  default `LoggingTelemetrySink` actually fires through the wallet's
- *  `ILogger` rather than discarding events. */
-function makeSpyLogger(): { logger: ILogger; calls: Array<[string, LogLevel, ...unknown[]]> } {
-	const calls: Array<[string, LogLevel, ...unknown[]]> = []
-	const logger: ILogger = {
-		log: (source: string, level: LogLevel, ...data: unknown[]): void => {
-			calls.push([source, level, ...data])
-		},
-	}
-	return { logger, calls }
-}
+import { captureMessage, emitMessage, makeSpyLogger, silentLogger } from "../testing/transport-harness"
+import { RpcDisconnectedError, RpcTimeoutError, UserRejectedError, WalletError } from "../errors"
+import { MessageType } from "../messages"
+import { LoggingTelemetrySink, MemoryTelemetrySink, type RequestTelemetry, type TelemetrySink } from "./telemetry"
+import { ServiceClient } from "./client"
 
 type Methods = {
 	echo(val: string): Promise<string>
@@ -89,7 +81,8 @@ function makeError(requestId: number, clientUid: string, error: string) {
 
 describe("ServiceClient.request (offscreen transport base)", () => {
 	beforeEach(() => {
-		// nothing to reset — fake-browser is reset globally in tests/vitest.setup
+		// nothing to reset — fake-browser is reset globally + the harness
+		// re-stubs chrome per test.
 	})
 
 	test("calls onReady hook before sending the request", async () => {
@@ -109,6 +102,15 @@ describe("ServiceClient.request (offscreen transport base)", () => {
 		const { requestId, fromUid } = getLastRequest()
 		emitMessage(makeResponse(requestId, fromUid, "echo:hi"))
 		await expect(promise).resolves.toBe("echo:hi")
+	})
+
+	test("null / malformed inbound messages are ignored without throwing (fix b)", () => {
+		const client = new TestClient()
+		client.connect()
+		// onMessageListener previously deref'd `message.to` on a null message.
+		expect(() => emitMessage(null)).not.toThrow()
+		expect(() => emitMessage(undefined)).not.toThrow()
+		expect(() => emitMessage({})).not.toThrow()
 	})
 
 	test("each request re-runs onReady (no memoization)", async () => {
@@ -167,9 +169,33 @@ describe("ServiceClient telemetry + send-failure", () => {
 		await flush()
 		const { requestId, fromUid } = getLastRequest()
 		emitMessage(makeError(requestId, fromUid, "remote_failed"))
-		await expect(promise).resolves.toBe("remote_failed")
+		// FLIPPED (phase 4): a flat-error response (no errorPayload) rejects with
+		// a plain Error instance, not the raw string.
+		const err = await promise
+		expect(err).toBeInstanceOf(Error)
+		expect((err as Error).message).toBe("remote_failed")
 
 		expect(sink.records).toHaveLength(1)
+		expect(sink.records[0].status).toBe("rejected")
+	})
+
+	test("rejected terminal: errorPayload reconstructs the typed WalletError subclass", async () => {
+		const sink = new MemoryTelemetrySink()
+		const client = new TestClient(sink)
+		const promise = client.echo("hi").catch((e) => e)
+		await flush()
+		const { requestId, fromUid } = getLastRequest()
+		emitMessage({
+			type: MessageType.Response,
+			from: "test-service",
+			to: fromUid,
+			content: { requestId, error: "user said no", errorPayload: { code: "USER_REJECTED", message: "user said no" } },
+		})
+
+		const err = await promise
+		expect(err).toBeInstanceOf(UserRejectedError)
+		expect(err).toBeInstanceOf(WalletError)
+		expect((err as WalletError).code).toBe("USER_REJECTED")
 		expect(sink.records[0].status).toBe("rejected")
 	})
 
@@ -180,7 +206,10 @@ describe("ServiceClient telemetry + send-failure", () => {
 		// Make sendMessage reject — typical cause: offscreen document gone.
 		sendMessageMock.mockRejectedValueOnce(new Error("offscreen closed before fully loading"))
 
-		await expect(client.echo("hi")).rejects.toMatch(/Offscreen send failed: echo/)
+		// FLIPPED (phase 4): rejects with a typed RpcDisconnectedError.
+		const err = await client.echo("hi").catch((e) => e)
+		expect(err).toBeInstanceOf(RpcDisconnectedError)
+		expect((err as Error).message).toMatch(/Offscreen send failed: echo/)
 
 		// Telemetry was emitted synchronously by the catch branch — no
 		// 90s timeout wait needed.
@@ -198,8 +227,11 @@ describe("ServiceClient telemetry + send-failure", () => {
 		expect(sink.records).toHaveLength(0) // not yet terminal
 
 		client.disconnect()
-		await expect(p1).resolves.toBe("Client disconnected")
-		await expect(p2).resolves.toBe("Client disconnected")
+		// FLIPPED (phase 4): rejects pending requests with Error("Client disconnected").
+		const [e1, e2] = await Promise.all([p1, p2])
+		expect(e1).toBeInstanceOf(Error)
+		expect((e1 as Error).message).toBe("Client disconnected")
+		expect((e2 as Error).message).toBe("Client disconnected")
 
 		expect(sink.records).toHaveLength(2)
 		expect(sink.records.every((r) => r.status === "disconnected")).toBe(true)
@@ -215,7 +247,10 @@ describe("ServiceClient telemetry + send-failure", () => {
 			await vi.advanceTimersByTimeAsync(0) // flush onReady microtasks
 
 			await vi.advanceTimersByTimeAsync(90_000 + 100)
-			await expect(promise).resolves.toMatch(/Offscreen request timed out: echo/)
+			// FLIPPED (phase 4): rejects with a typed RpcTimeoutError.
+			const err = await promise
+			expect(err).toBeInstanceOf(RpcTimeoutError)
+			expect((err as Error).message).toMatch(/Offscreen request timed out: echo/)
 
 			expect(sink.records).toHaveLength(1)
 			expect(sink.records[0].status).toBe("timeout")
@@ -259,7 +294,9 @@ describe("ServiceClient telemetry + send-failure", () => {
 
 			// Advance to the custom timeout — now it fires.
 			await vi.advanceTimersByTimeAsync(CUSTOM_TIMEOUT_MS - 90_000)
-			await expect(longPromise).resolves.toMatch(/Offscreen request timed out: multiply/)
+			const longErr = await longPromise
+			expect(longErr).toBeInstanceOf(RpcTimeoutError)
+			expect((longErr as Error).message).toMatch(/Offscreen request timed out: multiply/)
 			expect(sink.records).toHaveLength(1)
 			expect(sink.records[0].status).toBe("timeout")
 
@@ -267,7 +304,9 @@ describe("ServiceClient telemetry + send-failure", () => {
 			const echoPromise = client.echo("hi").catch((e) => e)
 			await vi.advanceTimersByTimeAsync(0)
 			await vi.advanceTimersByTimeAsync(90_000 + 100)
-			await expect(echoPromise).resolves.toMatch(/Offscreen request timed out: echo/)
+			const echoErr = await echoPromise
+			expect(echoErr).toBeInstanceOf(RpcTimeoutError)
+			expect((echoErr as Error).message).toMatch(/Offscreen request timed out: echo/)
 			expect(sink.records).toHaveLength(2)
 		} finally {
 			vi.useRealTimers()
@@ -324,7 +363,7 @@ describe("ServiceClient telemetry + send-failure", () => {
 		expect(sink.records[1].method).toBe("echo")
 	})
 
-	test("default sink (LoggingTelemetrySink, M4.4-followup): emits via logger when no explicit sink", async () => {
+	test("default sink (LoggingTelemetrySink): emits via logger when no explicit sink", async () => {
 		// No telemetry sink param — production callers rely on this default.
 		const { logger, calls } = makeSpyLogger()
 		const client = new TestClient(undefined, logger)
@@ -383,5 +422,103 @@ describe("ServiceClient telemetry + send-failure", () => {
 		expect(calls[2][1]).toBe(LogLevel.Info) // timeout
 		expect(calls[3][1]).toBe(LogLevel.Info) // disconnected
 		expect(calls[4][1]).toBe(LogLevel.Info) // send_failed
+	})
+})
+
+/**
+ * Leak guards for the unified correlator.
+ *
+ * The two transports used to track timers differently (background: a timer
+ * handle inside the pending entry; offscreen: a separate `requestTimers`
+ * sidecar). The shared core folds both into ONE pending entry whose timer is
+ * cleared whenever the entry is settled. These guards pin the invariant the
+ * unification depends on: every terminal path leaves the pending map empty AND
+ * leaves no armed timer behind that could fire a second, false terminal later.
+ * Probing `pendingCount` is intentional — a structural leak guard, not a
+ * behavior assertion. (D7: the offscreen sidecar is removed here, in the same
+ * change as these guards.)
+ */
+describe("leak guards for the unified correlator (single pending entry)", () => {
+	// biome-ignore lint/suspicious/noExplicitAny: probing the correlator's pending count
+	const pendingCount = (c: TestClient) => (c as any).pendingCount as number
+
+	test("success leaves the pending map empty", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		const promise = client.echo("hi")
+		await flush()
+		const { requestId, fromUid } = getLastRequest()
+		emitMessage(makeResponse(requestId, fromUid, "ok"))
+		await promise
+		expect(pendingCount(client)).toBe(0)
+	})
+
+	test("remote error leaves the pending map empty", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		const promise = client.echo("hi").catch(() => undefined)
+		await flush()
+		const { requestId, fromUid } = getLastRequest()
+		emitMessage(makeError(requestId, fromUid, "boom"))
+		await promise
+		expect(pendingCount(client)).toBe(0)
+	})
+
+	test("send_failed evicts the entry synchronously", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		captureMessage().mockRejectedValueOnce(new Error("offscreen gone"))
+		await expect(client.echo("hi")).rejects.toBeDefined()
+		expect(pendingCount(client)).toBe(0)
+	})
+
+	test("send_failed leaves NO armed timer — no false timeout fires 90s later (D7)", async () => {
+		const sink = new MemoryTelemetrySink()
+		const client = new TestClient(sink)
+		vi.useFakeTimers()
+		try {
+			captureMessage().mockRejectedValueOnce(new Error("offscreen gone"))
+			await client.echo("hi").catch(() => undefined)
+			expect(sink.records).toHaveLength(1)
+			expect(sink.records[0].status).toBe("send_failed")
+			// A leaked timer would fire a SECOND terminal (timeout) here.
+			await vi.advanceTimersByTimeAsync(90_000 + 100)
+			expect(sink.records).toHaveLength(1)
+			expect(pendingCount(client)).toBe(0)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("disconnect leaves NO armed timers — no false timeouts fire later (D7)", async () => {
+		const sink = new MemoryTelemetrySink()
+		const client = new TestClient(sink)
+		vi.useFakeTimers()
+		try {
+			const p1 = client.echo("a").catch(() => undefined)
+			const p2 = client.multiply(1, 2).catch(() => undefined)
+			await vi.advanceTimersByTimeAsync(0)
+			client.disconnect()
+			await Promise.all([p1, p2])
+			expect(sink.records).toHaveLength(2)
+			expect(sink.records.every((r) => r.status === "disconnected")).toBe(true)
+			// Both timers must be cleared — advancing past the ceiling adds nothing.
+			await vi.advanceTimersByTimeAsync(90_000 + 100)
+			expect(sink.records).toHaveLength(2)
+			expect(pendingCount(client)).toBe(0)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("timeout fire evicts the entry (no stale entry behind the fired timer)", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		vi.useFakeTimers()
+		try {
+			const promise = client.echo("hi").catch(() => undefined)
+			await vi.advanceTimersByTimeAsync(0)
+			await vi.advanceTimersByTimeAsync(90_000 + 100)
+			await promise
+			expect(pendingCount(client)).toBe(0)
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 })

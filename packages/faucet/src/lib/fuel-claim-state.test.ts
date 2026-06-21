@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
 	decideFuelClaim,
+	decideNoFuelClaimGate,
 	decidePrivateFuelClaim,
 	type FuelClaimEvidence,
 	isPrivateFuelInsufficiency,
@@ -146,5 +147,34 @@ describe("decidePrivateFuelClaim (Option A — never public/Sponsored)", () => {
 	it("the insufficiency classifier matches the installed assert + fails closed otherwise", () => {
 		expect(isPrivateFuelInsufficiency(`Tx invalid: ${PRIVATE_FUEL_INSUFFICIENCY_MSG}`)).toBe(true)
 		expect(isPrivateFuelInsufficiency("some other revert")).toBe(false)
+	})
+})
+
+describe("decideNoFuelClaimGate (unblock-only, fail-closed; wallet picks the method)", () => {
+	it("private FJ present -> allow (the new behavior: private FJ counts, no pre-selection)", () => {
+		expect(decideNoFuelClaimGate({ privateFeeJuice: 150n, publicFeeJuice: 0n })).toBe("allow")
+	})
+
+	it("public FJ present -> allow (the long-standing path)", () => {
+		expect(decideNoFuelClaimGate({ privateFeeJuice: 0n, publicFeeJuice: 200n })).toBe("allow")
+	})
+
+	it("both present -> allow", () => {
+		expect(decideNoFuelClaimGate({ privateFeeJuice: 100n, publicFeeJuice: 999n })).toBe("allow")
+	})
+
+	it("both known + zero -> none (a truly cold account)", () => {
+		expect(decideNoFuelClaimGate({ privateFeeJuice: 0n, publicFeeJuice: 0n })).toBe("none")
+	})
+
+	it("FAIL-CLOSED: a read failed (null) + no KNOWN gas -> unverifiable, NOT a false 'no gas'", () => {
+		expect(decideNoFuelClaimGate({ privateFeeJuice: null, publicFeeJuice: 0n })).toBe("unverifiable")
+		expect(decideNoFuelClaimGate({ privateFeeJuice: 0n, publicFeeJuice: null })).toBe("unverifiable")
+		expect(decideNoFuelClaimGate({ privateFeeJuice: null, publicFeeJuice: null })).toBe("unverifiable")
+	})
+
+	it("a KNOWN balance with gas overrides the other read failing (no false unverifiable)", () => {
+		expect(decideNoFuelClaimGate({ privateFeeJuice: 200n, publicFeeJuice: null })).toBe("allow")
+		expect(decideNoFuelClaimGate({ privateFeeJuice: null, publicFeeJuice: 200n })).toBe("allow")
 	})
 })

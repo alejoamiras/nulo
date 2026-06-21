@@ -1,5 +1,5 @@
 import type { ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { DummyLogger, type ILoggerStore, type Log } from "@/wallet/logger"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { type Events, LOG_VIEWER_SERVICE_NAME, type Methods } from "./spec"
@@ -7,6 +7,7 @@ import { type Events, LOG_VIEWER_SERVICE_NAME, type Methods } from "./spec"
 export * from "./spec"
 
 export class LogViewerService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()("getLogs", "clearLogs")
 	public static name = LOG_VIEWER_SERVICE_NAME
 
 	public readonly onLog = new EventHandler<Log>()

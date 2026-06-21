@@ -3,7 +3,7 @@ import { toRestoreError } from "@/utils/restore-error"
 import { poseidon2Hash } from "@aztec/foundation/crypto/poseidon"
 import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { EntityStorage } from "@/wallet/storage"
@@ -15,6 +15,14 @@ import { ACCOUNT_SERVICE_NAME, AccountType, type Account, type Events, type Meth
 export * from "./spec"
 
 export class AccountService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()(
+		"getAccounts",
+		"getAccount",
+		"createAccount",
+		"ensureDefaultAccount",
+		"changeAccountName",
+		"changeAccountVisibility",
+	)
 	public static name = ACCOUNT_SERVICE_NAME
 
 	public readonly onAccountAdded = new EventHandler<Account>()

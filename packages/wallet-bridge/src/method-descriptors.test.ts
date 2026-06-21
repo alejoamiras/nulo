@@ -14,6 +14,7 @@ import {
 	checkGetContractMetadata,
 	checkIsTokenRegistered,
 	checkGetContractClassMetadata,
+	checkRegisterContractClassDisabled,
 	checkSendTx,
 	checkGrantPublicAuthwit,
 	checkSimulateTx,
@@ -40,6 +41,7 @@ const FROZEN_CAPABILITY_MAP: Record<string, string> = {
 	registerContract: "contracts",
 	getContractMetadata: "contracts",
 	getContractClassMetadata: "contractClasses",
+	registerContractClass: "contractClasses",
 	simulateTx: "simulation",
 	executeUtility: "simulation",
 	profileTx: "simulation",
@@ -87,6 +89,7 @@ const FROZEN_SCOPE_CHECKER: Record<string, unknown> = {
 	getContractMetadata: checkGetContractMetadata,
 	isTokenRegistered: checkIsTokenRegistered,
 	getContractClassMetadata: checkGetContractClassMetadata,
+	registerContractClass: checkRegisterContractClassDisabled,
 	sendTx: checkSendTx,
 	grantPublicAuthwit: checkGrantPublicAuthwit,
 	simulateTx: checkSimulateTx,
@@ -148,7 +151,7 @@ describe("method-descriptors — parity with the pre-refactor tables", () => {
 		expect(deriveAccountKinds(METHOD_REGISTRY)).toEqual(FROZEN_ACCOUNT)
 	})
 
-	test("deriveScopeCheckerMap keys === frozen 14 names AND each checker is identical by reference", () => {
+	test("deriveScopeCheckerMap keys === frozen 15 names AND each checker is identical by reference", () => {
 		const derived = deriveScopeCheckerMap(METHOD_REGISTRY)
 		expect(new Set(Object.keys(derived))).toEqual(new Set(Object.keys(FROZEN_SCOPE_CHECKER)))
 		for (const [method, fn] of Object.entries(FROZEN_SCOPE_CHECKER)) {

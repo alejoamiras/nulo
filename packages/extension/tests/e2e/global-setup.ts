@@ -23,7 +23,13 @@ const PLAYGROUND_DIR = path.resolve(__dirname, "../../../playground")
 const FAUCET_DIR = path.resolve(__dirname, "../../../faucet")
 const CONFIG_PATH = path.resolve(__dirname, ".test-config.json")
 const AZTEC_BIN = path.resolve(process.env.HOME || "~", ".aztec/current/node_modules/.bin/aztec")
-const ANVIL_BIN = path.resolve(process.env.HOME || "~", ".aztec/current/bin/anvil")
+// 5.0 renamed bundled bare binaries to aztec-* on PATH: `anvil` → `aztec-anvil` (drop-in).
+const ANVIL_BIN = path.resolve(process.env.HOME || "~", ".aztec/current/bin/aztec-anvil")
+// We spawn node_modules/.bin/aztec directly (AZTEC_BIN), bypassing the bin/aztec wrapper that
+// prepends `internal-bin` to PATH. Replicate that prepend so the node's L1 deploy uses the
+// version-matched bundled `forge`, not a system/CI foundry whose `forge script` args differ — 5.0
+// otherwise fails with "deploy_aztec_l1_contracts: the following required arguments were not provided".
+const AZTEC_INTERNAL_BIN = path.resolve(process.env.HOME || "~", ".aztec/current/internal-bin")
 
 /**
  * Port resolution. Falls back to today's defaults if the agent wrapper
@@ -361,6 +367,7 @@ export default async function setup(project: TestProject) {
 				detached: true,
 				env: {
 					...process.env,
+					PATH: `${AZTEC_INTERNAL_BIN}${path.delimiter}${process.env.PATH ?? ""}`,
 					SEQ_MIN_TX_PER_BLOCK: "0",
 					ETHEREUM_HOSTS: ANVIL_URL,
 					ANVIL_PORT: String(ANVIL_PORT),

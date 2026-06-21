@@ -678,8 +678,11 @@ export async function sendTransfer(page: Page, opts: SendTransferOptions): Promi
 	})
 	await clickByTestId(page, "send-submit")
 
-	// Wait for submission toast + popup auto-close
-	await waitForToast(page, "Transaction submitted", 60_000)
+	// Wait for submission toast + popup auto-close. The toast only appears AFTER client-side
+	// proving; native proving (the prover-ON canary) adds tens of seconds to that pipeline —
+	// especially the shield (public→private) path — so give it real headroom there. Proverless
+	// bulk shards stay tight to keep failures honest-fast.
+	await waitForToast(page, "Transaction submitted", process.env.NULO_E2E_PROVERLESS === "1" ? 60_000 : 300_000)
 	// Wait for popup to fully close
 	await page.waitForFunction(() => !document.querySelector('[data-testid="send-destination-field"]'), { timeout: 10_000 })
 }

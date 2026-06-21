@@ -1,23 +1,22 @@
 #!/usr/bin/env bash
 # Compile + AVM-transpile the deployable bridge-aztec contracts.
 #
-# These contracts pin aztec-nr at the v4.2.0-aztecnr-rc.2 git tag, which needs
-# the rc.2 toolchain — the default 4.2.0 `aztec compile` (nargo beta.19) fails
-# with Noir 1299 errors. The rc.2 `aztec` CLI + `bb` (the AVM transpiler, via
-# `bb aztec_process`) live under node_modules/.bin (NOT bin/, which only has
-# nargo+forge). Plain `nargo compile` produces a NON-transpiled artifact that
-# aztec.js loadContractArtifact rejects ("public bytecode has not been
-# transpiled"); `aztec compile` does nargo + transpile + VKs. Output: the
-# postprocessed target/*.json (the deployable artifact).
+# These contracts pin aztec-nr at the v5.0.0-rc.1 git tag, which needs the matching
+# 5.0.0-rc.1 toolchain. The `aztec` CLI + `bb` (the AVM transpiler) live under
+# node_modules/.bin; nargo is exposed as `aztec-nargo` in bin/ (5.0 renamed the bundled
+# bare binaries to aztec-* on PATH). Plain `nargo compile` produces a NON-transpiled
+# artifact that aztec.js loadContractArtifact rejects ("public bytecode has not been
+# transpiled"); `aztec compile` does nargo + transpile + VKs. Output: the postprocessed
+# target/*.json (the deployable artifact).
 set -euo pipefail
 
-AZTEC_RC2="${AZTEC_RC2:-$HOME/.aztec/versions/4.2.0-aztecnr-rc.2}"
-AZTEC="$AZTEC_RC2/node_modules/.bin/aztec"
-[ -x "$AZTEC" ] || { echo "rc.2 aztec CLI not found at $AZTEC — run: aztec-up install 4.2.0-aztecnr-rc.2" >&2; exit 1; }
+AZTEC_HOME="${AZTEC_HOME:-$HOME/.aztec/versions/5.0.0-rc.1}"
+AZTEC="$AZTEC_HOME/node_modules/.bin/aztec"
+[ -x "$AZTEC" ] || { echo "5.0.0-rc.1 aztec CLI not found at $AZTEC — run: aztec-up install 5.0.0-rc.1" >&2; exit 1; }
 
-export PATH="$AZTEC_RC2/bin:$AZTEC_RC2/node_modules/.bin:$PATH"
-export NARGO="$AZTEC_RC2/bin/nargo"
-export BB="$AZTEC_RC2/node_modules/.bin/bb"
+export PATH="$AZTEC_HOME/bin:$AZTEC_HOME/node_modules/.bin:$PATH"
+export NARGO="$AZTEC_HOME/bin/aztec-nargo"
+export BB="$AZTEC_HOME/node_modules/.bin/bb"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo_root="$(cd "$here/../.." && pwd)"
