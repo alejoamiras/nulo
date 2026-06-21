@@ -1,0 +1,48 @@
+# Plan — Quality-arc completion on `dev-quality` (meta-orchestration)
+
+**STATUS: scaffolded — awaiting kickoff (`/loop` or `/goal`).** Branch `dev-quality` created off dev `65961f1` (post-Q3 + aztec 5.0 + design round 2), pushed.
+
+**Origin:** finish the remaining `/harden quality` arc (run `2026-06-11-ultra-50b45d`, `audit/quality/.../findings/verified.md`, 23 findings) on an isolated integration branch `dev-quality`. This is a META-blueprint: it sequences the arc; each finding gets its OWN `/blueprint` (light/mid) when the loop reaches it.
+
+## Arc status (23 findings)
+- **Done/merged/dropped (9):** Q1 (#91), Q2 (PR), Q3 (#121 ✓), Q7/Q14/Q16/Q20/Q22 (quick-wins), Q21 (dropped — mooted by #91).
+- **IN SCOPE here (8, contained):** Q6, Q8, Q9, Q12, Q13, Q15, Q17, Q18.
+- **DEFERRED (6, supervised later — DO NOT TOUCH):** Q4 (ExecutionService decomp), Q5 (send-pipeline tail), Q10 (composition-root), Q11 (WalletSdkDispatcher), Q19 (active-profile guards — authz), Q23 (claim/cancel coupling).
+
+## Decisions (user, this session)
+- **Scope:** contained dedups only (the 8 above). The 6 architectural/authz findings are explicitly out of scope here.
+- **Validation:** **FULL network e2e on EVERY arc** (units + smoke + network), all green AND every network job confirmed RUN (not skipped — the reducer reports green-when-skipped), on a base synced to latest `dev-quality`.
+- **Engine:** **inline** in the driving session (max control); read-only sub-agents allowed for re-verification only.
+- **Merge model:** one arc per branch off latest `dev-quality` → PR (base `dev-quality`) → CI → squash-merge `--admin` into `dev-quality`. No back-compat / state-migration required (no production users) **as long as the app + ALL tests stay green.**
+
+## Per-arc workflow (every finding)
+1. **RE-VERIFY FIRST** against current `dev-quality`: grep the cited symbols/sites from `verified.md` + check the constraints registry. The audit snapshot predates Q1/Q3 + aztec 5.0 — some findings may be partly/fully **moot** (e.g. Q9's `ensureInitialized` was unified for extension-messaging by Q3; Q13/Q17 sit on aztec-runtime which the 5.0 fork churned; Q18 overlaps execution-decomposition #83). If moot → mark `✓-moot` with evidence + advance. If shrunk → re-scope.
+2. **Blueprint** at its tier (`/blueprint light|mid`). Open questions → **codex xhigh** (no user gate; codex resolves; log the consult + verdict in lessons).
+3. **Implement inline**, preserving every constraints-registry invariant **verbatim**; pin surprising preserved behavior with a BUG-PIN test. Tests inline with the change.
+4. **Gate:** `bun run lint` + touched-package typecheck + units + smoke + **full network e2e** — all green, jobs-confirmed-run, latest-`dev-quality` base.
+5. **Merge** squash `--admin` into `dev-quality`; mark `✓` + merge SHA + network run id in this plan; file `lessons/<arc>.md`; print `LESSONS_FILE=…`; advance.
+
+## Ordered arcs (safest/cheapest → most invasive)
+
+| # | Finding | Tier | Key constraints (registry) / re-verify note |
+|---|---------|------|----------------------------------------------|
+| 1 | **Q12** e2e fixture dedup (`phase`, connected-playground setup, cap-grant helper, single `TEST_PASSWORD`) | light | Test-infra only, zero prod runtime. Threshold (≥3 cap-grant fixtures) now met. |
+| 2 | **Q15** lifecycle purge-cascade helper | mid | #10: preserve per-service emit order + lock-vs-lockless discipline; service-owned side effects. |
+| 3 | **Q17** extend `ContractResolver` (`ensureRegistered`/`findFunctionByName`/`findFunctionBySelector`) | mid | #6: frozen per-caller error strings (parameterize messages); re-verify vs aztec 5.0 pxe. |
+| 4 | **Q6** activity-feed extraction (`useIncomingTransfers`, `buildJournalAwaitingCardProps`, collapse template branches) | mid | Reuse `buildActivityRows` w/ params; don't touch the already-good shared helpers. |
+| 5 | **Q8** popup form abstractions (`useFormState.rebase()` + `FormPopup` Enter/error ownership; `useEntityCrud` adoption) | mid | #18: `NewContactPopup` Enter double-fire hazard must be handled by any FormPopup-level fix. |
+| 6 | **Q13** PXE subset key-list + type-level `IPXE`/`PXEProxy`↔`Methods` assertions | light/mid | #14: derivation drops `network` + promisifies; `client.ts` zod can't be generated. **Re-verify vs aztec 5.0** (Methods unchanged by Q3, but 5.0 churned bodies). |
+| 7 | **Q9** centralize transport-side readiness in the base service + expand declared `dependencies` | mid | NOT dispatch-boundary gating (in-process callers). **Re-verify**: Q3 unified extension-messaging `ensureInitialized`→`awaitInitialized`; confirm what's left on the extension service fleet. |
+| 8 | **Q18** internal execution tuples → named result objects (step-1 intra-extension only) | mid | #3: `FpcStrategy` byte-parity-sensitive — never normalize into the family. Internal-only (both ends ship together); NOT the public RPC param-object (that's step 2, out of scope). |
+
+The loop may re-order/re-tier on re-verification; record any change here.
+
+## Security & Adversarial Considerations
+- The arc's biggest authz risk (**Q19**, ~90 active-profile guards, ~37 deliberate non-throwers — a mis-sweep silently weakens a lock gate / changes a dApp error contract) is **DEFERRED**, not in this loop. Same for the hotspot decompositions (Q4/Q10/Q11) where blast radius is highest.
+- Each in-scope arc is behavior-preserving (constraints registry pinned). No new deps, no crypto, no privilege surface. Wire-format/parity pins (Q17 error strings, Q13 zod, Q18 fpc byte-parity) preserved verbatim.
+
+## Done definition
+All 8 arcs `✓` (or `✓-moot` with evidence) merged to `dev-quality`; each gate (units+smoke+network, jobs-run) reported passing; lessons filed; a **final full-network sweep on `dev-quality` HEAD** green; `bun run lint` + all package test suites exit 0. `dev-quality` = dev + the 8 contained quality arcs, validated. (PR `dev-quality → dev` is the user's call, later.)
+
+## Seeds
+_(below; finalized at kickoff)_
