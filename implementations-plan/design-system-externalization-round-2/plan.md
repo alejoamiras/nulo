@@ -437,9 +437,11 @@ pinned to the deleted-and-migrated set, not all package exports (D-SEAM). Codex 
 (storybook P1/P6-gate acceptable as a tooling-only gap if P6 keeps it mandatory), and the 6-PR
 sequence is independently shippable without stranding the other app.
 
-**Round-3 debt (recorded):** faucet `AppToastRegion`/`useToast` toast unification; delete `AppButton`
-+ resolve `DripButton`'s `variant=outline`/`data-loading` gap; pre-existing visual-quirk fixes
-(`--gray-15`, `dark`); the smoke-fixture FPC flake.
+**Round-3 debt:** addressed in `implementations-plan/design-system-externalization-round-3/`. Toast
+unification was **DECLINED — kept separate** (queue vs single-transient; different host contexts).
+Done in round 3: deleted `AppButton` (migrated `DripButton`, resolving the `variant=outline`/
+`data-loading` gap), dropped the `dark` color name, deleted the 9 round-1 SFC shadows. (The
+smoke-fixture FPC flake remains its own follow-up.)
 
 ## Seeds (FINAL — approved 2026-06-19)
 

@@ -20,7 +20,6 @@ export { default as MaterialIcon } from "./core/MaterialIcon.vue"
 export { default as Text } from "./core/Text.vue"
 
 /** UI primitives */
-export { default as AppButton } from "./ui/AppButton.vue"
 export { default as Badge } from "./ui/Badge.vue"
 export { default as Banner } from "./ui/Banner.vue"
 export { default as BrutalistTitle } from "./ui/BrutalistTitle.vue"

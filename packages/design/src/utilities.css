@@ -149,10 +149,6 @@
 	color: var(--txt-support);
 }
 
-.color--dark {
-	color: var(--gray-15);
-}
-
 .color--inverse {
 	color: var(--txt-inverse);
 }
@@ -219,10 +215,6 @@
 
 .fill--support {
 	fill: var(--txt-support);
-}
-
-.fill--dark {
-	fill: var(--gray-15);
 }
 
 .fill--inverse {

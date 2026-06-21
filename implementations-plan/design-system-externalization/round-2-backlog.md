@@ -3,9 +3,13 @@
 > **✓ IMPLEMENTED** in `implementations-plan/design-system-externalization-round-2/` (all 7 phases
 > green). The 9 component holdouts + the `toast`/`outside` composables are externalized; the storybook
 > rolldown build is fixed + primitive stories relocated; the orphaned faucet `public/fonts/` removed +
-> the faucet `base.css` parity guard added. Still deferred to **round 3**: the faucet toast-region
-> unification (`AppToastRegion`/faucet `useToast`), retiring the `AppButton` alias + migrating
-> `DripButton` off it, and the pre-existing visual-quirk fixes (`--gray-15`, the `dark` color name).
+> the faucet `base.css` parity guard added. **Round 3**
+> (`implementations-plan/design-system-externalization-round-3/`) closed the rest — and DECIDED the
+> faucet toast stays **SEPARATE, not unified** (`AppToastRegion`/faucet `useToast` is a 4-deep queue
+> with links; the extension's is a single-transient singleton — different state models, different host
+> contexts; the faucet already shares the package `Toast.vue` card). Round 3 also retired the
+> `AppButton` alias (migrated `DripButton` → `Button`), dropped the `dark` color name, and deleted the
+> 9 round-1 local SFC shadows.
 
 Round 1 (this plan) externalized L0 tokens + the base/theme/font takeover + L1 core (4) + the pure L2
 subset (5) into `@nulo/design`, consumed by the extension via an `unplugin-vue-components` resolver.
@@ -19,7 +23,9 @@ Everything below was deliberately deferred — each item has a concrete reason r
   prop the consumer wires, or a router-free base + an extension wrapper).
 - **`SubPageHeader`** — `useRouter()` + history policy (`:26`).
 - **`ToastManager`** — `useToast()` app-state adapter (`:3`). The package already ships the
-  presentational `Toast`; externalize the toast *state* composable first, then the region.
+  presentational `Toast`; round 2 externalized the toast *state* composable + the extension's
+  `ToastManager` region. **The faucet region unification was declined in round 3** (kept separate — the
+  faucet's queue model is intentionally different; see the round-3 plan).
 
 ### Spinner + its dependents
 - **`Spinner`** — the extension's (4s multi-rotate, `--txt-inverse`, `color` prop) diverges from the

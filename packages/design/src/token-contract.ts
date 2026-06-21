@@ -106,16 +106,13 @@ export const durations = {
  * utility layer). Kept verbatim from the originals so the generated CSS is byte-faithful.
  */
 
-/** `.color--*` / `.fill--*` color-name → CSS-var map (verbatim from the old `_text.scss`). NOTE:
- *  `dark` → `--gray-15` is a pre-existing ghost (var declared nowhere) preserved verbatim; it renders
- *  as inherited today and must keep doing so (look-same). The fix is tracked for the Phase-3 Text rewrite. */
+/** `.color--*` / `.fill--*` color-name → CSS-var map (relocated from the old `_text.scss`). */
 export const textColors = {
 	primary: "--txt-primary",
 	body: "--txt-body",
 	secondary: "--txt-secondary",
 	tertiary: "--txt-tertiary",
 	support: "--txt-support",
-	dark: "--gray-15",
 	inverse: "--txt-inverse",
 	white: "--txt-white",
 	blue: "--blue",

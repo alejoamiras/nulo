@@ -48,4 +48,13 @@ describe("ui/Toggle", () => {
 		const lock = w.find('[data-name="lock"]')
 		expect(lock.exists()).toBe(true)
 	})
+
+	// (round-3 P4 reconciliation pin) the package Toggle adds a `color` prop the deleted extension-local
+	// shadow lacked: it paints the ON-state background. Pin it so the round-1 shadow cleanup is a
+	// knowing behavior adoption, not a silent one.
+	test("color prop paints the ON-state background; OFF leaves it unset", () => {
+		const color = "rgb(1, 2, 3)"
+		expect(mountToggle({ modelValue: true, color }).html()).toContain("background: rgb(1, 2, 3)")
+		expect(mountToggle({ modelValue: false, color }).html()).not.toContain("rgb(1, 2, 3)")
+	})
 })

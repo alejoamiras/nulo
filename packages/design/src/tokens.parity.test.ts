@@ -6,9 +6,7 @@ import { borders, brand, button, colors, easings, fonts, layout, surfaces, text 
 
 /**
  * Look-same guard: every CSS-var the typed token surface exposes MUST be declared in base.css —
- * a token whose value declaration is missing would render unresolved in a consumer. (The
- * `--gray-15` ghost lives in the utility color map, NOT the typed token groups, so it is correctly
- * not asserted here; it is preserved verbatim and tracked for the Phase-3 Text rewrite.)
+ * a token whose value declaration is missing would render unresolved in a consumer.
  * Read via node:fs because vitest stubs `.css` imports to empty.
  */
 describe("token / base.css parity", () => {
