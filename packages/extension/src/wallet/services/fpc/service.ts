@@ -5,12 +5,11 @@ import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
-import { DEFAULT_SHALLOW_PXE_CLIENT_FACTORY, type ShallowPxeClient, type ShallowPxeClientFactory } from "@/wallet/services/pxe/shallow-port"
+import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import { resolveNetworkByChainId } from "@/wallet/utils/caip"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { Fpc } from "./fpc"
 import { getFpcHandler } from "./handlers"
 import { type Events, FPC_SERVICE_NAME, type FpcInfo, FpcType, type Methods } from "./spec"
@@ -42,7 +41,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 	public readonly onFpcUpdated = new EventHandler<FpcInfo>()
 	public readonly onFpcDeleted = new EventHandler<FpcInfo>()
 
-	private readonly storage: EntityStorage<StoredFpc>
+	private readonly storage = new EntityStorage<StoredFpc>("nulo:core:fpcs", chrome.storage.local)
 	private readonly lock = new Lock("fpc", this.logger)
 
 	/** Per-chain cache of deterministic protocol addresses. Populated lazily
@@ -50,23 +49,16 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 	 * service constructor. Used to recompute `isProtocol` at read time. */
 	private readonly protocolAddresses = new Map<number, ProtocolAddresses>()
 
-	private pxeService: ShallowPxeClient = null!
+	private pxeService: PxeServiceClient = null!
 	private profileService: ProfileService = null!
 	private networkService: NetworkService = null!
 
-	public constructor(
-		logger: ILogger,
-		private readonly pxeClientFactory: ShallowPxeClientFactory = DEFAULT_SHALLOW_PXE_CLIENT_FACTORY,
-		browserApi?: BrowserApi,
-	) {
+	public constructor(logger: ILogger) {
 		super(FPC_SERVICE_NAME, logger)
-		this.storage = browserApi
-			? new EntityStorage<StoredFpc>("nulo:core:fpcs", browserApi.storage.local)
-			: new EntityStorage<StoredFpc>("nulo:core:fpcs", chrome.storage.local)
 	}
 
 	protected async init(services: ServiceCollection) {
-		this.pxeService = this.pxeClientFactory(this.logger)
+		this.pxeService = new PxeServiceClient(this.logger)
 		this.profileService = services.get(ProfileService.name)
 		this.networkService = services.get(NetworkService.name)
 		this.profileService.onProfileDeleted.add(this.onProfileDeleted)

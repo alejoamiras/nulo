@@ -11,7 +11,10 @@ Asked A (init bb) / B (drop Fpc) / C (re-scope to bb-free CRUD) / D. Verdict: **
 ## What landed (honoring the /goal's "FpcService has a green composition test")
 `fpc/service.composition.test.ts` re-scoped to the bb-FREE seam + read/authz paths: (1) the injected fake seam constructs + starts + serves the chainless `getFpcs()` early-return list (no protocol derivation, no PXE); (2) `getFpc` profile-scoped existence guard (unknown id → "Invalid id"). The bb-bound discovery/add coverage stays in Network e2e. Fpc is now the doc's HEADLINE counter-example. (Deviation from the approved plan — surfaced to the user; honest maximum composition coverage for Fpc, with the limit documented rather than gamed.)
 
-## Gate — MET
-`vitest run fpc/service.composition.test.ts` (2/2) · fpc dir green (incl. existing) · typecheck 0 · lint clean · build:chrome + marker grep `dist/chrome` → 0.
+## TRIMMED (post-impl value review) — Fpc cut entirely
+After the correctness audits, a value-review (main + codex 019ee…) judged the re-scoped Fpc test **theatre**: the seam-pin asserts the new plumbing circularly; the bb-free reads are near-tautological; and the injectable `pxeClientFactory` was prod surface no test exercised. Verdict (both): cut it. Fpc was **fully reverted** (no `pxeClientFactory`/`browserApi` seams, composition test deleted). It stays the doc's pure counter-example — prose, no test. The rollout's real keepers: DappSession (real lifecycle/security coverage), Token (a wiring smoke test), the seams those two actually use, and — most durable — `COMPOSITION-TESTS.md` itself.
+
+## Gate (pre-trim, for the record) — was MET
+`vitest run fpc/service.composition.test.ts` (2/2) · fpc dir green · typecheck 0 · lint clean · build:chrome + marker grep → 0. (Test since deleted; Fpc service reverted to baseline.)
 
 LESSONS_FILE=implementations-plan/composition-test-rollout/lessons/phase-2.md
