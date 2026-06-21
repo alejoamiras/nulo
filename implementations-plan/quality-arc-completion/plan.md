@@ -15,6 +15,13 @@
 - **Engine:** **inline** in the driving session (max control); read-only sub-agents allowed for re-verification only.
 - **Merge model:** one arc per branch off latest `dev-quality` → PR (base `dev-quality`) → CI → squash-merge `--admin` into `dev-quality`. No back-compat / state-migration required (no production users) **as long as the app + ALL tests stay green.**
 
+## Autonomy & network-red policy (NON-NEGOTIABLE)
+- **FULLY AUTONOMOUS — NEVER pause for the user's judgment.** There is no "stop and surface for a human call." Every decision is resolved by `/codex xhigh` + your own judgment. The ONLY stop is completion (all 8 ✓ + final sweep green) or a true external blocker you cannot act on (e.g. credentials).
+- **Network e2e is reliable now (the suite was hardened).** A red is therefore a SIGNAL, not noise — treat it as **most likely a real break your change introduced**, not a flake.
+- **Red handling:** re-run the failed job(s) **ONCE** (a genuine one-off flake clears on a single re-run — "at most it fails once"). Green on the re-run → proceed. **Still red after that one re-run → it is REAL → root-cause and FIX it yourself** (read the failure, reproduce locally where possible, `/codex xhigh` if stuck), then re-validate to green. Then continue.
+- **FORBIDDEN:** retry-until-green (re-running repeatedly to wait out a red), skipping/quarantining/`.skip`/disabling a failing test, weakening an assertion, or merging over a red — all are masking. **Do not introduce flakes:** any test you add/touch must be deterministic; if your change makes a test intermittently red (flaky across re-runs), that is a defect you OWN and fix deterministically, never paper over with retries.
+- Same discipline for smoke/unit reds: investigate + fix, never skip.
+
 ## Per-arc workflow (every finding)
 1. **RE-VERIFY FIRST** against current `dev-quality`: grep the cited symbols/sites from `verified.md` + check the constraints registry. The audit snapshot predates Q1/Q3 + aztec 5.0 — some findings may be partly/fully **moot** (e.g. Q9's `ensureInitialized` was unified for extension-messaging by Q3; Q13/Q17 sit on aztec-runtime which the 5.0 fork churned; Q18 overlaps execution-decomposition #83). If moot → mark `✓-moot` with evidence + advance. If shrunk → re-scope.
 2. **Blueprint** at its tier (`/blueprint light|mid`). Open questions → **codex xhigh** (no user gate; codex resolves; log the consult + verdict in lessons).
