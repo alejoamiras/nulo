@@ -5,16 +5,22 @@ import { describe, expect, test } from "vitest"
 import { NULO_DESIGN_COMPONENTS, nuloDesignResolver } from "./design-resolver"
 
 const here = dirname(fileURLToPath(import.meta.url)) // packages/faucet/scripts
-const componentsDir = join(here, "../src/components")
+const srcDir = join(here, "../src")
 
 describe("design-resolver", () => {
 	// No faucet-local SFC may share a name with the resolver set: with dirs:[] the resolver only fires
 	// for unimported bare tags, but a same-named local component would still be the one a bare tag means
-	// to render. This pins that the resolver can never silently shadow a local component.
+	// to render. This pins that the resolver can never silently shadow a local component. Scans ALL of
+	// src/** (not just src/components) so an SFC in views/ or a nested folder can't slip a collision past.
 	test("no faucet-local SFC name collides with the resolver set", () => {
-		const localNames = readdirSync(componentsDir)
+		const localNames = (readdirSync(srcDir, { recursive: true }) as string[])
 			.filter((f) => f.endsWith(".vue"))
-			.map((f) => f.replace(/\.vue$/, ""))
+			.map((f) =>
+				f
+					.split("/")
+					.pop()!
+					.replace(/\.vue$/, ""),
+			)
 		const collisions = localNames.filter((n) => NULO_DESIGN_COMPONENTS.has(n))
 		expect(collisions).toEqual([])
 	})
