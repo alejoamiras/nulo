@@ -166,4 +166,15 @@ describe("useL1FeeAsset", () => {
 		expect(fa.mintError.value).toMatch(/rejected/i)
 		expect(fa.minting.value).toBe(false)
 	})
+
+	it("mint surfaces an on-chain revert (mined receipt status != success) as mintError, not a false success", async () => {
+		const { useL1FeeAsset } = await freshModule()
+		const fa = useL1FeeAsset()
+		readContract.mockImplementation(async (a) => (a?.functionName === "FEE_ASSET" ? "0xfjasset" : 0n))
+		addressRef.value = OWNER
+		waitForTransactionReceipt.mockResolvedValueOnce({ status: "reverted" } as never)
+		await fa.mint()
+		expect(fa.mintError.value).toMatch(/reverted/i)
+		expect(fa.minting.value).toBe(false)
+	})
 })

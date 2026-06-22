@@ -163,7 +163,10 @@ export function useL1FeeAsset() {
 				chain: sepolia,
 				account: owner,
 			})
-			await l1.publicClient.waitForTransactionReceipt({ hash })
+			// viem RESOLVES the receipt even on an on-chain revert — check status so a mined revert surfaces
+			// as mintError, never a false "minted" + refresh (codex post-impl MED).
+			const receipt = await l1.publicClient.waitForTransactionReceipt({ hash })
+			if (receipt.status !== "success") throw new Error("Mint transaction reverted on-chain.")
 			await refresh()
 		} catch (err) {
 			mintError.value = errorMessage(err, "Mint failed")

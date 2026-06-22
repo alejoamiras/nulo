@@ -121,6 +121,15 @@ Not warranted: testnet-only, permissionless mint, no secrets/auth/CI surface. (R
   - LOW (`mintAmount()` CTA + wrong-chain gate) → Phase 2: generic CTA copy; gate on connected + Sepolia.
   - Affirmed: pinning the handler in the same config as portal/asset is coherent; the cross-check is
     worth keeping; unit+component+smoke is the right depth.
+- **Codex post-impl audit (xhigh, on the impl diff): no HIGH/CRITICAL; all 4 plan-conditions verified
+  implemented.** One MED + one LOW:
+  - MED (`waitForTransactionReceipt` resolves on a mined revert → false "minted") → **fixed**: capture
+    the receipt + `throw` if `status !== "success"`; pinned by a new reverted-receipt test.
+  - LOW (`verifyHandlerAsset` cache lives the page lifetime; only wrong if the pinned contract changes
+    mid-session) → **accepted** (pinned-address-is-the-trust-boundary; a proxy upgrade mid-session isn't
+    a testnet concern). Noted.
+  - Follow-up (out of scope, pre-existing): `approve()` has the same revert-not-checked pattern — a
+    reverted approve would silently "succeed". Not in the mint plan's scope; left for a separate fix.
 
 ## 8. Seeds
 See `eli5.html` for the DRAFT `/goal` + `/loop`; finalized post-approval.

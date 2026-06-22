@@ -25,4 +25,12 @@
 - `bun run lint` → exit 0.
 - `bun run --cwd packages/faucet build` → built ✓.
 
+## Post-impl (code-review + codex audit)
+- `/code-review` pass: extracted a single `state` computed in MintFuelAsset (label + onClick branched on
+  the same connect/switch/mint ladder). Committed separately.
+- Codex post-impl audit: no HIGH/CRITICAL; all 4 plan-conditions verified. Fixed the one MED — `mint()`
+  now checks the receipt status (`waitForTransactionReceipt` resolves on a mined revert in this viem, so
+  a reverted mint was a false "minted"); pinned by a reverted-receipt test. LOW (lifetime handler cache)
+  accepted; `approve()`'s identical revert-gap noted as a pre-existing follow-up (out of scope).
+
 LESSONS_FILE=implementations-plan/fuel-l1-mint/lessons/phase-2.md
