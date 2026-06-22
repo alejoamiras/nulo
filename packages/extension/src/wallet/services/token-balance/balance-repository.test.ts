@@ -1,9 +1,10 @@
 import { describe, test, expect, beforeEach } from "vitest"
+import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { BalanceRepository } from "./balance-repository"
 import type { TokenBalanceRaw } from "./spec"
 
-/** The repo uses EntityStorage<TokenBalanceRaw> under the hood, backed
- *  by chrome.storage.local. The global test setup stubs chrome.*. */
+/** The repo uses EntityStorage<TokenBalanceRaw> backed by the injected
+ *  `browserApi.storage.local`; tests pass an in-memory `FakeBrowserApi`. */
 
 const balance = (id: number, overrides: Partial<TokenBalanceRaw> = {}): TokenBalanceRaw => ({
 	id,
@@ -16,43 +17,13 @@ const balance = (id: number, overrides: Partial<TokenBalanceRaw> = {}): TokenBal
 })
 
 describe("BalanceRepository", () => {
+	let api: FakeBrowserApi
 	let repo: BalanceRepository
 
 	beforeEach(() => {
-		// chrome.storage.local is stubbed globally in vitest.setup.ts via
-		// chrome.runtime, but EntityStorage talks to chrome.storage.local
-		// directly. Supply a minimal in-memory shim so tests can round-trip.
-		const backing = new Map<string, unknown>()
-		// biome-ignore lint/suspicious/noExplicitAny: test-only global stub
-		;(globalThis as any).chrome = {
-			// biome-ignore lint/suspicious/noExplicitAny: test-only global stub
-			...(globalThis as any).chrome,
-			storage: {
-				local: {
-					QUOTA_BYTES: 10485760,
-					get: async (keys: string | string[] | null | undefined) => {
-						const result: Record<string, unknown> = {}
-						if (keys == null) {
-							for (const [k, v] of backing) result[k] = v
-						} else if (typeof keys === "string") {
-							if (backing.has(keys)) result[keys] = backing.get(keys)
-						} else if (Array.isArray(keys)) {
-							for (const k of keys) if (backing.has(k)) result[k] = backing.get(k)
-						}
-						return result
-					},
-					set: async (items: Record<string, unknown>) => {
-						for (const [k, v] of Object.entries(items)) backing.set(k, v)
-					},
-					remove: async (keys: string | string[]) => {
-						const list = Array.isArray(keys) ? keys : [keys]
-						for (const k of list) backing.delete(k)
-					},
-					getKeys: async () => Array.from(backing.keys()),
-				},
-			},
-		}
-		repo = new BalanceRepository()
+		api = new FakeBrowserApi()
+		api.reset()
+		repo = new BalanceRepository(api)
 	})
 
 	test("set then get round-trips a balance", async () => {
@@ -96,9 +67,7 @@ describe("BalanceRepository", () => {
 
 	test("storage key is nulo:core:token-balances (frozen invariant)", async () => {
 		await repo.set(balance(1))
-		// biome-ignore lint/suspicious/noExplicitAny: inspect the chrome stub
-		const local = (globalThis as any).chrome.storage.local
-		const keys = await local.getKeys()
-		expect(keys.some((k: string) => k.startsWith("nulo:core:token-balances"))).toBe(true)
+		const all = await api.storage.local.get()
+		expect(Object.keys(all).some((k) => k.startsWith("nulo:core:token-balances"))).toBe(true)
 	})
 })
