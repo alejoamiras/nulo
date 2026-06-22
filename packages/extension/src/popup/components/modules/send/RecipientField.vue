@@ -12,7 +12,6 @@
  * - `selectedContact` — the candidate object once they pick one
  */
 import { trimAddress } from "@/utils/string"
-import { isValidHex } from "@/utils/string"
 
 const props = defineProps({
 	candidates: { type: Array, default: () => [] },
@@ -33,7 +32,6 @@ const filteredContacts = computed(() => {
 })
 
 const showSuggestions = computed(() => filteredContacts.value?.length && isSearchInputFocused.value)
-const isValidAddress = computed(() => isValidHex(searchTerm.value))
 
 const handleSelectContact = (contact) => {
 	selectedContact.value = contact
@@ -100,25 +98,7 @@ onBeforeUnmount(() => {
 					@focus="isSearchInputFocused = true"
 					@blur="handleSearchBlur()"
 					placeholder="0x... or contact name"
-				>
-					<template #suffix>
-						<Flex
-							v-if="!isSearchInputFocused && !isValidAddress && searchTerm.length > 0"
-							align="center"
-							gap="6"
-							:class="$style.input_right"
-						>
-							<Icon name="warning" size="12" color="primary" />
-						</Flex>
-						<Flex
-							v-else-if="!isSearchInputFocused && isValidAddress"
-							align="center"
-							:class="$style.input_right"
-						>
-							<Icon name="check-circle" size="14" color="primary" />
-						</Flex>
-					</template>
-				</AddressInput>
+				/>
 
 				<Transition name="fade">
 					<Flex v-if="showSuggestions" align="center" direction="column" wide :class="$style.contacts_wrapper">
@@ -176,18 +156,6 @@ onBeforeUnmount(() => {
 
 .recipient_wrap :global(input::placeholder) {
 	color: #363433;
-}
-
-.input_right {
-	max-width: 50%;
-	& span {
-		max-width: 90%;
-		min-width: 90%;
-
-		text-overflow: ellipsis;
-		overflow: hidden;
-		white-space: nowrap;
-	}
 }
 
 .contacts_wrapper {
