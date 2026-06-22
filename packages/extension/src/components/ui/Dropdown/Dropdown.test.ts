@@ -277,4 +277,44 @@ describe("ui/Dropdown — DropdownRoot", () => {
 		expect(document.activeElement?.id).toBe("ditem-1")
 		w.unmount()
 	})
+
+	// (P5a post-impl, codex LOW) end-to-end Enter-gate: a focused aria-disabled item must NOT fire its
+	// click on Enter (DropdownRoot.onKeydown gates activeElement.click() on aria-disabled !== "true").
+	test("Enter activates a focused item but NOT one marked aria-disabled", async () => {
+		const FlexWithWrapper = defineComponent({
+			inheritAttrs: false,
+			setup(_, { expose }) {
+				const wrapper = ref<HTMLElement | null>(null)
+				expose({ wrapper })
+				return { wrapper }
+			},
+			template: '<div ref="wrapper" v-bind="$attrs"><slot /></div>',
+		})
+		const w = mount(DropdownRoot, {
+			props: { forceOpen: false },
+			slots: {
+				default: "<button>Open</button>",
+				popup: '<div id="d-enabled" tabindex="0">Enabled</div><div id="d-disabled" aria-disabled="true" tabindex="-1">Disabled</div>',
+			},
+			attachTo: document.body,
+			global: { stubs: { ...STUBS, Flex: FlexWithWrapper } },
+		})
+		await w.setProps({ forceOpen: true })
+		await flushPromises()
+		const enabled = document.getElementById("d-enabled") as HTMLElement
+		const disabled = document.getElementById("d-disabled") as HTMLElement
+		const enabledClick = vi.fn()
+		const disabledClick = vi.fn()
+		enabled.addEventListener("click", enabledClick)
+		disabled.addEventListener("click", disabledClick)
+
+		disabled.focus()
+		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
+		expect(disabledClick).not.toHaveBeenCalled()
+
+		enabled.focus()
+		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
+		expect(enabledClick).toHaveBeenCalled()
+		w.unmount()
+	})
 })

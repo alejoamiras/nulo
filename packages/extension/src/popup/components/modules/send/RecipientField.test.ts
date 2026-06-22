@@ -6,8 +6,13 @@
  *     replacing the typing input
  *   - the card's `change` action clears the selection and restores the input
  */
-import { describe, expect, test } from "vitest"
+import { beforeEach, describe, expect, test, vi } from "vitest"
 import { mount } from "@vue/test-utils"
+
+// RecipientField calls useToast() at setup; mock it so we can assert the copy-error warning toast.
+const openToastSpy = vi.hoisted(() => vi.fn())
+vi.mock("@/composables/toast", () => ({ useToast: () => ({ openToast: openToastSpy }) }))
+
 import RecipientField from "./RecipientField.vue"
 
 const STUBS = {
@@ -25,9 +30,9 @@ const STUBS = {
 		props: ["name", "address", "size"],
 	},
 	RecipientCard: {
-		template: `<div data-testid="stub-card" :data-name="name" :data-address="address"><button data-testid="card-change-btn" @click="$emit('change')" /></div>`,
+		template: `<div data-testid="stub-card" :data-name="name" :data-address="address"><button data-testid="card-change-btn" @click="$emit('change')" /><button data-testid="card-copyerr-btn" @click="$emit('copy-error')" /></div>`,
 		props: ["name", "address"],
-		emits: ["change", "copied"],
+		emits: ["change", "copied", "copy-error"],
 	},
 }
 
@@ -35,6 +40,8 @@ const mountField = (props: Record<string, unknown> = {}) => mount(RecipientField
 
 const alice = { id: "1", name: "Alice", address: "0xaaaa", abbr: "AL" }
 const account1 = { id: "2", name: "Account 1", address: "0xbbbb" }
+
+beforeEach(() => openToastSpy.mockClear())
 
 describe("modules/send/RecipientField", () => {
 	test("renders no vault icon anywhere (removed in P3)", async () => {
@@ -76,5 +83,11 @@ describe("modules/send/RecipientField", () => {
 		expect(w.emitted("update:searchTerm")?.at(-1)).toEqual([""])
 		expect(w.find("input").exists()).toBe(true)
 		expect(w.find('[data-testid="stub-card"]').exists()).toBe(false)
+	})
+
+	test("a recipient-card copy-error surfaces a warning toast", async () => {
+		const w = mountField({ candidates: [alice], selectedContact: alice, searchTerm: alice.address })
+		await w.find('[data-testid="card-copyerr-btn"]').trigger("click")
+		expect(openToastSpy).toHaveBeenCalledWith(expect.objectContaining({ color: "red", icon: "warning" }), expect.anything())
 	})
 })
