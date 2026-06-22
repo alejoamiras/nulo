@@ -542,7 +542,7 @@ onBeforeUnmount(() => {
 
 .section_flush {
 	border-bottom: none;
-	padding-bottom: 10px;
+	padding-bottom: 0;
 }
 
 .section_last {

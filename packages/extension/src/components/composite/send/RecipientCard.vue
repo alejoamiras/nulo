@@ -83,7 +83,7 @@ const toggleReveal = () => {
 .card {
 	background: transparent;
 	border-bottom: 1px solid var(--nulo-border);
-	padding: 12px 0;
+	padding: 14px 0;
 }
 
 .identity {
