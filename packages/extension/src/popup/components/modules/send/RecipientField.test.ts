@@ -77,4 +77,20 @@ describe("modules/send/RecipientField", () => {
 		expect(w.find("input").exists()).toBe(true)
 		expect(w.find('[data-testid="stub-card"]').exists()).toBe(false)
 	})
+
+	test("shows the 'Invalid address' hint for a malformed address when blurred", () => {
+		const w = mountField({ candidates: [], searchTerm: "0xnotavalidaddress" })
+		expect(w.find('[data-testid="recipient-invalid-hint"]').exists()).toBe(true)
+	})
+
+	test("hides the invalid hint for a well-formed address", () => {
+		const w = mountField({ candidates: [], searchTerm: `0x${"a".repeat(64)}` })
+		expect(w.find('[data-testid="recipient-invalid-hint"]').exists()).toBe(false)
+	})
+
+	test("hides the invalid hint while focused (no nagging mid-type)", async () => {
+		const w = mountField({ candidates: [], searchTerm: "0xbad" })
+		await w.find("input").trigger("focus")
+		expect(w.find('[data-testid="recipient-invalid-hint"]').exists()).toBe(false)
+	})
 })

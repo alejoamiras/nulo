@@ -12,6 +12,7 @@
  * - `selectedContact` — the candidate object once they pick one
  */
 import { trimAddress } from "@/utils/string"
+import { isValidHex } from "@/utils/string"
 
 const props = defineProps({
 	candidates: { type: Array, default: () => [] },
@@ -32,6 +33,7 @@ const filteredContacts = computed(() => {
 })
 
 const showSuggestions = computed(() => filteredContacts.value?.length && isSearchInputFocused.value)
+const showInvalidHint = computed(() => !isSearchInputFocused.value && !isValidHex(searchTerm.value) && searchTerm.value.length > 0)
 
 const handleSelectContact = (contact) => {
 	selectedContact.value = contact
@@ -82,7 +84,15 @@ onBeforeUnmount(() => {
 
 <template>
 	<div :class="$style.recipient_section">
-		<span :class="$style.section_label">Recipient Address</span>
+		<Flex align="center" justify="between">
+			<span :class="$style.section_label">Recipient Address</span>
+			<Transition name="fade">
+				<Flex v-if="showInvalidHint" align="center" gap="6" data-testid="recipient-invalid-hint">
+					<Icon name="warning" size="12" color="red" />
+					<Text size="12" weight="600" color="primary">Invalid address</Text>
+				</Flex>
+			</Transition>
+		</Flex>
 		<div data-testid="send-destination-field" :class="$style.recipient_wrap">
 			<RecipientCard
 				v-if="selectedContact"
