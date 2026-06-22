@@ -1,4 +1,5 @@
 import type { Page } from "puppeteer"
+import { TEST_PASSWORD } from "./constants"
 import { clickByTestId, clickSelector, replaceInputValue } from "./extension"
 
 /**
@@ -16,8 +17,6 @@ import { clickByTestId, clickSelector, replaceInputValue } from "./extension"
  * For inline validation errors prefer `data-testid="error-text"` plus
  * `role="alert"`. Avoid asserting on copy.
  */
-
-const TEST_PASSWORD = "TestPassword123!"
 
 /**
  * Pinned workaround for a wallet bug: the simulate→prove pipeline doesn't

@@ -6,6 +6,38 @@ Merge of dual-family verification (`raw/verify-claude-{A,B,C}.md`, `raw/verify-c
 
 ## Findings (final priority order)
 
+## Resolution status — `dev-quality` quality arc (added 2026-06-21)
+
+Tracks the contained-dedup arc driven via `implementations-plan/quality-arc-completion/`. **In-scope = 8 contained findings**, each implemented behavior-preserving on a branch off `dev-quality`, validated (units + smoke + full network e2e, every job confirmed-run), and squash-merged. The 6 architectural/authz findings were explicitly **deferred** (out of scope for this arc). Findings already closed by prior work are marked accordingly. Two post-integration codex audits over the integrated diff converged on one regression (Q8 `BalanceView` display-reset), fixed in `c41a2928`.
+
+| Finding | Arc status | Evidence |
+|---|---|---|
+| Q1 | done (prior) | #91 |
+| Q2 | done (prior) | profile-flow-dedup PR |
+| Q3 | done (prior) | #121 |
+| Q4 | **DEFERRED** (architectural — `ExecutionService` decomp) | — |
+| Q5 | **DEFERRED** (architectural — send-pipeline tail) | — |
+| Q6 | ✅ resolved — **partial** (`useIncomingTransfers` composable; dedups #2/#3/#4 deferred per codex) | `d519b33` |
+| Q7 | done (prior, quick-win) | #113 |
+| Q8 | ✅ resolved — **partial** (`useFormState.rebase`/`isDirty` + 2 adopters + 2 drift fixes; FormPopup-Enter / EditContact / broad `useEntityCrud` deferred). Audit-found display-reset regression fixed. | `5de5f0a`, fix `c41a2928` |
+| Q9 | ✅ resolved — **partial** (declared `TokenBalanceService` startup deps; the central transport-readiness *gate* deferred — base-class behaviour-change risk) | `5b5f34e` |
+| Q10 | **DEFERRED** (architectural — composition root) | — |
+| Q11 | **DEFERRED** (structural hotspot — `WalletSdkDispatcher`) | — |
+| Q12 | ✅ resolved (full) | `6a8f673` |
+| Q13 | ✅ resolved (full — type-only key-list + assertions) | `a7d0c6f` |
+| Q14 | done (prior, quick-win) | — |
+| Q15 | ✅ resolved (full — `purgeRows`; lock/emit-order preserved) | `a20f8fd` |
+| Q16 | done (prior, dead-export cleanup) | #118 |
+| Q17 | ✅ resolved (full — single-contract `ensureRegistered`; findFunction* already done) | `54d0b39` |
+| Q18 | ✅ resolved (full — `processAztecJsPayload` named object; big tuples already done by #83) | `16c5e6e` |
+| Q19 | **DEFERRED** (authz — active-profile guards) | — |
+| Q20 | done (prior, quick-win) | — |
+| Q21 | dropped — mooted by #91 | — |
+| Q22 | done (prior, quick-win) | #108 |
+| Q23 | **DEFERRED** (temporal coupling — claim/cancel) | — |
+
+Per-arc lessons + the two codex-audit session ids: `implementations-plan/quality-arc-completion/`.
+
 ### Q1: Wallet method metadata scattered across parallel registries
 **Smell:** Shotgun Surgery via parallel registries. **Bucket:** architectural. **Blast radius:** wide (5 bridge files plus dispatcher consumers). **Change frequency:** hot (`dispatcher.ts`/`scope-enforcement.ts` are active hotspots). **Cross-model:** convergent
 **Instances:** `packages/wallet-bridge/src/capability-map.ts:18,21-46`; `packages/wallet-bridge/src/dispatcher.ts:163-198,237-280,867-956`; `packages/wallet-bridge/src/scope-enforcement.ts:9-10,348-362`.
@@ -52,6 +84,7 @@ Merge of dual-family verification (`raw/verify-claude-{A,B,C}.md`, `raw/verify-c
 **Verification:** ADJUSTED (high) — codex narrowed the duplication to the shared lifecycle tail rather than full methods end-to-end; claude found the doc-staleness is *stronger* than consolidated stated (comment claims the extraction happened; it never did).
 
 ### Q6: Activity-feed extraction is half-done around `RecentActivityView`
+> **Status (dev-quality):** ✅ partially resolved (core landed, remainder deferred) — see resolution-status table above.
 **Smell:** Large Component plus Duplicate Code. **Bucket:** structural. **Blast radius:** wide (widget, page, shared utils). **Change frequency:** hot (`RecentActivityView.vue` is a UI hotspot). **Cross-model:** convergent
 **Instances:** `packages/extension/src/popup/components/modules/general/RecentActivityView.vue:91-109,148-185,205-251,345-400,704-817`; `packages/extension/src/popup/pages/activity.vue:38-44,52-77,87-93,147-156,172-179`; stale extraction comment at `packages/extension/src/utils/activity-rows.ts:11-14`. (`activity-rows.ts:42-76` and `journal-state.ts:324-352` are the *good* shared helpers — comparison anchors, not smell sites; removed from the instance list.)
 **Evidence:** `RecentActivityView:91-109` reimplements the tx/journal/incoming triple-merge that `activity.vue:133-140` gets from the shared `buildActivityRows`; `activity-rows.ts:11-14` claims the merge was extracted from both surfaces — false for the widget. Incoming-transfer handlers, config-toggle reload, and token wiring are duplicated verbatim between widget and page. Awaiting-card prop derivation (345-400) mirrors the already-extracted `buildJournalTerminalCardProps` shape-for-shape. The token/!token template branches (704-817) duplicate the full awaiting+merged-rows block.
@@ -70,6 +103,7 @@ Merge of dual-family verification (`raw/verify-claude-{A,B,C}.md`, `raw/verify-c
 **Verification:** confirmed (high) — both families confirmed all instances and the shipped drift; claude's minor count correction (7 files, not 8) applied.
 
 ### Q8: Popup form abstractions are half-finished, so dialogs reassemble common lifecycle logic
+> **Status (dev-quality):** ✅ partially resolved (core landed + audit-found regression fixed; FormPopup-Enter / EditContact / broad useEntityCrud deferred) — see resolution-status table above.
 **Smell:** Duplicate Code and half-done abstraction — two distinct gaps: (a) `useFormState` lacks async rebase, (b) `useEntityCrud` adoption is incomplete. **Bucket:** structural. **Blast radius:** wide but smaller than consolidated stated (form composable, popup shell, the dialog family; the selector/balance list-sync sites are an adjacent family). **Change frequency:** hot across popup forms. **Cross-model:** convergent
 **Instances:** `packages/extension/src/composables/useFormState.ts:89-117,153-169`; `packages/extension/src/popup/components/popups/EditEndpointPopup.vue:37-43,85,148`; `EditNetworkPopup.vue:43-53,78,137`; `EditContactPopup.vue:120-130,149,434-463`; hand-rolled event/list sync in `NewContactPopup.vue:30-47,181-292`, `EditContactPopup.vue:32-74,348-463`, `NewFpcPopup.vue:83-108,121-207`, `EditFpcPopup.vue:128-167,189-295`, `SelectFpcPopup.vue:47-50,77-87`, `SelectTokenPopup.vue:26-37`; adjacent family members outside the strict popup-form scope: `SelectBalanceTypePopup.vue:45-65`, `SelectProfilePopup.vue:20-23,46-60`, `BalanceView.vue:150-169`. (`useEntityCrud.ts:7-8` is evidence of the unused abstraction, not a smell site.)
 **Evidence:** `useFormState` fixes its baseline at construction with no rebase API, so every async edit dialog hand-rolls refill and bypasses `form.isDirty` with per-field dirty computeds. `FormPopup` emits only button-click submit; consumers duplicate the identical Enter-keydown guard (NewContact's copy even documents the double-fire hazard a `FormPopup`-level fix must handle). List-sync drift is real: `SelectTokenPopup` has no update handler; `BalanceView`'s delete handler diverges.
@@ -79,6 +113,7 @@ Merge of dual-family verification (`raw/verify-claude-{A,B,C}.md`, `raw/verify-c
 **Verification:** ADJUSTED (moderate) — codex split the finding into its two component gaps, deflated the blast radius, and reclassified `useEntityCrud.ts:7-8` plus the SelectBalanceType/BalanceView sites; claude confirmed every cited dialog including the drift.
 
 ### Q9: Service readiness is split between declarative deps and hand-copied `ensureInitialized()`
+> **Status (dev-quality):** ✅ partially resolved (declared the missing startup deps; central transport-readiness gate deferred) — see resolution-status table above.
 **Smell:** Temporal coupling plus Duplicate Code. **Bucket:** architectural. **Blast radius:** wide (the full service fleet, shared base class — broader than the ten counted services). **Change frequency:** warm, with repeated new methods extending the pattern. **Cross-model:** convergent
 **Instances:** dependency declarations at `packages/extension/src/wallet/services/contact/service.ts:19` and `packages/extension/src/wallet/services/incoming-transfer/service.ts:68-75`; fallback mechanism at `packages/extension-messaging/src/background/service.ts:187-199`; topology contract at `packages/wallet-core/src/base/index.ts:55-70`; repeated preamble counts (grep-reproduced): profile 24, network 17, fpc 9, contact 8, account 7, token 7, auth-registry 4, dapp-session 3, transaction 2, config 0; the same preamble also recurs heavily in `account-state`, `execution`, `note`, `operation-journal`, `dapp-interaction`, and `token-balance` (added by verification).
 **Evidence:** Only two services declare startup dependencies; the rest rely on a per-method `await this.ensureInitialized()` backed by a 500ms-poll/30s-timeout loop, plus reviewer discipline. `ServiceCollection.start()` already provides topological phases specifically to avoid mysterious readiness timeouts.
@@ -106,6 +141,7 @@ Merge of dual-family verification (`raw/verify-claude-{A,B,C}.md`, `raw/verify-c
 **Verification:** ADJUSTED (high) — codex reframed as "Large Class plus a smaller duplicated flow" and reclassified two of the five duplication cites; claude confirmed the inline `formatSessionAccounts` reimplementation and flagged the two wire-parity pins.
 
 ### Q12: E2E harness setup/grant/bootstrap logic is duplicated in the hottest fixture module
+> **Status (dev-quality):** ✅ RESOLVED — see resolution-status table above.
 **Smell:** Duplicate Code (the fixture ladders and grant choreography) plus mixed-concern hotspot module (the bootstrap/DOM-helper load). **Bucket:** structural. **Blast radius:** wide across the e2e suite. **Change frequency:** warm-to-hot (`fixtures/extension.ts` is the hottest scoped file). **Cross-model:** codex-only at find-stage → dual-verified (both families confirmed, high)
 **Instances:** duplication: `packages/extension/tests/e2e/fixtures/extension.ts:282-296,383-390,391-399,407-414,415-421,429-457,468-475,476-482,490-513,524-530,532-538,547-570` — four identical inline `phase` wrappers (383, 407, 468, 524), four launch→registerProfile→openPopup→waitForHash→switchToLocalNetwork→connectPlayground ladders, three near-identical capability-grant choreographies (454, 510, 567). Mixed-concern/hotspot evidence (not duplication per se): `extension.ts:997-1018,1088-1236` (`openOnboarding`/`openPopupOnce` repeat the page bootstrap), `helpers.ts:2,20` (generic DOM helpers imported back from the launcher; unexported `TEST_PASSWORD` re-declared in 4+ test files).
 **Evidence:** The in-file comment documenting intentional duplication sets a "refactor once we have three or more such fixtures" threshold — now met (3 cap-grant fixtures), so the finding aligns with, not violates, the documented constraint. Explicitly in-cluster harness scope, so the test-code exclusion is satisfied.
@@ -115,6 +151,7 @@ Merge of dual-family verification (`raw/verify-claude-{A,B,C}.md`, `raw/verify-c
 **Verification:** ADJUSTED (high) — codex separated true duplication from hotspot/mixed-concern evidence and demoted the `TEST_PASSWORD` non-export from standalone smell; claude confirmed all sites and the now-met refactor threshold.
 
 ### Q13: PXE in-process contract surface is manually synchronized across subset interfaces
+> **Status (dev-quality):** ✅ RESOLVED — see resolution-status table above.
 **Smell:** Manual subset interface projection — an unchecked synchronization surface (no proven drift to date). **Bucket:** architectural. **Blast radius:** wide (PXE spec, in-process facade, proxy, client). **Change frequency:** warm. **Cross-model:** convergent
 **Instances:** `packages/aztec-runtime/src/pxe/spec.ts:24-81` (21 methods); `packages/aztec-runtime/src/pxe/ipxe.ts:27-50` (18-method hand-written subset, omitting getNoteSchemas/getBlockTimestamp/clearChainState); `packages/aztec-runtime/src/pxe/proxy.ts:32-102` (the same 18 network-currying delegations restated by hand); `packages/aztec-runtime/src/pxe/client.ts:72-201` (per-method restatement with zod parsing). (`packages/extension/src/wallet/services/pxe/client.ts:24` is a documented re-export shim — context, not an exhibiting instance.)
 **Evidence:** The subset is not mechanically derived and no drift-pinning test exists, so omissions are unchecked. `IPXE` is Nulo-owned, not an upstream-interface mirror, so deriving it violates no upstream-mirror constraint (only the behavioral "mirrors upstream BaseWallet.simulateTx" comment exists).
@@ -133,6 +170,7 @@ Merge of dual-family verification (`raw/verify-claude-{A,B,C}.md`, `raw/verify-c
 **Verification:** ADJUSTED, both families (high) — profile/service.ts removed from the loop family (non-loop variant); two missed instances added (account-state, token-balance); family recounted as ten loop sites + one variant; refactoring narrowed to the accumulation helper.
 
 ### Q15: Lifecycle purge cascade is duplicated across the service fleet
+> **Status (dev-quality):** ✅ RESOLVED — see resolution-status table above.
 **Smell:** Duplicate Code — lifecycle purge cascade (profile/chain/account-deletion variants). **Bucket:** structural. **Blast radius:** wide (9+ services, 13+ sites). **Change frequency:** warm. **Cross-model:** convergent
 **Instances:** `packages/extension/src/wallet/services/account/service.ts:43-50,194-202`; `token/service.ts:72-79,515-521`; `transaction/service.ts:74-82,166-174`; `contact/service.ts:256-270`; `fpc/service.ts:71-80,447-461`; `dapp-session/service.ts:325-338`; `network/service.ts:671-691`; `auth-registry/service.ts:56-70` (account-deletion cleanup — same family, different trigger); siblings added by verification: `incoming-transfer/service.ts:190-248` and `operation-journal/service.ts:154-160`.
 **Evidence:** The same load/filter/delete/emit purge loop recurs for profile, chain, and account cleanup, with inconsistent lock discipline (account/token/transaction lockless; contact/fpc/dapp-session/auth-registry/network take `this.lock`) and intra-file strategy divergence (token's `clearChainState` inline-deletes+emits while its `onProfileDeleted` delegates to `deleteToken`; network adds nested `purgeChain` error-swallowing plus a raw `chrome.storage.local.remove`).
@@ -142,6 +180,7 @@ Merge of dual-family verification (`raw/verify-claude-{A,B,C}.md`, `raw/verify-c
 **Verification:** ADJUSTED (moderate) — codex reframed auth-registry as a different-trigger sibling and added two missed siblings; claude verified all 11 original sites plus the lock-discipline and intra-file divergence claims.
 
 ### Q17: Contract/function resolution and PXE registration abstractions are half-done
+> **Status (dev-quality):** ✅ RESOLVED — see resolution-status table above.
 **Smell:** Duplicate Code from stopped extractions. **Bucket:** structural. **Blast radius:** wide across execution/token/fpc helpers. **Change frequency:** warm. **Cross-model:** convergent
 **Instances:** `packages/extension/src/wallet/services/execution/tx-request-builder.ts:113-125,279-334,404-424`; `authwit-discoverer.ts:149-225`; `helpers/batched-view-simulation.ts:177-192,494-591`; `execution/service.ts:1434-1446`; `token/service.ts:275-359,361-449,289-305,374-390`; `fpc/service.ts:245-261,347-357`.
 **Evidence:** The `getContracts→registerContract` prologue appears at 8 sites; the name-lookup pattern (`functions.find ?? nonDispatchPublicFunctions.find`) at 4 sites; the selector-scan loop at 3 sites; `token/service.ts:275-359` vs `361-449` is a second near-clone pair — all despite `ContractResolver` already existing for instance/artifact resolution.
@@ -151,6 +190,7 @@ Merge of dual-family verification (`raw/verify-claude-{A,B,C}.md`, `raw/verify-c
 **Verification:** confirmed (high) — both families verified every site; codex refined the refactoring to extending `ContractResolver` rather than a new module (refinement, not correction).
 
 ### Q18: Execution contracts rely on positional tuples and primitive clumps
+> **Status (dev-quality):** ✅ RESOLVED — see resolution-status table above.
 **Smell:** Data Clumps plus Primitive Obsession — strongest on internal builder/strategy returns, weaker on the public RPC surface. **Bucket:** structural. **Blast radius:** wide across spec/client/service/fee helpers. **Change frequency:** warm. **Cross-model:** convergent
 **Instances:** `packages/extension/src/wallet/services/execution/tx-request-builder.ts:69-70,373,477`; `fee/fee-strategy.ts:72-81`; `service.ts:538-545,739-742,903,1173-1177,1411,1967-1971,2081`; additional tuple consumers added by verification: `service.ts:894-895,1801-1805,1849,1953-1956`; `fee/fee-juice-strategy.ts:20-34`; `fee/fee-juice-with-claim-strategy.ts:28-42`; `fee/embedded-strategy.ts:35-51`; `fee/fpc-strategy.ts:47-85`; `spec.ts:18-27,48-56`; `client.ts:22-43,53-63`; `operation-planner.ts:71-79`; `service.ts:154-162,405-414,620-629,717-725`.
 **Evidence:** Execution helpers exchange 6/7/8-slot tuples (`StandardTxRequestResult`, `FeeEstimateResult`; positional indexing `built[0]..built[7]` at service.ts:538-545) and repeat the same 7-param transfer bundle across spec, client, service, and planner. Six same-typed adjacent slots make transposition plausible. The `fee-strategy.ts` "Matches the pre-split return verbatim" comment is internal doc parity, not wire parity.

@@ -8,6 +8,7 @@ import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { StepContent, type WrappedTask } from "@/wallet/services/task/service"
+import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { sleep } from "@/wallet/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
@@ -76,11 +77,14 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	public async clearChainState(_profileId: string, chainId: number): Promise<void> {
 		await this.ensureInitialized()
 		const txs = (await this.txs.getValues()).filter((x) => x.chainId === chainId)
-		for (const tx of txs) {
-			this.pending.delete(tx.hash)
-			await this.txs.delete(tx.hash)
-			this.emit("onTransactionDeleted", tx)
-		}
+		await purgeRows(
+			txs,
+			(tx) => {
+				this.pending.delete(tx.hash)
+				return this.txs.delete(tx.hash)
+			},
+			(tx) => this.emit("onTransactionDeleted", tx),
+		)
 	}
 
 	public async getTransactions(account: string): Promise<Tx[]> {
@@ -167,12 +171,16 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 
 	private readonly onAccountDeleted = async (account: Account) => {
 		this.logDebug(`Account ${account.address} deleted, remove related txs`)
-		for (const tx of (await this.txs.getValues()).filter((x) => x.account === account.address)) {
-			this.logDebug(`Remove tx ${tx.hash}`)
-			this.pending.delete(tx.hash)
-			await this.txs.delete(tx.hash)
-			this.emit("onTransactionDeleted", tx)
-		}
+		const txs = (await this.txs.getValues()).filter((x) => x.account === account.address)
+		await purgeRows(
+			txs,
+			(tx) => {
+				this.logDebug(`Remove tx ${tx.hash}`)
+				this.pending.delete(tx.hash)
+				return this.txs.delete(tx.hash)
+			},
+			(tx) => this.emit("onTransactionDeleted", tx),
+		)
 	}
 
 	private async runWorker() {

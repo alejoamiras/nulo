@@ -24,13 +24,19 @@ export interface FieldHandle<TValue = unknown> {
 	 *  decide when to display via `v-if="field.error"` (always) or
 	 *  `v-if="field.touched && field.error"` (after blur only). */
 	error: ComputedRef<string | null>
+	/** True iff this field's value differs from its baseline (its `initial`,
+	 *  or the last `rebase()` value for async-loaded edit forms). Use for
+	 *  per-field "changed?" UX (e.g. warning display) where `form.isDirty`
+	 *  (any-field) is too coarse. */
+	isDirty: ComputedRef<boolean>
 	/** Whether the user has interacted with this field. Use to gate when
 	 *  errors are visually displayed. */
 	touched: Ref<boolean>
 	/** Mark this field as touched. Typically called from `@blur` or
 	 *  `@input` depending on UX pattern. */
 	touch(): void
-	/** Reset this single field to its initial value + clear touched state. */
+	/** Reset this field to its baseline (its `initial`, or the last `rebase()`
+	 *  value) + clear touched state. */
 	reset(): void
 }
 
@@ -42,13 +48,22 @@ export interface FormState<TFields extends Record<string, FieldDef>> {
 	 *  Independent of `touched` — call sites use this for the submit button's
 	 *  disabled state regardless of whether the user blurred a field yet. */
 	isValid: ComputedRef<boolean>
-	/** True iff at least one field's value differs from its initial value. */
+	/** True iff at least one field's value differs from its baseline (its
+	 *  `initial`, or the last `rebase()` value). */
 	isDirty: ComputedRef<boolean>
 	/** Mark every field as touched. Useful before showing all errors on a
 	 *  submit attempt with unfocused fields. */
 	touchAll(): void
-	/** Reset every field to its initial value + clear touched state. */
+	/** Reset every field to its baseline (`initial`, or the last `rebase()`) +
+	 *  clear touched state. */
 	reset(): void
+	/** Re-baseline to async-loaded values: sets each given field's value AND
+	 *  its dirty-baseline to the provided value + clears touched, so
+	 *  `isDirty`/`reset()` track the loaded entity instead of the
+	 *  construction-time `initial`. Pass the FULL loaded set in one call so
+	 *  sibling-dependent validators read fresh values together. Fields omitted
+	 *  from `values` keep their current baseline. */
+	rebase(values: Partial<{ [K in keyof TFields]: TFields[K]["initial"] }>): void
 }
 
 /**
@@ -87,11 +102,17 @@ export function useFormState<TFields extends Record<string, FieldDef>>(defs: TFi
 	// that only care about one field).
 	const handles = {} as { [K in keyof TFields]: FieldHandle<TFields[K]["initial"]> }
 	const valuesProxy = reactive({}) as Record<string, unknown>
+	// Per-field dirty baseline. Starts at `initial` — so create dialogs, which
+	// never call `rebase()`, behave exactly as before — and is moved by
+	// `rebase()` to the async-loaded value for edit dialogs.
+	const baselines = {} as Record<string, Ref<unknown>>
 
 	for (const name of fieldNames) {
 		const def = defs[name]
 		const valueRef = ref(def.initial) as Ref<unknown>
+		const baselineRef = ref(def.initial) as Ref<unknown>
 		const touchedRef = ref(false)
+		baselines[name as string] = baselineRef
 
 		// Mirror to the proxy so validate() can read sibling values without
 		// closing over each ref individually.
@@ -103,17 +124,23 @@ export function useFormState<TFields extends Record<string, FieldDef>>(defs: TFi
 			return result ?? null
 		})
 
+		// Dirty vs the baseline (initial, or the last `rebase()` value) — NOT vs
+		// `def.initial` — so an edit dialog that rebases to a loaded entity reads
+		// clean until the user actually changes a field.
+		const isDirtyComputed = computed(() => valueRef.value !== baselineRef.value)
+
 		handles[name] = {
 			value: valueRef as Ref<TFields[typeof name]["initial"]>,
 			error: errorComputed,
+			isDirty: isDirtyComputed,
 			touched: touchedRef,
 			touch() {
 				touchedRef.value = true
 			},
 			reset() {
-				valueRef.value = def.initial
+				valueRef.value = baselineRef.value
 				touchedRef.value = false
-				valuesProxy[name as string] = def.initial
+				valuesProxy[name as string] = baselineRef.value
 			},
 		}
 	}
@@ -152,7 +179,7 @@ export function useFormState<TFields extends Record<string, FieldDef>>(defs: TFi
 
 	const isDirty = computed(() => {
 		for (const name of fieldNames) {
-			if (handles[name].value.value !== defs[name].initial) return true
+			if (handles[name].isDirty.value) return true
 		}
 		return false
 	})
@@ -169,6 +196,17 @@ export function useFormState<TFields extends Record<string, FieldDef>>(defs: TFi
 		}
 	}
 
+	function rebase(values: Partial<{ [K in keyof TFields]: TFields[K]["initial"] }>) {
+		for (const name of fieldNames) {
+			if (!(name in values)) continue
+			const next = values[name] as TFields[typeof name]["initial"]
+			baselines[name as string].value = next
+			handles[name].value.value = next
+			handles[name].touched.value = false
+			valuesProxy[name as string] = next
+		}
+	}
+
 	return {
 		fields: handles,
 		values,
@@ -176,6 +214,7 @@ export function useFormState<TFields extends Record<string, FieldDef>>(defs: TFi
 		isDirty,
 		touchAll,
 		reset,
+		rebase,
 	}
 }
 

@@ -1,9 +1,10 @@
 import type { Page } from "puppeteer"
 import { expect } from "vitest"
+import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue } from "./fixtures/extension"
 import { navigateByHash, revealSecretKey, revealSeedPhrase } from "./fixtures/helpers"
 
-const PASSWORD = "TestPassword123!"
+const PASSWORD = TEST_PASSWORD
 
 /** Read the value of the input inside the reveal-content container. */
 const readRevealedValue = (page: Page) =>

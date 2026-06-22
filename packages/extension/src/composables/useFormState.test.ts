@@ -167,4 +167,62 @@ describe("composables/useFormState", () => {
 		form.fields.b.value.value = 20
 		expect(form.values.value).toEqual({ a: 10, b: 20 })
 	})
+
+	test("field.isDirty / form.isDirty track the baseline (initial by default)", () => {
+		const form = useFormState({ name: { initial: "a" } })
+		expect(form.fields.name.isDirty.value).toBe(false)
+		expect(form.isDirty.value).toBe(false)
+		form.fields.name.value.value = "b"
+		expect(form.fields.name.isDirty.value).toBe(true)
+		expect(form.isDirty.value).toBe(true)
+		form.fields.name.value.value = "a"
+		expect(form.fields.name.isDirty.value).toBe(false)
+	})
+
+	test("rebase() moves the baseline: loaded value reads clean, edits read dirty", () => {
+		const form = useFormState({ name: { initial: "" }, note: { initial: "" } })
+		form.rebase({ name: "Loaded", note: "Hi" })
+		expect(form.values.value).toEqual({ name: "Loaded", note: "Hi" })
+		expect(form.isDirty.value).toBe(false)
+		expect(form.fields.name.isDirty.value).toBe(false)
+		expect(form.fields.name.touched.value).toBe(false)
+		form.fields.name.value.value = "Changed"
+		expect(form.fields.name.isDirty.value).toBe(true)
+		expect(form.isDirty.value).toBe(true)
+	})
+
+	test("reset() after rebase() restores the rebased baseline, not the construction initial", () => {
+		const form = useFormState({ name: { initial: "" } })
+		form.rebase({ name: "Loaded" })
+		form.fields.name.value.value = "Changed"
+		form.reset()
+		expect(form.fields.name.value.value).toBe("Loaded")
+		expect(form.fields.name.isDirty.value).toBe(false)
+	})
+
+	test("cross-field validation sees fresh sibling values after rebase()", () => {
+		const form = useFormState({
+			password: { initial: "" },
+			confirm: {
+				initial: "",
+				validate: (v, all) => (v === all.password ? null : "must match"),
+			},
+		})
+		form.rebase({ password: "secret", confirm: "secret" })
+		expect(form.fields.confirm.error.value).toBeNull()
+		expect(form.isValid.value).toBe(true)
+		form.fields.confirm.value.value = "typo"
+		expect(form.fields.confirm.error.value).toBe("must match")
+	})
+
+	test("rebase() with a partial set leaves omitted fields' baselines untouched", () => {
+		const form = useFormState({ a: { initial: "x" }, b: { initial: "y" } })
+		form.fields.b.value.value = "edited"
+		form.rebase({ a: "loaded" })
+		expect(form.fields.a.value.value).toBe("loaded")
+		expect(form.fields.a.isDirty.value).toBe(false)
+		// b omitted from the rebase set → keeps its initial baseline → still dirty.
+		expect(form.fields.b.value.value).toBe("edited")
+		expect(form.fields.b.isDirty.value).toBe(true)
+	})
 })

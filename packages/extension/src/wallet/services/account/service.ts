@@ -6,6 +6,7 @@ import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { NetworkService } from "@/wallet/services/network/service"
+import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { array_max, hasIntersectionByKeys } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
@@ -52,10 +53,11 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public async clearChainState(profileId: string, chainId: number): Promise<void> {
 		await this.ensureInitialized()
 		const accounts = (await this.storage.getValues()).filter((x) => x.profileId === profileId && x.chainId === chainId)
-		for (const account of accounts) {
-			await this.storage.delete(account.address)
-			this.emit("onAccountDeleted", account)
-		}
+		await purgeRows(
+			accounts,
+			(account) => this.storage.delete(account.address),
+			(account) => this.emit("onAccountDeleted", account),
+		)
 	}
 
 	public async getAccounts(profileId: string, chainId: number, all?: boolean): Promise<Account[]> {
@@ -203,11 +205,14 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	private readonly onProfileDeleted = async (profile: ProfileInfo) => {
 		this.logDebug(`profile ${profile.id} deleted, remove related accounts`)
 		const accounts = (await this.storage.getValues()).filter((x) => x.profileId === profile.id)
-		for (const account of accounts) {
-			this.logDebug(`remove account ${account.address}`)
-			await this.storage.delete(account.address)
-			this.emit("onAccountDeleted", account)
-		}
+		await purgeRows(
+			accounts,
+			(account) => {
+				this.logDebug(`remove account ${account.address}`)
+				return this.storage.delete(account.address)
+			},
+			(account) => this.emit("onAccountDeleted", account),
+		)
 	}
 
 	public async backup(): Promise<Account[]> {

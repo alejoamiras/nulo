@@ -1,9 +1,8 @@
 import { expect } from "vitest"
 import type { Page } from "puppeteer"
+import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue, type ExtensionContext } from "./fixtures/extension"
 import { lockWallet } from "./fixtures/helpers"
-
-const TEST_PASSWORD = "TestPassword123!"
 
 // Mirrors the helpers in sw-resilience.test.ts. Kept inline rather than
 // extracted because the SW-restart shape is the test-case under test —

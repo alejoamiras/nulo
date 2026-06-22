@@ -65,7 +65,7 @@ function makeHarness(overrides: Partial<ViewExecutorDeps> = {}) {
 		profileTx: vi.fn(async () => ({ kind: "profile" })),
 	}
 	const deps: ViewExecutorDeps = {
-		planner: { processAztecJsPayload: vi.fn(async () => [[], 0, {}]) } as never,
+		planner: { processAztecJsPayload: vi.fn(async () => ({ actions: [], feePaymentMethod: 0, feeOptions: {} })) } as never,
 		resolver: {} as never,
 		txBuilder: { buildStandard: vi.fn(async () => ({ txRequest: { kind: "txr" }, node, pxe, account, network })) } as never,
 		pxeService: {

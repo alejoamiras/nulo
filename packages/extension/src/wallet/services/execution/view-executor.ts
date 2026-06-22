@@ -300,7 +300,7 @@ export class ViewExecutor {
 	 *  synced, or when a fast-path-exclusive operation throws and signals
 	 *  fallback. */
 	private async executeAztecSimulateTxStandard(op: AztecSimulateTxOperation): Promise<TxSimulationResult> {
-		const [actions, feePaymentMethod, fee] = await this.deps.planner.processAztecJsPayload(op.exec, op.opts)
+		const { actions, feePaymentMethod, feeOptions: fee } = await this.deps.planner.processAztecJsPayload(op.exec, op.opts)
 		// Thread the dApp's `opts.fee.gasSettings` (including
 		// `maxPriorityFeesPerGas`) so `nulo-account.ts`'s
 		// `completeFeeOptions` call uses the dApp-supplied values rather
@@ -352,7 +352,7 @@ export class ViewExecutor {
 		if (op.accountAddress !== op.opts?.from?.toString()) {
 			throw new Error("Invalid `opts.from`")
 		}
-		const [actions, feePaymentMethod, fee] = await this.deps.planner.processAztecJsPayload(op.exec, op.opts)
+		const { actions, feePaymentMethod, feeOptions: fee } = await this.deps.planner.processAztecJsPayload(op.exec, op.opts)
 		const { txRequest, node, pxe } = await this.deps.txBuilder.buildStandard({ ...op, actions }, feePaymentMethod)
 		suggestGasLimits(txRequest, fee)
 		await applyEmbeddedFpcGasCap(txRequest, fee, node)

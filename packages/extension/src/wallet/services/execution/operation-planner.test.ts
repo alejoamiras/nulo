@@ -213,7 +213,7 @@ describe("OperationPlanner.processAztecJsPayload", () => {
 	test("returns empty actions + AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE for a minimal ExecutionPayload", async () => {
 		const planner = new OperationPlanner(makeProfile(), makeTokenService(makeToken()))
 		const exec = { calls: [], authWitnesses: [], capsules: [], extraHashedArgs: [] } as unknown as ExecutionPayload
-		const [actions, method, feeOptions] = await planner.processAztecJsPayload(exec, {} as never)
+		const { actions, feePaymentMethod: method, feeOptions } = await planner.processAztecJsPayload(exec, {} as never)
 		expect(actions).toEqual([])
 		// No feePayer → detectEmbeddedFeePayment returns undefined → FeeJuice.
 		expect(method).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
@@ -231,7 +231,7 @@ describe("OperationPlanner.processAztecJsPayload", () => {
 		const opts = {
 			fee: { gasSettings: { maxFeesPerGas: { feePerDaGas: 1000n, feePerL2Gas: 2000n } } },
 		} as never
-		const [, , feeOptions] = await planner.processAztecJsPayload(exec, opts)
+		const { feeOptions } = await planner.processAztecJsPayload(exec, opts)
 		expect(feeOptions.maxFeesPerGas).toEqual({ feePerDaGas: "1000", feePerL2Gas: "2000" })
 	})
 
@@ -246,7 +246,7 @@ describe("OperationPlanner.processAztecJsPayload", () => {
 				},
 			},
 		} as never
-		const [, , feeOptions] = await planner.processAztecJsPayload(exec, opts)
+		const { feeOptions } = await planner.processAztecJsPayload(exec, opts)
 		expect(feeOptions.maxFeesPerGas).toEqual({ feePerDaGas: "1000", feePerL2Gas: "2000" })
 		expect(feeOptions.maxPriorityFeesPerGas).toEqual({ feePerDaGas: "5", feePerL2Gas: "7" })
 	})

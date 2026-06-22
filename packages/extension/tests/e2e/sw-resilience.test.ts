@@ -1,9 +1,8 @@
 import { expect } from "vitest"
 import type { Page } from "puppeteer"
+import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue, type ExtensionContext } from "./fixtures/extension"
 import { lockWallet } from "./fixtures/helpers"
-
-const TEST_PASSWORD = "TestPassword123!"
 
 /** Stop the SW via CDP — closest approximation of MV3's idle-suspend
  *  recycle. Used by both strict-mode tests below. */
