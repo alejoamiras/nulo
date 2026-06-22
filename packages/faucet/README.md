@@ -80,12 +80,19 @@ Pages respects `_headers` natively.
 | `DEPLOYER_SECRET` | `scripts/deploy.ts` only | Seed for the deployer Schnorr account |
 | `VITE_AZTEC_NODE_URL` | Frontend (account-deployed probe) | Optional node URL the dApp uses |
 | `VITE_EXPLORER_BASE_URL` | Frontend | Base for tx + address explorer links |
-| `VITE_CHAIN_ID` | Frontend wallet-sdk discovery | Pin chain in wallet matcher |
-| `VITE_CHAIN_VERSION` | Frontend wallet-sdk discovery | Pin protocol version |
 | `VITE_NULO_INSTALL_URL` | Frontend (no-wallet CTA) | Chrome Web Store link, defaults to a generic one |
 
 The deploy env (`AZTEC_NODE_URL`) is deliberately separate from the
 frontend env (`VITE_AZTEC_NODE_URL`). The build never embeds `DEPLOYER_SECRET`.
+
+**Chain identity is NOT an env var.** The L1 chainId + rollup version that
+wallet-sdk discovery matches on are hardcoded in `src/lib/chain-constants.ts`
+(the faucet is testnet-only) — there is deliberately no `VITE_CHAIN_*` override.
+A stale Cloudflare `VITE_CHAIN_VERSION` once shadowed the value and broke the
+wallet handshake in prod ("No network configured for chainId 4138294185"), so
+the env path was removed. The production build also emits `dist/build.json` +
+a `<meta name="nulo-build">` (a matching `buildId` + the testnet `chainId`) that
+the release pipeline's post-deploy `verify-live` check reads.
 
 ## Tests
 

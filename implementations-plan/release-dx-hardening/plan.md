@@ -91,7 +91,7 @@ Pull the fragile release logic out of YAML into `scripts/release/*.ts` (`bun:tes
 
 **Validation gate** — `bunx release-please ... --dry-run` on a synthetic `feat!` history against **both** configs → stable `0.(x+1).0` NOT `1.0.0`, prerelease the mirrored `0.(x+1).0-rc`; PLUS two **stateful** prerelease rehearsals (codex — `versioning:"prerelease"` is stateful): (1) first rc *after* a stable re-baseline, (2) next rc on the same line → both compute sane rc counters (I2); a simulated `base==main` PR whose `title + " (#n)"` exceeds 100 chars → **caught** (not false-green), and a 104-char historical subject no longer fails; `bun run --cwd packages/faucet build` + headless boot with **no CSP violation** + no inline `<script>` in `dist/index.html`; `bun run lint:actions`. Layers: dry-run (incl. stateful rc) · build · smoke · actionlint. **No test repo.**
 
-### Phase 3 — Faucet chain-identity hardening + build metadata (code)
+### Phase 3 — Faucet chain-identity hardening + build metadata (code) — ✓ DONE
 
 **Drop** the `VITE_CHAIN_ID`/`VITE_CHAIN_VERSION` env path (A4); single-source the testnet identity from a shared constant derived from the wallet seed (faucet + wallet can't drift); keep URL query overrides for tests. Fix `.env.example:32` (F6). Emit **one build ID** from the actual faucet build into **BOTH** `index.html` (a `<meta name="nulo-build">`) **and** `dist/build.json` (release + chainId + buildId) — so Phase 5's verifier can require an EXACT HTML↔JSON match, defeating a split-CDN-cache false-pass (codex Critical-2; F5).
 
