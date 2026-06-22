@@ -12,6 +12,7 @@
 
 import { type PasskeyCredentialData, PASSKEY_PRF_LABEL } from "@nulo/wallet-crypto"
 import { PASSKEY_TIMEOUT, type PasskeyRequest, RP_ID } from "@/wallet/services/passkey/spec"
+import { formatPasskeyUserName } from "./passkey-label"
 
 function encodeBase64(buf: BufferSource): string {
 	const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
@@ -27,10 +28,14 @@ async function buildPrfInput(): Promise<ArrayBuffer> {
 	return await crypto.subtle.digest("SHA-256", te.encode(PASSKEY_PRF_LABEL))
 }
 
-export async function buildCreateOptions(userHandle: string): Promise<PublicKeyCredentialCreationOptions> {
+export async function buildCreateOptions(userHandle: string, name: string): Promise<PublicKeyCredentialCreationOptions> {
 	const challenge = crypto.getRandomValues(new Uint8Array(32))
 	const prfInput = await buildPrfInput()
 	const userHandleBytes = Uint8Array.from(Buffer.from(userHandle, "hex"))
+	// The label shown by iCloud Keychain / password managers. `user.name` and
+	// `user.displayName` carry the same value so the credential renders
+	// consistently regardless of which field a given manager surfaces.
+	const label = formatPasskeyUserName(name, userHandle)
 	return {
 		challenge,
 		rp: {
@@ -39,8 +44,8 @@ export async function buildCreateOptions(userHandle: string): Promise<PublicKeyC
 		},
 		user: {
 			id: userHandleBytes,
-			name: `profile-${userHandle}`,
-			displayName: "Nulo Profile",
+			name: label,
+			displayName: label,
 		},
 		pubKeyCredParams: [{ type: "public-key", alg: -7 }],
 		authenticatorSelection: {
@@ -81,8 +86,8 @@ export async function buildGetOptions(credentialId?: string): Promise<PublicKeyC
  * `signal` aborts the underlying `navigator.credentials.create` call if
  * the caller cancels (Escape, dialog dismount, popup nav).
  */
-async function runCreate(userHandle: string, signal?: AbortSignal): Promise<PasskeyCredentialData> {
-	const publicKey = await buildCreateOptions(userHandle)
+async function runCreate(userHandle: string, name: string, signal?: AbortSignal): Promise<PasskeyCredentialData> {
+	const publicKey = await buildCreateOptions(userHandle, name)
 	const credential = await navigator.credentials.create({ publicKey, signal })
 	if (!credential) throw new Error("Failed to create passkey credential")
 	if (!(credential instanceof PublicKeyCredential)) throw new Error("Unexpected credential type")
@@ -133,7 +138,7 @@ async function runGet(credentialId: string | undefined, signal?: AbortSignal): P
  */
 export async function runPasskeyCeremony(request: PasskeyRequest, signal?: AbortSignal): Promise<PasskeyCredentialData> {
 	if (request.mode === "create") {
-		return await runCreate(request.userHandle, signal)
+		return await runCreate(request.userHandle, request.name, signal)
 	}
 	return await runGet(request.credentialId, signal)
 }

@@ -10,6 +10,7 @@ import {
 	type BridgeWitness,
 	type DepositJournalRecord,
 	type EncryptionKey,
+	assetKindOf,
 	SWAP_BRIDGE_ROUTER_ABI,
 	bridgeWitnessPermitTypedData,
 	buildFuelRoute,
@@ -32,7 +33,7 @@ import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { parseEventLogs } from "viem"
 import { sepolia } from "viem/chains"
 import { ref, watch } from "vue"
-import { BRIDGE, BRIDGE_FUEL, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
+import { BRIDGE, BRIDGE_FUEL, FUEL_MIN_FJ, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
 import {
 	FUEL_FEE_MARGIN,
 	decideFuelClaim,
@@ -58,6 +59,7 @@ import {
 	useBridgeJournal,
 } from "./useBridgeJournal"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
+import { buildFuelClaimInteraction } from "./fuelClaim"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { ERC20_ABI } from "./useL1Usdc"
 import { useL1Wallet } from "./useL1Wallet"
@@ -244,8 +246,10 @@ async function readFeeJuiceOrNull(label: string, read: () => Promise<bigint>): P
 
 let depsWired = false
 
-/** Wire the journal engine's deposit-side chain deps (idempotent; real clients only). */
-function wireDepositDeps(): void {
+/** Wire the journal engine's deposit-side chain deps (idempotent; real clients only). Exported as
+ *  ensureDepositJournalDeps so the Fuel flow guarantees wiring WITHOUT useDepositFlow's
+ *  resumeSessionWork side-effect (codex Option C, lessons/phase-3.md). */
+export function ensureDepositJournalDeps(): void {
 	if (depsWired) return
 	depsWired = true
 	const l1 = useL1Wallet()
@@ -260,9 +264,42 @@ function wireDepositDeps(): void {
 			if (!wallet || !account) throw new Error("Connect your Ethereum wallet first.")
 			return wallet.signMessage({ account, message } as never) as Promise<string>
 		},
-		claim: async (rec, secretHex) => {
+		claim: async (rec, secretHex, envelope) => {
 			const aztec = bridgeWallet.wallet.value
 			if (!aztec) throw new Error("Connect your Aztec wallet first.")
+			// Fee-juice (Fuel) records claim via a different, no-token-leg path — dispatch to the dedicated
+			// builder; the token claim below never runs for them (codex Option C, lessons/phase-3.md).
+			if (assetKindOf(rec) === "fee-juice") {
+				const fpcInst = await getSponsoredFpcInstance()
+				const latchFuel = (patch: Record<string, unknown>) => {
+					const f = rec.fuel
+					if (f) updateRecord(rec.id, { fuel: { ...f, ...patch } })
+				}
+				// V5: pin the private claim's maxFeesPerGas to predicted-worst — NO extra padding. This is a
+				// SELF-PAY claim: the bridged amount is the whole budget and the FPC asserts
+				// amount >= gasLimits*maxFeesPerGas with no refund, so any fee headroom inflates max_gas_cost
+				// past the bridged amount and reverts "Amount too low to cover gas cost". (The wallet's x1.5
+				// minFeePadding is for refundable txs, not this.) predicted-worst is already a forward-looking
+				// ceiling so it still covers base-fee drift through the proving window; a rare spike beyond it
+				// fails recoverably and the engine reprices on retry. Public uses the Sponsored FPC (no cap).
+				const claimMaxFees = rec.isPrivate ? await predictedWorstMinFees(createAztecNodeClient(NODE_URL)) : undefined
+				return buildFuelClaimInteraction(rec, {
+					aztec,
+					recipient: AztecAddress.fromString(rec.recipient),
+					sponsoredFpc: fpcInst.address,
+					minFloorFj: FUEL_MIN_FJ,
+					maxFeesPerGas: claimMaxFees
+						? { feePerDaGas: claimMaxFees.feePerDaGas, feePerL2Gas: claimMaxFees.feePerL2Gas }
+						: undefined,
+					// Authoritative claim material from the engine: the unsealed `envelope.salt` (private) and
+					// the gated top-level secret (public) — never the plaintext journal copy (codex HIGH/LOW).
+					resolvedSalt: rec.isPrivate ? envelope?.salt : undefined,
+					resolvedSecret: rec.isPrivate ? undefined : secretHex,
+					onAttempt: () => latchFuel({ claimAttempt: true, setupInsufficiency: false }),
+					onTxHash: (txHash) => latchFuel({ claimAttempt: true, claimTxHash: txHash }),
+					onSetupInsufficiency: () => latchFuel({ setupInsufficiency: true }),
+				})
+			}
 			const recipientAddr = AztecAddress.fromString(rec.recipient)
 			const amount = BigInt(rec.amount)
 			const secret = Fr.fromString(secretHex)
@@ -294,12 +331,12 @@ function wireDepositDeps(): void {
 				// L15 kill-switch: the FJ landed at the pinned FPC. A drifted persisted address ⇒ FAIL-STOP
 				// (never claim to / trust a version-drifted FPC, never silently downgrade to public).
 				if (fb.fpc && fb.fpc !== PRIVATE_FPC_ADDRESS) {
-					return stop("Private fuel FPC address mismatch (version drift) — refusing to claim. Reselect a mode.")
+					return stop("Private fuel FPC address mismatch (version drift), refusing to claim. Reselect a mode.")
 				}
 				// Fail-closed budget: the bridged FJ must clear the calibrated floor (≈2× a real claim fee);
 				// below it the mint_and_pay_fee `amount >= max_gas_cost` assert fails anyway.
 				if (BRIDGE_FUEL && fuelReceived < BRIDGE_FUEL.minFuelFj) {
-					return stop("The bridged gas is below the safe claim floor — the private fuel claim can't self-pay.")
+					return stop("The bridged gas is below the safe claim floor; the private fuel claim can't self-pay.")
 				}
 				const fpcAddr = AztecAddress.fromString(fb.fpc ?? PRIVATE_FPC_ADDRESS)
 				const receiptStatus = fb.claimTxHash ? await fuelReceiptStatus(fb.claimTxHash) : undefined
@@ -508,7 +545,7 @@ function wireDepositDeps(): void {
  * key - zero extra signatures.
  */
 export function useDepositFlow() {
-	wireDepositDeps()
+	ensureDepositJournalDeps()
 	const l1 = useL1Wallet()
 	const bridgeWallet = useBridgeWallet()
 	const journal = useBridgeJournal()

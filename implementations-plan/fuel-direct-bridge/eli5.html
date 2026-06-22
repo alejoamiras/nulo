@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — Fuel (direct fee-juice bridge)</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    .risk { background: #fff4f4; padding: 1rem 1.25rem; border-left: 3px solid #d04545; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.9rem; margin: 1rem 0; }
+    th, td { border: 1px solid #ddd; padding: 6px 9px; text-align: left; vertical-align: top; }
+    th { background: #f6f6f6; }
+  </style>
+</head>
+<body>
+  <h1>Fuel — bridge your $AZTEC straight into Aztec gas</h1>
+  <p>Today the faucet can <strong>mint</strong> test tokens and <strong>bridge + swap</strong> a token into a little gas. This adds a third, simpler thing: a <strong>Fuel</strong> tab that takes the L1 fee asset you already hold ($AZTEC / the Fee-Juice token) and bridges it <em>directly</em> into L2 <strong>Fee Juice</strong> (gas) — no swap, no detour — with the same <strong>public / private</strong> choice the bridge already offers. Most of the hard machinery (the deposit/claim engine, the private-gas crypto, the public claim) already exists; this recomposes it into a standalone, simpler flow and adds the missing L1 deposit half + a safe new tab.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p>This ran as <code>/blueprint deep</code> (three independent planners → consolidate → audit twice → final cold review). Rubric: one clearly-HIGH dimension (<strong>security</strong> — it moves value across L1↔L2 and touches the private fee-payment contract), it spans two packages (<code>bridge-core</code> + the faucet), and you set the bar to <strong>Production</strong>. Novelty is LOW (we've shipped fee-juice bridging before), so this was dialed <em>down</em> from your "ultra": <code>mega-deep</code> exists to research brand-new surfaces, but here every building block is already in the repo — paying to "discover" code we wrote would be waste, not rigor. The value of <code>deep</code> showed up immediately: the reviewers caught a data-loss trap and a hidden integrity bug the first draft would have shipped.</p>
+
+  <h2>The one thing to understand: "private gas" and the risky bit</h2>
+  <p>On Aztec, "private gas" isn't a balance you hold — it's gas a special contract (the PrivateFPC) pays <em>on your behalf</em> so your identity isn't linked. The existing bridge claims private gas <em>while</em> claiming your tokens (the token claim is the "carrier" transaction the gas pays for). A Fuel-only bridge has no token claim — so the gas claim has to ride on a transaction with <strong>no real work in it</strong>, only the gas-payment setup. That shape is unusual, and we <strong>cannot prove it works without a live network</strong> (which is down). Everything we <em>can</em> check locally (does it build correctly? does it route to the right fee path? does it ask for the right permissions?) is gated; whether the live network actually accepts it is a <strong>deferred sign-off</strong> — the single biggest open risk. Public Fuel has no such question (that claim path is already proven).</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 0 — Plumbing + a safety floor that fails closed</h3>
+    <p>Wire up the <em>canonical</em> fee-juice portal + asset addresses (from the network itself, not the dead swap config), with a check that refuses to run if they don't match. Add the pure deposit/claim helpers. Fix a latent bug: the minimum-gas floor today silently <em>skips</em> when the old config is absent — make it mandatory and fail-closed so a too-small bridge can never strand funds.</p>
+    <p class="muted">Proves itself by: bridge-core unit tests (incl. a test that a missing floor fails closed) + typecheck + lint, all green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 1 — De-risk the private claim FIRST (stop-gate)</h3>
+    <p>Before building any UI, prove what's locally provable about the risky "no-work transaction": correct shape, correct fee-payer, routes to the private-FPC path, and the app actually requests permission for those calls. <strong>If this can't be constructed cleanly, STOP and surface it</strong> — don't build UI on a broken foundation. (This can't prove the live network accepts it — that's the deferred sign-off.)</p>
+    <p class="muted">Proves itself by: bridge-core unit tests asserting payload shape + fee-payer + capability scope; typecheck + lint.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2 — Teach the saved-bridges engine about a new asset kind</h3>
+    <p>Add an <code>assetKind</code> tag so the journal can carry "fee-juice" bridges alongside token bridges — done <em>additively</em> so it never drops your existing saved bridges (an earlier draft would have wiped them; the audit caught it). Generalize the bits that are currently hard-wired to the token bridge (deployment-matching, backup, recovery keys) and tighten their validation.</p>
+    <p class="muted">Proves itself by: journal/backup/recovery tests + a test that loads an old saved-bridges file and recovers everything; the existing Bridge flow still passes unit + component + smoke.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3 — The actual deposit + both claims</h3>
+    <p>Read your L1 fee-asset balance; deposit it into the canonical portal; claim it on L2 — publicly (a sponsored claim, already proven) or privately (the carrier-less claim from Phase 1, with the fail-closed floor and the "never fall back to public" guard). Durably save + seal the one secret (a salt) needed to recover a private claim.</p>
+    <p class="muted">Proves itself by: unit tests for both claim builders + the floor; smoke-e2e for public happy-path + private flow + too-small rejection (the private smoke proves orchestration, not live acceptance).</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4 — The Fuel tab, done safely</h3>
+    <p>Add the tab + form + receipt. The catch the audit found: the app keeps both tabs alive at once, and they'd <em>fight over the same "what's in progress" state</em> — a hidden tab could double-toast or show the wrong receipt. Fix it by lifting that "in-progress" surface above both tabs so there's exactly one owner.</p>
+    <p class="muted">Proves itself by: a NEW whole-app test that switches Bridge↔Fuel tabs and proves a single in-progress owner (the old test only mounted one tab, so it couldn't catch this) + the existing Bridge smoke still green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5 — Harden + document</h3>
+    <p>Security pass on the new flow (no secret logging, no private→public fallback, hard-block on address mismatch, keep the private-FPC out of broad permission registration), then docs + the live sign-off checklist.</p>
+    <p class="muted">Proves itself by: the full explicit local gate (bridge-core + faucet tests + e2e + build + lint + typecheck) + a <code>/harden security</code> pass with no unaddressed high/critical.</p>
+  </div>
+
+  <h2>What the deep review changed (so you can trust it)</h2>
+  <p>Three planners (me, codex, a separate Opus) drafted independently; two then attacked the merged plan. Real catches that changed the plan:</p>
+  <ul>
+    <li><strong>Data-loss trap:</strong> the first merge wanted to "bump the journal version." The reviewers proved that would make the loader <em>silently delete every saved in-progress bridge</em> (including the only recovery secret for a private one). Switched to a purely additive tag.</li>
+    <li><strong>Hidden integrity bug:</strong> a naive new tab would fight the existing one over shared in-progress state. Fixed structurally (Phase 4).</li>
+    <li><strong>Fail-open floor:</strong> the safety floor silently skips today when the old config is missing. Made mandatory + fail-closed.</li>
+    <li><strong>Honesty fixes:</strong> the private claim's live risk was understated (now flagged as the dominant deferred risk); two validation gates claimed coverage they couldn't deliver locally (corrected).</li>
+  </ul>
+
+  <div class="risk">
+    <h2>The one risk to accept consciously</h2>
+    <p>Private Fuel's claim shape ("a transaction with only gas-setup, no app work") is <strong>not provable without a live network</strong>, which is currently down. You locked "public + private, both, full parity," so private stays in and gets everything we can verify locally — but its <em>live</em> correctness is a deferred sign-off. If, when a network is back, the sequencer rejects that shape, the fix (a deferred-gas-reserve model, or temporarily public-only) is a <em>future</em> follow-up — explicitly out of this plan's scope.</p>
+  </div>
+
+  <h2>Open decisions (your call at approval)</h2>
+  <ul>
+    <li><strong>Config trust:</strong> pin the portal/asset in config <em>plus</em> a runtime check that hard-blocks on mismatch (recommended).</li>
+    <li><strong>Private live-trust:</strong> acknowledge private ships locally-complete, live-deferred — and that the deferred sign-off depends on re-confirming the private-FPC address for the new network version.</li>
+    <li><strong>Journal view:</strong> one shared "your bridges" list (recommended, least surface) vs a separate Fuel-only list.</li>
+    <li><strong>Copy:</strong> call it "$AZTEC" on the L1 side, "Fee Juice" on the L2 side (recommended) — don't mix them.</li>
+    <li><strong>Migration:</strong> do NOT pay for a downgrade-compatibility migration (recommended — the additive tag avoids it; old-build misread is a low-severity testnet-only edge).</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope + exclusions (§3 of the plan), and the tier (<code>deep</code>).</li>
+      <li>Confirm the validation plan: local gates only (typecheck/lint/unit/component/smoke-e2e); no live-network gate this plan.</li>
+      <li>Resolve the five open decisions above (each has a recommended default).</li>
+      <li>Acknowledge the deferred-live-validation risk for private Fuel.</li>
+      <li>Confirm <code>/harden security</code> is in-plan (Phase 5).</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>One drives the autonomous build session. <code>/goal</code> works until a condition holds and survives <code>claude --resume</code>; <code>/loop</code> re-fires on an interval. Pick one — they don't compose.</p>
+    <p class="warning">Use exactly ONE per session. Setting one replaces the other. Start the session in the permission mode you intend (a loop silently stalls on permission prompts).</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /loop</h3>
+      <p class="muted">Recommended because this plan has a <strong>stop-gate</strong> (Phase 1) and decisions that should go to codex — the loop's "stuck → consult codex → log; surface-and-hold on a hard limit" disposition fits better than a pure drive-to-done.</p>
+      <pre><code>/loop 15m Drive implementations-plan/fuel-direct-bridge forward. Never idle. Each firing: reality-check plan.md + lessons/ + `git status` + `git log --oneline -5` (gh pr checks if a PR exists). STOP-GATE: if Phase 1's carrierless private-claim spike fails its pass-criteria, STOP and surface to me — do NOT start UI work. Else advance the next pending phase honoring its EXACT plan.md §6 validation gate. After each meaningful edit run the touched-package fast layers; commit small/conventional; push the feature branch. Decisions (carrierless model, shell refactor, recovery binding) → /codex xhigh, log the verdict in lessons/phase-N.md. Same step failing 5× → reassess with codex. Phase green = its plan.md gate passes (paste the output) → mark ✓ + file lessons + print LESSONS_FILE=implementations-plan/fuel-direct-bridge/lessons/phase-N.md → next phase. All phases ✓ → /code-review max --fix (commit separately) → codex post-impl audit (xhigh; net diff + adversarial/security ask) → address high/critical → /harden security (Phase 5) → wrap-up report, then surface + stop. Hard limits: local gates only (no live network this plan); never main; private stays in scope (locked decision 2 — never silently drop it); keep PRIVATE_FPC out of contracts registration.</code></pre>
+    </div>
+
+    <h3>Alternative: /goal</h3>
+    <pre><code>/goal All phases ✓ in implementations-plan/fuel-direct-bridge/plan.md (the per-phase headers), each ✓ backed by its plan.md §6 validation gate reported passing in the transcript; Phase 1's stop-gate explicitly resolved (spike passed, or surfaced-and-held if it failed); for each phase LESSONS_FILE=implementations-plan/fuel-direct-bridge/lessons/phase-N.md printed; /code-review max --fix applied + committed separately; codex post-impl audit done with high/critical addressed; /harden security (Phase 5) done with no unaddressed high/critical; `bun run --cwd packages/faucet test` and `bun run lint` both exit 0 in the transcript. Constraints: local gates only; never main; private stays in scope.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a> · <a href="audit-codex.md">Codex audits</a> · <a href="audit-fable.md">Opus audits</a></p>
+</body>
+</html>

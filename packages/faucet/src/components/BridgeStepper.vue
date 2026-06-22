@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /** Services */
-import { type BridgeJournalRecord, type DepositJournalRecord, isProvisionalWithdrawId } from "@nulo/bridge-core"
+import { type BridgeJournalRecord, type DepositJournalRecord, assetKindOf, isProvisionalWithdrawId } from "@nulo/bridge-core"
 import { computed } from "vue"
 
 /** Composables */
 import { useBridgeJournal } from "@/composables/useBridgeJournal"
 
 /** Utils */
-import { BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
+import { assetDecimals, assetSymbol } from "@/lib/asset-label"
 import { stepperPhases } from "@/lib/bridge-steps"
 import { formatBigInt } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
@@ -48,9 +48,12 @@ function onRetry() {
 }
 
 const headline = computed(() => {
-	const amount = formatBigInt(BigInt(props.record.amount), BRIDGE_TOKEN_DECIMALS)
+	// A fee-juice (Fuel) record is 18-dec Fee Juice, not the token bridge asset (codex LOW — same class
+	// as the toast/card; the stepper header is the third shared surface).
+	const kind = assetKindOf(props.record)
+	const amount = formatBigInt(BigInt(props.record.amount), assetDecimals(kind))
 	const dir = props.record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM"
-	return `${dir} · ${amount} ${BRIDGE_TOKEN_SYMBOL} · ${props.record.isPrivate ? "PRIVATE" : "PUBLIC"}`
+	return `${dir} · ${amount} ${assetSymbol(kind, props.record.isPrivate)} · ${props.record.isPrivate ? "PRIVATE" : "PUBLIC"}`
 })
 </script>
 

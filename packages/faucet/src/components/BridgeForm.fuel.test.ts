@@ -150,13 +150,9 @@ describe("BridgeForm fuel surface", () => {
 		expect(w.find(sel(TESTIDS.bridgeFuelToggle)).exists()).toBe(true)
 		await w.find(sel(TESTIDS.bridgeFuelToggle)).trigger("click")
 		await settleQuote()
-		// the quote note carries the private-gas wording.
-		expect(w.find(sel(TESTIDS.bridgeFuelPrivateNote)).exists()).toBe(true)
-		expect(w.find(sel(TESTIDS.bridgeFuelPrivateNote)).text()).toMatch(/private gas/i)
-		// switching to PUBLIC keeps fuel available (the note just drops the private wording).
+		// switching to PUBLIC keeps fuel available.
 		await w.find(sel(TESTIDS.bridgePresetPublic)).trigger("click")
 		expect(w.find(sel(TESTIDS.bridgeFuelToggle)).exists()).toBe(true)
-		expect(w.find(sel(TESTIDS.bridgeFuelPrivateNote)).exists()).toBe(false)
 	})
 
 	it("switching presets keeps fuel ON (no guard) and a private+fuel submit passes the slice", async () => {

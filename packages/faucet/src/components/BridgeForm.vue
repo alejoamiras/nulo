@@ -310,11 +310,6 @@ function fmt(b: bigint | null): string {
 		/>
 		<BridgeReceipt v-else-if="formStage === 'receipt' && receiptSnapshot" :snapshot="receiptSnapshot" @new-bridge="onNewBridge" />
 		<template v-else>
-		<header>
-			<h3>BRIDGE {{ BRIDGE_TOKEN_SYMBOL }}</h3>
-			<p class="sub">Move test {{ BRIDGE_TOKEN_SYMBOL }} between Ethereum (Sepolia) and Aztec, 1:1. Bridges you background land in Your Bridges below.</p>
-		</header>
-
 		<div class="panels">
 			<div class="panel" :data-testid="TESTIDS.bridgeFrom" :data-chain="fromChain">
 				<span class="role">FROM</span>
@@ -389,20 +384,13 @@ function fmt(b: bigint | null): string {
 			<div class="modes">
 				<button type="button" class="mode" :class="{ sel: isPrivate }" :disabled="submitting" :data-testid="TESTIDS.bridgePresetPrivate" :aria-pressed="isPrivate" @click="isPrivate = true">
 					<span class="mt">PRIVATE <span class="badge2">default</span></span>
-					<span class="md">Your tokens — and the gas, if you add it — land in your private Aztec balance, hidden from everyone.</span>
+					<span class="md">Your tokens, and the gas if you add it, land in your private Aztec balance, hidden from everyone.</span>
 				</button>
 				<button type="button" class="mode" :class="{ sel: !isPrivate }" :disabled="submitting" :data-testid="TESTIDS.bridgePresetPublic" :aria-pressed="!isPrivate" @click="isPrivate = false">
 					<span class="mt">PUBLIC</span>
-					<span class="md">Tokens and gas arrive visible on Aztec — anyone can see the amount and recipient. Cheapest and simplest.</span>
+					<span class="md">Tokens and gas arrive visible on Aztec. Anyone can see the amount and recipient.</span>
 				</button>
 			</div>
-		<p v-if="isPrivate" class="opt-note" :data-testid="TESTIDS.bridgePrivacyNote" :data-first="isFirstSeal ? 'true' : 'false'">
-			<template v-if="direction === 'l1-to-l2'">
-				Lands in your private Aztec balance. {{ isFirstSeal ? "Two quick Ethereum signatures (then one)" : "One Ethereum signature" }} lock the recovery key - it lives only in this browser.
-			</template>
-			<template v-else>Burns from your private Aztec balance - nothing extra to back up.</template>
-		</p>
-
 		<!-- ADD-ON: fuel (gas on arrival), only on L1->L2. -->
 		<div v-if="fuelAvailable" class="opt-row">
 			<button
@@ -440,10 +428,6 @@ function fmt(b: bigint | null): string {
 					<template v-else>Fee Juice</template>
 				</span>
 			</div>
-			<p v-if="fuelQuote.state === 'ok'" class="opt-note" :data-testid="isPrivate ? TESTIDS.bridgeFuelPrivateNote : undefined">
-					<template v-if="isPrivate">+ private gas — claimed with your tokens, fully private.</template>
-					<template v-else>Claimed with your tokens in one transaction.</template>
-				</p>
 			<p v-if="fuelError && fuelQuote.state !== 'error'" class="err-msg" :data-testid="TESTIDS.bridgeFuelError">{{ fuelError }}</p>
 		</div>
 

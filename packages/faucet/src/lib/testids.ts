@@ -48,7 +48,22 @@ export const TESTIDS = {
 	tabs: "fa-tabs",
 	tabFaucet: "fa-tab-faucet",
 	tabBridge: "fa-tab-bridge",
+	tabFuel: "fa-tab-fuel",
 	bridgeView: "fa-bridge-view",
+
+	// Fuel - direct L1 fee-asset → L2 Fee Juice (the third tab)
+	fuelView: "fa-fuel-view",
+	fuelForm: "fa-fuel-form",
+	fuelAmount: "fa-fuel-amount",
+	fuelBalanceL1: "fa-fuel-balance-l1",
+	fuelPresetPrivate: "fa-fuel-preset-private",
+	fuelPresetPublic: "fa-fuel-preset-public",
+	fuelSubmit: "fa-fuel-submit",
+	fuelFormError: "fa-fuel-form-error",
+	fuelFlowError: "fa-fuel-flow-error",
+	fuelMintCard: "fa-fuel-mint-card",
+	fuelMintBtn: "fa-fuel-mint-btn",
+	fuelMintStatus: "fa-fuel-mint-status",
 
 	// Bridge - L1 (Ethereum) wallet
 	l1Status: "fa-l1-status",

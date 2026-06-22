@@ -117,37 +117,12 @@ describe("BridgeForm", () => {
 		expect(w.find(sel(TESTIDS.bridgeSubmit)).text()).toContain("BRIDGE TO ETHEREUM")
 	})
 
-	it("the privacy toggle highlights the ACTIVE balance (both stay visible) and shows ONE plain-language note", async () => {
+	it("the privacy toggle highlights the ACTIVE balance (both stay visible)", async () => {
 		const w = mount(BridgeForm)
 		await w.find(sel(TESTIDS.bridgePresetPrivate)).trigger("click")
 		expect(w.find(sel(TESTIDS.bridgeBalanceL2Private)).attributes("data-active")).toBe("true")
 		expect(w.find(sel(TESTIDS.bridgeBalanceL2Public)).attributes("data-active")).toBe("false")
 		expect(w.find(sel(TESTIDS.bridgeBalanceL2Public)).exists()).toBe(true)
-		const note = w.find(sel(TESTIDS.bridgePrivacyNote))
-		expect(note.text()).not.toMatch(/bearer/i)
-		expect(note.text()).toMatch(/recovery key/i)
-		expect(w.findAll(sel(TESTIDS.bridgePrivacyNote))).toHaveLength(1)
-	})
-
-	it("the withdraw-direction private note says nothing extra needs backing up", async () => {
-		const w = mount(BridgeForm)
-		await w.find(sel(TESTIDS.bridgeFlip)).trigger("click")
-		await w.find(sel(TESTIDS.bridgePresetPrivate)).trigger("click")
-		expect(w.find(sel(TESTIDS.bridgePrivacyNote)).text()).toMatch(/nothing extra to back up/i)
-	})
-
-	it("the merged note carries the signature count: two first time, one after trust", async () => {
-		const w = mount(BridgeForm)
-		await w.find(sel(TESTIDS.bridgePresetPrivate)).trigger("click")
-		const note = w.find(sel(TESTIDS.bridgePrivacyNote))
-		expect(note.attributes("data-first")).toBe("true")
-		expect(note.text()).toMatch(/two quick ethereum signatures/i) // terse copy keeps the phrase
-
-		sealTrusted.mockReturnValue(true)
-		const w2 = mount(BridgeForm)
-		await w2.find(sel(TESTIDS.bridgePresetPrivate)).trigger("click")
-		expect(w2.find(sel(TESTIDS.bridgePrivacyNote)).attributes("data-first")).toBe("false")
-		expect(w2.find(sel(TESTIDS.bridgePrivacyNote)).text()).toMatch(/one ethereum signature/i)
 	})
 
 	it("no validation error on first render - only after the user touches the amount", async () => {

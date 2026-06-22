@@ -6,8 +6,9 @@ import BridgeFooter from "./components/BridgeFooter.vue"
 import Footer from "./components/Footer.vue"
 import BridgeView from "./views/BridgeView.vue"
 import FaucetView from "./views/FaucetView.vue"
+import FuelView from "./views/FuelView.vue"
 
-type Tab = "faucet" | "bridge"
+type Tab = "faucet" | "bridge" | "fuel"
 
 /** Default to the Bridge tab when served from a bridge.* host; faucet otherwise. */
 function defaultTab(): Tab {
@@ -41,12 +42,23 @@ const tab = ref<Tab>(defaultTab())
 			>
 				Bridge
 			</button>
+			<button
+				type="button"
+				class="tab"
+				:class="{ active: tab === 'fuel' }"
+				:aria-selected="tab === 'fuel'"
+				:data-testid="TESTIDS.tabFuel"
+				@click="tab = 'fuel'"
+			>
+				Fuel
+			</button>
 		</nav>
 
 		<!-- v-show (not v-if): keep both views mounted so each tab owns an independent,
 		     persistent wallet session (codex: two sessions, not one shared connection). -->
 		<FaucetView v-show="tab === 'faucet'" />
 		<BridgeView v-show="tab === 'bridge'" />
+		<FuelView v-show="tab === 'fuel'" />
 
 		<Footer v-if="tab === 'faucet'" />
 		<BridgeFooter v-else />

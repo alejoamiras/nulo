@@ -200,6 +200,20 @@ describe("faucet smoke", () => {
 		expect(cards[1].attributes("data-symbol")).toBe("OLUN")
 	})
 
+	it("3b. the Fuel tab has its OWN bridges list (so backgrounded Fuel bridges surface there)", async () => {
+		wrapper = mount(App, { attachTo: document.body })
+		await flushPromises()
+		await wrapper.get(`[data-testid="${TESTIDS.tabFuel}"]`).trigger("click")
+		await flushPromises()
+		expect(wrapper.find(`[data-testid="${TESTIDS.fuelView}"]`).isVisible()).toBe(true)
+		expect(wrapper.find(`[data-testid="${TESTIDS.fuelForm}"]`).exists()).toBe(true)
+		// The Fuel tab now mounts its own (fee-juice-filtered) journal so a backgrounded Fuel bridge doesn't
+		// vanish until you visit the Bridge tab. Both tabs are always-mounted (v-show) → two lists app-wide.
+		// The single-toast-owner integrity (only the Bridge mount emits completion toasts; the Fuel mount is
+		// toast-silent) is unit-pinned in BridgeJournal.test.ts.
+		expect(wrapper.findAll(`[data-testid="${TESTIDS.journalEmpty}"]`)).toHaveLength(2)
+	})
+
 	it("4. clicking 'Drip … to public' fires sendTx and shows a success toast", async () => {
 		const wallet = makeWalletStub()
 		const pending = { verificationHash: "deadbeef", confirm: async () => wallet, cancel: async () => {} }
