@@ -361,7 +361,7 @@ function fmt(b: bigint | null): string {
 			</div>
 		</div>
 
-		<div class="amount-row">
+		<Flex align="center" gap="8">
 			<input
 				v-model="amount"
 				class="amount"
@@ -375,7 +375,7 @@ function fmt(b: bigint | null): string {
 				@input="amountTouched = true"
 			/>
 			<span class="unit">{{ BRIDGE_TOKEN_SYMBOL }}</span>
-		</div>
+		</Flex>
 		<p v-if="amountError" class="err-msg" :data-testid="TESTIDS.bridgeFormError">{{ amountError }}</p>
 		<p v-if="showMintHint" class="hint">No test {{ BRIDGE_TOKEN_SYMBOL }} on Sepolia yet - mint some below.</p>
 
@@ -392,7 +392,7 @@ function fmt(b: bigint | null): string {
 				</button>
 			</div>
 		<!-- ADD-ON: fuel (gas on arrival), only on L1->L2. -->
-		<div v-if="fuelAvailable" class="opt-row">
+		<Flex v-if="fuelAvailable" align="center" gap="10">
 			<button
 				type="button"
 				class="toggle"
@@ -405,7 +405,7 @@ function fmt(b: bigint | null): string {
 				<span class="knob" />
 			</button>
 			<span class="toggle-label">ARRIVE WITH GAS</span>
-		</div>
+		</Flex>
 		<div v-if="fuelOn && fuelAvailable" class="fuel-config">
 			<div class="fuel-slice-row">
 				<input
@@ -525,12 +525,6 @@ function fmt(b: bigint | null): string {
 	opacity: 0.6;
 }
 
-.amount-row {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-}
-
 .amount {
 	flex: 1;
 	background: transparent;
@@ -551,11 +545,6 @@ function fmt(b: bigint | null): string {
 	font: 500 12px/1.5 var(--font-mono);
 }
 
-.opt-row {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-}
 
 .flabel {
 	font: 600 11px/1 var(--font-mono);

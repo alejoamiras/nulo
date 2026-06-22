@@ -103,7 +103,9 @@ A swap is allowed ONLY if **all** hold:
 **In-phase task (the reuse inventory execution):** for each `Tag`/`Badge`/`SectionLabel` candidate, do the per-case fit check — `Tag` for `.tag` PRIVATE/PUBLIC: verify PUBLIC→`neutral` tone matches and whether PRIVATE maps to a package tone (neutral/test/warn) or must stay `.private` local; adopt where it holds, document the non-fit reason where it doesn't. Add `Tag` (and/or `Badge`) to the resolver set only if ≥1 candidate is actually adopted.
 **Validation gate:** T + L + U + B + E. Pass: `BridgeJournal.test.ts`, `BridgeJournalCard.test.ts`, `BridgeStepper.test.ts`, `BridgePhaseRail.test.ts`, `BridgeReceipt.test.ts` green; smokes green. Layers: all machine + jsdom-e2e.
 
-### Phase 4 — Form / card seam + remaining leaves
+### Phase 4 — Form / card seam + remaining leaves ✅ DONE
+
+> Gate green: typecheck 0 · test 403/403 · build ✓ · e2e 14/14 · lint 0. 7 Flex swaps (TokenCard `.head`/`.actions`, BridgeForm `.amount-row`/`.opt-row`, FuelForm `.amount-row`, FaucetView `.faucet-view`/`.hero`). Brutalist controls (mode cards, fuel toggle, amount inputs), footers, grids, baseline rows kept local. See `lessons/phase-4.md`.
 
 **Goal:** the densest + riskiest surfaces last, after the toolchain + patterns are proven.
 **Files (examples):** `BridgeForm.vue` (`.amount-row`→`<Flex align=center gap=8>`, `.opt-row`; keep amount input/fuel toggle/mode cards/grid local), `FuelForm.vue` (`.amount-row`; **no unit test** → leans on the bridge/fuel smokes + human gate), `TokenCard.vue` (`.head`→`<Flex tag=header direction=column gap=4>`, `.actions`→`<Flex gap=12 wrap=wrap>`; **drop `.foot`** — no-op), `Footer.vue`, `BridgeFooter.vue`, the 3 thin views.
