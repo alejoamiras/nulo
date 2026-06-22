@@ -111,7 +111,7 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// `ServiceCollection.start()`'s topological phases.
 		services.add(new AccountService(logger, browserApi))
 		services.add(new AccountStateService(logger))
-		services.add(new AuthRegistryService(logger))
+		services.add(new AuthRegistryService(logger, browserApi))
 		services.add(new ConfigService(config, logger))
 		const windowManager = new WindowManager(browserApi.windows, clock, logger)
 		services.add(new ContactService(logger, browserApi))
@@ -136,9 +136,9 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		services.add(new ProfileService(config, logger))
 		services.add(new TaskService(logger))
 		services.add(new TokenService(logger))
-		services.add(new TokenBalanceService(logger))
+		services.add(new TokenBalanceService(logger, browserApi))
 		services.add(new TransactionService(logger, browserApi))
-		services.add(new IncomingTransferService(logger))
+		services.add(new IncomingTransferService(logger, browserApi))
 		services.add(new PasskeyService(logger, windowManager))
 
 		await services.start()

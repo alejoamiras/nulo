@@ -14,7 +14,7 @@ import { TaskService } from "@/wallet/services/task/service"
 import { OriginType, TransactionService, type Tx, TxStatus } from "@/wallet/services/transaction/service"
 import { SystemClock } from "@/core/adapters/system-clock"
 import { ClockTickerAdapter } from "@/core/adapters/clock-ticker-adapter"
-import type { BackgroundTickerPort } from "@nulo/wallet-core/ports"
+import type { BackgroundTickerPort, BrowserApi } from "@nulo/wallet-core/ports"
 import { BalanceJobQueue } from "./balance-job-queue"
 import { BalanceProjector } from "./balance-projector"
 import { BalanceRepository } from "./balance-repository"
@@ -36,7 +36,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	public readonly onTokenBalanceUpdated = new EventHandler<TokenBalanceInfo>()
 	public readonly onTokenBalanceDeleted = new EventHandler<TokenBalanceInfo>()
 
-	private readonly repo = new BalanceRepository()
+	private readonly repo: BalanceRepository
 	private readonly tokens = new Map<number, Token>()
 
 	private profileService: ProfileService = null!
@@ -52,9 +52,11 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	public constructor(
 		logger: ILogger,
+		browserApi: BrowserApi,
 		private readonly ticker: BackgroundTickerPort = new ClockTickerAdapter(new SystemClock(), logger),
 	) {
 		super(TOKEN_BALANCE_SERVICE_NAME, logger)
+		this.repo = new BalanceRepository(browserApi)
 	}
 
 	protected async init(services: ServiceCollection) {

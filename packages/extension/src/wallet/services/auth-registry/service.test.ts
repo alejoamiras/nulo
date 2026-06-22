@@ -2,13 +2,14 @@
  * Unit pins for the Phase 5 trust-point primitives on `AuthRegistryService`:
  * `recordPendingAuthwits` / `reconcileAuthwits` / `assertWithinCap`. These touch only the
  * `authwits` EntityStorage + the internal lock, so the service is constructed
- * directly (no `init()`/deps) over an in-memory `chrome.storage.local` stub.
+ * directly (no `init()`/deps) over an in-memory `FakeBrowserApi`.
  *
  * The end-to-end recording + reconcile path is covered by the `authwit-lifecycle`
  * network e2e; these pin the unit behavior the e2e can't isolate (dedup, the
  * mined→confirm / dropped→remove transitions, the per-account ceiling).
  */
 import { beforeEach, describe, expect, test } from "vitest"
+import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import type { AuthwitContent } from "@/wallet/services/execution/spec"
 import { AuthRegistryService, MAX_TRACKED_AUTHWITS_PER_ACCOUNT } from "./service"
 
@@ -16,31 +17,13 @@ const noopLogger = { log: () => {} }
 const A = "0xowner"
 const content = { kind: "call" } as unknown as AuthwitContent
 
-function fakeStorageLocal() {
-	const m = new Map<string, string>()
-	return {
-		get: async (key?: string | string[] | null) => {
-			if (key === undefined || key === null) return Object.fromEntries(m)
-			const keys = Array.isArray(key) ? key : [key]
-			const out: Record<string, unknown> = {}
-			for (const k of keys) if (m.has(k)) out[k] = m.get(k)
-			return out
-		},
-		set: async (obj: Record<string, string>) => {
-			for (const [k, v] of Object.entries(obj)) m.set(k, v)
-		},
-		remove: async (key: string | string[]) => {
-			for (const k of Array.isArray(key) ? key : [key]) m.delete(k)
-		},
-		clear: async () => m.clear(),
-	}
-}
-
 function makeService(): AuthRegistryService {
-	// vitest.setup stubs `chrome` (with runtime); add a functional in-memory `storage.local`
-	// without clobbering runtime, then construct the service (binds its EntityStorage to it).
-	;(globalThis.chrome as unknown as { storage: unknown }).storage = { local: fakeStorageLocal() }
-	return new AuthRegistryService(noopLogger as never)
+	// AuthRegistryService binds its two EntityStorage tables to the injected
+	// browserApi port; FakeBrowserApi provides an in-memory storage.local.
+	// reset() clears the global fake-browser backing between tests.
+	const api = new FakeBrowserApi()
+	api.reset()
+	return new AuthRegistryService(noopLogger as never, api)
 }
 
 describe("AuthRegistryService — pending/reconcile/cap (Phase 5)", () => {
