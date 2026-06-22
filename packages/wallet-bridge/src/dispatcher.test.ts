@@ -584,6 +584,50 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 		const accounts = result.granted.find((c) => c.type === "accounts")
 		expect(accounts?.accounts).toEqual([])
 	})
+
+	test("enrichGrantedCapabilities resolves the network UNCONDITIONALLY — canGet:false on an unresolvable chain THROWS, not [] — Q11", async () => {
+		// Behavior-preservation pin (codex post-impl biggest-risk): resolveNetwork
+		// runs BEFORE the canGet gate, so a future gate-hoist can't silently turn a
+		// throw into accounts:[]. networkReader returns no networks → resolve throws.
+		const accountReader: IAccountReader = { getAccounts: async () => [] }
+		const networkReader: INetworkReader = { getNetworks: async () => [] }
+		const session = makeSession({
+			capabilityGrants: [
+				{ capability: { type: "accounts", canGet: false, canCreateAuthWit: false, accounts: [] } as Capability, grantedAt: 1 },
+			],
+		})
+		const { writer } = makeSessionWriter(session)
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({ granted: [{ type: "accounts", canGet: false, canCreateAuthWit: false }] })) as never,
+		}
+		const dispatcher = new WalletSdkDispatcher(networkReader, accountReader, stubExecution, interaction, writer, noopLogger)
+		const manifest = { capabilities: [{ type: "accounts", canGet: false, canCreateAuthWit: false }] }
+		await expect(dispatcher.dispatch("requestCapabilities", [manifest], ctx)).rejects.toThrow()
+	})
+
+	test('projection alias falls back to "" when an account has neither alias nor name — Q11', async () => {
+		const a = `0x${"44".repeat(32)}`
+		const caip = `aztec:0:${a}`
+		const accountReader: IAccountReader = { getAccounts: async () => [{ address: a, name: "", chainId: 0 }] }
+		const networkReader: INetworkReader = { getNetworks: async () => [{ id: "net-0", chainId: 0 }] }
+		const session = makeSession({
+			accounts: [caip],
+			capabilityGrants: [
+				{ capability: { type: "accounts", canGet: true, canCreateAuthWit: false, accounts: [] } as Capability, grantedAt: 1 },
+			],
+		})
+		const { writer } = makeSessionWriter(session)
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({ granted: [{ type: "accounts", canGet: true, canCreateAuthWit: false }] })) as never,
+		}
+		const dispatcher = new WalletSdkDispatcher(networkReader, accountReader, stubExecution, interaction, writer, noopLogger)
+		const manifest = { capabilities: [{ type: "accounts", canGet: true, canCreateAuthWit: false }] }
+		const result = (await dispatcher.dispatch("requestCapabilities", [manifest], ctx)) as { granted: Array<Record<string, unknown>> }
+		const accounts = result.granted.find((c) => c.type === "accounts")
+		expect(accounts?.accounts).toEqual([{ alias: "", item: a }])
+	})
 })
 
 /**
