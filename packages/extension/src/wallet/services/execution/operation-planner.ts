@@ -70,6 +70,15 @@ export interface TransferRequest {
 	feeSettings: FeeSettings
 }
 
+/** Result of {@link OperationPlanner.processAztecJsPayload}: the normalized
+ *  actions plus the inferred fee shape. Named (not a positional tuple) so the
+ *  three slots can't be transposed at the call sites (Q18 step 1). */
+export interface ProcessedAztecJsPayload {
+	actions: Action[]
+	feePaymentMethod: AccountFeePaymentMethodOptions
+	feeOptions: FeeOptions
+}
+
 export class OperationPlanner {
 	public constructor(
 		private readonly profileService: ProfileService,
@@ -161,7 +170,7 @@ export class OperationPlanner {
 	public async processAztecJsPayload(
 		exec: ExecutionPayload,
 		opts: SimulateOptions | ProfileOptions | SendOptions<InteractionWaitOptions>,
-	): Promise<[Action[], AccountFeePaymentMethodOptions, FeeOptions]> {
+	): Promise<ProcessedAztecJsPayload> {
 		const actions: Action[] = []
 
 		for (const _capsule of (exec.capsules ?? []).concat(opts.capsules ?? [])) {
@@ -238,7 +247,7 @@ export class OperationPlanner {
 					? AccountFeePaymentMethodOptions.EXTERNAL
 					: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE
 
-		return [actions, feePaymentMethod, feeOptions]
+		return { actions, feePaymentMethod, feeOptions }
 	}
 
 	/** Best-effort display label for the task title. Returns the first

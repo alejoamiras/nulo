@@ -14,8 +14,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Page } from "puppeteer"
 import { clickByTestId, type ExtensionContext, openOnboarding, openPopup, waitForHash } from "../fixtures/extension"
-
-export const TEST_PASSWORD = "TestPassword123!"
+export { TEST_PASSWORD } from "../fixtures/constants"
 
 /** Canonical BIP39 24-word zero-entropy vector. Stable across Aztec versions
  *  and BIP39 dictionary changes. Sourced from `mnemonic.test.ts:24`. */

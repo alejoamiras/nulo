@@ -2,6 +2,7 @@ import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
@@ -325,12 +326,15 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 			await this.lock.enter()
 
 			const now = Date.now()
-			const sessions = await this.storage.getValues()
-			for (const session of sessions.filter((x) => x.expiry < now)) {
-				this.logDebug(`Session ${session.id} has expired`)
-				await this.storage.delete(session.id)
-				this.emit("onDappSessionDeleted", session)
-			}
+			const expired = (await this.storage.getValues()).filter((x) => x.expiry < now)
+			await purgeRows(
+				expired,
+				(session) => {
+					this.logDebug(`Session ${session.id} has expired`)
+					return this.storage.delete(session.id)
+				},
+				(session) => this.emit("onDappSessionDeleted", session),
+			)
 		} finally {
 			this.lock.leave()
 		}
@@ -341,11 +345,14 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		try {
 			await this.lock.enter()
 			const sessions = (await this.storage.getValues()).filter((x) => x.profileId === profile.id)
-			for (const session of sessions) {
-				this.logDebug(`Remove session #${session.id}`)
-				await this.storage.delete(session.id)
-				this.emit("onDappSessionDeleted", session)
-			}
+			await purgeRows(
+				sessions,
+				(session) => {
+					this.logDebug(`Remove session #${session.id}`)
+					return this.storage.delete(session.id)
+				},
+				(session) => this.emit("onDappSessionDeleted", session),
+			)
 		} finally {
 			this.lock.leave()
 		}

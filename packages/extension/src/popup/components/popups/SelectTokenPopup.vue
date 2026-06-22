@@ -25,9 +25,16 @@ const tokens = ref([])
 
 const tokenService = new TokenServiceClient()
 tokenService.onTokenAdded.add(onTokenAdded)
+tokenService.onTokenUpdated.add(onTokenUpdated)
 tokenService.onTokenDeleted.add(onTokenDeleted)
 function onTokenAdded(token) {
 	tokens.value.push(token)
+}
+function onTokenUpdated(token) {
+	// Q8 drift fix: the list previously had no update handler, so a token
+	// rename/metadata change left a stale row until re-open.
+	const idx = tokens.value.findIndex((t) => t.id === token.id)
+	if (idx !== -1) tokens.value[idx] = token
 }
 function onTokenDeleted(token) {
 	const idx = tokens.value.findIndex((t) => t.id === token.id)

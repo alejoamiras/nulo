@@ -1,4 +1,5 @@
 import { expect } from "vitest"
+import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, typeIntoInput, replaceInputValue, clickByTestId } from "./fixtures/extension"
 
 test("fresh install shows register page", async ({ extension }) => {
@@ -37,7 +38,7 @@ test("create profile with password", async ({ extension }) => {
 	})
 
 	// Fill passwords (≥8 chars, matching)
-	const testPassword = "TestPassword123!"
+	const testPassword = TEST_PASSWORD
 	await typeIntoInput(page, "Strong password", testPassword)
 	await typeIntoInput(page, "Repeat password", testPassword)
 

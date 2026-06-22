@@ -22,6 +22,9 @@ import { ConfigServiceClient } from "@/wallet/services/config/client"
 /** Utils */
 import { buildActivityRows } from "@/utils/activity-rows"
 
+/** Composables */
+import { useIncomingTransfers } from "@/composables/useIncomingTransfers"
+
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 
@@ -46,51 +49,23 @@ const tokensById = computed(() => {
 /** Incoming-receive surface — third source for the activity row merge.
  *  Filtered by trust state at the service layer; only visible (trusted)
  *  records arrive via getIncomingTransfers. */
+// Parent owns the client lifecycle (connect/disconnect below); the composable
+// wires the listeners + optimistic merges + the `incomingTransfersVisible`
+// toggle reload. Shared verbatim with the home Recent-Activity widget.
 const incomingTransferService = new IncomingTransferServiceClient()
-const incomingTransfers = ref([])
-
-async function loadIncomingTransfers() {
-	if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) return
-	incomingTransfers.value = await incomingTransferService.getIncomingTransfers(
-		appStore.profile.id,
-		appStore.network.id,
-		appStore.account.address,
-	)
-}
-
-function onIncomingTransferAdded(inc) {
-	const idx = incomingTransfers.value.findIndex((x) => x.siloedNullifier === inc.siloedNullifier)
-	if (idx === -1) incomingTransfers.value = [inc, ...incomingTransfers.value]
-	else incomingTransfers.value[idx] = inc
-}
-function onIncomingTransferUpdated(inc) {
-	const idx = incomingTransfers.value.findIndex((x) => x.siloedNullifier === inc.siloedNullifier)
-	if (idx !== -1) incomingTransfers.value[idx] = inc
-}
-function onIncomingTransferDeleted(inc) {
-	incomingTransfers.value = incomingTransfers.value.filter((x) => x.siloedNullifier !== inc.siloedNullifier)
-}
-
-incomingTransferService.onIncomingTransferAdded.add(onIncomingTransferAdded)
-incomingTransferService.onIncomingTransferUpdated.add(onIncomingTransferUpdated)
-incomingTransferService.onIncomingTransferDeleted.add(onIncomingTransferDeleted)
-incomingTransferService.onConnected.add(loadIncomingTransfers)
-
-// React to the visibility settings toggle while the page is mounted.
-// Without this, flipping the toggle off would leave already-loaded
-// incoming rows on screen until the next mount (codex post-impl audit
-// critical). Reload routes through getIncomingTransfers which returns []
-// when the toggle is off, clearing the local array atomically.
-// ServiceClient doesn't auto-connect on listener registration — we
-// explicitly connect on mount so onUpdate fires (codex post-impl
-// followup high — without this, the subscriber is inert).
 const configService = new ConfigServiceClient()
-function onConfigUpdate(prop) {
-	if (prop.key === "incomingTransfersVisible") {
-		loadIncomingTransfers()
-	}
-}
-configService.onUpdate.add(onConfigUpdate)
+const {
+	incomingTransfers,
+	refresh: loadIncomingTransfers,
+	dispose: disposeIncomingTransfers,
+} = useIncomingTransfers({
+	incomingTransferService,
+	configService,
+	scope: () =>
+		appStore.profile?.id && appStore.network?.id && appStore.account?.address
+			? { profileId: appStore.profile.id, networkId: appStore.network.id, account: appStore.account.address }
+			: undefined,
+})
 
 /** Journal terminal records (Phase 2 follow-up).
  *  Loaded on mount + refreshed on every journal event so the list reacts to
@@ -185,6 +160,7 @@ onBeforeUnmount(() => {
 	journalService.disconnect()
 	incomingTransferService.disconnect()
 	configService.disconnect()
+	disposeIncomingTransfers()
 	heroObserver?.disconnect()
 })
 </script>

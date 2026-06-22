@@ -1,4 +1,5 @@
 import { expect } from "vitest"
+import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue } from "./fixtures/extension"
 import { lockWallet, openForgotPasswordFromAuth } from "./fixtures/helpers"
 
@@ -20,7 +21,7 @@ test("wrong password surfaces error-text and lets the user retry", async ({ regi
 	await page2.waitForSelector('[data-testid="error-text"][role="alert"]', { visible: true, timeout: 10_000 })
 
 	// Field clears on retry-input — verify by typing the correct password and unlocking
-	await replaceInputValue(page2, '[data-testid="auth-password-input"]', "TestPassword123!")
+	await replaceInputValue(page2, '[data-testid="auth-password-input"]', TEST_PASSWORD)
 	await clickByTestId(page2, "auth-submit")
 	await page2.waitForFunction(() => !window.location.hash.includes("/popup/auth"), { timeout: 10_000 })
 

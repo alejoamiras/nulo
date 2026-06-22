@@ -59,6 +59,23 @@ export async function findFunctionBySelector(artifact: ContractArtifact, selecto
 	return undefined
 }
 
+/** Register `instance`+`artifact` with PXE iff `contract` isn't already known —
+ *  the single-contract twin of `ContractResolver.ensureContractsRegistered`, for
+ *  the per-contract registration prologues in token/fpc that resolve one instance
+ *  at a time. Callers own artifact resolution + its (frozen) error text; this
+ *  dedups only the `getContracts()`→`registerContract` guard. */
+export async function ensureRegistered(
+	pxe: IPXE,
+	contract: string,
+	instance: ContractInstanceWithAddress,
+	artifact: ContractArtifact,
+): Promise<void> {
+	const registered = await pxe.getContracts()
+	if (!registered.find((x) => x.toString() === contract)) {
+		await pxe.registerContract({ instance, artifact })
+	}
+}
+
 export class ContractResolver {
 	public constructor(private readonly logger: ILogger) {}
 

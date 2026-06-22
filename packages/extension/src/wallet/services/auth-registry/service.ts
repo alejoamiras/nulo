@@ -7,6 +7,7 @@ import { ExecutionService, type FeeSettings, type AuthwitContent } from "@/walle
 import { ProfileService } from "@/wallet/services/profile/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
+import { purgeRows } from "@/wallet/services/purge-rows"
 import type { WrappedTask } from "@/wallet/services/task/wrapped-task"
 import { TaskService, RevokeAuthwitsContent, StepContent } from "@/wallet/services/task/service"
 import { TransactionService, OriginType } from "@/wallet/services/transaction/service"
@@ -74,10 +75,11 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			try {
 				await this.lock.enter()
 				const authwits = (await this.authwits.getValues()).filter((a) => a.account === account.address)
-				for (const authwit of authwits) {
-					await this.authwits.delete(`${authwit.id}`)
-					this.emit("onAuthwitDeleted", authwit)
-				}
+				await purgeRows(
+					authwits,
+					(authwit) => this.authwits.delete(`${authwit.id}`),
+					(authwit) => this.emit("onAuthwitDeleted", authwit),
+				)
 				if (await this.statuses.contains(account.address)) {
 					await this.statuses.delete(account.address)
 				}
