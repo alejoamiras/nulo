@@ -29,7 +29,9 @@ const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.from
 			</p>
 		</header>
 
-		<WalletPanel />
+		<section class="wallets">
+			<WalletPanel />
+		</section>
 
 		<!--
 		Cards always render so the page never collapses into the header
@@ -79,6 +81,17 @@ const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.from
 	max-width: 62ch;
 	margin: 0;
 	line-height: 1.55;
+}
+
+.wallets {
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px 16px;
+	padding: 16px 0;
+	border-top: 1px solid var(--nulo-outline);
+	border-bottom: 1px solid var(--nulo-outline);
 }
 
 .cards {

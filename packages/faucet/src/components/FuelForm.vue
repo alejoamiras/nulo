@@ -47,7 +47,7 @@ const validationError = computed(() => {
 	if (feeAsset.balance.value !== null && amountUnits.value > feeAsset.balance.value)
 		return "Amount exceeds your Sepolia fee-asset balance."
 	if (FUEL_MIN_FJ !== undefined && amountUnits.value < FUEL_MIN_FJ) {
-		return `Minimum is ${formatBigInt(FUEL_MIN_FJ, FUEL_ASSET_DECIMALS)} — the gas must cover its own claim.`
+		return `Minimum is ${formatBigInt(FUEL_MIN_FJ, FUEL_ASSET_DECIMALS)}. The gas must cover its own claim.`
 	}
 	return null
 })
@@ -85,11 +85,6 @@ function fmt(b: bigint | null): string {
 	<section class="fuel-form" :data-testid="TESTIDS.fuelForm" :data-stage="formStage">
 		<BridgeStepper v-if="fuelActive && activeRecord" :record="activeRecord" @background="onBackground" @backup="onBackup" />
 		<template v-else>
-			<header>
-				<h3>GET GAS</h3>
-				<p class="sub">Bridge your L1 $AZTEC straight into Aztec Fee Juice — no swap. Background bridges land in Your Bridges below.</p>
-			</header>
-
 			<div class="panel">
 				<span class="role">FROM</span>
 				<span class="chip">ETHEREUM · SEPOLIA</span>
@@ -117,11 +112,11 @@ function fmt(b: bigint | null): string {
 			<div class="modes">
 				<button type="button" class="mode" :class="{ sel: isPrivate }" :disabled="submitting" :data-testid="TESTIDS.fuelPresetPrivate" :aria-pressed="isPrivate" @click="isPrivate = true">
 					<span class="mt">PRIVATE <span class="badge2">default</span></span>
-					<span class="md">Your gas lands as Private Fee Juice — the Wonderland FPC pays on your behalf, hidden from everyone.</span>
+					<span class="md">Your gas lands as Private Fee Juice, hidden from everyone.</span>
 				</button>
 				<button type="button" class="mode" :class="{ sel: !isPrivate }" :disabled="submitting" :data-testid="TESTIDS.fuelPresetPublic" :aria-pressed="!isPrivate" @click="isPrivate = false">
 					<span class="mt">PUBLIC</span>
-					<span class="md">Gas arrives in your public Fee Juice balance — visible on Aztec. Cheapest and simplest.</span>
+					<span class="md">Gas arrives in your public Fee Juice balance, visible on Aztec. Cheapest and simplest.</span>
 				</button>
 			</div>
 

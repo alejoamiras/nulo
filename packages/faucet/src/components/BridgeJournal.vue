@@ -18,7 +18,10 @@ import { TESTIDS } from "@/lib/testids"
 // `kind` scopes the list to one asset (the Fuel tab shows fee-juice, the Bridge tab shows the token) so a
 // backgrounded Fuel bridge surfaces under its own tab. `toasts` keeps a SINGLE completion-toast owner across
 // the two mounts (the Bridge instance owns it; the Fuel instance is list-only) — no double toast.
-const props = withDefaults(defineProps<{ kind?: "bridge-token" | "fee-juice"; toasts?: boolean }>(), { toasts: true })
+const props = withDefaults(defineProps<{ kind?: "bridge-token" | "fee-juice"; toasts?: boolean; title?: string }>(), {
+	toasts: true,
+	title: "YOUR BRIDGES",
+})
 
 const journal = useBridgeJournal()
 const backup = useBridgeBackup()
@@ -84,7 +87,7 @@ watch(
 <template>
 	<section class="journal" :data-testid="TESTIDS.journal">
 		<header class="head-row">
-			<h3>YOUR BRIDGES</h3>
+			<h3>{{ props.title }}</h3>
 			<button
 				type="button"
 				class="restore"

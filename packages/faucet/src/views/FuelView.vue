@@ -11,7 +11,7 @@ import { TESTIDS } from "@/lib/testids"
 		<header class="hero">
 			<h1>FUEL</h1>
 			<p class="sub">
-				Bridge your L1 $AZTEC straight into Aztec Fee Juice — public or private gas, no swap. Testnet only.
+				Bridge your $AZTEC into Aztec Fee Juice, public or private gas, no swap. Testnet only.
 				Connect both wallets, choose how the gas arrives, and bridge. In-flight bridges persist in this browser.
 			</p>
 		</header>
@@ -22,7 +22,7 @@ import { TESTIDS } from "@/lib/testids"
 		</section>
 
 		<FuelForm />
-		<BridgeJournal kind="fee-juice" :toasts="false" />
+		<BridgeJournal kind="fee-juice" :toasts="false" title="YOUR FUELS" />
 	</div>
 </template>
 

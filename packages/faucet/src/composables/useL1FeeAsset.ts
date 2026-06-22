@@ -73,7 +73,7 @@ export function useL1FeeAsset() {
 		})) as string
 		if (underlying.toLowerCase() !== FUEL_ASSET.toLowerCase()) {
 			throw new Error(
-				"Fuel portal/asset mismatch — refusing to deposit. The FeeJuicePortal's UNDERLYING() doesn't match the configured fee asset.",
+				"Fuel portal/asset mismatch. Refusing to deposit: the FeeJuicePortal's UNDERLYING() doesn't match the configured fee asset.",
 			)
 		}
 		portalAssetVerified = true
