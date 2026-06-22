@@ -536,17 +536,17 @@ onBeforeUnmount(() => {
 	flex-direction: column;
 	gap: 8px;
 
-	padding: 20px 0;
+	padding: 14px 0;
 	border-bottom: 1px solid rgba(35, 31, 28, 1);
 }
 
 .section_flush {
 	border-bottom: none;
-	padding-bottom: 14px;
+	padding-bottom: 10px;
 }
 
 .section_last {
-	padding: 20px 0;
+	padding: 14px 0;
 }
 
 .section_label {
