@@ -437,7 +437,9 @@ Per-rc procedure. Same v4 bug as stable; same ~45 second unstick. Network-e2e is
 
 The prerelease manifest (`.release-please-prerelease-manifest.json`) tracks the rc series independently and must be re-baselined to the new stable version. Otherwise the next rc series starts from a stale base + release-please can reopen old Release PRs on the drift ([release-please#2172](https://github.com/googleapis/release-please/issues/2172)).
 
-**Two-step procedure (order matters):**
+> **Automated (`sync-main-to-dev` job).** `release.yml` now opens this PR for you. On the `push:main` that published a stable release, the `sync-main-to-dev` job branches from `origin/main`, writes the prerelease-manifest re-baseline, and opens ONE `chore: sync main → dev` PR (App-token-opened so dev's CI fires) that **combines both steps below**. It never local-merges: it lets GitHub compute mergeability — a clean PR is left for you to squash-merge; a CONFLICTING/UNKNOWN one is labeled `needs-manual-resolution` + commented (surfaced, never silent). It's **push-only** (a `workflow_dispatch` republish of an old tag never re-syncs) and **advisory** (post-publish — a sync hiccup reds only its own job, never the shipped release). The logic lives in unit-tested `scripts/release/open-sync-pr*.ts`. **You still review + squash-merge the PR**; the steps below are the manual fallback (and what the job automates) if it's ever red or disabled.
+
+**Manual two-step procedure (order matters) — the fallback the job automates:**
 
 1. **First, merge `main` back into `dev`** via the usual flow so `dev`'s `package.json` + `CHANGELOG.md` reflect the new stable version. (Without this, release-please sees a manifest/source drift on dev and can reopen merged PRs.)
 2. **Then, open a small PR to `dev`** updating `.release-please-prerelease-manifest.json` to match (e.g. `{ ".": "0.21.0" }`). Merge it.

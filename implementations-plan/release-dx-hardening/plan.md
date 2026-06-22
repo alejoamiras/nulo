@@ -115,7 +115,7 @@ Create `alejoamiras/nulo-release-rehearsal` (disposable; relaxed signing; dummy 
 
 **Validation gate** — `bun test scripts/release/auto-unstick.test.ts` (tag-missing→create; tag-exists→no-op; wrong-SHA→abort; re-invoke→idempotent, never a 2nd tag; **ordinary non-Release-PR push → no-op**); **test repo (mandatory):** full `push:main → merge Release PR → in-run auto-unstick → publish → deploys → verify-live` rehearsal incl. a forced re-run (idempotency) AND an **ordinary docs-push proving no misfire**; **real-repo `dry_run` pre-flight** (publish chain `dry_run=true` on an existing tag). Layers: unit · test-repo full-path · real-repo dry_run · actionlint.
 
-### Phase 7 — Auto main→dev sync + prerelease re-baseline (surgery — after publish completes)
+### Phase 7 — Auto main→dev sync + prerelease re-baseline (surgery — after publish completes) — ✓ DONE (advisory, push-only; test-repo rehearsal → first stable real release; verify §lessons/phase-7.md)
 
 Post-publish job: create the sync branch **from `origin/main`** (no local merge — codex), add the prerelease-manifest bump, open the `chore: sync main → dev` PR (App token → signed), and **let GitHub compute mergeability**. Conflicted → `needs-manual-resolution` label + comment; clean → mergeable. Never silent-fail (F8). **Trigger only when `sync_eligible`** = `event=='push'` AND a stable tag AND `github.sha` == the just-merged Release-PR merge commit — explicitly **`false` on every `workflow_dispatch`**, so a manual republish of an OLD tag (e.g. `v0.20.0`) can NOT re-touch the sync flow (codex Critical-1). Runs after Phase 6's publish-complete signal.
 

@@ -420,6 +420,52 @@ jobs:
           VERSION: ${{ needs.resolve.outputs.version }}
         run: bun scripts/release/verify-live-run.ts
 
+  sync-main-to-dev:
+    name: sync main → dev (post-release)
+    needs: [resolve, attach-assets]
+    # ADVISORY (deliberately NOT in the `status` aggregator): this runs AFTER the
+    # release is published, so a sync hiccup must never retro-fail a shipped
+    # release — a CONFLICTING/UNKNOWN sync is surfaced as a labeled PR, an IO
+    # error reds this job alone. Push-only: a workflow_dispatch republish of an
+    # old tag must never re-sync (codex Critical-1); the runner's syncEligible
+    # re-checks `github.sha == the Release-PR merge commit` as defense in depth.
+    # All logic lives in the unit-tested scripts/release/open-sync-pr*.ts.
+    if: |
+      always() &&
+      github.event_name == 'push' &&
+      needs.resolve.outputs.is_prerelease == 'false' &&
+      needs.attach-assets.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # App token so the sync PR is bot-opened → dev's required CI fires
+      # (a GITHUB_TOKEN-opened PR suppresses the pull_request workflow), and the
+      # branch push is authenticated. The branch's commit can be unsigned — dev's
+      # signed-commits rule is satisfied by the GitHub-signed UI squash-merge.
+      - name: Mint App token
+        id: app
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.RELEASE_PLEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app.outputs.token }}
+      - uses: ./.github/actions/setup-bun
+      - name: Open the main→dev sync PR
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IS_PRERELEASE: ${{ needs.resolve.outputs.is_prerelease }}
+          HEAD_SHA: ${{ github.sha }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: bun scripts/release/open-sync-pr-run.ts
+
   publish-chrome-store:
     name: publish to Chrome Web Store
     needs: [resolve, attach-assets]
