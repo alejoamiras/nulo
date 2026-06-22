@@ -85,7 +85,9 @@ A swap is allowed ONLY if **all** hold:
 **Sequence:** **one normal `bun install`** to record the faucet→unplugin workspace edge (no download, no version bump), THEN `--frozen-lockfile` thereafter (fable M2 — frozen would error on the un-recorded edge) → add factory/configs/resolver/test → introduce the one bare-tag proof → `bun run build` emits the (now non-empty) dts → commit dts → gates.
 **Validation gate:** T + L + U + B + E. Pass: the bare-tag proof renders correctly in `VerificationModal.test.ts` (proves vitest resolution) AND in `build` (proves rollup resolution) AND a smoke (proves the e2e config); `design-resolver.test.ts` green; generated dts contains the proof's entry. Layers: typecheck/lint · unit · build · jsdom-e2e.
 
-### Phase 2 — Wallet + verification seam
+### Phase 2 — Wallet + verification seam ✅ DONE
+
+> Gate green: typecheck 0 · test 403/403 · build ✓ · lint 0. Added L1WalletPanel/BridgeWalletPanel tests (closed the gate gap); 3 class-preserving Flex swaps (`.capability`/`.no-wallet`); the inline-flex/off-scale/position-dominant wrappers kept local. See `lessons/phase-2.md`.
 
 **Goal:** swap pure-layout/label markup to bare primitives in the shared wallet/verification surfaces. **Close the coverage gap first:** `BridgeWalletPanel.vue` + `L1WalletPanel.vue` have NO unit test and are **stubbed out of both smokes** (`bridge-smoke.test.ts:108` `stubs: { L1WalletPanel: true, BridgeWalletPanel: true }`), so a swap there is otherwise unguarded (codex final, High). `WalletPanel` is tested; `AppToastRegion` is smoke-covered.
 **Step 0 (coverage):** add focused `BridgeWalletPanel.test.ts` + `L1WalletPanel.test.ts` (mount with mocked composables, assert their `data-testid`s + connected/disconnected render) BEFORE swapping them — so the swap has a real safety net (inline-with-change, per the testing philosophy).
