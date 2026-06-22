@@ -155,11 +155,24 @@ jobs:
             ${{ runner.os }}-bun-1.3.13-
             ${{ runner.os }}-bun-
       - run: bun install --frozen-lockfile
-      - name: Lint PR commits
+      - name: Lint PR commits / merge subject
         env:
+          BASE_REF: ${{ github.base_ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: bunx commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$BASE_REF" = "main" ]; then
+            # Promote PRs (dev -> main) land as a single merge commit
+            # "<PR title> (#n)". The dev squash subjects in base..head are
+            # ALREADY merged + immutable, and re-linting them spuriously fails
+            # required Quality on long historical subjects. So on main, lint the
+            # synthetic merge subject only — which IS what becomes the commit.
+            printf '%s (#%s)\n' "$PR_TITLE" "$PR_NUMBER" | bunx commitlint --verbose
+          else
+            bunx commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
+          fi
 
   lint-and-typecheck:
     name: Lint + Typecheck
