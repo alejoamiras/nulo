@@ -111,7 +111,17 @@ A swap is allowed ONLY if **all** hold:
 **Files (examples):** `BridgeForm.vue` (`.amount-row`→`<Flex align=center gap=8>`, `.opt-row`; keep amount input/fuel toggle/mode cards/grid local), `FuelForm.vue` (`.amount-row`; **no unit test** → leans on the bridge/fuel smokes + human gate), `TokenCard.vue` (`.head`→`<Flex tag=header direction=column gap=4>`, `.actions`→`<Flex gap=12 wrap=wrap>`; **drop `.foot`** — no-op), `Footer.vue`, `BridgeFooter.vue`, the 3 thin views.
 **Validation gate:** T + L + U + B + E. Pass: `BridgeForm.test.ts` + `.fuel.test.ts` + `.18dec.test.ts`, `TokenCard.test.ts` green; 3 smokes green. **Riskiest phase for pixels.** Layers: all machine + jsdom-e2e.
 
-### Phase 5 — Human visual sign-off gate (terminal, human-gated, mandatory)
+### Phase 5 — Human visual sign-off gate (terminal, human-gated, mandatory) ⏸ HOLD — action executed, awaiting user sign-off
+
+> **Hold action performed (not ✓ — ✓ requires the user's visual sign-off, never self-marked):** faucet built green (preview-ready); the at-risk-node checklist below was derived from the diff (17 `<Flex>` swaps) and surfaced to the user; `audit:faucet` exit 0 + `test:e2e` 14/14 confirmed. Preview: `bun run --cwd packages/faucet dev`.
+>
+> **At-risk nodes to eyeball in light theme (from the diff):**
+> - **Faucet tab:** `FaucetView` page column + `.hero` (`.faucet-view`→Flex, `.hero` class-preserving); each `TokenCard` symbol header + drip-buttons row (`.head`→`<Flex tag=header>`, `.actions`→`<Flex wrap>`); `WalletPanel` connect / "Awaiting permissions" / "No wallet" blocks (`.capability`/`.no-wallet`→Flex).
+> - **Bridge tab:** `BridgeView` column + hero; `BridgeForm` amount-input row + "ARRIVE WITH GAS" toggle row (`.amount-row`/`.opt-row`→Flex); `BridgeJournal` header (title + RESTORE, `.head-row`→`<Flex tag=header>`) + card stack (`.cards`→Flex) + section (`.journal`→`<Flex tag=section>`); **`BridgeReceipt` "view tx" links — confirm colored + underlined** (`.links`→Flex, class-preserving — the one descendant-styled swap, highest-risk).
+> - **Fuel tab:** `FuelView` column + hero; `FuelForm` amount row; `VerificationModal` Cancel/"They match" buttons right-aligned (`.actions`→`<Flex justify=end>`).
+> - **Standing:** page bg `#f5f5f7`, text contrast, borders/outlines, button fills, focus rings.
+>
+> _Awaiting user verdict. On sign-off → mark this ✓ + (with the user's go) open the PR._
 
 **Goal:** the only defense for machine-invisible regressions (the round-1 lesson).
 **Steps:** `bun run --cwd packages/faucet build` + `preview`; eyeball **light theme** across all 3 tabs. **Checklist names the exact at-risk nodes derived from the Phase 2–4 diff** (fable L3): any anchors near swapped wrappers (orphan-style risk), any `tag=`-preserved header/footer, the untested `FuelForm` amount rows, the `Badge` adoptions, plus the standing list (page bg `#f5f5f7`, contrast, borders/outlines, button fills, focus-visible, toast region; `app.css.parity.test.ts` green).
