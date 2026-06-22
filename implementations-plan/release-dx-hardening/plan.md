@@ -103,7 +103,7 @@ Create `alejoamiras/nulo-release-rehearsal` (disposable; relaxed signing; dummy 
 
 **Validation gate** — a full rehearsal of the current `release.yml` in the test repo reaches the v4 abort + manual-unstick state (proving the harness mirrors prod control-flow); the I1 gap list is recorded in `lessons/phase-4.md`. Layers: live-CI (disposable repo).
 
-### Phase 5 — Deploys + live smoke (surgery — the safety net)
+### Phase 5 — Deploys + live smoke (surgery — the safety net) — ✓ DONE (via fallback; verify-live advisory; test-repo rehearsal skipped)
 
 (a) `refresh-landing` also fires on `workflow_dispatch` (keep `needs: attach-assets` — the fail-loud-on-missing-zip ordering, F5); (b) add `CLOUDFLARE_FAUCET_DEPLOY_HOOK` + a `deploy-faucet` job after `attach-assets`; (c) landing emits a **release-tag `<meta>`** into its served HTML; (d) a **`verify-live` job** (after deploys; bounded retry + cache-bust headers): for the faucet, fetch BOTH `/` and `/build.json` and require the **buildId to match EXACTLY** (kills the split-CDN-cache false-pass — fresh JSON + stale HTML — codex Critical-2) + chainId == the wallet's testnet + COOP/COEP; for the landing, assert the served HTML meta == `v$VERSION`. **Fail-closed** (can't determine → fail). Surface A5 (disable the dashboard auto-deploy, or accept double-deploy).
 

@@ -291,7 +291,7 @@ jobs:
     needs: [resolve, attach-assets]
     if: |
       needs.resolve.outputs.is_prerelease == 'false' &&
-      github.event_name == 'push' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -314,6 +314,64 @@ jobs:
             exit 1
           fi
           echo "deploy-hook triggered (HTTP $code)"
+
+  deploy-faucet:
+    name: deploy faucet (Cloudflare Pages deploy hook)
+    needs: [resolve, attach-assets]
+    if: |
+      needs.resolve.outputs.is_prerelease == 'false' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.event.inputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    environment: production
+    steps:
+      - name: Trigger Cloudflare Pages deploy (faucet)
+        env:
+          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_FAUCET_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$DEPLOY_HOOK" ]; then
+            # Not yet wired (A5: the faucet's CF dashboard Git-integration still
+            # deploys it on push:main — double-deploy accepted until the cutover).
+            # Skip, don't fail, so an unwired secret never blocks a release.
+            echo "::notice::CLOUDFLARE_FAUCET_DEPLOY_HOOK unset — skipping CI faucet deploy (dashboard Git-integration still deploys it)."
+            exit 0
+          fi
+          code=$(curl -sS -o /tmp/cf-faucet.out -w "%{http_code}" \
+            --retry 3 --retry-all-errors --retry-delay 2 \
+            -X POST "$DEPLOY_HOOK")
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+            echo "::error::faucet deploy-hook curl returned HTTP $code"
+            cat /tmp/cf-faucet.out
+            exit 1
+          fi
+          echo "faucet deploy-hook triggered (HTTP $code)"
+
+  verify-live:
+    name: verify live deploys (advisory)
+    needs: [resolve, attach-assets, refresh-landing, deploy-faucet]
+    # ADVISORY for now — deliberately NOT in the `status` aggregator. This
+    # fail-closed check ships unrehearsed (no test repo), so it reports red
+    # without blocking the required check until it's proven on the first clean
+    # real release; a follow-up then adds it to `status`'s needs (staged, like
+    # vars.AUTO_UNSTICK_ENABLED).
+    if: |
+      always() &&
+      needs.resolve.outputs.is_prerelease == 'false' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.event.inputs.dry_run != 'true' &&
+      needs.attach-assets.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+      - uses: ./.github/actions/setup-bun
+      - name: Verify the live sites serve this release
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: bun scripts/release/verify-live-run.ts
 
   publish-chrome-store:
     name: publish to Chrome Web Store
@@ -373,6 +431,7 @@ jobs:
         smoke-against-artifact,
         attach-assets,
         refresh-landing,
+        deploy-faucet,
         publish-chrome-store,
         publish-firefox-amo,
       ]
@@ -392,6 +451,7 @@ jobs:
             "${{ needs.smoke-against-artifact.result }}" \
             "${{ needs.attach-assets.result }}" \
             "${{ needs.refresh-landing.result }}" \
+            "${{ needs.deploy-faucet.result }}" \
             "${{ needs.publish-chrome-store.result }}" \
             "${{ needs.publish-firefox-amo.result }}" \
           ; do

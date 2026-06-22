@@ -77,3 +77,19 @@ export async function runVerifyLive(opts: RunVerifyLiveOpts): Promise<VerifyLive
 	}
 	return last // fail-closed: the last (failing) result after the retry budget
 }
+
+// CLI entry — the `verify-live` release job runs `bun scripts/release/verify-live-run.ts`.
+// Skipped on import (import.meta.main is false in the unit tests).
+if (import.meta.main) {
+	const result = await runVerifyLive({
+		version: process.env.VERSION ?? "",
+		landingUrl: process.env.LANDING_URL ?? "https://nulo.sh",
+		faucetUrl: process.env.FAUCET_URL ?? "https://faucet.nulo.sh",
+	})
+	if (result.ok) {
+		console.log("verify-live: OK — both surfaces serve this release")
+		process.exit(0)
+	}
+	console.error(`verify-live: FAILED (fail-closed)\n${result.failures.map((f) => `  - ${f}`).join("\n")}`)
+	process.exit(1)
+}
