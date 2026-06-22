@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Services */
-import { Button } from "@nulo/design"
+import { Button, Card } from "@nulo/design"
 import { computed } from "vue"
 
 /** Composables */
@@ -35,7 +35,7 @@ function onClick() {
 </script>
 
 <template>
-	<section class="mint-card" :data-testid="TESTIDS.fuelMintCard">
+	<Card :data-testid="TESTIDS.fuelMintCard">
 		<header>
 			<h3>GET $AZTEC ON SEPOLIA</h3>
 			<p class="sub">No $AZTEC yet? Mint some test $AZTEC to your Ethereum account, then fuel it into Aztec gas above. Testnet only, no real value.</p>
@@ -46,19 +46,11 @@ function onClick() {
 		</Button>
 
 		<p v-if="status" class="status" :data-testid="TESTIDS.fuelMintStatus">{{ status }}</p>
-	</section>
+	</Card>
 </template>
 
 <style scoped>
-.mint-card {
-	display: flex;
-	flex-direction: column;
-	gap: 14px;
-	padding: 24px;
-	border: 1px solid var(--nulo-outline);
-}
-
-.mint-card h3 {
+h3 {
 	font-family: var(--font-headline);
 	font-weight: 600;
 	font-size: 16px;
@@ -66,7 +58,7 @@ function onClick() {
 	margin: 0;
 }
 
-.mint-card .sub {
+.sub {
 	color: var(--txt-secondary);
 	font-size: 13px;
 	line-height: 1.55;
