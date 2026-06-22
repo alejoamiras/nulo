@@ -56,6 +56,10 @@ export const BRIDGE_FUEL: FuelDeployment | undefined = fuelCfg
 const feeJuiceCfg = (config.l1 as { feeJuice?: Record<string, unknown> }).feeJuice
 export const FUEL_PORTAL = feeJuiceCfg?.portal as `0x${string}` | undefined
 export const FUEL_ASSET = feeJuiceCfg?.asset as `0x${string}` | undefined
+/** Permissionless testnet FeeAssetHandler that mints the L1 fee asset. The pinned address IS the trust
+ *  boundary — it must be reviewed against the node's `l1ContractAddresses.feeAssetHandlerAddress`; the
+ *  mint path also cross-checks its `FEE_ASSET()` against `FUEL_ASSET` fail-closed. */
+export const FUEL_ASSET_HANDLER = feeJuiceCfg?.feeAssetHandler as `0x${string}` | undefined
 export const FUEL_MIN_FJ = feeJuiceCfg?.minFj ? BigInt(feeJuiceCfg.minFj as string) : undefined
 
 export const BRIDGE_PROXY = AztecAddress.fromString(config.l2.proxy.address)

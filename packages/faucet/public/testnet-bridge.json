@@ -7,6 +7,7 @@
 		"feeJuice": {
 			"portal": "0x7c4176bff969c9417e42f9cb921100145911cc84",
 			"asset": "0x762c132040fda6183066fa3b14d985ee55aa3c18",
+			"feeAssetHandler": "0x5602c39a6e9c5ace589f64f754927bcda4f4bfc9",
 			"minFj": "16000000000000000000"
 		},
 		"token": {

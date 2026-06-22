@@ -17,7 +17,13 @@ import { ref } from "vue"
 const depositFn = vi.fn(async (_amount: bigint, _isPrivate: boolean) => "0xfuelrec")
 
 vi.mock("@/composables/useL1Wallet", () => ({
-	useL1Wallet: () => ({ isConnected: ref(true), address: ref("0xl1addr") }),
+	useL1Wallet: () => ({
+		isConnected: ref(true),
+		address: ref("0xl1addr"),
+		wrongChain: ref(false),
+		connect: vi.fn(),
+		switchToSepolia: vi.fn(),
+	}),
 }))
 vi.mock("@/composables/useBridgeWallet", () => ({
 	useBridgeWallet: () => ({ status: ref("connected"), selectedAccount: ref(`0x${"10".repeat(32)}`), wallet: ref({}) }),
@@ -27,9 +33,12 @@ vi.mock("@/composables/useL1FeeAsset", () => ({
 		balance: ref(50n * 10n ** 18n),
 		approving: ref(false),
 		error: ref(null),
+		minting: ref(false),
+		mintError: ref(null),
 		refresh: vi.fn(),
 		allowance: vi.fn(async () => 0n),
 		approve: vi.fn(),
+		mint: vi.fn(),
 	}),
 	FUEL_ASSET_DECIMALS: 18,
 }))

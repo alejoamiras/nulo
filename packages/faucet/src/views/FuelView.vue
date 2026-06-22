@@ -3,6 +3,7 @@ import BridgeJournal from "@/components/BridgeJournal.vue"
 import BridgeWalletPanel from "@/components/BridgeWalletPanel.vue"
 import FuelForm from "@/components/FuelForm.vue"
 import L1WalletPanel from "@/components/L1WalletPanel.vue"
+import MintFuelAsset from "@/components/MintFuelAsset.vue"
 import { TESTIDS } from "@/lib/testids"
 </script>
 
@@ -22,6 +23,7 @@ import { TESTIDS } from "@/lib/testids"
 		</section>
 
 		<FuelForm />
+		<MintFuelAsset />
 		<BridgeJournal kind="fee-juice" :toasts="false" title="YOUR FUELS" />
 	</div>
 </template>

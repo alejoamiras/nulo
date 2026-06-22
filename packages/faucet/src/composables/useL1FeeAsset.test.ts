@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ref } from "vue"
 
 const addressRef = ref<string | null>(null)
-const readContract = vi.fn(async () => 0n)
+const readContract = vi.fn(async (_a?: { functionName?: string }): Promise<unknown> => 0n)
 const writeContract = vi.fn(async () => "0xapprovetx")
 const waitForTransactionReceipt = vi.fn(async () => ({ status: "success" }))
 const ensureWalletClient = vi.fn(() => ({ writeContract }))
@@ -20,6 +20,7 @@ vi.mock("@/contracts/bridge-deployments", () => ({
 	L1_PORTAL: "0xportal",
 	FUEL_ASSET: "0xfjasset",
 	FUEL_PORTAL: "0xfjportal",
+	FUEL_ASSET_HANDLER: "0xfjhandler",
 }))
 
 async function freshModule() {
@@ -119,5 +120,50 @@ describe("useL1FeeAsset", () => {
 		const fa = useL1FeeAsset()
 		readContract.mockResolvedValueOnce("0xWRONGASSET" as never)
 		await expect(fa.verifyPortalAsset()).rejects.toThrow(/mismatch/i)
+	})
+
+	it("mint calls FeeAssetHandler.mint(owner) after the FEE_ASSET cross-check, awaits the receipt, refreshes", async () => {
+		const { useL1FeeAsset } = await freshModule()
+		const fa = useL1FeeAsset()
+		readContract.mockImplementation(async (a) => (a?.functionName === "FEE_ASSET" ? "0xfjasset" : 0n))
+		addressRef.value = OWNER
+		await fa.mint()
+		expect(writeContract).toHaveBeenCalledWith(
+			expect.objectContaining({ address: "0xfjhandler", functionName: "mint", args: [OWNER], account: OWNER }),
+		)
+		expect(waitForTransactionReceipt).toHaveBeenCalledWith({ hash: "0xapprovetx" })
+		expect(fa.mintError.value).toBeNull()
+		expect(fa.minting.value).toBe(false)
+	})
+
+	it("mint REFUSES (no write) when the handler's FEE_ASSET() doesn't match the configured asset", async () => {
+		const { useL1FeeAsset } = await freshModule()
+		const fa = useL1FeeAsset()
+		readContract.mockImplementation(async (a) => (a?.functionName === "FEE_ASSET" ? "0xWRONG" : 0n))
+		addressRef.value = OWNER
+		await fa.mint()
+		expect(writeContract).not.toHaveBeenCalled()
+		expect(fa.mintError.value).toMatch(/mismatch/i)
+	})
+
+	it("mint without a wallet sets mintError (NOT the shared error) and never writes", async () => {
+		const { useL1FeeAsset } = await freshModule()
+		const fa = useL1FeeAsset()
+		ensureWalletClient.mockReturnValue(null as never)
+		await fa.mint()
+		expect(writeContract).not.toHaveBeenCalled()
+		expect(fa.mintError.value).toMatch(/connect/i)
+		expect(fa.error.value).toBeNull()
+	})
+
+	it("a failing mint sets mintError and clears the minting flag", async () => {
+		const { useL1FeeAsset } = await freshModule()
+		const fa = useL1FeeAsset()
+		readContract.mockImplementation(async (a) => (a?.functionName === "FEE_ASSET" ? "0xfjasset" : 0n))
+		addressRef.value = OWNER
+		writeContract.mockRejectedValueOnce(new Error("user rejected"))
+		await fa.mint()
+		expect(fa.mintError.value).toMatch(/rejected/i)
+		expect(fa.minting.value).toBe(false)
 	})
 })

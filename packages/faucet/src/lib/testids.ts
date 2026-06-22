@@ -61,6 +61,9 @@ export const TESTIDS = {
 	fuelSubmit: "fa-fuel-submit",
 	fuelFormError: "fa-fuel-form-error",
 	fuelFlowError: "fa-fuel-flow-error",
+	fuelMintCard: "fa-fuel-mint-card",
+	fuelMintBtn: "fa-fuel-mint-btn",
+	fuelMintStatus: "fa-fuel-mint-status",
 
 	// Bridge - L1 (Ethereum) wallet
 	l1Status: "fa-l1-status",

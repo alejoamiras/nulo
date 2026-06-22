@@ -28,7 +28,8 @@ const backup = useBridgeBackup()
 const fuelFlow = useFuelFlow()
 
 const isPrivate = ref(true)
-const amount = ref("12")
+// Default above the ~16 FJ floor (the claim's max_gas_cost) so mint→fuel doesn't dead-end on a too-small amount.
+const amount = ref("20")
 const submitting = ref(false)
 // The takeover machine: the form swaps to the stepper on its OWN submit. activeFlowId is the single
 // global owner; this form only ever steppers a fee-juice record it started (so it never collides with

@@ -79,7 +79,7 @@
     },
     "packages/extension": {
       "name": "@nulo/extension",
-      "version": "0.23.0-rc.9",
+      "version": "0.24.0-rc.1",
       "dependencies": {
         "@alejoamiras/aztec-accelerator": "5.0.0-rc.1",
         "@aztec/accounts": "5.0.0-rc.1",
@@ -192,6 +192,7 @@
         "@aztec/constants": "5.0.0-rc.1",
         "@aztec/ethereum": "5.0.0-rc.1",
         "@aztec/foundation": "5.0.0-rc.1",
+        "@aztec/l1-artifacts": "5.0.0-rc.1",
         "@aztec/noir-acvm_js": "5.0.0-rc.1",
         "@aztec/noir-contracts.js": "5.0.0-rc.1",
         "@aztec/noir-noirc_abi": "5.0.0-rc.1",

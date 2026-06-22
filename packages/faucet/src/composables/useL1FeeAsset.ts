@@ -1,7 +1,8 @@
+import { FeeAssetHandlerAbi } from "@aztec/l1-artifacts"
 import { FeeJuicePortalAbi } from "@nulo/bridge-core"
 import { sepolia } from "viem/chains"
 import { ref, watch } from "vue"
-import { FUEL_ASSET, FUEL_PORTAL } from "@/contracts/bridge-deployments"
+import { FUEL_ASSET, FUEL_ASSET_HANDLER, FUEL_PORTAL } from "@/contracts/bridge-deployments"
 import { ERC20_ABI } from "./useL1Usdc"
 import { useL1Wallet } from "./useL1Wallet"
 
@@ -15,16 +16,22 @@ const POLL_INTERVAL_MS = 15_000
 const balance = ref<bigint | null>(null)
 const approving = ref(false)
 const error = ref<string | null>(null)
+// Mint state is DEDICATED, not the shared `error`/busy: the deposit flow + balance poll also write
+// `error`, so a failed approve/poll must never surface on the mint card as a mint failure (codex).
+const minting = ref(false)
+const mintError = ref<string | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
-// Session cache: only the VERIFIED-good verdict is memoised (a mismatch throws every call). The bundled
-// portal/asset pair can't change mid-session, so one on-chain read suffices.
+// Session cache: only the VERIFIED-good verdicts are memoised (a mismatch throws every call). The bundled
+// portal/asset (and handler/asset) pairs can't change mid-session, so one on-chain read each suffices.
 let portalAssetVerified = false
+let handlerAssetVerified = false
 
 /**
  * Module-singleton L1 fee-asset state for the Fuel flow (the useL1Usdc pattern): one Sepolia balance
- * poll + the approve the canonical FeeJuicePortal deposit needs. NO mint — Fuel assumes the asset is
- * already held (locked decision 3). The fee asset + portal come from the `l1.feeJuice` config; when it
- * is absent every method is inert (the Fuel tab never renders). Canonical viem only.
+ * poll, the approve the canonical FeeJuicePortal deposit needs, and a `mint()` (the testnet
+ * FeeAssetHandler) so a zero-balance user can get $AZTEC to fuel. The fee asset + portal + handler come
+ * from the `l1.feeJuice` config; when it is absent every method is inert (the Fuel tab never renders).
+ * Canonical viem only.
  */
 export function useL1FeeAsset() {
 	const l1 = useL1Wallet()
@@ -110,6 +117,61 @@ export function useL1FeeAsset() {
 		}
 	}
 
+	/** Fail-closed cross-check before minting: the pinned FeeAssetHandler must hand out the configured fee
+	 *  asset (read its `FEE_ASSET()`, compare to `FUEL_ASSET`). Proves config COHERENCE, not handler
+	 *  authenticity — the pinned address is the trust boundary (reviewed against the node) — but it stops a
+	 *  stale/typo'd handler from minting the wrong token. */
+	async function verifyHandlerAsset(): Promise<void> {
+		if (handlerAssetVerified) return
+		if (!FUEL_ASSET || !FUEL_ASSET_HANDLER) throw new Error("Fuel mint is not configured for this deployment.")
+		const feeAsset = (await l1.publicClient.readContract({
+			address: FUEL_ASSET_HANDLER,
+			abi: FeeAssetHandlerAbi,
+			functionName: "FEE_ASSET",
+		})) as string
+		if (feeAsset.toLowerCase() !== FUEL_ASSET.toLowerCase()) {
+			throw new Error(
+				"Fuel mint handler mismatch. Refusing to mint: the FeeAssetHandler's FEE_ASSET() doesn't match the configured fee asset.",
+			)
+		}
+		handlerAssetVerified = true
+	}
+
+	/** Mint test $AZTEC to the connected account via the permissionless testnet FeeAssetHandler (fixed
+	 *  amount, set by the contract), then refresh the balance. Errors set the DEDICATED `mintError`; a
+	 *  handler revert (e.g. rate-limit) surfaces its message, never throws uncaught. */
+	async function mint(): Promise<void> {
+		const wallet = l1.ensureWalletClient()
+		const owner = l1.address.value
+		if (!wallet || !owner) {
+			mintError.value = "Connect your Ethereum wallet first."
+			return
+		}
+		if (!FUEL_ASSET_HANDLER) {
+			mintError.value = "Fuel mint is not configured for this deployment."
+			return
+		}
+		minting.value = true
+		mintError.value = null
+		try {
+			await verifyHandlerAsset()
+			const hash = await wallet.writeContract({
+				address: FUEL_ASSET_HANDLER,
+				abi: FeeAssetHandlerAbi,
+				functionName: "mint",
+				args: [owner],
+				chain: sepolia,
+				account: owner,
+			})
+			await l1.publicClient.waitForTransactionReceipt({ hash })
+			await refresh()
+		} catch (err) {
+			mintError.value = errorMessage(err, "Mint failed")
+		} finally {
+			minting.value = false
+		}
+	}
+
 	function ensurePolling(): void {
 		if (timer !== null) return
 		timer = setInterval(() => void refresh(), POLL_INTERVAL_MS)
@@ -124,5 +186,5 @@ export function useL1FeeAsset() {
 		{ immediate: true },
 	)
 
-	return { balance, approving, error, refresh, allowance, approve, verifyPortalAsset }
+	return { balance, approving, error, minting, mintError, refresh, allowance, approve, mint, verifyPortalAsset }
 }
