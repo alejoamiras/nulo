@@ -1,5 +1,5 @@
 import type { ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { PASSKEY_SERVICE_NAME, type Methods, type PasskeyCredentialData, type PasskeyRequest } from "./spec"
 import { PasskeyCredential } from "@nulo/wallet-crypto"
@@ -46,6 +46,7 @@ type PendingPasskey = {
 }
 
 export class PasskeyService extends Service<Methods> implements ServiceSpec<Methods> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()("getPendingRequest", "resolvePasskeyRequest", "rejectPasskeyRequest")
 	public static name = PASSKEY_SERVICE_NAME
 
 	private pending: Map<string, PendingPasskey> = new Map()

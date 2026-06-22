@@ -59,6 +59,8 @@ function fakeConfig(init: { sessionTtl?: number; strict?: boolean; debugMode?: b
  *  IService shape; createKey/getKey override the real (chrome.windows-using)
  *  implementations. */
 class FakePasskeyService extends Service<Record<string, never>> {
+	protected readonly rpcMethods = new Set<string>()
+
 	public constructor(logger: LoggerStore) {
 		super(PasskeyService.name, logger)
 	}
@@ -449,6 +451,8 @@ describe("ProfileService integration", () => {
 			const logger = new LoggerStore(config)
 
 			class CollidingPasskey extends Service<Record<string, never>> {
+				protected readonly rpcMethods = new Set<string>()
+
 				public constructor() {
 					super(PasskeyService.name, logger)
 				}

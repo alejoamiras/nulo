@@ -32,8 +32,4 @@ describe("Text", () => {
 	test("(PIN) off-scale/named size emits the class verbatim (no .fz--large in base.css → inherits at runtime)", () => {
 		expect(mount(Text, { props: { size: "large" } }).classes()).toContain("fz--large")
 	})
-
-	test("(PIN) color='dark' emits color--dark (ghost → undeclared --gray-15 → inherits)", () => {
-		expect(mount(Text, { props: { color: "dark" } }).classes()).toContain("color--dark")
-	})
 })

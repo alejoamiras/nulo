@@ -28,7 +28,7 @@ import z from "zod"
 
 const AccessScopesSchema = z.array(AztecAddress.schema)
 import type { ServiceSpec } from "@nulo/wallet-core/base"
-import { Service } from "@nulo/extension-messaging/offscreen"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/offscreen"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { ReadWriteGuard } from "@nulo/wallet-core/utils"
 import type { NetworkInfo } from "./chain-runtime"
@@ -56,6 +56,30 @@ export interface IProfileReader {
 
 export class PxeService extends Service<Methods> implements ServiceSpec<Methods> {
 	public static name = PXE_SERVICE_NAME
+
+	protected readonly rpcMethods = defineRpcMethods<Methods>()(
+		"getContractInstance",
+		"getContractArtifact",
+		"getNoteSchemas",
+		"registerAccount",
+		"registerSender",
+		"getSenders",
+		"removeSender",
+		"getRegisteredAccounts",
+		"registerContractClass",
+		"registerContract",
+		"updateContract",
+		"getContracts",
+		"getNotes",
+		"proveTx",
+		"profileTx",
+		"simulateTx",
+		"executeUtility",
+		"getPrivateEvents",
+		"getSyncedBlockHeader",
+		"getBlockTimestamp",
+		"clearChainState",
+	)
 
 	private readonly profiles: IProfileReader
 	/**

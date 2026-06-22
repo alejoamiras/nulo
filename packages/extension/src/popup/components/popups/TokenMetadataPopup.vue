@@ -76,7 +76,7 @@ watch(
 
 						<Text @click="handleCopyAddress" size="12" weight="600" color="secondary" class="copyable">
 							{{ token.contract.slice(0, 6) }}
-							<Text color="dark">•••</Text>
+							<Text color="tertiary">•••</Text>
 							{{ token.contract.slice(-4) }}
 						</Text>
 					</Flex>
@@ -122,7 +122,7 @@ watch(
 					<Flex align="center" justify="between">
 						<Flex direction="column" gap="6">
 							<Text size="12" weight="600" color="tertiary"> Balances </Text>
-							<Text size="11" weight="600" color="dark" mono> hasPrivateBalances </Text>
+							<Text size="11" weight="600" color="secondary" mono> hasPrivateBalances </Text>
 						</Flex>
 
 						<Icon
@@ -135,7 +135,7 @@ watch(
 					<Flex align="center" justify="between">
 						<Flex direction="column" gap="6">
 							<Text size="12" weight="600" color="tertiary"> Transfers </Text>
-							<Text size="11" weight="600" color="dark" mono> hasPrivateTransfers </Text>
+							<Text size="11" weight="600" color="secondary" mono> hasPrivateTransfers </Text>
 						</Flex>
 
 						<Icon
@@ -148,7 +148,7 @@ watch(
 					<Flex align="center" justify="between">
 						<Flex direction="column" gap="6">
 							<Text size="12" weight="600" color="tertiary"> Private to public </Text>
-							<Text size="11" weight="600" color="dark" mono> hasPrivateToPublicTransfers </Text>
+							<Text size="11" weight="600" color="secondary" mono> hasPrivateToPublicTransfers </Text>
 						</Flex>
 
 						<Icon
@@ -165,7 +165,7 @@ watch(
 					<Flex align="center" justify="between">
 						<Flex direction="column" gap="6">
 							<Text size="12" weight="600" color="tertiary"> Balances </Text>
-							<Text size="11" weight="600" color="dark" mono> hasPublicBalances </Text>
+							<Text size="11" weight="600" color="secondary" mono> hasPublicBalances </Text>
 						</Flex>
 
 						<Icon
@@ -178,7 +178,7 @@ watch(
 					<Flex align="center" justify="between">
 						<Flex direction="column" gap="6">
 							<Text size="12" weight="600" color="tertiary"> Transfers </Text>
-							<Text size="11" weight="600" color="dark" mono> hasPublicTransfers </Text>
+							<Text size="11" weight="600" color="secondary" mono> hasPublicTransfers </Text>
 						</Flex>
 
 						<Icon
@@ -191,7 +191,7 @@ watch(
 					<Flex align="center" justify="between">
 						<Flex direction="column" gap="6">
 							<Text size="12" weight="600" color="tertiary"> Public to private </Text>
-							<Text size="11" weight="600" color="dark" mono> hasPublicToPrivateTransfers</Text>
+							<Text size="11" weight="600" color="secondary" mono> hasPublicToPrivateTransfers</Text>
 						</Flex>
 
 						<Icon

@@ -76,7 +76,12 @@ merge order is functionally safe either way, but for a clean PR-A, cherry-pick t
    review fixes if cherry-picked), then PR-B `chore/design-r2-faucet-cutover` (P7). Merge A before B.
    The local commits (2 fixes + the docs/sign-off commits) are NOT pushed yet — awaiting your go.
 
-## Round-3 backlog (deferred)
+## Round 3 — see `implementations-plan/design-system-externalization-round-3/`
 
-Faucet toast-region unification (`AppToastRegion`/faucet `useToast`); retire the `AppButton` alias +
-migrate `DripButton` off it; the pre-existing visual-quirk fixes (`--gray-15`, the `dark` color name).
+**Toast: KEEP SEPARATE (round-3 decision — NOT unified).** The faucet `useToast` is a 4-deep queue
+with links; the extension's is a single-transient singleton — different state models driven by
+different host contexts (web viewport vs 360px popup). The faucet already shares the package's
+presentational `Toast.vue` card; only the queue state + region layout differ, and those stay separate.
+Round 3 also retires the `AppButton` alias (migrate `DripButton` → `Button`), drops the `dark` color
+name (split: `tertiary` dots / `secondary` metadata), and deletes the 9 round-1 local SFC shadows so
+the resolver finally takes effect.

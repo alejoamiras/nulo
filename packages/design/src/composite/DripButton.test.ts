@@ -29,7 +29,7 @@ describe("DripButton", () => {
 
 	it("renders a spinner and is aria-busy while loading", () => {
 		const w = mount(DripButton, { props: { label: "Drip", loading: true } })
-		expect(w.find(".btn__spinner").exists()).toBe(true)
+		expect(w.find('[role="status"]').exists()).toBe(true)
 		expect(w.get("button").attributes("aria-busy")).toBe("true")
 	})
 
@@ -50,9 +50,10 @@ describe("DripButton", () => {
 		expect(w.get("button").attributes("data-loading")).toBe("true")
 	})
 
-	it("uses the outline variant of AppButton", () => {
+	it("uses the primary_outline variant of Button", () => {
 		const w = mount(DripButton, { props: { label: "Drip" } })
-		expect(w.get("button").classes()).toContain("btn--outline")
+		// Button uses CSS modules → the hashed class contains the variant name.
+		expect(w.get("button").classes().join(" ")).toMatch(/primary_outline/)
 	})
 
 	it("re-enables when loading transitions back to false", async () => {
@@ -69,6 +70,6 @@ describe("DripButton", () => {
 
 	it("idle button does not show a spinner", () => {
 		const w = mount(DripButton, { props: { label: "Drip" } })
-		expect(w.find(".btn__spinner").exists()).toBe(false)
+		expect(w.find('[role="status"]').exists()).toBe(false)
 	})
 })

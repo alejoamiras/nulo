@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>color="dark" → which token? (round-3 P2)</title>
+<style>
+  :root { font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; }
+  body { margin: 0; padding: 2rem 1rem; background: #15140f; color: #e8e2d6; line-height: 1.5; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  p.sub { color: #b8b1a3; margin: 0 0 1.5rem; font-size: .92rem; }
+  h2 { font-size: 1.05rem; margin: 2rem 0 .75rem; color: #d8d1c2; }
+  .legend { font-size: .82rem; color: #b8b1a3; margin: .25rem 0 1rem; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 640px){ .grid { grid-template-columns: 1fr; } }
+  .opt { border-radius: 10px; overflow: hidden; border: 1px solid #34322c; }
+  .opt h3 { margin: 0; padding: 8px 12px; font-size: .8rem; font-weight: 600; letter-spacing: .04em;
+            text-transform: uppercase; background: #201e18; color: #cfc8b9; }
+  .opt h3 .rec { color: #f0a020; }
+  .pane { padding: 16px; }
+  /* one extension popup card, rendered with the REAL tokens */
+  .card { border-radius: 8px; padding: 14px 14px; }
+  /* mono font for metadata values */
+  .mono { font-family: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, monospace; }
+  .row { display: flex; align-items: center; justify-content: space-between; }
+  .col { display: flex; flex-direction: column; gap: 6px; }
+  .t12 { font-size: 12px; font-weight: 600; }
+  .t11 { font-size: 11px; font-weight: 600; }
+  .t13 { font-size: 13px; font-weight: 600; }
+  .mt { margin-top: 12px; }
+  .copyable { cursor: pointer; }
+
+  /* ===== DARK theme tokens (extension default :root) ===== */
+  .dark { background: #0a0908; }
+  .dark .txt-primary   { color: #f5f0e6; }
+  .dark .txt-secondary { color: #999187; }
+  .dark .txt-tertiary  { color: rgba(245,240,230,.30); }
+  /* the three candidates for the 8 sites */
+  .dark .as-current-dots  { color: #999187; }            /* ••• inherits its secondary parent today */
+  .dark .as-current-meta  { color: #f5f0e6; }            /* metadata value inherits ≈ primary today (the bug) */
+  .dark .as-tertiary      { color: rgba(245,240,230,.30); }
+  .dark .as-secondary     { color: #999187; }
+
+  /* ===== LIGHT theme tokens ===== */
+  .light { background: #f5f5f7; }
+  .light .txt-primary   { color: rgba(0,0,0,.88); }
+  .light .txt-secondary { color: rgba(0,0,0,.60); }
+  .light .txt-tertiary  { color: rgba(0,0,0,.35); }
+  .light .as-current-dots { color: rgba(0,0,0,.60); }
+  .light .as-current-meta { color: rgba(0,0,0,.88); }
+  .light .as-tertiary     { color: rgba(0,0,0,.35); }
+  .light .as-secondary    { color: rgba(0,0,0,.60); }
+
+  .note { font-size: .82rem; color: #9b948700; }
+  .tag { display:inline-block; font-size:.7rem; padding:1px 6px; border-radius:4px; background:#2b2a28; color:#b8b1a3; margin-left:6px; vertical-align:middle;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>P2 decision: what should the 8 <code>color="dark"</code> sites become?</h1>
+  <p class="sub">Today <code>color="dark"</code> points at an undeclared variable, so the text falls back to
+  whatever it <em>inherits</em>. That makes the two contexts below render differently — and the metadata
+  one is the actual bug (the value is brighter than its label). Compare the three real candidates. The
+  middle column is my proposal.</p>
+
+  <!-- ===================== DARK THEME ===================== -->
+  <h2>Dark theme <span class="tag">extension default</span></h2>
+
+  <p class="legend"><strong>Context A — masked address</strong> (TokenMetadataPopup + ReceivePopup). The
+  <code>•••</code> is nested inside a <em>secondary</em>-colored address, so it already inherits secondary.
+  Barely changes.</p>
+  <div class="grid">
+    <div class="opt"><h3>Current (bug)</h3><div class="pane dark"><div class="card dark">
+      <div class="row"><span class="txt-tertiary t12">Contract Address</span>
+      <span class="txt-secondary t12 copyable">0x1f2a<span class="as-current-dots">•••</span>9c4e</span></div>
+    </div></div></div>
+    <div class="opt"><h3><span class="rec">tertiary ★</span></h3><div class="pane dark"><div class="card dark">
+      <div class="row"><span class="txt-tertiary t12">Contract Address</span>
+      <span class="txt-secondary t12 copyable">0x1f2a<span class="as-tertiary">•••</span>9c4e</span></div>
+    </div></div></div>
+    <div class="opt"><h3>secondary</h3><div class="pane dark"><div class="card dark">
+      <div class="row"><span class="txt-tertiary t12">Contract Address</span>
+      <span class="txt-secondary t12 copyable">0x1f2a<span class="as-secondary">•••</span>9c4e</span></div>
+    </div></div></div>
+  </div>
+
+  <p class="legend mt"><strong>Context B — token metadata</strong> (TokenMetadataPopup, 6 sites). The mono
+  value (<code>hasPrivateBalances</code>) currently inherits ≈ <em>primary</em> — brighter than its own
+  <em>tertiary</em> label above it. This is the one that visibly shifts.</p>
+  <div class="grid">
+    <div class="opt"><h3>Current (bug)</h3><div class="pane dark"><div class="card dark">
+      <span class="txt-secondary t12">Private Methods</span>
+      <div class="row mt"><div class="col">
+        <span class="txt-tertiary t12">Balances</span>
+        <span class="mono t11 as-current-meta">hasPrivateBalances</span>
+      </div><span class="txt-secondary">✓</span></div>
+    </div></div></div>
+    <div class="opt"><h3><span class="rec">tertiary ★</span></h3><div class="pane dark"><div class="card dark">
+      <span class="txt-secondary t12">Private Methods</span>
+      <div class="row mt"><div class="col">
+        <span class="txt-tertiary t12">Balances</span>
+        <span class="mono t11 as-tertiary">hasPrivateBalances</span>
+      </div><span class="txt-secondary">✓</span></div>
+    </div></div></div>
+    <div class="opt"><h3>secondary</h3><div class="pane dark"><div class="card dark">
+      <span class="txt-secondary t12">Private Methods</span>
+      <div class="row mt"><div class="col">
+        <span class="txt-tertiary t12">Balances</span>
+        <span class="mono t11 as-secondary">hasPrivateBalances</span>
+      </div><span class="txt-secondary">✓</span></div>
+    </div></div></div>
+  </div>
+
+  <!-- ===================== LIGHT THEME ===================== -->
+  <h2>Light theme</h2>
+  <p class="legend"><strong>Context B — token metadata</strong> (the one that shifts), light theme.</p>
+  <div class="grid">
+    <div class="opt"><h3>Current (bug)</h3><div class="pane light"><div class="card light">
+      <span class="txt-secondary t12">Private Methods</span>
+      <div class="row mt"><div class="col">
+        <span class="txt-tertiary t12">Balances</span>
+        <span class="mono t11 as-current-meta">hasPrivateBalances</span>
+      </div><span class="txt-secondary">✓</span></div>
+    </div></div></div>
+    <div class="opt"><h3><span style="color:#b8860b">tertiary ★</span></h3><div class="pane light"><div class="card light">
+      <span class="txt-secondary t12">Private Methods</span>
+      <div class="row mt"><div class="col">
+        <span class="txt-tertiary t12">Balances</span>
+        <span class="mono t11 as-tertiary">hasPrivateBalances</span>
+      </div><span class="txt-secondary">✓</span></div>
+    </div></div></div>
+    <div class="opt"><h3>secondary</h3><div class="pane light"><div class="card light">
+      <span class="txt-secondary t12">Private Methods</span>
+      <div class="row mt"><div class="col">
+        <span class="txt-tertiary t12">Balances</span>
+        <span class="mono t11 as-secondary">hasPrivateBalances</span>
+      </div><span class="txt-secondary">✓</span></div>
+    </div></div></div>
+  </div>
+
+  <h2>My read</h2>
+  <p class="sub"><strong>tertiary</strong> (★) makes the masked dots recede nicely and de-emphasizes the
+  mono field-names below their labels — the intended hierarchy. The risk: at 30% opacity (dark) / 35%
+  black (light) the mono values get quite faint — if you want those metadata values to stay comfortably
+  readable, <strong>secondary</strong> is the safer muted level. A third option: split them —
+  <strong>tertiary for the dots, secondary for the metadata values</strong> (best of both, two tokens).
+  Tell me which and I'll lock P2.</p>
+</div>
+</body>
+</html>
