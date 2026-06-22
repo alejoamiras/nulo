@@ -99,6 +99,11 @@ export interface DepositFuelBlock {
 
 export interface DepositJournalRecord extends JournalBase {
 	direction: "deposit"
+	/** Which asset this deposit bridges. Absent ⇒ "bridge-token" (ADDITIVE — pre-Fuel records have no
+	 *  field and the loader never gates on it). "fee-juice" = a direct Fuel bridge (L1 fee asset → L2 Fee
+	 *  Juice via the canonical FeeJuicePortal); its deployment binding is {portal: FeeJuicePortal, bridge:
+	 *  L2 FeeJuice address}, NOT the token bridge. */
+	assetKind?: "bridge-token" | "fee-juice"
 	/** Display + pre-unseal guard for private; claim arg for public (self-authenticating on-chain). */
 	recipient: string
 	/** PUBLIC only - recipient-bound by the L1 content hash (tamper ⇒ claim fails, never redirects). */
@@ -132,6 +137,13 @@ export interface WithdrawJournalRecord extends JournalBase {
 }
 
 export type BridgeJournalRecord = DepositJournalRecord | WithdrawJournalRecord
+
+/** The deposit's asset variant, defaulting to the legacy "bridge-token" for records written before Fuel
+ *  existed (the field is additive; absent ⇒ token bridge). Withdraws are always token-bridge. The ONE
+ *  place the default is decided, so every consumer (deploymentMatches, backup, receipt) agrees. */
+export function assetKindOf(rec: BridgeJournalRecord): "bridge-token" | "fee-juice" {
+	return rec.direction === "deposit" && rec.assetKind === "fee-juice" ? "fee-juice" : "bridge-token"
+}
 
 /** Canonical display stages - closed sets, stable for e2e selectors. */
 export type DepositStage = "depositing" | "syncing" | "claimable" | "claiming" | "done"

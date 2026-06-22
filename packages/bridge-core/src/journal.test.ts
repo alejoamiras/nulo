@@ -7,6 +7,7 @@ import {
 	JOURNAL_KEY,
 	LEGACY_KEYS,
 	MAX_RECORDS,
+	assetKindOf,
 	capRecords,
 	clearLegacyKeys,
 	deriveDepositStage,
@@ -148,6 +149,38 @@ describe("schema-2 fuel records", () => {
 		expect(rec.fuel?.received).toBe("487000000000000000000")
 		expect(rec.fuel?.claimAttempt).toBe(true)
 		expect(rec.fuel?.consumed).toBe(true)
+	})
+})
+
+describe("assetKind (Fuel variant)", () => {
+	it("defaults to bridge-token when absent; reads fee-juice when set; withdraws are always token", () => {
+		expect(assetKindOf(deposit("0xtoken"))).toBe("bridge-token")
+		expect(assetKindOf(deposit("0xfuel", { assetKind: "fee-juice" }))).toBe("fee-juice")
+		expect(assetKindOf(withdraw("0xexit"))).toBe("bridge-token")
+	})
+
+	it("a fee-juice deposit round-trips through the journal with its variant + binding intact", () => {
+		const kv = memKV()
+		upsertRecord(kv, deposit("0xfj", { assetKind: "fee-juice", portal: "0xfjportal", bridge: "0xfjL2" }))
+		const [rec] = loadJournal(kv) as DepositJournalRecord[]
+		expect(assetKindOf(rec)).toBe("fee-juice")
+		expect(rec.portal).toBe("0xfjportal")
+	})
+
+	it("REGRESSION: a pre-Fuel journal (no assetKind) loads EVERY record, each as bridge-token (additive)", () => {
+		const kv = memKV({
+			[JOURNAL_KEY]: JSON.stringify({
+				schema: 1,
+				records: [
+					deposit("0xa"),
+					deposit("0xb", { schema: 2, fuel: { amount: "1", secret: "0x1", secretHashHex: "0x2", minOutput: "3" } }),
+					withdraw("0xc"),
+				],
+			}),
+		})
+		const records = loadJournal(kv)
+		expect(records.map((r) => r.id).sort()).toEqual(["0xa", "0xb", "0xc"])
+		for (const r of records) expect(assetKindOf(r)).toBe("bridge-token")
 	})
 })
 

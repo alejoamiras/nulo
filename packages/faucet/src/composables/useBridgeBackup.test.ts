@@ -12,6 +12,9 @@ vi.mock("@/contracts/bridge-deployments", () => ({
 	BRIDGE_TOKEN_SYMBOL: "USDC",
 	BRIDGE_TOKEN_DECIMALS: 6,
 	L1_PORTAL: "0xportal",
+	FUEL_PORTAL: "0xfjportal",
+	FUEL_ASSET: "0xfjasset",
+	FUEL_MIN_FJ: 11000000000000000000n,
 	BRIDGE: { toString: () => "0xbridge" },
 }))
 vi.mock("./useL1Wallet", () => ({

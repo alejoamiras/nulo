@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
 /** Services */
-import { Button } from "@nulo/design"
+import { Button, Card } from "@nulo/design"
 import { computed } from "vue"
 
 /** Composables */
@@ -22,7 +22,7 @@ const status = computed(() => {
 </script>
 
 <template>
-	<section class="mint-card">
+	<Card>
 		<header>
 			<h3>GET TEST {{ BRIDGE_TOKEN_SYMBOL }} ON SEPOLIA (L1)</h3>
 			<p class="sub">
@@ -42,19 +42,11 @@ const status = computed(() => {
 		</Button>
 
 		<p v-if="status" class="status" :data-testid="TESTIDS.mintL1Status">{{ status }}</p>
-	</section>
+	</Card>
 </template>
 
 <style scoped>
-.mint-card {
-	display: flex;
-	flex-direction: column;
-	gap: 14px;
-	padding: 24px;
-	border: 1px solid var(--nulo-outline);
-}
-
-.mint-card h3 {
+h3 {
 	font-family: var(--font-headline);
 	font-weight: 600;
 	font-size: 16px;
@@ -62,7 +54,7 @@ const status = computed(() => {
 	margin: 0;
 }
 
-.mint-card .sub {
+.sub {
 	color: var(--txt-secondary);
 	font-size: 13px;
 	line-height: 1.55;

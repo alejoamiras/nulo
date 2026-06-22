@@ -59,17 +59,17 @@ function openInstall() {
 
 <template>
 	<section class="panel" :data-testid="TESTIDS.status" :data-status="status">
-		<div v-if="status === 'connected' && selectedAccount" class="connected">
-			<span class="label">Connected</span>
+		<div v-if="status === 'connected' && selectedAccount" class="chip">
+			<span class="label">Aztec</span>
 			<AddressDisplay :address="selectedAccount" :data-testid="TESTIDS.account" />
-			<span class="chain">alpha-testnet</span>
 			<button
 				class="disconnect"
 				type="button"
+				aria-label="Disconnect"
 				:data-testid="TESTIDS.btnDisconnect"
 				@click="disconnect"
 			>
-				Disconnect
+				✕
 			</button>
 		</div>
 
@@ -126,46 +126,37 @@ function openInstall() {
 
 <style scoped>
 .panel {
-	display: flex;
+	display: inline-flex;
 	flex-direction: column;
-	gap: 16px;
-	padding: 24px 0;
-	border-bottom: 1px solid var(--nulo-outline);
-}
-
-.connected {
-	display: flex;
-	align-items: center;
 	gap: 12px;
-	flex-wrap: wrap;
 }
 
-.connected .label {
+.chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+	padding: 8px 12px;
+	border: 1px solid var(--nulo-outline);
+}
+
+.chip .label {
 	color: var(--txt-secondary);
 	font: 500 11px/1 var(--font-mono);
 	letter-spacing: 0.12em;
 	text-transform: uppercase;
 }
 
-.connected .chain {
-	color: var(--mint);
-	font: 500 11px/1 var(--font-mono);
-	letter-spacing: 0.08em;
-	text-transform: uppercase;
-	padding: 4px 8px;
-	border: 1px solid var(--mint);
-}
-
 .disconnect {
-	margin-left: auto;
 	color: var(--txt-secondary);
-	font-size: 13px;
-	text-decoration: underline;
-	text-underline-offset: 3px;
+	font: 600 12px/1 var(--font-mono);
+	cursor: pointer;
+	background: transparent;
+	border: none;
+	padding: 2px 4px;
 }
 
 .disconnect:hover {
-	color: var(--txt-primary);
+	color: var(--red);
 }
 
 .capability,

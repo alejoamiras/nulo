@@ -4,6 +4,7 @@ import {
 	type BridgeJournalRecord,
 	type DepositJournalRecord,
 	type WithdrawJournalRecord,
+	assetKindOf,
 	deriveDepositStage,
 	deriveWithdrawStage,
 	isProvisionalWithdrawId,
@@ -14,7 +15,7 @@ import { computed, ref, watch } from "vue"
 import { useBridgeJournal } from "@/composables/useBridgeJournal"
 
 /** Utils */
-import { BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
+import { assetDecimals, assetSymbol } from "@/lib/asset-label"
 import { useNow } from "@/lib/clock"
 import { formatBigInt } from "@/lib/format"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
@@ -50,6 +51,11 @@ watch(discardArmed, (armed) => {
 
 const rt = computed(() => journal.runtime.value[props.record.id] ?? {})
 
+// A DIRECT Fuel record (assetKind "fee-juice") IS Fee Juice — no token leg. Its `fuel` block mirrors the
+// amount, so the token-bridge surfaces (the AZLO amount line, the "+FJ" add-on, "CLAIM WITHOUT FUEL") would
+// double-count or mislabel it. Branch those off this flag; swap-fuel + token records are unaffected (codex LOW).
+const isFuel = computed(() => assetKindOf(props.record) === "fee-juice")
+
 /** Fuel surface (schema-2 deposits): the received-FJ line + the L14 manual escape. */
 const fuel = computed(() => {
 	const r = props.record
@@ -65,7 +71,11 @@ const fuelAmount = computed(() => {
 // The explicit, non-destructive escape: claim the tokens sponsored; the FJ message (if
 // unconsumed) stays claimable later. Offered only when a fueled claim is stuck on an error.
 const showClaimWithoutFuel = computed(
-	() => fuel.value !== undefined && !props.record.completedAt && (attention.value === "error" || attention.value === "unknown-outcome"),
+	() =>
+		fuel.value !== undefined &&
+		!isFuel.value &&
+		!props.record.completedAt &&
+		(attention.value === "error" || attention.value === "unknown-outcome"),
 )
 function onClaimWithoutFuel() {
 	overrideFuelClaim(props.record.id)
@@ -186,7 +196,9 @@ const txLinks = computed(() => {
 	return links.filter((l) => l.href !== "")
 })
 
-const amountDisplay = computed(() => formatBigInt(BigInt(props.record.amount), BRIDGE_TOKEN_DECIMALS))
+const amountKind = computed(() => assetKindOf(props.record))
+const amountDisplay = computed(() => formatBigInt(BigInt(props.record.amount), assetDecimals(amountKind.value)))
+const amountSymbol = computed(() => assetSymbol(amountKind.value, props.record.isPrivate))
 
 const now = useNow()
 const age = computed(() => {
@@ -224,7 +236,7 @@ function onDiscard() {
 		<p v-if="stage === 'done'" class="stamp">{{ record.direction === "deposit" ? "BRIDGED ✓" : "RELEASED ✓" }}</p>
 		<header class="row">
 			<span class="dir">{{ record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM" }}</span>
-			<span class="amt">{{ amountDisplay }} {{ BRIDGE_TOKEN_SYMBOL }}<span v-if="fuelAmount" class="amt-fuel">{{ fuelAmount }}</span></span>
+			<span class="amt">{{ amountDisplay }} {{ amountSymbol }}<span v-if="fuelAmount && !isFuel" class="amt-fuel">{{ fuelAmount }}</span></span>
 			<span class="tag" :class="{ private: record.isPrivate }">{{ record.isPrivate ? "PRIVATE" : "PUBLIC" }}</span>
 			<span class="age">{{ age }}</span>
 			<button

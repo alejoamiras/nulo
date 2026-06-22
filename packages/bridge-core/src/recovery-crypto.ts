@@ -109,6 +109,10 @@ export interface DepositEnvelopeV2 {
 	amount: string
 	sealerL1: string
 	leafIndex?: string
+	/** PRIVATE fuel only — the per-deposit bridge-secret salt. For a direct private Fuel bridge the salt
+	 *  is the SOLE recovery input: the claim secret is `deriveBridgeSecret(salt, claimer)`, so a lost salt
+	 *  strands the Fee Juice. Sealed here (not just the plaintext journal copy) so a backup can recover it. */
+	salt?: string
 }
 
 /** Normalize an amount to its canonical decimal form so seal-time and verify-time agree. */
@@ -136,7 +140,8 @@ export async function openDepositEnvelope(key: EncryptionKey, blob: string): Pro
 		typeof env.secret !== "string" ||
 		typeof env.recipient !== "string" ||
 		typeof env.amount !== "string" ||
-		typeof env.sealerL1 !== "string"
+		typeof env.sealerL1 !== "string" ||
+		(env.salt !== undefined && typeof env.salt !== "string")
 	) {
 		throw new Error("Sealed blob is not a v2 envelope — refusing to use it.")
 	}

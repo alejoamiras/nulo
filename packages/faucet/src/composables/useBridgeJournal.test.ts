@@ -3,6 +3,7 @@ import {
 	type DepositJournalRecord,
 	type KV,
 	type WithdrawJournalRecord,
+	feeJuiceAddress,
 	isSealTrusted,
 	markSealTrusted,
 	recoveryKeyFromSignature,
@@ -16,6 +17,9 @@ vi.mock("@/contracts/bridge-deployments", () => ({
 	BRIDGE_TOKEN_SYMBOL: "USDC",
 	BRIDGE_TOKEN_DECIMALS: 6,
 	L1_PORTAL: "0xportal",
+	FUEL_PORTAL: "0xfjportal",
+	FUEL_ASSET: "0xfjasset",
+	FUEL_MIN_FJ: 11000000000000000000n,
 	BRIDGE: { toString: () => "0xbridge" },
 }))
 
@@ -27,6 +31,7 @@ import {
 	cacheSecret,
 	claimForeground,
 	connectJournalDeps,
+	deploymentMatches,
 	discard,
 	markApproveOutcome,
 	hideCompleted,
@@ -888,5 +893,29 @@ describe("useBridgeJournal engine", () => {
 		releaseA()
 		await Promise.all([a, b])
 		expect(order).toEqual(["a-start", "c-start", "a-end", "b-start"])
+	})
+})
+
+describe("deploymentMatches — assetKind binding (plan §5 DQ2)", () => {
+	const dep = (over: Partial<DepositJournalRecord>): DepositJournalRecord => mkDeposit("0xdm", over)
+
+	it("token-bridge record (default assetKind) matches the token portal + bridge", () => {
+		expect(deploymentMatches(dep({ portal: "0xportal", bridge: "0xbridge" }))).toBe(true)
+	})
+
+	it("fee-juice record matches the FeeJuicePortal + L2 Fee Juice address", () => {
+		expect(deploymentMatches(dep({ assetKind: "fee-juice", portal: "0xfjportal", bridge: feeJuiceAddress }))).toBe(true)
+	})
+
+	it("a fee-juice record carrying the TOKEN binding is NOT a match (quarantine, never misroute)", () => {
+		expect(deploymentMatches(dep({ assetKind: "fee-juice", portal: "0xportal", bridge: "0xbridge" }))).toBe(false)
+	})
+
+	it("a token record carrying the fee-juice binding is NOT a match", () => {
+		expect(deploymentMatches(dep({ portal: "0xfjportal", bridge: feeJuiceAddress }))).toBe(false)
+	})
+
+	it("wrong chain never matches", () => {
+		expect(deploymentMatches(dep({ portal: "0xportal", bridge: "0xbridge", chainId: 1 }))).toBe(false)
 	})
 })

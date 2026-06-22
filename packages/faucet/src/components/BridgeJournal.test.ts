@@ -1,12 +1,21 @@
 import type { BridgeJournalRecord } from "@nulo/bridge-core"
-import { mount } from "@vue/test-utils"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { enableAutoUnmount, mount } from "@vue/test-utils"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { nextTick, ref } from "vue"
 
+// Each mount registers a watcher on the module-shared lastCompleted; without unmounting, zombie instances
+// from earlier tests fire on a later test's completion (breaks the toasts=false single-owner assertion).
+enableAutoUnmount(afterEach)
+
 const visibleRecords = ref<BridgeJournalRecord[]>([])
-const lastCompleted = ref<{ id: string; direction: "deposit" | "withdraw"; amount: string; isPrivate: boolean; txHash?: string } | null>(
-	null,
-)
+const lastCompleted = ref<{
+	id: string
+	direction: "deposit" | "withdraw"
+	amount: string
+	isPrivate: boolean
+	assetKind?: "bridge-token" | "fee-juice"
+	txHash?: string
+} | null>(null)
 const push = vi.fn()
 
 const activeFlowId = ref<string | null>(null)
@@ -24,9 +33,12 @@ vi.mock("@/composables/useBridgeBackup", () => ({
 
 import { TESTIDS } from "@/lib/testids"
 import BridgeJournal from "./BridgeJournal.vue"
+import BridgeJournalCard from "./BridgeJournalCard.vue"
 
 const sel = (t: string) => `[data-testid="${t}"]`
 const GOOD_HASH = `0x${"ab".repeat(32)}`
+const recOf = (over: Partial<BridgeJournalRecord>): BridgeJournalRecord =>
+	({ id: "0x", direction: "deposit", isPrivate: false, amount: "1000000000000000000", createdAt: 1, ...over }) as BridgeJournalRecord
 
 describe("BridgeJournal", () => {
 	beforeEach(() => {
@@ -93,5 +105,41 @@ describe("BridgeJournal", () => {
 				link: expect.objectContaining({ href: `https://sepolia.etherscan.io/tx/${GOOD_HASH}` }),
 			}),
 		)
+	})
+
+	it("kind='fee-juice' lists ONLY fuel records (the Fuel tab's own bridges)", () => {
+		visibleRecords.value = [recOf({ id: "0xtok", assetKind: "bridge-token" }), recOf({ id: "0xfuel", assetKind: "fee-juice" })]
+		const w = mount(BridgeJournal, { props: { kind: "fee-juice" }, global: { stubs: { BridgeJournalCard: true } } })
+		const cards = w.findAllComponents(BridgeJournalCard)
+		expect(cards).toHaveLength(1)
+		expect(cards[0].props("record")).toMatchObject({ id: "0xfuel" })
+	})
+
+	it("toasts=false suppresses the completion toast (the Fuel tab's list-only mount — single toast owner)", async () => {
+		mount(BridgeJournal, { props: { toasts: false }, global: { stubs: { BridgeJournalCard: true } } })
+		lastCompleted.value = {
+			id: "0xc",
+			direction: "deposit",
+			amount: "15000000000000000000",
+			isPrivate: false,
+			assetKind: "fee-juice",
+			txHash: GOOD_HASH,
+		}
+		await nextTick()
+		expect(push).not.toHaveBeenCalled()
+	})
+
+	it("a fee-juice completion toasts as Fee Juice, not the token (private → Private FJ)", async () => {
+		mount(BridgeJournal, { global: { stubs: { BridgeJournalCard: true } } })
+		lastCompleted.value = {
+			id: "0xfj",
+			direction: "deposit",
+			amount: "15000000000000000000",
+			isPrivate: true,
+			assetKind: "fee-juice",
+			txHash: GOOD_HASH,
+		}
+		await nextTick()
+		expect(push).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining("Fueled Aztec with 15.00 Private FJ") }))
 	})
 })

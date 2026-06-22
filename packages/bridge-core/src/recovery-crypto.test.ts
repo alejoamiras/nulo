@@ -49,6 +49,25 @@ describe("recovery-crypto", () => {
 		expect(await openSecret(key, b2)).toBe(SECRET)
 	})
 
+	it("envelope round-trips an optional private-fuel salt; a non-string salt is rejected", async () => {
+		const key = await recoveryKeyFromSignature(SIG_A)
+		const blob = await sealDepositEnvelope(key, {
+			secret: SECRET,
+			recipient: "0xrecipient",
+			amount: "1000",
+			sealerL1: "0xsealer",
+			leafIndex: "7",
+			salt: "0x5a17",
+		})
+		expect((await openDepositEnvelope(key, blob)).salt).toBe("0x5a17")
+		// An envelope WITHOUT a salt still opens (back-compat for token deposits).
+		const noSalt = await sealDepositEnvelope(key, { secret: SECRET, recipient: "0xr", amount: "1", sealerL1: "0xs" })
+		expect((await openDepositEnvelope(key, noSalt)).salt).toBeUndefined()
+		// A blob whose salt is a non-string is refused.
+		const bad = await sealSecret(key, JSON.stringify({ v: 2, secret: SECRET, recipient: "0xr", amount: "1", sealerL1: "0xs", salt: 7 }))
+		await expect(openDepositEnvelope(key, bad)).rejects.toThrow(/not a v2 envelope/)
+	})
+
 	it("recoveryKeyMessage is per-record — a different secretHash yields a different message", () => {
 		const base = { chainId: 11155111, portal: "0xPortal", bridge: "0xBridge" }
 		const mA = recoveryKeyMessage({ ...base, secretHashHex: "0xAAAA" })

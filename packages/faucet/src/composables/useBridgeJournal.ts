@@ -4,8 +4,10 @@ import {
 	type DepositJournalRecord,
 	type KV,
 	type WithdrawJournalRecord,
+	assetKindOf,
 	clearLegacyKeys,
 	envelopeMatchesRecord,
+	feeJuiceAddress,
 	loadJournal,
 	openDepositEnvelope,
 	patchRecord as journalPatch,
@@ -19,7 +21,7 @@ import {
 } from "@nulo/bridge-core"
 import { sepolia } from "viem/chains"
 import { computed, ref } from "vue"
-import { BRIDGE, L1_PORTAL } from "@/contracts/bridge-deployments"
+import { BRIDGE, FUEL_PORTAL, L1_PORTAL } from "@/contracts/bridge-deployments"
 import { SYNC_TARGET_MARGIN_BLOCKS } from "@/lib/bridge-steps"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import { dropPhaseClock } from "@/lib/phase-clock"
@@ -88,10 +90,13 @@ export interface JournalEngineDeps {
 	signL1?: (message: string) => Promise<string>
 	connectedL1?: () => string | null
 	connectedAztec?: () => string | null
-	/** Build the claim interaction for a deposit record; returns simulate/send handles. */
+	/** Build the claim interaction for a deposit record; returns simulate/send handles. `envelope` is the
+	 *  private record's UNSEALED authoritative copy (the fee-juice claim treats `envelope.salt` as the
+	 *  recovery source of truth rather than the plaintext journal copy — codex post-impl HIGH). */
 	claim?: (
 		rec: DepositJournalRecord,
 		secretHex: string,
+		envelope?: DepositEnvelopeV2,
 	) => Promise<{
 		simulate: () => Promise<unknown>
 		send: () => Promise<{ txHash: string }>
@@ -276,11 +281,18 @@ export const clearDone = discard
 
 /** Deployment binding: a record from another deployment never resumes (stale-deployment). */
 export function deploymentMatches(rec: BridgeJournalRecord): boolean {
-	return (
-		rec.chainId === sepolia.id &&
-		rec.portal?.toLowerCase() === L1_PORTAL.toLowerCase() &&
-		rec.bridge?.toLowerCase() === BRIDGE.toString().toLowerCase()
-	)
+	if (rec.chainId !== sepolia.id) return false
+	// Fee-juice (Fuel) records bind to the canonical FeeJuicePortal + the L2 Fee Juice address — NOT the
+	// token bridge. Same chain, different deployment edge: without this branch a Fuel record would be
+	// wrongly quarantined as stale-deployment (plan §5 DQ2).
+	if (assetKindOf(rec) === "fee-juice") {
+		return (
+			!!FUEL_PORTAL &&
+			rec.portal?.toLowerCase() === FUEL_PORTAL.toLowerCase() &&
+			rec.bridge?.toLowerCase() === feeJuiceAddress.toLowerCase()
+		)
+	}
+	return rec.portal?.toLowerCase() === L1_PORTAL.toLowerCase() && rec.bridge?.toLowerCase() === BRIDGE.toString().toLowerCase()
 }
 
 function guardDeployment(rec: BridgeJournalRecord): boolean {
@@ -383,12 +395,14 @@ const RECEIPT_POLLS_PER_ROUND = 45 // ×4s ≈ one ~3-minute round inside the lo
 const RECEIPT_MAX_ROUNDS = 10 // ≈30 min soft cap; after it the card re-arms RETRY, never a dead-end.
 const INTER_ROUND_MS = 100
 
-/** The most recent verified completion - P2's toast hook. */
+/** The most recent verified completion - P2's toast hook. `assetKind` lets the (always-mounted, bridge-tab)
+ *  toast format a fee-juice completion as Fee Juice rather than mislabelling it as the token (codex MEDIUM). */
 export const lastCompleted = ref<{
 	id: string
 	direction: "deposit" | "withdraw"
 	amount: string
 	isPrivate: boolean
+	assetKind: "bridge-token" | "fee-juice"
 	txHash?: string
 } | null>(null)
 
@@ -444,7 +458,14 @@ function completeDeposit(rec: DepositJournalRecord | undefined): void {
 	setRuntime(rec.id, { attention: undefined, note: undefined })
 	secretCache.delete(rec.id)
 	receiptRounds.delete(rec.id)
-	lastCompleted.value = { id: rec.id, direction: "deposit", amount: rec.amount, isPrivate: rec.isPrivate, txHash: rec.claimTxHash }
+	lastCompleted.value = {
+		id: rec.id,
+		direction: "deposit",
+		amount: rec.amount,
+		isPrivate: rec.isPrivate,
+		assetKind: assetKindOf(rec),
+		txHash: rec.claimTxHash,
+	}
 	// Completed cards STAY (✓ + the ✕ dismiss) - auto-hide was provenance-scoped and read as
 	// "sometimes my card vanishes". The foreground receipt path hides via hideCompleted instead.
 	localClaimProvenance.delete(rec.id)
@@ -458,7 +479,14 @@ function completeWithdraw(rec: WithdrawJournalRecord | undefined, consumeTxHash?
 	patchRecord(rec.id, { completedAt: deps.now() })
 	setRuntime(rec.id, { attention: undefined, note: undefined })
 	receiptRounds.delete(rec.id)
-	lastCompleted.value = { id: rec.id, direction: "withdraw", amount: rec.amount, isPrivate: rec.isPrivate, txHash: consumeTxHash }
+	lastCompleted.value = {
+		id: rec.id,
+		direction: "withdraw",
+		amount: rec.amount,
+		isPrivate: rec.isPrivate,
+		assetKind: assetKindOf(rec),
+		txHash: consumeTxHash,
+	}
 	log("withdraw complete", rec.id)
 }
 
@@ -527,6 +555,9 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 		}
 
 		let secretHex: string
+		// The private record's unsealed authoritative copy — forwarded to the claim dep so the fee-juice
+		// path reads `envelope.salt` (source of truth) over the plaintext journal copy (codex post-impl HIGH).
+		let resolvedEnvelope: DepositEnvelopeV2 | undefined
 		if (rec.isPrivate) {
 			// Only narrate UNSEALING when a real signature is needed (a rediscovered record). A fresh
 			// in-session deposit has its secret cached, so the unseal is instant - setting "unsealing"
@@ -537,6 +568,7 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 			const resolved = await resolvePrivateSecret(rec)
 			if (!resolved) return
 			secretHex = resolved.secretHex
+			resolvedEnvelope = resolved.envelope
 		} else {
 			if (!rec.secret) {
 				setRuntime(id, { attention: "stale", note: "This record has no claim secret - it cannot be claimed." })
@@ -548,7 +580,7 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 
 		const fresh = records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
 		if (!fresh) return // Cross-tab discard while the unseal signature waited.
-		const interaction = await deps.claim(fresh, secretHex)
+		const interaction = await deps.claim(fresh, secretHex, resolvedEnvelope)
 
 		// Sync phase, two legs sharing one iteration budget:
 		// 1. Block countdown (display pacing): the deposit-time L2 snapshot + a fixed margin gives a

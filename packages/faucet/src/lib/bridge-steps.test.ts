@@ -40,6 +40,38 @@ function wd(over: Partial<WithdrawJournalRecord> = {}): WithdrawJournalRecord {
 const states = (rec: DepositJournalRecord | WithdrawJournalRecord, rt: RecordRuntime = {}) =>
 	Object.fromEntries(stepperPhases(rec, rt).map((p) => [p.key, p.state]))
 
+describe("stepperPhases - fuel (fee-juice) records", () => {
+	const fuelRec = (over: Partial<DepositJournalRecord> = {}): DepositJournalRecord =>
+		dep({ schema: 2, assetKind: "fee-juice", fuel: { amount: "1", secret: "0x1", secretHashHex: "0x2", minOutput: "0" }, ...over })
+
+	it("a public fuel record uses APPROVE phases (not the swap SIGN), despite carrying a fuel block", () => {
+		expect(stepperPhases(fuelRec({ isPrivate: false }), {}).map((p) => p.key)).toEqual([
+			"approve",
+			"deposit",
+			"sync",
+			"claim",
+			"confirm",
+		])
+	})
+
+	it("a private fuel record SEALs the salt then APPROVEs (no Permit2 SIGN)", () => {
+		expect(stepperPhases(fuelRec({ isPrivate: true }), {}).map((p) => p.key)).toEqual([
+			"seal",
+			"approve",
+			"deposit",
+			"sync",
+			"claim",
+			"confirm",
+		])
+	})
+
+	it("claim is labelled CLAIM GAS and deposit is plain DEPOSIT (gas-only, no token/swap leg)", () => {
+		const phases = stepperPhases(fuelRec({ isPrivate: false }), {})
+		expect(phases.find((p) => p.key === "claim")?.label).toBe("CLAIM GAS")
+		expect(phases.find((p) => p.key === "deposit")?.label).toBe("DEPOSIT")
+	})
+})
+
 describe("stepperPhases - deposit matrix", () => {
 	it("private fresh record mid-seal: SEAL active, the rest pending", () => {
 		expect(states(dep(), { step: "sealing" })).toEqual({
