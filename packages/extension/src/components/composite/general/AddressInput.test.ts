@@ -4,10 +4,9 @@ import { defineComponent } from "vue"
 import AddressInput from "./AddressInput.vue"
 
 const focusSpy = vi.fn()
-const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r(null)))
 
-// Stub the Input with a REAL inner <input> (AddressInput finds it via $el.querySelector)
-// and an exposed focus() (mirrors the real Input's defineExpose).
+// Stub the Input with a REAL inner <input> (AddressInput attaches native listeners
+// to it via $el.querySelector) and an exposed focus() (mirrors the real Input).
 const STUBS = {
 	Input: defineComponent({
 		name: "Input",
@@ -30,31 +29,42 @@ describe("composite/AddressInput", () => {
 		expect(mountInput().find(".input-stub").exists()).toBe(true)
 	})
 
-	test("on blur, scrolls the native input back to the start (shows the address start at rest)", async () => {
+	test("blurred: scrolling the input snaps it back to the start (can't be dragged at rest)", async () => {
 		const w = mountInput()
-		const input = w.find("input").element as HTMLInputElement
-		input.scrollLeft = 99
-		await w.find("input").trigger("blur")
-		await nextFrame()
-		expect(input.scrollLeft).toBe(0)
+		const input = w.find("input")
+		const el = input.element as HTMLInputElement
+		el.scrollLeft = 99
+		await input.trigger("scroll")
+		expect(el.scrollLeft).toBe(0)
 	})
 
-	test("focusout also scrolls back to the start (native, reliable path)", async () => {
+	test("focused: scrolling is allowed (not reset) while editing", async () => {
 		const w = mountInput()
-		const input = w.find("input").element as HTMLInputElement
-		input.scrollLeft = 77
-		await w.find("input").trigger("focusout")
-		await nextFrame()
-		expect(input.scrollLeft).toBe(0)
+		const input = w.find("input")
+		const el = input.element as HTMLInputElement
+		await input.trigger("focus")
+		el.scrollLeft = 99
+		await input.trigger("scroll")
+		expect(el.scrollLeft).toBe(99)
 	})
 
-	test("on blur, still emits 'blur' to the parent", async () => {
+	test("on blur, the input is pinned back to the start", async () => {
+		const w = mountInput()
+		const input = w.find("input")
+		const el = input.element as HTMLInputElement
+		await input.trigger("focus")
+		el.scrollLeft = 50
+		await input.trigger("blur")
+		expect(el.scrollLeft).toBe(0)
+	})
+
+	test("forwards 'blur' to the parent", async () => {
 		const w = mountInput()
 		await w.find("input").trigger("blur")
 		expect(w.emitted("blur")).toBeTruthy()
 	})
 
-	test("on focus, emits 'focus' to the parent", async () => {
+	test("forwards 'focus' to the parent", async () => {
 		const w = mountInput()
 		await w.find("input").trigger("focus")
 		expect(w.emitted("focus")).toBeTruthy()

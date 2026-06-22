@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Send recipient card — style options</title>
+<style>
+  :root {
+    --app-bg: #0a0908;
+    --surface-low: #1d1b1a;
+    --surface-high: #2b2a28;
+    --surface-highest: #363433;
+    --outline: #4a463f;
+    --border: #231f1c;
+    --accent: #f8f1e7;
+    --txt-primary: #f5f0e6;
+    --txt-secondary: #999187;
+    --txt-tertiary: rgba(245, 240, 230, 0.30);
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+    --headline: "Space Grotesk", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--app-bg);
+    color: var(--txt-primary);
+    font-family: var(--headline);
+    margin: 0;
+    padding: 32px 20px 80px;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-size: 18px; font-weight: 700; letter-spacing: 0.02em; }
+  p.lead { color: var(--txt-secondary); font-size: 13px; max-width: 540px; line-height: 1.5; }
+  .frame { max-width: 380px; margin: 0 auto; }
+  .opt { margin: 26px 0; }
+  .opt > .tag {
+    font-family: var(--headline);
+    font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 4px;
+  }
+  .opt > .desc { color: var(--txt-secondary); font-size: 12px; margin: 0 0 10px; line-height: 1.4; }
+  .label {
+    font-family: var(--headline); font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--txt-secondary); margin-bottom: 8px;
+  }
+
+  /* shared card content */
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .avatar {
+    width: 36px; height: 36px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--surface-high); color: var(--txt-primary);
+    font-family: var(--headline); font-weight: 700; font-size: 14px;
+  }
+  .name { font-family: var(--headline); font-weight: 600; font-size: 14px; color: var(--txt-primary); line-height: 1.2; }
+  .addr { font-family: var(--mono); font-size: 12px; color: var(--txt-tertiary); margin-top: 2px; }
+  .actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+  .iconbtn { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; }
+  .iconbtn svg { width: 17px; height: 17px; stroke: var(--txt-secondary); fill: none; stroke-width: 1.6; }
+
+  /* base card */
+  .card { padding: 12px 14px; }
+
+  /* ── variants ── */
+  .v-a { border: 2px solid var(--outline); background: var(--surface-low); }           /* current */
+  .v-b { border: 1px solid var(--border); background: var(--surface-low); }            /* tight, recessed border */
+  .v-c { border: none; background: var(--surface-high); }                              /* filled block, no border */
+  .v-d { border: none; background: transparent; border-bottom: 1px solid var(--border); padding-left: 0; padding-right: 0; } /* field-style underline */
+  .v-e { border: 1px solid var(--outline); background: var(--surface-high); }          /* crisp thin outline + raised fill */
+</style>
+</head>
+<body>
+  <div class="frame">
+    <h1>Send recipient card — pick a style</h1>
+    <p class="lead">Same content + the grey square avatar (settled). Only the card's border / fill / line-width
+    varies. Reply with the letter you want (or mix — e.g. "C but 1px outline"). Dark theme, real tokens.</p>
+
+    <div class="label">Recipient address</div>
+
+    <div class="opt">
+      <div class="tag">A — current</div>
+      <p class="desc">2px outline (#4a463f) on surface-low. The one that feels "loose".</p>
+      <div class="card v-a">
+        <div class="row">
+          <div class="identity">
+            <div class="avatar">AS</div>
+            <div><div class="name">Asd</div><div class="addr">0x129201…890d6121</div></div>
+          </div>
+          <div class="actions">
+            <span class="iconbtn"><svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
+            <span class="iconbtn"><svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="opt">
+      <div class="tag">B — tight border</div>
+      <p class="desc">1px in the darker border token (#231f1c) — the edge recedes, less "loose".</p>
+      <div class="card v-b">
+        <div class="row">
+          <div class="identity">
+            <div class="avatar">AS</div>
+            <div><div class="name">Asd</div><div class="addr">0x129201…890d6121</div></div>
+          </div>
+          <div class="actions">
+            <span class="iconbtn"><svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
+            <span class="iconbtn"><svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="opt">
+      <div class="tag">C — filled, no border</div>
+      <p class="desc">No border at all; a solid raised block (surface-high). Most brutalist / flat.</p>
+      <div class="card v-c">
+        <div class="row">
+          <div class="identity">
+            <div class="avatar" style="background:var(--surface-highest)">AS</div>
+            <div><div class="name">Asd</div><div class="addr">0x129201…890d6121</div></div>
+          </div>
+          <div class="actions">
+            <span class="iconbtn"><svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
+            <span class="iconbtn"><svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="opt">
+      <div class="tag">D — field underline</div>
+      <p class="desc">No box; a single bottom rule, matching the input fields' brutalist underline.</p>
+      <div class="card v-d">
+        <div class="row">
+          <div class="identity">
+            <div class="avatar">AS</div>
+            <div><div class="name">Asd</div><div class="addr">0x129201…890d6121</div></div>
+          </div>
+          <div class="actions">
+            <span class="iconbtn"><svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
+            <span class="iconbtn"><svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="opt">
+      <div class="tag">E — crisp outline + raised fill</div>
+      <p class="desc">1px outline (#4a463f) on surface-high — thin edge + a slightly raised body.</p>
+      <div class="card v-e">
+        <div class="row">
+          <div class="identity">
+            <div class="avatar" style="background:var(--surface-highest)">AS</div>
+            <div><div class="name">Asd</div><div class="addr">0x129201…890d6121</div></div>
+          </div>
+          <div class="actions">
+            <span class="iconbtn"><svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
+            <span class="iconbtn"><svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

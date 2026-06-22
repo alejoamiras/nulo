@@ -13,7 +13,6 @@
  */
 import { trimAddress } from "@/utils/string"
 import { isValidHex } from "@/utils/string"
-import { useToast } from "@/composables/toast"
 
 const props = defineProps({
 	candidates: { type: Array, default: () => [] },
@@ -24,8 +23,6 @@ const selectedContact = defineModel("selectedContact", { default: null })
 
 const isSearchInputFocused = ref(false)
 const justCleared = ref(false)
-
-const { openToast } = useToast()
 
 const filteredContacts = computed(() => {
 	if (!searchTerm.value) return []
@@ -49,9 +46,6 @@ const handleChange = () => {
 	justCleared.value = true
 	isSearchInputFocused.value = true
 }
-
-const onCopied = () => openToast({ label: "Address copied", icon: "copy" }, 2_000)
-const onCopyError = () => openToast({ label: "Couldn't copy — select the address to copy it", icon: "warning", color: "red" }, 2_000)
 
 const handleSearchBlur = () => {
 	if (searchTerm.value !== selectedContact.value?.address) {
@@ -97,8 +91,6 @@ onBeforeUnmount(() => {
 				:name="selectedContact.name"
 				:address="selectedContact.address"
 				@change="handleChange"
-				@copied="onCopied"
-				@copy-error="onCopyError"
 			/>
 
 			<template v-else>
