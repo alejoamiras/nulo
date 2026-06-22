@@ -94,7 +94,9 @@ A swap is allowed ONLY if **all** hold:
 **Files (examples; derive full list per rubric):** `WalletPanel.vue`, `BridgeWalletPanel.vue`, `L1WalletPanel.vue`, `VerificationModal.vue`, `AppToastRegion.vue`. Keep `Button`/`AddressDisplay`/`Spinner`/`EmojiGrid`/`Toast` as explicit imports; `VerificationModal`/`EmojiGrid` testids are e2e **security** selectors — do not touch them.
 **Validation gate:** T + L + U + B. Pass: `WalletPanel.test.ts`, `VerificationModal.test.ts`, **the two new panel tests** green. Layers: typecheck/lint · unit · build.
 
-### Phase 3 — Journal / stepper / receipt seam (+ execute the Badge/label inventory)
+### Phase 3 — Journal / stepper / receipt seam (+ execute the Badge/label inventory) ✅ DONE
+
+> Gate green: typecheck 0 · test 403/403 · build ✓ · e2e 14/14 · lint 0. 4 Flex swaps (BridgeJournal `.journal`/`.cards`/`.head-row` + BridgeReceipt `.links`). **Pills (`Tag`/`Badge`) tested → both NON-FITS** (faucet pills are `10px/600` bordered-transparent, denser than both primitives; `.tag.private` accent maps to no tone). Stepper/rail/empty-state/ledger kept local. See `lessons/phase-3.md`.
 
 **Goal:** the shared bridge-progress surfaces — the seam where the *opportunistic* primitive evaluation lives.
 **Files (examples):** `BridgeJournal.vue` (`.cards`→`<Flex direction=column gap=10>`, `.head-row`→`<Flex justify=between gap=12>`; empty-state **stays local** — LoadingState non-fit), `BridgeJournalCard.vue` (evaluate `.tag` PRIVATE/PUBLIC → `<Tag>` — primary pill candidate), `BridgeStepper.vue`, `BridgePhaseRail.vue` (evaluate `.badge` SKIPPED → `<Badge>` only if a pixel check wins; `Tag` first), `BridgeReceipt.vue` (`.links` is a class-preserving candidate at best — keep `.links` on the `<Flex>` so `.links a` still matches; low gain → optional/skippable).

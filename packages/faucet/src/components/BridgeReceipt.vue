@@ -105,7 +105,7 @@ const links = computed(() => {
 			<div class="note">Ready to power your next {{ snapshot.isPrivate ? "private " : "" }}transaction</div>
 		</div>
 
-		<div v-if="links.length" class="links">
+		<Flex v-if="links.length" gap="12" class="links">
 			<a
 				v-for="link in links"
 				:key="link.href"
@@ -114,7 +114,7 @@ const links = computed(() => {
 				rel="noopener noreferrer"
 				:data-testid="TESTIDS.receiptLink"
 			>{{ link.label }}</a>
-		</div>
+		</Flex>
 		<button type="button" class="action" :data-testid="TESTIDS.receiptNewBridge" @click="emit('new-bridge')">NEW BRIDGE</button>
 	</section>
 </template>
@@ -182,11 +182,6 @@ const links = computed(() => {
 	color: var(--txt-secondary);
 	font: 500 12px/1.4 var(--font-mono);
 	margin-top: 4px;
-}
-
-.links {
-	display: flex;
-	gap: 12px;
 }
 
 .links a {
