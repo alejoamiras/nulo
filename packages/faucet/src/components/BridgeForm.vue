@@ -545,7 +545,6 @@ function fmt(b: bigint | null): string {
 	font: 500 12px/1.5 var(--font-mono);
 }
 
-
 .flabel {
 	font: 600 11px/1 var(--font-mono);
 	color: var(--txt-secondary);
