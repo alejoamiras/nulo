@@ -3,11 +3,11 @@ import { mount } from "@vue/test-utils"
 import { defineComponent } from "vue"
 import AddressInput from "./AddressInput.vue"
 
-// Mutable spies the Input stub exposes (mirroring the real Input's
-// `defineExpose({ inputEl, focus })`), reset before each test.
-let inputElSpy: { scrollLeft: number } | null
-let focusSpy: ReturnType<typeof vi.fn>
+const focusSpy = vi.fn()
+const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r(null)))
 
+// Stub the Input with a REAL inner <input> (AddressInput finds it via $el.querySelector)
+// and an exposed focus() (mirrors the real Input's defineExpose).
 const STUBS = {
 	Input: defineComponent({
 		name: "Input",
@@ -15,28 +15,37 @@ const STUBS = {
 		props: ["modelValue", "placeholder", "autofocus"],
 		emits: ["blur", "focus", "update:modelValue"],
 		setup(_, { expose }) {
-			expose({ inputEl: inputElSpy, focus: focusSpy })
+			expose({ focus: focusSpy })
 		},
 	}),
 }
 
 const mountInput = (props: Record<string, unknown> = {}, slots: Record<string, string> = {}) =>
-	mount(AddressInput, { props, slots, global: { stubs: STUBS } })
+	mount(AddressInput, { props, slots, attachTo: document.body, global: { stubs: STUBS } })
 
-beforeEach(() => {
-	inputElSpy = { scrollLeft: 99 }
-	focusSpy = vi.fn()
-})
+beforeEach(() => focusSpy.mockClear())
 
 describe("composite/AddressInput", () => {
 	test("renders the underlying Input", () => {
 		expect(mountInput().find(".input-stub").exists()).toBe(true)
 	})
 
-	test("on blur, resets the input's scrollLeft to 0 (shows the address start at rest)", async () => {
+	test("on blur, scrolls the native input back to the start (shows the address start at rest)", async () => {
 		const w = mountInput()
+		const input = w.find("input").element as HTMLInputElement
+		input.scrollLeft = 99
 		await w.find("input").trigger("blur")
-		expect(inputElSpy?.scrollLeft).toBe(0)
+		await nextFrame()
+		expect(input.scrollLeft).toBe(0)
+	})
+
+	test("focusout also scrolls back to the start (native, reliable path)", async () => {
+		const w = mountInput()
+		const input = w.find("input").element as HTMLInputElement
+		input.scrollLeft = 77
+		await w.find("input").trigger("focusout")
+		await nextFrame()
+		expect(input.scrollLeft).toBe(0)
 	})
 
 	test("on blur, still emits 'blur' to the parent", async () => {
@@ -65,13 +74,6 @@ describe("composite/AddressInput", () => {
 	test("forwards the #suffix slot to the Input", () => {
 		const w = mountInput({}, { suffix: '<i data-testid="my-suffix" />' })
 		expect(w.find('[data-testid="my-suffix"]').exists()).toBe(true)
-	})
-
-	test("blur with no inputEl does not crash and still emits 'blur'", async () => {
-		inputElSpy = null
-		const w = mountInput()
-		await w.find("input").trigger("blur")
-		expect(w.emitted("blur")).toBeTruthy()
 	})
 
 	test("exposes focus() that calls the inner Input's focus", () => {

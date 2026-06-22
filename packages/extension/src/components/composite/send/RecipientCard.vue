@@ -24,7 +24,9 @@ let copiedTimer: ReturnType<typeof setTimeout> | undefined
 const masked = computed(() => {
 	const a = props.address ?? ""
 	if (a.length <= 16) return a
-	return `${a.slice(0, 8)} *** ${a.slice(-8)}`
+	// Single ellipsis glyph (baseline-aligned) — matches how addresses are truncated
+	// across the app; the spaced `***` rendered misaligned in the mono font.
+	return `${a.slice(0, 8)}…${a.slice(-8)}`
 })
 
 /** Handlers */

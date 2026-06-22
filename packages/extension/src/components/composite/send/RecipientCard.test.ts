@@ -14,7 +14,7 @@ const STUBS = {
 
 // 66-char address: 0x + 64 hex. slice(0,8)="0x111111", slice(-8)="abcd1234".
 const FULL = `0x${"1".repeat(56)}abcd1234`
-const MASKED = "0x111111 *** abcd1234"
+const MASKED = "0x111111…abcd1234"
 
 const mountCard = (props: Record<string, unknown> = {}) =>
 	mount(RecipientCard, { props: { address: FULL, ...props }, global: { stubs: STUBS } })
