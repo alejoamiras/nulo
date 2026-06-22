@@ -27,12 +27,16 @@
   exercises `export/full.vue`, untouched here. Smoke is advisory.
 - `grep 'tabindex="[1-9]'` → none remain anywhere; `grep 'icon="vault"|name="vault"'` → none in source.
 
-## Audits
+## Audits + review
 - **Pre-impl dual audit** (`audit-codex.md` + `audit-opus.md`): both `reject` → every blocking finding folded.
 - **Final fresh-context codex pass**: `reject` (caught a div-tabindex regression the first revision introduced) → folded.
-- **Post-impl** (`audit-postimpl.md`): codex `xhigh` stalled service-side (network); documented self-audit
-  substitute → **no high/critical, no medium**; 3 low follow-ups (visibility-button DRY, `justCleared`
-  reset, avatar palette dark-theme note). Reconcile with codex when the service recovers.
+- **Post-impl codex `xhigh`** (`audit-postimpl.md`): completed after a mid-run network stall → **no high/critical**.
+  2 MED + 3 LOW. MED disabled-dropdown + LOW clipboard-error FIXED (`733c152`, with tests); MED eye-a11y is
+  an owner-accepted tradeoff (user chose field→field); avatar-color LOW acknowledged. A post-fix codex
+  re-audit on the final state confirms the fixes.
+- **`/code-review max --fix`**: reviewed the full branch diff (44 files) through a quality lens — converged
+  with codex on the same findings (already fixed in `733c152`); no additional fixes. Code adheres to the
+  CLAUDE.md conventions (no milestone tags / debug / WHAT-comments / dead code; lint + 2548 tests enforce).
 
 ## Key decision (user, informed)
 P3 Send recipient = masked **+ OPTIONAL reveal** (not forced). The full fork (full-always / mandatory-reveal
