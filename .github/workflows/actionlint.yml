@@ -33,6 +33,8 @@ jobs:
             shell:
               - 'packages/extension/scripts/**/*.sh'
               - 'packages/extension/scripts/**/*.bash'
+              - 'scripts/**/*.sh'
+              - 'scripts/**/*.bash'
               - '.githooks/**'
       - name: Override for manual dispatch
         if: github.event_name == 'workflow_dispatch'
@@ -69,7 +71,7 @@ jobs:
       - name: Run shellcheck
         run: |
           shopt -s globstar nullglob
-          mapfile -t FILES < <(find .githooks packages/extension/scripts -type f \( -name '*.sh' -o -name '*.bash' \) 2>/dev/null)
+          mapfile -t FILES < <(find .githooks packages/extension/scripts scripts -type f \( -name '*.sh' -o -name '*.bash' \) 2>/dev/null)
           if [ ${#FILES[@]} -eq 0 ]; then
             echo "No shell files found to lint."
             exit 0

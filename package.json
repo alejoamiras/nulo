@@ -21,6 +21,7 @@
     "e2e:agent": "bash packages/extension/scripts/e2e/agent.sh",
     "lint": "biome check",
     "lint:fix": "biome check --fix",
+    "lint:actions": "actionlint",
     "format": "biome format --write",
     "check": "biome check",
     "typecheck": "vue-tsc --project packages/extension/tsconfig.json --noEmit",
