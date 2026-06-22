@@ -9,13 +9,13 @@ import { TESTIDS } from "@/lib/testids"
 
 <template>
 	<div class="fuel-view" :data-testid="TESTIDS.fuelView">
-		<header class="hero">
+		<Flex tag="header" direction="column" gap="16" class="hero">
 			<h1>FUEL</h1>
 			<p class="sub">
 				Bridge your $AZTEC into Aztec Fee Juice, public or private gas, no swap. Testnet only.
 				Connect both wallets, choose how the gas arrives, and bridge. In-flight bridges persist in this browser.
 			</p>
-		</header>
+		</Flex>
 
 		<section class="wallets">
 			<L1WalletPanel />
@@ -36,9 +36,6 @@ import { TESTIDS } from "@/lib/testids"
 }
 
 .hero {
-	display: flex;
-	flex-direction: column;
-	gap: 16px;
 	margin-bottom: 4px;
 }
 

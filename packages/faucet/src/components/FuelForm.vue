@@ -92,7 +92,7 @@ function fmt(b: bigint | null): string {
 				<span class="balance" :data-testid="TESTIDS.fuelBalanceL1">Balance: {{ fmt(feeAsset.balance.value) }} $AZTEC</span>
 			</div>
 
-			<div class="amount-row">
+			<Flex align="center" gap="8">
 				<input
 					v-model="amount"
 					class="amount"
@@ -106,7 +106,7 @@ function fmt(b: bigint | null): string {
 					@input="amountTouched = true"
 				/>
 				<span class="unit">$AZTEC</span>
-			</div>
+			</Flex>
 			<p v-if="amountError" class="err-msg" :data-testid="TESTIDS.fuelFormError">{{ amountError }}</p>
 
 			<div class="flabel">How it arrives</div>
@@ -175,12 +175,6 @@ function fmt(b: bigint | null): string {
 .panel .balance {
 	font: 500 12px/1.4 var(--font-mono);
 	color: var(--txt-secondary);
-}
-
-.amount-row {
-	display: flex;
-	align-items: center;
-	gap: 8px;
 }
 
 .amount {

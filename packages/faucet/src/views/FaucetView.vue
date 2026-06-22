@@ -20,14 +20,14 @@ const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.from
 </script>
 
 <template>
-	<div class="faucet-view">
-		<header class="hero">
+	<Flex direction="column" gap="32">
+		<Flex tag="header" direction="column" gap="16" class="hero">
 			<h1>DRIP TEST ASSETS</h1>
 			<p class="sub">
 				Alpha-testnet only. Connect an Aztec wallet and mint fixed NULO or OLUN into a public or
 				private balance. Internal faucet. No real value.
 			</p>
-		</header>
+		</Flex>
 
 		<section class="wallets">
 			<WalletPanel />
@@ -49,20 +49,11 @@ const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.from
 				:account="status === 'connected' && accountAddress ? accountAddress : undefined"
 			/>
 		</section>
-	</div>
+	</Flex>
 </template>
 
 <style scoped>
-.faucet-view {
-	display: flex;
-	flex-direction: column;
-	gap: 32px;
-}
-
 .hero {
-	display: flex;
-	flex-direction: column;
-	gap: 16px;
 	margin-bottom: 8px;
 }
 

@@ -62,10 +62,10 @@ async function onClick() {
 			<span>Setting up the bridge session…</span>
 		</div>
 
-		<div v-else-if="status === 'capability-approval'" class="capability">
+		<Flex v-else-if="status === 'capability-approval'" direction="column" gap="12" align="start" class="capability">
 			<p>Approve the bridge's permissions in your wallet - claim, exit, and balance reads on the bridge contracts.</p>
 			<Button @click="retryCapabilities">Approve permissions</Button>
-		</div>
+		</Flex>
 
 		<div v-else class="connect">
 			<Button :loading="status === 'discovering'" :disabled="status === 'discovering'" :data-testid="TESTIDS.bridgeL2Connect" @click="onClick">
@@ -123,10 +123,6 @@ async function onClick() {
 }
 
 .capability {
-	display: flex;
-	flex-direction: column;
-	gap: 12px;
-	align-items: flex-start;
 	max-width: 56ch;
 }
 

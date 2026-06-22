@@ -1,6 +1,7 @@
 import { fileURLToPath, URL } from "node:url"
 import vue from "@vitejs/plugin-vue"
 import { defineConfig } from "vitest/config"
+import { nuloComponentsPlugin } from "./scripts/components-plugin"
 
 /*
  * Smoke e2e config. Separate from the unit/component config because:
@@ -13,7 +14,7 @@ import { defineConfig } from "vitest/config"
  *      config keeps the fast loop fast.
  */
 export default defineConfig({
-	plugins: [vue()],
+	plugins: [vue(), nuloComponentsPlugin({ dts: false })],
 	resolve: {
 		alias: [{ find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) }],
 	},

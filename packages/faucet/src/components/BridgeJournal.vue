@@ -85,8 +85,8 @@ watch(
 </script>
 
 <template>
-	<section class="journal" :data-testid="TESTIDS.journal">
-		<header class="head-row">
+	<Flex tag="section" direction="column" gap="14" class="journal" :data-testid="TESTIDS.journal">
+		<Flex tag="header" align="center" justify="between" gap="12">
 			<h3>{{ props.title }}</h3>
 			<button
 				type="button"
@@ -106,7 +106,7 @@ watch(
 				:data-testid="TESTIDS.journalRestoreInput"
 				@change="onRestorePick"
 			/>
-		</header>
+		</Flex>
 		<div v-if="sorted.length === 0" class="empty-state" :data-testid="TESTIDS.journalEmpty">
 			<span class="empty-headline">NOTHING PENDING YET</span>
 			<span class="empty-sub">
@@ -120,38 +120,19 @@ watch(
 				a saved bridge from its recovery file.
 			</span>
 		</div>
-		<div v-else class="cards">
+		<Flex v-else direction="column" gap="10">
 			<BridgeJournalCard v-for="rec in sorted" :key="rec.id" :record="rec" @backup="onBackup" />
-		</div>
-	</section>
+		</Flex>
+	</Flex>
 </template>
 
 <style scoped>
-.journal {
-	display: flex;
-	flex-direction: column;
-	gap: 14px;
-}
-
 .journal h3 {
 	font-family: var(--font-headline);
 	font-weight: 600;
 	font-size: 16px;
 	color: var(--txt-primary);
 	margin: 0;
-}
-
-.cards {
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-}
-
-.head-row {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 12px;
 }
 
 /* The backup button's sibling: same white-block treatment, inverse on hover. */
