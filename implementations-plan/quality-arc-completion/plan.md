@@ -24,8 +24,13 @@ All 8 in-scope `/harden quality` findings implemented behavior-preserving, valid
 | Q9 transport readiness | `5b5f34e` | 27916092215 | declared `TokenBalanceService` startup deps. Central gate deferred (base-class behaviour change). |
 | Q18 execution tuples | `16c5e6e` | 27916454771 | `processAztecJsPayload` → named `ProcessedAztecJsPayload`; 4 consumers. Big tuples already done by #83. |
 
-### Confidence pass (2 codex audits, `xhigh`, over the integrated diff)
-Both converged on ONE real finding — the Q8 `BalanceView.onBalanceDeleted` ordering regression (fixed `c41a2928`, pinned by `BalanceView.test.ts`). Both cleared everything else, including the highest-risk arcs: Q15 purge lock/emit-order + authz, Q9 startup-dep (no cycle), Q18 feePaymentMethod mapping + error strings, Q6 listener teardown. Sessions: behavior `019eebfa-df96-7db1-8379-1fa22af12688`, adversarial `019eebfa-e322-7281-becf-c1bfbfd2089d`.
+### Confidence pass — 4 audits, 2 model families, all converged
+- **#1 codex behavior** (`019eebfa-df96-7db1-8379-1fa22af12688`) → fix-first: Q8 `BalanceView` regression.
+- **#2 codex adversarial** (`019eebfa-e322-7281-becf-c1bfbfd2089d`) → fix-first: same Q8 regression.
+- **#3 codex gaps** (`019eee12-ecf7-7920-801c-07ec65dac72a`, run AFTER the fix) → **ship**: Q8 fix correct + test non-tautological; no cross-arc interaction hazard (Q9+Q15 / Q6+Q8 / Q18+Q17); Q6/Q8/Q9 deferrals are clean stopping points (Q9 dep IS enforced by `ServiceCollection.start()`).
+- **#4 Claude hostile** (different family, opus, run AFTER the fix) → **ship**: no second bug; independently re-verified Q18 (all 4 consumers read the correct field, no fee-method/gas transposition) + Q15 (all 12 sites byte-identical, delete-before-emit + lock + stop-on-first-rejection preserved) + Q12/Q13/Q17/Q6/Q9.
+
+The ONLY real finding across all four was the Q8 regression (fixed `c41a2928`, pinned by `BalanceView.test.ts`). The Claude pass raised 2 NITs, both dead-path, **not fixed** (no behavior change in real flows): `EditNetworkPopup` dirty-check snapshot-vs-live (diverges only if a network is renamed elsewhere while the modal is open — cosmetic), and `EditEndpointPopup` `rpcUrl ?? ""` (unreachable; `rpcUrl` always required). Codex #3's nice-to-have follow-up (a `ServiceCollection` + `purgeChain` integration test asserting token-balance rows gone) is logged, not blocking.
 
 ### Honest scope note
 Q6/Q8/Q9 shipped the safe sliver of their finding (rest deferred, documented in lessons + the `verified.md` resolution table). Q12/Q13/Q15/Q17/Q18 fully resolved. These are contained dedups — the architectural findings that drive the audit's quality verdict (Q4 `ExecutionService`, Q5, Q10, Q11) are **deferred, never touched**, along with Q19 (authz) and Q23.
