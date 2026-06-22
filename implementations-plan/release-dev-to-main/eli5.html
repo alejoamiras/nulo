@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — release dev → main</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem 4rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 0.3rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.4rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .sub { color: #666; font-size: 0.95rem; margin-top: 0; }
+    .phase { margin: 1.1rem 0; padding: 0.9rem 1.2rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .irr { border-left-color: #c2261b; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    .big { background: #fdeeec; padding: 0.9rem 1.15rem; border-left: 3px solid #c2261b; border-radius: 0 4px 4px 0; margin: 1.2rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .tag { display:inline-block; font-size:0.72rem; background:#c2261b; color:#fff; border-radius:3px; padding:0.05rem 0.4rem; vertical-align:middle; margin-left:0.3rem; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.9rem; }
+    th, td { border: 1px solid #e6e6ea; padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }
+    th { background: #f6f6f6; }
+  </style>
+</head>
+<body>
+  <h1>Release dev → main</h1>
+  <p class="sub">/blueprint <strong>deep</strong> · execute-only runbook · awaiting your approval</p>
+
+  <p>Everything that's been piling up on the <code>dev</code> branch goes out to the public <code>main</code> branch in one coordinated release — the <strong>browser extension</strong> (a versioned GitHub Release with downloadable zips), the <strong>faucet</strong> site (<code>faucet.nulo.sh</code>), and the <strong>landing</strong> page. The extension is the only thing with a version number; the two sites are just static pages that re-deploy themselves from <code>main</code>. We use the release pipeline <em>exactly as it already exists</em> — no new automation — including its one known 45-second manual hiccup.</p>
+
+  <div class="big">
+    <strong>The single biggest thing to decide: the version number.</strong> This batch contains a <em>breaking</em> change (the Aztec 5.0 protocol upgrade). The release robot reads that and — because of how it's configured — will want to call this release <strong>v1.0.0</strong>, not the <code>0.24</code> you might be expecting. Going to "1.0" publicly says "this is production-ready," while the wallet is still on a <em>test network</em> and a <em>release-candidate</em> protocol. So: do we ship <strong>1.0.0</strong>, or pin it to <strong>0.23.0</strong> (a one-word note in the release PR, no automation change)? All three independent reviewers flagged this as the #1 blocker. <strong>Nothing else proceeds until you decide.</strong>
+  </div>
+
+  <h2>Why this tier (deep)</h2>
+  <p><strong>deep.</strong> Four of six risk dials are HIGH: <strong>irreversibility</strong> (a pushed tag + a public release + two live sites can't be cleanly un-shipped), <strong>blast radius</strong> (every user; first release carrying the breaking protocol fork), <strong>external coupling</strong> (Cloudflare ×2, GitHub Releases, a live test-network gate), and <strong>migration</strong> (the 5.0 fork + version-tracking files). There's no code to write here — so the deep ceremony was spent on three independent reviewers <em>red-teaming the release order, the failure modes, and the rollback path</em>. They converged hard, which both reassures and warns (shared agreement can be a shared blind spot — the final review attacks exactly that).</p>
+
+  <h2>The plan, step by step</h2>
+  <p>Steps marked <span class="tag">irreversible</span> are the ones you (the human) approve before I touch them.</p>
+
+  <div class="phase">
+    <h3>0 · Pre-flight checklist</h3>
+    <p>Before anything moves: confirm <code>dev</code> is green, all four secret keys exist, there's no leftover release PR sitting open, the faucet's test-network contracts are actually deployed, and the version is decided.</p>
+    <p class="muted">Proves itself by: dev's required checks green + 4 secrets listed + no stale release PR + faucet check passes + version/flake-policy decided.</p>
+  </div>
+  <div class="phase irr">
+    <h3>1 · Promote dev → main <span class="tag">irreversible</span></h3>
+    <p>Open and merge the big "promote" PR. The moment <code>main</code> moves, the <strong>faucet auto-deploys</strong> on the new protocol — so this is the point of no return for the faucet. (Undo = a revert PR, which redeploys the old state.)</p>
+    <p class="muted">Proves itself by: the merge commit is on main + faucet.nulo.sh loads, is cross-origin-isolated, and shows the new Fuel tab.</p>
+  </div>
+  <div class="phase irr">
+    <h3>2 · Version check, then merge the Release PR <span class="tag">irreversible</span></h3>
+    <p>The robot opens a "release X.Y.Z" PR. <strong>STOP</strong> and check the number matches your decision (this is where the 1.0.0-vs-0.23.0 call gets enforced) — <em>then</em> merge. Before merging it's totally reversible (just close it).</p>
+    <p class="muted">Proves itself by: the PR's version == the number you chose, across its title, changelog, and package.json.</p>
+  </div>
+  <div class="phase irr">
+    <h3>3 · The known 45-second nudge <span class="tag">irreversible</span></h3>
+    <p>The release tool has a long-standing bug: after merge it stops short and refuses to tag. We do the documented manual nudge — create the tag + an empty release by hand. (Pushing a tag is the irreversible bit; it can be deleted but people may have seen it.)</p>
+    <p class="muted">Proves itself by: the tag points at <em>exactly</em> the release-PR's merge commit (guards against tagging the wrong thing) + the placeholder release exists.</p>
+  </div>
+  <div class="phase">
+    <h3>4 · Build &amp; publish</h3>
+    <p>Kick the build chain by hand: it runs the tests (including a 30-45 min real test-network run), builds Chrome + Firefox, and attaches the zips + checksums + real release notes (overwriting the placeholder).</p>
+    <p class="muted">Proves itself by: the build succeeds + the release shows 3 files (chrome zip, firefox zip, checksums) + real notes, not the placeholder text.</p>
+  </div>
+  <div class="phase">
+    <h3>5 · Refresh the landing page</h3>
+    <p>Because step 4 was a manual kick, the landing didn't auto-refresh. Poke Cloudflare (the deploy hook) <em>after</em> the files exist, so the download button points at the new release. (If poked too early, the landing build fails loudly rather than showing a broken link — safe, but we wait.)</p>
+    <p class="muted">Proves itself by: the landing page references <code>releases/tag/v&lt;version&gt;</code> and shows the new version.</p>
+  </div>
+  <div class="phase">
+    <h3>6 · Confirm all three are actually live</h3>
+    <p>Extension release is "Latest" with working downloads; landing download works; and <strong>you do one real test drip</strong> of NULO/OLUN on the faucet — the single best proof that 5.0 + cross-origin isolation + the contracts all work together in production.</p>
+    <p class="muted">Proves itself by: all three surfaces confirmed + checksums verify + one successful real drip.</p>
+  </div>
+  <div class="phase">
+    <h3>7 · Tidy up afterwards</h3>
+    <p>Sync <code>main</code> back into <code>dev</code>, then fix the version-tracking file (it's stale — currently points at an old <code>0.20.2</code>). Skipping this makes the next pre-release flow reopen old PRs.</p>
+    <p class="muted">Proves itself by: dev + the prerelease-tracking file both show the new version.</p>
+  </div>
+
+  <h2>Human context (the bits worth understanding)</h2>
+  <ul>
+    <li><strong>"Release to latest" = three different things.</strong> The extension gets a real version + GitHub Release. The faucet and landing aren't versioned — they're websites that just redeploy from <code>main</code>. There's only one version in this whole release.</li>
+    <li><strong>The faucet jumps the gun.</strong> It redeploys the instant we promote (step 1), ~30-45 min before the extension's release exists (step 4). For that window the faucet runs the new protocol while the "Latest" extension is still the old one. We either accept + announce it, or pause the faucet's auto-deploy until the end.</li>
+    <li><strong>The landing fails safe.</strong> Its build refuses to publish a download button that points at a release with no zip — so bad ordering produces a loud red build, not a silently broken site.</li>
+    <li><strong>The 45-second nudge is expected.</strong> It's a documented upstream bug, not something going wrong. You chose to accept it rather than fix the automation in this plan.</li>
+  </ul>
+
+  <h2>Open questions (please answer at approval)</h2>
+  <ul>
+    <li><strong>A1 — Version: 1.0.0 or 0.23.0?</strong> The blocker. (1.0.0 = the robot's default; 0.23.0 = a one-line <code>Release-As:</code> note.)</li>
+    <li><strong>A2 — Who drives the irreversible steps?</strong> Default: you click-merge the two PRs in the GitHub UI (auto-signs); I run the mechanical CLI + all verification. Or authorize me to do the CLI merges too.</li>
+    <li><strong>A3 — Landing's Cloudflare wiring:</strong> the address is <code>nulo.sh</code> (already known) — the 30-second dashboard check is that the landing's auto-build + the deploy-hook actually point at the <em>landing</em> project on <code>main</code>. Otherwise step 5 could "verify" the wrong site green.</li>
+    <li><strong>A5 — Are the faucet's 5.0 contracts actually deployed</strong> to the test network (NULO/OLUN <em>and</em> the separate bridge contracts)? It's a manual step, not automated. If not, the faucet loads but every drip fails.</li>
+    <li><strong>A6 — The cross-fork window:</strong> accept + announce it, or pause the faucet's auto-deploy until step 6?</li>
+    <li><strong>A7 — If the 30-45 min test-network run flakes <em>after</em> we've tagged:</strong> block until it's green (just re-run), or allow shipping with that gate turned off? Decide now, not at 2am.</li>
+    <li><strong>A4 / A8 (minor):</strong> the faucet's "install Nulo" button points at a Chrome Web Store page that won't exist (marketplaces are out of scope) — repoint or accept? And confirm who has Cloudflare rollback access.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm <strong>scope</strong>: execute-only (no workflow edits), GitHub-Release-only (no marketplaces), accept the manual unstick.</li>
+      <li>Confirm <strong>tier</strong>: deep.</li>
+      <li><strong>Answer A1 (version)</strong> — this is blocking. And A5, A6, A7 (also blocking for a clean release). A2/A3/A4/A8 can be confirmed inline.</li>
+      <li>Confirm <strong>validation</strong>: the live test-network gate runs + you do the manual smoke of all three surfaces (one real faucet drip).</li>
+      <li>Reply <strong>approve</strong> / <strong>conditional approve (conditions: …)</strong> / <strong>reject (blocking: …)</strong>.</li>
+    </ul>
+    <p class="muted">The two independent audits returned <strong>conditional approve</strong> (condition: decide the version). The final fresh-eyes pass came back a <strong>reject</strong> and caught 5 real gaps (landing wiring, unwired pause/flake choices, a self-contradiction, loose checks, a DAG error) — <strong>all now fixed + repo-verified</strong>. Trail in <a href="plan.md">plan.md → Audit verdicts</a>.</p>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>This plan <em>executes a release</em> and its "done" (3 surfaces live + verified) is fully visible in the transcript, but it has hard human-gated irreversible steps — so it should run <strong>attended</strong>. <code>/goal</code> fits; an unattended <code>/loop</code> does not.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended: /goal</h3>
+      <pre><code>/goal All phases ✓ in implementations-plan/release-dev-to-main/plan.md, each backed by its Validation gate reported passing in the transcript: Phase 0 go/no-go recorded; promote PR merged to main (human); Release PR version reconciled to the A1 decision + merged; v$VERSION tag + GitHub Release created via the documented unstick (tag SHA == merge SHA); release.yml workflow_dispatch run = success with 3 assets (chrome zip, firefox zip, SHASUMS256.txt) + git-cliff body (not the placeholder); landing references releases/tag/v$VERSION; faucet.nulo.sh live + crossOriginIsolated + one real testnet NULO/OLUN drip confirmed by me; prerelease manifest re-baselined to $VERSION on dev. PAUSE for my explicit go-ahead before every IRREVERSIBLE step (promote merge, Release-PR merge, tag push). Hard limits: no workflow/CI edits; no marketplace publish; never force-push or rewrite main history; testnet only.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop (NOT recommended — irreversible steps need a human)</h3>
+    <pre><code>/loop 20m Drive implementations-plan/release-dev-to-main forward, but STOP and ask before any IRREVERSIBLE step (promote merge, Release-PR merge, tag push, prod deploy). Each firing: read plan.md + lessons/; check release.yml run status (gh run list, no --watch); advance only reversible verification work; surface anything needing my decision. Hard limits: no workflow edits, no marketplace publish, testnet only, never act on an irreversible step without my explicit ok.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

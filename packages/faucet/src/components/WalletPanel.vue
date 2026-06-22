@@ -17,7 +17,7 @@ const {
 	disconnect,
 } = useWalletConnection()
 
-const NULO_INSTALL_URL = import.meta.env.VITE_NULO_INSTALL_URL ?? "https://chromewebstore.google.com/"
+const NULO_INSTALL_URL = import.meta.env.VITE_NULO_INSTALL_URL ?? "https://nulo.sh"
 
 const connectLabel = computed(() => {
 	switch (status.value) {
