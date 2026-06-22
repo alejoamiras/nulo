@@ -31,7 +31,7 @@ function onKey(evt: KeyboardEvent) {
 				<p class="body">Match this grid with the wallet window. If it differs, stop.</p>
 				<p class="secondary">This check is for the secure channel. It is not decorative.</p>
 				<EmojiGrid :cells="cells" :test-id="TESTIDS.emojiGrid" :cell-test-id="TESTIDS.emojiCell" class="grid" />
-				<div class="actions">
+				<Flex gap="12" justify="end">
 					<Button
 						variant="primary_outline"
 						:data-testid="TESTIDS.btnVerifyCancel"
@@ -46,7 +46,7 @@ function onKey(evt: KeyboardEvent) {
 					>
 						They match
 					</Button>
-				</div>
+				</Flex>
 			</div>
 		</div>
 	</Teleport>
@@ -96,11 +96,5 @@ function onKey(evt: KeyboardEvent) {
 .grid {
 	margin: 8px 0;
 	align-self: center;
-}
-
-.actions {
-	display: flex;
-	gap: 12px;
-	justify-content: flex-end;
 }
 </style>
