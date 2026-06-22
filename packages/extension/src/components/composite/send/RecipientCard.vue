@@ -37,7 +37,7 @@ const toggleReveal = () => {
 	<Flex direction="column" gap="10" :class="$style.card" data-testid="recipient-card">
 		<Flex align="center" justify="between" gap="10" wide>
 			<Flex align="center" gap="10" :class="$style.identity">
-				<AccountAvatar :name="name" :size="32" />
+				<AccountAvatar :name="name" :size="36" />
 				<Flex direction="column" gap="2" :class="$style.text">
 					<Text size="14" weight="600" color="primary" noWrap :class="$style.name">
 						{{ name || "Address" }}
