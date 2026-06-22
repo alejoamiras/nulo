@@ -275,11 +275,14 @@ export function ensureDepositJournalDeps(): void {
 					const f = rec.fuel
 					if (f) updateRecord(rec.id, { fuel: { ...f, ...patch } })
 				}
-				// V5: pin the private claim's maxFeesPerGas to predicted-worst×1.5 (the FPC asserts
-				// amount >= gasLimits*maxFeesPerGas; the protocol rejects a cap below the live base fee at
-				// inclusion). Computed here — the dispatch owns the node — and rebuilt per claim retry. Public
-				// pays via the Sponsored FPC, which needs no cap. Mirrors the swap private-fuel path below.
-				const claimMaxFees = rec.isPrivate ? (await predictedWorstMinFees(createAztecNodeClient(NODE_URL))).mul(1.5) : undefined
+				// V5: pin the private claim's maxFeesPerGas to predicted-worst — NO extra padding. This is a
+				// SELF-PAY claim: the bridged amount is the whole budget and the FPC asserts
+				// amount >= gasLimits*maxFeesPerGas with no refund, so any fee headroom inflates max_gas_cost
+				// past the bridged amount and reverts "Amount too low to cover gas cost". (The wallet's x1.5
+				// minFeePadding is for refundable txs, not this.) predicted-worst is already a forward-looking
+				// ceiling so it still covers base-fee drift through the proving window; a rare spike beyond it
+				// fails recoverably and the engine reprices on retry. Public uses the Sponsored FPC (no cap).
+				const claimMaxFees = rec.isPrivate ? await predictedWorstMinFees(createAztecNodeClient(NODE_URL)) : undefined
 				return buildFuelClaimInteraction(rec, {
 					aztec,
 					recipient: AztecAddress.fromString(rec.recipient),
@@ -328,12 +331,12 @@ export function ensureDepositJournalDeps(): void {
 				// L15 kill-switch: the FJ landed at the pinned FPC. A drifted persisted address ⇒ FAIL-STOP
 				// (never claim to / trust a version-drifted FPC, never silently downgrade to public).
 				if (fb.fpc && fb.fpc !== PRIVATE_FPC_ADDRESS) {
-					return stop("Private fuel FPC address mismatch (version drift) — refusing to claim. Reselect a mode.")
+					return stop("Private fuel FPC address mismatch (version drift), refusing to claim. Reselect a mode.")
 				}
 				// Fail-closed budget: the bridged FJ must clear the calibrated floor (≈2× a real claim fee);
 				// below it the mint_and_pay_fee `amount >= max_gas_cost` assert fails anyway.
 				if (BRIDGE_FUEL && fuelReceived < BRIDGE_FUEL.minFuelFj) {
-					return stop("The bridged gas is below the safe claim floor — the private fuel claim can't self-pay.")
+					return stop("The bridged gas is below the safe claim floor; the private fuel claim can't self-pay.")
 				}
 				const fpcAddr = AztecAddress.fromString(fb.fpc ?? PRIVATE_FPC_ADDRESS)
 				const receiptStatus = fb.claimTxHash ? await fuelReceiptStatus(fb.claimTxHash) : undefined

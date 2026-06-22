@@ -7,7 +7,7 @@
 		"feeJuice": {
 			"portal": "0x7c4176bff969c9417e42f9cb921100145911cc84",
 			"asset": "0x762c132040fda6183066fa3b14d985ee55aa3c18",
-			"minFj": "10170654118143041536"
+			"minFj": "16000000000000000000"
 		},
 		"token": {
 			"name": "Aztec Nulo",

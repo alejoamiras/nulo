@@ -37,10 +37,11 @@ export interface FuelClaimDeps {
 	sponsoredFpc: AztecAddress
 	/** The fail-CLOSED self-pay floor (FUEL_MIN_FJ). Undefined/zero ⇒ the private claim refuses. */
 	minFloorFj: bigint | undefined
-	/** V5: the PINNED worst-case maxFeesPerGas (predictedWorstMinFees×1.5), computed by the caller (which
-	 *  owns the node). The FPC asserts amount >= gasLimits*maxFeesPerGas, and the protocol rejects a cap
-	 *  below the live base fee at inclusion — so a current-min cap risks rejection in the claim's proving
-	 *  window. Absent ⇒ the wallet fills current-min (pre-V5 behavior). Public uses the Sponsored FPC. */
+	/** V5: the worst-case maxFeesPerGas (predictedWorstMinFees, NO padding), computed by the caller (which
+	 *  owns the node). This is a SELF-PAY claim — the bridged amount is the whole budget and the FPC asserts
+	 *  amount >= gasLimits*maxFeesPerGas with no refund, so any fee padding inflates max_gas_cost past the
+	 *  amount ("Amount too low to cover gas cost"). predicted-worst already covers base-fee drift. Absent ⇒
+	 *  the wallet fills current-min (pre-V5 behavior). Public uses the Sponsored FPC. */
 	maxFeesPerGas?: { feePerDaGas: bigint; feePerL2Gas: bigint }
 	/** PRIVATE: the AUTHORITATIVE salt the engine unsealed from the envelope (the sole recovery input).
 	 *  Used in preference to the journal's plaintext `fuel.bridgeSecretSalt` display copy, which can be
@@ -83,21 +84,29 @@ export async function buildFuelClaimInteraction(rec: DepositJournalRecord, deps:
 		}
 		// FPC version-drift kill-switch — never claim to a drifted FPC, never downgrade to public (L11/L15).
 		if (fuel.fpc && fuel.fpc !== PRIVATE_FPC_ADDRESS) {
-			return stop("Private fuel FPC address mismatch (version drift) — refusing to claim. Reselect a mode.")
+			return stop("Private fuel FPC address mismatch (version drift), refusing to claim. Reselect a mode.")
 		}
 		// Authoritative-first: the engine-unsealed salt wins over the plaintext journal copy (which can be
 		// missing/corrupted while the seal is intact). Plaintext is a fallback only (no-envelope legacy).
 		const saltHex = deps.resolvedSalt ?? fuel.bridgeSecretSalt
-		if (!saltHex) return stop("This private Fuel bridge is missing its recovery salt — cannot claim.")
+		if (!saltHex) return stop("This private Fuel bridge is missing its recovery salt, cannot claim.")
 		const salt = Fr.fromString(saltHex)
 		const fpcAddr = AztecAddress.fromString(fuel.fpc ?? PRIVATE_FPC_ADDRESS)
-		// teardownGas=0 keeps max_gas_cost within the bridged amount. V5: pin maxFeesPerGas to the caller's
-		// predicted-worst×1.5 snapshot — the FPC asserts amount >= gasLimits*maxFeesPerGas and the protocol
-		// rejects a cap below the live base fee at inclusion, so a wallet-filled current-min cap risks
-		// rejection in the claim's proving window. Mirrors the swap-private-fuel path (useDeposit.ts).
+		// teardownGas=0 keeps max_gas_cost within the bridged amount. maxFeesPerGas is the caller's
+		// predicted-worst snapshot (NO padding) — a self-pay claim spends the bridged amount as its whole
+		// budget, so any padding inflates max_gas_cost past it and the FPC reverts "Amount too low to cover
+		// gas cost". predicted-worst still covers base-fee drift; a rare overshoot fails recoverably (retry).
 		const privateFee = {
 			paymentMethod: privateMintAndPayFee(fpcAddr, received, deriveBridgeSecret(salt, recipient), salt, leaf),
 			gasSettings: {
+				// EXPLICIT gasLimits is REQUIRED for the carrier-less claim. The empty BatchCall([]) gives the
+				// wallet's gas estimator nothing to estimate, so it defaults gasLimits to the network per-tx
+				// MAX (txsLimits.gas ≈ 6.5M L2 on V5). applyEmbeddedFpcGasCap then caps maxFeesPerGas but NOT
+				// gasLimits, so max_gas_cost = MAX_gasLimits × fee (≈23 FJ) and no realistic bridge self-pays
+				// it ("Amount too low to cover gas cost"). The wallet honors a dApp-supplied gasLimits
+				// (suggestGasLimits), so size it to the 2-call setup (FeeJuice.claim + mint_and_pay_fee).
+				// TODO(calibrate): tighten from a landed claim's actual gas used to minimise overpay.
+				gasLimits: Gas.from({ daGas: 100_000, l2Gas: 4_000_000 }),
 				teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
 				...(deps.maxFeesPerGas ? { maxFeesPerGas: deps.maxFeesPerGas } : {}),
 			},

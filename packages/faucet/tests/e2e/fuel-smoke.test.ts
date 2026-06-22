@@ -76,17 +76,17 @@ describe("fuel smoke", () => {
 	it("public submit calls deposit(amount, isPrivate=false); private submit passes true", async () => {
 		const w = mountFuel()
 		await flushPromises()
-		await w.find(sel(TESTIDS.fuelAmount)).setValue("12")
+		await w.find(sel(TESTIDS.fuelAmount)).setValue("20") // above the ~16 FJ floor (covers the claim's max_gas_cost)
 		await w.find(sel(TESTIDS.fuelPresetPublic)).trigger("click")
 		await w.find(sel(TESTIDS.fuelSubmit)).trigger("click")
 		await flushPromises()
-		expect(depositFn).toHaveBeenCalledWith(12n * 10n ** 18n, false, expect.anything())
+		expect(depositFn).toHaveBeenCalledWith(20n * 10n ** 18n, false, expect.anything())
 
 		depositFn.mockClear()
 		await w.find(sel(TESTIDS.fuelPresetPrivate)).trigger("click")
 		await w.find(sel(TESTIDS.fuelSubmit)).trigger("click")
 		await flushPromises()
-		expect(depositFn).toHaveBeenCalledWith(12n * 10n ** 18n, true, expect.anything())
+		expect(depositFn).toHaveBeenCalledWith(20n * 10n ** 18n, true, expect.anything())
 	})
 
 	it("a fee-juice record drives to done through the engine (deploymentMatches accepts the Fuel binding)", async () => {
