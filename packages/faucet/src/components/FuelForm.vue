@@ -1,16 +1,17 @@
 <script setup lang="ts">
 /** Services */
-import { assetKindOf } from "@nulo/bridge-core"
+import { assetKindOf, type DepositJournalRecord } from "@nulo/bridge-core"
 import { Button } from "@nulo/design"
-import { computed, ref } from "vue"
+import { computed, ref, watch } from "vue"
 import { FUEL_MIN_FJ } from "@/contracts/bridge-deployments"
 
 /** Components */
+import BridgeReceipt, { type ReceiptSnapshot } from "./BridgeReceipt.vue"
 import BridgeStepper from "./BridgeStepper.vue"
 
 /** Composables */
 import { useBridgeBackup } from "@/composables/useBridgeBackup"
-import { useBridgeJournal } from "@/composables/useBridgeJournal"
+import { hideCompleted, useBridgeJournal } from "@/composables/useBridgeJournal"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { useFuelFlow } from "@/composables/useFuel"
 import { FUEL_ASSET_DECIMALS, useL1FeeAsset } from "@/composables/useL1FeeAsset"
@@ -34,7 +35,8 @@ const submitting = ref(false)
 // The takeover machine: the form swaps to the stepper on its OWN submit. activeFlowId is the single
 // global owner; this form only ever steppers a fee-juice record it started (so it never collides with
 // the Bridge tab's form over the shared activeFlowId).
-const formStage = ref<"form" | "stepper">("form")
+const formStage = ref<"form" | "stepper" | "receipt">("form")
+const receiptSnapshot = ref<ReceiptSnapshot | null>(null)
 const activeId = journal.activeFlowId
 
 const bothConnected = computed(() => l1.isConnected.value && bridge.status.value === "connected")
@@ -75,6 +77,40 @@ function onBackground() {
 	formStage.value = "form"
 }
 
+function onNewFuel() {
+	// The receipt WAS the result — hide the completed card instead of re-surfacing it in the journal below.
+	if (activeId.value) {
+		hideCompleted(activeId.value)
+		journal.releaseForeground(activeId.value)
+	}
+	receiptSnapshot.value = null
+	fuelFlow.error.value = null
+	formStage.value = "form"
+	void feeAsset.refresh()
+}
+
+// stepper → receipt on the fuel record's completion (mirrors BridgeForm S11): snapshot the FJ result so a
+// cross-tab discard / auto-hide can't blank the receipt. Only our own fee-juice record ever steppers here.
+watch(
+	() => activeRecord.value?.completedAt,
+	(done) => {
+		if (!done || formStage.value !== "stepper") return
+		const rec = activeRecord.value
+		if (!rec || assetKindOf(rec) !== "fee-juice") return
+		receiptSnapshot.value = {
+			direction: "deposit",
+			assetKind: "fee-juice",
+			amount: rec.amount,
+			isPrivate: rec.isPrivate,
+			l1TxHash: (rec as DepositJournalRecord).depositTxHash,
+			l2TxHash: (rec as DepositJournalRecord).claimTxHash,
+			startedAt: rec.createdAt,
+			completedAt: rec.completedAt,
+		}
+		formStage.value = "receipt"
+	},
+)
+
 const onBackup = backup.exportBridgeWithToast
 
 function fmt(b: bigint | null): string {
@@ -85,6 +121,12 @@ function fmt(b: bigint | null): string {
 <template>
 	<section class="fuel-form" :data-testid="TESTIDS.fuelForm" :data-stage="formStage">
 		<BridgeStepper v-if="fuelActive && activeRecord" :record="activeRecord" @background="onBackground" @backup="onBackup" />
+		<BridgeReceipt
+			v-else-if="formStage === 'receipt' && receiptSnapshot"
+			:snapshot="receiptSnapshot"
+			cta-label="NEW FUEL"
+			@new-bridge="onNewFuel"
+		/>
 		<template v-else>
 			<div class="panel">
 				<span class="role">FROM</span>
