@@ -78,10 +78,12 @@ const toggleReveal = () => {
 </template>
 
 <style module>
+/* Style D — field-style underline: no box, a single bottom rule (matches the
+ * brutalist input fields), flush horizontal. */
 .card {
-	border: 2px solid var(--nulo-outline);
-	background: var(--nulo-surface-low);
-	padding: 12px 14px;
+	background: transparent;
+	border-bottom: 1px solid var(--nulo-border);
+	padding: 12px 0;
 }
 
 .identity {
