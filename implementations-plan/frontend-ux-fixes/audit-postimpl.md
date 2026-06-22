@@ -23,6 +23,15 @@ It added 2 MEDIUM + 3 LOW.
 - **LOW — avatar color could read as an identity signal** on the send surface. Acknowledged; it is
   decoration only and we deliberately do NOT use color in any verification copy/assertion. No change.
 
+**Post-fix codex re-audit** (session `codex-HqS5x2X9`, verdict **`ship`**): no high/critical/medium.
+Independently verified both fixes are correct — `tabindex="-1"` + omitted `data-dropdown-item` removes
+disabled items from Tab + arrow-nav, the Enter handler refuses `aria-disabled="true"`, and
+`querySelectorAll("[data-dropdown-item]")` still matches `data-dropdown-item=""` so ENABLED items navigate
+normally; clipboard rejection emits only `copy-error` (no double-emit / unhandled rejection) → warning toast;
+no send submit/display divergence; no new XSS/layering. It flagged 2 LOW test-coverage gaps (no end-to-end
+Enter-gate test; copy-error toast unpinned) — **both CLOSED** (commit `78508ec`: a DropdownRoot Enter-gate
+test with enabled+disabled items, and a RecipientField copy-error→warning-toast test).
+
 The rigorous self-audit (done while codex was stalled) is retained below; it reached the same conclusion.
 
 Scope: the uncommitted change set P1–P5b on `feat/frontend-ux-batch-1`. Verified against code + the full
