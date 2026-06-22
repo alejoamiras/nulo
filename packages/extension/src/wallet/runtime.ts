@@ -127,15 +127,15 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// even when the call is dead, leaking the gate into prod dist. The
 		// _build-extension.yml negative grep is the enforcement that caught that.
 		services.add(new ExecutionService(logger, E2E_PROVERLESS ? new ChromeStorageProofGate() : undefined))
-		services.add(new FpcService(logger))
+		services.add(new FpcService(logger, browserApi))
 		services.add(new LogViewerService(logger))
 		services.add(new LoggerService(logger))
-		services.add(new NetworkService(logger))
+		services.add(new NetworkService(logger, browserApi))
 		services.add(new NoteService(logger))
 		services.add(new OperationJournalService(logger, browserApi))
 		services.add(new ProfileService(config, logger))
 		services.add(new TaskService(logger))
-		services.add(new TokenService(logger))
+		services.add(new TokenService(logger, browserApi))
 		services.add(new TokenBalanceService(logger, browserApi))
 		services.add(new TransactionService(logger, browserApi))
 		services.add(new IncomingTransferService(logger, browserApi))

@@ -16,6 +16,7 @@ import { ensureRegistered } from "@/wallet/services/execution/contract-resolver"
 import { EntityStorage } from "@/wallet/storage"
 import { array_max, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
+import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { feeJuiceAddress, feeJuiceName, feeJuiceSymbol } from "@/wallet/utils/fee-juice"
 import { simulate } from "@/wallet/utils/fn"
 import { type Token, type TokenInfo, TOKEN_SERVICE_NAME, type TokenInterface, type Methods, type Events } from "./spec"
@@ -52,7 +53,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	public readonly onTokenUpdated = new EventHandler<TokenInfo>()
 	public readonly onTokenDeleted = new EventHandler<TokenInfo>()
 
-	private readonly tokens = new EntityStorage<Token>("nulo:core:tokens", chrome.storage.local)
+	private readonly tokens: EntityStorage<Token>
 	private readonly lock = new Lock()
 
 	private pxeService: PxeServiceClient = null!
@@ -62,8 +63,9 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	private tasks: TaskService = null!
 	private journal: OperationJournalService = null!
 
-	public constructor(logger: ILogger) {
+	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(TOKEN_SERVICE_NAME, logger)
+		this.tokens = new EntityStorage<Token>("nulo:core:tokens", browserApi.storage.local)
 	}
 
 	protected async init(services: ServiceCollection) {

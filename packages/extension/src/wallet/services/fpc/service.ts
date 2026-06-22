@@ -12,6 +12,7 @@ import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import { resolveNetworkByChainId } from "@/wallet/utils/caip"
 import { EventHandler } from "@nulo/wallet-core/utils"
+import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { Fpc } from "./fpc"
 import { getFpcHandler } from "./handlers"
 import { type Events, FPC_SERVICE_NAME, type FpcInfo, FpcType, type Methods } from "./spec"
@@ -44,7 +45,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 	public readonly onFpcUpdated = new EventHandler<FpcInfo>()
 	public readonly onFpcDeleted = new EventHandler<FpcInfo>()
 
-	private readonly storage = new EntityStorage<StoredFpc>("nulo:core:fpcs", chrome.storage.local)
+	private readonly storage: EntityStorage<StoredFpc>
 	private readonly lock = new Lock("fpc", this.logger)
 
 	/** Per-chain cache of deterministic protocol addresses. Populated lazily
@@ -56,8 +57,9 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 	private profileService: ProfileService = null!
 	private networkService: NetworkService = null!
 
-	public constructor(logger: ILogger) {
+	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(FPC_SERVICE_NAME, logger)
+		this.storage = new EntityStorage<StoredFpc>("nulo:core:fpcs", browserApi.storage.local)
 	}
 
 	protected async init(services: ServiceCollection) {
