@@ -20,6 +20,8 @@ import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { LoggerStore } from "@/wallet/logger"
 import { ConfigStore } from "@/wallet/config"
 import { FakeNodeFactory } from "@/core/testing/fake-node-factory"
+import { FakeBrowserApi } from "@nulo/wallet-core/testing"
+import type { BrowserApi } from "@nulo/wallet-core/ports"
 import type { ProfileService } from "@/wallet/services/profile/service"
 import { NetworkService } from "./service"
 import type { Network, NetworkEndpoint } from "./spec"
@@ -50,7 +52,9 @@ function harness(seeded: Record<string, NodeInfo | Error>): {
 		}
 	}
 
-	const service = new NetworkService(logger, factory)
+	const browserApi = new FakeBrowserApi()
+	browserApi.reset()
+	const service = new NetworkService(logger, browserApi, factory)
 
 	// Stub a minimal ProfileService that reports an active profile.
 	const fakeProfile = { id: "p1", name: "p1", type: "password" } as const
@@ -143,7 +147,7 @@ describe("NetworkService NodeFactory seam", () => {
 	test("default ctor wires AztecNodeFactoryAdapter — no-arg constructor works", () => {
 		const logger = new LoggerStore(new ConfigStore())
 		// Smoke: constructing without an explicit factory should not throw.
-		expect(() => new NetworkService(logger)).not.toThrow()
+		expect(() => new NetworkService(logger, new FakeBrowserApi())).not.toThrow()
 	})
 })
 
@@ -257,7 +261,11 @@ function setupServiceWithStorage(seeded: Record<string, NodeInfo | Error>): {
 		}
 	}
 
-	const service = new NetworkService(logger, factory)
+	// The service must read/write the SAME `local` FakeStorageArea the tests seed
+	// (via `local.store.set`), so inject it as the browserApi storage port. Network
+	// only touches browserApi.storage, so a partial port is sufficient here.
+	const browserApi = { storage: { local, session } } as unknown as BrowserApi
+	const service = new NetworkService(logger, browserApi, factory)
 	const fakeProfile = { id: "p1", name: "p1", type: "password" } as const
 	const pxeStub = vi.fn().mockResolvedValue(undefined)
 	// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in

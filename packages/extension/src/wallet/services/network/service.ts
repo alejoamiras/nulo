@@ -12,6 +12,7 @@ import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
+import type { BrowserApi } from "@nulo/wallet-core/ports"
 import {
 	type ChainKind,
 	ERR_ACTIVE_NETWORK,
@@ -156,7 +157,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public readonly onPrimaryEndpointChanged = new EventHandler<{ networkId: string; endpointId: string }>()
 	public readonly onChainPurged = new EventHandler<{ profileId: string; chainId: number }>()
 
-	private readonly storage = new EntityStorage<Network>("nulo:core:networks", chrome.storage.local)
+	private readonly storage: EntityStorage<Network>
 	private readonly nodes = new Map<number, AztecNode>()
 	/** URL-keyed transient cache for pending-tx polling pin. */
 	private readonly transientNodes = new Map<string, { node: AztecNode; failures: number }>()
@@ -166,8 +167,13 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	private profileService: ProfileService = null!
 	private pxeServiceClient: PxeServiceClient = null!
 
-	public constructor(logger: ILogger, nodeFactory?: NodeFactory) {
+	public constructor(
+		logger: ILogger,
+		private readonly browserApi: BrowserApi,
+		nodeFactory?: NodeFactory,
+	) {
 		super(NETWORK_SERVICE_NAME, logger)
+		this.storage = new EntityStorage<Network>("nulo:core:networks", browserApi.storage.local)
 		this.lock = new Lock("network", logger)
 		this.nodeFactory = nodeFactory ?? new AztecNodeFactoryAdapter()
 	}
@@ -700,7 +706,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 				await this.storage.delete(network.id)
 				this.emit("onNetworkDeleted", network)
 			}
-			await chrome.storage.local.remove(activeKey(profile.id))
+			await this.browserApi.storage.local.remove(activeKey(profile.id))
 		} finally {
 			this.lock.leave()
 		}
@@ -765,13 +771,13 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	}
 
 	private async _readActive(profileId: string): Promise<string | undefined> {
-		const r = await chrome.storage.local.get(activeKey(profileId))
+		const r = await this.browserApi.storage.local.get(activeKey(profileId))
 		const raw = r[activeKey(profileId)]
 		return typeof raw === "string" ? raw : undefined
 	}
 
 	private async _writeActive(profileId: string, networkId: string): Promise<void> {
-		await chrome.storage.local.set({ [activeKey(profileId)]: networkId })
+		await this.browserApi.storage.local.set({ [activeKey(profileId)]: networkId })
 	}
 
 	private async _isKnownEndpointUrl(url: string): Promise<boolean> {
