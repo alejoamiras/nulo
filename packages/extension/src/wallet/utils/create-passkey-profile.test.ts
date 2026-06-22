@@ -88,6 +88,6 @@ describe("createPasskeyProfileWithRetry", () => {
 			},
 		})
 		await createPasskeyProfileWithRetry("My Wallet", deps)
-		expect(deps.mocks.runCeremony).toHaveBeenCalledWith({ mode: "create", userHandle: ids[0] })
+		expect(deps.mocks.runCeremony).toHaveBeenCalledWith({ mode: "create", userHandle: ids[0], name: "My Wallet" })
 	})
 })

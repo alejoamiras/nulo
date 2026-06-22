@@ -43,7 +43,7 @@ export async function createPasskeyProfileWithRetry(name: string, deps: CreatePa
 	const MAX_RETRIES = 1
 	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
 		const profileId = await deps.generateProfileId()
-		const credData = await deps.runCeremony({ mode: "create", userHandle: profileId })
+		const credData = await deps.runCeremony({ mode: "create", userHandle: profileId, name })
 		try {
 			return await deps.createPasskeyProfile(name, credData)
 		} catch (e) {
