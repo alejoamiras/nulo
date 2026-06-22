@@ -8,7 +8,7 @@ import { TESTIDS } from "@/lib/testids"
 </script>
 
 <template>
-	<Flex direction="column" gap="28" :data-testid="TESTIDS.fuelView">
+	<div class="fuel-view" :data-testid="TESTIDS.fuelView">
 		<Flex tag="header" direction="column" gap="16" class="hero">
 			<h1>FUEL</h1>
 			<p class="sub">
@@ -25,10 +25,16 @@ import { TESTIDS } from "@/lib/testids"
 		<FuelForm />
 		<MintFuelAsset />
 		<BridgeJournal kind="fee-juice" :toasts="false" title="YOUR FUELS" />
-	</Flex>
+	</div>
 </template>
 
 <style scoped>
+.fuel-view {
+	display: flex;
+	flex-direction: column;
+	gap: 28px;
+}
+
 .hero {
 	margin-bottom: 4px;
 }

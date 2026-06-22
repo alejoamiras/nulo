@@ -10,7 +10,7 @@ import { TESTIDS } from "@/lib/testids"
 </script>
 
 <template>
-	<Flex direction="column" gap="28" :data-testid="TESTIDS.bridgeView">
+	<div class="bridge-view" :data-testid="TESTIDS.bridgeView">
 		<Flex tag="header" direction="column" gap="16" class="hero">
 			<h1>BRIDGE</h1>
 			<p class="sub">
@@ -28,10 +28,16 @@ import { TESTIDS } from "@/lib/testids"
 		<BridgeJournal kind="bridge-token" />
 		<MintTestUsdc />
 		<BridgeAddToken />
-	</Flex>
+	</div>
 </template>
 
 <style scoped>
+.bridge-view {
+	display: flex;
+	flex-direction: column;
+	gap: 28px;
+}
+
 .hero {
 	margin-bottom: 4px;
 }
