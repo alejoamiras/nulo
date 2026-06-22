@@ -1,8 +1,9 @@
 /**
  * The I/O runner around the pure sync decision (open-sync-pr.ts). On the
  * `push:main` that just published a STABLE release, it opens a `main → dev` sync
- * PR — branch FROM origin/main (never a local merge), plus the prerelease-manifest
- * re-baseline — and lets GitHub compute mergeability: clean PRs are left
+ * PR — branch FROM the exact release commit (never a local merge, never moving
+ * `origin/main`), plus the prerelease-manifest re-baseline — and lets GitHub
+ * compute mergeability: clean PRs are left
  * mergeable, CONFLICTING/UNKNOWN ones are labeled + commented (surfaced, never
  * silently dropped). It combines the manual runbook's two steps (merge main→dev,
  * then bump the prerelease manifest) into one PR.
@@ -26,8 +27,8 @@ export interface SyncIO {
 	resolveReleasePrMergeSha(headSha: string): Promise<string | null>
 	/** The number of an already-open sync PR for `branch` (base dev), or null. */
 	findOpenSyncPr(branch: string): Promise<number | null>
-	/** Create `branch` from origin/main, write the prerelease-manifest re-baseline, commit + push. */
-	prepareSyncBranch(branch: string, version: string): Promise<void>
+	/** Create `branch` from the release commit `baseSha`, write the prerelease-manifest re-baseline, commit + push. */
+	prepareSyncBranch(branch: string, baseSha: string, version: string): Promise<void>
 	/** Open the `branch → dev` PR (via the App token so dev's CI fires); returns the PR number. */
 	openPr(branch: string, title: string, body: string): Promise<number>
 	/** GitHub's computed mergeability (the impl polls until it's no longer UNKNOWN, bounded). */
@@ -80,7 +81,7 @@ export async function runSync(opts: RunSyncOpts): Promise<RunSyncResult> {
 		return { action: "exists", reason: "sync PR already open", prNumber: existing, exitCode: 0 }
 	}
 
-	await io.prepareSyncBranch(branch, opts.version)
+	await io.prepareSyncBranch(branch, opts.headSha, opts.version)
 	const title = "chore: sync main → dev"
 	const body =
 		`Post-release sync of \`main\` → \`dev\` for **v${opts.version}** — brings the release version bump + ` +
@@ -140,9 +141,11 @@ if (import.meta.main) {
 			const out = res.stdout.toString().trim()
 			return out ? Number(out) : null
 		},
-		async prepareSyncBranch(branch, version) {
-			await $`git fetch origin main`
-			await $`git checkout -B ${branch} origin/main`
+		async prepareSyncBranch(branch, baseSha, version) {
+			// Branch from the EXACT release commit, not live origin/main — if another PR
+			// lands on main during the long release run, the sync must still carry only the
+			// released state (baseSha == github.sha, already present from fetch-depth: 0).
+			await $`git checkout -B ${branch} ${baseSha}`
 			await Bun.write(PRERELEASE_MANIFEST, `${JSON.stringify({ ".": version }, null, 2)}\n`)
 			await $`git -c user.name=${BOT_NAME} -c user.email=${BOT_EMAIL} add ${PRERELEASE_MANIFEST}`
 			// --allow-empty: if main already carries this manifest value, the sync PR still

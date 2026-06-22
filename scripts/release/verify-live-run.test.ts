@@ -23,11 +23,13 @@ function mkFetch(plan: (url: string, attempt: number) => { ok: boolean; body: st
 	return { fetchImpl, attempts: () => calls }
 }
 
-const base = { version: "0.23.0", landingUrl: LANDING, faucetUrl: FAUCET, retries: 3, retryDelayMs: 0, sleepImpl: async () => {} }
+const SHA = "abc12345def67890abc12345def67890abc12345" // release sha; first 8 = abc12345
+const BUILD = "0.1.0+abc12345" // buildJson's version (0.1.0) + SHA[:8] — passes the freshness guard
+const base = { version: "0.23.0", sha: SHA, landingUrl: LANDING, faucetUrl: FAUCET, retries: 3, retryDelayMs: 0, sleepImpl: async () => {} }
 
 function good(url: string): { ok: boolean; body: string } {
-	if (url.includes("/build.json")) return { ok: true, body: buildJson("b1") }
-	if (url.startsWith(FAUCET)) return { ok: true, body: faucetHtml("b1") }
+	if (url.includes("/build.json")) return { ok: true, body: buildJson(BUILD) }
+	if (url.startsWith(FAUCET)) return { ok: true, body: faucetHtml(BUILD) }
 	return { ok: true, body: landingHtml("0.23.0") }
 }
 
@@ -80,7 +82,7 @@ describe("runVerifyLive", () => {
 	})
 
 	test("wrong chainId (stale-env class) → fail", async () => {
-		const f = mkFetch((url) => (url.includes("/build.json") ? { ok: true, body: buildJson("b1", 4138294185) } : good(url)))
+		const f = mkFetch((url) => (url.includes("/build.json") ? { ok: true, body: buildJson(BUILD, 4138294185) } : good(url)))
 		expect((await runVerifyLive({ ...base, fetchImpl: f.fetchImpl })).ok).toBe(false)
 	})
 

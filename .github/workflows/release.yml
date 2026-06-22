@@ -419,6 +419,7 @@ jobs:
       - name: Verify the live sites serve this release
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
+          SHA: ${{ needs.resolve.outputs.sha }}
         run: bun scripts/release/verify-live-run.ts
 
   sync-main-to-dev:

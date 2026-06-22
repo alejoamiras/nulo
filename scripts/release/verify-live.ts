@@ -18,6 +18,8 @@ export interface FaucetBuildJson {
 
 export interface VerifyLiveInput {
 	expectedVersion: string
+	/** the release commit (full sha); the faucet buildId's sha component must match its first 8. */
+	expectedSha: string
 	expectedWalletChainId: number
 	/** faucet `/` HTML (null ⇒ unreachable). */
 	faucetHtml: string | null
@@ -56,6 +58,14 @@ export function verifyLive(input: VerifyLiveInput): VerifyLiveResult {
 		else if (!jsonBuildId) failures.push("faucet: no buildId in /build.json")
 		else if (htmlBuildId !== jsonBuildId) {
 			failures.push(`faucet: split CDN cache — HTML buildId ${htmlBuildId} != build.json ${jsonBuildId}`)
+		} else if (input.expectedSha) {
+			// Fresh-deploy guard: buildId is `${version}+${sha}`; its sha component must be
+			// THIS release's commit, else a stale-but-self-consistent prior deploy passes
+			// (both files old together). The faucet version is decoupled from the release,
+			// so the sha — not the version — is the freshness signal.
+			const buildSha = jsonBuildId.split("+").pop() ?? ""
+			const wantSha = input.expectedSha.slice(0, 8)
+			if (buildSha !== wantSha) failures.push(`faucet: stale deploy — build sha '${buildSha}' != release ${wantSha}`)
 		}
 		if (input.faucetBuildJson.chainId !== input.expectedWalletChainId) {
 			failures.push(`faucet: chainId ${input.faucetBuildJson.chainId} != expected ${input.expectedWalletChainId}`)

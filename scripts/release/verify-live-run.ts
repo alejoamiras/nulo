@@ -14,6 +14,8 @@ import { type FaucetBuildJson, verifyLive, type VerifyLiveResult } from "./verif
 export interface RunVerifyLiveOpts {
 	/** the release version the landing must reference, e.g. "0.23.0". */
 	version: string
+	/** the release commit (full sha); the faucet buildId's sha component must match its first 8. */
+	sha: string
 	/** landing origin, e.g. "https://nulo.sh". */
 	landingUrl: string
 	/** faucet origin, e.g. "https://faucet.nulo.sh". */
@@ -57,6 +59,7 @@ async function gather(fetchImpl: typeof fetch, opts: RunVerifyLiveOpts) {
 	}
 	return {
 		expectedVersion: opts.version,
+		expectedSha: opts.sha,
 		expectedWalletChainId: TESTNET_WALLET_CHAIN_ID,
 		faucetHtml,
 		faucetBuildJson,
@@ -83,6 +86,7 @@ export async function runVerifyLive(opts: RunVerifyLiveOpts): Promise<VerifyLive
 if (import.meta.main) {
 	const result = await runVerifyLive({
 		version: process.env.VERSION ?? "",
+		sha: process.env.SHA ?? "",
 		landingUrl: process.env.LANDING_URL ?? "https://nulo.sh",
 		faucetUrl: process.env.FAUCET_URL ?? "https://faucet.nulo.sh",
 	})

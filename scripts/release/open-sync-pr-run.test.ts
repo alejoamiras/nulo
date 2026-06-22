@@ -7,7 +7,7 @@ const SHA = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 interface Calls {
 	resolveReleasePrMergeSha: string[]
 	findOpenSyncPr: string[]
-	prepareSyncBranch: Array<{ branch: string; version: string }>
+	prepareSyncBranch: Array<{ branch: string; baseSha: string; version: string }>
 	openPr: Array<{ branch: string; title: string }>
 	mergeability: number[]
 	flagConflict: Array<{ prNumber: number; label: string }>
@@ -24,8 +24,8 @@ function fakeIO(script: { releaseSha?: string | null; openPr?: number | null; me
 			calls.findOpenSyncPr.push(branch)
 			return script.openPr ?? null
 		},
-		async prepareSyncBranch(branch, version) {
-			calls.prepareSyncBranch.push({ branch, version })
+		async prepareSyncBranch(branch, baseSha, version) {
+			calls.prepareSyncBranch.push({ branch, baseSha, version })
 		},
 		async openPr(branch, title) {
 			calls.openPr.push({ branch, title })
@@ -94,7 +94,7 @@ describe("runSync — opening the sync PR", () => {
 		const r = await runSync(opts({ io }))
 		expect(r.action).toBe("opened-clean")
 		expect(r.prNumber).toBe(201)
-		expect(calls.prepareSyncBranch).toEqual([{ branch: "sync/main-to-dev-v0.24.0", version: "0.24.0" }])
+		expect(calls.prepareSyncBranch).toEqual([{ branch: "sync/main-to-dev-v0.24.0", baseSha: SHA, version: "0.24.0" }])
 		expect(calls.openPr[0].branch).toBe("sync/main-to-dev-v0.24.0")
 		expect(calls.flagConflict).toHaveLength(0)
 	})
@@ -117,6 +117,6 @@ describe("runSync — opening the sync PR", () => {
 	test("the branch + manifest re-baseline carry the stable version", async () => {
 		const { io, calls } = fakeIO({ mergeable: "MERGEABLE" })
 		await runSync(opts({ io, version: "1.2.3" }))
-		expect(calls.prepareSyncBranch).toEqual([{ branch: "sync/main-to-dev-v1.2.3", version: "1.2.3" }])
+		expect(calls.prepareSyncBranch).toEqual([{ branch: "sync/main-to-dev-v1.2.3", baseSha: SHA, version: "1.2.3" }])
 	})
 })

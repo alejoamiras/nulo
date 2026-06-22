@@ -36,8 +36,8 @@ export interface UnstickIO {
 	resolveTagSha(tag: string): Promise<string | null>
 	createTag(tag: string, sha: string, message: string): Promise<void>
 	relabelPr(prNumber: number, add: string, remove: string): Promise<void>
-	/** Create an EMPTY GitHub Release for the tag; the publish chain fills the notes + assets later. */
-	createRelease(tag: string, prerelease: boolean): Promise<void>
+	/** Idempotently ensure an EMPTY GitHub Release exists for the tag (the publish chain fills notes + assets later). */
+	ensureRelease(tag: string, prerelease: boolean): Promise<void>
 	log(msg: string): void
 }
 
@@ -86,19 +86,28 @@ export async function runUnstick(opts: RunUnstickOpts): Promise<RunUnstickResult
 	switch (decision.action) {
 		case "disabled":
 		case "noop":
-		case "skip":
 			io.log(`auto-unstick: ${decision.action} — ${decision.reason}`)
 			return { action: decision.action, reason: decision.reason, performed: false, exitCode: 0 }
 		case "abort":
 			io.log(`auto-unstick: ABORT — ${decision.reason}`)
 			return { action: "abort", reason: decision.reason, performed: false, exitCode: 1 }
+		case "skip": {
+			// Tag already at the merge SHA. Heal a partial prior run (tag pushed, but the
+			// release or relabel didn't finish) by idempotently ensuring BOTH — otherwise a
+			// rerun would skip forever and `resolve` would never advance. Never a 2nd tag.
+			const prerelease = opts.version.includes("-")
+			await io.ensureRelease(tag, prerelease)
+			await io.relabelPr(decision.prNumber as number, AUTORELEASE_TAGGED_LABEL, AUTORELEASE_PENDING_LABEL)
+			io.log(`auto-unstick: skip (tag exists) — ensured release + label for ${tag}`)
+			return { action: "skip", reason: decision.reason, performed: false, exitCode: 0 }
+		}
 		case "create": {
 			// A hyphen in the version (e.g. 0.24.0-rc.1) means a prerelease GitHub Release.
 			const prerelease = opts.version.includes("-")
 			io.log(`auto-unstick: creating ${tag} at ${decision.tagSha} (Release PR #${decision.prNumber})`)
 			await io.createTag(tag, decision.tagSha as string, `Release ${opts.version}`)
 			await io.relabelPr(decision.prNumber as number, AUTORELEASE_TAGGED_LABEL, AUTORELEASE_PENDING_LABEL)
-			await io.createRelease(tag, prerelease)
+			await io.ensureRelease(tag, prerelease)
 			io.log(`auto-unstick: created ${tag}, relabeled PR #${decision.prNumber} → tagged (prerelease=${prerelease})`)
 			return { action: "create", reason: decision.reason, performed: true, exitCode: 0 }
 		}
@@ -121,7 +130,10 @@ if (import.meta.main) {
 	const realIO: UnstickIO = {
 		async resolveMergedPr(headSha) {
 			const res = await $`gh api ${`repos/${repo}/commits/${headSha}/pulls`} --jq ${".[0] // empty"}`.nothrow().quiet()
-			if (res.exitCode !== 0) return null
+			// Fail LOUD on a transport/auth/rate-limit error. Returning null here would be
+			// indistinguishable from "no Release PR" → a silent noop → a stuck-but-green
+			// release. A commit with no PRs is exit 0 + empty output (handled below).
+			if (res.exitCode !== 0) throw new Error(`gh api commits/${headSha}/pulls failed (exit ${res.exitCode}): ${res.stderr.toString().trim()}`)
 			const out = res.stdout.toString().trim()
 			if (!out) return null
 			const pr = JSON.parse(out) as {
@@ -153,7 +165,10 @@ if (import.meta.main) {
 		async relabelPr(prNumber, add, remove) {
 			await $`gh pr edit ${String(prNumber)} --add-label ${add} --remove-label ${remove}`
 		},
-		async createRelease(tag, prerelease) {
+		async ensureRelease(tag, prerelease) {
+			// Idempotent: a prior (possibly partial) run may already have created it.
+			const exists = await $`gh release view ${tag}`.nothrow().quiet()
+			if (exists.exitCode === 0) return
 			const flags = ["release", "create", tag, "--verify-tag", "--title", tag, "--notes", "Filled by publish run."]
 			if (prerelease) flags.push("--prerelease")
 			await $`gh ${flags}`

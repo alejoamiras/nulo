@@ -2,15 +2,18 @@ import { describe, expect, test } from "bun:test"
 import { extractBuildId, verifyLive, type VerifyLiveInput } from "./verify-live"
 
 const CHAIN = 4229590296
+const SHA = "abc12345def67890abc12345def67890abc12345" // 40-char release sha; first 8 = abc12345
+const BUILD = "0.23.0+abc12345" // the real faucet buildId shape: `${version}+${sha[:8]}`
 const html = (buildId: string) => `<!doctype html><meta name="nulo-build" content="${buildId}"><div id="app"></div>`
 const landing = (v: string) => `<a href="https://github.com/alejoamiras/nulo/releases/tag/v${v}">Download</a>`
 
 function ok(over: Partial<VerifyLiveInput> = {}): VerifyLiveInput {
 	return {
 		expectedVersion: "0.23.0",
+		expectedSha: SHA,
 		expectedWalletChainId: CHAIN,
-		faucetHtml: html("b-0.23.0-abc"),
-		faucetBuildJson: { buildId: "b-0.23.0-abc", version: "0.23.0", chainId: CHAIN },
+		faucetHtml: html(BUILD),
+		faucetBuildJson: { buildId: BUILD, version: "0.23.0", chainId: CHAIN },
 		landingHtml: landing("0.23.0"),
 		...over,
 	}
@@ -34,9 +37,16 @@ describe("verifyLive", () => {
 	})
 
 	test("(the false-pass codex flagged) fresh build.json + STALE html → fail", () => {
-		const r = verifyLive(ok({ faucetHtml: html("b-0.22.0-OLD") }))
+		const r = verifyLive(ok({ faucetHtml: html("0.22.0+stale111") }))
 		expect(r.ok).toBe(false)
 		expect(r.failures.join(" ")).toMatch(/split CDN cache/)
+	})
+
+	test("(stale-but-self-consistent deploy) buildId sha != release sha → fail", () => {
+		const stale = "0.23.0+0ld00000" // self-consistent HTML+JSON, right version, but a prior commit's sha
+		const r = verifyLive(ok({ faucetHtml: html(stale), faucetBuildJson: { buildId: stale, version: "0.23.0", chainId: CHAIN } }))
+		expect(r.ok).toBe(false)
+		expect(r.failures.join(" ")).toMatch(/stale deploy/)
 	})
 
 	test("faucet unreachable → fail-closed", () => {
@@ -48,7 +58,7 @@ describe("verifyLive", () => {
 	})
 
 	test("wrong chainId (the stale-env class) → fail", () => {
-		const r = verifyLive(ok({ faucetBuildJson: { buildId: "b-0.23.0-abc", chainId: 4138294185 } }))
+		const r = verifyLive(ok({ faucetBuildJson: { buildId: BUILD, version: "0.23.0", chainId: 4138294185 } }))
 		expect(r.ok).toBe(false)
 		expect(r.failures.join(" ")).toMatch(/chainId/)
 	})
