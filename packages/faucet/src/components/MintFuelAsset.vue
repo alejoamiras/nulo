@@ -13,13 +13,13 @@ import { TESTIDS } from "@/lib/testids"
 const l1 = useL1Wallet()
 const feeAsset = useL1FeeAsset()
 
-// Action + label are state-driven so the one button is always actionable (codex: don't copy
-// MintTestUsdc's connect-only gate). Mint is gated on connected AND on Sepolia.
-const label = computed(() => {
-	if (!l1.isConnected.value) return "CONNECT YOUR ETHEREUM WALLET"
-	if (l1.wrongChain.value) return "SWITCH TO SEPOLIA"
-	return "MINT TEST $AZTEC"
-})
+// One source of truth for the button's 3-way state so the label and the click can't drift (codex:
+// don't copy MintTestUsdc's connect-only gate — mint is gated on connected AND on Sepolia).
+const state = computed<"connect" | "switch" | "mint">(() => (!l1.isConnected.value ? "connect" : l1.wrongChain.value ? "switch" : "mint"))
+
+const label = computed(() =>
+	state.value === "connect" ? "CONNECT YOUR ETHEREUM WALLET" : state.value === "switch" ? "SWITCH TO SEPOLIA" : "MINT TEST $AZTEC",
+)
 
 const status = computed(() => {
 	if (feeAsset.mintError.value) return feeAsset.mintError.value
@@ -28,8 +28,8 @@ const status = computed(() => {
 })
 
 function onClick() {
-	if (!l1.isConnected.value) return void l1.connect()
-	if (l1.wrongChain.value) return void l1.switchToSepolia()
+	if (state.value === "connect") return void l1.connect()
+	if (state.value === "switch") return void l1.switchToSepolia()
 	void feeAsset.mint()
 }
 </script>
