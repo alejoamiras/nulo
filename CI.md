@@ -24,7 +24,7 @@ Contributor-facing reference for what runs when, how to opt in to slow gates, ho
 
 Always runs on every PR. Lightweight gates:
 
-- `commitlint` — every commit + the PR title must follow Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, etc.; lower-case subject).
+- `commitlint` — Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, …; lower-case subject, 100-char header cap). On PRs to `dev`: every commit in `base..head`. On PRs to `main`: **skipped** — the promote PR's merge subject is an intentional non-conventional release-note line (`release: promote dev → main …`, > 100 chars, no `release` type by design), the bot Release PR (`chore(main): release X.Y.Z`) is reliably conventional anyway, and the dev squash subjects in the range are already-merged + immutable (re-linting them spuriously failed required `Quality` on long historical subjects).
 - `lint-and-typecheck` — biome over the repo + `bun run typecheck:all` (vue-tsc across all packages).
 - `unit-tests` — `bun run test:all` (vitest across all workspaces; `--if-present` skips `playground` + `landing`).
 - `build-extension` — chrome + firefox builds.
@@ -122,7 +122,7 @@ Releases are driven by `release-please`. The human touchpoint is a single click 
 4. Merge the Release PR via the GitHub UI (merge commit).
 5. The next push-to-main run of `release.yml` sees the release was created. The same workflow run continues: gates → build chrome + firefox → smoke → `attach-assets` (uploads zips + SHASUMS, overlays git-cliff release notes onto the GitHub Release body) → Cloudflare deploy hook.
 
-Tag format is `v<X.Y.Z>` (forced by `include-v-in-tag: true` + `include-component-in-tag: false` in `.github/release-please-config.json`). Prerelease support (e.g. `v<X.Y.Z>-rc.<N>` from `dev`) is deferred to a follow-up PR.
+Tag format is `v<X.Y.Z>` (forced by `include-v-in-tag: true` + `include-component-in-tag: false` in `.github/release-please-config.json`). Prerelease (rc) support **exists** — `v<X.Y.Z>-rc[.N]` cut from `dev` via [`release-prerelease.yml`](./.github/workflows/release-prerelease.yml); see [`CLAUDE.md`](./CLAUDE.md) § Release runbook (Prerelease).
 
 ### Forcing the next-version
 
