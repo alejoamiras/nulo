@@ -350,6 +350,32 @@ Configured in [`.github/`](./.github/). The full contributor guide is at [`CI.md
 
 Two flows: **stable** (from `main`, tagged `vX.Y.Z`) and **prerelease** (from `dev`, tagged `vX.Y.Z-rc[.N]`). Both share the same v4 abort bug + manual unstick pattern.
 
+#### Start here — what a release is, and what you actually do
+
+A **stable release** turns the current `main` into a published `vX.Y.Z`: a GitHub Release with the built Chrome + Firefox zips + `SHASUMS256.txt`, the landing (`nulo.sh`) and faucet (`faucet.nulo.sh`) redeployed, and a `main → dev` back-sync PR opened. Most of it is automated by [`release.yml`](.github/workflows/release.yml); this table is the **current** division of labor (it shifts as the [staged rollout](#staged-rollout-switches) proceeds):
+
+| What | Who | Current state |
+|---|---|---|
+| Open the Release PR (version bump + `CHANGELOG`) | release-please | ✅ automatic |
+| **Tag + GitHub Release after you merge the Release PR** (the "unstick") | `auto-unstick` job **if `AUTO_UNSTICK_ENABLED=on`**, else **you** | ⚠️ **flag OFF → you do the 45s manual unstick** |
+| Gates → build chrome+firefox → smoke → attach zips/SHASUMS | publish chain | ✅ automatic |
+| Redeploy landing + faucet | `refresh-landing` + `deploy-faucet` | ✅ automatic (faucet hook unset → its CF dashboard Git-integration still deploys it) |
+| Confirm the live sites serve THIS release | `verify-live` | ✅ automatic (advisory — see switches) |
+| Open the `main → dev` back-sync PR (+ prerelease-manifest re-baseline) | `sync-main-to-dev` | ✅ automatic (you review + squash-merge it) |
+
+**The happy path (stable), end to end:**
+
+1. **Promote `dev → main`** — open a `release: promote dev → main (…)` PR, merge it (merge-commit, per `main`'s ruleset).
+2. **Merge the Release PR** — release-please opens `chore(main): release X.Y.Z` within ~1 min; review the `CHANGELOG.md` diff, merge it via the UI (merge-commit).
+3. **Unstick** — that merge re-triggers `release.yml`, which **aborts** on the [v4 bug](#why-the-manual-unstick-is-required-the-v4-bug):
+   - **`AUTO_UNSTICK_ENABLED=on`** → the `auto-unstick` job tags + publishes automatically; nothing to do, skip to 4.
+   - **flag OFF (current default)** → run the **[manual unstick](#stable-release-from-main)** below (§ Stable steps 5–6: a ~45s paste + a `workflow_dispatch` republish).
+4. **Wait for the publish chain** (~15–25 min): gates → build → smoke → `attach-assets` → landing/faucet deploys → `verify-live`.
+5. **Squash-merge the back-sync PR** — `sync-main-to-dev` opens `chore: sync main → dev`. Labeled `needs-manual-resolution`? Resolve the conflict first. Otherwise just squash-merge it.
+6. **Verify** — `gh release view v$VERSION --json assets -q '[.assets[].name]'` lists the two zips + `SHASUMS256.txt`.
+
+> **One-time flip to near-one-click:** once a flag-OFF release proves the wiring (step 3 manual, everything else automatic), `gh variable set AUTO_UNSTICK_ENABLED -b on`. After that a stable release is **steps 1, 2, 5 only** (promote → merge Release PR → squash the sync PR); the unstick + publish are hands-off. The detailed sections below are the reference + the fallback for when automation is off or red — see [§ Troubleshooting](#troubleshooting--when-x-fails).
+
 > **Auto-unstick (staged rollout — currently OFF).** `release.yml` now has an `auto-unstick` job that does the 45-second manual unstick (§ steps 5–6 below) automatically: on the post-merge `push:main` where release-please aborted, it detects the merged `autorelease: pending` Release PR at `github.sha`, creates the tag + empty release, relabels the PR, and lets `resolve` continue the publish chain in the SAME run. **It is gated by the repo variable `vars.AUTO_UNSTICK_ENABLED` and defaults OFF** (unset, or anything other than `on`/`true`/`1`, = off). While OFF the job still runs but no-ops (`unstuck=false`) → the chain stays skipped → the manual unstick below is still required, exactly as today. **The flip is a deliberate human action:** after one clean flag-off release proves the wiring, set `AUTO_UNSTICK_ENABLED=on` (Settings → Actions → Variables, or `gh variable set AUTO_UNSTICK_ENABLED -b on`) and the next release self-unsticks. The logic + every guard (idempotent re-tag, fail-closed on a wrong-SHA tag, no-op on a non-Release-PR push) live in unit-tested `scripts/release/auto-unstick*.ts`. **The manual procedure below remains the documented fallback and the source of truth** for what the automation does. To turn it back off: `gh variable set AUTO_UNSTICK_ENABLED -b off` (or delete the variable).
 
 **Prerequisites** (one-time, already done):
@@ -361,7 +387,7 @@ Two flows: **stable** (from `main`, tagged `vX.Y.Z`) and **prerelease** (from `d
 Per-release procedure for shipping a stable release. Total time: ~20 min, of which ~45 seconds is manual.
 
 1. **Get the work onto `main`.** Promote `dev → main` via the usual `release: promote dev → main (...)` PR. Merge-commit (per `main`'s ruleset).
-2. **Wait for the Release PR.** The push to `main` triggers `release.yml`. release-please opens a Release PR titled `chore(main): release X.Y.Z` (version chosen automatically from Conventional Commits since the last tag — `feat:` → minor, `fix:` → patch, `BREAKING CHANGE:` → major). Review the auto-generated `CHANGELOG.md` diff in the PR.
+2. **Wait for the Release PR.** The push to `main` triggers `release.yml`. release-please opens a Release PR titled `chore(main): release X.Y.Z` (version chosen automatically from Conventional Commits since the last tag — `feat:` → minor, `fix:` → patch). **While in `0.x`, `bump-minor-pre-major: true` caps a `BREAKING CHANGE:` to a *minor* bump (`0.23.0` → `0.24.0`, never auto-`1.0.0`)** — a `1.0.0` cut is a deliberate manual `Release-As: 1.0.0` footer. Review the auto-generated `CHANGELOG.md` diff in the PR.
 3. **Merge the Release PR via the UI** (merge commit).
 4. **Wait for the post-merge `release.yml` run.** It will run release-please-action again. **Expected: it aborts with `⚠ There are untagged, merged release PRs outstanding - aborting` and the downstream gates + publish jobs all skip.** This is the v4 bug.
 5. **Manual unstick** (~45 seconds — paste into terminal):
@@ -445,7 +471,7 @@ The prerelease manifest (`.release-please-prerelease-manifest.json`) tracks the 
 2. **Then, open a small PR to `dev`** updating `.release-please-prerelease-manifest.json` to match (e.g. `{ ".": "0.21.0" }`). Merge it.
 3. Next `gh workflow run release-prerelease.yml` will cut the next rc series from the correct base.
 
-**Why the manual unstick is required (the v4 bug):**
+#### Why the manual unstick is required (the v4 bug)
 
 `release-please-action@v4` runs both "open Release PR" and "tag + publish merged Release PR" phases. The publish phase looks for a previously-created GitHub Release that matches the merged PR's manifest entry — when no such release exists yet (because the publish phase is supposed to be the one creating it), it logs `⚠ Expected 1 releases, only found 0` and bails with the "outstanding" error instead of creating the release itself. Both the original action issue ([#1205](https://github.com/googleapis/release-please-action/issues/1205)) and the upstream tool issue ([release-please#2712](https://github.com/googleapis/release-please/issues/2712)) are open with no fix.
 
@@ -463,6 +489,31 @@ The manual unstick (tag + `autorelease: tagged` label + empty GitHub Release) pl
 - The Release PR's CI runs normally (App-token triggers the PR-quick workflow → `Quality / Status`).
 - The Release PR's commits are bot-verified (App-authenticated → satisfies `main`'s signed-commits rule).
 - The `workflow_dispatch` publish chain runs all gates + builds + smoke + attach-assets end-to-end.
+
+#### Troubleshooting — when X fails
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Post-merge `release.yml` skipped everything; no tag, no assets | v4 abort + `AUTO_UNSTICK_ENABLED` off (expected today) | Run the [manual unstick](#stable-release-from-main) (§ Stable 5–6). Consider flipping the flag for next time. |
+| `auto-unstick` job **red** with "refusing to re-point" | a `vX.Y.Z` tag already exists at a DIFFERENT commit | Fail-closed by design — it won't move a tag. Investigate the tag/commit mismatch, delete/fix the bad tag, then `workflow_dispatch` republish. |
+| `auto-unstick` ran, `unstuck=false`, chain still skipped | flag off (no-op by design), OR HEAD isn't a merged `autorelease: pending` Release PR | If you expected it ON: confirm `vars.AUTO_UNSTICK_ENABLED=on` AND the Release PR actually merged at `github.sha`. |
+| Release exists but assets are missing | an upload failed mid-`attach-assets` | Re-run just the publish chain: `gh workflow run release.yml --ref main -f tag=vX.Y.Z -f dry_run=false`. |
+| `verify-live` **red** but the release shipped | CDN lag, or a real deploy miss | It's advisory — open `nulo.sh` / `faucet.nulo.sh`. The faucet's `index.html` `nulo-build` meta must equal `/build.json` `buildId`; if not, re-fire the deploy hook. |
+| Faucet shows "No network configured for chainId …" | faucet built/deployed against a stale chain identity | Chain id is single-sourced in `packages/faucet/src/lib/chain-constants.ts` (no env override). Redeploy from current `main`. |
+| `sync-main-to-dev` PR labeled `needs-manual-resolution` | `dev` diverged from `main` since the release | Resolve the conflict on the sync branch (usually `CHANGELOG.md` / `bun.lock`), then squash-merge. |
+| No `sync-main-to-dev` PR appeared | push-only + stable-only; a `workflow_dispatch` republish never syncs | Expected on a republish. For a genuine cut, check the job ran on the `push:main` and read its log. |
+| release-please reopened an OLD Release PR | prerelease-manifest drift after a stable cut | Re-baseline `.release-please-prerelease-manifest.json` to the new stable version — the `sync-main-to-dev` PR does this; just merge it. |
+
+#### Staged-rollout switches
+
+Two pieces ship **guarded** and get promoted only after they're proven on a real release. Flip them deliberately, one at a time — the rule is *ship inert/advisory, observe one real release, then promote*:
+
+| Switch | What it gates | Default | Flip when | How |
+|---|---|---|---|---|
+| `vars.AUTO_UNSTICK_ENABLED` | the `auto-unstick` job acting vs no-op | **off** | after one clean flag-OFF release proves the wiring | `gh variable set AUTO_UNSTICK_ENABLED -b on` (back: `-b off`, or delete the var) |
+| `verify-live` ∈ `status` aggregator | whether a failed live-check fails the release | **advisory** (not in `status`) | after the first clean real release shows it green | one-line `release.yml` edit: add `verify-live` to the `status` job's `needs` + its result loop |
+
+The manual procedures above remain the permanent fallback regardless of switch state.
 
 ## What this file is NOT
 

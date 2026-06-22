@@ -121,7 +121,7 @@ Post-publish job: create the sync branch **from `origin/main`** (no local merge 
 
 **Validation gate** — `bun test scripts/release/open-sync-pr.test.ts` (clean→mergeable PR; idempotent if one's open; **`sync_eligible=false` on workflow_dispatch / old-tag republish → no-op**); **test repo:** happy-path opens the PR; an induced CHANGELOG/`bun.lock` conflict opens a *labeled* PR (not silent); a simulated `workflow_dispatch` republish → sync does NOT fire. Layers: unit · test-repo · actionlint.
 
-### Phase 8 — Docs + closing acceptance gate
+### Phase 8 — Docs + closing acceptance gate — ✓ DOC DONE (runbook cold-readable; gauntlet /code-review→codex→harden next; verify §lessons/phase-8.md)
 
 **Produce the teachable release runbook (DOC PRIORITY).** Rewrite `CLAUDE.md` §Release runbook + `CI.md` into a doc a future agent/human can execute **cold**, structured as: (1) the **one-click happy path** (merge promote PR → review+merge the Release PR → done) in numbered plain steps; (2) **what each automated piece does** under the hood — auto-unstick, `verify-live`, auto-sync, the version policy — in plain language with the "why"; (3) the **manual fallbacks** (the 45s unstick, the manual main→dev sync) for when `AUTO_UNSTICK_ENABLED` is off or something breaks; (4) the **staged-rollout** + the switch; (5) a "what to do when X fails" troubleshooting table. NOTE: phases 1–7 each already updated their own doc section as they landed (per the universal-workflow "docs in the same PR" rule) — Phase 8 is the consolidation + cold-read pass, not a from-scratch write. Tear down the test repo; run `/code-review max --fix` + codex post-impl audit + `/harden security`.
 
