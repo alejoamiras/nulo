@@ -2,6 +2,7 @@ import { fileURLToPath, URL } from "node:url"
 import vue from "@vitejs/plugin-vue"
 import { defineConfig } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
+import { nuloComponentsPlugin } from "./scripts/components-plugin"
 
 const COOP_COEP_HEADERS = {
 	"Cross-Origin-Opener-Policy": "same-origin",
@@ -35,6 +36,7 @@ export default defineConfig({
 	},
 	plugins: [
 		vue(),
+		nuloComponentsPlugin({ dts: "src/types/components.d.ts" }),
 		nodePolyfills({
 			// Aztec packages reach for `process` at module top-level via util/path
 			// shims. Without these the bundle throws ReferenceError before mount.

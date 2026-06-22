@@ -78,7 +78,7 @@ function openInstall() {
 			<span>Setting up your session…</span>
 		</div>
 
-		<div v-else-if="showCapabilityApproval" class="capability" :data-testid="TESTIDS.capabilityApproval">
+		<Flex v-else-if="showCapabilityApproval" direction="column" gap="12" align="start" class="capability" :data-testid="TESTIDS.capabilityApproval">
 			<h3>Awaiting permissions</h3>
 			<p>
 				Approve this faucet's permissions in your wallet. We're asking to read your balances and
@@ -88,9 +88,9 @@ function openInstall() {
 			<Button :data-testid="TESTIDS.btnCapabilityRetry" @click="retryCapabilities">
 				Approve permissions
 			</Button>
-		</div>
+		</Flex>
 
-		<div v-else-if="showNoWalletCta" class="no-wallet">
+		<Flex v-else-if="showNoWalletCta" direction="column" gap="12" align="start" class="no-wallet">
 			<h3>No Aztec wallet detected on this browser.</h3>
 			<p>
 				This faucet works with any wallet that speaks the Aztec Wallet SDK. Nulo is the fastest
@@ -99,7 +99,7 @@ function openInstall() {
 			<Button :data-testid="TESTIDS.btnInstallNulo" @click="openInstall">
 				Install Nulo
 			</Button>
-		</div>
+		</Flex>
 
 		<div v-else class="connect">
 			<Button
@@ -161,10 +161,6 @@ function openInstall() {
 
 .capability,
 .no-wallet {
-	display: flex;
-	flex-direction: column;
-	gap: 12px;
-	align-items: flex-start;
 	max-width: 56ch;
 }
 
