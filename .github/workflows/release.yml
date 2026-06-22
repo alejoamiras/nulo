@@ -37,16 +37,25 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+# Least-privilege default: read-only for every job (covers checkout; artifact +
+# cache ops don't need a `permissions:` scope). The handful of jobs that write
+# (release-please, auto-unstick, attach-assets, sync) escalate explicitly in
+# their own block — so build/test/resolve/deploy/verify/status no longer inherit
+# a write-capable token (codex post-impl audit, Should-fix 3).
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
+  contents: read
 
 jobs:
   release-please:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Uses the App token for its writes (signing + CI cascade), but escalate the
+    # job token too so the action is robust if it ever falls back to GITHUB_TOKEN.
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
@@ -97,8 +106,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
-      pull-requests: write
-      issues: write # autorelease:* / needs-manual-resolution label ops go through the issues API
+      pull-requests: write # covers PR labels + comments (autorelease:* / needs-manual-resolution)
     outputs:
       unstuck: ${{ steps.u.outputs.unstuck }}
       tag_name: ${{ steps.u.outputs.tag_name }}
@@ -441,8 +449,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
-      pull-requests: write
-      issues: write # autorelease:* / needs-manual-resolution label ops go through the issues API
+      pull-requests: write # covers PR labels + comments (autorelease:* / needs-manual-resolution)
     steps:
       # App token so the sync PR is bot-opened → dev's required CI fires
       # (a GITHUB_TOKEN-opened PR suppresses the pull_request workflow), and the
