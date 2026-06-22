@@ -156,7 +156,7 @@ Steps:
 create-account Tab pin AND the Dropdown arrow-nav pin are green. Layers: typecheck · lint · component ·
 smoke · build.
 
-### P5b — Long-tail per-screen tab-order sweep (#5) — human-gated ☐
+### P5b — Long-tail per-screen tab-order sweep (#5) — human-gated ✓
 With the primitives + convention fixed in P5a, sweep the remaining screens for residual tab-order issues:
 onboarding (import/fees), profile (change-password/export), send, contacts (edit/new/import), settings
 forms, the edit popups (account/network/token/fpc/endpoint), confirm/receive. Fix per-screen against the

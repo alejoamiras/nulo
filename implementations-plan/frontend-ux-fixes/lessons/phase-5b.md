@@ -48,10 +48,34 @@ restore standard tabbing). **User chose KEEP-AS-IS** — field→field flow is t
 `tabindex="-1"` (mouse + screen-reader reachable). Recorded as a deliberate owner-accepted tradeoff in
 `audit-postimpl.md` + the CLAUDE.md convention. No code change.
 
-## Human sign-off (REQUIRED — not yet recorded)
-The plan's gate forbids marking P5b ✓ without the human keyboard + visual sign-off. The eye-a11y DECISION
-is made (above); the remaining confirmation is the actual keyboard Tab-through (onboarding create, unlock,
-change-password, import, send, contacts, settings + edit popups) + the visual check (initials avatars, the
-Send recipient card, long-address-at-rest in the contact/send inputs). To be recorded here on sign-off.
+## Human sign-off — RECEIVED (2026-06-22)
+The user did the keyboard + visual pass against a versioned local build (`0.25.0-rc.1` → `…-rc.9`, bumps
+local-only/uncommitted since release-please owns the version) and **signed off**: *"Lovely, this work is
+ready to be merged."* All six fixes confirmed; #1/#5/#6 approved as-is; #2/#3/#4 approved after the
+refinement rounds below.
+
+### Visual-refinement rounds during sign-off (recorded for history)
+The card/avatar/spacing got several user-directed passes after the functional fixes landed — all on the
+Send surface (in scope of #3/#4, plus a bonus Send-layout polish the user explicitly directed):
+- **Avatar** → flat **grey square** (no per-account color, no rounded corners) to match the brutalist
+  design system (`AccountAvatar.vue`); recipient avatar sized **36** to match the token rectangle.
+- **Masked address** → single baseline ellipsis `0x123456…12345678` (the spaced `***` rendered misaligned).
+- **AddressInput (#2)** → reworked twice: scroll-reset-on-blur wasn't enough; final = **pin to start while
+  not focused** (native scroll/focus/blur listeners snap `scrollLeft` to 0), so a blurred address can't be
+  drag-scrolled. Pure read affordance; value never mutated.
+- **RecipientCard** → removed the "Copy full address" button (revealed address stays selectable); applied
+  card **style D** (field-style bottom underline, no box) from `card-style-options.html`.
+- **EditAccountPopup** → removed the redundant "Selected account for editing" header card.
+- **Send layout** → de-stacked paddings (section `20→14`, token-card wrapper `12→4`), shrank the token
+  picker (avatar `40→36`, fonts `18→16`); top-section bottom padding removed; recipient card padding `14px`.
+- **Recipient validity** → replaced the cryptic ✓/! suffix icon with the app-standard worded **"Invalid
+  address"** hint (red warning + text in the label row, as in the contact/FPC popups); the Send button's
+  `isValidHex` gate (`send.vue:190`) remains the hard block.
+
+## Validation gate — PASSED (machine) + human sign-off RECEIVED
+- `bun run audit:vue` green; full smoke 69/76 (the 1 fail pre-existing — see above).
+- Keyboard + visual sign-off received from the user (2026-06-22).
+
+LESSONS_FILE=implementations-plan/frontend-ux-fixes/lessons/phase-5b.md
 
 LESSONS_FILE=implementations-plan/frontend-ux-fixes/lessons/phase-5b.md

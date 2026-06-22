@@ -44,8 +44,12 @@ P3 Send recipient = masked **+ OPTIONAL reveal** (not forced). The full fork (fu
 optional and owns the residual address-poisoning risk. The implementation makes the reveal prominent + one
 tap, and binds the exact `searchTerm` that submits — display and submitted address never diverge.
 
-## Pending (both need the user)
-1. **1Password unlock** — every commit since P1 fails to sign; P2–P5b (36 files) + the audit/wrap-up docs
-   wait. Not bypassed (not AFK). On unlock: commit the phases + push.
-2. **P5b keyboard + visual sign-off** — checklist delivered; `dist/chrome` freshly rebuilt with all changes.
-   On sign-off: mark P5b ✓, then PR (`feat: frontend UX fixes batch 1` → `dev`).
+## Sign-off + merge (2026-06-22)
+- **1Password** unlocked; all phases committed + pushed (`feat/frontend-ux-batch-1`).
+- **P5b human sign-off RECEIVED** after a versioned local-build review (rc.1→rc.9) + several user-directed
+  Send-surface refinement rounds (grey square avatar, ellipsis truncation, pin-on-blur address input, card
+  style D, removed copy + edit-account header card, de-stacked Send paddings, worded "Invalid address"
+  hint). See `lessons/phase-5b.md`. All 6 phases ✓.
+- **Final `audit:vue`** green; merging to `dev` via squash (`--admin`, per dev's ruleset).
+- The Send-layout polish was beyond the original 6 fixes — folded in at the user's direction (mockups:
+  `card-style-options.html`, `send-layout-options.html`).
