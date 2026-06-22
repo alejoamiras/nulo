@@ -74,6 +74,17 @@ const submitLabel = computed(() => {
 	return authMethod.value === "passkey" ? "Create with passkey" : "Create profile"
 })
 
+// Roving tablist for the method toggle: only the active tab is in the Tab order,
+// so Tab flows name → method (ONE stop) → password; ←/→ switch the method.
+const passwordTabRef = ref<HTMLButtonElement>()
+const passkeyTabRef = ref<HTMLButtonElement>()
+const onMethodKeydown = (e: KeyboardEvent) => {
+	if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return
+	e.preventDefault()
+	authMethod.value = authMethod.value === "password" ? "passkey" : "password"
+	nextTick(() => (authMethod.value === "password" ? passwordTabRef.value : passkeyTabRef.value)?.focus())
+}
+
 // Onboarding keeps its own document-level Enter handler alongside the
 // `<form @submit.prevent>`; both are latch-protected by `isCreating`.
 function onKeydown(e: KeyboardEvent) {
@@ -134,10 +145,13 @@ onBeforeUnmount(() => {
 
 			<Flex direction="column" gap="12">
 				<Text size="11" weight="700" color="secondary" :class="$style.section_label">Authentication method</Text>
-				<Flex gap="0" :class="$style.tabs" role="group" aria-label="Authentication method">
+				<Flex gap="0" :class="$style.tabs" role="tablist" aria-label="Authentication method" @keydown="onMethodKeydown">
 					<button
+						ref="passwordTabRef"
 						type="button"
-						:aria-pressed="authMethod === 'password'"
+						role="tab"
+						:aria-selected="authMethod === 'password'"
+						:tabindex="authMethod === 'password' ? 0 : -1"
 						:class="[$style.tab, authMethod === 'password' && $style.tabActive]"
 						data-testid="onboarding-method-password"
 						@click="authMethod = 'password'"
@@ -145,10 +159,13 @@ onBeforeUnmount(() => {
 						Password
 					</button>
 					<button
+						ref="passkeyTabRef"
 						type="button"
-						:aria-pressed="authMethod === 'passkey'"
-						:class="[$style.tab, authMethod === 'passkey' && $style.tabActive]"
+						role="tab"
+						:aria-selected="authMethod === 'passkey'"
+						:tabindex="authMethod === 'passkey' ? 0 : -1"
 						data-testid="onboarding-method-passkey"
+						:class="[$style.tab, authMethod === 'passkey' && $style.tabActive]"
 						@click="authMethod = 'passkey'"
 					>
 						Passkey

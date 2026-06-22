@@ -19,12 +19,16 @@ const toggle = () => {
 <template>
 	<div
 		data-testid="toggle-switch"
+		role="switch"
+		:aria-checked="modelValue"
 		:data-toggle-active="modelValue ? 'true' : 'false'"
 		:data-toggle-disabled="disabled || protected ? 'true' : 'false'"
 		@click="toggle"
+		@keydown.enter.prevent="toggle"
+		@keydown.space.prevent="toggle"
 		:class="[$style.wrapper, modelValue && $style.active, (disabled || protected) && $style.disabled]"
 		:style="{ background: modelValue ? props.color : '' }"
-		tabindex="1"
+		:tabindex="disabled || protected ? -1 : 0"
 	>
 		<div
 			v-if="!disabled"

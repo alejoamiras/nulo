@@ -92,13 +92,11 @@ const onKeydown = (e) => {
 		@submit="handleUpdateAccount"
 	>
 		<ItemsContainer>
-			<SettingItem
-				size="large"
-				:title="accountToEdit.name"
-				description="Selected account for editing"
-				icon="vault"
-				raw
-			/>
+			<SettingItem size="large" :title="accountToEdit.name" description="Selected account for editing" raw>
+				<template #icon>
+					<AccountAvatar :name="accountToEdit.name" :address="accountToEdit.address" :size="20" />
+				</template>
+			</SettingItem>
 		</ItemsContainer>
 
 		<Input

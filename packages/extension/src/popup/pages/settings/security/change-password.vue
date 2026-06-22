@@ -159,6 +159,7 @@ onBeforeUnmount(() => {
 								<button
 									type="button"
 									@click="isPasswordType = !isPasswordType"
+									tabindex="-1"
 									:class="$style.visibility_btn"
 									:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
 								>
@@ -199,6 +200,7 @@ onBeforeUnmount(() => {
 								<button
 									type="button"
 									@click="isPasswordType = !isPasswordType"
+									tabindex="-1"
 									:class="$style.visibility_btn"
 									:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
 								>

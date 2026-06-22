@@ -10,6 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { mount, flushPromises } from "@vue/test-utils"
+import { defineComponent, ref } from "vue"
 
 vi.mock("focus-trap", () => ({
 	createFocusTrap: vi.fn(() => ({
@@ -98,9 +99,13 @@ describe("ui/Dropdown — DropdownItem", () => {
 		expect(w.text()).toContain("Action one")
 	})
 
-	test("has tabindex='1' for keyboard navigation by DropdownRoot", () => {
+	// (frontend-ux-fixes P5a) was tabindex="1" (a positive value corrupts whole-document tab order);
+	// now tabindex="0" + a stable `data-dropdown-item` hook so DropdownRoot's arrow-nav isn't coupled to
+	// the tabindex literal.
+	test("is focusable (tabindex='0') and tagged data-dropdown-item for DropdownRoot arrow-nav", () => {
 		const w = mount(DropdownItem, { slots: { default: "X" } })
-		expect(w.attributes("tabindex")).toBe("1")
+		expect(w.attributes("tabindex")).toBe("0")
+		expect(w.attributes("data-dropdown-item")).toBeDefined()
 	})
 
 	test("wrapper carries the wrapper CSS-module class", () => {
@@ -231,5 +236,37 @@ describe("ui/Dropdown — DropdownRoot", () => {
 		await w.setProps({ forceOpen: false })
 		await flushPromises()
 		expect(w.emitted("onClose")).toBeTruthy()
+	})
+
+	// (frontend-ux-fixes P5a) regression pin: arrow-nav must keep finding items after the
+	// `[tabindex="1"]` → `[data-dropdown-item]` selector change (else changing DropdownItem's tabindex
+	// silently breaks keyboard nav — the codex HIGH). The Flex stub here exposes `wrapper` (the real
+	// Flex's contract that DropdownRoot queries) so the nav can run.
+	test("ArrowDown navigates between data-dropdown-item elements", async () => {
+		const FlexWithWrapper = defineComponent({
+			inheritAttrs: false,
+			setup(_, { expose }) {
+				const wrapper = ref<HTMLElement | null>(null)
+				expose({ wrapper })
+				return { wrapper }
+			},
+			template: '<div ref="wrapper" v-bind="$attrs"><slot /></div>',
+		})
+		const w = mount(DropdownRoot, {
+			props: { forceOpen: false },
+			slots: {
+				default: "<button>Open</button>",
+				popup: '<div data-dropdown-item tabindex="0" id="ditem-0">A</div><div data-dropdown-item tabindex="0" id="ditem-1">B</div>',
+			},
+			attachTo: document.body,
+			global: { stubs: { ...STUBS, Flex: FlexWithWrapper } },
+		})
+		await w.setProps({ forceOpen: true })
+		await flushPromises()
+		document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }))
+		expect(document.activeElement?.id).toBe("ditem-0")
+		document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }))
+		expect(document.activeElement?.id).toBe("ditem-1")
+		w.unmount()
 	})
 })

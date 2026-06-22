@@ -13,6 +13,7 @@
  */
 import { trimAddress } from "@/utils/string"
 import { isValidHex } from "@/utils/string"
+import { useToast } from "@/composables/toast"
 
 const props = defineProps({
 	candidates: { type: Array, default: () => [] },
@@ -22,6 +23,9 @@ const searchTerm = defineModel("searchTerm", { type: String, default: "" })
 const selectedContact = defineModel("selectedContact", { default: null })
 
 const isSearchInputFocused = ref(false)
+const justCleared = ref(false)
+
+const { openToast } = useToast()
 
 const filteredContacts = computed(() => {
 	if (!searchTerm.value) return []
@@ -38,6 +42,15 @@ const handleSelectContact = (contact) => {
 	selectedContact.value = contact
 	searchTerm.value = contact.address
 }
+
+const handleChange = () => {
+	selectedContact.value = null
+	searchTerm.value = ""
+	justCleared.value = true
+	isSearchInputFocused.value = true
+}
+
+const onCopied = () => openToast({ label: "Address copied", icon: "copy" }, 2_000)
 
 const handleSearchBlur = () => {
 	if (searchTerm.value !== selectedContact.value?.address) {
@@ -78,68 +91,63 @@ onBeforeUnmount(() => {
 	<div :class="$style.recipient_section">
 		<span :class="$style.section_label">Recipient Address</span>
 		<div data-testid="send-destination-field" :class="$style.recipient_wrap">
-			<Input
-				v-model="searchTerm"
-				@focus="isSearchInputFocused = true"
-				@blur="handleSearchBlur()"
-				placeholder="0x... or contact name"
-			>
-				<template #suffix>
-					<Flex v-if="selectedContact" align="center" gap="6" :class="$style.input_right">
-						<Icon name="vault" size="12" color="primary" />
-						<Text size="13" weight="600" color="primary" noWrap>
-							{{ selectedContact?.name }}
-						</Text>
-					</Flex>
-					<Flex
-						v-else-if="!isSearchInputFocused && !isValidAddress && searchTerm.length > 0"
-						align="center"
-						gap="6"
-						:class="$style.input_right"
-					>
-						<Icon name="warning" size="12" color="primary" />
-					</Flex>
-					<Flex
-						v-else-if="!isSearchInputFocused && isValidAddress"
-						align="center"
-						:class="$style.input_right"
-					>
-						<Icon name="check-circle" size="14" color="primary" />
-					</Flex>
-				</template>
-			</Input>
+			<RecipientCard
+				v-if="selectedContact"
+				:name="selectedContact.name"
+				:address="selectedContact.address"
+				@change="handleChange"
+				@copied="onCopied"
+			/>
 
-			<Transition name="fade">
-				<Flex v-if="showSuggestions" align="center" direction="column" wide :class="$style.contacts_wrapper">
-					<Flex
-						v-for="c in filteredContacts"
-						@click="handleSelectContact(c)"
-						align="center"
-						gap="10"
-						:class="$style.contact"
-						wide
-					>
+			<template v-else>
+				<AddressInput
+					v-model="searchTerm"
+					:autofocus="justCleared"
+					@focus="isSearchInputFocused = true"
+					@blur="handleSearchBlur()"
+					placeholder="0x... or contact name"
+				>
+					<template #suffix>
 						<Flex
-							v-if="c.abbr"
+							v-if="!isSearchInputFocused && !isValidAddress && searchTerm.length > 0"
 							align="center"
-							justify="center"
-							:class="$style.contact_avatar"
+							gap="6"
+							:class="$style.input_right"
 						>
-							<Text size="10" weight="600" color="primary">{{ c.abbr }}</Text>
+							<Icon name="warning" size="12" color="primary" />
 						</Flex>
-						<Flex v-else align="center" justify="center">
-							<Icon name="vault" size="28" scale="1.2" color="secondary" />
+						<Flex
+							v-else-if="!isSearchInputFocused && isValidAddress"
+							align="center"
+							:class="$style.input_right"
+						>
+							<Icon name="check-circle" size="14" color="primary" />
 						</Flex>
+					</template>
+				</AddressInput>
 
-						<Flex direction="column" gap="4" wide>
-							<Text size="14" weight="600" color="primary" :class="$style.title">{{ c.name }}</Text>
-							<Text size="12" weight="500" color="tertiary" :class="$style.description">
-								{{ trimAddress(c.address) }}
-							</Text>
+				<Transition name="fade">
+					<Flex v-if="showSuggestions" align="center" direction="column" wide :class="$style.contacts_wrapper">
+						<Flex
+							v-for="c in filteredContacts"
+							@click="handleSelectContact(c)"
+							align="center"
+							gap="10"
+							:class="$style.contact"
+							wide
+						>
+							<AccountAvatar :name="c.name" :address="c.address" :size="28" />
+
+							<Flex direction="column" gap="4" wide>
+								<Text size="14" weight="600" color="primary" :class="$style.title">{{ c.name }}</Text>
+								<Text size="12" weight="500" color="tertiary" :class="$style.description">
+									{{ trimAddress(c.address) }}
+								</Text>
+							</Flex>
 						</Flex>
 					</Flex>
-				</Flex>
-			</Transition>
+				</Transition>
+			</template>
 		</div>
 	</div>
 </template>
@@ -213,14 +221,6 @@ onBeforeUnmount(() => {
 		}
 
 		&:active {
-			background: var(--nulo-surface-high);
-		}
-
-		.contact_avatar {
-			width: 28px;
-			height: 28px;
-			flex-shrink: 0;
-
 			background: var(--nulo-surface-high);
 		}
 

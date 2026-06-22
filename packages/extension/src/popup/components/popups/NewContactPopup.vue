@@ -222,7 +222,7 @@ const onKeydown = (e) => {
 			</template>
 		</Input>
 
-		<Input
+		<AddressInput
 			label="Address"
 			placeholder="0x15c4ac6afcffdf59aa8a1fb3317ff0c86aee3eb02f9e52c3612e1163d4701446"
 			sanitize
@@ -240,7 +240,7 @@ const onKeydown = (e) => {
 					</Flex>
 				</Transition>
 			</template>
-		</Input>
+		</AddressInput>
 
 		<Flex
 			align="center"

@@ -144,10 +144,12 @@ const handleCopyAddress = (target) => {
 						@click="handleShowAccount(account)"
 						:title="account.name"
 						:description="account.address"
-						icon="vault"
 						data-testid="manage-accounts-hidden-row"
 						:data-account-name="account.name"
 					>
+						<template #icon>
+							<AccountAvatar :name="account.name" :address="account.address" :size="20" />
+						</template>
 						<template #right>
 							<Icon name="arrow-back-up" size="14" color="secondary" />
 						</template>

@@ -194,7 +194,9 @@ const onKeydown = (event) => {
 	}
 
 	if (event.key === "ArrowDown") {
-		const itemsToNavigate = dropdown.value.wrapper.querySelectorAll('[tabindex = "1"]')
+		if (!dropdown.value?.wrapper) return
+		const itemsToNavigate = dropdown.value.wrapper.querySelectorAll("[data-dropdown-item]")
+		if (!itemsToNavigate.length) return
 		const activeItemIdx = [...itemsToNavigate].findIndex((item) => item.isEqualNode(document.activeElement))
 
 		if (activeItemIdx === -1 || activeItemIdx === itemsToNavigate.length - 1) {
@@ -205,7 +207,9 @@ const onKeydown = (event) => {
 	}
 
 	if (event.key === "ArrowUp") {
-		const itemsToNavigate = dropdown.value.wrapper.querySelectorAll('[tabindex = "1"]')
+		if (!dropdown.value?.wrapper) return
+		const itemsToNavigate = dropdown.value.wrapper.querySelectorAll("[data-dropdown-item]")
+		if (!itemsToNavigate.length) return
 		const activeItemIdx = [...itemsToNavigate].findIndex((item) => item.isEqualNode(document.activeElement))
 
 		if (activeItemIdx === -1 || activeItemIdx === 0) {

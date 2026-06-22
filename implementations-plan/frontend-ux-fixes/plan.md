@@ -44,7 +44,7 @@ network e2e — clarifying answer).
 `bun run --cwd packages/extension test -- run src/popup/components/popups/EditContactPopup src/popup/components/popups/NewContactPopup src/popup/pages/settings/index`
 · `bun run build`. Pass: all exit 0. Layers: typecheck · lint · component · build.
 
-### P2 — Account indicator: retire `vault` → initials avatar (#4, non-Send) ☐
+### P2 — Account indicator: retire `vault` → initials avatar (#4, non-Send) ✓
 `vault` is removed everywhere (4 sites; census confirmed by both auditors). The two NON-Send sites are
 account-row indicators → replace with an **initials avatar** (the Send sites `RecipientField.vue:89,131`
 are owned by P3). Reuse the existing contact-initials chip pattern already in the recipient suggestion
@@ -66,7 +66,7 @@ color, so contacts and accounts share one avatar component.
 (avatar renders; no `vault`) · `! grep -rn 'name="vault"\|icon="vault"' packages/extension/src` (must be
 empty AFTER P3) · `bun run build`. Layers: typecheck · lint · component · build.
 
-### P3 — Send recipient card (#3) + remove Send `vault` (#4 Send) ☐
+### P3 — Send recipient card (#3) + remove Send `vault` (#4 Send) ✓
 `RecipientField.vue:9-13` shows a selected contact/account as `<Icon vault> + <Text name>`. Replace with
 a **card**:
 1. New presentational `RecipientCard` (L3 composite): the `AccountAvatar` (from P2) + the recipient
@@ -91,7 +91,7 @@ a **card**:
 no `vault`) · `bun run test:e2e` (send smoke selects a recipient; no NEW smoke failures) · `bun run build`.
 Layers: typecheck · lint · component · smoke · build.
 
-### P4 — Address-input read affordance (#2) ☐
+### P4 — Address-input read affordance (#2) ✓
 A long address in the shared native `<input>` scrolls (cursor-following) so at rest the `0x…` prefix is
 hidden and "jumps" on focus. **Do NOT change `@nulo/design/Input`'s value or add wallet semantics to the
 package core** (audit: layering + paste/selection/a11y risk). Fix extension-side:
@@ -112,7 +112,7 @@ package core** (audit: layering + paste/selection/a11y risk). Fix extension-side
 contact/send field; the value submits intact) · `bun run build`. Layers: typecheck · lint · component ·
 smoke · build.
 
-### P5a — Shared focus primitives + the create/profile-new seam (the convention anchor) ☐
+### P5a — Shared focus primitives + the create/profile-new seam (the convention anchor) ✓
 Root cause (CORRECTED TWICE — the first draft's "DOM order" was wrong; the second draft's "remove the
 tabindex" was ALSO wrong because the nodes are `<div>`s. Final-pass HIGH). Three real causes:
 - **Positive tabindex on non-focusable elements:** `Toggle.vue:27` (a `<div>`, `@click` only) and
