@@ -1,11 +1,29 @@
 # Post-implementation audit — frontend UX fixes (P1–P5b)
 
-**Codex (`xhigh`) was launched** (`/tmp/codex-fuxfixes-postimpl.md`, session dir `codex-PSYEpKGF`) but
-**stalled service-side mid-audit** — its log shows it analyzing files, then repeated
-`stream disconnected before completion: IO error: Connection reset by peer` / "Reconnecting… 3/5". Same
-codex-stall pattern documented in `aztec-5.0-upgrade` + `no-fuel-claim-fee-source`. Per that established
-fallback, the post-impl review below is a **rigorous documented self-audit**; re-run codex when the
-service/network recovers to reconcile (it can only add findings — nothing here is gated on it).
+**Codex (`xhigh`) eventually completed** (session `019eec34-8302-7941-abc9-53ff351189ae`) after several
+mid-run network drops (`Connection reset by peer` / "Reconnecting…"). Its verdict: **no high/critical**,
+confirming the self-audit below — and it independently verified the load-bearing safety property (the
+submit address never diverges from the card's displayed address) + no XSS + AddressInput value-preservation.
+It added 2 MEDIUM + 3 LOW.
+
+**Codex findings + disposition:**
+- **MED — disabled dropdown items keyboard-reachable + Enter-activatable** (`DropdownItem` kept disabled
+  at `tabindex=0`; `DropdownRoot` Enter does `activeElement.click()`). **FIXED** (commit `733c152`):
+  disabled → `tabindex=-1` + no `data-dropdown-item` (out of Tab order AND arrow-nav); Enter gated on
+  `aria-disabled`. Test added.
+- **MED — show/hide-password buttons no longer keyboard-operable** (P5b's `tabindex=-1` removed them from
+  Tab with no replacement → WCAG 2.1.1). **ACCEPTED TRADEOFF (user decision).** Surfaced with three
+  options (reposition / keep-as-is / restore-standard); the user chose **keep-as-is** — field→field flow
+  is the priority, the eye stays `tabindex=-1` (mouse + screen-reader reachable, not Tab-reachable). The
+  password fields remain fully usable without it; toggling visibility is a convenience. Documented as a
+  deliberate, owner-accepted gap, NOT an oversight.
+- **LOW — silent clipboard failure** on the recipient card. **FIXED** (`733c152`): emits `copy-error` →
+  RecipientField toasts a warning. Test added.
+- **LOW — test gaps** for the two MEDs. **FIXED**: disabled-item + copy-error tests added.
+- **LOW — avatar color could read as an identity signal** on the send surface. Acknowledged; it is
+  decoration only and we deliberately do NOT use color in any verification copy/assertion. No change.
+
+The rigorous self-audit (done while codex was stalled) is retained below; it reached the same conclusion.
 
 Scope: the uncommitted change set P1–P5b on `feat/frontend-ux-batch-1`. Verified against code + the full
 `audit:vue` (typecheck → unit/component suite → lint → build, all green) + the smoke suite (69/76 pass; the

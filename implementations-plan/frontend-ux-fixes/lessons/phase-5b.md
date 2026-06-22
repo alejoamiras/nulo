@@ -41,10 +41,17 @@ Plus the P5a primitives (`Toggle`, `DropdownItem`/`DropdownRoot`) and the roving
   Smoke is advisory (per CLAUDE.md), and this failure is independent of the PR. The 18 other smoke files
   (incl. contacts, accounts, settings-crud, registration, onboarding, auth-flows, security) all pass.
 
+## Post-impl codex finding on the swept buttons (resolved)
+Codex's post-impl audit flagged that `tabindex="-1"` on the show/hide-password buttons is a WCAG-2.1.1
+keyboard-access gap. Surfaced to the user with 3 options (reposition after the field group / keep-as-is /
+restore standard tabbing). **User chose KEEP-AS-IS** — field→field flow is the priority; the eye stays
+`tabindex="-1"` (mouse + screen-reader reachable). Recorded as a deliberate owner-accepted tradeoff in
+`audit-postimpl.md` + the CLAUDE.md convention. No code change.
+
 ## Human sign-off (REQUIRED — not yet recorded)
-The plan's gate forbids marking P5b ✓ without the human keyboard + visual sign-off. Checklist handed to
-the user (keyboard Tab-through of: onboarding create, unlock, change-password, import, send, contacts,
-settings + the edit popups; visual check of the initials avatars + the Send recipient card). To be recorded
-here on sign-off.
+The plan's gate forbids marking P5b ✓ without the human keyboard + visual sign-off. The eye-a11y DECISION
+is made (above); the remaining confirmation is the actual keyboard Tab-through (onboarding create, unlock,
+change-password, import, send, contacts, settings + edit popups) + the visual check (initials avatars, the
+Send recipient card, long-address-at-rest in the contact/send inputs). To be recorded here on sign-off.
 
 LESSONS_FILE=implementations-plan/frontend-ux-fixes/lessons/phase-5b.md
