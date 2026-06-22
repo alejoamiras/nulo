@@ -148,7 +148,10 @@ if (import.meta.main) {
 			// --allow-empty: if main already carries this manifest value, the sync PR still
 			// opens (it carries main's release commits into dev even with no manifest delta).
 			await $`git -c user.name=${BOT_NAME} -c user.email=${BOT_EMAIL} commit --allow-empty -m ${`chore: re-baseline prerelease manifest to ${version}`}`
-			await $`git push -u origin ${branch} --force-with-lease`
+			// Fresh per-version branch on the normal path. A non-fast-forward here means a
+			// stale branch from a prior partial run (the push landed but openPr then failed) —
+			// fail loud so a human deletes it + re-runs, rather than force-pushing.
+			await $`git push -u origin ${branch}`
 		},
 		async openPr(branch, title, body) {
 			const out = await $`gh pr create --base dev --head ${branch} --title ${title} --body ${body}`.text()

@@ -98,6 +98,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: write # autorelease:* / needs-manual-resolution label ops go through the issues API
     outputs:
       unstuck: ${{ steps.u.outputs.unstuck }}
       tag_name: ${{ steps.u.outputs.tag_name }}
@@ -440,6 +441,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: write # autorelease:* / needs-manual-resolution label ops go through the issues API
     steps:
       # App token so the sync PR is bot-opened → dev's required CI fires
       # (a GITHUB_TOKEN-opened PR suppresses the pull_request workflow), and the
