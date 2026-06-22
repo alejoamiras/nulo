@@ -190,7 +190,7 @@ onBeforeUnmount(() => {
 const onKeydown = (event) => {
 	if (event.key === "Escape") close()
 	if (event.key === "Enter") {
-		document.activeElement.click()
+		if (document.activeElement?.getAttribute("aria-disabled") !== "true") document.activeElement?.click()
 	}
 
 	if (event.key === "ArrowDown") {

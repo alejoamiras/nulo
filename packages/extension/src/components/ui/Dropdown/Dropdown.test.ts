@@ -118,6 +118,14 @@ describe("ui/Dropdown — DropdownItem", () => {
 		expect(w.attributes("class") ?? "").toMatch(/disabled/)
 	})
 
+	// (P5a post-impl, codex MEDIUM) a disabled item must be OUT of the Tab order AND the arrow-nav set,
+	// so it can't be focused + Enter-activated (DropdownRoot's Enter does activeElement.click()).
+	test("a disabled item is unfocusable (tabindex=-1) and excluded from arrow-nav (no data-dropdown-item)", () => {
+		const w = mount(DropdownItem, { props: { disabled: true }, slots: { default: "X" } })
+		expect(w.attributes("tabindex")).toBe("-1")
+		expect(w.attributes("data-dropdown-item")).toBeUndefined()
+	})
+
 	test("non-disabled item does NOT have the disabled class", () => {
 		const w = mount(DropdownItem, { slots: { default: "X" } })
 		expect(w.attributes("class") ?? "").not.toMatch(/disabled/)

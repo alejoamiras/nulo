@@ -51,6 +51,7 @@ const handleChange = () => {
 }
 
 const onCopied = () => openToast({ label: "Address copied", icon: "copy" }, 2_000)
+const onCopyError = () => openToast({ label: "Couldn't copy — select the address to copy it", icon: "warning", color: "red" }, 2_000)
 
 const handleSearchBlur = () => {
 	if (searchTerm.value !== selectedContact.value?.address) {
@@ -97,6 +98,7 @@ onBeforeUnmount(() => {
 				:address="selectedContact.address"
 				@change="handleChange"
 				@copied="onCopied"
+				@copy-error="onCopyError"
 			/>
 
 			<template v-else>

@@ -14,7 +14,7 @@ const props = defineProps<{
 	name?: string
 	address: string
 }>()
-const emit = defineEmits<{ change: []; copied: [] }>()
+const emit = defineEmits<{ change: []; copied: []; "copy-error": [] }>()
 
 /** Reactive state */
 const revealed = ref(false)
@@ -42,7 +42,7 @@ const handleCopy = async () => {
 		}, 1500)
 		emit("copied")
 	} catch {
-		// best-effort; the parent may surface a toast on the `copied` event
+		emit("copy-error")
 	}
 }
 

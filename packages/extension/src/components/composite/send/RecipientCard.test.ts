@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { mount } from "@vue/test-utils"
+import { flushPromises, mount } from "@vue/test-utils"
 import RecipientCard from "./RecipientCard.vue"
 
 const STUBS = {
@@ -88,6 +88,16 @@ describe("composite/send/RecipientCard", () => {
 		await w.get('[data-testid="recipient-card-copy"]').trigger("click")
 		await w.vm.$nextTick()
 		expect(w.get('[data-testid="recipient-card-copy"]').text()).toContain("Copied")
+	})
+
+	test("copy emits 'copy-error' (not 'copied') when the clipboard write fails", async () => {
+		writeText.mockRejectedValueOnce(new Error("denied"))
+		const w = mountCard({ name: "Alice" })
+		await w.get('[data-testid="recipient-card-reveal"]').trigger("click")
+		await w.get('[data-testid="recipient-card-copy"]').trigger("click")
+		await flushPromises()
+		expect(w.emitted("copy-error")).toBeTruthy()
+		expect(w.emitted("copied")).toBeFalsy()
 	})
 
 	test("the change button emits 'change'", async () => {
