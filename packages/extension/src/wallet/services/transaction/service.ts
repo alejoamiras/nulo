@@ -13,6 +13,7 @@ import { EntityStorage } from "@/wallet/storage"
 import { sleep } from "@/wallet/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
+import type { BrowserApi } from "@nulo/wallet-core/ports"
 import {
 	type Tx,
 	type TxGasDetails,
@@ -36,7 +37,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	public readonly onTransactionUpdated = new EventHandler<Tx>()
 	public readonly onTransactionDeleted = new EventHandler<Tx>()
 
-	private readonly txs = new EntityStorage<Tx>("nulo:core:txs", chrome.storage.local)
+	private readonly txs: EntityStorage<Tx>
 	private readonly pending = new Map<string, Tx>()
 
 	private profileService: ProfileService = null!
@@ -44,8 +45,9 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	private networkService: NetworkService = null!
 	private pxeService: PxeServiceClient = null!
 
-	public constructor(logger: ILogger) {
+	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(TRANSACTION_SERVICE_NAME, logger)
+		this.txs = new EntityStorage<Tx>("nulo:core:txs", browserApi.storage.local)
 	}
 
 	protected async init(services: ServiceCollection) {

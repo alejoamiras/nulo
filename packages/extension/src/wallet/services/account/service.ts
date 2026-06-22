@@ -10,6 +10,7 @@ import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { array_max, hasIntersectionByKeys } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
+import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { NuloAccount, type IAccountContract } from "@nulo/aztec-runtime/account"
 import { ACCOUNT_SERVICE_NAME, AccountType, type Account, type Events, type Methods } from "./spec"
 
@@ -30,12 +31,13 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public readonly onAccountUpdated = new EventHandler<Account>()
 	public readonly onAccountDeleted = new EventHandler<Account>()
 
-	private readonly storage = new EntityStorage<Account>("nulo:core:accounts", chrome.storage.local)
+	private readonly storage: EntityStorage<Account>
 
 	private profileService: ProfileService = null!
 
-	public constructor(logger: ILogger) {
+	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(ACCOUNT_SERVICE_NAME, logger)
+		this.storage = new EntityStorage<Account>("nulo:core:accounts", browserApi.storage.local)
 	}
 
 	protected async init(services: ServiceCollection): Promise<void> {
