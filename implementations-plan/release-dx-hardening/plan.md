@@ -109,7 +109,7 @@ Create `alejoamiras/nulo-release-rehearsal` (disposable; relaxed signing; dummy 
 
 **Validation gate** — `bun test scripts/release/verify-live.test.ts` (HTML↔JSON buildId mismatch → fail; match → pass; unreachable → retry-then-fail-closed; **fresh-json-but-stale-html → fail**); a `describe.skipIf(!LIVE)` integration test against the real sites; `bun run lint:actions`. **Test repo:** rehearse deploy-hook ordering + `verify-live` PASS (matched) AND intentional FAIL (forced split-cache/stale) against throwaway sites/mocks. Layers: unit · live-skipIf · actionlint · test-repo.
 
-### Phase 6 — Auto-unstick the v4 abort (surgery — in-run, guarded; built before the sync that depends on it)
+### Phase 6 — Auto-unstick the v4 abort (surgery — in-run, guarded; built before the sync that depends on it) — ✓ DONE (flag OFF; test-repo rehearsal → staged flag-off release; verify §lessons/phase-6.md)
 
 **Inside `release.yml`** (codex — no second workflow → stays in the single `concurrency: release` group, closing the cross-group race, F10): after `release-please`, **only when** `release_created != true` AND `github.event_name == 'push'` AND **the PR attached to `github.sha` is a merged `autorelease: pending` Release PR with base `main`** (an explicit PR-to-SHA check — **NOT** a title/heuristic guard, which would be unsafe — assumption-attack), run an idempotent `auto-unstick.ts` (create tag if-not-exists, asserting **tag SHA == that merge SHA**; create release if-not-exists; relabel) → continue the **same** publish DAG, which emits the publish-complete signal Phase 7 keys off. Behind `vars.AUTO_UNSTICK_ENABLED` (default off — A7); manual unstick stays the documented fallback.
 

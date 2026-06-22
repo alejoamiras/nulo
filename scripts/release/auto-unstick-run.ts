@@ -104,3 +104,84 @@ export async function runUnstick(opts: RunUnstickOpts): Promise<RunUnstickResult
 		}
 	}
 }
+
+// CLI entry — the `auto-unstick` release job runs `bun scripts/release/auto-unstick-run.ts`.
+// Skipped on import (import.meta.main is false in the unit tests, which inject a fake IO).
+// The real IO shells out to `gh` + `git`; the decision + action-mapping above are what's
+// unit-tested, so this boundary stays a thin, un-mocked wrapper.
+if (import.meta.main) {
+	const { $ } = await import("bun")
+	const repo = process.env.GITHUB_REPOSITORY ?? ""
+	// github-actions[bot] identity for the annotated tag (tags need no signature —
+	// main's signed-commits rule covers commits, and the tag points at the already
+	// bot-signed merge commit).
+	const BOT_NAME = "github-actions[bot]"
+	const BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
+
+	const realIO: UnstickIO = {
+		async resolveMergedPr(headSha) {
+			const res = await $`gh api ${`repos/${repo}/commits/${headSha}/pulls`} --jq ${".[0] // empty"}`.nothrow().quiet()
+			if (res.exitCode !== 0) return null
+			const out = res.stdout.toString().trim()
+			if (!out) return null
+			const pr = JSON.parse(out) as {
+				number?: number
+				merged_at?: string | null
+				base?: { ref?: string }
+				labels?: Array<{ name: string }>
+				merge_commit_sha?: string
+			}
+			if (!pr.number) return null
+			return {
+				number: pr.number,
+				merged: pr.merged_at != null,
+				baseRef: pr.base?.ref ?? "",
+				labels: (pr.labels ?? []).map((l) => l.name),
+				mergeSha: pr.merge_commit_sha ?? "",
+			}
+		},
+		async resolveTagSha(tag) {
+			const ref = `${tag}^{commit}`
+			const res = await $`git rev-parse --verify --quiet ${ref}`.nothrow().quiet()
+			if (res.exitCode !== 0) return null
+			return res.stdout.toString().trim() || null
+		},
+		async createTag(tag, sha, message) {
+			await $`git -c user.name=${BOT_NAME} -c user.email=${BOT_EMAIL} tag -a ${tag} ${sha} -m ${message}`
+			await $`git push origin ${tag}`
+		},
+		async relabelPr(prNumber, add, remove) {
+			await $`gh pr edit ${String(prNumber)} --add-label ${add} --remove-label ${remove}`
+		},
+		async createRelease(tag, prerelease) {
+			const flags = ["release", "create", tag, "--verify-tag", "--title", tag, "--notes", "Filled by publish run."]
+			if (prerelease) flags.push("--prerelease")
+			await $`gh ${flags}`
+		},
+		log: (m) => console.log(m),
+	}
+
+	const version = process.env.VERSION?.trim() || ((await Bun.file("package.json").json()) as { version: string }).version
+	const flag = (process.env.AUTO_UNSTICK_ENABLED ?? "").trim().toLowerCase()
+
+	const result = await runUnstick({
+		autoUnstickEnabled: flag === "on" || flag === "true" || flag === "1",
+		releaseCreated: (process.env.RELEASE_CREATED ?? "").trim() === "true",
+		eventName: process.env.EVENT_NAME ?? "",
+		headSha: process.env.HEAD_SHA ?? "",
+		version,
+		io: realIO,
+	})
+
+	// Feed the downstream `resolve` job: `unstuck=true` (+ the tag) only when we
+	// actually created the release, so the publish chain continues on exactly the
+	// abort path and stays skipped (today's manual-unstick behavior) otherwise.
+	const ghOut = process.env.GITHUB_OUTPUT
+	if (ghOut) {
+		const { appendFileSync } = await import("node:fs")
+		const unstuck = result.action === "create" ? "true" : "false"
+		const tagName = result.action === "create" ? `v${version}` : ""
+		appendFileSync(ghOut, `unstuck=${unstuck}\ntag_name=${tagName}\n`)
+	}
+	process.exit(result.exitCode)
+}
