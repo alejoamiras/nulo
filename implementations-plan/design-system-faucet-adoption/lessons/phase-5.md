@@ -1,6 +1,6 @@
 # Phase 5 — Human visual sign-off gate
 
-**Status:** IN PROGRESS — visual review round 1 found a regression; fixed; awaiting re-review + final sign-off. (Not ✓ until the user signs off.)
+**Status:** ✅ DONE — user sign-off 2026-06-22 ("this worked perfectly") after the round-1 `gap--28` fix. Squash-merge to dev + dev-server close authorized once CI is all-green.
 
 ## Round 1 finding (the human gate did its job — machine-invisible regression)
 
