@@ -388,7 +388,7 @@ function fmt(b: bigint | null): string {
 				</button>
 				<button type="button" class="mode" :class="{ sel: !isPrivate }" :disabled="submitting" :data-testid="TESTIDS.bridgePresetPublic" :aria-pressed="!isPrivate" @click="isPrivate = false">
 					<span class="mt">PUBLIC</span>
-					<span class="md">Tokens and gas arrive visible on Aztec. Anyone can see the amount and recipient. Cheapest and simplest.</span>
+					<span class="md">Tokens and gas arrive visible on Aztec. Anyone can see the amount and recipient.</span>
 				</button>
 			</div>
 		<!-- ADD-ON: fuel (gas on arrival), only on L1->L2. -->

@@ -117,7 +117,7 @@ function fmt(b: bigint | null): string {
 				</button>
 				<button type="button" class="mode" :class="{ sel: !isPrivate }" :disabled="submitting" :data-testid="TESTIDS.fuelPresetPublic" :aria-pressed="!isPrivate" @click="isPrivate = false">
 					<span class="mt">PUBLIC</span>
-					<span class="md">Gas arrives in your public Fee Juice balance, visible on Aztec. Cheapest and simplest.</span>
+					<span class="md">Gas arrives in your public Fee Juice balance, visible on Aztec.</span>
 				</button>
 			</div>
 
