@@ -85,7 +85,7 @@ Pull the fragile release logic out of YAML into `scripts/release/*.ts` (`bun:tes
 
 **Validation gate** — `bun test scripts/release/` green (≥10 cases each: empty-tag, prerelease suffix, missing-asset, wrong-SHA…); `bun run lint:actions` (actionlint) + shellcheck clean. **No behavior change, no test repo.** Layers: unit · actionlint.
 
-### Phase 2 — Cheap config wins (cheap-config)
+### Phase 2 — Cheap config wins (cheap-config) — ✓ DONE (bump-minor empirical → Phase 4)
 
 (a) `bump-minor-pre-major: true` in `release-please-config.json` **+ the prerelease config** (A6 mirror); (b) commitlint: **add a merge-subject lint** (currently missing entirely, F4) — on `base==main`, lint the **synthetic merge subject** `<PR title> (#n)` (NOT just the title: GitHub appends `(#n)` to the merge commit, which can push an otherwise-fine title past the 100-char header cap, codex Medium), and drop the historical range; keep range-lint for dev PRs; (c) remove the inline polyfill from `faucet/index.html` + `playground/index.html` (F7); (d) fix `CI.md` doc-drift (prerelease built, not deferred; commitlint actually lints range not title).
 
