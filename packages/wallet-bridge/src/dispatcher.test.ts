@@ -532,6 +532,58 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 		expect(accountsResult?.canCreateAuthWit).toBe(false)
 		expect(accountsResult?.canGet).toBe(true)
 	})
+
+	// Q11: the grant-response path projects via the shared `projectSessionAccounts`
+	// helper. These pin the `accounts` ARRAY contents on the enrich path (previously
+	// only the canGet/canCreateAuthWit flags were tested here), so the helper
+	// substitution is verified character-for-character on the wire.
+	function makeAccountsEnrichDispatcher(canGet: boolean): { dispatcher: WalletSdkDispatcher } {
+		const a1 = `0x${"11".repeat(32)}`
+		const a2 = `0x${"22".repeat(32)}`
+		const a3 = `0x${"33".repeat(32)}`
+		const caip1 = `aztec:0:${a1}`
+		const caip2 = `aztec:0:${a2}`
+		const accountReader: IAccountReader = {
+			getAccounts: async () => [
+				{ address: a1, name: "Name1", chainId: 0 },
+				{ address: a2, name: "Name2", chainId: 0 },
+				{ address: a3, name: "Name3", chainId: 0 }, // NOT a session account → filtered out
+			],
+		}
+		const networkReader: INetworkReader = { getNetworks: async () => [{ id: "net-0", chainId: 0 }] }
+		const session = makeSession({
+			accounts: [caip1, caip2],
+			accountAliases: { [caip1]: "alias-1" }, // a1 → alias hit; a2 → name fallback
+			capabilityGrants: [
+				{ capability: { type: "accounts", canGet, canCreateAuthWit: false, accounts: [] } as Capability, grantedAt: 1 },
+			],
+		})
+		const { writer } = makeSessionWriter(session)
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({ granted: [{ type: "accounts", canGet, canCreateAuthWit: false }] })) as never,
+		}
+		return { dispatcher: new WalletSdkDispatcher(networkReader, accountReader, stubExecution, interaction, writer, noopLogger) }
+	}
+
+	test("enrichGrantedCapabilities projects the session accounts array (alias hit / name fallback / filtered) — Q11", async () => {
+		const { dispatcher } = makeAccountsEnrichDispatcher(true)
+		const manifest = { capabilities: [{ type: "accounts", canGet: true, canCreateAuthWit: false }] }
+		const result = (await dispatcher.dispatch("requestCapabilities", [manifest], ctx)) as { granted: Array<Record<string, unknown>> }
+		const accounts = result.granted.find((c) => c.type === "accounts")
+		expect(accounts?.accounts).toEqual([
+			{ alias: "alias-1", item: `0x${"11".repeat(32)}` },
+			{ alias: "Name2", item: `0x${"22".repeat(32)}` },
+		])
+	})
+
+	test("enrichGrantedCapabilities suppresses the accounts array to [] when canGet is false — Q11", async () => {
+		const { dispatcher } = makeAccountsEnrichDispatcher(false)
+		const manifest = { capabilities: [{ type: "accounts", canGet: false, canCreateAuthWit: false }] }
+		const result = (await dispatcher.dispatch("requestCapabilities", [manifest], ctx)) as { granted: Array<Record<string, unknown>> }
+		const accounts = result.granted.find((c) => c.type === "accounts")
+		expect(accounts?.accounts).toEqual([])
+	})
 })
 
 /**

@@ -431,12 +431,27 @@ export class WalletSdkDispatcher {
 		const network = await this.resolveNetwork(ctx)
 		const allAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
 		const sessionAccountAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
+		return this.projectSessionAccounts(allAccounts, sessionAccountAddresses, ctx.chainId, dappSession.accountAliases)
+	}
 
+	/**
+	 * The drift-prone `{ alias, item }` projection shared by `formatSessionAccounts`
+	 * and `enrichGrantedCapabilities`: filter to session members, CAIP-key the alias
+	 * lookup, fall back to the account name then "". Callers own their own
+	 * network/account resolution so each keeps its exact control flow — the grant
+	 * path resolves unconditionally, BEFORE its `canGet` gate, and must keep doing so.
+	 */
+	private projectSessionAccounts<T extends { address: string; name?: string }>(
+		allAccounts: readonly T[],
+		sessionAddresses: Set<string>,
+		chainId: number,
+		aliases: Record<string, string> | undefined,
+	): Array<{ alias: string; item: string }> {
 		return allAccounts
-			.filter((acc) => sessionAccountAddresses.has(acc.address))
+			.filter((acc) => sessionAddresses.has(acc.address))
 			.map((acc) => {
-				const caip = formatCaipAccount(ctx.chainId, acc.address)
-				const alias = dappSession.accountAliases?.[caip] ?? acc.name ?? ""
+				const caip = formatCaipAccount(chainId, acc.address)
+				const alias = aliases?.[caip] ?? acc.name ?? ""
 				return { alias, item: acc.address }
 			})
 	}
@@ -921,7 +936,6 @@ export class WalletSdkDispatcher {
 				const network = await this.resolveNetwork(ctx)
 				const allAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
 				const sessionAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
-				const sessionAccounts = allAccounts.filter((acc) => sessionAddresses.has(acc.address))
 
 				// Read canGet / canCreateAuthWit from the STORED grant, not the
 				// requested cap. The wire response must reflect what was actually
@@ -939,11 +953,7 @@ export class WalletSdkDispatcher {
 				// was exempt). Both paths now require `canGet === true`.
 				const canGet = storedAccounts?.canGet === true
 				const grantedAccounts = canGet
-					? sessionAccounts.map((acc) => {
-							const caip = formatCaipAccount(ctx.chainId, acc.address)
-							const alias = dappSession.accountAliases?.[caip] ?? acc.name ?? ""
-							return { alias, item: acc.address }
-						})
+					? this.projectSessionAccounts(allAccounts, sessionAddresses, ctx.chainId, dappSession.accountAliases)
 					: []
 
 				result.push({
