@@ -1,0 +1,106 @@
+/**
+ * The I/O runner around the pure `decideUnstick` (auto-unstick.ts). Resolves the
+ * live GitHub state the decision needs — the PR attached to `github.sha` and the
+ * tag's current SHA — calls `decideUnstick`, and performs the tag + relabel +
+ * release when (and only when) the decision is `create`.
+ *
+ * Staged-rollout + safety, by construction:
+ *  - The expensive resolution (PR-by-commit, tag SHA) runs ONLY when the kill
+ *    switch is on AND release-please genuinely aborted AND this is a push — so
+ *    the common path (flag off by default, or a normal push) is zero-API.
+ *  - `decideUnstick` is the single source of truth for whether to act; this
+ *    runner only maps its verdict to side effects.
+ *  - `abort` (tag exists at the WRONG sha) exits non-zero — fail-closed, never
+ *    re-points a tag.
+ *  - All I/O is injected, so every branch is unit-testable with zero secrets.
+ */
+
+import { AUTORELEASE_PENDING_LABEL, type AutoUnstickAction, decideUnstick } from "./auto-unstick"
+
+/** release-please labels a merged-but-unpublished Release PR `autorelease: pending`; the publish flips it to `tagged`. */
+export const AUTORELEASE_TAGGED_LABEL = "autorelease: tagged"
+
+export interface MergedPrRef {
+	number: number
+	merged: boolean
+	baseRef: string
+	labels: string[]
+	mergeSha: string
+}
+
+/** The injectable GitHub/git side of the runner — real impls shell out to `gh` / `git` in the workflow. */
+export interface UnstickIO {
+	/** The PR whose merge produced `headSha` (commits→PR association API), or null when HEAD is not a merged PR head. */
+	resolveMergedPr(headSha: string): Promise<MergedPrRef | null>
+	/** The SHA the tag points at, or null if the tag doesn't exist. */
+	resolveTagSha(tag: string): Promise<string | null>
+	createTag(tag: string, sha: string, message: string): Promise<void>
+	relabelPr(prNumber: number, add: string, remove: string): Promise<void>
+	/** Create an EMPTY GitHub Release for the tag; the publish chain fills the notes + assets later. */
+	createRelease(tag: string, prerelease: boolean): Promise<void>
+	log(msg: string): void
+}
+
+export interface RunUnstickOpts {
+	/** `vars.AUTO_UNSTICK_ENABLED` — default OFF (staged rollout); the real-release flip is the human's. */
+	autoUnstickEnabled: boolean
+	/** release-please's `release_created` output — true means it worked, no unstick. */
+	releaseCreated: boolean
+	/** `github.event_name` — only `push` is eligible. */
+	eventName: string
+	/** `github.sha` — the commit the workflow runs on. */
+	headSha: string
+	/** The release version (read from `package.json#version` at HEAD by the workflow), e.g. "0.24.0". */
+	version: string
+	io: UnstickIO
+}
+
+export interface RunUnstickResult {
+	action: AutoUnstickAction
+	reason: string
+	/** true only when a tag + release were actually created. */
+	performed: boolean
+	exitCode: 0 | 1
+}
+
+export async function runUnstick(opts: RunUnstickOpts): Promise<RunUnstickResult> {
+	const { io } = opts
+	const tag = `v${opts.version}`
+
+	// Cheap guards first: resolve the (API-costing) PR + tag state ONLY when the
+	// flag is on, release-please genuinely aborted, and this is a push. The common
+	// path — flag off by default, or a normal push — stays zero-API.
+	const eligible = opts.autoUnstickEnabled && !opts.releaseCreated && opts.eventName === "push"
+	const mergedPr = eligible ? await io.resolveMergedPr(opts.headSha) : null
+	const existingTagSha = mergedPr ? await io.resolveTagSha(tag) : null
+
+	const decision = decideUnstick({
+		autoUnstickEnabled: opts.autoUnstickEnabled,
+		releaseCreated: opts.releaseCreated,
+		eventName: opts.eventName,
+		headSha: opts.headSha,
+		mergedPr,
+		existingTagSha,
+	})
+
+	switch (decision.action) {
+		case "disabled":
+		case "noop":
+		case "skip":
+			io.log(`auto-unstick: ${decision.action} — ${decision.reason}`)
+			return { action: decision.action, reason: decision.reason, performed: false, exitCode: 0 }
+		case "abort":
+			io.log(`auto-unstick: ABORT — ${decision.reason}`)
+			return { action: "abort", reason: decision.reason, performed: false, exitCode: 1 }
+		case "create": {
+			// A hyphen in the version (e.g. 0.24.0-rc.1) means a prerelease GitHub Release.
+			const prerelease = opts.version.includes("-")
+			io.log(`auto-unstick: creating ${tag} at ${decision.tagSha} (Release PR #${decision.prNumber})`)
+			await io.createTag(tag, decision.tagSha as string, `Release ${opts.version}`)
+			await io.relabelPr(decision.prNumber as number, AUTORELEASE_TAGGED_LABEL, AUTORELEASE_PENDING_LABEL)
+			await io.createRelease(tag, prerelease)
+			io.log(`auto-unstick: created ${tag}, relabeled PR #${decision.prNumber} → tagged (prerelease=${prerelease})`)
+			return { action: "create", reason: decision.reason, performed: true, exitCode: 0 }
+		}
+	}
+}
