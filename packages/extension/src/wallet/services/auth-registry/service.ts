@@ -5,6 +5,7 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { maybeRethrowAsRpcCancel } from "@/wallet/services/execution/rpc-cancel"
 import { ExecutionService, type FeeSettings, type AuthwitContent } from "@/wallet/services/execution/service"
 import { ProfileService } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
@@ -398,10 +399,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	}
 
 	public async backup(): Promise<Authwit[] | undefined> {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 
 		const networks = await this.networkService.getNetworks()
 		if (!networks.length) {

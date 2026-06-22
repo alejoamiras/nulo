@@ -27,6 +27,7 @@ import { formatFeeJuice, feeToUsd } from "@/utils/fee-estimation"
 import type { Network } from "@/wallet/services/network/service"
 import type { NewOperationInput, OperationRecord } from "@/wallet/services/operation-journal/spec"
 import type { ProfileInfo } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { type TaskService, type WrappedTask, TransferContent } from "@/wallet/services/task/service"
 import { OriginType, type LocalTxOrigin, type TransactionService, type Tx } from "@/wallet/services/transaction/service"
 import type { IPXE } from "@/wallet/services/pxe/client"
@@ -169,8 +170,7 @@ export class TransferExecutor {
 				network = await this.deps.getNetwork(networkId)
 				node = await this.deps.getNode(network.chainId)
 				pxe = this.deps.getPXE(network)
-				const profile = await this.deps.getActiveProfile()
-				if (!profile) throw new Error("Wallet locked")
+				const profile = await requireActiveProfile(this.deps, "Wallet locked")
 				account = await this.deps.getAccountContract(profile.id, network.chainId, accountAddress)
 			} else {
 				const { op, token, fn, args } = await this.deps.planner.buildTransferOperation(req)
@@ -278,8 +278,7 @@ export class TransferExecutor {
 						feePerDaGas: builtFees.feePerDaGas,
 						feePerL2Gas: builtFees.feePerL2Gas,
 					})
-					const profile = await this.deps.getActiveProfile()
-					if (!profile) throw new Error("Wallet locked")
+					const profile = await requireActiveProfile(this.deps, "Wallet locked")
 					const pendingHashes = this.deps.getPendingForAccount(accountAddress).map((tx) => tx.hash)
 					estimateId = crypto.randomUUID()
 					this.deps.estimateReuse.stash(estimateId, {

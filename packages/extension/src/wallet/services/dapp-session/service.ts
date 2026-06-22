@@ -2,6 +2,7 @@ import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
@@ -59,10 +60,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 
 	public async getDappSessions(): Promise<DappSession[]> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 		await this.deleteExpired()
 		return (await this.storage.getValues()).filter((x) => x.profileId === profile.id)
 	}
@@ -124,10 +122,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		chainId: string,
 	): Promise<DappSession> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet is locked")
-		}
+		const profile = await requireActiveProfile(this.profileService, "Wallet is locked")
 		await this.deleteExpired()
 		try {
 			await this.lock.enter()
