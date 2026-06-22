@@ -109,14 +109,14 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// their migration lands. Registration order here is a visual
 		// convention only — actual startup ordering is determined by
 		// `ServiceCollection.start()`'s topological phases.
-		services.add(new AccountService(logger))
+		services.add(new AccountService(logger, browserApi))
 		services.add(new AccountStateService(logger))
 		services.add(new AuthRegistryService(logger))
 		services.add(new ConfigService(config, logger))
 		const windowManager = new WindowManager(browserApi.windows, clock, logger)
 		services.add(new ContactService(logger, browserApi))
 		services.add(new DappInteractionService(logger, windowManager))
-		services.add(new DappSessionService(logger))
+		services.add(new DappSessionService(logger, browserApi))
 		// E2E_PROVERLESS injects a chrome.storage-backed proof gate into the SW
 		// ExecutionCoordinator (the SW has chrome.storage; the offscreen does not).
 		// `E2E_PROVERLESS` is a statically-false constant in prod builds, so this
@@ -137,7 +137,7 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		services.add(new TaskService(logger))
 		services.add(new TokenService(logger))
 		services.add(new TokenBalanceService(logger))
-		services.add(new TransactionService(logger))
+		services.add(new TransactionService(logger, browserApi))
 		services.add(new IncomingTransferService(logger))
 		services.add(new PasskeyService(logger, windowManager))
 

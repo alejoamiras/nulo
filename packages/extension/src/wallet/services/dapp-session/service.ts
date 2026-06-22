@@ -6,6 +6,7 @@ import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
+import type { BrowserApi } from "@nulo/wallet-core/ports"
 import {
 	DAPP_SESSION_SERVICE_NAME,
 	type DappMetadata,
@@ -41,13 +42,14 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	public readonly onDappSessionUpdated = new EventHandler<DappSession>()
 	public readonly onDappSessionDeleted = new EventHandler<DappSession>()
 
-	private readonly storage = new EntityStorage<DappSession>("nulo:core:dappSessions", chrome.storage.local)
+	private readonly storage: EntityStorage<DappSession>
 	private readonly lock = new Lock()
 
 	private profileService: ProfileService = null!
 
-	public constructor(logger: ILogger) {
+	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(DAPP_SESSION_SERVICE_NAME, logger)
+		this.storage = new EntityStorage<DappSession>("nulo:core:dappSessions", browserApi.storage.local)
 	}
 
 	protected async init(services: ServiceCollection) {
