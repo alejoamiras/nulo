@@ -6,7 +6,7 @@ import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
-import { sanitizeString } from "@/utils"
+import { getInitials, sanitizeString } from "@/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { type Contact, CONTACT_SERVICE_NAME, type Events, type Methods } from "./spec"
@@ -281,17 +281,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 	}
 
 	private _getAbbreviation(name: string): string {
-		const words = name.trim().split(/\s+/)
-
-		if (words.length > 1) {
-			return (words[0][0] + words[1][0]).toUpperCase()
-		}
-
-		if (words.length === 1) {
-			return words[0].substring(0, Math.min(words[0].length, 2)).toUpperCase()
-		}
-
-		return "AZ"
+		return getInitials(name)
 	}
 
 	public async backup(): Promise<Contact[]> {

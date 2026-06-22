@@ -91,16 +91,6 @@ const onKeydown = (e) => {
 		submitTestId="edit-account-submit"
 		@submit="handleUpdateAccount"
 	>
-		<ItemsContainer>
-			<SettingItem
-				size="large"
-				:title="accountToEdit.name"
-				description="Selected account for editing"
-				icon="vault"
-				raw
-			/>
-		</ItemsContainer>
-
 		<Input
 			label="Name"
 			placeholder="My Vault"

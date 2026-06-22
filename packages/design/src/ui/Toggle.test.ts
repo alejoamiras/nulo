@@ -57,4 +57,37 @@ describe("ui/Toggle", () => {
 		expect(mountToggle({ modelValue: true, color }).html()).toContain("background: rgb(1, 2, 3)")
 		expect(mountToggle({ modelValue: false, color }).html()).not.toContain("rgb(1, 2, 3)")
 	})
+
+	// (frontend-ux-fixes P5a) the toggle is a <div> — it needs an explicit tabindex to be focusable, and
+	// keyboard activation to be operable. Was `tabindex="1"` (a positive value corrupts whole-document tab
+	// order) with @click only; now `tabindex="0"` (or -1 when locked) + Enter/Space.
+	test("is keyboard-focusable (tabindex=0) when enabled, out of tab order (-1) when locked", () => {
+		expect(mountToggle().attributes("tabindex")).toBe("0")
+		expect(mountToggle({ disabled: true }).attributes("tabindex")).toBe("-1")
+		expect(mountToggle({ protected: true }).attributes("tabindex")).toBe("-1")
+	})
+
+	test("Enter activates the toggle (keyboard parity with click)", async () => {
+		const w = mountToggle({ modelValue: false })
+		await w.trigger("keydown", { key: "Enter" })
+		expect(w.emitted("update:modelValue")?.[0]).toEqual([true])
+	})
+
+	test("Space activates the toggle", async () => {
+		const w = mountToggle({ modelValue: false })
+		await w.trigger("keydown", { key: " " })
+		expect(w.emitted("update:modelValue")?.[0]).toEqual([true])
+	})
+
+	test("disabled toggle ignores keyboard activation", async () => {
+		const w = mountToggle({ disabled: true, modelValue: false })
+		await w.trigger("keydown", { key: "Enter" })
+		expect(w.emitted("update:modelValue")).toBeUndefined()
+	})
+
+	test("exposes role=switch + aria-checked for assistive tech", () => {
+		expect(mountToggle({ modelValue: true }).attributes("role")).toBe("switch")
+		expect(mountToggle({ modelValue: true }).attributes("aria-checked")).toBe("true")
+		expect(mountToggle({ modelValue: false }).attributes("aria-checked")).toBe("false")
+	})
 })

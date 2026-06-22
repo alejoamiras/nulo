@@ -391,7 +391,7 @@ const onKeydown = (e) => {
 			</template>
 		</Input>
 
-		<Input
+		<AddressInput
 			label="Address"
 			placeholder="0x15c4ac6afcffdf59aa8a1fb3317ff0c86aee3eb02f9e52c3612e1163d4701446"
 			v-model="contactAddressTerm"
@@ -409,7 +409,7 @@ const onKeydown = (e) => {
 					</Flex>
 				</Transition>
 			</template>
-		</Input>
+		</AddressInput>
 
 		<Flex
 			v-if="!cacheStore.importContact"
@@ -474,7 +474,6 @@ const onKeydown = (e) => {
 .sender_row {
 	margin-top: -12px;
 	padding: 12px 0;
-	border-top: 1px solid var(--nulo-border);
 }
 
 .sender_text {

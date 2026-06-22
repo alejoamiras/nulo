@@ -175,6 +175,7 @@ watch(
 							<template #suffix>
 								<button
 									type="button"
+									tabindex="-1"
 									@click="isPasswordType = !isPasswordType"
 									:class="$style.visibility_btn"
 									:aria-label="isPasswordType ? 'Show password' : 'Hide password'"

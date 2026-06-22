@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — Frontend UX fixes (batch 1)</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    .reject { background: #fdecea; padding: 0.75rem 1.25rem; border-left: 3px solid #d1453b; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .done { color: #1a7f37; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Frontend UX fixes — batch 1</h1>
+  <p>Six small things you reported in the wallet popup were annoying or subtly unsafe. This plan fixes
+  them: a confusing settings label, a doubled border on the contact form, the ugly "vault" icon on
+  accounts, the Send recipient display, a long address that scrolls out of view in input boxes, and
+  keyboard Tab order that skips fields. It's all front-end polish — no network, no money-movement logic,
+  no secrets touched.</p>
+
+  <div class="reject">
+    <strong>Why this plan looks different from a first draft:</strong> it was rejected <em>three</em>
+    times before it was right. Two independent reviewers (codex + a top-tier Claude critic standing in for
+    the offline Fable model) both rejected the first draft (factual mistakes + a security gap); a final
+    fresh-context pass then rejected the <em>revision</em> too, catching real bugs it had introduced (a
+    keyboard-focus regression, an incomplete fix). All folded. The full story is in the
+    <a href="plan.md">decision ledger</a> and the audit transcripts
+    (<a href="audit-codex.md">codex</a>, <a href="audit-opus.md">opus</a>).
+  </div>
+
+  <h2>Why "mid" tier</h2>
+  <p>Rubric: ~1 higher-risk + 2 medium dimensions. <strong>Security-sensitivity</strong> — fix #3 changes
+  how you verify <em>who you're sending money to</em>. <strong>Blast radius</strong> — fix #5 changes a
+  shared toggle/dropdown's keyboard behavior, which touches many screens; fix #2 adds an address-input
+  behavior. Everything else is contained and reversible. That's a textbook <code>mid</code>: dual audit,
+  competing outline, final fresh-context pass — which is exactly the ceremony that caught the first
+  draft's mistakes.</p>
+
+  <h2>The two decisions you made</h2>
+  <ul>
+    <li><strong>Account indicator</strong> → <em>initials avatar</em> (a little colored disc with the
+    account's initials, color derived from its address). The "emoji identicon" idea was dropped: a single
+    emoji is only 256 possibilities (trivially faked), and the emoji tool can't even read a raw address.
+    Initials are legible at tiny sizes and carry no security weight — they just sit next to the real
+    name + address.</li>
+    <li><strong>Send recipient</strong> → <em>masked card with on-screen reveal</em>: name +
+    <code>0x</code> first-8 <code>***</code> last-8, and a tap to reveal the <em>full</em> address + copy,
+    right there before you hit Send.</li>
+  </ul>
+
+  <h2>Phases</h2>
+
+  <div class="phase">
+    <h3>P1 — Copy + border quick fixes (#1, #6)</h3>
+    <p>Settings: the row under "Identity" shows your profile <em>name</em> (confusing) → make it say
+    "Profile". Contacts: a doubled line where the address box meets the "Register as a sender" row →
+    remove the extra border. Tiny, safe.</p>
+    <p class="muted">Proves itself by: typecheck + lint + the contact/settings component tests + build, all green.</p>
+  </div>
+
+  <div class="phase">
+    <h3>P2 — Replace the "vault" icon with an initials avatar (#4, non-Send)</h3>
+    <p>You hate the vault SVG. It's also the <em>same</em> icon for every account (no distinction at all).
+    Replace it on the account rows with a small initials avatar whose color is derived from the address —
+    so accounts finally look different from each other. One reusable avatar component, shared with the
+    Send card.</p>
+    <p class="muted">Proves itself by: avatar component tests + a check that no "vault" usage remains + build.</p>
+  </div>
+
+  <div class="phase">
+    <h3>P3 — Send recipient card (#3) + remove the Send vault icon (#4)</h3>
+    <p>When you pick a recipient, show a card: avatar + name + the masked address, with a one-tap reveal
+    of the <em>full</em> address (selectable, copyable) for when you want 100% certainty. The reviewers
+    pushed for a <em>forced</em> reveal (the Send screen submits and leaves with no later confirmation, so
+    the card is the only check). <strong>You decided the reveal stays optional</strong> — you'll tap it
+    when you want to verify. That's a deliberate call you own; the build just makes the reveal obvious and
+    one tap away, and applies the same card to addresses you paste in directly (so nothing skips it).</p>
+    <p class="muted">Proves itself by: RecipientField tests (rewritten — they used to assert the vault icon)
+    + the send smoke test + build.</p>
+  </div>
+
+  <div class="phase">
+    <h3>P4 — Address inputs that don't scroll out of view (#2)</h3>
+    <p>Typing a long <code>0x…</code> address in a narrow box makes the start scroll off-screen and "jump"
+    on focus. Fix: when you're <em>not</em> editing, show a clean truncated address; when you click in, show
+    the real editable input. Done with a thin extension-side wrapper that <strong>never rewrites the value</strong>
+    — so paste, selection, and screen readers keep working (the reviewers flagged that risk explicitly).</p>
+    <p class="muted">Proves itself by: wrapper tests (blur/focus, value stays intact) + a paste smoke test + build.</p>
+  </div>
+
+  <div class="phase">
+    <h3>P5a — Fix the keyboard Tab order at the root (#5)</h3>
+    <p>The real cause (the first draft got this wrong): two shared widgets force a bogus
+    <code>tabindex="1"</code>, which corrupts Tab order for the <em>whole</em> page; and the show/hide-password
+    button sits between the password and confirm fields, so Tab lands on it instead of the next field. Fix
+    both, write down the convention (no forced tabindex; secondary buttons sit out of the Tab path), and
+    pin it with a test that Tab really goes name → password → confirm.</p>
+    <p class="muted">Proves itself by: the create-account Tab test going green + the toggle's own tests still
+    passing + build.</p>
+  </div>
+
+  <div class="phase">
+    <h3>P5b — Sweep the remaining screens (#5) — needs your hands on the keyboard</h3>
+    <p>With the root cause fixed, walk every remaining screen and confirm Tab order reads top-to-bottom.
+    This one ends with <em>you</em> tabbing through onboarding, send, contacts, settings, and the edit
+    popups to sign off.</p>
+    <p class="muted">Proves itself by: full audit:vue + smoke + <strong>your keyboard sign-off</strong>.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>"Masking" an address means hiding the middle (<code>0x3333…7a9c</code>) so it fits and reads cleanly.
+  That's fine for <em>showing</em> an address you already trust, but dangerous as the <em>only</em> thing you
+  see before sending money — attackers can grind a fake address that matches the visible ends. That's why
+  P3 keeps a full-address reveal. "Tab order" is the sequence the keyboard moves through fields when you
+  press Tab; a stray setting can scramble it for the entire page, which is what was happening.</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li class="done">Account indicator shape — <strong>resolved: initials avatar.</strong></li>
+    <li class="done">Send recipient display — <strong>resolved: masked + on-screen reveal.</strong></li>
+    <li>Visual sign-off on the avatar + card at real sizes, and keyboard sign-off on P5b — these are the
+    only human gates left, at the end.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: the six fixes above, nothing more.</li>
+      <li>Confirm tier: <code>mid</code> (dual audit done; final codex pass running).</li>
+      <li>Confirm validation: component tests + smoke e2e + your visual/keyboard sign-off; <em>no</em>
+      network e2e.</li>
+      <li>Confirm the two decisions (initials avatar; masked-with-reveal Send card).</li>
+    </ul>
+  </div>
+
+  <div class="seeds">
+    <h2>Implementation seeds</h2>
+    <p class="warning">Use exactly one per session — they don't compose.</p>
+
+    <h3 class="recommended">/goal — recommended (completion is observable in the transcript)</h3>
+    <pre>/goal All 6 phases (P1, P2, P3, P4, P5a, P5b) marked ✓ in implementations-plan/frontend-ux-fixes/plan.md, each ✓ backed by its Validation gate reported passing in the transcript; for each phase the agent printed `LESSONS_FILE=implementations-plan/frontend-ux-fixes/lessons/phase-N.md`; no `name="vault"`/`icon="vault"` remains in packages/extension/src; P3's on-screen full-address reveal implemented (recipient verification); `/code-review max --fix` complete + committed separately; codex post-impl audit (`/codex xhigh`) complete with high/critical addressed; `bun run audit:vue` and `bun run lint` exit 0 in the transcript. P5b + the visual/keyboard sign-off recorded in lessons.</pre>
+
+    <h3>/loop — fallback (fixed 15-minute cadence)</h3>
+    <pre>/loop 15m Drive implementations-plan/frontend-ux-fixes forward. Never idle. Each firing: read plan.md + lessons/ (authoritative); git status + log; take the next pending step; after each edit run `bun run lint` + `bun run --cwd packages/extension test -- run <touched paths>`; commit → push. Stuck/deciding? `/codex xhigh`, log it. Phase green = its plan.md gate passes; mark ✓, file lessons, print LESSONS_FILE, advance. Never merge to main/release, never publish, never expand scope. All 6 ✓? `/code-review max --fix` → commit → codex post-impl → address high/critical → wrap-up + stop. P3 reveal, P5b + visual/keyboard sign-off are human-gated — surface and hold.</pre>
+  </div>
+
+  <hr>
+  <p class="muted">Full plan: <a href="plan.md">plan.md</a> · Audits:
+  <a href="audit-codex.md">codex</a>, <a href="audit-opus.md">opus</a> · Lessons:
+  <a href="./lessons/">./lessons/</a></p>
+</body>
+</html>

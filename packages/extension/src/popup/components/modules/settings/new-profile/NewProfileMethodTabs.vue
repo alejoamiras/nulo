@@ -3,16 +3,37 @@
  * Method tabs for the create-profile page (Password / Passkey).
  * Two-tab segmented control bound through v-model. The active tab
  * gets the underline + primary color treatment.
+ *
+ * Keyboard: a roving tablist — only the active tab is in the Tab order
+ * (the other is tabindex=-1), so Tab flows name → method (ONE stop) →
+ * password, and ←/→ switch the method. (Was two positive tab stops
+ * between the name and password fields.)
  */
+import { nextTick, ref } from "vue"
+
 const type = defineModel("type", { type: String, default: "password" })
+
+const passwordTab = ref()
+const passkeyTab = ref()
+
+const onKeydown = (e) => {
+	if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return
+	e.preventDefault()
+	type.value = type.value === "password" ? "passkey" : "password"
+	nextTick(() => (type.value === "password" ? passwordTab.value : passkeyTab.value)?.focus())
+}
 </script>
 
 <template>
 	<div :class="$style.section">
 		<span :class="$style.section_label">Method</span>
-		<div :class="$style.tabs">
+		<div :class="$style.tabs" role="tablist" aria-label="Authentication method" @keydown="onKeydown">
 			<button
+				ref="passwordTab"
 				type="button"
+				role="tab"
+				:aria-selected="type === 'password'"
+				:tabindex="type === 'password' ? 0 : -1"
 				@click="type = 'password'"
 				:class="[$style.tab, type === 'password' && $style.tab_active]"
 				data-testid="register-method-password"
@@ -20,7 +41,11 @@ const type = defineModel("type", { type: String, default: "password" })
 				Password
 			</button>
 			<button
+				ref="passkeyTab"
 				type="button"
+				role="tab"
+				:aria-selected="type === 'passkey'"
+				:tabindex="type === 'passkey' ? 0 : -1"
 				@click="type = 'passkey'"
 				:class="[$style.tab, type === 'passkey' && $style.tab_active]"
 				data-testid="register-method-passkey"

@@ -29,7 +29,7 @@ const handleSelectToken = () => {
 <template>
 	<Flex @click="handleSelectToken" align="center" justify="between" :class="$style.wrapper" data-testid="send-token-trigger">
 		<template v-if="token">
-			<Flex align="center" gap="16">
+			<Flex align="center" gap="12">
 				<Flex align="center" justify="center" :class="$style.token_icon_box">
 					<span :class="$style.token_initial">{{ token.symbol?.charAt(0) }}</span>
 					<Icon v-if="isTokenBlocked" name="warning" size="10" color="red" :class="$style.type_icon" />
@@ -57,7 +57,9 @@ const handleSelectToken = () => {
 
 	cursor: pointer;
 
-	padding: 12px 0;
+	/* The parent `.section` already pads 14px top/bottom; keep this minimal so the
+	 * two don't stack into the oversized gap the token row had. */
+	padding: 4px 0;
 
 	transition: all 0.2s var(--bezier);
 
@@ -68,8 +70,8 @@ const handleSelectToken = () => {
 
 .token_icon_box {
 	position: relative;
-	width: 40px;
-	height: 40px;
+	width: 36px;
+	height: 36px;
 	flex-shrink: 0;
 
 	background: var(--nulo-accent);
@@ -78,7 +80,7 @@ const handleSelectToken = () => {
 .token_initial {
 	font-family: var(--font-headline);
 	font-weight: 700;
-	font-size: 18px;
+	font-size: 16px;
 	color: #0a0908;
 }
 
@@ -95,7 +97,7 @@ const handleSelectToken = () => {
 .token_symbol {
 	font-family: var(--font-headline);
 	font-weight: 700;
-	font-size: 18px;
+	font-size: 16px;
 	color: var(--txt-primary);
 }
 

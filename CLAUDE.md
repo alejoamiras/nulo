@@ -148,6 +148,16 @@ When adding new interactive elements, add a `data-testid` rather than relying on
 
 **E2E selector rule (strict):** e2e tests select **only** by `data-testid`. Never by `aria-label`, text content, role, placeholder, class, or DOM structure. If an element doesn't have a testid, add one BEFORE writing the test. Text-based selectors look fine until copy changes, i18n lands, or a Vue refactor reshuffles the tree — then every test that touched the element breaks at once. The `waitForToast` helper is the one explicit exception (toasts are intentionally text-asserted as a content check, not a click target).
 
+## Keyboard & focus order
+
+The primary Tab sequence must follow the visual/DOM order of the *fields*. A few hard rules (a positive `tabindex` anywhere on a screen silently corrupts the WHOLE document's tab order into two passes — every implicit-0 field becomes reachable only after every positive one):
+
+- **Never use a positive `tabindex`.** Focusable custom widgets (a `<div role="...">` like `Toggle`, `DropdownItem`) get `tabindex="0"` (or `-1` when disabled/locked), never `"1"`. A `<div>` needs an explicit `tabindex` to be focusable at all — so change `"1"`→`"0"`, don't *remove* it.
+- **Custom focusable widgets need keyboard activation.** A `<div @click>` is mouse-only; add `@keydown.enter.prevent` + `@keydown.space.prevent` (and `role`/`aria-*`) so it's operable by keyboard, matching click.
+- **Secondary in-field controls are `tabindex="-1"`.** A show/hide-password button, a clear (`×`) button, an inline copy — anything that sits *between* two logical fields in the DOM — must be out of the Tab path (still mouse/AT-clickable) so Tab flows field → field. (Icon-only `<Icon @click>` SVGs are NOT tabbable, so they need no fix; only real `<button>`s do.) This is a **deliberate, owner-accepted tradeoff**: the show/hide-password toggle is `tabindex="-1"` (mouse + screen-reader reachable, not Tab-reachable) — a known WCAG-2.1.1 gap accepted in favor of the field→field flow. Don't "fix" it by restoring positive/0 tabbing without re-confirming.
+- **Grouped mutually-exclusive choices use a roving tablist**, not N separate tab stops: `role="tablist"` + each option `role="tab"` with `:tabindex="active ? 0 : -1"`, and ←/→ switch + move focus. This collapses a segmented control (e.g. the create-profile Password/Passkey toggle) to ONE Tab stop between the fields around it.
+- **Never key navigation off a `tabindex` literal.** `DropdownRoot` selects items via a stable `[data-dropdown-item]` attribute, NOT `[tabindex="1"]`, so changing an item's tabindex can't silently break arrow-nav.
+
 ## Cleanup order in `onBeforeUnmount`
 
 Do NOT reorder these:

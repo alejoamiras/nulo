@@ -52,7 +52,7 @@ onBeforeUnmount(() => {
 			<ItemsContainer title="Identity">
 				<SettingItem
 					to="/popup/settings/profile"
-					:title="appStore.profile.name"
+					title="Profile"
 					description="Profile name, password, backup"
 					materialIcon="person"
 					chevron

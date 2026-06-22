@@ -11,7 +11,9 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AccountAvatar: typeof import('./../components/composite/general/AccountAvatar.vue')['default']
     AddressDisplay: typeof import('./../components/AddressDisplay.vue')['default']
+    AddressInput: typeof import('./../components/composite/general/AddressInput.vue')['default']
     AmountCard: typeof import('./../components/composite/send/AmountCard.vue')['default']
     Banner: typeof import('@nulo/design')['Banner']
     BrutalistTitle: typeof import('@nulo/design')['BrutalistTitle']
@@ -52,6 +54,7 @@ declare module 'vue' {
     Popup: typeof import('./../components/Popup/Popup.vue')['default']
     PopupCard: typeof import('./../components/Popup/PopupCard.vue')['default']
     PopupHeader: typeof import('./../components/ui/Popup/PopupHeader.vue')['default']
+    RecipientCard: typeof import('./../components/composite/send/RecipientCard.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     ScopeAddress: typeof import('./../components/ScopeAddress.vue')['default']
