@@ -104,6 +104,16 @@ describe("useL1FeeAsset", () => {
 		expect(fa.approving.value).toBe(false)
 	})
 
+	it("approve surfaces an on-chain revert (mined receipt status != success) as error, not a false success", async () => {
+		const { useL1FeeAsset } = await freshModule()
+		const fa = useL1FeeAsset()
+		addressRef.value = OWNER
+		waitForTransactionReceipt.mockResolvedValueOnce({ status: "reverted" } as never)
+		await fa.approve(1000n)
+		expect(fa.error.value).toMatch(/reverted/i)
+		expect(fa.approving.value).toBe(false)
+	})
+
 	it("verifyPortalAsset passes when the portal's UNDERLYING() matches the fee asset, then caches", async () => {
 		const { useL1FeeAsset } = await freshModule()
 		const fa = useL1FeeAsset()
