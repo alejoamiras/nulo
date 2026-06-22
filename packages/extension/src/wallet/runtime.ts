@@ -133,7 +133,7 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		services.add(new NetworkService(logger, browserApi))
 		services.add(new NoteService(logger))
 		services.add(new OperationJournalService(logger, browserApi))
-		services.add(new ProfileService(config, logger))
+		services.add(new ProfileService(config, logger, browserApi))
 		services.add(new TaskService(logger))
 		services.add(new TokenService(logger, browserApi))
 		services.add(new TokenBalanceService(logger, browserApi))
