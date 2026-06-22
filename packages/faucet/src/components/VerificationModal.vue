@@ -1,11 +1,14 @@
 <script setup lang="ts">
+import { computed } from "vue"
+import { toGrid } from "@/lib/emoji"
 import { TESTIDS } from "@/lib/testids"
-import AppButton from "./ui/AppButton.vue"
-import EmojiGrid from "./composite/EmojiGrid.vue"
+import { Button, EmojiGrid } from "@nulo/design"
 
-defineProps<{ emojis: string | null }>()
+const props = defineProps<{ emojis: string | null }>()
 
 const emit = defineEmits<{ confirm: []; cancel: [] }>()
+
+const cells = computed(() => (props.emojis ? toGrid(props.emojis) : []))
 
 function onKey(evt: KeyboardEvent) {
 	if (evt.key === "Escape") emit("cancel")
@@ -27,22 +30,22 @@ function onKey(evt: KeyboardEvent) {
 				<h2 class="title">VERIFY THE GRID</h2>
 				<p class="body">Match this grid with the wallet window. If it differs, stop.</p>
 				<p class="secondary">This check is for the secure channel. It is not decorative.</p>
-				<EmojiGrid :emojis="emojis" class="grid" />
+				<EmojiGrid :cells="cells" :test-id="TESTIDS.emojiGrid" :cell-test-id="TESTIDS.emojiCell" class="grid" />
 				<div class="actions">
-					<AppButton
-						variant="outline"
+					<Button
+						variant="primary_outline"
 						:data-testid="TESTIDS.btnVerifyCancel"
 						@click="emit('cancel')"
 					>
 						Cancel
-					</AppButton>
-					<AppButton
+					</Button>
+					<Button
 						variant="primary"
 						:data-testid="TESTIDS.btnVerifyConfirm"
 						@click="emit('confirm')"
 					>
 						They match
-					</AppButton>
+					</Button>
 				</div>
 			</div>
 		</div>

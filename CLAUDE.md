@@ -26,8 +26,10 @@ Operating rules for AI assistants (and any contributor) working in this reposito
   - `chore: release @nulo/extension X.Y.Z` PRs are opened by **release-please** after every push to main. Merging one creates the tag + GitHub Release; the release workflow then attaches built artifacts + git-cliff notes + redeploys the landing.
   Read main's own timeline via `git log main --first-parent`.
 - **Merge type is enforced per branch via GitHub rulesets**: dev allows only `squash`, main allows only `merge`. The repo-level toggle has both enabled, but the per-branch ruleset narrows what's selectable at PR-merge time.
-- Both branches require **signed commits** (SSH or GPG — GitHub's web-flow signature on UI-merges satisfies this) and a passing **`Quality / Status`** required check before merge.
-- **Force-pushes and branch deletions are blocked.** Use a feature branch + PR for everything. Admin bypass via the ruleset's pull-request bypass-mode is reserved for catch-22 cases (e.g., a required check whose name was renamed since the PR opened).
+- Both branches require **signed commits** (SSH or GPG — GitHub's web-flow signature on UI-merges satisfies this) and a passing **`Quality / Status`** required check before merge. Only `Quality / Status` is required on `dev`; the e2e gates (`Smoke e2e / Status`, `Network e2e / Status`) run on every PR but stay advisory.
+- **Branch-up-to-date is NOT required on `dev`** (legacy branch protection's `strict` flag is off). A new dev commit does not invalidate your PR's green CI, so you don't need to re-run the 25-min Network e2e every time someone else merges. The required `Quality / Status` check only has to be green on your PR's own commits.
+- **Force-pushes and branch deletions are blocked.** Use a feature branch + PR for everything.
+- **CLI merges (`gh pr merge --squash`) need `--admin` on `dev`.** `required_signatures` is enforced, and GitHub only signs squash commits when the merge is initiated from the web UI. From the CLI: `gh pr merge <n> --squash --admin --delete-branch`. From the GitHub UI: the "Squash and merge" button signs automatically — no bypass needed.
 - **PR title becomes the squash commit subject on dev.** Write PR titles as real Conventional Commits — `feat(send): ...`, `fix(passkey): ...`, `chore(deps): ...`. The PR body becomes the commit body.
 - **Promote PR naming**: `release: promote dev → main` followed by a short content summary in parentheses, e.g. `release: promote dev → main (biome schema bump, lockfile refs migration)`. Becomes the merge commit subject on main — write it like a release note.
 
@@ -60,15 +62,19 @@ Each package can import only the layers below it. `wallet-bridge` deliberately d
 
 Six layers, low → high. A layer can import only from layers below it. Enforced via `biome.json` `noRestrictedImports` overrides.
 
+**L0–L2 are externalized to `@nulo/design`** (round 1 + round 2 — see `implementations-plan/design-system-externalization/` and `implementations-plan/design-system-externalization-round-2/`). The framework-/host-agnostic primitives live in the shared package and are consumed by the extension via a custom `unplugin-vue-components` resolver (`packages/extension/scripts/design-resolver.ts`), so templates use `<Flex>`/`<Text>`/`<Badge>` unchanged. `src/design/tokens.ts` re-exports `@nulo/design/tokens`; `_base.scss`/`_flex.scss`/`_text.scss` are gone — the wallet's base stylesheet is now `@nulo/design/base.css`. The package has NO auto-import, so its SFCs use explicit imports. **Resolver discipline:** a name enters `NULO_DESIGN_COMPONENTS` only when its extension-local SFC is DELETED; the three host-coupled holdouts (`Button` → RouterLink, `SubPageHeader` → router/history, `ToastManager` → app-shell toast root) keep a thin LOCAL extension wrapper that renders the package base (`Button`/`SubPageHeaderBase`/`ToastManagerBase`), so their bare tags resolve to the wrapper, NOT the resolver. The `toast`/`outside` composables live in `@nulo/design/composables/*`; the extension keeps `composables/{toast,outside}.js` as named re-export shims so its explicit + auto-import call sites are untouched.
+
 ```
-[L0] design tokens     src/design/tokens.ts
-                       Pure typed reflection of CSS vars.
+[L0] design tokens     @nulo/design (token-contract.ts → generated tokens.ts + base.css + fonts).
+                       Extension src/design/tokens.ts re-exports the package.
 
-[L1] core primitives   src/components/core/
-                       Flex, Icon, MaterialIcon, Text. No chrome.*.
+[L1] core primitives   @nulo/design/core: Flex, Icon, MaterialIcon, Text. No chrome.*.
 
-[L2] ui primitives     src/components/ui/
-                       Button, Input, Toggle, Tooltip, ...
+[L2] ui primitives     @nulo/design/ui — ALL migrated: Badge, Banner, BrutalistTitle, Button,
+                       Checkbox, Input, LoadingState, Popover, SectionLabel, Spinner, SubPageHeaderBase,
+                       Toggle, Tooltip, ToastManagerBase (+ AppButton/Card/Tag/Toast faucet primitives).
+                       The 3 host-coupled ones keep a thin LOCAL extension wrapper in src/components/ui/
+                       (Button, SubPageHeader, ToastManager) rendering the package base.
                        Cannot import service clients, stores, or @/utils/core.
 
 [L3] composites        src/components/composite/
@@ -86,7 +92,7 @@ Six layers, low → high. A layer can import only from layers below it. Enforced
                        Orchestration. May own service-client lifecycle.
 ```
 
-Service-bound visual components (Header, AddressDisplay, GlobalLoader, NotificationManager, Popup, PopupCard, JsonViewer, LogsViewer) live flat in `src/components/` or in their own subdir, NOT in `core/`, `ui/`, or `composite/`.
+Service-bound visual components (Header, AddressDisplay, GlobalLoader, NotificationManager, Popup, PopupCard, JsonViewer, LogsViewer, PasskeyCeremonyDialog in `components/passkey/`) live flat in `src/components/` or in their own subdir, NOT in `core/`, `ui/`, or `composite/`. Cross-shell ones (e.g. `PasskeyCeremonyDialog`, consumed by both the popup and onboarding shells) MUST live under `src/components/`, never `src/popup/**`, so onboarding can import them without crossing the `@/popup/**` layer ban.
 
 ## Composables (C0 / C1)
 
@@ -141,6 +147,16 @@ Every extraction preserves all `data-testid` attributes verbatim. New components
 When adding new interactive elements, add a `data-testid` rather than relying on placeholder, label, or role queries. Querying by placeholder is a common source of e2e flake.
 
 **E2E selector rule (strict):** e2e tests select **only** by `data-testid`. Never by `aria-label`, text content, role, placeholder, class, or DOM structure. If an element doesn't have a testid, add one BEFORE writing the test. Text-based selectors look fine until copy changes, i18n lands, or a Vue refactor reshuffles the tree — then every test that touched the element breaks at once. The `waitForToast` helper is the one explicit exception (toasts are intentionally text-asserted as a content check, not a click target).
+
+## Keyboard & focus order
+
+The primary Tab sequence must follow the visual/DOM order of the *fields*. A few hard rules (a positive `tabindex` anywhere on a screen silently corrupts the WHOLE document's tab order into two passes — every implicit-0 field becomes reachable only after every positive one):
+
+- **Never use a positive `tabindex`.** Focusable custom widgets (a `<div role="...">` like `Toggle`, `DropdownItem`) get `tabindex="0"` (or `-1` when disabled/locked), never `"1"`. A `<div>` needs an explicit `tabindex` to be focusable at all — so change `"1"`→`"0"`, don't *remove* it.
+- **Custom focusable widgets need keyboard activation.** A `<div @click>` is mouse-only; add `@keydown.enter.prevent` + `@keydown.space.prevent` (and `role`/`aria-*`) so it's operable by keyboard, matching click.
+- **Secondary in-field controls are `tabindex="-1"`.** A show/hide-password button, a clear (`×`) button, an inline copy — anything that sits *between* two logical fields in the DOM — must be out of the Tab path (still mouse/AT-clickable) so Tab flows field → field. (Icon-only `<Icon @click>` SVGs are NOT tabbable, so they need no fix; only real `<button>`s do.) This is a **deliberate, owner-accepted tradeoff**: the show/hide-password toggle is `tabindex="-1"` (mouse + screen-reader reachable, not Tab-reachable) — a known WCAG-2.1.1 gap accepted in favor of the field→field flow. Don't "fix" it by restoring positive/0 tabbing without re-confirming.
+- **Grouped mutually-exclusive choices use a roving tablist**, not N separate tab stops: `role="tablist"` + each option `role="tab"` with `:tabindex="active ? 0 : -1"`, and ←/→ switch + move focus. This collapses a segmented control (e.g. the create-profile Password/Passkey toggle) to ONE Tab stop between the fields around it.
+- **Never key navigation off a `tabindex` literal.** `DropdownRoot` selects items via a stable `[data-dropdown-item]` attribute, NOT `[tabindex="1"]`, so changing an item's tabindex can't silently break arrow-nav.
 
 ## Cleanup order in `onBeforeUnmount`
 
@@ -317,9 +333,9 @@ Plans + audit transcripts under [`implementations-plan/`](./implementations-plan
 
 Configured in [`.github/`](./.github/). The full contributor guide is at [`CI.md`](./CI.md); the quick reference is at [`.github/README.md`](./.github/README.md).
 
-- **Every PR**: `Quality / Status` aggregates commitlint, lint, typecheck, units, build. **Required check** on `main` + `dev`.
+- **Every PR**: `Quality / Status` aggregates commitlint, lint, typecheck, units, build. **Required check** on `main` + `dev`. Branch-up-to-date is NOT enforced on `dev` (the legacy `strict` flag is off), so a new dev commit doesn't invalidate a green PR — you only re-run CI on your own pushes.
 - **`Smoke e2e / Status`**: runs on PRs to `main` (always), on PRs to `dev` whose diff touches the `smoke-surface` filter, or on PRs labeled `e2e:smoke`. Status emits pass when skipped. Currently advisory; will become required once the smoke fixture-cleanup follow-up PR lands.
-- **`Network e2e / Status`**: same shape as smoke, with the `extension-network` filter and `e2e:network` label. **Required check** on `main`.
+- **`Network e2e / Status`**: same shape as smoke, with the `extension-network` filter and `e2e:network` label. **Required check** on `main`. Each shard installs `accelerator-server` (Linux x86_64 binary from `alejoamiras/aztec-accelerator` releases, SHA-256-pinned in `_network-e2e.yml`) and enforces native bb proving via `VITE_NULO_ACCELERATOR_REQUIRED=1` baked into the wallet build. Silent fallback to WASM is a hard fail. Rollback: set `vars.NULO_E2E_DISABLE_ACCELERATOR=1` (Settings → Actions → Variables) or use the `workflow_dispatch` input `disable_accelerator: true`. See [CI.md § Accelerator in CI](./CI.md#accelerator-in-ci).
 - **Workflow-level**: actionlint + shellcheck run when workflow YAML or shell scripts change.
 
 ### Branches + releases

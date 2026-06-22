@@ -1,10 +1,10 @@
-import { fileURLToPath, URL } from "node:url"
 import { defineConfig } from "vitest/config"
+import { srcDir } from "./vite.shared"
 
 export default defineConfig({
 	resolve: {
 		alias: {
-			"@": fileURLToPath(new URL("./src", import.meta.url)),
+			"@": srcDir,
 		},
 	},
 	test: {

@@ -23,7 +23,13 @@ const cards = [
 	},
 ]
 
-function goNext() {
+// Continue advances into the fee-juice explainer step. Skip is intentionally a
+// SEPARATE handler that goes straight to /accelerator — the accelerator gate
+// still applies, same constraint that pre-dated the fees step.
+function goContinue() {
+	router.push("/onboarding/fees")
+}
+function goSkip() {
 	router.push("/onboarding/accelerator")
 }
 </script>
@@ -52,17 +58,18 @@ function goNext() {
 				variant="cta"
 				size="large"
 				data-testid="onboarding-learn-continue"
-				@click="goNext"
+				@click="goContinue"
 			>
 				Continue
 			</Button>
 			<!-- Skip intro routes to /accelerator, NOT /done — the accelerator
-				gate still applies (Codex v2 critique). -->
+				gate still applies (Codex v2 critique). Continue (above) routes
+				into the new /fees explainer step. -->
 			<button
 				type="button"
 				:class="$style.skipLink"
 				data-testid="onboarding-learn-skip"
-				@click="goNext"
+				@click="goSkip"
 			>
 				Skip intro
 			</button>

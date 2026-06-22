@@ -22,12 +22,46 @@ export type Note = {
 	renderError?: string
 }
 
+/** Note shape extended with the raw `NoteDao` identity + ordering fields that
+ *  the popup-friendly `Note` shape strips. Used by background-side consumers
+ *  (incoming-transfer discovery) that need the cryptographically-unique
+ *  `siloedNullifier` for idempotent records and the block-index tuple for
+ *  ordering. */
+export type RawNote = Note & {
+	/** Cryptographically unique per note (nullifier siloed under the
+	 *  contract's address). Stable across PXE syncs; the unique key for
+	 *  incoming-transfer records. */
+	siloedNullifier: string
+	/** Note's commitment hash. Stable per note. */
+	noteHash: string
+	/** L2 block the note was created in. Ordering field. */
+	l2BlockNumber: number
+	/** Index of the parent tx within the block. Ordering tiebreaker. */
+	txIndexInBlock: number
+	/** Index of the note within the tx. Ordering tiebreaker. */
+	noteIndexInTx: number
+}
+
 export type Methods = {
 	/**
-	 * Returns a list of private notes.
+	 * Returns a list of private notes (popup-friendly shape).
 	 * @param networkId Network id.
 	 * @param account Account address.
 	 * @param contract Contract address the note belongs to.
 	 */
 	getNotes(networkId: string, account: string, contract?: string): Note[]
+	/**
+	 * Same as `getNotes` but exposes the raw `NoteDao` identity + ordering
+	 * fields. Reserved for background-side consumers that key records by
+	 * `siloedNullifier` or order by `(l2BlockNumber, txIndexInBlock,
+	 * noteIndexInTx)`.
+	 */
+	getNotesRaw(networkId: string, account: string, contract?: string): RawNote[]
+	/**
+	 * Chain-derived UTC seconds for an L2 block. Returns `undefined` when
+	 * the node can't resolve it. Thin wrapper over PxeService so the
+	 * incoming-transfer service can populate `IncomingTransferRecord.blockTimestamp`
+	 * without taking a PXE-service dependency directly.
+	 */
+	getBlockTimestamp(networkId: string, blockNumber: number): number | undefined
 }

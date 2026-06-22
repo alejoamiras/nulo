@@ -3,11 +3,11 @@ import { NoteStatus, type NoteDao } from "@aztec/stdlib/note"
 import { canonicalSlotHex, type NoteFieldType, type NoteSchema } from "@nulo/aztec-runtime/pxe"
 import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { NetworkService, networkInfoFrom, type Network } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
-import { type Methods, type Note, NOTE_SERVICE_NAME } from "./spec"
+import { type Methods, type Note, type RawNote, NOTE_SERVICE_NAME } from "./spec"
 
 export * from "./spec"
 
@@ -33,6 +33,7 @@ function decodeField(value: { toString: () => string }, type: NoteFieldType): st
 }
 
 export class NoteService extends Service<Methods> implements ServiceSpec<Methods> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()("getNotes", "getNotesRaw", "getBlockTimestamp")
 	public static name = NOTE_SERVICE_NAME
 
 	private pxeService: PxeServiceClient = null!
@@ -48,6 +49,33 @@ export class NoteService extends Service<Methods> implements ServiceSpec<Methods
 	}
 
 	public async getNotes(networkId: string, account: string, contract?: string): Promise<Note[]> {
+		const raws = await this.getNotesRaw(networkId, account, contract)
+		// Project to popup-friendly shape: strip raw fields the popup
+		// doesn't consume. Keeping the projection here means `getNotes`
+		// and `getNotesRaw` always agree on parse + error handling.
+		return raws.map(
+			({ siloedNullifier: _sn, noteHash: _nh, l2BlockNumber: _bn, txIndexInBlock: _ti, noteIndexInTx: _ni, ...note }) => note,
+		)
+	}
+
+	/**
+	 * Chain-derived UTC seconds for an L2 block. Returns `undefined` when
+	 * the node can't resolve it. Activity-feed consumers use this so their
+	 * sort/render survives token remove + re-add (re-indexed records get
+	 * the same chain timestamp; without this, they'd jump to `Date.now()`).
+	 */
+	public async getBlockTimestamp(networkId: string, blockNumber: number): Promise<number | undefined> {
+		await this.ensureInitialized()
+		try {
+			const network = await this.networkService.getNetwork(networkId)
+			return await this.pxeService.getBlockTimestamp(networkInfoFrom(network), blockNumber)
+		} catch (error) {
+			this.logWarn(`getBlockTimestamp failed for block ${blockNumber}: ${getErrorMessage(error)}`)
+			return undefined
+		}
+	}
+
+	public async getNotesRaw(networkId: string, account: string, contract?: string): Promise<RawNote[]> {
 		await this.ensureInitialized()
 		const network = await this.networkService.getNetwork(networkId)
 		let notes: NoteDao[]
@@ -70,10 +98,18 @@ export class NoteService extends Service<Methods> implements ServiceSpec<Methods
 		// Parse each note in isolation so a single malformed note can't blank
 		// out the entire page. Failed entries surface as a renderError card on
 		// the UI instead of an unrecoverable list.
-		const res: Note[] = []
+		const res: RawNote[] = []
 		for (const note of notes) {
 			try {
-				res.push(await this.parseNote(network, note, classIdByContract, noteSchemas))
+				const parsed = await this.parseNote(network, note, classIdByContract, noteSchemas)
+				res.push({
+					...parsed,
+					siloedNullifier: this.safeSiloedNullifier(note),
+					noteHash: this.safeNoteHash(note),
+					l2BlockNumber: this.safeBlockNumber(note),
+					txIndexInBlock: this.safeTxIndex(note),
+					noteIndexInTx: this.safeNoteIndex(note),
+				})
 			} catch (error) {
 				const message = getErrorMessage(error)
 				this.logError("Failed to parse note", message)
@@ -83,6 +119,11 @@ export class NoteService extends Service<Methods> implements ServiceSpec<Methods
 					txHash: this.safeTxHash(note),
 					rawContent: [],
 					renderError: message,
+					siloedNullifier: this.safeSiloedNullifier(note),
+					noteHash: this.safeNoteHash(note),
+					l2BlockNumber: this.safeBlockNumber(note),
+					txIndexInBlock: this.safeTxIndex(note),
+					noteIndexInTx: this.safeNoteIndex(note),
 				})
 			}
 		}
@@ -121,6 +162,46 @@ export class NoteService extends Service<Methods> implements ServiceSpec<Methods
 			return note.txHash.toString()
 		} catch {
 			return ""
+		}
+	}
+
+	private safeSiloedNullifier(note: NoteDao): string {
+		try {
+			return note.siloedNullifier.toString()
+		} catch {
+			return ""
+		}
+	}
+
+	private safeNoteHash(note: NoteDao): string {
+		try {
+			return note.noteHash.toString()
+		} catch {
+			return ""
+		}
+	}
+
+	private safeBlockNumber(note: NoteDao): number {
+		try {
+			return Number(note.l2BlockNumber)
+		} catch {
+			return 0
+		}
+	}
+
+	private safeTxIndex(note: NoteDao): number {
+		try {
+			return Number(note.txIndexInBlock)
+		} catch {
+			return 0
+		}
+	}
+
+	private safeNoteIndex(note: NoteDao): number {
+		try {
+			return Number(note.noteIndexInTx)
+		} catch {
+			return 0
 		}
 	}
 

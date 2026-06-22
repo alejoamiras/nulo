@@ -6,7 +6,7 @@
  */
 
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import type { FeeEstimateResult, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
+import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
 import { finalizeGasLimits, startEstimateTask, suggestGasLimits } from "./fee-strategy"
 
 export class FeeJuiceStrategy implements FeeStrategy {
@@ -14,14 +14,11 @@ export class FeeJuiceStrategy implements FeeStrategy {
 
 	public constructor(private readonly deps: FeeStrategyDeps) {}
 
-	public async buildAndEstimate(ctx: FeeStrategyContext): Promise<FeeEstimateResult> {
+	public async buildAndEstimate(ctx: FeeStrategyContext): Promise<FeeEstimate> {
 		const task = startEstimateTask(this.deps.tasks, ctx.parentTask)
 		try {
-			const [txRequest, node, pxe, account, network, nonce, txCalls] = await this.deps.txBuilder.buildStandard(
-				ctx.op,
-				AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
-				task,
-			)
+			const built = await this.deps.txBuilder.buildStandard(ctx.op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE, task)
+			const { txRequest, node, pxe, account } = built
 			suggestGasLimits(txRequest, ctx.op.fee)
 			const simulatedTx = await this.deps.simulateTxTask(
 				pxe,
@@ -31,7 +28,7 @@ export class FeeJuiceStrategy implements FeeStrategy {
 			)
 			await finalizeGasLimits(node, txRequest, simulatedTx, ctx.gasPadding, undefined, ctx.op.fee, ctx.feeMultiplier)
 			task.complete()
-			return [txRequest, node, pxe, account, network, nonce, txCalls, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE]
+			return { ...built, feePaymentMethod: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE }
 		} catch (error) {
 			task.fail(error)
 			throw error

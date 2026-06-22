@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Plan ELI5 — IncomingTransfer trust-state-machine refactor</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>IncomingTransfer trust-state-machine refactor</h1>
+  <p>The wallet has a small piece of logic that decides when received tokens show up in your history: "I've never seen this token before → ask the user; user said Allow → show them from now on; user said Block → hide silently". Today, multiple parts of the wallet can change that decision at the same time (the background scanner, your Allow click, removing the token), and they step on each other. That's why you saw the bugs (records not appearing, popups closing late, weird ordering on remove+re-add). The fix: add a single "lock" so only one thing at a time can change the trust state.</p>
+
+  <h2>The journey</h2>
+  <p>This refactor went through significant planning ceremony — three independent plans (main agent, codex, opus), two adversarial audit rounds with push-back, and a final fresh-context codex pass. The audits flagged enough issues that we changed the architecture mid-planning: from a per-token lock (originally chosen for parallelism) to a single global service lock (simpler, eliminated multiple bug classes the audits found in the per-token design). The trade-off is small: scans for different tokens now serialize instead of running in parallel, but each lock-hold is sub-second and the slow part (PXE network calls) stays outside the lock.</p>
+
+  <h2>Phases</h2>
+
+  <div class="phase">
+    <h3>Phase -1: Pin Lock primitive behavior</h3>
+    <p>Add tests to the upstream Lock primitive (wallet-core) before we depend on it. FIFO ordering, force-release, idempotent leave, finally-release after thrown work. Codex audits flagged that the primitive has no test coverage today.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 0: Add lock + epoch scaffold</h3>
+    <p>Add one Lock instance to the service. Add a small "service epoch" counter (an int) bumped whenever lifecycle events happen (token delete, account delete, profile/chain clear). Scans capture the epoch BEFORE making network calls; inside the lock, they check the epoch hasn't changed — if it has, they bail. This closes a race the final audit found: a scan that's mid-network-call could otherwise resurrect records that a delete just wiped.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 1: Migrate the trust-setting writers</h3>
+    <p>Wrap setTrustAllow / setTrustReject / setTrustState in the lock. Drop several "compensating action" reverts we added during the prior six audit cycles — the lock makes them unnecessary. Remove setTrustState from the public IPC surface (it was bypassable via arbitrary state values — a footgun the audits surfaced).</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 2: Migrate replayPendingPrompts</h3>
+    <p>This is the path that re-fires the trust popup when you reopen the wallet. Wrap each per-pending-row in the lock; re-read state inside the lock to catch concurrent token deletions.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 3: Migrate onTokenDeleted</h3>
+    <p>When you remove a token, wipe records + reset trust under the lock. Scheduler teardown happens inside the lock too so a concurrent scan can't slip records in between.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 3.5: Migrate onAccountDeleted</h3>
+    <p>When you remove an account, wipe its records (across all networks matching the chain) under the lock. Trust rows are contract-scoped, so they survive (other accounts may still have records).</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 4: Migrate scanContract (the big one)</h3>
+    <p>The background scanner. Keep network calls (PXE) OUTSIDE the lock for responsiveness; only lock the per-note "decide + persist" critical section. Inside the lock: fresh re-reads of token registration, trust state, transaction dedupe sets. Drop the old generation-counter mechanism (scanGenerations) — the lock + epoch replace it.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 5: Migrate onTransactionAdded</h3>
+    <p>When an outgoing transaction confirms, delete any incoming records that matched its hash (those were actually our own outgoing notes). Wrap in the lock; drop the per-hash reentrancy guard (lock supersedes).</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 6: Migrate clearProfile + clearChain</h3>
+    <p>Profile delete + chain purge paths. Lock the wipe + scheduler rebuild together. Bump the epoch to invalidate any scans that started before the wipe.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 7: Test rewrites</h3>
+    <p>Update existing race-condition tests to assert the new lock-based semantics. Add a new file with race-ordering pins — including LR1, which precisely pins the bug from the previous arc's six audit cycles. LR12 pins the lifecycle-cancel race the final audit found.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 8: Post-impl audit + fix loop</h3>
+    <p>Run code-review tool + codex post-impl audit. Address any high/critical findings.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>The previous arc (the one that just merged) closed six rounds of concrete race-condition findings with ad-hoc patches: counters, sets, compensating-action reverts. Each fix worked, but the codex audit's final verdict was that the underlying architecture (multiple unsynchronized writers on the same row) is the real problem. This refactor replaces the patch stack with one proper synchronization primitive.</p>
+  <p>The original choice was a per-token lock (so two tokens can be scanned in parallel). Round 2 audits found that the per-token design has its own implementation complexity (TOCTOU races on a "wipe in progress" flag, drain patterns that leak late-discovered tokens, memory growth concerns on long-running browser sessions). The user pivoted to a single global service lock; the audits' subsequent attack surface shrunk dramatically. The cost — sequential scans across tokens — is bounded by the locked operations being sub-millisecond (network calls stay outside the lock).</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li>Should we defer churn-flooding mitigation (rapid register/revoke loops)? Currently planned as a follow-up PR. Product decision.</li>
+    <li>Should we fix the popup-misreads-async-throw bug now or later? Pre-existing; small popup-side fix. Currently planned as a follow-up.</li>
+    <li>I1/I4 performance assumptions need measurement during implementation. If lock contention causes user-visible latency, mitigate by caching per-scan-batch storage scans inside the lock.</li>
+  </ul>
+
+  <section class="seeds">
+    <h2>Implementation seeds</h2>
+    <p>Two seeds for the autonomous implementation session. Pick one. They don't compose within a single Claude Code session.</p>
+
+    <h3>/goal (primary)</h3>
+    <pre><code>/goal All phases marked ✓ in implementations-plan/incoming-trust-state-machine-refactor/plan.md; for each phase the agent has printed `LESSONS_FILE=implementations-plan/incoming-trust-state-machine-refactor/lessons/phase-N.md` in the transcript; the new residual-race-pin test (LR1) passes (parked scanContract per-note CS after liveTrust='pending' read and before upsertRecord + concurrent setTrustAllow → final hidden=false); the lifecycle-epoch test (LR12) passes (clearChain during scan → no records persisted post-clear); existing service.scenarios.test.ts tests pass (modulo updated audit-3 + audit-5 assertions); new service.lock-races.test.ts adds LR1-LR4, LR7, LR9, LR10, LR11, LR12 tests, all passing; setTrustState removed from public Methods interface (spec.ts + client.ts); `/code-review max --fix` complete with findings applied + committed; codex post-impl audit complete with high/critical findings addressed; `bun run audit:vue` and `bun run test:e2e:network -- --testNamePattern=incoming-transfers` both report exit 0 in the transcript.</code></pre>
+
+    <h3>/loop (fallback)</h3>
+    <pre><code>/loop Each turn, in priority order:
+1. Inspect: read implementations-plan/incoming-trust-state-machine-refactor/plan.md and lessons/ as source-of-truth; run `git status` and `git log --oneline -5`. If PR exists, `gh pr view --json statusCheckRollup`.
+2. CI in flight on HEAD SHA? Stream via `gh run watch &lt;run-id&gt;` up to 10 minutes.
+3. Failed check or local run? Triage and fix; call `/codex xhigh` if non-trivial. Commit (small, conventional) and push. After 5 failures on same step, stop and reassess.
+4. In-flight phase green? Mark ✓ in plan.md, file lessons log entry, print `LESSONS_FILE=...phase-N.md`, advance.
+5. Nothing in flight? Pick next pending step from plan.md and execute (edit → `bun run lint` → `bun run test` → commit → push).
+6. All phases ✓? Run post-impl: `/code-review max --fix` → commit → `/codex xhigh` post-impl audit → address high/critical findings. Stop when clean.
+
+Discipline: plan.md authoritative. Never merge to main or release branches. Stop when all phases ✓, /code-review applied + committed, codex post-impl audit clean.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a> · <a href="audit-codex.md">Codex audit transcripts</a> · <a href="audit-opus.md">Opus audit transcripts</a> · <a href="audit-codex-final.md">Final audit</a></p>
+</body>
+</html>

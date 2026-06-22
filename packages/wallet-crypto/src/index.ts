@@ -16,7 +16,7 @@
  */
 
 export { EncryptionKey } from "./encryption-key"
-export { ENCRYPTION_GUARD, PasswordSecretBox, type EncryptedProfileSecret, type Sealed } from "./password-secret-box"
+export { PasswordSecretBox, type EncryptedProfileSecret, type Sealed } from "./password-secret-box"
 export { PasskeyCredential, type PasskeyCredentialData } from "./passkey-credential"
 export { PASSKEY_PRF_LABEL } from "./constants"
 export { zeroize } from "./zeroize"

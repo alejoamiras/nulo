@@ -1,58 +1,67 @@
 <script setup lang="ts">
-import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { computed } from "vue"
-import { useWalletConnection } from "@/composables/useWalletConnection"
-import { FAUCET_TOKENS } from "@/constants/tokens"
-import { ETH, USDC } from "@/contracts/deployments"
+import { ref } from "vue"
 import { TESTIDS } from "@/lib/testids"
 import AppToastRegion from "./components/AppToastRegion.vue"
+import BridgeFooter from "./components/BridgeFooter.vue"
 import Footer from "./components/Footer.vue"
-import TokenCard from "./components/TokenCard.vue"
-import WalletPanel from "./components/WalletPanel.vue"
+import BridgeView from "./views/BridgeView.vue"
+import FaucetView from "./views/FaucetView.vue"
+import FuelView from "./views/FuelView.vue"
 
-const { status, wallet, selectedAccount } = useWalletConnection()
+type Tab = "faucet" | "bridge" | "fuel"
 
-const tokenEntries = computed(() =>
-	FAUCET_TOKENS.map((token) => ({
-		token,
-		address: token.symbol === "USDC" ? USDC : ETH,
-	})),
-)
+/** Default to the Bridge tab when served from a bridge.* host; faucet otherwise. */
+function defaultTab(): Tab {
+	if (typeof window !== "undefined" && window.location.hostname.startsWith("bridge")) return "bridge"
+	return "faucet"
+}
 
-const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.fromString(selectedAccount.value) : null))
+const tab = ref<Tab>(defaultTab())
 </script>
 
 <template>
 	<main class="page" :data-testid="TESTIDS.app">
-		<header class="hero">
-			<h1>DRIP TEST ASSETS</h1>
-			<p class="sub">
-				Alpha-testnet only. Connect an Aztec wallet and mint fixed USDC or ETH into a public or
-				private balance. Internal faucet. No real value.
-			</p>
-		</header>
+		<nav class="tabs" :data-testid="TESTIDS.tabs">
+			<button
+				type="button"
+				class="tab"
+				:class="{ active: tab === 'faucet' }"
+				:aria-selected="tab === 'faucet'"
+				:data-testid="TESTIDS.tabFaucet"
+				@click="tab = 'faucet'"
+			>
+				Faucet
+			</button>
+			<button
+				type="button"
+				class="tab"
+				:class="{ active: tab === 'bridge' }"
+				:aria-selected="tab === 'bridge'"
+				:data-testid="TESTIDS.tabBridge"
+				@click="tab = 'bridge'"
+			>
+				Bridge
+			</button>
+			<button
+				type="button"
+				class="tab"
+				:class="{ active: tab === 'fuel' }"
+				:aria-selected="tab === 'fuel'"
+				:data-testid="TESTIDS.tabFuel"
+				@click="tab = 'fuel'"
+			>
+				Fuel
+			</button>
+		</nav>
 
-		<WalletPanel />
+		<!-- v-show (not v-if): keep both views mounted so each tab owns an independent,
+		     persistent wallet session (codex: two sessions, not one shared connection). -->
+		<FaucetView v-show="tab === 'faucet'" />
+		<BridgeView v-show="tab === 'bridge'" />
+		<FuelView v-show="tab === 'fuel'" />
 
-		<!--
-		Cards always render so the page never collapses into the header
-		alone. Composables only activate when the user is connected; the
-		`:key` flips on connection state so the card cleanly re-mounts and
-		the composable lifecycle is unambiguous (no half-active polling).
-		-->
-		<section class="cards">
-			<TokenCard
-				v-for="entry in tokenEntries"
-				:key="`${entry.token.symbol}:${status === 'connected' ? 'on' : 'off'}`"
-				:token="entry.token"
-				:token-address="entry.address"
-				:wallet="status === 'connected' && wallet ? wallet : undefined"
-				:account="status === 'connected' && accountAddress ? accountAddress : undefined"
-			/>
-		</section>
-
-		<Footer />
-
+		<Footer v-if="tab === 'faucet'" />
+		<BridgeFooter v-else />
 		<AppToastRegion />
 	</main>
 </template>
@@ -68,33 +77,33 @@ const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.from
 	gap: 32px;
 }
 
-.hero {
+.tabs {
 	display: flex;
-	flex-direction: column;
-	gap: 16px;
-	margin-bottom: 8px;
+	gap: 4px;
+	padding: 4px;
+	background: var(--surface-raised, rgba(255, 255, 255, 0.04));
+	align-self: flex-start;
 }
 
-.hero h1 {
-	font-family: var(--font-headline);
-	font-weight: 700;
-	font-size: 44px;
-	letter-spacing: -0.02em;
-	line-height: 1.04;
-	margin: 0;
-}
-
-.hero .sub {
+.tab {
+	font-family: var(--font-headline, inherit);
+	font-weight: 600;
+	font-size: 15px;
+	letter-spacing: -0.01em;
 	color: var(--txt-secondary);
-	font-size: 16px;
-	max-width: 62ch;
-	margin: 0;
-	line-height: 1.55;
+	background: transparent;
+	border: none;
+	padding: 10px 20px;
+	cursor: pointer;
+	transition: background 0.15s ease, color 0.15s ease;
 }
 
-.cards {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-	gap: 20px;
+.tab:hover {
+	color: var(--txt-primary);
+}
+
+.tab.active {
+	color: var(--txt-primary);
+	background: var(--surface-active, rgba(255, 255, 255, 0.1));
 }
 </style>

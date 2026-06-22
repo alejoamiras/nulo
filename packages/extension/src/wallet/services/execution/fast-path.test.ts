@@ -56,7 +56,7 @@ function fakeNode(
 ) {
 	const blockHeader = "blockHeader" in opts ? opts.blockHeader : ({} as BlockHeader)
 	return {
-		getBlockHeader: vi.fn(async () => blockHeader),
+		getBlock: vi.fn(async () => ({ header: blockHeader })),
 		getNodeInfo: vi.fn(async () => {
 			if (opts.getNodeInfoThrows) throw new Error("nodeInfo boom")
 			return opts.nodeInfo ?? { l1ChainId: 11155111, rollupVersion: 4127419662 }
@@ -234,6 +234,9 @@ describe("runFastPath", () => {
 			deps: {
 				node: node as never,
 				pxe: pxe as never,
+				// chainId=0 means assertLiveChainIdentity skips its check (local
+				// substrate); tests don't exercise chain-identity drift here.
+				network: { chainId: 0 },
 				fromAddr: AztecAddress.ZERO,
 				opts: opts as never,
 				optimizableCalls,
@@ -249,21 +252,21 @@ describe("runFastPath", () => {
 		}
 	}
 
-	test("14. PXE getSyncedBlockHeader is preferred over node.getBlockHeader", async () => {
+	test("14. PXE getSyncedBlockHeader is preferred over node.getBlock", async () => {
 		simulateViaNodeMock.mockResolvedValue([fakeSimResult()])
 		const { deps, node, pxe } = makeDeps()
 		await runFastPath(deps)
 		expect(pxe.getSyncedBlockHeader).toHaveBeenCalledOnce()
-		expect(node.getBlockHeader).not.toHaveBeenCalled()
+		expect(node.getBlock).not.toHaveBeenCalled()
 	})
 
-	test("15. PXE synced-header failure → falls back to node.getBlockHeader", async () => {
+	test("15. PXE synced-header failure → falls back to node.getBlock", async () => {
 		simulateViaNodeMock.mockResolvedValue([fakeSimResult()])
 		const pxe = fakePxe({ throws: true })
 		const { deps, node } = makeDeps({ pxe })
 		await runFastPath(deps)
 		expect(pxe.getSyncedBlockHeader).toHaveBeenCalledOnce()
-		expect(node.getBlockHeader).toHaveBeenCalledOnce()
+		expect(node.getBlock).toHaveBeenCalledOnce()
 	})
 
 	test("16. both header sources return undefined → returns null (no sim)", async () => {

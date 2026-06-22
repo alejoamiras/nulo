@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — authwit-lifecycle-and-execution-followups</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Authwit lifecycle testability + execution follow-ups</h1>
+  <p>Right now, nobody — not the test suite, not you — can prove that revoking an authwit actually works, because nothing in the project ever <em>uses</em> one. This plan makes the full story testable: grant a permission slip, watch it get used, revoke one and watch it stop working, flip the registry kill-switch and watch everything stop. You get buttons in the playground to do it by hand, and CI gets a test that does it automatically. Bundled in: three small cleanups left over from the execution refactor.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>mid.</strong> Rubric: novelty MED (one untraveled wallet code path), security sensitivity MED (a permission check on job-cancelling + permission-slip semantics), everything else LOW. No HIGHs → mid. The ceremony earned its keep: the first draft was rewritten twice because the audits found the original test design would have passed while proving nothing (details below).</p>
+
+  <h2>Human context: what's an authwit, again?</h2>
+  <p>On Aztec, your account is a vault that only you can operate. Sometimes you want to let someone else move a specific thing once — like signing a permission slip: "the token contract may move 5 of my tokens to B, once." That slip is an <strong>authwit</strong>. Public slips get written into an on-chain registry; your wallet's Settings shows them and lets you revoke them, and there's a master switch that disables ALL of them at once.</p>
+  <p>The catch the audit caught: <strong>slips are single-use</strong> — using one burns it. So a test that grants once, revokes, then says "look, it stopped working!" proves nothing — it already stopped working because it was used. Every step of our test uses a fresh slip, and the revoke test revokes a slip that was never used. That's the difference between a test and theater.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 0: Housekeeping (~2h)</h3>
+    <p>Fix a missing index entry; write down the CURRENT (too-permissive) cancel behavior as a test so the next phase's change is visible and deliberate.</p>
+    <p class="muted">Proves itself by: lint + the lane unit tests, green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 1: Execution follow-ups (~half day) — deliberately FIRST</h3>
+    <p>Three small fixes that don't depend on the authwit work at all: (1) cancelling a job now checks the job belongs to your profile — others are silently ignored; (2) two internal "start a job record" code paths become one; (3) the test harness now fails LOUDLY when its blockchain sandbox fails to start, instead of skipping everything and looking green (this exact trap bit us during the last arc). Front-loaded so it ships even if the authwit work stalls.</p>
+    <p class="muted">Proves itself by: full unit suite + lint green, including the new permission tests.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: The grant button (~1 day, starts with a spike)</h3>
+    <p>Surprise finding: the wallet code that records public permission slips has <em>zero users</em> — no dApp can currently trigger it. So before building anything, a short proof-of-life spike decides between two ways to expose it (a custom RPC like our existing registerToken pattern, vs the action-based path), each with a real permission-scope story. Then the playground gets "grant" and "consume" buttons (kept strictly separate — bundling them would secretly re-grant before every use) and an account picker. <strong>If neither path works, work STOPS and comes back to you</strong> — no improvising.</p>
+    <p class="muted">Proves itself by: a minimal "grant then consume once" browser test against the local network, green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: The lifecycle test (~1 day)</h3>
+    <p>The full story, automated: fresh slip → used OK · fresh slip → revoked in Settings → use FAILS (and we assert it fails <em>because of the revoke</em>, not because it was already used) · fresh slip → master switch OFF → use fails → switch ON → use works. This finally covers the two Settings flows that have never had automated coverage.</p>
+    <p class="muted">Proves itself by: the new test green twice in a row locally, then the whole network suite green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: Close (~half day)</h3>
+    <p>Code review pass, independent codex audit, docs, one PR to dev. The merge gate is YOU clicking through the new playground buttons once.</p>
+    <p class="muted">Proves itself by: CI green on the PR + your manual pass.</p>
+  </div>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li>None for you right now — the three audit rounds surfaced six hidden assumptions and all are resolved in the plan. The one mid-flight decision (which grant-path design wins the Phase-2 spike) is delegated, with STOP-and-surface if both fail.</li>
+  </ul>
+
+  <h2>What the audits changed (the honest version)</h2>
+  <ul>
+    <li><strong>The custom Noir contract was dropped.</strong> v1 wanted a purpose-built "consumer" contract. Codex found the wallet couldn't even load its artifact without extra plumbing; both auditors confirmed a plain two-account token transfer exercises the identical on-chain path with zero new contracts. The contract idea is parked as a future arc.</li>
+    <li><strong>The test script was vacuous.</strong> Single-use semantics (above) — fable's catch, now fixed and re-verified by the final codex pass.</li>
+    <li><strong>"The wallet auto-grants" was false.</strong> The grant path has no users; Phase 2 exists because of this.</li>
+    <li><strong>One deliberate disagreement, decided:</strong> codex wanted the cancel-permission check to also match the exact account; we kept it at profile level — a profile is one human, and that human may cancel their own jobs from any of their accounts. Recorded as an explicit product decision.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: Outline B (two-account token consumption), playground panel, lifecycle e2e, three follow-ups front-loaded. The custom contract (Outline A) is OUT — future arc.</li>
+      <li>Confirm tier <code>mid</code> (rubric above) — note all three audit rounds are already done.</li>
+      <li>Confirm validation: units gate Phases 0-1; network e2e gates Phases 2-3; CI + your one manual playground pass gate the merge.</li>
+      <li>Confirm the D6 product decision: profile = the security boundary for job-cancelling.</li>
+      <li>No /harden scheduled (test-infra + small fixes; the wallet had its full passes recently).</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (FINAL — approved)</h2>
+    <p>One autonomous-session driver. <code>/goal</code> survives <code>claude --resume</code>; <code>/loop</code> fires on a fixed interval (expires after 7 days).</p>
+    <p class="warning">Use exactly ONE per session. They don't compose — setting one replaces the other.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /loop 15m (matches the execution-arc workflow that just shipped)</h3>
+      <pre><code>/loop 15m Drive implementations-plan/authwit-lifecycle-and-execution-followups forward. Never idle. Each firing: 1) read plan.md + lessons/ (authoritative), git status, git log -5; PR? gh pr view --json statusCheckRollup. 2) CI in flight: watch up to 10 min, prep next phase meanwhile. 3) No task? Next pending phase step (edit → bun run lint → bun run test → e2e:agent per the phase gate → commit). 4) Stuck or non-trivial decision? /codex xhigh, decide together, log in lessons/. Hard limits: never merge to dev/main, never publish, no scope beyond plan.md; Phase-2 spike unworkable → STOP and surface to me. 5) Same step failed 5×? Stop, reassess with codex. 6) Phase gate green (as WRITTEN in plan.md)? Mark ✓, lessons entry, print LESSONS_FILE=..., advance. 7) All ✓? /code-review max --fix → separate commit → codex post-impl audit → fix loop → PR to dev → manual-pass instructions in chat → wrap-up with contentious decisions ELI5'd → stop.</code></pre>
+    </div>
+
+    <h3>Alternative: /goal</h3>
+    <pre><code>/goal All phases 0-4 marked ✓ in implementations-plan/authwit-lifecycle-and-execution-followups/plan.md, each ✓ backed by its phase's validation gate (as written in plan.md) passing in the transcript; LESSONS_FILE=implementations-plan/authwit-lifecycle-and-execution-followups/lessons/phase-N.md printed per phase; /code-review max --fix applied + committed separately; codex post-impl audit complete with high/critical addressed; bun run lint and bun run test exit 0 in transcript; authwit-lifecycle.test.ts green inside a full e2e:agent run with the non-vacuity assertion present; single PR to dev opened (never merged autonomously); playground manual-pass instructions delivered in chat. Constraints: data-testid-only selectors; Phase-2 STOP-and-surface if neither grant-path design works; no scope beyond plan.md.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a> · audits: <a href="audit-codex.md">codex r1</a> / <a href="audit-fable.md">fable r1</a> / <a href="audit-codex-final.md">codex final</a></p>
+</body>
+</html>

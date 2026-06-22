@@ -1,9 +1,10 @@
 import { Fr } from "@aztec/foundation/curves/bn254"
+import { toRestoreError } from "@/utils/restore-error"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import type { IConfig } from "@/wallet/config"
 import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
 import { Lock } from "@/wallet/utils"
 import { ProfileRepository } from "./repository"
@@ -20,6 +21,31 @@ import { PROFILE_SERVICE_NAME, type ProfileInfo, type Profile, type Events, type
 export * from "./spec"
 
 export class ProfileService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()(
+		"getActiveProfile",
+		"getProfiles",
+		"generateProfileId",
+		"createProfile",
+		"createPasskeyProfile",
+		"unlockProfile",
+		"unlockPasskeyProfile",
+		"getPasskeyCredentialId",
+		"lockActiveProfile",
+		"refreshSession",
+		"changeProfileName",
+		"changeProfilePassword",
+		"confirmProfileOperation",
+		"deleteProfile",
+		"importEncrypted",
+		"importPlain",
+		"importPasskey",
+		"importMnemonic",
+		"exportEncrypted",
+		"exportPlain",
+		"exportMnemonic",
+		"restore",
+		"finalizeRestore",
+	)
 	public static name = PROFILE_SERVICE_NAME
 
 	public readonly onProfileAdded = new EventHandler<ProfileInfo>()
@@ -219,11 +245,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// modal opened).
 		// PATH B: no credentialData provided → SW opens a window via
 		// `passkeyCoordinator.createForNewProfile`, which calls
-		// `passkey.createKey(id)` → `openWindowAndWait`.
+		// `passkey.createKey(id, name)` → `openWindowAndWait`.
 		// Generate the id BEFORE entering the lock so the passkey UI
 		// prompt below doesn't hold the facade lock for minutes.
 		const id = credentialData?.userHandle ?? (await this.repo.generateUniqueId())
-		const recovery = await this.acquireRecovery({ ceremony: "create", userHandle: id }, credentialData)
+		const recovery = await this.acquireRecovery({ ceremony: "create", userHandle: id, name }, credentialData)
 
 		try {
 			await this.lock.enter()
@@ -310,6 +336,15 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// regardless of path.
 		const recovery = await this.acquireRecovery({ ceremony: "getById", credentialId: snapshot.credentialId }, credentialData)
 
+		// F-007: bind the recovered credential to the target profile. Mirrors
+		// the existing check in exportPlain (line ~656) and restore() (~916).
+		// Without this, a popup-supplied PasskeyCredentialData for credential
+		// B could unlock profile A using a session derived from credential B's
+		// master secret — opening a session with the wrong key material.
+		if (recovery.credentialId !== snapshot.credentialId) {
+			throw new Error("Invalid profile id")
+		}
+
 		// Phase 3 — re-enter lock, revalidate credentialId, open session.
 		try {
 			await this.lock.enter()
@@ -353,7 +388,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * logic.
 	 */
 	private async acquireRecovery(
-		opts: { ceremony: "create"; userHandle: string } | { ceremony: "getById"; credentialId: string } | { ceremony: "getAny" },
+		opts:
+			| { ceremony: "create"; userHandle: string; name: string }
+			| { ceremony: "getById"; credentialId: string }
+			| { ceremony: "getAny" },
 		credentialData: PasskeyCredentialData | undefined,
 	): Promise<PasskeyRecovery> {
 		if (credentialData) {
@@ -361,7 +399,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		}
 		switch (opts.ceremony) {
 			case "create":
-				return await this.passkeyCoordinator.createForNewProfile(opts.userHandle)
+				return await this.passkeyCoordinator.createForNewProfile(opts.userHandle, opts.name)
 			case "getById":
 				return await this.passkeyCoordinator.recoverByCredentialId(opts.credentialId)
 			case "getAny":
@@ -889,7 +927,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				} catch (err) {
 					return {
 						...profile,
-						restoreError: err instanceof Error ? err.message : err,
+						restoreError: toRestoreError(err),
 					}
 				} finally {
 					this.lock.leave()
@@ -950,7 +988,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				} catch (err) {
 					return {
 						...profile,
-						restoreError: err instanceof Error ? err.message : err,
+						restoreError: toRestoreError(err),
 					}
 				} finally {
 					this.lock.leave()

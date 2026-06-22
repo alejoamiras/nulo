@@ -15,18 +15,126 @@ on:
         required: false
         type: string
         default: "http://localhost:8080"
+      shard:
+        description: |
+          vitest --shard expression (e.g. "1/5"). Empty string runs the full suite.
+          Caller workflows use this with a matrix strategy to parallelize across
+          runners; each shard runs its own anvil + aztec sandbox.
+        required: false
+        type: string
+        default: ""
+      shard_label:
+        description: |
+          Artifact-safe label for the shard (e.g. "1-of-5"). actions/upload-artifact
+          rejects `/` in artifact names, so the caller passes a separate label
+          here distinct from the `shard` input's vitest expression. Empty falls
+          back to "full" for the unsharded invocation.
+        required: false
+        type: string
+        default: ""
+      probe:
+        description: |
+          Set to "1" when this workflow run is intentionally running with probes on
+          (slow-test investigation). The bundle-grep guard skips when "1" because
+          the build will legitimately contain probe strings. Default empty runs
+          the guard, which fails the workflow if probe strings ship in dist/chrome.
+        required: false
+        type: string
+        default: ""
+      test_files:
+        description: |
+          Explicit space-separated list of test files to run, passed straight to
+          vitest as positional args. Used by the dedicated heavy-network job to
+          run e.g. tests/e2e/network/fee-methods.test.ts alone, separated from
+          the SHA-1-distributed matrix shards so it doesn't pre-pressure the
+          prover queue for popup-shape tests sharing the same shard host.
+          Leave empty for the default (sharded) suite distribution.
+        required: false
+        type: string
+        default: ""
+      exclude_files:
+        description: |
+          Space-separated --exclude patterns passed to vitest. Used by the
+          lightweight matrix shards to exclude heavy-network files that are
+          run in a dedicated job (see test_files). Without this, an excluded
+          file would still consume one slot in the SHA-1 shard distribution.
+        required: false
+        type: string
+        default: ""
+      disable_accelerator:
+        description: |
+          Skip accelerator-server install + startup + hard-fail enforcement.
+          Wallet falls back to in-browser WASM proving (pre-PR baseline).
+          Rollback flag for emergencies. See plan §10 + CI.md "Accelerator in CI".
+        required: false
+        type: boolean
+        default: false
+      proverless:
+        description: |
+          Build the wallet with NULO_E2E_PROVERLESS=1 (skip BB-SNARK
+          generation; kernel sim + on-chain submission stay real). Implies
+          accelerator OFF (proverless ⊥ accelerator-required). Used by the
+          shard pool + STUB barrier jobs; the prover-ON canary jobs leave it
+          false. See implementations-plan/e2e-proverless-stub.
+        required: false
+        type: boolean
+        default: false
+      retry:
+        description: |
+          Override the vitest `retry` count via NULO_E2E_RETRY. Empty = config
+          default (3 attempts). The soak workflow passes "0" so a test that
+          passes only on a retry FAILS the iteration ("zero retries consumed").
+        required: false
+        type: string
+        default: ""
     secrets:
       SPONSORED_FPC_SALT:
         required: false
 
 jobs:
   network-e2e:
-    name: Aztec agent
+    name: ${{ inputs.shard && format('Aztec agent (shard {0})', inputs.shard) || 'Aztec agent' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Per-shard wall-time worst case is ~20m (9 files + cold-start ~5m). 30m
+    # budget gives headroom without masking real hangs. Was 60m for the single
+    # unsharded job; that ceiling no longer applies.
+    timeout-minutes: 30
     env:
       AZTEC_NODE_URL: ${{ inputs.aztec_node_url }}
       SPONSORED_FPC_SALT: ${{ !contains(inputs.aztec_node_url, 'localhost') && secrets.SPONSORED_FPC_SALT || '' }}
+      # Baked into the wallet build at `bun run build:chrome` time (via the
+      # agent.sh subprocess). When "1", `packages/extension/src/accelerator/config.ts`
+      # sets `ACCELERATOR_REQUIRED=true`, which makes the offscreen factory
+      # construct `ProductionPxeFactory` in required-mode (eager
+      # checkAcceleratorStatus preflight + onPhase throw on
+      # "fallback"/"denied"). When empty, the wallet behaves exactly like
+      # the production build (silent WASM fallback if no accelerator).
+      #
+      # Expression shape `disable_accelerator == false && '1' || ''` instead
+      # of the inverted form: GitHub Actions short-circuits `&&` such that
+      # `true && ''` returns `''` (right operand), and then `'' || '1'`
+      # falls through to `'1'` because empty string is falsy. So the inverted
+      # form would resolve to `'1'` in BOTH branches, completely defeating
+      # the disable flag (codex post-impl audit finding #1).
+      # Accelerator-required ONLY when not disabled AND not proverless (proverless
+      # ⊥ accelerator — the offscreen would FATAL on both). Same short-circuit
+      # shape as the disable flag (`(A && B) && '1' || ''` → '1' iff both true).
+      VITE_NULO_ACCELERATOR_REQUIRED: ${{ (inputs.disable_accelerator == false && inputs.proverless == false) && '1' || '' }}
+      # Proverless build flag, read by agent.sh (arms the double-opt-in VITE
+      # flags + asserts the positive build stamp). '1' iff proverless.
+      NULO_E2E_PROVERLESS: ${{ inputs.proverless && '1' || '' }}
+      # Override vitest retry. Empty leaves the config default (3 attempts; the
+      # vitest config treats "" as default). The soak passes "0" so a retry-passed
+      # test FAILS the iteration — the "zero retries consumed" acceptance gate.
+      NULO_E2E_RETRY: ${{ inputs.retry }}
+      # Widen the wallet's maxFeesPerGas envelope for e2e only. Devnet
+      # base-fees drift on loaded GHA runners; multi-prove tests
+      # (transfers, concurrent-sendtx-confirm) hit `maxFeesPerGas <
+      # gasFees` at inclusion. First attempt at 4× still missed (observed
+      # ~9× base-fee climb during a single test). Bumping to 10× to give
+      # the heavy multi-prove paths real headroom. Production stays at
+      # the upstream default of 2 (no env var set).
+      VITE_NULO_FEE_MULTIPLIER: "10"
     steps:
       - uses: actions/checkout@v6
         with:
@@ -40,17 +148,212 @@ jobs:
 
       - uses: ./.github/actions/setup-puppeteer
 
+      # Install + verify + start accelerator-server. Skipped when the
+      # rollback flag is set; in that case the wallet build's
+      # VITE_NULO_ACCELERATOR_REQUIRED is also empty so chain-runtime.ts
+      # behaves like production (silent WASM fallback).
+      - uses: ./.github/actions/setup-accelerator-server
+        if: '${{ !inputs.disable_accelerator && !inputs.proverless }}'
+        with:
+          # v1.0.6 (Aztec 4.3.1-bundled bb). The 5.0 proving stack is fetched on demand
+          # on first /prove (bb is downloaded per the SDK-requested version), so this binary
+          # proves 5.0.0-rc.1 txs without a 5.0-specific release. Bump again when a newer line ships.
+          version: "1.0.6"
+          # SHA-256 of the EXTRACTED binary (not the tarball — different
+          # hashes; the binary is what `actions/cache` restores, so it's
+          # the trust anchor on every run). Computed locally via:
+          #   curl ... | tar -xzO accelerator-server | shasum -a 256
+          # The upstream `.sha256` sidecar in the GH release covers the
+          # tarball; we don't trust the sidecar as a security boundary
+          # anyway (release-origin compromise would replace both).
+          # See SECURITY.md "Binary dependencies" for the bump procedure.
+          expected_sha256: 995d13a4d877c06ccdb457de3c54ac13f85a8ceb6f3b3ddf13aecbb026b8c3d3
+
+      - name: Start accelerator-server
+        if: '${{ !inputs.disable_accelerator && !inputs.proverless }}'
+        shell: bash
+        env:
+          # tracing-subscriber default = info; emits "Received /prove request"
+          # for each prove + version-cache info we tail in the advisory step.
+          RUST_LOG: "info"
+          # ACCEL_ALLOW_ALL approves every browser origin. accelerator-server v1.0.6
+          # (SEC-01c) flipped the headless default to deny-by-default: with ALLOWED_ORIGINS
+          # unset, localhost is auto-approved but every NON-localhost origin is DENIED. Our
+          # offscreen prover calls /prove from chrome-extension://<id> (non-localhost) with
+          # no popup available in headless CI → request denied → no proof → the canary tx
+          # errors / times out (NOT a silent WASM fallback — the required-mode build throws).
+          # We can't pre-list the origin in ALLOWED_ORIGINS because the unpacked-extension id
+          # isn't known until Chrome loads it, so allow-all is the headless contract (it is
+          # mutually exclusive with ALLOWED_ORIGINS, which stays unset). Safe per SECURITY.md:
+          # loopback-only (127.0.0.1:59833), single-tenant runner, fork PRs receive no secrets,
+          # and the only /prove traffic originates from the wallet we just built.
+          ACCEL_ALLOW_ALL: "1"
+        run: |
+          set -euo pipefail
+          # BB_BINARY_PATH is defined INSIDE the script, not in `env:`, because
+          # YAML env values are NOT shell-expanded by GitHub Actions — a literal
+          # `$HOME` would have been passed verbatim. Set + export here so the
+          # nohup subshell inherits it. Skip the server's first-prove
+          # bb-download tax by handing it the pre-installed binary from
+          # setup-aztec. The per-arch native ELF is the right target, not the
+          # Node-wrapped .bin/bb shim.
+          export BB_BINARY_PATH="$HOME/.aztec/current/node_modules/@aztec/bb.js/build/amd64-linux/bb"
+          if [ ! -x "$BB_BINARY_PATH" ]; then
+            echo "::error::BB_BINARY_PATH=$BB_BINARY_PATH not executable. setup-aztec layout may have shifted."
+            ls -la "$HOME/.aztec/" || true
+            ls -la "$HOME/.aztec/current/" 2>/dev/null || true
+            find "$HOME/.aztec" -name bb -type f 2>/dev/null | head -10 || true
+            exit 1
+          fi
+          nohup accelerator-server > /tmp/accelerator-server.log 2>&1 &
+          echo "ACCELERATOR_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for accelerator-server ready (Layer 1 preflight)
+        if: '${{ !inputs.disable_accelerator && !inputs.proverless }}'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for _i in $(seq 1 30); do
+            if curl -sSfL http://127.0.0.1:59833/health > /tmp/accelerator-health.json 2>/dev/null; then
+              # bb_available is the authoritative liveness signal. Version-
+              # cache matching is enforced later by Layer 2's eager
+              # checkAcceleratorStatus in chain-runtime.ts, where the error
+              # message includes the SDK's expected version (clearer than a
+              # workflow-level jq failure).
+              if jq -e '.bb_available == true' /tmp/accelerator-health.json > /dev/null; then
+                echo "Accelerator ready: $(cat /tmp/accelerator-health.json)"
+                exit 0
+              fi
+              echo "::error::accelerator-server alive but bb_available != true"
+              cat /tmp/accelerator-health.json
+              tail -30 /tmp/accelerator-server.log || true
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "::error::accelerator-server failed to come up in 30s"
+          tail -50 /tmp/accelerator-server.log || true
+          exit 1
+
       - name: Run network e2e via agent
-        run: bun run e2e:agent
+        env:
+          EXCLUDE_FILES: ${{ inputs.exclude_files }}
+          TEST_FILES: ${{ inputs.test_files }}
+          SHARD: ${{ inputs.shard }}
+        run: |
+          # Use bash arrays + read -ra so word-splitting is explicit + scoped
+          # (avoids shellcheck SC2086 noise on intentional split-into-flags).
+          read -ra EXCLUDE_LIST <<< "$EXCLUDE_FILES"
+          read -ra TEST_FILE_LIST <<< "$TEST_FILES"
+          EXCLUDE_ARGS=()
+          for f in "${EXCLUDE_LIST[@]}"; do
+            [ -n "$f" ] && EXCLUDE_ARGS+=(--exclude "$f")
+          done
+
+          run_agent() {
+            if [ "${#TEST_FILE_LIST[@]}" -gt 0 ] && [ -n "${TEST_FILE_LIST[0]}" ]; then
+              # Dedicated mode: caller specified explicit test files. Ignore shard;
+              # the file list IS the workload.
+              bun run e2e:agent "${TEST_FILE_LIST[@]}" "${EXCLUDE_ARGS[@]}"
+            elif [ -n "$SHARD" ]; then
+              bun run e2e:agent --shard="$SHARD" "${EXCLUDE_ARGS[@]}"
+            else
+              bun run e2e:agent "${EXCLUDE_ARGS[@]}"
+            fi
+          }
+
+          # Boot-failure sentinel: agent.sh exits 86 ONLY when the sandbox
+          # (anvil/node/deploy bring-up) never became ready AND no test ran.
+          # Retry the agent ONCE for that narrow infra window; any other non-zero
+          # is a real failure and fails immediately. Cap = 1. No test-dimension
+          # retry — the PR gate runs retry: 0 so app flakes surface honestly.
+          set +e
+          run_agent
+          CODE=$?
+          set -e
+          if [ "$CODE" -eq 86 ]; then
+            echo "::warning::Infra boot failure (exit 86) — retrying the agent once."
+            set +e
+            run_agent
+            CODE=$?
+            set -e
+            if [ "$CODE" -eq 86 ]; then
+              echo "::error::Infra boot failed again on retry (exit 86)."
+            fi
+          fi
+          exit "$CODE"
+
+      # Permanent guard: PR #46's lessons doc flagged bundle-grep as the actual
+      # leak guarantee for diagnostic probes (compile-time gate is design intent,
+      # not safety property). Probes accidentally surviving to dist/chrome would
+      # leak protocol details to browser consoles in production. Skip the guard
+      # when `inputs.probe == '1'` because slow-test investigation builds
+      # legitimately contain probe strings.
+      - name: Verify no probe code in shipped bundle
+        if: always() && inputs.probe != '1'
+        shell: bash
+        run: |
+          cd packages/extension
+          # grep exits 1 on no-match; with `set -e -o pipefail` that aborts the
+          # script before the `HITS > 0` check, so wrap the pipeline in `|| true`.
+          HITS=$( { grep -RnE '(PROBE|nulo:probe:|VITE_E2E_PROBE)' dist/chrome 2>/dev/null || true; } | wc -l | tr -d ' ')
+          if [ "$HITS" -gt 0 ]; then
+            echo "::error::Probe strings found in built bundle ($HITS hits)."
+            grep -RnE '(PROBE|nulo:probe:|VITE_E2E_PROBE)' dist/chrome | head -20
+            exit 1
+          fi
+          echo "Bundle clean: no probe strings."
+
+      # Advisory only — does NOT exit non-zero. Layer 2 in chain-runtime.ts
+      # is the authoritative hard-fail; this step surfaces server-side
+      # activity counts in the run summary for measurement / debugging.
+      # See plan §8 for layer design.
+      - name: Surface accelerator activity (advisory)
+        if: ${{ always() && !inputs.disable_accelerator && !inputs.proverless }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f /tmp/accelerator-server.log ]; then
+            echo "::warning::accelerator-server log missing — possible startup failure"
+            exit 0
+          fi
+          # Verified literal pattern from accelerator-server source
+          # (server.rs:392: `tracing::info!("Received /prove request");`).
+          PROVE_COUNT=$(grep -c 'Received /prove request' /tmp/accelerator-server.log || true)
+          echo "::notice::accelerator-server log shows ${PROVE_COUNT} /prove requests this run"
+          {
+            echo "### accelerator-server activity"
+            echo "- /prove request lines: ${PROVE_COUNT}"
+            echo "- log size: $(wc -c < /tmp/accelerator-server.log) bytes"
+            echo "- last 5 lines:"
+            echo '```'
+            tail -5 /tmp/accelerator-server.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Shut down accelerator-server
+        if: ${{ always() && !inputs.disable_accelerator && !inputs.proverless }}
+        shell: bash
+        run: |
+          if [ -n "${ACCELERATOR_PID:-}" ]; then
+            kill -TERM "${ACCELERATOR_PID}" 2>/dev/null || true
+            wait "${ACCELERATOR_PID}" 2>/dev/null || true
+          fi
+          pkill -TERM accelerator-server 2>/dev/null || true
 
       - name: Upload network e2e logs on failure
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: network-e2e-logs
+          # Use shard_label (e.g. "1-of-5") not shard ("1/5") — upload-artifact
+          # rejects `/` in names (actions/upload-artifact#647).
+          name: network-e2e-logs-${{ inputs.shard_label || 'full' }}
           path: |
             packages/extension/.e2e-state
             /tmp/aztec-*.log
             /tmp/anvil-*.log
+            /tmp/nulo-probes-*.jsonl
+            /tmp/accelerator-server.log
+            /tmp/accelerator-health.json
           if-no-files-found: ignore
           retention-days: 7

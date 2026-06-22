@@ -1,6 +1,8 @@
 import puppeteer, { TimeoutError, type Browser, type Page, type ConsoleMessage } from "puppeteer"
 import { test as base, inject } from "vitest"
-import { switchToLocalNetwork, importToken, getAccountAddress, refreshBalances } from "./helpers"
+import { switchToLocalNetwork, importToken, getAccountAddress, refreshBalances, createAccount } from "./helpers"
+import { snapshotResultSeq, waitForPgResult } from "./playground"
+import { waitForPopup, approveCapabilities } from "./popups"
 import type { AztecTestConfig } from "./aztec"
 
 export interface ExtensionContext {
@@ -53,7 +55,7 @@ export async function launchExtension(): Promise<ExtensionContext> {
 	// Discover extension ID from service worker target
 	const workerTarget = await browser.waitForTarget(
 		(target) => target.type() === "service_worker" && target.url().includes("service-worker-loader"),
-		{ timeout: 10_000 },
+		{ timeout: 30_000 },
 	)
 	const extensionId = new URL(workerTarget.url()).hostname
 
@@ -119,7 +121,12 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	ctx.pageErrors = []
 
 	page.on("console", (msg: ConsoleMessage) => {
-		if (msg.type() === "error") {
+		// "Client disconnected" is the benign SW-port-close cascade — pending
+		// background-port RPCs reject en-masse when the SW restarts (e.g. during
+		// account switch). Prod already treats it as benign (offscreen
+		// `isBenignSwDisconnect`); filter it here too so the `consoleErrors`
+		// assertions only catch UNEXPECTED errors, not this known noise.
+		if (msg.type() === "error" && !msg.text().includes("Client disconnected")) {
 			ctx.consoleErrors.push(msg.text())
 		}
 	})
@@ -130,19 +137,21 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 	const url = `chrome-extension://${ctx.extensionId}/src/onboarding/index.html#/onboarding/welcome`
 	await page.goto(url, { waitUntil: "domcontentloaded" })
 	// Wait for Vue mount: welcome CTA must render.
-	await page.waitForSelector('[data-testid="onboarding-welcome-create"]', { visible: true, timeout: 15_000 })
+	await page.waitForSelector('[data-testid="onboarding-welcome-create"]', { visible: true, timeout: 30_000 })
 	return page
 }
 
-/** Register a profile with a test password. Leaves the extension on #/popup/general. */
-async function registerProfile(ctx: ExtensionContext): Promise<void> {
+/** Register a profile with a test password. Leaves the extension on #/popup/general.
+ *  Exported so the Phase 3 cold-shard warm-up tap (and any other test infra that
+ *  drives the full register flow outside the fixture pipeline) can reuse it. */
+export async function registerProfile(ctx: ExtensionContext): Promise<void> {
 	const page = await openPopup(ctx)
 
 	await waitForHash(page, "#/popup/register")
 
 	// Wait for GlobalLoader to disappear (SW must connect first)
 	await page.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), {
-		timeout: 15_000,
+		timeout: 30_000,
 		polling: 500,
 	})
 
@@ -151,7 +160,7 @@ async function registerProfile(ctx: ExtensionContext): Promise<void> {
 	// Wait for RegisterPopup submit button to mount
 	await page.waitForSelector('[data-testid="register-submit-btn"]', {
 		visible: true,
-		timeout: 10_000,
+		timeout: 30_000,
 	})
 
 	// Profile name is required at submit time (F1: pre-create explicit
@@ -160,7 +169,7 @@ async function registerProfile(ctx: ExtensionContext): Promise<void> {
 
 	await page.waitForSelector('input[placeholder="Strong password"]', {
 		visible: true,
-		timeout: 10_000,
+		timeout: 30_000,
 	})
 
 	const testPassword = "TestPassword123!"
@@ -170,8 +179,8 @@ async function registerProfile(ctx: ExtensionContext): Promise<void> {
 	// Submit (waitForFunction inside clickByTestId gates on :disabled)
 	await clickByTestId(page, "register-submit-btn")
 
-	await waitForHash(page, "#/popup/general", 15_000)
-	await page.waitForSelector('[data-testid="balance-amount"]', { visible: true, timeout: 10_000 })
+	await waitForHash(page, "#/popup/general", 30_000)
+	await page.waitForSelector('[data-testid="balance-amount"]', { visible: true, timeout: 30_000 })
 	await page.close()
 }
 
@@ -185,31 +194,55 @@ async function registerProfile(ctx: ExtensionContext): Promise<void> {
  *
  * Returns the dApp Page so the caller can keep driving it; the caller is
  * responsible for closing it (or letting the browser teardown handle it).
+ *
+ * Exported alongside `registerProfile` so the Phase 3 cold-shard warm-up tap
+ * can perform the same setup without going through the fixture pipeline.
  */
-async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
+export async function connectPlayground(ctx: ExtensionContext): Promise<Page> {
 	const { openPlayground } = await import("./playground")
 	const { waitForPopup, approveDiscover, approveVerify } = await import("./popups")
 
-	const dappPage = await openPlayground(ctx)
+	// Internal phase-tag so the outer `[dappConnectedExtensionPerTest:connectPlayground]`
+	// error tells us WHICH step inside this function fails. Without this we
+	// only know "30s timeout somewhere in here" — useless for triage.
+	const step = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+		try {
+			return await fn()
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err)
+			throw new Error(`connectPlayground:${name} — ${msg}`)
+		}
+	}
+
+	const dappPage = await step("openPlayground", () => openPlayground(ctx))
 
 	// Set up popup listeners BEFORE the click so we don't miss the events.
-	const discoverP = waitForPopup(ctx, "discover", { timeout: 15_000 })
+	const discoverP = waitForPopup(ctx, "discover", { timeout: 30_000 })
 
 	// Bumped from 5s to 30s — under network-suite load the playground vite
 	// server cold-load + dapp Vue mount can take 10-20s; clickByTestId polls
 	// for ~10s on its own which is still usually enough, but the explicit
 	// waitForSelector here was the load-bearing 5s timeout that cascaded
 	// into ~40 fixture failures.
-	await dappPage.waitForSelector('[data-testid="pg-btn-connect"]', { visible: true, timeout: 30_000 })
-	await clickByTestId(dappPage, "pg-btn-connect")
+	await step("waitForConnectBtn", () => dappPage.waitForSelector('[data-testid="pg-btn-connect"]', { visible: true, timeout: 30_000 }))
+	await step("clickConnect", () => clickByTestId(dappPage, "pg-btn-connect"))
 
-	const discoverPage = await discoverP
-	await approveDiscover(discoverPage)
+	const discoverPage = await step("awaitDiscoverPopup", () => discoverP)
+	// Arm the verify popup wait BEFORE approveDiscover triggers the SW to
+	// create the verify window. Codex audit caught: approveDiscover only
+	// clicks (popups.ts:126), doesn't wait for close. If verify opens
+	// faster than the next waitForPopup, the snapshot at popups.ts:32
+	// treats the already-existing target as preExisting and ignores it —
+	// the test then hangs for 30s waiting for a NEW verify target that
+	// never appears. Race confirmed deterministic on shard 5.
+	const verifyP = waitForPopup(ctx, "verify", { timeout: 30_000 })
+	await step("approveDiscover", () => approveDiscover(discoverPage))
+	const verifyPage = await step("awaitVerifyPopup", () => verifyP)
+	await step("approveVerify", () => approveVerify(verifyPage))
 
-	const verifyPage = await waitForPopup(ctx, "verify", { timeout: 15_000 })
-	await approveVerify(verifyPage)
-
-	await dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 20_000 })
+	await step("waitForConnectedStatus", () =>
+		dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 30_000 }),
+	)
 	return dappPage
 }
 
@@ -232,6 +265,44 @@ export const test = base.extend<{
 	 *  for files with multiple parameterized cases (sim-methods, authwit-variants,
 	 *  tx-sendTx-multicall) so cap state from one case doesn't leak to the next. */
 	dappConnectedExtensionPerTest: ExtensionContext & { playgroundPage: Page }
+	/** Per-test fresh browser + registered profile + Local Network + dapp
+	 *  connected via @nulo/playground + `accounts` capability ALREADY GRANTED
+	 *  for the playground origin. Use this for tests that exercise an
+	 *  account-cap-gated RPC (registerToken, getAccounts post-grant) without
+	 *  paying the cold cap-popup round-trip during the test budget — the
+	 *  cap-popup work happens in fixture setup, which has hookTimeout=300s.
+	 *  The exposed `accountAddress` is the first account from the cap popup
+	 *  (the one the fixture selected on the dApp's behalf).
+	 *  See implementations-plan/e2e-stabilization/plan.md §6, §8.4. */
+	dappConnectedExtensionWithAccountsCap: ExtensionContext & { playgroundPage: Page; accountAddress: string }
+	/** Per-test fresh browser + registered profile + Local Network + dapp
+	 *  connected + `transaction` bundle (accounts + transaction caps) ALREADY
+	 *  GRANTED for the playground origin. Use this for tests that exercise a
+	 *  transaction-cap-gated RPC (sendTx, multicall) without paying the cold
+	 *  cap-popup round-trip during the test budget — the cap-popup work happens
+	 *  in fixture setup, which has hookTimeout=300s. The exposed `accountAddress`
+	 *  is the first account from the cap popup (the one the fixture selected on
+	 *  the dApp's behalf).
+	 *
+	 *  Mirrors the `dappConnectedExtensionWithAccountsCap` pattern; the
+	 *  cap-grant inner helper is intentionally duplicated rather than abstracted
+	 *  to keep the two fixtures independently auditable. Refactor once we have
+	 *  three or more such fixtures (CLAUDE.md "same code in 3 places" threshold).
+	 *  See implementations-plan/e2e-stabilization/lessons/phase-3a.md. */
+	dappConnectedExtensionWithTransactionCap: ExtensionContext & { playgroundPage: Page; accountAddress: string }
+	/** Same as `dappConnectedExtensionWithTransactionCap` BUT pre-grants the
+	 *  `transaction` bundle for up to the FIRST TWO accounts the cap popup
+	 *  exposes. Use this for tests that characterize multi-account session
+	 *  behavior (multi-account-from) without paying the cap-popup cold tax
+	 *  during the test budget. The exposed `accountAddresses` is the array
+	 *  of granted accounts (1 or 2 entries depending on what the wallet
+	 *  exposed). Mirrors the `dappConnectedExtensionWithTransactionCap`
+	 *  pattern; the cap-grant inner helper is intentionally duplicated
+	 *  rather than abstracted for the same audit-independence reason. */
+	dappConnectedExtensionWithFirstTwoAccountsCap: ExtensionContext & {
+		playgroundPage: Page
+		accountAddresses: string[]
+	}
 	/** Fresh browser with extension loaded, **no profile registered**. Per-test
 	 *  scope. Use for tests that drive the import or register flow from
 	 *  scratch (e.g. tests/e2e/import-paths.test.ts). */
@@ -297,7 +368,7 @@ export const test = base.extend<{
 			// no accounts → cap-account-item list is empty → every accounts/sendTx/
 			// sim test fails. (Confirmed by Codex audit run 1 — Codex 2026-04-26.)
 			const setupPage = await openPopup(registeredExtension)
-			await waitForHash(setupPage, "#/popup/general", 15_000)
+			await waitForHash(setupPage, "#/popup/general", 30_000)
 			await switchToLocalNetwork(setupPage)
 			await setupPage.close()
 			const playgroundPage = await connectPlayground(registeredExtension)
@@ -309,14 +380,243 @@ export const test = base.extend<{
 	dappConnectedExtensionPerTest: [
 		// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
 		async ({}, use) => {
-			const ctx = await launchExtension()
-			await registerProfile(ctx)
-			const setupPage = await openPopup(ctx)
-			await waitForHash(setupPage, "#/popup/general", 15_000)
-			await switchToLocalNetwork(setupPage)
+			// Phase-tag each setup step. A failure here previously surfaced
+			// downstream as `Cannot read properties of undefined (reading
+			// 'playgroundPage')` — the test body destructured the fixture
+			// result, but use() never ran because setup threw. The tag
+			// converts that opaque collapse into a precise origin line.
+			const phase = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+				try {
+					return await fn()
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err)
+					throw new Error(`[dappConnectedExtensionPerTest:${name}] ${msg}`)
+				}
+			}
+			const ctx = await phase("launchExtension", () => launchExtension())
+			await phase("registerProfile", () => registerProfile(ctx))
+			const setupPage = await phase("openPopup", () => openPopup(ctx))
+			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
+			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
 			await setupPage.close()
-			const playgroundPage = await connectPlayground(ctx)
+			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
 			await use(Object.assign(ctx, { playgroundPage }))
+			await ctx.browser.close()
+		},
+		{ scope: "test" },
+	],
+
+	dappConnectedExtensionWithAccountsCap: [
+		// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
+		async ({}, use) => {
+			const phase = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+				try {
+					return await fn()
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err)
+					throw new Error(`[dappConnectedExtensionWithAccountsCap:${name}] ${msg}`)
+				}
+			}
+			const ctx = await phase("launchExtension", () => launchExtension())
+			await phase("registerProfile", () => registerProfile(ctx))
+			const setupPage = await phase("openPopup", () => openPopup(ctx))
+			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
+			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
+			await setupPage.close()
+			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
+
+			// Pre-grant ONLY the `accounts` capability for the playground origin
+			// (NOT the wider `basic` bundle). Scoped per audit-codex-final-pass §1
+			// and plan.md §8.4. Runs inside the fixture's hookTimeout (300s) so
+			// the cold-shard cap-popup work doesn't eat into any consumer's
+			// per-test budget. The selected account address is returned to the
+			// consumer so it doesn't have to re-derive it from popup rows.
+			const accountAddress = await phase("grantAccountsCap", async () => {
+				await playgroundPage.evaluate(() => {
+					const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
+					if (!select) throw new Error("pg-bundle-select not present on playground page")
+					select.value = "accounts"
+					select.dispatchEvent(new Event("change", { bubbles: true }))
+				})
+				const seqGrant = await snapshotResultSeq(playgroundPage)
+				// 60s waitForPopup because this is THE first cap popup on a cold shard;
+				// chrome.windows.create + SW handler boot can push popup-target
+				// appearance past 30s on CI runners.
+				const capPopupP = waitForPopup(ctx, "capabilities", { timeout: 60_000 })
+				await clickByTestId(playgroundPage, "pg-btn-requestCapabilities")
+				const capPopup = await capPopupP
+				// 60s here too — loadInteractionPayload() round-trips through the SW
+				// to resolve availableAccounts (PXE + accountService warmup) which
+				// can also exceed 30s on cold shard.
+				await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 60_000 })
+				const accountIds = await capPopup.evaluate(() =>
+					[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) =>
+						r.getAttribute("data-account-id"),
+					),
+				)
+				const address = accountIds[0]
+				if (!address) throw new Error("capabilities popup returned no accounts")
+				await approveCapabilities(capPopup, { accounts: [address] })
+				await waitForPgResult(playgroundPage, "requestCapabilities", seqGrant, 30_000)
+				return address
+			})
+
+			await use(Object.assign(ctx, { playgroundPage, accountAddress }))
+			await ctx.browser.close()
+		},
+		{ scope: "test" },
+	],
+
+	dappConnectedExtensionWithTransactionCap: [
+		// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
+		async ({}, use) => {
+			const phase = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+				try {
+					return await fn()
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err)
+					throw new Error(`[dappConnectedExtensionWithTransactionCap:${name}] ${msg}`)
+				}
+			}
+			const ctx = await phase("launchExtension", () => launchExtension())
+			await phase("registerProfile", () => registerProfile(ctx))
+			const setupPage = await phase("openPopup", () => openPopup(ctx))
+			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
+			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
+			await setupPage.close()
+			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
+
+			// Pre-grant the `transaction` bundle (accounts + transaction caps).
+			// Tx-cap-gated tests (sendTx, multicall) opt into this fixture to
+			// push the cold cap-popup round-trip into hookTimeout (300s) instead
+			// of paying it during the test budget. Same scope rules as the
+			// accounts-cap fixture above: per-test, playground origin only,
+			// no state leak to siblings.
+			const accountAddress = await phase("grantTransactionCap", async () => {
+				await playgroundPage.evaluate(() => {
+					const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
+					if (!select) throw new Error("pg-bundle-select not present on playground page")
+					select.value = "transaction"
+					select.dispatchEvent(new Event("change", { bubbles: true }))
+				})
+				const seqGrant = await snapshotResultSeq(playgroundPage)
+				// 60s timeouts because this is THE first cap popup on a cold shard.
+				const capPopupP = waitForPopup(ctx, "capabilities", { timeout: 60_000 })
+				await clickByTestId(playgroundPage, "pg-btn-requestCapabilities")
+				const capPopup = await capPopupP
+				await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 60_000 })
+				const accountIds = await capPopup.evaluate(() =>
+					[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) =>
+						r.getAttribute("data-account-id"),
+					),
+				)
+				const address = accountIds[0]
+				if (!address) throw new Error("capabilities popup returned no accounts")
+				await approveCapabilities(capPopup, { accounts: [address] })
+				await waitForPgResult(playgroundPage, "requestCapabilities", seqGrant, 30_000)
+				return address
+			})
+
+			await use(Object.assign(ctx, { playgroundPage, accountAddress }))
+			await ctx.browser.close()
+		},
+		{ scope: "test" },
+	],
+
+	dappConnectedExtensionWithFirstTwoAccountsCap: [
+		// biome-ignore lint/correctness/noEmptyPattern: vitest fixture API requires {} destructuring
+		async ({}, use) => {
+			const phase = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+				try {
+					return await fn()
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err)
+					throw new Error(`[dappConnectedExtensionWithFirstTwoAccountsCap:${name}] ${msg}`)
+				}
+			}
+			const ctx = await phase("launchExtension", () => launchExtension())
+			await phase("registerProfile", () => registerProfile(ctx))
+			const setupPage = await phase("openPopup", () => openPopup(ctx))
+			await phase("waitForHashGeneral", () => waitForHash(setupPage, "#/popup/general", 30_000))
+			await phase("switchToLocalNetwork", () => switchToLocalNetwork(setupPage))
+			// A fresh profile exposes ONE account; multi-account consumers (the
+			// from-characterization + the authwit consume-as-caller flow) need a
+			// real second account in the cap popup, so create it here where the
+			// cost lands in hookTimeout.
+			await phase("createSecondAccount", () => createAccount(setupPage, "Second"))
+			// Persistence assertion: the row rendering proves only the optimistic
+			// appStore push; verify the SERVICE write landed before moving on.
+			let postCreateDump = ""
+			await phase("assertSecondAccountPersisted", async () => {
+				postCreateDump = await setupPage.evaluate(async () => {
+					const all = await chrome.storage.local.get(null)
+					return Object.entries(all)
+						.filter(([k]) => k.startsWith("nulo:core:accounts"))
+						.map(([, v]) => (typeof v === "string" ? v : JSON.stringify(v)))
+						.join(" ||| ")
+				})
+				if (!postCreateDump.includes('"Second"')) {
+					throw new Error(`account "Second" not in storage immediately after creation. Stored: ${postCreateDump.slice(0, 600)}`)
+				}
+			})
+			await setupPage.close()
+			const playgroundPage = await phase("connectPlayground", () => connectPlayground(ctx))
+
+			// Pre-grant the `transaction` bundle to the first 1-or-2 accounts the
+			// cap popup exposes. Multi-account-session tests opt into this fixture
+			// to push the cold cap-popup work into hookTimeout (300s) instead of
+			// paying it during the test budget. Tests that need to characterize
+			// "wallet picks first session account regardless of opts.from" rely on
+			// having 2+ accounts granted — but tolerate 1 if that's what the wallet
+			// exposed (characterization holds either way).
+			const accountAddresses = await phase("grantFirstTwoAccountsTransactionCap", async () => {
+				await playgroundPage.evaluate(() => {
+					const select = document.querySelector<HTMLSelectElement>('[data-testid="pg-bundle-select"]')
+					if (!select) throw new Error("pg-bundle-select not present on playground page")
+					select.value = "transaction"
+					select.dispatchEvent(new Event("change", { bubbles: true }))
+				})
+				const seqGrant = await snapshotResultSeq(playgroundPage)
+				// 60s timeouts because this is THE first cap popup on a cold shard.
+				const capPopupP = waitForPopup(ctx, "capabilities", { timeout: 60_000 })
+				await clickByTestId(playgroundPage, "pg-btn-requestCapabilities")
+				const capPopup = await capPopupP
+				await capPopup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 60_000 })
+				const accountIds = await capPopup.evaluate(() =>
+					[...document.querySelectorAll<HTMLElement>('[data-testid="cap-account-item"]')].map((r) =>
+						r.getAttribute("data-account-id"),
+					),
+				)
+				const granted = accountIds.slice(0, Math.min(2, accountIds.length)).filter((a): a is string => !!a)
+				if (granted.length === 0) throw new Error("capabilities popup returned no accounts")
+				// The fixture creates a second account upstream; if the cap popup
+				// exposes fewer, fail HERE with the ids so the discriminator
+				// (creation failed vs popup filtered) is in the error itself.
+				if (granted.length < 2) {
+					// Ground truth from the wallet's own storage: every account row
+					// with its chainId, so the failure discriminates wrong-chain
+					// creation from popup-side filtering.
+					const storedAccounts = await capPopup.evaluate(async () => {
+						const all = await chrome.storage.local.get(null)
+						const out: string[] = []
+						for (const [k, v] of Object.entries(all)) {
+							if (k.startsWith("nulo:core:accounts") || k.startsWith("nulo:core:networks")) {
+								// Raw, no shape assumptions — values may be serialized strings.
+								out.push(`${k} => ${(typeof v === "string" ? v : JSON.stringify(v)).slice(0, 400)}`)
+							}
+						}
+						return out.join(" ||| ")
+					})
+					throw new Error(
+						`capabilities popup exposed only [${accountIds.join(", ")}] — expected the created second account.\nAT-CAP-TIME: ${storedAccounts}\nPOST-CREATE: ${postCreateDump}`,
+					)
+				}
+				await approveCapabilities(capPopup, { accounts: granted })
+				await waitForPgResult(playgroundPage, "requestCapabilities", seqGrant, 30_000)
+				return granted
+			})
+
+			await use(Object.assign(ctx, { playgroundPage, accountAddresses }))
 			await ctx.browser.close()
 		},
 		{ scope: "test" },
@@ -328,7 +628,7 @@ export const test = base.extend<{
 			const ctx = await launchExtension()
 			await registerProfile(ctx)
 			const page = await openPopup(ctx)
-			await waitForHash(page, "#/popup/general", 15_000)
+			await waitForHash(page, "#/popup/general", 30_000)
 			await switchToLocalNetwork(page)
 			await page.close()
 			await use(ctx)
@@ -347,7 +647,7 @@ export const test = base.extend<{
 			await registerProfile(ctx)
 
 			const page = await openPopup(ctx)
-			await waitForHash(page, "#/popup/general", 15_000)
+			await waitForHash(page, "#/popup/general", 30_000)
 			await switchToLocalNetwork(page)
 
 			const accountAddress = await getAccountAddress(page)
@@ -395,7 +695,9 @@ export const test = base.extend<{
 				if (i === maxRetries - 1) {
 					console.warn("[tokenReady] Balance not visible after all retries (~60s) — tests may fail")
 				}
-				await new Promise((r) => setTimeout(r, 1_500))
+				await page
+					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 1_500, polling: 200 })
+					.catch(() => {})
 			}
 
 			await page.close()
@@ -416,7 +718,7 @@ export const test = base.extend<{
 			await registerProfile(ctx)
 
 			const page = await openPopup(ctx)
-			await waitForHash(page, "#/popup/general", 15_000)
+			await waitForHash(page, "#/popup/general", 30_000)
 			await switchToLocalNetwork(page)
 
 			const accountAddress = await getAccountAddress(page)
@@ -445,9 +747,15 @@ export const test = base.extend<{
 				console.log("[feeJuiceReady] Bridging FeeJuice from L1...")
 				const claim = await bridgeFeeJuice(node, accountAddress)
 
-				// Wait for L1→L2 message to arrive on L2
+				// Wait for the L1→L2 message to be CLAIMABLE. 5.0 mints no empty blocks, so force L2
+				// blocks (a tiny sponsored mint) until the anchor covers the message's checkpoint.
 				console.log("[feeJuiceReady] Waiting for L1→L2 message...")
-				await waitForL1ToL2Message(node, claim.messageHash.toString(), 90_000)
+				await waitForL1ToL2Message(
+					node,
+					claim.messageHash.toString(),
+					() => mintPublicTokens(wallet, aztecConfig.tokenAddress, accountAddress, 1n, minterAddress, feeOptions),
+					90_000,
+				)
 
 				// Claim FeeJuice on L2 (use SponsoredFPC to pay for the claim tx)
 				console.log("[feeJuiceReady] Claiming FeeJuice on L2...")
@@ -474,7 +782,9 @@ export const test = base.extend<{
 				if (i === maxRetries - 1) {
 					console.warn("[feeJuiceReady] Balance not visible after all retries")
 				}
-				await new Promise((r) => setTimeout(r, 1_500))
+				await page
+					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 1_500, polling: 200 })
+					.catch(() => {})
 			}
 
 			await page.close()
@@ -497,12 +807,17 @@ export const test = base.extend<{
 			try {
 				const feePayer = accounts[0]
 				if (!feePayer) throw new Error("expected at least one sandbox-deployed test account")
-				prefunded = await setupPreFundedAccount(wallet, node, feePayer)
+				const feeOptions = await createSponsoredFeeOptions(wallet)
+				// forceBlock: 5.0 mints no empty blocks, so FJ-claim readiness only advances on a real
+				// tx. A tiny sponsored mint is the cheapest block-producer available here.
+				prefunded = await setupPreFundedAccount(wallet, node, feePayer, {
+					forceBlock: () =>
+						mintPublicTokens(wallet, aztecConfig.tokenAddress, feePayer.toString(), 1n, aztecConfig.minterAddress, feeOptions),
+				})
 				console.log(`[feeJuiceImported] pre-funded account: ${prefunded.accountAddress.toString()}`)
 
 				// Mint test tokens for the imported account so transfer flows have
 				// something to send (matches feeJuiceReadyExtension's pattern at :330).
-				const feeOptions = await createSponsoredFeeOptions(wallet)
 				await mintPublicTokens(
 					wallet,
 					aztecConfig.tokenAddress,
@@ -520,9 +835,9 @@ export const test = base.extend<{
 			const ctx = await launchExtension()
 			const page = await openPopup(ctx)
 
-			await waitForHash(page, "#/popup/register", 15_000)
+			await waitForHash(page, "#/popup/register", 30_000)
 			await page.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), {
-				timeout: 15_000,
+				timeout: 30_000,
 				polling: 500,
 			})
 
@@ -533,10 +848,10 @@ export const test = base.extend<{
 			})
 			await waitForHash(page, "#/popup/import", 5_000)
 
-			await page.waitForSelector('[data-testid="import-option-private-key"]', { visible: true, timeout: 10_000 })
+			await page.waitForSelector('[data-testid="import-option-private-key"]', { visible: true, timeout: 30_000 })
 			await clickByTestId(page, "import-option-private-key")
 
-			await page.waitForSelector('[data-testid="import-private-key-input"] input', { visible: true, timeout: 10_000 })
+			await page.waitForSelector('[data-testid="import-private-key-input"] input', { visible: true, timeout: 30_000 })
 			await page.evaluate(
 				({ secretKey, pwd }: { secretKey: string; pwd: string }) => {
 					const setVal = (sel: string, v: string) => {
@@ -614,7 +929,9 @@ export const test = base.extend<{
 				if (i === maxRetries - 1) {
 					console.warn("[feeJuiceImported] token balance not visible after all retries")
 				}
-				await new Promise((r) => setTimeout(r, 1_500))
+				await page
+					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 1_500, polling: 200 })
+					.catch(() => {})
 			}
 
 			await page.close()
@@ -706,8 +1023,42 @@ export function patchPagePolling(page: Page): void {
 	}
 }
 
+/**
+ * Detect puppeteer detach errors that can occur during the brief CDP race
+ * between `browser.newPage()` and the first `page.goto(...)`. These signal
+ * a half-initialized frame, not a wallet-side problem — retrying with a
+ * fresh page resolves them. Symptom string varies across puppeteer-core
+ * versions and timing; match on any of the known phrases.
+ */
+function isFrameDetachError(err: unknown): boolean {
+	const msg = err instanceof Error ? err.message : String(err)
+	return /Navigating frame was detached|frame got detached|Session closed|Target closed|Connection closed/i.test(msg)
+}
+
 /** Open the extension popup in a new page with error collection. */
 export async function openPopup(ctx: ExtensionContext): Promise<Page> {
+	// One bounded retry on frame-detach errors: under accumulated suite load,
+	// `browser.newPage()` can return a page whose CDP frame is in a half-
+	// initialized state, causing the first `page.goto(popupUrl)` to throw
+	// "Navigating frame was detached" immediately. The mitigation is simply
+	// to close and re-create the page. A broader catch would mask real
+	// crashes — match only on known detach-error signatures.
+	let attempt = 0
+	const maxAttempts = 2
+	for (;;) {
+		try {
+			return await openPopupOnce(ctx)
+		} catch (err) {
+			attempt += 1
+			if (attempt >= maxAttempts || !isFrameDetachError(err)) throw err
+			if (process.env.NULO_E2E_OPENPOPUP_LOG === "1") {
+				console.log(`[openPopup] retry-on-detach attempt=${attempt}`)
+			}
+		}
+	}
+}
+
+async function openPopupOnce(ctx: ExtensionContext): Promise<Page> {
 	const page = await ctx.browser.newPage()
 	patchPagePolling(page)
 	await page.setViewport({ width: 360, height: 600 })
@@ -721,7 +1072,12 @@ export async function openPopup(ctx: ExtensionContext): Promise<Page> {
 	ctx.pageErrors = []
 
 	page.on("console", (msg: ConsoleMessage) => {
-		if (msg.type() === "error") {
+		// "Client disconnected" is the benign SW-port-close cascade — pending
+		// background-port RPCs reject en-masse when the SW restarts (e.g. during
+		// account switch). Prod already treats it as benign (offscreen
+		// `isBenignSwDisconnect`); filter it here too so the `consoleErrors`
+		// assertions only catch UNEXPECTED errors, not this known noise.
+		if (msg.type() === "error" && !msg.text().includes("Client disconnected")) {
 			ctx.consoleErrors.push(msg.text())
 		}
 	})
@@ -779,7 +1135,7 @@ export async function openPopup(ctx: ExtensionContext): Promise<Page> {
 		await page.goto(popupUrl, { waitUntil: "domcontentloaded" })
 		await page.waitForFunction(
 			() => window.location.hash !== "#/" && window.location.hash !== "" && !document.querySelector('[data-testid="global-loader"]'),
-			{ timeout: 15_000, polling: 200 },
+			{ timeout: 30_000, polling: 200 },
 		)
 	}
 	if (process.env.NULO_E2E_OPENPOPUP_LOG === "1") {
@@ -920,7 +1276,11 @@ export async function clickByTestId(page: Page, testId: string, timeout = 10_000
 		await page.waitForFunction(
 			(id: string) => {
 				const candidates = [...document.querySelectorAll<HTMLElement>(`[data-testid="${id}"]`)].filter((el) => {
-					if ((el as HTMLButtonElement).disabled) return false
+					// Skip natively-disabled AND aria-disabled elements (eg. DropdownItem,
+					// which is a <div> that can't carry native `disabled`). Both mean "not
+					// clickable yet" — wait for the element to enable rather than firing a
+					// programmatic click that bypasses CSS `pointer-events: none`.
+					if ((el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true") return false
 					const style = window.getComputedStyle(el)
 					if (style.display === "none" || style.visibility === "hidden") return false
 					const rect = el.getBoundingClientRect()

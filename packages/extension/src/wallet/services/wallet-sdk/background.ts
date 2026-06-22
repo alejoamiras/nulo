@@ -28,8 +28,8 @@
 import "./nulo-schema-patch"
 
 import { BackgroundConnectionHandler, type PendingDiscovery, type ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
-import type { WalletMessage, WalletResponse } from "@aztec/wallet-sdk/types"
-import { validateContentScriptMessage } from "./content-script-validator"
+import { NOOP_LOGGER, type WalletMessage, type WalletResponse } from "@aztec/wallet-sdk/types"
+import { isSubframeSender, validateContentScriptMessage } from "./content-script-validator"
 import { toWalletResponseError } from "./error-envelope"
 
 import type { ServiceCollection } from "@/wallet/base"
@@ -38,15 +38,33 @@ import { AccountService } from "@/wallet/services/account/service"
 import { ExecutionService } from "@/wallet/services/execution/service"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { DappInteractionService } from "@/wallet/services/dapp-interaction/service"
+import { TokenService } from "@/wallet/services/token/service"
 import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
 import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/service"
-import { DiscoveryQueue, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
-import { jsonStringify } from "@nulo/wallet-core/utils"
+import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
+import { OperationJournalService } from "@/wallet/services/operation-journal/service"
+import { type DispatchHooks, DiscoveryQueue, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
+import { jsonStringify, getErrorMessage } from "@nulo/wallet-core/utils"
+import { tryCreateQueuedJournal } from "./queued-journal"
+import { createSessionBaton } from "./session-baton"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@/wallet/logger"
 import type { Fr } from "@aztec/foundation/curves/bn254"
 
 declare const __VERSION__: string
+
+/**
+ * F-001 / Phase 4: feature flag to allow iframe (subframe) dApps to talk to
+ * the wallet. Default `false` — Nulo's wrapper rejects content-script
+ * messages from subframes. Override by setting
+ * `VITE_NULO_ALLOW_IFRAME_DAPPS=1` at build time (rare; research found no
+ * legitimate iframe-dApp use cases in the Nulo ecosystem).
+ *
+ * Why a build-time env flag (not a runtime config) — runtime config opens a
+ * widening primitive that an attacker could try to flip via storage poisoning
+ * or popup compromise. Build-time keeps the policy immutable per release.
+ */
+const NULO_ALLOW_IFRAME_DAPPS: boolean = import.meta.env?.VITE_NULO_ALLOW_IFRAME_DAPPS === "1"
 
 /**
  * Initialize the wallet-sdk BackgroundConnectionHandler and wire it
@@ -61,6 +79,8 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	const profileService: ProfileService = services.get(ProfileService.name)
 	const dappInteractionService: DappInteractionService = services.get(DappInteractionService.name)
 	const dappSessionService: DappSessionService = services.get(DappSessionService.name)
+	const operationJournal: OperationJournalService = services.get(OperationJournalService.name)
+	const tokenService: TokenService = services.get(TokenService.name)
 
 	const dispatcher = new WalletSdkDispatcher(
 		networkService,
@@ -69,6 +89,14 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 		dappInteractionService,
 		dappSessionService,
 		logger,
+		{
+			// The isTokenRegistered custom RPC: a wallet-local registry read, scope-gated upstream.
+			isTokenRegistered: async (address, profileId, chainId) => {
+				const tokens = await tokenService.getTokens(profileId, chainId)
+				const target = address.toLowerCase()
+				return tokens.some((t) => t.contract.toLowerCase() === target)
+			},
+		},
 	)
 
 	/**
@@ -109,12 +137,46 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 			walletName: "Nulo",
 			walletVersion: __VERSION__,
 			walletIcon: chrome.runtime.getURL("/src/assets/logo.png"),
+			// 5.0 added a required `logger`; NOOP preserves the prior no-SDK-logging behavior.
+			// (Follow-up: route to the @nulo logger to surface channel/heartbeat diagnostics.)
+			logger: NOOP_LOGGER,
 		},
 		{
 			sendToTab: (tabId, message) => chrome.tabs.sendMessage(tabId, message),
 			addContentListener: (listener) => {
 				// biome-ignore lint/suspicious/noExplicitAny: Chrome message listener provides untyped messages
 				chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.MessageSender) => {
+					// F-001: subframe rejection. Upstream `BackgroundConnectionHandler`
+					// attributes origin via `sender.tab?.url` (top-frame URL), so an
+					// iframe at https://evil.com/x.html embedded in https://app.example.com
+					// would be credited to https://app.example.com — inheriting any
+					// grants the user gave to the parent page.
+					//
+					// Nulo-side defense-in-depth: reject content-script messages
+					// from subframes at the wrapper layer. `sender.frameId === 0`
+					// is the top frame; any other value (or undefined for
+					// non-tab senders) is a subframe.
+					//
+					// Feature flag: `NULO_ALLOW_IFRAME_DAPPS` (env / build-time)
+					// disables this check. Default is "reject subframes" because
+					// research found NO legitimate iframe-dApp use cases in the
+					// Nulo ecosystem. If a counterexample surfaces, set the env
+					// var rather than removing this check.
+					//
+					// Frame-targeted send replies (F-002 full fix) require upstream
+					// `chrome.tabs.sendMessage(tabId, msg, { frameId })` support
+					// in `BackgroundConnectionHandler`'s sendToTab signature —
+					// upstream's `(tabId, msg)` interface doesn't pass frameId
+					// through, so this remains an upstream coordination item.
+					if (NULO_ALLOW_IFRAME_DAPPS !== true && isSubframeSender(sender)) {
+						logger.log(
+							"wallet-sdk-bg",
+							LogLevel.Debug,
+							`Rejected content-script message from subframe (frameId=${sender.frameId}, tab.url=${sender.tab?.url}, sender.url=${sender.url}) — F-001 defense-in-depth`,
+						)
+						return undefined
+					}
+
 					// Zod-validate content-script-originated envelopes before
 					// forwarding to the upstream handler. `passthrough` lets
 					// non-content-script messages through (ServiceClient
@@ -157,6 +219,21 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				const dappSession = await dappSessionService.tryGetDappSessionByOriginAndChain(session.origin, chainId)
 				if (dappSession) {
 					await dappSessionService.setVerificationHash(dappSession.id, session.verificationHash)
+				} else {
+					// F-006 (Round 2 B-2): if a session was established but the
+					// backing DappSession is gone, the user revoked between
+					// approveDiscovery and key-exchange. Terminate immediately
+					// so the dApp can't ride a stale approved-pending-discovery
+					// into a live ActiveSession. Without this, the upstream
+					// state machine would let the dApp re-key-exchange after
+					// revocation (see audit-codex-final.md B-2).
+					logger.log(
+						"wallet-sdk-bg",
+						LogLevel.Warn,
+						`Session established for ${session.origin} chain ${chainId} but DappSession missing — terminating to honor revocation`,
+					)
+					handler.terminateSession(session.sessionId)
+					return
 				}
 
 				const verifKey = pendingKey(session.origin, chainId)
@@ -185,10 +262,58 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 			onWalletMessage: (session, message) => {
 				const key = session.sessionId
 				const prev = sessionQueues.get(key) ?? Promise.resolve()
-				const next = prev.then(() => handleWalletMessage(session, message, handler, dispatcher, profileService, logger))
+
+				// Baton-based FIFO (see `session-baton.ts` for mechanics).
+				// Resolves when the sendTx handler enqueues on the execution mutex
+				// (via `onExecutionEnqueued`) OR when the handler completes
+				// (safety-net `.finally(releaseFifo)`), whichever fires first.
+				const { baton, releaseFifo } = createSessionBaton()
+
+				// Only top-level `sendTx` messages get a pre-allocated queued
+				// journal record. `batch` is excluded by design — the recursive
+				// dispatch in WalletSdkDispatcher.handleBatch can't safely
+				// route hooks per-leg, so we'd end up with a batch-level
+				// queued record that no inner leg knows to claim.
+				// TODO(queued-visibility-for-batch): batched sendTx legs
+				// currently bypass the queued-record creation path. Lifting
+				// this requires a per-leg queued-record model or a relaxation
+				// of the batch contract; out of scope for the
+				// concurrent-dApp-sendTx fix.
+				const queuedJournalIdPromise: Promise<string | undefined> =
+					message.type === "sendTx"
+						? tryCreateQueuedJournal(message, session, {
+								journal: operationJournal,
+								profile: profileService,
+								dappSession: dappSessionService,
+								networkSvc: networkService,
+								logger,
+							})
+						: Promise.resolve(undefined)
+
+				const handlerChain = queuedJournalIdPromise.then((queuedJournalId) =>
+					prev.then(() =>
+						handleWalletMessage(session, message, handler, dispatcher, profileService, operationJournal, logger, {
+							// Bind the baton release into the `onExecutionEnqueued`
+							// slot — fired downstream by ExecutionService the instant
+							// the approved request enqueues on the execution mutex
+							// (which preserves execution order). The field name is
+							// shared across DispatchHooks → ExecutionHooks so the wiring
+							// is type-checked end-to-end (a past field-name drift here
+							// is exactly what left this release dead before).
+							onExecutionEnqueued: releaseFifo,
+							queuedJournalId,
+						}),
+					),
+				)
+				// Safety-net release for handlers that don't call releaseFifo
+				// explicitly (every non-sendTx path) — preserves backward-
+				// compatible FIFO semantics for those. `.catch(() => {})` on
+				// the ignored side prevents an unhandled-rejection warning
+				// if the handler throws.
+				handlerChain.finally(releaseFifo).catch(() => {})
 				sessionQueues.set(
 					key,
-					next.catch(() => {}),
+					baton.catch(() => {}),
 				)
 			},
 		},
@@ -215,6 +340,42 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 		)
 		return next
 	}
+
+	/** F-006: when a stored DappSession is deleted (settings disconnect OR
+	 *  TTL expiry — both emit the same event), tear down every matching
+	 *  live wallet-sdk ActiveSession so the dApp can't keep calling
+	 *  network-only methods over the still-open channel.
+	 *
+	 *  Tuple-match by `(origin, chainId)` — per audit Round 1 reversal of
+	 *  Decision 8, NOT a single `walletSdkSessionId` field, because a single
+	 *  stored DappSession may correspond to MULTIPLE live ActiveSessions
+	 *  (multi-tab same dApp). O(n) iteration where n is bounded by tabs-with-
+	 *  dApp-loaded — typically <10. */
+	dappSessionService.onDappSessionDeleted.add((deleted) => {
+		try {
+			const origin = deleted.dappMetadata?.url
+			const chainId = deleted.chainId
+			if (!origin || !chainId) {
+				logger.log(
+					"wallet-sdk-bg",
+					LogLevel.Warn,
+					`DappSession deleted with missing origin/chainId — cannot match active sessions; skipping teardown`,
+				)
+				return
+			}
+			const matches = handler.getActiveSessions().filter((s) => s.origin === origin && String(chainInfoToChainId(s)) === chainId)
+			for (const match of matches) {
+				logger.log(
+					"wallet-sdk-bg",
+					LogLevel.Info,
+					`Terminating live session ${match.sessionId} for revoked dApp ${origin}@${chainId}`,
+				)
+				handler.terminateSession(match.sessionId)
+			}
+		} catch (err) {
+			logger.log("wallet-sdk-bg", LogLevel.Error, `Failed to terminate live sessions on dapp-session-deleted: ${err}`)
+		}
+	})
 
 	/** On unlock, drain any queued discovery requests */
 	profileService.onActiveProfileChanged.add((profile) => {
@@ -367,10 +528,13 @@ async function handleDiscovery(
 			return
 		}
 
-		// New dApp → show discovery popup (Allow/Deny)
+		// New dApp → show discovery popup (Allow/Deny). Sanitize dApp-controlled
+		// strings at the persistence boundary so downstream render sites never
+		// see raw bidi / zero-width / mixed-direction payloads (F-009 A-03).
+		const rawAppName = discovery.appName ?? discovery.appId
 		const params: DiscoveryParams = {
 			dappMetadata: {
-				name: discovery.appName ?? discovery.appId,
+				name: sanitizeWireString(rawAppName, 64),
 				url: discovery.origin,
 			},
 		}
@@ -432,6 +596,13 @@ async function handleDiscovery(
  *
  * Dispatches the method call to the WalletSdkDispatcher, then encrypts
  * and sends the response back through the BackgroundConnectionHandler.
+ *
+ * `hooks` is the wallet-bridge `DispatchHooks` contract (imported, not a
+ * local mirror) so the `onExecutionEnqueued` baton wiring is type-checked
+ * against the dispatcher's expectation — preventing a recurrence of the
+ * field-name drift that left the release dead. `onExecutionEnqueued` rides
+ * to the sendTx path; `queuedJournalId` is used here (catch block) to decide
+ * whether an unclaimed `queued` record should be transitioned to `failed`.
  */
 async function handleWalletMessage(
 	session: ActiveSession,
@@ -439,7 +610,9 @@ async function handleWalletMessage(
 	handler: BackgroundConnectionHandler,
 	dispatcher: WalletSdkDispatcher,
 	profileService: ProfileService,
+	operationJournal: OperationJournalService,
 	logger: ILogger,
+	hooks?: DispatchHooks,
 ): Promise<void> {
 	const response: WalletResponse = {
 		messageId: message.messageId,
@@ -459,7 +632,11 @@ async function handleWalletMessage(
 			sessionId: session.sessionId,
 		}
 
-		const raw = await dispatcher.dispatch(message.type, message.args, ctx)
+		// Hooks ride as an internal 4th arg — deliberately NOT on `ctx` so
+		// `dispatch("batch", ...)`'s recursive ctx forwarding can't leak them
+		// into batch legs (would let an inner sendTx release the top-level
+		// baton before the batch finishes).
+		const raw = await dispatcher.dispatch(message.type, message.args, ctx, hooks)
 		response.result = toJsonSafe(raw)
 	} catch (error) {
 		// Structured EIP-1193-aligned envelope for recognised WalletError subclasses
@@ -475,6 +652,36 @@ async function handleWalletMessage(
 		// logs don't read "[object Object]".
 		const logMsg = typeof response.error === "string" ? response.error : jsonStringify(response.error)
 		logger.log("wallet-sdk", LogLevel.Error, `Method ${message.type} failed for ${session.origin}: ${logMsg}`)
+
+		// If a queued journal record exists and is STILL at queued stage,
+		// the handler failed before claiming it. Transition to failed so
+		// the UI doesn't show a permanently-stuck "Queued..." card.
+		// Use the journal record as source of truth (not a mutable flag)
+		// to disambiguate "handler claimed and then failed" (terminal state
+		// already correct) from "handler failed before claim" (we own the
+		// terminal state).
+		if (hooks?.queuedJournalId) {
+			try {
+				const record = await operationJournal.getOperation(hooks.queuedJournalId)
+				if (record?.progress?.stage === "queued") {
+					await operationJournal.transitionOperation(
+						hooks.queuedJournalId,
+						{ stage: "failed" },
+						{
+							kind: "popup_bound",
+							message: getErrorMessage(error),
+							normalizedRaw: null,
+						},
+					)
+				}
+			} catch (transitionError) {
+				logger.log(
+					"wallet-sdk",
+					LogLevel.Warn,
+					`Failed to mark queued record ${hooks.queuedJournalId} as failed: ${getErrorMessage(transitionError)}`,
+				)
+			}
+		}
 	}
 
 	try {

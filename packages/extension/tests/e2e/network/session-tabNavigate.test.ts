@@ -27,10 +27,10 @@ test.skipIf(!hasConfig)(
 	async ({ registeredExtensionPerTest }) => {
 		// First connect on the playground origin
 		const dappPage = await openPlayground(registeredExtensionPerTest)
-		const discoverP = waitForPopup(registeredExtensionPerTest, "discover", { timeout: 15_000 })
+		const discoverP = waitForPopup(registeredExtensionPerTest, "discover", { timeout: 30_000 })
 		await clickByTestId(dappPage, "pg-btn-connect")
 		await approveDiscover(await discoverP)
-		const verifyPage = await waitForPopup(registeredExtensionPerTest, "verify", { timeout: 15_000 })
+		const verifyPage = await waitForPopup(registeredExtensionPerTest, "verify", { timeout: 30_000 })
 		await approveVerify(verifyPage)
 		await dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 20_000 })
 

@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest"
-import { CapabilityNotGrantedError, JobCancelledError } from "@nulo/extension-messaging/errors"
+import {
+	CapabilityNotGrantedError,
+	JobCancelledError,
+	RpcDisconnectedError,
+	RpcTimeoutError,
+	TooManyPendingError,
+} from "@nulo/extension-messaging/errors"
 import { toWalletResponseError } from "./error-envelope"
 
 describe("toWalletResponseError", () => {
@@ -33,6 +39,49 @@ describe("toWalletResponseError", () => {
 		expect(parsed.code).toBe(4100)
 		expect(parsed.data.walletErrorCode).toBe("CAPABILITY_NOT_GRANTED")
 		expect(parsed.data.capabilityType).toBe("accounts")
+	})
+
+	test("TooManyPendingError → {code:-32005, walletErrorCode} with no origin/profile detail", () => {
+		const env = toWalletResponseError(new TooManyPendingError())
+		expect(env).toEqual({
+			code: -32005,
+			message: "Too many pending transactions; retry after the in-flight ones settle.",
+			data: { walletErrorCode: TooManyPendingError.CODE },
+		})
+		// No oracle: the envelope must not carry a lane/origin/profile field.
+		const data = (env as { data: Record<string, unknown> }).data
+		expect(Object.keys(data)).toEqual(["walletErrorCode"])
+	})
+
+	// D11 dApp-contract: the phase-4 offscreen typed-error flip means a prove/
+	// simulate timeout or transport disconnect now reaches the dApp as a typed
+	// Rpc* error. These pin the intended, stable response.error — a generic
+	// message (NO internal "Offscreen request timed out: <method>" leak) + a
+	// discriminable walletErrorCode.
+	test("RpcTimeoutError → {code:-32603, walletErrorCode} with a generic, leak-free message", () => {
+		const env = toWalletResponseError(
+			new RpcTimeoutError("Offscreen request timed out: proveTx", { requestId: 7, methodName: "proveTx" }),
+		)
+		expect(env).toEqual({
+			code: -32603,
+			message: "The wallet timed out while processing the request.",
+			data: { walletErrorCode: "RPC_TIMEOUT" },
+		})
+		// No oracle: the internal method name must NOT cross to the dApp.
+		expect(JSON.stringify(env)).not.toContain("proveTx")
+		expect(JSON.stringify(env)).not.toContain("Offscreen")
+	})
+
+	test("RpcDisconnectedError → {code:-32603, walletErrorCode} (transient; NOT 4900) with a leak-free message", () => {
+		const env = toWalletResponseError(
+			new RpcDisconnectedError("Offscreen send failed: simulateTx", { requestId: 8, methodName: "simulateTx" }),
+		)
+		expect(env).toEqual({
+			code: -32603,
+			message: "The wallet was disconnected while processing the request.",
+			data: { walletErrorCode: "RPC_DISCONNECTED" },
+		})
+		expect(JSON.stringify(env)).not.toContain("simulateTx")
 	})
 
 	test("plain Error → string fallback (preserves wire contract for unrecognised throws)", () => {

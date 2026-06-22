@@ -19,7 +19,7 @@ describe("usePasskeyCeremony", () => {
 
 	test("onResolve clears the dialog and resolves the awaiting Promise", async () => {
 		const { request, runCeremony, onResolve } = usePasskeyCeremony()
-		const promise = runCeremony({ mode: "create", userHandle: "uh" })
+		const promise = runCeremony({ mode: "create", userHandle: "uh", name: "Test" })
 
 		const data = fakeData()
 		onResolve(data)
@@ -41,8 +41,8 @@ describe("usePasskeyCeremony", () => {
 
 	test("rejects a second concurrent runCeremony call", async () => {
 		const { runCeremony, onResolve } = usePasskeyCeremony()
-		const first = runCeremony({ mode: "create", userHandle: "uh" })
-		const second = runCeremony({ mode: "create", userHandle: "uh2" })
+		const first = runCeremony({ mode: "create", userHandle: "uh", name: "Test" })
+		const second = runCeremony({ mode: "create", userHandle: "uh2", name: "Test" })
 		await expect(second).rejects.toThrow(/already in flight/)
 		// First still resolvable cleanly.
 		onResolve(fakeData())
@@ -51,22 +51,22 @@ describe("usePasskeyCeremony", () => {
 
 	test("after resolve, a NEW ceremony can run", async () => {
 		const { runCeremony, onResolve } = usePasskeyCeremony()
-		const first = runCeremony({ mode: "create", userHandle: "uh" })
+		const first = runCeremony({ mode: "create", userHandle: "uh", name: "Test" })
 		onResolve(fakeData("cred-1"))
 		await first
 
-		const second = runCeremony({ mode: "create", userHandle: "uh2" })
+		const second = runCeremony({ mode: "create", userHandle: "uh2", name: "Test" })
 		onResolve(fakeData("cred-2"))
 		await expect(second).resolves.toMatchObject({ id: "cred-2" })
 	})
 
 	test("after reject, a NEW ceremony can run", async () => {
 		const { runCeremony, onResolve, onReject } = usePasskeyCeremony()
-		const first = runCeremony({ mode: "create", userHandle: "uh" })
+		const first = runCeremony({ mode: "create", userHandle: "uh", name: "Test" })
 		onReject(new Error("first cancelled"))
 		await expect(first).rejects.toThrow(/first cancelled/)
 
-		const second = runCeremony({ mode: "create", userHandle: "uh2" })
+		const second = runCeremony({ mode: "create", userHandle: "uh2", name: "Test" })
 		onResolve(fakeData("cred-2"))
 		await expect(second).resolves.toMatchObject({ id: "cred-2" })
 	})
@@ -92,7 +92,7 @@ describe("usePasskeyCeremony", () => {
 		onResolve(fakeData())
 		expect(request.value).toBeNull()
 
-		const req2 = { mode: "create", userHandle: "uh" } as const
+		const req2 = { mode: "create", userHandle: "uh", name: "Test" } as const
 		runCeremony(req2)
 		expect(request.value).toEqual(req2)
 	})

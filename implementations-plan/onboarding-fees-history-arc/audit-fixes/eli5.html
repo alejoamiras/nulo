@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Audit-fixes arc — ELI5</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --ink: #1d1b1a;
+    --ink-soft: #58524c;
+    --bg: #faf8f4;
+    --rule: #ddd6cb;
+    --accent: #c64a1f;
+    --code-bg: #efe9dd;
+    --max: 720px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main {
+    max-width: var(--max);
+    margin: 0 auto;
+    padding: 48px 24px 96px;
+  }
+  header {
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 24px;
+    margin-bottom: 32px;
+  }
+  h1 {
+    font: 700 32px/1.2 system-ui, sans-serif;
+    letter-spacing: -0.01em;
+    margin: 0 0 8px;
+  }
+  h1 span.tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 2px 6px;
+    border-radius: 2px;
+    vertical-align: middle;
+    margin-left: 8px;
+  }
+  h2 {
+    font: 700 22px/1.3 system-ui, sans-serif;
+    letter-spacing: -0.01em;
+    margin: 48px 0 8px;
+    padding-top: 24px;
+    border-top: 1px solid var(--rule);
+  }
+  h2.no-rule { border-top: 0; padding-top: 0; }
+  h3 {
+    font: 600 16px/1.4 system-ui, sans-serif;
+    margin: 28px 0 4px;
+  }
+  p { margin: 12px 0; }
+  ul { margin: 12px 0; padding-left: 24px; }
+  li { margin: 6px 0; }
+  .lead { color: var(--ink-soft); font-size: 17px; }
+  .label {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 4px;
+  }
+  .crit { color: var(--accent); font-weight: 700; }
+  .note {
+    background: var(--code-bg);
+    border-left: 2px solid var(--accent);
+    padding: 12px 16px;
+    margin: 16px 0;
+    font-size: 14px;
+    color: var(--ink-soft);
+  }
+  code {
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 2px;
+    font: 13px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  footer {
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-soft);
+    font-size: 13px;
+  }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>Audit-fixes <span class="tag">ELI5</span></h1>
+  <p class="lead">Three independent codex audits read our onboarding+fees+history work and all said "reject — here's a list of real bugs." This plan fixes nine of them. (We're skipping the tenth because the strategy it'd protect is being deleted anyway.)</p>
+</header>
+
+<h2 class="no-rule">What's broken — in plain English</h2>
+
+<h3>The home widget can't actually show incoming transfers <span class="crit">(critical)</span></h3>
+<p>The History page works. The little "Recent Activity" widget on the home tab does not. The code that's supposed to load incoming receives there is wired up — but the connection to the backend was never opened, and the initial-load call was never made. So the listeners are sitting there waiting for events that can never reach them.</p>
+<p><strong>Fix:</strong> two lines added to the widget's mount handler. <span class="label">Phase 3</span></p>
+
+<h3>The "hide incoming transfers" setting only half-works <span class="crit">(critical)</span></h3>
+<p>The toggle hides existing rows + blocks new ones from rendering. But the first-receive trust popup still pops up when a new contract sends you something, even if you've turned the whole feature off. A privacy promise that leaks.</p>
+<p><strong>Fix:</strong> the service checks the toggle before firing the prompt event. Plus symmetric: turning the toggle back on should re-prompt you for anything that piled up while it was off.<span class="label">Phase 4</span></p>
+
+<h3>Fake-link defense only protects one page</h3>
+<p>If a malicious app sets its name to <code>https://evil.com</code>, we bracket the value so it doesn't visually read as a link. We added that defense to the new "canceled-tx details" page. But the same dApp name shows up on the in-flight cards and the terminal cards on the main feed — unprotected.</p>
+<p><strong>Fix:</strong> apply the bracketing at the shared label-builder, not just the detail page. Also broaden the pattern to catch more URL-shaped strings (<code>mailto:</code>, <code>javascript:</code>, etc.).<span class="label">Phase 1</span></p>
+
+<h3>Internal error codes leak to end users</h3>
+<p>When a transaction interruption happens, the journal records an error <em>kind</em> like <code>sw_restart_post_prove</code>. We show that string directly on the detail page. It's not technically harmful, but it's gibberish to the user and reveals internal classifier names.</p>
+<p><strong>Fix:</strong> map each known kind to friendly copy. Unknown kinds show generic "Error" + log the raw kind for telemetry.<span class="label">Phase 2</span></p>
+
+<h3>New accounts don't get scanned for incoming transfers</h3>
+<p>The background service is told about new accounts via an event, but it never subscribes to that event. So if you add an account after the wallet started, the incoming-transfer poller doesn't pick it up until next restart.</p>
+<p><strong>Fix:</strong> subscribe to the event, rebuild the poller list on account add/delete.<span class="label">Phase 5</span></p>
+
+<h3>"Verify the contract" prompt is hard to actually verify</h3>
+<p>The first-receive popup shows the contract address as <code>0x1234..5678</code>. That's not enough for a user trying to tell real-USDC from fake-USDC apart. Need expand-to-full + copy.</p>
+<p><strong>Fix:</strong> add a "show full address" toggle + a copy button in the popup.<span class="label">Phase 6</span></p>
+
+<h3>Multi-contract pending prompts overwrite each other</h3>
+<p>If two apps send you tokens from two unknown contracts at the same time, the prompt for contract B overwrites the prompt for contract A while it's still on screen. After you resolve B, A re-appears (the safety net catches it on the next pass). Not great UX.</p>
+<p><strong>Fix:</strong> a real queue in the popup manager. One prompt at a time, in deterministic order, drained after each resolution.<span class="label">Phase 7</span></p>
+
+<h3>Test coverage on the incoming-transfer service is thin</h3>
+<p>We shipped two pure-function unit tests (sorting + key composition) but didn't actually test the risky logic: dedupe, late-delete, trust transitions, queue, visibility gating, cleanup wiring. Production calibration wants those pinned.</p>
+<p><strong>Fix:</strong> backfill ~30-50 unit + component test cases.<span class="label">Phase 8</span></p>
+
+<h3>The onboarding skip route isn't pinned by a test</h3>
+<p>We split the "Skip intro" link on the Aztec page into its own handler (Continue → fees, Skip → accelerator). The e2e tests cover Continue. Skip isn't asserted anywhere.</p>
+<p><strong>Fix:</strong> one e2e assertion per skip route.<span class="label">Phase 9</span></p>
+
+<h2>What we're NOT fixing (and why)</h2>
+<ul>
+  <li><strong><code>claim_and_end_setup</code> missing from <code>FEE_METHODS</code></strong> — the FeeJuiceWithClaim strategy is being deprecated. Pinning a fee-method allowlist for a strategy we're removing is anti-investment.</li>
+  <li><strong>StepIndicator <code>&lt;nav&gt;&gt;</code> → <code>&lt;ol&gt;</code> for richer screen-reader semantics</strong> — low-value polish; the <code>aria-current="step"</code> we already have is the load-bearing a11y signal.</li>
+  <li><strong>Stale "first call" JSDoc on <code>OperationPlanner.extractPrimaryMethod</code></strong> — pure doc drift; fix opportunistically.</li>
+  <li><strong>chrome.alarms refactor</strong>, <strong>symbol-collision badge</strong>, <strong>5-minute ring buffer</strong> — already tracked as follow-ups in the parent arc's lessons.</li>
+</ul>
+
+<h2>Order we'll ship</h2>
+<p>Risk-ascending, but with the two criticals front-loaded near the top:</p>
+<ol>
+  <li>Phase 1 — sanitize widening (pure helper)</li>
+  <li>Phase 2 — error.kind humanizer (pure helper)</li>
+  <li>Phase 3 — RecentActivityView wiring fix (3 lines, fixes critical)</li>
+  <li>Phase 4 — visibility-toggle gate completion (2 guards + 1 subscription, fixes critical)</li>
+  <li>Phase 5 — AccountService lifecycle (subscribe + handler)</li>
+  <li>Phase 6 — IncomingTrustPopup contract verification redesign (UI)</li>
+  <li>Phase 7 — pending-prompts queue refactor</li>
+  <li>Phase 8 — test backfill</li>
+  <li>Phase 9 — onboarding skip-route e2e</li>
+</ol>
+
+<h2>Open questions for the audit pass</h2>
+<ul>
+  <li><strong>Regex aggressiveness</strong> — broadening to <code>scheme:</code> (no <code>//</code>) catches more shapes but could false-positive timestamps (<code>12:34</code>), versioning (<code>v1:</code>), CSS values (<code>color:red</code>). Acceptable, or should the matcher require <code>:/</code> OR a known scheme set?</li>
+  <li><strong>Apply-at-builder vs apply-at-component</strong> — defense in depth?</li>
+  <li><strong>Visibility-gate symmetry</strong> — when toggle flips back ON, re-emit Pending events for stranded pending records? Plan says yes; bundled into Phase 4.</li>
+  <li><strong>Queue location</strong> — popup-side (proposed) or service-side?</li>
+  <li><strong>Trust popup affordance</strong> — show full address + copy. Also link to a block explorer? Plan defers explorer link to a follow-up.</li>
+</ul>
+
+<footer>
+  <p>Plan: <a href="plan.md">plan.md</a> · Parent arc: <a href="../plan.md">../plan.md</a> · Codex spawn audits: <a href="../audit-codex-spawn-1-f4f1.md">spawn-1</a>, <a href="../audit-codex-spawn-2-f3.md">spawn-2</a>, <a href="../audit-codex-spawn-3-f2.md">spawn-3</a> · Per-phase lessons: <a href="lessons/">lessons/</a></p>
+</footer>
+
+</main>
+</body>
+</html>

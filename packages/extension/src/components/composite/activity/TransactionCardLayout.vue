@@ -1,5 +1,6 @@
-<script setup>
-import { Comment } from "vue"
+<script setup lang="ts">
+import { Comment, type PropType } from "vue"
+import type { JobStage } from "@nulo/wallet-core/jobs"
 /**
  * Shared presentational layout for activity cards. Both
  * `TransactionAwaitingCard` (in-flight, TaskService / journal-driven) and
@@ -40,10 +41,17 @@ import { Comment } from "vue"
  *     chip label, the status icon, the hash slice — all things the user
  *     sees). Awaiting / terminal cards leave them blank; Vue omits
  *     `null`/`undefined` data-attribute bindings.
+ *   - stage: optional journal FSM stage (pending / queued / simulating /
+ *     proving / submitting / succeeded / failed / cancelled). Binds as
+ *     `data-stage` on the root. The awaiting card threads its `stage` prop
+ *     here so e2e tests can wait for the wallet's in-flight tx to reach a
+ *     specific stage — fast-path alternative to waiting on the dApp's
+ *     full sendTx promise. Settled cards leave it null.
  */
 defineProps({
 	title: { type: String, required: true },
 	icon: { type: String, required: true },
+	iconRotate: { type: [String, Number], default: 0 },
 	amount: { type: String, default: null },
 	amountSymbol: { type: String, default: null },
 	testId: { type: String, default: undefined },
@@ -51,6 +59,7 @@ defineProps({
 	txTransferTypeLabel: { type: String, default: undefined },
 	txStatus: { type: String, default: undefined },
 	txHash: { type: String, default: undefined },
+	stage: { type: String as PropType<JobStage | null>, default: null },
 })
 
 /**
@@ -94,11 +103,12 @@ function hasActionsContent() {
 		:data-tx-transfer-type="txTransferTypeLabel"
 		:data-tx-status="txStatus"
 		:data-tx-hash="txHash"
+		:data-stage="stage"
 		:class="[$style.wrapper, hasActionsContent() && $style.wrapper_has_actions]"
 	>
 		<Flex align="center" gap="16" :class="$style.left_content">
 			<Flex align="center" justify="center" :class="$style.activity_icon">
-				<Icon :name="icon" size="18" color="secondary" />
+				<Icon :name="icon" :rotate="iconRotate" size="18" color="secondary" />
 				<div v-if="$slots.badge" :class="$style.badge">
 					<slot name="badge" />
 				</div>

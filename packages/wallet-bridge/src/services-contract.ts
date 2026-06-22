@@ -34,13 +34,48 @@ export interface IAccountReader {
 	getAccounts(profileId: string, chainId: number): Promise<IAccountRef[]>
 }
 
+/**
+ * Optional execution hooks bag. `onExecutionEnqueued` is invoked by the wallet
+ * once the approved request has taken its place in the per-(profileId, chainId)
+ * execution FIFO (the execution mutex). That — not popup approval — is the
+ * point at which releasing the caller's session FIFO baton is safe: any later
+ * request necessarily enqueues strictly behind this one, so execution order is
+ * preserved while popups still open concurrently. `queuedJournalId` lets the
+ * message-arrival layer pass a pre-allocated journal id (so the in-flight
+ * surface is visible in the activity feed before the handler runs).
+ *
+ * `originKey` is the canonical browser origin of the calling dApp (NOT a display
+ * name or sessionId). It scopes the per-origin execution-mutex backpressure cap
+ * so one dApp can't monopolize the shared `(profileId, chainId)` lane and starve
+ * another. The dispatcher sets it from `ctx.origin` on every sendTx.
+ *
+ * Kept as a structural type so wallet-bridge doesn't import from the extension
+ * package. The extension's `ExecutionHooks` aliases this type directly, so the
+ * field set stays in lockstep across the layer boundary.
+ */
+export interface IExecutionHooks {
+	onExecutionEnqueued?: () => void
+	queuedJournalId?: string
+	originKey?: string
+}
+
 export interface IExecutionRunner {
-	executeOperations(operations: Operation[], origin: LocalTxOrigin): Promise<OperationResult[]>
+	executeOperations(
+		operations: Operation[],
+		origin: LocalTxOrigin,
+		parentTaskOrHooks?: unknown,
+		hooks?: IExecutionHooks,
+	): Promise<OperationResult[]>
 }
 
 export interface IDappInteractionRunner {
-	execute(params: ExecutionParams, cancellationToken?: string): Promise<ExecutionResult>
+	execute(params: ExecutionParams, cancellationToken?: string, hooks?: IExecutionHooks): Promise<ExecutionResult>
 	requestCapabilities(params: CapabilityParams, cancellationToken?: string): Promise<CapabilityResult>
+}
+
+/** Wallet-local token-registry read for the `isTokenRegistered` custom RPC (no prompt). */
+export interface ITokenRegistryReader {
+	isTokenRegistered(address: string, profileId: string, chainId: number): Promise<boolean>
 }
 
 export interface IDappSessionWriter {

@@ -3,7 +3,7 @@
 	"vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "dev" },
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["packages/**", "!**/node_modules", "!**/dist", "!**/packages/extension/src/types"]
+		"includes": ["packages/**", "!**/node_modules", "!**/dist", "!**/target", "!**/packages/extension/src/types"]
 	},
 	"formatter": {
 		"enabled": true,
@@ -45,6 +45,98 @@
 		}
 	},
 	"overrides": [
+		{
+			"includes": ["packages/design/src/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@nulo/*"],
+										"message": "@nulo/design is the lowest layer — it cannot import any @nulo/* package"
+									}
+								]
+							}
+						},
+						"noRestrictedGlobals": {
+							"level": "error",
+							"options": {
+								"deniedGlobals": {
+									"chrome": "@nulo/design is platform-agnostic — no chrome.*"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["packages/design/src/core/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@nulo/*"],
+										"message": "@nulo/design is the lowest layer — it cannot import any @nulo/* package"
+									},
+									{
+										"group": ["../ui/*", "../ui/**"],
+										"message": "@nulo/design core (L1) cannot import ui (L2) — core is the lower layer"
+									}
+								]
+							}
+						},
+						"noRestrictedGlobals": {
+							"level": "error",
+							"options": {
+								"deniedGlobals": {
+									"chrome": "@nulo/design is platform-agnostic — no chrome.*"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"includes": ["packages/design/src/ui/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["@nulo/*"],
+										"message": "@nulo/design is the lowest layer — it cannot import any @nulo/* package"
+									},
+									{
+										"group": ["../composite/*", "../composite/**"],
+										"message": "@nulo/design ui (L2) cannot import composite (L3) — ui is the lower layer"
+									}
+								]
+							}
+						},
+						"noRestrictedGlobals": {
+							"level": "error",
+							"options": {
+								"deniedGlobals": {
+									"chrome": "@nulo/design is platform-agnostic — no chrome.*"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		{
 			"includes": ["**/*.vue"],
 			"linter": {

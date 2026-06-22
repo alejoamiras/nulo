@@ -10,6 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { mount, flushPromises } from "@vue/test-utils"
+import { defineComponent, ref } from "vue"
 
 vi.mock("focus-trap", () => ({
 	createFocusTrap: vi.fn(() => ({
@@ -98,9 +99,13 @@ describe("ui/Dropdown — DropdownItem", () => {
 		expect(w.text()).toContain("Action one")
 	})
 
-	test("has tabindex='1' for keyboard navigation by DropdownRoot", () => {
+	// (frontend-ux-fixes P5a) was tabindex="1" (a positive value corrupts whole-document tab order);
+	// now tabindex="0" + a stable `data-dropdown-item` hook so DropdownRoot's arrow-nav isn't coupled to
+	// the tabindex literal.
+	test("is focusable (tabindex='0') and tagged data-dropdown-item for DropdownRoot arrow-nav", () => {
 		const w = mount(DropdownItem, { slots: { default: "X" } })
-		expect(w.attributes("tabindex")).toBe("1")
+		expect(w.attributes("tabindex")).toBe("0")
+		expect(w.attributes("data-dropdown-item")).toBeDefined()
 	})
 
 	test("wrapper carries the wrapper CSS-module class", () => {
@@ -111,6 +116,14 @@ describe("ui/Dropdown — DropdownItem", () => {
 	test("disabled prop applies the disabled class", () => {
 		const w = mount(DropdownItem, { props: { disabled: true }, slots: { default: "X" } })
 		expect(w.attributes("class") ?? "").toMatch(/disabled/)
+	})
+
+	// (P5a post-impl, codex MEDIUM) a disabled item must be OUT of the Tab order AND the arrow-nav set,
+	// so it can't be focused + Enter-activated (DropdownRoot's Enter does activeElement.click()).
+	test("a disabled item is unfocusable (tabindex=-1) and excluded from arrow-nav (no data-dropdown-item)", () => {
+		const w = mount(DropdownItem, { props: { disabled: true }, slots: { default: "X" } })
+		expect(w.attributes("tabindex")).toBe("-1")
+		expect(w.attributes("data-dropdown-item")).toBeUndefined()
 	})
 
 	test("non-disabled item does NOT have the disabled class", () => {
@@ -231,5 +244,77 @@ describe("ui/Dropdown — DropdownRoot", () => {
 		await w.setProps({ forceOpen: false })
 		await flushPromises()
 		expect(w.emitted("onClose")).toBeTruthy()
+	})
+
+	// (frontend-ux-fixes P5a) regression pin: arrow-nav must keep finding items after the
+	// `[tabindex="1"]` → `[data-dropdown-item]` selector change (else changing DropdownItem's tabindex
+	// silently breaks keyboard nav — the codex HIGH). The Flex stub here exposes `wrapper` (the real
+	// Flex's contract that DropdownRoot queries) so the nav can run.
+	test("ArrowDown navigates between data-dropdown-item elements", async () => {
+		const FlexWithWrapper = defineComponent({
+			inheritAttrs: false,
+			setup(_, { expose }) {
+				const wrapper = ref<HTMLElement | null>(null)
+				expose({ wrapper })
+				return { wrapper }
+			},
+			template: '<div ref="wrapper" v-bind="$attrs"><slot /></div>',
+		})
+		const w = mount(DropdownRoot, {
+			props: { forceOpen: false },
+			slots: {
+				default: "<button>Open</button>",
+				popup: '<div data-dropdown-item tabindex="0" id="ditem-0">A</div><div data-dropdown-item tabindex="0" id="ditem-1">B</div>',
+			},
+			attachTo: document.body,
+			global: { stubs: { ...STUBS, Flex: FlexWithWrapper } },
+		})
+		await w.setProps({ forceOpen: true })
+		await flushPromises()
+		document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }))
+		expect(document.activeElement?.id).toBe("ditem-0")
+		document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }))
+		expect(document.activeElement?.id).toBe("ditem-1")
+		w.unmount()
+	})
+
+	// (P5a post-impl, codex LOW) end-to-end Enter-gate: a focused aria-disabled item must NOT fire its
+	// click on Enter (DropdownRoot.onKeydown gates activeElement.click() on aria-disabled !== "true").
+	test("Enter activates a focused item but NOT one marked aria-disabled", async () => {
+		const FlexWithWrapper = defineComponent({
+			inheritAttrs: false,
+			setup(_, { expose }) {
+				const wrapper = ref<HTMLElement | null>(null)
+				expose({ wrapper })
+				return { wrapper }
+			},
+			template: '<div ref="wrapper" v-bind="$attrs"><slot /></div>',
+		})
+		const w = mount(DropdownRoot, {
+			props: { forceOpen: false },
+			slots: {
+				default: "<button>Open</button>",
+				popup: '<div id="d-enabled" tabindex="0">Enabled</div><div id="d-disabled" aria-disabled="true" tabindex="-1">Disabled</div>',
+			},
+			attachTo: document.body,
+			global: { stubs: { ...STUBS, Flex: FlexWithWrapper } },
+		})
+		await w.setProps({ forceOpen: true })
+		await flushPromises()
+		const enabled = document.getElementById("d-enabled") as HTMLElement
+		const disabled = document.getElementById("d-disabled") as HTMLElement
+		const enabledClick = vi.fn()
+		const disabledClick = vi.fn()
+		enabled.addEventListener("click", enabledClick)
+		disabled.addEventListener("click", disabledClick)
+
+		disabled.focus()
+		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
+		expect(disabledClick).not.toHaveBeenCalled()
+
+		enabled.focus()
+		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
+		expect(enabledClick).toHaveBeenCalled()
+		w.unmount()
 	})
 })

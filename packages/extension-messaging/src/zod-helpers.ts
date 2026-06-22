@@ -21,12 +21,12 @@ import type { ZodType } from "zod"
 import { ValidationError } from "./errors"
 
 /** Shorten a Zod issue path for error messages. Empty paths become "<root>". */
-function formatPath(path: readonly (string | number)[]): string {
+function formatPath(path: readonly PropertyKey[]): string {
 	return path.length === 0 ? "<root>" : path.join(".")
 }
 
 /** Compact human-readable summary across all issues in a failed parse. */
-function summariseIssues(issues: readonly { path: readonly (string | number)[]; message: string }[]): string {
+function summariseIssues(issues: readonly { path: readonly PropertyKey[]; message: string }[]): string {
 	return issues.map((i) => `${formatPath(i.path)}: ${i.message}`).join("; ")
 }
 

@@ -59,6 +59,8 @@ function fakeConfig(init: { sessionTtl?: number; strict?: boolean; debugMode?: b
  *  IService shape; createKey/getKey override the real (chrome.windows-using)
  *  implementations. */
 class FakePasskeyService extends Service<Record<string, never>> {
+	protected readonly rpcMethods = new Set<string>()
+
 	public constructor(logger: LoggerStore) {
 		super(PasskeyService.name, logger)
 	}
@@ -71,7 +73,12 @@ class FakePasskeyService extends Service<Record<string, never>> {
 		await super.start(services)
 	}
 
-	public async createKey(userHandle: string): Promise<PasskeyCredential> {
+	/** Records the name PATH B threads in, so a service-level test can assert
+	 *  the credential label was derived from the right profile name. */
+	public lastCreateKeyName?: string
+
+	public async createKey(userHandle: string, name?: string): Promise<PasskeyCredential> {
+		this.lastCreateKeyName = name
 		return this.credential(`cred-${userHandle}`, userHandle)
 	}
 
@@ -115,6 +122,7 @@ async function makeService(ttlOrInit: number | { sessionTtl?: number; strict?: b
 	config: ReturnType<typeof fakeConfig>
 	logger: LoggerStore
 	service: ProfileService
+	passkeys: FakePasskeyService
 }> {
 	const init = typeof ttlOrInit === "number" ? { sessionTtl: ttlOrInit } : ttlOrInit
 	const api = new FakeBrowserApi()
@@ -130,7 +138,7 @@ async function makeService(ttlOrInit: number | { sessionTtl?: number; strict?: b
 	services.add(service)
 
 	await services.start()
-	return { api, config, logger, service }
+	return { api, config, logger, service, passkeys }
 }
 
 /** Constructs a fresh `ProfileService` bound to a pre-existing
@@ -318,6 +326,16 @@ describe("ProfileService integration", () => {
 			expect(exported).toMatch(/^cred-/)
 		}, 30_000)
 
+		test("PATH B threads the profile name through to createKey for the label", async () => {
+			// createPasskeyProfile with no credentialData drives PATH B:
+			// acquireRecovery → createForNewProfile → createKey(id, name). Pin
+			// that the profile NAME (not the id) reaches createKey, so the
+			// nulo-{name}-{id} label is derived from the right value.
+			const { service, passkeys } = await makeService()
+			await service.createPasskeyProfile("My Wallet")
+			expect(passkeys.lastCreateKeyName).toBe("My Wallet")
+		}, 30_000)
+
 		test("exportPlain passkey rejects credentialData for a different credential", async () => {
 			// Bind safety: if the popup hands back a `PasskeyCredentialData`
 			// whose id doesn't match the profile's stored credentialId, the
@@ -327,6 +345,21 @@ describe("ProfileService integration", () => {
 			const profile = await service.createPasskeyProfile("PK")
 			const wrongCred = fakeCredentialData("cred-OTHER", profile.id)
 			await expect(service.exportPlain(profile.id, undefined, wrongCred)).rejects.toThrow(/Invalid profile id/)
+		}, 30_000)
+
+		test("F-007: unlockPasskeyProfile rejects credentialData for a different credential", async () => {
+			// Phase 2 / F-007 regression pin. Mirrors the exportPlain binding
+			// check (above). Without it, a popup-supplied credentialData whose
+			// id doesn't match the profile's stored credentialId would still
+			// open a session — using a master secret derived from the WRONG
+			// credential. Downstream account derivation then operates against
+			// the wrong key material.
+			const { service } = await makeService()
+			const profile = await service.createPasskeyProfile("PK")
+			// First lock the profile so we can attempt to unlock it.
+			await service.lockActiveProfile()
+			const wrongCred = fakeCredentialData("cred-OTHER", profile.id)
+			await expect(service.unlockPasskeyProfile(profile.id, wrongCred)).rejects.toThrow(/Invalid profile id/)
 		}, 30_000)
 
 		test("exportPlain passkey requires credentialData (no Path B fallback)", async () => {
@@ -418,6 +451,8 @@ describe("ProfileService integration", () => {
 			const logger = new LoggerStore(config)
 
 			class CollidingPasskey extends Service<Record<string, never>> {
+				protected readonly rpcMethods = new Set<string>()
+
 				public constructor() {
 					super(PasskeyService.name, logger)
 				}

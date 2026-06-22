@@ -97,6 +97,22 @@ describe("composite/TransactionCardLayout", () => {
 		}
 	})
 
+	test("stage prop renders as data-stage on the root for each journal stage", () => {
+		// Journal FSM (canonical: packages/wallet-core/src/jobs/types.ts JobStage).
+		// e2e tests synchronize on `data-stage` via waitForSendTxProvingStage to
+		// avoid waiting on the dApp's full sendTx promise on slow CI runners.
+		const stages = ["pending", "queued", "simulating", "proving", "submitting", "succeeded", "failed", "cancelled"]
+		for (const s of stages) {
+			const w = mountLayout({ testId: "tx-card", stage: s })
+			expect(w.find("[data-testid='tx-card']").attributes("data-stage")).toBe(s)
+		}
+	})
+
+	test("data-stage is omitted when stage prop is undefined (settled phase)", () => {
+		const w = mountLayout({ testId: "tx-card" })
+		expect(w.find("[data-testid='tx-card']").attributes("data-stage")).toBeUndefined()
+	})
+
 	// Phase 2 follow-up v4: visual clash fix. The wrapper gains a
 	// `wrapper_has_actions` modifier class when the `#actions` slot is
 	// filled, which adds `padding-right: 36px` so the absolute-positioned

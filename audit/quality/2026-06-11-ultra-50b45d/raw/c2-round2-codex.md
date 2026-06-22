@@ -1,0 +1,11 @@
+## Missed
+- `NetworkService` should have been called out as a `Large Class`, and none of us did. It is 781 LOC (`wc -l`), and one class owns storage, node caches, PXE wiring, seed bootstrapping, endpoint selection, backup/restore, and profile-lifecycle purge logic: `packages/extension/src/wallet/services/network/service.ts:143-166`, `:169-240`, `:604-690`, `:751-758`. That is a stronger in-scope structural smell than some of the smaller duplication families.
+- I also underweighted the local clone family in `DappSessionService`: six mutators repeat the same lock → fetch → mutate → persist → emit skeleton at `packages/extension/src/wallet/services/dapp-session/service.ts:142-166`, `:192-266`. Claude2 caught it; I should have.
+
+## Over-asserted
+- My startup-order finding was directionally right, but I worded it too much like a current failure surface. The source proves “split mechanisms” (`contact/service.ts:18-19`; `packages/extension-messaging/src/background/service.ts:187-199`), but most current `init()` bodies in scope only do lookup/subscription, not deep collaborator work: `account/service.ts:31-35`, `dapp-session/service.ts:38-40`, `network/service.ts:159-163`. I had stronger evidence for architectural drift than for immediate coordination pain.
+- In Round 1, I pushed too hard against Claude2’s cycle finding on scope grounds. The static cycle is real in source: `packages/extension/src/wallet/services/auth-registry/service.ts:5` imports execution/service, and `packages/extension/src/wallet/services/execution/service.ts:42` imports auth-registry/service. My better objection was “awkward for C2 scope,” not “effectively invalid.”
+
+## Anchoring corrections
+- I was anchored by `clusters.md` and the repo map toward horizontal “fleet pattern” smells: backup/restore, `onProfileDeleted`, dependency declarations, `EntityStorage`, `PxeServiceClient`. That bias made me audit for repeated families first and miss a plain code-first read that would have surfaced `NetworkService` as a large-class outlier.
+- I also let the map’s “dependencies-declaration gap” frame the startup story too early. I should have first attacked the code by asking “what does each `init()` actually do today?” before leaning on the map’s architectural narrative.

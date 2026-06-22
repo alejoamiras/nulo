@@ -57,7 +57,7 @@
  * IF YOU'RE THINKING OF DELETING THIS HELPER
  * ─────────────────────────────────────────────────────────────────
  *
- * Two pre-PR-74 audits (codex + opus 4.7) both flagged that dropping the
+ * Two independent audits both flagged that dropping the
  * cap and letting `completeFeeOptions`'s `1.5×` default flow through
  * would silently break dApps using the patterns above. Before removing,
  * verify with a real dApp that hits an embedded fee path. See

@@ -12,7 +12,7 @@
 /** Components */
 import SecretExportLayout from "@/components/composite/SecretExportLayout.vue"
 import SecretUnlockSection from "@/components/composite/SecretUnlockSection.vue"
-import PasskeyCeremonyDialog from "@/popup/components/popups/PasskeyCeremonyDialog.vue"
+import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vue"
 
 /** Services */
 import { managers } from "@/utils/core"

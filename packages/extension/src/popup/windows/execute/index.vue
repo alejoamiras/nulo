@@ -22,7 +22,7 @@ import { type ProfileInfo, ProfileServiceClient } from "@/wallet/services/profil
 import { type Network, NetworkServiceClient } from "@/wallet/services/network/client"
 import { type Account, AccountServiceClient } from "@/wallet/services/account/client"
 import { ExecutionServiceClient, type FeeSettings, type Operation } from "@/wallet/services/execution/client"
-import { TokenServiceClient } from "@/wallet/services/token/client"
+import { TokenServiceClient, type TokenInterface } from "@/wallet/services/token/client"
 import {
 	type CaipAccount,
 	type CaipChain,
@@ -91,6 +91,19 @@ const tokenService = new TokenServiceClient()
  * surface the user has — the popup must not be approvable while it's loading.
  */
 const tokenMetadata = ref<Map<string, { name: string; symbol: string; decimals: number }>>(new Map())
+/**
+ * Parallel map carrying the parsed `TokenInterface` from the same
+ * `previewTokenMetadata` call that populates `tokenMetadata`. Used by the
+ * approve mapper to thread the interface into `register_token` ops as
+ * `previewedInterface`, letting `executeRegisterToken` skip a redundant
+ * `parseTokenInterface` round-trip after Allow. Populated alongside
+ * `tokenMetadata.set(...)` during the prefetch loop in `init()`.
+ *
+ * Race-safety: the Confirm button is gated on `tokenMetadataLoading` (see
+ * line :312 and disabled-state at :481), so by the time `approveInteraction`
+ * runs, this map has been fully populated (or the user can't approve).
+ */
+const tokenInterfaces = ref<Map<string, TokenInterface>>(new Map())
 const tokenMetadataLoading = ref(false)
 const tokenMetadataError = ref<Map<string, string>>(new Map())
 
@@ -183,7 +196,6 @@ const init = async () => {
 				case "register_token":
 				case "simulate_transaction":
 				case "simulate_utility":
-				case "simulate_views":
 				case "aztec_simulateTx":
 				case "aztec_executeUtility":
 				case "aztec_profileTx":
@@ -266,7 +278,8 @@ const init = async () => {
 					registerOps.map(async (op) => {
 						try {
 							const meta = await tokenService.previewTokenMetadata(op.networkId, op.accountAddress, op.address)
-							tokenMetadata.value.set(op.address, meta)
+							tokenMetadata.value.set(op.address, { name: meta.name, symbol: meta.symbol, decimals: meta.decimals })
+							tokenInterfaces.value.set(op.address, meta.interface)
 						} catch (err) {
 							const msg = getErrorMessage(err)
 							tokenMetadataError.value.set(op.address, msg)
@@ -327,6 +340,19 @@ const approve = async () => {
 		const executable: Operation[] = operations.value.map(({ network: _n, account: _a, ...rest }) => {
 			const draft = rest as unknown as import("./types").DraftOperation
 			assertExecutableOperation(draft)
+			// Approve-mapper threading: for `register_token` ops, attach the
+			// `previewedInterface` from the popup's prefetched map so the
+			// executor can skip a redundant `parseTokenInterface` round-trip.
+			// Safe because by the time we get here `tokenMetadataLoading` is
+			// false (Confirm button gated), so the map is fully populated.
+			// Executor still validates `contract === op.address` + chainId.
+			if (draft.kind === "register_token") {
+				const previewed = tokenInterfaces.value.get(draft.address)
+				if (previewed) {
+					// Extension-local extended type; not part of the wire shape.
+					return { ...draft, previewedInterface: previewed } as unknown as Operation
+				}
+			}
 			return draft
 		})
 		await interactionService.approveInteraction(requestId.value!, executable, {
@@ -361,6 +387,16 @@ const stripStatus = computed<"ready" | "loading" | "cancelled">(() => {
 	if (isLoading.value) return "loading"
 	return "ready"
 })
+
+// Mirrors the `requiresFeeSelection` early-return inside approve(): a send-like op
+// with no chosen fee can't execute yet. Gating the Confirm button's disabled state
+// on it (not just approve()'s guard) makes the button authoritative — a click while
+// the fee is still auto-selecting can no longer no-op into the "select a fee"
+// warning. e2e clicks wait for the button to enable, so this also removes the race
+// where approval is clicked before the default fee resolves (slow PXE / cold start).
+const needsFeeSelection = computed(() =>
+	operations.value.some((op) => requiresFeeSelection(op as unknown as import("./types").DraftOperation)),
+)
 
 const showJson = () => {
 	if (!requestId.value) return
@@ -468,7 +504,14 @@ onUnmounted(() => {
 			</Tooltip>
 
 			<Flex align="center" justify="between" gap="12">
-				<Button data-testid="execute-reject-btn" @click="reject" wide variant="primary_outline" size="medium" :disabled="isLoading">
+				<Button
+					data-testid="execute-reject-btn"
+					@click="reject"
+					wide
+					variant="primary_outline"
+					size="medium"
+					:disabled="isLoading || !requestId"
+				>
 					Reject
 				</Button>
 
@@ -479,7 +522,7 @@ onUnmounted(() => {
 					variant="primary"
 					size="medium"
 					:loading="isLoading"
-					:disabled="processingError?.type === 'error' || tokenMetadataLoading || !initComplete || operations.length === 0"
+					:disabled="processingError?.type === 'error' || tokenMetadataLoading || !initComplete || operations.length === 0 || needsFeeSelection"
 				>
 					<Text size="13" color="inverse">{{ isLoading ? "EXECUTING" : "Confirm" }}</Text>
 				</Button>

@@ -7,7 +7,7 @@ import { Fr } from "@aztec/aztec.js/fields"
  * Precedence:
  *   1. URL ?chainId=…&version=… (test-driver override)
  *   2. VITE_CHAIN_ID / VITE_CHAIN_VERSION env (build-time pin)
- *   3. Testnet defaults (the faucet's only deployed target — see README)
+ *   3. Testnet defaults (the faucet's only deployed target - see README)
  *
  * The faucet is testnet-only by design. The `Fr.ZERO / Fr.ZERO` wildcard
  * fallback was previously thought "fine for dev" but it triggers a UX hole:
@@ -20,10 +20,10 @@ import { Fr } from "@aztec/aztec.js/fields"
  *
  * Values mirror the wallet's `DEFAULT_SEEDS` testnet entry:
  *   L1 chain ID: 11155111 (Sepolia)
- *   Rollup version: 4127419662 (alpha-testnet)
+ *   Rollup version: 4239416255 (V5 testnet)
  */
 const TESTNET_CHAIN_ID = "11155111"
-const TESTNET_ROLLUP_VERSION = "4127419662"
+const TESTNET_ROLLUP_VERSION = "4239416255"
 
 export function readChainInfo(url: URL = new URL(window.location.href)): ChainInfo {
 	const queryChainId = url.searchParams.get("chainId")

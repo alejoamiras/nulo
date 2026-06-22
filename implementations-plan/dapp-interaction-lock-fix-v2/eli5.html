@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>dapp-interaction-lock-fix-v2 — ELI5</title>
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --bg: #fafaf7;
+    --accent: #b54a00;
+    --border: #d8d4cc;
+    --code-bg: #f0ece4;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+    color: var(--fg);
+    background: var(--bg);
+    line-height: 1.6;
+    max-width: 760px;
+    margin: 3rem auto;
+    padding: 0 1.5rem 4rem;
+    font-size: 17px;
+  }
+  h1, h2, h3 { font-family: ui-sans-serif, system-ui, sans-serif; letter-spacing: -0.01em; }
+  h1 { font-size: 2.2rem; margin-bottom: 0.2em; }
+  h1 + p.subtitle { color: var(--muted); margin-top: 0; font-size: 1rem; }
+  h2 { margin-top: 3rem; font-size: 1.5rem; padding-bottom: 0.2em; border-bottom: 1px solid var(--border); }
+  h3 { margin-top: 2rem; font-size: 1.15rem; color: var(--accent); }
+  code, pre {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", "Menlo", monospace;
+    font-size: 0.9em;
+  }
+  code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px; }
+  pre {
+    background: var(--code-bg);
+    padding: 1em;
+    border-radius: 6px;
+    overflow-x: auto;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  blockquote {
+    margin: 1.5em 0;
+    padding: 0.8em 1.2em;
+    border-left: 3px solid var(--accent);
+    background: var(--code-bg);
+    color: var(--muted);
+    font-style: italic;
+  }
+  .verdict {
+    display: inline-block;
+    padding: 0.2em 0.6em;
+    border-radius: 4px;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.9em;
+    font-weight: 600;
+  }
+  .verdict.needs-revision { background: #fff3cd; color: #856404; }
+  .verdict.ship-it { background: #d4edda; color: #155724; }
+  .verdict.blocker { background: #f8d7da; color: #721c24; }
+  ul li { margin: 0.4em 0; }
+  .footnote { color: var(--muted); font-size: 0.85em; margin-top: 4em; padding-top: 1em; border-top: 1px solid var(--border); }
+  .key-takeaway {
+    background: #fffaeb;
+    border: 1px solid #f4d68b;
+    border-radius: 6px;
+    padding: 1em 1.2em;
+    margin: 1.5em 0;
+  }
+  .key-takeaway strong { display: block; margin-bottom: 0.3em; color: var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>dapp-interaction-lock-fix-v2</h1>
+<p class="subtitle">ELI5 companion to <a href="plan.md">plan.md</a> · 2026-05-28 · status: dual-audit complete, plan needs revision</p>
+
+<div class="key-takeaway">
+  <strong>One-sentence summary</strong>
+  My first v2 plan tried to bundle two things (a small bug-fix follow-up + a bigger UX refactor). Both audits came back saying that's wrong — ship the small piece first, plan the bigger one separately. They also caught three factual mistakes in my plan I need to fix before either piece moves forward.
+</div>
+
+<h2>What problem is v2 even trying to solve?</h2>
+
+<p>PR #53 shipped a fix for the bug you reported during friends QA: when a dApp fires two transactions at once, only one card was showing up. The fix had three internal layers (you don't need to remember them — they just work). It merged.</p>
+
+<p>But during your manual QA you found two more issues:</p>
+
+<ol>
+  <li><b>A transaction card briefly disappeared</b> when one tx finished while another was still queued. Codex's final audit confirmed my fix for this was <i>partial</i> — it only worked in a narrow timing window. The general case is still broken.</li>
+  <li><b>The "queued" UX feels wrong:</b> popup #2 only opens after popup #1's full transaction-build completes. You wanted popup #2 to open the moment popup #1 is approved, with T1's card running through "Estimating fee → Simulating → Proving" while T2 waits.</li>
+</ol>
+
+<p>v2 was supposed to fix both. The plan got <span class="verdict needs-revision">needs-revision</span> from both audits.</p>
+
+<h2>What the audits actually told me</h2>
+
+<p>I sent the v0 plan to two independent reviewers — codex (Anthropic) and an opus subagent — in parallel. Both came back with similar verdicts. Worth surfacing the convergent points first, then where they differ.</p>
+
+<h3>Both audits agree</h3>
+
+<ul>
+  <li><b>Split the work into two PRs.</b> Don't bundle.</li>
+  <li><b>"Layer A" (the small bug-fix closeout) is mechanical and ships fast.</b> Four code sites get a small change. One filter gets flipped. One invariant gets pinned. ~150 lines. Closes the bug your QA hit.</li>
+  <li><b>"Layer B" (parallel popups) is underspecified and has architectural ambiguities.</b> Treat as a separate planning pass.</li>
+  <li><b>The proposed change moves load-bearing concurrency boundaries.</b> Until those are nailed down, audit cycles will just keep re-flagging the same gaps.</li>
+</ul>
+
+<h3>Where they disagree (this is the interesting part)</h3>
+
+<p>Opus argues: <i>don't even add a per-account "wait your turn" lock for parallel popups</i>. Instead, just move when the existing FIFO baton releases + add a small interaction queue inside one service. The existing Aztec PXE write lock already serializes the dangerous parts of transaction building. <b>Prototype the simpler design first; if it works, you skip a major refactor.</b></p>
+
+<p>Codex argues: <i>specify the lock primitive precisely before approval</i>. The repo's current <code>Lock</code> force-releases after 5 minutes, which would silently break the very race a new exec mutex was supposed to prevent. Get the contract right or skip it entirely.</p>
+
+<p>These aren't contradictory — they're complementary. Opus's "spike the simpler design first" implicitly answers codex's "specify the lock or skip" by trying to skip.</p>
+
+<h2>Three concrete mistakes in my v0 plan</h2>
+
+<p>Useful to flag these out loud so future-me doesn't re-introduce them:</p>
+
+<h3>1. I picked the wrong stage for "approved but waiting"</h3>
+<p>My v0 plan said the second transaction (T2) could sit in <code>pending</code> stage while waiting for T1 to finish. Codex pointed out that the journal reaper <b>sweeps <code>pending</code>-stage records after 2 minutes</b>. A real transaction with prove time longer than 2 minutes would get killed by the reaper, leaving the dApp's promise hanging.</p>
+<p>The right stage for approved-but-waiting is <code>queued</code> (10-minute reaper window). Different design.</p>
+
+<h3>2. I'd silently picked the wrong lock primitive</h3>
+<p>The repo has a <code>Lock</code> class used in lots of places. It has a 5-minute auto-release built in — designed to prevent deadlocks if some code path forgets to release. But for a per-account "wait your turn while T1 proves" lock, that auto-release would let T2 cut in line if T1's prove crosses 5 minutes. Proving regularly crosses 5 minutes on slow CI runners.</p>
+<p>Either use a different lock primitive (no auto-release) or skip the lock entirely (opus's anti-suggestion).</p>
+
+<h3>3. My proposed safety test for transaction-hash propagation was nonsense</h3>
+<p>I'd written: "verify <code>tx.getTxHash()</code> matches what <code>node.sendTx(tx)</code> returns." Codex caught that <code>node.sendTx</code> returns <i>nothing</i> — it's a fire-and-forget call. The hash is a purely local computation from the proven transaction bytes. So my proposed test compared a value to <code>undefined</code>.</p>
+<p>The right test is pinning the invariant that the <code>submitting</code> stage's txHash matches the <code>succeeded</code> stage's txHash. Both are local computations off the same tx; if they drift, the bug is in the local hash function and worth catching.</p>
+
+<h2>What the new plan looks like</h2>
+
+<h3>Layer A — v2 PR (small, ships first)</h3>
+
+<ul>
+  <li>Plumb <code>submitting.txHash</code> at four sites in <code>execution/service.ts</code>. The hash is already computed (it's used on the next line for <code>succeeded.txHash</code>); we just also write it to the <code>submitting</code> transition.</li>
+  <li>Flip the disappearing-card filter in <code>RecentActivityView.vue</code> to journal-first. Drop the blanket "any in-flight task hides all pending chain txs" branch. Use the per-hash filter that becomes live now that <code>submitting.txHash</code> is populated.</li>
+  <li>Add an invariant pin in <code>transitionOperation</code>: <code>submitting.txHash === succeeded.txHash</code> on the same record.</li>
+  <li>Update the synthetic "intended-contract" unit tests to assert live production behavior.</li>
+</ul>
+
+<p>This is mechanical, deterministic, and closes the bug your QA hit. ~150 LOC. One PR.</p>
+
+<h3>Layer B — separate plan + PR (parallel popups)</h3>
+
+<ul>
+  <li>Spike opus's simpler architecture first: move the existing baton release point + add a per-session interaction queue inside <code>DappInteractionService</code>. No new locks. Trust PXE's existing serialization.</li>
+  <li>If the spike works (one day max): ship the simpler design.</li>
+  <li>If the spike fails: write a proper plan with the exact lock contract codex demands (which primitive, abort semantics, SW restart recovery, reaper-stage interaction).</li>
+</ul>
+
+<h2>What I'm asking you</h2>
+
+<p>Earlier you said "bundle parallel popups into v2." Both audits are pushing back on that with new technical information. I want your call:</p>
+
+<ol>
+  <li><b>Split (audits' recommendation)</b>: v2 = Layer A only. Layer B becomes v3 with the spike + new plan.</li>
+  <li><b>Keep bundled, but rewrite</b>: I re-do the plan addressing every audit gap, do the spike inside the plan, re-audit. Bigger PR but ships everything together.</li>
+  <li><b>Drop Layer A entirely</b>: accept the partial filter fix from #53 is good-enough; the disappearing-card hole only matters in narrow timings. Move directly to Layer B.</li>
+</ol>
+
+<p>I'd recommend #1 because the audits' arithmetic on Layer B is right — the architectural ambiguities aren't worth carrying through Layer A's review.</p>
+
+<h2>Open questions</h2>
+
+<ul>
+  <li>If split: should Layer A also include the approval-path e2e test you wanted, or does that ride with Layer B (since it tests Layer B's new boundary, not Layer A's filter fix)?</li>
+  <li>What's the appetite for the one-day spike of opus's simpler design before Layer B's full planning?</li>
+  <li>(Resolved post-v2 merge) v1's docs were renamed to <code>implementations-plan/dapp-interaction-lock-fix-v1/</code> for naming consistency with v2 and the future v3.</li>
+</ul>
+
+<p class="footnote">
+  Source documents: <a href="plan.md">plan.md</a> (v0 — needs revision per audits). Audit transcripts will land at <code>audit-codex.md</code> + <code>audit-opus.md</code> after this turn. Branch: <code>fix/dapp-interaction-lock-scope-v2</code>. Status checklist tracked in plan.md.
+</p>
+
+</body>
+</html>

@@ -68,7 +68,7 @@ function goNext() {
 
 <template>
 	<OnboardingPage>
-		<StepIndicator :current="3" />
+		<StepIndicator :current="4" />
 		<Flex direction="column" gap="16" :class="$style.hero">
 			<BrutalistTitle main="Speed up" sub="Proving" />
 			<div :class="$style.hero_bar" />

@@ -20,7 +20,7 @@ const hasConfig = aztecConfig !== undefined
 for (const variant of ["callIntent", "innerHash"] as const) {
 	test.skipIf(!hasConfig)(
 		`authwit-${variant} (#27) — silent path under accounts cap`,
-		{ timeout: 90_000, retry: 1 },
+		{ timeout: 90_000 },
 		async ({ dappConnectedExtensionPerTest: dappConnectedExtension }) => {
 			const page = dappConnectedExtension.playgroundPage
 
@@ -30,7 +30,7 @@ for (const variant of ["callIntent", "innerHash"] as const) {
 				select.dispatchEvent(new Event("change", { bubbles: true }))
 			})
 			const seqGrant = await snapshotResultSeq(page)
-			const popupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 15_000 })
+			const popupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
 			await clickByTestId(page, "pg-btn-requestCapabilities")
 			const popup = await popupP
 			await popup.waitForSelector('[data-testid="cap-account-item"]', { timeout: 10_000 })

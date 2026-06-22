@@ -1,5 +1,5 @@
 import type { ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { PASSKEY_SERVICE_NAME, type Methods, type PasskeyCredentialData, type PasskeyRequest } from "./spec"
 import { PasskeyCredential } from "@nulo/wallet-crypto"
@@ -20,7 +20,7 @@ const PASSKEY_TIMEOUT_MS = 5 * 60 * 1000
  *
  *   - PATH A — popup-driven in-page modal. Active path for register / unlock
  *     / import. The popup runs WebAuthn in its own frame via
- *     `src/popup/utils/passkey-ceremony.ts:runPasskeyCeremony`, then hands
+ *     `src/wallet/utils/passkey-ceremony.ts:runPasskeyCeremony`, then hands
  *     the resulting `PasskeyCredentialData` to `ProfileService.{create,unlock,import}*`
  *     which call `materializeCredential` to wrap it back into a
  *     `PasskeyCredential`. NO window opens for Path A.
@@ -46,6 +46,7 @@ type PendingPasskey = {
 }
 
 export class PasskeyService extends Service<Methods> implements ServiceSpec<Methods> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()("getPendingRequest", "resolvePasskeyRequest", "rejectPasskeyRequest")
 	public static name = PASSKEY_SERVICE_NAME
 
 	private pending: Map<string, PendingPasskey> = new Map()
@@ -57,9 +58,12 @@ export class PasskeyService extends Service<Methods> implements ServiceSpec<Meth
 		super(PASSKEY_SERVICE_NAME, logger)
 	}
 
-	/** PATH B — SW-driven window flow for create. No current callers. */
-	public async createKey(userHandle: string): Promise<PasskeyCredential> {
-		return await this.openWindowAndWait({ mode: "create", userHandle })
+	/** PATH B — SW-driven window flow for create. No current PRODUCTION callers,
+	 *  but reachable via `ProfileService.createPasskeyProfile` when no
+	 *  `credentialData` is supplied. `name` is the profile name, slugified into
+	 *  the credential label by `buildCreateOptions`. */
+	public async createKey(userHandle: string, name: string): Promise<PasskeyCredential> {
+		return await this.openWindowAndWait({ mode: "create", userHandle, name })
 	}
 
 	/** PATH B — SW-driven window flow for get. No current callers. */

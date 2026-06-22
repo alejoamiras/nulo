@@ -20,10 +20,12 @@ to live in the service worker while the PXE lives in the offscreen document.
 | Path | Purpose |
 |---|---|
 | `src/dispatcher.ts` | The dispatcher. Routes every wallet-sdk method to typed service calls; narrows protocol shapes; threads the right session/capabilities through. |
-| `src/capability-map.ts` | Declarative map of every capability the wallet exposes: name, scope, approval model, popup vs silent path. |
+| `src/method-descriptors.ts` | **Single source of truth** for per-method metadata: capability, routing (network/account/handler), scope-checker reference, exempt flag, F-/AUDIT markers. The six former parallel tables (`METHOD_CAPABILITY_MAP`, `EXEMPT_METHODS`, `METHOD_TO_KIND`, `NETWORK_ONLY_KINDS`, `ACCOUNT_KINDS`, `METHOD_SCOPE_CHECKER`) are DERIVED from `METHOD_REGISTRY` here. Add/reclassify a method = one row (a build-failing exhaustiveness test + the dispatch-entry guard catch a forgotten one). |
+| `src/method-scope-checkers.ts` | Leaf module: per-method scope-check function bodies + their helpers. Referenced by the registry's `scopeCheck` fields and by `scope-enforcement.ts` — kept here (depended-on, never depending back) to break the registry↔scope-enforcement cycle. |
+| `src/capability-map.ts` | Thin facade over the registry: `getRequiredCapability` / `isCapabilityExempt` read the derived capability map. |
 | `src/capabilities.ts` | Capability-request types and resolution helpers. |
 | `src/services-contract.ts` | Structural interfaces the dispatcher consumes (NetworkServices, AccountServices, DappSessionServices, …). Keeps the bridge import-free relative to concrete service impls in `@nulo/extension`. |
-| `src/scope-enforcement.ts` | Per-message re-check: call-intent targets, fee-payer constraints, chainId, account allow-list against the session's granted scope. |
+| `src/scope-enforcement.ts` | Per-message re-check entry points (`enforceScope` / `enforceScopeWithSession`) over the registry-derived method→checker map; owns the F-005 session-account-scope wrapper. Checker bodies live in `method-scope-checkers.ts`. |
 | `src/session-types.ts` | DappSession shape; per-`(origin, chainId, profileId)` keying. |
 | `src/dapp-interaction-protocol.ts` | Wire schemas for popup-driven interactions (discover, capabilities, execute, verify, json). |
 | `src/action.ts`, `operation.ts`, `operation-result.ts`, `transaction-origin.ts` | Operation models that flow through the dispatcher. |
@@ -203,7 +205,16 @@ against a fake services-contract; no real chain or runtime needed.
   path; removing one without a migration leaves stale sessions.
 - **The dispatcher is the single chokepoint.** Every dApp-originated request
   flows through `dispatcher.ts`. New surface (e.g. a new wallet-sdk method)
-  gets added here; bypass routes are not allowed.
+  gets added here; bypass routes are not allowed. `dispatch()` resolves the
+  method's `MethodDescriptor` up front — a method with no registry row is
+  rejected (`Unsupported wallet method`) before any routing.
+- **Method metadata lives in ONE place.** Capability, routing, and scope-checker
+  facts for every method are `MethodDescriptor` rows in `method-descriptors.ts`;
+  the old six parallel tables are derived. To add/reclassify a method, edit the
+  row — a forgotten descriptor fails the exhaustiveness test (build) and the
+  dispatch-entry guard (runtime). A method needing a NEW `Operation` kind also
+  touches the kind→Operation build switches in `dispatcher.ts`; a new
+  handler-routed method also needs its `dispatch()` branch.
 
 ## Versioning
 
@@ -213,12 +224,15 @@ new case added to their switches.
 
 ## Custom RPC methods (Nulo extensions)
 
-The wallet exposes one Nulo-custom RPC on top of the canonical `@aztec/wallet-sdk`
-`WalletSchema`:
+The wallet exposes three Nulo-custom RPCs on top of the canonical `@aztec/wallet-sdk`
+`WalletSchema` (all three are runtime-patched onto `WalletSchema`; see the
+schema-patch contract below):
 
 | Method | Signature | Capability | Popup |
 |---|---|---|---|
 | `registerToken` | `(account: AztecAddress, token: AztecAddress) => Promise<void>` | `accounts` | **Always** (per-call confirmation; AccessLevel.AppState) |
+| `isTokenRegistered` | `(token: AztecAddress) => Promise<boolean>` | `contracts` | None (silent reader; scope-checked via `canGetMetadata`) |
+| `grantPublicAuthwit` | `(account: AztecAddress, content: { caller, contract, method, args }) => Promise<TxHash>` | `transaction` | **Always** (execute confirmation; scope-checked against the granted transaction scope) |
 
 `registerToken` adds the token to the wallet's **profile + chain** watchlist
 (not per-account — every account on this chain tracks the token's balance
@@ -230,8 +244,9 @@ attacker-controllable.
 
 ### Schema-patch contract
 
-`WalletSchema` is mutable upstream. We extend it at runtime with a Zod entry
-for `registerToken`. **Three inline copies** of the patch live in this monorepo:
+`WalletSchema` is mutable upstream. We extend it at runtime with Zod entries
+for the three Nulo-custom methods (`registerToken`, `isTokenRegistered`,
+`grantPublicAuthwit`). **Three inline copies** of the patch live in this monorepo:
 
 | Side | File | Imported by |
 |---|---|---|
@@ -257,10 +272,12 @@ patch does NOT restore them):
 
 - `getCompleteAddress` — the `accounts` capability response already carries
   the account list. Use `wallet.requestCapabilities()` → granted accounts.
-- `simulateViews` — use `wallet.simulateUtility()` (or batch them via
-  `wallet.batch([{name: "executeUtility", ...}, ...])`). The `simulate_views`
-  *operation kind* survives internally for the balance projector + gas-balance
-  code; that refactor is filed as `deprecate-simulate-views`.
+- `simulateViews` — fully retired. dApp-facing method AND internal
+  `simulate_views` op kind both gone. Use `wallet.simulateUtility()` (or batch
+  via `wallet.batch([{name: "executeUtility", ...}, ...])`). The internal
+  batching logic that previously lived behind the op kind now lives in
+  `packages/extension/src/wallet/services/execution/helpers/batched-view-simulation.ts`,
+  called directly by balance-projector + gas-balance.
 
 If a future Aztec.js version ships its own `registerToken`, the patch's
 signature-drift guard throws at SW init (`expected 2 params, found N`). Pin the

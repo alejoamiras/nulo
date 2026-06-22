@@ -1,0 +1,114 @@
+name: Network e2e soak
+
+# Manual-only repeat-runner for proving the network suite is genuinely stable
+# before flipping it to a required check (Phase 5 acceptance gate) and for
+# validating Class B / Mode 3-4 fixes on the REAL runner without spamming PR CI.
+#
+# Runs the chosen workload `repeats` times SEQUENTIALLY (max-parallel: 1) on
+# fresh ubuntu-latest runners, with `retry: "0"` by default so a test that
+# passes only on a retry FAILS its iteration — that is the "zero retries
+# consumed" acceptance gate. `fail-fast: false` runs every iteration so the
+# pass-rate is visible even when one fails.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to run each iteration"
+        type: choice
+        options: [full, shard, files]
+        default: full
+      shard:
+        description: "vitest --shard expr when mode=shard (e.g. 1/5)"
+        type: string
+        default: ""
+      test_files:
+        description: "space-separated test files when mode=files"
+        type: string
+        default: ""
+      repeats:
+        description: "iterations to run (1-25)"
+        type: string
+        default: "5"
+      proverless:
+        description: "proverless build (fast; accelerator OFF)"
+        type: boolean
+        default: true
+      disable_accelerator:
+        description: "skip accelerator-server (no-op under proverless)"
+        type: boolean
+        default: false
+      retry:
+        description: 'vitest retry override; "0" = zero-retry acceptance gate'
+        type: string
+        default: "0"
+
+concurrency:
+  group: network-e2e-soak-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  prep:
+    name: Build iteration matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      iterations: ${{ steps.gen.outputs.iterations }}
+    steps:
+      - id: gen
+        env:
+          REPEATS: ${{ inputs.repeats }}
+        run: |
+          set -euo pipefail
+          n="${REPEATS:-5}"
+          # Clamp to a sane range so a typo can't spawn a runaway matrix.
+          if ! [[ "$n" =~ ^[0-9]+$ ]] || [ "$n" -lt 1 ]; then n=5; fi
+          if [ "$n" -gt 25 ]; then n=25; fi
+          iterations=$(seq 1 "$n" | jq -cRn '[inputs]')
+          echo "iterations=$iterations" >> "$GITHUB_OUTPUT"
+          echo "Soak will run $n iteration(s): $iterations"
+
+  soak:
+    name: iter ${{ matrix.iteration }}
+    needs: prep
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        iteration: ${{ fromJSON(needs.prep.outputs.iterations) }}
+    uses: ./.github/workflows/_network-e2e.yml
+    with:
+      ref: ${{ github.ref }}
+      shard: ${{ inputs.mode == 'shard' && inputs.shard || '' }}
+      shard_label: soak-${{ matrix.iteration }}
+      test_files: ${{ inputs.mode == 'files' && inputs.test_files || '' }}
+      proverless: ${{ inputs.proverless }}
+      disable_accelerator: ${{ inputs.disable_accelerator }}
+      retry: ${{ inputs.retry }}
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  status:
+    name: Status
+    if: always()
+    needs: [prep, soak]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Aggregate
+        env:
+          PREP: ${{ needs.prep.result }}
+          SOAK: ${{ needs.soak.result }}
+          REPEATS: ${{ inputs.repeats }}
+          RETRY: ${{ inputs.retry }}
+        run: |
+          set -euo pipefail
+          if [ "$PREP" != "success" ] || [ "$SOAK" != "success" ]; then
+            echo "::error::Soak NOT clean (prep=$PREP soak=$SOAK). With retry=$RETRY, any non-green iteration is a flake to fix — do NOT flip the gate to required."
+            exit 1
+          fi
+          echo "Soak clean: all $REPEATS iteration(s) green with retry=$RETRY (zero retries consumed)."

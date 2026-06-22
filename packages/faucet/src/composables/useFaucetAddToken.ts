@@ -6,11 +6,12 @@ import { type NormalizedError, normalizeError } from "@/lib/errors"
 /**
  * Local typed augmentation matching the runtime schema patch in
  * `@/lib/nulo-schema-patch.ts`. The cast in `addToken()` is the typed
- * boundary — the patch makes it true at runtime, this declaration makes
+ * boundary - the patch makes it true at runtime, this declaration makes
  * TypeScript agree.
  */
 type WalletWithRegisterToken = Wallet & {
 	registerToken(account: AztecAddress, token: AztecAddress): Promise<void>
+	isTokenRegistered?(token: AztecAddress): Promise<boolean>
 }
 
 export type AddTokenStatus =
@@ -18,7 +19,7 @@ export type AddTokenStatus =
 	| { kind: "submitting" }
 	| { kind: "ok" }
 	/** User clicked Deny in the extension popup. Per the wallet-bridge cancel
-	 *  recipe, the UI must NOT surface an error — return to idle silently. */
+	 *  recipe, the UI must NOT surface an error - return to idle silently. */
 	| { kind: "rejected" }
 	/** Dispatcher rejected the method by string (e.g. schema patch not in place
 	 *  on the wallet side, or the wallet is too old). Distinct from a network
@@ -71,5 +72,20 @@ export function useFaucetAddToken() {
 		status.value = { kind: "idle" }
 	}
 
-	return { status, addToken, reset }
+	/**
+	 * Whether the wallet already has this token registered (the capability-gated
+	 * `isTokenRegistered` custom RPC). FAIL OPEN on any failure - older wallet builds,
+	 * scope refusals, or transport errors must show the Add button, never hide it.
+	 */
+	async function isRegistered(wallet: Wallet, tokenAddress: AztecAddress): Promise<boolean> {
+		try {
+			const w = wallet as WalletWithRegisterToken
+			if (typeof w.isTokenRegistered !== "function") return false
+			return (await w.isTokenRegistered(tokenAddress)) === true
+		} catch {
+			return false
+		}
+	}
+
+	return { status, addToken, isRegistered, reset }
 }

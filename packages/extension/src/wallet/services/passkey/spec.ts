@@ -30,6 +30,9 @@ export type PasskeyRequest =
 	| {
 			mode: "create"
 			userHandle: string
+			/** Profile name — slugified into the WebAuthn credential label
+			 *  (`user.name`/`displayName`) at registration. Cosmetic only. */
+			name: string
 	  }
 	| {
 			mode: "get"
@@ -71,7 +74,7 @@ export type Methods = {
 // PATH A note: `PasskeyService.materializeCredential(data)` is a
 // SW-internal method (NOT in `Methods`) that wraps `PasskeyCredential.create`
 // for popup-driven flows. The popup runs WebAuthn itself via
-// `src/popup/utils/passkey-ceremony.ts` and hands the result to
+// `src/wallet/utils/passkey-ceremony.ts` and hands the result to
 // `ProfileService.{createPasskeyProfile,unlockPasskeyProfile,importPasskey}`
 // which call `materializeCredential` SW-internally before delegating to the
 // recovery coordinator. PasskeyCredential holds CryptoKey state so it

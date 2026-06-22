@@ -3,21 +3,21 @@
  *
  * Mirrors the shape of aztec-standards/scripts/deploy-config.ts so the
  * vendored deploy.ts can reuse the upstream pattern verbatim — but our
- * token list is USDC (decimals=6) + ETH (decimals=18), not the upstream's
- * WETH/DAI/USDC defaults.
+ * token list is NULO (decimals=6, USDC-shaped) + OLUN (decimals=18,
+ * ETH-shaped), not the upstream's WETH/DAI/USDC defaults.
  *
  * Salts:
  *   - Dripper salt 1337 matches Wonderland's default. If their Dripper is
  *     already deployed at this salt on alpha-testnet, our deterministic
  *     address collides to theirs (good — we share).
- *   - Token salts 4242 (USDC) and 4243 (ETH) avoid colliding with their
- *     WETH/DAI/USDC at salt 1337.
+ *   - Token salts 4244 (NULO) and 4245 (OLUN) avoid colliding with their
+ *     defaults at salt 1337 AND with our retired USDC/ETH drips (4242/4243).
  */
 
 export type Network = "testnet" | "local-network"
 
 export const NETWORK_URLS: Record<Network, string> = {
-	testnet: "https://rpc.testnet.aztec-labs.com",
+	testnet: "https://v5.testnet.rpc.aztec-labs.com",
 	"local-network": "http://localhost:8080",
 }
 
@@ -25,14 +25,14 @@ export const DRIPPER_SALT = 1337
 
 export interface FaucetTokenConfig {
 	readonly name: string
-	readonly symbol: "USDC" | "ETH"
+	readonly symbol: "NULO" | "OLUN"
 	readonly decimals: number
 	readonly salt: number
 }
 
 export const FAUCET_TOKEN_CONFIGS: readonly FaucetTokenConfig[] = [
-	{ name: "USDC", symbol: "USDC", decimals: 6, salt: 4242 },
-	{ name: "ETH", symbol: "ETH", decimals: 18, salt: 4243 },
+	{ name: "NULO", symbol: "NULO", decimals: 6, salt: 4244 },
+	{ name: "OLUN", symbol: "OLUN", decimals: 18, salt: 4245 },
 ] as const
 
 export interface DeploymentConfig {

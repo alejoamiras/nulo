@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bridge Security Audit — Nulo (2026-06-14)</title>
+<style>
+  :root {
+    --bg:#ffffff; --fg:#1a1a1a; --muted:#666; --hairline:#e3e3e3; --surface:#fafafa;
+    --code:#f0f0f0; --link:#0366d6;
+    --crit:#7a1020; --crit-bg:#fdecee; --high:#b3261e; --high-bg:#fdecea;
+    --med:#9a6700; --med-bg:#fff8e1; --low:#555; --low-bg:#f0f0f0;
+    --green:#1a7f37; --green-bg:#eaf7ee; --amber:#9a6700; --amber-bg:#fff4d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#16181c; --fg:#e6e6e6; --muted:#9aa0a6; --hairline:#2c2f36; --surface:#1d2026;
+      --code:#23262d; --link:#5aa6ff;
+      --crit:#ff8a9c; --crit-bg:#33161b; --high:#ff9a8f; --high-bg:#33181a; --med:#ffd166; --med-bg:#332a12;
+      --low:#aaa; --low-bg:#24262b; --green:#5fd07f; --green-bg:#15291b; --amber:#ffd166; --amber-bg:#332a12;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; max-width:820px;
+    margin:2rem auto; padding:0 1.1rem; color:var(--fg); background:var(--bg); line-height:1.6; }
+  h1 { font-size:1.7rem; margin:0 0 .3rem; } h2 { font-size:1.25rem; margin-top:2.4rem; }
+  h3 { font-size:1.05rem; margin-top:1.4rem; }
+  .sub { color:var(--muted); font-size:.92rem; margin:0 0 1.2rem; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.86em; background:var(--code);
+    padding:.1em .35em; border-radius:4px; }
+  pre { background:var(--code); padding:.9rem; border-radius:6px; overflow-x:auto; white-space:pre-wrap; font-size:.82rem; }
+  a { color:var(--link); }
+  .strip { display:flex; flex-wrap:wrap; gap:.5rem; margin:1rem 0 1.4rem; }
+  .stat { border:1px solid var(--hairline); border-radius:8px; padding:.5rem .8rem; text-align:center; min-width:74px; }
+  .stat b { display:block; font-size:1.3rem; } .stat span { font-size:.74rem; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .chip { display:inline-block; font-size:.7rem; font-weight:700; padding:.16em .5em; border-radius:999px; text-transform:uppercase; letter-spacing:.03em; }
+  .c-crit{ color:var(--crit); background:var(--crit-bg);} .c-high{ color:var(--high); background:var(--high-bg);}
+  .c-med{ color:var(--med); background:var(--med-bg);} .c-low{ color:var(--low); background:var(--low-bg);}
+  .c-info{ color:var(--muted); background:var(--low-bg);}
+  .callout { border-radius:8px; padding:.9rem 1.1rem; margin:1.2rem 0; border:1px solid; }
+  .callout.green { border-color:var(--green); background:var(--green-bg); }
+  .callout.amber { border-color:var(--amber); background:var(--amber-bg); }
+  .callout h3 { margin:.1rem 0 .5rem; } .callout ul { margin:.3rem 0 0; padding-left:1.1rem; } .callout li { margin:.25rem 0; }
+  .finding { background:var(--surface); border:1px solid var(--hairline); border-radius:8px; padding:1.1rem 1.2rem; margin:1.1rem 0; }
+  .fhead { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
+  .fid { font-family:ui-monospace,monospace; font-weight:700; } .ftitle { font-weight:600; }
+  .meta { margin:.5rem 0 .2rem; display:flex; gap:.4rem; flex-wrap:wrap; }
+  .eli5 p { margin:.5rem 0; } .eli5 strong { color:var(--fg); }
+  details { margin-top:.6rem; } summary { cursor:pointer; color:var(--link); font-size:.9rem; }
+  details[open] summary { margin-bottom:.5rem; }
+  .footer { margin-top:2.6rem; padding-top:1.2rem; border-top:1px solid var(--hairline); color:var(--muted); font-size:.88rem; }
+  .verified { color:var(--green); font-weight:700; }
+</style>
+</head>
+<body>
+
+<h1>Bridge Security Audit — Nulo L1↔L2 bridge</h1>
+<p class="sub">Smart-contract red-team · 2026-06-14 · effort <b>max</b> · Opus 4.8 + Codex (two model families) · run <code>2026-06-14-bridge-redteam</code></p>
+
+<div class="strip">
+  <div class="stat"><b>11</b><span>findings</span></div>
+  <div class="stat"><b style="color:var(--crit)">1</b><span>critical</span></div>
+  <div class="stat"><b style="color:var(--high)">2</b><span>high</span></div>
+  <div class="stat"><b style="color:var(--med)">2</b><span>medium</span></div>
+  <div class="stat"><b style="color:var(--low)">3</b><span>low</span></div>
+  <div class="stat"><b style="color:var(--muted)">3</b><span>info</span></div>
+</div>
+
+<p>You asked us to break the bridge contracts — swap, approve, permit2 — and find how someone steals user funds. The <strong>good news first:</strong> the swap/permit2/approve path you worried about is well-built. We actively tried about ten attacks on it across two AI model families and <strong>cleared them with proof</strong> — including a malicious swap contract, which is fenced in to exactly the trade the user signed. The real danger is somewhere you didn't ask about: <strong>how the bridge is switched on and who holds the keys.</strong></p>
+
+<div class="callout amber">
+  <h3>⚠ One critical issue is LIVE right now</h3>
+  <p>The L1 "portal" contract that the shipping faucet deposits into (<code>0x9c41…11ea</code> on Sepolia) can be <strong>re-configured by anyone</strong> — we proved it by re-pointing the real deployed contract from a random throwaway account in a test. Until it's migrated, treat that testnet portal and the L2 minter key as compromised-by-design. This does not block testnet experimentation, but <strong>none of F-001/F-002 may survive into any real-value deployment.</strong></p>
+</div>
+
+<div class="callout green">
+  <h3>✅ Cheapest fixes first (land these in the first PR — hours of work)</h3>
+  <ul>
+    <li><b>F-003</b> — Turn on the contract tests in CI. The team already wrote the safety checks (content-hash equality, router invariants); they just never run automatically. This is the highest-value, lowest-cost fix — it prevents a future Aztec upgrade from silently freezing every deposit.</li>
+    <li><b>F-008</b> — Add one missing <code>nonReentrant</code> word to the swap contract's sweep (minutes).</li>
+    <li><b>F-005</b> — Make the reusable <code>runSwapBridge</code> helper refuse unsafe private-fuel inputs instead of silently stranding gas (hours). The shipping app is already safe; this protects future callers.</li>
+  </ul>
+</div>
+
+<div class="callout amber">
+  <h3>🔗 Ship these together</h3>
+  <ul>
+    <li><b>F-001 + its deploy-window twin</b> — the portal needs both an "already initialized" lock <em>and</em> atomic deploy-then-initialize; one without the other still leaves a gap.</li>
+    <li><b>F-003 + the witness-hash check</b> — same CI PR: also flip <code>WitnessHash.t.sol</code> from printing to asserting, so the L1↔JS signature pin is two-directional.</li>
+    <li><b>F-004 (router) + the swap-target note</b> — binding the swap target into the signed message fixes both the router and swap-cluster versions at once.</li>
+  </ul>
+</div>
+
+<h2>Findings</h2>
+
+<div class="finding">
+  <div class="fhead"><span class="chip c-crit">Critical</span><span class="fid">F-001</span><span class="ftitle">Anyone can re-configure the live L1 portal and drain it</span></div>
+  <div class="meta"><span class="chip c-info">Claude + Codex ×3</span><span class="chip c-info">confidence: high</span><span class="chip c-info">CWE-665</span><span class="chip c-info">fix: days · migration</span><span class="chip" style="color:var(--green);background:var(--green-bg)">PoC verified ✓</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The L1 portal is the vault that holds bridged tokens and relays messages to Aztec. Its one-time "set up" function was copied from Aztec's <em>example</em> code, which never locks itself — so it can be "set up" again, by anyone, at any time, forever. The portal that real users are depositing into today has this flaw live.</p>
+    <p><strong>What an attacker would do.</strong> Call the set-up function again, pointing the portal at a fake messaging system they control, then withdraw the real tokens sitting in the vault to themselves — the portal happily releases them because it now trusts the attacker's fake "this withdrawal is approved" answer. They can also silently redirect every future deposit. We deployed nothing malicious — we simply re-pointed the <em>real</em> deployed contract in a fork test and it accepted it.</p>
+    <p><strong>The fix.</strong> Fork the portal to add a one-line "already set up? then stop" check, deploy-and-set-up in a single transaction, and have the deploy script read the values back to confirm. The current live portal can't be patched in place — it must be redeployed and the app pointed at the new one.</p>
+  </div>
+  <details><summary>Technical trace + verified PoC</summary>
+    <p><strong>Trace.</strong> <code>upstream/TokenPortal.sol:37-46</code> — <code>initialize()</code> has no owner check, no <code>initializer</code> modifier, no first-call guard, and re-derives <code>rollup/outbox/inbox</code> from the <em>caller-supplied</em> registry. Drain path: attacker fake-registry → fake-outbox, then <code>withdraw()</code> at <code>:146-148</code> does <code>outbox.consume()</code> (attacker no-op) → <code>underlying.safeTransfer(attacker, held)</code>. Live address pinned at <code>faucet/public/testnet-bridge.json:5</code>, UI-wired via <code>bridge-deployments.ts:18</code>. Deploy/init split across txs: <code>bridge-core/scripts/deploy-bridge-testnet.ts:113,191</code>.</p>
+    <p><strong>PoC (<span class="verified">VERIFIED PASSING</span>, <code>poc/PortalReinit.t.sol</code>, Sepolia fork on real bytecode):</strong></p>
+    <pre>live underlying (before): 0xA40A2FE147b7e96325d7c7D974B1f11C3ED82c68  (real AZLO USDC)
+[PASS] test_F001_attacker_reinitializes_the_LIVE_portal()
+F-001 CONFIRMED: live portal is permissionlessly re-initializable</pre>
+    <p><strong>Fix.</strong> Forked portal: <code>if (address(registry) != address(0)) revert AlreadyInitialized();</code> as line 1 of <code>initialize</code>; re-pin the keccak; atomic deploy+init; deploy-time read-back asserts. Migrate <code>0x9c41…11ea</code>.</p>
+  </details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip c-high">High</span><span class="fid">F-002</span><span class="ftitle">The L2 "minter" key is a permanent print-money backdoor into the L1 vault</span></div>
+  <div class="meta"><span class="chip c-info">Claude + Codex</span><span class="chip c-info">confidence: high</span><span class="chip c-info">CWE-266</span><span class="chip c-info">fix: days · redeploy</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> On Aztec, a "minter proxy" decides who is allowed to create the bridged token. Its owner can appoint new minters and mint unlimited tokens — and unlike the bridge contract, the proxy's <strong>owner can never be changed</strong> (it's a single account, frozen at deploy, with no way to hand it to a safer multisig).</p>
+    <p><strong>What an attacker would do.</strong> If that one owner key is ever stolen, the thief appoints themselves a minter, prints a huge amount of bridged tokens, then "exits" them back to L1 — which makes the L1 vault pay out real funds. The bridge's pause switch doesn't help, because the proxy is a separate contract the attacker calls directly.</p>
+    <p><strong>The fix.</strong> Give the proxy the same two-step ownership the bridge already has, move that owner to a multisig/timelock, and freeze the minter list to just the bridge after setup. At minimum, that key must never live on a hot wallet in a real deployment.</p>
+  </div>
+  <details><summary>Technical trace</summary>
+    <p><code>token_minter_proxy/main.nr:24-27</code> owner is <code>initialize</code>-only — verified <strong>no</strong> transfer/rotate function exists. <code>:55-58</code> <code>set_minter</code> authorizes anyone; <code>:68-88</code> mints arbitrary amounts → <code>token_bridge/main.nr:126-145</code> <code>exit_to_l1_*</code> → <code>TokenPortal.sol:146-148</code> releases L1 underlying. Deploy authorizes only the bridge today (<code>deploy-bridge-testnet.ts:185</code>) but nothing freezes the set. <strong>PoC sketch:</strong> TXE — owner <code>set_minter(attacker,true)</code> → mint → exit → L1 consume → assert portal balance dropped.</p>
+  </details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip c-high">High</span><span class="fid">F-003</span><span class="ftitle">The contract safety tests are never run automatically — a bad upgrade could freeze every deposit</span></div>
+  <div class="meta"><span class="chip c-info">Claude + Codex ×3</span><span class="chip c-info">confidence: high</span><span class="chip c-info">CWE-1059</span><span class="chip" style="color:var(--green);background:var(--green-bg)">fix: hours · CHEAPEST</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> For a deposit to work, L1 and L2 must compute the exact same "message fingerprint." The team wrote a clever test that checks both sides match — but that test, and all the other contract tests, <strong>are not part of CI</strong>. Today everything matches; the safety net just isn't plugged in.</p>
+    <p><strong>What gets triggered.</strong> The next time someone upgrades the Aztec libraries (routine maintenance), a fingerprint could drift. CI stays green, the change ships, and from that moment every deposit pulls the user's tokens on L1 but can never be claimed on L2 — funds frozen, with no automated warning.</p>
+    <p><strong>The fix.</strong> Add a small CI job that runs the Solidity (<code>forge test</code>) and Noir (<code>nargo test</code>) suites on any change to the bridge folders, and make it required. Also flip one test that currently only prints its result to actually assert it. Hours of work; biggest safety return in this report.</p>
+  </div>
+  <details><summary>Technical trace</summary>
+    <p>Verified: <code>rg 'forge test|nargo' .github/workflows</code> → none. <code>Quality / Status</code> = Biome + vue-tsc + bun audit only. Guards that never run: <code>bridge-aztec/keystone/src/main.nr</code>, <code>bridge-evm/test/ContentHash.t.sol</code>, <code>WitnessHash.t.sol</code> (only <code>console.log</code>, no <code>assertEq</code>), <code>SwapBridgeRouter.t.sol</code>. Content-hash equality matches byte-for-byte <em>today</em> (selectors <code>mint_to_public(bytes32,uint256)</code>/<code>mint_to_private(uint256)</code>/<code>withdraw(address,uint256,address)</code> vs the Noir vectors). Fix: paths-filtered <code>bridge-contracts.yml</code> running both suites + <code>verify:l1</code>, required check.</p>
+  </details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip c-med">Medium</span><span class="fid">F-004</span><span class="ftitle">The swap contract isn't locked into the user's signature — a compromised owner can skim slippage</span></div>
+  <div class="meta"><span class="chip c-info">Claude + Codex</span><span class="chip c-info">confidence: high</span><span class="chip c-info">CWE-829</span><span class="chip c-info">fix: hours + redeploy</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> When a user signs a fueled bridge, the signature pins the route but <em>not</em> which swap contract runs it — and the owner can swap that contract out instantly. Strong guards stop a malicious swap contract from touching the user's principal, but they don't force it to give a <em>fair</em> price — only the user's minimum.</p>
+    <p><strong>What an attacker would do.</strong> A compromised owner points the swap at a contract that returns exactly the user's worst-acceptable amount and pockets the difference — limited to the slippage band on the small fuel slice (~3%), never the main funds. Requires owner-key compromise, which is why it's Medium, not High.</p>
+    <p><strong>The fix.</strong> Add the swap-target address to the signed message. Then changing it instantly voids every outstanding signature — closing this cleanly. Or make the target immutable/timelocked.</p>
+  </div>
+  <details><summary>Technical trace</summary>
+    <p><code>SwapBridgeRouter.sol:142-146</code> instant <code>setSwapTarget</code>; witness (<code>:52-56</code>) omits the target; guards <code>:196/199/204</code> bound it to <code>(==fuelAmount in, ≥minFuelOutput out)</code> but not fair value. Fix: add <code>address swapTarget</code> as witness field #12 (+ JS mirror). <strong>PoC sketch:</strong> Foundry — malicious target pulls full <code>fuelAmount</code>, returns exactly <code>minFuelOutput</code>, keeps the rest; assert tx succeeds + target retains the skim.</p>
+  </details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip c-med">Medium</span><span class="fid">F-005</span><span class="ftitle">The reusable bridge helper silently strands gas on bad private-fuel input (app itself is safe)</span></div>
+  <div class="meta"><span class="chip c-info">Codex</span><span class="chip c-info">confidence: moderate</span><span class="chip c-info">CWE-20</span><span class="chip c-info">fix: hours</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The shared <code>runSwapBridge</code> library function trusts its caller to pass the right private-fuel secret and recipient. If a caller forgets the secret, it quietly invents a random one — which permanently strands the fuel (the claimer can never reconstruct it).</p>
+    <p><strong>What a user would trigger.</strong> The shipping faucet always passes the correct values, so end users are <em>not</em> affected. But any future integrator (or a refactor) that uses the helper directly with a private bridge and a missing secret loses the gas with no error.</p>
+    <p><strong>The fix.</strong> Make the helper derive the secret/recipient itself for private bridges and reject unsafe overrides — fail loudly before signing instead of stranding funds.</p>
+  </div>
+  <details><summary>Technical trace</summary>
+    <p><code>bridge-core/src/flows.ts:259</code> <code>const fuelSecret = p.fuelSecret ?? Fr.random()</code>; <code>fuelRecipient</code> passed through unchecked (<code>:276,:300</code>); invariant is comment-only (<code>:216-220</code>). Faucet compensates at <code>useDeposit.ts:530-543,646-650</code>. Fix: when <code>isPrivate</code>, require <code>claimer</code>+<code>bridgeSecretSalt</code>, derive both internally, reject overrides.</p>
+  </details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip c-low">Low</span><span class="fid">F-006</span><span class="ftitle">The swap contract is callable directly with zero slippage protection (self-harm/MEV)</span></div>
+  <div class="meta"><span class="chip c-info">Claude</span><span class="chip c-info">confidence: high</span><span class="chip c-info">CWE-668</span><span class="chip c-info">fix: hours</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> Anyone can call the swap contract directly (not just through the router) and set their minimum output to zero. The router path is safe (it pins the minimum in the signature); this only hurts someone who calls the raw contract carelessly.</p>
+    <p><strong>What a user would trigger.</strong> A direct caller with min=0 gets sandwiched by an MEV bot. It's self-inflicted — no protocol or other-user funds at risk — so it's Low.</p>
+    <p><strong>The fix.</strong> Restrict the swap to the router, or require a non-zero minimum.</p>
+  </div>
+  <details><summary>Technical trace</summary><p><code>UniswapFuelSwap.sol:88-115</code> permissionless; only bound is caller <code>minOutput</code>. The "hookless pool" route rule blocks hooks, not price.</p></details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip c-low">Low</span><span class="fid">F-007</span><span class="ftitle">Private claims are bearer-secret (whoever has the secret can claim) — accepted risk</span></div>
+  <div class="meta"><span class="chip c-info">Claude + Codex</span><span class="chip c-info">confidence: high</span><span class="chip c-info">accepted-risk</span><span class="chip c-info">fix: deferred</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> For private deposits, the recipient isn't baked into the message — whoever holds the secret can claim to any address. This is inherited from Aztec's design, and binding the recipient (the planned end-state) requires forking + redeploying the portal and bridge.</p>
+    <p><strong>What an attacker would do.</strong> Nothing, <em>as long as the secret never leaks</em> — it never appears on-chain, and the app encrypts it at rest. The one risk is off-chain: the secret is handed to the app in plaintext via a recovery hook; an integrator who logs or stores it unencrypted would let an observer claim first.</p>
+    <p><strong>The fix.</strong> Until recipient-binding ships, document loudly that the plaintext secret must never be logged or stored unsealed. (Recipient-commitment = weeks, deferred.)</p>
+  </div>
+  <details><summary>Technical trace</summary><p><code>token_bridge/main.nr:104-122</code> private content hash omits recipient; <code>TokenPortal.sol:90-112</code> carries only <code>Poseidon(secret)</code>. Leak seam: <code>flows.ts:46-64,263-268</code> <code>RecoveryHooks.onSecret</code>. Faucet seals at rest (<code>useDeposit.ts</code>), never logs.</p></details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip c-low">Low</span><span class="fid">F-008</span><span class="ftitle">Swap contract's sweep lacks the reentrancy guard the router's has</span></div>
+  <div class="meta"><span class="chip c-info">Claude</span><span class="chip c-info">confidence: high</span><span class="chip c-info">CWE-691</span><span class="chip c-info">fix: minutes</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The owner-only "sweep stuck tokens" function on the swap contract is missing the <code>nonReentrant</code> guard that the equivalent on the router has. Latent only — there's no accounted balance to exploit today.</p>
+    <p><strong>The fix.</strong> Add the modifier for consistency. One word.</p>
+  </div>
+  <details><summary>Technical trace</summary><p><code>UniswapFuelSwap.sol:290-303</code> (no guard) vs <code>SwapBridgeRouter.sol:287</code> (guarded).</p></details>
+</div>
+
+<div class="finding">
+  <div class="fhead"><span class="chip c-info">Info</span><span class="fid">INFO-1/2/3</span><span class="ftitle">Testnet-shaped shortcuts & a script glitch</span></div>
+  <div class="eli5">
+    <p><strong>INFO-1:</strong> the faucet token has permissionless minting + grants Permit2 infinite allowance for everyone — fine for a testnet faucet (Permit2 still needs a signature), but a <em>severe footgun</em> if copied to a real-value token. <strong>INFO-2:</strong> pausing the L2 bridge doesn't stop L1 deposits, so during an incident in-flight deposits sit unclaimable (recoverable on unpause; add a UI pre-check). <strong>INFO-3:</strong> a smoke-test script guesses the message index instead of reading the event, which can hang on concurrent deposits — script-only.</p>
+  </div>
+</div>
+
+<h2>What we tried and could NOT break (proof the core is solid)</h2>
+<p>These were actively attacked by both model families and cleared with reasoning — they are the reassuring half of the report:</p>
+<ul>
+  <li><strong>Permit2 replay / signature confusion</strong> — the signed message binds the router, chain, and Permit2 contract; the 11 fields are consistent across Solidity and JS; the fork test covers replay/expiry/tamper.</li>
+  <li><strong>Malicious swap contract stealing principal</strong> — three guards (floor, balance-delta, exact-consumption) fence it to the signed trade; over-delivery only strands the attacker's own funds.</li>
+  <li><strong>Weird tokens</strong> (fee-on-transfer/rebasing) — revert the whole transaction; self-harm only.</li>
+  <li><strong>Native-ETH swap reentrancy</strong> — guarded, callback locked to the pool manager, V4 reverts on unsettled balances.</li>
+  <li><strong>Minting bypass / pause evasion</strong> — only the bridge is a minter; the pause reverts the whole atomic transaction.</li>
+  <li><strong>Withdraw double-spend / front-running</strong> — nullifier + recipient baked into the message; front-running only delivers funds to the right person.</li>
+  <li><strong>JS payload / weak secret / zero slippage (the shipping app)</strong> — field order matches, secrets are cryptographically random, slippage floor enforced, secret sealed and never logged.</li>
+</ul>
+
+<h2>Cross-cutting themes</h2>
+<h3>The weak axis is setup &amp; authority, not logic</h3>
+<p>Every serious issue is about <em>who can change configuration after deploy</em> — not the swap/permit2/content-hash math, which is well-built. The remedy is the same throughout: bind it into the signature, lock it after first use, or move it off a hot key to a multisig and freeze it.</p>
+<h3>The safety checks exist but aren't plugged in</h3>
+<p>The team wrote the right guards (content-hash keystone, witness pin, router tests, verify-l1). They just don't run in CI, and one only prints instead of asserting. Wiring them up (F-003) is the single highest-leverage, lowest-cost action here.</p>
+<h3>Don't let testnet shortcuts graduate</h3>
+<p>The permissionless faucet token, the infinite allowance, the hot-key owners, and the re-initializable live portal are all reasonable for a testnet faucet — and all exactly the things that become incidents if the same artifacts/patterns are promoted to a value-bearing deployment. Gate the promotion.</p>
+
+<div class="footer">
+  <p>Engineering detail: <a href="report.md">report.md</a> · verification ledger: <a href="findings/verified.md">findings/verified.md</a> · consolidated: <a href="findings/verified.md">findings/</a> · raw cluster outputs: <a href="raw/">raw/</a> · verified PoC: <a href="poc/PortalReinit.t.sol">poc/PortalReinit.t.sol</a></p>
+  <p>Cross-model: Opus 4.8 (5 per-cluster auditors + coordinator/verifier) + Codex xhigh (2 per-chain passes). Convergence = the confidence signal. Artifacts uncommitted by design (exploit detail must not land in git before fixes). Run on a clean tree; the PoC was executed inside the Foundry project then moved out.</p>
+</div>
+
+</body>
+</html>

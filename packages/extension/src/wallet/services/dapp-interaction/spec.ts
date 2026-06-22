@@ -1,7 +1,7 @@
 import type { DappSession, DappMetadata } from "@/wallet/services/dapp-session/spec"
 import type { Operation } from "@/wallet/services/execution/spec"
 import type { LocalTxOrigin } from "@/wallet/services/transaction/spec"
-import type { CapabilityParams, CapabilityResult, ExecutionParams, ExecutionResult } from "@nulo/wallet-bridge"
+import type { CapabilityParams, CapabilityResult, ExecutionParams, ExecutionResult, IExecutionHooks } from "@nulo/wallet-bridge"
 
 /** Protocol-shape types (`ExecutionParams`, `ExecutionResult`,
  *  `CapabilityParams`, `CapabilityResult`, all `OperationRequest`
@@ -34,16 +34,45 @@ export type {
 	SendTransactionRequest,
 	SimulateTransactionRequest,
 	SimulateUtilityRequest,
-	SimulateViewsRequest,
 } from "@nulo/wallet-bridge"
 
 export const DAPP_INTERACTION_SERVICE_NAME = "dapp-interaction"
+
+/**
+ * Execution-side hooks carried across the popup handoff.
+ *
+ * The user-approval popup splits the request handling into two phases:
+ *
+ *   1) `interaction()` opens the popup, returns a `handle.promise` that
+ *      resolves with the final ExecutionResult.
+ *   2) After the user approves, the popup calls `approveInteraction(id, ...)`
+ *      which then dispatches `executeAndResolve` to actually run the operation.
+ *
+ * The hooks must survive that gap — they're set on the interaction record at
+ * step 1, picked up by `executeAndResolve` at step 2. Without this storage,
+ * the hooks would die at step 1's return and the post-popup execution path
+ * would never see them.
+ *
+ * Aliases wallet-bridge's `IExecutionHooks` (rather than re-declaring the same
+ * optional shape) so the field set stays in lockstep with the dispatcher's
+ * contract: a one-sided rename on either side is a build error, not a silent
+ * runtime no-op. `onExecutionEnqueued` fires once the request has enqueued on
+ * the execution mutex — see `ExecutionService.acquireExecutionSlot`.
+ */
+export type ExecutionHooks = IExecutionHooks
 
 export type DappInteraction = {
 	id: string
 	payload: ExecutionPayload | CapabilityPayload | DiscoveryPayload
 	handleId: string
 	cancellationToken: string
+	/**
+	 * Hooks bag carried across the popup handoff. `interaction()` sets it;
+	 * `approveInteraction → executeAndResolve` reads it back via storage
+	 * lookup. Undefined for popups that don't carry execution hooks (e.g.
+	 * verify, discover).
+	 */
+	hooks?: ExecutionHooks
 }
 
 export type ExecutionPayload = {

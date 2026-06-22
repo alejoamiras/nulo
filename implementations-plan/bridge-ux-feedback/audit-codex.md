@@ -1,0 +1,62 @@
+# Codex audit transcript — bridge-ux-feedback
+
+## Round 1 — dual audit + D5 arbitration (new session, xhigh)
+
+Verdict: **conditional approve** — all conditions folded (F6, F7, F8, F9). D5: **(a) stacked dual**. Outline: engine-narration.
+
+**Outline pick**
+
+Pick the primary engine-narration outline. The current truth already lives in the engine: `busy`, `attention`, `claimable`, `proven`, receipt waiting, and tx-identity gating are all in [useBridgeJournal.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:38), while the card is intentionally dumb in [BridgeJournalCard.vue](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeJournalCard.vue:24). Card-first would duplicate receipt polling, still miss unseal/sync internals, and can drift into a false “done” display.
+
+**D5 arbitration**
+
+Pick **(a) stacked dual balance**. It fixes the exact complaint against the current single derived `l2Balance` view in [BridgeForm.vue](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeForm.vue:51) without changing the shipped toggle model in [BridgeForm.vue](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeForm.vue:165). Two mono rows with active emphasis fit the existing brutalist panel and scan better than an inline hint.
+
+**Findings**
+
+- **High**: D3 overstates auto-clear safety. Deposit “verification” currently depends on `recordMessageConsumed()`, but that treats the whole `isMsgNotReady()` family as “consumed” in [useBridgeJournal.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:438); that is a heuristic, not a proof, and a forged `claimTxHash` on a public/not-yet-synced record can still false-complete. Fix: do **not** auto-clear deposit records until consumed-vs-not-synced is distinguishable, or scope auto-clear to withdraws first; this also means the parent retention dispute in [bridge-ux-trust/plan.md](/Users/alejoamiras/Projects/nulo/nulo-4/implementations-plan/bridge-ux-trust/plan.md:82) is not actually resolved yet.
+
+- **Medium**: D2’s 30-minute story is too confident. `claimReceiptStatus()` maps all lookup exceptions to `pending` in [useDeposit.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useDeposit.ts:103), and `withRecordLock()` drops duplicate retries while busy in [useBridgeJournal.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:287), so “RETRY forces a check now” is false unless the long wait is made abortable/backgrounded. Fix: separate transport failure from real pending, and only promise background checking/retry-now if the engine can cancel or yield.
+
+- **Medium**: D6/D7 need harder boundaries. Explorer helpers currently interpolate any non-empty string in [explorer.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/lib/explorer.ts:18), and the proposed “funds are safe” copy in [bridge-ux-feedback/plan.md](/Users/alejoamiras/Projects/nulo/nulo-4/implementations-plan/bridge-ux-feedback/plan.md:41) is too absolute for `unknown-outcome`/`tampered` states. Fix: link only strict hex hashes, enforce `https`, and phrase reassurance per state-specific guarantee.
+
+Assumption attack: “verified-only completion” in [bridge-ux-feedback/plan.md](/Users/alejoamiras/Projects/nulo/nulo-4/implementations-plan/bridge-ux-feedback/plan.md:95) is directionally true but stronger than the current verifier warrants; the “176 tests green” claim was not verifiable here because local Bun runs failed before assertions.
+
+conditional approve (with conditions: no deposit auto-clear until completion proof is stronger or scoped away from deposits; classify receipt transport failure separately from pending and make long waits/retry copy truthful; validate tx hashes and narrow reassurance copy to provable states)
+
+## Round 2 — FINAL fresh-context pass (new session)
+
+Verdict: **conditional approve** — all three conditions folded same-round (F12 provenance bit, F11 generation token, hide-only text sweep).
+
+- High: F9’s trust boundary is still underspecified. The plan says “in-session ordering is forge-resistant” for deposit auto-hide ([plan.md](/Users/alejoamiras/Projects/nulo/nulo-4/implementations-plan/bridge-ux-feedback/plan.md:26)), but the only concrete primitive in live code is `sessionLive`, a broad in-memory set populated at flow start and preserved across withdraw rekeys ([useBridgeJournal.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:165), [useDeposit.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useDeposit.ts:196), [useWithdraw.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useWithdraw.ts:182)). That is not the same thing as “this process observed claimable → sent claim → saw post-receipt disappearance.” Keep F9, but scope it to a narrower runtime provenance bit set only by the local claim-send path.
+
+- High: chunked re-entry needs explicit ownership/cancellation. Releasing `withRecordLock` between rounds ([useBridgeJournal.ts](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:288)) invites races between self-reentry, `resumeSessionWork`, and manual `RETRY`. Without a per-record generation token/abort flag, duplicate waiters can race `claimTxHash` clearing vs `completedAt`, double-toast, or resurrect runtime after discard. This is the main missing hardening in F8.
+
+- Medium: the plan still contradicts itself on the core security fold. D3/F3 say hide-only retention ([plan.md](/Users/alejoamiras/Projects/nulo/nulo-4/implementations-plan/bridge-ux-feedback/plan.md:24), [plan.md](/Users/alejoamiras/Projects/nulo/nulo-4/implementations-plan/bridge-ux-feedback/plan.md:89)), but P1/P2/manual-test text still says `auto-clear` / `discard` after grace ([plan.md](/Users/alejoamiras/Projects/nulo/nulo-4/implementations-plan/bridge-ux-feedback/plan.md:60), [plan.md](/Users/alejoamiras/Projects/nulo/nulo-4/implementations-plan/bridge-ux-feedback/plan.md:66), [plan.md](/Users/alejoamiras/Projects/nulo/nulo-4/implementations-plan/bridge-ux-feedback/plan.md:77), [plan.md](/Users/alejoamiras/Projects/nulo/nulo-4/implementations-plan/bridge-ux-feedback/plan.md:99)). That is implementation-dangerous, not cosmetic.
+
+- Medium: Assumptions still overstate what is “verified”: the “176-test suite is green” claim was not re-verified here, and the real attackable assumption is missing entirely: that the future auto-hide predicate is stronger than `sessionLive`.
+
+No F1-F8/F10 reversal otherwise. Three phases are fine, but keep toast/filter UI in P2; P1 should stay engine/runtime/provenance only.
+
+conditional approve (with conditions: narrow F9 to a local claim-send provenance bit rather than `sessionLive`; add per-record generation/cancellation for chunked receipt rounds; rewrite all leftover `auto-clear`/`discard` phase, test, and security text to match hide-only retention)
+
+## Round 3 — post-impl audit (NEW session, dir codex-70m46EIN)
+
+Initial verdict: **reject** — 1 blocking HIGH (cross-tab stale runners: tab-local generations + storage-event rehydration ⇒ a remote discard/completion could crash the blind rereads or double-complete) + 2 nits (soft-cap copy said RETRY while the button renders CLAIM; the toast watcher lacked a pin). All fixed in `dacedbf`: existence+idempotency guards on every completion write, bail on the post-send reread, copy aligned, toast pinned, two cross-tab pins added (remote discard via raw StorageEvent; remote completion stands + no local toast). Verdict-flip resume appended below.
+
+- HIGH: F11 ownership is only airtight within one tab. `inFlight` and `generations` are module-local state in [useBridgeJournal.ts:101](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:101), but the journal explicitly rehydrates writes from other tabs via `storage` in [useBridgeJournal.ts:170](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:170). That means tab B can `DISCARD` or re-run the same record while tab A is mid-round, and tab A will still trust stale ownership. The dangerous spots are the blind post-send reread in [useBridgeJournal.ts:487](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:487) and the completion reread in [useBridgeJournal.ts:528](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:528): after a remote discard they become `undefined` crash paths; after a remote completion they allow double-complete/double-toast. The only pin here is same-tab discard during `claimReceiptStatus` in [useBridgeJournal.test.ts:504](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.test.ts:504), not cross-tab or inter-round takeover.
+
+- No other HIGH/CRITICAL findings in the asked areas. F12 looks clean: deposit hiding is gated only by `localClaimProvenance` in [useBridgeJournal.ts:381](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:381), `hidden` is only set by the grace timer in [useBridgeJournal.ts:367](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:367), and it only affects render filtering in [useBridgeJournal.ts:658](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:658). The re-entry recursion is stack-safe and doesn’t starve other records; the only truth nit is that the soft-cap note says “RETRY” in [useBridgeJournal.ts:563](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:563) while the button still renders `CLAIM` because soft-cap is not an attention state in [BridgeJournalCard.vue:180](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeJournalCard.vue:180). Explorer-link hardening is sufficient for journal-controlled input via the strict hash regex in [explorer.ts:19](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/lib/explorer.ts:19); the remaining unpinned shipped behavior is the toast watcher in [BridgeJournal.vue:19](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeJournal.vue:19).
+
+reject (with blocking findings: F11 ownership/generation is only single-tab; cross-tab discard/retry can leave stale runners writing, double-completing, or crashing on undefined rereads)
+
+### Round 3b — verdict flip (resume, same session)
+
+All items confirmed (file:line). Final verdict: **approve**.
+
+- `completeDeposit`/`completeWithdraw` now no-op on `undefined`, missing current record, or already-completed current record before any patch/toast at [useBridgeJournal.ts:373](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:373) and [useBridgeJournal.ts:391](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:391).
+- The blind post-send reread now bails on disappearance instead of feeding a stale round at [useBridgeJournal.ts:495](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:495).
+- The new cross-tab pins are present and target the prior bug correctly: remote discard no crash/no completion at [useBridgeJournal.test.ts:596](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.test.ts:596), remote completion idempotent/no local toast at [useBridgeJournal.test.ts:618](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.test.ts:618).
+- The soft-cap copy now matches the rendered button at [useBridgeJournal.ts:573](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/composables/useBridgeJournal.ts:573), and the toast watcher is pinned for deposit/withdraw wording plus explorer links at [BridgeJournal.test.ts:37](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeJournal.test.ts:37) and [BridgeJournal.test.ts:51](/Users/alejoamiras/Projects/nulo/nulo-4/packages/faucet/src/components/BridgeJournal.test.ts:51).
+
+approve

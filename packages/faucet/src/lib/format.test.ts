@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { formatBigInt, trimAddress } from "./format"
+import { formatBigInt, parseAmount, trimAddress } from "./format"
 
 describe("formatBigInt", () => {
 	it("formats zero with the requested display places", () => {
@@ -32,10 +32,34 @@ describe("trimAddress", () => {
 	})
 
 	it("returns an em-dash for empty input", () => {
-		expect(trimAddress("")).toBe("—")
+		expect(trimAddress("")).toBe("-")
 	})
 
 	it("returns the original when shorter than head+tail+2", () => {
 		expect(trimAddress("0x123")).toBe("0x123")
+	})
+})
+
+describe("parseAmount (BigInt-safe fixed-decimal parsing)", () => {
+	it("parses whole + fractional inputs at 6 and 18 decimals", () => {
+		expect(parseAmount("100", 6)).toBe(100_000_000n)
+		expect(parseAmount("1.5", 18)).toBe(1_500_000_000_000_000_000n)
+		expect(parseAmount("0.000001", 6)).toBe(1n)
+	})
+
+	it("18-dec precision survives where Number() dies (>2^53 base units)", () => {
+		expect(parseAmount("9007199254.740993", 18)).toBe(9_007_199_254_740_993_000_000_000_000n)
+	})
+
+	it("excess fractional digits TRUNCATE (never round up a spend)", () => {
+		expect(parseAmount("1.9999999", 6)).toBe(1_999_999n)
+	})
+
+	it("junk, empty, and bare-dot inputs parse to 0n", () => {
+		expect(parseAmount("abc", 6)).toBe(0n)
+		expect(parseAmount("", 18)).toBe(0n)
+		expect(parseAmount(".", 18)).toBe(0n)
+		expect(parseAmount("1.2.3", 6)).toBe(0n)
+		expect(parseAmount("-5", 6)).toBe(0n)
 	})
 })

@@ -28,6 +28,7 @@ const isSidePanelEnabled = ref(defaultConfig.sidePanel)
 const isShowNodeNameEnabled = ref(defaultConfig.showNode)
 const isShowPopupFullscreen = ref(defaultConfig.showPopupFullscreen)
 const isAnimationsDisabled = ref(defaultConfig.disableAnimations)
+const isIncomingTransfersVisible = ref(defaultConfig.incomingTransfersVisible)
 const settings = {
 	theme: {
 		title: "",
@@ -53,6 +54,11 @@ const settings = {
 		title: "Disable animations",
 		description: "Minimize the use of animations",
 		model: isAnimationsDisabled,
+	},
+	incomingTransfersVisible: {
+		title: "Show incoming transfers",
+		description: "Hide if you run the same seed on multiple devices and don't want one device's outgoing to appear as incoming here",
+		model: isIncomingTransfersVisible,
 	},
 }
 

@@ -1,0 +1,6 @@
+{
+	"extends": "./tsconfig.json",
+	"include": ["src/**/*.ts", "scripts/**/*.ts"],
+	"comment": "deploy-sandbox.ts is excluded: it has a pre-existing aztec.js createAuthWit API-drift type error and is the deprecated local-sandbox path (no L1<->L2 sandbox; see memory aztec-no-sandbox-l1-l2-bridge).",
+	"exclude": ["scripts/deploy-sandbox.ts"]
+}

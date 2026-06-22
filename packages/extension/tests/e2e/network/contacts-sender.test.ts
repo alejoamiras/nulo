@@ -70,7 +70,7 @@ test.skipIf(!hasConfig)(
 
 		// Submit with toggle ON — both contact and sender are removed.
 		await clickByTestId(page, "confirm-submit")
-		await page.waitForFunction((sel: string) => !document.querySelector(sel), { timeout: 15_000 }, rowSelector)
+		await page.waitForFunction((sel: string) => !document.querySelector(sel), { timeout: 30_000 }, rowSelector)
 		// "Contact deleted" only fires after BOTH deleteContact AND deleteSender
 		// resolve in the confirm callback (pages/settings/contacts/index.vue).
 		// Without this wait, the next addContact races the in-flight deleteSender
@@ -131,7 +131,7 @@ test.skipIf(!hasConfig)(
 		expect(stateAfterFlip).toBe("false")
 
 		await clickByTestId(page, "confirm-submit")
-		await page.waitForFunction((sel: string) => !document.querySelector(sel), { timeout: 15_000 }, rowSelector)
+		await page.waitForFunction((sel: string) => !document.querySelector(sel), { timeout: 30_000 }, rowSelector)
 		await waitForToast(page, "Contact deleted", 30_000)
 
 		// Re-add the same address WITHOUT requesting sender. If the OFF branch
@@ -168,6 +168,21 @@ test.skipIf(!hasConfig)(
 		await page.waitForSelector('[data-testid="edit-contact-submit"]', { visible: true, timeout: 5_000 })
 
 		await replaceInputValue(page, 'input[placeholder*="0x15c4"]', ADDR_MIGRATE_NEW)
+
+		// Submit is gated on isLoadingSenderState while loadSenderState() awaits
+		// getSenders() (PXE init + read — transport-bounded but can run >10s under CI
+		// load right after a sender registration). Wait for the toggle to settle:
+		// data-toggle-disabled=false (loaded) AND data-toggle-active=true (proves the
+		// sender-ON scenario, not a load that defaulted false) before clicking, or
+		// clickByTestId races the still-disabled submit. Mirrors the readiness wait below.
+		await page.waitForFunction(
+			() => {
+				const el = document.querySelector('[data-testid="edit-contact-sender-toggle"]')
+				return el?.getAttribute("data-toggle-disabled") === "false" && el?.getAttribute("data-toggle-active") === "true"
+			},
+			{ timeout: 30_000, polling: 100 },
+		)
+
 		await clickByTestId(page, "edit-contact-submit")
 
 		// Wait for the submit's post-mutation toast — this only fires after

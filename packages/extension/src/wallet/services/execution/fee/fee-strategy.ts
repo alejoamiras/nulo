@@ -14,14 +14,11 @@
  * Shared helpers + the dispatch map live here. Per-strategy impls live
  * in `./{fee-juice,fee-juice-with-claim,fpc,embedded}-strategy.ts`.
  *
- * ## Return shape (minimal-diff)
+ * ## Return shape
  *
- * Strategies return the 8-tuple
- * `[txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod]`.
- * Callers destructure all 8. Returning a narrower `FeeEstimateResult`
- * would force callers to re-fetch `node` / `pxe` / `account`, so the
- * tuple shape is preserved verbatim. The `ExecutionCoordinator` can
- * migrate to a typed bundle when it owns the post-send flush point.
+ * Strategies return a `FeeEstimate` — the `BuiltStandardTx` bundle plus
+ * the `feePaymentMethod` the strategy resolved. Named fields are the
+ * contract; the old positional 8-tuple was a silent-transposition hazard.
  *
  * ## Action array mutation (preserved)
  *
@@ -45,33 +42,31 @@ import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { TxExecutionRequest, TxSimulationResult } from "@aztec/stdlib/tx"
 import type { ILogger } from "@/wallet/logger"
-import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { FpcService } from "@/wallet/services/fpc/service"
-import type { Network } from "@/wallet/services/network/service"
 import type { IPXE } from "@/wallet/services/pxe/client"
 import { StepContent, type TaskService, type WrappedTask } from "@/wallet/services/task/service"
-import type { TxCall } from "@/wallet/services/transaction/service"
-import type { Fr } from "@aztec/foundation/curves/bn254"
 import type { Action, FeeOptions, FeeSettings } from "../spec"
-import type { TxRequestBuilder } from "../tx-request-builder"
+import type { BuiltStandardTx, TxRequestBuilder } from "../tx-request-builder"
 
-/** Default multiplier for maxFeesPerGas (backwards-compatible). Matches
- *  the value in the pre-split facade (service.ts `DEFAULT_FEE_MULTIPLIER`). */
-export const DEFAULT_FEE_MULTIPLIER = 2
+/** Default multiplier for `maxFeesPerGas`. Production default is `2`.
+ *  Overridable at build time via `VITE_NULO_FEE_MULTIPLIER` so e2e CI can
+ *  widen the envelope when devnet base-fees drift on loaded GHA runners
+ *  (a real cross-branch flake class — confirmed reproducible against
+ *  `transfers.test.ts` and `concurrent-sendtx-confirm.test.ts` on a
+ *  non-PR commit). Parsed once at module load; invalid / unset → 2. */
+const VITE_FEE_MULTIPLIER_RAW = (import.meta.env?.VITE_NULO_FEE_MULTIPLIER ?? "") as string
+const VITE_FEE_MULTIPLIER_PARSED = Number.parseFloat(VITE_FEE_MULTIPLIER_RAW)
+export const DEFAULT_FEE_MULTIPLIER: number =
+	Number.isFinite(VITE_FEE_MULTIPLIER_PARSED) && VITE_FEE_MULTIPLIER_PARSED >= 1 ? VITE_FEE_MULTIPLIER_PARSED : 2
 
-/** Tuple returned by every strategy. Matches the pre-split
- *  `buildAndEstimateTxRequest` return verbatim. */
-export type FeeEstimateResult = [
-	TxExecutionRequest,
-	AztecNode,
-	IPXE,
-	IAccountContract,
-	Network,
-	Fr,
-	TxCall[],
-	AccountFeePaymentMethodOptions,
-]
+/** Result returned by every strategy: the built tx plus the payment
+ *  method the strategy resolved. Field names — not positions — are the
+ *  contract; same-typed slots (gas/teardown/fee) made the old tuple a
+ *  silent-transposition hazard. */
+export interface FeeEstimate extends BuiltStandardTx {
+	feePaymentMethod: AccountFeePaymentMethodOptions
+}
 
 /** Simulate callback — facade owns the TaskService wrapping so that
  *  strategies stay decoupled from task bookkeeping. */
@@ -99,7 +94,6 @@ export type FeeStrategyContext = {
 	/** From op.fee?.gasPadding, defaulted to 1.05 by caller. */
 	gasPadding: number
 	parentTask?: WrappedTask
-	deps: FeeStrategyDeps
 }
 
 /** Dependencies injected once at construction. */
@@ -114,7 +108,7 @@ export type FeeStrategyDeps = {
 /** Strategy contract. Each impl owns one fee kind end-to-end. */
 export interface FeeStrategy {
 	readonly kind: FeeSettings["paymentMethod"]["kind"]
-	buildAndEstimate(ctx: FeeStrategyContext): Promise<FeeEstimateResult>
+	buildAndEstimate(ctx: FeeStrategyContext): Promise<FeeEstimate>
 }
 
 /** Override gas limits on a pre-built tx request from a pending FeeOptions
@@ -165,6 +159,13 @@ export async function finalizeGasLimits(
 	if (!maxFeesPerGas) {
 		if (customLimits?.maxFeesPerGas) {
 			maxFeesPerGas = new GasFees(BigInt(customLimits.maxFeesPerGas.feePerDaGas), BigInt(customLimits.maxFeesPerGas.feePerL2Gas))
+		} else if (customLimits?.embeddedFeePayment) {
+			// Embedded-FPC payments are pre-capped by `applyEmbeddedFpcGasCap` (to the dApp-supplied fee or
+			// `getCurrentMinFees()`), and the FPC asserts `gasLimits·maxFeesPerGas <= budget`. Refetching +
+			// re-multiplying here would commit a DIFFERENT ceiling than the one the FPC budget was reasoned
+			// against — a post-simulation drift that can push the committed cost past the budgeted amount.
+			// Reuse the already-committed cap verbatim. Non-embedded paths keep the refetch + general default.
+			maxFeesPerGas = txRequest.txContext.gasSettings.maxFeesPerGas
 		} else {
 			maxFeesPerGas = await node.getCurrentMinFees()
 			maxFeesPerGas = maxFeesPerGas.mul(multiplier)

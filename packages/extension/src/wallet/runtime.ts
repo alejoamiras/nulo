@@ -26,6 +26,8 @@ import { ContactService } from "./services/contact/service"
 import { DappInteractionService } from "./services/dapp-interaction/service"
 import { DappSessionService } from "./services/dapp-session/service"
 import { ExecutionService } from "./services/execution/service"
+import { E2E_PROVERLESS } from "@/e2e/config"
+import { ChromeStorageProofGate } from "@/e2e/chrome-storage-proof-gate"
 import { FpcService } from "./services/fpc/service"
 import { LogViewerService } from "./services/log-viewer/service"
 import { LoggerService } from "./services/logger/service"
@@ -40,6 +42,7 @@ import { TaskService } from "./services/task/service"
 import { TokenService } from "./services/token/service"
 import { TokenBalanceService } from "./services/token-balance/service"
 import { TransactionService } from "./services/transaction/service"
+import { IncomingTransferService } from "./services/incoming-transfer/service"
 import { WindowManager } from "./services/window-manager/window-manager"
 import { initWalletSdkHandler } from "./services/wallet-sdk/background"
 import { runStorageMigration } from "./storage/migrate"
@@ -114,7 +117,16 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		services.add(new ContactService(logger, browserApi))
 		services.add(new DappInteractionService(logger, windowManager))
 		services.add(new DappSessionService(logger))
-		services.add(new ExecutionService(logger))
+		// E2E_PROVERLESS injects a chrome.storage-backed proof gate into the SW
+		// ExecutionCoordinator (the SW has chrome.storage; the offscreen does not).
+		// `E2E_PROVERLESS` is a statically-false constant in prod builds, so this
+		// dead branch — and the otherwise-unused ChromeStorageProofGate import —
+		// is tree-shaken out (verified: prod dist contains neither the gate class
+		// nor the nulo:e2e:proof-gate key). NOTE: a dynamic `import()` here was
+		// tried and REJECTED — rollup emits a code-split chunk for it that SHIPS
+		// even when the call is dead, leaking the gate into prod dist. The
+		// _build-extension.yml negative grep is the enforcement that caught that.
+		services.add(new ExecutionService(logger, E2E_PROVERLESS ? new ChromeStorageProofGate() : undefined))
 		services.add(new FpcService(logger))
 		services.add(new LogViewerService(logger))
 		services.add(new LoggerService(logger))
@@ -126,6 +138,7 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		services.add(new TokenService(logger))
 		services.add(new TokenBalanceService(logger))
 		services.add(new TransactionService(logger))
+		services.add(new IncomingTransferService(logger))
 		services.add(new PasskeyService(logger, windowManager))
 
 		await services.start()

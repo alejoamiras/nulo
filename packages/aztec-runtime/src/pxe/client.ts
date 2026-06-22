@@ -185,6 +185,15 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 		return await BlockHeader.schema.parseAsync(result)
 	}
 
+	/** Chain-derived UTC seconds for a specific L2 block. Returns
+	 *  `undefined` when the node can't resolve it. Activity-feed consumers
+	 *  use this to sort/render chronologically across remove+re-add cycles. */
+	public async getBlockTimestamp(network: NetworkInfo, blockNumber: number): Promise<number | undefined> {
+		const result = await this.request("getBlockTimestamp", network, blockNumber)
+		if (result === undefined || result === null) return undefined
+		return Number(result)
+	}
+
 	/** Dispose the offscreen runtime for `(profileId, chainId)` and delete
 	 *  its IndexedDB. SW-side cascade entry-point for `NetworkService.purgeChain`. */
 	public async clearChainState(profileId: string, chainId: number): Promise<void> {

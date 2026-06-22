@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
  * transition under controlled SDK responses.
  *
  * The pure helper `extractGrantedAccounts` is unit-tested directly without
- * any mocking — it's import-stable.
+ * any mocking - it's import-stable.
  */
 
 const mockEstablishSecureChannel = vi.fn()
@@ -28,7 +28,7 @@ async function* yieldOne() {
 }
 
 async function* yieldNone(): AsyncGenerator<typeof mockProvider, void, unknown> {
-	// no providers — empty discovery
+	// no providers - empty discovery
 }
 
 const mockGetAvailableWallets = vi.fn(() => ({
@@ -56,11 +56,29 @@ vi.mock("@aztec/aztec.js/node", () => ({
 
 vi.mock("@/contracts/deployments", () => ({
 	DRIPPER: { toString: () => "0x1" },
-	USDC: { toString: () => "0x2" },
-	ETH: { toString: () => "0x3" },
+	NULO: { toString: () => "0x2" },
+	OLUN: { toString: () => "0x3" },
 	rebuildDripperInstance: vi.fn(async () => ({ address: { toString: () => "0x1" } })),
-	rebuildUsdcInstance: vi.fn(async () => ({ address: { toString: () => "0x2" } })),
-	rebuildEthInstance: vi.fn(async () => ({ address: { toString: () => "0x3" } })),
+	rebuildNuloInstance: vi.fn(async () => ({ address: { toString: () => "0x2" } })),
+	rebuildOlunInstance: vi.fn(async () => ({ address: { toString: () => "0x3" } })),
+}))
+
+vi.mock("@/contracts/bridge-deployments", () => ({
+	BRIDGE_FUEL: undefined,
+	L1_USDC: "0xl1token",
+	BRIDGE_TOKEN_SYMBOL: "USDC",
+	BRIDGE_TOKEN_DECIMALS: 6,
+	BRIDGE: { toString: () => "0x4" },
+	BRIDGE_TOKEN: { toString: () => "0x5" },
+	BRIDGE_PROXY: { toString: () => "0x6" },
+	rebuildBridgeInstance: vi.fn(async () => ({ address: { toString: () => "0x4" } })),
+	rebuildBridgeTokenInstance: vi.fn(async () => ({ address: { toString: () => "0x5" } })),
+	rebuildBridgeProxyInstance: vi.fn(async () => ({ address: { toString: () => "0x6" } })),
+}))
+
+vi.mock("@nulo/bridge-core/artifacts", () => ({
+	bridgeProxyArtifact: { name: "BridgeProxy" },
+	tokenBridgeArtifact: { name: "TokenBridge" },
 }))
 
 vi.mock("@defi-wonderland/aztec-standards/dist/src/artifacts/Dripper.js", () => ({
@@ -150,7 +168,8 @@ describe("useWalletConnection", () => {
 		expect(c.status.value).toBe("connected")
 		expect(c.selectedAccount.value).toBe("0xa1b2c3")
 		expect(c.accounts.value).toEqual([{ address: "0xa1b2c3", alias: "Main" }])
-		expect(wallet.registerContract).toHaveBeenCalledTimes(3)
+		// 6 = the combined faucet + bridge set: dripper, usdc, eth, proxy, token, bridge.
+		expect(wallet.registerContract).toHaveBeenCalledTimes(6)
 	})
 
 	it("capability rejection lands in 'error' state with the capability-rejected category", async () => {

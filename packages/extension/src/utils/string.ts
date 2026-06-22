@@ -8,6 +8,18 @@ export const trimAddress = (address: string, start = 8, end = 4): string => {
 	return `${address.substring(0, start)}..${address.substring(address.length - end)}`
 }
 
+/**
+ * Initials for an entity name: first letters of the first two words, or the
+ * first 1–2 characters of a single word, uppercased. Empty/whitespace → "".
+ * Shared by contact `abbr` derivation and the account avatar so the two agree.
+ */
+export function getInitials(name: string): string {
+	const words = (name || "").trim().split(/\s+/).filter(Boolean)
+	if (words.length === 0) return ""
+	if (words.length === 1) return words[0].substring(0, Math.min(words[0].length, 2)).toUpperCase()
+	return (words[0][0] + words[1][0]).toUpperCase()
+}
+
 export function isValidHex(hex: string, length = 64): boolean {
 	const regex = new RegExp(`^0x[a-fA-F0-9]{${length}}$`)
 	return regex.test(hex)

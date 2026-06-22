@@ -245,5 +245,20 @@ describe("ContactService (port-migrated)", () => {
 			const all = await contactService.getContacts()
 			expect(all).toHaveLength(2)
 		})
+
+		test("(R3) a failed item stores the normalized error MESSAGE string, not the raw error", async () => {
+			// Before Q14, contact stored the raw `err` here while every other
+			// service stored `.message`. R3 normalized it through `toRestoreError`,
+			// so a failed restore now carries the message STRING (object → string
+			// is a ratified behavior change).
+			await contactService.addContact("Alice", "0xa")
+			const backup = await contactService.backup()
+			vi.spyOn(api.storage.local, "set").mockRejectedValueOnce(new Error("disk full"))
+
+			const restored = await contactService.restore(backup)
+			expect(restored).toHaveLength(1)
+			expect(restored[0].restoreError).toBe("disk full")
+			expect(typeof restored[0].restoreError).toBe("string")
+		})
 	})
 })

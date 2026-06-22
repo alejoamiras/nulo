@@ -10,6 +10,8 @@ import { randomBytes } from "node:crypto"
 import { rmSync } from "node:fs"
 
 import { createAztecNodeClient, waitForNode } from "@aztec/aztec.js/node"
+import { TxHash } from "@aztec/stdlib/tx"
+import { GasFees } from "@aztec/stdlib/gas"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Fr } from "@aztec/aztec.js/fields"
 import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
@@ -90,6 +92,18 @@ export async function createTestWallet(url = LOCAL_NODE_URL) {
 	return { wallet, accounts, node, cleanup }
 }
 
+/**
+ * Generous `maxFeesPerGas` ceiling for SponsoredFPC-paid setup txs. The SDK otherwise pins
+ * maxFeesPerGas to the ESTIMATION-time gas fee with no headroom, so an L2-fee spike between
+ * estimate and inclusion rejects the tx. maxFeesPerGas is only a ceiling and the FPC pays the
+ * ACTUAL network fee, so a high cap can't overpay — it just stops spike-rejection flakes.
+ * 5.0 raised the sandbox L2 base fee ~4 orders of magnitude (observed inclusion feePerL2Gas
+ * ≈9.24e11 vs 4.2.0's ~1.1e8), so the old 1e11 cap fell BELOW the live fee and rejected every
+ * setup tx with "maxFeesPerGas.feePerL2Gas must be >= gasFees.feePerL2Gas". 1e13 restores ~10x
+ * headroom while staying under the SponsoredFPC fee-juice balance (cap × gasLimit). See lessons/phase-6.md.
+ */
+const E2E_FEE_GAS = { maxFeesPerGas: new GasFees(10n ** 13n, 10n ** 13n) }
+
 /** Deploy a Token contract with a minter address. Returns the token contract address. */
 export async function deployTestToken(
 	wallet: InstanceType<typeof EmbeddedWallet>,
@@ -102,7 +116,7 @@ export async function deployTestToken(
 		"TST",
 		18,
 		minterAddress,
-	).send({ fee: feeOptions, from: minterAddress })
+	).send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: minterAddress })
 
 	return contract.address.toString()
 }
@@ -144,31 +158,59 @@ export async function mintPublicTokens(
 	const token = await TokenContract.at(AztecAddress.fromString(tokenAddress), wallet)
 	await token.methods
 		.mint_to_public(AztecAddress.fromString(toAddress), amount)
-		.send({ fee: feeOptions, from: AztecAddress.fromString(minterAddress) })
+		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: AztecAddress.fromString(minterAddress) })
 
 	// Verify the mint is visible by reading the balance from the test wallet's PXE.
 	// This ensures the state has settled before the extension tries to read it.
 	const to = AztecAddress.fromString(toAddress)
-	const balance = await token.methods.balance_of_public(to).simulate({ from: AztecAddress.fromString(minterAddress) })
+	const balance = await token.methods
+		.balance_of_public(to)
+		.simulate({ from: AztecAddress.fromString(minterAddress), fee: { gasSettings: E2E_FEE_GAS } })
 	console.log(`[mintPublicTokens] Verified on-chain public balance: ${balance}`)
 	if (balance === 0n) {
 		throw new Error(`Mint appeared to succeed but balance_of_public returned 0 for ${toAddress}`)
 	}
 }
 
-/** Mint private tokens to an address. */
+/** Mint private tokens to an address.
+ *
+ *  `mint_to_private` is a private execution path, so the test wallet's
+ *  PXE must know the token contract (instance + artifact) before it can
+ *  simulate the call. createTestWallet returns a fresh wallet whose PXE
+ *  hasn't been told about the deployed token — `TokenContract.at(...)`
+ *  alone doesn't register. Fetch the deployed instance from the node
+ *  + register with the wallet's PXE before simulating the mint.
+ *  `mintPublicTokens` doesn't need this because `mint_to_public` is a
+ *  public call that goes straight to the node.
+ */
 export async function mintPrivateTokens(
 	wallet: InstanceType<typeof EmbeddedWallet>,
+	node: ReturnType<typeof createAztecNodeClient>,
 	tokenAddress: string,
 	toAddress: string,
 	amount: bigint,
 	minterAddress: string,
 	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
 ): Promise<void> {
-	const token = await TokenContract.at(AztecAddress.fromString(tokenAddress), wallet)
+	const addr = AztecAddress.fromString(tokenAddress)
+	const instance = await node.getContract(addr)
+	if (!instance) throw new Error(`Token instance not found at node for ${tokenAddress}`)
+	try {
+		await wallet.registerContract(instance, TokenContract.artifact)
+	} catch {
+		// Already registered — ignore.
+	}
+
+	const token = await TokenContract.at(addr, wallet)
+	// `wait: { timeout: 120 }` blocks until the tx is mined; without it the
+	// returned SentTx isn't a thenable and the outer `await` resolves
+	// immediately (mintPublicTokens hides this via a follow-up
+	// `balance_of_public.simulate` that implicitly forces a chain query —
+	// no such barrier for the private path). Worth fixing here rather than
+	// at the call site so future callers don't repeat the trap.
 	await token.methods
 		.mint_to_private(AztecAddress.fromString(toAddress), amount)
-		.send({ fee: feeOptions, from: AztecAddress.fromString(minterAddress) })
+		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: AztecAddress.fromString(minterAddress), wait: { timeout: 120 } })
 }
 
 // ── Fee Juice L1→L2 Bridge ────────────────────────────────────────────
@@ -199,28 +241,52 @@ export async function bridgeFeeJuice(node: ReturnType<typeof createAztecNodeClie
 	return claim
 }
 
-/** Wait for an L1→L2 message to be synced on the Aztec node, then wait 2 more blocks. */
+/** Wait until a bridged L1→L2 message is CLAIMABLE.
+ *
+ *  5.0 readiness is NOT "the message is in a checkpoint" — it's "the node/PXE anchor block sits in
+ *  a checkpoint >= the message's checkpoint" (the claim builds a membership witness against the
+ *  anchor; otherwise `getL1ToL2MessageMembershipWitness` returns nothing and the claim throws
+ *  "No L1 to L2 message found"). 5.0 only mints an L2 block when txs are pending (no empty blocks,
+ *  and `SEQ_MIN_TX_PER_BLOCK=0` does not change that), so after the bridge the anchor stalls below
+ *  the message's checkpoint forever. `forceBlock` submits one cheap tx to advance the chain past
+ *  it. Callers without a handy tx fall back to best-effort. See lessons/phase-6.md. */
 export async function waitForL1ToL2Message(
 	node: ReturnType<typeof createAztecNodeClient>,
 	messageHash: string,
+	forceBlock?: () => Promise<unknown>,
 	timeoutMs = 90_000,
 ): Promise<void> {
+	const hash = Fr.fromString(messageHash)
 	const start = Date.now()
+	let msgCheckpoint: bigint | undefined
 	while (Date.now() - start < timeoutMs) {
-		const synced = await node.isL1ToL2MessageSynced(Fr.fromString(messageHash))
-		if (synced) {
-			console.log(`[waitForL1ToL2Message] Message synced after ${Date.now() - start}ms`)
+		const cp = await node.getL1ToL2MessageCheckpoint(hash)
+		if (cp !== undefined) {
+			msgCheckpoint = BigInt(cp)
+			console.log(`[waitForL1ToL2Message] message in checkpoint ${msgCheckpoint} after ${Date.now() - start}ms`)
 			break
 		}
 		await new Promise((r) => setTimeout(r, 2_000))
 	}
-	// Wait 2 more L2 blocks for the message tree to update
-	const currentBlock = await node.getBlockNumber()
-	const target = currentBlock + 2
-	while ((await node.getBlockNumber()) < target) {
-		await new Promise((r) => setTimeout(r, 2_000))
+	if (msgCheckpoint === undefined) throw new Error(`[waitForL1ToL2Message] ${messageHash} not checkpointed within ${timeoutMs}ms`)
+
+	// 5.0 mints no empty L2 blocks (SEQ_MIN_TX_PER_BLOCK=0 does not change that), so after the
+	// bridge the node/PXE anchor stalls below the message's checkpoint and the claim's membership
+	// witness can't be built ("No L1 to L2 message found"). The node-admin `mineBlock` is not
+	// RPC-exposed, so callers pass `forceBlock` — a cheap sponsored tx — which we run until the
+	// anchor's checkpoint covers the message (the real claimability condition).
+	while (Date.now() - start < timeoutMs) {
+		const latest = await node.getBlockData("latest")
+		if (latest && BigInt(latest.checkpointNumber) >= msgCheckpoint) {
+			console.log(
+				`[waitForL1ToL2Message] claimable after ${Date.now() - start}ms: anchor checkpoint ${latest.checkpointNumber} >= ${msgCheckpoint}`,
+			)
+			return
+		}
+		if (forceBlock) await forceBlock().catch((err) => console.warn(`[waitForL1ToL2Message] forceBlock failed: ${err}`))
+		await new Promise((r) => setTimeout(r, 1_500))
 	}
-	console.log("[waitForL1ToL2Message] +2 L2 blocks confirmed")
+	console.warn(`[waitForL1ToL2Message] anchor did not reach checkpoint ${msgCheckpoint} within ${timeoutMs}ms — proceeding best-effort`)
 }
 
 /** Claim bridged FeeJuice on L2. Uses SponsoredFPC to pay for the claim tx itself.
@@ -237,7 +303,7 @@ export async function claimFeeJuice(
 	const feeJuice = await Contract.at(ProtocolContractAddress.FeeJuice, FeeJuiceArtifact, wallet)
 	await feeJuice.methods
 		.claim(AztecAddress.fromString(toAddress), claim.claimAmount, claim.claimSecret, claim.messageLeafIndex)
-		.send({ fee: feeOptions, from: fromAddress })
+		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: fromAddress })
 	console.log(`[claimFeeJuice] Claimed ${claim.claimAmount} FJ for ${toAddress}`)
 }
 
@@ -279,6 +345,10 @@ export async function setupPreFundedAccount(
 	opts: {
 		publicAmount?: bigint
 		privateAmount?: bigint
+		/** A cheap sponsored state-changing tx that mints one L2 block. 5.0 mints no empty blocks,
+		 *  so FJ-claim readiness (anchor checkpoint >= message checkpoint) only advances when a real
+		 *  tx is sent. Provided by callers that have a token to transfer/mint. */
+		forceBlock?: () => Promise<unknown>
 	} = {},
 ): Promise<PreFundedAccount> {
 	// Mirrors Nulo's derivation exactly. Constants verified against source-of-truth:
@@ -331,16 +401,18 @@ export async function setupPreFundedAccount(
 	const deployMethod = await accountManager.getDeployMethod()
 	await deployMethod.send({
 		from: NO_FROM,
-		fee: { paymentMethod: sponsoredFee.paymentMethod },
+		fee: { paymentMethod: sponsoredFee.paymentMethod, gasSettings: E2E_FEE_GAS },
 		wait: { timeout: 120 },
 	})
 	logger.info(`Script-side account deployed: ${accountManager.address.toString()}`)
-	const derivedWallet = await accountManager.getAccount()
+	// getAccount() registers the derived account in the wallet (side effect); the value itself
+	// is unused — the subsequent mint targets `expectedAddress` (== the derived account address).
+	const _derivedWallet = await accountManager.getAccount()
 
 	// Step 4 — Public FJ: bridge + claim. Recipient-bound (sender-agnostic), so we
 	// reuse the existing helpers with the test sandbox wallet for fee payment.
 	const publicClaim = await bridgeFeeJuice(node, expectedAddress.toString(), publicAmount)
-	await waitForL1ToL2Message(node, publicClaim.messageHash.toString())
+	await waitForL1ToL2Message(node, publicClaim.messageHash.toString(), opts.forceBlock)
 	await claimFeeJuice(wallet, expectedAddress.toString(), feePayerAddress, publicClaim, sponsoredFee)
 	logger.info(`Public FJ claimed: amount=${publicAmount}`)
 
@@ -352,16 +424,21 @@ export async function setupPreFundedAccount(
 	const { bridgeForMint } = await import("./aztec-private-fpc-bridge")
 
 	// PrivateFPC instance salt MUST be Fr.zero() to match Nulo's auto-discovery
-	// (fpc/service.ts:104-110: salt=Fr.zero(), deployer=AztecAddress.ZERO).
-	// Mirrors @wonderland's registerPrivateContract (utils/deploy.ts) inline.
-	// `register` calls `wallet.registerContract` which lives on the parent
-	// EmbeddedWallet, not on per-account AccountWithSecretKey.
+	// (fpc/service.ts:91-94: salt=Fr.zero(), deployer=AztecAddress.ZERO). 5.0 rejects the old
+	// `deploy().register()` path here ("deployer is not yet locked" — a ZERO deployer isn't
+	// locked, and 5.0 moved salt/deployer to construction-time options). Compute + register the
+	// instance the SAME way the wallet does, which both sidesteps that and guarantees the address
+	// matches the wallet's auto-discovery.
 	// biome-ignore lint/suspicious/noExplicitAny: aztec-stdlib instance mismatch between @wonderland's pinned version and Nulo's
-	const fpc = await PrivateFPCContract.deploy(wallet as any).register({
-		contractAddressSalt: Fr.ZERO,
-		skipInitialization: true,
+	const fpcArtifact = (PrivateFPCContract as any).artifact
+	const fpcInstance = await getContractInstanceFromInstantiationParams(fpcArtifact, {
+		salt: Fr.ZERO,
 		deployer: AztecAddress.ZERO,
 	})
+	// biome-ignore lint/suspicious/noExplicitAny: see above
+	await (wallet as any).registerContract(fpcInstance, fpcArtifact)
+	// biome-ignore lint/suspicious/noExplicitAny: see above
+	const fpc = await PrivateFPCContract.at(fpcInstance.address, wallet as any)
 	logger.info(`PrivateFPC registered: ${fpc.address.toString()}`)
 
 	// Bridge salt must be RANDOM per invocation (avoids nullifier collision on reruns).
@@ -372,16 +449,9 @@ export async function setupPreFundedAccount(
 		expectedAddress,
 		bridgeSalt,
 		privateAmount,
-		// produceL2Block: send a no-op via SponsoredFPC to advance the chain
-		async () => {
-			const { Contract } = await import("@aztec/aztec.js/contracts")
-			const { FeeJuiceArtifact } = await import("@aztec/protocol-contracts/fee-juice")
-			const feeJuice = await Contract.at(ProtocolContractAddress.FeeJuice, FeeJuiceArtifact, wallet)
-			await feeJuice.methods
-				.balance_of_public(expectedAddress)
-				.simulate({ from: feePayerAddress })
-				.catch(() => undefined)
-		},
+		// produceL2Block: a REAL state-changing tx to advance the chain. The predecessor used
+		// `.simulate()` (read-only — mines nothing), which never advanced the anchor on 5.0.
+		opts.forceBlock ?? (async () => {}),
 	)
 	logger.info(`PrivateFPC bridge ready: leafIndex=${leafIndex.toString()}`)
 
@@ -393,7 +463,7 @@ export async function setupPreFundedAccount(
 		const { FeeJuiceArtifact } = await import("@aztec/protocol-contracts/fee-juice")
 		const feeJuice = await Contract.at(ProtocolContractAddress.FeeJuice, FeeJuiceArtifact, wallet)
 		await feeJuice.methods.claim(fpc.address, privateAmount, bridgeSecret, leafIndex).send({
-			fee: { paymentMethod: sponsoredFee.paymentMethod },
+			fee: { paymentMethod: sponsoredFee.paymentMethod, gasSettings: E2E_FEE_GAS },
 			from: feePayerAddress,
 			wait: { timeout: 120 },
 		})
@@ -405,7 +475,7 @@ export async function setupPreFundedAccount(
 	await fpc.methods.mint(privateAmount, bridgeSalt, leafIndex).send({
 		from: expectedAddress,
 		additionalScopes: [fpc.address],
-		fee: { paymentMethod: sponsoredFee.paymentMethod },
+		fee: { paymentMethod: sponsoredFee.paymentMethod, gasSettings: E2E_FEE_GAS },
 		wait: { timeout: 120 },
 	})
 	logger.info("PrivateFPC.mint succeeded")
@@ -413,7 +483,9 @@ export async function setupPreFundedAccount(
 	// Sanity assertion: balance landed before fixture returns.
 	// `balance_of(...).simulate(...)` returns `{ result: bigint }` per @wonderland's
 	// canonical pattern (private.test.ts:101-103).
-	const { result: privateBal } = await fpc.methods.balance_of(expectedAddress).simulate({ from: expectedAddress })
+	const { result: privateBal } = await fpc.methods
+		.balance_of(expectedAddress)
+		.simulate({ from: expectedAddress, fee: { gasSettings: E2E_FEE_GAS } })
 	if (typeof privateBal !== "bigint" || privateBal === 0n) {
 		throw new Error(`PrivateFPC.balance_of returned ${privateBal} after mint — claim/mint flow broken`)
 	}
@@ -421,4 +493,53 @@ export async function setupPreFundedAccount(
 
 	const masterBase64 = Buffer.from(master.toBuffer()).toString("base64")
 	return { masterBase64, accountAddress: expectedAddress }
+}
+
+/**
+ * Convenience wrapper for pre-minting public tokens to a dApp-granted account
+ * before exercising the wallet's sendTx flow in popup-shape tests. Without this,
+ * the wallet's simulate step fails ("not enough balance"), the journal advances
+ * straight to `failed`, and the `tx-awaiting-card` never reaches an active
+ * stage — which breaks waitForDappExecuteWorked(). cancel-mid-prove.test.ts
+ * uses an identical inline block; this helper consolidates it for the 6 tests
+ * restructured in implementations-plan/journal-stage-restructure/.
+ */
+export async function mintPublicTokensForAccount(
+	aztecConfig: AztecTestConfig,
+	accountAddress: string,
+	amount = 100n * 10n ** 18n,
+): Promise<void> {
+	const { wallet, cleanup } = await createTestWallet(aztecConfig.nodeUrl)
+	try {
+		const feeOptions = await createSponsoredFeeOptions(wallet)
+		await mintPublicTokens(wallet, aztecConfig.tokenAddress, accountAddress, amount, aztecConfig.minterAddress, feeOptions)
+	} finally {
+		await cleanup()
+	}
+}
+
+/** Poll the node until a tx (by hash string, as returned to the dApp) is
+ *  MINED successfully. Needed when a flow's NEXT step reads on-chain state
+ *  the tx wrote (e.g. a public-authwit grant's `set_authorized` must be
+ *  mined before a consume's public simulation can see it) — the wallet's
+ *  `send_transaction` path resolves the dApp promise at SUBMIT, not at
+ *  mine. Throws on revert/drop so failures attribute to the right tx. */
+export async function waitForTxMined(aztecConfig: AztecTestConfig, txHash: string, timeoutMs = 120_000): Promise<void> {
+	const node = createAztecNodeClient(aztecConfig.nodeUrl)
+	const deadline = Date.now() + timeoutMs
+	for (;;) {
+		const receipt = await node.getTxReceipt(TxHash.fromString(txHash)).catch(() => undefined)
+		const status = receipt ? String(receipt.status) : undefined
+		// Aztec terminal-success statuses: "success" (mined) and "finalized"
+		// / "proven" (block settled). Any of them means the tx's public
+		// effects (e.g. a set_authorized write) are live and readable.
+		if (status === "success" || status === "finalized" || status === "proven") return
+		if (status === "app_logic_reverted" || status === "teardown_reverted" || status === "dropped" || status === "reverted") {
+			throw new Error(`waitForTxMined: tx ${txHash} terminal as "${status}"`)
+		}
+		if (Date.now() > deadline) {
+			throw new Error(`waitForTxMined: timeout waiting for ${txHash} (last status: ${status ?? "pending"})`)
+		}
+		await new Promise((r) => setTimeout(r, 1_000))
+	}
 }

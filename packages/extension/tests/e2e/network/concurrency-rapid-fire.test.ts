@@ -15,7 +15,7 @@ const hasConfig = aztecConfig !== undefined
  */
 test.skipIf(!hasConfig)(
 	"concurrency-rapid-fire — 5 concurrent silent calls settle FIFO",
-	{ timeout: 60_000, retry: 1 },
+	{ timeout: 60_000 },
 	async ({ dappConnectedExtension }) => {
 		const page = dappConnectedExtension.playgroundPage
 		const seqBefore = await snapshotResultSeq(page)

@@ -286,6 +286,13 @@ describe("NewTokenPopup", () => {
 		expect(w.emitted("onClose")).toBeTruthy()
 	})
 
+	// NOTE: auto-trust on user-add was moved out of NewTokenPopup into
+	// IncomingTransferService.onTokenAdded so the in-popup AND dApp
+	// register_token paths both auto-trust uniformly. Regression coverage
+	// for "no Pending emit after onTokenAdded" lives at
+	// service.scenarios.test.ts → (LR14 onTokenAdded auto-trusts before
+	// any scan can read unknown).
+
 	test("multi-account: events for non-active accounts are ignored; only the active-account TB resolves the wait", async () => {
 		const w = await mountAndOpen()
 		tokenServiceMock.parseTokenInterface.mockResolvedValueOnce({ isComplete: true, contract: validHex, chainId: 1 })

@@ -93,7 +93,7 @@ const passwordHint = computed(() => {
 				<button
 					type="button"
 					@click="isDecryptionPasswordType = !isDecryptionPasswordType"
-					:class="$style.visibility_btn"
+					tabindex="-1" :class="$style.visibility_btn"
 					:aria-label="isDecryptionPasswordType ? 'Show password' : 'Hide password'"
 				>
 					<MaterialIcon
@@ -121,7 +121,7 @@ const passwordHint = computed(() => {
 					<button
 						type="button"
 						@click="isPasswordType = !isPasswordType"
-						:class="$style.visibility_btn"
+						tabindex="-1" :class="$style.visibility_btn"
 						:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
 					>
 						<MaterialIcon

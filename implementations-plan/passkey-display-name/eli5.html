@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — passkey display-name branding</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem 4rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 0.4rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .sub { color: #666; font-size: 0.95rem; margin-top: 0; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    .priv { background: #fdeeec; padding: 0.8rem 1.1rem; border-left: 3px solid #c2261b; border-radius: 0 4px 4px 0; margin: 1.2rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.9rem; }
+    th, td { border: 1px solid #e6e6ea; padding: 0.45rem 0.6rem; text-align: left; }
+    th { background: #f6f6f6; }
+    .mock { background:#fbfbfd; }
+  </style>
+</head>
+<body>
+  <h1>Passkey display-name branding</h1>
+  <p class="sub">/blueprint <strong>light</strong> · extension-only · awaiting your approval</p>
+
+  <p>When you make a passkey wallet, the passkey shows up in iCloud Keychain (and Google/1Password) under an ugly machine label like <code>profile-a3f29b14</code>. This plan changes that label to something you'll actually recognize: <strong><code>nulo-{your-profile-name}-{id}</code></strong> — e.g. <code>nulo-alice-a3f29b14</code>. It's a cosmetic label change only: it does <em>not</em> touch your keys, your wallet address, or anything that can spend money. Existing passkeys keep their old label; only new ones get the nice name.</p>
+
+  <pre class="mock">iCloud Keychain ▸ nulo.sh
+
+   before:   profile-a3f29b14
+   after:    nulo-alice-a3f29b14
+                   └ "Alice" = your profile name (cleaned up)</pre>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>light.</strong> Rubric — all six risk dimensions scored LOW: no novelty (the passkey flow is fully mapped), tiny blast radius (only the label of new passkeys), reversible (it's a code constant), zero migration (no key/address change — verified), no new external coupling, low security sensitivity (one privacy trade-off, surfaced and accepted). Single package, bounded, low-risk → light. Codex reviewed it and gave <strong>conditional approve</strong>; all conditions are now folded in.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1 — Build the "name cleaner"</h3>
+    <p>A small standalone function that turns a raw profile name into a safe, tidy label piece: lowercases it, removes emoji / accents / weird invisible characters, caps the length, and — if nothing usable is left (e.g. an all-emoji name) — falls back to a generic <code>nulo-profile-{id}</code>. Kept separate from the passkey code so every messy-input case is easy to test.</p>
+    <p class="muted">Proves itself by: a focused unit-test file covering spaces, <code>Élodie→elodie</code>, emoji, invisible/right-to-left characters, length cap, and empty/non-Latin fallback — plus lint &amp; typecheck, all green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2 — Carry the name to the passkey &amp; flip the label</h3>
+    <p>Pass the profile name down through <em>both</em> registration paths (the normal in-app one and a secondary background one codex caught) to the single place that builds the passkey, and set the visible name to <code>nulo-{name}-{id}</code>. The name is made a <em>required</em> field on purpose, so the TypeScript compiler refuses to build until every path is wired — no path can be silently missed.</p>
+    <p class="muted">Proves itself by: the typechecker forcing every path to pass the name; a regression test proving <em>only</em> the label changed (the crypto fields are byte-identical); the full <code>audit:vue</code> suite green; then you eyeballing a freshly-made passkey in iCloud Keychain.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>A "passkey" stores two human-readable labels when it's created (<code>user.name</code> and <code>user.displayName</code>). Your password manager shows one of them. Today the wallet sets them to <code>profile-&lt;random-id&gt;</code> because, at the moment the passkey is made, the code simply never received your chosen profile name — it only had the internal id. The whole change is really just "hand the name to that one spot, after tidying it up."</p>
+
+  <div class="priv">
+    <strong>The one honest trade-off (you already accepted this).</strong> Putting your profile name in the passkey means that name <em>syncs to Apple/Google's cloud</em> along with the passkey. For a privacy wallet that's a real (if small) change from today's leak-nothing <code>profile-&lt;id&gt;</code>. We reduce it by only ever sending a cleaned-up slug (lowercase, plain characters), and the fallback for empty/non-Latin names contains no personal text. You chose the <code>nulo-{name}-{id}</code> format knowing this.
+  </div>
+
+  <h2>Open questions (please confirm)</h2>
+  <ul>
+    <li><strong>O1 — non-Latin names.</strong> Default: a name in CJK/Arabic/Cyrillic (e.g. "山田") can't be ASCII-slugged, so it falls back to <code>nulo-profile-{id}</code> (no name shown). Alternative: keep Unicode so it shows <code>nulo-山田-{id}</code>. Default is ASCII (safer, predictable). OK?</li>
+    <li><strong>O2 — two tiny defaults codex asked me to surface.</strong> (a) The "friendly" <code>displayName</code> is set to the <em>same</em> <code>nulo-{slug}-{id}</code> as the main name, so every manager shows the same thing (vs. showing a raw "Alice"). (b) The name part is capped at <strong>24 characters</strong>. Keep both, or change?</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm <strong>scope</strong>: extension-only (the faucet has no passkeys), new registrations only, no UI-copy changes.</li>
+      <li>Confirm <strong>tier</strong>: light.</li>
+      <li>Confirm <strong>format</strong>: <code>nulo-{name}-{id}</code> (already chosen).</li>
+      <li>Answer <strong>O1</strong> (ASCII fallback vs Unicode) and <strong>O2</strong> (displayName = same slug; 24-char cap).</li>
+      <li>Confirm <strong>validation</strong>: unit + lint/typecheck + a manual real-authenticator smoke (you do the smoke; automated passkey e2e is blocked — see PRF-NON-PORTABLE.md).</li>
+      <li>Reply <strong>approve</strong> / <strong>conditional approve (conditions: …)</strong> / <strong>reject (blocking: …)</strong>.</li>
+    </ul>
+    <p class="muted">No <code>/harden</code> needed — cosmetic label change, no trust-boundary/secret/CI surface.</p>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>One drives the autonomous implementation session. <code>/goal</code> survives <code>claude --resume</code> and stops when a condition holds; <code>/loop</code> re-fires on an interval. This change is small and its completion is fully visible in the transcript (tests + phase ✓), so <code>/goal</code> fits best.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended: /goal</h3>
+      <pre><code>/goal Both phases in implementations-plan/passkey-display-name/plan.md are marked ✓ (the per-phase headers in the file), each backed by its validation gate reported passing in the transcript — Phase 1: passkey-label.test.ts green incl. the Élodie→nulo-elodie case, plus `bun run --cwd packages/extension lint` + `typecheck`; Phase 2: `bun run --cwd packages/extension typecheck` green (proving `name` threads to PATH A + the PATH B acquireRecovery→createForNewProfile→createKey chain), `bunx vitest run src/wallet/utils/` green, and `bun run audit:vue` green. For each phase the agent printed `LESSONS_FILE=implementations-plan/passkey-display-name/lessons/phase-N.md`. `/code-review max --fix` applied + committed separately. codex post-impl audit done with any high/critical addressed. The manual iCloud-Keychain smoke is left for the human and the checklist is surfaced in the transcript (do NOT claim it passed). Hard limits: extension package only; never change RP_ID / PRF input / HKDF salt; testnet only.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop</h3>
+    <pre><code>/loop 15m Drive implementations-plan/passkey-display-name forward. Never idle. Each firing: read plan.md + lessons/; `git status`; take the next pending phase; after each edit run `bun run --cwd packages/extension lint` + the phase's vitest gate; commit→push; mark ✓ only when the phase's full validation gate passes + print LESSONS_FILE=…/lessons/phase-N.md. Stuck or a real decision? `/codex xhigh`, decide, log it. Hard limits: extension package only; never touch RP_ID / PRF input / HKDF salt; never expand scope beyond the passkey display label. All phases ✓ → `/code-review max --fix` → codex post-impl audit → surface the manual-smoke checklist for me → stop.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

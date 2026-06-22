@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Plan ELI5 — audit-fixes-v2 (slim)</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1rem 0; padding: 0.85rem 1rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .phase.bug { border-left-color: #d04040; }
+    .phase.ux { border-left-color: #4080d0; }
+    .phase.copy { border-left-color: #50a050; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .pill { display: inline-block; padding: 2px 8px; background: #eee; border-radius: 3px; font-size: 0.8rem; color: #555; }
+    .deferred { padding: 1rem; background: #fff8e0; border-left: 3px solid #d0a040; margin: 1.5rem 0; }
+  </style>
+</head>
+<body>
+  <h1>audit-fixes-v2 (slim) — what we're shipping</h1>
+
+  <p>After 4 codex Rejects on increasingly complex versions of this plan, scope was SPLIT. This PR ships the user-QA-flagged bugs + the audit findings that are independently safe + tactical (good-enough, non-bulletproof) fixes for C1 and C2. The full trust-state-machine concurrency surgery gets a separate planning session.</p>
+
+  <h2>The 13 phases</h2>
+
+  <div class="phase copy"><h3>P1 — Onboarding copy fixes (A1–A4)</h3>
+  <p>Strip em-dashes in <code>fees.vue</code>. Reword private fee juice as a separate asset (not "fee juice held privately"). Add that fee juice is L2-only (only obtainable via burning $AZTEC on L1). Add a "not transferable today" note. <span class="pill">copy only · zero risk</span></p></div>
+
+  <div class="phase copy"><h3>P2 — "Claim Fee Juice" label (D1)</h3>
+  <p>Today the <code>claim_and_end_setup</code> method shows as "Claim And End Setup" — robotic. Add a friendly label. One-line allowlist addition. <span class="pill">trivial</span></p></div>
+
+  <div class="phase bug"><h3>P3 — Trust-popup a11y fix</h3>
+  <p>The expand-toggle on the incoming-trust popup advertises a control that points at a node that doesn't exist when collapsed. Fix: keep the controlled node in the DOM (hidden via v-show) AND only advertise the control when expanded. <span class="pill">a11y</span></p></div>
+
+  <div class="phase bug"><h3>P4a — C2 failing repro test</h3>
+  <p>You closed the extension popup window and the trust prompt never reopened. Before we write the fix, we capture a deterministic failing test that reproduces this. The test pre-seeds a pending contract, opens + closes + reopens the popup, asserts the prompt re-fires. P8 makes it pass. <span class="pill">test-first · this fails on dev today</span></p></div>
+
+  <div class="phase bug"><h3>P5 — Account-filter the late-delete path</h3>
+  <p>Two of your accounts (A and B) could receive notes for the same contract. If account A sends a transaction whose hash matches an incoming record for B, today's code would delete B's record by mistake. Adds a filter so only A's records get deleted. Also adds a per-hash guard against double-delete on concurrent events. <span class="pill">codex Med #2</span></p></div>
+
+  <div class="phase bug"><h3>P6 — Popup visibility toggle race + listener leak</h3>
+  <p>The Settings toggle has a race: if you flip OFF→ON in the first few ms after popup opens, the replay path silently drops pending prompts. Fix: register the listener inside <code>onMounted</code> after the setting reads from disk, AND deregister on unmount so listeners don't accumulate. <span class="pill">codex Med #1</span></p></div>
+
+  <div class="phase bug"><h3>P7 — Tactical C1: auto-trust on manual token-add</h3>
+  <p>When you manually add a token, the trust prompt shouldn't fire on the first incoming note — you implicitly trusted it by adding. Fix: after <code>addToken</code> succeeds in NewTokenPopup, immediately call <code>setTrustAllow</code>. Race window with the scheduler's 30s poll is small (~100ms vs 30s). dApp-driven <code>register_token</code> stays gated. <span class="pill">tactical · ~100ms race window vs 30s poll</span></p></div>
+
+  <div class="phase bug"><h3>P8 — Tactical C2: one-shot replay on triple-ready</h3>
+  <p>P4a told us the bug: when the popup mounts, the active profile/network/account triple isn't populated yet. The replay-on-connect listener fires too early and silently returns. Fix: install a watcher that fires replay when the triple becomes ready. Keyed on the triple itself, so a profile switch re-fires. <span class="pill">tactical · stale-resolve risk under rapid switching</span></p></div>
+
+  <div class="phase ux"><h3>P9 — Failure-category helper for the detail page</h3>
+  <p>Pure helper that maps <code>JobError.kind</code> to a user-friendly category ("Stopped before broadcast" / "Interrupted mid-flight" / "Network error" / etc.). Feeds P10. <span class="pill">helper</span></p></div>
+
+  <div class="phase ux"><h3>P10 — Brutalist restyle of failed/cancelled detail page</h3>
+  <p>The cancelled/failed detail page doesn't match the brutalist design of the rest of the app. You said the confirmed-transfer / confirmed-transaction detail pages look great — DO NOT touch those. We restructure only the failed/cancelled page to mirror the same hierarchy + brutalist tokens. The developer-mode raw error block stays verbatim — you said it's good. <span class="pill">visual · largest LoC</span></p></div>
+
+  <div class="phase bug"><h3>P11 — Profile-switch token list (and more)</h3>
+  <p>When you switch from Profile A to Profile B and press Send, you see "no available tokens" until you click into a token detail. Root cause: 10+ pages snapshot the token list once on mount and never re-fetch when the profile changes. Fix: a new <code>useIdentityScopedFetch</code> composable that watches the triple AND has a sequence counter to ignore stale resolves on rapid switches. Applied to all 10+ consumers. <span class="pill">bug fix · multi-file refactor</span></p></div>
+
+  <div class="phase"><h3>P12 — Test pin backfill</h3>
+  <p>Closes three test gaps codex flagged from the prior arc: <code>onAccountAdded → hydrateSchedulers</code>, <code>RecentActivityView.connect()</code> on mount, OFF→ON config replay (already added in P6).</p></div>
+
+  <div class="phase"><h3>P13 — Manual QA + lessons + rollback matrix</h3>
+  <p>Walk through every F1–F4 surface to confirm no regression. Walk through every v2 phase to confirm fix. Document rollback units. Note residual risks for the deferred trust-state-machine work.</p></div>
+
+  <div class="deferred">
+  <h2>What we're NOT doing here (deferred to a separate arc)</h2>
+  <ul>
+    <li>The full reconcileTrust mutex with proper unlocked-helper split</li>
+    <li>The scanContract trustState caching race (reveal-on-Allow-mid-scan)</li>
+    <li>The scanContract end-of-scan orphan sweep</li>
+    <li>Reconciling self-notes on journal <code>submitting.txHash</code> (the codex post-impl High from prior arc)</li>
+    <li>Cross-profile address collision fix (same mnemonic in two profiles)</li>
+    <li>The full <code>setUserAddTrustHandler</code> architecture with startup-ordering guard</li>
+    <li>Proper popup-reopen fix with AbortController + cancellation on rapid profile switch</li>
+    <li>Perf optimization for the 8–10 storage reads per scan</li>
+  </ul>
+  <p>These need a focused planning session with research subagents on the concurrency model, possibly an architectural rethink (event-sourced trust log vs. mutex-based). Not safe to retrofit here.</p>
+  </div>
+
+  <h2>The non-obvious decisions</h2>
+
+  <h3>Why "tactical" C1 and C2 instead of full design</h3>
+  <p>P7 puts <code>setTrustAllow</code> inside NewTokenPopup directly, racing with the scheduler. P8 uses a triple-keyed idempotency flag instead of AbortController. The full versions kept getting rejected by codex for subtle concurrency bugs. The tactical versions close the user-visible QA scenarios (popup-on-already-added-token, popup-never-reopens) with documented residual races.</p>
+
+  <h3>Why <code>useIdentityScopedFetch</code> has a sequence counter</h3>
+  <p>Without it, rapid profile switches (A→B→A) could let an old fetch resolve LAST and overwrite the latest profile's data. The counter rejects stale resolves.</p>
+
+  <h3>Why P10 doesn't touch the confirmed tx detail page</h3>
+  <p>You said it looks great. Don't fix what isn't broken. We mirror its structure for the failed/cancelled page without modifying the source.</p>
+
+  <h2>Open questions to resolve before squash</h2>
+  <ul>
+    <li>P1 em-dash strategy — in-place substitute or sentence rewrite?</li>
+    <li>P9 categorical copy table — does each label match your mental model?</li>
+    <li>P10 brutalist restructure — screenshot review pre-squash.</li>
+  </ul>
+
+  <section class="seeds">
+    <h2>Implementation seeds</h2>
+
+    <h3>/goal (primary)</h3>
+    <pre><code>/goal All 13 phases marked ✓ in implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/plan.md; per phase the agent has printed `LESSONS_FILE=implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/lessons/phase-N.md` in the transcript; `/code-review max --fix` complete with findings applied and committed; codex post-impl audit complete with high/critical findings addressed (re-audit if Reject); `bun run typecheck`, `bun run lint`, and `bunx vitest run` (run from packages/extension) all report exit 0 in the transcript.</code></pre>
+
+    <h3>/loop (fallback)</h3>
+    <pre><code>/loop Each turn, in priority order:
+1. **Inspect**: read implementations-plan/onboarding-fees-history-arc/audit-fixes-v2/plan.md and lessons/ as source-of-truth for phase status; run `git status` and `git log --oneline -5`. If a PR exists, `gh pr view --json statusCheckRollup`. If pushed without PR but CI is configured, `gh run list --branch $(git branch --show-current) --limit 1 --json status,databaseId`.
+2. **CI in flight on HEAD SHA?** Stream with `gh run watch <run-id>` for up to 10 minutes.
+3. **Failed check?** Triage and fix; call `/codex xhigh` for non-trivial decisions. Commit (small, conventional). After 5 failures on the same step, stop and reassess.
+4. **In-flight phase green?** Mark ✓, file lessons log, print `LESSONS_FILE=...`, advance.
+5. **Nothing in flight?** Pick the next pending phase and execute (edit → `bun run lint` → `bunx vitest run` → commit → push).
+6. **All phases ✓?** `/code-review max --fix` → skim → commit → `/codex xhigh` post-impl audit with adversarial/security ask → address findings → if Reject again, diff against prior audit + surface. Stop.
+
+Discipline: repo artifacts authoritative. Call codex on architecture decisions. Never merge to main/release. Stop when all phases ✓.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="audit-codex.md">round 1 codex</a> · <a href="audit-opus.md">round 1 opus</a> · <a href="audit-codex-final.md">final v2 codex (reject)</a> · <a href="audit-codex-final-v3.md">v3 codex (reject; split decision)</a> · <a href="./lessons/">Lessons</a></p>
+</body>
+</html>

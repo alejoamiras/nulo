@@ -85,6 +85,57 @@ describe("JournalReaper.reap", () => {
 		expect(after?.error?.kind).toBe("stuck_proving")
 	})
 
+	test("reaps a queued record past its 10-min grace window with kind=stuck_queued", async () => {
+		const rec = await service.createOperation({
+			...VALID_INPUT,
+			kind: "dapp_execute",
+			origin: "dapp",
+			sessionId: "session-1",
+			initialStage: { stage: "queued" },
+		})
+		// `queued` grace = 10 min; jump 11 min forward.
+		const reaper = new JournalReaper(service, api.alarms, logger, () => rec.updatedAt + 11 * 60_000)
+		await reaper.reap()
+
+		const after = await service.getOperation(rec.id)
+		expect(after?.progress.stage).toBe("failed")
+		expect(after?.error?.kind).toBe("stuck_queued")
+		expect(after?.terminalAt).not.toBeNull()
+	})
+
+	test("leaves a fresh queued record alone (within grace window)", async () => {
+		const rec = await service.createOperation({
+			...VALID_INPUT,
+			kind: "dapp_execute",
+			origin: "dapp",
+			sessionId: "session-1",
+			initialStage: { stage: "queued" },
+		})
+		// Within grace — 5 min < 10 min.
+		const reaper = new JournalReaper(service, api.alarms, logger, () => rec.updatedAt + 5 * 60_000)
+		await reaper.reap()
+
+		const after = await service.getOperation(rec.id)
+		expect(after?.progress.stage).toBe("queued")
+	})
+
+	test("boot sweep marks a queued record as failed (unconditional, no grace) using stuck_queued kind", async () => {
+		const rec = await service.createOperation({
+			...VALID_INPUT,
+			kind: "dapp_execute",
+			origin: "dapp",
+			sessionId: "session-1",
+			initialStage: { stage: "queued" },
+		})
+		// Fresh: not past grace, but boot sweep is unconditional.
+		const reaper = new JournalReaper(service, api.alarms, logger, () => Date.now())
+		await reaper.reap({ unconditional: true })
+
+		const after = await service.getOperation(rec.id)
+		expect(after?.progress.stage).toBe("failed")
+		expect(after?.error?.kind).toBe("stuck_queued")
+	})
+
 	test("leaves terminal records alone (succeeded / failed / cancelled)", async () => {
 		const recA = await service.createOperation(VALID_INPUT)
 		await service.transitionOperation(recA.id, { stage: "simulating" })

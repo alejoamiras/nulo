@@ -23,28 +23,27 @@
  *   - `"DefaultEntrypoint requires exactly 1 call, got ${n}"`
  *   - `"DefaultEntrypoint only supports private functions"`
  *
- * ## `trackAuthwit` stays inside `buildStandard`
+ * ## Public authwits: collected here, recorded POST-send
  *
- * `authRegistryService.trackAuthwit` is called inline during assembly.
- * Moving it to after-send (cleaner architecturally) requires
- * `ExecutionCoordinator` to own the post-send flush point; until then,
- * keep the inline call.
+ * `buildStandard` is PURE w.r.t. the authwit index — it does not write to
+ * `authRegistryService`. Each `add_public_authwit` action is collected into
+ * `pendingPublicAuthwits` (returned on the result) and a per-build cap is
+ * enforced. The post-send tail (`dapp-send-executor` → `recordPendingAuthwits`)
+ * writes them as pending rows, reconciled by the tx's on-chain outcome. This is
+ * what keeps a fee-estimate or a rejected approval from leaking a tracked grant.
  *
- * ## Return-shape parity
+ * ## Return shape
  *
- * `buildStandard` returns the 7-tuple
- * `[txRequest, node, pxe, account, network, nonce, txCalls]`.
- * `buildNoFrom` returns the 6-tuple
- * `[txRequest, node, pxe, account, network, txCalls]` — no nonce, since
- * `DefaultEntrypoint` doesn't use one. These tuples feed the
- * fee-strategy branches.
+ * `buildStandard` returns a `BuiltStandardTx`; `buildNoFrom` returns a
+ * `BuiltNoFromTx` (same fields minus `nonce`, since `DefaultEntrypoint`
+ * doesn't use one). These feed the fee-strategy branches.
  */
 
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { type AbiType, encodeArguments, FunctionCall, FunctionSelector, FunctionType } from "@aztec/stdlib/abi"
 import { AuthWitness } from "@aztec/stdlib/auth-witness"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { GasSettings } from "@aztec/stdlib/gas"
+import { Gas, GasSettings } from "@aztec/stdlib/gas"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { Capsule, ExecutionPayload, HashedValues, TxContext, TxExecutionRequest } from "@aztec/stdlib/tx"
 import type { ILogger } from "@/wallet/logger"
@@ -52,6 +51,7 @@ import { LogLevel } from "@/wallet/logger"
 import type { AccountService } from "@/wallet/services/account/service"
 import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { IAccountContract, PartialGasSettingsRPC } from "@nulo/aztec-runtime/account"
+import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { networkInfoFrom, type NetworkService, type Network } from "@/wallet/services/network/service"
 import type { ProfileService } from "@/wallet/services/profile/service"
@@ -60,13 +60,28 @@ import { StepContent, type TaskService, type WrappedTask } from "@/wallet/servic
 import type { TxCall } from "@/wallet/services/transaction/service"
 import { getAuthRegistryAddress, getSetAuthorizedFn, getSetAuthorizedSelector } from "@/wallet/utils/auth-registry"
 import type { AuthwitDiscoverer } from "./authwit-discoverer"
-import type { ContractResolver } from "./contract-resolver"
-import type { Action, AztecSendTxOperation } from "./spec"
+import { type ContractResolver, findFunctionByName, findFunctionBySelector } from "./contract-resolver"
+import type { Action, AuthwitContent, AztecSendTxOperation } from "./spec"
 
 const LOG_SOURCE = "TxRequestBuilder"
 
-export type StandardTxRequestResult = [TxExecutionRequest, AztecNode, IPXE, IAccountContract, Network, Fr, TxCall[]]
-export type NoFromTxRequestResult = [TxExecutionRequest, AztecNode, IPXE, IAccountContract, Network, TxCall[]]
+export interface BuiltStandardTx {
+	txRequest: TxExecutionRequest
+	node: AztecNode
+	pxe: IPXE
+	account: IAccountContract
+	network: Network
+	nonce: Fr
+	txCalls: TxCall[]
+	/** Public authwits this build will write on-chain (`set_authorized`). Recording
+	 *  is DEFERRED to the post-send tail (pending → reconcile) so a pure build —
+	 *  during fee estimate, or a rejected approval — records nothing. NO_FROM builds
+	 *  carry an empty array (they emit no `add_public_authwit`). */
+	pendingPublicAuthwits: { account: string; hash: string; content: AuthwitContent }[]
+}
+
+/** NO_FROM (DefaultEntrypoint) variant — no account nonce exists on that path. */
+export type BuiltNoFromTx = Omit<BuiltStandardTx, "nonce">
 
 export class TxRequestBuilder {
 	public constructor(
@@ -89,7 +104,7 @@ export class TxRequestBuilder {
 		feePaymentMethod: AccountFeePaymentMethodOptions,
 		parentTask?: WrappedTask,
 		gasSettings?: PartialGasSettingsRPC,
-	): Promise<StandardTxRequestResult> {
+	): Promise<BuiltStandardTx> {
 		const step = new StepContent("Processing transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.taskService.startNewTask(step)
 
@@ -104,20 +119,18 @@ export class TxRequestBuilder {
 			const pxe = this.pxeService.getPXE(networkInfoFrom(network))
 
 			const nodeInfo = await node.getNodeInfo()
+			// F-012 / Phase 5: refuse to sign/prove if the live node's chain
+			// identity has drifted from the network the user selected. Without
+			// this, a malicious or drifted RPC endpoint can change the signing
+			// context after enrollment.
+			assertLiveChainIdentity(network, nodeInfo)
 			const contracts = this.resolver.extractContracts(op.actions)
 			const instances = await this.resolver.resolveInstances(pxe, contracts)
 			const artifacts = await this.resolver.resolveArtifacts(pxe, instances)
 
-			const registeredContracts = new Set<string>((await pxe.getContracts()).map((x) => x.toString()))
-			for (const [contract, instance] of instances) {
-				if (!registeredContracts.has(contract)) {
-					this.log("Register contract")
-					await pxe.registerContract({
-						instance,
-						artifact: artifacts.get(instance.currentContractClassId.toString()),
-					})
-				}
-			}
+			await this.resolver.ensureContractsRegistered(pxe, instances, artifacts, {
+				onRegister: () => this.log("Register contract"),
+			})
 
 			const capsules: Capsule[] = []
 			const authwits: AuthWitness[] = []
@@ -125,6 +138,7 @@ export class TxRequestBuilder {
 			const calls: FunctionCall[] = []
 			const nonce = Fr.random()
 			const txCalls: TxCall[] = []
+			const pendingPublicAuthwits: { account: string; hash: string; content: AuthwitContent }[] = []
 
 			for (const action of op.actions) {
 				switch (action.kind) {
@@ -195,11 +209,6 @@ export class TxRequestBuilder {
 						switch (action.content.kind) {
 							case "call": {
 								messageHash = await this.authwit.computeCallMessageHash(action.content, nodeInfo, instances, artifacts)
-								await this.authRegistryService.trackAuthwit(
-									account.address.toString(),
-									messageHash.toString(),
-									action.content,
-								)
 								break
 							}
 							case "encoded_call": {
@@ -209,35 +218,28 @@ export class TxRequestBuilder {
 									instances,
 									artifacts,
 								)
-								await this.authRegistryService.trackAuthwit(
-									account.address.toString(),
-									messageHash.toString(),
-									action.content,
-								)
 								break
 							}
 							case "intent": {
 								messageHash = await this.authwit.computeIntentMessageHash(action.content, nodeInfo)
-								await this.authRegistryService.trackAuthwit(
-									account.address.toString(),
-									messageHash.toString(),
-									action.content,
-								)
 								break
 							}
 							case "message_hash": {
 								messageHash = Fr.fromString(action.content.messageHash)
-								await this.authRegistryService.trackAuthwit(
-									account.address.toString(),
-									messageHash.toString(),
-									action.content,
-								)
 								break
 							}
 							default: {
 								throw new Error("Invalid authwit content kind")
 							}
 						}
+						// Collect for POST-send recording (pending → reconcile). Build stays PURE:
+						// no trackAuthwit side-effect, so a fee-estimate or a rejected approval
+						// records nothing. The post-send tail persists these as pending rows.
+						pendingPublicAuthwits.push({
+							account: account.address.toString(),
+							hash: messageHash.toString(),
+							content: action.content,
+						})
 
 						const fn = getSetAuthorizedFn()
 						calls.push(
@@ -270,9 +272,7 @@ export class TxRequestBuilder {
 						if (!artifact) {
 							throw new Error("Contract artifact not found")
 						}
-						const fn =
-							artifact.functions.find((x) => x.name === action.method) ??
-							artifact.nonDispatchPublicFunctions.find((x) => x.name === action.method)
+						const fn = findFunctionByName(artifact, action.method)
 						if (!fn) {
 							throw new Error("Method not found")
 						}
@@ -303,26 +303,7 @@ export class TxRequestBuilder {
 							if (!artifact) {
 								throw new Error("Contract artifact not found")
 							}
-							// Union of artifact.functions[] and nonDispatchPublicFunctions[]
-							// element types — both expose `name`/`parameters`/`functionType`/`isStatic`
-							// which is all this loop reads.
-							let fn: (typeof artifact.functions)[number] | (typeof artifact.nonDispatchPublicFunctions)[number] | undefined
-							for (const _fn of artifact.functions) {
-								const selector = await FunctionSelector.fromNameAndParameters(_fn.name, _fn.parameters)
-								if (selector.toString() === action.selector) {
-									fn = _fn
-									break
-								}
-							}
-							if (!fn) {
-								for (const _fn of artifact.nonDispatchPublicFunctions) {
-									const selector = await FunctionSelector.fromNameAndParameters(_fn.name, _fn.parameters)
-									if (selector.toString() === action.selector) {
-										fn = _fn
-										break
-									}
-								}
-							}
+							const fn = await findFunctionBySelector(artifact, action.selector)
 							if (!fn) {
 								throw new Error("Method not found")
 							}
@@ -350,6 +331,16 @@ export class TxRequestBuilder {
 				}
 			}
 
+			// Per-BUILD cap (pre-send gate): block a grant that would push the account past the
+			// tracked-authwit ceiling. Delegated to the auth-registry service so the
+			// existing+pending+unique-new ceiling logic is unit-testable in isolation.
+			if (pendingPublicAuthwits.length > 0) {
+				await this.authRegistryService.assertWithinCap(
+					account.address.toString(),
+					pendingPublicAuthwits.map((p) => p.hash),
+				)
+			}
+
 			const payload = new ExecutionPayload(calls, authwits, capsules, extraHashedArgs)
 			const txRequest = await account.buildTxExecutionRequest(
 				node,
@@ -364,7 +355,7 @@ export class TxRequestBuilder {
 			)
 
 			task.complete()
-			return [txRequest, node, pxe, account, network, nonce, txCalls]
+			return { txRequest, node, pxe, account, network, nonce, txCalls, pendingPublicAuthwits }
 		} catch (error) {
 			task.fail(error)
 			throw error
@@ -376,7 +367,7 @@ export class TxRequestBuilder {
 	 *  wrapper, inlined `DefaultEntrypoint` logic. Cannot import
 	 *  `@aztec/entrypoints/default` in the service worker (upstream
 	 *  references `window`). */
-	public async buildNoFrom(op: AztecSendTxOperation, parentTask?: WrappedTask): Promise<NoFromTxRequestResult> {
+	public async buildNoFrom(op: AztecSendTxOperation, parentTask?: WrappedTask): Promise<BuiltNoFromTx> {
 		const step = new StepContent("Processing transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.taskService.startNewTask(step)
 
@@ -403,19 +394,11 @@ export class TxRequestBuilder {
 			this.log(`buildNoFrom: got ${instances.size} instances`)
 			const artifacts = await this.resolver.resolveArtifacts(pxe, instances)
 			this.log(`buildNoFrom: got ${artifacts.size} artifacts`)
-			const registeredContracts = new Set<string>((await pxe.getContracts()).map((x) => x.toString()))
-			this.log(`buildNoFrom: ${registeredContracts.size} already registered contracts`)
-			for (const [contract, instance] of instances) {
-				if (!registeredContracts.has(contract)) {
-					this.log(`buildNoFrom: registering contract ${contract} with classId ${instance.currentContractClassId.toString()}`)
-					await pxe.registerContract({
-						instance,
-						artifact: artifacts.get(instance.currentContractClassId.toString()),
-					})
-				} else {
-					this.log(`buildNoFrom: contract ${contract} already registered`)
-				}
-			}
+			await this.resolver.ensureContractsRegistered(pxe, instances, artifacts, {
+				onRegister: (contract, instance) =>
+					this.log(`buildNoFrom: registering contract ${contract} with classId ${instance.currentContractClassId.toString()}`),
+				onSkip: (contract) => this.log(`buildNoFrom: contract ${contract} already registered`),
+			})
 
 			// Inline DefaultEntrypoint logic — calls the function directly, msg_sender = None.
 			// Cannot import @aztec/entrypoints/default in service worker (references `window`).
@@ -445,8 +428,15 @@ export class TxRequestBuilder {
 
 			const hashedArguments = [await HashedValues.fromArgs(call.args)]
 			const nodeInfo = await node.getNodeInfo()
+			// F-012 / Phase 5: refuse to sign/prove if the live node's chain
+			// identity has drifted from the network the user selected.
+			assertLiveChainIdentity(network, nodeInfo)
 			const currentMinFees = await node.getCurrentMinFees()
-			const gasSettings = GasSettings.fallback({ maxFeesPerGas: currentMinFees })
+			// 5.0: `fallback` requires explicit gasLimits — fill the network's per-tx admission limit.
+			const gasSettings = GasSettings.fallback({
+				maxFeesPerGas: currentMinFees,
+				gasLimits: new Gas(nodeInfo.txsLimits.gas.daGas, nodeInfo.txsLimits.gas.l2Gas),
+			})
 			const txRequest = new TxExecutionRequest(
 				call.to,
 				call.selector,
@@ -465,7 +455,8 @@ export class TxRequestBuilder {
 			}))
 
 			task.complete()
-			return [txRequest, node, pxe, account, network, txCalls]
+			// NO_FROM emits no add_public_authwit, so there is nothing to record.
+			return { txRequest, node, pxe, account, network, txCalls, pendingPublicAuthwits: [] }
 		} catch (error) {
 			task.fail(error)
 			throw error

@@ -21,7 +21,10 @@ export async function waitForPopup(
 	kind: PopupKind,
 	opts: { requestId?: string; timeout?: number } = {},
 ): Promise<Page> {
-	const timeout = opts.timeout ?? 15_000
+	// CI CPU pressure pushes popup-mount latency up against the 15s cliff
+	// (see implementations-plan/network-followups/plan.md §C). 30s gives 2×
+	// margin without changing the steady-state — fast machines resolve in ms.
+	const timeout = opts.timeout ?? 30_000
 	// Snapshot existing matching target URLs so we only resolve a NEW popup,
 	// not a stale one left by a prior interaction. URL contains a unique
 	// requestId set by DappInteractionService.interaction(), so URL novelty
@@ -47,24 +50,51 @@ export async function waitForPopup(
 	// Puppeteer can resolve waitForTarget before the page's main frame is wired
 	// up — calling waitForFunction immediately throws "Requesting main frame too
 	// early!" Poll until mainFrame() succeeds before doing any further waits.
-	await waitForMainFrame(page)
+	// Tolerate transient frame-detach errors here: under load the CDP connection
+	// can transiently flap between target-creation and main-frame readiness.
+	try {
+		await waitForMainFrame(page)
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err)
+		if (!/frame got detached|Session closed|Target closed|Connection closed/i.test(msg)) throw err
+		// Re-wait for main frame after the detach — the browser usually
+		// recreates the frame within a few hundred ms.
+		await waitForMainFrame(page, 8_000)
+	}
 	// Apply the same waitForFunction/waitForSelector polling patch as openPopup
 	// — without it, every wait on this approval popup uses Puppeteer's default
 	// 'raf' polling which is throttled in offscreen tabs (this popup
 	// definitely is offscreen — it's a separate browser target).
 	patchPagePolling(page)
-	// Wait for SW liveness so the page can render
-	await page.waitForFunction(
-		async () => {
-			try {
-				const r = await chrome.storage.session.get("nulo:liveness")
-				return !!r["nulo:liveness"]
-			} catch {
-				return false
-			}
-		},
-		{ timeout: 10_000, polling: 250 },
-	)
+	// Wait for SW liveness so the page can render. Wrap in detach recovery:
+	// under full-suite load the freshly-created popup target can transiently
+	// detach DURING this wait (puppeteer-core FrameManager#onClientDisconnect),
+	// yielding `Error: waitForFunction failed: frame got detached` even when
+	// openPopup + waitForMainFrame already passed cleanly. One re-wait on the
+	// same target consistently recovers; the failure is the FrameManager
+	// disposing isolated worlds before the target stabilizes, not a real SW
+	// readiness problem.
+	const livenessFn = () =>
+		page.waitForFunction(
+			async () => {
+				try {
+					const r = await chrome.storage.session.get("nulo:liveness")
+					return !!r["nulo:liveness"]
+				} catch {
+					return false
+				}
+			},
+			{ timeout: 30_000, polling: 250 },
+		)
+	try {
+		await livenessFn()
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err)
+		if (!/frame got detached|Session closed|Target closed|Connection closed/i.test(msg)) throw err
+		// Re-stabilize main frame then retry once.
+		await waitForMainFrame(page, 8_000)
+		await livenessFn()
+	}
 	return page
 }
 
@@ -161,7 +191,7 @@ export async function approveCapabilities(
 		() =>
 			document.querySelector('[data-testid="cap-item"]') !== null ||
 			document.querySelector('[data-testid="cap-account-item"]') !== null,
-		{ timeout: 10_000, polling: 200 },
+		{ timeout: 30_000, polling: 200 },
 	)
 	for (const capId of opts.toggleOff ?? []) {
 		await page.waitForSelector(`[data-testid="cap-item"][data-cap-id="${capId}"] [data-testid="cap-toggle"]`, {
@@ -221,16 +251,47 @@ export async function approveExecute(page: Page, opts: { feeMethod?: "sponsored"
 		// service round-trip that can take several seconds on cold start. Wait for the
 		// trigger to be visible before clicking it; otherwise the click is a no-op
 		// against a not-yet-mounted DOM and the per-method option never renders.
-		await page.waitForSelector('[data-testid="send-fee-method-trigger"]', { visible: true, timeout: 15_000 })
+		await page.waitForSelector('[data-testid="send-fee-method-trigger"]', { visible: true, timeout: 30_000 })
 		await page.evaluate(() => {
 			;(document.querySelector('[data-testid="send-fee-method-trigger"]') as HTMLElement)?.click()
 		})
-		await page.waitForSelector(`[data-testid="send-fee-method-${opts.feeMethod}"]`, { visible: true, timeout: 10_000 })
+		await page.waitForSelector(`[data-testid="send-fee-method-${opts.feeMethod}"]`, { visible: true, timeout: 30_000 })
 		await page.evaluate((kind: string) => {
 			;(document.querySelector(`[data-testid="send-fee-method-${kind}"]`) as HTMLElement)?.click()
 		}, opts.feeMethod)
 	}
 	await clickByTestId(page, "execute-confirm-btn")
+}
+
+/** Pick a fee method + submit one of the authwit settings popups
+ *  (RevokeAuthwitsPopup / ChangeAuthwitsRegistryPopup). Both embed the
+ *  shared FeeSettingsCard (`send-fee-method-*` testids) and carry a
+ *  distinct submit testid. Mirrors approveExecute's fee-pick step.
+ *  `submitTestId`: "revoke-authwits-submit" | "registry-toggle-submit". */
+export async function pickFeeAndSubmitAuthwitPopup(
+	page: Page,
+	submitTestId: string,
+	feeMethod: "sponsored" | "fj" | "fpc" = "sponsored",
+): Promise<void> {
+	await page.waitForSelector('[data-testid="send-fee-method-trigger"]', { visible: true, timeout: 30_000 })
+	await page.evaluate(() => {
+		;(document.querySelector('[data-testid="send-fee-method-trigger"]') as HTMLElement)?.click()
+	})
+	await page.waitForSelector(`[data-testid="send-fee-method-${feeMethod}"]`, { visible: true, timeout: 30_000 })
+	await page.evaluate((kind: string) => {
+		;(document.querySelector(`[data-testid="send-fee-method-${kind}"]`) as HTMLElement)?.click()
+	}, feeMethod)
+	await page.waitForFunction(
+		(id: string) => {
+			const b = document.querySelector(`[data-testid="${id}"]`) as HTMLButtonElement | null
+			return !!b && !b.disabled
+		},
+		{ timeout: 30_000, polling: 200 },
+		submitTestId,
+	)
+	await page.evaluate((id: string) => {
+		;(document.querySelector(`[data-testid="${id}"]`) as HTMLElement)?.click()
+	}, submitTestId)
 }
 
 export async function rejectExecute(page: Page): Promise<void> {
@@ -245,7 +306,7 @@ export async function rejectExecute(page: Page): Promise<void> {
  * the "execute-op-item read returns []" race that previously skipped the
  * tx-sendTx-* suite.
  */
-export async function waitForExecuteContent(page: Page, timeout = 15_000): Promise<void> {
+export async function waitForExecuteContent(page: Page, timeout = 30_000): Promise<void> {
 	await page.waitForSelector('[data-testid="execute-op-item"]', { visible: true, timeout })
 }
 
@@ -261,10 +322,32 @@ export async function getExecuteOps(page: Page): Promise<Array<{ id: string; kin
 	)
 }
 
+/**
+ * Wait for the capabilities popup to finish its async render before tests
+ * read cap rows / select accounts. The popup mounts the Vue tree only after
+ * `init()` completes (DappInteractionService payload fetch + manifest resolve).
+ *
+ * Symmetric with `waitForExecuteContent`. Resolves as soon as EITHER a
+ * `cap-item` (capability row) OR a `cap-account-item` (account picker row)
+ * is visible — different bundles mount different surfaces and a strict
+ * cap-item-only wait silently times out via `.catch(() => undefined)` on
+ * the accounts-only path, leaving downstream selectors racing.
+ */
+export async function waitCapabilitiesReady(page: Page, timeout = 30_000): Promise<void> {
+	await page.waitForFunction(
+		() =>
+			document.querySelector('[data-testid="cap-item"]') !== null ||
+			document.querySelector('[data-testid="cap-account-item"]') !== null,
+		{ timeout, polling: 200 },
+	)
+}
+
 /** Read the visible capability rows: returns `{ id, granted }[]`. Waits for at
  *  least one cap-item to render — the popup's init() is async. */
 export async function getCapItems(page: Page): Promise<Array<{ id: string; granted: boolean; rerequested: boolean }>> {
-	await page.waitForSelector('[data-testid="cap-item"]', { visible: true, timeout: 10_000 }).catch(() => undefined)
+	// Wait for popup readiness (cap-item OR cap-account-item) instead of
+	// only cap-item — the bundle under test might be accounts-only.
+	await waitCapabilitiesReady(page).catch(() => undefined)
 	return page.evaluate(() =>
 		[...document.querySelectorAll<HTMLElement>('[data-testid="cap-item"]')].map((el) => ({
 			id: el.getAttribute("data-cap-id") ?? "",

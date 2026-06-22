@@ -74,13 +74,21 @@ function safe<T>(method: string, fn: () => Promise<T>): () => Promise<void> {
 }
 
 export function bindTransactions(root: HTMLElement): void {
+	// All sendTx buttons below use `wait: "NO_WAIT"` so the dApp's promise
+	// settles immediately after the wallet submits the tx (txHash + offchain
+	// data) rather than blocking on `node.getTxReceipt()`. Playground tests
+	// are popup-shape — they assert the popup flow + dApp callback, NOT
+	// receipt mining. Without NO_WAIT the dApp blocks on chain mining, which
+	// on heavy CI shards (shard 3 after fee-methods's 4 FJ transfers) takes
+	// >180s and exceeded the test budget repeatedly. See codex audit at
+	// session 019e6628-bc1c-7282-a1eb-aad1cc5bd70d (Phase 3 deadlock review).
 	root.querySelector<HTMLButtonElement>('[data-testid="pg-btn-sendTx-default"]')?.addEventListener(
 		"click",
 		safe("sendTx", async () => {
 			const wallet = getWallet()!
 			const { exec, fromAddr } = await buildTransferExec(1)
 			// biome-ignore lint/suspicious/noExplicitAny: ExecutionPayload + SendOptions structural cast
-			return wallet.sendTx(exec as any, { from: fromAddr } as any)
+			return wallet.sendTx(exec as any, { from: fromAddr, wait: "NO_WAIT" } as any)
 		}),
 	)
 
@@ -92,7 +100,7 @@ export function bindTransactions(root: HTMLElement): void {
 			// NoFrom: dispatcher.ts:82-88 detects from === "NO_FROM" and routes
 			// through DefaultEntrypoint instead of the account contract.
 			// biome-ignore lint/suspicious/noExplicitAny: NO_FROM is a sentinel string the SDK doesn't type
-			return wallet.sendTx(exec as any, { from: "NO_FROM" } as any)
+			return wallet.sendTx(exec as any, { from: "NO_FROM", wait: "NO_WAIT" } as any)
 		}),
 	)
 
@@ -111,7 +119,7 @@ export function bindTransactions(root: HTMLElement): void {
 			// biome-ignore lint/suspicious/noExplicitAny: ExecutionPayload doesn't include feePayer in this version's types
 			const execWithFeePayer: any = { ...exec, feePayer }
 			// biome-ignore lint/suspicious/noExplicitAny: SendOptions structural cast
-			return wallet.sendTx(execWithFeePayer, { from: fromAddr } as any)
+			return wallet.sendTx(execWithFeePayer, { from: fromAddr, wait: "NO_WAIT" } as any)
 		}),
 	)
 
@@ -121,7 +129,7 @@ export function bindTransactions(root: HTMLElement): void {
 			const wallet = getWallet()!
 			const { exec, fromAddr } = await buildTransferExec(3)
 			// biome-ignore lint/suspicious/noExplicitAny: structural cast
-			return wallet.sendTx(exec as any, { from: fromAddr } as any)
+			return wallet.sendTx(exec as any, { from: fromAddr, wait: "NO_WAIT" } as any)
 		}),
 	)
 
@@ -132,7 +140,7 @@ export function bindTransactions(root: HTMLElement): void {
 			// >5 calls triggers nulo-account.ts recursive chunking (CLAUDE.md mentions this).
 			const { exec, fromAddr } = await buildTransferExec(7)
 			// biome-ignore lint/suspicious/noExplicitAny: structural cast
-			return wallet.sendTx(exec as any, { from: fromAddr } as any)
+			return wallet.sendTx(exec as any, { from: fromAddr, wait: "NO_WAIT" } as any)
 		}),
 	)
 }

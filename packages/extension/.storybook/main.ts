@@ -11,22 +11,35 @@ import type { StorybookConfig } from "@storybook/vue3-vite"
 import { fileURLToPath, URL } from "node:url"
 import useAutoImport from "unplugin-auto-import/vite"
 import useComponents from "unplugin-vue-components/vite"
+// Storybook v10's main.ts loader requires explicit .ts extensions on relative imports.
+import { nuloDesignResolver } from "../scripts/design-resolver.ts"
 
 const config: StorybookConfig = {
 	framework: {
 		name: "@storybook/vue3-vite",
 		options: {},
 	},
-	stories: ["../src/components/**/*.stories.@(ts|vue)", "../src/design/**/*.stories.@(ts|vue)"],
+	stories: [
+		"../src/components/**/*.stories.@(ts|vue)",
+		"../src/design/**/*.stories.@(ts|vue)",
+		// Primitive stories that have migrated into @nulo/design live next to their SFCs.
+		"../../design/src/**/*.stories.@(ts|vue)",
+	],
 	addons: [],
 	docs: {
 		autodocs: false,
 	},
 	viteFinal(viteConfig) {
 		// Mirror the build's path aliases so stories import like the app does.
+		// Rolldown's ViteAlias builtin rejects array-form alias entries spread into an object
+		// literal (the inherited app alias is ARRAY-form for its regex `find` shims — see
+		// vite.config.ts:"Array form (not object) is required…"). Spreading that array into this
+		// object corrupts each entry's `replacement` into an object → `ViteAlias: StringExpected`.
+		// Storybook only needs the `@`/`~` source aliases to render primitives, so set a clean
+		// object map instead of inheriting the app's array (the function-bind/WASM shims are
+		// build-only and irrelevant to story rendering).
 		viteConfig.resolve = viteConfig.resolve ?? {}
 		viteConfig.resolve.alias = {
-			...(viteConfig.resolve.alias ?? {}),
 			"@": fileURLToPath(new URL("../src", import.meta.url)),
 			"~": fileURLToPath(new URL("../src", import.meta.url)),
 		}
@@ -52,6 +65,7 @@ const config: StorybookConfig = {
 			}),
 			useComponents({
 				dirs: ["../src/components"],
+				resolvers: [nuloDesignResolver()],
 				dts: false,
 			}),
 		)

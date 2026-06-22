@@ -22,7 +22,7 @@ const hasConfig = aztecConfig !== undefined
  * file-scoped fixture's browser stayed broken for subsequent tests. As
  * one scenario test, a single detach now surfaces as one honest fail.
  *
- * NO retry:1 here on purpose. The file-scoped `tokenReadyExtension`
+ * NO per-test retry here on purpose. The file-scoped `tokenReadyExtension`
  * initializes once per file (vitest fixture-scope semantics); a retry
  * would re-run the scenario against partially-mutated on-chain state
  * from the failed attempt, so step 1 ("balance shows 1,000") would fail
@@ -118,11 +118,23 @@ test.skipIf(!hasConfig)(
 			const page = await openPopup(tokenReadyExtension)
 			await waitForHash(page, "#/popup/general")
 			await navigateToTokenDetail(page)
-			const { privateBalance, publicBalance } = await getTokenDetailBalances(page)
-			console.log(`Token detail balances — public: "${publicBalance}", private: "${privateBalance}"`)
 			// SponsoredFPC: balances aren't affected by gas fees.
 			// pub→pub 10 (net 0), pub→priv 100 (-100/+100), priv→pub 50 (+50/-50), priv→priv 10 (net 0)
-			// Expected: public=950, private=50
+			// Expected: public=950, private=50.
+			// The token detail page auto-fires refreshTokenBalance on mount (see
+			// tokens/[id].vue:onMounted), so we wait for the DOM to reflect the
+			// projection result instead of clicking the Refresh button via a
+			// helper. Poll the balance selectors until both flip to expected.
+			await page.waitForFunction(
+				() => {
+					const pub = document.querySelector('[data-testid="public-balance-value"]')?.textContent?.trim() ?? ""
+					const priv = document.querySelector('[data-testid="private-balance-value"]')?.textContent?.trim() ?? ""
+					return pub.includes("950") && priv.includes("50")
+				},
+				{ timeout: 30_000, polling: 500 },
+			)
+			const { privateBalance, publicBalance } = await getTokenDetailBalances(page)
+			console.log(`Token detail balances — public: "${publicBalance}", private: "${privateBalance}"`)
 			expect(publicBalance).toContain("950")
 			expect(privateBalance).toContain("50")
 			console.log("✓ Token detail balances correct (pub=950, priv=50)")
@@ -139,7 +151,7 @@ test.skipIf(!hasConfig)(
 			await clickByTestId(page, "actions-send")
 			// SendPopup mounted — send-from-type proves the token loaded
 			// (if the bug were present, we'd see "No available tokens" instead).
-			await page.waitForSelector('[data-testid="send-from-type"]', { timeout: 15_000 })
+			await page.waitForSelector('[data-testid="send-from-type"]', { timeout: 30_000 })
 			await clickByTestId(page, "send-from-type")
 			const hasAmountInput = await page.evaluate(() => !!document.querySelector('[data-testid="send-amount-input"]'))
 			expect(hasAmountInput).toBe(true)

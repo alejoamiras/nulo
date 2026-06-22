@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>v3 follow-ups — ELI5</title>
+		<style>
+			:root { color-scheme: light dark; }
+			body {
+				font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+				line-height: 1.6;
+				max-width: 46rem;
+				margin: 3rem auto;
+				padding: 0 1.25rem;
+				color: #1a1a1a;
+			}
+			@media (prefers-color-scheme: dark) { body { color: #e6e6e6; background: #161616; } }
+			h1 { font-size: 1.7rem; margin-bottom: 0.25rem; }
+			h2 { font-size: 1.25rem; margin-top: 2.5rem; border-bottom: 1px solid #8884; padding-bottom: 0.3rem; }
+			h3 { font-size: 1.02rem; margin-top: 1.6rem; }
+			.lede { color: #6668; font-size: 0.95rem; margin-top: 0; }
+			@media (prefers-color-scheme: dark) { .lede { color: #999; } }
+			.card { border: 1px solid #8883; border-radius: 10px; padding: 0.4rem 1.1rem; margin: 1rem 0; }
+			.tag { display: inline-block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em;
+				text-transform: uppercase; padding: 0.1rem 0.5rem; border-radius: 999px; border: 1px solid #8886; }
+			code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.86em;
+				background: #8881; padding: 0.05rem 0.3rem; border-radius: 4px; }
+			.q { border-left: 3px solid #c9952b; padding-left: 0.9rem; margin: 1rem 0; }
+			a { color: inherit; }
+			footer { margin-top: 3rem; font-size: 0.85rem; color: #6668; }
+		</style>
+	</head>
+	<body>
+		<h1>v3 follow-ups, in plain language</h1>
+		<p class="lede">Two small clean-up jobs left over from the "parallel popups" work. Full detail in <a href="plan.md">plan.md</a>.</p>
+
+		<p>
+			When we shipped parallel dApp popups, a careful review flagged two things we chose to do later rather than
+			rush. This is what they are and why they matter — no jargon.
+		</p>
+
+		<h2><span class="tag">P1</span> &nbsp;A limit on how many transactions can pile up</h2>
+
+		<h3>What's the problem?</h3>
+		<p>
+			Think of one "lane" where your transactions are processed one at a time. Right now a dApp could shove an
+			unlimited number of transactions into that lane at once. Nothing breaks on the blockchain — they still run
+			one by one — but the pile can grow without bound, and the ones past a certain point become invisible and
+			impossible to cancel. A buggy or hostile dApp could abuse that.
+		</p>
+
+		<h3>What we're doing</h3>
+		<p>
+			Adding a limit. Once a lane has too many transactions waiting, the next one is politely refused with a clear
+			error the dApp can read ("too many pending"), instead of silently swelling the pile.
+		</p>
+
+		<h3>The twist the review caught</h3>
+		<p>
+			That one lane is <em>shared</em> by every dApp connected to the same wallet + network. So a dumb "limit the
+			whole lane" rule would backfire: a <strong>bad</strong> dApp could fill the lane and your <strong>good</strong>
+			dApp would start getting refused — even though it did nothing wrong. So instead we limit <em>each dApp's own
+			share</em> of the lane (plus a generous overall ceiling for memory). One misbehaving app can't starve the others.
+		</p>
+		<p>
+			One more subtlety: we tie that per-dApp limit to the dApp's <em>web address</em>, not to its connection.
+			Otherwise a sneaky site could just reconnect over and over to get a fresh allowance each time.
+		</p>
+
+		<h2><span class="tag">P2</span> &nbsp;Properly testing the "no-account" transaction path</h2>
+
+		<h3>What's the problem?</h3>
+		<p>
+			There's a special transaction path (called "NO_FROM") used when there isn't a normal account wrapper. It has
+			<em>no</em> built-in safety nonce, so it relies <em>entirely</em> on the one-at-a-time lane to stay correct.
+			That makes it the riskiest path — and our automated tests didn't actually cover two of them running at once.
+		</p>
+
+		<h3>The thing the review uncovered</h3>
+		<p>
+			Our existing test for this path looked like it "sometimes passed" — but it turns out it could basically
+			<strong>never</strong> truly succeed: this path only accepts <em>one private</em> action, and the test was
+			handing it a <em>public</em> one, which it refuses. So before we can test "two of these succeed together," we
+			first have to figure out the right kind of action to use and set up the funding so a single one reliably works.
+		</p>
+
+		<h3>How we'll de-risk it</h3>
+		<p>
+			We <em>investigate first</em> (a short, time-boxed spike): get one such transaction to succeed reliably, prove
+			it three times in a row, and only then build the "two-at-once, both succeed" test. If that investigation turns
+			out to be a swamp, we stop and fall back to a cheaper, lighter test rather than pour in endless effort.
+		</p>
+
+		<h2>The one decision we need a human for</h2>
+		<div class="q">
+			<p>
+				<strong>How strict should the per-dApp limit be vs. how much code do we want?</strong>
+			</p>
+			<p>
+				The simplest possible limit (one number for the whole lane) is a few lines — but it's the version that lets
+				a bad dApp get a good dApp refused. The recommended version (per-dApp share + overall ceiling) avoids that
+				but is a bit more plumbing. The review strongly favors the recommended one; we just want you to okay the
+				extra complexity before we build it.
+			</p>
+		</div>
+
+		<h2>Why these are two separate changes</h2>
+		<p>
+			P1 (the limit) is ready to build and low-risk. P2 (the test) has a real "will this even work?" investigation in
+			it. Bundling them would let the uncertain one hold up the ready one — so they ship as two separate pieces.
+		</p>
+
+		<footer>
+			Companion to <a href="plan.md">plan.md</a> · audit transcript in <a href="audit-codex.md">audit-codex.md</a>.
+		</footer>
+	</body>
+</html>

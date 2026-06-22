@@ -1,7 +1,8 @@
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { toRestoreError } from "@/utils/restore-error"
 import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { NetworkService } from "@/wallet/services/network/service"
 import type { Network } from "@/wallet/services/network/spec"
@@ -20,6 +21,14 @@ import {
 export * from "./spec"
 
 export class AccountStateService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()(
+		"getAccounts",
+		"getSenders",
+		"getSendersAcrossActiveNetworks",
+		"addSender",
+		"deleteSender",
+		"getContracts",
+	)
 	public static name = ACCOUNT_STATE_SERVICE_NAME
 
 	public readonly onSenderAdded = new EventHandler<string>()
@@ -198,7 +207,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 				} catch (err) {
 					senders.push({
 						...sender,
-						restoreError: err instanceof Error ? err.message : err,
+						restoreError: toRestoreError(err),
 					})
 				}
 			}
@@ -222,7 +231,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 				} catch (err) {
 					contracts.push({
 						...contract,
-						restoreError: err instanceof Error ? err.message : err,
+						restoreError: toRestoreError(err),
 					})
 				}
 			}

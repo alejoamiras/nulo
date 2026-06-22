@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code-quality audit, in plain words — nulo</title>
+<style>
+  :root {
+    --arch: #c0392b;
+    --struct: #e67e22;
+    --local: #9aa0a6;
+    --ink: #1d1f23;
+    --muted: #6b7280;
+    --rule: #e5e7eb;
+    --bg-soft: #f8f9fa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: #fff;
+    margin: 0;
+    line-height: 1.55;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 20px 64px; }
+  h1 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 12px; }
+  h2 { font-size: 1.25rem; margin: 48px 0 16px; padding-top: 24px; border-top: 1px solid var(--rule); }
+  h3 { font-size: 1.02rem; margin: 0 0 8px; line-height: 1.35; }
+  p { margin: 0 0 12px; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.86em;
+    background: var(--bg-soft);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  .lede { font-size: 1.02rem; color: #374151; }
+  .qid {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--muted);
+    background: var(--bg-soft);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 0 6px;
+    margin-right: 8px;
+    vertical-align: 2px;
+    white-space: nowrap;
+  }
+  .card {
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--local);
+    border-radius: 6px;
+    padding: 16px 18px 14px;
+    margin: 0 0 18px;
+  }
+  .card.arch { border-left-color: var(--arch); }
+  .card.struct { border-left-color: var(--struct); }
+  .facts {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin: 10px 0;
+    padding: 6px 0;
+    border-top: 1px dashed var(--rule);
+    border-bottom: 1px dashed var(--rule);
+  }
+  .fix, .watch { font-size: 0.92rem; margin: 8px 0 0; }
+  .fix strong { color: #166534; }
+  .watch strong { color: #92400e; }
+  .box {
+    background: var(--bg-soft);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 18px 20px;
+    margin: 24px 0;
+  }
+  .box h2 { border: none; margin: 0 0 10px; padding: 0; font-size: 1.1rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin: 12px 0 4px; }
+  th, td { text-align: left; padding: 8px 10px 8px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  ol.start { padding-left: 22px; margin: 12px 0; }
+  ol.start li { margin-bottom: 10px; }
+  .legend { font-size: 0.8rem; color: var(--muted); margin: 16px 0 0; }
+  .legend span { display: inline-block; margin-right: 16px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .footnote { font-size: 0.85rem; color: var(--muted); margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--rule); }
+  footer { font-size: 0.82rem; color: var(--muted); margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--rule); }
+  footer a { color: #2563eb; }
+  .empty-note { color: var(--muted); font-style: italic; }
+  @media (max-width: 480px) {
+    main { padding: 24px 14px 48px; }
+    h1 { font-size: 1.4rem; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>The code-quality audit, in plain words</h1>
+<p class="lede">24 independent reviewers from two model families (Fable and Codex) each combed a slice of this repo for code that is expensive to change — not bugs, not vulnerabilities, just maintenance cost. They then spent two rounds attacking each other's findings, and every claim that survived was re-checked against the actual source by one verifier from each family. 23 real issues made it through; 0 fabrications did — every invented claim died in rebuttal or verification.</p>
+
+<div class="box">
+  <h2>The one pattern behind most of it</h2>
+  <p>Someone started building the better way of doing something, got it partly adopted, and stopped. Now both the old way and the new way are live, so every change in that area is paid twice — once per shape — and comments saying "keep in sync" are the only thing holding it together. Twice, those comments are outright false: they claim an extraction happened that never did.</p>
+  <p>Five findings are direct instances of this: <strong>Q10</strong> (half the services get their storage injected, half still grab <code>chrome.storage</code> themselves), <strong>Q4/Q5</strong> (the execution-pipeline extraction that a comment claims happened but didn't), <strong>Q8</strong> (form abstractions that don't cover the async-edit case, so every dialog re-builds the missing half), <strong>Q7</strong> (config sharing by copy-paste, with drift already shipped), and <strong>Q13</strong> (a PXE interface subset maintained by hand in four files with nothing checking they match).</p>
+  <p>The cheapest leverage is almost always <em>finishing</em> (or explicitly abandoning) the existing migration — not inventing a new abstraction.</p>
+</div>
+
+<h2>The four heaviest files</h2>
+<table>
+  <tr><th>File</th><th>What's wrong, in one line</th></tr>
+  <tr><td><code>execution/service.ts</code></td><td>2,302 lines doing seven unrelated jobs, with the same send-flow ending hand-copied four times.</td></tr>
+  <tr><td><code>wallet-bridge/dispatcher.ts</code></td><td>A 1,011-line hub for every wallet-sdk request that re-implements its own helper inline at three spots.</td></tr>
+  <tr><td><code>RecentActivityView.vue</code></td><td>The home-screen widget rebuilt the feed-merge logic that a shared helper already provides to the activity page.</td></tr>
+  <tr><td><code>tests/e2e/fixtures/extension.ts</code></td><td>A 1,249-line test harness with four copies of the same setup ladder and three copies of the grant dance.</td></tr>
+</table>
+
+<h2>Where to start</h2>
+<ol class="start">
+  <li><strong>Q1</strong> — small surface, hot files; 2–3 days kills the whole "forgot to update one of the 7 lists" failure mode in the bridge.</li>
+  <li><strong>Q5</strong> — extracting the shared prove&rarr;send&rarr;record tail is the first concrete, test-backed cut into the 2,302-line monster, and it makes every later cut cheaper.</li>
+  <li><strong>Q4</strong> — keep carving that file one concern at a time; each extraction ships on its own.</li>
+  <li><strong>Q2</strong> — stop paying every profile-screen change twice across popup and onboarding.</li>
+  <li><strong>Q3</strong> — stop paying every messaging-layer fix twice, and decide the error-contract question once, on purpose.</li>
+  <li><strong>Q7</strong> — roughly a day of work, and it's the only finding where the drift has <em>already shipped</em> (the e2e:all config silently lost settings).</li>
+</ol>
+
+<p class="legend">
+  <span><span class="dot" style="background:var(--arch)"></span>red = architectural</span>
+  <span><span class="dot" style="background:var(--struct)"></span>orange = structural</span>
+  <span><span class="dot" style="background:var(--local)"></span>gray = local / cosmetic</span>
+</p>
+
+<h2>Big architecture stuff</h2>
+
+<div class="card arch">
+  <h3><span class="qid">Q1</span>Adding one wallet method means editing 7 hidden lists</h3>
+  <p>The bridge keeps seven hand-written tables that all restate the same facts about each wallet method — which capability it needs, what kind of operation it is, which scope check applies. Add or reclassify a method and you're on a scavenger hunt; miss one table and nothing complains, the method just silently behaves wrong. A "keep in sync" comment is the only guard.</p>
+  <p class="facts">Shotgun Surgery via parallel registries &middot; architectural &middot; 3 files, 7 parallel tables &middot; hot code &middot; confidence: high</p>
+  <p class="fix"><strong>Fix:</strong> One <code>MethodDescriptor</code> registry per method; derive all seven tables from it, preserving current names and behavior exactly.</p>
+  <p class="watch"><strong>Watch out:</strong> The three <code>nulo-schema-patch.ts</code> copies are a deliberate, test-pinned house contract — leave them out of this — and the <code>AUDIT F-00x</code> security markers must survive as descriptor fields.</p>
+</div>
+
+<div class="card arch">
+  <h3><span class="qid">Q2</span>The "create a wallet" screens exist twice — popup and onboarding each keep their own copy</h3>
+  <p>The import-profile and create-profile pages were duplicated between the popup and the onboarding flow, near line-for-line — down to the same input-shake animation keyframes. Fix a validation bug in one shell and the other still has it until someone remembers. The shared passkey dialog also still lives under popup paths even though onboarding uses it too.</p>
+  <p class="facts">Duplicate Code + Inappropriate Intimacy &middot; architectural &middot; 5 files (4 pages + shared dialog) &middot; hot code &middot; confidence: moderate</p>
+  <p class="fix"><strong>Fix:</strong> Extract shared <code>useProfileImportFlow</code> / <code>useProfileCreateFlow</code> composables (the shells differ only in routes, toasts, and completion), and move the passkey dialog to a neutral shared path.</p>
+</div>
+
+<div class="card arch">
+  <h3><span class="qid">Q3</span>The background and offscreen messaging stacks are the same code, written twice</h3>
+  <p>Two RPC transport stacks — one for the background worker, one for the offscreen page — each hand-rolled the same request bookkeeping, timeouts, JSON-fallback parsing, and init-wait loop (one function is byte-identical in both). Every transport bug fix is paid twice, and the two sides even fail differently: one throws typed errors, the other plain strings.</p>
+  <p class="facts">Duplicate Code — forked transport bases &middot; architectural &middot; 4 files (40+ consumers behind them) &middot; hot code &middot; confidence: moderate</p>
+  <p class="fix"><strong>Fix:</strong> Extract shared helpers first (response decoding, timeout bookkeeping, JSON fallback, <code>ensureInitialized</code>); the full shared core is a later, separate step.</p>
+  <p class="watch"><strong>Watch out:</strong> Unifying the error contracts changes offscreen rejections from plain strings to typed <code>WalletError</code> — that's a behavior decision to make on purpose, not a refactor side effect.</p>
+</div>
+
+<div class="card arch">
+  <h3><span class="qid">Q9</span>Services ask "am I ready yet?" ~80 times instead of declaring what they wait for</h3>
+  <p>The startup system already supports declaring "I depend on service X" — but only two services use it. Everyone else pastes <code>await this.ensureInitialized()</code> at the top of each method, backed by a 500ms polling loop, and whether a method gets the paste is a per-method judgment call. One service has 24 copies; another has zero.</p>
+  <p class="facts">Temporal coupling + Duplicate Code &middot; architectural &middot; whole service fleet (16+ services) &middot; warm code &middot; confidence: high</p>
+  <p class="fix"><strong>Fix:</strong> Gate readiness once in the shared base service class, and separately declare real startup dependencies — not at the RPC boundary alone, because many calls are in-process.</p>
+</div>
+
+<div class="card arch">
+  <h3><span class="qid">Q10</span>Half the services get storage handed to them; half still grab <code>chrome.storage</code> directly</h3>
+  <p>A migration to inject infrastructure (storage, PXE client) from the composition root started and stopped midway — the runtime comment literally says remaining services "still reach into chrome.* directly until their migration lands." So a storage or PXE wiring change fans out across ~20 constructor and init sites instead of touching one file.</p>
+  <p class="facts">Half-done composition-root migration &middot; architectural &middot; ~20 sites across ~15 files &middot; warm code &middot; confidence: high</p>
+  <p class="fix"><strong>Fix:</strong> Inject one collaborator at a time from <code>runtime.ts</code> (storage first or PXE first), service by service — no big-bang rewrite.</p>
+</div>
+
+<div class="card arch">
+  <h3><span class="qid">Q13</span>The PXE function list is hand-copied across four files, and nothing checks they match</h3>
+  <p>The full PXE spec declares 21 methods; three other files each hand-restate an 18-method subset of it — the facade interface, the proxy delegations, and the client with its response parsing. None of it is mechanically derived and no test pins them together, so adding a method to one and forgetting another fails silently. No drift yet — but only because everyone has remembered so far.</p>
+  <p class="facts">Manual subset interface projection &middot; architectural &middot; 4 files &middot; warm code &middot; confidence: high</p>
+  <p class="fix"><strong>Fix:</strong> One canonical subset key list plus type-level assertions, so a mismatch becomes a compile error instead of a review hope.</p>
+  <p class="watch"><strong>Watch out:</strong> Full mapped-type derivation has limits — it must drop the <code>network</code> param and promisify, and the client's per-method zod validation can't be generated; only partial mechanization is possible.</p>
+</div>
+
+<h2>Structure problems</h2>
+
+<div class="card struct">
+  <h3><span class="qid">Q4</span>One 2,300-line file is the wallet's everything-drawer</h3>
+  <p><code>ExecutionService</code> owns transfers, journal/cancel flow, gas-balance caching, fee-estimate reuse, dApp execution, registration handlers, and Aztec RPC adapters — 13 injected collaborators in a single class. Whatever you're changing, you start by reloading this whole monster into your head, and unrelated concerns keep colliding in the same file.</p>
+  <p class="facts">Large Class with Divergent Change &middot; structural &middot; 1 file (the central facade) &middot; hot code &middot; confidence: high</p>
+  <p class="fix"><strong>Fix:</strong> Extract one cohesive concern at a time (gas-balance caching, or one pipeline), keeping the RPC surface stable — each step ships on its own.</p>
+</div>
+
+<div class="card struct">
+  <h3><span class="qid">Q5</span>The same "prove &rarr; send &rarr; record" ending is hand-copied into all four send flows</h3>
+  <p>Four send pipelines each rewrite the identical lifecycle tail: register cancellation, walk the journal stages, prove, send, save history, clean up. Worse, a comment in <code>execution-coordinator.ts</code> claims this tail was already extracted into a <code>proveAndSend</code> method — that method was never written. The doc isn't stale; it's false.</p>
+  <p class="facts">Duplicate Code &middot; structural &middot; 2 files (4 copies in the hottest one) &middot; hot code &middot; confidence: high</p>
+  <p class="fix"><strong>Fix:</strong> Extract one shared tail helper with per-path callbacks for the parts that genuinely differ, and correct the lying comment in the same change.</p>
+</div>
+
+<div class="card struct">
+  <h3><span class="qid">Q6</span>The dashboard's activity widget rebuilt the feed logic the activity page already shares</h3>
+  <p>There's a shared <code>buildActivityRows</code> helper that the activity page uses — and the home-screen widget re-implements the same three-way merge by hand, while the helper's comment claims the extraction covered both surfaces (it didn't). The widget also duplicates its entire template for the token/no-token cases.</p>
+  <p class="facts">Large Component + Duplicate Code &middot; structural &middot; 3 files &middot; hot code &middot; confidence: moderate</p>
+  <p class="fix"><strong>Fix:</strong> Extract <code>useIncomingTransfers</code> and the awaiting-card props builder, collapse the two template branches into one, and parameterize <code>buildActivityRows</code> so the widget can use it.</p>
+</div>
+
+<div class="card struct">
+  <h3><span class="qid">Q7</span>Seven build/test config files copy each other by hand — and one already drifted</h3>
+  <p>Vite/Vitest aliases, defines, and runner settings are duplicated across seven config files under literal "Keep in sync" comments — and the sync already failed: the <code>e2e:all</code> config silently lost the noir aliases and retry settings the network config has, while still covering the network suite. The browser wrappers also mutate the shared base config in place.</p>
+  <p class="facts">Config Sprawl + Mutable Data &middot; structural &middot; 7 files &middot; hot enough that drift shipped &middot; confidence: high</p>
+  <p class="fix"><strong>Fix:</strong> Shared config helpers plus <code>mergeConfig</code>-style composition; validate by diffing resolved configs before/after.</p>
+  <p class="watch"><strong>Watch out:</strong> The host-specific noir-alias comment has to travel with the shared helper, not get lost in the move.</p>
+</div>
+
+<div class="card struct">
+  <h3><span class="qid">Q8</span>Every edit dialog re-invents form refill and Enter-to-submit</h3>
+  <p><code>useFormState</code> can't re-baseline after async data arrives, so every edit dialog hand-rolls its own refill and dirty tracking around it. <code>FormPopup</code> doesn't handle the Enter key, so each dialog copies the same keydown guard. The abstractions exist — they just don't cover the cases the dialogs actually have, so a dozen dialogs each carry the missing half.</p>
+  <p class="facts">Duplicate Code / half-done abstraction &middot; structural &middot; ~12 files &middot; hot code &middot; confidence: moderate</p>
+  <p class="fix"><strong>Fix:</strong> Two independent tracks: add a <code>rebase()</code> API to <code>useFormState</code> and move Enter-key ownership into <code>FormPopup</code>; then migrate hand-rolled list sync to <code>useEntityCrud</code> dialog by dialog.</p>
+  <p class="watch"><strong>Watch out:</strong> <code>NewContactPopup</code>'s comment documents an Enter double-fire hazard that any <code>FormPopup</code>-level submit fix must handle.</p>
+</div>
+
+<div class="card struct">
+  <h3><span class="qid">Q11</span>The bridge dispatcher is a 1,000-line hub that forgot to use its own helper</h3>
+  <p>One class routes every wallet-sdk request and also manages popups, grants, response shaping, and account resolution. It even has a helper (<code>formatSessionAccounts</code>) for projecting session accounts — and then re-implements that exact projection inline at three call sites anyway. Every local bridge change reopens the same file.</p>
+  <p class="facts">Large Class + Duplicate Code &middot; structural &middot; 1 file (the hub of the whole package) &middot; warm-to-hot code &middot; confidence: high</p>
+  <p class="fix"><strong>Fix:</strong> Route all session-account projection through the one helper, then extract account resolution as its own collaborator; grant management follows.</p>
+  <p class="watch"><strong>Watch out:</strong> <code>formatSessionAccounts</code> pins wire-format parity and <code>dispatcher.test.ts</code> pins the schema-patch tri-copy shape — extraction must preserve both byte-for-byte.</p>
+</div>
+
+<div class="card struct">
+  <h3><span class="qid">Q12</span>The e2e harness pastes the same setup ladder four times</h3>
+  <p>The 1,249-line fixture file holds four copies of the same launch&rarr;register&rarr;open-popup&rarr;connect ladder, four identical inline <code>phase</code> wrappers, and three near-identical capability-grant dances — plus a password constant re-declared in four test files. A comment in the file says "refactor once we have three or more such fixtures." That threshold is now met.</p>
+  <p class="facts">Duplicate Code + mixed-concern hotspot &middot; structural &middot; 2 files (mostly one) &middot; warm-to-hot code &middot; confidence: high</p>
+  <p class="fix"><strong>Fix:</strong> Extract <code>phase</code>, a shared connected-playground setup helper, a parameterized grant helper, and one exported <code>TEST_PASSWORD</code>.</p>
+</div>
+
+<div class="card struct">
+  <h3><span class="qid">Q14</span>Ten services copy-pasted the same backup-restore loop, and the copies already disagree</h3>
+  <p>The restore-from-backup loop — try each item, push <code>{...entity, restoreError}</code> on failure — is rewritten in ten services. The copies have drifted: one stores the raw error object where the others store <code>.message</code>, and some take a lock while others don't. Any change to the restore contract is a ten-file edit.</p>
+  <p class="facts">Duplicate Code &middot; structural &middot; 10 files &middot; warm code &middot; confidence: high</p>
+  <p class="fix"><strong>Fix:</strong> Extract just the per-item result/error accumulation helper; everything else stays per-service.</p>
+  <p class="watch"><strong>Watch out:</strong> Validation, locking, and id allocation genuinely differ per service — they stay as service-specific hooks, only the accumulation is shared.</p>
+</div>
+
+<div class="card struct">
+  <h3><span class="qid">Q15</span>When a profile, chain, or account dies, nine services each run their own homemade cleanup loop</h3>
+  <p>The "load rows, filter mine, delete, emit" purge loop exists at 13+ sites for profile/chain/account deletion — with inconsistent locking, and even one file disagreeing with itself on strategy. Changing cleanup semantics (batching, error policy) means editing a scattered family of near-identical listeners.</p>
+  <p class="facts">Duplicate Code — lifecycle purge cascade &middot; structural &middot; ~10 files, 13+ sites &middot; warm code &middot; confidence: moderate</p>
+  <p class="fix"><strong>Fix:</strong> One shared row-iteration/delete helper, with the side effects (predicates, events, cache eviction) staying service-owned.</p>
+  <p class="watch"><strong>Watch out:</strong> Per-service emit order and the lock-vs-lockless split must be preserved exactly during extraction.</p>
+</div>
+
+<div class="card struct">
+  <h3><span class="qid">Q17</span>"Make sure this contract is registered" is pasted at 8 places, despite a resolver existing for exactly this</h3>
+  <p>A <code>ContractResolver</code> already exists for instance/artifact lookups — but the register-before-use prologue is still hand-copied at 8 sites, the function-name lookup at 4, the selector scan at 3, and <code>token/service.ts</code> contains a near-clone method pair on top. The extraction simply stopped before the finish line.</p>
+  <p class="facts">Duplicate Code from stopped extractions &middot; structural &middot; 6 files, ~15 sites &middot; warm code &middot; confidence: high</p>
+  <p class="fix"><strong>Fix:</strong> Extend the existing <code>ContractResolver</code> with <code>ensureRegistered</code>, <code>findFunctionByName</code>, and <code>findFunctionBySelector</code>, preserving current lookup order.</p>
+  <p class="watch"><strong>Watch out:</strong> Per-caller error strings are frozen by doc contract and differ between callers — the helpers must parameterize messages, not unify them.</p>
+</div>
+
+<div class="card struct">
+  <h3><span class="qid">Q18</span>Functions pass around 8-slot anonymous tuples — <code>built[0]</code> through <code>built[7]</code></h3>
+  <p>Execution helpers exchange results as positional tuples of up to eight slots, and the same 7-parameter transfer bundle is repeated across spec, client, service, and planner. Six adjacent slots share the same type, so swapping two compiles cleanly and corrupts behavior. Adding one field means manually auditing every consumer.</p>
+  <p class="facts">Data Clumps + Primitive Obsession &middot; structural &middot; ~10 files &middot; warm code &middot; confidence: high</p>
+  <p class="fix"><strong>Fix:</strong> Step 1: replace the <em>internal</em> tuples with named result objects (both ends ship together); the public-API parameter object is a separate, later decision.</p>
+  <p class="watch"><strong>Watch out:</strong> <code>FpcStrategy</code> is byte-parity-sensitive and deliberately different from the other three strategies — do not normalize it into the family.</p>
+</div>
+
+<div class="card struct">
+  <h3><span class="qid">Q19</span>"Is the wallet unlocked?" is copy-pasted ~75 times, with three different error messages</h3>
+  <p>Nearly every service method opens with the same get-active-profile-or-throw guard, and the copies have drifted: "Profile locked" 34 times, "Wallet locked" 12, "Wallet is locked" twice — one file disagrees with itself — plus one "Unauthorized" outlier and one site that silently returns <code>undefined</code> instead of throwing. Any lock-policy change is a method-by-method slog.</p>
+  <p class="facts">Duplicate Code &middot; structural &middot; ~15 files, ~75 call sites &middot; warm code &middot; confidence: high</p>
+  <p class="fix"><strong>Fix:</strong> Extract one <code>requireActiveProfile()</code> helper, keeping existing strings per-site or unifying them as a deliberate choice.</p>
+  <p class="watch"><strong>Watch out:</strong> The "Unauthorized" string is documented as load-bearing (don't absorb that site), and the silent-<code>undefined</code> site in dapp-session is intentional behavior to preserve.</p>
+</div>
+
+<div class="card struct">
+  <h3><span class="qid">Q16</span>The shared packages export functions nobody calls</h3>
+  <p>Two whole modules in extension-messaging, four exports in wallet-core, one index export in wallet-crypto, and one declared dependency have zero production consumers — only their own colocated tests. Dead surface isn't free: every reviewer and auditor has to read around it, and it sits in the public API of packages with no external users.</p>
+  <p class="facts">Dead Code (symbol-level) + one unused dependency &middot; structural &middot; ~7 files across 3 packages &middot; warm visibility &middot; confidence: moderate</p>
+  <p class="fix"><strong>Fix:</strong> Small per-symbol removals, each proven by grep plus a test run — explicitly not a bulk sweep (the verifiers refuted the bulk version of this claim).</p>
+  <p class="watch"><strong>Watch out:</strong> The <code>ENCRYPTION_GUARD</code> canary test imports it relatively (removing the index export must not touch the test), and <code>IllegalTransitionError</code>'s index export IS consumed by a test via the package subpath.</p>
+</div>
+
+<div class="card struct">
+  <h3><span class="qid">Q20</span>The CAIP address helpers exist twice — bridge and extension each keep a copy</h3>
+  <p>Four CAIP parse/format functions are line-for-line duplicates across wallet-bridge and the extension. The extension copy's header even claims the dispatcher uses it — the dispatcher actually imports the bridge copy. No test pins the two together, so any CAIP rule change has to be remembered in both places.</p>
+  <p class="facts">Duplicate Code &middot; structural &middot; 2 files &middot; warm code &middot; confidence: high</p>
+  <p class="fix"><strong>Fix:</strong> Make the bridge (or a lower shared package) the single owner and have the extension re-export from it.</p>
+  <p class="watch"><strong>Watch out:</strong> Ownership must move <em>downward</em> — the reverse breaks the layering rules — and the extension's extra <code>parseCaipChain</code> must keep its behavior.</p>
+</div>
+
+<div class="card struct">
+  <h3><span class="qid">Q21</span>The permission checkers are clones — two are byte-identical except the error text</h3>
+  <p>The scope-enforcement file holds a family of checker functions that are near-copies of one another: same shape, same empty-grants pass-through, different capability flag and error label. Two of them are byte-identical apart from the label. New checkers get born by copy/paste, so any convention change has to be propagated by hand across all of them.</p>
+  <p class="facts">Duplicate Code &middot; structural &middot; 1 file (public policy surface) &middot; warm code &middot; confidence: high</p>
+  <p class="fix"><strong>Fix:</strong> Local helper extraction inside the file — no grand checker-factory; this is policy code, keep it boring.</p>
+  <p class="watch"><strong>Watch out:</strong> Exact error text and the "no grants &rArr; pass through" semantics are pinned by tests — the helpers must be byte-faithful on both.</p>
+</div>
+
+<div class="card struct">
+  <h3><span class="qid">Q23</span>Cancel-during-send only works because four files agree on microtask timing</h3>
+  <p>The claim/cancel logic depends on exact promise-interleaving across the claim helper, the execution service, the journal lock, and the execution mutex — a comment in the code literally calls it "correctness-by-microtask-interleaving" and "fragile against future refactors of either side." A refactor that looks local can silently break cancellation, because the ordering contract is implicit and spread across four files.</p>
+  <p class="facts">Temporal coupling &middot; structural &middot; 4 files &middot; warm code &middot; confidence: high</p>
+  <p class="fix"><strong>Fix:</strong> A small, explicit handshake abstraction around the controller/journal pair, gated on the existing race tests staying green — not a grand coordinator.</p>
+  <p class="watch"><strong>Watch out:</strong> The no-await invariant in the claim helper and <code>_transitionLocked</code>'s pre-abort awaits ARE the ordering contract — any extraction must own both sides.</p>
+</div>
+
+<div class="card struct">
+  <h3><span class="qid">Q22</span>Two helpers serialize BigInts and Errors differently, and neither knows about the other</h3>
+  <p>wallet-core has two serializers with overlapping jobs: the wire one writes a bigint as <code>"123"</code>, the job-journal one writes <code>"123n"</code> with a different Error envelope. Part of the divergence is documented and deliberate — but the overlapping Error-shaping logic can improve in one path and silently rot in the other, because nothing connects them.</p>
+  <p class="facts">Parallel serializer logic &middot; structural &middot; 2 files &middot; warm code (drift is silent) &middot; confidence: moderate</p>
+  <p class="fix"><strong>Fix:</strong> Share a low-level BigInt/Error replacer between the two only where the documented constraints allow — do not force one serialization core onto both.</p>
+  <p class="watch"><strong>Watch out:</strong> <code>serialization.ts</code> mirrors <code>@aztec/foundation/json-rpc</code> (its wire shape is frozen), and <code>jobs/error.ts</code>'s divergence is deliberate audit-hardening — neither is a consolidation target.</p>
+</div>
+
+<h2>Smaller stuff</h2>
+<p class="empty-note">Empty on purpose. Nothing that survived verification landed in the local/cosmetic bucket — every one of the 23 findings is at least structural. The genuinely small observations (log noise, micro dead code, naming wrinkles) were filed as out-of-scope notes in the full report instead.</p>
+
+<div class="footnote">
+  <p>12 candidate findings were dropped for lack of evidence — including a dead export that doesn't exist and a "tests-only" claim contradicted by a live consumer. ~45 correctness/security observations were filed out-of-scope: they belong to a bugs/security audit, not this one. Full detail in the linked reports, including the 19-entry constraints registry that any fix PR must clear.</p>
+</div>
+
+<footer>
+  <p>Full report: <a href="report.md">report.md</a> &middot; All findings + verification + constraints: <a href="findings/verified.md">findings/verified.md</a></p>
+  <p>Run <code>2026-06-11-ultra-50b45d</code> &middot; 2026-06-11</p>
+</footer>
+
+</main>
+</body>
+</html>

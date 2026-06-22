@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — Fuel-bridge Fee-Juice portal V5 fix</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .ok { color: #1a7f37; }
+  </style>
+</head>
+<body>
+  <h1>Fuel-bridge Fee-Juice portal V5 fix</h1>
+  <p>When you bridge tokens <em>with fuel</em> (swap a slice into Fee Juice so the arriving funds can pay their own gas), the gas part hangs forever — "message arrived, waiting for your wallet to sync" that never finishes. We traced it on-chain: the part of our bridge that hands Fee Juice across to Aztec was built with the address of the <strong>old (V4) Fee-Juice door</strong>. On V5, that door moved. So the Fee-Juice message gets posted to a dead door and never shows up where the wallet looks. The plain token transfer works fine because it uses a <em>different</em> door we deployed fresh. The fix is to point the fuel router at the new V5 door and re-deploy that one small piece.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>Light.</strong> Rubric: only 1 high dimension — External coupling (the canonical Aztec fee-juice portal). Novelty low (we understand the surface), blast radius small (one feature path, testnet), irreversibility low (re-deployable contract, no data migration), migration cost none, security low (one constructor argument, no trust-model change). The root cause is confirmed on-chain and the fix's ABI is verified compatible, so there's no plan-space to search — single plan, single codex audit.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: Point everything at the new V5 door + make the deploy router-only + prove it on a fork</h3>
+    <p>Swap the old V4 portal address for the V5 one in the 5 places that hard-coded it (the live deploy, a sibling script, two fork tests, and the env template). Also tweak the deploy script so that — when we tell it to reuse the existing swap + pools — it really deploys <em>only</em> the router (today it also spins up an unused helper; codex caught this). Then run the fork test that forks the <em>live</em> Sepolia chain and actually pushes Fee Juice through the router into the V5 door, proving the new door works <em>before</em> we spend anything real.</p>
+    <p class="muted">Proves itself by: <code>forge build</code> compiles, and <code>DeployFuelLive.fork.t.sol</code> goes green — the "router points at the V5 door" assert passes AND the Fee-Juice-lands-at-the-door balance checks pass.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: Re-deploy just the router (reuse the swap + pools)</h3>
+    <p>Deploy a fresh router wired to the V5 door. Everything else — the Uniswap swap helper and the seeded liquidity pools — is untouched and reused (they don't depend on the door). Dry-run first, then broadcast, then read the deployed router back to confirm it points at the right door, the right swap, and is owned by the deployer.</p>
+    <p class="muted">Proves itself by: dry-run shows exactly ONE new contract (no swap, no helper, no re-seeding), broadcast says "ONCHAIN EXECUTION COMPLETE", and three on-chain read-backs confirm door = V5 portal, swap = existing swap, owner = deployer.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: Smoke the candidate config → promote → prove the self-paying claim</h3>
+    <p>Point the <em>candidate</em> faucet config at the new router + door, then run the candidate-smoke script (deployer-funded, not your wallet): a full swap → bridge → self-paying Fee-Juice claim, exactly the flow that was hanging. Only once that's green do we promote the candidate to live (the repo's safe-cutover discipline; codex flagged that testing the live file directly is backwards). We also confirm the Fee-Juice message now actually appears in the V5 inbox for that exact deposit.</p>
+    <p class="muted">Proves itself by: <code>smoke-swap-existing-testnet.ts --config …candidate.json</code> completes with the self-paying claim confirmed; the exact Fee-Juice message's checkpoint reads "defined" (it folded into the V5 inbox); lint clean; then candidate→live promotion.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>An Aztec L1→L2 "message" (like a bridge deposit) is posted into an L1 <em>inbox</em> by a <em>portal</em> contract, then the receiving wallet claims it on L2 by its position (leaf index) in that inbox. Each rollup deployment (V4, V5) has its own portals at its own L1 addresses. Our fuel router was carried over from a V4-era reference with the V4 fee-juice portal baked in as a constant. The token portal was re-deployed fresh for V5, which is why tokens work and fuel doesn't. Crucially, the wallet's claim only needs the leaf index + secret — it doesn't care about the portal address — so once the message lands in the <em>right</em> inbox, the existing wallet code claims it with no change. <span class="ok">Verified on-chain this session: the live V5 portal answers <code>UNDERLYING()</code> with exactly our Fee-Juice token, so the new door and the existing pools are compatible.</span></p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li>None blocking. Resolved with you: verification is an autonomous deployer-funded script (no dependency on your gas-less account); we update all the Solidity/env address sites so no dead V4 address lingers.</li>
+    <li><strong>Codex audit: conditional approve.</strong> It confirmed the core thesis (wrong portal is the whole story; no wallet change needed; reusing the swap is safe; redeploying only the router suffices) and caught 4 real refinements — all folded in: (1) the deploy script needed a tweak to be truly router-only, (2) smoke the <em>candidate</em> config before promoting live, (3) the stale-address inventory was 7 sites not 6 + one fork test doesn't actually exercise the portal, (4) gate on the exact message folding, not a brittle index-range guess. Plus an owner read-back and a sharper note that the old router stays a live (if orphaned) sink.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: re-pin the V5 fee-juice portal + re-deploy ONLY the router (reuse swap + pools) + update manifests + verify via script. Out of scope: any wallet-side change (verified unnecessary), re-seeding pools, the old orphaned router.</li>
+      <li>Confirm tier: <strong>light</strong> (single codex audit).</li>
+      <li>Confirm the validation plan: Phase 1 fork-test gate, Phase 2 on-chain read-back gate, Phase 3 live self-paying-claim gate.</li>
+      <li><code>/harden</code>: not recommended (one constructor arg, no trust-model change).</li>
+      <li>Approve / conditionally approve / reject.</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>Two options for the implementation session. <code>/goal</code> works turn-after-turn until a condition holds and survives <code>claude --resume</code>; <code>/loop</code> re-fires on an interval. This fix has a clear, transcript-observable finish line (all phase gates green) and a long single verification step, so <code>/goal</code> fits better than interval polling.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose; setting one replaces the other.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <pre><code>/goal All 3 phases in implementations-plan/fuel-portal-v5-fix/plan.md marked ✓ (the per-phase headers in the file), each backed by its validation gate reported passing in the transcript: Phase 1 forge build + DeployFuelLive.fork.t.sol green (router.feeJuicePortal()==0x7c4176bf + FJ-at-portal balance asserts) + the PoolSetupHelper guard so the deploy is router-only; Phase 2 broadcast "ONCHAIN EXECUTION COMPLETE" + three router read-backs (feeJuicePortal==0x7c4176bf, swapTarget==0x459ea79d, owner==deployer 0xFcc2238319); Phase 3 smoke-swap-existing-testnet.ts --config testnet-bridge.candidate.json self-paying claim confirmed + getL1ToL2MessageCheckpoint(fuelKey) defined for that deposit, THEN candidate→live promotion. For each phase print LESSONS_FILE=implementations-plan/fuel-portal-v5-fix/lessons/phase-N.md. Then /code-review max --fix on the diff, commit separately, codex post-impl audit (xhigh, adversarial), address high/critical. `bun run lint` exit 0 in the transcript. Hard limits: testnet only, never touch mainnet, surface before any irreversible step.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop (fallback)</h3>
+    <pre><code>/loop 15m Drive implementations-plan/fuel-portal-v5-fix forward. Never idle. Each firing: read plan.md + lessons/; git status; do the next pending phase; after each edit run bun run lint + the phase's forge/script gate; commit→push; mark ✓ only when the gate passes + print LESSONS_FILE=…/lessons/phase-N.md. Stuck or a real decision? /codex xhigh, decide, log it. Hard limits: testnet only, never mainnet, never expand scope. All phases ✓ → /code-review max --fix → codex post-impl audit → wrap-up + stop.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a> · parent: <a href="../aztec-5.0-upgrade/plan.md">aztec-5.0-upgrade</a></p>
+</body>
+</html>

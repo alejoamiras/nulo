@@ -11,10 +11,10 @@
  *
  * Wired into `audit:faucet` in the root package.json.
  */
-import { DRIPPER, ETH, rebuildDripperInstance, rebuildEthInstance, rebuildUsdcInstance, USDC } from "../src/contracts/deployments.js"
+import { DRIPPER, OLUN, rebuildDripperInstance, rebuildOlunInstance, rebuildNuloInstance, NULO } from "../src/contracts/deployments.js"
 
 async function main(): Promise<void> {
-	const [dripper, usdc, eth] = await Promise.all([rebuildDripperInstance(), rebuildUsdcInstance(), rebuildEthInstance()])
+	const [dripper, usdc, eth] = await Promise.all([rebuildDripperInstance(), rebuildNuloInstance(), rebuildOlunInstance()])
 
 	const checks: Array<{ name: string; computed: string; committed: string; ok: boolean }> = [
 		{
@@ -26,14 +26,14 @@ async function main(): Promise<void> {
 		{
 			name: "usdc",
 			computed: usdc.address.toString(),
-			committed: USDC.toString(),
-			ok: usdc.address.equals(USDC),
+			committed: NULO.toString(),
+			ok: usdc.address.equals(NULO),
 		},
 		{
 			name: "eth",
 			computed: eth.address.toString(),
-			committed: ETH.toString(),
-			ok: eth.address.equals(ETH),
+			committed: OLUN.toString(),
+			ok: eth.address.equals(OLUN),
 		},
 	]
 

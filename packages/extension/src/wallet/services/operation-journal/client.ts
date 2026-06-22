@@ -9,6 +9,7 @@ import {
 	type Methods,
 	type NewOperationInput,
 	OPERATION_JOURNAL_SERVICE_NAME,
+	type OperationCountFilter,
 	type OperationFilter,
 	OperationJournalMethodSchemas,
 	type OperationRecord,
@@ -55,6 +56,12 @@ export class OperationJournalServiceClient extends ServiceClient<Methods, Events
 		return validateResult(OperationJournalMethodSchemas.getOperations.result, result, "getOperations")
 	}
 
+	public async countOperations(filter: OperationCountFilter): Promise<number> {
+		validateParams(OperationJournalMethodSchemas.countOperations.params, [filter], "countOperations")
+		const result = await this.request("countOperations", filter)
+		return validateResult(OperationJournalMethodSchemas.countOperations.result, result, "countOperations")
+	}
+
 	public async deleteOperation(id: string): Promise<void> {
 		validateParams(OperationJournalMethodSchemas.deleteOperation.params, [id], "deleteOperation")
 		await this.request("deleteOperation", id)
@@ -80,7 +87,7 @@ export class OperationJournalServiceClient extends ServiceClient<Methods, Events
 	public async subscribeJob(id: string, handler: (op: OperationRecord | undefined) => void): Promise<() => void> {
 		// Late-snapshot guard: a Vue consumer that unsubscribes while a
 		// snapshot fetch is in flight should NOT receive the final stale
-		// tick when the fetch resolves. Same pattern as `subscribeWithSnapshot`.
+		// tick when the fetch resolves. Same snapshot-then-subscribe guard pattern.
 		let unsubscribed = false
 
 		const onAnyChange = (op: OperationRecord) => {

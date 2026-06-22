@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — security-audit-remediation</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem 4rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.9rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; padding-bottom: 0.3rem; border-bottom: 1px solid #eee; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    p { margin: 0.5rem 0 0.8rem; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; font-size: 0.82rem; }
+    .phase { margin: 1.2rem 0; padding: 0.9rem 1.1rem; border-left: 3px solid #ccc; background: #fafafa; border-radius: 0 4px 4px 0; }
+    .phase strong { color: #222; }
+    .seeds { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 0.8rem 0; font-size: 0.9rem; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; border-radius: 0 4px 4px 0; }
+    .approval ul { margin: 0.3rem 0 0; padding-left: 1.4rem; }
+    .meta { color: #666; font-size: 0.88rem; margin-bottom: 1.5rem; }
+    .meta div { margin: 0.1rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.88rem; }
+    ul { padding-left: 1.4rem; }
+    li { margin: 0.2rem 0; }
+    .audit-summary { background: #f5f5f0; padding: 0.9rem 1.1rem; border-radius: 4px; margin: 1.2rem 0; font-size: 0.92rem; }
+    .audit-summary strong { color: #222; }
+  </style>
+</head>
+<body>
+
+<h1>security-audit-remediation</h1>
+
+<div class="meta">
+  <div><strong>Plan</strong>: <a href="plan.md">plan.md</a> · <a href="decision-ledger.md">decision-ledger.md</a></div>
+  <div><strong>Tier</strong>: <code>/blueprint mega-deep</code> (user invoked <code>ultra</code>; mapped to heaviest tier)</div>
+  <div><strong>Source audit</strong>: <a href="../../audit/security/2026-06-08-ultra-e6759a/report.html">audit/security/2026-06-08-ultra-e6759a/</a> — 12 findings, 11 in scope (F-010 deferred)</div>
+</div>
+
+<p>This plan implements 11 of the 12 security findings the audit surfaced — every High and every Medium except F-010 (incoming-transfer storage growth, which is significantly more expensive than the rest and was deferred for this cycle). The wallet code currently works; this work closes specific authorization holes, a passkey-binding gap, an RPC-URL trust gap, and rebuilds the transaction-approval UI so attackers can't hide what they're asking for.</p>
+
+<h2>Why mega-deep?</h2>
+
+<p>The user explicitly chose <code>ultra</code>. In the blueprint skill that maps to <code>mega-deep</code> — the heaviest planning tier. The rubric for mega-deep wants 2+ high-risk dimensions AND high novelty. This task has:</p>
+
+<ul>
+  <li><strong>Security sensitivity</strong>: HIGH — every fix touches authorization, trust boundaries, or approval UX.</li>
+  <li><strong>Blast radius</strong>: HIGH — wallet is self-custody; users lose money if something breaks.</li>
+  <li><strong>External coupling</strong>: HIGH — F-001/F-002 partially depend on upstream <code>@aztec/wallet-sdk</code>.</li>
+  <li><strong>Irreversibility</strong>: MEDIUM — mistakes in approval UI are user-facing immediately.</li>
+  <li><strong>Novelty</strong>: MEDIUM — most fixes are well-defined patches; F-008 UX redesign is the genuinely novel part.</li>
+</ul>
+
+<p>4 of 6 dimensions are HIGH/MEDIUM. Mega-deep was the right call.</p>
+
+<h2>The 11 findings in plain language</h2>
+
+<div class="phase">
+  <strong>F-001 + F-002</strong>: An iframe (a page-within-a-page, like an embedded ad) currently can convince the wallet that it's the outer page. The wallet shows the outer page's URL in the approval popup, but the iframe controls the action. <em>Fix</em>: reject iframes from talking to the wallet by default; coordinate upstream for a deeper fix.
+</div>
+<div class="phase">
+  <strong>F-003</strong>: A dApp can request "access to your accounts" with a sub-setting that says "but don't let me read the addresses." The UI shows that setting; the code ignores it. The dApp reads the addresses anyway. <em>Fix</em>: actually honor the sub-setting. Hours of work.
+</div>
+<div class="phase">
+  <strong>F-004</strong>: Same shape as F-003 but for the address book ("data" capability with an <code>addressBook</code> sub-bit). <em>Fix</em>: honor it. Hours of work.
+</div>
+<div class="phase">
+  <strong>F-005</strong>: When a dApp calls certain methods, it can attach a "look at these accounts too" list. The wallet doesn't check whether those accounts were ever approved for this dApp. One approved account silently widens to all accounts. <em>Fix</em>: validate the list against the session's approved accounts.
+</div>
+<div class="phase">
+  <strong>F-006</strong>: When you click "Disconnect this dApp" in Settings, the wallet deletes a stored record but leaves the live encrypted channel open. The dApp keeps calling network-only methods. <em>Fix</em>: also kill the live channel; make missing-session calls fail closed instead of silently succeeding.
+</div>
+<div class="phase">
+  <strong>F-007</strong>: When you unlock with a passkey, the wallet doesn't check that the passkey is actually bound to the profile you're unlocking. Could open the wrong profile with wrong key material. <em>Fix</em>: a 4-line patch that already exists in another part of the codebase — just mirror it here.
+</div>
+<div class="phase">
+  <strong>F-008</strong>: When approving a transaction, the wallet shows "calling function X on contract Y" but hides the actual arguments (recipient, amount) behind a "View JSON" sub-link. <em>Fix</em>: structured argument summaries on the primary card. This is the biggest UX change in the plan and the user is rightfully nervous about it — the plan adds "don't guess" semantics: only show recipient/amount when the wallet can <strong>prove</strong> the typed shape; otherwise fall back to indexed args with an "Unverified summary" marker.
+</div>
+<div class="phase">
+  <strong>F-009</strong>: dApp names, token names, and function names are rendered without checking for Unicode tricks (Cyrillic 'c' in "USDC", right-to-left override, zero-width characters). <em>Fix</em>: route every dApp-controlled string through the existing <code>sanitizeWireString</code> helper. There's already a sanitizer in the codebase used in some places — just apply it everywhere.
+</div>
+<div class="phase">
+  <strong>F-011</strong>: Adding a custom RPC endpoint barely validates the URL — <code>javascript:</code>, <code>data:</code>, <code>file://</code>, anything on any host all pass. <em>Fix</em>: a central allowlist — HTTPS for any host, HTTP only for loopback (<code>localhost</code>, <code>127.0.0.1</code>, <code>::1</code>).
+</div>
+<div class="phase">
+  <strong>F-012</strong>: When the wallet signs a transaction, it asks the connected node "what chain ID are you?" and trusts the answer without comparing to the network the user selected. <em>Fix</em>: rebind the live chain identity to the selected network before signing.
+</div>
+
+<h2>Audit cycle (the value of mega-deep)</h2>
+
+<div class="audit-summary">
+<p><strong>Round 1 audits found real problems with the initial plan:</strong></p>
+<ul>
+  <li>The initial plan split F-005 out of Phase 1 to keep Phase 1 small. <strong>Both audits said reverse this</strong> — F-005 shares the same file and registry as F-003 + F-004; splitting them creates two PRs reviewing the same authorization story.</li>
+  <li>The initial plan proposed a single <code>walletSdkSessionId</code> field on stored sessions for F-006. <strong>Both audits said reverse this</strong> — one stored session can map to multiple live sessions (multi-tab same dApp), so a single field is wrong; iterate active sessions instead.</li>
+  <li>The initial plan's F-001/F-002 fix assumed Nulo could send messages targeted to a specific frame. <strong>Codex caught this is infeasible</strong> with the current upstream transport — the proposed mitigation would have looked right in tests but the real exploit path would have remained tab-scoped.</li>
+  <li>The initial plan missed that the dispatcher has <strong>six separate</strong> <code>tryGetDappSessionByOriginAndChain</code> calls — adding a 7th in Phase 3 would have widened a TOCTOU window. <strong>Opus caught this</strong> and proposed a Phase 0.5 to consolidate the lookups.</li>
+  <li>The initial plan's F-008 router fallback only caught thrown errors. <strong>Both audits caught the silent-mis-parse risk</strong>: a malicious dApp could craft a payload that looks transfer-shaped but isn't, and the new structured UI would render a precise-but-wrong "To/Amount" — a new phishing surface.</li>
+</ul>
+<p>The plan was revised. All blocking findings addressed. A final fresh-context codex pass is running now (Phase 7 of the blueprint ceremony) — verdict pending.</p>
+</div>
+
+<h2>Phases</h2>
+
+<div class="phase">
+  <h3>Phase 0.5 — Consolidate dispatcher session lookups (NEW, from audit)</h3>
+  <p>The dispatcher has 6 separate places where it asks "what session is this?" — closing one TOCTOU window at the entry point is cleaner than fixing it 6 times. ~1 day. Ships first.</p>
+</div>
+<div class="phase">
+  <h3>Phase 1 — Scope-enforcement primitives (F-003 + F-004 + F-005)</h3>
+  <p>The architectural setup. One PR that adds the sub-grant checker pattern + the account-scope allow-list. Closes 3 findings via shared registry. 1.5-2 days.</p>
+</div>
+<div class="phase">
+  <h3>Phase 2 — F-007 passkey unlock binding</h3>
+  <p>4-line patch + 1 test. Ships in parallel with Phase 0.5/1 (different file). &lt;1 hour.</p>
+</div>
+<div class="phase">
+  <h3>Phase 3 — F-006 session revocation teardown</h3>
+  <p>Cross-package: dapp-session service emits a tuple; wallet-sdk subscribes and tears down matching live sessions. Make missing-session calls fail closed at the dispatcher. 2-3 days, codex consult before merge.</p>
+</div>
+<div class="phase">
+  <h3>Phase 4 — F-001 + F-002 (Nulo-side defense-in-depth)</h3>
+  <p>Subframe rejection (feature-flagged so we can roll back) + content-script pending-request correlation. Frame-targeted send is upstream-blocked; file a separate upstream issue. 2-3 days.</p>
+</div>
+<div class="phase">
+  <h3>Phase 5 — F-011 + F-012 RPC endpoint trust</h3>
+  <p>Scheme allowlist on URL (https + loopback HTTP only). Shared <code>assertLiveChainIdentity</code> helper at 6+ sink sites. Cache eviction on network change. 2-3 days.</p>
+</div>
+<div class="phase">
+  <h3>Phase 6 — F-008 broad UX redesign</h3>
+  <p>The big one. Structured argument summaries on the primary approval card for all 5 popup-gated op types. "Don't guess" semantics: shape-prove via wallet-owned builders, else indexed-args fallback. 6a (transfer) + 6b (other 4) develop separately, merge to <code>dev</code> in single landing event to avoid half-rollout phishing signal. 4-5 days.</p>
+</div>
+<div class="phase">
+  <h3>Phase 7 — F-009 Unicode sanitization sweep</h3>
+  <p>Apply <code>sanitizeWireString</code> to every dApp-controlled render site that Phase 6 didn't already cover. ~1 day.</p>
+</div>
+<div class="phase">
+  <h3>Phase 8 — <code>/harden security max</code> re-run</h3>
+  <p>Confirm the fixes hold + catch any regressions. Failure-mode protocol: triage new findings as related (re-loop) vs unrelated (audit-followup tag, new arc). 60-90 min wall + variable triage.</p>
+</div>
+
+<h2>Open questions / Asks needing decision</h2>
+
+<ul>
+  <li><strong>Upstream coordination timing</strong>: file the upstream <code>@aztec/wallet-sdk</code> issue/PR (for F-001/F-002 deeper fix) in parallel with Phase 4, or later? Plan default: parallel.</li>
+  <li><strong>Subframe rejection default</strong>: ship with iframes blocked by default (closes F-001 immediately) or allowed by default behind a feature flag (preserves potential iframe-dApp compat)? Plan default: blocked.</li>
+  <li><strong>Phase 8 audit tier</strong>: <code>max</code> (60-90 min, plan default), <code>medium</code> (faster), or <code>ultra</code> (deeper)?</li>
+  <li><strong>F-008 router fallback UX</strong>: when shape-validation fails and we render "Unverified summary + indexed args," what's the visual treatment? Banner? Inline marker? Codex consult before Phase 6 merge.</li>
+  <li><strong>F-010 deferral</strong>: Phase 8 re-audit will reopen F-010 as unclosed. Accept as known + tagged for next cycle, or revisit scope?</li>
+</ul>
+
+<div class="approval">
+  <h2 style="margin-top:0">Approval decision needed from you</h2>
+  <ul>
+    <li>Confirm scope: 11 findings (skipping F-010).</li>
+    <li>Confirm tier: <code>mega-deep</code>.</li>
+    <li>Decide the open questions above (or leave defaults).</li>
+    <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    <li><strong>Note</strong>: the final fresh-context codex pass is still running. Approval should wait for that verdict — if it surfaces new blocking findings, another iteration cycle.</li>
+  </ul>
+</div>
+
+<section class="seeds">
+  <h2>Implementation seeds</h2>
+  <p>Two options for the autonomous implementation session. <strong>Pick one</strong> — they don't compose within a single Claude session. <code>/goal</code> survives <code>claude --resume</code>; <code>/loop</code> doesn't and auto-expires after 7 days. Pick <code>/goal</code> if completion is observable in the transcript (it is here — plan.md gets marked ✓ per phase). Pick <code>/loop</code> for self-paced cadence if you'd rather have Claude pick when to check in.</p>
+  <p class="warning">⚠ Use exactly ONE per session — they don't compose, setting one replaces the other.</p>
+
+  <div class="phase recommended">
+    <h3>Recommended for this plan: <code>/goal</code></h3>
+    <p>Better fit: phase completion is transcript-observable (LESSONS_FILE prints + plan.md ✓ marks) AND there's a hard finish line (Phase 8 re-audit). Survives <code>claude --resume</code> if you start the implementation in one session and check in over multiple days.</p>
+    <pre><code>/goal All 8 phases marked ✓ in implementations-plan/security-audit-remediation/plan.md; for each phase the agent has printed `LESSONS_FILE=implementations-plan/security-audit-remediation/lessons/phase-N.md` in the transcript; every phase has a regression test pin landed; /code-review max --fix complete with findings applied and committed separately from implementation; codex post-impl audit complete with high/critical findings addressed; `bun --cwd packages/extension test` + `bun --cwd packages/extension lint` + `bun --cwd packages/extension typecheck` all report exit 0 in the transcript; Phase 8's /harden security max re-run committed under audit/security/&lt;new-date&gt;/ with verdict matching this plan's failure-mode definition (no new related-Critical/High; unrelated findings tagged audit-followup).</code></pre>
+  </div>
+
+  <h3>Alternative: <code>/loop</code></h3>
+  <pre><code>/loop Each turn:
+1. Read implementations-plan/security-audit-remediation/plan.md + lessons/ for phase state; run git status + git log --oneline -5; if PR exists, gh pr view --json statusCheckRollup.
+2. CI in flight on HEAD SHA? Stream via gh run watch &lt;id&gt; for up to 10 min.
+3. Failed check? Triage; call /codex xhigh on non-trivial. Commit small + conventional + push. 5 failures on same step → stop + reassess.
+4. Phase green? Mark ✓ in plan.md, file lessons log, print LESSONS_FILE=..., advance.
+5. Nothing in flight? Pick next pending phase from plan.md; execute (edit → bun --cwd packages/extension lint → bun --cwd packages/extension test → commit → push).
+6. All 7 fix phases ✓? Run post-impl sequence: /code-review max --fix → commit separately → codex post-impl audit /codex xhigh with adversarial ask → address high/critical findings → /harden security max for Phase 8 → compare against audit/security/2026-06-08-ultra-e6759a/. Apply Phase 8 failure-mode protocol if new H/C findings. Stop + surface.
+
+Discipline: plan.md authoritative. Per-finding codex consult on Phase 3 (cross-package session-id wiring) + Phase 4 (subframe rejection feature flag) + Phase 6 (router fallback UX). Never merge to main or release branches. Stop when 7 fix phases ✓ + post-impl clean + Phase 8 re-audit shows no new related H/C.</code></pre>
+</section>
+
+<p class="muted" style="margin-top: 3rem"><a href="plan.md">plan.md</a> · <a href="decision-ledger.md">decision-ledger.md</a> · <a href="audit-codex.md">audit-codex.md</a> · <a href="audit-opus.md">audit-opus.md</a> · <a href="research/">research/</a> · <a href="lessons/">lessons/</a></p>
+
+</body>
+</html>

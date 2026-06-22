@@ -1,0 +1,196 @@
+# Phase 7 — Q23: execution-lane seam
+
+## The move (commit on this checkpoint)
+
+`execution-lane.ts` (NEW) now owns, moved verbatim off the facade:
+`activeControllers`, `executionMutex`, `executionWaiters` + heartbeat
+timer + begin/end/heartbeat methods, `resolveExecutionMutexKey`,
+`acquireExecutionSlot` (→ `acquireSlot`), the
+`claimOrCreateDappExecuteJournal` wrapper (→ `claimOrCreateJournal`),
+`markJournal`, and `cancelJob`. The caps statics
+(`EXECUTION_ORIGIN_CAP`=8, `EXECUTION_LANE_CAP`=32,
+`EXECUTION_WAIT_HEARTBEAT_MS`=30s) moved with it.
+
+Stays facade-side: `beginDappExecuteJournal` (journal-record SHAPING —
+injected into the lane as `createFreshRecord` for the claim path),
+`ensureInitialized` on the public `cancelJob` delegate, and the
+`executeOperations` dispatcher.
+
+Executors were already lane-shaped (CC6 paid off exactly as designed):
+the facade wiring flipped from facade-private closures to
+`this.lane.*` calls — zero executor-file changes in this phase.
+
+Constraint registry — all preserved verbatim and documented in the
+module docblock: mutex no-timeout/no-force-release; FIFO baton release
+point (`onEnqueued` after synchronous enqueue, before grant);
+transition-journal-first-abort-second; `JobCancelledSentinel` never
+crosses RPC (`rpc-cancel.ts` unchanged); journal FSM untouched;
+sync-register (controller registered before the acquire's first await).
+
+## Tests
+
+`execution-lane.test.ts` (5, real `ExecutionMutex`, mocked journal):
+1. sync-register + cancel-during-wait → `JobCancelledSentinel` carrying
+   the queued id, controller cleaned, lane still grants afterward.
+2. FIFO baton point: `onEnqueued` fires while still waiting; grant
+   order preserved across two queued followers.
+3. **capacity-reject mapping** (plan-mandated): origin depth 8 filled →
+   9th rejects `TooManyPendingError`, journal got
+   `("q9", {stage:"failed"}, {kind:"dapp_execute"})`, controller cleaned.
+4. **queued-wait heartbeat + reaper-window** (plan-mandated): fake
+   timers; `touchOperation` fires each 30s while queued; after the
+   grant the timer stops cold (0 touches over a further 120s) — the
+   holder's stage transitions take over.
+5. Mutex keying: different chainIds never contend.
+
+cancelJob's two ordering pins (FSM-accept → abort+remove; FSM-reject →
+drop, no abort) retargeted from facade-private injection to the lane in
+`service.characterization.test.ts`.
+
+Existing race suites (`claim-helper.test.ts`, `execution-mutex.test.ts`,
+journal `_transitionLocked`) untouched and green.
+
+## Gates (slice)
+
+typecheck exit 0 · `bun run lint` exit 0 · full unit suite **2,336
+passed** (+5) · facade now **746 lines**.
+
+## Phase gate (pending)
+
+Full e2e:agent + heavy shards (cancel-mid-prove, concurrent-sendtx,
+concurrent-sendtx-confirm) — purged, idle. Bail-out per A2 if it fails
+twice.
+
+## Gate run 1 — INVALID (idle precondition violated)
+
+Result: 63/69, 4 fails in 2 files (`concurrent-sendtx-confirm` ×2:
+detached-frame during fixture connect + page.evaluate;
+`token-management delete` ×1: ConnectionClosedError on newPage). All
+three signatures are puppeteer/browser-infra, ZERO wallet-behavior
+assertion failures (no journal-stage, FIFO-order, or nullifier errors).
+
+Post-hoc process audit found the box was NOT idle: a different worktree
+(nulo-4, another session) had 4 native `bb msgpack` prover processes
+running through the suite — the exact "heavy concurrent machine load"
+condition of baseline Run 1 (63/69, infra signatures). The run violated
+the gate's own idle precondition and is recorded as INVALID rather than
+as bail-out failure #1; the next IDLE run is the real gate. (Bail-out
+counter per A2 counts valid runs.)
+
+Watcher armed on the foreign prover processes; retry fires when they
+exit, after re-purge.
+
+## Gate run 2 — pre-registered decision rule (recorded BEFORE launch)
+
+The nulo-4 deploy looks hung (log silent 3.5h, bb provers still hot) and
+may block "true idle" indefinitely. Quantified load: ~2 of 14 cores
+(load avg ~4). Run 2 launches under this bounded foreign load with the
+following pre-registered classification:
+- **PASS** → valid green (a pass under adverse load is strictly
+  stronger evidence than an idle pass). Phase 7 closes.
+- **FAIL, infra-only signatures** (detached frame / connection closed /
+  fixture-connect) → load-confounded, uninformative for the lane
+  question; does NOT count toward A2's two-failure threshold; wait for
+  true idle resumes.
+- **FAIL, any wallet-behavior assertion** (journal stage, FIFO order,
+  nullifier, balance) → REAL failure #1 regardless of load — behavior
+  failures are not load artifacts.
+
+## Gate run 2 — RESULT: 66/69, classified REAL failure #1
+
+`concurrent-sendtx` (reject variant: two queued sendTx, both popups
+rejected, both dApp promises must error — "neither hangs" is the
+contract) timed out ×3 retries at the FIRST `waitForPgResult` (30s)
+after both rejects. Everything upstream passed: queued journal stages,
+≥2 awaiting cards, second popup opened after first reject (baton OK),
+second reject clicked.
+
+Classification per the pre-registered rule: a dApp promise that never
+settles is a BEHAVIORAL symptom (hang), not an infra signature → REAL
+failure #1. Counterweights recorded honestly:
+- The reject path never reaches `acquireSlot`/the execution mutex —
+  rejection happens at the approval layer, upstream of execution. No
+  obvious lane involvement.
+- The same test PASSED in run 1 under heavier load, and the sibling
+  `concurrent-sendtx-confirm` (same mutex machinery, full prove+confirm)
+  PASSED in run 2 — the lane serializes and releases end-to-end.
+- The nulo-4 deploy was still proving during run 2 (~1-2 cores).
+
+Investigation in flight: isolated `e2e:agent
+tests/e2e/network/concurrent-sendtx.test.ts` at the P7 tip. Plan:
+isolated PASS ×2 → environmental/page-starvation flake, next full gate
+decides; isolated FAIL → bisect P6-tip vs P7-tip (same discrimination
+matrix as the phase-3 nullifier investigation).
+
+## Isolation evidence (post run 2)
+
+`e2e:agent tests/e2e/network/concurrent-sendtx.test.ts` at the P7 tip:
+**PASS ×2**, both runs while the nulo-4 deploy was STILL proving
+(~1-2 cores). The run-2 failure does not reproduce in isolation —
+mechanism attributed to parallel-shard + foreign-prover contention
+starving the playground page (the 30s `waitForPgResult` budget is the
+tightest wait in the suite).
+
+Ledger discipline: run 2's REAL-failure-#1 classification STANDS (it
+was pre-registered; no retroactive un-counting). The isolation evidence
+informs the NEXT step, not the last ruling: the decisive full gate run
+waits for true idle (watcher on the foreign deploy's exit), because a
+second valid failure triggers the A2 bail-out and must not be spent on
+reproducible-only-under-contention noise.
+
+Score so far: full-suite 66-69/69 across two loaded runs with zero
+wallet-behavior assertion failures; heavy shards cancel-mid-prove +
+concurrent-sendtx-confirm green on run 2; lane unit pins + codex parity
+green.
+
+## Bounded protocol for the decisive gate (pre-registered, run 3+)
+
+The foreign deploy is hung (6h, log frozen, provers hot); "true idle"
+may never arrive. To avoid both an unbounded stall AND run-until-green
+p-hacking, the following is fixed BEFORE run 3:
+- Run the full gate under the documented foreign load (~1-2.5 cores).
+- **GREEN → Phase 7 closes** (pass under adversity is strong evidence).
+- **FAIL with any wallet-behavior assertion → REAL failure #2 → A2
+  bail-out package to the user.** No exceptions.
+- **FAIL with contention-class signatures only** (waitFor timeout /
+  detached frame / connection closed, foreign load verified at run
+  time) → non-counting, but at MOST 2 such loaded attempts total; if
+  neither is green, STOP and surface the full ledger to the user
+  anyway — repeated contention flakes are themselves a finding.
+Every run + ruling is committed to lessons before/after each attempt.
+
+## Gate run 3 — 66/69, NON-COUNTING (contention-class)
+
+Single failure `batch-mixed`, ×3 retries, all in FIXTURE SETUP:
+`connectPlayground:awaitDiscoverPopup — detached Frame` — the exact
+signature class pre-registered as contention noise (run-1's class). The
+test body never executed. Foreign deploy verified still proving at
+launch and completion.
+
+Cross-run pattern (the strongest environmental evidence so far): the
+failing sets across runs 1/2/3 are DISJOINT — {concurrent-sendtx-confirm,
+token-management} → {concurrent-sendtx} → {batch-mixed} — and every
+failure passes in the other runs. Every test in the suite has now
+passed at the P7 tip in at least one loaded run. A real lane regression
+would fail the same test deterministically.
+
+This was loaded attempt 1 of max 2. Attempt 2 launches now; if not
+green, STOP and surface the full ledger per the bounded protocol.
+
+## Gate run 4 — GREEN. Phase 7 CLOSED ✓
+
+**67 passed | 2 skipped (69), ZERO failures** — while the foreign
+deploy was STILL proving. Per the pre-registered bounded protocol:
+green under adversity closes the phase. The full gate evidence chain:
+- Lane unit pins (5) + retargeted cancelJob pins: green.
+- Codex P6 parity: "PARITY CONFIRMED, no findings" (lane landed after,
+  but the lane move was verbatim with its own unit pins; P8's codex
+  post-impl audit covers the net arc diff including the lane).
+- e2e: runs 1-3 each 63-66/69 with DISJOINT contention-class failures
+  (every test passed at the P7 tip in ≥1 loaded run; isolation ×2 green);
+  run 4 fully green under the same load.
+- Bail-out ledger final state: one counted failure (run 2, pre-registered
+  ruling), never reached two.
+
+The heavy shards the phase names — cancel-mid-prove, concurrent-sendtx,
+concurrent-sendtx-confirm — are all green in run 4.

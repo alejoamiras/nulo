@@ -9,7 +9,7 @@
 <script setup>
 /** Components */
 import AuthProfilePill from "@/popup/components/modules/auth/AuthProfilePill.vue"
-import PasskeyCeremonyDialog from "@/popup/components/popups/PasskeyCeremonyDialog.vue"
+import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vue"
 
 /** Composables */
 import { checkNotificationsForShow } from "@/composables/notification"
@@ -175,6 +175,7 @@ watch(
 							<template #suffix>
 								<button
 									type="button"
+									tabindex="-1"
 									@click="isPasswordType = !isPasswordType"
 									:class="$style.visibility_btn"
 									:aria-label="isPasswordType ? 'Show password' : 'Hide password'"

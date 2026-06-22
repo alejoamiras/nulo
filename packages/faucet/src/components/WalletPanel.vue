@@ -2,9 +2,7 @@
 import { computed } from "vue"
 import { useWalletConnection } from "@/composables/useWalletConnection"
 import { TESTIDS } from "@/lib/testids"
-import AddressDisplay from "./composite/AddressDisplay.vue"
-import AppButton from "./ui/AppButton.vue"
-import Spinner from "./ui/Spinner.vue"
+import { AddressDisplay, Button, Spinner } from "@nulo/design"
 import VerificationModal from "./VerificationModal.vue"
 
 const {
@@ -19,7 +17,7 @@ const {
 	disconnect,
 } = useWalletConnection()
 
-const NULO_INSTALL_URL = import.meta.env.VITE_NULO_INSTALL_URL ?? "https://chromewebstore.google.com/"
+const NULO_INSTALL_URL = import.meta.env.VITE_NULO_INSTALL_URL ?? "https://nulo.sh"
 
 const connectLabel = computed(() => {
 	switch (status.value) {
@@ -61,17 +59,17 @@ function openInstall() {
 
 <template>
 	<section class="panel" :data-testid="TESTIDS.status" :data-status="status">
-		<div v-if="status === 'connected' && selectedAccount" class="connected">
-			<span class="label">Connected</span>
+		<div v-if="status === 'connected' && selectedAccount" class="chip">
+			<span class="label">Aztec</span>
 			<AddressDisplay :address="selectedAccount" :data-testid="TESTIDS.account" />
-			<span class="chain">alpha-testnet</span>
 			<button
 				class="disconnect"
 				type="button"
+				aria-label="Disconnect"
 				:data-testid="TESTIDS.btnDisconnect"
 				@click="disconnect"
 			>
-				Disconnect
+				✕
 			</button>
 		</div>
 
@@ -84,34 +82,35 @@ function openInstall() {
 			<h3>Awaiting permissions</h3>
 			<p>
 				Approve this faucet's permissions in your wallet. We're asking to read your balances and
-				submit drip transactions to the Dripper contract — nothing else.
+				submit drip transactions to the Dripper contract - nothing else.
 			</p>
 			<p v-if="showCapabilityError" class="hint">You denied the permissions. Click to try again.</p>
-			<AppButton :data-testid="TESTIDS.btnCapabilityRetry" @click="retryCapabilities">
+			<Button :data-testid="TESTIDS.btnCapabilityRetry" @click="retryCapabilities">
 				Approve permissions
-			</AppButton>
+			</Button>
 		</div>
 
 		<div v-else-if="showNoWalletCta" class="no-wallet">
 			<h3>No Aztec wallet detected on this browser.</h3>
 			<p>
 				This faucet works with any wallet that speaks the Aztec Wallet SDK. Nulo is the fastest
-				way to start — it's an extension, takes 30 seconds.
+				way to start - it's an extension, takes 30 seconds.
 			</p>
-			<AppButton :data-testid="TESTIDS.btnInstallNulo" @click="openInstall">
+			<Button :data-testid="TESTIDS.btnInstallNulo" @click="openInstall">
 				Install Nulo
-			</AppButton>
+			</Button>
 		</div>
 
 		<div v-else class="connect">
-			<AppButton
+			<Button
 				v-if="showConnectButton"
 				:loading="status === 'discovering'"
+				:disabled="status === 'discovering'"
 				:data-testid="TESTIDS.btnConnect"
 				@click="onClick"
 			>
 				{{ connectLabel }}
-			</AppButton>
+			</Button>
 			<p v-if="status === 'error' && error?.category !== 'no-wallet' && error?.category !== 'capability-rejected'" class="error-hint">
 				{{ error?.message }}
 			</p>
@@ -127,46 +126,37 @@ function openInstall() {
 
 <style scoped>
 .panel {
-	display: flex;
+	display: inline-flex;
 	flex-direction: column;
-	gap: 16px;
-	padding: 24px 0;
-	border-bottom: 1px solid var(--nulo-outline);
-}
-
-.connected {
-	display: flex;
-	align-items: center;
 	gap: 12px;
-	flex-wrap: wrap;
 }
 
-.connected .label {
+.chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+	padding: 8px 12px;
+	border: 1px solid var(--nulo-outline);
+}
+
+.chip .label {
 	color: var(--txt-secondary);
 	font: 500 11px/1 var(--font-mono);
 	letter-spacing: 0.12em;
 	text-transform: uppercase;
 }
 
-.connected .chain {
-	color: var(--mint);
-	font: 500 11px/1 var(--font-mono);
-	letter-spacing: 0.08em;
-	text-transform: uppercase;
-	padding: 4px 8px;
-	border: 1px solid var(--mint);
-}
-
 .disconnect {
-	margin-left: auto;
 	color: var(--txt-secondary);
-	font-size: 13px;
-	text-decoration: underline;
-	text-underline-offset: 3px;
+	font: 600 12px/1 var(--font-mono);
+	cursor: pointer;
+	background: transparent;
+	border: none;
+	padding: 2px 4px;
 }
 
 .disconnect:hover {
-	color: var(--txt-primary);
+	color: var(--red);
 }
 
 .capability,

@@ -26,7 +26,6 @@ for (const alwaysTrust of [false, true]) {
 		`session-reconnect — alwaysTrust=${alwaysTrust} reconnect ${alwaysTrust ? "skips" : "shows"} verify`,
 		{
 			timeout: 120_000,
-			retry: 1,
 		},
 		async ({ registeredExtensionPerTest }) => {
 			// Switch to Local Network so the playground's chainInfo (Fr.ZERO = 0)
@@ -38,10 +37,10 @@ for (const alwaysTrust of [false, true]) {
 
 			// First connect — full handshake with the alwaysTrust toggle as configured
 			const dappPage = await openPlayground(registeredExtensionPerTest)
-			const discoverP1 = waitForPopup(registeredExtensionPerTest, "discover", { timeout: 15_000 })
+			const discoverP1 = waitForPopup(registeredExtensionPerTest, "discover", { timeout: 30_000 })
 			await clickByTestId(dappPage, "pg-btn-connect")
 			await approveDiscover(await discoverP1)
-			const verifyPage1 = await waitForPopup(registeredExtensionPerTest, "verify", { timeout: 15_000 })
+			const verifyPage1 = await waitForPopup(registeredExtensionPerTest, "verify", { timeout: 30_000 })
 			await approveVerify(verifyPage1, { alwaysTrust })
 			await dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 20_000 })
 

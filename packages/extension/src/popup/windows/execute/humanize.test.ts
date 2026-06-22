@@ -25,7 +25,6 @@ describe("humanizeOperationKind", () => {
 		expect(humanizeOperationKind("register_contract")).toBe("Register contract")
 		expect(humanizeOperationKind("register_sender")).toBe("Register sender")
 		expect(humanizeOperationKind("register_token")).toBe("Register token")
-		expect(humanizeOperationKind("simulate_views")).toBe("Simulate views")
 	})
 
 	it("replaces ALL underscores in multi-underscore snake_case kinds", () => {

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — design-system externalization (round 2)</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    .callout { background: #fff4f4; padding: 1rem 1.25rem; border-left: 3px solid #d64545; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Design system, round 2: the hard leftovers</h1>
+  <p>Round 1 moved the <em>easy</em> shared UI bits (colors, fonts, plain little components like
+  badges and toggles) out of the wallet extension and into one shared package, <code>@nulo/design</code>,
+  so the wallet and the faucet both use the same source. Round 2 finishes the job: the <strong>9
+  leftover components</strong> that round 1 skipped because each was "stuck" to something
+  app-specific — the router, app state, or the page's HTML shell. We unstick each one cleanly, move it
+  to the shared package, and tidy up the leftover tooling.</p>
+
+  <h2>Why "deep" (the heaviest planning tier)</h2>
+  <p>Scored against the rubric: <strong>blast radius is HIGH</strong> (these primitives — Button,
+  Input, Spinner, Tooltip — render on basically every screen of a ~200-component wallet plus the
+  faucet, so a mistake shows up everywhere). The other factors are moderate/low (it's reversible, no
+  data migration, no new external services). One clear HIGH would normally be "mid", but the seams
+  round 1 deliberately deferred (decoupling the router, the teleport roots, reconciling two different
+  versions of Button + Spinner across two apps) are exactly the contested design forks where three
+  independent plans + two audit rounds earn their cost. Three plans were drafted (this agent + codex +
+  an Opus subagent), reconciled against the actual repo, then attacked by codex and a hostile fresh
+  reviewer. They caught real defects — see "What the audits changed."</p>
+
+  <div class="callout">
+    <h2>The faucet's look change is isolated to the LAST step (easy to roll back)</h2>
+    <p>The locked rule is "the extension's components win; the faucet adopts them" — so the faucet's
+    buttons will eventually change to the wallet's <strong>brutalist UPPERCASE accent style</strong>
+    and its spinner from a 0.75-second spin to the wallet's 4-second spin. Per your call, <strong>all
+    of that faucet visual change is packed into the single final step (PR7)</strong>, and the faucet is
+    held visually frozen until then. If anything looks wrong, reverting that one PR restores the
+    faucet's current look completely, leaving all the shared-package work intact. The only cost is a
+    small temporary "legacy spinner" kept around between steps 2 and 7.</p>
+  </div>
+
+  <h2>The plan in 7 steps (each is one PR, each stays green on its own)</h2>
+
+  <div class="phase">
+    <h3>PR1 — Set up the safety nets first</h3>
+    <p>Fix the (currently broken) Storybook build, add a lint rule so the new "ui" layer can't import
+    upward, turn the package's boundary test into a tripwire (no router, no raw-HTML rendering), and
+    add a guard that catches the exact kind of faucet styling regression that slipped through round 1.</p>
+    <p class="muted">Proves itself by: package tests + both app builds + Storybook build all green;
+    the new guards actually fail when you break them.</p>
+  </div>
+  <div class="phase">
+    <h3>PR2 — Merge the two Spinners into one (faucet kept frozen)</h3>
+    <p>The wallet and the package each have a different spinner. Merge them into one (the wallet's
+    look, keeping the package's accessibility labels). The wallet adopts it now; the <strong>faucet is
+    pinned to a temporary "legacy spinner" copy</strong> so it doesn't change yet. Then move the two
+    components that use it (Banner, LoadingState).</p>
+    <p class="muted">Proves itself by: all unit tests + both builds + smoke green; faucet build green +
+    visually unchanged (no faucet sign-off needed yet).</p>
+  </div>
+  <div class="phase">
+    <h3>PR3 — Move the toast (little popup messages) machinery</h3>
+    <p>Move the toast logic into the package, but leave a one-line forwarder where it used to live so
+    the ~55 places that use it don't change. Keep the wallet's toast region working as before.</p>
+    <p class="muted">Proves itself by: all ~55 toast users still compile + tests green.</p>
+  </div>
+  <div class="phase">
+    <h3>PR4 — The Button + back-header (the router-coupled ones) — wallet only</h3>
+    <p>Move Button so the shared package never needs the router: the package version is a plain button
+    (or a safe link), and the wallet keeps a thin wrapper for router links. Same trick for the page
+    back-header. <strong>The faucet is NOT touched here</strong> — it keeps its current buttons until
+    the final step.</p>
+    <p class="muted">Proves itself by: all tests + both builds + smoke green; faucet unchanged.</p>
+  </div>
+  <div class="phase">
+    <h3>PR5 — Tooltip + Popover (the ones glued to the page shell)</h3>
+    <p>Move the "click-outside" helper into the package (it's shared with the dropdown too), then move
+    Tooltip and Popover, letting each app say where they pop up instead of hard-coding it.</p>
+    <p class="muted">Proves itself by: package + extension tests + build + smoke green; the dropdown
+    still works.</p>
+  </div>
+  <div class="phase">
+    <h3>PR6 — Input — wallet only</h3>
+    <p>Move Input (it uses Tooltip, now available) with its own copy of the small text-cleaning helper.
+    Still no faucet visual change.</p>
+    <p class="muted">Proves itself by: package + extension + faucet tests + builds + smoke green; faucet
+    still frozen.</p>
+  </div>
+  <div class="phase recommended">
+    <h3>PR7 — Faucet cutover + final sign-off (the only faucet-look change — fully revertible)</h3>
+    <p>Now, in ONE PR, switch the faucet's 10 buttons to the shared Button, flip its spinner to the
+    shared one, and delete the temporary legacy spinner. Update docs. Full gate: everything green, the
+    network test suite, and a human check on both apps — wallet "looks identical", faucet "the
+    intentional restyle looks right". <strong>If the faucet restyle is wrong, revert this one PR and
+    the faucet is back to normal.</strong></p>
+    <p class="muted">Proves itself by: full audit + network e2e green + human sign-off on both apps.</p>
+  </div>
+
+  <h2>What the audits changed (proof the process worked)</h2>
+  <ul>
+    <li>Caught a <strong>self-contradiction</strong> in the Button design (a "plain button only" base
+    can't also render links) → fixed to a safe closed button/link choice.</li>
+    <li>Caught that the toast/outside helpers are imported with an explicit <code>.js</code> ending in
+    dozens of files → the forwarder must keep the <code>.js</code> filename or everything breaks.</li>
+    <li>Caught a potential <strong>infinite render loop</strong> in the Button wrapper (it must call
+    the base by a different name).</li>
+    <li>Caught a <strong>made-up bug-pin</strong> one planner hallucinated → removed.</li>
+    <li>Caught that the faucet restyle was being undersold as a "rename" → now called out explicitly
+    (the box above).</li>
+  </ul>
+
+  <h2>Open questions for you</h2>
+  <ul>
+    <li><strong>Faucet restyle (A3): RESOLVED</strong> — isolated to the final step (PR7) so it's
+    easily revertible; faucet stays frozen until then.</li>
+    <li><strong>Smoke-test policy (A1):</strong> there's a known pre-existing flaky smoke test. OK to
+    gate on "no <em>new</em> failures" (with the flake reproduced on the base branch first)?</li>
+    <li><strong>Old AppButton (A2):</strong> keep it live this round (a package component still uses
+    it); only the faucet's 10 direct buttons migrate. Retire it next round?</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope (9 components + tooling/cleanup; quirk-fixes excluded) and the tier (deep).</li>
+      <li>Confirm the validation plan: fast checks every PR, smoke on render PRs, network e2e + human
+      visual sign-off on both apps at the end.</li>
+      <li>Answer the three open questions (faucet restyle, smoke policy, AppButton alias).</li>
+      <li>Decide on <code>/harden</code>: recommended to SKIP (presentational round, no new trust
+      boundary; the package boundary test already guards the floor).</li>
+      <li>Approve / conditionally approve (with conditions) / reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>Two options for the autonomous implementation session. <code>/goal</code> survives
+    <code>claude --resume</code> and keeps working until a condition holds; <code>/loop</code> re-fires
+    on an interval. Pick the one matching whether completion is visible in the transcript.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose; setting one replaces the other.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <p class="muted">Completion is transcript-observable: each phase has concrete gate commands + a ✓
+      in plan.md.</p>
+      <pre><code>/goal All 7 phases marked ✓ in implementations-plan/design-system-externalization-round-2/plan.md (the per-phase headers in the file, not just chat), each ✓ backed by its phase's Validation gate reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/design-system-externalization-round-2/lessons/phase-N.md`; `/code-review max --fix` complete with findings applied + committed; codex post-impl audit complete with high/critical addressed; `bun run audit:vue` and `bun run lint` both report exit 0 in the transcript; final sign-off recorded in the lessons (extension "no deltas" + faucet intentional-restyle confirmed at P7).</code></pre>
+    </div>
+
+    <h3>Alternative: /loop</h3>
+    <pre><code>/loop 15m Drive implementations-plan/design-system-externalization-round-2 forward. Never idle waiting for my input. Each firing: (1) read plan.md + lessons/ (authoritative, not chat); `git status` + `git log --oneline -5`; if a PR exists, `gh pr view --json statusCheckRollup` (no --watch). (2) Waiting on CI is fine — confirm it's progressing; use the wait to review the diff / prep the next phase. (3) No task in hand? Take the next pending step from plan.md; after each edit run `bun run lint` + the touched-package tests; commit → push. (4) Stuck or facing a decision? `/codex xhigh` with full context, reach a defensible call, log it in lessons/phase-N.md. Never merge to main/release, never publish, never expand scope. (5) Same step failed 5×? Stop, reassess with codex. (6) Phase green = its plan.md Validation gate passes (commands + criteria); paste the result, mark ✓ in plan.md, file lessons, print `LESSONS_FILE=...`, advance. (7) All 7 ✓? Run `/code-review max --fix` → commit → codex post-impl audit → address high/critical → write the wrap-up (what shipped, every contentious codex debate with ELI5 context, open items) and stop.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="brief.md">Shared brief</a> ·
+  <a href="audit-codex.md">Codex audit</a> · <a href="audit-fable.md">Hostile audit</a> ·
+  <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

@@ -74,9 +74,62 @@ export const ERR_BACKUP_TOO_OLD = "BACKUP_TOO_OLD"
 
 export const ChainKindSchema: z.ZodType<ChainKind> = z.enum(["mainnet", "testnet", "devnet", "local", "custom"])
 
+/**
+ * F-011 / Phase 5: RPC URL allowlist.
+ *
+ * Pre-fix, RPC URL validation was only `z.string().url()`, which accepts
+ * `javascript:`, `data:`, `file://`, `chrome:`, plus any HTTP URL on any
+ * host. A phishing-added or backup-imported endpoint could become the
+ * wallet's trusted chain authority — controlling fee quotes, note state,
+ * chain identity, etc.
+ *
+ * Allow:
+ * - `https:` for any host.
+ * - `http:` ONLY for loopback hosts (`localhost`, `127.0.0.1`, `[::1]`).
+ *   NOTE: WHATWG-URL preserves IPv6 brackets in `URL.hostname`, so the
+ *   literal `[::1]` is correct — empirically verified by codex Round 2 B-3
+ *   in both Bun 1.3.13 and Node v24.
+ *
+ * Reject everything else.
+ *
+ * Applied at:
+ * - `NetworkEndpointSchema.rpcUrl` (rest-storage validation, including restore).
+ * - `NetworkInfoSchema.rpcUrl` (runtime-snapshot validation).
+ * - `addNetwork` / `addEndpoint` / `updateEndpoint` params (user-facing add).
+ * - `aztec-runtime` adapter (defense-in-depth at the node-factory boundary).
+ */
+export const RpcUrlSchema = z
+	.string()
+	.url()
+	.refine(
+		(url) => {
+			let parsed: URL
+			try {
+				parsed = new URL(url)
+			} catch {
+				return false
+			}
+			// Reject userinfo (`user:pass@host`). WHATWG-URL parses
+			// `https://user@evil.com@safe.com` as username=`user@evil.com`,
+			// host=`safe.com` — the userinfo is the visible part of the URL
+			// and a known phishing vector. We always strip these endpoints.
+			if (parsed.username !== "" || parsed.password !== "") return false
+			const scheme = parsed.protocol.slice(0, -1) // strip trailing ":"
+			if (scheme === "https") return true
+			if (scheme === "http") {
+				const host = parsed.hostname.toLowerCase()
+				// WHATWG-URL keeps IPv6 brackets in hostname; "[::1]" is the
+				// literal form. Codex Round 2 B-3 verified empirically.
+				return host === "localhost" || host === "127.0.0.1" || host === "[::1]"
+			}
+			return false
+		},
+		{ message: "RPC URL must use https:// or http://localhost / http://127.0.0.1 / http://[::1] and contain no userinfo" },
+	)
+
 export const NetworkEndpointSchema: z.ZodType<NetworkEndpoint> = z.object({
 	id: z.string(),
-	rpcUrl: z.string(),
+	rpcUrl: RpcUrlSchema,
 	label: z.string().optional(),
 })
 
@@ -97,7 +150,7 @@ export const NodeStatusSchema: z.ZodType<NodeStatus> = z.nativeEnum(NodeStatus)
 export const NetworkInfoSchema: z.ZodType<NetworkInfo> = z.object({
 	profileId: z.string(),
 	chainId: z.number(),
-	rpcUrl: z.string(),
+	rpcUrl: RpcUrlSchema,
 })
 
 /**
@@ -118,7 +171,7 @@ export const NetworkMethodSchemas = {
 		result: NetworkSchema,
 	},
 	addNetwork: {
-		params: z.tuple([z.string().min(1), z.string().url()]),
+		params: z.tuple([z.string().min(1), RpcUrlSchema]),
 		result: NetworkSchema,
 	},
 	renameNetwork: {
@@ -138,11 +191,11 @@ export const NetworkMethodSchemas = {
 		result: NetworkSchema.nullable(),
 	},
 	addEndpoint: {
-		params: z.tuple([z.string().min(1), z.string().optional(), z.string().url()]),
+		params: z.tuple([z.string().min(1), z.string().optional(), RpcUrlSchema]),
 		result: NetworkEndpointSchema,
 	},
 	updateEndpoint: {
-		params: z.tuple([z.string().min(1), z.string().min(1), z.string().optional(), z.string().url()]),
+		params: z.tuple([z.string().min(1), z.string().min(1), z.string().optional(), RpcUrlSchema]),
 		result: NetworkEndpointSchema,
 	},
 	deleteEndpoint: {

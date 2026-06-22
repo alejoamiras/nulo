@@ -1,3 +1,9 @@
+import {
+	formatCaipAccount as bridgeFormatCaipAccount,
+	formatCaipChain as bridgeFormatCaipChain,
+	parseCaipAccount as bridgeParseCaipAccount,
+	resolveNetworkByChainId as bridgeResolveNetworkByChainId,
+} from "@nulo/wallet-bridge"
 import { describe, expect, test } from "vitest"
 import { AZTEC_NAMESPACE, formatCaipAccount, formatCaipChain, parseCaipAccount, parseCaipChain, resolveNetworkByChainId } from "./caip"
 
@@ -100,5 +106,24 @@ describe("CAIP helpers", () => {
 			await resolveNetworkByChainId(service, 31337)
 			expect(seen).toBe(31337)
 		})
+	})
+})
+
+describe("CAIP single-owner parity with @nulo/wallet-bridge", () => {
+	// The format / parse-account / resolve helpers are single-owned by the bridge
+	// and re-exported from `./caip`. Pin that the extension surface IS the
+	// bridge's implementation — a divergent local re-copy would break the
+	// reference identity (and, defensively, the fixed-vector output).
+	test("re-exported helpers are the bridge's own references", () => {
+		expect(formatCaipChain).toBe(bridgeFormatCaipChain)
+		expect(formatCaipAccount).toBe(bridgeFormatCaipAccount)
+		expect(parseCaipAccount).toBe(bridgeParseCaipAccount)
+		expect(resolveNetworkByChainId).toBe(bridgeResolveNetworkByChainId)
+	})
+
+	test("identical output for a fixed vector", () => {
+		expect(formatCaipChain(31337)).toBe(bridgeFormatCaipChain(31337))
+		expect(formatCaipAccount(31337, "0xabc")).toBe(bridgeFormatCaipAccount(31337, "0xabc"))
+		expect(parseCaipAccount("aztec:31337:0xabc")).toEqual(bridgeParseCaipAccount("aztec:31337:0xabc"))
 	})
 })

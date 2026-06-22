@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>E2E Full Network Recovery — ELI5</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --fg-muted: #555;
+    --bg: #fefefe;
+    --accent: #2563eb;
+    --rule: #e5e5e5;
+    --code-bg: #f4f4f5;
+    --warn-bg: #fff7ed;
+    --warn-fg: #9a3412;
+    --ok-bg: #ecfdf5;
+    --ok-fg: #065f46;
+    --info-bg: #eff6ff;
+    --info-fg: #1e40af;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0;
+  }
+  main {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 6rem;
+  }
+  h1 {
+    font-size: 2rem;
+    line-height: 1.2;
+    margin: 0 0 0.5rem;
+    font-weight: 600;
+  }
+  h2 {
+    font-size: 1.4rem;
+    margin: 3rem 0 0.75rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+    font-weight: 600;
+  }
+  h2:first-of-type { border-top: none; padding-top: 0; }
+  h3 {
+    font-size: 1.1rem;
+    margin: 1.75rem 0 0.5rem;
+    font-weight: 600;
+  }
+  p, li { margin: 0.6rem 0; }
+  ul, ol { padding-left: 1.5rem; }
+  .lede {
+    color: var(--fg-muted);
+    font-size: 1.1rem;
+    margin: 0 0 2rem;
+  }
+  code, .mono {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.92em;
+    background: var(--code-bg);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+  pre {
+    background: var(--code-bg);
+    padding: 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 0.85em;
+    line-height: 1.5;
+  }
+  pre code {
+    background: none;
+    padding: 0;
+    border-radius: 0;
+  }
+  .box {
+    margin: 1rem 0;
+    padding: 0.8rem 1rem;
+    border-radius: 6px;
+    border-left: 3px solid;
+  }
+  .box.info { background: var(--info-bg); border-color: var(--info-fg); }
+  .box.warn { background: var(--warn-bg); border-color: var(--warn-fg); }
+  .box.ok { background: var(--ok-bg); border-color: var(--ok-fg); }
+  .box.info strong { color: var(--info-fg); }
+  .box.warn strong { color: var(--warn-fg); }
+  .box.ok strong { color: var(--ok-fg); }
+  .phase {
+    margin: 1.5rem 0;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+  }
+  .phase-title {
+    font-weight: 600;
+    color: var(--accent);
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+  }
+  .phase-what, .phase-why {
+    margin: 0.4rem 0;
+  }
+  .phase-what::before {
+    content: "What: ";
+    color: var(--fg-muted);
+    font-weight: 600;
+  }
+  .phase-why::before {
+    content: "Why: ";
+    color: var(--fg-muted);
+    font-weight: 600;
+  }
+  .ascii-flow {
+    background: var(--code-bg);
+    padding: 1rem 1.25rem;
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.82em;
+    line-height: 1.4;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid var(--rule);
+    margin: 3rem 0;
+  }
+  .footer {
+    margin-top: 4rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--rule);
+    color: var(--fg-muted);
+    font-size: 0.92em;
+  }
+  .q {
+    margin: 1rem 0;
+    padding: 0.8rem 1rem;
+    background: var(--code-bg);
+    border-radius: 6px;
+  }
+  .q-question {
+    font-weight: 600;
+    margin: 0 0 0.4rem;
+  }
+  .q-context {
+    color: var(--fg-muted);
+    font-size: 0.95em;
+    margin: 0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.92em;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th {
+    background: var(--code-bg);
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>E2E Full Network Recovery</h1>
+<p class="lede">A walkthrough of what we&rsquo;re doing, why, and what could go wrong &mdash; in plain language. No jargon you don&rsquo;t need.</p>
+
+<h2>The setup, in one paragraph</h2>
+<p>The Nulo browser extension talks to <em>dApps</em> (websites that want to use the wallet). Tests simulate that conversation. Right now, <strong>most of those tests fail</strong> &mdash; not because they&rsquo;re broken, but because the conversation between dApp and wallet is silently dropping messages in the middle. The previous PR (#46) made the failures <em>visible</em> instead of silently skipping; this plan&rsquo;s job is to fix them.</p>
+
+<div class="box ok">
+  <p><strong>Current score:</strong> 17 tests pass &middot; 36 tests fail &middot; 4 tests intentionally muted.</p>
+  <p><strong>Target score:</strong> 61 tests pass &middot; 0 tests fail &middot; 0 tests muted.</p>
+</div>
+
+<h2>The actors</h2>
+<table>
+<tr><th>Who</th><th>What they do</th></tr>
+<tr><td><strong>Playground</strong></td><td>A fake dApp we built for tests. Has buttons like &ldquo;connect to wallet&rdquo;, &ldquo;simulate a transaction&rdquo;. Talks to the wallet over an encrypted channel.</td></tr>
+<tr><td><strong>Content script</strong></td><td>A messenger between the playground page and the extension&rsquo;s service worker. Lives inside the dApp tab.</td></tr>
+<tr><td><strong>Service worker (SW)</strong></td><td>The wallet&rsquo;s brain. Always-on (mostly &mdash; see below). Receives messages from the content script, dispatches to the right handler.</td></tr>
+<tr><td><strong>Dispatcher</strong></td><td>Maps incoming dApp methods (&ldquo;getChainInfo&rdquo;, &ldquo;simulateTx&rdquo;) to internal operations.</td></tr>
+<tr><td><strong>Popup windows</strong></td><td>For methods that need user approval (&ldquo;requestCapabilities&rdquo;, &ldquo;sendTx&rdquo;), a tiny browser window opens for confirmation.</td></tr>
+<tr><td><strong>Offscreen iframe</strong></td><td>Where heavy crypto and PXE (private-execution) work happens. Hidden from the user.</td></tr>
+</table>
+
+<h2>The two real bugs</h2>
+
+<h3>Bug 1 (Cluster A): The wallet stops responding after saying hi</h3>
+<p>The dApp connects successfully (&ldquo;hi, I&rsquo;d like to talk to your wallet&rdquo;). After that, every follow-up message gets <strong>silence</strong>. The wallet receives it, presumably does something with it, but the response never comes back to the dApp.</p>
+
+<p>22 different tests are affected by this. They all show the same pattern: 30-second timeout, then test gives up.</p>
+
+<div class="box info">
+  <p><strong>Why &ldquo;ELI5&rdquo; isn&rsquo;t enough yet:</strong> we don&rsquo;t actually know <em>where</em> the message gets dropped. That&rsquo;s what the &ldquo;probe-first&rdquo; phase figures out. We&rsquo;re going to put little tracers at 16 key points in the conversation, run the failing tests, and read the trail to see exactly where the conversation dies.</p>
+</div>
+
+<p>Our top two guesses (we&rsquo;ll prove or disprove them with the probes):</p>
+
+<ul>
+  <li><strong>Guess A:</strong> The wallet&rsquo;s service worker (its brain) <em>fell asleep</em>. In Chrome&rsquo;s extension model, the SW can go idle after 30 seconds of nothing happening, and when it wakes up, it forgets which dApps it was talking to. So messages from a dApp it &ldquo;forgot&rdquo; get silently dropped.</li>
+  <li><strong>Guess B:</strong> The response makes it almost all the way back but gets lost in the last leg of the encryption channel. There&rsquo;s a known place in upstream Aztec SDK code where send-failures are silently swallowed.</li>
+</ul>
+
+<h3>Bug 2 (Cluster B): Switching to the local test network takes 30 seconds</h3>
+<p>When the user (or test) clicks &ldquo;switch to Local Network&rdquo; for the first time, the wallet takes <strong>30 seconds</strong> to actually switch. The second switch is fast. So something is being initialized lazily, on first demand, and that something is slow.</p>
+
+<div class="box info">
+  <p><strong>The non-obvious bit:</strong> we originally thought this was about the heavy crypto code (PXE) initializing. But the actual thing the test is waiting for is &ldquo;the new active account address shows up in storage&rdquo; &mdash; which is an <em>account-provisioning</em> problem, not a crypto-initialization problem. When you switch to a chain you&rsquo;ve never visited, the wallet has to derive a brand-new account for that chain. That derivation is what&rsquo;s slow.</p>
+</div>
+
+<p>The fix: <strong>pre-create the default account at startup</strong>, so by the time the user switches, the account already exists.</p>
+
+<h2>How we&rsquo;re going to do this (the 8 phases)</h2>
+
+<div class="phase">
+  <p class="phase-title">Phase A &mdash; Add tracers for Bug 1</p>
+  <p class="phase-what">Put 16 console-log markers at every important step in the dApp&rarr;wallet conversation. Gated behind a build flag so they only fire in tests &mdash; never in production.</p>
+  <p class="phase-why">We need to know <em>where</em> the conversation dies before we can fix it. Guessing wastes time and risks fixing the wrong thing.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase A.1 &mdash; Un-mute one of the muted tests</p>
+  <p class="phase-what">Re-enable the <code>connect-locked-queue</code> test, which exercises a different part of the system. With probes already on, we get free signal about another surface.</p>
+  <p class="phase-why">Cheap to do alongside Phase A; gives us extra data points.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase B &mdash; Add tracers for Bug 2</p>
+  <p class="phase-what">Probe the network-switch code path so we can measure exactly where the 30 seconds is spent.</p>
+  <p class="phase-why">Same logic as Phase A: measure before fixing.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase C &mdash; Run probes, document findings</p>
+  <p class="phase-what">Run failing tests with all the probes on. Write down what the trail says. Pick the right hypothesis.</p>
+  <p class="phase-why">Now we know the actual bug, not the guessed bug. <strong>Approval gate here</strong> &mdash; I show you findings; you approve the fix direction.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase D &mdash; Fix Bug 1</p>
+  <p class="phase-what">Apply the fix that matches what the probes showed. If the SW is falling asleep: keep it alive while dApps are connected (carefully &mdash; see safety section).</p>
+  <p class="phase-why">This is the high-impact fix that unblocks 22+ tests.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase D.1 &mdash; Un-mute another test</p>
+  <p class="phase-what">Re-enable <code>data-registerSender</code> as a clean re-test of the Bug 1 fix.</p>
+  <p class="phase-why">Single-method test &mdash; if it passes, the fix is solid.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase E &mdash; Fix Bug 2</p>
+  <p class="phase-what">Pre-create the default account for built-in chains at wallet startup. So first &ldquo;switch to Local Network&rdquo; takes &lt;1 second instead of 30.</p>
+  <p class="phase-why">Real user benefit, not just test-fix. Users today also see this 30-second lag on first switch.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase E.1 + E.2 &mdash; Un-mute remaining tests</p>
+  <p class="phase-what">Re-enable <code>token-management</code> and <code>fee-methods</code>, which depend on the network-switch path.</p>
+  <p class="phase-why">Both should &ldquo;just work&rdquo; after Phase E. If not, we have data to fix what&rsquo;s left.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase F &mdash; Mop up remaining test failures</p>
+  <p class="phase-what">Two tests (Cluster C and D) are likely cascade victims of A and B. Re-run; if they pass, done. If not, investigate.</p>
+  <p class="phase-why">Usually most of the long tail goes away when you fix the root cause.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase G &mdash; Remove the tracers</p>
+  <p class="phase-what">Delete all the probe code we added in Phase A and B. CI verifies the production bundle has zero probe strings.</p>
+  <p class="phase-why">Probes are debugging code, not production code. Shipping them would leak protocol internals.</p>
+</div>
+
+<div class="phase">
+  <p class="phase-title">Phase H &mdash; Final check + ship</p>
+  <p class="phase-what">Run the full test suite three times. Update the PR description with final numbers.</p>
+  <p class="phase-why">One green run could be luck; three consecutive green runs is signal.</p>
+</div>
+
+<h2>What could go wrong (the safety review)</h2>
+
+<h3>The probe tracers leaking into production</h3>
+<p>If we forgot to strip them and shipped a release with probe code, the dApp&rsquo;s browser console would log internal method names, session IDs, queue depths, etc. An attacker reading the console (or a sketchy other extension snooping on it) sees protocol internals.</p>
+<p><strong>How we prevent it:</strong></p>
+<ul>
+  <li>All probes gated by a build-time flag. Off by default. Vite&rsquo;s compiler replaces the flag check at build time.</li>
+  <li>A CI step that builds the production bundle, greps for any probe string, fails if it finds one. <em>This is the actual safety guarantee &mdash; the build flag is the design intent, the bundle-grep is the proof.</em></li>
+</ul>
+
+<h3>Keeping the service worker alive too long</h3>
+<p>If Bug 1&rsquo;s fix involves keeping the SW alive (so it doesn&rsquo;t forget dApps), we have to be careful: we can&rsquo;t just &ldquo;always keep it alive&rdquo;. That would keep encryption keys in RAM longer than the user intended.</p>
+<p><strong>How we prevent it:</strong></p>
+<ul>
+  <li>Keepalive scoped to <em>active dApp tabs</em>, not just &ldquo;a session exists&rdquo;.</li>
+  <li>Periodic re-verification that the tab is actually still alive (a dApp can leave a session open and never explicitly disconnect &mdash; we must not pin the SW forever based on that).</li>
+  <li>The moment the last live dApp tab closes, keepalive stops.</li>
+</ul>
+
+<h3>Pre-creating accounts for chains the user hasn&rsquo;t visited</h3>
+<p>Bug 2&rsquo;s fix means we derive default accounts for built-in chains (Local, testnet) at startup, even if the user never goes to those chains. <strong>This is a conscious tradeoff:</strong></p>
+<ul>
+  <li>Good: 30-second first-switch lag becomes <1 second. No network calls during derivation &mdash; nothing leaks to the network.</li>
+  <li>Cost: those accounts show up in storage exports, encrypted backups, profile imports. A user who never used the Local chain now has a Local-chain account in their backup. We&rsquo;ll note this in the changelog for transparency.</li>
+</ul>
+
+<h3>Persisting encryption keys to disk (NO)</h3>
+<p>One tempting &ldquo;fix&rdquo; would be to save the dApp&rsquo;s encryption session to Chrome&rsquo;s storage so it survives SW restarts. We&rsquo;re explicitly NOT doing this. The session contains an AES key derived from key exchange &mdash; putting AES keys on disk-IPC channels would be a security regression even though Chrome&rsquo;s &ldquo;session&rdquo; storage clears on browser close.</p>
+
+<h2>Open questions (the things we&rsquo;ll know after probes)</h2>
+
+<div class="q">
+  <p class="q-question">1. For failing <code>requestCapabilities</code> tests: does the capabilities popup actually approve, and does the approval reach the dispatcher?</p>
+  <p class="q-context">This tells us whether the bug is in the popup-handling code or somewhere else. If popup approves but dispatcher never hears about it, that&rsquo;s a specific bug to fix.</p>
+</div>
+
+<div class="q">
+  <p class="q-question">2. Between &ldquo;dApp connects&rdquo; and &ldquo;dApp&rsquo;s next message fails&rdquo;, did the service worker restart or did a tab event fire?</p>
+  <p class="q-context">If yes, that&rsquo;s strong evidence for the &ldquo;SW fell asleep&rdquo; hypothesis (Guess A). If no, the bug is elsewhere.</p>
+</div>
+
+<div class="q">
+  <p class="q-question">3. For Bug 2: is the time spent in <em>cryptographic account derivation</em>, or in <em>everything around it</em> (storage writes, UI watchers, etc.)?</p>
+  <p class="q-context">Determines whether the fix is &ldquo;pre-create the account at startup&rdquo; (most likely) or &ldquo;fix something in the storage/watcher path&rdquo; (less likely but possible).</p>
+</div>
+
+<div class="q">
+  <p class="q-question">4. For the muted <code>connect-locked-queue</code> test: does it just need a deterministic &ldquo;queued&rdquo; signal from the wallet, or is there a real bug under lock/unlock churn?</p>
+  <p class="q-context">Determines whether un-muting it is a one-line change or a real investigation.</p>
+</div>
+
+<div class="q">
+  <p class="q-question">5. For the <code>session-reconnect</code> flaky test: where exactly does it fail &mdash; before the verify popup, during approval, or after popup close?</p>
+  <p class="q-context">Each of those is a different code path with a different fix. Probes pin it down.</p>
+</div>
+
+<h2>Why three plans + audits?</h2>
+<p>This is the &ldquo;Tier A&rdquo; protocol from our internal guide for big cross-cutting changes. Three independent plans get written: mine (the main agent), Codex&rsquo;s (a different AI model family for an independent take), and an Opus subagent&rsquo;s (also independent but parallel). Then I consolidate the strongest pieces from each, and Codex does one final review.</p>
+
+<p><strong>What this process actually caught:</strong></p>
+<ul>
+  <li>My plan said Cluster B&rsquo;s problem was PXE crypto init. Codex correctly pointed out it&rsquo;s actually account provisioning. Different fix.</li>
+  <li>My probe set missed the capability-popup approval branch entirely. Codex caught that.</li>
+  <li>I had wrong file paths in 2 places (offscreen lives at <code>packages/extension/src/offscreen/</code>, not <code>packages/extension/src/wallet/offscreen/</code>). Codex caught that.</li>
+  <li>Opus contributed the upstream-SDK silent-drop discovery (where the wallet-sdk library will quietly throw away messages if it can&rsquo;t find a session for them).</li>
+  <li>Opus contributed the bundle-grep approach instead of source-grep for probe leak prevention.</li>
+  <li>Both audits agreed on rejecting things I had as possibilities (persisting session keys to disk, global SW keepalive, timeout bumps).</li>
+</ul>
+
+<h2>Estimated effort</h2>
+<p><strong>15&ndash;25 engineering hours</strong>, roughly 2&ndash;3 working days. Most of the time is in Phase A (carefully wiring 16 probes), Phase C (running them and analyzing), and Phase D (applying the actual fix for Bug 1).</p>
+
+<div class="box ok">
+  <p><strong>What you decide next:</strong></p>
+  <ol style="margin: 0.4rem 0 0 1.5rem; padding: 0;">
+    <li>Approve the plan as-is &rarr; I start Phase A (probes).</li>
+    <li>Approve with changes &rarr; tell me what to adjust.</li>
+    <li>Reject &rarr; we replan.</li>
+  </ol>
+  <p style="margin-top: 0.6rem; margin-bottom: 0;">After Phase C (probes-run + findings), I&rsquo;ll come back to you with the actual hypothesis confirmation before applying any fix. So you get a second gate to redirect if the data surprises us.</p>
+</div>
+
+<div class="footer">
+  <p>Source plan: <code>implementations-plan/e2e-full-network-recovery/plan.md</code> &middot; Audit transcripts in the same directory.</p>
+  <p>Generated 2026-05-22.</p>
+</div>
+
+</main>
+</body>
+</html>

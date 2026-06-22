@@ -2,9 +2,42 @@ import { getPXEConfig, type PXEConfig } from "@aztec/pxe/config"
 import { createPXE, type PXE } from "@aztec/pxe/client/bundle"
 import { WASMSimulator } from "@aztec/simulator/client"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { AcceleratorProver } from "@alejoamiras/aztec-accelerator"
+import { AcceleratorProver, type AcceleratorPhase } from "@alejoamiras/aztec-accelerator"
 import { AztecNodeFactoryAdapter } from "../adapters/aztec-node-factory-adapter"
 import type { NodeFactory } from "../ports/node-factory-port"
+
+/**
+ * Optional accelerator-server policy for `ProductionPxeFactory`.
+ *
+ * Defaults (all fields omitted): silent-fallback behavior preserved
+ * — the wallet constructs `AcceleratorProver` with no callback and no
+ * preflight, so if the accelerator isn't reachable the SDK falls back to
+ * WASM proving as it does in production today.
+ *
+ * `required: true` is CI-only. Set from the extension shell when
+ * `VITE_NULO_ACCELERATOR_REQUIRED=1` is baked into the build. In this
+ * mode `createChainRuntime` performs an eager `checkAcceleratorStatus()`
+ * preflight and the prover's `onPhase` callback throws synchronously
+ * whenever the SDK is about to fall back ("fallback"/"denied" phases).
+ *
+ * Fields stay primitive (no `accelerator/config` import here) so that
+ * `@nulo/aztec-runtime` remains decoupled from the extension's `@/` alias.
+ */
+export interface ProductionPxeFactoryOptions {
+	required?: boolean
+	host?: string
+	port?: number
+	/**
+	 * E2E-only: build the PXE with `proverEnabled: false` so the BB SNARK is
+	 * never generated (kernel simulation + on-chain submission stay real; the
+	 * default bundle prover's fakeProofs path emits a random chonk proof the
+	 * local network accepts). No `AcceleratorProver` is constructed in this
+	 * mode. Set ONLY from the extension shell behind the double-opt-in
+	 * `VITE_NULO_E2E_PROVERLESS` build flag; mutually exclusive with
+	 * `required`. NEVER reaches a production build.
+	 */
+	proverless?: boolean
+}
 
 /**
  * Minimal structural shape of the network info required to bootstrap a
@@ -67,9 +100,20 @@ export interface PxeFactory {
 
 export class ProductionPxeFactory implements PxeFactory {
 	private readonly nodeFactory: NodeFactory
+	private readonly required: boolean
+	private readonly host: string | undefined
+	private readonly port: number | undefined
+	private readonly proverless: boolean
 
-	public constructor(nodeFactory?: NodeFactory) {
+	public constructor(nodeFactory?: NodeFactory, options?: ProductionPxeFactoryOptions) {
 		this.nodeFactory = nodeFactory ?? new AztecNodeFactoryAdapter()
+		this.required = options?.required ?? false
+		this.host = options?.host
+		this.port = options?.port
+		this.proverless = options?.proverless ?? false
+		if (this.proverless && this.required) {
+			throw new Error("ProductionPxeFactory: `proverless` and `required` are mutually exclusive.")
+		}
 	}
 
 	public async createChainRuntime(network: NetworkInfo): Promise<ChainRuntime> {
@@ -77,7 +121,7 @@ export class ProductionPxeFactory implements PxeFactory {
 		const config = {
 			...getPXEConfig(),
 			dataDirectory: `pxe/${network.profileId}/${network.chainId}`,
-			proverEnabled: true,
+			proverEnabled: !this.proverless,
 		} as PXEConfig
 		// Pass an explicit WASMSimulator into both the prover AND the PXE
 		// config so neither falls back to dynamic-import
@@ -88,7 +132,63 @@ export class ProductionPxeFactory implements PxeFactory {
 		// could not be loaded." during `proveTx`. Static import makes the
 		// simulator part of the main bundle graph and avoids that path.
 		const simulator = new WASMSimulator()
-		const prover = new AcceleratorProver({ simulator })
+
+		// E2E-only proverless: skip the BB SNARK. The PXE still runs kernel
+		// simulation (real public inputs / nullifiers) and emits a random
+		// chonk proof via the default bundle prover's fakeProofs path; the
+		// local network accepts it. No AcceleratorProver, no onPhase, no
+		// preflight. The `simulator` is still passed so kernel sim stays on
+		// the bundled WASM path (same MV3 reason as above).
+		if (this.proverless) {
+			const pxe = await createPXE(node, config, { simulator })
+			return new ChainRuntime(network.chainId, node, pxe, network.rpcUrl)
+		}
+
+		// Required-mode (CI only): the onPhase callback throws synchronously
+		// when the SDK would silently fall back to WASM. "downloading" is a
+		// warn — the proof still succeeds, just with a cold-start tax. In
+		// non-required (production) mode, onPhase is undefined and the SDK
+		// behaves exactly as before for end users without Aztec Accelerator.
+		const onPhase = this.required
+			? (phase: AcceleratorPhase) => {
+					if (phase === "fallback" || phase === "denied") {
+						throw new Error(
+							`[accelerator-required] SDK emitted phase="${phase}" — proving was about ` +
+								"to fall back to WASM. Forbidden in required-mode " +
+								"(VITE_NULO_ACCELERATOR_REQUIRED=1).",
+						)
+					}
+					if (phase === "downloading") {
+						// First prove on a fresh runner without BB_BINARY_PATH set
+						// pays a multi-minute bb-download tax. Warn so we surface it.
+						console.warn(
+							'[accelerator-required] SDK emitted phase="downloading" — first ' +
+								"prove will be slow. Pre-warm BB_BINARY_PATH to avoid this.",
+						)
+					}
+				}
+			: undefined
+
+		const accelerator = this.host !== undefined || this.port !== undefined ? { host: this.host, port: this.port } : undefined
+		const prover = new AcceleratorProver({ simulator, onPhase, accelerator })
+
+		// Required-mode preflight: fail at PXE-creation time rather than at
+		// first prove, so the failure site is unambiguous. The status cache
+		// inside AcceleratorProver (10s TTL) makes this cheap when called
+		// again from the SDK at first prove.
+		if (this.required) {
+			const status = await prover.checkAcceleratorStatus()
+			if (!status.available) {
+				throw new Error(`[accelerator-required] accelerator-server unavailable. Status: ${JSON.stringify(status)}`)
+			}
+			if (status.needsDownload) {
+				console.warn(
+					"[accelerator-required] accelerator-server reports needsDownload=true " +
+						`for aztec_version=${status.sdkAztecVersion}. First prove will be slow.`,
+				)
+			}
+		}
+
 		const pxe = await createPXE(node, config, { proverOrOptions: prover, simulator })
 		return new ChainRuntime(network.chainId, node, pxe, network.rpcUrl)
 	}

@@ -14,7 +14,7 @@ const hasConfig = aztecConfig !== undefined
  */
 test.skipIf(!hasConfig)(
 	"data-addressBook — silent path after data cap granted",
-	{ timeout: 90_000, retry: 1 },
+	{ timeout: 90_000 },
 	async ({ dappConnectedExtension }) => {
 		const page = dappConnectedExtension.playgroundPage
 
@@ -25,7 +25,7 @@ test.skipIf(!hasConfig)(
 			select.dispatchEvent(new Event("change", { bubbles: true }))
 		})
 		const seqGrant = await snapshotResultSeq(page)
-		const popupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 15_000 })
+		const popupP = waitForPopup(dappConnectedExtension, "capabilities", { timeout: 30_000 })
 		await clickByTestId(page, "pg-btn-requestCapabilities")
 		await approveCapabilities(await popupP)
 		await waitForPgResult(page, "requestCapabilities", seqGrant, 30_000)

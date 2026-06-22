@@ -71,7 +71,7 @@ describe("OperationJournalService", () => {
 		expect(rec.subtitle).toBe("to 0xdef")
 
 		// Persisted via the port
-		const entries = await api.storage.session.get(null)
+		const entries = await api.storage.local.get(null)
 		expect(`nulo:journal@${rec.id}` in entries).toBe(true)
 
 		expect(seen).toHaveBeenCalledWith(rec)
@@ -204,24 +204,24 @@ describe("OperationJournalService", () => {
 	describe("schema-invalid row resilience", () => {
 		test("getOperation drops a schema-invalid row and returns undefined", async () => {
 			// Write a row directly to storage that bypasses the journal's create path.
-			await api.storage.session.set({ "nulo:journal@deadbeef": JSON.stringify({ id: "deadbeef", kind: "transfer" }) })
+			await api.storage.local.set({ "nulo:journal@deadbeef": JSON.stringify({ id: "deadbeef", kind: "transfer" }) })
 			expect(await service.getOperation("deadbeef")).toBeUndefined()
 			// The bad row should have been deleted as a side effect.
 			expect(await service.getOperation("deadbeef")).toBeUndefined()
-			const remaining = await api.storage.session.get("nulo:journal@deadbeef")
+			const remaining = await api.storage.local.get("nulo:journal@deadbeef")
 			expect("nulo:journal@deadbeef" in remaining).toBe(false)
 		})
 
 		test("getOperations skips schema-invalid rows and returns only the valid ones", async () => {
 			const valid = await service.createOperation(VALID_INPUT)
-			await api.storage.session.set({ "nulo:journal@bogus": JSON.stringify({ id: "bogus", foo: 1 }) })
+			await api.storage.local.set({ "nulo:journal@bogus": JSON.stringify({ id: "bogus", foo: 1 }) })
 
 			const ops = await service.getOperations()
 			expect(ops.map((o) => o.id)).toEqual([valid.id])
 		})
 
 		test("transitionOperation throws 'not found' if the existing row is schema-invalid (record removed)", async () => {
-			await api.storage.session.set({ "nulo:journal@zombie": JSON.stringify({ id: "zombie", kind: "transfer" }) })
+			await api.storage.local.set({ "nulo:journal@zombie": JSON.stringify({ id: "zombie", kind: "transfer" }) })
 			await expect(service.transitionOperation("zombie", { stage: "simulating" })).rejects.toThrow(/not found/i)
 		})
 	})
@@ -260,6 +260,64 @@ describe("OperationJournalService", () => {
 			expect(done.progress.stage).toBe("succeeded")
 			expect(done.terminalAt).not.toBeNull()
 		})
+
+		// v2 Layer A — pin `submitting.txHash === succeeded.txHash` invariant.
+		// Drift across the prove/submit boundary would silently break
+		// RecentActivityView's per-hash pending-suppression filter and bring
+		// the disappearing-card bug back. Catch at the FSM layer.
+		test("submitting.txHash must match succeeded.txHash when both are populated", async () => {
+			const rec = await service.createOperation(VALID_INPUT)
+			await service.transitionOperation(rec.id, { stage: "simulating" })
+			await service.transitionOperation(rec.id, { stage: "proving", enteredProveAt: Date.now() })
+			await service.transitionOperation(rec.id, { stage: "submitting", txHash: "0xaaa" })
+			await expect(
+				service.transitionOperation(rec.id, { stage: "succeeded", txHash: "0xbbb" } as unknown as JobProgress),
+			).rejects.toThrow(/submitting\.txHash !== succeeded\.txHash/i)
+		})
+
+		test("submitting → succeeded with matching txHashes is accepted", async () => {
+			const rec = await service.createOperation(VALID_INPUT)
+			await service.transitionOperation(rec.id, { stage: "simulating" })
+			await service.transitionOperation(rec.id, { stage: "proving", enteredProveAt: Date.now() })
+			await service.transitionOperation(rec.id, { stage: "submitting", txHash: "0xcanonical" })
+			const done = await service.transitionOperation(rec.id, { stage: "succeeded", txHash: "0xcanonical" } as unknown as JobProgress)
+			expect(done.progress.stage).toBe("succeeded")
+		})
+
+		test("bare submitting (no txHash) → succeeded(txHash) is still accepted (no drift to check against)", async () => {
+			// Backward-compat: pre-v2 records that landed in submitting without
+			// a txHash should still be transitionable to succeeded. The drift
+			// check is conditional on submitting carrying a hash.
+			const rec = await service.createOperation(VALID_INPUT)
+			await service.transitionOperation(rec.id, { stage: "simulating" })
+			await service.transitionOperation(rec.id, { stage: "proving", enteredProveAt: Date.now() })
+			await service.transitionOperation(rec.id, { stage: "submitting" })
+			const done = await service.transitionOperation(rec.id, { stage: "succeeded", txHash: "0xanything" } as unknown as JobProgress)
+			expect(done.progress.stage).toBe("succeeded")
+		})
+	})
+
+	// v3: touchOperation — SW-internal liveness heartbeat for mutex waiters.
+	describe("touchOperation", () => {
+		test("bumps updatedAt without changing stage and without emitting onOperationUpdated", async () => {
+			const rec = await service.createOperation(VALID_INPUT)
+			const updatedEvents: string[] = []
+			service.onOperationUpdated.add((op) => updatedEvents.push(op.id))
+
+			// Advance the clock so the bump is observable.
+			await new Promise((r) => setTimeout(r, 5))
+			await service.touchOperation(rec.id)
+
+			const after = await service.getOperation(rec.id)
+			expect(after?.updatedAt).toBeGreaterThan(rec.updatedAt)
+			expect(after?.progress.stage).toBe(rec.progress.stage)
+			// Heartbeat must NOT churn the UI subscription.
+			expect(updatedEvents).toEqual([])
+		})
+
+		test("no-ops silently when the record is gone (reaped mid-wait)", async () => {
+			await expect(service.touchOperation("does-not-exist")).resolves.toBeUndefined()
+		})
 	})
 
 	test("getOperations filter accepts `kind` and isolates token_import from on-chain ops", async () => {
@@ -291,5 +349,217 @@ describe("OperationJournalService", () => {
 		expect(rehydrated?.progress.stage).toBe("simulating")
 		expect(rehydrated?.profileId).toBe("profile-a")
 		expect(rehydrated?.attempts).toBe(0)
+	})
+
+	// ───────── Concurrent-dApp-sendTx additions ─────────
+
+	test("createOperation: initialStage='queued' produces a queued record (used by message-arrival surface)", async () => {
+		const rec = await service.createOperation({
+			...VALID_INPUT,
+			kind: "dapp_execute",
+			origin: "dapp",
+			sessionId: "session-1",
+			initialStage: { stage: "queued" },
+		})
+		expect(rec.progress.stage).toBe("queued")
+		expect(rec.sessionId).toBe("session-1")
+		expect(rec.terminalAt).toBeNull()
+	})
+
+	test("transitionOperation: queued → pending is legal (claim path)", async () => {
+		const rec = await service.createOperation({
+			...VALID_INPUT,
+			kind: "dapp_execute",
+			origin: "dapp",
+			sessionId: "session-X",
+			initialStage: { stage: "queued" },
+		})
+		const claimed = await service.transitionOperation(rec.id, { stage: "pending" })
+		expect(claimed.progress.stage).toBe("pending")
+	})
+
+	test("transitionOperation: queued → simulating is illegal (must pass through pending)", async () => {
+		const rec = await service.createOperation({
+			...VALID_INPUT,
+			kind: "dapp_execute",
+			origin: "dapp",
+			sessionId: "session-X",
+			initialStage: { stage: "queued" },
+		})
+		await expect(service.transitionOperation(rec.id, { stage: "simulating" })).rejects.toBeInstanceOf(IllegalTransitionError)
+	})
+
+	test("transitionOperation: queued → cancelled is legal (user-cancel-while-queued)", async () => {
+		const rec = await service.createOperation({
+			...VALID_INPUT,
+			kind: "dapp_execute",
+			origin: "dapp",
+			sessionId: "session-X",
+			initialStage: { stage: "queued" },
+		})
+		const cancelled = await service.transitionOperation(rec.id, { stage: "cancelled" })
+		expect(cancelled.progress.stage).toBe("cancelled")
+		expect(cancelled.terminalAt).not.toBeNull()
+	})
+
+	test("countOperations: filters by sessionId and stage; excludes other sessions' records", async () => {
+		// Sessioned dapp records — only the wallet-sdk message-arrival surface
+		// creates queued records, so the per-session cap query exercises
+		// across dapp_execute records with distinct sessionIds.
+		await service.createOperation({
+			kind: "dapp_execute",
+			origin: "dapp",
+			profileId: "p1",
+			sessionId: "s1",
+			initialStage: { stage: "queued" },
+		})
+		await service.createOperation({
+			kind: "dapp_execute",
+			origin: "dapp",
+			profileId: "p1",
+			sessionId: "s1",
+			initialStage: { stage: "queued" },
+		})
+		await service.createOperation({
+			kind: "dapp_execute",
+			origin: "dapp",
+			profileId: "p1",
+			sessionId: "s2",
+			initialStage: { stage: "queued" },
+		})
+		// Sessionless UI transfer (popup origin, no sessionId) at default
+		// `pending` stage — must NOT count against any per-session queued cap
+		// because (a) it has no sessionId and (b) it's not at queued stage.
+		await service.createOperation({
+			kind: "transfer",
+			origin: "popup",
+			profileId: "p1",
+		})
+
+		expect(await service.countOperations({ sessionId: "s1", stage: "queued" })).toBe(2)
+		expect(await service.countOperations({ sessionId: "s2", stage: "queued" })).toBe(1)
+		expect(await service.countOperations({ stage: "queued" })).toBe(3)
+		// No filter → total non-deleted records.
+		expect(await service.countOperations({})).toBe(4)
+	})
+
+	test("createOperation: rejects initialStage='queued' without sessionId (refinement)", async () => {
+		await expect(
+			service.createOperation({
+				kind: "dapp_execute",
+				origin: "dapp",
+				profileId: "p1",
+				// no sessionId
+				initialStage: { stage: "queued" },
+			}),
+		).rejects.toThrow(/sessionId/)
+	})
+
+	test("createOperation: rejects initialStage='queued' with kind='transfer' (refinement)", async () => {
+		await expect(
+			service.createOperation({
+				kind: "transfer",
+				origin: "popup",
+				profileId: "p1",
+				sessionId: "irrelevant",
+				initialStage: { stage: "queued" },
+			}),
+		).rejects.toThrow(/dapp_execute/)
+	})
+
+	test("createOperation: rejects initialStage='queued' with origin='popup' (refinement)", async () => {
+		await expect(
+			service.createOperation({
+				kind: "dapp_execute",
+				origin: "popup",
+				profileId: "p1",
+				sessionId: "session-X",
+				initialStage: { stage: "queued" },
+			}),
+		).rejects.toThrow(/dapp/)
+	})
+
+	test("countOperations: stage filter excludes records in other stages", async () => {
+		const r = await service.createOperation({
+			...VALID_INPUT,
+			kind: "dapp_execute",
+			origin: "dapp",
+			sessionId: "session-X",
+			initialStage: { stage: "queued" },
+		})
+		await service.transitionOperation(r.id, { stage: "pending" })
+		expect(await service.countOperations({ stage: "queued" })).toBe(0)
+		expect(await service.countOperations({ stage: "pending" })).toBe(1)
+	})
+
+	test("transitionOperation: mutex serializes concurrent transitions on the same record (claim vs cancel)", async () => {
+		// This test pins the journal-mutex contract: concurrent transitions
+		// on the same record must serialize at the lock so the FSM holds.
+		//
+		// Both `queued → pending` and `pending → cancelled` are legal edges.
+		// Without the mutex, two concurrent transitions reading the SAME
+		// `queued` snapshot would both validate (against the stale read) and
+		// produce a stage that doesn't reflect both writes (last-write-wins
+		// at the storage layer would leave the record in EITHER `pending`
+		// OR `cancelled`, both with stale-validation provenance).
+		//
+		// WITH the mutex, the second transition sees the first's write and
+		// either continues legally (queued → pending → cancelled is a valid
+		// 2-hop path) or rejects with IllegalTransitionError. The key
+		// invariant: there's no path where the final state was produced
+		// without seeing the previous transition's write.
+		const rec = await service.createOperation({
+			...VALID_INPUT,
+			kind: "dapp_execute",
+			origin: "dapp",
+			sessionId: "session-X",
+			initialStage: { stage: "queued" },
+		})
+		const claim = service.transitionOperation(rec.id, { stage: "pending" })
+		const cancel = service.transitionOperation(rec.id, { stage: "cancelled" })
+		const results = await Promise.allSettled([claim, cancel])
+
+		const fulfilled = results.filter((r) => r.status === "fulfilled")
+		const rejected = results.filter((r) => r.status === "rejected")
+		// EITHER both succeed (queued → pending → cancelled, valid 2-hop) OR
+		// one rejects with IllegalTransitionError (the second saw a state
+		// from which its target was unreachable). Both outcomes prove the
+		// lock is doing its job.
+		expect(fulfilled.length + rejected.length).toBe(2)
+		for (const r of rejected) {
+			expect((r as PromiseRejectedResult).reason).toBeInstanceOf(IllegalTransitionError)
+		}
+		const final = await service.getOperation(rec.id)
+		// Final state is in EXACTLY one of the legal terminal-or-active
+		// stages — never an illegal "stuck mid-transition" state.
+		expect(["pending", "cancelled"]).toContain(final?.progress.stage)
+	})
+
+	test("transitionOperation: mutex prevents concurrent ILLEGAL transitions from racing past FSM check", async () => {
+		// Stronger test: two concurrent illegal transitions targeting the
+		// SAME end-stage from a NON-matching start-stage. Without the lock,
+		// they could both pass `assertCanTransition` on the same stale read.
+		// With the lock, the second sees the first's write and the
+		// validation correctly rejects.
+		const rec = await service.createOperation({
+			...VALID_INPUT,
+			kind: "dapp_execute",
+			origin: "dapp",
+			sessionId: "session-X",
+			initialStage: { stage: "queued" },
+		})
+		// Move record to pending first (legal).
+		await service.transitionOperation(rec.id, { stage: "pending" })
+		// Now both of these would be legal from `pending`: pending → simulating,
+		// pending → cancelled. But after one fires, the other's target is
+		// either still legal (pending → cancelled after simulating happens
+		// would fail because simulating → cancelled IS legal too — so both
+		// succeed). The check here is just: NO storage-layer corruption,
+		// state is always in a legal stage.
+		const a = service.transitionOperation(rec.id, { stage: "simulating" })
+		const b = service.transitionOperation(rec.id, { stage: "cancelled" })
+		await Promise.allSettled([a, b])
+		const final = await service.getOperation(rec.id)
+		expect(["simulating", "cancelled"]).toContain(final?.progress.stage)
 	})
 })

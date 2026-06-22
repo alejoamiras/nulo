@@ -1,0 +1,12 @@
+## Missed
+- I missed a small but real `Duplicate Code` in [`packages/extension/src/wallet/services/dapp-session/capability-meta.ts`]( packages/extension/src/wallet/services/dapp-session/capability-meta.ts:83 ). `getCapabilityInfo()` and `getSafeDisplay()` each re-encode the same “known capability vs fallback” lookup over `CAPABILITY_LABELS` (`:83-92`, `:179-199`). The fallbacks differ intentionally, but the branch structure and field projection are duplicated enough that adding a new metadata field or changing the known-capability path would require touching both helpers.
+- I do not see a second unflagged smell in-scope that is stronger than that one after re-checking the smaller files.
+
+## Over-asserted
+- My `Large Class` finding on `WalletSdkDispatcher` is directionally right, but I overstated the proof. The code clearly concentrates many responsibilities in one file (`packages/wallet-bridge/src/dispatcher.ts:227-1006`), but phrases like “high merge friction” and “unrelated change axes collide” were partly inferred from hotspot context, not demonstrated directly from the source alone.
+- My `Middle Man` finding on the re-export shims was also a bit too strong. The forwarding layers are real (`dapp-session/spec.ts:11-25`, `dapp-interaction/spec.ts:11-37`, `execution/models/index.ts:4-62`), but my wording implied higher current pain than I proved. In this scope, the strongest evidence is “ongoing export-list maintenance,” not a demonstrated drift bug.
+- In the Round-1 rebuttal, I was right to push back on Claude’s broad comment-style finding, but I should have separated “stale factual docs” from “history-bearing comments” more cleanly. The stale doc at `dispatcher.ts:341-345` is objectively false because `enrichGrantedCapabilities()` does not call `formatSessionAccounts()` (`dispatcher.ts:707-759`).
+
+## Anchoring corrections
+- I was anchored by the cluster hints. `clusters.md` told me to look for “dispatcher concern count, 3 parallel method tables, checker duplication, caip duplicate” (`audit/.../clusters.md:14-16`), and I largely found exactly those. That focus caused me to under-scan lower-churn files like `capability-meta.ts`, which is where the one clear unflagged duplicate lives.
+- I also leaned too much on the repo-map hotspot framing when sizing severity. For example, I used commit-frequency language to strengthen the dispatcher findings before doing enough bottom-up comparison against the smaller scoped modules. The code supports the core smells; some of my severity wording was map-led rather than code-led.

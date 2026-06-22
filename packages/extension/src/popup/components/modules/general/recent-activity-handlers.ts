@@ -13,6 +13,48 @@
 
 import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
 import { ContentKind } from "@/wallet/services/task/spec"
+import { TxStatus } from "@/wallet/services/transaction/spec"
+
+/** Minimal chain-tx shape the pending-suppression filter needs. */
+export interface MinimalChainTx {
+	hash: string
+	status: TxStatus
+}
+
+/**
+ * Suppress pending chain txs that are already represented by an in-flight
+ * journal awaiting card — but ONLY for the records that match by txHash.
+ *
+ * Bug pinned: a previous blanket filter hid T1's pending chain tx as soon
+ * as T1's journal record transitioned to `succeeded`, while T2 was still
+ * in-flight. T1 vanished from the feed (succeeded → returns null from
+ * the terminal-card resolver, AND its chain tx was suppressed because
+ * T2 was in-flight). Came back only after T1's chain tx left `pending`.
+ *
+ * Per-hash scoping: suppress chain txs whose hash matches an in-flight
+ * journal record currently in `submitting` stage (the one in-flight
+ * stage whose schema permits a `txHash`, populated at all four
+ * `execution/service.ts:markJournal({ stage: "submitting", txHash })`
+ * call sites). Records in queued / pending / simulating / proving stages
+ * don't have a chain tx yet, so they pull nothing through this filter
+ * and T1's pending chain tx stays visible while T2 is anywhere in the
+ * pre-submit lifecycle.
+ *
+ * Drift safety: the FSM invariant in `operation-journal/service.ts:_transitionLocked`
+ * enforces `submitting.txHash === succeeded.txHash` so a future hash-fn
+ * change can't silently no-op the filter — the FSM throws first.
+ */
+export function filterPendingDoubleRender(
+	txs: ReadonlyArray<MinimalChainTx>,
+	inFlightJournalOps: ReadonlyArray<OperationRecord>,
+): MinimalChainTx[] {
+	const inFlightHashes = new Set<string>()
+	for (const op of inFlightJournalOps) {
+		const stage = op.progress
+		if (stage.stage === "submitting" && stage.txHash) inFlightHashes.add(stage.txHash)
+	}
+	return txs.filter((t) => t.status !== TxStatus.Pending || !inFlightHashes.has(t.hash))
+}
 
 export interface CancelExecutor {
 	cancelJob(jobId: string): Promise<void>

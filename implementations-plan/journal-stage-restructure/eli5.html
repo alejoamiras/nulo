@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ELI5 — journal-stage restructure</title>
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --muted: #5a5a5a;
+    --accent: #2a5d8f;
+    --rule: #e0e0e0;
+    --bg: #fbfbfb;
+    --code-bg: #f1f1f1;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 5rem;
+    line-height: 1.6;
+    font-size: 17px;
+  }
+  h1 { font-size: 1.8rem; font-weight: 600; margin-top: 2.5rem; margin-bottom: 0.5rem; }
+  h2 { font-size: 1.3rem; font-weight: 600; margin-top: 2.5rem; margin-bottom: 0.5rem; border-bottom: 1px solid var(--rule); padding-bottom: 0.3rem; }
+  h3 { font-size: 1.05rem; font-weight: 600; margin-top: 1.6rem; margin-bottom: 0.3rem; color: var(--accent); }
+  p { margin: 0.6rem 0; }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: 0.3rem 0; }
+  code { background: var(--code-bg); padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.92em; }
+  pre { background: var(--code-bg); padding: 0.8rem 1rem; border-radius: 4px; overflow-x: auto; font-size: 0.88em; }
+  pre code { background: none; padding: 0; }
+  .muted { color: var(--muted); }
+  .pill { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; background: var(--code-bg); font-size: 0.82em; color: var(--muted); }
+  .ascii { font-family: ui-monospace, "SF Mono", Menlo, monospace; white-space: pre; font-size: 0.85em; line-height: 1.45; }
+  .nav { margin: 1rem 0 2rem; padding: 0.8rem 1rem; background: white; border: 1px solid var(--rule); border-radius: 4px; }
+  .nav a { display: inline-block; margin-right: 1rem; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .meta { color: var(--muted); font-size: 0.9rem; }
+  table { border-collapse: collapse; margin: 1rem 0; width: 100%; }
+  th, td { padding: 0.5rem 0.7rem; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { background: var(--code-bg); }
+</style>
+</head>
+<body>
+
+<h1>Restructuring tests to wait for the right thing</h1>
+<p class="meta">Companion to <a href="plan.md"><code>plan.md</code></a>. Aimed at a reader who has zero context on this project.</p>
+
+<div class="nav">
+  <strong>Other docs:</strong>
+  <a href="plan.md">plan.md</a>
+  <a href="audit-codex.md">audit-codex.md</a>
+  <a href="audit-opus.md">audit-opus.md</a>
+</div>
+
+<h2>What problem are we solving?</h2>
+
+<p>Nulo's test suite has a handful of tests that send a transaction through the wallet and wait for the dApp to receive an "ok" back. On a slow CI runner, those tests time out because part of the wallet's work (generating cryptographic proofs in WebAssembly) takes longer than the test budget allows.</p>
+
+<p>We have to keep skipping those tests on CI. We want to stop skipping them.</p>
+
+<h2>Why didn't the previous PR fix this?</h2>
+
+<p>The previous PR (#67) installed a native proof-generator on the CI runner — way faster than WebAssembly. But it only speeds up the LAST step of proof generation. The wallet has to do several earlier proof steps that still run in WebAssembly, and THOSE are what take too long on slow runners.</p>
+
+<p>We can't fix the WebAssembly speed problem in this PR (it'd require upstream changes to the proof tooling). But we can change <strong>what the tests wait for</strong>, so they don't have to wait for the slow part at all.</p>
+
+<h2>The plain-English idea</h2>
+
+<p>The wallet has an internal state machine for every transaction:</p>
+
+<div class="ascii">
+pending  →  queued  →  simulating  →  proving  →  submitting  →  succeeded
+</div>
+
+<p>Today's tests wait for the WHOLE state machine to reach <code>succeeded</code> (or <code>failed</code>). That requires generating all the proofs (slow part).</p>
+
+<p>The new tests will wait for the state machine to reach <code>proving</code>. That just requires the wallet to have built the transaction and started the proof process. Fast — happens in seconds, not minutes.</p>
+
+<p>Same UI being tested. Same wallet code path being exercised. Just an earlier finish line.</p>
+
+<h2>What we keep testing</h2>
+
+<ul>
+  <li>✅ User clicks "Send" in the dApp</li>
+  <li>✅ Wallet's "Execute" popup opens</li>
+  <li>✅ Popup shows the right contents (fee picker, payload rows, etc.)</li>
+  <li>✅ User clicks Approve</li>
+  <li>✅ Wallet builds the transaction request from the dApp's input</li>
+  <li>✅ Wallet successfully simulates the transaction (means: the inputs make sense + balances allow it)</li>
+  <li>✅ Wallet enters the proof generation phase</li>
+</ul>
+
+<h2>What we stop testing</h2>
+
+<ul>
+  <li>❌ Wallet successfully COMPLETES all the proofs</li>
+  <li>❌ Wallet successfully broadcasts the transaction to the L2 node</li>
+</ul>
+
+<p>Important: even today's tests <strong>do not verify the transaction actually mines on chain</strong>. We thought they did, but the audit caught that the wallet's "I'm done" signal fires the moment the wallet broadcasts (not the moment the block mines). So the actual coverage gap is narrower than it first appeared.</p>
+
+<h2>Is anything else testing the "completes" part?</h2>
+
+<p>Yes — <code>transfers.test.ts</code> exercises the full prove + submit + mining cycle. It uses the wallet's OWN send flow (not a dApp), but it goes through the same proof-generation code. If the prove pipeline breaks structurally, that test catches it.</p>
+
+<p>What's NOT separately covered: "the dApp-initiated path specifically completes its prove + submit pipeline." That's the residual risk. Mitigation: PR review + the test still runs all the EARLIER parts of the pipeline (so a wallet that broke in obvious ways would still fail).</p>
+
+<h2>How we wire it up</h2>
+
+<p>The wallet's popup already shows a card for in-flight transactions (a "tx-awaiting-card"). We add one new HTML attribute to that card: <code>data-stage="proving"</code> (or whatever stage is current). Tests look for that attribute. Done.</p>
+
+<p>The Vue component already has a <code>stage</code> prop — we're literally just plumbing one extra value through to the DOM. Five lines of code in the wallet UI.</p>
+
+<p><em>Note: the final implementation broadened from "wait for proving" to "wait for any active processing stage" (<code>simulating</code>, <code>proving</code>, or <code>submitting</code>) because on local WASM the wallet spends most of its time in <code>simulating</code> — a <code>proving</code>-only matcher raced the test's 200ms poll. The codex post-impl audit then tightened the matcher from "anything not pending/queued" to an explicit allowlist of those three stages so terminal results (failed, cancelled, succeeded) never silently match. The helper is <code>waitForSendTxActiveStage</code>.</em></p>
+
+<h2>The plan, phase by phase</h2>
+
+<h3>Phase A — Add the <code>data-stage</code> attribute</h3>
+<p>Edit two Vue files: <code>TransactionCardLayout.vue</code> (adds the attribute binding on the root element) and <code>TransactionAwaitingCard.vue</code> (passes its existing <code>stage</code> prop through to the layout). Add unit tests in two test files: one for the contract (the actual binding) and one for the wiring (the prop pass-through).</p>
+
+<h3>Phase B — New test helper</h3>
+<p>Add <code>waitForSendTxActiveStage(walletPopup)</code> — a one-purpose function that waits for the wallet's tx-awaiting-card to reach any of three active stages (<code>simulating</code>, <code>proving</code>, <code>submitting</code>). Deliberately narrow: a future PR can't quietly weaken this to "wait for stage 'pending'" by changing one string parameter; they'd have to rename the function, which is loud in PR diffs.</p>
+
+<h3>Phase C — Restructure the 3 quarantined tests</h3>
+<p>Edit <code>tx-sendTx-default.test.ts</code>, <code>multi-account-from.test.ts</code>, and <code>tx-sendTx-multicall.test.ts</code>. Replace "wait for dApp's full sendTx promise" with "open wallet popup, wait for any active stage." Remove the quarantine gate that's been hiding these from CI.</p>
+
+<h3>Phase D — Restructure 3 more tests with the same pattern</h3>
+<p>The opportunistic ones: <code>tx-sendTx-noFrom.test.ts</code>, <code>tx-sendTx-feePayer.test.ts</code>, <code>tx-sendTx-sponsoredFpc.test.ts</code>. Currently passing on CI, but exhibit the same pattern. Restructure for consistency (and as a buffer against future slow-runner-pool flake).</p>
+
+<p>One test that LOOKS like it qualifies but explicitly DOES NOT: <code>tx-sendTx-reject.test.ts</code>. That test rejects the transaction in the popup before approval — the wallet never enters proving. Its "wait for dApp result" IS the point of the test. Leave it alone.</p>
+
+<h3>Phase E — Workflow + docs cleanup</h3>
+<p>Now that the 3 quarantined tests don't need the quarantine env var, remove it from the GitHub Actions workflow + the local docker-ci-like script + the e2e README. Sanity check via grep that nothing else references it.</p>
+
+<h3>Phase F — Update the planning archive</h3>
+<p>Add resolution notes to the previous plan docs (<code>e2e-stabilization</code>, <code>network-followups/slow-tests-hypotheses</code>, <code>network-e2e-unquarantine</code>) marking the quarantine fully resolved.</p>
+
+<h2>Open questions (resolved during implementation, not blockers)</h2>
+
+<ul>
+  <li><strong>Q1:</strong> Does Vue properly forward <code>data-stage</code> to the rendered DOM with the explicit-prop pattern? <em>(Audits confirmed yes; verified pattern at <code>TransactionCardLayout.vue:93-96</code> for sibling <code>data-tx-*</code> attributes.)</em></li>
+  <li><strong>Q2:</strong> Does the wallet popup auto-open after the dApp's approve, or does the test need to drive it open? <em>(Mirror <code>cancel-mid-prove.test.ts:112</code> — established pattern.)</em></li>
+  <li><strong>Q3:</strong> Race window where the wallet enters "proving" before the popup card mounts? <em>(Existing precedent at <code>cancel-mid-prove.test.ts:111</code> waits for the card; same pattern handles this implicitly.)</em></li>
+</ul>
+
+<h2>Security in plain words</h2>
+
+<ul>
+  <li><strong>Risk: a future PR quietly weakens the assertion.</strong> Mitigation 1: the helper is named <code>waitForSendTxProvingStage</code> — a future PR can't degrade it via a single string-param change. Mitigation 2: PR review catches new <code>waitForPgResult</code> for <code>sendTx</code> in popup-shape files (this would be a regression to the old anti-pattern).</li>
+  <li><strong>Risk: someone re-introduces the <code>skipDeferredSlow</code> env var to silently hide a regression.</strong> Visible in workflow YAML diff.</li>
+  <li><strong>No production code path reads <code>data-stage</code>.</strong> The attribute is consumed only by tests. End users never see it.</li>
+  <li><strong>No new dependencies.</strong> No supply-chain change.</li>
+</ul>
+
+<h2>How this links back to recent work</h2>
+
+<p>This is the third PR in the arc:</p>
+<ol>
+  <li><strong>PR #67</strong>: Installed accelerator-server in CI. Sped up the final proof step. But couldn't un-quarantine these 3 tests because earlier proof steps stay slow.</li>
+  <li><strong>This PR</strong>: Changes the tests to not wait on those slow steps. Un-quarantines.</li>
+  <li><strong>(Future)</strong>: If accelerator-server upstream adds coverage for the earlier proof steps, OR if we restructure the wallet to expose more journal events, we could go even further. Not in scope here.</li>
+</ol>
+
+<h2>What would make me say "this isn't ready yet"</h2>
+
+<ul>
+  <li>Phase A unit tests pass even when the binding is deliberately broken — would mean we tested the wrong thing.</li>
+  <li>Restructured tests flake on CI within the first 3 acceptance runs at the new (much smaller) 60s budget — would mean even the "proving" stage takes >60s to reach, which would be surprising and worth investigating.</li>
+  <li>The Phase D opportunistic sweep accidentally weakens a test that was deliberately e2e (audit was rigorous about this, but it's the kind of thing that's easy to over-do).</li>
+</ul>
+
+</body>
+</html>

@@ -45,6 +45,8 @@ import type { ContractNameResolver } from "@aztec/pxe/client/lazy"
 import { buildMergedSimulationResult, simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
 import { completeFeeOptions, type PartialGasSettingsRPC } from "@nulo/aztec-runtime/account"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
+import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
+import { getBlockHeaderAnchor } from "./helpers/block-header-anchor"
 
 /**
  * For Nulo's `DefaultAccountEntrypoint` standard path: the flattened
@@ -127,6 +129,10 @@ export function wrapStandardArmForMixedMerge(result: TxSimulationResult): TxSimu
 export interface FastPathDeps {
 	node: AztecNode
 	pxe: IPXE
+	/** Stored chain identity for the user-selected network. Used to rebind
+	 *  the live node's `getNodeInfo()` before deriving `chainInfo`
+	 *  (F-012 / A-01 V-01). */
+	network: { chainId: number }
 	fromAddr: AztecAddress
 	opts: SimulateOptions
 	optimizableCalls: FunctionCall[]
@@ -164,10 +170,13 @@ export interface FastPathDeps {
  * needs the same node) and our own post-sim merge are NOT caught.
  */
 export async function runFastPath(deps: FastPathDeps): Promise<TxSimulationResult | null> {
-	const { node, pxe, fromAddr, opts, optimizableCalls, remainingRaw, runStandardArm, getContractName, logError } = deps
+	const { node, pxe, network, fromAddr, opts, optimizableCalls, remainingRaw, runStandardArm, getContractName, logError } = deps
 
 	// `getNodeInfo` shares fate with the standard PXE path — let it propagate.
 	const nodeInfo = await node.getNodeInfo()
+	// F-012 / A-01 V-01: refuse to sim against a drifted RPC. Mirrors the
+	// rebind already present in `tx-request-builder.ts`.
+	assertLiveChainIdentity(network, nodeInfo)
 	const chainInfo: ChainInfo = {
 		chainId: new Fr(nodeInfo.l1ChainId),
 		version: new Fr(nodeInfo.rollupVersion),
@@ -176,15 +185,10 @@ export async function runFastPath(deps: FastPathDeps): Promise<TxSimulationResul
 	let optimizedResults: TxSimulationResult[]
 	let normalResult: TxSimulationResultWithAppOffset | null = null
 	try {
-		// Mirror upstream `BaseWallet.simulateTx`: prefer PXE synced
-		// header, fall back to node head. Critical for mixed merge so
-		// both arms anchor at the same chain state.
-		let blockHeader: Awaited<ReturnType<typeof pxe.getSyncedBlockHeader>> | undefined
-		try {
-			blockHeader = await pxe.getSyncedBlockHeader()
-		} catch {
-			blockHeader = (await node.getBlockHeader()) ?? undefined
-		}
+		// Shared helper — mirrors upstream `BaseWallet.simulateTx` by preferring
+		// PXE-synced header so a parallel slow arm using `pxe.simulateTx` observes
+		// roughly the same chain block. See `helpers/block-header-anchor.ts`.
+		const blockHeader = await getBlockHeaderAnchor(pxe, node)
 		if (!blockHeader) return null
 
 		const gasSettings = await completeFeeOptions({

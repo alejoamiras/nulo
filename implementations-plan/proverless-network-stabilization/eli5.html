@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — Proverless Network E2E Stabilization</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+    th, td { border: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
+    th { background: #f6f6f6; }
+  </style>
+</head>
+<body>
+  <h1>Proverless Network E2E Stabilization</h1>
+  <p>Our networked end-to-end tests (a real wallet driving real transactions against a local
+  Aztec sandbox) are <strong>flaky</strong> — they go red for reasons that aren't real bugs. That
+  means we can't trust them, so they're only "advisory" on the <code>dev</code> branch. The plan
+  fixes the flakiness <em>at the root</em>, proves it's gone with a repeated "soak" run, and only
+  then makes the suite a <strong>required</strong> check so a broken network change can never sneak
+  into <code>dev</code> again (which is exactly how PR #85 slipped a red suite in).</p>
+
+  <h2>Why this tier was chosen (<code>deep</code>)</h2>
+  <p>High on <strong>blast radius</strong> (this becomes a gate on every PR) and <strong>external
+  coupling</strong> (anvil + Aztec sandbox + Chrome + WASM proving), plus real
+  <strong>security</strong> surface (a required CI gate is part of the trusted "is this safe to
+  merge" path). Two-plus high dimensions → <code>deep</code>. The ceremony paid off: three
+  independent planners (me + codex + an opus architect) <em>each</em> caught a load-bearing
+  factual error in my own brief, and the hostile double-audit found six real flaws I'd otherwise
+  have shipped.</p>
+
+  <h2>The big idea (the question you handed me)</h2>
+  <p>You asked: should the test "proverless" mode be made broader so tests can reliably <em>time</em>
+  the simulating/proving/submitting stages — or does that break the idea of an e2e? <strong>Answer:
+  don't broaden it.</strong> A test-only "hold" point at the proving step already exists and is
+  clean. The real fix is simpler: <strong>read the wallet's durable journal record as the source of
+  truth</strong> (it doesn't vanish when proving is fast), and only look at the on-screen card when
+  a test is specifically about rendering. Broadening the stub would mean faking the real
+  simulator/network — which <em>would</em> break the e2e and risk the worst outcome (shipping a
+  wallet that sends unproven transactions).</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 0: Lock the "never ship proverless" guards</h3>
+    <p>Before touching anything, pin (as unit tests) the guards that stop the fake-proof test mode
+    from ever reaching real users. We're about to edit test-mode-adjacent code, so we secure the
+    catastrophe-prevention first.</p>
+    <p class="muted">Proves itself by: unit tests for the fail-closed double-opt-in, all green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 1: Fix the timing races at the real source (the journal)</h3>
+    <p>Replace assertions that race the on-screen card with ones that count the wallet's durable
+    journal records ("≥1 transaction active AND ≥1 queued in this session"). Retire the old, sloppy
+    helper that accepted any record (even a finished one). This kills the whole Mode-1 family.</p>
+    <p class="muted">Proves itself by: the concurrent + single-tx tests pass 10 runs in a row locally.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: Build the "see what actually failed" harness</h3>
+    <p>The last debugging round failed because we guessed instead of looking. This phase adds a
+    failure-classifier that, on any timeout, snapshots the journal + browser + sandbox health so we
+    can tell a frozen browser apart from a stuck sandbox apart from a real bug — no more blind
+    bisecting. Pull fresh failure artifacts (don't rely on old ones expiring).</p>
+    <p class="muted">Proves itself by: a fresh failing run is captured + classified for all 4 modes.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: Fix the long hangs (resource starvation)</h3>
+    <p>Some shards hang 17–21 minutes — the browser freezes under load on the CI machine. The fix is
+    reducing memory pressure + a <em>Node-side</em> wall-clock guard that turns a 21-minute dead-air
+    hang into a fast, labeled failure (we can't use a browser ping — the browser is the thing that
+    froze). Critically, we prove the fix on the <em>real</em> CI machine, not just a local container
+    (a container that never reproduces the freeze can't prove it's gone).</p>
+    <p class="muted">Proves itself by: a real-runner soak shows the freeze gone + before/after memory evidence.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: Diagnose-then-fix the remaining two modes</h3>
+    <p>A settle-timeout and a "transaction errored" mode could each be a real wallet bug OR just
+    load. We read the captured error first, name the cause, then fix it — no blind gas-knob bumps
+    that could hide a real concurrency bug.</p>
+    <p class="muted">Proves itself by: the cause is named in the commit + 8 green runs in a row.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5: Soak — prove it's really stable</h3>
+    <p>Run the whole suite many times and require it green <em>with zero retries used</em> (a test
+    that only passes on a retry is still flaky — the soak enforces that, it's not just a slogan).</p>
+    <p class="muted">Proves itself by: full matrix 5/5 with zero retries consumed, recorded in lessons.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 6: Ship it — close the CI bypass holes (one PR)</h3>
+    <p>Make the trigger <em>fail-closed</em> (run the suite unless the PR is docs-only — covering the
+    shared packages + patched deps the old allowlist missed), pin the CI actions to exact versions
+    (a floating tag in the trusted pre-gate job is a supply-chain hole), remove a dead secret, and
+    update the docs. One well-validated PR — merged only when you're extra-sure.</p>
+    <p class="muted">Proves itself by: the full pre-PR gate is green; a shared-dep PR triggers, a docs PR skips+passes.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 7: Make it required (your call, admin step)</h3>
+    <p>After the PR lands and <code>dev</code> is green, flip the suite to a required check. This is a
+    GitHub settings change, not code — so <strong>you</strong> do it (or approve it). With a documented
+    admin-override for genuine CI/platform incidents (not test-skipping).</p>
+    <p class="muted">Proves itself by: a deliberately-red network PR is blocked; a docs PR still merges.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>"Proverless" is a <em>test-only</em> speed-up: it fakes the expensive cryptographic proof so a
+  transaction finishes in ~3 seconds instead of minutes. Real users always get real proofs. The
+  flakiness appeared because that speed-up made the proving step so fast that tests watching for it
+  "live" started missing it — and a separate set of tests just run out of resources on the modest
+  CI machine and hang. Two different problems, one suite.</p>
+
+  <h2>What the audits changed</h2>
+  <p>The hostile review caught that my first draft (a) tried to scope a test helper to a specific
+  transaction — impossible, because concurrent transactions in one session look identical (fix:
+  count them instead); (b) had a Phase-3 "proof" that could pass while CI still hung (fix: require
+  the real-machine soak); (c) left CI bypass holes through shared packages + patched deps (fix:
+  true fail-closed); (d) used a browser-ping watchdog that hangs when the browser is frozen (fix:
+  a Node-side timer); and (e) specced work that already existed in the repo (dropped).</p>
+  <p>The <strong>final fresh-context codex pass</strong> then conditionally approved, catching two
+  more: the Phase-3 gate referenced a workflow not built until Phase 5 (fix: build it in Phase 2),
+  and my Node-side timer would have killed legitimately-long tests like <code>authwit-lifecycle</code>
+  (which runs up to 20 minutes) — so it's now a <em>no-progress</em> stall detector, not a fixed
+  clock. Plus: protect the gate's own workflow files from being edited in the PR they're gating. All
+  folded in. <strong>Verdicts: codex (final) — conditional approve, all conditions addressed; opus —
+  conditional approve, addressed; codex (round 2) — reject, addressed.</strong></p>
+
+  <div class="approval">
+    <h2>Approval decisions — RESOLVED ✓</h2>
+    <p class="muted">Settled at the gate: scope + <code>deep</code> tier approved; D7 → broaden the
+    allowlist (gaps the auditors found are closed within it); D9 → <code>retry:1</code> live (soak
+    still enforces zero-retry); <code>/harden security</code> deferred to pre-release. Plan status:
+    APPROVED — implementation is user-triggered (paste a seed below).</p>
+    <h3>What was decided</h3>
+    <ul>
+      <li><strong>Scope + tier:</strong> confirm <code>deep</code> + the 8 phases (fix both flakiness classes, then make required).</li>
+      <li><strong>D7 — CI trigger:</strong> both auditors rejected your earlier "broaden the allowlist" pick in favor of <strong>fail-closed</strong> (run unless docs-only). The plan now ships fail-closed by default. Confirm, or relax back to a broaden-allowlist?</li>
+      <li><strong>D9 — retry policy:</strong> the soak enforces <em>zero retries consumed</em> regardless. For the live required gate: <code>retry:1</code> (absorb a true one-off blip — recommended) or <code>retry:0</code> (strict)?</li>
+      <li><strong>Escape hatch:</strong> OK to keep an admin-override for a demonstrated CI/platform incident (distinct from skipping a test)?</li>
+      <li><strong>/harden:</strong> this touches CI trust surface + a required gate — schedule a <code>/harden security</code> pass at release time? (Optional; recommended pre-release, not now.)</li>
+      <li><strong>Verdict:</strong> approve · conditional approve (with conditions) · reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>One seed drives the autonomous build session. <code>/goal</code> works until a condition holds
+    and survives <code>--resume</code>; <code>/loop</code> re-fires on an interval. Completion here is
+    transcript-observable (phases ✓ in plan.md + the soak result), so <code>/goal</code> is the better fit.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose. Start the session in the permission mode you intend (a loop stalls on a permission prompt).</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <pre><code>/goal All phases 0-7 marked ✓ in implementations-plan/proverless-network-stabilization/plan.md, each ✓ backed by its phase's Validation gate reported passing in the transcript; the Phase 5 soak recorded full-matrix 5/5 with ZERO retries consumed in lessons/phase-5-soak.md, and Phase 3's real-runner soak named + evidenced the Class B root cause; for each phase the agent printed `LESSONS_FILE=implementations-plan/proverless-network-stabilization/lessons/phase-N.md`; `/code-review max --fix` complete with findings applied + committed; codex post-impl audit complete with high/critical findings addressed; `bun run audit:vue` reports exit 0. STOP before merging to dev (Phase 6) and before flipping the required check (Phase 7) — both are user-gated.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop</h3>
+    <pre><code>/loop 20m Drive implementations-plan/proverless-network-stabilization forward. Never idle. Each firing: read plan.md + lessons/ (authoritative), git status/log; PR? gh pr view --json statusCheckRollup (no --watch); CI in flight → gh run watch up to 10 min. No task in hand? take the next pending phase step (edit → bun run lint + typecheck → the phase's flake-loop / docker-ci-like / real-runner-soak gate exactly as written in plan.md). NEVER run codex concurrently with a local e2e run. Phase gate green (Phase 3 needs the REAL-RUNNER soak, not container-only)? mark ✓, file lessons, print LESSONS_FILE=..., advance. Stuck or non-trivial fork? /codex xhigh, log consult+verdict. Same step failing 5×? stop+reassess. Hard limits: never merge to dev/main, never flip the required check, never publish — surface + stop. All phases 0-5 ✓? /code-review max --fix → commit → codex post-impl audit → address high/critical → wrap-up ELI5'd → STOP (Phase 6 PR + Phase 7 flip are user-gated).</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="BRIEF.md">Shared brief</a> · <a href="audit-codex.md">Codex audit</a> · <a href="audit-opus.md">Opus audit</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

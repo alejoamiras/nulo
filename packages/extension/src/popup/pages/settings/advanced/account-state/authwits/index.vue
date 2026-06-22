@@ -126,18 +126,18 @@ onBeforeUnmount(() => {
 		<SubPageHeader title="Authwits" :backTo="'/popup/settings/advanced/account-state'">
 			<template #trailing>
 				<Dropdown>
-					<button type="button" :class="$style.icon_btn" aria-label="Authwit actions">
+					<button type="button" data-testid="authwits-actions-btn" :class="$style.icon_btn" aria-label="Authwit actions">
 						<MaterialIcon name="settings" :size="18" color="secondary" />
 					</button>
 
 					<template #popup>
-						<DropdownItem @click="changeAuthwitsRegistry">
+						<DropdownItem data-testid="authwits-toggle-registry" @click="changeAuthwitsRegistry">
 							<Flex align="center" gap="8">
 								<Icon name="lock" size="14" color="secondary" />
 								{{ `${isRegistryEnabled ? "Disable" : "Enable"} authwits registry` }}
 							</Flex>
 						</DropdownItem>
-						<DropdownItem @click="revokeAuthwits()" :disabled="!authwits.length">
+						<DropdownItem data-testid="authwits-revoke-all" @click="revokeAuthwits()" :disabled="!authwits.length">
 							<Flex align="center" gap="8">
 								<Icon name="close-circle" size="14" color="secondary" />
 								Revoke all authwits

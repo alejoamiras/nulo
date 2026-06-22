@@ -1,6 +1,7 @@
 import type { ILogger } from "@/wallet/logger"
+import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
-import { Service } from "@nulo/extension-messaging/background"
+import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { getTokenInfo } from "@/wallet/services/token/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { AccountService, type Account } from "@/wallet/services/account/service"
@@ -8,6 +9,7 @@ import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { TokenService, type Token, type TokenInfo } from "@/wallet/services/token/service"
 import { ExecutionService } from "@/wallet/services/execution/service"
+import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { TaskService } from "@/wallet/services/task/service"
 import { OriginType, TransactionService, type Tx, TxStatus } from "@/wallet/services/transaction/service"
 import { SystemClock } from "@/core/adapters/system-clock"
@@ -21,6 +23,7 @@ import { TOKEN_BALANCE_SERVICE_NAME, type TokenBalanceRaw, type TokenBalanceInfo
 export * from "./spec"
 
 export class TokenBalanceService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
+	protected readonly rpcMethods = defineRpcMethods<Methods>()("getTokenBalance", "getTokenBalances", "refreshTokenBalance")
 	public static name = TOKEN_BALANCE_SERVICE_NAME
 
 	public readonly onTokenBalanceAdded = new EventHandler<TokenBalanceInfo>()
@@ -57,7 +60,15 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		this.executionService = services.get(ExecutionService.name)
 		this.taskService = services.get(TaskService.name)
 
-		const projector = new BalanceProjector(this.executionService, this.networkService, this.tokenService, this.logger)
+		const projector = new BalanceProjector(
+			this.executionService,
+			this.networkService,
+			this.tokenService,
+			this.profileService,
+			this.accountService,
+			new PxeServiceClient(this.logger),
+			this.logger,
+		)
 		this.queue = new BalanceJobQueue(
 			this.ticker,
 			this.repo,
@@ -255,7 +266,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			} catch (err) {
 				result.push({
 					...tb,
-					restoreError: err instanceof Error ? err.message : err,
+					restoreError: toRestoreError(err),
 				})
 			}
 		}

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Deprecate `simulate_views` — ELI5</title>
+<style>
+  :root {
+    --bg: #fcfcfb;
+    --ink: #1a1a1a;
+    --muted: #666;
+    --rule: #e6e6e2;
+    --accent: #2563eb;
+    --warn: #b45309;
+  }
+  body {
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    max-width: 720px;
+    margin: 4rem auto;
+    padding: 0 1.5rem 6rem;
+  }
+  h1 { font-size: 1.8rem; margin: 0 0 0.5rem; letter-spacing: -0.01em; }
+  h2 { font-size: 1.15rem; margin: 2.4rem 0 0.6rem; letter-spacing: -0.01em; }
+  h3 { font-size: 0.95rem; margin: 1.6rem 0 0.4rem; letter-spacing: -0.005em; color: var(--muted); text-transform: uppercase; font-weight: 600; }
+  p { margin: 0 0 0.9rem; }
+  hr { border: 0; border-top: 1px solid var(--rule); margin: 2rem 0; }
+  .lede { font-size: 1.05rem; color: var(--muted); margin-bottom: 2rem; }
+  .phase { margin: 1.2rem 0 1.8rem; padding-left: 0.9rem; border-left: 2px solid var(--rule); }
+  .phase strong { display: block; margin-bottom: 0.3rem; }
+  code { font: 0.93em ui-monospace, "SF Mono", Menlo, monospace; background: #f3f3ee; padding: 0.05em 0.4em; border-radius: 3px; }
+  .why { color: var(--muted); font-style: italic; }
+  .warn { color: var(--warn); }
+  ul { margin: 0.4rem 0 0.9rem; padding-left: 1.4rem; }
+  li { margin-bottom: 0.2rem; }
+</style>
+</head>
+<body>
+
+<h1>Deprecate <code>simulate_views</code> — ELI5</h1>
+<p class="lede">A refactor PR. Zero user-visible changes; this is cleanup of a leftover internal abstraction so the next contributor doesn't have to wonder what it's for.</p>
+
+<hr />
+
+<h2>The shape of the problem</h2>
+
+<p>The wallet has a "view simulation" feature: given a batch of view-only calls (like "what's USDC's <code>balance_of_public</code>?"), it runs them efficiently — utility-typed calls go through PXE one-by-one, but public-typed calls get bundled into a single simulated transaction. That's faster than doing N separate simulations.</p>
+
+<p>This was originally exposed as a Nulo-custom RPC (<code>simulateViews</code>) that dApps could call. In the last PR (#50) we deleted the dApp-facing surface — that RPC is gone. But the underlying <em>operation kind</em> (<code>simulate_views</code>) and the public method that implements it (<code>ExecutionService.executeSimulateViews</code>) survived because two internal callers depend on it:</p>
+
+<ul>
+  <li><strong>Balance projector</strong> — when the wallet's token list refreshes, it batches all the <code>balance_of_*</code> reads for every token through this method.</li>
+  <li><strong>Gas balance</strong> — checks FeeJuice public balance + Private FPC balance via this method (one call each, but uses the same path).</li>
+</ul>
+
+<p>So we have a "dispatch path" (op kind, switch case, type, request shape) that nothing dispatches anymore, plus a public service method that's actually only used internally. That's misleading code. Future maintainers will assume <code>executeSimulateViews</code> is a dispatched operation and treat it accordingly.</p>
+
+<h2>What we're doing about it</h2>
+
+<div class="phase">
+  <strong>1. Extract the batching logic into a real helper</strong>
+  <p>The body of <code>executeSimulateViews</code> becomes <code>batchedViewSimulation(calls, deps)</code> — a pure function in its own file (<code>execution/helpers/batched-view-simulation.ts</code>). No <code>this</code>, no class, just inputs → outputs. The dependencies (PXE, account, etc.) get injected so it's easy to unit-test by stubbing them.</p>
+  <p class="why">Why: a "simulate a batch of views" helper isn't really an <em>Operation</em> in the way <code>sendTx</code> or <code>simulateTx</code> are. It's a derived utility used by other code. Putting it in its own module signals "this is a primitive, not a wire protocol."</p>
+</div>
+
+<div class="phase">
+  <strong>2. Refactor the two callers to use the helper</strong>
+  <p>The balance projector + gas balance code both stop calling <code>this.execution.executeSimulateViews({kind: "simulate_views", ...})</code>. Instead they call <code>batchedViewSimulation(calls, deps)</code> directly. Same logic, no fake operation wrapper.</p>
+</div>
+
+<div class="phase">
+  <strong>3. Delete every trace of the <code>simulate_views</code> operation kind</strong>
+  <p>The type definition, the request shape, the switch case in <code>executeOperations</code>, the dead branches in the dApp-interaction validation, the popup window's case, the materialize case, the humanize test. All gone.</p>
+  <p class="why">Why now: in the last PR we kept some of these "in case the legacy popup path still hits them" — but with the op kind itself gone, there's no way to reach them.</p>
+</div>
+
+<div class="phase">
+  <strong>4. Pin the new helper with unit tests</strong>
+  <p>The split-by-FunctionType logic + payload-build + decode contract gets unit tests for the first time. Right now this batching logic only has e2e coverage (which is slow + indirect). Direct unit tests catch regressions in seconds.</p>
+</div>
+
+<div class="phase">
+  <strong>5. (Bundled) Thread the register-token preview through</strong>
+  <p>Codex deferred a small thing in the last PR's post-impl review: when the user clicks "Add USDC to wallet," the popup pre-fetches the token's name/symbol/decimals to show before Allow. After Allow, the executor re-fetches the same data. That's a wasted round-trip to PXE.</p>
+  <p>We thread the popup's fetched <code>TokenInterface</code> through the operation so the executor skips the second fetch. Same correctness, one fewer PXE call.</p>
+</div>
+
+<div class="phase">
+  <strong>6. (Bundled) Drop the leftover dapp-interaction cases</strong>
+  <p>Same as step 3 but specifically for the validateSession + materialize + popup window code paths that were kept defensively in #50. They're unreachable now — clean them up.</p>
+</div>
+
+<hr />
+
+<h2>What could go wrong</h2>
+
+<p>This is a pure refactor — no behavior changes. The main risk is <strong>output parity</strong>: the new helper must produce exactly the same results as the old code, byte-for-byte.</p>
+
+<ul>
+  <li>Same call ordering in the simulated tx</li>
+  <li>Same fee-payment-method setting (<code>PREEXISTING_FEE_JUICE</code>)</li>
+  <li>Same <code>simulatePublic: true</code> + <code>skipFeeEnforcement: true</code> on <code>pxe.simulateTx</code></li>
+  <li>Same error messages ("Contract not found", "Method not found") — callers may surface them</li>
+  <li>Same return-value mapping (public-typed vs private-typed slots in the returned tuple)</li>
+</ul>
+
+<p>The safety net: before the PR ships, run the existing network e2e on <code>dev</code> AND on this branch, compare balance + gas readings. Same numbers = parity confirmed.</p>
+
+<h2>Bundled register-token security note</h2>
+
+<p>The "thread the previewed interface through" change has a security wrinkle: if the executor blindly trusted dApp-supplied metadata, a malicious dApp could lie about a token's symbol/decimals to fool the user. <strong>But our popup's pre-fetch runs in the extension's own context</strong>, not in the dApp's. The data is fetched by our offscreen PXE, never touched by the dApp. So threading it through is safe.</p>
+
+<p>The risk is staleness, not forgery — the on-chain contract <em>could</em> theoretically change behavior between popup pre-fetch and executor execution. For a normal token contract this is near-zero risk (the contract's ABI doesn't mutate). Accepted.</p>
+
+<h2>What you get when this merges</h2>
+
+<ul>
+  <li>One fewer "what is this for?" Nulo-custom op kind cluttering the codebase</li>
+  <li>The batching logic is testable in isolation and documented</li>
+  <li>One fewer PXE round-trip on every "Add to wallet" approval</li>
+  <li>Faster on-ramp for the next contributor: <code>executeSimulateViews</code> stops being a confusing tag they have to grep to understand</li>
+</ul>
+
+<p>Zero user-visible UI changes. Token balances and gas balances render exactly as before.</p>
+
+</body>
+</html>

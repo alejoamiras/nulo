@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Send screen — top-section balance options</title>
+<style>
+  :root {
+    --app-bg: #0a0908;
+    --surface-low: #1d1b1a;
+    --surface-high: #2b2a28;
+    --surface-highest: #363433;
+    --outline: #4a463f;
+    --border: #231f1c;
+    --accent: #f8f1e7;
+    --txt-primary: #f5f0e6;
+    --txt-secondary: #999187;
+    --txt-tertiary: rgba(245, 240, 230, 0.30);
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+    --headline: "Space Grotesk", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { background: #000; color: var(--txt-primary); font-family: var(--headline); margin: 0; padding: 24px; }
+  h1 { font-size: 17px; }
+  p.lead { color: var(--txt-secondary); font-size: 13px; max-width: 560px; line-height: 1.5; }
+  .grid { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+  .screen { width: 343px; background: var(--app-bg); padding: 18px 18px 26px; border: 1px solid #2a2724; }
+  .vtag { font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin: 0 0 2px; }
+  .vdesc { color: var(--txt-secondary); font-size: 11.5px; line-height: 1.4; margin: 0 0 12px; min-height: 30px; }
+
+  .label { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--txt-secondary); margin: 0 0 8px; }
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .col-label { font-size: 9px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--txt-secondary); margin: 0 0 6px; }
+
+  /* segmented control */
+  .seg { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--outline); }
+  .seg > div { text-align: center; font-weight: 700; letter-spacing: 0.06em; color: var(--txt-secondary); }
+  .seg > .on { background: var(--accent); color: #0a0908; }
+  .seg.sm > div { padding: 9px 0; font-size: 12px; }
+  .seg.lg > div { padding: 14px 0; font-size: 14px; }
+
+  /* recipient card (style D) */
+  .rcard { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--border); }
+  .rcard.sm { padding: 12px 0; }
+  .rcard.lg { padding: 16px 0; }
+  .id { display: flex; align-items: center; gap: 10px; }
+  .av { display: flex; align-items: center; justify-content: center; background: var(--surface-high); color: var(--txt-primary); font-weight: 700; flex-shrink: 0; }
+  .av.s32 { width: 36px; height: 36px; font-size: 14px; }
+  .av.s44 { width: 44px; height: 44px; font-size: 16px; }
+  .rname.sm { font-size: 14px; }
+  .rname.lg { font-size: 16px; }
+  .rname { font-weight: 600; line-height: 1.2; }
+  .raddr { font-family: var(--mono); font-size: 12px; color: var(--txt-tertiary); margin-top: 3px; }
+  .icons { display: flex; gap: 4px; color: var(--txt-secondary); }
+  .icons svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.6; }
+
+  /* reference token picker + amount (kept BIG, the same in every variant) */
+  .sec { margin-top: 22px; }
+  .tok { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .tokav { width: 48px; height: 48px; background: var(--accent); color: #0a0908; font-weight: 700; font-size: 20px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .tokname { font-size: 20px; font-weight: 700; line-height: 1.1; }
+  .toksub { font-size: 12px; color: var(--txt-secondary); }
+  .amt { font-size: 52px; font-weight: 700; letter-spacing: -0.02em; padding-left: 10px; border-left: 3px solid var(--accent); line-height: 1; margin-top: 6px; }
+</style>
+</head>
+<body>
+  <h1>Send screen — balancing the top section</h1>
+  <p class="lead">The FROM/TO toggles + recipient read small next to the (big) token picker + amount. Each
+  variant keeps the token picker + amount identical (the reference) and treats the top section differently.
+  Reply with a letter (or a mix). NOTE: this is beyond the original 6 fixes — fold in now or follow-up, your call.</p>
+
+  <div class="grid">
+
+    <!-- A current -->
+    <div class="screen">
+      <div class="vtag">A — current</div>
+      <div class="vdesc">Small side-by-side toggles, compact recipient. The cramped baseline.</div>
+      <div class="duo">
+        <div><div class="col-label">From origin</div><div class="seg sm"><div class="on">Private</div><div>Public</div></div></div>
+        <div><div class="col-label">To destination</div><div class="seg sm"><div class="on">Private</div><div>Public</div></div></div>
+      </div>
+      <div class="sec">
+        <div class="label">Recipient address</div>
+        <div class="rcard sm"><div class="id"><div class="av s32">AC</div><div><div class="rname sm">Account</div><div class="raddr">0x129201…890d6120</div></div></div>
+          <div class="icons"><svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg><svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg></div></div>
+      </div>
+      <div class="sec"><div class="tok"><div class="tokav">N</div><div style="flex:1"><div class="tokname">NULO</div><div class="toksub">NULO</div></div><span style="color:var(--txt-secondary)">›</span></div></div>
+      <div class="sec"><div class="label">Transaction amount</div><div class="amt">0.00</div></div>
+    </div>
+
+    <!-- B bigger toggles -->
+    <div class="screen">
+      <div class="vtag">B — bigger toggles</div>
+      <div class="vdesc">Taller segmented controls + larger labels, so the top controls carry weight closer to the token row.</div>
+      <div class="duo">
+        <div><div class="col-label">From origin</div><div class="seg lg"><div class="on">Private</div><div>Public</div></div></div>
+        <div><div class="col-label">To destination</div><div class="seg lg"><div class="on">Private</div><div>Public</div></div></div>
+      </div>
+      <div class="sec">
+        <div class="label">Recipient address</div>
+        <div class="rcard sm"><div class="id"><div class="av s32">AC</div><div><div class="rname sm">Account</div><div class="raddr">0x129201…890d6120</div></div></div>
+          <div class="icons"><svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg><svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg></div></div>
+      </div>
+      <div class="sec"><div class="tok"><div class="tokav">N</div><div style="flex:1"><div class="tokname">NULO</div><div class="toksub">NULO</div></div><span style="color:var(--txt-secondary)">›</span></div></div>
+      <div class="sec"><div class="label">Transaction amount</div><div class="amt">0.00</div></div>
+    </div>
+
+    <!-- C full-width stacked -->
+    <div class="screen">
+      <div class="vtag">C — full-width stacked</div>
+      <div class="vdesc">One full-width segmented bar per row (From, then To) instead of two cramped columns — bigger, clearer.</div>
+      <div><div class="col-label">From origin</div><div class="seg lg" style="margin-bottom:12px"><div class="on">Private</div><div>Public</div></div></div>
+      <div><div class="col-label">To destination</div><div class="seg lg"><div class="on">Private</div><div>Public</div></div></div>
+      <div class="sec">
+        <div class="label">Recipient address</div>
+        <div class="rcard sm"><div class="id"><div class="av s32">AC</div><div><div class="rname sm">Account</div><div class="raddr">0x129201…890d6120</div></div></div>
+          <div class="icons"><svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg><svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg></div></div>
+      </div>
+      <div class="sec"><div class="tok"><div class="tokav">N</div><div style="flex:1"><div class="tokname">NULO</div><div class="toksub">NULO</div></div><span style="color:var(--txt-secondary)">›</span></div></div>
+      <div class="sec"><div class="label">Transaction amount</div><div class="amt">0.00</div></div>
+    </div>
+
+    <!-- D bigger toggles + scaled recipient -->
+    <div class="screen">
+      <div class="vtag">D — bigger toggles + recipient</div>
+      <div class="vdesc">B's taller toggles AND a scaled-up recipient (44px avatar, 16px name) so the whole top reads substantial.</div>
+      <div class="duo">
+        <div><div class="col-label">From origin</div><div class="seg lg"><div class="on">Private</div><div>Public</div></div></div>
+        <div><div class="col-label">To destination</div><div class="seg lg"><div class="on">Private</div><div>Public</div></div></div>
+      </div>
+      <div class="sec">
+        <div class="label">Recipient address</div>
+        <div class="rcard lg"><div class="id"><div class="av s44">AC</div><div><div class="rname lg">Account</div><div class="raddr">0x129201…890d6120</div></div></div>
+          <div class="icons"><svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg><svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg></div></div>
+      </div>
+      <div class="sec"><div class="tok"><div class="tokav">N</div><div style="flex:1"><div class="tokname">NULO</div><div class="toksub">NULO</div></div><span style="color:var(--txt-secondary)">›</span></div></div>
+      <div class="sec"><div class="label">Transaction amount</div><div class="amt">0.00</div></div>
+    </div>
+
+  </div>
+</body>
+</html>

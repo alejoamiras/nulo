@@ -2,6 +2,12 @@ name: Network e2e
 
 on:
   workflow_dispatch:
+    inputs:
+      disable_accelerator:
+        description: "Skip accelerator-server for this manual run (investigation override)"
+        required: false
+        type: boolean
+        default: false
   pull_request:
     branches: [main, dev]
     # `labeled` so adding `e2e:network` after open triggers a fresh run;
@@ -37,6 +43,22 @@ jobs:
               - 'packages/extension/src/wallet/services/fpc/**'
               - 'packages/extension/src/wallet/services/dapp-interaction/**'
               - 'packages/extension/src/wallet/services/dapp-session/**'
+              # TokenBalance + token detail page — added 2026-05-24 so a
+              # TokenBalance-only bugfix PR on `dev` doesn't silently skip the
+              # network matrix. The Phase B TokenBalance auto-refresh change
+              # lives in tokens/[id].vue + balance service code.
+              - 'packages/extension/src/wallet/services/token-balance/**'
+              - 'packages/extension/src/popup/pages/tokens/**'
+              # Grant-approval + revoke surfaces (the authwit trust point). Added
+              # so a PR touching the execute window, advanced settings, the
+              # authwits module/popups, or the entity-CRUD composable triggers the
+              # network gate instead of silently skipping it.
+              - 'packages/extension/src/popup/windows/execute/**'
+              - 'packages/extension/src/popup/pages/settings/advanced/**'
+              - 'packages/extension/src/popup/components/modules/settings/authwits/**'
+              - 'packages/extension/src/popup/components/popups/RevokeAuthwitsPopup.vue'
+              - 'packages/extension/src/popup/components/popups/ChangeAuthwitsRegistryPopup.vue'
+              - 'packages/extension/src/composables/useEntityCrud.ts'
               - 'packages/extension/src/offscreen/**'
               - 'packages/extension/tests/e2e/network/**'
               - 'packages/extension/tests/e2e/fixtures/**'
@@ -46,9 +68,11 @@ jobs:
               - 'packages/aztec-runtime/**'
               - 'packages/wallet-bridge/**'
               - 'packages/playground/**'
+              - 'packages/design/**'
               - '.github/workflows/_network-e2e.yml'
               - '.github/workflows/pr-network-e2e.yml'
               - '.github/actions/setup-aztec/**'
+              - '.github/actions/setup-accelerator-server/**'
               - '.github/actions/setup-bun/**'
               - 'bun.lock'
               - 'bunfig.toml'
@@ -83,19 +107,123 @@ jobs:
           fi
 
   network-e2e:
-    name: Run
+    name: Run / shard ${{ matrix.shard.id }}
     needs: decide
     if: needs.decide.outputs.run == 'true'
+    strategy:
+      # Don't cancel other shards when one fails — under flaky CI we want the
+      # full per-shard picture. fail-fast: true would mask "is this 1 specific
+      # shard failing or is the suite broadly broken?"
+      fail-fast: false
+      matrix:
+        # N=5 splits the lightweight network test files into ~9-per-shard.
+        # N=5 (not N=4) because vitest's deterministic SHA-1-of-file-path
+        # sharder puts the two known slow files (multi-account-from,
+        # tx-sendTx-multicall) into the same shard at N=4; N=5 separates
+        # them. ~25% more runner cost for materially better worst-case
+        # shard wall-time.
+        #
+        # Heavy-network tests run in the `network-e2e-heavy` job below — they
+        # are EXCLUDED here so they don't pre-pressure the prover queue for
+        # popup-shape tests on the same shard host. See codex audit session
+        # 019e6743-2fb7-7df3-bad7-6cf503cf2338 ("Phase 4 deadlock").
+        #
+        # `id` is the vitest --shard=N/M value. `label` is the artifact-safe
+        # variant (no `/`). actions/upload-artifact rejects `/` in artifact
+        # names (https://github.com/actions/upload-artifact/issues/647), so
+        # the reusable workflow takes both as separate inputs.
+        shard:
+          - { id: "1/5", label: "1-of-5" }
+          - { id: "2/5", label: "2-of-5" }
+          - { id: "3/5", label: "3-of-5" }
+          - { id: "4/5", label: "4-of-5" }
+          - { id: "5/5", label: "5-of-5" }
     uses: ./.github/workflows/_network-e2e.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      shard: ${{ matrix.shard.id }}
+      shard_label: ${{ matrix.shard.label }}
+      # retry: 0 — the PR gate is the honest acceptance signal. A test-dimension
+      # retry would re-mask app flakes; pure infra-boot flakes are handled by the
+      # agent's exit-86 sentinel (one infra-retry in _network-e2e.yml).
+      retry: "0"
+      # Proverless shard pool (fast, accelerator OFF). Exclude, on top of the
+      # fee-methods + concurrent-confirm heavy jobs (which run proverless too),
+      # the prover-ON canary files transfers + tx-sendTx-default — they run with
+      # REAL proving in network-e2e-canary. Keep this list in sync with those jobs.
+      exclude_files: "tests/e2e/network/fee-methods.test.ts tests/e2e/network/concurrent-sendtx-confirm.test.ts tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts"
+      proverless: true
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  network-e2e-heavy:
+    name: Run / heavy / fee-methods
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    # Dedicated runner so the prover queue isn't shared with popup-shape
+    # tests. The file is ~6 min wall-time (5 tests, 4 real fee-juice TX
+    # flows requiring full WASM proving on CI). Without this isolation the
+    # fee-methods queue pressure caused the next file on the same shard to
+    # exceed waitForPgResult budgets — Phase 4 was 1/5 at 5/5 green pre-split.
+    uses: ./.github/workflows/_network-e2e.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      shard_label: "heavy"
+      retry: "0"
+      test_files: "tests/e2e/network/fee-methods.test.ts"
+      # fee-methods is PLAIN proverless (no barrier; the fee flows don't depend
+      # on prove duration). Proverless implies accelerator OFF.
+      proverless: true
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  network-e2e-heavy-concurrent:
+    name: Run / heavy / concurrent-confirm
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    # Dedicated runner, same rationale as fee-methods: two sequential dApp
+    # sendTx proves (both approved → both confirm, serialized by the execution
+    # mutex). Kept off the SHA-1 matrix so its WASM-prove CPU doesn't pressure
+    # popup-shape tests sharing a shard host, and separate from fee-methods so
+    # the two heavy workloads don't share one prover queue.
+    uses: ./.github/workflows/_network-e2e.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      shard_label: "heavy-concurrent"
+      retry: "0"
+      test_files: "tests/e2e/network/concurrent-sendtx-confirm.test.ts"
+      # STUB + barrier: proverless makes prove sub-second, so the test holds T1
+      # at `proving` via the ProofGate to keep the ordering assert deterministic.
+      proverless: true
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  network-e2e-canary:
+    name: Run / canary / real-proving
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    # The ONLY prover-ON jobs after the proverless split — they guard the real
+    # BB-proving path the proverless pool no longer exercises:
+    #   - transfers: wallet-UI flow, waits through real prove → mine (balance change).
+    #   - tx-sendTx-default: dApp flow, waits through real prove → submit (the node
+    #     validates a REAL proof at node.sendTx; playground hard-codes NO_WAIT so
+    #     mine isn't awaited). Covers dapp-send-executor plumbing transfers doesn't.
+    # Dedicated runner with accelerator-server (proverless: false default).
+    uses: ./.github/workflows/_network-e2e.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      shard_label: "canary"
+      retry: "0"
+      test_files: "tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts"
+      # Real proving — accelerator ON unless the emergency kill switch is set.
+      disable_accelerator: ${{ github.event.inputs.disable_accelerator == 'true' || vars.NULO_E2E_DISABLE_ACCELERATOR == '1' }}
     secrets:
       SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
 
   status:
     name: Status
     if: always()
-    needs: [changes, decide, network-e2e]
+    needs: [changes, decide, network-e2e, network-e2e-heavy, network-e2e-heavy-concurrent, network-e2e-canary]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -105,6 +233,9 @@ jobs:
             "${{ needs.changes.result }}" \
             "${{ needs.decide.result }}" \
             "${{ needs.network-e2e.result }}" \
+            "${{ needs.network-e2e-heavy.result }}" \
+            "${{ needs.network-e2e-heavy-concurrent.result }}" \
+            "${{ needs.network-e2e-canary.result }}" \
           ; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
               echo "::error::A required job failed or was cancelled: $r"

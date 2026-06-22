@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — Q3 transport unification</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Q3 — Unify the forked background/offscreen RPC transports</h1>
+  <p>The wallet talks to itself over two internal "phone lines": one between the popup and the background service worker, and one between the background worker and the offscreen page (which runs the heavy Aztec proving). Both lines were built twice, almost identically — ~973 lines of near-duplicate request/timeout/error plumbing across four files. Every fix to one line has to be paid again on the other, and the two lines disagree on one important thing: when something fails, the background line hands back a proper typed error, but the offscreen line hands back a bare string. This plan merges the two lines into one shared core, and fixes that error mismatch — so a failure looks the same whichever line it came down.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>deep</strong> (3 of 6 rubric dimensions HIGH): blast radius (the wallet's entire RPC boundary — 21 background service clients + the PXE offscreen path + the dApp error envelope), irreversibility (moderate — touches every RPC), security sensitivity (the trust boundary + a changing error contract). Three independent plans (me + codex + a planning subagent) were drafted, consolidated, then double-audited — both auditors initially <em>rejected</em>, and their findings reshaped the plan (see below). That's the deep tier earning its keep.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 0: Get the transports under test, where they live</h3>
+    <p>Move the existing transport contract tests into the package that owns the code, and add the missing service-side + timer-cleanup tests. Pin today's behavior (including the to-be-changed string errors) so every later step is provably safe.</p>
+    <p class="muted">Proves itself by: the new unit suites pass and reproduce today's behavior; no production code touched.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 1: Extract the shared pure helpers + fix the bugs they expose</h3>
+    <p>Pull the genuinely-identical pieces (decode, timeout bookkeeping, error-response builder) into one place and wire the background side to them. Fix three real bugs the tests surface — including the offscreen side silently hanging when a result can't be serialized.</p>
+    <p class="muted">Proves itself by: unit + consumer tests green; new tests show a malformed message returns a clean error instead of hanging; network e2e (liveness).</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: One shared "request correlator" for both clients (riskiest)</h3>
+    <p>Both clients track in-flight requests, ids, and timeouts. Merge that bookkeeping into one base class, with the transport-specific bits (reconnect, keepalive, telemetry) staying as plug-in hooks. This is the riskiest step — a sloppy merge could silently double-answer or leak a timer.</p>
+    <p class="muted">Proves itself by: unit tests for every race (timeout-then-late-reply, send-fail-then-disconnect) — exactly-once is unit-proven, not e2e-hoped — PLUS a real-Chrome e2e leg that proves the lifecycle things a fake browser can't (service-worker death → reconnect → request still resolves). Mock proves logic; real Chrome proves lifecycle.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: One shared service core (+ lock the callable surface)</h3>
+    <p>Merge the server-side request handling into one base. While here, fix a latent security weakness: today a message can name <em>any</em> method on the service object (even inherited ones) — restrict it to the intended RPC surface. The offscreen side starts emitting the structured error payload here (harmless — the offscreen client ignores it until Phase 4).</p>
+    <p class="muted">Proves itself by: a unit test proving a non-registered method name is rejected; a unit test proving the keepalive ping fires on schedule, AND a real-Chrome e2e proving a &gt;30s proving job actually completes without the worker dying (only a real browser can prove that); smoke + network.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: Make the offscreen line return typed errors (and keep the dApp's view stable)</h3>
+    <p>The offscreen client stops returning bare strings and returns proper typed errors like the background line. Critically — these errors <em>do</em> reach connected dApps via the response envelope, so we add explicit handling there so the dApp-visible error message stays intentional and stable. Migrate the handful of tests that asserted the old string shape.</p>
+    <p class="muted">Proves itself by: offscreen unit tests assert typed errors; a dApp-error-contract check (a prove/simulate timeout yields the intended response.error); smoke + network.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5: Security hardening sweep</h3>
+    <p>A thin <code>/harden security</code> pass over the now-shared seam: reject malformed/hostile cross-context messages, duplicate ids, replayed responses.</p>
+    <p class="muted">Proves itself by: hostile-message tests show bad input is dropped safely (listener never crashes); network.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>"Background" and "offscreen" are two Chrome-extension execution contexts. Aztec proving is heavy and can't run in the service worker, so it lives in the offscreen page; the worker talks to it over Chrome messaging. The two transports drifted because they were written at different times for different Chrome APIs (long-lived Port vs one-shot sendMessage). The error mismatch is a real latent bug: a PXE failure today reaches a connected dApp as a slightly different string than an equivalent background failure, and some internal "is this just a benign disconnect?" checks don't even recognize the offscreen string form.</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li>None blocking — the three original decisions (disconnect parity, error codes, CI wiring) were resolved during planning, and the double-audit's findings are folded into v2. The final codex pass is the last check before you approve.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: full shared service-core + correlator + error-contract unification + dApp-envelope handling (5 functional phases + a harden sweep).</li>
+      <li>Confirm tier: <code>deep</code>.</li>
+      <li>Confirm the validation plan: unit + smoke on every phase; network e2e on the behavior phases (2-4); exactly-once correlator properties are unit-gated (network is liveness-only).</li>
+      <li>Confirm <code>/harden security</code> runs as Phase 5 (you already asked for it post-impl — it's folded in as a gated phase).</li>
+      <li>Approve / conditionally approve (with conditions) / reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p class="warning">Use exactly ONE per session — they don't compose.</p>
+    <div class="phase recommended">
+      <h3>Recommended: /goal (completion is transcript-observable)</h3>
+      <pre><code>/goal All 6 phases marked ✓ in implementations-plan/q3-transport-unification/plan.md, each backed by its plan.md validation gate reported passing in the transcript; for each phase the agent printed LESSONS_FILE=implementations-plan/q3-transport-unification/lessons/phase-N.md; for the network-gated phases (1-4) the network execution jobs are confirmed to have actually run (not skipped) + green AFTER syncing the branch to latest dev incl. de-flake commits; the Phase-4 dApp-error-contract check is green; `/code-review max --fix` complete + committed separately; codex xhigh post-impl audit complete with high/critical addressed; `bun run lint` and `bun run --cwd packages/extension-messaging test` both exit 0 in the transcript.</code></pre>
+    </div>
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/q3-transport-unification forward. Never idle. Each firing: read plan.md + lessons/ (authoritative), git status, git log -5, and any open PR's statusCheckRollup. CI in flight? Confirm progress (gh run watch up to 10m); use the wait to prep the next phase. No task in hand? Take the next pending phase; after each edit run bun run lint + the touched packages' typecheck+test; commit→push; network-gated phases (1-4) add the e2e:network label AND must be synced to latest dev (incl. de-flake commits) before judging network results. Phase green = its plan.md gate passes (commands+criteria, exactly-once is unit-proven not e2e); mark ✓, file lessons, print LESSONS_FILE=..., advance. Stuck/decision? /codex xhigh, decide, log it. Hard limits: never merge to main/release, never publish, never expand scope past plan.md. All 6 ✓? /code-review max --fix → codex xhigh post-impl audit → address high/critical → /harden security (Phase 5) → wrap-up + stop. Keep the ASCII checklist visible.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a> · <a href="audit-codex.md">codex audit</a> · <a href="audit-fable.md">subagent audit</a></p>
+</body>
+</html>

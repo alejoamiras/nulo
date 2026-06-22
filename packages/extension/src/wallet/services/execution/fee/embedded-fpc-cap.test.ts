@@ -34,7 +34,6 @@ function initialGasSettings(): GasSettings {
 
 function fakeNode(minFees: GasFees = new GasFees(100n, 200n)): AztecNode & { getCurrentMinFees: ReturnType<typeof vi.fn> } {
 	return {
-		// biome-ignore lint/suspicious/noExplicitAny: fake covers only the surface the helper touches
 		getCurrentMinFees: vi.fn(async () => minFees),
 	} as unknown as AztecNode & { getCurrentMinFees: ReturnType<typeof vi.fn> }
 }
@@ -72,7 +71,10 @@ describe("applyEmbeddedFpcGasCap", () => {
 		expect(node.getCurrentMinFees).toHaveBeenCalledOnce()
 	})
 
-	test("3. embedded='fpc', dApp supplied explicit maxFeesPerGas → uses provided values; node NOT consulted", async () => {
+	// This IS the private-fuel claim path: PrivateMintAndPayFeePaymentMethod sets feePayer=FPC (≠ from)
+	// → embedded="fpc", and the faucet supplies explicit maxFeesPerGas + teardownGas=0 (plan L14), which
+	// must pass through verbatim so mint_and_pay_fee's `gasLimits * maxFeesPerGas <= amount` assertion holds.
+	test("3. embedded='fpc', dApp supplied explicit maxFeesPerGas → uses provided values; node NOT consulted (the private-fuel path)", async () => {
 		const node = fakeNode()
 		const txRequest = fakeTxRequest(initialGasSettings())
 		const fee: FeeOptions = {
@@ -85,6 +87,9 @@ describe("applyEmbeddedFpcGasCap", () => {
 		const after = txRequest.txContext.gasSettings
 		expect(after.maxFeesPerGas.feePerDaGas).toBe(777n)
 		expect(after.maxFeesPerGas.feePerL2Gas).toBe(888n)
+		// teardownGasLimits pass through untouched — a dApp's explicit teardownGas (e.g. 0) survives.
+		expect(after.teardownGasLimits.daGas).toBe(100_000)
+		expect(after.teardownGasLimits.l2Gas).toBe(200_000)
 		expect(node.getCurrentMinFees).not.toHaveBeenCalled()
 	})
 })

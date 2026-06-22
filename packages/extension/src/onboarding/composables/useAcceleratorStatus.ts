@@ -16,6 +16,7 @@
  */
 
 import { onMounted, ref } from "vue"
+import { ACCELERATOR_HEALTH_URL } from "@/accelerator/config"
 
 export type AcceleratorStatus = "idle" | "detecting" | "not-detected" | "no-bb" | "active"
 
@@ -25,7 +26,6 @@ interface AcceleratorInfo {
 	bb_available?: boolean
 }
 
-const HEALTH_URL = "http://127.0.0.1:59833/health"
 const TIMEOUT_MS = 2000
 
 export function useAcceleratorStatus(options?: { autoDetect?: boolean }) {
@@ -35,7 +35,7 @@ export function useAcceleratorStatus(options?: { autoDetect?: boolean }) {
 	async function detect(): Promise<void> {
 		status.value = "detecting"
 		try {
-			const r = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(TIMEOUT_MS) })
+			const r = await fetch(ACCELERATOR_HEALTH_URL, { signal: AbortSignal.timeout(TIMEOUT_MS) })
 			if (!r.ok) throw new Error(`HTTP ${r.status}`)
 			const data = (await r.json()) as {
 				status?: string

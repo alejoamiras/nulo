@@ -36,6 +36,11 @@
 import { type JobStage, isTerminal } from "./types"
 
 const LEGAL_TRANSITIONS: Readonly<Record<JobStage, ReadonlySet<JobStage>>> = {
+	// Pre-execution holding stage — handler claims via queued → pending.
+	// Cancel + fail edges support user-cancel-while-queued + handler-error-
+	// before-claim paths. No queued → simulating shortcut: any executor
+	// MUST pass through pending so the FSM invariant holds.
+	queued: new Set<JobStage>(["pending", "failed", "cancelled"]),
 	pending: new Set<JobStage>(["simulating", "failed", "cancelled"]),
 	simulating: new Set<JobStage>(["proving", "succeeded", "failed", "cancelled"]),
 	proving: new Set<JobStage>(["submitting", "failed", "cancelled"]),

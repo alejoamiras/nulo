@@ -53,8 +53,8 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { TESTIDS } from "@/lib/testids"
 import TokenCard from "./TokenCard.vue"
 
-const USDC = { symbol: "USDC", decimals: 6, displayAmount: "1,000", onchainAmount: 1_000_000_000n } as const
-const USDC_ADDR = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000002")
+const NULO = { symbol: "NULO", decimals: 6, displayAmount: "1,000", onchainAmount: 1_000_000_000n } as const
+const NULO_ADDR = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000002")
 const ACCOUNT = AztecAddress.fromString("0x000000000000000000000000000000000000000000000000000000000000000a")
 // biome-ignore lint/suspicious/noExplicitAny: minimal wallet stub for component mount
 const WALLET = {} as any
@@ -78,14 +78,14 @@ describe("TokenCard", () => {
 
 	function makeCard() {
 		return mount(TokenCard, {
-			props: { token: USDC, tokenAddress: USDC_ADDR, wallet: WALLET, account: ACCOUNT },
+			props: { token: NULO, tokenAddress: NULO_ADDR, wallet: WALLET, account: ACCOUNT },
 		})
 	}
 
 	it("renders the symbol header and the fixed-amount subline", () => {
 		const w = makeCard()
-		expect(w.text()).toContain("USDC")
-		expect(w.text()).toContain("Fixed drip: 1,000 USDC")
+		expect(w.text()).toContain("NULO")
+		expect(w.text()).toContain("Fixed drip: 1,000 NULO")
 	})
 
 	it("renders the disclaimer chip", () => {
@@ -97,16 +97,16 @@ describe("TokenCard", () => {
 		const w = makeCard()
 		const pub = w.get(`[data-testid="${TESTIDS.btnDripPublic}"]`)
 		const priv = w.get(`[data-testid="${TESTIDS.btnDripPrivate}"]`)
-		expect(pub.text()).toBe("Get USDC (public)")
-		expect(priv.text()).toBe("Get USDC (private)")
+		expect(pub.text()).toBe("Get NULO (public)")
+		expect(priv.text()).toBe("Get NULO (private)")
 	})
 
 	it("drip buttons carry an aria-label that names the amount + target balance", () => {
 		const w = makeCard()
 		const pub = w.get(`[data-testid="${TESTIDS.btnDripPublic}"]`)
 		const priv = w.get(`[data-testid="${TESTIDS.btnDripPrivate}"]`)
-		expect(pub.attributes("aria-label")).toBe("Get 1,000 USDC into your public balance")
-		expect(priv.attributes("aria-label")).toBe("Get 1,000 USDC into your private balance")
+		expect(pub.attributes("aria-label")).toBe("Get 1,000 NULO into your public balance")
+		expect(priv.attributes("aria-label")).toBe("Get 1,000 NULO into your private balance")
 	})
 
 	it("renders the balance row with public + private values", () => {
@@ -120,7 +120,7 @@ describe("TokenCard", () => {
 		expect(w.find(`[data-testid="${TESTIDS.dripStatus}"]`).exists()).toBe(false)
 	})
 
-	it("clicking 'Get USDC (public)' calls drip() with target=public and refreshes balance", async () => {
+	it("clicking 'Get NULO (public)' calls drip() with target=public and refreshes balance", async () => {
 		const w = makeCard()
 		await w.get(`[data-testid="${TESTIDS.btnDripPublic}"]`).trigger("click")
 		await Promise.resolve()
@@ -130,7 +130,7 @@ describe("TokenCard", () => {
 		expect(refreshFn).toHaveBeenCalled()
 	})
 
-	it("clicking 'Get USDC (private)' calls drip() with target=private", async () => {
+	it("clicking 'Get NULO (private)' calls drip() with target=private", async () => {
 		const w = makeCard()
 		await w.get(`[data-testid="${TESTIDS.btnDripPrivate}"]`).trigger("click")
 		await Promise.resolve()
@@ -189,7 +189,7 @@ describe("TokenCard", () => {
 		expect(row.text()).toContain("Reverted")
 	})
 
-	it("ok emphasis persists past 3s — no auto-decay timer (user-noticed-confirmation fix)", async () => {
+	it("ok emphasis persists past 3s - no auto-decay timer (user-noticed-confirmation fix)", async () => {
 		vi.useFakeTimers()
 		const w = makeCard()
 		await w.get(`[data-testid="${TESTIDS.btnDripPublic}"]`).trigger("click")
@@ -226,7 +226,7 @@ describe("TokenCard", () => {
 		// Step 2: force inflight state on the SAME card via the shared ref. Vue's
 		// computed `dripping` reads `inflightRef.value` so this triggers the
 		// statusKind transition without us needing a deferred mock promise.
-		inflightRef.value = { tokenSymbol: "USDC", target: "private" }
+		inflightRef.value = { tokenSymbol: "NULO", target: "private" }
 		await w.vm.$nextTick()
 
 		// Step 3: status-link should be GONE; status-text should reflect inflight.
@@ -292,7 +292,7 @@ describe("TokenCard", () => {
 	it("carries the stable testid + data-symbol on the card root", () => {
 		const w = makeCard()
 		const card = w.get(`[data-testid="${TESTIDS.tokenCard}"]`)
-		expect(card.attributes("data-symbol")).toBe("USDC")
+		expect(card.attributes("data-symbol")).toBe("NULO")
 	})
 
 	it("the actions row renders both drip buttons", () => {
@@ -305,14 +305,14 @@ describe("TokenCard", () => {
 	describe("disconnected variant (no wallet, no account)", () => {
 		function makeDisconnectedCard() {
 			return mount(TokenCard, {
-				props: { token: USDC, tokenAddress: USDC_ADDR },
+				props: { token: NULO, tokenAddress: NULO_ADDR },
 			})
 		}
 
 		it("renders the symbol + buttons even with no wallet", () => {
 			const w = makeDisconnectedCard()
-			expect(w.text()).toContain("USDC")
-			expect(w.text()).toContain("Fixed drip: 1,000 USDC")
+			expect(w.text()).toContain("NULO")
+			expect(w.text()).toContain("Fixed drip: 1,000 NULO")
 			expect(w.find(`[data-testid="${TESTIDS.btnDripPublic}"]`).exists()).toBe(true)
 			expect(w.find(`[data-testid="${TESTIDS.btnDripPrivate}"]`).exists()).toBe(true)
 		})
@@ -337,8 +337,8 @@ describe("TokenCard", () => {
 
 		it("balance row renders em-dash placeholders (no live data)", () => {
 			const w = makeDisconnectedCard()
-			expect(w.get(`[data-testid="${TESTIDS.balancePublic}"]`).text()).toBe("—")
-			expect(w.get(`[data-testid="${TESTIDS.balancePrivate}"]`).text()).toBe("—")
+			expect(w.get(`[data-testid="${TESTIDS.balancePublic}"]`).text()).toBe("-")
+			expect(w.get(`[data-testid="${TESTIDS.balancePrivate}"]`).text()).toBe("-")
 		})
 
 		it("carries data-connected=undefined on the card root", () => {

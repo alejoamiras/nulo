@@ -1,51 +1,29 @@
 /**
- * Maps wallet-sdk method names to required capability types.
+ * Capability lookup for wallet-sdk method names.
  *
- * Used by `enforceCapability()` in the dispatcher to check whether a dApp
- * has been granted the capability needed for a given method call.
+ * Thin facade over the `method-descriptors` registry (the single source of
+ * truth). `getRequiredCapability` / `isCapabilityExempt` read the registry-derived
+ * `METHOD_CAPABILITY_MAP` / `EXEMPT_METHODS`. Used by `enforceCapability()` in the
+ * dispatcher to check whether a dApp has been granted the capability a method needs.
  *
- * Exempt methods (getChainInfo, requestCapabilities, batch) do not require
- * any capability grant — they are either meta-protocol or infrastructure.
+ * The per-method facts (which methods are exempt, each method's required
+ * capability, the F-003/F1 rationale) live as `MethodDescriptor` fields in
+ * `./method-descriptors`. To add/reclassify a method, edit the registry row.
  */
 
-export type CapabilityType = "accounts" | "contracts" | "contractClasses" | "simulation" | "transaction" | "data"
+import { METHOD_CAPABILITY_MAP, EXEMPT_METHODS, type CapabilityType } from "./method-descriptors"
 
-/** Methods that never require a capability check. */
-const EXEMPT_METHODS = new Set(["getChainInfo", "requestCapabilities", "batch", "getAccounts"])
-
-/** Maps each wallet-sdk method name to its required capability type. */
-const METHOD_CAPABILITY_MAP: Record<string, CapabilityType> = {
-	// accounts
-	createAuthWit: "accounts",
-	registerToken: "accounts",
-
-	// contracts
-	registerContract: "contracts",
-	getContractMetadata: "contracts",
-
-	// contractClasses
-	getContractClassMetadata: "contractClasses",
-
-	// simulation
-	simulateTx: "simulation",
-	executeUtility: "simulation",
-	profileTx: "simulation",
-
-	// transaction
-	sendTx: "transaction",
-
-	// data
-	getPrivateEvents: "data",
-	getAddressBook: "data",
-	registerSender: "data",
-}
+// Re-exported to preserve the public `@nulo/wallet-bridge` path (index.ts:15).
+export type { CapabilityType }
 
 /**
  * Get the capability type required for a wallet-sdk method.
  * Returns `null` for exempt or unknown methods.
  */
 export function getRequiredCapability(method: string): CapabilityType | null {
-	return METHOD_CAPABILITY_MAP[method] ?? null
+	// `Object.hasOwn` guards against prototype names (`toString`, `constructor`)
+	// resolving to a truthy prototype member on the derived plain object.
+	return Object.hasOwn(METHOD_CAPABILITY_MAP, method) ? METHOD_CAPABILITY_MAP[method] : null
 }
 
 /**

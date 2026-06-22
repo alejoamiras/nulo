@@ -9,7 +9,7 @@ const STUBS = {
 	Spinner: { template: '<span data-testid="stub-spinner" />' },
 	TransactionCardLayout: {
 		template: `
-			<div :data-testid="testId">
+			<div :data-testid="testId" :data-stage="stage">
 				<span class="title">{{ title }}</span>
 				<slot name="title-trailing" />
 				<slot name="badge" />
@@ -19,7 +19,7 @@ const STUBS = {
 				<span class="symbol">{{ amountSymbol }}</span>
 			</div>
 		`,
-		props: ["title", "icon", "amount", "amountSymbol", "testId"],
+		props: ["title", "icon", "amount", "amountSymbol", "testId", "stage"],
 	},
 }
 
@@ -59,6 +59,25 @@ describe("composite/TransactionAwaitingCard", () => {
 	test("forwards the testId 'tx-awaiting-card' to the underlying layout", () => {
 		const w = mountCard()
 		expect(w.find("[data-testid='tx-awaiting-card']").exists()).toBe(true)
+	})
+
+	test("forwards every JobStage literal through to the layout (e2e selector contract)", () => {
+		// E2E concurrency tests cross-check `[data-testid="tx-awaiting-card"]`
+		// rendering as a secondary UI check; the primary oracle is the journal
+		// (tests/e2e/fixtures/journal.ts).
+		// Contract: this card threads each `stage` literal through to
+		// TransactionCardLayout verbatim. Canonical type:
+		// packages/wallet-core/src/jobs/types.ts JobStage.
+		const stages = ["pending", "queued", "simulating", "proving", "submitting", "succeeded", "failed", "cancelled"]
+		for (const s of stages) {
+			const w = mountCard({ stage: s })
+			expect(w.find("[data-testid='tx-awaiting-card']").attributes("data-stage")).toBe(s)
+		}
+	})
+
+	test("data-stage is omitted when stage prop is null/default (no in-flight journal binding)", () => {
+		const w = mountCard()
+		expect(w.find("[data-testid='tx-awaiting-card']").attributes("data-stage")).toBeUndefined()
 	})
 
 	test("forwards amount + amountSymbol props to the layout", () => {

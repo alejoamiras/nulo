@@ -65,7 +65,7 @@ const passwordHint = computed(() => {
 				<button
 					type="button"
 					@click="hideCredentials = !hideCredentials"
-					:class="$style.visibility_btn"
+					tabindex="-1" :class="$style.visibility_btn"
 					:aria-label="hideCredentials ? 'Show seed phrase' : 'Hide seed phrase'"
 				>
 					<MaterialIcon
@@ -98,7 +98,7 @@ const passwordHint = computed(() => {
 						<button
 							type="button"
 							@click="hideCredentials = !hideCredentials"
-							:class="$style.visibility_btn"
+							tabindex="-1" :class="$style.visibility_btn"
 							:aria-label="hideCredentials ? 'Show key' : 'Hide key'"
 						>
 							<MaterialIcon
@@ -137,7 +137,7 @@ const passwordHint = computed(() => {
 						<button
 							type="button"
 							@click="hideCredentials = !hideCredentials"
-							:class="$style.visibility_btn"
+							tabindex="-1" :class="$style.visibility_btn"
 							:aria-label="hideCredentials ? 'Show key' : 'Hide key'"
 						>
 							<MaterialIcon
@@ -178,7 +178,7 @@ const passwordHint = computed(() => {
 						<button
 							type="button"
 							@click="isPasswordType = !isPasswordType"
-							:class="$style.visibility_btn"
+							tabindex="-1" :class="$style.visibility_btn"
 							:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
 						>
 							<MaterialIcon
@@ -221,7 +221,7 @@ const passwordHint = computed(() => {
 							<button
 								type="button"
 								@click="isPasswordType = !isPasswordType"
-								:class="$style.visibility_btn"
+								tabindex="-1" :class="$style.visibility_btn"
 								:aria-label="isPasswordType ? 'Show password' : 'Hide password'"
 							>
 								<MaterialIcon

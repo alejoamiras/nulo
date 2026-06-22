@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import { DRIPPER, ETH, USDC } from "@/contracts/deployments"
+import { DRIPPER, NULO, OLUN } from "@/contracts/deployments"
 import { explorerAddressUrl } from "@/lib/explorer"
 
 const links = computed(() => ({
-	usdc: explorerAddressUrl(USDC.toString()),
-	eth: explorerAddressUrl(ETH.toString()),
+	nulo: explorerAddressUrl(NULO.toString()),
+	olun: explorerAddressUrl(OLUN.toString()),
 	dripper: explorerAddressUrl(DRIPPER.toString()),
 }))
 </script>
@@ -14,11 +14,11 @@ const links = computed(() => ({
 	<footer class="footer">
 		<p class="contracts">
 			<span class="label">Contracts:</span>
-			<a v-if="links.usdc" :href="links.usdc" target="_blank" rel="noopener noreferrer">USDC</a>
-			<span v-else>USDC</span>
+			<a v-if="links.nulo" :href="links.nulo" target="_blank" rel="noopener noreferrer">NULO</a>
+			<span v-else>NULO</span>
 			<span class="sep">·</span>
-			<a v-if="links.eth" :href="links.eth" target="_blank" rel="noopener noreferrer">ETH</a>
-			<span v-else>ETH</span>
+			<a v-if="links.olun" :href="links.olun" target="_blank" rel="noopener noreferrer">OLUN</a>
+			<span v-else>OLUN</span>
 			<span class="sep">·</span>
 			<a v-if="links.dripper" :href="links.dripper" target="_blank" rel="noopener noreferrer">Dripper</a>
 			<span v-else>Dripper</span>

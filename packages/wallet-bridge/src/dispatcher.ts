@@ -52,9 +52,26 @@
 // package-name import (`@nulo/wallet-bridge`) would resolve at runtime but
 // wires an unnecessary self-reference through the barrel.
 import { formatCaipAccount, formatCaipChain, parseCaipAccount, resolveNetworkByChainId } from "./caip"
-import type { AccountsCapability, Capability, GrantedCapabilityRecord, RejectedCapabilityRecord } from "./capabilities"
+import type {
+	AccountsCapability,
+	Capability,
+	ContractsCapability,
+	DataCapability,
+	GrantedCapabilityRecord,
+	RejectedCapabilityRecord,
+	Scope,
+	SimulationCapability,
+	TransactionCapability,
+} from "./capabilities"
 import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
-import type { AztecSendTxRequest, CapabilityResult, ExecutionResult, RegisterTokenRequest } from "./dapp-interaction-protocol"
+import { METHOD_TO_KIND, NETWORK_ONLY_KINDS, ACCOUNT_KINDS, METHOD_REGISTRY } from "./method-descriptors"
+import type {
+	AztecSendTxRequest,
+	CapabilityResult,
+	ExecutionResult,
+	RegisterTokenRequest,
+	SendTransactionRequest,
+} from "./dapp-interaction-protocol"
 import type {
 	AztecCreateAuthWitOperation,
 	AztecExecuteUtilityOperation,
@@ -68,14 +85,50 @@ import type {
 	Operation,
 } from "./operation"
 import type { OperationResult } from "./operation-result"
-import { enforceScope } from "./scope-enforcement"
+import { enforceScope, enforceScopeWithSession } from "./scope-enforcement"
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { OriginType, type LocalTxOrigin } from "./transaction-origin"
 import type { SessionContext } from "./types"
 import { CapabilityNotGrantedError, JobCancelledError } from "@nulo/extension-messaging/errors"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
-import type { IAccountReader, IDappInteractionRunner, IDappSessionWriter, IExecutionRunner, INetworkReader } from "./services-contract"
+import type {
+	IAccountReader,
+	IDappInteractionRunner,
+	IDappSessionWriter,
+	IExecutionRunner,
+	INetworkReader,
+	ITokenRegistryReader,
+} from "./services-contract"
+
+/**
+ * Internal hooks bag the dispatcher accepts from its caller (the wallet-sdk
+ * background message handler). NOT part of `SessionContext` — codex round-3
+ * caught that putting hooks on the ctx would propagate them into recursive
+ * batch-leg dispatches and break the batch's sequential-completion contract.
+ *
+ * Currently consumed only by the `sendTx` path (forwarded to
+ * `DappInteractionService.execute` → `executionService.executeOperations`
+ * → `executeAztecSendTx` / `executeNoFromSendTx`). Other methods ignore.
+ */
+export interface DispatchHooks {
+	/**
+	 * Invoked by the wallet once the approved request has enqueued on the
+	 * per-(profileId, chainId) execution mutex. Releases the session FIFO baton
+	 * so the next pending message's popup can open — safely, because this
+	 * request is already ahead of any later one in the execution FIFO, so
+	 * message/approval order is preserved. Popup/UI concurrency without
+	 * reordering execution.
+	 */
+	onExecutionEnqueued?: () => void
+	/**
+	 * Pre-allocated journal id from `background.ts:onWalletMessage`. When
+	 * present, the handler should TRANSITION this record (queued → pending
+	 * → ...) instead of creating a new one. Lets the activity feed surface
+	 * the request immediately on message arrival.
+	 */
+	queuedJournalId?: string
+}
 
 declare const __VERSION__: string
 
@@ -114,6 +167,71 @@ function isNoFromRequest(from: unknown): boolean {
  *  scope-enforcement: missing flag = no permission). The `accounts` array
  *  field is dispatcher-emitted, not dApp-controlled, and is excluded from
  *  the comparison. */
+/** Whether every address+flag the request needs is already covered by the UNION of stored
+ *  contracts grants. NOT equality: shrinking requests must not re-prompt; growing ones must
+ *  (the type-only delta silently stranded new addresses after redeploys). */
+function contractsRequestCovered(existing: ContractsCapability[], requested: ContractsCapability): boolean {
+	const flagCovered = (flag: "canRegister" | "canGetMetadata"): boolean => {
+		if (!requested[flag]) return true
+		if (requested.contracts === "*") return existing.some((e) => e[flag] && e.contracts === "*")
+		return requested.contracts.every((addr) =>
+			existing.some((e) => e[flag] && (e.contracts === "*" || e.contracts.some((x) => String(x) === String(addr)))),
+		)
+	}
+	return flagCovered("canRegister") && flagCovered("canGetMetadata")
+}
+
+/** Pattern-list coverage: every requested pattern is satisfied by ONE existing scope. Coverage
+ *  deliberately mirrors enforcement's shape (`checkTransactionCalls` requires a SINGLE cap to
+ *  cover every call of a tx) - union-coverage here would approve requests enforcement then
+ *  refuses. */
+function scopeCovers(existing: Scope, requested: Scope): boolean {
+	if (existing === "*") return true
+	if (requested === "*") return false
+	return requested.every((rp) =>
+		existing.some(
+			(ep) =>
+				(ep.contract === "*" || String(ep.contract) === String(rp.contract)) &&
+				(ep.function === "*" || ep.function === rp.function),
+		),
+	)
+}
+
+function transactionRequestCovered(existing: TransactionCapability[], requested: TransactionCapability): boolean {
+	if (!requested.scope) return existing.length > 0
+	return existing.some((e) => scopeCovers(e.scope, requested.scope))
+}
+
+/** Sub-scopes (transactions / utilities) check independently - enforcement's per-sub `caps.some`
+ *  lets different caps cover different sub-scopes. */
+function simulationRequestCovered(existing: SimulationCapability[], requested: SimulationCapability): boolean {
+	for (const sub of ["transactions", "utilities"] as const) {
+		const rs = requested[sub]?.scope
+		if (!rs) continue
+		if (
+			!existing.some((e) => {
+				const es = e[sub]?.scope
+				return es !== undefined && scopeCovers(es, rs)
+			})
+		) {
+			return false
+		}
+	}
+	return true
+}
+
+function dataRequestCovered(existing: DataCapability[], requested: DataCapability): boolean {
+	const rc = requested.privateEvents?.contracts
+	if (!rc) return existing.length > 0
+	if (rc === "*") return existing.some((e) => e.privateEvents?.contracts === "*")
+	return rc.every((addr) =>
+		existing.some((e) => {
+			const list = e.privateEvents?.contracts
+			return list === "*" || (Array.isArray(list) && list.some((x) => String(x) === String(addr)))
+		}),
+	)
+}
+
 function accountsCapsEqual(a: AccountsCapability, b: AccountsCapability): boolean {
 	return Boolean(a.canGet) === Boolean(b.canGet) && Boolean(a.canCreateAuthWit) === Boolean(b.canCreateAuthWit)
 }
@@ -124,54 +242,14 @@ type CapabilityManifest = {
 	[key: string]: unknown
 }
 
-/**
- * Maps wallet-sdk method names to internal Operation kinds.
- *
- * The wallet-sdk ExtensionWallet proxy calls methods by their WalletSchema key name.
- * On the dApp side these are camelCase method names (e.g. `sendTx`, `simulateTx`).
- * We map each to the corresponding `Operation.kind` that `ExecutionService` understands.
- */
-const METHOD_TO_KIND: Record<string, Operation["kind"]> = {
-	// --- Standard Wallet interface (from @aztec/aztec.js/wallet WalletSchema) ---
-	getChainInfo: "aztec_getChainInfo",
-	getContractClassMetadata: "aztec_getContractClassMetadata",
-	getContractMetadata: "aztec_getContractMetadata",
-	getPrivateEvents: "aztec_getPrivateEvents",
-	registerSender: "aztec_registerSender",
-	getAddressBook: "aztec_getAddressBook",
-	registerContract: "aztec_registerContract",
-	simulateTx: "aztec_simulateTx",
-	executeUtility: "aztec_executeUtility",
-	profileTx: "aztec_profileTx",
-	// sendTx and registerToken are handled directly in dispatch() via
-	// DappInteractionService — both need the confirmation popup.
-	createAuthWit: "aztec_createAuthWit",
-}
-
-/**
- * Operations that only need a network (no account context).
- * These map chainId → networkId.
- */
-const NETWORK_ONLY_KINDS = new Set<Operation["kind"]>([
-	"aztec_getChainInfo",
-	"aztec_getContractClassMetadata",
-	"aztec_getContractMetadata",
-	"aztec_getPrivateEvents",
-	"aztec_registerSender",
-	"aztec_getAddressBook",
-	"aztec_registerContract",
-])
-
-/**
- * Operations that need both network AND account context.
- * These map chainId → networkId AND resolve the first session account.
- */
-const ACCOUNT_KINDS = new Set<Operation["kind"]>(["aztec_simulateTx", "aztec_executeUtility", "aztec_profileTx", "aztec_createAuthWit"])
-
-// Note: sendTx and registerToken are handled separately via DappInteractionService
-// (handleSendTx / handleRegisterToken). simulate_views and get_complete_address are no
-// longer dApp-facing — `simulate_views` op kind is retained for internal callers (the
-// balance projector + gas-balance code); `get_complete_address` is dropped entirely.
+// `METHOD_TO_KIND`, `NETWORK_ONLY_KINDS`, and `ACCOUNT_KINDS` are DERIVED from
+// the method-descriptors registry (the single source of truth) and imported at
+// the top of this file. sendTx / registerToken / grantPublicAuthwit are handled
+// directly in dispatch() via DappInteractionService (popup); they carry no
+// METHOD_TO_KIND entry (routing: "handler"). simulate_views and
+// get_complete_address are fully retired (no descriptor → dispatch rejects them);
+// the batching logic that lived behind `simulate_views` now lives in
+// extension/.../execution/helpers/batched-view-simulation.ts.
 
 export class WalletSdkDispatcher {
 	constructor(
@@ -181,6 +259,7 @@ export class WalletSdkDispatcher {
 		private readonly dappInteractionService: IDappInteractionRunner,
 		private readonly dappSessionService: IDappSessionWriter,
 		private readonly logger: ILogger,
+		private readonly tokenRegistryReader?: ITokenRegistryReader,
 	) {}
 
 	/**
@@ -193,21 +272,80 @@ export class WalletSdkDispatcher {
 	 * @returns The result value from the first (and only) operation
 	 * @throws If the method is unsupported, the operation fails, or session context is invalid
 	 */
-	async dispatch(methodName: string, args: unknown[], ctx: SessionContext): Promise<unknown> {
-		// Enforce capability grants (type-level) then scope (per-operation)
-		const grants = await this.enforceCapability(methodName, ctx)
+	async dispatch(methodName: string, args: unknown[], ctx: SessionContext, hooks?: DispatchHooks): Promise<unknown> {
+		// F-006 / audit cross-cutting #1 / Phase 0.5: capture the dApp session
+		// ONCE at dispatch entry and thread it through every internal call.
+		// Closes the TOCTOU window where 6 separate `tryGetDappSessionByOriginAndChain`
+		// calls previously gave different handlers different views of the same
+		// session (e.g. if the session was deleted mid-dispatch).
+		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+
+		// Resolve the method's descriptor up front. A method that reaches dispatch()
+		// without a registry row is unsupported (retired, or never-supported) —
+		// reject it before any enforcement/routing. This is the RUNTIME half of the
+		// silent-omission guard (the build-time exhaustiveness test is the other
+		// half): "supported but missing metadata" is impossible in both. Preserves
+		// the historical "Unsupported wallet method" string (pinned by the
+		// retired-method guards in dispatcher.test.ts).
+		// `Object.hasOwn`, not a truthy index, so prototype names (`toString`,
+		// `constructor`, …) are rejected here rather than slipping into capability
+		// handling and failing with a misleading CapabilityNotGrantedError.
+		if (!Object.hasOwn(METHOD_REGISTRY, methodName)) {
+			throw new Error(`Unsupported wallet method: ${methodName}`)
+		}
+
+		// Enforce capability grants (type-level) then scope (per-operation +
+		// per-account allow-list).
+		const grants = this.enforceCapability(methodName, ctx, dappSession)
 		if (grants.length) {
-			enforceScope(methodName, args, grants)
+			// F-005: enforceScopeWithSession includes account-scope-array
+			// validation. Build the approved-accounts set from the session.
+			// If the session is missing (shouldn't happen when grants.length>0
+			// since enforceCapability would have returned []), fall back to
+			// the plain enforceScope to avoid throwing on the wrong thing.
+			if (dappSession) {
+				// The session stores CAIP-10 identifiers ("aztec:<chainId>:0x…") but dApps send RAW
+				// hex addresses in scope arrays (the wallet-sdk serializes AztecAddress as hex), so
+				// the set carries BOTH representations. Without this, every fresh session failed
+				// account-scope validation deterministically; pre-CAIP sessions masked the mismatch.
+				const sessionAccounts = new Set<string>()
+				for (const entry of dappSession.accounts ?? []) {
+					sessionAccounts.add(entry)
+					try {
+						sessionAccounts.add(parseCaipAccount(entry).address)
+					} catch {
+						// A raw (pre-CAIP) entry: keep it as-is; nothing extra to add.
+					}
+				}
+				enforceScopeWithSession(methodName, args, grants, sessionAccounts)
+			} else {
+				enforceScope(methodName, args, grants)
+			}
 		}
 
 		// Handle methods that don't go through ExecutionService
 		if (methodName === "requestCapabilities") {
-			return this.handleRequestCapabilities(args[0] as CapabilityManifest, ctx)
+			return this.handleRequestCapabilities(args[0] as CapabilityManifest, ctx, dappSession)
 		}
 		if (methodName === "getAccounts") {
-			return this.handleGetAccounts(ctx)
+			return this.handleGetAccounts(ctx, dappSession)
+		}
+		if (methodName === "isTokenRegistered") {
+			// A wallet-local registry read: no prompt, no execution op. Scope enforcement above
+			// already required a contracts grant covering args[0].
+			if (!this.tokenRegistryReader) throw new Error("isTokenRegistered is not available in this wallet build")
+			return this.tokenRegistryReader.isTokenRegistered(String(args[0]), ctx.profileId, ctx.chainId)
 		}
 		if (methodName === "batch") {
+			// CRITICAL: do NOT forward `hooks` into batch legs. handleBatch
+			// recurses into dispatch() per-leg; forwarding hooks would let an
+			// inner sendTx leg's `onExecutionEnqueued` release the top-level
+			// FIFO baton before the batch finishes, breaking the batch's
+			// sequential-completion contract.
+			//
+			// Note: batch legs re-enter dispatch(), which re-captures the
+			// session — that's intentional. Each leg is a separate dispatch;
+			// the consolidation is per-dispatch, not per-batch.
 			return this.handleBatch(args[0] as Array<{ name: string; args: unknown[] }>, ctx)
 		}
 
@@ -215,10 +353,13 @@ export class WalletSdkDispatcher {
 		// confirmation popup. sendTx also drives fee selection; registerToken pre-fetches
 		// token metadata so the user sees name + symbol + decimals before approving.
 		if (methodName === "sendTx") {
-			return this.handleSendTx(args, ctx)
+			return this.handleSendTx(args, ctx, dappSession, hooks)
 		}
 		if (methodName === "registerToken") {
-			return this.handleRegisterToken(args, ctx)
+			return this.handleRegisterToken(args, ctx, dappSession)
+		}
+		if (methodName === "grantPublicAuthwit") {
+			return this.handleGrantPublicAuthwit(args, ctx, dappSession)
 		}
 
 		const kind = METHOD_TO_KIND[methodName]
@@ -226,7 +367,7 @@ export class WalletSdkDispatcher {
 			throw new Error(`Unsupported wallet method: ${methodName}`)
 		}
 
-		const operation = await this.buildOperation(kind, args, ctx)
+		const operation = await this.buildOperation(kind, args, ctx, dappSession)
 		const origin: LocalTxOrigin = { type: OriginType.DAPP, name: ctx.origin }
 
 		const results = await this.executionService.executeOperations([operation], origin)
@@ -249,8 +390,8 @@ export class WalletSdkDispatcher {
 	 *    fallback catches it and sends the full manifest. See wallet-bridge README
 	 *    for the dApp-side parse recipe.
 	 */
-	private async handleGetAccounts(ctx: SessionContext): Promise<unknown> {
-		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+	private async handleGetAccounts(ctx: SessionContext, dappSession: IDappSessionRef | undefined): Promise<unknown> {
+		// Phase 0.5: dappSession captured at dispatch entry, not re-looked-up here.
 		if (!dappSession) {
 			throw new Error(`No dApp session found for origin ${ctx.origin}`)
 		}
@@ -343,8 +484,21 @@ export class WalletSdkDispatcher {
 	 * validates the session, checks if confirmation is needed, and opens the
 	 * popup for user approval + fee method selection.
 	 */
-	private async handleSendTx(args: unknown[], ctx: SessionContext): Promise<unknown> {
-		const [_network, account] = await this.resolveNetworkAndAccount(ctx)
+	private async handleSendTx(
+		args: unknown[],
+		ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+		hooks?: DispatchHooks,
+	): Promise<unknown> {
+		// Phase 0.5: dappSession captured at dispatch entry.
+		const rawOpts = (args[1] as Record<string, unknown>) ?? {}
+		const isNoFrom = isNoFromRequest(rawOpts.from)
+		// An explicit `from` (a real address — not the NO_FROM sentinel, not omitted) names
+		// the account the dApp wants to send from. Resolve to THAT account (validated against
+		// the session) instead of defaulting to the first session account, which silently
+		// ignored a multi-account dApp's choice and could send from the wrong account.
+		const requestedFrom = isNoFrom || rawOpts.from == null ? undefined : String(rawOpts.from)
+		const [_network, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedFrom)
 		const caipAccount = formatCaipAccount(ctx.chainId, account.address)
 		this.logger.log(
 			"wallet-sdk",
@@ -352,7 +506,6 @@ export class WalletSdkDispatcher {
 			`handleSendTx: account=${account.address}, chainId=${ctx.chainId}, origin=${ctx.origin}`,
 		)
 
-		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
 		if (!dappSession) {
 			throw new Error(`No dApp session found for origin ${ctx.origin}`)
 		}
@@ -362,8 +515,6 @@ export class WalletSdkDispatcher {
 			`handleSendTx: session=${dappSession.id}, sessionAccounts=${JSON.stringify(dappSession.accounts)}`,
 		)
 
-		const rawOpts = (args[1] as Record<string, unknown>) ?? {}
-		const isNoFrom = isNoFromRequest(rawOpts.from)
 		const opts = isNoFrom ? rawOpts : { ...rawOpts, from: account.address }
 		const execPayload = args[0] as Record<string, unknown> | undefined
 		this.logger.log(
@@ -380,10 +531,20 @@ export class WalletSdkDispatcher {
 			...(isNoFrom ? { executionMode: "default_entrypoint" as const } : {}),
 		}
 
-		const results: ExecutionResult = await this.dappInteractionService.execute({
-			sessionId: dappSession.id,
-			operations: [sendOp],
-		})
+		const results: ExecutionResult = await this.dappInteractionService.execute(
+			{
+				sessionId: dappSession.id,
+				operations: [sendOp],
+			},
+			// Arg 2 is the existing cancellationToken slot — leave undefined when
+			// hooks are the only thing we're forwarding. Arg 3 is the hooks bag
+			// (see services-contract.ts:IDappInteractionRunner). `originKey` is
+			// ALWAYS set from ctx.origin (not gated on `hooks`) so the per-origin
+			// backpressure cap applies to every dApp sendTx, even ones that arrive
+			// without the FIFO-baton hooks.
+			undefined,
+			{ onExecutionEnqueued: hooks?.onExecutionEnqueued, queuedJournalId: hooks?.queuedJournalId, originKey: ctx.origin },
+		)
 
 		return this.unwrapResult(results[0])
 	}
@@ -407,8 +568,8 @@ export class WalletSdkDispatcher {
 	 * refuses with a clear error instead of silently substituting a different
 	 * authorized account.
 	 */
-	private async handleRegisterToken(args: unknown[], ctx: SessionContext): Promise<unknown> {
-		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+	private async handleRegisterToken(args: unknown[], ctx: SessionContext, dappSession: IDappSessionRef | undefined): Promise<unknown> {
+		// Phase 0.5: dappSession captured at dispatch entry.
 		if (!dappSession) {
 			throw new Error(`No dApp session found for origin ${ctx.origin}`)
 		}
@@ -447,6 +608,66 @@ export class WalletSdkDispatcher {
 		return this.unwrapResult(results[0])
 	}
 
+	/** Nulo-custom `grantPublicAuthwit`: writes a public authwit for
+	 *  `method@contract` (caller = the authorized spender) into the on-chain
+	 *  AuthRegistry via a `send_transaction` carrying a single
+	 *  `add_public_authwit` action. Routed through DappInteractionService so
+	 *  the user approves (and selects the fee for) the registry write like
+	 *  any other dApp transaction; `buildStandard` computes the message
+	 *  hash, records it via `trackAuthwit` (settings revoke UI), and injects
+	 *  the `set_authorized` call. Returns the tx hash. */
+	private async handleGrantPublicAuthwit(
+		args: unknown[],
+		ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+	): Promise<unknown> {
+		if (!dappSession) {
+			throw new Error(`No dApp session found for origin ${ctx.origin}`)
+		}
+
+		const requestedAccount = String(args[0])
+		const network = await this.resolveNetwork(ctx)
+		const allAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
+		const sessionAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
+		const account = allAccounts.find((acc) => sessionAddresses.has(acc.address) && acc.address === requestedAccount)
+		if (!account) {
+			throw new Error(`grantPublicAuthwit: account ${requestedAccount} is not authorized for this dApp session`)
+		}
+		const caipAccount = formatCaipAccount(ctx.chainId, account.address)
+
+		const content = args[1] as { caller: string; contract: string; method: string; args: unknown[] }
+		const grantOp: SendTransactionRequest = {
+			kind: "send_transaction" as const,
+			account: caipAccount,
+			actions: [
+				{
+					kind: "add_public_authwit" as const,
+					content: {
+						kind: "call" as const,
+						caller: content.caller,
+						contract: content.contract,
+						method: content.method,
+						args: content.args,
+					},
+				},
+			],
+		}
+
+		const results: ExecutionResult = await this.dappInteractionService.execute(
+			{
+				sessionId: dappSession.id,
+				operations: [grantOp],
+			},
+			// `originKey` applies the per-origin backpressure cap to grants too,
+			// matching sendTx; without it the execution lane buckets the grant
+			// under "__no_origin__" and loses per-origin fairness.
+			undefined,
+			{ originKey: ctx.origin },
+		)
+
+		return this.unwrapResult(results[0])
+	}
+
 	/**
 	 * Handle requestCapabilities with 3-phase approach:
 	 * 1. Check stored grants → compute delta (new/changed types)
@@ -455,8 +676,12 @@ export class WalletSdkDispatcher {
 	 * 3. Show popup for delta → user approves → merge and store
 	 *    - Track rejected types for future re-request detection
 	 */
-	private async handleRequestCapabilities(manifest: CapabilityManifest, ctx: SessionContext): Promise<unknown> {
-		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+	private async handleRequestCapabilities(
+		manifest: CapabilityManifest,
+		ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+	): Promise<unknown> {
+		// Phase 0.5: dappSession captured at dispatch entry.
 		if (!dappSession) {
 			throw new Error(`No dApp session found for origin ${ctx.origin}`)
 		}
@@ -489,6 +714,33 @@ export class WalletSdkDispatcher {
 			if (cap.type === "accounts") {
 				const existing = existingGrants.find((g) => g.capability.type === "accounts")
 				return !existing || !accountsCapsEqual(existing.capability as AccountsCapability, cap as unknown as AccountsCapability)
+			}
+			if (cap.type === "contracts") {
+				// Field-level delta (closes wallet-sdk-capability-field-diff for contracts): a request
+				// listing addresses/flags beyond the stored grants re-prompts; approval APPENDS a new
+				// grant, and scope checkers union across grants - so coverage grows monotonically.
+				const existing = existingGrants
+					.filter((g) => g.capability.type === "contracts")
+					.map((g) => g.capability as ContractsCapability)
+				return existing.length === 0 || !contractsRequestCovered(existing, cap as unknown as ContractsCapability)
+			}
+			if (cap.type === "transaction") {
+				// Scope-list field diff (the rest of wallet-sdk-capability-field-diff): a request whose
+				// scope exceeds every stored grant re-prompts; approval REPLACES the stored grant.
+				const existing = existingGrants
+					.filter((g) => g.capability.type === "transaction")
+					.map((g) => g.capability as TransactionCapability)
+				return existing.length === 0 || !transactionRequestCovered(existing, cap as unknown as TransactionCapability)
+			}
+			if (cap.type === "simulation") {
+				const existing = existingGrants
+					.filter((g) => g.capability.type === "simulation")
+					.map((g) => g.capability as SimulationCapability)
+				return existing.length === 0 || !simulationRequestCovered(existing, cap as unknown as SimulationCapability)
+			}
+			if (cap.type === "data") {
+				const existing = existingGrants.filter((g) => g.capability.type === "data").map((g) => g.capability as DataCapability)
+				return existing.length === 0 || !dataRequestCovered(existing, cap as unknown as DataCapability)
 			}
 			return !grantedTypes.has(cap.type as Capability["type"])
 		})
@@ -588,12 +840,37 @@ export class WalletSdkDispatcher {
 		const approvedTypes = new Set(grantedResults.map((cap) => cap.type as string))
 		const now = Date.now()
 
-		// New grants: approved delta items that weren't already granted
-		const newGrants: GrantedCapabilityRecord[] = grantedResults
-			.filter((cap) => !grantedTypes.has(cap.type as Capability["type"]) || rejectedTypes.has(cap.type as string))
-			.map((cap) => ({ capability: cap as Capability, grantedAt: now }))
-		// Merge: keep existing grants (excluding re-approved types) + new grants
-		const mergedGrants = [...existingGrants.filter((g) => !rejectedTypes.has(g.capability.type)), ...newGrants]
+		// Approved DELTA types REPLACE their stored grant (never-granted types simply append).
+		// The old type-only filter silently dropped re-approved types: a contracts re-consent
+		// (field-diff, e.g. after a redeploy adds token addresses) was REPORTED granted but never
+		// persisted - every later call still refused on the stale grant. Same hole applied to
+		// accounts upgrades. The popup echoes existing caps alongside the newly approved delta,
+		// so for replaced types we take the LAST result entry of that type that differs from the
+		// stored capability (falling back to the delta's requested shape).
+		const deltaApprovedTypes = new Set(delta.filter((cap) => approvedTypes.has(cap.type as string)).map((cap) => cap.type as string))
+		const replacementFor = (type: string): Capability | undefined => {
+			const stored = existingGrants.find((g) => g.capability.type === type)?.capability
+			const candidates = grantedResults.filter((cap) => cap.type === type)
+			const changed = candidates.filter((cap) => JSON.stringify(cap) !== JSON.stringify(stored))
+			return (changed[changed.length - 1] ?? candidates[candidates.length - 1]) as Capability | undefined
+		}
+		const newGrants: GrantedCapabilityRecord[] = []
+		for (const cap of grantedResults) {
+			const type = cap.type as string
+			if (deltaApprovedTypes.has(type)) continue // handled via replacement below (dedupes echoes).
+			if (!grantedTypes.has(type as Capability["type"]) || rejectedTypes.has(type)) {
+				newGrants.push({ capability: cap as Capability, grantedAt: now })
+			}
+		}
+		for (const type of deltaApprovedTypes) {
+			const replacement = replacementFor(type) ?? (delta.find((c) => c.type === type) as unknown as Capability)
+			newGrants.push({ capability: replacement, grantedAt: now })
+		}
+		// Merge: keep existing grants minus rejected AND minus replaced types, then the new records.
+		const mergedGrants = [
+			...existingGrants.filter((g) => !rejectedTypes.has(g.capability.type) && !deltaApprovedTypes.has(g.capability.type)),
+			...newGrants,
+		]
 
 		await this.dappSessionService.setCapabilityGrants(dappSession.id, mergedGrants)
 
@@ -655,15 +932,25 @@ export class WalletSdkDispatcher {
 					| AccountsCapability
 					| undefined
 
+				// F-003: honor canGet on the GRANT-RESPONSE path. Previously the
+				// accounts list was echoed unconditionally — a dApp could request
+				// `canGet:false` and still receive the full account list in the
+				// grant response (and later via getAccounts because that method
+				// was exempt). Both paths now require `canGet === true`.
+				const canGet = storedAccounts?.canGet === true
+				const grantedAccounts = canGet
+					? sessionAccounts.map((acc) => {
+							const caip = formatCaipAccount(ctx.chainId, acc.address)
+							const alias = dappSession.accountAliases?.[caip] ?? acc.name ?? ""
+							return { alias, item: acc.address }
+						})
+					: []
+
 				result.push({
 					...cap,
-					canGet: storedAccounts?.canGet ?? false,
+					canGet,
 					canCreateAuthWit: storedAccounts?.canCreateAuthWit ?? false,
-					accounts: sessionAccounts.map((acc) => {
-						const caip = formatCaipAccount(ctx.chainId, acc.address)
-						const alias = dappSession.accountAliases?.[caip] ?? acc.name ?? ""
-						return { alias, item: acc.address }
-					}),
+					accounts: grantedAccounts,
 				})
 			} else {
 				result.push(cap)
@@ -675,24 +962,65 @@ export class WalletSdkDispatcher {
 	/**
 	 * Enforce capability grants before dispatching a method call.
 	 *
-	 * - Exempt methods (getChainInfo, requestCapabilities, batch, getAccounts) skip enforcement.
+	 * - Exempt methods (getChainInfo, requestCapabilities, batch) skip enforcement.
+	 *   NOTE: getAccounts is NOT exempt — F-003 made it require accounts.canGet=true.
 	 * - The method's required capability type must be in the session's grants.
 	 * - Sessions without grants (new or pre-migration) are treated as having no grants,
 	 *   so non-exempt methods are blocked until requestCapabilities() is called.
 	 */
-	private async enforceCapability(methodName: string, ctx: SessionContext): Promise<GrantedCapabilityRecord[]> {
+	private enforceCapability(
+		methodName: string,
+		_ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+	): GrantedCapabilityRecord[] {
+		// Phase 0.5: dappSession captured at dispatch entry; no async lookup
+		// here. Method is now synchronous; callers that did `await this.enforceCapability(...)`
+		// can drop the await (no behavior change because the promise resolved
+		// synchronously when the inner lookup was the only async point).
 		if (isCapabilityExempt(methodName)) return []
 
 		const requiredType = getRequiredCapability(methodName)
 		if (!requiredType) return [] // Unknown method — let dispatch() handle it
 
-		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
-		if (!dappSession) return [] // No session yet — let the method handler deal with it
+		if (!dappSession) {
+			// F-006: fail-closed when the stored DappSession is missing. Pre-fix,
+			// this returned [] and the dispatcher fell through to the sink with
+			// no grants — network-only methods (getPrivateEvents, getAddressBook,
+			// registerSender, registerContract, getContractMetadata,
+			// getContractClassMetadata) executed unchecked after the user
+			// disconnected the dApp from Settings or after session expiry.
+			//
+			// Throwing CapabilityNotGrantedError gives the dApp a structured
+			// signal to re-request capabilities (the same path used for
+			// pre-grant calls), and is paired with the live-transport teardown
+			// in wallet-sdk/background.ts that prevents the channel from
+			// staying useful after revocation.
+			this.logger.log(
+				"wallet-sdk",
+				LogLevel.Debug,
+				`${methodName} from ${_ctx.origin} — no DappSession found; throwing CAPABILITY_NOT_GRANTED (F-006 fail-closed)`,
+			)
+			throw new CapabilityNotGrantedError(requiredType)
+		}
 
 		const grants = dappSession.capabilityGrants ?? []
 		const grantedTypes = new Set(grants.map((g) => g.capability.type))
 		if (!grantedTypes.has(requiredType)) {
-			throw new Error(`Capability "${requiredType}" not granted. The dApp must call requestCapabilities() first.`)
+			// Debug (not Info): dApps may re-fire methods per render, so the
+			// pre-grant throw must not spam the log. The existing log-noise
+			// pattern at handleGetAccounts is preserved here for any method
+			// reaching enforceCapability without the required grant type.
+			this.logger.log(
+				"wallet-sdk",
+				LogLevel.Debug,
+				`${methodName} from ${_ctx.origin} — throwing CAPABILITY_NOT_GRANTED to nudge requestCapabilities()`,
+			)
+			// CapabilityNotGrantedError is the public contract — dApps substring-
+			// match on the error code and message. The plain `Error` form was a
+			// pre-Phase-1 mistake; F-003's removal of `getAccounts` from
+			// EXEMPT_METHODS made this code path reachable by `getAccounts`,
+			// which has an existing CapabilityNotGrantedError-pinned test.
+			throw new CapabilityNotGrantedError(requiredType)
 		}
 		return grants
 	}
@@ -705,14 +1033,20 @@ export class WalletSdkDispatcher {
 	 * to the operation fields. For Nulo custom methods, we unpack them
 	 * according to the schema_patch.ts definitions.
 	 */
-	private async buildOperation(kind: Operation["kind"], args: unknown[], ctx: SessionContext): Promise<Operation> {
+	private async buildOperation(
+		kind: Operation["kind"],
+		args: unknown[],
+		ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+	): Promise<Operation> {
+		// Phase 0.5: dappSession threaded through from dispatch() entry.
 		if (NETWORK_ONLY_KINDS.has(kind)) {
 			const network = await this.resolveNetwork(ctx)
 			return this.buildNetworkOperation(kind, args, network.id)
 		}
 
 		if (ACCOUNT_KINDS.has(kind)) {
-			const [network, account] = await this.resolveNetworkAndAccount(ctx)
+			const [network, account] = await this.resolveNetworkAndAccount(ctx, dappSession)
 			return this.buildAccountOperation(kind, args, network.id, account.address)
 		}
 
@@ -848,16 +1182,33 @@ export class WalletSdkDispatcher {
 	 * operations (simulateTx, sendTx, etc.) use session-authorized accounts,
 	 * not just the first global account.
 	 */
-	private async resolveNetworkAndAccount(ctx: SessionContext): Promise<[INetworkRef, IAccountRef]> {
+	private async resolveNetworkAndAccount(
+		ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+		requestedFrom?: string,
+	): Promise<[INetworkRef, IAccountRef]> {
+		// Phase 0.5: dappSession captured at dispatch entry; no inline lookup here.
 		const network = await this.resolveNetwork(ctx)
 		const allAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
 		if (allAccounts.length === 0) {
 			throw new Error(`No accounts found for profile ${ctx.profileId} on chainId ${ctx.chainId}`)
 		}
 
-		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
 		if (dappSession?.accounts && dappSession.accounts.length > 0) {
 			const sessionAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
+			// Honor an explicit, session-authorized `requestedFrom`: a dApp connected to
+			// multiple accounts may send from any of them. Match it against the
+			// session-authorized set and REJECT anything outside it — never silently fall
+			// back to the first account (that both ignores the dApp's choice and would let a
+			// tx be sent from an account the request did not name). Mirrors the resolution in
+			// `handleGrantPublicAuthwit`.
+			if (requestedFrom !== undefined) {
+				const requested = allAccounts.find((acc) => sessionAddresses.has(acc.address) && acc.address === requestedFrom)
+				if (requested) {
+					return [network, requested]
+				}
+				throw new Error(`Requested account ${requestedFrom} is not authorized for this dApp session`)
+			}
 			const sessionAccount = allAccounts.find((acc) => sessionAddresses.has(acc.address))
 			if (sessionAccount) {
 				return [network, sessionAccount]
