@@ -133,6 +133,11 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		services.add(new NetworkService(logger, browserApi))
 		services.add(new NoteService(logger))
 		services.add(new OperationJournalService(logger, browserApi))
+		// Passing `browserApi` threads the storage port into ProfileService AND, because the port
+		// carries alarms, ACTIVATES SessionManager's proactive TTL auto-lock (dormant pre-arc when the
+		// composition root passed no port — see session-manager.ts "proactive TTL lights up once the
+		// composition root wires browserApi"). Accepted behavior change; seam-pinned in
+		// service.integration.test.ts "Q10 composition seam".
 		services.add(new ProfileService(config, logger, browserApi))
 		services.add(new TaskService(logger))
 		services.add(new TokenService(logger, browserApi))
