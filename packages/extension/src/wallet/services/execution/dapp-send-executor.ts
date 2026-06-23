@@ -245,7 +245,8 @@ export class DappSendExecutor {
 			})
 			return txHash.toString()
 		} catch (error) {
-			throw await markFailedUnlessCancelled(error, journalId, this.deps.lane)
+			await markFailedUnlessCancelled(error, journalId, this.deps.lane)
+			throw error
 		} finally {
 			if (journalId) this.deps.lane.deleteController(journalId)
 		}
@@ -404,7 +405,8 @@ export class DappSendExecutor {
 			const receipt = await node.getTxReceipt(txHash)
 			return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 		} catch (error) {
-			throw await markFailedUnlessCancelled(error, journalId, this.deps.lane)
+			await markFailedUnlessCancelled(error, journalId, this.deps.lane)
+			throw error
 		} finally {
 			if (journalId) this.deps.lane.deleteController(journalId)
 			releaseSlot()
@@ -589,7 +591,8 @@ export class DappSendExecutor {
 			const receipt = await node.getTxReceipt(txHash)
 			return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 		} catch (error) {
-			throw await markFailedUnlessCancelled(error, journalId, this.deps.lane)
+			await markFailedUnlessCancelled(error, journalId, this.deps.lane)
+			throw error
 		} finally {
 			if (journalId) this.deps.lane.deleteController(journalId)
 			releaseSlot()
