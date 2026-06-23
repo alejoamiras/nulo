@@ -108,22 +108,24 @@
 
   <h2>⚠️ Caveats &amp; things to take care of</h2>
 
-  <div class="caveat danger" id="auto-lock">
-    <h3>1. Proactive auto-lock is now ON (the one real behavior change)</h3>
+  <div class="caveat" id="auto-lock">
+    <h3>1. Proactive auto-lock is now ON — a real behavior change (audit found a race here; we fixed it)</h3>
     <p>Wiring the storage handle into the profile service also switched on a built-but-dormant feature:
     <strong>sessions now auto-lock when their timeout expires, even if you’re not using the wallet.</strong>
     Before, a session only locked the <em>next time you touched the wallet</em> (reactive). Now an alarm fires
-    and locks it (proactive).</p>
-    <p><strong>Why it happened:</strong> the storage handle and the alarm clock travel together in one port —
-    you can’t wire storage cleanly without also lighting up the alarm. <strong>This is a security improvement
-    and the intended end-state</strong>, and you explicitly accepted it. But it’s a user-visible change:</p>
-    <ul>
-      <li>Users idle past the session timeout get locked sooner / more reliably.</li>
-      <li>A dApp mid-session could newly see a “Wallet locked” error if the timeout fires during use.</li>
-    </ul>
-    <p><strong>To watch:</strong> any uptick in mid-session “Wallet/Profile locked” reports after release. It’s
-    pinned by a seam test so it can’t silently turn off (or on without the port), but the user-facing timing is
-    worth a line in release notes.</p>
+    and locks it (proactive). The storage handle and the alarm clock travel together in one port, so wiring
+    storage cleanly also lights up the alarm. It’s a security improvement and the intended end-state.</p>
+    <p><strong>The mega-audit caught a bug in this activation, and we fixed it.</strong> codex’s security pass
+    found a <em>race</em>: the auto-lock alarm ran <em>outside</em> the lock that guards session writes, so if
+    the alarm fired at the exact moment a dApp interaction was refreshing the session, the refresh could
+    re-save the session right after the lock deleted it — quietly <strong>un-expiring a session that should
+    have locked</strong> (a timeout bypass). <strong>Fix:</strong> the alarm’s lock now goes through the same
+    serializer as every other session write, so they can never overlap; we also fixed a related gap where
+    older (pre-upgrade) sessions never proactively locked. Both are covered by a deterministic test that we
+    confirmed <em>fails</em> without the fix. Two independent reviewers (codex + claude) signed off.</p>
+    <p><strong>Still worth a release-notes line:</strong> users idle past the timeout now get locked sooner /
+    more reliably, and a dApp mid-session could newly see a “Wallet locked” error if the timeout fires during
+    use. That’s the intended, now-safe behavior — just newly visible.</p>
   </div>
 
   <div class="caveat">
@@ -154,6 +156,14 @@
     <ul>
       <li><strong>Q23 structural seam</strong> → PRs #125/#126.</li>
       <li><strong>Q10 PXE injection factory</strong> → PR #125 already carries it; we didn’t duplicate it.</li>
+      <li><strong>One more lock-free session-write path</strong> (both reviewers, low/rare): a config-driven
+      timeout <em>shrink</em> (<code>applyTtlChange</code>) can still close the session outside the lock and
+      race a refresh. Separate from the auto-lock race we fixed, far rarer (needs a settings change at the
+      wrong instant), and pre-existing — left as a follow-up because the lock is non-reentrant and wrapping
+      that path naïvely would self-deadlock.</li>
+      <li><strong>Optional hardening</strong> (claude): add a re-entrancy guard to the shared <code>Lock</code>
+      so a future mistake (calling the serializer from inside a held lock) fails loudly instead of stalling.
+      Defense-in-depth, not required today.</li>
     </ul>
   </div>
 
@@ -175,8 +185,11 @@
     <li><strong>A final confidence pass</strong> (codex + claude) — codex caught the proactive-auto-lock
     behavior change; we documented + seam-tested it and codex re-confirmed.</li>
     <li><strong>This page is backed by a mega-audit</strong> you requested: 3× codex (regression /
-    network-test integrity / security) + a fresh claude hostile pass, plus a re-confirm that all network jobs
-    run green on the promote PR itself. <em>(Verdicts summarized in <a href="WRAP-UP.md">WRAP-UP.md</a>.)</em></li>
+    network-test integrity / security) + a fresh claude hostile pass. Outcome: the <strong>6 refactors are all
+    behavior-equivalent</strong> (keys byte-identical, no weakened guard, timing preserved) — every reviewer
+    agreed. The security pass found the auto-lock race described above; we fixed it (and a fresh codex+claude
+    round signed off on the fix). All network jobs ran green on the promote PR itself.
+    <em>(Full verdicts in <a href="WRAP-UP.md">WRAP-UP.md</a>.)</em></li>
   </ul>
 
   <h2>What’s left for you</h2>

@@ -73,6 +73,36 @@ SessionManager was designed to light up once wired). Closed codex's gap:
 claude PROMOTE + codex PROMOTE (post-resolution). The arc is a genuine quality improvement, safe to promote.
 All 6 deferred findings resolved; one accepted behavior change (Q10 proactive TTL) documented + seam-tested.
 
+## User-requested MEGA-AUDIT (3× codex + claude) + the TTL race fix it found
+After the promote PR opened, the owner asked for a deeper pre-merge audit ("mega-sure it doesn't break
+anything; all network tests run correctly") + an ELI5 (`eli5.html`).
+
+- **3× codex (regression / network-test integrity / security) + 1 fresh claude hostile pass.** The **6
+  refactors were unanimously cleared as behavior-equivalent** (keys byte-identical; no weakened guard; Q5
+  timing preserved; dispatcher projection identical; tests deterministic + meaningful). Network jobs confirmed
+  RUN green on the promote PR #160 itself (8/8 Aztec jobs, event=pull_request).
+- **codex security (`019ef47d-d5c5`) RISK-FOUND** — the accepted Q10 proactive-TTL activation introduced an
+  **alarm-vs-refresh race**: the alarm's `close()` ran outside the facade lock, so a `refreshSession()`
+  write-back could land after `close()`'s delete and resurrect an expired session on the next SW restore (a
+  TTL bypass), reachable from normal dApp flow. claude independently flagged a related edge (the lock fire
+  wipes the node pool mid-tx — narrow, recoverable). **Surfaced to the owner; owner chose to FIX the race.**
+- **Fix — PR #161 `df77331`** (dual-model design AGREE → Fix A): `ProfileService.runExclusive` injects the
+  facade lock into `SessionManager`; `onAlarmFired`'s gate + `close()` now run inside it (serialized against
+  refresh/open/unlock). Gate uses `deriveLockedAt` (also fixes a legacy no-`lockedAt` gap). ONLY the alarm
+  path is wrapped (the `Lock` is non-reentrant; config-driven closes stay lock-free). Deterministic race test
+  pins it — **verified it FAILS without the serializer.** codex post-impl (`019ef…`) + fresh-claude hostile
+  BOTH SHIP. Full gate green (net 28033992165 8/8 · quality · smoke [1× sanctioned re-run = the known
+  accounts/"Client disconnected" SW-restart flake]).
+
+### Residual follow-ups (logged, non-blocking — both models)
+- **Config-driven `applyTtlChange`→`close()` is still lock-free** vs a refresh (a TTL-*shrink* race, far rarer
+  than the alarm race, pre-existing). Not wrapped because the non-reentrant `Lock` would self-deadlock from
+  the sync config listener. Follow-up: a proper serialization of that path.
+- **Optional defense-in-depth:** a re-entrancy guard on the shared `Lock` so a future mis-wire of
+  `runExclusive` fails loudly instead of stalling 5 min.
+- **claude's mid-tx `NetworkService.nodes.clear()` edge** (narrow, recoverable): guard it on #125/#126's
+  execution-composition seam.
+
 ## Promote
 `dev-quality → dev` PR opened (squash, per dev's ruleset). **NOT merged autonomously** — the dev-quality→dev
 promote is the user's call (hard limit). The promote auto-triggers dev's CI (Quality/Status required).
