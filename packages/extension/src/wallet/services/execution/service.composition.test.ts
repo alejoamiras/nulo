@@ -122,7 +122,9 @@ async function makeHarness() {
 	collection.add(svc(ContactService.name, {}))
 	collection.add(svc(AuthRegistryService.name, { assertWithinCap: async () => {} }))
 	collection.add(journal)
-	const fakeTask = { complete: vi.fn(), fail: vi.fn(), startSubtask: vi.fn() }
+	// `cancel` is part of the real WrappedTask surface — classifyOperationCatch
+	// calls task.cancel() on a user-cancel before returning the cancelled result.
+	const fakeTask = { complete: vi.fn(), fail: vi.fn(), cancel: vi.fn(), startSubtask: vi.fn() }
 	fakeTask.startSubtask.mockReturnValue(fakeTask)
 	collection.add(svc(TaskService.name, { startNewTask: () => fakeTask }))
 
@@ -267,7 +269,9 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 			accountAddress: ACCOUNT.toString(),
 			feeSettings: { paymentMethod: { kind: "fpc" } },
 		} as never
-		const p2 = service.executeOperations([aztecSendOp], origin, undefined, { queuedJournalId: queuedId }).catch((e) => e)
+		// executeOperations catches JobCancelledSentinel internally (classifyOperationCatch)
+		// and RETURNS a results array — it never throws here, so no .catch is needed.
+		const p2 = service.executeOperations([aztecSendOp], origin, undefined, { queuedJournalId: queuedId })
 
 		// Wait until job2 has pre-registered its controller and is parked on the slot.
 		await waitFor(() => controllers.has(queuedId))
@@ -284,8 +288,8 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 		expect(queuedStages).not.toContain("simulating")
 		expect(queuedStages).not.toContain("proving")
 		expect(queuedStages).not.toContain("submitting")
-		// Job 2 did not succeed.
-		expect(Array.isArray(r2) ? r2[0]?.status : "error").not.toBe("ok")
+		// Job 2 surfaced as a user-cancel (NOT a downstream fail) at the result layer.
+		expect(r2[0]?.status).toBe("cancelled")
 
 		// The slot is NOT wedged: after releasing the holder, a fresh acquire grants
 		// promptly (would hang past the test timeout if job2's abort corrupted the FIFO).
