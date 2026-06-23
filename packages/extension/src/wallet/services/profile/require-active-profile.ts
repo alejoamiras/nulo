@@ -11,9 +11,11 @@ import type { ProfileInfo } from "./spec"
  * `"Wallet locked"` is the dApp-observable error pinned by view-executor tests —
  * so callers preserve their own wording rather than unifying it.
  *
- * Accepts any `{ getActiveProfile() }` source so the varied receivers (the
- * `ProfileService`, an execution deps adapter, a captured getter) reuse one
- * guard without widening any DI contract.
+ * Accepts any `{ getActiveProfile() }` source so the varied SW-side receivers
+ * (the `ProfileService`, an execution deps adapter, a captured getter) reuse one
+ * guard without widening any DI contract. The source must be an in-process
+ * service — NOT the popup-side `ProfileServiceClient` (an RPC proxy that happens
+ * to share the shape); this guard is for the service worker, not the popup.
  *
  * NOT a substitute for identity guards (`profile?.id !== expected`) or the
  * deliberate silent non-throwers (`if (!profile) return`) — those encode
