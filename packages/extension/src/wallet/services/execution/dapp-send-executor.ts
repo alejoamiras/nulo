@@ -33,7 +33,8 @@ import { Fr } from "@aztec/foundation/curves/bn254"
 import type { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { collectOffchainEffects } from "@aztec/stdlib/tx"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
-import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
+import { type JobError, type JobProgress, JobCancelledSentinel } from "@nulo/wallet-core/jobs"
+import { markFailedUnlessCancelled } from "./mark-failed-unless-cancelled"
 import { feeToUsd, formatFeeJuice } from "@/utils/fee-estimation"
 import { pickPrimaryMethod } from "@/utils/primary-method"
 import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
@@ -244,11 +245,7 @@ export class DappSendExecutor {
 			})
 			return txHash.toString()
 		} catch (error) {
-			if (error instanceof JobCancelledSentinel) {
-				throw error
-			}
-			await this.deps.lane.markJournal(journalId, { stage: "failed" }, normalizeError(error, "dapp_execute"))
-			throw error
+			throw await markFailedUnlessCancelled(error, journalId, this.deps.lane)
 		} finally {
 			if (journalId) this.deps.lane.deleteController(journalId)
 		}
@@ -407,11 +404,7 @@ export class DappSendExecutor {
 			const receipt = await node.getTxReceipt(txHash)
 			return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 		} catch (error) {
-			if (error instanceof JobCancelledSentinel) {
-				throw error
-			}
-			await this.deps.lane.markJournal(journalId, { stage: "failed" }, normalizeError(error, "dapp_execute"))
-			throw error
+			throw await markFailedUnlessCancelled(error, journalId, this.deps.lane)
 		} finally {
 			if (journalId) this.deps.lane.deleteController(journalId)
 			releaseSlot()
@@ -596,11 +589,7 @@ export class DappSendExecutor {
 			const receipt = await node.getTxReceipt(txHash)
 			return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 		} catch (error) {
-			if (error instanceof JobCancelledSentinel) {
-				throw error
-			}
-			await this.deps.lane.markJournal(journalId, { stage: "failed" }, normalizeError(error, "dapp_execute"))
-			throw error
+			throw await markFailedUnlessCancelled(error, journalId, this.deps.lane)
 		} finally {
 			if (journalId) this.deps.lane.deleteController(journalId)
 			releaseSlot()
