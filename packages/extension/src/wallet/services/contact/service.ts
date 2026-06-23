@@ -4,6 +4,7 @@ import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
@@ -58,20 +59,14 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 
 	public async getContacts(): Promise<Contact[]> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 
 		return (await this.storage.getValues()).filter((c) => c.profileId === profile.id)
 	}
 
 	public async getContact(contactId: string): Promise<Contact> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 
 		const contact = await this.storage.get(contactId)
 		if (contact?.profileId !== profile.id) {
@@ -83,10 +78,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 
 	public async getContactByAddress(contactAddress: string): Promise<Contact | undefined> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 
 		const contact = (await this.storage.getValues()).filter((c) => c.profileId === profile.id && c.address === contactAddress)
 
@@ -97,10 +89,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 
 	public async addContact(name: string, address: string): Promise<Contact> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 
 		try {
 			await this.lock.enter()
@@ -130,10 +119,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 
 	public async updateContact(contactId: string, name?: string, address?: string): Promise<Contact> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 
 		try {
 			await this.lock.enter()
@@ -162,10 +148,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 
 	public async deleteContact(contactId: string): Promise<Contact> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 
 		try {
 			await this.lock.enter()
@@ -198,10 +181,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 
 	public async importContacts(data: string): Promise<Contact[]> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 
 		const results: Contact[] = []
 

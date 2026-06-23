@@ -8,6 +8,7 @@ import { NetworkService, networkInfoFrom } from "@/wallet/services/network/servi
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import type { OperationContext } from "@/wallet/services/operation-journal/spec"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { AccountService } from "@/wallet/services/account/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { TaskService, StepContent, type WrappedTask } from "@/wallet/services/task/service"
@@ -467,10 +468,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		contract: string,
 	): Promise<{ name: string; symbol: string; decimals: number; interface: TokenInterface }> {
 		await this.ensureInitialized()
-		const profile = await this.profiles.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet locked")
-		}
+		const profile = await requireActiveProfile(this.profiles, "Wallet locked")
 		const tokenInterface = await this.parseTokenInterface(networkId, contract)
 		const [name, symbol, decimals] = await this.fetchTokenMetadata(profile.id, networkId, accountAddress, tokenInterface)
 		return { name, symbol, decimals, interface: tokenInterface }
@@ -525,10 +523,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	}
 
 	public async backup(): Promise<Token[]> {
-		const profile = await this.profiles.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profiles)
 
 		return await this.getTokensRaw(profile.id)
 	}

@@ -27,6 +27,7 @@ import type { AccountService } from "@/wallet/services/account/service"
 import type { ContactService } from "@/wallet/services/contact/service"
 import { type NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import type { ProfileService } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import type { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { type ContractResolver, findFunctionByName } from "./contract-resolver"
 import { rehydrateOptimizablePrefix, runFastPath } from "./fast-path"
@@ -81,10 +82,7 @@ export class ViewExecutor {
 	}
 
 	public async executeSimulateUtility(op: SimulateUtilityOperation): Promise<AbiDecoded> {
-		const profile = await this.deps.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet locked")
-		}
+		const profile = await requireActiveProfile(this.deps.profileService, "Wallet locked")
 		const network = await this.deps.networkService.getNetwork(op.networkId)
 		const account = await this.deps.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
 
@@ -242,10 +240,7 @@ export class ViewExecutor {
 		}
 		const { optimizableCalls, remainingRaw } = split
 
-		const profile = await this.deps.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet locked")
-		}
+		const profile = await requireActiveProfile(this.deps.profileService, "Wallet locked")
 		const network = await this.deps.networkService.getNetwork(op.networkId)
 		const node = await this.deps.networkService.getNode(network.chainId)
 
@@ -334,10 +329,7 @@ export class ViewExecutor {
 	}
 
 	public async executeAztecExecuteUtility(op: AztecExecuteUtilityOperation): Promise<UtilityExecutionResult> {
-		const profile = await this.deps.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet locked")
-		}
+		const profile = await requireActiveProfile(this.deps.profileService, "Wallet locked")
 		const network = await this.deps.networkService.getNetwork(op.networkId)
 		const account = await this.deps.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
 		const pxe = this.deps.pxeService.getPXE(networkInfoFrom(network))

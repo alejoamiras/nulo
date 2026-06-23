@@ -7,6 +7,7 @@ import { AztecNodeFactoryAdapter } from "@nulo/aztec-runtime/adapters"
 import type { NodeFactory } from "@nulo/aztec-runtime/ports"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
@@ -189,8 +190,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 
 	public async getOrInitNetworks(): Promise<Network[]> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
 			const existing = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
@@ -224,8 +224,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async getNetworks(chainId?: number): Promise<Network[]> {
 		validateParams(NetworkMethodSchemas.getNetworks.params, [chainId], "getNetworks")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		return (await this.storage.getValues()).filter(
 			(n) => n.profileId === profile.id && (chainId === undefined || n.chainId === chainId),
 		)
@@ -234,8 +233,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async getNetwork(id: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.getNetwork.params, [id], "getNetwork")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		const network = await this.storage.get(id)
 		if (network?.profileId !== profile.id) throw new Error("Invalid id")
 		return network
@@ -244,8 +242,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async getActiveNetwork(): Promise<Network | null> {
 		validateParams(NetworkMethodSchemas.getActiveNetwork.params, [], "getActiveNetwork")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		const id = await this._readActive(profile.id)
 		if (!id) return null
 		const network = await this.storage.get(id)
@@ -258,8 +255,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async addNetwork(name: string, rpcUrl: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.addNetwork.params, [name, rpcUrl], "addNetwork")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		const chainId = await this._getChainId(rpcUrl)
 		try {
 			await this.lock.enter()
@@ -283,8 +279,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async renameNetwork(id: string, name: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.renameNetwork.params, [id, name], "renameNetwork")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
 			const network = await this.storage.get(id)
@@ -304,8 +299,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async deleteNetwork(id: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.deleteNetwork.params, [id], "deleteNetwork")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
 			const network = await this.storage.get(id)
@@ -328,8 +322,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async setActiveNetwork(id: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.setActiveNetwork.params, [id], "setActiveNetwork")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
 			const network = await this.storage.get(id)
@@ -351,8 +344,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async addEndpoint(networkId: string, label: string | undefined, rpcUrl: string): Promise<NetworkEndpoint> {
 		validateParams(NetworkMethodSchemas.addEndpoint.params, [networkId, label, rpcUrl], "addEndpoint")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		// Peek the network's kind unlocked so the chainId probe can short-circuit
 		// for `kind === "local"` regardless of how the URL was edited. The lock-
 		// guarded re-read below handles the (rare) deletion race.
@@ -394,8 +386,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	): Promise<NetworkEndpoint> {
 		validateParams(NetworkMethodSchemas.updateEndpoint.params, [networkId, endpointId, label, rpcUrl], "updateEndpoint")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		const normalized = normalizeRpcUrl(rpcUrl)
 		// Peek the network's kind so the chainId probe can short-circuit for
 		// `kind === "local"` regardless of how the URL was edited.
@@ -442,8 +433,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async deleteEndpoint(networkId: string, endpointId: string): Promise<NetworkEndpoint> {
 		validateParams(NetworkMethodSchemas.deleteEndpoint.params, [networkId, endpointId], "deleteEndpoint")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
 			const network = await this.storage.get(networkId)
@@ -469,8 +459,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async setPrimaryEndpoint(networkId: string, endpointId: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.setPrimaryEndpoint.params, [networkId, endpointId], "setPrimaryEndpoint")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
 			const network = await this.storage.get(networkId)
@@ -493,8 +482,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async getNodeStatus(networkId: string): Promise<NodeStatus> {
 		validateParams(NetworkMethodSchemas.getNodeStatus.params, [networkId], "getNodeStatus")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		const network = await this.storage.get(networkId)
 		if (network?.profileId !== profile.id) throw new Error("Invalid id")
 		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
@@ -514,8 +502,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			await this.lock.enter()
 			let node = this.nodes.get(chainId)
 			if (!node) {
-				const profile = await this.profileService.getActiveProfile()
-				if (!profile) throw new Error("Profile locked")
+				const profile = await requireActiveProfile(this.profileService)
 				const network = (await this.storage.getValues()).find((n) => n.profileId === profile.id && n.chainId === chainId)
 				if (!network) throw new Error(`No network configured for chainId ${chainId}`)
 				const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)

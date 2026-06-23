@@ -6,6 +6,7 @@ import type { ILogger } from "@/wallet/logger"
 import { AccountService, type Account } from "@/wallet/services/account/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { StepContent, type WrappedTask } from "@/wallet/services/task/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
@@ -288,10 +289,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	}
 
 	public async backup(): Promise<Tx[] | undefined> {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 
 		const networks = await this.networkService.getNetworks()
 		if (!networks.length) {

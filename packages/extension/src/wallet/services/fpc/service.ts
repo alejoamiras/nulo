@@ -4,6 +4,7 @@ import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { purgeRows } from "@/wallet/services/purge-rows"
@@ -120,10 +121,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 
 	public async getFpcs(chainId?: number): Promise<FpcInfo[]> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 		const allFpcs = await this.storage.getValues()
 		let result = allFpcs.filter((fpc) => fpc.profileId === profile.id && (chainId === undefined || fpc.chainId === chainId))
 		this.logDebug(
@@ -222,10 +220,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 
 	public async getFpc(id: string): Promise<FpcInfo> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 		const fpcInfo = await this.storage.get(id)
 		if (fpcInfo?.profileId !== profile.id) {
 			throw new Error("Invalid id")
@@ -242,10 +237,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		if (type !== FpcType.DefaultSponsoredFpc && type !== FpcType.PrivateFpc) {
 			throw new Error("Unsupported FPC type")
 		}
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 		const network = await this.networkService.getNetwork(networkId)
 		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
 
@@ -291,10 +283,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 
 	public async updateFpc(id: string, name: string): Promise<FpcInfo> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
 			const fpc = await this.storage.get(id)
@@ -317,10 +306,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 
 	public async updateFpcAddress(id: string, address: string): Promise<FpcInfo> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 		// Snapshot the row first so we know which network's PXE to query.
 		const existing = await this.storage.get(id)
 		if (existing?.profileId !== profile.id) {
@@ -384,10 +370,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 
 	public async deleteFpc(id: string): Promise<FpcInfo> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
 			const fpc = await this.storage.get(id)
@@ -409,10 +392,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 
 	public async getFpcImpl(id: string): Promise<Fpc> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 		const fpcInfo = await this.storage.get(id)
 		if (fpcInfo?.profileId !== profile.id) {
 			throw new Error("Invalid id")

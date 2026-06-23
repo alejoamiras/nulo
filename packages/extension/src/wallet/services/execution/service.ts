@@ -16,6 +16,7 @@ import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { AccountService } from "@/wallet/services/account/service"
 import { ContactService } from "@/wallet/services/contact/service"
 import { ProfileService } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { TokenService } from "@/wallet/services/token/service"
 import { FpcService, FpcType } from "@/wallet/services/fpc/service"
@@ -506,10 +507,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
 	): Promise<void> {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet locked")
-		}
+		const profile = await requireActiveProfile(this.profileService, "Wallet locked")
 		const network = await this.networkService.getNetwork(op.networkId)
 
 		// Honor the popup's pre-fetched interface (`previewedInterface`) if it
@@ -629,10 +627,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	}
 
 	public async executeAztecCreateAuthWit(op: AztecCreateAuthWitOperation): Promise<AuthWitness> {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet locked")
-		}
+		const profile = await requireActiveProfile(this.profileService, "Wallet locked")
 		const network = await this.networkService.getNetwork(op.networkId)
 		const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress.toString())
 

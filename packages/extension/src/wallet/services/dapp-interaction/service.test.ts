@@ -110,6 +110,29 @@ describe("DappInteractionService forwards execution hooks (does not fire the bat
 		expect(releaseSpy).not.toHaveBeenCalled()
 	})
 
+	// AUTHZ guard pin (Q19): silentInteraction's check is an IDENTITY guard
+	// (`profile?.id !== session.profileId`), NOT a mere absence guard. The
+	// requireActiveProfile sweep must NEVER collapse it to "profile exists" —
+	// doing so would let a DIFFERENT still-unlocked profile execute a dApp
+	// request approved under another profile. These two cases pin both arms.
+	test('silentInteraction throws "Wallet locked" when the active profile DIFFERS from the session profile', async () => {
+		const executeOperations = vi.fn(async () => [])
+		const { internals } = makeService({ executeOperations, getActiveProfile: async () => ({ id: "p2" }) })
+		const payload = { params: { operations: [] }, session: { profileId: "p1", dappMetadata: { name: "test-dapp" } } }
+
+		await expect(internals.silentInteraction(payload)).rejects.toThrow("Wallet locked")
+		expect(executeOperations).not.toHaveBeenCalled()
+	})
+
+	test('silentInteraction throws "Wallet locked" when the wallet is locked (no active profile)', async () => {
+		const executeOperations = vi.fn(async () => [])
+		const { internals } = makeService({ executeOperations, getActiveProfile: async () => undefined })
+		const payload = { params: { operations: [] }, session: { profileId: "p1", dappMetadata: { name: "test-dapp" } } }
+
+		await expect(internals.silentInteraction(payload)).rejects.toThrow("Wallet locked")
+		expect(executeOperations).not.toHaveBeenCalled()
+	})
+
 	test("approveInteraction without hooks does not throw", async () => {
 		const { svc, internals } = makeService({ executeOperations: async () => [] })
 		const id = "interaction-3"

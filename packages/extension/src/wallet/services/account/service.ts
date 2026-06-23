@@ -5,6 +5,7 @@ import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { NetworkService } from "@/wallet/services/network/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
@@ -218,10 +219,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	}
 
 	public async backup(): Promise<Account[]> {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 
 		return (await this.storage.getValues()).filter((x) => x.profileId === profile.id)
 	}

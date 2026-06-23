@@ -7,6 +7,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import { AccountService, type Account } from "@/wallet/services/account/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { TokenService, type Token, type TokenInfo } from "@/wallet/services/token/service"
 import { ExecutionService } from "@/wallet/services/execution/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
@@ -256,10 +257,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	}
 
 	public async backup(): Promise<TokenBalanceRaw[]> {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 		return await this.repo.getAll()
 	}
 

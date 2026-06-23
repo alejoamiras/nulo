@@ -37,6 +37,7 @@ import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
 import { ExecutionService } from "@/wallet/services/execution/service"
 import { ProfileService } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { DappInteractionService } from "@/wallet/services/dapp-interaction/service"
 import { TokenService } from "@/wallet/services/token/service"
 import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
@@ -620,10 +621,7 @@ async function handleWalletMessage(
 	}
 
 	try {
-		const profile = await profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet is locked")
-		}
+		const profile = await requireActiveProfile(profileService, "Wallet is locked")
 
 		const ctx: SessionContext = {
 			chainId: chainInfoToChainId(session),
