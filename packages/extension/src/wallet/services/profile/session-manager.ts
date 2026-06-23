@@ -274,34 +274,46 @@ export class SessionManager {
 		}
 	}
 
-	/** Drops the persisted `passhash` bearer from BOTH the storage record
-	 *  AND the in-memory `activeSession.session` object. Called by
-	 *  `onConfigUpdated` when strict mode is enabled mid-session.
+	/** Drops the persisted `passhash` bearer from the session record. Called
+	 *  by `onConfigUpdated` when strict mode is enabled mid-session.
 	 *
-	 *  Why both: `refresh()` (and TTL updates) re-persist the in-memory
+	 *  Why it matters: `refresh()` (and TTL updates) re-persist the in-memory
 	 *  `activeSession.session` object, so leaving the in-memory passhash
-	 *  present would silently re-write the bearer to storage on the
-	 *  next refresh — strict ON would be quietly undone. Mutating the
-	 *  in-memory copy too closes that race.
+	 *  present would silently re-write the bearer to storage on the next
+	 *  refresh — strict ON would be quietly undone.
 	 *
 	 *  The Fr master secret keeps living: enabling strict mid-session is
 	 *  not a force-lock — the user stays unlocked until SW death OR
 	 *  auto-lock OR manual lock. Idempotent. */
 	public async clearPasshash(): Promise<void> {
 		try {
-			// Clear in-memory FIRST. Order matters: if a `refresh()` (or TTL
-			// alarm reschedule) lands between our two ops while in-memory
-			// still has the bearer, refresh re-persists it. By clearing
-			// memory before storage, any concurrent refresh reads the
-			// cleared session and writes a clean record — our subsequent
-			// storage-set is a no-op confirmation.
-			if (this.activeSession?.session.passhash) {
-				this.activeSession.session.passhash = undefined
-			}
-			const persisted = await this.session.get()
-			if (persisted?.passhash) {
-				await this.session.set({ ...persisted, passhash: undefined })
-			}
+			// Serialize against the facade-locked session writers (refresh/open/
+			// unlock), applyTtlChange, and the alarm close, via the injected
+			// runExclusive — same config-driven, void-dispatched provenance as
+			// applyTtlChange, so it is deadlock-free (only reached from
+			// `onConfigUpdated`, never from within the facade lock). Without
+			// serialization the storage write below could clobber a concurrent
+			// refresh/applyTtlChange's newer `since`/`lockedAt` (lost update).
+			await this.runExclusive(async () => {
+				// Re-read inside the lock.
+				const active = this.activeSession
+				if (active) {
+					// Live session: clear the bearer on the shared object and persist
+					// THAT object — it carries the authoritative latest since/lockedAt.
+					// Persisting a fresh storage snapshot instead (`{...persisted}`)
+					// would be the lost-update vector against a serialized writer.
+					if (active.session.passhash) {
+						active.session.passhash = undefined
+						await this.session.set(active.session)
+					}
+					return
+				}
+				// No in-memory session (locked): scrub a persisted bearer directly.
+				const persisted = await this.session.get()
+				if (persisted?.passhash) {
+					await this.session.set({ ...persisted, passhash: undefined })
+				}
+			})
 			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Cleared passhash bearer (strict mode)")
 		} catch (error) {
 			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to clear passhash bearer", getErrorMessage(error))
@@ -494,27 +506,42 @@ export class SessionManager {
 	 */
 	private async applyTtlChange(newTtl: number): Promise<void> {
 		try {
-			if (!this.activeSession) return
-			if (newTtl === 0) {
-				// `lockedAt: undefined` is dropped by JSON.stringify on
-				// persist, matching the no-TTL write in `open()`.
-				this.activeSession.session.lockedAt = undefined
-				await this.session.set(this.activeSession.session)
+			// Serialize the writeback + close against the facade-locked session
+			// writers (refresh/open/unlock) AND the TTL alarm close, via the
+			// injected runExclusive — the same reason as `onAlarmFired`. Without
+			// it, a config-driven TTL-shorten's close()/set() racing a refresh()
+			// writeback can resurrect a session the shorten just expired (a TTL
+			// bypass) or lose the lockedAt update. Deadlock-free: applyTtlChange
+			// is only ever reached from the config-update listener
+			// (`onConfigUpdated`), never from within the facade lock, and
+			// `close()` is itself lock-free.
+			await this.runExclusive(async () => {
+				// Re-read INSIDE the lock: a queued refresh/open/unlock may have
+				// changed the active session (e.g. bumped `since`, or closed it)
+				// while we waited for the lock.
+				const active = this.activeSession
+				if (!active) return
+				if (newTtl === 0) {
+					// `lockedAt: undefined` is dropped by JSON.stringify on
+					// persist, matching the no-TTL write in `open()`.
+					active.session.lockedAt = undefined
+					await this.session.set(active.session)
+					await this.clearLockAlarm()
+					return
+				}
+				const newLockedAt = active.session.since + newTtl
+				if (newLockedAt <= Date.now()) {
+					// New TTL has already elapsed since `since` — lock now,
+					// don't schedule an already-overdue alarm.
+					this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session TTL shortened past elapsed window; locking immediately")
+					await this.close()
+					return
+				}
+				active.session.lockedAt = newLockedAt
+				await this.session.set(active.session)
 				await this.clearLockAlarm()
-				return
-			}
-			const newLockedAt = this.activeSession.session.since + newTtl
-			if (newLockedAt <= Date.now()) {
-				// New TTL has already elapsed since `since` — lock now,
-				// don't schedule an already-overdue alarm.
-				this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session TTL shortened past elapsed window; locking immediately")
-				await this.close()
-				return
-			}
-			this.activeSession.session.lockedAt = newLockedAt
-			await this.session.set(this.activeSession.session)
-			await this.clearLockAlarm()
-			await this.scheduleLockAlarm(newLockedAt)
+				await this.scheduleLockAlarm(newLockedAt)
+			})
 		} catch (error) {
 			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to apply TTL change", getErrorMessage(error))
 		}

@@ -982,4 +982,111 @@ describe("ProfileService integration", () => {
 			expect(restoredActive).toBe(memActive)
 		}, 30_000)
 	})
+
+	// Q10 TTL residual (C1): the CONFIG-driven session writebacks — applyTtlChange
+	// (sessionTtl change) and clearPasshash (strictSecurityMode toggle) — are now
+	// ALSO routed through ProfileService.runExclusive, like the alarm close. Before,
+	// they ran lock-free and could interleave with a refreshSession() write-back:
+	// a TTL-shorten close could be resurrected (TTL bypass), and clearPasshash's
+	// stale-snapshot write could clobber a newer lockedAt (lost update).
+	describe("config-driven writeback vs refresh race (serialized)", () => {
+		const readRoot = async (api: FakeBrowserApi): Promise<string | undefined> => {
+			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
+			return raw[SESSION_STORAGE_ROOT] as string | undefined
+		}
+		const readSession = async (api: FakeBrowserApi): Promise<{ lockedAt?: number; passhash?: string }> => {
+			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
+			return JSON.parse(raw[SESSION_STORAGE_ROOT] as string)
+		}
+		/** Arm a one-shot block on the next storage.session.set so the next writer
+		 *  (refresh) parks WHILE holding the facade lock. Returns the release fn. */
+		function blockNextSessionSet(api: FakeBrowserApi): () => void {
+			let release!: () => void
+			const blocked = new Promise<void>((r) => {
+				release = r
+			})
+			const area = api.storage.session
+			const origSet = area.set.bind(area)
+			let armed = true
+			area.set = async (items: Record<string, unknown>) => {
+				if (armed) {
+					armed = false
+					await blocked
+				}
+				return origSet(items)
+			}
+			return release
+		}
+
+		test("a sessionTtl shorten-to-elapsed close during refresh's write-back does NOT resurrect the session", async () => {
+			const { api, config, service } = await makeService(60_000)
+			const profile = await service.createProfile("P", "pass1234")
+			await service.unlockProfile(profile.id, "pass1234")
+
+			const releaseSet = blockNextSessionSet(api)
+			const refreshP = service.refreshSession()
+			await flushPromises() // refresh acquires the lock + parks at the blocked set (bumped `since`)
+
+			// Shorten the TTL to ~0 → onConfigUpdated fires applyTtlChange, now routed
+			// through runExclusive → it BLOCKS behind the parked refresh.
+			config.set("sessionTtl", 1)
+			await flushPromises()
+			// Advance real time so applyTtlChange's `since + 1 <= now` close branch is
+			// deterministic once it runs.
+			await new Promise((r) => setTimeout(r, 25))
+
+			// MID-STATE: neither refresh's set nor applyTtlChange's close has run — the
+			// session is still in storage (not deleted mid-write).
+			expect(await readRoot(api)).toBeDefined()
+
+			// Release refresh → it persists (bumped lockedAt) + releases the lock → the
+			// queued applyTtlChange runs, takes the close branch (TTL elapsed), deletes.
+			releaseSet()
+			await refreshP
+			await flushPromises()
+
+			// Memory + a fresh SW restore must AGREE (no resurrection hybrid).
+			const memActive = (await service.getActiveProfile()) !== undefined
+			const restarted = await makeServiceFromExistingApi(api, { sessionTtl: 1 })
+			const restoredActive = (await restarted.service.getActiveProfile()) !== undefined
+			expect(restoredActive).toBe(memActive)
+			expect(memActive).toBe(false) // TTL shortened-past-elapsed → locked
+		}, 30_000)
+
+		test("enabling strict mode during refresh's write-back drops the bearer WITHOUT reverting the bumped lockedAt", async () => {
+			const { api, config, service } = await makeService(60_000) // lenient → bearer persisted
+			const profile = await service.createProfile("P", "pass1234")
+			await service.unlockProfile(profile.id, "pass1234")
+			expect((await readSession(api)).passhash).toBeDefined() // lenient bearer cached
+			const lockedAtBeforeRefresh = (await readSession(api)).lockedAt as number
+
+			// Ensure refresh bumps `since` strictly past unlock so a stale-snapshot
+			// clobber (the bug) would be DETECTABLE as a reverted (smaller) lockedAt.
+			await new Promise((r) => setTimeout(r, 12))
+
+			const releaseSet = blockNextSessionSet(api)
+			const refreshP = service.refreshSession()
+			await flushPromises() // refresh parks holding the lock (in-memory passhash still present)
+
+			// Toggle strict ON → clearPasshash() routed through runExclusive → BLOCKS
+			// behind the parked refresh.
+			config.set("strictSecurityMode", true)
+			await flushPromises()
+
+			// Release refresh → persists {bumped lockedAt, passhash present} + releases
+			// lock → queued clearPasshash runs, re-reads the bumped session, drops the
+			// bearer, persists THAT object (not a stale pre-refresh snapshot).
+			releaseSet()
+			await refreshP
+			await flushPromises()
+
+			expect((await service.getActiveProfile()) !== undefined).toBe(true) // strict ≠ force-lock
+			const persisted = await readSession(api)
+			expect(persisted.passhash).toBeUndefined() // bearer dropped — strict enforced
+			// The bumped lockedAt survived: a stale-snapshot write would have reverted it
+			// to the pre-refresh value. (Strict deliberately drops the cross-restart bearer,
+			// so a SW-restart agreement check does NOT apply here — that's expected, not a hybrid.)
+			expect(persisted.lockedAt).toBeGreaterThan(lockedAtBeforeRefresh)
+		}, 30_000)
+	})
 })

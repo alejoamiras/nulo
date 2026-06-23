@@ -99,12 +99,17 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	}
 
 	/** Run `fn` under the facade lock. Injected into `SessionManager` so its
-	 *  alarm-driven TTL close serializes against the lock-holding session
-	 *  writers (`refresh`/`open`/`unlock`) — without it, a racing `refresh()`
-	 *  storage write can land after the alarm's `close()` delete and resurrect
-	 *  an expired session on the next SW restore. Callers MUST NOT already hold
-	 *  the facade lock — `Lock` is non-reentrant (so this is wired ONLY to the
-	 *  alarm path, never to config-driven internal closes). */
+	 *  out-of-band session closes — the alarm-driven TTL close AND the
+	 *  config-driven `applyTtlChange` close — serialize against the lock-holding
+	 *  session writers (`refresh`/`open`/`unlock`). Without it, a racing
+	 *  `refresh()` storage write can land after a `close()` delete and resurrect
+	 *  an expired session on the next SW restore (a TTL bypass). Callers MUST NOT
+	 *  already hold the facade lock — `Lock` is non-reentrant, so re-entering it
+	 *  self-deadlocks; this is safe ONLY because both wired paths are reached from
+	 *  the alarm dispatch / the config-update listener, never from inside a locked
+	 *  op. A future facade-locked write of `sessionTtl` would re-enter via
+	 *  `applyTtlChange` and deadlock — keep `sessionTtl` writes off the locked
+	 *  paths. */
 	private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
 		try {
 			await this.lock.enter()
