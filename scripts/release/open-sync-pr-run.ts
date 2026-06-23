@@ -173,6 +173,10 @@ if (import.meta.main) {
 			return "UNKNOWN" // bounded wait elapsed → fail-closed (labeled for a human)
 		},
 		async flagConflict(prNumber, label, comment) {
+			// `gh pr edit --add-label` FAILS if the label isn't defined in the repo yet —
+			// `needs-manual-resolution` won't exist on a fresh repo. Ensure it first
+			// (idempotent via --force). Same class of bug the rehearsal found on auto-unstick.
+			await $`gh label create ${label} --color d93f0b --force`.nothrow().quiet()
 			await $`gh pr edit ${String(prNumber)} --add-label ${label}`
 			await $`gh pr comment ${String(prNumber)} --body ${comment}`
 		},

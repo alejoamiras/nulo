@@ -163,6 +163,11 @@ if (import.meta.main) {
 			await $`git push origin ${tag}`
 		},
 		async relabelPr(prNumber, add, remove) {
+			// `gh pr edit --add-label` FAILS if the label isn't defined in the repo. The
+			// `autorelease: tagged` label won't exist on a repo that has never completed a
+			// release (the v4 abort means release-please never created it). Ensure it first
+			// (idempotent via --force). Found by the throwaway-repo rehearsal.
+			await $`gh label create ${add} --color ededed --force`.nothrow().quiet()
 			await $`gh pr edit ${String(prNumber)} --add-label ${add} --remove-label ${remove}`
 		},
 		async ensureRelease(tag, prerelease) {
