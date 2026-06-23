@@ -158,12 +158,14 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 	// journal record BEFORE calling `controller.abort()`, and the journal's
 	// transition lock is the arbiter that serializes claim-vs-cancel. Combined
 	// with `reuseController` being registered before the acquire wait (above),
-	// cancelJob always finds a controller to abort — correctness rests on
-	// controller-identity-continuity + transition-before-abort + the journal
-	// lock, NOT on microtask luck. The one microtask-sensitive residual is the
-	// LEGACY no-reuse path, where the bare `set()` below must land before a
-	// concurrent cancel reads `activeControllers` — which the no-await line above
-	// guarantees. Making the handshake explicit via a small claim/cancel
+	// cancelJob always finds a controller to abort on this claim path —
+	// correctness rests on controller-identity-continuity + transition-before-
+	// abort + the journal lock, NOT on microtask luck. The one microtask-
+	// sensitive residual is the LEGACY no-reuse / reaped-record fallback, where a
+	// freshly-created controller is `set()` immediately after the create await
+	// (the same register-immediately discipline, applied at those create sites);
+	// the queued/pending `set()` below is the one the no-await line above covers.
+	// Making the handshake explicit via a small claim/cancel
 	// coordinator seam was evaluated (codex) and deferred to the execution
 	// composition harness in #125/#126 for human review; see
 	// implementations-plan/quality-arc-deferred/lessons/q23.md.
