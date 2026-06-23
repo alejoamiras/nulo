@@ -38,7 +38,7 @@ Drive the REAL wallet service graph (`ServiceCollection.start()` + the real serv
 - **Real artifacts.** Seed with real compiled artifacts (`TokenContractArtifact`, `SponsoredFPCContractArtifact`), never hand-written ABI.
 - **Assert real state.** ≥1 assertion on real-collaborator state (storage rows, journal stage, emitted events), never on the fake's own canned return.
 - **Bundle hygiene.** Every fake carries a unique marker (`SHALLOW_PXE_FAKE_BUNDLE_MARKER`); the `_build-extension.yml` "Assert test-only markers absent" CI step greps `dist/chrome|firefox` and fails on any hit. A fake reaching production = a wallet that "succeeds" without a real PXE.
-- **Inject the boundaries** via defaulted ctor params (`pxeClientFactory` + `browserApi?`), mirroring `OperationJournalService`. Production passes nothing → real client + real `chrome.storage`.
+- **Inject the boundaries** via ctor params, mirroring the composition root. `browserApi` is a REQUIRED port (production passes the real `BrowserApi` from the root, as `OperationJournalService` does; tests pass `FakeBrowserApi`). Where a service touches the PXE, a DEFAULTED `pxeClientFactory` carries that seam (production passes nothing → real client; tests pass `() => fake.client`).
 
 ## Failure taxonomy — name it in review
 

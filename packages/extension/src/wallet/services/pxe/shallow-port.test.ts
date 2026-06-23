@@ -1,5 +1,6 @@
 /**
- * Pins the shared PXE seam that TokenService + FpcService inject.
+ * Pins the shared PXE seam that TokenService injects (FpcService constructs its
+ * client directly — bb-bound, e2e-only — so it does NOT inject this seam).
  *
  * Two directions of conformance:
  *  - client → port: the production DEFAULT factory builds the REAL
@@ -20,7 +21,7 @@ import { DEFAULT_SHALLOW_PXE_CLIENT_FACTORY, type ShallowPxe, type ShallowPxeCli
 import { makeShallowPxeFake } from "./shallow-port.fake"
 
 describe("ShallowPxe port", () => {
-	test("DEFAULT_SHALLOW_PXE_CLIENT_FACTORY (the Token/Fpc production default) builds the real PxeServiceClient", () => {
+	test("DEFAULT_SHALLOW_PXE_CLIENT_FACTORY (the TokenService production default) builds the real PxeServiceClient", () => {
 		const client: ShallowPxeClient = DEFAULT_SHALLOW_PXE_CLIENT_FACTORY(new LoggerStore(new ConfigStore()))
 		expect(client).toBeInstanceOf(PxeServiceClient)
 	})
