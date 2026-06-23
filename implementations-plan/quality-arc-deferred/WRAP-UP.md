@@ -54,17 +54,19 @@ Merge-base `b068393` = dev after batch-1's #148.
   is a user-visible, security-relevant behavior change outside the "behavior-preserving" framing. codex's gap:
   no runtime-seam test + no explicit acceptance that Q10 was meant to flip it on.
 
-## SURFACED to user (security-relevant behavior change + dual-model split)
+## SURFACED to user → RESOLVED (option 1: accept + document + seam-test)
 The `browserApi` port carries BOTH storage AND alarms, so Q10's clean port-injection into ProfileService
-cannot thread storage WITHOUT also activating proactive TTL (short of passing a degraded alarms-less port —
-an ugly carve-out). The activation is the SessionManager's intended end-state, but it changes when users'
-wallets lock → the user must decide. Options surfaced:
-- **(1) Promote-with-acknowledgment [rec]** — accept the activation (intended design + security improvement);
-  I add codex's requested runtime-seam test + an explicit acceptance note, then re-confirm codex → promote.
-- **(2) Decouple** — keep proactive TTL dormant for now (pass ProfileService an alarms-less port / gate it),
-  activate it deliberately in a separate change.
-- **(3) Revert Q10's ProfileService closeout** — drop the runtime wiring (ProfileService stays on the storage
-  fallback), promote the other 5 findings without it.
+cannot thread storage WITHOUT also activating proactive TTL (short of a degraded alarms-less port). Surfaced as
+a security-relevant behavior change + dual-model split. **User decision (2026-06-23): option 1** — accept the
+activation as the intended completion of the composition-root migration (a security improvement; the
+SessionManager was designed to light up once wired). Closed codex's gap:
+- **Acceptance note** at the seam: `runtime.ts:136` comment documents that wiring `browserApi` activates
+  SessionManager's proactive TTL auto-lock (accepted behavior change).
+- **Runtime-seam test**: `service.integration.test.ts` "Q10 composition seam" — WITH a port → SessionManager
+  subscribes to the proactive-TTL alarm; WITHOUT (the pre-arc runtime) → no subscription (dormant). Pins the
+  activation against silent regression in either direction.
+- Re-confirm: codex `019ef437` resumed to verify the HOLD is closed (see below).
 
 ## Promote
-`dev-quality → dev` PR — BLOCKED pending the user's decision above. NOT merged autonomously (hard limit).
+`dev-quality → dev` PR — opened after codex re-confirms the HOLD is closed. NOT merged autonomously (hard
+limit: the dev-quality→dev promote is the user's call).

@@ -14,7 +14,7 @@
  * stay small (1–2 PBKDF2 runs each) so the suite stays under ~30s total.
  */
 
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import type { ConfigProp, IConfig } from "@/wallet/config"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { LoggerStore } from "@/wallet/logger"
@@ -874,5 +874,35 @@ describe("ProfileService integration", () => {
 			expect(await service.getActiveProfile()).toBeUndefined()
 			expect(await service.getProfiles()).toEqual([])
 		}, 30_000)
+	})
+
+	// Q10 composition seam — the runtime now does `new ProfileService(config, logger, browserApi)`
+	// (runtime.ts:136). The browserApi port carries BOTH storage AND alarms, so wiring it for the
+	// storage migration also ACTIVATES SessionManager's pre-existing proactive TTL auto-lock (it was
+	// dormant pre-arc only because the composition root passed no port). This is an accepted,
+	// user-visible behavior change — the intended completion of the migration, flagged by the codex
+	// confidence-pass HOLD and accepted by the owner. See WRAP-UP.md. These pins keep the activation
+	// from silently regressing back to dormant (or silently flipping on without a port).
+	describe("ProfileService Q10 composition seam — proactive TTL activation", () => {
+		test("WITH a browserApi port → SessionManager subscribes to the proactive-TTL alarm", () => {
+			const api = new FakeBrowserApi()
+			api.reset()
+			const onAlarm = vi.spyOn(api.alarms, "onAlarm")
+			const config = fakeConfig()
+			const logger = new LoggerStore(config)
+			new ProfileService(config, logger, api)
+			expect(onAlarm).toHaveBeenCalledTimes(1)
+		})
+
+		test("WITHOUT a browserApi port (the pre-arc runtime) → no alarm subscription (reactive-only, dormant)", () => {
+			const api = new FakeBrowserApi()
+			api.reset()
+			const onAlarm = vi.spyOn(api.alarms, "onAlarm")
+			const config = fakeConfig()
+			const logger = new LoggerStore(config)
+			// Port deliberately NOT passed — mirrors the pre-arc `new ProfileService(config, logger)`.
+			new ProfileService(config, logger)
+			expect(onAlarm).not.toHaveBeenCalled()
+		})
 	})
 })
