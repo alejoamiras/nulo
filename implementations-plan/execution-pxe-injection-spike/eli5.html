@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — ExecutionService PXE-injection spike</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>ExecutionService PXE-injection spike</h1>
+  <p>We can't cheaply test most of the wallet because the logic only runs once the real Aztec engine (the PXE) and the background worker are up — which means slow, flaky network tests. This spike proves a cheaper way: let one service (<code>ExecutionService</code>) accept a <em>fake</em> PXE, then write one fast test that runs the real wallet logic against that fake — no Aztec, no browser, no proving. If it feels good, it becomes the first step of doing the same for every service. If it's awkward, we found out in half a day.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>Light.</strong> Rubric: 0 of 6 risk dimensions are high — the pattern already exists in the repo (two services already test this way), the change is behavior-preserving (production keeps the real PXE via a default), it's a single package, trivially reversible (one defaulted constructor argument), and there's no migration, security, or external-coupling surface. Bounded + low-risk = light.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: Make the PXE swappable</h3>
+    <p>Today <code>ExecutionService</code> builds its own connection to the PXE, hard-wired. We change it to <em>accept</em> one (the PXE <em>client</em>, since the service uses more than just the prove/simulate slice), defaulting to the real thing — so production behaves exactly as before, but a test can hand it a fake.</p>
+    <p class="muted">Proves itself by: lint + typecheck pass, the existing ExecutionService tests still pass, AND a new test confirms that with no fake supplied it still uses the real client (the old tests skip construction, so they wouldn't catch a broken default).</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: Build the fake + the test rig</h3>
+    <p>A deliberately dumb stand-in for the PXE client that returns canned, correctly-shaped answers — it does NOT pretend to do real Aztec cryptography. Plus a small harness that snaps the real wallet pieces together around it (using fakes that already exist for the node and storage).</p>
+    <p class="muted">Proves itself by: typecheck passes (the fake satisfies the real client surface), the rig boots without error, and — stronger than a convention — a production build + grep confirms the fake is nowhere in the shipped bundle.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: The one real test (cancel-mid-prove)</h3>
+    <p>Through the wallet's real <code>executeTransfer</code> + <code>cancelJob</code> API (not a shortcut into the internals): start a transfer, pause it at the "proving" moment, cancel it, and check the wallet does the right thing — records the right states, drops the half-made proof, never sends, and reports a clean cancellation. Today this is only checkable by booting the whole Aztec sandbox.</p>
+    <p class="muted">Proves itself by: the new test passes in plain vitest (no sandbox), the existing tests still pass, lint + typecheck green.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>The wallet is layered, and the boundary to the Aztec engine is an interface called <code>IPXE</code>. Faking <em>at that one boundary</em> lets all the wallet logic above it run in a plain test. The reason we can't already do this is small but real: the services build their PXE connection themselves instead of being handed one — so there's nowhere to slip a fake in. This spike fixes that for exactly one service, as a proof.</p>
+  <p>The big prize isn't this spike — it's that the same move unlocks the ~65% of "did we break the wallet?" surface that today only the slow sandbox tests can check, AND it fixes the over-mocked unit tests (same root cause). But we prove the shape on one service first.</p>
+
+  <h2>Open questions — resolved by the codex audit (conditional approve)</h2>
+  <ul>
+    <li><strong>Resolved:</strong> the execution path DOES use methods beyond <code>IPXE</code> (it calls the concrete client's <code>getContractInstance</code>/<code>registerContract</code>/<code>registerSender</code>…), so we inject at the <em>client</em> level and the fake covers both — not raw <code>IPXE</code>.</li>
+    <li><strong>Resolved:</strong> the test is driven through the real <code>executeTransfer</code> + <code>cancelJob</code> public API (not the coordinator directly), so it can't pass trivially against the fake.</li>
+    <li><strong>Resolved:</strong> the fake is kept out of the production build by a bundle-grep (not just convention), and a new test pins that production still uses the real client.</li>
+    <li>Out of scope here, flagged for the rollout: keeping the fake honest vs the real PXE (a few real-stack "contract canaries").</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: ExecutionService only; keep-it-as-foundation; cancel-mid-prove proof test; fast-layers gate (already chosen).</li>
+      <li>Confirm tier: <code>light</code>.</li>
+      <li>Confirm the validation plan: lint · typecheck · unit (existing execution tests) · the new composition test. No sandbox for the spike.</li>
+      <li>No <code>/harden</code> scheduled (test-infra + a DI seam — no security surface).</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>One drives the autonomous implementation session. <code>/goal</code> survives <code>claude --resume</code> and stops when the condition holds; <code>/loop</code> fires on an interval. Completion here is fully transcript-observable (3 phases ✓ + fast-layer gates), so <code>/goal</code> is recommended.</p>
+    <p class="warning">Use exactly ONE per session. They don't compose — setting one replaces the other.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <pre><code>/goal All 3 phases marked ✓ in implementations-plan/execution-pxe-injection-spike/plan.md (the per-phase headers, not just chat), each ✓ backed by its validation gate reported passing in the transcript; the cancel-mid-prove composition test green via `bun run --cwd packages/extension vitest run` with NO Aztec sandbox; existing ExecutionService unit tests (`vitest run src/wallet/services/execution/`) still green; FakeIPXE confirmed zero production import sites (grep); `bun run lint` and `bun run --cwd packages/extension typecheck` both exit 0; for each phase `LESSONS_FILE=implementations-plan/execution-pxe-injection-spike/lessons/phase-N.md` printed; `/code-review max --fix` applied + committed; codex post-impl audit high/critical addressed.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop</h3>
+    <pre><code>/loop 15m Drive implementations-plan/execution-pxe-injection-spike forward. Never idle. Each firing: read plan.md + lessons/ (authoritative) and git status; take the next pending phase EXACTLY as written; after each edit run `bun run lint` + the touched `vitest run`; commit then push; phase green = the plan.md gate passes → mark ✓, file LESSONS_FILE=…/lessons/phase-N.md, advance; decision or stuck → `/codex xhigh`, log verdict, act on the stronger argument (HARD LIMITS: production default stays the real PxeServiceClient, FakeIPXE never imported by prod, spike adds no sandbox dependency); same step failing 5× → reassess with codex; all 3 phases ✓ → `/code-review max --fix` + commit, codex post-impl audit, address high/critical, wrap-up, STOP. Keep an ASCII checklist visible.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>
