@@ -97,7 +97,7 @@ Pull the fragile release logic out of YAML into `scripts/release/*.ts` (`bun:tes
 
 **Validation gate** — `bun test` for the chain-identity module (resolves to `4229590296`/testnet; URL override works; no env path); `bun run --cwd packages/faucet build` emits `dist/build.json` AND an `index.html` meta tag carrying the **same** buildId + the correct chainId; `bun run --cwd packages/faucet test:e2e`. Layers: unit · build · smoke. **No test repo.**
 
-### Phase 4 — Test-repo rehearsal harness (infra — gates the surgery phases)
+### Phase 4 — Test-repo rehearsal harness (infra — gates the surgery phases) — ✓ DONE (post-hoc, at the user's request; found the real label-crash bug → a4780a5f; verify §lessons/phase-4-rehearsal.md)
 
 Create `alejoamiras/nulo-release-rehearsal` (disposable; relaxed signing; dummy secrets — A3/A8) mirroring `release.yml` + configs. **Baseline-rehearse the CURRENT (unchanged) pipeline** to reproduce the v4 abort → confirms fidelity for the path we're about to automate. Document the I1 gaps it canNOT prove.
 

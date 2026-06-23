@@ -96,7 +96,7 @@
     <p>You said the old release doc was hard to follow. So the <a href="../../CLAUDE.md">CLAUDE.md § Release runbook</a> was rewritten <em>happy-path-first</em>: a "Start here" section with the 6-step flow and a who-does-what table, a troubleshooting table ("if X fails, do Y"), and a switches table — then the detailed manual steps as the fallback. A future agent (or you, in six months) can run a release cold from it.</p>
   </div>
 
-  <p class="muted"><strong>Phase 4 (a throwaway test repo to rehearse in) was skipped.</strong> Setting it up needed your go-ahead, which I didn't have while you were away, so I fell back to the plan's pre-approved alternative: unit tests + the staged rollout (below) as the real-world rehearsal. Noted honestly in the lessons.</p>
+  <p class="muted"><strong>Phase 4 (a throwaway test repo to rehearse in) — done, at your request.</strong> Initially skipped (it needed your go-ahead while you were away), then run in full once you asked for it. It <strong>found a real bug</strong> — a missing-label crash that would have stuck the very first flag-on release — plus two of my own harness mistakes. All fixed; the full orchestration is now validated end-to-end on a real repo. See <a href="./lessons/phase-4-rehearsal.md">lessons/phase-4-rehearsal.md</a>.</p>
 
   <h2>The review that caught real bugs</h2>
   <p>Before calling it done, I ran a self-review, then handed the whole thing to <strong>codex</strong> (a different AI model) and explicitly asked it to break the code. It said "not ready" and found <strong>four genuine holes</strong> that the unit tests alone would not have — this was the highest-value hour of the whole effort:</p>
@@ -110,7 +110,7 @@
   <p>Then a <strong>security pass</strong> tightened the workflow's permissions to least-privilege (build/test jobs no longer get a write-capable token they don't need). The full transcript + every decision is in <a href="./audit-codex-postimpl.md">audit-codex-postimpl.md</a>.</p>
 
   <h2 id="staged">The one idea to understand: the staged rollout</h2>
-  <p>The auto-unstick is the riskiest piece — it creates tags and releases. So it ships <strong>off by default</strong> behind a switch (<code>AUTO_UNSTICK_ENABLED</code>). Here's the safety logic, and why it means I didn't need a test repo:</p>
+  <p>The auto-unstick is the riskiest piece — it creates tags and releases. So it ships <strong>off by default</strong> behind a switch (<code>AUTO_UNSTICK_ENABLED</code>). Here's the safety logic (and on top of it, we ran a full throwaway-repo rehearsal — see below):</p>
   <ul>
     <li><strong>Release N (switch OFF)</strong> — the new job runs but <em>does nothing</em> (it no-ops). The release behaves exactly like today: you do the manual unstick. This proves the new wiring didn't break anything, with zero risk.</li>
     <li><strong>You flip the switch.</strong></li>
@@ -150,7 +150,7 @@
     <p><span class="badge b-defer">follow-up</span> <strong>One tidy-up left.</strong> <code>resolve-tag.ts</code> is written and tested but not yet <em>wired in</em> — the live job still uses the old inline shell for that bit. codex rated it a nit; it's a clean follow-up (needs a small wrapper + touching a load-bearing job, which I didn't want to rush solo).</p>
   </div>
   <div class="card">
-    <p><span class="badge b-defer">skipped</span> <strong>No throwaway test repo</strong> (needed your go-ahead). The staged rollout is the substitute. If you'd prefer a full rehearsal in a scratch repo before flipping the switch, say the word.</p>
+    <p><span class="badge b-done">done</span> <strong>Throwaway-repo rehearsal — complete.</strong> Ran the full release orchestration on a scratch repo at your request. Caught + fixed a real missing-label crash (Bug #1); validated the flag-off, flag-on, conflict, and republish paths end-to-end. See <a href="./lessons/phase-4-rehearsal.md">lessons/phase-4-rehearsal.md</a>.</p>
   </div>
 
   <h2>Is it safe? What I did <em>not</em> do</h2>
@@ -158,7 +158,7 @@
     <ul>
       <li><strong>Nothing merged.</strong> Everything is on the <code>chore/release-dx-hardening</code> branch in PR #149. <code>main</code> is untouched.</li>
       <li><strong>No real release fired.</strong> No tags, no GitHub releases, no deploys triggered by me.</li>
-      <li><strong>No secrets wired, no test repo created</strong> — the two things gated on your OK.</li>
+      <li><strong>No prod secrets wired.</strong> The throwaway test repo was created + rehearsed at your request (dummy <code>GITHUB_TOKEN</code> only, no prod credentials); wiring real secrets into the live repo is still gated on your OK.</li>
       <li><strong>The riskiest piece ships off.</strong> Auto-unstick can't act until you flip the switch.</li>
       <li><strong>85 unit tests pass; actionlint clean;</strong> tokens are least-privilege; the codex audit's findings are fixed.</li>
     </ul>
