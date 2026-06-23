@@ -89,7 +89,29 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		super(PROFILE_SERVICE_NAME, logger)
 		this.repo = new ProfileRepository(browserApi)
 		this.secretBox = new PasswordSecretBox()
-		this.sessionManager = new SessionManager(config, logger, (p) => this.emit("onActiveProfileChanged", p), browserApi)
+		this.sessionManager = new SessionManager(
+			config,
+			logger,
+			(p) => this.emit("onActiveProfileChanged", p),
+			browserApi,
+			(fn) => this.runExclusive(fn),
+		)
+	}
+
+	/** Run `fn` under the facade lock. Injected into `SessionManager` so its
+	 *  alarm-driven TTL close serializes against the lock-holding session
+	 *  writers (`refresh`/`open`/`unlock`) — without it, a racing `refresh()`
+	 *  storage write can land after the alarm's `close()` delete and resurrect
+	 *  an expired session on the next SW restore. Callers MUST NOT already hold
+	 *  the facade lock — `Lock` is non-reentrant (so this is wired ONLY to the
+	 *  alarm path, never to config-driven internal closes). */
+	private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+		try {
+			await this.lock.enter()
+			return await fn()
+		} finally {
+			this.lock.leave()
+		}
 	}
 
 	protected async init(services: ServiceCollection) {

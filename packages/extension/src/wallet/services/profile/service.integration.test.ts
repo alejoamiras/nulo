@@ -24,7 +24,9 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import { InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
 import type { PasskeyCredential } from "@nulo/wallet-crypto"
 import { PasskeyService } from "@/wallet/services/passkey/service"
+import { flushPromises } from "@vue/test-utils"
 import { ProfileService } from "./service"
+import { SESSION_STORAGE_ROOT, SESSION_TTL_ALARM_NAME } from "./session-manager"
 
 /** Fake `IConfig` with `sessionTtl` + `strictSecurityMode`. Default is
  *  `strictSecurityMode = false` so the bearer-cache tests preserve
@@ -904,5 +906,80 @@ describe("ProfileService integration", () => {
 			new ProfileService(config, logger)
 			expect(onAlarm).not.toHaveBeenCalled()
 		})
+	})
+
+	// Q10 proactive-TTL alarm-vs-refresh RACE fix (codex security audit 019ef47d-d5c5).
+	// The alarm's close() is routed through ProfileService.runExclusive (the facade lock),
+	// so it cannot interleave with a refreshSession() storage write-back. Without that, a
+	// refresh().set() landing after the alarm close().delete() would resurrect an expired
+	// session on the next SW restore (a TTL bypass).
+	describe("TTL alarm-vs-refresh race (serialized close)", () => {
+		async function fireTtlAlarm(scheduledTime: number): Promise<void> {
+			const { fakeBrowser } = await import("@webext-core/fake-browser")
+			fakeBrowser.alarms.onAlarm.trigger({
+				name: SESSION_TTL_ALARM_NAME,
+				scheduledTime,
+				periodInMinutes: undefined,
+			} as chrome.alarms.Alarm)
+		}
+		const readLockedAt = async (api: FakeBrowserApi): Promise<number> => {
+			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
+			return (JSON.parse(raw[SESSION_STORAGE_ROOT] as string) as { lockedAt: number }).lockedAt
+		}
+
+		test("alarm firing during refreshSession()'s write-back does NOT delete the session mid-write; session stays consistent", async () => {
+			const { api, service } = await makeService(60_000)
+			const profile = await service.createProfile("P", "pass1234")
+			await service.unlockProfile(profile.id, "pass1234")
+			const oldLockedAt = await readLockedAt(api)
+
+			// Block the NEXT storage.session.set (refreshSession's write-back) so refresh
+			// parks WHILE holding the facade lock.
+			let releaseSet!: () => void
+			const blocked = new Promise<void>((r) => {
+				releaseSet = r
+			})
+			const sessionArea = api.storage.session
+			const origSet = sessionArea.set.bind(sessionArea)
+			let armed = true
+			sessionArea.set = async (items: Record<string, unknown>) => {
+				if (armed) {
+					armed = false
+					await blocked
+				}
+				return origSet(items)
+			}
+
+			const refreshP = service.refreshSession()
+			await flushPromises() // let refresh acquire the lock + park at the blocked set
+
+			// Fire the (now-old) alarm while refresh holds the lock. onAlarmFired routes
+			// close() through runExclusive → it BLOCKS on the facade lock.
+			await fireTtlAlarm(oldLockedAt)
+			await flushPromises()
+
+			// MID-STATE: the alarm's close is serialized behind refresh — it must NOT have
+			// deleted the session. (In the un-fixed code the close ran concurrently here.)
+			// NB: probe via storage.get (lock-free) — `service.getActiveProfile()` here would
+			// block on the facade lock the parked refresh still holds.
+			const midRaw = await api.storage.session.get(SESSION_STORAGE_ROOT)
+			expect(midRaw[SESSION_STORAGE_ROOT]).toBeDefined()
+
+			// Release refresh's write-back → it finishes (bumps lockedAt + reschedules) +
+			// releases the lock → the queued alarm-close runs, finds the gate stale
+			// (oldLockedAt ≠ new lockedAt), and no-ops. Session stays active + consistent.
+			releaseSet()
+			await refreshP
+			await flushPromises()
+
+			// Whatever the serialized outcome (refresh-won → extended/active, or alarm-won →
+			// locked), in-memory state and a fresh SW restore must AGREE. The bug this fixes is
+			// the resurrection HYBRID: the alarm clears memory while a racing refresh re-persists
+			// the session, so restore() silently un-expires it. Asserting agreement catches that.
+			const memActive = (await service.getActiveProfile()) !== undefined
+			const restarted = await makeServiceFromExistingApi(api, { sessionTtl: 60_000 })
+			const restoredActive = (await restarted.service.getActiveProfile()) !== undefined
+			expect(restoredActive).toBe(memActive)
+		}, 30_000)
 	})
 })

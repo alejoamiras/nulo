@@ -99,6 +99,12 @@ export class SessionManager {
 	 *  sync. */
 	private strictSecurityMode: boolean
 	private readonly alarms?: AlarmsPort
+	/** Facade-lock serializer injected by ProfileService. Serializes the
+	 *  alarm-driven TTL close against the facade-locked session writers
+	 *  (refresh/open/unlock) so a racing refresh writeback cannot resurrect a
+	 *  session the alarm just closed. Defaults to a pass-through for the
+	 *  lock-agnostic legacy/test paths (which never wire the alarm). */
+	private readonly runExclusive: <T>(fn: () => Promise<T>) => Promise<T>
 
 	/**
 	 * @param config      Reactive config — SessionManager subscribes to
@@ -122,6 +128,7 @@ export class SessionManager {
 		private readonly logger: ILogger,
 		onChange: SessionChangeListener,
 		browserApi?: BrowserApi,
+		runExclusive?: <T>(fn: () => Promise<T>) => Promise<T>,
 	) {
 		this.onChange = onChange
 		this.sessionTtl = config.get("sessionTtl")
@@ -135,6 +142,9 @@ export class SessionManager {
 		// behavior — proactive TTL lights up once the composition root
 		// passes a real `BrowserApi`.
 		this.alarms = browserApi?.alarms
+		// Pass-through default keeps the lock-agnostic contract for callers
+		// that don't wire the alarm (legacy SW path / unit tests).
+		this.runExclusive = runExclusive ?? ((fn) => fn())
 		// SessionManager has no dispose method (SW-lifetime singleton);
 		// we don't store the unsubscribe handle. If a future teardown
 		// path emerges, capture this return value.
@@ -525,23 +535,32 @@ export class SessionManager {
 	 */
 	private readonly onAlarmFired = (alarm: AlarmEvent): void => {
 		if (alarm.name !== SESSION_TTL_ALARM_NAME) return
-		const active = this.activeSession
-		if (!active) return // already closed; nothing to do
-		const expectedLockedAt = active.session.lockedAt
-		if (expectedLockedAt === undefined || alarm.scheduledTime !== expectedLockedAt) {
-			// Stale alarm — refreshed session has a newer lockedAt; this
-			// fire is from the previous schedule. Ignore.
-			this.logger.log(
-				LOG_SOURCE,
-				LogLevel.Debug,
-				`Stale TTL alarm (scheduledTime=${alarm.scheduledTime}, lockedAt=${expectedLockedAt}); ignoring`,
-			)
-			return
-		}
-		this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session TTL alarm fired; locking")
-		// Don't await — the listener signature is sync. close() handles
-		// its own errors.
-		void this.close()
+		// Serialize the expiry close against the facade-locked session writers
+		// (refresh/open/unlock) via the injected runExclusive. Without it, a
+		// refresh() writeback racing this close()'s delete() can re-persist
+		// (resurrect) the session the alarm just expired, which the next SW
+		// restore() silently rehydrates — a TTL bypass. The activeSession +
+		// lockedAt gate is re-checked INSIDE the lock so a refresh that won the
+		// lock first (and bumped lockedAt) makes this now-stale fire a no-op.
+		// `deriveLockedAt` (lockedAt ?? since+ttl) also matches the alarm
+		// scheduled for legacy restored records that lack an explicit lockedAt.
+		void this.runExclusive(async () => {
+			const active = this.activeSession
+			if (!active) return // already closed; nothing to do
+			const expectedLockedAt = this.deriveLockedAt(active.session)
+			if (alarm.scheduledTime !== expectedLockedAt) {
+				// Stale alarm — a refresh rescheduled to a newer lockedAt; this
+				// fire is from the previous schedule. Ignore.
+				this.logger.log(
+					LOG_SOURCE,
+					LogLevel.Debug,
+					`Stale TTL alarm (scheduledTime=${alarm.scheduledTime}, lockedAt=${expectedLockedAt}); ignoring`,
+				)
+				return
+			}
+			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session TTL alarm fired; locking")
+			await this.close()
+		})
 	}
 
 	/**
