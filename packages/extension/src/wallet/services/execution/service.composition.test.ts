@@ -30,11 +30,13 @@ import { ContactService } from "@/wallet/services/contact/service"
 import { TokenService } from "@/wallet/services/token/service"
 import { FpcService } from "@/wallet/services/fpc/service"
 import { TransactionService, TransferType } from "@/wallet/services/transaction/service"
+import { OriginType } from "@/wallet/services/transaction/spec"
 import { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { TaskService } from "@/wallet/services/task/service"
 import type { PxeServiceClient } from "@/wallet/services/pxe/client"
 import type { ProofGate } from "@/e2e/proof-gate"
+import type { ExecutionLane } from "./execution-lane"
 import { DEFAULT_FEE_MULTIPLIER } from "./fee/fee-strategy"
 import {
 	fingerprintBaseFee,
@@ -211,4 +213,84 @@ describe("ExecutionService composition — cancel-mid-prove (in-process, no sand
 		expect(toTx).not.toHaveBeenCalled()
 		expect(sendTx).not.toHaveBeenCalled()
 	})
+})
+
+// Q23 close-out (both models' recommended risk-reducer, in lieu of the rejected
+// QueuedClaimHandle seam): the cancel-during-QUEUED-WAIT race through the real
+// graph. A queued dapp-send job parked on the held execution slot, cancelled
+// mid-wait, must end terminally `cancelled` WITHOUT ever advancing to
+// simulating/proving/submitting — and must not wedge the slot for the next job.
+//
+// The slot holder is acquired directly via `lane.acquireSlot` — the SAME
+// primitive a live dapp-send holds while simulating/proving. `executeTransfer`
+// can't stand in: only the dapp-send path (dapp-send-executor.ts) touches the
+// per-(profile, chain) execution mutex, so a transfer never contends this slot.
+describe("ExecutionService composition — cancel during queued-wait (in-process)", () => {
+	test("cancel a queued dapp-send waiting on the held slot → cancelled, never advances, slot not wedged", async () => {
+		const { service, journal } = await makeHarness()
+		// executeOperations takes the dapp LocalTxOrigin object; the journal record's
+		// `origin` is the OperationOrigin string enum ("dapp"). Different types.
+		const origin = { type: OriginType.DAPP, name: "test-dapp" } as never
+		const lane = (service as unknown as { lane: ExecutionLane }).lane
+		// `activeControllers` is private — observe it to know job2 has pre-registered
+		// its controller (acquireSlot:230) and is parked on the mutex (acquireSlot:246).
+		const controllers = (lane as unknown as { activeControllers: Map<string, unknown> }).activeControllers
+
+		// Pre-allocate a QUEUED dapp_execute record (what background.ts allocates on
+		// message arrival, before the silent/popup path claims it). queued is gated on
+		// kind=dapp_execute + origin="dapp" + non-empty sessionId (NewOperationInputSchema).
+		const queued = await journal.createOperation({
+			kind: "dapp_execute",
+			origin: "dapp",
+			profileId: "p1",
+			sessionId: "sess-1",
+			initialStage: { stage: "queued" },
+		})
+		const queuedId = queued.id
+		const queuedStages: string[] = []
+		journal.onOperationUpdated.add((rec) => {
+			if (rec.id === queuedId) queuedStages.push(rec.progress.stage)
+		})
+
+		// Occupy the (p1, net1) execution slot directly — same primitive a live
+		// dapp-send holds while in flight. Job 2 must wait behind this.
+		const held = await lane.acquireSlot(NETWORK.id, undefined)
+
+		// Job 2 (dapp-send) with the queued record → acquireSlot pre-registers its
+		// controller under queuedId, then WAITS on the held slot. The minimal op
+		// only needs networkId (for the slot) + truthy feeSettings (standard-path
+		// guard); the cancel fires while parked at acquireSlot, long before the
+		// opts.from / payload validation downstream.
+		const aztecSendOp = {
+			kind: "aztec_sendTx",
+			networkId: NETWORK.id,
+			accountAddress: ACCOUNT.toString(),
+			feeSettings: { paymentMethod: { kind: "fpc" } },
+		} as never
+		const p2 = service.executeOperations([aztecSendOp], origin, undefined, { queuedJournalId: queuedId }).catch((e) => e)
+
+		// Wait until job2 has pre-registered its controller and is parked on the slot.
+		await waitFor(() => controllers.has(queuedId))
+
+		// Cancel job2 while it waits: cancelJob transitions the queued record FIRST
+		// (queued→cancelled via the journal transition lock), then aborts the
+		// pre-registered controller → job2's acquire-wait aborts (JobCancelledSentinel).
+		await service.cancelJob(queuedId)
+		const r2 = await p2
+
+		// The queued record is terminally cancelled and NEVER advanced past the wait.
+		const finalQ = await journal.getOperation(queuedId)
+		expect(finalQ?.progress.stage).toBe("cancelled")
+		expect(queuedStages).not.toContain("simulating")
+		expect(queuedStages).not.toContain("proving")
+		expect(queuedStages).not.toContain("submitting")
+		// Job 2 did not succeed.
+		expect(Array.isArray(r2) ? r2[0]?.status : "error").not.toBe("ok")
+
+		// The slot is NOT wedged: after releasing the holder, a fresh acquire grants
+		// promptly (would hang past the test timeout if job2's abort corrupted the FIFO).
+		held.release()
+		const held2 = await lane.acquireSlot(NETWORK.id, undefined)
+		held2.release()
+	}, 15_000)
 })
