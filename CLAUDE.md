@@ -7,6 +7,7 @@ Operating rules for AI assistants (and any contributor) working in this reposito
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — process boundaries, message flow, storage versioning, offscreen lifecycle, session model, concurrency, account contract, fee model, test taxonomy.
 - `packages/<name>/README.md` — per-package purpose, file map, scripts, testing, key invariants.
 - [`packages/extension/tests/e2e/README.md`](./packages/extension/tests/e2e/README.md) — e2e suite layout, parallel-safe agent runner, helper conventions.
+- [`packages/extension/tests/COMPOSITION-TESTS.md`](./packages/extension/tests/COMPOSITION-TESTS.md) — **normative** rules for the `*.composition.test.ts` layer (drive the real service graph in-process against dumb fakes): when to use it, the hard limits (shallow PXE **and** bb-free **and** no simulate/prove), the failure taxonomy. Read before adding a composition test.
 - [`implementations-plan/README.md`](./implementations-plan/README.md) — planning archive, when to add to it, the milestone-vocabulary key.
 
 ## Working in this repo
