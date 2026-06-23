@@ -3,111 +3,178 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Blueprint ELI5 — release-DX hardening</title>
+  <title>Release DX Hardening — what we shipped</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem 4rem; color: #222; line-height: 1.6; }
-    h1, h2, h3 { font-weight: 600; }
-    h1 { font-size: 1.8rem; margin-bottom: 0.3rem; }
-    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
-    h3 { font-size: 1.05rem; margin-top: 1.4rem; color: #444; }
-    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86rem; }
-    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
-    .sub { color: #666; font-size: 0.95rem; margin-top: 0; }
-    .phase { margin: 1.1rem 0; padding: 0.9rem 1.2rem; border-left: 3px solid #ccc; background: #fafafa; }
-    .infra { border-left-color: #6b7280; }
-    .surgery { border-left-color: #c2261b; }
-    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
-    .recommended { background: #fff8e1; border-left-color: #f0a020; }
-    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
-    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
-    .tag { display:inline-block; font-size:0.68rem; border-radius:3px; padding:0.05rem 0.4rem; vertical-align:middle; margin-left:0.3rem; color:#fff; }
-    .t-infra { background:#6b7280; } .t-cheap { background:#2f8f4e; } .t-surgery { background:#c2261b; }
-    a { color: #0366d6; }
-    .muted { color: #666; font-size: 0.9rem; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 820px; margin: 2rem auto; padding: 0 1rem 5rem; color: #1f2328; line-height: 1.65; }
+    h1, h2, h3 { font-weight: 600; line-height: 1.25; }
+    h1 { font-size: 1.9rem; margin-bottom: 0.2rem; }
+    h2 { font-size: 1.35rem; margin-top: 2.8rem; padding-bottom: 0.3rem; border-bottom: 1px solid #eaecef; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #333; }
+    p, li { font-size: 0.98rem; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; background: #eff1f3; padding: 0.08rem 0.35rem; border-radius: 4px; }
+    pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; background: #f6f8fa; padding: 0.9rem 1rem; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; line-height: 1.5; }
+    pre code { background: none; padding: 0; }
+    .sub { color: #57606a; font-size: 1rem; margin-top: 0.1rem; }
+    .tldr { background: #f0f7ff; border: 1px solid #cfe3fb; border-radius: 8px; padding: 1rem 1.25rem; margin: 1.5rem 0; }
+    .card { margin: 0.9rem 0; padding: 0.85rem 1.15rem; border-left: 3px solid #d0d7de; background: #fafbfc; border-radius: 0 6px 6px 0; }
+    .card h3 { margin-top: 0.2rem; }
+    .found { border-left-color: #1a7f37; }
+    .action { background: #fff8e6; border-left-color: #d4a72c; }
+    .danger { background: #fff0ee; border-left-color: #c2261b; }
+    .safe { background: #eefbf1; border-left-color: #1a7f37; }
+    .badge { display:inline-block; font-size:0.7rem; font-weight:600; border-radius:999px; padding:0.1rem 0.6rem; vertical-align:middle; color:#fff; }
+    .b-done { background:#1a7f37; } .b-off { background:#9a6700; } .b-defer { background:#6e7781; } .b-fix { background:#c2261b; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.9rem; }
+    th, td { border: 1px solid #d0d7de; padding: 0.5rem 0.7rem; text-align: left; vertical-align: top; }
+    th { background: #f6f8fa; }
+    .muted { color: #57606a; font-size: 0.9rem; }
+    a { color: #0969da; text-decoration: none; } a:hover { text-decoration: underline; }
+    ol li, ul li { margin: 0.3rem 0; }
+    .num { display:inline-flex; align-items:center; justify-content:center; width:1.5rem; height:1.5rem; border-radius:50%; background:#0969da; color:#fff; font-size:0.8rem; font-weight:600; margin-right:0.4rem; }
+    footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #eaecef; font-size: 0.92rem; }
   </style>
 </head>
 <body>
-  <h1>Release-DX hardening</h1>
-  <p class="sub">/blueprint <strong>deep</strong> · make dev → main near one-click · awaiting your approval</p>
+  <h1>Release DX Hardening</h1>
+  <p class="sub">What we built so that shipping <code>dev → main</code> stops being a 45-minute hand-cranked ordeal. <span class="badge b-done">SHIPPED</span> &rarr; <a href="https://github.com/alejoamiras/nulo/pull/149">PR&nbsp;#149</a> (into <code>dev</code>, not merged)</p>
 
-  <p>Tonight's release worked but took ~90 minutes of babysitting: ~10 manual commands, 3 admin-overrides, a hand-built branch to dodge a merge conflict, a manual version re-sync, a manual site redeploy, and a <strong>prod faucet bug from a stale config value</strong>. This plan makes the next release close to <strong>one click</strong>: merge the promote PR → version, tag, publish, all three sites deploy, and a safety check runs — automatically — and a stale/broken site <em>can't ship silently</em>. We do NOT touch app-store publishing (that needs your store accounts).</p>
-
-  <h2>Why deep + how we test it without breaking real releases</h2>
-  <p><strong>deep</strong> because a wrong change here breaks <em>every</em> release (high blast radius + irreversible: it creates real tags/releases). The hard part you flagged — you can't test release automation by cutting 10 real releases — is handled by: <strong>(1)</strong> pulling the fragile logic out of the workflow YAML into small scripts we <em>unit-test</em>; <strong>(2)</strong> the existing <code>dry_run</code> switch; <strong>(3)</strong> <code>release-please --dry-run</code> for version math; <strong>(4)</strong> a <strong>throwaway test GitHub repo</strong> that rehearses the full "merge → tag → publish → deploy → sync" path end-to-end; and <strong>(5)</strong> the next real release as the final proof. Three independent planners (me + codex + a second model) converged on this; the trickiest piece (auto-fixing the release tool's known bug) ships <strong>last, behind an off-by-default switch</strong>.</p>
-
-  <h2>The 8 phases</h2>
-  <div class="phase infra"><h3>1 · Extraction harness<span class="tag t-infra">infra</span></h3>
-    <p>Move the brittle release logic out of YAML into small testable scripts (tag-resolver, live-checker, sync-opener, auto-unstick). No behavior change yet — just makes everything after this <em>unit-testable</em>.</p>
-    <p class="muted">Proves itself by: <code>bun test</code> on the scripts + actionlint, all green. No release.</p></div>
-
-  <div class="phase"><h3>2 · Cheap config wins<span class="tag t-cheap">cheap</span></h3>
-    <p>(a) <strong>Stop the accidental 1.0.0</strong>: breaking changes now bump 0.23→0.24, not 1.0.0 (you opted in; a real 1.0 becomes a deliberate choice). (b) <strong>Stop the spurious commit-lint failure</strong> on promote PRs (it re-checks old commit titles it can't edit). (c) Delete a dead inline script the strict security policy already blocks. (d) Fix stale docs.</p>
-    <p class="muted">Proves itself by: <code>release-please --dry-run</code> shows 0.24.0 not 1.0.0 (both stable + rc configs); a simulated promote PR goes green; the faucet builds + boots clean.</p></div>
-
-  <div class="phase"><h3>3 · Faucet chain-identity + build stamp<span class="tag t-cheap">code</span></h3>
-    <p>The root of tonight's bug: a stale chain-version value (shipped in <code>.env.example</code>!) overrode the correct one. Fix: <strong>delete the override path</strong> — the faucet is testnet-only, so it reads one shared source of truth (so it can't drift from the wallet). Also stamp a <code>build.json</code> so the safety check (Phase 5) can read exactly what's live.</p>
-    <p class="muted">Proves itself by: unit tests resolve to the right chain; the build emits a correct <code>build.json</code>; faucet smoke green.</p></div>
-
-  <div class="phase infra"><h3>4 · Throwaway test repo<span class="tag t-infra">infra</span></h3>
-    <p>Stand up a disposable GitHub repo (dummy secrets only — never real ones) that mirrors the release workflow, so we can rehearse the risky surgery (phases 5–7) safely. First we confirm it reproduces today's known bug — proving it behaves like the real thing.</p>
-    <p class="muted">Proves itself by: a full rehearsal in the test repo reaches the exact known-bug state. We also write down what it can't mirror (signing, real Cloudflare, branch rules).</p></div>
-
-  <div class="phase surgery"><h3>5 · Deploys + live safety check<span class="tag t-surgery">surgery</span></h3>
-    <p>Deploy the landing AND faucet from the release pipeline (today the faucet is dashboard-only), then a <strong>"verify-live" gate</strong> fetches both sites and confirms they're actually serving the new release/chain — <strong>failing the release if anything's stale</strong>. This is the check that would've caught tonight's bug at release time instead of in your browser.</p>
-    <p class="muted">Proves itself by: unit tests (stale→fail, match→pass, can't-tell→fail); a real-site integration test; a test-repo rehearsal showing it both passing and intentionally failing.</p></div>
-
-  <div class="phase surgery"><h3>6 · Auto re-sync main → dev<span class="tag t-surgery">surgery</span></h3>
-    <p>After each release, automatically open the "sync main back to dev" PR (the step that was skipped tonight → caused the merge conflict). If it conflicts, it opens the PR <em>labeled for you</em> — never fails silently.</p>
-    <p class="muted">Proves itself by: test-repo rehearsal — clean case opens a mergeable PR; a forced conflict opens a labeled PR.</p></div>
-
-  <div class="phase surgery"><h3>7 · Auto-fix the release-tool bug<span class="tag t-surgery">surgery · last</span></h3>
-    <p>The release tool has an <em>upstream bug</em> (all versions) that needs a 45-second manual nudge every release. We automate that nudge <strong>inside the same release run</strong> (the safest design — no second workflow to race it), idempotent + SHA-checked, and <strong>behind an off-by-default switch</strong> you flip after watching it work once. The manual nudge stays documented as a fallback.</p>
-    <p class="muted">Proves itself by: unit tests (won't double-tag, won't tag the wrong commit); a full test-repo rehearsal incl. a forced re-run; a real-repo dry-run pre-flight.</p></div>
-
-  <div class="phase"><h3>8 · Docs + closing gate<span class="tag t-cheap">wrap</span></h3>
-    <p>Rewrite the runbook to the new mostly-automatic flow, delete the test repo, run code-review + a security hardening pass.</p>
-    <p class="muted">Proves itself by: docs match the shipped workflows; <code>/harden security</code> done. <strong>Final acceptance (later, tracked):</strong> the next real release runs push-button.</p></div>
-
-  <h2>Human context</h2>
-  <ul>
-    <li><strong>The release-tool bug is unfixable</strong> (it's upstream, in every version — you verified this before). We can only <em>automate the workaround</em>, carefully.</li>
-    <li><strong>The test repo proves the <em>logic</em>, not the <em>protections</em></strong> — signing rules, real Cloudflare wiring, and branch rules only truly prove out on the next real release. That's why the auto-fix ships behind an off switch you flip deliberately.</li>
-    <li><strong>The faucet stale-config bug had a literal source:</strong> <code>.env.example</code> shipped the old value. Phase 3 removes that whole class of mistake.</li>
-  </ul>
-
-  <h2>Open questions (please decide at approval)</h2>
-  <ul>
-    <li><strong>A3 — Test repo:</strong> OK for me to create + delete a disposable <code>nulo-release-rehearsal</code> repo, using <strong>dummy secrets only</strong> (never your real Cloudflare/App keys)?</li>
-    <li><strong>A5 — Faucet Cloudflare deploy:</strong> when we add a CI deploy job, should the faucet's existing dashboard auto-deploy be <strong>turned off/redirected</strong> (clean handover), or do you accept it deploying twice until you do that? (Needs your CF dashboard.)</li>
-    <li><strong>A7 — Auto-fix rollout:</strong> ship the release-tool auto-fix <strong>off by default</strong> and flip it on after watching one real release (recommended), or enable immediately?</li>
-    <li><strong>A6 (default: yes):</strong> mirror the version-policy change to the rc/prerelease line too. <strong>A8 (default: mocked):</strong> rehearse deploys against mock endpoints vs real throwaway Cloudflare projects.</li>
-  </ul>
-
-  <div class="approval">
-    <h2>Approval decision needed from you</h2>
-    <ul>
-      <li>Confirm <strong>scope</strong>: the reliability set (phases 1–8), NOT marketplace publishing.</li>
-      <li>Confirm <strong>tier</strong>: deep.</li>
-      <li>Answer <strong>A3, A5, A7</strong> (A6/A8 have sensible defaults).</li>
-      <li>Confirm the <strong>validation plan</strong>: unit-tested scripts + dry_run + throwaway test repo, with the next real release as the closing gate.</li>
-      <li>OK the <strong>`/harden security`</strong> pass at the end (release pipeline = supply-chain boundary).</li>
-      <li>Reply <strong>approve</strong> / <strong>conditional approve (conditions: …)</strong> / <strong>reject (blocking: …)</strong>.</li>
-    </ul>
-    <p class="muted">The two independent audits returned <strong>conditional approve</strong> (their conditions — in-run auto-unstick + the kill-switch — folded). The final fresh-eyes pass came back a <strong>reject</strong> and caught 6 real gaps (a sync-on-republish misfire, a verifier that could still false-pass, a rollout contradiction, + 3) — <strong>all now folded + repo-verified</strong>. Trail in <a href="plan.md">plan.md → Audit verdicts</a>.</p>
+  <div class="tldr">
+    <strong>TL;DR.</strong> The last release (v0.23.0) hurt: a manual unstick step, a faucet that booted with the wrong chain and broke prod, a manual <code>main&rarr;dev</code> sync, and a lurking risk of accidentally jumping to <code>1.0.0</code>. We automated or guarded every one of those. The new machinery lives in small, <strong>unit-tested TypeScript</strong> (85 tests) with thin GitHub-Actions glue. A robot reviewer (codex) then tore it apart and found 4 real bugs, which we fixed. <strong>Nothing is merged, nothing is live, no release was fired.</strong> The one thing I need from you: after your <em>next</em> normal release proves it works, flip a single switch to turn the automation fully on.</p>
   </div>
 
-  <section class="seeds">
-    <h2>Implementation seeds (draft — finalized after approval)</h2>
-    <p>Mostly autonomous, with human-gated bits (create/delete the test repo, wire the faucet hook, the Cloudflare dashboard cutover, the closing real release). <code>/loop</code> fits the build-out and pauses at those gates.</p>
-    <p class="warning">Use exactly ONE per session — they don't compose.</p>
-    <div class="phase recommended">
-      <h3>Recommended: /loop</h3>
-      <pre><code>/loop 15m Drive implementations-plan/release-dx-hardening forward. Never idle. Each firing: read plan.md + lessons/ (authoritative); git status; gh pr/run status (no --watch). Take the next pending phase; logic goes into bun:test-ed scripts/release/*.ts not YAML; after each edit run `bun run lint:actions` + `bun test <touched>` + the phase's gate; commit→push. DOC PRIORITY: every phase that changes release behavior updates its CLAUDE.md/CI.md section in the SAME change; Phase 8 = the teachable cold-readable runbook. Phases 4-7 rehearse in the disposable test repo before any real-repo change (best-effort — if it yak-shaves, fall back to unit + dry_run + the staged rollout, don't block); the auto-unstick (Phase 6) lives IN release.yml behind vars.AUTO_UNSTICK_ENABLED (default OFF — staged rollout). Stuck or a real decision (auto-unstick idempotency/SHA-guard, bump-minor×prerelease)? `/codex xhigh`, decide, log it. Hard limits: NO real release; test repo uses DUMMY secrets only; never force-push/rewrite main; never widen a workflow token's permissions; PAUSE for my ok before creating/deleting the test repo or wiring the faucet hook. (A5 CF-dashboard cutover is your deferred task — accept double-deploy, don't block.) Phase green = its plan.md Validation gate passes; mark ✓ + print LESSONS_FILE=…/lessons/phase-N.md. All phases ✓ → /code-review max --fix → codex post-impl audit → /harden security → wrap-up + stop.</code></pre>
-    </div>
-    <h3>Alternative: /goal</h3>
-    <pre><code>/goal All phases ✓ in implementations-plan/release-dx-hardening/plan.md, each backed by its Validation gate in the transcript (incl. test-repo rehearsals for phases 4-7 + the real-repo dry_run pre-flight for phase 7); release logic in bun:test-ed scripts/release/; `bun run lint:actions` + `bun test` exit 0; `/code-review max --fix` + codex post-impl audit high/critical addressed; `/harden security` run. PAUSE before creating/deleting the test repo, wiring the faucet hook, the CF cutover, or any real release. Hard limits: no real release, dummy secrets only, no token-permission widening, auto-unstick stays behind AUTO_UNSTICK_ENABLED.</code></pre>
-  </section>
+  <h2>Why we did this</h2>
+  <p>The v0.23.0 release exposed four recurring pains. Keep these in mind — every phase below maps back to one:</p>
+  <ul>
+    <li><strong>The "stuck release" dance.</strong> Our release tool (release-please) has a known bug: after you merge the Release PR, it <em>aborts instead of tagging</em>. Every release needed a ~45-second copy-paste "unstick" ritual.</li>
+    <li><strong>The faucet broke prod.</strong> <code>faucet.nulo.sh</code> shipped a stale chain ID baked into an env file and threw <em>"No network configured for chainId …"</em> on load.</li>
+    <li><strong>Manual <code>main&rarr;dev</code> sync.</strong> After a release you had to hand-merge <code>main</code> back into <code>dev</code> and re-baseline a manifest, or the next prerelease series broke.</li>
+    <li><strong>Accidental <code>1.0.0</code>.</strong> A single <code>BREAKING CHANGE:</code> commit could have auto-jumped the version to <code>1.0.0</code>.</li>
+  </ul>
 
-  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a></p>
+  <h2>What a release looks like now</h2>
+  <p>Here's the whole stable-release flow today. The middle column is who does each step <em>right now</em> (the automation ships deliberately half-off — see <a href="#staged">the staged rollout</a>):</p>
+  <table>
+    <tr><th>Step</th><th>Who</th><th>State</th></tr>
+    <tr><td>Open the Release PR (version + changelog)</td><td>release-please</td><td><span class="badge b-done">auto</span></td></tr>
+    <tr><td><strong>Tag + publish after you merge it</strong> (the "unstick")</td><td><code>auto-unstick</code> job <em>once you flip the switch</em>, else you (45s paste)</td><td><span class="badge b-off">FLAG OFF &rarr; still manual</span></td></tr>
+    <tr><td>Build, smoke-test, attach the zips + checksums</td><td>publish chain</td><td><span class="badge b-done">auto</span></td></tr>
+    <tr><td>Redeploy the landing + faucet</td><td><code>refresh-landing</code> + <code>deploy-faucet</code></td><td><span class="badge b-done">auto</span></td></tr>
+    <tr><td>Confirm both sites actually serve <em>this</em> release</td><td><code>verify-live</code></td><td><span class="badge b-done">auto (advisory)</span></td></tr>
+    <tr><td>Open the <code>main&rarr;dev</code> back-sync PR</td><td><code>sync-main-to-dev</code></td><td><span class="badge b-done">auto (you squash-merge it)</span></td></tr>
+  </table>
+  <p class="muted">Once the switch is on, a release is just: promote <code>dev&rarr;main</code> &rarr; merge the Release PR &rarr; squash the auto-opened sync PR. The rest runs itself.</p>
+
+  <h2>What we built</h2>
+  <p>Eight phases. Each one's logic is a tiny tested TypeScript file under <a href="https://github.com/alejoamiras/nulo/tree/chore/release-dx-hardening/scripts/release"><code>scripts/release/</code></a>; the workflow just calls it.</p>
+
+  <div class="card found">
+    <h3>Phases 1–3 — Foundations <span class="badge b-done">done</span></h3>
+    <ul>
+      <li><strong>Extraction harness</strong> — pulled the fiddly bits (tag resolution, the chain-ID math) into testable functions instead of buried shell script.</li>
+      <li><strong>No more accidental 1.0.0</strong> — turned on <code>bump-minor-pre-major</code>: while we're in <code>0.x</code>, a breaking change bumps the <em>minor</em> (0.23 &rarr; 0.24), never <code>1.0.0</code>. Going 1.0 becomes a deliberate choice.</li>
+      <li><strong>Faucet chain identity, single-sourced</strong> — deleted the stale env file that broke prod. The chain ID now comes from one constant in code (<code>chain-constants.ts</code>) and the build stamps a <code>build.json</code> so we can verify what's live.</li>
+    </ul>
+  </div>
+
+  <div class="card found">
+    <h3>Phase 5 — The safety net <span class="badge b-done">done</span></h3>
+    <p>After publishing, the workflow redeploys the landing + faucet, then <strong><code>verify-live</code></strong> fetches both sites and checks they actually serve <em>this</em> release — fail-closed (anything it can't confirm is a failure). It even defeats a split CDN cache (a fresh data file served behind a stale page) and confirms the faucet's chain ID is right — directly catching the v0.23.0 prod bug class. It's <em>advisory</em> for now (reports problems without blocking) until it's proven on a real release.</p>
+  </div>
+
+  <div class="card found">
+    <h3>Phase 6 — Auto-unstick: the big one <span class="badge b-off">ships OFF</span></h3>
+    <p>This kills the 45-second manual ritual. When release-please aborts, a new job detects the exact situation — a merged Release PR sitting at the current commit — and creates the tag + release itself, then lets the rest of the pipeline continue <em>in the same run</em>. It's careful: it identifies the PR by commit (not by guessing from the title), it won't create a second tag if one exists, and if it finds a tag pointing at the <em>wrong</em> commit it refuses to touch it and fails loudly. It ships behind an off-by-default switch (see below).</p>
+  </div>
+
+  <div class="card found">
+    <h3>Phase 7 — Auto <code>main&rarr;dev</code> sync <span class="badge b-done">done</span></h3>
+    <p>After a stable release, a job opens one <code>chore: sync main &rarr; dev</code> PR carrying the version bump, changelog, and manifest re-baseline. It never auto-merges — it lets GitHub compute whether it's clean; a clean one waits for your squash-merge, a conflicting one gets labelled <code>needs-manual-resolution</code> so it's never silently dropped. It only fires on a real release (never on a re-publish of an old tag).</p>
+  </div>
+
+  <div class="card found">
+    <h3>Phase 8 — A runbook a stranger could follow <span class="badge b-done">done</span></h3>
+    <p>You said the old release doc was hard to follow. So the <a href="../../CLAUDE.md">CLAUDE.md § Release runbook</a> was rewritten <em>happy-path-first</em>: a "Start here" section with the 6-step flow and a who-does-what table, a troubleshooting table ("if X fails, do Y"), and a switches table — then the detailed manual steps as the fallback. A future agent (or you, in six months) can run a release cold from it.</p>
+  </div>
+
+  <p class="muted"><strong>Phase 4 (a throwaway test repo to rehearse in) was skipped.</strong> Setting it up needed your go-ahead, which I didn't have while you were away, so I fell back to the plan's pre-approved alternative: unit tests + the staged rollout (below) as the real-world rehearsal. Noted honestly in the lessons.</p>
+
+  <h2>The review that caught real bugs</h2>
+  <p>Before calling it done, I ran a self-review, then handed the whole thing to <strong>codex</strong> (a different AI model) and explicitly asked it to break the code. It said "not ready" and found <strong>four genuine holes</strong> that the unit tests alone would not have — this was the highest-value hour of the whole effort:</p>
+  <table>
+    <tr><th>What codex caught</th><th>Why it mattered</th><th></th></tr>
+    <tr><td>A GitHub API hiccup looked identical to "no release to unstick"</td><td>A transient network blip could leave a release <em>stuck but showing green</em> — the worst kind of failure. Now it fails loudly.</td><td><span class="badge b-fix">fixed</span></td></tr>
+    <tr><td>The sync branched off live <code>main</code>, not the released commit</td><td>If anything landed on <code>main</code> mid-release, the sync could drag in unpublished work. Now pinned to the exact release commit.</td><td><span class="badge b-fix">fixed</span></td></tr>
+    <tr><td>The unstick wasn't safe to re-run after a half-failure</td><td>A retry could skip forever and never finish the release. Now every step is idempotent and self-heals.</td><td><span class="badge b-fix">fixed</span></td></tr>
+    <tr><td><code>verify-live</code> could pass a stale-but-self-consistent faucet</td><td>An old deploy could sneak through. Now it checks the build's commit stamp matches the release.</td><td><span class="badge b-fix">fixed</span></td></tr>
+  </table>
+  <p>Then a <strong>security pass</strong> tightened the workflow's permissions to least-privilege (build/test jobs no longer get a write-capable token they don't need). The full transcript + every decision is in <a href="./audit-codex-postimpl.md">audit-codex-postimpl.md</a>.</p>
+
+  <h2 id="staged">The one idea to understand: the staged rollout</h2>
+  <p>The auto-unstick is the riskiest piece — it creates tags and releases. So it ships <strong>off by default</strong> behind a switch (<code>AUTO_UNSTICK_ENABLED</code>). Here's the safety logic, and why it means I didn't need a test repo:</p>
+  <ul>
+    <li><strong>Release N (switch OFF)</strong> — the new job runs but <em>does nothing</em> (it no-ops). The release behaves exactly like today: you do the manual unstick. This proves the new wiring didn't break anything, with zero risk.</li>
+    <li><strong>You flip the switch.</strong></li>
+    <li><strong>Release N+1 (switch ON)</strong> — now the auto-unstick actually fires. This is the first time it does real work, and you're watching for it.</li>
+  </ul>
+  <p>That two-release sequence <em>is</em> the rehearsal. The same pattern applies to <code>verify-live</code> (advisory until proven, then promoted to blocking).</p>
+
+  <h2>What I need from you</h2>
+
+  <div class="card action">
+    <h3><span class="num">1</span>Review &amp; merge <a href="https://github.com/alejoamiras/nulo/pull/149">PR&nbsp;#149</a></h3>
+    <p>It targets <code>dev</code> (squash-merge). 19 commits, but the PR description summarizes everything. This is the review venue — nothing landed without it.</p>
+  </div>
+
+  <div class="card action">
+    <h3><span class="num">2</span>After your next normal release proves the wiring, flip the switch</h3>
+    <p>Do a release as you do today (the auto-unstick will sit there doing nothing). If that release is clean, turn the automation on:</p>
+    <pre><code>gh variable set AUTO_UNSTICK_ENABLED -b on</code></pre>
+    <p>From then on, releases self-unstick. To turn it back off: <code>gh variable set AUTO_UNSTICK_ENABLED -b off</code>.</p>
+  </div>
+
+  <div class="card action">
+    <h3><span class="num">3</span>Promote <code>verify-live</code> to blocking (later, optional)</h3>
+    <p>Once you've seen it pass green on a real release, add it to the workflow's <code>status</code> aggregator (a one-line edit) so a bad deploy actually fails the release instead of just warning.</p>
+  </div>
+
+  <div class="card action">
+    <h3><span class="num">4</span>The faucet deploy hook (your call, deferred)</h3>
+    <p>The <code>deploy-faucet</code> job is wired but <strong>skips harmlessly</strong> until you add the <code>CLOUDFLARE_FAUCET_DEPLOY_HOOK</code> secret — today the faucet still auto-deploys via its Cloudflare dashboard Git integration (the "A5 cutover" we agreed to defer). No rush; nothing is broken in the meantime.</p>
+  </div>
+
+  <h2>What's missing / honest caveats</h2>
+  <div class="card">
+    <p><span class="badge b-defer">caveat</span> <strong>The workflow itself isn't exercised by the PR.</strong> <code>release.yml</code> only runs on push-to-<code>main</code> / manual dispatch, so its job wiring + the tightened permissions are <em>staged-validated</em> — the first real release confirms them. If I pruned a permission too aggressively, that release fails loudly and the fix is a one-line grant. Low risk (<code>contents: read</code> is the standard floor), but stated plainly.</p>
+  </div>
+  <div class="card">
+    <p><span class="badge b-defer">follow-up</span> <strong>One tidy-up left.</strong> <code>resolve-tag.ts</code> is written and tested but not yet <em>wired in</em> — the live job still uses the old inline shell for that bit. codex rated it a nit; it's a clean follow-up (needs a small wrapper + touching a load-bearing job, which I didn't want to rush solo).</p>
+  </div>
+  <div class="card">
+    <p><span class="badge b-defer">skipped</span> <strong>No throwaway test repo</strong> (needed your go-ahead). The staged rollout is the substitute. If you'd prefer a full rehearsal in a scratch repo before flipping the switch, say the word.</p>
+  </div>
+
+  <h2>Is it safe? What I did <em>not</em> do</h2>
+  <div class="card safe">
+    <ul>
+      <li><strong>Nothing merged.</strong> Everything is on the <code>chore/release-dx-hardening</code> branch in PR #149. <code>main</code> is untouched.</li>
+      <li><strong>No real release fired.</strong> No tags, no GitHub releases, no deploys triggered by me.</li>
+      <li><strong>No secrets wired, no test repo created</strong> — the two things gated on your OK.</li>
+      <li><strong>The riskiest piece ships off.</strong> Auto-unstick can't act until you flip the switch.</li>
+      <li><strong>85 unit tests pass; actionlint clean;</strong> tokens are least-privilege; the codex audit's findings are fixed.</li>
+    </ul>
+  </div>
+  <p class="muted">One housekeeping note: my commits are <em>unsigned</em> (standing AFK authorization). That's fine here — <code>dev</code> squash-merges, and GitHub signs the squash commit, so the branch's individual commits never land on <code>dev</code>. Nothing to re-enable; no backfill needed. (Separately: your SSH agent dropped mid-run, so I pushed over HTTPS with the gh token — your git config is untouched; re-<code>ssh-add</code> when convenient.)</p>
+
+  <footer>
+    <strong>Dig deeper:</strong>
+    <ul>
+      <li><a href="https://github.com/alejoamiras/nulo/pull/149">PR #149</a> — the full changeset + summary</li>
+      <li><a href="./plan.md">plan.md</a> — the approved 8-phase plan + decision ledger</li>
+      <li><a href="./audit-codex-postimpl.md">audit-codex-postimpl.md</a> — codex's findings + how each was handled</li>
+      <li><a href="./lessons/">lessons/</a> — per-phase build logs (incl. <a href="./lessons/harden-security.md">harden-security.md</a>)</li>
+      <li><a href="../../CLAUDE.md">CLAUDE.md § Release runbook</a> — the rewritten cold-readable runbook</li>
+    </ul>
+    <p class="muted">Reflects the shipped state as of PR #149. Open this file in any browser — no build, no dependencies.</p>
+  </footer>
 </body>
 </html>
