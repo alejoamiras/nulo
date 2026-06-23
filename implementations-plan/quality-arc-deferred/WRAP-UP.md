@@ -38,10 +38,33 @@ Merge-base `b068393` = dev after batch-1's #148.
   execution composition harness (where the real-journal + ProofGate fixtures live), for human review.
 - **Q10 PXE injection factory** → overlaps #125 (`feat/execution-pxe-injection-spike`), which already carries it.
 
-## Final confidence pass (codex + claude over the integrated diff)
-- codex `bc42i2pif`: _pending_
-- claude `a460949e`: _pending_
+## Final confidence pass (codex + claude over the integrated diff) — SPLIT
+- **claude `a460949e`: PROMOTE** — keys byte-identical (all 11), Q19 exclusions intact across all 26 files (no
+  lock guard weakened; dapp-interaction:260 identity pin is "the single most important authz pin"), Q5 sync
+  timing preserved, test quality UPGRADED (FakeBrowserApi), flake risk LOW (deterministic ×2). One LOW/latent:
+  NetworkService ctor param ordering (`browserApi` param 2 → `nodeFactory` param 3) — future positional-arg
+  trap, harmless today.
+- **codex `019ef437`: HOLD** — Q10's ProfileService wiring (`e8a660a`) is NOT behavior-preserving at
+  runtime: it ACTIVATES `SessionManager`'s proactive TTL auto-lock. VERIFIED: at dev `b068393` the alarms code
+  is present but dormant (`new ProfileService(config, logger)` → `this.alarms = browserApi?.alarms` =
+  undefined); dev-quality wires `browserApi` → `this.alarms` real → warm-SW sessions now auto-lock on the TTL
+  alarm instead of only expiring reactively on the next `getActive()`. It's a PRE-EXISTING, DESIGNED, TESTED
+  feature (session-manager.ts:133-141 anticipates "proactive TTL lights up once the composition root wires
+  browserApi"; tested at session-manager.test.ts "M4.5 proactive TTL via chrome.alarms") — but activating it
+  is a user-visible, security-relevant behavior change outside the "behavior-preserving" framing. codex's gap:
+  no runtime-seam test + no explicit acceptance that Q10 was meant to flip it on.
+
+## SURFACED to user (security-relevant behavior change + dual-model split)
+The `browserApi` port carries BOTH storage AND alarms, so Q10's clean port-injection into ProfileService
+cannot thread storage WITHOUT also activating proactive TTL (short of passing a degraded alarms-less port —
+an ugly carve-out). The activation is the SessionManager's intended end-state, but it changes when users'
+wallets lock → the user must decide. Options surfaced:
+- **(1) Promote-with-acknowledgment [rec]** — accept the activation (intended design + security improvement);
+  I add codex's requested runtime-seam test + an explicit acceptance note, then re-confirm codex → promote.
+- **(2) Decouple** — keep proactive TTL dormant for now (pass ProfileService an alarms-less port / gate it),
+  activate it deliberately in a separate change.
+- **(3) Revert Q10's ProfileService closeout** — drop the runtime wiring (ProfileService stays on the storage
+  fallback), promote the other 5 findings without it.
 
 ## Promote
-`dev-quality → dev` via PR — _pending the confidence pass_. NOT merged autonomously (per hard limit: the
-dev-quality→dev promote is the user's call).
+`dev-quality → dev` PR — BLOCKED pending the user's decision above. NOT merged autonomously (hard limit).
