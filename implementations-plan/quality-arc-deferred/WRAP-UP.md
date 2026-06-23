@@ -65,8 +65,14 @@ SessionManager was designed to light up once wired). Closed codex's gap:
 - **Runtime-seam test**: `service.integration.test.ts` "Q10 composition seam" — WITH a port → SessionManager
   subscribes to the proactive-TTL alarm; WITHOUT (the pre-arc runtime) → no subscription (dormant). Pins the
   activation against silent regression in either direction.
-- Re-confirm: codex `019ef437` resumed to verify the HOLD is closed (see below).
+- Re-confirm: codex `019ef437` **RE-CONFIRMED PROMOTE** — "the HOLD is closed; the previously unacknowledged
+  Q10 runtime behavior change is now explicit at runtime.ts:136 and seam-pinned both directions." Resolution
+  merged (`ab4cbe1`, PR #159; gate green net 28025359332 8/8 · quality · smoke).
+
+## Final verdict: BOTH MODELS PROMOTE
+claude PROMOTE + codex PROMOTE (post-resolution). The arc is a genuine quality improvement, safe to promote.
+All 6 deferred findings resolved; one accepted behavior change (Q10 proactive TTL) documented + seam-tested.
 
 ## Promote
-`dev-quality → dev` PR — opened after codex re-confirms the HOLD is closed. NOT merged autonomously (hard
-limit: the dev-quality→dev promote is the user's call).
+`dev-quality → dev` PR opened (squash, per dev's ruleset). **NOT merged autonomously** — the dev-quality→dev
+promote is the user's call (hard limit). The promote auto-triggers dev's CI (Quality/Status required).
