@@ -7,7 +7,6 @@ import { AccountService, type Account } from "@/wallet/services/account/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
-import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { StepContent, type WrappedTask } from "@/wallet/services/task/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
@@ -44,7 +43,6 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	private profileService: ProfileService = null!
 	private accountService: AccountService = null!
 	private networkService: NetworkService = null!
-	private pxeService: PxeServiceClient = null!
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(TRANSACTION_SERVICE_NAME, logger)
@@ -55,7 +53,6 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		this.profileService = services.get(ProfileService.name)
 		this.accountService = services.get(AccountService.name)
 		this.networkService = services.get(NetworkService.name)
-		this.pxeService = new PxeServiceClient(this.logger)
 
 		this.accountService.onAccountDeleted.add(this.onAccountDeleted)
 		this.networkService.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
