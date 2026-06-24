@@ -11,7 +11,7 @@ Operating rules for AI assistants (and any contributor) working in this reposito
 
 ## Working in this repo
 
-- **Bun** is the package manager. No yarn/npm/pnpm. Pinned to `1.3.13` via `package.json#packageManager` + `setup-bun` action.
+- **Bun** is the package manager. No yarn/npm/pnpm. Pinned to `1.3.14` via `package.json#packageManager` + `setup-bun` action.
 - **Biome** handles lint + format. Layer-import rules are enforced via `noRestrictedImports` overrides in [`biome.json`](./biome.json); violations fail `bun run lint`.
 - **Commitlint** enforces Conventional Commits (`feat:`, `fix:`, `chore:`, …). Subject line must be lower-case.
 - **Pre-commit hook** (`.githooks/pre-commit`) runs `biome check --staged` followed by `scripts/check-no-brand.sh` (legacy brand and absolute-path guard). **Commit-msg hook** validates the message. Both auto-install on `bun install` via the `prepare` script.

@@ -79,7 +79,7 @@
     },
     "packages/extension": {
       "name": "@nulo/extension",
-      "version": "0.24.0-rc.3",
+      "version": "0.23.0",
       "dependencies": {
         "@alejoamiras/aztec-accelerator": "5.0.0-rc.1",
         "@aztec/accounts": "5.0.0-rc.1",
@@ -152,7 +152,7 @@
         "unplugin-auto-import": "^21.0.0",
         "unplugin-vue-components": "^32.0.0",
         "vite": "^8.0.11",
-        "vite-plugin-node-polyfills": "^0.26.0",
+        "vite-plugin-node-polyfills": "^0.28.0",
         "vite-plugin-pages": "^0.33.1",
         "vite-plugin-static-copy": "^4.1.0",
         "vite-plugin-vue-devtools": "^8.0.0",
@@ -216,7 +216,7 @@
         "typescript": "^6.0.3",
         "unplugin-vue-components": "^32.0.0",
         "vite": "^8.0.11",
-        "vite-plugin-node-polyfills": "^0.26.0",
+        "vite-plugin-node-polyfills": "^0.28.0",
         "vitest": "^4.1.5",
         "vue-tsc": "^3.0.5",
       },
@@ -246,7 +246,7 @@
       "devDependencies": {
         "typescript": "^6.0.3",
         "vite": "^8.0.11",
-        "vite-plugin-node-polyfills": "^0.26.0",
+        "vite-plugin-node-polyfills": "^0.28.0",
       },
     },
     "packages/wallet-bridge": {
@@ -2447,7 +2447,7 @@
 
     "vite-plugin-inspect": ["vite-plugin-inspect@11.3.3", "", { "dependencies": { "ansis": "^4.1.0", "debug": "^4.4.1", "error-stack-parser-es": "^1.0.5", "ohash": "^2.0.11", "open": "^10.2.0", "perfect-debounce": "^2.0.0", "sirv": "^3.0.1", "unplugin-utils": "^0.3.0", "vite-dev-rpc": "^1.1.0" }, "peerDependencies": { "vite": "^6.0.0 || ^7.0.0-0" } }, "sha512-u2eV5La99oHoYPHE6UvbwgEqKKOQGz86wMg40CCosP6q8BkB6e5xPneZfYagK4ojPJSj5anHCrnvC20DpwVdRA=="],
 
-    "vite-plugin-node-polyfills": ["vite-plugin-node-polyfills@0.26.0", "", { "dependencies": { "@rollup/plugin-inject": "^5.0.5", "node-stdlib-browser": "^1.3.1" }, "peerDependencies": { "vite": "^2.0.0 || ^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0" } }, "sha512-BAe5YzJf368XGev02hDvioidx4uVH8dqEJlG73bjQSxM26/AQnGcKFomq9n3vGq5yqpSHKN4h1XQNxx9l98mBg=="],
+    "vite-plugin-node-polyfills": ["vite-plugin-node-polyfills@0.28.0", "", { "dependencies": { "@rollup/plugin-inject": "^5.0.5", "node-stdlib-browser": "^1.3.1" }, "peerDependencies": { "vite": "^2.0.0 || ^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0" } }, "sha512-NXct/ci2ef4fRyCfTb8fk2HmR80Rv7icLd+cRH41TnUugDzdKMFKqFPpZYCFUInZMMem9bkLv5pkq02+7Xu7+w=="],
 
     "vite-plugin-pages": ["vite-plugin-pages@0.33.3", "", { "dependencies": { "@types/debug": "^4.1.12", "debug": "^4.4.3", "dequal": "^2.0.3", "extract-comments": "^1.1.0", "json5": "^2.2.3", "local-pkg": "^1.1.2", "micromatch": "^4.0.8", "picocolors": "^1.1.1", "tinyglobby": "^0.2.15", "yaml": "^2.8.2" }, "peerDependencies": { "@vue/compiler-sfc": "^2.7.0 || ^3.0.0", "vite": "^2.0.0 || ^3.0.0-0 || ^4.0.0 || ^5.0.0-0 || ^6.0.0-0 || ^7.0.0-0 || ^8.0.0-0" }, "optionalPeers": ["@vue/compiler-sfc"] }, "sha512-k97CAlVN7VUD5CIkRaose8Ty1xjtpuSeJQngFxsinPyM7PCtAIp23QdnkygNRdoo4gjX21TORYdEAAN/lGtCIA=="],
 
