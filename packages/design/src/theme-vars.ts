@@ -69,11 +69,15 @@ export function collectStyleFiles(dir: string, exts = [".vue", ".css", ".scss"])
 /** Owned `var(--x)` references in `files` that are NOT declared in base.css (the ghosts). */
 export function findUndefinedThemeVars(files: string[], declared: Set<string>): { file: string; token: string }[] {
 	const out: { file: string; token: string }[] = []
+	// Match two reference forms: a CSS `var(--x)`, and a quoted bare token name passed as a component
+	// prop (e.g. `<Spinner color="--txt-tertiary" />`). The `--nulo-error` ghost appeared as BOTH a
+	// style `var()` and an `<Icon color>` prop, so the guard checks both to prevent that class regressing.
+	const re = /var\(\s*(--[a-z0-9-]+)|["'](--[a-z0-9-]+)["']/gi
 	for (const file of files) {
 		const src = readFileSync(file, "utf8")
 		const seen = new Set<string>()
-		for (const m of src.matchAll(/var\(\s*(--[a-z0-9-]+)/gi)) {
-			const name = m[1]
+		for (const m of src.matchAll(re)) {
+			const name = m[1] ?? m[2]
 			// A trailing `-` means the regex stopped at a template interpolation, e.g. `var(--txt-${x})`
 			// (Icon.vue builds hover-color vars dynamically) — not a statically resolvable token.
 			if (name.endsWith("-")) continue

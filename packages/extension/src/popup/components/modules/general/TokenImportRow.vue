@@ -51,7 +51,7 @@ const subtitle = computed(() => {
 		<Flex v-if="isInFlight" align="center" gap="6" data-testid="token-import-spinner">
 			<Spinner size="12" color="--txt-tertiary" />
 		</Flex>
-		<Icon v-else-if="isFailed" name="close-circle" size="14" color="--nulo-error" data-testid="token-import-failed" />
+		<Icon v-else-if="isFailed" name="close-circle" size="14" color="red" data-testid="token-import-failed" />
 	</Flex>
 </template>
 
