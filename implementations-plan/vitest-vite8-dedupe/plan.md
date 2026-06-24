@@ -44,7 +44,7 @@ The original "two competing outlines" (overrides pin vs re-resolve) were resolve
 - Pass criteria: devtools chain absent from `bun.lock`; extension build exit 0; `bun run test:all` completes (no watch hang) all green; lockfile diff = removals + the `test`-script line.
 - Layers: dependency-tree assertion · build · unit.
 
-### Phase 2 — Dedupe Vitest onto Vite 8 via a declarative override
+### Phase 2 — ✓ DONE — Dedupe Vitest onto Vite 8 via a declarative override
 Add `"overrides": { "vite": "^8.0.0" }` to root `package.json`, then `bun install`. The override constrains every `vite` consumer (incl. vitest's `^6||^7||^8`) to `^8`, deterministically collapsing vitest's nested `vite@7.3.2` (+ its `postcss`/`rollup` subtree) onto the hoisted 8.x. It resolves to the highest aged-out 8.x (8.0.11 today; 8.1.0 only if it has aged out — the gate validates whichever; the lockfile-diff review flags any incidental app bump). Surgical `bun.lock` hand-editing was rejected as brittle (ledger D2).
 
 **Validation gate**
