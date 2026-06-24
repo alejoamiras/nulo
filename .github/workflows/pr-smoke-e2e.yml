@@ -141,7 +141,7 @@ jobs:
       artifact_name: extension-chrome
 
   status:
-    name: Status
+    name: smoke-e2e-status
     if: always()
     needs: [changes, decide, build, smoke]
     runs-on: ubuntu-latest
