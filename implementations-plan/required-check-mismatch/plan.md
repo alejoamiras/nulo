@@ -1,6 +1,6 @@
 # Required-check name mismatch — the fix
 
-**Status:** DRAFT — codex + opus-Plan audits + final fresh-context codex pass folded in (final pass returned `reject` on the first consolidated draft; all 5 findings adopted below). Pending approval gate.
+**Status:** ✅ COMPLETE (2026-06-24) — approved + executed. dev (#170 rename, #171 re-point/positive, #172 negative) and main (#173 rename + re-point) both re-pointed to the bare names; a self-authored signed PR now merges with a plain `gh pr merge` (no `--admin`), and a deliberate red check is correctly blocked. Audit trail: codex + opus-Plan (both conditional-approve) + final fresh-context codex (`reject` → all 5 findings folded). See `lessons/phase-{1,2,3,4}.md`.
 **Tier:** `mid` (rubric: blast-radius HIGH, external-coupling HIGH → normally `deep`; held at `mid` because the fix is bounded CI config, fully and instantly reversible, and the residual risk is retired by empirical live-PR verification — sacrificial-PR name-read + union-first re-point + positive AND negative acceptance — not by more planning ceremony).
 
 ## The problem (diagnosis), with hard proofs
