@@ -228,7 +228,7 @@ jobs:
   # filter, or via the `e2e:smoke` label. Mirrors pr-network-e2e.yml.
 
   status:
-    name: Status
+    name: quality-status
     if: always()
     needs: [changes, commitlint, lint-and-typecheck, unit-tests, build-chrome, build-firefox, build-faucet]
     runs-on: ubuntu-latest

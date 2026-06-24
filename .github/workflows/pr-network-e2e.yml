@@ -222,7 +222,7 @@ jobs:
       SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
 
   status:
-    name: Status
+    name: network-e2e-status
     if: always()
     needs: [changes, decide, network-e2e, network-e2e-heavy, network-e2e-heavy-concurrent, network-e2e-canary]
     runs-on: ubuntu-latest
