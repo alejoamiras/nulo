@@ -68,7 +68,7 @@ const handleSwitchReceiverType = () => {
 .toggle_pair {
 	display: flex;
 	cursor: pointer;
-	border: 1px solid #231f1c;
+	border: 1px solid var(--nulo-border);
 }
 
 .toggle_btn {
@@ -85,13 +85,13 @@ const handleSwitchReceiverType = () => {
 	transition: all 0.15s ease;
 
 	&:first-child {
-		border-right: 1px solid #231f1c;
+		border-right: 1px solid var(--nulo-border);
 	}
 }
 
 .toggle_active {
 	background: var(--nulo-accent);
-	color: #0a0908;
+	color: var(--txt-inverse);
 	font-weight: 700;
 }
 </style>
