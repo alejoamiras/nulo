@@ -42,8 +42,15 @@ case "$STEP" in
     next_checks="$(jq -n --argjson live "$(jq '.checks' <<<"$live_json")" --argjson new "$new_pinned" \
       '($live + $new) | unique_by(.context)')" ;;
   finalize)
-    # exactly the new pinned names; drops the phantoms (and the actionlint Status was never here).
-    next_checks="$new_pinned" ;;
+    # Drop ONLY the known phantoms; preserve any other live check; ensure the new pinned are present.
+    # For this repo the phantoms were the sole non-new checks, so the result is exactly the three new
+    # pinned names — but this stays correct (and never silently un-requires a real gate) if the script
+    # is reused on a branch that carries other required checks.
+    next_checks="$(jq -n \
+      --argjson live "$(jq '.checks' <<<"$live_json")" \
+      --argjson new "$new_pinned" \
+      --argjson phantoms '["Quality / Status","Network e2e / Status","Smoke e2e / Status"]' \
+      '[ $live[] | select(.context as $c | $phantoms | index($c) | not) ] + $new | unique_by(.context)')" ;;
   *)
     echo "unknown step: $STEP" >&2; exit 2 ;;
 esac
