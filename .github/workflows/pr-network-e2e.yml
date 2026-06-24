@@ -12,8 +12,9 @@ on:
     branches: [main, dev]
     # `labeled` so adding `e2e:network` after open triggers a fresh run;
     # `unlabeled` so removing it re-evaluates the gate instead of leaving
-    # a stale failing result.
-    types: [opened, reopened, synchronize, labeled, unlabeled]
+    # a stale failing result; `ready_for_review` so a draft marked ready
+    # (without a new push) re-runs CI instead of hanging the required check.
+    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review]
 
 concurrency:
   group: pr-network-e2e-${{ github.workflow }}-${{ github.head_ref || github.ref }}
