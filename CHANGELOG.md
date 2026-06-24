@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.23.1](https://github.com/alejoamiras/nulo/compare/v0.23.0...v0.23.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* **ci:** rename required-check aggregators to unique names (main) ([0f8ae25](https://github.com/alejoamiras/nulo/commit/0f8ae25086f431c3c0706d397fe486cf1165d5dd))
+* **ci:** rename required-check aggregators to unique names (main) ([#173](https://github.com/alejoamiras/nulo/issues/173)) ([17408da](https://github.com/alejoamiras/nulo/commit/17408da69cfcef824a4b292104a7644c9110fb83))
+
 ## [0.23.0](https://github.com/alejoamiras/nulo/compare/v0.22.0...v0.23.0) (2026-06-22)
 
 
