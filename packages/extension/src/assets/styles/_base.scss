@@ -1,12 +1,6 @@
 @use "./flex" as *;
 @use "./text" as *;
 
-// vue-devtools overlay CSS is injected by the plugin at runtime in dev mode;
-// the previous explicit `@import "/node_modules/..."` here resolved fine on
-// macOS dev builds but broke production CSS resolution on Linux CI (vite-plugin
-// postcss-import treats leading `/` as filesystem-absolute on Linux). The
-// plugin loads its own overlay assets, so importing them here is unnecessary.
-
 :root[data-has-nav="true"] {
 	--nav-clearance: 96px;
 }

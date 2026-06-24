@@ -26,6 +26,12 @@ import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
+// Static (module-scope) import: pays Vite's cold transform of this service +
+// its inlined @nulo/* graph during the file's import phase, NOT inside the first
+// test's 5s budget. Under Vite 8 that cold transform can exceed 5s on CI's
+// shared runner, which timed out the first `bootService()` when the import was
+// dynamic. vi.mock("./repository") is hoisted above this, so the mock still applies.
+import { IncomingTransferService } from "./service"
 import type { IncomingTransferRecord, IncomingTrustRecord, IncomingTrustState } from "./spec"
 
 // ── Repo mock (in-memory) ────────────────────────────────────────────────
@@ -228,7 +234,6 @@ async function bootService(
 		note: stubs.note ?? makeNoteStub(),
 		config: stubs.config ?? makeConfigStub(),
 	}
-	const { IncomingTransferService } = await import("./service")
 	const logger = new LoggerStore(new ConfigStore())
 	// Huge poll interval so scheduler doesn't fire during tests; we exercise
 	// the scan path via the public surface or via direct method calls.
