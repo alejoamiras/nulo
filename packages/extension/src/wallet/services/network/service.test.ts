@@ -160,16 +160,80 @@ describe("NetworkService transient-node cache (M4.10)", () => {
 		// which would otherwise wait for `init()` to set the flag.
 		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 		;(service as any).initialized = true
-		// Pre-seed the cache + the storage so the public method's
-		// `_isKnownEndpointUrl` lookup returns true.
+		// Pre-seed the transient cache so the call is a pure cache hit.
 		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 		const transient: Map<string, { node: unknown; failures: number }> = (service as any).transientNodes
 		const stub = { __id: "first" }
 		transient.set("https://rpc.a", { node: stub as never, failures: 0 })
-		const result = await service.getNodeForUrl("https://rpc.a", 1)
+		const result = await service.getNodeForUrl("https://rpc.a")
 		expect(result).toBe(stub)
 		// No new factory call — cache hit.
 		expect(factory.created.length).toBe(0)
+	})
+
+	test("getNodeForUrl pins a pending tx to its submitting endpoint ACROSS profiles (C3 cross-profile leak fix)", async () => {
+		// Leak setup: two profiles, SAME chainId, DIFFERENT rpc endpoints.
+		const { service, factory } = setupServiceWithStorage({
+			"https://rpc.a": nodeInfoForChain(7),
+			"https://rpc.b": nodeInfoForChain(7),
+		})
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to seed cross-profile networks
+		const storage = (service as any).storage as { set: (id: string, n: Network) => Promise<void> }
+		await storage.set("netA", {
+			id: "netA",
+			profileId: "p1",
+			chainId: 7,
+			name: "A",
+			primaryEndpointId: "epA",
+			endpoints: [{ id: "epA", rpcUrl: "https://rpc.a" }],
+		})
+		await storage.set("netB", {
+			id: "netB",
+			profileId: "p2",
+			chainId: 7,
+			name: "B",
+			primaryEndpointId: "epB",
+			endpoints: [{ id: "epB", rpcUrl: "https://rpc.b" }],
+		})
+		// Active profile is p2. The old code fell back to p2's node here → A's tx
+		// hash sent to p2's RPC. getNodeForUrl now always pins to the submitted URL.
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to switch the active profile
+		;(service as any).profileService.getActiveProfile = async () => ({ id: "p2", name: "p2", type: "password" })
+
+		// Poll profile A's still-pending tx (submitted to A's endpoint) while B is active.
+		const node = await service.getNodeForUrl("https://rpc.a")
+
+		// The returned node is bound to A's endpoint — NOT a fallback to p2's (rpc.b).
+		const createdEntry = factory.created.find((c) => c.node === node)
+		expect(createdEntry?.rpcUrl).toBe("https://rpc.a")
+		expect(factory.created.map((c) => c.rpcUrl)).not.toContain("https://rpc.b")
+	})
+
+	test("getNodeForUrl pins to the submitted URL even when it matches NO configured endpoint (deleted/edited, never falls back to active)", async () => {
+		// The endpoint was deleted/edited away from every profile while the tx was
+		// still pending. Pinning to the submitted URL (no active-profile fallback)
+		// keeps the receipt fetch off the active profile's RPC — the leak is closed
+		// here too, not just on a plain profile switch.
+		const { service, factory } = setupServiceWithStorage({ "https://rpc.b": nodeInfoForChain(7) })
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to seed the active profile's network
+		const storage = (service as any).storage as { set: (id: string, n: Network) => Promise<void> }
+		await storage.set("netB", {
+			id: "netB",
+			profileId: "p1",
+			chainId: 7,
+			name: "B",
+			primaryEndpointId: "epB",
+			endpoints: [{ id: "epB", rpcUrl: "https://rpc.b" }],
+		})
+
+		// active profile is p1 (harness default, endpoint rpc.b). Poll a URL no
+		// profile configures — the submitting endpoint was removed.
+		const node = await service.getNodeForUrl("https://rpc.deleted")
+
+		// Pins to the submitted URL; never touches the active profile's node (rpc.b).
+		const createdEntry = factory.created.find((c) => c.node === node)
+		expect(createdEntry?.rpcUrl).toBe("https://rpc.deleted")
+		expect(factory.created.map((c) => c.rpcUrl)).not.toContain("https://rpc.b")
 	})
 
 	test("reportEndpointFailure increments + evicts at threshold 3", () => {

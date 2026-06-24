@@ -208,14 +208,16 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 
 	private async updateTx(tx: Tx) {
 		this.logDebug(`Sync tx ${tx.hash.slice(0, 8)}`)
-		// Pin polling to the endpoint that submitted this tx: staying on
-		// the originating endpoint avoids transient receipt-not-yet-indexed
-		// issues when the user swaps the network's primary endpoint mid-
-		// pending. Falls back to the current primary if the URL is no
-		// longer a known endpoint (deleted) — handled inside
-		// `getNodeForUrl`.
+		// Pin polling to the endpoint that submitted this tx: staying on the
+		// originating endpoint avoids transient receipt-not-yet-indexed issues
+		// when the user swaps the network's primary endpoint mid-pending, and —
+		// critically — keeps a pending tx's receipt fetch on ITS OWN profile's
+		// endpoint after a profile switch, instead of leaking the tx hash to the
+		// now-active profile's RPC. `getNodeForUrl` never falls back to the
+		// active profile. Legacy txs with no recorded endpoint have no URL to
+		// pin to, so they still resolve via the active profile's node.
 		const node = tx.submittedEndpointUrl
-			? await this.networkService.getNodeForUrl(tx.submittedEndpointUrl, tx.chainId)
+			? await this.networkService.getNodeForUrl(tx.submittedEndpointUrl)
 			: await this.networkService.getNode(tx.chainId)
 		if (!node) {
 			this.logError("Unknown network")
