@@ -36,7 +36,7 @@ The original "two competing outlines" (overrides pin vs re-resolve) were resolve
 
 ## Phases
 
-### Phase 1 — Delete the unused devtools dependency + fix the test-script footgun
+### Phase 1 — ✓ DONE — Delete the unused devtools dependency + fix the test-script footgun
 (a) Remove `"vite-plugin-vue-devtools"` from `packages/extension/package.json` devDependencies (evicts the chain + 4× `vite@7.3.2`); remove the stale `_base.scss:4` comment. (b) Change `@nulo/extension`'s `test` script `vitest` → `vitest run` — it's the only watch-mode one in the workspace, the cause of the `audit:vue`/`test:all` local hang. `bun install` to update `bun.lock`.
 
 **Validation gate**

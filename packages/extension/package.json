@@ -21,7 +21,7 @@
 		"format": "biome format src/ --write",
 		"check": "biome check src/",
 		"typecheck": "vue-tsc --noEmit",
-		"test": "vitest",
+		"test": "vitest run",
 		"test:components": "vitest run src/components",
 		"test:e2e": "vitest run --config vitest.e2e.config.ts",
 		"test:e2e:all": "vitest run --config vitest.e2e.all.config.ts",
@@ -103,7 +103,6 @@
 		"vite-plugin-node-polyfills": "^0.28.0",
 		"vite-plugin-pages": "^0.33.1",
 		"vite-plugin-static-copy": "^4.1.0",
-		"vite-plugin-vue-devtools": "^8.0.0",
 		"vitest": "^4.1.5",
 		"vue-tsc": "^3.0.5",
 		"webext-bridge": "^6.0.1"
