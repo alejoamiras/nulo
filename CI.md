@@ -29,7 +29,7 @@ Always runs on every PR. Lightweight gates:
 - `unit-tests` — `bun run test:all` (vitest across all workspaces; `--if-present` skips `playground` + `landing`).
 - `build-extension` — chrome + firefox builds.
 
-The `Quality / Status` aggregator at the end is the required check on `main` / `dev` branch protection.
+The `quality-status` aggregator at the end is the required check on `main` / `dev` branch protection (the bare job/check-run name; the old required context `Quality / Status` was a phantom that never matched a produced check — see [CLAUDE.md § Branching](./CLAUDE.md#branching--merging) and `implementations-plan/required-check-mismatch/`).
 
 ### `pr-smoke-e2e.yml`
 
@@ -40,7 +40,7 @@ Triggers:
 - **Auto** on PRs to `dev` whose diff touches the `smoke-surface` paths-filter (popup, components, manifest, the wallet services smoke exercises, build inputs, the harness, etc. — see [`pr-smoke-e2e.yml`](./.github/workflows/pr-smoke-e2e.yml) `filters:`)
 - **Manual** by adding the `e2e:smoke` label
 
-`Smoke e2e / Status` emits `pass` when the suite is skipped (no relevant changes / no label), so branch protection sees a green check either way.
+`smoke-e2e-status` emits `pass` when the suite is skipped (no relevant changes / no label), so branch protection sees a green check either way. It is a **required** check on both `dev` and `main`.
 
 ### `pr-network-e2e.yml`
 
@@ -120,7 +120,7 @@ Releases are driven by `release-please`. The human touchpoint is a single click 
 
 1. Confirm what you want to ship is on `main` (via the usual `release: promote dev → main` PR).
 2. Wait for `release.yml` to run on the push to main. It opens (or updates) a Release PR titled `chore: release X.Y.Z`. The version comes from Conventional Commits since the last tag.
-3. Review the Release PR. CI runs the normal `Quality / Status` check. Eyeball the proposed `CHANGELOG.md` diff + `package.json` bumps.
+3. Review the Release PR. CI runs the normal `quality-status` check. Eyeball the proposed `CHANGELOG.md` diff + `package.json` bumps.
 4. Merge the Release PR via the GitHub UI (merge commit).
 5. The next push-to-main run of `release.yml` sees the release was created. The same workflow run continues: gates → build chrome + firefox → smoke → `attach-assets` (uploads zips + SHASUMS, overlays git-cliff release notes onto the GitHub Release body) → Cloudflare deploy hook.
 
@@ -172,7 +172,7 @@ Composite actions (step-level reuse):
 
 ## Known limitations
 
-- **Smoke e2e is currently advisory on `main`** (not a required check) until the fixture-cleanup follow-up PR hardens cross-file Chrome teardown. See [`implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md`](./implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md) §5 for the deferral rationale.
+- **Smoke e2e is required on both `dev` and `main`** (as `smoke-e2e-status`). Its fixtures can still flake (cross-file Chrome teardown — see [`implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md`](./implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md) §5); treat a red smoke like any gate — flake → re-run, breakage → fix — never neutralize it.
 - **Network e2e has 18 quarantined tests** via co-located `test.skip` / `describe.skip`. See [`implementations-plan/network-test-triage/plan.md`](./implementations-plan/network-test-triage/plan.md) for the cluster grid + un-skip criteria.
 - **Marketplace publishing (Chrome Web Store, Firefox AMO)** is stubbed in `release.yml`. Enabling it requires wiring `CWS_*` + `AMO_JWT_*` secrets and replacing the Firefox `gecko.id` placeholder.
 
