@@ -35,29 +35,12 @@
 # CLI equivalent: --minimum-release-age=604800
 minimumReleaseAge = 604800
 
-# Excludes:
-# - puppeteer + its transitive deps: temporary. We want to ship puppeteer 25
-#   today; all 25.x and its transitives (chromium-bidi 16.x,
-#   @puppeteer/browsers 3.x, puppeteer-core 25.x) are inside the 7-day window
-#   (25.0.0 = 2026-05-12). Once 25.0.0 ages out (~2026-05-19 16:08 UTC),
-#   remove these entries in a follow-up.
-# TEMPORARY (aztec-5.0-upgrade): all @aztec/* 5.0.0-rc.1 (published 2026-06-15) sit inside
-# the 7-day window until ~2026-06-22, and this repo's Bun gates frozen-lockfile installs of
-# pinned <min-age versions. Glob excludes are NOT supported, so the full first-party closure
-# is enumerated below (incl. transitives surfaced by Bun #25305: builder, key-store, native,
-# world-state, standard-contracts, …). The Phase-7 follow-up PR removes this @aztec/@alejoamiras
-# block once 5.0.0-rc.1 ages out. @aztec/viem (2.38.2, not bumped) is intentionally omitted.
-minimumReleaseAgeExcludes = [
-	"puppeteer", "puppeteer-core", "@puppeteer/browsers", "chromium-bidi",
-	"@alejoamiras/aztec-accelerator",
-	"@aztec/accounts", "@aztec/aztec.js", "@aztec/bb-prover", "@aztec/bb.js",
-	"@aztec/blob-lib", "@aztec/builder", "@aztec/constants", "@aztec/entrypoints",
-	"@aztec/ethereum", "@aztec/foundation", "@aztec/key-store", "@aztec/kv-store",
-	"@aztec/l1-artifacts", "@aztec/native", "@aztec/noir-acvm_js",
-	"@aztec/noir-contracts.js", "@aztec/noir-noir_codegen", "@aztec/noir-noirc_abi",
-	"@aztec/noir-protocol-circuits-types", "@aztec/noir-types",
-	"@aztec/protocol-contracts", "@aztec/pxe", "@aztec/simulator",
-	"@aztec/sqlite3mc-wasm", "@aztec/standard-contracts", "@aztec/stdlib",
-	"@aztec/telemetry-client", "@aztec/wallet-sdk", "@aztec/wallets",
-	"@aztec/world-state",
-]
+# Excludes (the ONLY packages exempt from the 7-day gate):
+# - @alejoamiras/aztec-accelerator: TEMPORARY. Republished 2026-06-18 (5.0.0-rc.1), so it
+#   ages out ~2026-06-25 20:02 UTC. Remove this entry in a follow-up after that date.
+# The puppeteer closure (aged out 2026-05) and the @aztec/* 5.0.0-rc.1 set (published
+# 2026-06-15, aged out 2026-06-22) were dropped once past the window — the gate covers them
+# again. On Bun 1.3.13 a frozen-lockfile install of already-pinned versions no longer trips
+# the gate (verified: removing every exclude keeps `bun install [--frozen-lockfile]` green);
+# it only bites active re-resolution, so dropping aged-out excludes is safe.
+minimumReleaseAgeExcludes = ["@alejoamiras/aztec-accelerator"]
