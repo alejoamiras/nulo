@@ -37,6 +37,7 @@ import { type JobError, type JobProgress, JobCancelledSentinel } from "@nulo/wal
 import { markFailedUnlessCancelled } from "./mark-failed-unless-cancelled"
 import { feeToUsd, formatFeeJuice } from "@/utils/fee-estimation"
 import { pickPrimaryMethod } from "@/utils/primary-method"
+import { primaryEndpointUrl } from "@/wallet/services/network/spec"
 import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import type { WrappedTask } from "@/wallet/services/task/service"
 import type { LocalTxOrigin, TransactionService } from "@/wallet/services/transaction/service"
@@ -235,6 +236,7 @@ export class DappSendExecutor {
 						nonce.toString(),
 						feePaymentMethod,
 						hash,
+						primaryEndpointUrl(network),
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
 					)
@@ -390,6 +392,7 @@ export class DappSendExecutor {
 						nonce.toString(),
 						feePaymentMethod,
 						hash,
+						primaryEndpointUrl(network),
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
 					)
@@ -580,6 +583,7 @@ export class DappSendExecutor {
 						Fr.ZERO.toString(),
 						AccountFeePaymentMethodOptions.EXTERNAL,
 						hash,
+						primaryEndpointUrl(network),
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
 					),

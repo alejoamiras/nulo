@@ -58,6 +58,18 @@ export function networkInfoFrom(network: Network): NetworkInfo {
 	return { profileId: network.profileId, chainId: network.chainId, rpcUrl: primary.rpcUrl }
 }
 
+/**
+ * The Network's primary endpoint URL, or `undefined` if it has no primary
+ * endpoint. Unlike `networkInfoFrom`, never throws — for callers that want to
+ * record/pin the endpoint a tx was submitted to and should degrade gracefully
+ * when the primary is missing rather than abort. The `endpoints?.` guard is
+ * defensive against a malformed record crossing the storage boundary; a
+ * well-formed Network always carries ≥1 endpoint.
+ */
+export function primaryEndpointUrl(network: Network): string | undefined {
+	return network.endpoints?.find((e) => e.id === network.primaryEndpointId)?.rpcUrl
+}
+
 // ── Service-thrown error message prefixes ────────────────────────────
 // Errors cross the SW↔popup wire as plain Error.message strings (custom
 // classes don't survive serialization). Callers match on prefixes.

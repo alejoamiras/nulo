@@ -120,6 +120,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		nonce: string,
 		feePaymentMethod: AccountFeePaymentMethodOptions,
 		hash: string,
+		submittedEndpointUrl: string | undefined,
 		estimatedFee?: string,
 		gasDetails?: TxGasDetails,
 	): Promise<Tx> {
@@ -127,19 +128,14 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			throw new Error("duplicated hash")
 		}
 		const now = Date.now()
-		// Capture the primary endpoint URL at submission time so receipt
-		// polling stays bound to it across primary-endpoint swaps. Lookup
-		// is best-effort — if the network record can't be resolved (e.g.
-		// just deleted), the field stays undefined and polling falls back
-		// to the chain's current primary at read time.
-		let submittedEndpointUrl: string | undefined
-		try {
-			const networks = await this.networkService.getNetworks(chainId)
-			const network = networks[0]
-			submittedEndpointUrl = network?.endpoints.find((e) => e.id === network.primaryEndpointId)?.rpcUrl
-		} catch {
-			submittedEndpointUrl = undefined
-		}
+		// `submittedEndpointUrl` is resolved by the EXECUTOR from the network it
+		// actually built+submitted against (captured before prove/send), then
+		// passed in. It is NOT re-derived here from active-profile state: a TTL
+		// auto-lock or profile switch DURING the (slow) prove would make an
+		// active-profile lookup throw or resolve the wrong profile's endpoint,
+		// recording a wrong/undefined URL — which at poll time routes the receipt
+		// fetch to the active profile's RPC (a cross-profile leak). See
+		// `NetworkService.getNodeForUrl`.
 		const tx: Tx = {
 			origin,
 			chainId,

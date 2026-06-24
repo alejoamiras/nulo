@@ -123,4 +123,27 @@ this dial).
 - 52 network tests green. typecheck:all + lint exit 0. No transaction unit-test file exists; the pin
   behavior is fully covered by the network tests + network e2e.
 
-### STATUS: C2 ✓ closed-documented. C3 ✓ implemented; gating on dev-quality network e2e before merge.
+### C3 part 2 — the RECORDING-site leak (found by the arc-wide confidence pass)
+The owner asked for a fresh codex + opus pass on the whole arc before manual smoke. The two models
+SPLIT on a privacy point — exactly the surface the pass was meant to find:
+- opus#1 (concurrency/security agent): PROMOTE; rated the undefined-`submittedEndpointUrl` residual minor.
+- codex (arc-wide): **HOLD** — sharper arc-level interaction: Q10 made proactive TTL auto-lock LIVE +
+  proving is slow, so the lock can fire MID-PROVE. `addTransaction` (`transaction/service.ts`) re-derived
+  `submittedEndpointUrl` from `networkService.getNetworks(chainId)` — which is active-profile-scoped and
+  throws (via Q19's `requireActiveProfile`) when locked → records `undefined` → poll falls back to the
+  active profile's node = the SAME cross-profile leak C3 closed at the POLLING site, reintroduced at the
+  RECORDING site. THREE arc findings interacting (Q10 + Q19 + C3) — none has it alone.
+
+**Verified codex is right** against the code: `addTransaction:137` re-queried + `catch → undefined`; the
+executor already held the real `network` (`network = built.network`) but threw it away. Not surfaced to
+the owner as a question (it's the SAME privacy-first decision already made; the owner explicitly asked
+this review to catch such issues) → fixed.
+
+**Fix:** `addTransaction` now takes `submittedEndpointUrl` as a param; the executor resolves it from its
+own build network via a new `primaryEndpointUrl(network)` helper (network/spec.ts) and passes it at all
+4 call sites (transfer + 3 dapp-send). Removed the active-profile re-derivation entirely. The helper
+guards `endpoints?.` defensively (storage-boundary record). Pin test: dapp-send records the submitting
+network's primary URL as arg 7 (teeth: without the threading the arg shifts to the fee value).
+341 execution+network tests green; typecheck:all + lint exit 0.
+
+### STATUS: C2 ✓ closed-documented. C3 ✓ (polling + recording sites both closed); gating on network e2e.
