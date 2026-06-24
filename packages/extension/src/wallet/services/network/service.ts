@@ -517,21 +517,32 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	}
 
 	/**
-	 * Returns a transient AztecNode bound to the given URL — used by
-	 * pending-tx polling so receipt fetches stay on the originally-submitted
-	 * endpoint even after the user swaps the primary. Falls back to the
-	 * chain's current primary if the URL is no longer a known endpoint.
+	 * Returns a transient AztecNode bound to `url` — used by pending-tx
+	 * polling so receipt fetches ALWAYS stay on the endpoint the tx was
+	 * submitted to, even after the user swaps the primary OR switches profiles
+	 * while the tx is still pending.
+	 *
+	 * Polling is pinned to the submitted URL and NEVER falls back to the active
+	 * profile's node. The previous fallback routed one profile's tx hash to
+	 * another profile's RPC provider (a cross-profile isolation leak) whenever
+	 * the submitted endpoint wasn't the active profile's — on a profile switch,
+	 * or after the submitting endpoint was edited/deleted. `url` is internal:
+	 * captured at submit time from a configured (allowlist-validated) endpoint
+	 * and reused verbatim, so dialing it without consulting the active profile
+	 * is the correct ownership model for a pending tx. (The only trust this
+	 * places is in the persisted `submittedEndpointUrl`, a wallet-written
+	 * field; the active-profile fallback survives only for the legacy
+	 * no-recorded-endpoint path in `TransactionService.updateTx`, where there
+	 * is no URL to pin to.)
 	 *
 	 * Failures are reported via `reportEndpointFailure(url)`; after 3
-	 * consecutive failures the cache entry is evicted and the next call
-	 * falls back.
+	 * consecutive failures the cache entry is evicted and the next poll
+	 * rebuilds the same URL.
 	 */
-	public async getNodeForUrl(url: string, fallbackChainId: number): Promise<AztecNode> {
+	public async getNodeForUrl(url: string): Promise<AztecNode> {
 		await this.ensureInitialized()
 		const entry = this.transientNodes.get(url)
 		if (entry) return entry.node
-		const known = await this._isKnownEndpointUrl(url)
-		if (!known) return this.getNode(fallbackChainId)
 		const created = this.nodeFactory.createNode(url)
 		this.transientNodes.set(url, { node: created, failures: 0 })
 		return created
@@ -765,13 +776,6 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 
 	private async _writeActive(profileId: string, networkId: string): Promise<void> {
 		await this.browserApi.storage.local.set({ [activeKey(profileId)]: networkId })
-	}
-
-	private async _isKnownEndpointUrl(url: string): Promise<boolean> {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) return false
-		const networks = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
-		return networks.some((n) => n.endpoints.some((e) => e.rpcUrl === url))
 	}
 }
 

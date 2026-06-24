@@ -77,4 +77,73 @@ concurrency-critical disagreements per the goal's SURFACE rule rather than silen
   bearer, so a SW-restart agreement check does NOT apply — documented in the test).
 - 128 profile tests green (126 + 2). typecheck + lint clean.
 
-### STATUS: C1 ✓ implemented; gating on dev-quality network e2e before merge.
+### STATUS: C1 ✓ MERGED — #164 `d217a6d`, full network gate green (8/8 on run 28045182972).
+
+---
+
+## C2 + C3 OUTCOME (2026-06-24) — dual-model + owner decision
+
+Both surfaced to the owner via `c2-c3-decision.html`. Owner: **C2 → close (no code); C3 → minimal fix.**
+
+### C2 — Lock re-entrancy guard → **CLOSED, no code change** (codex + claude AGREE)
+No path re-enters the facade lock; the wallet-core `Lock`'s 5-min force-release prevents PERMANENT
+deadlock; same-context re-entry isn't reliably detectable in async JS without owner-token threading
+(brittle). The self-deadlock-shape warning already lives at `service.ts:101`. Both noted one nuance
+(force-release HIDES a deadlock for 5 min rather than failing fast); if ever revisited, the safe shape
+is an extension-side `runExclusive` depth-counter assert, NOT a shared-Lock change. Not done — documented.
+
+### C3 — cross-profile pending-tx RPC leak → **FIXED** (branch `c3/pin-pending-tx-endpoint`, #165)
+**The leak (codex found; I verified):** the pending-tx set is global (Tx records carry chainId, NOT
+profileId — `transaction/service.ts:76-78`). After a profile switch, `onActiveProfileChanged` clears
+`transientNodes`; polling profile A's still-pending tx called `getNodeForUrl(A_url)`, whose
+`_isKnownEndpointUrl` was ACTIVE-profile-scoped → A_url "unknown" under B → fell back to `getNode`
+(B's node) → **A's tx hash sent to B's RPC provider.** claude originally under-weighted it (assumed
+the submitted-URL pin held); the cache-miss fallback silently broke the pin. Verified at
+`network/service.ts:529-537,770-775` + `transaction/service.ts:192-219`.
+
+**First cut (too small):** widened `_isKnownEndpointUrl` to all profiles. Post-impl dual audit
+(codex `019ef8d1` CORRECT-SHIP-with-residual + fresh-claude FIX-FIRST) BOTH flagged the SAME residual:
+the `getNodeForUrl` active-profile fallback still leaks when the submitting endpoint is edited/deleted
+from the active profile (reachable via a normal endpoint edit, not just exotic deletion) — and the
+first-cut test BLESSED that fallback as intended. Both recommended the IDENTICAL stronger fix.
+
+**Final fix (faithful to the owner's "pin regardless of active profile"):** `getNodeForUrl(url)` now
+ALWAYS pins to the submitted URL — build + cache the transient node, NEVER fall back to the active
+profile's node. Removed `_isKnownEndpointUrl` (now unused) + the `fallbackChainId` param. The legacy
+no-recorded-endpoint path (`updateTx`, `submittedEndpointUrl === undefined`) keeps `getNode(chainId)` —
+no URL to pin to. Trust note (both models, accepted): this trusts the internal, allowlist-validated
+`submittedEndpointUrl`; defending it against local-storage tampering is moot (that compromise dwarfs
+this dial).
+
+**Tests (network/service.test.ts):**
+- cross-profile pin: active=p2, `getNodeForUrl(A_url)` → builds A's node, never p2's. VERIFIED it fails
+  under the old active-scoped logic (teeth check: patched to old behavior → red; restored → green).
+- deleted/edited endpoint: URL on no profile → STILL pins to the submitted URL, never the active node
+  (the flipped test — the first cut had it asserting the leak as correct; now asserts it closed).
+- 52 network tests green. typecheck:all + lint exit 0. No transaction unit-test file exists; the pin
+  behavior is fully covered by the network tests + network e2e.
+
+### C3 part 2 — the RECORDING-site leak (found by the arc-wide confidence pass)
+The owner asked for a fresh codex + opus pass on the whole arc before manual smoke. The two models
+SPLIT on a privacy point — exactly the surface the pass was meant to find:
+- opus#1 (concurrency/security agent): PROMOTE; rated the undefined-`submittedEndpointUrl` residual minor.
+- codex (arc-wide): **HOLD** — sharper arc-level interaction: Q10 made proactive TTL auto-lock LIVE +
+  proving is slow, so the lock can fire MID-PROVE. `addTransaction` (`transaction/service.ts`) re-derived
+  `submittedEndpointUrl` from `networkService.getNetworks(chainId)` — which is active-profile-scoped and
+  throws (via Q19's `requireActiveProfile`) when locked → records `undefined` → poll falls back to the
+  active profile's node = the SAME cross-profile leak C3 closed at the POLLING site, reintroduced at the
+  RECORDING site. THREE arc findings interacting (Q10 + Q19 + C3) — none has it alone.
+
+**Verified codex is right** against the code: `addTransaction:137` re-queried + `catch → undefined`; the
+executor already held the real `network` (`network = built.network`) but threw it away. Not surfaced to
+the owner as a question (it's the SAME privacy-first decision already made; the owner explicitly asked
+this review to catch such issues) → fixed.
+
+**Fix:** `addTransaction` now takes `submittedEndpointUrl` as a param; the executor resolves it from its
+own build network via a new `primaryEndpointUrl(network)` helper (network/spec.ts) and passes it at all
+4 call sites (transfer + 3 dapp-send). Removed the active-profile re-derivation entirely. The helper
+guards `endpoints?.` defensively (storage-boundary record). Pin test: dapp-send records the submitting
+network's primary URL as arg 7 (teeth: without the threading the arg shifts to the fee value).
+341 execution+network tests green; typecheck:all + lint exit 0.
+
+### STATUS: C2 ✓ closed-documented. C3 ✓ (polling + recording sites both closed); gating on network e2e.

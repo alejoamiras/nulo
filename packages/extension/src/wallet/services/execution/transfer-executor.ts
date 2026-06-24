@@ -25,6 +25,7 @@ import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import { formatFeeJuice, feeToUsd } from "@/utils/fee-estimation"
 import type { Network } from "@/wallet/services/network/service"
+import { primaryEndpointUrl } from "@/wallet/services/network/spec"
 import type { NewOperationInput, OperationRecord } from "@/wallet/services/operation-journal/spec"
 import type { ProfileInfo } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
@@ -230,6 +231,7 @@ export class TransferExecutor {
 						nonce.toString(),
 						feePaymentMethod,
 						hash,
+						primaryEndpointUrl(network),
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
 					),

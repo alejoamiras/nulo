@@ -7,7 +7,6 @@ import { AccountService, type Account } from "@/wallet/services/account/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
-import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { StepContent, type WrappedTask } from "@/wallet/services/task/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
@@ -44,7 +43,6 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	private profileService: ProfileService = null!
 	private accountService: AccountService = null!
 	private networkService: NetworkService = null!
-	private pxeService: PxeServiceClient = null!
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(TRANSACTION_SERVICE_NAME, logger)
@@ -55,7 +53,6 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		this.profileService = services.get(ProfileService.name)
 		this.accountService = services.get(AccountService.name)
 		this.networkService = services.get(NetworkService.name)
-		this.pxeService = new PxeServiceClient(this.logger)
 
 		this.accountService.onAccountDeleted.add(this.onAccountDeleted)
 		this.networkService.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
@@ -123,6 +120,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		nonce: string,
 		feePaymentMethod: AccountFeePaymentMethodOptions,
 		hash: string,
+		submittedEndpointUrl: string | undefined,
 		estimatedFee?: string,
 		gasDetails?: TxGasDetails,
 	): Promise<Tx> {
@@ -130,19 +128,14 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			throw new Error("duplicated hash")
 		}
 		const now = Date.now()
-		// Capture the primary endpoint URL at submission time so receipt
-		// polling stays bound to it across primary-endpoint swaps. Lookup
-		// is best-effort — if the network record can't be resolved (e.g.
-		// just deleted), the field stays undefined and polling falls back
-		// to the chain's current primary at read time.
-		let submittedEndpointUrl: string | undefined
-		try {
-			const networks = await this.networkService.getNetworks(chainId)
-			const network = networks[0]
-			submittedEndpointUrl = network?.endpoints.find((e) => e.id === network.primaryEndpointId)?.rpcUrl
-		} catch {
-			submittedEndpointUrl = undefined
-		}
+		// `submittedEndpointUrl` is resolved by the EXECUTOR from the network it
+		// actually built+submitted against (captured before prove/send), then
+		// passed in. It is NOT re-derived here from active-profile state: a TTL
+		// auto-lock or profile switch DURING the (slow) prove would make an
+		// active-profile lookup throw or resolve the wrong profile's endpoint,
+		// recording a wrong/undefined URL — which at poll time routes the receipt
+		// fetch to the active profile's RPC (a cross-profile leak). See
+		// `NetworkService.getNodeForUrl`.
 		const tx: Tx = {
 			origin,
 			chainId,
@@ -208,14 +201,16 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 
 	private async updateTx(tx: Tx) {
 		this.logDebug(`Sync tx ${tx.hash.slice(0, 8)}`)
-		// Pin polling to the endpoint that submitted this tx: staying on
-		// the originating endpoint avoids transient receipt-not-yet-indexed
-		// issues when the user swaps the network's primary endpoint mid-
-		// pending. Falls back to the current primary if the URL is no
-		// longer a known endpoint (deleted) — handled inside
-		// `getNodeForUrl`.
+		// Pin polling to the endpoint that submitted this tx: staying on the
+		// originating endpoint avoids transient receipt-not-yet-indexed issues
+		// when the user swaps the network's primary endpoint mid-pending, and —
+		// critically — keeps a pending tx's receipt fetch on ITS OWN profile's
+		// endpoint after a profile switch, instead of leaking the tx hash to the
+		// now-active profile's RPC. `getNodeForUrl` never falls back to the
+		// active profile. Legacy txs with no recorded endpoint have no URL to
+		// pin to, so they still resolve via the active profile's node.
 		const node = tx.submittedEndpointUrl
-			? await this.networkService.getNodeForUrl(tx.submittedEndpointUrl, tx.chainId)
+			? await this.networkService.getNodeForUrl(tx.submittedEndpointUrl)
 			: await this.networkService.getNode(tx.chainId)
 		if (!node) {
 			this.logError("Unknown network")
