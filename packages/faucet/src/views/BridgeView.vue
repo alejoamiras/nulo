@@ -11,13 +11,13 @@ import { TESTIDS } from "@/lib/testids"
 
 <template>
 	<div class="bridge-view" :data-testid="TESTIDS.bridgeView">
-		<header class="hero">
+		<Flex tag="header" direction="column" gap="16" class="hero">
 			<h1>BRIDGE</h1>
 			<p class="sub">
 				Move test {{ BRIDGE_TOKEN_SYMBOL }} between Ethereum (Sepolia) and Aztec, 1:1, public or private. Testnet only. Connect
 				both wallets, pick a direction, bridge. In-flight transfers persist in this browser.
 			</p>
-		</header>
+		</Flex>
 
 		<section class="wallets">
 			<L1WalletPanel />
@@ -39,9 +39,6 @@ import { TESTIDS } from "@/lib/testids"
 }
 
 .hero {
-	display: flex;
-	flex-direction: column;
-	gap: 16px;
 	margin-bottom: 4px;
 }
 

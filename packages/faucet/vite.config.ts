@@ -5,6 +5,7 @@ import { fileURLToPath, URL } from "node:url"
 import vue from "@vitejs/plugin-vue"
 import { defineConfig, type Plugin } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
+import { nuloComponentsPlugin } from "./scripts/components-plugin"
 import { TESTNET_WALLET_CHAIN_ID } from "./src/lib/chain-constants"
 
 const COOP_COEP_HEADERS = {
@@ -84,6 +85,7 @@ export default defineConfig({
 	},
 	plugins: [
 		vue(),
+		nuloComponentsPlugin({ dts: "src/types/components.d.ts" }),
 		nodePolyfills({
 			// Aztec packages reach for `process` at module top-level via util/path
 			// shims. Without these the bundle throws ReferenceError before mount.

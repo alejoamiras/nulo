@@ -6,6 +6,8 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
+import { purgeRows } from "@/wallet/services/purge-rows"
+import { ensureRegistered } from "@/wallet/services/execution/contract-resolver"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import { resolveNetworkByChainId } from "@/wallet/utils/caip"
@@ -73,10 +75,11 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 	public async clearChainState(profileId: string, chainId: number): Promise<void> {
 		await this.ensureInitialized()
 		const fpcs = (await this.storage.getValues()).filter((f) => f.profileId === profileId && f.chainId === chainId)
-		for (const fpc of fpcs) {
-			await this.storage.delete(fpc.id)
-			this.emit("onFpcDeleted", this.decorate(fpc, this.protocolAddresses.get(chainId)))
-		}
+		await purgeRows(
+			fpcs,
+			(fpc) => this.storage.delete(fpc.id),
+			(fpc) => this.emit("onFpcDeleted", this.decorate(fpc, this.protocolAddresses.get(chainId))),
+		)
 		// Drop the cached addresses for this chain so a later re-add re-derives.
 		this.protocolAddresses.delete(chainId)
 	}
@@ -254,13 +257,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 			throw new Error("Contract artifact not found")
 		}
 
-		const registeredContracts = await pxe.getContracts()
-		if (!registeredContracts.find((x) => x.toString() === address)) {
-			await pxe.registerContract({
-				instance: fpcInstance,
-				artifact: fpcArtifact,
-			})
-		}
+		await ensureRegistered(pxe, address, fpcInstance, fpcArtifact)
 
 		const fpcHandler = getFpcHandler(type)
 		fpcHandler.validateArtifact(fpcArtifact)
@@ -354,10 +351,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		if (!fpcArtifact) {
 			throw new Error("Couldn't load the contract artifact. This address is not a Sponsored FPC.")
 		}
-		const registered = await pxe.getContracts()
-		if (!registered.find((x) => x.toString() === address)) {
-			await pxe.registerContract({ instance: fpcInstance, artifact: fpcArtifact })
-		}
+		await ensureRegistered(pxe, address, fpcInstance, fpcArtifact)
 
 		// Hard-validate that the new address still implements the same FPC type.
 		const handler = getFpcHandler(existing.type)
@@ -451,12 +445,14 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		try {
 			await this.lock.enter()
 			const fpcs = (await this.storage.getValues()).filter((fpc) => fpc.profileId === profile.id)
-			for (const fpc of fpcs) {
-				this.logDebug(`Remove fpc #${fpc.id}`)
-				await this.storage.delete(fpc.id)
-				const protocols = this.protocolAddresses.get(fpc.chainId)
-				this.emit("onFpcDeleted", this.decorate(fpc, protocols))
-			}
+			await purgeRows(
+				fpcs,
+				(fpc) => {
+					this.logDebug(`Remove fpc #${fpc.id}`)
+					return this.storage.delete(fpc.id)
+				},
+				(fpc) => this.emit("onFpcDeleted", this.decorate(fpc, this.protocolAddresses.get(fpc.chainId))),
+			)
 		} finally {
 			this.lock.leave()
 		}

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — faucet @nulo/design adoption</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    .keyfinding { background: #f3fbf3; padding: 1rem 1.25rem; border-left: 3px solid #2e9e44; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.9rem; margin: 1rem 0; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; }
+    th { background: #f6f6f6; }
+  </style>
+</head>
+<body>
+  <h1>Faucet adopts the shared design system</h1>
+  <p>The faucet app barely uses our shared <code>@nulo/design</code> component library — it has its own hand-written markup almost everywhere. This plan makes the faucet <em>reuse</em> the shared building blocks where they genuinely fit, by adding the same auto-import "resolver" the extension uses (so templates can write a bare <code>&lt;Flex&gt;</code>/<code>&lt;Text&gt;</code> tag) and swapping hand-written layout/labels for those shared pieces — <strong>without changing how anything looks or behaves</strong>.</p>
+
+  <div class="keyfinding">
+    <h2 style="margin-top:0">The honest headline (please read)</h2>
+    <p>You said "we should be able to re-use a bit more." After three planning passes and three audits reading the actual files (which corrected the plan twice), the truthful answer is: <strong>yes — modestly and genuinely, and here's exactly where.</strong></p>
+    <ul>
+      <li><strong>The real reuse is <code>&lt;Flex&gt;</code></strong> (layout containers — the bulk), a fair amount of <code>&lt;Text&gt;</code> (labels), and likely the <code>&lt;Tag&gt;</code> status pill (which was originally lifted out of the faucet, so it should drop right back in).</li>
+      <li><strong>The big brutalist forms stay hand-written.</strong> The shared <code>Flex</code> can't do CSS grid; the shared <code>Input</code>/<code>Toggle</code> are shaped differently (different DOM, test IDs, behavior); <code>Text</code> can't be a semantic heading/paragraph or carry the odd letter-spacing values. Forcing them would either break the look or require editing the shared package — both off-limits.</li>
+      <li><strong>We deliberately do NOT churn the imports.</strong> Components the faucet already uses (<code>Button</code>, <code>Card</code>, etc.) stay as normal imports — turning them into bare tags would be busywork with zero reuse gain.</li>
+    </ul>
+    <p>So the value here is: genuine-but-bounded reuse + consistency + the resolver plumbing that makes future reuse cheap — not a dramatic rewrite of the forms.</p>
+  </div>
+
+  <h2>Why this tier was chosen (deep)</h2>
+  <p>By the numbers it's borderline <code>mid</code> (only one elevated risk dimension: it touches the whole live faucet). It was run as <code>deep</code> at your request, justified by a known nasty failure mode on this exact surface (a past light-theme regression that slipped past every automated check). <strong>The extra ceremony paid for itself:</strong> the review rounds killed a zero-value "convert all imports" over-reach, caught a real bug that no test would have caught (a CSS rule deletion that would have left some links unstyled), corrected a false "fact" the plan was resting on, and turned an asserted "low reuse ceiling" into an evidence-based one.</p>
+
+  <h2>The reuse inventory (what fits, what doesn't, and why)</h2>
+  <table>
+    <tr><th>Shared piece</th><th>Verdict</th><th>Why</th></tr>
+    <tr><td><code>Flex</code></td><td>✅ real win (the bulk)</td><td>pure layout wrappers — but only where there's no grid/odd-gap and no CSS rule depends on the wrapper's class</td></tr>
+    <tr><td><code>Text</code></td><td>✅ many labels</td><td>font IS available (utility classes); can't be a semantic heading/paragraph, or carry off-scale letter-spacing / custom line-height</td></tr>
+    <tr><td><code>Tag</code></td><td>◑ likely (primary pill)</td><td>the "PRIVATE/PUBLIC" pill — near-identical (Tag came from the faucet); pending a tone-match check</td></tr>
+    <tr><td><code>Badge</code></td><td>◑ opt-in</td><td>only the "SKIPPED" pill, and only if a pixel check wins (Tag fits better)</td></tr>
+    <tr><td><code>LoadingState</code></td><td>✗ no</td><td>forces a spinner (the spot is <em>empty</em>, not loading) + has a fixed test ID + no slot for the existing link-button</td></tr>
+    <tr><td><code>Banner</code> / <code>Tooltip</code> / <code>SectionLabel</code></td><td>✗ no</td><td>too heavy for a plain hint / needs a host setup the faucet lacks / wrong shape</td></tr>
+    <tr><td><code>Input</code> / <code>Toggle</code></td><td>✗ no</td><td>different DOM, value type, test IDs, and size vs the faucet's controls</td></tr>
+  </table>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: Resolver plumbing + a real proof</h3>
+    <p>Add the auto-import resolver (primitives only), a guard test that no local component name collides with it, a shared config helper so the build + both test setups stay in sync, and the lint/lockfile housekeeping. Then migrate <em>one</em> tiny tested swap to a bare tag — to actually <em>prove</em> bare tags resolve in the build AND the tests (the extension's tests don't use this plugin, so this wiring is new here and must be proven, not assumed).</p>
+    <p class="muted">Proves itself by: typecheck + lint + unit tests + a real production build all green, with the one bare-tag swap rendering correctly in tests and build.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: Wallet + verification screens</h3>
+    <p>Swap pure layout/label markup to shared primitives in the wallet panels + the emoji-verification modal. Two of the panels have no test today and are stubbed out of the smokes, so we <strong>add focused tests for them first</strong> — then the swaps are actually guarded. Security test IDs on the verification flow are left untouched.</p>
+    <p class="muted">Proves itself by: the existing + two new wallet-panel tests + the verification test stay green; build green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: Bridge journal / stepper / receipt</h3>
+    <p>The shared bridge-progress screens — and the place we actually check the <code>Badge</code> candidates and adopt them where they visually match. The known "don't touch" spots (the receipt links, the empty-state box) stay hand-written for documented reasons.</p>
+    <p class="muted">Proves itself by: all five bridge-progress component tests + the smoke tests stay green; build green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: Forms + cards + leftover leaves</h3>
+    <p>The biggest, riskiest files last (the bridge form has the most test IDs; the fuel form has no unit test so it leans on smoke tests + your eyeball). Only the clean layout rows get swapped; the bespoke inputs/toggles/mode-cards stay.</p>
+    <p class="muted">Proves itself by: the bridge-form test trio + token-card test + all three smoke tests stay green; build green.</p>
+  </div>
+  <div class="phase recommended">
+    <h3>Phase 5: Your visual sign-off (the gate machines can't replace)</h3>
+    <p>Build + preview the faucet; you eyeball the <strong>light theme</strong> across all three tabs. The checklist will point at the exact spots most likely to drift (anything near a swapped wrapper, the untested fuel form, the badge adoptions). I build it, surface the checklist, and <strong>hold</strong> — I never mark this done myself.</p>
+    <p class="muted">Proves itself by: the full <code>audit:faucet</code> machine suite green + your explicit sign-off.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p><code>@nulo/design</code> is the shared component package both the extension and the faucet pull from. A "resolver" is a build-time helper that lets a template use <code>&lt;Flex&gt;</code> without an import line — handy for tiny ubiquitous layout pieces. The faucet is <strong>light-themed</strong>; the shared package ships both light and dark palettes, so the pieces adapt — but a past incident proved that a missing CSS rule can break the light theme invisibly to every automated check, which is exactly why your visual sign-off is mandatory.</p>
+
+  <h2>Open question for you</h2>
+  <ul>
+    <li><strong>Resolver scope.</strong> I recommend "primitives only" — keep <code>Button</code>/<code>Card</code>/etc. as normal imports (no busywork). The alternative is converting <em>all</em> the faucet's existing design imports to bare tags too, purely for uniformity with the extension. I think that's churn with no payoff; flagging it in case you want the uniformity anyway.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm the <strong>scope</strong> (whole faucet) and the <strong>honest low ceiling</strong> (mostly <code>Flex</code> + a little <code>Text</code>/<code>Badge</code>; forms stay bespoke) — is that worth doing, or would you rather I stop at just the resolver plumbing?</li>
+      <li>Confirm the <strong>resolver scope</strong> open question above (primitives-only recommended).</li>
+      <li>Confirm the <strong>tier</strong> (deep) and the <strong>validation plan</strong> (typecheck/lint/unit/build per phase; smoke tests where untested code is touched; full <code>audit:faucet</code> + your visual sign-off at the end).</li>
+      <li><strong>Approve</strong>, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+    <p class="muted">No <code>/harden</code> pass is recommended (this is presentational — no auth/secrets/CI/crypto surface).</p>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p><code>/goal</code> keeps the session working until a condition holds and survives <code>claude --resume</code>; <code>/loop</code> re-fires on an interval. For this plan <code>/goal</code> is the better fit — completion is condition-based and Phase 5's "surface and hold for your sign-off" is a natural stopping point the goal-checker can see.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose (setting one replaces the other).</p>
+
+    <div class="phase recommended">
+      <h3>Recommended: /goal</h3>
+      <pre><code>/goal All phases marked ✓ in implementations-plan/design-system-faucet-adoption/plan.md (Phase 5 NOT self-completed — the agent builds + previews the faucet, surfaces the light-theme checklist naming the exact at-risk nodes from the diff, and HOLDS for my sign-off), each ✓ backed by its phase gate passing in the transcript (typecheck + lint + faucet test + faucet build; test:e2e where noted); for each phase the agent printed LESSONS_FILE=implementations-plan/design-system-faucet-adoption/lessons/phase-N.md; /code-review max --fix complete + committed; codex post-impl audit complete with high/critical addressed; bun run audit:faucet reported exit 0 in the transcript.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/design-system-faucet-adoption forward. Never idle. Each firing: read plan.md + lessons/ (authoritative) + git status; take the next pending step; after each edit run bun run lint + bun run --cwd packages/faucet test; commit. Stuck/deciding? /codex xhigh, log it. Phase green = its plan.md gate passes (T/L/U/B; E where noted); mark ✓, file lessons, print LESSONS_FILE, advance. SURFACE-AND-HOLD at Phase 5 (human visual gate) — never self-mark it ✓. Never merge/publish/expand scope. All phases ✓? /code-review max --fix → commit → codex post-impl → address high/critical → wrap-up + stop.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a> · <a href="audit-codex.md">Codex transcript</a> · <a href="audit-fable.md">Fable transcript</a></p>
+</body>
+</html>

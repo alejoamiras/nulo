@@ -11,6 +11,8 @@ import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/serv
 import { AccountService } from "@/wallet/services/account/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { TaskService, StepContent, type WrappedTask } from "@/wallet/services/task/service"
+import { purgeRows } from "@/wallet/services/purge-rows"
+import { ensureRegistered } from "@/wallet/services/execution/contract-resolver"
 import { EntityStorage } from "@/wallet/storage"
 import { array_max, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
@@ -83,10 +85,11 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	public async clearChainState(profileId: string, chainId: number): Promise<void> {
 		await this.ensureInitialized()
 		const tokens = (await this.tokens.getValues()).filter((t) => t.profileId === profileId && t.chainId === chainId)
-		for (const token of tokens) {
-			await this.tokens.delete(`${token.id}`)
-			this.emit("onTokenDeleted", getTokenInfo(token))
-		}
+		await purgeRows(
+			tokens,
+			(token) => this.tokens.delete(`${token.id}`),
+			(token) => this.emit("onTokenDeleted", getTokenInfo(token)),
+		)
 	}
 
 	public async getTokens(profileId?: string, chainId?: number): Promise<TokenInfo[]> {
@@ -307,13 +310,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			throw new Error("contract artifact not found")
 		}
 
-		const registeredContracts = await pxe.getContracts()
-		if (!registeredContracts.find((x) => x.toString() === token.contract)) {
-			await pxe.registerContract({
-				instance,
-				artifact,
-			})
-		}
+		await ensureRegistered(pxe, token.contract, instance, artifact)
 
 		const getNameFnCandidates = GetNameFn.getCandidates(artifact).map((x) => x.getImpl())
 		const getNameFn = token.getNameFn
@@ -392,13 +389,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				throw new Error("contract artifact not found")
 			}
 
-			const registeredContracts = await pxe.getContracts()
-			if (!registeredContracts.find((x) => x.toString() === contract)) {
-				await pxe.registerContract({
-					instance,
-					artifact,
-				})
-			}
+			await ensureRegistered(pxe, contract, instance, artifact)
 
 			const getNameFnCandidates = GetNameFn.getCandidates(artifact)
 			const getNameFn = GetNameFn.getDefault(getNameFnCandidates)

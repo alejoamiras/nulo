@@ -23,10 +23,10 @@ import { Fr } from "@aztec/foundation/curves/bn254"
 import { poseidon2Hash } from "@aztec/foundation/crypto/sync"
 import { NuloAccount } from "@nulo/aztec-runtime/account"
 import { createLogger } from "@aztec/foundation/log"
+import { TEST_PASSWORD } from "../fixtures/constants"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const EXTENSION_PATH = path.resolve(__dirname, "../../../dist/chrome")
-const TEST_PASSWORD = "TestPassword123!"
 
 // Mirrors AccountType.Nulo_v1 from packages/extension/src/wallet/services/account/spec.ts:5
 // SECURITY: must match the enum exactly — used in poseidon2Hash for key derivation.

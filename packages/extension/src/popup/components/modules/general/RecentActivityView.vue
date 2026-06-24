@@ -24,6 +24,9 @@ import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisp
 import { formatTransferType, humanizeMethodName } from "@/utils/tx-enrichment"
 import { buildCancelHandler, filterPendingDoubleRender, isMatchingTask } from "./recent-activity-handlers"
 
+/** Composables */
+import { useIncomingTransfers } from "@/composables/useIncomingTransfers"
+
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 const appStore = useAppStore()
@@ -199,46 +202,19 @@ const journalOps = ref([])
 /** Third source for the activity-row merge: incoming-receive records from
  *  trusted fungible-token contracts. Filtered at the service layer
  *  (hidden=false only); the merge below adds them to recentActivityRows. */
+// Parent owns the client lifecycle (connect/disconnect in onMounted/
+// onBeforeUnmount below); useIncomingTransfers wires the listeners + the
+// `incomingTransfersVisible` toggle reload. Shared verbatim with activity.vue.
 const incomingTransferService = new IncomingTransferServiceClient()
-const incomingTransfers = ref([])
-
-async function loadIncomingTransfers() {
-	if (!appStore.profile?.id || !appStore.network?.id || !appStore.account?.address) return
-	incomingTransfers.value = await incomingTransferService.getIncomingTransfers(
-		appStore.profile.id,
-		appStore.network.id,
-		appStore.account.address,
-	)
-}
-function onIncomingTransferAdded(inc) {
-	const idx = incomingTransfers.value.findIndex((x) => x.siloedNullifier === inc.siloedNullifier)
-	if (idx === -1) incomingTransfers.value = [inc, ...incomingTransfers.value]
-	else incomingTransfers.value[idx] = inc
-}
-function onIncomingTransferUpdated(inc) {
-	const idx = incomingTransfers.value.findIndex((x) => x.siloedNullifier === inc.siloedNullifier)
-	if (idx !== -1) incomingTransfers.value[idx] = inc
-}
-function onIncomingTransferDeleted(inc) {
-	incomingTransfers.value = incomingTransfers.value.filter((x) => x.siloedNullifier !== inc.siloedNullifier)
-}
-incomingTransferService.onIncomingTransferAdded.add(onIncomingTransferAdded)
-incomingTransferService.onIncomingTransferUpdated.add(onIncomingTransferUpdated)
-incomingTransferService.onIncomingTransferDeleted.add(onIncomingTransferDeleted)
-incomingTransferService.onConnected.add(loadIncomingTransfers)
-
-// Visibility settings toggle: reload incoming records when the user flips
-// `incomingTransfersVisible` while this widget is mounted. getIncoming-
-// Transfers returns [] when off, clearing the local array atomically.
-// ServiceClient doesn't auto-connect on listener registration; an
-// explicit connect in onMounted below ensures onUpdate fires.
 const configService = new ConfigServiceClient()
-function onConfigUpdate(prop) {
-	if (prop.key === "incomingTransfersVisible") {
-		loadIncomingTransfers()
-	}
-}
-configService.onUpdate.add(onConfigUpdate)
+const { incomingTransfers, dispose: disposeIncomingTransfers } = useIncomingTransfers({
+	incomingTransferService,
+	configService,
+	scope: () =>
+		appStore.profile?.id && appStore.network?.id && appStore.account?.address
+			? { profileId: appStore.profile.id, networkId: appStore.network.id, account: appStore.account.address }
+			: undefined,
+})
 
 function incomingCardProps(inc) {
 	const token = inc.tokenId !== undefined ? tokenById(inc.tokenId) : undefined
@@ -697,6 +673,7 @@ onBeforeUnmount(() => {
 	executionService.disconnect()
 	incomingTransferService.disconnect()
 	configService.disconnect()
+	disposeIncomingTransfers()
 })
 </script>
 

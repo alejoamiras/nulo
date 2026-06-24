@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** Utils */
 import { computed } from "vue"
-import { BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
+import { type AssetKind, assetDecimals, assetSymbol } from "@/lib/asset-label"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { formatBigInt } from "@/lib/format"
 import { formatElapsed } from "@/lib/phase-clock"
@@ -13,6 +13,9 @@ export interface ReceiptSnapshot {
 	direction: "deposit" | "withdraw"
 	amount: string
 	isPrivate: boolean
+	/** Bridged asset. Absent ⇒ the token bridge (back-compat — bridge receipts omit it). "fee-juice" ⇒ a
+	 *  Fuel bridge: the amount IS Fee Juice (18-dec, "FJ"/"Private FJ"), there is no separate token leg. */
+	assetKind?: AssetKind
 	l1TxHash?: string
 	l2TxHash?: string
 	/** Persisted facts (createdAt/completedAt) - the end-to-end time always survives reloads. */
@@ -25,7 +28,7 @@ export interface ReceiptSnapshot {
 	fuelUsed?: string
 }
 
-const props = defineProps<{ snapshot: ReceiptSnapshot }>()
+const props = withDefaults(defineProps<{ snapshot: ReceiptSnapshot; ctaLabel?: string }>(), { ctaLabel: "NEW BRIDGE" })
 const emit = defineEmits<{ "new-bridge": [] }>()
 
 // The meme: a one-shot burst of square monospace bits. Deterministic pseudo-random placement,
@@ -37,12 +40,16 @@ const CONFETTI = Array.from({ length: 14 }, (_, i) => ({
 }))
 
 const isDeposit = computed(() => props.snapshot.direction === "deposit")
+/** A direct Fuel bridge: the amount itself is Fee Juice (no token leg, no bought/used split). */
+const isFuel = computed(() => props.snapshot.assetKind === "fee-juice")
 const route = computed(() => (isDeposit.value ? "Ethereum → Aztec" : "Aztec → Ethereum"))
 const privacyWord = computed(() => (props.snapshot.isPrivate ? "private" : "public"))
 /** Gas naming by surface: private → "Private FJ", public → "FJ". ($AZTEC is the L1-side name.) */
 const gasLabel = computed(() => (props.snapshot.isPrivate ? "Private FJ" : "FJ"))
+const stampWord = computed(() => (isFuel.value ? "FUELED ✓" : isDeposit.value ? "BRIDGED ✓" : "RELEASED ✓"))
 
-const amountDisplay = computed(() => formatBigInt(BigInt(props.snapshot.amount), BRIDGE_TOKEN_DECIMALS))
+const amountDisplay = computed(() => formatBigInt(BigInt(props.snapshot.amount), assetDecimals(props.snapshot.assetKind)))
+const amountSymbol = computed(() => assetSymbol(props.snapshot.assetKind, props.snapshot.isPrivate))
 // Fuel only ever rides IN on a deposit; a withdraw never carries gas back to Ethereum.
 const hasFuel = computed(() => isDeposit.value && !!props.snapshot.fuelReceived)
 const boughtDisplay = computed(() => (props.snapshot.fuelReceived ? formatBigInt(BigInt(props.snapshot.fuelReceived), 18) : null))
@@ -84,20 +91,21 @@ const links = computed(() => {
 		</div>
 
 		<div class="rhead">
-			<p class="stamp">{{ isDeposit ? "BRIDGED ✓" : "RELEASED ✓" }}</p>
+			<p class="stamp">{{ stampWord }}</p>
 			<span class="meta"><template v-if="totalElapsed">{{ totalElapsed }} · </template>{{ privacyWord }}</span>
 		</div>
 		<p class="route">{{ route }}</p>
 
 		<div class="ledger">
-			<template v-if="isDeposit">
-				<div class="row"><span class="k">Tokens</span><span>{{ amountDisplay }} {{ BRIDGE_TOKEN_SYMBOL }}</span></div>
+			<div v-if="isFuel" class="row" :data-testid="TESTIDS.receiptFuel"><span class="k">Fuel</span><span>{{ amountDisplay }} {{ amountSymbol }}</span></div>
+			<template v-else-if="isDeposit">
+				<div class="row"><span class="k">Tokens</span><span>{{ amountDisplay }} {{ amountSymbol }}</span></div>
 				<template v-if="hasFuel">
 					<div class="row" :data-testid="TESTIDS.receiptFuel"><span class="k">Gas bought</span><span>{{ boughtDisplay }} {{ gasLabel }}</span></div>
 					<div v-if="usedDisplay" class="row"><span class="k">Gas used</span><span>&minus; {{ usedDisplay }} {{ gasLabel }}</span></div>
 				</template>
 			</template>
-			<div v-else class="row"><span class="k">Released</span><span>{{ amountDisplay }} {{ BRIDGE_TOKEN_SYMBOL }} &rarr; Ethereum</span></div>
+			<div v-else class="row"><span class="k">Released</span><span>{{ amountDisplay }} {{ amountSymbol }} &rarr; Ethereum</span></div>
 		</div>
 
 		<div v-if="hasFuel && availableDisplay" class="reserve">
@@ -105,7 +113,7 @@ const links = computed(() => {
 			<div class="note">Ready to power your next {{ snapshot.isPrivate ? "private " : "" }}transaction</div>
 		</div>
 
-		<div v-if="links.length" class="links">
+		<Flex v-if="links.length" gap="12" class="links">
 			<a
 				v-for="link in links"
 				:key="link.href"
@@ -114,8 +122,8 @@ const links = computed(() => {
 				rel="noopener noreferrer"
 				:data-testid="TESTIDS.receiptLink"
 			>{{ link.label }}</a>
-		</div>
-		<button type="button" class="action" :data-testid="TESTIDS.receiptNewBridge" @click="emit('new-bridge')">NEW BRIDGE</button>
+		</Flex>
+		<button type="button" class="action" :data-testid="TESTIDS.receiptNewBridge" @click="emit('new-bridge')">{{ ctaLabel }}</button>
 	</section>
 </template>
 
@@ -182,11 +190,6 @@ const links = computed(() => {
 	color: var(--txt-secondary);
 	font: 500 12px/1.4 var(--font-mono);
 	margin-top: 4px;
-}
-
-.links {
-	display: flex;
-	gap: 12px;
 }
 
 .links a {

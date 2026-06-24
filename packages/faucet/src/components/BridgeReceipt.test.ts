@@ -118,4 +118,46 @@ describe("BridgeReceipt", () => {
 		expect(w.text()).toContain("87.70 Private FJ available")
 		expect(w.text()).not.toContain("Gas used")
 	})
+
+	// Fuel variant (assetKind "fee-juice"): the amount IS Fee Juice (18-dec) — never the bridge token.
+	it("fuel (private) receipt: FUELED stamp, a Fuel row in Private FJ, NEW FUEL cta — no token leak", async () => {
+		const w = mount(BridgeReceipt, {
+			props: {
+				ctaLabel: "NEW FUEL",
+				snapshot: {
+					direction: "deposit" as const,
+					assetKind: "fee-juice" as const,
+					amount: "20000000000000000000",
+					isPrivate: true,
+					l1TxHash: L1,
+					l2TxHash: L2,
+				},
+			},
+		})
+		expect(w.text()).toContain("FUELED ✓")
+		expect(w.text()).toContain("Fuel")
+		expect(w.text()).toContain("20.00 Private FJ")
+		expect(w.text()).not.toContain("AZLO")
+		expect(w.text()).not.toContain("Tokens")
+		expect(w.text()).not.toContain("BRIDGED")
+		expect(w.find(sel(TESTIDS.receiptNewBridge)).text()).toBe("NEW FUEL")
+		await w.find(sel(TESTIDS.receiptNewBridge)).trigger("click")
+		expect(w.emitted("new-bridge")).toHaveLength(1)
+	})
+
+	it("fuel (public) receipt: reads FJ, not Private FJ", () => {
+		const w = mount(BridgeReceipt, {
+			props: {
+				ctaLabel: "NEW FUEL",
+				snapshot: {
+					direction: "deposit" as const,
+					assetKind: "fee-juice" as const,
+					amount: "12500000000000000000",
+					isPrivate: false,
+				},
+			},
+		})
+		expect(w.text()).toContain("12.50 FJ")
+		expect(w.text()).not.toContain("Private FJ")
+	})
 })

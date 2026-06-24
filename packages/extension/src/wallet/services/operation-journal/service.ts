@@ -7,6 +7,7 @@ import { Lock, EventHandler } from "@nulo/wallet-core/utils"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import type { ILogger } from "@/wallet/logger"
 import { NetworkService } from "@/wallet/services/network/service"
+import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex } from "@/wallet/utils"
 import {
@@ -163,10 +164,11 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	public async clearChainState(networkId: string): Promise<void> {
 		await this.ensureInitialized()
 		const records = (await this._loadAllValidated()).filter((r) => r.networkId === networkId)
-		for (const record of records) {
-			await this.storage.delete(record.id)
-			this.emit("onOperationDeleted", record)
-		}
+		await purgeRows(
+			records,
+			(record) => this.storage.delete(record.id),
+			(record) => this.emit("onOperationDeleted", record),
+		)
 	}
 
 	public async createOperation(input: NewOperationInput): Promise<OperationRecord> {

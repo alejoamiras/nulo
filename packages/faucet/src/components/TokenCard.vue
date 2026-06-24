@@ -181,17 +181,17 @@ onBeforeUnmount(() => {
 
 <template>
 	<Card :data-testid="TESTIDS.tokenCard" :data-symbol="token.symbol" :data-connected="connected || undefined">
-		<header class="head">
+		<Flex tag="header" direction="column" gap="4">
 			<h3 class="symbol">{{ token.symbol }}</h3>
 			<p class="sub">Fixed drip: {{ token.displayAmount }} {{ token.symbol }}</p>
-		</header>
+		</Flex>
 		<BalanceRow
 			:public-text="publicText"
 			:private-text="privateText"
 			:public-test-id="TESTIDS.balancePublic"
 			:private-test-id="TESTIDS.balancePrivate"
 		/>
-		<div class="actions">
+		<Flex gap="12" wrap="wrap">
 			<!-- Order matches the wallet popup convention: private first, public second. -->
 			<DripButton
 				:loading="privateDripping"
@@ -209,7 +209,7 @@ onBeforeUnmount(() => {
 				:data-testid="TESTIDS.btnDripPublic"
 				@click="handleDrip('public')"
 			/>
-		</div>
+		</Flex>
 		<div v-if="connected && !registered" class="add-to-wallet">
 			<button
 				type="button"
@@ -255,12 +255,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.head {
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
-}
-
 .symbol {
 	font-family: var(--font-mono);
 	font-size: 24px;
@@ -273,12 +267,6 @@ onBeforeUnmount(() => {
 	color: var(--txt-secondary);
 	font-size: 13px;
 	font-family: var(--font-mono);
-}
-
-.actions {
-	display: flex;
-	gap: 12px;
-	flex-wrap: wrap;
 }
 
 .add-to-wallet {
