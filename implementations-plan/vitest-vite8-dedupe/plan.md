@@ -52,7 +52,7 @@ Add `"overrides": { "vite": "^8.0.0" }` to root `package.json`, then `bun instal
 - Pass criteria: no nested vite under vitest; tree shows a SINGLE `vite@8.x`; `bun.lock` has zero `vite@7` and no `vitest/vite` subtree; test:all + typecheck + lint exit 0; lockfile diff = the `overrides` line + vitest collapsing onto the shared vite (+ a reviewed app 8.x bump iff it occurred).
 - Layers: dependency-tree + lockfile assertion · unit (all suites) · typecheck · lint.
 
-### Phase 3 — Full validation + merge readiness
+### Phase 3 — ✓ DONE — Full validation + merge readiness
 Run the complete gate set, review the final lockfile diff, open the PR.
 
 **Validation gate**
@@ -103,6 +103,8 @@ Run the complete gate set, review the final lockfile diff, open the PR.
 - **Codex (xhigh), session `019ef909-86c3-72f3-9186-f37490bee149`:** `reject` — blocking: (1) devtools dep unused → delete not bump; (2) B-first not deterministic for vitest; (3) `test:all` doesn't run each suite once. **All folded** (D1, D2, D3). Mediums/Lows (overrides global, dev-server smoke meaningless, pair find+lockfile, redundant test:faucet) folded into D2/D4 + gate edits.
 - **Sonnet Plan subagent (fable unavailable):** `conditional approve` — 5 conditions: (1) state surgical-delete as the vitest mechanism → D2; (2) flag the extension watch-mode footgun → D3 + Ask; (3) verify 11.4.1 cascade before Outline B → mooted by D1; (4) package count 10→11 → fixed; (5) explicit playground/landing build invocations → D5. **All addressed.**
 - **Final fresh-context codex pass (xhigh), session `019ef916-ccf9-7c81-a6d6-ad6333f0ff68`:** `conditional approve` — (1, Med) Phase 2 must delete/verify the **full `vitest/vite` subtree** (incl. `vitest/vite/postcss`, `vitest/vite/rollup`) and keep "reuse without re-resolving" an inference; (2, Low) override rationale must name Storybook + `@crxjs/vite-plugin` as vite-8 consumers. **Both folded** (Chosen-approach + Phase 2 gate + Security section). Codex confirmed: the devtools delete is safe (no import in any vite config, Storybook, or browser wrapper; `_base.scss` ref is stale-only), the `CI=true` gate is real, and the 5-build list matches the actual build surfaces.
+- **`/code-review max --fix`:** the repo's `code-review` skill is the interactive guided-tour variant (unsuited to an autonomous `/goal` run — it stalls on "next?"). Performed an autonomous critical self-review of the diff instead: no logic changed (deps + override + comment removal), **no fixes needed**; verified zero dangling references to the removed devtools chain across source/configs/Storybook.
+- **Post-impl codex (xhigh), session `019ef93d-a7d2-7c32-923f-170451402350`:** `conditional approve` — 1 Low: the plan-**index** entry described the superseded pre-audit approach; **fixed**. Codex confirmed the impl matches the ledger, the override blast-radius is safe (all consumers — apps + vitest + Storybook + @crxjs — accept ^8), and the `bun.lock` diff has no unexpected additions/churn (one root `vite@8.0.11`; `pinia` owns the 7.7.9 `@vue/devtools-api` chain; `vue-router` its 8.1.2 subtree).
 
 ## Post-implementation hardening
 
