@@ -109,7 +109,10 @@ export function useL1FeeAsset() {
 				chain: sepolia,
 				account: owner,
 			})
-			await l1.publicClient.waitForTransactionReceipt({ hash })
+			// viem RESOLVES the receipt even on an on-chain revert — check status so a mined revert surfaces as
+			// an error, never a false "approved" the deposit's transferFrom then fails behind (mirrors mint()).
+			const receipt = await l1.publicClient.waitForTransactionReceipt({ hash })
+			if (receipt.status !== "success") throw new Error("Approve transaction reverted on-chain.")
 		} catch (err) {
 			error.value = errorMessage(err, "Approve failed")
 		} finally {
