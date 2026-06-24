@@ -67,7 +67,7 @@ jobs:
       # would suppress downstream workflow runs).
       - name: Mint App token
         id: app
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.RELEASE_PLEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
@@ -111,7 +111,7 @@ jobs:
       unstuck: ${{ steps.u.outputs.unstuck }}
       tag_name: ${{ steps.u.outputs.tag_name }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -145,7 +145,7 @@ jobs:
       sha: ${{ steps.r.outputs.sha }}
       is_prerelease: ${{ steps.r.outputs.is_prerelease }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -272,7 +272,7 @@ jobs:
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.resolve.outputs.sha }}
           fetch-depth: 0
@@ -420,7 +420,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.resolve.outputs.sha }}
       - uses: ./.github/actions/setup-bun
@@ -457,11 +457,11 @@ jobs:
       # signed-commits rule is satisfied by the GitHub-signed UI squash-merge.
       - name: Mint App token
         id: app
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.RELEASE_PLEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ steps.app.outputs.token }}
@@ -484,7 +484,7 @@ jobs:
     timeout-minutes: 10
     environment: production
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           name: release-${{ needs.resolve.outputs.version }}
@@ -505,7 +505,7 @@ jobs:
     timeout-minutes: 10
     environment: production
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           name: release-${{ needs.resolve.outputs.version }}
