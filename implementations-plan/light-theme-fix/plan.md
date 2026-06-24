@@ -99,7 +99,7 @@ Keeps the warm identity; light surfaces = warm paper, accent = a saturated **bur
   --nulo-surface-low:     #f0efec;
   --nulo-surface-high:    #e7e5e1;
   --nulo-surface-highest: #dcd9d3;
-  --nulo-accent:          #b8530f;   /* burnt amber; on #fff ≈ 4.9:1 (link ✓, fill+white-text ✓) */
+  --nulo-accent:          #a8480c;   /* burnt amber (FINAL, gate-verified): link-on-white 5.84:1; white-90%-on-accent 5.06:1. The candidate #b8530f was 4.29:1 on the fill role — below AA — so it was darkened. */
   --nulo-outline:         #c9c5bd;
   --nulo-border:          #d8d4cc;
   --nulo-secondary:       #6b655c;   /* on #fff = 5.77:1; on inset #f0efec = 5.02:1 (AA ✓) */
@@ -170,7 +170,8 @@ All figures **computed (WCAG 2.x)**, not eyeballed: ink/fill/secondary/inverse p
 - **Dark-regression proof:** mapping table (literal → token → dark value) in `lessons/phase-1.md`; the gate's **dark** assertions stay green; grep gate (only intentional scrim survivors). Light is expected-worse transiently (single PR; not shipped until Phase 2) — gates assert dark only here.
 - **Validation gate:** `bun run --cwd packages/design test` (**dark** contrast green; design self-scan green); `bun run lint` + `bun run typecheck:all` + `bun run test` (extension component tests + **the extension undefined-var guard now GREEN** after the `--nulo-primary` fix) + grep gate + `bun run --cwd packages/extension build-storybook`; manual dark smoke + **manual no-flash check** (popup + onboarding opened in light, incl. an explicit choice opposite the OS). **No base.css edit → SHA untouched.** Layers: unit + component + static + build + manual.
 
-### Phase 2 — Land the signed-off chromatic palette in base.css (GREEN) + design sign-off
+### Phase 2 — Land the signed-off chromatic palette in base.css (GREEN) + design sign-off ⏸ AWAITING SIGN-OFF
+> **Code complete; STOP per /goal.** Direction A (accent `#a8480c`) landed in `[theme="light"]` + explicit `--border` + `color-scheme`. Contrast gate **GREEN both themes** (18/18); base.css SHA updated; dark frozen (diff = only additive `color-scheme: dark`); design 270 / faucet 413 / build-storybook green. **Awaiting your visual sign-off of the rendered light theme before Phase 3.** See `lessons/phase-2.md`.
 - In `[theme="light"]`: add the 8 tokens + explicit `--border`/`--border-hovered` (chosen direction) + `color-scheme: light`. Add `color-scheme: dark` to `:root`/`[theme="dark"]` (additive, intentional dark exception per §3 — verify no perceptible diff on the custom UI).
 - Resolve the **Button hover states** (§7, finding H2) for the chosen accent — text-hover → `var(--txt-primary)`; primary/cta-hover → the decided contrast-shift — and show them in the matrix. (FOUC is already fixed in Phase 1 via the external boot script — no base.css `@media` needed.)
 - Iterate hex until the gate's **light** assertions (flipped from xfail to required here) are GREEN, dark still GREEN.

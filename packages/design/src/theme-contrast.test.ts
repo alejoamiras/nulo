@@ -10,8 +10,9 @@ import { contrast, resolveColor, themeMap } from "./theme-contrast"
 
 const AA_TEXT = 4.5
 
-// Phase 2 flips this to `true` once `[theme="light"]` gets the 8 brand tokens + the explicit --border.
-const LIGHT_ENFORCED = false
+// Phase 2 set this true: `[theme="light"]` now has the 8 brand tokens + the explicit --border, so the
+// light palette pairs are REQUIRED (no longer xfail). Flipping back to false would re-expect-fail them.
+const LIGHT_ENFORCED = true
 
 type Pair = { fg: string; bg: string; min: number; label: string }
 
@@ -70,13 +71,12 @@ describe("theme contrast — light, enforce-only pairs", () => {
 	}
 })
 
-// Root-cause pins: prove WHY light fails (the 8 tokens fall through to dark + the --border mis-alias).
-// These get removed/flipped in Phase 2 once the light values land.
-describe("light root-cause RED proof (remove at Phase 2)", () => {
-	test("nulo-surface falls through to the DARK value in light", () => {
-		expect(resolveColor("--nulo-surface", themeMap("light")).r).toBeLessThan(40) // dark #141312
+// Phase-2 sanity: the formerly-broken tokens now resolve to their LIGHT values, not the dark fallthrough.
+describe("light palette landed (was the root cause)", () => {
+	test("nulo-surface is now the light value, not the dark fallthrough", () => {
+		expect(resolveColor("--nulo-surface", themeMap("light")).r).toBeGreaterThan(200) // #ffffff
 	})
-	test("--border mis-aliases to a dark value in light (base.css:132)", () => {
-		expect(resolveColor("--border", themeMap("light")).r).toBeLessThan(80) // -> --nulo-surface-highest #363433
+	test("--border is an explicit light value, not the --nulo-surface-highest alias", () => {
+		expect(resolveColor("--border", themeMap("light")).r).toBeGreaterThan(100) // rgba(124,116,104,.3)
 	})
 })
