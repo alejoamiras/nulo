@@ -6,7 +6,7 @@ import { managers } from "@/utils/core"
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 
 /** Utils */
-import { isPrefersDarkScheme } from "@/utils/general"
+import { isPrefersDarkScheme, persistThemeHint } from "@/utils/general"
 import { Config } from "@/wallet/config"
 
 /** Store */
@@ -23,6 +23,7 @@ type Theme = "dark" | "light" | "system"
 const theme = ref<Theme>(new Config().theme as Theme)
 function applyTheme(value: Theme) {
 	theme.value = value
+	persistThemeHint(value)
 	if (value === "system") {
 		root?.setAttribute("theme", isPrefersDarkScheme() ? "dark" : "light")
 	} else {

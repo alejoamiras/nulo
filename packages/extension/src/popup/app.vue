@@ -5,7 +5,7 @@ import Navigation from "./components/Navigation.vue"
 
 /** Utils */
 import { managers, isBackgroundConnected } from "@/utils/core"
-import { isPrefersDarkScheme } from "@/utils/general"
+import { isPrefersDarkScheme, persistThemeHint } from "@/utils/general"
 import { getLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { Config } from "@/wallet/config"
 import { AccountServiceClient, AccountType } from "@/wallet/services/account/client"
@@ -50,6 +50,7 @@ const intervalId = ref(null)
 const settingHandlers = {
 	theme(value) {
 		theme.value = value
+		persistThemeHint(value)
 		if (value === "system") {
 			root.setAttribute("theme", isPrefersDarkScheme() ? "dark" : "light")
 		} else {
