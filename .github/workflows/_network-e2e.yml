@@ -136,7 +136,7 @@ jobs:
       # the upstream default of 2 (no env var set).
       VITE_NULO_FEE_MULTIPLIER: "10"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
 

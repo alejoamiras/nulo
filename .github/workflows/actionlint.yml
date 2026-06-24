@@ -22,7 +22,7 @@ jobs:
       workflows: ${{ steps.override.outputs.workflows || steps.filter.outputs.workflows }}
       shell: ${{ steps.override.outputs.shell || steps.filter.outputs.shell }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -52,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # Replaces the prior `bash <(curl -fsSL ...download-actionlint.bash)` —
       # SHA-pinned Marketplace action eliminates the curl|bash supply-chain
       # surface. The action handles caching internally.
@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Run shellcheck
         run: |
           shopt -s globstar nullglob

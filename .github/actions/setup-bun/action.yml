@@ -1,7 +1,7 @@
 name: Setup Bun
 description: |
   Install Bun, restore the install cache, and run `bun install --frozen-lockfile`.
-  Callers must `actions/checkout@v6` before invoking this action — it does NOT
+  Callers must `actions/checkout@v7` before invoking this action — it does NOT
   check out the repo itself. Removed the inner checkout because every direct
   caller in this repo already checks out first (verified in build-caching-plan
   audit), so the duplicate was pure overhead (~5s × N jobs).
@@ -16,7 +16,7 @@ runs:
       with:
         bun-version: 1.3.14
 
-    - uses: actions/cache@v5
+    - uses: actions/cache@v6
       with:
         path: ~/.bun/install/cache
         key: ${{ runner.os }}-bun-1.3.14-${{ hashFiles('bun.lock') }}

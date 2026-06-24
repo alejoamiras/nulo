@@ -37,7 +37,7 @@ jobs:
       needs-firefox-build: ${{ steps.compute.outputs.needs-firefox-build }}
       needs-faucet-build: ${{ steps.compute.outputs.needs-faucet-build }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -144,13 +144,13 @@ jobs:
     timeout-minutes: 5
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-1.3.14-${{ hashFiles('bun.lock') }}
