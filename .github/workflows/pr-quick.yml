@@ -157,9 +157,25 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Lint PR commits
         env:
+          BASE_REF: ${{ github.base_ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: bunx commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
+        run: |
+          if [ "$BASE_REF" = "main" ]; then
+            # Skip on promote / Release PRs to main. The two kinds of main PR:
+            #  - the promote PR, whose merge subject is an intentionally
+            #    NON-conventional, >100-char "release: promote dev -> main (...)"
+            #    release-note line (mandated by CLAUDE.md) — it cannot pass
+            #    commitlint by design (no 'release' type; over the header cap);
+            #  - the bot Release PR, whose "chore(main): release X.Y.Z" is
+            #    reliably conventional anyway.
+            # And the dev squash subjects in base..head are already-merged +
+            # immutable — re-linting them spuriously failed required Quality on
+            # long historical subjects. So commitlint adds no value on main.
+            echo "commitlint: skipped on PRs to main (promote/Release subjects are exempt by design)."
+          else
+            bunx commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
+          fi
 
   lint-and-typecheck:
     name: Lint + Typecheck

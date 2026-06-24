@@ -23,3 +23,14 @@ jobs:
 
       - name: Run unit tests in every package
         run: bun run test:all
+
+      - name: Run release-script unit tests
+        # scripts/release/ isn't a @nulo/* workspace, so `test:all` (which
+        # filters @nulo/*) skips it. Run it here, guarded so this is a no-op on
+        # refs that predate the dir (other branches / older history).
+        run: |
+          if [ -d scripts/release ]; then
+            bun run test:release
+          else
+            echo "scripts/release/ not present on this ref — skipping."
+          fi

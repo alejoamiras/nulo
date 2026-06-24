@@ -7,6 +7,7 @@
 			"package-name": "@nulo/extension",
 			"include-component-in-tag": false,
 			"include-v-in-tag": true,
+			"bump-minor-pre-major": true,
 			"extra-files": [
 				{ "type": "json", "path": "packages/extension/package.json", "jsonpath": "$.version" }
 			],
