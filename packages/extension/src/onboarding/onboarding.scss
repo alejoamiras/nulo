@@ -1,6 +1,7 @@
 /* Onboarding HTML entry — viewport-width body, not the popup's 360px lock.
- * Imports the global base tokens via @/assets/styles/_base.scss but skips
- * popup/index.scss (which pins body width to --base-width). */
+ * The global base tokens come from @nulo/design/base.css (imported in onboarding/index.ts);
+ * this file only adds the onboarding shell layout and skips popup/index.scss (which pins the
+ * body width to --base-width). */
 
 #app {
 	display: flex;
