@@ -3,6 +3,7 @@ import { ref } from "vue"
 import { TESTIDS } from "@/lib/testids"
 import AppToastRegion from "./components/AppToastRegion.vue"
 import BridgeFooter from "./components/BridgeFooter.vue"
+import ThemeToggle from "./components/ThemeToggle.vue"
 import Footer from "./components/Footer.vue"
 import BridgeView from "./views/BridgeView.vue"
 import FaucetView from "./views/FaucetView.vue"
@@ -21,6 +22,7 @@ const tab = ref<Tab>(defaultTab())
 
 <template>
 	<main class="page" :data-testid="TESTIDS.app">
+		<div class="topbar">
 		<nav class="tabs" :data-testid="TESTIDS.tabs">
 			<button
 				type="button"
@@ -53,6 +55,8 @@ const tab = ref<Tab>(defaultTab())
 				Fuel
 			</button>
 		</nav>
+			<ThemeToggle />
+		</div>
 
 		<!-- v-show (not v-if): keep both views mounted so each tab owns an independent,
 		     persistent wallet session (codex: two sessions, not one shared connection). -->
@@ -77,12 +81,18 @@ const tab = ref<Tab>(defaultTab())
 	gap: 32px;
 }
 
+.topbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+}
+
 .tabs {
 	display: flex;
 	gap: 4px;
 	padding: 4px;
-	background: var(--surface-raised, rgba(255, 255, 255, 0.04));
-	align-self: flex-start;
+	background: color-mix(in srgb, var(--txt-primary) 4%, transparent);
 }
 
 .tab {
@@ -104,6 +114,6 @@ const tab = ref<Tab>(defaultTab())
 
 .tab.active {
 	color: var(--txt-primary);
-	background: var(--surface-active, rgba(255, 255, 255, 0.1));
+	background: color-mix(in srgb, var(--txt-primary) 10%, transparent);
 }
 </style>

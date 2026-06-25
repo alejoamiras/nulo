@@ -12,6 +12,7 @@ declare global {
   const FEE_JUICE_PRICING: typeof import('../utils/fee-estimation').FEE_JUICE_PRICING
   const FEE_JUICE_USD_RATE: typeof import('../utils/fee-estimation').FEE_JUICE_USD_RATE
   const FEE_METHODS: typeof import('../utils/tx-enrichment').FEE_METHODS
+  const THEME_HINT_KEY: typeof import('../utils/general.js').THEME_HINT_KEY
   const TOAST_DURATION: typeof import('../composables/toast.js').TOAST_DURATION
   const balanceFormatted: typeof import('../utils/amount').balanceFormatted
   const browser: typeof import('webextension-polyfill')
@@ -50,6 +51,7 @@ declare global {
   const getCurrentScope: typeof import('vue').getCurrentScope
   const getCurrentWatcher: typeof import('vue').getCurrentWatcher
   const getDecimalSeparator: typeof import('../utils/amount').getDecimalSeparator
+  const getInitials: typeof import('../utils/string').getInitials
   const getLastActiveProfileId: typeof import('../utils/lastActiveProfile').getLastActiveProfileId
   const getMethodLabel: typeof import('../utils/tx-enrichment').getMethodLabel
   const getOriginLabel: typeof import('../utils/tx-enrichment').getOriginLabel
@@ -97,6 +99,7 @@ declare global {
   const parseAmountToBaseUnits: typeof import('../utils/amount').parseAmountToBaseUnits
   const parseContactsExport: typeof import('../utils/contacts-export-format').parseContactsExport
   const parseTransferIntent: typeof import('../utils/transfer-intent').parseTransferIntent
+  const persistThemeHint: typeof import('../utils/general.js').persistThemeHint
   const pickFile: typeof import('../utils/files').pickFile
   const pickPrimaryMethod: typeof import('../utils/tx-enrichment').pickPrimaryMethod
   const provide: typeof import('vue').provide
@@ -120,6 +123,7 @@ declare global {
   const toRaw: typeof import('vue').toRaw
   const toRef: typeof import('vue').toRef
   const toRefs: typeof import('vue').toRefs
+  const toRestoreError: typeof import('../utils/restore-error').toRestoreError
   const toValue: typeof import('vue').toValue
   const triggerRef: typeof import('vue').triggerRef
   const trimAddress: typeof import('../utils/string').trimAddress
@@ -140,6 +144,7 @@ declare global {
   const useFullBackupImport: typeof import('../composables/useFullBackupImport').useFullBackupImport
   const useFullscreenPopupSetting: typeof import('../composables/fullscreenPopupSetting').useFullscreenPopupSetting
   const useId: typeof import('vue').useId
+  const useIncomingTransfers: typeof import('../composables/useIncomingTransfers').useIncomingTransfers
   const useLink: typeof import('vue-router').useLink
   const useModel: typeof import('vue').useModel
   const useNotificationStore: typeof import('../stores/notification.store').useNotificationStore
@@ -170,9 +175,6 @@ declare global {
   export type { Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef } from 'vue'
   import('vue')
   // @ts-ignore
-  export type { ToastOptions } from '../composables/toast.d'
-  import('../composables/toast.d')
-  // @ts-ignore
   export type { UIDappMetadata, DappInteractionLike, UseDappInteractionPayloadOptions, UseDappInteractionPayloadResult } from '../composables/useDappInteractionPayload'
   import('../composables/useDappInteractionPayload')
   // @ts-ignore
@@ -190,6 +192,9 @@ declare global {
   // @ts-ignore
   export type { RestoreStatus, UseFullBackupImportOptions, UseFullBackupImportResult } from '../composables/useFullBackupImport'
   import('../composables/useFullBackupImport')
+  // @ts-ignore
+  export type { IncomingTransferServiceLike, ConfigServiceLike, UseIncomingTransfersOptions, UseIncomingTransfersResult } from '../composables/useIncomingTransfers'
+  import('../composables/useIncomingTransfers')
   // @ts-ignore
   export type { UseProfileCreateFlowOptions } from '../composables/useProfileCreateFlow'
   import('../composables/useProfileCreateFlow')
@@ -254,6 +259,7 @@ declare module 'vue' {
     readonly FEE_JUICE_PRICING: UnwrapRef<typeof import('../utils/fee-estimation')['FEE_JUICE_PRICING']>
     readonly FEE_JUICE_USD_RATE: UnwrapRef<typeof import('../utils/fee-estimation')['FEE_JUICE_USD_RATE']>
     readonly FEE_METHODS: UnwrapRef<typeof import('../utils/tx-enrichment')['FEE_METHODS']>
+    readonly THEME_HINT_KEY: UnwrapRef<typeof import('../utils/general.js')['THEME_HINT_KEY']>
     readonly TOAST_DURATION: UnwrapRef<typeof import('../composables/toast.js')['TOAST_DURATION']>
     readonly balanceFormatted: UnwrapRef<typeof import('../utils/amount')['balanceFormatted']>
     readonly browser: UnwrapRef<typeof import('webextension-polyfill')>
@@ -292,6 +298,7 @@ declare module 'vue' {
     readonly getCurrentScope: UnwrapRef<typeof import('vue')['getCurrentScope']>
     readonly getCurrentWatcher: UnwrapRef<typeof import('vue')['getCurrentWatcher']>
     readonly getDecimalSeparator: UnwrapRef<typeof import('../utils/amount')['getDecimalSeparator']>
+    readonly getInitials: UnwrapRef<typeof import('../utils/string')['getInitials']>
     readonly getLastActiveProfileId: UnwrapRef<typeof import('../utils/lastActiveProfile')['getLastActiveProfileId']>
     readonly getMethodLabel: UnwrapRef<typeof import('../utils/tx-enrichment')['getMethodLabel']>
     readonly getOriginLabel: UnwrapRef<typeof import('../utils/tx-enrichment')['getOriginLabel']>
@@ -339,6 +346,7 @@ declare module 'vue' {
     readonly parseAmountToBaseUnits: UnwrapRef<typeof import('../utils/amount')['parseAmountToBaseUnits']>
     readonly parseContactsExport: UnwrapRef<typeof import('../utils/contacts-export-format')['parseContactsExport']>
     readonly parseTransferIntent: UnwrapRef<typeof import('../utils/transfer-intent')['parseTransferIntent']>
+    readonly persistThemeHint: UnwrapRef<typeof import('../utils/general.js')['persistThemeHint']>
     readonly pickFile: UnwrapRef<typeof import('../utils/files')['pickFile']>
     readonly pickPrimaryMethod: UnwrapRef<typeof import('../utils/tx-enrichment')['pickPrimaryMethod']>
     readonly provide: UnwrapRef<typeof import('vue')['provide']>
@@ -362,6 +370,7 @@ declare module 'vue' {
     readonly toRaw: UnwrapRef<typeof import('vue')['toRaw']>
     readonly toRef: UnwrapRef<typeof import('vue')['toRef']>
     readonly toRefs: UnwrapRef<typeof import('vue')['toRefs']>
+    readonly toRestoreError: UnwrapRef<typeof import('../utils/restore-error')['toRestoreError']>
     readonly toValue: UnwrapRef<typeof import('vue')['toValue']>
     readonly triggerRef: UnwrapRef<typeof import('vue')['triggerRef']>
     readonly trimAddress: UnwrapRef<typeof import('../utils/string')['trimAddress']>
@@ -382,6 +391,7 @@ declare module 'vue' {
     readonly useFullBackupImport: UnwrapRef<typeof import('../composables/useFullBackupImport')['useFullBackupImport']>
     readonly useFullscreenPopupSetting: UnwrapRef<typeof import('../composables/fullscreenPopupSetting')['useFullscreenPopupSetting']>
     readonly useId: UnwrapRef<typeof import('vue')['useId']>
+    readonly useIncomingTransfers: UnwrapRef<typeof import('../composables/useIncomingTransfers')['useIncomingTransfers']>
     readonly useLink: UnwrapRef<typeof import('vue-router')['useLink']>
     readonly useModel: UnwrapRef<typeof import('vue')['useModel']>
     readonly useNotificationStore: UnwrapRef<typeof import('../stores/notification.store')['useNotificationStore']>

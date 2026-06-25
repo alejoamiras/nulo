@@ -354,7 +354,7 @@ onBeforeUnmount(() => {
 	transition: background 0.2s var(--bezier);
 
 	&:hover {
-		background: rgba(248, 241, 231, 0.08);
+		background: color-mix(in srgb, var(--nulo-accent) 8%, transparent);
 	}
 }
 </style>

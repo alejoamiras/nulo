@@ -266,7 +266,7 @@ watch(
 	width: 100%;
 }
 .contract_button:focus-visible {
-	outline: 2px solid var(--nulo-primary);
+	outline: 2px solid var(--nulo-accent);
 	outline-offset: 2px;
 }
 .contract_full_row {
@@ -294,7 +294,7 @@ watch(
 	justify-content: center;
 }
 .copy_button:focus-visible {
-	outline: 2px solid var(--nulo-primary);
+	outline: 2px solid var(--nulo-accent);
 	outline-offset: 2px;
 }
 .warning {

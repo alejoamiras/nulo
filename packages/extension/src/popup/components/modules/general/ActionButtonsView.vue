@@ -76,7 +76,7 @@ const handleReceive = () => {
 }
 
 .primary .label {
-	color: #0a0908;
+	color: var(--txt-inverse);
 }
 
 .secondary .label {

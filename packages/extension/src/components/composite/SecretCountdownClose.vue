@@ -55,7 +55,7 @@ const emit = defineEmits(["close", "disableAutoClose"])
 	border: none;
 
 	background: var(--nulo-accent);
-	color: #0a0908;
+	color: var(--txt-inverse);
 
 	font-family: var(--font-headline);
 	font-weight: 700;

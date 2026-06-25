@@ -24,7 +24,7 @@ export const Easings: Story = {
 			<div style="padding: 24px; color: var(--txt-primary); font-family: var(--font-body);">
 				<div style="margin-bottom: 16px;">
 					<code style="color: var(--txt-secondary); font-family: var(--font-mono); font-size: 12px;">${easings.bezier}</code>
-					<div style="color: var(--txt-tertiary); font-size: 12px; margin-top: 4px;">cubic-bezier(0.19, 1, 0.22, 1) — used by every transition in _base.scss</div>
+					<div style="color: var(--txt-tertiary); font-size: 12px; margin-top: 4px;">cubic-bezier(0.19, 1, 0.22, 1) — used by every transition in @nulo/design/base.css</div>
 				</div>
 				<div style="background: var(--nulo-surface); padding: 24px; border: 1px solid var(--nulo-outline); position: relative; overflow: hidden;">
 					<div id="motion-swatch" style="width: 48px; height: 48px; background: var(--nulo-accent); transition: transform 1.2s var(${easings.bezier}); transform: translateX(0);"></div>

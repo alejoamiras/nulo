@@ -148,7 +148,7 @@ const headline = computed(() => {
 .backup {
 	background: var(--txt-primary);
 	border: 1px solid var(--txt-primary);
-	color: var(--nulo-bg, #000);
+	color: var(--txt-inverse);
 	font: 700 11px/1 var(--font-mono);
 	letter-spacing: 0.06em;
 	cursor: pointer;

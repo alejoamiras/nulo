@@ -68,6 +68,8 @@
 }
 
 :root {
+	color-scheme: dark;
+
 	--base-width: 360px;
 	--base-height: 600px;
 
@@ -129,14 +131,36 @@
 	--card-bg: #fff;
 	--tooltip-bg: #f3f3f3;
 	--dropdown-bg: #fff;
-	--border: var(--nulo-surface-highest);
-	--border-hovered: var(--nulo-surface-highest);
+
+	/* Direction A — warm chromatic. These 8 brand tokens were MISSING from the light block (they fell
+	 * through to the dark :root values, which is what broke the light theme). The accent stays a
+	 * saturated colour (NOT near-black ink) so it still reads as a link / active-tab / toggle-ON across
+	 * its 43 text sites + 27 fills. */
+	--nulo-surface: #ffffff;
+	--nulo-surface-low: #f0efec;
+	--nulo-surface-high: #e7e5e1;
+	--nulo-surface-highest: #dcd9d3;
+	--nulo-accent: #a8480c;
+	--nulo-outline: #c9c5bd;
+	--nulo-border: #d8d4cc;
+	--nulo-secondary: #6b655c;
+
+	/* Explicit values — replaces the bug-on-bug `var(--nulo-surface-highest)` alias (a DARK token). */
+	--border: rgba(124, 116, 104, 0.3);
+	--border-hovered: rgba(124, 116, 104, 0.55);
+
+	color-scheme: light;
 
 	--txt-primary: rgba(0, 0, 0, 88%);
 	--txt-secondary: rgba(0, 0, 0, 60%);
-	--txt-body: rgba(0, 0, 0, 45%);
-	--txt-tertiary: rgba(0, 0, 0, 35%);
-	--txt-support: rgba(0, 0, 0, 25%);
+	/* Muted scale raised to clear WCAG-AA on white-ish surfaces (down to surface-high). Black-on-white
+	 * at low alpha is far weaker than dark-mode's light-on-dark, so a naive inversion left body/tertiary
+	 * below AA — and these tokens carry security copy (scam-token trust prompt, "irreversible" confirm,
+	 * reset guidance). The light muted scale necessarily compresses (the AA floor on white sits near
+	 * secondary). The contrast gate enforces these in light. */
+	--txt-body: rgba(0, 0, 0, 58%);
+	--txt-tertiary: rgba(0, 0, 0, 56%);
+	--txt-support: rgba(0, 0, 0, 56%);
 	--txt-white: rgba(255, 255, 255, 95%);
 	--txt-inverse: rgba(255, 255, 255, 90%);
 
@@ -172,6 +196,8 @@
 }
 
 [theme="dark"] {
+	color-scheme: dark;
+
 	--base-width: 360px;
 	--base-height: 600px;
 

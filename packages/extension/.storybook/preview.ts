@@ -67,6 +67,8 @@ setup((app) => {
 	ensureChromeStub()
 })
 
+const THEMES = ["dark", "light"] as const
+
 const preview: Preview = {
 	parameters: {
 		controls: {
@@ -75,27 +77,36 @@ const preview: Preview = {
 				date: /Date$/i,
 			},
 		},
-		// Storybook's default canvas is white. The brutalist palette in
-		// _base.scss assumes a dark background (--app-bg: #0a0908) — text,
-		// spinner color, default icon color all render light-on-light when
-		// the canvas is white. Match the app's actual background here.
-		// Light theme switching arrives later (see STATUS.md follow-ups).
-		backgrounds: {
-			default: "app",
-			values: [
-				{ name: "app", value: "#0a0908" },
-				{ name: "light", value: "#f5f5f7" },
-			],
+	},
+	// The toolbar drives the real `theme` attribute on <html> (NOT just a canvas-background swap),
+	// so every primitive renders against its actual light/dark token values — the same mechanism the
+	// popup uses. This is the Storybook theme-matrix the light-theme work is signed off against.
+	globalTypes: {
+		theme: {
+			description: "Theme (light/dark)",
+			defaultValue: "dark",
+			toolbar: {
+				title: "Theme",
+				icon: "contrast",
+				items: THEMES.map((value) => ({ value, title: value[0].toUpperCase() + value.slice(1) })),
+				dynamicTitle: true,
+			},
 		},
 	},
 	decorators: [
-		// Apply --app-bg as the wrapper background. Uses the live CSS var
-		// so a future theme switcher (data-theme="light") will track.
-		(story) => ({
-			components: { story },
-			template:
-				'<div style="background: var(--app-bg); padding: 24px; min-height: 100vh; color: var(--txt-primary);"><story /></div>',
-		}),
+		(story, context) => {
+			// Set the real attribute so `[theme="…"]`-gated component styles AND token values both apply.
+			if (typeof document !== "undefined") {
+				const theme = (context.globals.theme as string) ?? "dark"
+				document.documentElement.setAttribute("theme", theme)
+			}
+			// The wrapper bg/text use live CSS vars, so they track whatever theme the attribute selects.
+			return {
+				components: { story },
+				template:
+					'<div style="background: var(--app-bg); padding: 24px; min-height: 100vh; color: var(--txt-primary);"><story /></div>',
+			}
+		},
 	],
 }
 

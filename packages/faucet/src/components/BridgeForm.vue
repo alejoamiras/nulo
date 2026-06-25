@@ -629,7 +629,7 @@ function fmt(b: bigint | null): string {
 }
 
 .fuel-out[data-state="error"] {
-	color: var(--warn, #e0a020);
+	color: var(--orange);
 	font-weight: 500;
 }
 

@@ -2,6 +2,9 @@
 <html lang="en">
 	<head>
 		<meta charset="UTF-8" />
+		<!-- Pre-paint theme boot (render-blocking, CSP-safe external script) — sets <html theme> before
+		     first paint so light-mode users never flash dark. See public/theme-boot.js. -->
+		<script src="/theme-boot.js"></script>
 		<link rel="icon" type="image/svg+xml" href="/logo.svg" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>%HTML_TITLE%</title>
