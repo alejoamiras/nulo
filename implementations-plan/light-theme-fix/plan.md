@@ -188,11 +188,13 @@ All figures **computed (WCAG 2.x)**, not eyeballed: ink/fill/secondary/inverse p
 - Token hygiene: `--nulo-bg`→`var(--txt-inverse)`; `--surface-raised/active`→`var(--nulo-surface-high/highest)`; `--warn`→`var(--yellow)`; focus ring stays `var(--nulo-accent)` (now chromatic/visible).
 - **Validation gate:** `bun run --cwd packages/faucet test` (useTheme unit incl. **allowlist-rejection** + toggle component + `app.css.parity` green; undefined-var guard green for the faucet ghosts); `bun run --cwd packages/faucet typecheck` + `bun run lint`; manual smoke all 3 tabs in Light/Dark/System, hard-reload (no FOUC), persistence. Layers: unit + component + static + manual.
 
-### Phase 4 — Cross-cutting validation
+### Phase 4 — Cross-cutting validation ✓
+> **✓ COMPLETE.** `audit:vue` GREEN (typecheck:all + extension 2598 + lint + build); design gate GREEN (270, run explicitly per H1); build-storybook GREEN; smoke e2e 67 pass / 1 pre-existing load-flake (`wallet-lock` — passes in isolation, not a regression; my diff doesn't touch the lock flow). Manual security/affordance smoke handed to the user. See `lessons/phase-4.md`.
 - Storybook theme-matrix as the sign-off artifact; extension manual smoke across **security-relevant surfaces** in light: send-confirm (amounts/fees), dApp-connect, passkey ceremony dialog, address displays, JSON/Logs viewers, danger/warning banners, **and the toggle/active-state affordance** (verify links read as links, ON toggles read as on — finding H2).
 - **Validation gate (finding H1 — corrected):** `bun run audit:vue` (typecheck:all → **extension** test → lint → build) **AND `bun run --cwd packages/design test`** (the contrast gate + undefined-var guard — `audit:vue` runs *extension tests only* and does **not** execute the design package, so the oracle must be invoked explicitly; equivalently `bun run test:all`); `bun run --cwd packages/extension build-storybook` (light matrix clean); `bun run test:e2e` (smoke). Layers: typecheck + unit + component + build + smoke e2e + manual security/affordance matrix.
 
-### Phase 5 — Cleanup + final gate
+### Phase 5 — Cleanup + final gate ✓
+> **✓ COMPLETE.** Deleted the dead `_base/_flex/_text.scss` trio (verified unimported) + fixed 2 stale comments; build green after deletion. Post-impl sequence (`/code-review` + codex audit + final gates) runs next. See `lessons/phase-5.md`.
 - Delete dead `_base.scss`/`_flex.scss`/`_text.scss`; fix the stale `onboarding.scss` comment; confirm via build nothing referenced them.
 - **Recommend (follow-up):** wire `bun run test:all` (or the design contrast gate) into the CI regression aggregate so the dark-freeze guard runs on every PR, not just locally (closes the H1 gap permanently). (Optional Asks: `:root` fallbacks for `--json-*`/`--log-*`; onboarding reading the persisted theme.)
 - **Validation gate:** `bun run audit:vue` + `bun run --cwd packages/design test` + `bun run test:e2e` green; final manual smoke of extension (popup + onboarding) and faucet in light/dark/system. Update `implementations-plan/index.md` to completed. Layers: full.
