@@ -153,9 +153,14 @@
 
 	--txt-primary: rgba(0, 0, 0, 88%);
 	--txt-secondary: rgba(0, 0, 0, 60%);
-	--txt-body: rgba(0, 0, 0, 45%);
-	--txt-tertiary: rgba(0, 0, 0, 35%);
-	--txt-support: rgba(0, 0, 0, 25%);
+	/* Muted scale raised to clear WCAG-AA on white-ish surfaces (down to surface-high). Black-on-white
+	 * at low alpha is far weaker than dark-mode's light-on-dark, so a naive inversion left body/tertiary
+	 * below AA — and these tokens carry security copy (scam-token trust prompt, "irreversible" confirm,
+	 * reset guidance). The light muted scale necessarily compresses (the AA floor on white sits near
+	 * secondary). The contrast gate enforces these in light. */
+	--txt-body: rgba(0, 0, 0, 58%);
+	--txt-tertiary: rgba(0, 0, 0, 56%);
+	--txt-support: rgba(0, 0, 0, 56%);
 	--txt-white: rgba(255, 255, 255, 95%);
 	--txt-inverse: rgba(255, 255, 255, 90%);
 

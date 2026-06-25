@@ -71,6 +71,25 @@ describe("theme contrast — light, enforce-only pairs", () => {
 	}
 })
 
+// Muted-text tokens carry real + SECURITY copy (the scam-token trust prompt, the "irreversible"
+// confirm, reset guidance — IncomingTrustPopup/ConfirmPopup/reset). They MUST clear AA in light on
+// every surface they sit on. This is the gate gap the post-impl codex audit caught (HIGH-1/HIGH-2):
+// the original table only checked primary/secondary/inverse, so sub-AA body/tertiary shipped green.
+// NOTE: dark's muted scale (body/tertiary/support at low alpha) is a PRE-EXISTING, frozen, de-emphasized
+// design that is intentionally below AA on dark surfaces — it is out of this work's scope (dark frozen)
+// and is therefore NOT asserted here. We only guarantee the NEW light theme is AA.
+const LIGHT_MUTED = ["--txt-body", "--txt-tertiary", "--txt-support"]
+const LIGHT_SURFACES = ["--card-bg", "--nulo-surface", "--nulo-surface-low", "--nulo-surface-high"]
+describe("theme contrast — light muted text on surfaces (required)", () => {
+	for (const fg of LIGHT_MUTED) {
+		for (const bg of LIGHT_SURFACES) {
+			test(`light: ${fg} on ${bg} >= ${AA_TEXT}:1`, () => {
+				expect(contrast(fg, bg, "light")).toBeGreaterThanOrEqual(AA_TEXT)
+			})
+		}
+	}
+})
+
 // Regression: resolveColor must tolerate both comma and CSS Color 4 space-separated rgb() syntax.
 describe("resolveColor rgb() parsing", () => {
 	test("parses comma and space-separated rgb/rgba", () => {
