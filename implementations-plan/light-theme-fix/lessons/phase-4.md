@@ -15,5 +15,13 @@ The smoke suite is environmentally flaky in this setup. Evidence:
 - **67–69/76 pass every run, INCLUDING popup boot** → `theme-boot.js` doesn't break the popup; the theme applies.
 - Smoke e2e is **advisory** per CLAUDE.md, with standing de-flake plans (`network-e2e-required`, `passkey-e2e`). The `test:e2e` exit-1 is the known flake, not a light-theme regression. Individual flaky tests exit 0 in isolation (e.g. `wallet-lock` 1/1 pass).
 
+## DEFINITIVE PROOF — the e2e failure is pre-existing on `dev` (gold-standard control)
+After 7 runs + `--retry=4` narrowed it to ONE test (`passkey-backup > "modal appears + status card + CTAs become available"` — a 240s-timeout WebAuthn-registration + backup-crypto flow), I ran the control: checked out clean **`dev`** (zero light-theme changes), rebuilt the extension, ran that exact test:
+```
+git checkout dev → bun run build:chrome → vitest -t "modal appears"
+→ Tests  1 failed | 75 skipped (76)        # FAILS ON DEV TOO, with none of my code
+```
+**Airtight: the failure reproduces on `dev` without any light-theme change.** It's a pre-existing, environment-sensitive flake in the headless WebAuthn/backup-crypto path on this machine — 100% independent of this work (the test asserts only backup-logic/WebAuthn testids, all preserved by the CSS-only diff). The literal `test:e2e` exit-0 must come from a clean CI runner; locally it's blocked by a `dev`-level pre-existing condition. (Branch restored + extension rebuilt afterward; 20 commits intact, working tree clean.)
+
 ## Manual smoke (HANDED TO THE USER — agent can't render UI)
 The plan's security/affordance manual matrix in light mode is the user's to run: send-confirm (amounts/fees), dApp-connect, passkey ceremony dialog, address displays, JSON/Logs viewers, danger/warning banners, and the affordance check (links read as links, ON toggles read as on). Surfaced in the wrap-up.
