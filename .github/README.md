@@ -4,15 +4,17 @@ This directory holds the GitHub Actions wiring. The contributor-facing guide liv
 
 ## Status check matrix
 
-These `status` aggregators are what branch protection on `main` / `dev` requires (where required — see "Branch protection" in [`CI.md`](../CI.md)).
+These `status` aggregators are what branch protection on `main` / `dev` requires. Branch protection matches the **produced check-run name**, which for a normal GitHub Actions job is its bare `name:` — there is no `Workflow / Status` form (that only exists for reusable `uses:` jobs). The old required contexts `Quality / Status` etc. were hand-typed phantoms that never matched a produced check, hanging every required gate `Expected` and forcing `--admin` on every merge; the aggregators were renamed to unique bare names and the required contexts re-pointed (2026-06-24 — see [`CI.md`](../CI.md#branch-protection) + [`../implementations-plan/required-check-mismatch/`](../implementations-plan/required-check-mismatch/)).
 
-| Workflow | Runs when | What it checks |
-|---|---|---|
-| `pr-quick.yml` | every PR to `main` / `dev` | commitlint, lint, typecheck, units, chrome+firefox build |
-| `pr-smoke-e2e.yml` | PR to `main`, OR `e2e:smoke` label, OR `smoke-surface` paths-filter | chrome build + puppeteer smoke (18 files, 67 tests, 7 quarantined) |
-| `pr-network-e2e.yml` | PR to `main`, OR `e2e:network` label, OR `extension-network` paths-filter | full network e2e (anvil + Aztec sandbox + playground) |
-| `actionlint.yml` | when `.github/workflows/**` or shell scripts change | actionlint + shellcheck |
-| `release.yml` | manual `workflow_dispatch` only | full quality bar + build + smoke against artifact + (optional) tag + GitHub Release |
+| Workflow | Required check-run | Required on | Runs when | What it checks |
+|---|---|---|---|---|
+| `pr-quick.yml` | `quality-status` | dev + main | every PR to `main` / `dev` | commitlint, lint, typecheck, units, chrome+firefox build |
+| `pr-smoke-e2e.yml` | `smoke-e2e-status` | dev + main | PR to `main`, OR `e2e:smoke` label, OR `smoke-surface` paths-filter | chrome build + puppeteer smoke (18 files, 67 tests, 7 quarantined) |
+| `pr-network-e2e.yml` | `network-e2e-status` | dev + main | PR to `main`, OR `e2e:network` label, OR `extension-network` paths-filter | full network e2e (anvil + Aztec sandbox + playground) |
+| `actionlint.yml` | `Status` (not required) | — | when `.github/workflows/**` or shell scripts change | actionlint + shellcheck |
+| `release.yml` | `status` (not required) | — | manual `workflow_dispatch` only | full quality bar + build + smoke against artifact + (optional) tag + GitHub Release |
+
+Each required check-run is `app_id`-pinned to GitHub Actions in `required_status_checks.checks`, so only a check produced by Actions (not a same-named check from another app) can satisfy the gate.
 
 ## Reusable workflows + composite actions
 
