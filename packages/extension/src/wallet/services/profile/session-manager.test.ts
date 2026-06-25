@@ -453,7 +453,7 @@ describe("SessionManager", () => {
 			// the chrome shape via its own global. Simpler: drive via the
 			// fakeBrowser global the adapter uses.
 			const { fakeBrowser } = await import("@webext-core/fake-browser")
-			return fakeBrowser.alarms.get(SESSION_TTL_ALARM_NAME)
+			return fakeBrowser.alarms.get(SESSION_TTL_ALARM_NAME) as Promise<chrome.alarms.Alarm | undefined>
 		}
 
 		// Helper: directly trigger the alarm event with a given scheduledTime.
