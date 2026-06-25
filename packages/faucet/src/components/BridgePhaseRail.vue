@@ -270,7 +270,7 @@ function liveElapsed(startedAt?: number): string | null {
 
 .retry:hover {
 	background: var(--red);
-	color: var(--nulo-bg, #000);
+	color: var(--txt-inverse);
 }
 
 /* ---------- compact rail (journal cards) ---------- */

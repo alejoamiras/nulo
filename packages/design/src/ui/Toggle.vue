@@ -97,7 +97,7 @@ const toggle = () => {
 
 .wrapper.active .slider {
 	left: 15px;
-	background: #0a0908;
+	background: var(--txt-inverse);
 }
 
 .wrapper:active .slider {

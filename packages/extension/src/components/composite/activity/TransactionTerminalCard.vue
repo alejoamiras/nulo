@@ -91,7 +91,7 @@ defineProps({
 	color: var(--yellow);
 }
 .subtitle_red {
-	color: var(--nulo-error, #f85149);
+	color: var(--red);
 }
 
 /* Title-trailing chip + separator. Mirrors the awaiting + settled cards

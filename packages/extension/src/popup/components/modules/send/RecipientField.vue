@@ -165,7 +165,7 @@ onBeforeUnmount(() => {
 }
 
 .recipient_wrap :global(input::placeholder) {
-	color: #363433;
+	color: var(--txt-tertiary);
 }
 
 .contacts_wrapper {

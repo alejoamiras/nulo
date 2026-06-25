@@ -49,6 +49,7 @@ export const TESTIDS = {
 	tabFaucet: "fa-tab-faucet",
 	tabBridge: "fa-tab-bridge",
 	tabFuel: "fa-tab-fuel",
+	themeToggle: "fa-theme-toggle",
 	bridgeView: "fa-bridge-view",
 
 	// Fuel - direct L1 fee-asset → L2 Fee Juice (the third tab)

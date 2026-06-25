@@ -64,7 +64,7 @@ const handleSelectToken = () => {
 	transition: all 0.2s var(--bezier);
 
 	&:hover {
-		background: rgba(29, 27, 26, 0.5);
+		background: color-mix(in srgb, var(--nulo-surface-low) 50%, transparent);
 	}
 }
 
@@ -81,7 +81,7 @@ const handleSelectToken = () => {
 	font-family: var(--font-headline);
 	font-weight: 700;
 	font-size: 16px;
-	color: #0a0908;
+	color: var(--txt-inverse);
 }
 
 .type_icon {

@@ -71,7 +71,7 @@ const emit = defineEmits(["update:modelValue"])
 	color: var(--nulo-secondary);
 
 	background: transparent;
-	border: 1px solid #231f1c;
+	border: 1px solid var(--nulo-border);
 
 	transition: all 0.15s ease;
 

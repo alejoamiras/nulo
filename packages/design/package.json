@@ -10,7 +10,8 @@
 		"./core/*": "./src/core/*",
 		"./ui/*": "./src/ui/*",
 		"./composite/*": "./src/composite/*",
-		"./composables/*": "./src/composables/*"
+		"./composables/*": "./src/composables/*",
+		"./testing": "./src/testing.ts"
 	},
 	"scripts": {
 		"gen:tokens": "bun scripts/gen-tokens.ts",

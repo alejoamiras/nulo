@@ -221,14 +221,14 @@ const rel = computed(() => {
 /** VARIANTS */
 .wrapper.primary {
 	background: var(--nulo-accent);
-	color: #0a0908;
-	fill: #0a0908;
+	color: var(--txt-inverse);
+	fill: var(--txt-inverse);
 	font-family: var(--font-headline);
 	font-weight: 700;
 	text-transform: uppercase;
 }
 .wrapper.primary:hover:not(.disabled):not(.loading) {
-	background: #fff;
+	background: color-mix(in srgb, var(--nulo-accent), var(--txt-primary) 18%);
 }
 .wrapper.primary:active:not(.disabled):not(.loading) {
 	transform: scale(0.98);
@@ -287,7 +287,7 @@ const rel = computed(() => {
 	transition: color 0.2s ease;
 }
 .wrapper.text:hover {
-	color: #fff;
+	color: var(--txt-primary);
 }
 .wrapper.text.small {
 	font-size: 12px;
@@ -299,8 +299,8 @@ const rel = computed(() => {
 .wrapper.cta {
 	width: 100%;
 	background: var(--nulo-accent);
-	color: #0a0908;
-	fill: #0a0908;
+	color: var(--txt-inverse);
+	fill: var(--txt-inverse);
 	font-family: var(--font-headline);
 	font-weight: 700;
 	font-size: 14px;
@@ -310,7 +310,7 @@ const rel = computed(() => {
 	border: none;
 }
 .wrapper.cta:hover:not(.disabled):not(.loading) {
-	background: #fff;
+	background: color-mix(in srgb, var(--nulo-accent), var(--txt-primary) 18%);
 }
 .wrapper.cta:active:not(.disabled):not(.loading) {
 	background: var(--txt-primary);
@@ -344,8 +344,8 @@ const rel = computed(() => {
 .wrapper.cta_destructive {
 	width: 100%;
 	background: var(--red);
-	color: #fff;
-	fill: #fff;
+	color: var(--txt-white);
+	fill: var(--txt-white);
 	font-family: var(--font-headline);
 	font-weight: 700;
 	font-size: 14px;

@@ -194,7 +194,7 @@ const amountStr = computed(() => (displayAmount.value !== null ? String(displayA
 	transition: background 0.2s var(--bezier);
 
 	&:hover {
-		background: rgba(29, 27, 26, 0.5);
+		background: color-mix(in srgb, var(--nulo-surface-low) 50%, transparent);
 	}
 }
 
