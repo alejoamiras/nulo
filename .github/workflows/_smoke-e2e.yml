@@ -32,7 +32,7 @@ jobs:
     env:
       EXTENSION_PATH: ${{ inputs.extension_path }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
 

@@ -45,7 +45,7 @@ runs:
 
     - name: Cache accelerator-server binary
       id: cache
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ${{ steps.paths.outputs.bin_dir }}
         key: ${{ runner.os }}-accelerator-server-${{ inputs.version }}-${{ inputs.expected_sha256 }}
