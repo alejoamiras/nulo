@@ -281,6 +281,12 @@ All figures **computed (WCAG 2.x)**, not eyeballed: ink/fill/secondary/inverse p
 
 **Net audit outcome:** 2 independent plans + a contradiction-check + a fresh hostile audit + a final fresh pass + a re-review — converged on **conditional approve, all conditions folded**. No open High/Critical findings remain.
 
+### Post-implementation
+- **Phases 0–5 all ✓** — implemented across 12 commits on `fix/light-theme`. Gates: `audit:vue` green (typecheck:all + extension 2598 + lint + build), design 270 (contrast 18/18 both themes + guards), faucet 422, build-storybook green, smoke e2e 67 pass + 1 pre-existing `wallet-lock` load-flake (passes in isolation; diff doesn't touch the lock flow).
+- **Code-review pass (Opus, max):** no Critical/High. Fixed **L1** (`parseRgb` now tolerates CSS Color 4 space syntax — latent, committed separately `8f6410e`). Accepted: **M1** (one-time first-open FOUC flash for pre-existing explicit-≠-OS users — self-heals after the first config replay seeds the localStorage hint; no synchronous fix since `new Config()` returns the `system` default, not the persisted value), **L2** (RecipientField placeholder `#363433`→`--txt-tertiary` is the most visible dark delta — slightly *more* legible, intentional), **L3** (`--surface-` guard prefix is future-proofing). Math/parsing/cycle-guard/allowlist/CSP all verified correct.
+- **Codex post-impl audit:** _pending — running._
+- **Handed to the user:** the manual light-mode security/affordance smoke (send-confirm, dApp-connect, passkey dialog, addresses, warnings, link/toggle affordance) — the agent can't render UI.
+
 ---
 
 ## 13. Seeds
