@@ -34,20 +34,21 @@
 		"@defi-wonderland/aztec-standards": "https://github.com/defi-wonderland/aztec-standards/releases/download/prerelease-334c38d/defi-wonderland-aztec-standards-5.0.0-rc.1-prerelease.334c38d.tgz",
 		"@nulo/bridge-core": "workspace:*",
 		"@nulo/design": "workspace:*",
-		"viem": "^2.43.0",
-		"vue": "^3.5.18"
+		"viem": "^2.52.2",
+		"vue": "^3.5.38",
+		"zod": "^4.4.3"
 	},
 	"devDependencies": {
-		"@types/node": "^24.2.1",
-		"@vitejs/plugin-vue": "^6.0.1",
-		"@vue/compiler-sfc": "^3.5.18",
-		"@vue/test-utils": "^2.4.9",
+		"@types/node": "^24.13.2",
+		"@vitejs/plugin-vue": "^6.0.7",
+		"@vue/compiler-sfc": "^3.5.38",
+		"@vue/test-utils": "^2.4.11",
 		"jsdom": "^29.1.1",
 		"typescript": "^6.0.3",
-		"unplugin-vue-components": "^32.0.0",
-		"vite": "^8.0.11",
+		"unplugin-vue-components": "^32.1.0",
+		"vite": "^8.0.16",
 		"vite-plugin-node-polyfills": "^0.28.0",
-		"vitest": "^4.1.5",
-		"vue-tsc": "^3.0.5"
+		"vitest": "^4.1.9",
+		"vue-tsc": "^3.3.5"
 	}
 }

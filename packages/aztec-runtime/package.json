@@ -32,11 +32,11 @@
 		"@nulo/extension-messaging": "workspace:*",
 		"@nulo/wallet-core": "workspace:*",
 		"@wonderland/aztec-fee-payment": "https://github.com/defi-wonderland/aztec-fee-payment/releases/download/prerelease-fb6f196/wonderland-aztec-fee-payment-5.0.0-rc.1-prerelease.fb6f196.tgz",
-		"zod": "^4"
+		"zod": "^4.4.3"
 	},
 	"devDependencies": {
-		"chrome-types": "^0.1.370",
+		"chrome-types": "^0.1.429",
 		"typescript": "^6.0.3",
-		"vitest": "^4.1.5"
+		"vitest": "^4.1.9"
 	}
 }

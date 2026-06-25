@@ -1,5 +1,5 @@
 {
-	"$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+	"$schema": "https://biomejs.dev/schemas/2.5.0/schema.json",
 	"vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "dev" },
 	"files": {
 		"ignoreUnknown": false,
@@ -8,6 +8,7 @@
 			"!**/node_modules",
 			"!**/dist",
 			"!**/target",
+			"!**/*.svg",
 			"!**/packages/extension/src/types",
 			"!**/packages/faucet/src/types"
 		]
@@ -27,11 +28,12 @@
 	"linter": {
 		"enabled": true,
 		"rules": {
-			"recommended": true,
+			"preset": "recommended",
 			"style": {
 				"noNonNullAssertion": "off",
 				"noParameterAssign": "off",
-				"useEnumInitializers": "off"
+				"useEnumInitializers": "off",
+				"useVueMultiWordComponentNames": "off"
 			},
 			"performance": {
 				"noDelete": "info",

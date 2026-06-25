@@ -28,11 +28,11 @@
 		}
 	},
 	"devDependencies": {
-		"@webext-core/fake-browser": "^1.3.4",
-		"chrome-types": "^0.1.370",
+		"@webext-core/fake-browser": "^1.5.2",
+		"chrome-types": "^0.1.429",
 		"jsdom": "^29.1.1",
 		"typescript": "^6.0.3",
-		"vitest": "^4.1.5",
-		"zod": "^4"
+		"vitest": "^4.1.9",
+		"zod": "^4.4.3"
 	}
 }
