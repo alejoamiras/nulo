@@ -52,7 +52,8 @@ function parseHex(hex: string): Rgba {
 function parseRgb(str: string): Rgba {
 	const parts = str
 		.replace(RGB, "$1")
-		.split(/[,/]/)
+		// Tolerate both comma syntax `rgb(1, 2, 3)` and CSS Color 4 space syntax `rgb(1 2 3 / 95%)`.
+		.split(/[,/\s]+/)
 		.map((s) => s.trim())
 		.filter(Boolean)
 	const chan = (s: string) => (s.endsWith("%") ? Math.round((Number.parseFloat(s) / 100) * 255) : Number.parseFloat(s))

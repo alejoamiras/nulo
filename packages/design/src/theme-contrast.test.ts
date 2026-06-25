@@ -71,6 +71,15 @@ describe("theme contrast — light, enforce-only pairs", () => {
 	}
 })
 
+// Regression: resolveColor must tolerate both comma and CSS Color 4 space-separated rgb() syntax.
+describe("resolveColor rgb() parsing", () => {
+	test("parses comma and space-separated rgb/rgba", () => {
+		expect(resolveColor("rgba(124, 116, 104, 0.3)", {})).toEqual({ r: 124, g: 116, b: 104, a: 0.3 })
+		expect(resolveColor("rgb(255 255 255 / 50%)", {})).toEqual({ r: 255, g: 255, b: 255, a: 0.5 })
+		expect(resolveColor("#a8480c", {})).toEqual({ r: 168, g: 72, b: 12, a: 1 })
+	})
+})
+
 // Phase-2 sanity: the formerly-broken tokens now resolve to their LIGHT values, not the dark fallthrough.
 describe("light palette landed (was the root cause)", () => {
 	test("nulo-surface is now the light value, not the dark fallthrough", () => {
