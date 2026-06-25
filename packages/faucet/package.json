@@ -35,7 +35,8 @@
 		"@nulo/bridge-core": "workspace:*",
 		"@nulo/design": "workspace:*",
 		"viem": "^2.52.2",
-		"vue": "^3.5.38"
+		"vue": "^3.5.38",
+		"zod": "^4.4.3"
 	},
 	"devDependencies": {
 		"@types/node": "^24.13.2",

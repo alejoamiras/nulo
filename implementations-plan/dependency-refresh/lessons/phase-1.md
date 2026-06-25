@@ -30,3 +30,13 @@ Also bumped biome `$schema` 2.4.15→2.5.0 to match.
 ## Gate — PASS
 
 `bun install --frozen-lockfile` 0 · audit 186/186 ≥7d · `@types/node` ≤24 · `typecheck:all` 0 · `lint` 0 (0 errors; 55 pre-existing non-blocking warnings: useArrowFunction ×16, noUnusedVariables ×2, useNodejsImportProtocol ×1, …) · `CI=true test:all` 0 (extension 2597, faucet 413, bridge-core 127, all suites green).
+
+## Post-impl codex audit (session 019efd5e) — `changes-needed` → addressed
+
+1. **Under-declarations (FIXED).** faucet + playground import `zod` (`nulo-schema-patch.ts`) without declaring it; design's `base.css.test.ts` uses `node:*` without `@types/node`. They worked only via hoisting. Since this PR already edits those manifests, declared them: `zod ^4.4.3` (faucet, playground) + `@types/node ^24.13.2` (design). `bun install` dedup'd to the existing aged resolutions — no new installs, no version bumps, `@types/node` ≤24; frozen 0; gates re-run green.
+2. **`useVueMultiWordComponentNames: off` global (KEPT — evidence-based disagreement).** Codex wanted it scoped to design. But the single-word convention is REPO-WIDE: `App.vue`, `Footer.vue`, `Navigation.vue` (faucet/landing) + `Header.vue`/`Divider.vue` (extension) are also single-word, beyond the 15 design primitives. Scoping would whack-a-mole legit names + re-introduce warnings. Global off is the consistent response to the established convention.
+3. **`!**/*.svg` (KEPT).** Codex rated it low-risk itself; no standalone `.svg` is lint-worthy source (inline `.vue` SVGs are still checked). Accepted tradeoff.
+
+Verified fine by codex: redundant-role drop; the Alarm test-cast (the real port only reads `{ name, scheduledTime }` — `wallet-core/src/ports/alarms-port.ts:21`), so it masks nothing; the biome `$schema`/`preset` migration; and the one-shot refresh + full-diff min-age audit as the bun #25305 backstop.
+
+(Noted, out of scope for this PR: the committed `packages/extension/src/types/auto-imports.d.ts` is stale since #100 — source symbols `getInitials`/`toRestoreError`/`useIncomingTransfers` were added without regenerating; any build regenerates it. A separate `chore: regen auto-imports` should land it.)

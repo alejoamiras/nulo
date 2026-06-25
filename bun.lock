@@ -5,9 +5,9 @@
     "": {
       "name": "nulo",
       "devDependencies": {
-        "@biomejs/biome": "^2.4.15",
-        "@commitlint/cli": "^21.0.1",
-        "@commitlint/config-conventional": "^21.0.1",
+        "@biomejs/biome": "^2.5.0",
+        "@commitlint/cli": "^21.0.2",
+        "@commitlint/config-conventional": "^21.0.2",
       },
     },
     "packages/aztec-runtime": {
@@ -65,6 +65,7 @@
       "name": "@nulo/design",
       "version": "0.1.0",
       "devDependencies": {
+        "@types/node": "^24.13.2",
         "@vitejs/plugin-vue": "^6.0.7",
         "@vue/compiler-sfc": "^3.5.38",
         "@vue/test-utils": "^2.4.11",
@@ -205,6 +206,7 @@
         "@nulo/design": "workspace:*",
         "viem": "^2.52.2",
         "vue": "^3.5.38",
+        "zod": "^4.4.3",
       },
       "devDependencies": {
         "@types/node": "^24.13.2",
@@ -241,6 +243,7 @@
         "@aztec/stdlib": "5.0.0-rc.1",
         "@aztec/wallet-sdk": "5.0.0-rc.1",
         "@defi-wonderland/aztec-standards": "https://github.com/defi-wonderland/aztec-standards/releases/download/prerelease-334c38d/defi-wonderland-aztec-standards-5.0.0-rc.1-prerelease.334c38d.tgz",
+        "zod": "^4.4.3",
       },
       "devDependencies": {
         "typescript": "^6.0.3",
