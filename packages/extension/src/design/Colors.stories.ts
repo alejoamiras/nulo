@@ -6,7 +6,7 @@
  * tokens and verifying theme overrides at a glance.
  */
 import type { Meta, StoryObj } from "@storybook/vue3-vite"
-import { brand, button, colors, surfaces, text } from "./tokens"
+import { brand, colors, surfaces, text } from "./tokens"
 
 const meta: Meta = {
 	title: "Design / Colors",
@@ -54,12 +54,6 @@ export const Brand: Story = {
 export const Text: Story = {
 	render: () => ({
 		template: swatchSheet(Object.entries(text) as Array<[string, string]>),
-	}),
-}
-
-export const Button: Story = {
-	render: () => ({
-		template: swatchSheet(Object.entries(button) as Array<[string, string]>),
 	}),
 }
 

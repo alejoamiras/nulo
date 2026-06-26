@@ -43,10 +43,6 @@ export const tokenGroups = {
 		default: "--border",
 		hovered: "--border-hovered",
 	},
-	button: {
-		primaryBg: "--btn-primary-bg",
-		redBg: "--btn-red-bg",
-	},
 	colors: {
 		white: "--white",
 		black: "--black",

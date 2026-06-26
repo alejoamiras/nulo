@@ -13,5 +13,5 @@ import { expect, test } from "vitest"
 test("base.css content is pinned (edits must be deliberate + visually re-verified)", () => {
 	const css = readFileSync(join(process.cwd(), "src/base.css"), "utf8")
 	const hash = createHash("sha256").update(css).digest("hex")
-	expect(hash).toBe("21ce8f551b3e5d7824c30d9da0f1843f55d63539d17eae39d599a5c783f4ccac")
+	expect(hash).toBe("2e4e52d3ef5b3a0d2096489130285a74761946785900b744211b01de79796d04")
 })

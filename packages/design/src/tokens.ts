@@ -37,11 +37,6 @@ export const borders = {
 	hovered: "--border-hovered",
 } as const
 
-export const button = {
-	primaryBg: "--btn-primary-bg",
-	redBg: "--btn-red-bg",
-} as const
-
 export const colors = {
 	white: "--white",
 	black: "--black",
