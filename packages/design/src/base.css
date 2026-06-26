@@ -98,14 +98,11 @@
 
 	--txt-primary: #f5f0e6;
 	--txt-secondary: #999187;
-	--txt-body: rgba(245, 240, 230, 45%);
-	--txt-tertiary: rgba(245, 240, 230, 30%);
-	--txt-support: rgba(245, 240, 230, 25%);
+	--txt-body: rgba(245, 240, 230, 60%);
+	--txt-tertiary: rgba(245, 240, 230, 56%);
+	--txt-support: rgba(245, 240, 230, 54%);
 	--txt-white: rgba(255, 255, 255, 95%);
 	--txt-inverse: rgba(0, 0, 0, 90%);
-
-	--btn-primary-bg: #f8f1e7;
-	--btn-red-bg: #c33636;
 
 	--white: #fff;
 	--black: #000;
@@ -164,9 +161,6 @@
 	--txt-white: rgba(255, 255, 255, 95%);
 	--txt-inverse: rgba(255, 255, 255, 90%);
 
-	--btn-primary-bg: #0c8bfe;
-	--btn-red-bg: #c33636;
-
 	--white: #fff;
 	--black: #000;
 	--blue: #027cfc;
@@ -212,14 +206,11 @@
 
 	--txt-primary: #f5f0e6;
 	--txt-secondary: #999187;
-	--txt-body: rgba(245, 240, 230, 45%);
-	--txt-tertiary: rgba(245, 240, 230, 30%);
-	--txt-support: rgba(245, 240, 230, 25%);
+	--txt-body: rgba(245, 240, 230, 60%);
+	--txt-tertiary: rgba(245, 240, 230, 56%);
+	--txt-support: rgba(245, 240, 230, 54%);
 	--txt-white: rgba(255, 255, 255, 95%);
 	--txt-inverse: rgba(0, 0, 0, 90%);
-
-	--btn-primary-bg: #f8f1e7;
-	--btn-red-bg: #c33636;
 
 	--blue: #027cfc;
 	--green: #14ae5c;
