@@ -20,6 +20,7 @@
  */
 
 import { EventHandler } from "@nulo/wallet-core/utils"
+import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { flushPromises } from "@vue/test-utils"
 import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
@@ -237,7 +238,9 @@ async function bootService(
 	const logger = new LoggerStore(new ConfigStore())
 	// Huge poll interval so scheduler doesn't fire during tests; we exercise
 	// the scan path via the public surface or via direct method calls.
-	const service = new IncomingTransferService(logger, 1_000_000)
+	const browserApi = new FakeBrowserApi()
+	browserApi.reset()
+	const service = new IncomingTransferService(logger, browserApi, 1_000_000)
 	const collection = new ServiceCollection()
 	for (const stub of Object.values(fixture)) collection.add(stub as never)
 	collection.add(service)

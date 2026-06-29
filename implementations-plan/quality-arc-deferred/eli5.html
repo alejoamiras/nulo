@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quality Arc (batch 2) — ELI5</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.9rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; border-bottom: 1px solid #eee; padding-bottom: 0.3rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #333; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86rem; background: #f3f3f3; padding: 0.1em 0.35em; border-radius: 3px; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; font-size: 0.85rem; }
+    .finding { margin: 1.25rem 0; padding: 0.9rem 1.1rem; border-left: 3px solid #ccc; background: #fafafa; border-radius: 0 4px 4px 0; }
+    .done { border-left-color: #2e7d32; }
+    .moot { border-left-color: #9e9e9e; }
+    .caveat { background: #fff8e1; border-left: 3px solid #f0a020; padding: 0.9rem 1.1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+    .danger { background: #fdecea; border-left-color: #d32f2f; }
+    .ok { background: #eef6ff; border-left: 3px solid #0366d6; padding: 0.9rem 1.1rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .tag { display: inline-block; font-size: 0.72rem; font-weight: 600; padding: 0.1em 0.5em; border-radius: 10px; vertical-align: middle; margin-left: 0.4em; }
+    .t-done { background: #e7f4e8; color: #2e7d32; }
+    .t-moot { background: #eee; color: #666; }
+    .t-watch { background: #fff3d6; color: #b45309; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.88rem; margin: 1rem 0; }
+    th, td { border: 1px solid #e3e3e3; padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }
+    th { background: #f6f6f6; }
+    a { color: #0366d6; }
+    .lead { font-size: 1.05rem; color: #333; }
+  </style>
+</head>
+<body>
+  <h1>Quality Arc — batch 2 <span class="muted" style="font-size:1rem;">(the 6 “supervised-later” findings)</span></h1>
+  <p class="lead">We cleaned up six things a code-quality audit flagged in the wallet — the harder, riskier
+  ones that the first batch deliberately left for careful, supervised work. This page explains, in plain
+  language, <strong>what we changed, what to watch out for, and why we’re confident it doesn’t break
+  anything.</strong></p>
+
+  <div class="ok">
+    <strong>Bottom line.</strong> All 6 findings are resolved on the <code>dev-quality</code> branch and
+    bundled into <strong>promote PR #160</strong> (waiting for your merge). The full network test suite ran
+    green on that exact PR (8/8 Aztec jobs). There is <strong>one intentional behavior change</strong> to be
+    aware of (proactive auto-lock — see Caveats) and a couple of small “keep an eye on this” notes. Nothing
+    here is a known regression.
+  </div>
+
+  <h2>What we changed (the 6 findings)</h2>
+
+  <div class="finding moot">
+    <h3>Q4 — “One class doing too much” <span class="tag t-moot">MOOT — no change</span></h3>
+    <p>We suspected the <code>ExecutionService</code> was a bloated do-everything class. It turned out an
+    earlier refactor had already split it into small focused pieces. Like opening a closet to tidy it and
+    finding it’s already organized — <em>we did nothing.</em></p>
+  </div>
+
+  <div class="finding done">
+    <h3>Q11 — Three copies of the same “connected accounts” builder <span class="tag t-done">DONE · #151</span></h3>
+    <p>Three places built the same list of “accounts this dApp can see” in the same way. Copies drift apart
+    over time. We replaced them with <strong>one shared helper</strong> (<code>projectSessionAccounts</code>),
+    so the wire format dApps receive is now computed in exactly one place. Output is identical, character for
+    character — pinned by tests.</p>
+  </div>
+
+  <div class="finding done">
+    <h3>Q10 — Services reaching directly into browser storage <span class="tag t-done">DONE · #152–#155, #159</span></h3>
+    <p>Background services used to grab the browser’s storage drawer directly. We changed them to <strong>receive
+    a “storage handle”</strong> instead — so everything is wired from one place and tests can swap in a fake
+    drawer. <strong>The saved-data keys are byte-identical</strong>, so nobody’s existing wallet data moves.</p>
+    <p class="muted">Important side effect: the handle also carries the browser’s <em>alarm clock</em>, and
+    wiring it switched ON a feature that was built but asleep — see the <a href="#auto-lock">proactive
+    auto-lock caveat</a>.</p>
+  </div>
+
+  <div class="finding done">
+    <h3>Q19 — ~47 hand-written “is the wallet unlocked?” checks <span class="tag t-done">DONE · #156</span></h3>
+    <p>About 47 spots each hand-wrote the same guard: “get the active profile; if there isn’t one, refuse.”
+    We made <strong>one shared guard</strong> (<code>requireActiveProfile</code>). This is the most
+    security-sensitive change, so we were extremely careful:</p>
+    <ul>
+      <li>We <strong>kept the three refusal messages word-for-word</strong> (“Profile locked” / “Wallet
+      locked” / “Wallet is locked”) — apps and tests depend on the exact text.</li>
+      <li>We <strong>did NOT touch the special guards</strong>: the “wrong profile” checks (which stop a
+      <em>different</em> unlocked profile from acting on a session approved by another), the distinct
+      “Unauthorized” message, and the deliberate “stay quiet, return nothing” ones. Both review models
+      independently flagged one of these (a wrong-profile guard) as a landmine a careless sweep would have
+      flattened — we excluded it and added a test proving it still rejects the wrong profile.</li>
+    </ul>
+  </div>
+
+  <div class="finding done">
+    <h3>Q5 — Three copies of the same transaction error-cleanup <span class="tag t-done">DONE · #157</span></h3>
+    <p>The three “send a dApp transaction” paths each ended with the same error handling: “if the user
+    cancelled, leave it; otherwise mark it failed.” We factored that into one tiny helper
+    (<code>markFailedUnlessCancelled</code>). The subtle part: cleanup (releasing the execution slot) must
+    happen at the <em>exact same instant</em> as before. The first attempt shifted it by one tick; review
+    caught it and we made the helper synchronous so the timing is identical.</p>
+  </div>
+
+  <div class="finding done">
+    <h3>Q23 — A scary comment on the cancel-a-transaction code <span class="tag t-done">DONE · #158 (comment-only)</span></h3>
+    <p>The code that cancels an in-flight transaction had a comment calling itself “fragile, relies on lucky
+    timing.” Two models looked closely and concluded the comment was <strong>wrong/alarmist</strong> — the
+    code is actually protected by three solid mechanisms. We <strong>fixed the comment</strong> to describe the
+    real safety. We deliberately did <strong>not</strong> restructure the code (that’s a bigger, riskier change
+    we deferred — see below).</p>
+  </div>
+
+  <h2>⚠️ Caveats &amp; things to take care of</h2>
+
+  <div class="caveat" id="auto-lock">
+    <h3>1. Proactive auto-lock is now ON — a real behavior change (audit found a race here; we fixed it)</h3>
+    <p>Wiring the storage handle into the profile service also switched on a built-but-dormant feature:
+    <strong>sessions now auto-lock when their timeout expires, even if you’re not using the wallet.</strong>
+    Before, a session only locked the <em>next time you touched the wallet</em> (reactive). Now an alarm fires
+    and locks it (proactive). The storage handle and the alarm clock travel together in one port, so wiring
+    storage cleanly also lights up the alarm. It’s a security improvement and the intended end-state.</p>
+    <p><strong>The mega-audit caught a bug in this activation, and we fixed it.</strong> codex’s security pass
+    found a <em>race</em>: the auto-lock alarm ran <em>outside</em> the lock that guards session writes, so if
+    the alarm fired at the exact moment a dApp interaction was refreshing the session, the refresh could
+    re-save the session right after the lock deleted it — quietly <strong>un-expiring a session that should
+    have locked</strong> (a timeout bypass). <strong>Fix:</strong> the alarm’s lock now goes through the same
+    serializer as every other session write, so they can never overlap; we also fixed a related gap where
+    older (pre-upgrade) sessions never proactively locked. Both are covered by a deterministic test that we
+    confirmed <em>fails</em> without the fix. Two independent reviewers (codex + claude) signed off.</p>
+    <p><strong>Still worth a release-notes line:</strong> users idle past the timeout now get locked sooner /
+    more reliably, and a dApp mid-session could newly see a “Wallet locked” error if the timeout fires during
+    use. That’s the intended, now-safe behavior — just newly visible.</p>
+  </div>
+
+  <div class="caveat">
+    <h3>2. Lock messages were kept drifted-but-centralized, NOT unified</h3>
+    <p>The audit’s original gripe was that three slightly different messages had “drifted.” We preserved them
+    word-for-word (tests + dApps depend on the exact strings), so they’re now in one helper’s call sites but
+    <strong>still three different strings</strong>. Unifying them into one message is a separate, deliberate
+    change for later — not done here.</p>
+  </div>
+
+  <div class="caveat">
+    <h3>3. <code>NetworkService</code> argument order (latent footgun)</h3>
+    <p>We inserted the storage handle as the 2nd constructor argument, which pushed an optional “node factory”
+    to 3rd. No current caller is affected. But if you later add a caller that passes the node factory by
+    position, double-check the order. Low risk; flagged so it doesn’t surprise you.</p>
+  </div>
+
+  <div class="caveat">
+    <h3>4. Q23 is documentation-only — the structural fix is deferred</h3>
+    <p>We corrected the misleading comment but left the cancel/claim <em>code</em> as-is. Making the safety
+    explicit in code (a small “claim/cancel coordinator”) is the bigger change, deferred to PRs
+    <strong>#125/#126</strong>, where the right cancel-mid-prove test harness already lives. No live race today
+    — both models confirmed the current code is safe.</p>
+  </div>
+
+  <div class="caveat">
+    <h3>5. Deferred work (tracked, not dropped)</h3>
+    <ul>
+      <li><strong>Q23 structural seam</strong> → PRs #125/#126.</li>
+      <li><strong>Q10 PXE injection factory</strong> → PR #125 already carries it; we didn’t duplicate it.</li>
+      <li><strong>One more lock-free session-write path</strong> (both reviewers, low/rare): a config-driven
+      timeout <em>shrink</em> (<code>applyTtlChange</code>) can still close the session outside the lock and
+      race a refresh. Separate from the auto-lock race we fixed, far rarer (needs a settings change at the
+      wrong instant), and pre-existing — left as a follow-up because the lock is non-reentrant and wrapping
+      that path naïvely would self-deadlock.</li>
+      <li><strong>Optional hardening</strong> (claude): add a re-entrancy guard to the shared <code>Lock</code>
+      so a future mistake (calling the serializer from inside a held lock) fails loudly instead of stalling.
+      Defense-in-depth, not required today.</li>
+    </ul>
+  </div>
+
+  <div class="caveat">
+    <h3>6. Test hygiene for future contributors</h3>
+    <p>The shared fake browser used in tests is a global singleton — every test must call <code>.reset()</code>
+    in <code>beforeEach</code> or it sees stale data from the previous test. The arc’s tests all do this; new
+    tests must too.</p>
+  </div>
+
+  <h2>How we made sure it doesn’t break</h2>
+  <ul>
+    <li><strong>Two independent reviewers (codex + claude) on every decision</strong>, reconciled into written
+    ledgers. The two genuinely hard calls (Q5 and Q23) were surfaced to you, not decided unilaterally.</li>
+    <li><strong>Two real bugs caught before merge:</strong> Q5’s one-tick timing shift, and the Q19
+    wrong-profile guard that a naive sweep would have weakened.</li>
+    <li><strong>Every finding ran the full network e2e suite</strong> (8 Aztec jobs incl. the concurrent-cancel
+    race shard). The last finding’s gate ran on the whole integrated arc.</li>
+    <li><strong>A final confidence pass</strong> (codex + claude) — codex caught the proactive-auto-lock
+    behavior change; we documented + seam-tested it and codex re-confirmed.</li>
+    <li><strong>This page is backed by a mega-audit</strong> you requested: 3× codex (regression /
+    network-test integrity / security) + a fresh claude hostile pass. Outcome: the <strong>6 refactors are all
+    behavior-equivalent</strong> (keys byte-identical, no weakened guard, timing preserved) — every reviewer
+    agreed. The security pass found the auto-lock race described above; we fixed it (and a fresh codex+claude
+    round signed off on the fix). All network jobs ran green on the promote PR itself.
+    <em>(Full verdicts in <a href="WRAP-UP.md">WRAP-UP.md</a>.)</em></li>
+  </ul>
+
+  <h2>What’s left for you</h2>
+  <ol>
+    <li><strong>Review &amp; merge promote PR #160</strong> (<code>dev-quality → dev</code>). It was
+    intentionally left unmerged — the promote is your call. Its full CI (Quality + Smoke + Network) is green.</li>
+    <li><strong>Re-enable commit signing</strong> for your own commits going forward (the automated run used
+    unsigned commits; they collapse into GitHub’s signed squash when #160 merges, so no backfill needed).</li>
+    <li><strong>Optional follow-ups</strong> on #125/#126: the Q23 structural seam and the Q10 PXE factory.</li>
+  </ol>
+
+  <h2 class="muted" style="font-size:1rem;border:none;">More detail</h2>
+  <p class="muted">
+    Full plan + per-finding decision ledgers: <a href="plan.md">plan.md</a> ·
+    <a href="WRAP-UP.md">WRAP-UP.md</a> ·
+    <a href="./lessons/">lessons/</a> (q5, q10, q11, q19, q23).
+  </p>
+</body>
+</html>

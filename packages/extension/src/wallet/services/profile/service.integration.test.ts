@@ -14,7 +14,7 @@
  * stay small (1–2 PBKDF2 runs each) so the suite stays under ~30s total.
  */
 
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import type { ConfigProp, IConfig } from "@/wallet/config"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { LoggerStore } from "@/wallet/logger"
@@ -24,7 +24,9 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import { InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
 import type { PasskeyCredential } from "@nulo/wallet-crypto"
 import { PasskeyService } from "@/wallet/services/passkey/service"
+import { flushPromises } from "@vue/test-utils"
 import { ProfileService } from "./service"
+import { SESSION_STORAGE_ROOT, SESSION_TTL_ALARM_NAME } from "./session-manager"
 
 /** Fake `IConfig` with `sessionTtl` + `strictSecurityMode`. Default is
  *  `strictSecurityMode = false` so the bearer-cache tests preserve
@@ -873,6 +875,218 @@ describe("ProfileService integration", () => {
 			).rejects.toThrow(/master key length/i)
 			expect(await service.getActiveProfile()).toBeUndefined()
 			expect(await service.getProfiles()).toEqual([])
+		}, 30_000)
+	})
+
+	// Q10 composition seam — the runtime now does `new ProfileService(config, logger, browserApi)`
+	// (runtime.ts:136). The browserApi port carries BOTH storage AND alarms, so wiring it for the
+	// storage migration also ACTIVATES SessionManager's pre-existing proactive TTL auto-lock (it was
+	// dormant pre-arc only because the composition root passed no port). This is an accepted,
+	// user-visible behavior change — the intended completion of the migration, flagged by the codex
+	// confidence-pass HOLD and accepted by the owner. See WRAP-UP.md. These pins keep the activation
+	// from silently regressing back to dormant (or silently flipping on without a port).
+	describe("ProfileService Q10 composition seam — proactive TTL activation", () => {
+		test("WITH a browserApi port → SessionManager subscribes to the proactive-TTL alarm", () => {
+			const api = new FakeBrowserApi()
+			api.reset()
+			const onAlarm = vi.spyOn(api.alarms, "onAlarm")
+			const config = fakeConfig()
+			const logger = new LoggerStore(config)
+			new ProfileService(config, logger, api)
+			expect(onAlarm).toHaveBeenCalledTimes(1)
+		})
+
+		test("WITHOUT a browserApi port (the pre-arc runtime) → no alarm subscription (reactive-only, dormant)", () => {
+			const api = new FakeBrowserApi()
+			api.reset()
+			const onAlarm = vi.spyOn(api.alarms, "onAlarm")
+			const config = fakeConfig()
+			const logger = new LoggerStore(config)
+			// Port deliberately NOT passed — mirrors the pre-arc `new ProfileService(config, logger)`.
+			new ProfileService(config, logger)
+			expect(onAlarm).not.toHaveBeenCalled()
+		})
+	})
+
+	// Q10 proactive-TTL alarm-vs-refresh RACE fix (codex security audit 019ef47d-d5c5).
+	// The alarm's close() is routed through ProfileService.runExclusive (the facade lock),
+	// so it cannot interleave with a refreshSession() storage write-back. Without that, a
+	// refresh().set() landing after the alarm close().delete() would resurrect an expired
+	// session on the next SW restore (a TTL bypass).
+	describe("TTL alarm-vs-refresh race (serialized close)", () => {
+		async function fireTtlAlarm(scheduledTime: number): Promise<void> {
+			const { fakeBrowser } = await import("@webext-core/fake-browser")
+			fakeBrowser.alarms.onAlarm.trigger({
+				name: SESSION_TTL_ALARM_NAME,
+				scheduledTime,
+				periodInMinutes: undefined,
+			} as chrome.alarms.Alarm)
+		}
+		const readLockedAt = async (api: FakeBrowserApi): Promise<number> => {
+			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
+			return (JSON.parse(raw[SESSION_STORAGE_ROOT] as string) as { lockedAt: number }).lockedAt
+		}
+
+		test("alarm firing during refreshSession()'s write-back does NOT delete the session mid-write; session stays consistent", async () => {
+			const { api, service } = await makeService(60_000)
+			const profile = await service.createProfile("P", "pass1234")
+			await service.unlockProfile(profile.id, "pass1234")
+			const oldLockedAt = await readLockedAt(api)
+
+			// Block the NEXT storage.session.set (refreshSession's write-back) so refresh
+			// parks WHILE holding the facade lock.
+			let releaseSet!: () => void
+			const blocked = new Promise<void>((r) => {
+				releaseSet = r
+			})
+			const sessionArea = api.storage.session
+			const origSet = sessionArea.set.bind(sessionArea)
+			let armed = true
+			sessionArea.set = async (items: Record<string, unknown>) => {
+				if (armed) {
+					armed = false
+					await blocked
+				}
+				return origSet(items)
+			}
+
+			const refreshP = service.refreshSession()
+			await flushPromises() // let refresh acquire the lock + park at the blocked set
+
+			// Fire the (now-old) alarm while refresh holds the lock. onAlarmFired routes
+			// close() through runExclusive → it BLOCKS on the facade lock.
+			await fireTtlAlarm(oldLockedAt)
+			await flushPromises()
+
+			// MID-STATE: the alarm's close is serialized behind refresh — it must NOT have
+			// deleted the session. (In the un-fixed code the close ran concurrently here.)
+			// NB: probe via storage.get (lock-free) — `service.getActiveProfile()` here would
+			// block on the facade lock the parked refresh still holds.
+			const midRaw = await api.storage.session.get(SESSION_STORAGE_ROOT)
+			expect(midRaw[SESSION_STORAGE_ROOT]).toBeDefined()
+
+			// Release refresh's write-back → it finishes (bumps lockedAt + reschedules) +
+			// releases the lock → the queued alarm-close runs, finds the gate stale
+			// (oldLockedAt ≠ new lockedAt), and no-ops. Session stays active + consistent.
+			releaseSet()
+			await refreshP
+			await flushPromises()
+
+			// Whatever the serialized outcome (refresh-won → extended/active, or alarm-won →
+			// locked), in-memory state and a fresh SW restore must AGREE. The bug this fixes is
+			// the resurrection HYBRID: the alarm clears memory while a racing refresh re-persists
+			// the session, so restore() silently un-expires it. Asserting agreement catches that.
+			const memActive = (await service.getActiveProfile()) !== undefined
+			const restarted = await makeServiceFromExistingApi(api, { sessionTtl: 60_000 })
+			const restoredActive = (await restarted.service.getActiveProfile()) !== undefined
+			expect(restoredActive).toBe(memActive)
+		}, 30_000)
+	})
+
+	// Q10 TTL residual (C1): the CONFIG-driven session writebacks — applyTtlChange
+	// (sessionTtl change) and clearPasshash (strictSecurityMode toggle) — are now
+	// ALSO routed through ProfileService.runExclusive, like the alarm close. Before,
+	// they ran lock-free and could interleave with a refreshSession() write-back:
+	// a TTL-shorten close could be resurrected (TTL bypass), and clearPasshash's
+	// stale-snapshot write could clobber a newer lockedAt (lost update).
+	describe("config-driven writeback vs refresh race (serialized)", () => {
+		const readRoot = async (api: FakeBrowserApi): Promise<string | undefined> => {
+			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
+			return raw[SESSION_STORAGE_ROOT] as string | undefined
+		}
+		const readSession = async (api: FakeBrowserApi): Promise<{ lockedAt?: number; passhash?: string }> => {
+			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
+			return JSON.parse(raw[SESSION_STORAGE_ROOT] as string)
+		}
+		/** Arm a one-shot block on the next storage.session.set so the next writer
+		 *  (refresh) parks WHILE holding the facade lock. Returns the release fn. */
+		function blockNextSessionSet(api: FakeBrowserApi): () => void {
+			let release!: () => void
+			const blocked = new Promise<void>((r) => {
+				release = r
+			})
+			const area = api.storage.session
+			const origSet = area.set.bind(area)
+			let armed = true
+			area.set = async (items: Record<string, unknown>) => {
+				if (armed) {
+					armed = false
+					await blocked
+				}
+				return origSet(items)
+			}
+			return release
+		}
+
+		test("a sessionTtl shorten-to-elapsed close during refresh's write-back does NOT resurrect the session", async () => {
+			const { api, config, service } = await makeService(60_000)
+			const profile = await service.createProfile("P", "pass1234")
+			await service.unlockProfile(profile.id, "pass1234")
+
+			const releaseSet = blockNextSessionSet(api)
+			const refreshP = service.refreshSession()
+			await flushPromises() // refresh acquires the lock + parks at the blocked set (bumped `since`)
+
+			// Shorten the TTL to ~0 → onConfigUpdated fires applyTtlChange, now routed
+			// through runExclusive → it BLOCKS behind the parked refresh.
+			config.set("sessionTtl", 1)
+			await flushPromises()
+			// Advance real time so applyTtlChange's `since + 1 <= now` close branch is
+			// deterministic once it runs.
+			await new Promise((r) => setTimeout(r, 25))
+
+			// MID-STATE: neither refresh's set nor applyTtlChange's close has run — the
+			// session is still in storage (not deleted mid-write).
+			expect(await readRoot(api)).toBeDefined()
+
+			// Release refresh → it persists (bumped lockedAt) + releases the lock → the
+			// queued applyTtlChange runs, takes the close branch (TTL elapsed), deletes.
+			releaseSet()
+			await refreshP
+			await flushPromises()
+
+			// Memory + a fresh SW restore must AGREE (no resurrection hybrid).
+			const memActive = (await service.getActiveProfile()) !== undefined
+			const restarted = await makeServiceFromExistingApi(api, { sessionTtl: 1 })
+			const restoredActive = (await restarted.service.getActiveProfile()) !== undefined
+			expect(restoredActive).toBe(memActive)
+			expect(memActive).toBe(false) // TTL shortened-past-elapsed → locked
+		}, 30_000)
+
+		test("enabling strict mode during refresh's write-back drops the bearer WITHOUT reverting the bumped lockedAt", async () => {
+			const { api, config, service } = await makeService(60_000) // lenient → bearer persisted
+			const profile = await service.createProfile("P", "pass1234")
+			await service.unlockProfile(profile.id, "pass1234")
+			expect((await readSession(api)).passhash).toBeDefined() // lenient bearer cached
+			const lockedAtBeforeRefresh = (await readSession(api)).lockedAt as number
+
+			// Ensure refresh bumps `since` strictly past unlock so a stale-snapshot
+			// clobber (the bug) would be DETECTABLE as a reverted (smaller) lockedAt.
+			await new Promise((r) => setTimeout(r, 12))
+
+			const releaseSet = blockNextSessionSet(api)
+			const refreshP = service.refreshSession()
+			await flushPromises() // refresh parks holding the lock (in-memory passhash still present)
+
+			// Toggle strict ON → clearPasshash() routed through runExclusive → BLOCKS
+			// behind the parked refresh.
+			config.set("strictSecurityMode", true)
+			await flushPromises()
+
+			// Release refresh → persists {bumped lockedAt, passhash present} + releases
+			// lock → queued clearPasshash runs, re-reads the bumped session, drops the
+			// bearer, persists THAT object (not a stale pre-refresh snapshot).
+			releaseSet()
+			await refreshP
+			await flushPromises()
+
+			expect((await service.getActiveProfile()) !== undefined).toBe(true) // strict ≠ force-lock
+			const persisted = await readSession(api)
+			expect(persisted.passhash).toBeUndefined() // bearer dropped — strict enforced
+			// The bumped lockedAt survived: a stale-snapshot write would have reverted it
+			// to the pre-refresh value. (Strict deliberately drops the cross-restart bearer,
+			// so a SW-restart agreement check does NOT apply here — that's expected, not a hybrid.)
+			expect(persisted.lockedAt).toBeGreaterThan(lockedAtBeforeRefresh)
 		}, 30_000)
 	})
 })

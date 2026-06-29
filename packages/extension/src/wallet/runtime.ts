@@ -109,14 +109,14 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// their migration lands. Registration order here is a visual
 		// convention only — actual startup ordering is determined by
 		// `ServiceCollection.start()`'s topological phases.
-		services.add(new AccountService(logger))
+		services.add(new AccountService(logger, browserApi))
 		services.add(new AccountStateService(logger))
-		services.add(new AuthRegistryService(logger))
+		services.add(new AuthRegistryService(logger, browserApi))
 		services.add(new ConfigService(config, logger))
 		const windowManager = new WindowManager(browserApi.windows, clock, logger)
 		services.add(new ContactService(logger, browserApi))
 		services.add(new DappInteractionService(logger, windowManager))
-		services.add(new DappSessionService(logger))
+		services.add(new DappSessionService(logger, browserApi))
 		// E2E_PROVERLESS injects a chrome.storage-backed proof gate into the SW
 		// ExecutionCoordinator (the SW has chrome.storage; the offscreen does not).
 		// `E2E_PROVERLESS` is a statically-false constant in prod builds, so this
@@ -127,18 +127,23 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// even when the call is dead, leaking the gate into prod dist. The
 		// _build-extension.yml negative grep is the enforcement that caught that.
 		services.add(new ExecutionService(logger, E2E_PROVERLESS ? new ChromeStorageProofGate() : undefined))
-		services.add(new FpcService(logger))
+		services.add(new FpcService(logger, browserApi))
 		services.add(new LogViewerService(logger))
 		services.add(new LoggerService(logger))
-		services.add(new NetworkService(logger))
+		services.add(new NetworkService(logger, browserApi))
 		services.add(new NoteService(logger))
 		services.add(new OperationJournalService(logger, browserApi))
-		services.add(new ProfileService(config, logger))
+		// Passing `browserApi` threads the storage port into ProfileService AND, because the port
+		// carries alarms, ACTIVATES SessionManager's proactive TTL auto-lock (dormant pre-arc when the
+		// composition root passed no port — see session-manager.ts "proactive TTL lights up once the
+		// composition root wires browserApi"). Accepted behavior change; seam-pinned in
+		// service.integration.test.ts "Q10 composition seam".
+		services.add(new ProfileService(config, logger, browserApi))
 		services.add(new TaskService(logger))
-		services.add(new TokenService(logger))
-		services.add(new TokenBalanceService(logger))
-		services.add(new TransactionService(logger))
-		services.add(new IncomingTransferService(logger))
+		services.add(new TokenService(logger, browserApi))
+		services.add(new TokenBalanceService(logger, browserApi))
+		services.add(new TransactionService(logger, browserApi))
+		services.add(new IncomingTransferService(logger, browserApi))
 		services.add(new PasskeyService(logger, windowManager))
 
 		await services.start()

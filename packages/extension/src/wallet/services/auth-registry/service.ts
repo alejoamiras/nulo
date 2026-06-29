@@ -5,6 +5,7 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { maybeRethrowAsRpcCancel } from "@/wallet/services/execution/rpc-cancel"
 import { ExecutionService, type FeeSettings, type AuthwitContent } from "@/wallet/services/execution/service"
 import { ProfileService } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
@@ -16,6 +17,7 @@ import { EntityStorage } from "@/wallet/storage"
 import { array_max, Lock, sleep } from "@/wallet/utils"
 import { getAuthRegistryAddress, isAuthRegistryEnabled, isAuthwitConsumable } from "@/wallet/utils/auth-registry"
 import { EventHandler } from "@nulo/wallet-core/utils"
+import type { BrowserApi } from "@nulo/wallet-core/ports"
 import {
 	AUTH_REGISTRY_SERVICE_NAME,
 	type Authwit,
@@ -44,8 +46,8 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	public readonly onRegistryEnabled = new EventHandler<string>()
 	public readonly onRegistryDisabled = new EventHandler<string>()
 
-	private readonly authwits = new EntityStorage<Authwit>("nulo:core:auth-registry", chrome.storage.local)
-	private readonly statuses = new EntityStorage<boolean>("nulo:core:auth-registry-enabled", chrome.storage.local)
+	private readonly authwits: EntityStorage<Authwit>
+	private readonly statuses: EntityStorage<boolean>
 	private readonly lock = new Lock()
 
 	private profileService: ProfileService = null!
@@ -55,8 +57,10 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	private transactionService: TransactionService = null!
 	private taskService: TaskService = null!
 
-	public constructor(logger: ILogger) {
+	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(AUTH_REGISTRY_SERVICE_NAME, logger)
+		this.authwits = new EntityStorage<Authwit>("nulo:core:auth-registry", browserApi.storage.local)
+		this.statuses = new EntityStorage<boolean>("nulo:core:auth-registry-enabled", browserApi.storage.local)
 	}
 
 	protected async init(services: ServiceCollection) {
@@ -395,10 +399,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	}
 
 	public async backup(): Promise<Authwit[] | undefined> {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 
 		const networks = await this.networkService.getNetworks()
 		if (!networks.length) {

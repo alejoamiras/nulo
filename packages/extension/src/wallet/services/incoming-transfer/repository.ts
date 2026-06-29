@@ -1,7 +1,7 @@
 /**
  * Storage ownership for `IncomingTransferRecord` + `IncomingTrustRecord`.
  *
- * Two independent EntityStorage tables under chrome.storage.local:
+ * Two independent EntityStorage tables under the injected `browserApi.storage.local`:
  *   - `nulo:core:incoming-transfers` keyed by `siloedNullifier` (Fr string,
  *     cryptographically unique per note).
  *   - `nulo:core:incoming-trust` keyed by `${profileId}|${networkId}|${contract}`.
@@ -15,6 +15,7 @@
  */
 
 import { EntityStorage } from "@/wallet/storage"
+import type { BrowserApi } from "@nulo/wallet-core/ports"
 import type { IncomingTransferRecord, IncomingTrustRecord, IncomingTrustState } from "./spec"
 
 const RECORDS_KEY = "nulo:core:incoming-transfers"
@@ -30,9 +31,9 @@ export class IncomingTransferRepository {
 	private readonly records: EntityStorage<IncomingTransferRecord>
 	private readonly trust: EntityStorage<IncomingTrustRecord>
 
-	public constructor() {
-		this.records = new EntityStorage<IncomingTransferRecord>(RECORDS_KEY, chrome.storage.local)
-		this.trust = new EntityStorage<IncomingTrustRecord>(TRUST_KEY, chrome.storage.local)
+	public constructor(browserApi: BrowserApi) {
+		this.records = new EntityStorage<IncomingTransferRecord>(RECORDS_KEY, browserApi.storage.local)
+		this.trust = new EntityStorage<IncomingTrustRecord>(TRUST_KEY, browserApi.storage.local)
 	}
 
 	// --- Records ---

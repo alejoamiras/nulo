@@ -16,6 +16,7 @@ import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { AccountService } from "@/wallet/services/account/service"
 import { ContactService } from "@/wallet/services/contact/service"
 import { ProfileService } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { TokenService } from "@/wallet/services/token/service"
 import { FpcService, FpcType } from "@/wallet/services/fpc/service"
@@ -70,6 +71,11 @@ import { ExecutionCoordinator } from "./execution-coordinator"
 import { type ProofGate, NOOP_PROOF_GATE } from "@/e2e/proof-gate"
 
 export * from "./spec"
+
+/** Default PXE-client factory: the real RPC-backed client. Exported so the
+ *  construction seam (real client vs the composition-test fake) is unit-testable
+ *  without spinning up `init()` + a full ServiceCollection. */
+export const DEFAULT_PXE_CLIENT_FACTORY = (logger: ILogger): PxeServiceClient => new PxeServiceClient(logger)
 
 export class ExecutionService extends Service<Methods> implements ServiceSpec<Methods> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
@@ -135,12 +141,18 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		/** E2E-only proving hold-point, forwarded to the coordinator. The
 		 *  no-op default keeps production proving unimpeded. */
 		private readonly proofGate: ProofGate = NOOP_PROOF_GATE,
+		/** PXE-client factory — the seam for in-process composition tests. The
+		 *  default builds the real RPC-backed client, so production is unchanged;
+		 *  tests inject a fake to drive the graph without the offscreen PXE /
+		 *  Aztec sandbox. (Rollout: extract an `ExecutionPxePort` interface to
+		 *  drop the test-side cast — deferred per the spike's codex audit.) */
+		private readonly pxeClientFactory: (logger: ILogger) => PxeServiceClient = DEFAULT_PXE_CLIENT_FACTORY,
 	) {
 		super(EXECUTION_SERVICE_NAME, logger)
 	}
 
 	protected async init(services: ServiceCollection) {
-		this.pxeService = new PxeServiceClient(this.logger)
+		this.pxeService = this.pxeClientFactory(this.logger)
 		this.profileService = services.get(ProfileService.name)
 		this.networkService = services.get(NetworkService.name)
 		this.accountService = services.get(AccountService.name)
@@ -506,10 +518,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
 	): Promise<void> {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet locked")
-		}
+		const profile = await requireActiveProfile(this.profileService, "Wallet locked")
 		const network = await this.networkService.getNetwork(op.networkId)
 
 		// Honor the popup's pre-fetched interface (`previewedInterface`) if it
@@ -629,10 +638,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	}
 
 	public async executeAztecCreateAuthWit(op: AztecCreateAuthWitOperation): Promise<AuthWitness> {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet locked")
-		}
+		const profile = await requireActiveProfile(this.profileService, "Wallet locked")
 		const network = await this.networkService.getNetwork(op.networkId)
 		const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress.toString())
 

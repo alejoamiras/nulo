@@ -12,6 +12,7 @@
  */
 
 import { beforeEach, describe, expect, test, vi } from "vitest"
+import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { BalanceRepository } from "./balance-repository"
@@ -38,39 +39,13 @@ describe("TokenBalanceService.onTokenDeleted purge cascade", () => {
 	let seedRepo: BalanceRepository
 
 	beforeEach(() => {
-		// EntityStorage talks to chrome.storage.local directly; the global setup
-		// only stubs chrome.* shallowly. Supply an in-memory backing (the same
-		// shim balance-repository.test.ts uses) so the real repo round-trips.
-		const backing = new Map<string, unknown>()
-		// biome-ignore lint/suspicious/noExplicitAny: test-only global stub
-		;(globalThis as any).chrome = {
-			// biome-ignore lint/suspicious/noExplicitAny: test-only global stub
-			...(globalThis as any).chrome,
-			storage: {
-				local: {
-					QUOTA_BYTES: 10485760,
-					get: async (keys: string | string[] | null | undefined) => {
-						const result: Record<string, unknown> = {}
-						if (keys == null) for (const [k, v] of backing) result[k] = v
-						else if (typeof keys === "string") {
-							if (backing.has(keys)) result[keys] = backing.get(keys)
-						} else if (Array.isArray(keys)) for (const k of keys) if (backing.has(k)) result[k] = backing.get(k)
-						return result
-					},
-					set: async (items: Record<string, unknown>) => {
-						for (const [k, v] of Object.entries(items)) backing.set(k, v)
-					},
-					remove: async (keys: string | string[]) => {
-						for (const k of Array.isArray(keys) ? keys : [keys]) backing.delete(k)
-					},
-					getKeys: async () => Array.from(backing.keys()),
-				},
-			},
-		}
-		// A separate repo over the same fixed storage key as the service's
-		// internal repo — lets the test seed + assert without reaching privates.
-		seedRepo = new BalanceRepository()
-		service = new TokenBalanceService(new LoggerStore(new ConfigStore()))
+		// One FakeBrowserApi shared by the service's internal repo and the test's
+		// seedRepo (same fixed storage key) so the test can seed + assert without
+		// reaching into privates.
+		const api = new FakeBrowserApi()
+		api.reset()
+		seedRepo = new BalanceRepository(api)
+		service = new TokenBalanceService(new LoggerStore(new ConfigStore()), api)
 	})
 
 	const invokeDelete = (id: number) =>

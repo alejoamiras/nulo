@@ -7,6 +7,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import { AccountService, type Account } from "@/wallet/services/account/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { TokenService, type Token, type TokenInfo } from "@/wallet/services/token/service"
 import { ExecutionService } from "@/wallet/services/execution/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
@@ -14,7 +15,7 @@ import { TaskService } from "@/wallet/services/task/service"
 import { OriginType, TransactionService, type Tx, TxStatus } from "@/wallet/services/transaction/service"
 import { SystemClock } from "@/core/adapters/system-clock"
 import { ClockTickerAdapter } from "@/core/adapters/clock-ticker-adapter"
-import type { BackgroundTickerPort } from "@nulo/wallet-core/ports"
+import type { BackgroundTickerPort, BrowserApi } from "@nulo/wallet-core/ports"
 import { BalanceJobQueue } from "./balance-job-queue"
 import { BalanceProjector } from "./balance-projector"
 import { BalanceRepository } from "./balance-repository"
@@ -36,7 +37,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	public readonly onTokenBalanceUpdated = new EventHandler<TokenBalanceInfo>()
 	public readonly onTokenBalanceDeleted = new EventHandler<TokenBalanceInfo>()
 
-	private readonly repo = new BalanceRepository()
+	private readonly repo: BalanceRepository
 	private readonly tokens = new Map<number, Token>()
 
 	private profileService: ProfileService = null!
@@ -52,9 +53,11 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	public constructor(
 		logger: ILogger,
+		browserApi: BrowserApi,
 		private readonly ticker: BackgroundTickerPort = new ClockTickerAdapter(new SystemClock(), logger),
 	) {
 		super(TOKEN_BALANCE_SERVICE_NAME, logger)
+		this.repo = new BalanceRepository(browserApi)
 	}
 
 	protected async init(services: ServiceCollection) {
@@ -254,10 +257,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	}
 
 	public async backup(): Promise<TokenBalanceRaw[]> {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 		return await this.repo.getAll()
 	}
 

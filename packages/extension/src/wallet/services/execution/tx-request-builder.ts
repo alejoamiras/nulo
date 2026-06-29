@@ -55,6 +55,7 @@ import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { networkInfoFrom, type NetworkService, type Network } from "@/wallet/services/network/service"
 import type { ProfileService } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import type { IPXE, PxeServiceClient } from "@/wallet/services/pxe/client"
 import { StepContent, type TaskService, type WrappedTask } from "@/wallet/services/task/service"
 import type { TxCall } from "@/wallet/services/transaction/service"
@@ -109,10 +110,7 @@ export class TxRequestBuilder {
 		const task = parentTask ? parentTask.startSubtask(step) : this.taskService.startNewTask(step)
 
 		try {
-			const profile = await this.profileService.getActiveProfile()
-			if (!profile) {
-				throw new Error("Wallet locked")
-			}
+			const profile = await requireActiveProfile(this.profileService, "Wallet locked")
 			const network = await this.networkService.getNetwork(op.networkId)
 			const account = await this.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
 			const node = await this.networkService.getNode(network.chainId)
@@ -373,8 +371,7 @@ export class TxRequestBuilder {
 
 		try {
 			this.log(`buildNoFrom: starting, accountAddress=${op.accountAddress}, networkId=${op.networkId}`)
-			const profile = await this.profileService.getActiveProfile()
-			if (!profile) throw new Error("Wallet locked")
+			const profile = await requireActiveProfile(this.profileService, "Wallet locked")
 
 			const network = await this.networkService.getNetwork(op.networkId)
 			const node = await this.networkService.getNode(network.chainId)

@@ -62,7 +62,14 @@ function addr(hex: string) {
 }
 
 function makeHarness(overrides: Partial<DappSendExecutorDeps> = {}) {
-	const network = { chainId: 7 } as never
+	const network = {
+		id: "net-1",
+		profileId: "p1",
+		chainId: 7,
+		name: "N",
+		primaryEndpointId: "ep1",
+		endpoints: [{ id: "ep1", rpcUrl: "https://rpc.submit" }],
+	} as never
 	const node = {
 		getNodeInfo: vi.fn(async () => ({ l1ChainId: 1, rollupVersion: 2 })),
 		getTxReceipt: vi.fn(async () => ({ status: "success" })),
@@ -151,6 +158,25 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 		expect(txArgs[3]).toBe(built.txCalls)
 		expect(txArgs[4]).toBe("42")
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
+	})
+
+	test("records the SUBMITTING network's primary endpoint URL (C3 recording-site pin)", async () => {
+		// addTransaction's submittedEndpointUrl (arg 7) must come from the network the
+		// executor built+submitted against — NOT re-derived from active-profile state,
+		// which a mid-prove TTL auto-lock / profile switch would corrupt and route the
+		// pending-tx poll to the active profile's RPC (cross-profile leak).
+		const { executor, deps } = makeHarness()
+		const op = {
+			kind: "send_transaction",
+			networkId: "net-1",
+			accountAddress: "0xacct",
+			feeSettings: { paymentMethod: { kind: "fj" } },
+			actions: [{ kind: "call", method: "dapp_method" }],
+		} as never
+		await executor.executeSendTransaction(op, ORIGIN)
+
+		const txArgs = (deps.addTransaction as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
+		expect(txArgs[7]).toBe("https://rpc.submit")
 	})
 
 	test("failure: journal → failed with dapp_execute-normalized error, error rethrown", async () => {

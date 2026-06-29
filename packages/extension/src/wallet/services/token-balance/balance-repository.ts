@@ -3,7 +3,7 @@
  *
  * Frozen invariants:
  * - Storage key `nulo:core:token-balances`.
- * - `chrome.storage.local`.
+ * - Injected `browserApi.storage.local` (the chrome.storage.local adapter in prod).
  * - `TokenBalanceRaw` shape unchanged.
  * - IDs are numeric; `allocateId()` mirrors today's
  *   `array_max((await balances.getKeys()).map((x) => +x)) + 1`.
@@ -11,13 +11,14 @@
 
 import { array_max } from "@/wallet/utils"
 import { EntityStorage } from "@/wallet/storage"
+import type { BrowserApi } from "@nulo/wallet-core/ports"
 import type { TokenBalanceRaw } from "./spec"
 
 export class BalanceRepository {
 	private readonly storage: EntityStorage<TokenBalanceRaw>
 
-	public constructor() {
-		this.storage = new EntityStorage<TokenBalanceRaw>("nulo:core:token-balances", chrome.storage.local)
+	public constructor(browserApi: BrowserApi) {
+		this.storage = new EntityStorage<TokenBalanceRaw>("nulo:core:token-balances", browserApi.storage.local)
 	}
 
 	public async get(id: number): Promise<TokenBalanceRaw | undefined> {

@@ -33,9 +33,11 @@ import { Fr } from "@aztec/foundation/curves/bn254"
 import type { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { collectOffchainEffects } from "@aztec/stdlib/tx"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
-import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
+import { type JobError, type JobProgress, JobCancelledSentinel } from "@nulo/wallet-core/jobs"
+import { markFailedUnlessCancelled } from "./mark-failed-unless-cancelled"
 import { feeToUsd, formatFeeJuice } from "@/utils/fee-estimation"
 import { pickPrimaryMethod } from "@/utils/primary-method"
+import { primaryEndpointUrl } from "@/wallet/services/network/spec"
 import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import type { WrappedTask } from "@/wallet/services/task/service"
 import type { LocalTxOrigin, TransactionService } from "@/wallet/services/transaction/service"
@@ -234,6 +236,7 @@ export class DappSendExecutor {
 						nonce.toString(),
 						feePaymentMethod,
 						hash,
+						primaryEndpointUrl(network),
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
 					)
@@ -244,10 +247,7 @@ export class DappSendExecutor {
 			})
 			return txHash.toString()
 		} catch (error) {
-			if (error instanceof JobCancelledSentinel) {
-				throw error
-			}
-			await this.deps.lane.markJournal(journalId, { stage: "failed" }, normalizeError(error, "dapp_execute"))
+			await markFailedUnlessCancelled(error, journalId, this.deps.lane)
 			throw error
 		} finally {
 			if (journalId) this.deps.lane.deleteController(journalId)
@@ -392,6 +392,7 @@ export class DappSendExecutor {
 						nonce.toString(),
 						feePaymentMethod,
 						hash,
+						primaryEndpointUrl(network),
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
 					)
@@ -407,10 +408,7 @@ export class DappSendExecutor {
 			const receipt = await node.getTxReceipt(txHash)
 			return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 		} catch (error) {
-			if (error instanceof JobCancelledSentinel) {
-				throw error
-			}
-			await this.deps.lane.markJournal(journalId, { stage: "failed" }, normalizeError(error, "dapp_execute"))
+			await markFailedUnlessCancelled(error, journalId, this.deps.lane)
 			throw error
 		} finally {
 			if (journalId) this.deps.lane.deleteController(journalId)
@@ -585,6 +583,7 @@ export class DappSendExecutor {
 						Fr.ZERO.toString(),
 						AccountFeePaymentMethodOptions.EXTERNAL,
 						hash,
+						primaryEndpointUrl(network),
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
 					),
@@ -596,10 +595,7 @@ export class DappSendExecutor {
 			const receipt = await node.getTxReceipt(txHash)
 			return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
 		} catch (error) {
-			if (error instanceof JobCancelledSentinel) {
-				throw error
-			}
-			await this.deps.lane.markJournal(journalId, { stage: "failed" }, normalizeError(error, "dapp_execute"))
+			await markFailedUnlessCancelled(error, journalId, this.deps.lane)
 			throw error
 		} finally {
 			if (journalId) this.deps.lane.deleteController(journalId)

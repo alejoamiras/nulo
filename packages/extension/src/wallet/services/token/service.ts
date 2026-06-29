@@ -8,14 +8,16 @@ import { NetworkService, networkInfoFrom } from "@/wallet/services/network/servi
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import type { OperationContext } from "@/wallet/services/operation-journal/spec"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { AccountService } from "@/wallet/services/account/service"
-import { PxeServiceClient } from "@/wallet/services/pxe/client"
+import { DEFAULT_SHALLOW_PXE_CLIENT_FACTORY, type ShallowPxeClient, type ShallowPxeClientFactory } from "@/wallet/services/pxe/shallow-port"
 import { TaskService, StepContent, type WrappedTask } from "@/wallet/services/task/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { ensureRegistered } from "@/wallet/services/execution/contract-resolver"
 import { EntityStorage } from "@/wallet/storage"
 import { array_max, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
+import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { feeJuiceAddress, feeJuiceName, feeJuiceSymbol } from "@/wallet/utils/fee-juice"
 import { simulate } from "@/wallet/utils/fn"
 import { type Token, type TokenInfo, TOKEN_SERVICE_NAME, type TokenInterface, type Methods, type Events } from "./spec"
@@ -52,22 +54,27 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	public readonly onTokenUpdated = new EventHandler<TokenInfo>()
 	public readonly onTokenDeleted = new EventHandler<TokenInfo>()
 
-	private readonly tokens = new EntityStorage<Token>("nulo:core:tokens", chrome.storage.local)
+	private readonly tokens: EntityStorage<Token>
 	private readonly lock = new Lock()
 
-	private pxeService: PxeServiceClient = null!
+	private pxeService: ShallowPxeClient = null!
 	private profiles: ProfileService = null!
 	private networks: NetworkService = null!
 	private accounts: AccountService = null!
 	private tasks: TaskService = null!
 	private journal: OperationJournalService = null!
 
-	public constructor(logger: ILogger) {
+	public constructor(
+		logger: ILogger,
+		browserApi: BrowserApi,
+		private readonly pxeClientFactory: ShallowPxeClientFactory = DEFAULT_SHALLOW_PXE_CLIENT_FACTORY,
+	) {
 		super(TOKEN_SERVICE_NAME, logger)
+		this.tokens = new EntityStorage<Token>("nulo:core:tokens", browserApi.storage.local)
 	}
 
 	protected async init(services: ServiceCollection) {
-		this.pxeService = new PxeServiceClient(this.logger)
+		this.pxeService = this.pxeClientFactory(this.logger)
 		this.profiles = services.get(ProfileService.name)
 		this.networks = services.get(NetworkService.name)
 		this.accounts = services.get(AccountService.name)
@@ -465,10 +472,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		contract: string,
 	): Promise<{ name: string; symbol: string; decimals: number; interface: TokenInterface }> {
 		await this.ensureInitialized()
-		const profile = await this.profiles.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet locked")
-		}
+		const profile = await requireActiveProfile(this.profiles, "Wallet locked")
 		const tokenInterface = await this.parseTokenInterface(networkId, contract)
 		const [name, symbol, decimals] = await this.fetchTokenMetadata(profile.id, networkId, accountAddress, tokenInterface)
 		return { name, symbol, decimals, interface: tokenInterface }
@@ -523,10 +527,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	}
 
 	public async backup(): Promise<Token[]> {
-		const profile = await this.profiles.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profiles)
 
 		return await this.getTokensRaw(profile.id)
 	}

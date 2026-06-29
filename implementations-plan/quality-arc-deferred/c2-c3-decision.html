@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quality arc — C2 / C3 decision</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.35rem; margin-top: 2.5rem; border-bottom: 1px solid #eee; padding-bottom: 0.3rem; }
+    h3 { font-size: 1.08rem; margin-top: 1.5rem; color: #333; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.86rem; background: #f3f3f3; padding: 0.1rem 0.3rem; border-radius: 3px; }
+    pre { background: #f6f6f6; padding: 0.9rem; border-radius: 4px; overflow-x: auto; font-size: 0.82rem; line-height: 1.45; }
+    .box { margin: 1.2rem 0; padding: 0.9rem 1.2rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .verdict { background: #f0f7f0; border-left-color: #3a9a3a; }
+    .leak { background: #fff5f5; border-left-color: #d04545; }
+    .neutral { background: #f5f8ff; border-left-color: #3a6ea5; }
+    .rec { background: #fff8e1; border-left-color: #f0a020; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .tag { display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 0.1rem 0.5rem; border-radius: 10px; vertical-align: middle; }
+    .tag-close { background: #d9efd9; color: #1c5e1c; }
+    .tag-real { background: #f7d9d9; color: #7a1c1c; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.9rem; }
+    th, td { border: 1px solid #ddd; padding: 0.5rem 0.7rem; text-align: left; vertical-align: top; }
+    th { background: #f3f3f3; }
+    a { color: #0366d6; }
+    .analogy { font-style: italic; color: #444; border-left: 3px solid #ddd; padding-left: 0.9rem; margin: 0.8rem 0; }
+    ol.steps > li { margin-bottom: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>Quality arc — the last two residuals</h1>
+  <p class="muted">A plain-language brief so you can decide <strong>C2</strong> and <strong>C3</strong>. Both came out of the arc's mega-audit; neither is one of the original 6 findings. Both got a fresh codex + claude dual review. C2 is unanimous. C3 is where the two models split — and I verified which one is right.</p>
+
+  <h2>Where we are</h2>
+  <p>The arc is essentially done. For context:</p>
+  <ul>
+    <li>✅ All <strong>6 deferred findings</strong> (Q4 / Q5 / Q10 / Q11 / Q19 / Q23) — merged into <code>dev-quality</code>.</li>
+    <li>✅ <strong>Phase A</strong> — pulled PRs #125 + #126 in and closed them (#162).</li>
+    <li>✅ <strong>Phase B</strong> — closed Q23 with the cancel-race test, no structural seam (#163), per your pick.</li>
+    <li>✅ <strong>Phase C1</strong> — serialized the config-driven session writebacks, finishing the #161 TTL-race fix (#164, just merged).</li>
+    <li>❓ <strong>C2 + C3</strong> — the two residuals below. This is the only thing left before the final promote.</li>
+  </ul>
+  <p class="muted">Hard limit still in force: I never merge <code>dev-quality → dev</code>. That promote PR is yours to merge.</p>
+
+  <!-- ───────────────────────── C2 ───────────────────────── -->
+  <h2>C2 — the "lock re-entry guard" <span class="tag tag-close">BOTH MODELS: CLOSE</span></h2>
+
+  <h3>What the lock is</h3>
+  <p class="analogy">A lock here is a single-key bathroom. Only one piece of code can be "inside" at a time; everyone else queues. It's <em>non-reentrant</em>: if the code that's already inside somehow tries to open the door and walk in <em>again</em>, it waits forever — for itself. That's a deadlock.</p>
+  <p>The arc added three new users of this lock in <code>ProfileService</code> (the alarm-close, plus C1's <code>applyTtlChange</code> and <code>clearPasshash</code>). So the question was raised: should we add a guard that <em>detects</em> a re-entry and throws an error immediately (fail fast), instead of relying on a code comment + the existing safety net?</p>
+
+  <h3>Why both models said don't</h3>
+  <ul>
+    <li><strong>No code actually re-enters.</strong> All three new users are fired from the alarm/config listener — never from inside a locked operation. Verified by both.</li>
+    <li><strong>Permanent deadlock is already impossible.</strong> The lock has a 5-minute <em>force-release</em> safety net (the janitor who kicks the door open). So even a future re-entry bug self-heals after 5 minutes.</li>
+    <li><strong>You can't reliably build the guard anyway.</strong> In single-threaded async JavaScript there's no clean way to tell "this is the <em>same</em> logical caller re-entering" without threading an owner-token through every call site (brittle) or AsyncLocalStorage (heavy). A naive guard would either false-alarm or miss the real case.</li>
+  </ul>
+
+  <div class="box neutral">
+    <strong>One nuance worth your awareness (not a fix request):</strong> that 5-minute force-release doesn't <em>prevent</em> a deadlock — it <em>hides</em> one for 5 minutes, then silently hands the lock to the next waiter while the stuck holder still thinks it owns it. On a money path, a reviewer could argue failing fast is better. If you ever want <em>any</em> guard, the safe shape is a tiny depth-counter assert on the <em>extension-side</em> <code>runExclusive</code> (dev-time only) — <strong>not</strong> a change to the shared <code>wallet-core</code> lock. Neither model thinks it's worth doing now.</div>
+
+  <div class="box rec"><strong>My recommendation: close C2, no code change.</strong> Document it in the wrap-up (the deadlock-shape warning comment already lives at <code>service.ts:101</code>). This is genuinely a non-issue today.</div>
+
+  <!-- ───────────────────────── C3 ───────────────────────── -->
+  <h2>C3 — node-pool clear on profile switch <span class="tag tag-real">A REAL (NARROW) LEAK</span></h2>
+
+  <h3>The original worry — and why it's a non-bug</h3>
+  <p>The mega-audit flagged: when you lock or switch profiles, <code>NetworkService</code> empties its pool of RPC connections (<code>nodes.clear()</code>). Could that disrupt a transaction that's mid-flight (being proven / sent)?</p>
+  <p><strong>Both models: no.</strong> A transaction that's actively executing already grabbed its RPC connection and is holding it as a local variable. Emptying the <em>pool</em> (a lookup table for <em>future</em> requests) doesn't yank the connection out of an in-flight send. Verified safe.</p>
+
+  <h3>But codex found a different, real problem — and I checked the code myself</h3>
+  <p>The issue isn't the <em>in-flight</em> transaction. It's the <em>pending</em> transaction — one that's already been sent and is just waiting for confirmation. Here's the chain, in plain language:</p>
+
+  <p class="analogy">Think of profiles as two identities, <strong>Alice</strong> and <strong>Bob</strong>, that are supposed to stay unlinkable. Each sends transactions through their own "post office" (RPC provider). The whole point of separate profiles in a privacy wallet is that Bob's post office should never hear about Alice's mail.</p>
+
+  <ol class="steps">
+    <li>Alice sends a transaction. The wallet remembers <em>which post office</em> it went to (the tx stores <code>submittedEndpointUrl</code>) and keeps asking that post office "confirmed yet?" on a loop.</li>
+    <li>You switch to <strong>Bob</strong>. Switching wipes the wallet's cache of open connections (<code>transientNodes.clear()</code>).</li>
+    <li>The loop is still tracking Alice's not-yet-confirmed transaction — the pending list is <strong>global</strong>, it isn't cleared on a profile switch.</li>
+    <li>To poll, it asks "what's the connection for Alice's post-office URL?" The lookup (<code>_isKnownEndpointUrl</code>) <strong>only checks the currently-active profile</strong> — Bob. Alice's URL isn't in Bob's address book, so it's treated as "unknown."</li>
+    <li>"Unknown" → it falls back to <strong>Bob's</strong> post office and asks <em>Bob's provider</em> about <em>Alice's</em> transaction.</li>
+  </ol>
+
+  <div class="box leak"><strong>The leak:</strong> Alice's transaction hash gets sent to Bob's RPC provider. Two identities that were supposed to be isolated just got correlated — Bob's provider now knows about a transaction that belongs to Alice. In a privacy wallet, that's a cross-profile isolation break.</div>
+
+  <h3>How narrow is the trigger?</h3>
+  <p>Real, but it needs all of these at once:</p>
+  <ul>
+    <li>Alice has a transaction that's <strong>still unconfirmed</strong> when you switch.</li>
+    <li>Bob has a network configured on the <strong>same chain</strong> as Alice's tx (otherwise the poll just errors out — no leak, but the tx stops polling).</li>
+    <li>Bob's RPC endpoint URL is <strong>different</strong> from Alice's (if they share the same provider, there's nothing to leak).</li>
+  </ul>
+  <p class="muted">So: two profiles, same Aztec chain, deliberately different RPC providers (which is exactly the setup a privacy-conscious user would choose) + a switch while a tx is pending. Plausible, not everyday.</p>
+
+  <h3>Why the two reviewers split</h3>
+  <p>claude said "safe" — it reasoned the submitted URL is pinned, so polling stays on Alice's endpoint. <strong>It missed</strong> that the pinning <em>silently fails</em> on the cache-miss path when the URL isn't in the active profile's address book. codex traced that fallback and called it a real fix. <strong>I read the code at each step and confirmed codex is right.</strong> (Files: <code>network/service.ts:529-537,770-775</code>, <code>transaction/service.ts:192-219</code>.)</p>
+
+  <!-- ───────────────────────── options ───────────────────────── -->
+  <h2>Your options for C3</h2>
+
+  <table>
+    <tr><th>Option</th><th>What it does</th><th>Cost / risk</th></tr>
+    <tr>
+      <td><strong>1. Fix now (minimal)</strong><br><span class="muted">my pick</span></td>
+      <td>Make the wallet recognize a tx's <em>submitted</em> URL across <em>all</em> profiles, so Alice's tx always polls Alice's post office. This just makes the <em>existing intent</em> (pin to the submitting endpoint) actually work — the code already tries to do this; it silently breaks across profiles.</td>
+      <td>Small, targeted change to <code>network</code>/<code>transaction</code>. No data-shape change. No residual leak to the wrong provider. Full dual-model + network e2e before merge.</td>
+    </tr>
+    <tr>
+      <td><strong>2. Fix thoroughly</strong></td>
+      <td>Don't poll Alice's transactions <em>at all</em> while Bob is active — only poll the active profile's pending txs. Strongest isolation (the wallet doesn't even talk to Alice's provider while you're in Bob).</td>
+      <td>Heavier. Transaction records <strong>don't currently store which profile they belong to</strong> (<code>service.ts:76-78</code>), so this needs a data-shape change + migration. And Alice's tx confirmation freezes until you switch back to her — a real UX regression.</td>
+    </tr>
+    <tr>
+      <td><strong>3. Accept the risk</strong></td>
+      <td>Document the narrow leak, change nothing.</td>
+      <td>Cheapest. But it leaves a known cross-profile isolation break in a privacy wallet — somewhat against your "no deferrals, no follow-ups" close-out goal.</td>
+    </tr>
+  </table>
+
+  <div class="box rec">
+    <strong>My recommendation: Option 1.</strong> The code already <em>means</em> to pin each pending tx to the endpoint it was submitted to — that's what <code>submittedEndpointUrl</code> is for. The bug is that the pin quietly fails across profiles. Option 1 fixes exactly that, with the smallest blast radius, and it closes the serious part of the leak (Alice's hash reaching Bob's provider) with <em>no</em> residual. Option 2's extra isolation only buys protection against a much more exotic threat (a global network observer correlating your IP talking to both providers) at the cost of a data migration + frozen confirmations. Option 3 leaves a privacy hole open in the exact wallet whose job is privacy.
+  </div>
+
+  <div class="approval">
+    <h2>What I need from you</h2>
+    <ol>
+      <li><strong>C2</strong> — confirm <em>close, no code change</em> (or tell me you want the dev-time depth-counter assert).</li>
+      <li><strong>C3</strong> — pick <strong>1 (minimal fix)</strong>, <strong>2 (thorough)</strong>, or <strong>3 (accept)</strong>.</li>
+    </ol>
+    <p class="muted">Once you decide, I'll implement (if any), run the full dual-model + network gate, fold the outcome into the wrap-up, and open the <code>dev-quality → dev</code> promote PR for you to merge.</p>
+  </div>
+
+  <p class="muted" style="margin-top:2.5rem;border-top:1px solid #eee;padding-top:1rem;">
+    Plan: <a href="plan.md">plan.md</a> · Wrap-up: <a href="WRAP-UP.md">WRAP-UP.md</a> · C2/C3 + TTL residual notes: <a href="lessons/q10-ttl-residuals.md">lessons/q10-ttl-residuals.md</a>
+  </p>
+</body>
+</html>

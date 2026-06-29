@@ -7,11 +7,13 @@ import { AztecNodeFactoryAdapter } from "@nulo/aztec-runtime/adapters"
 import type { NodeFactory } from "@nulo/aztec-runtime/ports"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
+import type { BrowserApi } from "@nulo/wallet-core/ports"
 import {
 	type ChainKind,
 	ERR_ACTIVE_NETWORK,
@@ -156,7 +158,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public readonly onPrimaryEndpointChanged = new EventHandler<{ networkId: string; endpointId: string }>()
 	public readonly onChainPurged = new EventHandler<{ profileId: string; chainId: number }>()
 
-	private readonly storage = new EntityStorage<Network>("nulo:core:networks", chrome.storage.local)
+	private readonly storage: EntityStorage<Network>
 	private readonly nodes = new Map<number, AztecNode>()
 	/** URL-keyed transient cache for pending-tx polling pin. */
 	private readonly transientNodes = new Map<string, { node: AztecNode; failures: number }>()
@@ -166,8 +168,13 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	private profileService: ProfileService = null!
 	private pxeServiceClient: PxeServiceClient = null!
 
-	public constructor(logger: ILogger, nodeFactory?: NodeFactory) {
+	public constructor(
+		logger: ILogger,
+		private readonly browserApi: BrowserApi,
+		nodeFactory?: NodeFactory,
+	) {
 		super(NETWORK_SERVICE_NAME, logger)
+		this.storage = new EntityStorage<Network>("nulo:core:networks", browserApi.storage.local)
 		this.lock = new Lock("network", logger)
 		this.nodeFactory = nodeFactory ?? new AztecNodeFactoryAdapter()
 	}
@@ -183,8 +190,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 
 	public async getOrInitNetworks(): Promise<Network[]> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
 			const existing = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
@@ -218,8 +224,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async getNetworks(chainId?: number): Promise<Network[]> {
 		validateParams(NetworkMethodSchemas.getNetworks.params, [chainId], "getNetworks")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		return (await this.storage.getValues()).filter(
 			(n) => n.profileId === profile.id && (chainId === undefined || n.chainId === chainId),
 		)
@@ -228,8 +233,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async getNetwork(id: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.getNetwork.params, [id], "getNetwork")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		const network = await this.storage.get(id)
 		if (network?.profileId !== profile.id) throw new Error("Invalid id")
 		return network
@@ -238,8 +242,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async getActiveNetwork(): Promise<Network | null> {
 		validateParams(NetworkMethodSchemas.getActiveNetwork.params, [], "getActiveNetwork")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		const id = await this._readActive(profile.id)
 		if (!id) return null
 		const network = await this.storage.get(id)
@@ -252,8 +255,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async addNetwork(name: string, rpcUrl: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.addNetwork.params, [name, rpcUrl], "addNetwork")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		const chainId = await this._getChainId(rpcUrl)
 		try {
 			await this.lock.enter()
@@ -277,8 +279,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async renameNetwork(id: string, name: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.renameNetwork.params, [id, name], "renameNetwork")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
 			const network = await this.storage.get(id)
@@ -298,8 +299,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async deleteNetwork(id: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.deleteNetwork.params, [id], "deleteNetwork")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
 			const network = await this.storage.get(id)
@@ -322,8 +322,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async setActiveNetwork(id: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.setActiveNetwork.params, [id], "setActiveNetwork")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
 			const network = await this.storage.get(id)
@@ -345,8 +344,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async addEndpoint(networkId: string, label: string | undefined, rpcUrl: string): Promise<NetworkEndpoint> {
 		validateParams(NetworkMethodSchemas.addEndpoint.params, [networkId, label, rpcUrl], "addEndpoint")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		// Peek the network's kind unlocked so the chainId probe can short-circuit
 		// for `kind === "local"` regardless of how the URL was edited. The lock-
 		// guarded re-read below handles the (rare) deletion race.
@@ -388,8 +386,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	): Promise<NetworkEndpoint> {
 		validateParams(NetworkMethodSchemas.updateEndpoint.params, [networkId, endpointId, label, rpcUrl], "updateEndpoint")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		const normalized = normalizeRpcUrl(rpcUrl)
 		// Peek the network's kind so the chainId probe can short-circuit for
 		// `kind === "local"` regardless of how the URL was edited.
@@ -436,8 +433,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async deleteEndpoint(networkId: string, endpointId: string): Promise<NetworkEndpoint> {
 		validateParams(NetworkMethodSchemas.deleteEndpoint.params, [networkId, endpointId], "deleteEndpoint")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
 			const network = await this.storage.get(networkId)
@@ -463,8 +459,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async setPrimaryEndpoint(networkId: string, endpointId: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.setPrimaryEndpoint.params, [networkId, endpointId], "setPrimaryEndpoint")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
 			const network = await this.storage.get(networkId)
@@ -487,8 +482,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async getNodeStatus(networkId: string): Promise<NodeStatus> {
 		validateParams(NetworkMethodSchemas.getNodeStatus.params, [networkId], "getNodeStatus")
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) throw new Error("Profile locked")
+		const profile = await requireActiveProfile(this.profileService)
 		const network = await this.storage.get(networkId)
 		if (network?.profileId !== profile.id) throw new Error("Invalid id")
 		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
@@ -508,8 +502,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			await this.lock.enter()
 			let node = this.nodes.get(chainId)
 			if (!node) {
-				const profile = await this.profileService.getActiveProfile()
-				if (!profile) throw new Error("Profile locked")
+				const profile = await requireActiveProfile(this.profileService)
 				const network = (await this.storage.getValues()).find((n) => n.profileId === profile.id && n.chainId === chainId)
 				if (!network) throw new Error(`No network configured for chainId ${chainId}`)
 				const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
@@ -524,21 +517,32 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	}
 
 	/**
-	 * Returns a transient AztecNode bound to the given URL — used by
-	 * pending-tx polling so receipt fetches stay on the originally-submitted
-	 * endpoint even after the user swaps the primary. Falls back to the
-	 * chain's current primary if the URL is no longer a known endpoint.
+	 * Returns a transient AztecNode bound to `url` — used by pending-tx
+	 * polling so receipt fetches ALWAYS stay on the endpoint the tx was
+	 * submitted to, even after the user swaps the primary OR switches profiles
+	 * while the tx is still pending.
+	 *
+	 * Polling is pinned to the submitted URL and NEVER falls back to the active
+	 * profile's node. The previous fallback routed one profile's tx hash to
+	 * another profile's RPC provider (a cross-profile isolation leak) whenever
+	 * the submitted endpoint wasn't the active profile's — on a profile switch,
+	 * or after the submitting endpoint was edited/deleted. `url` is internal:
+	 * captured at submit time from a configured (allowlist-validated) endpoint
+	 * and reused verbatim, so dialing it without consulting the active profile
+	 * is the correct ownership model for a pending tx. (The only trust this
+	 * places is in the persisted `submittedEndpointUrl`, a wallet-written
+	 * field; the active-profile fallback survives only for the legacy
+	 * no-recorded-endpoint path in `TransactionService.updateTx`, where there
+	 * is no URL to pin to.)
 	 *
 	 * Failures are reported via `reportEndpointFailure(url)`; after 3
-	 * consecutive failures the cache entry is evicted and the next call
-	 * falls back.
+	 * consecutive failures the cache entry is evicted and the next poll
+	 * rebuilds the same URL.
 	 */
-	public async getNodeForUrl(url: string, fallbackChainId: number): Promise<AztecNode> {
+	public async getNodeForUrl(url: string): Promise<AztecNode> {
 		await this.ensureInitialized()
 		const entry = this.transientNodes.get(url)
 		if (entry) return entry.node
-		const known = await this._isKnownEndpointUrl(url)
-		if (!known) return this.getNode(fallbackChainId)
 		const created = this.nodeFactory.createNode(url)
 		this.transientNodes.set(url, { node: created, failures: 0 })
 		return created
@@ -700,7 +704,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 				await this.storage.delete(network.id)
 				this.emit("onNetworkDeleted", network)
 			}
-			await chrome.storage.local.remove(activeKey(profile.id))
+			await this.browserApi.storage.local.remove(activeKey(profile.id))
 		} finally {
 			this.lock.leave()
 		}
@@ -765,20 +769,13 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	}
 
 	private async _readActive(profileId: string): Promise<string | undefined> {
-		const r = await chrome.storage.local.get(activeKey(profileId))
+		const r = await this.browserApi.storage.local.get(activeKey(profileId))
 		const raw = r[activeKey(profileId)]
 		return typeof raw === "string" ? raw : undefined
 	}
 
 	private async _writeActive(profileId: string, networkId: string): Promise<void> {
-		await chrome.storage.local.set({ [activeKey(profileId)]: networkId })
-	}
-
-	private async _isKnownEndpointUrl(url: string): Promise<boolean> {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) return false
-		const networks = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
-		return networks.some((n) => n.endpoints.some((e) => e.rpcUrl === url))
+		await this.browserApi.storage.local.set({ [activeKey(profileId)]: networkId })
 	}
 }
 

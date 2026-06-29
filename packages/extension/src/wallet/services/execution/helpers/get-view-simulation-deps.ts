@@ -10,6 +10,7 @@ import type { AccountService } from "@/wallet/services/account/service"
 import type { NetworkService } from "@/wallet/services/network/service"
 import { networkInfoFrom } from "@/wallet/services/network/service"
 import type { ProfileService } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import type { PxeServiceClient } from "@/wallet/services/pxe/client"
 import type { ILogger } from "@/wallet/logger"
 import type { ContractResolver } from "../contract-resolver"
@@ -29,10 +30,7 @@ export async function getViewSimulationDeps(
 	networkId: string,
 	accountAddress: string,
 ): Promise<BatchedViewSimulationDeps> {
-	const profile = await services.profiles.getActiveProfile()
-	if (!profile) {
-		throw new Error("Wallet locked")
-	}
+	const profile = await requireActiveProfile(services.profiles, "Wallet locked")
 	const network = await services.networks.getNetwork(networkId)
 	const account = await services.accounts.getAccountContract(profile.id, network.chainId, accountAddress)
 	const node = await services.networks.getNode(network.chainId)

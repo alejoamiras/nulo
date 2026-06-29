@@ -153,13 +153,22 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 	// safer than the original "register only after the transition" timing. The
 	// `set` is idempotent in that case (same key, same value).
 	//
-	// The OTHER side of this invariant lives in cancelJob → transitionOperation
-	// → `_transitionLocked` (operation-journal/service.ts). That path has
-	// its own awaits BEFORE it calls `controller.abort()`, which yields
-	// the microtask back to us so we get a chance to set the controller
-	// before any cancel-side abort lands. This is correctness-by-microtask-
-	// interleaving and is fragile against future refactors of either side
-	// (opus post-impl F5).
+	// The OTHER side of this handshake is cancelJob → transitionOperation →
+	// `_transitionLocked` (operation-journal/service.ts): it transitions the
+	// journal record BEFORE calling `controller.abort()`, and the journal's
+	// transition lock is the arbiter that serializes claim-vs-cancel. Combined
+	// with `reuseController` being registered before the acquire wait (above),
+	// cancelJob always finds a controller to abort on this claim path —
+	// correctness rests on controller-identity-continuity + transition-before-
+	// abort + the journal lock, NOT on microtask luck. The one microtask-
+	// sensitive residual is the LEGACY no-reuse / reaped-record fallback, where a
+	// freshly-created controller is `set()` immediately after the create await
+	// (the same register-immediately discipline, applied at those create sites);
+	// the queued/pending `set()` below is the one the no-await line above covers.
+	// Making the handshake explicit via a small claim/cancel
+	// coordinator seam was evaluated (codex) and deferred to the execution
+	// composition harness in #125/#126 for human review; see
+	// implementations-plan/quality-arc-deferred/lessons/q23.md.
 	const controller = reuseController ?? new AbortController()
 	activeControllers.set(queuedJournalId, controller)
 	return { journalId: queuedJournalId, controller }

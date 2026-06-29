@@ -2,10 +2,12 @@ import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
+import type { BrowserApi } from "@nulo/wallet-core/ports"
 import {
 	DAPP_SESSION_SERVICE_NAME,
 	type DappMetadata,
@@ -41,13 +43,14 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	public readonly onDappSessionUpdated = new EventHandler<DappSession>()
 	public readonly onDappSessionDeleted = new EventHandler<DappSession>()
 
-	private readonly storage = new EntityStorage<DappSession>("nulo:core:dappSessions", chrome.storage.local)
+	private readonly storage: EntityStorage<DappSession>
 	private readonly lock = new Lock()
 
 	private profileService: ProfileService = null!
 
-	public constructor(logger: ILogger) {
+	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(DAPP_SESSION_SERVICE_NAME, logger)
+		this.storage = new EntityStorage<DappSession>("nulo:core:dappSessions", browserApi.storage.local)
 	}
 
 	protected async init(services: ServiceCollection) {
@@ -57,10 +60,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 
 	public async getDappSessions(): Promise<DappSession[]> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Profile locked")
-		}
+		const profile = await requireActiveProfile(this.profileService)
 		await this.deleteExpired()
 		return (await this.storage.getValues()).filter((x) => x.profileId === profile.id)
 	}
@@ -122,10 +122,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		chainId: string,
 	): Promise<DappSession> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
-			throw new Error("Wallet is locked")
-		}
+		const profile = await requireActiveProfile(this.profileService, "Wallet is locked")
 		await this.deleteExpired()
 		try {
 			await this.lock.enter()

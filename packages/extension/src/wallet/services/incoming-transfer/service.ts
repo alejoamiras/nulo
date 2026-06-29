@@ -2,6 +2,7 @@ import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { EventHandler, Lock, getErrorMessage } from "@nulo/wallet-core/utils"
+import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { NetworkService, type Network } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
@@ -91,7 +92,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	public readonly onIncomingTransferPending = new EventHandler<IncomingTransferPending>()
 	public readonly onIncomingTrustChanged = new EventHandler<IncomingTrustRecord>()
 
-	private readonly repo = new IncomingTransferRepository()
+	private readonly repo: IncomingTransferRepository
 	private profileService: ProfileService = null!
 	private networkService: NetworkService = null!
 	private accountService: AccountService = null!
@@ -124,8 +125,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 	private readonly pollIntervalMs: number
 
-	public constructor(logger: ILogger, pollIntervalMs: number = DEFAULT_POLL_INTERVAL_MS) {
+	public constructor(logger: ILogger, browserApi: BrowserApi, pollIntervalMs: number = DEFAULT_POLL_INTERVAL_MS) {
 		super(INCOMING_TRANSFER_SERVICE_NAME, logger)
+		this.repo = new IncomingTransferRepository(browserApi)
 		this.pollIntervalMs = pollIntervalMs
 		this.serviceLock = new Lock(INCOMING_TRANSFER_SERVICE_NAME, logger)
 	}
