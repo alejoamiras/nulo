@@ -28,6 +28,7 @@
     "typecheck:all": "bun run --filter '@nulo/*' typecheck",
     "test:all": "bun run --filter '@nulo/*' --if-present test",
     "test:release": "bun test scripts/release/",
+    "test:ci-gating": "bun test scripts/ci-cd/",
     "check:imports": "biome check packages/",
     "audit:vue": "bun run typecheck:all && bun run test && bun run lint && bun run build",
     "audit:faucet": "bun run typecheck:all && bun run test:faucet && bun run lint && bun run --cwd packages/faucet verify:deployments && bun run build:faucet",

@@ -43,35 +43,46 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
           filters: |
+            # Graph-derived (see CI.md "CI gating"): dependency libraries by consumed
+            # src + manifest; built targets by whole package. NO `!` negations (the dorny
+            # `some`-quantifier footgun). Pinned by scripts/ci-cd/behavior-gating.test.ts.
             core-foundation:
-              - 'packages/wallet-core/**'
-              - 'packages/wallet-crypto/**'
-              - 'packages/extension-messaging/**'
-              - '!packages/wallet-core/**/*.md'
-              - '!packages/wallet-crypto/**/*.md'
-              - '!packages/extension-messaging/**/*.md'
+              - 'packages/wallet-core/src/**'
+              - 'packages/wallet-core/package.json'
+              - 'packages/wallet-crypto/src/**'
+              - 'packages/wallet-crypto/package.json'
+              - 'packages/extension-messaging/src/**'
+              - 'packages/extension-messaging/package.json'
             aztec-runtime:
-              - 'packages/aztec-runtime/**'
-              - '!packages/aztec-runtime/**/*.md'
+              - 'packages/aztec-runtime/src/**'
+              - 'packages/aztec-runtime/package.json'
             wallet-bridge:
-              - 'packages/wallet-bridge/**'
-              - '!packages/wallet-bridge/**/*.md'
+              - 'packages/wallet-bridge/src/**'
+              - 'packages/wallet-bridge/package.json'
             extension:
+              # Built target — whole package; design dep lib — src + manifest.
               - 'packages/extension/**'
-              - '!packages/extension/**/*.md'
-              - 'packages/design/**'
-              - '!packages/design/**/*.md'
+              - 'packages/design/src/**'
+              - 'packages/design/package.json'
             playground:
               - 'packages/playground/**'
-              - '!packages/playground/**/*.md'
             landing:
+              # Dead filter — no job consumes it; kept positive-only for the no-`!` invariant.
               - 'packages/landing/**'
-              - '!packages/landing/**/*.md'
             faucet:
+              # Built target — faucet (whole package) + its transitive dep libs
+              # (bridge-core → wallet-crypto → wallet-core, + design) + the faucet build
+              # workflow. Closes the prior under-gate (was faucet + design only).
               - 'packages/faucet/**'
-              - '!packages/faucet/**/*.md'
-              - 'packages/design/**'
-              - '!packages/design/**/*.md'
+              - 'packages/bridge-core/src/**'
+              - 'packages/bridge-core/package.json'
+              - 'packages/wallet-crypto/src/**'
+              - 'packages/wallet-crypto/package.json'
+              - 'packages/wallet-core/src/**'
+              - 'packages/wallet-core/package.json'
+              - 'packages/design/src/**'
+              - 'packages/design/package.json'
+              - '.github/workflows/_build-faucet.yml'
             workflows:
               - '.github/workflows/**'
               - '.github/actions/**'
@@ -83,6 +94,7 @@ jobs:
               - 'tsconfig.json'
               - '.commitlintrc.json'
               - '.githooks/**'
+              - 'patches/**'
             # Files that can change Firefox build divergence (not runtime behaviour).
             # Auditor (codex) corrected this to include shared build inputs in addition
             # to the firefox-only configs; see implementations-plan/ci-cd/build-caching-plan.md §1.1.
