@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nulo — How keys are made (and how a "standard" wallet would do it)</title>
+<style>
+  :root{
+    --ink:#1c1c1e; --muted:#65656b; --line:#e6e6ea; --bg:#fff;
+    --code-bg:#f5f5f7; --accent:#0a6cff;
+    --info:#0a6cff; --info-bg:#eef5ff;
+    --warn:#b4690e; --warn-bg:#fff6e9;
+    --danger:#c2261b; --danger-bg:#fdeeec;
+    --good:#1a7f47; --good-bg:#ecf8f1;
+    --purple:#6b3fd1; --purple-bg:#f2edff;
+  }
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    max-width:820px;margin:0 auto;padding:2rem 1.1rem 5rem;color:var(--ink);
+    line-height:1.62;background:var(--bg);-webkit-text-size-adjust:100%}
+  h1{font-size:1.95rem;line-height:1.2;margin:.2rem 0 .4rem;font-weight:680}
+  h2{font-size:1.32rem;margin:2.8rem 0 .5rem;font-weight:660;padding-top:1rem;border-top:1px solid var(--line)}
+  h3{font-size:1.05rem;margin:1.5rem 0 .3rem;font-weight:640;color:#2a2a2e}
+  p{margin:.55rem 0}
+  .sub{color:var(--muted);font-size:.92rem;margin-top:0}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86em;
+    background:var(--code-bg);padding:.1em .35em;border-radius:4px;word-break:break-word}
+  pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.8rem;line-height:1.45;
+    background:var(--code-bg);padding:1rem;border-radius:8px;overflow-x:auto;border:1px solid var(--line)}
+  pre.diagram{background:#fbfbfd}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  ul,ol{padding-left:1.3rem;margin:.5rem 0}
+  li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--line);padding:.55rem .7rem;text-align:left;vertical-align:top}
+  th{background:var(--code-bg);font-weight:620;white-space:nowrap}
+  .box{padding:.85rem 1.05rem;border-radius:8px;margin:1.1rem 0;border:1px solid var(--line)}
+  .box p:first-child{margin-top:0}.box p:last-child{margin-bottom:0}
+  .box .tag{font-weight:700;font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;display:block;margin-bottom:.3rem}
+  .info{background:var(--info-bg);border-color:#cfe1ff}.info .tag{color:var(--info)}
+  .warn{background:var(--warn-bg);border-color:#f3dcb4}.warn .tag{color:var(--warn)}
+  .danger{background:var(--danger-bg);border-color:#f3cdc8}.danger .tag{color:var(--danger)}
+  .good{background:var(--good-bg);border-color:#c7e9d4}.good .tag{color:var(--good)}
+  .purple{background:var(--purple-bg);border-color:#ddd0fb}.purple .tag{color:var(--purple)}
+  .eli5{background:#fcfcfd;border-left:3px solid var(--accent);border-radius:0 6px 6px 0;padding:.5rem .9rem;margin:.7rem 0}
+  .eli5 .tag{font-weight:700;font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;color:var(--accent)}
+  .pill{display:inline-block;font-size:.74rem;font-weight:640;padding:.08em .5em;border-radius:20px;border:1px solid currentColor;vertical-align:middle}
+  .pill.no{color:var(--danger)}.pill.yes{color:var(--good)}.pill.partial{color:var(--warn)}
+  .toc{font-size:.92rem;background:#fbfbfd;border:1px solid var(--line);border-radius:8px;padding:.8rem 1rem}
+  .toc ol{margin:.2rem 0}
+  .footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--muted);font-size:.85rem}
+  .filemap td:first-child{white-space:nowrap;font-family:ui-monospace,Menlo,monospace;font-size:.82rem}
+  .small{font-size:.85rem;color:var(--muted)}
+  .checkmark{color:var(--good);font-weight:700}.cross{color:var(--danger);font-weight:700}
+</style>
+</head>
+<body>
+
+<h1>How Nulo makes your keys</h1>
+<p class="sub">A plain-English tour of the wallet's key system as it exists today — and what a more "standard" version would look like. &nbsp;·&nbsp; June 2026 · <code>@aztec 5.0.0-rc.1</code> · <code>@nulo/extension 0.24.0-rc.1</code></p>
+
+<div class="box info">
+  <span class="tag">Read this first — the one-paragraph version</span>
+  <p>Nulo does <strong>not</strong> use a seed phrase as its starting point the way MetaMask does. Instead, every wallet ("profile") is built around a single <strong>32-byte master secret</strong>. That secret is born in one of two ways: a <strong>password</strong> profile rolls a random number and locks it with your password; a <strong>passkey</strong> profile <em>derives</em> the secret from your fingerprint/Face-ID passkey every time you unlock. From that one master secret, the wallet mathematically grows every account, every signing key, and every privacy key. There <em>is</em> a 24-word seed phrase in here — but it's an <em>export/backup feature for password profiles only</em>, never shown during sign-up, and the passkey path has no seed phrase at all. The thing that actually signs your Aztec transactions is always a classic <strong>Schnorr key</strong>; the passkey itself never signs anything on-chain — it only reconstructs the secret in memory.</p>
+</div>
+
+<div class="toc">
+  <strong>Tour</strong>
+  <ol>
+    <li><a href="#what">What is a "key" here, really?</a></li>
+    <li><a href="#doors">How a wallet is born — the two doors</a></li>
+    <li><a href="#tree">One secret → many accounts (the family tree)</a></li>
+    <li><a href="#storage">Where everything actually lives</a></li>
+    <li><a href="#backup">Backup &amp; recovery — the part that bites</a></li>
+    <li><a href="#strict">"Strict mode" today vs. what you want</a></li>
+    <li><a href="#standard">How a more standard wallet would do it</a></li>
+    <li><a href="#sharp">Sharp edges we found along the way</a></li>
+    <li><a href="#filemap">Where to look in the code</a></li>
+  </ol>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="what">1 · What is a "key" here, really?</h2>
+
+<p>Crypto wallets throw the word "key" at a lot of different things. In Nulo there are <strong>four distinct layers</strong>, and keeping them separate is the whole game:</p>
+
+<table>
+  <tr><th>Layer</th><th>Plain-English name</th><th>What it is</th></tr>
+  <tr><td><strong>Master secret</strong></td><td>"the one true secret"</td><td>A single 32-byte number (a point in Aztec's number field, called an <code>Fr</code>). One per profile. Whoever has this owns <em>everything</em> in the profile.</td></tr>
+  <tr><td><strong>Per-account secret</strong></td><td>"this account's secret"</td><td>A child number, mixed from the master + which chain + which account index. One per account.</td></tr>
+  <tr><td><strong>Signing key</strong></td><td>"the pen that signs"</td><td>A <strong>Schnorr</strong> key grown from the per-account secret. This is what actually authorizes a transaction.</td></tr>
+  <tr><td><strong>Viewing / nullifier keys</strong></td><td>"the privacy keys"</td><td>Aztec is a private chain. These keys let you <em>see</em> your own incoming private notes and spend them without revealing who you are. Also grown from the per-account secret.</td></tr>
+</table>
+
+<div class="eli5">
+  <span class="tag">ELI5</span>
+  <p>Think of the <strong>master secret</strong> as the master key to an apartment building. From it the wallet cuts a key for each apartment (<strong>per-account secret</strong>). Each apartment key is actually two keys on one ring: a <strong>pen</strong> that signs your name (Schnorr signing key) and a pair of <strong>special glasses</strong> that let you read invisible mail addressed to you (viewing keys). The passkey/password is just the thing that gets the master key out of the safe — it isn't any of these keys itself.</p>
+</div>
+
+<p>Two facts that surprise people:</p>
+<ul>
+  <li><strong>The passkey never signs a transaction.</strong> On Aztec, the on-chain account contract checks a <em>Schnorr</em> signature. The passkey's only job is to rebuild the master secret in memory; the Schnorr pen does the signing.</li>
+  <li><strong>There is no "private key" in the Ethereum sense.</strong> What the UI calls "Plain Key" / <code>private_key</code> on export is literally the raw 32-byte master secret in base64 — not an secp256k1 key.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="doors">2 · How a wallet is born — the two doors</h2>
+
+<p>When you create a profile, the code branches at the very top: password door or passkey door. Both doors end at the same place (a 32-byte master secret) — they just get there differently.</p>
+
+<h3>Door A — Password profile</h3>
+<pre class="diagram">  you type a password
+        │
+        ▼
+  the wallet IGNORES it for a second and rolls a fresh random number
+        │                          Fr.random()  →  32-byte master secret
+        ▼
+  password is used only to LOCK that random secret for storage:
+        SHA-256(password) ─► PBKDF2-SHA256 (600,000 rounds) ─► AES-GCM-256 key
+        │
+        ▼
+  store on disk:  { guard: <encrypted check-value>,  secret: <encrypted master> }</pre>
+
+<div class="box info">
+  <span class="tag">Key point</span>
+  <p>The password does <strong>not</strong> generate the secret — it only <em>wraps</em> it. That means your password is not your backup: if you wipe the device, re-typing the password on a fresh install gives you nothing, because the random secret it was protecting is gone. (More on this in §5.)</p>
+</div>
+
+<h3>Door B — Passkey profile</h3>
+<pre class="diagram">  you tap your passkey (Face-ID / fingerprint / security key)
+        │
+        ▼
+  WebAuthn runs with the "PRF" extension — a feature that asks the
+  authenticator for a stable secret pseudo-random output:
+        eval input = SHA-256("nulo:profile:v1")          (domain separation)
+        │
+        ▼  authenticator returns 32 secret bytes  ("the PRF output")
+        │
+        ▼  HKDF-SHA256 stretches/labels it into the master secret:
+        salt = SHA-256("nulo:kdf:v1" ‖ credentialId)
+        info = "nulo:master:v1"
+        │
+        ▼
+  32-byte master secret   (nothing is stored on disk except the credentialId)</pre>
+
+<div class="box purple">
+  <span class="tag">The crucial difference (the "KEK question")</span>
+  <p>A passkey profile does <strong>not</strong> store a random secret and unlock it with the passkey. The passkey output <em>is</em> the seed — the master secret is <strong>derived</strong> from it every single time. Nothing on disk but the <code>credentialId</code>. This is elegant (no secret at rest) but has a sharp consequence: <strong>your passkey is your wallet.</strong> Lose the authenticator and there is no encrypted blob to fall back on.</p>
+</div>
+
+<div class="eli5">
+  <span class="tag">ELI5</span>
+  <p><strong>Password door:</strong> the wallet writes a secret on a card, locks the card in a box, and your password is the box's combination. <strong>Passkey door:</strong> there is no card and no box — your fingerprint <em>is</em> a machine that prints the exact same secret on demand. If the machine breaks, the secret can never be printed again.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="tree">3 · One secret → many accounts (the family tree)</h2>
+
+<p>You don't sign with the master secret directly. The wallet grows a tree from it, so one profile can hold many accounts across many chains:</p>
+
+<pre class="diagram">           MASTER SECRET  (per profile — from Door A or Door B)
+                  │
+                  │   per-account secret =
+                  │   poseidon2Hash( master , chainId , type , index )
+                  ▼
+           PER-ACCOUNT SECRET   (one per chain + account number)
+                  │
+        ┌─────────┴───────────────┐
+        ▼                         ▼
+  deriveSigningKey()         deriveKeys()
+   = Schnorr key              = nullifier key + incoming-viewing
+   (Grumpkin scalar)            + outgoing-viewing + tagging keys
+        │                         │
+        └───────────┬─────────────┘
+                    ▼
+       SchnorrAccountContract   (salt = 0)
+                    ▼
+            your account address (0x…)</pre>
+
+<p>So the hierarchy is <strong>HD-wallet-like</strong> (one root → unlimited children), but it does <em>not</em> use the Bitcoin/Ethereum BIP-32 standard. It uses Aztec's native <code>poseidon2</code> hash as the "derivation path." The index auto-increments per (chain, account-type) so "add account" just bumps a counter.</p>
+
+<table>
+  <tr><th>Both doors agree on…</th><th>Detail</th></tr>
+  <tr><td>Signing scheme</td><td>Always <strong>Schnorr over the Grumpkin curve</strong>. Literally <code>sha512ToGrumpkinScalar([secret, IVSK_M])</code>.</td></tr>
+  <tr><td>On-chain account</td><td>Always the stock Aztec <code>SchnorrAccountContract</code> at <code>salt = 0</code>. The Noir contract verifies <code>schnorr::verify_signature(...)</code>.</td></tr>
+  <tr><td>Passkey's role</td><td><strong>None on-chain.</strong> A passkey account and a password account are <em>indistinguishable</em> on Aztec — both are plain Schnorr accounts. The door only changed how the secret was obtained.</td></tr>
+</table>
+
+<div class="box info">
+  <span class="tag">This answers your "use the Schnorr K for passkey accounts" question</span>
+  <p>Passkey accounts <strong>already use a Schnorr key</strong> — passkey → master → per-account secret → <code>deriveSigningKey</code> → Schnorr, exactly like password accounts. There is no separate "passkey signature" type today. So if "make it actually use Schnorr" meant "it currently signs with the passkey natively" — it doesn't; it's Schnorr already. If you meant something else (native on-chain passkey verification), that's a real but much bigger change — see §7.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="storage">4 · Where everything actually lives</h2>
+
+<table>
+  <tr><th>What</th><th>Where</th><th>Encrypted?</th></tr>
+  <tr><td>Password profile row</td><td><code>chrome.storage.local</code> → <code>nulo:core:profiles@&lt;id&gt;</code><br><span class="small">fields: <code>guard</code>, <code>secret</code> (both ciphertext)</span></td><td><span class="checkmark">Yes</span> — AES-GCM under your password.</td></tr>
+  <tr><td>Passkey profile row</td><td>same root</td><td><span class="small">n/a — stores only <code>credentialId</code>, no secret at all.</span></td></tr>
+  <tr><td>Active session</td><td><code>chrome.storage.session</code> → <code>nulo:core:session</code></td><td>The in-memory master <code>Fr</code> is <strong>never</strong> written here. Password sessions may cache a <code>SHA-256(password)</code> "bearer" (unless strict mode). Passkey sessions never auto-restore.</td></tr>
+  <tr><td>Account metadata</td><td><code>chrome.storage.local</code> → <code>nulo:core:accounts@&lt;addr&gt;</code></td><td><span class="small">Just labels/visibility. No secrets.</span></td></tr>
+  <tr><td><strong>Derived account keys</strong></td><td><strong>IndexedDB</strong> (Aztec PXE's keystore)</td><td><span class="cross">No.</span> Once an account is registered, Aztec writes <code>ivsk_m / ovsk_m / tsk_m / nhk_m …</code> into its own IndexedDB store, <strong>not</strong> encrypted by the wallet.</td></tr>
+</table>
+
+<div class="box warn">
+  <span class="tag">Worth knowing</span>
+  <p>The profile-row encryption is <strong>not the whole at-rest story.</strong> The moment you have a live account, the <em>derived</em> private keys for it sit in IndexedDB in the clear (this is upstream Aztec PXE behaviour, not Nulo-specific). Disk-encryption of the OS is doing the heavy lifting there, not the wallet.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="backup">5 · Backup &amp; recovery — the part that bites</h2>
+
+<p>This is the section that matters most for "should we change it." Here's the honest matrix:</p>
+
+<table>
+  <tr><th>Capability</th><th>Password profile</th><th>Passkey profile</th></tr>
+  <tr><td>Seed phrase (24 words)</td><td><span class="pill yes">✓ export &amp; import</span></td><td><span class="pill no">✗ blocked</span></td></tr>
+  <tr><td>Raw secret key export</td><td><span class="pill yes">✓</span></td><td><span class="pill no">✗ returns only the credentialId</span></td></tr>
+  <tr><td>Encrypted key export</td><td><span class="pill yes">✓</span></td><td><span class="pill no">✗</span></td></tr>
+  <tr><td>Full Backup (JSON file)</td><td><span class="pill yes">✓ contains the master key</span></td><td><span class="pill partial">~ contains only the credentialId</span></td></tr>
+  <tr><td>Recover after device loss</td><td>Only if you exported one of the above <em>beforehand</em>.</td><td>Only if the <em>same passkey</em> still exists (synced / second device).</td></tr>
+  <tr><td>Password / passkey alone recovers?</td><td><span class="cross">No</span> — secret is random, not password-derived.</td><td><span class="cross">No file helps</span> — you need the authenticator itself.</td></tr>
+</table>
+
+<h3>The 24-word seed phrase — yes it exists, but read the fine print</h3>
+<p>There's a hand-rolled <strong>BIP-39 codec</strong> in the codebase (the real 2048-word English list, 11-bit packing, SHA-256 checksum). A 32-byte secret renders to <strong>24 words</strong>. But:</p>
+<ul>
+  <li>It is <strong>only</strong> reachable via <em>Settings → Security → Export → Seed</em>, password-gated, <strong>password profiles only</strong>.</li>
+  <li>It is <strong>never shown at sign-up</strong> (unlike MetaMask, which forces it on you day one).</li>
+  <li>It's just a <em>rendering of the already-random secret</em> — there's no BIP-32/HD seed-stretching. The words <em>are</em> the entropy, reversibly. (Standard wallets run the words through PBKDF2 to a 512-bit seed first; Nulo doesn't.)</li>
+</ul>
+
+<div class="box danger">
+  <span class="tag">The two recovery traps</span>
+  <p><strong>Passkey users have no portable backup.</strong> Their "Full Backup" file stores the <code>credentialId</code>, not the secret — restoring it just re-runs WebAuthn against that credential. If the authenticator is gone (lost phone, non-synced security key, the known <a href="../passkey-e2e/PRF-NON-PORTABLE.md">PRF-non-portability issue</a>), the funds are gone. There is no seed phrase to write down.</p>
+  <p><strong>Password users who never exported are equally stuck.</strong> The password protects a random secret stored only on that device. No export = no recovery, full stop.</p>
+</div>
+
+<div class="box warn">
+  <span class="tag">Also note</span>
+  <p>A <em>plain</em> Full Backup writes the <strong>raw master key</strong> into the JSON by default — "Protect with Password" is a separate, optional step. Easy to footgun a plaintext master key onto disk / cloud.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="strict">6 · "Strict mode" today vs. what you want</h2>
+
+<p>Strict security mode is <strong>ON by default</strong>. But here's exactly what it does and doesn't do today:</p>
+
+<table>
+  <tr><th></th><th>Today's behaviour</th></tr>
+  <tr><td>What strict mode <em>does</em></td><td>Stops the wallet from caching the <code>SHA-256(password)</code> bearer in session storage, so the service worker can't silently re-unlock itself after it sleeps. You re-auth more often. (Passkey sessions already never silent-restore.)</td></tr>
+  <tr><td>What strict mode <em>does not</em> do</td><td>It does <strong>not</strong> require a passkey tap or password at signing time. Once unlocked, the master secret sits in service-worker memory and <strong>every</strong> transaction signs from it with no prompt, until manual lock / TTL timeout / worker death.</td></tr>
+</table>
+
+<pre class="diagram">  TODAY:   unlock once ──► master secret held in memory ──► tx, tx, tx, tx … (no re-prompt)
+
+  YOU WANT: ── tx ──► [tap passkey / enter password] ──► sign ──► drop secret ──► repeat</pre>
+
+<div class="box good">
+  <span class="tag">The good news</span>
+  <p>The seam to change this is small and well-located. Signing pulls the secret through one chokepoint — <code>SessionManager.getSecret()</code> via <code>ProfileService.getProfileSecret()</code>, consumed in the execution/account services. A "strict-signing" mode would replace that in-memory read at the execution boundary with a <em>fresh ceremony</em> (passkey assertion or password), use the secret to sign, then drop it. No on-chain or account-contract change required for the password/derived-Schnorr path.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="standard">7 · How a more standard wallet would do it</h2>
+
+<p>Here's the contrast and three concrete directions, from cheapest to most ambitious.</p>
+
+<table>
+  <tr><th>Dimension</th><th>Standard (MetaMask-style)</th><th>Nulo today</th></tr>
+  <tr><td>Root of the wallet</td><td>12/24-word BIP-39 mnemonic, shown at sign-up, IS the seed.</td><td>Random 32-byte secret (password) or passkey-derived. Mnemonic is an after-the-fact export, password-only.</td></tr>
+  <tr><td>Backup model</td><td>Write down the words once → recover anywhere.</td><td>Must opt into an export; passkey path has no portable backup.</td></tr>
+  <tr><td>Key derivation</td><td>BIP-39 → 512-bit seed → BIP-32 HD tree.</td><td>master → <code>poseidon2(master, chain, type, index)</code>.</td></tr>
+  <tr><td>Signing</td><td>secp256k1 / per-tx confirm.</td><td>Schnorr/Grumpkin; in-memory, no per-tx auth.</td></tr>
+</table>
+
+<h3>Direction A — Make the seed phrase the <em>root</em>, not an export (cheap, high value)</h3>
+<p>Flip the model: at sign-up, generate BIP-39 entropy, <strong>show the 24 words</strong>, and derive the master secret <em>from</em> them (optionally with a passphrase). This is nearly free because the import path already converts words → entropy → master — you'd essentially make "import" the way "create" works, and surface the words. Result: a real, portable, write-it-down backup that works on any device, matching what users expect. Keep passkey as an <em>optional unlock convenience</em> layered on top, not the sole root.</p>
+
+<h3>Direction B — Per-transaction unlock in strict mode (cheap, exactly your ask)</h3>
+<p>As described in §6: gate <code>getSecret()</code> at the execution boundary so that, in strict mode, each signature (or each signature above an amount, or after N minutes) requires a fresh passkey assertion / password entry. The secret is reconstructed just-in-time, used, and dropped. This also lets you finally <em>zeroize</em> aggressively instead of holding a long-lived <code>Fr</code> in memory.</p>
+
+<h3>Direction C — Native passkey accounts (powerful, expensive)</h3>
+<p>This is the "make the passkey <em>actually</em> the signer" idea. Two sub-options:</p>
+<table>
+  <tr><th></th><th>Derived-Schnorr (today)</th><th>Native P-256 passkey account</th></tr>
+  <tr><td>How it signs</td><td>Passkey PRF → rebuild secret → Schnorr key signs.</td><td>The passkey signs the tx hash directly; a custom Noir account contract verifies the WebAuthn <strong>secp256r1 (P-256)</strong> signature on-chain.</td></tr>
+  <tr><td>Secret ever in memory?</td><td>Yes (the master <code>Fr</code>).</td><td><strong>Never</strong> — the private key stays in the secure element.</td></tr>
+  <tr><td>Per-tx touch?</td><td>Bolt-on (Direction B).</td><td><strong>Inherent</strong> — every tx needs a real assertion.</td></tr>
+  <tr><td>Cost</td><td>—</td><td>Write + audit a Noir account contract doing P-256 verification (not Aztec-native — in-circuit secp256r1 is heavy), new address scheme, migration.</td></tr>
+</table>
+
+<div class="box purple">
+  <span class="tag">The insight tying B and C together</span>
+  <p>Your two wishes — "per-transaction unlock" and "passkey actually signs" — are the same wish at different depths. <strong>Direction C gives you per-tx touch for free</strong> (the chain itself demands a fresh passkey signature every time), at the cost of building a P-256 account contract. <strong>Direction B</strong> gets you the per-tx feel today, cheaply, while staying on the stock Schnorr account. A sane path: ship B now; evaluate C as a separate, audited account-contract project if true secure-element-resident signing is a product goal.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="sharp">8 · Sharp edges we found along the way</h2>
+<p class="small">Surfaced by three parallel codex audits + a manual read of the crypto core. None are "drop everything," but they're the security-relevant footnotes for any redesign.</p>
+<ul>
+  <li><strong>Account derivation omits <code>profileId</code>.</strong> <code>poseidon2(master, chainId, type, index)</code> has no profile binding, so the <em>same</em> master imported into two profiles yields identical addresses — and account storage is keyed by address. Worth fixing if you touch derivation.</li>
+  <li><strong>Signing-key domain separator is an upstream TODO.</strong> rc.1 derives the Schnorr key with the <code>IVSK_M</code> separator; if Aztec changes that, signing keys drift. Pinned by <code>key-vectors.test.ts</code>, so a drift would at least fail loudly.</li>
+  <li><strong>Derived keys sit unencrypted in IndexedDB</strong> (PXE keystore) — see §4.</li>
+  <li><strong>The password "bearer" is a single <code>SHA-256(password)</code>.</strong> Cheap to brute-force if session storage leaks; strict mode is what stops it being persisted. (At-rest master is still behind 600k-round PBKDF2, so this is a session-theft concern, not an at-rest one.)</li>
+  <li><strong>PBKDF2, not Argon2id.</strong> 600k rounds is OWASP-compliant but GPU-friendly; Argon2id would be the modern choice. Also the AES-GCM salt is <code>SHA-256(iv)</code> rather than independent randomness (unique per-encryption, so not exploitable, but unconventional).</li>
+  <li><strong>Plain Full Backup writes the raw master key by default</strong> — see §5.</li>
+  <li><strong>The long-lived master <code>Fr</code> isn't zeroized on lock</strong> — only the reference is dropped (the zeroizer can't wipe <code>Fr</code>/<code>CryptoKey</code> internals). Direction B's just-in-time model would shrink this window.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="filemap">9 · Where to look in the code</h2>
+<table class="filemap">
+  <tr><th>Concern</th><th>File</th></tr>
+  <tr><td>Passkey PRF → HKDF → master</td><td>packages/wallet-crypto/src/passkey-credential.ts</td></tr>
+  <tr><td>Password KDF (PBKDF2 + AES-GCM)</td><td>packages/wallet-crypto/src/encryption-key.ts</td></tr>
+  <tr><td>Seal/unseal the master under a password</td><td>packages/wallet-crypto/src/password-secret-box.ts</td></tr>
+  <tr><td>PRF eval label (<code>nulo:profile:v1</code>)</td><td>packages/wallet-crypto/src/constants.ts</td></tr>
+  <tr><td>BIP-39 codec (24-word seed)</td><td>packages/wallet-core/src/utils/mnemonic.ts</td></tr>
+  <tr><td>WebAuthn ceremony options</td><td>packages/extension/src/wallet/utils/passkey-ceremony.ts</td></tr>
+  <tr><td>Profile create / unlock / export / import</td><td>packages/extension/src/wallet/services/profile/service.ts</td></tr>
+  <tr><td>In-memory session &amp; strict mode</td><td>packages/extension/src/wallet/services/profile/session-manager.ts</td></tr>
+  <tr><td>Passkey recovery coordinator</td><td>packages/extension/src/wallet/services/profile/passkey-recovery-coordinator.ts</td></tr>
+  <tr><td>Per-account derivation (<code>poseidon2</code>)</td><td>packages/extension/src/wallet/services/account/service.ts</td></tr>
+  <tr><td>Schnorr account adapter</td><td>packages/aztec-runtime/src/account/nulo-account.ts</td></tr>
+  <tr><td>Derivation test vectors (drift tripwire)</td><td>packages/extension/src/wallet/crypto/key-vectors.test.ts</td></tr>
+  <tr><td>Passkey portability limits</td><td>implementations-plan/passkey-e2e/PRF-NON-PORTABLE.md</td></tr>
+</table>
+
+<div class="footer">
+  <p>Built from three parallel codex (read-only) investigations + a manual read of the crypto core, all cross-checked against the installed <code>@aztec 5.0.0-rc.1</code> source. Every claim here was verified in the files above, not assumed from general Aztec knowledge.</p>
+  <p><strong>Not a plan</strong> — this is the "understand what we have" step. If you want to pursue Directions A/B/C, that's a <code>/blueprint</code> away.</p>
+</div>
+
+</body>
+</html>
