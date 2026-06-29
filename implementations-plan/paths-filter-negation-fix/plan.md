@@ -1,6 +1,6 @@
 # Whole-repo CI gating from the dependency graph
 
-**Status:** DRAFT — **5 audit rounds folded** (codex v1/v2 extension; codex + independent opus whole-repo; codex final pass). Converged on **whole-package gating for built targets** (which structurally ends the input-completeness whack-a-mole). One open user decision (the src-nested test/story over-trigger). → approval gate.
+**Status:** ✅ COMPLETE (2026-06-29) — implemented + **merged to dev (PR #181, plain merge, no `--admin`)** + **live-proven on dev** (sentinels: #182 docs→skip-all · #183 `wallet-core/src`→smoke+network fire · #184 `bridge-core/src`→faucet build fires, extension suites skip). 5 audit rounds (codex ×4 + independent opus) + the `nulo-release-rehearsal` throwaway footgun-proof, all folded; converged on **whole-package gating for built targets** (structurally ends the input whack-a-mole). User accepted the src-nested test/story over-trigger. Closed two live coverage holes (network never ran on `wallet-core`; faucet never rebuilt on `bridge-core`) + killed the dorny `!`-negation footgun; guard test (`scripts/ci-cd/behavior-gating.test.ts`) wired into `_unit-tests.yml` prevents re-drift.
 **Tier:** `mid` (was `light` — "whole-repo CI gating" raises blast radius to *all* build/test/e2e gates; novelty stays LOW [proven graph-derivation principle] and risk LOW [safe-over-gating + guard test + live validation, fully revertible], so `mid`, not `deep`).
 
 ## The problem (diagnosis), with hard proofs
