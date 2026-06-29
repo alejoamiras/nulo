@@ -34,3 +34,15 @@ jobs:
           else
             echo "scripts/release/ not present on this ref — skipping."
           fi
+
+      - name: Run CI-gating guard test
+        # scripts/ci-cd/ isn't a @nulo/* workspace, so `test:all` skips it. This is
+        # the anti-drift guard for the paths-filter gates (derived from the dependency
+        # graph) — it MUST run on PRs or a new ungated @nulo/* dep / a re-introduced `!`
+        # negation would merge green. Guarded so it's a no-op on refs predating the dir.
+        run: |
+          if [ -d scripts/ci-cd ]; then
+            bun run test:ci-gating
+          else
+            echo "scripts/ci-cd/ not present on this ref — skipping."
+          fi

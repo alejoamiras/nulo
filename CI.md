@@ -151,6 +151,21 @@ If a release was tagged but the asset upload failed (e.g. transient `gh release 
 
 For smoke / network e2e specifically: failure artifacts (vitest output, `.e2e-state/`, sandbox logs) upload on failure. Download them from the run page's "Artifacts" section.
 
+## CI gating — derived from the dependency graph
+
+The `pr-quick` / `pr-smoke-e2e` / `pr-network-e2e` `changes` jobs use `dorny/paths-filter` to skip work on PRs that can't affect a given target. **These filters are derived from the workspace dependency graph, not hand-curated** — a suite/build runs whenever any package its target is built from changes:
+
+- **Built targets** (`extension`, `faucet`, `playground`) → gated on the **whole package** (`packages/<target>/**`), so no build input (manifest, vite/tsconfig configs, `public/` assets, scripts, the e2e harness) can ever be silently missed.
+- **Dependency libraries** (`wallet-core`, `wallet-crypto`, `extension-messaging`, `aztec-runtime`, `wallet-bridge`, `design`, `bridge-core`) → gated on their consumed surface (`packages/<dep>/src/**` + `package.json`); their own README/docs stay out of the gate.
+- Plus repo-wide build inputs (`package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, **`patches/**`**) + each suite's harness/workflow files.
+
+**Two hard rules:**
+
+1. **Never use a bare `!` negation pattern.** `dorny/paths-filter` defaults to `predicate-quantifier: some` (a file matches a filter if it matches ANY pattern), so a bare `!packages/x/**/*.md` matches *every file that isn't that md* → the filter silently becomes `**` and fires on every PR. Exclude by listing positive paths only (or, for true subset-exclusion, picomatch extglobs — never a bare `!`).
+2. **Gate on the graph.** When the extension (or faucet) gains a new `@nulo/*` dependency, add it to the relevant filters. [`scripts/ci-cd/behavior-gating.test.ts`](./scripts/ci-cd/behavior-gating.test.ts) recomputes each target's transitive graph from `package.json` and **fails CI** (via the `test:ci-gating` step in `_unit-tests.yml`) if a gate doesn't cover it, or if a `!` negation reappears — so the lists can't silently rot. The gates intentionally **over-trigger** (a colocated `*.test.ts`/`*.stories.ts` edit under `src/` runs the e2e suites) — the safe direction: err toward running, never skipping.
+
+History + the dual-audit trail: [`implementations-plan/paths-filter-negation-fix/`](./implementations-plan/paths-filter-negation-fix/plan.md).
+
 ## Adding a new gate
 
 1. If the gate is a single shell step, add it to an existing workflow's job.
