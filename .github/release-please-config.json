@@ -9,7 +9,7 @@
 			"include-v-in-tag": true,
 			"bump-minor-pre-major": true,
 			"extra-files": [
-				{ "type": "json", "path": "packages/extension/package.json", "jsonpath": "$.version" }
+				{ "type": "json", "path": "apps/extension/package.json", "jsonpath": "$.version" }
 			],
 			"changelog-sections": [
 				{ "type": "feat", "section": "Features" },

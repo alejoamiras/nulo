@@ -15,7 +15,7 @@ on:
         default: "both"
       version_override:
         description: |
-          If set, write this semver into packages/extension/package.json before building.
+          If set, write this semver into apps/extension/package.json before building.
           Used by release.yml; empty for PR builds.
         required: false
         type: string
@@ -45,19 +45,19 @@ jobs:
         run: |
           bun -e "
             const fs = require('fs');
-            const p = JSON.parse(fs.readFileSync('packages/extension/package.json', 'utf8'));
+            const p = JSON.parse(fs.readFileSync('apps/extension/package.json', 'utf8'));
             p.version = process.env.OVERRIDE;
-            fs.writeFileSync('packages/extension/package.json', JSON.stringify(p, null, '\t') + '\n');
+            fs.writeFileSync('apps/extension/package.json', JSON.stringify(p, null, '\t') + '\n');
             console.log('patched extension version to', process.env.OVERRIDE);
           "
 
       - name: Build Chrome
         if: inputs.target == 'chrome' || inputs.target == 'both'
-        run: bun run --cwd packages/extension build:chrome
+        run: bun run --cwd apps/extension build:chrome
 
       - name: Build Firefox
         if: inputs.target == 'firefox' || inputs.target == 'both'
-        run: bun run --cwd packages/extension build:firefox
+        run: bun run --cwd apps/extension build:firefox
 
       # Production bundle-hygiene guard for test-only markers. Two families must
       # NEVER appear in a shipping build:
@@ -70,11 +70,11 @@ jobs:
       #     returned object, so it survives tree-shaking whenever the factory is
       #     bundled — if the fake ever ships, this grep catches it. (A wallet
       #     that "succeeds" without a real PXE.) Fails the build loudly.
-      # See packages/extension/tests/COMPOSITION-TESTS.md.
+      # See apps/extension/tests/COMPOSITION-TESTS.md.
       - name: Assert test-only markers absent (production guard)
         run: |
           fail=0
-          for d in packages/extension/dist/chrome packages/extension/dist/firefox; do
+          for d in apps/extension/dist/chrome apps/extension/dist/firefox; do
             [ -d "$d" ] || continue
             for marker in "NULO_E2E_PROVERLESS_BUILD_STAMP" "nulo:e2e:proof-gate" "SHALLOW_PXE_FAKE_BUNDLE_MARKER"; do
               if grep -rq "$marker" "$d"; then
@@ -91,7 +91,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: extension-chrome
-          path: packages/extension/dist/chrome
+          path: apps/extension/dist/chrome
           if-no-files-found: error
           retention-days: 7
 
@@ -100,6 +100,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: extension-firefox
-          path: packages/extension/dist/firefox
+          path: apps/extension/dist/firefox
           if-no-files-found: error
           retention-days: 7

@@ -50,7 +50,7 @@ The package exposes targeted entry points instead of a single barrel:
 
 ## Testing
 
-Colocated `*.test.ts`. The end-to-end account behavior is exercised by the extension's network e2e suite (`packages/extension/tests/e2e/network/`) against a real anvil + aztec sandbox.
+Colocated `*.test.ts`. The end-to-end account behavior is exercised by the extension's network e2e suite (`apps/extension/tests/e2e/network/`) against a real anvil + aztec sandbox.
 
 ## Key invariants
 

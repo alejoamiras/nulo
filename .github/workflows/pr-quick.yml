@@ -61,19 +61,19 @@ jobs:
               - 'packages/wallet-bridge/package.json'
             extension:
               # Built target — whole package; design dep lib — src + manifest.
-              - 'packages/extension/**'
+              - 'apps/extension/**'
               - 'packages/design/src/**'
               - 'packages/design/package.json'
             playground:
-              - 'packages/playground/**'
+              - 'apps/playground/**'
             landing:
               # Dead filter — no job consumes it; kept positive-only for the no-`!` invariant.
-              - 'packages/landing/**'
+              - 'apps/landing/**'
             faucet:
               # Built target — faucet (whole package) + its transitive dep libs
               # (bridge-core → wallet-crypto → wallet-core, + design) + the faucet build
               # workflow. Closes the prior under-gate (was faucet + design only).
-              - 'packages/faucet/**'
+              - 'apps/faucet/**'
               - 'packages/bridge-core/src/**'
               - 'packages/bridge-core/package.json'
               - 'packages/wallet-crypto/src/**'
@@ -99,11 +99,11 @@ jobs:
             # Auditor (codex) corrected this to include shared build inputs in addition
             # to the firefox-only configs; see implementations-plan/ci-cd/build-caching-plan.md §1.1.
             firefox-touching:
-              - 'packages/extension/manifest/manifest.firefox.config.ts'
-              - 'packages/extension/vite.firefox.config.mts'
-              - 'packages/extension/manifest/manifest.config.ts'
-              - 'packages/extension/vite.config.ts'
-              - 'packages/extension/package.json'
+              - 'apps/extension/manifest/manifest.firefox.config.ts'
+              - 'apps/extension/vite.firefox.config.mts'
+              - 'apps/extension/manifest/manifest.config.ts'
+              - 'apps/extension/vite.config.ts'
+              - 'apps/extension/package.json'
               - 'bun.lock'
               - 'bunfig.toml'
               - '.github/workflows/_build-extension.yml'

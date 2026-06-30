@@ -44,8 +44,8 @@ jobs:
               # harness drives); src + manifest for dependency libraries. NO `!`
               # negations. Pinned by scripts/ci-cd/behavior-gating.test.ts.
               # Built targets — extension + playground harness (whole packages):
-              - 'packages/extension/**'
-              - 'packages/playground/**'
+              - 'apps/extension/**'
+              - 'apps/playground/**'
               # Dependency libraries — consumed source + manifest:
               - 'packages/aztec-runtime/src/**'
               - 'packages/aztec-runtime/package.json'

@@ -103,7 +103,7 @@ jobs:
       AZTEC_NODE_URL: ${{ inputs.aztec_node_url }}
       SPONSORED_FPC_SALT: ${{ !contains(inputs.aztec_node_url, 'localhost') && secrets.SPONSORED_FPC_SALT || '' }}
       # Baked into the wallet build at `bun run build:chrome` time (via the
-      # agent.sh subprocess). When "1", `packages/extension/src/accelerator/config.ts`
+      # agent.sh subprocess). When "1", `apps/extension/src/accelerator/config.ts`
       # sets `ACCELERATOR_REQUIRED=true`, which makes the offscreen factory
       # construct `ProductionPxeFactory` in required-mode (eager
       # checkAcceleratorStatus preflight + onPhase throw on
@@ -293,7 +293,7 @@ jobs:
         if: always() && inputs.probe != '1'
         shell: bash
         run: |
-          cd packages/extension
+          cd apps/extension
           # grep exits 1 on no-match; with `set -e -o pipefail` that aborts the
           # script before the `HITS > 0` check, so wrap the pipeline in `|| true`.
           HITS=$( { grep -RnE '(PROBE|nulo:probe:|VITE_E2E_PROBE)' dist/chrome 2>/dev/null || true; } | wc -l | tr -d ' ')
@@ -349,7 +349,7 @@ jobs:
           # rejects `/` in names (actions/upload-artifact#647).
           name: network-e2e-logs-${{ inputs.shard_label || 'full' }}
           path: |
-            packages/extension/.e2e-state
+            apps/extension/.e2e-state
             /tmp/aztec-*.log
             /tmp/anvil-*.log
             /tmp/nulo-probes-*.jsonl

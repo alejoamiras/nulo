@@ -1,0 +1,3 @@
+# Phase 3 ✓ — tsconfig refs + biome globs + .gitignore
+tsconfig project refs packages/{extension,playground,landing,faucet} -> apps/. biome: includes += apps/**; extension/faucet overrides + type-excludes -> apps/ (libs stay packages/). .gitignore extension/faucet runtime paths -> apps/ (surfaced early: the moved .e2e-state/ports.json + .test-config.json were no longer git-ignored -> biome format errors; Phase-6 .gitignore item pulled forward).
+Gates: lint 0. G3 violation probe — a banned `@/stores/app.store` import planted in apps/extension/src/components/ui/ FAILED lint (noRestrictedImports 'UI primitives cannot import stores') then reverted -> the layer rules still bind after the repath (R8).

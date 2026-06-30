@@ -6,8 +6,8 @@ Operating rules for AI assistants (and any contributor) working in this reposito
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — process boundaries, message flow, storage versioning, offscreen lifecycle, session model, concurrency, account contract, fee model, test taxonomy.
 - `packages/<name>/README.md` — per-package purpose, file map, scripts, testing, key invariants.
-- [`packages/extension/tests/e2e/README.md`](./packages/extension/tests/e2e/README.md) — e2e suite layout, parallel-safe agent runner, helper conventions.
-- [`packages/extension/tests/COMPOSITION-TESTS.md`](./packages/extension/tests/COMPOSITION-TESTS.md) — **normative** rules for the `*.composition.test.ts` layer (drive the real service graph in-process against dumb fakes): when to use it, the hard limits (shallow PXE **and** bb-free **and** no simulate/prove), the failure taxonomy. Read before adding a composition test.
+- [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md) — e2e suite layout, parallel-safe agent runner, helper conventions.
+- [`apps/extension/tests/COMPOSITION-TESTS.md`](./apps/extension/tests/COMPOSITION-TESTS.md) — **normative** rules for the `*.composition.test.ts` layer (drive the real service graph in-process against dumb fakes): when to use it, the hard limits (shallow PXE **and** bb-free **and** no simulate/prove), the failure taxonomy. Read before adding a composition test.
 - [`implementations-plan/README.md`](./implementations-plan/README.md) — planning archive, when to add to it, the milestone-vocabulary key.
 
 ## Working in this repo
@@ -58,13 +58,13 @@ Each package can import only the layers below it. `wallet-bridge` deliberately d
 
 ### Custom RPC schema patch (`registerToken`)
 
-`registerToken` is added to `@aztec/wallet-sdk`'s `WalletSchema` at runtime via three identical inline files: `packages/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts`, `packages/faucet/src/lib/nulo-schema-patch.ts`, `packages/playground/src/lib/nulo-schema-patch.ts`. Each is **side-effect only** (no exports) and is imported as the first import in the module that constructs the wallet-sdk client. Drift between the three copies is pinned by [`packages/wallet-bridge/src/dispatcher.test.ts`](./packages/wallet-bridge/src/dispatcher.test.ts) (reachability test imports the extension's copy and asserts shape). When adding a new Nulo-custom RPC, update all three copies AND add a paired reachability assertion. See [`packages/wallet-bridge/README.md`](./packages/wallet-bridge/README.md) "Custom RPC methods" for the full contract.
+`registerToken` is added to `@aztec/wallet-sdk`'s `WalletSchema` at runtime via three identical inline files: `apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts`, `apps/faucet/src/lib/nulo-schema-patch.ts`, `apps/playground/src/lib/nulo-schema-patch.ts`. Each is **side-effect only** (no exports) and is imported as the first import in the module that constructs the wallet-sdk client. Drift between the three copies is pinned by [`packages/wallet-bridge/src/dispatcher.test.ts`](./packages/wallet-bridge/src/dispatcher.test.ts) (reachability test imports the extension's copy and asserts shape). When adding a new Nulo-custom RPC, update all three copies AND add a paired reachability assertion. See [`packages/wallet-bridge/README.md`](./packages/wallet-bridge/README.md) "Custom RPC methods" for the full contract.
 
 ## Extension component model (L0–L6)
 
 Six layers, low → high. A layer can import only from layers below it. Enforced via `biome.json` `noRestrictedImports` overrides.
 
-**L0–L2 are externalized to `@nulo/design`** (round 1 + round 2 — see `implementations-plan/design-system-externalization/` and `implementations-plan/design-system-externalization-round-2/`). The framework-/host-agnostic primitives live in the shared package and are consumed by the extension via a custom `unplugin-vue-components` resolver (`packages/extension/scripts/design-resolver.ts`), so templates use `<Flex>`/`<Text>`/`<Badge>` unchanged. `src/design/tokens.ts` re-exports `@nulo/design/tokens`; `_base.scss`/`_flex.scss`/`_text.scss` are gone — the wallet's base stylesheet is now `@nulo/design/base.css`. The package has NO auto-import, so its SFCs use explicit imports. **Resolver discipline:** a name enters `NULO_DESIGN_COMPONENTS` only when its extension-local SFC is DELETED; the three host-coupled holdouts (`Button` → RouterLink, `SubPageHeader` → router/history, `ToastManager` → app-shell toast root) keep a thin LOCAL extension wrapper that renders the package base (`Button`/`SubPageHeaderBase`/`ToastManagerBase`), so their bare tags resolve to the wrapper, NOT the resolver. The `toast`/`outside` composables live in `@nulo/design/composables/*`; the extension keeps `composables/{toast,outside}.js` as named re-export shims so its explicit + auto-import call sites are untouched.
+**L0–L2 are externalized to `@nulo/design`** (round 1 + round 2 — see `implementations-plan/design-system-externalization/` and `implementations-plan/design-system-externalization-round-2/`). The framework-/host-agnostic primitives live in the shared package and are consumed by the extension via a custom `unplugin-vue-components` resolver (`apps/extension/scripts/design-resolver.ts`), so templates use `<Flex>`/`<Text>`/`<Badge>` unchanged. `src/design/tokens.ts` re-exports `@nulo/design/tokens`; `_base.scss`/`_flex.scss`/`_text.scss` are gone — the wallet's base stylesheet is now `@nulo/design/base.css`. The package has NO auto-import, so its SFCs use explicit imports. **Resolver discipline:** a name enters `NULO_DESIGN_COMPONENTS` only when its extension-local SFC is DELETED; the three host-coupled holdouts (`Button` → RouterLink, `SubPageHeader` → router/history, `ToastManager` → app-shell toast root) keep a thin LOCAL extension wrapper that renders the package base (`Button`/`SubPageHeaderBase`/`ToastManagerBase`), so their bare tags resolve to the wrapper, NOT the resolver. The `toast`/`outside` composables live in `@nulo/design/composables/*`; the extension keeps `composables/{toast,outside}.js` as named re-export shims so its explicit + auto-import call sites are untouched.
 
 ```
 [L0] design tokens     @nulo/design (token-contract.ts → generated tokens.ts + base.css + fonts).
@@ -312,7 +312,7 @@ openToast({ label: "Message", icon: "copy" }, 2_000)
 
 Plans + audit transcripts under [`implementations-plan/`](./implementations-plan/README.md) are committed artifacts. They get read by future contributors and future Claude sessions that have no idea who you are or where you cloned the repo. A few rules:
 
-- **No personal absolute paths.** Never write home-directory-rooted paths (macOS `~/...` expansions, Linux `~/Projects/...` expansions, Windows user-profile paths) in any plan file, audit transcript, or status doc. Use repo-relative paths (`packages/extension/src/popup/app.vue:164`) — they survive the clone and they don't leak whose machine the plan was written on.
+- **No personal absolute paths.** Never write home-directory-rooted paths (macOS `~/...` expansions, Linux `~/Projects/...` expansions, Windows user-profile paths) in any plan file, audit transcript, or status doc. Use repo-relative paths (`apps/extension/src/popup/app.vue:164`) — they survive the clone and they don't leak whose machine the plan was written on.
 - **No machine-specific paths in general.** Temp-file paths (system scratch dirs, macOS folder containers, Linux tmpdirs) belong in transient terminal output, never in committed planning docs. Quote the conversation context instead ("the codex review transcript saved at this session's CODEX_DIR") or paste the response inline.
 - **The same rule applies to file links in audit reports.** When recording a codex / opus audit, rewrite paths to repo-relative before committing — e.g. `[plan.md](implementations-plan/<topic>/plan.md)` rather than an absolute path that includes a username segment.
 - **OK to reference outside repos by name when load-bearing.** E.g. "the Rabby reference implementation" or "the aztec-accelerator native app". Don't include the clone path on your machine.
@@ -327,9 +327,9 @@ Plans + audit transcripts under [`implementations-plan/`](./implementations-plan
 | Before opening any UI PR | `bun run audit:vue` (typecheck → unit + component tests → lint → build). |
 | When editing the popup, contracts, or anything user-visible | `bun run test:e2e` (smoke; no Aztec sandbox). |
 | When touching dApp / network / PXE behavior | `bun run e2e:agent` (network suite; owns anvil + aztec + playground per worktree — parallel-safe). |
-| When editing Storybook stories or component visuals | `bun run --cwd packages/extension build-storybook`. |
+| When editing Storybook stories or component visuals | `bun run --cwd apps/extension build-storybook`. |
 
-`audit:vue` excludes e2e tests (`packages/extension/vitest.config.ts:68`). Smoke and network e2e are separate gates.
+`audit:vue` excludes e2e tests (`apps/extension/vitest.config.ts:68`). Smoke and network e2e are separate gates.
 
 ### In CI (server-side enforcement)
 
@@ -503,7 +503,7 @@ The manual unstick (tag + `autorelease: tagged` label + empty GitHub Release) pl
 | `auto-unstick` ran, `unstuck=false`, chain still skipped | flag off (no-op by design), OR HEAD isn't a merged `autorelease: pending` Release PR | If you expected it ON: confirm `vars.AUTO_UNSTICK_ENABLED=on` AND the Release PR actually merged at `github.sha`. |
 | Release exists but assets are missing | an upload failed mid-`attach-assets` | Re-run just the publish chain: `gh workflow run release.yml --ref main -f tag=vX.Y.Z -f dry_run=false`. |
 | `verify-live` **red** but the release shipped | CDN lag, or a real deploy miss | It's advisory — open `nulo.sh` / `faucet.nulo.sh`. The faucet's `index.html` `nulo-build` meta must equal `/build.json` `buildId`; if not, re-fire the deploy hook. |
-| Faucet shows "No network configured for chainId …" | faucet built/deployed against a stale chain identity | Chain id is single-sourced in `packages/faucet/src/lib/chain-constants.ts` (no env override). Redeploy from current `main`. |
+| Faucet shows "No network configured for chainId …" | faucet built/deployed against a stale chain identity | Chain id is single-sourced in `apps/faucet/src/lib/chain-constants.ts` (no env override). Redeploy from current `main`. |
 | `sync-main-to-dev` PR labeled `needs-manual-resolution` | `dev` diverged from `main` since the release | Resolve the conflict on the sync branch (usually `CHANGELOG.md` / `bun.lock`), then squash-merge. |
 | No `sync-main-to-dev` PR appeared | push-only + stable-only; a `workflow_dispatch` republish never syncs | Expected on a republish. For a genuine cut, check the job ran on the `push:main` and read its log. |
 | release-please reopened an OLD Release PR | prerelease-manifest drift after a stable cut | Re-baseline `.release-please-prerelease-manifest.json` to the new stable version — the `sync-main-to-dev` PR does this; just merge it. |
@@ -523,5 +523,5 @@ The manual procedures above remain the permanent fallback regardless of switch s
 
 - Not the architecture overview — see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 - Not the per-package surface — see each `packages/<name>/README.md`.
-- Not the e2e infrastructure doc — see [`packages/extension/tests/e2e/README.md`](./packages/extension/tests/e2e/README.md).
+- Not the e2e infrastructure doc — see [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md).
 - Not the planning archive — see [`implementations-plan/README.md`](./implementations-plan/README.md).

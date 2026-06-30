@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — Monorepo restructure</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    .contested { background: #fdecea; border-left: 3px solid #c0392b; padding: 1rem 1.25rem; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Monorepo restructure → apps / packages / contracts</h1>
+  <p>The repo's packages all live in one flat <code>packages/</code> folder. This plan sorts them into three role-based homes — <code>apps/</code> (the things you ship: extension, faucet, landing, playground), <code>packages/</code> (shared libraries), and <code>contracts/</code> (the Noir + Foundry smart contracts) — in <strong>one big history-preserving move</strong>. The crucial fact that makes this safe-ish: <strong>nothing about the code changes</strong>. Package names stay <code>@nulo/*</code>, and Bun finds them by name, not by folder — so no <code>import</code> statement moves. Only directories and the <em>tooling that points at directories</em> change (CI filters, the linter's layer-rules, the type-checker, the release wiring, and a handful of test files that reach across folders by relative path).</p>
+
+  <h2>Why this is a "deep" plan</h2>
+  <p>It's a folder move, but the blast radius is large: the repo <em>just</em> rebuilt its CI gating to be derived from the dependency graph (with a guard test), and the release pipeline references package paths. Get a path wrong and a <strong>required check can silently stop running</strong> — exactly the class of bug the team spent a whole arc fixing recently. So: HIGH blast radius + HIGH migration cost → deep, with three independent plans (me, codex, and a 1M-context Opus planner) cross-checked against each other. That cross-check already paid off — between the three we found <strong>four hidden couplings the first pass missed</strong> (a second fragile test file, the contracts' two links, the extension's test config reaching into sibling libs, and two CI setup-actions).</p>
+
+  <div class="contested">
+    <h2>⚠️ One decision needs your call: flat vs nested <code>packages/</code></h2>
+    <p>You leaned toward <em>more</em> nesting (e.g. <code>packages/wallet/*</code>). But the strongest analysis argues <strong>against</strong> sub-grouping <code>packages/</code>: the guard test and 13 linter rules are built on "folder name == package name", and grouping breaks that for cosmetic benefit — while <code>apps/ vs packages/ vs contracts/</code> already gives you the meaningful nesting. <strong>I recommend FLAT <code>packages/</code></strong> (libraries stay one level deep), and keep the <code>contracts/bridge/{aztec,evm}</code> nesting you asked about (that one's free — contracts aren't packages). The plan's steps are identical either way; only the path strings differ. Your call at approval.</p>
+  </div>
+
+  <h2>Phases (each proves itself before the next)</h2>
+  <div class="phase"><h3>0 — Green baseline</h3><p>Confirm everything passes <em>before</em> touching anything, so any later red is clearly ours.</p><p class="muted">Proves itself by: typecheck + lint + all tests + the CI-guard + release-script tests green on an untouched branch.</p></div>
+  <div class="phase"><h3>1 — Move the contracts (+ fix their 2 hidden links)</h3><p>The Noir/Foundry folders move to <code>contracts/</code>. Two things secretly point at them: a JS file imports a compiled contract (loud — the type-checker catches a miss), and a Foundry config climbs to <code>node_modules</code> by counting folders (silent — nothing in CI builds contracts).</p><p class="muted">Proves itself by: clean lockfile + typecheck + an explicit <code>forge build</code> (the only catch for the silent one).</p></div>
+  <div class="phase"><h3>2 — Move the apps + fix the workspace list</h3><p>The 4 apps move to <code>apps/</code>; update the workspace glob; reinstall. The one place the lockfile is allowed to change — and we eyeball that it changed <em>folder paths only, not versions</em>.</p><p class="muted">Proves itself by: frozen install succeeds and the lockfile diff is path-only.</p></div>
+  <div class="phase"><h3>3 — Repoint type-checker + linter</h3><p>Point tsconfig and the 13 linter layer-rules at the new app folder. Then deliberately break a layer-rule to confirm it still bites (a silently-dead rule would be a real regression).</p><p class="muted">Proves itself by: typecheck + lint green, AND a planted violation makes lint fail.</p></div>
+  <div class="phase"><h3>4 — Fix the cross-folder test files</h3><p>A few tests reach into the (now-moved) extension by relative path — including two traps: a <em>second</em> test file with the same link, and a repo-root calculation that must <em>not</em> change (because that library didn't move).</p><p class="muted">Proves itself by: the wallet-bridge suite (run alone first) + all tests green, incl. the "three copies identical" canary.</p></div>
+  <div class="phase"><h3>5 — Repoint CI filters + teach the guard test</h3><p>Update the per-package CI filters (apps → <code>apps/</code>, libs stay <code>packages/</code>) and teach the guard test the new split. The guard then re-proves the filters match the graph — this is the built-in safety loop.</p><p class="muted">Proves itself by: the CI-guard test green + a literal grep finds zero stale app paths in workflows.</p></div>
+  <div class="phase"><h3>6 — Repoint the release wiring + build</h3><p>The release pipeline references the extension path (changelog filter, version-bump file, build steps, two setup-actions). Build the apps and smoke the changelog so the worst silent failure — empty release notes — can't hide.</p><p class="muted">Proves itself by: all builds green + release-script tests + a local changelog run yields non-empty notes.</p></div>
+  <div class="phase"><h3>7 — e2e harness</h3><p>Repoint the one functional e2e path; leave the package-internal ones alone.</p><p class="muted">Proves itself by: smoke e2e green.</p></div>
+  <div class="phase"><h3>8 — Docs: update live, freeze history</h3><p>Update the operating docs (the map of today's repo). <em>Freeze</em> the ~670 path references in old plans/audits — rewriting them would falsify dated history for zero benefit; one decoder-ring note instead.</p><p class="muted">Proves itself by: no stale app-path in live docs; pre-commit hook clean.</p></div>
+  <div class="phase"><h3>9 — Full gate + PR + release rehearsal + merge</h3><p>Full local gate, open the PR (the move touches every package, so every required check must actually <em>fire</em> — we verify, not assume), and in parallel cut a <strong>rehearsal release</strong> in the throwaway repo to prove the release orchestration survives the repath.</p><p class="muted">Proves itself by: all 3 required checks green AND confirmed-fired; rehearsal release succeeds.</p></div>
+
+  <h2>Human context</h2>
+  <p>The single scariest failure mode isn't a crash — it's a CI filter left pointing at the old path, so a check <em>silently skips</em> and reports green while testing nothing. The plan's whole defense philosophy is "make every silent failure loud": the graph guard test, a literal grep, forced CI labels, a deliberate lint-violation probe, a <code>forge build</code>, and a local changelog smoke. The move changes <strong>zero runtime behavior</strong> (no data, no schema, no shipped-artifact change), so if anything slips through, rollback is one clean <code>git revert</code>.</p>
+
+  <h2>Open questions (your decisions at the gate)</h2>
+  <ul>
+    <li><strong>Flat vs nested <code>packages/</code></strong> — I recommend flat (see the red box). This contradicts your earlier lean, so it's your call.</li>
+    <li><strong>Contract folder names</strong> drop the <code>bridge-</code> prefix (<code>contracts/bridge/aztec</code>, not <code>.../bridge-aztec</code>) — OK?</li>
+    <li><strong>Rehearsal stub</strong>: the throwaway repo needs a tiny stub <code>apps/extension/package.json</code> so the relocated version-bump path is actually exercised — acceptable?</li>
+    <li><strong>Cloudflare Pages (your action, outside the repo)</strong>: the landing + faucet sites have a build-root setting in the Cloudflare <em>dashboard</em> pointing at the old <code>packages/</code> paths. Before the first release after this lands, you'll need to flip those to <code>apps/</code>. This is a silent one — the deploy reports success even if the build root is stale — so it's surfaced as an explicit step, not left to chance. Confirm you can do it.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: one atomic history-preserving PR; CI filters + guard + release wiring + docs all updated; archives frozen.</li>
+      <li><strong>Pick the layout: FLAT (recommended) / grouped-short-names / grouped-full-names.</strong></li>
+      <li>Confirm tier: <code>deep</code>.</li>
+      <li>Confirm validation: per-phase gates + the release rehearsal cut + all 3 required CI checks confirmed-fired on the PR.</li>
+      <li>Answer the 3 open questions above.</li>
+      <li><code>/harden</code>: not scheduled (mechanical move, no new trust boundary).</li>
+      <li>Approve / conditionally approve (conditions) / reject (blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (DRAFT — finalized after approval)</h2>
+    <p>Completion here is transcript-observable (each phase ends in a concrete gate), so <code>/goal</code> is recommended.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose.</p>
+    <div class="phase recommended">
+      <h3>Recommended: /goal</h3>
+      <pre><code>/goal All phases ✓ in implementations-plan/monorepo-restructure/plan.md, each backed by its validation gate (G0–G9 as written) reported passing in the transcript; for each phase printed LESSONS_FILE=implementations-plan/monorepo-restructure/lessons/phase-N.md; the bun.lock diff verified path-only; the contracts forge build, the deliberate biome-violation probe, the CI guard (test:ci-gating), and the local git-cliff smoke all shown passing; the release rehearsal cut in nulo-release-rehearsal succeeded; `/code-review max --fix` applied + committed; codex post-impl audit done with high/critical addressed; PR opened with all 3 required checks (quality-status, smoke-e2e-status, network-e2e-status) green AND confirmed-fired (Decide logs run=true).</code></pre>
+    </div>
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/monorepo-restructure forward. Never idle. Each firing: read plan.md + lessons/; git status; the open PR's statusCheckRollup. Pick the next pending phase; after each edit run the phase's gate (lint + the relevant test/build). Phase green (its G-gate passes) → mark ✓, file lessons/phase-N.md, print LESSONS_FILE=…, advance. Decisions → /codex xhigh, log verdict, act. Same step failed 5× → reassess with codex. Hard limits: never merge to main/release, never publish/deploy, never expand scope; never edit a status: job name:. All phases ✓ → /code-review max --fix → commit → codex post-impl audit → address high/critical → release rehearsal → report + stop.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

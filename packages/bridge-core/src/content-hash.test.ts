@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { mintToPrivateContentHash, mintToPublicContentHash, withdrawContentHash } from "./content-hash"
 
 // Same fixed vectors + expected values as the on-chain keystone
-// (bridge-evm/test/ContentHash.t.sol + bridge-aztec/keystone). These three
+// (contracts/bridge/evm/test/ContentHash.t.sol + contracts/bridge/aztec/keystone). These three
 // must stay byte-identical across all THREE toolchains (Solidity, Noir, TS) —
 // a drift means a deposit's L1->L2 message is unconsumable and funds strand.
 describe("content-hash (TS keystone — matches Solidity + Noir)", () => {

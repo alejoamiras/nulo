@@ -44,7 +44,7 @@ Triggers:
 
 ### `pr-network-e2e.yml`
 
-Runs the network e2e suite (anvil + Aztec sandbox + playground + the extension build) as a **5-shard parallel matrix** — each shard owns its own sandbox + ~9 of the 45 test files (deterministic SHA-1-of-filename distribution). Wall time ~10–15 min (vs ~35–45 min unsharded). Same trigger shape as `pr-smoke-e2e`, but with the `extension-network` filter (network-touching wallet code, runtime, bridge, playground, etc.) and the `e2e:network` label. See [`packages/extension/tests/e2e/README.md`](./packages/extension/tests/e2e/README.md#ci-sharding-5-way-matrix) for the shard-design rationale + the 2 quarantined slow tests.
+Runs the network e2e suite (anvil + Aztec sandbox + playground + the extension build) as a **5-shard parallel matrix** — each shard owns its own sandbox + ~9 of the 45 test files (deterministic SHA-1-of-filename distribution). Wall time ~10–15 min (vs ~35–45 min unsharded). Same trigger shape as `pr-smoke-e2e`, but with the `extension-network` filter (network-touching wallet code, runtime, bridge, playground, etc.) and the `e2e:network` label. See [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md#ci-sharding-5-way-matrix) for the shard-design rationale + the 2 quarantined slow tests.
 
 #### Accelerator in CI
 
@@ -108,9 +108,9 @@ Everything CI runs has a local equivalent:
 | lint | `bun run lint` |
 | typecheck | `bun run typecheck:all` |
 | unit tests | `bun run test:all` |
-| build (chrome) | `bun run --cwd packages/extension build:chrome` |
-| build (firefox) | `bun run --cwd packages/extension build:firefox` |
-| smoke e2e | `bun run --cwd packages/extension test:e2e` |
+| build (chrome) | `bun run --cwd apps/extension build:chrome` |
+| build (firefox) | `bun run --cwd apps/extension build:firefox` |
+| smoke e2e | `bun run --cwd apps/extension test:e2e` |
 | network e2e | `bun run e2e:agent` (NOTE: local runs do NOT use `accelerator-server`. The wallet's `AcceleratorProver` auto-detects the **Aztec Accelerator** desktop app on `127.0.0.1:59833` and uses it if available; otherwise WASM. CI specifically stamps `VITE_NULO_ACCELERATOR_REQUIRED=1` to enforce no-fallback — that's not set locally.) |
 | one-shot pre-PR | `bun run audit:vue` (typecheck + units + lint + build) |
 

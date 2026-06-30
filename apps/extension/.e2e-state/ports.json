@@ -1,0 +1,13 @@
+{
+  "anvil": 65235,
+  "aztec": 65236,
+  "aztecAdmin": 65237,
+  "aztecP2P": 65238,
+  "playground": 65239,
+  "faucet": 65240,
+  "anvilUrl": "http://127.0.0.1:65235",
+  "aztecUrl": "http://localhost:65236",
+  "playgroundUrl": "http://localhost:65239/",
+  "faucetUrl": "http://localhost:65240/",
+  "resolvedAt": "2026-06-18T13:44:36.557Z"
+}

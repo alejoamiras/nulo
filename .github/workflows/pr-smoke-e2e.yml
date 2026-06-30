@@ -39,7 +39,7 @@ jobs:
               # package manifest for each dependency library. NO `!` negations (the dorny
               # `some`-quantifier footgun). Pinned by scripts/ci-cd/behavior-gating.test.ts.
               # Built target — extension (whole package):
-              - 'packages/extension/**'
+              - 'apps/extension/**'
               # Dependency libraries — consumed source + manifest:
               - 'packages/aztec-runtime/src/**'
               - 'packages/aztec-runtime/package.json'

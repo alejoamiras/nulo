@@ -1,7 +1,7 @@
 /**
  * Canonical source of truth for Nulo's design-token NAMES, scales, and durations.
  *
- * Authored from `packages/extension/src/assets/styles/_base.scss` (the live CSS-var set) and the
+ * Authored from `apps/extension/src/assets/styles/_base.scss` (the live CSS-var set) and the
  * extension's `design/tokens.ts` (the canonical typed API shape). The public typed reflection in
  * `src/tokens.ts` is GENERATED from this file by `scripts/gen-tokens.ts` — never hand-edit the
  * generated file; run `bun run gen:tokens`. `tokens.drift.test.ts` fails CI on divergence.

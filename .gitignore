@@ -21,13 +21,13 @@ dist-ssr
 # Storybook build output (M6 phase 2)
 storybook-static/
 
-packages/extension/src/external/*
+apps/extension/src/external/*
 
 # E2E test generated config
-packages/extension/tests/e2e/.test-config.json
+apps/extension/tests/e2e/.test-config.json
 
 # E2E parallel-agent state (port pack, ownership lockfile, child logs)
-packages/extension/.e2e-state/
+apps/extension/.e2e-state/
 
 # Editor directories and files
 .vscode/*
@@ -53,5 +53,5 @@ packages/bridge-core/sandbox-deploy/
 **/wallet_data_*/
 
 # Bridge cutover deploy artifacts (transient; the promoted manifest is testnet-bridge.json)
-packages/faucet/public/testnet-bridge.candidate.json
-packages/faucet/public/testnet-bridge.journal*.jsonl
+apps/faucet/public/testnet-bridge.candidate.json
+apps/faucet/public/testnet-bridge.journal*.jsonl

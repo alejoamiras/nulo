@@ -10,75 +10,7 @@
         "@commitlint/config-conventional": "^21.0.2",
       },
     },
-    "packages/aztec-runtime": {
-      "name": "@nulo/aztec-runtime",
-      "version": "0.1.0",
-      "dependencies": {
-        "@alejoamiras/aztec-accelerator": "5.0.0-rc.1",
-        "@aztec/accounts": "5.0.0-rc.1",
-        "@aztec/aztec.js": "5.0.0-rc.1",
-        "@aztec/bb.js": "5.0.0-rc.1",
-        "@aztec/entrypoints": "5.0.0-rc.1",
-        "@aztec/foundation": "5.0.0-rc.1",
-        "@aztec/noir-contracts.js": "5.0.0-rc.1",
-        "@aztec/protocol-contracts": "5.0.0-rc.1",
-        "@aztec/pxe": "5.0.0-rc.1",
-        "@aztec/simulator": "5.0.0-rc.1",
-        "@aztec/stdlib": "5.0.0-rc.1",
-        "@defi-wonderland/aztec-standards": "https://github.com/defi-wonderland/aztec-standards/releases/download/prerelease-334c38d/defi-wonderland-aztec-standards-5.0.0-rc.1-prerelease.334c38d.tgz",
-        "@nulo/extension-messaging": "workspace:*",
-        "@nulo/wallet-core": "workspace:*",
-        "@wonderland/aztec-fee-payment": "https://github.com/defi-wonderland/aztec-fee-payment/releases/download/prerelease-fb6f196/wonderland-aztec-fee-payment-5.0.0-rc.1-prerelease.fb6f196.tgz",
-        "zod": "^4.4.3",
-      },
-      "devDependencies": {
-        "chrome-types": "^0.1.429",
-        "typescript": "^6.0.3",
-        "vitest": "^4.1.9",
-      },
-    },
-    "packages/bridge-core": {
-      "name": "@nulo/bridge-core",
-      "version": "0.1.0",
-      "dependencies": {
-        "@aztec/accounts": "5.0.0-rc.1",
-        "@aztec/aztec.js": "5.0.0-rc.1",
-        "@aztec/constants": "5.0.0-rc.1",
-        "@aztec/ethereum": "5.0.0-rc.1",
-        "@aztec/foundation": "5.0.0-rc.1",
-        "@aztec/l1-artifacts": "5.0.0-rc.1",
-        "@aztec/noir-contracts.js": "5.0.0-rc.1",
-        "@aztec/stdlib": "5.0.0-rc.1",
-        "@aztec/wallets": "5.0.0-rc.1",
-        "@defi-wonderland/aztec-standards": "https://github.com/defi-wonderland/aztec-standards/releases/download/prerelease-334c38d/defi-wonderland-aztec-standards-5.0.0-rc.1-prerelease.334c38d.tgz",
-        "@nulo/wallet-crypto": "workspace:*",
-        "@wonderland/aztec-fee-payment": "https://github.com/defi-wonderland/aztec-fee-payment/releases/download/prerelease-fb6f196/wonderland-aztec-fee-payment-5.0.0-rc.1-prerelease.fb6f196.tgz",
-        "viem": "npm:@aztec/viem@2.38.2",
-      },
-      "devDependencies": {
-        "@types/node": "^24.13.2",
-        "typescript": "^6.0.3",
-        "vitest": "^4.1.9",
-      },
-    },
-    "packages/design": {
-      "name": "@nulo/design",
-      "version": "0.1.0",
-      "devDependencies": {
-        "@types/node": "^24.13.2",
-        "@vitejs/plugin-vue": "^6.0.7",
-        "@vue/compiler-sfc": "^3.5.38",
-        "@vue/test-utils": "^2.4.11",
-        "jsdom": "^29.1.1",
-        "typescript": "^6.0.3",
-        "vitest": "^4.1.9",
-        "vue-tsc": "^3.3.5",
-      },
-      "peerDependencies": {
-        "vue": "^3.5.38",
-      },
-    },
-    "packages/extension": {
+    "apps/extension": {
       "name": "@nulo/extension",
       "version": "0.23.0",
       "dependencies": {
@@ -161,28 +93,7 @@
         "webext-bridge": "^6.0.1",
       },
     },
-    "packages/extension-messaging": {
-      "name": "@nulo/extension-messaging",
-      "version": "0.2.0",
-      "dependencies": {
-        "@nulo/wallet-core": "workspace:*",
-      },
-      "devDependencies": {
-        "@webext-core/fake-browser": "^1.5.2",
-        "chrome-types": "^0.1.429",
-        "jsdom": "^29.1.1",
-        "typescript": "^6.0.3",
-        "vitest": "^4.1.9",
-        "zod": "^4.4.3",
-      },
-      "peerDependencies": {
-        "zod": "^4",
-      },
-      "optionalPeers": [
-        "zod",
-      ],
-    },
-    "packages/faucet": {
+    "apps/faucet": {
       "name": "@nulo/faucet",
       "version": "0.1.0",
       "dependencies": {
@@ -222,7 +133,7 @@
         "vue-tsc": "^3.3.5",
       },
     },
-    "packages/landing": {
+    "apps/landing": {
       "name": "@nulo/landing",
       "version": "0.1.0",
       "devDependencies": {
@@ -231,7 +142,7 @@
         "vitest": "^4.1.9",
       },
     },
-    "packages/playground": {
+    "apps/playground": {
       "name": "@nulo/playground",
       "version": "0.1.0",
       "dependencies": {
@@ -250,6 +161,95 @@
         "vite": "^8.0.16",
         "vite-plugin-node-polyfills": "^0.28.0",
       },
+    },
+    "packages/aztec-runtime": {
+      "name": "@nulo/aztec-runtime",
+      "version": "0.1.0",
+      "dependencies": {
+        "@alejoamiras/aztec-accelerator": "5.0.0-rc.1",
+        "@aztec/accounts": "5.0.0-rc.1",
+        "@aztec/aztec.js": "5.0.0-rc.1",
+        "@aztec/bb.js": "5.0.0-rc.1",
+        "@aztec/entrypoints": "5.0.0-rc.1",
+        "@aztec/foundation": "5.0.0-rc.1",
+        "@aztec/noir-contracts.js": "5.0.0-rc.1",
+        "@aztec/protocol-contracts": "5.0.0-rc.1",
+        "@aztec/pxe": "5.0.0-rc.1",
+        "@aztec/simulator": "5.0.0-rc.1",
+        "@aztec/stdlib": "5.0.0-rc.1",
+        "@defi-wonderland/aztec-standards": "https://github.com/defi-wonderland/aztec-standards/releases/download/prerelease-334c38d/defi-wonderland-aztec-standards-5.0.0-rc.1-prerelease.334c38d.tgz",
+        "@nulo/extension-messaging": "workspace:*",
+        "@nulo/wallet-core": "workspace:*",
+        "@wonderland/aztec-fee-payment": "https://github.com/defi-wonderland/aztec-fee-payment/releases/download/prerelease-fb6f196/wonderland-aztec-fee-payment-5.0.0-rc.1-prerelease.fb6f196.tgz",
+        "zod": "^4.4.3",
+      },
+      "devDependencies": {
+        "chrome-types": "^0.1.429",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.9",
+      },
+    },
+    "packages/bridge-core": {
+      "name": "@nulo/bridge-core",
+      "version": "0.1.0",
+      "dependencies": {
+        "@aztec/accounts": "5.0.0-rc.1",
+        "@aztec/aztec.js": "5.0.0-rc.1",
+        "@aztec/constants": "5.0.0-rc.1",
+        "@aztec/ethereum": "5.0.0-rc.1",
+        "@aztec/foundation": "5.0.0-rc.1",
+        "@aztec/l1-artifacts": "5.0.0-rc.1",
+        "@aztec/noir-contracts.js": "5.0.0-rc.1",
+        "@aztec/stdlib": "5.0.0-rc.1",
+        "@aztec/wallets": "5.0.0-rc.1",
+        "@defi-wonderland/aztec-standards": "https://github.com/defi-wonderland/aztec-standards/releases/download/prerelease-334c38d/defi-wonderland-aztec-standards-5.0.0-rc.1-prerelease.334c38d.tgz",
+        "@nulo/wallet-crypto": "workspace:*",
+        "@wonderland/aztec-fee-payment": "https://github.com/defi-wonderland/aztec-fee-payment/releases/download/prerelease-fb6f196/wonderland-aztec-fee-payment-5.0.0-rc.1-prerelease.fb6f196.tgz",
+        "viem": "npm:@aztec/viem@2.38.2",
+      },
+      "devDependencies": {
+        "@types/node": "^24.13.2",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.9",
+      },
+    },
+    "packages/design": {
+      "name": "@nulo/design",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/node": "^24.13.2",
+        "@vitejs/plugin-vue": "^6.0.7",
+        "@vue/compiler-sfc": "^3.5.38",
+        "@vue/test-utils": "^2.4.11",
+        "jsdom": "^29.1.1",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.9",
+        "vue-tsc": "^3.3.5",
+      },
+      "peerDependencies": {
+        "vue": "^3.5.38",
+      },
+    },
+    "packages/extension-messaging": {
+      "name": "@nulo/extension-messaging",
+      "version": "0.2.0",
+      "dependencies": {
+        "@nulo/wallet-core": "workspace:*",
+      },
+      "devDependencies": {
+        "@webext-core/fake-browser": "^1.5.2",
+        "chrome-types": "^0.1.429",
+        "jsdom": "^29.1.1",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.9",
+        "zod": "^4.4.3",
+      },
+      "peerDependencies": {
+        "zod": "^4",
+      },
+      "optionalPeers": [
+        "zod",
+      ],
     },
     "packages/wallet-bridge": {
       "name": "@nulo/wallet-bridge",
@@ -716,15 +716,15 @@
 
     "@nulo/design": ["@nulo/design@workspace:packages/design"],
 
-    "@nulo/extension": ["@nulo/extension@workspace:packages/extension"],
+    "@nulo/extension": ["@nulo/extension@workspace:apps/extension"],
 
     "@nulo/extension-messaging": ["@nulo/extension-messaging@workspace:packages/extension-messaging"],
 
-    "@nulo/faucet": ["@nulo/faucet@workspace:packages/faucet"],
+    "@nulo/faucet": ["@nulo/faucet@workspace:apps/faucet"],
 
-    "@nulo/landing": ["@nulo/landing@workspace:packages/landing"],
+    "@nulo/landing": ["@nulo/landing@workspace:apps/landing"],
 
-    "@nulo/playground": ["@nulo/playground@workspace:packages/playground"],
+    "@nulo/playground": ["@nulo/playground@workspace:apps/playground"],
 
     "@nulo/wallet-bridge": ["@nulo/wallet-bridge@workspace:packages/wallet-bridge"],
 

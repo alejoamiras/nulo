@@ -2,13 +2,13 @@
  * Verifies the bridge's L1 sources on Sepolia Etherscan.
  *
  * Two contracts, two compile roots:
- * - MintableERC20 - our own foundry project (packages/bridge-evm); forge reconstructs the
+ * - MintableERC20 - our own foundry project (contracts/bridge/evm); forge reconstructs the
  *   standard-json from the same foundry.toml that produced the deployed bytecode.
  * - the portal - compiled from source in the l1-contracts root (the npm package ships the full
  *   foundry project EXCEPT the target source). A `l1.portalSource: "forked-v1"` config verifies the
  *   F-001 fork NuloTokenPortal, staged + self-pinned by source keccak (see portal-artifact.ts);
  *   otherwise the canonical TokenPortal is verified, keccak-checked against the artifact metadata.
- *   Both sources are vendored under packages/bridge-evm/upstream/.
+ *   Both sources are vendored under contracts/bridge/evm/upstream/.
  *
  * Requires ETHERSCAN_API_KEY (bun auto-loads packages/bridge-core/.env). Pass --dry-run to build +
  * print source-graph stats without submitting (no key needed). Pass --config <path> to verify a
@@ -27,8 +27,10 @@ import { stageForkSource } from "./portal-artifact"
 const here = dirname(fileURLToPath(import.meta.url))
 const configArg = process.argv.indexOf("--config")
 const CONFIG_PATH =
-	configArg !== -1 ? (process.argv[configArg + 1] as string) : join(here, "..", "..", "faucet", "public", "testnet-bridge.json")
-const EVM_ROOT = join(here, "..", "..", "bridge-evm")
+	configArg !== -1
+		? (process.argv[configArg + 1] as string)
+		: join(here, "..", "..", "..", "apps", "faucet", "public", "testnet-bridge.json")
+const EVM_ROOT = join(here, "..", "..", "..", "contracts", "bridge", "evm")
 const L1_ARTIFACTS_ROOT = join(dirname(createRequire(import.meta.url).resolve("@aztec/l1-artifacts/package.json")), "l1-contracts")
 const PORTAL_SOURCE_REL = join("test", "portals", "TokenPortal.sol")
 const VENDORED_PORTAL = join(EVM_ROOT, "upstream", "TokenPortal.sol")

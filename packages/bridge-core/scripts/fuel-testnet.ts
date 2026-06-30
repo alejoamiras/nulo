@@ -46,9 +46,11 @@ if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-core/.e
 const here = dirname(fileURLToPath(import.meta.url))
 const configArg = process.argv.indexOf("--config")
 const CONFIG_PATH =
-	configArg !== -1 ? (process.argv[configArg + 1] as string) : join(here, "..", "..", "faucet", "public", "testnet-bridge.json")
+	configArg !== -1
+		? (process.argv[configArg + 1] as string)
+		: join(here, "..", "..", "..", "apps", "faucet", "public", "testnet-bridge.json")
 const CONFIG = JSON.parse(readFileSync(CONFIG_PATH, "utf8"))
-const OUT = join(here, "..", "..", "bridge-evm", "out")
+const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
 const fuel = CONFIG.l1.fuel
 if (!fuel) throw new Error("testnet-bridge.json has no l1.fuel - run the P2 deploy first")
 

@@ -5,7 +5,7 @@
  * correct value, yielding wallet chainId `4138294185` — which the V5 wallet
  * (chainId `4229590296`) has no network for ("No network configured…").
  *
- * Phase 3 wires `packages/faucet/src/lib/chain-info.ts` to import these
+ * Phase 3 wires `apps/faucet/src/lib/chain-info.ts` to import these
  * constants (dropping the `VITE_CHAIN_*` override path entirely) so the faucet
  * + wallet cannot diverge; this module is the canonical pair + the assert.
  */
