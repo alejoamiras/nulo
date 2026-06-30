@@ -50,7 +50,7 @@ Shared shell (unchanged): the `.confetti` burst, the `.links` row, the `.action`
 
 **Validation gate** — Commands: `bun run test:faucet` · `bun run typecheck:all` · `bun run lint`. Pass: `BridgeReceipt` suite green (all variants), vue-tsc exit 0, biome exit 0. Layers: unit · typecheck · lint.
 
-### Phase 2 — Build + visual smoke + deliver
+### Phase 2 ✓ — Build + visual smoke + deliver
 
 1. `bun run build:faucet` — production build is unaffected.
 2. Manual visual smoke: `bun run dev:faucet`, eyeball all three receipts (token bridge with + without fuel, withdraw, Fuel) — confirm the mint left-rule + flush-right `✓`, the cream hero amount, the dim gas rows, and that confetti/links/CTA still render.
