@@ -244,3 +244,18 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new WalletError(payload.code, payload.message, payload.details)
 	}
 }
+
+/**
+ * Reconstruct the client-side error from a response envelope's content.
+ *
+ * A structured `errorPayload` is rebuilt into its typed `WalletError` subclass
+ * (so `instanceof` survives the JSON boundary); otherwise the flat `error`
+ * string becomes a plain `Error`. Shared verbatim by the background (Port) and
+ * offscreen (sendMessage) transport clients — the structural param keeps this
+ * decoupled from each client's `ResponseContentLike`.
+ */
+export function remoteErrorFromResponseContent(content: { errorPayload?: unknown; error?: string }): Error {
+	return content.errorPayload
+		? walletErrorFromPayload(content.errorPayload as WalletErrorPayload)
+		: new Error(content.error ?? "Unknown error")
+}

@@ -1,5 +1,12 @@
 import { describe, expect, test } from "vitest"
-import { CapabilityNotGrantedError, JobCancelledError, UserRejectedError, WalletError, walletErrorFromPayload } from "./errors"
+import {
+	CapabilityNotGrantedError,
+	JobCancelledError,
+	remoteErrorFromResponseContent,
+	UserRejectedError,
+	WalletError,
+	walletErrorFromPayload,
+} from "./errors"
 
 describe("walletErrorFromPayload", () => {
 	test("JobCancelledError round-trips with code + jobId preserved", () => {
@@ -42,5 +49,32 @@ describe("walletErrorFromPayload", () => {
 		expect(rebuilt.code).toBe(CapabilityNotGrantedError.CODE)
 		expect(rebuilt.message).toBe(original.message)
 		expect((rebuilt.details as { capabilityType?: string })?.capabilityType).toBe("accounts")
+	})
+})
+
+describe("remoteErrorFromResponseContent", () => {
+	// Pins the extraction shared by the background + offscreen clients' makeRemoteError.
+	test("structured errorPayload → typed WalletError subclass (instanceof survives the boundary)", () => {
+		const rebuilt = remoteErrorFromResponseContent({ errorPayload: new UserRejectedError().toPayload() })
+		expect(rebuilt).toBeInstanceOf(UserRejectedError)
+		expect(rebuilt).toBeInstanceOf(WalletError)
+	})
+
+	test("unknown code → base WalletError with the code preserved", () => {
+		const rebuilt = remoteErrorFromResponseContent({ errorPayload: { code: "WEIRD", message: "huh" } })
+		expect(rebuilt).toBeInstanceOf(WalletError)
+		expect((rebuilt as WalletError).code).toBe("WEIRD")
+		expect(rebuilt.message).toBe("huh")
+	})
+
+	test("no errorPayload, flat error string → plain Error (NOT a WalletError)", () => {
+		const rebuilt = remoteErrorFromResponseContent({ error: "boom" })
+		expect(rebuilt).toBeInstanceOf(Error)
+		expect(rebuilt).not.toBeInstanceOf(WalletError)
+		expect(rebuilt.message).toBe("boom")
+	})
+
+	test("neither payload nor message → Error('Unknown error')", () => {
+		expect(remoteErrorFromResponseContent({}).message).toBe("Unknown error")
 	})
 })
