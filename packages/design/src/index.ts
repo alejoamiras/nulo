@@ -50,3 +50,6 @@ export { default as EmojiGrid } from "./composite/EmojiGrid.vue"
 
 /** Tokens */
 export * from "./tokens"
+
+/** Shared severity/status vocabulary (Badge/Banner/Toast tone subsets) */
+export type { SeverityTone } from "./severity"
