@@ -43,7 +43,7 @@ Shared shell (unchanged): the `.confetti` burst, the `.links` row, the `.action`
 
 ## Phases
 
-### Phase 1 — Reconcile + rework the component and its test
+### Phase 1 ✓ — Reconcile + rework the component and its test
 
 1. Rewrite `BridgeReceipt.vue`'s template + `<style>` to the design above; drop `boughtDisplay`/`stampWord`, add `heroLabel`, **harden `hasFuel` with `!isFuel`**, and mark the eyebrow `✓` `role="img" aria-label="completed"`. Preserve the `ReceiptSnapshot` interface, `amountSymbol`/`assetKind`/`isFuel` logic, every `data-testid`, the `new-bridge` emit, and the confetti/links/action shell.
 2. Rewrite `BridgeReceipt.test.ts` to assert the new structure: the mint-`✓` done-mark present; `Bridged`/`Released`/`Fueled` hero label + amount per variant; `Gas ready` (net) + `Gas used` for a fueled deposit; **no** `Gas bought`, **no** `available`/`Ready to power…` copy, **no** bold stamp text. Keep the existing variant coverage (deposit, withdraw, private/public fueled, **fueled-without-known-used** — the `usedDisplay`-absent branch, where `Gas ready` = received and no `Gas used` row — no-fuel, fuel-private, fuel-public) and the testid queries; **add an assertion that no shape yields two `receiptFuel` nodes**. Tests stay inline with the component change.

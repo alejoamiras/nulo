@@ -8,7 +8,7 @@ const L1 = `0x${"ab".repeat(32)}`
 const L2 = `0x${"cd".repeat(32)}`
 
 describe("BridgeReceipt", () => {
-	it("deposit receipt: route, tokens, both validated links, NEW BRIDGE emits", async () => {
+	it("deposit receipt: eyebrow route + done-mark, Bridged hero, both validated links, NEW BRIDGE emits", async () => {
 		const w = mount(BridgeReceipt, {
 			props: {
 				snapshot: {
@@ -22,8 +22,13 @@ describe("BridgeReceipt", () => {
 				},
 			},
 		})
-		expect(w.text()).toContain("BRIDGED ✓")
+		// The bold "BRIDGED ✓" stamp is gone; success is the past-tense hero + the small ✓ done-mark.
+		expect(w.text()).not.toContain("BRIDGED ✓")
+		const done = w.find('[aria-label="completed"]')
+		expect(done.exists()).toBe(true)
+		expect(done.text()).toBe("✓")
 		expect(w.text()).toContain("Ethereum → Aztec")
+		expect(w.text()).toContain("Bridged")
 		expect(w.text()).toContain("100.00 AZLO")
 		expect(w.text()).toContain("private")
 		expect(w.text()).toContain("3m 42s")
@@ -35,7 +40,7 @@ describe("BridgeReceipt", () => {
 		expect(w.emitted("new-bridge")).toHaveLength(1)
 	})
 
-	it("withdraw receipt: Aztec → Ethereum, token only (no gas ever), junk hash renders no link", () => {
+	it("withdraw receipt: Aztec → Ethereum, Released hero, token only (no gas ever), junk hash renders no link", () => {
 		const w = mount(BridgeReceipt, {
 			props: {
 				snapshot: {
@@ -47,15 +52,15 @@ describe("BridgeReceipt", () => {
 				},
 			},
 		})
-		expect(w.text()).toContain("RELEASED ✓")
 		expect(w.text()).toContain("Aztec → Ethereum")
+		expect(w.text()).toContain("Released")
 		expect(w.text()).toContain("40.00 AZLO")
 		// A withdraw never carries gas back to Ethereum — no FJ anywhere.
 		expect(w.text()).not.toContain("FJ")
 		expect(w.findAll(sel(TESTIDS.receiptLink))).toHaveLength(1)
 	})
 
-	it("private fueled deposit: the ledger + reserve (bought/used/available, Private FJ)", () => {
+	it("private fueled deposit: Bridged hero + dim Gas ready (net) / Gas used rows, no gross 'bought' or reserve copy", () => {
 		const w = mount(BridgeReceipt, {
 			props: {
 				snapshot: {
@@ -69,16 +74,21 @@ describe("BridgeReceipt", () => {
 				},
 			},
 		})
-		expect(w.text()).toContain("Gas bought")
-		expect(w.text()).toContain("87.70 Private FJ")
+		expect(w.text()).toContain("Bridged")
+		expect(w.text()).toContain("Gas ready")
+		// ready = received − used = 87.70 − 2.88 = 84.82 (net the user can spend next).
+		expect(w.text()).toContain("84.82 Private FJ")
 		expect(w.text()).toContain("Gas used")
 		expect(w.text()).toContain("2.88")
-		// available = 87.70 − 2.88 = 84.82
-		expect(w.text()).toContain("84.82 Private FJ available")
-		expect(w.text()).toContain("Ready to power your next private transaction")
+		// The gross "Gas bought" line and the boxed "available / Ready to power…" panel are dropped.
+		expect(w.text()).not.toContain("Gas bought")
+		expect(w.text()).not.toContain("available")
+		expect(w.text()).not.toContain("Ready to power")
+		// The receiptFuel marker is on the Gas-ready row for a fueled token deposit — exactly one.
+		expect(w.findAll(sel(TESTIDS.receiptFuel))).toHaveLength(1)
 	})
 
-	it("public fueled deposit: gas reads FJ (not Private FJ); note drops 'private'", () => {
+	it("public fueled deposit: gas reads FJ (not Private FJ)", () => {
 		const w = mount(BridgeReceipt, {
 			props: {
 				snapshot: {
@@ -89,22 +99,22 @@ describe("BridgeReceipt", () => {
 				},
 			},
 		})
-		expect(w.text()).toContain("53.00 FJ available")
+		expect(w.text()).toContain("Gas ready")
+		expect(w.text()).toContain("53.00 FJ")
 		expect(w.text()).not.toContain("Private FJ")
-		expect(w.text()).toContain("Ready to power your next transaction")
-		expect(w.text()).not.toContain("next private")
+		expect(w.text()).not.toContain("Ready to power")
 	})
 
-	it("no-fuel deposit: no gas rows, no reserve box", () => {
+	it("no-fuel deposit: no gas rows", () => {
 		const w = mount(BridgeReceipt, {
 			props: { snapshot: { direction: "deposit" as const, amount: "100000000000000000000", isPrivate: true } },
 		})
 		expect(w.text()).toContain("100.00 AZLO")
-		expect(w.text()).not.toContain("Gas bought")
-		expect(w.text()).not.toContain("available")
+		expect(w.text()).not.toContain("Gas ready")
+		expect(w.text()).not.toContain("Gas used")
 	})
 
-	it("fueled deposit without a known claim fee: available = bought, no 'used' row", () => {
+	it("fueled deposit without a known claim fee: Gas ready = received, no 'Gas used' row", () => {
 		const w = mount(BridgeReceipt, {
 			props: {
 				snapshot: {
@@ -115,12 +125,12 @@ describe("BridgeReceipt", () => {
 				},
 			},
 		})
-		expect(w.text()).toContain("87.70 Private FJ available")
+		expect(w.text()).toContain("87.70 Private FJ")
 		expect(w.text()).not.toContain("Gas used")
 	})
 
-	// Fuel variant (assetKind "fee-juice"): the amount IS Fee Juice (18-dec) — never the bridge token.
-	it("fuel (private) receipt: FUELED stamp, a Fuel row in Private FJ, NEW FUEL cta — no token leak", async () => {
+	// Fuel variant (assetKind "fee-juice"): the amount IS Fee Juice (18-dec) — it gets the SAME hero treatment.
+	it("fuel (private) receipt: Fueled hero in Private FJ, NEW FUEL cta, no token leak, one receiptFuel", async () => {
 		const w = mount(BridgeReceipt, {
 			props: {
 				ctaLabel: "NEW FUEL",
@@ -134,12 +144,12 @@ describe("BridgeReceipt", () => {
 				},
 			},
 		})
-		expect(w.text()).toContain("FUELED ✓")
-		expect(w.text()).toContain("Fuel")
+		expect(w.text()).toContain("Fueled")
 		expect(w.text()).toContain("20.00 Private FJ")
 		expect(w.text()).not.toContain("AZLO")
-		expect(w.text()).not.toContain("Tokens")
-		expect(w.text()).not.toContain("BRIDGED")
+		expect(w.text()).not.toContain("Bridged")
+		// The Fee-Juice amount IS the hero, so the receiptFuel marker sits on the hero row — exactly one.
+		expect(w.findAll(sel(TESTIDS.receiptFuel))).toHaveLength(1)
 		expect(w.find(sel(TESTIDS.receiptNewBridge)).text()).toBe("NEW FUEL")
 		await w.find(sel(TESTIDS.receiptNewBridge)).trigger("click")
 		expect(w.emitted("new-bridge")).toHaveLength(1)
@@ -159,5 +169,25 @@ describe("BridgeReceipt", () => {
 		})
 		expect(w.text()).toContain("12.50 FJ")
 		expect(w.text()).not.toContain("Private FJ")
+	})
+
+	// The `!isFuel` guard on hasFuel keeps the two receiptFuel sites mutually exclusive — a pathological
+	// (valid-by-interface) Fuel snapshot that also carries fuelReceived must NOT duplicate the testid.
+	it("never renders two receiptFuel nodes (isFuel and hasFuel are mutually exclusive)", () => {
+		const w = mount(BridgeReceipt, {
+			props: {
+				snapshot: {
+					direction: "deposit" as const,
+					assetKind: "fee-juice" as const,
+					amount: "20000000000000000000",
+					isPrivate: true,
+					fuelReceived: "5000000000000000000",
+					fuelUsed: "1000000000000000000",
+				},
+			},
+		})
+		expect(w.findAll(sel(TESTIDS.receiptFuel))).toHaveLength(1)
+		expect(w.text()).toContain("Fueled")
+		expect(w.text()).not.toContain("Gas ready")
 	})
 })
