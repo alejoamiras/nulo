@@ -1,7 +1,7 @@
 import type { Ref } from "vue"
 import { onBeforeUnmount, onMounted, ref } from "vue"
 
-import { Config } from "@/wallet/config"
+import { defaultConfig } from "@/wallet/config"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /**
@@ -20,7 +20,7 @@ import { ConfigServiceClient } from "@/wallet/services/config/client"
  *   - onBeforeUnmount: dispose the client
  */
 export function useFullscreenPopupSetting(): Ref<boolean> {
-	const showFullscreen = ref<boolean>(new Config().showPopupFullscreen)
+	const showFullscreen = ref<boolean>(defaultConfig().showPopupFullscreen)
 
 	const client = new ConfigServiceClient()
 	client.onUpdate.add((setting) => {

@@ -1,6 +1,10 @@
 import { CHAIN_IDS } from "@/components/ui/utils"
 
-export type BlockExplorerType = "aztecscan"
+/** Canonical list of explorer ids — single source for both the `BlockExplorerType`
+ *  union and the config zod schema (`defaultExplorer`), so they can't drift. */
+export const BLOCK_EXPLORER_IDS = ["aztecscan"] as const
+
+export type BlockExplorerType = (typeof BLOCK_EXPLORER_IDS)[number]
 
 export type BlockExplorer = {
 	/** Unique identifier */
