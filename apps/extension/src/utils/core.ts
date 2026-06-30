@@ -37,7 +37,10 @@ export const isBackgroundConnected = ref(false)
  * `bootstrapActiveProfile()` resolves the active profile/network/account).
  *
  * The lazy three are typed `| null` (honest) — a bare `managers.network` read is
- * `NetworkServiceClient | null`, so an unchecked `.foo()` is a COMPILE error. Use
+ * `NetworkServiceClient | null`, so an unchecked `.foo()` is a compile error IN
+ * `.ts` CONSUMERS. (`vue-tsc` does NOT strict-null-check `.vue` `<script setup>`,
+ * so `.vue` reads are NOT compiler-guarded today — use the accessors there by
+ * convention; closing that `.vue` gap is a separate infra task.) Use
  * {@link requireNetwork}/{@link requireTransaction}/{@link requireAccount} (throw
  * if unset) for method calls in unlock-guarded code, or {@link getNetwork}/
  * {@link getTransaction}/{@link getAccount} (`| null`) where the unset case is
