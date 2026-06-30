@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from "vue"
+import { computed, type PropType } from "vue"
+import type { TextColorName } from "../color-names"
 
 const props = defineProps({
 	name: {
@@ -11,7 +12,7 @@ const props = defineProps({
 		default: 24,
 	},
 	color: {
-		type: String,
+		type: String as PropType<TextColorName>,
 		default: "primary",
 	},
 	filled: {

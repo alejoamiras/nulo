@@ -53,3 +53,6 @@ export * from "./tokens"
 
 /** Shared severity/status vocabulary (Badge/Banner/Toast tone subsets) */
 export type { SeverityTone } from "./severity"
+
+/** Utility color names (keys of textColors) for `color` props */
+export type { TextColorName } from "./color-names"
