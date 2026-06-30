@@ -14,7 +14,7 @@ Depends only on `wallet-core` for the `ILogger` interface and `Web Crypto` (avai
 
 | Path | Purpose |
 |---|---|
-| `src/encryption-key.ts` | `EncryptionKey` — PBKDF2 (SHA-256, 250k iterations) + AES-GCM framed ciphertext. The 1-byte version frame lets future formats coexist. |
+| `src/encryption-key.ts` | `EncryptionKey` — PBKDF2 (SHA-256, 600k iterations) + AES-GCM framed ciphertext. The 1-byte version frame lets future formats coexist. |
 | `src/password-secret-box.ts` | `PasswordSecretBox` — password-based wrap around `EncryptionKey`. Stores `passhash` (a deterministic public hash of the password's KDF output) so a session can be silently re-derived without re-prompting. |
 | `src/passkey-credential.ts` | `PasskeyCredential` — WebAuthn PRF → HKDF master-secret. Exposes `recoverFromCredentialData()` for the in-page modal Path A flow. |
 | `src/constants.ts` | `ENCRYPTION_GUARD` (frozen by the V8 vector), `PASSKEY_PRF_LABEL`. |
