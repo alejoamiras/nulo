@@ -27,6 +27,8 @@ describe("BridgeReceipt", () => {
 		const done = w.find('[aria-label="completed"]')
 		expect(done.exists()).toBe(true)
 		expect(done.text()).toBe("✓")
+		// Pin the a11y exposure (role="img" + name) so a regression dropping the role is caught.
+		expect(done.attributes("role")).toBe("img")
 		expect(w.text()).toContain("Ethereum → Aztec")
 		expect(w.text()).toContain("Bridged")
 		expect(w.text()).toContain("100.00 AZLO")

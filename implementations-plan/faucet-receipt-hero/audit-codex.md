@@ -30,3 +30,13 @@
 | — | don't carry "lone success mark" comments | **Adopt** — ledger note; both rule + `✓` are `--mint` ("mint is the only green", not the only mark). |
 
 No findings rejected.
+
+## Post-impl audit — approve (session `019f19da`)
+
+> **approve**
+
+Verified in the implemented files: all 3 plan conditions folded (`hasFuel` `!isFuel` at `BridgeReceipt.vue:56`; done-mark `role`/name at `:100`; Fact corrections doc-only). No new variant bug — Fuel gets exactly one `receiptFuel` on the hero (`:102`), fueled token deposits one on `Gas ready` (`:106-108`), `hasFuel` excludes withdraw + Fuel; the pathological duplicate is tested (`BridgeReceipt.test.ts:176-192`). Behavior drops are the intended ones (stamp / gross `Gas bought` / `.reserve`); dropping `→ Ethereum` from the withdraw hero is fine (route stays in the eyebrow). No `v-html`; tx links still strict-URL-helper-gated.
+
+- **LOW (adopted):** the `✓` a11y was asserted via `[aria-label="completed"]` + text but not `role="img"`, so a regression dropping the role would pass. Added `expect(done.attributes("role")).toBe("img")` to the deposit test. Re-ran: 9/9 green.
+
+No high/critical findings.
