@@ -17,12 +17,22 @@ vi.mock("@/utils/core", () => {
 		ensureDefaultAccount: vi.fn(async () => undefined),
 		getAccounts: vi.fn(async () => []),
 	}
+	const managers = {
+		profile: profileMock,
+		network: networkMock,
+		account: accountMock,
+	}
 	return {
-		managers: {
-			profile: profileMock,
-			network: networkMock,
-			account: accountMock,
-		},
+		managers,
+		// Q-16: app.store reads the lazy clients via require*()/get*(). initNetworks/
+		// initAccount REASSIGN `managers.network`/`.account` to the mocked
+		// `new NetworkServiceClient()`/`new AccountServiceClient()` (which carry
+		// getNodeStatus etc.), so these MUST read the CURRENT `managers.X` — close
+		// over `managers`, not the original *Mock consts (matching the real impl).
+		requireNetwork: () => managers.network,
+		requireAccount: () => managers.account,
+		getNetwork: () => managers.network,
+		getAccount: () => managers.account,
 		initTransactionService: vi.fn(),
 	}
 })
