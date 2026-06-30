@@ -3,7 +3,7 @@
  *
  * Covers the env-gated runtime hard-fail path used by CI's `network-e2e`
  * when `VITE_NULO_ACCELERATOR_REQUIRED=1` is baked into the build. Default
- * mode (no options or `required: false`) must preserve the SDK's silent
+ * mode (no options or `provingMode: "default"`) must preserve the SDK's silent
  * WASM fallback — production end-users without Aztec Accelerator must NOT
  * see any new behavior from this code path.
  *

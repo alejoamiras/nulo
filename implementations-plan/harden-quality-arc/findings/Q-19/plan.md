@@ -47,3 +47,9 @@ Map call sites: `required:true`→`provingMode:"required"`; `proverless:true`→
 **NetworkInfo (codex MED#3):** artifact-registry's is dead-as-data (`_network` never read) — **rename** to `ArtifactNetworkContext`, KEEP the param (removing it churns a public method signature).
 
 **Biggest break (codex):** DU remaps default→proverless/required, endpoint pass-through lost, or a registry/guard/profile-delete prefix diverges so cleanup/dispose targets the wrong runtime/DB. Implementation reads the constructor (~103-117) + createChainRuntime (~119-190) + every option call site + every key/prefix site before editing.
+
+## Codex post-impl (session 019f19d7 resumed) — `conditional approve`
+Confirmations: codec strings byte-identical (`p:c`, `p:`, `pxe/p/c`, `pxe/p/`, `pxe/`); DU maps 1:1 for all migrated callers (default/required construct `AcceleratorProver`; required adds onPhase+preflight; proverless `proverEnabled:false`; host/port pass in default+required, ignored in proverless); `@ts-expect-error` reliable; `ArtifactNetworkContext` rename contained.
+- **Medium → ACCEPTED as an API break** (no defensive legacy-key check): the constructor no longer reads `required`/`proverless`, so a hypothetical old-shape/`any`/JS caller would silently change behavior. All callers are migrated + TS-typed (`offscreen/index.ts` + `service.ts`); no JS/non-literal callers, no prod users → the DU is the new contract (no-backwards-compat ruling). Documented, not guarded.
+- **Low → FIXED:** stale comments `offscreen/entry.ts:29` + `chain-runtime.test.ts` header (made stale by the DU rename).
+- **Low → DEFERRED:** `apps/extension/src/wallet/storage/migrate.ts:79` `INDEXEDDB_WIPE_PREFIXES = ["pxe/"]` is byte-identical + in the storage-migration layer (outside Q-19's cited pxe-service scope); centralizing it would widen the codec export surface across a layer for marginal gain. Follow-up candidate.
