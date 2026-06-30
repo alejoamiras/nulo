@@ -878,41 +878,44 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				let passhash: ArrayBuffer | undefined
 				try {
 					return await this.runExclusive(async () => {
-						const sealed = await this.secretBox.seal(password, plainSecret as Uint8Array<ArrayBuffer>)
-						passhash = sealed.passhash
+						try {
+							const sealed = await this.secretBox.seal(password, plainSecret as Uint8Array<ArrayBuffer>)
+							passhash = sealed.passhash
 
-						let id = profile.id
-						while (await this.repo.contains(id)) {
-							id = await this.repo.generateUniqueId()
+							let id = profile.id
+							while (await this.repo.contains(id)) {
+								id = await this.repo.generateUniqueId()
+							}
+
+							const newProfile: Profile = {
+								id,
+								name,
+								type: "password",
+								guard: sealed.encrypted.guard,
+								secret: sealed.encrypted.secret,
+							}
+
+							await this.repo.set(id, newProfile)
+
+							this.emit("onProfileAdded", this.getProfileInfo(newProfile))
+
+							// Late activation: do NOT open the session here. The popup
+							// will call `finalizeRestore(id, password)` after restoring
+							// all backup data (networks, accounts, etc.) to avoid
+							// `app.vue:onActiveProfileChanged` racing the import with
+							// auto-seeded defaults.
+							return this.getProfileInfo(newProfile)
+						} catch (err) {
+							// Build restoreError INSIDE the locked callback so it runs
+							// before lock.leave() — byte-equivalent to the pre-refactor
+							// catch-before-leave order (toRestoreError may invoke a
+							// custom err.toString()).
+							return {
+								...profile,
+								restoreError: toRestoreError(err),
+							}
 						}
-
-						const newProfile: Profile = {
-							id,
-							name,
-							type: "password",
-							guard: sealed.encrypted.guard,
-							secret: sealed.encrypted.secret,
-						}
-
-						await this.repo.set(id, newProfile)
-
-						this.emit("onProfileAdded", this.getProfileInfo(newProfile))
-
-						// Late activation: do NOT open the session here. The popup
-						// will call `finalizeRestore(id, password)` after restoring
-						// all backup data (networks, accounts, etc.) to avoid
-						// `app.vue:onActiveProfileChanged` racing the import with
-						// auto-seeded defaults.
-						return this.getProfileInfo(newProfile)
 					})
-				} catch (err) {
-					// toRestoreError is a pure error formatter, so building it after
-					// runExclusive's lock.leave() (vs the prior catch-before-leave
-					// order) is observationally identical.
-					return {
-						...profile,
-						restoreError: toRestoreError(err),
-					}
 				} finally {
 					zeroize(plainSecret)
 					if (passhash) zeroize(passhash)
