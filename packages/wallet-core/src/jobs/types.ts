@@ -63,6 +63,66 @@ export type JobProgress =
 	| { stage: "cancelled" }
 
 /**
+ * Known {@link JobError.kind} categories. OPEN union — the `(string & {})` arm
+ * keeps arbitrary strings assignable, so a `switch` over `kind` does NOT narrow
+ * to `never` (consumers MUST keep a `default` arm). The literals exist for
+ * autocomplete + the runtime drift guard, NOT for compiler exhaustiveness.
+ *
+ * Producers: `normalizeError(…, "transfer" | "dapp_execute" | "prover" |
+ * "network" | "unknown")`, `{ kind: "popup_bound" }` (wallet-sdk), the reaper
+ * (`sw_restart_post_prove` | `stuck_proving` | `stuck_queued` | `stale_on_resume`),
+ * and `classifyTokenImportError` (`network_unreachable` | `contract_invalid` |
+ * `metadata_fetch` | `unknown`). `user_rejected` | `network` | `simulation` are
+ * switched-on / documented but not all produced on HEAD.
+ */
+export type KnownJobErrorKind =
+	| "user_rejected"
+	| "popup_bound"
+	| "sw_restart_post_prove"
+	| "stale_on_resume"
+	| "stuck_proving"
+	| "stuck_queued"
+	| "network"
+	| "simulation"
+	| "prover"
+	| "transfer"
+	| "dapp_execute"
+	| "network_unreachable"
+	| "contract_invalid"
+	| "metadata_fetch"
+	| "unknown"
+
+export type JobErrorKind = KnownJobErrorKind | (string & {})
+
+/**
+ * Runtime mirror of {@link KnownJobErrorKind}, completeness-guarded by
+ * `satisfies Record<KnownJobErrorKind, true>`: adding a literal to the type
+ * without adding it here (or vice-versa) is a COMPILE error → the drift signal.
+ * This table — NOT the compiler's `switch` narrowing, which the open arm defeats
+ * — is what catches a producer/known-set drift.
+ */
+const KNOWN_JOB_ERROR_KIND_TABLE = {
+	user_rejected: true,
+	popup_bound: true,
+	sw_restart_post_prove: true,
+	stale_on_resume: true,
+	stuck_proving: true,
+	stuck_queued: true,
+	network: true,
+	simulation: true,
+	prover: true,
+	transfer: true,
+	dapp_execute: true,
+	network_unreachable: true,
+	contract_invalid: true,
+	metadata_fetch: true,
+	unknown: true,
+} satisfies Record<KnownJobErrorKind, true>
+
+/** All {@link KnownJobErrorKind} literals at runtime (drift-guarded mirror). */
+export const KNOWN_JOB_ERROR_KINDS = Object.keys(KNOWN_JOB_ERROR_KIND_TABLE) as KnownJobErrorKind[]
+
+/**
  * Error envelope. Preserves the raw error category from the underlying
  * boundary so Phase 2+ retry policy can classify retryable vs terminal.
  *
@@ -72,14 +132,10 @@ export type JobProgress =
  */
 export interface JobError {
 	/**
-	 * Category, used by resume + retry policy. Phase 2 emits:
-	 * `user_rejected | popup_bound | sw_restart_post_prove |
-	 *  stale_on_resume | stuck_proving | network | simulation |
-	 *  prover | unknown`.
-	 *
-	 * Phase 2+ may add categories; consumers MUST tolerate unknown values.
+	 * Category, used by resume + retry policy (see {@link KnownJobErrorKind}).
+	 * Open union — consumers MUST tolerate unknown values (keep a `default` arm).
 	 */
-	kind: string
+	kind: JobErrorKind
 	/** User-facing message — already humanized; safe to render verbatim. */
 	message: string
 	/** Best-effort serialized raw error (capped); `null` if unserializable. */
