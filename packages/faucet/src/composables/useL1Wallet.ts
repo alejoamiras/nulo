@@ -1,4 +1,4 @@
-import { type Address, createPublicClient, createWalletClient, custom, type EIP1193Provider, http, type WalletClient } from "viem"
+import { type Address, createPublicClient, createWalletClient, custom, type EIP1193Provider, type WalletClient } from "viem"
 import { sepolia } from "viem/chains"
 import { computed, ref, shallowRef } from "vue"
 
@@ -17,7 +17,25 @@ function getProvider(): EIP1193Provider | undefined {
 	return (window as Window & { ethereum?: EIP1193Provider }).ethereum
 }
 
-const publicClient = createPublicClient({ chain: sepolia, transport: http() })
+/**
+ * Public (read) client routed through the live injected provider, resolved per-call because this
+ * singleton is built before any wallet connects. It MUST NOT use viem's `http()` default transport:
+ * that issues a page-origin fetch to the chain's default RPC (Sepolia → `https://11155111.rpc.thirdweb.com`)
+ * which the faucet's CSP `connect-src` refuses, breaking every L1 read + receipt wait. Delegating to the
+ * wallet's EIP-1193 provider makes the extension perform the `eth_call` (no page fetch, so the page CSP
+ * never applies) using the user's own RPC. Every L1 read is gated on a connected wallet, so the provider
+ * is present whenever a read actually runs.
+ */
+const publicClient = createPublicClient({
+	chain: sepolia,
+	transport: custom({
+		async request(args: { method: string; params?: unknown }) {
+			const provider = getProvider()
+			if (!provider) throw new Error("Connect your Ethereum wallet first.")
+			return provider.request(args as Parameters<EIP1193Provider["request"]>[0])
+		},
+	}),
+})
 
 const address = ref<Address | null>(null)
 const chainId = ref<number | null>(null)
