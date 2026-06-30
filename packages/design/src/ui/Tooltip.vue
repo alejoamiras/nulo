@@ -3,25 +3,25 @@
  * Vendor
  */
 import { ref, reactive, nextTick, watch } from "vue"
-import type { VNode } from "vue"
+import type { PropType, VNode } from "vue"
 
 const props = defineProps({
 	side: {
-		type: String,
+		type: String as PropType<"top" | "bottom" | "left" | "right">,
 		default: "bottom",
 		validator: (value: string) => {
 			return ["top", "bottom", "left", "right"].includes(value)
 		},
 	},
 	position: {
-		type: String,
+		type: String as PropType<"start" | "end" | "center">,
 		default: "center",
 		validator: (value: string) => {
 			return ["start", "end", "center"].includes(value)
 		},
 	},
 
-	textAlign: { type: String, default: "center" },
+	textAlign: { type: String as PropType<"center" | "left" | "right">, default: "center" },
 	wide: { type: Boolean, default: null },
 	disabled: { type: Boolean, default: false },
 	delay: { type: [String, Number], default: 0 },
