@@ -129,7 +129,7 @@ describe("PasswordSecretBox", () => {
 
 	describe("ENCRYPTION_GUARD canary", () => {
 		test("ENCRYPTION_GUARD bytes are unchanged (tripwire for silent GUARD edits)", () => {
-			// Hard-code the current bytes so a drive-by change to spec.ts
+			// Hard-code the current bytes so a drive-by change to password-secret-box.ts
 			// fails this test before it silently invalidates every existing
 			// profile. If you intentionally change the GUARD, write a
 			// migration first, then update this assertion.

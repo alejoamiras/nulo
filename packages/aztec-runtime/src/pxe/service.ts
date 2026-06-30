@@ -360,7 +360,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			}
 
 			// When we pass `overrides`, upstream PXE enforces
-			// `skipKernels: true` (`@aztec/pxe@4.2.0` pxe.js:627 —
+			// `skipKernels: true` (`@aztec/pxe@5.0.0-rc.1` pxe.js:627 —
 			// `if (hasOverriddenContracts && !skipKernels) throw`). Today
 			// this works because upstream defaults `skipKernels` to true,
 			// but riding a default is fragile: a future upstream change
