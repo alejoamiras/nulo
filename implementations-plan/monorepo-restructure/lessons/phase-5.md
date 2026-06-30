@@ -1,0 +1,3 @@
+# Phase 5 ✓ — CI dorny filters + the graph guard
+Broad .github sed: app-target globs packages/{extension,faucet,playground,landing} -> apps/ (lib globs packages/<lib> stay). actionlint shell-script paths -> apps/. behavior-gating.test.ts taught the split: added APPS set + dirOf(pkg); :21 directDeps read, :58 target glob, :88 playground all use dirOf (dep-lib globs stay packages/). NO ! negations; no status: job name touched.
+Gates: test:ci-gating 0 (6 tests — guard re-proves filters match the graph at new paths), lint:actions 0, zero stale app-path in .github/workflows (the silent-gate check). Corrected the G9 grep boundary: packages/extension\\b false-matched extension-messaging (a staying lib) — use app-name + non-hyphen boundary.

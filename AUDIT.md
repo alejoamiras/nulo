@@ -22,11 +22,11 @@ in CLAUDE.md (Phase 9). 1212 unit tests passing. See
 **Status check 2026-05-19 (pre-open-source flip):** A1 and A2 both
 fixed. A1: the Strict Security Mode work ensures passhash is no longer
 persisted to `chrome.storage.session` by default (see
-`packages/extension/src/wallet/services/profile/session-manager.ts`
+`apps/extension/src/wallet/services/profile/session-manager.ts`
 lines `127`, `192`, `280`, `461`). A2: `exportEncrypted` now requires
 that the requested profile is the currently-active (unlocked) session
 — `sessionManager.getActive()` check at
-`packages/extension/src/wallet/services/profile/service.ts:617`,
+`apps/extension/src/wallet/services/profile/service.ts:617`,
 throwing `"Profile locked"` on mismatch. Integration coverage in
 `service.integration.test.ts:521,608`.
 
@@ -44,19 +44,19 @@ Running totals: **13 fixed, 6 still open.**
 ## CRITICAL
 
 ### A1. Passhash stored in session storage (plaintext-equivalent secret)
-- **File:** `src/wallet/services/profile/service.ts:569` (audit) → now `packages/extension/src/wallet/services/profile/session-manager.ts:190` post-M2.1-d split
+- **File:** `src/wallet/services/profile/service.ts:569` (audit) → now `apps/extension/src/wallet/services/profile/session-manager.ts:190` post-M2.1-d split
 - **Issue:** SHA-256(password) stored in `chrome.storage.session` as base64. This hash is the sole input to `EncryptionKey.fromPasshash()` which derives the AES key via PBKDF2. Anyone with session storage access can reconstruct the encryption key without knowing the password.
 - **Impact:** Full secret key compromise if session storage is accessed (other extensions, memory dump, devtools)
 - **Fix:** Don't persist the passhash. Re-derive on each unlock, or use a session-scoped derived key that can't reconstruct the master.
-- [x] **Fixed** — Strict Security Mode default-on shipped in 0.13.9 (see `packages/extension/src/wallet/services/profile/session-manager.ts:127` and `:192`). Passhash is re-derived per session and no longer persisted in `chrome.storage.session` when strict mode is enabled (default). A user-toggleable lenient mode is documented in `SECURITY.md`.
+- [x] **Fixed** — Strict Security Mode default-on shipped in 0.13.9 (see `apps/extension/src/wallet/services/profile/session-manager.ts:127` and `:192`). Passhash is re-derived per session and no longer persisted in `chrome.storage.session` when strict mode is enabled (default). A user-toggleable lenient mode is documented in `SECURITY.md`.
 
 ### A2. `exportEncrypted()` requires no authentication
-- **File:** `src/wallet/services/profile/service.ts:422-432` (audit) → now `packages/extension/src/wallet/services/profile/service.ts:506-516` post-M2.1-e
+- **File:** `src/wallet/services/profile/service.ts:422-432` (audit) → now `apps/extension/src/wallet/services/profile/service.ts:506-516` post-M2.1-e
 - **Issue:** Returns the encrypted master secret with zero auth checks (no password, no session, no active profile check). Combined with A1, an attacker gets everything needed to decrypt.
 - **Impact:** Encrypted secret accessible to any code path that can call the service. Defense-in-depth gap.
 - **Note:** Only callable from extension pages, not dApps. Still concerning.
 - **Fix:** Add `confirmProfileOperation()` check (same as `exportPlain` uses).
-- [x] **Fixed** — `exportEncrypted` now requires that the requested profile be the currently-active (unlocked) session. The gate at `packages/extension/src/wallet/services/profile/service.ts:617` calls `sessionManager.getActive()` and throws `"Profile locked"` if the active profile id does not match — same shape as `SessionManager.getSecret`'s lock check, so the error surface is consistent. Combined with the strict-mode fix in A1, the defense-in-depth gap is closed. Integration coverage in `service.integration.test.ts:521,608`.
+- [x] **Fixed** — `exportEncrypted` now requires that the requested profile be the currently-active (unlocked) session. The gate at `apps/extension/src/wallet/services/profile/service.ts:617` calls `sessionManager.getActive()` and throws `"Profile locked"` if the active profile id does not match — same shape as `SessionManager.getSecret`'s lock check, so the error surface is consistent. Combined with the strict-mode fix in A1, the defense-in-depth gap is closed. Integration coverage in `service.integration.test.ts:521,608`.
 
 ### A3. 29 `console.error("[DEBUG]...")` calls shipping sensitive data
 - **Files:** `execution/service.ts` (23), `dispatcher.ts` (3), `fpc/service.ts` (3)
@@ -123,7 +123,7 @@ Running totals: **13 fixed, 6 still open.**
 
 ### A12. `@ts-ignore` masking type errors (7 instances)
 - **Files (audit):** `execute/index.vue:6,8,51`, `capabilities/index.vue:6,53`, `verify/index.vue:7`, `discover/index.vue:32`.
-- **Current status (2026-05-08):** **0 in hand-authored source** across all packages — `grep -rn "@ts-ignore" packages/*/src | grep -v "/types/"` returns empty. The audit's original 7 sites were progressively cleaned up across M2/M3/M6 via the `noExplicitAny: error` biome rule + the typecheck-clean-as-we-touch policy. Remaining `@ts-ignore` instances live exclusively in auto-generated declaration files (`packages/extension/src/types/auto-imports.d.ts`, `components.d.ts`, `typed-router.d.ts`) which we don't hand-edit — those come from `unplugin-auto-import` / `unplugin-vue-components` / `unplugin-vue-router` and are excluded by convention.
+- **Current status (2026-05-08):** **0 in hand-authored source** across all packages — `grep -rn "@ts-ignore" packages/*/src | grep -v "/types/"` returns empty. The audit's original 7 sites were progressively cleaned up across M2/M3/M6 via the `noExplicitAny: error` biome rule + the typecheck-clean-as-we-touch policy. Remaining `@ts-ignore` instances live exclusively in auto-generated declaration files (`apps/extension/src/types/auto-imports.d.ts`, `components.d.ts`, `typed-router.d.ts`) which we don't hand-edit — those come from `unplugin-auto-import` / `unplugin-vue-components` / `unplugin-vue-router` and are excluded by convention.
 - [x] **Effectively fixed** — auto-generated declarations are not actionable.
 
 ### A13. Request ID via `Math.random()`, duplicated

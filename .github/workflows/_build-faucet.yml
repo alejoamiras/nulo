@@ -33,19 +33,19 @@ jobs:
       # cause wallet.registerContract to reject every contract at connect
       # time. Cheap insurance against deploy/code skew.
       - name: Verify deployments.json matches the rebuild logic
-        run: bun run --cwd packages/faucet verify:deployments
+        run: bun run --cwd apps/faucet verify:deployments
 
       - name: Smoke e2e (mock wallet, jsdom)
-        run: bun run --cwd packages/faucet test:e2e
+        run: bun run --cwd apps/faucet test:e2e
 
       - name: Build
-        run: bun run --cwd packages/faucet build
+        run: bun run --cwd apps/faucet build
 
       - name: Upload faucet build
         if: inputs.upload_artifacts
         uses: actions/upload-artifact@v7
         with:
           name: faucet-dist
-          path: packages/faucet/dist
+          path: apps/faucet/dist
           if-no-files-found: error
           retention-days: 7

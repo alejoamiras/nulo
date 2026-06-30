@@ -7,6 +7,6 @@ runs:
     - uses: actions/cache@v6
       with:
         path: ~/.cache/puppeteer
-        key: ${{ runner.os }}-puppeteer-${{ hashFiles('packages/extension/package.json') }}
+        key: ${{ runner.os }}-puppeteer-${{ hashFiles('apps/extension/package.json') }}
         restore-keys: |
           ${{ runner.os }}-puppeteer-

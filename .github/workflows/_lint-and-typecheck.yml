@@ -28,8 +28,8 @@ jobs:
       # to the nearest stored state.
       - uses: actions/cache@v6
         with:
-          path: packages/extension/tsconfig.tsbuildinfo
-          key: ${{ runner.os }}-tsbuildinfo-${{ hashFiles('bun.lock', 'tsconfig.json', 'packages/extension/tsconfig.json', 'packages/extension/package.json') }}
+          path: apps/extension/tsconfig.tsbuildinfo
+          key: ${{ runner.os }}-tsbuildinfo-${{ hashFiles('bun.lock', 'tsconfig.json', 'apps/extension/tsconfig.json', 'apps/extension/package.json') }}
           restore-keys: |
             ${{ runner.os }}-tsbuildinfo-
 
@@ -54,7 +54,7 @@ jobs:
             grep -RnE 'setForceLocal\b' \
               --include='*.ts' --include='*.vue' \
               --exclude-dir='node_modules' --exclude-dir='dist' \
-              packages/ 2>/dev/null \
+              apps/ packages/ 2>/dev/null \
             | grep -vE '(__tests__|\.test\.ts|\.spec\.ts)' \
             || true
           } )

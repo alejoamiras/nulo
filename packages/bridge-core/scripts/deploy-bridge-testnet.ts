@@ -59,9 +59,9 @@ if (!PRIVATE_KEY && !MNEMONIC) throw new Error("PRIVATE_KEY or MNEMONIC required
 const fromJournalMode = process.argv.includes("--from-journal")
 
 const here = dirname(fileURLToPath(import.meta.url))
-const OUT = join(here, "..", "..", "bridge-evm", "out")
-const AZTEC = join(here, "..", "..", "bridge-aztec")
-const PUBLIC_DIR = join(here, "..", "..", "faucet", "public")
+const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
+const AZTEC = join(here, "..", "..", "..", "contracts", "bridge", "aztec")
+const PUBLIC_DIR = join(here, "..", "..", "..", "apps", "faucet", "public")
 const LIVE_PATH = join(PUBLIC_DIR, "testnet-bridge.json")
 const CANDIDATE_PATH = join(PUBLIC_DIR, "testnet-bridge.candidate.json")
 const JOURNAL_PATH = join(PUBLIC_DIR, "testnet-bridge.journal.jsonl")
@@ -360,7 +360,7 @@ async function main() {
 		if (!witnessType.includes("swapTarget")) {
 			throw new Error(
 				"fuel router is PRE-B2 (witness type string lacks swapTarget) - F-004/F-006 not shipped. Deploy fresh fuel " +
-					"(packages/bridge-evm DeployFuelLive.s.sol, no-reuse) and pass FUEL_ROUTER + FUEL_SWAP.",
+					"(contracts/bridge/evm DeployFuelLive.s.sol, no-reuse) and pass FUEL_ROUTER + FUEL_SWAP.",
 			)
 		}
 	}
@@ -392,7 +392,7 @@ async function main() {
 		},
 	}
 	writeCandidateAtomic(CANDIDATE_PATH, manifest)
-	console.log(`\n✅ candidate written to faucet/public/testnet-bridge.candidate.json in ${mins()}.`)
+	console.log(`\n✅ candidate written to apps/faucet/public/testnet-bridge.candidate.json in ${mins()}.`)
 	console.log("   Promote it to testnet-bridge.json at cutover, AFTER the candidate passes smoke.")
 
 	if (process.env.ETHERSCAN_API_KEY) {

@@ -50,7 +50,7 @@ const fuel = CONFIG.l1.fuel
 if (!fuel) throw new Error("candidate manifest has no l1.fuel")
 
 const here = dirname(fileURLToPath(import.meta.url))
-const OUT = join(here, "..", "..", "bridge-evm", "out")
+const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
 
 const sepolia = defineChain({
 	id: 11155111,

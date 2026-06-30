@@ -15,10 +15,13 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 const ROOT = join(import.meta.dir, "..", "..")
+// apps/ vs packages/ split (FLAT layout): deployable leaves live under apps/, libs under packages/.
+const APPS = new Set(["extension", "faucet", "landing", "playground"])
+const dirOf = (pkg: string): string => (APPS.has(pkg) ? "apps" : "packages")
 
 /** Direct `@nulo/*` workspace deps of a package (runtime + dev — what it's built/tested from). */
 function directDeps(pkg: string): string[] {
-  const p = JSON.parse(readFileSync(join(ROOT, "packages", pkg, "package.json"), "utf8"))
+  const p = JSON.parse(readFileSync(join(ROOT, dirOf(pkg), pkg, "package.json"), "utf8"))
   return Object.keys({ ...p.dependencies, ...p.devDependencies })
     .filter((k) => k.startsWith("@nulo/"))
     .map((k) => k.slice("@nulo/".length))
@@ -55,7 +58,7 @@ function filtersOf(workflow: string): Record<string, string[]> {
 
 /** A gate's pattern set must whole-package the target and src+manifest every transitive dep lib. */
 function assertGraphCovered(patterns: string[], target: string, label: string) {
-  expect(patterns, `${label}: target '${target}' must be whole-package gated`).toContain(`packages/${target}/**`)
+  expect(patterns, `${label}: target '${target}' must be whole-package gated`).toContain(`${dirOf(target)}/${target}/**`)
   for (const dep of transitiveDeps(target)) {
     expect(patterns, `${label}: dep lib '${dep}' src must be gated`).toContain(`packages/${dep}/src/**`)
     expect(patterns, `${label}: dep lib '${dep}' package.json must be gated`).toContain(`packages/${dep}/package.json`)
@@ -85,7 +88,7 @@ describe("CI behavior-gating guard", () => {
 
   test("extension-network covers the extension graph + the playground harness", () => {
     assertGraphCovered(network, "extension", "extension-network")
-    expect(network, "network must gate the playground dApp harness").toContain("packages/playground/**")
+    expect(network, "network must gate the playground dApp harness").toContain("apps/playground/**")
   })
 
   test("needs-extension-build (pr-quick filter union) covers the extension graph", () => {

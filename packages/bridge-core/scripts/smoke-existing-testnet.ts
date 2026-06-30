@@ -41,12 +41,12 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}` | undefined
 if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-core/.env)")
 
 const configArg = process.argv.indexOf("--config")
-if (configArg === -1) throw new Error("pass --config <candidate manifest path> (e.g. faucet/public/testnet-bridge.candidate.json)")
+if (configArg === -1) throw new Error("pass --config <candidate manifest path> (e.g. apps/faucet/public/testnet-bridge.candidate.json)")
 const CONFIG = JSON.parse(readFileSync(process.argv[configArg + 1] as string, "utf8"))
 
 const here = dirname(fileURLToPath(import.meta.url))
-const OUT = join(here, "..", "..", "bridge-evm", "out")
-const AZTEC = join(here, "..", "..", "bridge-aztec")
+const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
+const AZTEC = join(here, "..", "..", "..", "contracts", "bridge", "aztec")
 
 const sepolia = defineChain({
 	id: 11155111,

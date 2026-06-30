@@ -314,7 +314,7 @@ jobs:
         uses: orhun/git-cliff-action@v4
         with:
           config: cliff.toml
-          args: --tag ${{ env.TAG }} --unreleased --strip header --include-path 'packages/extension/**'
+          args: --tag ${{ env.TAG }} --unreleased --strip header --include-path 'apps/extension/**'
         env:
           OUTPUT: /tmp/release-notes.md
 
@@ -511,7 +511,7 @@ jobs:
           name: release-${{ needs.resolve.outputs.version }}
           path: dist/release
       # Requires repo secrets: AMO_JWT_ISSUER, AMO_JWT_SECRET
-      # Requires `gecko.id` in packages/extension/manifest/manifest.firefox.config.ts to be a real ID.
+      # Requires `gecko.id` in apps/extension/manifest/manifest.firefox.config.ts to be a real ID.
       - name: Upload to AMO
         env:
           IS_PRERELEASE: ${{ needs.resolve.outputs.is_prerelease }}
