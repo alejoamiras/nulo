@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harden Quality — Nulo extension chain</title>
+<style>
+  :root{
+    --bg:#fbfbfa; --fg:#1d1d1f; --muted:#666; --hairline:#e4e4e2; --surface:#fff;
+    --code:#f3f3f1; --link:#0366d6;
+    --high:#b32424; --high-bg:#fcecec; --med:#9a6700; --med-bg:#fff6e0; --low:#555; --low-bg:#eee;
+    --green:#1c7c34; --green-bg:#ecf7ee; --amber:#9a6700; --amber-bg:#fff6e0;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#1a1a1b; --fg:#e6e6e6; --muted:#9a9a9a; --hairline:#33333a; --surface:#222226;
+      --code:#2a2a30; --link:#5aa1ff;
+      --high:#ff7b72; --high-bg:#3a1f1f; --med:#e3b341; --med-bg:#352a12; --low:#bbb; --low-bg:#2c2c32;
+      --green:#5ed27a; --green-bg:#16301d; --amber:#e3b341; --amber-bg:#352a12;
+    }
+  }
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:820px;margin:0 auto;padding:2rem 1rem 5rem;color:var(--fg);background:var(--bg);line-height:1.6}
+  h1{font-size:1.7rem;margin:0 0 .3rem}
+  h2{font-size:1.25rem;margin:2.6rem 0 1rem;padding-bottom:.3rem;border-bottom:1px solid var(--hairline)}
+  h3{font-size:1.05rem;margin:1.6rem 0 .5rem}
+  p{margin:.5rem 0}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82em;background:var(--code);padding:.1rem .32rem;border-radius:4px}
+  a{color:var(--link)}
+  .sub{color:var(--muted);font-size:.92rem}
+  .strip{display:flex;flex-wrap:wrap;gap:.5rem;margin:1.2rem 0}
+  .stat{flex:1;min-width:90px;background:var(--surface);border:1px solid var(--hairline);border-radius:8px;padding:.6rem .8rem;text-align:center}
+  .stat .n{font-size:1.5rem;font-weight:700;display:block}
+  .stat .l{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .callout{border-radius:8px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  .callout.green{background:var(--green-bg);border:1px solid var(--green)}
+  .callout.amber{background:var(--amber-bg);border:1px solid var(--amber)}
+  .callout h3{margin:.1rem 0 .5rem}
+  .callout ul{margin:.3rem 0;padding-left:1.2rem}
+  .callout li{margin:.25rem 0}
+  .finding{background:var(--surface);border:1px solid var(--hairline);border-radius:8px;padding:1.1rem 1.2rem;margin:1rem 0}
+  .fh{display:flex;align-items:baseline;flex-wrap:wrap;gap:.5rem;margin-bottom:.2rem}
+  .fid{font-family:ui-monospace,monospace;font-weight:700;font-size:.85rem;color:var(--muted)}
+  .ft{font-weight:600;font-size:1.02rem}
+  .chip{display:inline-block;font-size:.68rem;font-weight:700;padding:.12rem .5rem;border-radius:11px;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap}
+  .c-high{background:var(--high-bg);color:var(--high)} .c-med{background:var(--med-bg);color:var(--med)} .c-low{background:var(--low-bg);color:var(--low)}
+  .meta{font-size:.78rem;color:var(--muted);margin:.35rem 0 .7rem}
+  .meta .chip{font-size:.66rem;margin-right:.25rem}
+  .eli5 p{margin:.4rem 0}
+  details{margin-top:.7rem;border-top:1px dashed var(--hairline);padding-top:.5rem}
+  summary{cursor:pointer;font-size:.85rem;color:var(--link);font-weight:600}
+  details .body{font-size:.86rem;color:var(--fg);margin-top:.5rem}
+  details .body p{margin:.35rem 0}
+  .lens{font-style:italic;color:var(--muted)}
+  footer{margin-top:3rem;padding-top:1.2rem;border-top:1px solid var(--hairline);font-size:.85rem;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<h1>Harden Quality — extension + supporting packages</h1>
+<p class="sub">Nulo Aztec wallet · <code>dev</code> @ <code>ea2d5a4</code> · ultra effort · typing + dedup lens · 2026-06-29<br>
+Scope: <code>extension</code>, <code>wallet-core</code>, <code>wallet-crypto</code>, <code>extension-messaging</code>, <code>aztec-runtime</code>, <code>wallet-bridge</code>, <code>design</code>. Two-model audit (Opus + Codex), 22 findings, independently verified (0 refuted).</p>
+
+<p>This is a <strong>maintainability</strong> audit — nothing here is a bug or a vulnerability. Every finding is about <em>what costs more to change than it should</em>, with a focus on the two things you asked to prioritise: <strong>type safety at boundaries</strong> and <strong>wise deduplication</strong>. "Impact" = how deep the smell sits (architectural &gt; structural &gt; local &gt; cosmetic), weighted by how many files it touches and how often they change.</p>
+
+<div class="strip">
+  <div class="stat"><span class="n">22</span><span class="l">findings</span></div>
+  <div class="stat"><span class="n">6</span><span class="l">architectural</span></div>
+  <div class="stat"><span class="n">13</span><span class="l">structural</span></div>
+  <div class="stat"><span class="n">2</span><span class="l">local</span></div>
+  <div class="stat"><span class="n">1</span><span class="l">cosmetic</span></div>
+</div>
+
+<div class="callout green">
+  <h3>Cheapest high-value fixes — land these first</h3>
+  <p class="sub">All hours-scale, no public-API change. One PR banks real risk reduction.</p>
+  <ul>
+    <li><strong>Q-17</strong> — route <code>profile/service.ts</code>'s 21 lock blocks through the <code>runExclusive</code> it already defines (one missed <code>finally</code> wedges every profile RPC).</li>
+    <li><strong>Q-18</strong> — one aztec-runtime artifact catalog (kills double class-id hashing + cache drift).</li>
+    <li><strong>Q-19</strong> — PXE factory options → discriminated union (no more illegal mode combos).</li>
+    <li><strong>Q-09</strong> — a shared <code>bytesToHex</code>/<code>toBase64</code>/<code>fromBase64</code> (removes scattered byte casts).</li>
+    <li><strong>Q-07 (partial)</strong> — extract the duplicated error-projection helpers.</li>
+    <li><strong>Q-10 (partial)</strong> — type <code>Checkbox</code> + <code>ButtonVariant</code>/<code>ButtonSize</code> ahead of the full token migration.</li>
+    <li><strong>Q-21</strong> / <strong>Q-20</strong> — <code>general.js</code>→<code>.ts</code> + centralize <code>lastError</code>; config via a schema.</li>
+  </ul>
+</div>
+
+<div class="callout amber">
+  <h3>Ship-together pairs</h3>
+  <ul>
+    <li><strong>Q-04 + Q-05</strong> — both replace kind/type <code>switch</code>es with a keyed registry; same pattern, same PR.</li>
+    <li><strong>Q-06 + Q-09</strong> — branded secret-byte types land cleanest on top of the shared encoders.</li>
+    <li><strong>Q-10 + Q-11</strong> — design token-union typing + the shared severity vocabulary.</li>
+  </ul>
+</div>
+
+<h2>Findings</h2>
+
+<!-- Q-01 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-high">Architectural</span><span class="fid">Q-01</span><span class="ft">No uniform decode layer at the storage / RPC / dApp / backup seams</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: high</span><span class="chip c-low">hot · 8 files · 30+ casts</span> · <span class="lens">typing</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> Whenever data crosses a boundary — read from storage, returned from an RPC, sent by a dApp, or imported from a backup — the wallet <em>asserts</em> it is the right type (<code>JSON.parse(...) as T</code>) instead of <em>checking</em> it. The right pattern already exists in one corner (aztec-runtime validates 16 PXE methods with a schema) but isn't used everywhere.</p>
+    <p><strong>What gets harder to change.</strong> A storage migration, an RPC result change, or a backup-format bump can compile perfectly while feeding stale or malformed data into the app as if it were trustworthy. The failure then shows up somewhere far away and confusing, not at the boundary where it entered.</p>
+    <p><strong>The fix.</strong> Give the boundaries a real "codec": storage constructors take a parser/schema, and the RPC/dApp/backup seams decode by method or payload kind. Copy the pattern aztec-runtime already proves — you're not inventing it, just applying it uniformly. Biggest item here; do it one seam at a time.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>wallet-core/storage/entity_storage.ts:49</code>, <code>value-storage.ts:21</code>; <code>extension-messaging/core/decode.ts:15</code>, <code>utils.ts:22,28</code>; <code>aztec-runtime/pxe/client.ts:90-93,144,191-195</code>; <code>extension/composables/useFullBackupImport.ts:165,201-214,…</code>, <code>useDappInteractionPayload.ts:16,86</code> (full list in <code>consolidated.md</code>).</p>
+    <p><strong>Refactoring:</strong> Introduce Codec / Replace Cast With Schema. <strong>Effort:</strong> weeks.</p>
+  </div></details>
+</div>
+
+<!-- Q-02 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-high">Architectural</span><span class="fid">Q-02</span><span class="ft">RPC dispatch is stringly-typed end-to-end</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: high</span><span class="chip c-low">hot · 6 files · 100+ casts</span> · <span class="lens">typing</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> Messages between the dApp, the popup, and the service worker are routed by a plain string method name and an untyped <code>args: unknown[]</code> bag; the receiver then hand-casts <code>args[0] as X</code>. (The low-level <code>MethodsMap</code> generic that looks suspicious is actually fine — the real looseness is downstream at the dispatch + dApp boundary.)</p>
+    <p><strong>What gets harder to change.</strong> Renaming an RPC or reordering its arguments isn't caught by the compiler <em>at the dApp trust boundary</em> — the place you most want it caught. The request builders, the scope/permission checkers, and the enforcement code can quietly drift out of sync.</p>
+    <p><strong>The fix.</strong> Derive a typed <code>RpcRequest</code> discriminated union from the method descriptors, narrow it once at dispatch, then pass typed tuples downstream. Biggest typing item; schedule deliberately.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>wallet-core/base/index.ts:11</code>; <code>extension-messaging/core/base-service.ts:111,125,130</code>; <code>wallet-bridge/dispatcher.ts:275,328,503,…,1078-1162</code>; <code>method-scope-checkers.ts:58-190</code>.</p>
+    <p><strong>Refactoring:</strong> Introduce Parameter Object / method-descriptor-derived union. <strong>Effort:</strong> weeks.</p>
+  </div></details>
+</div>
+
+<!-- Q-03 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-high">Architectural</span><span class="fid">Q-03</span><span class="ft">RPC/PXE method surfaces are hand-restated as passthroughs</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: high</span><span class="chip c-low">hot · 30 files</span> · <span class="lens">dedup</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> 21 service client files each hand-write <code>return this.request("methodName", ...args)</code> for every method, even though the method list is already declared once in the spec. The PXE interface is worse — the same method list is restated in <em>seven</em> places (interface, subset, proxy, client, registry, impl, names).</p>
+    <p><strong>What gets harder to change.</strong> Adding or renaming one method is a multi-file edit held together only by matching string literals — easy to typo, impossible for the compiler to verify. PXE is the most expensive because each method's validation body is hand-written too.</p>
+    <p><strong>The fix.</strong> A typed <code>ServiceClient</code> proxy/factory generates the passthroughs from the spec; one PXE descriptor table generates the interface, proxy forwarding, RPC names, and schemas. <strong>Effort:</strong> days.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> the 21 <code>extension/src/wallet/services/*/client.ts</code>; <code>aztec-runtime/pxe/{spec,ipxe,subset,proxy,client,service}.ts</code>.</p>
+    <p><strong>Refactoring:</strong> Replace Boilerplate With Typed Proxy / Extract Method Table.</p>
+  </div></details>
+</div>
+
+<!-- Q-04 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-high">Architectural</span><span class="fid">Q-04</span><span class="ft">OperationKind policy + Draft/Executable models are split</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: high</span><span class="chip c-low">hot · 9 files</span> · <span class="lens">typing + dedup</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> An "operation" is a proper tagged union, but the dApp materializer turns it back into a loose blob and re-casts it (<code>as unknown as Operation</code>), and there's a parallel <code>DraftOperation</code> type in the popup. Five different places each <code>switch</code> over the same operation-kind strings.</p>
+    <p><strong>What gets harder to change.</strong> Adding a new operation kind means finding and editing all five switches (materialization, authorization, fee-readiness, execution, UI). Miss the authorization one and the new kind silently falls back to "no access".</p>
+    <p><strong>The fix.</strong> One <code>OperationPolicy</code> table keyed by kind, plus a single shared <code>DraftOperation</code> + <code>assertExecutableOperation</code> at the model seam. Pairs with Q-05. <strong>Effort:</strong> days.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>dapp-interaction/materialize.ts:44-147</code>, <code>service.ts:293-294</code>; <code>execution/{service.ts:377-453,operation-planner.ts,contract-resolver.ts}</code>; <code>popup/windows/execute/{types.ts,index.vue,OperationCard.vue}</code>. The <code>as unknown as Operation</code> is verbatim at <code>service.ts:294</code>.</p>
+    <p><strong>Refactoring:</strong> Replace Conditional With Registry.</p>
+  </div></details>
+</div>
+
+<!-- Q-12 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-high">Architectural</span><span class="fid">Q-12</span><span class="ft">Token-function ABI matchers are copy-paste catalogs (~1.3k LOC)</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: high</span><span class="chip c-low">hot · 12 files</span> · <span class="lens">dedup</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> Nine token-function modules (<code>get-name</code>, <code>get-symbol</code>, the balance + transfer variants) are near-identical — <code>get-name.ts</code> and <code>get-symbol.ts</code> are byte-for-byte the same except one word, and the same ABI struct literal is copied verbatim 12 times.</p>
+    <p><strong>What gets harder to change.</strong> An Aztec ABI change or a new token capability means synchronized edits across all nine modules plus the service assembly, specs, and utils — ~1.3k lines that rot independently.</p>
+    <p><strong>The fix.</strong> One <code>TokenFnDescriptor</code> table with shared ABI builders + scoring. The repo already does exactly this next door in <code>fpc/handlers/</code>. <strong>Effort:</strong> days.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>extension/src/wallet/services/token/functions/*.ts</code> (9 modules) + <code>token/{service.ts:322-450,spec.ts,utils.ts}</code>.</p>
+    <p><strong>Refactoring:</strong> Parameterize Method / Extract Descriptor Registry.</p>
+  </div></details>
+</div>
+
+<!-- Q-15 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-high">Architectural</span><span class="fid">Q-15</span><span class="ft">Execution send-paths duplicate slot/journal scaffolding</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: high</span><span class="chip c-low">hot · 5 files</span> · <span class="lens">dedup</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The send pipelines repeat the same acquire-slot → claim-journal → cancellation-check → catch/finally-release → record-transaction sequence, and a 10-argument <code>recordTransaction</code> closure appears byte-identical in two places.</p>
+    <p><strong>What gets harder to change.</strong> This is the concurrency/cancel path you <em>just</em> hardened in the quality arc — the slot/journal/finally ordering is load-bearing. A copy that drifts can leak a mutex slot (wedged lane) or mis-record a transaction.</p>
+    <p><strong>The fix.</strong> A <code>lane.withExecutionSlot(...)</code> template that owns journal/cancel/finally; a shared <code>recordTransaction</code> builder and payload parser. Refactor with extra care to preserve the verbatim ordering invariants. <strong>Effort:</strong> days.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>execution/dapp-send-executor.ts:150-604</code> (closure dup at <code>230-246</code> &amp; <code>386-402</code>); <code>transfer-executor.ts:130-237</code>; <code>operation-planner.ts:166-250</code>.</p>
+    <p><strong>Refactoring:</strong> Form Template Method.</p>
+  </div></details>
+</div>
+
+<!-- Q-05 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-med">Structural</span><span class="fid">Q-05</span><span class="ft">Capability flow erases the union + mirrors enforcement (already drifted)</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: high</span><span class="chip c-low">hot · 4 files</span> · <span class="lens">typing + dedup</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> dApp capabilities are carried as <code>unknown[]</code> and cast back to concrete types; separately, "what does this request cover" logic in the dispatcher hand-mirrors the "is this allowed" checks elsewhere.</p>
+    <p><strong>What gets harder to change.</strong> A new capability field has to be added to delta-detection, coverage, enrichment, <em>and</em> enforcement — and it's already gone wrong: <code>contractClasses</code> is missing from the dispatcher's delta branches (4 of 6 capability types handled).</p>
+    <p><strong>The fix.</strong> Parse once to <code>Capability[]</code>; one table keyed by capability type for parse/covers/delta/merge/enrich/check. Pairs with Q-04. <strong>Effort:</strong> days.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>wallet-bridge/capabilities.ts:16-20</code>; <code>dispatcher.ts:173-236,694-916</code>; <code>method-scope-checkers.ts:42-190</code>. Missing branch confirmed in source by the verifier.</p>
+    <p><strong>Refactoring:</strong> Replace Conditional With Strategy.</p>
+  </div></details>
+</div>
+
+<!-- Q-06 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-med">Structural</span><span class="fid">Q-06</span><span class="ft">Secret bytes + wire encodings are primitive-typed</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: high</span><span class="chip c-low">warm · 8 files</span> · <span class="lens">typing</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> Passhash, salt, master secret, ciphertext, credential-id, PRF output — all carried as bare <code>ArrayBuffer</code>/<code>Uint8Array</code>/<code>string</code>, so they're freely assignable to each other. Worst case: one <code>masterKey: string</code> parameter holds a base64 master key for password restore but a credential-id for passkey restore.</p>
+    <p><strong>What gets harder to change.</strong> A backup/import/profile refactor can swap two encodings or byte-roles and still type-check; the mistake only surfaces at decrypt/restore time. (This is the branded-types ask.)</p>
+    <p><strong>The fix.</strong> Branded types — <code>Passhash</code>, <code>MasterSecretBytes</code>, <code>Salt</code>, <code>Base64Ciphertext</code>, … — and split the restore payload by profile type. Type-only; the KDF test vectors stay green. Pairs with Q-09. <strong>Effort:</strong> days.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>wallet-crypto/{encryption-key,password-secret-box,passkey-credential,zeroize}.ts</code>; <code>extension/.../profile/{spec.ts:22-35,250-262,service.ts,session-manager.ts}</code>. The dual-role <code>masterKey</code> is documented verbatim at <code>spec.ts:250-262</code>.</p>
+    <p><strong>Refactoring:</strong> Replace Primitive With Branded Types.</p>
+  </div></details>
+</div>
+
+<!-- Q-07 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-med">Structural</span><span class="fid">Q-07</span><span class="ft">Error taxonomies + projection are split and stringly-typed (already drifted)</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: high</span><span class="chip c-low">warm · 9 files</span> · <span class="lens">typing + dedup</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> <code>JobError.kind</code> is a bare <code>string</code> whose "known values" live only in a comment — and producers already emit kinds not in that comment. Separately, two functions duplicate hostile-input error-message handling, and <code>makeRemoteError</code> is byte-identical across both messaging clients.</p>
+    <p><strong>What gets harder to change.</strong> It's already broken: token-import error kinds match none of the three hand-maintained UI switches, so they silently render the generic "Error" label. Adding an error category means manual edits across producers, schemas, and UI copy with no exhaustiveness signal.</p>
+    <p><strong>The fix.</strong> An open union <code>KnownJobErrorKind | (string &amp; {})</code>; a code-keyed discriminated <code>WalletErrorPayload</code>; extract the shared error helpers (the extractions alone are hours — a cheap win). <strong>Effort:</strong> days.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>wallet-core/jobs/{types.ts:73-82,error.ts}</code>, <code>utils/errors.ts</code>; <code>extension-messaging/errors.ts:16-20,220-246</code> + both clients; <code>extension/utils/journal-state.ts:105,164-266</code>.</p>
+    <p><strong>Refactoring:</strong> Replace Type Code With Open Union + Extract Function.</p>
+  </div></details>
+</div>
+
+<!-- Q-10 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-med">Structural</span><span class="fid">Q-10</span><span class="ft">Design props bypass token unions; extension wrappers re-copy them</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: high</span><span class="chip c-low">warm · 16 files · 600+ call sites</span> · <span class="lens">typing + dedup</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The design system already generates token unions (<code>ColorToken</code>, <code>FontSize</code>, …), but the older primitives still type their variant/size/color props as bare <code>string</code> (and <code>Checkbox</code> uses the array form, making every prop <code>any</code>). The extension then re-declares those prop contracts in untyped JS wrappers.</p>
+    <p><strong>What gets harder to change.</strong> 542 <code>color=</code> + 59 <code>variant=</code> call sites get zero autocomplete or typo protection, and a typo'd <code>Button</code> variant silently renders an unstyled button. New base props can be silently dropped by the wrappers.</p>
+    <p><strong>The fix.</strong> Migrate the old primitives to typed <code>defineProps&lt;{}&gt;()</code> over the token unions; export the base prop types so wrappers forward them typed. Start with <code>Checkbox</code> + <code>ButtonVariant/Size</code> (hours). Pairs with Q-11. <strong>Effort:</strong> days.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>design/src/core/{Flex,Text,Icon,MaterialIcon}.vue</code> + <code>ui/{Button,Input,Badge,Banner,Checkbox,Toggle,Popover,Tooltip}.vue</code>; <code>extension/src/components/ui/{Button,SubPageHeader}.vue</code>. <code>Button</code> indexes <code>$style[props.variant]</code> unguarded.</p>
+    <p><strong>Refactoring:</strong> Replace Primitive With Token Unions.</p>
+  </div></details>
+</div>
+
+<!-- Q-11 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-med">Structural</span><span class="fid">Q-11</span><span class="ft">Design severity/status color vocabulary is duplicated</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: high</span><span class="chip c-low">warm · 5 files</span> · <span class="lens">dedup</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The same "status color" idea is spelled four different ways across components: <code>info|warning|error|purple</code>, <code>info|done|warning|error</code>, <code>ok|error|info</code>, and raw <code>red|green|orange</code>.</p>
+    <p><strong>What gets harder to change.</strong> Adding or recoloring a semantic state means editing several CSS/JS maps plus translating between the caller vocabularies.</p>
+    <p><strong>The fix.</strong> One <code>SeverityTone</code> + token map in the design contract; renderers keep their own layout but share the names and colors. Pairs with Q-10. <strong>Effort:</strong> days.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>design/src/ui/{Badge,Banner,Toast,ToastManagerBase}.vue</code> + <code>composables/toast.ts</code>.</p>
+    <p><strong>Refactoring:</strong> Extract Shared Severity Map.</p>
+  </div></details>
+</div>
+
+<!-- Q-13 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-med">Structural</span><span class="fid">Q-13</span><span class="ft">Entity restore / id-allocation / ownership guards reimplemented per service</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: high</span><span class="chip c-low">hot · 10 files · 60+ sites</span> · <span class="lens">dedup</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> All seven entity services hand-roll the same scaffolding: a restore loop (<code>try/catch → toRestoreError</code>), id allocation (<code>max(...)+1</code> or random-until-unique), profile-ownership checks (~24×), and delete cascades (6×).</p>
+    <p><strong>What gets harder to change.</strong> Changing the restore error shape, the collision policy, or the profile-scoped delete behavior is a multi-service edit, and the copies already differ in small ways.</p>
+    <p><strong>The fix.</strong> A shared <code>restoreRows&lt;T&gt;()</code>, id-allocator strategies, and a <code>ProfileScopedRepository</code> base — two repository classes already prove the extraction works. <strong>Effort:</strong> days.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>token</code>, <code>token-balance</code>, <code>fpc</code>, <code>network</code>, <code>account</code>, <code>auth-registry</code>, <code>contact</code>, <code>incoming-transfer</code> services + <code>full-backup-helpers.ts</code>.</p>
+    <p><strong>Refactoring:</strong> Form Template Method / Extract Repository.</p>
+  </div></details>
+</div>
+
+<!-- Q-14 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-med">Structural</span><span class="fid">Q-14</span><span class="ft">Popup + dApp approval windows duplicate lifecycle shells</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: high</span><span class="chip c-low">hot · 29 popups + 3 windows</span> · <span class="lens">dedup</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The three dApp approval windows repeat the same client setup + session-wait + auth-redirect + beforeunload-reject + cleanup + error UI; ~26 popup SFCs repeat connect-on-show/disconnect-on-hide + an Enter-key handler + an error-tooltip block.</p>
+    <p><strong>What gets harder to change.</strong> A fix to cancellation semantics, disconnect ordering, or keyboard-submit has to be applied across dozens of SFCs — and they already drift.</p>
+    <p><strong>The fix.</strong> A dApp-window shell composable (session/cancel/beforeunload) + a <code>usePopupEntity</code> + FormPopup-level submit/error handling. <strong>Effort:</strong> days.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>popup/windows/{execute,capabilities,discover}/index.vue</code>; ~26 <code>popup/components/popups/*Popup.vue</code> (full list in <code>consolidated.md</code>).</p>
+    <p><strong>Refactoring:</strong> Extract Template Method / Composable.</p>
+  </div></details>
+</div>
+
+<!-- Q-16 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-med">Structural</span><span class="fid">Q-16</span><span class="ft"><code>AppServices</code> lies about lazily-assigned clients</span></div>
+  <div class="meta"><span class="chip c-low">claude · codex-verified</span><span class="chip c-low">confidence: high</span><span class="chip c-low">warm · 1 type · ~43 reads</span> · <span class="lens">typing</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The <code>AppServices</code> type declares <code>network</code>/<code>transaction</code>/<code>account</code> as always-present clients, but they're initialized as <code>null as unknown as Client</code> and only filled in after unlock. The type lies — and its own JSDoc admits it.</p>
+    <p><strong>What gets harder to change.</strong> New popup code can read one of these clients before unlock with no compile-time warning, so a "this is always there" assumption breaks only at runtime.</p>
+    <p><strong>The fix.</strong> Type the lazy clients <code>Client | undefined</code> (or split eager vs lazy) with asserted accessors at the real unlock chokepoints. Mechanical but touches ~43 read sites. <strong>Effort:</strong> days.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>extension/src/utils/core.ts:44-50,75-77,132-139</code>.</p>
+    <p><strong>Refactoring:</strong> Replace Type Lie With Honest Optionality.</p>
+  </div></details>
+</div>
+
+<!-- Q-17 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-med">Structural</span><span class="fid">Q-17</span><span class="ft"><code>profile/service.ts</code> defines <code>runExclusive</code> but bypasses it 21×</span></div>
+  <div class="meta"><span class="chip c-low">claude · codex-verified</span><span class="chip c-low">confidence: high</span><span class="chip c-low">warm · 21 lock pairs</span> · <span class="lens">dedup</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The profile facade already has a <code>runExclusive(fn)</code> helper that does <code>lock.enter()</code> / <code>try</code> / <code>finally lock.leave()</code> — but 21 other methods paste that same try/finally structure inline instead of using it.</p>
+    <p><strong>What gets harder to change.</strong> Any change to locking behaviour, telemetry, or reentrancy is a 21-site edit, and a single missed <code>finally</code> would wedge every profile RPC behind a never-released lock.</p>
+    <p><strong>The fix.</strong> Route the inline lock sections through <code>runExclusive</code> (keep an outer <code>finally</code> only where zeroization needs it). The cheapest high-value fix in the report. <strong>Effort:</strong> hours.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> helper at <code>profile/service.ts:113-120</code>; 21 inline bypass pairs <code>143/148 … 1057/1106</code>. (Corrected from "22": the 22nd pair is <code>runExclusive</code>'s own body.)</p>
+    <p><strong>Refactoring:</strong> Apply Existing Extract Method.</p>
+  </div></details>
+</div>
+
+<!-- Q-18 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-med">Structural</span><span class="fid">Q-18</span><span class="ft">aztec-runtime double-hashes artifact class-ids across two loaders</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: high</span><span class="chip c-low">cold · 2 files</span> · <span class="lens">dedup</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> Two files independently import the same four contract artifacts and run the same class-id hashing under two separate caches.</p>
+    <p><strong>What gets harder to change.</strong> An artifact-alias or Aztec class-id change can leave the note-schema keys pointing at a different class-id than the known-artifact resolver — a silent desync.</p>
+    <p><strong>The fix.</strong> One catalog loader owns artifact + class-id + optional instance + note-schema metadata. <strong>Effort:</strong> hours.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>aztec-runtime/pxe/known-artifacts.ts:13-21,40-68</code> + <code>note-schemas.ts:3-8,66-83</code>.</p>
+    <p><strong>Refactoring:</strong> Extract Known Artifact Catalog.</p>
+  </div></details>
+</div>
+
+<!-- Q-19 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-med">Structural</span><span class="fid">Q-19</span><span class="ft">PXE factory modes + chain coordinates are primitive/repeated</span></div>
+  <div class="meta"><span class="chip c-low">claude · codex-verified</span><span class="chip c-low">confidence: high</span><span class="chip c-low">cold · 3 files</span> · <span class="lens">typing + dedup</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The PXE factory takes two booleans (<code>required</code>, <code>proverless</code>) that allow illegal combinations, caught only by a runtime throw; and the <code>(profileId, chainId)</code> pair is encoded two different ways in different places.</p>
+    <p><strong>What gets harder to change.</strong> A new PXE mode or a DB-path layout change means hunting optional flags and string literals; profile cleanup can drift from the runtime registry keys.</p>
+    <p><strong>The fix.</strong> A discriminated-union for the factory modes; a <code>ChainCoordinates</code> key codec; drop the unused duplicate <code>NetworkInfo</code> shape. <strong>Effort:</strong> hours.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>aztec-runtime/pxe/{chain-runtime.ts:26-117,service.ts:127-180,artifact-registry.ts:13-17}</code>.</p>
+    <p><strong>Refactoring:</strong> Replace Flags With Discriminated Union + Introduce Key Codec.</p>
+  </div></details>
+</div>
+
+<!-- Q-08 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-med">Structural</span><span class="fid">Q-08</span><span class="ft"><code>nulo-schema-patch.ts</code> triplicated across apps</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: moderate</span><span class="chip c-low">cold · 3 files</span> · <span class="lens">typing + dedup</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The same schema-patch (adding <code>registerToken</code>, <code>isTokenRegistered</code>, <code>grantPublicAuthwit</code> via <code>(WalletSchema as any)</code>) is copied byte-for-byte into the extension, faucet, and playground.</p>
+    <p><strong>What gets harder to change.</strong> A fourth custom RPC, or adapting to an upstream schema change, is a three-copy edit — and only the extension's copy is pinned by a test, so faucet/playground can drift unnoticed.</p>
+    <p><strong>The fix.</strong> Extract one <code>applyNuloSchemaPatch(schema)</code> (or generate the three from one source), preserving the deliberate "don't export wallet-bridge to third-party dApps" constraint. Moderate confidence — the constraint is real; this re-surfaces a documented tradeoff because the duplication is genuine debt. <strong>Effort:</strong> days.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>extension/.../wallet-sdk/nulo-schema-patch.ts:47-118</code>; <code>faucet/src/lib/…</code>; <code>playground/src/lib/…</code> (latter two outside audit scope; bodies <code>diff</code>-confirmed identical).</p>
+  </div></details>
+</div>
+
+<!-- Q-09 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-med">Structural</span><span class="fid">Q-09</span><span class="ft">Hex/Base64 encoders duplicated and divergent</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: high</span><span class="chip c-low">warm · 8 files</span> · <span class="lens">dedup</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The byte-to-hex loop is hand-written in several files, and base64 is split between <code>btoa</code>/<code>atob</code> loops and <code>Buffer.from(...)</code> — two implementations of each operation that can quietly differ.</p>
+    <p><strong>What gets harder to change.</strong> Removing the Buffer polyfill or fixing an encoding edge case means a repo-wide hunt, and the implementations can behave differently on edge inputs.</p>
+    <p><strong>The fix.</strong> One <code>bytesToHex</code> / <code>toBase64</code> / <code>fromBase64</code> in <code>@nulo/wallet-core/utils</code>. A cheap win that also removes several byte casts; pairs with Q-06. <strong>Effort:</strong> hours.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>wallet-crypto/encryption-key.ts:114</code>, <code>wallet-core/utils/random.ts:7-9</code>, <code>bridge-core/{content-hash,recovery-crypto}.ts</code>, <code>extension/utils/full-backup-helpers.ts:19</code>, <code>extension/wallet/utils/passkey-ceremony.ts:17-23</code>. (Verifier: the loop body is triplicated; <code>getRandomHex</code> the function is not.)</p>
+    <p><strong>Refactoring:</strong> Extract Function.</p>
+  </div></details>
+</div>
+
+<!-- Q-20 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-low">Local</span><span class="fid">Q-20</span><span class="ft">Config store uses reflective double-casts instead of a schema</span></div>
+  <div class="meta"><span class="chip c-low">claude</span><span class="chip c-low">confidence: moderate</span><span class="chip c-low">warm · 2 files</span> · <span class="lens">typing</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> Persisted config is loaded as a generic record and validated by comparing <code>typeof</code> against defaults; union-literal settings (theme, default explorer) are only checked as "is a string".</p>
+    <p><strong>What gets harder to change.</strong> A corrupt or migrated value outside the allowed set loads as a valid config prop, so config drift isn't caught at the boundary.</p>
+    <p><strong>The fix.</strong> A zod schema as the single source of <code>Config</code>/<code>ConfigProp</code> + persisted validation — matching the idiom the service graph already uses. <strong>Effort:</strong> hours.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>extension/src/wallet/config/store.ts:14,35,47-52</code>, <code>config.ts</code>.</p>
+    <p><strong>Refactoring:</strong> Replace Reflection With Schema.</p>
+  </div></details>
+</div>
+
+<!-- Q-21 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-low">Local</span><span class="fid">Q-21</span><span class="ft">Host-utility seam has two real drifts (not a broad failure)</span></div>
+  <div class="meta"><span class="chip c-low">both models</span><span class="chip c-low">confidence: moderate</span><span class="chip c-low">warm · 4 files</span> · <span class="lens">typing + dedup</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The audit's own hypothesis that "the Chrome adapter is unsafe" was <em>falsified</em> — its casts are localized, correct compatibility shims. Two narrow real issues remain: <code>chrome.runtime.lastError</code> is re-shimmed outside the port (duplicating the port's own helper), and <code>general.js</code> carries a hand-maintained <code>.d.ts</code> type shadow.</p>
+    <p><strong>What gets harder to change.</strong> Host-API typing changes need edits in two places, and the <code>general.js</code> signatures can drift from <code>general.d.ts</code> with no compiler check.</p>
+    <p><strong>The fix.</strong> Reuse <code>RuntimePort.lastError</code>; migrate <code>general.js</code> → <code>.ts</code> and delete the declaration shadow. <strong>Effort:</strong> hours.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>extension/core/adapters/chrome-browser-api.ts:136-137</code>; <code>wallet-core/ports/runtime-port.ts:52-54</code>; <code>extension/utils/files.ts:71-72</code>; <code>extension/utils/general.{js,d.ts}</code>.</p>
+  </div></details>
+</div>
+
+<!-- Q-22 -->
+<div class="finding">
+  <div class="fh"><span class="chip c-low">Cosmetic</span><span class="fid">Q-22</span><span class="ft">Cross-package documentation drift (versions, architecture, crypto constants)</span></div>
+  <div class="meta"><span class="chip c-low">claude</span><span class="chip c-low">confidence: moderate</span><span class="chip c-low">cold · ~7 docs</span> · <span class="lens">docs</span></div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> Several docs/comments are stale: Aztec is cited as <code>4.2.0</code> while the dependency pins <code>5.0.0-rc.1</code>; the wallet-crypto README says PBKDF2 250k iterations while the source uses <code>600_000</code>; the extension-messaging README omits the <code>core/</code> correlator.</p>
+    <p><strong>What gets harder to change.</strong> Stale architecture maps and a wrong security-relevant KDF cost mislead future maintainers and audit agents — exactly the kind of thing this run had to work around.</p>
+    <p><strong>The fix.</strong> One doc sweep; optionally a doc-lint pin on the PBKDF2 iteration text. (One originally-cited instance — "wallet-core README says <code>types:[]</code>" — was dropped: both verifiers confirmed that text isn't in the README.) <strong>Effort:</strong> hours.</p>
+  </div>
+  <details><summary>Technical trace</summary><div class="body">
+    <p><strong>Instances:</strong> <code>aztec-runtime/README.md:62</code>, <code>pxe/service.ts:362</code>, <code>wallet-bridge/README.md:284</code>, <code>execution/helpers/batched-view-simulation.ts:91,355</code>; <code>wallet-crypto/README.md:17</code> + <code>encryption-key.ts:2</code>; <code>extension-messaging/README.md</code>.</p>
+  </div></details>
+</div>
+
+<h2>Cross-cutting observations</h2>
+
+<h3>The wallet trusts its own wire</h3>
+<p>Q-01, Q-02, Q-06, and Q-07 are one theme at four seams: data crossing a boundary (storage, RPC, dApp, crypto/backup) is <em>cast</em> to a domain type instead of <em>decoded</em> into one. The antidote already exists in the codebase (aztec-runtime's schema rehydration; operation-journal's hand-rolled <code>safeParse</code>) — the work is making it uniform, not inventing it. This is the single highest-leverage architectural investment.</p>
+
+<h3>Describe the surface once</h3>
+<p>Q-02, Q-03, Q-04, Q-05, Q-12, Q-13, and Q-19 are all <em>one list maintained in N places</em> — RPC methods, PXE methods, operation kinds, capability types, token functions, entity CRUD, factory modes. The repo already demonstrates the descriptor/registry pattern (<code>fpc/handlers</code>, the two repository classes, <code>defineRpcMethods</code>); these findings extend it to the surfaces that still hand-restate.</p>
+
+<h3>Drift is not hypothetical here</h3>
+<p>Three findings have <em>already</em> drifted on <code>dev</code>: the missing <code>contractClasses</code> capability branch (Q-05), the <code>JobError.kind</code> values vs their consumers (Q-07), and design wrapper props (Q-10). These are the strongest candidates — the change-amplification cost is being paid right now.</p>
+
+<h3>The typing axis is <code>any</code>-clean but cast-heavy</h3>
+<p>Several packages (wallet-crypto, token/assets, execution) have zero <code>any</code>. The debt is <code>as</code> / <code>as unknown as</code> narrowing at boundaries plus primitive obsession — which a decode layer (Q-01) and branded types (Q-06) remove at the root rather than site-by-site.</p>
+
+<footer>
+  Engineering detail: <a href="report.md">report.md</a> · consolidated findings: <a href="findings/consolidated.md">findings/consolidated.md</a> · verification: <a href="findings/verified.md">findings/verified.md</a> (<a href="findings/verified-claude.md">claude</a>, <a href="findings/verified-codex.md">codex</a>) · raw per-cluster output: <a href="raw/">raw/</a><br>
+  Maintainability audit only — no bugs or vulnerabilities. 2 models (Opus + Codex), 20 raw passes, deduped + independently verified (0 refuted).
+</footer>
+
+</body>
+</html>
