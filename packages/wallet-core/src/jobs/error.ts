@@ -26,7 +26,7 @@
 import { baseErrorJson } from "../utils/error-json"
 import { errorMessageFromUnknown } from "../utils/errors"
 import { NORMALIZED_RAW_MAX_CHARS } from "./types"
-import type { JobError } from "./types"
+import type { JobError, JobErrorKind } from "./types"
 
 const TRUNCATED_SUFFIX = "…[truncated]"
 
@@ -36,7 +36,7 @@ const TRUNCATED_SUFFIX = "…[truncated]"
  * @param raw   the value that was caught (any type)
  * @param kind  category for retry/resume policy (e.g. `"network"`, `"prover"`)
  */
-export function normalizeError(raw: unknown, kind = "unknown"): JobError {
+export function normalizeError(raw: unknown, kind: JobErrorKind = "unknown"): JobError {
 	try {
 		return {
 			kind,
