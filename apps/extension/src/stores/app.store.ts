@@ -7,6 +7,7 @@ import { NodeStatus } from "@/wallet/services/network/client"
 import type { ProfileInfo } from "@/wallet/services/profile/client"
 import type { Tx } from "@/wallet/services/transaction/spec"
 import type { BlockExplorerType } from "@/wallet/constants/explorers"
+import { requireAccount, requireNetwork } from "@/utils/core"
 import { getPrimaryCall } from "@/utils/tx-enrichment"
 
 import { useSyncedRef } from "@/composables/syncedRef.js"
@@ -76,7 +77,7 @@ export const useAppStore = defineStore("app", () => {
 		if (!profile.value || !network.value) return
 		const accIdx = accounts.value.findIndex((a) => acc.address === a.address)
 
-		await managers.account.changeAccountVisibility(profile.value.id, network.value.chainId, acc.address, value)
+		await requireAccount().changeAccountVisibility(profile.value.id, network.value.chainId, acc.address, value)
 		accounts.value[accIdx] = { ...acc, visible: value }
 
 		if (!value) {
@@ -92,7 +93,7 @@ export const useAppStore = defineStore("app", () => {
 		if (!profile.value || !network.value) return
 		const accIdx = accounts.value.findIndex((a) => address === a.address)
 
-		await managers.account.changeAccountName(profile.value.id, network.value.chainId, address, name)
+		await requireAccount().changeAccountName(profile.value.id, network.value.chainId, address, name)
 
 		const updatedAccount = { ...accounts.value[accIdx], name: name }
 		accounts.value[accIdx] = updatedAccount
@@ -109,18 +110,18 @@ export const useAppStore = defineStore("app", () => {
 		if (!network.value) return
 		networkStatus.value = "sync"
 		const oldNetworkId = network.value?.id
-		const status = await managers.network.getNodeStatus(network.value.id)
+		const status = await requireNetwork().getNodeStatus(network.value.id)
 
 		if (oldNetworkId !== network.value?.id) return
 
 		networkStatus.value = NodeStatus[status]
 	}
 	const renameNetwork = async (id: string, name: string) => {
-		await managers.network.renameNetwork(id, name)
-		networks.value = await managers.network.getNetworks()
+		await requireNetwork().renameNetwork(id, name)
+		networks.value = await requireNetwork().getNetworks()
 	}
 	const removeNetwork = async (target: Network) => {
-		await managers.network.deleteNetwork(target.id)
+		await requireNetwork().deleteNetwork(target.id)
 		networks.value = networks.value.filter((n) => n.id !== target.id)
 	}
 
