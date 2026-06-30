@@ -3,7 +3,7 @@
  *
  * Covers the env-gated runtime hard-fail path used by CI's `network-e2e`
  * when `VITE_NULO_ACCELERATOR_REQUIRED=1` is baked into the build. Default
- * mode (no options or `required: false`) must preserve the SDK's silent
+ * mode (no options or `provingMode: "default"`) must preserve the SDK's silent
  * WASM fallback — production end-users without Aztec Accelerator must NOT
  * see any new behavior from this code path.
  *
@@ -102,7 +102,7 @@ describe("ProductionPxeFactory default (production) mode", () => {
 
 	test("succeeds even when accelerator is reported unavailable", async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: false })
-		const factory = new ProductionPxeFactory(fakeNodeFactory, { required: false })
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "default" })
 		await expect(factory.createChainRuntime(fakeNetwork)).resolves.toBeDefined()
 	})
 })
@@ -110,19 +110,19 @@ describe("ProductionPxeFactory default (production) mode", () => {
 describe("ProductionPxeFactory required mode", () => {
 	test("preflight throws when checkAcceleratorStatus reports unavailable", async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: false })
-		const factory = new ProductionPxeFactory(fakeNodeFactory, { required: true })
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
 		await expect(factory.createChainRuntime(fakeNetwork)).rejects.toThrow(/accelerator-required.*unavailable/)
 	})
 
 	test("preflight does NOT throw when available", async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
-		const factory = new ProductionPxeFactory(fakeNodeFactory, { required: true })
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
 		await expect(factory.createChainRuntime(fakeNetwork)).resolves.toBeDefined()
 	})
 
 	test("preflight invokes checkAcceleratorStatus exactly once", async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
-		const factory = new ProductionPxeFactory(fakeNodeFactory, { required: true })
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
 		await factory.createChainRuntime(fakeNetwork)
 		expect(checkAcceleratorStatusMock).toHaveBeenCalledTimes(1)
 	})
@@ -130,14 +130,14 @@ describe("ProductionPxeFactory required mode", () => {
 	test("warns (does NOT throw) when status.needsDownload === true", async () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		checkAcceleratorStatusMock.mockResolvedValue({ available: true, needsDownload: true, sdkAztecVersion: "4.2.0" })
-		const factory = new ProductionPxeFactory(fakeNodeFactory, { required: true })
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
 		await expect(factory.createChainRuntime(fakeNetwork)).resolves.toBeDefined()
 		expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/needsDownload=true/))
 	})
 
 	test('onPhase throws on phase="fallback"', async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
-		const factory = new ProductionPxeFactory(fakeNodeFactory, { required: true })
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
 		await factory.createChainRuntime(fakeNetwork)
 		const onPhase = acceleratorProverInstances[0].onPhase
 		expect(onPhase).toBeDefined()
@@ -146,7 +146,7 @@ describe("ProductionPxeFactory required mode", () => {
 
 	test('onPhase throws on phase="denied"', async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
-		const factory = new ProductionPxeFactory(fakeNodeFactory, { required: true })
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
 		await factory.createChainRuntime(fakeNetwork)
 		const onPhase = acceleratorProverInstances[0].onPhase
 		expect(() => onPhase?.("denied")).toThrow(/SDK emitted phase="denied"/)
@@ -154,7 +154,7 @@ describe("ProductionPxeFactory required mode", () => {
 
 	test("onPhase does NOT throw on benign phases", async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
-		const factory = new ProductionPxeFactory(fakeNodeFactory, { required: true })
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
 		await factory.createChainRuntime(fakeNetwork)
 		const onPhase = acceleratorProverInstances[0].onPhase
 		const benign: AcceleratorPhase[] = ["detect", "serialize", "transmit", "proving", "proved", "receive"]
@@ -166,7 +166,7 @@ describe("ProductionPxeFactory required mode", () => {
 	test('onPhase warns (does NOT throw) on phase="downloading"', async () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
-		const factory = new ProductionPxeFactory(fakeNodeFactory, { required: true })
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
 		await factory.createChainRuntime(fakeNetwork)
 		const onPhase = acceleratorProverInstances[0].onPhase
 		expect(() => onPhase?.("downloading")).not.toThrow()
@@ -176,7 +176,7 @@ describe("ProductionPxeFactory required mode", () => {
 	test("passes host/port through to AcceleratorProver when configured", async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
 		const factory = new ProductionPxeFactory(fakeNodeFactory, {
-			required: true,
+			provingMode: "required",
 			host: "127.0.0.1",
 			port: 59833,
 		})
@@ -190,13 +190,13 @@ describe("ProductionPxeFactory required mode", () => {
 
 describe("ProductionPxeFactory proverless mode (e2e-only)", () => {
 	test("does NOT construct an AcceleratorProver", async () => {
-		const factory = new ProductionPxeFactory(fakeNodeFactory, { proverless: true })
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "proverless" })
 		await factory.createChainRuntime(fakeNetwork)
 		expect(acceleratorProverInstances).toHaveLength(0)
 	})
 
 	test("sets proverEnabled:false and omits proverOrOptions (default fakeProofs prover)", async () => {
-		const factory = new ProductionPxeFactory(fakeNodeFactory, { proverless: true })
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "proverless" })
 		await factory.createChainRuntime(fakeNetwork)
 		const lastCall = createPXEMock.mock.calls.at(-1)!
 		const config = lastCall[1] as { proverEnabled?: boolean }
@@ -208,7 +208,13 @@ describe("ProductionPxeFactory proverless mode (e2e-only)", () => {
 		expect(options.simulator).toBeDefined()
 	})
 
-	test("proverless + required is mutually exclusive (constructor throws)", () => {
-		expect(() => new ProductionPxeFactory(fakeNodeFactory, { proverless: true, required: true })).toThrow(/mutually exclusive/)
+	test("proverless + required is unrepresentable in the options union (compile-time guarantee)", () => {
+		// The `provingMode` discriminated union makes the previously-illegal combo a
+		// TYPE error — stronger than the old runtime throw. The @ts-expect-error IS
+		// the assertion: if the union ever allowed both, this line would compile and
+		// the directive would become an unused-error.
+		// @ts-expect-error - `provingMode: "proverless"` cannot also carry `required`.
+		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "proverless", required: true })
+		expect(factory).toBeDefined()
 	})
 })

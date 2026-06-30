@@ -5,39 +5,36 @@ import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { AcceleratorProver, type AcceleratorPhase } from "@alejoamiras/aztec-accelerator"
 import { AztecNodeFactoryAdapter } from "../adapters/aztec-node-factory-adapter"
 import type { NodeFactory } from "../ports/node-factory-port"
+import { chainDataDir, chainRegistryKey, chainRegistryKeyPrefix } from "./chain-coordinates"
 
-/**
- * Optional accelerator-server policy for `ProductionPxeFactory`.
- *
- * Defaults (all fields omitted): silent-fallback behavior preserved
- * — the wallet constructs `AcceleratorProver` with no callback and no
- * preflight, so if the accelerator isn't reachable the SDK falls back to
- * WASM proving as it does in production today.
- *
- * `required: true` is CI-only. Set from the extension shell when
- * `VITE_NULO_ACCELERATOR_REQUIRED=1` is baked into the build. In this
- * mode `createChainRuntime` performs an eager `checkAcceleratorStatus()`
- * preflight and the prover's `onPhase` callback throws synchronously
- * whenever the SDK is about to fall back ("fallback"/"denied" phases).
- *
- * Fields stay primitive (no `accelerator/config` import here) so that
- * `@nulo/aztec-runtime` remains decoupled from the extension's `@/` alias.
- */
-export interface ProductionPxeFactoryOptions {
-	required?: boolean
+/** Optional accelerator-server endpoint. Orthogonal to the proving mode —
+ *  meaningful only in non-proverless modes; ignored under `proverless`. Stays
+ *  primitive (no `accelerator/config` import) so `@nulo/aztec-runtime` remains
+ *  decoupled from the extension's `@/` alias. */
+export interface AcceleratorEndpoint {
 	host?: string
 	port?: number
-	/**
-	 * E2E-only: build the PXE with `proverEnabled: false` so the BB SNARK is
-	 * never generated (kernel simulation + on-chain submission stay real; the
-	 * default bundle prover's fakeProofs path emits a random chonk proof the
-	 * local network accepts). No `AcceleratorProver` is constructed in this
-	 * mode. Set ONLY from the extension shell behind the double-opt-in
-	 * `VITE_NULO_E2E_PROVERLESS` build flag; mutually exclusive with
-	 * `required`. NEVER reaches a production build.
-	 */
-	proverless?: boolean
 }
+
+/**
+ * PXE factory options as a discriminated union over the proving mode, so the
+ * previously-illegal `required` + `proverless` combination is unrepresentable
+ * (it used to be a runtime throw in the constructor).
+ *
+ * - `default` (or `provingMode` omitted) — production: real BB proving via
+ *   `AcceleratorProver`, silent WASM fallback preserved, no preflight/onPhase.
+ * - `required` — CI-only (`VITE_NULO_ACCELERATOR_REQUIRED=1`): same proving
+ *   plus an eager `checkAcceleratorStatus()` preflight and an `onPhase` guard
+ *   that throws synchronously on a silent fallback ("fallback"/"denied").
+ * - `proverless` — E2E-only (double-opt-in `VITE_NULO_E2E_PROVERLESS`): builds
+ *   the PXE with `proverEnabled: false` (no `AcceleratorProver`; the bundle
+ *   prover's fakeProofs path emits a chonk proof the local network accepts).
+ *   NEVER reaches a production build. `host`/`port` are ignored in this mode.
+ */
+export type ProductionPxeFactoryOptions =
+	| (AcceleratorEndpoint & { provingMode?: "default" })
+	| (AcceleratorEndpoint & { provingMode: "required" })
+	| (AcceleratorEndpoint & { provingMode: "proverless" })
 
 /**
  * Minimal structural shape of the network info required to bootstrap a
@@ -107,20 +104,20 @@ export class ProductionPxeFactory implements PxeFactory {
 
 	public constructor(nodeFactory?: NodeFactory, options?: ProductionPxeFactoryOptions) {
 		this.nodeFactory = nodeFactory ?? new AztecNodeFactoryAdapter()
-		this.required = options?.required ?? false
+		const provingMode = options?.provingMode ?? "default"
+		// `required` + `proverless` is unrepresentable in the union, so the old
+		// runtime mutual-exclusion throw is no longer reachable.
+		this.required = provingMode === "required"
+		this.proverless = provingMode === "proverless"
 		this.host = options?.host
 		this.port = options?.port
-		this.proverless = options?.proverless ?? false
-		if (this.proverless && this.required) {
-			throw new Error("ProductionPxeFactory: `proverless` and `required` are mutually exclusive.")
-		}
 	}
 
 	public async createChainRuntime(network: NetworkInfo): Promise<ChainRuntime> {
 		const node = this.nodeFactory.createNode(network.rpcUrl)
 		const config = {
 			...getPXEConfig(),
-			dataDirectory: `pxe/${network.profileId}/${network.chainId}`,
+			dataDirectory: chainDataDir(network),
 			proverEnabled: !this.proverless,
 		} as PXEConfig
 		// Pass an explicit WASMSimulator into both the prover AND the PXE
@@ -212,7 +209,7 @@ export class ChainRuntimeRegistry {
 	public constructor(private readonly factory: PxeFactory) {}
 
 	private key(profileId: string, chainId: number): string {
-		return `${profileId}:${chainId}`
+		return chainRegistryKey({ profileId, chainId })
 	}
 
 	/** Returns the initialized runtime for `(profileId, chainId)` or
@@ -288,7 +285,7 @@ export class ChainRuntimeRegistry {
 	 * per-profile cascade vs. the global `clear()`.
 	 */
 	public async disposeProfile(profileId: string): Promise<void> {
-		const prefix = `${profileId}:`
+		const prefix = chainRegistryKeyPrefix(profileId)
 		const victims: ChainRuntime[] = []
 		for (const [k, runtime] of this.runtimes) {
 			if (k.startsWith(prefix)) {
