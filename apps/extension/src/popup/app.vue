@@ -7,7 +7,7 @@ import Navigation from "./components/Navigation.vue"
 import { managers, isBackgroundConnected } from "@/utils/core"
 import { isPrefersDarkScheme, persistThemeHint } from "@/utils/general"
 import { getLastActiveProfileId } from "@/utils/lastActiveProfile"
-import { Config } from "@/wallet/config"
+import { defaultConfig } from "@/wallet/config"
 import { AccountServiceClient, AccountType } from "@/wallet/services/account/client"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 
@@ -23,7 +23,7 @@ const { bootstrapActiveProfile } = useProfileBootstrap()
 
 /** Update theme */
 const root = document.querySelector("html")
-const theme = ref(new Config().theme)
+const theme = ref(defaultConfig().theme)
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (_event) => {
 	if (theme.value === "system") root.setAttribute("theme", isPrefersDarkScheme() ? "dark" : "light")
 })
