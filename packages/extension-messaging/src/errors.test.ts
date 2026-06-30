@@ -50,6 +50,14 @@ describe("walletErrorFromPayload", () => {
 		expect(rebuilt.message).toBe(original.message)
 		expect((rebuilt.details as { capabilityType?: string })?.capabilityType).toBe("accounts")
 	})
+
+	test("unknown code → base WalletError, code + message preserved (default arm)", () => {
+		const rebuilt = walletErrorFromPayload({ code: "SOME_FUTURE_CODE", message: "hi", details: { x: 1 } })
+		expect(rebuilt).toBeInstanceOf(WalletError)
+		expect(rebuilt.constructor).toBe(WalletError) // base, not a subclass
+		expect(rebuilt.code).toBe("SOME_FUTURE_CODE")
+		expect(rebuilt.message).toBe("hi")
+	})
 })
 
 describe("remoteErrorFromResponseContent", () => {
