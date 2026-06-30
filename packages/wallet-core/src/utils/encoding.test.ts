@@ -36,9 +36,13 @@ describe("toBase64 / fromBase64", () => {
 		expect(toBase64(big)).toBe(Buffer.from(big).toString("base64"))
 	})
 
-	test(".buffer parity — toBase64(new Uint8Array(x.buffer)) === Buffer.from(x.buffer) (password-secret-box site)", () => {
-		const x = new Uint8Array([9, 8, 7, 6])
-		expect(toBase64(new Uint8Array(x.buffer))).toBe(Buffer.from(x.buffer).toString("base64"))
+	test(".buffer parity uses the WHOLE backing buffer, not the logical view (password-secret-box site)", () => {
+		const backing = new Uint8Array([1, 2, 3, 4, 5, 6])
+		const view = backing.subarray(2, 4) // logical [3,4], but .buffer is the whole [1..6]
+		// The site encodes `new Uint8Array(x.buffer)` → the whole buffer, byte-identical to `Buffer.from(x.buffer)`.
+		expect(toBase64(new Uint8Array(view.buffer))).toBe(Buffer.from(view.buffer).toString("base64"))
+		// And that genuinely differs from encoding the logical view, so this pins the whole-buffer semantics.
+		expect(toBase64(new Uint8Array(view.buffer))).not.toBe(toBase64(view))
 	})
 
 	test("fromBase64 is strict on malformed input (atob semantics)", () => {

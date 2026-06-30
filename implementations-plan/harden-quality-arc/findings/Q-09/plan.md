@@ -25,8 +25,11 @@ New `packages/wallet-core/src/utils/encoding.ts`, exported from `utils/index.ts`
 - Base64 decode: crypto sites only ever decode base64 THEY produced (always valid) → `atob` path === `Buffer` path. The one site that decodes untrusted/malformed input (`full-backup-helpers`) ALREADY uses `atob` → identical edge behavior (Buffer-decode would have been MORE lenient — we deliberately do NOT switch it to Buffer).
 - **PIN to verify in impl:** `password-secret-box` encodes `x.buffer` (whole underlying ArrayBuffer) vs canonical `toBase64(x)` (logical view bytes). Confirm `guard`/`encryptedSecret` from `key.encrypt()` are full-buffer (offset 0, length === buffer.byteLength) so the two agree; add a test. If ever an offset view → BUG-PIN + keep `.buffer` semantics at that one site.
 
-## Scope
-Replace the 6 non-excluded sites. **EXCLUDE** `bridge-core/content-hash.ts` + `recovery-crypto.ts` (feed content-addressed recovery fields; not byte-identical to the others; ~zero maintainability win, real cross-device-recovery risk).
+## Scope (final — post codex review)
+Migrate hex (×2: `random.ts`, `encryption-key.ts`) + base64 ENCODE (×2: `password-secret-box` guard/secret, `passkey-ceremony` encodeBase64) + the 2 SAFE base64 decodes (`full-backup-helpers` — already `atob`, byte-identical incl. malformed; `passkey-credential` — input is self-produced valid base64; `passkey-ceremony` decodeBase64).
+- **DEFER** `password-secret-box`'s 2 DECODE sites (`:169,174`): atob-strict would change the corruption→`null` contract (guard decode sits outside the `try`); needs a security-sensitive restructure, out of scope for a light dedup. Kept on `Buffer.from`.
+- **EXCLUDE** `bridge-core/content-hash.ts` + `recovery-crypto.ts`: content-addressed recovery fields; not byte-identical; real cross-device-recovery risk, ~zero win.
+- **OUT OF SCOPE** (NOT in Q-09's instance list — codex-flagged, left for a follow-up; need their own malformed-input policy): base64 decodes in `profile/service.ts`, `useFullBackupImport.ts`, `session-manager.ts`.
 
 ## Validation gate
 - Unit (new `encoding.test.ts` in wallet-core): per-site byte-identical vectors (hex of a known buffer; `toBase64`/`fromBase64` round-trip; **large-input** encode = no RangeError; `fromBase64` malformed-input parity with `atob`).
