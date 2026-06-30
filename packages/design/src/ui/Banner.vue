@@ -6,11 +6,15 @@ import type { PropType } from "vue"
 import Flex from "../core/Flex.vue"
 import Icon from "../core/Icon.vue"
 import Text from "../core/Text.vue"
+import type { SeverityTone } from "../severity"
 import Spinner from "./Spinner.vue"
+
+/** Banner renders 4 semantic tones via its icon fill (info = neutral). */
+type BannerVariant = Extract<SeverityTone, "info" | "warning" | "error" | "done">
 
 defineProps({
 	variant: {
-		type: String,
+		type: String as PropType<BannerVariant>,
 		default: "info",
 	},
 	direction: {
