@@ -11,7 +11,7 @@
 import { Dropdown } from "@/components/ui/Dropdown"
 
 /** Utils */
-import { Config } from "@/wallet/config"
+import { defaultConfig as makeDefaultConfig } from "@/wallet/config"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { BLOCK_EXPLORERS } from "@/wallet/constants/explorers"
 
@@ -54,7 +54,7 @@ const handleOpenLogs = async () => {
 
 const isLoading = ref(true)
 
-const defaultConfig = new Config()
+const defaultConfig = makeDefaultConfig()
 const isDeveloperModeEnabled = ref(defaultConfig.developerMode)
 const isIndicationFailuresEnabled = ref(defaultConfig.indicateFailures)
 const isDebugModeEnabled = ref(defaultConfig.debugMode)
