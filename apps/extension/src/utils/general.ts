@@ -1,5 +1,5 @@
-export const isPrefersDarkScheme = () => {
-	return window.matchMedia("(prefers-color-scheme: dark)")?.matches
+export const isPrefersDarkScheme = (): boolean => {
+	return window.matchMedia("(prefers-color-scheme: dark)")?.matches ?? false
 }
 
 // Key shared with the pre-paint boot script at public/theme-boot.js. Keep both in sync.
@@ -10,7 +10,7 @@ export const THEME_HINT_KEY = "nulo:theme"
 // chrome.storage stays the source of truth; this is only a synchronous paint cache. Store the RAW
 // choice ("dark"|"light"|"system") so "system" re-resolves to the CURRENT OS preference on next load —
 // storing the resolved value would desync after the OS theme changes while the popup is closed.
-export const persistThemeHint = (value) => {
+export const persistThemeHint = (value: string): void => {
 	try {
 		localStorage.setItem(THEME_HINT_KEY, value)
 	} catch {
@@ -18,10 +18,10 @@ export const persistThemeHint = (value) => {
 	}
 }
 
-export const debounce = (fn, delay) => {
-	let timeout
+export const debounce = <T extends (...args: never[]) => unknown>(fn: T, delay: number): ((...args: Parameters<T>) => void) => {
+	let timeout: ReturnType<typeof setTimeout> | undefined
 
-	return (...args) => {
+	return (...args: Parameters<T>) => {
 		clearTimeout(timeout)
 		timeout = setTimeout(() => {
 			fn(...args)
@@ -29,7 +29,7 @@ export const debounce = (fn, delay) => {
 	}
 }
 
-export async function ensurePermissions(perms) {
+export async function ensurePermissions(perms: chrome.permissions.Permissions): Promise<boolean> {
 	return new Promise((resolve) => {
 		chrome.permissions.contains(perms, (has) => {
 			if (has) return resolve(true)
