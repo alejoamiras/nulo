@@ -88,7 +88,7 @@
  *
  * Every PXE method (`simulateTx`, `executeUtility`, `getSyncedBlockHeader`,
  * `proveTx`, `profileTx`) goes through a single upstream `SerialQueue`
- * (`@aztec/pxe@4.2.0/src/pxe.ts:328-336`). The upstream comment
+ * (`@aztec/pxe@5.0.0-rc.1/src/pxe.ts:328-336`). The upstream comment
  * (`pxe.ts:1058-1060`): *"we disable concurrent executions since those
  * might execute oracles which read and write to the PXE stores (e.g. to
  * the capsules), and we need to prevent concurrent runs from interfering
@@ -352,7 +352,7 @@ export async function batchedViewSimulation(
 	// Unpack fast arm (if any).
 	if (fastResults && leadingFast.length > 0) {
 		// `simulateViaNode` returns one TxSimulationResult per upstream-internal
-		// batch of MAX_ENQUEUED_CALLS_PER_CALL (=32 in @aztec/constants@4.2.0).
+		// batch of MAX_ENQUEUED_CALLS_PER_CALL (=32 in @aztec/constants@5.0.0-rc.1).
 		// With our typical batch sizes (≤12 from balance-projector, 1 from
 		// gas-balance) we get fastResults.length === 1, but flatMap is defensive
 		// against future BATCH_SIZE bumps.
