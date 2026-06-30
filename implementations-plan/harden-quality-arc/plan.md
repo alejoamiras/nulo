@@ -53,7 +53,9 @@ Both audits' #1 finding: the network e2e drives the **cooperative** playground d
 
 > Tiering rationale: `light` = bounded single-area, behavior-preserving, low blast radius. `mid` = contained, may span 2 areas / many call sites. `deep` = cross-cutting OR concurrency-/trust-boundary-critical. `mega-deep` = novel surface (first-of-kind in this repo) + days+ cost.
 
-### P0 — Branch + scaffold (no PR)
+### P0 — Branch + scaffold (no PR) — ✓ DONE (`dev-quality` @ `1537dc7`, signed + GitHub-verified, pushed; `bun run lint` exit 0)
+> Closed-out notes in `lessons/P0.md`: dev advanced `ea2d5a4`→`8e919f6` (#186 apps/+packages/ restructure), findings re-indexed to `apps/` layout, biome 2.5.0 toolchain synced. Driver cron `d54f7670`.
+
 **First `git fetch --prune origin`** — a STALE local `remotes/origin/dev-quality` from batch-2 still exists, but the REMOTE branch is absent (confirm via `git -c credential.helper=… ls-remote --heads …/nulo.git dev-quality` → no output). Do NOT base off the stale ref. Create `dev-quality` **fresh** off `dev` @ `8e919f6`; push it. Scaffold `findings/`; copy the 22 findings into the tracker. **Gate:** remote dev-quality verified-absent then created + pushed; `bun run lint` clean.
 
 ### Cheap wins + prerequisites (light)

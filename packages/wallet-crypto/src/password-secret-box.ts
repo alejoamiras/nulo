@@ -36,7 +36,7 @@
  * distinguish those — they're system-level bugs, not user input.
  */
 
-import { array_equals } from "@nulo/wallet-core/utils"
+import { array_equals, toBase64 } from "@nulo/wallet-core/utils"
 import { EncryptionKey } from "./encryption-key"
 import { zeroize } from "./zeroize"
 
@@ -157,8 +157,8 @@ export class PasswordSecretBox {
 		const guard = await key.encrypt(ENCRYPTION_GUARD as Uint8Array<ArrayBuffer>)
 		const encryptedSecret = await key.encrypt(secret)
 		return {
-			guard: Buffer.from(guard.buffer).toString("base64"),
-			secret: Buffer.from(encryptedSecret.buffer).toString("base64"),
+			guard: toBase64(new Uint8Array(guard.buffer)),
+			secret: toBase64(new Uint8Array(encryptedSecret.buffer)),
 		}
 	}
 

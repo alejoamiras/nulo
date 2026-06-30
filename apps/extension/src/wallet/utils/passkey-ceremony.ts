@@ -12,15 +12,16 @@
 
 import { type PasskeyCredentialData, PASSKEY_PRF_LABEL } from "@nulo/wallet-crypto"
 import { PASSKEY_TIMEOUT, type PasskeyRequest, RP_ID } from "@/wallet/services/passkey/spec"
+import { fromBase64, toBase64 } from "@/wallet/utils"
 import { formatPasskeyUserName } from "./passkey-label"
 
 function encodeBase64(buf: BufferSource): string {
 	const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
-	return Buffer.from(bytes).toString("base64")
+	return toBase64(bytes)
 }
 
 function decodeBase64(b64: string): Uint8Array {
-	return Uint8Array.from(Buffer.from(b64, "base64"))
+	return fromBase64(b64)
 }
 
 async function buildPrfInput(): Promise<ArrayBuffer> {
