@@ -1,4 +1,5 @@
 import { Fr } from "@aztec/foundation/curves/bn254"
+import { fromBase64 } from "@nulo/wallet-core/utils"
 import { zeroize } from "./zeroize"
 
 /** Raw passkey output returned by the WebAuthn PRF extension, as
@@ -34,9 +35,9 @@ export class PasskeyCredential {
 	}
 
 	public static async create(params: PasskeyCredentialData): Promise<PasskeyCredential> {
-		const ikm = Buffer.from(params.prf, "base64")
+		const ikm = fromBase64(params.prf)
 		try {
-			const credential = Buffer.from(params.id, "base64")
+			const credential = fromBase64(params.id)
 			const saltInput = Buffer.concat([PASSKEY_KDF_LABEL, credential])
 			const baseKey = await self.crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"])
 			const salt = await self.crypto.subtle.digest("SHA-256", saltInput)

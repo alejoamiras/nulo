@@ -1,3 +1,5 @@
+import { bytesToHex } from "@nulo/wallet-core/utils"
+
 /** OWASP-recommended minimum for PBKDF2-SHA256 (2023). */
 const PBKDF2_ITERATIONS = 600_000
 
@@ -110,7 +112,6 @@ export class EncryptionKey {
 		const hashBuffer = await self.crypto.subtle.digest("SHA-256", data)
 		const hashArray = new Uint8Array(hashBuffer)
 
-		// Convert bytes to hex
-		return [...hashArray].map((b) => b.toString(16).padStart(2, "0")).join("")
+		return bytesToHex(hashArray)
 	}
 }
