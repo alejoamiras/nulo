@@ -213,34 +213,70 @@ export class ProfileIdConflictError extends WalletError {
 }
 
 /**
+ * Closed, code-keyed view of {@link WalletErrorPayload} for the reconstruction
+ * switch below. The WIRE type stays the permissive `WalletErrorPayload` (so
+ * `toPayload`, `messages.ts`, and the `errorPayload?: unknown` transport boundary
+ * are untouched); this union only types `details` per code so each case reads it
+ * without a per-case cast. The two structured codes carry their detail shape; the
+ * rest keep `details?: unknown`. (A later boundary-decode parser — Q-01 — will
+ * VALIDATE the wire into this shape; today it is one documented cast.)
+ */
+type KnownWalletErrorPayload =
+	| { code: typeof RpcTimeoutError.CODE; message: string; details?: unknown }
+	| { code: typeof RpcDisconnectedError.CODE; message: string; details?: unknown }
+	| { code: typeof UserRejectedError.CODE; message: string; details?: unknown }
+	| { code: typeof JobCancelledError.CODE; message: string; details?: { jobId?: string } }
+	| { code: typeof CapabilityNotGrantedError.CODE; message: string; details?: { capabilityType?: string } }
+	| { code: typeof ValidationError.CODE; message: string; details?: unknown }
+	| { code: typeof InvalidPasswordError.CODE; message: string; details?: unknown }
+	| { code: typeof ProfileIdConflictError.CODE; message: string; details?: unknown }
+
+/**
  * Reconstruct a WalletError (concrete subclass if the code is recognised)
  * from a wire payload. Unknown codes produce a plain `WalletError` with
  * the code preserved so telemetry / log analysis can still group them.
  */
 export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError {
-	switch (payload.code) {
+	// One documented boundary cast (the wire `details` is unvalidated). The closed
+	// union then lets each case read `details` with no per-case cast; an unknown
+	// runtime code falls to the permissive `payload` in `default`.
+	const known = payload as KnownWalletErrorPayload
+	switch (known.code) {
 		case RpcTimeoutError.CODE:
-			return new RpcTimeoutError(payload.message, payload.details)
+			return new RpcTimeoutError(known.message, known.details)
 		case RpcDisconnectedError.CODE:
-			return new RpcDisconnectedError(payload.message, payload.details)
+			return new RpcDisconnectedError(known.message, known.details)
 		case UserRejectedError.CODE:
-			return new UserRejectedError(payload.message, payload.details)
+			return new UserRejectedError(known.message, known.details)
 		case JobCancelledError.CODE:
-			return new JobCancelledError(payload.message, payload.details as { jobId?: string } | undefined)
-		case CapabilityNotGrantedError.CODE: {
+			return new JobCancelledError(known.message, known.details)
+		case CapabilityNotGrantedError.CODE:
 			// Reconstruct preserves both the capabilityType discriminator and the
 			// stable message wording so the popup-side / dApp-side instanceof check
 			// and substring-match contracts both survive the JSON boundary.
-			const ct = (payload.details as { capabilityType?: string } | undefined)?.capabilityType ?? "unknown"
-			return new CapabilityNotGrantedError(ct, payload.message)
-		}
+			return new CapabilityNotGrantedError(known.details?.capabilityType ?? "unknown", known.message)
 		case ValidationError.CODE:
-			return new ValidationError(payload.message, payload.details)
+			return new ValidationError(known.message, known.details)
 		case InvalidPasswordError.CODE:
-			return new InvalidPasswordError(payload.message, payload.details)
+			return new InvalidPasswordError(known.message, known.details)
 		case ProfileIdConflictError.CODE:
-			return new ProfileIdConflictError(payload.message, payload.details)
+			return new ProfileIdConflictError(known.message, known.details)
 		default:
 			return new WalletError(payload.code, payload.message, payload.details)
 	}
+}
+
+/**
+ * Reconstruct the client-side error from a response envelope's content.
+ *
+ * A structured `errorPayload` is rebuilt into its typed `WalletError` subclass
+ * (so `instanceof` survives the JSON boundary); otherwise the flat `error`
+ * string becomes a plain `Error`. Shared verbatim by the background (Port) and
+ * offscreen (sendMessage) transport clients — the structural param keeps this
+ * decoupled from each client's `ResponseContentLike`.
+ */
+export function remoteErrorFromResponseContent(content: { errorPayload?: unknown; error?: string }): Error {
+	return content.errorPayload
+		? walletErrorFromPayload(content.errorPayload as WalletErrorPayload)
+		: new Error(content.error ?? "Unknown error")
 }
