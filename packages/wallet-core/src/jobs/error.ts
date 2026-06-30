@@ -24,6 +24,7 @@
  */
 
 import { baseErrorJson } from "../utils/error-json"
+import { errorMessageFromUnknown } from "../utils/errors"
 import { NORMALIZED_RAW_MAX_CHARS } from "./types"
 import type { JobError } from "./types"
 
@@ -39,7 +40,7 @@ export function normalizeError(raw: unknown, kind = "unknown"): JobError {
 	try {
 		return {
 			kind,
-			message: extractMessage(raw),
+			message: errorMessageFromUnknown(raw),
 			normalizedRaw: trySerialize(raw),
 		}
 	} catch {
@@ -48,14 +49,6 @@ export function normalizeError(raw: unknown, kind = "unknown"): JobError {
 		// fallback rather than re-throwing.
 		return { kind, message: "<unrenderable error>", normalizedRaw: null }
 	}
-}
-
-function extractMessage(raw: unknown): string {
-	if (raw instanceof Error) return raw.message
-	if (typeof raw === "string") return raw
-	if (raw === null) return "null"
-	if (raw === undefined) return "undefined"
-	return String(raw)
 }
 
 function trySerialize(raw: unknown): string | null {
