@@ -1,4 +1,4 @@
-import { textColors } from "./token-contract"
+import type { textColors } from "./token-contract"
 
 /**
  * Utility color NAMES accepted by `color` props (Icon, MaterialIcon, Toggle,
