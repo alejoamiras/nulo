@@ -1,11 +1,4 @@
-import { getContractClassFromArtifact } from "@aztec/stdlib/contract"
-import { loadContractArtifact } from "@aztec/stdlib/abi"
-import { NFTContractArtifact } from "@aztec/noir-contracts.js/NFT"
-import { TokenContractArtifact } from "@aztec/noir-contracts.js/Token"
-// @ts-expect-error — raw JSON import via vite alias
-import WonderlandTokenJson from "@wonderland-token-artifact"
-// @ts-expect-error — raw JSON import via vite alias
-import PrivateFPCJson from "@private-fpc-artifact"
+import { _resetArtifactCatalogForTests, getCatalogEntry } from "./artifact-catalog"
 
 /** Field types we know how to decode from a packed note. */
 export type NoteFieldType = "u128" | "field" | "address"
@@ -52,14 +45,18 @@ const nftNote = (contractName: string): NoteSchema => ({
 })
 
 /**
- * Production schemas for the bundled standards. Class ids are computed
- * lazily on first call (Poseidon hashing the artifact) and the result is
- * cached in a module-level promise — same loader pattern as
- * `loadProductionKnownArtifacts`.
+ * Production schemas for the bundled standards. Class ids come from the shared
+ * {@link artifact-catalog} — the SAME computation `loadProductionKnownArtifacts`
+ * uses — so a note schema can never be keyed off a class id that diverges from
+ * known-artifact resolution. Resolved lazily on first call (the catalog hashes
+ * each artifact once) and the built map is cached in a module-level promise.
  *
- * Slot numbers verified against each artifact's `storageLayout` at the
- * pinned aztec-packages release. Update this file when storage layouts
- * shift in a future bump.
+ * Only the four note-bearing artifacts are requested, so a transient failure
+ * hashing an unrelated protocol artifact can't break note rendering.
+ *
+ * Slot numbers verified against each artifact's `storageLayout` at the pinned
+ * aztec-packages release. Update this file when storage layouts shift in a
+ * future bump.
  */
 let cachedSchemas: Promise<NoteSchemaMap> | null = null
 
@@ -68,19 +65,17 @@ export async function loadProductionNoteSchemas(): Promise<NoteSchemaMap> {
 	cachedSchemas = (async () => {
 		const map: NoteSchemaMap = new Map()
 
-		const tokenClass = await getContractClassFromArtifact(TokenContractArtifact)
-		map.set(tokenClass.id.toString(), new Map([["0x3", uintNote("Aztec Token")]]))
+		const token = await getCatalogEntry("token")
+		map.set(token.classId, new Map([["0x3", uintNote("Aztec Token")]]))
 
-		const nftClass = await getContractClassFromArtifact(NFTContractArtifact)
-		map.set(nftClass.id.toString(), new Map([["0x7", nftNote("Aztec NFT")]]))
+		const nft = await getCatalogEntry("nft")
+		map.set(nft.classId, new Map([["0x7", nftNote("Aztec NFT")]]))
 
-		const wonderlandTokenArtifact = loadContractArtifact(WonderlandTokenJson)
-		const wonderlandTokenClass = await getContractClassFromArtifact(wonderlandTokenArtifact)
-		map.set(wonderlandTokenClass.id.toString(), new Map([["0x7", uintNote("Wonderland Token")]]))
+		const wonderlandToken = await getCatalogEntry("wonderlandToken")
+		map.set(wonderlandToken.classId, new Map([["0x7", uintNote("Wonderland Token")]]))
 
-		const privateFpcArtifact = loadContractArtifact(PrivateFPCJson)
-		const privateFpcClass = await getContractClassFromArtifact(privateFpcArtifact)
-		map.set(privateFpcClass.id.toString(), new Map([["0x1", uintNote("Private FPC")]]))
+		const privateFpc = await getCatalogEntry("privateFpc")
+		map.set(privateFpc.classId, new Map([["0x1", uintNote("Private FPC")]]))
 
 		return map
 	})()
@@ -93,7 +88,10 @@ export async function loadProductionNoteSchemas(): Promise<NoteSchemaMap> {
 	}
 }
 
-/** Reset the module-level cache. Test-only. */
+/** Reset the module-level cache. Test-only. Also resets the shared artifact
+ *  catalog so class ids re-resolve — this stays the single authoritative reset
+ *  note-schema callers/tests already use. */
 export function _resetNoteSchemasForTests(): void {
 	cachedSchemas = null
+	_resetArtifactCatalogForTests()
 }
