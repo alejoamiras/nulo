@@ -29,6 +29,12 @@ export class ConfigStore implements IConfigStore {
 	public async set<TKey extends ConfigKey>(key: TKey, value: Config[TKey]) {
 		// Fail fast on an out-of-domain value BEFORE mutating memory/storage —
 		// the RPC config spec is type-only, so a runtime caller could pass one.
+		// `undefined` is never valid: the per-key schema has a `.default()`, so
+		// `safeParse(undefined)` would SUCCEED with the default rather than fail —
+		// reject it explicitly.
+		if (value === undefined) {
+			throw new Error(`Invalid config value for "${String(key)}": value is required`)
+		}
 		const parsed = ConfigSchema.shape[key].safeParse(value)
 		if (!parsed.success) {
 			throw new Error(`Invalid config value for "${String(key)}": ${parsed.error.message}`)
@@ -61,7 +67,10 @@ export class ConfigStore implements IConfigStore {
 	private async apply(incoming: unknown) {
 		const src = (incoming ?? {}) as Record<string, unknown>
 		for (const key of Object.keys(this.config) as ConfigKey[]) {
-			if (!(key in src)) continue
+			// Skip missing AND explicit-undefined props: the per-key schema has a
+			// `.default()`, so `safeParse(undefined)` would reset to default rather
+			// than keep the current value (the prior typeof check skipped these).
+			if (!(key in src) || src[key] === undefined) continue
 			const parsed = ConfigSchema.shape[key].safeParse(src[key])
 			if (parsed.success && this.config[key] !== parsed.data) {
 				;(this.config as Record<string, unknown>)[key] = parsed.data

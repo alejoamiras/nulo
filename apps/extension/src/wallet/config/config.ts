@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { BLOCK_EXPLORER_IDS } from "@/wallet/constants/explorers"
 
 /**
  * The wallet config schema is the single source of truth for `Config`, its
@@ -24,8 +25,8 @@ export const ConfigSchema = z.object({
 	// regression that requires audit / security sign-off.
 	strictSecurityMode: z.boolean().default(true),
 
-	// Additional — keep the enum in sync with `BlockExplorerType` (constants/explorers).
-	defaultExplorer: z.enum(["aztecscan"]).nullable().default("aztecscan"),
+	// Additional — enum derived from the explorer-ids single source (no drift).
+	defaultExplorer: z.enum(BLOCK_EXPLORER_IDS).nullable().default("aztecscan"),
 
 	// Activity
 	// When OFF, IncomingTransferService records are still persisted but
