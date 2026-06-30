@@ -20,36 +20,33 @@ describe("errorMessageFromUnknown (canonical, = former jobs/error.extractMessage
 	})
 })
 
-describe("getErrorMessage (lenient wire/popup variant) — REGRESSION PINS", () => {
-	// These pins lock the quirks that distinguish getErrorMessage from
-	// errorMessageFromUnknown. Collapsing the two would change the dApp-visible
-	// wire string (core/error-response.ts) and popup error text — do NOT do it.
-	test("nullish → 'Unknown error' (NOT 'null'/'undefined')", () => {
+describe("getErrorMessage (lenient wire/popup variant) — PRESERVED VERBATIM", () => {
+	// getErrorMessage is the dApp-wire / log projection. Its EXACT pre-Q07 output —
+	// including the raw non-string passthrough type-lie — is observable at
+	// NON-coercing sinks (the wire JSON in core/error-response.ts; LoggerStore).
+	// These pins lock that behavior so a future refactor can't silently change
+	// wire/log bytes (routing it through errorMessageFromUnknown WOULD).
+	test("Error / string / nullish (realistic inputs)", () => {
+		expect(getErrorMessage(new Error("e"))).toBe("e")
+		expect(getErrorMessage(new Error(""))).toBe("")
+		expect(getErrorMessage("s")).toBe("s")
 		expect(getErrorMessage(null)).toBe("Unknown error")
 		expect(getErrorMessage(undefined)).toBe("Unknown error")
 	})
 
-	test("duck-types .message off a non-Error object (JSON-RPC / PXE plain throws)", () => {
+	test("duck-types a string .message off a non-Error object (JSON-RPC / PXE throws)", () => {
 		expect(getErrorMessage({ message: "x" })).toBe("x")
 		expect(getErrorMessage({ code: 4001, message: "User rejected" })).toBe("User rejected")
 	})
 
-	test("object without a usable .message → '[object Object]'", () => {
-		expect(getErrorMessage({ nope: 1 })).toBe("[object Object]")
-		expect(getErrorMessage({ message: null })).toBe("[object Object]")
-	})
-
-	test("Error / string pass through like the core", () => {
-		expect(getErrorMessage(new Error("e"))).toBe("e")
-		expect(getErrorMessage("s")).toBe("s")
-		expect(getErrorMessage(42)).toBe("42")
-	})
-
-	test("(BUG-PIN) non-string .message is string-coerced, not leaked", () => {
-		// Pre-Q07 `(error as string)` could return a raw non-string (e.g. the
-		// number 0 onto a string-typed wire field). The wrapper now coerces, so
-		// the value is observably identical at every sink AND genuinely a string.
-		expect(getErrorMessage({ message: 0 })).toBe("0")
-		expectTypeOf(getErrorMessage({ message: 0 })).toEqualTypeOf<string>()
+	test("(BUG-PIN) raw non-string value passes through UN-coerced — the preserved type-lie", () => {
+		// `(error as Error)?.message ?? (error as string) ?? "Unknown error"` returns
+		// the RAW value (number/object), not a string, for these. The wire JSON +
+		// LoggerStore see that raw value; coercing it would change observable bytes.
+		// Tracked for Q-01 (boundary decode); `as unknown` reflects the type-lie.
+		expect(getErrorMessage(42) as unknown).toBe(42)
+		expect(getErrorMessage({ message: 0 }) as unknown).toBe(0)
+		expect(getErrorMessage({ nope: 1 }) as unknown).toEqual({ nope: 1 })
+		expect(getErrorMessage({ message: null }) as unknown).toEqual({ message: null })
 	})
 })

@@ -2,7 +2,8 @@
  * Hostile-input-safe message extractor. ALWAYS returns a real string — for an
  * `Error` its `.message`, for a string itself, the literal `"null"`/`"undefined"`
  * for nullish, else `String(raw)`. Canonical semantics, identical to the former
- * `jobs/error.extractMessage` (whose tests pin `null`→`"null"` etc.).
+ * `jobs/error.extractMessage` (whose tests pin `null`→`"null"` etc.). Used by the
+ * durable-job error envelope (`jobs/error.normalizeError`).
  */
 export function errorMessageFromUnknown(raw: unknown): string {
 	if (raw instanceof Error) return raw.message
@@ -12,22 +13,17 @@ export function errorMessageFromUnknown(raw: unknown): string {
 	return String(raw)
 }
 
-/**
- * Lenient variant used at the RPC wire projection + popup display: nullish maps
- * to `"Unknown error"`, and a non-Error object's own `.message` is duck-typed out
- * (JSON-RPC / PXE plain-object throws like `{ code, message }`). Observably
- * identical to the pre-Q07 impl at every sink — but now genuinely typed `string`
- * (the old `(error as string)` cast could leak a non-string at runtime). The tail
- * delegates to {@link errorMessageFromUnknown}. Distinct from it by design: do NOT
- * collapse the two (see `utils/errors.test.ts` regression pins).
- */
-export const getErrorMessage = (error: unknown): string => {
-	if (error === null || error === undefined) return "Unknown error"
-	if (typeof error === "object" && !(error instanceof Error)) {
-		const m = (error as { message?: unknown }).message
-		if (m !== null && m !== undefined) return typeof m === "string" ? m : String(m)
-	}
-	return errorMessageFromUnknown(error)
-}
-
 export const getErrorData = (error: unknown) => (error as Error)?.stack ?? getErrorMessage(error)
+
+/**
+ * Lenient RPC-wire / popup variant — DELIBERATELY NOT routed through
+ * {@link errorMessageFromUnknown}. Its raw semantics are OBSERVABLE at
+ * non-coercing sinks: the dApp wire JSON (extension-messaging
+ * `core/error-response.ts` `buildErrorResponseContent`) and `LoggerStore`
+ * (`logger/store.ts`). A pathological non-string throw (`42`, `{ message: 0 }`,
+ * `{ nope: 1 }`) must reach those sinks as the SAME raw value it did pre-Q07, so
+ * the pre-existing type-lie (typed `string`, can return a non-string at runtime)
+ * is preserved verbatim and tracked for Q-01 (boundary decode), where the wire
+ * field gets a real parser. Do NOT "fix" it here — that changes wire/log bytes.
+ */
+export const getErrorMessage = (error: unknown) => (error as Error)?.message ?? (error as string) ?? "Unknown error"
