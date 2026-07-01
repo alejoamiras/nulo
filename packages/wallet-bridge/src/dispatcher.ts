@@ -64,7 +64,7 @@ import type {
 	TransactionCapability,
 } from "./capabilities"
 import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
-import { METHOD_TO_KIND, NETWORK_ONLY_KINDS, ACCOUNT_KINDS, METHOD_REGISTRY } from "./method-descriptors"
+import { METHOD_TO_KIND, NETWORK_ONLY_KINDS, ACCOUNT_KINDS, assertKnownMethod } from "./method-descriptors"
 import type {
 	AztecSendTxRequest,
 	CapabilityResult,
@@ -349,9 +349,10 @@ export class WalletSdkDispatcher {
 		// `Object.hasOwn`, not a truthy index, so prototype names (`toString`,
 		// `constructor`, …) are rejected here rather than slipping into capability
 		// handling and failing with a misleading CapabilityNotGrantedError.
-		if (!Object.hasOwn(METHOD_REGISTRY, methodName)) {
-			throw new Error(`Unsupported wallet method: ${methodName}`)
-		}
+		// The guard lives in `assertKnownMethod` (the single typed choke point);
+		// on return `methodName` is narrowed to `MethodName`. Behavior is identical
+		// to the former inline `Object.hasOwn` check (same throw string).
+		assertKnownMethod(methodName)
 
 		// Enforce capability grants (type-level) then scope (per-operation +
 		// per-account allow-list).
