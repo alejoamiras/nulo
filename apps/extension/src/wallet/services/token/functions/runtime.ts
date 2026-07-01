@@ -84,3 +84,13 @@ export function getDefaultTokenFn(descriptor: TokenFnDescriptor, candidates: Fn[
 	const top = candidates.at(0)
 	return top && descriptor.defaultNames.includes(top.name) ? top : undefined
 }
+
+/**
+ * `createTokenFn` narrowed to a `ViewFn` (has `unpackResult`) for the read kinds. Throws if the
+ * descriptor is a `call` kind — a compile-time-unrepresentable-but-runtime-checked invariant, so
+ * view consumers (balance reads, metadata) don't cast at every call site.
+ */
+export function createViewTokenFn(descriptor: TokenFnDescriptor, name: string, impl: number): ViewFn {
+	if (descriptor.fnType !== "view") throw new Error(`${descriptor.kind} is not a view fn`)
+	return createTokenFn(descriptor, name, impl) as ViewFn
+}

@@ -21,17 +21,7 @@ import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { feeJuiceAddress, feeJuiceName, feeJuiceSymbol } from "@/wallet/utils/fee-juice"
 import { simulate } from "@/wallet/utils/fn"
 import { type Token, type TokenInfo, TOKEN_SERVICE_NAME, type TokenInterface, type Methods, type Events } from "./spec"
-import {
-	BalanceOfPrivateFn,
-	BalanceOfPublicFn,
-	GetDecimalsFn,
-	GetNameFn,
-	GetSymbolFn,
-	TransferPrivateFn,
-	TransferPrivateToPublicFn,
-	TransferPublicFn,
-	TransferPublicToPrivateFn,
-} from "./functions"
+import { createViewTokenFn, getDefaultTokenFn, getTokenFnCandidates, TOKEN_FN_DESCRIPTORS } from "./functions"
 import { getTokenInfo, isTokenComplete } from "./utils"
 
 export * from "./functions"
@@ -319,31 +309,35 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 
 		await ensureRegistered(pxe, token.contract, instance, artifact)
 
-		const getNameFnCandidates = GetNameFn.getCandidates(artifact).map((x) => x.getImpl())
+		const getNameFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getName, artifact).map((x) => x.getImpl())
 		const getNameFn = token.getNameFn
 
-		const getSymbolFnCandidates = GetSymbolFn.getCandidates(artifact).map((x) => x.getImpl())
+		const getSymbolFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getSymbol, artifact).map((x) => x.getImpl())
 		const getSymbolFn = token.getSymbolFn
 
-		const getDecimalsFnCandidates = GetDecimalsFn.getCandidates(artifact).map((x) => x.getImpl())
+		const getDecimalsFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getDecimals, artifact).map((x) => x.getImpl())
 		const getDecimalsFn = token.getDecimalsFn
 
-		const balanceOfPrivateFnCandidates = BalanceOfPrivateFn.getCandidates(artifact).map((x) => x.getImpl())
+		const balanceOfPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.balanceOfPrivate, artifact).map((x) => x.getImpl())
 		const balanceOfPrivateFn = token.balanceOfPrivateFn
 
-		const balanceOfPublicFnCandidates = BalanceOfPublicFn.getCandidates(artifact).map((x) => x.getImpl())
+		const balanceOfPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.balanceOfPublic, artifact).map((x) => x.getImpl())
 		const balanceOfPublicFn = token.balanceOfPublicFn
 
-		const transferPublicFnCandidates = TransferPublicFn.getCandidates(artifact).map((x) => x.getImpl())
+		const transferPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPublic, artifact).map((x) => x.getImpl())
 		const transferPublicFn = token.transferPublicFn
 
-		const transferPrivateFnCandidates = TransferPrivateFn.getCandidates(artifact).map((x) => x.getImpl())
+		const transferPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPrivate, artifact).map((x) => x.getImpl())
 		const transferPrivateFn = token.transferPrivateFn
 
-		const transferPrivateToPublicFnCandidates = TransferPrivateToPublicFn.getCandidates(artifact).map((x) => x.getImpl())
+		const transferPrivateToPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPrivateToPublic, artifact).map((x) =>
+			x.getImpl(),
+		)
 		const transferPrivateToPublicFn = token.transferPrivateToPublicFn
 
-		const transferPublicToPrivateFnCandidates = TransferPublicToPrivateFn.getCandidates(artifact).map((x) => x.getImpl())
+		const transferPublicToPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPublicToPrivate, artifact).map((x) =>
+			x.getImpl(),
+		)
 		const transferPublicToPrivateFn = token.transferPublicToPrivateFn
 
 		const ti: TokenInterface = {
@@ -398,32 +392,38 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 
 			await ensureRegistered(pxe, contract, instance, artifact)
 
-			const getNameFnCandidates = GetNameFn.getCandidates(artifact)
-			const getNameFn = GetNameFn.getDefault(getNameFnCandidates)
+			const getNameFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getName, artifact)
+			const getNameFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.getName, getNameFnCandidates)
 
-			const getSymbolFnCandidates = GetSymbolFn.getCandidates(artifact)
-			const getSymbolFn = GetSymbolFn.getDefault(getSymbolFnCandidates)
+			const getSymbolFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getSymbol, artifact)
+			const getSymbolFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.getSymbol, getSymbolFnCandidates)
 
-			const getDecimalsFnCandidates = GetDecimalsFn.getCandidates(artifact)
-			const getDecimalsFn = GetDecimalsFn.getDefault(getDecimalsFnCandidates)
+			const getDecimalsFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getDecimals, artifact)
+			const getDecimalsFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.getDecimals, getDecimalsFnCandidates)
 
-			const balanceOfPrivateFnCandidates = BalanceOfPrivateFn.getCandidates(artifact)
-			const balanceOfPrivateFn = BalanceOfPrivateFn.getDefault(balanceOfPrivateFnCandidates)
+			const balanceOfPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.balanceOfPrivate, artifact)
+			const balanceOfPrivateFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.balanceOfPrivate, balanceOfPrivateFnCandidates)
 
-			const balanceOfPublicFnCandidates = BalanceOfPublicFn.getCandidates(artifact)
-			const balanceOfPublicFn = BalanceOfPublicFn.getDefault(balanceOfPublicFnCandidates)
+			const balanceOfPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.balanceOfPublic, artifact)
+			const balanceOfPublicFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.balanceOfPublic, balanceOfPublicFnCandidates)
 
-			const transferPublicFnCandidates = TransferPublicFn.getCandidates(artifact)
-			const transferPublicFn = TransferPublicFn.getDefault(transferPublicFnCandidates)
+			const transferPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPublic, artifact)
+			const transferPublicFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.transferPublic, transferPublicFnCandidates)
 
-			const transferPrivateFnCandidates = TransferPrivateFn.getCandidates(artifact)
-			const transferPrivateFn = TransferPrivateFn.getDefault(transferPrivateFnCandidates)
+			const transferPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPrivate, artifact)
+			const transferPrivateFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.transferPrivate, transferPrivateFnCandidates)
 
-			const transferPrivateToPublicFnCandidates = TransferPrivateToPublicFn.getCandidates(artifact)
-			const transferPrivateToPublicFn = TransferPrivateToPublicFn.getDefault(transferPrivateToPublicFnCandidates)
+			const transferPrivateToPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPrivateToPublic, artifact)
+			const transferPrivateToPublicFn = getDefaultTokenFn(
+				TOKEN_FN_DESCRIPTORS.transferPrivateToPublic,
+				transferPrivateToPublicFnCandidates,
+			)
 
-			const transferPublicToPrivateFnCandidates = TransferPublicToPrivateFn.getCandidates(artifact)
-			const transferPublicToPrivateFn = TransferPublicToPrivateFn.getDefault(transferPublicToPrivateFnCandidates)
+			const transferPublicToPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPublicToPrivate, artifact)
+			const transferPublicToPrivateFn = getDefaultTokenFn(
+				TOKEN_FN_DESCRIPTORS.transferPublicToPrivate,
+				transferPublicToPrivateFnCandidates,
+			)
 
 			const result: TokenInterface = {
 				chainId: network.chainId,
@@ -494,9 +494,13 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		const node = await this.networks.getNode(network.chainId)
 		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
 
-		const getNameFn = ti.getNameFn ? GetNameFn.new(ti.getNameFn.name, ti.getNameFn.impl) : undefined
-		const getSymbolFn = ti.getSymbolFn ? GetSymbolFn.new(ti.getSymbolFn.name, ti.getSymbolFn.impl) : undefined
-		const getDecimalsFn = ti.getDecimalsFn ? GetDecimalsFn.new(ti.getDecimalsFn.name, ti.getDecimalsFn.impl) : undefined
+		const getNameFn = ti.getNameFn ? createViewTokenFn(TOKEN_FN_DESCRIPTORS.getName, ti.getNameFn.name, ti.getNameFn.impl) : undefined
+		const getSymbolFn = ti.getSymbolFn
+			? createViewTokenFn(TOKEN_FN_DESCRIPTORS.getSymbol, ti.getSymbolFn.name, ti.getSymbolFn.impl)
+			: undefined
+		const getDecimalsFn = ti.getDecimalsFn
+			? createViewTokenFn(TOKEN_FN_DESCRIPTORS.getDecimals, ti.getDecimalsFn.name, ti.getDecimalsFn.impl)
+			: undefined
 
 		return [
 			getNameFn

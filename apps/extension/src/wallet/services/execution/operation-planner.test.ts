@@ -22,31 +22,27 @@ import type { AztecSendTxOperation, Operation, SendTransactionOperation } from "
 // vitest/jsdom. The planner's contract under test is "pick the right fn
 // by TransferType + build the op shape"; the fn internals aren't ours.
 vi.mock("@/wallet/services/token/functions", () => {
-	const makeFakeFn = (_name: string) => ({
-		new: (fnName: string, _impl: unknown) => ({
-			name: fnName,
-			type: "private",
-			isStatic: false,
-			buildArgs: (..._args: unknown[]) => ["arg0", "arg1", "arg2"],
-			getSelector: async () => ({ toString: () => `selector:${fnName}` }),
-			encodeArgs: (_args: unknown[]) => [{ toString: () => "encoded" }],
-		}),
+	// The planner builds args via `createTokenFn(TOKEN_FN_DESCRIPTORS.<kind>, name, impl).buildArgs(...)`.
+	// Fake it — the real factory calls Barretenberg WASM (poseidon2 selectors), unavailable under
+	// vitest/jsdom. The planner's contract under test is "pick the right kind + build the op shape".
+	const fakeFn = (fnName: string) => ({
+		name: fnName,
+		type: "private",
+		isStatic: false,
+		buildArgs: (..._args: unknown[]) => ["arg0", "arg1", "arg2"],
+		getSelector: async () => ({ toString: () => `selector:${fnName}` }),
+		encodeArgs: (_args: unknown[]) => [{ toString: () => "encoded" }],
 	})
 	return {
-		TransferPrivateFn: makeFakeFn("transfer_in_private"),
-		TransferPrivateToPublicFn: makeFakeFn("transfer_private_to_public"),
-		TransferPublicFn: makeFakeFn("transfer_in_public"),
-		TransferPublicToPrivateFn: makeFakeFn("transfer_public_to_private"),
-		TransferPrivateImpl: { Default: 0 },
-		TransferPrivateToPublicImpl: { Default: 0 },
-		TransferPublicImpl: { Default: 0 },
-		TransferPublicToPrivateImpl: { Default: 0 },
+		createTokenFn: (_descriptor: unknown, name: string, _impl: unknown) => fakeFn(name),
+		TOKEN_FN_DESCRIPTORS: {
+			transferPrivate: { kind: "transferPrivate" },
+			transferPrivateToPublic: { kind: "transferPrivateToPublic" },
+			transferPublic: { kind: "transferPublic" },
+			transferPublicToPrivate: { kind: "transferPublicToPrivate" },
+		},
 	}
 })
-
-const { TransferPrivateImpl, TransferPrivateToPublicImpl, TransferPublicImpl, TransferPublicToPrivateImpl } = await import(
-	"@/wallet/services/token/functions"
-)
 
 const { OperationPlanner } = await import("./operation-planner")
 
@@ -70,10 +66,10 @@ function makeToken(overrides: Partial<Token> = {}): Token {
 		name: "Nulo",
 		symbol: "NULO",
 		decimals: 18,
-		transferPublicFn: { name: "transfer_in_public", impl: TransferPublicImpl.Default },
-		transferPrivateFn: { name: "transfer_in_private", impl: TransferPrivateImpl.Default },
-		transferPrivateToPublicFn: { name: "transfer_private_to_public", impl: TransferPrivateToPublicImpl.Default },
-		transferPublicToPrivateFn: { name: "transfer_public_to_private", impl: TransferPublicToPrivateImpl.Default },
+		transferPublicFn: { name: "transfer_in_public", impl: 0 },
+		transferPrivateFn: { name: "transfer_in_private", impl: 0 },
+		transferPrivateToPublicFn: { name: "transfer_private_to_public", impl: 0 },
+		transferPublicToPrivateFn: { name: "transfer_public_to_private", impl: 0 },
 		...overrides,
 	}
 }
