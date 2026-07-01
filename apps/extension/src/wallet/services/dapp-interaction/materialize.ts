@@ -11,14 +11,14 @@
  * "Cannot read properties of undefined (reading 'priorityLevel')" crash.
  *
  * Now: both paths call `materializeRequest(req, deps)` and get the same
- * shape. Each caller layers its own policy on top of the materialized
- * result:
- *   - silent: completeForSilent(materialized) sets the embedded fee for
- *     send-likes (the silent path only sees self-fee'd dApp requests
- *     anyway — `isConfirmationNeeded` gates that), and casts to Operation.
- *   - popup: stores materialized rows as DraftUIOperation; user picks
- *     fee via FeeSettingsCard; approve() runs requiresFeeSelection +
- *     assertExecutableOperation before sending to the SW.
+ * `DraftOperation` shape. Each caller narrows it to the executable `Operation`
+ * with a TS assertion (no `as unknown as Operation` cast):
+ *   - silent: `assertSilentExecutable(materialized)` — the silent path only sees
+ *     self-fee'd dApp requests (`isConfirmationNeeded` gates the rest), so this is
+ *     a drift alarm; it narrows Draft → Operation.
+ *   - popup: stores rows as DraftUIOperation; user picks fee via FeeSettingsCard;
+ *     approve() runs `requiresFeeSelection` + `assertExecutableOperation`
+ *     (both shared from `@nulo/wallet-bridge`) before sending to the SW.
  *
  * The materializer is the ONE place where "what does kind X look like
  * after CAIP resolution + draft feeSettings policy" is defined.
@@ -29,36 +29,13 @@
 
 import type { Account } from "@/wallet/services/account/service"
 import type { Network } from "@/wallet/services/network/service"
+import type { DraftOperation, Operation } from "@nulo/wallet-bridge"
 import type { OperationRequest } from "./spec"
 
 export type MaterializeDeps = {
 	resolveNetwork(chain: string): Promise<Network>
 	resolveNetworkAndAccount(account: string): Promise<[Network, Account]>
 }
-
-/**
- * Send-like draft shape: the wallet-bridge `Operation` requires feeSettings,
- * but the materializer leaves it undefined when the dApp didn't supply its
- * own fee path (popup-path consumer will fill it).
- */
-type MaterializedSendLike = {
-	kind: "aztec_sendTx" | "send_transaction"
-	networkId: string
-	accountAddress: string
-	feeSettings?: { paymentMethod: { kind: "embedded" } }
-	// All other fields preserved from the request; the caller spreads them.
-} & Record<string, unknown>
-
-/** Materialized non-send op: shape depends on the kind, but never carries
- *  `feeSettings`. */
-type MaterializedNonSend = {
-	kind: string
-	networkId: string
-	accountAddress?: string
-} & Record<string, unknown>
-
-/** Union returned by the materializer. The discriminant is `kind`. */
-export type MaterializedOperation = MaterializedSendLike | MaterializedNonSend
 
 /**
  * Run the request→operation switch in one place. Returns the executable
@@ -73,7 +50,7 @@ export type MaterializedOperation = MaterializedSendLike | MaterializedNonSend
  * (silent path: never see these by virtue of `isConfirmationNeeded`;
  * popup path: hold as draft until user picks).
  */
-export async function materializeRequest(request: OperationRequest, deps: MaterializeDeps): Promise<MaterializedOperation> {
+export async function materializeRequest(request: OperationRequest, deps: MaterializeDeps): Promise<DraftOperation> {
 	switch (request.kind) {
 		case "register_contract":
 		case "register_sender":
@@ -85,7 +62,7 @@ export async function materializeRequest(request: OperationRequest, deps: Materi
 		case "aztec_registerContract":
 		case "aztec_getPrivateEvents": {
 			const network = await deps.resolveNetwork(request.chain)
-			return { ...request, networkId: network.id } as MaterializedNonSend
+			return { ...request, networkId: network.id } as DraftOperation
 		}
 		case "register_token":
 		case "simulate_transaction":
@@ -99,7 +76,7 @@ export async function materializeRequest(request: OperationRequest, deps: Materi
 				...request,
 				networkId: network.id,
 				accountAddress: account.address,
-			} as MaterializedNonSend
+			} as DraftOperation
 		}
 		case "aztec_sendTx": {
 			const [network, account] = await deps.resolveNetworkAndAccount(request.account)
@@ -110,7 +87,7 @@ export async function materializeRequest(request: OperationRequest, deps: Materi
 				networkId: network.id,
 				accountAddress: account.address,
 				feeSettings: isNoFrom || hasEmbeddedFeePayer ? { paymentMethod: { kind: "embedded" } } : undefined,
-			} as MaterializedSendLike
+			} as DraftOperation
 		}
 		case "send_transaction": {
 			const [network, account] = await deps.resolveNetworkAndAccount(request.account)
@@ -120,7 +97,7 @@ export async function materializeRequest(request: OperationRequest, deps: Materi
 				networkId: network.id,
 				accountAddress: account.address,
 				feeSettings: hasEmbeddedFee ? { paymentMethod: { kind: "embedded" } } : undefined,
-			} as MaterializedSendLike
+			} as DraftOperation
 		}
 		default: {
 			throw new Error(`materializeRequest: unknown operation kind: ${(request as { kind?: string }).kind}`)
@@ -129,16 +106,14 @@ export async function materializeRequest(request: OperationRequest, deps: Materi
 }
 
 /**
- * Silent-path completion: assert that any send-like that reached us has
- * its feeSettings set (it should — `isConfirmationNeeded` gates non-embedded
- * sends out of silent), and return the executable-shape value. Throws as
- * a drift alarm if the gate is ever bypassed.
+ * Silent-path completion: assert that any send-like that reached us has its
+ * `feeSettings` set — `isConfirmationNeeded` should have gated non-embedded sends
+ * out of the silent path. NARROWS the `DraftOperation` to the executable
+ * `Operation` (so the caller pushes it with no cast), and throws a silent-path-
+ * specific drift alarm if the gate was ever bypassed.
  */
-export function assertSilentExecutable(materialized: MaterializedOperation): void {
-	if (
-		(materialized.kind === "aztec_sendTx" || materialized.kind === "send_transaction") &&
-		(materialized as MaterializedSendLike).feeSettings === undefined
-	) {
+export function assertSilentExecutable(materialized: DraftOperation): asserts materialized is Operation {
+	if ((materialized.kind === "aztec_sendTx" || materialized.kind === "send_transaction") && materialized.feeSettings === undefined) {
 		throw new Error(
 			`silentInteraction: ${materialized.kind} reached the silent path with no feeSettings — ` +
 				"isConfirmationNeeded gate broken or bypassed",
