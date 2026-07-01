@@ -942,7 +942,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 						throw new Error("credentialId mismatch")
 					}
 					recoverySecret = recovery.secret
-					let id = recovery.userHandle
+					// The restored profile id is the (hex) userHandle when the credential
+					// carried one, else a freshly generated id — a plain profile-id string
+					// either way, so widen off the `HexUserHandle` brand here.
+					let id: string | undefined = recovery.userHandle
 
 					// Only the storage tail is locked — the WebAuthn ceremony +
 					// credentialId-bind above run UNLOCKED, and their early throws

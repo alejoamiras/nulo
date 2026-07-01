@@ -1,4 +1,12 @@
-import { asMasterSecretBytes, type MasterSecretBytes } from "./secret-types"
+import {
+	asBase64CredentialId,
+	asHexUserHandle,
+	asMasterSecretBytes,
+	type Base64CredentialId,
+	type Base64SecretPrf,
+	type HexUserHandle,
+	type MasterSecretBytes,
+} from "./secret-types"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { fromBase64 } from "@nulo/wallet-core/utils"
 import { zeroize } from "./zeroize"
@@ -8,11 +16,11 @@ import { zeroize } from "./zeroize"
  *  All three fields are wire-safe strings. */
 export type PasskeyCredentialData = {
 	/** WebAuthn credential id (base64). */
-	id: string
+	id: Base64CredentialId
 	/** PRF eval output (base64). Secret IKM for HKDF. */
-	prf: string
+	prf: Base64SecretPrf
 	/** Optional userHandle tying the credential to a profile (hex). */
-	userHandle?: string
+	userHandle?: HexUserHandle
 }
 
 const te = new TextEncoder()
@@ -23,26 +31,31 @@ const PASSKEY_KDF_LABEL = te.encode("nulo:kdf:v1")
 const PASSKEY_MASTER_LABEL = te.encode("nulo:master:v1")
 
 export class PasskeyCredential {
-	public readonly id: string
-	public readonly userHandle?: string
+	public readonly id: Base64CredentialId
+	public readonly userHandle?: HexUserHandle
 	private baseKey: CryptoKey
 	private salt: ArrayBuffer
 
-	private constructor(id: string, baseKey: CryptoKey, salt: ArrayBuffer, userHandle?: string) {
+	private constructor(id: Base64CredentialId, baseKey: CryptoKey, salt: ArrayBuffer, userHandle?: HexUserHandle) {
 		this.id = id
 		this.userHandle = userHandle
 		this.baseKey = baseKey
 		this.salt = salt
 	}
 
-	public static async create(params: PasskeyCredentialData): Promise<PasskeyCredential> {
+	public static async create(params: { id: string; prf: string; userHandle?: string }): Promise<PasskeyCredential> {
 		const ikm = fromBase64(params.prf)
 		try {
 			const credential = fromBase64(params.id)
 			const saltInput = Buffer.concat([PASSKEY_KDF_LABEL, credential])
 			const baseKey = await self.crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"])
 			const salt = await self.crypto.subtle.digest("SHA-256", saltInput)
-			return new PasskeyCredential(params.id, baseKey, salt, params.userHandle)
+			return new PasskeyCredential(
+				asBase64CredentialId(params.id),
+				baseKey,
+				salt,
+				params.userHandle === undefined ? undefined : asHexUserHandle(params.userHandle),
+			)
 		} finally {
 			// PRF input keying material — engine has it inside `baseKey` after
 			// `importKey`, but the local copy we passed in is no longer needed.

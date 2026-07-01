@@ -9,7 +9,7 @@ import { describe, expect, test, vi } from "vitest"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
-import type { PasskeyCredential } from "@nulo/wallet-crypto"
+import { asBase64CredentialId, asBase64SecretPrf, asHexUserHandle, type PasskeyCredential } from "@nulo/wallet-crypto"
 import type { PasskeyService } from "@/wallet/services/passkey/service"
 import { PasskeyRecoveryCoordinator } from "./passkey-recovery-coordinator"
 import type { Profile } from "./spec"
@@ -143,7 +143,11 @@ describe("PasskeyRecoveryCoordinator", () => {
 			const passkeys = makeFakePasskeyService({ materialize: materialize as never })
 			const coord = newCoordinator(passkeys)
 
-			const data = { id: "cred-from-modal", prf: "prf-bytes-base64", userHandle: "uh-from-modal" }
+			const data = {
+				id: asBase64CredentialId("cred-from-modal"),
+				prf: asBase64SecretPrf("prf-bytes-base64"),
+				userHandle: asHexUserHandle("uh-from-modal"),
+			}
 			const recovery = await coord.recoverFromCredentialData(data)
 
 			expect(materialize).toHaveBeenCalledWith(data)
@@ -162,7 +166,10 @@ describe("PasskeyRecoveryCoordinator", () => {
 			})
 			const coord = newCoordinator(passkeys)
 
-			const recovery = await coord.recoverFromCredentialData({ id: "cred-no-handle", prf: "prf-bytes" })
+			const recovery = await coord.recoverFromCredentialData({
+				id: asBase64CredentialId("cred-no-handle"),
+				prf: asBase64SecretPrf("prf-bytes"),
+			})
 			expect(recovery.userHandle).toBeUndefined()
 		})
 
@@ -174,7 +181,9 @@ describe("PasskeyRecoveryCoordinator", () => {
 			})
 			const coord = newCoordinator(passkeys)
 
-			await expect(coord.recoverFromCredentialData({ id: "x", prf: "bad" })).rejects.toThrow(/invalid PRF/)
+			await expect(coord.recoverFromCredentialData({ id: asBase64CredentialId("x"), prf: asBase64SecretPrf("bad") })).rejects.toThrow(
+				/invalid PRF/,
+			)
 		})
 	})
 
