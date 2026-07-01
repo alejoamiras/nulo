@@ -9,6 +9,8 @@ import { OperationJournalService } from "@/wallet/services/operation-journal/ser
 import type { OperationContext } from "@/wallet/services/operation-journal/spec"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
+import { requireOwnedRow } from "@/wallet/services/require-owned-row"
+import { nextNumericId } from "@/wallet/services/id-allocators"
 import { AccountService } from "@/wallet/services/account/service"
 import { DEFAULT_SHALLOW_PXE_CLIENT_FACTORY, type ShallowPxeClient, type ShallowPxeClientFactory } from "@/wallet/services/pxe/shallow-port"
 import { TaskService, StepContent, type WrappedTask } from "@/wallet/services/task/service"
@@ -105,19 +107,16 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	}
 
 	public async getToken(id: number): Promise<TokenInfo> {
-		const token = await this.tokens.get(`${id}`)
-		if (!token) {
-			throw new Error("unknown token id")
-		}
+		await this.ensureInitialized()
+		const profile = await requireActiveProfile(this.profiles)
+		const token = requireOwnedRow(await this.tokens.get(`${id}`), profile.id, "unknown token id")
 		return getTokenInfo(token)
 	}
 
 	public async getTokenRaw(id: number): Promise<Token> {
-		const token = await this.tokens.get(`${id}`)
-		if (!token) {
-			throw new Error("unknown token id")
-		}
-		return token
+		await this.ensureInitialized()
+		const profile = await requireActiveProfile(this.profiles)
+		return requireOwnedRow(await this.tokens.get(`${id}`), profile.id, "unknown token id")
 	}
 
 	public async addToken(
@@ -269,6 +268,19 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	}
 
 	public async deleteToken(id: number): Promise<TokenInfo> {
+		await this.ensureInitialized()
+		const profile = await requireActiveProfile(this.profiles)
+		requireOwnedRow(await this.tokens.get(`${id}`), profile.id, "unknown token id")
+		return this._deleteTokenById(id)
+	}
+
+	/**
+	 * Delete a token row by id with NO active-profile ownership guard — the
+	 * profile-delete cascade calls this for an explicit, possibly-INACTIVE
+	 * profile's tokens (an active-profile guard here would throw and orphan
+	 * them). The public `deleteToken` RPC does the ownership check first.
+	 */
+	private async _deleteTokenById(id: number): Promise<TokenInfo> {
 		try {
 			await this.lock.enter()
 			const token = await this.tokens.get(`${id}`)
@@ -285,10 +297,8 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 
 	public async getTokenInterface(networkId: string, tokenId: number): Promise<TokenInterface> {
 		await this.ensureInitialized()
-		const token = await this.tokens.get(`${tokenId}`)
-		if (!token) {
-			throw new Error("unknown token id")
-		}
+		const profile = await requireActiveProfile(this.profiles)
+		const token = requireOwnedRow(await this.tokens.get(`${tokenId}`), profile.id, "unknown token id")
 
 		const network = await this.networks.getNetwork(networkId)
 		if (!network) {
@@ -526,7 +536,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		this.logDebug(`Profile ${profile.id} deleted, remove related tokens`)
 		for (const token of (await this.tokens.getValues()).filter((x) => x.profileId === profile.id)) {
 			this.logDebug(`Remove token ${token.id}`)
-			await this.deleteToken(token.id)
+			await this._deleteTokenById(token.id)
 		}
 	}
 
