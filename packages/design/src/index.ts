@@ -56,3 +56,6 @@ export type { SeverityTone } from "./severity"
 
 /** Utility color names (keys of textColors) for `color` props */
 export type { TextColorName } from "./color-names"
+
+/** Layout prop unions (Flex/Text align, justify, wrap, direction, gap) */
+export type { FlexAlign, FlexDirection, FlexGap, FlexJustify, FlexWrap, TextAlign } from "./layout-names"

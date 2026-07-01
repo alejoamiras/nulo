@@ -293,8 +293,8 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 				     straight from the on-chain contract and are
 				     attacker-controllable. Name is hidden when it duplicates
 				     the symbol (e.g. test USDC where both equal "USDC"). -->
-				<Flex :class="$style.prop" align="baseline">
-					<Flex align="baseline" gap="6">
+				<Flex :class="$style.prop">
+					<Flex gap="6">
 						<Text size="14" weight="600" color="primary" data-testid="register-token-symbol">
 							{{ safe(tokenMetadata.symbol, 32) }}
 						</Text>
