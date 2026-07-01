@@ -1,78 +1,39 @@
-import type { ServiceSpec } from "@/wallet/base"
-import { ServiceClient } from "@nulo/extension-messaging/background"
+import type { MethodsSpec, ServiceSpec } from "@/wallet/base"
+import { ServiceClient, definePassthroughs } from "@nulo/extension-messaging/background"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
-import type { TransferType, LocalTxOrigin } from "@/wallet/services/transaction/service"
-import {
-	EXECUTION_SERVICE_NAME,
-	type FeeSettings,
-	type GasBalances,
-	type TransferFeeEstimate,
-	type Operation,
-	type OperationResult,
-	type Methods,
-} from "./spec"
+import { EXECUTION_SERVICE_NAME, type Methods } from "./spec"
 
 export * from "./spec"
 
+/** Every client method is a pure request-passthrough — installed on the
+ *  prototype by `definePassthroughs`. The list is the only per-method content;
+ *  the two drift guards below keep it locked to the `Methods` surface. */
+const EXECUTION_METHODS = [
+	"executeTransfer",
+	"executeOperations",
+	"getGasBalances",
+	"estimateTransferFee",
+	"estimateOperationFee",
+	"cancelJob",
+] as const satisfies readonly (keyof Methods)[]
+// Completeness: if any `Methods` key is missing from the list above, the
+// declaration-merged type would advertise a method the runtime never installs.
+// This makes the union of missing keys the required type of `true` → type error.
+type _ExecutionMethodsExhaustive =
+	Exclude<keyof Methods, (typeof EXECUTION_METHODS)[number]> extends never
+		? true
+		: Exclude<keyof Methods, (typeof EXECUTION_METHODS)[number]>
+const _executionMethodsExhaustive: _ExecutionMethodsExhaustive = true
+void _executionMethodsExhaustive
+
+// Declaration-merge the passthrough signatures onto the class type. Bodies are
+// installed at runtime by `definePassthroughs`; this is what satisfies
+// `implements ServiceSpec` and gives consumers full inference.
+export interface ExecutionServiceClient extends MethodsSpec<Methods> {}
+// biome-ignore lint/suspicious/noUnsafeDeclarationMerging: the merged interface's methods ARE installed — at runtime by definePassthroughs below — and the exhaustiveness guard above proves the name list covers every Methods key, so no advertised method is missing.
 export class ExecutionServiceClient extends ServiceClient<Methods> implements ServiceSpec<Methods> {
 	public constructor(name?: string) {
 		super(EXECUTION_SERVICE_NAME, new LoggerServiceClient(), name)
 	}
-
-	public executeTransfer(
-		networkId: string,
-		accountAddress: string,
-		tokenId: number,
-		transferType: TransferType,
-		recipientAddress: string,
-		amount: bigint,
-		feeSettings: FeeSettings,
-		precomputedEstimateId?: string,
-	): Promise<string> {
-		return this.request(
-			"executeTransfer",
-			networkId,
-			accountAddress,
-			tokenId,
-			transferType,
-			recipientAddress,
-			amount,
-			feeSettings,
-			precomputedEstimateId,
-		)
-	}
-
-	public executeOperations(operations: Operation[], origin: LocalTxOrigin): Promise<OperationResult[]> {
-		return this.request("executeOperations", operations, origin)
-	}
-
-	public getGasBalances(networkId: string, accountAddress: string, forceRefresh?: boolean): Promise<GasBalances> {
-		return this.request("getGasBalances", networkId, accountAddress, forceRefresh)
-	}
-
-	public estimateTransferFee(
-		networkId: string,
-		accountAddress: string,
-		tokenId: number,
-		transferType: TransferType,
-		recipientAddress: string,
-		amount: bigint,
-		feeSettings: FeeSettings,
-	): Promise<TransferFeeEstimate> {
-		return this.request("estimateTransferFee", networkId, accountAddress, tokenId, transferType, recipientAddress, amount, feeSettings)
-	}
-
-	public estimateOperationFee(operation: Operation, feeSettings: FeeSettings): Promise<TransferFeeEstimate> {
-		return this.request("estimateOperationFee", operation, feeSettings)
-	}
-
-	/**
-	 * Cancel an in-flight job by its operation-journal id. Lossy-cancel
-	 * semantics — see {@link Methods.cancelJob}.
-	 *
-	 * Idempotent: no-op for unknown ids or already-terminated jobs.
-	 */
-	public cancelJob(jobId: string): Promise<void> {
-		return this.request("cancelJob", jobId)
-	}
 }
+definePassthroughs<Methods>(ExecutionServiceClient.prototype, EXECUTION_METHODS)
