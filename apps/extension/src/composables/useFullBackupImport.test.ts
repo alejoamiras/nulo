@@ -61,37 +61,59 @@ let configClient = passthroughClient()
 // Vitest 4 requires `function` expressions (not arrow functions) for mocks
 // instantiated with `new`. Arrow factories error: "() => ... is not a constructor".
 vi.mock("@/wallet/services/profile/client", () => ({
-	ProfileServiceClient: vi.fn(() => profileClient),
+	ProfileServiceClient: vi.fn(function () {
+		return profileClient
+	}),
 }))
 vi.mock("@/wallet/services/network/client", () => ({
-	NetworkServiceClient: vi.fn(() => networkClient),
+	NetworkServiceClient: vi.fn(function () {
+		return networkClient
+	}),
 }))
 vi.mock("@/wallet/services/account/client", () => ({
-	AccountServiceClient: vi.fn(() => accountClient),
+	AccountServiceClient: vi.fn(function () {
+		return accountClient
+	}),
 }))
 vi.mock("@/wallet/services/token/client", () => ({
-	TokenServiceClient: vi.fn(() => tokenClient),
+	TokenServiceClient: vi.fn(function () {
+		return tokenClient
+	}),
 }))
 vi.mock("@/wallet/services/transaction/client", () => ({
-	TransactionServiceClient: vi.fn(() => transactionClient),
+	TransactionServiceClient: vi.fn(function () {
+		return transactionClient
+	}),
 }))
 vi.mock("@/wallet/services/token-balance/client", () => ({
-	TokenBalanceServiceClient: vi.fn(() => tokenBalanceClient),
+	TokenBalanceServiceClient: vi.fn(function () {
+		return tokenBalanceClient
+	}),
 }))
 vi.mock("@/wallet/services/account-state/client", () => ({
-	AccountStateServiceClient: vi.fn(() => accountStateClient),
+	AccountStateServiceClient: vi.fn(function () {
+		return accountStateClient
+	}),
 }))
 vi.mock("@/wallet/services/auth-registry/client", () => ({
-	AuthRegistryServiceClient: vi.fn(() => authRegistryClient),
+	AuthRegistryServiceClient: vi.fn(function () {
+		return authRegistryClient
+	}),
 }))
 vi.mock("@/wallet/services/fpc/client", () => ({
-	FpcServiceClient: vi.fn(() => fpcClient),
+	FpcServiceClient: vi.fn(function () {
+		return fpcClient
+	}),
 }))
 vi.mock("@/wallet/services/contact/client", () => ({
-	ContactServiceClient: vi.fn(() => contactClient),
+	ContactServiceClient: vi.fn(function () {
+		return contactClient
+	}),
 }))
 vi.mock("@/wallet/services/config/client", () => ({
-	ConfigServiceClient: vi.fn(() => configClient),
+	ConfigServiceClient: vi.fn(function () {
+		return configClient
+	}),
 }))
 
 // Service-name modules pull in side-effecting validators when imported
