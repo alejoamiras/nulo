@@ -4,21 +4,25 @@ import { restoreRows } from "./restore-rows"
 type Row = { id: number; name: string }
 
 describe("restoreRows", () => {
-	test("returns each successfully-written row as-is (no restoreError)", async () => {
-		const written: Row[] = []
+	test("returns the row writeOne PERSISTED (not the input) on success", async () => {
 		const rows: Row[] = [
 			{ id: 1, name: "a" },
 			{ id: 2, name: "b" },
 		]
-		const out = await restoreRows(rows, async (r) => {
-			written.push(r)
-		})
-		expect(written).toEqual(rows)
+		const out = await restoreRows(rows, async (r) => r)
 		expect(out).toEqual(rows)
 		expect(out.every((r) => r.restoreError === undefined)).toBe(true)
 	})
 
-	test("a throwing writeOne records the error MESSAGE string on that row and CONTINUES", async () => {
+	test("reflects an id reassignment writeOne made (the reason it returns TOut, not void)", async () => {
+		// Every restore that reallocates an id (collision avoidance / numeric cursor)
+		// must return the WRITTEN id, not the input's. writeOne returns the persisted row.
+		const out = await restoreRows([{ id: 1, name: "x" }], async (r) => ({ ...r, id: 99 }))
+		expect(out[0].id).toBe(99)
+		expect(out[0].restoreError).toBeUndefined()
+	})
+
+	test("a throwing writeOne records the error MESSAGE string on the INPUT row and CONTINUES", async () => {
 		const rows: Row[] = [
 			{ id: 1, name: "ok" },
 			{ id: 2, name: "boom" },
@@ -26,11 +30,11 @@ describe("restoreRows", () => {
 		]
 		const out = await restoreRows(rows, async (r) => {
 			if (r.name === "boom") throw new Error("disk full")
+			return r
 		})
 		expect(out).toHaveLength(3)
 		expect(out[0].restoreError).toBeUndefined()
-		expect(out[1].restoreError).toBe("disk full")
-		expect(typeof out[1].restoreError).toBe("string")
+		expect(out[1]).toEqual({ id: 2, name: "boom", restoreError: "disk full" }) // input row + error string
 		expect(out[2].restoreError).toBeUndefined() // loop did NOT abort on the failure
 	})
 
@@ -43,21 +47,13 @@ describe("restoreRows", () => {
 
 	test("preserves order", async () => {
 		const rows = [1, 2, 3, 4].map((id) => ({ id, name: `n${id}` }))
-		const out = await restoreRows(rows, async () => {})
+		const out = await restoreRows(rows, async (r) => r)
 		expect(out.map((r) => r.id)).toEqual([1, 2, 3, 4])
 	})
 
 	test("empty input → empty output, writeOne never called", async () => {
-		const writeOne = vi.fn()
+		const writeOne = vi.fn(async (r: Row) => r)
 		expect(await restoreRows([], writeOne)).toEqual([])
 		expect(writeOne).not.toHaveBeenCalled()
-	})
-
-	test("reflects an in-place id reassignment made by writeOne (success path returns the row)", async () => {
-		const row = { id: 1, name: "x" }
-		const out = await restoreRows([row], async (r) => {
-			r.id = 99 // writeOne owns id allocation (e.g. collision avoidance)
-		})
-		expect(out[0].id).toBe(99)
 	})
 })
