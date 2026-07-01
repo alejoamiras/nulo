@@ -152,14 +152,13 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 			expect(list.map((t) => t.id)).toEqual([1])
 		})
 
-		test.fails("(GAP #2 — fixed R1.4) getToken(foreignId) must REJECT a p2 token while p1 active", async () => {
-			// Currently getToken(id) does a bare storage lookup with NO ownership
-			// check, so it RETURNS p2's token. This `test.fails` passes today
-			// (documenting the leak) and FLIPS to `test` when R1.4 adds the guard.
+		test("(GAP #2 — CLOSED R1.4) getToken(foreignId) REJECTS a p2 token while p1 active", async () => {
+			// R1.4 added requireActiveProfile + requireOwnedRow to the by-id getters,
+			// so a foreign token id now throws instead of leaking p2's token.
 			await expect(tokens.getToken(2)).rejects.toThrow()
 		})
 
-		test.fails("(GAP #2 — fixed R1.4) getTokenRaw(foreignId) must REJECT a p2 token while p1 active", async () => {
+		test("(GAP #2 — CLOSED R1.4) getTokenRaw(foreignId) REJECTS a p2 token while p1 active", async () => {
 			await expect(tokens.getTokenRaw(2)).rejects.toThrow()
 		})
 
