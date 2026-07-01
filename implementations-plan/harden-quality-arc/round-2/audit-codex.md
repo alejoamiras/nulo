@@ -1,35 +1,21 @@
-# Round-2 audit — codex (xhigh, read-only)
+# Round-2 codex audits
 
-Session `019f1e7a`. Verdict: **SHIP-WITH-FIXES**. Full response below, then reconciliation.
+## R6 (Q-02 arg guards) — pre-merge, SAFE TO LAND (`019f1f8f`)
+codex xhigh reviewed the extraction before #244 merged: "SAFE TO LAND, zero behavior-changing findings" — independently verified listener-identity pairing, thunk TDZ-safety, reactivity shape, every must-stay divergence. Recorded in `plan.md` R3b/R6 rows.
 
----
+## R7 confidence pass (`019f1fe5`) — BLOCK → (under reachability facts) SHIP-WITH-NOTES
 
-## codex response
+**Initial verdict: BLOCK**, two HIGH findings:
+1. Token/account arg-scoped + by-id RPCs trust caller-supplied `profileId` (`token/service.ts:94,214`; `account/service.ts:66,152`) — "a client that knows p2's id can read/mutate p2 rows"; the isolation test asserts `getTokens(p1.id)` not `getTokens(p2.id)` while p1 active.
+2. dApp-session by-id RPCs (`dapp-session/service.ts:71,157,249,289`) load/update/delete by `sessionId` without an active-profile check.
 
-**SHIP-WITH-FIXES**
+**Main-agent verification (why this is NOT a round-2 merge blocker):**
+- `updateToken`, `getDappSession(id)`, `updateDappSession`, `deleteDappSession`, account mutations are **NOT in `METHOD_REGISTRY`** → not dApp-dispatchable (`assertKnownMethod` throws). Grep = 0.
+- The sole dApp→token path `isTokenRegistered` passes **`ctx.profileId`** (server-derived), not a dApp value (`dispatcher.ts:408`).
+- dApp session resolution is by `(origin, chainId)` (`dispatcher.ts:340`); the one by-id read (`:950`) re-reads its own resolved session.
+- The authoritative `../findings/Q-13/plan.md` (lines 14, 49, 52) ALREADY assessed this exact surface: "defense-in-depth, NOT dApp-reachable (confirmed), extension-Port-RPC reachable, **explicit accepted non-fix, owner decides**." The loop's owner-authorized change list scoped Q-13 to the **no-profileId by-id READ getters + revokeAuthwits + backup leak** — NOT the arg-scoped mutations or dapp-session. Closing those is a fail-open→closed change off the authorized list = a HARD LIMIT (halt+surface), not an autonomous fix.
+- **Round 2 did not touch these methods** (`getTokens(profileId)`/`updateToken`/account-mutations/dapp-session are byte-identical to `dev`); R1 only ADDED guards to the by-id READ getters + split deleteToken + fixed the backup export leak + revokeAuthwits.
 
-1. **BLOCKER: token guard can break legitimate profile deletion.** `token/service.ts:525` calls `deleteToken(token.id)` while deleting rows for an explicit `profile.id`. If `deleteToken(id)` becomes active-profile guarded at `:271`, deleting an inactive profile can throw and leave tokens/balances behind. Fix by extracting a private `deleteTokenRow(token)`/`deleteOwnedToken(token, profileId)` used by cascades; keep public RPC fail-closed. Add an inactive-profile deletion test.
+**Revised verdict (codex, after pushback with the 3 reachability facts): SHIP-WITH-NOTES.** codex confirmed all three facts verbatim and stated: "my BLOCK over-scoped extension-Port-RPC defense-in-depth into dApp reachability. Round 2 did not introduce a new dApp-reachable cross-profile exposure based on these paths. The remaining issue is pre-existing, owner-gated extension UI/internal RPC hardening, not a round-2 merge blocker."
 
-2. **HIGH: token-balance export filter is necessary but not fully FK-complete.** `token-balance/service.ts:259` should filter by active-profile token ids; orphan/deleted-token balances should be dropped (consistent with restore already dropping unmapped rows in `useFullBackupImport.ts:377`). But `TokenBalanceRaw` has both `token` and `account` (`spec.ts:5`), so a corrupt/malicious row with an active-profile token id and foreign account would still export. Stronger predicate: token is active-profile owned, and `account` belongs to the active profile on that token's `chainId`.
-
-3. **HIGH: leak is not "protected downstream."** `full.vue` builds `backup.data` in plaintext at `:127-141`; encryption is optional/later at `:162-165`; download can be plain JSON at `:173-177`. The leak is plaintext in the unencrypted artifact and still present inside optional ciphertext if encrypted. Phrase the finding that way.
-
-4. **HIGH: Q-02 "ADD-only" proves table parity, not arg safety.** Derivations ignore extra fields, so D7/XOR + scope-checker identity won't widen if `derive*` stays as-is (`method-descriptors.ts:226-270`). The trap is dispatch behavior: `dispatcher.ts:334-430` enforces then casts raw `args`; handlers like `isTokenRegistered` stringify `args[0]` at `:397`; batch recurses at `:529-550`. Schemas must run before capability/scope AND before handler destructuring, be exact tuple / no-rest / no coercive `String()`, and validate every batch leg by its own method schema.
-
-5. **MED: preserve-backup line is export-only.** Do not add restore FK validation or schema-version changes in R1/R5. Export filtering is fine; changing `TokenBalanceService.restore()` tolerance at `service.ts:264-270` is the deferred backup/migration work.
-
-**What's Solid:** by-id token gap IS dApp-unreachable on this HEAD (wallet-sdk exposes token state only via `isTokenRegistered` → `getTokens(profileId, chainId)`, `background.ts:94-99`, not `getToken*`). `revokeAuthwits` adding `authwit.account === account` is well-scoped (UI callers pass matching account, `RevokeAuthwitsPopup.vue:96-100`). Sequencing mostly right (R0 first, Q-02 last); tighten R1 isolation suite with inactive-profile deletion + mixed token/account FK export cases.
-
----
-
-## Reconciliation (all 5 adopted)
-
-| # | Sev | Adopted into | Change |
-|---|-----|--------------|--------|
-| 1 | BLOCKER | R1.4 | Split `deleteToken`: private cascade method (explicit profileId) + guarded public RPC. New inactive-profile-deletion test. |
-| 2 | HIGH | R1.5 | Export predicate = token active-profile-owned **AND** account active-profile-owned on that chainId. |
-| 3 | HIGH | Security §, R1.5 | Reworded: the leak is **plaintext** (export can be unencrypted JSON), not "maybe protected." |
-| 4 | HIGH | R6 (new item 5) | Schema runs before enforcement + before destructuring; exact tuple, no rest/coercion; per-batch-leg validation; pinned in adversarial-bypass. |
-| 5 | MED | R1.5, R5 | Export-only fix; do NOT touch `restore()` tolerance (deferred). |
-
-Confirmed-solid (no change needed): by-id gap dApp-unreachable; `revokeAuthwits` account-check well-scoped; R0-first/Q-02-last sequencing. Isolation-suite tightening folded into R1.0.
+**→ OWNER DECISION ITEM (surfaced, not a regression, not autonomously fixable):** whether to fail-closed the extension-Port-RPC arg-scoped/by-id surfaces (token/account `getTokens(profileId)`/`updateToken`/…, dapp-session by-id). Pre-existing on `dev`; not dApp-reachable; fixing = a fail-open→closed change beyond the round-2 authorized list. This is the natural round-3 candidate.
