@@ -1,7 +1,7 @@
 /**
  * Contract registration + metadata. Canonical wallet-sdk methods + the
  * Nulo-custom `registerToken` (re-introduced via the runtime schema patch in
- * `lib/nulo-schema-patch.ts`).
+ * `@nulo/wallet-sdk-schema-patch`).
  *
  * registerContract needs a real ContractInstance which the test driver passes
  * via the `pg-input-contractInstance` textarea (JSON-stringified instance).
@@ -14,7 +14,7 @@ import { logCall } from "../lib/log"
 import { getInput, getState, setState } from "../state"
 
 /** Typed augmentation for the Nulo-custom method. The runtime patch in
- *  `lib/nulo-schema-patch.ts` makes this true at runtime; the cast aligns TS. */
+ *  `@nulo/wallet-sdk-schema-patch` makes this true at runtime; the cast aligns TS. */
 type WalletWithRegisterToken = Wallet & {
 	registerToken(account: AztecAddress, token: AztecAddress): Promise<void>
 }

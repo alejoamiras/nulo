@@ -246,24 +246,31 @@ attacker-controllable.
 
 `WalletSchema` is mutable upstream. We extend it at runtime with Zod entries
 for the three Nulo-custom methods (`registerToken`, `isTokenRegistered`,
-`grantPublicAuthwit`). **Three inline copies** of the patch live in this monorepo:
+`grantPublicAuthwit`). The patch is a **single private package**,
+[`@nulo/wallet-sdk-schema-patch`](../wallet-sdk-schema-patch/README.md), consumed
+by all three apps:
 
-| Side | File | Imported by |
+| Side | Import | In |
 |---|---|---|
-| Extension | `apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts` | `wallet-sdk/background.ts` (first import) |
-| Faucet | `apps/faucet/src/lib/nulo-schema-patch.ts` | `composables/useWalletConnection.ts` (first import) |
-| Playground | `apps/playground/src/lib/nulo-schema-patch.ts` | `lib/wallet.ts` (first import) |
+| Extension | `import "@nulo/wallet-sdk-schema-patch/register"` | `wallet-sdk/background.ts` (first import) |
+| Faucet | `import "@nulo/wallet-sdk-schema-patch/register"` | `composables/createAztecWalletSession.ts` (first import) |
+| Playground | `import "@nulo/wallet-sdk-schema-patch/register"` | `lib/wallet.ts` (first import) |
 
-Each file is **side-effect only** — no exports. Drift between the three copies
-is pinned by `dispatcher.test.ts` ("schema patch extends WalletSchema with a
-2-arg `registerToken` entry") which imports the extension's copy directly. When
-adding a new Nulo-custom RPC, update all three copies and add a paired
-reachability assertion.
+`./register` is **side-effect only** — importing it first mutates `WalletSchema`
+before any wallet-sdk proxy reads it. The package also exports `./apply`
+(`applyNuloSchemaPatch(schema)`), the pure patch body, unit-tested against mock
+schema objects in `packages/wallet-sdk-schema-patch/src/apply.test.ts`. The
+reachability guarantee is pinned by `dispatcher.test.ts` ("schema patch extends
+WalletSchema with a 2-arg `registerToken` entry"), which now imports the shared
+package. (It used to be three byte-identical inline copies with a copy-identity
+drift pin; one source removed both the drift risk and that pin.) When adding a
+new Nulo-custom RPC, edit the ONE source and add a paired reachability assertion.
 
-The shared-package alternative (`@nulo/wallet-bridge-client`) was deliberately
-rejected to avoid acquiring third-party dApp consumers on `wallet-bridge` — the
-package depends on `wallet-core` + `extension-messaging` and is intended to stay
-extension-internal.
+Keeping the patch in a **dedicated private package** — not an export of
+`wallet-bridge` itself — is deliberate: `wallet-bridge` depends on `wallet-core`
++ `extension-messaging` and must stay extension-internal, so exposing it to the
+faucet/playground dApp surfaces would leak its dispatcher/protocol internals to
+third-party dApps.
 
 ### Dropped surface
 
