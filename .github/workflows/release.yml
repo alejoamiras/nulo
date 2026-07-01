@@ -453,8 +453,14 @@ jobs:
     steps:
       # App token so the sync PR is bot-opened → dev's required CI fires
       # (a GITHUB_TOKEN-opened PR suppresses the pull_request workflow), and the
-      # branch push is authenticated. The branch's commit can be unsigned — dev's
-      # signed-commits rule is satisfied by the GitHub-signed UI squash-merge.
+      # branch push is authenticated. The sync PR is now MERGE-committed (not
+      # squashed) so main's release commit stays in dev's ancestry — the prerelease
+      # version-anchor needs it (a squash drops it and re-breaks the rc cut; see
+      # implementations-plan/release-prerelease-fix/). Because a merge (unlike a
+      # squash) brings the branch's own manifest-rebaseline commit onto dev, and
+      # that bot commit is unsigned, the merge needs a verified path or an
+      # `--admin` bypass of classic required_signatures (interim: --admin; the
+      # clean fix — an App-API-verified manifest commit — is a tracked follow-up).
       - name: Mint App token
         id: app
         uses: actions/create-github-app-token@v3

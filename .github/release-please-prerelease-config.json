@@ -9,7 +9,7 @@
 			"include-v-in-tag": true,
 			"bump-minor-pre-major": true,
 			"prerelease": true,
-			"prerelease-type": "rc",
+			"prerelease-type": "rc.0",
 			"versioning": "prerelease",
 			"extra-files": [
 				{ "type": "json", "path": "apps/extension/package.json", "jsonpath": "$.version" }
