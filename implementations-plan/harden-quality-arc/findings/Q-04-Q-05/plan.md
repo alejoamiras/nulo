@@ -33,4 +33,36 @@ Fail-open landmines the plan MUST pin (each with a `.rejects`/denied test, and t
 - **Inferences (codex to attack):** Q-04 ⟂ Q-05 (no shared types → separable PRs); a `type`-keyed table can express every current per-kind branch without `unknown`; the current access-level default is already restrictive (MUST verify — if it's permissive today, that's a pre-existing finding to surface, not silently "fix").
 - **Asks (surface, do NOT self-resolve):** any place the unified `covers`/`check` would change a real allow/deny verdict = a permission-semantics change = HARD-LIMIT halt+surface. The refactor is behavior-preserving ONLY; a genuine authz bug found en route gets surfaced as a separate tracked finding.
 
-> **Status:** research foundation + main plan drafted this firing (Explore research subagent glitched → mapped inline). Next: codex `xhigh` deep-audit leg on this plan (enumerate the mirror pairs, attack the fail-open landmines + the assumptions), then finalize the ledger → implement P15.0 → P15.2.
+## codex deep-audit (`d5JcE5Ov`) — **PLAN-NEEDS-REVISION** + ⚠ SURFACED OWNER DECISION
+
+codex enumerated the mirror pairs + attacked the landmines. Material corrections to the plan above:
+
+### FACT CORRECTION — the access default is NOT the safety net (my Fact was wrong)
+The real path: `isConfirmationNeeded` (`dapp-interaction/service.ts:437-465`) → `getAccessLevel` (`:467-473`) → `getOperationAccessLevel` (`:475-515`). Unknown kind → `AccessLevel.None` at `:513-514`, BUT sessions seed `AccessLevel.Transactions` (`wallet-sdk/background.ts:565-570`) so an unknown kind **would not prompt by access level** — today it fails only because `materializeRequest` THROWS on unknown kind (`materialize.ts:125-127`). ⇒ **The `OperationPolicy` registry MUST have NO permissive fallback**, and MUST preserve the materializer-throw-on-unknown as the hard stop (don't let the registry swallow an unknown kind into a silent default). This is the #1 fail-open risk for Q-04.
+
+### Two PRE-EXISTING permission drifts (codex-confirmed) — PRESERVE, characterize, surface
+| drift | coverage says | enforcement says |
+|---|---|---|
+| **`contractClasses` field-widening** (`dispatcher.ts:760` type-only fallback vs `method-scope-checkers.ts:97-106`) | re-request wider `classes`/`canGetMetadata` after an existing grant → **no prompt** | can **deny** |
+| **`data.addressBook`** (`dispatcher.ts:756-758` checks only `privateEvents`) | existing data grant makes `{addressBook:true}` look **covered** | `getAddressBook`/`registerSender` later **deny** |
+
+codex's Ask: **characterize + PRESERVE these as explicit oracle cases; do NOT silently "fix" them in this refactor** (bundling a permission-tightening into a "behavior-preserving" refactor is unreviewable + dangerous at the trust boundary).
+
+### ⚠ SURFACED OWNER DECISION (hard limit — dApp-permission-semantics; NOT self-resolving)
+**The approved arc plan (meta `plan.md` P15 line) says: "ADD the missing `contractClasses` delta branch — a fail-CLOSED fix." codex says: PRESERVE the drift, surface it, do NOT fix in this PR.** These conflict, and BOTH are permission-semantics calls (`contractClasses` fix = a fail-CLOSED tightening; `data.addressBook` = an un-pinned drift). Per the arc's HARD LIMITS ("any dApp-permission-semantics or fail-open/closed change not already pinned → halt+surface") + the AFK rule ("codex can't override approved plan scope → surface the conflict"), I am NOT deciding this autonomously. **Owner must choose:**
+- **(A) PRESERVE both drifts** (codex's rec): P15 is a strictly behavior-preserving refactor; the 2 drifts are characterized as oracle cases + filed as separate findings for a later fail-CLOSED fix PR. Safest; keeps P15 reviewable. ← my default pending your call.
+- **(B) FIX `contractClasses` fail-CLOSED in P15** (meta-plan intent) + preserve/surface `addressBook`: bundles one permission-tightening into P15.
+- **(C) FIX both** fail-CLOSED in P15.
+
+Default while awaiting the decision: **(A)** — proceed behavior-preserving so no permission semantics change autonomously.
+
+### DESIGN REVISION — the flat `Record<type,strategy>` is insufficient
+codex: the table must support **cross-type checks** (`createAuthWit` is an `accounts` method that also consumes `simulation.transactions` + `transaction` grants — `dispatcher.ts:217-233`, `279-303`; scope-checker `method-scope-checkers.ts:145-186`,`279-303`) and **per-kind exceptions** (`register_token` always-confirm anti-phishing; send-like `feeSettings` gating). ⇒ the strategy table needs a composition hook (a capability can reference OTHER capabilities in its `check`), not a pure per-type isolate. Redesign the table signature to pass the FULL granted `Capability[]` into each `covers`/`check`, not just the same-type slice.
+
+### PARSE-ONCE — must NOT filter or coerce
+Wire caps are intentionally `unknown[]` (`dapp-interaction-protocol.ts:143-153`); dispatcher casts at `:704`; NO schema validation today; unknown caps currently reach the popup + are **default-off** (`popup/windows/capabilities/build-items.ts:38-56`). ⇒ parse-once must PRESERVE that: do NOT filter unknowns (hides the warning/default-off path), do NOT coerce malformed known caps (never default a missing `scope`/list to `"*"` — that's a fail-OPEN). "Parse" here = type-narrow the shape the code already trusts, keeping unknown/malformed handling byte-identical.
+
+### P15.0 matrix EXPANSION (codex)
+The characterization oracle must cover: malformed/unknown caps, `addressBook`, `contractClasses` widening, `createAuthWit` tx/sim coupling, F-005 account scopes, batch-forbidden methods, `registerToken` per-call confirmation. `method-descriptors.test.ts` (FROZEN_*) pins method metadata but is NOT enough for request-capability coverage — keep `dispatcher.test.ts` + `scope-enforcement.test.ts` + ADD popup capability default-off + `DappInteractionService` access/materialization tests.
+
+> **Status:** codex audit incorporated. **BLOCKED on the SURFACED OWNER DECISION above** (drift fix-vs-preserve) before finalizing the Q-05 covers/check design. Q-04 (OperationPolicy, no-permissive-fallback) + P15.0 (characterization matrix, which captures current behavior regardless of the A/B/C choice) can proceed behavior-preserving under default (A). Next: build P15.0 the equivalence oracle (safe under any choice), then implement per the owner's drift decision.
