@@ -11,9 +11,18 @@
  * raw `chrome.storage.local` outside this file + the composition-root adapter).
  *
  * Deliberately NO timeout: proceeding while a migration is mid-flight is the
- * corruption we're preventing. If the SW died mid-migration the marker stays
- * set until the next boot resumes + clears it; the shell shows "Updating…"
- * (see `MigrationBarrier.vue`) rather than silently racing.
+ * corruption we're preventing. Liveness leans on the engine's journal — EVERY
+ * path out of a run (success, failure, resume, crash + next boot) clears the
+ * marker, so a wait here can only outlive the current boot if the SW died
+ * mid-migration, and the next boot's resume unblocks it. The shell shows
+ * "Updating…" (see `MigrationBarrier.vue`) rather than silently racing.
+ *
+ * Residual TOCTOU, accepted: the barrier is check-then-act, not a lock — a
+ * write dispatched in the gap between the idle check and the marker being set
+ * can land inside a migration's snapshot window. The marker spans the WHOLE
+ * run (no inter-migration gaps), which shrinks the window to SW-boot-instant;
+ * true mutual exclusion needs the deferred route-all-UI-storage-through-the-SW
+ * follow-up.
  */
 import { SCHEMA_RUNNING_KEY } from "@nulo/wallet-core/migration"
 

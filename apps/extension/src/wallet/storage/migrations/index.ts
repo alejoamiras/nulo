@@ -1,5 +1,6 @@
 /**
- * The extension's numbered migration registry (the data door: extension update).
+ * The extension's numbered migration registry, applied at SW boot when a
+ * release changes a persisted storage shape.
  *
  * The launch shape is version 1. Forward migrations are v2, v3, … — one file
  * each (copy `template.ts`), imported into the `migrations` array below. The

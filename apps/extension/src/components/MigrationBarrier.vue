@@ -1,9 +1,9 @@
 <script setup>
-/** Services */
+/** Utils */
 import { SCHEMA_RUNNING_KEY } from "@nulo/wallet-core/migration"
 import { SCHEMA_BLOCKED_KEY, SCHEMA_DEGRADED_KEY } from "@/wallet/storage/migrations"
 
-/** 6. Reactive state */
+/** Reactive state */
 // Raw chrome.storage reads ON PURPOSE (allowlisted in storage-facade-ban):
 // the facade awaits `running` clearing, but this component's whole job is to
 // OBSERVE that state — going through the facade would deadlock. It only ever
@@ -31,26 +31,46 @@ const blockedCopy = computed(() => {
 			}
 })
 
-/** 8. Handlers */
+/** Handlers */
+// `refresh()`'s get-snapshot and `onChanged` events ride different IPC
+// channels with no cross-channel ordering guarantee: a stale snapshot
+// resolving AFTER an event could resurrect an already-cleared state (a
+// permanent "UPDATING" overlay). Events win — the snapshot only fills keys
+// no event has touched yet.
+const eventTouched = new Set()
 async function refresh() {
 	const res = await chrome.storage.local.get([SCHEMA_RUNNING_KEY, SCHEMA_BLOCKED_KEY, SCHEMA_DEGRADED_KEY])
-	running.value = SCHEMA_RUNNING_KEY in res
-	blocked.value = res[SCHEMA_BLOCKED_KEY] ?? null
-	degraded.value = res[SCHEMA_DEGRADED_KEY] ?? null
+	if (!eventTouched.has(SCHEMA_RUNNING_KEY)) running.value = SCHEMA_RUNNING_KEY in res
+	if (!eventTouched.has(SCHEMA_BLOCKED_KEY)) blocked.value = res[SCHEMA_BLOCKED_KEY] ?? null
+	if (!eventTouched.has(SCHEMA_DEGRADED_KEY)) degraded.value = res[SCHEMA_DEGRADED_KEY] ?? null
 }
 function onStorageChanged(changes, area) {
 	if (area !== "local") return
-	if (SCHEMA_RUNNING_KEY in changes) running.value = changes[SCHEMA_RUNNING_KEY].newValue !== undefined
-	if (SCHEMA_BLOCKED_KEY in changes) blocked.value = changes[SCHEMA_BLOCKED_KEY].newValue ?? null
-	if (SCHEMA_DEGRADED_KEY in changes) degraded.value = changes[SCHEMA_DEGRADED_KEY].newValue ?? null
+	if (SCHEMA_RUNNING_KEY in changes) {
+		eventTouched.add(SCHEMA_RUNNING_KEY)
+		running.value = changes[SCHEMA_RUNNING_KEY].newValue !== undefined
+	}
+	if (SCHEMA_BLOCKED_KEY in changes) {
+		eventTouched.add(SCHEMA_BLOCKED_KEY)
+		blocked.value = changes[SCHEMA_BLOCKED_KEY].newValue ?? null
+	}
+	if (SCHEMA_DEGRADED_KEY in changes) {
+		eventTouched.add(SCHEMA_DEGRADED_KEY)
+		degraded.value = changes[SCHEMA_DEGRADED_KEY].newValue ?? null
+	}
 }
+// Per-mount dismiss ON PURPOSE: the degraded status persists in storage until
+// the next healthy boot clears it, so the banner returns on a fresh popup —
+// a degraded wallet should keep saying so, without nagging within a session.
 function dismissDegraded() {
 	degraded.value = null
 }
 
-/** 10. Lifecycle */
+/** Service subscriptions (before the initial read, so no change is missed) */
 chrome.storage.onChanged.addListener(onStorageChanged)
 void refresh()
+
+/** Lifecycle */
 onBeforeUnmount(() => {
 	chrome.storage.onChanged.removeListener(onStorageChanged)
 })
@@ -134,7 +154,7 @@ onBeforeUnmount(() => {
 	gap: 8px;
 
 	padding: 6px 10px;
-	background-color: var(--yellow, #b45309);
+	background-color: var(--yellow);
 	z-index: 10000;
 }
 

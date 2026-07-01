@@ -21,7 +21,9 @@ const ALLOWLIST: RegExp[] = [
 	// Composition-root adapter: implements the StoragePort the SW runs on.
 	/^core\/adapters\/chrome-browser-api\.ts$/,
 	// Service-worker context: owns the migrator + journal; the barrier is FOR
-	// the UI contexts racing it, not for the SW itself.
+	// the UI contexts racing it, not for the SW itself. Service CLIENTS are
+	// excluded from this allowance — they execute in popup/onboarding pages,
+	// so a raw access there would bypass the barrier (see DENYLIST).
 	/^wallet\//,
 	// The barrier component observes the reserved `nulo:schema:*` keys; going
 	// through the facade would deadlock on the very marker it displays.
@@ -33,6 +35,10 @@ const ALLOWLIST: RegExp[] = [
 	// Generated type shims.
 	/^types\//,
 ]
+
+/** Overrides the allowlist: paths that run in UI contexts despite living under
+ *  an allowlisted prefix. */
+const DENYLIST: RegExp[] = [/^wallet\/services\/[^/]+\/client/]
 
 const SCANNED_EXT = /\.(ts|js|vue)$/
 
@@ -49,7 +55,7 @@ function walk(dir: string, out: string[] = []): string[] {
 function findRawStorageAccess(files: Array<{ path: string; content: string }>): string[] {
 	const offenders: string[] = []
 	for (const { path, content } of files) {
-		if (ALLOWLIST.some((re) => re.test(path))) continue
+		if (!DENYLIST.some((re) => re.test(path)) && ALLOWLIST.some((re) => re.test(path))) continue
 		content.split("\n").forEach((line, i) => {
 			const trimmed = line.trim()
 			// Comments may legitimately mention the API; only code lines count.
@@ -95,5 +101,10 @@ describe("storage-facade ban (static)", () => {
 			{ path: "components/MigrationBarrier.vue", content: "chrome.storage.local.get(keys)" },
 		])
 		expect(offenders).toEqual([])
+	})
+
+	test("service CLIENTS are denied despite the wallet/ allowance (they run in UI pages)", () => {
+		const offenders = findRawStorageAccess([{ path: "wallet/services/foo/client.ts", content: "chrome.storage.local.get(k)" }])
+		expect(offenders).toHaveLength(1)
 	})
 })

@@ -110,23 +110,25 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		}).run()
 		logger.log("wallet", LogLevel.Info, `Storage migration: ${migration.kind}`)
 		if (migration.kind === "needs-recovery" || (migration.kind === "failed" && migration.breaking)) {
-			const detail = "reason" in migration ? migration.reason : migration.error
-			logger.log("wallet", LogLevel.Error, `Storage migration blocked boot (${migration.kind}): ${detail}`)
+			logger.log("wallet", LogLevel.Error, `Storage migration blocked boot (${migration.kind}): ${migration.reason}`)
 			// Persist the blocked status so the UI shells render the recovery
 			// screen (MigrationBarrier) instead of a dead popup, then fail
 			// closed: never start services on un-migrated / incompatible data.
 			const blocked: MigrationBlockedStatus = {
 				kind: migration.kind,
-				detail,
-				terminal: migration.kind === "failed" ? migration.terminal : true,
+				detail: migration.reason,
+				terminal: migration.kind === "failed" ? migration.terminal : !migration.retryable,
 			}
 			await browserApi.storage.local.set({ [SCHEMA_BLOCKED_KEY]: blocked })
 			throw new Error(`storage migration blocked: ${migration.kind}`)
 		}
 		if (migration.kind === "failed") {
-			logger.log("wallet", LogLevel.Warn, `Storage migration failed on an additive migration; booting degraded: ${migration.error}`)
-			const degraded: MigrationDegradedStatus = { version: migration.version, error: migration.error }
+			logger.log("wallet", LogLevel.Warn, `Storage migration failed on an additive migration; booting degraded: ${migration.reason}`)
+			const degraded: MigrationDegradedStatus = { version: migration.version, error: migration.reason }
+			// A stale blocked status from an EARLIER boot must not outrank the
+			// degraded banner over a wallet that just booted.
 			await browserApi.storage.local.set({ [SCHEMA_DEGRADED_KEY]: degraded })
+			await browserApi.storage.local.remove(SCHEMA_BLOCKED_KEY)
 		} else {
 			// Healthy boot clears any stale status from a prior failed run.
 			await browserApi.storage.local.remove([SCHEMA_BLOCKED_KEY, SCHEMA_DEGRADED_KEY])

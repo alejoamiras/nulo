@@ -7,14 +7,9 @@
  * crash-safe journal that drives these.
  */
 
-/** The minimal storage surface the engine needs — a subset of the chrome/webext
- *  `StorageArea` so `chrome.storage.local` and `FakeBrowserApi` both satisfy it
- *  structurally. `get()` / `get(undefined)` returns ALL entries. */
-export type MinimalStorageArea = {
-	get(keys?: string | string[]): Promise<Record<string, unknown>>
-	set(items: Record<string, unknown>): Promise<void>
-	remove(keys: string | string[]): Promise<void>
-}
+/** The minimal storage surface the engine needs — the same contract
+ *  `EntityStorage` runs on, re-exported so the two cannot drift. */
+export type { MinimalStorageArea } from "../storage/entity_storage"
 
 /** A location a migration reads or writes. `root` = an EntityStorage namespace
  *  (rows keyed `${root}@${id}`); `value` = a single ValueStorage key. The engine
@@ -85,7 +80,7 @@ export type MigrationFailure = {
 	version: number
 	/** Mirrors the failed migration's `breaking` flag → block (true) vs degrade (false). */
 	breaking: boolean
-	error: string
+	reason: string
 	/** Durable attempt count across boots. */
 	attempts: number
 	/** `attempts >= maxRetries` — switch from retry to block-vs-degrade. */
@@ -98,6 +93,8 @@ export type MigrationResult =
 	| { kind: "migrated"; from: number; to: number }
 	| { kind: "fresh"; version: number }
 	| MigrationFailure
-	/** A stale legacy `nulo:core:storage-version` key or a corrupt/out-of-range
-	 *  marker over existing data — the engine refuses to guess and fails closed. */
-	| { kind: "needs-recovery"; reason: string }
+	/** The engine refuses to guess: a stale legacy marker, a corrupt/out-of-range
+	 *  version, an invalid journal backup, or a failing restore. `retryable`
+	 *  distinguishes "the next boot retries this automatically" (transient
+	 *  restore failure) from a genuinely terminal state (reinstall guidance). */
+	| { kind: "needs-recovery"; reason: string; retryable: boolean }

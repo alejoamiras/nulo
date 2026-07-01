@@ -3,6 +3,13 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Page } from "puppeteer"
 import { afterEach, describe, expect, test } from "vitest"
+import { SCHEMA_RUNNING_KEY, SCHEMA_VERSION_KEY } from "@nulo/wallet-core/migration"
+import {
+	MIGRATION_FIXTURE_BOOM_KEY,
+	MIGRATION_FIXTURE_HOLD_KEY,
+	MIGRATION_FIXTURE_ROOT,
+	MIGRATION_FIXTURE_VERSION,
+} from "@/e2e/migration-fixture"
 import { type ExtensionContext, launchExtension, openPopup } from "./fixtures/extension"
 
 /**
@@ -29,14 +36,17 @@ import { type ExtensionContext, launchExtension, openPopup } from "./fixtures/ex
 
 const HAS_FIXTURE = process.env.NULO_E2E_MIGRATION_FIXTURE === "1"
 
-const ROOT = "nulo:e2e:mig-fixture"
-const VERSION_KEY = "nulo:schema:version"
-const RUNNING_KEY = "nulo:schema:running"
+const ROOT = MIGRATION_FIXTURE_ROOT
+const VERSION_KEY = SCHEMA_VERSION_KEY
+const RUNNING_KEY = SCHEMA_RUNNING_KEY
+const BOOM_KEY = MIGRATION_FIXTURE_BOOM_KEY
+const HOLD_KEY = MIGRATION_FIXTURE_HOLD_KEY
+const MAX_VERSION = MIGRATION_FIXTURE_VERSION
+// Engine-private journal keys, pinned as literals on purpose: the e2e asserts
+// the PERSISTED protocol, so an accidental rename must fail here.
 const BACKUP_KEY = "nulo:schema:backup"
 const ATTEMPTS_KEY = "nulo:schema:attempts"
 const BLOCKED_KEY = "nulo:schema:blocked"
-const BOOM_KEY = "nulo:e2e:migration-boom"
-const HOLD_KEY = "nulo:e2e:migration-hold"
 
 const storageSet = (page: Page, items: Record<string, unknown>) => page.evaluate((i) => chrome.storage.local.set(i), items)
 const storageRemove = (page: Page, keys: string[]) => page.evaluate((k) => chrome.storage.local.remove(k), keys)
@@ -65,6 +75,16 @@ const waitForKeyPresent = (page: Page, key: string, timeout = 30_000) =>
 		key,
 	)
 
+const waitForKeyAbsent = (page: Page, key: string, timeout = 30_000) =>
+	page.waitForFunction(
+		async (k) => {
+			const res = await chrome.storage.local.get(k)
+			return !(k in res)
+		},
+		{ timeout, polling: 250 },
+		key,
+	)
+
 /** Seed pre-shape rows + rewind the marker so the NEXT cold boot migrates. */
 async function seedPreShape(page: Page, extra: Record<string, unknown> = {}): Promise<void> {
 	await storageSet(page, {
@@ -76,6 +96,9 @@ async function seedPreShape(page: Page, extra: Record<string, unknown> = {}): Pr
 }
 
 async function expectTransformed(page: Page): Promise<void> {
+	// The version stamps BEFORE the run-level journal clear; wait for the clear
+	// so the journal-empty assertion below can't race the final removes.
+	await waitForKeyAbsent(page, RUNNING_KEY)
 	const rows = await storageGet(page, [`${ROOT}@a`, `${ROOT}@b`])
 	expect(JSON.parse(rows[`${ROOT}@a`] as string)).toEqual({ name: "alpha", keep: 1 })
 	expect(JSON.parse(rows[`${ROOT}@b`] as string)).toEqual({ name: "beta" })
@@ -85,14 +108,14 @@ async function expectTransformed(page: Page): Promise<void> {
 
 describe.skipIf(!HAS_FIXTURE)("storage migration through the real boot path", () => {
 	let ctx: ExtensionContext | undefined
-	let profileDir: string
+	let profileDir = ""
 
 	/** Fresh install on a persistent profile, stamped at max, pre-shape seeded. */
 	async function launchAndSeed(extra: Record<string, unknown> = {}): Promise<void> {
 		profileDir = mkdtempSync(join(tmpdir(), "nulo-mig-e2e-"))
 		ctx = await launchExtension({ userDataDir: profileDir })
 		const page = await openPopup(ctx)
-		await waitForVersion(page, 2)
+		await waitForVersion(page, MAX_VERSION)
 		await seedPreShape(page, extra)
 		await ctx.browser.close()
 		ctx = undefined
@@ -114,13 +137,16 @@ describe.skipIf(!HAS_FIXTURE)("storage migration through the real boot path", ()
 	afterEach(async () => {
 		await ctx?.browser.close()
 		ctx = undefined
-		rmSync(profileDir, { recursive: true, force: true })
+		// Guarded: a failure before mkdtemp must not turn into an rmSync throw
+		// that masks the real assertion error.
+		if (profileDir) rmSync(profileDir, { recursive: true, force: true })
+		profileDir = ""
 	})
 
 	test("transforms seeded pre-shape rows and checkpoints the version", async () => {
 		await launchAndSeed()
 		const page = await relaunch()
-		await waitForVersion(page, 2)
+		await waitForVersion(page, MAX_VERSION)
 		await expectTransformed(page)
 	})
 
@@ -140,7 +166,7 @@ describe.skipIf(!HAS_FIXTURE)("storage migration through the real boot path", ()
 		await storageRemove(page, [BOOM_KEY])
 		if (ctx) await ctx.browser.close()
 		const page2 = await relaunch()
-		await waitForVersion(page2, 2)
+		await waitForVersion(page2, MAX_VERSION)
 		await expectTransformed(page2)
 		expect(await page2.$("[data-testid='migration-blocked']")).toBeNull()
 	})
@@ -156,7 +182,7 @@ describe.skipIf(!HAS_FIXTURE)("storage migration through the real boot path", ()
 		expect(JSON.parse(mid[`${ROOT}@a`] as string)).toEqual({ legacyName: "alpha", keep: 1 })
 
 		await storageRemove(page, [HOLD_KEY]) // release
-		await waitForVersion(page, 2)
+		await waitForVersion(page, MAX_VERSION)
 		await page.waitForSelector("[data-testid='migration-updating']", { hidden: true, timeout: 10_000 })
 		await expectTransformed(page) // transformed exactly once, no resurrection
 	})
@@ -174,7 +200,7 @@ describe.skipIf(!HAS_FIXTURE)("storage migration through the real boot path", ()
 		const page2 = await relaunch()
 		await waitForKeyPresent(page2, RUNNING_KEY)
 		await storageRemove(page2, [HOLD_KEY])
-		await waitForVersion(page2, 2)
+		await waitForVersion(page2, MAX_VERSION)
 		await expectTransformed(page2)
 	})
 })
