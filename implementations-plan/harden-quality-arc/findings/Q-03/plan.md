@@ -1,7 +1,13 @@
 # P18 / Q-03 — dedup RPC client/PXE passthroughs
 
 **Tier:** deep, TRUST-BOUNDARY (registry cluster P15/P18/P19/P20).
-**Status:** BLUEPRINT CONSOLIDATED (main leg + codex `019f1cca` xhigh; opus leg env-blocked). Impl NEXT on `qa/Q-03-service-client-factory` off dev-quality `7a2cf43`.
+**Status:** P18a IMPLEMENTED (branch `qa/Q-03-service-client-factory` off `a5292c6`; commits `215170f` factory+token, `9b9caa8` +15 clients). codex post-impl `b35c0amof` in flight. P18b (PXE) still deferred.
+
+## OUTCOME (P18a)
+- **16 clients migrated** to `definePassthroughs`: token, account, account-state, auth-registry, contact, dapp-interaction, dapp-session, execution, fpc, incoming-transfer, log-viewer, note, passkey, task, token-balance, transaction.
+- **Left explicit (non-fitting):** config (getValue casts), logger (log() injects `this.context`), operation-journal (per-call zod validate), network (custom), pxe (→ P18b). **profile: SPECIAL-CASE — its `restore` RPC collides with the base ServiceClient's hardcoded `restore()` convenience (background/client.ts:159-165); the explicit method overrides it for the typed return, so folding into the factory needs a carve-out messier than the explicit form → left explicit.** (Landmine noted: any client whose `Methods` has `backup`/`restore` collides with the base and can't be naively factory-migrated; the green typecheck proves none of the 16 do.)
+- **base-typing DEFERRED to P20** — the factory uses the existing `request`; no base typing was needed, so nothing for P20 to churn.
+- **Validated:** typecheck:all (13 pkgs) + biome clean; full ext 2723; extension-messaging 154 (factory unit test); wallet-bridge 159 (frozen method-descriptors + scope-enforcement + dispatcher UNEDITED, git-diff-confirmed). Trust boundary intact — no service.ts/spec.ts/rpcMethods touched.
 
 ## Finding
 21 extension `services/<name>/client.ts` mechanically `return this.request("method", ...args)` though `Methods` already defines the surface; PXE repeats the method list across `Methods`/`IPXE`/subset/proxy/client/service. Refactor: a `ServiceClient` factory derives passthroughs; PXE uses one descriptor table.
