@@ -23,6 +23,7 @@ import { LoggerStore } from "@/wallet/logger"
 import { PROFILE_SERVICE_NAME, type ProfileInfo } from "@/wallet/services/profile/spec"
 import { svc } from "./composition-harness"
 import { ContactService } from "./contact/service"
+import { FpcService } from "./fpc/service"
 import { AccountService } from "./account/service"
 import { NetworkService } from "./network/service"
 import { OperationJournalService } from "./operation-journal/service"
@@ -216,6 +217,34 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 			// tokenService.getTokensRaw(profile.id).
 			const backup = await tbal.backup()
 			expect(backup.map((b) => b.id)).toEqual([10])
+		})
+	})
+
+	describe("fpc — by-id getters profileId-guarded via requireOwnedRow (R1.3a)", () => {
+		let profile: FakeProfileService
+		let fpc: FpcService
+
+		beforeEach(async () => {
+			profile = new FakeProfileService()
+			profile.setActiveProfile(p1)
+			const services = new ServiceCollection()
+			services.add(profile)
+			services.add(networkStub())
+			fpc = new FpcService(mkLogger(), api)
+			services.add(fpc)
+			await services.start()
+			await seedRow(api, "nulo:core:fpcs", "fpc-p2", {
+				id: "fpc-p2",
+				profileId: p2.id,
+				chainId: 1,
+				type: 1,
+				address: "0xfpc2",
+				name: "F2",
+			})
+		})
+
+		test("getFpc(foreignId) rejects a p2 fpc while p1 active", async () => {
+			await expect(fpc.getFpc("fpc-p2")).rejects.toThrow(/invalid id/i)
 		})
 	})
 })
