@@ -20,3 +20,17 @@ export { PasswordSecretBox, type EncryptedProfileSecret, type Sealed } from "./p
 export { PasskeyCredential, type PasskeyCredentialData } from "./passkey-credential"
 export { PASSKEY_PRF_LABEL } from "./constants"
 export { zeroize } from "./zeroize"
+export {
+	type Base64Ciphertext,
+	type Base64CredentialId,
+	type Base64SecretPrf,
+	type HexUserHandle,
+	type MasterSecretBytes,
+	type Passhash,
+	asBase64Ciphertext,
+	asBase64CredentialId,
+	asBase64SecretPrf,
+	asHexUserHandle,
+	asMasterSecretBytes,
+	asPasshash,
+} from "./secret-types"

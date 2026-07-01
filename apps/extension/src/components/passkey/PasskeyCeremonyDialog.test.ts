@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { flushPromises, mount } from "@vue/test-utils"
 import { UserRejectedError } from "@nulo/extension-messaging/errors"
+import { asBase64CredentialId, asBase64SecretPrf } from "@nulo/wallet-crypto"
 import PasskeyCeremonyDialog from "./PasskeyCeremonyDialog.vue"
 
 // Mock the helper module — we don't want a real WebAuthn call.
@@ -18,7 +19,7 @@ import { runPasskeyCeremony } from "@/wallet/utils/passkey-ceremony"
 const runPasskeyCeremonyMock = vi.mocked(runPasskeyCeremony)
 
 const fakeRequest = { mode: "create" as const, userHandle: "uh", name: "Test" }
-const fakeData = { id: "cred-x", prf: "prf-bytes" }
+const fakeData = { id: asBase64CredentialId("cred-x"), prf: asBase64SecretPrf("prf-bytes") }
 
 beforeEach(() => {
 	// Provide a #popup teleport target the dialog can mount into.

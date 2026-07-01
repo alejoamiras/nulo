@@ -1,4 +1,5 @@
 import { bytesToHex } from "@nulo/wallet-core/utils"
+import { asPasshash, type Passhash } from "./secret-types"
 
 /** OWASP-recommended minimum for PBKDF2-SHA256 (2023). */
 const PBKDF2_ITERATIONS = 600_000
@@ -86,7 +87,7 @@ export class EncryptionKey {
 	 * @param passhash - Hash of the password
 	 * @returns New instance of EncryptionKey
 	 */
-	public static async fromPasshash(passhash: ArrayBuffer): Promise<EncryptionKey> {
+	public static async fromPasshash(passhash: Passhash): Promise<EncryptionKey> {
 		const baseKey = await self.crypto.subtle.importKey("raw", passhash, "PBKDF2", false, ["deriveKey"])
 		return new EncryptionKey(baseKey)
 	}
@@ -96,9 +97,9 @@ export class EncryptionKey {
 	 * @param password User password
 	 * @returns Hash of the password
 	 */
-	public static async getPasshash(password: string): Promise<ArrayBuffer> {
+	public static async getPasshash(password: string): Promise<Passhash> {
 		const utf8 = new TextEncoder()
-		return await self.crypto.subtle.digest("SHA-256", utf8.encode(password))
+		return asPasshash(await self.crypto.subtle.digest("SHA-256", utf8.encode(password)))
 	}
 
 	/**
