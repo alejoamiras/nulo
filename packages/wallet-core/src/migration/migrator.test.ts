@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest"
+import { EntityStorage } from "../storage/entity_storage"
 import { Migrator, RESERVED_KEYS, SCHEMA_RUNNING_KEY, SCHEMA_VERSION_KEY } from "./migrator"
 import { defineMigration, type Migration, type MinimalStorageArea } from "./types"
 
@@ -78,6 +79,28 @@ describe("Migrator — marker decision table", () => {
 		const store = new MemStore().seed(ver(2))
 		const r = await new Migrator({ store, migrations: [patchRows(1, "a", {}), patchRows(2, "a", {})] }).run()
 		expect(r).toEqual({ kind: "noop", version: 2 })
+	})
+
+	test("baseline floor: fresh install stamps the baseline with an empty registry", async () => {
+		const store = new MemStore()
+		const r = await new Migrator({ store, migrations: [], baselineVersion: 1 }).run()
+		expect(r).toEqual({ kind: "fresh", version: 1 })
+		expect(store.data.get(SCHEMA_VERSION_KEY)).toBe(1)
+	})
+
+	test("baseline floor: an install below the baseline is stamped up to it (no bridging migration, data untouched)", async () => {
+		const store = new MemStore().seed(ver(0)).seed(row("acct", "a", { n: 0 }))
+		const r = await new Migrator({ store, migrations: [], baselineVersion: 1 }).run()
+		expect(r).toEqual({ kind: "migrated", from: 0, to: 1 })
+		expect(store.data.get(SCHEMA_VERSION_KEY)).toBe(1)
+		expect(store.obj("acct", "a")).toEqual({ n: 0 })
+	})
+
+	test("baseline is a floor — a higher migration version wins", async () => {
+		const store = new MemStore().seed(ver(1)).seed(row("acct", "a", { n: 0 }))
+		await new Migrator({ store, migrations: [patchRows(2, "acct", { x: 1 })], baselineVersion: 1 }).run()
+		expect(store.data.get(SCHEMA_VERSION_KEY)).toBe(2)
+		expect(store.obj("acct", "a")).toEqual({ n: 0, x: 1 })
 	})
 
 	test("corrupt marker over existing data → needs-recovery (never init-at-max)", async () => {
@@ -254,6 +277,28 @@ describe("Migrator — batched diff", () => {
 		const r = await new Migrator({ store, migrations: [patchRows(1, "acct", { x: 1 })] }).run()
 		expect(r.kind).toBe("failed")
 		expect(store.has("acct@a")).toBe(true) // NOT dropped
+	})
+
+	test("ctx.local.rows(root) matches EntityStorage.getAll for well-formed data", async () => {
+		const store = new MemStore()
+			.seed(ver(0))
+			.seed(row("acct", "a", { n: 1 }))
+			.seed(row("acct", "b", { n: 2 }))
+		const byId = (rows: Array<[string, unknown]>) => rows.slice().sort((x, y) => x[0].localeCompare(y[0]))
+		const viaEntity = byId(await new EntityStorage<{ n: number }>("acct", store).getAll())
+
+		let viaCtx: Array<[string, unknown]> = []
+		const capture = defineMigration({
+			version: 1,
+			description: "capture rows",
+			reads: [{ kind: "root", root: "acct" }],
+			writes: [],
+			up: async (ctx) => {
+				viaCtx = byId(await ctx.local.rows("acct"))
+			},
+		})
+		await new Migrator({ store, migrations: [capture] }).run()
+		expect(viaCtx).toEqual(viaEntity)
 	})
 })
 

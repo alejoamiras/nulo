@@ -45,7 +45,8 @@ import { TransactionService } from "./services/transaction/service"
 import { IncomingTransferService } from "./services/incoming-transfer/service"
 import { WindowManager } from "./services/window-manager/window-manager"
 import { initWalletSdkHandler } from "./services/wallet-sdk/background"
-import { runStorageMigration } from "./storage/migrate"
+import { Migrator } from "@nulo/wallet-core/migration"
+import { BASELINE_VERSION, migrations } from "./storage/migrations"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 
 /** Shell-supplied dependencies. All I/O goes through ports on this object. */
@@ -92,6 +93,26 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 			logger.log("wallet", LogLevel.Warn, "Failed to set uninstall URL", getErrorMessage(error))
 		}
 
+		// Data-preserving storage migration runs FIRST — before config.load() (a
+		// config-reshaping migration must not be shadowed by an already-loaded
+		// config) and before any service reads storage.
+		const migration = await new Migrator({
+			store: browserApi.storage.local,
+			migrations,
+			baselineVersion: BASELINE_VERSION,
+		}).run()
+		logger.log("wallet", LogLevel.Info, `Storage migration: ${migration.kind}`)
+		if (migration.kind === "needs-recovery" || (migration.kind === "failed" && migration.breaking)) {
+			const detail = "reason" in migration ? migration.reason : migration.error
+			logger.log("wallet", LogLevel.Error, `Storage migration blocked boot (${migration.kind}): ${detail}`)
+			// Fail closed: never start services on un-migrated / incompatible data.
+			// Phase 3 replaces this throw with the recovery UI + "Updating…" barrier.
+			throw new Error(`storage migration blocked: ${migration.kind}`)
+		}
+		if (migration.kind === "failed") {
+			logger.log("wallet", LogLevel.Warn, `Storage migration failed on an additive migration; booting degraded: ${migration.error}`)
+		}
+
 		// Config + Barretenberg can load in parallel — neither depends on the other.
 		await Promise.all([
 			config.load().then(() => logger.log("wallet", LogLevel.Info, "Config loaded")),
@@ -99,10 +120,6 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 				logger.log("wallet", LogLevel.Info, "Barretenberg initialized"),
 			),
 		])
-
-		// Destructive storage migration (version-gated) must run before any
-		// service reads storage. Older shapes get wiped; profiles/passkeys preserved.
-		await runStorageMigration((msg) => logger.log("wallet", LogLevel.Info, msg))
 
 		// Service graph. Services migrated to ports accept `browserApi`;
 		// remaining services still reach into `chrome.*` directly until

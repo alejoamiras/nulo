@@ -108,6 +108,10 @@ export interface MigratorOptions {
 	store: MinimalStorageArea
 	migrations: Migration[]
 	maxRetries?: number
+	/** The store's current shape is already at this version (the launch baseline).
+	 *  The effective max is `max(baselineVersion, …migration versions)`; fresh
+	 *  installs stamp it and run nothing. Default 0. */
+	baselineVersion?: number
 }
 
 export class Migrator {
@@ -116,7 +120,7 @@ export class Migrator {
 	private readonly maxRetries: number
 	private readonly maxVersion: number
 
-	constructor({ store, migrations, maxRetries = DEFAULT_MAX_RETRIES }: MigratorOptions) {
+	constructor({ store, migrations, maxRetries = DEFAULT_MAX_RETRIES, baselineVersion = 0 }: MigratorOptions) {
 		this.store = store
 		this.maxRetries = maxRetries
 		this.migrations = [...migrations].sort((a, b) => a.version - b.version)
@@ -125,7 +129,8 @@ export class Migrator {
 			if (!Number.isInteger(v) || v < 1) throw new Error(`migration version must be a positive integer, got ${v}`)
 			if (i > 0 && v === this.migrations[i - 1].version) throw new Error(`duplicate migration version ${v}`)
 		}
-		this.maxVersion = this.migrations.length ? this.migrations[this.migrations.length - 1].version : 0
+		const migMax = this.migrations.length ? this.migrations[this.migrations.length - 1].version : 0
+		this.maxVersion = Math.max(baselineVersion, migMax)
 	}
 
 	/** Drive persisted storage to the current max version. Idempotent + crash-safe. */
@@ -162,6 +167,9 @@ export class Migrator {
 			const failure = await this.applyWithRetry(m)
 			if (failure) return failure
 		}
+		// Reach maxVersion even if the last migration's version is below it (a
+		// baseline floor with no bridging migration). Idempotent if already stamped.
+		await this.store.set({ [SCHEMA_VERSION_KEY]: this.maxVersion })
 		return { kind: "migrated", from, to: this.maxVersion }
 	}
 

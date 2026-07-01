@@ -195,34 +195,6 @@ async function fetchTokenBalances() {
 	)
 }
 
-async function loadBalanceDisplayOptionMigration(profileId, networkId) {
-	const oldKey = "nulo:ui:balanceDisplayOption"
-	const newKey = `nulo:ui:balanceDisplayOption@${profileId}`
-	let option
-	let optionsMap
-
-	const oldResult = await chrome.storage.local.get(oldKey)
-	if (oldKey in oldResult) {
-		option = oldResult[oldKey]
-		await chrome.storage.local.remove(oldKey)
-		if (option) {
-			await saveBalanceDisplayOption(profileId, networkId, option)
-		}
-	} else {
-		const result = await chrome.storage.local.get(newKey)
-		optionsMap = result[newKey] || {}
-
-		option = optionsMap[networkId]
-	}
-
-	if (!option) {
-		option = "total_account_value"
-		optionsMap[networkId] = option
-		await chrome.storage.local.set({ [newKey]: optionsMap })
-	}
-
-	appStore.displayOption = option
-}
 async function loadBalanceDisplayOption(profileId, networkId) {
 	const key = `nulo:ui:balanceDisplayOption@${profileId}`
 
@@ -275,7 +247,7 @@ watch(
 onMounted(async () => {
 	await fetchTokenBalances()
 
-	await loadBalanceDisplayOptionMigration(appStore.profile.id, appStore.network.id) // Replace me with "loadBalanceDisplayOption" at some point
+	await loadBalanceDisplayOption(appStore.profile.id, appStore.network.id)
 })
 onBeforeUnmount(() => {
 	taskService.disconnect()
