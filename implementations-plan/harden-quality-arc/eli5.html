@@ -23,6 +23,18 @@
 <h1>Harden-Quality Arc — meta-plan</h1>
 <p>An autonomous driver that takes the 22 maintainability findings from last run's quality audit and lands them, one at a time, on a throwaway <code>dev-quality</code> branch — re-checking each is still valid, planning it at the right depth, running it past Codex, implementing it, gating it on the <em>full</em> test suite (units + smoke + network), and squash-merging — until all 22 are done. At the end it opens a <code>dev-quality → dev</code> pull request <strong>for you to merge</strong> (it never merges that itself). No production users exist, so it's free to break backwards-compatibility as long as the app + every test still pass.</p>
 
+<div class="approval">
+<h2 style="margin-top:.2rem">✅ FINAL OUTCOME — arc complete, promote PR open for you to merge</h2>
+<p><strong>21 of 22 findings landed</strong> on <code>dev-quality</code> (HEAD <code>dc2a03e</code>). The promote <code>dev-quality → dev</code> PR is <strong>open and green — you merge it</strong> (the driver never does).</p>
+<ul>
+  <li><strong>Not landed — owner-gated (1):</strong> <strong>Q-13</strong> (backup cross-profile leak). Blueprinted only — its fix touches the <em>backup persisted shape</em> (a wipe-vs-tolerate call), a hard limit reserved for you. It's a maintainability + defense-in-depth finding; leaving it unlanded is <em>not</em> a regression (the gap it surfaced already exists on <code>dev</code> and isn't dApp-reachable).</li>
+  <li><strong>Both confidence passes agree it's safe:</strong> Codex → <em>SAFE TO PROMOTE</em>; fresh-Opus (adversarial) → <em>PROMOTE-WITH-FIXES</em>, and its one "blocking" fix — run the combined full-network sweep on the finished branch — <strong>is done and green</strong> (Quality + Smoke + Network e2e). Opus found no code regression and no permission-boundary slip.</li>
+  <li><strong>The security promise held, stated precisely:</strong> the frozen permission/crypto oracle <em>assertions</em> are byte-for-byte unchanged. The only change to any frozen test file is a single mechanical <em>import-path</em> line (from de-duplicating the schema-patch, Q-08) — the actual permission tables and crypto test-vectors are identical. (An earlier draft over-claimed "files never edited"; the honest version is "assertions never changed + one mechanical import re-point.")</li>
+  <li><strong>Deferred sub-parts (documented follow-ons, not silently dropped):</strong> the dApp-window shell (Q-14), the PXE descriptor table (Q-03), the storage-codec roll-out to the remaining stores + RPC/dApp/backup (Q-01), and typed argument tuples (Q-02 — blocked because it would need to edit the frozen oracle, i.e. your call). Plus one surfaced <em>product</em> race (lock right after a password change) — fixed test-side, product fix is yours.</li>
+</ul>
+<p class="muted">Full detail: the promote PR body + <a href="plan.md">plan.md</a> (P0–P21 with SHAs/run-ids) + <a href="./lessons/">lessons/</a>. The planning write-up below is preserved as the original blueprint.</p>
+</div>
+
 <h2>Why <code>mid</code> (for the plan itself)</h2>
 <p>The rubric scores the <em>driver</em>, not the arc's reach: novelty low (this is the exact pattern that shipped the batch-2 arc), blast-radius low (it writes only to a throwaway branch; the one irreversible step — the <code>dev</code> merge — is yours), irreversibility/migration/coupling all low. 0–1 high → <code>mid</code>. The risk lives in individual findings, so each one gets its OWN tier inside the loop: <code>light</code> for the 7 cheap wins, <code>mid</code> for the dedup/typing, <code>deep</code> for the cross-cutting + concurrency + privacy ones, <code>mega-deep</code> for the two trust-boundary rewrites (Q-01 decode layer, Q-02 typed dispatch).</p>
 
