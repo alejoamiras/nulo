@@ -40,6 +40,12 @@ describe("definePassthroughs", () => {
 		expect(Object.keys(instance)).not.toContain("foo")
 	})
 
+	test("installed methods carry their own name (stack-trace identity, not 'value')", () => {
+		const { instance } = makeInstance()
+		expect((instance.foo as { name: string }).name).toBe("foo")
+		expect((instance.bar as { name: string }).name).toBe("bar")
+	})
+
 	test("returns whatever request returns (passthrough, no wrapping)", async () => {
 		const request = vi.fn(async () => ({ shaped: true }))
 		class C {

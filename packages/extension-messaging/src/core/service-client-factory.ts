@@ -27,16 +27,17 @@ import type { MethodsMap } from "@nulo/wallet-core/base"
  */
 export function definePassthroughs<M extends MethodsMap>(proto: object, methods: readonly (keyof M & string)[]): void {
 	for (const name of methods) {
-		Object.defineProperty(proto, name, {
-			value: function (
-				this: { request(method: string, ...args: unknown[]): Promise<unknown> },
-				...args: unknown[]
-			): Promise<unknown> {
-				return this.request(name, ...args)
-			},
-			writable: true,
-			enumerable: false,
-			configurable: true,
-		})
+		const forward = function (
+			this: { request(method: string, ...args: unknown[]): Promise<unknown> },
+			...args: unknown[]
+		): Promise<unknown> {
+			return this.request(name, ...args)
+		}
+		// Restore the method's own `.name` so stack traces and `Function.prototype.name`
+		// match the hand-written methods (an object-literal value would otherwise be
+		// "value"). Arity (`.length`) is NOT preserved — rest params make it 0 — but it
+		// isn't part of the client API and has no consumers.
+		Object.defineProperty(forward, "name", { value: name, configurable: true })
+		Object.defineProperty(proto, name, { value: forward, writable: true, enumerable: false, configurable: true })
 	}
 }
