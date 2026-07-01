@@ -60,7 +60,7 @@ export function useProfileBootstrap() {
 	 * popup/app.vue's `onActiveProfileChanged(profile)` — minus the routing
 	 * decisions and `popupStore.closeAll()` which stay in the calling shell.
 	 */
-	const bootstrapActiveProfile = async (profile: ProfileInfo): Promise<void> => {
+	const bootstrapActiveProfile = async (profile: ProfileInfo): Promise<boolean> => {
 		appStore.profile = profile
 		// Refresh the in-memory list so the profile switcher + any other
 		// consumer sees adds (backup-import activates a restored profile)
@@ -73,7 +73,16 @@ export function useProfileBootstrap() {
 		initTransactionService(appStore.onTxAdded, appStore.onTxUpdated)
 		await appStore.syncTransactions()
 
-		appStore.isLogined = true
+		// The lock must win: if the active session was cleared or switched while
+		// this bootstrap awaited (e.g. a lock fired right after a password change),
+		// do NOT flip isLogined back on. getActiveProfile() runs under the same
+		// profile-service runExclusive mutex as lockActiveProfile(), so this re-read
+		// observes the completed lock rather than the stale pre-lock session.
+		const stillActive = (await managers.profile.getActiveProfile())?.id === profile.id
+		if (stillActive) {
+			appStore.isLogined = true
+		}
+		return stillActive
 	}
 
 	/**
@@ -93,7 +102,12 @@ export function useProfileBootstrap() {
 		initTransactionService(appStore.onTxAdded, appStore.onTxUpdated)
 		await appStore.syncTransactions()
 
-		appStore.isLogined = true
+		// Same lock-wins guard as bootstrapActiveProfile: don't flip isLogined if the
+		// session was cleared/switched mid-hydrate. isSessionChecked is set either way
+		// (the session WAS checked); a stale isLogined=true is the only harmful write.
+		if ((await managers.profile.getActiveProfile())?.id === activeProfile.id) {
+			appStore.isLogined = true
+		}
 		appStore.isSessionChecked = true
 
 		return activeProfile
