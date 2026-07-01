@@ -145,7 +145,7 @@ onBeforeUnmount(() => {
 
 			<Flex direction="column" gap="12">
 				<Text size="11" weight="700" color="secondary" :class="$style.section_label">Authentication method</Text>
-				<Flex gap="0" :class="$style.tabs" role="tablist" aria-label="Authentication method" @keydown="onMethodKeydown">
+				<Flex :class="$style.tabs" role="tablist" aria-label="Authentication method" @keydown="onMethodKeydown">
 					<button
 						ref="passwordTabRef"
 						type="button"
