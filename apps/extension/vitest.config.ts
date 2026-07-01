@@ -40,6 +40,7 @@ export default defineConfig({
 			"../../packages/extension-messaging/src/**/*.test.ts",
 			"../../packages/aztec-runtime/src/**/*.test.ts",
 			"../../packages/wallet-bridge/src/**/*.test.ts",
+			"../../packages/wallet-sdk-schema-patch/src/**/*.test.ts",
 		],
 		exclude: ["tests/e2e/**", "node_modules/**"],
 		// Inline workspace @nulo/* packages so vite processes their TS

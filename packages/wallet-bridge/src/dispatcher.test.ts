@@ -846,7 +846,7 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		// reachability assertion: if the side-effect import drifts (renamed,
 		// moved, or accidentally tree-shaken by a future bundler), this test
 		// fails.
-		await import("../../../apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
+		await import("@nulo/wallet-sdk-schema-patch/register")
 		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
 		expect("registerToken" in WalletSchema).toBe(true)
 		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
@@ -1163,32 +1163,13 @@ describe("dispatcher — isTokenRegistered reachability + gating", () => {
 	}
 
 	test("schema patch extends WalletSchema with a 1-arg boolean `isTokenRegistered` entry", async () => {
-		await import("../../../apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
+		await import("@nulo/wallet-sdk-schema-patch/register")
 		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
 		expect("isTokenRegistered" in WalletSchema).toBe(true)
 		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
 		const entry = (WalletSchema as any).isTokenRegistered
 		expect(entry?.def?.input?.def?.items?.length).toBe(1)
 		expect(entry?.def?.output?.def?.type).toBe("boolean")
-	})
-
-	test("the three schema-patch copies are content-identical (drift pin)", async () => {
-		const { readFileSync } = await import("node:fs")
-		const { resolve } = await import("node:path")
-		const root = resolve(__dirname, "../../..")
-		const read = (p: string) => readFileSync(resolve(root, p), "utf8")
-		const ext = read("apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts")
-		const faucet = read("apps/faucet/src/lib/nulo-schema-patch.ts")
-		const playground = read("apps/playground/src/lib/nulo-schema-patch.ts")
-		// Identical Zod surface: compare with the per-file header comments stripped (comments may
-		// name their own mirror paths) - every CODE line must match.
-		const code = (s: string) =>
-			s
-				.split("\n")
-				.filter((l) => !l.trim().startsWith("*") && !l.trim().startsWith("//") && !l.trim().startsWith("/*"))
-				.join("\n")
-		expect(code(faucet)).toBe(code(ext))
-		expect(code(playground)).toBe(code(ext))
 	})
 
 	test("granted address ⇒ boolean from the reader, NO interaction service involved", async () => {
@@ -1510,7 +1491,7 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 
 describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 	test("schema patch extends WalletSchema with a 2-arg `grantPublicAuthwit` entry", async () => {
-		await import("../../../apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
+		await import("@nulo/wallet-sdk-schema-patch/register")
 		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
 		expect("grantPublicAuthwit" in WalletSchema).toBe(true)
 		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
