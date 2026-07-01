@@ -25,3 +25,9 @@ Three parallel lens-reviewers (correctness/concurrency · security/adversarial �
 
 ## Verified-fine (security lens, recorded)
 No XSS in the barrier (mustache-escaped); fixture prod-exclusion chain sound end-to-end; workflows least-privilege, no injection; independent raw-storage tree scan matches the ban; the backup duplicating encrypted profile ciphertext stays within the same storage trust domain (no new exposure, cleared on success).
+
+## Codex post-impl audit (3 rounds → approve)
+- **R1 `reject`** — 3 blockers, all verified real: (1) resume ran before marker validation → an armed journal with a missing version could restore/clear then FRESH-STAMP hostile state; (2) a non-breaking failure returned immediately → degraded boot on data with LATER migrations unapplied; (3) syncedRef adopted raw `onChanged` newValues mid-migration. Fixed in `be501e5` (+ Mediums: ref-shape validation, attempts-before-clear, structural registry test).
+- **R2 `reject`** — sharper: `typeof version !== "number"` still admitted `-1`/`1.5`/`999`/`NaN` (typeof number!) into the restore/clear matrix; `backup.version` unbounded before its refs were trusted. Fixed in `514385f` (full `isValidMarker` + `1..maxVersion` bounds under an armed journal; per-value pinning tests).
+- **R3 `approve`** (unconditional).
+Residual, explicitly accepted by the auditor: the documented facade check-then-act TOCTOU (deferred to the SW-routing follow-up). Final counts: engine tests 37, facade/barrier/ban 22, registry structural 3, e2e 4/4 (re-proven after every engine change).
