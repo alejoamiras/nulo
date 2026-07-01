@@ -2,7 +2,7 @@
  * Q-12 equivalence proof. Asserts the descriptor-registry output is byte-identical to the
  * old copy-paste module it replaces, kind by kind, against the real Token artifact + synthetic
  * multi-candidate artifacts. A kind's old module is only deleted after its equivalence test is
- * green. (Currently: the 5 read/view kinds. Transfers are added as they migrate.)
+ * green. (All 9 kinds — 5 read + 4 transfer.)
  */
 import type { Fr } from "@aztec/foundation/curves/bn254"
 import type { ContractArtifact, FunctionAbi } from "@aztec/stdlib/abi"
@@ -17,11 +17,19 @@ import {
 	getDecimalsDescriptor,
 	getNameDescriptor,
 	getSymbolDescriptor,
+	transferPrivateDescriptor,
+	transferPrivateToPublicDescriptor,
+	transferPublicDescriptor,
+	transferPublicToPrivateDescriptor,
 } from "./descriptors"
 import { GetDecimalsFn } from "./get-decimals"
 import { GetNameFn } from "./get-name"
 import { GetSymbolFn } from "./get-symbol"
 import { createTokenFn, getDefaultTokenFn, getTokenFnCandidates } from "./runtime"
+import { TransferPrivateFn } from "./transfer-private"
+import { TransferPrivateToPublicFn } from "./transfer-private-to-public"
+import { TransferPublicFn } from "./transfer-public"
+import { TransferPublicToPrivateFn } from "./transfer-public-to-private"
 import type { TokenFnDescriptor } from "./types"
 
 // The old abstract matcher classes expose these statics; typed structurally for the loop.
@@ -127,3 +135,66 @@ describe("token-fn registry ≡ old module — balanceOfPublic synthetic scoring
 		expect(getTokenFnCandidates(balanceOfPublicDescriptor, art).map(shape)).toEqual(BalanceOfPublicFn.getCandidates(art).map(shape))
 	})
 })
+
+// Transfer kinds are `Fn` (call) — no unpackResult; buildArgs differs per variant impl
+// (2-param `[to, amount]` vs 4-param `[from, to, amount, Fr.zero()]`), so it is checked per impl.
+const TRANSFER_KINDS: ReadonlyArray<{
+	name: string
+	descriptor: TokenFnDescriptor
+	old: OldMatcher
+	impls: readonly number[]
+	invalidMessage: string
+}> = [
+	{
+		name: "transferPublic",
+		descriptor: transferPublicDescriptor,
+		old: TransferPublicFn as unknown as OldMatcher,
+		impls: [0],
+		invalidMessage: "Invalid TransferPublicImpl",
+	},
+	{
+		name: "transferPrivate",
+		descriptor: transferPrivateDescriptor,
+		old: TransferPrivateFn as unknown as OldMatcher,
+		impls: [0, 1],
+		invalidMessage: "Invalid TransferPrivateImpl",
+	},
+	{
+		name: "transferPublicToPrivate",
+		descriptor: transferPublicToPrivateDescriptor,
+		old: TransferPublicToPrivateFn as unknown as OldMatcher,
+		impls: [0, 1],
+		invalidMessage: "Invalid TransferPublicToPrivateImpl",
+	},
+	{
+		name: "transferPrivateToPublic",
+		descriptor: transferPrivateToPublicDescriptor,
+		old: TransferPrivateToPublicFn as unknown as OldMatcher,
+		impls: [0],
+		invalidMessage: "Invalid TransferPrivateToPublicImpl",
+	},
+]
+
+for (const k of TRANSFER_KINDS) {
+	describe(`token-fn registry ≡ old module — ${k.name}`, () => {
+		test("candidates + default identical (real Token artifact)", () => {
+			const oldC = k.old.getCandidates(artifact)
+			const newC = getTokenFnCandidates(k.descriptor, artifact)
+			expect(newC.map(shape)).toEqual(oldC.map(shape))
+			expect(getDefaultTokenFn(k.descriptor, newC)?.name ?? null).toBe(k.old.getDefault(oldC)?.name ?? null)
+		})
+
+		test("buildArgs identical for every variant impl", () => {
+			for (const impl of k.impls) {
+				const oldArgs = k.old.new("x", impl).buildArgs("0xfrom", "0xto", 100n)
+				const newArgs = createTokenFn(k.descriptor, "x", impl).buildArgs("0xfrom", "0xto", 100n)
+				expect(newArgs).toEqual(oldArgs)
+			}
+		})
+
+		test("invalid impl throws the same message", () => {
+			expect(() => createTokenFn(k.descriptor, "x", 99)).toThrow(k.invalidMessage)
+			expect(() => k.old.new("x", 99)).toThrow(k.invalidMessage)
+		})
+	})
+}

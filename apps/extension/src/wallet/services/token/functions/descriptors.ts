@@ -1,6 +1,6 @@
-import type { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec/foundation/curves/bn254"
 import { type FunctionAbi, FunctionType, type StructType } from "@aztec/stdlib/abi"
-import type { TokenFnDescriptor } from "./types"
+import type { TokenFnDescriptor, TokenFnKind } from "./types"
 
 /**
  * Descriptor table — the data-driven replacement for the 9 copy-paste token-function
@@ -10,7 +10,7 @@ import type { TokenFnDescriptor } from "./types"
  * "improve" while transcribing (see the module headers for the accepted loose predicates).
  *
  * Migration status: kinds are added here one at a time, each proven equivalent to its old
- * module before the old module is deleted (Q-12 phasing). Present: the 5 read (view) kinds.
+ * module before the old module is deleted (Q-12 phasing). All 9 kinds present (5 read + 4 transfer).
  */
 
 const AZTEC_ADDRESS_PATH = "aztec::protocol_types::address::aztec_address::AztecAddress"
@@ -209,3 +209,216 @@ export const getDecimalsDescriptor: TokenFnDescriptor = metadataDescriptor({
 	returnMatches: (actual) => actual.kind === "integer" && actual.sign === "unsigned" && actual.width === 8,
 	unpackResult: (result) => result[0].toNumber(),
 })
+
+// ── Transfer kinds (fnType "call" — no unpackResult) ─────────────────────────────────
+// Two variant shapes recur: a 4-param `(from, to, amount, authwit_nonce)` and a 2-param
+// `(to, amount)` (PRIVATE only). Predicates are LOOSE on amount (kind "integer", not width)
+// and accept `authwit_nonce` OR `_nonce` while the abi emits `authwit_nonce` — preserved verbatim.
+const addressParam = (name: string) => ({
+	name,
+	type: { fields: [{ name: "inner", type: { kind: "field" as const } }], kind: "struct" as const, path: AZTEC_ADDRESS_PATH },
+	visibility: "private" as const,
+})
+const amountParam = {
+	name: "amount",
+	type: { kind: "integer" as const, sign: "unsigned" as const, width: 128 },
+	visibility: "private" as const,
+}
+const nonceParam = { name: "authwit_nonce", type: { kind: "field" as const }, visibility: "private" as const }
+
+const transfer4Abi = (name: string, functionType: FunctionType): FunctionAbi => ({
+	name,
+	isInitializer: false,
+	functionType,
+	isOnlySelf: false,
+	isStatic: false,
+	parameters: [addressParam("from"), addressParam("to"), amountParam, nonceParam],
+	returnTypes: [],
+	errorTypes: {},
+})
+const transfer2Abi = (name: string): FunctionAbi => ({
+	name,
+	isInitializer: false,
+	functionType: FunctionType.PRIVATE,
+	isOnlySelf: false,
+	isStatic: false,
+	parameters: [addressParam("to"), amountParam],
+	returnTypes: [],
+	errorTypes: {},
+})
+const transfer4Predicate = (fn: FunctionAbi, functionType: FunctionType): boolean =>
+	!fn.isInitializer &&
+	!fn.isOnlySelf &&
+	!fn.isStatic &&
+	fn.functionType === functionType &&
+	fn.parameters.length === 4 &&
+	fn.parameters[0].name === "from" &&
+	(fn.parameters[0].type as StructType)?.path === AZTEC_ADDRESS_PATH &&
+	fn.parameters[1].name === "to" &&
+	(fn.parameters[1].type as StructType)?.path === AZTEC_ADDRESS_PATH &&
+	fn.parameters[2].name === "amount" &&
+	fn.parameters[2].type.kind === "integer" &&
+	(fn.parameters[3].name === "authwit_nonce" || fn.parameters[3].name === "_nonce") &&
+	fn.parameters[3].type.kind === "field" &&
+	fn.returnTypes.length === 0
+const transfer2Predicate = (fn: FunctionAbi): boolean =>
+	!fn.isInitializer &&
+	!fn.isOnlySelf &&
+	!fn.isStatic &&
+	fn.functionType === FunctionType.PRIVATE &&
+	fn.parameters.length === 2 &&
+	fn.parameters[0].name === "to" &&
+	(fn.parameters[0].type as StructType)?.path === AZTEC_ADDRESS_PATH &&
+	fn.parameters[1].name === "amount" &&
+	fn.parameters[1].type.kind === "integer" &&
+	fn.returnTypes.length === 0
+
+interface TransferVariant {
+	impl: number
+	source: "functions" | "nonDispatchPublicFunctions"
+	functionType: FunctionType
+	params: 2 | 4
+}
+
+function transferDescriptor(config: {
+	kind: TokenFnDescriptor["kind"]
+	invalidImplMessage: string
+	variants: readonly TransferVariant[]
+	score: TokenFnDescriptor["score"]
+	defaultNames: readonly string[]
+}): TokenFnDescriptor {
+	const byImpl = new Map(config.variants.map((v) => [v.impl, v]))
+	const variant = (impl: number): TransferVariant => {
+		const v = byImpl.get(impl)
+		if (!v) throw new Error(config.invalidImplMessage)
+		return v
+	}
+	return {
+		kind: config.kind,
+		fnType: "call",
+		variants: config.variants.map((v) => ({ impl: v.impl, source: v.source })),
+		invalidImplMessage: config.invalidImplMessage,
+		abiBuilder: (name, impl): FunctionAbi => {
+			const v = variant(impl)
+			return v.params === 2 ? transfer2Abi(name) : transfer4Abi(name, v.functionType)
+		},
+		candidatePredicate: (fn, impl): boolean => {
+			const v = variant(impl)
+			return v.params === 2 ? transfer2Predicate(fn) : transfer4Predicate(fn, v.functionType)
+		},
+		buildArgs: (impl, ...args): unknown[] => {
+			const [from, to, amount] = args
+			return variant(impl).params === 2 ? [to, amount] : [from, to, amount, Fr.zero()]
+		},
+		score: config.score,
+		defaultNames: config.defaultNames,
+	}
+}
+
+/** transferPublic — from transfer-public.ts (1 variant, PUBLIC, `nonDispatchPublicFunctions`). */
+export const transferPublicDescriptor: TokenFnDescriptor = transferDescriptor({
+	kind: "transferPublic",
+	invalidImplMessage: "Invalid TransferPublicImpl",
+	variants: [{ impl: 0, source: "nonDispatchPublicFunctions", functionType: FunctionType.PUBLIC, params: 4 }],
+	score: (fn): number => {
+		if (fn.name === "transfer_public_to_public") return 102
+		if (fn.name === "transfer_in_public") return 100
+		let p = 0
+		if (fn.name.includes("transfer")) {
+			p += 1
+			if (fn.name.includes("public")) {
+				p += 2
+				if (!fn.name.includes("private")) p += 4
+			}
+		}
+		return p
+	},
+	defaultNames: ["transfer_public_to_public", "transfer_in_public"],
+})
+
+/** transferPrivate — from transfer-private.ts (2 variants: Default `[to,amount]` + DefaultFrom 4-param). */
+export const transferPrivateDescriptor: TokenFnDescriptor = transferDescriptor({
+	kind: "transferPrivate",
+	invalidImplMessage: "Invalid TransferPrivateImpl",
+	variants: [
+		{ impl: 0, source: "functions", functionType: FunctionType.PRIVATE, params: 2 },
+		{ impl: 1, source: "functions", functionType: FunctionType.PRIVATE, params: 4 },
+	],
+	score: (fn): number => {
+		if (fn.name === "transfer_private_to_private") return 102
+		if (fn.name === "transfer") return 101
+		if (fn.name === "transfer_in_private") return 100
+		let p = 0
+		if (fn.name.includes("transfer")) {
+			p += 1
+			if (fn.name.includes("private")) {
+				p += 2
+				if (!fn.name.includes("public")) p += 4
+			}
+		}
+		return p
+	},
+	defaultNames: ["transfer_private_to_private", "transfer", "transfer_in_private"],
+})
+
+/** transferPublicToPrivate — from transfer-public-to-private.ts (2 variants: Default `[to,amount]` + DefiWonderland 4-param). */
+export const transferPublicToPrivateDescriptor: TokenFnDescriptor = transferDescriptor({
+	kind: "transferPublicToPrivate",
+	invalidImplMessage: "Invalid TransferPublicToPrivateImpl",
+	variants: [
+		{ impl: 0, source: "functions", functionType: FunctionType.PRIVATE, params: 2 },
+		{ impl: 1, source: "functions", functionType: FunctionType.PRIVATE, params: 4 },
+	],
+	score: (fn): number => {
+		if (fn.name === "transfer_public_to_private") return 101
+		if (fn.name === "transfer_to_private") return 100
+		let p = 0
+		if (fn.name.includes("transfer")) {
+			p += 1
+			if (fn.name.includes("to_private")) {
+				p += 2
+				if (fn.name.includes("public_to_private")) p += 4
+			}
+		}
+		return p
+	},
+	defaultNames: ["transfer_public_to_private", "transfer_to_private"],
+})
+
+/** transferPrivateToPublic — from transfer-private-to-public.ts (1 variant, PRIVATE, 4-param). */
+export const transferPrivateToPublicDescriptor: TokenFnDescriptor = transferDescriptor({
+	kind: "transferPrivateToPublic",
+	invalidImplMessage: "Invalid TransferPrivateToPublicImpl",
+	variants: [{ impl: 0, source: "functions", functionType: FunctionType.PRIVATE, params: 4 }],
+	score: (fn): number => {
+		if (fn.name === "transfer_private_to_public") return 101
+		if (fn.name === "transfer_to_public") return 100
+		let p = 0
+		if (fn.name.includes("transfer")) {
+			p += 1
+			if (fn.name.includes("to_public")) {
+				p += 2
+				if (fn.name.includes("private_to_public")) p += 4
+			}
+		}
+		return p
+	},
+	defaultNames: ["transfer_private_to_public", "transfer_to_public"],
+})
+
+/**
+ * The single source of truth for the 9 token-function kinds. `satisfies` makes a missing or
+ * extra kind a compile error. Consumers (service assembly, spec completeness, OperationPlanner)
+ * iterate this instead of re-threading the 9-way enum.
+ */
+export const TOKEN_FN_DESCRIPTORS = {
+	getName: getNameDescriptor,
+	getSymbol: getSymbolDescriptor,
+	getDecimals: getDecimalsDescriptor,
+	balanceOfPrivate: balanceOfPrivateDescriptor,
+	balanceOfPublic: balanceOfPublicDescriptor,
+	transferPrivate: transferPrivateDescriptor,
+	transferPublic: transferPublicDescriptor,
+	transferPrivateToPublic: transferPrivateToPublicDescriptor,
+	transferPublicToPrivate: transferPublicToPrivateDescriptor,
+} satisfies Record<TokenFnKind, TokenFnDescriptor>
