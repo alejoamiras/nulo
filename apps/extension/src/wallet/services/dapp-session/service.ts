@@ -18,6 +18,7 @@ import {
 	type AccessLevel,
 	type Methods,
 	type Events,
+	DappSessionSchema,
 } from "./spec"
 
 export * from "./spec"
@@ -50,7 +51,9 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(DAPP_SESSION_SERVICE_NAME, logger)
-		this.storage = new EntityStorage<DappSession>("nulo:core:dappSessions", browserApi.storage.local)
+		this.storage = new EntityStorage<DappSession>("nulo:core:dappSessions", browserApi.storage.local, (raw) =>
+			DappSessionSchema.parse(raw),
+		)
 	}
 
 	protected async init(services: ServiceCollection) {
