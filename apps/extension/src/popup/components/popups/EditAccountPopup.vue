@@ -56,27 +56,11 @@ const handleUpdateAccount = async () => {
 	openToast({ label: "Account is updated" })
 }
 
-watch(
-	() => props.show,
-	() => {
-		if (!props.show) {
-			document.removeEventListener("keydown", onKeydown)
-
-			handleFillFieldsWithDefaultValues()
-		} else {
-			document.addEventListener("keydown", onKeydown)
-
-			handleFillFieldsWithDefaultValues()
-		}
-	},
-)
-
-const onKeydown = (e) => {
-	if (e.key !== "Enter") return
-	const target = e.target
-	if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-	handleUpdateAccount()
-}
+usePopupEntity(() => props.show, {
+	submit: handleUpdateAccount,
+	onShow: handleFillFieldsWithDefaultValues,
+	onHide: handleFillFieldsWithDefaultValues,
+})
 </script>
 
 <template>
