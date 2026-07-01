@@ -86,7 +86,7 @@ The migration-aware storage facade routing **every** direct reader (§3.6 list);
 Build-time-excluded fixture (§3.9) + **four** smoke e2es hitting the real boot path.
 **Gate** — `bun run test:e2e` (selectors by `data-testid` only). Pass: (1) fixture transforms seeded live rows + checkpoints; (2) throwing fixture ⇒ version unadvanced + backup restored + **next-boot retry with a fixed fixture completes + clears backup**; (3) **popup opened mid-migration** shows "Updating…" + no old-shape write-back; (4) **SW killed at each journal kill-point** (running-before-backup, backup-before-write, stamp-before-clear, restore-partial-fail) ⇒ next boot converges correctly. Negative bundle-grep proves the fixture marker absent from `dist/`. Layers: smoke e2e (+ prior green).
 
-### Phase 5 — Docs + network e2e
+### Phase 5 — Docs + network e2e ✓ COMPLETE
 ARCHITECTURE.md §5 (framework + worked `template.ts` example) + §3 (journal now `local`); `apps/extension/README.md` + `packages/wallet-core/README.md`; supersede M4.7 in `M4/DECISIONS.md`; update `implementations-plan/index.md`; add a pointer to the `storage-migration-backup/` follow-up. Network e2e: cold-boot + register/sync post-migration.
 **Gate** — `bun run e2e:agent` && `bun run audit:vue`. Pass: cold-boot + register/sync round-trip; docs reflect live behavior. Layers: network e2e · full audit gate.
 
