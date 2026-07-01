@@ -35,6 +35,21 @@
 <p class="muted">Full detail: the promote PR body + <a href="plan.md">plan.md</a> (P0–P21 with SHAs/run-ids) + <a href="./lessons/">lessons/</a>. The planning write-up below is preserved as the original blueprint.</p>
 </div>
 
+<div class="approval" style="border-left-color:#22863a;background:#f0fff4">
+<h2 style="margin-top:.2rem">✅ ROUND 2 — every deferral finished; the same PR now carries the whole arc</h2>
+<p><strong>Round 2 landed on the same <code>dev-quality</code> branch</strong> (code HEAD <code>f636f6c</code>, PRs #227–#244, each behind the same full gate). Everything the round-1 list above calls "deferred" or "owner-gated" is now DONE — with your six authorizations folded in:</p>
+<ul>
+  <li><strong>Q-13 backup leak — FIXED</strong> (your call #3): the token-balance backup export no longer ships other profiles' balances. Export-only; restoring old backups behaves exactly as before (your call #4). Plus every by-id read is now ownership-guarded fail-closed, with the profile-delete cascade proven intact by a standing 11-assertion isolation suite.</li>
+  <li><strong>The lock race — FIXED in product</strong>: locking right after a password change can no longer resurrect a logged-in UI. The lock always wins.</li>
+  <li><strong>dApp approval windows</strong>: the three approval popups now share one lifecycle shell, extracted against a 37-pin "frozen oracle" that passed byte-unchanged before AND after — including the deliberately-weird bits (dismissing an overlay rejects the request via the page-unload event; that's load-bearing and preserved).</li>
+  <li><strong>PXE surface</strong>: one flags table now owns which methods exist where; the three service-worker-only methods (including chain-purge) are <em>compile-time</em> excluded from the per-network handle a dApp-adjacent caller gets.</li>
+  <li><strong>Storage codecs</strong>: 11 stores now validate rows on read — a bad row is hidden, never deleted. The real-proving canary caught a real first-cut bug here (two Aztec enums are numbers, not objects) and blocked it from landing — the gates doing their job.</li>
+  <li><strong>Typed dispatch args (your call #5)</strong>: the ONE authorized edit to the frozen permission oracle happened — mechanically provable as add-only (zero deleted lines), with the exact diff pinned in PR #244's body for you to eyeball.</li>
+</ul>
+<p><strong>Before you merge #220, three things need you</strong> (details in <a href="WRAP-UP.md">WRAP-UP.md</a> §Round-2 owner action items): the promote's commitlint red (one over-long line in an old commit body — reword+force-push, or <code>--admin</code> the squash, which is clean here), the 1Password agent that died mid-run (a few unsigned commits; the squash is web-signed anyway), and the R6 oracle diff review. Three follow-on questions are parked for your ruling: the RPC/dApp decode layer, profile/session/config codecs, and the optional typed-tuple layer.</p>
+<p class="muted">Round-2 detail: <a href="round-2/plan.md">round-2/plan.md</a> (R0–R7 with SHAs/run-ids) + <a href="round-2/lessons/">round-2/lessons/</a> + <a href="round-2/R3-characterization.md">the window characterization</a>.</p>
+</div>
+
 <h2>Why <code>mid</code> (for the plan itself)</h2>
 <p>The rubric scores the <em>driver</em>, not the arc's reach: novelty low (this is the exact pattern that shipped the batch-2 arc), blast-radius low (it writes only to a throwaway branch; the one irreversible step — the <code>dev</code> merge — is yours), irreversibility/migration/coupling all low. 0–1 high → <code>mid</code>. The risk lives in individual findings, so each one gets its OWN tier inside the loop: <code>light</code> for the 7 cheap wins, <code>mid</code> for the dedup/typing, <code>deep</code> for the cross-cutting + concurrency + privacy ones, <code>mega-deep</code> for the two trust-boundary rewrites (Q-01 decode layer, Q-02 typed dispatch).</p>
 
