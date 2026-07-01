@@ -40,6 +40,12 @@ export const PXE_ANCHOR_SYNC_WORKAROUND_MS = 5_000
  *  Under vitest worker pressure the SW round-trip can take 5-10s before
  *  the navigation lands; 20s timeout is generous enough to absorb that. */
 export async function lockWallet(page: Page): Promise<void> {
+	// Wait for the lock control to actually be mounted BEFORE clicking. A bare
+	// `querySelector(...)?.click()` silently no-ops if the header hasn't
+	// (re)mounted yet — e.g. right after a `router.back()` — and then the
+	// hash-wait below burns its full timeout with nothing having happened. That
+	// was the root cause of the intermittent `change password` smoke flake.
+	await page.waitForSelector('[data-testid="header-lock"]', { visible: true, timeout: 15_000 })
 	await page.evaluate(() => {
 		;(document.querySelector('[data-testid="header-lock"]') as HTMLElement)?.click()
 	})
