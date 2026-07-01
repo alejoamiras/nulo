@@ -99,7 +99,7 @@ export class BalanceProjector {
 			const calls: [CallAction | EncodedCallAction, number, boolean, ViewFn][] = []
 			const perBalance: Record<number, { privateBalance: string; publicBalance: string }> = {}
 			// Cache so the two passes below don't re-fetch the same token metadata.
-			const tokenCache = new Map<number, Awaited<ReturnType<typeof this.tokens.getTokenRaw>>>()
+			const tokenCache = new Map<number, Awaited<ReturnType<typeof this.tokens.getTokenRaw>> | undefined>()
 
 			// Pass 0: initialize perBalance entries + populate the token cache.
 			for (let i = 0; i < balances.length; i++) {
@@ -108,7 +108,10 @@ export class BalanceProjector {
 					privateBalance: balance.privateBalance ?? "0",
 					publicBalance: balance.publicBalance ?? "0",
 				}
-				tokenCache.set(balance.id, await this.tokens.getTokenRaw(balance.token))
+				// `.catch(undefined)` absorbs the R1.4 ownership guard on `getTokenRaw`: a
+				// stale/foreign balance whose token the active profile doesn't own now
+				// throws — cache undefined so the passes below skip it (see `if (!token)`).
+				tokenCache.set(balance.id, await this.tokens.getTokenRaw(balance.token).catch(() => undefined))
 			}
 
 			// Pass 1: enqueue every PUBLIC call across all balances first.
@@ -121,7 +124,7 @@ export class BalanceProjector {
 			for (let i = 0; i < balances.length; i++) {
 				const balance = balances[i]
 				const token = tokenCache.get(balance.id)
-				if (!token) continue // unreachable: pass 0 populated for every balance
+				if (!token) continue // skip a balance whose token the active profile doesn't own (R1.4 guard)
 				if (token.balanceOfPublicFn) {
 					const fn = createViewTokenFn(
 						TOKEN_FN_DESCRIPTORS.balanceOfPublic,
@@ -138,7 +141,7 @@ export class BalanceProjector {
 			for (let i = 0; i < balances.length; i++) {
 				const balance = balances[i]
 				const token = tokenCache.get(balance.id)
-				if (!token) continue // unreachable: pass 0 populated for every balance
+				if (!token) continue // skip a balance whose token the active profile doesn't own (R1.4 guard)
 				if (token.balanceOfPrivateFn) {
 					const fn = createViewTokenFn(
 						TOKEN_FN_DESCRIPTORS.balanceOfPrivate,
