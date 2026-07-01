@@ -1,0 +1,102 @@
+# Harden-Quality Arc — Round 2 (finish the deferrals, then merge the whole arc)
+
+**Goal:** on the SAME `dev-quality` branch (promote PR #220 stays open + grows), land the parts round-1 deliberately deferred, so the owner QAs and merges **one complete quality arc** into `dev`. Round-1 landed 21/22 findings + the P21 finale; round-2 finishes Q-13, a real backup leak, and the five documented follow-ons.
+
+**Owner decisions locked (this conversation):**
+1. **Do NOT merge #220 yet** — owner manual-QAs the whole change; round-2 accumulates onto `dev-quality`; owner merges at the end.
+2. **Q-13: BUILD** the dedup (owner: "I hate duplicated code"). **Ownership guards approved** (close the by-id gaps fail-closed).
+3. **Backup leak #1: FIX, folded into Q-13** (token-balance phase), not a separate PR.
+4. **Backup restore behavior: PRESERVE exactly** (owner will do dedicated migration/backup work later — touch it as little as possible; the ONLY backup change is leak #1, which is a bug fix, not a format change).
+5. **Q-02 arg-typing: AUTHORIZED to edit the frozen authz oracle** — carefully, ADD-only, adversarial-bypass re-run, exact oracle diff surfaced for owner review before merge.
+6. **P18b: strong typing is fine** (no need to keep loose) — BUT every `@aztec`-coupled type must be logged in a new `UPDATE.md` so a library bump has a re-check checklist.
+
+**Tier: `deep`** (2+ HIGH: security-sensitivity — a real cross-profile leak + an authorized frozen-oracle edit; blast radius — privacy boundary + dApp dispatch). Round-1's per-finding blueprints already did the heavy research (`../findings/Q-13/plan.md` is a full 2-leg deep blueprint + contradiction-check); round-2 consolidates them + the six decisions above, and gets a fresh codex adversarial pass on the NEW/changed security surface.
+
+---
+
+## Standing rules (inherited from round-1, unchanged)
+- Per-edit fast gate: `bun run lint` + `typecheck:all` + touched-package `bun run test`.
+- Per-PR full gate: units + smoke + FULL network (dispatch on the branch).
+- Trust-boundary phases: the authz proof is the **frozen oracle + adversarial-bypass suite**, NOT network e2e.
+- RED policy: re-run a flake ONCE; still red → root-cause + FIX. Never weaken/skip a test.
+- Squash-merge each round-2 PR into `dev-quality` (plain, no `--admin`).
+- Commit subjects ≤100 lower-case; PR titles ≤93 (the `(#NN)` budget — round-1 P21 relint lesson).
+
+## What CHANGED vs round-1's hard limits (now owner-authorized, so no longer halts)
+Round-1 correctly HALTED on these; the owner has now ruled, so they become **planned, test-first behavior changes** (each lands behind a failing test that pins the NEW behavior):
+- **Leak #1 fix** (backup filtering) — fold into Q-13.
+- **By-id ownership guards** (#2 token, #3 authwit) — fail-open → fail-closed.
+- **Q-02 frozen-oracle edit** — the ONE authorized oracle change (ADD-only protocol below).
+Still HARD LIMITS (unchanged): merge `dev-quality`→`dev`/`main` (owner does it), publish/deploy, any backup *format/tolerance* change beyond leak #1, scope beyond these items.
+
+---
+
+## Phases (each = one PR cycle into `dev-quality`)
+
+### R0 — `UPDATE.md` upgrade-checklist doc (light, FIRST — later phases append to it)
+Create `UPDATE.md` at repo root: the "how to bump `@aztec/*`" checklist (none exists — verified). Seed with the KNOWN coupling points: the class-id + address invariant fixture, the noir-wasm nodejs-entry alias, `@nulo/wallet-sdk-schema-patch`, the PXE seam, PBKDF2/artifact constants. Wire a pointer from `CLAUDE.md` (§ Dependency policy, next to the `@aztec` exact-pin note). **Convention established here: any phase that types against an `@aztec` shape MUST add that type + file:line to `UPDATE.md`.** **Gate:** lint + doc exists + CLAUDE.md link + `check-no-brand.sh`.
+
+### R1 — Q-13 dedup + leak #1 + ownership guards (deep, PRIVACY — the big one)
+Execute `../findings/Q-13/plan.md` phasing verbatim (`restore-rows.ts` + `id-allocators.ts` + `require-owned-row.ts`; NO base class — token-balance/auth-registry are FK-scoped; account stays hand-rolled; restore ORDER + `profileId` never overwritten; backup restore tolerance PRESERVED). **With the owner rulings folded in:**
+- **R1.0 — cross-profile isolation suite** (`cross-profile-isolation.test.ts`, comprehensive per the contradiction-check: by-id denial, list-scoping, delete-cascade fanout + order, **backup/export isolation**, restore order, FK-scoped stores). **codex-tightening:** add (a) an **INACTIVE-profile deletion** case (delete non-active p2 while p1 active → all p2 rows gone, no throw — the guard-split guard) and (b) a **mixed token/account FK export** case (a balance with a valid active-profile token id but a FOREIGN account must NOT export). **Gate-contradiction fix (opus-MED-1):** the not-yet-closed gaps (#1/#2/#3) are pinned with **`test.fails()`** — a Vitest assertion that the behavior is *currently* broken, so the suite is **GREEN at every phase** (documenting the known leak as expected-red), NOT skipped/quarantined. Each fixing phase (R1.4 for #2, R1.5 for #1/#3) **flips its pin from `test.fails` → `test`** (a real passing assertion) in the SAME PR as the fix. The invariants that already hold (list-scoping, sibling-store isolation, cascade order) are normal `test` from R1.0 and gate every phase. This keeps "isolation suite green" true for R1.1–R1.5 without weakening anything.
+- **R1.1 — helpers** (+ unit tests, characterization for auth-registry `max==nextNumericId`).
+- **R1.2 — contact** (least divergent, proves the pattern).
+- **R1.3 — fpc → network** (separate PRs; keep each `writeOne`'s validation; network keeps `purgeChain`).
+- **R1.4 — token + account**, **and CLOSE gap #2** (add `requireOwnedRow` to `getToken`/`getTokenRaw`/`getTokenInterface`, test-first). **⚠ codex-BLOCKER fix:** `deleteToken` is called by the profile-delete CASCADE (`token/service.ts:525`, `clearForProfile`) with an **explicit, possibly-inactive** `profile.id` — an active-profile guard there would throw when deleting an inactive profile and orphan its rows. So **split it**: a private `deleteTokenRow(token)` / `deleteOwnedToken(token, profileId)` for the cascade (explicit profileId), and the guard goes on the **public RPC `deleteToken(id)` only** (fail-closed to active profile). The internal cascade delete must **not depend on `requireActiveProfile` at all** (opus-HIGH: `deleteProfile` removes the repo row at `profile/service.ts:568` *before* emitting `onProfileDeleted` at `:570`, so `requireActiveProfile` can already throw even for the *active* profile) — the cascade passes the deleted `profile.id` explicitly. **New tests: deleting an INACTIVE profile — and an ACTIVE profile — both fully purge tokens + cascaded balances (no throw, no orphans).** Account stays whole-throw.
+- **R1.5 — token-balance + auth-registry**, **and FIX leak #1** (`backup()` currently returns `repo.getAll()` unfiltered — a **plaintext** cross-profile leak in the export artifact, since `full.vue:136-141` builds `backup.data` in plaintext and `handleEncrypt` is optional/user-password, not per-profile-key). **Export-ONLY fix** (per decision #4 + codex-MED: do NOT touch `restore()` tolerance at `service.ts:264-270` — deferred backup/migration work). **Authoritative source (opus-MED, CRITICAL):** filter via `tokenService.getTokensRaw(profile.id)` — NOT `this.tokens` (the in-memory Map is cleared/reloaded on profile switch `:174-182`; `backup()` skips `ensureInitialized()`, so filtering the Map could drop ALL balances → empty backup). **FK-complete predicate:** a balance exports iff its `token` is active-profile-owned **AND** its `account` belongs to the active profile on that token's `chainId` (opus verified the token-id filter alone is already an exact partition — ids are one global sequence — so the account clause is belt-and-suspenders against a corrupt/foreign-account row). **Projector interaction (opus-MED):** add a `.catch` to `balance-projector.ts:111` `getTokenRaw` (it lacks one, unlike `:64`) so a stale foreign balance can't throw the batch once the token guard lands. **+ CLOSE gap #3** (`revokeAuthwits` asserts each id's `authwit.account === account`, test-first — well-scoped: UI callers already pass matching account, `RevokeAuthwitsPopup.vue:96-100`).
+- **Gate each PR:** affected service units + the isolation suite (green) + smoke + FULL network. Frozen authz oracle untouched (Q-13 is not on the dApp-dispatch path) — verify by `git diff --exit-code`.
+
+### R2 — Q-15 lock/bootstrap product race (mid, concurrency)
+Fix the real product bug surfaced in round-1 (`../lessons/Q-15.md`): locking right after a password change lets a stale `bootstrapActiveProfile` re-set `isLogined=true` after the lock, bouncing the `/popup/auth` redirect. The lock must win (bootstrap must not resurrect a locked session). **Gate:** the lock/bootstrap race unit test (new, pins the fix) + smoke (`change password`, the flake round-1 hardened) + units.
+
+### R3 — P16b dApp window shell (deep, UI orchestration)
+Extract the dApp approval-window shell (session wait, auth redirect, `beforeunload` rejection, completion cleanup, disconnect ORDER, the execute wrong-profile reject) — characterize the 3 windows (execute/capabilities/discover) FIRST, preserve ordering verbatim. **Gate:** window component units + characterization + smoke + FULL network (dApp connect/execute flows).
+
+### R4 — P18b PXE descriptor table (deep, seam) — strong-typed + UPDATE.md logged
+Generate the PXE method surface from one descriptor table (explicit per-field `rpc`/`ipxe`/`requiresNetwork` flags; NO permissive defaults; bodies hand-written). **SW-only methods (`clearChainState`/`getNoteSchemas`) stay ABSENT from `IPXE`/the proxy.** Strong-type against the `@aztec` PXE shape (owner OK), and **log every `@aztec`-coupled type in `UPDATE.md`** (the R0 convention). **Gate:** pxe units + `typecheck:all` + smoke + FULL network.
+
+### R5 — Q-01 remaining codecs (deep, boundary) — backup path MINIMAL
+Extend the round-1 storage codec to the remaining durable stores (token/account/network/contact/fpc/auth-registry/…), each **fail-closed-on-drift + a round-trip corpus**; add RPC method-decode + the dApp discriminated decoder (thread the discarded SW `type`). **Backup-import codec: touch minimally** — per decision #4, only where it's a pure validation add that PRESERVES current tolerance; defer anything that changes backup behavior to the owner's dedicated migration work. **PIN (direction matters — opus-MED-3):** for the RPC/dApp seams a decoder must never be **LAXER** than the cast it replaces (fail-closed). For **backup import** the rule INVERTS — a codec must never be **STRICTER** than current tolerance, or old backups fail to import (that would be a tolerance change violating decision #4). So backup-import gets, at most, a non-tightening validation add; anything stricter is deferred to the owner's migration work. Per-seam codecs (serializers differ); frozen oracle byte-identical. **Gate:** per-store units + round-trip corpus + smoke + FULL network.
+
+### R6 — Q-02 typed arg tuples + AUTHORIZED oracle edit (mega-deep, dApp TRUST BOUNDARY — LAST)
+Add per-method arg schemas → new `MethodDescriptor` fields → **edit the frozen `method-descriptors.test.ts`** (authorized). **ADD-ONLY oracle protocol (non-negotiable):**
+1. The `FROZEN_CAPABILITY_MAP` / `FROZEN_EXEMPT` / `FROZEN_SCOPE_CHECKER` by-reference-identity assertions stay **byte-identical** — the edit only ADDS arg-schema assertions, never relaxes an authz assertion. (If a change would touch an existing authz assertion → STOP + surface.)
+2. Re-run the **adversarial-bypass suite** proving **no widening**: no method reaches a sink with fewer grants; an arg-tuple/arity mismatch is REJECTED fail-closed; every method keeps its scope checker + capability gate.
+3. **Surface the exact oracle diff** (`git diff` of the test) for owner review **before** the R6 PR merges.
+4. Type the `args[N] as X` casts via the schemas; the security path (enforcement order, batch-forbidden set, entry guard) stays behavior-identical.
+5. **⚠ codex-HIGH — the real trap is arg SAFETY, not table parity.** "ADD-only" keeps `derive*` (`method-descriptors.ts:226-270`) ignoring extra fields, so D7/XOR + scope-checker identity won't widen — but WHERE the schema runs is the risk. So the schema MUST: (a) run **before capability/scope enforcement AND before any handler destructuring** (`dispatcher.ts:334-430`) — note scope checkers read raw `args` positionally right after enforcement (`method-scope-checkers.ts` does `args[0] as X`/`String(args[0])`), so a coercing pre-enforcement parse would change what `checkSendTx`/`checkCreateAuthWit` see = **fail-OPEN**; (b) be an **EXACT, NON-MUTATING tuple — no rest args, no coercive normalization**, nor over-tighten arity into a **fail-CLOSED** regression; (c) **validate every batch leg by its OWN method's schema** (batch recurses at `:529-550`).
+6. **⚠ opus-HIGH — `argSchema?` MUST be optional + model existing optionality EXACTLY.** If the new field is required, all ~19 rows must be edited → breaks the "FROZEN_* rows byte-identical" claim. It stays **optional** (rows without it are untouched). And many methods legitimately take **optional trailing args** — `registerSender` alias `args[1] as string|undefined` (`:1134`); `simulateTx`/`profileTx`/`executeUtility`/`sendTx` opts `(args[1] as …) ?? {}` (`:569,1172,1181,1191`) — so a schema that's stricter than today's tolerance breaks real dApps. Model optionality exactly (opt-trailing allowed, absent = ok). **The adversarial-bypass suite + dispatcher tests are the proof of arg-safety — the oracle diff only proves the authz MAPS are unchanged, which is necessary but NOT sufficient.** Pin: coerced/rest/loose-arity/wrong-batch-leg/over-strict-optional args are all REJECTED-or-tolerated exactly as today.
+**Gate:** the edited oracle GREEN (diff surfaced) + adversarial-bypass suite (incl. all arg-safety pins) + dispatcher tests + units + smoke + FULL network.
+
+### R7 — Final sweep + hand to owner (finale, NO autonomous merge)
+Full-network sweep on the final `dev-quality` HEAD; codex + fresh-opus confidence pass (adversarial); refresh `../WRAP-UP.md` + `../eli5.html` to cover round-1 **and** round-2; #220 now carries the whole arc. **STOP — owner manual-QAs and merges** (hard limit).
+
+---
+
+## Security & Adversarial Considerations
+- **Threat model:** (1) cross-profile — Q-13 IS the profile-isolation mechanism; leak #1 is a *live* cross-profile data leak in the backup artifact; #2/#3 are id-enumeration gaps (internal-only, dApp-unreachable — verified: only scope-gated `isTokenRegistered` reaches token). (2) malicious dApp — R6 edits the dispatch oracle; the ADD-only protocol + adversarial-bypass suite are the proof authz didn't widen.
+- **Isolation invariant (R1):** every read/mutate/delete/**export** of a profile-scoped row confirms ownership before returning; a missing/mismatched/absent owner MUST deny — never fall back to all-rows or active-profile default. The isolation suite is the real gate (dedup is only maintainability; a leak is a security defect).
+- **Leak scope (both audits verified):** `token-balance.backup()` is the **only** profile-private store with an unfiltered export — `contact`/`fpc`/`network` self-scope via `requireActiveProfile`; `account`/`transaction`/`auth-registry` scope transitively. `config.getProps()` is unfiltered but **global-by-design** (app settings, not profile-private) — not a leak; note it in R1.0 so it isn't mistaken for one.
+- **The one oracle edit (R6):** ADD-only, no authz-assertion relaxed, adversarial-bypass green, diff owner-reviewed. This is the single deliberate exception to round-1's "never edit the oracle" — bounded + proven.
+- **Backup (decision #4):** treat as fragile; the only change is leak #1 (removes foreign data from the export — strictly safer). No tolerance/format change.
+- **Least privilege / supply chain:** no new deps without the 7-day gate; `UPDATE.md` hardens the `@aztec` bump path (supply-chain-adjacent).
+
+## Assumptions
+- **Facts (verified this session):** leak #1 live (`token-balance/service.ts:260-261`, `profile` fetched then `getAll()` unfiltered); `revokeAuthwits(networkId, account, ids, …)` at `:185` takes raw ids; no `UPDATE.md`/upgrade doc exists; #220 open + green (29 checks); frozen oracle assertions byte-identical after round-1.
+- **Inferences (attack):** the by-id guard closures are behavior-preserving for legit internal callers (they always hold their own ids) — verify with the isolation suite, not assumption. Q-02's new descriptor fields can be added ADD-only without disturbing the by-reference authz identity — verify by re-derivation, STOP if not.
+- **Asks (resolved this session):** merge-timing (no, QA first); leak #1 (fold into Q-13); Q-02 oracle edit (authorized); backup (preserve); P18b (strong-typed + UPDATE.md); execution (blueprint-first-then-loop). *No open Asks.*
+
+## Decision ledger (round-2)
+- **Leak #1 → fold into Q-13 R1.5** (owner), not a standalone PR. It's a bug fix (drops foreign balances from the export), not a format change → compatible with "preserve backup behavior."
+- **Guards #2/#3 → close, test-first** (owner authorized ownership guards).
+- **Q-02 → proceed with the ADD-only oracle-edit protocol** (owner authorized); surface the diff pre-merge.
+- **P18b → strong typing + mandatory `UPDATE.md` coupling log** (owner); establishes a repo-wide upgrade-doc convention (R0).
+- **Backup path → minimal** everywhere except leak #1 (owner will do migration/backup work separately).
+- **Sequencing:** R0 first (doc other phases append to); Q-13+leak (R1) before the seams; Q-02 (R6) LAST (most sensitive, edits the oracle); finale R7.
+
+## Audit
+- Round-1 per-finding blueprints stand (`../findings/Q-13/plan.md` deep + contradiction-checked; others in `../lessons/`).
+- **Round-2 dual adversarial audit (this session) — both `SHIP-WITH-FIXES`, independently converged:**
+  - **codex** (`019f1e7a`, `audit-codex.md`): 1 BLOCKER (deleteToken cascade) + 4 HIGH/MED. All 5 adopted.
+  - **opus** (`a3d2383e`, `audit-fable.md`): converged on both big traps + added MED-1 (gate contradiction), MED-2 (authoritative token source + projector `.catch`), MED-3 (backup-codec direction). All adopted.
+  - **Net:** no RECONSIDER/BLOCKER remains open; every finding is folded into the phases above. The two most dangerous traps — guarding `deleteToken` would break the profile-delete cascade, and the Q-02 oracle diff proves table-parity but NOT arg-safety — are now explicitly carved out (R1.4 cascade-split; R6 items 5–6 + "the bypass suite is the proof, not the diff").
