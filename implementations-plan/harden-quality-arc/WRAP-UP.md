@@ -1,8 +1,45 @@
-# Harden-Quality Arc — WRAP-UP / promote `dev-quality` → `dev`
+# Harden-Quality Arc — WRAP-UP / promote `dev-quality` → `dev` (rounds 1 + 2)
 
-Lands the quality-hardening arc from `audit/quality/2026-06-29-ext-ultra` (22 findings Q-01–Q-22). Each finding was re-verified vs HEAD → tier-blueprinted (codex + Explore/opus + decision ledger) → implemented behavior-preserving → **squash-merged into `dev-quality` only after its own units + smoke + FULL network gate went green**. Every commit is on `dev-quality`; this is the single promote for the owner to merge.
+Lands the quality-hardening arc from `audit/quality/2026-06-29-ext-ultra` (22 findings Q-01–Q-22) **plus round 2**, which finished every deferral round 1 documented. Each finding was re-verified vs HEAD → tier-blueprinted (codex + Explore/opus + decision ledger) → implemented behavior-preserving (except the owner-authorized changes, each behind failing-first tests) → **squash-merged into `dev-quality` only after its own units + smoke + FULL network gate went green**. Every commit is on `dev-quality`; this is the single promote for the owner to merge.
 
-> **Code HEAD `dc2a03e`.** The integrated sweep + both confidence passes ran on the arc's final code state `dc2a03e`. This WRAP-UP + `eli5.html` are a **docs-only** commit on top (no code), so the swept/audited code state equals the promoted code state.
+> **Round-2 code HEAD `f636f6c`** (round-1's was `dc2a03e`). The round-2 integrated sweep + both round-2 confidence passes ran on `f636f6c`; WRAP-UP/eli5 refreshes are docs-only commits on top.
+
+## ROUND 2 — the deferrals, finished (PRs #227–#244, `round-2/plan.md`)
+
+Round 2 resolved **every** owner-follow-on from the round-1 list below: Q-13 (owner-authorized), P16b, P18b, the Q-01 durable-store seams, and Q-02's arg typing (owner-authorized oracle edit). Plus a real product-race fix (Q-15) and a real backup privacy leak fix.
+
+| Phase | PRs | What landed |
+|---|---|---|
+| R0 | #227 | `UPDATE.md` @aztec-bump checklist (the coupling convention later phases append to) |
+| R1 Q-13 | #229–#236 | cross-profile isolation standing gate (11 assertions, zero `test.fails` left); shared `restore-rows`/`id-allocators`/`require-owned-row` helpers adopted by contact/fpc/network/token; **by-id ownership guards closed fail-closed** (deleteToken split: public RPC guarded / private cascade); **token-balance `backup()` plaintext cross-profile leak FIXED export-only** (filter via `tokenService.getTokensRaw(profile.id)` — restore tolerance untouched per decision #4); `revokeAuthwits` account check |
+| R2 Q-15 | #237 | the round-1-surfaced lock/bootstrap race FIXED in product: `useProfileBootstrap` re-reads the active profile before flipping `isLogined` (serialized behind the lock via the profile-service `runExclusive`) — the lock wins |
+| R3 P16b | #238 #240 | 37-pin frozen-oracle characterization of the 3 dApp approval windows, then the `useDappApprovalWindow` shell extraction graded against it byte-unchanged (divergences preserved verbatim: capabilities' missing `!requestId` guard, execute's lazy execution transport, dismiss-routes-through-beforeunload) |
+| R4 P18b | #241 | PXE `descriptors.ts` flags table (explicit `rpc`/`ipxe`/`requiresNetwork`; SW-only trio compile-time-excluded from `IPXE`/proxy); `PXEProxy`'s 18 curries generated; `rpcMethods` dispatch allowlist stays hand-written; UPDATE.md §Types-coupled populated |
+| R5 Q-01 | #242 #243 | zod row codecs injected into 11 durable stores (validation-fail = kept + read-undefined, NEVER deleted); strictness per seam direction; **the real-proving canary caught a first-cut bug** (numeric `@aztec` enums vs object checks) — fixed, corpus rebuilt from write sites |
+| R6 Q-02 | #244 | `argSchema` predicate guards on the dApp dispatch path (11 guarded / 8 deliberately omitted); **the ONE authorized frozen-oracle edit — mechanically ADD-only (zero deletions), diff surfaced in #244's PR body for your review** |
+| CI fix | #239 | `fetch-depth: 0` on the three paths-filter changes jobs (the shallow-deepen git race went structural at ~100 commits from `dev`; detection-only, no gating change) |
+
+### Round-2 confidence passes (on code HEAD `f636f6c`)
+- **Integrated full-network sweep:** <PENDING — filled at R7 close>
+- **codex (xhigh, read-only, adversarial):** <PENDING — filled at R7 close>
+- **fresh Fable subagent (adversarial, read-only, fresh context):** <PENDING — filled at R7 close>
+
+### Round-2 invariants (mechanically verified on the `dc2a03e..f636f6c` span)
+- `scope-enforcement.test.ts` — **byte-identical**. `key-vectors.test.ts` — **byte-identical**.
+- `method-descriptors.test.ts` — **ZERO deletion lines** (the authorized ADD-only edit; FROZEN_* tables + reference-identity assertions untouched; a new strip-and-rederive test proves the derived authz maps ignore the new field).
+- Enforcement runtime (`capability-map.ts` / `scope-enforcement.ts` / `capabilities.ts`) — **absent from the diff**.
+- Every behavior change is fail-CLOSED and owner-authorized; backup restore tolerance untouched.
+
+### Round-2 deferrals (surfaced owner rulings — NOT silently dropped)
+- **RPC method-decode + dApp discriminated decoder** (Q-01 tail): fail-open→fail-closed on the dApp seam — needs an explicit authorization like leak#1 got. Rationale in `round-2/plan.md` §R5.
+- **profile / session / config store codecs**: profile = a false-reject hides the vault (your backup/migration domain); session/config are `ValueStorage` where a codec would *activate* throw-on-drift in unlock/boot.
+- **Q-02 typed-tuple layer** (plan point 4): deliberately not declared — precise TS tuples would claim what the tolerance-exact runtime doesn't enforce. Follow-on if you want it.
+
+### Round-2 owner action items
+1. **#220 is RED on Commitlint** — one 138-char body line in `c8c80ae` (the only violation in the whole 100+-commit range). Options: (a) authorize a body-only reword + force-push of `dev-quality` (re-SHAs descendants), or (b) `--admin` the promote — legitimate here because dev-quality→dev is a **squash** (the final `dev` commit uses #220's own clean message; the overage never lands on `dev`).
+2. **1Password agent went down mid-round-2** (commit signing + SSH). Per your AFK rules: a handful of later dev-quality commits are unsigned (config untouched; pushes went via `gh` HTTPS). Unlock 1Password; optionally backfill signatures pre-merge (same note as round 1 — the squash is web-flow-signed regardless).
+3. **Review the R6 oracle diff** in #244's PR body (the `<details>` block) during #220 QA.
+4. The **Q-15 surfaced race is now FIXED** (R2/#237) — the round-1 "owner action item" below is superseded.
 
 ## Landed (21/22 findings)
 | Finding | Phase | PR | What |
