@@ -112,8 +112,6 @@ if (import.meta.main) {
 	const { $ } = await import("bun")
 	const repo = process.env.GITHUB_REPOSITORY ?? ""
 	const PRERELEASE_MANIFEST = ".release-please-prerelease-manifest.json"
-	const BOT_NAME = "github-actions[bot]"
-	const BOT_EMAIL = "41898282+github-actions[bot]@users.noreply.github.com"
 
 	const realIO: SyncIO = {
 		async resolveReleasePrMergeSha(headSha) {
@@ -143,19 +141,37 @@ if (import.meta.main) {
 			return out ? Number(out) : null
 		},
 		async prepareSyncBranch(branch, baseSha, version) {
-			// Branch from the EXACT release commit, not live origin/main — if another PR
-			// lands on main during the long release run, the sync must still carry only the
-			// released state (baseSha == github.sha, already present from fetch-depth: 0).
-			await $`git checkout -B ${branch} ${baseSha}`
-			await Bun.write(PRERELEASE_MANIFEST, `${JSON.stringify({ ".": version }, null, 2)}\n`)
-			await $`git -c user.name=${BOT_NAME} -c user.email=${BOT_EMAIL} add ${PRERELEASE_MANIFEST}`
-			// --allow-empty: if main already carries this manifest value, the sync PR still
-			// opens (it carries main's release commits into dev even with no manifest delta).
-			await $`git -c user.name=${BOT_NAME} -c user.email=${BOT_EMAIL} commit --allow-empty -m ${`chore: re-baseline prerelease manifest to ${version}`}`
-			// Fresh per-version branch on the normal path. A non-fast-forward here means a
-			// stale branch from a prior partial run (the push landed but openPr then failed) —
-			// fail loud so a human deletes it + re-runs, rather than force-pushing.
-			await $`git push -u origin ${branch}`
+			const desired = `${JSON.stringify({ ".": version }, null, 2)}\n`
+			// Read the manifest blob (content + sha) AT the release commit — reliable
+			// (baseSha == github.sha exists) and, because the branch is created at baseSha,
+			// its blob sha matches. (Reading from the just-created branch instead can 409 on
+			// Contents-API propagation lag — the sha comes back empty.)
+			const cur = await $`gh api ${`repos/${repo}/contents/${PRERELEASE_MANIFEST}?ref=${baseSha}`}`.nothrow().quiet()
+			const blob = cur.exitCode === 0 ? (JSON.parse(cur.stdout.toString()) as { sha: string; content: string }) : null
+			// Create the sync branch at the EXACT release commit (baseSha), not live
+			// origin/main — if another PR lands on main during the long release run, the sync
+			// must carry only the released state. Via the API (no local `git push`) so the
+			// re-baseline commit below is App-authored + signed. A fresh per-version branch on
+			// the normal path: if the ref already exists it's a stale branch from a prior
+			// partial run → fail loud so a human deletes it + re-runs.
+			const mkRef = await $`gh api -X POST ${`repos/${repo}/git/refs`} -f ref=${`refs/heads/${branch}`} -f sha=${baseSha}`.nothrow().quiet()
+			if (mkRef.exitCode !== 0) {
+				throw new Error(`could not create branch ${branch} at ${baseSha} (stale branch from a prior run? delete it + re-run): ${mkRef.stderr.toString().trim()}`)
+			}
+			// If the manifest already reads `version`, no re-baseline commit is needed — the
+			// branch (== baseSha) alone carries main's release commits into dev's ancestry
+			// when merged (replaces the old `--allow-empty` no-op commit).
+			if (blob && Buffer.from(blob.content, "base64").toString() === desired) return
+			// Re-baseline via the Contents API (NOT a local `git commit`): a commit made with
+			// the release App's installation token is GitHub-SIGNED (verified — see the bot's
+			// existing release commits), so the MERGE sync introduces only verified commits
+			// and satisfies dev's classic `required_signatures` with NO `--admin`. A plain bot
+			// `git commit` would be UNSIGNED → the merge would be blocked.
+			const shaArgs = blob ? ["-f", `sha=${blob.sha}`] : []
+			const put = await $`gh api -X PUT ${`repos/${repo}/contents/${PRERELEASE_MANIFEST}`} -f branch=${branch} -f message=${`chore: re-baseline prerelease manifest to ${version}`} -f content=${Buffer.from(desired).toString("base64")} ${shaArgs}`.nothrow().quiet()
+			if (put.exitCode !== 0) {
+				throw new Error(`could not write ${PRERELEASE_MANIFEST} via the Contents API on ${branch}: ${put.stderr.toString().trim()}`)
+			}
 		},
 		async openPr(branch, title, body) {
 			const out = await $`gh pr create --base dev --head ${branch} --title ${title} --body ${body}`.text()
