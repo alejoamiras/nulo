@@ -52,7 +52,7 @@ import { type ILogger, LogLevel } from "@/wallet/logger"
 import { ValueStorage } from "@/wallet/storage"
 import type { AlarmEvent, AlarmsPort, BrowserApi } from "@nulo/wallet-core/ports"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
-import { asPasshash, type Passhash, zeroize } from "@nulo/wallet-crypto"
+import { asPasshash, type MasterSecretBytes, type Passhash, zeroize } from "@nulo/wallet-crypto"
 import type { ActiveSession, Profile, ProfileInfo, Session } from "./spec"
 
 const LOG_SOURCE = "SessionManager"
@@ -76,7 +76,7 @@ export type SessionProfileLookup = (profileId: string) => Promise<Profile | unde
  *  decrypt the master secret for a password profile. Returns `null` on
  *  wrong-credential / corrupted-ciphertext — same contract as
  *  `PasswordSecretBox.unsealWithPasshash`. */
-export type SessionSecretUnsealer = (passhash: Passhash, profile: Profile & { type: "password" }) => Promise<Uint8Array<ArrayBuffer> | null>
+export type SessionSecretUnsealer = (passhash: Passhash, profile: Profile & { type: "password" }) => Promise<MasterSecretBytes | null>
 
 /** Hook the facade registers at construction so SessionManager can
  *  surface open / close transitions as `onActiveProfileChanged`
@@ -196,7 +196,7 @@ export class SessionManager {
 	 *  copies what it needs (`Fr.fromBuffer` makes its own copy; passhash
 	 *  is base64-encoded into `Session`). The caller is responsible for
 	 *  calling `zeroize(...)` on these buffers after `open` returns. */
-	public async open(profile: Profile, secretBuffer: Uint8Array<ArrayBuffer>, passhash?: Passhash): Promise<void> {
+	public async open(profile: Profile, secretBuffer: MasterSecretBytes, passhash?: Passhash): Promise<void> {
 		try {
 			const since = Date.now()
 			// In strict mode the bearer is never persisted, regardless of

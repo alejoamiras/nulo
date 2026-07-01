@@ -24,7 +24,7 @@ import { setActivePinia } from "pinia"
 import { createTestingPinia } from "@pinia/testing"
 import { ref } from "vue"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { EncryptionKey } from "@nulo/wallet-crypto"
+import { asBase64CredentialId, asBase64SecretPrf, asHexUserHandle, EncryptionKey } from "@nulo/wallet-crypto"
 import { UserRejectedError } from "@nulo/extension-messaging/errors"
 
 // ── Mocks ───────────────────────────────────────────────────────────────────
@@ -61,59 +61,37 @@ let configClient = passthroughClient()
 // Vitest 4 requires `function` expressions (not arrow functions) for mocks
 // instantiated with `new`. Arrow factories error: "() => ... is not a constructor".
 vi.mock("@/wallet/services/profile/client", () => ({
-	ProfileServiceClient: vi.fn(function () {
-		return profileClient
-	}),
+	ProfileServiceClient: vi.fn(() => profileClient),
 }))
 vi.mock("@/wallet/services/network/client", () => ({
-	NetworkServiceClient: vi.fn(function () {
-		return networkClient
-	}),
+	NetworkServiceClient: vi.fn(() => networkClient),
 }))
 vi.mock("@/wallet/services/account/client", () => ({
-	AccountServiceClient: vi.fn(function () {
-		return accountClient
-	}),
+	AccountServiceClient: vi.fn(() => accountClient),
 }))
 vi.mock("@/wallet/services/token/client", () => ({
-	TokenServiceClient: vi.fn(function () {
-		return tokenClient
-	}),
+	TokenServiceClient: vi.fn(() => tokenClient),
 }))
 vi.mock("@/wallet/services/transaction/client", () => ({
-	TransactionServiceClient: vi.fn(function () {
-		return transactionClient
-	}),
+	TransactionServiceClient: vi.fn(() => transactionClient),
 }))
 vi.mock("@/wallet/services/token-balance/client", () => ({
-	TokenBalanceServiceClient: vi.fn(function () {
-		return tokenBalanceClient
-	}),
+	TokenBalanceServiceClient: vi.fn(() => tokenBalanceClient),
 }))
 vi.mock("@/wallet/services/account-state/client", () => ({
-	AccountStateServiceClient: vi.fn(function () {
-		return accountStateClient
-	}),
+	AccountStateServiceClient: vi.fn(() => accountStateClient),
 }))
 vi.mock("@/wallet/services/auth-registry/client", () => ({
-	AuthRegistryServiceClient: vi.fn(function () {
-		return authRegistryClient
-	}),
+	AuthRegistryServiceClient: vi.fn(() => authRegistryClient),
 }))
 vi.mock("@/wallet/services/fpc/client", () => ({
-	FpcServiceClient: vi.fn(function () {
-		return fpcClient
-	}),
+	FpcServiceClient: vi.fn(() => fpcClient),
 }))
 vi.mock("@/wallet/services/contact/client", () => ({
-	ContactServiceClient: vi.fn(function () {
-		return contactClient
-	}),
+	ContactServiceClient: vi.fn(() => contactClient),
 }))
 vi.mock("@/wallet/services/config/client", () => ({
-	ConfigServiceClient: vi.fn(function () {
-		return configClient
-	}),
+	ConfigServiceClient: vi.fn(() => configClient),
 }))
 
 // Service-name modules pull in side-effecting validators when imported
@@ -397,7 +375,11 @@ describe("useFullBackupImport — failure branches", () => {
 
 describe("useFullBackupImport — passkey backup", () => {
 	const PASSKEY_CRED_ID = "cred-PK123"
-	const PASSKEY_DATA = { id: PASSKEY_CRED_ID, prf: "AAAA", userHandle: "src-profile-id" }
+	const PASSKEY_DATA = {
+		id: asBase64CredentialId(PASSKEY_CRED_ID),
+		prf: asBase64SecretPrf("AAAA"),
+		userHandle: asHexUserHandle("src-profile-id"),
+	}
 
 	async function buildPasskeyBackup() {
 		// For passkey backups, `master-key` IS the credentialId (per

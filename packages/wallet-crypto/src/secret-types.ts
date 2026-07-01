@@ -1,9 +1,13 @@
 /**
- * Branded secret + wire-encoding types (Q-06). Zero-runtime: each brand is a nominal
- * `unique symbol` intersection, minted at a trust boundary via an identity cast (the `as*`
- * helpers) and required at the typed sinks — stopping the class of bug where a base64 string,
- * a ciphertext, a credential id, or a raw byte-array is passed into the wrong slot and only
- * fails at decrypt/restore time.
+ * Branded secret + wire-encoding types (Q-06). Each brand is a nominal `unique symbol`
+ * intersection — the TYPES erase at emit (no bytes). The `as*` mint helpers are runtime
+ * IDENTITY functions (`(b) => b as X`): one trivial, trivially-inlinable call per mint that
+ * returns the same reference — NO allocation, NO byte change, NO control-flow or zeroization
+ * delta, so behavior stays byte-identical. (They're functions, not erased casts, on purpose:
+ * a single named mint per value is grep-auditable — the one sanctioned boundary where a raw
+ * value acquires the brand.) Consumed at the typed sinks — stopping the class of bug where a
+ * base64 string, a ciphertext, a credential id, or a raw byte-array is passed into the wrong
+ * slot and only fails at decrypt/restore time.
  *
  * NOT classes (would change runtime identity → break Web Crypto / `Buffer` / `Fr.fromBuffer`
  * / `zeroize`). NOT `zod.brand()` (this package has no zod dep; branding must be zero-runtime).

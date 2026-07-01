@@ -9,7 +9,7 @@
  *     expects.
  */
 
-import { asPasshash } from "@nulo/wallet-crypto"
+import { asMasterSecretBytes, asPasshash, type MasterSecretBytes } from "@nulo/wallet-crypto"
 import { describe, expect, test, vi } from "vitest"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
@@ -72,10 +72,10 @@ const passkeyProfile = (id = "pid"): Profile & { type: "passkey" } => ({
 })
 
 /** 32-byte secret buffer; Fr-reducible. */
-function secretBuffer(): Uint8Array<ArrayBuffer> {
+function secretBuffer(): MasterSecretBytes {
 	const buf = new Uint8Array(new ArrayBuffer(32))
 	for (let i = 0; i < 32; i++) buf[i] = i + 1
-	return buf as Uint8Array<ArrayBuffer>
+	return asMasterSecretBytes(buf as Uint8Array<ArrayBuffer>)
 }
 
 function setup(

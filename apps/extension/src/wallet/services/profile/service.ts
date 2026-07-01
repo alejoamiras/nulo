@@ -77,7 +77,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * to get the same secret would be a UX regression — we cache the recovery
 	 * secret here in memory only, never persisted, cleared on SW restart.
 	 */
-	private readonly pendingRestoreSecrets = new Map<string, Uint8Array<ArrayBuffer>>()
+	private readonly pendingRestoreSecrets = new Map<string, MasterSecretBytes>()
 
 	/**
 	 * @param browserApi Optional. Tests pass `FakeBrowserApi` so the
@@ -798,7 +798,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	private async importPasskeyProfile(
 		name: string,
 		credentialId: string,
-		secret: Uint8Array<ArrayBuffer>,
+		secret: MasterSecretBytes,
 		userHandle?: string,
 	): Promise<Profile> {
 		try {
