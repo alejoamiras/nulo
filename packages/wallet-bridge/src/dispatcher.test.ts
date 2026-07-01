@@ -1738,3 +1738,74 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 		).rejects.toThrow(/[Ss]cope/)
 	})
 })
+
+describe("dispatcher — arg guards (Q-02): order, tolerance, batch-leg validation", () => {
+	function makeBareDispatcher(session: IDappSessionRef | undefined) {
+		const writer: IDappSessionWriter = {
+			tryGetDappSessionByOriginAndChain: async () => session,
+			getDappSession: async () => session as IDappSessionRef,
+			updateDappSession: async () => session as IDappSessionRef,
+			setAccountAliases: async () => session as IDappSessionRef,
+			setCapabilityGrants: async () => session as IDappSessionRef,
+			setCapabilityRejections: async () => session as IDappSessionRef,
+		}
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({})) as never,
+		}
+		return new WalletSdkDispatcher(stubNetwork, stubAccount, stubExecution, interaction, writer, noopLogger)
+	}
+
+	test("guard rejects BEFORE capability enforcement — arity garbage on an ungranted method", async () => {
+		// Order pin (mandate 5a): the schema runs pre-enforcement, so a missing-args
+		// call fails on arguments even when the capability would ALSO be missing.
+		const dispatcher = makeBareDispatcher(makeSession())
+		await expect(dispatcher.dispatch("getContractMetadata", [], ctx)).rejects.toThrow(
+			"Invalid arguments for wallet method: getContractMetadata",
+		)
+	})
+
+	test("unguarded methods keep their exact pre-Q-02 behavior — capability error, never an args error", async () => {
+		// simulateTx deliberately has NO argSchema (its exec validation is owned by
+		// checkSimulateTx with a pinned error string). With no grants + garbage args,
+		// the observable stays the capability rejection — proving no guard preempts it.
+		const dispatcher = makeBareDispatcher(makeSession())
+		await expect(dispatcher.dispatch("simulateTx", [], ctx)).rejects.toThrow(CapabilityNotGrantedError)
+	})
+
+	test("optional trailing args pass the guard — registerSender with 1 arg reaches enforcement", async () => {
+		// The rejection is the CAPABILITY one (no data grant) — i.e. the call got PAST
+		// the arg guard with the alias omitted, pinning optional-trailing tolerance.
+		const dispatcher = makeBareDispatcher(makeSession())
+		await expect(dispatcher.dispatch("registerSender", ["0xaddr"], ctx)).rejects.toThrow(CapabilityNotGrantedError)
+	})
+
+	test("extra args beyond the read positions pass the guard (no max arity)", async () => {
+		const dispatcher = makeBareDispatcher(makeSession())
+		await expect(dispatcher.dispatch("getContractMetadata", ["0xaddr", "spurious", 42], ctx)).rejects.toThrow(CapabilityNotGrantedError)
+	})
+
+	test("batch legs are validated by their OWN method's guard on re-entry", async () => {
+		// batch itself is exempt + its legs are well-formed, so dispatch recurses;
+		// the inner getContractMetadata leg then fails ITS arg guard.
+		const dispatcher = makeBareDispatcher(makeSession())
+		await expect(dispatcher.dispatch("batch", [[{ name: "getContractMetadata", args: [] }]], ctx)).rejects.toThrow(
+			"Invalid arguments for wallet method: getContractMetadata",
+		)
+	})
+
+	test("malformed batch envelopes are rejected by batch's own guard", async () => {
+		const dispatcher = makeBareDispatcher(makeSession())
+		await expect(dispatcher.dispatch("batch", ["not-legs"], ctx)).rejects.toThrow("Invalid arguments for wallet method: batch")
+		await expect(dispatcher.dispatch("batch", [[{ name: 42, args: [] }]], ctx)).rejects.toThrow(
+			"Invalid arguments for wallet method: batch",
+		)
+	})
+
+	test("requestCapabilities requires an object manifest at the guard", async () => {
+		const dispatcher = makeBareDispatcher(makeSession())
+		await expect(dispatcher.dispatch("requestCapabilities", [], ctx)).rejects.toThrow(
+			"Invalid arguments for wallet method: requestCapabilities",
+		)
+	})
+})

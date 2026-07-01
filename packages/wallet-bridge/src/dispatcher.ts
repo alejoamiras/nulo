@@ -64,7 +64,7 @@ import type {
 	TransactionCapability,
 } from "./capabilities"
 import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
-import { METHOD_TO_KIND, NETWORK_ONLY_KINDS, ACCOUNT_KINDS, assertKnownMethod } from "./method-descriptors"
+import { METHOD_REGISTRY, METHOD_TO_KIND, NETWORK_ONLY_KINDS, ACCOUNT_KINDS, assertKnownMethod } from "./method-descriptors"
 import type {
 	AztecSendTxRequest,
 	CapabilityResult,
@@ -353,6 +353,17 @@ export class WalletSdkDispatcher {
 		// on return `methodName` is narrowed to `MethodName`. Behavior is identical
 		// to the former inline `Object.hasOwn` check (same throw string).
 		assertKnownMethod(methodName)
+
+		// Arg-shape guard (Q-02): a pure pass/fail predicate over the ORIGINAL
+		// args — runs BEFORE capability/scope enforcement and before any handler
+		// destructuring, and never replaces the array, so scope checkers and
+		// handlers keep seeing the exact wire values. Batch legs re-enter
+		// dispatch() and hit their own method's guard here. Methods without an
+		// argSchema keep their historical arg tolerance untouched.
+		const argSchema = METHOD_REGISTRY[methodName].argSchema
+		if (argSchema && !argSchema(args)) {
+			throw new Error(`Invalid arguments for wallet method: ${methodName}`)
+		}
 
 		// Enforce capability grants (type-level) then scope (per-operation +
 		// per-account allow-list).
