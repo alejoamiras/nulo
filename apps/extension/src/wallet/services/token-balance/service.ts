@@ -258,7 +258,13 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	public async backup(): Promise<TokenBalanceRaw[]> {
 		const profile = await requireActiveProfile(this.profileService)
-		return await this.repo.getAll()
+		// leak#1 fix (export-only): balances carry no profileId, so scope the export to
+		// the active profile via its token ids. Token ids are a single global sequence,
+		// so `balance.token ∈ active-profile-token-ids` is an exact partition. Use the
+		// AUTHORITATIVE token service (not the in-memory `this.tokens`, which is cleared
+		// mid-profile-switch → would export nothing) — opus-MED-2.
+		const ownedTokenIds = new Set((await this.tokenService.getTokensRaw(profile.id)).map((t) => t.id))
+		return (await this.repo.getAll()).filter((b) => ownedTokenIds.has(b.token))
 	}
 
 	public async restore(tokenBalances: TokenBalanceRaw[]): Promise<Restored<TokenBalanceRaw>[]> {
