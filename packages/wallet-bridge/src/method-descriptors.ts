@@ -85,7 +85,12 @@ export interface MethodDescriptor {
 	readonly note?: string
 }
 
-export const METHOD_REGISTRY: Record<string, MethodDescriptor> = {
+// Private `satisfies` source so the literal KEYS survive for `MethodName`
+// (`keyof typeof METHOD_REGISTRY_SOURCE`). The public `METHOD_REGISTRY` below is
+// a wide-typed (`Record<string, MethodDescriptor>`) re-export of this SAME object
+// so the frozen oracle + derivations keep their optional-field (`exemptReason?`/
+// `scopeCheck?`) access. Runtime-identical; oracle byte-UNEDITED.
+const METHOD_REGISTRY_SOURCE = {
 	// ── Exempt meta / infra (no capability, no scope) ──
 	getChainInfo: {
 		capability: null,
@@ -209,7 +214,12 @@ export const METHOD_REGISTRY: Record<string, MethodDescriptor> = {
 		scopeCheck: checkRegisterSender,
 		audit: "F-004 (paired): requires data.addressBook=true",
 	},
-}
+} satisfies Record<string, MethodDescriptor>
+
+/** The registry the facades/derivations/oracle consume — the SAME object as
+ *  `METHOD_REGISTRY_SOURCE`, widened to `Record<string, MethodDescriptor>` so
+ *  optional-field access (`exemptReason?`/`scopeCheck?`) type-checks. */
+export const METHOD_REGISTRY: Record<string, MethodDescriptor> = METHOD_REGISTRY_SOURCE
 
 // ── Derivations (each replaces a former hand-maintained table) ─────────
 
@@ -259,6 +269,30 @@ export function deriveScopeCheckerMap(registry: Record<string, MethodDescriptor>
 		if (d.scopeCheck !== undefined) out[method] = d.scopeCheck
 	}
 	return out
+}
+
+/** The exact set of dApp RPC method names the dispatcher supports — the literal
+ *  key union of `METHOD_REGISTRY`. A typed replacement for the bare `string` at
+ *  the dispatch boundary; layered FROM the registry (not a second whitelist). */
+export type MethodName = keyof typeof METHOD_REGISTRY_SOURCE
+
+/** A dApp RPC request after the dispatch-entry guard has validated the method.
+ *  `args` stays `unknown[]` — per-arg typing would need per-method arg schemas
+ *  (new descriptor fields → an oracle change), deferred. */
+export interface RpcRequest {
+	method: MethodName
+	args: unknown[]
+}
+
+/** Fail-closed dispatch-entry guard + narrowing. Throws (preserving the frozen
+ *  "Unsupported wallet method" string) for any name absent from `METHOD_REGISTRY`;
+ *  `Object.hasOwn` (not a truthy index) rejects prototype names. On return,
+ *  `methodName` is narrowed to `MethodName`. This is the single typed choke point
+ *  the dispatcher routes through — no permissive default, no `as` at the boundary. */
+export function assertKnownMethod(methodName: string): asserts methodName is MethodName {
+	if (!Object.hasOwn(METHOD_REGISTRY, methodName)) {
+		throw new Error(`Unsupported wallet method: ${methodName}`)
+	}
 }
 
 // Pre-computed once at module load — these are what the facades import in Phase 2.
