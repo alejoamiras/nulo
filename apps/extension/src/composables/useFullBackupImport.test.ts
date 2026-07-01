@@ -435,7 +435,7 @@ describe("useFullBackupImport — passkey backup", () => {
 		expect(runCeremony).toHaveBeenCalledWith({ mode: "get", credentialId: PASSKEY_CRED_ID })
 		expect(profileClient.restore).toHaveBeenCalledWith(
 			expect.objectContaining({ type: "passkey" }),
-			PASSKEY_CRED_ID,
+			{ type: "passkey", credentialId: PASSKEY_CRED_ID },
 			"", // empty password for passkey
 			PASSKEY_DATA, // credentialData forwarded
 		)
