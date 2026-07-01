@@ -28,3 +28,19 @@ Establishing ancestry FUNDAMENTALLY needs a merge commit on dev — so **dev's h
 ## Operational gotchas observed
 - After a squash-merged release PR, the `release-please--branches--<branch>` head branch is NOT auto-deleted → it blocks the next cut. Delete it (or enable auto-delete) between cuts.
 - Transient `401 Bad credentials` on rapid `gh pr merge` mutations (secondary rate-limit on the keyring token) — space out merge calls.
+
+## Real-repo Phase 2 execution (2026-07-01) — landed with ZERO `--admin`
+
+Applied 2a to the live repo:
+- **PR #221** — `prerelease-type: rc→rc.0` + flipped the forward `sync-main-to-dev` instruction squash→merge (runbook + `open-sync-pr-run.ts` body/comment + `release.yml` comment) + docs. Smoke/network correctly **skip-but-pass** (release tooling ≠ extension behavior). Plain squash-merge.
+- **dev ruleset** `16603140 "dev: squash only"` → renamed + `allowed_merge_methods: ["squash","merge"]` via `gh api PUT` (GET-modify-PUT, bypass actor + conditions preserved). classic branch-protection separately enforces `required_signatures` (NOT in the ruleset).
+- **PR #224** — one-time signed `git merge -s ours v0.23.0` (empty diff, keeps dev's tree) → `--merge` → `50b4145a` is now a dev ancestor. Real-`dev` dry-run then yields `0.24.0-rc.0` / 47 commits.
+
+### The commitlint trap (throwaway couldn't surface it)
+The FIRST ancestry attempt (**PR #222**, branch `chore/restore-release-ancestry`) **failed `quality-status` on Commitlint** — and ONLY commitlint (empty diff → lint/typecheck/units all pass). Cause: a `-s ours` merge makes `base..head` (`--from BASE_SHA --to HEAD_SHA`) carry v0.23.0's 28 immutable, already-merged commits, including the intentionally >100-char `release: promote dev → main (…)` subject (#144) → `header-max-length` fail. The CI's commitlint step ALREADY skips this for `BASE_REF=main` (documented "spurious … adds no value") but not for dev.
+- **Fix (PR #223):** extend the skip to sync PRs on dev — `HEAD_REF` prefixed `sync/main-to-dev*`. Narrow, safe (the one NEW sync commit — the manifest re-baseline — is bot-conventional; everything else is immutable history). Then re-did the ancestry on branch **`sync/main-to-dev-v0.23.0`** (matching the skip) → #224 → commitlint SUCCESS → merged clean, **no `--admin`**.
+- **This also fixes the FORWARD merge-sync**, which would have tripped the same commitlint failure every stable release (the throwaway had no commitlint gate, so Phase 1 never saw it).
+- Lesson: a real-repo CI gate can reject a structurally-valid merge the throwaway waved through. Rehearse against the actual required checks, not just the tool.
+
+### Signed-commit reality on real dev
+`required_signatures` is **classic branch protection** (not the ruleset). The one-time `-s ours` merge was SSH-signed (verified) and v0.23.0's 28 introduced commits are all GitHub-verified (main is signed) → the merge passed signatures with no `--admin`. The FORWARD automated sync's bot manifest commit is still unsigned → codex-F1 follow-up (App-API-verified commit) remains; interim documented as `--merge --admin`.
