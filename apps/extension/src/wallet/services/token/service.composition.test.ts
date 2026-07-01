@@ -30,6 +30,7 @@ import { OperationJournalService } from "@/wallet/services/operation-journal/ser
 import { makeShallowPxeFake, type ShallowPxeFakeConfig } from "@/wallet/services/pxe/shallow-port.fake"
 import { svc } from "@/wallet/services/composition-harness"
 import { TokenService } from "./service"
+import type { Token } from "./spec"
 
 const NETWORK = { id: "net1", chainId: 1, primaryEndpointId: "ep1", endpoints: [{ id: "ep1", rpcUrl: "http://fake" }] }
 const CONTRACT = AztecAddress.fromNumber(0x1234).toString()
@@ -66,7 +67,7 @@ async function makeHarness(fakeConfig?: ShallowPxeFakeConfig) {
 	const tokenService = new TokenService(logger, api, () => fake.client)
 	collection.add(tokenService)
 	await collection.start()
-	return { tokenService, fake }
+	return { tokenService, fake, api }
 }
 
 describe("TokenService composition — in-process, no sandbox", () => {
@@ -92,5 +93,39 @@ describe("TokenService composition — in-process, no sandbox", () => {
 
 		await tokenService.parseTokenInterface(NETWORK.id, CONTRACT)
 		expect(fake.registerCalls).toHaveLength(0) // getContracts() already lists it → no register
+	})
+})
+
+describe("TokenService.restore — shared numeric cursor (nextNumericId + restoreRows)", () => {
+	const mkToken = (contract: string): Token =>
+		({ id: 0, profileId: "p1", chainId: 1, contract, name: contract, symbol: contract, decimals: 18 }) as Token
+
+	test("assigns a shared numeric cursor — ids are consecutive across the batch", async () => {
+		const { tokenService } = await makeHarness()
+
+		const restored = await tokenService.restore([mkToken("0xa"), mkToken("0xb"), mkToken("0xc")])
+
+		expect(restored.every((r) => r.restoreError === undefined)).toBe(true)
+		const ids = restored.map((r) => r.id)
+		expect(ids[1]).toBe(ids[0] + 1)
+		expect(ids[2]).toBe(ids[1] + 1)
+		// The reassigned ids are what actually landed in the store.
+		expect((await tokenService.getTokensRaw("p1")).map((t) => t.id).sort((a, b) => a - b)).toEqual(ids)
+	})
+
+	test("a failed write records a restoreError STRING; the cursor skips it (no id consumed)", async () => {
+		const { tokenService, api } = await makeHarness()
+		// Fail only the first persisted write (restore's writes are the only sets and
+		// run in row order), so the surviving rows must still restore.
+		vi.spyOn(api.storage.local, "set").mockRejectedValueOnce(new Error("disk full"))
+
+		const [a, b, c] = await tokenService.restore([mkToken("0xa"), mkToken("0xb"), mkToken("0xc")])
+
+		expect(a.restoreError).toBe("disk full")
+		expect(typeof a.restoreError).toBe("string")
+		expect(b.restoreError).toBeUndefined()
+		expect(c.restoreError).toBeUndefined()
+		// `a` failed → its id was not consumed → `b`/`c` are consecutive from the cursor start.
+		expect(c.id).toBe(b.id + 1)
 	})
 })
