@@ -86,7 +86,8 @@ export async function runSync(opts: RunSyncOpts): Promise<RunSyncResult> {
 	const body =
 		`Post-release sync of \`main\` → \`dev\` for **v${opts.version}** — brings the release version bump + ` +
 		`\`CHANGELOG.md\` into \`dev\` and re-baselines \`.release-please-prerelease-manifest.json\` to \`${opts.version}\` ` +
-		`(so the next rc series cuts from the right base). Squash-merge via the UI (GitHub signs the squash commit). ` +
+		`(so the next rc series cuts from the right base). **Merge-commit** via the UI — NOT squash: a merge preserves ` +
+		`main's release-commit ancestry on \`dev\`, which the prerelease version-anchor needs (a squash drops it and re-breaks the rc cut). ` +
 		`See CLAUDE.md § "After a stable cut promotes to main".`
 	const pr = await io.openPr(branch, title, body)
 
@@ -98,7 +99,7 @@ export async function runSync(opts: RunSyncOpts): Promise<RunSyncResult> {
 	}
 	const comment =
 		`GitHub computed this \`main → dev\` sync as **${mergeable}**. Resolve manually (usually \`CHANGELOG.md\` or ` +
-		`\`bun.lock\`), then squash-merge. This is expected when \`dev\` has diverged since the release — it's surfaced, ` +
+		`\`bun.lock\`), then **merge-commit** (NOT squash). This is expected when \`dev\` has diverged since the release — it's surfaced, ` +
 		`not auto-merged, by design.`
 	await io.flagConflict(pr, decision.label as string, comment)
 	io.log(`sync: opened #${pr} + labeled '${decision.label}' (${mergeable}) — needs manual resolution`)
