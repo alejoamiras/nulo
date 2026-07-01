@@ -71,6 +71,25 @@ export type MethodRouting =
 	| { readonly via: "account-operation"; readonly kind: AccountOperationKind }
 	| { readonly via: "handler" }
 
+/**
+ * Per-method argument guard. A pure, NON-MUTATING predicate over the ORIGINAL
+ * args array — deliberately not a parser: it can return only pass/fail, so it
+ * cannot coerce, normalize, or substitute values, and everything downstream
+ * (scope checkers reading `args` positionally, handler destructuring) keeps
+ * seeing the exact wire values. Runs in dispatch() right after
+ * `assertKnownMethod`, BEFORE capability/scope enforcement and before any
+ * handler destructuring.
+ *
+ * Calibration is tolerance-exact (audit pins): required-LEADING arity only
+ * where no working absent-arg path exists today; optional trailing args stay
+ * optional; extra args stay ignored; no value-type requirements on args the
+ * code `String()`-coerces. Methods whose first-arg validation is OWNED by
+ * their scope checker (sendTx/simulateTx/profileTx/executeUtility — pinned
+ * error strings) or that read no args at all OMIT the field: absence = no arg
+ * validation, exactly today's behavior.
+ */
+export type ArgGuard = (args: readonly unknown[]) => boolean
+
 export interface MethodDescriptor {
 	/** Required capability, or `null` for exempt/meta. `null` ⟺ `exemptReason` set (D7 XOR). */
 	readonly capability: CapabilityType | null
@@ -79,10 +98,48 @@ export interface MethodDescriptor {
 	readonly routing: MethodRouting
 	/** Per-origin scope gate. Omitted = no scope dimension (enforceScope no-ops). */
 	readonly scopeCheck?: ScopeCheck
+	/** Arg-shape guard (see {@link ArgGuard}). Omitted = no arg validation (historical tolerance). */
+	readonly argSchema?: ArgGuard
 	/** Preserved F-/AUDIT markers paired with security tests. */
 	readonly audit?: string
 	/** Rationale migrated verbatim from the old inline comments. */
 	readonly note?: string
+}
+
+// ── Arg guards (named fns so failures stack-trace to the method) ───────
+
+const isPlainRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null
+
+/** requestCapabilities(manifest): the handler reads manifest properties directly. */
+export function argsRequestCapabilities(args: readonly unknown[]): boolean {
+	return isPlainRecord(args[0])
+}
+
+/** batch(legs): handleBatch iterates legs and re-dispatches `leg.name(leg.args)`;
+ *  each leg is then validated by its OWN method's guard on re-entry. */
+export function argsBatch(args: readonly unknown[]): boolean {
+	const legs = args[0]
+	if (!Array.isArray(legs)) return false
+	return legs.every((leg) => isPlainRecord(leg) && typeof leg.name === "string" && Array.isArray(leg.args))
+}
+
+/** createAuthWit(from, messageHashOrIntent): both positions are read; there is
+ *  no working path with the intent absent (the built operation would carry
+ *  `messageHashOrIntent: undefined` into execution). Values stay unvalidated —
+ *  the scope checker handles the 3 intent shapes tolerantly. */
+export function argsCreateAuthWit(args: readonly unknown[]): boolean {
+	return args.length >= 2
+}
+
+/** Single leading arg that the checker/handler `String()`-coerces — presence
+ *  only, no type requirement (coercion tolerance preserved). */
+export function argsOneRequired(args: readonly unknown[]): boolean {
+	return args.length >= 1
+}
+
+/** Two leading args read (getPrivateEvents / registerToken / grantPublicAuthwit). */
+export function argsTwoRequired(args: readonly unknown[]): boolean {
+	return args.length >= 2
 }
 
 // Private `satisfies` source so the literal KEYS survive for `MethodName`
@@ -101,11 +158,13 @@ const METHOD_REGISTRY_SOURCE = {
 		capability: null,
 		exemptReason: "capability-negotiation meta-protocol — the method by which grants are obtained",
 		routing: { via: "handler" },
+		argSchema: argsRequestCapabilities,
 	},
 	batch: {
 		capability: null,
 		exemptReason: "infrastructure wrapper — each leg re-enters dispatch() and is enforced individually",
 		routing: { via: "handler" },
+		argSchema: argsBatch,
 	},
 
 	// ── accounts ──
@@ -113,10 +172,12 @@ const METHOD_REGISTRY_SOURCE = {
 		capability: "accounts",
 		routing: { via: "account-operation", kind: "aztec_createAuthWit" },
 		scopeCheck: checkCreateAuthWit,
+		argSchema: argsCreateAuthWit,
 	},
 	registerToken: {
 		capability: "accounts",
 		routing: { via: "handler" },
+		argSchema: argsTwoRequired,
 		// D8: NOT a missing scope checker. registerToken's session-account authz
 		// is enforced inline in handleRegisterToken(); it has no METHOD_SCOPE_CHECKER
 		// entry by design.
@@ -134,6 +195,7 @@ const METHOD_REGISTRY_SOURCE = {
 		capability: "contracts",
 		routing: { via: "handler" },
 		scopeCheck: checkIsTokenRegistered,
+		argSchema: argsOneRequired,
 		// A1: wallet-local registration probe; gated by the contracts grant
 		// (need-to-know address list), scope-checked via canGetMetadata — the same
 		// consent surface as getContractMetadata. Preserved verbatim.
@@ -143,11 +205,13 @@ const METHOD_REGISTRY_SOURCE = {
 		capability: "contracts",
 		routing: { via: "network-operation", kind: "aztec_registerContract" },
 		scopeCheck: checkRegisterContract,
+		argSchema: argsOneRequired,
 	},
 	getContractMetadata: {
 		capability: "contracts",
 		routing: { via: "network-operation", kind: "aztec_getContractMetadata" },
 		scopeCheck: checkGetContractMetadata,
+		argSchema: argsOneRequired,
 	},
 
 	// ── contractClasses ──
@@ -155,6 +219,7 @@ const METHOD_REGISTRY_SOURCE = {
 		capability: "contractClasses",
 		routing: { via: "network-operation", kind: "aztec_getContractClassMetadata" },
 		scopeCheck: checkGetContractClassMetadata,
+		argSchema: argsOneRequired,
 	},
 	registerContractClass: {
 		capability: "contractClasses",
@@ -191,6 +256,7 @@ const METHOD_REGISTRY_SOURCE = {
 		capability: "transaction",
 		routing: { via: "handler" },
 		scopeCheck: checkGrantPublicAuthwit,
+		argSchema: argsTwoRequired,
 		// F1: WITHOUT the transaction capability, enforceCapability returns [] and the
 		// scope-enforcement block is skipped — the gate becomes dead code (audit F1).
 		audit: "F1: requires the transaction capability or the scope gate is dead code (dispatcher.test.ts:1459-1544)",
@@ -201,6 +267,7 @@ const METHOD_REGISTRY_SOURCE = {
 		capability: "data",
 		routing: { via: "network-operation", kind: "aztec_getPrivateEvents" },
 		scopeCheck: checkGetPrivateEvents,
+		argSchema: argsTwoRequired,
 	},
 	getAddressBook: {
 		capability: "data",
@@ -212,6 +279,7 @@ const METHOD_REGISTRY_SOURCE = {
 		capability: "data",
 		routing: { via: "network-operation", kind: "aztec_registerSender" },
 		scopeCheck: checkRegisterSender,
+		argSchema: argsOneRequired,
 		audit: "F-004 (paired): requires data.addressBook=true",
 	},
 } satisfies Record<string, MethodDescriptor>

@@ -284,3 +284,125 @@ describe("method-descriptors — add-a-method proof (metadata only)", () => {
 		expect(missing).toEqual(["sendTx"])
 	})
 })
+
+// ── ADD-ONLY (Q-02, owner-authorized): arg-guard assertions ────────────
+// Everything ABOVE this marker is the round-1 frozen oracle and is byte-
+// identical to its pre-Q-02 state (verified by the surfaced git diff). The
+// additions below only pin the NEW argSchema field; no authz assertion is
+// touched, and the derive* parity tests above prove the authz maps are
+// unchanged by the field's presence.
+
+import { METHOD_REGISTRY as REGISTRY_FOR_ARGS } from "./method-descriptors"
+
+// The exact split, frozen: 11 methods carry an arg guard; 8 deliberately do
+// NOT (no-arg methods; methods whose first-arg validation is OWNED by their
+// scope checker with pinned error strings; and the disabled method whose
+// scope-check error must remain the observable error).
+const FROZEN_ARG_GUARDED = new Set([
+	"requestCapabilities",
+	"batch",
+	"createAuthWit",
+	"registerToken",
+	"isTokenRegistered",
+	"registerContract",
+	"getContractMetadata",
+	"getContractClassMetadata",
+	"grantPublicAuthwit",
+	"getPrivateEvents",
+	"registerSender",
+])
+const FROZEN_ARG_UNGUARDED = new Set([
+	"getChainInfo", // reads no args
+	"getAccounts", // reads no args
+	"getAddressBook", // reads no args
+	"sendTx", // exec validation owned by checkSendTx (pinned error); opts optional
+	"simulateTx", // exec validation owned by checkSimulateTx (pinned error); opts optional
+	"profileTx", // exec validation owned by checkProfileTx (pinned error); opts optional
+	"executeUtility", // call validation owned by checkExecuteUtility (pinned error)
+	"registerContractClass", // disabled at scope-check — that error must stay observable
+])
+
+describe("method-descriptors — arg guards (Q-02 ADD-only)", () => {
+	test("guarded/unguarded split is exact and total over the registry", () => {
+		const guarded = new Set(
+			Object.entries(REGISTRY_FOR_ARGS)
+				.filter(([, d]) => d.argSchema !== undefined)
+				.map(([m]) => m),
+		)
+		const unguarded = new Set(
+			Object.entries(REGISTRY_FOR_ARGS)
+				.filter(([, d]) => d.argSchema === undefined)
+				.map(([m]) => m),
+		)
+		expect(guarded).toEqual(FROZEN_ARG_GUARDED)
+		expect(unguarded).toEqual(FROZEN_ARG_UNGUARDED)
+	})
+
+	test("guards are pure pass/fail over the ORIGINAL array — never mutate or replace", () => {
+		for (const [method, d] of Object.entries(REGISTRY_FOR_ARGS)) {
+			if (!d.argSchema) continue
+			const args: unknown[] = [{ a: 1 }, ["x"], "s"]
+			const snapshot = JSON.stringify(args)
+			const result = d.argSchema(args)
+			expect(typeof result, `${method} guard must return boolean`).toBe("boolean")
+			expect(JSON.stringify(args), `${method} guard mutated args`).toBe(snapshot)
+		}
+	})
+
+	test("optional trailing args stay optional; extra args stay tolerated (no max arity)", () => {
+		// registerSender(address, alias?) — 1 arg is a complete call today.
+		expect(REGISTRY_FOR_ARGS.registerSender.argSchema?.(["0xaddr"])).toBe(true)
+		// Extra args beyond the read positions are ignored today — guards must not reject them.
+		expect(REGISTRY_FOR_ARGS.registerSender.argSchema?.(["0xaddr", "alias", "extra", 42])).toBe(true)
+		expect(REGISTRY_FOR_ARGS.getContractMetadata.argSchema?.(["0xaddr", "spurious"])).toBe(true)
+		expect(REGISTRY_FOR_ARGS.createAuthWit.argSchema?.(["0xfrom", { consumer: "0xc", innerHash: "0xh" }, "extra"])).toBe(true)
+	})
+
+	test("required-leading arity is enforced fail-closed (the authorized rejection)", () => {
+		expect(REGISTRY_FOR_ARGS.getContractMetadata.argSchema?.([])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.getContractClassMetadata.argSchema?.([])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.isTokenRegistered.argSchema?.([])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.registerContract.argSchema?.([])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.registerSender.argSchema?.([])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.createAuthWit.argSchema?.(["0xfrom"])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.getPrivateEvents.argSchema?.([{ meta: true }])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.registerToken.argSchema?.(["0xaccount"])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.grantPublicAuthwit.argSchema?.(["0xaccount"])).toBe(false)
+	})
+
+	test("value coercion tolerance is preserved — scalar args accept ANY present value", () => {
+		// These args are String()-coerced downstream; the guard must not add a type requirement.
+		expect(REGISTRY_FOR_ARGS.getContractMetadata.argSchema?.([12345])).toBe(true)
+		expect(REGISTRY_FOR_ARGS.isTokenRegistered.argSchema?.([null])).toBe(true)
+		expect(REGISTRY_FOR_ARGS.registerContract.argSchema?.(["raw-address-string"])).toBe(true)
+	})
+
+	test("requestCapabilities requires an object manifest; batch requires well-formed legs", () => {
+		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([{ capabilities: [] }])).toBe(true)
+		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.(["manifest"])).toBe(false)
+
+		expect(REGISTRY_FOR_ARGS.batch.argSchema?.([[{ name: "getChainInfo", args: [] }]])).toBe(true)
+		expect(REGISTRY_FOR_ARGS.batch.argSchema?.([[]])).toBe(true)
+		expect(REGISTRY_FOR_ARGS.batch.argSchema?.(["not-an-array"])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.batch.argSchema?.([[{ name: 42, args: [] }]])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.batch.argSchema?.([[{ name: "x" }]])).toBe(false)
+	})
+
+	test("derive* outputs are IDENTICAL with and without argSchema fields (no authz widening)", () => {
+		// Strip argSchema from every row and re-derive: every derived authz/routing
+		// map must be unchanged — the field is invisible to enforcement derivation.
+		const stripped: Record<string, MethodDescriptor> = Object.fromEntries(
+			Object.entries(REGISTRY_FOR_ARGS).map(([m, d]) => {
+				const { argSchema: _drop, ...rest } = d
+				return [m, rest as MethodDescriptor]
+			}),
+		)
+		expect(deriveCapabilityMap(stripped)).toEqual(deriveCapabilityMap(REGISTRY_FOR_ARGS))
+		expect(deriveExemptSet(stripped)).toEqual(deriveExemptSet(REGISTRY_FOR_ARGS))
+		expect(deriveMethodToKind(stripped)).toEqual(deriveMethodToKind(REGISTRY_FOR_ARGS))
+		expect(deriveNetworkOnlyKinds(stripped)).toEqual(deriveNetworkOnlyKinds(REGISTRY_FOR_ARGS))
+		expect(deriveAccountKinds(stripped)).toEqual(deriveAccountKinds(REGISTRY_FOR_ARGS))
+		expect(deriveScopeCheckerMap(stripped)).toEqual(deriveScopeCheckerMap(REGISTRY_FOR_ARGS))
+	})
+})
