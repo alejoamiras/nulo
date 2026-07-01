@@ -38,6 +38,7 @@
 
 import { array_equals, toBase64 } from "@nulo/wallet-core/utils"
 import { EncryptionKey } from "./encryption-key"
+import type { Passhash } from "./secret-types"
 import { zeroize } from "./zeroize"
 
 /** Fixed-plaintext round-trip check. `seal` encrypts this under the
@@ -69,7 +70,7 @@ export type EncryptedProfileSecret = {
  *  `encrypted` on the `Profile` record and pass `passhash` into the
  *  SessionManager's `open` fast-path (avoiding a second PBKDF2). */
 export type Sealed = {
-	passhash: ArrayBuffer
+	passhash: Passhash
 	encrypted: EncryptedProfileSecret
 }
 
@@ -93,7 +94,7 @@ export class PasswordSecretBox {
 	 *  The `passhash` and `secret` parameters are **caller-owned**.
 	 *  This method does NOT zero them; the caller is responsible for
 	 *  calling `zeroize(...)` after the last legitimate use. */
-	public async sealWithPasshash(passhash: ArrayBuffer, secret: Uint8Array<ArrayBuffer>): Promise<EncryptedProfileSecret> {
+	public async sealWithPasshash(passhash: Passhash, secret: Uint8Array<ArrayBuffer>): Promise<EncryptedProfileSecret> {
 		const key = await EncryptionKey.fromPasshash(passhash)
 		return this.sealInternal(key, secret)
 	}
@@ -119,7 +120,7 @@ export class PasswordSecretBox {
 	 *  The `passhash` parameter is **caller-owned**. This method does
 	 *  NOT zero it; the caller is responsible for calling
 	 *  `zeroize(...)` after the last legitimate use. */
-	public async unsealWithPasshash(passhash: ArrayBuffer, encrypted: EncryptedProfileSecret): Promise<Uint8Array<ArrayBuffer> | null> {
+	public async unsealWithPasshash(passhash: Passhash, encrypted: EncryptedProfileSecret): Promise<Uint8Array<ArrayBuffer> | null> {
 		const key = await EncryptionKey.fromPasshash(passhash)
 		return this.unsealInternal(key, encrypted)
 	}

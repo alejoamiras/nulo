@@ -6,6 +6,7 @@
  * pass-through, and the base64 encoding lock.
  */
 
+import { asPasshash } from "./secret-types"
 import { describe, expect, test } from "vitest"
 import { ENCRYPTION_GUARD, type EncryptedProfileSecret, PasswordSecretBox } from "./password-secret-box"
 
@@ -93,7 +94,7 @@ describe("PasswordSecretBox", () => {
 			const box = newBox()
 			const { encrypted } = await box.seal("hunter2", PLAINTEXT as Uint8Array<ArrayBuffer>)
 			const otherHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("different"))
-			const recovered = await box.unsealWithPasshash(otherHash, encrypted)
+			const recovered = await box.unsealWithPasshash(asPasshash(otherHash), encrypted)
 			expect(recovered).toBeNull()
 		})
 	})

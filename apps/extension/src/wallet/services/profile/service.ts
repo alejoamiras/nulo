@@ -11,7 +11,7 @@ import { ProfileRepository } from "./repository"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getEntropy, getMnemonic } from "@nulo/wallet-core/utils"
-import { EncryptionKey, PasswordSecretBox, zeroize } from "@nulo/wallet-crypto"
+import { EncryptionKey, type Passhash, PasswordSecretBox, zeroize } from "@nulo/wallet-crypto"
 import { PasskeyService } from "@/wallet/services/passkey/service"
 import { PasskeyRecoveryCoordinator, type PasskeyRecovery } from "./passkey-recovery-coordinator"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
@@ -768,7 +768,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * import* methods. Zeroes both in finally — runs on success, throw,
 	 * and re-throw paths.
 	 */
-	private async importPasswordProfile(name: string, secret: Uint8Array<ArrayBuffer>, passhash: ArrayBuffer): Promise<Profile> {
+	private async importPasswordProfile(name: string, secret: Uint8Array<ArrayBuffer>, passhash: Passhash): Promise<Profile> {
 		try {
 			return await this.runExclusive(async () => {
 				const id = await this.repo.generateUniqueId()
