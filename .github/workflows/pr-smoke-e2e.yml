@@ -53,6 +53,8 @@ jobs:
               - 'packages/wallet-core/package.json'
               - 'packages/wallet-crypto/src/**'
               - 'packages/wallet-crypto/package.json'
+              - 'packages/wallet-sdk-schema-patch/src/**'
+              - 'packages/wallet-sdk-schema-patch/package.json'
               # Repo-wide build inputs:
               - 'package.json'
               - 'bun.lock'

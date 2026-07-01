@@ -266,6 +266,7 @@
         "@nulo/wallet-core": "workspace:*",
       },
       "devDependencies": {
+        "@nulo/wallet-sdk-schema-patch": "workspace:*",
         "chrome-types": "^0.1.429",
         "typescript": "^6.0.3",
         "vitest": "^4.1.9",
