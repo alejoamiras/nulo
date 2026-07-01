@@ -4,10 +4,10 @@
  */
 
 import { describe, expect, test } from "vitest"
-import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
+import { asBase64CredentialId, asBase64SecretPrf, type PasskeyCredentialData } from "@nulo/wallet-crypto"
 import { usePasskeyCeremony } from "./usePasskeyCeremony"
 
-const fakeData = (id = "cred-x"): PasskeyCredentialData => ({ id, prf: "prf-bytes-base64" })
+const fakeData = (id = "cred-x"): PasskeyCredentialData => ({ id: asBase64CredentialId(id), prf: asBase64SecretPrf("prf-bytes-base64") })
 
 describe("usePasskeyCeremony", () => {
 	test("opens the dialog (sets request) when runCeremony is called", () => {

@@ -11,7 +11,7 @@ import { ProfileRepository } from "./repository"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getEntropy, getMnemonic } from "@nulo/wallet-core/utils"
-import { EncryptionKey, PasswordSecretBox, zeroize } from "@nulo/wallet-crypto"
+import { asMasterSecretBytes, EncryptionKey, type MasterSecretBytes, type Passhash, PasswordSecretBox, zeroize } from "@nulo/wallet-crypto"
 import { PasskeyService } from "@/wallet/services/passkey/service"
 import { PasskeyRecoveryCoordinator, type PasskeyRecovery } from "./passkey-recovery-coordinator"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
@@ -77,7 +77,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * to get the same secret would be a UX regression — we cache the recovery
 	 * secret here in memory only, never persisted, cleared on SW restart.
 	 */
-	private readonly pendingRestoreSecrets = new Map<string, Uint8Array<ArrayBuffer>>()
+	private readonly pendingRestoreSecrets = new Map<string, MasterSecretBytes>()
 
 	/**
 	 * @param browserApi Optional. Tests pass `FakeBrowserApi` so the
@@ -152,7 +152,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 	public async createProfile(name: string, password: string): Promise<ProfileInfo> {
 		await this.ensureInitialized()
-		const secret = Fr.random().toBuffer() as Buffer<ArrayBuffer>
+		const secret = asMasterSecretBytes(Fr.random().toBuffer() as Buffer<ArrayBuffer>)
 		const { passhash, encrypted } = await this.secretBox.seal(password, secret)
 		try {
 			return await this.runExclusive(async () => {
@@ -607,7 +607,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			throw new Error("Invalid secret length")
 		}
 		// importPasswordProfile takes ownership of `_plainSecret` + `passhash`.
-		return await this.importPasswordProfile(name, _plainSecret, passhash)
+		return await this.importPasswordProfile(name, asMasterSecretBytes(_plainSecret as Uint8Array<ArrayBuffer>), passhash)
 	}
 
 	public async importPlain(name: string, secret: string, password: string): Promise<ProfileInfo> {
@@ -619,7 +619,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			zeroize(passhash)
 			throw new Error("Invalid secret length")
 		}
-		return await this.importPasswordProfile(name, _plainSecret, passhash)
+		return await this.importPasswordProfile(name, asMasterSecretBytes(_plainSecret as Uint8Array<ArrayBuffer>), passhash)
 	}
 
 	public async importMnemonic(name: string, mnemonic: string[], password: string): Promise<ProfileInfo> {
@@ -627,7 +627,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		const passhash = await EncryptionKey.getPasshash(password)
 		const plain = await getEntropy(mnemonic)
 		// importPasswordProfile takes ownership of `plain` + `passhash`.
-		return await this.importPasswordProfile(name, plain, passhash)
+		return await this.importPasswordProfile(name, asMasterSecretBytes(plain as Uint8Array<ArrayBuffer>), passhash)
 	}
 
 	public async exportEncrypted(id: string): Promise<string> {
@@ -768,7 +768,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * import* methods. Zeroes both in finally — runs on success, throw,
 	 * and re-throw paths.
 	 */
-	private async importPasswordProfile(name: string, secret: Uint8Array<ArrayBuffer>, passhash: ArrayBuffer): Promise<Profile> {
+	private async importPasswordProfile(name: string, secret: MasterSecretBytes, passhash: Passhash): Promise<Profile> {
 		try {
 			return await this.runExclusive(async () => {
 				const id = await this.repo.generateUniqueId()
@@ -798,7 +798,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	private async importPasskeyProfile(
 		name: string,
 		credentialId: string,
-		secret: Uint8Array<ArrayBuffer>,
+		secret: MasterSecretBytes,
 		userHandle?: string,
 	): Promise<Profile> {
 		try {
@@ -879,7 +879,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				try {
 					return await this.runExclusive(async () => {
 						try {
-							const sealed = await this.secretBox.seal(password, plainSecret as Uint8Array<ArrayBuffer>)
+							const sealed = await this.secretBox.seal(password, asMasterSecretBytes(plainSecret as Uint8Array<ArrayBuffer>))
 							passhash = sealed.passhash
 
 							let id = profile.id
@@ -942,7 +942,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 						throw new Error("credentialId mismatch")
 					}
 					recoverySecret = recovery.secret
-					let id = recovery.userHandle
+					// The restored profile id is the (hex) userHandle when the credential
+					// carried one, else a freshly generated id — a plain profile-id string
+					// either way, so widen off the `HexUserHandle` brand here.
+					let id: string | undefined = recovery.userHandle
 
 					// Only the storage tail is locked — the WebAuthn ceremony +
 					// credentialId-bind above run UNLOCKED, and their early throws
