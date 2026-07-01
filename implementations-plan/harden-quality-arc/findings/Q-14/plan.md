@@ -31,4 +31,41 @@ Duplication persists: `NewNetworkPopup.vue` has the keydown add/remove lifecycle
 - **Inferences (codex to attack):** the 29 popups share ENOUGH shape for ONE `usePopupEntity` (some may be too bespoke — the migration may leave a few unmigrated, which is fine); the window shell can unify cancellation without changing the beforeunload/disconnect ordering.
 - **Asks:** none expected (behavior-preserving); a genuine cancellation/beforeunload behavior change would be surfaced, not folded in.
 
-> **Status:** STEP 1 ✓ VALID; infra scoped; design direction drafted. Next: codex `xhigh` deep-audit leg on this plan (attack the "one composable fits 29 popups" assumption + the load-bearing cancellation/beforeunload preservation), then P16.0 characterization → P16.1 `usePopupEntity` + representative migration.
+## codex deep-audit (`gH2bjztQ`) — PLAN-NEEDS-REVISION → **RE-SCOPED (finding shrunk)**
+
+codex confirmed "one composable for 29 popups" is **too broad**. The behavior-preserving, valuable scope is a **NARROW helper**, not a broad CRUD/service-lifecycle owner. Revised plan:
+
+### `usePopupEntity` = NARROW helper (show-watcher + Enter-listener + reset/error state ONLY)
+NOT a service-lifecycle owner. It unifies the mechanical duplication the fitting popups share: the `watch(show)` connect/disconnect timing hook, the document Enter-key listener add/remove, and the reset/error state. The parent keeps owning `.connect()/.disconnect()` (per C1); the helper just fires callbacks at the right lifecycle points.
+
+### Popups that FIT (the P16 migration set — plain `FormPopup` create/edit forms)
+`NewNetworkPopup`, `EditNetworkPopup`, `NewEndpointPopup`, `EditEndpointPopup`, `NewAccountPopup`, `EditAccountPopup` (+ maybe `NewFpcPopup` with hooks). **~6–7 popups**, not 29.
+
+### Popups that RESIST — LEAVE THEM (codex-enumerated; forcing them in is the danger)
+- `NewTokenPopup` (balance wait + event subs + explicit `taskService.connect()` in submit + abort/reset/disconnect ordering, `:177-188,264-276`)
+- `EditContactPopup` (dual services, sync sender-state latch, import branch, migration truth table; only keydown/error common, `:290-337`)
+- `ChangeAuthwitsRegistryPopup` / `RevokeAuthwitsPopup` (fee settings, cancellable-tx classification, chunked sequential revoke, non-`FormPopup`, different Enter semantics, `:91-115` / `:139-168`)
+- `ImportContactsPopup` (close rejects `cacheStore.importPromise`; not form CRUD, `:73-80,126-135`)
+- `IncomingTrustPopup` (trust-boundary focus on contract expand, no Enter-submit, `:115-129`)
+- list/detail: `SelectFpcPopup`, `SelectBalanceTypePopup`, `SelectProfilePopup`, `SelectTokenPopup`, `TokenMetadataPopup`
+- `EditProfilePopup`, `NewSenderPopup` (form-like but non-`FormPopup`; global Enter, not input-only, `:84-112` / `:77-97`)
+
+### Window shell = SEPARATE effort (NOT this PR; NOT the same abstraction)
+The 3 dApp windows (execute/capabilities/discover) are a DIFFERENT phase (P16b, own PR). **Load-bearing semantics the shell MUST preserve verbatim** (codex, file:line):
+- services connect BEFORE session-wait/auth-redirect (execute `411-438`, capabilities `241-267`, discover `136-162`)
+- `beforeunload` added ONLY after `await init()` — closing during session-wait/auth-redirect/pre-listener does NOT reject today; moving it earlier is a behavior change
+- completed approve/reject removes `beforeunload` BEFORE `chrome.windows.remove` (execute `370-380`, …)
+- unmount disconnects services BEFORE removing `beforeunload` (execute `441-447`, …); a shell calling `dispose()` must follow CLAUDE.md `163-178`: service disconnect → dispose/timers → remove listener
+- **execute wrong-profile is SUBTLE** (`execute/index.vue:157-160,532-535,376-378`): overlay dismiss calls `closeWindow()` without `true`, so the still-installed `beforeunload` REJECTS the pending request; removing the listener there would silently strand/reclassify the dApp request — DO NOT touch without a pin.
+
+### Deferred asks (codex) — resolved autonomously (behavior-preserving = leave as-is)
+- `SelectFpcPopup` has NO hide-disconnect (`:88-95`) — **BUG-PIN as pre-existing, DEFER** (don't "fix" it; a fix = behavior change out of dedup scope).
+- `useDappInteractionPayload` auto-disposes via `onScopeDispose` (`:109-115`) vs the stricter C1 rule — **DEFER** (touching it is out of Q-14's dedup scope; a separate finding if pursued).
+
+## Revised phasing
+- **P16.0** characterize 2 fitting popups (`NewNetworkPopup` simple + `EditAccountPopup`) — current connect/disconnect/Enter/error behavior as the equivalence reference.
+- **P16.1** build the NARROW `usePopupEntity` + migrate those 2; component tests + testid/focus-order verbatim + smoke. One gated PR.
+- **P16.2** migrate the rest of the fitting set (the other network/endpoint/account popups) in one batch; gated.
+- **P16b (separate PR, deferred/optional)** the dApp-window shell — characterize the 3 windows FIRST, preserve the load-bearing semantics above; FULL network gate. Higher-risk; may be time-boxed/deferred past the arc.
+
+> **Status:** codex audit incorporated; finding **SHRUNK** to a narrow helper for ~7 popups (window shell = separate P16b). Next: P16.0 characterize → P16.1 narrow `usePopupEntity` + migrate 2, first gated PR.
