@@ -533,6 +533,53 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 		expect(accountsResult?.canGet).toBe(true)
 	})
 
+	// ── P15.0 coverage-side DRIFT PINS (Q-04+Q-05 refactor equivalence oracle) ──
+	// Phase 1.5 above closed the field-blind coverage gap for `accounts` only.
+	// `contractClasses` (type-only fallback, dispatcher.ts:760) and `data.addressBook`
+	// (`dataRequestCovered` keys only on `privateEvents`) are STILL field-blind — the
+	// residual `wallet-sdk-capability-field-diff` follow-up finding, which is OUTSIDE
+	// the 22 quality-arc findings. These pins lock the CURRENT (drift) coverage verdict
+	// so the OperationPolicy / CapabilityStrategy refactor cannot silently move it; they
+	// flip to `popupCalls === 1` when that follow-up lands its fail-CLOSED fix. Enforcement
+	// still denies the over-broad use (scope-enforcement.test.ts), so this is a re-prompt
+	// gap, not a scope-escape.
+	test("(DRIFT PIN) contractClasses widening after a grant does NOT re-prompt (field-blind coverage; wallet-sdk-capability-field-diff)", async () => {
+		let popupCalls = 0
+		const existing: Capability = { type: "contractClasses", classes: [`0x${"aa".repeat(32)}`], canGetMetadata: false }
+		const session = makeSession({ capabilityGrants: [{ capability: existing, grantedAt: 1 }] })
+		const { writer } = makeSessionWriter(session)
+		const dispatcher = makePhase15Dispatcher(writer, async () => {
+			popupCalls++
+			return { granted: [{ type: "contractClasses" }] } as CapabilityResult
+		})
+		// Wider `classes` + `canGetMetadata:true` after a narrower grant: coverage at
+		// dispatcher.ts:760 is type-only (`grantedTypes.has`), so it reads as covered →
+		// delta empty → early return, no popup.
+		const manifest = {
+			capabilities: [{ type: "contractClasses", classes: [`0x${"aa".repeat(32)}`, `0x${"bb".repeat(32)}`], canGetMetadata: true }],
+		}
+		await dispatcher.dispatch("requestCapabilities", [manifest], ctx)
+		expect(popupCalls).toBe(0)
+	})
+
+	test("(DRIFT PIN) data.addressBook re-request with an existing data grant does NOT re-prompt (field-blind coverage; wallet-sdk-capability-field-diff)", async () => {
+		let popupCalls = 0
+		const existing: Capability = { type: "data", privateEvents: { contracts: "*" } }
+		const session = makeSession({ capabilityGrants: [{ capability: existing, grantedAt: 1 }] })
+		const { writer } = makeSessionWriter(session)
+		const dispatcher = makePhase15Dispatcher(writer, async () => {
+			popupCalls++
+			return { granted: [{ type: "data" }] } as CapabilityResult
+		})
+		// `addressBook:true` (no `privateEvents`): `dataRequestCovered` sets `rc = undefined`
+		// → `if (!rc) return existing.length > 0` → covered → delta empty → no popup.
+		// Enforcement (F-004, scope-enforcement.test.ts:60-73) still denies getAddressBook
+		// without an `addressBook:true` grant.
+		const manifest = { capabilities: [{ type: "data", addressBook: true }] }
+		await dispatcher.dispatch("requestCapabilities", [manifest], ctx)
+		expect(popupCalls).toBe(0)
+	})
+
 	// Q11: the grant-response path projects via the shared `projectSessionAccounts`
 	// helper. These pin the `accounts` ARRAY contents on the enrich path (previously
 	// only the canGet/canCreateAuthWit flags were tested here), so the helper
