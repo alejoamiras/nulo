@@ -34,12 +34,7 @@ import type { ProfileOptions, SendOptions, SimulateOptions } from "@aztec/aztec.
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { ProfileService } from "@/wallet/services/profile/service"
 import type { TokenService, Token } from "@/wallet/services/token/service"
-import {
-	TransferPrivateFn,
-	TransferPrivateToPublicFn,
-	TransferPublicFn,
-	TransferPublicToPrivateFn,
-} from "@/wallet/services/token/functions"
+import { createTokenFn, TOKEN_FN_DESCRIPTORS } from "@/wallet/services/token/functions"
 import { TransferType } from "@/wallet/services/transaction/spec"
 import type { Fn } from "@/wallet/utils/fn"
 import { pickPrimaryMethod } from "@/utils/primary-method"
@@ -107,32 +102,40 @@ export class OperationPlanner {
 				if (!token.transferPrivateFn) {
 					throw new Error("Transfer type not supported")
 				}
-				fn = TransferPrivateFn.new(token.transferPrivateFn.name, token.transferPrivateFn.impl)
-				args = (fn as TransferPrivateFn).buildArgs(accountAddress, recipientAddress, amount)
+				fn = createTokenFn(TOKEN_FN_DESCRIPTORS.transferPrivate, token.transferPrivateFn.name, token.transferPrivateFn.impl)
+				args = fn.buildArgs(accountAddress, recipientAddress, amount)
 				break
 			}
 			case TransferType.PrivateToPublic: {
 				if (!token.transferPrivateToPublicFn) {
 					throw new Error("Transfer type not supported")
 				}
-				fn = TransferPrivateToPublicFn.new(token.transferPrivateToPublicFn.name, token.transferPrivateToPublicFn.impl)
-				args = (fn as TransferPrivateToPublicFn)?.buildArgs(accountAddress, recipientAddress, amount)
+				fn = createTokenFn(
+					TOKEN_FN_DESCRIPTORS.transferPrivateToPublic,
+					token.transferPrivateToPublicFn.name,
+					token.transferPrivateToPublicFn.impl,
+				)
+				args = fn?.buildArgs(accountAddress, recipientAddress, amount)
 				break
 			}
 			case TransferType.Public: {
 				if (!token.transferPublicFn) {
 					throw new Error("Transfer type not supported")
 				}
-				fn = TransferPublicFn.new(token.transferPublicFn.name, token.transferPublicFn.impl)
-				args = (fn as TransferPublicFn)?.buildArgs(accountAddress, recipientAddress, amount)
+				fn = createTokenFn(TOKEN_FN_DESCRIPTORS.transferPublic, token.transferPublicFn.name, token.transferPublicFn.impl)
+				args = fn?.buildArgs(accountAddress, recipientAddress, amount)
 				break
 			}
 			case TransferType.PublicToPrivate: {
 				if (!token.transferPublicToPrivateFn) {
 					throw new Error("Transfer type not supported")
 				}
-				fn = TransferPublicToPrivateFn.new(token.transferPublicToPrivateFn.name, token.transferPublicToPrivateFn.impl)
-				args = (fn as TransferPublicToPrivateFn)?.buildArgs(accountAddress, recipientAddress, amount)
+				fn = createTokenFn(
+					TOKEN_FN_DESCRIPTORS.transferPublicToPrivate,
+					token.transferPublicToPrivateFn.name,
+					token.transferPublicToPrivateFn.impl,
+				)
+				args = fn?.buildArgs(accountAddress, recipientAddress, amount)
 				break
 			}
 			default:

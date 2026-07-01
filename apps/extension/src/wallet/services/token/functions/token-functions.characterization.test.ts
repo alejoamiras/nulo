@@ -1,56 +1,42 @@
 /**
- * Q-12 behavior pin. Snapshots the CURRENT output of the 9 copy-paste token-function
- * matchers BEFORE they are collapsed into a `TokenFnDescriptor` registry, so the
- * registry (introduced in a later phase) can be proven byte-identical.
+ * Q-12 behavior pin (post-migration). Snapshots the output of the `TokenFnDescriptor`
+ * registry that replaced the 9 copy-paste token-function modules. The `.snap` was captured
+ * from the ORIGINAL modules (P13.1); this test now drives it through the REGISTRY API — the
+ * snapshots staying byte-identical is the proof the registry reproduces the old matchers
+ * exactly (the equivalence test that compared registry-vs-old is retired now the old modules
+ * are gone; this remains the ongoing pin).
  *
- * What is pinned per kind: the `getCandidates(artifact)` result (name / impl / type /
- * isStatic + the full `abi()`), in the matcher's own order, and the `getDefault`
- * selection. A wrong ABI or a mis-scored candidate = the wallet calls the WRONG token
- * function (mis-read balance / mis-routed transfer), so these snapshots are the
- * security-relevant gate for the whole refactor.
+ * What is pinned per kind: `getTokenFnCandidates` (name / impl / type / isStatic + the full
+ * `abi()`), in matcher order, and `getDefaultTokenFn`. A wrong ABI or a mis-scored candidate =
+ * the wallet calls the WRONG token function (mis-read balance / mis-routed transfer).
  *
- * The fixture is the real `@aztec/noir-contracts.js/Token` artifact (imported live —
- * it is ~11 MB, too large to freeze; Aztec is exact-pinned + manually bumped, so an
- * intentional bump that shifts these snapshots is expected to be re-generated then).
- * The real artifact exposes ONE candidate per kind, so the multi-candidate scoring /
- * tie / duplicate paths are pinned separately below against synthetic artifacts built
- * from cloned real ABIs (valid shapes, varied names).
+ * Fixture: the real `@aztec/noir-contracts.js/Token` artifact (imported live — ~11 MB, too
+ * large to freeze; Aztec is exact-pinned + manually bumped). The real artifact exposes ONE
+ * candidate per kind, so the multi-candidate scoring / tie paths are pinned separately below
+ * against synthetic artifacts (cloned real ABIs, varied names).
  */
 import type { ContractArtifact, FunctionAbi } from "@aztec/stdlib/abi"
 import { TokenContractArtifact } from "@aztec/noir-contracts.js/Token"
 import { describe, expect, test } from "vitest"
 import type { Fn } from "@/wallet/utils/fn"
-import { BalanceOfPrivateFn } from "./balance-of-private"
-import { BalanceOfPublicFn } from "./balance-of-public"
-import { GetDecimalsFn } from "./get-decimals"
-import { GetNameFn } from "./get-name"
-import { GetSymbolFn } from "./get-symbol"
-import { TransferPrivateFn } from "./transfer-private"
-import { TransferPrivateToPublicFn } from "./transfer-private-to-public"
-import { TransferPublicFn } from "./transfer-public"
-import { TransferPublicToPrivateFn } from "./transfer-public-to-private"
+import { TOKEN_FN_DESCRIPTORS } from "./descriptors"
+import { getDefaultTokenFn, getTokenFnCandidates } from "./runtime"
+import type { TokenFnDescriptor, TokenFnKind } from "./types"
 
-// The 9 abstract matcher classes expose the same static surface (`getCandidates`,
-// `getDefault`). Typed structurally so the loop stays honest about that contract.
-type Matcher = {
-	getCandidates(artifact: ContractArtifact): Fn[]
-	getDefault(candidates: Fn[]): Fn | undefined
-}
-
-const KINDS: ReadonlyArray<readonly [string, Matcher]> = [
-	["getName", GetNameFn as unknown as Matcher],
-	["getSymbol", GetSymbolFn as unknown as Matcher],
-	["getDecimals", GetDecimalsFn as unknown as Matcher],
-	["balanceOfPrivate", BalanceOfPrivateFn as unknown as Matcher],
-	["balanceOfPublic", BalanceOfPublicFn as unknown as Matcher],
-	["transferPrivate", TransferPrivateFn as unknown as Matcher],
-	["transferPublic", TransferPublicFn as unknown as Matcher],
-	["transferPrivateToPublic", TransferPrivateToPublicFn as unknown as Matcher],
-	["transferPublicToPrivate", TransferPublicToPrivateFn as unknown as Matcher],
+const KINDS: readonly TokenFnKind[] = [
+	"getName",
+	"getSymbol",
+	"getDecimals",
+	"balanceOfPrivate",
+	"balanceOfPublic",
+	"transferPrivate",
+	"transferPublic",
+	"transferPrivateToPublic",
+	"transferPublicToPrivate",
 ]
 
-// `abi()` is protected on Fn; the matchers derive selection + arg-encoding from it, so
-// it is exactly what must not drift. Read it the way the refactor's snapshot harness will.
+// `abi()` is protected on Fn; the matchers derive selection + arg-encoding from it, so it is
+// exactly what must not drift.
 const abiOf = (fn: Fn): FunctionAbi => (fn as unknown as { abi(): FunctionAbi }).abi()
 
 const shapeOf = (fn: Fn) => ({
@@ -62,29 +48,28 @@ const shapeOf = (fn: Fn) => ({
 })
 
 const artifact = TokenContractArtifact as ContractArtifact
+const descriptorFor = (kind: TokenFnKind): TokenFnDescriptor => TOKEN_FN_DESCRIPTORS[kind]
 
 describe("token-functions characterization — real Token artifact", () => {
-	for (const [kind, matcher] of KINDS) {
+	for (const kind of KINDS) {
 		test(`${kind}: candidates (name/impl/type/isStatic/abi) in matcher order`, () => {
-			const candidates = matcher.getCandidates(artifact)
+			const candidates = getTokenFnCandidates(descriptorFor(kind), artifact)
 			expect(candidates.map(shapeOf)).toMatchSnapshot()
 		})
 
 		test(`${kind}: default selection`, () => {
-			const candidates = matcher.getCandidates(artifact)
-			expect(matcher.getDefault(candidates)?.name ?? null).toMatchSnapshot()
+			const candidates = getTokenFnCandidates(descriptorFor(kind), artifact)
+			expect(getDefaultTokenFn(descriptorFor(kind), candidates)?.name ?? null).toMatchSnapshot()
 		})
 	}
 })
 
-// The real Token artifact has ONE candidate per kind, so the scoring sort / tie /
-// duplicate paths never fire against it. Pin them here by cloning a real (predicate-
-// passing) ABI and only varying the NAME — the predicate filters by shape, the score
-// by name, so these exercise the sort the registry must reproduce exactly.
+// The real Token artifact has ONE candidate per kind, so the scoring sort / tie / duplicate
+// paths never fire against it. Pin them by cloning a real (predicate-passing) ABI and only
+// varying the NAME — the predicate filters by shape, the score by name.
 describe("token-functions characterization — synthetic multi-candidate scoring", () => {
-	// Public function whose SHAPE passes the balance/transfer predicates, cloned + renamed.
-	const realBalancePublicAbi = abiOf(BalanceOfPublicFn.getCandidates(artifact)[0])
-	const realTransferPublicAbi = abiOf(TransferPublicFn.getCandidates(artifact)[0])
+	const realBalancePublicAbi = abiOf(getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.balanceOfPublic, artifact)[0])
+	const realTransferPublicAbi = abiOf(getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPublic, artifact)[0])
 	const rename = (abi: FunctionAbi, name: string): FunctionAbi => ({ ...abi, name })
 	const publicArtifact = (fns: FunctionAbi[]): ContractArtifact =>
 		({ nonDispatchPublicFunctions: fns, functions: fns }) as unknown as ContractArtifact
@@ -96,7 +81,7 @@ describe("token-functions characterization — synthetic multi-candidate scoring
 			rename(realBalancePublicAbi, "balance_of_public"),
 			rename(realBalancePublicAbi, "my_balance"),
 		])
-		const ordered = (BalanceOfPublicFn as unknown as Matcher).getCandidates(art).map((c) => c.name)
+		const ordered = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.balanceOfPublic, art).map((c) => c.name)
 		expect(ordered).toMatchSnapshot()
 	})
 
@@ -107,7 +92,7 @@ describe("token-functions characterization — synthetic multi-candidate scoring
 			rename(realTransferPublicAbi, "transfer_in_public"),
 			rename(realTransferPublicAbi, "transfer_public_to_public"),
 		])
-		const ordered = (TransferPublicFn as unknown as Matcher).getCandidates(art).map((c) => c.name)
+		const ordered = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPublic, art).map((c) => c.name)
 		expect(ordered).toMatchSnapshot()
 	})
 })
