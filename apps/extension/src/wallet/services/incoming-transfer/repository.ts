@@ -16,7 +16,13 @@
 
 import { EntityStorage } from "@/wallet/storage"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
-import type { IncomingTransferRecord, IncomingTrustRecord, IncomingTrustState } from "./spec"
+import {
+	type IncomingTransferRecord,
+	type IncomingTrustRecord,
+	type IncomingTrustState,
+	IncomingTransferRecordSchema,
+	IncomingTrustRecordSchema,
+} from "./spec"
 
 const RECORDS_KEY = "nulo:core:incoming-transfers"
 const TRUST_KEY = "nulo:core:incoming-trust"
@@ -32,8 +38,12 @@ export class IncomingTransferRepository {
 	private readonly trust: EntityStorage<IncomingTrustRecord>
 
 	public constructor(browserApi: BrowserApi) {
-		this.records = new EntityStorage<IncomingTransferRecord>(RECORDS_KEY, browserApi.storage.local)
-		this.trust = new EntityStorage<IncomingTrustRecord>(TRUST_KEY, browserApi.storage.local)
+		this.records = new EntityStorage<IncomingTransferRecord>(RECORDS_KEY, browserApi.storage.local, (raw) =>
+			IncomingTransferRecordSchema.parse(raw),
+		)
+		this.trust = new EntityStorage<IncomingTrustRecord>(TRUST_KEY, browserApi.storage.local, (raw) =>
+			IncomingTrustRecordSchema.parse(raw),
+		)
 	}
 
 	// --- Records ---

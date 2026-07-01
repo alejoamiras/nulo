@@ -23,6 +23,8 @@ export const INCOMING_TRANSFER_SERVICE_NAME = "incoming-transfer"
 /** Trust-state per `(profileId, networkId, contract)`. Replaces the v1
  *  split-state shape (Token boolean + blocked Set + hidden flag) that left
  *  bursty-during-pending behaviour under-specified. */
+import { z } from "zod"
+
 export type IncomingTrustState = "unknown" | "pending" | "trusted" | "blocked"
 
 /** Persisted shape per discovered incoming note. */
@@ -78,6 +80,26 @@ export type IncomingTransferRecord = {
 	blockTimestamp?: number
 }
 
+/** Storage codec row schema — mirrors `IncomingTransferRecord` exactly. */
+export const IncomingTransferRecordSchema: z.ZodType<IncomingTransferRecord> = z.object({
+	siloedNullifier: z.string(),
+	profileId: z.string(),
+	networkId: z.string(),
+	accountAddress: z.string(),
+	contract: z.string(),
+	tokenId: z.number().optional(),
+	owner: z.string(),
+	amountRaw: z.string(),
+	noteHash: z.string(),
+	txHash: z.string(),
+	l2BlockNumber: z.number(),
+	txIndexInBlock: z.number(),
+	noteIndexInTx: z.number(),
+	hidden: z.boolean(),
+	discoveredAt: z.number(),
+	blockTimestamp: z.number().optional(),
+})
+
 /** Trust-state row keyed by `(profileId, networkId, contract)`. */
 export type IncomingTrustRecord = {
 	profileId: string
@@ -87,6 +109,15 @@ export type IncomingTrustRecord = {
 	/** Last transition timestamp. Debug + future analytics. */
 	updatedAt: number
 }
+
+/** Storage codec row schema — mirrors `IncomingTrustRecord` exactly. */
+export const IncomingTrustRecordSchema: z.ZodType<IncomingTrustRecord> = z.object({
+	profileId: z.string(),
+	networkId: z.string(),
+	contract: z.string(),
+	state: z.enum(["unknown", "pending", "trusted", "blocked"]),
+	updatedAt: z.number(),
+})
 
 /** Lightweight pending-prompt payload. The popup subscribes and prompts the
  *  user to Allow / Reject the contract. Multiple notes from the same contract
