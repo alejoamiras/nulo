@@ -250,16 +250,24 @@ export class Migrator {
 			// an invalid one means tampering or corruption. Keep it, fail closed.
 			return { kind: "needs-recovery", reason: "interrupted migration journal has an invalid backup payload", retryable: false }
 		}
+		// An armed journal REQUIRES a valid marker AND an in-range backup version
+		// (every path that writes the journal starts from a validated marker and
+		// a registered migration). Anything else is external mutation — a restore
+		// or clear here would mutate hostile state BEFORE the marker table gets
+		// to fail closed (e.g. `-1`, `1.5`, `NaN`, or an impossible backup
+		// version whose refs restore would trust to tombstone live keys).
 		const version = j[SCHEMA_VERSION_KEY]
-		// An armed journal REQUIRES a numeric version (every path that writes the
-		// journal starts from a validated marker). Missing/corrupt here means
-		// external mutation — restoring and falling through would end at the
-		// fresh-install stamp, laundering hostile state past the fail-closed
-		// marker table. Refuse instead.
-		if (typeof version !== "number") {
+		if (!this.isValidMarker(version)) {
 			return {
 				kind: "needs-recovery",
 				reason: `interrupted migration journal with a ${version === undefined ? "missing" : "corrupt"} schema version`,
+				retryable: false,
+			}
+		}
+		if (backup.version < 1 || backup.version > this.maxVersion) {
+			return {
+				kind: "needs-recovery",
+				reason: `interrupted migration journal backup carries an unregistered version ${backup.version} (expected 1..${this.maxVersion})`,
 				retryable: false,
 			}
 		}

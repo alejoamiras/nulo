@@ -301,6 +301,32 @@ describe("Migrator — crash-safe journal", () => {
 		expect(r).toMatchObject({ kind: "needs-recovery", retryable: false })
 	})
 
+	test("an armed journal with a NUMERIC-but-invalid version fails closed BEFORE any restore/clear", async () => {
+		// `-1` passes a typeof check and compares `< backup.version` — without
+		// full marker validation the engine would restore + clear (mutating
+		// hostile state) before the marker table rejects it.
+		for (const bad of [-1, 1.5, 999, Number.NaN]) {
+			const store = new MemStore()
+				.seed({ [SCHEMA_VERSION_KEY]: bad })
+				.seed(row("acct", "a", { n: 5 }))
+				.seed(journal(1, [rootRef("acct")], row("acct", "a", { n: 0 })))
+			const r = await new Migrator({ store, migrations: [patchRows(1, "acct", {})] }).run()
+			expect(r).toMatchObject({ kind: "needs-recovery", retryable: false })
+			expect(store.obj("acct", "a")).toEqual({ n: 5 }) // NOT restored
+			expect(store.has(BACKUP_KEY)).toBe(true) // journal kept
+		}
+	})
+
+	test("a backup carrying an UNREGISTERED version fails closed before its refs are trusted", async () => {
+		const store = new MemStore()
+			.seed(ver(0))
+			.seed(row("acct", "a", { n: 5 }))
+			.seed(journal(42, [rootRef("acct")], row("acct", "a", { n: 0 }))) // max is 1
+		const r = await new Migrator({ store, migrations: [patchRows(1, "acct", {})] }).run()
+		expect(r).toMatchObject({ kind: "needs-recovery", retryable: false })
+		expect(store.obj("acct", "a")).toEqual({ n: 5 }) // NOT restored/tombstoned
+	})
+
 	test("an armed journal with a MISSING version fails closed (never restore-then-fresh-stamp)", async () => {
 		// No nulo:schema:version at all, but running + a valid backup: external
 		// mutation. Restoring and falling through would end at the fresh-install

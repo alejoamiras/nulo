@@ -40,6 +40,10 @@ describe("migrations registry (structural)", () => {
 		}
 	})
 
+	// Empty-store double-runs catch structural non-idempotency only; a row
+	// transform can pass vacuously here. Every REAL migration must ship its own
+	// colocated test with seeded pre-shape fixtures (see template.ts step 6) —
+	// this is the safety net, not the proof.
 	test("every registered migration is idempotent (run twice ≡ once) from an empty store", async () => {
 		for (const m of migrations) {
 			const store = memStore()
