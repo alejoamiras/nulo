@@ -191,7 +191,11 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		const authwits: Authwit[] = []
 		for (const id of ids) {
 			const authwit = await this.authwits.get(`${id}`)
-			if (!authwit) {
+			// gap#3 fix: reject an authwit id that belongs to a DIFFERENT account —
+			// authwits are FK-scoped by account (no profileId), so without this a caller
+			// could revoke another account's authwits by supplying its ids. Treat a
+			// foreign id as "doesn't exist" (no cross-account existence oracle).
+			if (!authwit || authwit.account !== account) {
 				throw new Error(`Authwit #${id} doesn't exist`)
 			}
 			authwits.push(authwit)
