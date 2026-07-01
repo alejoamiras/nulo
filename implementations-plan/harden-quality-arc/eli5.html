@@ -47,7 +47,8 @@
   <li><strong>Typed dispatch args (your call #5)</strong>: the ONE authorized edit to the frozen permission oracle happened — mechanically provable as add-only (zero deleted lines), with the exact diff pinned in PR #244's body for you to eyeball.</li>
 </ul>
 <p><strong>Before you merge #220, three things need you</strong> (details in <a href="WRAP-UP.md">WRAP-UP.md</a> §Round-2 owner action items): the promote's commitlint red (one over-long line in an old commit body — reword+force-push, or <code>--admin</code> the squash, which is clean here), the 1Password agent that died mid-run (a few unsigned commits; the squash is web-signed anyway), and the R6 oracle diff review. Three follow-on questions are parked for your ruling: the RPC/dApp decode layer, profile/session/config codecs, and the optional typed-tuple layer.</p>
-<p class="muted">Round-2 detail: <a href="round-2/plan.md">round-2/plan.md</a> (R0–R7 with SHAs/run-ids) + <a href="round-2/lessons/">round-2/lessons/</a> + <a href="round-2/R3-characterization.md">the window characterization</a>.</p>
+<p><strong>Both hostile confidence passes agree: ship-with-notes.</strong> Codex first flagged two "cross-profile" holes, then — shown the code — confirmed neither is reachable by a dApp and withdrew the block. A fresh independent reviewer agreed and caught one real arc side-effect (a rare bad token could blank the balance list); that's <strong>fixed</strong> (#245). Nothing left blocks the merge; the open questions above are yours to rule on.</p>
+<p class="muted">Round-2 detail: <a href="round-2/plan.md">round-2/plan.md</a> (R0–R7 with SHAs/run-ids) + <a href="round-2/lessons/">round-2/lessons/</a> + <a href="round-2/audit-codex.md">audit-codex.md</a> + <a href="round-2/audit-fable.md">audit-fable.md</a> + <a href="round-2/R3-characterization.md">the window characterization</a>.</p>
 </div>
 
 <h2>Why <code>mid</code> (for the plan itself)</h2>
