@@ -119,10 +119,17 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	public async getTokenBalances(tokenId?: number, accountAddress?: string): Promise<TokenBalanceInfo[]> {
 		await this.ensureInitialized()
-		return (await this.repo.getAll())
-			.filter((x) => tokenId === undefined || x.token === tokenId)
-			.filter((x) => accountAddress === undefined || x.account === accountAddress)
-			.map((x) => this.getTokenBalanceInfo(x), this)
+		return (
+			(await this.repo.getAll())
+				.filter((x) => tokenId === undefined || x.token === tokenId)
+				.filter((x) => accountAddress === undefined || x.account === accountAddress)
+				// Skip a balance whose token the active profile doesn't own (the map is
+				// active-profile-only): a lingering foreign-profile balance (balances carry
+				// no profileId) or a codec-hidden token row must not throw and white-screen
+				// the whole list — mirrors the balance projector's skip (R1.4a opus-MED-2).
+				.filter((x) => this.tokens.has(x.token))
+				.map((x) => this.getTokenBalanceInfo(x), this)
+		)
 	}
 
 	public async refreshTokenBalance(id: number): Promise<void> {
