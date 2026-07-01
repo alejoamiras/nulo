@@ -11,7 +11,15 @@ import { ProfileRepository } from "./repository"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getEntropy, getMnemonic } from "@nulo/wallet-core/utils"
-import { asMasterSecretBytes, EncryptionKey, type MasterSecretBytes, type Passhash, PasswordSecretBox, zeroize } from "@nulo/wallet-crypto"
+import {
+	asBase64Ciphertext,
+	asMasterSecretBytes,
+	EncryptionKey,
+	type MasterSecretBytes,
+	type Passhash,
+	PasswordSecretBox,
+	zeroize,
+} from "@nulo/wallet-crypto"
 import { PasskeyService } from "@/wallet/services/passkey/service"
 import { PasskeyRecoveryCoordinator, type PasskeyRecovery } from "./passkey-recovery-coordinator"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
@@ -131,8 +139,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			(id) => this.repo.get(id),
 			(passhash, profile) =>
 				this.secretBox.unsealWithPasshash(passhash, {
-					guard: profile.guard,
-					secret: profile.secret,
+					guard: asBase64Ciphertext(profile.guard),
+					secret: asBase64Ciphertext(profile.secret),
 				}),
 		)
 	}
@@ -207,8 +215,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// Phase 2 — crypto UNLOCKED. Caller pays ~1s PBKDF2 but the rest of
 		// the RPC surface stays responsive.
 		const secret = await this.secretBox.unseal(password, {
-			guard: snapshot.guard,
-			secret: snapshot.secret,
+			guard: asBase64Ciphertext(snapshot.guard),
+			secret: asBase64Ciphertext(snapshot.secret),
 		})
 		if (!secret) {
 			// Can't tell wrong-password from storage corruption from this single
@@ -463,8 +471,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			}
 
 			const resealed = await this.secretBox.reseal(oldPassword, newPassword, {
-				guard: profile.guard,
-				secret: profile.secret,
+				guard: asBase64Ciphertext(profile.guard),
+				secret: asBase64Ciphertext(profile.secret),
 			})
 			if (!resealed) {
 				throw new Error("Invalid profile old password")
@@ -522,8 +530,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					throw new Error("Password is required")
 				}
 				const secret = await this.secretBox.unseal(password, {
-					guard: snapshot.guard,
-					secret: snapshot.secret,
+					guard: asBase64Ciphertext(snapshot.guard),
+					secret: asBase64Ciphertext(snapshot.secret),
 				})
 				try {
 					if (!secret) {
@@ -710,8 +718,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// `Error(message)` so callers see a stable error shape.
 		try {
 			const secret = await this.secretBox.unseal(password, {
-				guard: profile.guard,
-				secret: profile.secret,
+				guard: asBase64Ciphertext(profile.guard),
+				secret: asBase64Ciphertext(profile.secret),
 			})
 			try {
 				if (!secret) {
@@ -739,8 +747,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			throw new Error("Operation not supported for passkey profile")
 		}
 		const secret = await this.secretBox.unseal(password, {
-			guard: profile.guard,
-			secret: profile.secret,
+			guard: asBase64Ciphertext(profile.guard),
+			secret: asBase64Ciphertext(profile.secret),
 		})
 		try {
 			if (!secret) {
@@ -1038,8 +1046,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// Re-derive: unseal the stored ciphertext with the supplied
 				// password. Mirrors `unlockProfile` Phase 3.
 				const secret = await this.secretBox.unseal(password, {
-					guard: profile.guard,
-					secret: profile.secret,
+					guard: asBase64Ciphertext(profile.guard),
+					secret: asBase64Ciphertext(profile.secret),
 				})
 				if (!secret) {
 					throw new InvalidPasswordError()
