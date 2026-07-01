@@ -2,6 +2,7 @@
 import { computed, type PropType, useCssModule } from "vue"
 import Icon from "../core/Icon.vue"
 import Spinner from "./Spinner.vue"
+import type { TextColorName } from "../color-names"
 
 defineEmits(["onKeybind"])
 const props = defineProps({
@@ -54,7 +55,7 @@ const props = defineProps({
 		required: false,
 	},
 	leftIconColor: {
-		type: String,
+		type: String as PropType<TextColorName>,
 		required: false,
 	},
 	rightIcon: {
@@ -62,7 +63,7 @@ const props = defineProps({
 		required: false,
 	},
 	rightIconColor: {
-		type: String,
+		type: String as PropType<TextColorName>,
 		required: false,
 	},
 })
