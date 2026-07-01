@@ -5,7 +5,7 @@ import { type NormalizedError, normalizeError } from "@/lib/errors"
 
 /**
  * Local typed augmentation matching the runtime schema patch in
- * `@/lib/nulo-schema-patch.ts`. The cast in `addToken()` is the typed
+ * `@nulo/wallet-sdk-schema-patch`. The cast in `addToken()` is the typed
  * boundary - the patch makes it true at runtime, this declaration makes
  * TypeScript agree.
  */
