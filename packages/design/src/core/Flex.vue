@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** Vendor */
-import { ref, computed } from "vue"
+import { ref, computed, type PropType } from "vue"
+import type { FlexAlign, FlexDirection, FlexGap, FlexJustify, FlexWrap } from "../layout-names"
 
 const wrapper = ref(null)
 defineExpose({ wrapper })
@@ -14,31 +15,32 @@ const props = defineProps({
 		required: false,
 	},
 	align: {
-		type: String,
+		type: String as PropType<FlexAlign>,
 		validator(value) {
 			return ["center", "between", "around", "evenly", "start", "end"].includes(value as string)
 		},
 	},
 	justify: {
-		type: String,
+		type: String as PropType<FlexJustify>,
 		validator(value) {
 			return ["center", "between", "around", "evenly", "start", "end"].includes(value as string)
 		},
 	},
 	wrap: {
-		type: String,
+		type: String as PropType<FlexWrap>,
 		validator(value) {
 			return ["nowrap", "wrap", "wrapReverse"].includes(value as string)
 		},
 	},
 	direction: {
-		type: String,
+		type: String as PropType<FlexDirection>,
 		validator(value) {
 			return ["column", "columnReversed", "row", "rowReversed"].includes(value as string)
 		},
 	},
+	// Static Vue attrs arrive as strings (`gap="10"`); accept the token and its stringified form.
 	gap: {
-		type: String,
+		type: String as PropType<FlexGap | `${FlexGap}`>,
 	},
 	wide: {
 		type: Boolean,
