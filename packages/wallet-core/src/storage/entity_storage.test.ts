@@ -184,7 +184,7 @@ describe("EntityStorage", () => {
 			// path can still recover it. This is the silent-data-loss guard.
 			expect(await s.contains("drifted")).toBe(true)
 			expect(removeSpy).not.toHaveBeenCalled()
-			expect(errorSpy.mock.calls.some((c) => String(c[0]).includes("failed validation"))).toBe(true)
+			expect(errorSpy.mock.calls.some((c: unknown[]) => String(c[0]).includes("failed validation"))).toBe(true)
 			removeSpy.mockRestore()
 		})
 
