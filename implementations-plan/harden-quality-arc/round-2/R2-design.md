@@ -68,12 +68,26 @@ preserved). Gate: this unit test + smoke (`change password`, the round-1-hardene
 
 ## Decision ledger
 
-- **Chosen (pending audit):** A — minimal localized bootstrap end-guard.
-- **Rejected:** B (over-broad for the symptom), C (routing blast radius). Revisit if codex/opus argue
-  the end-guard leaves an exploitable window.
-- **Codex xhigh review:** PENDING (kicked off during R1.4b CI wait). Record verdict here.
-- **Opus Plan review:** PENDING (round-1 noted the opus/fable Plan leg was environmentally broken;
-  if it fails again, codex + main-leg is the adequate deep-lite per `../lessons/Q-15.md` §29-30).
+- **Chosen:** A — minimal localized bootstrap end-guard, + return a `boolean` ("bootstrapped and
+  still active") so `loadProfile` can gate its `/popup/general` push (closes the analogous
+  initial-load bounce). Guard BOTH `bootstrapActiveProfile` and `hydrateKnownProfile`.
+- **Rejected:** B (over-broad for the symptom — stale populated state is cosmetic here), C (routing
+  blast radius AND wrong signal — see codex HIGH).
+- **Codex xhigh review (`019f1f44`):** VERDICT **A sound; would not pick B/C.** Corrections adopted:
+  (HIGH) `getActiveProfile()` is an RPC **serialized with `lockActiveProfile()` under `runExclusive`**
+  (`profile/service.ts:148,429`), so the re-check waits behind an in-flight lock and observes the
+  cleared state — strictly better than a storage-presence check. My "storage authoritative" framing
+  was WRONG: storage is a persisted **mirror**; live authority is `SessionManager.activeSession`
+  (they diverge on passkey-restore, `session-manager.ts:348`). `getActiveProfile()` reflects the live
+  session, so A uses the right signal. (LOW) return `boolean` for a clean composable contract —
+  ADOPTED. (MED) A is not full cancellation (stale bootstrap still writes profile/net/acct state
+  before the guarded write); codex agrees this does NOT preserve the auth-bounce bug and stale
+  populated state is out of R2 scope (that's B's domain). Confirmed safe: lock-during-re-check,
+  no client caching of `getActiveProfile()`, keeping `appStore.profile` while locked.
+- **Opus Plan review:** SKIPPED — codex xhigh gave a decisive, well-grounded verdict that re-derived
+  the concurrency model from source (runExclusive serialization); round-1 (`../lessons/Q-15.md`
+  §29-30) established codex + main-leg as an adequate deep-lite when the fable/opus Plan leg is
+  unavailable. No unresolved fork remained for a third opinion to adjudicate.
 
 ## Security & adversarial
 
