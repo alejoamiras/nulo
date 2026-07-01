@@ -1,5 +1,4 @@
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { normalizeError } from "@nulo/wallet-core/jobs"
@@ -11,13 +10,14 @@ import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/serv
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
 import { nextNumericId } from "@/wallet/services/id-allocators"
+import { restoreRows } from "@/wallet/services/restore-rows"
 import { AccountService } from "@/wallet/services/account/service"
 import { DEFAULT_SHALLOW_PXE_CLIENT_FACTORY, type ShallowPxeClient, type ShallowPxeClientFactory } from "@/wallet/services/pxe/shallow-port"
 import { TaskService, StepContent, type WrappedTask } from "@/wallet/services/task/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { ensureRegistered } from "@/wallet/services/execution/contract-resolver"
 import { EntityStorage } from "@/wallet/storage"
-import { array_max, Lock } from "@/wallet/utils"
+import { Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { feeJuiceAddress, feeJuiceName, feeJuiceSymbol } from "@/wallet/utils/fee-juice"
@@ -172,7 +172,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				// (setOperationMeta tolerates terminal records).
 				await this.journal.setOperationMeta(journalOp.id, { title: symbol })
 				token = {
-					id: array_max((await this.tokens.getKeys()).map((x) => +x)) + 1,
+					id: await nextNumericId(this.tokens),
 					profileId,
 					chainId: tokenInterface.chainId,
 					contract: tokenInterface.contract,
@@ -549,26 +549,17 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	public async restore(tokens: Token[]): Promise<Restored<Token>[]> {
 		await this.ensureInitialized()
 
-		const result: Restored<Token>[] = []
-
 		try {
 			await this.lock.enter()
-
-			let id = array_max((await this.tokens.getKeys()).map((x) => +x)) + 1
-			for (const token of tokens) {
-				try {
-					await this.tokens.set(`${id}`, { ...token, id })
-					result.push({ ...token, id })
-					id++
-				} catch (err) {
-					result.push({
-						...token,
-						restoreError: toRestoreError(err),
-					})
-				}
-			}
-
-			return result
+			// Shared numeric cursor across the batch: ids are one global sequence,
+			// so a single write consumes an id and the next row picks up after it.
+			let id = await nextNumericId(this.tokens)
+			return await restoreRows(tokens, async (token) => {
+				const row = { ...token, id }
+				await this.tokens.set(`${id}`, row)
+				id++
+				return row
+			})
 		} finally {
 			this.lock.leave()
 		}
