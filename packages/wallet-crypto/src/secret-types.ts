@@ -16,11 +16,21 @@
  */
 
 declare const __passhash: unique symbol
+declare const __masterSecretBytes: unique symbol
 
 /** SHA-256 of the UTF-8 password (`EncryptionKey.getPasshash`) — the PBKDF2 base-key input. */
 export type Passhash = ArrayBuffer & { readonly [__passhash]: true }
+
+/** The raw 32-byte master secret (unsealed / passkey-derived / freshly generated) — the value
+ *  behind `Fr.fromBuffer`. `Buffer<ArrayBuffer>` satisfies the `Uint8Array<ArrayBuffer>` base
+ *  structurally, so both mint here. */
+export type MasterSecretBytes = Uint8Array<ArrayBuffer> & { readonly [__masterSecretBytes]: true }
 
 /** Mint a `Passhash` — the ONLY sanctioned way to brand a raw digest as a passhash. Grep this
  *  to audit every boundary where a passhash originates (`getPasshash`, base64-session decode,
  *  test fixtures). */
 export const asPasshash = (b: ArrayBuffer): Passhash => b as Passhash
+
+/** Mint `MasterSecretBytes` — grep to audit every boundary where the master secret originates
+ *  (`PasswordSecretBox.unseal*`, `PasskeyCredential.deriveMasterSecret`, fresh `Fr.random`). */
+export const asMasterSecretBytes = (b: Uint8Array<ArrayBuffer>): MasterSecretBytes => b as MasterSecretBytes

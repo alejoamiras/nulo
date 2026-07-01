@@ -66,7 +66,7 @@ describe("PasskeyRecoveryCoordinator", () => {
 			expect(createKey).toHaveBeenCalledWith("profile-123", "Test")
 			expect(result.credentialId).toBe("cred-profile-123")
 			expect(result.userHandle).toBe("profile-123")
-			expect(result.secret.toString("hex")).toBe(frBytes("02").toString("hex"))
+			expect(Buffer.from(result.secret).toString("hex")).toBe(frBytes("02").toString("hex"))
 		})
 
 		test("propagates errors from the underlying PasskeyService", async () => {
@@ -96,7 +96,7 @@ describe("PasskeyRecoveryCoordinator", () => {
 			expect(getKey).toHaveBeenCalledWith("known-credential-id")
 			expect(recovery.credentialId).toBe("known-credential-id")
 			expect(recovery.userHandle).toBe("handle-from-credential")
-			expect(recovery.secret.toString("hex")).toBe(frBytes("03").toString("hex"))
+			expect(Buffer.from(recovery.secret).toString("hex")).toBe(frBytes("03").toString("hex"))
 		})
 	})
 
@@ -149,7 +149,7 @@ describe("PasskeyRecoveryCoordinator", () => {
 			expect(materialize).toHaveBeenCalledWith(data)
 			expect(recovery.credentialId).toBe("cred-from-modal")
 			expect(recovery.userHandle).toBe("uh-from-modal")
-			expect(recovery.secret.toString("hex")).toBe(frBytes("06").toString("hex"))
+			expect(Buffer.from(recovery.secret).toString("hex")).toBe(frBytes("06").toString("hex"))
 		})
 
 		test("propagates undefined userHandle from the materialized credential", async () => {

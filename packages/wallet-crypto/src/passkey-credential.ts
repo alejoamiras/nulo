@@ -1,3 +1,4 @@
+import { asMasterSecretBytes, type MasterSecretBytes } from "./secret-types"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { fromBase64 } from "@nulo/wallet-core/utils"
 import { zeroize } from "./zeroize"
@@ -51,7 +52,7 @@ export class PasskeyCredential {
 		}
 	}
 
-	public async deriveMasterSecret(): Promise<Buffer<ArrayBuffer>> {
+	public async deriveMasterSecret(): Promise<MasterSecretBytes> {
 		const masterBits = await self.crypto.subtle.deriveBits(
 			{ name: "HKDF", hash: "SHA-256", salt: this.salt, info: PASSKEY_MASTER_LABEL },
 			this.baseKey,
@@ -61,7 +62,7 @@ export class PasskeyCredential {
 			const masterFr = Fr.fromBufferReduce(Buffer.from(new Uint8Array(masterBits)))
 			// `masterFr.toBuffer()` allocates a fresh Buffer; the returned
 			// reference is the caller's responsibility to zero.
-			return masterFr.toBuffer() as Buffer<ArrayBuffer>
+			return asMasterSecretBytes(masterFr.toBuffer() as Buffer<ArrayBuffer>)
 		} finally {
 			// The deriveBits ArrayBuffer is no longer needed — Fr made its
 			// own copy (verified by `Fr.fromBufferReduce` test in

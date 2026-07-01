@@ -25,7 +25,7 @@
 
 import type { ILogger } from "@/wallet/logger"
 import type { PasskeyService } from "@/wallet/services/passkey/service"
-import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
+import type { MasterSecretBytes, PasskeyCredentialData } from "@nulo/wallet-crypto"
 import type { Profile } from "./spec"
 
 /** Shape returned by create / import paths — everything the facade
@@ -37,7 +37,7 @@ import type { Profile } from "./spec"
  *  directly, so there is no reason to round-trip through `Fr`. */
 export type PasskeyRecovery = {
 	credentialId: string
-	secret: Buffer<ArrayBuffer>
+	secret: MasterSecretBytes
 	/** Optional because WebAuthn `get` may omit userHandle. */
 	userHandle?: string
 }
