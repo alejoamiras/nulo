@@ -6,7 +6,7 @@
  * pass-through, and the base64 encoding lock.
  */
 
-import { asMasterSecretBytes, asPasshash } from "./secret-types"
+import { asBase64Ciphertext, asMasterSecretBytes, asPasshash } from "./secret-types"
 import { describe, expect, test } from "vitest"
 import { ENCRYPTION_GUARD, type EncryptedProfileSecret, PasswordSecretBox } from "./password-secret-box"
 
@@ -62,7 +62,7 @@ describe("PasswordSecretBox", () => {
 			const box = newBox()
 			const { encrypted } = await box.seal("hunter2", PLAINTEXT)
 			const corrupted: EncryptedProfileSecret = {
-				guard: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+				guard: asBase64Ciphertext("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
 				secret: encrypted.secret,
 			}
 			const recovered = await box.unseal("hunter2", corrupted)
@@ -74,7 +74,7 @@ describe("PasswordSecretBox", () => {
 			const { encrypted } = await box.seal("hunter2", PLAINTEXT)
 			const corrupted: EncryptedProfileSecret = {
 				guard: encrypted.guard,
-				secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+				secret: asBase64Ciphertext("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
 			}
 			const recovered = await box.unseal("hunter2", corrupted)
 			expect(recovered).toBeNull()

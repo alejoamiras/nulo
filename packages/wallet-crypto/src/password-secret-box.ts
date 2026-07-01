@@ -38,7 +38,7 @@
 
 import { array_equals, toBase64 } from "@nulo/wallet-core/utils"
 import { EncryptionKey } from "./encryption-key"
-import { asMasterSecretBytes, type MasterSecretBytes, type Passhash } from "./secret-types"
+import { asBase64Ciphertext, asMasterSecretBytes, type Base64Ciphertext, type MasterSecretBytes, type Passhash } from "./secret-types"
 import { zeroize } from "./zeroize"
 
 /** Fixed-plaintext round-trip check. `seal` encrypts this under the
@@ -60,10 +60,10 @@ export type EncryptedProfileSecret = {
 	 *  derived from the profile password. On unseal this is decrypted
 	 *  first and byte-compared to `ENCRYPTION_GUARD`; a mismatch means
 	 *  the supplied password is wrong. */
-	guard: string
+	guard: Base64Ciphertext
 	/** Base64-encoded ciphertext of the raw 32-byte master secret under
 	 *  the same key as `guard`. */
-	secret: string
+	secret: Base64Ciphertext
 }
 
 /** Result of a successful `seal`. Returned to callers so they can persist
@@ -158,8 +158,8 @@ export class PasswordSecretBox {
 		const guard = await key.encrypt(ENCRYPTION_GUARD as Uint8Array<ArrayBuffer>)
 		const encryptedSecret = await key.encrypt(secret)
 		return {
-			guard: toBase64(new Uint8Array(guard.buffer)),
-			secret: toBase64(new Uint8Array(encryptedSecret.buffer)),
+			guard: asBase64Ciphertext(toBase64(new Uint8Array(guard.buffer))),
+			secret: asBase64Ciphertext(toBase64(new Uint8Array(encryptedSecret.buffer))),
 		}
 	}
 
