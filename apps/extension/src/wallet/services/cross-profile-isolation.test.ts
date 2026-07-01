@@ -29,6 +29,12 @@ import { OperationJournalService } from "./operation-journal/service"
 import { TaskService } from "./task/service"
 import { TokenService } from "./token/service"
 import type { Token } from "./token/spec"
+import { BalanceRepository } from "./token-balance/balance-repository"
+import { TokenBalanceService } from "./token-balance/service"
+import type { TokenBalanceRaw } from "./token-balance/spec"
+import { TransactionService } from "./transaction/service"
+import { ExecutionService } from "./execution/service"
+import type { BackgroundTickerPort } from "@nulo/wallet-core/ports"
 
 /**
  * Minimal ProfileService fake (golden reference: contact/service.test.ts). Carries
@@ -63,6 +69,12 @@ const mkToken = (id: number, profileId: string): Token =>
 
 // A network stub token's init subscribes to; must expose registerChainPurgeSubscriber.
 const networkStub = () => svc(NetworkService.name, { registerChainPurgeSubscriber: () => {} })
+
+/** A ticker that never fires — lets token-balance's init run queue.start() without a poll loop. */
+const noopTicker: BackgroundTickerPort = { subscribe: () => ({ cancel: () => {} }) }
+
+const mkBalance = (id: number, token: number, account: string): TokenBalanceRaw =>
+	({ id, token, account, privateBalance: "0", publicBalance: "0", updatedAt: 0 }) as TokenBalanceRaw
 
 describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 	let api: FakeBrowserApi
@@ -148,6 +160,48 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 
 		test.fails("(GAP #2 — fixed R1.4) getTokenRaw(foreignId) must REJECT a p2 token while p1 active", async () => {
 			await expect(tokens.getTokenRaw(2)).rejects.toThrow()
+		})
+	})
+
+	describe("token-balance — backup UNFILTERED across profiles (leak #1, fixed R1.5)", () => {
+		let profile: FakeProfileService
+		let tbal: TokenBalanceService
+		let seedRepo: BalanceRepository
+
+		beforeEach(async () => {
+			profile = new FakeProfileService()
+			profile.setActiveProfile(p1)
+			seedRepo = new BalanceRepository(api)
+			const services = new ServiceCollection()
+			services.add(profile)
+			services.add(svc(NetworkService.name, {}))
+			services.add(svc(AccountService.name, { onAccountAdded: new EventHandler() }))
+			services.add(
+				svc(TokenService.name, {
+					onTokenAdded: new EventHandler(),
+					onTokenUpdated: new EventHandler(),
+					onTokenDeleted: new EventHandler(),
+					getTokensRaw: async (pid: string) => (pid === p1.id ? [mkToken(1, p1.id)] : pid === p2.id ? [mkToken(2, p2.id)] : []),
+				}),
+			)
+			services.add(svc(TransactionService.name, { onTransactionUpdated: new EventHandler() }))
+			services.add(svc(ExecutionService.name, {}))
+			services.add(svc(TaskService.name, {}))
+			tbal = new TokenBalanceService(mkLogger(), api, noopTicker)
+			services.add(tbal)
+			await services.start()
+			// p1 owns token 1, p2 owns token 2 (balances are FK'd via `token`, no profileId).
+			await seedRepo.set(mkBalance(10, 1, "0xp1acct"))
+			await seedRepo.set(mkBalance(20, 2, "0xp2acct"))
+		})
+
+		test.fails("(LEAK #1 — fixed R1.5) backup() must return only the active profile's balances", async () => {
+			// Today backup() returns repo.getAll() (ALL profiles) — a plaintext
+			// cross-profile leak in the export artifact. This test.fails passes now
+			// (documenting the leak) and FLIPS to `test` when R1.5 filters export by
+			// tokenService.getTokensRaw(profile.id).
+			const backup = await tbal.backup()
+			expect(backup.map((b) => b.id)).toEqual([10])
 		})
 	})
 })
