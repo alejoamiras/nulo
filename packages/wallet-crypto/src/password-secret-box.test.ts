@@ -6,6 +6,7 @@
  * pass-through, and the base64 encoding lock.
  */
 
+import { asMasterSecretBytes, asPasshash } from "./secret-types"
 import { describe, expect, test } from "vitest"
 import { ENCRYPTION_GUARD, type EncryptedProfileSecret, PasswordSecretBox } from "./password-secret-box"
 
@@ -14,14 +15,14 @@ function newBox(): PasswordSecretBox {
 }
 
 const PLAINTEXT_HEX = "0011223344556677889900aabbccddeeff00112233445566778899aabbccddee"
-const PLAINTEXT = new Uint8Array(PLAINTEXT_HEX.match(/.{2}/g)!.map((b) => Number.parseInt(b, 16)))
+const PLAINTEXT = asMasterSecretBytes(new Uint8Array(PLAINTEXT_HEX.match(/.{2}/g)!.map((b) => Number.parseInt(b, 16))))
 const toHex = (bytes: Uint8Array) => [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")
 
 describe("PasswordSecretBox", () => {
 	describe("seal + unseal", () => {
 		test("seal/unseal round-trip returns the original secret", async () => {
 			const box = newBox()
-			const { encrypted } = await box.seal("hunter2", PLAINTEXT as Uint8Array<ArrayBuffer>)
+			const { encrypted } = await box.seal("hunter2", PLAINTEXT)
 			const recovered = await box.unseal("hunter2", encrypted)
 			expect(recovered).not.toBeNull()
 			expect(toHex(recovered!)).toBe(PLAINTEXT_HEX)
@@ -29,15 +30,15 @@ describe("PasswordSecretBox", () => {
 
 		test("same inputs produce distinct ciphertexts (IV entropy)", async () => {
 			const box = newBox()
-			const a = await box.seal("hunter2", PLAINTEXT as Uint8Array<ArrayBuffer>)
-			const b = await box.seal("hunter2", PLAINTEXT as Uint8Array<ArrayBuffer>)
+			const a = await box.seal("hunter2", PLAINTEXT)
+			const b = await box.seal("hunter2", PLAINTEXT)
 			expect(a.encrypted.guard).not.toBe(b.encrypted.guard)
 			expect(a.encrypted.secret).not.toBe(b.encrypted.secret)
 		})
 
 		test("seal output fields are base64-encoded strings (frozen format)", async () => {
 			const box = newBox()
-			const { encrypted } = await box.seal("hunter2", PLAINTEXT as Uint8Array<ArrayBuffer>)
+			const { encrypted } = await box.seal("hunter2", PLAINTEXT)
 			// base64 chars: A-Z a-z 0-9 + / =
 			expect(encrypted.guard).toMatch(/^[A-Za-z0-9+/]+=*$/)
 			expect(encrypted.secret).toMatch(/^[A-Za-z0-9+/]+=*$/)
@@ -52,14 +53,14 @@ describe("PasswordSecretBox", () => {
 	describe("wrong-password returns null (does NOT throw)", () => {
 		test("unseal with a wrong password returns null", async () => {
 			const box = newBox()
-			const { encrypted } = await box.seal("hunter2", PLAINTEXT as Uint8Array<ArrayBuffer>)
+			const { encrypted } = await box.seal("hunter2", PLAINTEXT)
 			const recovered = await box.unseal("not-hunter2", encrypted)
 			expect(recovered).toBeNull()
 		})
 
 		test("unseal with a corrupted guard returns null", async () => {
 			const box = newBox()
-			const { encrypted } = await box.seal("hunter2", PLAINTEXT as Uint8Array<ArrayBuffer>)
+			const { encrypted } = await box.seal("hunter2", PLAINTEXT)
 			const corrupted: EncryptedProfileSecret = {
 				guard: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 				secret: encrypted.secret,
@@ -70,7 +71,7 @@ describe("PasswordSecretBox", () => {
 
 		test("unseal with a corrupted secret returns null", async () => {
 			const box = newBox()
-			const { encrypted } = await box.seal("hunter2", PLAINTEXT as Uint8Array<ArrayBuffer>)
+			const { encrypted } = await box.seal("hunter2", PLAINTEXT)
 			const corrupted: EncryptedProfileSecret = {
 				guard: encrypted.guard,
 				secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -83,7 +84,7 @@ describe("PasswordSecretBox", () => {
 	describe("unsealWithPasshash", () => {
 		test("accepts the passhash returned by seal", async () => {
 			const box = newBox()
-			const { passhash, encrypted } = await box.seal("hunter2", PLAINTEXT as Uint8Array<ArrayBuffer>)
+			const { passhash, encrypted } = await box.seal("hunter2", PLAINTEXT)
 			const recovered = await box.unsealWithPasshash(passhash, encrypted)
 			expect(recovered).not.toBeNull()
 			expect(toHex(recovered!)).toBe(PLAINTEXT_HEX)
@@ -91,9 +92,9 @@ describe("PasswordSecretBox", () => {
 
 		test("returns null with a different passhash", async () => {
 			const box = newBox()
-			const { encrypted } = await box.seal("hunter2", PLAINTEXT as Uint8Array<ArrayBuffer>)
+			const { encrypted } = await box.seal("hunter2", PLAINTEXT)
 			const otherHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("different"))
-			const recovered = await box.unsealWithPasshash(otherHash, encrypted)
+			const recovered = await box.unsealWithPasshash(asPasshash(otherHash), encrypted)
 			expect(recovered).toBeNull()
 		})
 	})
@@ -101,7 +102,7 @@ describe("PasswordSecretBox", () => {
 	describe("reseal", () => {
 		test("returns fresh encrypted + passhash that unseal under new password", async () => {
 			const box = newBox()
-			const { encrypted } = await box.seal("hunter2", PLAINTEXT as Uint8Array<ArrayBuffer>)
+			const { encrypted } = await box.seal("hunter2", PLAINTEXT)
 
 			const resealed = await box.reseal("hunter2", "hunter3", encrypted)
 			expect(resealed).not.toBeNull()
@@ -121,7 +122,7 @@ describe("PasswordSecretBox", () => {
 
 		test("returns null when the old password is wrong", async () => {
 			const box = newBox()
-			const { encrypted } = await box.seal("hunter2", PLAINTEXT as Uint8Array<ArrayBuffer>)
+			const { encrypted } = await box.seal("hunter2", PLAINTEXT)
 			const resealed = await box.reseal("not-hunter2", "hunter3", encrypted)
 			expect(resealed).toBeNull()
 		})

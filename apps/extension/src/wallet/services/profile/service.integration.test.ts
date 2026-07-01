@@ -22,7 +22,13 @@ import { ServiceCollection } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
-import type { PasskeyCredential } from "@nulo/wallet-crypto"
+import {
+	asBase64CredentialId,
+	asBase64SecretPrf,
+	asHexUserHandle,
+	type PasskeyCredential,
+	type PasskeyCredentialData,
+} from "@nulo/wallet-crypto"
 import { PasskeyService } from "@/wallet/services/passkey/service"
 import { flushPromises } from "@vue/test-utils"
 import { ProfileService } from "./service"
@@ -115,8 +121,12 @@ class FakePasskeyService extends Service<Record<string, never>> {
  *  deterministic credential shape. `prf` is a placeholder — the fake
  *  ignores it because `materializeCredential` doesn't actually run HKDF;
  *  it just returns the canned credential object. */
-function fakeCredentialData(credentialId: string, userHandle?: string) {
-	return { id: credentialId, prf: "AAAA", userHandle }
+function fakeCredentialData(credentialId: string, userHandle?: string): PasskeyCredentialData {
+	return {
+		id: asBase64CredentialId(credentialId),
+		prf: asBase64SecretPrf("AAAA"),
+		userHandle: userHandle === undefined ? undefined : asHexUserHandle(userHandle),
+	}
 }
 
 async function makeService(ttlOrInit: number | { sessionTtl?: number; strict?: boolean } = 1_800_000): Promise<{
