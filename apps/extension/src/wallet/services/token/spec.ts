@@ -1,3 +1,4 @@
+import { z } from "zod"
 import type { FnImpl } from "@/wallet/utils/fn"
 import type { OperationContext } from "@/wallet/services/operation-journal/spec"
 
@@ -24,6 +25,30 @@ export type Token = {
 	transferPublicToPrivateFn?: FnImpl
 	transferPrivateToPublicFn?: FnImpl
 }
+
+/** `FnImpl` on disk is its two data fields; parse yields a structurally
+ *  equivalent plain object (same as the JSON.parse cast always did). */
+const FnImplSchema = z.object({ name: z.string(), impl: z.number() })
+
+/** Storage codec row schema — mirrors `Token` exactly. */
+export const TokenSchema: z.ZodType<Token> = z.object({
+	id: z.number(),
+	profileId: z.string(),
+	chainId: z.number(),
+	contract: z.string(),
+	name: z.string(),
+	symbol: z.string(),
+	decimals: z.number(),
+	getNameFn: FnImplSchema.optional(),
+	getSymbolFn: FnImplSchema.optional(),
+	getDecimalsFn: FnImplSchema.optional(),
+	balanceOfPublicFn: FnImplSchema.optional(),
+	balanceOfPrivateFn: FnImplSchema.optional(),
+	transferPublicFn: FnImplSchema.optional(),
+	transferPrivateFn: FnImplSchema.optional(),
+	transferPublicToPrivateFn: FnImplSchema.optional(),
+	transferPrivateToPublicFn: FnImplSchema.optional(),
+})
 
 export type TokenInfo = {
 	/** Internal id. */
