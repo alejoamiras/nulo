@@ -209,7 +209,7 @@ describe("method-descriptors — exhaustiveness (the silent-omission killer)", (
 		// dispatcher.test.ts:682) so the 3 Nulo-custom methods are present on
 		// WalletSchema. WITHOUT this import the custom trio would be invisible — the
 		// import order is load-bearing for the guarantee.
-		await import("../../../apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
+		await import("@nulo/wallet-sdk-schema-patch/register")
 		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
 		const schemaMethods = new Set(Object.keys(WalletSchema))
 		const registryMethods = new Set(Object.keys(METHOD_REGISTRY))

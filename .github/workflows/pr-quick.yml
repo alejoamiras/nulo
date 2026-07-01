@@ -53,6 +53,8 @@ jobs:
               - 'packages/wallet-crypto/package.json'
               - 'packages/extension-messaging/src/**'
               - 'packages/extension-messaging/package.json'
+              - 'packages/wallet-sdk-schema-patch/src/**'
+              - 'packages/wallet-sdk-schema-patch/package.json'
             aztec-runtime:
               - 'packages/aztec-runtime/src/**'
               - 'packages/aztec-runtime/package.json'
@@ -80,6 +82,8 @@ jobs:
               - 'packages/wallet-crypto/package.json'
               - 'packages/wallet-core/src/**'
               - 'packages/wallet-core/package.json'
+              - 'packages/wallet-sdk-schema-patch/src/**'
+              - 'packages/wallet-sdk-schema-patch/package.json'
               - 'packages/design/src/**'
               - 'packages/design/package.json'
               - '.github/workflows/_build-faucet.yml'
