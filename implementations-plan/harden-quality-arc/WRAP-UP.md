@@ -17,12 +17,15 @@ Round 2 resolved **every** owner-follow-on from the round-1 list below: Q-13 (ow
 | R4 P18b | #241 | PXE `descriptors.ts` flags table (explicit `rpc`/`ipxe`/`requiresNetwork`; SW-only trio compile-time-excluded from `IPXE`/proxy); `PXEProxy`'s 18 curries generated; `rpcMethods` dispatch allowlist stays hand-written; UPDATE.md §Types-coupled populated |
 | R5 Q-01 | #242 #243 | zod row codecs injected into 11 durable stores (validation-fail = kept + read-undefined, NEVER deleted); strictness per seam direction; **the real-proving canary caught a first-cut bug** (numeric `@aztec` enums vs object checks) — fixed, corpus rebuilt from write sites |
 | R6 Q-02 | #244 | `argSchema` predicate guards on the dApp dispatch path (11 guarded / 8 deliberately omitted); **the ONE authorized frozen-oracle edit — mechanically ADD-only (zero deletions), diff surfaced in #244's PR body for your review** |
+| R6.5 | #245 | the one actionable finding from the R7 fresh-Fable pass: `getTokenBalances` now SKIPS a foreign/hidden-token row (fail-safe) instead of throwing `"unknown token"` and white-screening the balance list — mirrors the projector's R1.4a skip |
 | CI fix | #239 | `fetch-depth: 0` on the three paths-filter changes jobs (the shallow-deepen git race went structural at ~100 commits from `dev`; detection-only, no gating change) |
 
-### Round-2 confidence passes (on code HEAD `f636f6c`)
-- **Integrated full-network sweep:** <PENDING — filled at R7 close>
-- **codex (xhigh, read-only, adversarial):** <PENDING — filled at R7 close>
-- **fresh Fable subagent (adversarial, read-only, fresh context):** <PENDING — filled at R7 close>
+### Round-2 confidence passes (final code HEAD `2f3d9d4`)
+- **Integrated full-network sweep on `2f3d9d4`:** Quality + Smoke + Network e2e all GREEN (runs `28554414288` / `28554415303` / `28554416304`). Every round-2 PR (#227–#245) additionally passed its own units + smoke + FULL network before squash-merge.
+- **codex (xhigh, read-only, adversarial) — `019f1fe5`:** initial **BLOCK** (two HIGH: token/account + dapp-session by-id RPCs trust caller-supplied `profileId`), **revised to SHIP-WITH-NOTES** once given the reachability facts. codex confirmed: `updateToken`/dapp-session-by-id/account-mutations are NOT in `METHOD_REGISTRY` (not dApp-dispatchable); the sole dApp→token path `isTokenRegistered` passes server-derived `ctx.profileId`; dApp session lookup is by `(origin,chainId)`. "My BLOCK over-scoped extension-Port-RPC defense-in-depth into dApp reachability. Round 2 did not introduce a new dApp-reachable cross-profile exposure." Full exchange: `round-2/audit-codex.md`.
+- **fresh Fable subagent (adversarial, read-only, fresh context):** **SHIP-WITH-NOTES.** Independently converged with codex (the residual by-id/arg-scoped surface is all first-party-only — absent from `wallet-bridge/services-contract.ts` — not dApp-reachable). Its one actionable catch — an arc-introduced projector/display asymmetry — is **FIXED in #245 (R6.5)**. Remaining notes (test-scope honesty, codec-fixture realism, discover-window pins) are non-blocking. Full findings + "attacked and held": `round-2/audit-fable.md`.
+
+**Both independent hostile passes converge: SHIP-WITH-NOTES.** No dApp-reachable cross-profile regression; the frozen authz/crypto oracles are byte-identical except R6's authorized ADD-only edit (zero deletions); every behavior change is fail-closed/fail-safe and owner-authorized.
 
 ### Round-2 invariants (mechanically verified on the `dc2a03e..f636f6c` span)
 - `scope-enforcement.test.ts` — **byte-identical**. `key-vectors.test.ts` — **byte-identical**.
