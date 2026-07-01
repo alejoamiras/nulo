@@ -236,6 +236,65 @@ function accountsCapsEqual(a: AccountsCapability, b: AccountsCapability): boolea
 	return Boolean(a.canGet) === Boolean(b.canGet) && Boolean(a.canCreateAuthWit) === Boolean(b.canCreateAuthWit)
 }
 
+/** The known `Capability` discriminants, as an exhaustive record so adding a
+ *  `Capability` variant is a compile error until it's classified here (and in
+ *  `isCapabilityCovered` below). A wire capability whose `type` is NOT in this set
+ *  is an UNKNOWN-type cap: it flows through untouched to the popup, where it renders
+ *  default-off — do NOT drop or coerce it (that would hide the warning path). */
+const KNOWN_CAPABILITY_TYPES: Record<Capability["type"], true> = {
+	accounts: true,
+	contracts: true,
+	contractClasses: true,
+	simulation: true,
+	transaction: true,
+	data: true,
+}
+
+function isKnownCapabilityType(type: string): type is Capability["type"] {
+	return Object.hasOwn(KNOWN_CAPABILITY_TYPES, type)
+}
+
+/** Grants of one capability type, narrowed to that variant. The single typed cast
+ *  lives here instead of the `existing.capability as XCapability` casts scattered
+ *  across the coverage branches. */
+function grantsOfType<K extends Capability["type"]>(grants: GrantedCapabilityRecord[], type: K): Extract<Capability, { type: K }>[] {
+	return grants.filter((g) => g.capability.type === type).map((g) => g.capability as Extract<Capability, { type: K }>)
+}
+
+/** Is `requested` already covered by the existing grants of its type — i.e. NO
+ *  re-prompt needed? Field-aware for accounts/contracts/transaction/simulation/data;
+ *  TYPE-ONLY for `contractClasses` (the field-blind coverage drift filed as the
+ *  out-of-arc `wallet-sdk-capability-field-diff` finding, pinned in dispatcher.test.ts).
+ *  Exhaustive over `Capability["type"]`: a new variant forces a coverage decision here
+ *  rather than silently defaulting to covered (fail-open) or not (spurious re-prompt).
+ *  `cap` is the discriminated union, so the branches narrow WITHOUT per-branch casts. */
+function isCapabilityCovered(cap: Capability, existingGrants: GrantedCapabilityRecord[], grantedTypes: Set<string>): boolean {
+	switch (cap.type) {
+		case "accounts": {
+			const existing = grantsOfType(existingGrants, "accounts")[0]
+			return existing !== undefined && accountsCapsEqual(existing, cap)
+		}
+		case "contracts": {
+			const existing = grantsOfType(existingGrants, "contracts")
+			return existing.length > 0 && contractsRequestCovered(existing, cap)
+		}
+		case "transaction": {
+			const existing = grantsOfType(existingGrants, "transaction")
+			return existing.length > 0 && transactionRequestCovered(existing, cap)
+		}
+		case "simulation": {
+			const existing = grantsOfType(existingGrants, "simulation")
+			return existing.length > 0 && simulationRequestCovered(existing, cap)
+		}
+		case "data": {
+			const existing = grantsOfType(existingGrants, "data")
+			return existing.length > 0 && dataRequestCovered(existing, cap)
+		}
+		case "contractClasses":
+			return grantedTypes.has("contractClasses")
+	}
+}
+
 /** Shape of the capability manifest sent by the dApp via requestCapabilities(). */
 type CapabilityManifest = {
 	capabilities?: unknown[]
@@ -713,7 +772,7 @@ export class WalletSdkDispatcher {
 		// Phase 1: Check existing grants and rejections
 		const existingGrants = dappSession.capabilityGrants ?? []
 		const existingRejections = dappSession.capabilityRejections ?? []
-		const grantedTypes = new Set(existingGrants.map((g) => g.capability.type))
+		const grantedTypes = new Set<string>(existingGrants.map((g) => g.capability.type))
 		const rejectedTypes = new Set(existingRejections.map((r) => r.capabilityType))
 
 		// Delta: capabilities not yet granted OR previously rejected (re-request).
@@ -725,39 +784,16 @@ export class WalletSdkDispatcher {
 		// silently authorising the upgrade. The breadth fix for other cap types
 		// is filed as `wallet-sdk-capability-field-diff`.
 		const delta = requestedCapabilities.filter((cap) => {
-			if (rejectedTypes.has(cap.type as string)) return true
-			if (cap.type === "accounts") {
-				const existing = existingGrants.find((g) => g.capability.type === "accounts")
-				return !existing || !accountsCapsEqual(existing.capability as AccountsCapability, cap as unknown as AccountsCapability)
-			}
-			if (cap.type === "contracts") {
-				// Field-level delta (closes wallet-sdk-capability-field-diff for contracts): a request
-				// listing addresses/flags beyond the stored grants re-prompts; approval APPENDS a new
-				// grant, and scope checkers union across grants - so coverage grows monotonically.
-				const existing = existingGrants
-					.filter((g) => g.capability.type === "contracts")
-					.map((g) => g.capability as ContractsCapability)
-				return existing.length === 0 || !contractsRequestCovered(existing, cap as unknown as ContractsCapability)
-			}
-			if (cap.type === "transaction") {
-				// Scope-list field diff (the rest of wallet-sdk-capability-field-diff): a request whose
-				// scope exceeds every stored grant re-prompts; approval REPLACES the stored grant.
-				const existing = existingGrants
-					.filter((g) => g.capability.type === "transaction")
-					.map((g) => g.capability as TransactionCapability)
-				return existing.length === 0 || !transactionRequestCovered(existing, cap as unknown as TransactionCapability)
-			}
-			if (cap.type === "simulation") {
-				const existing = existingGrants
-					.filter((g) => g.capability.type === "simulation")
-					.map((g) => g.capability as SimulationCapability)
-				return existing.length === 0 || !simulationRequestCovered(existing, cap as unknown as SimulationCapability)
-			}
-			if (cap.type === "data") {
-				const existing = existingGrants.filter((g) => g.capability.type === "data").map((g) => g.capability as DataCapability)
-				return existing.length === 0 || !dataRequestCovered(existing, cap as unknown as DataCapability)
-			}
-			return !grantedTypes.has(cap.type as Capability["type"])
+			const type = cap.type as string
+			if (rejectedTypes.has(type)) return true
+			// Unknown wire types keep the type-only default: they flow through to the
+			// popup and render default-off — do NOT drop or coerce them. Known types are
+			// trusted as their `Capability` variant (the same trust the removed per-branch
+			// `as unknown as XCapability` casts encoded) and checked field-aware via
+			// `isCapabilityCovered`. (Grant-path semantics unchanged: contracts APPENDS a
+			// grant, transaction REPLACES; scope checkers union across grants downstream.)
+			if (!isKnownCapabilityType(type)) return !grantedTypes.has(type)
+			return !isCapabilityCovered(cap as unknown as Capability, existingGrants, grantedTypes)
 		})
 		// Track which delta items are re-requests (previously rejected)
 		const reRequested = requestedCapabilities.filter((cap) => rejectedTypes.has(cap.type as string)).map((cap) => cap.type as string)
