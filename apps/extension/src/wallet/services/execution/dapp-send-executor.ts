@@ -153,7 +153,12 @@ export class DappSendExecutor {
 			accountAddress: string
 			origin: LocalTxOrigin
 			hooks: ExecutionHooks | undefined
-			calls: { method?: string }[] | undefined
+			// A THUNK, not a value: the primary-method extraction reads the
+			// (potentially large / adversarial) `op.exec.calls`, and must run
+			// AFTER `acquireSlot` — computing it earlier would delay our FIFO
+			// enqueue (letting a later request overtake) and move any throw out
+			// of the acquire-protected try. Evaluated below, inside the try.
+			getCalls: () => { method?: string }[] | undefined
 		},
 		run: (ctx: {
 			journalId: string | undefined
@@ -174,7 +179,7 @@ export class DappSendExecutor {
 				params.networkId,
 				params.accountAddress,
 				params.origin,
-				params.calls,
+				params.getCalls(),
 				params.hooks,
 				preController,
 			)
@@ -353,15 +358,19 @@ export class DappSendExecutor {
 
 		// The standard path takes the shared execution slot + journal scaffold
 		// (runInSlot); its `run` owns the opts.from guard, payload parse, its own
-		// `simulating` checkpoint, authwit discovery, build, and prove/send.
-		const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
+		// `simulating` checkpoint, authwit discovery, build, and prove/send. The
+		// primary-method extraction is a thunk so it runs after acquireSlot.
 		return this.runInSlot(
 			{
 				networkId: op.networkId,
 				accountAddress: op.accountAddress,
 				origin,
 				hooks,
-				calls: primaryMethod ? [{ method: primaryMethod }] : undefined,
+				getCalls: () => {
+					const primaryMethod =
+						(Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
+					return primaryMethod ? [{ method: primaryMethod }] : undefined
+				},
 			},
 			async ({ checkCancelled, markJournal }) => {
 				if (op.accountAddress !== op.opts?.from?.toString()) {
@@ -470,15 +479,19 @@ export class DappSendExecutor {
 		// (runInSlot) as the standard path. It has no nonce at all (history
 		// records Fr.ZERO), so the mutex is its ONLY protection against
 		// concurrent build/simulate interleaving. Unlike the standard path it
-		// does NOT re-check cancel after `simulating` — preserved verbatim.
-		const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
+		// does NOT re-check cancel after `simulating` — preserved verbatim. The
+		// primary-method extraction is a thunk so it runs after acquireSlot.
 		return this.runInSlot(
 			{
 				networkId: op.networkId,
 				accountAddress: op.accountAddress,
 				origin,
 				hooks,
-				calls: primaryMethod ? [{ method: primaryMethod }] : undefined,
+				getCalls: () => {
+					const primaryMethod =
+						(Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
+					return primaryMethod ? [{ method: primaryMethod }] : undefined
+				},
 			},
 			async ({ checkCancelled, markJournal }) => {
 				await markJournal({ stage: "simulating" })

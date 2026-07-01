@@ -528,4 +528,22 @@ describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on e
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
 		expect(releaseSlot).toHaveBeenCalledTimes(1)
 	})
+
+	test("primaryMethod extraction runs AFTER acquireSlot (inside the protected region)", async () => {
+		// A throwing `exec.calls` getter stands in for large/adversarial calls: the
+		// extraction must run inside runInSlot's try — AFTER acquireSlot — so the FIFO
+		// enqueue isn't delayed by it and a throw is caught + the slot released. If it
+		// moved back before acquire, acquireSlot would never be called (0 vs 1).
+		const { executor, deps, releaseSlot } = makeHarness()
+		const op = makeAztecOp() as { exec: { calls?: unknown } }
+		Object.defineProperty(op.exec, "calls", {
+			configurable: true,
+			get() {
+				throw new Error("calls boom")
+			},
+		})
+		await expect(executor.executeAztecSendTx(op as never, ORIGIN)).rejects.toThrow("calls boom")
+		expect(deps.lane.acquireSlot).toHaveBeenCalledTimes(1)
+		expect(releaseSlot).toHaveBeenCalledTimes(1)
+	})
 })
