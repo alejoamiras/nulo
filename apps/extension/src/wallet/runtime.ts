@@ -46,7 +46,14 @@ import { IncomingTransferService } from "./services/incoming-transfer/service"
 import { WindowManager } from "./services/window-manager/window-manager"
 import { initWalletSdkHandler } from "./services/wallet-sdk/background"
 import { Migrator } from "@nulo/wallet-core/migration"
-import { BASELINE_VERSION, migrations } from "./storage/migrations"
+import {
+	BASELINE_VERSION,
+	migrations,
+	SCHEMA_BLOCKED_KEY,
+	SCHEMA_DEGRADED_KEY,
+	type MigrationBlockedStatus,
+	type MigrationDegradedStatus,
+} from "./storage/migrations"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 
 /** Shell-supplied dependencies. All I/O goes through ports on this object. */
@@ -105,12 +112,24 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		if (migration.kind === "needs-recovery" || (migration.kind === "failed" && migration.breaking)) {
 			const detail = "reason" in migration ? migration.reason : migration.error
 			logger.log("wallet", LogLevel.Error, `Storage migration blocked boot (${migration.kind}): ${detail}`)
-			// Fail closed: never start services on un-migrated / incompatible data.
-			// Phase 3 replaces this throw with the recovery UI + "Updating…" barrier.
+			// Persist the blocked status so the UI shells render the recovery
+			// screen (MigrationBarrier) instead of a dead popup, then fail
+			// closed: never start services on un-migrated / incompatible data.
+			const blocked: MigrationBlockedStatus = {
+				kind: migration.kind,
+				detail,
+				terminal: migration.kind === "failed" ? migration.terminal : true,
+			}
+			await browserApi.storage.local.set({ [SCHEMA_BLOCKED_KEY]: blocked })
 			throw new Error(`storage migration blocked: ${migration.kind}`)
 		}
 		if (migration.kind === "failed") {
 			logger.log("wallet", LogLevel.Warn, `Storage migration failed on an additive migration; booting degraded: ${migration.error}`)
+			const degraded: MigrationDegradedStatus = { version: migration.version, error: migration.error }
+			await browserApi.storage.local.set({ [SCHEMA_DEGRADED_KEY]: degraded })
+		} else {
+			// Healthy boot clears any stale status from a prior failed run.
+			await browserApi.storage.local.remove([SCHEMA_BLOCKED_KEY, SCHEMA_DEGRADED_KEY])
 		}
 
 		// Config + Barretenberg can load in parallel — neither depends on the other.

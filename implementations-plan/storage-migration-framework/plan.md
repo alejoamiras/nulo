@@ -78,7 +78,7 @@ Per-collection version vectors — rejected (§3.1); single-global's safety is l
 Live `MigrationContext` (EntityStorage `${root}@` parity, no read-time row-delete); backup store (atomic `set`+sentinel; in reset/wipe set); registry (baseline, `template.ts`, `types.ts`); wire before `config.load()`; delete `migrate.ts` + BalanceView stray; stale/corrupt marker fail-closed UX; retry-counter key in the reset set; package `exports`; **rewrite `wallet-crypto/README.md:37` + `extension/README.md:82`** (§3.7).
 **Gate** — `bun run audit:vue`. Pass: fresh-install init-at-max runs nothing; migrator before `config.load()`; stale/corrupt marker fails closed (loud, not silent); backup is one atomic `set`+sentinel; `ctx.local.rows(root)` ≡ `EntityStorage.getAll()` incl. NOT deleting malformed rows; BalanceView caller switched; no orphan `runStorageMigration`. Layers: typecheck·lint·unit·component·build.
 
-### Phase 3 — UI barrier + static facade ban + fail/degrade UX
+### Phase 3 — UI barrier + static facade ban + fail/degrade UX ✓ COMPLETE
 The migration-aware storage facade routing **every** direct reader (§3.6 list); the biome static ban proving no raw `chrome.storage.local` outside the facade/adapter (+ allowlist); the "Updating…" state; bounded-retry → `breaking`-driven block-with-recovery vs boot-degraded-with-warning.
 **Gate** — `bun run lint && bun run test:components && bun run audit:vue`. Pass: **the static ban fails the build on a raw `chrome.storage.local` outside the facade** (add a deliberate violation in a test fixture, assert lint errors, revert); component tests — set `running` shows "Updating…" + blocks reads; a `breaking` failure renders recovery; an additive failure boots degraded. Layers: typecheck·lint·unit·component·build.
 

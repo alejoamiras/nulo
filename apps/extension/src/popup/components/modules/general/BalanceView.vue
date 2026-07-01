@@ -15,6 +15,7 @@ import { TokenServiceClient } from "@/wallet/services/token/client"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
+import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
 /** Composables */
 import { useToast } from "@/composables/toast.js"
@@ -198,7 +199,7 @@ async function fetchTokenBalances() {
 async function loadBalanceDisplayOption(profileId, networkId) {
 	const key = `nulo:ui:balanceDisplayOption@${profileId}`
 
-	const result = await chrome.storage.local.get(key)
+	const result = await storageLocalGet(key)
 	const optionsMap = result[key] || {}
 
 	let option = optionsMap[networkId]
@@ -206,7 +207,7 @@ async function loadBalanceDisplayOption(profileId, networkId) {
 	if (!option) {
 		option = "total_account_value"
 		optionsMap[networkId] = option
-		await chrome.storage.local.set({ [key]: optionsMap })
+		await storageLocalSet({ [key]: optionsMap })
 	}
 
 	appStore.displayOption = option
@@ -214,12 +215,12 @@ async function loadBalanceDisplayOption(profileId, networkId) {
 async function saveBalanceDisplayOption(profileId, networkId, option) {
 	const key = `nulo:ui:balanceDisplayOption@${profileId}`
 
-	const result = await chrome.storage.local.get(key)
+	const result = await storageLocalGet(key)
 	const optionsMap = result[key] || {}
 
 	if (optionsMap[networkId] !== option) {
 		optionsMap[networkId] = option
-		await chrome.storage.local.set({ [key]: optionsMap })
+		await storageLocalSet({ [key]: optionsMap })
 	}
 }
 

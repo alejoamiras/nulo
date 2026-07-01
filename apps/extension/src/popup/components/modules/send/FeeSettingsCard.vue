@@ -10,6 +10,9 @@ import { getRandomHex } from "@/wallet/utils"
 import { getErrorData, getErrorMessage } from "@nulo/wallet-core/utils"
 import { UI_STORAGE_KEYS } from "@/popup/constants/storage-keys"
 
+/** Utils */
+import { storageLocalGet, storageLocalSet } from "@/utils/storage"
+
 /** Services */
 import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 import { ExecutionServiceClient } from "@/wallet/services/execution/client"
@@ -124,9 +127,9 @@ watch(derivedSettings, (val) => {
  * `onBalanceUpdated`.
  */
 const persistSelection = async (method) => {
-	const fpms = (await chrome.storage.local.get(FEE_METHOD_LS_KEY))[FEE_METHOD_LS_KEY] || {}
+	const fpms = (await storageLocalGet(FEE_METHOD_LS_KEY))[FEE_METHOD_LS_KEY] || {}
 	fpms[props.account.address] = method
-	await chrome.storage.local.set({ [FEE_METHOD_LS_KEY]: fpms })
+	await storageLocalSet({ [FEE_METHOD_LS_KEY]: fpms })
 
 	if (method.type === "fpc" || method.type === "private_fpc") {
 		const idx = cacheStore.feePaymentMethods.findIndex((m) => m.id === methodId)
@@ -212,7 +215,7 @@ const runInit = async () => {
 		// dropdown trigger displays the user's last-used method while the
 		// fetch is in flight. The `isInitComplete` gate ensures this
 		// pre-fill doesn't drive settings derivation against stale state.
-		const saved = (await chrome.storage.local.get(FEE_METHOD_LS_KEY))[FEE_METHOD_LS_KEY] || {}
+		const saved = (await storageLocalGet(FEE_METHOD_LS_KEY))[FEE_METHOD_LS_KEY] || {}
 		if (saved[props.account.address]) {
 			selectedMethod.value = saved[props.account.address]
 		}
@@ -244,7 +247,7 @@ const runInit = async () => {
 			} else {
 				if (saved[props.account.address]) {
 					delete saved[props.account.address]
-					await chrome.storage.local.set({ [FEE_METHOD_LS_KEY]: saved })
+					await storageLocalSet({ [FEE_METHOD_LS_KEY]: saved })
 				}
 				// Fall through to auto-select: prefer sponsored if registered.
 				const sponsoredMethod = methods.value.find((m) => m.fpc?.type === FpcType.DefaultSponsoredFpc)

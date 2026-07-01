@@ -16,3 +16,22 @@ export const BASELINE_VERSION = 1
 
 /** Forward-only, ascending. Empty until the first real schema change ships. */
 export const migrations: Migration[] = []
+
+/** Host-level status keys the boot path writes for the UI shells (the engine
+ *  doesn't know these). `blocked` ⇒ the shell renders the recovery screen
+ *  instead of the app; `degraded` ⇒ the shell boots with a warning banner. */
+export const SCHEMA_BLOCKED_KEY = "nulo:schema:blocked"
+export const SCHEMA_DEGRADED_KEY = "nulo:schema:degraded"
+
+/** Shape persisted under `SCHEMA_BLOCKED_KEY`. */
+export type MigrationBlockedStatus = {
+	kind: "needs-recovery" | "failed"
+	detail: string
+	/** `false` ⇒ the engine will retry on the next boot (recovery copy says
+	 *  "restart to retry"); `true` ⇒ retries exhausted. */
+	terminal: boolean
+}
+
+/** Shape persisted under `SCHEMA_DEGRADED_KEY` (additive migration failed;
+ *  the app runs with the old shape for that slice). */
+export type MigrationDegradedStatus = { version: number; error: string }
