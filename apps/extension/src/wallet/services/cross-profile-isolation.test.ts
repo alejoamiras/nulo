@@ -217,6 +217,17 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 			const backup = await tbal.backup()
 			expect(backup.map((b) => b.id)).toEqual([10])
 		})
+
+		test("getTokenBalances() SKIPS a balance whose token the active profile doesn't own — never throws", async () => {
+			// Balances are FK'd by `token` and carry no profileId, so p2's balance
+			// (token 2) lingers in the shared repo while p1 is active. Its token is
+			// absent from the active-profile `tokens` map — the display list must skip
+			// it, exactly as the balance PROJECTOR was hardened to (R1.4a opus-MED-2),
+			// not throw "unknown token" and white-screen the whole account list. Q-01's
+			// codec-hiding of an invalid token row can also make a token absent this way.
+			const balances = await tbal.getTokenBalances()
+			expect(balances.map((b) => b.id)).toEqual([10])
+		})
 	})
 
 	describe("fpc — by-id getters profileId-guarded via requireOwnedRow (R1.3a)", () => {
