@@ -127,12 +127,14 @@ describe("useProfileBootstrap", () => {
 		expect(initTransactionService).toHaveBeenCalled()
 	})
 
-	test("bootstrapActiveProfile flips isLogined to true at the end", async () => {
+	test("bootstrapActiveProfile flips isLogined to true and returns true when its profile stays active", async () => {
+		;(managers.profile.getActiveProfile as ReturnType<typeof vi.fn>).mockResolvedValue(fakeProfile)
 		const { bootstrapActiveProfile } = useProfileBootstrap()
 		const appStore = useAppStore()
 		expect(appStore.isLogined).toBe(false)
-		await bootstrapActiveProfile(fakeProfile)
+		const stillActive = await bootstrapActiveProfile(fakeProfile)
 		expect(appStore.isLogined).toBe(true)
+		expect(stillActive).toBe(true)
 	})
 
 	test("hydrateKnownProfile returns null when no active profile exists", async () => {
@@ -152,5 +154,32 @@ describe("useProfileBootstrap", () => {
 		expect(appStore.profile).toEqual(fakeProfile)
 		expect(appStore.isLogined).toBe(true)
 		expect(appStore.isSessionChecked).toBe(true)
+	})
+
+	// Q-15: a lock right after a password change clears the active session while a stale
+	// bootstrap is still running; that bootstrap must NOT resurrect isLogined afterward
+	// (the lock must win). The end-guard re-reads the authoritative active profile
+	// (getActiveProfile — serialized with lockActiveProfile under the profile service's
+	// runExclusive) before the flip, and returns whether the profile is still active.
+	test("(Q-15) bootstrapActiveProfile does not resurrect isLogined when the session was locked mid-bootstrap", async () => {
+		;(managers.profile.getActiveProfile as ReturnType<typeof vi.fn>).mockResolvedValue(null)
+		const { bootstrapActiveProfile } = useProfileBootstrap()
+		const appStore = useAppStore()
+		const stillActive = await bootstrapActiveProfile(fakeProfile)
+		expect(appStore.isLogined).toBe(false)
+		expect(stillActive).toBe(false)
+	})
+
+	test("(Q-15) bootstrapActiveProfile does not set isLogined when a different profile became active mid-bootstrap", async () => {
+		;(managers.profile.getActiveProfile as ReturnType<typeof vi.fn>).mockResolvedValue({
+			id: "other",
+			name: "Other",
+			type: "password",
+		} as never)
+		const { bootstrapActiveProfile } = useProfileBootstrap()
+		const appStore = useAppStore()
+		const stillActive = await bootstrapActiveProfile(fakeProfile)
+		expect(appStore.isLogined).toBe(false)
+		expect(stillActive).toBe(false)
 	})
 })
