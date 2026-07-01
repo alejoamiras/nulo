@@ -35,3 +35,19 @@ A wrong encoding or byte-role swap = decrypt/restore failure or a secret in the 
 - **Facts (main-verified):** persisted `Session` = `{profile,passhash?,since,lockedAt?}` (no masterKey); cold restore only rehydrates PASSWORD profiles, passkey short-circuits (`session-manager.ts:351-355`); backup v2 writes `"master-key"` (`full.vue`), import reads it (`useFullBackupImport.ts`); frozen oracle at `apps/extension/src/wallet/crypto/key-vectors.test.ts`.
 - **Inferences:** branding is type-only if all brands mint at existing boundaries via identity casts; the restore split needs no backup-v2 / session change.
 - **Asks (resolved autonomously):** `Base64MasterSecret` added (type-only, in-scope); NO backup schema v3; NO persisted-session split. All non-hard-limit. (Left surfaced ONLY as an FYI: cold passkey restore never auto-activates — that's existing product behavior, not Q-06's to change.)
+
+## Implementation record — P14a (branch `qa/Q-06a-branded-types`, PR #209)
+
+Landed as three behavior-preserving commits (all `typecheck:all=0`, frozen oracle byte-UNEDITED throughout, wallet-crypto 23/23 + extension crypto/profile/passkey/composables 163/163, biome clean bar 2 pre-existing warnings):
+- `e330e29` — `Passhash` end-to-end.
+- `e0a87ca` — `MasterSecretBytes` across unseal / derive / import boundaries.
+- `70f3c2a` — the WebAuthn ceremony trio `Base64CredentialId` / `Base64SecretPrf` / `HexUserHandle`.
+
+### Scope decisions (mapper-backed; the Explore mint→consume map confirmed each)
+- **`Salt` NOT branded (dropped from the 8).** Both salts (`EncryptionKey.deriveKey` local, `PasskeyCredential.salt` private field) never cross a function boundary → a brand guards **zero** call sites. The finding's own cited "salt" instances (`encryption-key.ts:11,87,97,114`) are actually `getPasshash`/`fromPasshash`/`getHashHex` sites, not a salt slot.
+- **`Base64Ciphertext` DEFINED in P14a, APPLIED in P14b.** `EncryptedProfileSecret.{guard,secret}` only move as named object fields and share one brand, so a guard↔secret swap is already caught by the `ENCRYPTION_GUARD` round-trip, not by branding. Its real value — separating an on-disk ciphertext from a **plain** base64 secret at the polymorphic `master-key`/`exportPlain`/`exportEncrypted` boundary — only materializes once `Base64MasterSecret` exists (P14b). Applying it alone costs ~14 `service.ts` lift-site mints for near-zero catch today, so it lands with P14b.
+- **`PasskeyCredential.create` takes an UNbranded `{ id; prf; userHandle? }`** and mints onto its branded fields. Rationale: the catastrophic `id`↔`prf` swap is already rejected at the ceremony mint + the branded `PasskeyCredentialData` shuttle (every production path); `create` is the terminal sink. Making its param unbranded is the design that keeps the frozen `key-vectors.test.ts` oracle — which calls `create({id, prf})` with plain-string fixtures — **byte-UNEDITED** (the hard limit). Flagged for the post-impl codex audit to challenge whether this materially weakens the terminal sink (it does not, for any non-test path).
+
+### Still open on P14a
+- Per-arc tail: `/code-review max --fix` + codex post-impl audit (in flight).
+- Full gate: dispatch `pr-quick` + `pr-smoke-e2e` + `pr-network-e2e` on the branch HEAD (`70f3c2a`), then plain squash-merge #209. Base64Ciphertext + Base64MasterSecret + the restore split move entirely to P14b.
