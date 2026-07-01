@@ -447,13 +447,13 @@ Per-rc procedure. Same v4 bug as stable; same ~45 second unstick. Network-e2e is
    - `--verify-tag` confirms the tag exists; we don't pass `--target` because `target_commitish` is ignored when the tag already exists per the GitHub Releases API.
 6. **Trigger the publish chain via the STABLE workflow's escape hatch:**
    ```bash
-   gh workflow run release.yml --ref main \
+   gh workflow run release.yml --ref dev \
      -f tag="v$VERSION" -f dry_run=false \
      -f publish_marketplaces=false
    # Add -f run_network_e2e=true if you want to gate this rc on the
    # 30-45 min network e2e suite. Off by default for prereleases.
    ```
-   - **Always `--ref main`** — uses the known-stable workflow definition; `dev`'s workflow file might be mid-edit during a feature cycle.
+   - **Use `--ref dev` for a prerelease, NOT `--ref main`.** `--ref` picks BOTH the `release.yml` definition AND the reusable workflows it calls (`_build-extension.yml` etc., resolved at the caller's ref). Those must match the **layout of the tag's code**. Since #186 moved `packages/extension → apps/extension` on `dev` but `main` is still pre-restructure (`packages/extension`), a prerelease tag cut from `dev` (apps/ layout) built via `--ref main` fails with `ENOENT: Could not change directory to "packages/extension"`. `dev`'s workflow has the matching `apps/extension` paths. (Once #186 promotes to `main` at the next stable cut, `main` and `dev` reconverge and `--ref main` works again — but the safe rule is: **publish a prerelease with the ref of the branch it was cut from.**)
    - Pass the prerelease tag explicitly; the workflow's `resolve` job verifies the tag exists and detects `is_prerelease=true` from the `-` in the version string.
 7. **Cloudflare hook is intentionally skipped** for prereleases — the landing points at stable releases only. No manual step.
 8. **Verify:**
