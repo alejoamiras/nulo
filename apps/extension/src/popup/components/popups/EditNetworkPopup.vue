@@ -70,27 +70,11 @@ const handleUpdateNetwork = async () => {
 	openToast({ label: "Network is updated" })
 }
 
-watch(
-	() => props.show,
-	() => {
-		if (!props.show) {
-			document.removeEventListener("keydown", onKeydown)
-
-			handleFillFieldsWithDefaultValues()
-		} else {
-			document.addEventListener("keydown", onKeydown)
-
-			handleFillFieldsWithDefaultValues()
-		}
-	},
-)
-
-const onKeydown = (e) => {
-	if (e.key !== "Enter") return
-	const target = e.target
-	if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-	handleUpdateNetwork()
-}
+usePopupEntity(() => props.show, {
+	submit: handleUpdateNetwork,
+	onShow: handleFillFieldsWithDefaultValues,
+	onHide: handleFillFieldsWithDefaultValues,
+})
 </script>
 
 <template>
