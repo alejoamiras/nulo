@@ -50,7 +50,7 @@ describe("materializeRequest", () => {
 		const deps = makeDeps()
 		const out = await materializeRequest({ kind: "simulate_transaction", account: "eip155:1337:0xabc", actions: [] } as never, deps)
 		expect(out.networkId).toBe("net-1")
-		expect(out.accountAddress).toBe("0xabc")
+		expect((out as { accountAddress?: string }).accountAddress).toBe("0xabc")
 		expect((out as { feeSettings?: unknown }).feeSettings).toBeUndefined()
 	})
 
