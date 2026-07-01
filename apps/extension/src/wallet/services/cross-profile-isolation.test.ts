@@ -247,4 +247,31 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 			await expect(fpc.getFpc("fpc-p2")).rejects.toThrow(/invalid id/i)
 		})
 	})
+
+	describe("network — by-id getters profileId-guarded via requireOwnedRow (R1.3b)", () => {
+		let profile: FakeProfileService
+		let network: NetworkService
+
+		beforeEach(async () => {
+			profile = new FakeProfileService()
+			profile.setActiveProfile(p1)
+			const services = new ServiceCollection()
+			services.add(profile)
+			network = new NetworkService(mkLogger(), api)
+			services.add(network)
+			await services.start()
+			await seedRow(api, "nulo:core:networks", "net-p2", {
+				id: "net-p2",
+				profileId: p2.id,
+				chainId: 1,
+				name: "N2",
+				primaryEndpointId: "ep0",
+				endpoints: [{ id: "ep0", rpcUrl: "http://localhost:8080" }],
+			})
+		})
+
+		test("getNetwork(foreignId) rejects a p2 network while p1 active", async () => {
+			await expect(network.getNetwork("net-p2")).rejects.toThrow(/invalid id/i)
+		})
+	})
 })
