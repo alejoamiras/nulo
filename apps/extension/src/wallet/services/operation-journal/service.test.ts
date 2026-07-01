@@ -195,21 +195,22 @@ describe("OperationJournalService", () => {
 	})
 
 	/**
-	 * Layer-2 schema resilience. `EntityStorage` already drops byte-malformed
-	 * rows; this group covers the case where a row parses as JSON but doesn't
-	 * fit `OperationRecordSchema` (e.g. an unknown stage or a missing required
-	 * field). The journal logs, deletes, and returns nothing — the FSM never
-	 * sees the bad record.
+	 * Layer-2 schema resilience. `EntityStorage` drops byte-malformed rows
+	 * (layer 1) and, via the injected `OperationRecordSchema` codec, KEEPS a row
+	 * that parses as JSON but fails the schema (e.g. an unknown stage or a missing
+	 * required field) — reading it as `undefined` without deleting it. The FSM
+	 * never sees the bad record, but a forward-incompatible shape is not silently
+	 * lost (delete→keep vs the pre-codec behavior).
 	 */
 	describe("schema-invalid row resilience", () => {
-		test("getOperation drops a schema-invalid row and returns undefined", async () => {
+		test("getOperation returns undefined for a schema-invalid row, KEEPING it (no delete)", async () => {
 			// Write a row directly to storage that bypasses the journal's create path.
 			await api.storage.local.set({ "nulo:journal@deadbeef": JSON.stringify({ id: "deadbeef", kind: "transfer" }) })
 			expect(await service.getOperation("deadbeef")).toBeUndefined()
-			// The bad row should have been deleted as a side effect.
-			expect(await service.getOperation("deadbeef")).toBeUndefined()
+			// The schema-invalid row is KEPT, not deleted — avoids silent data loss on
+			// a forward-incompatible shape; a repair/migration path can still see it.
 			const remaining = await api.storage.local.get("nulo:journal@deadbeef")
-			expect("nulo:journal@deadbeef" in remaining).toBe(false)
+			expect("nulo:journal@deadbeef" in remaining).toBe(true)
 		})
 
 		test("getOperations skips schema-invalid rows and returns only the valid ones", async () => {
@@ -220,9 +221,12 @@ describe("OperationJournalService", () => {
 			expect(ops.map((o) => o.id)).toEqual([valid.id])
 		})
 
-		test("transitionOperation throws 'not found' if the existing row is schema-invalid (record removed)", async () => {
+		test("transitionOperation throws 'not found' if the existing row is schema-invalid (record KEPT, not removed)", async () => {
 			await api.storage.local.set({ "nulo:journal@zombie": JSON.stringify({ id: "zombie", kind: "transfer" }) })
 			await expect(service.transitionOperation("zombie", { stage: "simulating" })).rejects.toThrow(/not found/i)
+			// The schema-invalid row is KEPT (not deleted).
+			const remaining = await api.storage.local.get("nulo:journal@zombie")
+			expect("nulo:journal@zombie" in remaining).toBe(true)
 		})
 	})
 
