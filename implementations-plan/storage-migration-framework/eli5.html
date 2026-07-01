@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — storage-migration-framework</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>A real migration system for the wallet's saved data</h1>
+  <p>When you ship a new version of the extension, users already have data saved in their browser from the old version. <strong>Migration</strong> is the step that <em>transforms</em> that saved data to the new shape — add a field, rename one, restructure a record — <strong>without losing it</strong>. Today the wallet has no real migrator, just a leftover "delete everything on a version bump" wipe inherited from the fork. This builds the actual production mechanism, learning from how MetaMask and Rabby (the two most production-hardened wallets) do it, and adds two safety features neither of them has: a <strong>pre-migration backup with restore</strong>, and a <strong>fail-closed</strong> stance so a bad migration can't quietly corrupt your data.</p>
+
+  <h2>The two big ideas</h2>
+  <p><strong>Built for two doors, shipping one.</strong> Old data reaches a new build two ways: by <em>updating</em> the extension, or by <em>importing an old backup</em>. The engine is designed for both — but this plan ships the <em>update</em> door. Backup import turned out to be a genuinely different data shape (it's stored differently), so it's a queued follow-up plan (<code>storage-migration-backup/</code>) that plugs into the same engine later.</p>
+  <p><strong>Safe by construction.</strong> Before each migration the engine takes a backup; it only marks a migration "done" if it fully succeeded; if the browser kills the background process mid-migration, the next launch restores the backup and resumes. And every migration is tested by running it <em>twice</em> to prove re-running is harmless.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: The engine (shared, pure, no browser calls)</h3>
+    <p>The migration runner in the shared package: applies numbered migrations in order, refuses to record success unless a migration fully completes, backs up before it starts, and restores + resumes after a crash. Built to run on either live storage <em>or</em> an imported backup.</p>
+    <p class="muted">Proves itself by: unit tests — in-order apply, checkpoint per success, backup→restore→retry, and every migration run twice = run once (idempotency).</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: Wire it into the extension + delete the old wipe</h3>
+    <p>Connect the runner to Chrome storage (carefully mirroring how rows are stored), run it as the first thing on startup, delete the old <code>migrate.ts</code> wipe, and fix the crypto documentation that currently points engineers at the file we're deleting.</p>
+    <p class="muted">Proves itself by: the full <code>audit:vue</code> gate + unit tests — fresh install runs nothing, the backup is written atomically, a leftover old-version key raises a loud dev warning instead of being silently swallowed.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: The "Updating…" barrier + what happens on failure</h3>
+    <p>Stop a popup opened mid-update from scribbling old data over a migration in flight (a small "Updating…" gate). And decide failure behavior: a <strong>breaking</strong> migration that fails blocks with a recovery path ("your funds are safe — reinstall/recover"); an <strong>additive</strong> one lets you in with a warning.</p>
+    <p class="muted">Proves itself by: component tests — the barrier blocks reads while migrating; a breaking failure shows recovery; an additive failure boots degraded.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: Prove it in a real browser (4 smoke tests)</h3>
+    <p>Drive real migrations through the real extension: (1) a normal transform, (2) a failure that restores + retries, (3) a popup opening mid-migration, (4) a crash at each risky point mid-migration that resumes cleanly.</p>
+    <p class="muted">Proves itself by: the four smoke e2es green + a build check proving the test-only fixture never ships to production.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5: Docs + the networked end-to-end</h3>
+    <p>Update the architecture docs + a worked "how to add a migration" example, then run the full networked test (real wallet boots, registers, syncs, and restores a backup after migrating).</p>
+    <p class="muted">Proves itself by: the network e2e + <code>audit:vue</code> gates green.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <ul>
+    <li><strong>Why not just wipe?</strong> Because once real users exist, "delete their data on update" is unacceptable — the whole point is to <em>keep</em> it. We're building the real thing now, while mistakes are cheap.</li>
+    <li><strong>The crypto exception.</strong> Your secret key is encrypted with your password; the migrator runs at startup <em>before</em> you unlock, so it has no password and physically can't re-encrypt. So changing the encryption scheme isn't a normal migration — it's a "re-encrypt when you next unlock, or reset" case. We document that boundary rather than pretend to auto-handle it.</li>
+    <li><strong>The race we had to close.</strong> Some of the wallet's screens read/write browser storage directly (not through the background). Without a barrier, a screen opened mid-migration could overwrite it. The "Updating…" gate closes that — and only ever shows up on the rare launch right after an update that ships a migration.</li>
+    <li><strong>Long-term:</strong> routing <em>all</em> screen storage through the background would kill this race class entirely — it's the cleaner end-state, noted as a separate follow-up, and this work leaves a seam for it.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm the design (one engine, two doors; crash-safe backup/restore; fail-closed + breaking flag; UI barrier) and the 6-phase plan.</li>
+      <li>Confirm validation layers: unit (1,4) · full <code>audit:vue</code> (2,3,6) · smoke e2e (5) · network e2e (6).</li>
+      <li>Confirm <code>/harden security</code> for production-prep (not now).</li>
+      <li>Approve / conditionally approve (with conditions) / reject (with blocking findings).</li>
+    </ul>
+    <p class="muted">Already decided with you: scope = chrome.storage JSON + backups (PXE + session out); no legacy (reinstall fresh); default = breaking; backup migration in-scope now with e2es.</p>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>Two options for the autonomous implementation session. <code>/goal</code> survives <code>claude --resume</code> and is the primitive for "work until the condition holds"; <code>/loop</code> re-fires on an interval. Completion here is transcript-observable (phase ✓ in plan.md + gate output), so <code>/goal</code> is recommended.</p>
+    <p class="warning">Use exactly ONE per session. They don't compose. Start the session in the permission mode you intend (a loop silently stalls on permission prompts).</p>
+
+    <div class="phase recommended">
+      <h3>Recommended: /goal</h3>
+      <pre><code>/goal All 5 phases marked ✓ in implementations-plan/storage-migration-framework/plan.md (the per-phase headers, not just chat), each ✓ backed by its phase's validation gate reported passing in the transcript; for each phase the agent printed LESSONS_FILE=implementations-plan/storage-migration-framework/lessons/phase-N.md; `/code-review max --fix` complete + committed separately; codex post-impl audit (xhigh) complete with high/critical addressed (especially crash-safe journal, fail-closed + durable retry-counter, statically-enforced facade coverage, and marker decision-table invariants); `bun run audit:vue` plus `bun run test:e2e` and `bun run e2e:agent` report exit 0 in the transcript.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop</h3>
+    <pre><code>/loop 15m Drive implementations-plan/storage-migration-framework forward. Never idle. Each firing: read plan.md + lessons/ (authoritative), `git status`/`git log --oneline -5`, and any PR's `gh pr view --json statusCheckRollup` (no --watch). Waiting on CI is fine — confirm it's progressing (`gh run watch <id>` up to 10 min), use the wait to review the diff / prep the next phase. No task in hand? Take the next pending step; after each edit run `bun run lint` + the touched package's tests; commit → push. Stuck or facing a decision? `/codex xhigh`, reach a defensible call, act, log it in lessons/phase-N.md — hard limits stay hard (never merge to main/release, publish, or expand scope). Same step failed 5×? Reassess with codex. Phase green = its plan.md validation gate passes (commands + criteria): run it, paste it, mark ✓, file lessons, print LESSONS_FILE=…/phase-N.md, advance. All 5 ✓? `/code-review max --fix` → commit separately → codex post-impl audit → address high/critical → wrap-up report → surface and stop. Keep the ASCII checklist visible (plan.md is source of truth).</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="audit-codex.md">codex audits</a> · <a href="audit-fable.md">fable audits</a> · <a href="research/metamask-migrations.md">MetaMask study</a> · <a href="research/rabby-migrations.md">Rabby study</a> · <a href="./lessons/">Lessons</a></p>
+</body>
+</html>
