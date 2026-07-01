@@ -1,30 +1,53 @@
-# Round-2 audit — opus (fable-role, adversarial, read-only)
+# Round-2 fable/opus audits
 
-Agent `a3d2383e`. Verdict: **SHIP-WITH-FIXES** — "leak #1 fix is correct and complete; the by-id guard and Q-02 protocol each hide a real trap the plan doesn't carve out." Converged independently with codex on both big traps + added 3 refinements.
+## R7 fresh-context confidence pass (fresh Fable subagent, hostile, read-only)
 
-## Concerns (severity-ranked)
+**VERDICT: SHIP-WITH-NOTES** — no untrusted-reachable regression; one arc-introduced resilience
+asymmetry (FIXED, #245) + coverage/honesty notes.
 
-- **HIGH-1 — `deleteToken` guard breaks the profile-deletion cascade.** `token/service.ts:525-531` `onProfileDeleted → deleteToken(token.id)` deletes the *deleted* profile's tokens; `deleteToken(id)` has no `profileId` param so a guard's only source is `requireActiveProfile`. Deleting an INACTIVE profile → throws on the first token → cascade aborts → orphaned rows = a NEW cross-profile residue. Active-profile deletion is also at risk: `deleteProfile` removes the repo row at `profile/service.ts:568` *before* emitting at `:570`, so `requireActiveProfile` may already throw. Fix: route the cascade through an unguarded internal delete (guard only the read getters), AND assert inactive-profile cascade *completion* in the suite. (= codex BLOCKER; opus adds the active-profile-order angle.)
-- **HIGH-2 — "ADD-only oracle" proves the wrong invariant.** `derive*` reads only capability/exemptReason/routing/scopeCheck (`method-descriptors.ts:226-272`); an optional `argSchema?` feeds none → FROZEN_* parity stays green with zero edits, so the oracle diff says NOTHING about arg-validation. The real risk: scope checkers read raw `args` positionally right after enforcement (`dispatcher.ts:359-382`; `method-scope-checkers.ts` does `args[0] as X`/`String(args[0])`) → a coercing pre-enforcement parse changes what checkers see (fail-open); a schema stricter than tolerance breaks dApps — many methods take optional trailing args (`registerSender` `:1134`; `simulateTx/profileTx/executeUtility/sendTx` opts `:569,1172,1181,1191`). `argSchema` MUST be optional (else all 19 rows edit); validation non-mutating + optionality-exact; **the adversarial-bypass suite + dispatcher tests are the proof, not the oracle diff.** (= codex #4; opus adds argSchema-optional + optional-trailing-arg tolerance.)
-- **MED-1 — internal gate contradiction.** R1 gates each PR on "isolation suite green," but R1.0 says #1/#2/#3 are RED until R1.4/R1.5 — can't both hold for R1.1–R1.4. Needs per-phase quarantine or a split gate.
-- **MED-2 — leak#1 fix must query the token service, not the in-memory Map.** `token-balance/service.ts:259` `backup()` skips `ensureInitialized()`, and `this.tokens` is cleared/reloaded on profile switch (`:174-182`) → filtering the Map could drop ALL balances (empty backup). Filter via `tokenService.getTokensRaw(profile.id)`. Also `balance-projector.ts:111` `getTokenRaw` has NO `.catch` (unlike `:64`) → a stale foreign balance throws the batch once the guard lands.
-- **MED-3 — backup-import codec pin inverted (R5).** "Never LAXER" is right for RPC/dApp but backup import needs "never STRICTER" or old backups fail to import — a tolerance change violating decision #4.
+**Finding 1 [HIGH note] — arc-introduced balance-list fragility (Q-01×Q-13) → FIXED in #245.**
+`getTokenBalances` (`token-balance/service.ts:120`) mapped every row through `getTokenBalanceInfo`,
+which THROWS `"unknown token"` when the token is absent from the active-profile-only `tokens` map.
+The arc newly makes a token absent (R1.4 requireOwnedRow; Q-01 codec-hiding); the sibling PROJECTOR
+(`balance-projector.ts:111`) was hardened in-arc for exactly this, the display path was not → one
+foreign/stale/hidden token white-screens the whole account list. Fable rated NOTE (no fully-traced
+live caller — the accountAddress filter usually excludes foreign balances). **Fixed R6.5/#245**:
+`.filter(x => this.tokens.has(x.token))` mirrors the projector; pinned failing-first in the isolation gate.
 
-## What's solid (independently verified)
-- Leak#1 is a real **plaintext** leak (`full.vue:136-141` plaintext; `handleEncrypt` optional/user-password, not per-profile-key).
-- **Transitive filter is complete + correct:** token ids are one GLOBAL sequence (`token/service.ts:176`, restore `:547`) → `balance.token ∈ active-profile-token-ids` is an exact partition (no cross-profile id collision; cross-chain same-profile kept; orphans safely dropped).
-- **No sibling backup leak:** token-balance is the only profile-private store with an unfiltered `backup()`; `config.getProps()` is unfiltered but global-by-design (one-line note).
-- **By-id gap IS dApp-unreachable** (the 4 token methods + `revokeAuthwits` absent from `METHOD_REGISTRY`) ⇒ low urgency, don't ship a cascade regression to close it.
-- `revokeAuthwits` account-check low-risk (`RevokeAuthwitsPopup.vue:99` passes same-account ids). Sequencing sound (R0 first, R6 last).
+**Finding 2 [MED note] — Q-13 residual + isolation-gate over-claim → OWNER ITEM.** Unmigrated by-id/
+arg-scoped methods still trust the CALLER's profileId (`token/service.ts:214` updateToken;
+`account/service.ts:152,165` changeAccountName/Visibility; `auth-registry:124,250` getAuthwits/enabled;
+`transaction/service.ts:91,95` getTransactions). **Fable confirmed ALL first-party-only** — none in
+`wallet-bridge/services-contract.ts`, so no dApp can inject a foreign profileId; arc edits to these
+files are strict improvements. This CORROBORATES the codex R7 adjudication (`audit-codex.md`). Separate
+honesty note: `cross-profile-isolation.test.ts:3-5` states a broad invariant while covering a subset —
+the docstring over-claims vs coverage. → owner decides fail-closed hardening (round-3 candidate);
+optionally narrow the docstring.
 
-## Reconciliation (all adopted)
-| # | Adopted into |
-|---|---|
-| HIGH-1 | R1.4 — internal cascade delete independent of `requireActiveProfile`; assert active AND inactive profile cascade completion. |
-| HIGH-2 | R6 items 5–6 — `argSchema?` optional, non-mutating, optionality-exact; adversarial-bypass + dispatcher tests are the proof. |
-| MED-1 | R1.0 — `test.fails()` pins for #1/#2/#3, flipped to `test` in the fixing phase; suite green every phase. |
-| MED-2 | R1.5 — filter via `tokenService.getTokensRaw(profile.id)`; add `.catch` to `balance-projector.ts:111`. |
-| MED-3 | R5 — backup-import codec "never STRICTER"; RPC/dApp "never laxer". |
-| config note | Security § — `config.getProps()` global-by-design, not a leak. |
+**Finding 3 [LOW] — codec-gate fixture realism (Q-01).** `storage-codecs.test.ts` fixtures diverge from
+real producers on TOLERANT `z.custom` fields (gasDetails/transfers-token). Those fields are pass-through-
+verbatim (uncodec'd), so divergence doesn't affect codec correctness — but the gate can't catch real
+producer drift on the VALIDATED fields beyond what it hand-authors. (The R5b canary catch is the live
+detector for that class.) Low.
 
-**Both legs converged → SHIP-WITH-FIXES; all fixes folded into `plan.md`.** No RECONSIDER/BLOCKER remains open.
+**Finding 4 [LOW] — P16b discover unpinned.** `discover/index.test.ts` is a pre-existing component test,
+not part of the frozen 37; its shell-injected connect/disconnect order isn't pinned per-window. Extraction
+itself verbatim-preserving (Fable confirmed). Low.
+
+**Finding 5 [INFO] — migrate.ts KEYS_TO_WIPE** uses exact keys but rows live at `root@id`; legacy rows
+survive a version bump into the new codecs. Pre-existing, mooted by no-production-users.
+
+**ATTACKED AND HELD (Fable):** Q-02 widening (scope-checkers/capability-map/scope-enforcement byte-
+unchanged; argSchema pass/fail; derive* identical with/without it); Q-02 legit-rejection (guards match
+canonical WalletSchema+patch arities; only under-arity rejected; zero-arg requestCapabilities rejection
+intentional+pinned); Q-02 ordering (guard only ADDS rejection post-assertKnownMethod; batch legs
+re-guarded); Q-13 dApp path (finding-methods absent from services-contract; cascade only via
+onProfileDeleted; by-id getters throw via requireOwnedRow; ids globally unique); Q-01 session DoS
+(capability records z.custom tolerate passthrough; codec-fail hides+KEEPS row, recoverable); P18b
+(generated proxy = identical 18-method ipxe subset; SW-only trio compile-excluded); P16b (no
+double-reject, stable listener identity, no fast-cancel race, no param-spoof).
+
+## Cross-leg synthesis
+codex (`audit-codex.md`) and Fable INDEPENDENTLY converged: no dApp-reachable cross-profile regression;
+the residual by-id/arg-scoped first-party surface is pre-existing + owner-gated (round-3). Fable's unique
+catch (the projector/display asymmetry) is FIXED (#245). Both = SHIP-WITH-NOTES.
