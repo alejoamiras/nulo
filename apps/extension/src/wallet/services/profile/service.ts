@@ -24,7 +24,7 @@ import { PasskeyService } from "@/wallet/services/passkey/service"
 import { PasskeyRecoveryCoordinator, type PasskeyRecovery } from "./passkey-recovery-coordinator"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import { SessionManager } from "./session-manager"
-import { PROFILE_SERVICE_NAME, type ProfileInfo, type Profile, type Events, type Methods } from "./spec"
+import { PROFILE_SERVICE_NAME, type ProfileInfo, type Profile, type Events, type Methods, type RestoreSecret } from "./spec"
 
 export * from "./spec"
 
@@ -847,13 +847,21 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 	public async restore(
 		profile: ProfileInfo,
-		masterKey: string,
+		secret: RestoreSecret,
 		password?: string,
 		credentialData?: PasskeyCredentialData,
 	): Promise<Restored<ProfileInfo>> {
 		await this.ensureInitialized()
 
-		if (!masterKey) {
+		// The split's core invariant: the secret discriminant MUST match the profile
+		// type — prevents a password master key reaching a passkey profile (or vice
+		// versa), the swap the old polymorphic `masterKey: string` slot allowed.
+		if (secret.type !== profile.type) {
+			throw new Error("Restore secret type does not match profile type")
+		}
+
+		const rawSecret = secret.type === "password" ? secret.masterKey : secret.credentialId
+		if (!rawSecret) {
 			throw new Error("Master key is required to restore profile")
 		}
 
@@ -866,13 +874,13 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			counter++
 		}
 
-		switch (profile.type) {
+		switch (secret.type) {
 			case "password": {
 				if (!password) {
 					throw new Error("Password is required for password profile")
 				}
 
-				const plainSecret = Buffer.from(masterKey, "base64")
+				const plainSecret = Buffer.from(secret.masterKey, "base64")
 				if (plainSecret.byteLength !== 32) {
 					zeroize(plainSecret)
 					throw new Error("Invalid master key length")
@@ -945,7 +953,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					// could stash a secret derived from the WRONG key, then
 					// finalizeRestore would open a session bound to a master
 					// that doesn't match the imported account address.
-					if (recovery.credentialId !== masterKey) {
+					if (recovery.credentialId !== secret.credentialId) {
 						zeroize(recovery.secret)
 						throw new Error("credentialId mismatch")
 					}
