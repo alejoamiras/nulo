@@ -33,7 +33,7 @@ Still HARD LIMITS (unchanged): merge `dev-quality`→`dev`/`main` (owner does it
 
 ## Phases (each = one PR cycle into `dev-quality`)
 
-### R0 — `UPDATE.md` upgrade-checklist doc (light, FIRST — later phases append to it)
+### R0 — `UPDATE.md` upgrade-checklist doc (light, FIRST — later phases append to it) — ✓ DONE (#227 @ `efc10a7`, quality run 28535527725; docs-only → smoke/network N/A)
 Create `UPDATE.md` at repo root: the "how to bump `@aztec/*`" checklist (none exists — verified). Seed with the KNOWN coupling points: the class-id + address invariant fixture, the noir-wasm nodejs-entry alias, `@nulo/wallet-sdk-schema-patch`, the PXE seam, PBKDF2/artifact constants. Wire a pointer from `CLAUDE.md` (§ Dependency policy, next to the `@aztec` exact-pin note). **Convention established here: any phase that types against an `@aztec` shape MUST add that type + file:line to `UPDATE.md`.** **Gate:** lint + doc exists + CLAUDE.md link + `check-no-brand.sh`.
 
 ### R1 — Q-13 dedup + leak #1 + ownership guards (deep, PRIVACY — the big one)
