@@ -14,12 +14,6 @@ import { getErrorData } from "@nulo/wallet-core/utils"
 import { type ProfileInfo, ProfileServiceClient } from "@/wallet/services/profile/client"
 import { type DiscoveryPayload, DappInteractionServiceClient } from "@/wallet/services/dapp-interaction/client"
 
-type UIError = {
-	title: string
-	tooltip: string
-	type: string
-}
-
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 const appStore = useAppStore()
@@ -27,12 +21,12 @@ const appStore = useAppStore()
 /** Composables */
 import { useDappInteractionPayload } from "@/composables/useDappInteractionPayload"
 import { useDappHostname } from "@/composables/useDappHostname"
+import { useDappApprovalWindow } from "@/composables/useDappApprovalWindow"
 
 const router = useRouter()
 
 const profile = ref<ProfileInfo>()
 const isLoading = ref(false)
-const processingError = ref<UIError>()
 
 // isReady flips true only after init() commits payload + dApp identity +
 // active profile. Gates Allow so the user can't approve a session whose
@@ -59,14 +53,30 @@ const {
 
 const { hostname: dappHostname, isSuspicious: hostnameHasNonAscii } = useDappHostname(dapp)
 
-function setError(title: string, tooltip: string = title, type: string = "error") {
-	processingError.value = { title, tooltip, type }
-}
-
-const stripStatus = computed<"ready" | "loading" | "cancelled">(() => {
-	if (isInteractionCancelled.value) return "cancelled"
-	if (isLoading.value) return "loading"
-	return "ready"
+// init/reject/services are referenced lazily (thunks): they are declared below
+// and only invoked by start()/dispose()/the guard at runtime.
+const {
+	start: startWindow,
+	dispose: disposeWindow,
+	closeWindow,
+	onActiveProfileChanged,
+	stripStatus,
+	processingError,
+	setError,
+} = useDappApprovalWindow({
+	profile,
+	isInteractionCancelled,
+	isLoading,
+	connectServices: () => {
+		profileService.connect()
+		interactionService.connect()
+	},
+	disconnectServices: () => {
+		profileService.disconnect()
+		interactionService.disconnect()
+	},
+	init: () => init(),
+	reject: () => reject(),
 })
 
 const init = async () => {
@@ -82,12 +92,6 @@ const init = async () => {
 	} catch (error) {
 		console.error(getErrorData(error))
 		setError("Something went wrong")
-	}
-}
-
-const onActiveProfileChanged = (_profile?: ProfileInfo) => {
-	if (!_profile || _profile.id !== profile.value?.id) {
-		reject()
 	}
 }
 
@@ -119,54 +123,12 @@ const reject = async () => {
 	closeWindow(true)
 }
 
-const closeWindow = (interactionCompleted?: boolean) => {
-	if (interactionCompleted) {
-		window.removeEventListener("beforeunload", reject)
-	}
-	chrome.windows.getCurrent(undefined, (window) => {
-		if (window.id) {
-			chrome.windows.remove(window.id)
-		}
-	})
-}
-
 const profileService = new ProfileServiceClient()
 profileService.onActiveProfileChanged.add(onActiveProfileChanged)
 
-onMounted(async () => {
-	profileService.connect()
-	interactionService.connect()
+onMounted(startWindow)
 
-	if (!appStore.isSessionChecked) {
-		await new Promise<void>((resolve) => {
-			const stop = watch(
-				() => appStore.isSessionChecked,
-				(checked) => {
-					if (checked) {
-						stop()
-						resolve()
-					}
-				},
-				{ immediate: true },
-			)
-		})
-	}
-
-	if (!appStore.isLogined) {
-		appStore.pageAwaitingAuth = router.currentRoute.value.fullPath
-		router.push({ path: "/popup/auth" })
-		return
-	}
-
-	await init()
-	window.addEventListener("beforeunload", reject)
-})
-
-onUnmounted(() => {
-	profileService.disconnect()
-	interactionService.disconnect()
-	window.removeEventListener("beforeunload", reject)
-})
+onUnmounted(disposeWindow)
 </script>
 
 <template>
