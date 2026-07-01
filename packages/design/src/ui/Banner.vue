@@ -18,7 +18,7 @@ defineProps({
 		default: "info",
 	},
 	direction: {
-		type: String,
+		type: String as PropType<"horizontal" | "vertical">,
 		default: "horizontal",
 	},
 	text: {
