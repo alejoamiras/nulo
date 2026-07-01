@@ -1,5 +1,7 @@
 export const ACCOUNT_SERVICE_NAME = "account"
 
+import { z } from "zod"
+
 export enum AccountType {
 	// SECURITY: Numeric value is used in poseidon2Hash for key derivation. NEVER change it.
 	/** Upstream-canonical Schnorr account (Aztec `@aztec/accounts/schnorr`). */
@@ -22,6 +24,17 @@ export type Account = {
 	/** Flag, determining whether the account is active or hidden. */
 	visible: boolean
 }
+
+/** Storage codec row schema — mirrors `Account` exactly. */
+export const AccountSchema: z.ZodType<Account> = z.object({
+	profileId: z.string(),
+	chainId: z.number(),
+	address: z.string(),
+	index: z.number(),
+	type: z.nativeEnum(AccountType),
+	name: z.string(),
+	visible: z.boolean(),
+})
 
 export type Methods = {
 	/**

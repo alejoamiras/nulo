@@ -34,6 +34,7 @@ import {
 	NetworkMethodSchemas,
 	NetworkSchema,
 	NodeStatus,
+	NetworkRowSchema,
 } from "./spec"
 
 export * from "./spec"
@@ -176,7 +177,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		nodeFactory?: NodeFactory,
 	) {
 		super(NETWORK_SERVICE_NAME, logger)
-		this.storage = new EntityStorage<Network>("nulo:core:networks", browserApi.storage.local)
+		this.storage = new EntityStorage<Network>("nulo:core:networks", browserApi.storage.local, (raw) => NetworkRowSchema.parse(raw))
 		this.lock = new Lock("network", logger)
 		this.nodeFactory = nodeFactory ?? new AztecNodeFactoryAdapter()
 	}

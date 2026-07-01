@@ -22,7 +22,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { feeJuiceAddress, feeJuiceName, feeJuiceSymbol } from "@/wallet/utils/fee-juice"
 import { simulate } from "@/wallet/utils/fn"
-import { type Token, type TokenInfo, TOKEN_SERVICE_NAME, type TokenInterface, type Methods, type Events } from "./spec"
+import { type Token, type TokenInfo, TOKEN_SERVICE_NAME, TokenSchema, type TokenInterface, type Methods, type Events } from "./spec"
 import { createViewTokenFn, getDefaultTokenFn, getTokenFnCandidates, TOKEN_FN_DESCRIPTORS } from "./functions"
 import { getTokenInfo, isTokenComplete } from "./utils"
 
@@ -62,7 +62,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		private readonly pxeClientFactory: ShallowPxeClientFactory = DEFAULT_SHALLOW_PXE_CLIENT_FACTORY,
 	) {
 		super(TOKEN_SERVICE_NAME, logger)
-		this.tokens = new EntityStorage<Token>("nulo:core:tokens", browserApi.storage.local)
+		this.tokens = new EntityStorage<Token>("nulo:core:tokens", browserApi.storage.local, (raw) => TokenSchema.parse(raw))
 	}
 
 	protected async init(services: ServiceCollection) {
