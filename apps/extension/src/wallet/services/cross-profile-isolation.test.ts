@@ -161,6 +161,20 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 		test.fails("(GAP #2 — fixed R1.4) getTokenRaw(foreignId) must REJECT a p2 token while p1 active", async () => {
 			await expect(tokens.getTokenRaw(2)).rejects.toThrow()
 		})
+
+		test("deleting an INACTIVE profile purges its tokens (cascade must survive the R1.4 guard-split)", async () => {
+			// The BLOCKER both audits caught: R1.4 adds an active-profile guard to the
+			// PUBLIC deleteToken RPC, but the profile-delete cascade deletes an explicit,
+			// possibly-INACTIVE profile's tokens. This asserts the cascade fully purges an
+			// inactive profile — it passes today and MUST stay green after R1.4 routes the
+			// cascade through the internal UNGUARDED delete (a naive guard would throw here
+			// on p2's token while p1 is active, orphaning rows).
+			profile.setActiveProfile(p1)
+			profile.onProfileDeleted.invoke(p2)
+			await new Promise((r) => setTimeout(r, 0))
+			expect((await tokens.getTokens(p2.id)).map((t) => t.id)).toEqual([])
+			expect((await tokens.getTokens(p1.id)).map((t) => t.id)).toEqual([1])
+		})
 	})
 
 	describe("token-balance — backup UNFILTERED across profiles (leak #1, fixed R1.5)", () => {
