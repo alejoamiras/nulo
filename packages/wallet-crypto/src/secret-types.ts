@@ -17,17 +17,17 @@
  * downstream base-typed param to become branded — only the origin mints.
  *
  * ## Scope (Q-06)
- * Six brands are defined here; each is applied (mint→consume) in the PR that can carry its
- * cascade. Already applied: `Passhash`, `MasterSecretBytes`. Applied alongside this definition:
- * `Base64CredentialId`, `Base64SecretPrf`, `HexUserHandle` — the WebAuthn ceremony shuttle,
- * where the silent `id`↔`prf` transposition (both base64, both `string` today) is the one
- * catastrophic swap. `Base64Ciphertext` is DEFINED but applied with the restore-payload split,
- * where it pairs with `Base64MasterSecret` (the base64 plain master key) to separate an on-disk
- * ciphertext from a plain secret — the distinction that gives it value; applying it alone earns
- * little for a wide `service.ts` cascade. `Salt` from the finding's list is deliberately NOT
- * branded: the PBKDF2 / HKDF salt is a private local (`EncryptionKey.deriveKey`,
- * `PasskeyCredential.salt`) that never crosses a function boundary, so a brand would guard zero
- * call sites.
+ * Seven brands, each applied (mint→consume) in the PR that can carry its cascade. P14a:
+ * `Passhash`, `MasterSecretBytes`, and the WebAuthn ceremony shuttle `Base64CredentialId` /
+ * `Base64SecretPrf` / `HexUserHandle` — where the silent `id`↔`prf` transposition (both base64,
+ * both `string` today) is the one catastrophic swap. P14b (the restore-payload split): the
+ * `Base64Ciphertext` ↔ `Base64MasterSecret` PAIR — an on-disk AES-GCM ciphertext vs. a decrypted
+ * base64 plain master key. They only earn their keep together, at the polymorphic `master-key` /
+ * `exportPlain` / `exportEncrypted` boundary where one `string` slot legitimately carries a
+ * ciphertext, a plain secret, or a credential id and only a runtime length/`!==` check guards it.
+ * `Salt` from the finding's list is deliberately NOT branded: the PBKDF2 / HKDF salt is a private
+ * local (`EncryptionKey.deriveKey`, `PasskeyCredential.salt`) that never crosses a function
+ * boundary, so a brand would guard zero call sites.
  *
  * `PasskeyCredential.create` intentionally accepts an UNbranded `{ id; prf; userHandle? }` and
  * mints onto its branded fields: the swap is already caught upstream at the ceremony mint + the
@@ -38,6 +38,7 @@
 declare const __passhash: unique symbol
 declare const __masterSecretBytes: unique symbol
 declare const __base64Ciphertext: unique symbol
+declare const __base64MasterSecret: unique symbol
 declare const __base64CredentialId: unique symbol
 declare const __base64SecretPrf: unique symbol
 declare const __hexUserHandle: unique symbol
@@ -54,6 +55,12 @@ export type MasterSecretBytes = Uint8Array<ArrayBuffer> & { readonly [__masterSe
  *  `guard` + `secret`). Distinguishes an on-disk ciphertext from any other base64 string — a
  *  credential id must never land in the ciphertext slot. */
 export type Base64Ciphertext = string & { readonly [__base64Ciphertext]: true }
+
+/** Base64-encoded 32-byte PLAIN master secret — `exportPlain`'s password-profile return + the
+ *  backup `master-key` field for password profiles. The decrypted counterpart of
+ *  `Base64Ciphertext`: the polymorphic `master-key` / `exportPlain` / `exportEncrypted` boundary
+ *  is exactly where a ciphertext must never be confused with a plain secret. */
+export type Base64MasterSecret = string & { readonly [__base64MasterSecret]: true }
 
 /** Base64-encoded WebAuthn credential id (`PublicKeyCredential.rawId`). Adjacent to the PRF and
  *  user-handle strings on the ceremony shuttle + the recovery record + the restore payload,
@@ -80,6 +87,10 @@ export const asMasterSecretBytes = (b: Uint8Array<ArrayBuffer>): MasterSecretByt
 /** Mint `Base64Ciphertext` — grep to audit ciphertext origins (`PasswordSecretBox.sealInternal`
  *  `toBase64`, the profile-record `guard`/`secret` lift at the unseal call sites). */
 export const asBase64Ciphertext = (s: string): Base64Ciphertext => s as Base64Ciphertext
+
+/** Mint `Base64MasterSecret` — grep to audit plain-master-secret origins (`exportPlain`'s
+ *  base64 return for password profiles, the backup-import `master-key` field). */
+export const asBase64MasterSecret = (s: string): Base64MasterSecret => s as Base64MasterSecret
 
 /** Mint `Base64CredentialId` — grep to audit credential-id origins (the WebAuthn ceremony
  *  `encodeBase64(rawId)`, the backup-import `master-key` field for passkey profiles). */

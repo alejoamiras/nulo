@@ -24,6 +24,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import { InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
 import {
 	asBase64CredentialId,
+	asBase64MasterSecret,
 	asBase64SecretPrf,
 	asHexUserHandle,
 	type PasskeyCredential,
@@ -725,7 +726,11 @@ describe("ProfileService integration", () => {
 		test("restore() writes the profile but does NOT open a session", async () => {
 			const { service } = await makeService()
 
-			const out = await service.restore({ id: "ignored", name: "P", type: "password" }, RESTORE_MASTER_KEY, "pass1234")
+			const out = await service.restore(
+				{ id: "ignored", name: "P", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
+				"pass1234",
+			)
 
 			expect("restoreError" in out && out.restoreError).toBeFalsy()
 			// Profile is in storage but no session.
@@ -739,7 +744,11 @@ describe("ProfileService integration", () => {
 			const events: Array<{ id: string } | undefined> = []
 			service.onActiveProfileChanged.add((p) => events.push(p))
 
-			const out = await service.restore({ id: "ignored", name: "P", type: "password" }, RESTORE_MASTER_KEY, "pass1234")
+			const out = await service.restore(
+				{ id: "ignored", name: "P", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
+				"pass1234",
+			)
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 			// No emit happened during restore — sanity-check before finalize.
@@ -754,7 +763,11 @@ describe("ProfileService integration", () => {
 
 		test("finalizeRestore() with wrong password throws InvalidPasswordError; profile stays in storage", async () => {
 			const { service } = await makeService()
-			const out = await service.restore({ id: "ignored", name: "P", type: "password" }, RESTORE_MASTER_KEY, "pass1234")
+			const out = await service.restore(
+				{ id: "ignored", name: "P", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
+				"pass1234",
+			)
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 			await expect(service.finalizeRestore(out.id, "wrong-pass")).rejects.toBeInstanceOf(InvalidPasswordError)
@@ -765,7 +778,11 @@ describe("ProfileService integration", () => {
 
 		test("finalizeRestore() is idempotent: a second call on an already-active session is a no-op", async () => {
 			const { service } = await makeService()
-			const out = await service.restore({ id: "ignored", name: "P", type: "password" }, RESTORE_MASTER_KEY, "pass1234")
+			const out = await service.restore(
+				{ id: "ignored", name: "P", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
+				"pass1234",
+			)
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 			await service.finalizeRestore(out.id, "pass1234")
@@ -779,7 +796,11 @@ describe("ProfileService integration", () => {
 
 		test("finalizeRestore() throws when the profile no longer exists (rollback case)", async () => {
 			const { service } = await makeService()
-			const out = await service.restore({ id: "ignored", name: "P", type: "password" }, RESTORE_MASTER_KEY, "pass1234")
+			const out = await service.restore(
+				{ id: "ignored", name: "P", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
+				"pass1234",
+			)
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 			await service.deleteProfile(out.id)
@@ -798,7 +819,12 @@ describe("ProfileService integration", () => {
 			await service.deleteProfile(original.id)
 
 			const credData = fakeCredentialData(credentialId, original.id)
-			const out = await service.restore({ id: "ignored", name: "PK", type: "passkey" }, credentialId, undefined, credData)
+			const out = await service.restore(
+				{ id: "ignored", name: "PK", type: "passkey" },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				undefined,
+				credData,
+			)
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 			// Profile re-created, no session yet.
@@ -824,7 +850,10 @@ describe("ProfileService integration", () => {
 			await service.lockActiveProfile()
 			await service.deleteProfile(original.id)
 
-			const out = await service.restore({ id: "ignored", name: "PK", type: "passkey" }, credentialId)
+			const out = await service.restore(
+				{ id: "ignored", name: "PK", type: "passkey" },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+			)
 			expect("restoreError" in out && out.restoreError).toBeTruthy()
 			expect(String((out as { restoreError?: unknown }).restoreError)).toMatch(/credentialData is required/)
 		}, 30_000)
@@ -842,7 +871,12 @@ describe("ProfileService integration", () => {
 			// and finalizeRestore would open a session bound to a master
 			// that doesn't match the imported address.
 			const wrongCred = fakeCredentialData("cred-WRONG", original.id)
-			const out = await service.restore({ id: "ignored", name: "PK", type: "passkey" }, credentialId, undefined, wrongCred)
+			const out = await service.restore(
+				{ id: "ignored", name: "PK", type: "passkey" },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				undefined,
+				wrongCred,
+			)
 			expect("restoreError" in out && out.restoreError).toBeTruthy()
 			expect(String((out as { restoreError?: unknown }).restoreError)).toMatch(/credentialId mismatch/)
 		}, 30_000)
@@ -856,7 +890,12 @@ describe("ProfileService integration", () => {
 			await service.deleteProfile(original.id)
 
 			const credData = fakeCredentialData(credentialId, original.id)
-			const out = await service.restore({ id: "ignored", name: "PK", type: "passkey" }, credentialId, undefined, credData)
+			const out = await service.restore(
+				{ id: "ignored", name: "PK", type: "passkey" },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				undefined,
+				credData,
+			)
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 			// Rollback before finalize — simulating the duplicate-address path
@@ -879,12 +918,87 @@ describe("ProfileService integration", () => {
 			await expect(
 				service.restore(
 					{ id: "ignored", name: "P", type: "password" },
-					Buffer.from(new Uint8Array(16)).toString("base64"), // 16 bytes, not 32
+					{ type: "password", masterKey: asBase64MasterSecret(Buffer.from(new Uint8Array(16)).toString("base64")) }, // 16 bytes, not 32
 					"pass1234",
 				),
 			).rejects.toThrow(/master key length/i)
 			expect(await service.getActiveProfile()).toBeUndefined()
 			expect(await service.getProfiles()).toEqual([])
+		}, 30_000)
+
+		test("restore() rejects a secret whose type does not match the profile type (split invariant)", async () => {
+			const { service } = await makeService()
+
+			// The RestoreSecret split's core guard: a passkey-shaped secret handed to a
+			// password profile (and the inverse) is rejected up front — the swap the old
+			// polymorphic `masterKey: string` slot silently allowed. Both throw (the check
+			// is before runExclusive), leaving no profile + no session.
+			await expect(
+				service.restore(
+					{ id: "ignored", name: "P", type: "password" },
+					{ type: "passkey", credentialId: asBase64CredentialId("cred-x") },
+					"pass1234",
+				),
+			).rejects.toThrow(/secret type does not match/i)
+			await expect(
+				service.restore(
+					{ id: "ignored", name: "PK", type: "passkey" },
+					{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
+					undefined,
+					fakeCredentialData("cred-x"),
+				),
+			).rejects.toThrow(/secret type does not match/i)
+			expect(await service.getProfiles()).toEqual([])
+			expect(await service.getActiveProfile()).toBeUndefined()
+		}, 30_000)
+
+		test("restore + finalize password profile survives a simulated SW restart via chrome.storage.session", async () => {
+			const { service, api } = await makeService()
+			const out = await service.restore(
+				{ id: "ignored", name: "P", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
+				"pass1234",
+			)
+			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
+			await service.finalizeRestore(out.id, "pass1234")
+			expect((await service.getActiveProfile())?.id).toBe(out.id)
+
+			// Simulate an MV3 SW restart: a fresh ProfileService over the SAME persisted
+			// storage must rehydrate the password session from chrome.storage.session.
+			const { service: service2 } = await makeServiceFromExistingApi(api)
+			expect((await service2.getActiveProfile())?.id).toBe(out.id)
+		}, 30_000)
+
+		test("restore + finalize passkey profile round-trips across SW restart WITHOUT silent activation", async () => {
+			const { service, api } = await makeService()
+
+			// Seed the FakePasskeyService credential map, capture its deterministic
+			// credentialId + userHandle, then wipe to simulate a fresh import.
+			const original = await service.createPasskeyProfile("PK")
+			const credentialId = await service.getPasskeyCredentialId(original.id)
+			const userHandle = original.id
+			await service.lockActiveProfile()
+			await service.deleteProfile(original.id)
+
+			const credData = fakeCredentialData(credentialId, userHandle)
+			const out = await service.restore(
+				{ id: "ignored", name: "PK", type: "passkey" },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				undefined,
+				credData,
+			)
+			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
+			await service.finalizeRestore(out.id)
+			expect((await service.getActiveProfile())?.id).toBe(out.id)
+
+			// SW restart: a fresh service does NOT auto-activate a passkey profile
+			// (WebAuthn needs a user gesture), but the persisted record survives and an
+			// explicit unlockPasskeyProfile re-opens it.
+			const { service: service2 } = await makeServiceFromExistingApi(api)
+			expect(await service2.getActiveProfile()).toBeUndefined()
+			const unlocked = await service2.unlockPasskeyProfile(out.id, fakeCredentialData(credentialId, userHandle))
+			expect(unlocked.id).toBe(out.id)
+			expect((await service2.getActiveProfile())?.id).toBe(out.id)
 		}, 30_000)
 	})
 
