@@ -19,7 +19,15 @@ export function useSyncedRef(key, defaultValue) {
 
 	chrome.storage.onChanged.addListener((changes, area) => {
 		if (area === "local" && changes[storageKey]) {
-			state.value = changes[storageKey].newValue
+			// Never trust the event's newValue directly: mid-migration commits
+			// fire onChanged too, and adopting an intermediate value here would
+			// let the watcher above echo it back AFTER the migration finishes.
+			// Re-read through the facade instead — it waits for idle, so state
+			// only ever reflects settled post-migration values. (Vue's watch
+			// skips identical assignments, so the echo terminates.)
+			void storageLocalGet([storageKey]).then((result) => {
+				state.value = result[storageKey]
+			})
 		}
 	})
 

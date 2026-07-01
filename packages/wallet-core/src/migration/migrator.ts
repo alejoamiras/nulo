@@ -54,12 +54,23 @@ const DEFAULT_MAX_RETRIES = 3
 type BackupPayload = { version: number; refs: StorageRef[]; entries: Record<string, unknown> }
 type AttemptRecord = { version: number; phase: "up" | "restore"; count: number }
 
+function isValidRef(r: unknown): r is StorageRef {
+	if (typeof r !== "object" || r === null) return false
+	const ref = r as { kind?: unknown; root?: unknown; key?: unknown }
+	if (ref.kind === "root") return typeof ref.root === "string" && ref.root.length > 0
+	if (ref.kind === "value") return typeof ref.key === "string" && ref.key.length > 0
+	return false
+}
+
+/** Full shape validation: `restore()` trusts these refs to tombstone live keys,
+ *  so a malformed ref array from hostile persisted state must never reach it. */
 function isValidBackup(v: unknown): v is BackupPayload {
 	if (typeof v !== "object" || v === null) return false
 	const b = v as Partial<BackupPayload>
 	return (
 		Number.isInteger(b.version) &&
 		Array.isArray(b.refs) &&
+		b.refs.every(isValidRef) &&
 		typeof b.entries === "object" &&
 		b.entries !== null &&
 		!Array.isArray(b.entries)
@@ -132,13 +143,27 @@ export class Migrator {
 		for (const m of this.migrations) {
 			if (m.version <= from) continue
 			const failure = await this.applyOne(m)
-			if (failure) return failure
+			if (failure) return this.escalateIfLaterPending(failure, m)
 		}
 		// Reach maxVersion even when a baseline floor sits above the last
 		// migration (no bridging migration). Idempotent if already stamped.
 		await this.store.set({ [SCHEMA_VERSION_KEY]: this.maxVersion })
 		await this.store.remove([SCHEMA_ATTEMPTS_KEY, SCHEMA_RUNNING_KEY])
 		return { kind: "migrated", from, to: this.maxVersion }
+	}
+
+	/** `breaking: false` promises the code tolerates THAT migration's old shape —
+	 *  it says nothing about the LATER migrations a failure would leave
+	 *  unapplied (and sequential migrations may depend on the failed one's
+	 *  output). A degraded boot is only sound when the failure is the tail. */
+	private escalateIfLaterPending(failure: MigrationResult, m: Migration): MigrationResult {
+		if (failure.kind !== "failed" || failure.breaking) return failure
+		if (!this.migrations.some((x) => x.version > m.version)) return failure
+		return {
+			...failure,
+			breaking: true,
+			reason: `${failure.reason} (escalated: later migrations remain unapplied behind the failure)`,
+		}
 	}
 
 	private isValidMarker(v: unknown): v is number {
@@ -178,8 +203,11 @@ export class Migrator {
 					retryable: attempts < this.maxRetries,
 				}
 			}
-			await this.store.remove([SCHEMA_BACKUP_KEY, SCHEMA_RUNNING_KEY])
+			// Attempts bump BEFORE the journal clear: a kill between the two must
+			// lose the (idempotently re-doable) clear, never the durable count
+			// that bounds retries.
 			const attempts = await this.bumpAttempts(m.version, "up")
+			await this.store.remove([SCHEMA_BACKUP_KEY, SCHEMA_RUNNING_KEY])
 			return {
 				kind: "failed",
 				version: m.version,
@@ -223,7 +251,19 @@ export class Migrator {
 			return { kind: "needs-recovery", reason: "interrupted migration journal has an invalid backup payload", retryable: false }
 		}
 		const version = j[SCHEMA_VERSION_KEY]
-		if (typeof version === "number" && version >= backup.version) {
+		// An armed journal REQUIRES a numeric version (every path that writes the
+		// journal starts from a validated marker). Missing/corrupt here means
+		// external mutation — restoring and falling through would end at the
+		// fresh-install stamp, laundering hostile state past the fail-closed
+		// marker table. Refuse instead.
+		if (typeof version !== "number") {
+			return {
+				kind: "needs-recovery",
+				reason: `interrupted migration journal with a ${version === undefined ? "missing" : "corrupt"} schema version`,
+				retryable: false,
+			}
+		}
+		if (version >= backup.version) {
 			// The migration committed + stamped before the crash — restoring now
 			// would revert committed data underneath the new version marker.
 			await this.store.remove([SCHEMA_BACKUP_KEY, SCHEMA_RUNNING_KEY])

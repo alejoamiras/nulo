@@ -293,6 +293,26 @@ describe("Migrator — crash-safe journal", () => {
 		expect(store.has(BACKUP_KEY)).toBe(true) // kept for forensics
 	})
 
+	test("a backup with MALFORMED refs fails closed (restore would trust them to tombstone)", async () => {
+		const store = new MemStore()
+			.seed(ver(0))
+			.seed({ [SCHEMA_RUNNING_KEY]: 1, [BACKUP_KEY]: { version: 1, refs: [{ kind: "root" }], entries: {} } })
+		const r = await new Migrator({ store, migrations: [patchRows(1, "acct", {})] }).run()
+		expect(r).toMatchObject({ kind: "needs-recovery", retryable: false })
+	})
+
+	test("an armed journal with a MISSING version fails closed (never restore-then-fresh-stamp)", async () => {
+		// No nulo:schema:version at all, but running + a valid backup: external
+		// mutation. Restoring and falling through would end at the fresh-install
+		// stamp, laundering the state past the marker decision table.
+		const store = new MemStore().seed(row("acct", "a", { n: 5 })).seed(journal(1, [rootRef("acct")], row("acct", "a", { n: 0 })))
+		const r = await new Migrator({ store, migrations: [patchRows(1, "acct", {})] }).run()
+		expect(r).toMatchObject({ kind: "needs-recovery", retryable: false })
+		expect(store.obj("acct", "a")).toEqual({ n: 5 }) // NOT restored
+		expect(store.has(SCHEMA_VERSION_KEY)).toBe(false) // NOT fresh-stamped
+		expect(store.has(BACKUP_KEY)).toBe(true) // journal kept
+	})
+
 	test("restore failure → needs-recovery with BOUNDED retries across boots", async () => {
 		const store = new MemStore()
 			.seed(ver(0))
@@ -464,6 +484,25 @@ describe("Migrator — retry counter", () => {
 		const store = new MemStore().seed(ver(0))
 		const r = await new Migrator({ store, migrations: [additive], maxRetries: 1 }).run()
 		expect(r).toMatchObject({ kind: "failed", breaking: false, terminal: true })
+	})
+
+	test("a non-breaking failure ESCALATES to breaking when later migrations remain pending", async () => {
+		// breaking:false promises tolerance of THIS migration's old shape — not
+		// that v2 (which may depend on v1's output) is safe to leave unapplied.
+		const boom = defineMigration({
+			version: 1,
+			description: "non-breaking fail",
+			breaking: false,
+			reads: [],
+			writes: [],
+			up: async () => {
+				throw new Error("x")
+			},
+		})
+		const store = new MemStore().seed(ver(0))
+		const r = await new Migrator({ store, migrations: [boom, patchRows(2, "acct", {})] }).run()
+		expect(r).toMatchObject({ kind: "failed", breaking: true })
+		expect((r as { reason: string }).reason).toContain("escalated")
 	})
 })
 
