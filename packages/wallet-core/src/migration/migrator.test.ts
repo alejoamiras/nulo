@@ -48,10 +48,10 @@ const patchRows = (version: number, root: string, patch: Record<string, unknown>
 		reads: [{ kind: "root", root }],
 		writes: [{ kind: "root", root }],
 		up: async (ctx) => {
-			const rows = await ctx.local.rows(root)
+			const rows = await ctx.local.rows<Record<string, unknown>>(root)
 			await ctx.local.setRows(
 				root,
-				rows.map(([id, v]) => [id, { ...(v as object), ...patch }]),
+				rows.map(([id, v]) => [id, { ...v, ...patch }]),
 			)
 		},
 	})
@@ -170,10 +170,10 @@ describe("Migrator — crash-safe journal", () => {
 			writes: [{ kind: "root", root: "acct" }],
 			up: async (ctx) => {
 				if (attempt++ === 0) throw new Error("transient")
-				const rows = await ctx.local.rows("acct")
+				const rows = await ctx.local.rows<Record<string, unknown>>("acct")
 				await ctx.local.setRows(
 					"acct",
-					rows.map(([id, v]) => [id, { ...(v as object), x: 1 }]),
+					rows.map(([id, v]) => [id, { ...v, x: 1 }]),
 				)
 			},
 		})
@@ -262,7 +262,8 @@ describe("Migrator — batched diff", () => {
 			reads: [{ kind: "value", key: "nulo:ui:pref" }],
 			writes: [{ kind: "value", key: "nulo:ui:pref" }],
 			up: async (ctx) => {
-				const cur = (await ctx.local.value("nulo:ui:pref")) as { theme: string }
+				const cur = await ctx.local.value<{ theme: string }>("nulo:ui:pref")
+				if (cur === undefined) throw new Error("expected seeded pref")
 				await ctx.local.setValue("nulo:ui:pref", { colorScheme: cur.theme })
 				const readBack = await ctx.local.value("nulo:ui:pref") // read-your-writes
 				expect(readBack).toEqual({ colorScheme: "dark" })
@@ -367,10 +368,10 @@ describe("Migrator — idempotency (run twice ≡ once)", () => {
 			reads: [{ kind: "root", root: "acct" }],
 			writes: [{ kind: "root", root: "acct" }],
 			up: async (ctx) => {
-				const rows = await ctx.local.rows("acct")
+				const rows = await ctx.local.rows<{ tags: number[] }>("acct")
 				await ctx.local.setRows(
 					"acct",
-					rows.map(([id, v]) => [id, { ...(v as { tags: number[] }), tags: [...(v as { tags: number[] }).tags, 1] }]),
+					rows.map(([id, v]) => [id, { ...v, tags: [...v.tags, 1] }]),
 				)
 			},
 		})

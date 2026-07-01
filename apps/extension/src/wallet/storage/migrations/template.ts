@@ -26,10 +26,14 @@ export const exampleMigration = defineMigration({
 	reads: [{ kind: "root", root: "nulo:core:accounts" }],
 	writes: [{ kind: "root", root: "nulo:core:accounts" }],
 	up: async (ctx) => {
-		const rows = await ctx.local.rows("nulo:core:accounts")
-		await ctx.local.setRows(
+		// Declare the PRE-migration shape once via the type parameter. It is an
+		// assertion over untrusted JSON, not a validation — keep field access
+		// guarded (spread + default below is presence-safe and idempotent).
+		type AccountRow = { pinned?: boolean; [k: string]: unknown }
+		const rows = await ctx.local.rows<AccountRow>("nulo:core:accounts")
+		await ctx.local.setRows<AccountRow>(
 			"nulo:core:accounts",
-			rows.map(([id, v]) => [id, { pinned: false, ...(v as object) }]),
+			rows.map(([id, row]) => [id, { pinned: false, ...row }]),
 		)
 	},
 })

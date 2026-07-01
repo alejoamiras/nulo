@@ -25,18 +25,25 @@ export type StorageRef = { kind: "root"; root: string } | { kind: "value"; key: 
 /** The staged data surface a migration's `up()` operates on. Reads see the
  *  pre-migration store overlaid with the migration's own staged writes
  *  (read-your-writes); writes accumulate in a staging buffer that the engine
- *  commits as one batched diff AFTER `up()` succeeds — never mid-migration. */
+ *  commits as one batched diff AFTER `up()` succeeds — never mid-migration.
+ *
+ *  The type parameters are call-site ASSERTIONS, not validations — persisted
+ *  rows are untrusted input, and the engine cannot know their shape. Declare
+ *  the shape you expect (typically the PRE-migration shape for reads), then
+ *  still guard field access (`hasProperty`-style presence checks) exactly as
+ *  `template.ts` shows: a hostile or half-written row must fail the migration
+ *  (fail-closed), not silently produce garbage. */
 export interface MigrationArea {
 	/** All rows of an EntityStorage `root` as `[id, value]`. Raw read — unlike
 	 *  `EntityStorage.getAll`, a malformed row THROWS (fail-closed) rather than
 	 *  being silently dropped, so a migration never loses data unnoticed. */
-	rows(root: string): Promise<Array<[string, unknown]>>
+	rows<T = unknown>(root: string): Promise<Array<[string, T]>>
 	/** Stage upserts (`[id, value]`) and deletes (ids) for a `root`. */
-	setRows(root: string, upserts: Array<[string, unknown]>, deletes?: string[]): Promise<void>
+	setRows<T = unknown>(root: string, upserts: Array<[string, T]>, deletes?: string[]): Promise<void>
 	/** A single value key (parsed), or `undefined` if absent. */
-	value(key: string): Promise<unknown>
+	value<T = unknown>(key: string): Promise<T | undefined>
 	/** Stage a single value write. */
-	setValue(key: string, value: unknown): Promise<void>
+	setValue<T = unknown>(key: string, value: T): Promise<void>
 	/** Stage a single value delete. */
 	deleteValue(key: string): Promise<void>
 }

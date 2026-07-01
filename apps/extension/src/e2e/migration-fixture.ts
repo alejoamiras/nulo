@@ -59,11 +59,11 @@ export const migrationFixture = /* @__PURE__ */ defineMigration({
 		if ((await ctx.local.value(MIGRATION_FIXTURE_BOOM_KEY)) !== undefined) {
 			throw new Error("e2e fixture migration: boom key present")
 		}
-		const rows = await ctx.local.rows(MIGRATION_FIXTURE_ROOT)
-		await ctx.local.setRows(
+		type FixtureRow = { legacyName?: string; name?: string; [k: string]: unknown }
+		const rows = await ctx.local.rows<FixtureRow>(MIGRATION_FIXTURE_ROOT)
+		await ctx.local.setRows<FixtureRow>(
 			MIGRATION_FIXTURE_ROOT,
-			rows.map(([id, v]) => {
-				const row = v as { legacyName?: string; name?: string; [k: string]: unknown }
+			rows.map(([id, row]) => {
 				if (row.legacyName === undefined) return [id, row]
 				const { legacyName, ...rest } = row
 				return [id, { ...rest, name: legacyName }]
