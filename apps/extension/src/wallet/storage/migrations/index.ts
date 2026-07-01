@@ -10,12 +10,18 @@
  * `../../runtime.ts` (before `config.load()`), driven against `chrome.storage.local`.
  */
 import type { Migration } from "@nulo/wallet-core/migration"
+import { E2E_MIGRATION_FIXTURE } from "@/e2e/config"
+import { migrationFixture } from "@/e2e/migration-fixture"
 
 /** The current on-disk shape. Fresh installs stamp this and run nothing. */
 export const BASELINE_VERSION = 1
 
-/** Forward-only, ascending. Empty until the first real schema change ships. */
-export const migrations: Migration[] = []
+/** Forward-only, ascending. Empty until the first real schema change ships.
+ *  The e2e fixture spreads in ONLY on builds stamped with
+ *  `VITE_NULO_E2E_MIGRATION_FIXTURE=1` — `E2E_MIGRATION_FIXTURE` is a
+ *  static-false constant otherwise, so prod builds tree-shake the fixture
+ *  (proof-gate pattern; enforced by the `_build-extension.yml` grep). */
+export const migrations: Migration[] = [...(E2E_MIGRATION_FIXTURE ? [migrationFixture] : [])]
 
 /** Host-level status keys the boot path writes for the UI shells (the engine
  *  doesn't know these). `blocked` ⇒ the shell renders the recovery screen

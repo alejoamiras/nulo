@@ -82,7 +82,7 @@ Live `MigrationContext` (EntityStorage `${root}@` parity, no read-time row-delet
 The migration-aware storage facade routing **every** direct reader (§3.6 list); the biome static ban proving no raw `chrome.storage.local` outside the facade/adapter (+ allowlist); the "Updating…" state; bounded-retry → `breaking`-driven block-with-recovery vs boot-degraded-with-warning.
 **Gate** — `bun run lint && bun run test:components && bun run audit:vue`. Pass: **the static ban fails the build on a raw `chrome.storage.local` outside the facade** (add a deliberate violation in a test fixture, assert lint errors, revert); component tests — set `running` shows "Updating…" + blocks reads; a `breaking` failure renders recovery; an additive failure boots degraded. Layers: typecheck·lint·unit·component·build.
 
-### Phase 4 — Proof: seam + fixture + smoke e2es
+### Phase 4 — Proof: seam + fixture + smoke e2es ✓ COMPLETE
 Build-time-excluded fixture (§3.9) + **four** smoke e2es hitting the real boot path.
 **Gate** — `bun run test:e2e` (selectors by `data-testid` only). Pass: (1) fixture transforms seeded live rows + checkpoints; (2) throwing fixture ⇒ version unadvanced + backup restored + **next-boot retry with a fixed fixture completes + clears backup**; (3) **popup opened mid-migration** shows "Updating…" + no old-shape write-back; (4) **SW killed at each journal kill-point** (running-before-backup, backup-before-write, stamp-before-clear, restore-partial-fail) ⇒ next boot converges correctly. Negative bundle-grep proves the fixture marker absent from `dist/`. Layers: smoke e2e (+ prior green).
 

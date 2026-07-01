@@ -87,7 +87,7 @@ describe("migration-aware storage facade", () => {
 		// First get() sees the marker; the re-check get() must see it gone and
 		// resolve WITHOUT any onChanged event ever firing.
 		let calls = 0
-		s.get.mockImplementation(async (keys?: string | string[]) => {
+		s.get.mockImplementation(async (_keys?: string | string[]) => {
 			calls++
 			if (calls === 1) return { [SCHEMA_RUNNING_KEY]: 1 }
 			return {}
