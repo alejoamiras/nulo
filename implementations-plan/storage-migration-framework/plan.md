@@ -70,7 +70,7 @@ Per-collection version vectors — rejected (§3.1); single-global's safety is l
 
 ## 5. Phases (each gated)
 
-### Phase 1 — Engine (`wallet-core`, pure)
+### Phase 1 — Engine (`wallet-core`, pure) ✓ COMPLETE
 `Migration` type (+ `breaking`, footprint), `Migrator` with the §3.3 journal (running-first, atomic-backup+sentinel, batched-diff+tombstones, stamp, clear; restore-before-retry; resume-on-prep-crash), fail-closed + durable bounded-retry (§3.5), marker validation + decision table (§3.4), injected data-source/backup/version ports, run-twice idempotency harness.
 **Gate** — `bun run --cwd packages/wallet-core typecheck && bun run --cwd packages/wallet-core test src/migration && bun run lint`. Pass: apply-in-order · per-migration checkpoint · throw-at-N keeps 1…N-1 · backup→restore→**retry-forward-succeeds** · restore-failure fails-closed-keeps-backup · resume-on-prep-crash · batched-diff apply + tombstone restore · **every migration twice ≡ once** · marker decision table (fresh / valid / corrupt-fail-closed / stale-fail-closed) · retry-counter durable + outside footprint · injected seam + injected data-source exercised. Biome: no `chrome.*` in `src/migration/`. Layers: typecheck·lint·unit.
 
