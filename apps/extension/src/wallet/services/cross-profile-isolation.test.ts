@@ -24,6 +24,7 @@ import { PROFILE_SERVICE_NAME, type ProfileInfo } from "@/wallet/services/profil
 import { svc } from "./composition-harness"
 import { ContactService } from "./contact/service"
 import { FpcService } from "./fpc/service"
+import { AuthRegistryService } from "./auth-registry/service"
 import { AccountService } from "./account/service"
 import { NetworkService } from "./network/service"
 import { OperationJournalService } from "./operation-journal/service"
@@ -209,11 +210,10 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 			await seedRepo.set(mkBalance(20, 2, "0xp2acct"))
 		})
 
-		test.fails("(LEAK #1 — fixed R1.5) backup() must return only the active profile's balances", async () => {
-			// Today backup() returns repo.getAll() (ALL profiles) — a plaintext
-			// cross-profile leak in the export artifact. This test.fails passes now
-			// (documenting the leak) and FLIPS to `test` when R1.5 filters export by
-			// tokenService.getTokensRaw(profile.id).
+		test("(LEAK #1 — CLOSED R1.5) backup() returns only the active profile's balances", async () => {
+			// R1.5 scopes the export to balances whose token is owned by the active
+			// profile (via tokenService.getTokensRaw), so p2's balance (token 2) no
+			// longer leaks into p1's plaintext backup artifact.
 			const backup = await tbal.backup()
 			expect(backup.map((b) => b.id)).toEqual([10])
 		})
@@ -271,6 +271,34 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 
 		test("getNetwork(foreignId) rejects a p2 network while p1 active", async () => {
 			await expect(network.getNetwork("net-p2")).rejects.toThrow(/invalid id/i)
+		})
+	})
+
+	describe("auth-registry — revokeAuthwits account-scoped (gap #3, closed R1.5)", () => {
+		let profile: FakeProfileService
+		let authRegistry: AuthRegistryService
+
+		beforeEach(async () => {
+			profile = new FakeProfileService()
+			profile.setActiveProfile(p1)
+			const services = new ServiceCollection()
+			services.add(profile)
+			services.add(svc(NetworkService.name, {}))
+			services.add(svc(AccountService.name, { onAccountDeleted: new EventHandler() }))
+			services.add(svc(ExecutionService.name, {}))
+			services.add(svc(TransactionService.name, { onTransactionUpdated: new EventHandler() }))
+			services.add(svc(TaskService.name, {}))
+			authRegistry = new AuthRegistryService(mkLogger(), api)
+			services.add(authRegistry)
+			await services.start()
+			// An authwit owned by account 0xACCT-P2 (a different account than the caller).
+			await seedRow(api, "nulo:core:auth-registry", "5", { id: 5, account: "0xACCT-P2", hash: "0xhash" })
+		})
+
+		test("revokeAuthwits(otherAccount, [foreignId]) rejects a different account's authwit", async () => {
+			// gap#3: without the account check, a caller passing a foreign authwit id could
+			// revoke another account's authwit. Now it's treated as "doesn't exist".
+			await expect(authRegistry.revokeAuthwits("net", "0xACCT-P1", [5], {} as never)).rejects.toThrow(/doesn't exist/i)
 		})
 	})
 })
