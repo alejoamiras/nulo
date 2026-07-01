@@ -141,4 +141,85 @@ describe("EntityStorage", () => {
 			expect(await storage.contains("bad2")).toBe(false)
 		})
 	})
+
+	/**
+	 * Injected boundary codec: the deliberate split between JSON-SYNTAX failure
+	 * (drop the row, legacy) and CODEC-VALIDATION failure (KEEP the row — never
+	 * silently delete present-but-unreadable data). Guards the mega-deep trap
+	 * where a stricter codec turns a valid-but-drifted row into permanent loss.
+	 */
+	describe("injected codec (validation split)", () => {
+		let errorSpy: ReturnType<typeof vi.spyOn>
+		const userParse = (raw: unknown): User => {
+			if (
+				typeof raw === "object" &&
+				raw !== null &&
+				typeof (raw as User).name === "string" &&
+				typeof (raw as User).age === "number"
+			) {
+				return raw as User
+			}
+			throw new Error("invalid User shape")
+		}
+
+		beforeEach(() => {
+			errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		})
+		afterEach(() => errorSpy.mockRestore())
+
+		test("a valid row passes the injected parse unchanged", async () => {
+			const s = new EntityStorage<User>("users", api.storage.local, userParse)
+			await s.set("alice", { name: "Alice", age: 30 })
+			expect(await s.get("alice")).toEqual({ name: "Alice", age: 30 })
+		})
+
+		test("VALIDATION failure KEEPS the row (never deletes) + returns undefined + logs", async () => {
+			const removeSpy = vi.spyOn(api.storage.local, "remove")
+			const s = new EntityStorage<User>("users", api.storage.local, userParse)
+			// Well-formed JSON, wrong shape (age missing) → validation fails, NOT a syntax error.
+			await api.storage.local.set({ "users@drifted": JSON.stringify({ name: "NoAge" }) })
+			expect(await s.get("drifted")).toBeUndefined()
+			await Promise.resolve()
+			// The row is KEPT — the opposite of the syntax-drop path — so a repair
+			// path can still recover it. This is the silent-data-loss guard.
+			expect(await s.contains("drifted")).toBe(true)
+			expect(removeSpy).not.toHaveBeenCalled()
+			expect(errorSpy.mock.calls.some((c) => String(c[0]).includes("failed validation"))).toBe(true)
+			removeSpy.mockRestore()
+		})
+
+		test("getAll / getValues skip a validation-failing row WITHOUT deleting it", async () => {
+			const removeSpy = vi.spyOn(api.storage.local, "remove")
+			const s = new EntityStorage<User>("users", api.storage.local, userParse)
+			await s.set("alice", { name: "Alice", age: 30 })
+			await api.storage.local.set({ "users@drifted": JSON.stringify({ name: "NoAge" }) })
+			expect((await s.getValues()).map((u) => u.name)).toEqual(["Alice"])
+			expect((await s.getAll()).map(([id]) => id)).toEqual(["alice"])
+			await Promise.resolve()
+			expect(await s.contains("drifted")).toBe(true)
+			expect(removeSpy).not.toHaveBeenCalled()
+			removeSpy.mockRestore()
+		})
+
+		test("JSON-SYNTAX failure still DROPS the row even with an injected parse (syntax != validation)", async () => {
+			const removeSpy = vi.spyOn(api.storage.local, "remove")
+			const s = new EntityStorage<User>("users", api.storage.local, userParse)
+			await api.storage.local.set({ "users@corrupt": "{not json" })
+			expect(await s.get("corrupt")).toBeUndefined()
+			await Promise.resolve()
+			expect(removeSpy).toHaveBeenCalledWith("users@corrupt")
+			removeSpy.mockRestore()
+		})
+
+		test("write→read round-trip corpus: every shape the app writes survives the codec", async () => {
+			const s = new EntityStorage<User>("users", api.storage.local, userParse)
+			const corpus: Array<[string, User]> = [
+				["min", { name: "", age: 0 }],
+				["typical", { name: "Alice", age: 30 }],
+				["big", { name: "x".repeat(1000), age: Number.MAX_SAFE_INTEGER }],
+			]
+			for (const [id, u] of corpus) await s.set(id, u)
+			for (const [id, u] of corpus) expect(await s.get(id)).toEqual(u)
+		})
+	})
 })
