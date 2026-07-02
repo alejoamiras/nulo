@@ -108,6 +108,8 @@ When a release changes the shape of a persisted `chrome.storage.local` record (a
 
 A throw never advances the version; the next boot **restores the backup, then retries** (a durable, footprint-excluded attempt counter bounds retries). Interrupted boots converge: `running` + valid backup ⇒ restore-then-rerun; `running` without a backup ⇒ the crash predated any write. The marker decision table fails closed: a corrupt/out-of-range version — or the legacy `nulo:core:storage-version` key without a schema version — refuses to guess (`needs-recovery`), never init-and-skip. Fresh installs stamp the max version and run nothing.
 
+**Pre-production rule**: while the wallet has no production users, shape changes do NOT get migrations — the launch baseline absorbs them and devs reinstall fresh (see CLAUDE.md § Persisted-storage shape changes for the full rule and its flip-at-launch).
+
 **The registry** — `apps/extension/src/wallet/storage/migrations/` (baseline v1; copy `template.ts` to add `NNN-*.ts`, declare the exact read/write footprint, keep `up` idempotent — the harness runs every migration twice — and set `breaking: false` only if the new code genuinely tolerates the old shape). The migrator runs in `runtime.ts` as the FIRST storage action — before `config.load()`, so a config-reshaping migration can't be shadowed by an already-loaded config.
 
 **Failure UX**: a breaking failure (or `needs-recovery`) persists `nulo:schema:blocked` and refuses to start services — `MigrationBarrier.vue` (both shells) renders a funds-are-safe recovery screen. An additive failure persists `nulo:schema:degraded` and boots with a dismissible warning. Healthy boots clear both.
