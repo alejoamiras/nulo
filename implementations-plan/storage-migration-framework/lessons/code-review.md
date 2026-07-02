@@ -41,3 +41,7 @@ Two zero-context auditors, primed with the fixed ledger to hunt beyond it. They 
 - **[fable Low, adopted] workflow env coupling single-sourced** (`MIGRATION_FIXTURE_ARMED`).
 - **Accepted as tracked follow-ups** (both auditors' explicit non-blockers): up()-hang watchdog (M2), cross-code-version retry-budget nuance (L1), re-execution of terminally-blocked migrations per boot (L2), facade not gating on `blocked` (L3), MemStore's all-or-nothing set vs chrome's partial-set reality (L5), non-vacuous-test enforcement for future migrations (L6).
 Engine tests 37 → 40; registry structural 3 → 5; ban 5 → 6.
+
+## Fresh-round confirmations (final)
+- **fable (max, fresh→resumed): `approve`** — verified the journal-preservation fix (282f9e7), independently confirmed its OWN suggested remedy would have leaked via the orphan-sweep, and endorsed the clear-nothing/single-owner-resume design as strictly better. All prior follow-ups remain tracked non-blockers.
+- **codex (fresh): `approve`** at 1e8219b; final confirmation on 282f9e7 recorded below when returned.
