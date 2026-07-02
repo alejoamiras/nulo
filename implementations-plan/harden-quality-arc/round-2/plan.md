@@ -2,6 +2,10 @@
 
 **Goal:** on the SAME `dev-quality` branch (promote PR #220 stays open + grows), land the parts round-1 deliberately deferred, so the owner QAs and merges **one complete quality arc** into `dev`. Round-1 landed 21/22 findings + the P21 finale; round-2 finishes Q-13, a real backup leak, and the five documented follow-ons.
 
+> **✅ ROUND-2 COMPLETE — R0..R7 ALL DONE (dev-quality HEAD `2f6c120`, code `2f3d9d4`).** All phases merged via gated PRs #227–#245; final integrated sweep GREEN; both hostile confidence passes SHIP-WITH-NOTES; WRAP-UP/eli5 refreshed. **STOPPED for owner** — #220 carries rounds 1+2 and is OPEN, NOT merged (the arc never merges it). Owner action items in the R7 section + WRAP-UP §Round-2.
+>
+> `R0 ✓  R1.0–R1.5 ✓  R1.4b ✓  R2 ✓  R3(a+b) ✓  R4 ✓  R5(a+b) ✓  R6 ✓  R6.5 ✓  R7 ✓ → STOP`
+
 **Owner decisions locked (this conversation):**
 1. **Do NOT merge #220 yet** — owner manual-QAs the whole change; round-2 accumulates onto `dev-quality`; owner merges at the end.
 2. **Q-13: BUILD** the dedup (owner: "I hate duplicated code"). **Ownership guards approved** (close the by-id gaps fail-closed).
@@ -88,8 +92,17 @@ Add per-method arg schemas → new `MethodDescriptor` fields → **edit the froz
 6. **⚠ opus-HIGH — `argSchema?` MUST be optional + model existing optionality EXACTLY.** If the new field is required, all ~19 rows must be edited → breaks the "FROZEN_* rows byte-identical" claim. It stays **optional** (rows without it are untouched). And many methods legitimately take **optional trailing args** — `registerSender` alias `args[1] as string|undefined` (`:1134`); `simulateTx`/`profileTx`/`executeUtility`/`sendTx` opts `(args[1] as …) ?? {}` (`:569,1172,1181,1191`) — so a schema that's stricter than today's tolerance breaks real dApps. Model optionality exactly (opt-trailing allowed, absent = ok). **The adversarial-bypass suite + dispatcher tests are the proof of arg-safety — the oracle diff only proves the authz MAPS are unchanged, which is necessary but NOT sufficient.** Pin: coerced/rest/loose-arity/wrong-batch-leg/over-strict-optional args are all REJECTED-or-tolerated exactly as today.
 **Gate:** the edited oracle GREEN (diff surfaced) + adversarial-bypass suite (incl. all arg-safety pins) + dispatcher tests + units + smoke + FULL network.
 
-### R7 — Final sweep + hand to owner (finale, NO autonomous merge)
+### R7 — Final sweep + hand to owner (finale, NO autonomous merge) — ✓ DONE, STOPPED FOR OWNER
 Full-network sweep on the final `dev-quality` HEAD; codex + fresh-opus confidence pass (adversarial); refresh `../WRAP-UP.md` + `../eli5.html` to cover round-1 **and** round-2; #220 now carries the whole arc. **STOP — owner manual-QAs and merges** (hard limit).
+
+**✓ COMPLETE (dev-quality code HEAD `2f3d9d4`; docs-on-top HEAD `2f6c120`).**
+- **Integrated full-network sweep on `2f3d9d4`: GREEN** — quality `28554414288` · smoke `28554415303` · network `28554416304`. (WRAP-UP/eli5 are docs-only commits on top, so swept code = promoted code — the round-1 pattern.)
+- **Confidence, both legs → SHIP-WITH-NOTES.** codex `019f1fe5`: BLOCK→revised (the two "cross-profile" HIGHs are first-party-only / not dApp-reachable — verified; round 2 introduced no new dApp-reachable exposure) — `audit-codex.md`. Fresh-Fable: SHIP-WITH-NOTES, converged with codex + caught ONE actionable arc side-effect → **fixed in R6.5/#245** (`getTokenBalances` skips a foreign/hidden-token row instead of white-screening) — `audit-fable.md`.
+- **WRAP-UP.md + eli5.html refreshed** to cover round-1 **and** round-2 (`b6152b9`, `2f6c120`).
+- **Round-2 invariants mechanically verified** (`dc2a03e..f636f6c`): `scope-enforcement.test.ts` + `key-vectors.test.ts` byte-identical; `method-descriptors.test.ts` ZERO deletions (R6 ADD-only); enforcement runtime absent from the diff.
+- **STOPPED. Owner manual-QAs + merges #220** (hard limit — the arc never merges `dev-quality → dev`).
+
+**Owner action items (all in WRAP-UP.md §Round-2):** (1) #220 is RED on commitlint — one 138-char body line in `c8c80ae`; reword+force-push (owner-gated history rewrite) OR `--admin` the squash (clean — the overage never lands on `dev`). (2) 1Password agent went down mid-round-2 → a handful of unsigned dev-quality commits; the squash is web-flow-signed regardless. (3) Review the R6 oracle diff in #244's PR body. (4) The Q-13 residual first-party by-id/arg-scoped hardening is the natural **round-3** candidate — pre-existing, not dApp-reachable, owner-gated.
 
 > **⚠ R7 PREREQUISITE — #220 promote is RED on `Commitlint`.** CI lints the whole range (`commitlint --from BASE --to HEAD`, NOT skipped on PRs to `dev` — only PRs to `main` are exempt). Scanned the full 95-commit range `8e919f6..dev-quality` (2026-07-01): **zero** over-length subjects; **exactly one** over-length body line — the 138-char line in `c8c80ae` (#233, network R1.3b). That single line is the entire blocker. **Fix = reword only `c8c80ae`'s body** (reflow the `(getNetwork/renameNetwork/…)` line to ≤100). This is a **history rewrite** of `dev-quality` (force-push) that re-SHAs every descendant (R1.4a `5e61a3a`, R1.5 `9e39ebb`, all docs commits) → **owner-gated** (autonomous hard limit on history rewrites of a branch the owner touches) and churns recorded SHAs. **Owner's choice at R7:** (a) I reword+force-push with your OK then update recorded SHAs, or (b) `--admin` the promote — legitimate here because dev-quality→dev is a **squash** merge, so the final `dev` commit uses #220's own (clean) title/body and the 38-char overage never lands. Every round-2 squash body since has been kept lint-clean; keep doing so.
 
