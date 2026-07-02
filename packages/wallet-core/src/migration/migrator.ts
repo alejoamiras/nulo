@@ -109,21 +109,17 @@ export class Migrator {
 	/** Drive persisted storage to the current max version. Idempotent + crash-safe.
 	 *  NEVER throws: the host writes the recovery UX off the RETURN value, so a
 	 *  thrown storage exception (disk-full, internal chrome.storage error) would
-	 *  be the one failure class with no defined recovery — and could strand the
-	 *  `running` barrier as a permanent "Updating" overlay. Any unexpected throw
-	 *  becomes a retryable `needs-recovery` with the barrier cleared. Safe
-	 *  because every committing step already journals first: a throw outside the
-	 *  per-migration try can only come from the reads, the barrier set, or the
-	 *  backup set — none of which have touched user data yet. */
+	 *  be the one failure class with no defined recovery. The catch deliberately
+	 *  clears NOTHING — a throw can escape the RESUME path while an armed backup
+	 *  is load-bearing, and deleting it here would destroy the only copy of the
+	 *  pre-migration state. The resume matrix owns journal cleanup and converges
+	 *  every stranded shape on the next boot (running-without-backup is cleared,
+	 *  an armed backup restores or completes); this session the host's blocked
+	 *  status outranks the updating overlay, so no silent wedge either. */
 	async run(): Promise<MigrationResult> {
 		try {
 			return await this.runInner()
 		} catch (err) {
-			try {
-				await this.store.remove([SCHEMA_BACKUP_KEY, SCHEMA_RUNNING_KEY])
-			} catch {
-				// Storage is failing wholesale; the next boot's resume converges.
-			}
 			return {
 				kind: "needs-recovery",
 				reason: `unexpected storage failure during migration: ${message(err)}`,

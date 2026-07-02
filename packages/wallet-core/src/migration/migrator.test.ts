@@ -11,6 +11,10 @@ class MemStore implements MinimalStorageArea {
 	failSetKeys?: Set<string>
 
 	async get(keys?: string | string[]): Promise<Record<string, unknown>> {
+		if (this.failNextGet) {
+			this.failNextGet = false
+			throw new Error("injected get failure")
+		}
 		if (keys === undefined) return Object.fromEntries(this.data)
 		const arr = Array.isArray(keys) ? keys : [keys]
 		const out: Record<string, unknown> = {}
@@ -24,6 +28,8 @@ class MemStore implements MinimalStorageArea {
 	/** If set, `remove()` throws when it would delete any of these keys ONCE
 	 *  (simulates a transient storage failure in journal cleanup). */
 	failRemoveKeysOnce?: Set<string>
+	/** If true, the next `get()` throws (simulates a read failure at boot). */
+	failNextGet = false
 
 	async remove(keys: string | string[]): Promise<void> {
 		const arr = Array.isArray(keys) ? keys : [keys]
@@ -380,13 +386,19 @@ describe("Migrator — crash-safe journal", () => {
 })
 
 describe("Migrator — run() never throws (unstructured storage failures)", () => {
-	test("a failing BACKUP write becomes a retryable needs-recovery with the barrier cleared (no wedge, no oscillating silent boot)", async () => {
+	test("a failing BACKUP write becomes a retryable needs-recovery; the stranded barrier self-heals next boot", async () => {
 		const store = new MemStore().seed(ver(0)).seed(row("acct", "a", { n: 0 }))
 		store.failSetKeys = new Set([BACKUP_KEY])
-		const r = await new Migrator({ store, migrations: [patchRows(1, "acct", { x: 1 })] }).run()
+		const mk = () => new Migrator({ store, migrations: [patchRows(1, "acct", { x: 1 })] })
+		const r = await mk().run()
 		expect(r).toMatchObject({ kind: "needs-recovery", retryable: true })
-		expect(store.has(SCHEMA_RUNNING_KEY)).toBe(false) // barrier NOT stranded
 		expect(store.obj("acct", "a")).toEqual({ n: 0 }) // untouched
+		// The catch clears NOTHING (an armed backup could be load-bearing on the
+		// resume path); the stranded running-without-backup converges next boot.
+		store.failSetKeys = undefined
+		const r2 = await mk().run()
+		expect(r2).toEqual({ kind: "migrated", from: 0, to: 1 })
+		expect(store.obj("acct", "a")).toEqual({ n: 0, x: 1 })
 	})
 
 	test("a failing BARRIER write becomes a retryable needs-recovery", async () => {
@@ -394,6 +406,25 @@ describe("Migrator — run() never throws (unstructured storage failures)", () =
 		store.failSetKeys = new Set([SCHEMA_RUNNING_KEY])
 		const r = await new Migrator({ store, migrations: [patchRows(1, "acct", {})] }).run()
 		expect(r).toMatchObject({ kind: "needs-recovery", retryable: true })
+	})
+
+	test("a throw escaping the RESUME path never deletes the load-bearing backup", async () => {
+		// Armed journal needing restore (torn footprint from a prior crash), and
+		// the resume's own read throws: the catch-all must leave the journal
+		// intact — clearing it would destroy the only copy of the pre-state.
+		const store = new MemStore()
+			.seed(ver(0))
+			.seed(row("acct", "a", { n: 0, torn: true }))
+			.seed(journal(1, [rootRef("acct")], row("acct", "a", { n: 0 })))
+		store.failNextGet = true
+		const mk = () => new Migrator({ store, migrations: [patchRows(1, "acct", { x: 1 })] })
+		const r = await mk().run()
+		expect(r).toMatchObject({ kind: "needs-recovery", retryable: true })
+		expect(store.has(BACKUP_KEY)).toBe(true) // load-bearing backup KEPT
+		// Storage heals → the next boot restores the pre-state and re-runs.
+		const r2 = await mk().run()
+		expect(r2).toEqual({ kind: "migrated", from: 0, to: 1 })
+		expect(store.obj("acct", "a")).toEqual({ n: 0, x: 1 }) // torn state gone
 	})
 
 	test("a cleanup failure AFTER the stamp is SUCCESS — never a restore under the stamped version", async () => {
