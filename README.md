@@ -30,25 +30,25 @@ What's still in flight is tracked in [`implementations-plan/`](./implementations
 
 ```bash
 bun install
-bun run build                 # Chrome build → packages/extension/dist/chrome/
+bun run build                 # Chrome build → apps/extension/dist/chrome/
 ```
 
-Then load `packages/extension/dist/chrome/` as an unpacked extension at `chrome://extensions` (Developer mode → Load unpacked).
+Then load `apps/extension/dist/chrome/` as an unpacked extension at `chrome://extensions` (Developer mode → Load unpacked).
 
-For Firefox, `bun run build:firefox` → `packages/extension/dist/firefox/`.
+For Firefox, `bun run build:firefox` → `apps/extension/dist/firefox/`.
 
 ## Monorepo
 
 | Package | Purpose |
 |---|---|
-| [`@nulo/extension`](./packages/extension/) | The Chrome/Firefox MV3 extension — service worker, popup UI, content script, offscreen PXE host. |
+| [`@nulo/extension`](./apps/extension/) | The Chrome/Firefox MV3 extension — service worker, popup UI, content script, offscreen PXE host. |
 | [`@nulo/wallet-bridge`](./packages/wallet-bridge/) | dApp-facing dispatcher: `@aztec/wallet-sdk` capability map, scope enforcement. |
 | [`@nulo/aztec-runtime`](./packages/aztec-runtime/) | PXE lifecycle, `NuloAccount` adapter, class-id verification, payload chunking. |
 | [`@nulo/extension-messaging`](./packages/extension-messaging/) | Typed RPC plumbing across service worker, popup, and offscreen. |
 | [`@nulo/wallet-crypto`](./packages/wallet-crypto/) | Password + passkey KDF, `PasswordSecretBox`, derivation chain (vector-locked). |
 | [`@nulo/wallet-core`](./packages/wallet-core/) | Pure ports + utilities. No `chrome.*`; no I/O. Foundation of the layer hierarchy. |
-| [`@nulo/playground`](./packages/playground/) | Test dApp the network e2e suite drives end-to-end. |
-| [`@nulo/landing`](./packages/landing/) | Marketing landing page. |
+| [`@nulo/playground`](./apps/playground/) | Test dApp the network e2e suite drives end-to-end. |
+| [`@nulo/landing`](./apps/landing/) | Marketing landing page. |
 
 The package layer hierarchy (`wallet-core` → … → `extension`) is enforced via biome `noRestrictedImports`. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full picture.
 
@@ -56,7 +56,7 @@ The package layer hierarchy (`wallet-core` → … → `extension`) is enforced 
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — process boundaries, message flow, storage versioning, offscreen lifecycle, session model, concurrency, account contract, test taxonomy.
 - Each `packages/<name>/README.md` — purpose, file map, scripts, testing, key invariants.
-- [`packages/extension/tests/e2e/README.md`](./packages/extension/tests/e2e/README.md) — e2e suite layout, parallel-safe agent runner.
+- [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md) — e2e suite layout, parallel-safe agent runner.
 - [`implementations-plan/README.md`](./implementations-plan/README.md) — what the planning archive is, when to add to it, the milestone-vocabulary key.
 - [`CLAUDE.md`](./CLAUDE.md) — operating rules for AI assistants working in this repo (layer model, SFC ordering, cleanup order, comment style).
 

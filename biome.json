@@ -1,9 +1,18 @@
 {
-	"$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+	"$schema": "https://biomejs.dev/schemas/2.5.0/schema.json",
 	"vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "dev" },
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["packages/**", "!**/node_modules", "!**/dist", "!**/target", "!**/packages/extension/src/types"]
+		"includes": [
+			"apps/**",
+			"packages/**",
+			"!**/node_modules",
+			"!**/dist",
+			"!**/target",
+			"!**/*.svg",
+			"!**/apps/extension/src/types",
+			"!**/apps/faucet/src/types"
+		]
 	},
 	"formatter": {
 		"enabled": true,
@@ -20,11 +29,12 @@
 	"linter": {
 		"enabled": true,
 		"rules": {
-			"recommended": true,
+			"preset": "recommended",
 			"style": {
 				"noNonNullAssertion": "off",
 				"noParameterAssign": "off",
-				"useEnumInitializers": "off"
+				"useEnumInitializers": "off",
+				"useVueMultiWordComponentNames": "off"
 			},
 			"performance": {
 				"noDelete": "info",
@@ -298,9 +308,9 @@
 		},
 		{
 			"includes": [
-				"packages/extension/src/components/core/**",
-				"packages/extension/src/components/ui/**",
-				"packages/extension/src/components/composite/**"
+				"apps/extension/src/components/core/**",
+				"apps/extension/src/components/ui/**",
+				"apps/extension/src/components/composite/**"
 			],
 			"linter": {
 				"rules": {
@@ -333,7 +343,7 @@
 			}
 		},
 		{
-			"includes": ["packages/extension/src/popup/components/modules/**"],
+			"includes": ["apps/extension/src/popup/components/modules/**"],
 			"linter": {
 				"rules": {
 					"style": {
@@ -357,7 +367,7 @@
 			}
 		},
 		{
-			"includes": ["packages/extension/src/onboarding/**"],
+			"includes": ["apps/extension/src/onboarding/**"],
 			"linter": {
 				"rules": {
 					"style": {

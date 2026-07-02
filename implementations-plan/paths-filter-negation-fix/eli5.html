@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — CI behavior-gating</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .tag { display: inline-block; font-size: 0.75rem; background: #eee; border-radius: 3px; padding: 0.1rem 0.4rem; margin-left: 0.3rem; vertical-align: middle; }
+  </style>
+</head>
+<body>
+  <h1>Run each CI suite when its thing's behavior could change — derived from the dependency graph</h1>
+  <p>
+    The rules that decide "should this PR run smoke / network e2e / the chrome / firefox / faucet build" are
+    hand-written lists of folders, and across the <em>whole repo</em> they've drifted from reality in two
+    opposite directions: they fire on <em>everything</em> (even a doc-only PR, via a broken exclusion trick)
+    <strong>and</strong> they miss real things — a change to <code>wallet-core</code> <strong>does not run
+    network e2e today</strong>, and a change to <code>bridge-core</code> <strong>doesn't rebuild the
+    faucet</strong>. The fix: stop hand-listing folders. Derive each rule from the <em>dependency graph</em> —
+    run a suite/build whenever any package its target is built from changes — and add a test (that actually
+    runs in CI) so the lists can never silently drift again. One honest caveat the audits insisted on: this
+    errs toward <em>running</em> — e.g. editing only a unit test or a Storybook story will still run the heavy
+    suites (see the decision below).
+  </p>
+
+  <h2>Why this tier <span class="tag">light</span></h2>
+  <p>
+    It's a contained rewrite of two (maybe three) filter blocks plus one guard test. The one real danger —
+    a behavior change silently skipping a <em>required</em> suite — is handled two ways: the rule is
+    <em>computed</em> from the dependency graph instead of typed by hand, and a test fails CI if a package
+    gets added without being gated. The footgun mechanics are already proven in the throwaway repo.
+  </p>
+
+  <h2>The idea</h2>
+  <p>
+    The extension is built from 7 packages: itself plus
+    <code>aztec-runtime, design, extension-messaging, wallet-bridge, wallet-core, wallet-crypto</code>
+    (that's the full chain of "things it imports"). So the rule becomes: <strong>run the suites if any of
+    those 7 packages' source changed.</strong> We write it as one line per package —
+    <code>packages/&lt;pkg&gt;/src/**</code> — with <strong>no</strong> backwards <code>!</code> exclusion lines
+    (those caused the original bug). One honesty note the audit insisted on: <code>src/**</code> excludes the
+    <em>common</em> docs (each package's top-level <code>README</code>, the plan files), but a stray doc that
+    happens to live <em>inside</em> a source folder will still trigger a run. That's on purpose — we'd rather
+    occasionally run a suite we didn't strictly need than ever <em>skip</em> one we did. The rule errs toward
+    running, never toward skipping. Then a tiny test reads the extension's dependencies and checks each one
+    (plus the patches, the test harness, the playground) is gated — so the list can't silently rot again.
+  </p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1 — Rewrite the rules from the graph</h3>
+    <p>Replace the curated folder lists in the smoke + network (+ the build-skip) filters with one
+      <code>src/**</code> line per graph package, plus the build inputs and each suite's own test/harness
+      files. Zero <code>!</code> exclusion lines left anywhere.</p>
+    <p class="muted">Proves itself by: actionlint green + a grep for <code>'!</code> in the workflows returns nothing.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2 — Add the anti-drift guard test</h3>
+    <p>A small test reads the extension's dependency graph and asserts every package in it has a
+      <code>src/**</code> rule in the smoke + network filters. If a future dependency isn't gated, this test
+      fails — so the list can't silently rot like it just did.</p>
+    <p class="muted">Proves itself by: the test passes now, and deleting a package's line makes it fail.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3 — Prove it on real PRs</h3>
+    <p>Throwaway PRs reading the "Detect changes" outputs: a doc/plan-only PR → both suites skip; a PR touching
+      <em>each</em> of the 7 packages (especially the 3 that network was missing) → both fire; a package
+      <code>README.md</code> PR → both skip (docs correctly excluded).</p>
+    <p class="muted">Proves itself by: skip on docs, fire on every behavior package, skip on a package README.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4 — Write down the principle</h3>
+    <p>A note in <code>CI.md</code>: the e2e gates come from the dependency graph, src-scoped; never add a bare
+      <code>!</code> exclusion; the guard test enforces coverage.</p>
+    <p class="muted">Proves itself by: the brand/path guard is clean and the note is next to the filters.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>
+    This came out of the required-check work: once smoke became a <em>required</em> gate, the broken filter
+    started actually blocking PRs (a doc-only change caught a smoke flake). Digging in showed the lists were
+    both over- and under-firing. You asked for the principled version: gate on "what can change the
+    extension's behavior" = its dependency graph, excluding docs. The bonus is it fixes a real hole —
+    network e2e silently not running on the core wallet packages.
+  </p>
+
+  <h2>The one real decision for you</h2>
+  <ul>
+    <li><strong>Should editing only a unit-test or a Storybook story run the heavy e2e suites?</strong> Because
+      those test/story files live <em>inside</em> <code>src/</code> (there are ~332 of them), gating on
+      <code>src/**</code> means a test-only PR will run smoke + the 25-minute network suite. That's the
+      <em>safe</em> direction (better to over-run than miss a real change), and it's the simple option I
+      recommend now. The alternative is a fancier pattern that excludes <code>*.test</code>/<code>*.stories</code>
+      — tighter, but trickier, and I'd want to prove it in the throwaway repo first (like I did the original
+      bug). <strong>Accept the over-run, or have me build + prove the tighter version?</strong></li>
+  </ul>
+
+  <h2>What the audits already resolved</h2>
+  <ul>
+    <li>Five real holes I'd have shipped, now closed: dependency <strong>patches</strong>, the
+      <strong>playground</strong> build config, the <strong>test harness</strong>, the <strong>faucet</strong>
+      build's missing packages, and — caught by the independent reviewer — <strong>the guard test would never
+      have run in CI</strong> (so a future drift would've merged green). All fixed.</li>
+    <li><strong>Landing</strong> turned out to be a "dead" rule — its filter exists but nothing uses it — so we
+      just remove its broken line and don't pretend to gate it.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li><strong>Approach:</strong> derive the gates from the dependency graph, src-scoped (no <code>!</code>
+        exclusions), + a guard test. Confirm.</li>
+      <li><strong>Tier:</strong> <code>light</code>. Confirm or override.</li>
+      <li><strong>Scope:</strong> smoke + network for sure — also fix <code>pr-quick</code>'s build-skip filters
+        in the same PR, or defer them? (Same bug.)</li>
+      <li><strong>Smoke + network stay required.</strong> Confirm.</li>
+      <li><strong>Validation:</strong> guard test + live throwaway PRs (docs skip, every behavior package fires,
+        package README skips). Confirm.</li>
+    </ul>
+  </div>
+
+  <div class="seeds">
+    <h2>Implementation seeds <span class="tag">DRAFT — finalized after approval</span></h2>
+    <p class="warning">Use exactly one of these per session — they don't compose.</p>
+    <h3>/goal <span class="tag">Recommended for this plan</span></h3>
+    <pre>/goal Re-gate smoke + network e2e on the extension dependency graph per
+implementations-plan/paths-filter-negation-fix/plan.md. Done = (1) smoke-surface + extension-network
+(+ pr-quick build flags if in scope) rewritten to one `packages/<pkg>/src/**` line per extension graph
+package {extension,aztec-runtime,design,extension-messaging,wallet-bridge,wallet-core,wallet-crypto} +
+build inputs + each suite's harness/workflow files, ZERO `!` negations, lint:actions green; (2) a bun:test
+guard asserts every graph package is gated (fails if a dep is added ungated); (3) live proof on dev:
+a doc/plan PR skips both suites, a PR per behavior package (esp. wallet-core/crypto/messaging) fires both,
+a package README PR skips; (4) CI.md documents the principle. Never let a behavior change skip a required
+suite. Each phase's plan.md gate passes before done.</pre>
+  </div>
+
+  <hr style="margin-top:3rem; border:none; border-top:1px solid #eee;">
+  <p class="muted">Full plan: <a href="plan.md">plan.md</a> · Logs: <code>./lessons/phase-N.md</code></p>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{
+	"name": "@nulo/playground",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"preview": "vite preview",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@aztec/aztec.js": "5.0.0-rc.2",
+		"@aztec/bb.js": "5.0.0-rc.2",
+		"@aztec/foundation": "5.0.0-rc.2",
+		"@aztec/noir-acvm_js": "5.0.0-rc.2",
+		"@aztec/noir-noirc_abi": "5.0.0-rc.2",
+		"@aztec/stdlib": "5.0.0-rc.2",
+		"@aztec/wallet-sdk": "5.0.0-rc.2",
+		"@alejoamiras/aztec-standards": "5.0.0-rc.2",
+		"zod": "^4.4.3"
+	},
+	"devDependencies": {
+		"typescript": "^6.0.3",
+		"vite": "^8.0.16",
+		"vite-plugin-node-polyfills": "^0.28.0"
+	}
+}

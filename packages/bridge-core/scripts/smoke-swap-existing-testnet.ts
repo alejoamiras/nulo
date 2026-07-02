@@ -29,7 +29,7 @@ import { FeeJuiceContractArtifact } from "@aztec/noir-contracts.js/FeeJuice"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveSigningKey } from "@aztec/stdlib/keys"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
 import { type Abi, createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { bridgeProxyArtifact, tokenBridgeArtifact } from "../src/artifacts"
@@ -50,7 +50,7 @@ const fuel = CONFIG.l1.fuel
 if (!fuel) throw new Error("candidate manifest has no l1.fuel")
 
 const here = dirname(fileURLToPath(import.meta.url))
-const OUT = join(here, "..", "..", "bridge-evm", "out")
+const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
 
 const sepolia = defineChain({
 	id: 11155111,
@@ -162,7 +162,7 @@ async function main() {
 		CONFIG.l2.bridge.salt,
 		CONFIG.l2.bridge.address,
 	)
-	const feeJuice = await Contract.at(AztecAddress.fromString(feeJuiceAddress), FeeJuiceContractArtifact, ewallet as never)
+	const feeJuice = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, ewallet as never)
 	console.log(`candidate contracts registered (${mins()})`)
 
 	const fjBalance = async (): Promise<bigint> => {

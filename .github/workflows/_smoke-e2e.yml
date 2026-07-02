@@ -32,7 +32,7 @@ jobs:
     env:
       EXTENSION_PATH: ${{ inputs.extension_path }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
 
@@ -53,10 +53,10 @@ jobs:
 
       - name: Build Chrome (no artifact, no override)
         if: inputs.artifact_name == '' && inputs.extension_path == ''
-        run: bun run --cwd packages/extension build:chrome
+        run: bun run --cwd apps/extension build:chrome
 
       - name: Run smoke e2e
-        run: bun run --cwd packages/extension test:e2e
+        run: bun run --cwd apps/extension test:e2e
 
       - name: Upload smoke logs on failure
         if: failure()
@@ -64,6 +64,6 @@ jobs:
         with:
           name: smoke-e2e-logs
           path: |
-            packages/extension/.e2e-state
+            apps/extension/.e2e-state
           if-no-files-found: ignore
           retention-days: 7

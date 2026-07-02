@@ -12,8 +12,9 @@ on:
     branches: [main, dev]
     # `labeled` so adding `e2e:network` after open triggers a fresh run;
     # `unlabeled` so removing it re-evaluates the gate instead of leaving
-    # a stale failing result.
-    types: [opened, reopened, synchronize, labeled, unlabeled]
+    # a stale failing result; `ready_for_review` so a draft marked ready
+    # (without a new push) re-runs CI instead of hanging the required check.
+    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review]
 
 concurrency:
   group: pr-network-e2e-${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -31,52 +32,46 @@ jobs:
     outputs:
       extension-network: ${{ steps.override.outputs.full || steps.filter.outputs.extension-network }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
         id: filter
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
           filters: |
             extension-network:
-              - 'packages/extension/src/wallet/services/network/**'
-              - 'packages/extension/src/wallet/services/execution/**'
-              - 'packages/extension/src/wallet/services/fpc/**'
-              - 'packages/extension/src/wallet/services/dapp-interaction/**'
-              - 'packages/extension/src/wallet/services/dapp-session/**'
-              # TokenBalance + token detail page — added 2026-05-24 so a
-              # TokenBalance-only bugfix PR on `dev` doesn't silently skip the
-              # network matrix. The Phase B TokenBalance auto-refresh change
-              # lives in tokens/[id].vue + balance service code.
-              - 'packages/extension/src/wallet/services/token-balance/**'
-              - 'packages/extension/src/popup/pages/tokens/**'
-              # Grant-approval + revoke surfaces (the authwit trust point). Added
-              # so a PR touching the execute window, advanced settings, the
-              # authwits module/popups, or the entity-CRUD composable triggers the
-              # network gate instead of silently skipping it.
-              - 'packages/extension/src/popup/windows/execute/**'
-              - 'packages/extension/src/popup/pages/settings/advanced/**'
-              - 'packages/extension/src/popup/components/modules/settings/authwits/**'
-              - 'packages/extension/src/popup/components/popups/RevokeAuthwitsPopup.vue'
-              - 'packages/extension/src/popup/components/popups/ChangeAuthwitsRegistryPopup.vue'
-              - 'packages/extension/src/composables/useEntityCrud.ts'
-              - 'packages/extension/src/offscreen/**'
-              - 'packages/extension/tests/e2e/network/**'
-              - 'packages/extension/tests/e2e/fixtures/**'
-              - 'packages/extension/scripts/e2e/**'
-              - 'packages/extension/vitest.e2e.network.config.ts'
-              - 'packages/extension/vitest.e2e.all.config.ts'
-              - 'packages/aztec-runtime/**'
-              - 'packages/wallet-bridge/**'
-              - 'packages/playground/**'
-              - 'packages/design/**'
+              # Derived from the extension dependency graph (see CI.md "CI gating").
+              # Whole-package for built targets (extension + the playground dApp the
+              # harness drives); src + manifest for dependency libraries. NO `!`
+              # negations. Pinned by scripts/ci-cd/behavior-gating.test.ts.
+              # Built targets — extension + playground harness (whole packages):
+              - 'apps/extension/**'
+              - 'apps/playground/**'
+              # Dependency libraries — consumed source + manifest:
+              - 'packages/aztec-runtime/src/**'
+              - 'packages/aztec-runtime/package.json'
+              - 'packages/design/src/**'
+              - 'packages/design/package.json'
+              - 'packages/extension-messaging/src/**'
+              - 'packages/extension-messaging/package.json'
+              - 'packages/wallet-bridge/src/**'
+              - 'packages/wallet-bridge/package.json'
+              - 'packages/wallet-core/src/**'
+              - 'packages/wallet-core/package.json'
+              - 'packages/wallet-crypto/src/**'
+              - 'packages/wallet-crypto/package.json'
+              # Repo-wide build inputs:
+              - 'package.json'
+              - 'bun.lock'
+              - 'bunfig.toml'
+              - 'tsconfig.json'
+              - 'patches/**'
+              # Network workflow + composite actions:
               - '.github/workflows/_network-e2e.yml'
               - '.github/workflows/pr-network-e2e.yml'
               - '.github/actions/setup-aztec/**'
               - '.github/actions/setup-accelerator-server/**'
               - '.github/actions/setup-bun/**'
-              - 'bun.lock'
-              - 'bunfig.toml'
-              - 'package.json'
+              - '.github/actions/setup-puppeteer/**'
       - name: Override for manual dispatch
         if: github.event_name == 'workflow_dispatch'
         id: override

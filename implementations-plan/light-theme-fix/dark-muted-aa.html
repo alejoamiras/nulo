@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dark muted-text → WCAG-AA</title>
+<style>
+  :root { --bg:#0a0908; --card:#141312; --low:#1d1b1a; --high:#2b2a28; --primary:#f5f0e6; --line:#2b2a28; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--primary);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; line-height:1.55;
+    max-width:980px; margin:0 auto; padding:2rem 1.25rem 4rem; }
+  h1 { font-size:1.6rem; margin:0 0 .4rem; }
+  h2 { font-size:1.15rem; margin:2.4rem 0 .8rem; }
+  p.lede { color:#c9c3b6; max-width:64ch; }
+  code { font-family:ui-monospace,Menlo,monospace; font-size:.85em; background:#1d1b1a; padding:1px 5px; border-radius:3px; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+  @media (max-width:680px){ .cols{ grid-template-columns:1fr; } }
+  .panel { border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .panel > header { padding:.55rem .9rem; font-weight:600; font-size:.8rem; letter-spacing:.04em; text-transform:uppercase; }
+  .panel.before > header { background:#3a1f1e; color:#e7a39a; }
+  .panel.after  > header { background:#13321f; color:#7fce9f; }
+  .card { background:var(--card); padding:1rem 1.1rem; }
+  .card + .card { border-top:1px solid var(--line); }
+  .tok { font:600 .62rem/1 ui-monospace,monospace; letter-spacing:.05em; color:#6b655c; text-transform:uppercase; }
+  .sample { margin:.35rem 0 .5rem; }              /* alpha is set inline per render */
+  .badge { display:inline-block; font:700 .62rem/1 ui-monospace,monospace; padding:3px 6px; border-radius:3px; }
+  .pass { background:#13321f; color:#7fce9f; } .fail { background:#3a1f1e; color:#e7a39a; }
+  .ratio { font:600 .72rem/1 ui-monospace,monospace; color:#999187; margin-left:.4rem; }
+  table { width:100%; border-collapse:collapse; font-size:.82rem; margin-top:.6rem; }
+  th,td { border:1px solid var(--line); padding:5px 9px; text-align:left; }
+  th { color:#999187; font-weight:600; } td.r { font-family:ui-monospace,monospace; }
+  .muted { color:#999187; font-size:.85rem; }
+  .swatch { display:inline-block; width:11px; height:11px; border-radius:2px; vertical-align:middle; margin-right:5px; border:1px solid #ffffff22; }
+</style>
+</head>
+<body>
+  <h1>Dark muted-text → WCAG-AA <span class="muted">(follow-up #1)</span></h1>
+  <p class="lede">The light-theme fix raised the <em>light</em> muted-grey tokens to the AA readability bar (4.5:1) after
+  codex caught that they carry <strong>security copy</strong> — the scam-token "Allow?" warning, the "irreversible"
+  confirm, reset guidance. The <em>dark</em> theme had the same tokens at the same low opacity, so the same copy was
+  also sub-AA in dark. This page shows the before/after. Everything below is rendered with the <strong>real token
+  values</strong> and the contrast ratios are computed live (WCAG 2.x) — not eyeballed.</p>
+
+  <h2>The three muted tokens, on a dark card (<span class="swatch" style="background:#141312"></span><code>--card-bg #141312</code>)</h2>
+  <p class="lede">Each block renders the kind of copy that actually uses the token. Watch <code>--txt-tertiary</code> and
+  <code>--txt-support</code> in the "Before" column — that's a real scam-warning a user is supposed to read.</p>
+  <div class="cols">
+    <div class="panel before"><header>Before — shipped (sub-AA)</header><div id="before"></div></div>
+    <div class="panel after"><header>After — this fix (AA)</header><div id="after"></div></div>
+  </div>
+
+  <h2>Contrast ratios across every dark surface (binding case = lightest surface)</h2>
+  <table id="grid"><thead><tr><th>token</th><th>alpha</th>
+    <th><span class="swatch" style="background:#141312"></span>card #141312</th>
+    <th><span class="swatch" style="background:#1d1b1a"></span>surface-low</th>
+    <th><span class="swatch" style="background:#2b2a28"></span>surface-high</th></tr></thead><tbody></tbody></table>
+  <p class="muted">AA for normal text = 4.5:1. The fix targets the <em>lightest</em> dark surface (surface-high, the
+  lowest-contrast case) so every surface clears the bar. The muted scale necessarily compresses near the top — there
+  isn't much room between the AA floor (~52% alpha) and <code>--txt-secondary</code> — but all three are now legible.
+  Dark is otherwise unchanged.</p>
+
+<script>
+  const CREAM = [245,240,230];
+  const SURF = { "card #141312":[20,19,18], "surface-low #1d1b1a":[29,27,26], "surface-high #2b2a28":[43,42,40] };
+  // [token, alpha-before, alpha-after, sample copy]
+  const TOKENS = [
+    ["--txt-body", .45, .60, "You received 1,000 $AZTEC from a contract you haven't seen before."],
+    ["--txt-tertiary", .30, .56, "Only allow tokens you trust. Scam tokens can mimic real ones."],
+    ["--txt-support", .25, .54, "This action is irreversible and cannot be undone."],
+  ];
+  const lin = c => { const s=c/255; return s<=0.03928 ? s/12.92 : ((s+0.055)/1.055)**2.4; };
+  const L = ([r,g,b]) => 0.2126*lin(r)+0.7152*lin(g)+0.0722*lin(b);
+  const over = (fg,a,bg) => fg.map((c,i)=>Math.round(c*a+bg[i]*(1-a)));
+  const ratio = (x,y) => { const lx=L(x),ly=L(y),[hi,lo]=lx>=ly?[lx,ly]:[ly,lx]; return (hi+0.05)/(lo+0.05); };
+  const card = [20,19,18], high = [43,42,40];
+  const rgba = a => `rgba(245,240,230,${a})`;
+
+  function renderColumn(elId, which) { // which: 'before'|'after'
+    const ai = which==='before' ? 1 : 2;
+    document.getElementById(elId).innerHTML = TOKENS.map(([tok,b,a]) => {
+      const alpha = which==='before'? b : a;
+      const r = ratio(over(CREAM,alpha,card), card);
+      const ok = r >= 4.5;
+      return `<div class="card">
+        <div class="tok">${tok} · ${Math.round(alpha*100)}%</div>
+        <div class="sample" style="color:${rgba(alpha)}">${TOKENS.find(t=>t[0]===tok)[3]}</div>
+        <span class="badge ${ok?'pass':'fail'}">${ok?'AA PASS':'AA FAIL'}</span>
+        <span class="ratio">${r.toFixed(2)}:1 on card</span>
+      </div>`;
+    }).join("");
+  }
+  renderColumn('before','before'); renderColumn('after','after');
+
+  const tb = document.querySelector("#grid tbody");
+  TOKENS.forEach(([tok,b,a]) => {
+    [["before",b],["after",a]].forEach(([label,alpha]) => {
+      const cells = Object.values(SURF).map(bg => { const r=ratio(over(CREAM,alpha,bg),bg);
+        return `<td class="r" style="color:${r>=4.5?'#7fce9f':'#e7a39a'}">${r.toFixed(2)}</td>`; }).join("");
+      tb.innerHTML += `<tr><td><code>${tok}</code> <span class="muted">(${label})</span></td><td class="r">${Math.round(alpha*100)}%</td>${cells}</tr>`;
+    });
+  });
+</script>
+</body>
+</html>

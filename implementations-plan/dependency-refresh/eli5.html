@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — Dependency refresh</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Dependency refresh (in-range, min-age-respected)</h1>
+  <p>The thing that kicked this off — "bump zod to v5" — turns out to be a no-op: <strong>there is no zod v5</strong> (latest is 4.4.3, and we're already on it). So this isn't a migration; it's a routine "pull the small updates" pass. A full scan shows the only big jump available is <code>@types/node</code> 24→26, which our policy caps at &lt;25, so we skip it. Everything else is small (minor/patch) and already allowed by our version ranges — so two small <code>bun update</code> passes (libraries first, then tooling, kept separate so any breakage is attributable) refresh them, and our 7-day safety rule automatically holds back anything published this week.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>light</strong> (downgraded from the requested mid). Once research showed no zod v5 and no real major upgrades, the risk is low: routine small bumps, fully reversible (revert the lockfile), no data/migration, our supply-chain rule stays on. The only "moderate" bit is that it touches dev-dependencies of every package — but they're small bumps validated by the full test/build/e2e suite.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: Runtime/lib refresh + full safety audit</h3>
+    <p>Update the app/runtime libraries (Vue, vue-router, pinia, viem, CodeMirror, etc.) within their ranges. Then audit the <em>entire</em> lockfile diff — every changed package, including indirect (transitive) ones — to confirm nothing newer than a week slipped in (a known Bun bug can let a too-new indirect dep survive, so we check them all, not just the direct ones), nothing jumped a major, and <code>@types/node</code> stayed at 24. Then typecheck + lint + all unit tests. Commit.</p>
+    <p class="muted">Proves itself by: frozen install passes; every changed entry (direct + indirect) is ≥7 days old; typecheck + lint + the whole unit suite green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: Tooling refresh + fix fallout (separate commit)</h3>
+    <p>Update the build/test tooling (Biome the linter, vue-tsc the type-checker, Vitest, Vite plugins, Storybook, etc.) in a <em>separate</em> commit — so if a check breaks, we know it was the tooling, not the libraries. These can surface new lint rules or stricter type errors; fix anything new they flag. The same full-diff age audit applies.</p>
+    <p class="muted">Proves itself by: typecheck + lint + the whole unit suite (the 10 packages that have tests) green, with fallout fixed.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: Builds + end-to-end + PR</h3>
+    <p>The build-related bumps (Vite, Vue, CodeMirror, Sass, Storybook) affect bundling, so build all five surfaces and re-run the <em>full</em> checks explicitly (typecheck + lint + all unit tests — not the extension-only shortcut <code>audit:vue</code> takes), then open the PR; smoke + network end-to-end tests run in CI.</p>
+    <p class="muted">Proves itself by: typecheck + lint + test:all + all 5 builds pass; smoke + network e2e green in CI; final lockfile diff reviewed.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p><code>bun update</code> moves each dependency to the newest version still allowed by the <code>^</code> range in <code>package.json</code> — so no manifest edits are needed. Our <code>bunfig.toml</code> blocks anything published in the last 7 days (supply-chain defense); this week's brand-new releases (Vite 8.1.0, Biome 2.5.1, viem 2.53.1) simply land a few days later, on their own. There's a known Bun bug (#25305) where a too-new <em>indirect</em> dependency can sneak through on a bulk re-resolve — so we audit the whole lockfile diff ourselves (and, if it's messy, fall back to the repo's documented "delete the lockfile and reinstall" which re-applies the rule to everything). <code>@types/node</code> is frozen below 25 by repo policy; <code>@aztec/*</code> are exact-pinned and handled separately — untouched here.</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li>None blocking. Scope (full in-range refresh, libs + tooling in two commits) and tier (light) are settled. If a single tooling bump breaks something un-cheaply, the fallback is to pin just that one back and note it — the rest still ship.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: in-range <code>bun update</code> refresh in two gated commits (libs, then tooling); skip <code>@types/node</code>; let min-age defer this-week's releases.</li>
+      <li>Confirm tier: <code>light</code>.</li>
+      <li>Confirm validation: full-lockfile-diff min-age audit + typecheck + lint + all unit tests + 5 builds + smoke + network e2e (CI).</li>
+      <li><code>/harden</code>: not scheduled (no security-sensitive surface).</li>
+      <li>Approve / conditionally approve (with conditions) / reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>Two ways to run the autonomous session. <code>/goal</code> works until a condition holds; <code>/loop</code> fires on an interval. Completion here is transcript-observable, so <code>/goal</code> is recommended.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <pre><code>/goal All phases ✓ in implementations-plan/dependency-refresh/plan.md, each backed by its gate passing in the transcript: Phase 1 (runtime/libs) — bun update done, frozen install exit 0, FULL bun.lock diff audited (every changed entry incl. transitives ≥7 days old; @types/node ≤24), typecheck:all+lint+test:all green, committed; Phase 2 (tooling, separate commit) — same full-diff audit + typecheck:all+lint+test:all green with fallout fixed; Phase 3 — typecheck:all+lint+test:all + all 5 builds + test:e2e + e2e:agent + frozen install exit 0, final diff reviewed; each phase printed LESSONS_FILE=implementations-plan/dependency-refresh/lessons/phase-N.md; `/code-review max --fix` applied + committed; codex post-impl audit done, high/critical addressed.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/dependency-refresh forward. Never idle. Each firing: read plan.md + lessons/ (authoritative), `git status`, `git log --oneline -5`, any open PR `gh pr view --json statusCheckRollup`. Pick the next pending phase; after each edit run `bun run lint` + `CI=true bun run test:all`; audit the FULL bun.lock diff for <7-day entries (transitives too); when a phase's gate (as written in plan.md) passes, mark ✓, file lessons/phase-N.md, print LESSONS_FILE=…, advance. Decisions → `/codex xhigh`, log verdict, act. Same step failed 5× → reassess with codex. Hard limits: never merge to main/release, never publish/deploy, never expand scope (no cross-major bumps, no @types/node ≥25). All phases ✓ → `/code-review max --fix` → commit → codex post-impl audit → address high/critical → report + stop.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

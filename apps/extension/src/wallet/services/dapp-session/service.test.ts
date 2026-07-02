@@ -1,0 +1,67 @@
+/**
+ * Active-profile guard preservation pins for `DappSessionService` (Q19).
+ *
+ * This file has three distinct active-profile dispositions in one service, and
+ * the requireActiveProfile sweep must preserve each EXACTLY:
+ *   - `getDappSessions` throws "Profile locked" (swept → requireActiveProfile()).
+ *   - `addDappSession` throws "Wallet is locked" (swept → requireActiveProfile(_, "Wallet is locked")).
+ *   - `tryGetDappSessionByOriginAndChain` SILENTLY returns undefined (deliberate
+ *     non-thrower; a locked wallet must decline auto-approve, NOT throw — this
+ *     site was EXCLUDED from the sweep and must stay silent).
+ */
+import { EventHandler } from "@nulo/wallet-core/utils"
+import { FakeBrowserApi } from "@nulo/wallet-core/testing"
+import { ServiceCollection } from "@/wallet/base"
+import { ConfigStore } from "@/wallet/config"
+import { LoggerStore } from "@/wallet/logger"
+import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/service"
+import { beforeEach, describe, expect, test, vi } from "vitest"
+import { DappSessionService } from "./service"
+
+let activeProfile: { id: string } | undefined
+
+function makeProfileStub() {
+	return {
+		name: PROFILE_SERVICE_NAME,
+		dependencies: [],
+		onProfileDeleted: new EventHandler(),
+		getActiveProfile: vi.fn(async () => activeProfile),
+		async start() {},
+	}
+}
+
+async function makeService(): Promise<DappSessionService> {
+	const logger = new LoggerStore(new ConfigStore())
+	const browserApi = new FakeBrowserApi()
+	browserApi.reset()
+	const service = new DappSessionService(logger, browserApi)
+	const collection = new ServiceCollection()
+	collection.add(makeProfileStub() as never)
+	collection.add(service)
+	await collection.start()
+	return service
+}
+
+beforeEach(() => {
+	activeProfile = { id: "p1" }
+})
+
+describe("DappSessionService active-profile guards (Q19 preservation pins)", () => {
+	test('getDappSessions throws "Profile locked" when the wallet is locked', async () => {
+		const svc = await makeService()
+		activeProfile = undefined
+		await expect(svc.getDappSessions()).rejects.toThrow("Profile locked")
+	})
+
+	test('addDappSession throws "Wallet is locked" when the wallet is locked', async () => {
+		const svc = await makeService()
+		activeProfile = undefined
+		await expect(svc.addDappSession({} as never, [], [], 0 as never, "1")).rejects.toThrow("Wallet is locked")
+	})
+
+	test("tryGetDappSessionByOriginAndChain SILENTLY returns undefined when locked (deliberate non-thrower, NOT swept)", async () => {
+		const svc = await makeService()
+		activeProfile = undefined
+		await expect(svc.tryGetDappSessionByOriginAndChain("https://dapp.example", "1")).resolves.toBeUndefined()
+	})
+})

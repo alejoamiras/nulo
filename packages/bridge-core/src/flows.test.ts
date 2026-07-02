@@ -141,7 +141,7 @@ describe("flows — runSwapBridge injectable fuel secret (L3)", () => {
 
 	it("threads an injected derived secret into the on-chain witness + the result", async () => {
 		const salt = Fr.zero()
-		const claimer = AztecAddress.fromString(AZTEC_RECIPIENT)
+		const claimer = AztecAddress.fromStringUnsafe(AZTEC_RECIPIENT)
 		const injected = deriveBridgeSecret(salt, claimer)
 		const l1 = makeL1()
 
@@ -175,7 +175,7 @@ describe("flows — runSwapBridge injectable fuel secret (L3)", () => {
 
 	it("F-005: private fuel to a non-FPC recipient is rejected BEFORE signing", async () => {
 		const l1 = makeL1()
-		const injected = deriveBridgeSecret(Fr.zero(), AztecAddress.fromString(AZTEC_RECIPIENT))
+		const injected = deriveBridgeSecret(Fr.zero(), AztecAddress.fromStringUnsafe(AZTEC_RECIPIENT))
 		const evil = `0x${"de".repeat(32)}` as `0x${string}`
 		await expect(runSwapBridge(l1 as never, { ...baseParams, fuelSecret: injected, fuelRecipient: evil } as never)).rejects.toThrow(
 			/must target the PrivateFPC/,

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — required-check name mismatch</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .tag { display: inline-block; font-size: 0.75rem; background: #eee; border-radius: 3px; padding: 0.1rem 0.4rem; margin-left: 0.3rem; vertical-align: middle; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.9rem; }
+    th, td { border: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; }
+    th { background: #f6f6f6; }
+  </style>
+</head>
+<body>
+  <h1>Why every PR hangs orange — and the one-line cause</h1>
+  <p>
+    For weeks, every pull request on <code>dev</code> and <code>main</code> has shown three required
+    checks stuck on <em>"Expected — Waiting for status to be reported"</em>, forcing you to merge with
+    <code>--admin</code> every single time. It was never flaky CI, missing signatures, or stacked branches.
+    The cause is a <strong>name typo in branch protection</strong>: it requires checks called
+    <code>Quality / Status</code>, but GitHub Actions actually produces a check called just <code>Status</code>.
+    Those two strings never match, so the required checks can never report — they hang forever. This plan
+    renames the checks so the names are unique, re-points branch protection to the <em>real</em> names, and
+    proves the fix with a live PR that merges cleanly with no <code>--admin</code> — while a deliberately
+    broken PR still gets blocked.
+  </p>
+
+  <h2>Why this tier was chosen <span class="tag">mid</span></h2>
+  <p>
+    Rubric: <strong>2 dimensions are HIGH</strong> — blast radius (this is the merge gate for the whole repo)
+    and external coupling (it depends on GitHub's exact check-name matching semantics). Two HIGHs would
+    normally push to <code>deep</code>. It's held at <code>mid</code> because the change is bounded CI config,
+    fully and instantly reversible (branch protection is one API call to revert), and the real risk is retired
+    by <em>doing it live and watching</em> — observe the produced names before writing, keep the old gate in
+    place until the new one is confirmed green, and run a negative test — not by more planning ceremony. The
+    plan still got the full <code>mid</code> treatment: a competing approach, a dual adversarial audit
+    (codex + a Claude planning agent), and a final fresh-context codex pass.
+  </p>
+
+  <h2>The two things that confused us for so long</h2>
+  <p>
+    <strong>1. The name rule.</strong> A normal GitHub Actions job produces a check named exactly its job's
+    <code>name:</code> — just <code>Status</code>, with no workflow prefix. Only <em>reusable</em>
+    (<code>uses:</code>) jobs get a <code>Workflow / Job</code> two-part name. So <code>Quality / Status</code>
+    was a name that <em>can never be produced</em> — someone typed it into branch protection by hand, guessing
+    at GitHub's display format. The fix is to give each gate a unique one-word name like
+    <code>quality-status</code> and require <em>that</em>.
+  </p>
+  <p>
+    <strong>2. There are actually two locks on the door.</strong> The repo also requires signed commits.
+    <code>--admin</code> bypasses <em>both</em> the broken check-name lock and the signature lock at the same
+    time — which is exactly why we kept mis-diagnosing it: the symptom (forced <code>--admin</code>) couldn't
+    tell the two locks apart. We got this wrong twice (once blaming signatures, once blaming the name). This
+    plan refuses to guess a third time: the name mismatch is the <em>proven</em> cause of the orange hang, and
+    Phase 3 <em>measures</em> whether signatures add a second block — the docs will say whatever the live test
+    shows.
+  </p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1 — Rename the three stuck checks</h3>
+    <p>Give the aggregator job in the Quality, Network e2e, and Smoke e2e workflows a unique one-word name
+      (<code>quality-status</code>, <code>network-e2e-status</code>, <code>smoke-e2e-status</code>). Only the
+      label changes — the pass/fail logic is untouched.</p>
+    <p class="muted">Proves itself by: <code>bun run lint:actions</code> green, and the job's logic is
+      byte-identical except the name.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2 — On <code>dev</code> first: look at the real names, then re-point the lock (carefully)</h3>
+    <p>After the rename ships to <code>dev</code>, read the names GitHub <em>actually</em> produced on a live
+      PR (never guess). Then update branch protection — but <strong>add the new names while keeping the old
+      ones first</strong> (so the gate is never open for even a moment), confirm the new ones are green, and
+      only then remove the old broken ones. The update is done as a careful <em>read-then-write</em> so it
+      can't accidentally flip <code>main</code>'s "branch must be up to date" setting or drop another check.</p>
+    <p class="muted">Proves itself by: the live <code>dev</code> PR shows the three checks <em>matched</em>
+      (not "Expected"), and <code>dev</code>'s config lists exactly the three new names.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3 — Prove it both ways on a real <code>dev</code> PR</h3>
+    <p><strong>Positive:</strong> a normal signed PR goes green and merges with a plain
+      <code>gh pr merge --squash</code> — no <code>--admin</code>. <strong>Negative:</strong> a PR with a
+      deliberately broken check (break a lint rule so it really runs and fails) still gets <em>blocked</em>.
+      Both matter — "green merges" alone could also mean "the gate is gone."</p>
+    <p class="muted">Proves itself by: positive PR merges clean without admin (squash signed); broken PR is
+      refused without admin.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4 — Promote the rename to <code>main</code>, then re-point <code>main</code></h3>
+    <p><code>main</code> can't be re-pointed until the rename is actually <em>on</em> <code>main</code> —
+      otherwise a PR branched from the old <code>main</code> still produces the old check name and re-hangs.
+      So the rename rides a normal promote PR to <code>main</code>, we confirm the new names appear there, then
+      re-point <code>main</code> the same careful way (preserving its <code>strict</code> setting).</p>
+    <p class="muted">Proves itself by: <code>main</code>'s config lists the three new names with
+      <code>strict</code> intact, and a <code>main</code>-targeted PR shows them matched.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5 — Fix the docs that lied</h3>
+    <p>Update the required-check tables in <code>CLAUDE.md</code> + <code>CI.md</code> to the new names,
+      correct the <code>--admin</code> explanation to the true two-locks story (recording what Phase 3
+      measured, scoped to self-authored PRs), and fix the stale line that calls Smoke "advisory" when it's
+      actually required.</p>
+    <p class="muted">Proves itself by: the brand/path guard is clean and the doc tables match the live
+      branch-protection config on both branches.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>
+    "Branch protection" is GitHub's rule that a PR can't merge until certain named checks pass. It matches by
+    <em>exact string</em>. "Required signatures" is a separate rule that commits must be cryptographically
+    signed. <code>--admin</code> is the override that ignores all protection rules — handy in emergencies, but
+    if you need it on <em>every</em> merge, something is misconfigured. That "something" is this name typo.
+  </p>
+
+  <h2>Open questions — all resolved by the final audit</h2>
+  <p class="muted">The final fresh-context codex pass <em>rejected</em> the first consolidated draft and closed
+    each of these. Nothing here is left for you to decide.</p>
+  <ul>
+    <li><strong>Does breaking a lint rule actually turn <code>quality-status</code> red?</strong>
+      <em>Yes</em> — confirmed by tracing the aggregator: lint always runs on PRs, and its failure propagates
+      to the "always" aggregator, which exits non-zero. The negative test is real.</li>
+    <li><strong>Pin to GitHub Actions' app id?</strong> <em>Yes, but observed live at write time</em>, never
+      hard-coded — so a future id change can't silently orphan the check. (And there's no merge queue on this
+      repo, so that re-hang path doesn't exist.)</li>
+    <li><strong>Is the signatures question determinable?</strong> <em>Partly yes</em> — GitHub only lets you
+      squash-merge a signed branch when you're the PR author. So for your own PRs (almost all of them),
+      signatures never block, and the orange hang was <em>purely</em> the name typo. The plan states this and
+      scopes the live test to the self-authored case.</li>
+    <li><strong>(New, caught by the final pass) Can <code>main</code> be re-pointed at the same time as
+      <code>dev</code>?</strong> <em>No</em> — it must wait until the rename is on <code>main</code>, or
+      in-flight PRs re-hang. This split the rollout into a <code>dev</code>-first, then-promote-to-<code>main</code>
+      sequence, and forced the branch-protection update to be a careful read-then-write that preserves
+      <code>main</code>'s <code>strict</code> setting.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li><strong>Scope:</strong> rename only the 3 <em>required</em> PR aggregators (Quality / Network / Smoke).
+        <code>release.yml</code> and the Lint workflow's <code>Status</code> are left alone (out of causal
+        scope). Confirm.</li>
+      <li><strong>Tier:</strong> <code>mid</code> (2 HIGH dimensions, held at mid because it's bounded +
+        reversible + live-verified). Confirm or override.</li>
+      <li><strong>Validation:</strong> every phase gates on its listed checks; Phases 2–4 gate on
+        <em>live CI + branch protection</em> (observe-before-write, union-first, positive + negative
+        acceptance on <code>dev</code>). Confirm.</li>
+      <li><strong>Staged rollout:</strong> fix lands on <code>dev</code> fully first; <code>main</code> is
+        re-pointed only <em>after</em> the rename is promoted to it (so in-flight PRs don't re-hang). This
+        means <code>main</code>'s clean-merge fix arrives on the next promote PR, not instantly. Confirm.</li>
+      <li><strong>Smoke stays required</strong> (your decision this session); the stale "advisory" doc line is
+        corrected. Confirm.</li>
+      <li><strong>No drift-guard CI</strong> (fix + document only, per your earlier choice). Confirm.</li>
+      <li><strong>/harden:</strong> not scheduled — contained CI-config fix, no new trust boundary/secret/dep.
+        Confirm.</li>
+    </ul>
+  </div>
+
+  <div class="seeds">
+    <h2>Implementation seeds <span class="tag">DRAFT — finalized after approval</span></h2>
+    <p class="warning">Use exactly one of these per session — they don't compose.</p>
+
+    <h3>/goal <span class="tag">Recommended for this plan</span></h3>
+    <p class="muted">Recommended because "done" is crisply transcript-observable: a real signed PR merges with
+      plain <code>gh pr merge</code> (no <code>--admin</code>) and a broken PR is still blocked.</p>
+    <pre>/goal Fix the required-check name mismatch per implementations-plan/required-check-mismatch/plan.md.
+Staged dev-first, then promote-to-main. Done = (1) the 3 required aggregator jobs renamed to unique bare names
+(quality-status / network-e2e-status / smoke-e2e-status) in pr-quick.yml + pr-network-e2e.yml +
+pr-smoke-e2e.yml, lint:actions green; (2) DEV re-pointed: required_status_checks.checks via read-modify-write
+(GET → preserve strict=false + other checks → PATCH), UNION-FIRST (add new app_id-pinned names observed live on
+the rename PR head, keep old phantoms until new confirmed green, then remove old); (3) POSITIVE acceptance on
+dev: a self-authored signed green PR merges with plain `gh pr merge --squash` (NO --admin), mergeStateStatus
+CLEAN, squash verified=true; (4) NEGATIVE acceptance on dev: a forced-red required job (break Biome so it
+actually runs) yields non-CLEAN + refused non-admin merge; (5) promote the rename to MAIN, observe the new
+names there, then re-point main read-modify-write preserving strict=true; (6) CLAUDE.md + CI.md tables updated
+to the new names + the two-gates --admin truth (signatures scoped to self-authored squash) + Smoke=required.
+Never leave the gate weaker than today (union-first, read-modify-write). Each phase's plan.md Validation gate
+must pass before marking it done.</pre>
+
+    <h3>/loop <span class="tag">Alternative</span></h3>
+    <p class="muted">Use this instead if you'd rather it self-pace through the live-CI waits (Phase 2/3 poll
+      produced names + mergeStateStatus).</p>
+    <pre>/loop Drive implementations-plan/required-check-mismatch/plan.md forward. Each firing: read plan.md +
+lessons/; git status; gh pr/run status (no --watch). Take the next pending phase; after each edit run
+`bun run lint:actions` + the phase's gate; commit→push. Phase 2/3 wait on live CI — poll produced check-run
+names + mergeStateStatus, never --admin unless the plan says so. Re-point UNION-FIRST (never weaken the gate);
+the negative test is a hard gate that must actually run. All phases ✓ → /code-review max --fix → wrap-up.</pre>
+  </div>
+
+  <hr style="margin-top:3rem; border:none; border-top:1px solid #eee;">
+  <p class="muted">
+    Full plan: <a href="plan.md">plan.md</a> · Debugging logs (added during implementation):
+    <code>./lessons/phase-N.md</code>
+  </p>
+</body>
+</html>

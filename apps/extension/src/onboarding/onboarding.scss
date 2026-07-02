@@ -1,0 +1,24 @@
+/* Onboarding HTML entry — viewport-width body, not the popup's 360px lock.
+ * The global base tokens come from @nulo/design/base.css (imported in onboarding/index.ts);
+ * this file only adds the onboarding shell layout and skips popup/index.scss (which pins the
+ * body width to --base-width). */
+
+#app {
+	display: flex;
+	flex-direction: column;
+	min-height: 100vh;
+}
+
+html,
+body {
+	height: 100%;
+	margin: 0;
+}
+
+body {
+	width: 100%;
+	min-width: 320px;
+	background: var(--app-bg);
+	color: var(--txt-primary);
+	font-family: var(--font-body);
+}

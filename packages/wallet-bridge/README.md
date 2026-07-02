@@ -250,9 +250,9 @@ for the three Nulo-custom methods (`registerToken`, `isTokenRegistered`,
 
 | Side | File | Imported by |
 |---|---|---|
-| Extension | `packages/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts` | `wallet-sdk/background.ts` (first import) |
-| Faucet | `packages/faucet/src/lib/nulo-schema-patch.ts` | `composables/useWalletConnection.ts` (first import) |
-| Playground | `packages/playground/src/lib/nulo-schema-patch.ts` | `lib/wallet.ts` (first import) |
+| Extension | `apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts` | `wallet-sdk/background.ts` (first import) |
+| Faucet | `apps/faucet/src/lib/nulo-schema-patch.ts` | `composables/useWalletConnection.ts` (first import) |
+| Playground | `apps/playground/src/lib/nulo-schema-patch.ts` | `lib/wallet.ts` (first import) |
 
 Each file is **side-effect only** — no exports. Drift between the three copies
 is pinned by `dispatcher.test.ts` ("schema patch extends WalletSchema with a
@@ -276,7 +276,7 @@ patch does NOT restore them):
   `simulate_views` op kind both gone. Use `wallet.simulateUtility()` (or batch
   via `wallet.batch([{name: "executeUtility", ...}, ...])`). The internal
   batching logic that previously lived behind the op kind now lives in
-  `packages/extension/src/wallet/services/execution/helpers/batched-view-simulation.ts`,
+  `apps/extension/src/wallet/services/execution/helpers/batched-view-simulation.ts`,
   called directly by balance-projector + gas-balance.
 
 If a future Aztec.js version ships its own `registerToken`, the patch's

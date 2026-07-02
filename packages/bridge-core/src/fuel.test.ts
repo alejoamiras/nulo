@@ -12,7 +12,7 @@ import {
 } from "./fuel"
 import { PRIVATE_FPC_ADDRESS, deriveBridgeSecret, privateMintAndPayFee } from "./private-fuel"
 
-const recipient = AztecAddress.fromNumber(0x1234)
+const recipient = AztecAddress.fromNumberUnsafe(0x1234)
 
 describe("fuel — deposit planning", () => {
 	it("public: recipient-bound, random secret, matching secretHash, correct args", async () => {
@@ -67,7 +67,7 @@ describe("fuel — fail-closed floor", () => {
 // locally. It does NOT (cannot) prove the live sequencer accepts a zero-app-call tx — that is the
 // deferred risk I2. If any assertion here fails, STOP before UI work (plan §6 Phase 1).
 describe("fuel — carrierless private claim spike (Phase 1 STOP-gate)", () => {
-	const fpc = AztecAddress.fromString(PRIVATE_FPC_ADDRESS)
+	const fpc = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
 
 	it("payload is carrier-less: exactly the 2 FPC setup calls (no app call), feePayer = FPC", async () => {
 		const salt = new Fr(99n)

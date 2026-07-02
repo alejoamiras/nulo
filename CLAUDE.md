@@ -6,12 +6,13 @@ Operating rules for AI assistants (and any contributor) working in this reposito
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — process boundaries, message flow, storage versioning, offscreen lifecycle, session model, concurrency, account contract, fee model, test taxonomy.
 - `packages/<name>/README.md` — per-package purpose, file map, scripts, testing, key invariants.
-- [`packages/extension/tests/e2e/README.md`](./packages/extension/tests/e2e/README.md) — e2e suite layout, parallel-safe agent runner, helper conventions.
+- [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md) — e2e suite layout, parallel-safe agent runner, helper conventions.
+- [`apps/extension/tests/COMPOSITION-TESTS.md`](./apps/extension/tests/COMPOSITION-TESTS.md) — **normative** rules for the `*.composition.test.ts` layer (drive the real service graph in-process against dumb fakes): when to use it, the hard limits (shallow PXE **and** bb-free **and** no simulate/prove), the failure taxonomy. Read before adding a composition test.
 - [`implementations-plan/README.md`](./implementations-plan/README.md) — planning archive, when to add to it, the milestone-vocabulary key.
 
 ## Working in this repo
 
-- **Bun** is the package manager. No yarn/npm/pnpm. Pinned to `1.3.13` via `package.json#packageManager` + `setup-bun` action.
+- **Bun** is the package manager. No yarn/npm/pnpm. Pinned to `1.3.14` via `package.json#packageManager` + `setup-bun` action.
 - **Biome** handles lint + format. Layer-import rules are enforced via `noRestrictedImports` overrides in [`biome.json`](./biome.json); violations fail `bun run lint`.
 - **Commitlint** enforces Conventional Commits (`feat:`, `fix:`, `chore:`, …). Subject line must be lower-case.
 - **Pre-commit hook** (`.githooks/pre-commit`) runs `biome check --staged` followed by `scripts/check-no-brand.sh` (legacy brand and absolute-path guard). **Commit-msg hook** validates the message. Both auto-install on `bun install` via the `prepare` script.
@@ -20,17 +21,18 @@ Operating rules for AI assistants (and any contributor) working in this reposito
 
 ## Branching + merging
 
-- `dev` is the **default branch** and the integration lane. Feature work happens on short-lived branches off `dev` (named `feat/...`, `fix/...`, `chore/...`, `refactor/...`, `docs/...`, `test/...`, `deps/...`) and lands via **squash-merge** PRs. dev's history stays linear — one commit per merged PR.
+- `dev` is the **default branch** and the integration lane. Feature work happens on short-lived branches off `dev` (named `feat/...`, `fix/...`, `chore/...`, `refactor/...`, `docs/...`, `test/...`, `deps/...`) and lands via **squash-merge** PRs — dev's history stays essentially linear, one commit per merged feature PR. **The one exception is the post-release `chore: sync main → dev` PR, which is MERGE-committed** (not squashed) so `main`'s release commit stays in `dev`'s ancestry — the prerelease version-anchor needs it. So `dev` carries a periodic sync merge commit; everything else is a squash.
 - `main` is the **stable branch**. main advances via two PR types — both use a **merge commit** (not squash):
   - `release: promote dev → main` PRs land the next release-candidate set of features.
   - `chore: release @nulo/extension X.Y.Z` PRs are opened by **release-please** after every push to main. Merging one creates the tag + GitHub Release; the release workflow then attaches built artifacts + git-cliff notes + redeploys the landing.
   Read main's own timeline via `git log main --first-parent`.
-- **Merge type is enforced per branch via GitHub rulesets**: dev allows only `squash`, main allows only `merge`. The repo-level toggle has both enabled, but the per-branch ruleset narrows what's selectable at PR-merge time.
-- Both branches require **signed commits** (SSH or GPG — GitHub's web-flow signature on UI-merges satisfies this) and a passing **`Quality / Status`** required check before merge. Only `Quality / Status` is required on `dev`; the e2e gates (`Smoke e2e / Status`, `Network e2e / Status`) run on every PR but stay advisory.
-- **Branch-up-to-date is NOT required on `dev`** (legacy branch protection's `strict` flag is off). A new dev commit does not invalidate your PR's green CI, so you don't need to re-run the 25-min Network e2e every time someone else merges. The required `Quality / Status` check only has to be green on your PR's own commits.
+- **Merge type is enforced per branch via GitHub rulesets**: dev allows `squash` **and** `merge` (merge is reserved for the post-release sync PR — see above; feature PRs still squash by convention + the merge-button default), main allows only `merge`. The repo-level toggle has both enabled, and the per-branch ruleset narrows what's selectable at PR-merge time. (dev's `merge` was added for the prerelease-fix: a squash-only ruleset HARD-blocks the history-preserving sync — not bypassable by `--admin` or a bypass actor; see `implementations-plan/release-prerelease-fix/`.)
+- Both branches require **signed commits** (SSH or GPG — the merge's squash commit is GitHub web-flow-signed, CLI or UI). **Both `dev` and `main` require all three status gates — `quality-status`, `network-e2e-status`, and `smoke-e2e-status`** (the *produced* check-run names — a GitHub Actions normal job's check-run is named its bare job `name:`, with no `Workflow /` prefix). Verified against the live `required_status_checks.checks`, each app_id-pinned to GitHub Actions. Smoke is **required** on both, not advisory.
+- **Branch-up-to-date is NOT required on `dev`** (legacy branch protection's `strict` flag is off; `main` keeps `strict: true`). A new dev commit does not invalidate your PR's green CI, so you don't need to re-run the 25-min Network e2e every time someone else merges. The required checks only have to be green on your PR's own commits.
 - **Force-pushes and branch deletions are blocked.** Use a feature branch + PR for everything.
-- **CLI merges (`gh pr merge --squash`) need `--admin` on `dev`.** `required_signatures` is enforced, and GitHub only signs squash commits when the merge is initiated from the web UI. From the CLI: `gh pr merge <n> --squash --admin --delete-branch`. From the GitHub UI: the "Squash and merge" button signs automatically — no bypass needed.
+- **Why `--admin` used to be needed on *every* PR (fixed 2026-06-24):** branch protection required the contexts `Quality / Status` / `Network e2e / Status` / `Smoke e2e / Status`, but the workflows produce **bare** check-run names (`quality-status`, …) — the `Workflow /` prefix only appears for reusable `uses:` jobs, so `Quality / Status` was a hand-typed phantom that could never match. The required gates hung `Expected — Waiting for status to be reported` forever → `mergeStateStatus=BLOCKED` → every merge forced `--admin`. The fix renamed the three aggregator jobs to unique bare names and re-pointed `required_status_checks.checks` to them (`implementations-plan/required-check-mismatch/`). **Two gates exist, and they're independent:** the status checks above, AND `required_signatures`. For a **self-authored** squash GitHub signs the squash on your behalf, so signatures don't independently block (verified: a self-authored signed PR now merges with a plain `gh pr merge --squash`, no `--admin`). Keep your branch commits signed anyway (a dropped SSH agent → unsigned → can still block non-author merges). `--admin` (and the raw `PUT .../merge` API) bypass **both** gates — emergency/admin-only, never a routine path. When you genuinely must bypass: `gh pr merge <n> --squash --admin --delete-branch` (the squash still lands `verified=true`).
 - **PR title becomes the squash commit subject on dev.** Write PR titles as real Conventional Commits — `feat(send): ...`, `fix(passkey): ...`, `chore(deps): ...`. The PR body becomes the commit body.
+- **PR-title length: keep the title ≤ ~93 chars.** On squash-merge GitHub appends ` (#NN)` to the subject, and `commitlint`'s `header-max-length` (100) is enforced in `Quality / Status` and is **NOT** skipped on `dev`/`dev-quality` promotes (only on PRs to `main`). A 94-char title becomes a 101-char commit subject → red commitlint that you can't fix without rewriting history (force-push, blocked on protected branches). So budget for the `(#NN)` suffix: `len(title) + len(" (#NN)") ≤ 100`. The same applies to any direct commit on a long-running branch (e.g. `dev-quality`) that a promote PR later re-lints over its whole range — keep every subject ≤ 100. Fixing an already-merged over-length subject means amending + force-pushing the arc branch, which is only an option on non-protected branches.
 - **Promote PR naming**: `release: promote dev → main` followed by a short content summary in parentheses, e.g. `release: promote dev → main (biome schema bump, lockfile refs migration)`. Becomes the merge commit subject on main — write it like a release note.
 
 ## Dependency policy
@@ -56,13 +58,13 @@ Each package can import only the layers below it. `wallet-bridge` deliberately d
 
 ### Custom RPC schema patch (`registerToken`)
 
-`registerToken` is added to `@aztec/wallet-sdk`'s `WalletSchema` at runtime via three identical inline files: `packages/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts`, `packages/faucet/src/lib/nulo-schema-patch.ts`, `packages/playground/src/lib/nulo-schema-patch.ts`. Each is **side-effect only** (no exports) and is imported as the first import in the module that constructs the wallet-sdk client. Drift between the three copies is pinned by [`packages/wallet-bridge/src/dispatcher.test.ts`](./packages/wallet-bridge/src/dispatcher.test.ts) (reachability test imports the extension's copy and asserts shape). When adding a new Nulo-custom RPC, update all three copies AND add a paired reachability assertion. See [`packages/wallet-bridge/README.md`](./packages/wallet-bridge/README.md) "Custom RPC methods" for the full contract.
+`registerToken` is added to `@aztec/wallet-sdk`'s `WalletSchema` at runtime via three identical inline files: `apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts`, `apps/faucet/src/lib/nulo-schema-patch.ts`, `apps/playground/src/lib/nulo-schema-patch.ts`. Each is **side-effect only** (no exports) and is imported as the first import in the module that constructs the wallet-sdk client. Drift between the three copies is pinned by [`packages/wallet-bridge/src/dispatcher.test.ts`](./packages/wallet-bridge/src/dispatcher.test.ts) (reachability test imports the extension's copy and asserts shape). When adding a new Nulo-custom RPC, update all three copies AND add a paired reachability assertion. See [`packages/wallet-bridge/README.md`](./packages/wallet-bridge/README.md) "Custom RPC methods" for the full contract.
 
 ## Extension component model (L0–L6)
 
 Six layers, low → high. A layer can import only from layers below it. Enforced via `biome.json` `noRestrictedImports` overrides.
 
-**L0–L2 are externalized to `@nulo/design`** (round 1 + round 2 — see `implementations-plan/design-system-externalization/` and `implementations-plan/design-system-externalization-round-2/`). The framework-/host-agnostic primitives live in the shared package and are consumed by the extension via a custom `unplugin-vue-components` resolver (`packages/extension/scripts/design-resolver.ts`), so templates use `<Flex>`/`<Text>`/`<Badge>` unchanged. `src/design/tokens.ts` re-exports `@nulo/design/tokens`; `_base.scss`/`_flex.scss`/`_text.scss` are gone — the wallet's base stylesheet is now `@nulo/design/base.css`. The package has NO auto-import, so its SFCs use explicit imports. **Resolver discipline:** a name enters `NULO_DESIGN_COMPONENTS` only when its extension-local SFC is DELETED; the three host-coupled holdouts (`Button` → RouterLink, `SubPageHeader` → router/history, `ToastManager` → app-shell toast root) keep a thin LOCAL extension wrapper that renders the package base (`Button`/`SubPageHeaderBase`/`ToastManagerBase`), so their bare tags resolve to the wrapper, NOT the resolver. The `toast`/`outside` composables live in `@nulo/design/composables/*`; the extension keeps `composables/{toast,outside}.js` as named re-export shims so its explicit + auto-import call sites are untouched.
+**L0–L2 are externalized to `@nulo/design`** (round 1 + round 2 — see `implementations-plan/design-system-externalization/` and `implementations-plan/design-system-externalization-round-2/`). The framework-/host-agnostic primitives live in the shared package and are consumed by the extension via a custom `unplugin-vue-components` resolver (`apps/extension/scripts/design-resolver.ts`), so templates use `<Flex>`/`<Text>`/`<Badge>` unchanged. `src/design/tokens.ts` re-exports `@nulo/design/tokens`; `_base.scss`/`_flex.scss`/`_text.scss` are gone — the wallet's base stylesheet is now `@nulo/design/base.css`. The package has NO auto-import, so its SFCs use explicit imports. **Resolver discipline:** a name enters `NULO_DESIGN_COMPONENTS` only when its extension-local SFC is DELETED; the three host-coupled holdouts (`Button` → RouterLink, `SubPageHeader` → router/history, `ToastManager` → app-shell toast root) keep a thin LOCAL extension wrapper that renders the package base (`Button`/`SubPageHeaderBase`/`ToastManagerBase`), so their bare tags resolve to the wrapper, NOT the resolver. The `toast`/`outside` composables live in `@nulo/design/composables/*`; the extension keeps `composables/{toast,outside}.js` as named re-export shims so its explicit + auto-import call sites are untouched.
 
 ```
 [L0] design tokens     @nulo/design (token-contract.ts → generated tokens.ts + base.css + fonts).
@@ -310,7 +312,7 @@ openToast({ label: "Message", icon: "copy" }, 2_000)
 
 Plans + audit transcripts under [`implementations-plan/`](./implementations-plan/README.md) are committed artifacts. They get read by future contributors and future Claude sessions that have no idea who you are or where you cloned the repo. A few rules:
 
-- **No personal absolute paths.** Never write home-directory-rooted paths (macOS `~/...` expansions, Linux `~/Projects/...` expansions, Windows user-profile paths) in any plan file, audit transcript, or status doc. Use repo-relative paths (`packages/extension/src/popup/app.vue:164`) — they survive the clone and they don't leak whose machine the plan was written on.
+- **No personal absolute paths.** Never write home-directory-rooted paths (macOS `~/...` expansions, Linux `~/Projects/...` expansions, Windows user-profile paths) in any plan file, audit transcript, or status doc. Use repo-relative paths (`apps/extension/src/popup/app.vue:164`) — they survive the clone and they don't leak whose machine the plan was written on.
 - **No machine-specific paths in general.** Temp-file paths (system scratch dirs, macOS folder containers, Linux tmpdirs) belong in transient terminal output, never in committed planning docs. Quote the conversation context instead ("the codex review transcript saved at this session's CODEX_DIR") or paste the response inline.
 - **The same rule applies to file links in audit reports.** When recording a codex / opus audit, rewrite paths to repo-relative before committing — e.g. `[plan.md](implementations-plan/<topic>/plan.md)` rather than an absolute path that includes a username segment.
 - **OK to reference outside repos by name when load-bearing.** E.g. "the Rabby reference implementation" or "the aztec-accelerator native app". Don't include the clone path on your machine.
@@ -325,18 +327,20 @@ Plans + audit transcripts under [`implementations-plan/`](./implementations-plan
 | Before opening any UI PR | `bun run audit:vue` (typecheck → unit + component tests → lint → build). |
 | When editing the popup, contracts, or anything user-visible | `bun run test:e2e` (smoke; no Aztec sandbox). |
 | When touching dApp / network / PXE behavior | `bun run e2e:agent` (network suite; owns anvil + aztec + playground per worktree — parallel-safe). |
-| When editing Storybook stories or component visuals | `bun run --cwd packages/extension build-storybook`. |
+| When editing Storybook stories or component visuals | `bun run --cwd apps/extension build-storybook`. |
 
-`audit:vue` excludes e2e tests (`packages/extension/vitest.config.ts:68`). Smoke and network e2e are separate gates.
+`audit:vue` excludes e2e tests (`apps/extension/vitest.config.ts:68`). Smoke and network e2e are separate gates.
 
 ### In CI (server-side enforcement)
 
 Configured in [`.github/`](./.github/). The full contributor guide is at [`CI.md`](./CI.md); the quick reference is at [`.github/README.md`](./.github/README.md).
 
-- **Every PR**: `Quality / Status` aggregates commitlint, lint, typecheck, units, build. **Required check** on `main` + `dev`. Branch-up-to-date is NOT enforced on `dev` (the legacy `strict` flag is off), so a new dev commit doesn't invalidate a green PR — you only re-run CI on your own pushes.
-- **`Smoke e2e / Status`**: runs on PRs to `main` (always), on PRs to `dev` whose diff touches the `smoke-surface` filter, or on PRs labeled `e2e:smoke`. Status emits pass when skipped. Currently advisory; will become required once the smoke fixture-cleanup follow-up PR lands.
-- **`Network e2e / Status`**: same shape as smoke, with the `extension-network` filter and `e2e:network` label. **Required check** on `main`. Each shard installs `accelerator-server` (Linux x86_64 binary from `alejoamiras/aztec-accelerator` releases, SHA-256-pinned in `_network-e2e.yml`) and enforces native bb proving via `VITE_NULO_ACCELERATOR_REQUIRED=1` baked into the wallet build. Silent fallback to WASM is a hard fail. Rollback: set `vars.NULO_E2E_DISABLE_ACCELERATOR=1` (Settings → Actions → Variables) or use the `workflow_dispatch` input `disable_accelerator: true`. See [CI.md § Accelerator in CI](./CI.md#accelerator-in-ci).
+- **Every PR**: `quality-status` aggregates commitlint, lint, typecheck, units, build. **Required check** on `main` + `dev`. Branch-up-to-date is NOT enforced on `dev` (the legacy `strict` flag is off), so a new dev commit doesn't invalidate a green PR — you only re-run CI on your own pushes. (The check-run is the bare job name `quality-status`; the old required context `Quality / Status` was a phantom that never matched — see § Branching.)
+- **`smoke-e2e-status`**: runs on PRs to `main` (always), on PRs to `dev` whose diff touches the `smoke-surface` filter, or on PRs labeled `e2e:smoke`. Status emits pass when skipped. **Required check on both `dev` and `main`** (the produced bare name; verified against the live `required_status_checks.checks`).
+- **`network-e2e-status`**: same shape as smoke, with the `extension-network` filter and `e2e:network` label. **Required check on both `dev` and `main`** (verified against the live `required_status_checks.checks`). Each shard installs `accelerator-server` (Linux x86_64 binary from `alejoamiras/aztec-accelerator` releases, SHA-256-pinned in `_network-e2e.yml`) and enforces native bb proving via `VITE_NULO_ACCELERATOR_REQUIRED=1` baked into the wallet build. Silent fallback to WASM is a hard fail. Rollback: set `vars.NULO_E2E_DISABLE_ACCELERATOR=1` (Settings → Actions → Variables) or use the `workflow_dispatch` input `disable_accelerator: true`. See [CI.md § Accelerator in CI](./CI.md#accelerator-in-ci).
 - **Workflow-level**: actionlint + shellcheck run when workflow YAML or shell scripts change.
+
+> **⚠️ The quality gates are non-negotiable — NEVER weaken them to merge faster.** Unit tests (inside `quality-status`), `Network e2e`, and `Smoke e2e` are *the* safety net that lets this repo move fast without shipping breakage. **Do not** convert a failing one to `advisory` / `continue-on-error` / `neutral` / `|| true`, **do not** make a check report success-on-failure, and **do not** remove one from a branch's required set — not to get a green rollup, not to dodge a `--admin`, not for any "we're in a hurry" reason. A red check means exactly one of two things: a **genuine flake → re-run it**, or **real breakage → fix it**. Silencing the signal to merge faster is precisely the wrong trade and destroys the gate's entire purpose. (Smoke is now **required** on both branches; its fixtures can still flake, so treat a red smoke like any other gate — flake → re-run, real breakage → fix — never neutralize it.) If a red check blocks a CLI merge, re-run the flake or fix the breakage — never neutralize the check.
 
 ### Branches + releases
 
@@ -350,6 +354,34 @@ Configured in [`.github/`](./.github/). The full contributor guide is at [`CI.md
 
 Two flows: **stable** (from `main`, tagged `vX.Y.Z`) and **prerelease** (from `dev`, tagged `vX.Y.Z-rc[.N]`). Both share the same v4 abort bug + manual unstick pattern.
 
+#### Start here — what a release is, and what you actually do
+
+A **stable release** turns the current `main` into a published `vX.Y.Z`: a GitHub Release with the built Chrome + Firefox zips + `SHASUMS256.txt`, the landing (`nulo.sh`) and faucet (`faucet.nulo.sh`) redeployed, and a `main → dev` back-sync PR opened. Most of it is automated by [`release.yml`](.github/workflows/release.yml); this table is the **current** division of labor (it shifts as the [staged rollout](#staged-rollout-switches) proceeds):
+
+| What | Who | Current state |
+|---|---|---|
+| Open the Release PR (version bump + `CHANGELOG`) | release-please | ✅ automatic |
+| **Tag + GitHub Release after you merge the Release PR** (the "unstick") | `auto-unstick` job **if `AUTO_UNSTICK_ENABLED=on`**, else **you** | ⚠️ **flag OFF → you do the 45s manual unstick** |
+| Gates → build chrome+firefox → smoke → attach zips/SHASUMS | publish chain | ✅ automatic |
+| Redeploy landing + faucet | `refresh-landing` + `deploy-faucet` | ✅ automatic (faucet hook unset → its CF dashboard Git-integration still deploys it) |
+| Confirm the live sites serve THIS release | `verify-live` | ✅ automatic (advisory — see switches) |
+| Open the `main → dev` back-sync PR (+ prerelease-manifest re-baseline) | `sync-main-to-dev` | ⚠️ automatic **only when `AUTO_UNSTICK_ENABLED=on`** (it gates on `push` + `attach-assets` success; the flag-OFF manual `workflow_dispatch` unstick is neither → **flag OFF = you open the sync manually**, see § After a stable cut). You review + **merge-commit** it, NOT squash — see step 5. |
+
+**The happy path (stable), end to end:**
+
+1. **Promote `dev → main`** — open a `release: promote dev → main (…)` PR, merge it (merge-commit, per `main`'s ruleset).
+2. **Merge the Release PR** — release-please opens `chore(main): release X.Y.Z` within ~1 min; review the `CHANGELOG.md` diff, merge it via the UI (merge-commit).
+3. **Unstick** — that merge re-triggers `release.yml`, which **aborts** on the [v4 bug](#why-the-manual-unstick-is-required-the-v4-bug):
+   - **`AUTO_UNSTICK_ENABLED=on`** → the `auto-unstick` job tags + publishes automatically; nothing to do, skip to 4.
+   - **flag OFF (current default)** → run the **[manual unstick](#stable-release-from-main)** below (§ Stable steps 5–6: a ~45s paste + a `workflow_dispatch` republish).
+4. **Wait for the publish chain** (~15–25 min): gates → build → smoke → `attach-assets` → landing/faucet deploys → `verify-live`.
+5. **Merge-commit the back-sync PR (NOT squash)** — `sync-main-to-dev` opens `chore: sync main → dev`. **Merge it with a merge commit** (`gh pr merge <n> --merge`) so `main`'s release commit stays in `dev`'s ancestry — a squash drops it and re-breaks the next rc cut (this was the [prerelease-fix](implementations-plan/release-prerelease-fix/plan.md)). `dev`'s ruleset now allows `merge` alongside `squash`. The merge carries the bot's manifest-rebaseline commit onto `dev`, but that commit is written via the Contents API under the App token → GitHub-**signed** (verified), so classic `required_signatures` is satisfied with **no `--admin`**. Labeled `needs-manual-resolution`? Resolve the conflict on the sync branch first, then merge-commit.
+6. **Verify** — `gh release view v$VERSION --json assets -q '[.assets[].name]'` lists the two zips + `SHASUMS256.txt`.
+
+> **One-time flip to near-one-click:** once a flag-OFF release proves the wiring (step 3 manual, everything else automatic), `gh variable set AUTO_UNSTICK_ENABLED -b on`. After that a stable release is **steps 1, 2, 5 only** (promote → merge Release PR → merge-commit the sync PR); the unstick + publish are hands-off. The detailed sections below are the reference + the fallback for when automation is off or red — see [§ Troubleshooting](#troubleshooting--when-x-fails).
+
+> **Auto-unstick (staged rollout — currently OFF).** `release.yml` now has an `auto-unstick` job that does the 45-second manual unstick (§ steps 5–6 below) automatically: on the post-merge `push:main` where release-please aborted, it detects the merged `autorelease: pending` Release PR at `github.sha`, creates the tag + empty release, relabels the PR, and lets `resolve` continue the publish chain in the SAME run. **It is gated by the repo variable `vars.AUTO_UNSTICK_ENABLED` and defaults OFF** (unset, or anything other than `on`/`true`/`1`, = off). While OFF the job still runs but no-ops (`unstuck=false`) → the chain stays skipped → the manual unstick below is still required, exactly as today. **The flip is a deliberate human action:** after one clean flag-off release proves the wiring, set `AUTO_UNSTICK_ENABLED=on` (Settings → Actions → Variables, or `gh variable set AUTO_UNSTICK_ENABLED -b on`) and the next release self-unsticks. The logic + every guard (idempotent re-tag, fail-closed on a wrong-SHA tag, no-op on a non-Release-PR push) live in unit-tested `scripts/release/auto-unstick*.ts`. **The manual procedure below remains the documented fallback and the source of truth** for what the automation does. To turn it back off: `gh variable set AUTO_UNSTICK_ENABLED -b off` (or delete the variable).
+
 **Prerequisites** (one-time, already done):
 - GitHub App `nulo-release-bot` installed on the repo with `RELEASE_PLEASE_APP_ID` + `RELEASE_PLEASE_APP_PRIVATE_KEY` repo secrets wired.
 - `CLOUDFLARE_PAGES_DEPLOY_HOOK` repo secret set (used by the workflow's `refresh-landing` job).
@@ -359,7 +391,7 @@ Two flows: **stable** (from `main`, tagged `vX.Y.Z`) and **prerelease** (from `d
 Per-release procedure for shipping a stable release. Total time: ~20 min, of which ~45 seconds is manual.
 
 1. **Get the work onto `main`.** Promote `dev → main` via the usual `release: promote dev → main (...)` PR. Merge-commit (per `main`'s ruleset).
-2. **Wait for the Release PR.** The push to `main` triggers `release.yml`. release-please opens a Release PR titled `chore(main): release X.Y.Z` (version chosen automatically from Conventional Commits since the last tag — `feat:` → minor, `fix:` → patch, `BREAKING CHANGE:` → major). Review the auto-generated `CHANGELOG.md` diff in the PR.
+2. **Wait for the Release PR.** The push to `main` triggers `release.yml`. release-please opens a Release PR titled `chore(main): release X.Y.Z` (version chosen automatically from Conventional Commits since the last tag — `feat:` → minor, `fix:` → patch). **While in `0.x`, `bump-minor-pre-major: true` caps a `BREAKING CHANGE:` to a *minor* bump (`0.23.0` → `0.24.0`, never auto-`1.0.0`)** — a `1.0.0` cut is a deliberate manual `Release-As: 1.0.0` footer. Review the auto-generated `CHANGELOG.md` diff in the PR.
 3. **Merge the Release PR via the UI** (merge commit).
 4. **Wait for the post-merge `release.yml` run.** It will run release-please-action again. **Expected: it aborts with `⚠ There are untagged, merged release PRs outstanding - aborting` and the downstream gates + publish jobs all skip.** This is the v4 bug.
 5. **Manual unstick** (~45 seconds — paste into terminal):
@@ -415,13 +447,13 @@ Per-rc procedure. Same v4 bug as stable; same ~45 second unstick. Network-e2e is
    - `--verify-tag` confirms the tag exists; we don't pass `--target` because `target_commitish` is ignored when the tag already exists per the GitHub Releases API.
 6. **Trigger the publish chain via the STABLE workflow's escape hatch:**
    ```bash
-   gh workflow run release.yml --ref main \
+   gh workflow run release.yml --ref dev \
      -f tag="v$VERSION" -f dry_run=false \
      -f publish_marketplaces=false
    # Add -f run_network_e2e=true if you want to gate this rc on the
    # 30-45 min network e2e suite. Off by default for prereleases.
    ```
-   - **Always `--ref main`** — uses the known-stable workflow definition; `dev`'s workflow file might be mid-edit during a feature cycle.
+   - **Use `--ref dev` for a prerelease, NOT `--ref main`.** `--ref` picks BOTH the `release.yml` definition AND the reusable workflows it calls (`_build-extension.yml` etc., resolved at the caller's ref). Those must match the **layout of the tag's code**. Since #186 moved `packages/extension → apps/extension` on `dev` but `main` is still pre-restructure (`packages/extension`), a prerelease tag cut from `dev` (apps/ layout) built via `--ref main` fails with `ENOENT: Could not change directory to "packages/extension"`. `dev`'s workflow has the matching `apps/extension` paths. (Once #186 promotes to `main` at the next stable cut, `main` and `dev` reconverge and `--ref main` works again — but the safe rule is: **publish a prerelease with the ref of the branch it was cut from.**)
    - Pass the prerelease tag explicitly; the workflow's `resolve` job verifies the tag exists and detects `is_prerelease=true` from the `-` in the version string.
 7. **Cloudflare hook is intentionally skipped** for prereleases — the landing points at stable releases only. No manual step.
 8. **Verify:**
@@ -435,13 +467,15 @@ Per-rc procedure. Same v4 bug as stable; same ~45 second unstick. Network-e2e is
 
 The prerelease manifest (`.release-please-prerelease-manifest.json`) tracks the rc series independently and must be re-baselined to the new stable version. Otherwise the next rc series starts from a stale base + release-please can reopen old Release PRs on the drift ([release-please#2172](https://github.com/googleapis/release-please/issues/2172)).
 
-**Two-step procedure (order matters):**
+> **Automated (`sync-main-to-dev` job).** `release.yml` now opens this PR for you. On the `push:main` that published a stable release, the `sync-main-to-dev` job branches from `origin/main`, writes the prerelease-manifest re-baseline, and opens ONE `chore: sync main → dev` PR (App-token-opened so dev's CI fires) that **combines both steps below**. It never local-merges: it lets GitHub compute mergeability — a clean PR is left for you to **merge-commit** (NOT squash — the merge keeps `main`'s release commit in `dev`'s ancestry, which the prerelease anchor needs); a CONFLICTING/UNKNOWN one is labeled `needs-manual-resolution` + commented (surfaced, never silent). It's **push-only** (a `workflow_dispatch` republish of an old tag never re-syncs) and **advisory** (post-publish — a sync hiccup reds only its own job, never the shipped release). The logic lives in unit-tested `scripts/release/open-sync-pr*.ts`. **You still review + merge-commit the PR** (`--merge`, NOT squash — the bot's manifest commit is written via the Contents API under the App token, so it's GitHub-signed and satisfies `required_signatures` with no `--admin`); the steps below are the manual fallback (and what the job automates) if it's ever red or disabled.
+
+**Manual two-step procedure (order matters) — the fallback the job automates:**
 
 1. **First, merge `main` back into `dev`** via the usual flow so `dev`'s `package.json` + `CHANGELOG.md` reflect the new stable version. (Without this, release-please sees a manifest/source drift on dev and can reopen merged PRs.)
 2. **Then, open a small PR to `dev`** updating `.release-please-prerelease-manifest.json` to match (e.g. `{ ".": "0.21.0" }`). Merge it.
 3. Next `gh workflow run release-prerelease.yml` will cut the next rc series from the correct base.
 
-**Why the manual unstick is required (the v4 bug):**
+#### Why the manual unstick is required (the v4 bug)
 
 `release-please-action@v4` runs both "open Release PR" and "tag + publish merged Release PR" phases. The publish phase looks for a previously-created GitHub Release that matches the merged PR's manifest entry — when no such release exists yet (because the publish phase is supposed to be the one creating it), it logs `⚠ Expected 1 releases, only found 0` and bails with the "outstanding" error instead of creating the release itself. Both the original action issue ([#1205](https://github.com/googleapis/release-please-action/issues/1205)) and the upstream tool issue ([release-please#2712](https://github.com/googleapis/release-please/issues/2712)) are open with no fix.
 
@@ -456,13 +490,38 @@ The manual unstick (tag + `autorelease: tagged` label + empty GitHub Release) pl
 
 **Things that DO work without manual intervention:**
 - release-please opens correctly-titled Release PRs (after the `group-pull-request-title-pattern` fix in [`release-please-config.json`](.github/release-please-config.json)).
-- The Release PR's CI runs normally (App-token triggers the PR-quick workflow → `Quality / Status`).
+- The Release PR's CI runs normally (App-token triggers the PR-quick workflow → `quality-status`).
 - The Release PR's commits are bot-verified (App-authenticated → satisfies `main`'s signed-commits rule).
 - The `workflow_dispatch` publish chain runs all gates + builds + smoke + attach-assets end-to-end.
+
+#### Troubleshooting — when X fails
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Post-merge `release.yml` skipped everything; no tag, no assets | v4 abort + `AUTO_UNSTICK_ENABLED` off (expected today) | Run the [manual unstick](#stable-release-from-main) (§ Stable 5–6). Consider flipping the flag for next time. |
+| `auto-unstick` job **red** with "refusing to re-point" | a `vX.Y.Z` tag already exists at a DIFFERENT commit | Fail-closed by design — it won't move a tag. Investigate the tag/commit mismatch, delete/fix the bad tag, then `workflow_dispatch` republish. |
+| `auto-unstick` ran, `unstuck=false`, chain still skipped | flag off (no-op by design), OR HEAD isn't a merged `autorelease: pending` Release PR | If you expected it ON: confirm `vars.AUTO_UNSTICK_ENABLED=on` AND the Release PR actually merged at `github.sha`. |
+| Release exists but assets are missing | an upload failed mid-`attach-assets` | Re-run just the publish chain: `gh workflow run release.yml --ref main -f tag=vX.Y.Z -f dry_run=false`. |
+| `verify-live` **red** but the release shipped | CDN lag, or a real deploy miss | It's advisory — open `nulo.sh` / `faucet.nulo.sh`. The faucet's `index.html` `nulo-build` meta must equal `/build.json` `buildId`; if not, re-fire the deploy hook. |
+| Faucet shows "No network configured for chainId …" | faucet built/deployed against a stale chain identity | Chain id is single-sourced in `apps/faucet/src/lib/chain-constants.ts` (no env override). Redeploy from current `main`. |
+| `sync-main-to-dev` PR labeled `needs-manual-resolution` | `dev` diverged from `main` since the release | Resolve the conflict on the sync branch (usually `CHANGELOG.md` / `bun.lock`), then **merge-commit** it (`--merge`, NOT squash — preserves release-commit ancestry on `dev`; the bot's manifest commit is App-signed so no `--admin`). |
+| No `sync-main-to-dev` PR appeared | push-only + stable-only; a `workflow_dispatch` republish never syncs | Expected on a republish. For a genuine cut, check the job ran on the `push:main` and read its log. |
+| release-please reopened an OLD Release PR | prerelease-manifest drift after a stable cut | Re-baseline `.release-please-prerelease-manifest.json` to the new stable version — the `sync-main-to-dev` PR does this; just merge it. |
+
+#### Staged-rollout switches
+
+Two pieces ship **guarded** and get promoted only after they're proven on a real release. Flip them deliberately, one at a time — the rule is *ship inert/advisory, observe one real release, then promote*:
+
+| Switch | What it gates | Default | Flip when | How |
+|---|---|---|---|---|
+| `vars.AUTO_UNSTICK_ENABLED` | the `auto-unstick` job acting vs no-op | **off** | after one clean flag-OFF release proves the wiring | `gh variable set AUTO_UNSTICK_ENABLED -b on` (back: `-b off`, or delete the var) |
+| `verify-live` ∈ `status` aggregator | whether a failed live-check fails the release | **advisory** (not in `status`) | after the first clean real release shows it green | one-line `release.yml` edit: add `verify-live` to the `status` job's `needs` + its result loop |
+
+The manual procedures above remain the permanent fallback regardless of switch state.
 
 ## What this file is NOT
 
 - Not the architecture overview — see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 - Not the per-package surface — see each `packages/<name>/README.md`.
-- Not the e2e infrastructure doc — see [`packages/extension/tests/e2e/README.md`](./packages/extension/tests/e2e/README.md).
+- Not the e2e infrastructure doc — see [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md).
 - Not the planning archive — see [`implementations-plan/README.md`](./implementations-plan/README.md).

@@ -31,7 +31,7 @@ import { EthAddress } from "@aztec/foundation/eth-address"
 import { TokenPortalAbi, TokenPortalBytecode } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
 import { createPublicClient, createWalletClient, defineChain, getContract, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 
@@ -46,8 +46,8 @@ const PERMIT2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3" as const
 const ACCOUNT0_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const
 
 const here = dirname(fileURLToPath(import.meta.url))
-const OUT = join(here, "..", "..", "bridge-evm", "out")
-const AZTEC = join(here, "..", "..", "bridge-aztec")
+const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
+const AZTEC = join(here, "..", "..", "..", "contracts", "bridge", "aztec")
 
 const sandbox = defineChain({
 	id: 31337,

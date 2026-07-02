@@ -1,0 +1,413 @@
+<script setup>
+/** Components */
+import ActionButtonsView from "./ActionButtonsView.vue"
+import GasBalanceCard from "./GasBalanceCard.vue"
+import { Dropdown } from "@/components/ui/Dropdown"
+
+/** Vendor */
+import { DateTime } from "luxon"
+
+/** Services */
+import { ContentKind } from "@/wallet/services/task/spec"
+import { TaskServiceClient } from "@/wallet/services/task/client"
+import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
+import { TokenServiceClient } from "@/wallet/services/token/client"
+
+/** Utils */
+import { balanceFormatted } from "@/utils/amount.js"
+
+/** Composables */
+import { useToast } from "@/composables/toast.js"
+const { openToast } = useToast()
+
+/** Store */
+import { useAppStore } from "@/stores/app.store"
+import { usePopupStore } from "@/stores/popup.store"
+import { useCacheStore } from "@/stores/cache.store"
+const appStore = useAppStore()
+const popupStore = usePopupStore()
+const cacheStore = useCacheStore()
+
+const router = useRouter()
+
+const props = defineProps({
+	tokenBalance: {
+		type: Object,
+		required: false,
+		default: null,
+	},
+})
+
+const tokenBalances = ref([])
+
+const tokenToDisplay = computed(
+	() => props.tokenBalance?.token || tokenBalances.value.find((tb) => tb.token.id === appStore.displayOption)?.token,
+)
+const tokenBalanceToDisplay = computed(() => {
+	return props.tokenBalance || tokenBalances.value.find((tb) => tb.token.id === tokenToDisplay.value?.id)
+})
+const showFullBalance = ref(false)
+const totalTokenBalance = computed(() => {
+	if (!tokenBalanceToDisplay.value) return { value: 0 }
+
+	// Sum raw base units in bigint domain — no float pivot, no precision loss
+	// even at 18 decimals.
+	const decimals = tokenBalanceToDisplay.value?.token?.decimals || 0
+	const publicRaw = BigInt(tokenBalanceToDisplay.value?.publicBalance || 0)
+	const privateRaw = BigInt(tokenBalanceToDisplay.value?.privateBalance || 0)
+	const totalRaw = publicRaw + privateRaw
+
+	return balanceFormatted(totalRaw, decimals, showFullBalance.value ? undefined : 20)
+})
+
+const privateBalanceFormatted = computed(() => {
+	if (!tokenBalanceToDisplay.value) return "0"
+	const decimals = tokenBalanceToDisplay.value?.token?.decimals || 0
+	return balanceFormatted(tokenBalanceToDisplay.value?.privateBalance || 0, decimals, 10).value
+})
+const publicBalanceFormatted = computed(() => {
+	if (!tokenBalanceToDisplay.value) return "0"
+	const decimals = tokenBalanceToDisplay.value?.token?.decimals || 0
+	return balanceFormatted(tokenBalanceToDisplay.value?.publicBalance || 0, decimals, 10).value
+})
+
+const BalanceDisplayOptionsMap = {
+	total_account_value: "Account Value",
+	total_private_balances: "Private Account Value",
+	total_public_balances: "Public Account Value",
+}
+
+const isCopied = ref(false)
+const handleCopy = (value, label) => {
+	isCopied.value = true
+	window.navigator.clipboard.writeText(value)
+	openToast({ label: `${label} is copied`, icon: "copy" })
+	setTimeout(() => {
+		isCopied.value = false
+	}, 2500)
+}
+const handleRefreshBalance = () => {
+	tokenBalanceService.refreshTokenBalance(tokenBalanceToDisplay.value?.id)
+}
+const isRefreshingBalance = ref(false)
+
+const handleTokenBalanceClick = async () => {
+	let balance = totalTokenBalance.value?.value
+	if (totalTokenBalance.value?.slashed || showFullBalance.value) {
+		showFullBalance.value = !showFullBalance.value
+		await nextTick()
+		balance = totalTokenBalance.value?.value
+	}
+
+	handleCopy(balance, "Balance")
+}
+
+const taskService = new TaskServiceClient()
+taskService.onTaskCreated.add(onTaskCreated)
+taskService.onTaskUpdated.add(onTaskUpdated)
+taskService.onTaskDeleted.add(onTaskDeleted)
+function onTaskCreated(task) {
+	switch (task.content.kind) {
+		case ContentKind.BalanceUpdate:
+			if (tokenBalanceToDisplay.value?.id !== task.content.tbId) return
+
+			isRefreshingBalance.value = true
+
+			break
+
+		default:
+			break
+	}
+}
+function onTaskUpdated(task) {
+	switch (task.content.kind) {
+		case ContentKind.BalanceUpdate:
+			if (!task.finishedAt) return
+			if (tokenBalanceToDisplay.value?.id !== task.content.tbId) return
+
+			isRefreshingBalance.value = false
+
+			break
+
+		default:
+			break
+	}
+}
+function onTaskDeleted(task) {
+	switch (task.content.kind) {
+		case ContentKind.BalanceUpdate:
+			if (tokenBalanceToDisplay.value?.id !== task.content.tbId) return
+
+			isRefreshingBalance.value = false
+
+			break
+
+		default:
+			break
+	}
+}
+
+const tokenBalanceService = new TokenBalanceServiceClient()
+tokenBalanceService.onTokenBalanceAdded.add(onBalanceAdded)
+tokenBalanceService.onTokenBalanceUpdated.add(onBalanceUpdated)
+tokenBalanceService.onTokenBalanceDeleted.add(onBalanceDeleted)
+function onBalanceAdded(tb) {
+	if (tb.account !== appStore.account.address) return
+
+	tokenBalances.value.push(tb)
+}
+function onBalanceUpdated(tb) {
+	const idx = tokenBalances.value.findIndex((_tb) => _tb.id === tb.id)
+	if (idx !== -1) {
+		tokenBalances.value[idx] = tb
+	}
+}
+function onBalanceDeleted(tb) {
+	// tokenToDisplay is computed from tokenBalances, so the selected-token check
+	// must read the pre-delete list — capture it BEFORE filtering, otherwise the
+	// recompute returns undefined and the displayOption reset never fires
+	// (deleting the displayed balance would leave the home view stuck on a stale
+	// selection). Maintaining the list here also stops the deleted row lingering
+	// until the next full fetch.
+	const wasDisplayed = !props.tokenBalance && tokenToDisplay.value?.id === tb.token.id
+	tokenBalances.value = tokenBalances.value.filter((_tb) => _tb.id !== tb.id)
+	if (wasDisplayed) {
+		appStore.displayOption = "total_account_value"
+	}
+}
+
+const tokenService = new TokenServiceClient()
+tokenService.onTokenDeleted.add(onTokenDeleted)
+function onTokenDeleted(token) {
+	if (!props.tokenBalance && tokenToDisplay.value?.id === token.id) {
+		appStore.displayOption = "total_account_value"
+	}
+}
+
+async function fetchTokenBalances() {
+	tokenBalances.value = await tokenBalanceService.getTokenBalances(undefined, appStore.account?.address)
+	isRefreshingBalance.value = (await taskService.getTasks()).some(
+		(t) =>
+			!t.finishedAt &&
+			t.content.kind === ContentKind.BalanceUpdate &&
+			t.content.account === appStore.account.address &&
+			t.content.tbId === tokenBalanceToDisplay.value?.id,
+	)
+}
+
+async function loadBalanceDisplayOptionMigration(profileId, networkId) {
+	const oldKey = "nulo:ui:balanceDisplayOption"
+	const newKey = `nulo:ui:balanceDisplayOption@${profileId}`
+	let option
+	let optionsMap
+
+	const oldResult = await chrome.storage.local.get(oldKey)
+	if (oldKey in oldResult) {
+		option = oldResult[oldKey]
+		await chrome.storage.local.remove(oldKey)
+		if (option) {
+			await saveBalanceDisplayOption(profileId, networkId, option)
+		}
+	} else {
+		const result = await chrome.storage.local.get(newKey)
+		optionsMap = result[newKey] || {}
+
+		option = optionsMap[networkId]
+	}
+
+	if (!option) {
+		option = "total_account_value"
+		optionsMap[networkId] = option
+		await chrome.storage.local.set({ [newKey]: optionsMap })
+	}
+
+	appStore.displayOption = option
+}
+async function loadBalanceDisplayOption(profileId, networkId) {
+	const key = `nulo:ui:balanceDisplayOption@${profileId}`
+
+	const result = await chrome.storage.local.get(key)
+	const optionsMap = result[key] || {}
+
+	let option = optionsMap[networkId]
+
+	if (!option) {
+		option = "total_account_value"
+		optionsMap[networkId] = option
+		await chrome.storage.local.set({ [key]: optionsMap })
+	}
+
+	appStore.displayOption = option
+}
+async function saveBalanceDisplayOption(profileId, networkId, option) {
+	const key = `nulo:ui:balanceDisplayOption@${profileId}`
+
+	const result = await chrome.storage.local.get(key)
+	const optionsMap = result[key] || {}
+
+	if (optionsMap[networkId] !== option) {
+		optionsMap[networkId] = option
+		await chrome.storage.local.set({ [key]: optionsMap })
+	}
+}
+
+watch(
+	() => appStore.network,
+	async () => {
+		await loadBalanceDisplayOption(appStore.profile.id, appStore.network.id)
+	},
+)
+watch(
+	() => appStore.account,
+	async () => {
+		await fetchTokenBalances()
+		if (!tokenToDisplay.value) {
+			appStore.displayOption = "total_account_value"
+		}
+	},
+)
+watch(
+	() => appStore.displayOption,
+	async () => {
+		await saveBalanceDisplayOption(appStore.profile.id, appStore.network.id, appStore.displayOption)
+	},
+)
+onMounted(async () => {
+	await fetchTokenBalances()
+
+	await loadBalanceDisplayOptionMigration(appStore.profile.id, appStore.network.id) // Replace me with "loadBalanceDisplayOption" at some point
+})
+onBeforeUnmount(() => {
+	taskService.disconnect()
+	tokenBalanceService.disconnect()
+	tokenService.disconnect()
+})
+</script>
+
+<template>
+	<Flex direction="column" :class="$style.wrapper">
+		<!-- Balance section -->
+		<section :class="$style.balance_section">
+			<div
+				@click="handleTokenBalanceClick"
+				data-testid="balance-amount"
+				:class="[$style.balance_amount, isRefreshingBalance && $style.refreshing]"
+			>
+				<template v-if="tokenToDisplay">
+					{{ totalTokenBalance.value }}
+					<span :class="$style.balance_symbol">{{ tokenToDisplay?.symbol }}</span>
+				</template>
+				<template v-else>$0.00</template>
+			</div>
+
+			<Flex v-if="tokenToDisplay" align="center" justify="center" gap="12" :class="$style.breakdown">
+				<span :class="$style.breakdown_item">
+					<span :class="$style.breakdown_dot" /> PRIVATE: <span data-testid="private-balance-value">{{ privateBalanceFormatted }}</span>
+				</span>
+				<span :class="$style.breakdown_divider">|</span>
+				<span :class="$style.breakdown_item">
+					<span :class="[$style.breakdown_dot, $style.public_dot]" /> PUBLIC: <span data-testid="public-balance-value">{{ publicBalanceFormatted }}</span>
+				</span>
+			</Flex>
+		</section>
+
+		<!-- Gas juice (home page only, not token detail) -->
+		<GasBalanceCard v-if="!tokenBalance" />
+
+		<!-- Action buttons -->
+		<Flex :class="$style.actions">
+			<ActionButtonsView :token="tokenBalance?.token" />
+		</Flex>
+	</Flex>
+</template>
+
+<style module>
+.wrapper {
+	padding: 0 24px 24px 24px;
+}
+
+.balance_section {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	text-align: center;
+
+	margin-top: 32px;
+	margin-bottom: 16px;
+}
+
+.balance_amount {
+	font-family: var(--font-headline);
+	font-size: 48px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
+	color: var(--txt-primary);
+	cursor: pointer;
+
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 100%;
+}
+
+.balance_symbol {
+	font-size: 24px;
+	color: var(--txt-tertiary);
+}
+
+@keyframes blink {
+	0% { opacity: 1; }
+	50% { opacity: 0.3; }
+	100% { opacity: 1; }
+}
+
+.refreshing {
+	animation: blink 2s linear infinite;
+}
+
+.breakdown {
+	margin-top: 8px;
+}
+
+.breakdown_item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+
+	font-family: var(--font-mono);
+	font-size: 11px;
+	letter-spacing: 0.02em;
+	color: var(--nulo-secondary);
+}
+
+.breakdown_dot {
+	width: 6px;
+	height: 6px;
+	background: var(--nulo-accent);
+}
+
+.public_dot {
+	background: var(--nulo-outline);
+}
+
+.breakdown_divider {
+	color: var(--nulo-outline);
+}
+
+.actions {
+	width: 100%;
+	margin-top: 16px;
+}
+
+.hover_red {
+	& svg,
+	& span {
+		transition: all 0.2s var(--bezier);
+	}
+
+	&:hover {
+		svg { fill: var(--red); }
+		span { color: var(--red); }
+	}
+}
+</style>

@@ -26,7 +26,7 @@ import { FeeJuiceContractArtifact } from "@aztec/noir-contracts.js/FeeJuice"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveSigningKey } from "@aztec/stdlib/keys"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
 import { type Abi, createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { loadContractArtifact } from "@aztec/aztec.js/abi"
@@ -46,9 +46,11 @@ if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-core/.e
 const here = dirname(fileURLToPath(import.meta.url))
 const configArg = process.argv.indexOf("--config")
 const CONFIG_PATH =
-	configArg !== -1 ? (process.argv[configArg + 1] as string) : join(here, "..", "..", "faucet", "public", "testnet-bridge.json")
+	configArg !== -1
+		? (process.argv[configArg + 1] as string)
+		: join(here, "..", "..", "..", "apps", "faucet", "public", "testnet-bridge.json")
 const CONFIG = JSON.parse(readFileSync(CONFIG_PATH, "utf8"))
-const OUT = join(here, "..", "..", "bridge-evm", "out")
+const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
 const fuel = CONFIG.l1.fuel
 if (!fuel) throw new Error("testnet-bridge.json has no l1.fuel - run the P2 deploy first")
 
@@ -136,7 +138,7 @@ async function main() {
 		meta: { address: string; salt: number; constructorArtifact: string; constructorArgs: unknown[] },
 	) => {
 		const args = meta.constructorArgs.map((a) =>
-			typeof a === "string" && a.startsWith("0x") && a.length === 66 ? AztecAddress.fromString(a) : a,
+			typeof a === "string" && a.startsWith("0x") && a.length === 66 ? AztecAddress.fromStringUnsafe(a) : a,
 		)
 		const instance = await getContractInstanceFromInstantiationParams(
 			artifact as never,
@@ -161,7 +163,7 @@ async function main() {
 	const token = await registerLive("token", TokenContractArtifact, CONFIG.l2.token)
 	const bridge = await registerLive("bridge", tokenBridgeArtifact, bridgeMeta)
 	await registerLive("proxy", bridgeProxyArtifact, CONFIG.l2.proxy)
-	const feeJuice = await Contract.at(AztecAddress.fromString(feeJuiceAddress), FeeJuiceContractArtifact, ewallet as never)
+	const feeJuice = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, ewallet as never)
 
 	// Register the Wonderland PrivateFPC locally (instance + class). It has no public functions / no
 	// init, so 5.0 needs NO on-chain deploy (codex 019ee697); the private-kernel oracle DOES need both
@@ -176,7 +178,7 @@ async function main() {
 					"..",
 					"..",
 					"node_modules",
-					"@wonderland",
+					"@alejoamiras",
 					"aztec-fee-payment",
 					"target",
 					"private_contract-PrivateFPC.json",
@@ -285,7 +287,7 @@ async function main() {
 			return {
 				fee: {
 					paymentMethod: privateMintAndPayFee(
-						AztecAddress.fromString(PRIVATE_FPC_ADDRESS),
+						AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS),
 						result.fuelReceived,
 						deriveBridgeSecret(bridgeSalt as Fr, from),
 						bridgeSalt as Fr,
@@ -411,7 +413,7 @@ async function main() {
 					await token.methods.transfer_public_to_public(from, from, 1n, 0).send({
 						from,
 						fee: {
-							paymentMethod: privateFeeJuicePayment(AztecAddress.fromString(PRIVATE_FPC_ADDRESS)),
+							paymentMethod: privateFeeJuicePayment(AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)),
 							gasSettings: { teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }), maxFeesPerGas: maxFees },
 						},
 						wait: { waitForStatus: TxStatus.PROPOSED },

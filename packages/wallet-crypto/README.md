@@ -32,9 +32,9 @@ Depends only on `wallet-core` for the `ILogger` interface and `Web Crypto` (avai
 
 Colocated `*.test.ts`. The cryptographic derivation chain is **additionally locked** by an extension-side integration test:
 
-- `packages/extension/src/wallet/crypto/key-vectors.test.ts` exercises the full chain end-to-end and must pass byte-identically after any change here.
+- `apps/extension/src/wallet/crypto/key-vectors.test.ts` exercises the full chain end-to-end and must pass byte-identically after any change here.
 
-Treat that file as a contract. If a change is intentional (rotating a label, bumping a KDF cost), it requires a storage-version bump and a destructive-migration row in `packages/extension/src/wallet/storage/migrate.ts`.
+Treat that file as a contract. If a change is intentional (rotating a label, bumping a KDF cost), it requires a storage-version bump and a destructive-migration row in `apps/extension/src/wallet/storage/migrate.ts`.
 
 ## Key invariants
 

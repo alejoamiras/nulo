@@ -9,7 +9,7 @@ import {
 	type PoolKey,
 } from "./l1"
 
-// Reference values from bridge-evm/test/WitnessHash.t.sol — the Solidity router's
+// Reference values from contracts/bridge/evm/test/WitnessHash.t.sol — the Solidity router's
 // _hashRoute / _hashBridgeWitness for the SAME fixed inputs. If TS drifts from
 // Solidity, the Permit2 witness signature won't verify and the bridge reverts.
 // (The L1 analogue of the content-hash keystone.)

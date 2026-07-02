@@ -532,6 +532,102 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 		expect(accountsResult?.canCreateAuthWit).toBe(false)
 		expect(accountsResult?.canGet).toBe(true)
 	})
+
+	// Q11: the grant-response path projects via the shared `projectSessionAccounts`
+	// helper. These pin the `accounts` ARRAY contents on the enrich path (previously
+	// only the canGet/canCreateAuthWit flags were tested here), so the helper
+	// substitution is verified character-for-character on the wire.
+	function makeAccountsEnrichDispatcher(canGet: boolean): { dispatcher: WalletSdkDispatcher } {
+		const a1 = `0x${"11".repeat(32)}`
+		const a2 = `0x${"22".repeat(32)}`
+		const a3 = `0x${"33".repeat(32)}`
+		const caip1 = `aztec:0:${a1}`
+		const caip2 = `aztec:0:${a2}`
+		const accountReader: IAccountReader = {
+			getAccounts: async () => [
+				{ address: a1, name: "Name1", chainId: 0 },
+				{ address: a2, name: "Name2", chainId: 0 },
+				{ address: a3, name: "Name3", chainId: 0 }, // NOT a session account → filtered out
+			],
+		}
+		const networkReader: INetworkReader = { getNetworks: async () => [{ id: "net-0", chainId: 0 }] }
+		const session = makeSession({
+			accounts: [caip1, caip2],
+			accountAliases: { [caip1]: "alias-1" }, // a1 → alias hit; a2 → name fallback
+			capabilityGrants: [
+				{ capability: { type: "accounts", canGet, canCreateAuthWit: false, accounts: [] } as Capability, grantedAt: 1 },
+			],
+		})
+		const { writer } = makeSessionWriter(session)
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({ granted: [{ type: "accounts", canGet, canCreateAuthWit: false }] })) as never,
+		}
+		return { dispatcher: new WalletSdkDispatcher(networkReader, accountReader, stubExecution, interaction, writer, noopLogger) }
+	}
+
+	test("enrichGrantedCapabilities projects the session accounts array (alias hit / name fallback / filtered) — Q11", async () => {
+		const { dispatcher } = makeAccountsEnrichDispatcher(true)
+		const manifest = { capabilities: [{ type: "accounts", canGet: true, canCreateAuthWit: false }] }
+		const result = (await dispatcher.dispatch("requestCapabilities", [manifest], ctx)) as { granted: Array<Record<string, unknown>> }
+		const accounts = result.granted.find((c) => c.type === "accounts")
+		expect(accounts?.accounts).toEqual([
+			{ alias: "alias-1", item: `0x${"11".repeat(32)}` },
+			{ alias: "Name2", item: `0x${"22".repeat(32)}` },
+		])
+	})
+
+	test("enrichGrantedCapabilities suppresses the accounts array to [] when canGet is false — Q11", async () => {
+		const { dispatcher } = makeAccountsEnrichDispatcher(false)
+		const manifest = { capabilities: [{ type: "accounts", canGet: false, canCreateAuthWit: false }] }
+		const result = (await dispatcher.dispatch("requestCapabilities", [manifest], ctx)) as { granted: Array<Record<string, unknown>> }
+		const accounts = result.granted.find((c) => c.type === "accounts")
+		expect(accounts?.accounts).toEqual([])
+	})
+
+	test("enrichGrantedCapabilities resolves the network UNCONDITIONALLY — canGet:false on an unresolvable chain THROWS, not [] — Q11", async () => {
+		// Behavior-preservation pin (codex post-impl biggest-risk): resolveNetwork
+		// runs BEFORE the canGet gate, so a future gate-hoist can't silently turn a
+		// throw into accounts:[]. networkReader returns no networks → resolve throws.
+		const accountReader: IAccountReader = { getAccounts: async () => [] }
+		const networkReader: INetworkReader = { getNetworks: async () => [] }
+		const session = makeSession({
+			capabilityGrants: [
+				{ capability: { type: "accounts", canGet: false, canCreateAuthWit: false, accounts: [] } as Capability, grantedAt: 1 },
+			],
+		})
+		const { writer } = makeSessionWriter(session)
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({ granted: [{ type: "accounts", canGet: false, canCreateAuthWit: false }] })) as never,
+		}
+		const dispatcher = new WalletSdkDispatcher(networkReader, accountReader, stubExecution, interaction, writer, noopLogger)
+		const manifest = { capabilities: [{ type: "accounts", canGet: false, canCreateAuthWit: false }] }
+		await expect(dispatcher.dispatch("requestCapabilities", [manifest], ctx)).rejects.toThrow()
+	})
+
+	test('projection alias falls back to "" when an account has neither alias nor name — Q11', async () => {
+		const a = `0x${"44".repeat(32)}`
+		const caip = `aztec:0:${a}`
+		const accountReader: IAccountReader = { getAccounts: async () => [{ address: a, name: "", chainId: 0 }] }
+		const networkReader: INetworkReader = { getNetworks: async () => [{ id: "net-0", chainId: 0 }] }
+		const session = makeSession({
+			accounts: [caip],
+			capabilityGrants: [
+				{ capability: { type: "accounts", canGet: true, canCreateAuthWit: false, accounts: [] } as Capability, grantedAt: 1 },
+			],
+		})
+		const { writer } = makeSessionWriter(session)
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({ granted: [{ type: "accounts", canGet: true, canCreateAuthWit: false }] })) as never,
+		}
+		const dispatcher = new WalletSdkDispatcher(networkReader, accountReader, stubExecution, interaction, writer, noopLogger)
+		const manifest = { capabilities: [{ type: "accounts", canGet: true, canCreateAuthWit: false }] }
+		const result = (await dispatcher.dispatch("requestCapabilities", [manifest], ctx)) as { granted: Array<Record<string, unknown>> }
+		const accounts = result.granted.find((c) => c.type === "accounts")
+		expect(accounts?.accounts).toEqual([{ alias: "", item: a }])
+	})
 })
 
 /**
@@ -750,7 +846,7 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		// reachability assertion: if the side-effect import drifts (renamed,
 		// moved, or accidentally tree-shaken by a future bundler), this test
 		// fails.
-		await import("../../extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
+		await import("../../../apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
 		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
 		expect("registerToken" in WalletSchema).toBe(true)
 		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
@@ -1067,7 +1163,7 @@ describe("dispatcher — isTokenRegistered reachability + gating", () => {
 	}
 
 	test("schema patch extends WalletSchema with a 1-arg boolean `isTokenRegistered` entry", async () => {
-		await import("../../extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
+		await import("../../../apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
 		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
 		expect("isTokenRegistered" in WalletSchema).toBe(true)
 		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
@@ -1081,9 +1177,9 @@ describe("dispatcher — isTokenRegistered reachability + gating", () => {
 		const { resolve } = await import("node:path")
 		const root = resolve(__dirname, "../../..")
 		const read = (p: string) => readFileSync(resolve(root, p), "utf8")
-		const ext = read("packages/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts")
-		const faucet = read("packages/faucet/src/lib/nulo-schema-patch.ts")
-		const playground = read("packages/playground/src/lib/nulo-schema-patch.ts")
+		const ext = read("apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts")
+		const faucet = read("apps/faucet/src/lib/nulo-schema-patch.ts")
+		const playground = read("apps/playground/src/lib/nulo-schema-patch.ts")
 		// Identical Zod surface: compare with the per-file header comments stripped (comments may
 		// name their own mirror paths) - every CODE line must match.
 		const code = (s: string) =>
@@ -1414,7 +1510,7 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 
 describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 	test("schema patch extends WalletSchema with a 2-arg `grantPublicAuthwit` entry", async () => {
-		await import("../../extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
+		await import("../../../apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
 		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
 		expect("grantPublicAuthwit" in WalletSchema).toBe(true)
 		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque

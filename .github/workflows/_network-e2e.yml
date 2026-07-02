@@ -103,7 +103,7 @@ jobs:
       AZTEC_NODE_URL: ${{ inputs.aztec_node_url }}
       SPONSORED_FPC_SALT: ${{ !contains(inputs.aztec_node_url, 'localhost') && secrets.SPONSORED_FPC_SALT || '' }}
       # Baked into the wallet build at `bun run build:chrome` time (via the
-      # agent.sh subprocess). When "1", `packages/extension/src/accelerator/config.ts`
+      # agent.sh subprocess). When "1", `apps/extension/src/accelerator/config.ts`
       # sets `ACCELERATOR_REQUIRED=true`, which makes the offscreen factory
       # construct `ProductionPxeFactory` in required-mode (eager
       # checkAcceleratorStatus preflight + onPhase throw on
@@ -136,7 +136,7 @@ jobs:
       # the upstream default of 2 (no env var set).
       VITE_NULO_FEE_MULTIPLIER: "10"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
 
@@ -157,7 +157,7 @@ jobs:
         with:
           # v1.0.6 (Aztec 4.3.1-bundled bb). The 5.0 proving stack is fetched on demand
           # on first /prove (bb is downloaded per the SDK-requested version), so this binary
-          # proves 5.0.0-rc.1 txs without a 5.0-specific release. Bump again when a newer line ships.
+          # proves 5.0.0-rc.2 txs without a 5.0-specific release (bb is fetched per the SDK version). Bump again when a newer line ships.
           version: "1.0.6"
           # SHA-256 of the EXTRACTED binary (not the tarball — different
           # hashes; the binary is what `actions/cache` restores, so it's
@@ -293,7 +293,7 @@ jobs:
         if: always() && inputs.probe != '1'
         shell: bash
         run: |
-          cd packages/extension
+          cd apps/extension
           # grep exits 1 on no-match; with `set -e -o pipefail` that aborts the
           # script before the `HITS > 0` check, so wrap the pipeline in `|| true`.
           HITS=$( { grep -RnE '(PROBE|nulo:probe:|VITE_E2E_PROBE)' dist/chrome 2>/dev/null || true; } | wc -l | tr -d ' ')
@@ -349,7 +349,7 @@ jobs:
           # rejects `/` in names (actions/upload-artifact#647).
           name: network-e2e-logs-${{ inputs.shard_label || 'full' }}
           path: |
-            packages/extension/.e2e-state
+            apps/extension/.e2e-state
             /tmp/aztec-*.log
             /tmp/anvil-*.log
             /tmp/nulo-probes-*.jsonl

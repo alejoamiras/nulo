@@ -20,18 +20,24 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { keccak256 } from "viem"
 
-/** keccak256 of upstream/NuloTokenPortal.sol (the reviewed fork source). */
-export const FORKED_PORTAL_KECCAK = "0x36f5678622ae2250ec749afe4699690c40a567180a943be3636ab7cec781a3c0"
+/** keccak256 of upstream/NuloTokenPortal.sol (the reviewed fork source). Re-pinned after the
+ *  monorepo restructure repathed ONE header-comment line inside the fork
+ *  (`packages/bridge-evm/…` → `contracts/bridge/evm/…`) without regenerating this pin —
+ *  diff reviewed: comment-only, zero code change. */
+export const FORKED_PORTAL_KECCAK = "0x1820c1ab1da9ffcd9e443350639e803a8019f624a8e967bc2dd86e8ec21f96b8"
 
-/** Creation/runtime code hashes + solc version of the reviewed fork build. */
+/** Creation/runtime code hashes + solc version of the reviewed fork build. Regenerated for the
+ *  5.0.0-rc.2 l1-contracts toolchain (the fork's `@aztec` interface imports now resolve against
+ *  rc.2; the fork source itself is unchanged beyond the repathed header comment). The candidate
+ *  smoke's deposit→claim round-trip is the empirical proof of the rc.2 portal semantics. */
 export const PORTAL_PIN = {
 	solc: "0.8.30",
-	initCodeHash: "0xca81e8f30728b76508c3bcaea82c7d455831a831818dea7bd15a5ab30f6caed8",
-	runtimeCodeHash: "0xcaff5f62114d1f4829a5ac9c74f582e77e1ee298191aecc5cf3d27fde7febf4c",
+	initCodeHash: "0x7886020a18cdd8d5b6dea0bfb94e2edbdf7d5e4927094f3a17b7022840b4d26e",
+	runtimeCodeHash: "0x851a507b53399339973c204767e4bddbaae2ecf4499cb4df1f40a54cd3963ca6",
 } as const
 
 const here = dirname(fileURLToPath(import.meta.url))
-const EVM_ROOT = join(here, "..", "..", "bridge-evm")
+const EVM_ROOT = join(here, "..", "..", "..", "contracts", "bridge", "evm")
 export const VENDORED_FORK = join(EVM_ROOT, "upstream", "NuloTokenPortal.sol")
 export const PORTAL_BUILD_JSON = join(EVM_ROOT, "upstream", "NuloTokenPortal.build.json")
 const STAGE_REL = join("test", "portals", "NuloTokenPortal.sol")

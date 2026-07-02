@@ -1,9 +1,9 @@
 {
 	"files": [],
 	"references": [
-		{ "path": "packages/extension" },
-		{ "path": "packages/playground" },
-		{ "path": "packages/landing" },
-		{ "path": "packages/faucet" }
+		{ "path": "apps/extension" },
+		{ "path": "apps/playground" },
+		{ "path": "apps/landing" },
+		{ "path": "apps/faucet" }
 	]
 }

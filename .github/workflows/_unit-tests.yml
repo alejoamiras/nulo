@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
 
@@ -23,3 +23,26 @@ jobs:
 
       - name: Run unit tests in every package
         run: bun run test:all
+
+      - name: Run release-script unit tests
+        # scripts/release/ isn't a @nulo/* workspace, so `test:all` (which
+        # filters @nulo/*) skips it. Run it here, guarded so this is a no-op on
+        # refs that predate the dir (other branches / older history).
+        run: |
+          if [ -d scripts/release ]; then
+            bun run test:release
+          else
+            echo "scripts/release/ not present on this ref — skipping."
+          fi
+
+      - name: Run CI-gating guard test
+        # scripts/ci-cd/ isn't a @nulo/* workspace, so `test:all` skips it. This is
+        # the anti-drift guard for the paths-filter gates (derived from the dependency
+        # graph) — it MUST run on PRs or a new ungated @nulo/* dep / a re-introduced `!`
+        # negation would merge green. Guarded so it's a no-op on refs predating the dir.
+        run: |
+          if [ -d scripts/ci-cd ]; then
+            bun run test:ci-gating
+          else
+            echo "scripts/ci-cd/ not present on this ref — skipping."
+          fi

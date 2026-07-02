@@ -6,7 +6,7 @@
  *   - `PasskeyCredential`  — WebAuthn PRF → HKDF master-secret.
  *
  * Every chain is locked by test vectors at
- * `packages/extension/src/wallet/crypto/key-vectors.test.ts`. Those
+ * `apps/extension/src/wallet/crypto/key-vectors.test.ts`. Those
  * vectors run as an extension integration test and MUST pass
  * byte-identically after any change here.
  *

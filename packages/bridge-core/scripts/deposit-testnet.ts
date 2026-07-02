@@ -10,7 +10,7 @@
  *
  * Real proofs make every L2 tx take minutes — expect ~15-30 min end to end.
  * Run: bun run scripts/deposit-testnet.ts   (needs PRIVATE_KEY + SEPOLIA_RPC_URL in
- *      packages/bridge-evm/.env; AZTEC_NODE_URL defaults to the public testnet RPC).
+ *      contracts/bridge/evm/.env; AZTEC_NODE_URL defaults to the public testnet RPC).
  */
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
@@ -31,7 +31,7 @@ import { TokenPortalAbi, TokenPortalBytecode } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveSigningKey } from "@aztec/stdlib/keys"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
 import { createPublicClient, createWalletClient, defineChain, getContract, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { consumeWithdrawal } from "../src/flows"
@@ -43,11 +43,11 @@ const TOKEN_DECIMALS = 6
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}` | undefined
-if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-evm/.env)")
+if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (contracts/bridge/evm/.env)")
 
 const here = dirname(fileURLToPath(import.meta.url))
-const OUT = join(here, "..", "..", "bridge-evm", "out")
-const AZTEC = join(here, "..", "..", "bridge-aztec")
+const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
+const AZTEC = join(here, "..", "..", "..", "contracts", "bridge", "aztec")
 
 const sepolia = defineChain({
 	id: 11155111,

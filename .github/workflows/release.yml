@@ -37,16 +37,25 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+# Least-privilege default: read-only for every job (covers checkout; artifact +
+# cache ops don't need a `permissions:` scope). The handful of jobs that write
+# (release-please, auto-unstick, attach-assets, sync) escalate explicitly in
+# their own block — so build/test/resolve/deploy/verify/status no longer inherit
+# a write-capable token (codex post-impl audit, Should-fix 3).
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
+  contents: read
 
 jobs:
   release-please:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Uses the App token for its writes (signing + CI cascade), but escalate the
+    # job token too so the action is robust if it ever falls back to GITHUB_TOKEN.
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
@@ -58,7 +67,7 @@ jobs:
       # would suppress downstream workflow runs).
       - name: Mint App token
         id: app
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.RELEASE_PLEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
@@ -74,15 +83,60 @@ jobs:
           target-branch: main
           token: ${{ steps.app.outputs.token }}
 
+  # release-please-action@v4 abort bug: after a Release PR merges, the action logs
+  # "untagged, merged release PRs outstanding" and never tags, so release_created
+  # stays false and the whole publish chain below skips (the documented manual
+  # unstick exists for exactly this). This job detects that precise state — a
+  # MERGED `autorelease: pending` Release PR whose merge commit IS github.sha (an
+  # explicit PR-to-SHA check, never a title heuristic) — creates the tag + empty
+  # release itself, and feeds `resolve` so the chain continues. All logic + guards
+  # live in unit-tested scripts/release/auto-unstick*.ts. Behind
+  # vars.AUTO_UNSTICK_ENABLED (unset/anything-but-on ⇒ OFF — staged rollout; the
+  # manual unstick stays the documented fallback until the flag is flipped). When
+  # OFF the job still runs but the script no-ops (unstuck=false) → resolve stays
+  # skipped → today's behavior exactly, so the first flag-off release validates
+  # this wiring before anyone flips it on.
+  auto-unstick:
+    needs: release-please
+    if: |
+      always() &&
+      github.event_name == 'push' &&
+      needs.release-please.outputs.release_created != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write # covers PR labels + comments (autorelease:* / needs-manual-resolution)
+    outputs:
+      unstuck: ${{ steps.u.outputs.unstuck }}
+      tag_name: ${{ steps.u.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: ./.github/actions/setup-bun
+      - id: u
+        env:
+          AUTO_UNSTICK_ENABLED: ${{ vars.AUTO_UNSTICK_ENABLED }}
+          RELEASE_CREATED: ${{ needs.release-please.outputs.release_created }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun scripts/release/auto-unstick-run.ts
+
   # Translate either trigger path into the same {tag, version, sha, is_prerelease}
   # outputs that downstream jobs consume. Runs on every workflow_dispatch (the
   # script fails loudly on empty tag) and only when release-please created a
   # release on the push path.
   resolve:
-    needs: release-please
+    needs: [release-please, auto-unstick]
     if: |
       always() &&
-      (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch')
+      (needs.release-please.outputs.release_created == 'true'
+        || needs.auto-unstick.outputs.unstuck == 'true'
+        || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
@@ -91,18 +145,20 @@ jobs:
       sha: ${{ steps.r.outputs.sha }}
       is_prerelease: ${{ steps.r.outputs.is_prerelease }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
       - id: r
         env:
           TAG_FROM_PLEASE: ${{ needs.release-please.outputs.tag_name }}
+          TAG_FROM_UNSTICK: ${{ needs.auto-unstick.outputs.tag_name }}
           TAG_FROM_INPUT: ${{ github.event.inputs.tag }}
           IS_PUSH: ${{ github.event_name == 'push' }}
         run: |
           if [ "$IS_PUSH" = "true" ]; then
-            TAG="$TAG_FROM_PLEASE"
+            # release-please's tag on the happy path; the auto-unstick's tag on the abort path.
+            TAG="${TAG_FROM_PLEASE:-$TAG_FROM_UNSTICK}"
           else
             TAG="$TAG_FROM_INPUT"
           fi
@@ -216,7 +272,7 @@ jobs:
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.resolve.outputs.sha }}
           fetch-depth: 0
@@ -258,7 +314,7 @@ jobs:
         uses: orhun/git-cliff-action@v4
         with:
           config: cliff.toml
-          args: --tag ${{ env.TAG }} --unreleased --strip header --include-path 'packages/extension/**'
+          args: --tag ${{ env.TAG }} --unreleased --strip header --include-path 'apps/extension/**'
         env:
           OUTPUT: /tmp/release-notes.md
 
@@ -291,7 +347,7 @@ jobs:
     needs: [resolve, attach-assets]
     if: |
       needs.resolve.outputs.is_prerelease == 'false' &&
-      github.event_name == 'push' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -315,6 +371,117 @@ jobs:
           fi
           echo "deploy-hook triggered (HTTP $code)"
 
+  deploy-faucet:
+    name: deploy faucet (Cloudflare Pages deploy hook)
+    needs: [resolve, attach-assets]
+    if: |
+      needs.resolve.outputs.is_prerelease == 'false' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.event.inputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    environment: production
+    steps:
+      - name: Trigger Cloudflare Pages deploy (faucet)
+        env:
+          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_FAUCET_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$DEPLOY_HOOK" ]; then
+            # Not yet wired (A5: the faucet's CF dashboard Git-integration still
+            # deploys it on push:main — double-deploy accepted until the cutover).
+            # Skip, don't fail, so an unwired secret never blocks a release.
+            echo "::notice::CLOUDFLARE_FAUCET_DEPLOY_HOOK unset — skipping CI faucet deploy (dashboard Git-integration still deploys it)."
+            exit 0
+          fi
+          code=$(curl -sS -o /tmp/cf-faucet.out -w "%{http_code}" \
+            --retry 3 --retry-all-errors --retry-delay 2 \
+            -X POST "$DEPLOY_HOOK")
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+            echo "::error::faucet deploy-hook curl returned HTTP $code"
+            cat /tmp/cf-faucet.out
+            exit 1
+          fi
+          echo "faucet deploy-hook triggered (HTTP $code)"
+
+  verify-live:
+    name: verify live deploys (advisory)
+    needs: [resolve, attach-assets, refresh-landing, deploy-faucet]
+    # ADVISORY for now — deliberately NOT in the `status` aggregator. This
+    # fail-closed check ships unrehearsed (no test repo), so it reports red
+    # without blocking the required check until it's proven on the first clean
+    # real release; a follow-up then adds it to `status`'s needs (staged, like
+    # vars.AUTO_UNSTICK_ENABLED).
+    if: |
+      always() &&
+      needs.resolve.outputs.is_prerelease == 'false' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.event.inputs.dry_run != 'true' &&
+      needs.attach-assets.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+      - uses: ./.github/actions/setup-bun
+      - name: Verify the live sites serve this release
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+        run: bun scripts/release/verify-live-run.ts
+
+  sync-main-to-dev:
+    name: sync main → dev (post-release)
+    needs: [resolve, attach-assets]
+    # ADVISORY (deliberately NOT in the `status` aggregator): this runs AFTER the
+    # release is published, so a sync hiccup must never retro-fail a shipped
+    # release — a CONFLICTING/UNKNOWN sync is surfaced as a labeled PR, an IO
+    # error reds this job alone. Push-only: a workflow_dispatch republish of an
+    # old tag must never re-sync (codex Critical-1); the runner's syncEligible
+    # re-checks `github.sha == the Release-PR merge commit` as defense in depth.
+    # All logic lives in the unit-tested scripts/release/open-sync-pr*.ts.
+    if: |
+      always() &&
+      github.event_name == 'push' &&
+      needs.resolve.outputs.is_prerelease == 'false' &&
+      needs.attach-assets.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write # covers PR labels + comments (autorelease:* / needs-manual-resolution)
+    steps:
+      # App token so the sync PR is bot-opened → dev's required CI fires
+      # (a GITHUB_TOKEN-opened PR suppresses the pull_request workflow), and the
+      # branch + the manifest-rebaseline commit are App-authenticated. The sync PR is
+      # MERGE-committed (not squashed) so main's release commit stays in dev's ancestry
+      # — the prerelease version-anchor needs it (a squash drops it and re-breaks the rc
+      # cut; see implementations-plan/release-prerelease-fix/). A merge (unlike a squash)
+      # brings the branch's own manifest-rebaseline commit onto dev; open-sync-pr-run.ts
+      # writes that commit via the Contents API under THIS App token, which GitHub SIGNS
+      # (verified), so classic required_signatures is satisfied and the merge needs NO
+      # `--admin`. (The `--admin` fallback only matters if that signing ever regresses.)
+      - name: Mint App token
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_PLEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app.outputs.token }}
+      - uses: ./.github/actions/setup-bun
+      - name: Open the main→dev sync PR
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IS_PRERELEASE: ${{ needs.resolve.outputs.is_prerelease }}
+          HEAD_SHA: ${{ github.sha }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: bun scripts/release/open-sync-pr-run.ts
+
   publish-chrome-store:
     name: publish to Chrome Web Store
     needs: [resolve, attach-assets]
@@ -323,7 +490,7 @@ jobs:
     timeout-minutes: 10
     environment: production
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           name: release-${{ needs.resolve.outputs.version }}
@@ -344,13 +511,13 @@ jobs:
     timeout-minutes: 10
     environment: production
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           name: release-${{ needs.resolve.outputs.version }}
           path: dist/release
       # Requires repo secrets: AMO_JWT_ISSUER, AMO_JWT_SECRET
-      # Requires `gecko.id` in packages/extension/manifest/manifest.firefox.config.ts to be a real ID.
+      # Requires `gecko.id` in apps/extension/manifest/manifest.firefox.config.ts to be a real ID.
       - name: Upload to AMO
         env:
           IS_PRERELEASE: ${{ needs.resolve.outputs.is_prerelease }}
@@ -364,6 +531,7 @@ jobs:
     needs:
       [
         release-please,
+        auto-unstick,
         resolve,
         lint-and-typecheck,
         unit-tests,
@@ -373,6 +541,7 @@ jobs:
         smoke-against-artifact,
         attach-assets,
         refresh-landing,
+        deploy-faucet,
         publish-chrome-store,
         publish-firefox-amo,
       ]
@@ -383,6 +552,7 @@ jobs:
         run: |
           for r in \
             "${{ needs.release-please.result }}" \
+            "${{ needs.auto-unstick.result }}" \
             "${{ needs.resolve.result }}" \
             "${{ needs.lint-and-typecheck.result }}" \
             "${{ needs.unit-tests.result }}" \
@@ -392,6 +562,7 @@ jobs:
             "${{ needs.smoke-against-artifact.result }}" \
             "${{ needs.attach-assets.result }}" \
             "${{ needs.refresh-landing.result }}" \
+            "${{ needs.deploy-faucet.result }}" \
             "${{ needs.publish-chrome-store.result }}" \
             "${{ needs.publish-firefox-amo.result }}" \
           ; do

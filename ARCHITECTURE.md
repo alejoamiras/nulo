@@ -12,7 +12,7 @@ A running extension lives in four browser contexts:
    │                                                                 │
    │  ┌──────────────────┐        ┌────────────────────────────────┐ │
    │  │  Service Worker  │ ◄──────┤  Popup UI (Vue 3)              │ │
-   │  │  (background)    │        │  packages/extension/src/popup/ │ │
+   │  │  (background)    │        │  apps/extension/src/popup/ │ │
    │  │  src/wallet/     │        └────────────────────────────────┘ │
    │  └─────────┬────────┘                                           │
    │            │ chrome.runtime.connect / chrome.runtime.sendMessage│
@@ -36,10 +36,10 @@ Entry points:
 
 | Context | File | Owns |
 |---|---|---|
-| Service Worker | `packages/extension/src/wallet/index.ts` | Every background service; storage; the wallet-sdk dispatcher. |
-| Popup UI | `packages/extension/src/popup/index.ts` | Vue 3 app; Pinia stores; service-clients. |
-| Content Script | `packages/extension/src/content-script/content.ts` | dApp bridge — postMessage ↔ runtime. |
-| Offscreen | `packages/extension/src/offscreen/index.ts` | PXE; protocol-contract artifacts; key derivation that needs full WebCrypto. |
+| Service Worker | `apps/extension/src/wallet/index.ts` | Every background service; storage; the wallet-sdk dispatcher. |
+| Popup UI | `apps/extension/src/popup/index.ts` | Vue 3 app; Pinia stores; service-clients. |
+| Content Script | `apps/extension/src/content-script/content.ts` | dApp bridge — postMessage ↔ runtime. |
+| Offscreen | `apps/extension/src/offscreen/index.ts` | PXE; protocol-contract artifacts; key derivation that needs full WebCrypto. |
 
 ## 2. Package layer hierarchy
 
@@ -88,15 +88,15 @@ For the service worker → offscreen direction, the same pattern repeats with `O
 ## 4. State surface
 
 - **Background services** hold authoritative state and emit `EventHandler` events. The popup pulls current state on mount via service-client method calls and subscribes to relevant events.
-- **Pinia stores** in the popup (`packages/extension/src/stores/`) cache visible state (`appStore`, `popupStore`, `cacheStore`). They are not the source of truth — services are.
+- **Pinia stores** in the popup (`apps/extension/src/stores/`) cache visible state (`appStore`, `popupStore`, `cacheStore`). They are not the source of truth — services are.
 - **`chrome.storage.local`** holds persistent records (profiles, networks, FPCs, accounts, contacts, tokens, dApp sessions). Entity rows are keyed `${root}@${id}`.
-- **`chrome.storage.session`** holds the active `Session` mirror AND the in-flight operation journal — both survive SW suspensions but are cleared when the browser session ends. The journal stores `nulo:journal@<id>` records via `OperationJournalService` (`packages/extension/src/wallet/services/operation-journal/service.ts`); stale ops after a browser reboot aren't actionable, so this is the right tier.
+- **`chrome.storage.session`** holds the active `Session` mirror AND the in-flight operation journal — both survive SW suspensions but are cleared when the browser session ends. The journal stores `nulo:journal@<id>` records via `OperationJournalService` (`apps/extension/src/wallet/services/operation-journal/service.ts`); stale ops after a browser reboot aren't actionable, so this is the right tier.
 - **Operation journal model** (Phase 2 + Phase 2.5). Every long-running operation creates a record with a 7-stage FSM (`pending → simulating → proving → submitting → succeeded/failed/cancelled`, plus a `simulating → succeeded` no-prove shortcut for non-tx kinds). Three kinds today: `transfer`, `dapp_execute` (full FSM + on-chain `txHash`), `token_import` (no-prove shortcut, no `txHash`). The kind ↔ `txHash` invariant is enforced at `transitionOperation`. Sibling `JournalReaper` marks stuck non-terminal records as failed; `JournalGC` caps terminal records at 50 per `(profileId, accountAddress)` on a 60-min alarm. Activity feed renders one card per in-flight journal op (newest on top, older below); token-import surface is a sibling `TokenImportRow` in the tokens view. The substrate is intentionally extensible — adding a new kind requires adding the enum variant + the `kind ↔ txHash` branch + a renderer; the FSM table stays unchanged.
 - **PXE** writes its own IndexedDB under the offscreen document (`pxe/...` databases). The wipe migration nukes these on storage-version bumps.
 
 ## 5. Storage versioning + destructive migration
 
-`packages/extension/src/wallet/storage/migrate.ts` runs on first unlock after the SW boots. It compares the stored `nulo:core:storage-version` against `CURRENT_VERSION` (currently 8 — bumped through `v7` for Phase 2 follow-up v4 transfer-card fields and `v8` for the Aztec 5.0.0-rc.1 hard-fork reset: account/contract address derivation + Schnorr scheme changed, so stored accounts/balances/PXE DBs are wiped and users re-register). If the version is older, the migration:
+`apps/extension/src/wallet/storage/migrate.ts` runs on first unlock after the SW boots. It compares the stored `nulo:core:storage-version` against `CURRENT_VERSION` (currently 9 — `v8` for the Aztec 5.0.0-rc.1 hard fork, where account/contract address derivation + the Schnorr scheme changed; `v9` for the rc.2 testnet redeploy, where the rollupVersion/derived chainId moved and every contract class-id shifted. Both wipe stored accounts/balances/PXE DBs; users re-register). If the version is older, the migration:
 
 1. Wipes a known set of `KEYS_TO_WIPE` and `KEY_PREFIXES_TO_WIPE_LOCAL` / `_SESSION`.
 2. Deletes PXE IndexedDB databases (`pxe/...` prefix + `keyval-store`).
@@ -110,7 +110,7 @@ Wipe scope per version is documented at the top of `migrate.ts`. When bumping `C
 
 ## 6. Offscreen lifecycle
 
-The offscreen document hosts the Aztec PXE. The service worker creates and supervises it via `packages/extension/src/wallet/utils/offscreen.ts`:
+The offscreen document hosts the Aztec PXE. The service worker creates and supervises it via `apps/extension/src/wallet/utils/offscreen.ts`:
 
 - `ensureOffscreenRunning()` is the entry point. It first checks `isOffscreenAlreadyRunning()` (Chromium: `chrome.runtime.getContexts`; Firefox: a module-local `firefoxOffscreenWindowId`).
 - If a document exists, it pings it via `isOffscreenHealthy()`. A non-responsive ("zombie") offscreen is torn down and recreated.
@@ -122,7 +122,7 @@ Firefox MV3 has no `chrome.offscreen` API, so the implementation falls back to a
 
 Two profile types: **password** and **passkey**. Each uses a different derivation chain (see `@nulo/wallet-crypto`) to produce the same master-secret shape; downstream code is agnostic.
 
-`SessionManager` (`packages/extension/src/wallet/services/profile/session-manager.ts`) owns the in-memory `ActiveSession` and its persisted `Session` mirror in `chrome.storage.session`. Properties:
+`SessionManager` (`apps/extension/src/wallet/services/profile/session-manager.ts`) owns the in-memory `ActiveSession` and its persisted `Session` mirror in `chrome.storage.session`. Properties:
 
 - **Session storage** survives MV3 service-worker suspensions but is cleared when the browser session ends. The popup can reconnect mid-session without re-prompting.
 - **In-memory only**: the raw master secret (`Fr`). Never persisted.
@@ -131,7 +131,7 @@ Two profile types: **password** and **passkey**. Each uses a different derivatio
 - **Wrong credentials / corrupted ciphertext** → silent close, same as TTL.
 - **Lock-agnostic**: SessionManager performs no locking of its own. Callers (the `ProfileService` facade) serialize via its lock.
 
-Strict security mode (default ON) prevents the passhash bearer from ever being persisted to `chrome.storage.session`. With strict mode ON, any SW recycle (Chrome's idle-suspend within the same browser session, a full browser close, or an explicit kill) forces a fresh password unlock — the session restore short-circuits because there is no bearer to silently re-derive the master secret from. See `packages/extension/tests/e2e/sw-resilience.test.ts` for the SW-stop-and-respawn coverage.
+Strict security mode (default ON) prevents the passhash bearer from ever being persisted to `chrome.storage.session`. With strict mode ON, any SW recycle (Chrome's idle-suspend within the same browser session, a full browser close, or an explicit kill) forces a fresh password unlock — the session restore short-circuits because there is no bearer to silently re-derive the master secret from. See `apps/extension/tests/e2e/sw-resilience.test.ts` for the SW-stop-and-respawn coverage.
 
 A **late-activation** pattern is used for full-backup restore: `ProfileService.restore()` writes the profile and stashes the recovered secret in a `pendingRestoreSecrets` map without opening a session. The caller restores backup data, then calls `finalizeRestore()` which opens the session. This avoids racing `app.vue`'s `onActiveProfileChanged → ensureDefaultAccount` against the import's writes.
 
@@ -139,20 +139,20 @@ A **late-activation** pattern is used for full-backup restore: `ProfileService.r
 
 dApps interact via `@aztec/wallet-sdk` over a postMessage-bridged encrypted channel. Wiring lives in:
 
-- `packages/extension/src/wallet/services/wallet-sdk/background.ts` — sets up `BackgroundConnectionHandler` from the SDK. Owns discovery, key exchange, message routing.
+- `apps/extension/src/wallet/services/wallet-sdk/background.ts` — sets up `BackgroundConnectionHandler` from the SDK. Owns discovery, key exchange, message routing.
 - `packages/wallet-bridge/src/dispatcher.ts` — the typed dispatcher. Receives wallet messages, narrows protocol shapes via Zod, enforces session scope, and delegates to typed service calls.
 - `packages/wallet-bridge/src/capability-map.ts` — declarative map of every capability the wallet exposes (~17 RPCs + 4 special). Determines which RPCs need user approval vs auto-approve, which open a popup vs run silently.
 - `packages/wallet-bridge/src/scope-enforcement.ts` — re-checks per-message scope against the granted session (call-intent targets, fee-payer constraints, chainId, accounts).
 
 A `DappSession` is per-`(origin, chainId, profileId)`. When the dApp's profile or chain changes, the session is revoked and re-approval is required. Auto-approve runs when an active session matches the discovery request.
 
-Capability *bundles* — the playground's helper concept for grouping capabilities into a single approval gesture — are a test-harness construct and live in `packages/playground/`. The wallet does not model bundles internally; they are sugar over `requestCapabilities`.
+Capability *bundles* — the playground's helper concept for grouping capabilities into a single approval gesture — are a test-harness construct and live in `apps/playground/`. The wallet does not model bundles internally; they are sugar over `requestCapabilities`.
 
 ## 9. Concurrency model
 
 Two primitives:
 
-- **`Lock`** (`packages/extension/src/wallet/utils/lock.ts`) — single-flight queue per service. Methods that mutate service state acquire the lock; readers and writers serialize behind it. Includes a `MAX_HOLD_MS` force-release to avoid deadlocks.
+- **`Lock`** (`apps/extension/src/wallet/utils/lock.ts`) — single-flight queue per service. Methods that mutate service state acquire the lock; readers and writers serialize behind it. Includes a `MAX_HOLD_MS` force-release to avoid deadlocks.
 - **`ReadWriteGuard`** (`packages/wallet-core/src/utils/rw-guard.ts`) — multi-reader / single-writer guard. `read(fn)` runs in parallel with other reads; `write(fn)` drains readers, then runs exclusively. Manual `enterWrite()` / `leaveWrite()` for destructive ops that span multiple awaits (profile switch / delete). Writers have FIFO priority — a reader arriving while a writer is queued waits behind that writer. Force-release at `MAX_READER_DRAIN_MS` is a debuggability aid, not a correctness path.
 
 Service startup is **phase-ordered**, not parallel: `ServiceCollection.start()` (`packages/wallet-core/src/base/index.ts`) runs services in topological phases derived from each service's `dependencies` array. Phase 0 runs everything with no declared deps in parallel; each subsequent phase awaits the previous. Cycles and unknown deps throw named errors at boot.
@@ -165,7 +165,7 @@ Service startup is **phase-ordered**, not parallel: `ServiceCollection.start()` 
 - `PasswordSecretBox` — password-based wrap around `EncryptionKey`. Stores `passhash` (a public, deterministic hash of the password's KDF output) so a session can be silently re-derived without re-prompting.
 - `PasskeyCredential` — WebAuthn PRF → HKDF master-secret. Cross-extension / cross-device portability is limited by browser PRF non-portability (see `implementations-plan/passkey-e2e/PRF-NON-PORTABLE.md`).
 
-All derivation chains are **vector-locked** by `packages/extension/src/wallet/crypto/key-vectors.test.ts`. Any change to wallet-crypto must keep those vectors passing byte-identically. The KDF rev-key (`ENCRYPTION_GUARD`) is a frozen constant: changing it bricks every existing wallet.
+All derivation chains are **vector-locked** by `apps/extension/src/wallet/crypto/key-vectors.test.ts`. Any change to wallet-crypto must keep those vectors passing byte-identically. The KDF rev-key (`ENCRYPTION_GUARD`) is a frozen constant: changing it bricks every existing wallet.
 
 Buffer ownership is explicit. Secret material is allocated as `Uint8Array<ArrayBuffer>` (never `Buffer`), zeroed on drop via the `zeroize()` helper.
 
@@ -195,7 +195,7 @@ The private-cold-start fee-payment path (private mint + pay-fee combined for an 
 
 ## 13. Build artifacts
 
-`bun run build` produces a Chrome MV3 bundle at `packages/extension/dist/chrome/`. `bun run build:firefox` produces a Firefox MV3 bundle at `dist/firefox/`. Manifests are configured per-target in `packages/extension/manifest/`; the Firefox manifest drops the `offscreen` permission (no Chromium offscreen API) and substitutes a hidden-window strategy.
+`bun run build` produces a Chrome MV3 bundle at `apps/extension/dist/chrome/`. `bun run build:firefox` produces a Firefox MV3 bundle at `dist/firefox/`. Manifests are configured per-target in `apps/extension/manifest/`; the Firefox manifest drops the `offscreen` permission (no Chromium offscreen API) and substitutes a hidden-window strategy.
 
 Vite env propagation: e2e network suites pass `VITE_LOCAL_NETWORK_RPC_URL=http://localhost:<aztec-port>` so the wallet's "Local Network" preset points at the per-worktree sandbox. The build wrapper greps the bundle for the URL and fails fast if the env didn't substitute.
 
@@ -206,10 +206,10 @@ Vite env propagation: e2e network suites pass `VITE_LOCAL_NETWORK_RPC_URL=http:/
 | Suite | Config | Scope | Aztec sandbox? |
 |---|---|---|---|
 | Unit | Per-package: `wallet-core`, `wallet-crypto`, `extension-messaging`, `extension` ship a `vitest.config.ts`; `wallet-bridge` and `aztec-runtime` run on the default vitest config. | Colocated `*.test.ts`. Pure logic, mocks via `@webext-core/fake-browser`, `FakeBrowserApi` from `wallet-core/testing`. | No. |
-| Component | `packages/extension/vitest.config.ts` (filtered via `bun run test:components`) | Vue SFC tests via `@vue/test-utils`. `chrome.*` stubbed by `tests/vitest.setup.ts:88-113`. | No. |
-| Smoke e2e | `packages/extension/vitest.e2e.config.ts` | `tests/e2e/*.test.ts` — popup UI flows. | No. |
-| Network e2e | `packages/extension/vitest.e2e.network.config.ts` | `tests/e2e/network/**` — drives the playground dApp against a real anvil + aztec sandbox. | Yes (per worktree). |
-| Full e2e | `packages/extension/vitest.e2e.all.config.ts` | Smoke + network. | Yes. |
+| Component | `apps/extension/vitest.config.ts` (filtered via `bun run test:components`) | Vue SFC tests via `@vue/test-utils`. `chrome.*` stubbed by `tests/vitest.setup.ts:88-113`. | No. |
+| Smoke e2e | `apps/extension/vitest.e2e.config.ts` | `tests/e2e/*.test.ts` — popup UI flows. | No. |
+| Network e2e | `apps/extension/vitest.e2e.network.config.ts` | `tests/e2e/network/**` — drives the playground dApp against a real anvil + aztec sandbox. | Yes (per worktree). |
+| Full e2e | `apps/extension/vitest.e2e.all.config.ts` | Smoke + network. | Yes. |
 
 Run commands:
 
@@ -220,6 +220,6 @@ bun run e2e:agent             # Network — parallel-safe per worktree
 bun run audit:vue             # One-shot pre-PR: typecheck → test → lint → build
 ```
 
-`bun run audit:vue` deliberately **excludes** e2e tests — that gate is for fast, isolated correctness. Smoke e2e is a separate command; network e2e is its own infrastructure (see [`packages/extension/tests/e2e/README.md`](./packages/extension/tests/e2e/README.md) for the parallel-safe agent runner, port allocation, and reuse-vs-cold-start logic).
+`bun run audit:vue` deliberately **excludes** e2e tests — that gate is for fast, isolated correctness. Smoke e2e is a separate command; network e2e is its own infrastructure (see [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md) for the parallel-safe agent runner, port allocation, and reuse-vs-cold-start logic).
 
 Coverage minimums for component / composable tests, the `chrome.*` stubbing, and the e2e helper conventions all live in [`CLAUDE.md`](./CLAUDE.md).

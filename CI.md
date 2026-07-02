@@ -24,12 +24,12 @@ Contributor-facing reference for what runs when, how to opt in to slow gates, ho
 
 Always runs on every PR. Lightweight gates:
 
-- `commitlint` — every commit + the PR title must follow Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, etc.; lower-case subject).
+- `commitlint` — Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, …; lower-case subject, 100-char header cap). On PRs to `dev`: every commit in `base..head`. On PRs to `main`: **skipped** — the promote PR's merge subject is an intentional non-conventional release-note line (`release: promote dev → main …`, > 100 chars, no `release` type by design), the bot Release PR (`chore(main): release X.Y.Z`) is reliably conventional anyway, and the dev squash subjects in the range are already-merged + immutable (re-linting them spuriously failed required `Quality` on long historical subjects).
 - `lint-and-typecheck` — biome over the repo + `bun run typecheck:all` (vue-tsc across all packages).
 - `unit-tests` — `bun run test:all` (vitest across all workspaces; `--if-present` skips `playground` + `landing`).
 - `build-extension` — chrome + firefox builds.
 
-The `Quality / Status` aggregator at the end is the required check on `main` / `dev` branch protection.
+The `quality-status` aggregator at the end is the required check on `main` / `dev` branch protection (the bare job/check-run name; the old required context `Quality / Status` was a phantom that never matched a produced check — see [CLAUDE.md § Branching](./CLAUDE.md#branching--merging) and `implementations-plan/required-check-mismatch/`).
 
 ### `pr-smoke-e2e.yml`
 
@@ -40,11 +40,11 @@ Triggers:
 - **Auto** on PRs to `dev` whose diff touches the `smoke-surface` paths-filter (popup, components, manifest, the wallet services smoke exercises, build inputs, the harness, etc. — see [`pr-smoke-e2e.yml`](./.github/workflows/pr-smoke-e2e.yml) `filters:`)
 - **Manual** by adding the `e2e:smoke` label
 
-`Smoke e2e / Status` emits `pass` when the suite is skipped (no relevant changes / no label), so branch protection sees a green check either way.
+`smoke-e2e-status` emits `pass` when the suite is skipped (no relevant changes / no label), so branch protection sees a green check either way. It is a **required** check on both `dev` and `main`.
 
 ### `pr-network-e2e.yml`
 
-Runs the network e2e suite (anvil + Aztec sandbox + playground + the extension build) as a **5-shard parallel matrix** — each shard owns its own sandbox + ~9 of the 45 test files (deterministic SHA-1-of-filename distribution). Wall time ~10–15 min (vs ~35–45 min unsharded). Same trigger shape as `pr-smoke-e2e`, but with the `extension-network` filter (network-touching wallet code, runtime, bridge, playground, etc.) and the `e2e:network` label. See [`packages/extension/tests/e2e/README.md`](./packages/extension/tests/e2e/README.md#ci-sharding-5-way-matrix) for the shard-design rationale + the 2 quarantined slow tests.
+Runs the network e2e suite (anvil + Aztec sandbox + playground + the extension build) as a **5-shard parallel matrix** — each shard owns its own sandbox + ~9 of the 45 test files (deterministic SHA-1-of-filename distribution). Wall time ~10–15 min (vs ~35–45 min unsharded). Same trigger shape as `pr-smoke-e2e`, but with the `extension-network` filter (network-touching wallet code, runtime, bridge, playground, etc.) and the `e2e:network` label. See [`apps/extension/tests/e2e/README.md`](./apps/extension/tests/e2e/README.md#ci-sharding-5-way-matrix) for the shard-design rationale + the 2 quarantined slow tests.
 
 #### Accelerator in CI
 
@@ -80,9 +80,11 @@ Runs when any `.github/workflows/**`, `.github/actions/**`, or shell script chan
 
 Two triggers in one workflow:
 
-- **`push` to `main`** — runs `googleapis/release-please-action@v4`. release-please scans Conventional Commits since the last tag and opens or updates a Release PR titled `chore: release X.Y.Z`. The PR bumps `package.json` + appends to `CHANGELOG.md` + updates `.release-please-manifest.json`. The PR's commits are app-authenticated (verified) via `actions/create-github-app-token@v1` using the `RELEASE_PLEASE_APP_ID` + `RELEASE_PLEASE_APP_PRIVATE_KEY` secrets. When the Release PR is merged, the next push-to-main run sees `release_created=true` and the same workflow continues: gates → build chrome + firefox → smoke against the zipped artifact → `attach-assets` (zip + SHASUMS + `gh release upload --clobber` + `gh release edit --notes-file` with git-cliff body) → Cloudflare Pages deploy hook → marketplace stubs (gated).
+- **`push` to `main`** — runs `googleapis/release-please-action@v4`. release-please scans Conventional Commits since the last tag and opens or updates a Release PR titled `chore: release X.Y.Z`. The PR bumps `package.json` + appends to `CHANGELOG.md` + updates `.release-please-manifest.json`. The PR's commits are app-authenticated (verified) via `actions/create-github-app-token@v1` using the `RELEASE_PLEASE_APP_ID` + `RELEASE_PLEASE_APP_PRIVATE_KEY` secrets. When the Release PR is merged, the next push-to-main run *should* see `release_created=true` and continue — but the v4 abort bug means it usually doesn't (release-please logs "untagged, merged release PRs outstanding" and leaves `release_created` false). The **`auto-unstick`** job handles that: when `release_created != 'true'` on a `push`, it detects the merged `autorelease: pending` Release PR at `github.sha`, creates the tag + empty release + relabels, and feeds `resolve` (`unstuck=true` + the tag) so the chain continues in the same run. It's gated by `vars.AUTO_UNSTICK_ENABLED` (**default OFF** — while off the job runs but no-ops, so the manual unstick in [CLAUDE.md § Release runbook](./CLAUDE.md#release-runbook) is still needed; see there for the staged-rollout flip). Once a release is unstuck (auto or manual), the same workflow continues: gates → build chrome + firefox → smoke against the zipped artifact → `attach-assets` (zip + SHASUMS + `gh release upload --clobber` + `gh release edit --notes-file` with git-cliff body) → **landing + faucet Cloudflare Pages deploy hooks** (`refresh-landing` + `deploy-faucet`) → **`verify-live`** (advisory) → marketplace stubs (gated). A stable push also runs **`sync-main-to-dev`** (advisory, push-only): it opens the `chore: sync main → dev` PR that carries the release bump + `CHANGELOG` back into `dev` and re-baselines the prerelease manifest — clean PRs await your squash-merge, conflicts are labeled `needs-manual-resolution` (see [CLAUDE.md § After a stable cut](./CLAUDE.md#after-a-stable-cut-promotes-to-main)).
 
-- **`workflow_dispatch`** — re-publish artifacts for an existing tag. Takes `tag` (e.g. `v0.20.0`), `dry_run` (default false), `run_network_e2e` (default true), and `publish_marketplaces` (default false). Skips `release-please`; runs `resolve` → gates → build → smoke → `attach-assets`. Useful when an asset upload failed mid-publish.
+- **`workflow_dispatch`** — re-publish artifacts for an existing tag. Takes `tag` (e.g. `v0.20.0`), `dry_run` (default false), `run_network_e2e` (default true), and `publish_marketplaces` (default false). Skips `release-please`; runs `resolve` → gates → build → smoke → `attach-assets`. The landing + faucet deploy hooks + `verify-live` now ALSO fire on a non-dry-run `workflow_dispatch` (so a republish refreshes the sites + re-checks them). Useful when an asset upload failed mid-publish.
+
+**`deploy-faucet`** mirrors `refresh-landing` against `CLOUDFLARE_FAUCET_DEPLOY_HOOK`; until that secret is wired it **skips (doesn't fail)** — the faucet still auto-deploys via its CF dashboard Git-integration (the A5 cutover that disables the dashboard side is deferred). **`verify-live`** fetches `nulo.sh` + `faucet.nulo.sh` (cache-busted, bounded retry) and asserts both serve THIS release — the faucet's `index.html` `nulo-build` meta must match `/build.json`'s `buildId` (split-cache guard) and the `chainId` must equal the wallet's testnet id — **fail-closed**. It's **advisory** (not in the `status` aggregator) until proven on the first clean real release, then promoted to required.
 
 Marketplace publish (CWS + AMO) is stubbed until secrets are wired (`CWS_*` + `AMO_JWT_*`).
 
@@ -106,9 +108,9 @@ Everything CI runs has a local equivalent:
 | lint | `bun run lint` |
 | typecheck | `bun run typecheck:all` |
 | unit tests | `bun run test:all` |
-| build (chrome) | `bun run --cwd packages/extension build:chrome` |
-| build (firefox) | `bun run --cwd packages/extension build:firefox` |
-| smoke e2e | `bun run --cwd packages/extension test:e2e` |
+| build (chrome) | `bun run --cwd apps/extension build:chrome` |
+| build (firefox) | `bun run --cwd apps/extension build:firefox` |
+| smoke e2e | `bun run --cwd apps/extension test:e2e` |
 | network e2e | `bun run e2e:agent` (NOTE: local runs do NOT use `accelerator-server`. The wallet's `AcceleratorProver` auto-detects the **Aztec Accelerator** desktop app on `127.0.0.1:59833` and uses it if available; otherwise WASM. CI specifically stamps `VITE_NULO_ACCELERATOR_REQUIRED=1` to enforce no-fallback — that's not set locally.) |
 | one-shot pre-PR | `bun run audit:vue` (typecheck + units + lint + build) |
 
@@ -118,11 +120,11 @@ Releases are driven by `release-please`. The human touchpoint is a single click 
 
 1. Confirm what you want to ship is on `main` (via the usual `release: promote dev → main` PR).
 2. Wait for `release.yml` to run on the push to main. It opens (or updates) a Release PR titled `chore: release X.Y.Z`. The version comes from Conventional Commits since the last tag.
-3. Review the Release PR. CI runs the normal `Quality / Status` check. Eyeball the proposed `CHANGELOG.md` diff + `package.json` bumps.
+3. Review the Release PR. CI runs the normal `quality-status` check. Eyeball the proposed `CHANGELOG.md` diff + `package.json` bumps.
 4. Merge the Release PR via the GitHub UI (merge commit).
 5. The next push-to-main run of `release.yml` sees the release was created. The same workflow run continues: gates → build chrome + firefox → smoke → `attach-assets` (uploads zips + SHASUMS, overlays git-cliff release notes onto the GitHub Release body) → Cloudflare deploy hook.
 
-Tag format is `v<X.Y.Z>` (forced by `include-v-in-tag: true` + `include-component-in-tag: false` in `.github/release-please-config.json`). Prerelease support (e.g. `v<X.Y.Z>-rc.<N>` from `dev`) is deferred to a follow-up PR.
+Tag format is `v<X.Y.Z>` (forced by `include-v-in-tag: true` + `include-component-in-tag: false` in `.github/release-please-config.json`). Prerelease (rc) support **exists** — `v<X.Y.Z>-rc[.N]` cut from `dev` via [`release-prerelease.yml`](./.github/workflows/release-prerelease.yml); see [`CLAUDE.md`](./CLAUDE.md) § Release runbook (Prerelease).
 
 ### Forcing the next-version
 
@@ -149,6 +151,21 @@ If a release was tagged but the asset upload failed (e.g. transient `gh release 
 
 For smoke / network e2e specifically: failure artifacts (vitest output, `.e2e-state/`, sandbox logs) upload on failure. Download them from the run page's "Artifacts" section.
 
+## CI gating — derived from the dependency graph
+
+The `pr-quick` / `pr-smoke-e2e` / `pr-network-e2e` `changes` jobs use `dorny/paths-filter` to skip work on PRs that can't affect a given target. **These filters are derived from the workspace dependency graph, not hand-curated** — a suite/build runs whenever any package its target is built from changes:
+
+- **Built targets** (`extension`, `faucet`, `playground`) → gated on the **whole package** (`packages/<target>/**`), so no build input (manifest, vite/tsconfig configs, `public/` assets, scripts, the e2e harness) can ever be silently missed.
+- **Dependency libraries** (`wallet-core`, `wallet-crypto`, `extension-messaging`, `aztec-runtime`, `wallet-bridge`, `design`, `bridge-core`) → gated on their consumed surface (`packages/<dep>/src/**` + `package.json`); their own README/docs stay out of the gate.
+- Plus repo-wide build inputs (`package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, **`patches/**`**) + each suite's harness/workflow files.
+
+**Two hard rules:**
+
+1. **Never use a bare `!` negation pattern.** `dorny/paths-filter` defaults to `predicate-quantifier: some` (a file matches a filter if it matches ANY pattern), so a bare `!packages/x/**/*.md` matches *every file that isn't that md* → the filter silently becomes `**` and fires on every PR. Exclude by listing positive paths only (or, for true subset-exclusion, picomatch extglobs — never a bare `!`).
+2. **Gate on the graph.** When the extension (or faucet) gains a new `@nulo/*` dependency, add it to the relevant filters. [`scripts/ci-cd/behavior-gating.test.ts`](./scripts/ci-cd/behavior-gating.test.ts) recomputes each target's transitive graph from `package.json` and **fails CI** (via the `test:ci-gating` step in `_unit-tests.yml`) if a gate doesn't cover it, or if a `!` negation reappears — so the lists can't silently rot. The gates intentionally **over-trigger** (a colocated `*.test.ts`/`*.stories.ts` edit under `src/` runs the e2e suites) — the safe direction: err toward running, never skipping.
+
+History + the dual-audit trail: [`implementations-plan/paths-filter-negation-fix/`](./implementations-plan/paths-filter-negation-fix/plan.md).
+
 ## Adding a new gate
 
 1. If the gate is a single shell step, add it to an existing workflow's job.
@@ -170,7 +187,7 @@ Composite actions (step-level reuse):
 
 ## Known limitations
 
-- **Smoke e2e is currently advisory on `main`** (not a required check) until the fixture-cleanup follow-up PR hardens cross-file Chrome teardown. See [`implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md`](./implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md) §5 for the deferral rationale.
+- **Smoke e2e is required on both `dev` and `main`** (as `smoke-e2e-status`). Its fixtures can still flake (cross-file Chrome teardown — see [`implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md`](./implementations-plan/ci-cd/smoke-gating-and-branch-cleanup.md) §5); treat a red smoke like any gate — flake → re-run, breakage → fix — never neutralize it.
 - **Network e2e has 18 quarantined tests** via co-located `test.skip` / `describe.skip`. See [`implementations-plan/network-test-triage/plan.md`](./implementations-plan/network-test-triage/plan.md) for the cluster grid + un-skip criteria.
 - **Marketplace publishing (Chrome Web Store, Firefox AMO)** is stubbed in `release.yml`. Enabling it requires wiring `CWS_*` + `AMO_JWT_*` secrets and replacing the Firefox `gecko.id` placeholder.
 
