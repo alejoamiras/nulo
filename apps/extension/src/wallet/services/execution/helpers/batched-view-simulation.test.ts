@@ -81,8 +81,8 @@ const simulateViaNodeMock = simulateViaNode as unknown as ReturnType<typeof vi.f
 
 const CONTRACT_A = "0x0000000000000000000000000000000000000000000000000000000000000a01"
 const CONTRACT_B = "0x0000000000000000000000000000000000000000000000000000000000000a02"
-const ACCOUNT_ADDR = AztecAddress.fromString("0x000000000000000000000000000000000000000000000000000000000000000a")
-const OTHER_ORIGIN = AztecAddress.fromString("0x000000000000000000000000000000000000000000000000000000000000000b")
+const ACCOUNT_ADDR = AztecAddress.fromStringUnsafe("0x000000000000000000000000000000000000000000000000000000000000000a")
+const OTHER_ORIGIN = AztecAddress.fromStringUnsafe("0x000000000000000000000000000000000000000000000000000000000000000b")
 
 /** Build a stub FunctionAbi with the minimum surface the helper reads. */
 function abi(name: string, kind: FunctionType, isStatic = false): FunctionAbi {
@@ -135,7 +135,7 @@ function makeDeps(opts: {
 
 	// biome-ignore lint/suspicious/noExplicitAny: duck-typed PXE stub
 	const pxe: any = {
-		getContracts: vi.fn(async () => [CONTRACT_A, CONTRACT_B].map((c) => AztecAddress.fromString(c))),
+		getContracts: vi.fn(async () => [CONTRACT_A, CONTRACT_B].map((c) => AztecAddress.fromStringUnsafe(c))),
 		registerContract: vi.fn(async () => undefined),
 		getSyncedBlockHeader: vi.fn(async () => {
 			if (opts.pxeHeader === "throw") throw new Error("pxe sync error")

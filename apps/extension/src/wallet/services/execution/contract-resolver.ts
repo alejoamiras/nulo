@@ -112,7 +112,7 @@ export class ContractResolver {
 	/** Fetch a single `ContractInstanceWithAddress` from PXE. Throws
 	 *  `"Contract instance not found"` if PXE returns undefined. */
 	public async resolveInstance(pxe: IPXE, contract: string): Promise<[string, ContractInstanceWithAddress]> {
-		const instance = await pxe.getContractInstance(AztecAddress.fromString(contract))
+		const instance = await pxe.getContractInstance(AztecAddress.fromStringUnsafe(contract))
 		if (!instance) {
 			throw new Error("Contract instance not found")
 		}

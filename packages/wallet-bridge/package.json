@@ -11,10 +11,10 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
-		"@aztec/aztec.js": "5.0.0-rc.1",
-		"@aztec/foundation": "5.0.0-rc.1",
-		"@aztec/stdlib": "5.0.0-rc.1",
-		"@aztec/wallet-sdk": "5.0.0-rc.1",
+		"@aztec/aztec.js": "5.0.0-rc.2",
+		"@aztec/foundation": "5.0.0-rc.2",
+		"@aztec/stdlib": "5.0.0-rc.2",
+		"@aztec/wallet-sdk": "5.0.0-rc.2",
 		"@nulo/extension-messaging": "workspace:*",
 		"@nulo/wallet-core": "workspace:*"
 	},

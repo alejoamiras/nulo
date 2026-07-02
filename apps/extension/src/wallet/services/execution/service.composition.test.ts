@@ -69,7 +69,7 @@ function makeControllableGate() {
 }
 
 const MIN_FEES = { feePerDaGas: 1n, feePerL2Gas: 1n }
-const ACCOUNT = AztecAddress.fromNumber(0x1234)
+const ACCOUNT = AztecAddress.fromNumberUnsafe(0x1234)
 const NETWORK = {
 	id: "net1",
 	chainId: 1,
@@ -139,7 +139,7 @@ async function makeHarness() {
 		accountAddress: ACCOUNT.toString(),
 		tokenId: 1,
 		transferType: TransferType.Public,
-		recipientAddress: AztecAddress.fromNumber(0x5678).toString(),
+		recipientAddress: AztecAddress.fromNumberUnsafe(0x5678).toString(),
 		amount: 10n,
 		feeSettings,
 	}

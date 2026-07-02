@@ -81,10 +81,10 @@ vi.mock("@nulo/bridge-core/artifacts", () => ({
 	tokenBridgeArtifact: { name: "TokenBridge" },
 }))
 
-vi.mock("@defi-wonderland/aztec-standards/dist/src/artifacts/Dripper.js", () => ({
+vi.mock("@alejoamiras/aztec-standards/dist/src/artifacts/Dripper.js", () => ({
 	DripperContractArtifact: { name: "Dripper" },
 }))
-vi.mock("@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js", () => ({
+vi.mock("@alejoamiras/aztec-standards/dist/src/artifacts/Token.js", () => ({
 	TokenContractArtifact: { name: "Token" },
 }))
 vi.mock("@/contracts/sponsored-fpc", () => ({

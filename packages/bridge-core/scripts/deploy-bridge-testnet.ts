@@ -39,7 +39,7 @@ import { RegistryAbi } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveSigningKey } from "@aztec/stdlib/keys"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
 import { type Abi, createPublicClient, createWalletClient, defineChain, getContract, http, keccak256 } from "viem"
 import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts"
 import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
@@ -82,15 +82,19 @@ function nargoArtifact(rel: string) {
 	return loadContractArtifact(JSON.parse(readFileSync(join(AZTEC, rel), "utf8")))
 }
 
-async function nodeRegistry(): Promise<`0x${string}`> {
+async function nodeL1Addresses(): Promise<Record<string, `0x${string}`>> {
 	const res = await fetch(NODE_URL, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "node_getNodeInfo", params: [] }),
 	})
-	const a = (await res.json()).result.l1ContractAddresses
+	const a = (await res.json()).result.l1ContractAddresses as Record<string, unknown>
 	const pick = (v: unknown) => (typeof v === "object" && v ? (v as { value: string }).value : (v as string)) as `0x${string}`
-	return pick(a.registryAddress)
+	return Object.fromEntries(Object.entries(a).map(([k, v]) => [k, pick(v)]))
+}
+
+async function nodeRegistry(): Promise<`0x${string}`> {
+	return (await nodeL1Addresses()).registryAddress
 }
 
 const lc = (v: unknown) => String(v).toLowerCase()
@@ -331,13 +335,29 @@ async function main() {
 	// quoter, slippage, …) carries forward from the live manifest. Pre-B2 fuel is a hard abort.
 	const prior = existsSync(LIVE_PATH) ? JSON.parse(readFileSync(LIVE_PATH, "utf8")) : null
 	const priorFuel = prior?.l1?.fuel as Record<string, unknown> | undefined
+	const l1a = await nodeL1Addresses()
 	const fuel = priorFuel
 		? {
 				...priorFuel,
+				// The FeeJuicePortal is ROLLUP-COUPLED — refresh it from the node so a carried fuel
+				// block never re-promotes the previous rollup's (dead) portal (codex post-impl MED).
+				feeJuicePortal: l1a.feeJuicePortalAddress.toLowerCase(),
 				...(process.env.FUEL_ROUTER ? { router: process.env.FUEL_ROUTER.toLowerCase() } : {}),
 				...(process.env.FUEL_SWAP ? { swapTarget: process.env.FUEL_SWAP.toLowerCase() } : {}),
 			}
 		: undefined
+
+	// ─── Direct-Fuel config (`l1.feeJuice`): the portal/asset/handler are ROLLUP-COUPLED (a network
+	// reset re-points them), so they come fresh from the node — never carried from the prior manifest.
+	// Only `minFj` (empirically calibrated, network-independent) carries forward, env-overridable.
+	// Omitting this block from a promotion would silently disable the faucet's Fuel tab.
+	const priorFeeJuice = prior?.l1?.feeJuice as Record<string, unknown> | undefined
+	const feeJuice = {
+		portal: l1a.feeJuicePortalAddress.toLowerCase(),
+		asset: l1a.feeJuiceAddress.toLowerCase(),
+		feeAssetHandler: l1a.feeAssetHandlerAddress.toLowerCase(),
+		minFj: String(process.env.FUEL_MIN_FJ ?? priorFeeJuice?.minFj ?? "16000000000000000000"),
+	}
 	if (fuel?.router && fuel?.swapTarget) {
 		const router = getContract({
 			address: fuel.router as `0x${string}`,
@@ -374,6 +394,7 @@ async function main() {
 			portalSource: "forked-v1",
 			token: { name: TOKEN_NAME, symbol: TOKEN_SYMBOL, decimals: TOKEN_DECIMALS, maxWholePerTx: 1000 },
 			...(fuel ? { fuel } : {}),
+			feeJuice,
 		},
 		l2: {
 			proxy: { address: proxy.address.toString(), salt: salts.proxy, constructorArtifact: "constructor", constructorArgs: [] },

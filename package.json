@@ -46,7 +46,7 @@
     "vite": "^8.0.0"
   },
   "patchedDependencies": {
-    "@aztec/noir-noirc_abi@5.0.0-rc.1": "patches/@aztec%2Fnoir-noirc_abi@5.0.0-rc.1.patch",
-    "@aztec/noir-acvm_js@5.0.0-rc.1": "patches/@aztec%2Fnoir-acvm_js@5.0.0-rc.1.patch"
+    "@aztec/noir-noirc_abi@5.0.0-rc.2": "patches/@aztec%2Fnoir-noirc_abi@5.0.0-rc.2.patch",
+    "@aztec/noir-acvm_js@5.0.0-rc.2": "patches/@aztec%2Fnoir-acvm_js@5.0.0-rc.2.patch"
   }
 }

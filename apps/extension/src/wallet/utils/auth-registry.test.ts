@@ -20,7 +20,7 @@ import { isAuthRegistryEnabled, isAuthwitConsumable } from "./auth-registry"
 // revoke could never be confirmed on-chain (a fast consume raced the unmined
 // revoke). Pin the read slots so a re-swap fails here, not in a flaky e2e.
 describe("auth-registry read slots (AUDIT F1)", () => {
-	const account = AztecAddress.fromNumber(0x1234).toString()
+	const account = AztecAddress.fromNumberUnsafe(0x1234).toString()
 	const messageHash = new Fr(0x5678n).toString()
 
 	beforeEach(() => deriveMock.mockClear())

@@ -34,7 +34,7 @@
  * If a future upstream `@aztec/wallet-sdk` ships its own `registerToken` (etc.),
  * we throw at SW init rather than silently no-op. The guard checks arg types +
  * output type (not just arity), so a same-arity-but-different-shape upstream
- * method is caught. Pinned upstream version: `@aztec/wallet-sdk == 5.0.0-rc.1`;
+ * method is caught. Pinned upstream version: `@aztec/wallet-sdk == 5.0.0-rc.2`;
  * revisit on bump.
  */
 

@@ -31,7 +31,7 @@ import { EthAddress } from "@aztec/foundation/eth-address"
 import { TokenPortalAbi, TokenPortalBytecode } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
 import { createPublicClient, createWalletClient, defineChain, getContract, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 

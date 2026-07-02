@@ -96,7 +96,7 @@ For the service worker → offscreen direction, the same pattern repeats with `O
 
 ## 5. Storage versioning + destructive migration
 
-`apps/extension/src/wallet/storage/migrate.ts` runs on first unlock after the SW boots. It compares the stored `nulo:core:storage-version` against `CURRENT_VERSION` (currently 8 — bumped through `v7` for Phase 2 follow-up v4 transfer-card fields and `v8` for the Aztec 5.0.0-rc.1 hard-fork reset: account/contract address derivation + Schnorr scheme changed, so stored accounts/balances/PXE DBs are wiped and users re-register). If the version is older, the migration:
+`apps/extension/src/wallet/storage/migrate.ts` runs on first unlock after the SW boots. It compares the stored `nulo:core:storage-version` against `CURRENT_VERSION` (currently 9 — `v8` for the Aztec 5.0.0-rc.1 hard fork, where account/contract address derivation + the Schnorr scheme changed; `v9` for the rc.2 testnet redeploy, where the rollupVersion/derived chainId moved and every contract class-id shifted. Both wipe stored accounts/balances/PXE DBs; users re-register). If the version is older, the migration:
 
 1. Wipes a known set of `KEYS_TO_WIPE` and `KEY_PREFIXES_TO_WIPE_LOCAL` / `_SESSION`.
 2. Deletes PXE IndexedDB databases (`pxe/...` prefix + `keyval-store`).

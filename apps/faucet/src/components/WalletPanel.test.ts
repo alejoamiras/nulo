@@ -17,8 +17,8 @@ vi.mock("@/contracts/deployments", () => ({
 	rebuildUsdcInstance: vi.fn(async () => ({ address: { toString: () => "0x2" } })),
 	rebuildEthInstance: vi.fn(async () => ({ address: { toString: () => "0x3" } })),
 }))
-vi.mock("@defi-wonderland/aztec-standards/dist/src/artifacts/Dripper.js", () => ({ DripperContractArtifact: { name: "Dripper" } }))
-vi.mock("@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js", () => ({ TokenContractArtifact: { name: "Token" } }))
+vi.mock("@alejoamiras/aztec-standards/dist/src/artifacts/Dripper.js", () => ({ DripperContractArtifact: { name: "Dripper" } }))
+vi.mock("@alejoamiras/aztec-standards/dist/src/artifacts/Token.js", () => ({ TokenContractArtifact: { name: "Token" } }))
 
 import { __resetWalletConnectionForTests, useWalletConnection } from "@/composables/useWalletConnection"
 import WalletPanel from "./WalletPanel.vue"
