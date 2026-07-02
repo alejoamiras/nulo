@@ -106,13 +106,24 @@ export interface MethodDescriptor {
 	readonly note?: string
 }
 
-// ── Arg guards (named fns so failures stack-trace to the method) ───────
+// ── Arg guards ─────────────────────────────────────────────────────────
+// Each is a pure pass/fail PREDICATE over the raw positional args; the
+// dispatcher throws the "invalid arguments" rejection when one returns false.
+// Named (not inline) so the registry reads as a table of guarded methods.
 
-const isPlainRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null
+const isPlainRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v)
 
-/** requestCapabilities(manifest): the handler reads manifest properties directly. */
+/** requestCapabilities(manifest?): the handler optional-chains the manifest
+ *  (`manifest?.capabilities ?? []`) and `.filter`s the capabilities list. The
+ *  guard is optionality-exact with that tolerance — an ABSENT manifest is the
+ *  valid "no capabilities requested" call, and a PRESENT manifest must be a
+ *  plain object whose optional `capabilities` is an array (a non-array would
+ *  TypeError in the handler's `.filter`, so it's a calibrated reject here). */
 export function argsRequestCapabilities(args: readonly unknown[]): boolean {
-	return isPlainRecord(args[0])
+	const manifest = args[0]
+	if (manifest === undefined) return true
+	if (!isPlainRecord(manifest)) return false
+	return manifest.capabilities === undefined || Array.isArray(manifest.capabilities)
 }
 
 /** batch(legs): handleBatch iterates legs and re-dispatches `leg.name(leg.args)`;

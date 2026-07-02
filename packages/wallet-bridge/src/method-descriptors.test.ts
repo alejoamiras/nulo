@@ -377,10 +377,22 @@ describe("method-descriptors — arg guards (Q-02 ADD-only)", () => {
 		expect(REGISTRY_FOR_ARGS.registerContract.argSchema?.(["raw-address-string"])).toBe(true)
 	})
 
-	test("requestCapabilities requires an object manifest; batch requires well-formed legs", () => {
+	test("requestCapabilities matches the handler's tolerance EXACTLY; batch requires well-formed legs", () => {
+		// The handler optional-chains the manifest (`manifest?.capabilities ?? []`),
+		// so an absent manifest is a valid "no capabilities requested" call and MUST
+		// pass — rejecting it would over-tighten vs the pre-guard handler tolerance.
+		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([])).toBe(true)
+		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([undefined])).toBe(true)
+		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([{}])).toBe(true)
 		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([{ capabilities: [] }])).toBe(true)
-		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([{ capabilities: [{ type: "data" }] }])).toBe(true)
+		// A present manifest must be a plain object whose optional `capabilities` is
+		// an array — the handler `.filter`s it, so a non-array `capabilities` is a
+		// calibrated reject (not a downstream TypeError), and an array is not an object.
 		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.(["manifest"])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([{ capabilities: {} }])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([[]])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([null])).toBe(false)
 
 		expect(REGISTRY_FOR_ARGS.batch.argSchema?.([[{ name: "getChainInfo", args: [] }]])).toBe(true)
 		expect(REGISTRY_FOR_ARGS.batch.argSchema?.([[]])).toBe(true)
