@@ -34,6 +34,29 @@ describe("migrations registry (structural)", () => {
 		for (const v of versions) expect(v).toBeGreaterThan(BASELINE_VERSION)
 	})
 
+	test("real migrations are CONTIGUOUS from the baseline (a gap means one was skipped or unregistered)", () => {
+		// The e2e fixture's 9001 sentinel is excluded; real migrations must be
+		// baseline+1, baseline+2, … — a jump (1 → 3) would boot existing users
+		// past a transform their data still needs.
+		const real = migrations.map((m) => m.version).filter((v) => v < 9000)
+		real.forEach((v, i) => expect(v, `version gap before v${v}`).toBe(BASELINE_VERSION + 1 + i))
+	})
+
+	test("every NNN-*.ts migration file in this directory is actually registered", async () => {
+		// An authored-but-unimported migration file passes every other check
+		// while existing users silently skip its transform.
+		const { readdirSync } = await import("node:fs")
+		const { dirname, join } = await import("node:path")
+		const { fileURLToPath } = await import("node:url")
+		const here = dirname(fileURLToPath(import.meta.url))
+		const files = readdirSync(join(here)).filter((f) => /^\d{3}-.*\.ts$/.test(f) && !f.endsWith(".test.ts"))
+		const registered = new Set(migrations.map((m) => m.version))
+		for (const f of files) {
+			const v = Number.parseInt(f.slice(0, 3), 10)
+			expect(registered.has(v), `${f} exists but version ${v} is not in the migrations array`).toBe(true)
+		}
+	})
+
 	test("every registered migration declares a footprint", () => {
 		for (const m of migrations) {
 			expect(m.reads.length + m.writes.length, `migration ${m.version} declares no refs`).toBeGreaterThan(0)

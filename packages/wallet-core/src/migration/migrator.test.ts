@@ -21,8 +21,20 @@ class MemStore implements MinimalStorageArea {
 		if (this.failSetKeys) for (const k of Object.keys(items)) if (this.failSetKeys.has(k)) throw new Error(`injected set failure: ${k}`)
 		for (const [k, v] of Object.entries(items)) this.data.set(k, v)
 	}
+	/** If set, `remove()` throws when it would delete any of these keys ONCE
+	 *  (simulates a transient storage failure in journal cleanup). */
+	failRemoveKeysOnce?: Set<string>
+
 	async remove(keys: string | string[]): Promise<void> {
-		for (const k of Array.isArray(keys) ? keys : [keys]) this.data.delete(k)
+		const arr = Array.isArray(keys) ? keys : [keys]
+		if (this.failRemoveKeysOnce) {
+			for (const k of arr)
+				if (this.failRemoveKeysOnce.has(k)) {
+					this.failRemoveKeysOnce = undefined
+					throw new Error(`injected remove failure: ${k}`)
+				}
+		}
+		for (const k of arr) this.data.delete(k)
 	}
 	seed(entries: Record<string, unknown>): this {
 		for (const [k, v] of Object.entries(entries)) this.data.set(k, v)
@@ -364,6 +376,40 @@ describe("Migrator — crash-safe journal", () => {
 		const noop = defineMigration({ version: 1, description: "n", reads: [], writes: [], up: async () => {} })
 		await new Migrator({ store, migrations: [noop] }).run()
 		expect(store.data.get(SCHEMA_VERSION_KEY)).toBe(1) // stamped by the run, not the crafted 99
+	})
+})
+
+describe("Migrator — run() never throws (unstructured storage failures)", () => {
+	test("a failing BACKUP write becomes a retryable needs-recovery with the barrier cleared (no wedge, no oscillating silent boot)", async () => {
+		const store = new MemStore().seed(ver(0)).seed(row("acct", "a", { n: 0 }))
+		store.failSetKeys = new Set([BACKUP_KEY])
+		const r = await new Migrator({ store, migrations: [patchRows(1, "acct", { x: 1 })] }).run()
+		expect(r).toMatchObject({ kind: "needs-recovery", retryable: true })
+		expect(store.has(SCHEMA_RUNNING_KEY)).toBe(false) // barrier NOT stranded
+		expect(store.obj("acct", "a")).toEqual({ n: 0 }) // untouched
+	})
+
+	test("a failing BARRIER write becomes a retryable needs-recovery", async () => {
+		const store = new MemStore().seed(ver(0))
+		store.failSetKeys = new Set([SCHEMA_RUNNING_KEY])
+		const r = await new Migrator({ store, migrations: [patchRows(1, "acct", {})] }).run()
+		expect(r).toMatchObject({ kind: "needs-recovery", retryable: true })
+	})
+
+	test("a cleanup failure AFTER the stamp is SUCCESS — never a restore under the stamped version", async () => {
+		// The synchronous twin of the stamp-vs-clear crash window: remove()
+		// rejecting after version=N landed must not fire the restore path.
+		const store = new MemStore().seed(ver(0)).seed(row("acct", "a", { n: 0 }))
+		store.failRemoveKeysOnce = new Set([BACKUP_KEY])
+		const r = await new Migrator({ store, migrations: [patchRows(1, "acct", { x: 1 })] }).run()
+		expect(r).toEqual({ kind: "migrated", from: 0, to: 1 })
+		expect(store.obj("acct", "a")).toEqual({ n: 0, x: 1 }) // committed data KEPT
+		expect(store.data.get(SCHEMA_VERSION_KEY)).toBe(1)
+		// The orphaned backup (no barrier) is swept — never restored — next run.
+		const r2 = await new Migrator({ store, migrations: [patchRows(1, "acct", { x: 1 })] }).run()
+		expect(r2).toEqual({ kind: "noop", version: 1 })
+		expect(store.obj("acct", "a")).toEqual({ n: 0, x: 1 }) // still NOT reverted
+		expect(store.has(BACKUP_KEY)).toBe(false) // snapshot debris swept
 	})
 })
 

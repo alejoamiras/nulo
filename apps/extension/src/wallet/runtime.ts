@@ -45,7 +45,7 @@ import { TransactionService } from "./services/transaction/service"
 import { IncomingTransferService } from "./services/incoming-transfer/service"
 import { WindowManager } from "./services/window-manager/window-manager"
 import { initWalletSdkHandler } from "./services/wallet-sdk/background"
-import { Migrator } from "@nulo/wallet-core/migration"
+import { type MigrationResult, Migrator, SCHEMA_RUNNING_KEY } from "@nulo/wallet-core/migration"
 import {
 	BASELINE_VERSION,
 	migrations,
@@ -103,11 +103,22 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// Data-preserving storage migration runs FIRST — before config.load() (a
 		// config-reshaping migration must not be shadowed by an already-loaded
 		// config) and before any service reads storage.
+		// The engine contractually never throws (a throw becomes a retryable
+		// needs-recovery result) — this catch is belt-and-braces so even an
+		// engine BUG still lands on the blocked-status recovery UX instead of a
+		// bare boot crash with a possibly-stranded barrier.
 		const migration = await new Migrator({
 			store: browserApi.storage.local,
 			migrations,
 			baselineVersion: BASELINE_VERSION,
-		}).run()
+		})
+			.run()
+			.catch(async (err): Promise<MigrationResult> => {
+				await browserApi.storage.local
+					.remove(["nulo:schema:backup", SCHEMA_RUNNING_KEY])
+					.catch(() => logger.log("wallet", LogLevel.Error, "Failed to clear the migration barrier after an engine throw"))
+				return { kind: "needs-recovery", reason: `migration engine threw: ${getErrorMessage(err)}`, retryable: true }
+			})
 		logger.log("wallet", LogLevel.Info, `Storage migration: ${migration.kind}`)
 		if (migration.kind === "needs-recovery" || (migration.kind === "failed" && migration.breaking)) {
 			logger.log("wallet", LogLevel.Error, `Storage migration blocked boot (${migration.kind}): ${migration.reason}`)

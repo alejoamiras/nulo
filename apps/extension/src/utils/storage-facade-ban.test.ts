@@ -37,8 +37,10 @@ const ALLOWLIST: RegExp[] = [
 ]
 
 /** Overrides the allowlist: paths that run in UI contexts despite living under
- *  an allowlisted prefix. */
-const DENYLIST: RegExp[] = [/^wallet\/services\/[^/]+\/client/]
+ *  an allowlisted prefix — and MIGRATIONS, which must go through the engine's
+ *  staged `ctx` (a raw access would bypass the footprint backup and restore,
+ *  making its writes unrecoverable on failure). */
+const DENYLIST: RegExp[] = [/^wallet\/services\/[^/]+\/client/, /^wallet\/storage\/migrations\//]
 
 const SCANNED_EXT = /\.(ts|js|vue)$/
 
@@ -105,6 +107,13 @@ describe("storage-facade ban (static)", () => {
 
 	test("service CLIENTS are denied despite the wallet/ allowance (they run in UI pages)", () => {
 		const offenders = findRawStorageAccess([{ path: "wallet/services/foo/client.ts", content: "chrome.storage.local.get(k)" }])
+		expect(offenders).toHaveLength(1)
+	})
+
+	test("MIGRATIONS are denied raw access (must use the engine's staged ctx)", () => {
+		const offenders = findRawStorageAccess([
+			{ path: "wallet/storage/migrations/002-example.ts", content: "await chrome.storage.local.set({ k: 1 })" },
+		])
 		expect(offenders).toHaveLength(1)
 	})
 })

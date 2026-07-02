@@ -1,6 +1,7 @@
 /**
  * TEMPLATE for a new data-preserving migration. To add one:
- *   1. Copy this file to `NNN-short-description.ts` (NNN = current max + 1).
+ *   1. Copy this file to `NNN-short-description.ts` (NNN = current max REAL
+ *      migration + 1 — the e2e fixture's 9001 sentinel doesn't count).
  *   2. Set `version` to that number and describe the shape change.
  *   3. Declare the EXACT roots + value keys you read and write — the engine
  *      snapshots ONLY that footprint into the pre-migration backup, so an

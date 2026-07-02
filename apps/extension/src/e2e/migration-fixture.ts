@@ -26,7 +26,11 @@ import { defineMigration } from "@nulo/wallet-core/migration"
 export const MIGRATION_FIXTURE_ROOT = "nulo:e2e:mig-fixture"
 export const MIGRATION_FIXTURE_BOOM_KEY = "nulo:e2e:migration-boom"
 export const MIGRATION_FIXTURE_HOLD_KEY = "nulo:e2e:migration-hold"
-export const MIGRATION_FIXTURE_VERSION = 2
+/** Deliberately a HIGH sentinel, far above any real migration's version: the
+ *  first real migration is v2, and a fixture also at v2 would make stamped
+ *  smoke builds throw `duplicate migration version` at SW boot the moment a
+ *  template-following author registers it. */
+export const MIGRATION_FIXTURE_VERSION = 9001
 
 /** Must stay under the smoke vitest testTimeout (60s) so a forgotten hold
  *  fails the test's own assertion, not the generic timeout — but long enough

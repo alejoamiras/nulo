@@ -106,8 +106,33 @@ export class Migrator {
 		this.maxVersion = Math.max(baselineVersion, migMax)
 	}
 
-	/** Drive persisted storage to the current max version. Idempotent + crash-safe. */
+	/** Drive persisted storage to the current max version. Idempotent + crash-safe.
+	 *  NEVER throws: the host writes the recovery UX off the RETURN value, so a
+	 *  thrown storage exception (disk-full, internal chrome.storage error) would
+	 *  be the one failure class with no defined recovery — and could strand the
+	 *  `running` barrier as a permanent "Updating" overlay. Any unexpected throw
+	 *  becomes a retryable `needs-recovery` with the barrier cleared. Safe
+	 *  because every committing step already journals first: a throw outside the
+	 *  per-migration try can only come from the reads, the barrier set, or the
+	 *  backup set — none of which have touched user data yet. */
 	async run(): Promise<MigrationResult> {
+		try {
+			return await this.runInner()
+		} catch (err) {
+			try {
+				await this.store.remove([SCHEMA_BACKUP_KEY, SCHEMA_RUNNING_KEY])
+			} catch {
+				// Storage is failing wholesale; the next boot's resume converges.
+			}
+			return {
+				kind: "needs-recovery",
+				reason: `unexpected storage failure during migration: ${message(err)}`,
+				retryable: true,
+			}
+		}
+	}
+
+	private async runInner(): Promise<MigrationResult> {
 		const resumed = await this.resumeIfInterrupted()
 		if (resumed) return resumed
 
@@ -179,6 +204,12 @@ export class Migrator {
 		const backup: BackupPayload = { version: m.version, refs, entries: snapshot }
 		await this.store.set({ [SCHEMA_BACKUP_KEY]: backup })
 
+		// Once the version stamp lands the migration IS complete — a failure in
+		// the journal cleanup after it must NEVER trigger a restore (that would
+		// revert committed data underneath the stamped marker, the exact
+		// data-loss shape the crash-resume path guards against, reached via a
+		// synchronous remove() rejection instead of a kill).
+		let stamped = false
 		try {
 			const staging = new StagingArea(this.store)
 			await m.up({ local: staging } satisfies MigrationContext)
@@ -189,9 +220,15 @@ export class Migrator {
 			if (removes.length) await this.store.remove(removes)
 
 			await this.store.set({ [SCHEMA_VERSION_KEY]: m.version })
+			stamped = true
 			await this.store.remove(SCHEMA_BACKUP_KEY)
 			return undefined
 		} catch (err) {
+			if (stamped) {
+				// Only the cleanup failed; the next boot's resume sees
+				// version >= backup.version and clears without restoring.
+				return undefined
+			}
 			try {
 				await this.restore(backup)
 			} catch (restoreErr) {
@@ -237,7 +274,13 @@ export class Migrator {
 	/** Converge an interrupted journal (see the file header for the matrix). */
 	private async resumeIfInterrupted(): Promise<MigrationResult | undefined> {
 		const j = await this.store.get([SCHEMA_RUNNING_KEY, SCHEMA_BACKUP_KEY, SCHEMA_VERSION_KEY])
-		if (!(SCHEMA_RUNNING_KEY in j)) return undefined
+		if (!(SCHEMA_RUNNING_KEY in j)) {
+			// A backup without the barrier is cleanup debris (a post-stamp
+			// remove() that failed): the migration completed, nothing to restore
+			// — but the snapshot may hold sensitive rows, so sweep it.
+			if (SCHEMA_BACKUP_KEY in j) await this.store.remove(SCHEMA_BACKUP_KEY)
+			return undefined
+		}
 
 		if (!(SCHEMA_BACKUP_KEY in j)) {
 			// Crash predated any backup write — nothing was touched.
