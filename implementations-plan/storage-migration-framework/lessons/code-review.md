@@ -44,4 +44,4 @@ Engine tests 37 → 40; registry structural 3 → 5; ban 5 → 6.
 
 ## Fresh-round confirmations (final)
 - **fable (max, fresh→resumed): `approve`** — verified the journal-preservation fix (282f9e7), independently confirmed its OWN suggested remedy would have leaked via the orphan-sweep, and endorsed the clear-nothing/single-owner-resume design as strictly better. All prior follow-ups remain tracked non-blockers.
-- **codex (fresh): `approve`** at 1e8219b; final confirmation on 282f9e7 recorded below when returned.
+- **codex (fresh): `approve`** at 1e8219b; final confirmation on 282f9e7: **`approve`** — removing the clear reopens nothing.
