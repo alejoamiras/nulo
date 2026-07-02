@@ -24,7 +24,7 @@ vi.mock("@/utils/core", () => {
 	}
 	return {
 		managers,
-		// Q-16: app.store reads the lazy clients via require*()/get*(). initNetworks/
+		// app.store reads the lazy clients via require*()/get*(). initNetworks/
 		// initAccount REASSIGN `managers.network`/`.account` to the mocked
 		// `new NetworkServiceClient()`/`new AccountServiceClient()` (which carry
 		// getNodeStatus etc.), so these MUST read the CURRENT `managers.X` — close
@@ -156,12 +156,12 @@ describe("useProfileBootstrap", () => {
 		expect(appStore.isSessionChecked).toBe(true)
 	})
 
-	// Q-15: a lock right after a password change clears the active session while a stale
+	// A lock right after a password change clears the active session while a stale
 	// bootstrap is still running; that bootstrap must NOT resurrect isLogined afterward
 	// (the lock must win). The end-guard re-reads the authoritative active profile
 	// (getActiveProfile — serialized with lockActiveProfile under the profile service's
 	// runExclusive) before the flip, and returns whether the profile is still active.
-	test("(Q-15) bootstrapActiveProfile does not resurrect isLogined when the session was locked mid-bootstrap", async () => {
+	test("bootstrapActiveProfile does not resurrect isLogined when the session was locked mid-bootstrap", async () => {
 		;(managers.profile.getActiveProfile as ReturnType<typeof vi.fn>).mockResolvedValue(null)
 		const { bootstrapActiveProfile } = useProfileBootstrap()
 		const appStore = useAppStore()
@@ -170,7 +170,7 @@ describe("useProfileBootstrap", () => {
 		expect(stillActive).toBe(false)
 	})
 
-	test("(Q-15) bootstrapActiveProfile does not set isLogined when a different profile became active mid-bootstrap", async () => {
+	test("bootstrapActiveProfile does not set isLogined when a different profile became active mid-bootstrap", async () => {
 		;(managers.profile.getActiveProfile as ReturnType<typeof vi.fn>).mockResolvedValue({
 			id: "other",
 			name: "Other",

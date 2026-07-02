@@ -354,7 +354,7 @@ export class WalletSdkDispatcher {
 		// to the former inline `Object.hasOwn` check (same throw string).
 		assertKnownMethod(methodName)
 
-		// Arg-shape guard (Q-02): a pure pass/fail predicate over the ORIGINAL
+		// Arg-shape guard: a pure pass/fail predicate over the ORIGINAL
 		// args — runs BEFORE capability/scope enforcement and before any handler
 		// destructuring, and never replaces the array, so scope checkers and
 		// handlers keep seeing the exact wire values. Batch legs re-enter

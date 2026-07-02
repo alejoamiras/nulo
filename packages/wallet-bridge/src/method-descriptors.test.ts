@@ -285,9 +285,9 @@ describe("method-descriptors — add-a-method proof (metadata only)", () => {
 	})
 })
 
-// ── ADD-ONLY (Q-02, owner-authorized): arg-guard assertions ────────────
+// ── ADD-ONLY (owner-authorized): arg-guard assertions ────────────
 // Everything ABOVE this marker is the round-1 frozen oracle and is byte-
-// identical to its pre-Q-02 state (verified by the surfaced git diff). The
+// identical to its pre-guard state (verified by the surfaced git diff). The
 // additions below only pin the NEW argSchema field; no authz assertion is
 // touched, and the derive* parity tests above prove the authz maps are
 // unchanged by the field's presence.
@@ -322,7 +322,7 @@ const FROZEN_ARG_UNGUARDED = new Set([
 	"registerContractClass", // disabled at scope-check — that error must stay observable
 ])
 
-describe("method-descriptors — arg guards (Q-02 ADD-only)", () => {
+describe("method-descriptors — arg guards (ADD-only)", () => {
 	test("guarded/unguarded split is exact and total over the registry", () => {
 		const guarded = new Set(
 			Object.entries(REGISTRY_FOR_ARGS)

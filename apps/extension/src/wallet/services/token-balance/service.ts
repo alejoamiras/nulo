@@ -126,7 +126,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 				// Skip a balance whose token the active profile doesn't own (the map is
 				// active-profile-only): a lingering foreign-profile balance (balances carry
 				// no profileId) or a codec-hidden token row must not throw and white-screen
-				// the whole list — mirrors the balance projector's skip (R1.4a opus-MED-2).
+				// the whole list — mirrors the balance projector's same-reason skip.
 				.filter((x) => this.tokens.has(x.token))
 				.map((x) => this.getTokenBalanceInfo(x), this)
 		)
@@ -265,11 +265,11 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	public async backup(): Promise<TokenBalanceRaw[]> {
 		const profile = await requireActiveProfile(this.profileService)
-		// leak#1 fix (export-only): balances carry no profileId, so scope the export to
-		// the active profile via its token ids. Token ids are a single global sequence,
-		// so `balance.token ∈ active-profile-token-ids` is an exact partition. Use the
+		// Export-scope guard: balances carry no profileId, so scope the export to the
+		// active profile via its token ids. Token ids are a single global sequence, so
+		// `balance.token ∈ active-profile-token-ids` is an exact partition. Use the
 		// AUTHORITATIVE token service (not the in-memory `this.tokens`, which is cleared
-		// mid-profile-switch → would export nothing) — opus-MED-2.
+		// mid-profile-switch → would export nothing).
 		const ownedTokenIds = new Set((await this.tokenService.getTokensRaw(profile.id)).map((t) => t.id))
 		return (await this.repo.getAll()).filter((b) => ownedTokenIds.has(b.token))
 	}

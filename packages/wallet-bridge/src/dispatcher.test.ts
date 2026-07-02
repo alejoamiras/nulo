@@ -1739,7 +1739,7 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 	})
 })
 
-describe("dispatcher — arg guards (Q-02): order, tolerance, batch-leg validation", () => {
+describe("dispatcher — arg guards: order, tolerance, batch-leg validation", () => {
 	function makeBareDispatcher(session: IDappSessionRef | undefined) {
 		const writer: IDappSessionWriter = {
 			tryGetDappSessionByOriginAndChain: async () => session,
@@ -1765,7 +1765,7 @@ describe("dispatcher — arg guards (Q-02): order, tolerance, batch-leg validati
 		)
 	})
 
-	test("unguarded methods keep their exact pre-Q-02 behavior — capability error, never an args error", async () => {
+	test("unguarded methods keep their exact pre-guard behavior — capability error, never an args error", async () => {
 		// simulateTx deliberately has NO argSchema (its exec validation is owned by
 		// checkSimulateTx with a pinned error string). With no grants + garbage args,
 		// the observable stays the capability rejection — proving no guard preempts it.
