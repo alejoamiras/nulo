@@ -241,7 +241,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		const network = await this.networkService.getNetwork(networkId)
 		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
 
-		const fpcInstance = await pxe.getContractInstance(AztecAddress.fromString(address))
+		const fpcInstance = await pxe.getContractInstance(AztecAddress.fromStringUnsafe(address))
 		if (!fpcInstance) {
 			throw new Error("Contract instance not found")
 		}
@@ -331,7 +331,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		const network = await resolveNetworkByChainId(this.networkService, existing.chainId)
 		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
 
-		const fpcInstance = await pxe.getContractInstance(AztecAddress.fromString(address))
+		const fpcInstance = await pxe.getContractInstance(AztecAddress.fromStringUnsafe(address))
 		if (!fpcInstance) {
 			throw new Error("No contract found at this address. Make sure it's deployed and is a Sponsored FPC.")
 		}

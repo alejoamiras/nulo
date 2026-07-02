@@ -107,7 +107,7 @@ export class ViewExecutor {
 		const encodedArgs = encodeArguments(fn, op.args)
 		const call = new FunctionCall(
 			fn.name,
-			AztecAddress.fromString(op.contract),
+			AztecAddress.fromStringUnsafe(op.contract),
 			fnSelector,
 			fn.functionType,
 			false,
@@ -211,7 +211,7 @@ export class ViewExecutor {
 		// TODO: filter by chainId
 		return (await this.deps.contactService.getContacts()).map((x) => ({
 			alias: x.name,
-			item: AztecAddress.fromString(x.address),
+			item: AztecAddress.fromStringUnsafe(x.address),
 		}))
 	}
 
@@ -271,7 +271,7 @@ export class ViewExecutor {
 			node,
 			pxe,
 			network,
-			fromAddr: AztecAddress.fromString(op.accountAddress),
+			fromAddr: AztecAddress.fromStringUnsafe(op.accountAddress),
 			opts: op.opts,
 			optimizableCalls,
 			remainingRaw,
@@ -352,7 +352,7 @@ export class ViewExecutor {
 		return pxe.profileTx(txRequest, {
 			profileMode: op.opts.profileMode,
 			skipProofGeneration: op.opts.skipProofGeneration,
-			scopes: [AztecAddress.fromString(op.accountAddress), ...additionalScopes],
+			scopes: [AztecAddress.fromStringUnsafe(op.accountAddress), ...additionalScopes],
 		})
 	}
 }

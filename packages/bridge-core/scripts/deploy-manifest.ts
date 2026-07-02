@@ -35,6 +35,9 @@ export interface CandidateManifest {
 		portalSource: "forked-v1"
 		token: { name: string; symbol: string; decimals: number; maxWholePerTx: number }
 		fuel?: Record<string, unknown>
+		/** Direct Fee-Juice bridge config — the faucet's Fuel tab reads exactly these keys
+		 *  (bridge-deployments.ts). Omitting it from a promotion silently disables direct Fuel. */
+		feeJuice?: { portal: string; asset: string; feeAssetHandler: string; minFj: string }
 	}
 	l2: { proxy: L2Record; token: L2Record; bridge: L2Record }
 }

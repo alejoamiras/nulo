@@ -82,7 +82,7 @@ export function useFuelFlow() {
 			// Fail-closed portal/asset cross-check BEFORE any record, signature, approve or deposit: the bundled
 			// FeeJuicePortal must actually accept the configured fee asset (its on-chain UNDERLYING()).
 			await feeAsset.verifyPortalAsset()
-			const claimer = AztecAddress.fromString(recipient)
+			const claimer = AztecAddress.fromStringUnsafe(recipient)
 			const plan = isPrivate ? await planPrivateFuelDeposit(claimer, amount) : await planPublicFuelDeposit(claimer, amount)
 			id = plan.secretHash
 			const now = Date.now()

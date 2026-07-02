@@ -501,7 +501,7 @@ async function classifyCall(
 		if (fn.functionType === FunctionType.UTILITY) {
 			const functionCall = new FunctionCall(
 				fn.name,
-				AztecAddress.fromString(call.contract),
+				AztecAddress.fromStringUnsafe(call.contract),
 				fnSelector,
 				fn.functionType,
 				false, // hideMsgSender hardcoded false for utility calls (parity)
@@ -516,7 +516,7 @@ async function classifyCall(
 			kind: "tx",
 			functionCall: new FunctionCall(
 				fn.name,
-				AztecAddress.fromString(call.contract),
+				AztecAddress.fromStringUnsafe(call.contract),
 				fnSelector,
 				fn.functionType,
 				call.hideSender === true, // 'call' kind uses hideSender (parity)
@@ -539,7 +539,7 @@ async function classifyCall(
 	if (fn.functionType === FunctionType.UTILITY) {
 		const functionCall = new FunctionCall(
 			fn.name,
-			AztecAddress.fromString(call.to),
+			AztecAddress.fromStringUnsafe(call.to),
 			FunctionSelector.fromString(call.selector),
 			fn.functionType,
 			false, // hideMsgSender hardcoded false for utility calls (parity)
@@ -554,7 +554,7 @@ async function classifyCall(
 		kind: "tx",
 		functionCall: new FunctionCall(
 			fn.name,
-			AztecAddress.fromString(call.to),
+			AztecAddress.fromStringUnsafe(call.to),
 			FunctionSelector.fromString(call.selector),
 			fn.functionType,
 			call.hideMsgSender === true, // 'encoded_call' kind uses hideMsgSender (parity)

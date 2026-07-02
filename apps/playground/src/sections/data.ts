@@ -32,12 +32,14 @@ export function bindData(root: HTMLElement): void {
 				const tokenAddress = getInput("tokenAddress")
 				if (!tokenAddress) throw new Error("tokenAddress input required")
 				const s = getState()
-				const acct = s.selectedAccount ? AztecAddress.fromString(s.selectedAccount) : AztecAddress.fromString(tokenAddress)
+				const acct = s.selectedAccount
+					? AztecAddress.fromStringUnsafe(s.selectedAccount)
+					: AztecAddress.fromStringUnsafe(tokenAddress)
 				// Minimal eventMetadata stub — wallet may reject, but the call is silent-path
 				// either way (PrivateData=4 < confirmationLevel=5).
 				const eventMetadata = { eventSelector: Fr.ZERO, fieldNames: [], decode: (_: unknown[]) => null }
 				const eventFilter = {
-					contractAddress: AztecAddress.fromString(tokenAddress),
+					contractAddress: AztecAddress.fromStringUnsafe(tokenAddress),
 					fromBlock: 0,
 					toBlock: 1000,
 					scopes: [acct],

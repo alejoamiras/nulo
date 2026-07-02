@@ -240,17 +240,25 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	}
 
 	public async registerSender(network: NetworkInfo, address: AztecAddress): Promise<AztecAddress> {
-		return this.withPxeWrite("registerSender", network, async (pxe) =>
-			pxe.registerSender(await AztecAddress.schema.parseAsync(address)),
-		)
+		// rc.2 folded senders into tagging-secret sources; `address-derived` carries the old sender
+		// semantics. The new API returns void, so return the parsed address to keep this service's contract.
+		return this.withPxeWrite("registerSender", network, async (pxe) => {
+			const sender = await AztecAddress.schema.parseAsync(address)
+			await pxe.registerTaggingSecretSource({ kind: "address-derived", sender })
+			return sender
+		})
 	}
 
 	public async getSenders(network: NetworkInfo): Promise<AztecAddress[]> {
-		return this.withPxeRead("getSenders", network, (pxe) => pxe.getSenders())
+		return this.withPxeRead("getSenders", network, async (pxe) =>
+			(await pxe.getTaggingSecretSources({ kind: "address-derived" })).map((s) => s.sender),
+		)
 	}
 
 	public async removeSender(network: NetworkInfo, address: AztecAddress): Promise<void> {
-		return this.withPxeWrite("removeSender", network, async (pxe) => pxe.removeSender(await AztecAddress.schema.parseAsync(address)))
+		return this.withPxeWrite("removeSender", network, async (pxe) =>
+			pxe.removeTaggingSecretSource({ kind: "address-derived", sender: await AztecAddress.schema.parseAsync(address) }),
+		)
 	}
 
 	public async getRegisteredAccounts(network: NetworkInfo): Promise<CompleteAddress[]> {

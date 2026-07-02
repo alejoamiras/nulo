@@ -169,7 +169,7 @@ async function sendStandaloneFjClaim(
 	const fpc = await getSponsoredFpcInstance()
 	const sponsored = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
 	const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
-	const fj = await Contract.at(AztecAddress.fromString(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
+	const fj = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
 	let receiptTxHash: string
 	try {
 		const { receipt } = (await fj.methods
@@ -209,7 +209,7 @@ export async function claimFuelStandalone(id: string): Promise<void> {
 	if (!aztec) throw new Error("Connect your Aztec wallet first.")
 	const rec = useBridgeJournal().records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
 	if (!rec?.fuel?.received || !rec.fuel.leafIndex) throw new Error("This bridge has no fuel to claim.")
-	await sendStandaloneFjClaim(aztec, AztecAddress.fromString(rec.recipient), rec.fuel, id)
+	await sendStandaloneFjClaim(aztec, AztecAddress.fromStringUnsafe(rec.recipient), rec.fuel, id)
 }
 
 /** Read the account's PUBLIC Fee Juice balance — the cold-account detector for no-fuel claims. Uses the
@@ -217,7 +217,7 @@ export async function claimFuelStandalone(id: string): Promise<void> {
  *  simulation); mirrors the wallet's own gas-balance-reader. */
 async function readPublicFeeJuiceBalance(aztec: unknown, recipient: AztecAddress): Promise<bigint> {
 	const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
-	const fj = await Contract.at(AztecAddress.fromString(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
+	const fj = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
 	// readBalance unwraps the SDK's SimulationResult { result } + coerces to bigint (cf. useTokenBalance).
 	return readBalance(aztec as never, fj, "balance_of_public", recipient)
 }
@@ -228,7 +228,7 @@ async function readPublicFeeJuiceBalance(aztec: unknown, recipient: AztecAddress
  *  is `abi_utility` — scoped in the combined manifest's `simulation.utilities`. */
 async function readPrivateFeeJuiceBalance(aztec: unknown, recipient: AztecAddress): Promise<bigint> {
 	const { PrivateFPCContractArtifact } = await import("@nulo/bridge-core/private-fpc-artifact")
-	const fpc = await Contract.at(AztecAddress.fromString(PRIVATE_FPC_ADDRESS), PrivateFPCContractArtifact, aztec as never)
+	const fpc = await Contract.at(AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS), PrivateFPCContractArtifact, aztec as never)
 	return readBalance(aztec as never, fpc, "balance_of", recipient)
 }
 
@@ -285,7 +285,7 @@ export function ensureDepositJournalDeps(): void {
 				const claimMaxFees = rec.isPrivate ? await predictedWorstMinFees(createAztecNodeClient(NODE_URL)) : undefined
 				return buildFuelClaimInteraction(rec, {
 					aztec,
-					recipient: AztecAddress.fromString(rec.recipient),
+					recipient: AztecAddress.fromStringUnsafe(rec.recipient),
 					sponsoredFpc: fpcInst.address,
 					minFloorFj: FUEL_MIN_FJ,
 					maxFeesPerGas: claimMaxFees
@@ -300,7 +300,7 @@ export function ensureDepositJournalDeps(): void {
 					onSetupInsufficiency: () => latchFuel({ setupInsufficiency: true }),
 				})
 			}
-			const recipientAddr = AztecAddress.fromString(rec.recipient)
+			const recipientAddr = AztecAddress.fromStringUnsafe(rec.recipient)
 			const amount = BigInt(rec.amount)
 			const secret = Fr.fromString(secretHex)
 			const leaf = new Fr(BigInt(rec.leafIndex ?? "0"))
@@ -338,7 +338,7 @@ export function ensureDepositJournalDeps(): void {
 				if (BRIDGE_FUEL && fuelReceived < BRIDGE_FUEL.minFuelFj) {
 					return stop("The bridged gas is below the safe claim floor; the private fuel claim can't self-pay.")
 				}
-				const fpcAddr = AztecAddress.fromString(fb.fpc ?? PRIVATE_FPC_ADDRESS)
+				const fpcAddr = AztecAddress.fromStringUnsafe(fb.fpc ?? PRIVATE_FPC_ADDRESS)
 				const receiptStatus = fb.claimTxHash ? await fuelReceiptStatus(fb.claimTxHash) : undefined
 				if (receiptStatus === "included" && fb.consumed !== true) {
 					updateRecord(rec.id, { fuel: { ...fb, consumed: true } })
@@ -585,7 +585,7 @@ export function useDepositFlow() {
 			// bridge is never blocked (it brings its own gas).
 			if (!fuelSlice) {
 				try {
-					const addr = AztecAddress.fromString(recipient)
+					const addr = AztecAddress.fromStringUnsafe(recipient)
 					if ((await readPublicFeeJuiceBalance(aztec, addr)) === 0n) {
 						const priv = await readPrivateFeeJuiceBalance(aztec, addr).catch(() => null)
 						if (priv === 0n) {
@@ -622,7 +622,7 @@ export function useDepositFlow() {
 				// reconstruct it from msg_sender inside PrivateFPC.mint_and_pay_fee — a random secret would
 				// strand the FJ forever (L3/L4). The per-deposit BRIDGE-SECRET salt is random + persisted;
 				// it is DISTINCT from the FPC-ADDRESS salt (Fr.zero()). Public fuel stays recipient-bound random.
-				const claimer = AztecAddress.fromString(recipient)
+				const claimer = AztecAddress.fromStringUnsafe(recipient)
 				const bridgeSecretSalt = isPrivate ? Fr.random() : undefined
 				const fuelSecret = bridgeSecretSalt ? deriveBridgeSecret(bridgeSecretSalt, claimer) : Fr.random()
 				fuelPre = {

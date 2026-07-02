@@ -1,19 +1,20 @@
 /**
  * Single source of truth for the faucet's alpha-testnet chain identity, + a
  * build-time guard against drift. The prod faucet broke because a stale
- * `VITE_CHAIN_VERSION=4127419662` (shipped in `.env.example`) overrode the
- * correct value, yielding wallet chainId `4138294185` — which the V5 wallet
- * (chainId `4229590296`) has no network for ("No network configured…").
+ * `VITE_CHAIN_VERSION` (shipped in `.env.example`) overrode the correct value,
+ * yielding a wallet chainId the V5 wallet has no network for ("No network
+ * configured…").
  *
- * Phase 3 wires `apps/faucet/src/lib/chain-info.ts` to import these
- * constants (dropping the `VITE_CHAIN_*` override path entirely) so the faucet
- * + wallet cannot diverge; this module is the canonical pair + the assert.
+ * The canonical pair is single-sourced from the FAUCET's own
+ * `apps/faucet/src/lib/chain-constants.ts` (which `chain-info.ts` also imports)
+ * so the faucet, the wallet, and this release-time `verify-live` guard cannot
+ * diverge. A testnet redeploy that bumps `chain-constants.ts` (e.g. #248's
+ * 5.0.0-rc.2) automatically flows here — no hand-edit, no drift.
  */
 
-/** Sepolia — the L1 the alpha-testnet rollup settles to. */
-export const TESTNET_L1_CHAIN_ID = 11155111
-/** V5 alpha-testnet rollup version (the value `.env.example` must carry). */
-export const TESTNET_ROLLUP_VERSION = 4239416255
+import { TESTNET_L1_CHAIN_ID, TESTNET_ROLLUP_VERSION } from "../../apps/faucet/src/lib/chain-constants"
+
+export { TESTNET_L1_CHAIN_ID, TESTNET_ROLLUP_VERSION }
 
 /**
  * The wallet's `DEFAULT_SEEDS` derives a network's chainId as
@@ -23,7 +24,7 @@ export function walletChainId(l1ChainId: number, rollupVersion: number): number 
 	return (l1ChainId ^ rollupVersion) >>> 0
 }
 
-/** Canonical V5 testnet wallet chainId — `(11155111 ^ 4239416255) >>> 0 = 4229590296`. */
+/** Canonical V5 testnet wallet chainId — single-sourced from `chain-constants.ts`. */
 export const TESTNET_WALLET_CHAIN_ID = walletChainId(TESTNET_L1_CHAIN_ID, TESTNET_ROLLUP_VERSION)
 
 export interface ResolvedChainIdentity {

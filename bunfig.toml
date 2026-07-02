@@ -1,6 +1,12 @@
 # Bun configuration. Docs: https://bun.com/docs/runtime/bunfig
 
 [install]
+# Keep the classic hoisted node_modules layout. A fresh lockfile on Bun 1.3.13 defaults new
+# workspace resolutions to the ISOLATED linker (per-workspace symlink trees + a .bun store),
+# which breaks this repo's hoisting assumptions: the foundry `@aztec/` remap into root
+# node_modules, resolvePackageFile walkers, and the bridge-core deploy-script paths.
+linker = "hoisted"
+
 # Supply-chain defense: block packages published in the last 7 days.
 # Recent npm token-compromise attacks (axios 2026-03, chalk/debug 2025-09)
 # were detected and pulled within hours-to-days; a 7-day window catches
@@ -36,11 +42,47 @@
 minimumReleaseAge = 604800
 
 # Excludes (the ONLY packages exempt from the 7-day gate):
-# - @alejoamiras/aztec-accelerator: TEMPORARY. Republished 2026-06-18 (5.0.0-rc.1), so it
-#   ages out ~2026-06-25 20:02 UTC. Remove this entry in a follow-up after that date.
-# The puppeteer closure (aged out 2026-05) and the @aztec/* 5.0.0-rc.1 set (published
-# 2026-06-15, aged out 2026-06-22) were dropped once past the window — the gate covers them
-# again. On Bun 1.3.13 a frozen-lockfile install of already-pinned versions no longer trips
-# the gate (verified: removing every exclude keeps `bun install [--frozen-lockfile]` green);
-# it only bites active re-resolution, so dropping aged-out excludes is safe.
-minimumReleaseAgeExcludes = ["@alejoamiras/aztec-accelerator"]
+# - The @aztec/* 5.0.0-rc.2 set (30 names incl. transitives, enumerated from the lockfile —
+#   the gate bites ANY fresh resolution, not just direct pins): published ~2026-07-01, ages
+#   out ~2026-07-08. TEMPORARY — remove in a follow-up PR after that date.
+# - @alejoamiras/{aztec-accelerator,aztec-standards,aztec-fee-payment}: the rc.2 line
+#   (accelerator republished 2026-06-30; standards + fee-payment npm-takeover published
+#   2026-07-02, age out ~2026-07-09). Same follow-up removes them.
+# The puppeteer closure (aged out 2026-05) and the rc.1 set were dropped once past the
+# window. On Bun 1.3.13+ a frozen-lockfile install of already-pinned versions doesn't trip
+# the gate; it only bites active re-resolution, so dropping aged-out excludes is safe.
+minimumReleaseAgeExcludes = [
+	"@alejoamiras/aztec-accelerator",
+	"@alejoamiras/aztec-standards",
+	"@alejoamiras/aztec-fee-payment",
+	"@aztec/accounts",
+	"@aztec/aztec.js",
+	"@aztec/bb-prover",
+	"@aztec/bb.js",
+	"@aztec/blob-lib",
+	"@aztec/builder",
+	"@aztec/constants",
+	"@aztec/entrypoints",
+	"@aztec/ethereum",
+	"@aztec/foundation",
+	"@aztec/key-store",
+	"@aztec/kv-store",
+	"@aztec/l1-artifacts",
+	"@aztec/native",
+	"@aztec/noir-acvm_js",
+	"@aztec/noir-contracts.js",
+	"@aztec/noir-noir_codegen",
+	"@aztec/noir-noirc_abi",
+	"@aztec/noir-protocol-circuits-types",
+	"@aztec/noir-types",
+	"@aztec/protocol-contracts",
+	"@aztec/pxe",
+	"@aztec/simulator",
+	"@aztec/sqlite3mc-wasm",
+	"@aztec/standard-contracts",
+	"@aztec/stdlib",
+	"@aztec/telemetry-client",
+	"@aztec/wallet-sdk",
+	"@aztec/wallets",
+	"@aztec/world-state",
+]

@@ -67,7 +67,7 @@ export function bindContracts(root: HTMLElement): void {
 		"click",
 		safe("getContractMetadata", async () => {
 			const wallet = getWallet()!
-			const addr = AztecAddress.fromString(getInput("tokenAddress"))
+			const addr = AztecAddress.fromStringUnsafe(getInput("tokenAddress"))
 			return wallet.getContractMetadata(addr)
 		}),
 	)
@@ -85,7 +85,7 @@ export function bindContracts(root: HTMLElement): void {
 		"click",
 		safe("registerSender", async () => {
 			const wallet = getWallet()!
-			const addr = AztecAddress.fromString(getInput("senderAddress") || getInput("tokenAddress"))
+			const addr = AztecAddress.fromStringUnsafe(getInput("senderAddress") || getInput("tokenAddress"))
 			return wallet.registerSender(addr, "test-sender")
 		}),
 	)
@@ -110,8 +110,8 @@ export function bindContracts(root: HTMLElement): void {
 			if (!accountInput) throw new Error("Empty accountAddress — set the input first")
 			const tokenInput = getInput("tokenAddress")
 			if (!tokenInput) throw new Error("Empty tokenAddress — set the input first")
-			const account = AztecAddress.fromString(accountInput)
-			const token = AztecAddress.fromString(tokenInput)
+			const account = AztecAddress.fromStringUnsafe(accountInput)
+			const token = AztecAddress.fromStringUnsafe(tokenInput)
 			return wallet.registerToken(account, token)
 		}),
 	)

@@ -28,7 +28,7 @@ vi.mock("@aztec/aztec.js/fee", () => ({
 	},
 }))
 
-vi.mock("@defi-wonderland/aztec-standards/dist/src/artifacts/Dripper.js", () => ({
+vi.mock("@alejoamiras/aztec-standards/dist/src/artifacts/Dripper.js", () => ({
 	DripperContractArtifact: { name: "Dripper" },
 }))
 
@@ -45,9 +45,9 @@ vi.mock("@/contracts/deployments", () => ({
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { __resetFaucetDripForTests, useFaucetDrip } from "./useFaucetDrip"
 
-const NULO_ADDR = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000002")
-const OLUN_ADDR = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000003")
-const ACCOUNT = AztecAddress.fromString("0x000000000000000000000000000000000000000000000000000000000000000a")
+const NULO_ADDR = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000002")
+const OLUN_ADDR = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000003")
+const ACCOUNT = AztecAddress.fromStringUnsafe("0x000000000000000000000000000000000000000000000000000000000000000a")
 
 const NULO = { symbol: "NULO", decimals: 6, displayAmount: "1,000", onchainAmount: 1_000_000_000n } as const
 const OLUN = { symbol: "OLUN", decimals: 18, displayAmount: "1", onchainAmount: 1_000_000_000_000_000_000n } as const

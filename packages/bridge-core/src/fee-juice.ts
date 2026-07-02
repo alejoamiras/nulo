@@ -17,7 +17,7 @@ import { GasFees } from "@aztec/stdlib/gas"
 import { FEE_JUICE_ADDRESS } from "@aztec/constants"
 
 /** The canonical L2 Fee Juice contract address — a protocol constant (identical on every network). */
-export const feeJuiceAddress: string = AztecAddress.fromNumber(FEE_JUICE_ADDRESS).toString()
+export const feeJuiceAddress: string = AztecAddress.fromNumberUnsafe(FEE_JUICE_ADDRESS).toString()
 
 /** Minimal node shape for fee prediction (avoids a hard dep on the full node client type). */
 type MinFeeNode = {

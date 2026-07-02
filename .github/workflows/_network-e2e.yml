@@ -157,7 +157,7 @@ jobs:
         with:
           # v1.0.6 (Aztec 4.3.1-bundled bb). The 5.0 proving stack is fetched on demand
           # on first /prove (bb is downloaded per the SDK-requested version), so this binary
-          # proves 5.0.0-rc.1 txs without a 5.0-specific release. Bump again when a newer line ships.
+          # proves 5.0.0-rc.2 txs without a 5.0-specific release (bb is fetched per the SDK version). Bump again when a newer line ships.
           version: "1.0.6"
           # SHA-256 of the EXTRACTED binary (not the tarball — different
           # hashes; the binary is what `actions/cache` restores, so it's

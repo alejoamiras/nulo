@@ -16,7 +16,7 @@ const tokenEntries = computed(() =>
 	})),
 )
 
-const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.fromString(selectedAccount.value) : null))
+const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.fromStringUnsafe(selectedAccount.value) : null))
 </script>
 
 <template>
