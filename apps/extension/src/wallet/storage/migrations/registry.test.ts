@@ -39,7 +39,9 @@ describe("migrations registry (structural)", () => {
 		// baseline+1, baseline+2, … — a jump (1 → 3) would boot existing users
 		// past a transform their data still needs.
 		const real = migrations.map((m) => m.version).filter((v) => v < 9000)
-		real.forEach((v, i) => expect(v, `version gap before v${v}`).toBe(BASELINE_VERSION + 1 + i))
+		real.forEach((v, i) => {
+			expect(v, `version gap before v${v}`).toBe(BASELINE_VERSION + 1 + i)
+		})
 	})
 
 	test("every NNN-*.ts migration file in this directory is actually registered", async () => {
