@@ -1,10 +1,11 @@
 /**
  * Direct unit tests for the dApp approval-window shell. The per-window frozen
- * oracles (windows/{discover,capabilities,execute}/index.test.ts) prove the
- * shell composes correctly inside each window; this suite pins the shell's own
- * contract in isolation — start/dispose ordering, the closeWindow completion
- * semantics, the listener identity pairing, the profile-change guard, and the
- * strip/error state.
+ * oracles (capabilities & execute in each window's `index.test.ts`; discover in
+ * `windows/discover/index.lifecycle.test.ts`, split from its `isReady` suite)
+ * prove the shell composes correctly inside each window; this suite pins the
+ * shell's own contract in isolation — start/dispose ordering, the closeWindow
+ * completion semantics, the listener identity pairing, the profile-change guard,
+ * and the strip/error state.
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
