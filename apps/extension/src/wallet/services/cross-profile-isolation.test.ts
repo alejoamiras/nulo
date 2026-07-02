@@ -69,6 +69,13 @@ const seedRow = (api: FakeBrowserApi, root: string, id: string, row: unknown) =>
 const mkToken = (id: number, profileId: string): Token =>
 	({ id, profileId, chainId: 1, contract: `0xtok${id}`, name: `T${id}`, symbol: `T${id}`, decimals: 18 }) as Token
 
+// Sentinel thrown from a stubbed `executeSendTransaction`: lets an ownership-gate
+// control prove it reached the send WITHOUT stubbing the node-touching tail.
+const EXEC_REACHED = "EXEC_REACHED"
+const throwExecReached = (): never => {
+	throw new Error(EXEC_REACHED)
+}
+
 // A network stub token's init subscribes to; must expose registerChainPurgeSubscriber.
 const networkStub = () => svc(NetworkService.name, { registerChainPurgeSubscriber: () => {} })
 
@@ -296,20 +303,41 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 			services.add(profile)
 			services.add(svc(NetworkService.name, {}))
 			services.add(svc(AccountService.name, { onAccountDeleted: new EventHandler() }))
-			services.add(svc(ExecutionService.name, {}))
+			// A same-account revoke passes the ownership gate and reaches the send —
+			// throw a UNIQUE sentinel there so the control below can prove the gate
+			// was crossed WITHOUT stubbing the node-touching prove/sync tail.
+			services.add(svc(ExecutionService.name, { executeSendTransaction: async () => throwExecReached() }))
 			services.add(svc(TransactionService.name, { onTransactionUpdated: new EventHandler() }))
-			services.add(svc(TaskService.name, {}))
+			services.add(svc(TaskService.name, { startNewTask: () => ({ cancel() {}, fail() {}, complete() {} }) }))
 			authRegistry = new AuthRegistryService(mkLogger(), api)
 			services.add(authRegistry)
 			await services.start()
-			// An authwit owned by account 0xACCT-P2 (a different account than the caller).
-			await seedRow(api, "nulo:core:auth-registry", "5", { id: 5, account: "0xACCT-P2", hash: "0xhash" })
+			// A CODEC-VALID authwit (content present, matching a real producer's
+			// `{ kind: "call", … }` shape) owned by 0xACCT-P2. It must survive the row
+			// codec and be PRESENT, so the rejection below is the account mismatch —
+			// NOT a codec-hidden row (which would pass the assertion tautologically).
+			await seedRow(api, "nulo:core:auth-registry", "5", {
+				id: 5,
+				account: "0xACCT-P2",
+				hash: "0xhash",
+				content: { kind: "call", contract: "0xregistry" },
+			})
 		})
 
-		test("revokeAuthwits(otherAccount, [foreignId]) rejects a different account's authwit", async () => {
-			// gap#3: without the account check, a caller passing a foreign authwit id could
-			// revoke another account's authwit. Now it's treated as "doesn't exist".
+		test("revokeAuthwits(otherAccount, [foreignId]) rejects a PRESENT authwit owned by another account", async () => {
+			// authwits are FK-scoped by account (no profileId). Without the check a caller
+			// passing a foreign id revokes another account's authwit; the fix rejects it as
+			// "doesn't exist" (no cross-account existence oracle). The row is codec-valid and
+			// present, so the account mismatch — not row absence — is what rejects.
 			await expect(authRegistry.revokeAuthwits("net", "0xACCT-P1", [5], {} as never)).rejects.toThrow(/doesn't exist/i)
+		})
+
+		test("revokeAuthwits(sameAccount, [ownId]) passes the ownership gate and proceeds to send", async () => {
+			// Control: the SAME-account revoke must cross the ownership gate (else the test
+			// above would pass even with the check removed, if it rejected everything). It
+			// reaches executeSendTransaction, which throws the sentinel — proving the gate
+			// admitted the owner rather than treating its own id as "doesn't exist".
+			await expect(authRegistry.revokeAuthwits("net", "0xACCT-P2", [5], {} as never)).rejects.toThrow(EXEC_REACHED)
 		})
 	})
 })
