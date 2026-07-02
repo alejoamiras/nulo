@@ -1,17 +1,15 @@
 /**
- * Cross-profile isolation suite (Q-13 / round-2 R1.0) — the STANDING gate for the
- * whole Q-13 cluster. Invariant: with p1 the active profile, no read / mutate /
- * delete / EXPORT may return or touch p2's data; a missing/mismatched/absent
- * owner must DENY, never fall back to all-rows or the active-profile default.
+ * Cross-profile isolation suite — the STANDING gate for per-profile data privacy.
+ * Invariant: with p1 the active profile, no read / mutate / delete / EXPORT may
+ * return or touch p2's data; a missing / mismatched / absent owner must DENY,
+ * never fall back to all-rows or the active-profile default.
  *
- * The dedup phases (R1.1-R1.5) MUST keep this green. The three KNOWN pre-existing
- * gaps are pinned here with `test.fails` (a Vitest assertion that the behavior is
- * CURRENTLY broken — so the suite is green at every phase, documenting the leak)
- * and each FLIPS to a normal `test` in its fixing phase:
- *   - leak #1  token-balance `backup()` returns all profiles' rows  → fixed R1.5
- *   - gap  #2  token by-id getters (`getToken`/`getTokenRaw`/…) unguarded → fixed R1.4
- *   - gap  #3  `revokeAuthwits` doesn't check `authwit.account === account` → fixed R1.5
- * See round-2/plan.md R1.0 + round-2/audit-{codex,fable}.md.
+ * Three paths that once leaked across profiles are closed and asserted here:
+ *   - token-balance `backup()` scopes its export to the active profile's token ids.
+ *   - token by-id getters (`getToken` / `getTokenRaw` / …) reject a foreign row.
+ *   - `revokeAuthwits` checks `authwit.account === account` before revoking.
+ * The delete cascade is deliberately EXEMPT (an inactive-profile deletion must
+ * still purge that profile's rows) — see the cascade test below.
  */
 
 import { beforeEach, describe, expect, test } from "vitest"
@@ -69,6 +67,13 @@ const seedRow = (api: FakeBrowserApi, root: string, id: string, row: unknown) =>
 const mkToken = (id: number, profileId: string): Token =>
 	({ id, profileId, chainId: 1, contract: `0xtok${id}`, name: `T${id}`, symbol: `T${id}`, decimals: 18 }) as Token
 
+// Sentinel thrown from a stubbed `executeSendTransaction`: lets an ownership-gate
+// control prove it reached the send WITHOUT stubbing the node-touching tail.
+const EXEC_REACHED = "EXEC_REACHED"
+const throwExecReached = (): never => {
+	throw new Error(EXEC_REACHED)
+}
+
 // A network stub token's init subscribes to; must expose registerChainPurgeSubscriber.
 const networkStub = () => svc(NetworkService.name, { registerChainPurgeSubscriber: () => {} })
 
@@ -78,7 +83,7 @@ const noopTicker: BackgroundTickerPort = { subscribe: () => ({ cancel: () => {} 
 const mkBalance = (id: number, token: number, account: string): TokenBalanceRaw =>
 	({ id, token, account, privateBalance: "0", publicBalance: "0", updatedAt: 0 }) as TokenBalanceRaw
 
-describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
+describe("cross-profile isolation (standing gate)", () => {
 	let api: FakeBrowserApi
 
 	beforeEach(() => {
@@ -121,7 +126,7 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 		})
 	})
 
-	describe("token — backup scoped; by-id getters UNGUARDED (gap #2, fixed R1.4)", () => {
+	describe("token — backup scoped; by-id getters reject foreign rows", () => {
 		let profile: FakeProfileService
 		let tokens: TokenService
 
@@ -153,22 +158,21 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 			expect(list.map((t) => t.id)).toEqual([1])
 		})
 
-		test("(GAP #2 — CLOSED R1.4) getToken(foreignId) REJECTS a p2 token while p1 active", async () => {
-			// R1.4 added requireActiveProfile + requireOwnedRow to the by-id getters,
-			// so a foreign token id now throws instead of leaking p2's token.
+		test("getToken(foreignId) REJECTS a p2 token while p1 active", async () => {
+			// The by-id getters call requireActiveProfile + requireOwnedRow, so a foreign
+			// token id throws instead of leaking p2's token.
 			await expect(tokens.getToken(2)).rejects.toThrow()
 		})
 
-		test("(GAP #2 — CLOSED R1.4) getTokenRaw(foreignId) REJECTS a p2 token while p1 active", async () => {
+		test("getTokenRaw(foreignId) REJECTS a p2 token while p1 active", async () => {
 			await expect(tokens.getTokenRaw(2)).rejects.toThrow()
 		})
 
-		test("deleting an INACTIVE profile purges its tokens (cascade must survive the R1.4 guard-split)", async () => {
-			// The BLOCKER both audits caught: R1.4 adds an active-profile guard to the
-			// PUBLIC deleteToken RPC, but the profile-delete cascade deletes an explicit,
-			// possibly-INACTIVE profile's tokens. This asserts the cascade fully purges an
-			// inactive profile — it passes today and MUST stay green after R1.4 routes the
-			// cascade through the internal UNGUARDED delete (a naive guard would throw here
+		test("deleting an INACTIVE profile purges its tokens (cascade must survive the guard-split)", async () => {
+			// The active-profile guard lives on the PUBLIC deleteToken RPC, but the
+			// profile-delete cascade deletes an explicit, possibly-INACTIVE profile's
+			// tokens. This asserts the cascade fully purges an inactive profile: it must
+			// route through the internal UNGUARDED delete (a naive guard would throw here
 			// on p2's token while p1 is active, orphaning rows).
 			profile.setActiveProfile(p1)
 			profile.onProfileDeleted.invoke(p2)
@@ -178,7 +182,7 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 		})
 	})
 
-	describe("token-balance — backup UNFILTERED across profiles (leak #1, fixed R1.5)", () => {
+	describe("token-balance — backup scoped to the active profile's balances", () => {
 		let profile: FakeProfileService
 		let tbal: TokenBalanceService
 		let seedRepo: BalanceRepository
@@ -210,10 +214,10 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 			await seedRepo.set(mkBalance(20, 2, "0xp2acct"))
 		})
 
-		test("(LEAK #1 — CLOSED R1.5) backup() returns only the active profile's balances", async () => {
-			// R1.5 scopes the export to balances whose token is owned by the active
-			// profile (via tokenService.getTokensRaw), so p2's balance (token 2) no
-			// longer leaks into p1's plaintext backup artifact.
+		test("backup() returns only the active profile's balances", async () => {
+			// backup() scopes the export to balances whose token is owned by the active
+			// profile (via tokenService.getTokensRaw), so p2's balance (token 2) never
+			// leaks into p1's plaintext backup artifact.
 			const backup = await tbal.backup()
 			expect(backup.map((b) => b.id)).toEqual([10])
 		})
@@ -222,15 +226,15 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 			// Balances are FK'd by `token` and carry no profileId, so p2's balance
 			// (token 2) lingers in the shared repo while p1 is active. Its token is
 			// absent from the active-profile `tokens` map — the display list must skip
-			// it, exactly as the balance PROJECTOR was hardened to (R1.4a opus-MED-2),
-			// not throw "unknown token" and white-screen the whole account list. Q-01's
-			// codec-hiding of an invalid token row can also make a token absent this way.
+			// it, exactly as the balance PROJECTOR skips it, not throw "unknown token"
+			// and white-screen the whole account list. A codec-hidden invalid token row
+			// can also make a token absent this way.
 			const balances = await tbal.getTokenBalances()
 			expect(balances.map((b) => b.id)).toEqual([10])
 		})
 	})
 
-	describe("fpc — by-id getters profileId-guarded via requireOwnedRow (R1.3a)", () => {
+	describe("fpc — by-id getters profileId-guarded via requireOwnedRow", () => {
 		let profile: FakeProfileService
 		let fpc: FpcService
 
@@ -258,7 +262,7 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 		})
 	})
 
-	describe("network — by-id getters profileId-guarded via requireOwnedRow (R1.3b)", () => {
+	describe("network — by-id getters profileId-guarded via requireOwnedRow", () => {
 		let profile: FakeProfileService
 		let network: NetworkService
 
@@ -285,7 +289,7 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 		})
 	})
 
-	describe("auth-registry — revokeAuthwits account-scoped (gap #3, closed R1.5)", () => {
+	describe("auth-registry — revokeAuthwits account-scoped", () => {
 		let profile: FakeProfileService
 		let authRegistry: AuthRegistryService
 
@@ -296,20 +300,41 @@ describe("cross-profile isolation (Q-13 R1.0 standing gate)", () => {
 			services.add(profile)
 			services.add(svc(NetworkService.name, {}))
 			services.add(svc(AccountService.name, { onAccountDeleted: new EventHandler() }))
-			services.add(svc(ExecutionService.name, {}))
+			// A same-account revoke passes the ownership gate and reaches the send —
+			// throw a UNIQUE sentinel there so the control below can prove the gate
+			// was crossed WITHOUT stubbing the node-touching prove/sync tail.
+			services.add(svc(ExecutionService.name, { executeSendTransaction: async () => throwExecReached() }))
 			services.add(svc(TransactionService.name, { onTransactionUpdated: new EventHandler() }))
-			services.add(svc(TaskService.name, {}))
+			services.add(svc(TaskService.name, { startNewTask: () => ({ cancel() {}, fail() {}, complete() {} }) }))
 			authRegistry = new AuthRegistryService(mkLogger(), api)
 			services.add(authRegistry)
 			await services.start()
-			// An authwit owned by account 0xACCT-P2 (a different account than the caller).
-			await seedRow(api, "nulo:core:auth-registry", "5", { id: 5, account: "0xACCT-P2", hash: "0xhash" })
+			// A CODEC-VALID authwit (content present, matching a real producer's
+			// `{ kind: "call", … }` shape) owned by 0xACCT-P2. It must survive the row
+			// codec and be PRESENT, so the rejection below is the account mismatch —
+			// NOT a codec-hidden row (which would pass the assertion tautologically).
+			await seedRow(api, "nulo:core:auth-registry", "5", {
+				id: 5,
+				account: "0xACCT-P2",
+				hash: "0xhash",
+				content: { kind: "call", contract: "0xregistry" },
+			})
 		})
 
-		test("revokeAuthwits(otherAccount, [foreignId]) rejects a different account's authwit", async () => {
-			// gap#3: without the account check, a caller passing a foreign authwit id could
-			// revoke another account's authwit. Now it's treated as "doesn't exist".
+		test("revokeAuthwits(otherAccount, [foreignId]) rejects a PRESENT authwit owned by another account", async () => {
+			// authwits are FK-scoped by account (no profileId). Without the check a caller
+			// passing a foreign id revokes another account's authwit; the fix rejects it as
+			// "doesn't exist" (no cross-account existence oracle). The row is codec-valid and
+			// present, so the account mismatch — not row absence — is what rejects.
 			await expect(authRegistry.revokeAuthwits("net", "0xACCT-P1", [5], {} as never)).rejects.toThrow(/doesn't exist/i)
+		})
+
+		test("revokeAuthwits(sameAccount, [ownId]) passes the ownership gate and proceeds to send", async () => {
+			// Control: the SAME-account revoke must cross the ownership gate (else the test
+			// above would pass even with the check removed, if it rejected everything). It
+			// reaches executeSendTransaction, which throws the sentinel — proving the gate
+			// admitted the owner rather than treating its own id as "doesn't exist".
+			await expect(authRegistry.revokeAuthwits("net", "0xACCT-P2", [5], {} as never)).rejects.toThrow(EXEC_REACHED)
 		})
 	})
 })

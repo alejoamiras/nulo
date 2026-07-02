@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest"
 import { METHOD_REGISTRY, assertKnownMethod } from "./method-descriptors"
 
 /**
- * The typed dispatch-entry choke point (Q-02 P20a). `assertKnownMethod` is the
+ * The typed dispatch-entry choke point. `assertKnownMethod` is the
  * single fail-closed guard the dispatcher routes through: it narrows the wire
  * `methodName: string` to `MethodName` (the literal key union of METHOD_REGISTRY)
  * or throws. Lives in its OWN file — NOT `method-descriptors.test.ts` (the frozen

@@ -1,5 +1,5 @@
 /**
- * Round-trip corpus + drift-policy pins for the durable-store codecs (Q-01).
+ * Round-trip corpus + drift-policy pins for the durable-store codecs.
  * Each store now injects its zod row schema into `EntityStorage` (the
  * operation-journal precedent), which gives it the wallet-core `decodeRow`
  * guarantees:
@@ -302,7 +302,7 @@ const CORPUS = [
 	},
 ] as const
 
-describe("durable-store codecs (Q-01 R5a+R5b)", () => {
+describe("durable-store codecs", () => {
 	for (const c of CORPUS) {
 		describe(c.name, () => {
 			test("round-trip corpus: full + minimal rows survive write→read equal", async () => {

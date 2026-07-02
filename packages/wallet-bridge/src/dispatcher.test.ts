@@ -1739,7 +1739,7 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 	})
 })
 
-describe("dispatcher — arg guards (Q-02): order, tolerance, batch-leg validation", () => {
+describe("dispatcher — arg guards: order, tolerance, batch-leg validation", () => {
 	function makeBareDispatcher(session: IDappSessionRef | undefined) {
 		const writer: IDappSessionWriter = {
 			tryGetDappSessionByOriginAndChain: async () => session,
@@ -1765,7 +1765,7 @@ describe("dispatcher — arg guards (Q-02): order, tolerance, batch-leg validati
 		)
 	})
 
-	test("unguarded methods keep their exact pre-Q-02 behavior — capability error, never an args error", async () => {
+	test("unguarded methods keep their exact pre-guard behavior — capability error, never an args error", async () => {
 		// simulateTx deliberately has NO argSchema (its exec validation is owned by
 		// checkSimulateTx with a pinned error string). With no grants + garbage args,
 		// the observable stays the capability rejection — proving no guard preempts it.
@@ -1802,9 +1802,18 @@ describe("dispatcher — arg guards (Q-02): order, tolerance, batch-leg validati
 		)
 	})
 
-	test("requestCapabilities requires an object manifest at the guard", async () => {
+	test("requestCapabilities guard is optionality-exact: absent manifest passes, non-array capabilities rejects", async () => {
 		const dispatcher = makeBareDispatcher(makeSession())
-		await expect(dispatcher.dispatch("requestCapabilities", [], ctx)).rejects.toThrow(
+		// An absent manifest is the valid "no capabilities requested" call — it must
+		// pass the guard and reach the handler's empty-envelope path, NOT reject.
+		await expect(dispatcher.dispatch("requestCapabilities", [], ctx)).resolves.toMatchObject({ granted: [] })
+		// A present manifest whose `capabilities` isn't an array would TypeError in
+		// the handler's `.filter` — the guard turns it into a calibrated reject.
+		await expect(dispatcher.dispatch("requestCapabilities", [{ capabilities: {} }], ctx)).rejects.toThrow(
+			"Invalid arguments for wallet method: requestCapabilities",
+		)
+		// An array-shaped "manifest" is not a plain object → reject.
+		await expect(dispatcher.dispatch("requestCapabilities", [[]], ctx)).rejects.toThrow(
 			"Invalid arguments for wallet method: requestCapabilities",
 		)
 	})
