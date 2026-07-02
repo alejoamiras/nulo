@@ -44,9 +44,14 @@
  *   sessions — so the bump re-fires them. Users must re-register accounts and
  *   re-sync; documented in release notes (no in-app migration UX) per the
  *   aztec-5.0-upgrade plan's "document the reset" decision.
+ * v9 (Aztec 5.0.0-rc.2 testnet reset) re-fires the same wipe: the alpha-testnet
+ *   was redeployed (rollupVersion 4239416255 → 2787991301, so the derived wallet
+ *   chainId changed) and every contract class-id shifted under the rc.2 toolchain,
+ *   so stored accounts/balances/PXE DBs reference a chain that no longer exists.
+ *   Same blast radius, same lists, same document-the-reset stance as v8.
  */
 const STORAGE_VERSION_KEY = "nulo:core:storage-version"
-const CURRENT_VERSION = 8
+const CURRENT_VERSION = 9
 
 const KEYS_TO_WIPE = [
 	"nulo:core:accounts",
@@ -71,6 +76,17 @@ const KEY_PREFIXES_TO_WIPE_LOCAL = [
 	// Index entry (the `getValues` namespace probe). Wiping the prefix
 	// covers it too — listed explicitly for clarity.
 	"nulo:core:dappSessions",
+	// v9 (codex post-impl HIGH): EntityStorage persists rows as `<root>@<id>`, so the bare
+	// KEYS_TO_WIPE entries above never matched the row keys — stale accounts/txs/balances
+	// from the pre-reset chain survived the wipe (a latent v8 gap too; ghost pending txs
+	// could reload). Wipe every chain-coupled entity root by prefix. `contacts@` stays —
+	// user-authored address-book data, preserved by the same call v8 made.
+	"nulo:core:accounts@",
+	"nulo:core:txs@",
+	"nulo:core:token-balances@",
+	"nulo:core:tokens@",
+	"nulo:core:auth-registry@",
+	"nulo:core:auth-registry-enabled@",
 ]
 
 /** Prefix-matched session-storage keys to wipe (journal entries reference networkIds). */

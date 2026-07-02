@@ -11,7 +11,7 @@ import { type WithdrawJournalRecord, makeProvisionalWithdrawId } from "@nulo/bri
 import { tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
 import { OutboxContract } from "@aztec/ethereum/contracts"
-import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
 import { decodeFunctionData } from "viem"
 import { sepolia } from "viem/chains"
 import { computed, ref, watch } from "vue"
@@ -216,7 +216,7 @@ export function useWithdrawFlow() {
 				isPrivate ? "confirm the exit in your Aztec wallet" : "two Aztec signatures: the authorization, then the exit",
 			)
 
-			const fromAddr = AztecAddress.fromString(from)
+			const fromAddr = AztecAddress.fromStringUnsafe(from)
 			const nonce = Fr.random()
 			const fpc = await getSponsoredFpcInstance()
 			const fee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }

@@ -2,8 +2,8 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
-import { DripperContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Dripper.js"
-import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
+import { DripperContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Dripper.js"
+import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
 import deploymentsJson from "./deployments.json"
 
 /*
@@ -53,9 +53,9 @@ function findToken(symbol: "NULO" | "OLUN"): TokenDeployment {
 const NULO_RECORD = findToken("NULO")
 const OLUN_RECORD = findToken("OLUN")
 
-export const DRIPPER = AztecAddress.fromString(data.dripper.address)
-export const NULO = AztecAddress.fromString(NULO_RECORD.address)
-export const OLUN = AztecAddress.fromString(OLUN_RECORD.address)
+export const DRIPPER = AztecAddress.fromStringUnsafe(data.dripper.address)
+export const NULO = AztecAddress.fromStringUnsafe(NULO_RECORD.address)
+export const OLUN = AztecAddress.fromStringUnsafe(OLUN_RECORD.address)
 
 export const DEPLOYMENT_RECORDS = {
 	dripper: data.dripper,
@@ -70,7 +70,7 @@ export async function rebuildDripperInstance(): Promise<ReconstructedInstance> {
 		constructorArgs: [],
 		salt: new Fr(data.dripper.salt),
 		publicKeys: PublicKeys.default(),
-		deployer: AztecAddress.fromString(data.dripper.deployer),
+		deployer: AztecAddress.fromStringUnsafe(data.dripper.deployer),
 		constructorArtifact: data.dripper.constructorArtifact,
 	})
 }
@@ -78,10 +78,10 @@ export async function rebuildDripperInstance(): Promise<ReconstructedInstance> {
 async function rebuildTokenInstance(record: TokenDeployment): Promise<ReconstructedInstance> {
 	const { name, symbol, decimals, minter } = record.constructorArgs
 	return getContractInstanceFromInstantiationParams(TokenContractArtifact, {
-		constructorArgs: [name, symbol, decimals, AztecAddress.fromString(minter)],
+		constructorArgs: [name, symbol, decimals, AztecAddress.fromStringUnsafe(minter)],
 		salt: new Fr(record.salt),
 		publicKeys: PublicKeys.default(),
-		deployer: AztecAddress.fromString(record.deployer),
+		deployer: AztecAddress.fromStringUnsafe(record.deployer),
 		constructorArtifact: record.constructorArtifact,
 	})
 }

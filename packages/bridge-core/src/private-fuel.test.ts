@@ -57,13 +57,13 @@ describe("private-fuel keystone", () => {
 		},
 		{
 			salt: new Fr(1n),
-			claimer: AztecAddress.fromBigInt(2n),
+			claimer: AztecAddress.fromBigIntUnsafe(2n),
 			secret: "0x1b78d208a5751b740d7ace9e08b870abee85b745e7b8681d7dac30f44894bd50",
 			secretHash: "0x2a3613114a93cc062e7fe72c31a0d93291b386d9a255522f376febb9a6ad1781",
 		},
 		{
 			salt: new Fr(0x1234567890abcdefn),
-			claimer: AztecAddress.fromBigInt(0xdeadbeefn),
+			claimer: AztecAddress.fromBigIntUnsafe(0xdeadbeefn),
 			secret: "0x2f346ff7ed39809df5f2e20e99164bf87c1bff13be2dc50f66731d1eb87381f6",
 			secretHash: "0x024a50704521695145e0e6531986c89e55596bfeede2d5b2229fd30ed3ac7ab0",
 		},
@@ -81,7 +81,7 @@ describe("private-fuel keystone", () => {
 
 	it("ADDRESS TRIPWIRE — re-deriving from the installed artifact matches PRIVATE_FPC_ADDRESS", async () => {
 		const rawJson = JSON.parse(
-			readFileSync(resolvePackageFile("@wonderland/aztec-fee-payment", "target/private_contract-PrivateFPC.json"), "utf8"),
+			readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "target/private_contract-PrivateFPC.json"), "utf8"),
 		)
 		const artifact = loadContractArtifact(rawJson)
 		const instance = await getContractInstanceFromInstantiationParams(artifact, {
@@ -95,7 +95,7 @@ describe("private-fuel keystone", () => {
 
 describe("privateMintAndPayFee", () => {
 	it("builds a method paying via the FPC with a two-call setup payload", async () => {
-		const fpc = AztecAddress.fromString(PRIVATE_FPC_ADDRESS)
+		const fpc = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
 		const method = privateMintAndPayFee(fpc, 1_000n, new Fr(123n), Fr.zero(), new Fr(7n))
 		expect((await method.getFeePayer()).toString()).toBe(PRIVATE_FPC_ADDRESS)
 		// FeeJuice.claim + PrivateFPC.mint_and_pay_fee, run verbatim by the wallet's EXTERNAL path.
@@ -106,7 +106,7 @@ describe("privateMintAndPayFee", () => {
 
 describe("privateFeeJuicePayment", () => {
 	it("pays via the FPC with a SINGLE pay_fee setup call (the manifest-scope assumption)", async () => {
-		const fpc = AztecAddress.fromString(PRIVATE_FPC_ADDRESS)
+		const fpc = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
 		const method = privateFeeJuicePayment(fpc)
 		expect((await method.getFeePayer()).toString()).toBe(PRIVATE_FPC_ADDRESS)
 		// FPCFeePaymentMethod emits exactly ONE private setup call — PrivateFPC.pay_fee. The faucet

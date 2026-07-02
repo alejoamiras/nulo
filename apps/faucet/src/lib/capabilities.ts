@@ -1,11 +1,11 @@
 import { PRIVATE_FPC_ADDRESS, feeJuiceAddress } from "@nulo/bridge-core"
 
 /** The canonical L2 FeeJuice protocol contract (identical on every network). */
-const FEE_JUICE_L2 = AztecAddress.fromString(feeJuiceAddress)
+const FEE_JUICE_L2 = AztecAddress.fromStringUnsafe(feeJuiceAddress)
 /** The Wonderland PrivateFPC L2 address (pinned from the installed artifact). Like the SponsoredFPC it
  *  is auto-registered by the wallet (`fpc/service.ts`), so it stays OUT of `contracts` (the faucet never
  *  loads its artifact) — only its `mint_and_pay_fee` call is scoped, mirroring the sponsor-call pattern. */
-const PRIVATE_FPC_L2 = AztecAddress.fromString(PRIVATE_FPC_ADDRESS)
+const PRIVATE_FPC_L2 = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-registry/constants"
 

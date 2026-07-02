@@ -4,9 +4,9 @@ import { TESTNET_L1_CHAIN_ID, TESTNET_ROLLUP_VERSION, TESTNET_WALLET_CHAIN_ID } 
 import { readChainInfo } from "./chain-info"
 
 describe("chain-constants", () => {
-	it("canonical V5 testnet wallet chainId is 4229590296", () => {
-		expect(TESTNET_WALLET_CHAIN_ID).toBe(4229590296)
-		expect((TESTNET_L1_CHAIN_ID ^ TESTNET_ROLLUP_VERSION) >>> 0).toBe(4229590296)
+	it("canonical V5 testnet wallet chainId is 2793892258", () => {
+		expect(TESTNET_WALLET_CHAIN_ID).toBe(2793892258)
+		expect((TESTNET_L1_CHAIN_ID ^ TESTNET_ROLLUP_VERSION) >>> 0).toBe(2793892258)
 	})
 
 	it("(BUG PIN) the stale rollup version would have given 4138294185", () => {

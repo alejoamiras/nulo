@@ -32,13 +32,13 @@ import { svc } from "@/wallet/services/composition-harness"
 import { TokenService } from "./service"
 
 const NETWORK = { id: "net1", chainId: 1, primaryEndpointId: "ep1", endpoints: [{ id: "ep1", rpcUrl: "http://fake" }] }
-const CONTRACT = AztecAddress.fromNumber(0x1234).toString()
+const CONTRACT = AztecAddress.fromNumberUnsafe(0x1234).toString()
 const CLASS_ID = "0xc1a55"
 
 /** Hardcoded fake instance — deriving a real one needs the bb WASM (not loaded in vitest). */
 function fakeTokenInstance(): ContractInstanceWithAddress {
 	return {
-		address: AztecAddress.fromString(CONTRACT),
+		address: AztecAddress.fromStringUnsafe(CONTRACT),
 		currentContractClassId: { toString: () => CLASS_ID } as unknown as Fr,
 	} as unknown as ContractInstanceWithAddress
 }
@@ -46,7 +46,7 @@ function fakeTokenInstance(): ContractInstanceWithAddress {
 async function makeHarness(fakeConfig?: ShallowPxeFakeConfig) {
 	const fake = makeShallowPxeFake(
 		fakeConfig ?? {
-			instances: new Map([[AztecAddress.fromString(CONTRACT).toString(), fakeTokenInstance()]]),
+			instances: new Map([[AztecAddress.fromStringUnsafe(CONTRACT).toString(), fakeTokenInstance()]]),
 			artifacts: new Map([[CLASS_ID, TokenContractArtifact]]),
 			registered: [],
 		},
@@ -85,9 +85,9 @@ describe("TokenService composition — in-process, no sandbox", () => {
 
 	test("parseTokenInterface skips registration when already registered (dedup)", async () => {
 		const { tokenService, fake } = await makeHarness({
-			instances: new Map([[AztecAddress.fromString(CONTRACT).toString(), fakeTokenInstance()]]),
+			instances: new Map([[AztecAddress.fromStringUnsafe(CONTRACT).toString(), fakeTokenInstance()]]),
 			artifacts: new Map([[CLASS_ID, TokenContractArtifact]]),
-			registered: [AztecAddress.fromString(CONTRACT)],
+			registered: [AztecAddress.fromStringUnsafe(CONTRACT)],
 		})
 
 		await tokenService.parseTokenInterface(NETWORK.id, CONTRACT)

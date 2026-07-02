@@ -84,8 +84,8 @@ export function bindAuthwit(root: HTMLElement): void {
 			if (!s.selectedAccount) throw new Error("No selected account")
 			const consumer = getInput("consumer") || getInput("tokenAddress")
 			if (!consumer) throw new Error("consumer or tokenAddress required")
-			const fromAddr = AztecAddress.fromString(s.selectedAccount)
-			const consumerAddr = AztecAddress.fromString(consumer)
+			const fromAddr = AztecAddress.fromStringUnsafe(s.selectedAccount)
+			const consumerAddr = AztecAddress.fromStringUnsafe(consumer)
 			const intent = {
 				caller: consumerAddr,
 				call: FunctionCall.from({
@@ -113,9 +113,9 @@ export function bindAuthwit(root: HTMLElement): void {
 			const consumer = getInput("consumer") || getInput("tokenAddress")
 			const innerHashStr = getInput("innerHash") || "0x01"
 			if (!consumer) throw new Error("consumer or tokenAddress required")
-			const fromAddr = AztecAddress.fromString(s.selectedAccount)
+			const fromAddr = AztecAddress.fromStringUnsafe(s.selectedAccount)
 			const intent = {
-				consumer: AztecAddress.fromString(consumer),
+				consumer: AztecAddress.fromStringUnsafe(consumer),
 				innerHash: Fr.fromString(innerHashStr),
 			}
 			// biome-ignore lint/suspicious/noExplicitAny: IntentInnerHash shape
@@ -142,7 +142,7 @@ export function bindAuthwit(root: HTMLElement): void {
 			// The grant's args must byte-match the future consume call:
 			// transfer_public_to_public(owner, caller, amount, nonce).
 			// biome-ignore lint/suspicious/noExplicitAny: schema-patched method — not on the upstream Wallet type
-			return (wallet as any).grantPublicAuthwit(AztecAddress.fromString(owner), {
+			return (wallet as any).grantPublicAuthwit(AztecAddress.fromStringUnsafe(owner), {
 				caller,
 				contract: tokenAddress,
 				method: "transfer_public_to_public",
@@ -165,12 +165,12 @@ export function bindAuthwit(root: HTMLElement): void {
 			if (!s.selectedAccount) throw new Error("No selected account")
 			const amount = getInput("authwitAmount") || "1"
 			const nonce = getInput("authwitNonce") || "1"
-			const { TokenContract } = await import("@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js")
+			const { TokenContract } = await import("@alejoamiras/aztec-standards/dist/src/artifacts/Token.js")
 			// biome-ignore lint/suspicious/noExplicitAny: structural typing across SDK boundary
-			const token: any = await TokenContract.at(AztecAddress.fromString(tokenAddress), wallet as any)
-			const callerAddr = AztecAddress.fromString(s.selectedAccount)
+			const token: any = await TokenContract.at(AztecAddress.fromStringUnsafe(tokenAddress), wallet as any)
+			const callerAddr = AztecAddress.fromStringUnsafe(s.selectedAccount)
 			const exec = await token.methods
-				.transfer_public_to_public(AztecAddress.fromString(owner), callerAddr, BigInt(amount), BigInt(nonce))
+				.transfer_public_to_public(AztecAddress.fromStringUnsafe(owner), callerAddr, BigInt(amount), BigInt(nonce))
 				.request()
 			const payload = { calls: exec.calls ?? [], authWitnesses: [], capsules: [], extraHashedArgs: [] }
 			// biome-ignore lint/suspicious/noExplicitAny: ExecutionPayload + SendOptions structural cast

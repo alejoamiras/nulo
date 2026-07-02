@@ -25,7 +25,7 @@ function decodeField(value: { toString: () => string }, type: NoteFieldType): st
 			return raw
 		case "address":
 			try {
-				return AztecAddress.fromField({ toString: () => raw } as never).toString()
+				return AztecAddress.fromFieldUnsafe({ toString: () => raw } as never).toString()
 			} catch {
 				return raw
 			}
@@ -81,7 +81,7 @@ export class NoteService extends Service<Methods> implements ServiceSpec<Methods
 		let notes: NoteDao[]
 		try {
 			notes = contract
-				? await this.fetchContractNotes(network, account, AztecAddress.fromString(contract))
+				? await this.fetchContractNotes(network, account, AztecAddress.fromStringUnsafe(contract))
 				: await this.fetchKnownContractsNotes(network, account)
 		} catch (error) {
 			this.logError("Failed to fetch incoming notes", getErrorMessage(error))
@@ -218,7 +218,7 @@ export class NoteService extends Service<Methods> implements ServiceSpec<Methods
 		return await this.pxeService.getNotes(networkInfoFrom(network), {
 			contractAddress: contract,
 			status: NoteStatus.ACTIVE,
-			scopes: [AztecAddress.fromString(account)],
+			scopes: [AztecAddress.fromStringUnsafe(account)],
 		})
 	}
 

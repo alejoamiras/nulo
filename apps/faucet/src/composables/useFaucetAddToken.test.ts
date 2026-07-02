@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { useFaucetAddToken } from "./useFaucetAddToken"
 
-const TOKEN_ADDR = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000002")
+const TOKEN_ADDR = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000002")
 const ACCOUNT = "0x000000000000000000000000000000000000000000000000000000000000000a"
 
 /**

@@ -18,7 +18,7 @@ describe("deployments.json invariants", () => {
 
 	it("every token's minter equals the dripper address", () => {
 		for (const record of [DEPLOYMENT_RECORDS.nulo, DEPLOYMENT_RECORDS.olun]) {
-			const minter = AztecAddress.fromString(record.constructorArgs.minter)
+			const minter = AztecAddress.fromStringUnsafe(record.constructorArgs.minter)
 			expect(minter.equals(DRIPPER)).toBe(true)
 		}
 	})

@@ -43,8 +43,8 @@ export const sharedDefine: Record<string, string> = {
 /** Contract-artifact aliases (bypass each package's `exports`), shared by the
  *  build + unit configs. */
 export const artifactAliases: Record<string, string> = {
-	"@private-fpc-artifact": resolvePackageFile("@wonderland/aztec-fee-payment", "target/private_contract-PrivateFPC.json"),
-	"@wonderland-token-artifact": resolvePackageFile("@defi-wonderland/aztec-standards", "artifacts/target/token_contract-Token.json"),
+	"@private-fpc-artifact": resolvePackageFile("@alejoamiras/aztec-fee-payment", "target/private_contract-PrivateFPC.json"),
+	"@wonderland-token-artifact": resolvePackageFile("@alejoamiras/aztec-standards", "artifacts/target/token_contract-Token.json"),
 }
 
 /**

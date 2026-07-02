@@ -11,7 +11,7 @@
  * `extension/src/wallet/services/execution/helpers/batched-view-simulation.ts`
  * and is called directly by balance-projector + gas-balance.
  *
- * Function-call construction uses @defi-wonderland/aztec-standards Token
+ * Function-call construction uses @alejoamiras/aztec-standards Token
  * artifact + Contract.at() pattern, mirroring real dApps.
  */
 import { AztecAddress } from "@aztec/aztec.js/addresses"
@@ -40,14 +40,14 @@ async function buildTransferPayload() {
 	const amount = getInput("amount") || "1"
 	if (!tokenAddress || !recipient) throw new Error("tokenAddress + recipient inputs required")
 
-	const { TokenContract } = await import("@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js")
+	const { TokenContract } = await import("@alejoamiras/aztec-standards/dist/src/artifacts/Token.js")
 	const wallet = getWallet()!
 	// biome-ignore lint/suspicious/noExplicitAny: structural typing across SDK boundary
-	const token: any = await TokenContract.at(AztecAddress.fromString(tokenAddress), wallet as any)
+	const token: any = await TokenContract.at(AztecAddress.fromStringUnsafe(tokenAddress), wallet as any)
 
 	const s = getState()
-	const fromAddr = s.selectedAccount ? AztecAddress.fromString(s.selectedAccount) : AztecAddress.fromString(recipient)
-	const interaction = token.methods.transfer_public_to_public(fromAddr, AztecAddress.fromString(recipient), BigInt(amount), 0n)
+	const fromAddr = s.selectedAccount ? AztecAddress.fromStringUnsafe(s.selectedAccount) : AztecAddress.fromStringUnsafe(recipient)
+	const interaction = token.methods.transfer_public_to_public(fromAddr, AztecAddress.fromStringUnsafe(recipient), BigInt(amount), 0n)
 	const exec = await interaction.request()
 	return { exec, fromAddr }
 }
@@ -93,13 +93,13 @@ export function bindSimulation(root: HTMLElement): void {
 		"click",
 		safe("executeUtility", async () => {
 			const wallet = getWallet()!
-			const { TokenContract } = await import("@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js")
+			const { TokenContract } = await import("@alejoamiras/aztec-standards/dist/src/artifacts/Token.js")
 			const tokenAddress = getInput("tokenAddress")
 			if (!tokenAddress) throw new Error("tokenAddress input required")
 			// biome-ignore lint/suspicious/noExplicitAny: structural Contract typing
-			const token: any = await TokenContract.at(AztecAddress.fromString(tokenAddress), wallet as any)
+			const token: any = await TokenContract.at(AztecAddress.fromStringUnsafe(tokenAddress), wallet as any)
 			const s = getState()
-			const acct = s.selectedAccount ? AztecAddress.fromString(s.selectedAccount) : AztecAddress.fromString(tokenAddress)
+			const acct = s.selectedAccount ? AztecAddress.fromStringUnsafe(s.selectedAccount) : AztecAddress.fromStringUnsafe(tokenAddress)
 			const exec = await token.methods.balance_of_public(acct).request()
 			const call = exec.calls?.[0]
 			if (!call) throw new Error("balance_of_public produced no call")

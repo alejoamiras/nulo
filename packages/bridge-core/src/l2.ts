@@ -40,20 +40,20 @@ export interface ExitParams {
 }
 
 export function bridgeAt(wallet: Wallet, bridge: string, artifact: ContractArtifact): ContractBase {
-	return Contract.at(AztecAddress.fromString(bridge), artifact, wallet)
+	return Contract.at(AztecAddress.fromStringUnsafe(bridge), artifact, wallet)
 }
 
 /** Claim a PUBLIC L1→L2 deposit — mints to `recipient` publicly via the minter-proxy. */
 export function claimPublic(bridge: ContractBase, p: ClaimParams, send: SendOpts) {
 	return bridge.methods
-		.claim_public(AztecAddress.fromString(p.recipient), p.amount, p.secret, new Fr(p.messageLeafIndex))
+		.claim_public(AztecAddress.fromStringUnsafe(p.recipient), p.amount, p.secret, new Fr(p.messageLeafIndex))
 		.send(send as never)
 }
 
 /** Claim a PRIVATE L1→L2 deposit — the secret bears the funds; mints privately to `recipient`. */
 export function claimPrivate(bridge: ContractBase, p: ClaimParams, send: SendOpts) {
 	return bridge.methods
-		.claim_private(AztecAddress.fromString(p.recipient), p.amount, p.secret, new Fr(p.messageLeafIndex))
+		.claim_private(AztecAddress.fromStringUnsafe(p.recipient), p.amount, p.secret, new Fr(p.messageLeafIndex))
 		.send(send as never)
 }
 

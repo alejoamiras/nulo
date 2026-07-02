@@ -37,7 +37,7 @@ test.skipIf(!hasConfig)(
 		const { createAztecNodeClient } = await import("@aztec/aztec.js/node")
 		const { AztecAddress } = await import("@aztec/aztec.js/addresses")
 		const node = createAztecNodeClient(aztecConfig!.nodeUrl)
-		const instance = await node.getContract(AztecAddress.fromString(aztecConfig!.tokenAddress))
+		const instance = await node.getContract(AztecAddress.fromStringUnsafe(aztecConfig!.tokenAddress))
 		if (!instance) throw new Error("Could not fetch token instance from node")
 
 		// Inject instance JSON into the playground

@@ -40,13 +40,13 @@ async function buildTransferExec(callCount = 1) {
 	const amount = getInput("amount") || "1"
 	if (!tokenAddress || !recipient) throw new Error("tokenAddress + recipient inputs required")
 
-	const { TokenContract } = await import("@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js")
+	const { TokenContract } = await import("@alejoamiras/aztec-standards/dist/src/artifacts/Token.js")
 	const wallet = getWallet()!
 	// biome-ignore lint/suspicious/noExplicitAny: structural typing across SDK boundary
-	const token: any = await TokenContract.at(AztecAddress.fromString(tokenAddress), wallet as any)
+	const token: any = await TokenContract.at(AztecAddress.fromStringUnsafe(tokenAddress), wallet as any)
 	const s = getState()
-	const fromAddr = s.selectedAccount ? AztecAddress.fromString(s.selectedAccount) : AztecAddress.fromString(recipient)
-	const toAddr = AztecAddress.fromString(recipient)
+	const fromAddr = s.selectedAccount ? AztecAddress.fromStringUnsafe(s.selectedAccount) : AztecAddress.fromStringUnsafe(recipient)
+	const toAddr = AztecAddress.fromStringUnsafe(recipient)
 
 	// Build N transfer calls. For the chunked variant (callCount > 5) we issue
 	// N independent BatchCall.request() requests and concat their calls arrays.
@@ -115,7 +115,7 @@ export function bindTransactions(root: HTMLElement): void {
 			// recipient for ad-hoc playground usage (will fail at submit but exercises
 			// the popup path).
 			const feePayerInput = getInput("feePayer")
-			const feePayer = AztecAddress.fromString(feePayerInput || getInput("recipient"))
+			const feePayer = AztecAddress.fromStringUnsafe(feePayerInput || getInput("recipient"))
 			// biome-ignore lint/suspicious/noExplicitAny: ExecutionPayload doesn't include feePayer in this version's types
 			const execWithFeePayer: any = { ...exec, feePayer }
 			// biome-ignore lint/suspicious/noExplicitAny: SendOptions structural cast

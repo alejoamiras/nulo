@@ -30,8 +30,8 @@ import { buildFuelClaimInteraction } from "./fuelClaim"
 const saltArgOf = (call = 0): Fr => (privateMintAndPayFee as unknown as Mock).mock.calls[call][3] as Fr
 const secretArgOf = (call = 0): Fr => (claimMethod.mock.calls[call] as unknown as Fr[])[2]
 
-const RECIPIENT = AztecAddress.fromNumber(0x1234)
-const SPONSORED = AztecAddress.fromNumber(0x5)
+const RECIPIENT = AztecAddress.fromNumberUnsafe(0x1234)
+const SPONSORED = AztecAddress.fromNumberUnsafe(0x5)
 const ABOVE_FLOOR = "100000000000000000000" // 100e18, well above the 11e18 floor
 const FLOOR = 11_000_000_000_000_000_000n
 

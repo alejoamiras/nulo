@@ -50,7 +50,7 @@ export const getSetAuthorizedSelector = async () => {
 
 export const isAuthwitConsumable = async (node: AztecNode, account: string, message_hash: string) => {
 	const slot = await deriveStorageSlotInMap(
-		await deriveStorageSlotInMap(APPROVED_ACTIONS_SLOT, AztecAddress.fromString(account)),
+		await deriveStorageSlotInMap(APPROVED_ACTIONS_SLOT, AztecAddress.fromStringUnsafe(account)),
 		Fr.fromString(message_hash),
 	)
 	const approved = await node.getPublicStorageAt("latest", getAuthRegistryAddress(), slot)
@@ -58,7 +58,7 @@ export const isAuthwitConsumable = async (node: AztecNode, account: string, mess
 }
 
 export const isAuthRegistryEnabled = async (node: AztecNode, account: string) => {
-	const slot = await deriveStorageSlotInMap(REJECT_ALL_SLOT, AztecAddress.fromString(account))
+	const slot = await deriveStorageSlotInMap(REJECT_ALL_SLOT, AztecAddress.fromStringUnsafe(account))
 	const rejectAll = await node.getPublicStorageAt("latest", getAuthRegistryAddress(), slot)
 	return rejectAll.isZero()
 }
