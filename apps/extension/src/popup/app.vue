@@ -145,10 +145,15 @@ const loadProfile = async () => {
 	appStore.profiles = await managers.profile.getProfiles()
 	const activeProfile = await managers.profile.getActiveProfile()
 	if (activeProfile) {
-		await bootstrapActiveProfile(activeProfile)
+		const stillActive = await bootstrapActiveProfile(activeProfile)
 		appStore.isSessionChecked = true
 
-		if (["popup-register", "popup-auth"].includes(route.name)) router.push("/popup/general")
+		// Only advance into the authed area if the session survived bootstrap. If a
+		// lock fired mid-bootstrap (stillActive=false, isLogined stayed off), pushing
+		// to the auth-required /popup/general would bounce straight back through the
+		// router's auth guard to /popup/auth — the lock's onActiveProfileChanged(undefined)
+		// handler already routes there. Consuming the flag skips the redundant bounce.
+		if (stillActive && ["popup-register", "popup-auth"].includes(route.name)) router.push("/popup/general")
 
 		return
 	}

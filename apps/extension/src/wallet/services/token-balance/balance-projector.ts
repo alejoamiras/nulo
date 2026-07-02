@@ -108,7 +108,7 @@ export class BalanceProjector {
 					privateBalance: balance.privateBalance ?? "0",
 					publicBalance: balance.publicBalance ?? "0",
 				}
-				// `.catch(undefined)` absorbs the R1.4 ownership guard on `getTokenRaw`: a
+				// `.catch(undefined)` absorbs the ownership guard on `getTokenRaw`: a
 				// stale/foreign balance whose token the active profile doesn't own now
 				// throws — cache undefined so the passes below skip it (see `if (!token)`).
 				tokenCache.set(balance.id, await this.tokens.getTokenRaw(balance.token).catch(() => undefined))
@@ -124,7 +124,7 @@ export class BalanceProjector {
 			for (let i = 0; i < balances.length; i++) {
 				const balance = balances[i]
 				const token = tokenCache.get(balance.id)
-				if (!token) continue // skip a balance whose token the active profile doesn't own (R1.4 guard)
+				if (!token) continue // skip a balance whose token the active profile doesn't own (ownership guard)
 				if (token.balanceOfPublicFn) {
 					const fn = createViewTokenFn(
 						TOKEN_FN_DESCRIPTORS.balanceOfPublic,
@@ -141,7 +141,7 @@ export class BalanceProjector {
 			for (let i = 0; i < balances.length; i++) {
 				const balance = balances[i]
 				const token = tokenCache.get(balance.id)
-				if (!token) continue // skip a balance whose token the active profile doesn't own (R1.4 guard)
+				if (!token) continue // skip a balance whose token the active profile doesn't own (ownership guard)
 				if (token.balanceOfPrivateFn) {
 					const fn = createViewTokenFn(
 						TOKEN_FN_DESCRIPTORS.balanceOfPrivate,

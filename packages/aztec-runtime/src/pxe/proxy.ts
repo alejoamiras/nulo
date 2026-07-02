@@ -42,3 +42,21 @@ for (const name of PXE_IPXE_METHODS) {
 	Object.defineProperty(curried, "name", { value: name, configurable: true })
 	Object.defineProperty(PXEProxy.prototype, name, { value: curried, writable: true, enumerable: false, configurable: true })
 }
+
+// ── Compile-time bridge: the generated curry must SATISFY IPXE ──────────
+// The `extends IPXE` merge above only ASSERTS the methods exist; it does NOT
+// check that the runtime curry `name(...args) => pxeService.name(network, ...args)`
+// actually produces IPXE's signatures. `subset.ts`'s old `PXEProxy implements IPXE`
+// gave that per-method check for free; the generated proxy lost it. Reconstruct it
+// at the type level: drop the leading NetworkInfo from each client method and
+// require the result to be ASSIGNABLE to IPXE (assignability, not identity — a
+// client method may carry extra optional args the facade omits, exactly as
+// `implements` allowed). A param/return-type drift on any single method — not just
+// a missing/extra name (which `_IPXEMatchesTable` still owns) — now fails HERE at
+// compile time instead of surfacing as a runtime shape mismatch.
+type Expect<T extends true> = T
+type CurriedClientMethod<K extends keyof IPXE> = PxeServiceClientBase[K] extends (network: NetworkInfo, ...rest: infer P) => infer R
+	? (...rest: P) => R
+	: never
+type CurriedProxy = { [K in keyof IPXE]: CurriedClientMethod<K> }
+type _ProxyCurrySatisfiesIPXE = Expect<CurriedProxy extends IPXE ? true : false>
