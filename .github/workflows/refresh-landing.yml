@@ -1,0 +1,83 @@
+name: refresh-landing
+run-name: "refresh-landing → ${{ inputs.target }}"
+
+# Break-glass: manually re-fire the Cloudflare Pages deploy hook(s) to redeploy
+# the landing (nulo.sh) and/or faucet (faucet.nulo.sh) WITHOUT a full release run.
+#
+# The release pipeline (release.yml) deploys both automatically on every stable publish.
+# This workflow exists for the rare stale-deploy case (a CDN miss, or a landing
+# that didn't refresh) — one command, no Cloudflare token, no account id, no
+# dashboard: `gh workflow run refresh-landing.yml [-f target=landing|faucet|both]`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Which site(s) to redeploy"
+        type: choice
+        default: both
+        options:
+          - both
+          - landing
+          - faucet
+
+permissions:
+  contents: read
+
+concurrency:
+  group: refresh-landing-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: refresh Cloudflare Pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - name: Trigger landing deploy
+        if: inputs.target == 'both' || inputs.target == 'landing'
+        env:
+          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$DEPLOY_HOOK" ]; then
+            echo "::error::CLOUDFLARE_PAGES_DEPLOY_HOOK secret is not set"
+            exit 1
+          fi
+          code=$(curl -sS -o /tmp/cf-landing.out -w "%{http_code}" \
+            --retry 3 --retry-all-errors --retry-delay 2 \
+            -X POST "$DEPLOY_HOOK")
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+            echo "::error::landing deploy-hook curl returned HTTP $code"
+            cat /tmp/cf-landing.out
+            exit 1
+          fi
+          echo "landing deploy-hook triggered (HTTP $code)"
+
+      - name: Trigger faucet deploy
+        if: inputs.target == 'both' || inputs.target == 'faucet'
+        env:
+          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_FAUCET_DEPLOY_HOOK }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          if [ -z "$DEPLOY_HOOK" ]; then
+            if [ "$TARGET" = "faucet" ]; then
+              # Explicitly asked to refresh the faucet, but its hook isn't wired —
+              # fail loud rather than a green no-op (codex post-impl finding).
+              echo "::error::CLOUDFLARE_FAUCET_DEPLOY_HOOK is unset but target=faucet was requested — nothing to deploy."
+              exit 1
+            fi
+            # target=both: the faucet's CF dashboard Git-integration deploys it on
+            # push:main, so an unwired hook is a tolerated no-op here.
+            echo "::notice::CLOUDFLARE_FAUCET_DEPLOY_HOOK unset — skipping faucet (dashboard Git-integration deploys it on push:main)."
+            exit 0
+          fi
+          code=$(curl -sS -o /tmp/cf-faucet.out -w "%{http_code}" \
+            --retry 3 --retry-all-errors --retry-delay 2 \
+            -X POST "$DEPLOY_HOOK")
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+            echo "::error::faucet deploy-hook curl returned HTTP $code"
+            cat /tmp/cf-faucet.out
+            exit 1
+          fi
+          echo "faucet deploy-hook triggered (HTTP $code)"
