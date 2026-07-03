@@ -58,10 +58,17 @@ jobs:
         if: inputs.target == 'both' || inputs.target == 'faucet'
         env:
           DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_FAUCET_DEPLOY_HOOK }}
+          TARGET: ${{ inputs.target }}
         run: |
           if [ -z "$DEPLOY_HOOK" ]; then
-            # Not wired yet — the faucet's CF dashboard Git-integration deploys it
-            # on push:main. Skip, don't fail, so an unwired secret is a no-op here.
+            if [ "$TARGET" = "faucet" ]; then
+              # Explicitly asked to refresh the faucet, but its hook isn't wired —
+              # fail loud rather than a green no-op (codex post-impl finding).
+              echo "::error::CLOUDFLARE_FAUCET_DEPLOY_HOOK is unset but target=faucet was requested — nothing to deploy."
+              exit 1
+            fi
+            # target=both: the faucet's CF dashboard Git-integration deploys it on
+            # push:main, so an unwired hook is a tolerated no-op here.
             echo "::notice::CLOUDFLARE_FAUCET_DEPLOY_HOOK unset — skipping faucet (dashboard Git-integration deploys it on push:main)."
             exit 0
           fi
