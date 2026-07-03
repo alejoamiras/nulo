@@ -1,0 +1,12 @@
+# Phase 2 lessons — Release PR → unstick → publish (2026-07-02)
+
+## The publish's network-e2e flaked → cascaded to the landing build
+The publish run (`release.yml --ref main -f tag=v0.24.0 -f run_network_e2e=true`) went green on resolve/gates/**build-chrome/build-firefox** (validating the Phase-1 `--ref main` heal — no ENOENT this time)/smoke, then **network-e2e FAILED**. Diagnosis: the failed step was "Run network e2e via agent" with NO vitest assertion failure and proving confirmed (16 /prove requests → sandbox booted, tests ran). The same code had already passed network-e2e TWICE (promote #250, Release PR #252). → **flake** in a known-flaky suite → **re-ran the failed job** (`gh run rerun <id> --failed`, reuses the green builds), never neutralized.
+
+**Cascade the user caught:** the failed publish stopped before `attach-assets`, so the GitHub Release `v0.24.0` had **zero assets**. The landing (`apps/landing`) prebuild `scripts/fetch-latest-release.ts` fetches the LATEST release and **throws if there's no `nulo-chrome-*.zip`** → EVERY Cloudflare landing build (prod + any feature-branch preview) failed with `release v0.24.0 has no nulo-chrome-*.zip asset` while the release sat empty.
+- **Root cause is singular:** completing the publish (attach-assets) attaches the zips → the landing builds resolve. No separate landing fix needed.
+- **Lesson:** the moment a stable release TAG+empty-Release exists (the manual unstick), the landing is in a broken-build window until `attach-assets` runs. On a flake between unstick and attach, expect red landing builds repo-wide — fix forward by finishing the publish, don't touch the landing.
+- **Latent hardening idea (not done here):** make `fetch-latest-release.ts` tolerate an asset-less latest release (fall back to the previous release, or skip) so a mid-publish window doesn't red every landing build. Tracked as a follow-up, out of scope for this release.
+
+## Concurrency collision on the Release PR (recap)
+release-please opening #252 raced the promote's `push:main` `release.yml` run → the PR-workflow concurrency groups cancelled #252's first CI → aggregators failed fast (`cancelled`). Fix: after the fresh re-run passed, the stale CANCELLED runs still wedged `mss` (duplicate check-runs, success+cancelled per name) → **deleted the 3 stale cancelled runs** (`gh run delete`) so only the fresh SUCCESS remained → `mss` CLEAN → merged. (Deleting stale cancelled duplicates ≠ neutralizing — the real gate passed.)
