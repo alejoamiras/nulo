@@ -44,7 +44,8 @@ _Done 2026-07-03: `workflow_dispatch`-only, target input, contents:read, actionl
 - `gh workflow run refresh-landing.yml -f target=landing` (after merge, or on-branch via `--ref`) → the run's curl step reports HTTP 2xx + a new Cloudflare production deployment appears / `nulo.sh` rebuilds. (This workflow's only real test IS the live curl — it has no dry-run.)
 - Layers: lint (actionlint) + live-CI (a real dispatch that triggers a CF deploy).
 
-## Phase 3 — docs rewrite + flip the `AUTO_UNSTICK_ENABLED` variable
+## Phase 3 ✓ — docs rewrite + flip the `AUTO_UNSTICK_ENABLED` variable
+_Done 2026-07-03: runbook step 7 rewritten (stale claim gone, grep=0), 2 current-state markers updated, `AUTO_UNSTICK_ENABLED` flipped ON (var=on, code-default OFF). Flipped pre-merge — safe per I2. See [lessons/phase-3.md](lessons/phase-3.md)._
 - **`CLAUDE.md` § Release runbook step 7** ("Cloudflare landing redeploy"): the manual push-no-op / curl-hook / CF-API dance is obsolete — rewrite to "the landing + faucet now deploy automatically on **any** publish path (`push:main` AND `workflow_dispatch`) after the Phase-1 fix; if ever stuck, `gh workflow run refresh-landing.yml`". Remove the stale claim that `refresh-landing` "only fires on the `push:main` path, not on `workflow_dispatch`".
 - **Division-of-labor + staged-rollout-switches tables**: note the `always()` fix; update the `AUTO_UNSTICK_ENABLED` switch row to reflect it's being flipped ON (default still OFF in-code as a kill-switch).
 - **Flip the variable (post-merge step, per Q2):** `gh variable set AUTO_UNSTICK_ENABLED -b on`. Keep the workflow's in-code default OFF (unset ⇒ off) — the flip is via the repo variable only, so it stays an instant kill-switch. The code default flips to ON only after ONE release proves `auto-unstick` acts cleanly (a later, separate change — noted, not done here).
