@@ -1,6 +1,6 @@
 # Release-pipeline hardening — deploy jobs skip on `workflow_dispatch`
 
-**Status:** DRAFT (2026-07-03) — `/blueprint light`, Phase 0 answers locked. Awaiting codex audit + approval gate.
+**Status:** ✅ IMPLEMENTED (2026-07-03) — `/blueprint light`, all 3 phases ✓, **PR #256 → dev**. codex: plan **conditional approve** (folded) + post-impl **approve** (one Low folded). `AUTO_UNSTICK_ENABLED` flipped ON (var-only, code-default OFF).
 **Tier:** `light`. Rubric: novelty LOW (the `always()` pattern already lives in this file), blast radius MODERATE (breaks the *release process*, not the shipped extension), irreversibility LOW (CI is revertible; the flip is a repo variable), migration NONE, external coupling MODERATE (Cloudflare hooks — unchanged, only *when* they fire), security LOW (no new secrets/privilege). Zero HIGH → `light`.
 
 ## What this is
