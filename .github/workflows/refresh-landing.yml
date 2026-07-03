@@ -1,9 +1,10 @@
 name: refresh-landing
+run-name: "refresh-landing → ${{ inputs.target }}"
 
 # Break-glass: manually re-fire the Cloudflare Pages deploy hook(s) to redeploy
 # the landing (nulo.sh) and/or faucet (faucet.nulo.sh) WITHOUT a full release run.
 #
-# The release pipeline (release.yml) deploys both automatically on every publish.
+# The release pipeline (release.yml) deploys both automatically on every stable publish.
 # This workflow exists for the rare stale-deploy case (a CDN miss, or a landing
 # that didn't refresh) — one command, no Cloudflare token, no account id, no
 # dashboard: `gh workflow run refresh-landing.yml [-f target=landing|faucet|both]`.
