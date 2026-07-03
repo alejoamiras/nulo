@@ -10,6 +10,21 @@ Operating rules for AI assistants (and any contributor) working in this reposito
 - [`apps/extension/tests/COMPOSITION-TESTS.md`](./apps/extension/tests/COMPOSITION-TESTS.md) — **normative** rules for the `*.composition.test.ts` layer (drive the real service graph in-process against dumb fakes): when to use it, the hard limits (shallow PXE **and** bb-free **and** no simulate/prove), the failure taxonomy. Read before adding a composition test.
 - [`implementations-plan/README.md`](./implementations-plan/README.md) — planning archive, when to add to it, the milestone-vocabulary key.
 
+## Skills own their domains — route new lessons to them
+
+Project skills in [`.claude/skills/`](./.claude/skills/) are the source of truth for their domain's procedure + accumulated know-how. This file is the ruleset + index; the depth lives in the skill. **When you learn a durable lesson, write it into the owning skill — not an inline comment, not a new paragraph here.**
+
+| Learned something about… | Update this skill |
+|---|---|
+| Bumping the `@aztec/*` line — rc bumps, protocol forks, testnet resets | [`aztec-update`](./.claude/skills/aztec-update/) |
+| Writing/running E2E — fixtures, flake root-causes, selector rules, the parallel-safe runner | [`e2e-testing`](./.claude/skills/e2e-testing/) |
+| Debugging the extension — popup/offscreen/SW, DevTools-MCP techniques, network/console gotchas | [`chrome-extension-debug`](./.claude/skills/chrome-extension-debug/) |
+| The code-review protocol — a new review lens, a recurring nit class | [`code-review`](./.claude/skills/code-review/) |
+| How CLAUDE.md itself is maintained | [`update-docs`](./.claude/skills/update-docs/) |
+| The **release** process — cut/unstick/publish/deploy/sync, a new failure mode | _no skill yet → the `### Release runbook` below is its home; extract it when it's worth it_ |
+
+**Three-way routing for anything you learn:** a *rule/policy* → here; a *durable domain procedure/technique* → the owning skill above; a *plan-specific debugging log* → `implementations-plan/<plan>/lessons/`. Re-check this table when you add or rename a skill.
+
 ## Working in this repo
 
 - **Bun** is the package manager. No yarn/npm/pnpm. Pinned to `1.3.14` via `package.json#packageManager` + `setup-bun` action.
