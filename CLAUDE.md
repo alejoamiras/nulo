@@ -369,6 +369,8 @@ Configured in [`.github/`](./.github/). The full contributor guide is at [`CI.md
 
 Two flows: **stable** (from `main`, tagged `vX.Y.Z`) and **prerelease** (from `dev`, tagged `vX.Y.Z-rc[.N]`). Both share the same v4 abort bug + manual unstick pattern.
 
+> **This runbook is the source of truth for the release process. Update it when the process changes** — a new failure mode, a changed step, a flipped switch. It's the one runbook still living in CLAUDE.md rather than a skill (see the skill-routing table above — the `release` row points back here); extract it into a `release` skill when it's worth it. Worked examples: `implementations-plan/{release-prerelease-fix,required-check-mismatch,stable-release-0.24.0,release-pipeline-hardening}/`.
+
 #### Start here — what a release is, and what you actually do
 
 A **stable release** turns the current `main` into a published `vX.Y.Z`: a GitHub Release with the built Chrome + Firefox zips + `SHASUMS256.txt`, the landing (`nulo.sh`) and faucet (`faucet.nulo.sh`) redeployed, and a `main → dev` back-sync PR opened. Most of it is automated by [`release.yml`](.github/workflows/release.yml); this table is the **current** division of labor (it shifts as the [staged rollout](#staged-rollout-switches) proceeds):
