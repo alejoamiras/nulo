@@ -20,7 +20,7 @@ Two independent questions:
    Different rollupVersion ⇒ **NETWORK RESET** ⇒ Branch B below is mandatory and COUPLED to the bump: `verify:deployments` runs inside the faucet build CI gate, so a class-id/identity shift reds the build — you cannot land the bump and defer the redeploy.
 2. **What changed upstream?** `gh api repos/AztecProtocol/aztec-packages/compare/v<old>...v<new>` — scan `!:` commits, then grep OUR surface for the broken symbols before assuming they bite. Expect class-id shifts from ANY toolchain/bytecode change even when no API we call moved.
 
-**Then gate on the user via the `AskUserQuestion` tool** — present what the probes FOUND (rollupVersions, `!:` commit count, our-surface hits), never ask blind. One call, two questions:
+**Then gate on the user via the `AskUserQuestion` tool** — present what the probes FOUND (rollupVersions, `!:` commit count, our-surface hits), never ask blind. **No implementation starts while ANY clarifying question is open**: Q1/Q2 below are the mandatory minimum, and anything else the probes left ambiguous — the exact target version, validation depth (network-e2e? full calibration?), deployer-key availability, whether the extension/faucet release timing matters — gets batched into the same `AskUserQuestion` call(s) up front. Silent assumptions on a runbook with live broadcasts are how funds strand. The two fixed questions:
 
 - **Q1 "Bump class"** (single-select) — options grounded in the probe result, e.g.:
   - `Version-only bump` — rollupVersion unchanged; pins + toolchain + detectors, no on-chain work (Branch A).
