@@ -10,7 +10,8 @@ A targeted fix + hardening for the release pipeline, motivated by the `stable-re
 
 **Scope (user-locked):** Core fix + break-glass workflow. **Excluded:** the `fetch-latest-release.ts` asset-less fallback (low value — `auto-unstick` collapses the empty-Release window to seconds; tracked as a note, not built).
 
-## Phase 1 — `always()` guards on the two deploy jobs (root-cause fix)
+## Phase 1 ✓ — `always()` guards on the two deploy jobs (root-cause fix)
+_Done 2026-07-03: guard on refresh-landing:349 + deploy-faucet:381, verify-live untouched, actionlint clean, 8-case logic-review passed. See [lessons/phase-1.md](lessons/phase-1.md)._
 - **`refresh-landing` (`release.yml:348`)** and **`deploy-faucet` (`release.yml:377`)**: prepend a guard mirroring `attach-assets`, so a skipped ancestor no longer skips them, while staying fail-closed on a real failure or a cancellation:
   ```yaml
   if: |
