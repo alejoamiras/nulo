@@ -7,6 +7,8 @@ description: Runbook for bumping the @aztec/* version line (rc bumps, protocol f
 
 Operational runbook distilled from the shipped bumps (4.2→5.0 hard fork: `implementations-plan/aztec-5.0-upgrade/`; rc.1→rc.2 + testnet redeploy: `implementations-plan/aztec-5.0-rc2/` — read that plan + its `lessons/` for a complete worked example). Non-trivial bumps still go through `/blueprint` — this skill is the domain checklist the plan draws from, not a substitute for planning.
 
+> **This skill is the source of truth for the Aztec-bump process. Update it when the process changes** — a new pin surface, a new failure mode, a toolchain/proving shift. A durable lesson from a bump belongs HERE (not only in the plan's `lessons/`). CLAUDE.md's skill-routing table points here for that reason.
+
 ## Phase 0 — classify the bump (do this FIRST, it forks everything)
 
 Two independent questions:
