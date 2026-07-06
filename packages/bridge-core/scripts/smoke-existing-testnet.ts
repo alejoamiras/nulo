@@ -232,7 +232,8 @@ async function main() {
 		if (!(await claimPrivate(l2recipient, saltB, leafB))) throw new Error("sentinel B never claimed — L1→L2 not synced within budget")
 		console.log(`sentinel B claimed → network synced; A is now claimable (${mins()})`)
 
-		// A is synced. A wrong recipient MUST fail to consume it (single attempt — no retry).
+		// A is synced (B, a LATER leaf, claimed). So a wrong-recipient claim on A that reverts does so for
+		// the BINDING reason, not because A isn't synced yet. Single attempt — no retry (we want the revert).
 		const wrongRecipient = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000001")
 		let wrongReverted = false
 		try {
@@ -240,23 +241,20 @@ async function main() {
 		} catch {
 			wrongReverted = true
 		}
-		console.log(
-			wrongReverted
-				? "wrong-recipient claim threw (expected)"
-				: "⚠ wrong-recipient claim did NOT throw — the re-claim of A below is the authoritative check",
-		)
-
-		// AUTHORITATIVE: the correct recipient still claims A. Success proves the wrong attempt did not
-		// redirect/consume A (if it had, A's message would be gone and this would fail).
-		if (!(await claimPrivate(l2recipient, saltA, leafA))) {
+		if (!wrongReverted) {
 			throw new Error(
-				"SECURITY FAILURE: correct claim of A failed after the wrong-recipient attempt — A may have been redirected/consumed",
+				"SECURITY FAILURE: wrong-recipient claim_private on a SYNCED message did NOT revert — recipient-commitment broken (redirect possible)",
 			)
 		}
+		// A stays claimable: a reverted consume_l1_to_l2_message never nullifies the message (protocol
+		// invariant). We deliberately do NOT re-claim A here — re-simulating the same leaf in the same PXE
+		// session after a failed consume attempt wedges the local PXE (a harness limitation, not on-chain
+		// state); canary 2 already proves a correct private claim settles + mints. B's claim is the balance
+		// sanity that private claims work on this candidate.
 		const balRP = ((await token.methods.balance_of_private(l2recipient).simulate({ from })) as { result: bigint }).result
-		if (balRP < 2n * amount) throw new Error(`redirect-proof: balance ${balRP} < expected ${2n * amount} (A+B)`)
+		if (balRP < amount) throw new Error(`redirect-proof: sentinel balance ${balRP} < expected ${amount} (B)`)
 		console.log(
-			`\n✅ CANDIDATE REDIRECT-PROOF PASSED — wrong recipient cannot consume; correct recipient claims A+B; balance ${balRP} (${mins()})`,
+			`\n✅ CANDIDATE REDIRECT-PROOF PASSED — a wrong recipient cannot consume a SYNCED message (binding holds); sentinel balance ${balRP} (${mins()})`,
 		)
 		return
 	}
