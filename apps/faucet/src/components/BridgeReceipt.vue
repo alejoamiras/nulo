@@ -24,7 +24,7 @@ export interface ReceiptSnapshot {
 	/** Fueled deposits: the FJ that landed as gas (base units). */
 	fuelReceived?: string
 	/** The claim tx's fee (gas used), base units — read post-completion. Undefined ⇒ omit the used row
-	 *  and treat `available` as the full bought amount. */
+	 *  and treat `available` as the full received amount. */
 	fuelUsed?: string
 }
 
@@ -46,14 +46,16 @@ const route = computed(() => (isDeposit.value ? "Ethereum → Aztec" : "Aztec �
 const privacyWord = computed(() => (props.snapshot.isPrivate ? "private" : "public"))
 /** Gas naming by surface: private → "Private FJ", public → "FJ". ($AZTEC is the L1-side name.) */
 const gasLabel = computed(() => (props.snapshot.isPrivate ? "Private FJ" : "FJ"))
-const stampWord = computed(() => (isFuel.value ? "FUELED ✓" : isDeposit.value ? "BRIDGED ✓" : "RELEASED ✓"))
+/** Past-tense hero verb by surface — the only label on the hero row. */
+const heroLabel = computed(() => (isFuel.value ? "Fueled" : isDeposit.value ? "Bridged" : "Released"))
 
 const amountDisplay = computed(() => formatBigInt(BigInt(props.snapshot.amount), assetDecimals(props.snapshot.assetKind)))
 const amountSymbol = computed(() => assetSymbol(props.snapshot.assetKind, props.snapshot.isPrivate))
-// Fuel only ever rides IN on a deposit; a withdraw never carries gas back to Ethereum.
-const hasFuel = computed(() => isDeposit.value && !!props.snapshot.fuelReceived)
-const boughtDisplay = computed(() => (props.snapshot.fuelReceived ? formatBigInt(BigInt(props.snapshot.fuelReceived), 18) : null))
+// Fuel rides IN only on a token deposit: a withdraw never carries gas, and a Fuel bridge IS the gas (no split).
+// The `!isFuel` guard keeps hasFuel and isFuel mutually exclusive, so the receiptFuel testid is never duplicated.
+const hasFuel = computed(() => isDeposit.value && !isFuel.value && !!props.snapshot.fuelReceived)
 const usedDisplay = computed(() => (props.snapshot.fuelUsed ? formatBigInt(BigInt(props.snapshot.fuelUsed), 18) : null))
+/** Gas READY = received − used (the net the user can spend next); used unknown ⇒ the full received. */
 const availableDisplay = computed(() => {
 	if (!props.snapshot.fuelReceived) return null
 	const available = BigInt(props.snapshot.fuelReceived) - (props.snapshot.fuelUsed ? BigInt(props.snapshot.fuelUsed) : 0n)
@@ -90,27 +92,25 @@ const links = computed(() => {
 			<span v-for="(c, i) in CONFETTI" :key="i" class="bit" :style="c">{{ i % 3 === 0 ? "▓" : i % 3 === 1 ? "░" : "✓" }}</span>
 		</div>
 
-		<div class="rhead">
-			<p class="stamp">{{ stampWord }}</p>
-			<span class="meta"><template v-if="totalElapsed">{{ totalElapsed }} · </template>{{ privacyWord }}</span>
-		</div>
-		<p class="route">{{ route }}</p>
-
+		<!-- The mint left-rule and the small ✓ are the only green — success without shouting. The bridged
+		     asset is the hero (cream, large); Fee Juice demotes to dim rows (absent on withdraw/Fuel/plain). -->
 		<div class="ledger">
-			<div v-if="isFuel" class="row" :data-testid="TESTIDS.receiptFuel"><span class="k">Fuel</span><span>{{ amountDisplay }} {{ amountSymbol }}</span></div>
-			<template v-else-if="isDeposit">
-				<div class="row"><span class="k">Tokens</span><span>{{ amountDisplay }} {{ amountSymbol }}</span></div>
-				<template v-if="hasFuel">
-					<div class="row" :data-testid="TESTIDS.receiptFuel"><span class="k">Gas bought</span><span>{{ boughtDisplay }} {{ gasLabel }}</span></div>
-					<div v-if="usedDisplay" class="row"><span class="k">Gas used</span><span>&minus; {{ usedDisplay }} {{ gasLabel }}</span></div>
-				</template>
+			<p class="eyebrow">
+				<span>{{ route }} · {{ privacyWord }}<template v-if="totalElapsed"> · {{ totalElapsed }}</template></span>
+				<span class="done" role="img" aria-label="completed">✓</span>
+			</p>
+			<div class="row primary" :data-testid="isFuel ? TESTIDS.receiptFuel : undefined">
+				<span class="k">{{ heroLabel }}</span>
+				<span class="v">{{ amountDisplay }} {{ amountSymbol }}</span>
+			</div>
+			<template v-if="hasFuel">
+				<div class="row" :data-testid="TESTIDS.receiptFuel">
+					<span class="k">Gas ready</span><span class="v">{{ availableDisplay }} {{ gasLabel }}</span>
+				</div>
+				<div v-if="usedDisplay" class="row">
+					<span class="k">Gas used</span><span class="v">&minus; {{ usedDisplay }} {{ gasLabel }}</span>
+				</div>
 			</template>
-			<div v-else class="row"><span class="k">Released</span><span>{{ amountDisplay }} {{ amountSymbol }} &rarr; Ethereum</span></div>
-		</div>
-
-		<div v-if="hasFuel && availableDisplay" class="reserve">
-			<div class="big">{{ availableDisplay }} {{ gasLabel }} available</div>
-			<div class="note">Ready to power your next {{ snapshot.isPrivate ? "private " : "" }}transaction</div>
 		</div>
 
 		<Flex v-if="links.length" gap="12" class="links">
@@ -133,63 +133,61 @@ const links = computed(() => {
 	overflow: hidden;
 	display: flex;
 	flex-direction: column;
-	gap: 12px;
+	gap: 14px;
 }
 
-.rhead {
+.ledger {
+	border-left: 2px solid var(--mint);
+	padding-left: 14px;
+	display: flex;
+	flex-direction: column;
+}
+
+.eyebrow {
+	margin: 0 0 5px;
 	display: flex;
 	justify-content: space-between;
 	align-items: baseline;
+	color: var(--txt-secondary);
+	font: 600 10px/1.5 var(--font-mono);
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
 }
 
-.meta {
+.eyebrow .done {
+	color: var(--mint);
+	letter-spacing: 0;
+}
+
+.row {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	padding: 5px 0;
+}
+
+.row .k {
+	color: var(--txt-secondary);
+	font: 500 12px/1 var(--font-mono);
+}
+
+.row .v {
 	color: var(--txt-secondary);
 	font: 500 13px/1 var(--font-mono);
 }
 
-.route {
-	margin: 0;
-	font-family: var(--font-headline);
-	font-weight: 600;
-	font-size: 17px;
+/* The bridged asset is the hero: cream + large, the only thing that draws the eye. */
+.row.primary {
+	padding-top: 7px;
+}
+
+.row.primary .k {
 	color: var(--txt-primary);
 }
 
-.ledger {
-	display: flex;
-	flex-direction: column;
-	font: 500 13px/1.5 var(--font-mono);
-}
-
-.ledger .row {
-	display: flex;
-	justify-content: space-between;
-	padding: 6px 0;
-	border-bottom: 1px solid var(--nulo-outline);
-}
-
-.ledger .row:last-child {
-	border-bottom: none;
-}
-
-.ledger .row .k {
-	color: var(--txt-secondary);
-}
-
-.reserve {
-	border: 1px solid var(--mint);
-	padding: 12px 14px;
-}
-
-.reserve .big {
-	color: var(--mint);
-	font: 600 15px/1.2 var(--font-mono);
-}
-
-.reserve .note {
-	color: var(--txt-secondary);
-	font: 500 12px/1.4 var(--font-mono);
-	margin-top: 4px;
+.row.primary .v {
+	color: var(--txt-primary);
+	font: 600 19px/1.1 var(--font-mono);
 }
 
 .links a {
@@ -217,29 +215,6 @@ const links = computed(() => {
 .action:hover {
 	border-color: var(--nulo-accent);
 	color: var(--nulo-accent);
-}
-
-.stamp {
-	margin: 0;
-	font: 700 20px/1 var(--font-mono);
-	letter-spacing: 0.12em;
-	color: var(--mint);
-	animation: stamp-in 0.25s ease-out;
-}
-
-@keyframes stamp-in {
-	0% {
-		transform: scale(1.8);
-		opacity: 0;
-	}
-	60% {
-		transform: scale(0.94);
-		opacity: 1;
-	}
-	100% {
-		transform: scale(1);
-		opacity: 1;
-	}
 }
 
 .confetti {

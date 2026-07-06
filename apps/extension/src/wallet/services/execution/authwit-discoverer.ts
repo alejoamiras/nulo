@@ -153,10 +153,10 @@ export class AuthwitDiscoverer {
 		}
 		return await computeAuthWitMessageHash(
 			{
-				caller: AztecAddress.fromString(content.caller),
+				caller: AztecAddress.fromStringUnsafe(content.caller),
 				call: new FunctionCall(
 					fn.name,
-					AztecAddress.fromString(content.contract),
+					AztecAddress.fromStringUnsafe(content.contract),
 					await FunctionSelector.fromNameAndParameters(fn.name, fn.parameters),
 					fn.functionType,
 					content.hideSender === true,
@@ -208,10 +208,10 @@ export class AuthwitDiscoverer {
 		}
 		return await computeAuthWitMessageHash(
 			{
-				caller: AztecAddress.fromString(content.caller),
+				caller: AztecAddress.fromStringUnsafe(content.caller),
 				call: new FunctionCall(
 					content.name,
-					AztecAddress.fromString(content.to),
+					AztecAddress.fromStringUnsafe(content.to),
 					FunctionSelector.fromString(content.selector),
 					content.type as FunctionType,
 					content.hideMsgSender === true,
@@ -231,7 +231,7 @@ export class AuthwitDiscoverer {
 	public async computeIntentMessageHash(content: IntentAuthwitContent, nodeInfo: NodeInfo): Promise<Fr> {
 		return await computeAuthWitMessageHash(
 			{
-				consumer: AztecAddress.fromString(content.consumer),
+				consumer: AztecAddress.fromStringUnsafe(content.consumer),
 				innerHash: await computeInnerAuthWitHash(content.intent.map((x) => Fr.fromString(x))),
 			},
 			{

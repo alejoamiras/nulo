@@ -44,7 +44,7 @@ export function useFaucetAddToken() {
 		status.value = { kind: "submitting" }
 		try {
 			const w = wallet as WalletWithRegisterToken
-			await w.registerToken(AztecAddress.fromString(accountAddress), tokenAddress)
+			await w.registerToken(AztecAddress.fromStringUnsafe(accountAddress), tokenAddress)
 			status.value = { kind: "ok" }
 		} catch (err) {
 			const normalized = normalizeError(err)

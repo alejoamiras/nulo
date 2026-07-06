@@ -4,7 +4,7 @@ The checklist for bumping the Aztec / Noir dependency line. **`@aztec/*` is exac
 
 > **Convention:** any code that types against an `@aztec` shape (a PXE method signature, a wire type, an artifact field) MUST add an entry to **§ Types coupled to `@aztec` shape** below, with `file:line`, so the next bump has a checklist. Round-2 phase R4 (P18b PXE descriptor) is the first to append here.
 
-Current line: **`@aztec/* = 5.0.0-rc.1`** (Noir wasm packages `noir-acvm_js` / `noir-noirc_abi` carry Bun patches — see below).
+Current line: **`@aztec/* = 5.0.0-rc.2`** (Noir wasm packages `noir-acvm_js` / `noir-noirc_abi` carry Bun patches — see below).
 
 ## Before you bump
 1. Read the upstream `@aztec/aztec.js` + `@aztec/pxe` changelog for the target version — note any renamed/removed exports, PXE method signature changes, or artifact-format changes.

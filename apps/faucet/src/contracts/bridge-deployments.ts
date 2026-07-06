@@ -3,7 +3,7 @@ import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/cont
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
 import { EthAddress } from "@aztec/foundation/eth-address"
-import { TokenContractArtifact } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
 import { bridgeProxyArtifact, tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import config from "../../public/testnet-bridge.json"
 
@@ -62,14 +62,14 @@ export const FUEL_ASSET = feeJuiceCfg?.asset as `0x${string}` | undefined
 export const FUEL_ASSET_HANDLER = feeJuiceCfg?.feeAssetHandler as `0x${string}` | undefined
 export const FUEL_MIN_FJ = feeJuiceCfg?.minFj ? BigInt(feeJuiceCfg.minFj as string) : undefined
 
-export const BRIDGE_PROXY = AztecAddress.fromString(config.l2.proxy.address)
-export const BRIDGE_TOKEN = AztecAddress.fromString(config.l2.token.address)
+export const BRIDGE_PROXY = AztecAddress.fromStringUnsafe(config.l2.proxy.address)
+export const BRIDGE_TOKEN = AztecAddress.fromStringUnsafe(config.l2.token.address)
 
 /** The bridged pair's display identity - ONE source for every surface. The token-identity flip
  *  (AZLO/18) changes these two lines + the deployment config; nothing else. */
 export const BRIDGE_TOKEN_SYMBOL = "AZLO"
 export const BRIDGE_TOKEN_DECIMALS = 18
-export const BRIDGE = AztecAddress.fromString(config.l2.bridge.address)
+export const BRIDGE = AztecAddress.fromStringUnsafe(config.l2.bridge.address)
 
 const common = { publicKeys: PublicKeys.default(), deployer: AztecAddress.ZERO } as const
 

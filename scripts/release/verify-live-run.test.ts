@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { TESTNET_WALLET_CHAIN_ID } from "./chain-guard"
 import { runVerifyLive } from "./verify-live-run"
 
-const CHAIN = 4229590296
+const CHAIN = TESTNET_WALLET_CHAIN_ID
 const FAUCET = "https://faucet.test"
 const LANDING = "https://landing.test"
 const faucetHtml = (id: string) => `<!doctype html><meta name="nulo-build" content="${id}"><div id=app></div>`

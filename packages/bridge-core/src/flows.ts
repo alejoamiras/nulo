@@ -122,7 +122,7 @@ async function runDeposit(
 	// Generous: a fresh PXE re-syncing a long-lived sandbox (many blocks) can lag.
 	for (let i = 0; i < 200; i++) {
 		try {
-			await claim(AztecAddress.fromString(p.recipient), p.amount, secret, new Fr(leafIndex)).send(sendOpts as never)
+			await claim(AztecAddress.fromStringUnsafe(p.recipient), p.amount, secret, new Fr(leafIndex)).send(sendOpts as never)
 			recovery?.onClaimed?.()
 			onStage?.("done")
 			return leafIndex

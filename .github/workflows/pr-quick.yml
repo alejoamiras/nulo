@@ -184,6 +184,7 @@ jobs:
       - name: Lint PR commits
         env:
           BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
@@ -199,6 +200,16 @@ jobs:
             # immutable — re-linting them spuriously failed required Quality on
             # long historical subjects. So commitlint adds no value on main.
             echo "commitlint: skipped on PRs to main (promote/Release subjects are exempt by design)."
+          elif [ "${HEAD_REF#sync/main-to-dev}" != "$HEAD_REF" ]; then
+            # Skip on the main->dev sync PR (head branch `sync/main-to-dev*`). It
+            # is MERGE-committed (not squashed) so main's release commit stays in
+            # dev's ancestry — the prerelease version-anchor needs it. That makes
+            # base..head carry main's IMMUTABLE, already-merged release/promote
+            # history (the same >100-char "release: promote ..." subjects the
+            # main skip above exempts) → re-linting them spuriously reds required
+            # Quality. The one NEW commit the sync adds (the manifest re-baseline)
+            # is bot-generated and reliably conventional. Same rationale, dev side.
+            echo "commitlint: skipped on the main->dev sync PR ($HEAD_REF) — carries main's immutable history; the one new commit (manifest re-baseline) is bot-conventional."
           else
             bunx commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
           fi

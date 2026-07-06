@@ -60,7 +60,7 @@ export async function simulate(
 	viewFn: ViewFn,
 	args: unknown[],
 ): Promise<unknown> {
-	const contractAddress = AztecAddress.fromString(contract)
+	const contractAddress = AztecAddress.fromStringUnsafe(contract)
 	const fnSelector = await viewFn.getSelector()
 	const encodedArgs = viewFn.encodeArgs(args)
 

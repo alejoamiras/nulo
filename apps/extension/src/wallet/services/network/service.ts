@@ -80,7 +80,7 @@ const DEFAULT_SEEDS: DefaultSeed[] = [
 	{
 		name: "Testnet",
 		rpcUrl: "https://v5.testnet.rpc.aztec-labs.com",
-		chainId: 4229590296, // (11155111 ^ 4239416255) >>> 0 — V5 testnet rollup version
+		chainId: 2793892258, // (11155111 ^ 2787991301) >>> 0 — V5 testnet rollup version
 		kind: "testnet",
 		isPrimaryActive: true,
 	},

@@ -45,7 +45,15 @@ import { TransactionService } from "./services/transaction/service"
 import { IncomingTransferService } from "./services/incoming-transfer/service"
 import { WindowManager } from "./services/window-manager/window-manager"
 import { initWalletSdkHandler } from "./services/wallet-sdk/background"
-import { runStorageMigration } from "./storage/migrate"
+import { type MigrationResult, Migrator } from "@nulo/wallet-core/migration"
+import {
+	BASELINE_VERSION,
+	migrations,
+	SCHEMA_BLOCKED_KEY,
+	SCHEMA_DEGRADED_KEY,
+	type MigrationBlockedStatus,
+	type MigrationDegradedStatus,
+} from "./storage/migrations"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 
 /** Shell-supplied dependencies. All I/O goes through ports on this object. */
@@ -92,6 +100,54 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 			logger.log("wallet", LogLevel.Warn, "Failed to set uninstall URL", getErrorMessage(error))
 		}
 
+		// Data-preserving storage migration runs FIRST — before config.load() (a
+		// config-reshaping migration must not be shadowed by an already-loaded
+		// config) and before any service reads storage.
+		// The engine contractually never throws (a throw becomes a retryable
+		// needs-recovery result) — this catch is belt-and-braces so even an
+		// engine BUG still lands on the blocked-status recovery UX instead of a
+		// bare boot crash. It deliberately clears NOTHING: an armed backup may
+		// be load-bearing, and the engine's next-boot resume owns journal
+		// cleanup for every stranded shape.
+		const migration = await new Migrator({
+			store: browserApi.storage.local,
+			migrations,
+			baselineVersion: BASELINE_VERSION,
+		})
+			.run()
+			.catch(
+				(err): MigrationResult => ({
+					kind: "needs-recovery",
+					reason: `migration engine threw: ${getErrorMessage(err)}`,
+					retryable: true,
+				}),
+			)
+		logger.log("wallet", LogLevel.Info, `Storage migration: ${migration.kind}`)
+		if (migration.kind === "needs-recovery" || (migration.kind === "failed" && migration.breaking)) {
+			logger.log("wallet", LogLevel.Error, `Storage migration blocked boot (${migration.kind}): ${migration.reason}`)
+			// Persist the blocked status so the UI shells render the recovery
+			// screen (MigrationBarrier) instead of a dead popup, then fail
+			// closed: never start services on un-migrated / incompatible data.
+			const blocked: MigrationBlockedStatus = {
+				kind: migration.kind,
+				detail: migration.reason,
+				terminal: migration.kind === "failed" ? migration.terminal : !migration.retryable,
+			}
+			await browserApi.storage.local.set({ [SCHEMA_BLOCKED_KEY]: blocked })
+			throw new Error(`storage migration blocked: ${migration.kind}`)
+		}
+		if (migration.kind === "failed") {
+			logger.log("wallet", LogLevel.Warn, `Storage migration failed on an additive migration; booting degraded: ${migration.reason}`)
+			const degraded: MigrationDegradedStatus = { version: migration.version, error: migration.reason }
+			// A stale blocked status from an EARLIER boot must not outrank the
+			// degraded banner over a wallet that just booted.
+			await browserApi.storage.local.set({ [SCHEMA_DEGRADED_KEY]: degraded })
+			await browserApi.storage.local.remove(SCHEMA_BLOCKED_KEY)
+		} else {
+			// Healthy boot clears any stale status from a prior failed run.
+			await browserApi.storage.local.remove([SCHEMA_BLOCKED_KEY, SCHEMA_DEGRADED_KEY])
+		}
+
 		// Config + Barretenberg can load in parallel — neither depends on the other.
 		await Promise.all([
 			config.load().then(() => logger.log("wallet", LogLevel.Info, "Config loaded")),
@@ -99,10 +155,6 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 				logger.log("wallet", LogLevel.Info, "Barretenberg initialized"),
 			),
 		])
-
-		// Destructive storage migration (version-gated) must run before any
-		// service reads storage. Older shapes get wiped; profiles/passkeys preserved.
-		await runStorageMigration((msg) => logger.log("wallet", LogLevel.Info, msg))
 
 		// Service graph. Services migrated to ports accept `browserApi`;
 		// remaining services still reach into `chrome.*` directly until

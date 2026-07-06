@@ -346,6 +346,9 @@ jobs:
     name: refresh landing (Cloudflare Pages deploy hook)
     needs: [resolve, attach-assets]
     if: |
+      always() && !cancelled() &&
+      needs.resolve.result == 'success' &&
+      needs.attach-assets.result == 'success' &&
       needs.resolve.outputs.is_prerelease == 'false' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       github.event.inputs.dry_run != 'true'
@@ -375,6 +378,9 @@ jobs:
     name: deploy faucet (Cloudflare Pages deploy hook)
     needs: [resolve, attach-assets]
     if: |
+      always() && !cancelled() &&
+      needs.resolve.result == 'success' &&
+      needs.attach-assets.result == 'success' &&
       needs.resolve.outputs.is_prerelease == 'false' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       github.event.inputs.dry_run != 'true'
@@ -453,8 +459,14 @@ jobs:
     steps:
       # App token so the sync PR is bot-opened → dev's required CI fires
       # (a GITHUB_TOKEN-opened PR suppresses the pull_request workflow), and the
-      # branch push is authenticated. The branch's commit can be unsigned — dev's
-      # signed-commits rule is satisfied by the GitHub-signed UI squash-merge.
+      # branch + the manifest-rebaseline commit are App-authenticated. The sync PR is
+      # MERGE-committed (not squashed) so main's release commit stays in dev's ancestry
+      # — the prerelease version-anchor needs it (a squash drops it and re-breaks the rc
+      # cut; see implementations-plan/release-prerelease-fix/). A merge (unlike a squash)
+      # brings the branch's own manifest-rebaseline commit onto dev; open-sync-pr-run.ts
+      # writes that commit via the Contents API under THIS App token, which GitHub SIGNS
+      # (verified), so classic required_signatures is satisfied and the merge needs NO
+      # `--admin`. (The `--admin` fallback only matters if that signing ever regresses.)
       - name: Mint App token
         id: app
         uses: actions/create-github-app-token@v3

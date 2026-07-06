@@ -406,7 +406,7 @@ for them — see `renovate.json` `packageRules`.
 - `prConcurrentLimit: 3`, `prHourlyLimit: 2`, weekly Monday schedule
   (Buenos Aires TZ), no auto-merge anywhere.
 - `@aztec/*`, `@alejoamiras/aztec-accelerator`,
-  `@defi-wonderland/aztec-standards`, `@wonderland/aztec-fee-payment` —
+  `@alejoamiras/aztec-standards`, `@alejoamiras/aztec-fee-payment` —
   all disabled (rule at the bottom of `packageRules`; later rules win
   per Renovate semantics).
 - `@types/node` capped via `allowedVersions: "<25"` — patch/minor on

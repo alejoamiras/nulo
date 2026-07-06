@@ -108,7 +108,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 		const network = await this.networkService.getNetwork(networkId)
 		const info = networkInfoFrom(network)
 		try {
-			const sender = (await this.pxeService.registerSender(info, AztecAddress.fromString(address))).toString()
+			const sender = (await this.pxeService.registerSender(info, AztecAddress.fromStringUnsafe(address))).toString()
 			this.emit("onSenderAdded", sender)
 			return sender
 		} catch (error) {
@@ -121,7 +121,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 		await this.ensureInitialized()
 		const network = await this.networkService.getNetwork(networkId)
 		try {
-			await this.pxeService.removeSender(networkInfoFrom(network), AztecAddress.fromString(address))
+			await this.pxeService.removeSender(networkInfoFrom(network), AztecAddress.fromStringUnsafe(address))
 			this.emit("onSenderDeleted", address)
 			return address
 		} catch (error) {
@@ -163,7 +163,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 				const contractsFull: BackupContract[] = []
 				const nInfo = networkInfoFrom(n)
 				for (const c of contracts) {
-					const instance = await this.pxeService.getContractInstance(nInfo, AztecAddress.fromString(c))
+					const instance = await this.pxeService.getContractInstance(nInfo, AztecAddress.fromStringUnsafe(c))
 					if (!instance) continue
 
 					if (!instance.currentContractClassId) continue
@@ -202,7 +202,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 				try {
 					if (!network) throw new Error("Network not found")
 
-					await this.pxeService.registerSender(networkInfoFrom(network), AztecAddress.fromString(sender.address))
+					await this.pxeService.registerSender(networkInfoFrom(network), AztecAddress.fromStringUnsafe(sender.address))
 					senders.push(sender)
 				} catch (err) {
 					senders.push({
@@ -216,7 +216,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 				try {
 					if (!network) throw new Error("Network not found")
 
-					const addressNum = AztecAddress.fromString(contract.address).toBigInt()
+					const addressNum = AztecAddress.fromStringUnsafe(contract.address).toBigInt()
 					if (addressNum >= 0 && addressNum <= 6) {
 						// ignore protocol contracts registration,
 						// because we cannot validate it due to hardcoded addresses

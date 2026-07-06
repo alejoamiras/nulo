@@ -35,7 +35,7 @@ modules evaluate.
 If a future `@aztec/wallet-sdk` ships its own `registerToken` (etc.) with a
 different signature, `applyNuloSchemaPatch` throws rather than silently no-op.
 The guard checks arg types + output type, not just arity. Pinned upstream:
-`@aztec/wallet-sdk == 5.0.0-rc.1`.
+`@aztec/wallet-sdk == 5.0.0-rc.2`.
 
 ## Testing
 

@@ -54,8 +54,8 @@ import { TESTIDS } from "@/lib/testids"
 import TokenCard from "./TokenCard.vue"
 
 const NULO = { symbol: "NULO", decimals: 6, displayAmount: "1,000", onchainAmount: 1_000_000_000n } as const
-const NULO_ADDR = AztecAddress.fromString("0x0000000000000000000000000000000000000000000000000000000000000002")
-const ACCOUNT = AztecAddress.fromString("0x000000000000000000000000000000000000000000000000000000000000000a")
+const NULO_ADDR = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000002")
+const ACCOUNT = AztecAddress.fromStringUnsafe("0x000000000000000000000000000000000000000000000000000000000000000a")
 // biome-ignore lint/suspicious/noExplicitAny: minimal wallet stub for component mount
 const WALLET = {} as any
 

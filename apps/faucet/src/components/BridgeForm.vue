@@ -74,7 +74,7 @@ watch(
 		l2Handle.value?.dispose()
 		l2Handle.value =
 			status === "connected" && account && bridge.wallet.value
-				? useTokenBalance(bridge.wallet.value, BRIDGE_TOKEN, AztecAddress.fromString(account))
+				? useTokenBalance(bridge.wallet.value, BRIDGE_TOKEN, AztecAddress.fromStringUnsafe(account))
 				: null
 	},
 	{ immediate: true },

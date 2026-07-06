@@ -260,6 +260,7 @@ onBeforeUnmount(() => {
 			<ToastManager />
 			<NotificationManager />
 			<GlobalLoader />
+			<MigrationBarrier />
 		</div>
 
 		<Header />

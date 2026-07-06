@@ -22,7 +22,7 @@ import { L1FeeJuicePortalManager } from "@aztec/aztec.js/ethereum"
 import { ProtocolContractAddress } from "@aztec/aztec.js/protocol"
 import { createExtendedL1Client } from "@aztec/ethereum/client"
 import { SponsoredFPCContractArtifact } from "@aztec/noir-contracts.js/SponsoredFPC"
-import { TokenContract } from "@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js"
+import { TokenContract } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
 
 /**
  * Aztec L2 node URL. Defaults to http://localhost:8080 (the standard sandbox port).
@@ -155,17 +155,17 @@ export async function mintPublicTokens(
 	minterAddress: string,
 	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
 ): Promise<void> {
-	const token = await TokenContract.at(AztecAddress.fromString(tokenAddress), wallet)
+	const token = await TokenContract.at(AztecAddress.fromStringUnsafe(tokenAddress), wallet)
 	await token.methods
-		.mint_to_public(AztecAddress.fromString(toAddress), amount)
-		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: AztecAddress.fromString(minterAddress) })
+		.mint_to_public(AztecAddress.fromStringUnsafe(toAddress), amount)
+		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: AztecAddress.fromStringUnsafe(minterAddress) })
 
 	// Verify the mint is visible by reading the balance from the test wallet's PXE.
 	// This ensures the state has settled before the extension tries to read it.
-	const to = AztecAddress.fromString(toAddress)
+	const to = AztecAddress.fromStringUnsafe(toAddress)
 	const balance = await token.methods
 		.balance_of_public(to)
-		.simulate({ from: AztecAddress.fromString(minterAddress), fee: { gasSettings: E2E_FEE_GAS } })
+		.simulate({ from: AztecAddress.fromStringUnsafe(minterAddress), fee: { gasSettings: E2E_FEE_GAS } })
 	console.log(`[mintPublicTokens] Verified on-chain public balance: ${balance}`)
 	if (balance === 0n) {
 		throw new Error(`Mint appeared to succeed but balance_of_public returned 0 for ${toAddress}`)
@@ -192,7 +192,7 @@ export async function mintPrivateTokens(
 	minterAddress: string,
 	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
 ): Promise<void> {
-	const addr = AztecAddress.fromString(tokenAddress)
+	const addr = AztecAddress.fromStringUnsafe(tokenAddress)
 	const instance = await node.getContract(addr)
 	if (!instance) throw new Error(`Token instance not found at node for ${tokenAddress}`)
 	try {
@@ -208,9 +208,11 @@ export async function mintPrivateTokens(
 	// `balance_of_public.simulate` that implicitly forces a chain query —
 	// no such barrier for the private path). Worth fixing here rather than
 	// at the call site so future callers don't repeat the trap.
-	await token.methods
-		.mint_to_private(AztecAddress.fromString(toAddress), amount)
-		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: AztecAddress.fromString(minterAddress), wait: { timeout: 120 } })
+	await token.methods.mint_to_private(AztecAddress.fromStringUnsafe(toAddress), amount).send({
+		fee: { ...feeOptions, gasSettings: E2E_FEE_GAS },
+		from: AztecAddress.fromStringUnsafe(minterAddress),
+		wait: { timeout: 120 },
+	})
 }
 
 // ── Fee Juice L1→L2 Bridge ────────────────────────────────────────────
@@ -236,7 +238,7 @@ export async function bridgeFeeJuice(node: ReturnType<typeof createAztecNodeClie
 		trace: () => {},
 	}
 	const portalManager = await L1FeeJuicePortalManager.new(node, l1Client, logger)
-	const claim = await portalManager.bridgeTokensPublic(AztecAddress.fromString(toAddress), amount, true)
+	const claim = await portalManager.bridgeTokensPublic(AztecAddress.fromStringUnsafe(toAddress), amount, true)
 	console.log(`[bridgeFeeJuice] Bridged ${amount} FJ to ${toAddress}, messageHash: ${claim.messageHash}`)
 	return claim
 }
@@ -302,7 +304,7 @@ export async function claimFeeJuice(
 	const { FeeJuiceArtifact } = await import("@aztec/protocol-contracts/fee-juice")
 	const feeJuice = await Contract.at(ProtocolContractAddress.FeeJuice, FeeJuiceArtifact, wallet)
 	await feeJuice.methods
-		.claim(AztecAddress.fromString(toAddress), claim.claimAmount, claim.claimSecret, claim.messageLeafIndex)
+		.claim(AztecAddress.fromStringUnsafe(toAddress), claim.claimAmount, claim.claimSecret, claim.messageLeafIndex)
 		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: fromAddress })
 	console.log(`[claimFeeJuice] Claimed ${claim.claimAmount} FJ for ${toAddress}`)
 }
@@ -417,10 +419,10 @@ export async function setupPreFundedAccount(
 	logger.info(`Public FJ claimed: amount=${publicAmount}`)
 
 	// Step 5 — Private FJ via PrivateFPC.
-	// Top-level import of @wonderland/aztec-fee-payment fails on
+	// Top-level import of @alejoamiras/aztec-fee-payment fails on
 	// `Export named 'DEFAULT_TEARDOWN_DA_GAS_LIMIT'` (Aztec version drift between
 	// @wonderland's pinned deps and Nulo's). Sub-path imports work.
-	const { PrivateFPCContract } = await import("@wonderland/aztec-fee-payment/artifacts/private")
+	const { PrivateFPCContract } = await import("@alejoamiras/aztec-fee-payment/artifacts/private")
 	const { bridgeForMint } = await import("./aztec-private-fpc-bridge")
 
 	// PrivateFPC instance salt MUST be Fr.zero() to match Nulo's auto-discovery

@@ -88,7 +88,7 @@
  *
  * Every PXE method (`simulateTx`, `executeUtility`, `getSyncedBlockHeader`,
  * `proveTx`, `profileTx`) goes through a single upstream `SerialQueue`
- * (`@aztec/pxe@5.0.0-rc.1/src/pxe.ts:328-336`). The upstream comment
+ * (`@aztec/pxe@5.0.0-rc.2/src/pxe.ts:328-336`). The upstream comment
  * (`pxe.ts:1058-1060`): *"we disable concurrent executions since those
  * might execute oracles which read and write to the PXE stores (e.g. to
  * the capsules), and we need to prevent concurrent runs from interfering
@@ -352,7 +352,7 @@ export async function batchedViewSimulation(
 	// Unpack fast arm (if any).
 	if (fastResults && leadingFast.length > 0) {
 		// `simulateViaNode` returns one TxSimulationResult per upstream-internal
-		// batch of MAX_ENQUEUED_CALLS_PER_CALL (=32 in @aztec/constants@5.0.0-rc.1).
+		// batch of MAX_ENQUEUED_CALLS_PER_CALL (=32 in @aztec/constants@5.0.0-rc.2).
 		// With our typical batch sizes (≤12 from balance-projector, 1 from
 		// gas-balance) we get fastResults.length === 1, but flatMap is defensive
 		// against future BATCH_SIZE bumps.
@@ -501,7 +501,7 @@ async function classifyCall(
 		if (fn.functionType === FunctionType.UTILITY) {
 			const functionCall = new FunctionCall(
 				fn.name,
-				AztecAddress.fromString(call.contract),
+				AztecAddress.fromStringUnsafe(call.contract),
 				fnSelector,
 				fn.functionType,
 				false, // hideMsgSender hardcoded false for utility calls (parity)
@@ -516,7 +516,7 @@ async function classifyCall(
 			kind: "tx",
 			functionCall: new FunctionCall(
 				fn.name,
-				AztecAddress.fromString(call.contract),
+				AztecAddress.fromStringUnsafe(call.contract),
 				fnSelector,
 				fn.functionType,
 				call.hideSender === true, // 'call' kind uses hideSender (parity)
@@ -539,7 +539,7 @@ async function classifyCall(
 	if (fn.functionType === FunctionType.UTILITY) {
 		const functionCall = new FunctionCall(
 			fn.name,
-			AztecAddress.fromString(call.to),
+			AztecAddress.fromStringUnsafe(call.to),
 			FunctionSelector.fromString(call.selector),
 			fn.functionType,
 			false, // hideMsgSender hardcoded false for utility calls (parity)
@@ -554,7 +554,7 @@ async function classifyCall(
 		kind: "tx",
 		functionCall: new FunctionCall(
 			fn.name,
-			AztecAddress.fromString(call.to),
+			AztecAddress.fromStringUnsafe(call.to),
 			FunctionSelector.fromString(call.selector),
 			fn.functionType,
 			call.hideMsgSender === true, // 'encoded_call' kind uses hideMsgSender (parity)

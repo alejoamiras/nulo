@@ -9,6 +9,7 @@ import type { Tx } from "@/wallet/services/transaction/spec"
 import type { BlockExplorerType } from "@/wallet/constants/explorers"
 import { requireAccount, requireNetwork } from "@/utils/core"
 import { getPrimaryCall } from "@/utils/tx-enrichment"
+import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
 import { useSyncedRef } from "@/composables/syncedRef.js"
 
@@ -32,12 +33,12 @@ export const useAppStore = defineStore("app", () => {
 	const onboardingCompleted = ref<boolean>(false)
 	const ONBOARDING_COMPLETED_KEY = "nulo:onboarding:completed"
 	const loadOnboardingCompleted = async () => {
-		const result = await chrome.storage.local.get(ONBOARDING_COMPLETED_KEY)
+		const result = await storageLocalGet(ONBOARDING_COMPLETED_KEY)
 		onboardingCompleted.value = result[ONBOARDING_COMPLETED_KEY] === true
 	}
 	const setOnboardingCompleted = async (value: boolean) => {
 		onboardingCompleted.value = value
-		await chrome.storage.local.set({ [ONBOARDING_COMPLETED_KEY]: value })
+		await storageLocalSet({ [ONBOARDING_COMPLETED_KEY]: value })
 	}
 
 	const profile = ref<ProfileInfo>()
@@ -52,7 +53,7 @@ export const useAppStore = defineStore("app", () => {
 	const pageAwaitingAuth = ref<string>("")
 
 	const setupActiveAccount = async () => {
-		const activeAccountResult = await chrome.storage.local.get("nulo:ui:activeAccount")
+		const activeAccountResult = await storageLocalGet("nulo:ui:activeAccount")
 		if ("nulo:ui:activeAccount" in activeAccountResult) {
 			const activeAccountAddress = activeAccountResult["nulo:ui:activeAccount"]
 			const activeAccount = accounts.value.find((a) => a.address === activeAccountAddress)
@@ -63,13 +64,13 @@ export const useAppStore = defineStore("app", () => {
 		}
 
 		account.value = accounts.value[0]
-		await chrome.storage.local.set({
+		await storageLocalSet({
 			"nulo:ui:activeAccount": account.value?.address,
 		})
 	}
 	const selectAccount = async (acc: Account) => {
 		account.value = acc
-		await chrome.storage.local.set({
+		await storageLocalSet({
 			"nulo:ui:activeAccount": acc.address,
 		})
 	}
@@ -83,7 +84,7 @@ export const useAppStore = defineStore("app", () => {
 		if (!value) {
 			if (accounts.value.length) {
 				account.value = accounts.value.filter((a) => a.visible).sort((a, b) => a.index - b.index)[0]
-				await chrome.storage.local.set({
+				await storageLocalSet({
 					"nulo:ui:activeAccount": account.value?.address,
 				})
 			}

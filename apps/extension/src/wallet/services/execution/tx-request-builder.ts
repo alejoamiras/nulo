@@ -144,7 +144,7 @@ export class TxRequestBuilder {
 						this.log("Adding capsule...")
 						capsules.push(
 							new Capsule(
-								AztecAddress.fromString(action.contract),
+								AztecAddress.fromStringUnsafe(action.contract),
 								Fr.fromString(action.storageSlot),
 								action.capsule.map(Fr.fromString),
 							),
@@ -278,7 +278,7 @@ export class TxRequestBuilder {
 						calls.push(
 							new FunctionCall(
 								fn.name,
-								AztecAddress.fromString(action.contract),
+								AztecAddress.fromStringUnsafe(action.contract),
 								fnSelector,
 								fn.functionType,
 								action.hideSender === true,
@@ -313,7 +313,7 @@ export class TxRequestBuilder {
 						calls.push(
 							new FunctionCall(
 								fnName,
-								AztecAddress.fromString(action.to),
+								AztecAddress.fromStringUnsafe(action.to),
 								FunctionSelector.fromString(action.selector),
 								action.type as FunctionType,
 								action.hideMsgSender === true,

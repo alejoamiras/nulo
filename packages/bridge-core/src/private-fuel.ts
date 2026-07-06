@@ -11,7 +11,7 @@
  * (`private-fuel.test.ts`) pins both against fixed vectors so an `@aztec` crypto change
  * can never silently strand funds.
  */
-import { FPCFeePaymentMethod, PrivateMintAndPayFeePaymentMethod } from "@wonderland/aztec-fee-payment/fee-payment-methods"
+import { FPCFeePaymentMethod, PrivateMintAndPayFeePaymentMethod } from "@alejoamiras/aztec-fee-payment/fee-payment-methods"
 import { poseidon2HashWithSeparator } from "@aztec/foundation/crypto/sync"
 import type { Fr } from "@aztec/aztec.js/fields"
 import type { AztecAddress } from "@aztec/aztec.js/addresses"
@@ -28,7 +28,7 @@ export const DOM_SEP__FPC_BRIDGE_SECRET = 3952304070
 
 /**
  * The PrivateFPC L2 address — deterministic from the INSTALLED Wonderland artifact
- * (`@wonderland/aztec-fee-payment` 4.2.0-prerelease.215fd08) at `salt=0, deployer=ZERO`, the exact
+ * (`@alejoamiras/aztec-fee-payment` 4.2.0-prerelease.215fd08) at `salt=0, deployer=ZERO`, the exact
  * instance the wallet auto-registers (`extension/src/wallet/services/fpc/service.ts:90-94`).
  *
  * Pinned, NOT runtime-derived: the 2.2 MB artifact never enters the browser bundle, and a Wonderland
@@ -38,9 +38,10 @@ export const DOM_SEP__FPC_BRIDGE_SECRET = 3952304070
  *
  * INVARIANT: never deposit private Fee Juice to any address other than this for the pinned version.
  * The address is `@aztec`-version + bytecode specific. Re-derived from the
- * `@wonderland/aztec-fee-payment` prerelease-fb6f196 (5.0.0-rc.1) artifact via the test tripwire.
+ * `@alejoamiras/aztec-fee-payment` 5.0.0-rc.2 artifact via the test tripwire; the live re-canary
+ * (a private fueled claim settling against this instance) is the rc.2 redeploy's promotion gate.
  */
-export const PRIVATE_FPC_ADDRESS = "0x1fa8746eff0ce58d72d4d60ecc22ed6ebbd99247178e679dc9c8fee3f44c5c4c"
+export const PRIVATE_FPC_ADDRESS = "0x0d4b2c28d6ef19603e15b1a58294cbd5340a207eeec6d11f65627040260065f6"
 
 /**
  * The bridge secret a private-fuel L1 deposit binds to: `poseidon2([salt, claimer], DOM_SEP)`.

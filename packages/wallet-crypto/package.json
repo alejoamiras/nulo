@@ -11,7 +11,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@aztec/foundation": "5.0.0-rc.1",
+		"@aztec/foundation": "5.0.0-rc.2",
 		"@nulo/wallet-core": "workspace:*"
 	},
 	"devDependencies": {

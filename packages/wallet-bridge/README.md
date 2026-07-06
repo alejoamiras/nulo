@@ -288,7 +288,7 @@ patch does NOT restore them):
 
 If a future Aztec.js version ships its own `registerToken`, the patch's
 signature-drift guard throws at SW init (`expected 2 params, found N`). Pin the
-`@aztec/wallet-sdk` version exactly (`5.0.0-rc.1` today) so the patch's
+`@aztec/wallet-sdk` version exactly (`5.0.0-rc.2` today) so the patch's
 assumptions are stable across upgrades.
 
 ### Not in `batch`

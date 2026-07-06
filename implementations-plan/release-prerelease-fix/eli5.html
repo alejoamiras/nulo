@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — Fix the prerelease (rc) flow</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .draft { display: inline-block; background: #fde68a; color: #92400e; font-size: 0.7rem; font-weight: 700; padding: 0.1rem 0.4rem; border-radius: 3px; vertical-align: middle; }
+  </style>
+</head>
+<body>
+  <h1>Fixing the prerelease (rc) flow</h1>
+  <p>When we try to cut a "release candidate" (an <code>-rc</code> preview build) from the <code>dev</code> branch, the tool spits out the <strong>wrong version</strong> (<code>0.23.0</code> — the version we already shipped — instead of <code>0.24.0-rc.0</code>) and a changelog listing <strong>every commit since the repo was born</strong>. This plan fixes the real cause, proves the fix in a throwaway repo, then re-cuts and publishes the real <code>v0.24.0-rc.0</code>.</p>
+
+  <h2>The one-sentence cause</h2>
+  <p>Our release robot finds the version number by walking <code>dev</code>'s history looking for the commit that the last release (<code>v0.23.0</code>) is tagged on — but that commit <strong>only lives on <code>main</code></strong>, never made it into <code>dev</code>'s history, so the robot gets lost and falls back to "start from the beginning."</p>
+  <p>Why isn't it in <code>dev</code>'s history? After every release we sync <code>main</code> back into <code>dev</code> — but that sync is <strong>squashed</strong> (flattened into a brand-new commit). Squashing copies the <em>content</em> (the version number in the files) but throws away the <em>link</em> to <code>main</code>'s actual release commit. So <code>dev</code> looks like it has 0.23.0, but the robot can't find the anchor it needs.</p>
+
+  <h2>The fix (two parts, no hacks)</h2>
+  <ol>
+    <li><strong>One tiny config change:</strong> tell the prerelease config to number the series <code>rc.0, rc.1, …</code> (a one-word edit: <code>"rc"</code> → <code>"rc.0"</code>).</li>
+    <li><strong>Put <code>main</code>'s release commit back into <code>dev</code>'s history</strong> with a real <em>merge</em> (not a squash), so the robot can find its anchor — and make the after-every-release sync do this <em>merge</em> from now on instead of squashing. That permanently stops the bug from coming back.</li>
+  </ol>
+  <p class="muted">Proven already: in a scratch test, doing exactly this produced a clean <code>0.24.0-rc.0</code> with a 43-commit changelog (only the new work), not 186 commits of ancient history.</p>
+
+  <h2>Why this is a "light" blueprint</h2>
+  <p>Rubric: novelty <strong>low</strong> (release-please is well-understood), blast radius <strong>low</strong> (prereleases skip the live websites), irreversibility <strong>low</strong> (a bad rc is just deleted), migration cost <strong>none</strong>, external coupling <strong>low</strong>, security sensitivity <strong>low-moderate</strong> (it's release tooling, but guarded). 0–1 "high" → <code>light</code>. The fix itself is a one-line config edit plus a history correction. The <em>one</em> thing that pokes above "config-only" is a branch-policy decision (below), surfaced for you to choose.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: Rehearse the whole lifecycle in the throwaway</h3>
+    <p>Before touching the real repo, reproduce the bug and the fix in the private <code>nulo-release-rehearsal</code> repo, then do <strong>real</strong> cuts end-to-end: first rc (<code>rc.0</code>) → second rc (<code>rc.1</code>) → promote to a stable release. This is the only way to prove the parts a dry-run can't (the <code>rc.1</code> bump and the stable promotion need real tags). It also answers a practical question: can an admin force a "merge" on a squash-only branch, or do we need a different mechanism?</p>
+    <p class="muted">Proves itself by: all three versions come out correct in the throwaway (rc.0, then rc.1, then stable), each with a clean changelog.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: Apply the fix to the real repo</h3>
+    <p>(a) Merge the one-line config change into <code>dev</code>. (b) Do the one-time history fix so <code>main</code>'s release commit is in <code>dev</code>'s ancestry. (c) Change the recurring sync so it merges instead of squashing, and write it into the runbook.</p>
+    <p class="muted">Proves itself by: a check confirms the release commit is now an ancestor of <code>dev</code>, and a dry-run on real <code>dev</code> prints <code>0.24.0-rc.0</code> with a clean changelog.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: Re-cut and publish the real <code>v0.24.0-rc.0</code></h3>
+    <p>Re-run the prerelease workflow (it fixes the existing broken PR in place), review, merge, do the documented manual "unstick", and let the publish chain build the Chrome + Firefox zips and attach them — as a <strong>prerelease</strong> GitHub Release. Prereleases deliberately do <strong>not</strong> redeploy the live websites.</p>
+    <p class="muted">Proves itself by: the GitHub Release <code>v0.24.0-rc.0</code> exists, is marked prerelease, and carries the two zips + checksums.</p>
+  </div>
+
+  <h2>Human context you need to weigh the decision</h2>
+  <p>Our two branches have strict rules: <code>dev</code> only allows <strong>squash</strong> merges (to keep its history a clean single line), <code>main</code> only allows <strong>merge commits</strong>. The squash rule on <code>dev</code> is exactly what breaks the release anchor — and fixing it requires landing one <em>merge</em> commit on <code>dev</code>, which the rule currently forbids. So this is unavoidably a small policy call, not just a config tweak.</p>
+
+  <h2>The one open question — RESOLVED (2026-06-30)</h2>
+  <p class="muted"><strong>Phase 1 rehearsal changed the answer.</strong> A squash-only rule turned out to hard-block merge commits for <em>everyone</em> — even an admin or a "bypass" bot couldn't force one through a pull-request merge. So the original "bypass bot" idea (Option 1 below) was proven impossible. <strong>Chosen instead: allow both squash and merge on <code>dev</code>, and have the sync use a merge.</strong> Humans still squash by habit (it stays the default button); the periodic sync adds a merge commit either way, so nothing extra is lost. The original options are kept below for the record.</p>
+  <p>How should we allow that history-preserving sync onto <code>dev</code> without weakening the squash rule for normal feature work?</p>
+  <ul>
+    <li><strong>Option 1 — Bypass for the release bot only (recommended).</strong> Let only the release robot land a merge-commit on <code>dev</code>; humans still must squash. Clean, automatic, keeps the linear-history guarantee for everyone else.</li>
+    <li><strong>Option 2 — Allow merge commits on <code>dev</code> for everyone.</strong> Simplest to set up, but now nothing <em>enforces</em> squash on feature PRs (it's back to habit/convention).</li>
+    <li><strong>Option 3 — Admin-force a merge each release.</strong> Keep the rule, and an admin overrides it once per release. Manual, and we're not 100% sure the override can pick "merge" on a squash-only branch — Phase 1 settles that.</li>
+  </ul>
+
+  <p class="muted">Already audited: codex (xhigh, adversarial) gave a <strong>conditional approve</strong> — all 5 findings folded in (signed sync commits, flip the runbook/code from squash→merge, manual-sync note, rehearsal changelog check, Phase-3 preflight). It also caught that my local checkout was 3 commits stale — corrected. Details in <a href="plan.md">plan.md</a> → Audit verdicts.</p>
+
+  <div class="approval">
+    <strong>What I need you to approve:</strong>
+    <ul>
+      <li>The <strong>scope</strong>: fix the prerelease flow + publish the real <code>v0.24.0-rc.0</code>, validated by a full throwaway lifecycle first.</li>
+      <li>The <strong>tier</strong>: <code>light</code>.</li>
+      <li>The <strong>open question</strong> above: Option 1, 2, or 3 (I recommend Option 1).</li>
+      <li>That re-firing the prerelease workflow to <strong>fix PR #189 in place</strong> (rather than closing it) is fine.</li>
+    </ul>
+  </div>
+
+  <div class="seeds">
+    <h2>Implementation seeds</h2>
+    <p class="warning">Use exactly one per session — they don't compose. Approved 2026-06-30; mechanism = release-bot ruleset bypass.</p>
+
+    <h3>Recommended for this plan: <code>/loop</code></h3>
+    <p class="muted">Completion is gated on live CI (throwaway cuts, then the real cut → merge → unstick → publish) — an event-paced loop fits better than a one-shot goal.</p>
+    <pre>/loop Drive implementations-plan/release-prerelease-fix/plan.md forward. Each firing: read plan.md + lessons/; git status; gh pr/run status (no --watch). Take the next pending phase; validate with the phase's gate; log lessons. Phase 1 = real cuts in nulo-release-rehearsal (rc.0 -> rc.1 -> stable, + verify --admin --merge under squash-only). Establish ancestry via a SIGNED `-s ours` merge-commit; dev's ruleset now allows merge (2a) so merge the sync PR with --merge, never squash. Flip the sync runbook/code/tests squash->merge. NEVER merge PR #189 until Phase 3 re-cuts it to 0.24.0-rc.0. All phases done -> /code-review max --fix -> wrap-up.</pre>
+
+    <h3>Alternative: <code>/goal</code></h3>
+    <pre>/goal The release-please prerelease flow cuts a correct 0.24.0-rc.0 from dev (proven by a full rc.0->rc.1->stable lifecycle in nulo-release-rehearsal), and the real v0.24.0-rc.0 is published as a prerelease GitHub Release with chrome+firefox zips + SHASUMS.</pre>
+  </div>
+
+  <p class="muted" style="margin-top:3rem">Full plan: <a href="plan.md">plan.md</a> · Lessons: <a href="./lessons/">./lessons/</a></p>
+</body>
+</html>

@@ -472,7 +472,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	// Nulo base:
 
 	private async executeRegisterContract(op: RegisterContractOperation): Promise<void> {
-		const addressNum = AztecAddress.fromString(op.address).toBigInt()
+		const addressNum = AztecAddress.fromStringUnsafe(op.address).toBigInt()
 		if (addressNum >= 0 && addressNum <= 6) {
 			// ignore protocol contracts registration,
 			// because we cannot validate it due to hardcoded addresses
@@ -483,7 +483,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 		const providedInstance = await ContractInstanceWithAddressSchema.optional().parseAsync(op.instance)
 		const instance =
-			providedInstance ?? (await this.pxeService.getContractInstance(networkInfoFrom(network), AztecAddress.fromString(op.address)))
+			providedInstance ??
+			(await this.pxeService.getContractInstance(networkInfoFrom(network), AztecAddress.fromStringUnsafe(op.address)))
 		if (!instance) {
 			throw new Error("Contract instance not found")
 		}
@@ -510,7 +511,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 	private async executeRegisterSender(op: RegisterSenderOperation): Promise<void> {
 		const network = await this.networkService.getNetwork(op.networkId)
-		await this.pxeService.registerSender(networkInfoFrom(network), AztecAddress.fromString(op.address))
+		await this.pxeService.registerSender(networkInfoFrom(network), AztecAddress.fromStringUnsafe(op.address))
 	}
 
 	private async executeRegisterToken(

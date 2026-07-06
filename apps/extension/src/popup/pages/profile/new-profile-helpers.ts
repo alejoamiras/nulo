@@ -2,6 +2,7 @@ import type { Router } from "vue-router"
 import type { useAppStore } from "@/stores/app.store"
 import { initTransactionService, managers, setSentinel } from "@/utils/core"
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
+import { storageLocalSet } from "@/utils/storage"
 import { AccountServiceClient } from "@/wallet/services/account/client"
 import { sleep } from "@/wallet/utils"
 
@@ -33,7 +34,7 @@ export async function activateCreatedProfile(profile: { id: string }, deps: { ap
 
 	initTransactionService(appStore.onTxAdded, appStore.onTxUpdated)
 
-	await chrome.storage.local.set({
+	await storageLocalSet({
 		"nulo:ui:activeAccount": appStore.account?.address,
 	})
 

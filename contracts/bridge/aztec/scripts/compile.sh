@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Compile + AVM-transpile the deployable bridge-aztec contracts.
 #
-# These contracts pin aztec-nr at the v5.0.0-rc.1 git tag, which needs the matching
-# 5.0.0-rc.1 toolchain. The `aztec` CLI + `bb` (the AVM transpiler) live under
+# These contracts pin aztec-nr at the v5.0.0-rc.2 git tag, which needs the matching
+# 5.0.0-rc.2 toolchain. The `aztec` CLI + `bb` (the AVM transpiler) live under
 # node_modules/.bin; nargo is exposed as `aztec-nargo` in bin/ (5.0 renamed the bundled
 # bare binaries to aztec-* on PATH). Plain `nargo compile` produces a NON-transpiled
 # artifact that aztec.js loadContractArtifact rejects ("public bytecode has not been
@@ -10,9 +10,9 @@
 # target/*.json (the deployable artifact).
 set -euo pipefail
 
-AZTEC_HOME="${AZTEC_HOME:-$HOME/.aztec/versions/5.0.0-rc.1}"
+AZTEC_HOME="${AZTEC_HOME:-$HOME/.aztec/versions/5.0.0-rc.2}"
 AZTEC="$AZTEC_HOME/node_modules/.bin/aztec"
-[ -x "$AZTEC" ] || { echo "5.0.0-rc.1 aztec CLI not found at $AZTEC — run: aztec-up install 5.0.0-rc.1" >&2; exit 1; }
+[ -x "$AZTEC" ] || { echo "5.0.0-rc.2 aztec CLI not found at $AZTEC — run: aztec-up install 5.0.0-rc.2" >&2; exit 1; }
 
 export PATH="$AZTEC_HOME/bin:$AZTEC_HOME/node_modules/.bin:$PATH"
 export NARGO="$AZTEC_HOME/bin/aztec-nargo"
@@ -20,7 +20,7 @@ export BB="$AZTEC_HOME/node_modules/.bin/bb"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo_root="$(cd "$here/../.." && pwd)"
-for c in token_minter_proxy token_bridge; do
+for c in token_minter_proxy token_bridge keystone; do
 	echo "=== aztec compile $c ==="
 	(cd "$here/$c" && "$AZTEC" compile)
 	# `aztec compile` embeds absolute source paths (this machine's repo root + the ~/.aztec and

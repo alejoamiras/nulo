@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { TESTNET_WALLET_CHAIN_ID } from "./chain-guard"
 import { extractBuildId, verifyLive, type VerifyLiveInput } from "./verify-live"
 
-const CHAIN = 4229590296
+const CHAIN = TESTNET_WALLET_CHAIN_ID
 const SHA = "abc12345def67890abc12345def67890abc12345" // 40-char release sha; first 8 = abc12345
 const BUILD = "0.23.0+abc12345" // the real faucet buildId shape: `${version}+${sha[:8]}`
 const html = (buildId: string) => `<!doctype html><meta name="nulo-build" content="${buildId}"><div id="app"></div>`

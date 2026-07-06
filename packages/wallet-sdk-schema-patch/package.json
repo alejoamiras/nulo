@@ -12,8 +12,8 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
-		"@aztec/aztec.js": "5.0.0-rc.1",
-		"@aztec/stdlib": "5.0.0-rc.1",
+		"@aztec/aztec.js": "5.0.0-rc.2",
+		"@aztec/stdlib": "5.0.0-rc.2",
 		"zod": "^4.4.3"
 	},
 	"devDependencies": {

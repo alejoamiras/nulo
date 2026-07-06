@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — aztec-5.0-rc2</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .flag { background: #fff4f4; border-left-color: #d64545; }
+  </style>
+</head>
+<body>
+  <h1>Aztec 5.0.0-rc.1 → rc.2 library bump</h1>
+  <p>The wallet is built on Aztec's SDK, currently pinned at release-candidate <strong>rc.1</strong>. This bumps it to <strong>rc.2</strong>. You thought it'd be a clean bump — I double-checked the diff, and it's <em>not</em> trivially clean: rc.1→rc.2 is <strong>187 commits</strong> and includes a few labelled "breaking" changes. The good news: those breaks are all in Aztec's internal node/protocol plumbing (things like how the network syncs blocks), and none of them appear in the code <em>we</em> actually call. So the plan is a careful bump — swap the version everywhere, prove it still compiles, tests pass, and — the real test — that real transactions still <em>prove</em> against a live rc.2 network.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>mid.</strong> One genuinely HIGH-risk dimension: external coupling (the wallet's SDK must match the network it talks to). It's <em>satisfiable</em> — the proving helper auto-downloads the right version, and an rc.2 build exists as backup. We deliberately kept the riskiest bit — redeploying on-chain contracts — <em>out</em> of this arc (it becomes a follow-up only if the bump shifts contract identities). That scope cut is what keeps this <code>mid</code> and not <code>deep</code>. If the trial reveals deep compiler churn or a forced redeploy, we escalate that part.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: Bump + install + typecheck</h3>
+    <p>Change the version number everywhere (20 packages across 7 files), re-label the 2 small packaging patches, temporarily let the fresh rc.2 packages past the "wait 7 days" safety gate, re-resolve the lockfile, and check the TypeScript still compiles. This is the fast fail — if the SDK renamed something we use, we find out in minutes.</p>
+    <p class="muted">Proves itself by: a clean install (patches apply, lockfile resolves) + <code>typecheck:all</code> exit 0.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: Tests + recompile + shift inventory</h3>
+    <p>Run all unit tests, bump the Noir toolchain + git-tags, recompile the 3 bridge contracts, and <strong>measure exactly which contract identities shift</strong> (you expect: all of them). The old→new list becomes Phase 3's redeploy checklist. The PrivateFPC "conscious re-pin" test gets updated to the new values — deliberately, never silenced.</p>
+    <p class="muted">Proves itself by: <code>test:all</code> + <code>lint</code> + all 5 builds green, and a complete old→new identity inventory written down.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: Redeploy the testnet contracts + re-pin + prove them live</h3>
+    <p>Your call at the gate: the shift is expected, so we redeploy — with the same scripts that did it for rc.1. Check the testnet actually runs rc.2 first, redeploy the L1 portals (with the new rollup's addresses) and the L2 contracts (dripper, tokens, bridge, PrivateFPC), write the new addresses into the pinned manifests, then prove it all works <em>live</em>: a public bridge settles, a private fueled claim settles, a drip works.</p>
+    <p class="muted">Proves itself by: every live check green against the real rc.2 testnet — the deployed world and the code's pins agree again.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: The protocol proof — native-proving network e2e</h3>
+    <p>Run the end-to-end suite against a real rc.2 Aztec network with native (fast) proving. This is the one that actually proves rc.2 transactions work and the wallet↔network protocol still matches. We try the existing proving helper first (it fetches the right version on demand); only if that can't handle rc.2 do we swap in the rc.2-specific helper.</p>
+    <p class="muted">Proves itself by: the PR's <code>network-e2e-status</code> green with native proving required (a silent fallback to slow WASM proving is a hard fail).</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>"rc" = release candidate — a near-final version. Aztec ships these fast, so the wallet tracks them. Because rc.2 was published only days ago, our supply-chain rule (don't install anything younger than 7 days, to dodge just-published malware) would block it — so we make a <em>temporary, tracked</em> exception for exactly the Aztec packages, and a follow-up PR removes the exception once rc.2 is old enough. "Native proving" is a Rust helper that generates the cryptographic proofs ~10× faster than the browser fallback; the network test insists on it so we never accidentally "pass" on the slow path.</p>
+
+  <div class="phase flag">
+    <h3>What the audits changed (the central story)</h3>
+    <p>The two reviewers split the problem cleanly. <strong>Opus confirmed</strong> the network test deploys <em>fresh</em> contracts each run, so a shifted contract identity can't break <em>that</em> gate. But <strong>codex caught the other path:</strong> a separate check, <code>verify:deployments</code>, rebuilds the <em>live</em> faucet's contracts from pinned values — and it runs inside the build gate. So if rc.2 shifts contract identities, the <em>build</em> fails, and the live faucet would be broken. That means a shift is a <strong>hard blocker, not a "deal-with-it-later" follow-up</strong>. Codex's first pass <em>rejected</em> the original plan for exactly this. You then resolved it the direct way: <strong>the shift is expected, so the redeploy is part of this arc</strong> — Phase 3 executes it with the same scripts that handled the rc.1 cutover, and the PR only goes green once the live testnet and the code's pins agree again.</p>
+  </div>
+
+  <h2>Open questions (resolved with you)</h2>
+  <ul>
+    <li><strong>Network proof</strong> → gate on native-proving network-e2e (the rc.2 accelerator exists).</li>
+    <li><strong>Redeploy</strong> → out of scope; assess a class-id shift and flag a follow-up, don't redeploy here.</li>
+    <li><strong>Tier</strong> → mid, redeploy deferred.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: bump the ~20 <code>@aztec</code> pins + the <code>@alejoamiras/aztec-accelerator</code> npm package (required — else a mixed rc.1/rc.2 set) + patches + bunfig exclude + lockfile (allowlist-diffed) + the Noir toolchain + 5 git-tags (recompile + commit artifacts). The 2 Wonderland packages switch to your own npm takeover scope — <code>@alejoamiras/aztec-standards@5.0.0-rc.2</code> + <code>@alejoamiras/aztec-fee-payment@5.0.0-rc.2</code> (verified on npm, rc.2 peers, no transitive drag) — 8 pins across 5 packages + an import rename in 16 files. Redeploy OUT <em>only in the no-drift case</em>.</li>
+      <li><strong>Re-confirm the drift handling</strong> (the audit correction): your "redeploy → follow-up" holds ONLY if rc.2 doesn't shift contract identities. A shift <em>couples</em> the redeploy to the bump (it reds the build gate), so the arc <strong>hard-stops and escalates to <code>deep</code></strong> — it is NOT a silent follow-up. OK with that?</li>
+      <li>Confirm tier: <code>mid</code> for the diagnostic + no-drift landing, with the hard Phase-2 escalation to <code>deep</code> on drift.</li>
+      <li>Confirm validation: typecheck/lint/unit/build + <code>verify:deployments</code> + PrivateFPC test + native-proving network-e2e (no separate <code>/harden</code> unless we escalate).</li>
+      <li>Approve / conditionally approve (with conditions) / reject (with blocking findings).</li>
+    </ul>
+    <p class="muted">Audits done: codex Round 1 <strong>rejected</strong> (drift-as-follow-up unsound) → all findings folded; Opus <strong>conditional approve</strong> (confirmed the fresh-deploy pivot) → folded. A final fresh-context codex pass on the revised plan is confirming now; its verdict is reported in chat before this gate is final.</p>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>One drives the autonomous session. <code>/loop</code> is recommended here because the deciding gate (network-e2e) runs in CI over ~25-45 min — cron-style re-checking beats a single pass.</p>
+    <p class="warning">Use exactly ONE per session. They don't compose — setting one replaces the other.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /loop</h3>
+      <pre><code>/loop 15m Drive implementations-plan/aztec-5.0-rc2 forward. Never idle. Each firing: read plan.md + lessons/; git status; if a PR exists gh pr view --json statusCheckRollup. Pick the next pending phase; run its gate (P1: bun install + bun.lock allowlist/no-rc.1 diff + typecheck:all; P2: test:all [PrivateFPC tripwire re-pinned consciously, never silenced] + Noir recompile [compile.sh toolchain + keystone in loop + 5 Nargo tags] + shift-inventory script + lint + 5 builds; P3: TESTNET REDEPLOY — pre-flight network=rc.2 + funded keys [missing keys → surface, don't create], forge L1 portals via DeployBridge.s.sol re-pins, L2 deploy.ts + deploy-bridge-testnet.ts + PrivateFPC, re-pin deployments.json/ts + bridge-deployments.ts + sponsored-fpc.ts + chain-constants.ts, then verify-l1 + verify:deployments + smoke-existing-testnet + fuel-testnet private variant + a drip ALL GREEN LIVE; P4: network-e2e via CI labels). Phase green → mark ✓, file lessons/phase-N.md, print LESSONS_FILE=…, advance. A LIVE deploy step failing → fix forward carefully; 5 failures on one step → STOP + surface. Decisions / non-mechanical churn → /codex xhigh, log verdict, act. Hard limits: never merge to main/release; never publish npm/marketplaces; the scripted rc.2 TESTNET redeploy IS authorized; nothing mainnet-shaped; never remove the min-age exclude here; never create/rotate credentials. All phases ✓ → /code-review max --fix → commit → codex post-impl audit → address high/critical → open PR (labels e2e:network + e2e:smoke) → report + stop.</code></pre>
+    </div>
+
+    <h3>Alternative: /goal</h3>
+    <pre><code>/goal All phases in implementations-plan/aztec-5.0-rc2/plan.md marked ✓ (per-phase headers), each backed by its validation gate reported passing in the transcript — including Phase 3's LIVE gates (verify-l1, verify:deployments on the NEW pins, smoke-existing-testnet, the fuel-testnet private-FPC canary, a drip) all green against the rc.2 testnet; for each phase LESSONS_FILE printed; /code-review max --fix complete + committed; codex post-impl audit complete with high/critical addressed; bun run typecheck:all, bun run test:all, bun run lint exit 0; the PR's network-e2e-status green in the transcript.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

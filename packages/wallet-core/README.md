@@ -17,6 +17,7 @@ wallet-core  →  wallet-crypto  →  extension-messaging  →  aztec-runtime  �
 | `src/ports/browser-api.ts` | The `BrowserApi` interface — runtime, storage, alarms, windows. Used by services that need chrome.* through an injectable seam. |
 | `src/ports/alarms-port.ts`, `runtime-port.ts`, `window-port.ts` | Narrower ports for services that only need one slice. |
 | `src/storage/value-storage.ts`, `entity_storage.ts` | Typed wrappers over a `StorageArea`. `ValueStorage<T>` for single records; `EntityStorage<T>` for indexed entity rows keyed `${root}@${id}`. |
+| `src/migration/` | The data-preserving storage-migration engine: numbered `Migration`s applied where `version > persisted`, crash-safe journal (running marker → atomic footprint backup → staged batched commit → checkpoint), fail-closed retry with a durable attempt counter, marker decision table. Pure — the extension injects the store + registry (`apps/extension/src/wallet/storage/migrations/`). |
 | `src/utils/lock.ts` | Single-flight per-service lock with `MAX_HOLD_MS` force-release. |
 | `src/utils/rw-guard.ts` | Reader/writer guard. Multiple parallel reads; writers drain readers then run exclusively. Writers have FIFO priority. |
 | `src/utils/event-handler.ts` | The `EventHandler<T>` primitive every service emits through. |

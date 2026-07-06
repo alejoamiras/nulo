@@ -59,4 +59,4 @@ Colocated `*.test.ts`. The end-to-end account behavior is exercised by the exten
 - **Class-id verification is required.** `artifact-registry.ts` refuses to trust an artifact whose class-id doesn't equal the canonical hash. Treat that as a security gate, not a debuggability aid.
 - **Payload chunking is recursive.** Payloads with more than 5 calls are split: each chunk is wrapped via `entrypoint.wrapExecutionPayload()` so every nesting layer gets its own outer-authwit hash. Chunk-size changes ripple through authwit signing — don't tune without re-testing.
 - **PXE state is per-chain.** Adding a chain spins up a new chain-runtime; removing a chain tears down its PXE and wipes its IndexedDB. `chain-coordinator` events propagate this across the SW.
-- **Pinned aztec versions.** Every `@aztec/*` dep is at the same version (currently `5.0.0-rc.1`). Mismatched versions cause hard-to-debug failures inside `bb.js` proof generation.
+- **Pinned aztec versions.** Every `@aztec/*` dep is at the same version (currently `5.0.0-rc.2`). Mismatched versions cause hard-to-debug failures inside `bb.js` proof generation.

@@ -32,7 +32,7 @@ const majorMinor = (v: string): string => v.replace(/^v/, "").split(".").slice(0
 const major = (v: string): number => Number(v.replace(/^v/, "").split(".")[0])
 
 async function main() {
-	const pkg = JSON.parse(readFileSync(resolvePackageFile("@wonderland/aztec-fee-payment", "package.json"), "utf8"))
+	const pkg = JSON.parse(readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "package.json"), "utf8"))
 	// "4.2.0-prerelease.215fd08" → the @aztec line the artifact was compiled against.
 	const artifactAztecVersion = String(pkg.version).split("-")[0]
 
@@ -45,7 +45,7 @@ async function main() {
 
 	console.log("node URL          :", NODE_URL)
 	console.log("network nodeVersion:", info.nodeVersion, `(l1ChainId=${info.l1ChainId}, rollupVersion=${info.rollupVersion})`)
-	console.log("artifact @aztec    :", artifactAztecVersion, `(@wonderland/aztec-fee-payment ${pkg.version})`)
+	console.log("artifact @aztec    :", artifactAztecVersion, `(@alejoamiras/aztec-fee-payment ${pkg.version})`)
 	console.log("pinned FPC address :", PRIVATE_FPC_ADDRESS)
 
 	// Aztec testnet is backward-compatible across MINOR bumps — a 4.2.0-compiled contract class is

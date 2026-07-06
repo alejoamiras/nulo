@@ -32,7 +32,7 @@ vi.mock("@aztec/aztec.js/contracts", () => ({
 	Contract: { at: vi.fn(async () => mockContract) },
 }))
 
-vi.mock("@defi-wonderland/aztec-standards/dist/src/artifacts/Token.js", () => ({
+vi.mock("@alejoamiras/aztec-standards/dist/src/artifacts/Token.js", () => ({
 	TokenContractArtifact: { name: "Token" },
 }))
 

@@ -91,7 +91,7 @@ export async function buildFuelClaimInteraction(rec: DepositJournalRecord, deps:
 		const saltHex = deps.resolvedSalt ?? fuel.bridgeSecretSalt
 		if (!saltHex) return stop("This private Fuel bridge is missing its recovery salt, cannot claim.")
 		const salt = Fr.fromString(saltHex)
-		const fpcAddr = AztecAddress.fromString(fuel.fpc ?? PRIVATE_FPC_ADDRESS)
+		const fpcAddr = AztecAddress.fromStringUnsafe(fuel.fpc ?? PRIVATE_FPC_ADDRESS)
 		// teardownGas=0 keeps max_gas_cost within the bridged amount. maxFeesPerGas is the caller's
 		// predicted-worst snapshot (NO padding) — a self-pay claim spends the bridged amount as its whole
 		// budget, so any padding inflates max_gas_cost past it and the FPC reverts "Amount too low to cover
@@ -142,7 +142,7 @@ export async function buildFuelClaimInteraction(rec: DepositJournalRecord, deps:
 	if (!secretHex) return stop("This Fuel bridge is missing its claim secret.")
 	const sponsored = { paymentMethod: new SponsoredFeePaymentMethod(deps.sponsoredFpc) }
 	const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
-	const fj = await Contract.at(AztecAddress.fromString(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
+	const fj = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
 	const secret = Fr.fromString(secretHex)
 	const claim = () => fj.methods.claim_and_end_setup(recipient, received, secret, leaf)
 	return {
