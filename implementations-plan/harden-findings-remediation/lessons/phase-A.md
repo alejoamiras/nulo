@@ -90,4 +90,17 @@ Branch: `fix/hf-a-dispatcher-authz` off `fix/harden-findings`. Status: **design 
 - ⏳ (iii) F-08 dispatcher pre-scope arg validation.
 - ⏳ tests: wallet-bridge method-scope-checkers (raw-Fr reject, hasTxCaps covered/uncovered) + authwit-discoverer negative (mock findFunctionBySelector). Positive binding across sinks → network e2e.
 
-**ENV NOTE (gate):** `vue-tsc` is not in local `.bin` (sparse sandbox install) — the Unit A gate must run `bun install --frozen-lockfile` before `typecheck`/`test`/`e2e:agent`.
+**ENV NOTE (gate):** `vue-tsc` is not in local `.bin` (sparse sandbox install) — the Unit A gate must run `bun install --frozen-lockfile` before `typecheck`/`test`/`e2e:agent`. `bunx vitest` runs pure-logic suites (scope-enforcement ✓ 74/74) but can't resolve some `@nulo/*`/`@aztec/*` subpath exports (dispatcher.test.ts / method-descriptors.test.ts fail to COLLECT locally — pre-existing env, pass after `bun install`).
+
+### Handler refactor design (part ii) — grounded in dapp-interaction/service.ts
+
+- `DappInteractionService.execute(params)` → `validateSession` (already has an `aztec_createAuthWit` case, :375) → `isConfirmationNeeded(payload)` (:437): popups when profile-mismatch, `accessLevel ≥ session.confirmationLevel` (wallet-sdk sessions seed confirmationLevel = Transactions), fee-selection, or register_token; else silent.
+- **Routing decision lives in the DISPATCHER** (it has the grants + the coverage helper), NOT in isConfirmationNeeded (avoids leaking scope logic into the extension):
+  - raw `Fr` → already rejected by `checkCreateAuthWit` (scope enforcement, pre-routing). ✅ done.
+  - CallIntent **covered** by tx/sim scope → `executionService.executeOperations` directly (silent — dApp already holds that authority).
+  - CallIntent **uncovered** OR `IntentInnerHash` → `DappInteractionService.execute` (popups: set `aztec_createAuthWit` accessLevel = Transactions so the gate fires).
+- **Signer fix:** build the op with `accountAddress = String(args[0])` (the scope-checked account), not the session's first account (`dispatcher.ts:1061`).
+- Exports needed from `method-scope-checkers.ts`: `callWithinTxOrSimulationScope`, `isCallIntent`, `isIntentInnerHash` (dispatcher reuses them for the coverage decision).
+- Must NOT pass sendTx FIFO hooks (send FIFO is sendTx-specific; codex Q6).
+
+**Consult (in flight):** focused Codex xhigh on the exact handler wiring — signer-account resolution (how handleSendTx resolves its account + how to override to args[0]), routing-in-dispatcher vs isConfirmationNeeded, accessLevel, the exports.
