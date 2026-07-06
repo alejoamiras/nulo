@@ -127,6 +127,7 @@ onBeforeUnmount(() => {
 
 .title {
 	font-family: var(--font-headline);
+	font-weight: 700;
 	font-size: 14px;
 	color: var(--txt-primary);
 }
