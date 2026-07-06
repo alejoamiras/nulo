@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — Harden findings remediation</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    @media (prefers-color-scheme: dark) { body { background:#141414; color:#e6e6e6; } pre,.phase{ background:#1c1c1c !important;} .approval{background:#12233a !important;} .recommended{background:#2c2410 !important;} a{color:#6cb2ff;} .muted{color:#9a9a9a;} .tag{background:#2c2c2c;color:#ccc;} }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.7rem; margin-bottom: .3rem; }
+    h2 { font-size: 1.25rem; margin-top: 2.4rem; }
+    h3 { font-size: 1.02rem; margin-top: 1.3rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+    .phase { margin: 1rem 0; padding: .85rem 1.1rem; border-left: 3px solid #ccc; background: #fafafa; border-radius: 0 6px 6px 0; }
+    .phase.deep { border-left-color: #b3261e; }
+    .phase.mid { border-left-color: #9a6700; }
+    .phase.direct { border-left-color: #1a7f37; }
+    .tag { display:inline-block; font-size:.7rem; font-weight:700; letter-spacing:.03em; padding:.1em .5em; border-radius:999px; background:#eee; color:#555; vertical-align:middle; margin-left:.4rem; }
+    .seeds { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #ddd; }
+    .recommended { background: #fff8e1; border-left: 3px solid #f0a020; padding: .85rem 1.1rem; border-radius: 0 6px 6px 0; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; border-radius: 0 6px 6px 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: .9rem; }
+    ul { padding-left: 1.2rem; }
+  </style>
+</head>
+<body>
+  <h1>Harden findings remediation</h1>
+  <p class="muted">Blueprint <code>mid</code> · integration branch <code>fix/harden-findings</code> · fully autonomous · dual-audited (codex + fable, both conditional-approve, conditions folded in)</p>
+
+  <p>Fix all <strong>14 security findings</strong> from the audit, one reviewable PR per fix, on a single branch. I drive it autonomously: for each fix I do the right amount of design (trivial ones I just code; the two dangerous ones get a full design pass), consult Codex whenever there's a real decision or I'm stuck, validate every fix locally, and stack them onto <code>fix/harden-findings</code>. At the end I open one promote PR to <code>dev</code> and stop for you to merge.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><code>mid</code> for the campaign (one plan + a competing sequencing outline + a two-model audit + a final fresh-Codex pass). The rubric actually scores 2+ HIGH (security-sensitivity + blast-radius on the auth boundary; irreversibility on the crypto/storage change) — normally <code>deep</code> — but the findings and fixes are already pinned by the audit, so planning uncertainty is low. Instead of over-ceremonial-izing the index, the <strong>two genuinely risky fixes (the dispatcher and the crypto bearer) each get their own <em>deep</em> design pass at build time</strong>. The audit already earned its keep: both reviewers refuted a wrong assumption in my first draft (see "What the audit changed").</p>
+
+  <h2>The 11 fixes (each becomes its own PR)</h2>
+  <p class="muted">Colour = design rigor before coding: <span style="color:#b3261e">red = deep</span>, <span style="color:#9a6700">amber = mid</span>, <span style="color:#1a7f37">green = direct/light</span>. Each "proves itself by" line is its local validation gate (unit PRs get no GitHub CI — that runs once on the promote PR).</p>
+
+  <div class="phase deep"><h3>A · Dispatcher trust-boundary <span class="tag">DEEP</span> <span class="tag">Critical + High</span></h3>
+    <p>The big one. A malicious website can currently (1) get the wallet to <strong>silently sign a blank cheque</strong> (a raw hash), and (2) get approval for "Transfer" while "Approve" actually runs. Fix: reject raw hashes, and — at all <strong>three</strong> places it happens — make the wallet check that the function actually being run matches the one that was authorized, rejecting mismatches. Plus validate website request data on the wallet's own side.</p>
+    <p class="muted">Proves itself by: wallet-bridge + execution unit tests (mismatch/raw-hash rejected at each sink), a faucet serialization test, and the network e2e suite (real dApp flows still work).</p></div>
+
+  <div class="phase mid"><h3>B · Honest approval screen <span class="tag">LIGHT→MID</span></h3>
+    <p>Stop the confirmation popup from being fooled: clean up website-supplied text (no invisible/right-to-left trickery), verify the shown name against the real function, and <strong>show the hidden "can create auth-witnesses" permission</strong> that today is granted invisibly. Depends on A.</p>
+    <p class="muted">Proves itself by: component tests (including tricky-Unicode cases) + smoke e2e.</p></div>
+
+  <div class="phase mid"><h3>C · Chain-identity double-check <span class="tag">MID</span></h3>
+    <p>The wallet checks which blockchain it's on, then asks again and signs using the second (unchecked) answer. Fix: sign using the answer it already validated.</p>
+    <p class="muted">Proves itself by: aztec-runtime unit tests + network e2e (signing path).</p></div>
+
+  <div class="phase mid"><h3>D · Discovery flood limit <span class="tag">MID</span></h3>
+    <p>A page can spam the wallet with "are you there?" messages. Fix: rate-limit them, cap the queue, reject unknown chains before popping a window.</p>
+    <p class="muted">Proves itself by: wallet-bridge unit tests + network e2e (discovery path).</p></div>
+
+  <div class="phase mid"><h3>E · Safe backup restore <span class="tag">MID</span> <span class="tag">needed before L</span></h3>
+    <p>A tampered backup file can silently switch off a security setting and leak the password bearer. Fix: validate what a backup is allowed to change; never silently downgrade security.</p>
+    <p class="muted">Proves itself by: config/import unit + component tests + smoke e2e.</p></div>
+
+  <div class="phase direct"><h3>F · Content-Security-Policy tighten <span class="tag">DIRECT</span></h3>
+    <p>Add an image-source rule so a website logo can never phone home. One-line hardening (currently a dormant risk).</p>
+    <p class="muted">Proves itself by: the build succeeds + smoke e2e (popup renders).</p></div>
+
+  <div class="phase mid"><h3>G · Who-sent-this checks (offscreen) <span class="tag">MID</span></h3>
+    <p>The hidden crypto document accepts commands without checking the sender is the wallet's own service worker. Fix: verify the sender (and reject page/content-script senders), and give Firefox's fallback window a token so a stale one can't double-handle secret work.</p>
+    <p class="muted">Proves itself by: messaging unit tests (incl. Firefox sender shapes) + Firefox build + network e2e.</p></div>
+
+  <div class="phase mid"><h3>I · Tamper-proof website permissions <span class="tag">MID</span></h3>
+    <p>Stored website-permission rows aren't integrity-checked. Fix: validate + clamp them on load and add a tamper-detecting seal keyed to your profile secret; drop rows that fail.</p>
+    <p class="muted">Proves itself by: wallet-core unit tests + a real grant→reconnect check on network e2e (a bad seal could brick reconnects).</p></div>
+
+  <div class="phase direct"><h3>J · Storage read can't brick startup <span class="tag">DIRECT</span></h3>
+    <p>One corrupt storage row currently crashes startup. Fix: mirror the existing "skip the bad row" handling.</p>
+    <p class="muted">Proves itself by: wallet-core unit test (malformed row) + lint.</p></div>
+
+  <div class="phase direct"><h3>K · Clipboard secret hygiene <span class="tag">LIGHT</span></h3>
+    <p>Exporting your seed/private key leaves it on the clipboard forever. Fix: warn, and clear it after a delay.</p>
+    <p class="muted">Proves itself by: component tests + smoke e2e.</p></div>
+
+  <div class="phase deep"><h3>L · Password bearer redesign <span class="tag">DEEP</span> <span class="tag">after E · crypto</span></h3>
+    <p>The token that silently re-opens your session is a weak, password-equivalent hash. Fix: replace it with a random token that unwraps a session-stored encrypted secret (no longer crackable / password-equivalent), and actually wipe secret buffers. Touches frozen crypto test-vectors, so it pairs with a storage-version bump (a destructive wipe — safe because there are no production users). <strong>This is the riskiest fix and the one decision I need from you (below).</strong></p>
+    <p class="muted">Proves itself by: wallet-crypto unit tests (new vectors + wipe) + migration assertions + network e2e (unlock/restore across a service-worker restart).</p></div>
+
+  <h2>What the audit changed (so you can trust the plan)</h2>
+  <ul>
+    <li>My first draft put the "check the function matches" fix in the wrong layer. <strong>Both</strong> reviewers proved with code that the contract info isn't available there — it must go in the execution layer. Fixed.</li>
+    <li>The fix isn't one place, it's <strong>three</strong> — including the silent auth-witness path. Fable found the third. Now all three are in scope.</li>
+    <li>"Zeroize the passkey secret" was a no-op (the type it's stored in can't be wiped). Now the plan moves it to a wipeable buffer first.</li>
+    <li>Per-fix PRs into the integration branch get <strong>no</strong> GitHub CI (workflows only run for PRs to <code>dev</code>/<code>main</code>). So each fix runs its full gate locally; the one promote PR runs real CI.</li>
+  </ul>
+
+  <h2>Open questions I'll drive with Codex (not blocking your approval)</h2>
+  <ul>
+    <li>Unit A: exact artifact-resolution call on the silent auth-witness path; server-side request-schema coverage.</li>
+    <li>Unit L: random-token vs salted-KDF for the new bearer; exact session-record fields + TTL/lock deletion.</li>
+    <li>Unit I: precise fields to seal; confirm wipe-and-reseed doesn't break a silent reconnect.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li><strong>F-11 (Unit L) scope</strong> — the one real fork. Pick: <em>(a) full fix + storage-version wipe</em> (default; closes it completely, safe with no users), <em>(b) memory-hygiene only</em> (wipe buffers now, defer the bearer redesign — no frozen-crypto change), or <em>(c) defer L entirely</em> (fix the other 13).</li>
+      <li>Confirm scope: all 14 findings / 11 units; <code>bridge-core</code> excluded (faucet-only).</li>
+      <li>Confirm tier: <code>mid</code> campaign, <code>deep</code> per-unit for A and L.</li>
+      <li>Confirm structure: integration branch + one PR per fix into it (no GitHub CI on those) + one final promote PR to <code>dev</code> that I open and leave for you to merge.</li>
+      <li>Optional: schedule a fresh <code>/harden security</code> re-audit after merge to confirm the findings are closed (I recommend it post-merge, not inline — it's expensive).</li>
+    </ul>
+    <p>Reply with a verdict: <strong>approve</strong> / <strong>conditional approve (conditions: …)</strong> / <strong>reject (blocking: …)</strong>, and your F-11 choice.</p>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds ✅ approved 2026-07-06 — F-11 = option (a), session-only (no wipe)</h2>
+    <p>Two ways to run the autonomous session. Completion here <em>is</em> transcript-observable (units tick ✓ in <code>plan.md</code>, gates paste green, the promote PR opens), so <code>/goal</code> is the right primitive.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose. And start the session in the permission mode you intend (plus AFK authorization): the run spins up the network-e2e sandbox and calls Codex, so a permission prompt would stall it.</p>
+
+    <div class="recommended">
+      <h3>✅ Recommended: /goal</h3>
+<pre><code>/goal Every unit in implementations-plan/harden-findings-remediation/plan.md is ✓ in the "Unit status" checklist (A,B,C,D,E,F,G,I,J,K,L), each ✓ backed by that unit's validation gate (as defined in plan.md) pasted passing in the transcript and a lessons/phase-&lt;unit&gt;.md filed and printed as LESSONS_FILE=implementations-plan/harden-findings-remediation/lessons/phase-&lt;unit&gt;.md; the two DEEP units (A, L) each logged a Codex-reviewed design artifact BEFORE coding; `/code-review max --fix` applied + committed separately on the integration branch; a `/codex xhigh` post-impl audit done with high/critical findings addressed; and the PROMOTE item done — a fix/harden-findings → dev PR opened with `gh pr checks` showing quality-status + smoke-e2e-status + network-e2e-status green — then STOP without merging (hard limit: never merge to dev). F-11 = option (a), session-only: NO storage-version bump, NO wipe, NO re-registration (per plan.md Unit L).</code></pre>
+    </div>
+
+    <h3>Alternative: /loop 15m (fixed interval, cron-style)</h3>
+<pre><code>/loop 15m Drive implementations-plan/harden-findings-remediation forward; never idle. Each firing: (1) read plan.md — the "Unit status" checklist is authoritative — + lessons/, run git status/log. (2) No unit in hand? take the next unresolved unit respecting edges (B after A, L after E, L last); DEEP unit (A/L) → write the design artifact + go back-and-forth with `/codex xhigh` before coding; MID → approach note + one `/codex xhigh` consult; DIRECT/LIGHT → code. (3) Work on a child branch fix/hf-&lt;unit&gt;; after each edit run `bun run lint` + the touched package test; commit+push. (4) Stuck or a real decision? `/codex xhigh`, resolve, log it — hard limits stay hard (never merge to dev/main, never publish, never expand scope). (5) Same step failed 5×? reassess with codex. (6) Unit gate green (the FULL local gate in plan.md incl. `bun run e2e:agent` where listed)? paste it, PR the child branch into fix/harden-findings, merge it, tick the unit ✓, file lessons, print LESSONS_FILE=…. (7) All units ✓? `/code-review max --fix` → commit → `/codex xhigh` post-impl audit → address high/critical → open the fix/harden-findings → dev promote PR, watch its real CI, STOP without merging, write the wrap-up. Keep the Unit-status checklist visible. F-11 = option (a), session-only: NO storage-version bump, NO wipe, NO re-registration (per plan.md Unit L).</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="audit-codex.md">codex audit</a> · <a href="audit-fable.md">fable audit</a> · <a href="./lessons/">lessons logs</a></p>
+</body>
+</html>

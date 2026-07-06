@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harden Report — security — Nulo wallet</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #6b6b6b; --hairline: #e3e3e3;
+    --surface: #fafafa; --code: #f0f0f0; --link: #0b62c4;
+    --crit: #7a1218; --crit-bg: #fbe0e0;
+    --high: #b3261e; --high-bg: #fdeceb; --med: #9a6700; --med-bg: #fff4d6;
+    --low: #57606a; --low-bg: #eef1f4; --green: #1a7f37; --green-bg: #e6f4ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121212; --fg: #e6e6e6; --muted: #9a9a9a; --hairline: #2c2c2c;
+      --surface: #1b1b1b; --code: #242424; --link: #6cb2ff;
+      --crit: #ff9a9a; --crit-bg: #4a1414;
+      --high: #ff7b72; --high-bg: #3a1d1b; --med: #e3b341; --med-bg: #3a2f12;
+      --low: #a0a8b0; --low-bg: #23272c; --green: #57c478; --green-bg: #15301d;
+    }
+  }
+  body { background: var(--bg); color: var(--fg); margin: 0 auto; max-width: 820px;
+         padding: 2.5rem 1.25rem 4rem; font: 16px/1.6 -apple-system, BlinkMacSystemFont,
+         "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  h1 { font-size: 1.6rem; } h2 { font-size: 1.25rem; margin-top: 2.5rem; }
+  h3 { font-size: 1.05rem; margin-top: 1.8rem; }
+  a { color: var(--link); }
+  code { background: var(--code); border-radius: 4px; padding: 0.1em 0.35em; font-size: 0.86em;
+         word-break: break-word; }
+  .muted { color: var(--muted); }
+  .stats { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 1.25rem 0 2rem; }
+  .chip { border-radius: 999px; padding: 0.15em 0.7em; font-size: 0.8rem; font-weight: 600;
+          background: var(--low-bg); color: var(--low); white-space: nowrap; }
+  .chip-crit { background: var(--crit-bg); color: var(--crit); }
+  .chip-high { background: var(--high-bg); color: var(--high); }
+  .chip-med  { background: var(--med-bg);  color: var(--med); }
+  .chip-low  { background: var(--low-bg);  color: var(--low); }
+  .chip-info { background: var(--low-bg);  color: var(--low); font-weight: 500; }
+  .callout { border: 1px solid var(--hairline); border-left: 4px solid var(--green);
+             background: var(--green-bg); border-radius: 8px; padding: 0.9rem 1.1rem; margin: 1.25rem 0; }
+  .callout-pair { border-left-color: var(--med); background: var(--med-bg); }
+  .callout ul { margin: 0.4rem 0 0; padding-left: 1.2rem; }
+  .finding { background: var(--surface); border: 1px solid var(--hairline); border-radius: 8px;
+             padding: 1.2rem; margin: 1.25rem 0; }
+  .finding-header { display: flex; gap: 0.6rem; align-items: baseline; flex-wrap: wrap; }
+  .finding-id { color: var(--muted); font-weight: 600; }
+  .finding-title { font-weight: 700; }
+  .meta-line { margin: 0.6rem 0 0.9rem; display: flex; gap: 0.35rem; flex-wrap: wrap; }
+  .eli5 p { margin: 0.5rem 0; }
+  details { margin-top: 0.75rem; }
+  summary { cursor: pointer; color: var(--link); }
+  details p { margin: 0.5rem 0; }
+  footer { margin-top: 3rem; border-top: 1px solid var(--hairline); padding-top: 1rem;
+           font-size: 0.85rem; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>Harden Report: security</h1>
+<p class="muted">Nulo Aztec wallet (extension + dependency packages) · 2026-07-06 · effort: max · run 2026-07-06-max</p>
+
+<div class="stats">
+  <span class="chip">14 findings</span>
+  <span class="chip chip-crit">1 Critical</span>
+  <span class="chip chip-high">2 High</span>
+  <span class="chip chip-med">4 Medium</span>
+  <span class="chip chip-low">7 Low</span>
+  <span class="chip chip-info">2 models × 12 clusters, cross-verified</span>
+</div>
+
+<h2>Executive summary</h2>
+<p>Nulo is a non-custodial wallet that lives in your browser, holds your Aztec private keys, and signs transactions when websites (dApps) ask it to. This audit put on an attacker's hat: <em>what could a malicious or hacked website do to a user who has connected their wallet to it?</em> Two Claude Fable models and two Codex models reviewed twelve slices of the codebase independently, then argued with each other and re-checked the survivors against the actual source. Fourteen issues held up: <strong>1 Critical, 2 High, 4 Medium, 7 Low</strong>.</p>
+<p>Almost everything serious traces back to one design gap: <strong>when a website sends the wallet a request, the wallet checks the message is well-formed but not that it means what it claims.</strong> The wallet trusts labels the website supplies. Two attacks fall out of this. In the worst one (F-01), a website that holds a permission users grant routinely — and which the approval screen never actually shows them — can make the wallet <strong>silently sign a blank cheque</strong>, with no popup, that lets the attacker move the user's funds. In the second (F-02), a website can get approval for a harmless-looking action (&ldquo;Transfer&rdquo;) while a <em>different</em> action (&ldquo;Approve&rdquo;) is what actually runs and gets signed — and the confirmation popup shows the harmless name, so even a careful user is fooled. A third High (F-03) lets a malicious network endpoint trick the wallet into signing for the wrong blockchain.</p>
+<p>The good news: the fixes cluster tightly. One focused change to how the wallet handles website requests (reject blank-cheque hashes, authorize the real function being called, and validate request data on the wallet's own side) closes the Critical, one High, and the systemic Medium underneath them — and makes the approval popup trustworthy again. After that, a handful of cheap hardening fixes (a one-line content-security-policy addition, safer storage parsing, clipboard clearing, sender checks) stop several &ldquo;Low&rdquo; issues from quietly turning into &ldquo;High&rdquo; ones after a future change. Nothing here is being exploited in the shipped build today, but F-01 and F-02 are reachable by any site a user connects to and should block release.</p>
+
+<div class="callout">
+  <strong>Cheapest fixes first — land these in the first PR (hours, not days):</strong>
+  <ul>
+    <li><strong>F-01 guard:</strong> reject opaque raw-hash <code>createAuthWit</code> requests from dApps (or force a per-request confirmation). Small change, kills the Critical.</li>
+    <li><strong>F-05:</strong> add <code>img-src 'self' data: blob:</code> to the manifest CSP — a one-liner that closes a latent tracking-beacon vector.</li>
+    <li><strong>F-13:</strong> wrap <code>ValueStorage</code>'s <code>JSON.parse</code> in the same drop-and-skip containment <code>EntityStorage</code> already uses.</li>
+    <li><strong>F-14:</strong> clear the clipboard (and warn) after a seed/private-key copy.</li>
+  </ul>
+</div>
+
+<div class="callout callout-pair">
+  <strong>Ship together — fixing one without the others leaves the gap open:</strong>
+  <ul>
+    <li><strong>F-01 + F-02 + F-08</strong> share one root cause (the wallet trusts website-supplied request data without server-side validation or selector binding). Fix them as a single dispatcher-hardening change.</li>
+    <li><strong>F-02 + F-07</strong> both let the confirmation popup misrepresent what's being signed — authorize the real function <em>and</em> sanitize/label it truthfully, or the popup is still lying.</li>
+  </ul>
+</div>
+
+<h2>Findings</h2>
+
+<!-- F-01 -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-crit">Critical</span>
+    <span class="finding-id">F-01</span>
+    <span class="finding-title">A website can make the wallet silently sign a blank cheque</span>
+  </div>
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude+Codex</span>
+    <span class="chip chip-info">confidence: high</span>
+    <span class="chip chip-info">CWE-863</span>
+    <span class="chip chip-info">fix: hours · CHEAPEST</span>
+  </div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> In Aztec, an &ldquo;auth-witness&rdquo; is the wallet's signature saying &ldquo;I authorize this specific action.&rdquo; The wallet is supposed to only sign one when it can see exactly what the action is. But if a website sends a bare, pre-computed hash (an opaque number) instead of a described action, the wallet's safety check finds &ldquo;no information to check&rdquo; and waves it through — then signs it, with no popup. The one permission this needs, &ldquo;can create auth-witnesses,&rdquo; is bundled into the ordinary &ldquo;pick an account&rdquo; approval and <em>is never shown on the approval screen</em>, so users grant it without knowing.</p>
+    <p><strong>What an attacker would do.</strong> A malicious dApp the user has connected to computes the hash for &ldquo;transfer all of the user's tokens to me,&rdquo; sends it as a <code>createAuthWit</code> request, and receives a valid signature back — silently, no confirmation. It then uses that signature to move the user's funds.</p>
+    <p><strong>The fix.</strong> Refuse bare hashes from websites — require the request to describe the actual call (contract + function) so the wallet can check it against what the user allowed, or pop a confirmation for opaque ones. Also show &ldquo;can create auth-witnesses&rdquo; on the approval screen so users see what they're granting.</p>
+  </div>
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Instances:</strong> <code>packages/wallet-bridge/src/method-scope-checkers.ts:255,306</code>, <code>packages/wallet-bridge/src/dispatcher.ts:352,370,1156-1162</code>, <code>apps/extension/src/wallet/services/execution/service.ts:680-685</code>; UI gap: <code>apps/extension/src/popup/windows/capabilities/build-items.ts:32</code>, <code>AccountSelectRow.vue:45</code>.</p>
+    <p><strong>Trace:</strong> dApp RPC enters the dispatcher as <code>unknown[]</code> (<code>dispatcher.ts:275</code>) → <code>createAuthWit</code> scope check enforces only <code>accounts.canCreateAuthWit</code> and scope-checks only <em>structured</em> intents, letting a raw <code>Fr</code> fall through with &ldquo;no semantic info&rdquo; (<code>method-scope-checkers.ts:306</code>) → non-popup methods route straight to <code>executeOperations</code> (<code>dispatcher.ts:370</code>; <code>:352</code> lists only <code>sendTx</code>/<code>registerToken</code> as popup-gated) → <code>service.ts:680</code> parses the raw hash and <code>:685</code> signs it. Both Codex and Fable verifiers confirmed; band raised to Critical because the gating permission is UI-invisible and routinely granted.</p>
+    <p><strong>Fix:</strong> reject opaque <code>Fr</code>/<code>IntentInnerHash</code> from dApp RPC or require explicit confirmation; recompute the hash from a structured <code>CallIntent</code> whose contract/function/<em>selector</em> are all authorized; surface <code>canCreateAuthWit</code> in the capability approval UI.</p>
+  </details>
+</div>
+
+<!-- F-02 -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-high">High</span>
+    <span class="finding-id">F-02</span>
+    <span class="finding-title">Approve &ldquo;Transfer&rdquo;, actually run &ldquo;Approve&rdquo; — and the popup shows the wrong name</span>
+  </div>
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude+Codex</span>
+    <span class="chip chip-info">confidence: high</span>
+    <span class="chip chip-info">CWE-863</span>
+    <span class="chip chip-info">fix: ~1 day</span>
+  </div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> Every contract function has a human name (&ldquo;transfer&rdquo;) and a machine id called a selector. When a website asks the wallet to run a function, it sends <em>both</em> — but the wallet checks permission against the <strong>name</strong> and then executes the <strong>selector</strong>, and nothing forces the two to match. The confirmation popup also displays the name, not the selector.</p>
+    <p><strong>What an attacker would do.</strong> A dApp with permission for the harmless <code>transfer</code> sends a request labelled <code>name: "transfer"</code> but carrying <code>selector</code> for <code>approve</code> (which hands the attacker spending rights). The permission check passes on the name, the popup reassuringly says &ldquo;Transfer,&rdquo; and the wallet signs and runs <code>approve</code>. Both the automatic guard and the human double-check are defeated at once.</p>
+    <p><strong>The fix.</strong> Authorize the thing that actually runs — resolve the selector against the contract's real ABI, reject the request if the supplied name disagrees, and show the ABI-verified name (never the website's raw label) in the popup.</p>
+  </div>
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Instances:</strong> <code>packages/wallet-bridge/src/method-scope-checkers.ts:121,160,174,281</code>, <code>apps/extension/src/wallet/services/execution/operation-planner.ts:207-219</code>, <code>tx-request-builder.ts:304,317</code>, <code>apps/extension/src/popup/windows/execute/index.vue:181</code>, <code>OperationCard.vue:183</code>.</p>
+    <p><strong>Trace:</strong> scope checks compare grants to attacker-controlled <code>call.name</code> → planner stores <code>selector</code> and <code>name</code> independently → tx builder resolves the selector only to fill missing fields and never compares ABI name to <code>action.name</code> (<code>tx-request-builder.ts:304</code>), then executes <code>FunctionSelector.fromString(action.selector)</code> (<code>:317</code>) → the execute window renders <code>call.name ?? call.selector</code> (<code>OperationCard.vue:183</code>). The <code>parseTransferIntent</code> &ldquo;verified transfer&rdquo; block also keys on name, so even that badge is spoofable. Confirmed by both families at Phase 4.</p>
+    <p><strong>Fix:</strong> resolve + authorize the selector against the artifact before authorization; reject name/selector mismatch; display only ABI-verified names.</p>
+  </details>
+</div>
+
+<!-- F-03 -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-high">High</span>
+    <span class="finding-id">F-03</span>
+    <span class="finding-title">Chain identity is checked once, then re-fetched and trusted for signing</span>
+  </div>
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude+Codex</span>
+    <span class="chip chip-info">confidence: high</span>
+    <span class="chip chip-info">CWE-367 (TOCTOU)</span>
+    <span class="chip chip-info">fix: hours</span>
+  </div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> Before signing, the wallet asks the network &ldquo;which chain are you?&rdquo; and validates the answer. But the signing code then asks a <em>second</em> time and signs using that second answer, which is never re-validated. A &ldquo;check it, then use a different value&rdquo; gap (a time-of-check/time-of-use bug).</p>
+    <p><strong>What an attacker would do.</strong> If the user's configured network endpoint is attacker-controlled or intercepted, it answers correctly the first time (passing the guard) and differently the second time, so the wallet signs a transaction bound to a chain the user never intended — enabling cross-chain replay/confusion of the signed action.</p>
+    <p><strong>The fix.</strong> Pass the already-validated chain info into the signing routine and delete the second fetch — or re-run the same validation on the second answer before using it.</p>
+  </div>
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Instances:</strong> <code>apps/extension/src/wallet/services/execution/tx-request-builder.ts:116-124,343</code>, <code>packages/aztec-runtime/src/account/nulo-account.ts:103-107,137,140</code>; reached via <code>dapp-send-executor.ts:153,351</code>.</p>
+    <p><strong>Trace:</strong> builder fetches + validates the first <code>getNodeInfo()</code> (<code>:119,:124</code>), hands the node to <code>account.buildTxExecutionRequest</code> (<code>:343</code>); <code>NuloAccount</code> calls <code>getNodeInfo()</code> again (<code>nulo-account.ts:103</code>), builds <code>chainInfo</code> from it (<code>:104-107</code>) and signs/wraps with it (<code>:137,:140</code>). On the normal dApp send path. Confirmed by the Codex verifier.</p>
+    <p><strong>Fix:</strong> thread validated chain info into <code>buildTxExecutionRequest()</code>; drop the internal re-fetch or re-assert on it.</p>
+  </details>
+</div>
+
+<!-- F-04 -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-med">Medium</span>
+    <span class="finding-id">F-04</span>
+    <span class="finding-title">A page can flood the wallet with discovery requests</span>
+  </div>
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude+Codex</span>
+    <span class="chip chip-info">confidence: high</span>
+    <span class="chip chip-info">CWE-770</span>
+    <span class="chip chip-info">fix: hours</span>
+  </div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The wallet has no rate limit on the &ldquo;is a wallet here?&rdquo; discovery messages a page can send.</p>
+    <p><strong>What an attacker would do.</strong> A page loops discovery with unique ids/chain ids: while the wallet is locked it grows an unbounded in-memory queue; while unlocked it can spawn a stream of connect popups — a denial-of-service / nuisance.</p>
+    <p><strong>The fix.</strong> Cap pending discoveries globally and per origin/tab, reject unknown chain ids before opening a popup, and coalesce locked-state discoveries by <code>(origin, chainId)</code>.</p>
+  </div>
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Instances:</strong> <code>apps/extension/src/content-script/content.ts:12</code>, <code>apps/extension/src/wallet/services/wallet-sdk/background.ts:475,503,552</code>, <code>packages/wallet-bridge/src/discovery-queue.ts:20</code>, <code>window-manager/window-manager.ts:83</code>.</p>
+    <p><strong>Fix:</strong> global + per-origin caps, chain allowlist before popup, coalesce locked discoveries.</p>
+  </details>
+</div>
+
+<!-- F-06 -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-med">Medium</span>
+    <span class="finding-id">F-06</span>
+    <span class="finding-title">A crafted backup file can turn off a security control and persist the password bearer</span>
+  </div>
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Codex</span>
+    <span class="chip chip-info">confidence: high</span>
+    <span class="chip chip-info">CWE-862</span>
+    <span class="chip chip-info">fix: hours</span>
+  </div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> &ldquo;Strict security mode&rdquo; keeps a password-derived bearer out of browser storage. When restoring a backup, the wallet applies the backup's settings <em>before</em> activating the profile — including turning strict mode off — and the backup's checksum only detects corruption, not tampering.</p>
+    <p><strong>What an attacker would do.</strong> Trick a user into importing an attacker-crafted plaintext backup with <code>strictSecurityMode=false</code>; on restore, the wallet writes the password bearer (a base64 passhash) into session storage, weakening the account.</p>
+    <p><strong>The fix.</strong> Validate backup settings against a schema, and never silently restore a security downgrade — default to strict unless the user explicitly confirms.</p>
+  </div>
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Instances:</strong> <code>apps/extension/src/composables/useFullBackupImport.ts:226,393-412</code>, <code>apps/extension/src/wallet/services/config/service.ts:45</code>, <code>session-manager.ts:211-214</code>, <code>profile/service.ts:1082</code>.</p>
+    <p><strong>Trace:</strong> config (incl. <code>strictSecurityMode</code>) restored before <code>finalizeRestore</code> (<code>useFullBackupImport.ts:393-403</code>) → passhash derived (<code>profile/service.ts:1082</code>) → <code>SessionManager.open()</code> persists it because strict is off (<code>session-manager.ts:211</code>). Checksum is recomputable-from-content integrity, not authenticity. Confirmed by the Fable verifier.</p>
+    <p><strong>Fix:</strong> allowlist/schema for restored config; require explicit confirmation for <code>strictSecurityMode</code>/<code>sessionTtl</code> changes.</p>
+  </details>
+</div>
+
+<!-- F-07 -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-med">Medium</span>
+    <span class="finding-id">F-07</span>
+    <span class="finding-title">The signing popup doesn't sanitize website-supplied text</span>
+  </div>
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude</span>
+    <span class="chip chip-info">confidence: high</span>
+    <span class="chip chip-info">CWE-451</span>
+    <span class="chip chip-info">fix: hours</span>
+  </div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The transaction-confirmation card shows dApp-supplied method names and arguments through a helper that only title-cases and truncates — it skips the <code>sanitizeWireString</code> cleanup used everywhere else for dApp text.</p>
+    <p><strong>What an attacker would do.</strong> Use right-to-left override or zero-width characters, homoglyphs, or an enormous string so the popup <em>looks</em> like it describes a benign call while the real action differs — visual spoofing of the signing decision (it compounds F-02).</p>
+    <p><strong>The fix.</strong> Route all dApp-authored labels/args through <code>sanitizeWireString</code> (or a stricter method-label sanitizer) and clamp lengths in the fixed UI rows.</p>
+  </div>
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Instances:</strong> <code>apps/extension/src/popup/windows/execute/OperationCard.vue:118,133,138,183,401,416,433</code>, <code>apps/extension/src/utils/tx-enrichment.ts:52</code>.</p>
+    <p><strong>Fix:</strong> sanitize + length-clamp all dApp labels/args at the confirmation surface; prefer artifact-verified names. Ship with F-02.</p>
+  </details>
+</div>
+
+<!-- F-08 -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-med">Medium</span>
+    <span class="finding-id">F-08</span>
+    <span class="finding-title">The wallet never re-validates website request data on its own side (root enabler)</span>
+  </div>
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude</span>
+    <span class="chip chip-info">confidence: high</span>
+    <span class="chip chip-info">CWE-20</span>
+    <span class="chip chip-info">fix: 1–2 days · HIGH LEVERAGE</span>
+  </div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The request-validation schema (Zod) runs in the <em>website's</em> copy of the SDK — not a control the wallet can trust. Inside the service worker, the dispatcher takes request arguments as <code>unknown[]</code> and runs permission/scope checks over raw type-casts, never validating the data itself.</p>
+    <p><strong>What an attacker would do.</strong> Send raw protocol frames (bypassing the website-side schema) with malformed or inconsistent arguments. This is the substrate F-01 and F-02 stand on, and any future RPC method inherits the same exposure.</p>
+    <p><strong>The fix.</strong> Add a wallet-side, per-method schema table and parse arguments <em>before</em> permission/scope checks and casts; reject unknown fields where meaning matters.</p>
+  </div>
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Instances:</strong> <code>apps/extension/src/wallet/services/wallet-sdk/content-script-validator.ts:50</code>, <code>background.ts:637</code>, <code>packages/wallet-bridge/src/dispatcher.ts:275,328,544,1134,1162</code>.</p>
+    <p><strong>Fix:</strong> server-side per-method arg schema, parsed before authorization. Closes the class behind F-01/F-02, not just the instances.</p>
+  </details>
+</div>
+
+<!-- F-05 -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-low">Low (latent)</span>
+    <span class="finding-id">F-05</span>
+    <span class="finding-title">dApp logo would load as an unrestricted image — no writer today, no img-src CSP</span>
+  </div>
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude+Codex</span>
+    <span class="chip chip-info">confidence: high</span>
+    <span class="chip chip-info">CWE-1021</span>
+    <span class="chip chip-info">fix: minutes · CHEAPEST</span>
+  </div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> Several approval/settings screens are wired to render a dApp's <code>logo</code> as an <code>&lt;img src&gt;</code>, and the extension's content-security-policy sets no <code>img-src</code> — so a remote image URL would be fetched. Verification found <strong>no code that actually populates the logo field</strong> in the shipped build, so the vector is dormant.</p>
+    <p><strong>What an attacker would do.</strong> If a future change ever plumbs a dApp-supplied logo, a hostile site could set <code>logo=https://attacker/beacon.gif?id=…</code> and have the approval screen phone home (IP + timing) before the user clicks Approve. Today it can't fire.</p>
+    <p><strong>The fix.</strong> Add <code>img-src 'self' data: blob:</code> to the CSP now (a one-liner), and if remote logos are ever wanted, re-encode them through a wallet-controlled <code>blob:</code> sanitizer.</p>
+  </div>
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Sinks:</strong> <code>apps/extension/src/composables/useDappInteractionPayload.ts:90-93</code>, <code>components/composite/DappIdentityBlock.vue:40</code>, <code>popup/windows/verify/index.vue:161,199</code>, <code>connected-apps/index.vue:43,144</code>, <code>[id].vue:83,202</code>. CSP: <code>manifest/manifest.config.ts:42</code>. Sole <code>dappMetadata</code> constructor (no <code>logo</code> key): <code>wallet-sdk/background.ts:535-541</code>.</p>
+    <p><strong>Why Low:</strong> two independent Fable passes proved zero <code>.logo =</code> writers on the shipped path — latent until one exists.</p>
+  </details>
+</div>
+
+<!-- F-09 -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-low">Low (DiD)</span>
+    <span class="finding-id">F-09</span>
+    <span class="finding-title">The offscreen crypto document doesn't check who sent it commands</span>
+  </div>
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude</span>
+    <span class="chip chip-info">confidence: high code / low reach</span>
+    <span class="chip chip-info">CWE-306</span>
+    <span class="chip chip-info">fix: hours</span>
+  </div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The hidden document that runs the Aztec crypto engine accepts a message purely because it's addressed <code>to: "pxe"</code> — it never checks the sender is the extension's own service worker. Privileged operations (register account, prove, wipe) sit behind that.</p>
+    <p><strong>What an attacker would do.</strong> Nothing today: a web page has no way to deliver such a message (the extension isn't externally connectable, and the page relay uses a fixed envelope that can't set <code>to</code>). This is defense-in-depth — the risk is a <em>future</em> change silently making it reachable.</p>
+    <p><strong>The fix.</strong> Add a <code>sender.id === chrome.runtime.id</code> check and reject tab/content-script senders, mirroring the subframe defense the SW already uses; add a nonce to the lifecycle handshake.</p>
+  </div>
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Instances:</strong> <code>packages/extension-messaging/src/offscreen/service.ts:36-48</code>, <code>apps/extension/src/offscreen/index.ts:14</code>, <code>wallet/utils/offscreen.ts:47,80</code>.</p>
+    <p><strong>Why Low:</strong> the offscreen leg rated this High via the content-script relay; three independent reads refuted web reachability (no <code>externally_connectable</code>; fixed SDK envelope). Real missing guard, not currently reachable.</p>
+  </details>
+</div>
+
+<!-- F-10 -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-low">Low</span>
+    <span class="finding-id">F-10</span>
+    <span class="finding-title">On Firefox, a stale crypto window can double-handle secret operations</span>
+  </div>
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude+Codex</span>
+    <span class="chip chip-info">confidence: high</span>
+    <span class="chip chip-info">CWE-664</span>
+    <span class="chip chip-info">fix: hours–day</span>
+  </div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> Firefox lacks Chrome's offscreen API, so Nulo uses a hidden window tracked only in memory. If the service worker restarts, it forgets the old window and makes a new one, and both receive the same broadcast crypto commands.</p>
+    <p><strong>What a user would trigger.</strong> On Firefox, after an SW restart a secret-bearing command (e.g. register account) can be executed by two crypto engines at once — an integrity/duplication hazard.</p>
+    <p><strong>The fix.</strong> Give each offscreen instance a durable token, include it in every request, and have stale windows self-close or ignore mismatched tokens.</p>
+  </div>
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Instances:</strong> <code>apps/extension/src/wallet/utils/offscreen.ts:45,183,201,215</code>, <code>packages/extension-messaging/src/offscreen/client.ts:104</code>, <code>offscreen/service.ts:36</code>. The code comments already acknowledge the SW-restart leak.</p>
+  </details>
+</div>
+
+<!-- F-11 -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-low">Low</span>
+    <span class="finding-id">F-11</span>
+    <span class="finding-title">The password bearer is weakly derived; some secret buffers aren't wiped</span>
+  </div>
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude+Codex</span>
+    <span class="chip chip-info">confidence: high</span>
+    <span class="chip chip-info">CWE-759/916</span>
+    <span class="chip chip-info">fix: days</span>
+  </div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The token used to silently re-unlock is an unsalted single <code>SHA-256(password)</code> — offline-crackable for human passwords and password-equivalent — and the passkey-derived master secret is copied into a buffer that isn't zeroed afterward. (The core AES-GCM/PBKDF2 encryption itself is sound: random IVs, 600k iterations, integrity enforced.)</p>
+    <p><strong>What an attacker would do.</strong> Only after local compromise (malware/heap read) — recover the bearer or crack a weak password offline. No remote/website path.</p>
+    <p><strong>The fix.</strong> Make the silent-restore bearer a random wrapping token or salted-KDF output; zeroize the temporary passhash and master-secret buffers. Keep <code>key-vectors.test.ts</code> byte-identical.</p>
+  </div>
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Instances:</strong> <code>packages/wallet-crypto/src/encryption-key.ts:77,97</code>, <code>password-secret-box.ts:80,122</code>, <code>passkey-credential.ts:60</code>, <code>zeroize.ts:17</code>.</p>
+    <p><strong>Note:</strong> Fable recalibrated the Phase-2 &ldquo;universally reversible&rdquo; claim — the practical risk is offline cracking of weak passwords plus bearer reuse, not universal reversal.</p>
+  </details>
+</div>
+
+<!-- F-12 -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-low">Low</span>
+    <span class="finding-id">F-12</span>
+    <span class="finding-title">Stored dApp-permission rows aren't integrity-protected</span>
+  </div>
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Codex</span>
+    <span class="chip chip-info">confidence: high</span>
+    <span class="chip chip-info">CWE-345</span>
+    <span class="chip chip-info">fix: hours–day</span>
+  </div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The wallet trusts dApp-session/permission rows in storage as-is — no signature, MAC, or schema check on load.</p>
+    <p><strong>What an attacker would do.</strong> Requires an already-compromised machine (ability to write extension storage): plant a session row granting a hostile origin high trust, so later requests auto-approve. No web write path exists, hence Low.</p>
+    <p><strong>The fix.</strong> Validate session rows on load (schema + range clamps) and MAC them with a profile-local key so tampering is detected.</p>
+  </div>
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Instances:</strong> <code>packages/wallet-core/src/storage/entity_storage.ts:47-49,103</code>, <code>apps/extension/src/wallet/services/dapp-session/service.ts:53,100-112</code>, <code>background.ts:486</code>, <code>dispatcher.ts:281</code>, <code>dapp-interaction/service.ts:443</code>.</p>
+  </details>
+</div>
+
+<!-- F-13 -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-low">Low</span>
+    <span class="finding-id">F-13</span>
+    <span class="finding-title">One corrupt storage row can brick wallet startup</span>
+  </div>
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude+Codex</span>
+    <span class="chip chip-info">confidence: high</span>
+    <span class="chip chip-info">CWE-248</span>
+    <span class="chip chip-info">fix: hours · CHEAPEST</span>
+  </div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> <code>ValueStorage.get()</code> calls <code>JSON.parse</code> with no error handling, unlike <code>EntityStorage</code>, which already tolerates bad rows.</p>
+    <p><strong>What a user would trigger.</strong> A single malformed <code>nulo:config</code> or session row (local corruption) throws on every read, repeatedly failing startup/restore.</p>
+    <p><strong>The fix.</strong> Mirror <code>EntityStorage</code>'s existing <code>parseOrDelete</code>: catch, log bounded metadata, quarantine/delete the bad row, return a default.</p>
+  </div>
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Instances:</strong> <code>packages/wallet-core/src/storage/value-storage.ts:18-22</code>, <code>apps/extension/src/wallet/config/store.ts:18</code>, <code>runtime.ts:96</code>, <code>session-manager.ts:138,336</code>.</p>
+  </details>
+</div>
+
+<!-- F-14 -->
+<div class="finding">
+  <div class="finding-header">
+    <span class="chip chip-low">Low</span>
+    <span class="finding-id">F-14</span>
+    <span class="finding-title">Exporting the seed/private key leaves it on the clipboard</span>
+  </div>
+  <div class="meta-line">
+    <span class="chip chip-info">Found by Claude</span>
+    <span class="chip chip-info">confidence: high</span>
+    <span class="chip chip-info">CWE-522</span>
+    <span class="chip chip-info">fix: hours · CHEAPEST</span>
+  </div>
+  <div class="eli5">
+    <p><strong>What it is.</strong> The seed-phrase and private-key export screens copy the full secret to the OS clipboard and never clear it; the key page doesn't even show the seed page's warning.</p>
+    <p><strong>What a user would trigger.</strong> After copying to paste elsewhere, the secret lingers on a shared/synced clipboard where a clipboard manager, another app, or a later permitted page can read it.</p>
+    <p><strong>The fix.</strong> Warn on both copy actions, and attempt a delayed clipboard clear when it still holds the copied secret.</p>
+  </div>
+  <details>
+    <summary>Technical trace</summary>
+    <p><strong>Instances:</strong> <code>apps/extension/src/popup/pages/settings/security/export/seed.vue:67</code>, <code>key.vue:77</code>.</p>
+  </details>
+</div>
+
+<h2>Cross-cutting observations</h2>
+
+<h3>The website→wallet boundary checks shape, not meaning</h3>
+<p>Validation confirms a request is well-formed; nothing binds the website-supplied name / selector / raw-hash to an authorized, artifact-verified action before the wallet signs. F-08 is the substrate; F-01 and F-02 are its sharpest exploits. The single highest-value structural change is wallet-side, per-method argument validation plus selector-based authorization at the dispatcher — it closes a class of bugs, not three instances.</p>
+
+<h3>The approval popup — the human's last line of defense — can be made to lie</h3>
+<p>F-02 (shows one name, runs another), F-07 (unsanitized bidi/homoglyph text), and the UI-invisible <code>canCreateAuthWit</code> grant behind F-01 all erode &ldquo;what you see equals what you sign.&rdquo; Treat them as one theme: a scope fix that still renders attacker-controlled text is only half a fix.</p>
+
+<h3>Several Lows are safe only by accident of the current manifest</h3>
+<p>F-09 (offscreen sender check), F-12 (unsigned session rows), and the messaging <code>Port</code> sender gap are non-issues <em>today</em> purely because there's no <code>externally_connectable</code> and the content-script relay uses a fixed envelope. A future permission or relay refactor would turn them into Highs with no change at the vulnerable line. Add the sender checks and row integrity now, so safety is enforced rather than incidental.</p>
+
+<h3>Local-attacker secret hygiene is soft (but not web-exploitable)</h3>
+<p>F-06, F-11, and F-14 don't help a remote dApp, but they weaken the wallet against local malware, a synced clipboard, or heap inspection. Reasonable to batch as a &ldquo;local hardening&rdquo; PR after the dApp-boundary fixes land.</p>
+
+<footer>
+  Engineering detail: <a href="report.md">report.md</a> ·
+  <a href="findings/verified.md">verified findings</a> ·
+  <a href="findings/consolidated.md">consolidated findings</a> ·
+  <a href="findings/fable-challenge.md">Fable meta-review</a> ·
+  <a href="raw/">raw cluster outputs (24)</a>
+  <br>Generated by the <code>/harden security max</code> skill — 2 model families × 12 clusters, cross-rebutted and independently verified. Links are relative to this run's audit directory.
+</footer>
+
+</body>
+</html>
