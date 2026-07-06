@@ -207,3 +207,78 @@ Fix: order it explicitly: copy live to `legacy/testnet-bridge.v1.json`, verify h
 Fix: include a backup/sealed-envelope legacy recovery fixture.
 
 conditional approve (with conditions: 1. add a live deployed-router `bridge()` gate; 2. add a runtime manifest/artifact guard enforcing L9; 3. add the Phase 2 sole-consumer static invariant; 4. explicitly document and test the generic-router phishing boundary; 5. define exact candidate/live/legacy manifest copy and verifier commands)
+
+## Phase 4 unblock — codex consult (session 019f3806)
+
+**Q:** sandbox smoke claim_public/private SIMULATES revertCode 0 but .send() fails silently, message never nullifies.
+
+**Verdict (correct):** rc.2 mints no empty L2 blocks, so after the L1 deposit the L2 anchor stalls below the message's checkpoint → the claim's membership witness can't be built ('Tried to consume nonexistent L1-to-L2 message'), though the optimistic pre-send simulation passes. Fix: wait for L1→L2 claimability (node.getL1ToL2MessageCheckpoint + getBlockData anchor >= msgCheckpoint) and submit a cheap `forceBlock` tx to advance the anchor (mirrors e2e fixtures/aztec.ts:waitForL1ToL2Message). Applied verbatim → all flows pass.
+
+### Codex response
+
+I read the files. The claim `.send(...)` pattern is not materially different.
+
+In [fixtures/aztec.ts](/home/homelab/Projects/nulo/nulo-1/apps/extension/tests/e2e/fixtures/aztec.ts:294), the working claim sends:
+
+```ts
+feeJuice.methods.claim(to, amount, secret, leafIndex).send({
+  fee: { ...feeOptions, gasSettings: E2E_FEE_GAS },
+  from: fromAddress,
+})
+```
+
+Your smoke sends in [deploy-sandbox.ts](/home/homelab/Projects/nulo/nulo-1/packages/bridge-core/scripts/deploy-sandbox.ts:237):
+
+```ts
+send({
+  ...opts,
+  wait: { waitForStatus: TxStatus.PROPOSED },
+})
+```
+
+Same effective fee shape, same sponsored FPC pattern, same gas settings, no explicit `authWitnesses`, and `from` is fine. `new Fr(leafIndex)` also matches the Noir signature: `message_leaf_index: Field`.
+
+The important missing piece is before the send. The working fixture calls `waitForL1ToL2Message(...)` before claiming, at [fixtures/aztec.ts](/home/homelab/Projects/nulo/nulo-1/apps/extension/tests/e2e/fixtures/aztec.ts:246). Its comments describe the rc.2 / 5.0 gotcha: the message being checkpointed is not enough; the L2 anchor must advance to at least the message checkpoint, and local-network does not mine empty blocks. The fixture optionally forces that with a cheap sponsored L2 tx.
+
+So I do not think `waitForStatus` is the core issue. `PROPOSED` is fine. Your log means PXE’s pre-send simulation succeeded, but that simulation is not proof the tx passed proof/submission/mempool validation. Since the message never nullifies, the claim is being rejected or dropped before inclusion.
+
+Concrete fix:
+
+1. Return the portal message key/hash from `runRouterDeposit`. You already parse the `Bridge` event in [flows.ts](/home/homelab/Projects/nulo/nulo-1/packages/bridge-core/src/flows.ts:266); also return `ev.args.key`.
+
+2. Before each claim, wait like the fixture:
+
+```ts
+await waitForL1ToL2Message(
+  node,
+  pubRes.messageHashHex,
+  forceBlock, // cheap sponsored L2 state-changing tx
+);
+```
+
+3. Then send:
+
+```ts
+await bridge.methods
+  .claim_public(from, amount, Fr.fromString(pubRes.claimValueHex), new Fr(pubRes.leafIndex))
+  .send({
+    from,
+    fee: {
+      paymentMethod: new SponsoredFeePaymentMethod(fpc.address),
+      gasSettings: E2E_FEE_GAS,
+    },
+    wait: { waitForStatus: TxStatus.PROPOSED, timeout: 120 },
+  } as never);
+```
+
+To surface the real error, stop slicing the catch:
+
+```ts
+} catch (e) {
+  console.error(`[${label}] claim failed`, e);
+  console.error('cause', (e as any).cause);
+  console.error('stack', (e as Error).stack);
+}
+```
+
+Also try one attempt with `wait: NO_WAIT`. If that throws, submission/proving is failing. If it returns a tx hash, poll `node.getTxReceipt(hash)` for the dropped reason.

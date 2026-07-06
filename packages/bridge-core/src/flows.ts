@@ -193,6 +193,8 @@ export interface RouterDepositResult {
 	claimValueHex: string
 	secretHashHex: string
 	leafIndex: bigint
+	/** The L1→L2 message hash (the router `Bridge` event `key`) — for waiting on L2 claimability. */
+	messageHashHex: string
 }
 
 /**
@@ -264,13 +266,18 @@ export async function runRouterDeposit(
 	})
 
 	onStage?.("syncing")
-	// Leaf index from the router's Bridge event (never a preflight simulate — see runDeposit's note).
+	// Leaf index + message key from the router's Bridge event (never a preflight simulate — see runDeposit's note).
 	const events = parseEventLogs({ abi: p.routerAbi, eventName: "Bridge", logs: receipt.logs })
-	const ev = events[0] as { args?: { index?: bigint } } | undefined
-	if (ev?.args?.index === undefined) throw new Error("bridge() emitted no Bridge event")
+	const ev = events[0] as { args?: { index?: bigint; key?: Hex } } | undefined
+	if (ev?.args?.index === undefined || ev.args.key === undefined) throw new Error("bridge() emitted no Bridge event")
 	recovery?.onDeposited?.(ev.args.index)
 	onStage?.("done")
-	return { claimValueHex: claimValue.toString(), secretHashHex: secretHash.toString(), leafIndex: ev.args.index }
+	return {
+		claimValueHex: claimValue.toString(),
+		secretHashHex: secretHash.toString(),
+		leafIndex: ev.args.index,
+		messageHashHex: ev.args.key,
+	}
 }
 
 type AztecNodeClient = ReturnType<typeof createAztecNodeClient>

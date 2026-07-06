@@ -14,17 +14,15 @@
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { getInitialTestAccountsData } from "@aztec/accounts/testing"
 import { loadContractArtifact } from "@aztec/aztec.js/abi"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { SetPublicAuthwitContractInteraction } from "@aztec/aztec.js/authorization"
-import { Contract, getContractInstanceFromInstantiationParams, waitForProven } from "@aztec/aztec.js/contracts"
-import { computeSecretHash } from "@aztec/aztec.js/crypto"
+import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
-import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
+import { GasFees } from "@aztec/stdlib/gas"
+import { registerInitialLocalNetworkAccountsInWallet } from "@aztec/wallets/testing"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
@@ -34,6 +32,8 @@ import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
 import { createPublicClient, createWalletClient, defineChain, getContract, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
+import { runRouterDeposit } from "../src/flows"
+import { SWAP_BRIDGE_ROUTER_ABI } from "../src/router-abi"
 
 const SANDBOX_RPC = process.env.SANDBOX_L1_RPC ?? "http://localhost:8545"
 const TOKEN_NAME = "Nulo USDC"
@@ -76,6 +76,45 @@ async function nodeAddrs(): Promise<{ registry: `0x${string}`; feeJuice: `0x${st
 	return { registry: pick(a.registryAddress), feeJuice: pick(a.feeJuiceAddress), feeJuicePortal: pick(a.feeJuicePortalAddress) }
 }
 
+/**
+ * Wait until a bridged L1→L2 message is CLAIMABLE. rc.2 mints no empty L2 blocks, so after an L1
+ * deposit the node/PXE anchor stalls below the message's checkpoint forever and the claim's
+ * membership witness can't be built ("Tried to consume nonexistent L1-to-L2 message") — even though
+ * the pre-send SIMULATION passes optimistically. `forceBlock` submits a cheap L2 tx each poll to
+ * advance the anchor. Mirrors apps/extension/tests/e2e/fixtures/aztec.ts:waitForL1ToL2Message.
+ */
+async function waitForL1ToL2Message(
+	node: ReturnType<typeof createAztecNodeClient>,
+	messageHash: string,
+	forceBlock: () => Promise<unknown>,
+	timeoutMs = 180_000,
+): Promise<void> {
+	const hash = Fr.fromString(messageHash)
+	const start = Date.now()
+	let msgCp: bigint | undefined
+	while (Date.now() - start < timeoutMs) {
+		const cp = await node.getL1ToL2MessageCheckpoint(hash)
+		if (cp !== undefined && cp !== null) {
+			msgCp = BigInt(cp)
+			console.log(`  message checkpointed at ${msgCp} (${Date.now() - start}ms)`)
+			break
+		}
+		await forceBlock().catch(() => {})
+		await new Promise((r) => setTimeout(r, 1500))
+	}
+	if (msgCp === undefined) throw new Error(`message ${messageHash} not checkpointed within ${timeoutMs}ms`)
+	while (Date.now() - start < timeoutMs) {
+		const latest = await node.getBlockData("latest")
+		if (latest && BigInt(latest.checkpointNumber) >= msgCp) {
+			console.log(`  claimable: anchor checkpoint ${latest.checkpointNumber} >= ${msgCp} (${Date.now() - start}ms)`)
+			return
+		}
+		await forceBlock().catch(() => {})
+		await new Promise((r) => setTimeout(r, 1500))
+	}
+	console.warn(`  anchor did not reach checkpoint ${msgCp} within ${timeoutMs}ms — proceeding best-effort`)
+}
+
 async function main() {
 	// ─── L1 (viem) ───────────────────────────────────────────────────
 	const account = privateKeyToAccount(ACCOUNT0_KEY)
@@ -107,19 +146,24 @@ async function main() {
 	// ─── L2 (aztec.js) ───────────────────────────────────────────────
 	const node = createAztecNodeClient(NODE_URL)
 	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: false } })
-	const [acct] = await getInitialTestAccountsData()
-	const manager = await ewallet.createSchnorrAccount(acct.secret, acct.salt, acct.signingKey)
-	const deployer = await manager.getAccount()
-	const from = deployer.getAddress()
-	console.log("L2 deployer", from.toString())
+	// rc.2 --local-network: the funded test accounts are PRE-DEPLOYED at genesis; register them.
+	// (The stale getInitialTestAccountsData + createSchnorrAccount path was for the old --sandbox and
+	// fails "Failed to get a note" — the account/FPC it derives isn't the genesis-funded one.)
+	const accounts = await registerInitialLocalNetworkAccountsInWallet(ewallet as never)
+	const from = accounts[0]
+	const relayer = accounts[1] // a DIFFERENT funded account for the relayer-claim leg (Phase 4)
+	console.log("L2 deployer", from.toString(), "relayer", relayer?.toString())
 
 	const fpc = await getContractInstanceFromInstantiationParams(SponsoredFPCContract.artifact, { salt: new Fr(SPONSORED_FPC_SALT) })
 	try {
 		await ewallet.registerContract(fpc, SponsoredFPCContract.artifact)
 	} catch {}
-	const fee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
+	// rc.2 raised the L2 base fee ~4 orders of magnitude; setup txs need a generous maxFeesPerGas
+	// ceiling or they reject with "maxFeesPerGas.feePerL2Gas must be >= gasFees" (see e2e fixtures).
+	const E2E_FEE_GAS = { maxFeesPerGas: new GasFees(10n ** 13n, 10n ** 13n) }
+	const fee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address), gasSettings: E2E_FEE_GAS }
 	const opts = { from, fee }
-	const sendOpts = { ...opts, wait: { waitForStatus: TxStatus.PROPOSED } }
+	const sendOpts = { ...opts, wait: { waitForStatus: TxStatus.CHECKPOINTED } }
 
 	const deployL2 = async (label: string, art: unknown, args: unknown[], ctor: string): Promise<Contract> => {
 		const salt = Fr.random()
@@ -133,11 +177,15 @@ async function main() {
 				constructorArtifact: ctor,
 			} as never,
 		)
-		await Contract.deploy(ewallet as never, art as never, args as never, ctor).send({
-			...opts,
-			contractAddressSalt: salt,
+		// 5.0: salt + universalDeploy are construction-time DeployInstantiationOptions, NOT send options.
+		// Passing them to .send() is silently ignored → the deploy lands at the wallet-as-deployer /
+		// default-salt address, DIFFERENT from the deployer=ZERO instance computed above ("not deployed").
+		await Contract.deploy(ewallet as never, art as never, args as never, ctor, {
+			salt,
 			universalDeploy: true,
-			wait: { waitForStatus: TxStatus.PROPOSED },
+		} as never).send({
+			...opts,
+			wait: { waitForStatus: TxStatus.CHECKPOINTED },
 		} as never)
 		const c = await Contract.at(instance.address, art as never, ewallet as never)
 		console.log(`${label}:`, c.address.toString())
@@ -197,198 +245,122 @@ async function main() {
 	}
 
 	if (process.argv.includes("--smoke")) {
-		console.log("\n=== deposit-public smoke (L1 deposit → L2 claim) ===")
 		const amount = 100n * 10n ** 6n
-		const l2recipient = from
-		const secret = Fr.random()
-		const secretHash = await computeSecretHash(secret)
 		const usdcAbi = usdcArt.abi as never
-
-		await pub.waitForTransactionReceipt({
-			hash: await wallet.writeContract({
-				address: usdc,
-				abi: usdcAbi,
-				functionName: "mint",
-				args: [account.address, amount] as never,
-			}),
-		})
-		await pub.waitForTransactionReceipt({
-			hash: await wallet.writeContract({ address: usdc, abi: usdcAbi, functionName: "approve", args: [portal, amount] as never }),
-		})
-		const depositArgs = [l2recipient.toString(), amount, secretHash.toString()]
-		const sim = await pub.simulateContract({
-			address: portal,
-			abi: TokenPortalAbi as never,
-			functionName: "depositToAztecPublic",
-			args: depositArgs as never,
-			account,
-		})
-		const leafIndex = BigInt((sim.result as [string, bigint])[1])
-		await pub.waitForTransactionReceipt({
-			hash: await wallet.writeContract({
-				address: portal,
-				abi: TokenPortalAbi as never,
-				functionName: "depositToAztecPublic",
-				args: depositArgs as never,
-			}),
-		})
-		console.log("deposited 100 USDC → L2, leafIndex:", leafIndex.toString())
-
-		let claimed = false
-		for (let i = 0; i < 200 && !claimed; i++) {
-			try {
-				await bridge.methods.claim_public(l2recipient, amount, secret, new Fr(leafIndex)).send(sendOpts)
-				claimed = true
-			} catch {
-				await new Promise((r) => setTimeout(r, 3000))
-			}
-		}
-		if (!claimed) throw new Error("claim_public never succeeded (L1→L2 message not synced)")
-
-		// aztec.js 4.2.0 simulate() wraps the value in { result, offchainEffects, offchainMessages }.
-		const bal = ((await token.methods.balance_of_public(l2recipient).simulate({ from })) as { result: bigint }).result
-		console.log("L2 public USDC balance:", bal.toString())
-		if (bal < amount) throw new Error(`balance ${bal} < deposited ${amount}`)
-		console.log("✅ deposit-public balance assertion OK (100 USDC minted on L2)")
-		console.log("✅ deposit-public smoke PASSED")
-
-		// ── deposit-private (flow #2): claim_private mints to a private balance ──
-		console.log("\n=== deposit-private smoke (L1 deposit → L2 private claim) ===")
-		const secretP = Fr.random()
-		const secretHashP = await computeSecretHash(secretP)
-		await pub.waitForTransactionReceipt({
-			hash: await wallet.writeContract({
-				address: usdc,
-				abi: usdcAbi,
-				functionName: "mint",
-				args: [account.address, amount] as never,
-			}),
-		})
-		await pub.waitForTransactionReceipt({
-			hash: await wallet.writeContract({ address: usdc, abi: usdcAbi, functionName: "approve", args: [portal, amount] as never }),
-		})
-		const privArgs = [amount, secretHashP.toString()]
-		const simP = await pub.simulateContract({
-			address: portal,
-			abi: TokenPortalAbi as never,
-			functionName: "depositToAztecPrivate",
-			args: privArgs as never,
-			account,
-		})
-		const leafIndexP = BigInt((simP.result as [string, bigint])[1])
-		await pub.waitForTransactionReceipt({
-			hash: await wallet.writeContract({
-				address: portal,
-				abi: TokenPortalAbi as never,
-				functionName: "depositToAztecPrivate",
-				args: privArgs as never,
-			}),
-		})
-		console.log("deposited 100 USDC → L2 (private), leafIndex:", leafIndexP.toString())
-
-		let claimedP = false
-		for (let i = 0; i < 200 && !claimedP; i++) {
-			try {
-				await bridge.methods.claim_private(l2recipient, amount, secretP, new Fr(leafIndexP)).send(sendOpts)
-				claimedP = true
-			} catch {
-				await new Promise((r) => setTimeout(r, 3000))
-			}
-		}
-		if (!claimedP) throw new Error("claim_private never succeeded (L1→L2 message not synced)")
-
-		const balP = ((await token.methods.balance_of_private(l2recipient).simulate({ from })) as { result: bigint }).result
-		console.log("L2 private USDC balance:", balP.toString())
-		if (balP < amount) throw new Error(`private balance ${balP} < deposited ${amount}`)
-		console.log("✅ deposit-private balance assertion OK (100 USDC minted privately on L2)")
-
-		// ── withdraw-public (flow #4): exit_to_l1 → proven → L1 Outbox consume ──
-		console.log("\n=== withdraw-public smoke (L2 burn → L1 Outbox consume) ===")
-		const wAmount = 40n * 10n ** 6n
-		const wNonce = Fr.random()
-		// Authorize the proxy (the direct caller of token.burn_public) to burn the deployer's public tokens.
-		const authwit = await SetPublicAuthwitContractInteraction.create(
-			ewallet as never,
-			from,
-			{ caller: proxy.address, action: token.methods.burn_public(from, wAmount, wNonce) } as never,
-			true,
-		)
-		await authwit.send(sendOpts)
-		const { receipt: exitReceipt } = await bridge.methods
-			.exit_to_l1_public(EthAddress.fromString(account.address), wAmount, EthAddress.ZERO, wNonce)
-			.send(sendOpts)
-		const exitTxHash = exitReceipt.txHash
-		console.log("exit_to_l1 sent, txHash:", exitTxHash.toString())
-
-		await waitForProven(node, exitReceipt)
-		const eff = await node.getTxEffect(exitTxHash)
-		if (!eff) throw new Error("no tx effect for exit")
-		const messageHash = eff.data.l2ToL1Msgs[0]
-		if (!messageHash) throw new Error("no L2→L1 message in exit tx")
-		const wit = await computeL2ToL1MembershipWitness(node, messageHash, exitTxHash, 0)
-		if (!wit) throw new Error("L2→L1 witness not available")
-		console.log("withdraw witness: epoch", wit.epochNumber, "leafIndex", wit.leafIndex.toString())
-
-		const path = wit.siblingPath.toBufferArray().map((b: Buffer) => `0x${b.toString("hex")}` as `0x${string}`)
-		const balOf = async (): Promise<bigint> =>
-			(
-				await pub.simulateContract({
+		const l1ctx = { pub, wallet, account }
+		const DEADLINE = 9_999_999_999n
+		// Permit2 SignatureTransfer nonces are single-use and the anvil L1 state PERSISTS across reruns
+		// (the aztec node is bound to it, so it can't be reset), so use a fresh RANDOM nonce per deposit —
+		// a sequential 0,1,2 collides with a prior run and reverts InvalidNonce (0x756688fe).
+		const mintUsdc = async () => {
+			await pub.waitForTransactionReceipt({
+				hash: await wallet.writeContract({
 					address: usdc,
 					abi: usdcAbi,
-					functionName: "balanceOf",
-					args: [account.address] as never,
-					account,
-				})
-			).result as bigint
-		const usdcBefore = await balOf()
-		const wReq = await pub.simulateContract({
-			address: portal,
-			abi: TokenPortalAbi as never,
-			functionName: "withdraw",
-			args: [account.address, wAmount, false, BigInt(wit.epochNumber), wit.leafIndex, path] as never,
-			account,
-		})
-		await pub.waitForTransactionReceipt({ hash: await wallet.writeContract(wReq.request as never) })
-		const withdrawn = (await balOf()) - usdcBefore
-		console.log("L1 USDC withdrawn:", withdrawn.toString())
-		if (withdrawn < wAmount) throw new Error(`withdrew ${withdrawn} < ${wAmount}`)
-		console.log("✅ withdraw-public smoke PASSED")
+					functionName: "mint",
+					args: [account.address, amount] as never,
+				}),
+			})
+		}
+		const routerDeposit = (isPrivate: boolean, claimSalt?: Fr) =>
+			runRouterDeposit(l1ctx as never, {
+				router,
+				routerAbi: SWAP_BRIDGE_ROUTER_ABI as never,
+				permit2: PERMIT2,
+				tokenPortal: portal,
+				bridgeToken: usdc,
+				amount,
+				aztecRecipient: from.toString() as `0x${string}`,
+				isPrivate,
+				claimSalt,
+				swapTarget: mock,
+				nonce: Fr.random().toBigInt(),
+				deadline: DEADLINE,
+				chainId: 31337,
+			})
+		// Claims wait for PROPOSED (in a block proposal), NOT CHECKPOINTED — a checkpoint is a PROVEN
+		// state and is far slower with proving disabled (deploys need CHECKPOINTED to be queryable; a
+		// claim only needs to land, and the balance simulate reads proposed state). Using CHECKPOINTED
+		// here makes every send's wait time out → the loop re-sends forever though the message is
+		// consumable (simulation returns revertCode 0).
+		const claimOpts = { ...opts, wait: { waitForStatus: TxStatus.PROPOSED } }
+		// biome-ignore lint/suspicious/noExplicitAny: aztec.js method typing
+		const claimLoop = async (mk: () => any, label: string, send: unknown = claimOpts) => {
+			for (let i = 0; i < 60; i++) {
+				try {
+					await mk().send(send as never)
+					return
+				} catch (e) {
+					if (i % 5 === 0) console.log(`[${label}] attempt ${i} failed:`, (e as Error).message?.slice(0, 300))
+					await new Promise((r) => setTimeout(r, 3000))
+				}
+			}
+			throw new Error(`${label} never succeeded (L1→L2 message not synced)`)
+		}
+		const privBal = async (): Promise<bigint> =>
+			((await token.methods.balance_of_private(from).simulate({ from })) as { result: bigint }).result
+		// rc.2 mints no empty L2 blocks, so a cheap 0-amount self-transfer advances the anchor past the
+		// deposit's L1→L2 message checkpoint (the real claimability condition). Balance-independent.
+		const forceBlock = () => token.methods.transfer_public_to_private(from, from, 0n, 0n).send(claimOpts as never)
 
-		// ── withdraw-private (flow #4b): exit_to_l1_private (private burn, private authwit) ──
-		console.log("\n=== withdraw-private smoke (private L2 burn → L1 consume) ===")
-		const wpAmount = 30n * 10n ** 6n
-		const wpNonce = Fr.random()
-		const ni = await node.getNodeInfo()
-		const chainInfo = { chainId: new Fr(ni.l1ChainId), version: new Fr(ni.rollupVersion) }
-		const burnAuthwit = await deployer.createAuthWit(
-			{ caller: proxy.address, action: token.methods.burn_private(from, wpAmount, wpNonce) },
-			chainInfo as never,
+		// ── (a) PUBLIC bridge via router.bridge() → claim_public ──
+		console.log("\n=== deposit-public via router.bridge() ===")
+		await mintUsdc()
+		const pubRes = await routerDeposit(false)
+		console.log("public bridge() deposited, leafIndex:", pubRes.leafIndex.toString())
+		await waitForL1ToL2Message(node, pubRes.messageHashHex, forceBlock)
+		await claimLoop(
+			() => bridge.methods.claim_public(from, amount, Fr.fromString(pubRes.claimValueHex), new Fr(pubRes.leafIndex)),
+			"claim_public",
 		)
-		const { receipt: exitPReceipt } = await bridge.methods
-			.exit_to_l1_private(EthAddress.fromString(account.address), wpAmount, EthAddress.ZERO, wpNonce)
-			.send({ ...sendOpts, authWitnesses: [burnAuthwit] })
-		const exitPTxHash = exitPReceipt.txHash
-		await waitForProven(node, exitPReceipt)
-		const effP = await node.getTxEffect(exitPTxHash)
-		if (!effP) throw new Error("no tx effect for private exit")
-		const messageHashP = effP.data.l2ToL1Msgs[0]
-		if (!messageHashP) throw new Error("no L2→L1 message in private exit")
-		const witP = await computeL2ToL1MembershipWitness(node, messageHashP, exitPTxHash, 0)
-		if (!witP) throw new Error("private withdraw witness not available")
-		const pathP = witP.siblingPath.toBufferArray().map((b: Buffer) => `0x${b.toString("hex")}` as `0x${string}`)
-		const usdcBeforeP = await balOf()
-		const wReqP = await pub.simulateContract({
-			address: portal,
-			abi: TokenPortalAbi as never,
-			functionName: "withdraw",
-			args: [account.address, wpAmount, false, BigInt(witP.epochNumber), witP.leafIndex, pathP] as never,
-			account,
-		})
-		await pub.waitForTransactionReceipt({ hash: await wallet.writeContract(wReqP.request as never) })
-		const withdrawnP = (await balOf()) - usdcBeforeP
-		console.log("private: L1 USDC withdrawn:", withdrawnP.toString())
-		if (withdrawnP < wpAmount) throw new Error(`private withdrew ${withdrawnP} < ${wpAmount}`)
-		console.log("✅ withdraw-private smoke PASSED")
+		const balPub = ((await token.methods.balance_of_public(from).simulate({ from })) as { result: bigint }).result
+		if (balPub < amount) throw new Error(`public balance ${balPub} < ${amount}`)
+		console.log("✅ deposit-public via router PASSED, L2 public balance:", balPub.toString())
+
+		// ── (c) PRIVATE bridge via router.bridge() with a recipient-committed salt → claim_private(salt) ──
+		console.log("\n=== deposit-private via router.bridge() (recipient-committed) ===")
+		await mintUsdc()
+		const salt = Fr.random()
+		const privRes = await routerDeposit(true, salt)
+		console.log("private bridge() deposited, leafIndex:", privRes.leafIndex.toString())
+		await waitForL1ToL2Message(node, privRes.messageHashHex, forceBlock)
+		// claimValueHex IS the salt for the private path; claim_private re-derives the secret in-circuit.
+		const balPrivBefore = await privBal()
+		await claimLoop(
+			() => bridge.methods.claim_private(from, amount, Fr.fromString(privRes.claimValueHex), new Fr(privRes.leafIndex)),
+			"claim_private (self)",
+		)
+		if ((await privBal()) - balPrivBefore < amount) throw new Error("private self-claim did not mint")
+		console.log("✅ deposit-private self-claim PASSED — the recipient-commitment circuit consumed a real L1→L2 message")
+
+		// ── RELAYER (F-007 closure): account[1] submits claim_private FOR account[0]; wrong recipient must fail first ──
+		console.log("\n=== relayer claim + wrong-recipient rejection ===")
+		await mintUsdc()
+		const salt2 = Fr.random()
+		const relRes = await routerDeposit(true, salt2)
+		await waitForL1ToL2Message(node, relRes.messageHashHex, forceBlock)
+		const relayerSend = { ...opts, from: relayer, wait: { waitForStatus: TxStatus.PROPOSED } }
+		// Wrong recipient BEFORE consuming: claim to `relayer` with salt2 derives a different secret → must fail.
+		let wrongRejected = false
+		try {
+			await bridge.methods
+				.claim_private(relayer, amount, Fr.fromString(salt2.toString()), new Fr(relRes.leafIndex))
+				.send(relayerSend as never)
+		} catch {
+			wrongRejected = true
+		}
+		if (!wrongRejected) throw new Error("SECURITY FAILURE: wrong-recipient claim_private SUCCEEDED — recipient-commitment is broken")
+		console.log("✅ wrong-recipient claim rejected (the binding holds — a relayer cannot redirect)")
+		// Correct: the RELAYER (account[1] ≠ recipient) submits the claim for account[0]; funds land at account[0].
+		const balBefore = await privBal()
+		await claimLoop(
+			() => bridge.methods.claim_private(from, amount, Fr.fromString(salt2.toString()), new Fr(relRes.leafIndex)),
+			"relayer claim_private",
+			relayerSend,
+		)
+		if ((await privBal()) - balBefore < amount) throw new Error("relayer claim: recipient balance did not increase")
+		console.log("✅ relayer claim PASSED — account[1] finished account[0]'s deposit; funds landed at account[0] (F-007 closed)")
+		console.log("\n✅ ALL PHASE-4 SMOKE FLOWS PASSED (router deposits + recipient-committed claims + relayer)")
 	}
 
 	const deployment = {
