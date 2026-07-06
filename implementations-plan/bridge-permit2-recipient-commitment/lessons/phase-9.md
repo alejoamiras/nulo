@@ -69,6 +69,25 @@ current live testnet** (`privateClaimMode: undefined`) — usable only after the
 | Faucet full | `bun run audit:faucet` | exit 0 (426 tests, verify-deployments matched, build OK) |
 | Repo | `bun run lint && bun run typecheck:all` | lint 0; typecheck 8/8 |
 
+## Wrap-up code-review pass (loop terminal step, `/code-review max --fix` in spirit)
+
+The local `code-review` skill is an interactive guided-tour reviewer (no `max`/`--fix` mode); the billed
+cloud `ultra` is user-only. So the wrap-up was honoured directly: a rigorous fix-oriented read of the
+NEWEST un-audited code — the relayer LIVE wrapper (`relay-claim-testnet.ts`), which was written AFTER the
+Phase 9 audit subagents ran and is live-only (untestable offline). Reading it against the proven
+`fuel-testnet.ts:110-165` pattern found real wiring bugs that would have failed the first Phase 7 run:
+
+- `createSchnorrAccount` returns a **manager**, not a wallet/account — the original used it directly as
+  both the tx `from` and the contract wallet. Fixed: `manager.getAccount().getAddress()` for `from`,
+  contracts bound to the `EmbeddedWallet`.
+- No account **deploy** step — added the deploy-if-needed gate (`node.getContract(addr)` → sponsored-FPC
+  deploy, fixed `Fr.ZERO` salt for a deterministic persistent-relayer address).
+
+**Lesson:** code written after the audit fan-out completes escapes the audit — review the diff's tail
+(post-audit commits) explicitly. Live-only scripts get their ONLY validation from a static read against a
+proven sibling; do that read deliberately, don't assume typecheck+lint covers runtime wiring. A codex
+xhigh pass on the corrected wrapper is the final insurance (it can't be integration-tested until Phase 7).
+
 ## Toolchain note (this machine)
 
 `nargo`/`forge` are installed (Phase 0) but not on the non-interactive shell PATH. Reach them with

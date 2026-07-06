@@ -34,6 +34,7 @@ import { EthAddress } from "@aztec/foundation/eth-address"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveSigningKey } from "@aztec/stdlib/keys"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
+import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
 import { bridgeProxyArtifact, tokenBridgeArtifact } from "../src/artifacts"
 import { bridgeAt, submitPrivateClaim } from "../src/l2"
 import { assertSaltV2, parseClaimDescriptor, redactDescriptorForLog, requireRelayerSecret } from "../src/relay-claim"
@@ -78,13 +79,24 @@ async function main(): Promise<void> {
 		await deployMethod.send({ fee, from: "NO_FROM" as never } as never)
 	}
 
-	// 3. Register the target bridge instance (rebuilt from the manifest, same path as verify-deployments).
+	// 3. Register EVERY L2 contract the private claim touches. claim_private privately calls
+	//    TokenMinterProxy.mint_to_private → the Token, so a clean PXE needs the proxy + token + bridge
+	//    artifacts to simulate+prove — not just the bridge. Rebuilt from the manifest (same path as
+	//    verify-deployments / fuel-testnet).
 	const proxy = await getContractInstanceFromInstantiationParams(bridgeProxyArtifact, {
 		publicKeys: PublicKeys.default(),
 		deployer: AztecAddress.ZERO,
 		constructorArgs: [],
 		salt: new Fr(BigInt(manifest.l2.proxy.salt)),
 		constructorArtifact: manifest.l2.proxy.constructorArtifact,
+	})
+	const [tokenName, tokenSymbol, tokenDecimals] = manifest.l2.token.constructorArgs
+	const token = await getContractInstanceFromInstantiationParams(TokenContractArtifact, {
+		publicKeys: PublicKeys.default(),
+		deployer: AztecAddress.ZERO,
+		constructorArgs: [tokenName, tokenSymbol, tokenDecimals, proxy.address],
+		salt: new Fr(BigInt(manifest.l2.token.salt)),
+		constructorArtifact: manifest.l2.token.constructorArtifact,
 	})
 	const bridgeInstance = await getContractInstanceFromInstantiationParams(tokenBridgeArtifact, {
 		publicKeys: PublicKeys.default(),
@@ -98,17 +110,42 @@ async function main(): Promise<void> {
 			`bridge mismatch: descriptor names ${descriptor.bridge} but the manifest rebuilds ${bridgeInstance.address.toString()} — refusing`,
 		)
 	}
-	await ewallet.registerContract(bridgeInstance, tokenBridgeArtifact)
+	for (const [inst, art] of [
+		[proxy, bridgeProxyArtifact],
+		[token, TokenContractArtifact],
+		[bridgeInstance, tokenBridgeArtifact],
+	] as const) {
+		await ewallet.registerContract(inst, art as never)
+	}
 
-	// 4. Submit the claim FOR the user. A wrong recipient could not have produced this salt→secret, so
-	//    the relayer cannot redirect; the funds land at `descriptor.recipient`. The `wait` opt auto-waits
-	//    and THROWS if the tx doesn't reach PROPOSED — success is "no throw" (same as the sandbox smoke).
+	// 4. Submit the claim FOR the user, with a bounded retry for the L1→L2 settling window / fee drift
+	//    (the message may not be claimable the instant the relayer is handed the descriptor). A wrong
+	//    recipient could not have produced this salt→secret, so the relayer cannot redirect; the funds
+	//    land at descriptor.recipient. `wait` auto-waits and THROWS if the tx doesn't reach PROPOSED.
 	const bridge = bridgeAt(ewallet as never, descriptor.bridge, tokenBridgeArtifact)
-	const result = (await submitPrivateClaim(
-		bridge,
-		{ recipient: descriptor.recipient, amount: descriptor.amount, secret: descriptor.salt, messageLeafIndex: descriptor.leafIndex },
-		{ from: relayerAddr, ...fee, wait: { waitForStatus: TxStatus.PROPOSED } },
-	)) as { receipt?: { txHash?: { toString(): string } } }
+	let result: { receipt?: { txHash?: { toString(): string } } } | undefined
+	let lastErr: unknown
+	for (let attempt = 1; attempt <= 5 && !result; attempt++) {
+		try {
+			result = (await submitPrivateClaim(
+				bridge,
+				{
+					recipient: descriptor.recipient,
+					amount: descriptor.amount,
+					secret: descriptor.salt,
+					messageLeafIndex: descriptor.leafIndex,
+				},
+				{ from: relayerAddr, ...fee, wait: { waitForStatus: TxStatus.PROPOSED } },
+			)) as { receipt?: { txHash?: { toString(): string } } }
+		} catch (e) {
+			// A claim error never carries the salt (it's a not-yet-claimable / fee-drift condition), so the
+			// message is safe to log; the salt stays out per redactDescriptorForLog + the top-level catch.
+			lastErr = e
+			console.log(`claim attempt ${attempt}/5 failed: ${e instanceof Error ? e.message : String(e)} — retrying in 15s`)
+			await new Promise((r) => setTimeout(r, 15_000))
+		}
+	}
+	if (!result) throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
 	console.log(
 		`✅ relayed claim_private for ${descriptor.recipient} — tx ${result.receipt?.txHash?.toString() ?? "(mined)"} (funds land at the bound recipient)`,
 	)
