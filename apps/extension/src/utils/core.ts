@@ -26,6 +26,7 @@ import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import type { Tx } from "@/wallet/services/transaction/spec"
 import { TransactionServiceClient } from "@/wallet/services/transaction/client"
+import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
 /** Reactive: true when the long-lived port to the service worker is open. */
 export const isBackgroundConnected = ref(false)
@@ -141,9 +142,9 @@ export function initTransactionService(onTransactionAdded: (tx: Tx) => void, onT
 const sentinelPath = "nulo:ui:sentinel"
 
 export async function setSentinel(): Promise<void> {
-	await chrome.storage.local.set({ [sentinelPath]: __SENTINEL__ })
+	await storageLocalSet({ [sentinelPath]: __SENTINEL__ })
 }
 
 export async function checkSentinel(): Promise<boolean> {
-	return (await chrome.storage.local.get(sentinelPath))[sentinelPath] === __SENTINEL__
+	return (await storageLocalGet(sentinelPath))[sentinelPath] === __SENTINEL__
 }

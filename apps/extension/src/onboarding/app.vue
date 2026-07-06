@@ -86,6 +86,7 @@ onMounted(async () => {
 		<ToastManager />
 		<NotificationManager />
 		<GlobalLoader />
+		<MigrationBarrier />
 
 		<!-- Brand signature: lock icon + NULO wordmark — same as popup
 			register page, so the onboarding tab feels like Nulo from the

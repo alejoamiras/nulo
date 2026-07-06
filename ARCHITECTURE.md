@@ -90,23 +90,37 @@ For the service worker → offscreen direction, the same pattern repeats with `O
 - **Background services** hold authoritative state and emit `EventHandler` events. The popup pulls current state on mount via service-client method calls and subscribes to relevant events.
 - **Pinia stores** in the popup (`apps/extension/src/stores/`) cache visible state (`appStore`, `popupStore`, `cacheStore`). They are not the source of truth — services are.
 - **`chrome.storage.local`** holds persistent records (profiles, networks, FPCs, accounts, contacts, tokens, dApp sessions). Entity rows are keyed `${root}@${id}`.
-- **`chrome.storage.session`** holds the active `Session` mirror AND the in-flight operation journal — both survive SW suspensions but are cleared when the browser session ends. The journal stores `nulo:journal@<id>` records via `OperationJournalService` (`apps/extension/src/wallet/services/operation-journal/service.ts`); stale ops after a browser reboot aren't actionable, so this is the right tier.
+- **`chrome.storage.session`** holds the active `Session` mirror — survives SW suspensions, cleared when the browser session ends.
+- **The operation journal lives in `chrome.storage.local`** (`nulo:journal@<id>` via `OperationJournalService`, `apps/extension/src/wallet/services/operation-journal/service.ts`). It originally used session storage ("stale ops post-reboot aren't actionable"), but terminal records ARE the user's history — the browser-exit wipe was erasing failed/cancelled history users expected to keep, so the durability tier changed (2026-06-05). The reaper still fails surviving non-terminal records on SW restart.
 - **Operation journal model** (Phase 2 + Phase 2.5). Every long-running operation creates a record with a 7-stage FSM (`pending → simulating → proving → submitting → succeeded/failed/cancelled`, plus a `simulating → succeeded` no-prove shortcut for non-tx kinds). Three kinds today: `transfer`, `dapp_execute` (full FSM + on-chain `txHash`), `token_import` (no-prove shortcut, no `txHash`). The kind ↔ `txHash` invariant is enforced at `transitionOperation`. Sibling `JournalReaper` marks stuck non-terminal records as failed; `JournalGC` caps terminal records at 50 per `(profileId, accountAddress)` on a 60-min alarm. Activity feed renders one card per in-flight journal op (newest on top, older below); token-import surface is a sibling `TokenImportRow` in the tokens view. The substrate is intentionally extensible — adding a new kind requires adding the enum variant + the `kind ↔ txHash` branch + a renderer; the FSM table stays unchanged.
-- **PXE** writes its own IndexedDB under the offscreen document (`pxe/...` databases). The wipe migration nukes these on storage-version bumps.
+- **PXE** writes its own IndexedDB under the offscreen document (`pxe/...` databases). PXE state is OUTSIDE the storage-migration framework's scope — it is Aztec-owned and rebuilt on protocol resets, not field-migrated.
 
-## 5. Storage versioning + destructive migration
+## 5. Storage versioning + data-preserving migration
 
-`apps/extension/src/wallet/storage/migrate.ts` runs on first unlock after the SW boots. It compares the stored `nulo:core:storage-version` against `CURRENT_VERSION` (currently 9 — `v8` for the Aztec 5.0.0-rc.1 hard fork, where account/contract address derivation + the Schnorr scheme changed; `v9` for the rc.2 testnet redeploy, where the rollupVersion/derived chainId moved and every contract class-id shifted. Both wipe stored accounts/balances/PXE DBs; users re-register). If the version is older, the migration:
+When a release changes the shape of a persisted `chrome.storage.local` record (add / rename / remove a field, restructure), existing users' data is **transformed in place by a numbered migration — never wiped**. (The pre-launch wipe-on-bump model and its `migrate.ts` are gone; the wallet launched its current shape as **schema v1**.)
 
-1. Wipes a known set of `KEYS_TO_WIPE` and `KEY_PREFIXES_TO_WIPE_LOCAL` / `_SESSION`.
-2. Deletes PXE IndexedDB databases (`pxe/...` prefix + `keyval-store`).
-3. Writes the new version key.
+**The engine** — `@nulo/wallet-core/migration` (pure, `chrome.*`-free, fully unit-tested) — applies migrations where `version > persisted nulo:schema:version`, each under a crash-safe journal:
 
-The wallet has no production users, so each version bump is a destructive wipe — `getOrInitNetworks()` and friends reseed defaults on next access. Pre-0.11.0 wallets are not migratable.
+1. Set the durable `nulo:schema:running` marker (doubles as the UI barrier, below).
+2. Snapshot the migration's **declared footprint** into a single-key atomic backup.
+3. Run `up(ctx)` — writes accumulate in a staging buffer (read-your-writes), never mid-migration.
+4. Commit the staged diff, stamp `nulo:schema:version = N` (per-migration checkpoint), clear the journal.
 
-Wipe scope per version is documented at the top of `migrate.ts`. When bumping `CURRENT_VERSION`, add a paragraph to that doc block explaining the schema change and what gets wiped.
+A throw never advances the version; the next boot **restores the backup, then retries** (a durable, footprint-excluded attempt counter bounds retries). Interrupted boots converge: `running` + valid backup ⇒ restore-then-rerun; `running` without a backup ⇒ the crash predated any write. The marker decision table fails closed: a corrupt/out-of-range version — or the legacy `nulo:core:storage-version` key without a schema version — refuses to guess (`needs-recovery`), never init-and-skip. Fresh installs stamp the max version and run nothing.
 
-**Per-row storage resilience** (Phase 2+ Bundle 1). `EntityStorage` (`packages/wallet-core/src/storage/entity_storage.ts`) wraps every `JSON.parse` in a per-row try/catch: a byte-malformed row used to throw and poison every reader of the namespace; now bad rows are logged with a truncated payload preview, deleted, and skipped from iteration. The journal service layers on top with `OperationRecordSchema.safeParse` in a `_loadValidated` helper — schema-invalid records get the same drop-and-skip treatment so downstream FSM code never sees a malformed record.
+**Pre-production rule**: while the wallet has no production users, shape changes do NOT get migrations — the launch baseline absorbs them and devs reinstall fresh (see CLAUDE.md § Persisted-storage shape changes for the full rule and its flip-at-launch).
+
+**The registry** — `apps/extension/src/wallet/storage/migrations/` (baseline v1; copy `template.ts` to add `NNN-*.ts`, declare the exact read/write footprint, keep `up` idempotent — the harness runs every migration twice — and set `breaking: false` only if the new code genuinely tolerates the old shape). The migrator runs in `runtime.ts` as the FIRST storage action — before `config.load()`, so a config-reshaping migration can't be shadowed by an already-loaded config.
+
+**Failure UX**: a breaking failure (or `needs-recovery`) persists `nulo:schema:blocked` and refuses to start services — `MigrationBarrier.vue` (both shells) renders a funds-are-safe recovery screen. An additive failure persists `nulo:schema:degraded` and boots with a dismissible warning. Healthy boots clear both.
+
+**The UI barrier**: popup/onboarding pages are separate JS contexts that read `chrome.storage.local` outside the SW, so a page opened mid-migration could read a pre-migration row and write the old shape back. ALL UI storage access goes through the migration-aware facade (`apps/extension/src/utils/storage.ts`), which blocks on the `running` marker; `storage-facade-ban.test.ts` statically enforces that no raw `chrome.storage.local` access exists outside the allowlist. The barrier engages only on the rare boot right after an update that ships a migration.
+
+**What migrations do NOT cover**: crypto/KDF/vector rotations — the migrator runs pre-unlock and has no password to re-encrypt with (see `packages/wallet-crypto/README.md`); those are re-encrypt-on-next-unlock or a documented reset. PXE IndexedDB — protocol-reset concern, out of scope. `chrome.storage.session` — ephemeral, can't be tracked by a durable version. Imported full-backups are a queued follow-up (`implementations-plan/storage-migration-backup/`) reusing the engine's injected-data-source seam.
+
+**E2E proof**: a build-stamped fixture migration (`VITE_NULO_E2E_MIGRATION_FIXTURE=1`, tree-shaken from prod builds and grep-guarded in `_build-extension.yml`) drives real cold boots in `tests/e2e/migration.test.ts` — transform+checkpoint, fail-closed→recovery→retry, the mid-flight barrier, and crash-mid-migration convergence.
+
+**Per-row storage resilience** (Phase 2+ Bundle 1). `EntityStorage` (`packages/wallet-core/src/storage/entity_storage.ts`) wraps every `JSON.parse` in a per-row try/catch: a byte-malformed row used to throw and poison every reader of the namespace; now bad rows are logged with a truncated payload preview, deleted, and skipped from iteration. (Migration reads are the deliberate exception: the engine's `ctx` THROWS on a malformed row — fail-closed — rather than dropping it, since mid-migration the backup may be the only copy.) The journal service layers on top with `OperationRecordSchema.safeParse` in a `_loadValidated` helper — schema-invalid records get the same drop-and-skip treatment so downstream FSM code never sees a malformed record.
 
 ## 6. Offscreen lifecycle
 

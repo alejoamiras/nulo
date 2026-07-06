@@ -11,6 +11,7 @@
 <script setup>
 /** Utils */
 import { managers } from "@/utils/core"
+import { storageLocalRemove } from "@/utils/storage"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
@@ -49,7 +50,7 @@ const handleReset = async () => {
 	appStore.account = null
 	appStore.transactions = []
 	appStore.awaitingTransactions = []
-	chrome.storage.local.remove("nulo:ui:feePaymentMethods")
+	storageLocalRemove("nulo:ui:feePaymentMethods")
 
 	appStore.isLogined = false
 	appStore.isSessionChecked = false

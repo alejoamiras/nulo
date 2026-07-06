@@ -2,6 +2,7 @@
 /** Utils */
 import { AccountType } from "@/wallet/services/account/client"
 import { managers } from "@/utils/core"
+import { storageLocalSet } from "@/utils/storage"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -53,7 +54,7 @@ const handleCreateAccount = async () => {
 	appStore.account = account
 	appStore.accounts.push(account)
 
-	await chrome.storage.local.set({
+	await storageLocalSet({
 		"nulo:ui:activeAccount": account.address,
 	})
 

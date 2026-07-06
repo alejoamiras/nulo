@@ -15,8 +15,17 @@ export interface ExtensionContext {
 
 /** Launch a fresh browser with the extension and wait for SW liveness.
  *  Exported so test files that need a fully-clean extension (no profile
- *  registered, no networks switched) can build their own fixture. */
-export async function launchExtension(): Promise<ExtensionContext> {
+ *  registered, no networks switched) can build their own fixture.
+ *
+ *  `userDataDir` persists the Chrome profile (chrome.storage.local included)
+ *  across launches — closing the browser and relaunching on the same dir is a
+ *  REAL extension cold boot over surviving data, the faithful way to exercise
+ *  update/crash paths (CDP `Runtime.terminateExecution` leaves an
+ *  unrevivable zombie SW — see migration.test.ts). `waitForLiveness: false`
+ *  skips the liveness gate for boots expected to park or fail before the
+ *  heartbeat starts (a held or failing storage migration). */
+export async function launchExtension(opts: { userDataDir?: string; waitForLiveness?: boolean } = {}): Promise<ExtensionContext> {
+	const { userDataDir, waitForLiveness = true } = opts
 	const extensionPath = inject("extensionPath")
 
 	// Headless `true` (the modern default in Puppeteer 24+) supports MV3
@@ -28,6 +37,7 @@ export async function launchExtension(): Promise<ExtensionContext> {
 	const headless: boolean = process.env.HEADLESS !== "0"
 	const browser = await puppeteer.launch({
 		headless,
+		...(userDataDir ? { userDataDir } : {}),
 		args: [
 			`--disable-extensions-except=${extensionPath}`,
 			`--load-extension=${extensionPath}`,
@@ -70,17 +80,19 @@ export async function launchExtension(): Promise<ExtensionContext> {
 	await blankPage.goto(`chrome-extension://${extensionId}/src/popup/index.html`, {
 		waitUntil: "domcontentloaded",
 	})
-	await blankPage.waitForFunction(
-		async () => {
-			try {
-				const result = await chrome.storage.session.get("nulo:liveness")
-				return !!result["nulo:liveness"]
-			} catch {
-				return false
-			}
-		},
-		{ timeout: 30_000, polling: 500 },
-	)
+	if (waitForLiveness) {
+		await blankPage.waitForFunction(
+			async () => {
+				try {
+					const result = await chrome.storage.session.get("nulo:liveness")
+					return !!result["nulo:liveness"]
+				} catch {
+					return false
+				}
+			},
+			{ timeout: 30_000, polling: 500 },
+		)
+	}
 
 	// Default: bypass the new onboarding tab flow for all e2e tests. Existing
 	// tests (registration, import-paths, passkey-paths, etc.) drive the

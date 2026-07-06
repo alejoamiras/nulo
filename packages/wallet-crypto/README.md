@@ -34,7 +34,7 @@ Colocated `*.test.ts`. The cryptographic derivation chain is **additionally lock
 
 - `apps/extension/src/wallet/crypto/key-vectors.test.ts` exercises the full chain end-to-end and must pass byte-identically after any change here.
 
-Treat that file as a contract. If a change is intentional (rotating a label, bumping a KDF cost), it requires a storage-version bump and a destructive-migration row in `apps/extension/src/wallet/storage/migrate.ts`.
+Treat that file as a contract. **A vector/KDF change is NOT an ordinary storage migration.** The boot migrator (`@nulo/wallet-core/migration`) runs BEFORE unlock, so it has no password and cannot decrypt + re-encrypt the stored secret. An intentional change (rotating a label, bumping a KDF cost) therefore requires either a **re-encrypt-on-next-unlock** step (once the password is available) or a **documented reset** — never a plain numbered migration. The data-preserving migration framework at `apps/extension/src/wallet/storage/migrations/` handles persisted-JSON shape changes only, not crypto.
 
 ## Key invariants
 
