@@ -49,13 +49,19 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 	// approve-based phases with fuel-specific labels, never the "DEPOSIT + FUEL" / SIGN swap shape.
 	const isFuel = assetKindOf(rec) === "fee-juice"
 	const fueled = rec.fuel !== undefined && !isFuel
-	const keys: BridgePhase["key"][] = rec.isPrivate
-		? fueled
-			? ["seal", "sign", "deposit", "sync", "claim", "confirm"]
-			: ["seal", "approve", "deposit", "sync", "claim", "confirm"]
-		: fueled
-			? ["sign", "deposit", "sync", "claim", "confirm"]
-			: ["approve", "deposit", "sync", "claim", "confirm"]
+	// Every deposit now SIGNS a Permit2 witness and calls the router's bridge()/bridgeWithFuel (the
+	// single path). The AZLO token pre-approves canonical Permit2 for every holder, so bridge-only +
+	// swap-fueled need no approve. Fuel-only is the exception: the canonical fee asset does NOT
+	// pre-approve Permit2, so its FIRST deposit shows a one-time APPROVE (skipped thereafter).
+	const keys: BridgePhase["key"][] = [
+		...(rec.isPrivate ? (["seal"] as BridgePhase["key"][]) : []),
+		...(isFuel ? (["approve"] as BridgePhase["key"][]) : []),
+		"sign",
+		"deposit",
+		"sync",
+		"claim",
+		"confirm",
+	]
 
 	// The fact-bounded zone (the latch): runtime can only refine WITHIN it.
 	let activeKey: BridgePhase["key"]
@@ -81,14 +87,16 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 	}
 	const prompts: Record<string, string> = {
 		seal: "Sign in your Ethereum wallet - encrypts this bridge's recovery secret. No funds move.",
-		approve: "Confirm the allowance for the bridge portal in your Ethereum wallet. No funds move yet.",
+		approve: "First time only: approve Permit2 for the fee asset in your Ethereum wallet. No funds move yet.",
 		deposit: rec.depositTxHash
 			? "Waiting for the Ethereum confirmation…"
 			: fueled
 				? "Confirm the deposit in your Ethereum wallet - the fuel swap rides along in the same transaction."
 				: "Confirm the deposit in your Ethereum wallet.",
 		sync: "The message is crossing to Aztec - no signature needed.",
-		sign: "Sign the bridge intent in your Ethereum wallet - one signature covers the swap and the deposit.",
+		sign: fueled
+			? "Sign the bridge intent in your Ethereum wallet - one signature covers the swap and the deposit."
+			: "Sign the bridge intent in your Ethereum wallet - one signature authorizes the deposit.",
 		claim:
 			rt.step === "unsealing"
 				? "Sign in your Ethereum wallet to unseal the recovery secret, then confirm in your Aztec wallet."

@@ -44,9 +44,10 @@ describe("stepperPhases - fuel (fee-juice) records", () => {
 	const fuelRec = (over: Partial<DepositJournalRecord> = {}): DepositJournalRecord =>
 		dep({ schema: 2, assetKind: "fee-juice", fuel: { amount: "1", secret: "0x1", secretHashHex: "0x2", minOutput: "0" }, ...over })
 
-	it("a public fuel record uses APPROVE phases (not the swap SIGN), despite carrying a fuel block", () => {
+	it("a public fuel record APPROVEs Permit2 (one-time) then SIGNs the router bridge()", () => {
 		expect(stepperPhases(fuelRec({ isPrivate: false }), {}).map((p) => p.key)).toEqual([
 			"approve",
+			"sign",
 			"deposit",
 			"sync",
 			"claim",
@@ -54,10 +55,11 @@ describe("stepperPhases - fuel (fee-juice) records", () => {
 		])
 	})
 
-	it("a private fuel record SEALs the salt then APPROVEs (no Permit2 SIGN)", () => {
+	it("a private fuel record SEALs the salt, APPROVEs Permit2 (one-time), then SIGNs", () => {
 		expect(stepperPhases(fuelRec({ isPrivate: true }), {}).map((p) => p.key)).toEqual([
 			"seal",
 			"approve",
+			"sign",
 			"deposit",
 			"sync",
 			"claim",
@@ -76,7 +78,7 @@ describe("stepperPhases - deposit matrix", () => {
 	it("private fresh record mid-seal: SEAL active, the rest pending", () => {
 		expect(states(dep(), { step: "sealing" })).toEqual({
 			seal: "active",
-			approve: "pending",
+			sign: "pending",
 			deposit: "pending",
 			sync: "pending",
 			claim: "pending",
@@ -84,19 +86,25 @@ describe("stepperPhases - deposit matrix", () => {
 		})
 	})
 
-	it("public records have NO seal phase", () => {
+	it("public records have NO seal phase (SIGN-first, no approve — the token pre-approves Permit2)", () => {
 		const keys = stepperPhases(dep({ isPrivate: false }), {}).map((p) => p.key)
-		expect(keys).toEqual(["approve", "deposit", "sync", "claim", "confirm"])
+		expect(keys).toEqual(["sign", "deposit", "sync", "claim", "confirm"])
 	})
 
-	it("approving: SEAL done, APPROVE active", () => {
-		const s = states(dep(), { step: "approving" })
+	it("signing: SEAL done, SIGN active", () => {
+		const s = states(dep(), { step: "signing" })
 		expect(s.seal).toBe("done")
-		expect(s.approve).toBe("active")
+		expect(s.sign).toBe("active")
 	})
 
-	it("approveOutcome carries skipped (⊘) vs done vs honest degradation when absent", () => {
-		const base = dep({ depositTxHash: "0xt" })
+	it("approveOutcome carries skipped (⊘) vs done vs honest degradation when absent (fuel-only, the sole approve path)", () => {
+		// Only fuel-only shows a one-time Permit2 APPROVE now (bridge-only pre-approves via the token).
+		const base = dep({
+			assetKind: "fee-juice",
+			fuel: { amount: "1", secret: "0x1", secretHashHex: "0x2", minOutput: "0" },
+			isPrivate: false,
+			depositTxHash: "0xt",
+		})
 		expect(states(base, { approveOutcome: "skipped" }).approve).toBe("skipped")
 		expect(states(base, { approveOutcome: "done" }).approve).toBe("done")
 		expect(states(base, {}).approve).toBe("done") // absent (reload) - no false skipped badge
@@ -261,8 +269,8 @@ describe("fueled deposit rail", () => {
 		expect(phases.find((p) => p.key === "claim")?.detail).toMatch(/tokens and your gas/)
 	})
 
-	it("a NON-fueled record's rail is byte-identical to before (no fuel keys leak)", () => {
+	it("a NON-fueled bridge-only record SIGNs (no approve, no fuel keys leak)", () => {
 		const phases = stepperPhases(dep({ isPrivate: false }))
-		expect(phases.map((p) => p.key)).toEqual(["approve", "deposit", "sync", "claim", "confirm"])
+		expect(phases.map((p) => p.key)).toEqual(["sign", "deposit", "sync", "claim", "confirm"])
 	})
 })

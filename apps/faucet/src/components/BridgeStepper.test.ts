@@ -45,14 +45,20 @@ describe("BridgeStepper", () => {
 		runtime.value = { "0xd": { step: "sealing" } }
 		const w = mount(BridgeStepper, { props: { record: dep() } })
 		const phases = w.findAll(sel(TESTIDS.stepperPhase))
-		expect(phases.map((p) => p.attributes("data-phase"))).toEqual(["seal", "approve", "deposit", "sync", "claim", "confirm"])
+		expect(phases.map((p) => p.attributes("data-phase"))).toEqual(["seal", "sign", "deposit", "sync", "claim", "confirm"])
 		expect(phases[0].attributes("data-state")).toBe("active")
 		expect(phases[0].text()).toMatch(/encrypts this bridge's recovery secret/i)
 	})
 
-	it("skipped APPROVE renders the badge", () => {
+	it("skipped APPROVE renders the badge (fuel-only — the sole approve path)", () => {
 		runtime.value = { "0xd": { approveOutcome: "skipped" } }
-		const w = mount(BridgeStepper, { props: { record: dep({ depositTxHash: "0xt" }) } })
+		const fuelRec = dep({
+			assetKind: "fee-juice",
+			fuel: { amount: "1", secret: "0x1", secretHashHex: "0x2", minOutput: "0" },
+			isPrivate: false,
+			depositTxHash: "0xt",
+		})
+		const w = mount(BridgeStepper, { props: { record: fuelRec } })
 		const approve = w.findAll(sel(TESTIDS.stepperPhase)).find((p) => p.attributes("data-phase") === "approve")
 		expect(approve?.attributes("data-state")).toBe("skipped")
 		expect(approve?.text()).toContain("SKIPPED")
