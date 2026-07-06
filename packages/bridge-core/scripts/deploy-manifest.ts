@@ -33,6 +33,9 @@ export interface CandidateManifest {
 		usdc: string
 		portal: string
 		portalSource: "forked-v1"
+		/** L9 runtime interlock — "salt-v2" marks a recipient-committed deployment; the deposit code
+		 *  refuses private deposits without it. Written only into candidate/promoted manifests. */
+		privateClaimMode?: "salt-v2"
 		token: { name: string; symbol: string; decimals: number; maxWholePerTx: number }
 		fuel?: Record<string, unknown>
 		/** Direct Fee-Juice bridge config — the faucet's Fuel tab reads exactly these keys

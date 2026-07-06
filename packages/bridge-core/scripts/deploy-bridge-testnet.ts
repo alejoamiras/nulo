@@ -168,7 +168,30 @@ async function main() {
 	if (!recorded) appendJournal(JOURNAL_PATH, { phase: "generation", salts })
 
 	const usdcArt = evmArtifact("MintableERC20")
-	const usdc = await deployEvm("usdc", "MintableERC20", usdcArt.abi, usdcArt.bytecode, [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, 1000n])
+	// WIPE cutover reuses the LIVE L1 token (EXISTING_L1_TOKEN) — the WIPE is of L2 STATE, not the L1
+	// token/pools. A fresh L1 token would orphan the AZLO/WETH pool, the quoter, and every user's L1
+	// balance (fresh-audit R4). Read-back the identity so a wrong address fails closed.
+	const EXISTING_L1_TOKEN = process.env.EXISTING_L1_TOKEN as `0x${string}` | undefined
+	let usdc: `0x${string}`
+	if (EXISTING_L1_TOKEN) {
+		const readTok = (fn: string) =>
+			pub.readContract({ address: EXISTING_L1_TOKEN, abi: usdcArt.abi as never, functionName: fn } as never)
+		const [sym, dec, cap] = (await Promise.all([readTok("symbol"), readTok("decimals"), readTok("maxMintPerTx")])) as [
+			string,
+			number,
+			bigint,
+		]
+		const expectedCap = 1000n * 10n ** BigInt(TOKEN_DECIMALS)
+		if (sym !== TOKEN_SYMBOL || Number(dec) !== TOKEN_DECIMALS || BigInt(cap) !== expectedCap) {
+			throw new Error(
+				`EXISTING_L1_TOKEN ${EXISTING_L1_TOKEN} identity mismatch: symbol=${sym} decimals=${dec} maxMintPerTx=${cap} (want ${TOKEN_SYMBOL}/${TOKEN_DECIMALS}/${expectedCap})`,
+			)
+		}
+		console.log("reusing existing L1 token", EXISTING_L1_TOKEN, `(${sym}/${dec}) — no fresh deploy, pools preserved`)
+		usdc = EXISTING_L1_TOKEN
+	} else {
+		usdc = await deployEvm("usdc", "MintableERC20", usdcArt.abi, usdcArt.bytecode, [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, 1000n])
+	}
 	const portal = await deployEvm("portal", "NuloTokenPortal", portalArt.abi, portalArt.bytecode, [])
 
 	// ─── L2 (testnet aztec.js - REAL proofs) ─────────────────────────
@@ -392,6 +415,11 @@ async function main() {
 			usdc,
 			portal,
 			portalSource: "forked-v1",
+			// L9 runtime interlock: the recipient-committed deposit code REFUSES to build a private deposit
+			// unless the active manifest declares this. Written ONLY into the candidate (this file is never
+			// the live manifest before promotion), so a stray preview/static deploy of new code against an
+			// OLD (bearer-bridge) manifest fails closed instead of stranding funds.
+			privateClaimMode: "salt-v2",
 			token: { name: TOKEN_NAME, symbol: TOKEN_SYMBOL, decimals: TOKEN_DECIMALS, maxWholePerTx: 1000 },
 			...(fuel ? { fuel } : {}),
 			feeJuice,
