@@ -303,8 +303,11 @@ export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRec
 		return
 	}
 
-	// Raw Fr message hash (pre-computed by wallet-sdk) — no semantic info to
-	// validate beyond the accounts-level check above.
+	// Raw Fr message hash: a dApp-supplied pre-computed hash carries no semantic
+	// info to scope-check, so it cannot be proven within the granted scope. Reject
+	// it — a dApp must pass a structured CallIntent. (An inner-hash is handled above;
+	// the dispatcher routes createAuthWit to explicit user confirmation.)
+	throw new Error("Scope violation: createAuthWit requires a structured call intent; a raw message hash cannot be authorized")
 }
 
 /**
