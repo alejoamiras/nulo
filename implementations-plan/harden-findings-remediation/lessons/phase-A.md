@@ -103,4 +103,17 @@ Branch: `fix/hf-a-dispatcher-authz` off `fix/harden-findings`. Status: **design 
 - Exports needed from `method-scope-checkers.ts`: `callWithinTxOrSimulationScope`, `isCallIntent`, `isIntentInnerHash` (dispatcher reuses them for the coverage decision).
 - Must NOT pass sendTx FIFO hooks (send FIFO is sendTx-specific; codex Q6).
 
-**Consult (in flight):** focused Codex xhigh on the exact handler wiring — signer-account resolution (how handleSendTx resolves its account + how to override to args[0]), routing-in-dispatcher vs isConfirmationNeeded, accessLevel, the exports.
+**Consult-2 verdict (`phase-A-consult-2.md`):** exact wiring confirmed. Ordered implementation:
+1. `method-scope-checkers.ts`: export `isCreateAuthWitCoveredByTxOrSimulationScope(intent, grants)` (wraps `callWithinTxOrSimulationScope` + `isCallIntent`). **Relax `checkCreateAuthWit`**: keep accounts-check + raw-`Fr` reject; STOP throwing for structured uncovered CallIntent/IntentInnerHash (dispatcher routing popups them). → updates scope tests "CallIntent outside scope throws"/"wrong function throws" (no longer throw at scope-checker).
+2. `method-descriptors.ts:107`: `createAuthWit.routing` → `{ via: "handler" }`; remove `"aztec_createAuthWit"` from `AccountOperationKind` (:59).
+3. `dispatcher.ts`: import `AztecCreateAuthWitRequest` + the coverage helper; add `if (methodName === "createAuthWit") return this.handleCreateAuthWit(...)` before the generic METHOD_TO_KIND lookup (~:361); add `handleCreateAuthWit(args, ctx, dappSession, grants)` near `handleGrantPublicAuthwit` (:634):
+   - `requestedFrom = String(args[0])`; `[network, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedFrom)` (validates wallet-owned + in-session → **signer fix**).
+   - covered CallIntent → `executionService.executeOperations([{ kind:"aztec_createAuthWit", networkId: network.id, accountAddress: account.address, messageHashOrIntent }], {type:DAPP,name:ctx.origin})` (silent).
+   - IntentInnerHash / uncovered CallIntent → `dappInteractionService.execute({ sessionId: dappSession.id, operations:[{ kind:"aztec_createAuthWit", account: formatCaipAccount(ctx.chainId, account.address), messageHashOrIntent }] })` (popup, **no hooks**).
+4. `dapp-interaction/service.ts:511`: `aztec_createAuthWit` accessLevel `PrivateData` → `Transactions` (so the popup gate fires).
+5. `OperationCard.vue:450`: minimal `consumer` display for inner-hash.
+6. Tests: `method-descriptors.test.ts` FROZEN_METHOD_TO_KIND/FROZEN_ACCOUNT drop createAuthWit; scope tests updated; add dispatcher tests (signer mismatch, covered→silent, uncovered→popup, inner-hash→popup, raw-Fr reject, no-hooks).
+
+**Adversarial (codex):** covered-CallIntent silent is safe once raw-Fr rejected + inner-hash always-popups + uncovered popups + signer=args[0] + execution ABI name↔selector bind before hashing. Residual = intentionally-granted authority only.
+
+**⚠ Coupling:** the checkCreateAuthWit relax + dispatcher routing MUST land together (relaxing alone would silently execute uncovered intents — reopening F-01). Build the whole arc, hold commit until wallet-bridge suite is green.

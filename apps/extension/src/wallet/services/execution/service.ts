@@ -661,18 +661,18 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			// could obtain an authwit for a selector that did not match the claimed name.
 			// Fail closed if the contract/artifact is unregistered — the dApp registers it
 			// first. Build the call from ABI truth; never trust dApp name/type/isStatic.
-			const authwitInstance = await this.pxeService.getContractInstance(
-				networkInfoFrom(network),
-				AztecAddress.fromStringUnsafe(call.to),
-			)
+			const authwitInstance = await this.pxeService.getContractInstance(networkInfoFrom(network), call.to)
 			if (!authwitInstance) {
 				throw new Error("Contract not found")
 			}
-			const authwitArtifact = await this.pxeService.getContractArtifact(networkInfoFrom(network), authwitInstance.currentContractClassId)
+			const authwitArtifact = await this.pxeService.getContractArtifact(
+				networkInfoFrom(network),
+				authwitInstance.currentContractClassId,
+			)
 			if (!authwitArtifact) {
 				throw new Error("Contract artifact not found")
 			}
-			const authwitFn = await findFunctionBySelector(authwitArtifact, call.selector)
+			const authwitFn = await findFunctionBySelector(authwitArtifact, call.selector.toString())
 			if (!authwitFn) {
 				throw new Error("Method not found")
 			}
