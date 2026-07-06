@@ -15,6 +15,7 @@ AZLO `0x457f…d389`. Manifest: `apps/faucet/public/testnet-bridge.candidate.jso
 | 1 | public bridge → `claim_public` | `smoke-existing-testnet.ts --config <candidate>` | ✅ PASS (2.9m, 100 AZLO, `balance_of_public` verified) |
 | 2 | **PRIVATE bridge → `claim_private`** (strand-risk gate) | `… --config <candidate> --private` | ✅ PASS (4.4m, `balance_of_private` verified — recipient-commitment works LIVE) |
 | 3 | **redirect-proof** (wrong recipient can't consume) | `… --config <candidate> --redirect-proof` | ✅ PASS (binding held — see below) |
+| 4 | fueled bridge (Permit2 `bridgeWithFuel` + self-paying claim) | `smoke-swap-existing-testnet.ts --config <candidate>` | ✅ PASS (3.5m, token 9.75 AZLO + FJ 331 — new portal + reused router) |
 
 ### Canary 3 — the redirect-proof + a PXE gotcha
 
