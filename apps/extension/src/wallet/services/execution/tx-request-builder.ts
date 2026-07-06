@@ -40,7 +40,7 @@
  */
 
 import { Fr } from "@aztec/foundation/curves/bn254"
-import { type AbiType, encodeArguments, FunctionCall, FunctionSelector, FunctionType } from "@aztec/stdlib/abi"
+import { encodeArguments, FunctionCall, FunctionSelector, FunctionType } from "@aztec/stdlib/abi"
 import { AuthWitness } from "@aztec/stdlib/auth-witness"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { Gas, GasSettings } from "@aztec/stdlib/gas"
@@ -292,37 +292,44 @@ export class TxRequestBuilder {
 						break
 					}
 					case "encoded_call": {
-						if (action.type === undefined || action.isStatic === undefined) {
-							const instance = instances.get(action.to)
-							if (!instance) {
-								throw new Error("Contract not found")
-							}
-							const artifact = artifacts.get(instance.currentContractClassId.toString())
-							if (!artifact) {
-								throw new Error("Contract artifact not found")
-							}
-							const fn = await findFunctionBySelector(artifact, action.selector)
-							if (!fn) {
-								throw new Error("Method not found")
-							}
-							action.type = fn.functionType
-							action.isStatic = fn.isStatic
+						// Resolve the ABI UNCONDITIONALLY and bind the dApp-supplied `name` to the
+						// selector's real function. Resolving only when `action.type`/`isStatic`
+						// were absent let a dApp supply them to skip the lookup and execute a
+						// selector that did not match the authorized `name` — scope authorizes the
+						// name, execution ran the selector. Build the call from ABI truth; never
+						// trust dApp-supplied type/isStatic/returnTypes for execution metadata.
+						const instance = instances.get(action.to)
+						if (!instance) {
+							throw new Error("Contract not found")
 						}
-						const fnName = action.name || action.selector
-						const fnReturnTypes: AbiType[] = []
+						const artifact = artifacts.get(instance.currentContractClassId.toString())
+						if (!artifact) {
+							throw new Error("Contract artifact not found")
+						}
+						const fn = await findFunctionBySelector(artifact, action.selector)
+						if (!fn) {
+							throw new Error("Method not found")
+						}
+						if (action.name !== undefined && action.name !== fn.name) {
+							throw new Error(
+								`Scope violation: call name "${action.name}" does not match selector's function "${fn.name}" on ${action.to}`,
+							)
+						}
+						action.type = fn.functionType
+						action.isStatic = fn.isStatic
 						calls.push(
 							new FunctionCall(
-								fnName,
+								fn.name,
 								AztecAddress.fromStringUnsafe(action.to),
 								FunctionSelector.fromString(action.selector),
-								action.type as FunctionType,
+								fn.functionType,
 								action.hideMsgSender === true,
-								action.isStatic ?? false,
+								fn.isStatic,
 								action.args.map((x) => Fr.fromString(x)),
-								fnReturnTypes,
+								fn.returnTypes ?? [],
 							),
 						)
-						txCalls.push({ contract: action.to, method: fnName, args: action.args })
+						txCalls.push({ contract: action.to, method: fn.name, args: action.args })
 						this.log("EncodedCall enqueued.")
 						break
 					}

@@ -56,5 +56,25 @@ Branch: `fix/hf-a-dispatcher-authz` off `fix/harden-findings`. Status: **design 
 - N7. Positive: a legit `{name:"transfer", selector:transferSelector}` within `transfer@TOKEN` scope → executes/signs unchanged (no regression).
 - N8. F-08: malformed args (wrong types / extra fields where binding matters) → rejected at the dispatcher before authz.
 
-## Consult log
-- (pending) Codex xhigh design consult — verdict + adjustments recorded here before coding.
+## Routing surface (read from source — informs Q1)
+
+- `createAuthWit` uses the **generic silent path**: `dispatch()` (`dispatcher.ts:365-374`) → `METHOD_TO_KIND` → `buildOperation("aztec_createAuthWit")` (`:1156-1162`) → `executionService.executeOperations` → NO popup. Confirmed F-01 silence.
+- Popup-gating is **hardcoded in `dispatch()`**, NOT declarative: the `if (methodName === "sendTx")` / `registerToken` branches (`:355-360`) route through `DappInteractionService`. `method-descriptors.ts:107-110` gives createAuthWit only `routing: {via:"account-operation", kind:"aztec_createAuthWit"}` + `scopeCheck: checkCreateAuthWit` — no popup flag.
+- **Implication:** raw-`Fr` reject → throw in `checkCreateAuthWit` (sync scope-check, runs before routing). Inner-hash / tx-scope-uncovered CallIntent confirmation → a NEW `dispatch()` branch routing createAuthWit through `DappInteractionService` (mirroring `handleSendTx`). Silent path stays only for a CallIntent whose call is within a granted tx/sim scope AND passes the execution-layer name↔selector bind.
+
+## Consult log — Codex xhigh `b2tvhsv1w` (full text: `phase-A-consult-1.md`)
+
+**Verdict:** directionally right but INCOMPLETE. Adopted, with these expansions:
+
+- **4th F-02 sink (NEW):** `AuthwitDiscoverer.computeEncodedCallMessageHash()` (`apps/extension/src/wallet/services/execution/authwit-discoverer.ts:180`) has the same conditional-lookup bug → unconditional selector lookup + reject `content.name` mismatch before hashing. *(within F-02 root cause — in scope.)*
+- **Adjacent createAuthWit signer bug (NEW):** scope check reads `args[0]` (requestedFrom) but signing uses the first session account (`dispatcher.ts:1059`). Fix: resolve `String(args[0])` as the signer for `aztec_createAuthWit`. **Decision:** fold into Unit A — it's required for createAuthWit authz to be *correct* (F-01's remit); flagged here for transparency (not in the original audit).
+- **Q1 popup mechanism:** gating = `routing:{via:"handler"}` in `method-descriptors.ts` + a hardcoded `dispatch()` branch. So: change `createAuthWit` descriptor (`:107`) `account-operation`→`handler`; add `handleCreateAuthWit()`; route IntentInnerHash + uncovered-CallIntent through `DappInteractionService`; add an `aztec_createAuthWit` rule in `dapp-interaction/service.ts` `isConfirmationNeeded` (~:455). Minimal `consumer` display for inner-hash in `OperationCard.vue:450` ships WITH A's new popup (else opaque); broader label sanitization stays Unit B.
+- **Q2 policy:** `canCreateAuthWit` alone ⇒ permission to ASK only. Silent CallIntent REQUIRES tx/sim scope coverage. Fix the `hasTxCaps` gap (`:282`). Uncovered CallIntent → popup-confirm (not blanket reject, for compat). Raw `Fr` → reject. IntentInnerHash → always popup-confirm.
+- **Q3 (confirmed):** the `type`/`isStatic` skip-evasion is real. buildStandard `encoded_call` + buildNoFrom must ALWAYS resolve artifact + `findFunctionBySelector` + reject `name` mismatch + **build `FunctionCall` from ABI truth** (`fn.name/functionType/isStatic/returnTypes`) — don't trust dApp metadata. buildNoFrom also rejects non-PRIVATE via ABI (not `call.type`).
+- **Q4 (confirmed):** resolve artifact in `executeAztecCreateAuthWit` (has `pxeService`/`resolver`); **fail closed** if unresolvable (dApp registers the contract first).
+- **Q5 (confirmed):** F-08 parse at `dispatcher.ts:293` pre-scope via shared `WalletSchema[methodName].def.input.parseAsync`; use parsed args for capability/scope/routing/buildOperation/batch. Caveat: ensure the Nulo custom-schema patch loads before dispatcher validation (or move the 3 custom schema constants into wallet-bridge).
+- **Q6 regressions:** don't make scope-checkers async (artifact resolution in execution only); popup-gated createAuthWit must NOT use sendTx FIFO hooks (background safety-net release at `background.ts:309`); signature binding unaffected if validation happens BEFORE `computeAuthWitMessageHash` and only attacker metadata is replaced with ABI-resolved metadata.
+
+**Revised sink list (F-02): FOUR** — buildStandard, buildNoFrom, executeAztecCreateAuthWit, AuthwitDiscoverer.
+
+**Implementation order (test after each):** (i) F-02 execution bindings — buildStandard → buildNoFrom → executeAztecCreateAuthWit → authwit-discoverer (+ N1/N2/N3/N7). (ii) createAuthWit handler refactor + hasTxCaps + raw-Fr reject + popup (+ N4/N5/N6) + signer fix + consumer display. (iii) F-08 dispatcher pre-scope validation (+ N8). Then the full gate.
