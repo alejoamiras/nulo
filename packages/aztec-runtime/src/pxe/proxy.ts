@@ -55,8 +55,12 @@ for (const name of PXE_IPXE_METHODS) {
 // a missing/extra name (which `_IPXEMatchesTable` still owns) — now fails HERE at
 // compile time instead of surfacing as a runtime shape mismatch.
 type Expect<T extends true> = T
+// The fallback is `unknown`, NOT `never`: if a client method's first param ever
+// drifts off `NetworkInfo` (e.g. to a subtype), the conditional fails to match and
+// this branch is taken — `never` is assignable to any IPXE method and would make
+// the assert pass VACUOUSLY, whereas `unknown` is not, so the drift fails HERE.
 type CurriedClientMethod<K extends keyof IPXE> = PxeServiceClientBase[K] extends (network: NetworkInfo, ...rest: infer P) => infer R
 	? (...rest: P) => R
-	: never
+	: unknown
 type CurriedProxy = { [K in keyof IPXE]: CurriedClientMethod<K> }
 type _ProxyCurrySatisfiesIPXE = Expect<CurriedProxy extends IPXE ? true : false>

@@ -97,12 +97,12 @@ type _IpxeImpliesNetwork = Expect<Equal<{ [K in PxeIpxeMethod]: Descriptors[K]["
 //     that split doesn't exist yet, so pin all-true until it deliberately does.
 type _EveryMethodIsRpc = Expect<Equal<{ [K in keyof Descriptors]: Descriptors[K]["rpc"] }[keyof Descriptors], true>>
 // (5) The `requiresNetwork` FLAG matches the real signature: every method flagged
-//     `requiresNetwork: true` takes a `NetworkInfo` first parameter. This ties the
-//     boolean to the type, and — with (3) — guarantees every `ipxe: true` method is
-//     provably network-first, so proxy.ts's curried-satisfies-IPXE assert can never
-//     pass vacuously (a curry that dropped a non-network first arg infers `never`,
-//     which is assignable to anything; this assert forecloses that shape here).
+//     `requiresNetwork: true` takes a first parameter that is EXACTLY `NetworkInfo`.
+//     Exact `Equal`, not `extends NetworkInfo`: a first param drifted to a SUBTYPE
+//     would satisfy `extends` yet break the proxy curry (contravariance), so the
+//     one-directional check would miss it. With (3) this makes every `ipxe: true`
+//     method provably network-first, foreclosing proxy.ts's curry-assert vacuity.
 type NetworkFirstMethod = { [K in keyof Descriptors]: Descriptors[K]["requiresNetwork"] extends true ? K : never }[keyof Descriptors]
 type _RequiresNetworkImpliesNetworkFirstParam = Expect<
-	Equal<{ [K in NetworkFirstMethod]: Parameters<Methods[K]>[0] extends NetworkInfo ? true : false }[NetworkFirstMethod], true>
+	Equal<{ [K in NetworkFirstMethod]: Equal<Parameters<Methods[K]>[0], NetworkInfo> }[NetworkFirstMethod], true>
 >
