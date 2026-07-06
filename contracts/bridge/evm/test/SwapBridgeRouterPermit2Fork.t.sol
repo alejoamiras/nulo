@@ -80,6 +80,11 @@ contract SwapBridgeRouterPermit2ForkTest is Test {
     address constant FEE_JUICE = 0x762C132040fdA6183066Fa3B14d985ee55aA3C18;
     address constant FEE_ASSET_HANDLER = 0x5602c39A6E9C5AcE589F64F754927bcDa4f4BFc9;
     address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+    // The canonical Sepolia FeeJuicePortal + the live-deployed SwapBridgeRouter — used to prove I2
+    // (the FJ portal accepts a router-originated deposit on the bridge() path) and I1 (the deployed
+    // bytecode actually exposes bridge()) against real chain state, not mocks.
+    address constant FEE_JUICE_PORTAL = 0xB06AC8156Af9C4b369A7ae3E11708bAAa1990a3A;
+    address constant DEPLOYED_ROUTER = 0x4c3fcd14d63e9cB3e76F2e723Ce849eB75204068;
 
     uint24 constant FEE = 3000;
     int24 constant TICK_SPACING = 60;
@@ -293,5 +298,159 @@ contract SwapBridgeRouterPermit2ForkTest is Test {
         vm.prank(user);
         vm.expectRevert();
         router.bridgeWithFuel(p, permit);
+    }
+
+    // ─── bridge() (bridge-only Permit2) against REAL Permit2 ──────────────
+    // (a) rewires bridge-only onto this dormant entrypoint; these legs prove it against the real
+    // Permit2 witness surface with the same rigor as the bridgeWithFuel legs above.
+
+    function _simpleParams(bool isPrivate, address portal, address token, uint256 amount, uint256 nonce, uint256 deadline)
+        internal
+        view
+        returns (SwapBridgeRouter.SimpleBridgeParams memory p, SwapBridgeRouter.PermitParams memory permit)
+    {
+        p = SwapBridgeRouter.SimpleBridgeParams({
+            tokenPortal: portal,
+            bridgeToken: token,
+            amount: amount,
+            aztecRecipient: bytes32(uint256(0x3333)),
+            secretHash: bytes32(uint256(0x5555)),
+            isPrivate: isPrivate
+        });
+        permit = SwapBridgeRouter.PermitParams({nonce: nonce, deadline: deadline, signature: _signSimple(p, nonce, deadline)});
+    }
+
+    function _signSimple(SwapBridgeRouter.SimpleBridgeParams memory p, uint256 nonce, uint256 deadline)
+        internal
+        view
+        returns (bytes memory)
+    {
+        // bridge() builds a BridgeWitness with the fuel fields zeroed (SwapBridgeRouter.sol:253-267).
+        bytes32 witnessHash = router.hWitness(
+            SwapBridgeRouter.BridgeWitness({
+                tokenPortal: p.tokenPortal,
+                bridgeToken: p.bridgeToken,
+                totalAmount: p.amount,
+                fuelAmount: 0,
+                aztecRecipient: p.aztecRecipient,
+                fuelRecipient: bytes32(0),
+                tokenSecretHash: p.secretHash,
+                fuelSecretHash: bytes32(0),
+                minFuelOutput: 0,
+                routeHash: bytes32(0),
+                isPrivate: p.isPrivate,
+                swapTarget: address(router.swapTarget())
+            })
+        );
+        bytes32 permitTypehash = keccak256(
+            abi.encodePacked(
+                "PermitWitnessTransferFrom(TokenPermissions permitted,address spender,uint256 nonce,uint256 deadline,",
+                router.BRIDGE_WITNESS_TYPE_STRING()
+            )
+        );
+        bytes32 tokenPermissions = keccak256(abi.encode(TOKEN_PERMISSIONS_TYPEHASH, p.bridgeToken, p.amount));
+        bytes32 structHash =
+            keccak256(abi.encode(permitTypehash, tokenPermissions, address(router), nonce, deadline, witnessHash));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", IPermit2Domain(PERMIT2).DOMAIN_SEPARATOR(), structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPk, digest);
+        return abi.encodePacked(r, s, v);
+    }
+
+    function test_bridge_realPermit2Public() public {
+        usdc.mint(user, 5e6);
+        vm.prank(user);
+        usdc.approve(PERMIT2, type(uint256).max);
+        (SwapBridgeRouter.SimpleBridgeParams memory p, SwapBridgeRouter.PermitParams memory permit) =
+            _simpleParams(false, address(tokenPortal), address(usdc), 5e6, 0, block.timestamp + 1 hours);
+
+        uint256 before = usdc.balanceOf(user);
+        vm.prank(user);
+        router.bridge(p, permit);
+        assertEq(before - usdc.balanceOf(user), 5e6, "pulled amount via Permit2");
+        assertEq(tokenPortal.lastAmount(), 5e6, "bridged full amount to the portal");
+    }
+
+    function test_bridge_realPermit2Private() public {
+        usdc.mint(user, 5e6);
+        vm.prank(user);
+        usdc.approve(PERMIT2, type(uint256).max);
+        (SwapBridgeRouter.SimpleBridgeParams memory p, SwapBridgeRouter.PermitParams memory permit) =
+            _simpleParams(true, address(tokenPortal), address(usdc), 5e6, 0, block.timestamp + 1 hours);
+        vm.prank(user);
+        router.bridge(p, permit);
+        assertEq(tokenPortal.lastAmount(), 5e6, "private: bridged full amount");
+    }
+
+    function test_bridge_nonceReplayReverts() public {
+        usdc.mint(user, 10e6);
+        vm.prank(user);
+        usdc.approve(PERMIT2, type(uint256).max);
+        (SwapBridgeRouter.SimpleBridgeParams memory p, SwapBridgeRouter.PermitParams memory permit) =
+            _simpleParams(false, address(tokenPortal), address(usdc), 5e6, 0, block.timestamp + 1 hours);
+        vm.prank(user);
+        router.bridge(p, permit); // consumes nonce 0
+        vm.prank(user);
+        vm.expectRevert(); // Permit2 InvalidNonce
+        router.bridge(p, permit);
+    }
+
+    function test_bridge_expiredDeadlineReverts() public {
+        usdc.mint(user, 5e6);
+        vm.prank(user);
+        usdc.approve(PERMIT2, type(uint256).max);
+        (SwapBridgeRouter.SimpleBridgeParams memory p, SwapBridgeRouter.PermitParams memory permit) =
+            _simpleParams(false, address(tokenPortal), address(usdc), 5e6, 1, block.timestamp - 1);
+        vm.prank(user);
+        vm.expectRevert(); // Permit2 SignatureExpired
+        router.bridge(p, permit);
+    }
+
+    function test_bridge_witnessTamperReverts() public {
+        usdc.mint(user, 5e6);
+        vm.prank(user);
+        usdc.approve(PERMIT2, type(uint256).max);
+        (SwapBridgeRouter.SimpleBridgeParams memory p, SwapBridgeRouter.PermitParams memory permit) =
+            _simpleParams(false, address(tokenPortal), address(usdc), 5e6, 0, block.timestamp + 1 hours);
+        p.aztecRecipient = bytes32(uint256(0xDEAD)); // re-aim after signing → witness mismatch
+        vm.prank(user);
+        vm.expectRevert();
+        router.bridge(p, permit);
+    }
+
+    // ─── (b) fuel-only via bridge(tokenPortal = REAL FeeJuicePortal) ──────
+    // The zero-Solidity bet (I2): bridge() with the canonical FeeJuicePortal as tokenPortal executes
+    // the fuel-only deposit verbatim. The fee asset does NOT pre-approve Permit2 (unlike AZLO), so the
+    // user's one-time approve(Permit2) is part of the flow — modeled here.
+    function test_fuelOnly_realFeeJuicePortal() public {
+        deal(FEE_JUICE, user, 20 ether);
+        vm.prank(user);
+        IERC20(FEE_JUICE).approve(PERMIT2, type(uint256).max); // the one-time fuel-only approve
+        (SwapBridgeRouter.SimpleBridgeParams memory p, SwapBridgeRouter.PermitParams memory permit) =
+            _simpleParams(false, FEE_JUICE_PORTAL, FEE_JUICE, 16 ether, 0, block.timestamp + 1 hours);
+
+        uint256 before = IERC20(FEE_JUICE).balanceOf(user);
+        vm.prank(user);
+        router.bridge(p, permit);
+        assertEq(before - IERC20(FEE_JUICE).balanceOf(user), 16 ether, "pulled fee asset via Permit2");
+        assertEq(IERC20(FEE_JUICE).balanceOf(address(router)), 0, "no fee-asset residue in the router");
+    }
+
+    // ─── I1: the DEPLOYED router bytecode actually exposes bridge() ───────
+    // Positive probe (fresh-audit L4): a zero-amount call must revert with the router's OWN guard
+    // string — proving the selector is present AND reaches the body. An absent selector reverts empty.
+    function test_deployedRouter_hasBridgeSelector() public {
+        SwapBridgeRouter deployed = SwapBridgeRouter(DEPLOYED_ROUTER);
+        SwapBridgeRouter.SimpleBridgeParams memory p = SwapBridgeRouter.SimpleBridgeParams({
+            tokenPortal: address(tokenPortal),
+            bridgeToken: address(usdc),
+            amount: 0, // trips the top-of-body require before any Permit2 work
+            aztecRecipient: bytes32(uint256(0x3333)),
+            secretHash: bytes32(uint256(0x5555)),
+            isPrivate: false
+        });
+        SwapBridgeRouter.PermitParams memory permit =
+            SwapBridgeRouter.PermitParams({nonce: 0, deadline: block.timestamp + 1 hours, signature: hex"00"});
+        vm.expectRevert(bytes("SwapBridgeRouter: zero amount"));
+        deployed.bridge(p, permit);
     }
 }
