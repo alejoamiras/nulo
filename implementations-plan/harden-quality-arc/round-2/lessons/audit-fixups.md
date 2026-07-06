@@ -75,3 +75,38 @@ Local: lint ✅ · typecheck:all ✅ · `bun run test` **2862 passed / 0 failed*
 CI (workflow_dispatch on `qa/r2-audit-fixups` @ `730e3f9`, all green): Quality
 `28602367850` · Smoke e2e `28602369652` · Network e2e `28602371758`.
 Merged into `dev-quality` via plain squash (no `--admin`) — PR #247 → `c844e5c`.
+
+## Independent review pass (PR #259 → `af76417`)
+The 6 fixes above were self-authored + self-tested, so they got an independent
+adversarial pass — codex xhigh + Fable 5 on the exact `db15748..c844e5c` diff. It
+was worth it: both converged on **Fix 1 being wrong in both directions**, and Fable
+found a genuine shipped bug.
+
+- **The real bug (Fable):** the dApp channel JSON-serializes, so
+  `requestCapabilities(undefined)` arrives as `[null]` (`JSON.stringify([undefined]) ===
+  "[null]"`). The handler tolerates null (`manifest?.capabilities ?? []`) but the Fix-1
+  guard REJECTED `[null]` — and the oracle test *pinned that rejection as correct*, so the
+  bug was self-endorsed. Root cause: `=== undefined` where the wire encoding is `null`.
+  Fixed to `== null`. Lesson: **a guard on a JSON-transported trust boundary must reason
+  about the wire encoding, not the in-language value** — `undefined` never survives the hop.
+- **The consistency bug (codex):** `{capabilities:[null]}` passed the guard then crashed
+  the handler on `null.type` — the exact `.filter` TypeError the guard's comment claimed to
+  prevent. Now a nullish entry is a calibrated reject; tolerance-exact otherwise.
+- **Fix 5 hardening (Fable):** the proxy curry assert could pass VACUOUSLY on a
+  first-param drift to a `NetworkInfo` *subtype* (the `: never` fallback is assignable to
+  anything). `: never` → `: unknown` + exact `Equal` in descriptor assert (5). A seeded
+  subtype drift now fails to compile.
+- **Test-gap closures:** Fix 3's decision extracted to `shouldAdvanceToGeneral` + a
+  mutation-proven unit test (app.vue itself is L6-exempt; nav guard is the real backstop —
+  both audits confirmed it real). Fix 6's discover B10 rewritten to drive the LIVE
+  dismiss→`beforeunload`→inert-reject chain (was a direct `reject()` call); 6 discover pins
+  mutation-verified during review.
+- **Pushed back on the audit (both were partly wrong):** Fable's "Fix 4 missed 3 files" —
+  those files are NOT in the round-2 diff, so scrubbing them breaches the scope limit; the
+  original split was correct (Fable conflated last-touch blame with net-diff membership).
+  codex's C12 pre-init case — benign (no `requestId` = nothing to approve). **An audit is
+  input, not a verdict: verify each finding against the code before acting.**
+
+Validation: `bun run test` **2866 / 0**; CI all green on `qa/r2-review-followup` @ `3216acf`
+(Quality `28807116690` · Smoke `28807118353` · Network `28807120212`). Plain squash, no
+`--admin`. Frozen authz oracle byte-unedited throughout; `#220` still awaits owner QA + merge.
