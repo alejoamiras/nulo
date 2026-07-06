@@ -26,6 +26,7 @@ import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/cont
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
+import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
@@ -57,15 +58,25 @@ async function main(): Promise<void> {
 	const relayerSecret = requireRelayerSecret(process.env)
 	console.log("relaying claim:", redactDescriptorForLog(descriptor))
 
-	// 2. Relayer wallet (its OWN key) + sponsored fees (relayer needs no Fee Juice).
+	// 2. Relayer wallet (its OWN dedicated key) + sponsored fees (relayer needs no Fee Juice). A FIXED
+	//    account salt makes the address deterministic across runs; the account is deployed once, on first
+	//    use, via the sponsored FPC (getContract(addr) skips the deploy when it already exists).
+	const node = createAztecNodeClient(NODE_URL)
 	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
-	const relayer = await ewallet.createSchnorrAccount(relayerSecret, Fr.ZERO, deriveSigningKey(relayerSecret))
+	const manager = await ewallet.createSchnorrAccount(relayerSecret, Fr.ZERO, deriveSigningKey(relayerSecret))
+	const relayerAddr = (await manager.getAccount()).getAddress()
 	const fpc = await getContractInstanceFromInstantiationParams(SponsoredFPCContract.artifact, {
 		salt: new Fr(SPONSORED_FPC_SALT),
 		publicKeys: PublicKeys.default(),
 	})
-	await ewallet.registerContract(fpc, SponsoredFPCContract.artifact)
+	try {
+		await ewallet.registerContract(fpc, SponsoredFPCContract.artifact)
+	} catch {}
 	const fee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
+	if (!(await node.getContract(relayerAddr))) {
+		const deployMethod = await manager.getDeployMethod()
+		await deployMethod.send({ fee, from: "NO_FROM" as never } as never)
+	}
 
 	// 3. Register the target bridge instance (rebuilt from the manifest, same path as verify-deployments).
 	const proxy = await getContractInstanceFromInstantiationParams(bridgeProxyArtifact, {
@@ -92,11 +103,11 @@ async function main(): Promise<void> {
 	// 4. Submit the claim FOR the user. A wrong recipient could not have produced this salt→secret, so
 	//    the relayer cannot redirect; the funds land at `descriptor.recipient`. The `wait` opt auto-waits
 	//    and THROWS if the tx doesn't reach PROPOSED — success is "no throw" (same as the sandbox smoke).
-	const bridge = bridgeAt(relayer as never, descriptor.bridge, tokenBridgeArtifact)
+	const bridge = bridgeAt(ewallet as never, descriptor.bridge, tokenBridgeArtifact)
 	const result = (await submitPrivateClaim(
 		bridge,
 		{ recipient: descriptor.recipient, amount: descriptor.amount, secret: descriptor.salt, messageLeafIndex: descriptor.leafIndex },
-		{ from: relayer, ...fee, wait: { waitForStatus: TxStatus.PROPOSED } },
+		{ from: relayerAddr, ...fee, wait: { waitForStatus: TxStatus.PROPOSED } },
 	)) as { receipt?: { txHash?: { toString(): string } } }
 	console.log(
 		`✅ relayed claim_private for ${descriptor.recipient} — tx ${result.receipt?.txHash?.toString() ?? "(mined)"} (funds land at the bound recipient)`,
