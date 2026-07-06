@@ -54,3 +54,29 @@ describe("claim-secret keystone", () => {
 		expect((await tokenClaimSecretHash(salt, recipient)).toString()).toBe(secretHash)
 	})
 })
+
+/**
+ * PRIVACY INVARIANT tripwire (solidity+noir classics audit FN-I1 / FS-I3): the private deposit's
+ * `secret_hash` is L1-public and the amount is public, so recipient-privacy rests ENTIRELY on the salt
+ * being full-entropy-random. These pin that (a) the salt genuinely varies the secret_hash — so two
+ * random-salt deposits to the SAME recipient are unlinkable — and (b) the entropy MUST come from the
+ * salt, since the derivation is otherwise deterministic in (salt, recipient). A future "deterministic /
+ * recoverable salt" refactor (which would let an observer brute-force the recipient pre-claim) turns
+ * the first test red.
+ */
+describe("claim-secret privacy invariant (salt entropy)", () => {
+	const recipient = AztecAddress.fromBigIntUnsafe(0xc0ffeen)
+
+	it("two DIFFERENT salts → DIFFERENT secretHash for the same recipient (unlinkable with a random salt)", async () => {
+		const a = await tokenClaimSecretHash(Fr.random(), recipient)
+		const b = await tokenClaimSecretHash(Fr.random(), recipient)
+		expect(a.toString()).not.toBe(b.toString())
+	})
+
+	it("derivation is deterministic in (salt, recipient) — so entropy MUST come from the salt", async () => {
+		const salt = Fr.random()
+		const a = await tokenClaimSecretHash(salt, recipient)
+		const b = await tokenClaimSecretHash(salt, recipient)
+		expect(a.toString()).toBe(b.toString())
+	})
+})

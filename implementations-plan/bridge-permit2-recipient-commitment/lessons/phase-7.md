@@ -73,6 +73,15 @@ deployment + live network handle it.
   Permit2 paths (`smoke-swap-existing-testnet.ts`, `fuel-testnet.ts` private leg, fuel-only canaries).
   Separate from the recipient-commitment core.
 
+## Promotion gotcha — `biome format` the manifest before committing
+
+The deploy script writes the candidate manifest with `JSON.stringify(…, "\t")` (tabs), which **fails
+`biome format`**. The live `testnet-bridge.json` is biome-clean, so a raw `cp candidate → testnet-bridge.json`
+followed by a commit would **red the promotion's lint / `audit:faucet` gate**. Promotion MUST run
+`bunx biome format --write apps/faucet/public/testnet-bridge.json` after the `cp` (whitespace-only — the
+faucet parses the JSON identically). Surfaced by the 2026-07-06 solidity+noir classics audit while the
+local faucet was pointed at the candidate. (Follow-up option: make `deploy-manifest.ts` emit biome-format.)
+
 ## Promotion — HELD
 
 Per the standing user gate + the WIPE plan: promotion = `cp candidate → testnet-bridge.json` (carrying
