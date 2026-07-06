@@ -7,7 +7,7 @@
  *
  * Mirrors token_bridge/src/main.nr:
  *   claim_public(to, amount, secret, message_leaf_index)
- *   claim_private(recipient, amount, secret_for_L1_to_L2_message_consumption, message_leaf_index)
+ *   claim_private(recipient, amount, claim_salt, message_leaf_index)   ← recipient-committed
  *   exit_to_l1_public(recipient, amount, caller_on_l1, authwit_nonce)
  *   exit_to_l1_private(recipient, amount, caller_on_l1, authwit_nonce)
  */
@@ -21,11 +21,20 @@ import { EthAddress } from "@aztec/foundation/eth-address"
 /** Opaque send options (fee + from + wait); the shape varies by wallet. */
 export type SendOpts = Record<string, unknown>
 
-/** A claim secret is the L1→L2 message preimage; private claims are bearer credentials. */
+/**
+ * The L1→L2 message consumption input.
+ * - PUBLIC (`claimPublic`): `secret` is the raw message preimage (`claim_public` binds the recipient
+ *   in its content hash, so the secret is not recipient-scoped).
+ * - PRIVATE (`claimPrivate`): `secret` carries the per-deposit `claim_salt`; `claim_private` re-derives
+ *   the actual consumption secret from `(claim_salt, recipient)` in-circuit (recipient-committed). A
+ *   claim naming a different recipient derives a different secret and can't consume — so a relayer can
+ *   submit this for the user without redirecting funds. NOT a bearer credential anymore.
+ */
 export interface ClaimParams {
-	/** L2 recipient (AztecAddress hex). For private, whoever holds the secret chooses this. */
+	/** L2 recipient (AztecAddress hex). For private, the recipient is BOUND — a different one fails to consume. */
 	recipient: string
 	amount: bigint
+	/** PUBLIC: the raw secret. PRIVATE: the `claim_salt` (the circuit derives the secret from it + recipient). */
 	secret: Fr
 	messageLeafIndex: bigint
 }
@@ -50,12 +59,25 @@ export function claimPublic(bridge: ContractBase, p: ClaimParams, send: SendOpts
 		.send(send as never)
 }
 
-/** Claim a PRIVATE L1→L2 deposit — the secret bears the funds; mints privately to `recipient`. */
+/**
+ * Claim a PRIVATE L1→L2 deposit — mints privately to `recipient`, recipient-committed. `p.secret`
+ * carries the `claim_salt`; the circuit re-derives the consumption secret from `(claim_salt, recipient)`.
+ * Works identically for a self-claim and a relayer-submitted claim (the sender is in `send.from`); a
+ * relayer can finish the deposit but can never redirect it. See {@link submitPrivateClaim}.
+ */
 export function claimPrivate(bridge: ContractBase, p: ClaimParams, send: SendOpts) {
 	return bridge.methods
 		.claim_private(AztecAddress.fromStringUnsafe(p.recipient), p.amount, p.secret, new Fr(p.messageLeafIndex))
 		.send(send as never)
 }
+
+/**
+ * Submit a PRIVATE claim on behalf of a user (a relayer). Identical mechanics to {@link claimPrivate}
+ * — the recipient-commitment means a wrong recipient can't consume, so this is safe for a third party
+ * to run. `send.from` is the relayer's account; `p.recipient` is the (bound) user. Named distinctly so
+ * relayer call sites read as intentional delegation, not a self-claim.
+ */
+export const submitPrivateClaim = claimPrivate
 
 /**
  * A zero L1 recipient strands the withdraw: the L2 burn succeeds but the canonical

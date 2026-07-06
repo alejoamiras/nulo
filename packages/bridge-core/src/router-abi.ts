@@ -65,4 +65,46 @@ export const SWAP_BRIDGE_ROUTER_ABI = [
 			{ name: "isPrivate", type: "bool", indexed: false },
 		],
 	},
+	// bridge-only + fuel-only (via tokenPortal = FeeJuicePortal) both go through this entrypoint.
+	{
+		type: "function",
+		name: "bridge",
+		stateMutability: "nonpayable",
+		inputs: [
+			{
+				name: "p",
+				type: "tuple",
+				components: [
+					{ name: "tokenPortal", type: "address" },
+					{ name: "bridgeToken", type: "address" },
+					{ name: "amount", type: "uint256" },
+					{ name: "aztecRecipient", type: "bytes32" },
+					{ name: "secretHash", type: "bytes32" },
+					{ name: "isPrivate", type: "bool" },
+				],
+			},
+			{
+				name: "permit",
+				type: "tuple",
+				components: [
+					{ name: "nonce", type: "uint256" },
+					{ name: "deadline", type: "uint256" },
+					{ name: "signature", type: "bytes" },
+				],
+			},
+		],
+		outputs: [],
+	},
+	{
+		type: "event",
+		name: "Bridge",
+		inputs: [
+			{ name: "aztecRecipient", type: "bytes32", indexed: true },
+			{ name: "key", type: "bytes32", indexed: false },
+			{ name: "index", type: "uint256", indexed: false },
+			{ name: "amount", type: "uint256", indexed: false },
+			{ name: "secretHash", type: "bytes32", indexed: false },
+			{ name: "isPrivate", type: "bool", indexed: false },
+		],
+	},
 ] as const

@@ -45,4 +45,16 @@ describe.skipIf(!existsSync(ARTIFACT))("router-abi pin (forge artifact)", () => 
 		const ours = inputsOf(SWAP_BRIDGE_ROUTER_ABI as unknown as AbiParam[], "BridgeWithFuel")
 		expect(ours.map(shape)).toEqual(real.map(shape))
 	})
+
+	it("bridge inputs match the artifact", () => {
+		const real = inputsOf(loadArtifact().abi, "bridge")
+		const ours = inputsOf(SWAP_BRIDGE_ROUTER_ABI as unknown as AbiParam[], "bridge")
+		expect(ours.map(shape)).toEqual(real.map(shape))
+	})
+
+	it("Bridge event matches the artifact", () => {
+		const real = inputsOf(loadArtifact().abi, "Bridge")
+		const ours = inputsOf(SWAP_BRIDGE_ROUTER_ABI as unknown as AbiParam[], "Bridge")
+		expect(ours.map(shape)).toEqual(real.map(shape))
+	})
 })

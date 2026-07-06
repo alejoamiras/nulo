@@ -2,6 +2,7 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Fr } from "@aztec/aztec.js/fields"
 import { encodeAbiParameters, keccak256, numberToHex, toHex } from "viem"
 import { describe, expect, it, vi } from "vitest"
+import { tokenClaimSecretHash } from "./claim-secret"
 import { type DepositFlowStage, depositPublic, runSwapBridge } from "./flows"
 import { PRIVATE_FPC_ADDRESS, deriveBridgeSecret, privateFuelSecretHash } from "./private-fuel"
 import { SWAP_BRIDGE_ROUTER_ABI } from "./router-abi"
@@ -134,6 +135,7 @@ describe("flows — runSwapBridge injectable fuel secret (L3)", () => {
 		zeroForOnes: [],
 		isPrivate: true,
 		swapTarget: ADDR,
+		tokenClaimSalt: new Fr(0x7abcn),
 		nonce: 0n,
 		deadline: 9_999_999_999n,
 		chainId: 31337,
@@ -157,6 +159,24 @@ describe("flows — runSwapBridge injectable fuel secret (L3)", () => {
 		}
 		expect(writeArg.functionName).toBe("bridgeWithFuel")
 		expect(writeArg.args[0].fuelSecretHash).toBe((await privateFuelSecretHash(salt, claimer)).toString())
+		// F2: the private TOKEN leg binds the recipient-committed secret derived from tokenClaimSalt —
+		// the returned tokenSecretHex is the SALT (what claim_private takes), and the on-chain
+		// tokenSecretHash is computeSecretHash(deriveTokenClaimSecret(salt, recipient)).
+		expect(res.tokenSecretHex).toBe(new Fr(0x7abcn).toString())
+		const tokenArg = writeArg.args[0] as unknown as { tokenSecretHash: string }
+		expect(tokenArg.tokenSecretHash).toBe((await tokenClaimSecretHash(new Fr(0x7abcn), claimer)).toString())
+	})
+
+	it("F2: private token leg with no tokenClaimSalt is rejected BEFORE signing", async () => {
+		const l1 = makeL1()
+		const injected = deriveBridgeSecret(Fr.zero(), AztecAddress.fromStringUnsafe(AZTEC_RECIPIENT))
+		// fuelSecret present (passes the fuel guard) but tokenClaimSalt omitted → a random token secret
+		// would strand the deposit against the recipient-committed claim_private.
+		const { tokenClaimSalt: _drop, ...noSalt } = baseParams
+		await expect(runSwapBridge(l1 as never, { ...noSalt, fuelSecret: injected } as never)).rejects.toThrow(
+			/private token leg requires an injected tokenClaimSalt/,
+		)
+		expect(l1.wallet.signTypedData).not.toHaveBeenCalled()
 	})
 
 	it("falls back to a random secret when none is injected (PUBLIC path unchanged)", async () => {
