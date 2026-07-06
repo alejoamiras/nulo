@@ -412,7 +412,28 @@ export class TxRequestBuilder {
 				throw new Error(`DefaultEntrypoint requires exactly 1 call, got ${rawCalls.length}`)
 			}
 			const call = await FunctionCall.schema.parseAsync(rawCalls[0])
-			if (call.type !== FunctionType.PRIVATE) {
+			// Bind the dApp-supplied name to the selector's real ABI function, and derive
+			// the function type from the ABI — never trust call.name/type. The NO_FROM path
+			// resolved no artifact, so a dApp could name a benign function while running a
+			// different selector.
+			const noFromInstance = instances.get(call.to.toString())
+			if (!noFromInstance) {
+				throw new Error("Contract not found")
+			}
+			const noFromArtifact = artifacts.get(noFromInstance.currentContractClassId.toString())
+			if (!noFromArtifact) {
+				throw new Error("Contract artifact not found")
+			}
+			const noFromFn = await findFunctionBySelector(noFromArtifact, call.selector.toString())
+			if (!noFromFn) {
+				throw new Error("Method not found")
+			}
+			if (call.name !== undefined && call.name !== noFromFn.name) {
+				throw new Error(
+					`Scope violation: call name "${call.name}" does not match selector's function "${noFromFn.name}" on ${call.to.toString()}`,
+				)
+			}
+			if (noFromFn.functionType !== FunctionType.PRIVATE) {
 				throw new Error("DefaultEntrypoint only supports private functions")
 			}
 
