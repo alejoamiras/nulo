@@ -1,6 +1,32 @@
 # Phase 6 — testnet candidate deploy (live)
 
-Status: ◑ BLOCKED on testnet fee/infra (not a code bug). No harmful on-chain state.
+Status: ✓ DONE 2026-07-06 (candidate deployed + verified). The blocker below was resolved by the user
+funding the shared SponsoredFPC; the retry completed end-to-end.
+
+## Resolution + deployed candidate (attempt 2, after FPC funded)
+
+The user funded the shared SponsoredFPC. The retry (clean journal, forge on PATH) completed in 7.4m with
+EVERY read-back ✓:
+
+| Contract | Address |
+|---|---|
+| L1 NuloTokenPortal (fresh) | `0xbd071af9172e9d1d39912c64bb8ca26d4b1ebd8b` |
+| L1 AZLO token (REUSED) | `0x457f9cdb972e036b07f49c23cee78d0c689cd389` |
+| L2 TokenMinterProxy | `0x2da8ce14b1aa5780f01d2afaa4cf0dc7b02f932f5c5a24c845f5137eaaae62dd` |
+| L2 Token | `0x2dcbe24280f183f0976810b44bd4d14389411dfce5d5ae561c84d828b361b31c` |
+| L2 TokenBridge | `0x0f137a7ac7af4598a80d49d01a344cd947ec1a2bd73ff186dbe4f054390be98e` |
+
+Read-backs ✓: portal.underlying, portal.l2Bridge, portal.rollup == registry canonical, portal runtime
+code-hash == pin, proxy.get_token, proxy.get_bridge, router.swapTarget. L1 sources Etherscan-verified.
+Candidate manifest verifier (`BRIDGE_MANIFEST=public/testnet-bridge.candidate.json`) GREEN — all three
+L2 instances rebuild to the committed addresses; router/permit2/swapTarget present; `privateClaimMode:
+"salt-v2"` present. Live `testnet-bridge.json` untouched (git clean) + still lacks `privateClaimMode`.
+
+**Gate: PASS.** Next = Phase 7 canaries (dust real-money), STOP before the promotion (user gate).
+
+---
+
+## Original blocker log (attempt 1 — resolved)
 
 ## Pre-flight (all green)
 
