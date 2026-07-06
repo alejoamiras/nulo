@@ -7,6 +7,7 @@ import Navigation from "./components/Navigation.vue"
 import { managers, isBackgroundConnected } from "@/utils/core"
 import { isPrefersDarkScheme, persistThemeHint } from "@/utils/general"
 import { getLastActiveProfileId } from "@/utils/lastActiveProfile"
+import { shouldAdvanceToGeneral } from "./should-advance-to-general"
 import { defaultConfig } from "@/wallet/config"
 import { AccountServiceClient, AccountType } from "@/wallet/services/account/client"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
@@ -148,12 +149,9 @@ const loadProfile = async () => {
 		const stillActive = await bootstrapActiveProfile(activeProfile)
 		appStore.isSessionChecked = true
 
-		// Only advance into the authed area if the session survived bootstrap. If a
-		// lock fired mid-bootstrap (stillActive=false, isLogined stayed off), pushing
-		// to the auth-required /popup/general would bounce straight back through the
-		// router's auth guard to /popup/auth — the lock's onActiveProfileChanged(undefined)
-		// handler already routes there. Consuming the flag skips the redundant bounce.
-		if (stillActive && ["popup-register", "popup-auth"].includes(route.name)) router.push("/popup/general")
+		// Only advance into the authed area if the session survived bootstrap (a lock
+		// mid-bootstrap leaves stillActive=false). See shouldAdvanceToGeneral.
+		if (shouldAdvanceToGeneral(stillActive, route.name)) router.push("/popup/general")
 
 		return
 	}

@@ -244,7 +244,7 @@ describe("discover window — shell lifecycle frozen oracle", () => {
 		expect(callLog.filter((c) => c.endsWith(".connect"))).toEqual(["profile.connect", "interaction.connect"])
 	})
 
-	test("A2: session gate — init and beforeunload wait for isSessionChecked", async () => {
+	test("A2: session gate — init and beforeunload wait for isSessionChecked, then the delayed path completes", async () => {
 		appStoreMock.isSessionChecked = false
 		w = factory()
 		await flushPromises()
@@ -253,6 +253,15 @@ describe("discover window — shell lifecycle frozen oracle", () => {
 		appStoreMock.isSessionChecked = true
 		await flushPromises()
 		expect(getActiveProfileMock).toHaveBeenCalledTimes(1)
+		// Drive the unblocked init through to completion: the listener must register
+		// exactly once on the delayed path too (not only the session-ready-at-mount path).
+		// Flush between the two resolves — loadInteractionPayload is only called after
+		// getActiveProfile resolves, so loadPromiseResolve isn't wired until then.
+		getActiveProfilePromiseResolve?.({ id: "p1" })
+		await flushPromises()
+		loadPromiseResolve?.()
+		await flushPromises()
+		expect(beforeunloadAdds()).toBe(1)
 	})
 
 	test("A3: auth redirect short-circuits — pageAwaitingAuth set, no init, no beforeunload", async () => {
@@ -355,24 +364,27 @@ describe("discover window — shell lifecycle frozen oracle", () => {
 		expect(windowsRemoveMock).not.toHaveBeenCalled()
 	})
 
-	test("B10: reject() is inert once the interaction is cancelled — no reject on an already-cancelled request", async () => {
-		// The cancelled overlay's dismiss closes via closeWindow() (no arg), leaving
-		// beforeunload attached; when it fires, reject() must be a no-op because the
-		// request is already cancelled — otherwise a dismiss would double-reject.
+	test("B10: a cancelled overlay dismiss keeps the listener, and the LIVE beforeunload reject is inert", async () => {
+		// Exercises the real chain end-to-end (not a direct reject() call): overlay
+		// dismiss → closeWindow() with no arg → beforeunload stays attached → the
+		// browser unloads → the LIVE listener calls reject() → which must be a no-op
+		// because the request is already cancelled, or a dismiss would double-reject.
 		w = factory()
 		await completeInit()
 		isCancelledMock.value = true
 		await w.vm.$nextTick()
+		await w.find('[data-testid="cancelled-overlay"]').trigger("click")
+		expect(beforeunloadRemoves()).toBe(0) // dismiss did NOT detach the listener
 		callLog.length = 0
-		await (w.vm as unknown as DiscoverVm).reject()
+		window.dispatchEvent(new Event("beforeunload")) // fire the live listener
+		await flushPromises()
 		expect(rejectViaInteractionServiceMock).not.toHaveBeenCalled()
-		expect(windowsRemoveMock).not.toHaveBeenCalled()
 		expect(callLog).toEqual([])
 	})
 
 	test("C12: onActiveProfileChanged — undefined or different id rejects; same id is a no-op", async () => {
 		w = factory()
-		// Registered synchronously during setup, before the mounted hook.
+		// The window subscribes to onActiveProfileChanged exactly once during init.
 		expect(onActiveProfileChangedAddMock).toHaveBeenCalledTimes(1)
 		const handler = onActiveProfileChangedAddMock.mock.calls[0][0] as (p?: { id: string }) => void
 		await completeInit({ id: "p1" })
