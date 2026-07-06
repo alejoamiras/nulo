@@ -196,3 +196,37 @@ describe("sealDepositRecord (trust-aware signature economics)", () => {
 		expect((await openDepositEnvelope(key, blob)).secret).toBe(ENVELOPE.secret)
 	})
 })
+
+describe("recovery-crypto — recipient-committed backup durability (Phase 8)", () => {
+	const RECIP = `0x${"3".repeat(64)}`
+	const SEALER = `0x${"1".repeat(40)}`
+
+	it("the token claim-salt round-trips the sealed envelope (the strand-prevention credential)", async () => {
+		// For a recipient-committed PRIVATE token deposit the sealed `secret` field IS the claim_salt
+		// (claim_private re-derives the consumption secret from it + the recipient), so it MUST survive
+		// the sealed backup — losing it strands the deposit.
+		const key = await recoveryKeyFromSignature(SIG_A)
+		const claimSalt = "0x07abc0ffee1234"
+		const blob = await sealDepositEnvelope(key, { secret: claimSalt, recipient: RECIP, amount: "100", sealerL1: SEALER })
+		expect(blob).not.toContain(claimSalt)
+		expect((await openDepositEnvelope(key, blob)).secret).toBe(claimSalt)
+	})
+
+	it("direct-fuel private seals BOTH salts; swap-fueled seals only the token secret (documented asymmetry)", async () => {
+		const key = await recoveryKeyFromSignature(SIG_A)
+		// Direct private FUEL (useFuel): the fuel bridge-secret salt is the sole recovery input → sealed.
+		const withSalt = await openDepositEnvelope(
+			key,
+			await sealDepositEnvelope(key, { secret: "0xaa", recipient: RECIP, amount: "1", sealerL1: SEALER, salt: "0xf001" }),
+		)
+		expect(withSalt.salt).toBe("0xf001")
+		// Swap-fueled private (useDeposit): only the TOKEN secret is sealed; the FUEL salt lives in the
+		// plaintext journal (record.fuel.bridgeSecretSalt), NOT the sealed blob (fresh-audit M2 — a known
+		// durability asymmetry: a lost localStorage loses the fuel-salt recovery, never the token one).
+		const noSalt = await openDepositEnvelope(
+			key,
+			await sealDepositEnvelope(key, { secret: "0xbb", recipient: RECIP, amount: "1", sealerL1: SEALER }),
+		)
+		expect(noSalt.salt).toBeUndefined()
+	})
+})
