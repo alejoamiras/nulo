@@ -75,12 +75,14 @@ deployment + live network handle it.
 
 ## Promotion gotcha — `biome format` the manifest before committing
 
-The deploy script writes the candidate manifest with `JSON.stringify(…, "\t")` (tabs), which **fails
-`biome format`**. The live `testnet-bridge.json` is biome-clean, so a raw `cp candidate → testnet-bridge.json`
-followed by a commit would **red the promotion's lint / `audit:faucet` gate**. Promotion MUST run
-`bunx biome format --write apps/faucet/public/testnet-bridge.json` after the `cp` (whitespace-only — the
-faucet parses the JSON identically). Surfaced by the 2026-07-06 solidity+noir classics audit while the
-local faucet was pointed at the candidate. (Follow-up option: make `deploy-manifest.ts` emit biome-format.)
+The deploy script writes the candidate manifest with `JSON.stringify(…, "\t")`, which **fails `biome
+format`** — NOT over tabs (those match biome's `indentStyle: tab`) but because `JSON.stringify` always
+multi-lines arrays while biome **inlines short ones** (e.g. `"constructorArgs": ["Aztec Nulo", "AZLO",
+18, "0x…"]`). So a raw `cp candidate → testnet-bridge.json` + commit would **red the promotion's lint /
+`audit:faucet` gate**. Promotion MUST run `bunx biome format --write apps/faucet/public/testnet-bridge.json`
+after the `cp` (whitespace-only — the faucet parses the JSON identically). Surfaced by the 2026-07-06
+classics audit. NOT worth changing `deploy-manifest.ts`: matching biome's array-inlining would mean
+shelling `biome` into the crash-safe atomic-write path — the post-cp format step is the clean fix.
 
 ## Promotion — HELD
 
