@@ -204,7 +204,8 @@ Per the blast-radius table: `useDeposit.ts` / `useFuel.ts` / `bridge-steps.ts` (
 
 **Gate**: `bun run --cwd packages/bridge-core typecheck` + `bun run --cwd packages/bridge-core test` (the deploy script changed — C6) · pre-deploy `SEPOLIA_RPC_URL=… forge test` **with the named-fork-leg-PASSED assertion** (same grep-the-output check as Phase 1 — a bare exit 0 hides skipped rehearsals; final-codex HIGH-3) · deploy completes with every read-back `✓` · `BRIDGE_MANIFEST=…candidate.json` verifier green (incl. the `privateClaimMode` presence check) · candidate committed with the journal · live `testnet-bridge.json` untouched AND still lacks `privateClaimMode`. Layers: TS unit + live L1+L2 deploy (no user traffic).
 
-### Phase 7 — candidate canaries → drain window → promotion (the cutover)
+### Phase 7 — candidate canaries → drain window → promotion (the cutover) ◑ CANARIES ✓, PROMOTION HELD
+`[◑ 2026-07-06]` All candidate canaries PASSED live on testnet: public claim, private claim (strand-risk gate), redirect-proof (wrong recipient can't consume a synced msg), fueled bridge, fuel-testnet (public + 3× private-FPC). Fuel-only covered by the `test_fuelOnly_realFeeJuicePortal` fork test + unchanged infra. Candidate READY. **PROMOTION (cp candidate → live + `audit:faucet` + ship faucet+code as one release) HELD on the explicit user gate — not run.** LESSONS_FILE=implementations-plan/bridge-permit2-recipient-commitment/lessons/phase-7.md
 Order (cheapest-fail-first), all against the candidate manifest:
 1. `smoke-existing-testnet.ts --config candidate` — public bridge → `claim_public`.
 2. Same, `--private` — **the strand-risk gate**: real money against the in-circuit derivation; minimal amount first, self-claimed.
