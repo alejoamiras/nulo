@@ -252,6 +252,18 @@ function isIntentInnerHash(x: unknown): x is IntentInnerHashShape {
 	return "consumer" in obj && "innerHash" in obj
 }
 
+/**
+ * Whether a dApp createAuthWit intent's target call is covered by a granted
+ * transaction/simulation scope. The dispatcher uses this to route a covered call
+ * to silent execution and an uncovered call — or any `IntentInnerHash`, which
+ * carries no call to check — to an explicit confirmation popup.
+ */
+export function isCreateAuthWitCoveredByTxOrSimulationScope(intent: unknown, grants: GrantedCapabilityRecord[]): boolean {
+	if (!isCallIntent(intent)) return false
+	const { permitted } = callWithinTxOrSimulationScope(String(intent.call.to), intent.call.name, grants)
+	return permitted
+}
+
 export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	const from = String(args[0])
 

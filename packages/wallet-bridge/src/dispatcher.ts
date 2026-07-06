@@ -66,6 +66,7 @@ import type {
 import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
 import { METHOD_TO_KIND, NETWORK_ONLY_KINDS, ACCOUNT_KINDS, METHOD_REGISTRY } from "./method-descriptors"
 import type {
+	AztecCreateAuthWitRequest,
 	AztecSendTxRequest,
 	CapabilityResult,
 	ExecutionResult,
@@ -86,6 +87,7 @@ import type {
 } from "./operation"
 import type { OperationResult } from "./operation-result"
 import { enforceScope, enforceScopeWithSession } from "./scope-enforcement"
+import { isCreateAuthWitCoveredByTxOrSimulationScope } from "./method-scope-checkers"
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { OriginType, type LocalTxOrigin } from "./transaction-origin"
 import type { SessionContext } from "./types"
@@ -361,6 +363,9 @@ export class WalletSdkDispatcher {
 		if (methodName === "grantPublicAuthwit") {
 			return this.handleGrantPublicAuthwit(args, ctx, dappSession)
 		}
+		if (methodName === "createAuthWit") {
+			return this.handleCreateAuthWit(args, ctx, dappSession, grants)
+		}
 
 		const kind = METHOD_TO_KIND[methodName]
 		if (!kind) {
@@ -561,6 +566,50 @@ export class WalletSdkDispatcher {
 			{ onExecutionEnqueued: hooks?.onExecutionEnqueued, queuedJournalId: hooks?.queuedJournalId, originKey: ctx.origin },
 		)
 
+		return this.unwrapResult(results[0])
+	}
+
+	/**
+	 * Handle createAuthWit: resolve the signer from args[0] (not the session default),
+	 * then route by scope coverage. A CallIntent covered by a granted tx/sim scope is
+	 * within authority the dApp already holds → sign silently. An uncovered call, or any
+	 * IntentInnerHash (whose inner hash is fully attacker-chosen), → confirmation popup.
+	 * No sendTx FIFO hooks: the background's non-send safety-net releases the baton.
+	 */
+	private async handleCreateAuthWit(
+		args: unknown[],
+		ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+		grants: GrantedCapabilityRecord[],
+	): Promise<unknown> {
+		if (!dappSession) {
+			throw new Error(`No dApp session found for origin ${ctx.origin}`)
+		}
+		const requestedFrom = String(args[0])
+		const [network, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedFrom)
+		const messageHashOrIntent = args[1] as AztecCreateAuthWitOperation["messageHashOrIntent"]
+
+		if (isCreateAuthWitCoveredByTxOrSimulationScope(messageHashOrIntent, grants)) {
+			const operation: AztecCreateAuthWitOperation = {
+				kind: "aztec_createAuthWit",
+				networkId: network.id,
+				accountAddress: account.address,
+				messageHashOrIntent,
+			}
+			const origin: LocalTxOrigin = { type: OriginType.DAPP, name: ctx.origin }
+			const results = await this.executionService.executeOperations([operation], origin)
+			return this.unwrapResult(results[0])
+		}
+
+		const authwitReq: AztecCreateAuthWitRequest = {
+			kind: "aztec_createAuthWit",
+			account: formatCaipAccount(ctx.chainId, account.address),
+			messageHashOrIntent,
+		}
+		const results = await this.dappInteractionService.execute({
+			sessionId: dappSession.id,
+			operations: [authwitReq],
+		})
 		return this.unwrapResult(results[0])
 	}
 
