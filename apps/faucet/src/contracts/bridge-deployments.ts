@@ -25,6 +25,8 @@ export const L1_PORTAL = config.l1.portal as `0x${string}`
  */
 export const BRIDGE_ROUTER = (config.l1 as { fuel?: { router?: string } }).fuel?.router as `0x${string}` | undefined
 export const BRIDGE_PERMIT2 = (config.l1 as { fuel?: { permit2?: string } }).fuel?.permit2 as `0x${string}` | undefined
+/** The router's current swap target — witness-bound even for a bridge-only deposit (F-004). */
+export const BRIDGE_SWAP_TARGET = (config.l1 as { fuel?: { swapTarget?: string } }).fuel?.swapTarget as `0x${string}` | undefined
 
 /**
  * L9 runtime interlock (codex cond. 2): the deposit code REFUSES to build a private deposit unless
