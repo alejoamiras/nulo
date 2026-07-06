@@ -175,10 +175,11 @@ F-001 CONFIRMED: live portal is permissionlessly re-initializable</pre>
 </div>
 
 <div class="finding">
-  <div class="fhead"><span class="chip c-low">Low</span><span class="fid">F-007</span><span class="ftitle">Private claims are bearer-secret (whoever has the secret can claim) — accepted risk</span></div>
-  <div class="meta"><span class="chip c-info">Claude + Codex</span><span class="chip c-info">confidence: high</span><span class="chip c-info">accepted-risk</span><span class="chip c-info">fix: deferred</span></div>
+  <div class="fhead"><span class="chip c-low">Low</span><span class="fid">F-007</span><span class="ftitle">Private claims were bearer-secret — ✅ FIXED (recipient-committed)</span></div>
+  <div class="meta"><span class="chip c-info">Claude + Codex</span><span class="chip c-info">confidence: high</span><span class="chip c-info">was: accepted-risk</span><span class="chip c-info">fix: shipped (recipient-commitment)</span></div>
   <div class="eli5">
-    <p><strong>What it is.</strong> For private deposits, the recipient isn't baked into the message — whoever holds the secret can claim to any address. This is inherited from Aztec's design, and binding the recipient (the planned end-state) requires forking + redeploying the portal and bridge.</p>
+    <p><strong>STATUS 2026-07-06 — FIXED.</strong> The <code>bridge-permit2-recipient-commitment</code> plan closed this. <code>claim_private</code> now takes a per-deposit <code>claim_salt</code> and re-derives the consumption secret from <code>poseidon2([claim_salt, recipient], DS=3140354885)</code> in-circuit (keystone-pinned Noir↔TS), so a leaked salt can only claim to the <em>originally-bound</em> recipient — a relayer can finish a claim, never redirect it. The salt is now a strand-prevention + linkage-privacy credential, not a bearer credential. The real driver was the new relayer capability, not this Low-2.6 finding. Requires a fresh L2 stack (the deployment migration); the old bearer deployment keeps bearer semantics for its in-flight claims. The original finding is preserved below for the record.</p>
+    <p><strong>What it was.</strong> For private deposits, the recipient wasn't baked into the message — whoever holds the secret could claim to any address. This was inherited from Aztec's design; binding the recipient required forking + redeploying the portal and bridge (now done).</p>
     <p><strong>What an attacker would do.</strong> Nothing, <em>as long as the secret never leaks</em> — it never appears on-chain, and the app encrypts it at rest. The one risk is off-chain: the secret is handed to the app in plaintext via a recovery hook; an integrator who logs or stores it unencrypted would let an observer claim first.</p>
     <p><strong>The fix.</strong> Until recipient-binding ships, document loudly that the plaintext secret must never be logged or stored unsealed. (Recipient-commitment = weeks, deferred.)</p>
   </div>
