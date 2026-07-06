@@ -165,7 +165,8 @@ Client-side fail-closed guards for (b): fuel-only plans assert the WITNESS field
 
 **Gate**: `cd contracts/bridge/evm && forge build && forge test` (all green, fuzz runs visible, incl. the 5 fuzz targets) · `SEPOLIA_RPC_URL=… forge test` **with an assertion that the NAMED fork legs PASSED** (grep the forge output for the new leg names — `forge test` exits 0 when `SEPOLIA_RPC_URL`-gated legs `vm.skip(true)`, so bare exit-0 is NOT proof; fresh-audit H3, verified at `SwapBridgeRouterPermit2Fork.t.sol:108-110`). Layers: L1 unit + fuzz + fork (real Permit2/V4/FJ-portal + live router bytecode).
 
-### Phase 2 — L2 recipient-commitment + cross-toolchain keystone
+### Phase 2 — L2 recipient-commitment + cross-toolchain keystone ✓
+`[✓ 2026-07-06]` claim_secret lib + claim_private rewrite + sole-consumer static check + 6/6 keystone + TS keystone; **Noir↔TS derivation byte-matches** (DS 3140354885 + 3 vectors identical in both toolchains); artifact-diff limited to token_bridge. LESSONS_FILE=implementations-plan/bridge-permit2-recipient-commitment/lessons/phase-2.md
 1. Snapshot the legacy artifact: commit `packages/bridge-core/legacy/token-bridge.v1.json` (pin for the Phase 8 legacy script).
 2. New `claim_secret` lib; wire path-deps; `claim_private` change per spec; module doc states the sole-consumer/non-bearer invariant.
 3. Keystone: 3 derivation vectors + 3 secretHash vectors (L6 literals) as Noir tests; existing content-hash pins MUST stay byte-identical (that is the proof the portal layer didn't move).
