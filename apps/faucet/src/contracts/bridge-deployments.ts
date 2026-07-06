@@ -17,6 +17,25 @@ import config from "../../public/testnet-bridge.json"
 export const L1_USDC = config.l1.usdc as `0x${string}`
 export const L1_PORTAL = config.l1.portal as `0x${string}`
 
+/**
+ * Router + Permit2 are REQUIRED bridge config now (bridge-only + fuel-only both go through the
+ * router's `bridge()` — C7). They currently live under `l1.fuel`; read them from there but treat
+ * them as bridge-level requirements. `undefined` here means the (post-cutover) single-path deposit
+ * cannot run — the deposit code asserts their presence fail-closed.
+ */
+export const BRIDGE_ROUTER = (config.l1 as { fuel?: { router?: string } }).fuel?.router as `0x${string}` | undefined
+export const BRIDGE_PERMIT2 = (config.l1 as { fuel?: { permit2?: string } }).fuel?.permit2 as `0x${string}` | undefined
+
+/**
+ * L9 runtime interlock (codex cond. 2): the deposit code REFUSES to build a private deposit unless
+ * the active manifest declares `privateClaimMode: "salt-v2"` — so a stray preview/static deploy of
+ * recipient-committed code against an OLD (bearer-bridge) manifest fails closed instead of stranding
+ * funds. The value is written ONLY into the candidate→promoted manifest (never the live manifest
+ * before promotion), so during the dev-side cutover window this is intentionally absent.
+ */
+export const PRIVATE_CLAIM_MODE = (config.l1 as { privateClaimMode?: string }).privateClaimMode
+export const SUPPORTS_SALT_V2 = PRIVATE_CLAIM_MODE === "salt-v2"
+
 /** The fuel (swap-to-FeeJuice) deployment. Optional: absent config ⇒ the fuel UI never renders. */
 export interface FuelDeployment {
 	router: `0x${string}`
