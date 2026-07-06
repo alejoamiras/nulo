@@ -687,7 +687,11 @@ export function useDepositFlow() {
 								secretHashHex: fuelPre.secretHashHex,
 								minOutput: fuelPre.minOutput.toString(),
 								// PRIVATE fuel: persist the bridge-secret salt + the FPC the FJ lands at, so the
-								// claim can rebuild the Wonderland method. (Sealing parity follow-up: TODO seal salt.)
+								// claim can rebuild the Wonderland method. Plaintext-safe by design: the fuel secret is
+								// CLAIMER-COMMITTED (deriveBridgeSecret(salt, claimer); PrivateFPC.mint_and_pay_fee
+								// re-derives it from msg_sender), so a localStorage read is a privacy-linkage, not a
+								// theft/consume path. Recovery rides the whole-record backup seal (backup.ts); the
+								// sealedEnvelope deliberately carries only the recipient-committed TOKEN salt.
 								...(isPrivate ? { bridgeSecretSalt: fuelPre.salt?.toString(), fpc: PRIVATE_FPC_ADDRESS } : {}),
 							},
 						}
