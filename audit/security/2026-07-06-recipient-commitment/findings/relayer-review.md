@@ -41,3 +41,23 @@ So the salt is a **linkage-privacy credential**, not a bearer/theft credential.
   proof is exercised end-to-end there.
 - The script cannot be integration-tested offline (no live salt-v2 deployment yet); its pure core is
   fully unit-tested and it typechecks. Live exercise is a Phase 7 step, gated on explicit go.
+
+## Live-wiring review (wrap-up code-review pass — the wrapper was written after the audit fan-out)
+
+The live wrapper escaped the Phase 9 audit subagents (written after they ran). Two review rounds:
+
+1. **Main-agent read vs the proven `fuel-testnet.ts` pattern** found the account API was misused:
+   `createSchnorrAccount` returns a MANAGER, not a wallet — fixed to `manager.getAccount().getAddress()`
+   for the tx `from`, contracts bound to the `EmbeddedWallet`, and a deploy-if-needed gate
+   (`node.getContract(addr)` → sponsored-FPC deploy, deterministic `Fr.ZERO` salt). (commit f659f39)
+2. **Codex xhigh** (session 019f3879-4876-7e80-aed7-83412a5196f1) confirmed the corrected account gate,
+   the `deployMethod.send({from:"NO_FROM"})` idiom, the `ewallet` binding, and that a waited send returns
+   a real `receipt.txHash`. It found ONE real bug: `claim_private` privately calls
+   `TokenMinterProxy.mint_to_private` → the Token, so a clean PXE needs the **proxy + token** artifacts
+   registered, not just the bridge. Fixed — the wrapper now rebuilds + registers all three from the
+   manifest (mirroring `fuel-testnet.ts:135-165`). Added a bounded 5×/15s claim retry for the L1→L2
+   settling window. (commit 48d2a91)
+
+Net: the relayer's security-relevant logic (key handling, salt-v2 refusal, redirect-proof) is unit-tested
+and audited; the remaining live-only wiring is now matched line-for-line to the proven testnet scripts and
+codex-verified. Its first real exercise is the gated Phase 7 run.
