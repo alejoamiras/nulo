@@ -1802,17 +1802,25 @@ describe("dispatcher — arg guards: order, tolerance, batch-leg validation", ()
 		)
 	})
 
-	test("requestCapabilities guard is optionality-exact: absent manifest passes, non-array capabilities rejects", async () => {
+	test("requestCapabilities guard: nullish manifest reaches the empty-envelope path; crash-inducing shapes reject", async () => {
 		const dispatcher = makeBareDispatcher(makeSession())
-		// An absent manifest is the valid "no capabilities requested" call — it must
-		// pass the guard and reach the handler's empty-envelope path, NOT reject.
+		// The valid "no capabilities" call, in every wire shape. `[null]` is the JSON
+		// encoding of `requestCapabilities(undefined)` — it MUST reach the handler's
+		// empty-envelope path, not reject (the bug this pins was rejecting it).
 		await expect(dispatcher.dispatch("requestCapabilities", [], ctx)).resolves.toMatchObject({ granted: [] })
-		// A present manifest whose `capabilities` isn't an array would TypeError in
-		// the handler's `.filter` — the guard turns it into a calibrated reject.
+		await expect(dispatcher.dispatch("requestCapabilities", [null], ctx)).resolves.toMatchObject({ granted: [] })
+		await expect(dispatcher.dispatch("requestCapabilities", [{ capabilities: null }], ctx)).resolves.toMatchObject({
+			granted: [],
+		})
+		// Shapes the handler cannot process become a calibrated reject instead of an
+		// uncalibrated TypeError: non-array `capabilities` (no `.filter`), a nullish
+		// ENTRY (`null.type` throws), and a non-object manifest.
 		await expect(dispatcher.dispatch("requestCapabilities", [{ capabilities: {} }], ctx)).rejects.toThrow(
 			"Invalid arguments for wallet method: requestCapabilities",
 		)
-		// An array-shaped "manifest" is not a plain object → reject.
+		await expect(dispatcher.dispatch("requestCapabilities", [{ capabilities: [null] }], ctx)).rejects.toThrow(
+			"Invalid arguments for wallet method: requestCapabilities",
+		)
 		await expect(dispatcher.dispatch("requestCapabilities", [[]], ctx)).rejects.toThrow(
 			"Invalid arguments for wallet method: requestCapabilities",
 		)

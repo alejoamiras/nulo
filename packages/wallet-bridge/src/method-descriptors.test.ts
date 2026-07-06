@@ -378,21 +378,28 @@ describe("method-descriptors — arg guards (ADD-only)", () => {
 	})
 
 	test("requestCapabilities matches the handler's tolerance EXACTLY; batch requires well-formed legs", () => {
-		// The handler optional-chains the manifest (`manifest?.capabilities ?? []`),
-		// so an absent manifest is a valid "no capabilities requested" call and MUST
-		// pass — rejecting it would over-tighten vs the pre-guard handler tolerance.
+		// Nullish manifest = the valid "no capabilities requested" call. BOTH forms
+		// must pass: the dApp channel JSON-serializes, so `requestCapabilities(undefined)`
+		// arrives as `null` — rejecting `[null]` would reject the actual wire encoding.
 		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([])).toBe(true)
 		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([undefined])).toBe(true)
+		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([null])).toBe(true)
 		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([{}])).toBe(true)
+		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([{ capabilities: null }])).toBe(true)
 		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([{ capabilities: [] }])).toBe(true)
 		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([{ capabilities: [{ type: "data" }] }])).toBe(true)
-		// A present manifest must be a plain object whose optional `capabilities` is
-		// an array — the handler `.filter`s it, so a non-array `capabilities` is a
-		// calibrated reject (not a downstream TypeError), and an array is not an object.
+		// Tolerance-exact: non-nullish non-object entries flow as the handler tolerates
+		// them (`.type` → undefined → ignored), so they pass the guard unchanged.
+		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([{ capabilities: [{}] }])).toBe(true)
+		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([{ capabilities: ["x"] }])).toBe(true)
+		// Reject only what the handler cannot process: a non-object manifest, a
+		// non-array `capabilities` (no `.filter`), or a NULLISH entry (`null.type`
+		// throws) — the dApp-triggerable crash the guard converts to a calibrated reject.
 		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.(["manifest"])).toBe(false)
 		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([{ capabilities: {} }])).toBe(false)
 		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([[]])).toBe(false)
-		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([null])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([{ capabilities: [null] }])).toBe(false)
+		expect(REGISTRY_FOR_ARGS.requestCapabilities.argSchema?.([{ capabilities: [{ type: "data" }, null] }])).toBe(false)
 
 		expect(REGISTRY_FOR_ARGS.batch.argSchema?.([[{ name: "getChainInfo", args: [] }]])).toBe(true)
 		expect(REGISTRY_FOR_ARGS.batch.argSchema?.([[]])).toBe(true)

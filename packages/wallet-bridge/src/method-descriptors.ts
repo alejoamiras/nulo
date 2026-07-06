@@ -114,16 +114,25 @@ export interface MethodDescriptor {
 const isPlainRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v)
 
 /** requestCapabilities(manifest?): the handler optional-chains the manifest
- *  (`manifest?.capabilities ?? []`) and `.filter`s the capabilities list. The
- *  guard is optionality-exact with that tolerance — an ABSENT manifest is the
- *  valid "no capabilities requested" call, and a PRESENT manifest must be a
- *  plain object whose optional `capabilities` is an array (a non-array would
- *  TypeError in the handler's `.filter`, so it's a calibrated reject here). */
+ *  (`manifest?.capabilities ?? []`) then `.filter`s the list, reading `cap.type`
+ *  on each entry. The guard mirrors that tolerance for OBJECT manifests and
+ *  rejects only inputs the handler cannot process:
+ *   - A nullish manifest is the valid "no capabilities requested" call. It is
+ *     `== null` (not `=== undefined`) because the dApp channel JSON-serializes,
+ *     so a caller's `requestCapabilities(undefined)` arrives as `null`.
+ *   - A non-object manifest (array / string / number) is malformed → reject.
+ *   - `capabilities` nullish mirrors the handler's `?? []` (empty) → pass.
+ *   - `capabilities` non-array (no `.filter`) or with a NULLISH entry
+ *     (`null.type` throws) is a dApp-triggerable crash → calibrated reject.
+ *     Non-nullish non-object entries flow exactly as the handler tolerates them
+ *     (`.type` → undefined → ignored), so this stays a crash guard, not a validator. */
 export function argsRequestCapabilities(args: readonly unknown[]): boolean {
 	const manifest = args[0]
-	if (manifest === undefined) return true
+	if (manifest == null) return true
 	if (!isPlainRecord(manifest)) return false
-	return manifest.capabilities === undefined || Array.isArray(manifest.capabilities)
+	const caps = manifest.capabilities
+	if (caps == null) return true
+	return Array.isArray(caps) && caps.every((cap) => cap != null)
 }
 
 /** batch(legs): handleBatch iterates legs and re-dispatches `leg.name(leg.args)`;
