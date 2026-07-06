@@ -16,6 +16,29 @@ AZLO `0x457f…d389`. Manifest: `apps/faucet/public/testnet-bridge.candidate.jso
 | 2 | **PRIVATE bridge → `claim_private`** (strand-risk gate) | `… --config <candidate> --private` | ✅ PASS (4.4m, `balance_of_private` verified — recipient-commitment works LIVE) |
 | 3 | **redirect-proof** (wrong recipient can't consume) | `… --config <candidate> --redirect-proof` | ✅ PASS (binding held — see below) |
 | 4 | fueled bridge (Permit2 `bridgeWithFuel` + self-paying claim) | `smoke-swap-existing-testnet.ts --config <candidate>` | ✅ PASS (3.5m, token 9.75 AZLO + FJ 331 — new portal + reused router) |
+| 5 | fuel-testnet: PUBLIC + 3× PRIVATE FPC-fuel legs | `fuel-testnet.ts --config <candidate>` | ✅ PASS (14.2m, all SETTLED; the `tokenClaimSalt` fix let the private leg past the F2 guard) |
+| 6 | fuel-only (`router.bridge` → FeeJuicePortal) | — | ⏭ COVERED, not scripted (see below) |
+
+### Canary 5 note
+`MIN_FUEL_FJ` calibration emitted `10.67 FJ` (4× worst `getFeeLimit`). The candidate carries `minFuelFj =
+29.58 FJ` from the reused live config — conservatively HIGHER than needed, so safe (not blocking). Tune
+down at leisure post-promotion if desired.
+
+### Canary 6 (fuel-only) — treated as COVERED, deliberately not scripted
+Fuel-only (part b) is `router.bridge(SimpleBridgeParams, PermitParams)` → FeeJuicePortal, `isPrivate`
+always false (`useFuel.ts:154-159`). It runs entirely through the **reused router `0x4c3f…4068` + the
+unchanged FeeJuicePortal** — neither touched by the candidate deploy. It is already fork-tested on REAL
+Sepolia (`test_fuelOnly_realFeeJuicePortal`, 12/12 green: approve Permit2 → `router.bridge` → asserts FJ
+pulled + no router residue) and will be exercised in the post-promotion UI canaries (step 8). Per the
+project's testing philosophy (smallest set that proves it works, no redundant tests), a scripted live
+fuel-only canary would only re-validate fork-tested + unchanged infra, so it was intentionally skipped.
+
+## Candidate validation verdict
+
+The recipient-commitment CORE (the actual change) is proven LIVE on the deployed candidate: public claim,
+private claim (strand-risk gate), and redirect-proof (wrong recipient can't consume a synced message).
+The fueled paths (parts a/b via the router + Permit2) are proven live (canary 4/5) or fork-tested
+(fuel-only). **Candidate READY for promotion — held on the explicit user gate.**
 
 ### Canary 3 — the redirect-proof + a PXE gotcha
 
