@@ -1,5 +1,6 @@
 import { describe, test, expect } from "vitest"
 import { enforceScope, enforceScopeWithSession } from "./scope-enforcement"
+import { isCreateAuthWitCoveredByTxOrSimulationScope } from "./method-scope-checkers"
 import type { Capability, GrantedCapabilityRecord } from "./capabilities"
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -512,6 +513,35 @@ describe("createAuthWit", () => {
 		// an unstructured args[1] fell through the scope check and got signed silently. Now rejected.
 		const grants = [grant(accountsCap(true, [ADDR_A]))]
 		expect(() => enforceScope("createAuthWit", [addr(ADDR_A), {}], grants)).toThrow(/structured call intent/)
+	})
+})
+
+// ── createAuthWit silent-vs-popup routing (dispatcher coverage helper) ──
+
+describe("isCreateAuthWitCoveredByTxOrSimulationScope", () => {
+	const txGrant = grant({ type: "transaction", scope: [{ contract: ADDR_B, function: "transfer" }] } as Capability)
+	const callIntent = (to: string, name: string) => ({ caller: addr(ADDR_A), call: { to: addr(to), name } })
+	const innerHash = (consumer: string) => ({ consumer: addr(consumer), innerHash: "0xabc" })
+
+	test("covered CallIntent → true (routes to silent execution)", () => {
+		expect(isCreateAuthWitCoveredByTxOrSimulationScope(callIntent(ADDR_B, "transfer"), [txGrant])).toBe(true)
+	})
+	test("uncovered CallIntent (wrong function) → false (routes to popup)", () => {
+		expect(isCreateAuthWitCoveredByTxOrSimulationScope(callIntent(ADDR_B, "burn"), [txGrant])).toBe(false)
+	})
+	test("CallIntent with no tx/sim grant → false (routes to popup)", () => {
+		expect(isCreateAuthWitCoveredByTxOrSimulationScope(callIntent(ADDR_B, "transfer"), [])).toBe(false)
+	})
+	test("IntentInnerHash → false (always routes to popup)", () => {
+		expect(isCreateAuthWitCoveredByTxOrSimulationScope(innerHash(ADDR_B), [txGrant])).toBe(false)
+	})
+	test("simulation.transactions scope also covers → true", () => {
+		const simGrant = grant({ type: "simulation", transactions: { scope: [{ contract: ADDR_B, function: "transfer" }] } } as Capability)
+		expect(isCreateAuthWitCoveredByTxOrSimulationScope(callIntent(ADDR_B, "transfer"), [simGrant])).toBe(true)
+	})
+	test("raw / non-structured → false", () => {
+		expect(isCreateAuthWitCoveredByTxOrSimulationScope("0xhash", [txGrant])).toBe(false)
+		expect(isCreateAuthWitCoveredByTxOrSimulationScope({}, [txGrant])).toBe(false)
 	})
 })
 
