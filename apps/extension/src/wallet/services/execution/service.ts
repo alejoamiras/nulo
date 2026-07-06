@@ -57,7 +57,7 @@ import { DappSendExecutor } from "./dapp-send-executor"
 import { ViewExecutor } from "./view-executor"
 import { ExecutionLane } from "./execution-lane"
 import { GasBalanceReader } from "./gas-balance-reader"
-import { ContractResolver } from "./contract-resolver"
+import { ContractResolver, findFunctionBySelector } from "./contract-resolver"
 import { getViewSimulationDeps } from "./helpers/get-view-simulation-deps"
 import type { MaterializedRegisterTokenOperation } from "./models"
 import { AuthwitDiscoverer } from "./authwit-discoverer"
@@ -656,17 +656,42 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		let messageHash: Fr
 		if (typeof op.messageHashOrIntent === "object" && "caller" in op.messageHashOrIntent) {
 			const { caller, call } = op.messageHashOrIntent
+			// Bind the dApp-supplied name to the selector's real ABI function before
+			// signing an authwit over it. No artifact was resolved here pre-fix, so a dApp
+			// could obtain an authwit for a selector that did not match the claimed name.
+			// Fail closed if the contract/artifact is unregistered — the dApp registers it
+			// first. Build the call from ABI truth; never trust dApp name/type/isStatic.
+			const authwitInstance = await this.pxeService.getContractInstance(
+				networkInfoFrom(network),
+				AztecAddress.fromStringUnsafe(call.to),
+			)
+			if (!authwitInstance) {
+				throw new Error("Contract not found")
+			}
+			const authwitArtifact = await this.pxeService.getContractArtifact(networkInfoFrom(network), authwitInstance.currentContractClassId)
+			if (!authwitArtifact) {
+				throw new Error("Contract artifact not found")
+			}
+			const authwitFn = await findFunctionBySelector(authwitArtifact, call.selector)
+			if (!authwitFn) {
+				throw new Error("Method not found")
+			}
+			if (call.name !== undefined && call.name !== authwitFn.name) {
+				throw new Error(
+					`Scope violation: authwit call name "${call.name}" does not match selector's function "${authwitFn.name}" on ${call.to}`,
+				)
+			}
 			const intentAction: CallIntent = {
 				caller: await AztecAddress.schema.parseAsync(caller),
 				call: new FunctionCall(
-					call.name,
+					authwitFn.name,
 					await AztecAddress.schema.parseAsync(call.to),
 					await FunctionSelector.schema.parseAsync(call.selector),
-					call.type,
+					authwitFn.functionType,
 					call.hideMsgSender,
-					call.isStatic,
+					authwitFn.isStatic,
 					await z.array(Fr.schema).parseAsync(call.args),
-					await z.array(AbiTypeSchema).parseAsync(call.returnTypes),
+					authwitFn.returnTypes,
 				),
 			}
 			messageHash = await computeAuthWitMessageHash(intentAction, metadata)
