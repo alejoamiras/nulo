@@ -78,3 +78,16 @@ Branch: `fix/hf-a-dispatcher-authz` off `fix/harden-findings`. Status: **design 
 **Revised sink list (F-02): FOUR** — buildStandard, buildNoFrom, executeAztecCreateAuthWit, AuthwitDiscoverer.
 
 **Implementation order (test after each):** (i) F-02 execution bindings — buildStandard → buildNoFrom → executeAztecCreateAuthWit → authwit-discoverer (+ N1/N2/N3/N7). (ii) createAuthWit handler refactor + hasTxCaps + raw-Fr reject + popup (+ N4/N5/N6) + signer fix + consumer display. (iii) F-08 dispatcher pre-scope validation (+ N8). Then the full gate.
+
+### Progress
+- ✅ (i) F-02 execution bindings — all 4 sinks bound (unconditional ABI resolve + name↔selector reject + build from ABI truth):
+  - buildStandard `encoded_call` — `5014db1`
+  - buildNoFrom (+ ABI private-type check) — `96e4d24`
+  - authwit-discoverer `computeEncodedCallMessageHash` — `10ba462`
+  - executeAztecCreateAuthWit CallIntent (resolve via pxeService, fail-closed) — `45d99cc`
+  - All biome-clean. API usage mirrors `service.ts:487/494` + `contract-resolver` exports (type-safe by construction).
+- ⏳ (ii) dispatcher: checkCreateAuthWit raw-Fr reject + hasTxCaps-gap fix (wallet-bridge) → createAuthWit handler refactor (descriptor→handler, signer from args[0], inner-hash/uncovered-CallIntent popup, no sendTx FIFO hooks) → DappInteractionService `isConfirmationNeeded` rule + OperationCard consumer display.
+- ⏳ (iii) F-08 dispatcher pre-scope arg validation.
+- ⏳ tests: wallet-bridge method-scope-checkers (raw-Fr reject, hasTxCaps covered/uncovered) + authwit-discoverer negative (mock findFunctionBySelector). Positive binding across sinks → network e2e.
+
+**ENV NOTE (gate):** `vue-tsc` is not in local `.bin` (sparse sandbox install) — the Unit A gate must run `bun install --frozen-lockfile` before `typecheck`/`test`/`e2e:agent`.
