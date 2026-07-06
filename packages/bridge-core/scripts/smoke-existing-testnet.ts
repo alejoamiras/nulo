@@ -34,6 +34,7 @@ import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
 import { createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
+import { deriveTokenClaimSecret } from "../src/claim-secret"
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
@@ -43,6 +44,9 @@ if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-core/.e
 const configArg = process.argv.indexOf("--config")
 if (configArg === -1) throw new Error("pass --config <candidate manifest path> (e.g. apps/faucet/public/testnet-bridge.candidate.json)")
 const CONFIG = JSON.parse(readFileSync(process.argv[configArg + 1] as string, "utf8"))
+// --private exercises the recipient-committed path (the strand-risk gate): deposit commits to
+// H(deriveTokenClaimSecret(salt, recipient)) and claim_private re-derives the secret in-circuit.
+const isPrivate = process.argv.includes("--private")
 
 const here = dirname(fileURLToPath(import.meta.url))
 const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
@@ -159,11 +163,15 @@ async function main() {
 		CONFIG.l2.bridge.address,
 	)
 
-	// ─── Deposit (public) → claim ────────────────────────────────────
+	// ─── Deposit → claim (public, or --private recipient-committed) ────────────────────
 	const amount = 100n * 10n ** BigInt(decimals)
 	const l2recipient = from
-	const claimSecret = Fr.random()
-	const secretHash = await computeSecretHash(claimSecret)
+	// PRIVATE: the stored/claimed value is the claim_salt; the L1-committed secretHash is over the
+	// DERIVED secret deriveTokenClaimSecret(salt, recipient), so claim_private re-derives it in-circuit.
+	// PUBLIC: claimValue is the raw secret (claim_public binds the recipient in its content hash).
+	const claimValue = Fr.random()
+	const committedSecret = isPrivate ? deriveTokenClaimSecret(claimValue, l2recipient) : claimValue
+	const secretHash = await computeSecretHash(committedSecret)
 
 	await pub.waitForTransactionReceipt({
 		hash: await wallet.writeContract({
@@ -181,11 +189,14 @@ async function main() {
 			args: [portal, amount] as never,
 		}),
 	})
-	const depositArgs = [l2recipient.toString(), amount, secretHash.toString()]
+	// PRIVATE deposit omits the recipient (mint_to_private content hash = amount only); the recipient
+	// is bound solely via the secretHash. PUBLIC deposit carries the recipient in its content hash.
+	const depositFn = isPrivate ? "depositToAztecPrivate" : "depositToAztecPublic"
+	const depositArgs = isPrivate ? [amount, secretHash.toString()] : [l2recipient.toString(), amount, secretHash.toString()]
 	const sim = await pub.simulateContract({
 		address: portal,
 		abi: TokenPortalAbi as never,
-		functionName: "depositToAztecPublic",
+		functionName: depositFn as never,
 		args: depositArgs as never,
 		account,
 	})
@@ -194,26 +205,34 @@ async function main() {
 		hash: await wallet.writeContract({
 			address: portal,
 			abi: TokenPortalAbi as never,
-			functionName: "depositToAztecPublic",
+			functionName: depositFn as never,
 			args: depositArgs as never,
 		}),
 	})
-	console.log(`deposited ${amount} → L2, leafIndex ${leafIndex} (${mins()})`)
+	console.log(`deposited ${amount} → L2 (${isPrivate ? "private" : "public"}), leafIndex ${leafIndex} (${mins()})`)
 
 	let claimed = false
 	for (let i = 0; i < 300 && !claimed; i++) {
 		try {
-			await bridge.methods.claim_public(l2recipient, amount, claimSecret, new Fr(leafIndex)).send(sendOpts)
+			// PRIVATE: pass the SALT (claimValue); claim_private re-derives the secret from (salt, recipient).
+			await (isPrivate
+				? bridge.methods.claim_private(l2recipient, amount, claimValue, new Fr(leafIndex))
+				: bridge.methods.claim_public(l2recipient, amount, claimValue, new Fr(leafIndex))
+			).send(sendOpts)
 			claimed = true
 		} catch {
 			await new Promise((r) => setTimeout(r, 6000))
 		}
 	}
-	if (!claimed) throw new Error("claim_public never succeeded (L1→L2 message not synced within budget)")
+	if (!claimed) throw new Error(`claim_${isPrivate ? "private" : "public"} never succeeded (L1→L2 message not synced within budget)`)
 
-	const bal = ((await token.methods.balance_of_public(l2recipient).simulate({ from })) as { result: bigint }).result
+	const bal = isPrivate
+		? ((await token.methods.balance_of_private(l2recipient).simulate({ from })) as { result: bigint }).result
+		: ((await token.methods.balance_of_public(l2recipient).simulate({ from })) as { result: bigint }).result
 	if (bal < amount) throw new Error(`balance ${bal} < deposited ${amount}`)
-	console.log(`\n✅ CANDIDATE smoke PASSED — deposit→claim bridged ${amount} on the recorded set in ${mins()}.`)
+	console.log(
+		`\n✅ CANDIDATE ${isPrivate ? "PRIVATE " : ""}smoke PASSED — deposit→claim bridged ${amount} on the recorded set in ${mins()}.`,
+	)
 	console.log("   Safe to promote testnet-bridge.candidate.json → testnet-bridge.json.")
 }
 

@@ -44,6 +44,12 @@ const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-lab
 const here = dirname(fileURLToPath(import.meta.url))
 const MANIFEST_PATH = process.env.BRIDGE_MANIFEST ?? join(here, "..", "..", "..", "apps", "faucet", "public", "testnet-bridge.json")
 
+// Phase 7 canary (fresh-audit H2): submit claim_private with a WRONG recipient DIRECTLY to the
+// sequencer — bypassing the faucet's deposit-time client re-derivation guard — and assert the tx
+// REVERTS. This proves the CIRCUIT's recipient binding (not just the client assert): a relayer with a
+// valid (salt, amount, leaf) cannot redirect to a recipient other than the one bound at deposit time.
+const WRONG_RECIPIENT_CANARY = process.argv.includes("--wrong-recipient")
+
 function claimPathFromArgv(argv: string[]): string {
 	const i = argv.indexOf("--claim")
 	const path = i >= 0 ? argv[i + 1] : process.env.RELAY_CLAIM_FILE
@@ -123,6 +129,44 @@ async function main(): Promise<void> {
 	//    recipient could not have produced this salt→secret, so the relayer cannot redirect; the funds
 	//    land at descriptor.recipient. `wait` auto-waits and THROWS if the tx doesn't reach PROPOSED.
 	const bridge = bridgeAt(ewallet as never, descriptor.bridge, tokenBridgeArtifact)
+
+	// Canary: the wrong-recipient claim MUST revert (the circuit re-derives the secret from the recipient
+	// argument, so a wrong recipient yields a non-matching secret that can't consume the message).
+	if (WRONG_RECIPIENT_CANARY) {
+		if (relayerAddr.toString().toLowerCase() === descriptor.recipient.toLowerCase()) {
+			throw new Error(
+				"--wrong-recipient: the relayer IS the bound recipient — use a relayer key that differs so the wrong claim is genuinely wrong",
+			)
+		}
+		console.log(
+			`[canary] submitting claim_private with WRONG recipient ${relayerAddr.toString()} (bound=${descriptor.recipient}) — MUST revert`,
+		)
+		let reverted = false
+		try {
+			await submitPrivateClaim(
+				bridge,
+				{
+					recipient: relayerAddr.toString(),
+					amount: descriptor.amount,
+					secret: descriptor.salt,
+					messageLeafIndex: descriptor.leafIndex,
+				},
+				{ from: relayerAddr, ...fee, wait: { waitForStatus: TxStatus.PROPOSED } },
+			)
+		} catch {
+			reverted = true
+		}
+		if (!reverted) {
+			throw new Error(
+				"SECURITY FAILURE: wrong-recipient claim_private SUCCEEDED — recipient-commitment is broken (redirect possible)",
+			)
+		}
+		console.log(
+			"✅ wrong-recipient claim_private REVERTED — the circuit binding holds (relayer cannot redirect); the message stays claimable for the correct recipient",
+		)
+		return
+	}
+
 	let result: { receipt?: { txHash?: { toString(): string } } } | undefined
 	let lastErr: unknown
 	for (let attempt = 1; attempt <= 5 && !result; attempt++) {
