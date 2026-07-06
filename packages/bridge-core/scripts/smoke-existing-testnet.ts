@@ -46,7 +46,10 @@ if (configArg === -1) throw new Error("pass --config <candidate manifest path> (
 const CONFIG = JSON.parse(readFileSync(process.argv[configArg + 1] as string, "utf8"))
 // --private exercises the recipient-committed path (the strand-risk gate): deposit commits to
 // H(deriveTokenClaimSecret(salt, recipient)) and claim_private re-derives the secret in-circuit.
-const isPrivate = process.argv.includes("--private")
+// --redirect-proof (implies private) additionally proves the CIRCUIT binding LIVE: a wrong recipient
+// can't consume (Phase 7 step 3, fresh-audit H2).
+const redirectProof = process.argv.includes("--redirect-proof")
+const isPrivate = process.argv.includes("--private") || redirectProof
 
 const here = dirname(fileURLToPath(import.meta.url))
 const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
@@ -166,6 +169,97 @@ async function main() {
 	// ─── Deposit → claim (public, or --private recipient-committed) ────────────────────
 	const amount = 100n * 10n ** BigInt(decimals)
 	const l2recipient = from
+
+	if (redirectProof) {
+		// Prove the CIRCUIT binding LIVE: deposit A + a sync SENTINEL B (both to R). Once B claims, the
+		// network has synced past both, so a wrong-recipient claim on the earlier A reverts for the BINDING
+		// reason, not because A isn't synced yet. The authoritative gate is that the CORRECT claim of A still
+		// succeeds afterwards — if the wrong claim had redirected/consumed A, that correct claim would fail.
+		const depositPrivate = async (salt: Fr): Promise<bigint> => {
+			const sh = await computeSecretHash(deriveTokenClaimSecret(salt, l2recipient))
+			await pub.waitForTransactionReceipt({
+				hash: await wallet.writeContract({
+					address: usdc,
+					abi: usdcAbi as never,
+					functionName: "mint",
+					args: [account.address, amount] as never,
+				}),
+			})
+			await pub.waitForTransactionReceipt({
+				hash: await wallet.writeContract({
+					address: usdc,
+					abi: usdcAbi as never,
+					functionName: "approve",
+					args: [portal, amount] as never,
+				}),
+			})
+			const s = await pub.simulateContract({
+				address: portal,
+				abi: TokenPortalAbi as never,
+				functionName: "depositToAztecPrivate" as never,
+				args: [amount, sh.toString()] as never,
+				account,
+			})
+			const leaf = BigInt((s.result as [string, bigint])[1])
+			await pub.waitForTransactionReceipt({
+				hash: await wallet.writeContract({
+					address: portal,
+					abi: TokenPortalAbi as never,
+					functionName: "depositToAztecPrivate" as never,
+					args: [amount, sh.toString()] as never,
+				}),
+			})
+			return leaf
+		}
+		const claimPrivate = async (recipient: AztecAddress, salt: Fr, leaf: bigint): Promise<boolean> => {
+			for (let i = 0; i < 300; i++) {
+				try {
+					await bridge.methods.claim_private(recipient, amount, salt, new Fr(leaf)).send(sendOpts)
+					return true
+				} catch {
+					await new Promise((r) => setTimeout(r, 6000))
+				}
+			}
+			return false
+		}
+
+		const saltA = Fr.random()
+		const leafA = await depositPrivate(saltA)
+		const saltB = Fr.random()
+		const leafB = await depositPrivate(saltB)
+		console.log(`redirect-proof: deposited A(leaf ${leafA}) + sentinel B(leaf ${leafB}) (${mins()})`)
+
+		if (!(await claimPrivate(l2recipient, saltB, leafB))) throw new Error("sentinel B never claimed — L1→L2 not synced within budget")
+		console.log(`sentinel B claimed → network synced; A is now claimable (${mins()})`)
+
+		// A is synced. A wrong recipient MUST fail to consume it (single attempt — no retry).
+		const wrongRecipient = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000001")
+		let wrongReverted = false
+		try {
+			await bridge.methods.claim_private(wrongRecipient, amount, saltA, new Fr(leafA)).send(sendOpts)
+		} catch {
+			wrongReverted = true
+		}
+		console.log(
+			wrongReverted
+				? "wrong-recipient claim threw (expected)"
+				: "⚠ wrong-recipient claim did NOT throw — the re-claim of A below is the authoritative check",
+		)
+
+		// AUTHORITATIVE: the correct recipient still claims A. Success proves the wrong attempt did not
+		// redirect/consume A (if it had, A's message would be gone and this would fail).
+		if (!(await claimPrivate(l2recipient, saltA, leafA))) {
+			throw new Error(
+				"SECURITY FAILURE: correct claim of A failed after the wrong-recipient attempt — A may have been redirected/consumed",
+			)
+		}
+		const balRP = ((await token.methods.balance_of_private(l2recipient).simulate({ from })) as { result: bigint }).result
+		if (balRP < 2n * amount) throw new Error(`redirect-proof: balance ${balRP} < expected ${2n * amount} (A+B)`)
+		console.log(
+			`\n✅ CANDIDATE REDIRECT-PROOF PASSED — wrong recipient cannot consume; correct recipient claims A+B; balance ${balRP} (${mins()})`,
+		)
+		return
+	}
 	// PRIVATE: the stored/claimed value is the claim_salt; the L1-committed secretHash is over the
 	// DERIVED secret deriveTokenClaimSecret(salt, recipient), so claim_private re-derives it in-circuit.
 	// PUBLIC: claimValue is the raw secret (claim_public binds the recipient in its content hash).
