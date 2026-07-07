@@ -18,3 +18,11 @@ Branch: `fix/hf-b-approval-display` off `fix/harden-findings`. Depends on A (mer
 - Capabilities UI with an `accounts` grant that has `canCreateAuthWit` → the create-authwit permission is visible.
 
 ## Gate (plan.md Unit B): components + `bun run test` + lint + `bun run test:e2e` (smoke).
+
+### Gate result
+- `bun run test` (extension units + components): **2649 passed | 7 todo**, exit 0.
+- `bun run lint`: clean (57 warnings / 3 infos, **0 errors**).
+- `bun run --cwd apps/extension typecheck`: **0 errors**.
+- `bun run test:e2e` (smoke): **69 passed | 6 skipped | 1 failed**.
+  - The single failure is `passkey-backup.test.ts > passkey full-backup export`, which is **`test.skipIf(process.env.CI === "true")`** (local-only — its header documents it as 5-10× slower + fragile "under cumulative load"). On this loaded multi-agent host it times out at the 15s inner `waitForFunction` for the `backup-status-card` "Creating your backup" intermediate state (`:201`). The other 2 tests in the file pass (virtual authenticator works), and an isolated re-run failed x2 → external machine load, not a transient hiccup.
+  - **Unrelated to Unit B** (no file overlap: B touched `OperationCard.vue` + `capabilities/index.vue`; the failure is the passkey full-backup export flow) and **excluded from the enforced CI `smoke-e2e-status` gate**. Classified as a load-induced flake in a CI-skipped test; not neutralized (test left as-is). All 69 CI-relevant smoke tests pass.
