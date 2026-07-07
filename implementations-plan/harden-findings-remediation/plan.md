@@ -192,7 +192,7 @@ A unit is ✓ when its child-branch PR has merged into `fix/harden-findings` wit
 - [x] A — Dispatcher trust-boundary (F-01, F-02 authz, F-08) — **PR #261 merged**; gate green: audit:vue 2649 · faucet 423 · wallet-bridge 165 · e2e:agent 70/1-skip
 - [x] B — Approval-display truthfulness + `canCreateAuthWit` surfacing (F-02 display, F-07, F-01 UI) — **PR #262 merged**; gate green: units 2649 · lint/typecheck 0-err · smoke 69-pass (1 CI-skipped passkey load-flake, unrelated)
 - [x] C — Chain-identity TOCTOU (F-03) — **PR #265 merged**; required chainInfo param + re-fetch deleted. Gate: aztec-runtime 36/36 · full test 2653 · typecheck:all/lint 0-err · proverless e2e 70-pass/1-skip (baseline parity)
-- [ ] D — Discovery-flood rate limit (F-04)
+- [x] D — Discovery-flood rate limit (F-04) — **PR #267 merged**; caps (global 32 / per-origin 4) + (origin,chainId) coalesce, locked-queue + popup. Gate: wallet-bridge 174 (+4) · full test 2657 · lint 0-err · proverless e2e 70-pass/1-skip. chainId-reject deferred
 - [ ] E — Backup-restore config allowlist (F-06)  *(prerequisite of L)*
 - [x] F — CSP hardening (F-05) — **PR #264 merged**; `img-src 'self' data: blob:` (default-src floor deferred — broke connect e2e, DiD follow-up). Gate: build/lint 0-err · smoke 69-pass (1 CI-skipped flake) · proverless e2e 70-pass/1-skip (baseline parity)
 - [ ] G — Offscreen/messaging sender-auth + Firefox token (F-09, F-10)
