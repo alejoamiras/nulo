@@ -194,11 +194,21 @@ function cloneJsonObject(value: Record<string, unknown>, path: string): { [key: 
 	if (Object.getOwnPropertySymbols(value).length > 0) throw new Error(`row-map data at ${path} has symbol keys`)
 	const out: { [key: string]: JsonValue } = {}
 	for (const key of Object.keys(value)) {
+		// An own computed `__proto__` key would not survive a naive `out[key] =`
+		// (the inherited setter rewrites the clone's PROTOTYPE, which deepFreeze
+		// does not freeze — a post-brand mutation route). Reject the name AND
+		// write via defineProperty so no setter can ever be reached.
+		if (key === "__proto__") throw new Error(`row-map data at ${path} has a "__proto__" key`)
 		const desc = Object.getOwnPropertyDescriptor(value, key)
 		if (!desc || desc.get !== undefined || desc.set !== undefined) {
 			throw new Error(`row-map data at ${path}.${key} is an accessor — transforms must be pure data`)
 		}
-		out[key] = cloneJsonValue(desc.value, `${path}.${key}`)
+		Object.defineProperty(out, key, {
+			value: cloneJsonValue(desc.value, `${path}.${key}`),
+			enumerable: true,
+			writable: true,
+			configurable: true,
+		})
 	}
 	return out
 }
@@ -210,13 +220,20 @@ function validateTransform(target: string, t: RowMapTransform): void {
 		throw new Error(`row-map transform for "${target}": ${reason}`)
 	}
 	const fields = (names: Iterable<string>, where: string) => {
-		for (const n of names) if (typeof n !== "string" || n.length === 0) fail(`${where} has an empty field name`)
+		for (const n of names) {
+			if (typeof n !== "string" || n.length === 0) fail(`${where} has an empty field name`)
+			// Writing `out["__proto__"]` on a row clone would mutate its
+			// prototype via the inherited setter, not set a field — never a
+			// legitimate transform target.
+			if (n === "__proto__") fail(`${where} targets "__proto__"`)
+		}
 	}
 	if (t.rename) {
 		fields(Object.keys(t.rename), "rename")
 		const targets = new Set<string>()
 		for (const [oldName, newName] of Object.entries(t.rename)) {
 			if (typeof newName !== "string" || newName.length === 0) fail("rename has an empty target name")
+			if (newName === "__proto__") fail(`rename targets "__proto__"`)
 			if (oldName === newName) fail(`rename maps "${oldName}" onto itself`)
 			if (targets.has(newName)) fail(`rename maps two fields onto "${newName}"`)
 			targets.add(newName)

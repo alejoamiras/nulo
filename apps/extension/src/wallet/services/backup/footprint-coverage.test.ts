@@ -267,6 +267,32 @@ describe("DSL define-time validation rejects ambiguous or non-idempotent transfo
 		).toThrow(/hole or accessor/)
 	})
 
+	test("proto smuggling is rejected: computed __proto__ keys and __proto__ transform targets throw", () => {
+		// `out["__proto__"] = …` on a plain clone would hit the inherited
+		// SETTER and rewrite the clone's (unfrozen) prototype — a post-brand
+		// mutation route via rowMapDefOf. Both the clone walker and the field
+		// validator must reject the name.
+		const protoKeyed = JSON.parse('{"rename":{"a":"b"},"__proto__":{"x":1}}') as RowMapTransform
+		expect(() => defineRowMapMigration({ version: 2, description: "x", rowMaps: { [CONTACT_STORAGE_ROOT]: protoKeyed } })).toThrow(
+			/__proto__/,
+		)
+
+		expect(() =>
+			defineRowMapMigration({
+				version: 2,
+				description: "x",
+				rowMaps: { [CONTACT_STORAGE_ROOT]: { rename: { legacy: "__proto__" } } },
+			}),
+		).toThrow(/__proto__/)
+		expect(() =>
+			defineRowMapMigration({
+				version: 2,
+				description: "x",
+				rowMaps: { [CONTACT_STORAGE_ROOT]: { addDefault: JSON.parse('{"__proto__": true}') } },
+			}),
+		).toThrow(/__proto__/)
+	})
+
 	test("exotic transform objects are DEFUSED by canonicalization: the interpreter sees a plain clone, traps run at most once", () => {
 		let reads = 0
 		const proxied = new Proxy(
