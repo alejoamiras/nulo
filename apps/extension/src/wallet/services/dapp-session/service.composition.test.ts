@@ -31,8 +31,19 @@ async function makeHarness() {
 	const logger = new LoggerStore(new ConfigStore())
 	const onProfileDeleted = new EventHandler<ProfileInfo>()
 
+	// F-12: DappSessionService now signs/verifies rows with a per-profile MAC
+	// key from ProfileService. Provide a stable HMAC key so persisted rows
+	// verify on read-back.
+	const macKey = await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"])
+
 	const collection = new ServiceCollection()
-	collection.add(svc(ProfileService.name, { getActiveProfile: async () => ({ id: "p1" }), onProfileDeleted }))
+	collection.add(
+		svc(ProfileService.name, {
+			getActiveProfile: async () => ({ id: "p1" }),
+			onProfileDeleted,
+			deriveDappSessionMacKey: async () => macKey,
+		}),
+	)
 	const service = new DappSessionService(logger, api)
 	collection.add(service)
 	await collection.start()

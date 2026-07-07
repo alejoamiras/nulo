@@ -5,6 +5,7 @@ import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/serv
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
+import { DappSessionMacStorage } from "./mac-storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
@@ -43,14 +44,21 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	public readonly onDappSessionUpdated = new EventHandler<DappSession>()
 	public readonly onDappSessionDeleted = new EventHandler<DappSession>()
 
-	private readonly storage: EntityStorage<DappSession>
+	private readonly storage: DappSessionMacStorage
 	private readonly lock = new Lock()
 
 	private profileService: ProfileService = null!
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(DAPP_SESSION_SERVICE_NAME, logger)
-		this.storage = new EntityStorage<DappSession>("nulo:core:dappSessions", browserApi.storage.local)
+		// F-12: wrap the raw store with the row-integrity (MAC) layer. The key
+		// provider reads `this.profileService` lazily — it is set in `init`,
+		// before any storage operation runs.
+		this.storage = new DappSessionMacStorage(
+			new EntityStorage<DappSession>("nulo:core:dappSessions", browserApi.storage.local),
+			(profileId) => this.profileService.deriveDappSessionMacKey(profileId),
+			logger,
+		)
 	}
 
 	protected async init(services: ServiceCollection) {
