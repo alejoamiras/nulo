@@ -196,7 +196,7 @@ A unit is ✓ when its child-branch PR has merged into `fix/harden-findings` wit
 - [ ] E — Backup-restore config allowlist (F-06)  *(prerequisite of L)*
 - [x] F — CSP hardening (F-05) — **PR #264 merged**; `img-src 'self' data: blob:` (default-src floor deferred — broke connect e2e, DiD follow-up). Gate: build/lint 0-err · smoke 69-pass (1 CI-skipped flake) · proverless e2e 70-pass/1-skip (baseline parity)
 - [x] G — Offscreen/messaging sender-auth + Firefox token (F-09, F-10) — **PR #268 merged**; sender-url auth (e2e caught a tab-hosted-page bug) + Firefox instance token. Gate: full test 2662 · ext-messaging 151 · offscreen 4 · build:firefox · lint 0-err · proverless e2e 70/1-skip
-- [ ] I — DappSession row integrity (F-12)
+- [x] I — DappSession row integrity (F-12) — **PR #269 merged**; per-row HMAC (ProfileService-derived non-extractable key) via MacStorage wrapper; tampered/no-mac dropped, locked hidden. Gate: integrity 6 · dapp-session 33 · full test 2673 · typecheck:all/lint 0 · proverless e2e 70/1-skip (grant→reconnect)
 - [x] J — ValueStorage parse containment (F-13) — **PR #263 merged**; gate green: wallet-core 95/95 · value-storage 10/10 (2 new malformed-row) · lint 0-err
 - [x] K — Clipboard secret hygiene (F-14) — **PR #266 merged**; key-page warning + best-effort 60s scrub (no clipboardRead perm added). Gate: test:components 356 · lint 0-err · smoke 68-pass (2 unrelated load-flakes)
 - [ ] L — Bearer redesign + memory hygiene (F-11)  *(after E; option (a) session-only — no wipe, no re-registration)*
