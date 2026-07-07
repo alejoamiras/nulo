@@ -16,7 +16,7 @@ export type MinimalStorageArea = {
 }
 
 /** Maximum chars of a malformed payload preserved in the parse-failure log. */
-const PARSE_FAILURE_PREVIEW_MAX = 200
+export const PARSE_FAILURE_PREVIEW_MAX = 200
 
 export class EntityStorage<T> {
 	private readonly storage: MinimalStorageArea
