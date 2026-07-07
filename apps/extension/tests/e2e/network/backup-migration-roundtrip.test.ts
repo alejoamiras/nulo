@@ -101,10 +101,14 @@ test.skipIf(!hasConfig || !HAS_FIXTURE)(
 		const exportedJson = await page.evaluate(() => (window as unknown as { __backupCapture: Promise<string> }).__backupCapture)
 		await page.close()
 
-		// ── 2. Doctor it into a PRE-shape v1 backup ───────────────────────
+		// ── 2. Doctor it into a PRE-shape backup ──────────────────────────
+		// Don't pin exact version VALUES: this harness must keep working when a
+		// real migration bumps the export stamp — the fixture's 9001 sentinel
+		// stays pending above any real version, which is all the test needs.
 		const exported = JSON.parse(exportedJson) as { checksum?: string; data: Record<string, unknown> } & Record<string, unknown>
-		expect(exported["compat-epoch"]).toBe(2)
-		expect(exported["backup-schema-version"]).toBe(1)
+		expect(typeof exported["compat-epoch"]).toBe("number")
+		const exportedVersion = exported["backup-schema-version"]
+		expect(Number.isInteger(exportedVersion) && (exportedVersion as number) >= 1).toBe(true)
 		const profile = exported.data.profile as { id: string }
 		exported.data.contact = [
 			{
