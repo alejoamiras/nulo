@@ -236,6 +236,37 @@ describe("DSL define-time validation rejects ambiguous or non-idempotent transfo
 		).toThrow(/not plain JSON/)
 	})
 
+	test("array species/iterator smuggling is rejected: own non-index props, holes, and index accessors throw", () => {
+		// An own `constructor` on a plain array redirects Array.prototype.map's
+		// @@species — the clone would be an attacker-classed array whose
+		// iterator runs per row. The canonicalizer never uses map and rejects
+		// every own non-index key.
+		const speciesDrop: string[] = ["legacy"]
+		Object.defineProperty(speciesDrop, "constructor", { value: { [Symbol.species]: Array }, enumerable: false, configurable: true })
+		expect(() =>
+			defineRowMapMigration({ version: 2, description: "x", rowMaps: { [CONTACT_STORAGE_ROOT]: { drop: speciesDrop } } }),
+		).toThrow(/non-index own property/)
+
+		const iteratorDrop: string[] = ["legacy"]
+		Object.defineProperty(iteratorDrop, Symbol.iterator, { value: () => ({ next: () => ({ done: true }) }), configurable: true })
+		expect(() =>
+			defineRowMapMigration({ version: 2, description: "x", rowMaps: { [CONTACT_STORAGE_ROOT]: { drop: iteratorDrop } } }),
+		).toThrow(/non-index own property/)
+
+		// biome-ignore lint/suspicious/noSparseArray: the hole IS the case under test
+		const holey: string[] = ["a", , "b"] as string[]
+		expect(() => defineRowMapMigration({ version: 2, description: "x", rowMaps: { [CONTACT_STORAGE_ROOT]: { drop: holey } } })).toThrow(
+			/hole or accessor/,
+		)
+
+		const accessorIndex: string[] = []
+		Object.defineProperty(accessorIndex, 0, { get: () => "boom", enumerable: true, configurable: true })
+		Object.defineProperty(accessorIndex, "length", { value: 1 })
+		expect(() =>
+			defineRowMapMigration({ version: 2, description: "x", rowMaps: { [CONTACT_STORAGE_ROOT]: { drop: accessorIndex } } }),
+		).toThrow(/hole or accessor/)
+	})
+
 	test("exotic transform objects are DEFUSED by canonicalization: the interpreter sees a plain clone, traps run at most once", () => {
 		let reads = 0
 		const proxied = new Proxy(

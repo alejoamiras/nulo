@@ -87,6 +87,13 @@ export function defineRowMapMigration(def: RowMapMigrationDef): Migration {
 	// REJECTED; anything exotic that lies its way past detection is DEFUSED,
 	// because the interpreter only ever sees this plain-literal clone, built
 	// exactly once here (codex post-impl audit, finding 1).
+	if (
+		typeof def.version !== "number" ||
+		typeof def.description !== "string" ||
+		(def.breaking !== undefined && typeof def.breaking !== "boolean")
+	) {
+		throw new Error("row-map migration version/description/breaking must be primitives")
+	}
 	const rowMaps = canonicalizeTransformMap(def.rowMaps ?? {}, "rowMaps")
 	const valueMaps = canonicalizeTransformMap(def.valueMaps ?? {}, "valueMaps")
 	const roots = Object.keys(rowMaps)
@@ -156,7 +163,26 @@ function cloneJsonValue(value: unknown, path: string): JsonValue {
 	}
 	if (Array.isArray(value)) {
 		if (Object.getPrototypeOf(value) !== Array.prototype) throw new Error(`row-map data at ${path} has an exotic array prototype`)
-		return value.map((v, i) => cloneJsonValue(v, `${path}[${i}]`))
+		// Clone index-by-index into a LITERAL array — never Array.prototype.map,
+		// whose @@species lookup lets an own `constructor` property substitute an
+		// attacker-classed result whose iterator would then run per row. Any own
+		// non-index key (incl. `constructor` or a symbol like @@iterator), hole,
+		// or index accessor is rejected outright.
+		for (const key of Reflect.ownKeys(value)) {
+			if (key === "length") continue
+			if (typeof key !== "string" || String(Number(key)) !== key || !(Number(key) >= 0)) {
+				throw new Error(`row-map data at ${path} array carries a non-index own property`)
+			}
+		}
+		const out: JsonValue[] = []
+		for (let i = 0; i < value.length; i++) {
+			const desc = Object.getOwnPropertyDescriptor(value, i)
+			if (!desc || desc.get !== undefined || desc.set !== undefined) {
+				throw new Error(`row-map data at ${path}[${i}] is a hole or accessor — transforms must be pure data`)
+			}
+			out.push(cloneJsonValue(desc.value, `${path}[${i}]`))
+		}
+		return out
 	}
 	if (typeof value === "object") return cloneJsonObject(value as Record<string, unknown>, path)
 	throw new Error(`row-map data at ${path} is not plain JSON data (got ${typeof value})`)
