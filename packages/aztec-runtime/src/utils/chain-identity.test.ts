@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { assertLiveChainIdentity } from "./chain-identity"
+import { assertLiveChainIdentity, chainInfoFrom } from "./chain-identity"
 
 describe("assertLiveChainIdentity (F-012 / Phase 5)", () => {
 	test("passes when live composite (l1ChainId XOR rollupVersion) matches stored chainId", () => {
@@ -31,5 +31,19 @@ describe("assertLiveChainIdentity (F-012 / Phase 5)", () => {
 		const sepoliaComposite = (11155111 ^ 1) >>> 0
 		expect(() => assertLiveChainIdentity({ chainId: sepoliaComposite }, { l1ChainId: 1, rollupVersion: 1 })).toThrow(/chainId=11155110/)
 		expect(() => assertLiveChainIdentity({ chainId: sepoliaComposite }, { l1ChainId: 1, rollupVersion: 1 })).toThrow(/l1ChainId=1/)
+	})
+})
+
+describe("chainInfoFrom (F-03 — build the signed identity from a validated nodeInfo)", () => {
+	test("maps l1ChainId → chainId and rollupVersion → version (distinct values; no swap)", () => {
+		const ci = chainInfoFrom({ l1ChainId: 31337, rollupVersion: 4 })
+		expect(ci.chainId.toBigInt()).toBe(31337n)
+		expect(ci.version.toBigInt()).toBe(4n)
+	})
+
+	test("encodes a realistic identity as Fr", () => {
+		const ci = chainInfoFrom({ l1ChainId: 11155111, rollupVersion: 1 })
+		expect(ci.chainId.toBigInt()).toBe(11155111n)
+		expect(ci.version.toBigInt()).toBe(1n)
 	})
 })
