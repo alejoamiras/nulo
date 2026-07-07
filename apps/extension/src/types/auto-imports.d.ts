@@ -78,6 +78,7 @@ declare global {
   const journalTerminalDisplay: typeof import('../utils/journal-state').journalTerminalDisplay
   const managers: typeof import('../utils/core').managers
   const markRaw: typeof import('vue').markRaw
+  const migrationIdle: typeof import('../utils/storage').migrationIdle
   const nextTick: typeof import('vue').nextTick
   const normalizeAmount: typeof import('../utils/amount').normalizeAmount
   const onActivated: typeof import('vue').onActivated
@@ -119,6 +120,9 @@ declare global {
   const shallowReadonly: typeof import('vue').shallowReadonly
   const shallowRef: typeof import('vue').shallowRef
   const stageSubtitle: typeof import('../utils/card-subtitle').stageSubtitle
+  const storageLocalGet: typeof import('../utils/storage').storageLocalGet
+  const storageLocalRemove: typeof import('../utils/storage').storageLocalRemove
+  const storageLocalSet: typeof import('../utils/storage').storageLocalSet
   const stringCompare: typeof import('../utils/string').stringCompare
   const toRaw: typeof import('vue').toRaw
   const toRef: typeof import('vue').toRef
@@ -325,6 +329,7 @@ declare module 'vue' {
     readonly journalTerminalDisplay: UnwrapRef<typeof import('../utils/journal-state')['journalTerminalDisplay']>
     readonly managers: UnwrapRef<typeof import('../utils/core')['managers']>
     readonly markRaw: UnwrapRef<typeof import('vue')['markRaw']>
+    readonly migrationIdle: UnwrapRef<typeof import('../utils/storage')['migrationIdle']>
     readonly nextTick: UnwrapRef<typeof import('vue')['nextTick']>
     readonly normalizeAmount: UnwrapRef<typeof import('../utils/amount')['normalizeAmount']>
     readonly onActivated: UnwrapRef<typeof import('vue')['onActivated']>
@@ -366,6 +371,9 @@ declare module 'vue' {
     readonly shallowReadonly: UnwrapRef<typeof import('vue')['shallowReadonly']>
     readonly shallowRef: UnwrapRef<typeof import('vue')['shallowRef']>
     readonly stageSubtitle: UnwrapRef<typeof import('../utils/card-subtitle')['stageSubtitle']>
+    readonly storageLocalGet: UnwrapRef<typeof import('../utils/storage')['storageLocalGet']>
+    readonly storageLocalRemove: UnwrapRef<typeof import('../utils/storage')['storageLocalRemove']>
+    readonly storageLocalSet: UnwrapRef<typeof import('../utils/storage')['storageLocalSet']>
     readonly stringCompare: UnwrapRef<typeof import('../utils/string')['stringCompare']>
     readonly toRaw: UnwrapRef<typeof import('vue')['toRaw']>
     readonly toRef: UnwrapRef<typeof import('vue')['toRef']>

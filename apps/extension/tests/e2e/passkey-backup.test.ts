@@ -121,6 +121,9 @@ function buildSyntheticPasskeyBackup(credentialId: string, accountAddress: strin
 				},
 			],
 			token: [],
+			// Present-but-empty, like a real export: the stamped backup fixture
+			// migration reads contacts and rejects a missing required slice.
+			contact: [],
 		},
 	}
 	const checksum = createHash("sha256").update(JSON.stringify(body)).digest("hex")
