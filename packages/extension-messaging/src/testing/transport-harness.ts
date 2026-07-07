@@ -141,6 +141,8 @@ export const connectServiceClient = (service: string): ServiceClientHandle => {
 	const postMessageMock = vi.fn()
 	const port = {
 		name: service,
+		// F-09: the service's onConnect authenticates the Port's sender.
+		sender: { id: chrome.runtime.id } as chrome.runtime.MessageSender,
 		postMessage: postMessageMock,
 		disconnect: vi.fn(),
 		onMessage: {
@@ -176,7 +178,11 @@ const sendMessageMock: Mock<Fn> = vi.fn()
 /** Invoke every `chrome.runtime.onMessage` listener — drives offscreen client
  *  responses AND offscreen service requests, depending on which is mounted. */
 export const emitMessage = (message: unknown) => {
-	for (const listener of [...messageListeners]) listener(message)
+	// F-09: the offscreen listener authenticates its sender. Drive it with a
+	// same-extension sender (matching `runtime.id`, no `tab`) so contract tests
+	// exercise the message path rather than tripping the sender gate.
+	const sender = { id: chrome.runtime.id } as chrome.runtime.MessageSender
+	for (const listener of [...messageListeners]) listener(message, sender)
 }
 
 /** The `vi.fn` backing `chrome.runtime.sendMessage`. */
