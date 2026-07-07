@@ -38,6 +38,12 @@ echo "[e2e:agent] building wallet with VITE_LOCAL_NETWORK_RPC_URL=$AZTEC_NODE_UR
 # kernel simulation + on-chain submission stay real). Arms the double-opt-in
 # flags so apps/extension/src/e2e/config.ts enables the proverless PXE +
 # ChromeStorageProofGate. Mutually exclusive with accelerator-required.
+# The migration-fixture stamp arms the e2e-only fixture migrations (live 9001
+# + the declarative BACKUP 9001) so backup-migration-roundtrip.test.ts can
+# drive a vN backup through the whole import path on a live sandbox. Inert for
+# every other network test (fresh installs stamp max and run nothing; the
+# backup fixture only runs on backup import). Never ships: prod builds omit
+# the env and _build-extension.yml greps release bundles for the markers.
 if [ "${NULO_E2E_PROVERLESS:-}" = "1" ]; then
   if [ "${VITE_NULO_ACCELERATOR_REQUIRED:-}" = "1" ]; then
     echo "[e2e:agent] FATAL: NULO_E2E_PROVERLESS and VITE_NULO_ACCELERATOR_REQUIRED are mutually exclusive" >&2
@@ -45,6 +51,7 @@ if [ "${NULO_E2E_PROVERLESS:-}" = "1" ]; then
   fi
   echo "[e2e:agent] PROVERLESS build — BB-SNARK generation skipped (double opt-in)"
   VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" \
+  VITE_NULO_E2E_MIGRATION_FIXTURE=1 \
   VITE_NULO_E2E_PROVERLESS=1 \
   VITE_NULO_E2E_PROVERLESS_CONFIRM=1 \
     bun run build:chrome
@@ -54,7 +61,9 @@ else
   # env — the double-opt-in would otherwise arm if both vars are already set
   # (codex post-impl audit).
   unset VITE_NULO_E2E_PROVERLESS VITE_NULO_E2E_PROVERLESS_CONFIRM
-  VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" bun run build:chrome
+  VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" \
+  VITE_NULO_E2E_MIGRATION_FIXTURE=1 \
+    bun run build:chrome
 fi
 
 # Bundle assertion — if the URL didn't actually land in dist, abort before the
@@ -66,6 +75,15 @@ if ! grep -rq "$AZTEC_NODE_URL" dist/chrome 2>/dev/null; then
   exit 2
 fi
 echo "[e2e:agent] bundle contains $AZTEC_NODE_URL ✓"
+
+# Positive fixture-stamp assertion: the backup-migration round-trip spec FAILS
+# (never skips) when the runner declares the fixture armed but the build lacks
+# it — catch the propagation failure here, before tests waste cycles.
+if ! grep -rq "nulo:e2e:backup-mig-fixture" dist/chrome 2>/dev/null; then
+  echo "[e2e:agent] FATAL: migration-fixture stamp did not propagate (backup fixture marker absent from dist/chrome)" >&2
+  exit 2
+fi
+echo "[e2e:agent] bundle contains the backup-migration fixture ✓"
 
 # Parallel bundle assertion for VITE_NULO_ACCELERATOR_REQUIRED. Codex post-impl
 # audit (finding #3): without this check, if the env var ever stops propagating
@@ -124,6 +142,7 @@ echo "[e2e:agent] running network e2e..."
 # Capture vitest's exit without `set -e` aborting, so the boot classifier runs.
 set +e
 E2E_REQUIRE_SETUP=1 \
+NULO_E2E_MIGRATION_FIXTURE=1 \
 ANVIL_URL="$ANVIL_URL" \
 ANVIL_PORT="$ANVIL_PORT" \
 AZTEC_NODE_URL="$AZTEC_NODE_URL" \

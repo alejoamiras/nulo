@@ -16,17 +16,17 @@ import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vu
 
 /** Services */
 import { managers } from "@/utils/core"
-import { AccountServiceClient } from "@/wallet/services/account/client"
-import { AccountStateServiceClient } from "@/wallet/services/account-state/client"
-import { AuthRegistryServiceClient } from "@/wallet/services/auth-registry/client"
-import { ConfigServiceClient } from "@/wallet/services/config/client"
-import { ContactServiceClient } from "@/wallet/services/contact/client"
-import { FpcServiceClient } from "@/wallet/services/fpc/client"
-import { NetworkServiceClient } from "@/wallet/services/network/client"
-import { ProfileServiceClient } from "@/wallet/services/profile/client"
-import { TokenServiceClient } from "@/wallet/services/token/client"
-import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
-import { TransactionServiceClient } from "@/wallet/services/transaction/client"
+import { ACCOUNT_SERVICE_NAME, AccountServiceClient } from "@/wallet/services/account/client"
+import { ACCOUNT_STATE_SERVICE_NAME, AccountStateServiceClient } from "@/wallet/services/account-state/client"
+import { AUTH_REGISTRY_SERVICE_NAME, AuthRegistryServiceClient } from "@/wallet/services/auth-registry/client"
+import { CONFIG_SERVICE_NAME, ConfigServiceClient } from "@/wallet/services/config/client"
+import { CONTACT_SERVICE_NAME, ContactServiceClient } from "@/wallet/services/contact/client"
+import { FPC_SERVICE_NAME, FpcServiceClient } from "@/wallet/services/fpc/client"
+import { NETWORK_SERVICE_NAME, NetworkServiceClient } from "@/wallet/services/network/client"
+import { PROFILE_SERVICE_NAME, ProfileServiceClient } from "@/wallet/services/profile/client"
+import { TOKEN_SERVICE_NAME, TokenServiceClient } from "@/wallet/services/token/client"
+import { TOKEN_BALANCE_SERVICE_NAME, TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
+import { TRANSACTION_SERVICE_NAME, TransactionServiceClient } from "@/wallet/services/transaction/client"
 import { BACKUP_SCHEMA_VERSION_FIELD, COMPAT_EPOCH_FIELD, CURRENT_COMPAT_EPOCH } from "@/wallet/services/backup/backup-migration-registry"
 import { CURRENT_BACKUP_SCHEMA_VERSION } from "@/wallet/services/backup/backup-migrator"
 import { EncryptionKey } from "@nulo/wallet-crypto"
@@ -56,18 +56,22 @@ const router = useRouter()
 const backupHelpUrl = "https://nulo.sh/help/wallet-setup/backup-methods"
 
 let backup = {}
+// Slice keys are the services' OWN name constants — the import path's slice
+// registry rejects anything else. (Client instances expose no `name` field:
+// the old `s.name?.replace("-client", "")` keying read `undefined` and
+// silently collapsed every slice onto one bogus key.)
 const backupServices = [
-	new ProfileServiceClient(),
-	new NetworkServiceClient(),
-	new AccountServiceClient(),
-	new TransactionServiceClient(),
-	new TokenServiceClient(),
-	new TokenBalanceServiceClient(),
-	new AccountStateServiceClient(),
-	new AuthRegistryServiceClient(),
-	new FpcServiceClient(),
-	new ContactServiceClient(),
-	new ConfigServiceClient(),
+	{ name: PROFILE_SERVICE_NAME, client: new ProfileServiceClient() },
+	{ name: NETWORK_SERVICE_NAME, client: new NetworkServiceClient() },
+	{ name: ACCOUNT_SERVICE_NAME, client: new AccountServiceClient() },
+	{ name: TRANSACTION_SERVICE_NAME, client: new TransactionServiceClient() },
+	{ name: TOKEN_SERVICE_NAME, client: new TokenServiceClient() },
+	{ name: TOKEN_BALANCE_SERVICE_NAME, client: new TokenBalanceServiceClient() },
+	{ name: ACCOUNT_STATE_SERVICE_NAME, client: new AccountStateServiceClient() },
+	{ name: AUTH_REGISTRY_SERVICE_NAME, client: new AuthRegistryServiceClient() },
+	{ name: FPC_SERVICE_NAME, client: new FpcServiceClient() },
+	{ name: CONTACT_SERVICE_NAME, client: new ContactServiceClient() },
+	{ name: CONFIG_SERVICE_NAME, client: new ConfigServiceClient() },
 ]
 const version = __VERSION__
 const aztecVersion = __AZTEC_VERSION__
@@ -140,11 +144,11 @@ async function handleBackup() {
 		data: {},
 	}
 
-	for (const s of backupServices) {
-		const data = await s.backup()
-		s.disconnect()
+	for (const { name, client } of backupServices) {
+		const data = await client.backup()
+		client.disconnect()
 		if (data === null || data === undefined) continue
-		backup.data[s.name?.replace("-client", "")] = data
+		backup.data[name] = data
 	}
 
 	backup.checksum = await EncryptionKey.getHashHex(JSON.stringify(backup))
