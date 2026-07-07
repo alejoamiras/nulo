@@ -194,7 +194,7 @@ A unit is ✓ when its child-branch PR has merged into `fix/harden-findings` wit
 - [ ] C — Chain-identity TOCTOU (F-03)
 - [ ] D — Discovery-flood rate limit (F-04)
 - [ ] E — Backup-restore config allowlist (F-06)  *(prerequisite of L)*
-- [ ] F — CSP hardening (F-05)
+- [x] F — CSP hardening (F-05) — **PR #264 merged**; `img-src 'self' data: blob:` (default-src floor deferred — broke connect e2e, DiD follow-up). Gate: build/lint 0-err · smoke 69-pass (1 CI-skipped flake) · proverless e2e 70-pass/1-skip (baseline parity)
 - [ ] G — Offscreen/messaging sender-auth + Firefox token (F-09, F-10)
 - [ ] I — DappSession row integrity (F-12)
 - [x] J — ValueStorage parse containment (F-13) — **PR #263 merged**; gate green: wallet-core 95/95 · value-storage 10/10 (2 new malformed-row) · lint 0-err
