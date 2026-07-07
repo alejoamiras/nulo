@@ -47,4 +47,16 @@ This is the passing baseline (which had no `img-src` at all → img unrestricted
 
 Teardown of the doomed run used the sanctioned run-isolation path: SIGINT to my own **cwd-verified** process group (`pgid 267561`, agent.sh trap → sandbox cleanup), then reaped only `nulo-2`-cwd chrome orphans. No cross-agent process touched.
 
-## Gate (revised): `bun run build` + `bun run lint` + `bun run test:e2e` (smoke) + **`bun run e2e:agent`** (network — must be green with the `img-src`-only CSP to confirm no regression).
+## Gate (revised): `bun run build` + `bun run lint` + `bun run test:e2e` (smoke) + **`NULO_E2E_PROVERLESS=1 bun run e2e:agent`** (network, proverless — see below).
+
+## Campaign-wide e2e-strategy decision (autonomous — codex CLI unavailable)
+`bun run e2e:agent` with no flags runs **real WASM proving** — there is **no local accelerator-server binary** (`accelerator-server not found`; the accelerator is a CI-only SHA-pinned binary). Real WASM proving is 5-10× slower → a single proof-heavy test file ran >10 min with no output (looked hung; was slow). This blocks per-unit local e2e for every e2e-gated unit (C, D, E, G, L, F).
+
+**Resolution:** run local e2e in **proverless mode** (`NULO_E2E_PROVERLESS=1` → agent.sh builds a BB-SNARK-skipping wallet via the double-opt-in `VITE_NULO_E2E_PROVERLESS[_CONFIRM]`). Proverless still exercises the **full connect / dApp-interaction / tx-submission path** — which is exactly where the CSP floor broke — and only fakes the SNARK. **Real proving stays gated in CI**: the promote PR (`fix/harden-findings → dev`) runs the GitHub `network-e2e` with the accelerator. So: proverless locally (fast, catches connect/logic regressions per-unit) + real-proving in CI (catches proof-path regressions once, at promote). This is repo-supported (the mode exists for this) and does not weaken the final gate.
+
+## Process-management lesson (2nd mistake this campaign — DURABLE, route to `e2e-testing` skill)
+Tearing down a slow e2e run, `pgrep -f 'e2e:agent|agent\.sh|vitest.e2e.network'` **matched my own Bash command's `zsh -c` line** (the pattern string is literally in my command), so "first cwd-matching pgid" grabbed a **shell** pgid (a `zsh -c source …`), and `kill -INT -<that pgid>` interrupted my own command (exit 144) + killed the harness-tracked background tasks. Rules going forward:
+- **Never `pgrep -f` a pattern that appears in the very command running it.** Match by `comm` (`pgrep -x aztec-anvil|chrome|MainThread`) or `readlink /proc/<pid>/cwd`, and **exclude `$$`/`$PPID`**.
+- **Prefer not killing at all:** proverless e2e is fast (~5-10 min) → **launch, let it complete, read the result.** Killing was only ever needed for the slow real-proving runs; proverless removes the need.
+- When a teardown IS unavoidable: resolve the pgid from a **known pid** (the tracked launcher), verify `cwd` is *this* worktree, and reap orphans **by exact pid**, not group, not `-f` pattern.
+- (Reaffirmed) only ever touch `*/nulo/nulo-2*`-cwd procs — never another agent's worktree.
