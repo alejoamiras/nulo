@@ -116,7 +116,7 @@ The v1 parity test was a **tautology**; the v2 "reads ⊆ writes roots + cardina
 
 ## Phases
 
-### Phase 1 — Registry + slice↔storage transforms (pure, no wiring)
+### Phase 1 — Registry + slice↔storage transforms (pure, no wiring) ✓
 `backup-migration-registry.ts`: the descriptor map (fpc as plain `root`; config as `value-projection`; transaction/auth-registry `optional`; profile block-listed; account-state non-storage), `normalize`/`denormalize`, config `toStored`/`fromStored` (absence-preserving), `CURRENT_COMPAT_EPOCH` + `BACKUP_SCHEMA_BASELINE` + `isSupportedCompatEpoch`. Split the migration registry so the e2e fixture version `9001` can never become a backup-schema-version.
 - **Validation gate:** `bun run --cwd apps/extension test src/wallet/services/backup/backup-migration-registry.test.ts` (round-trip `denormalize(normalize(slice))===slice` per service on baseline fixtures; transaction keyed by `hash`; **config `toStored` preserves an on-disk key absent from the typed `Config` class** — the anticipated key-rename shape; **fpc slice === stored `StoredFpc` with no `isProtocol`**; optional slices normalize empty; account-state/profile classified out/block-listed; registry root+idKey ↔ each service's own constant parity) `&& bun run typecheck && bun run lint`. Layers: typecheck+lint+unit (pure — no engine/chrome/services).
 

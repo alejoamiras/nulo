@@ -2,6 +2,17 @@ import type { FeeSettings, AuthwitContent } from "@/wallet/services/execution/sp
 
 export const AUTH_REGISTRY_SERVICE_NAME = "auth-registry"
 
+/** EntityStorage root for authwit rows (keyed by `String(authwit.id)`). Frozen:
+ *  renaming detaches every existing row; the backup-migration registry pins it. */
+export const AUTH_REGISTRY_STORAGE_ROOT = "nulo:core:auth-registry"
+
+/** EntityStorage root for per-account enable flags. Backup-ABSENT by design:
+ *  `backup()` never exports it and absence defaults to `true` at read time, so
+ *  a backup migration touching this root cannot distinguish "disabled" from
+ *  "absent" — the backup-migration guardrail blocks import for any migration
+ *  that reads or writes it. */
+export const AUTH_REGISTRY_ENABLED_STORAGE_ROOT = "nulo:core:auth-registry-enabled"
+
 export const MAX_REVOKES_PER_TX = 28 // Aztec protocol limitation
 
 /** Per-account ceiling on tracked public authwits. Enforced PRE-send (at the

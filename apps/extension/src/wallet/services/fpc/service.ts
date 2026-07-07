@@ -16,7 +16,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { Fpc } from "./fpc"
 import { getFpcHandler } from "./handlers"
-import { type Events, FPC_SERVICE_NAME, type FpcInfo, FpcType, type Methods } from "./spec"
+import { type Events, FPC_SERVICE_NAME, FPC_STORAGE_ROOT, type FpcInfo, FpcType, type Methods } from "./spec"
 import { getContractInstanceFromInstantiationParams, type ContractInstanceWithAddress } from "@aztec/stdlib/contract"
 import { loadContractArtifact, type ContractArtifact } from "@aztec/stdlib/abi"
 import { SponsoredFPCContractArtifact } from "@aztec/noir-contracts.js/SponsoredFPC"
@@ -60,7 +60,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(FPC_SERVICE_NAME, logger)
-		this.storage = new EntityStorage<StoredFpc>("nulo:core:fpcs", browserApi.storage.local)
+		this.storage = new EntityStorage<StoredFpc>(FPC_STORAGE_ROOT, browserApi.storage.local)
 	}
 
 	protected async init(services: ServiceCollection) {

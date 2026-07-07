@@ -1,5 +1,10 @@
 export const FPC_SERVICE_NAME = "fpc"
 
+/** EntityStorage root for stored FPC rows (keyed by `fpc.id`; rows omit the
+ *  read-time `isProtocol` decoration). Frozen: renaming detaches every
+ *  existing row; the backup-migration registry pins it. */
+export const FPC_STORAGE_ROOT = "nulo:core:fpcs"
+
 /**
  * Numeric values are explicit so a stale popup posting `type: 0`
  * (the deprecated DefaultFpc / Token FPC slot) fails a runtime check

@@ -3,6 +3,10 @@ import type { OperationContext } from "@/wallet/services/operation-journal/spec"
 
 export const TOKEN_SERVICE_NAME = "token"
 
+/** EntityStorage root for token rows (keyed by `String(token.id)`). Frozen:
+ *  renaming detaches every existing row; the backup-migration registry pins it. */
+export const TOKEN_STORAGE_ROOT = "nulo:core:tokens"
+
 export type Token = {
 	id: number
 	profileId: string

@@ -17,12 +17,19 @@ import { migrationFixture } from "@/e2e/migration-fixture"
 /** The current on-disk shape. Fresh installs stamp this and run nothing. */
 export const BASELINE_VERSION = 1
 
-/** Forward-only, ascending. Empty until the first real schema change ships.
- *  The e2e fixture spreads in ONLY on builds stamped with
- *  `VITE_NULO_E2E_MIGRATION_FIXTURE=1` — `E2E_MIGRATION_FIXTURE` is a
- *  static-false constant otherwise, so prod builds tree-shake the fixture
- *  (proof-gate pattern; enforced by the `_build-extension.yml` grep). */
-export const migrations: Migration[] = [...(E2E_MIGRATION_FIXTURE ? [migrationFixture] : [])]
+/** REAL migrations only — forward-only, ascending, empty until the first real
+ *  schema change ships. This is the array the backup-import migrator runs: the
+ *  e2e fixture's 9001 sentinel must never be reachable from an on-disk
+ *  `backup-schema-version`, so the fixture is spread into `migrations` (the
+ *  live-boot array) separately below. */
+export const realMigrations: Migration[] = []
+
+/** The live-boot array: real migrations + the e2e fixture. The fixture spreads
+ *  in ONLY on builds stamped with `VITE_NULO_E2E_MIGRATION_FIXTURE=1` —
+ *  `E2E_MIGRATION_FIXTURE` is a static-false constant otherwise, so prod
+ *  builds tree-shake the fixture (proof-gate pattern; enforced by the
+ *  `_build-extension.yml` grep). */
+export const migrations: Migration[] = [...realMigrations, ...(E2E_MIGRATION_FIXTURE ? [migrationFixture] : [])]
 
 /** Host-level status keys the boot path writes for the UI shells (the engine
  *  doesn't know these). `blocked` ⇒ the shell renders the recovery screen

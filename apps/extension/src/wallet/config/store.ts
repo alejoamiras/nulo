@@ -3,11 +3,16 @@ import { Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { type IConfigStore, Config, type ConfigProp, type ConfigKey } from "."
 
+/** ValueStorage key holding the whole serialized `Config` object. Frozen:
+ *  renaming detaches every install's settings; the backup-migration registry
+ *  pins it. */
+export const CONFIG_STORAGE_KEY = "nulo:config"
+
 export class ConfigStore implements IConfigStore {
 	public readonly onUpdate = new EventHandler<ConfigProp>()
 
 	private readonly lock = new Lock()
-	private readonly storage = new ValueStorage<Config>("nulo:config", chrome.storage.local)
+	private readonly storage = new ValueStorage<Config>(CONFIG_STORAGE_KEY, chrome.storage.local)
 	private config = new Config()
 
 	public get props(): ConfigProp[] {

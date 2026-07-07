@@ -1,5 +1,9 @@
 export const CONTACT_SERVICE_NAME = "contact"
 
+/** EntityStorage root for contact rows (keyed by `contact.id`). Frozen:
+ *  renaming detaches every existing row; the backup-migration registry pins it. */
+export const CONTACT_STORAGE_ROOT = "nulo:core:contacts"
+
 export type Contact = {
 	/** Randomly generated contact id. */
 	id: string

@@ -18,6 +18,7 @@ import {
 	type Tx,
 	type TxGasDetails,
 	TRANSACTION_SERVICE_NAME,
+	TRANSACTION_STORAGE_ROOT,
 	type LocalTxOrigin,
 	type TxCall,
 	TxStatus,
@@ -46,7 +47,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(TRANSACTION_SERVICE_NAME, logger)
-		this.txs = new EntityStorage<Tx>("nulo:core:txs", browserApi.storage.local)
+		this.txs = new EntityStorage<Tx>(TRANSACTION_STORAGE_ROOT, browserApi.storage.local)
 	}
 
 	protected async init(services: ServiceCollection) {
