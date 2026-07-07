@@ -7,8 +7,14 @@ Branch: `fix/hf-g-offscreen-auth` off `fix/harden-findings`.
 ## F-09 — offscreen/messaging listeners lack sender authentication (Low/DiD)
 `offscreen/service.ts:35 onMessageListener(message)` accepts any runtime message with `message.to === this.name` — it never receives or checks `sender`. `background/service.ts:36 onConnect(client)` accepts any Port whose `client.name === this.name` — it never checks `client.sender`. Today unreachable from a web page (no `externally_connectable`; `content.ts` can't set a top-level `to`), but a missing defense-in-depth guard.
 
-**Fix — trusted-internal-sender check (mirror `content-script-validator.ts isSubframeSender`).**
-- New shared helper in extension-messaging, e.g. `isTrustedInternalSender(sender): boolean` = `sender?.id === chrome.runtime.id && sender.tab === undefined`. This allowlists SW / popup / offscreen (same-extension, no tab) and rejects: (a) other extensions (`id` mismatch), (b) content-scripts / pages (`sender.tab` present).
+**Fix — trusted-internal-sender check.** New shared helper `isTrustedInternalSender(sender)` in `extension-messaging/core/sender-auth.ts`, wired into the offscreen listener + background `onConnect`.
+
+> **⚠️ REAL BUG the e2e caught — the plan's "reject tab-present" mechanism is wrong.** First cut used `sender.id === chrome.runtime.id && sender.tab === undefined`. That **cascaded the network e2e** (19 test files failing at ~34s timeouts): the e2e (and the options page, and a user-opened popup-in-a-tab) hosts the extension **popup in a TAB**, so its Port `sender.tab` is *defined* → the check rejected the popup's SW Port → every tx-approval flow hung. An extension page in a tab is NOT untrusted. **Corrected discriminator: `sender.url`**, which Chrome sets and the sender cannot spoof:
+> ```ts
+> if (sender?.id !== chrome.runtime.id) return false
+> return sender.url === undefined || sender.url.startsWith(chrome.runtime.getURL(""))
+> ```
+> `getURL("")` is the extension's own base (`chrome-extension://<id>/` / `moz-extension://<id>/` — browser-agnostic). Trusts SW (no url), popup/offscreen/options (extension-URL, tab or not); rejects a content script (its `sender.url` is the **web page**) and foreign extensions (`id`). This is the plan's *intent* (reject content-scripts/pages) with a correct mechanism. **Lesson: a build+unit gate would have shipped this; the plan's `e2e:agent` gate on G is what caught it.**
 - `offscreen/service.ts`: `onMessageListener = (message, sender) => { if (!isTrustedInternalSender(sender)) return false; ... }` (the Chrome `onMessage` listener already passes `sender` as arg 2).
 - `background/service.ts`: `onConnect = (client) => { if (client.name !== this.name) return; if (!isTrustedInternalSender(client.sender)) { logWarn; return } ... }`.
 - **Firefox sender-shape parity**: Firefox `MessageSender` has the same `{id, tab, frameId}` shape; add unit tests asserting accept (SW/popup shape) / reject (tab-present, foreign-id) on BOTH Chrome and Firefox-shaped sender objects.
