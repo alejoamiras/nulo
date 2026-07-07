@@ -27,7 +27,7 @@ import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import type { PasskeyRequest } from "@/wallet/services/passkey/spec"
 import { type BackupSelection, collectRestoreErrors, readBackupFile, remapIdInBackupData } from "@/utils/full-backup-helpers"
 import { BACKUP_SCHEMA_VERSION_FIELD, COMPAT_EPOCH_FIELD, isSupportedCompatEpoch } from "@/wallet/services/backup/backup-migration-registry"
-import { maxBackupSchemaVersion } from "@/wallet/services/backup/backup-migrator"
+import { maxBackupSchemaVersion, migrateBackupData } from "@/wallet/services/backup/backup-migrator"
 
 export type RestoreStatus = "" | "progress" | "failed" | "finished" | null | undefined
 
@@ -208,13 +208,6 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			data: Record<string, unknown>
 		}
 		const { checksum, ...backup } = fullBackup
-		const data = backup.data as Record<string, unknown> & {
-			account?: unknown[]
-			network?: unknown[]
-			token?: unknown[]
-			"token-balance"?: Array<Record<string, unknown>>
-			profile?: { id: string; name?: string }
-		}
 
 		// Trust-gate order is deliberate: integrity FIRST (over the original
 		// body, before any field is interpreted), then the non-migratable
@@ -266,11 +259,49 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			return
 		}
 
+		// Migrate the verified slices forward BEFORE anything touches live
+		// storage: pure and in-memory, so a failure here rejects the import
+		// with ZERO live state to roll back. The migrated data replaces the
+		// parsed slices; the checksum was already verified over the ORIGINAL
+		// bytes and is dropped — migration is a pure function of verified
+		// input, so its output is covered transitively (never recompute-and-
+		// trust a post-migration checksum). `master-key` is a top-level field,
+		// not a slice — it never enters the migrator.
+		const migrationResult = await migrateBackupData({ data: backup.data, backupSchemaVersion })
+		if (migrationResult.kind === "incompatible") {
+			restoreStatus.value = "failed"
+			opts.fillError("full_backup", "Incompatible backup", migrationResult.reason)
+			return
+		}
+		if (migrationResult.kind === "failed") {
+			restoreStatus.value = "failed"
+			opts.fillError(
+				"full_backup",
+				"Import failed",
+				`The backup could not be upgraded to the current format: ${migrationResult.reason}`,
+			)
+			return
+		}
+		const data = migrationResult.data as Record<string, unknown> & {
+			account?: unknown[]
+			network?: unknown[]
+			token?: unknown[]
+			"token-balance"?: Array<Record<string, unknown>>
+			profile?: { id: string; name?: string }
+		}
+
 		// Kept alive for the whole restore so the duplicate-address rollback
 		// can call `profileService.deleteProfile()` and so we can call
 		// `profileService.finalizeRestore()` at the end. Disconnect in finally.
 		const profileService = new ProfileServiceClient()
 		const networkService = new NetworkServiceClient()
+
+		// Rollback bookkeeping for the outer catch: a restore failure AFTER the
+		// profile row landed but BEFORE finalize must delete the orphan; once
+		// finalize is in flight the profile is deliberately KEPT (its data is
+		// fully in storage — the user can unlock it later).
+		let createdProfileId: string | undefined
+		let finalizeStarted = false
 
 		try {
 			restoreErrorLog.value = {}
@@ -324,6 +355,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				opts.fillError("full_backup", "Import failed", errMsg)
 				return
 			}
+			createdProfileId = newProfile.id
 
 			if (newProfile.id !== profile.id) {
 				remapIdInBackupData(data, "profileId", newProfile.id)
@@ -440,6 +472,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// `ensureDefaultAccount`. Running it now (after the restore) means
 			// those see the imported data, not an empty profile that needs
 			// default seeding.
+			finalizeStarted = true
 			try {
 				await profileService.finalizeRestore(newProfile.id, opts.password.value || undefined)
 			} catch (err) {
@@ -455,6 +488,18 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			}
 			importedProfile.value = newProfile
 		} catch (err) {
+			// Pre-finalize failure with a created profile: the profile row is in
+			// storage but the restore never completed — delete the orphan so a
+			// retry starts clean. Post-finalize errors keep the profile (see the
+			// bookkeeping note above); the finalize call itself has its own catch
+			// and never reaches here.
+			if (createdProfileId !== undefined && !finalizeStarted) {
+				try {
+					await profileService.deleteProfile(createdProfileId)
+				} catch (deleteErr) {
+					console.error(deleteErr)
+				}
+			}
 			restoreStatus.value = ""
 			opts.fillError("full_backup", "Import failed", String((err as Error)?.message ?? err))
 			console.error((err as Error)?.message || err)

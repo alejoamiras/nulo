@@ -140,13 +140,33 @@ vi.mock("@/wallet/services/transaction/spec", () => ({
 	TRANSACTION_STORAGE_ROOT: "nulo:core:txs",
 }))
 
+// A REAL pending backup-safe migration (v2, contact legacyName → name) so the
+// suite exercises the full migrate-then-restore path: `buildBackup` stamps
+// `backup-schema-version: 1`, so every restore in this file migrates 1 → 2
+// before any service restore runs.
+vi.mock("@/wallet/storage/migrations", async () => {
+	const { defineRowMapMigration } = await vi.importActual<typeof import("@/wallet/services/backup/row-map-migration")>(
+		"@/wallet/services/backup/row-map-migration",
+	)
+	const v2 = defineRowMapMigration({
+		version: 2,
+		description: "test: rename contact legacyName to name",
+		rowMaps: { "nulo:core:contacts": { rename: { legacyName: "name" } } },
+	})
+	return { BASELINE_VERSION: 1, realMigrations: [], migrations: [], backupMigrations: [v2] }
+})
+
 // Imported AFTER mocks are registered.
 import { useFullBackupImport } from "./useFullBackupImport"
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Build a backup payload + matching checksum so the integrity guard passes. */
+/** Build a backup payload + matching checksum so the integrity guard passes.
+ *  `overrides.data` MERGES over the default slices (it must not clobber them:
+ *  the mocked v2 migration reads contacts, so the default `contact: []` has to
+ *  survive every override). */
 async function buildBackup(overrides: Record<string, unknown> = {}) {
+	const { data: dataOverride, ...bodyOverrides } = overrides
 	const body = {
 		"compat-epoch": 2,
 		"backup-schema-version": 1,
@@ -156,9 +176,12 @@ async function buildBackup(overrides: Record<string, unknown> = {}) {
 			network: [{ id: "src-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }],
 			account: [{ address: "0xaaaa" }],
 			token: [],
-			...((overrides.data as Record<string, unknown>) ?? {}),
+			// Present-but-empty: the mocked v2 migration READS contacts, and a
+			// missing non-optional slice a pending migration reads rejects.
+			contact: [],
+			...((dataOverride as Record<string, unknown>) ?? {}),
 		},
-		...overrides,
+		...bodyOverrides,
 	}
 	const checksum = await EncryptionKey.getHashHex(JSON.stringify(body))
 	return { ...body, checksum }
@@ -327,6 +350,35 @@ describe("useFullBackupImport — guards before any writes", () => {
 		;(backup as { checksum: string }).checksum = "deadbeef"
 		await expectRejected(backup, "Backup Integrity Check Failed")
 	})
+
+	it("a migration failure aborts BEFORE any restore() call — zero-rollback atomicity", async () => {
+		// An unknown slice fails the migrator's trust-boundary validation; the
+		// import must reject with profileService.restore never invoked (nothing
+		// touched live storage, so there is nothing to roll back).
+		const backup = await buildBackup({ data: { mystery: [] } })
+		await expectRejected(backup, "Import failed")
+	})
+})
+
+describe("useFullBackupImport — backup migration wiring", () => {
+	it("a v1 backup migrates forward and services restore CURRENT-shape slices", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: { contact: [{ id: "c1", profileId: "src-profile-id", address: "0xc", legacyName: "Ali" }] },
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
+
+		await c.restoreBackup()
+
+		expect(c.restoreStatus.value).toBe("finished")
+		// The v2 migration renamed legacyName → name before the restore ran.
+		expect(contactClient.restore).toHaveBeenCalledWith([{ id: "c1", profileId: "new-id", address: "0xc", name: "Ali" }])
+	})
 })
 
 describe("useFullBackupImport — failure branches", () => {
@@ -383,7 +435,7 @@ describe("useFullBackupImport — failure branches", () => {
 		expect(profileClient.finalizeRestore).not.toHaveBeenCalled()
 	})
 
-	it("non-duplicate account failure re-throws into the outer catch (no half-restore)", async () => {
+	it("non-duplicate account failure re-throws into the outer catch, which deletes the orphan profile (pre-finalize rollback)", async () => {
 		const opts = makeOpts()
 		const c = useFullBackupImport(opts)
 		const backup = await buildBackup()
@@ -397,6 +449,26 @@ describe("useFullBackupImport — failure branches", () => {
 
 		expect(c.restoreStatus.value).toBe("")
 		expect(opts.fillError).toHaveBeenCalledWith("full_backup", "Import failed", "Profile locked")
+		expect(profileClient.finalizeRestore).not.toHaveBeenCalled()
+		// The half-created profile must not be left behind.
+		expect(profileClient.deleteProfile).toHaveBeenCalledWith("new-id")
+	})
+
+	it("a token restore throw (pre-finalize) also rolls the orphan profile back", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup()
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
+		tokenClient.restore.mockRejectedValue(new Error("storage exploded"))
+
+		await c.restoreBackup()
+
+		expect(opts.fillError).toHaveBeenCalledWith("full_backup", "Import failed", "storage exploded")
+		expect(profileClient.deleteProfile).toHaveBeenCalledWith("new-id")
 		expect(profileClient.finalizeRestore).not.toHaveBeenCalled()
 	})
 
