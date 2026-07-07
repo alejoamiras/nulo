@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "vitest"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { FakeBrowserApi } from "../testing/fake-browser-api"
 import { ValueStorage } from "./value-storage"
 
@@ -73,5 +73,43 @@ describe("ValueStorage", () => {
 		await session.set("ephemeral")
 		expect(await local.get()).toBe("persisted")
 		expect(await session.get()).toBe("ephemeral")
+	})
+
+	/**
+	 * Resilience: a malformed value used to throw from `JSON.parse` inside the
+	 * read path and poison wallet startup/restore. Mirrors `EntityStorage`'s
+	 * `parseOrDelete` — quarantine + drop, never throw.
+	 */
+	describe("malformed value resilience", () => {
+		let errorSpy: ReturnType<typeof vi.spyOn>
+
+		beforeEach(() => {
+			errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		})
+
+		afterEach(() => {
+			errorSpy.mockRestore()
+		})
+
+		test("get of a malformed value returns undefined, schedules delete, logs an error", async () => {
+			await api.storage.local.set({ config: "{not valid json" })
+			const vs = new ValueStorage<{ a: number }>("config", api.storage.local)
+			expect(await vs.get()).toBeUndefined()
+			expect(errorSpy).toHaveBeenCalledTimes(1)
+			expect(errorSpy.mock.calls[0]?.[0]).toContain("config")
+			// Delete is fire-and-forget; allow the microtask to flush.
+			await Promise.resolve()
+			expect(await vs.get()).toBeUndefined()
+		})
+
+		test("logged payload preview is length-bounded", async () => {
+			const garbage = `{${"x".repeat(5000)}`
+			await api.storage.local.set({ blob: garbage })
+			const vs = new ValueStorage<unknown>("blob", api.storage.local)
+			expect(await vs.get()).toBeUndefined()
+			const logged = String(errorSpy.mock.calls[0]?.[0] ?? "")
+			expect(logged).not.toContain("x".repeat(5000))
+			expect(logged.length).toBeLessThan(600)
+		})
 	})
 })
