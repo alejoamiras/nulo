@@ -192,6 +192,9 @@ Insert `await backupMigrator.migrate(...)` between the checksum gate and the fir
 - **I-B (hidden projections) — CONFIRMED, two found:** fpc (`isProtocol` decoration) and config (typed-class key-drop) were mis-classified; corrected above. token-balance's non-profile-filter noted.
 - **I-D (network-e2e)** — the v1 parity claim was unsound (tautology); replaced by the finite-DSL structural row-locality. Semantic on-chain validity is now covered by the Phase-6 network round-trip (user added it; A2 manual compromise retired).
 
+## Post-implementation (2026-07-07)
+All 6 phases ✓ (gates in `lessons/phase-{1..6}.md`). `/code-review max --fix` applied (harness must not pin exact export version values). **Codex post-impl audit (xhigh, adversarial): 3 reject→fix rounds on the data-only DSL guarantee, then `approve`** — (r1) accessor/Proxy smuggling past `Object.freeze` → canonicalize transforms into plain-literal clones, reject accessors; (r2) `Array.prototype.map` @@species escape via an own `constructor` → index-by-index literal cloning, reject non-index own keys; (r3) computed `__proto__` key hitting the inherited setter → reject the name + `defineProperty` writes. Medium: round-trip e2e now removes the doctored backup (embeds a test master-key) from /tmp. Low: checksum comment no longer overclaims "original bytes". **Bonus find (phase 6, first run): the shipping export bug** — `full.vue` keyed every slice as literal `"undefined"`; fixed with explicit service-name constants. Transcripts: this session's CODEX_DIR (`response{,-1,-2,-3}.md`), verdict chain `conditional approve → reject → reject → approve`.
+
 ## Audit verdicts
 - **Codex (contradiction-check + adversarial, resumed):** `conditional approve` — H1-H4 + M1-M5, split M6, Facts. Folded into v2. Transcript: `audit-codex.md`.
 - **Fable (Opus, fresh hostile):** `conditional approve` — 5 conditions. Folded into v2. Transcript: `audit-fable.md`.
