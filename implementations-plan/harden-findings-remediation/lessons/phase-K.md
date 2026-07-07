@@ -26,4 +26,13 @@ Both `readText` AND `writeText` ~60s later are **gesture-gated** in an extension
 
 Deviation from the plan's literal "delayed auto-clear" is deliberate + constraint-driven (auto-clear requires a `clipboardRead`/`clipboardWrite` permission this hardening pass won't add for a Low finding). Same finding intent (cut clipboard-secret exposure), no surface expansion.
 
-## Gate (plan.md Unit K): `bun run --cwd apps/extension test:components` + `bun run test:e2e` (smoke) + `bun run lint`. Layers: lint · component · smoke-e2e.
+## Implemented
+`seed.vue` + `key.vue`: on copy, schedule a `setTimeout` best-effort unconditional `writeText("")` scrub (`CLIPBOARD_CLEAR_MS = 60_000`), timer cleared in `onBeforeUnmount`; added the seed-page clipboard warning to `key.vue`'s private-key flow. No `clipboardRead`/`clipboardWrite` permission added.
+
+## Gate (plan.md Unit K) — green
+- `bun run --cwd apps/extension test:components`: **356 passed** (34 files).
+- `bun run lint`: 0 errors.
+- `bun run test:e2e` (smoke): **68 passed / 6 skipped / 2 failed** — **both failures are load-induced flakes unrelated to K** (K touched only the seed/key export pages; neither failing test references them):
+  1. `passkey full-backup export` — the CI-skipped, load-fragile passkey flake (documented in phase-B/F).
+  2. `security.test.ts > change password` (crypto-heavy re-encrypt) — timed out at 60s under contention from **2 orphaned faucet dev-servers** left by prior e2e runs; **re-run in isolation passed in 9.25s**. Reaped the orphans by exact cwd-verified PID.
+
