@@ -27,33 +27,39 @@ const SEED = [
 ]
 
 vi.mock("@/wallet/services/token-balance/client", () => ({
-	TokenBalanceServiceClient: vi.fn(() => ({
-		disconnect: vi.fn(),
-		onTokenBalanceAdded: noopEvent,
-		onTokenBalanceUpdated: noopEvent,
-		onTokenBalanceDeleted: {
-			add: vi.fn((fn: (tb: unknown) => void) => {
-				deletedHandler = fn
-			}),
-			remove: vi.fn(),
-		},
-		getTokenBalances: vi.fn().mockResolvedValue(SEED),
-		refreshTokenBalance: vi.fn(),
-	})),
+	TokenBalanceServiceClient: vi.fn(function () {
+		return {
+			disconnect: vi.fn(),
+			onTokenBalanceAdded: noopEvent,
+			onTokenBalanceUpdated: noopEvent,
+			onTokenBalanceDeleted: {
+				add: vi.fn((fn: (tb: unknown) => void) => {
+					deletedHandler = fn
+				}),
+				remove: vi.fn(),
+			},
+			getTokenBalances: vi.fn().mockResolvedValue(SEED),
+			refreshTokenBalance: vi.fn(),
+		}
+	}),
 }))
 
 vi.mock("@/wallet/services/token/client", () => ({
-	TokenServiceClient: vi.fn(() => ({ disconnect: vi.fn(), onTokenDeleted: noopEvent })),
+	TokenServiceClient: vi.fn(function () {
+		return { disconnect: vi.fn(), onTokenDeleted: noopEvent }
+	}),
 }))
 
 vi.mock("@/wallet/services/task/client", () => ({
-	TaskServiceClient: vi.fn(() => ({
-		disconnect: vi.fn(),
-		getTasks: vi.fn().mockResolvedValue([]),
-		onTaskCreated: { add: vi.fn(), remove: vi.fn() },
-		onTaskUpdated: { add: vi.fn(), remove: vi.fn() },
-		onTaskDeleted: { add: vi.fn(), remove: vi.fn() },
-	})),
+	TaskServiceClient: vi.fn(function () {
+		return {
+			disconnect: vi.fn(),
+			getTasks: vi.fn().mockResolvedValue([]),
+			onTaskCreated: { add: vi.fn(), remove: vi.fn() },
+			onTaskUpdated: { add: vi.fn(), remove: vi.fn() },
+			onTaskDeleted: { add: vi.fn(), remove: vi.fn() },
+		}
+	}),
 }))
 
 vi.mock("@/wallet/services/task/spec", () => ({

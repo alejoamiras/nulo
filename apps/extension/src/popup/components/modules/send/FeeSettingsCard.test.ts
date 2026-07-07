@@ -23,32 +23,38 @@ const mocks = vi.hoisted(() => ({
 // Vitest 4 requires `function` expressions (not arrow functions) for mocks
 // instantiated with `new`. Arrow factories error: "() => ... is not a constructor".
 vi.mock("@/wallet/services/execution/client", () => ({
-	ExecutionServiceClient: vi.fn().mockImplementation(() => ({
-		disconnect: vi.fn(),
-		connect: vi.fn(),
-		getGasBalances: mocks.getGasBalances,
-	})),
+	ExecutionServiceClient: vi.fn().mockImplementation(function () {
+		return {
+			disconnect: vi.fn(),
+			connect: vi.fn(),
+			getGasBalances: mocks.getGasBalances,
+		}
+	}),
 }))
 
 vi.mock("@/wallet/services/token-balance/client", () => ({
-	TokenBalanceServiceClient: vi.fn().mockImplementation(() => ({
-		onTokenBalanceAdded: { add: vi.fn(), remove: vi.fn() },
-		onTokenBalanceUpdated: { add: vi.fn(), remove: vi.fn() },
-		onTokenBalanceDeleted: { add: vi.fn(), remove: vi.fn() },
-		connect: vi.fn(),
-		disconnect: vi.fn(),
-		getTokenBalances: mocks.getTokenBalances,
-	})),
+	TokenBalanceServiceClient: vi.fn().mockImplementation(function () {
+		return {
+			onTokenBalanceAdded: { add: vi.fn(), remove: vi.fn() },
+			onTokenBalanceUpdated: { add: vi.fn(), remove: vi.fn() },
+			onTokenBalanceDeleted: { add: vi.fn(), remove: vi.fn() },
+			connect: vi.fn(),
+			disconnect: vi.fn(),
+			getTokenBalances: mocks.getTokenBalances,
+		}
+	}),
 }))
 
 vi.mock("@/wallet/services/fpc/client", () => ({
-	FpcServiceClient: vi.fn().mockImplementation(() => ({
-		onFpcDeleted: { add: vi.fn(), remove: vi.fn() },
-		onFpcUpdated: { add: vi.fn(), remove: vi.fn() },
-		connect: vi.fn(),
-		disconnect: vi.fn(),
-		getFpcs: mocks.getFpcs,
-	})),
+	FpcServiceClient: vi.fn().mockImplementation(function () {
+		return {
+			onFpcDeleted: { add: vi.fn(), remove: vi.fn() },
+			onFpcUpdated: { add: vi.fn(), remove: vi.fn() },
+			connect: vi.fn(),
+			disconnect: vi.fn(),
+			getFpcs: mocks.getFpcs,
+		}
+	}),
 	FpcType: { DefaultSponsoredFpc: 1, PrivateFpc: 2 },
 }))
 
