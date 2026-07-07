@@ -15,7 +15,13 @@ Branch: `fix/hf-g-offscreen-auth` off `fix/harden-findings`.
 
 ## F-10 — Firefox offscreen fallback can duplicate PXE listeners after SW restart (Low)
 On Firefox, the offscreen document is emulated (a hidden window); after an SW restart a new offscreen can be created while a stale one lingers → two PXE listeners answer `{to:"pxe"}`. **Durable instance token**: stamp each SW instance / offscreen with a token; `{to:"pxe"}` requests carry the current token; a stale offscreen sees a mismatched token → ignores + self-closes.
-**Design deferred to implementation** — must read `apps/extension/src/offscreen/index.ts` + `src/wallet/utils/offscreen.ts` first to place: (a) token generation (SW-instance-scoped, `crypto.randomUUID()` at offscreen create), (b) token propagation on `{to:"pxe"}`, (c) the mismatch → ignore/self-close in the offscreen. This is **stale-instance separation, NOT** the F-09 sender-auth — keep both.
+**Codex consult (restored — gpt-5.5, high effort) verdict:** use a **Firefox-only lifecycle control token, NOT per-request tokening** (per-request would gold-plate + touch the shared `extension-messaging` envelope for a Low/Firefox-only path — avoid). Chosen minimal design:
+- **SW (`offscreen.ts`), Firefox branch only** (`!hasOffscreenApi()`): a per-SW-lifetime `firefoxOffscreenInstanceId = crypto.randomUUID()` (module-level, lazy). Put it in the created window's URL (`?instance=<token>`). Right after `chrome.windows.create`, broadcast `OFFSCREEN_ADOPT_INSTANCE {token}` — sequenced **before** PXE traffic (ensureOffscreenRunning creates → broadcasts → awaits READY → only then does the SW route `{to:"pxe"}`), so a stale window is gone before it can answer.
+- **Offscreen (`offscreen/index.ts`)**: read own token from `location.search` (undefined on Chrome — no param). Register an EARLY listener (beside the PING one, before `createPxeOffscreen`) for `OFFSCREEN_ADOPT_INSTANCE`: if my token is set (Firefox) AND `msg.token !== myToken` → **stale** → `window.close()` (removes the window + its PXE listener). Codex Q3: don't depend on close for correctness, but here the SW sequences ADOPT-before-PXE so the stale window closes before traffic; close is reliable for an extension-created window.
+- **Chrome path stays byte-for-byte unchanged**: no URL param, no ADOPT broadcast (both gated on `!hasOffscreenApi()`); `chrome.offscreen` + `getContexts()` already prevents Chrome duplicates.
+
+Codex's adversarial test to add: two stale windows + one fresh, single PXE request → only the fresh (matching-token) responder answers; stale ones self-close.
+This is **stale-instance separation, NOT** the F-09 sender-auth — keep both.
 
 ## Invariants
 - No context other than same-extension SW/popup/offscreen can drive the offscreen PXE listener or open a background Port (F-09).
