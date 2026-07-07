@@ -217,6 +217,51 @@ describe("DSL define-time validation rejects ambiguous or non-idempotent transfo
 		expect(() => defineRowMapMigration({ version: 2, description: "x" })).toThrow()
 	})
 
+	test("accessor smuggling is rejected: a getter on the transform is NOT pure data (codex post-impl finding)", () => {
+		// A frozen accessor still executes on every read — per-row arbitrary
+		// code behind an intact brand. The canonicalizer must throw on it.
+		const withGetter = {}
+		Object.defineProperty(withGetter, "rename", {
+			get: () => ({ a: "b" }),
+			enumerable: true,
+			configurable: true,
+		})
+		expect(() =>
+			defineRowMapMigration({ version: 2, description: "x", rowMaps: { [CONTACT_STORAGE_ROOT]: withGetter as RowMapTransform } }),
+		).toThrow(/accessor/)
+
+		const fnValue = { addDefault: { cb: (() => 1) as unknown as string } }
+		expect(() =>
+			defineRowMapMigration({ version: 2, description: "x", rowMaps: { [CONTACT_STORAGE_ROOT]: fnValue as RowMapTransform } }),
+		).toThrow(/not plain JSON/)
+	})
+
+	test("exotic transform objects are DEFUSED by canonicalization: the interpreter sees a plain clone, traps run at most once", () => {
+		let reads = 0
+		const proxied = new Proxy(
+			{ addDefault: { starred: false } },
+			{
+				get(target, prop, receiver) {
+					reads++
+					return Reflect.get(target, prop, receiver)
+				},
+			},
+		)
+		const m = defineRowMapMigration({
+			version: 2,
+			description: "proxy defusal",
+			rowMaps: { [CONTACT_STORAGE_ROOT]: proxied as RowMapTransform },
+		})
+		const readsAfterDefine = reads
+		const def = rowMapDefOf(m)
+		const transform = def?.rowMaps?.[CONTACT_STORAGE_ROOT]
+		expect(transform).toEqual({ addDefault: { starred: false } })
+		// Interpreting rows must not touch the proxy again — it closed over the clone.
+		applyRowTransform({}, transform as RowMapTransform)
+		applyRowTransform({ starred: true }, transform as RowMapTransform)
+		expect(reads).toBe(readsAfterDefine)
+	})
+
 	test("interpreter fail-closed: rename collision and non-object rows throw", () => {
 		expect(() => applyRowTransform({ a: 1, b: 2 }, { rename: { a: "b" } })).toThrow()
 		expect(() => applyRowTransform("not-a-row", { drop: ["a"] })).toThrow()

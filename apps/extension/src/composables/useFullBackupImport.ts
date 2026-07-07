@@ -209,12 +209,15 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		}
 		const { checksum, ...backup } = fullBackup
 
-		// Trust-gate order is deliberate: integrity FIRST (over the original
-		// body, before any field is interpreted), then the non-migratable
-		// compat-epoch, then the migratable schema-version range. The checksum
-		// is accidental-integrity detection only — a plain backup's checksum
-		// is attacker-recomputable, so nothing downstream may treat it as
-		// authentication.
+		// Trust-gate order is deliberate: integrity FIRST — re-serialized
+		// exactly as the exporter hashed it (the exporter also hashed
+		// JSON.stringify of the object, so this IS the exported body) — then
+		// the non-migratable compat-epoch, then the migratable schema-version
+		// range. The earlier profile name/type reads in pickBackupFile/
+		// decryptBackup are sanitized display-only prefill and gate nothing.
+		// The checksum is accidental-integrity detection only — a plain
+		// backup's checksum is attacker-recomputable, so nothing downstream
+		// may treat it as authentication.
 		const comparisonChecksum = await EncryptionKey.getHashHex(JSON.stringify(backup))
 		if (checksum !== comparisonChecksum) {
 			restoreStatus.value = "failed"

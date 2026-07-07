@@ -80,8 +80,15 @@ export function rowMapDefOf(m: Migration): RowMapMigrationDef | undefined {
 }
 
 export function defineRowMapMigration(def: RowMapMigrationDef): Migration {
-	const rowMaps = def.rowMaps ?? {}
-	const valueMaps = def.valueMaps ?? {}
+	// Canonicalize BEFORE anything else: the data-only guarantee must hold
+	// against accessor properties and Proxies, which survive Object.freeze (a
+	// frozen accessor still runs its getter on every read — arbitrary code per
+	// row, the exact hole the DSL exists to close). Detectable accessors are
+	// REJECTED; anything exotic that lies its way past detection is DEFUSED,
+	// because the interpreter only ever sees this plain-literal clone, built
+	// exactly once here (codex post-impl audit, finding 1).
+	const rowMaps = canonicalizeTransformMap(def.rowMaps ?? {}, "rowMaps")
+	const valueMaps = canonicalizeTransformMap(def.valueMaps ?? {}, "valueMaps")
 	const roots = Object.keys(rowMaps)
 	const valueKeys = Object.keys(valueMaps)
 	if (roots.length + valueKeys.length === 0) throw new Error("row-map migration transforms nothing")
@@ -117,10 +124,57 @@ export function defineRowMapMigration(def: RowMapMigrationDef): Migration {
 	})
 
 	deepFreeze(migration)
-	deepFreeze(def)
+	// Brand + expose ONLY the canonical clone — never the caller's objects.
+	const canonicalDef: RowMapMigrationDef = {
+		version: def.version,
+		description: def.description,
+		...(def.breaking === undefined ? {} : { breaking: def.breaking }),
+		...(roots.length ? { rowMaps } : {}),
+		...(valueKeys.length ? { valueMaps } : {}),
+	}
+	deepFreeze(canonicalDef)
 	backupSafeBrand.add(migration)
-	compiledFrom.set(migration, def)
+	compiledFrom.set(migration, canonicalDef)
 	return migration
+}
+
+/** Recursively copy a transform map into fresh plain literals, REJECTING
+ *  anything that is not inert JSON data: accessor properties (a frozen getter
+ *  still executes on every read), symbol keys, non-plain prototypes,
+ *  functions, and non-JSON primitives. Exotic objects that evade detection
+ *  (a Proxy can lie to descriptor checks) are still defused — their traps run
+ *  at most once, here, and the interpreter closes over the clone. */
+function canonicalizeTransformMap(maps: Readonly<Record<string, RowMapTransform>>, where: string): Record<string, RowMapTransform> {
+	return cloneJsonObject(maps, where) as unknown as Record<string, RowMapTransform>
+}
+
+function cloneJsonValue(value: unknown, path: string): JsonValue {
+	if (value === null || typeof value === "string" || typeof value === "boolean") return value
+	if (typeof value === "number") {
+		if (!Number.isFinite(value)) throw new Error(`row-map data at ${path} is a non-finite number`)
+		return value
+	}
+	if (Array.isArray(value)) {
+		if (Object.getPrototypeOf(value) !== Array.prototype) throw new Error(`row-map data at ${path} has an exotic array prototype`)
+		return value.map((v, i) => cloneJsonValue(v, `${path}[${i}]`))
+	}
+	if (typeof value === "object") return cloneJsonObject(value as Record<string, unknown>, path)
+	throw new Error(`row-map data at ${path} is not plain JSON data (got ${typeof value})`)
+}
+
+function cloneJsonObject(value: Record<string, unknown>, path: string): { [key: string]: JsonValue } {
+	const proto = Object.getPrototypeOf(value)
+	if (proto !== Object.prototype && proto !== null) throw new Error(`row-map data at ${path} has a non-plain prototype`)
+	if (Object.getOwnPropertySymbols(value).length > 0) throw new Error(`row-map data at ${path} has symbol keys`)
+	const out: { [key: string]: JsonValue } = {}
+	for (const key of Object.keys(value)) {
+		const desc = Object.getOwnPropertyDescriptor(value, key)
+		if (!desc || desc.get !== undefined || desc.set !== undefined) {
+			throw new Error(`row-map data at ${path}.${key} is an accessor — transforms must be pure data`)
+		}
+		out[key] = cloneJsonValue(desc.value, `${path}.${key}`)
+	}
+	return out
 }
 
 /** Define-time well-formedness: reject transforms that could be ambiguous or
