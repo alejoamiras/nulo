@@ -444,6 +444,36 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		}
 	}
 
+	/**
+	 * F-12: derive the per-profile, NON-EXTRACTABLE HMAC key that signs
+	 * DappSession rows. The raw master secret never leaves this service — only
+	 * the derived (non-exportable) key is handed out. Propagates the "Profile
+	 * locked" throw from `getSecret`, which the DappSession read path treats as
+	 * "drop rows until unlock". Key is per-profile (IKM = the profile master
+	 * secret), so a row signed under one profile can't verify under another.
+	 */
+	public async deriveDappSessionMacKey(profileId: string): Promise<CryptoKey> {
+		const secret = await this.sessionManager.getSecret(profileId)
+		const ikm = new Uint8Array(secret.toBuffer())
+		try {
+			const baseKey = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveKey"])
+			return await crypto.subtle.deriveKey(
+				{
+					name: "HKDF",
+					hash: "SHA-256",
+					salt: new TextEncoder().encode("nulo:dappsession-mac:salt:v1"),
+					info: new TextEncoder().encode("nulo:dappsession-mac:v1"),
+				},
+				baseKey,
+				{ name: "HMAC", hash: "SHA-256" },
+				false,
+				["sign", "verify"],
+			)
+		} finally {
+			zeroize(ikm)
+		}
+	}
+
 	public async refreshSession(): Promise<void> {
 		await this.ensureInitialized()
 		try {

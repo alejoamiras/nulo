@@ -49,6 +49,10 @@ export type DappSession = {
 	accountAliases?: Record<string, string>
 	capabilityGrants?: GrantedCapabilityRecord[]
 	capabilityRejections?: RejectedCapabilityRecord[]
+	/** F-12: HMAC-SHA256 (base64) over the canonical row minus this field.
+	 *  Written on persist, verified on read; a row that fails (or lacks it) is
+	 *  dropped so a storage-tampered row can't mint grants. */
+	mac?: string
 }
 
 export type Methods = {
