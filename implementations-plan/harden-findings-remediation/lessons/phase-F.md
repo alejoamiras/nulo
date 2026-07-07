@@ -31,4 +31,20 @@ Per directive: `default-src 'self'` = the floor (restricts media/manifest/prefet
 - No dApp-supplied remote URL can load as an image (no beacon); the blob:/data:/self logo sink still works.
 - No regression to node connectivity or bb.js proving (proven by `e2e:agent` green).
 
-## Gate (escalated): `bun run build` + `bun run lint` + `bun run test:e2e` (smoke) + **`bun run e2e:agent`** (network — the only layer that exercises offscreen proving + node connect under the new floor).
+## Validation outcome — the `default-src` floor broke network-e2e → reverted to `img-src`-only
+First `e2e:agent` run (floor CSP built into `dist/`, confirmed present in the built manifest) produced a **total cascade**: every network test failed at its ~30s timeout (`fee-methods` 5/5, `transfers`, `sim-methods` 3/3, `authwit-lifecycle`, `connect-deny`, `concurrent-sendtx`, `cancel-mid-prove`, `tx-sendTx-default`, …).
+
+**Ruled out environmental** before acting (no process was touched to diagnose):
+- Machine **idle**: load 0.33 on 12 cores (not starved → not a proving-timeout-under-load cascade).
+- My run's aztec node **healthy**: `:43229` returned HTTP 200 in ~2ms.
+- The only diff from the 70/70-passing baseline (`fix/harden-findings` = A+B) is the CSP → the floor is the cause.
+
+The e2e harness does not pipe the browser console, so the exact violated directive wasn't captured. Rather than bisect a multi-directive floor across ~20-min runs for a **latent-Low** finding, **reverted to the surgical fix** that closes the actual beacon with zero connect/worker/style blast radius:
+```
+script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:
+```
+This is the passing baseline (which had no `img-src` at all → img unrestricted) plus the single `img-src` restriction; the app uses only self/data/blob images (audit: no remote image). **The `default-src` floor is deferred** as a separate DiD follow-up (needs per-directive isolation with browser-console capture — likely a `worker-src`/wasm-in-worker or a WASM-fetch nuance in the offscreen proving path; the finding F-05 itself is fully closed by `img-src`).
+
+Teardown of the doomed run used the sanctioned run-isolation path: SIGINT to my own **cwd-verified** process group (`pgid 267561`, agent.sh trap → sandbox cleanup), then reaped only `nulo-2`-cwd chrome orphans. No cross-agent process touched.
+
+## Gate (revised): `bun run build` + `bun run lint` + `bun run test:e2e` (smoke) + **`bun run e2e:agent`** (network — must be green with the `img-src`-only CSP to confirm no regression).
