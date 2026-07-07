@@ -73,11 +73,23 @@ const handleUnlock = async () => {
 	}
 }
 
+// F-14: best-effort clipboard scrub a while after copy. Extension popups may
+// deny clipboard writes without a transient user gesture, so this is a bonus
+// layer — the on-page warning is the reliable mitigation. We deliberately do
+// NOT add a clipboardRead permission (it would only widen the wallet's
+// clipboard-read surface); the scrub is therefore unconditional, not
+// equals-checked.
+const CLIPBOARD_CLEAR_MS = 60_000
+let clipboardClearTimer
 const isCopied = ref(false)
 const handleCopy = (key) => {
 	isCopied.value = true
 	window.navigator.clipboard.writeText(key === "private" ? privateKey.value : publicKey.value)
 	openToast({ label: "Key is copied", icon: "copy" })
+	clearTimeout(clipboardClearTimer)
+	clipboardClearTimer = setTimeout(() => {
+		void window.navigator.clipboard.writeText("").catch(() => {})
+	}, CLIPBOARD_CLEAR_MS)
 	setTimeout(() => {
 		isCopied.value = false
 	}, 2500)
@@ -95,6 +107,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+	clearTimeout(clipboardClearTimer)
 	privateKey.value = null
 	publicKey.value = null
 	document.removeEventListener("keydown", onKeydown)
@@ -193,9 +206,17 @@ const heroMain = computed(() => {
 				</div>
 
 				<div class="export_section_last">
-					<Text size="12" weight="500" height="150" color="tertiary">
-						Recovery with this key is instant, without a password
-					</Text>
+					<Flex direction="column" gap="10">
+						<Flex gap="8">
+							<Icon name="warning" size="12" color="tertiary" style="height: 18px; flex-shrink: 0" />
+							<Text size="12" weight="500" height="150" color="tertiary">
+								Some applications on your PC can have access to your clipboard and read a private key
+							</Text>
+						</Flex>
+						<Text size="12" weight="500" height="150" color="tertiary">
+							Recovery with this key is instant, without a password
+						</Text>
+					</Flex>
 				</div>
 			</template>
 		</template>

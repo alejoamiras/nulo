@@ -63,11 +63,23 @@ const handleUnlock = async () => {
 	}
 }
 
+// F-14: best-effort clipboard scrub a while after copy. Extension popups may
+// deny clipboard writes without a transient user gesture, so this is a bonus
+// layer — the on-page warning is the reliable mitigation. We deliberately do
+// NOT add a clipboardRead permission (it would only widen the wallet's
+// clipboard-read surface); the scrub is therefore unconditional, not
+// equals-checked.
+const CLIPBOARD_CLEAR_MS = 60_000
+let clipboardClearTimer
 const isCopied = ref(false)
 const handleCopy = () => {
 	isCopied.value = true
 	window.navigator.clipboard.writeText(phrase.value)
 	openToast({ label: "Seed phrase is copied", icon: "copy" })
+	clearTimeout(clipboardClearTimer)
+	clipboardClearTimer = setTimeout(() => {
+		void window.navigator.clipboard.writeText("").catch(() => {})
+	}, CLIPBOARD_CLEAR_MS)
 	setTimeout(() => {
 		isCopied.value = false
 	}, 2500)
@@ -85,6 +97,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+	clearTimeout(clipboardClearTimer)
 	phrase.value = null
 	document.removeEventListener("keydown", onKeydown)
 })
