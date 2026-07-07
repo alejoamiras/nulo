@@ -1710,3 +1710,23 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 		).rejects.toThrow(/[Ss]cope/)
 	})
 })
+
+describe("F-08 authorization-relevant arg-shape guard", () => {
+	const dispatcher = makeDispatcher(makeSessionWriter(makeSession()).writer, async () => ({}) as CapabilityResult)
+
+	test("sendTx with non-array exec.calls is rejected before authz", async () => {
+		await expect(dispatcher.dispatch("sendTx", [{ calls: "nope" }], ctx)).rejects.toThrow(/Malformed sendTx/)
+	})
+	test("sendTx with a call missing a string name is rejected", async () => {
+		await expect(dispatcher.dispatch("sendTx", [{ calls: [{ to: "0xabc" }] }], ctx)).rejects.toThrow(/Malformed sendTx/)
+	})
+	test("executeUtility with a non-object call is rejected", async () => {
+		await expect(dispatcher.dispatch("executeUtility", ["nope"], ctx)).rejects.toThrow(/Malformed executeUtility/)
+	})
+	test("createAuthWit with a missing `from` is rejected", async () => {
+		await expect(dispatcher.dispatch("createAuthWit", [], ctx)).rejects.toThrow(/Malformed createAuthWit/)
+	})
+	test("registerToken with a null positional arg is rejected", async () => {
+		await expect(dispatcher.dispatch("registerToken", ["0xtok", null], ctx)).rejects.toThrow(/Malformed registerToken/)
+	})
+})

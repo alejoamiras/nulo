@@ -183,29 +183,32 @@ export class AuthwitDiscoverer {
 		instances: Map<string, ContractInstanceWithAddress>,
 		artifacts: Map<string, ContractArtifact>,
 	): Promise<Fr> {
-		if (
-			content.name === undefined ||
-			content.type === undefined ||
-			content.isStatic === undefined ||
-			content.returnTypes === undefined
-		) {
-			const instance = instances.get(content.to)
-			if (!instance) {
-				throw new Error("Contract not found")
-			}
-			const artifact = artifacts.get(instance.currentContractClassId.toString())
-			if (!artifact) {
-				throw new Error("Contract artifact not found")
-			}
-			const fn = await findFunctionBySelector(artifact, content.selector)
-			if (!fn) {
-				throw new Error("Method not found")
-			}
-			content.name = fn.name
-			content.type = fn.functionType
-			content.isStatic = fn.isStatic
-			content.returnTypes = fn.returnTypes
+		// Resolve the ABI UNCONDITIONALLY and bind `content.name` to the selector's
+		// real function before hashing. Reading the ABI only when fields were absent
+		// let a dApp supply name/type/isStatic/returnTypes to skip the lookup and
+		// obtain an authwit over a selector that did not match the claimed name. The
+		// fields set below are ABI truth; any dApp-supplied values are overwritten.
+		const instance = instances.get(content.to)
+		if (!instance) {
+			throw new Error("Contract not found")
 		}
+		const artifact = artifacts.get(instance.currentContractClassId.toString())
+		if (!artifact) {
+			throw new Error("Contract artifact not found")
+		}
+		const fn = await findFunctionBySelector(artifact, content.selector)
+		if (!fn) {
+			throw new Error("Method not found")
+		}
+		if (content.name !== undefined && content.name !== fn.name) {
+			throw new Error(
+				`Scope violation: authwit call name "${content.name}" does not match selector's function "${fn.name}" on ${content.to}`,
+			)
+		}
+		content.name = fn.name
+		content.type = fn.functionType
+		content.isStatic = fn.isStatic
+		content.returnTypes = fn.returnTypes
 		return await computeAuthWitMessageHash(
 			{
 				caller: AztecAddress.fromStringUnsafe(content.caller),

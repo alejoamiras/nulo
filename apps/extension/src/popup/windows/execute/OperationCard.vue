@@ -476,6 +476,10 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 					</Text>
 				</Flex>
 			</template>
+			<Flex v-else :class="$style.prop">
+				<Text size="12" color="secondary">Consumer contract:</Text>
+				<AddressDisplay :address="String((op.messageHashOrIntent as { consumer: { toString(): string } }).consumer)" />
+			</Flex>
 		</template>
 	</Flex>
 </template>

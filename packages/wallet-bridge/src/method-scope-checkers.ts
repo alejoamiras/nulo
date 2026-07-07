@@ -252,6 +252,18 @@ function isIntentInnerHash(x: unknown): x is IntentInnerHashShape {
 	return "consumer" in obj && "innerHash" in obj
 }
 
+/**
+ * Whether a dApp createAuthWit intent's target call is covered by a granted
+ * transaction/simulation scope. The dispatcher uses this to route a covered call
+ * to silent execution and an uncovered call — or any `IntentInnerHash`, which
+ * carries no call to check — to an explicit confirmation popup.
+ */
+export function isCreateAuthWitCoveredByTxOrSimulationScope(intent: unknown, grants: GrantedCapabilityRecord[]): boolean {
+	if (!isCallIntent(intent)) return false
+	const { permitted } = callWithinTxOrSimulationScope(String(intent.call.to), intent.call.name, grants)
+	return permitted
+}
+
 export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	const from = String(args[0])
 
@@ -303,8 +315,11 @@ export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRec
 		return
 	}
 
-	// Raw Fr message hash (pre-computed by wallet-sdk) — no semantic info to
-	// validate beyond the accounts-level check above.
+	// Raw Fr message hash: a dApp-supplied pre-computed hash carries no semantic
+	// info to scope-check, so it cannot be proven within the granted scope. Reject
+	// it — a dApp must pass a structured CallIntent. (An inner-hash is handled above;
+	// the dispatcher routes createAuthWit to explicit user confirmation.)
+	throw new Error("Scope violation: createAuthWit requires a structured call intent; a raw message hash cannot be authorized")
 }
 
 /**
