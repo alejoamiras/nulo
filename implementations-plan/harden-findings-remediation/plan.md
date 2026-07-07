@@ -198,7 +198,7 @@ A unit is ✓ when its child-branch PR has merged into `fix/harden-findings` wit
 - [ ] G — Offscreen/messaging sender-auth + Firefox token (F-09, F-10)
 - [ ] I — DappSession row integrity (F-12)
 - [x] J — ValueStorage parse containment (F-13) — **PR #263 merged**; gate green: wallet-core 95/95 · value-storage 10/10 (2 new malformed-row) · lint 0-err
-- [ ] K — Clipboard secret hygiene (F-14)
+- [x] K — Clipboard secret hygiene (F-14) — **PR #266 merged**; key-page warning + best-effort 60s scrub (no clipboardRead perm added). Gate: test:components 356 · lint 0-err · smoke 68-pass (2 unrelated load-flakes)
 - [ ] L — Bearer redesign + memory hygiene (F-11)  *(after E; option (a) session-only — no wipe, no re-registration)*
 - [ ] PROMOTE — open `fix/harden-findings → dev` PR, full CI green, STOP (user merges)
 
