@@ -22,9 +22,7 @@ const openToastMock = vi.fn()
 
 // Vitest 4 requires function expressions (not arrows) for `new`-constructed mocks.
 vi.mock("@/wallet/services/auth-registry/client", () => ({
-	AuthRegistryServiceClient: vi.fn(function () {
-		return authwitsServiceMock
-	}),
+	AuthRegistryServiceClient: vi.fn(() => authwitsServiceMock),
 	MAX_REVOKES_PER_TX: 8,
 }))
 

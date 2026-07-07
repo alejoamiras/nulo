@@ -12,6 +12,7 @@
  */
 import type { Migration } from "@nulo/wallet-core/migration"
 import { E2E_MIGRATION_FIXTURE } from "@/e2e/config"
+import { backupMigrationFixture } from "@/e2e/backup-migration-fixture"
 import { migrationFixture } from "@/e2e/migration-fixture"
 
 /** The current on-disk shape. Fresh installs stamp this and run nothing. */
@@ -30,6 +31,13 @@ export const realMigrations: Migration[] = []
  *  builds tree-shake the fixture (proof-gate pattern; enforced by the
  *  `_build-extension.yml` grep). */
 export const migrations: Migration[] = [...realMigrations, ...(E2E_MIGRATION_FIXTURE ? [migrationFixture] : [])]
+
+/** The backup-import array: real migrations + (on stamped builds only) the
+ *  DECLARATIVE backup fixture, which transforms a real registry root so the
+ *  e2e suites can drive a vN backup through the whole import path. On prod
+ *  builds this is exactly `realMigrations` — the 9001 sentinel is unreachable
+ *  from any on-disk `backup-schema-version`. */
+export const backupMigrations: Migration[] = [...realMigrations, ...(E2E_MIGRATION_FIXTURE ? [backupMigrationFixture] : [])]
 
 /** Host-level status keys the boot path writes for the UI shells (the engine
  *  doesn't know these). `blocked` ⇒ the shell renders the recovery screen
