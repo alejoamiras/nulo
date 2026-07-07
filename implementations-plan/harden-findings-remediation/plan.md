@@ -190,7 +190,7 @@ Warn on both seed + key copy; attempt a delayed clipboard clear only if it still
 A unit is ✓ when its child-branch PR has merged into `fix/harden-findings` with its full local validation gate pasted green in the transcript and a `lessons/phase-<unit>.md` filed.
 
 - [x] A — Dispatcher trust-boundary (F-01, F-02 authz, F-08) — **PR #261 merged**; gate green: audit:vue 2649 · faucet 423 · wallet-bridge 165 · e2e:agent 70/1-skip
-- [ ] B — Approval-display truthfulness + `canCreateAuthWit` surfacing (F-02 display, F-07, F-01 UI)
+- [x] B — Approval-display truthfulness + `canCreateAuthWit` surfacing (F-02 display, F-07, F-01 UI) — **PR #262 merged**; gate green: units 2649 · lint/typecheck 0-err · smoke 69-pass (1 CI-skipped passkey load-flake, unrelated)
 - [ ] C — Chain-identity TOCTOU (F-03)
 - [ ] D — Discovery-flood rate limit (F-04)
 - [ ] E — Backup-restore config allowlist (F-06)  *(prerequisite of L)*
