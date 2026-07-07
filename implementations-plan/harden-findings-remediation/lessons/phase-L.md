@@ -44,3 +44,33 @@ Claim: a profile created before L still unlocks after L, with no wipe / re-regis
 - Passkey memory hygiene: the raw master-secret buffer is zeroized after the `Fr` is built (spy/inspect).
 
 ## Gate (plan.md Unit L — DEEP, network-e2e gated): `bun run --filter '@nulo/wallet-crypto' test` + `bun run test` (incl. **byte-identical** `key-vectors.test.ts`) + `bun run typecheck:all` + `bun run lint` + `NULO_E2E_PROVERLESS=1 bun run e2e:agent` (unlock / silent-restore / passkey flows). Layers: unit · typecheck · lint · network-e2e.
+
+---
+
+## Implementation — DONE
+
+Commits on `fix/hf-l-bearer-redesign`:
+- `d25824d` — `SessionSecretBox` primitive in `@nulo/wallet-crypto` (+ `session-secret-box.test.ts`, 7 tests).
+- `5a15189` — wire the bearer through `open()`/`restore()`/`clearBearer()` in `session-manager.ts`; `Session.bearer?: SessionWrappedSecret` (+ legacy `passhash?` `@deprecated`, never accepted); drop the `unseal` callback from `restore()` + `ProfileService.init`; rewrite `session-manager.test.ts` + `service.integration.test.ts` to the bearer mechanism + F-11 negatives.
+- `9d93e57` — `EncryptionKey.fromPassword()` zeroizes the password-equivalent passhash scratch after `importKey`.
+
+### What shipped (matches the adopted codex verdict)
+- **`SessionSecretBox`** (`packages/wallet-crypto/src/session-secret-box.ts`): `wrap(secret, aad)` → `{ v:1, token:b64(32 rand), salt:b64(32 rand), wrappedSecret:b64([iv(12)||ct||tag]) }`; `key = HKDF-SHA256(token, salt, info="nulo:session-wrap:v1")` → AES-GCM-256, fresh 96-bit IV, **AAD = profile.id**. `unwrap()` returns `null` (never throws) on v≠1 / malformed b64 / wrong token length / bad GCM tag / wrong AAD. Token+salt binary copies zeroized after use. NOT built on PBKDF2/`EncryptionKey` (random 256-bit token needs no stretching; keeps the profile-record crypto domain separate).
+- **`open()`** (non-strict password only): `persistBearer = passhash !== undefined && !strictSecurityMode && profile.type === "password"`; wraps a COPY of the master secret under a fresh token. `passhash` is now only a PRESENCE signal — its value is never persisted.
+- **`restore(lookup)`** (unseal callback dropped): fail-closed shape gate `silentClose` if `session.passhash || (strict && bearer) || !bearer`; then `unwrap(bearer, profile.id)`; **re-check `strictSecurityMode` AFTER the async decrypt** (mid-restore strict-toggle race); `zeroize(secretBytes)` in `finally`.
+- **`clearBearer()`** (was `clearPasshash`): clears `bearer` + legacy `passhash` on BOTH the persisted record and the in-memory `activeSession.session` (else `refresh()` re-persists a cleared bearer). Routed through `runExclusive`.
+- **Memory hygiene:** `fromPassword` scratch wipe applied. `passkey-credential.ts` ordering (HKDF bits → `Fr` copy → fresh buffer → zeroize raw bits) + every `open()`-caller `zeroize(secret)` in `finally` were already correct — confirmed, no change.
+
+### No-re-registration invariant — VERIFIED end-to-end
+- `key-vectors.test.ts` stays **byte-identical** (9/9) — the profile-record crypto is provably untouched.
+- New integration test `service.integration.test.ts > SW restart simulation: legacy passhash record → silentClose + profile still unlockable`: seeds a genuine pre-F-11 `passhash` session, asserts restore `silentClose`s it + cleans the record, **then re-unlocks the SAME profile with the SAME password** and confirms a fresh F-11 bearer is written. This is the invariant proven at the service layer: no wipe, no re-registration, one re-unlock.
+
+### Gate results
+- `@nulo/wallet-crypto` test: **30 passed** (incl. `session-secret-box` 7).
+- `bun run test` (full unit+component): **2684 passed** | 7 todo | 1 skipped (up from E's 2669; session-manager 51, profile suite 130, all green). `key-vectors.test.ts` **9/9 byte-identical**.
+- `bun run typecheck:all`: **all packages exit 0**.
+- `bun run lint`: **exit 0** (58 advisory baseline `useArrowFunction` warnings, none in touched files).
+- `NULO_E2E_PROVERLESS=1 bun run e2e:agent`: **53 files passed / 1 skipped · 70 tests passed / 1 skipped** — exact baseline parity (unlock / silent-restore / passkey / sw-resilience flows all green; no regression from the bearer redesign). Duration ~15 min.
+
+### One operational note
+The prior e2e run had died leaving a stale `apps/extension/.e2e-state/` (6 dead ports, empty `~/.agents/ports.md`, a zombie anvil). Reclaimed by deleting the 3 ignored runtime markers (`boot-ready`/`boot-started`/`tests-started`); the tracked `ports.json` is a committed template the runner overwrites + is restored via `git checkout --` post-run. Per run-isolation: verified the ports were dead + no live owner BEFORE reclaiming.
