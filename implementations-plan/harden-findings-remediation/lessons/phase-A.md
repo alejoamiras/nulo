@@ -117,3 +117,14 @@ Branch: `fix/hf-a-dispatcher-authz` off `fix/harden-findings`. Status: **design 
 **Adversarial (codex):** covered-CallIntent silent is safe once raw-Fr rejected + inner-hash always-popups + uncovered popups + signer=args[0] + execution ABI name↔selector bind before hashing. Residual = intentionally-granted authority only.
 
 **⚠ Coupling:** the checkCreateAuthWit relax + dispatcher routing MUST land together (relaxing alone would silently execute uncovered intents — reopening F-01). Build the whole arc, hold commit until wallet-bridge suite is green.
+
+## Implementation COMPLETE (F-01, F-02, F-08 closed)
+
+All three findings closed + tested (commits on `fix/hf-a-dispatcher-authz`):
+- **F-02** — name↔selector bound in execution across all 4 sinks (`5014db1`, `96e4d24`, `10ba462`, `45d99cc`/`7b2ed95`); build from ABI truth (defeats the type/isStatic skip-evasion).
+- **F-01** — raw-`Fr` reject (`2cefc0b`, 74/74 scope tests) + createAuthWit handler routing (`2ee1253`): signer resolved from `args[0]`, covered CallIntent→silent, uncovered/inner-hash→popup (accessLevel→Transactions), no sendTx FIFO hooks. Coverage helper unit-tested (`7563f5e`, 80/80). Inner-hash consumer display in the popup (`b81b110`).
+- **F-08** — dependency-free arg-shape guard before scope enforcement (`14424e7`), scoped to authz-sensitive methods, +5 guard tests (dispatcher 75/75). Per consult-3 (option b): NO WalletSchema import (preserves wallet-bridge layering); full WalletSchema dispatch-parse documented as a follow-up.
+
+**Adopted policy (deliberate, coherent + secure — NOT the full codex popup-for-all-uncovered):** covered CallIntent→silent · uncovered CallIntent WITH a declared tx/sim scope→**reject** (dApp asked outside its own scope) · uncovered with NO declared scope / inner-hash→**popup** · raw `Fr`→reject. This keeps `checkCreateAuthWit`'s existing scope-reject tests intact (no test-meaning changes that could read as weakening). *Optional refinement (deferred):* relax `checkCreateAuthWit` so uncovered-with-tx-caps also popups instead of rejecting (codex's compat preference) — requires updating the CallIntent-outside-scope scope tests.
+
+Validation so far: `typecheck:all` 0 errors · wallet-bridge 165/165 · extension typecheck 0 errors. Running full gate: `audit:vue` (typecheck:all→test→lint→build) + `e2e:agent` (network) + `test:faucet` (serialization).
