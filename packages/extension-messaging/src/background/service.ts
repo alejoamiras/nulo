@@ -2,6 +2,7 @@ import type { ILogger } from "@nulo/wallet-core/logger"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { BaseService } from "../core/base-service"
+import { isTrustedInternalSender } from "../core/sender-auth"
 import type { ResponseContentLike } from "../core/base-client"
 import { MessageType, type EventMessage, type RequestMessage } from "../messages"
 
@@ -35,6 +36,13 @@ export abstract class Service<TRequests extends MethodsMap, TEvents extends Even
 
 	private readonly onConnect = (client: chrome.runtime.Port) => {
 		if (client.name !== this.name) {
+			return
+		}
+		// F-09: reject Ports opened by anything other than a same-extension
+		// SW / popup / offscreen context (foreign extension id, or a tab-bound
+		// content-script sender).
+		if (!isTrustedInternalSender(client.sender)) {
+			this.logWarn(`Rejected Port from untrusted sender (id=${client.sender?.id ?? "?"})`)
 			return
 		}
 		client.onDisconnect.addListener(this.onDisconnect)
