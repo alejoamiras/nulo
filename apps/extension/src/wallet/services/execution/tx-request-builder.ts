@@ -51,7 +51,7 @@ import { LogLevel } from "@/wallet/logger"
 import type { AccountService } from "@/wallet/services/account/service"
 import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { IAccountContract, PartialGasSettingsRPC } from "@nulo/aztec-runtime/account"
-import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
+import { assertLiveChainIdentity, chainInfoFrom } from "@nulo/aztec-runtime/utils"
 import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { networkInfoFrom, type NetworkService, type Network } from "@/wallet/services/network/service"
 import type { ProfileService } from "@/wallet/services/profile/service"
@@ -356,6 +356,7 @@ export class TxRequestBuilder {
 					txNonce: nonce,
 					feePaymentMethodOptions: feePaymentMethod,
 				},
+				chainInfoFrom(nodeInfo),
 				gasSettings,
 			)
 

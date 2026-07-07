@@ -134,7 +134,7 @@ import { simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
 import { completeFeeOptions } from "@nulo/aztec-runtime/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
-import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
+import { assertLiveChainIdentity, chainInfoFrom } from "@nulo/aztec-runtime/utils"
 import type { CallAction, EncodedCallAction } from "@nulo/wallet-bridge"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { type ILogger, LogLevel } from "@/wallet/logger"
@@ -436,11 +436,17 @@ async function runSlowArm(
 		[],
 		[],
 	)
-	const txRequest = await account.buildTxExecutionRequest(node, pxe, payload, {
-		cancellable: false,
-		txNonce: Fr.random(),
-		feePaymentMethodOptions: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
-	})
+	const txRequest = await account.buildTxExecutionRequest(
+		node,
+		pxe,
+		payload,
+		{
+			cancellable: false,
+			txNonce: Fr.random(),
+			feePaymentMethodOptions: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
+		},
+		chainInfoFrom(await node.getNodeInfo()),
+	)
 	const simulatedTx = await pxe.simulateTx(txRequest, {
 		simulatePublic: true,
 		skipFeeEnforcement: true,
