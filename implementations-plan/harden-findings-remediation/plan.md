@@ -195,7 +195,7 @@ A unit is ✓ when its child-branch PR has merged into `fix/harden-findings` wit
 - [x] D — Discovery-flood rate limit (F-04) — **PR #267 merged**; caps (global 32 / per-origin 4) + (origin,chainId) coalesce, locked-queue + popup. Gate: wallet-bridge 174 (+4) · full test 2657 · lint 0-err · proverless e2e 70-pass/1-skip. chainId-reject deferred
 - [ ] E — Backup-restore config allowlist (F-06)  *(prerequisite of L)*
 - [x] F — CSP hardening (F-05) — **PR #264 merged**; `img-src 'self' data: blob:` (default-src floor deferred — broke connect e2e, DiD follow-up). Gate: build/lint 0-err · smoke 69-pass (1 CI-skipped flake) · proverless e2e 70-pass/1-skip (baseline parity)
-- [ ] G — Offscreen/messaging sender-auth + Firefox token (F-09, F-10)
+- [x] G — Offscreen/messaging sender-auth + Firefox token (F-09, F-10) — **PR #268 merged**; sender-url auth (e2e caught a tab-hosted-page bug) + Firefox instance token. Gate: full test 2662 · ext-messaging 151 · offscreen 4 · build:firefox · lint 0-err · proverless e2e 70/1-skip
 - [ ] I — DappSession row integrity (F-12)
 - [x] J — ValueStorage parse containment (F-13) — **PR #263 merged**; gate green: wallet-core 95/95 · value-storage 10/10 (2 new malformed-row) · lint 0-err
 - [x] K — Clipboard secret hygiene (F-14) — **PR #266 merged**; key-page warning + best-effort 60s scrub (no clipboardRead perm added). Gate: test:components 356 · lint 0-err · smoke 68-pass (2 unrelated load-flakes)
