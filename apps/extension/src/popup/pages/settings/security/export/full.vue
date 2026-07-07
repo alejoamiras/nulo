@@ -27,6 +27,8 @@ import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { TransactionServiceClient } from "@/wallet/services/transaction/client"
+import { BACKUP_SCHEMA_VERSION_FIELD, COMPAT_EPOCH_FIELD, CURRENT_COMPAT_EPOCH } from "@/wallet/services/backup/backup-migration-registry"
+import { CURRENT_BACKUP_SCHEMA_VERSION } from "@/wallet/services/backup/backup-migrator"
 import { EncryptionKey } from "@nulo/wallet-crypto"
 
 /** Errors */
@@ -125,10 +127,15 @@ async function handleBackup() {
 	}
 
 	backupStatus.value = "progress"
+	// Two orthogonal version fields replace the legacy conflated
+	// `schema-version: 2`: the NON-migratable account-contract epoch and the
+	// MIGRATABLE storage schema version the import path migrates forward from.
+	// Constants are single-sourced with the import gates.
 	backup = {
 		"wallet-version": version,
 		"aztec-version": aztecVersion,
-		"schema-version": 2,
+		[COMPAT_EPOCH_FIELD]: CURRENT_COMPAT_EPOCH,
+		[BACKUP_SCHEMA_VERSION_FIELD]: CURRENT_BACKUP_SCHEMA_VERSION,
 		"master-key": key,
 		data: {},
 	}

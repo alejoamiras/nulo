@@ -232,14 +232,15 @@ export interface SyntheticBackupOpts {
 	accountAddress?: string
 }
 
-/** Build a minimum-viable full-backup payload (schema v2 + valid SHA-256
+/** Build a minimum-viable full-backup payload (current metadata fields + valid SHA-256
  *  checksum) the importer accepts: profile + one network + one account + empty
  *  token slice. Missing slices are treated as no-ops by the importer. */
 export function buildSyntheticBackup({ masterBase64, profileName = "Imported", accountAddress }: SyntheticBackupOpts): string {
 	const body = {
 		"wallet-version": "test",
 		"aztec-version": "test",
-		"schema-version": 2,
+		"compat-epoch": 2,
+		"backup-schema-version": 1,
 		"master-key": masterBase64,
 		data: {
 			profile: { id: "syn-profile-id", name: profileName, type: "password" },

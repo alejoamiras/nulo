@@ -25,7 +25,7 @@
 import type { Migration, StorageRef } from "@nulo/wallet-core/migration"
 import { Migrator, SCHEMA_VERSION_KEY } from "@nulo/wallet-core/migration"
 import { MemoryStorageArea } from "@nulo/wallet-core/storage"
-import { backupMigrations } from "@/wallet/storage/migrations"
+import { backupMigrations, realMigrations } from "@/wallet/storage/migrations"
 import {
 	BACKUP_BLOCKED_ROOTS,
 	BACKUP_SCHEMA_BASELINE,
@@ -66,6 +66,12 @@ export function maxBackupSchemaVersion(
 ): number {
 	return Math.max(baselineVersion, ...migrations.map((m) => m.version))
 }
+
+/** What a NEW export stamps as `backup-schema-version`: the version the REAL
+ *  migration line puts live data at. Deliberately excludes the e2e fixtures'
+ *  9001 sentinel — a stamped test build must not mint backups a production
+ *  build would reject as from-the-future. */
+export const CURRENT_BACKUP_SCHEMA_VERSION = maxBackupSchemaVersion(realMigrations)
 
 export async function migrateBackupData(opts: MigrateBackupOptions): Promise<BackupMigrationResult> {
 	const migrations = opts.migrations ?? backupMigrations

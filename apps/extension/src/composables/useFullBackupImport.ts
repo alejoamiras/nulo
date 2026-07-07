@@ -26,6 +26,8 @@ import { UserRejectedError } from "@nulo/extension-messaging/errors"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import type { PasskeyRequest } from "@/wallet/services/passkey/spec"
 import { type BackupSelection, collectRestoreErrors, readBackupFile, remapIdInBackupData } from "@/utils/full-backup-helpers"
+import { BACKUP_SCHEMA_VERSION_FIELD, COMPAT_EPOCH_FIELD, isSupportedCompatEpoch } from "@/wallet/services/backup/backup-migration-registry"
+import { maxBackupSchemaVersion } from "@/wallet/services/backup/backup-migrator"
 
 export type RestoreStatus = "" | "progress" | "failed" | "finished" | null | undefined
 
@@ -200,7 +202,8 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		const sel = selectedBackup.value as BackupSelection
 		const fullBackup = sel.backup as {
 			checksum?: string
-			"schema-version"?: number
+			"compat-epoch"?: unknown
+			"backup-schema-version"?: unknown
 			"master-key"?: string
 			data: Record<string, unknown>
 		}
@@ -213,16 +216,12 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			profile?: { id: string; name?: string }
 		}
 
-		if (backup["schema-version"] !== 2) {
-			restoreStatus.value = "failed"
-			opts.fillError(
-				"full_backup",
-				"Incompatible backup",
-				"This backup was created by a pre-release build that used custom account contracts. It cannot be imported into the current version. Re-export a backup from the same release you are importing into.",
-			)
-			return
-		}
-
+		// Trust-gate order is deliberate: integrity FIRST (over the original
+		// body, before any field is interpreted), then the non-migratable
+		// compat-epoch, then the migratable schema-version range. The checksum
+		// is accidental-integrity detection only — a plain backup's checksum
+		// is attacker-recomputable, so nothing downstream may treat it as
+		// authentication.
 		const comparisonChecksum = await EncryptionKey.getHashHex(JSON.stringify(backup))
 		if (checksum !== comparisonChecksum) {
 			restoreStatus.value = "failed"
@@ -230,6 +229,39 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				"full_backup",
 				"Backup Integrity Check Failed",
 				"The backup file appears to be corrupted or has been tampered with. Please ensure you have the correct backup file.",
+			)
+			return
+		}
+
+		// A pre-baseline blob (the legacy conflated `schema-version: 2`, no
+		// `compat-epoch`) fails this gate too — intended fail-closed; the fix
+		// is re-exporting from a current wallet.
+		if (!isSupportedCompatEpoch(backup[COMPAT_EPOCH_FIELD])) {
+			restoreStatus.value = "failed"
+			opts.fillError(
+				"full_backup",
+				"Incompatible backup",
+				"This backup was created by an incompatible wallet version and cannot be imported. Re-export a backup from a current version of the wallet.",
+			)
+			return
+		}
+
+		const backupSchemaVersion = backup[BACKUP_SCHEMA_VERSION_FIELD]
+		if (typeof backupSchemaVersion !== "number" || !Number.isInteger(backupSchemaVersion) || backupSchemaVersion < 1) {
+			restoreStatus.value = "failed"
+			opts.fillError(
+				"full_backup",
+				"Incompatible backup",
+				"This backup does not carry a valid schema version. Re-export a backup from a current version of the wallet.",
+			)
+			return
+		}
+		if (backupSchemaVersion > maxBackupSchemaVersion()) {
+			restoreStatus.value = "failed"
+			opts.fillError(
+				"full_backup",
+				"Backup is too new",
+				"This backup was created by a newer version of the wallet. Update the wallet, then import it again.",
 			)
 			return
 		}

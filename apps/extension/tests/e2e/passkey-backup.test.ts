@@ -87,7 +87,8 @@ function buildSyntheticPasskeyBackup(credentialId: string, accountAddress: strin
 	const body = {
 		"wallet-version": "test",
 		"aztec-version": "test",
-		"schema-version": 2,
+		"compat-epoch": 2,
+		"backup-schema-version": 1,
 		"master-key": credentialId,
 		data: {
 			profile: { id: "syn-profile-id", name: "Imported PK", type: "passkey" },
