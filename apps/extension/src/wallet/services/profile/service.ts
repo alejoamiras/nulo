@@ -127,14 +127,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// profile, wrong creds, and passkey-can't-silently-restore
 		// internally. No emit on restore — subscribers pull via
 		// getActiveProfile() when they mount.
-		await this.sessionManager.restore(
-			(id) => this.repo.get(id),
-			(passhash, profile) =>
-				this.secretBox.unsealWithPasshash(passhash, {
-					guard: profile.guard,
-					secret: profile.secret,
-				}),
-		)
+		// F-11: the silent-restore bearer is now a random-token wrapped secret
+		// (SessionSecretBox), so `restore()` no longer needs the passhash unsealer.
+		await this.sessionManager.restore((id) => this.repo.get(id))
 	}
 
 	public async getActiveProfile(): Promise<ProfileInfo | undefined> {

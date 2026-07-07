@@ -22,7 +22,7 @@ import { ServiceCollection } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
-import type { PasskeyCredential } from "@nulo/wallet-crypto"
+import type { PasskeyCredential, SessionWrappedSecret } from "@nulo/wallet-crypto"
 import { PasskeyService } from "@/wallet/services/passkey/service"
 import { flushPromises } from "@vue/test-utils"
 import { ProfileService } from "./service"
@@ -548,42 +548,42 @@ describe("ProfileService integration", () => {
 		// 32-byte base64 secret used for importPlain.
 		const PLAIN_SECRET_B64 = Buffer.from(new Uint8Array(32).fill(7)).toString("base64")
 
-		async function readPersistedPasshash(api: FakeBrowserApi): Promise<string | undefined> {
+		async function readPersistedBearer(api: FakeBrowserApi): Promise<SessionWrappedSecret | undefined> {
 			const raw = await api.storage.session.get("nulo:core:session")
 			if (!raw["nulo:core:session"]) return undefined
-			const session = JSON.parse(raw["nulo:core:session"] as string) as { passhash?: string }
-			return session.passhash
+			const session = JSON.parse(raw["nulo:core:session"] as string) as { bearer?: SessionWrappedSecret }
+			return session.bearer
 		}
 
-		test("default unlock under strict ON: persisted Session has no passhash", async () => {
+		test("default unlock under strict ON: persisted Session has no bearer", async () => {
 			const { api, service } = await makeService({ strict: true })
 			const profile = await service.createProfile("P", "pass1234")
 			// createProfile already opens a session (no separate unlock needed).
-			expect(await readPersistedPasshash(api)).toBeUndefined()
+			expect(await readPersistedBearer(api)).toBeUndefined()
 			expect(profile.id).toBeDefined()
 		}, 30_000)
 
 		test("opt-out unlock keeps bearer (legacy lenient behavior)", async () => {
 			const { api, service } = await makeService({ strict: false })
 			await service.createProfile("P", "pass1234")
-			expect(typeof (await readPersistedPasshash(api))).toBe("string")
+			expect((await readPersistedBearer(api))?.v).toBe(1)
 		}, 30_000)
 
 		test("createProfile honors strict mode (gate applies even on profile creation, not just unlock)", async () => {
 			const { api, service } = await makeService({ strict: true })
 			await service.createProfile("P", "pass1234")
-			expect(await readPersistedPasshash(api)).toBeUndefined()
+			expect(await readPersistedBearer(api)).toBeUndefined()
 		}, 30_000)
 
 		test("changeProfilePassword honors strict mode (gate applies on re-open after password change)", async () => {
 			const { api, service } = await makeService({ strict: true })
 			const profile = await service.createProfile("P", "oldpass1")
-			expect(await readPersistedPasshash(api)).toBeUndefined() // create was strict
+			expect(await readPersistedBearer(api)).toBeUndefined() // create was strict
 
 			await service.changeProfilePassword(profile.id, "oldpass1", "newpass1")
 			// changeProfilePassword reopens the session with the new credentials
 			// — still must respect strict mode (codex-flagged BLOCKER in v1).
-			expect(await readPersistedPasshash(api)).toBeUndefined()
+			expect(await readPersistedBearer(api)).toBeUndefined()
 		}, 30_000)
 
 		test("importPlain honors strict mode (gate applies on import-then-open)", async () => {
@@ -591,22 +591,22 @@ describe("ProfileService integration", () => {
 			await service.importPlain("Imported", PLAIN_SECRET_B64, "pass1234")
 			// importPasswordProfile reopens the session as part of the import flow
 			// — must respect strict mode (codex-flagged BLOCKER in v1).
-			expect(await readPersistedPasshash(api)).toBeUndefined()
+			expect(await readPersistedBearer(api)).toBeUndefined()
 		}, 30_000)
 
 		test("toggle ON during unlocked session: bearer cleared from persisted record + in-memory", async () => {
 			const { api, config, service } = await makeService({ strict: false })
 			await service.createProfile("P", "pass1234")
-			expect(typeof (await readPersistedPasshash(api))).toBe("string")
+			expect((await readPersistedBearer(api))?.v).toBe(1)
 
 			config.set("strictSecurityMode", true)
-			// onConfigUpdated fires `void clearPasshash()` — flush microtasks.
+			// onConfigUpdated fires `void clearBearer()` — flush microtasks.
 			await Promise.resolve()
 			await Promise.resolve()
 			await Promise.resolve()
 			await Promise.resolve()
 
-			expect(await readPersistedPasshash(api)).toBeUndefined()
+			expect(await readPersistedBearer(api)).toBeUndefined()
 			// Master secret survives toggle — wallet stays unlocked.
 			const active = await service.getActiveProfile()
 			expect(active).toBeDefined()
@@ -615,7 +615,7 @@ describe("ProfileService integration", () => {
 		test("toggle OFF during strict session: no immediate backfill", async () => {
 			const { api, config, service } = await makeService({ strict: true })
 			await service.createProfile("P", "pass1234")
-			expect(await readPersistedPasshash(api)).toBeUndefined()
+			expect(await readPersistedBearer(api)).toBeUndefined()
 
 			config.set("strictSecurityMode", false)
 			await Promise.resolve()
@@ -623,7 +623,7 @@ describe("ProfileService integration", () => {
 
 			// Session storage stays bearer-less; bearer reappears on the
 			// NEXT unlock (after the user manually locks + unlocks).
-			expect(await readPersistedPasshash(api)).toBeUndefined()
+			expect(await readPersistedBearer(api)).toBeUndefined()
 		}, 30_000)
 
 		test("toggle OFF + relock + unlock: bearer is restored on the next unlock", async () => {
@@ -639,30 +639,44 @@ describe("ProfileService integration", () => {
 
 			// Now the bearer is back — confirms toggle OFF takes effect on
 			// next unlock.
-			expect(typeof (await readPersistedPasshash(api))).toBe("string")
+			expect((await readPersistedBearer(api))?.v).toBe(1)
 		}, 30_000)
 
-		test("SW restart simulation: legacy passhash + strict ON → silentClose (upgrade-path safety)", async () => {
-			// Step 1: lenient unlock writes a bearer to storage.
+		test("SW restart simulation: legacy passhash record → silentClose + profile still unlockable (upgrade-path safety)", async () => {
+			// A pre-F-11 build persisted a password-equivalent `passhash` string.
+			// After upgrade, restore() must NEVER accept it (F-11) — the profile
+			// record is intact, so the user re-unlocks ONCE. This proves the
+			// no-re-registration invariant end-to-end: no wipe, no re-create.
 			const { api } = await makeService({ strict: false })
-			const s = await (async () => {
+			const profile = await (async () => {
 				const built = await makeServiceFromExistingApi(api, { strict: false })
-				const profile = await built.service.createProfile("P", "pass1234")
-				return { profile, service: built.service }
+				const p = await built.service.createProfile("P", "pass1234")
+				await built.service.lockActiveProfile() // clears the F-11 session
+				return p
 			})()
-			expect(typeof (await readPersistedPasshash(api))).toBe("string")
-			// Don't await any close — leave the persisted Session with passhash
-			// as if the user upgraded the build with an active lenient session.
 
-			// Step 2: simulate SW restart with strict ON. Construct a fresh
-			// ProfileService that observes the same FakeBrowserApi.
-			const { service: service2 } = await makeServiceFromExistingApi(api, { strict: true })
-			// During init, restore() runs. With strict ON + persisted passhash,
-			// it must treat the bearer as untrusted → silentClose.
-			const active = await service2.getActiveProfile()
-			expect(active).toBeUndefined() // lock-screen state
-			expect(await readPersistedPasshash(api)).toBeUndefined() // record cleaned up
-			expect(s.profile.id).toBeDefined()
+			// Hand-seed a genuine legacy passhash session as an old build left it.
+			await api.storage.session.set({
+				[SESSION_STORAGE_ROOT]: JSON.stringify({
+					profile: profile.id,
+					passhash: Buffer.from(new ArrayBuffer(8)).toString("base64"),
+					since: Date.now(),
+					lockedAt: Date.now() + 1_800_000,
+				}),
+			})
+
+			// SW restart. restore() sees the legacy passhash → silentClose,
+			// regardless of strict mode (the legacy shape is never trusted).
+			const { service: service2 } = await makeServiceFromExistingApi(api, { strict: false })
+			expect(await service2.getActiveProfile()).toBeUndefined() // lock-screen state
+			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
+			expect(SESSION_STORAGE_ROOT in raw).toBe(false) // legacy record cleaned up
+
+			// The profile is untouched: the SAME password unlocks it — no
+			// re-registration, no data loss (F-11 option (a)).
+			const reunlocked = await service2.unlockProfile(profile.id, "pass1234")
+			expect(reunlocked.id).toBe(profile.id)
+			expect((await readPersistedBearer(api))?.v).toBe(1) // fresh F-11 bearer on re-unlock
 		}, 30_000)
 
 		test("SW restart simulation: clean strict session + strict ON → no in-memory restore (passkey-equivalent)", async () => {
@@ -672,8 +686,8 @@ describe("ProfileService integration", () => {
 
 			// Fresh ProfileService against the same api with strict ON.
 			const { service: service2 } = await makeServiceFromExistingApi(api, { strict: true })
-			// Persisted Session has no passhash (strict open never wrote one).
-			// restore() takes the `!session.passhash` branch → silentClose.
+			// Persisted Session has no bearer (strict open never wrote one).
+			// restore() takes the `!session.bearer` branch → silentClose.
 			expect(await service2.getActiveProfile()).toBeUndefined()
 		}, 30_000)
 
@@ -681,7 +695,7 @@ describe("ProfileService integration", () => {
 			const { api } = await makeService({ strict: false })
 			const built = await makeServiceFromExistingApi(api, { strict: false })
 			await built.service.createProfile("P", "pass1234")
-			expect(typeof (await readPersistedPasshash(api))).toBe("string")
+			expect((await readPersistedBearer(api))?.v).toBe(1)
 
 			const { service: service2 } = await makeServiceFromExistingApi(api, { strict: false })
 			// Persisted bearer + strict OFF → silent restore.
@@ -693,7 +707,7 @@ describe("ProfileService integration", () => {
 			const { api, service } = await makeService({ strict: true })
 			const profile = await service.createPasskeyProfile("PK")
 			expect(profile.type).toBe("passkey")
-			expect(await readPersistedPasshash(api)).toBeUndefined()
+			expect(await readPersistedBearer(api)).toBeUndefined()
 		}, 30_000)
 	})
 
@@ -984,17 +998,17 @@ describe("ProfileService integration", () => {
 	})
 
 	// Q10 TTL residual (C1): the CONFIG-driven session writebacks — applyTtlChange
-	// (sessionTtl change) and clearPasshash (strictSecurityMode toggle) — are now
+	// (sessionTtl change) and clearBearer (strictSecurityMode toggle) — are now
 	// ALSO routed through ProfileService.runExclusive, like the alarm close. Before,
 	// they ran lock-free and could interleave with a refreshSession() write-back:
-	// a TTL-shorten close could be resurrected (TTL bypass), and clearPasshash's
+	// a TTL-shorten close could be resurrected (TTL bypass), and clearBearer's
 	// stale-snapshot write could clobber a newer lockedAt (lost update).
 	describe("config-driven writeback vs refresh race (serialized)", () => {
 		const readRoot = async (api: FakeBrowserApi): Promise<string | undefined> => {
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			return raw[SESSION_STORAGE_ROOT] as string | undefined
 		}
-		const readSession = async (api: FakeBrowserApi): Promise<{ lockedAt?: number; passhash?: string }> => {
+		const readSession = async (api: FakeBrowserApi): Promise<{ lockedAt?: number; bearer?: SessionWrappedSecret }> => {
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			return JSON.parse(raw[SESSION_STORAGE_ROOT] as string)
 		}
@@ -1057,7 +1071,7 @@ describe("ProfileService integration", () => {
 			const { api, config, service } = await makeService(60_000) // lenient → bearer persisted
 			const profile = await service.createProfile("P", "pass1234")
 			await service.unlockProfile(profile.id, "pass1234")
-			expect((await readSession(api)).passhash).toBeDefined() // lenient bearer cached
+			expect((await readSession(api)).bearer).toBeDefined() // lenient bearer cached
 			const lockedAtBeforeRefresh = (await readSession(api)).lockedAt as number
 
 			// Ensure refresh bumps `since` strictly past unlock so a stale-snapshot
@@ -1066,15 +1080,15 @@ describe("ProfileService integration", () => {
 
 			const releaseSet = blockNextSessionSet(api)
 			const refreshP = service.refreshSession()
-			await flushPromises() // refresh parks holding the lock (in-memory passhash still present)
+			await flushPromises() // refresh parks holding the lock (in-memory bearer still present)
 
-			// Toggle strict ON → clearPasshash() routed through runExclusive → BLOCKS
+			// Toggle strict ON → clearBearer() routed through runExclusive → BLOCKS
 			// behind the parked refresh.
 			config.set("strictSecurityMode", true)
 			await flushPromises()
 
-			// Release refresh → persists {bumped lockedAt, passhash present} + releases
-			// lock → queued clearPasshash runs, re-reads the bumped session, drops the
+			// Release refresh → persists {bumped lockedAt, bearer present} + releases
+			// lock → queued clearBearer runs, re-reads the bumped session, drops the
 			// bearer, persists THAT object (not a stale pre-refresh snapshot).
 			releaseSet()
 			await refreshP
@@ -1082,7 +1096,7 @@ describe("ProfileService integration", () => {
 
 			expect((await service.getActiveProfile()) !== undefined).toBe(true) // strict ≠ force-lock
 			const persisted = await readSession(api)
-			expect(persisted.passhash).toBeUndefined() // bearer dropped — strict enforced
+			expect(persisted.bearer).toBeUndefined() // bearer dropped — strict enforced
 			// The bumped lockedAt survived: a stale-snapshot write would have reverted it
 			// to the pre-refresh value. (Strict deliberately drops the cross-restart bearer,
 			// so a SW-restart agreement check does NOT apply here — that's expected, not a hybrid.)

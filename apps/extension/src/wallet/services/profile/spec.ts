@@ -1,5 +1,5 @@
 import type { Fr } from "@aztec/foundation/curves/bn254"
-import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
+import type { PasskeyCredentialData, SessionWrappedSecret } from "@nulo/wallet-crypto"
 import type { Restored } from "@/wallet/base"
 
 export const PROFILE_SERVICE_NAME = "profile"
@@ -31,7 +31,14 @@ export type Profile = ProfileInfo &
 export type Session = {
 	/** Profile id. */
 	profile: string
-	/** Profile passhash. */
+	/** F-11: random-token wrapped-secret silent-restore bearer (non-strict
+	 *  password profiles only). Replaces `passhash` — see `SessionSecretBox`.
+	 *  The token is random, not password-derived, so a session-store leak no
+	 *  longer exposes a password-equivalent value. */
+	bearer?: SessionWrappedSecret
+	/** @deprecated F-11: legacy password-equivalent bearer (unsalted
+	 *  `SHA-256(password)`). Written only by pre-F-11 code; the new `restore()`
+	 *  NEVER accepts it — such a session is `silentClose`d (one-time re-unlock). */
 	passhash?: string
 	/** Creation time */
 	since: number
