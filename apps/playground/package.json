@@ -18,6 +18,7 @@
 		"@aztec/stdlib": "5.0.0-rc.2",
 		"@aztec/wallet-sdk": "5.0.0-rc.2",
 		"@alejoamiras/aztec-standards": "5.0.0-rc.2",
+		"@nulo/wallet-sdk-schema-patch": "workspace:*",
 		"zod": "^4.4.3"
 	},
 	"devDependencies": {

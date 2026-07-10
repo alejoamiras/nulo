@@ -3,6 +3,8 @@
  * No vue, no chrome.*, no service clients — safe to import anywhere.
  */
 
+import { fromBase64 } from "@/wallet/utils"
+
 export type BackupFileType = "plain" | "encrypted" | "unknown"
 
 export interface BackupSelection {
@@ -16,7 +18,7 @@ export function detectBackupType(text: string): BackupFileType {
 	const trimmed = text.trim()
 	if (trimmed.startsWith("{") || trimmed.startsWith("[")) return "plain"
 	try {
-		const bytes = Uint8Array.from(atob(trimmed), (c) => c.charCodeAt(0))
+		const bytes = fromBase64(trimmed)
 		if (bytes.length >= 13 && bytes[0] === 0) return "encrypted"
 	} catch {
 		return "unknown"

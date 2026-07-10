@@ -26,7 +26,7 @@ export interface PxeOffscreenDeps {
 	 * WASM fallback preserved — production behavior).
 	 *
 	 * The extension shell uses this seam to pass a pre-built
-	 * `ProductionPxeFactory(undefined, { required, host, port })` when
+	 * `ProductionPxeFactory(undefined, { provingMode: "required", host, port })` when
 	 * the build is configured for required-mode (CI only). Keeping the
 	 * factory as the seam — rather than threading policy primitives —
 	 * lets this package stay decoupled from the extension's

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — release-pipeline-hardening</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Release-pipeline hardening</h1>
+  <p>When we shipped v0.24.0, the website (<code>nulo.sh</code>) stayed stuck on the old version and needed a manual Cloudflare poke to update. This plan fixes the actual cause so it can't happen again, adds a one-command "un-stick the website" button for emergencies, and turns on the auto-release helper that makes the whole thing hands-off next time.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>Light.</strong> Rubric: novelty LOW (the exact fix — an <code>always()</code> guard — is already used elsewhere in the same file), blast radius MODERATE (a mistake breaks the <em>release process</em>, not the shipped extension), irreversibility LOW (CI edits revert; the on/off switch is a repo variable), migration NONE, external coupling MODERATE (Cloudflare, but we don't change the hooks — only <em>when</em> they fire), security LOW (no new secrets or permissions). Zero HIGH dimensions → light. Codex audited it: <strong>conditional approve</strong>, and its most important catch (don't weaken the safety-net check) is already folded in.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: Fix the two deploy jobs so they stop skipping</h3>
+    <p>Two jobs that redeploy the website + faucet (<code>refresh-landing</code>, <code>deploy-faucet</code>) silently switch themselves off whenever an earlier optional job (the long network test) is skipped — which happens on every manual release. The one-line-each fix is the same <code>always()</code> guard the neighbouring jobs already use, plus a "don't fire if the run was cancelled" safety. We deliberately do <em>not</em> touch the <code>verify-live</code> checker (it's the smoke alarm that caught this bug — muffling it would hide the next one).</p>
+    <p class="muted">Proves itself by: actionlint passing + a walk-through of the on/off conditions (optionally, a real dispatch that shows the jobs run instead of skip).</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: A one-command "refresh the website" button</h3>
+    <p>A tiny new workflow you can run by hand (<code>gh workflow run refresh-landing.yml</code>) that pokes Cloudflare directly. If the site is ever stale for any reason, this fixes it in one command — no API token, no account ID, no dashboard hunting (all the things I had to do this time).</p>
+    <p class="muted">Proves itself by: actionlint passing + running it once triggers a real Cloudflare deploy.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: Update the runbook + flip the auto-release switch ON</h3>
+    <p>Rewrite the release runbook (the old manual "poke Cloudflare" steps are now obsolete) and turn on <code>AUTO_UNSTICK_ENABLED</code> — the helper that finishes a release automatically instead of needing a 45-second manual nudge. We flip it via a repo <em>variable</em> (an instant off-switch) and leave the code default OFF, so it stays reversible until one real release proves the automatic path.</p>
+    <p class="muted">Proves itself by: the stale runbook claim is gone (grep) + the variable reads <code>on</code> + actionlint passing.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>GitHub Actions has a quirk: if job C depends on job B, and B depends on a job A that got <em>skipped</em>, then C can skip too — unless C says <code>always()</code>. The person who built this pipeline already learned this and put <code>always()</code> on the build/upload jobs (there's even a comment about it), but the two final deploy jobs were missed. That's the whole bug. The fix is to make those two consistent with the rest.</p>
+
+  <h2>Open question for you</h2>
+  <ul>
+    <li><strong>How to validate Phase 1.</strong> You originally picked "live-repro dispatch." Codex correctly pointed out that dispatch isn't free — it <em>re-clobbers v0.24.0's release zips + notes and re-fires the deploy hooks</em> (a production republish, though low-risk since nothing pins v0.24.0 and the site stays on v0.24.0). So: <strong>(a)</strong> default to actionlint + a logic walk-through and let the next real <code>0.24.1</code> release prove it live for free, or <strong>(b)</strong> still run the live-repro now, accepting the republish. Recommendation: <strong>(a)</strong>.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: Phases 1-3 (core fix + break-glass workflow + docs/flip). Fetch-fallback stays excluded.</li>
+      <li>Confirm tier: <code>light</code>.</li>
+      <li>Pick the Phase-1 validation: <strong>(a) logic-review + next-release</strong> (recommended) or <strong>(b) + live-repro republish now</strong>.</li>
+      <li>Approve / conditionally approve / reject.</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>One drives the autonomous build session. <code>/goal</code> works turn-after-turn until a condition holds and survives resume; <code>/loop</code> re-fires on an interval. This plan's completion is fully transcript-observable (lint exit codes, a grep, a variable read), so <code>/goal</code> fits.</p>
+    <p class="warning">Use exactly ONE per session — they don't compose.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <pre><code>/goal All 3 phases marked ✓ in implementations-plan/release-pipeline-hardening/plan.md, each backed by its gate in the transcript: P1 — `bun run lint:actions` exit 0 + a printed logic-review of the refresh-landing/deploy-faucet guards; P2 — refresh-landing.yml passes `bun run lint:actions`; P3 — `grep -c "only fires on the \`push:main\`" CLAUDE.md` = 0 AND `gh variable get AUTO_UNSTICK_ENABLED` = on. For each phase print `LESSONS_FILE=implementations-plan/release-pipeline-hardening/lessons/phase-N.md`. Then `/code-review max --fix` applied + committed separately; codex post-impl audit done with high/critical addressed; `bun run lint:actions` exit 0; PR opened to dev. Never touch verify-live's always(); never weaken a gate.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop</h3>
+    <pre><code>/loop 15m Drive implementations-plan/release-pipeline-hardening forward. Never idle. Each firing: read plan.md + lessons/; `git status`; if a PR exists `gh pr view --json statusCheckRollup` (no --watch). Take the next pending phase, run its validation gate (actionlint / logic-review / grep+var), mark ✓ in plan.md, file lessons/phase-N.md and print its path. Stuck or a fork? `/codex xhigh`, decide, log it — never neutralize a gate, never touch verify-live's always(), never merge to main. All phases ✓ → `/code-review max --fix` (commit separately) → codex post-impl audit → open PR to dev → surface + stop.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="audit-codex.md">Codex audit</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

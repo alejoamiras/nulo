@@ -1,4 +1,5 @@
-import type { AccessLevel, DappPermissions, GrantedCapabilityRecord, RejectedCapabilityRecord } from "@nulo/wallet-bridge"
+import { z } from "zod"
+import { AccessLevel, type DappPermissions, type GrantedCapabilityRecord, type RejectedCapabilityRecord } from "@nulo/wallet-bridge"
 
 export const DAPP_SESSION_SERVICE_NAME = "dapp-session"
 
@@ -50,6 +51,33 @@ export type DappSession = {
 	capabilityGrants?: GrantedCapabilityRecord[]
 	capabilityRejections?: RejectedCapabilityRecord[]
 }
+
+const tolerantRecord = (v: unknown) => typeof v === "object" && v !== null
+
+/** Storage codec row schema. Exact on the access-gating fields (permissions,
+ *  accounts, confirmationLevel, chain/profile scoping — a drifted session row
+ *  is HIDDEN, so the dApp must re-request: fail-closed); tolerant on the deep
+ *  wallet-bridge capability records (display + re-grant bookkeeping). */
+export const DappSessionSchema: z.ZodType<DappSession> = z.object({
+	id: z.string(),
+	profileId: z.string(),
+	chainId: z.string(),
+	dappMetadata: z.object({
+		name: z.string().optional(),
+		description: z.string().optional(),
+		logo: z.string().optional(),
+		url: z.string().optional(),
+	}),
+	permissions: z.array(z.object({ methods: z.array(z.string()).optional(), events: z.array(z.string()).optional() })),
+	accounts: z.array(z.string()),
+	confirmationLevel: z.nativeEnum(AccessLevel),
+	expiry: z.number(),
+	verificationHash: z.string().optional(),
+	trustedVerification: z.boolean().optional(),
+	accountAliases: z.record(z.string(), z.string()).optional(),
+	capabilityGrants: z.array(z.custom<GrantedCapabilityRecord>(tolerantRecord)).optional(),
+	capabilityRejections: z.array(z.custom<RejectedCapabilityRecord>(tolerantRecord)).optional(),
+})
 
 export type Methods = {
 	getDappSessions(): DappSession[]

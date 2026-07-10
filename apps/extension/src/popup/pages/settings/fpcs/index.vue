@@ -13,6 +13,7 @@ import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 /** Utils */
 import { stringCompare } from "@/utils/string"
 import { UI_STORAGE_KEYS } from "@/popup/constants/storage-keys"
+import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
@@ -84,14 +85,14 @@ const handleDelete = (fpc) => {
 	cacheStore.confirm.callback = async () => {
 		await fpcService.deleteFpc(fpc.id)
 
-		const fpms = (await chrome.storage.local.get(FEE_METHOD_LS_KEY))[FEE_METHOD_LS_KEY] || {}
+		const fpms = (await storageLocalGet(FEE_METHOD_LS_KEY))[FEE_METHOD_LS_KEY] || {}
 		if (Object.keys(fpms).length) {
 			for (const [account, data] of Object.entries(fpms)) {
 				if (data.fpc?.id === fpc.id) {
 					delete fpms[account]
 				}
 			}
-			await chrome.storage.local.set({ [FEE_METHOD_LS_KEY]: fpms })
+			await storageLocalSet({ [FEE_METHOD_LS_KEY]: fpms })
 		}
 
 		openToast({ label: "FPC is deleted" })

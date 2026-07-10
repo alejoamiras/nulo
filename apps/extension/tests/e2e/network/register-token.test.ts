@@ -11,7 +11,7 @@ const hasConfig = aztecConfig !== undefined
  * registerToken (Nulo-custom RPC) — happy path.
  *
  * Validates:
- *   - The runtime schema patch in `wallet-sdk/nulo-schema-patch.ts` makes the
+ *   - The runtime schema patch in `@nulo/wallet-sdk-schema-patch` makes the
  *     method reachable through `@aztec/wallet-sdk`'s ExtensionWallet proxy.
  *   - The dispatcher routes `registerToken` through DappInteractionService.execute()
  *     (the BLOCKER fix from the opus/codex audits — previously it bypassed the

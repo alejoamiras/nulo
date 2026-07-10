@@ -346,6 +346,9 @@ jobs:
     name: refresh landing (Cloudflare Pages deploy hook)
     needs: [resolve, attach-assets]
     if: |
+      always() && !cancelled() &&
+      needs.resolve.result == 'success' &&
+      needs.attach-assets.result == 'success' &&
       needs.resolve.outputs.is_prerelease == 'false' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       github.event.inputs.dry_run != 'true'
@@ -375,6 +378,9 @@ jobs:
     name: deploy faucet (Cloudflare Pages deploy hook)
     needs: [resolve, attach-assets]
     if: |
+      always() && !cancelled() &&
+      needs.resolve.result == 'success' &&
+      needs.attach-assets.result == 'success' &&
       needs.resolve.outputs.is_prerelease == 'false' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       github.event.inputs.dry_run != 'true'

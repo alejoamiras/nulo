@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blueprint ELI5 — harden-quality arc</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;color:#222;line-height:1.6}
+  @media (prefers-color-scheme: dark){body{background:#1a1a1b;color:#e6e6e6}pre{background:#23232a!important}.phase{background:#202024!important}.approval{background:#16243a!important}.rec{background:#2a2410!important}a{color:#5aa1ff}}
+  h1{font-size:1.7rem;margin-bottom:.4rem}h2{font-size:1.25rem;margin-top:2.3rem}h3{font-size:1.02rem;margin-top:1.3rem;color:#444}
+  code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem}
+  pre{background:#f3f3f1;padding:1rem;border-radius:6px;overflow-x:auto;white-space:pre-wrap;word-break:break-word}
+  .phase{margin:1rem 0;padding:.8rem 1.1rem;border-left:3px solid #ccc;background:#fafafa;border-radius:4px}
+  .muted{color:#777;font-size:.9rem}
+  .rec{background:#fff8e1;border-left-color:#f0a020}
+  .warn{color:#b45309;font-weight:600}
+  .approval{background:#eef6ff;padding:1rem 1.2rem;border-left:3px solid #0366d6;margin:1.5rem 0;border-radius:4px}
+  a{color:#0366d6}
+</style>
+</head>
+<body>
+
+<h1>Harden-Quality Arc — meta-plan</h1>
+<p>An autonomous driver that takes the 22 maintainability findings from last run's quality audit and lands them, one at a time, on a throwaway <code>dev-quality</code> branch — re-checking each is still valid, planning it at the right depth, running it past Codex, implementing it, gating it on the <em>full</em> test suite (units + smoke + network), and squash-merging — until all 22 are done. At the end it opens a <code>dev-quality → dev</code> pull request <strong>for you to merge</strong> (it never merges that itself). No production users exist, so it's free to break backwards-compatibility as long as the app + every test still pass.</p>
+
+<div class="approval">
+<h2 style="margin-top:.2rem">✅ FINAL OUTCOME — arc complete, promote PR open for you to merge</h2>
+<p><strong>21 of 22 findings landed</strong> on <code>dev-quality</code> (HEAD <code>dc2a03e</code>). The promote <code>dev-quality → dev</code> PR is <strong>open and green — you merge it</strong> (the driver never does).</p>
+<ul>
+  <li><strong>Not landed — owner-gated (1):</strong> <strong>Q-13</strong> (backup cross-profile leak). Blueprinted only — its fix touches the <em>backup persisted shape</em> (a wipe-vs-tolerate call), a hard limit reserved for you. It's a maintainability + defense-in-depth finding; leaving it unlanded is <em>not</em> a regression (the gap it surfaced already exists on <code>dev</code> and isn't dApp-reachable).</li>
+  <li><strong>Both confidence passes agree it's safe:</strong> Codex → <em>SAFE TO PROMOTE</em>; fresh-Opus (adversarial) → <em>PROMOTE-WITH-FIXES</em>, and its one "blocking" fix — run the combined full-network sweep on the finished branch — <strong>is done and green</strong> (Quality + Smoke + Network e2e). Opus found no code regression and no permission-boundary slip.</li>
+  <li><strong>The security promise held, stated precisely:</strong> the frozen permission/crypto oracle <em>assertions</em> are byte-for-byte unchanged. The only change to any frozen test file is a single mechanical <em>import-path</em> line (from de-duplicating the schema-patch, Q-08) — the actual permission tables and crypto test-vectors are identical. (An earlier draft over-claimed "files never edited"; the honest version is "assertions never changed + one mechanical import re-point.")</li>
+  <li><strong>Deferred sub-parts (documented follow-ons, not silently dropped):</strong> the dApp-window shell (Q-14), the PXE descriptor table (Q-03), the storage-codec roll-out to the remaining stores + RPC/dApp/backup (Q-01), and typed argument tuples (Q-02 — blocked because it would need to edit the frozen oracle, i.e. your call). Plus one surfaced <em>product</em> race (lock right after a password change) — fixed test-side, product fix is yours.</li>
+</ul>
+<p class="muted">Full detail: the promote PR body + <a href="plan.md">plan.md</a> (P0–P21 with SHAs/run-ids) + <a href="./lessons/">lessons/</a>. The planning write-up below is preserved as the original blueprint.</p>
+</div>
+
+<div class="approval" style="border-left-color:#22863a;background:#f0fff4">
+<h2 style="margin-top:.2rem">✅ ROUND 2 — every deferral finished; the same PR now carries the whole arc</h2>
+<p><strong>Round 2 landed on the same <code>dev-quality</code> branch</strong> (code HEAD <code>f636f6c</code>, PRs #227–#244, each behind the same full gate). Everything the round-1 list above calls "deferred" or "owner-gated" is now DONE — with your six authorizations folded in:</p>
+<ul>
+  <li><strong>Q-13 backup leak — FIXED</strong> (your call #3): the token-balance backup export no longer ships other profiles' balances. Export-only; restoring old backups behaves exactly as before (your call #4). Plus every by-id read is now ownership-guarded fail-closed, with the profile-delete cascade proven intact by a standing 11-assertion isolation suite.</li>
+  <li><strong>The lock race — FIXED in product</strong>: locking right after a password change can no longer resurrect a logged-in UI. The lock always wins.</li>
+  <li><strong>dApp approval windows</strong>: the three approval popups now share one lifecycle shell, extracted against a 37-pin "frozen oracle" that passed byte-unchanged before AND after — including the deliberately-weird bits (dismissing an overlay rejects the request via the page-unload event; that's load-bearing and preserved).</li>
+  <li><strong>PXE surface</strong>: one flags table now owns which methods exist where; the three service-worker-only methods (including chain-purge) are <em>compile-time</em> excluded from the per-network handle a dApp-adjacent caller gets.</li>
+  <li><strong>Storage codecs</strong>: 11 stores now validate rows on read — a bad row is hidden, never deleted. The real-proving canary caught a real first-cut bug here (two Aztec enums are numbers, not objects) and blocked it from landing — the gates doing their job.</li>
+  <li><strong>Typed dispatch args (your call #5)</strong>: the ONE authorized edit to the frozen permission oracle happened — mechanically provable as add-only (zero deleted lines), with the exact diff pinned in PR #244's body for you to eyeball.</li>
+</ul>
+<p><strong>Before you merge #220, three things need you</strong> (details in <a href="WRAP-UP.md">WRAP-UP.md</a> §Round-2 owner action items): the promote's commitlint red (one over-long line in an old commit body — reword+force-push, or <code>--admin</code> the squash, which is clean here), the 1Password agent that died mid-run (a few unsigned commits; the squash is web-signed anyway), and the R6 oracle diff review. Three follow-on questions are parked for your ruling: the RPC/dApp decode layer, profile/session/config codecs, and the optional typed-tuple layer.</p>
+<p><strong>Both hostile confidence passes agree: ship-with-notes.</strong> Codex first flagged two "cross-profile" holes, then — shown the code — confirmed neither is reachable by a dApp and withdrew the block. A fresh independent reviewer agreed and caught one real arc side-effect (a rare bad token could blank the balance list); that's <strong>fixed</strong> (#245). Nothing left blocks the merge; the open questions above are yours to rule on.</p>
+<p class="muted">Round-2 detail: <a href="round-2/plan.md">round-2/plan.md</a> (R0–R7 with SHAs/run-ids) + <a href="round-2/lessons/">round-2/lessons/</a> + <a href="round-2/audit-codex.md">audit-codex.md</a> + <a href="round-2/audit-fable.md">audit-fable.md</a> + <a href="round-2/R3-characterization.md">the window characterization</a>.</p>
+</div>
+
+<h2>Why <code>mid</code> (for the plan itself)</h2>
+<p>The rubric scores the <em>driver</em>, not the arc's reach: novelty low (this is the exact pattern that shipped the batch-2 arc), blast-radius low (it writes only to a throwaway branch; the one irreversible step — the <code>dev</code> merge — is yours), irreversibility/migration/coupling all low. 0–1 high → <code>mid</code>. The risk lives in individual findings, so each one gets its OWN tier inside the loop: <code>light</code> for the 7 cheap wins, <code>mid</code> for the dedup/typing, <code>deep</code> for the cross-cutting + concurrency + privacy ones, <code>mega-deep</code> for the two trust-boundary rewrites (Q-01 decode layer, Q-02 typed dispatch).</p>
+
+<h2>How each finding is handled (the loop's per-finding cycle)</h2>
+<p>Re-verify it's still real → blueprint at its tier (with a Codex + a second-model consult) → implement on its own branch → fast checks after every edit → <code>/code-review</code> + a Codex post-impl audit → full gate (units + smoke + full network) → squash-merge into <code>dev-quality</code> → mark done + log lessons → next. A failed CI job is re-run once; still red → root-caused and fixed, never skipped or weakened.</p>
+
+<h2>The phases (P0 → P21)</h2>
+
+<div class="phase"><h3>P0 — Set up the branch</h3>
+<p>Make a fresh <code>dev-quality</code> off <code>dev</code> (after pruning a stale leftover reference from the last arc).</p>
+<p class="muted">Proves itself by: branch created + pushed, lint clean.</p></div>
+
+<div class="phase"><h3>P1–P7 — Cheap wins + prerequisites (<code>light</code>)</h3>
+<p>The hours-each, low-risk ones: shared hex/base64 encoders (Q-09, but leaving the crypto-recovery encoders alone — changing those would break cross-device recovery); route the profile service's 21 lock blocks through the helper it already has (Q-17, carefully — that lock is non-reentrant and sits next to secret-zeroizing code); one artifact catalog (Q-18); a typed PXE factory (Q-19); a schema for config (Q-20); tidy the host-API seam (Q-21); a docs/version sweep (Q-22).</p>
+<p class="muted">Proves itself by: touched-package units + smoke + full network, green, on each PR.</p></div>
+
+<div class="phase"><h3>P8–P13 — Structural dedup + typing (<code>mid</code>, except P12)</h3>
+<p>Error taxonomy as real types (Q-07); make the <code>AppServices</code> type stop lying about lazily-set clients (Q-16); design components use the real token unions + a shared severity palette (Q-10+Q-11); de-triplicate the schema patch (Q-08); a shared profile-scoped repository (Q-13 — bumped to <code>deep</code>: it's the cross-profile isolation boundary, so a bug there could leak one profile's data to another); collapse the ~1,300-line token-function copy-paste into one descriptor table (Q-12).</p>
+<p class="muted">Proves itself by: per-service units (Q-13 also a cross-profile isolation test) + smoke + full network.</p></div>
+
+<div class="phase"><h3>P14–P17 — Cross-cutting + concurrency (<code>deep</code>)</h3>
+<p>Branded types for secret bytes (Q-06 — NOT just types: it also reshapes how a wallet restores after the background worker dies, so it's gated on a restore round-trip); the operation + capability policy registries (Q-04+Q-05 — a trust boundary; this also fixes a real already-present gap where one capability type was silently unhandled); de-duplicate the popup/approval-window shells (Q-14); and a shared execution-slot template (Q-15 — the money/cancel path the last arc just hardened, so the ordering is preserved verbatim).</p>
+<p class="muted">Proves itself by: units + race tests + smoke + full network (the concurrent-confirm shard is the real gate for Q-15).</p></div>
+
+<div class="phase"><h3>P18–P20 — The architectural seams (<code>deep</code> / <code>mega-deep</code>), last</h3>
+<p>Generate the RPC/PXE surface from one table instead of restating it 7× (Q-03); a uniform decode layer so the wallet stops trusting its own wire (Q-01); and typed RPC dispatch at the dApp boundary (Q-02). These are the biggest, riskiest rewrites — done last, when everything else has settled.</p>
+<p class="muted">Proves itself by: the FROZEN authz oracle staying green-and-unedited + an adversarial-bypass test suite (a hostile fake-dApp that tries to widen scopes, skip grants, smuggle batches) — NOT the network test (it only drives a cooperative dApp and would stay green even if something opened up). Plus units + smoke + full network as a smoke signal.</p></div>
+
+<div class="phase"><h3>P21 — Final sweep + promote (no auto-merge)</h3>
+<p>One full-network sweep on the finished branch, a Codex + fresh-model confidence pass, then open the <code>dev-quality → dev</code> PR. <strong>It stops there — you merge it.</strong></p>
+<p class="muted">Proves itself by: full network 8/8 green on the branch head; both models say PROMOTE; promote PR open + green.</p></div>
+
+<h2>Human context</h2>
+<p>The two auditors (Codex + a top-tier Claude) agreed the single biggest danger isn't a typo — it's that the <strong>network test only exercises a friendly dApp</strong>, so a refactor that accidentally <em>loosens</em> a permission check at the dApp boundary would still go green and merge. The defense the plan builds in: a hand-frozen "authz oracle" test that the loop is <strong>forbidden to edit</strong> (editing it to pass = an instant halt-and-ask), plus a hostile-dApp test suite. That, not the network test, is what proves permissions didn't regress. The other recurring theme: "no production users" lets us skip data-migration, but it does <em>not</em> mean we can't break the wallet's own restore/backup tests — those are real contracts, so the secret-typing (Q-06) and decode-layer (Q-01) phases are gated on a restore round-trip.</p>
+
+<h2>Open questions</h2>
+<p>None outstanding — your three Phase-0 answers (all 22 in scope incl. the architectural 3; full network on every PR; fully autonomous) are folded in. The one thing the plan deliberately keeps gated <em>despite</em> "fully autonomous": a genuine permission-semantics / fail-open change, or any edit to a frozen security oracle, halts and surfaces — because that's a behavior change, not a refactor, and you'd want eyes on it.</p>
+
+<div class="approval">
+<h2>Approval decision needed from you</h2>
+<ul>
+  <li>Confirm scope (all 22, architectural-3 included) + the <code>mid</code> meta-tier.</li>
+  <li>Confirm the validation plan: full network e2e on every PR; trust-boundary phases additionally gated on the frozen oracle + adversarial-bypass suite (network e2e is only a smoke signal there).</li>
+  <li>Confirm the autonomy boundary: fully autonomous EXCEPT the hard-limit halts (merge to dev/main, publish, editing a frozen authz/crypto oracle, any permission-semantics/fail-open change, a backup-shape wipe-vs-tolerate decision, scope creep, infra CI thrash).</li>
+  <li>Approve / conditionally approve (with conditions) / reject (with blocking findings).</li>
+</ul>
+<p class="muted">Post-impl <code>/harden</code> isn't scheduled — this arc IS the quality pass; a security <code>/harden</code> could be considered separately before any release, but the trust-boundary work here gets adversarial audits inline.</p>
+</div>
+
+<section>
+<h2>Implementation seeds (draft — finalized after approval)</h2>
+<p>Two options; use exactly ONE per session — <span class="warn">they don't compose (setting one replaces the other).</span> Start the session in the permission mode you intend (a loop silently stalls on a permission prompt).</p>
+
+<div class="phase rec">
+<h3>Recommended: /loop (this is a long, multi-day arc; cron-reliable cadence; it's the driver that shipped batch-2)</h3>
+<pre><code>/loop 20m Drive implementations-plan/harden-quality-arc on dev-quality, FULLY AUTONOMOUS. Each firing: read plan.md + lessons/ (authoritative, not chat); git status; git log -5; if a finding PR is open, gh pr view --json statusCheckRollup (no --watch). Confirm you're on/synced to dev-quality. CI in flight? confirm progress (gh run watch up to 10m) + use the wait to prep the next finding. No finding in hand? take the next pending phase in plan.md order (P0->P21). STEP 1 ALWAYS: re-verify the finding still valid vs current dev-quality HEAD (grep the cited file:line in findings/consolidated.md); moot -> mark moot + evidence + advance; shrunk -> re-scope. Else blueprint at the finding's assigned tier (light/mid/deep/mega-deep) with /codex xhigh + an opus Plan subagent + a decision ledger -> findings/&lt;Q-NN&gt;/plan.md. Implement inline on qa/&lt;Q-NN&gt;-&lt;slug&gt; off latest dev-quality; behavior-preserving, no-backwards-compat OK; BUG-PIN surprising behavior; tests inline + deterministic. After each edit: bun run lint + typecheck:all + touched-package bun run test. Per-arc tail: /code-review max --fix -> codex post-impl audit -> fix loop. TRUST-BOUNDARY phases (P15/P18/P19/P20): the authz proof is the frozen oracle (method-descriptors.test.ts FROZEN_*, kept green + UNEDITED) + the adversarial-bypass suite, NOT the network e2e. Gate (every PR): units + smoke + FULL network (dispatch pr-network-e2e + pr-smoke-e2e + pr-quick via workflow_dispatch on the branch). Green = squash-merge (plain gh pr merge --squash --delete-branch, NO --admin) into dev-quality; mark done + SHA + run-id in plan.md; file lessons/&lt;Q-NN&gt;.md; print LESSONS_FILE=...; advance. After any registry-cluster phase, re-run P15's adversarial-bypass suite + frozen oracle vs the new HEAD. RED policy: re-run a failed job ONCE; green->proceed; still red->root-cause+FIX. FORBIDDEN: retry-until-green, skip/.skip/quarantine/weaken a test, merge over red, introduce a flake. HARD LIMITS (halt+surface): merge dev-quality->dev/main; publish/deploy; edit a frozen authz/crypto oracle; any dApp-permission-semantics or fail-open/closed change not already pinned; a session/backup persisted-shape break needing wipe-vs-tolerate; scope beyond the 22 findings; infra CI thrash. Stuck/decision? /codex xhigh, act on the stronger argument, log it. Same step failed 5x? stop, reassess with codex. All phases done? run P21 (full-network sweep on dev-quality HEAD; codex+fresh-opus confidence pass; WRAP-UP + eli5; open the dev-quality->dev promote PR, title &lt;=93 chars) and STOP -- the owner merges. Keep the ASCII P0..P21 checklist visible each firing.</code></pre>
+</div>
+
+<h3>Alternative: /goal (completion is transcript-observable)</h3>
+<pre><code>/goal All phases P0..P21 marked done in implementations-plan/harden-quality-arc/plan.md (the file headers, not chat), each backed by its validation gate reported passing in the transcript (units + smoke + FULL network; trust-boundary phases also show the frozen oracle green-UNEDITED + the adversarial-bypass suite passing); each finding's LESSONS_FILE printed; per finding /code-review max --fix applied+committed + codex post-impl audit with high/critical addressed; the frozen authz/crypto oracles NEVER edited; a final full-network sweep green on dev-quality HEAD; the dev-quality->dev promote PR opened (NOT merged). bun run test + bun run lint exit 0. HARD LIMITS hold (no dev/main merge, no publish, no oracle edits, no fail-open/permission-semantics change, no scope creep) -- halt+surface if hit.</code></pre>
+</section>
+
+<p class="muted"><a href="plan.md">Full plan.md</a> · <a href="audit-codex.md">codex audit</a> · <a href="audit-fable.md">opus audit</a> · <a href="./lessons/">lessons</a> · findings: <a href="../../audit/quality/2026-06-29-ext-ultra/report.md">harden report</a></p>
+</body>
+</html>

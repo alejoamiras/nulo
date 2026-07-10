@@ -86,10 +86,10 @@ await createPxeOffscreen({
 	// strips it from prod. The controllable barrier lives SW-side (the
 	// offscreen has no chrome.storage); see ExecutionCoordinator's ProofGate.
 	factory: E2E_PROVERLESS
-		? new ProductionPxeFactory(undefined, { proverless: true })
+		? new ProductionPxeFactory(undefined, { provingMode: "proverless" })
 		: ACCELERATOR_REQUIRED
 			? new ProductionPxeFactory(undefined, {
-					required: true,
+					provingMode: "required",
 					host: ACCELERATOR_HOST,
 					port: ACCELERATOR_PORT,
 				})

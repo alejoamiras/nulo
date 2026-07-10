@@ -12,7 +12,7 @@ declare global {
   const FEE_JUICE_PRICING: typeof import('../utils/fee-estimation').FEE_JUICE_PRICING
   const FEE_JUICE_USD_RATE: typeof import('../utils/fee-estimation').FEE_JUICE_USD_RATE
   const FEE_METHODS: typeof import('../utils/tx-enrichment').FEE_METHODS
-  const THEME_HINT_KEY: typeof import('../utils/general.js').THEME_HINT_KEY
+  const THEME_HINT_KEY: typeof import('../utils/general').THEME_HINT_KEY
   const TOAST_DURATION: typeof import('../composables/toast.js').TOAST_DURATION
   const balanceFormatted: typeof import('../utils/amount').balanceFormatted
   const browser: typeof import('webextension-polyfill')
@@ -32,14 +32,14 @@ declare global {
   const confirmationPolicies: typeof import('../utils/confirmation-policies').confirmationPolicies
   const createApp: typeof import('vue').createApp
   const customRef: typeof import('vue').customRef
-  const debounce: typeof import('../utils/general.js').debounce
+  const debounce: typeof import('../utils/general').debounce
   const decompressData: typeof import('../utils/files').decompressData
   const defineAsyncComponent: typeof import('vue').defineAsyncComponent
   const defineComponent: typeof import('vue').defineComponent
   const detectBackupType: typeof import('../utils/full-backup-helpers').detectBackupType
   const downloadFile: typeof import('../utils/files').downloadFile
   const effectScope: typeof import('vue').effectScope
-  const ensurePermissions: typeof import('../utils/general.js').ensurePermissions
+  const ensurePermissions: typeof import('../utils/general').ensurePermissions
   const feeToUsd: typeof import('../utils/fee-estimation').feeToUsd
   const formatBaseUnits: typeof import('../utils/amount').formatBaseUnits
   const formatCallSummary: typeof import('../utils/tx-enrichment').formatCallSummary
@@ -67,7 +67,7 @@ declare global {
   const initTransactionService: typeof import('../utils/core').initTransactionService
   const inject: typeof import('vue').inject
   const isBackgroundConnected: typeof import('../utils/core').isBackgroundConnected
-  const isPrefersDarkScheme: typeof import('../utils/general.js').isPrefersDarkScheme
+  const isPrefersDarkScheme: typeof import('../utils/general').isPrefersDarkScheme
   const isProxy: typeof import('vue').isProxy
   const isReactive: typeof import('vue').isReactive
   const isReadonly: typeof import('vue').isReadonly
@@ -99,7 +99,7 @@ declare global {
   const parseAmountToBaseUnits: typeof import('../utils/amount').parseAmountToBaseUnits
   const parseContactsExport: typeof import('../utils/contacts-export-format').parseContactsExport
   const parseTransferIntent: typeof import('../utils/transfer-intent').parseTransferIntent
-  const persistThemeHint: typeof import('../utils/general.js').persistThemeHint
+  const persistThemeHint: typeof import('../utils/general').persistThemeHint
   const pickFile: typeof import('../utils/files').pickFile
   const pickPrimaryMethod: typeof import('../utils/tx-enrichment').pickPrimaryMethod
   const provide: typeof import('vue').provide
@@ -259,7 +259,7 @@ declare module 'vue' {
     readonly FEE_JUICE_PRICING: UnwrapRef<typeof import('../utils/fee-estimation')['FEE_JUICE_PRICING']>
     readonly FEE_JUICE_USD_RATE: UnwrapRef<typeof import('../utils/fee-estimation')['FEE_JUICE_USD_RATE']>
     readonly FEE_METHODS: UnwrapRef<typeof import('../utils/tx-enrichment')['FEE_METHODS']>
-    readonly THEME_HINT_KEY: UnwrapRef<typeof import('../utils/general.js')['THEME_HINT_KEY']>
+    readonly THEME_HINT_KEY: UnwrapRef<typeof import('../utils/general')['THEME_HINT_KEY']>
     readonly TOAST_DURATION: UnwrapRef<typeof import('../composables/toast.js')['TOAST_DURATION']>
     readonly balanceFormatted: UnwrapRef<typeof import('../utils/amount')['balanceFormatted']>
     readonly browser: UnwrapRef<typeof import('webextension-polyfill')>
@@ -279,14 +279,14 @@ declare module 'vue' {
     readonly confirmationPolicies: UnwrapRef<typeof import('../utils/confirmation-policies')['confirmationPolicies']>
     readonly createApp: UnwrapRef<typeof import('vue')['createApp']>
     readonly customRef: UnwrapRef<typeof import('vue')['customRef']>
-    readonly debounce: UnwrapRef<typeof import('../utils/general.js')['debounce']>
+    readonly debounce: UnwrapRef<typeof import('../utils/general')['debounce']>
     readonly decompressData: UnwrapRef<typeof import('../utils/files')['decompressData']>
     readonly defineAsyncComponent: UnwrapRef<typeof import('vue')['defineAsyncComponent']>
     readonly defineComponent: UnwrapRef<typeof import('vue')['defineComponent']>
     readonly detectBackupType: UnwrapRef<typeof import('../utils/full-backup-helpers')['detectBackupType']>
     readonly downloadFile: UnwrapRef<typeof import('../utils/files')['downloadFile']>
     readonly effectScope: UnwrapRef<typeof import('vue')['effectScope']>
-    readonly ensurePermissions: UnwrapRef<typeof import('../utils/general.js')['ensurePermissions']>
+    readonly ensurePermissions: UnwrapRef<typeof import('../utils/general')['ensurePermissions']>
     readonly feeToUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeToUsd']>
     readonly formatBaseUnits: UnwrapRef<typeof import('../utils/amount')['formatBaseUnits']>
     readonly formatCallSummary: UnwrapRef<typeof import('../utils/tx-enrichment')['formatCallSummary']>
@@ -314,7 +314,7 @@ declare module 'vue' {
     readonly initTransactionService: UnwrapRef<typeof import('../utils/core')['initTransactionService']>
     readonly inject: UnwrapRef<typeof import('vue')['inject']>
     readonly isBackgroundConnected: UnwrapRef<typeof import('../utils/core')['isBackgroundConnected']>
-    readonly isPrefersDarkScheme: UnwrapRef<typeof import('../utils/general.js')['isPrefersDarkScheme']>
+    readonly isPrefersDarkScheme: UnwrapRef<typeof import('../utils/general')['isPrefersDarkScheme']>
     readonly isProxy: UnwrapRef<typeof import('vue')['isProxy']>
     readonly isReactive: UnwrapRef<typeof import('vue')['isReactive']>
     readonly isReadonly: UnwrapRef<typeof import('vue')['isReadonly']>
@@ -346,7 +346,7 @@ declare module 'vue' {
     readonly parseAmountToBaseUnits: UnwrapRef<typeof import('../utils/amount')['parseAmountToBaseUnits']>
     readonly parseContactsExport: UnwrapRef<typeof import('../utils/contacts-export-format')['parseContactsExport']>
     readonly parseTransferIntent: UnwrapRef<typeof import('../utils/transfer-intent')['parseTransferIntent']>
-    readonly persistThemeHint: UnwrapRef<typeof import('../utils/general.js')['persistThemeHint']>
+    readonly persistThemeHint: UnwrapRef<typeof import('../utils/general')['persistThemeHint']>
     readonly pickFile: UnwrapRef<typeof import('../utils/files')['pickFile']>
     readonly pickPrimaryMethod: UnwrapRef<typeof import('../utils/tx-enrichment')['pickPrimaryMethod']>
     readonly provide: UnwrapRef<typeof import('vue')['provide']>

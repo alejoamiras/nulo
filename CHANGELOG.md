@@ -1,5 +1,73 @@
 # Changelog
 
+## [0.24.0](https://github.com/alejoamiras/nulo/compare/v0.23.0...v0.24.0) (2026-07-02)
+
+
+### Features
+
+* **ci:** derive smoke/network/build gates from the dependency graph + guard test ([#181](https://github.com/alejoamiras/nulo/issues/181)) ([ee885cb](https://github.com/alejoamiras/nulo/commit/ee885cbdb0da552b3f0558d80499e8f4793cc21f))
+* **design:** light theme — repair the broken extension theme + add faucet toggle ([#179](https://github.com/alejoamiras/nulo/issues/179)) ([c3db255](https://github.com/alejoamiras/nulo/commit/c3db255cd2e8e512b195b7241f30d0afa832d2bb))
+* **faucet:** adopt @nulo/design primitives app-wide (resolver + Flex swaps) ([#147](https://github.com/alejoamiras/nulo/issues/147)) ([1741356](https://github.com/alejoamiras/nulo/commit/17413567524b4a2201fd79ecb202a1cdb7f5c1e3))
+* **release:** near-one-click dev→main releases (auto-unstick, verify-live, sync, runbook) ([#149](https://github.com/alejoamiras/nulo/issues/149)) ([5aa8f8a](https://github.com/alejoamiras/nulo/commit/5aa8f8a1ca4e03c4d00732baac9c924c24d4e77e))
+
+
+### Bug Fixes
+
+* **ci:** rename required-check aggregators to unique names (main) ([0f8ae25](https://github.com/alejoamiras/nulo/commit/0f8ae25086f431c3c0706d397fe486cf1165d5dd))
+* **ci:** rename required-check aggregators to unique names (main) ([#173](https://github.com/alejoamiras/nulo/issues/173)) ([17408da](https://github.com/alejoamiras/nulo/commit/17408da69cfcef824a4b292104a7644c9110fb83))
+* **ci:** rename required-check aggregators to unique names so the merge gate can pass ([#170](https://github.com/alejoamiras/nulo/issues/170)) ([92df350](https://github.com/alejoamiras/nulo/commit/92df350074a2fda177f28c6ebd1d7b67619d4f2b))
+* **ci:** repoint.sh finalize drops only the phantoms, preserving other checks ([#177](https://github.com/alejoamiras/nulo/issues/177)) ([5e3ea4e](https://github.com/alejoamiras/nulo/commit/5e3ea4e4e22260b64a067b88952b985398d03cc4))
+* **ci:** skip commitlint on the main→dev sync PR (dev side) ([#223](https://github.com/alejoamiras/nulo/issues/223)) ([5d34da6](https://github.com/alejoamiras/nulo/commit/5d34da68901947f5afcca2361eaf1eb120d2b1cd))
+* **design:** raise dark muted-text to WCAG-AA + drop dead --btn-* tokens ([#180](https://github.com/alejoamiras/nulo/issues/180)) ([a1351c6](https://github.com/alejoamiras/nulo/commit/a1351c6ad02246b4bd3737bcbb40508ef05a30c9))
+* **faucet:** add completion receipt + New Fuel button to the Fuel flow ([#150](https://github.com/alejoamiras/nulo/issues/150)) ([64fa7ab](https://github.com/alejoamiras/nulo/commit/64fa7ab5f06d1bda735b291f322d74c227be9262))
+* **faucet:** hero the bridged tokens on the receipt, demote Fee Juice ([#192](https://github.com/alejoamiras/nulo/issues/192)) ([cb9f1ff](https://github.com/alejoamiras/nulo/commit/cb9f1ffed22dd212773ae70dc19628451cde5721))
+* **faucet:** route L1 reads through the connected wallet provider ([#187](https://github.com/alejoamiras/nulo/issues/187)) ([db0d745](https://github.com/alejoamiras/nulo/commit/db0d745070fb144c31fd8ce1039c2eaf6ef81948))
+* **faucet:** surface a reverted fee-asset approve as an error ([#141](https://github.com/alejoamiras/nulo/issues/141)) ([e737869](https://github.com/alejoamiras/nulo/commit/e737869b9fb45ee6c6a57ec725bf323ecf1017f2))
+* **release:** correct prerelease rc versioning (rc.0) + merge-based main→dev sync ([#221](https://github.com/alejoamiras/nulo/issues/221)) ([1d1c01e](https://github.com/alejoamiras/nulo/commit/1d1c01e10f54d29cf8dfedb25cfdf437b1ed84f5))
+* **release:** sign the sync manifest re-baseline via the Contents API (App token) ([#228](https://github.com/alejoamiras/nulo/issues/228)) ([5a0d8b5](https://github.com/alejoamiras/nulo/commit/5a0d8b5ef9049d80d063c9e727ea2d953ce57f7e))
+* **release:** single-source verify-live chain-guard from the faucet constant ([#249](https://github.com/alejoamiras/nulo/issues/249)) ([2a27a9c](https://github.com/alejoamiras/nulo/commit/2a27a9c4f442ff8f6d1f19b325b8045dfd88cdeb))
+
+
+### Refactoring
+
+* complete harden-quality arc (8 contained dedups + Q8 fix + purge test) ([#148](https://github.com/alejoamiras/nulo/issues/148)) ([b068393](https://github.com/alejoamiras/nulo/commit/b0683931e362c399404146a17f0c32912fc30683))
+* **extension:** quality-arc batch 2 ([#160](https://github.com/alejoamiras/nulo/issues/160)) ([ea2d5a4](https://github.com/alejoamiras/nulo/commit/ea2d5a4391d9dfdc1c399678d276994d97a996fc))
+* **repo:** restructure to apps/ + packages/ + contracts/ layout ([#186](https://github.com/alejoamiras/nulo/issues/186)) ([8e919f6](https://github.com/alejoamiras/nulo/commit/8e919f6af66834df7b3dd26f62fc7ae8ea3b3036))
+
+
+### CI
+
+* **merge:** add ready_for_review trigger so draft→ready PRs re-run CI ([#168](https://github.com/alejoamiras/nulo/issues/168)) ([5acd6df](https://github.com/alejoamiras/nulo/commit/5acd6dfe569121622648f9d5957c4d1839b517d5))
+
+
+### Misc
+
+* **deps:** bump bun 1.3.14 + node-polyfills 0.28.0, restore min-age gate ([#166](https://github.com/alejoamiras/nulo/issues/166)) ([e8c4191](https://github.com/alejoamiras/nulo/commit/e8c4191bddd4b40b4b580a464c3c31365317c8eb))
+* **deps:** bump GitHub Actions majors + concurrently 10 ([#174](https://github.com/alejoamiras/nulo/issues/174)) ([f7bfcb7](https://github.com/alejoamiras/nulo/commit/f7bfcb74529ef1c27ed28ff74c5545cef86db8f9))
+* **deps:** dedupe vitest onto vite 8 + drop dead vue-devtools chain ([#169](https://github.com/alejoamiras/nulo/issues/169)) ([3e392be](https://github.com/alejoamiras/nulo/commit/3e392be4b9f4400b20f530f6d24522e047a2dbe7))
+* **deps:** refresh all in-range dependencies + biome 2.5 fallout ([#178](https://github.com/alejoamiras/nulo/issues/178)) ([5e1362f](https://github.com/alejoamiras/nulo/commit/5e1362f01337fe3bb460bef5265e86ded642b0f2))
+* **dev:** release 0.24.0-rc.0 ([#189](https://github.com/alejoamiras/nulo/issues/189)) ([103b8e3](https://github.com/alejoamiras/nulo/commit/103b8e3bd1f0784ea3dabe4e69beb6252a6ebbbc))
+* re-baseline dev to 0.23.0 after the stable cut ([#146](https://github.com/alejoamiras/nulo/issues/146)) ([c1a2712](https://github.com/alejoamiras/nulo/commit/c1a2712cac03b31cfcef56af4fb8230f21859b07))
+* sync main → dev — bring [#173](https://github.com/alejoamiras/nulo/issues/173) (required-check rename) to satisfy promote strict:true ([d14ab14](https://github.com/alejoamiras/nulo/commit/d14ab149e2a75f92f1ff8918fbf48acab32cd932))
+* sync main → dev — bring [#173](https://github.com/alejoamiras/nulo/issues/173) to satisfy the promote's strict:true ([#251](https://github.com/alejoamiras/nulo/issues/251)) ([f4f8061](https://github.com/alejoamiras/nulo/commit/f4f8061568c531581d50809c87eb5521c4fc5ed7))
+* sync main → dev — restore v0.23.0 release-commit ancestry (prerelease anchor) ([1623ec2](https://github.com/alejoamiras/nulo/commit/1623ec24a250c362a38ea07c8518527de485ecd1))
+* sync main → dev — restore v0.23.0 release-commit ancestry (prerelease anchor) ([#224](https://github.com/alejoamiras/nulo/issues/224)) ([32b490b](https://github.com/alejoamiras/nulo/commit/32b490b8ccb383886301afe69e8a6721f99dd966))
+
+
+### Docs
+
+* **ci:** correct required-check matrix (dev vs main) + the --admin/signing reason ([#165](https://github.com/alejoamiras/nulo/issues/165)) ([3a70ff8](https://github.com/alejoamiras/nulo/commit/3a70ff8d9a7c411f58f82ca4ffd745d5aaaa1396))
+* **ci:** correct required-check matrix to the new bare names + two-gates --admin truth ([#176](https://github.com/alejoamiras/nulo/issues/176)) ([4199245](https://github.com/alejoamiras/nulo/commit/4199245a9d039e48584a58acd51d59a98753f198))
+* **ci:** mark paths-filter-negation-fix complete + index it ([#185](https://github.com/alejoamiras/nulo/issues/185)) ([8968b40](https://github.com/alejoamiras/nulo/commit/8968b40f0fa9e7b1fade256e6f704dfed72f7d23))
+* **ci:** required-check rollout lessons + repoint helper ([#171](https://github.com/alejoamiras/nulo/issues/171)) ([d23fca7](https://github.com/alejoamiras/nulo/commit/d23fca7328aa6ae149d98481b9ddf57ac63c44c8))
+* **release:** prerelease-fix complete + fix prerelease publish --ref (dev not main) ([#226](https://github.com/alejoamiras/nulo/issues/226)) ([9d04629](https://github.com/alejoamiras/nulo/commit/9d04629e2243d2acfd6ab6b8c097afe007f20774))
+* **release:** record prerelease-fix Phase 2 (zero-admin) + Phase 3 progress ([#225](https://github.com/alejoamiras/nulo/issues/225)) ([d3b0f24](https://github.com/alejoamiras/nulo/commit/d3b0f24d9327def875a675e855ed97fe90ca7b1b))
+
+
+### Dependencies
+
+* **aztec:** bump to 5.0.0-rc.2 + coupled testnet redeploy (portals, fpc, chainid, v9) ([#248](https://github.com/alejoamiras/nulo/issues/248)) ([bffb757](https://github.com/alejoamiras/nulo/commit/bffb7572bdba8b3dd5996d112dd88e4c0f4cb00b))
+
 ## [0.24.0-rc.0](https://github.com/alejoamiras/nulo/compare/v0.23.0...v0.24.0-rc.0) (2026-07-01)
 
 

@@ -11,12 +11,20 @@ import { ProfileRepository } from "./repository"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getEntropy, getMnemonic } from "@nulo/wallet-core/utils"
-import { EncryptionKey, PasswordSecretBox, zeroize } from "@nulo/wallet-crypto"
+import {
+	asBase64Ciphertext,
+	asMasterSecretBytes,
+	EncryptionKey,
+	type MasterSecretBytes,
+	type Passhash,
+	PasswordSecretBox,
+	zeroize,
+} from "@nulo/wallet-crypto"
 import { PasskeyService } from "@/wallet/services/passkey/service"
 import { PasskeyRecoveryCoordinator, type PasskeyRecovery } from "./passkey-recovery-coordinator"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import { SessionManager } from "./session-manager"
-import { PROFILE_SERVICE_NAME, type ProfileInfo, type Profile, type Events, type Methods } from "./spec"
+import { PROFILE_SERVICE_NAME, type ProfileInfo, type Profile, type Events, type Methods, type RestoreSecret } from "./spec"
 
 export * from "./spec"
 
@@ -77,7 +85,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * to get the same secret would be a UX regression — we cache the recovery
 	 * secret here in memory only, never persisted, cleared on SW restart.
 	 */
-	private readonly pendingRestoreSecrets = new Map<string, Uint8Array<ArrayBuffer>>()
+	private readonly pendingRestoreSecrets = new Map<string, MasterSecretBytes>()
 
 	/**
 	 * @param browserApi Optional. Tests pass `FakeBrowserApi` so the
@@ -131,22 +139,18 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			(id) => this.repo.get(id),
 			(passhash, profile) =>
 				this.secretBox.unsealWithPasshash(passhash, {
-					guard: profile.guard,
-					secret: profile.secret,
+					guard: asBase64Ciphertext(profile.guard),
+					secret: asBase64Ciphertext(profile.secret),
 				}),
 		)
 	}
 
 	public async getActiveProfile(): Promise<ProfileInfo | undefined> {
 		await this.ensureInitialized()
-		try {
-			await this.lock.enter()
-
+		return this.runExclusive(async () => {
 			const session = await this.sessionManager.getActive()
 			return session ? this.getProfileInfo(session.profile) : undefined
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async getProfiles(): Promise<ProfileInfo[]> {
@@ -156,29 +160,28 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 	public async createProfile(name: string, password: string): Promise<ProfileInfo> {
 		await this.ensureInitialized()
-		const secret = Fr.random().toBuffer() as Buffer<ArrayBuffer>
+		const secret = asMasterSecretBytes(Fr.random().toBuffer() as Buffer<ArrayBuffer>)
 		const { passhash, encrypted } = await this.secretBox.seal(password, secret)
 		try {
-			await this.lock.enter()
+			return await this.runExclusive(async () => {
+				const id = await this.repo.generateUniqueId()
 
-			const id = await this.repo.generateUniqueId()
+				const profile: Profile = {
+					id,
+					name,
+					type: "password",
+					guard: encrypted.guard,
+					secret: encrypted.secret,
+				}
+				await this.repo.set(id, profile)
 
-			const profile: Profile = {
-				id,
-				name,
-				type: "password",
-				guard: encrypted.guard,
-				secret: encrypted.secret,
-			}
-			await this.repo.set(id, profile)
+				this.emit("onProfileAdded", this.getProfileInfo(profile))
 
-			this.emit("onProfileAdded", this.getProfileInfo(profile))
+				await this.sessionManager.open(profile, secret, passhash)
 
-			await this.sessionManager.open(profile, secret, passhash)
-
-			return profile
+				return profile
+			})
 		} finally {
-			this.lock.leave()
 			// zero secret + passhash after sessionManager has copied
 			// what it needs (Fr.fromBuffer copies; passhash is base64-
 			// encoded into Session). Done after lock release so a thrown
@@ -198,9 +201,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		await this.ensureInitialized()
 
 		// Phase 1 — snapshot profile under lock.
-		let snapshot: Profile & { type: "password" }
-		try {
-			await this.lock.enter()
+		const snapshot = await this.runExclusive(async () => {
 			const fetched = await this.repo.get(id)
 			if (!fetched) {
 				throw new Error("Invalid profile id")
@@ -208,16 +209,14 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (fetched.type === "passkey") {
 				throw new Error("Profile requires passkey")
 			}
-			snapshot = fetched
-		} finally {
-			this.lock.leave()
-		}
+			return fetched
+		})
 
 		// Phase 2 — crypto UNLOCKED. Caller pays ~1s PBKDF2 but the rest of
 		// the RPC surface stays responsive.
 		const secret = await this.secretBox.unseal(password, {
-			guard: snapshot.guard,
-			secret: snapshot.secret,
+			guard: asBase64Ciphertext(snapshot.guard),
+			secret: asBase64Ciphertext(snapshot.secret),
 		})
 		if (!secret) {
 			// Can't tell wrong-password from storage corruption from this single
@@ -229,25 +228,25 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 		// Phase 3 — re-enter lock, revalidate, open session.
 		try {
-			await this.lock.enter()
-			const current = await this.repo.get(id)
-			if (!current) {
-				throw new Error("Invalid profile id")
-			}
-			if (current.type !== "password") {
-				throw new Error("Profile requires passkey")
-			}
-			if (current.guard !== snapshot.guard || current.secret !== snapshot.secret) {
-				// Password changed under us. `secret` is for the OLD ciphertext;
-				// the passhash wouldn't unseal the current encrypted blob, so
-				// SessionManager.restore would silently close on the next SW
-				// suspension. Refuse and let the user retry with the new password.
-				throw new InvalidPasswordError()
-			}
-			await this.sessionManager.open(current, secret, passhash)
-			return this.getProfileInfo(current)
+			return await this.runExclusive(async () => {
+				const current = await this.repo.get(id)
+				if (!current) {
+					throw new Error("Invalid profile id")
+				}
+				if (current.type !== "password") {
+					throw new Error("Profile requires passkey")
+				}
+				if (current.guard !== snapshot.guard || current.secret !== snapshot.secret) {
+					// Password changed under us. `secret` is for the OLD ciphertext;
+					// the passhash wouldn't unseal the current encrypted blob, so
+					// SessionManager.restore would silently close on the next SW
+					// suspension. Refuse and let the user retry with the new password.
+					throw new InvalidPasswordError()
+				}
+				await this.sessionManager.open(current, secret, passhash)
+				return this.getProfileInfo(current)
+			})
 		} finally {
-			this.lock.leave()
 			// zero buffers after sessionManager has copied. Runs on
 			// success AND on the revalidate-failure throw path.
 			zeroize(secret)
@@ -279,33 +278,33 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		const recovery = await this.acquireRecovery({ ceremony: "create", userHandle: id, name }, credentialData)
 
 		try {
-			await this.lock.enter()
-			// Re-verify under the lock: another writer could have claimed
-			// the id during the WebAuthn prompt. If so, throw a retryable
-			// `ProfileIdConflictError` — the previous behavior silently
-			// regenerated `id` here, which left the WebAuthn credential's
-			// `userHandle` (= the OLD id) out of sync with the persisted
-			// profile id. Caller is responsible for re-running the entire
-			// flow with a fresh id (and a fresh WebAuthn ceremony).
-			if (await this.repo.contains(id)) {
-				throw new ProfileIdConflictError()
-			}
+			return await this.runExclusive(async () => {
+				// Re-verify under the lock: another writer could have claimed
+				// the id during the WebAuthn prompt. If so, throw a retryable
+				// `ProfileIdConflictError` — the previous behavior silently
+				// regenerated `id` here, which left the WebAuthn credential's
+				// `userHandle` (= the OLD id) out of sync with the persisted
+				// profile id. Caller is responsible for re-running the entire
+				// flow with a fresh id (and a fresh WebAuthn ceremony).
+				if (await this.repo.contains(id)) {
+					throw new ProfileIdConflictError()
+				}
 
-			const profile: Profile = {
-				id,
-				name,
-				type: "passkey",
-				credentialId: recovery.credentialId,
-			}
-			await this.repo.set(id, profile)
+				const profile: Profile = {
+					id,
+					name,
+					type: "passkey",
+					credentialId: recovery.credentialId,
+				}
+				await this.repo.set(id, profile)
 
-			this.emit("onProfileAdded", this.getProfileInfo(profile))
+				this.emit("onProfileAdded", this.getProfileInfo(profile))
 
-			await this.sessionManager.open(profile, recovery.secret)
+				await this.sessionManager.open(profile, recovery.secret)
 
-			return profile
+				return profile
+			})
 		} finally {
-			this.lock.leave()
 			// zero recovery secret after sessionManager copied it.
 			zeroize(recovery.secret)
 		}
@@ -319,25 +318,20 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 *      the profile was deleted or the credential rotated under us. */
 	public async getPasskeyCredentialId(id: string): Promise<string> {
 		await this.ensureInitialized()
-		try {
-			await this.lock.enter()
+		return this.runExclusive(async () => {
 			const fetched = await this.repo.get(id)
 			if (!fetched) throw new Error("Invalid profile id")
 			if (fetched.type !== "passkey") throw new Error("Profile requires password")
 			if (!fetched.credentialId) throw new Error("Missing credentialId")
 			return fetched.credentialId
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async unlockPasskeyProfile(id: string, credentialData?: PasskeyCredentialData): Promise<ProfileInfo> {
 		await this.ensureInitialized()
 
 		// Phase 1 — snapshot profile under lock.
-		let snapshot: Profile & { type: "passkey" }
-		try {
-			await this.lock.enter()
+		const snapshot = await this.runExclusive(async () => {
 			const fetched = await this.repo.get(id)
 			if (!fetched) {
 				throw new Error("Invalid profile id")
@@ -348,10 +342,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (!fetched.credentialId) {
 				throw new Error("Missing credentialId")
 			}
-			snapshot = fetched
-		} finally {
-			this.lock.leave()
-		}
+			return fetched
+		})
 
 		// Phase 2 — WebAuthn prompt, UNLOCKED.
 		// PATH A: caller already ran the ceremony; we just materialize the
@@ -374,23 +366,23 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 		// Phase 3 — re-enter lock, revalidate credentialId, open session.
 		try {
-			await this.lock.enter()
-			const current = await this.repo.get(id)
-			if (!current) {
-				throw new Error("Invalid profile id")
-			}
-			if (current.type !== "passkey") {
-				throw new Error("Profile requires password")
-			}
-			if (current.credentialId !== snapshot.credentialId) {
-				// Credential rotated (delete + reimport with different passkey) during
-				// prompt. Refuse rather than open a session bound to the old id.
-				throw new Error("Invalid profile id")
-			}
-			await this.sessionManager.open(current, recovery.secret)
-			return this.getProfileInfo(current)
+			return await this.runExclusive(async () => {
+				const current = await this.repo.get(id)
+				if (!current) {
+					throw new Error("Invalid profile id")
+				}
+				if (current.type !== "passkey") {
+					throw new Error("Profile requires password")
+				}
+				if (current.credentialId !== snapshot.credentialId) {
+					// Credential rotated (delete + reimport with different passkey) during
+					// prompt. Refuse rather than open a session bound to the old id.
+					throw new Error("Invalid profile id")
+				}
+				await this.sessionManager.open(current, recovery.secret)
+				return this.getProfileInfo(current)
+			})
 		} finally {
-			this.lock.leave()
 			// zero recovery secret after sessionManager copied it.
 			zeroize(recovery.secret)
 		}
@@ -436,29 +428,21 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 	public async lockActiveProfile(): Promise<void> {
 		await this.ensureInitialized()
-		try {
-			await this.lock.enter()
+		return this.runExclusive(async () => {
 			await this.sessionManager.close()
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async refreshSession(): Promise<void> {
 		await this.ensureInitialized()
-		try {
-			await this.lock.enter()
+		return this.runExclusive(async () => {
 			await this.sessionManager.refresh()
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async changeProfileName(id: string, newName: string): Promise<ProfileInfo> {
 		await this.ensureInitialized()
-		try {
-			await this.lock.enter()
-
+		return this.runExclusive(async () => {
 			const profile = await this.repo.get(id)
 			if (!profile) {
 				throw new Error("Invalid profile id")
@@ -472,16 +456,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			this.sessionManager.patchActiveProfile(id, profile)
 
 			return profile
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async changeProfilePassword(id: string, oldPassword: string, newPassword: string): Promise<ProfileInfo> {
 		await this.ensureInitialized()
-		try {
-			await this.lock.enter()
-
+		return this.runExclusive(async () => {
 			const profile = await this.repo.get(id)
 			if (!profile) {
 				throw new Error("Invalid profile id")
@@ -491,8 +471,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			}
 
 			const resealed = await this.secretBox.reseal(oldPassword, newPassword, {
-				guard: profile.guard,
-				secret: profile.secret,
+				guard: asBase64Ciphertext(profile.guard),
+				secret: asBase64Ciphertext(profile.secret),
 			})
 			if (!resealed) {
 				throw new Error("Invalid profile old password")
@@ -525,9 +505,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			}
 
 			return profile
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	/** Point-in-time "does this user know the password / still hold the
@@ -538,17 +516,13 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	public async confirmProfileOperation(id: string, password?: string): Promise<boolean> {
 		await this.ensureInitialized()
 
-		let snapshot: Profile
-		try {
-			await this.lock.enter()
+		const snapshot = await this.runExclusive(async () => {
 			const fetched = await this.repo.get(id)
 			if (!fetched) {
 				throw new Error("Invalid profile id")
 			}
-			snapshot = fetched
-		} finally {
-			this.lock.leave()
-		}
+			return fetched
+		})
 
 		try {
 			if (snapshot.type === "password") {
@@ -556,8 +530,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					throw new Error("Password is required")
 				}
 				const secret = await this.secretBox.unseal(password, {
-					guard: snapshot.guard,
-					secret: snapshot.secret,
+					guard: asBase64Ciphertext(snapshot.guard),
+					secret: asBase64Ciphertext(snapshot.secret),
 				})
 				try {
 					if (!secret) {
@@ -585,9 +559,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 	public async deleteProfile(id: string): Promise<ProfileInfo> {
 		await this.ensureInitialized()
-		try {
-			await this.lock.enter()
-
+		return this.runExclusive(async () => {
 			const profile = await this.repo.get(id)
 			if (!profile) {
 				throw new Error("Invalid profile id")
@@ -612,9 +584,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			}
 
 			return profile
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async importEncrypted(name: string, secret: string, password: string): Promise<ProfileInfo> {
@@ -645,7 +615,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			throw new Error("Invalid secret length")
 		}
 		// importPasswordProfile takes ownership of `_plainSecret` + `passhash`.
-		return await this.importPasswordProfile(name, _plainSecret, passhash)
+		return await this.importPasswordProfile(name, asMasterSecretBytes(_plainSecret as Uint8Array<ArrayBuffer>), passhash)
 	}
 
 	public async importPlain(name: string, secret: string, password: string): Promise<ProfileInfo> {
@@ -657,7 +627,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			zeroize(passhash)
 			throw new Error("Invalid secret length")
 		}
-		return await this.importPasswordProfile(name, _plainSecret, passhash)
+		return await this.importPasswordProfile(name, asMasterSecretBytes(_plainSecret as Uint8Array<ArrayBuffer>), passhash)
 	}
 
 	public async importMnemonic(name: string, mnemonic: string[], password: string): Promise<ProfileInfo> {
@@ -665,13 +635,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		const passhash = await EncryptionKey.getPasshash(password)
 		const plain = await getEntropy(mnemonic)
 		// importPasswordProfile takes ownership of `plain` + `passhash`.
-		return await this.importPasswordProfile(name, plain, passhash)
+		return await this.importPasswordProfile(name, asMasterSecretBytes(plain as Uint8Array<ArrayBuffer>), passhash)
 	}
 
 	public async exportEncrypted(id: string): Promise<string> {
 		await this.ensureInitialized()
-		try {
-			await this.lock.enter()
+		return this.runExclusive(async () => {
 			// Auth gate (AUDIT A2): require the requested profile to be the
 			// currently-active (unlocked) one. The encrypted blob is already
 			// password-protected at rest, but leaking it to a caller whose only
@@ -691,9 +660,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				throw new Error("Operation not supported for passkey profile")
 			}
 			return profile.secret
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async exportPlain(id: string, password?: string, credentialData?: PasskeyCredentialData): Promise<string> {
@@ -751,8 +718,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// `Error(message)` so callers see a stable error shape.
 		try {
 			const secret = await this.secretBox.unseal(password, {
-				guard: profile.guard,
-				secret: profile.secret,
+				guard: asBase64Ciphertext(profile.guard),
+				secret: asBase64Ciphertext(profile.secret),
 			})
 			try {
 				if (!secret) {
@@ -780,8 +747,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			throw new Error("Operation not supported for passkey profile")
 		}
 		const secret = await this.secretBox.unseal(password, {
-			guard: profile.guard,
-			secret: profile.secret,
+			guard: asBase64Ciphertext(profile.guard),
+			secret: asBase64Ciphertext(profile.secret),
 		})
 		try {
 			if (!secret) {
@@ -801,12 +768,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 	public async getProfileSecret(id: string): Promise<Fr> {
 		await this.ensureInitialized()
-		try {
-			await this.lock.enter()
-			return await this.sessionManager.getSecret(id)
-		} finally {
-			this.lock.leave()
-		}
+		return this.runExclusive(() => this.sessionManager.getSecret(id))
 	}
 
 	/**
@@ -814,24 +776,24 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * import* methods. Zeroes both in finally — runs on success, throw,
 	 * and re-throw paths.
 	 */
-	private async importPasswordProfile(name: string, secret: Uint8Array<ArrayBuffer>, passhash: ArrayBuffer): Promise<Profile> {
+	private async importPasswordProfile(name: string, secret: MasterSecretBytes, passhash: Passhash): Promise<Profile> {
 		try {
-			await this.lock.enter()
-			const id = await this.repo.generateUniqueId()
-			const encrypted = await this.secretBox.sealWithPasshash(passhash, secret)
-			const profile: Profile = {
-				id,
-				name,
-				type: "password",
-				guard: encrypted.guard,
-				secret: encrypted.secret,
-			}
-			await this.repo.set(id, profile)
-			this.emit("onProfileAdded", this.getProfileInfo(profile))
-			await this.sessionManager.open(profile, secret, passhash)
-			return profile
+			return await this.runExclusive(async () => {
+				const id = await this.repo.generateUniqueId()
+				const encrypted = await this.secretBox.sealWithPasshash(passhash, secret)
+				const profile: Profile = {
+					id,
+					name,
+					type: "password",
+					guard: encrypted.guard,
+					secret: encrypted.secret,
+				}
+				await this.repo.set(id, profile)
+				this.emit("onProfileAdded", this.getProfileInfo(profile))
+				await this.sessionManager.open(profile, secret, passhash)
+				return profile
+			})
 		} finally {
-			this.lock.leave()
 			zeroize(secret)
 			zeroize(passhash)
 		}
@@ -844,33 +806,33 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	private async importPasskeyProfile(
 		name: string,
 		credentialId: string,
-		secret: Uint8Array<ArrayBuffer>,
+		secret: MasterSecretBytes,
 		userHandle?: string,
 	): Promise<Profile> {
 		try {
-			await this.lock.enter()
-			if (userHandle && (await this.repo.contains(userHandle))) {
-				throw new Error("Passkey profile already exists")
-			}
+			return await this.runExclusive(async () => {
+				if (userHandle && (await this.repo.contains(userHandle))) {
+					throw new Error("Passkey profile already exists")
+				}
 
-			// It is unclear if this case is possible, this is a fallback:
-			if (!userHandle) {
-				userHandle = await this.repo.generateUniqueId()
-			}
+				// It is unclear if this case is possible, this is a fallback:
+				if (!userHandle) {
+					userHandle = await this.repo.generateUniqueId()
+				}
 
-			const id = userHandle
-			const profile: Profile = {
-				id,
-				name,
-				type: "passkey",
-				credentialId,
-			}
-			await this.repo.set(id, profile)
-			this.emit("onProfileAdded", this.getProfileInfo(profile))
-			await this.sessionManager.open(profile, secret)
-			return profile
+				const id = userHandle
+				const profile: Profile = {
+					id,
+					name,
+					type: "passkey",
+					credentialId,
+				}
+				await this.repo.set(id, profile)
+				this.emit("onProfileAdded", this.getProfileInfo(profile))
+				await this.sessionManager.open(profile, secret)
+				return profile
+			})
 		} finally {
-			this.lock.leave()
 			zeroize(secret)
 		}
 	}
@@ -885,13 +847,21 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 	public async restore(
 		profile: ProfileInfo,
-		masterKey: string,
+		secret: RestoreSecret,
 		password?: string,
 		credentialData?: PasskeyCredentialData,
 	): Promise<Restored<ProfileInfo>> {
 		await this.ensureInitialized()
 
-		if (!masterKey) {
+		// The split's core invariant: the secret discriminant MUST match the profile
+		// type — prevents a password master key reaching a passkey profile (or vice
+		// versa), the swap the old polymorphic `masterKey: string` slot allowed.
+		if (secret.type !== profile.type) {
+			throw new Error("Restore secret type does not match profile type")
+		}
+
+		const rawSecret = secret.type === "password" ? secret.masterKey : secret.credentialId
+		if (!rawSecret) {
 			throw new Error("Master key is required to restore profile")
 		}
 
@@ -904,13 +874,13 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			counter++
 		}
 
-		switch (profile.type) {
+		switch (secret.type) {
 			case "password": {
 				if (!password) {
 					throw new Error("Password is required for password profile")
 				}
 
-				const plainSecret = Buffer.from(masterKey, "base64")
+				const plainSecret = Buffer.from(secret.masterKey, "base64")
 				if (plainSecret.byteLength !== 32) {
 					zeroize(plainSecret)
 					throw new Error("Invalid master key length")
@@ -923,41 +893,46 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// the try, leaking plainSecret on seal failure.)
 				let passhash: ArrayBuffer | undefined
 				try {
-					await this.lock.enter()
+					return await this.runExclusive(async () => {
+						try {
+							const sealed = await this.secretBox.seal(password, asMasterSecretBytes(plainSecret as Uint8Array<ArrayBuffer>))
+							passhash = sealed.passhash
 
-					const sealed = await this.secretBox.seal(password, plainSecret as Uint8Array<ArrayBuffer>)
-					passhash = sealed.passhash
+							let id = profile.id
+							while (await this.repo.contains(id)) {
+								id = await this.repo.generateUniqueId()
+							}
 
-					let id = profile.id
-					while (await this.repo.contains(id)) {
-						id = await this.repo.generateUniqueId()
-					}
+							const newProfile: Profile = {
+								id,
+								name,
+								type: "password",
+								guard: sealed.encrypted.guard,
+								secret: sealed.encrypted.secret,
+							}
 
-					const newProfile: Profile = {
-						id,
-						name,
-						type: "password",
-						guard: sealed.encrypted.guard,
-						secret: sealed.encrypted.secret,
-					}
+							await this.repo.set(id, newProfile)
 
-					await this.repo.set(id, newProfile)
+							this.emit("onProfileAdded", this.getProfileInfo(newProfile))
 
-					this.emit("onProfileAdded", this.getProfileInfo(newProfile))
-
-					// Late activation: do NOT open the session here. The popup
-					// will call `finalizeRestore(id, password)` after restoring
-					// all backup data (networks, accounts, etc.) to avoid
-					// `app.vue:onActiveProfileChanged` racing the import with
-					// auto-seeded defaults.
-					return this.getProfileInfo(newProfile)
-				} catch (err) {
-					return {
-						...profile,
-						restoreError: toRestoreError(err),
-					}
+							// Late activation: do NOT open the session here. The popup
+							// will call `finalizeRestore(id, password)` after restoring
+							// all backup data (networks, accounts, etc.) to avoid
+							// `app.vue:onActiveProfileChanged` racing the import with
+							// auto-seeded defaults.
+							return this.getProfileInfo(newProfile)
+						} catch (err) {
+							// Build restoreError INSIDE the locked callback so it runs
+							// before lock.leave() — byte-equivalent to the pre-refactor
+							// catch-before-leave order (toRestoreError may invoke a
+							// custom err.toString()).
+							return {
+								...profile,
+								restoreError: toRestoreError(err),
+							}
+						}
+					})
 				} finally {
-					this.lock.leave()
 					zeroize(plainSecret)
 					if (passhash) zeroize(passhash)
 				}
@@ -978,47 +953,54 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					// could stash a secret derived from the WRONG key, then
 					// finalizeRestore would open a session bound to a master
 					// that doesn't match the imported account address.
-					if (recovery.credentialId !== masterKey) {
+					if (recovery.credentialId !== secret.credentialId) {
 						zeroize(recovery.secret)
 						throw new Error("credentialId mismatch")
 					}
 					recoverySecret = recovery.secret
-					let id = recovery.userHandle
+					// The restored profile id is the (hex) userHandle when the credential
+					// carried one, else a freshly generated id — a plain profile-id string
+					// either way, so widen off the `HexUserHandle` brand here.
+					let id: string | undefined = recovery.userHandle
 
-					await this.lock.enter()
-					if (id && (await this.repo.contains(id))) {
-						throw new Error("Passkey profile already exists")
-					}
+					// Only the storage tail is locked — the WebAuthn ceremony +
+					// credentialId-bind above run UNLOCKED, and their early throws
+					// must NOT reach a lock.leave() (the prior single try/finally
+					// called leave() even when enter() was never reached).
+					return await this.runExclusive(async () => {
+						if (id && (await this.repo.contains(id))) {
+							throw new Error("Passkey profile already exists")
+						}
 
-					// It is unclear if this case is possible, this is a fallback:
-					if (!id) {
-						id = await this.repo.generateUniqueId()
-					}
+						// It is unclear if this case is possible, this is a fallback:
+						if (!id) {
+							id = await this.repo.generateUniqueId()
+						}
 
-					const newProfile: Profile = {
-						id,
-						name,
-						type: "passkey",
-						credentialId: recovery.credentialId,
-					}
-					await this.repo.set(id, newProfile)
+						const newProfile: Profile = {
+							id,
+							name,
+							type: "passkey",
+							credentialId: recovery.credentialId,
+						}
+						await this.repo.set(id, newProfile)
 
-					this.emit("onProfileAdded", this.getProfileInfo(newProfile))
+						this.emit("onProfileAdded", this.getProfileInfo(newProfile))
 
-					// Late activation: stash the recovery secret so finalize
-					// can open the session without re-prompting WebAuthn.
-					// The map takes ownership — DO NOT zero in finally.
-					this.pendingRestoreSecrets.set(id, recoverySecret)
-					storedPending = true
+						// Late activation: stash the recovery secret so finalize
+						// can open the session without re-prompting WebAuthn.
+						// The map takes ownership — DO NOT zero in finally.
+						this.pendingRestoreSecrets.set(id, recovery.secret)
+						storedPending = true
 
-					return this.getProfileInfo(newProfile)
+						return this.getProfileInfo(newProfile)
+					})
 				} catch (err) {
 					return {
 						...profile,
 						restoreError: toRestoreError(err),
 					}
 				} finally {
-					this.lock.leave()
 					// Zero the recovery secret iff it never made it into the
 					// pending map (early throws). If stashed, finalize owns it.
 					if (!storedPending) zeroize(recoverySecret)
@@ -1053,8 +1035,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	public async finalizeRestore(id: string, password?: string): Promise<ProfileInfo> {
 		await this.ensureInitialized()
 
-		try {
-			await this.lock.enter()
+		return this.runExclusive(async () => {
 			const profile = await this.repo.get(id)
 			if (!profile) {
 				throw new Error("Invalid profile id")
@@ -1073,8 +1054,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// Re-derive: unseal the stored ciphertext with the supplied
 				// password. Mirrors `unlockProfile` Phase 3.
 				const secret = await this.secretBox.unseal(password, {
-					guard: profile.guard,
-					secret: profile.secret,
+					guard: asBase64Ciphertext(profile.guard),
+					secret: asBase64Ciphertext(profile.secret),
 				})
 				if (!secret) {
 					throw new InvalidPasswordError()
@@ -1102,8 +1083,6 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				this.pendingRestoreSecrets.delete(id)
 				zeroize(pending)
 			}
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 }

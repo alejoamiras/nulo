@@ -7,7 +7,7 @@ import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 
 /** Utils */
 import { isPrefersDarkScheme, persistThemeHint } from "@/utils/general"
-import { Config } from "@/wallet/config"
+import { defaultConfig } from "@/wallet/config"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -20,7 +20,7 @@ const { hydrateKnownProfile } = useProfileBootstrap()
  * the same light/dark/system preference. Reads from Config (chrome.storage). */
 const root = document.querySelector("html")
 type Theme = "dark" | "light" | "system"
-const theme = ref<Theme>(new Config().theme as Theme)
+const theme = ref<Theme>(defaultConfig().theme as Theme)
 function applyTheme(value: Theme) {
 	theme.value = value
 	persistThemeHint(value)
@@ -86,6 +86,7 @@ onMounted(async () => {
 		<ToastManager />
 		<NotificationManager />
 		<GlobalLoader />
+		<MigrationBarrier />
 
 		<!-- Brand signature: lock icon + NULO wordmark — same as popup
 			register page, so the onboarding tab feels like Nulo from the

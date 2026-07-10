@@ -49,7 +49,14 @@ function makeAppStore(overrides: Partial<Record<string, unknown>> = {}): AppStor
 
 beforeEach(() => {
 	vi.clearAllMocks()
-	vi.stubGlobal("chrome", { storage: { local: { set: storageSet } } })
+	// Promise-form `get` returning no migration marker so the storage facade's
+	// barrier check passes straight through; `onChanged` for its listener path.
+	vi.stubGlobal("chrome", {
+		storage: {
+			local: { set: storageSet, get: vi.fn(async () => ({})) },
+			onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
+		},
+	})
 })
 
 describe("activateCreatedProfile (popup manual sequence)", () => {

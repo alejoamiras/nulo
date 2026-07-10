@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import type { PropType } from "vue"
 import Icon from "../core/Icon.vue"
+import type { TextColorName } from "../color-names"
 
 const props = defineProps({
 	modelValue: { type: Boolean, default: false },
 	disabled: { type: Boolean, default: false },
 	protected: { type: Boolean, default: false },
-	color: { type: String, required: false },
+	color: { type: String as PropType<TextColorName>, required: false },
 })
 const emit = defineEmits(["update:modelValue"])
 

@@ -8,6 +8,7 @@ import { useToast } from "../composables/toast"
 /** Components */
 import Flex from "../core/Flex.vue"
 import Icon from "../core/Icon.vue"
+import type { TextColorName } from "../color-names"
 
 // Host-DOM contract: teleports the transient toast region to `teleportTo` (default `#toast`); the
 // consuming app must declare that root (the extension does, in popup/onboarding app shells).
@@ -38,7 +39,9 @@ const variantClass = computed(() => {
 						gap="10"
 						:class="[$style.card, variantClass && $style[variantClass]]"
 					>
-						<Icon :name="toast.icon || 'check-circle'" size="14" :color="toast.color || 'primary'" />
+						<!-- toast.color is the raw-color axis (ToastOptions.color: string); cast at the Icon
+					     boundary until that prop is typed in a toast.ts cluster. -->
+					<Icon :name="toast.icon || 'check-circle'" size="14" :color="(toast.color || 'primary') as TextColorName" />
 						<span :class="$style.label">{{ toast.label }}</span>
 						<Icon name="close-circle" size="12" color="tertiary" :class="$style.close_icon" />
 					</Flex>

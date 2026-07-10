@@ -34,6 +34,7 @@
 		"@alejoamiras/aztec-standards": "5.0.0-rc.2",
 		"@nulo/bridge-core": "workspace:*",
 		"@nulo/design": "workspace:*",
+		"@nulo/wallet-sdk-schema-patch": "workspace:*",
 		"viem": "^2.52.2",
 		"vue": "^3.5.38",
 		"zod": "^4.4.3"

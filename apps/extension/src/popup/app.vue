@@ -7,7 +7,8 @@ import Navigation from "./components/Navigation.vue"
 import { managers, isBackgroundConnected } from "@/utils/core"
 import { isPrefersDarkScheme, persistThemeHint } from "@/utils/general"
 import { getLastActiveProfileId } from "@/utils/lastActiveProfile"
-import { Config } from "@/wallet/config"
+import { shouldAdvanceToGeneral } from "./should-advance-to-general"
+import { defaultConfig } from "@/wallet/config"
 import { AccountServiceClient, AccountType } from "@/wallet/services/account/client"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 
@@ -23,7 +24,7 @@ const { bootstrapActiveProfile } = useProfileBootstrap()
 
 /** Update theme */
 const root = document.querySelector("html")
-const theme = ref(new Config().theme)
+const theme = ref(defaultConfig().theme)
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (_event) => {
 	if (theme.value === "system") root.setAttribute("theme", isPrefersDarkScheme() ? "dark" : "light")
 })
@@ -145,10 +146,12 @@ const loadProfile = async () => {
 	appStore.profiles = await managers.profile.getProfiles()
 	const activeProfile = await managers.profile.getActiveProfile()
 	if (activeProfile) {
-		await bootstrapActiveProfile(activeProfile)
+		const stillActive = await bootstrapActiveProfile(activeProfile)
 		appStore.isSessionChecked = true
 
-		if (["popup-register", "popup-auth"].includes(route.name)) router.push("/popup/general")
+		// Only advance into the authed area if the session survived bootstrap (a lock
+		// mid-bootstrap leaves stillActive=false). See shouldAdvanceToGeneral.
+		if (shouldAdvanceToGeneral(stillActive, route.name)) router.push("/popup/general")
 
 		return
 	}
@@ -257,6 +260,7 @@ onBeforeUnmount(() => {
 			<ToastManager />
 			<NotificationManager />
 			<GlobalLoader />
+			<MigrationBarrier />
 		</div>
 
 		<Header />
