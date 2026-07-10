@@ -1,0 +1,1338 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`token-functions characterization — real Token artifact > balanceOfPrivate: candidates (name/impl/type/isStatic/abi) in matcher order 1`] = `
+[
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "utility",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "balance_of_private",
+      "parameters": [
+        {
+          "name": "owner",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [
+        {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 128,
+        },
+      ],
+    },
+    "impl": 0,
+    "isStatic": false,
+    "name": "balance_of_private",
+    "type": "utility",
+  },
+]
+`;
+
+exports[`token-functions characterization — real Token artifact > balanceOfPrivate: default selection 1`] = `"balance_of_private"`;
+
+exports[`token-functions characterization — real Token artifact > balanceOfPublic: candidates (name/impl/type/isStatic/abi) in matcher order 1`] = `
+[
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "public",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": true,
+      "name": "balance_of_public",
+      "parameters": [
+        {
+          "name": "owner",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [
+        {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 128,
+        },
+      ],
+    },
+    "impl": 0,
+    "isStatic": true,
+    "name": "balance_of_public",
+    "type": "public",
+  },
+]
+`;
+
+exports[`token-functions characterization — real Token artifact > balanceOfPublic: default selection 1`] = `"balance_of_public"`;
+
+exports[`token-functions characterization — real Token artifact > getDecimals: candidates (name/impl/type/isStatic/abi) in matcher order 1`] = `
+[
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": true,
+      "name": "private_get_decimals",
+      "parameters": [],
+      "returnTypes": [
+        {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 8,
+        },
+      ],
+    },
+    "impl": 1,
+    "isStatic": true,
+    "name": "private_get_decimals",
+    "type": "private",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "public",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": true,
+      "name": "public_get_decimals",
+      "parameters": [],
+      "returnTypes": [
+        {
+          "kind": "integer",
+          "sign": "unsigned",
+          "width": 8,
+        },
+      ],
+    },
+    "impl": 0,
+    "isStatic": true,
+    "name": "public_get_decimals",
+    "type": "public",
+  },
+]
+`;
+
+exports[`token-functions characterization — real Token artifact > getDecimals: default selection 1`] = `"private_get_decimals"`;
+
+exports[`token-functions characterization — real Token artifact > getName: candidates (name/impl/type/isStatic/abi) in matcher order 1`] = `
+[
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": true,
+      "name": "private_get_name",
+      "parameters": [],
+      "returnTypes": [
+        {
+          "fields": [
+            {
+              "name": "value",
+              "type": {
+                "kind": "field",
+              },
+            },
+          ],
+          "kind": "struct",
+          "path": "compressed_string::field_compressed_string::FieldCompressedString",
+        },
+      ],
+    },
+    "impl": 1,
+    "isStatic": true,
+    "name": "private_get_name",
+    "type": "private",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "public",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": true,
+      "name": "public_get_name",
+      "parameters": [],
+      "returnTypes": [
+        {
+          "fields": [
+            {
+              "name": "value",
+              "type": {
+                "kind": "field",
+              },
+            },
+          ],
+          "kind": "struct",
+          "path": "compressed_string::field_compressed_string::FieldCompressedString",
+        },
+      ],
+    },
+    "impl": 0,
+    "isStatic": true,
+    "name": "public_get_name",
+    "type": "public",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "public",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": true,
+      "name": "public_get_symbol",
+      "parameters": [],
+      "returnTypes": [
+        {
+          "fields": [
+            {
+              "name": "value",
+              "type": {
+                "kind": "field",
+              },
+            },
+          ],
+          "kind": "struct",
+          "path": "compressed_string::field_compressed_string::FieldCompressedString",
+        },
+      ],
+    },
+    "impl": 0,
+    "isStatic": true,
+    "name": "public_get_symbol",
+    "type": "public",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": true,
+      "name": "private_get_symbol",
+      "parameters": [],
+      "returnTypes": [
+        {
+          "fields": [
+            {
+              "name": "value",
+              "type": {
+                "kind": "field",
+              },
+            },
+          ],
+          "kind": "struct",
+          "path": "compressed_string::field_compressed_string::FieldCompressedString",
+        },
+      ],
+    },
+    "impl": 1,
+    "isStatic": true,
+    "name": "private_get_symbol",
+    "type": "private",
+  },
+]
+`;
+
+exports[`token-functions characterization — real Token artifact > getName: default selection 1`] = `"private_get_name"`;
+
+exports[`token-functions characterization — real Token artifact > getSymbol: candidates (name/impl/type/isStatic/abi) in matcher order 1`] = `
+[
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": true,
+      "name": "private_get_symbol",
+      "parameters": [],
+      "returnTypes": [
+        {
+          "fields": [
+            {
+              "name": "value",
+              "type": {
+                "kind": "field",
+              },
+            },
+          ],
+          "kind": "struct",
+          "path": "compressed_string::field_compressed_string::FieldCompressedString",
+        },
+      ],
+    },
+    "impl": 1,
+    "isStatic": true,
+    "name": "private_get_symbol",
+    "type": "private",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "public",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": true,
+      "name": "public_get_symbol",
+      "parameters": [],
+      "returnTypes": [
+        {
+          "fields": [
+            {
+              "name": "value",
+              "type": {
+                "kind": "field",
+              },
+            },
+          ],
+          "kind": "struct",
+          "path": "compressed_string::field_compressed_string::FieldCompressedString",
+        },
+      ],
+    },
+    "impl": 0,
+    "isStatic": true,
+    "name": "public_get_symbol",
+    "type": "public",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "public",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": true,
+      "name": "public_get_name",
+      "parameters": [],
+      "returnTypes": [
+        {
+          "fields": [
+            {
+              "name": "value",
+              "type": {
+                "kind": "field",
+              },
+            },
+          ],
+          "kind": "struct",
+          "path": "compressed_string::field_compressed_string::FieldCompressedString",
+        },
+      ],
+    },
+    "impl": 0,
+    "isStatic": true,
+    "name": "public_get_name",
+    "type": "public",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": true,
+      "name": "private_get_name",
+      "parameters": [],
+      "returnTypes": [
+        {
+          "fields": [
+            {
+              "name": "value",
+              "type": {
+                "kind": "field",
+              },
+            },
+          ],
+          "kind": "struct",
+          "path": "compressed_string::field_compressed_string::FieldCompressedString",
+        },
+      ],
+    },
+    "impl": 1,
+    "isStatic": true,
+    "name": "private_get_name",
+    "type": "private",
+  },
+]
+`;
+
+exports[`token-functions characterization — real Token artifact > getSymbol: default selection 1`] = `"private_get_symbol"`;
+
+exports[`token-functions characterization — real Token artifact > transferPrivate: candidates (name/impl/type/isStatic/abi) in matcher order 1`] = `
+[
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "transfer",
+      "parameters": [
+        {
+          "name": "to",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 128,
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [],
+    },
+    "impl": 0,
+    "isStatic": false,
+    "name": "transfer",
+    "type": "private",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "transfer_in_private",
+      "parameters": [
+        {
+          "name": "from",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "to",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 128,
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "authwit_nonce",
+          "type": {
+            "kind": "field",
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [],
+    },
+    "impl": 1,
+    "isStatic": false,
+    "name": "transfer_in_private",
+    "type": "private",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "transfer_to_private",
+      "parameters": [
+        {
+          "name": "to",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 128,
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [],
+    },
+    "impl": 0,
+    "isStatic": false,
+    "name": "transfer_to_private",
+    "type": "private",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "transfer_in_private_with_offchain_delivery",
+      "parameters": [
+        {
+          "name": "from",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "to",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 128,
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "authwit_nonce",
+          "type": {
+            "kind": "field",
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [],
+    },
+    "impl": 1,
+    "isStatic": false,
+    "name": "transfer_in_private_with_offchain_delivery",
+    "type": "private",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "transfer_to_public",
+      "parameters": [
+        {
+          "name": "from",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "to",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 128,
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "authwit_nonce",
+          "type": {
+            "kind": "field",
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [],
+    },
+    "impl": 1,
+    "isStatic": false,
+    "name": "transfer_to_public",
+    "type": "private",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "mint_to_private",
+      "parameters": [
+        {
+          "name": "to",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 128,
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [],
+    },
+    "impl": 0,
+    "isStatic": false,
+    "name": "mint_to_private",
+    "type": "private",
+  },
+]
+`;
+
+exports[`token-functions characterization — real Token artifact > transferPrivate: default selection 1`] = `"transfer"`;
+
+exports[`token-functions characterization — real Token artifact > transferPrivateToPublic: candidates (name/impl/type/isStatic/abi) in matcher order 1`] = `
+[
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "transfer_to_public",
+      "parameters": [
+        {
+          "name": "from",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "to",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 128,
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "authwit_nonce",
+          "type": {
+            "kind": "field",
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [],
+    },
+    "impl": 0,
+    "isStatic": false,
+    "name": "transfer_to_public",
+    "type": "private",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "transfer_in_private",
+      "parameters": [
+        {
+          "name": "from",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "to",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 128,
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "authwit_nonce",
+          "type": {
+            "kind": "field",
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [],
+    },
+    "impl": 0,
+    "isStatic": false,
+    "name": "transfer_in_private",
+    "type": "private",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "transfer_in_private_with_offchain_delivery",
+      "parameters": [
+        {
+          "name": "from",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "to",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 128,
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "authwit_nonce",
+          "type": {
+            "kind": "field",
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [],
+    },
+    "impl": 0,
+    "isStatic": false,
+    "name": "transfer_in_private_with_offchain_delivery",
+    "type": "private",
+  },
+]
+`;
+
+exports[`token-functions characterization — real Token artifact > transferPrivateToPublic: default selection 1`] = `"transfer_to_public"`;
+
+exports[`token-functions characterization — real Token artifact > transferPublic: candidates (name/impl/type/isStatic/abi) in matcher order 1`] = `
+[
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "public",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "transfer_in_public",
+      "parameters": [
+        {
+          "name": "from",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "to",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 128,
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "authwit_nonce",
+          "type": {
+            "kind": "field",
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [],
+    },
+    "impl": 0,
+    "isStatic": false,
+    "name": "transfer_in_public",
+    "type": "public",
+  },
+]
+`;
+
+exports[`token-functions characterization — real Token artifact > transferPublic: default selection 1`] = `"transfer_in_public"`;
+
+exports[`token-functions characterization — real Token artifact > transferPublicToPrivate: candidates (name/impl/type/isStatic/abi) in matcher order 1`] = `
+[
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "transfer_to_private",
+      "parameters": [
+        {
+          "name": "to",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 128,
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [],
+    },
+    "impl": 0,
+    "isStatic": false,
+    "name": "transfer_to_private",
+    "type": "private",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "transfer",
+      "parameters": [
+        {
+          "name": "to",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 128,
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [],
+    },
+    "impl": 0,
+    "isStatic": false,
+    "name": "transfer",
+    "type": "private",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "transfer_in_private",
+      "parameters": [
+        {
+          "name": "from",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "to",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 128,
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "authwit_nonce",
+          "type": {
+            "kind": "field",
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [],
+    },
+    "impl": 1,
+    "isStatic": false,
+    "name": "transfer_in_private",
+    "type": "private",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "transfer_in_private_with_offchain_delivery",
+      "parameters": [
+        {
+          "name": "from",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "to",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 128,
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "authwit_nonce",
+          "type": {
+            "kind": "field",
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [],
+    },
+    "impl": 1,
+    "isStatic": false,
+    "name": "transfer_in_private_with_offchain_delivery",
+    "type": "private",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "transfer_to_public",
+      "parameters": [
+        {
+          "name": "from",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "to",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 128,
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "authwit_nonce",
+          "type": {
+            "kind": "field",
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [],
+    },
+    "impl": 1,
+    "isStatic": false,
+    "name": "transfer_to_public",
+    "type": "private",
+  },
+  {
+    "abi": {
+      "errorTypes": {},
+      "functionType": "private",
+      "isInitializer": false,
+      "isOnlySelf": false,
+      "isStatic": false,
+      "name": "mint_to_private",
+      "parameters": [
+        {
+          "name": "to",
+          "type": {
+            "fields": [
+              {
+                "name": "inner",
+                "type": {
+                  "kind": "field",
+                },
+              },
+            ],
+            "kind": "struct",
+            "path": "aztec::protocol_types::address::aztec_address::AztecAddress",
+          },
+          "visibility": "private",
+        },
+        {
+          "name": "amount",
+          "type": {
+            "kind": "integer",
+            "sign": "unsigned",
+            "width": 128,
+          },
+          "visibility": "private",
+        },
+      ],
+      "returnTypes": [],
+    },
+    "impl": 0,
+    "isStatic": false,
+    "name": "mint_to_private",
+    "type": "private",
+  },
+]
+`;
+
+exports[`token-functions characterization — real Token artifact > transferPublicToPrivate: default selection 1`] = `"transfer_to_private"`;
+
+exports[`token-functions characterization — synthetic multi-candidate scoring > balanceOfPublic: exact canonical wins, keyword partials ordered, unrelated-but-valid kept last 1`] = `
+[
+  "balance_of_public",
+  "public_balance",
+  "my_balance",
+  "zzz_unrelated",
+]
+`;
+
+exports[`token-functions characterization — synthetic multi-candidate scoring > transferPublic: candidate ordering across name variants 1`] = `
+[
+  "transfer_public_to_public",
+  "transfer_in_public",
+  "transfer_public",
+  "zzz_unrelated",
+]
+`;

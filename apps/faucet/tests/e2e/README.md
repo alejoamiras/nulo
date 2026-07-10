@@ -43,7 +43,7 @@ If a smoke fails after a wallet-sdk dep bump:
 - Check `src/composables/useWalletConnection.ts` for new SDK calls.
 - Add the handler in `helpers/mockWalletProvider.ts`.
 
-If a smoke fails after a `@defi-wonderland/aztec-standards` bump:
+If a smoke fails after a `@alejoamiras/aztec-standards` bump:
 - The artifact import paths may have changed. Re-check
   `dist/src/artifacts/{Token,Dripper}.js` and update the mocked
   re-exports if needed.

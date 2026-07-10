@@ -27,30 +27,15 @@
  * contract that is otherwise correctly enforced everywhere else.
  */
 
-import type { AztecSendTxOperation, FeeSettings, Operation, SendTransactionOperation } from "@nulo/wallet-bridge"
+import type { DraftAztecSendTxOperation, DraftOperation, DraftSendTransactionOperation } from "@nulo/wallet-bridge"
 import type { Account } from "@/wallet/services/account/client"
 import type { Network } from "@/wallet/services/network/client"
 
-/** `aztec_sendTx` with feeSettings honestly optional (popup may not yet
- *  have the user's selection). Becomes executable once feeSettings is set. */
-export type DraftAztecSendTxOperation = Omit<AztecSendTxOperation, "feeSettings"> & {
-	feeSettings?: FeeSettings
-}
-
-/** `send_transaction` with feeSettings honestly optional. */
-export type DraftSendTransactionOperation = Omit<SendTransactionOperation, "feeSettings"> & {
-	feeSettings?: FeeSettings
-}
-
-/**
- * Discriminated union: all Operation variants, with `feeSettings`
- * optionalised on the two send-like kinds where the wallet (not the
- * dApp) supplies it.
- */
-export type DraftOperation =
-	| Exclude<Operation, AztecSendTxOperation | SendTransactionOperation>
-	| DraftAztecSendTxOperation
-	| DraftSendTransactionOperation
+// `DraftOperation` + the two `Draft*` send-like variants moved DOWN to
+// `@nulo/wallet-bridge` (beside `Operation`) so the dApp-interaction materializer
+// shares them. Re-exported here so this window's existing `./types` imports are
+// unchanged.
+export type { DraftAztecSendTxOperation, DraftOperation, DraftSendTransactionOperation }
 
 /** Popup row type: a draft operation plus UI-only attachments. */
 export type DraftUIOperation = DraftOperation & {

@@ -36,8 +36,9 @@
  * distinguish those — they're system-level bugs, not user input.
  */
 
-import { array_equals } from "@nulo/wallet-core/utils"
+import { array_equals, toBase64 } from "@nulo/wallet-core/utils"
 import { EncryptionKey } from "./encryption-key"
+import { asBase64Ciphertext, asMasterSecretBytes, type Base64Ciphertext, type MasterSecretBytes, type Passhash } from "./secret-types"
 import { zeroize } from "./zeroize"
 
 /** Fixed-plaintext round-trip check. `seal` encrypts this under the
@@ -59,17 +60,17 @@ export type EncryptedProfileSecret = {
 	 *  derived from the profile password. On unseal this is decrypted
 	 *  first and byte-compared to `ENCRYPTION_GUARD`; a mismatch means
 	 *  the supplied password is wrong. */
-	guard: string
+	guard: Base64Ciphertext
 	/** Base64-encoded ciphertext of the raw 32-byte master secret under
 	 *  the same key as `guard`. */
-	secret: string
+	secret: Base64Ciphertext
 }
 
 /** Result of a successful `seal`. Returned to callers so they can persist
  *  `encrypted` on the `Profile` record and pass `passhash` into the
  *  SessionManager's `open` fast-path (avoiding a second PBKDF2). */
 export type Sealed = {
-	passhash: ArrayBuffer
+	passhash: Passhash
 	encrypted: EncryptedProfileSecret
 }
 
@@ -77,7 +78,7 @@ export class PasswordSecretBox {
 	/** Encrypts `secret` under a key derived from `password`. Returns the
 	 *  base64-encoded guard+secret pair for storage plus the passhash for
 	 *  the immediate session-open. */
-	public async seal(password: string, secret: Uint8Array<ArrayBuffer>): Promise<Sealed> {
+	public async seal(password: string, secret: MasterSecretBytes): Promise<Sealed> {
 		const passhash = await EncryptionKey.getPasshash(password)
 		const key = await EncryptionKey.fromPasshash(passhash)
 		const encrypted = await this.sealInternal(key, secret)
@@ -93,14 +94,14 @@ export class PasswordSecretBox {
 	 *  The `passhash` and `secret` parameters are **caller-owned**.
 	 *  This method does NOT zero them; the caller is responsible for
 	 *  calling `zeroize(...)` after the last legitimate use. */
-	public async sealWithPasshash(passhash: ArrayBuffer, secret: Uint8Array<ArrayBuffer>): Promise<EncryptedProfileSecret> {
+	public async sealWithPasshash(passhash: Passhash, secret: MasterSecretBytes): Promise<EncryptedProfileSecret> {
 		const key = await EncryptionKey.fromPasshash(passhash)
 		return this.sealInternal(key, secret)
 	}
 
 	/** Decrypts and returns the raw master secret, or `null` if the
 	 *  password is wrong or the ciphertext is corrupted. */
-	public async unseal(password: string, encrypted: EncryptedProfileSecret): Promise<Uint8Array<ArrayBuffer> | null> {
+	public async unseal(password: string, encrypted: EncryptedProfileSecret): Promise<MasterSecretBytes | null> {
 		const passhash = await EncryptionKey.getPasshash(password)
 		try {
 			const key = await EncryptionKey.fromPasshash(passhash)
@@ -119,7 +120,7 @@ export class PasswordSecretBox {
 	 *  The `passhash` parameter is **caller-owned**. This method does
 	 *  NOT zero it; the caller is responsible for calling
 	 *  `zeroize(...)` after the last legitimate use. */
-	public async unsealWithPasshash(passhash: ArrayBuffer, encrypted: EncryptedProfileSecret): Promise<Uint8Array<ArrayBuffer> | null> {
+	public async unsealWithPasshash(passhash: Passhash, encrypted: EncryptedProfileSecret): Promise<MasterSecretBytes | null> {
 		const key = await EncryptionKey.fromPasshash(passhash)
 		return this.unsealInternal(key, encrypted)
 	}
@@ -135,7 +136,7 @@ export class PasswordSecretBox {
 	 *  must zero it after the last legitimate use. */
 	public async reseal(oldPassword: string, newPassword: string, encrypted: EncryptedProfileSecret): Promise<Sealed | null> {
 		const oldPasshash = await EncryptionKey.getPasshash(oldPassword)
-		let secret: Uint8Array<ArrayBuffer> | null = null
+		let secret: MasterSecretBytes | null = null
 		try {
 			const oldKey = await EncryptionKey.fromPasshash(oldPasshash)
 			secret = await this.unsealInternal(oldKey, encrypted)
@@ -153,19 +154,19 @@ export class PasswordSecretBox {
 
 	/** Encrypt GUARD + secret under the given key. Shared between `seal`
 	 *  and `reseal`. Returns the persistable base64 pair. */
-	private async sealInternal(key: EncryptionKey, secret: Uint8Array<ArrayBuffer>): Promise<EncryptedProfileSecret> {
+	private async sealInternal(key: EncryptionKey, secret: MasterSecretBytes): Promise<EncryptedProfileSecret> {
 		const guard = await key.encrypt(ENCRYPTION_GUARD as Uint8Array<ArrayBuffer>)
 		const encryptedSecret = await key.encrypt(secret)
 		return {
-			guard: Buffer.from(guard.buffer).toString("base64"),
-			secret: Buffer.from(encryptedSecret.buffer).toString("base64"),
+			guard: asBase64Ciphertext(toBase64(new Uint8Array(guard.buffer))),
+			secret: asBase64Ciphertext(toBase64(new Uint8Array(encryptedSecret.buffer))),
 		}
 	}
 
 	/** Decrypt GUARD and verify; decrypt secret. Shared between `unseal`,
 	 *  `unsealWithPasshash`, and `reseal`. Returns null on any
 	 *  wrong-password / corrupted-ciphertext condition. */
-	private async unsealInternal(key: EncryptionKey, encrypted: EncryptedProfileSecret): Promise<Uint8Array<ArrayBuffer> | null> {
+	private async unsealInternal(key: EncryptionKey, encrypted: EncryptedProfileSecret): Promise<MasterSecretBytes | null> {
 		const guard = await this.tryDecrypt(key, Buffer.from(encrypted.guard, "base64") as Uint8Array<ArrayBuffer>)
 		try {
 			if (!guard || !array_equals(guard, ENCRYPTION_GUARD)) {
@@ -177,7 +178,7 @@ export class PasswordSecretBox {
 			// (storage damage), which we still surface as null — the facade
 			// maps it to "Profile storage corrupted" at the appropriate
 			// callsite.
-			return secret ?? null
+			return secret ? asMasterSecretBytes(secret) : null
 		} finally {
 			// `guard` is just ENCRYPTION_GUARD bytes (a known constant) so
 			// it isn't a secret, but defensible to zero anyway — the

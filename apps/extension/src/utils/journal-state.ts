@@ -38,6 +38,7 @@
  *       failures, plus any future / unknown kind.
  */
 
+import type { JobErrorKind } from "@nulo/wallet-core/jobs"
 import { balanceFormatted } from "@/utils/amount.js"
 import { formatTransferType, humanizeMethodName } from "@/utils/tx-enrichment"
 import type { OperationKind, OperationRecord } from "@/wallet/services/operation-journal/spec"
@@ -161,7 +162,7 @@ export function sanitizeJournalSubtitle(raw: string | undefined | null): string 
  * Without humanization it would leak the raw kind name into the UI.
  * Codex post-impl audit H2 + opus C1.
  */
-export function humanizeErrorKind(kind: string): string {
+export function humanizeErrorKind(kind: JobErrorKind): string {
 	switch (kind) {
 		case "network":
 			return "Network"
@@ -255,7 +256,7 @@ export function categoricalLabel(op: OperationRecord): CategoricalFailureLabel {
 }
 
 /** Subtitle copy per documented `JobError.kind` + live execution catch-alls. */
-function failedSubtitleFor(kind: string): string {
+function failedSubtitleFor(kind: JobErrorKind): string {
 	switch (kind) {
 		case "network":
 			return "Network error"

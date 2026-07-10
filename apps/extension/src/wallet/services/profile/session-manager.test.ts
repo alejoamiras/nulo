@@ -9,6 +9,7 @@
  *     expects.
  */
 
+import { asMasterSecretBytes, asPasshash, type MasterSecretBytes } from "@nulo/wallet-crypto"
 import { describe, expect, test, vi } from "vitest"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
@@ -71,10 +72,10 @@ const passkeyProfile = (id = "pid"): Profile & { type: "passkey" } => ({
 })
 
 /** 32-byte secret buffer; Fr-reducible. */
-function secretBuffer(): Uint8Array<ArrayBuffer> {
+function secretBuffer(): MasterSecretBytes {
 	const buf = new Uint8Array(new ArrayBuffer(32))
 	for (let i = 0; i < 32; i++) buf[i] = i + 1
-	return buf as Uint8Array<ArrayBuffer>
+	return asMasterSecretBytes(buf as Uint8Array<ArrayBuffer>)
 }
 
 function setup(
@@ -118,7 +119,7 @@ describe("SessionManager", () => {
 			const { api, emits, manager } = setup()
 			const profile = passwordProfile()
 
-			await manager.open(profile, secretBuffer(), new ArrayBuffer(8))
+			await manager.open(profile, secretBuffer(), asPasshash(new ArrayBuffer(8)))
 
 			const active = await manager.getActive()
 			expect(active).toBeDefined()
@@ -151,7 +152,7 @@ describe("SessionManager", () => {
 	describe("close", () => {
 		test("clears in-memory + persisted state and emits undefined", async () => {
 			const { api, emits, manager } = setup()
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			emits.length = 0
 
 			await manager.close()
@@ -172,7 +173,7 @@ describe("SessionManager", () => {
 	describe("refresh", () => {
 		test("extends the session.since timestamp", async () => {
 			const { api, manager } = setup()
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 
 			const raw1 = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			const session1: Session = JSON.parse(raw1[SESSION_STORAGE_ROOT] as string)
@@ -196,7 +197,7 @@ describe("SessionManager", () => {
 	describe("TTL expiry", () => {
 		test("getActive silently closes an expired session", async () => {
 			const { emits, manager } = setup(50)
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			emits.length = 0
 
 			await new Promise((r) => setTimeout(r, 60))
@@ -206,7 +207,7 @@ describe("SessionManager", () => {
 
 		test("sessionTtl === 0 means sessions never expire", async () => {
 			const { manager } = setup(0)
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			// Artificially age the in-memory session far past any non-zero ttl
 			const active = await manager.getActive()
 			if (active) {
@@ -217,7 +218,7 @@ describe("SessionManager", () => {
 
 		test("config update to sessionTtl takes effect for the next check", async () => {
 			const { config, manager } = setup(1_800_000)
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 
 			config.setTtl(1)
 			await new Promise((r) => setTimeout(r, 5))
@@ -229,7 +230,7 @@ describe("SessionManager", () => {
 	describe("getSecret", () => {
 		test("returns the master secret for the active profile id", async () => {
 			const { manager } = setup()
-			await manager.open(passwordProfile("abc"), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile("abc"), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 
 			const secret = await manager.getSecret("abc")
 			expect(secret).toBeInstanceOf(Fr)
@@ -237,7 +238,7 @@ describe("SessionManager", () => {
 
 		test("throws 'Profile locked' when the id doesn't match", async () => {
 			const { manager } = setup()
-			await manager.open(passwordProfile("abc"), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile("abc"), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 
 			await expect(manager.getSecret("other")).rejects.toThrow(/Profile locked/)
 		})
@@ -252,7 +253,7 @@ describe("SessionManager", () => {
 		test("patchActiveProfile updates in-memory profile ref", async () => {
 			const { manager } = setup()
 			const p = passwordProfile("abc")
-			await manager.open(p, secretBuffer(), new ArrayBuffer(8))
+			await manager.open(p, secretBuffer(), asPasshash(new ArrayBuffer(8)))
 
 			const renamed: Profile = { ...p, name: "New Name" }
 			manager.patchActiveProfile("abc", renamed)
@@ -264,7 +265,7 @@ describe("SessionManager", () => {
 		test("patchActiveProfile is a no-op for non-active ids", async () => {
 			const { manager } = setup()
 			const p = passwordProfile("abc")
-			await manager.open(p, secretBuffer(), new ArrayBuffer(8))
+			await manager.open(p, secretBuffer(), asPasshash(new ArrayBuffer(8)))
 
 			manager.patchActiveProfile("other", { ...p, id: "other", name: "Nope" })
 
@@ -276,7 +277,7 @@ describe("SessionManager", () => {
 		test("isActive reflects the current session", async () => {
 			const { manager } = setup()
 			expect(manager.isActive("abc")).toBe(false)
-			await manager.open(passwordProfile("abc"), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile("abc"), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			expect(manager.isActive("abc")).toBe(true)
 			expect(manager.isActive("other")).toBe(false)
 			await manager.close()
@@ -291,7 +292,7 @@ describe("SessionManager", () => {
 			const profile = passwordProfile("abc")
 			const session: Session = {
 				profile: "abc",
-				passhash: Buffer.from(new ArrayBuffer(8)).toString("base64"),
+				passhash: Buffer.from(asPasshash(new ArrayBuffer(8))).toString("base64"),
 				since: Date.now(),
 			}
 			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(session) })
@@ -312,7 +313,7 @@ describe("SessionManager", () => {
 			const { api, emits, manager } = setup(50)
 			const expired: Session = {
 				profile: "abc",
-				passhash: Buffer.from(new ArrayBuffer(8)).toString("base64"),
+				passhash: Buffer.from(asPasshash(new ArrayBuffer(8))).toString("base64"),
 				since: Date.now() - 1000,
 			}
 			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(expired) })
@@ -332,7 +333,7 @@ describe("SessionManager", () => {
 			const { api, emits, manager } = setup()
 			const session: Session = {
 				profile: "gone",
-				passhash: Buffer.from(new ArrayBuffer(8)).toString("base64"),
+				passhash: Buffer.from(asPasshash(new ArrayBuffer(8))).toString("base64"),
 				since: Date.now(),
 			}
 			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(session) })
@@ -350,7 +351,7 @@ describe("SessionManager", () => {
 			const { api, emits, manager } = setup()
 			const session: Session = {
 				profile: "abc",
-				passhash: Buffer.from(new ArrayBuffer(8)).toString("base64"),
+				passhash: Buffer.from(asPasshash(new ArrayBuffer(8))).toString("base64"),
 				since: Date.now(),
 			}
 			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(session) })
@@ -414,7 +415,7 @@ describe("SessionManager", () => {
 	describe("storage key + shape invariants", () => {
 		test("writes under the frozen 'nulo:core:session' root", async () => {
 			const { api, manager } = setup()
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			const raw = await api.storage.session.get(null)
 			expect(SESSION_STORAGE_ROOT in raw).toBe(true)
 			expect(SESSION_STORAGE_ROOT).toBe("nulo:core:session")
@@ -422,7 +423,7 @@ describe("SessionManager", () => {
 
 		test("persisted Session shape is { profile, passhash?, since, lockedAt? }", async () => {
 			const { api, manager } = setup()
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			const persisted: Session = JSON.parse(raw[SESSION_STORAGE_ROOT] as string)
 			// `lockedAt` is an additive optional field (schema still v1).
@@ -435,7 +436,7 @@ describe("SessionManager", () => {
 
 		test("persisted Session omits lockedAt when sessionTtl=0", async () => {
 			const { api, manager } = setup(0)
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			const persisted: Session = JSON.parse(raw[SESSION_STORAGE_ROOT] as string)
 			// `lockedAt: undefined` is dropped by JSON.stringify.
@@ -470,7 +471,7 @@ describe("SessionManager", () => {
 			vi.useFakeTimers()
 			vi.setSystemTime(new Date("2026-04-26T10:00:00Z"))
 			const since = Date.now()
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			const alarm = await getAlarm(api)
 			expect(alarm).toBeDefined()
 			expect(alarm?.scheduledTime).toBe(since + ttl)
@@ -479,14 +480,14 @@ describe("SessionManager", () => {
 
 		test("open(ttl=0) does not schedule an alarm", async () => {
 			const { api, manager } = setup(0)
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			const alarm = await getAlarm(api)
 			expect(alarm).toBeUndefined()
 		})
 
 		test("close() cancels the scheduled alarm", async () => {
 			const { api, manager } = setup(60_000)
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			expect(await getAlarm(api)).toBeDefined()
 			await manager.close()
 			expect(await getAlarm(api)).toBeUndefined()
@@ -497,7 +498,7 @@ describe("SessionManager", () => {
 			const { api, manager } = setup(ttl)
 			vi.useFakeTimers()
 			vi.setSystemTime(new Date("2026-04-26T10:00:00Z"))
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			const firstAlarm = await getAlarm(api)
 			expect(firstAlarm?.scheduledTime).toBe(Date.now() + ttl)
 
@@ -513,7 +514,7 @@ describe("SessionManager", () => {
 		test("alarm fire at the persisted lockedAt closes the session + emits onChange(undefined)", async () => {
 			const ttl = 60_000
 			const { emits, manager } = setup(ttl)
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			const lockedAt = (await manager.getActive())?.session.lockedAt
 			expect(lockedAt).toBeDefined()
 			emits.length = 0 // discard the open() emit
@@ -530,7 +531,7 @@ describe("SessionManager", () => {
 		test("STALE alarm fire (different scheduledTime) is ignored — session stays open", async () => {
 			const ttl = 60_000
 			const { manager } = setup(ttl)
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 
 			// A late delivery from a hypothetical old alarm arrives with a
 			// scheduledTime that no longer matches the current
@@ -547,7 +548,7 @@ describe("SessionManager", () => {
 
 		test("config TTL change to 0 clears alarm + persists lockedAt removal", async () => {
 			const { api, config, manager } = setup(60_000)
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			expect(await getAlarm(api)).toBeDefined()
 
 			config.setTtl(0)
@@ -564,7 +565,7 @@ describe("SessionManager", () => {
 			const { emits, manager, config } = setup(ttl)
 			vi.useFakeTimers()
 			vi.setSystemTime(new Date("2026-04-26T10:00:00Z"))
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			emits.length = 0
 
 			// 40s pass.
@@ -592,7 +593,7 @@ describe("SessionManager", () => {
 				profile: "pid",
 				since: Date.now() - 120_000,
 				lockedAt: Date.now() - 60_000, // already expired
-				passhash: Buffer.from(new ArrayBuffer(8)).toString("base64"),
+				passhash: Buffer.from(asPasshash(new ArrayBuffer(8))).toString("base64"),
 			}
 			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(stale) })
 
@@ -623,7 +624,7 @@ describe("SessionManager", () => {
 	describe("M4.2 — open + strictSecurityMode", () => {
 		test("strict ON: open ignores passhash, persisted Session has no bearer", async () => {
 			const { api, manager } = setup(1_800_000, true) // strict ON
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			const persisted: Session = JSON.parse(raw[SESSION_STORAGE_ROOT] as string)
 			expect(persisted.profile).toBe("pid")
@@ -635,7 +636,7 @@ describe("SessionManager", () => {
 
 		test("strict OFF: open persists passhash (legacy bearer behavior)", async () => {
 			const { api, manager } = setup(1_800_000, false) // strict OFF
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			const persisted: Session = JSON.parse(raw[SESSION_STORAGE_ROOT] as string)
 			expect(typeof persisted.passhash).toBe("string")
@@ -664,7 +665,7 @@ describe("SessionManager", () => {
 				profile: "pid",
 				since: Date.now(),
 				lockedAt: Date.now() + 1_800_000,
-				passhash: Buffer.from(new ArrayBuffer(8)).toString("base64"),
+				passhash: Buffer.from(asPasshash(new ArrayBuffer(8))).toString("base64"),
 			}
 			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(legacy) })
 
@@ -691,7 +692,7 @@ describe("SessionManager", () => {
 				profile: "pid",
 				since: Date.now(),
 				lockedAt: Date.now() + 1_800_000,
-				passhash: Buffer.from(new ArrayBuffer(8)).toString("base64"),
+				passhash: Buffer.from(asPasshash(new ArrayBuffer(8))).toString("base64"),
 			}
 			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(fresh) })
 
@@ -753,7 +754,7 @@ describe("SessionManager", () => {
 
 		test("drops persisted passhash AND in-memory activeSession.session.passhash", async () => {
 			const { api, manager } = setup(1_800_000, false)
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			// Sanity: bearer present.
 			const before = JSON.parse((await api.storage.session.get(SESSION_STORAGE_ROOT))[SESSION_STORAGE_ROOT] as string) as Session
 			expect(typeof before.passhash).toBe("string")
@@ -771,7 +772,7 @@ describe("SessionManager", () => {
 
 		test("refresh() after clearPasshash does NOT re-persist passhash", async () => {
 			const { api, manager } = setup(1_800_000, false)
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			await manager.clearPasshash()
 
 			// refresh() reads activeSession.session and re-persists. If the
@@ -785,7 +786,7 @@ describe("SessionManager", () => {
 
 		test("idempotent: calling twice succeeds without error", async () => {
 			const { manager } = setup(1_800_000, false)
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			await manager.clearPasshash()
 			await expect(manager.clearPasshash()).resolves.toBeUndefined()
 		})
@@ -794,7 +795,7 @@ describe("SessionManager", () => {
 	describe("M4.2 — onConfigUpdated strictSecurityMode toggle", () => {
 		test("toggle ON during unlocked password session → bearer cleared from storage + memory", async () => {
 			const { api, config, manager } = setup(1_800_000, false)
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			expect(typeof (await manager.getActive())?.session.passhash).toBe("string")
 
 			config.setStrict(true)
@@ -812,7 +813,7 @@ describe("SessionManager", () => {
 
 		test("toggle OFF during unlocked strict session → no immediate effect (no backfill)", async () => {
 			const { api, config, manager } = setup(1_800_000, true)
-			await manager.open(passwordProfile(), secretBuffer(), new ArrayBuffer(8))
+			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			expect((await manager.getActive())?.session.passhash).toBeUndefined()
 
 			config.setStrict(false)

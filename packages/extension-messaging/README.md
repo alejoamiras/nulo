@@ -14,6 +14,9 @@ Depends on `wallet-core` for ports, error types, and the `ServiceSpec` contract.
 
 | Path | Purpose |
 |---|---|
+| `src/core/base-service.ts` · `base-client.ts` | Transport-agnostic `Service` / `ServiceClient` base shared by the background + offscreen specializations: request **correlation**, dispatch, event broadcast, and port-disconnect handling. |
+| `src/core/decode.ts` · `error-response.ts` | Success-path result decode + typed-error (`WalletError`) reconstruction shared by both transport clients. |
+| `src/core/rpc-methods.ts` · `initialization.ts` | RPC method-name registry + shared service-initialization helpers. |
 | `src/background/service.ts` | `Service<Methods, Events>` — server-side base. Owns the port listener, request dispatch, and event broadcast. |
 | `src/background/client.ts` | `ServiceClient<Methods, Events>` — client-side base. Owns `chrome.runtime.connect`, request correlation, port-disconnect handling, and subscription bookkeeping. |
 | `src/messages.ts` | Wire schema: `RequestMessage`, `ResponseMessage`, `EventMessage`, `SubscribeMessage`. |

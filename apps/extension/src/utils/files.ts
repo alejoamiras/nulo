@@ -68,8 +68,7 @@ export async function downloadFile({
 					saveAs,
 				},
 				() => {
-					// biome-ignore lint/suspicious/noExplicitAny: chrome-types lastError shim varies across type packages
-					const err = (chrome.runtime as any).lastError as { message?: string } | undefined
+					const err = (chrome.runtime as unknown as { lastError?: { message?: string } }).lastError
 					if (err) reject(new Error(err.message ?? "Download failed"))
 					else resolve()
 				},

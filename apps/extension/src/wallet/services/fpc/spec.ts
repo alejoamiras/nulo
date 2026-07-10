@@ -1,3 +1,5 @@
+import { z } from "zod"
+
 export const FPC_SERVICE_NAME = "fpc"
 
 /**
@@ -22,6 +24,17 @@ export type FpcInfo = {
 	/** Set by the service before returning over RPC; never stored. */
 	isProtocol?: boolean
 }
+
+/** Storage codec row schema for the STORED shape (no `isProtocol` — zod strips
+ *  unknown keys, so a stray persisted decoration is tolerated on read). */
+export const StoredFpcSchema: z.ZodType<Omit<FpcInfo, "isProtocol">> = z.object({
+	id: z.string(),
+	profileId: z.string(),
+	chainId: z.number(),
+	type: z.nativeEnum(FpcType),
+	address: z.string(),
+	name: z.string().optional(),
+})
 
 export type Methods = {
 	/**

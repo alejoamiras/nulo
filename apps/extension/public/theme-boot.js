@@ -3,7 +3,7 @@
  * (`script-src 'self' 'wasm-unsafe-eval'`) forbids INLINE js but allows self-hosted files, so this
  * runs before first paint and sets <html theme> so light-mode users never flash dark. chrome.storage
  * is the source of truth; localStorage["nulo:theme"] is a synchronous paint cache written on every
- * theme change (see utils/general.js persistThemeHint). Keep the key + allowed values in sync.
+ * theme change (see utils/general.ts persistThemeHint). Keep the key + allowed values in sync.
  */
 function bootTheme() {
 	let choice = null

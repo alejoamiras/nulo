@@ -11,7 +11,7 @@
 import { Dropdown } from "@/components/ui/Dropdown"
 
 /** Utils */
-import { Config } from "@/wallet/config"
+import { defaultConfig as makeDefaultConfig } from "@/wallet/config"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Composables */
@@ -22,7 +22,7 @@ const configService = new ConfigServiceClient()
 configService.onUpdate.add(onSettingUpdate)
 
 const isLoading = ref(true)
-const defaultConfig = new Config()
+const defaultConfig = makeDefaultConfig()
 const theme = ref(defaultConfig.theme)
 const isSidePanelEnabled = ref(defaultConfig.sidePanel)
 const isShowNodeNameEnabled = ref(defaultConfig.showNode)

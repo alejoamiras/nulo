@@ -25,6 +25,8 @@ import {
 	MAX_REVOKES_PER_TX,
 	MAX_TRACKED_AUTHWITS_PER_ACCOUNT,
 	type Methods,
+	AuthwitSchema,
+	AuthwitStatusSchema,
 } from "./spec"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { TxHash } from "@aztec/stdlib/tx"
@@ -59,8 +61,10 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(AUTH_REGISTRY_SERVICE_NAME, logger)
-		this.authwits = new EntityStorage<Authwit>("nulo:core:auth-registry", browserApi.storage.local)
-		this.statuses = new EntityStorage<boolean>("nulo:core:auth-registry-enabled", browserApi.storage.local)
+		this.authwits = new EntityStorage<Authwit>("nulo:core:auth-registry", browserApi.storage.local, (raw) => AuthwitSchema.parse(raw))
+		this.statuses = new EntityStorage<boolean>("nulo:core:auth-registry-enabled", browserApi.storage.local, (raw) =>
+			AuthwitStatusSchema.parse(raw),
+		)
 	}
 
 	protected async init(services: ServiceCollection) {
@@ -191,7 +195,11 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		const authwits: Authwit[] = []
 		for (const id of ids) {
 			const authwit = await this.authwits.get(`${id}`)
-			if (!authwit) {
+			// Reject an authwit id owned by a DIFFERENT account: authwits are FK-scoped
+			// by account (no profileId), so without this a caller could revoke another
+			// account's authwits by supplying its ids. Treat a foreign id as "doesn't
+			// exist" — there is deliberately no cross-account existence oracle.
+			if (!authwit || authwit.account !== account) {
 				throw new Error(`Authwit #${id} doesn't exist`)
 			}
 			authwits.push(authwit)

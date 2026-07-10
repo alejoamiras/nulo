@@ -127,6 +127,83 @@ export interface DappSendExecutorDeps {
 export class DappSendExecutor {
 	public constructor(private readonly deps: DappSendExecutorDeps) {}
 
+	/**
+	 * Shared execution-slot scaffold for the two slot-taking dApp-send paths
+	 * (standard `aztec_sendTx` + NO_FROM). Owns ONLY the invariant-critical
+	 * choreography; each caller's `run` closure owns its own `simulating`
+	 * checkpoint and body.
+	 *
+	 * Frozen ordering (do not reorder — see execution-lane.ts header):
+	 *   - `acquireSlot` BEFORE the journal claim and any PXE work (the
+	 *     session-FIFO baton releases inside acquisition via `onEnqueued`).
+	 *   - `journalId` hoisted OUTSIDE the try so catch (mark failed) +
+	 *     finally (controller cleanup + slot release) run even if the claim
+	 *     or the post-claim cancel-check throws on a raced cancel — otherwise
+	 *     the slot leaks and the (profileId, chainId) lane wedges until SW
+	 *     restart.
+	 *   - the post-claim `checkCancelled()` surfaces a cancel that landed
+	 *     during the claim's await-chain BEFORE any side-effecting work; the
+	 *     `simulating` transition is deliberately NOT here — a fixed point
+	 *     would change the standard path's invalid-from / payload-parse
+	 *     failure FSM and add a NO_FROM checkpoint that does not exist today.
+	 */
+	private async runInSlot<T>(
+		params: {
+			networkId: string
+			accountAddress: string
+			origin: LocalTxOrigin
+			hooks: ExecutionHooks | undefined
+			// A THUNK, not a value: the primary-method extraction reads the
+			// (potentially large / adversarial) `op.exec.calls`, and must run
+			// AFTER `acquireSlot` — computing it earlier would delay our FIFO
+			// enqueue (letting a later request overtake) and move any throw out
+			// of the acquire-protected try. Evaluated below, inside the try.
+			getCalls: () => { method?: string }[] | undefined
+		},
+		run: (ctx: {
+			journalId: string | undefined
+			checkCancelled: () => void
+			markJournal: (patch: JobProgress) => Promise<void>
+		}) => Promise<T>,
+	): Promise<T> {
+		const { release: releaseSlot, preController } = await this.deps.lane.acquireSlot(
+			params.networkId,
+			params.hooks?.queuedJournalId,
+			params.hooks?.onExecutionEnqueued,
+			params.hooks?.originKey,
+		)
+
+		let journalId: string | undefined
+		try {
+			const claimed = await this.deps.lane.claimOrCreateJournal(
+				params.networkId,
+				params.accountAddress,
+				params.origin,
+				params.getCalls(),
+				params.hooks,
+				preController,
+			)
+			journalId = claimed.journalId
+			const controller = claimed.controller
+			const checkCancelled = (): void => {
+				if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
+			}
+			checkCancelled()
+
+			return await run({
+				journalId,
+				checkCancelled,
+				markJournal: (patch) => this.deps.lane.markJournal(journalId, patch),
+			})
+		} catch (error) {
+			await markFailedUnlessCancelled(error, journalId, this.deps.lane)
+			throw error
+		} finally {
+			if (journalId) this.deps.lane.deleteController(journalId)
+			releaseSlot()
+		}
+	}
+
 	public async estimateOperationFee(operation: Operation, feeSettings: FeeSettings): Promise<TransferFeeEstimate> {
 		if (operation.kind !== "send_transaction" && operation.kind !== "aztec_sendTx") {
 			throw new Error("Only send_transaction and aztec_sendTx operations support fee estimation")
@@ -279,141 +356,105 @@ export class DappSendExecutor {
 			throw new Error("aztec_sendTx: feeSettings is required for the standard execution path")
 		}
 
-		// Acquire the per-(profileId, chainId) execution slot BEFORE the
-		// journal claim and any PXE-touching work. This is where the session-FIFO
-		// baton is released — via the onExecutionEnqueued hook, fired inside
-		// the slot acquisition the instant we're enqueued — so the next dApp popup
-		// opens now while we keep our place at the head of the execution FIFO.
-		// That ordering is what stops T1 and T2 from interleaving their
-		// simulate/prove against shared private-note state. A user-cancel of the
-		// Queued record aborts the wait → JobCancelledSentinel. Held through
-		// submit; released in `finally`.
-		const { release: releaseSlot, preController } = await this.deps.lane.acquireSlot(
-			op.networkId,
-			hooks?.queuedJournalId,
-			hooks?.onExecutionEnqueued,
-			hooks?.originKey,
-		)
-
-		// `journalId` is hoisted so the catch (mark failed) + finally (controller
-		// cleanup + slot release) run even if the claim or the immediate
-		// post-claim cancel-check throws on a raced cancel. If those threw before
-		// the try, `releaseSlot()` would never run and the (profileId, chainId)
-		// lane would wedge until SW restart.
-		let journalId: string | undefined
-		try {
-			// Durable journal record. Claims the pre-allocated queued record (set
-			// by background.ts:tryCreateQueuedJournal at message arrival) or creates
-			// a fresh one. Runs AFTER the slot is held so a record waiting for the
-			// slot stays `queued` (not `pending`), and reuses the pre-acquire
-			// controller so cancel works throughout. See claim helper for the
-			// cancel-during-claim safety properties.
-			const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
-			const claimed = await this.deps.lane.claimOrCreateJournal(
-				op.networkId,
-				op.accountAddress,
+		// The standard path takes the shared execution slot + journal scaffold
+		// (runInSlot); its `run` owns the opts.from guard, payload parse, its own
+		// `simulating` checkpoint, authwit discovery, build, and prove/send. The
+		// primary-method extraction is a thunk so it runs after acquireSlot.
+		return this.runInSlot(
+			{
+				networkId: op.networkId,
+				accountAddress: op.accountAddress,
 				origin,
-				primaryMethod ? [{ method: primaryMethod }] : undefined,
 				hooks,
-				preController,
-			)
-			journalId = claimed.journalId
-			const controller = claimed.controller
-			const checkCancelled = (): void => {
-				if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
-			}
-			// Surface a cancel that landed during the claim's await-chain
-			// BEFORE any side-effecting PXE work.
-			checkCancelled()
-
-			if (op.accountAddress !== op.opts?.from?.toString()) {
-				throw new Error("Invalid `opts.from`")
-			}
-
-			const { actions, feeOptions: fee } = await this.deps.planner.processAztecJsPayload(op.exec, op.opts)
-
-			// Enter `simulating` BEFORE authwit discovery (which runs real
-			// `pxe.simulateTx`). Keeps the holder out of the short-grace `pending`
-			// window during a potentially-slow discovery + build — `pending`'s
-			// 2-min reaper grace is not a defensible ceiling for simulation, and
-			// the holder is no longer wait-heartbeated once it holds the slot.
-			// Matches the NO_FROM path, which already marks simulating first.
-			await this.deps.lane.markJournal(journalId, { stage: "simulating" })
-			checkCancelled()
-
-			// Skip auth witness discovery for embedded fee payments — the dApp handles its own
-			// fee calls (e.g., FeeJuice:claim_and_end_setup) which conflict with the discovery
-			// simulation's dummy fee method.
-			if (!fee.embeddedFeePayment) {
-				const authWitActions = await this.deps.authwit.discoverPrivateAuthwits(
-					{ ...op, actions: [...actions] },
-					async (o, method) => {
-						const { txRequest, node, pxe, account, network } = await this.deps.txBuilder.buildStandard(
-							o as SendTransactionOperation,
-							method,
-						)
-						return { txRequest, node, pxe, account, network }
-					},
-				)
-				if (authWitActions.length) {
-					this.deps.logDebug(`[executeAztecSendTx] Discovered ${authWitActions.length} auth witness(es) via offchain effects`)
-					actions.push(...authWitActions)
+				getCalls: () => {
+					const primaryMethod =
+						(Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
+					return primaryMethod ? [{ method: primaryMethod }] : undefined
+				},
+			},
+			async ({ checkCancelled, markJournal }) => {
+				if (op.accountAddress !== op.opts?.from?.toString()) {
+					throw new Error("Invalid `opts.from`")
 				}
-			}
 
-			checkCancelled()
+				const { actions, feeOptions: fee } = await this.deps.planner.processAztecJsPayload(op.exec, op.opts)
 
-			const { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } =
-				await this.deps.buildAndEstimate({ ...op, actions, fee }, op.feeSettings, parentTask)
+				// Enter `simulating` BEFORE authwit discovery (which runs real
+				// `pxe.simulateTx`). Keeps the holder out of the short-grace `pending`
+				// window during a potentially-slow discovery + build. Marked HERE (not
+				// in runInSlot) so it stays AFTER the opts.from guard + payload parse —
+				// those failures must remain `pending → failed`, not go via simulating.
+				await markJournal({ stage: "simulating" })
+				checkCancelled()
 
-			const sendAdditionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
-			const { txHash, offchainOutput } = await this.deps.coordinator.proveAndSend({
-				pxe,
-				node,
-				txRequest,
-				scopes: [account.address, ...sendAdditionalScopes],
-				parentTask,
-				checkCancelled,
-				markJournal: (patch) => this.deps.lane.markJournal(journalId, patch),
-				wantOffchainOutput: (provedTx) => {
-					const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
-					return extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
-				},
-				// One post-send closure owns BOTH the activity record AND the public-authwit
-				// index write, so ordering is explicit. Recording here (not at build) is what
-				// keeps estimate/reject from leaking a grant; the rows land `pending` and are
-				// reconciled by the tx's on-chain outcome (onTransactionUpdated).
-				recordTransaction: async (hash) => {
-					await this.deps.addTransaction(
-						origin,
-						network.chainId,
-						account.address.toString(),
-						txCalls,
-						nonce.toString(),
-						feePaymentMethod,
-						hash,
-						primaryEndpointUrl(network),
-						getEstimatedFee(txRequest),
-						getGasDetails(txRequest),
+				// Skip auth witness discovery for embedded fee payments — the dApp handles its own
+				// fee calls (e.g., FeeJuice:claim_and_end_setup) which conflict with the discovery
+				// simulation's dummy fee method.
+				if (!fee.embeddedFeePayment) {
+					const authWitActions = await this.deps.authwit.discoverPrivateAuthwits(
+						{ ...op, actions: [...actions] },
+						async (o, method) => {
+							const { txRequest, node, pxe, account, network } = await this.deps.txBuilder.buildStandard(
+								o as SendTransactionOperation,
+								method,
+							)
+							return { txRequest, node, pxe, account, network }
+						},
 					)
-					if (pendingPublicAuthwits.length > 0) {
-						await this.deps.recordPendingAuthwits(account.address.toString(), pendingPublicAuthwits, hash)
+					if (authWitActions.length) {
+						this.deps.logDebug(`[executeAztecSendTx] Discovered ${authWitActions.length} auth witness(es) via offchain effects`)
+						actions.push(...authWitActions)
 					}
-				},
-			})
+				}
 
-			if (op.opts.wait === "NO_WAIT") {
-				return { txHash, ...offchainOutput } as SendReturn<InteractionWaitOptions>
-			}
-			const receipt = await node.getTxReceipt(txHash)
-			return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
-		} catch (error) {
-			await markFailedUnlessCancelled(error, journalId, this.deps.lane)
-			throw error
-		} finally {
-			if (journalId) this.deps.lane.deleteController(journalId)
-			releaseSlot()
-		}
+				checkCancelled()
+
+				const { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } =
+					await this.deps.buildAndEstimate({ ...op, actions, fee }, op.feeSettings, parentTask)
+
+				const sendAdditionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
+				const { txHash, offchainOutput } = await this.deps.coordinator.proveAndSend({
+					pxe,
+					node,
+					txRequest,
+					scopes: [account.address, ...sendAdditionalScopes],
+					parentTask,
+					checkCancelled,
+					markJournal,
+					wantOffchainOutput: (provedTx) => {
+						const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
+						return extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
+					},
+					// One post-send closure owns BOTH the activity record AND the public-authwit
+					// index write, so ordering is explicit. Recording here (not at build) is what
+					// keeps estimate/reject from leaking a grant; the rows land `pending` and are
+					// reconciled by the tx's on-chain outcome (onTransactionUpdated).
+					recordTransaction: async (hash) => {
+						await this.deps.addTransaction(
+							origin,
+							network.chainId,
+							account.address.toString(),
+							txCalls,
+							nonce.toString(),
+							feePaymentMethod,
+							hash,
+							primaryEndpointUrl(network),
+							getEstimatedFee(txRequest),
+							getGasDetails(txRequest),
+						)
+						if (pendingPublicAuthwits.length > 0) {
+							await this.deps.recordPendingAuthwits(account.address.toString(), pendingPublicAuthwits, hash)
+						}
+					},
+				})
+
+				if (op.opts.wait === "NO_WAIT") {
+					return { txHash, ...offchainOutput } as SendReturn<InteractionWaitOptions>
+				}
+				const receipt = await node.getTxReceipt(txHash)
+				return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
+			},
+		)
 	}
 
 	/**
@@ -434,172 +475,143 @@ export class DappSendExecutor {
 			throw new Error("DefaultEntrypoint transactions must use embedded fee payment")
 		}
 
-		// NO_FROM acquires the SAME per-(profileId, chainId) execution slot
-		// as the standard path. This path has no nonce at all (history records
-		// Fr.ZERO), so the mutex is its ONLY protection against concurrent
-		// build/simulate interleaving. Acquire before claim + any PXE work; the
-		// session-FIFO baton is released from inside the slot acquisition
-		// (onExecutionEnqueued) once we're enqueued. Release the slot in
-		// `finally`. Cancel-during-wait aborts → JobCancelledSentinel.
-		const { release: releaseSlot, preController } = await this.deps.lane.acquireSlot(
-			op.networkId,
-			hooks?.queuedJournalId,
-			hooks?.onExecutionEnqueued,
-			hooks?.originKey,
-		)
-
-		// `journalId` hoisted so the catch + finally (controller cleanup + slot
-		// release) run even if the claim / post-claim cancel-check throws on a
-		// raced cancel — otherwise the slot would leak and wedge the
-		// (profileId, chainId) lane. Mirrors the standard path.
-		let journalId: string | undefined
-		try {
-			// NO_FROM / default_entrypoint dApp paths get the same durable
-			// coverage as the standard flows. Claim-or-create mirrors the standard
-			// executeAztecSendTx path so queued visibility + cancel-safe claim
-			// work for first-time-account-deploy sendTx too. Reuses the pre-acquire
-			// controller (cancel works through the wait + execution).
-			const primaryMethod = (Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
-			const claimed = await this.deps.lane.claimOrCreateJournal(
-				op.networkId,
-				op.accountAddress,
+		// NO_FROM takes the SAME shared execution slot + journal scaffold
+		// (runInSlot) as the standard path. It has no nonce at all (history
+		// records Fr.ZERO), so the mutex is its ONLY protection against
+		// concurrent build/simulate interleaving. Unlike the standard path it
+		// does NOT re-check cancel after `simulating` — preserved verbatim. The
+		// primary-method extraction is a thunk so it runs after acquireSlot.
+		return this.runInSlot(
+			{
+				networkId: op.networkId,
+				accountAddress: op.accountAddress,
 				origin,
-				primaryMethod ? [{ method: primaryMethod }] : undefined,
 				hooks,
-				preController,
-			)
-			journalId = claimed.journalId
-			const controller = claimed.controller
-			const checkCancelled = (): void => {
-				if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
-			}
-			// Surface an abort that landed during the claim's await chain
-			// BEFORE side-effecting PXE work.
-			checkCancelled()
+				getCalls: () => {
+					const primaryMethod =
+						(Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
+					return primaryMethod ? [{ method: primaryMethod }] : undefined
+				},
+			},
+			async ({ checkCancelled, markJournal }) => {
+				await markJournal({ stage: "simulating" })
 
-			await this.deps.lane.markJournal(journalId, { stage: "simulating" })
+				const { txRequest, node, pxe, account, network, txCalls } = await this.deps.txBuilder.buildNoFrom(op, parentTask)
+				this.deps.logDebug(
+					`executeNoFromSendTx: buildNoFromTxRequest completed, txCalls=${txCalls.length}, account=${account.address.toString()}`,
+				)
 
-			const { txRequest, node, pxe, account, network, txCalls } = await this.deps.txBuilder.buildNoFrom(op, parentTask)
-			this.deps.logDebug(
-				`executeNoFromSendTx: buildNoFromTxRequest completed, txCalls=${txCalls.length}, account=${account.address.toString()}`,
-			)
+				// NO_FROM is enforced (above) to use embedded payment, so we mark
+				// `embeddedFeePayment` explicitly here (the planner-built path infers
+				// it; this code path constructs `feeOpts` inline so it must set it).
+				// That gates `applyEmbeddedFpcGasCap` to fire as expected — see the
+				// helper's JSDoc for the cap rationale.
+				const maxFeesUpstream = op.opts.fee?.gasSettings?.maxFeesPerGas
+				const feeOpts: FeeOptions = {
+					embeddedFeePayment: detectEmbeddedFeePayment(op.exec?.feePayer, op.opts.from) ?? "fpc",
+					gasLimits: op.opts.fee?.gasSettings?.gasLimits,
+					teardownGasLimits: op.opts.fee?.gasSettings?.teardownGasLimits,
+					maxFeesPerGas: maxFeesUpstream
+						? { feePerDaGas: maxFeesUpstream.feePerDaGas.toString(), feePerL2Gas: maxFeesUpstream.feePerL2Gas.toString() }
+						: undefined,
+					gasPadding: 1,
+				}
+				suggestGasLimits(txRequest, feeOpts)
+				await applyEmbeddedFpcGasCap(txRequest, feeOpts, node)
 
-			// NO_FROM is enforced (above) to use embedded payment, so we mark
-			// `embeddedFeePayment` explicitly here (the planner-built path infers
-			// it; this code path constructs `feeOpts` inline so it must set it).
-			// That gates `applyEmbeddedFpcGasCap` to fire as expected — see the
-			// helper's JSDoc for the cap rationale.
-			const maxFeesUpstream = op.opts.fee?.gasSettings?.maxFeesPerGas
-			const feeOpts: FeeOptions = {
-				embeddedFeePayment: detectEmbeddedFeePayment(op.exec?.feePayer, op.opts.from) ?? "fpc",
-				gasLimits: op.opts.fee?.gasSettings?.gasLimits,
-				teardownGasLimits: op.opts.fee?.gasSettings?.teardownGasLimits,
-				maxFeesPerGas: maxFeesUpstream
-					? { feePerDaGas: maxFeesUpstream.feePerDaGas.toString(), feePerL2Gas: maxFeesUpstream.feePerL2Gas.toString() }
-					: undefined,
-				gasPadding: 1,
-			}
-			suggestGasLimits(txRequest, feeOpts)
-			await applyEmbeddedFpcGasCap(txRequest, feeOpts, node)
+				// Kernelless auth witness discovery: stub the user's account so verify_private_authwit
+				// doesn't fail on missing witnesses. The stub accepts any authwit during simulation.
+				// The discovery result is ONLY used to read offchain effects — never for proving or gas estimation.
+				const dappScopes: AztecAddress[] = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
+				// Dedup by hex (AztecAddress is a class — Set de-dups by ref, not value).
+				const scopeByHex = new Map<string, AztecAddress>()
+				for (const s of dappScopes) scopeByHex.set(s.toString(), s)
+				const additionalScopes = [...scopeByHex.values()]
+				const scopeWithAccountByHex = new Map<string, AztecAddress>()
+				scopeWithAccountByHex.set(account.address.toString(), account.address)
+				for (const s of dappScopes) scopeWithAccountByHex.set(s.toString(), s)
+				const scopesWithAccount = [...scopeWithAccountByHex.values()]
+				this.deps.logDebug(
+					`executeNoFromSendTx: dappScopes=${JSON.stringify(dappScopes)}, additionalScopes=${JSON.stringify(additionalScopes)}, scopesWithAccount=${JSON.stringify(scopesWithAccount)}`,
+				)
 
-			// Kernelless auth witness discovery: stub the user's account so verify_private_authwit
-			// doesn't fail on missing witnesses. The stub accepts any authwit during simulation.
-			// The discovery result is ONLY used to read offchain effects — never for proving or gas estimation.
-			const dappScopes: AztecAddress[] = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
-			// Dedup by hex (AztecAddress is a class — Set de-dups by ref, not value).
-			const scopeByHex = new Map<string, AztecAddress>()
-			for (const s of dappScopes) scopeByHex.set(s.toString(), s)
-			const additionalScopes = [...scopeByHex.values()]
-			const scopeWithAccountByHex = new Map<string, AztecAddress>()
-			scopeWithAccountByHex.set(account.address.toString(), account.address)
-			for (const s of dappScopes) scopeWithAccountByHex.set(s.toString(), s)
-			const scopesWithAccount = [...scopeWithAccountByHex.values()]
-			this.deps.logDebug(
-				`executeNoFromSendTx: dappScopes=${JSON.stringify(dappScopes)}, additionalScopes=${JSON.stringify(additionalScopes)}, scopesWithAccount=${JSON.stringify(scopesWithAccount)}`,
-			)
+				this.deps.logDebug(`executeNoFromSendTx: starting kernelless discovery simulation`)
+				const discoveryResult = await pxe.simulateTx(
+					txRequest,
+					{ simulatePublic: true, skipTxValidation: true, skipFeeEnforcement: true, scopes: additionalScopes },
+					[account.address.toString()],
+				)
 
-			this.deps.logDebug(`executeNoFromSendTx: starting kernelless discovery simulation`)
-			const discoveryResult = await pxe.simulateTx(
-				txRequest,
-				{ simulatePublic: true, skipTxValidation: true, skipFeeEnforcement: true, scopes: additionalScopes },
-				[account.address.toString()],
-			)
-
-			this.deps.logDebug(`executeNoFromSendTx: kernelless discovery completed`)
-			// Extract auth witness requirements from CallAuthorizationRequest offchain effects
-			const effects = collectOffchainEffects(discoveryResult.privateExecutionResult)
-			this.deps.logDebug(`executeNoFromSendTx: offchain effects found: ${effects.length}`)
-			if (effects.length) {
-				const nodeInfo2 = await node.getNodeInfo()
-				// F-012 / A-01 V-01: NO_FROM path also derives chainInfo from
-				// live node — rebind to selected network before constructing
-				// the authwit message hash.
-				assertLiveChainIdentity(network, nodeInfo2)
-				const chainInfo = { chainId: new Fr(nodeInfo2.l1ChainId), version: new Fr(nodeInfo2.rollupVersion) }
-				for (const effect of effects) {
-					try {
-						const authRequest = await CallAuthorizationRequest.fromFields(effect.data)
-						const messageHash = await computeAuthWitMessageHash(
-							{ consumer: effect.contractAddress, innerHash: authRequest.innerHash },
-							chainInfo,
-						)
-						const authWitness = await account.createAuthWit(messageHash)
-						txRequest.authWitnesses.push(authWitness)
-					} catch {
-						// Not a CallAuthorizationRequest — skip
+				this.deps.logDebug(`executeNoFromSendTx: kernelless discovery completed`)
+				// Extract auth witness requirements from CallAuthorizationRequest offchain effects
+				const effects = collectOffchainEffects(discoveryResult.privateExecutionResult)
+				this.deps.logDebug(`executeNoFromSendTx: offchain effects found: ${effects.length}`)
+				if (effects.length) {
+					const nodeInfo2 = await node.getNodeInfo()
+					// F-012 / A-01 V-01: NO_FROM path also derives chainInfo from
+					// live node — rebind to selected network before constructing
+					// the authwit message hash.
+					assertLiveChainIdentity(network, nodeInfo2)
+					const chainInfo = { chainId: new Fr(nodeInfo2.l1ChainId), version: new Fr(nodeInfo2.rollupVersion) }
+					for (const effect of effects) {
+						try {
+							const authRequest = await CallAuthorizationRequest.fromFields(effect.data)
+							const messageHash = await computeAuthWitMessageHash(
+								{ consumer: effect.contractAddress, innerHash: authRequest.innerHash },
+								chainInfo,
+							)
+							const authWitness = await account.createAuthWit(messageHash)
+							txRequest.authWitnesses.push(authWitness)
+						} catch {
+							// Not a CallAuthorizationRequest — skip
+						}
 					}
 				}
-			}
 
-			this.deps.logDebug(`executeNoFromSendTx: authwits added: ${txRequest.authWitnesses.length}, starting real simulation`)
-			// Real simulation with actual auth witnesses and real account contract
-			const simulatedTx = await this.deps.coordinator.simulateTxTask(
-				pxe,
-				txRequest,
-				{ simulatePublic: true, skipFeeEnforcement: true, scopes: scopesWithAccount },
-				parentTask,
-			)
-			await finalizeGasLimits(node, txRequest, simulatedTx, 1, undefined, feeOpts, 1)
+				this.deps.logDebug(`executeNoFromSendTx: authwits added: ${txRequest.authWitnesses.length}, starting real simulation`)
+				// Real simulation with actual auth witnesses and real account contract
+				const simulatedTx = await this.deps.coordinator.simulateTxTask(
+					pxe,
+					txRequest,
+					{ simulatePublic: true, skipFeeEnforcement: true, scopes: scopesWithAccount },
+					parentTask,
+				)
+				await finalizeGasLimits(node, txRequest, simulatedTx, 1, undefined, feeOpts, 1)
 
-			// Prove with account in scope
-			const { txHash, offchainOutput } = await this.deps.coordinator.proveAndSend({
-				pxe,
-				node,
-				txRequest,
-				scopes: scopesWithAccount,
-				parentTask,
-				checkCancelled,
-				markJournal: (patch) => this.deps.lane.markJournal(journalId, patch),
-				wantOffchainOutput: (provedTx) => {
-					const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
-					return extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
-				},
-				recordTransaction: (hash) =>
-					this.deps.addTransaction(
-						origin,
-						network.chainId,
-						account.address.toString(),
-						txCalls,
-						Fr.ZERO.toString(),
-						AccountFeePaymentMethodOptions.EXTERNAL,
-						hash,
-						primaryEndpointUrl(network),
-						getEstimatedFee(txRequest),
-						getGasDetails(txRequest),
-					),
-			})
+				// Prove with account in scope
+				const { txHash, offchainOutput } = await this.deps.coordinator.proveAndSend({
+					pxe,
+					node,
+					txRequest,
+					scopes: scopesWithAccount,
+					parentTask,
+					checkCancelled,
+					markJournal,
+					wantOffchainOutput: (provedTx) => {
+						const timestamp = provedTx.publicInputs.constants.anchorBlockHeader.globalVariables.timestamp
+						return extractOffchainOutput(provedTx.getOffchainEffects(), BigInt(timestamp))
+					},
+					recordTransaction: (hash) =>
+						this.deps.addTransaction(
+							origin,
+							network.chainId,
+							account.address.toString(),
+							txCalls,
+							Fr.ZERO.toString(),
+							AccountFeePaymentMethodOptions.EXTERNAL,
+							hash,
+							primaryEndpointUrl(network),
+							getEstimatedFee(txRequest),
+							getGasDetails(txRequest),
+						),
+				})
 
-			if (op.opts.wait === "NO_WAIT") {
-				return { txHash, ...offchainOutput } as SendReturn<InteractionWaitOptions>
-			}
-			const receipt = await node.getTxReceipt(txHash)
-			return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
-		} catch (error) {
-			await markFailedUnlessCancelled(error, journalId, this.deps.lane)
-			throw error
-		} finally {
-			if (journalId) this.deps.lane.deleteController(journalId)
-			releaseSlot()
-		}
+				if (op.opts.wait === "NO_WAIT") {
+					return { txHash, ...offchainOutput } as SendReturn<InteractionWaitOptions>
+				}
+				const receipt = await node.getTxReceipt(txHash)
+				return { receipt, ...offchainOutput } as SendReturn<InteractionWaitOptions>
+			},
+		)
 	}
 }

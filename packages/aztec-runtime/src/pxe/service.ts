@@ -33,6 +33,7 @@ import type { ILogger } from "@nulo/wallet-core/logger"
 import { ReadWriteGuard } from "@nulo/wallet-core/utils"
 import type { NetworkInfo } from "./chain-runtime"
 import { ChainRuntimeRegistry, ProductionPxeFactory, type PxeFactory } from "./chain-runtime"
+import { PXE_DATA_DIR_ROOT, chainDataDir, chainDataDirPrefix, chainRegistryKey, chainRegistryKeyPrefix } from "./chain-coordinates"
 import { ArtifactRegistry } from "./artifact-registry"
 import { loadProductionKnownArtifacts } from "./known-artifacts"
 import { loadProductionNoteSchemas, type NoteSchema } from "./note-schemas"
@@ -124,7 +125,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	}
 
 	private chainKey(profileId: string, chainId: number): string {
-		return `${profileId}:${chainId}`
+		return chainRegistryKey({ profileId, chainId })
 	}
 
 	private getChainGuard(profileId: string, chainId: number): ReadWriteGuard {
@@ -149,11 +150,11 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	protected async init() {
 		// delete orphan PXE DBs
 		const dbs = await indexedDB.databases()
-		const pxes = dbs.filter((x) => x.name?.startsWith("pxe/"))
+		const pxes = dbs.filter((x) => x.name?.startsWith(PXE_DATA_DIR_ROOT))
 		if (pxes.length) {
 			const profiles = await this.profiles.getProfiles()
 			for (let i = pxes.length - 1; i >= 0; i--) {
-				if (!profiles.some((x) => pxes[i].name!.startsWith(`pxe/${x.id}/`))) {
+				if (!profiles.some((x) => pxes[i].name!.startsWith(chainDataDirPrefix(x.id)))) {
 					await new Promise<void>((resolve, reject) => {
 						const req = indexedDB.deleteDatabase(pxes[i].name!)
 						req.onsuccess = () => resolve()
@@ -367,7 +368,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			}
 
 			// When we pass `overrides`, upstream PXE enforces
-			// `skipKernels: true` (`@aztec/pxe@4.2.0` pxe.js:627 —
+			// `skipKernels: true` (`@aztec/pxe@5.0.0-rc.2` pxe.js:627 —
 			// `if (hasOverriddenContracts && !skipKernels) throw`). Today
 			// this works because upstream defaults `skipKernels` to true,
 			// but riding a default is fragile: a future upstream change
@@ -463,7 +464,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		await barrier.read(async () => {
 			await chainGuard.write(async () => {
 				await this.registry.dispose(profileId, chainId)
-				const dbName = `pxe/${profileId}/${chainId}`
+				const dbName = chainDataDir({ profileId, chainId })
 				await new Promise<void>((resolve) => {
 					const req = indexedDB.deleteDatabase(dbName)
 					req.onsuccess = () => resolve()
@@ -526,7 +527,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			await this.registry.disposeProfile(profile.id)
 			// Drop the per-chain guards for this profile. They're idle (drained
 			// by the barrier above) so deletion is race-free.
-			const prefix = `${profile.id}:`
+			const prefix = chainRegistryKeyPrefix(profile.id)
 			for (const k of Array.from(this.chainGuards.keys())) {
 				if (k.startsWith(prefix)) this.chainGuards.delete(k)
 			}
@@ -536,7 +537,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// profile delete used to nuke the bundle for every surviving
 			// profile too, causing a wasted reload on next access.
 			for (const db of await indexedDB.databases()) {
-				if (db.name?.startsWith(`pxe/${profile.id}/`) || db.name === "keyval-store") {
+				if (db.name?.startsWith(chainDataDirPrefix(profile.id)) || db.name === "keyval-store") {
 					const _ = indexedDB.deleteDatabase(db.name)
 				}
 			}

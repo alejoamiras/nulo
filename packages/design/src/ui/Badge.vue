@@ -1,9 +1,14 @@
 <script setup lang="ts">
+import type { PropType } from "vue"
 import Flex from "../core/Flex.vue"
+import type { SeverityTone } from "../severity"
+
+/** Badge renders the 3 semantic tones it has styles for + the non-semantic `purple` accent. */
+type BadgeVariant = Extract<SeverityTone, "info" | "warning" | "error"> | "purple"
 
 const props = defineProps({
 	variant: {
-		type: String,
+		type: String as PropType<BadgeVariant>,
 		default: "info",
 	},
 })

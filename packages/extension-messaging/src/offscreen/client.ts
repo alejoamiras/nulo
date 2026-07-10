@@ -2,7 +2,7 @@ import type { ILogger } from "@nulo/wallet-core/logger"
 import { getRandomHex } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { BaseServiceClient, type RequestErrorMeta, type ResponseContentLike, type TerminalRecord } from "../core/base-client"
-import { RpcDisconnectedError, RpcTimeoutError, walletErrorFromPayload } from "../errors"
+import { RpcDisconnectedError, RpcTimeoutError, remoteErrorFromResponseContent } from "../errors"
 import { MessageType } from "../messages"
 import type { EventMessage, ResponseMessage } from "./messages"
 import { type RequestTelemetry, type TelemetrySink, LoggingTelemetrySink } from "./telemetry"
@@ -111,9 +111,7 @@ export abstract class ServiceClient<
 	// connected dApp via prove/simulate are mapped to a stable response.error in
 	// `error-envelope.ts` (the Rpc* cases added in this phase).
 	protected makeRemoteError(content: ResponseContentLike): unknown {
-		return content.errorPayload
-			? walletErrorFromPayload(content.errorPayload as Parameters<typeof walletErrorFromPayload>[0])
-			: new Error(content.error ?? "Unknown error")
+		return remoteErrorFromResponseContent(content)
 	}
 
 	protected makeTimeoutError(meta: RequestErrorMeta): unknown {
