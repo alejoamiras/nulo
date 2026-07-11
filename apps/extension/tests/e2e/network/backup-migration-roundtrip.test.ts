@@ -30,6 +30,7 @@ import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, launchExtension, openPopup, replaceInputValue, test, waitForHash } from "../fixtures/extension"
 import { getAccountAddress, navigateByHash, refreshBalances, switchToLocalNetwork, waitForBalance } from "../fixtures/helpers"
+import { armBackupDownloadCapture, readCapturedBackupDownload } from "../helpers/backup-export"
 import { gotoPopupImport, importFullBackup, POPUP_IMPORT_SHELL, TEST_PASSWORD, writeBackupToTemp } from "../helpers/import-drivers"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -64,41 +65,11 @@ test.skipIf(!hasConfig || !HAS_FIXTURE)(
 			{ timeout: 120_000, polling: 250 },
 		)
 
-		// Capture the download in-page: stub the optional-permission gate and
-		// chrome.downloads, fetch the blob URL BEFORE downloadFile's finally
-		// revokes it, gunzip via DecompressionStream, hand the JSON back.
-		await page.evaluate(() => {
-			const w = window as unknown as { __backupCapture?: Promise<string> }
-			w.__backupCapture = new Promise<string>((resolve, reject) => {
-				const timer = setTimeout(() => reject(new Error("backup download was not captured within 30s")), 30_000)
-				const c = chrome as unknown as {
-					permissions: { contains: (p: unknown, cb: (has: boolean) => void) => void }
-					downloads: { download: (opts: { url: string }, cb: (id: number) => void) => void }
-				}
-				c.permissions.contains = (_perms, cb) => cb(true)
-				c.downloads = {
-					download: (opts, cb) => {
-						fetch(opts.url)
-							.then((r) => r.blob())
-							.then(async (blob) => {
-								const ds = new DecompressionStream("gzip")
-								const text = await new Response(blob.stream().pipeThrough(ds)).text()
-								clearTimeout(timer)
-								resolve(text)
-								cb(1)
-							})
-							.catch((err) => {
-								clearTimeout(timer)
-								reject(err instanceof Error ? err : new Error(String(err)))
-							})
-					},
-				}
-			})
-			// Swallow the (test-only) unhandled rejection if the click never fires.
-			w.__backupCapture.catch(() => {})
-		})
+		// Capture the download in-page (see helpers/backup-export.ts for the
+		// chrome.downloads stub + gunzip mechanics).
+		await armBackupDownloadCapture(page)
 		await clickByTestId(page, "download-backup-btn")
-		const exportedJson = await page.evaluate(() => (window as unknown as { __backupCapture: Promise<string> }).__backupCapture)
+		const exportedJson = await readCapturedBackupDownload(page)
 		await page.close()
 
 		// ── 2. Doctor it into a PRE-shape backup ──────────────────────────
