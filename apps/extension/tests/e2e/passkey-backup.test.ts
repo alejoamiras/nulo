@@ -29,6 +29,46 @@ import { clickByTestId, openPopup, replaceInputValue, waitForHash, test } from "
 import { getActiveProfileName } from "./fixtures/helpers"
 import { setupPasskeyVirtualAuth } from "./fixtures/passkey"
 
+/** Reset the wallet via the in-app reset flow (settings → security → reset).
+ *  Cascades through every service (NetworkService.onProfileDeleted, etc.) so
+ *  storage AND in-memory SW state are properly cleaned — a plain
+ *  `chrome.storage.local.clear()` would leave the SW's cached account map
+ *  populated and a subsequent import would hit a spurious "Duplicate
+ *  address". Lands on /popup/register with the loader cleared. */
+async function resetWallet(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		window.location.hash = "#/popup/settings/security/reset"
+	})
+	await waitForHash(page, "#/popup/settings/security/reset", 5_000)
+	await page.waitForSelector('[data-testid="reset-checkbox-permanent"]', { visible: true, timeout: 5_000 })
+	await clickByTestId(page, "reset-checkbox-permanent")
+	await clickByTestId(page, "reset-checkbox-undone")
+	await clickByTestId(page, "reset-checkbox-sure")
+	// Profile name is user-typed (F1) — read it from the reset page's
+	// data-profile-name attribute rather than hardcoding.
+	const activeProfileName = await getActiveProfileName(page)
+	await page.evaluate((expectedName: string) => {
+		const input = document.querySelector<HTMLInputElement>('[data-testid="reset-confirm-input"] input')
+		if (!input) throw new Error("reset-confirm-input not found")
+		const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set
+		setter?.call(input, expectedName)
+		input.dispatchEvent(new Event("input", { bubbles: true }))
+	}, activeProfileName)
+	await page.waitForFunction(
+		() => {
+			const btn = document.querySelector<HTMLButtonElement>('[data-testid="reset-submit-btn"]')
+			return btn !== null && !btn.disabled
+		},
+		{ timeout: 5_000 },
+	)
+	await clickByTestId(page, "reset-submit-btn")
+	await waitForHash(page, "#/popup/register", 10_000)
+	await page.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), {
+		timeout: 15_000,
+		polling: 500,
+	})
+}
+
 /** Drive the passkey-register flow on a fresh extension at /popup/register.
  *  Mirrors `passkey-paths.test.ts:registerPasskeyProfile`. Lands on
  *  /popup/general. */
@@ -376,43 +416,8 @@ test("passkey full-backup: in-session round-trip (register → reset → import 
 		const filePath = writeBackupToTemp(buildSyntheticPasskeyBackup(credentialId, addressBefore))
 
 		// 3. Reset the wallet via the in-app reset flow — the same pattern
-		//    `passkey-paths.test.ts:140-172` uses. This cascades through
-		//    every service (NetworkService.onProfileDeleted, etc.) so
-		//    storage AND in-memory SW state are properly cleaned. A plain
-		//    `chrome.storage.local.clear()` would leave the SW's cached
-		//    account map populated and the import would hit a spurious
-		//    "Duplicate address".
-		await page.evaluate(() => {
-			window.location.hash = "#/popup/settings/security/reset"
-		})
-		await waitForHash(page, "#/popup/settings/security/reset", 5_000)
-		await page.waitForSelector('[data-testid="reset-checkbox-permanent"]', { visible: true, timeout: 5_000 })
-		await clickByTestId(page, "reset-checkbox-permanent")
-		await clickByTestId(page, "reset-checkbox-undone")
-		await clickByTestId(page, "reset-checkbox-sure")
-		// Profile name is now user-typed (F1) — read it from the reset
-		// page's data-profile-name attribute rather than hardcoding.
-		const activeProfileName = await getActiveProfileName(page)
-		await page.evaluate((expectedName: string) => {
-			const input = document.querySelector<HTMLInputElement>('[data-testid="reset-confirm-input"] input')
-			if (!input) throw new Error("reset-confirm-input not found")
-			const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set
-			setter?.call(input, expectedName)
-			input.dispatchEvent(new Event("input", { bubbles: true }))
-		}, activeProfileName)
-		await page.waitForFunction(
-			() => {
-				const btn = document.querySelector<HTMLButtonElement>('[data-testid="reset-submit-btn"]')
-				return btn !== null && !btn.disabled
-			},
-			{ timeout: 5_000 },
-		)
-		await clickByTestId(page, "reset-submit-btn")
-		await waitForHash(page, "#/popup/register", 10_000)
-		await page.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), {
-			timeout: 15_000,
-			polling: 500,
-		})
+		//    `passkey-paths.test.ts:140-172` uses.
+		await resetWallet(page)
 
 		// 4. Drive the import flow.
 		await page.evaluate(() => {
@@ -444,3 +449,14 @@ test("passkey full-backup: in-session round-trip (register → reset → import 
 		await page.close()
 	}
 }, 120_000)
+
+// NOTE: a REAL passkey export → reset → import round-trip (capturing the
+// actual EXPORT file, mirroring the encrypted/password real-export tests) was
+// prototyped but NOT landed: it depends on the passkey EXPORT ceremony, which
+// does not resolve on this machine's virtual authenticator — the SAME
+// pre-existing limitation that already CI-skips + locally-fails the
+// "status card" export test above (verified failing at the branch base). The
+// passkey IMPORT path is fully covered by the synthetic round-trip above, and
+// the export FILE format is covered by the password (network round-trip) and
+// encrypted (`backup-roundtrip.test.ts`) real-export tests. Revisit if the
+// export-ceremony virtual-auth issue is fixed.
