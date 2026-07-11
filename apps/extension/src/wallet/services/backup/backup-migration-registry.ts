@@ -133,7 +133,11 @@ const numberAnchor =
 	}
 
 function configSliceToStored(slice: readonly unknown[]): { ok: true; stored: Record<string, unknown> } | { ok: false; reason: string } {
-	const stored: Record<string, unknown> = {}
+	// Prototype-free target: this projection intentionally preserves arbitrary
+	// on-disk keys (for a config key-rename migration), so a literal `{}` would
+	// route a `"__proto__"` key through the inherited setter — silently dropping
+	// it AND defeating the duplicate-key guard (`Object.hasOwn` never sees it).
+	const stored: Record<string, unknown> = Object.create(null)
 	for (const el of slice) {
 		if (typeof el !== "object" || el === null || Array.isArray(el)) {
 			return { ok: false, reason: "config slice element is not an object" }
@@ -145,7 +149,9 @@ function configSliceToStored(slice: readonly unknown[]): { ok: true; stored: Rec
 		if (Object.hasOwn(stored, key)) return { ok: false, reason: `config slice has a duplicate key "${key}"` }
 		stored[key] = prop.value
 	}
-	return { ok: true, stored }
+	// Re-plain the object so the caller's `JSON.stringify` emits a normal object
+	// (a null-proto object still stringifies fine, but keep the wire type plain).
+	return { ok: true, stored: { ...stored } }
 }
 
 function configStoredToSlice(stored: unknown): { ok: true; slice: unknown[] } | { ok: false; reason: string } {

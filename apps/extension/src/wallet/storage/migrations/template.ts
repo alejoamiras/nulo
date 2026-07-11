@@ -27,8 +27,19 @@
  *      Presence-guard every access and THROW on anything malformed
  *      (fail-closed) — a migration that trusts its input is a vulnerability,
  *      not just a bug.
- *   7. Import it into `index.ts`'s `realMigrations` array.
- *   8. Add a colocated `*.test.ts` with before→after fixtures.
+ *   7. **SCHEMA-CONFORMANCE RULE (post-#220 row codecs):** every service now
+ *      validates each stored row against a zod schema ON READ; a row that
+ *      fails is KEPT but read back as `undefined` — written successfully, then
+ *      INVISIBLE in the UI and dropped from the next export. So your
+ *      migration's OUTPUT row MUST satisfy the destination service's row
+ *      schema (`<Service>Schema` in its `spec.ts`). The two traps: `drop`ping
+ *      or `retype`ing a schema-REQUIRED field, and — when a release ADDS a new
+ *      required field — failing to `addDefault` it (old rows won't have it).
+ *      Your colocated test MUST assert `Schema.parse(migratedRow)` succeeds
+ *      for every before→after fixture. (There is no automatic gate that a
+ *      migration's old→new output matches the schema — only your test.)
+ *   8. Import it into `index.ts`'s `realMigrations` array.
+ *   9. Add a colocated `*.test.ts` with before→after fixtures.
  *
  * `breaking` defaults to `true` (the new code REQUIRES this shape; a failed
  * migration blocks with recovery). Set `false` ONLY if the code genuinely

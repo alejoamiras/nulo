@@ -259,6 +259,25 @@ function validateTransform(target: string, t: RowMapTransform): void {
 			}
 		}
 	}
+
+	// Cross-clause idempotency: `addDefault` runs LAST, so a field it fills on
+	// the first pass would be re-transformed by an earlier value clause on the
+	// second — the harness runs every migration twice. Reject a default whose
+	// field is also `retype`d / `remapValues`d (run 2 coerces/remaps the
+	// freshly-defaulted value), or is a `rename` SOURCE (run 2 re-triggers the
+	// rename → a both-names collision throw). Overlap with `drop` is fine
+	// (drop-then-default is a stable reset).
+	if (t.addDefault) {
+		const retypeFields = new Set(Object.keys(t.retype ?? {}))
+		const remapFields = new Set(Object.keys(t.remapValues ?? {}))
+		const renameSources = new Set(Object.keys(t.rename ?? {}))
+		for (const field of Object.keys(t.addDefault)) {
+			if (retypeFields.has(field)) fail(`addDefault "${field}" is also retyped — a re-run would coerce the default (non-idempotent)`)
+			if (remapFields.has(field)) fail(`addDefault "${field}" is also remapped — a re-run would remap the default (non-idempotent)`)
+			if (renameSources.has(field))
+				fail(`addDefault "${field}" re-creates a rename source — a re-run would re-trigger the rename (non-idempotent)`)
+		}
+	}
 }
 
 /** The per-row interpreter. Deterministic, sibling-blind, order-blind: its

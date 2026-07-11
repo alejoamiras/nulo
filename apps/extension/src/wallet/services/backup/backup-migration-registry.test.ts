@@ -85,6 +85,29 @@ describe("backup-migration-registry", () => {
 		expect(back.data.config).toEqual([{ key: "legacyTheme", value: "dark" }])
 	})
 
+	test("config toStored preserves a `__proto__` key faithfully and still detects it as a duplicate", () => {
+		// On a plain `{}` target, `stored["__proto__"] = …` hits the inherited
+		// setter — silently dropping the key AND bypassing the duplicate guard.
+		// The null-proto target round-trips it as real data. (Bug hunt.)
+		const data = { ...fixture(), config: [{ key: "__proto__", value: { x: 1 } }] }
+		const normalized = normalizeOrThrow(data)
+		// Assert on the raw JSON string — an object literal `{__proto__: …}` sets
+		// the prototype, so `.toEqual` can't express "own __proto__ key".
+		expect(normalized.entries[CONFIG_STORAGE_KEY]).toBe('{"__proto__":{"x":1}}')
+		const back = denormalizeBackupData(normalized.entries, normalized)
+		if (!back.ok) throw new Error(back.reason)
+		expect(back.data.config).toEqual([{ key: "__proto__", value: { x: 1 } }])
+
+		const dup = normalizeBackupData({
+			...fixture(),
+			config: [
+				{ key: "__proto__", value: 1 },
+				{ key: "__proto__", value: 2 },
+			],
+		})
+		expect(dup.ok).toBe(false)
+	})
+
 	test("fpc slice element is the stored row verbatim — no `isProtocol` fabricated anywhere", () => {
 		const data = fixture()
 		const normalized = normalizeOrThrow(data)

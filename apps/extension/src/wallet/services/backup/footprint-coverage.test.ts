@@ -19,7 +19,8 @@ import { defineMigration, type Migration, Migrator, SCHEMA_VERSION_KEY } from "@
 import { MemoryStorageArea } from "@nulo/wallet-core/storage"
 import { backupMigrationFixture } from "@/e2e/backup-migration-fixture"
 import { backupMigrations, migrations, realMigrations } from "@/wallet/storage/migrations"
-import { CONTACT_STORAGE_ROOT } from "@/wallet/services/contact/spec"
+import { CONTACT_STORAGE_ROOT, ContactSchema } from "@/wallet/services/contact/spec"
+import type { z } from "zod"
 import { BACKUP_BLOCKED_ROOTS, BACKUP_SLICE_REGISTRY } from "./backup-migration-registry"
 import { applyRowTransform, defineRowMapMigration, isBackupSafeMigration, rowMapDefOf, type RowMapTransform } from "./row-map-migration"
 
@@ -143,10 +144,68 @@ describe("metamorphic guardrail: per-row output invariant under subset × permut
 		}
 	})
 
+	// SCHEMA CONFORMANCE (post-#220 row codecs): a backup-safe migration whose
+	// output violates the destination service's row schema produces a row that
+	// restore WRITES but the next codec'd read returns as `undefined` —
+	// invisible in the UI, dropped from the next export. We cannot fully prove
+	// the old→new path here (only the author's before/after fixtures know the
+	// old shape — see template.ts step 7), but a `drop`/`retype` of a required
+	// field breaks a CURRENT-shape row too, which we CAN catch: apply each
+	// migration to a schema-valid current row and assert it stays valid. The
+	// map forces a sample when a future migration targets a new root.
+	const SCHEMA_SAMPLES: Record<string, { schema: z.ZodType<unknown>; valid: Record<string, unknown> }> = {
+		[CONTACT_STORAGE_ROOT]: {
+			schema: ContactSchema as unknown as z.ZodType<unknown>,
+			valid: { id: "c1", profileId: "p1", name: "Alice", address: "0xabc", abbr: "A" },
+		},
+	}
+
+	test("every backup-safe migration keeps a schema-valid row valid (no dropped/retyped required field)", () => {
+		for (const m of covered) {
+			const def = rowMapDefOf(m)
+			for (const root of Object.keys(def?.rowMaps ?? {})) {
+				const sample = SCHEMA_SAMPLES[root]
+				expect(
+					sample,
+					`migration ${m.version} transforms "${root}" but no schema sample is registered — add one to SCHEMA_SAMPLES so this guardrail can prove the output stays codec-valid`,
+				).toBeDefined()
+				if (!sample) continue
+				const transform = def?.rowMaps?.[root]
+				if (!transform) continue
+				const out = applyRowTransform(sample.valid, transform)
+				const parsed = sample.schema.safeParse(out)
+				expect(
+					parsed.success,
+					`migration ${m.version} output for "${root}" fails its row schema (would restore invisible): ${JSON.stringify(out)}`,
+				).toBe(true)
+			}
+		}
+	})
+
+	test("the guardrail has teeth: a migration dropping a schema-REQUIRED field is caught", () => {
+		const dropsRequired = defineRowMapMigration({
+			version: 2,
+			description: "drops the required abbr field",
+			rowMaps: { [CONTACT_STORAGE_ROOT]: { drop: ["abbr"] } },
+		})
+		const transform = rowMapDefOf(dropsRequired)?.rowMaps?.[CONTACT_STORAGE_ROOT]
+		const out = applyRowTransform(
+			{ id: "c1", profileId: "p1", name: "Alice", address: "0xabc", abbr: "A" },
+			transform as RowMapTransform,
+		)
+		expect(ContactSchema.safeParse(out).success).toBe(false)
+	})
+
 	test("interpreter idempotence: applying a transform twice equals applying it once (run-twice safety)", () => {
 		for (const m of covered) {
 			const def = rowMapDefOf(m)
-			for (const transform of Object.values(def?.rowMaps ?? {})) {
+			// BOTH rowMaps AND valueMaps: `applyRowTransform` is the same
+			// interpreter for a value object, and the engine's empty-store
+			// run-twice harness short-circuits an absent config value — so
+			// without this a non-idempotent `valueMaps` transform would escape
+			// every automated guardrail (row-map audit finding).
+			const transforms = [...Object.values(def?.rowMaps ?? {}), ...Object.values(def?.valueMaps ?? {})]
+			for (const transform of transforms) {
 				for (const row of sampleRowsFor(transform)) {
 					const once = applyRowTransform(row, transform)
 					expect(applyRowTransform(once, transform)).toEqual(once)
@@ -215,6 +274,30 @@ describe("DSL define-time validation rejects ambiguous or non-idempotent transfo
 
 	test("a migration transforming nothing is rejected", () => {
 		expect(() => defineRowMapMigration({ version: 2, description: "x" })).toThrow()
+	})
+
+	test("cross-clause non-idempotency is rejected: addDefault field also transformed by an earlier clause", () => {
+		// retype coerces the run-1 default on run 2; remapValues remaps it;
+		// re-adding a rename source re-triggers the rename → collision. (Bug hunt.)
+		const cases: RowMapTransform[] = [
+			{ retype: { n: "number" }, addDefault: { n: "42" } },
+			{ remapValues: { status: { old: "new" } }, addDefault: { status: "old" } },
+			{ rename: { legacyName: "name" }, addDefault: { legacyName: "seed" } },
+		]
+		for (const t of cases) {
+			expect(
+				() => defineRowMapMigration({ version: 2, description: "x", rowMaps: { [CONTACT_STORAGE_ROOT]: t } }),
+				JSON.stringify(t),
+			).toThrow(/non-idempotent/)
+		}
+		// drop + addDefault on the same field is a stable reset — still allowed.
+		expect(() =>
+			defineRowMapMigration({
+				version: 2,
+				description: "x",
+				rowMaps: { [CONTACT_STORAGE_ROOT]: { drop: ["x"], addDefault: { x: 1 } } },
+			}),
+		).not.toThrow()
 	})
 
 	test("accessor smuggling is rejected: a getter on the transform is NOT pure data (codex post-impl finding)", () => {

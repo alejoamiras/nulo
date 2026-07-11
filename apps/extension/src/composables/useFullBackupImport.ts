@@ -195,6 +195,12 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 	}
 
 	async function restoreBackup() {
+		// Re-entrancy guard: a second concurrent run (double-click, or the
+		// popup's document-level Enter handler firing again mid-flight) would
+		// create a second profile and race the un-locked account restore into
+		// duplicate/last-writer-wins rows. `AccountService.restore` has no lock,
+		// so this guard is the barrier. Mirrors `pickBackupFile`'s guard.
+		if (restoreStatus.value === "progress") return
 		if (!isAllowedToImportBackup.value) return
 		opts.clearError()
 		restoreStatus.value = "progress"
