@@ -114,7 +114,7 @@ const handleHalf = () => {
 <template>
 	<Flex @click="handleFocus" gap="8" direction="column" :class="$style.wrapper">
 		<Flex direction="column" gap="4">
-			<Flex align="baseline" gap="4">
+			<Flex gap="4">
 				<input
 					ref="inputEl"
 					v-model="model"

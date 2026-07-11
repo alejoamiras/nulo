@@ -1,5 +1,5 @@
 import { computed, ref, type Ref } from "vue"
-import { EncryptionKey } from "@nulo/wallet-crypto"
+import { asBase64CredentialId, asBase64MasterSecret, EncryptionKey } from "@nulo/wallet-crypto"
 import { sanitizeString } from "@/utils/string"
 import { AccountServiceClient } from "@/wallet/services/account/client"
 import { ACCOUNT_SERVICE_NAME } from "@/wallet/services/account/spec"
@@ -15,7 +15,7 @@ import { FpcServiceClient } from "@/wallet/services/fpc/client"
 import { FPC_SERVICE_NAME } from "@/wallet/services/fpc/spec"
 import { NetworkServiceClient } from "@/wallet/services/network/client"
 import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
-import { ProfileServiceClient } from "@/wallet/services/profile/client"
+import { ProfileServiceClient, type RestoreSecret } from "@/wallet/services/profile/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { TOKEN_BALANCE_SERVICE_NAME } from "@/wallet/services/token-balance/spec"
 import { TokenServiceClient } from "@/wallet/services/token/client"
@@ -350,7 +350,15 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// existing profiles.
 			const override = opts.profileName?.value.trim()
 			const profileForRestore = override ? { ...profile, name: override } : profile
-			const newProfile = await profileService.restore(profileForRestore, masterKey, opts.password.value, credentialData)
+			// Construct the profile-type-discriminated restore secret at the backup
+			// boundary: the v2 `master-key` field is a base64 plain master key for
+			// password profiles and the credentialId for passkey profiles (unchanged
+			// on disk — this only types the transient RPC payload).
+			const restoreSecret: RestoreSecret =
+				profile.type === "password"
+					? { type: "password", masterKey: asBase64MasterSecret(masterKey) }
+					: { type: "passkey", credentialId: asBase64CredentialId(masterKey) }
+			const newProfile = await profileService.restore(profileForRestore, restoreSecret, opts.password.value, credentialData)
 
 			if (newProfile.restoreError) {
 				restoreStatus.value = "failed"

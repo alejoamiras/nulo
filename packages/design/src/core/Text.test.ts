@@ -30,6 +30,9 @@ describe("Text", () => {
 
 	// (PIN) verbatim behavior preserved from the pre-migration component:
 	test("(PIN) off-scale/named size emits the class verbatim (no .fz--large in base.css → inherits at runtime)", () => {
+		// `size` is now typed to the FontSize scale; this pins that the RUNTIME still passes an
+		// off-scale value straight through to `fz--<value>`. The off-contract value is deliberate.
+		// @ts-expect-error off-scale size is intentionally off-contract here.
 		expect(mount(Text, { props: { size: "large" } }).classes()).toContain("fz--large")
 	})
 })

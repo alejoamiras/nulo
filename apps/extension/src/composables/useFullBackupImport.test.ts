@@ -24,7 +24,7 @@ import { setActivePinia } from "pinia"
 import { createTestingPinia } from "@pinia/testing"
 import { ref } from "vue"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { EncryptionKey } from "@nulo/wallet-crypto"
+import { asBase64CredentialId, asBase64SecretPrf, asHexUserHandle, EncryptionKey } from "@nulo/wallet-crypto"
 import { UserRejectedError } from "@nulo/extension-messaging/errors"
 
 // ── Mocks ───────────────────────────────────────────────────────────────────
@@ -497,7 +497,11 @@ describe("useFullBackupImport — failure branches", () => {
 
 describe("useFullBackupImport — passkey backup", () => {
 	const PASSKEY_CRED_ID = "cred-PK123"
-	const PASSKEY_DATA = { id: PASSKEY_CRED_ID, prf: "AAAA", userHandle: "src-profile-id" }
+	const PASSKEY_DATA = {
+		id: asBase64CredentialId(PASSKEY_CRED_ID),
+		prf: asBase64SecretPrf("AAAA"),
+		userHandle: asHexUserHandle("src-profile-id"),
+	}
 
 	async function buildPasskeyBackup() {
 		// For passkey backups, `master-key` IS the credentialId (per
@@ -531,7 +535,7 @@ describe("useFullBackupImport — passkey backup", () => {
 		expect(runCeremony).toHaveBeenCalledWith({ mode: "get", credentialId: PASSKEY_CRED_ID })
 		expect(profileClient.restore).toHaveBeenCalledWith(
 			expect.objectContaining({ type: "passkey" }),
-			PASSKEY_CRED_ID,
+			{ type: "passkey", credentialId: PASSKEY_CRED_ID },
 			"", // empty password for passkey
 			PASSKEY_DATA, // credentialData forwarded
 		)

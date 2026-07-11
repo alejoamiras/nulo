@@ -54,7 +54,7 @@ test.skipIf(!HAS_FIXTURE)(
 							profileId: "syn-profile-id",
 							address: `0x${"02".repeat(32)}`,
 							legacyName: "Migrated Ali",
-							abbreviation: "MA",
+							abbr: "MA",
 						},
 					],
 				},

@@ -1,56 +1,70 @@
 /**
- * Freezing tests for the wallet config defaults.
+ * Freezing tests for the wallet config defaults + schema-domain validation.
  *
- * Each `expect(...).toBe(...)` line below is INTENTIONALLY a freeze: a
- * failing assertion here means a default flipped.
+ * Each `expect(...).toBe(...)` default-freeze below is INTENTIONAL: a failing
+ * assertion means a default flipped.
  *
- * **Security / financial defaults** (this category covers anything affecting
- * passhash caching, session lifetime, fee payment, or signing exposure) must
- * NOT be flipped without an explicit SECURITY.md entry. The expectation
- * documents the security invariant; "fixing" the test by updating the value
- * silently is a regression.
+ * **Security / financial defaults** (anything affecting passhash caching,
+ * session lifetime, fee payment, or signing exposure) must NOT be flipped
+ * without an explicit SECURITY.md entry. "Fixing" the test by updating the
+ * value silently is a regression.
  *
  * **UX defaults** (theme, animations, panel visibility) may be flipped with
  * reviewer sign-off in the PR description — no SECURITY.md entry required.
- * The freeze exists so a careless change is caught and discussed, not so
- * every UX tweak needs a security paper trail.
  */
 
 import { describe, expect, test } from "vitest"
-import { Config } from "./config"
+import { ConfigSchema, defaultConfig } from "./config"
 
 describe("Config — frozen security defaults", () => {
 	test("strictSecurityMode defaults to true", () => {
-		// SECURITY.md §strict mode:
-		// password profiles do NOT cache passhash in chrome.storage.session
-		// when this is on. Default must stay `true`. SW death → re-auth.
-		// Flipping this to `false` is an explicit security regression that
+		// SECURITY.md §strict mode: password profiles do NOT cache passhash in
+		// chrome.storage.session when on. Default must stay `true`. SW death →
+		// re-auth. Flipping to `false` is an explicit security regression that
 		// requires SECURITY.md sign-off.
-		const config = new Config()
-		expect(config.strictSecurityMode).toBe(true)
+		expect(defaultConfig().strictSecurityMode).toBe(true)
 	})
 
 	test("sessionTtl defaults to 30 minutes", () => {
-		// Lock-related freezing — UX choice, not security-critical, but
-		// callers (popup auto-lock UI, alarm scheduler) assume this default.
-		const config = new Config()
-		expect(config.sessionTtl).toBe(30 * 60 * 1000)
+		// Lock-related — callers (popup auto-lock UI, alarm scheduler) assume it.
+		expect(defaultConfig().sessionTtl).toBe(30 * 60 * 1000)
 	})
 })
 
 describe("Config — frozen UX defaults", () => {
 	test("theme defaults to 'system'", () => {
-		// Flipped from 'dark' → 'system' in the QA-feedback-batch-1 PR after
-		// friends QA noted the wallet ignores OS appearance on first install.
-		// 'system' tracks the OS setting (matches Chrome / macOS conventions);
-		// existing users keep their persisted choice via config storage.
-		expect(new Config().theme).toBe("system")
+		expect(defaultConfig().theme).toBe("system")
 	})
 
 	test("debug + developer flags default OFF", () => {
-		const config = new Config()
+		const config = defaultConfig()
 		expect(config.developerMode).toBe(false)
 		expect(config.debugMode).toBe(false)
 		expect(config.indicateFailures).toBe(false)
+	})
+})
+
+describe("ConfigSchema — domain validation (Q-20)", () => {
+	test("theme rejects out-of-domain values (closes the prior typeof-check hole)", () => {
+		expect(ConfigSchema.shape.theme.safeParse("bogus").success).toBe(false)
+		expect(ConfigSchema.shape.theme.safeParse("dark").success).toBe(true)
+	})
+
+	test("defaultExplorer accepts null + 'aztecscan', rejects others", () => {
+		// `null` is a valid domain value (`BlockExplorerType | null`); the prior
+		// `typeof null !== "string"` check WRONGLY rejected a persisted null.
+		expect(ConfigSchema.shape.defaultExplorer.safeParse(null).success).toBe(true)
+		expect(ConfigSchema.shape.defaultExplorer.safeParse("aztecscan").success).toBe(true)
+		expect(ConfigSchema.shape.defaultExplorer.safeParse("etherscan").success).toBe(false)
+	})
+
+	test("strictSecurityMode: a corrupted string can't flip it; only a real boolean false (intentional opt-out)", () => {
+		expect(ConfigSchema.shape.strictSecurityMode.safeParse("false").success).toBe(false)
+		expect(ConfigSchema.shape.strictSecurityMode.safeParse(false).success).toBe(true)
+	})
+
+	test("sessionTtl: 0 stays valid (no coercion / .positive / .min); a string is rejected", () => {
+		expect(ConfigSchema.shape.sessionTtl.safeParse(0).success).toBe(true)
+		expect(ConfigSchema.shape.sessionTtl.safeParse("1800000").success).toBe(false)
 	})
 })

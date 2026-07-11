@@ -1,7 +1,11 @@
 <script setup lang="ts">
+/** Vendor */
+import type { PropType } from "vue"
+
 /** Components */
 import Flex from "../core/Flex.vue"
 import MaterialIcon from "../core/MaterialIcon.vue"
+import type { TextColorName } from "../color-names"
 
 // Router-free base: emits `back` instead of touching the router. The extension wrapper owns the
 // history policy (`window.history.length > 1 ? router.back() : backTo ?? "/popup/general"`).
@@ -21,7 +25,7 @@ defineProps({
 		required: false,
 	},
 	leadingIconColor: {
-		type: String,
+		type: String as PropType<TextColorName>,
 		default: "secondary",
 	},
 })

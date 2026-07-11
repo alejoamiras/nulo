@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, type CSSProperties } from "vue"
+import { computed, type CSSProperties, type PropType } from "vue"
 
 import iconsJson from "../internal/icons.json"
+import type { TextColorName } from "../color-names"
 
 type IconPath = { path: string; opacity?: number; color?: string }
 const icons = iconsJson as Record<string, string | IconPath[]>
@@ -9,8 +10,8 @@ const icons = iconsJson as Record<string, string | IconPath[]>
 const props = defineProps({
 	name: { type: String, required: true, default: "warning" },
 	size: { type: [String, Number], default: "16" },
-	color: { type: String, default: null },
-	hoverColor: { type: String, required: false },
+	color: { type: String as PropType<TextColorName>, default: null },
+	hoverColor: { type: String as PropType<TextColorName>, required: false },
 	rotate: { type: [String, Number], default: 0 },
 	fill: { type: Boolean, default: false },
 	scale: { type: [String, Number], default: 1 },

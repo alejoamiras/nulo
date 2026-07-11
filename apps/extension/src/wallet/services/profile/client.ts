@@ -3,7 +3,7 @@ import { ServiceClient } from "@nulo/extension-messaging/background"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
-import { PROFILE_SERVICE_NAME, type ProfileInfo, type Events, type Methods } from "./spec"
+import { PROFILE_SERVICE_NAME, type ProfileInfo, type Events, type Methods, type RestoreSecret } from "./spec"
 
 export * from "./spec"
 
@@ -103,11 +103,11 @@ export class ProfileServiceClient extends ServiceClient<Methods, Events> impleme
 
 	public restore(
 		profile: ProfileInfo,
-		masterKey: string,
+		secret: RestoreSecret,
 		password?: string,
 		credentialData?: PasskeyCredentialData,
 	): Promise<Restored<ProfileInfo>> {
-		return this.request("restore", profile, masterKey, password, credentialData)
+		return this.request("restore", profile, secret, password, credentialData)
 	}
 
 	public finalizeRestore(id: string, password?: string): Promise<ProfileInfo> {

@@ -30,7 +30,7 @@ const fixture = () => ({
 	network: [{ id: "n1", profileId: "p1", name: "Local", rpcUrl: "http://localhost:8080", chainId: 31337 }],
 	token: [{ id: 1, profileId: "p1", chainId: 31337, contract: "0xt0k", name: "Test", symbol: "TST", decimals: 18 }],
 	"token-balance": [{ id: 3, token: 1, account: "0xaaa1", publicBalance: "10", updatedAt: 1700000000000 }],
-	contact: [{ id: "c1", profileId: "p1", name: "Alice", address: "0xccc", abbreviation: "A" }],
+	contact: [{ id: "c1", profileId: "p1", name: "Alice", address: "0xccc", abbr: "A" }],
 	transaction: [{ hash: "0xh4sh", account: "0xaaa1", chainId: 31337, status: 1 }],
 	fpc: [{ id: "f1", profileId: "p1", chainId: 31337, type: 1, address: "0xfpc", name: "Sponsored" }],
 	"auth-registry": [{ id: 7, account: "0xaaa1", hash: "0xmsg", content: { kind: "x" } }],

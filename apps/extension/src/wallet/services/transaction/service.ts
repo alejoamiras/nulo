@@ -25,6 +25,7 @@ import {
 	TxExecutionResult,
 	type Methods,
 	type Events,
+	TxSchema,
 } from "./spec"
 import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 
@@ -47,7 +48,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(TRANSACTION_SERVICE_NAME, logger)
-		this.txs = new EntityStorage<Tx>(TRANSACTION_STORAGE_ROOT, browserApi.storage.local)
+		this.txs = new EntityStorage<Tx>(TRANSACTION_STORAGE_ROOT, browserApi.storage.local, (raw) => TxSchema.parse(raw))
 	}
 
 	protected async init(services: ServiceCollection) {

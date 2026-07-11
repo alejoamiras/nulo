@@ -10,17 +10,24 @@
  * same code.
  */
 
-import { type PasskeyCredentialData, PASSKEY_PRF_LABEL } from "@nulo/wallet-crypto"
+import {
+	asBase64CredentialId,
+	asBase64SecretPrf,
+	asHexUserHandle,
+	type PasskeyCredentialData,
+	PASSKEY_PRF_LABEL,
+} from "@nulo/wallet-crypto"
 import { PASSKEY_TIMEOUT, type PasskeyRequest, RP_ID } from "@/wallet/services/passkey/spec"
+import { fromBase64, toBase64 } from "@/wallet/utils"
 import { formatPasskeyUserName } from "./passkey-label"
 
 function encodeBase64(buf: BufferSource): string {
 	const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
-	return Buffer.from(bytes).toString("base64")
+	return toBase64(bytes)
 }
 
 function decodeBase64(b64: string): Uint8Array {
-	return Uint8Array.from(Buffer.from(b64, "base64"))
+	return fromBase64(b64)
 }
 
 async function buildPrfInput(): Promise<ArrayBuffer> {
@@ -97,9 +104,9 @@ async function runCreate(userHandle: string, name: string, signal?: AbortSignal)
 	if (ext.prf.enabled) {
 		if (!ext.prf.results) throw new Error("Passkey PRF has no results")
 		return {
-			id: encodeBase64(credential.rawId),
-			prf: encodeBase64(ext.prf.results.first),
-			userHandle,
+			id: asBase64CredentialId(encodeBase64(credential.rawId)),
+			prf: asBase64SecretPrf(encodeBase64(ext.prf.results.first)),
+			userHandle: asHexUserHandle(userHandle),
 		}
 	}
 
@@ -122,9 +129,9 @@ async function runGet(credentialId: string | undefined, signal?: AbortSignal): P
 	if (!(assertion.response instanceof AuthenticatorAssertionResponse)) throw new Error("Unexpected assertion response type")
 	const userHandleOption = assertion.response.userHandle
 	return {
-		id: encodeBase64(assertion.rawId),
-		prf: encodeBase64(ext.prf.results.first),
-		userHandle: userHandleOption ? Buffer.from(userHandleOption).toString("hex") : undefined,
+		id: asBase64CredentialId(encodeBase64(assertion.rawId)),
+		prf: asBase64SecretPrf(encodeBase64(ext.prf.results.first)),
+		userHandle: userHandleOption ? asHexUserHandle(Buffer.from(userHandleOption).toString("hex")) : undefined,
 	}
 }
 

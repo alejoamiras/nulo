@@ -1,3 +1,5 @@
+import { z } from "zod"
+
 export const ACCOUNT_SERVICE_NAME = "account"
 
 /** EntityStorage root for account rows (keyed by `account.address`). Frozen:
@@ -26,6 +28,17 @@ export type Account = {
 	/** Flag, determining whether the account is active or hidden. */
 	visible: boolean
 }
+
+/** Storage codec row schema — mirrors `Account` exactly. */
+export const AccountSchema: z.ZodType<Account> = z.object({
+	profileId: z.string(),
+	chainId: z.number(),
+	address: z.string(),
+	index: z.number(),
+	type: z.nativeEnum(AccountType),
+	name: z.string(),
+	visible: z.boolean(),
+})
 
 export type Methods = {
 	/**

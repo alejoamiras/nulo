@@ -40,6 +40,28 @@ export type Network = {
 	kind?: ChainKind
 }
 
+const NetworkEndpointRowSchema: z.ZodType<NetworkEndpoint> = z.object({
+	id: z.string(),
+	rpcUrl: z.string(),
+	label: z.string().optional(),
+})
+
+/** STORAGE codec row schema — structural only, deliberately LAXER than the wire
+ *  `NetworkSchema` below (no `RpcUrlSchema` refine, no `.min(1)`): a legacy row
+ *  written before a value-constraint was tightened must still LOAD (the strict
+ *  rules keep applying at the add/update/restore boundaries). The `kind` enum
+ *  list MUST stay in sync with `ChainKind` above: a new kind written before it
+ *  is added here would make those rows unreadable (kept, but hidden) on read. */
+export const NetworkRowSchema: z.ZodType<Network> = z.object({
+	id: z.string(),
+	profileId: z.string(),
+	chainId: z.number(),
+	name: z.string(),
+	primaryEndpointId: z.string(),
+	endpoints: z.array(NetworkEndpointRowSchema),
+	kind: z.enum(["mainnet", "testnet", "devnet", "local", "custom"]).optional(),
+})
+
 /**
  * Synthesized at lookup-time from `(Network, primaryEndpoint.rpcUrl)`. Kept
  * structurally identical to the prior `Network` shape on the PXE-facing

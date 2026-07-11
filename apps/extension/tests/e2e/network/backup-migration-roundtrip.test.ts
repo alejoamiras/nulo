@@ -116,7 +116,7 @@ test.skipIf(!hasConfig || !HAS_FIXTURE)(
 				profileId: profile.id,
 				address: `0x${"03".repeat(32)}`,
 				legacyName: "Roundtrip Ali",
-				abbreviation: "RA",
+				abbr: "RA",
 			},
 		]
 		const { checksum: _stale, ...body } = exported

@@ -71,6 +71,25 @@ export type MethodRouting =
 	| { readonly via: "account-operation"; readonly kind: AccountOperationKind }
 	| { readonly via: "handler" }
 
+/**
+ * Per-method argument guard. A pure, NON-MUTATING predicate over the ORIGINAL
+ * args array — deliberately not a parser: it can return only pass/fail, so it
+ * cannot coerce, normalize, or substitute values, and everything downstream
+ * (scope checkers reading `args` positionally, handler destructuring) keeps
+ * seeing the exact wire values. Runs in dispatch() right after
+ * `assertKnownMethod`, BEFORE capability/scope enforcement and before any
+ * handler destructuring.
+ *
+ * Calibration is tolerance-exact (audit pins): required-LEADING arity only
+ * where no working absent-arg path exists today; optional trailing args stay
+ * optional; extra args stay ignored; no value-type requirements on args the
+ * code `String()`-coerces. Methods whose first-arg validation is OWNED by
+ * their scope checker (sendTx/simulateTx/profileTx/executeUtility — pinned
+ * error strings) or that read no args at all OMIT the field: absence = no arg
+ * validation, exactly today's behavior.
+ */
+export type ArgGuard = (args: readonly unknown[]) => boolean
+
 export interface MethodDescriptor {
 	/** Required capability, or `null` for exempt/meta. `null` ⟺ `exemptReason` set (D7 XOR). */
 	readonly capability: CapabilityType | null
@@ -79,13 +98,76 @@ export interface MethodDescriptor {
 	readonly routing: MethodRouting
 	/** Per-origin scope gate. Omitted = no scope dimension (enforceScope no-ops). */
 	readonly scopeCheck?: ScopeCheck
+	/** Arg-shape guard (see {@link ArgGuard}). Omitted = no arg validation (historical tolerance). */
+	readonly argSchema?: ArgGuard
 	/** Preserved F-/AUDIT markers paired with security tests. */
 	readonly audit?: string
 	/** Rationale migrated verbatim from the old inline comments. */
 	readonly note?: string
 }
 
-export const METHOD_REGISTRY: Record<string, MethodDescriptor> = {
+// ── Arg guards ─────────────────────────────────────────────────────────
+// Each is a pure pass/fail PREDICATE over the raw positional args; the
+// dispatcher throws the "invalid arguments" rejection when one returns false.
+// Named (not inline) so the registry reads as a table of guarded methods.
+
+const isPlainRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v)
+
+/** requestCapabilities(manifest?): the handler optional-chains the manifest
+ *  (`manifest?.capabilities ?? []`) then `.filter`s the list, reading `cap.type`
+ *  on each entry. The guard mirrors that tolerance for OBJECT manifests and
+ *  rejects only inputs the handler cannot process:
+ *   - A nullish manifest is the valid "no capabilities requested" call. It is
+ *     `== null` (not `=== undefined`) because the dApp channel JSON-serializes,
+ *     so a caller's `requestCapabilities(undefined)` arrives as `null`.
+ *   - A non-object manifest (array / string / number) is malformed → reject.
+ *   - `capabilities` nullish mirrors the handler's `?? []` (empty) → pass.
+ *   - `capabilities` non-array (no `.filter`) or with a NULLISH entry
+ *     (`null.type` throws) is a dApp-triggerable crash → calibrated reject.
+ *     Non-nullish non-object entries flow exactly as the handler tolerates them
+ *     (`.type` → undefined → ignored), so this stays a crash guard, not a validator. */
+export function argsRequestCapabilities(args: readonly unknown[]): boolean {
+	const manifest = args[0]
+	if (manifest == null) return true
+	if (!isPlainRecord(manifest)) return false
+	const caps = manifest.capabilities
+	if (caps == null) return true
+	return Array.isArray(caps) && caps.every((cap) => cap != null)
+}
+
+/** batch(legs): handleBatch iterates legs and re-dispatches `leg.name(leg.args)`;
+ *  each leg is then validated by its OWN method's guard on re-entry. */
+export function argsBatch(args: readonly unknown[]): boolean {
+	const legs = args[0]
+	if (!Array.isArray(legs)) return false
+	return legs.every((leg) => isPlainRecord(leg) && typeof leg.name === "string" && Array.isArray(leg.args))
+}
+
+/** createAuthWit(from, messageHashOrIntent): both positions are read; there is
+ *  no working path with the intent absent (the built operation would carry
+ *  `messageHashOrIntent: undefined` into execution). Values stay unvalidated —
+ *  the scope checker handles the 3 intent shapes tolerantly. */
+export function argsCreateAuthWit(args: readonly unknown[]): boolean {
+	return args.length >= 2
+}
+
+/** Single leading arg that the checker/handler `String()`-coerces — presence
+ *  only, no type requirement (coercion tolerance preserved). */
+export function argsOneRequired(args: readonly unknown[]): boolean {
+	return args.length >= 1
+}
+
+/** Two leading args read (getPrivateEvents / registerToken / grantPublicAuthwit). */
+export function argsTwoRequired(args: readonly unknown[]): boolean {
+	return args.length >= 2
+}
+
+// Private `satisfies` source so the literal KEYS survive for `MethodName`
+// (`keyof typeof METHOD_REGISTRY_SOURCE`). The public `METHOD_REGISTRY` below is
+// a wide-typed (`Record<string, MethodDescriptor>`) re-export of this SAME object
+// so the frozen oracle + derivations keep their optional-field (`exemptReason?`/
+// `scopeCheck?`) access. Runtime-identical; oracle byte-UNEDITED.
+const METHOD_REGISTRY_SOURCE = {
 	// ── Exempt meta / infra (no capability, no scope) ──
 	getChainInfo: {
 		capability: null,
@@ -96,11 +178,13 @@ export const METHOD_REGISTRY: Record<string, MethodDescriptor> = {
 		capability: null,
 		exemptReason: "capability-negotiation meta-protocol — the method by which grants are obtained",
 		routing: { via: "handler" },
+		argSchema: argsRequestCapabilities,
 	},
 	batch: {
 		capability: null,
 		exemptReason: "infrastructure wrapper — each leg re-enters dispatch() and is enforced individually",
 		routing: { via: "handler" },
+		argSchema: argsBatch,
 	},
 
 	// ── accounts ──
@@ -108,10 +192,12 @@ export const METHOD_REGISTRY: Record<string, MethodDescriptor> = {
 		capability: "accounts",
 		routing: { via: "account-operation", kind: "aztec_createAuthWit" },
 		scopeCheck: checkCreateAuthWit,
+		argSchema: argsCreateAuthWit,
 	},
 	registerToken: {
 		capability: "accounts",
 		routing: { via: "handler" },
+		argSchema: argsTwoRequired,
 		// D8: NOT a missing scope checker. registerToken's session-account authz
 		// is enforced inline in handleRegisterToken(); it has no METHOD_SCOPE_CHECKER
 		// entry by design.
@@ -129,6 +215,7 @@ export const METHOD_REGISTRY: Record<string, MethodDescriptor> = {
 		capability: "contracts",
 		routing: { via: "handler" },
 		scopeCheck: checkIsTokenRegistered,
+		argSchema: argsOneRequired,
 		// A1: wallet-local registration probe; gated by the contracts grant
 		// (need-to-know address list), scope-checked via canGetMetadata — the same
 		// consent surface as getContractMetadata. Preserved verbatim.
@@ -138,11 +225,13 @@ export const METHOD_REGISTRY: Record<string, MethodDescriptor> = {
 		capability: "contracts",
 		routing: { via: "network-operation", kind: "aztec_registerContract" },
 		scopeCheck: checkRegisterContract,
+		argSchema: argsOneRequired,
 	},
 	getContractMetadata: {
 		capability: "contracts",
 		routing: { via: "network-operation", kind: "aztec_getContractMetadata" },
 		scopeCheck: checkGetContractMetadata,
+		argSchema: argsOneRequired,
 	},
 
 	// ── contractClasses ──
@@ -150,6 +239,7 @@ export const METHOD_REGISTRY: Record<string, MethodDescriptor> = {
 		capability: "contractClasses",
 		routing: { via: "network-operation", kind: "aztec_getContractClassMetadata" },
 		scopeCheck: checkGetContractClassMetadata,
+		argSchema: argsOneRequired,
 	},
 	registerContractClass: {
 		capability: "contractClasses",
@@ -186,6 +276,7 @@ export const METHOD_REGISTRY: Record<string, MethodDescriptor> = {
 		capability: "transaction",
 		routing: { via: "handler" },
 		scopeCheck: checkGrantPublicAuthwit,
+		argSchema: argsTwoRequired,
 		// F1: WITHOUT the transaction capability, enforceCapability returns [] and the
 		// scope-enforcement block is skipped — the gate becomes dead code (audit F1).
 		audit: "F1: requires the transaction capability or the scope gate is dead code (dispatcher.test.ts:1459-1544)",
@@ -196,6 +287,7 @@ export const METHOD_REGISTRY: Record<string, MethodDescriptor> = {
 		capability: "data",
 		routing: { via: "network-operation", kind: "aztec_getPrivateEvents" },
 		scopeCheck: checkGetPrivateEvents,
+		argSchema: argsTwoRequired,
 	},
 	getAddressBook: {
 		capability: "data",
@@ -207,9 +299,15 @@ export const METHOD_REGISTRY: Record<string, MethodDescriptor> = {
 		capability: "data",
 		routing: { via: "network-operation", kind: "aztec_registerSender" },
 		scopeCheck: checkRegisterSender,
+		argSchema: argsOneRequired,
 		audit: "F-004 (paired): requires data.addressBook=true",
 	},
-}
+} satisfies Record<string, MethodDescriptor>
+
+/** The registry the facades/derivations/oracle consume — the SAME object as
+ *  `METHOD_REGISTRY_SOURCE`, widened to `Record<string, MethodDescriptor>` so
+ *  optional-field access (`exemptReason?`/`scopeCheck?`) type-checks. */
+export const METHOD_REGISTRY: Record<string, MethodDescriptor> = METHOD_REGISTRY_SOURCE
 
 // ── Derivations (each replaces a former hand-maintained table) ─────────
 
@@ -259,6 +357,30 @@ export function deriveScopeCheckerMap(registry: Record<string, MethodDescriptor>
 		if (d.scopeCheck !== undefined) out[method] = d.scopeCheck
 	}
 	return out
+}
+
+/** The exact set of dApp RPC method names the dispatcher supports — the literal
+ *  key union of `METHOD_REGISTRY`. A typed replacement for the bare `string` at
+ *  the dispatch boundary; layered FROM the registry (not a second whitelist). */
+export type MethodName = keyof typeof METHOD_REGISTRY_SOURCE
+
+/** A dApp RPC request after the dispatch-entry guard has validated the method.
+ *  `args` stays `unknown[]` — per-arg typing would need per-method arg schemas
+ *  (new descriptor fields → an oracle change), deferred. */
+export interface RpcRequest {
+	method: MethodName
+	args: unknown[]
+}
+
+/** Fail-closed dispatch-entry guard + narrowing. Throws (preserving the frozen
+ *  "Unsupported wallet method" string) for any name absent from `METHOD_REGISTRY`;
+ *  `Object.hasOwn` (not a truthy index) rejects prototype names. On return,
+ *  `methodName` is narrowed to `MethodName`. This is the single typed choke point
+ *  the dispatcher routes through — no permissive default, no `as` at the boundary. */
+export function assertKnownMethod(methodName: string): asserts methodName is MethodName {
+	if (!Object.hasOwn(METHOD_REGISTRY, methodName)) {
+		throw new Error(`Unsupported wallet method: ${methodName}`)
+	}
 }
 
 // Pre-computed once at module load — these are what the facades import in Phase 2.

@@ -291,7 +291,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			// send-like through, we want to know LOUDLY, not crash deep in
 			// the execution pipeline.
 			assertSilentExecutable(materialized)
-			operations.push(materialized as unknown as Operation)
+			operations.push(materialized)
 		}
 		await this.profileService.refreshSession()
 
