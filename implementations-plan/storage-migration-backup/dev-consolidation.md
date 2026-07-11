@@ -22,6 +22,12 @@ While this branch was in flight, dev landed **#220** (21/22 quality findings, ~1
 ## Validation gate (all must pass post-merge)
 `bun run typecheck` + `bun run lint` exit 0 · full unit suite · backup module suites + composable tests · smoke `test:e2e backup-migration migration import-paths security-backup` (fixture-armed) · `bun run e2e:agent backup-migration-roundtrip` green · codex xhigh review of the merge diff.
 
+## Post-merge codex review (xhigh, adversarial) — verdict: no merge defects
+Codex diffed the merge against both parents and confirmed every resolution rule held (constants + codecs combined, dev helper bodies retained, trust-gate order + rollback bookkeeping intact, docs ours, fixture `abbr`, agent arming + grep marker present). Two findings, BOTH pre-existing classes that survived the merge (its words: "not a lost conflict hunk" / "not introduced by #220") — tracked here as owner follow-ups, deliberately NOT folded into this branch:
+
+- **[medium] The live Q-01 backup seam**: backup root slices are anchor-validated (fail-closed on id/shape basics) but not row-codec validated before restore — a crafted row missing e.g. `abbr` imports "successfully", then the read codec rejects it (present-but-invisible). #220's wrap-up explicitly parked "Q-01 seams … backup import" as an owner-gated follow-on; the natural fix is descriptor-carried row schemas in `BACKUP_SLICE_REGISTRY` validated at normalize time. Owner decision: fold into the Q-01 seams follow-up, don't scope-creep this branch.
+- **[low] `remapIdInBackupData` networkId remap is not old-id-scoped** (`full-backup-helpers.ts`): a collision-minted network id rewrites EVERY slice's `networkId`, so a multi-network backup can misattach account-state registrations. Pre-dates this branch (the plan kept remap logic byte-identical by design). Candidate for the same follow-up.
+
 ## Lessons
 - **Long-lived arc branches clobber sibling docs on squash**: #220 branched before the approved plan landed and its stale `plan.md` copy silently won. When resolving, always diff committed-docs conflicts against BOTH parents before accepting either side. (Flagged upstream: the dev copy of the approved plan was lost between 79333e6 and 32fd6e0.)
 - **Row codecs turn "harmless extra fixture fields" into behavioral drift**: post-Q-01, a fixture row that doesn't match the real schema restores fine but reads as `undefined` in the UI. Fixture rows must mirror real shapes exactly — the round-trip e2e (which uses a REAL export) is now the only fixture-free proof, which is exactly why it exists.
