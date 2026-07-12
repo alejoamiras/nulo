@@ -1,8 +1,12 @@
 import type { TokenInfo } from "@/wallet/services/token/spec"
 
+import { z } from "zod"
+
 export const TOKEN_BALANCE_SERVICE_NAME = "token-balance"
 
-import { z } from "zod"
+/** EntityStorage root for balance rows (keyed by `String(balance.id)`). Frozen:
+ *  renaming detaches every existing row; the backup-migration registry pins it. */
+export const TOKEN_BALANCE_STORAGE_ROOT = "nulo:core:token-balances"
 
 export type TokenBalanceRaw = {
 	id: number

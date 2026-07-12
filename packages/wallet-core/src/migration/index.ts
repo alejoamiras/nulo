@@ -14,4 +14,11 @@ export type {
 	StorageRef,
 } from "./types"
 export { defineMigration } from "./types"
-export { Migrator, RESERVED_KEYS, SCHEMA_RUNNING_KEY, SCHEMA_VERSION_KEY, type MigratorOptions } from "./migrator"
+export {
+	Migrator,
+	RESERVED_KEYS,
+	SCHEMA_RESERVED_PREFIX,
+	SCHEMA_RUNNING_KEY,
+	SCHEMA_VERSION_KEY,
+	type MigratorOptions,
+} from "./migrator"

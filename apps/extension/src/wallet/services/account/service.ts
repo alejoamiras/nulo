@@ -13,7 +13,7 @@ import { array_max, hasIntersectionByKeys } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { NuloAccount, type IAccountContract } from "@nulo/aztec-runtime/account"
-import { ACCOUNT_SERVICE_NAME, AccountSchema, AccountType, type Account, type Events, type Methods } from "./spec"
+import { ACCOUNT_SERVICE_NAME, ACCOUNT_STORAGE_ROOT, AccountSchema, AccountType, type Account, type Events, type Methods } from "./spec"
 
 export * from "./spec"
 
@@ -38,7 +38,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(ACCOUNT_SERVICE_NAME, logger)
-		this.storage = new EntityStorage<Account>("nulo:core:accounts", browserApi.storage.local, (raw) => AccountSchema.parse(raw))
+		this.storage = new EntityStorage<Account>(ACCOUNT_STORAGE_ROOT, browserApi.storage.local, (raw) => AccountSchema.parse(raw))
 	}
 
 	protected async init(services: ServiceCollection): Promise<void> {

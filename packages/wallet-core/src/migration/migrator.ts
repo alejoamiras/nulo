@@ -42,7 +42,11 @@ export const SCHEMA_VERSION_KEY = "nulo:schema:version"
 export const SCHEMA_RUNNING_KEY = "nulo:schema:running"
 const SCHEMA_BACKUP_KEY = "nulo:schema:backup"
 const SCHEMA_ATTEMPTS_KEY = "nulo:schema:attempts"
-const RESERVED_PREFIX = "nulo:schema:"
+/** Everything under this prefix belongs to the engine: migrations may not
+ *  footprint or write it, and adapters (e.g. the backup-import migrator's
+ *  scratch read-back) must filter it out of user data. */
+export const SCHEMA_RESERVED_PREFIX = "nulo:schema:"
+const RESERVED_PREFIX = SCHEMA_RESERVED_PREFIX
 /** The forked-app's legacy wipe marker. Its presence is positive evidence of a
  *  non-fresh install (the "reinstall fresh" assumption is violated) → fail closed. */
 const LEGACY_VERSION_KEY = "nulo:core:storage-version"

@@ -18,7 +18,10 @@ export function resolveFullBackupEnterAction(state: {
 }): FullBackupEnterAction {
 	const { selectedBackup, restoreStatus, isRestoreHasErrors } = state
 	if (selectedBackup?.type === "encrypted" && !selectedBackup?.profileType) return "decrypt"
-	if (selectedBackup?.profileType && restoreStatus !== "finished") return "restore"
+	// Never resolve to "restore" while a restore is already in flight — the
+	// composable guards re-entry too, but not firing the action keeps Enter
+	// from queueing a redundant submit mid-import.
+	if (selectedBackup?.profileType && restoreStatus !== "finished" && restoreStatus !== "progress") return "restore"
 	if (restoreStatus === "finished" && isRestoreHasErrors) return "continue"
 	return null
 }

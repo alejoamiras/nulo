@@ -2,6 +2,10 @@ import { z } from "zod"
 
 export const NETWORK_SERVICE_NAME = "network"
 
+/** EntityStorage root for network rows (keyed by `network.id`). Frozen:
+ *  renaming detaches every existing row; the backup-migration registry pins it. */
+export const NETWORK_STORAGE_ROOT = "nulo:core:networks"
+
 export enum NodeStatus {
 	Active,
 	Inactive,

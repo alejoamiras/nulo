@@ -13,7 +13,7 @@ import { getRandomHex, Lock } from "@/wallet/utils"
 import { getInitials, sanitizeString } from "@/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
-import { type Contact, CONTACT_SERVICE_NAME, ContactSchema, type Events, type Methods } from "./spec"
+import { type Contact, CONTACT_SERVICE_NAME, CONTACT_STORAGE_ROOT, ContactSchema, type Events, type Methods } from "./spec"
 
 export * from "./spec"
 
@@ -50,8 +50,8 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 	public constructor(logger: ILogger, browserApi?: BrowserApi) {
 		super(CONTACT_SERVICE_NAME, logger)
 		this.storage = browserApi
-			? new EntityStorage<Contact>("nulo:core:contacts", browserApi.storage.local, (raw) => ContactSchema.parse(raw))
-			: new EntityStorage<Contact>("nulo:core:contacts", chrome.storage.local, (raw) => ContactSchema.parse(raw))
+			? new EntityStorage<Contact>(CONTACT_STORAGE_ROOT, browserApi.storage.local, (raw) => ContactSchema.parse(raw))
+			: new EntityStorage<Contact>(CONTACT_STORAGE_ROOT, chrome.storage.local, (raw) => ContactSchema.parse(raw))
 	}
 
 	protected async init(services: ServiceCollection) {

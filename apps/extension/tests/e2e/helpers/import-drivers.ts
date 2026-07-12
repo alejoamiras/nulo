@@ -136,13 +136,15 @@ export async function importSeed(page: Page, seed: string, password: string, she
 }
 
 /** Drive the full-backup import. Lands on the shell's success hash, or — when
- *  `expectError` — waits for the inline "Can't import" banner + disabled submit. */
+ *  `expectError` — waits for the inline error banner + disabled submit
+ *  (`true` expects the default "Can't import" copy; a string expects that
+ *  exact banner title — a content assertion, not a click target). */
 export async function importFullBackup(
 	page: Page,
 	filePath: string,
 	password: string,
 	shell: ImportShell,
-	{ expectError = false }: { expectError?: boolean } = {},
+	{ expectError = false }: { expectError?: boolean | string } = {},
 ): Promise<void> {
 	await page.waitForSelector('[data-testid="import-option-full-backup"]', { visible: true, timeout: 10_000 })
 	await clickByTestId(page, "import-option-full-backup")
@@ -162,14 +164,16 @@ export async function importFullBackup(
 	await submitWhenEnabled(page, shell.submitTestId("full-backup"))
 
 	if (expectError) {
+		const expectedText = typeof expectError === "string" ? expectError : "Can't import"
 		await page.waitForFunction(
-			(id: string) => {
+			(id: string, wanted: string) => {
 				const btn = document.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)
 				const text = document.body.textContent ?? ""
-				return btn?.disabled === true && text.includes("Can't import")
+				return btn?.disabled === true && text.includes(wanted)
 			},
 			{ timeout: 30_000, polling: 250 },
 			shell.submitTestId("full-backup"),
+			expectedText,
 		)
 	} else {
 		await waitForHash(page, shell.successHash, 30_000)
@@ -230,16 +234,30 @@ export interface SyntheticBackupOpts {
 	profileName?: string
 	/** Override the embedded account address (used for the duplicate-rejection test). */
 	accountAddress?: string
+	/** Extra slices merged into `data` (e.g. a pre-shape `contact` slice for the
+	 *  backup-migration smoke). */
+	extraData?: Record<string, unknown>
+	/** Top-level metadata overrides merged over the body BEFORE the checksum is
+	 *  computed. A key set to `undefined` is dropped by JSON.stringify — use
+	 *  that to build pre-baseline (legacy `schema-version`) blobs. */
+	bodyOverrides?: Record<string, unknown>
 }
 
-/** Build a minimum-viable full-backup payload (schema v2 + valid SHA-256
+/** Build a minimum-viable full-backup payload (current metadata fields + valid SHA-256
  *  checksum) the importer accepts: profile + one network + one account + empty
  *  token slice. Missing slices are treated as no-ops by the importer. */
-export function buildSyntheticBackup({ masterBase64, profileName = "Imported", accountAddress }: SyntheticBackupOpts): string {
+export function buildSyntheticBackup({
+	masterBase64,
+	profileName = "Imported",
+	accountAddress,
+	extraData,
+	bodyOverrides,
+}: SyntheticBackupOpts): string {
 	const body = {
 		"wallet-version": "test",
 		"aztec-version": "test",
-		"schema-version": 2,
+		"compat-epoch": 2,
+		"backup-schema-version": 1,
 		"master-key": masterBase64,
 		data: {
 			profile: { id: "syn-profile-id", name: profileName, type: "password" },
@@ -267,7 +285,13 @@ export function buildSyntheticBackup({ masterBase64, profileName = "Imported", a
 				},
 			],
 			token: [],
+			// Present-but-empty, like a real export: the stamped backup fixture
+			// migration READS contacts, and a missing non-optional slice a
+			// pending migration reads rejects the import.
+			contact: [],
+			...(extraData ?? {}),
 		},
+		...(bodyOverrides ?? {}),
 	}
 	const checksum = createHash("sha256").update(JSON.stringify(body)).digest("hex")
 	return JSON.stringify({ ...body, checksum })

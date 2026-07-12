@@ -10,6 +10,10 @@ export type { TxOrigin, LocalTxOrigin } from "@nulo/wallet-bridge"
 
 export const TRANSACTION_SERVICE_NAME = "transaction"
 
+/** EntityStorage root for tx rows (keyed by `tx.hash`, NOT an `id`). Frozen:
+ *  renaming detaches every existing row; the backup-migration registry pins it. */
+export const TRANSACTION_STORAGE_ROOT = "nulo:core:txs"
+
 /** Block inclusion/finalization status. */
 export enum TxStatus {
 	Pending,

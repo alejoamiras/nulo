@@ -1,6 +1,10 @@
+import { z } from "zod"
+
 export const CONTACT_SERVICE_NAME = "contact"
 
-import { z } from "zod"
+/** EntityStorage root for contact rows (keyed by `contact.id`). Frozen:
+ *  renaming detaches every existing row; the backup-migration registry pins it. */
+export const CONTACT_STORAGE_ROOT = "nulo:core:contacts"
 
 export type Contact = {
 	/** Randomly generated contact id. */

@@ -1,37 +1,34 @@
 import { describe, expect, test } from "vitest"
 import { EntityStorage } from "../storage/entity_storage"
+import { MemoryStorageArea } from "../storage/memory-storage-area"
 import { Migrator, RESERVED_KEYS, SCHEMA_RUNNING_KEY, SCHEMA_VERSION_KEY } from "./migrator"
-import { defineMigration, type Migration, type MinimalStorageArea, type StorageRef } from "./types"
+import { defineMigration, type Migration, type StorageRef } from "./types"
 
-/** In-memory `MinimalStorageArea` with optional fault injection, for engine tests. */
-class MemStore implements MinimalStorageArea {
-	readonly data = new Map<string, unknown>()
+/** The shared in-memory store plus fault injection, for engine tests. */
+class MemStore extends MemoryStorageArea {
 	/** If set, `set()` throws when it would write any of these keys (simulates a
 	 *  storage failure mid-restore). */
 	failSetKeys?: Set<string>
-
-	async get(keys?: string | string[]): Promise<Record<string, unknown>> {
-		if (this.failNextGet) {
-			this.failNextGet = false
-			throw new Error("injected get failure")
-		}
-		if (keys === undefined) return Object.fromEntries(this.data)
-		const arr = Array.isArray(keys) ? keys : [keys]
-		const out: Record<string, unknown> = {}
-		for (const k of arr) if (this.data.has(k)) out[k] = this.data.get(k)
-		return out
-	}
-	async set(items: Record<string, unknown>): Promise<void> {
-		if (this.failSetKeys) for (const k of Object.keys(items)) if (this.failSetKeys.has(k)) throw new Error(`injected set failure: ${k}`)
-		for (const [k, v] of Object.entries(items)) this.data.set(k, v)
-	}
 	/** If set, `remove()` throws when it would delete any of these keys ONCE
 	 *  (simulates a transient storage failure in journal cleanup). */
 	failRemoveKeysOnce?: Set<string>
 	/** If true, the next `get()` throws (simulates a read failure at boot). */
 	failNextGet = false
 
-	async remove(keys: string | string[]): Promise<void> {
+	override async get(keys?: string | string[]): Promise<Record<string, unknown>> {
+		if (this.failNextGet) {
+			this.failNextGet = false
+			throw new Error("injected get failure")
+		}
+		return super.get(keys)
+	}
+
+	override async set(items: Record<string, unknown>): Promise<void> {
+		if (this.failSetKeys) for (const k of Object.keys(items)) if (this.failSetKeys.has(k)) throw new Error(`injected set failure: ${k}`)
+		return super.set(items)
+	}
+
+	override async remove(keys: string | string[]): Promise<void> {
 		const arr = Array.isArray(keys) ? keys : [keys]
 		if (this.failRemoveKeysOnce) {
 			for (const k of arr)
@@ -40,16 +37,14 @@ class MemStore implements MinimalStorageArea {
 					throw new Error(`injected remove failure: ${k}`)
 				}
 		}
-		for (const k of arr) this.data.delete(k)
+		return super.remove(arr)
 	}
-	seed(entries: Record<string, unknown>): this {
-		for (const [k, v] of Object.entries(entries)) this.data.set(k, v)
-		return this
-	}
+
 	obj(root: string, id: string): unknown {
 		const raw = this.data.get(`${root}@${id}`)
 		return raw === undefined ? undefined : JSON.parse(raw as string)
 	}
+
 	has(key: string): boolean {
 		return this.data.has(key)
 	}

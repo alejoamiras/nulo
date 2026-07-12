@@ -1,6 +1,10 @@
+import { z } from "zod"
+
 export const ACCOUNT_SERVICE_NAME = "account"
 
-import { z } from "zod"
+/** EntityStorage root for account rows (keyed by `account.address`). Frozen:
+ *  renaming detaches every existing row; the backup-migration registry pins it. */
+export const ACCOUNT_STORAGE_ROOT = "nulo:core:accounts"
 
 export enum AccountType {
 	// SECURITY: Numeric value is used in poseidon2Hash for key derivation. NEVER change it.

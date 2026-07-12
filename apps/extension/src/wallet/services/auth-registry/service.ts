@@ -19,7 +19,9 @@ import { getAuthRegistryAddress, isAuthRegistryEnabled, isAuthwitConsumable } fr
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import {
+	AUTH_REGISTRY_ENABLED_STORAGE_ROOT,
 	AUTH_REGISTRY_SERVICE_NAME,
+	AUTH_REGISTRY_STORAGE_ROOT,
 	type Authwit,
 	type Events,
 	MAX_REVOKES_PER_TX,
@@ -61,8 +63,8 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(AUTH_REGISTRY_SERVICE_NAME, logger)
-		this.authwits = new EntityStorage<Authwit>("nulo:core:auth-registry", browserApi.storage.local, (raw) => AuthwitSchema.parse(raw))
-		this.statuses = new EntityStorage<boolean>("nulo:core:auth-registry-enabled", browserApi.storage.local, (raw) =>
+		this.authwits = new EntityStorage<Authwit>(AUTH_REGISTRY_STORAGE_ROOT, browserApi.storage.local, (raw) => AuthwitSchema.parse(raw))
+		this.statuses = new EntityStorage<boolean>(AUTH_REGISTRY_ENABLED_STORAGE_ROOT, browserApi.storage.local, (raw) =>
 			AuthwitStatusSchema.parse(raw),
 		)
 	}
