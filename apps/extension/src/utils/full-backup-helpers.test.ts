@@ -136,4 +136,42 @@ describe("remapIdInBackupData", () => {
 		remapIdInBackupData(data, "profileId", "new")
 		expect(data.account).toEqual([{ id: "a1" }, { profileId: "new", id: "a2" }])
 	})
+
+	it("SCOPED form (oldId given): rewrites only rows matching oldId — no cross-graft across networks (P2)", () => {
+		// Two networks N1→M1, N2→M2. Each remap must touch ONLY its own rows.
+		const data: Record<string, unknown> = {
+			"account-state": [
+				{ networkId: "N1", x: 1 },
+				{ networkId: "N2", x: 2 },
+			],
+			fpc: [{ networkId: "N2", y: 1 }],
+		}
+		remapIdInBackupData(data, "networkId", "M1", "N1")
+		remapIdInBackupData(data, "networkId", "M2", "N2")
+		expect(data["account-state"]).toEqual([
+			{ networkId: "M1", x: 1 },
+			{ networkId: "M2", x: 2 },
+		])
+		expect(data.fpc).toEqual([{ networkId: "M2", y: 1 }])
+	})
+
+	it("SCOPED form: an unrelated networkId is left alone (no over-write)", () => {
+		const data: Record<string, unknown> = { fpc: [{ networkId: "N1" }, { networkId: "N9" }] }
+		remapIdInBackupData(data, "networkId", "M1", "N1")
+		expect(data.fpc).toEqual([{ networkId: "M1" }, { networkId: "N9" }])
+	})
+
+	it("ALL-ROWS form (oldId omitted): still normalizes a hostile row whose profileId differs (P2 guard)", () => {
+		const data: Record<string, unknown> = {
+			account: [
+				{ profileId: "real-old", id: "a1" },
+				{ profileId: "0xHOSTILE-FOREIGN", id: "a2" },
+			],
+		}
+		remapIdInBackupData(data, "profileId", "new")
+		expect(data.account).toEqual([
+			{ profileId: "new", id: "a1" },
+			{ profileId: "new", id: "a2" },
+		])
+	})
 })

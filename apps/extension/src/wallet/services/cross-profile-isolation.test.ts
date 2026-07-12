@@ -337,4 +337,80 @@ describe("cross-profile isolation (standing gate)", () => {
 			await expect(authRegistry.revokeAuthwits("net", "0xACCT-P2", [5], {} as never)).rejects.toThrow(EXEC_REACHED)
 		})
 	})
+
+	// P1 (backup-restore-corruption-fix): deleting one profile must NOT wipe
+	// another profile's tx history on a shared chain. The buggy chainId-only
+	// tx chain-purge subscriber was REMOVED; cleanup now flows through the
+	// account-scoped `onAccountDeleted` cascade. This drives the REAL
+	// Account→Transaction wiring: a captured chain-purge subscriber (what
+	// `NetworkService.purgeChain` invokes) runs `AccountService.clearChainState`,
+	// which deletes that profile's accounts + emits `onAccountDeleted`, which
+	// `TransactionService` handles to delete only those accounts' txs.
+	describe("transaction — profile deletion is account-scoped, never chain-wide (P1)", () => {
+		let profile: FakeProfileService
+		let txService: TransactionService
+		const chainPurgeSubs: Array<(profileId: string, chainId: number, networkId: string) => Promise<void>> = []
+		const A1 = "0xa1-p1"
+		const A2 = "0xa2-p2"
+		const mkAccount = (address: string, profileId: string) =>
+			({ profileId, chainId: 1, address, index: 0, type: 0, name: address, visible: true }) as never
+		const mkTx = (hash: string, account: string) =>
+			({
+				chainId: 1,
+				account,
+				nonce: "0",
+				feePaymentMethod: 0,
+				hash,
+				createdAt: 0,
+				updatedAt: 0,
+				status: 1, // non-Pending → the init pending-scan / worker never touches it
+				origin: { type: "wallet" },
+				calls: [{ contract: "0xc", method: "m", args: [] }],
+			}) as never
+
+		beforeEach(async () => {
+			chainPurgeSubs.length = 0
+			profile = new FakeProfileService()
+			profile.setActiveProfile(p1)
+			const services = new ServiceCollection()
+			services.add(profile)
+			// Capturing network stub: purgeChain just forwards to these subscribers.
+			services.add(
+				svc(NetworkService.name, {
+					registerChainPurgeSubscriber: (fn: (p: string, c: number, n: string) => Promise<void>) => chainPurgeSubs.push(fn),
+					getNetworks: async () => [],
+				}),
+			)
+			services.add(new AccountService(mkLogger(), api))
+			txService = new TransactionService(mkLogger(), api)
+			services.add(txService)
+			await services.start()
+			// Seed AFTER start() so init's pending-scan doesn't ingest the fixtures.
+			await seedRow(api, "nulo:core:accounts", A1, mkAccount(A1, p1.id))
+			await seedRow(api, "nulo:core:accounts", A2, mkAccount(A2, p2.id))
+			await seedRow(api, "nulo:core:txs", "h1", mkTx("h1", A1))
+			await seedRow(api, "nulo:core:txs", "h2", mkTx("h2", A2))
+		})
+
+		test("the buggy chainId-only clearChainState subscriber is GONE", () => {
+			expect((txService as unknown as { clearChainState?: unknown }).clearChainState).toBeUndefined()
+			expect(chainPurgeSubs.some((fn) => fn.name.includes("clearChainState"))).toBe(false)
+		})
+
+		test("deleting profile P2 (shared chain) purges P2's txs and LEAVES P1's intact", async () => {
+			// Simulate purgeChain(p2, chain 1) — invoke every captured subscriber
+			// (AccountService's cascade is among them).
+			for (const fn of chainPurgeSubs) await fn(p2.id, 1, "net-p2")
+			await new Promise((r) => setTimeout(r, 0))
+			expect((await txService.getTransactions(A2)).map((t) => t.hash)).toEqual([]) // P2 gone
+			expect((await txService.getTransactions(A1)).map((t) => t.hash)).toEqual(["h1"]) // P1 survives
+		})
+
+		test("a single-network delete on the shared chain still cleans only that profile's txs", async () => {
+			// Same subscriber path (deleteNetwork → purgeChain), scoped to P2.
+			for (const fn of chainPurgeSubs) await fn(p2.id, 1, "net-p2")
+			await new Promise((r) => setTimeout(r, 0))
+			expect((await txService.getTransactions(A1)).map((t) => t.hash)).toEqual(["h1"])
+		})
+	})
 })

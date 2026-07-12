@@ -191,7 +191,10 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 
 	function recordRestoreErrors(serviceName: string, data: unknown) {
 		const errors = collectRestoreErrors(serviceName, data)
-		if (errors) restoreErrorLog.value[serviceName] = errors
+		// APPEND, not assign: some services already have entries recorded before
+		// their restore runs (e.g. token-balance's un-relinkable rows are recorded
+		// pre-restore) — a plain assignment would clobber those diagnostics.
+		if (errors) restoreErrorLog.value[serviceName] = [...(restoreErrorLog.value[serviceName] ?? []), ...errors]
 	}
 
 	async function restoreBackup() {
@@ -374,9 +377,14 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			}
 			createdProfileId = newProfile.id
 
-			if (newProfile.id !== profile.id) {
-				remapIdInBackupData(data, "profileId", newProfile.id)
-			}
+			// UNCONDITIONAL all-rows remap, even when the restored root profile id is
+			// unchanged. A full backup is exactly ONE profile's data, so every child
+			// row must bind to the profile we just created. Guarding this on
+			// `newProfile.id !== profile.id` left a graft hole: a crafted backup whose
+			// root profile id is unused (so restore keeps it) but whose child rows
+			// carry a VICTIM profile id would skip the remap and write those rows under
+			// the victim. Rewriting every `profileId` to `newProfile.id` closes it.
+			remapIdInBackupData(data, "profileId", newProfile.id)
 
 			const newNetworks = (await networkService.restore(data.network)) as Array<{
 				id: string
@@ -398,13 +406,20 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				return
 			}
 
-			for (const network of newNetworks) {
-				const oldNetwork = (data.network as Array<{ id: string; name: string; rpcUrl: string; chainId: string }>).find(
-					(n) => n.name === network.name && n.rpcUrl === network.rpcUrl && n.chainId === network.chainId,
-				)
-				if (oldNetwork && oldNetwork.id !== network.id) {
-					remapIdInBackupData(data, "networkId", network.id)
-				}
+			// Pair each restored network to its source by RESULT INDEX, not a
+			// field-match: `NetworkService.restore` returns exactly one result
+			// per input, in order, and spreads a FAILED input's raw fields back
+			// into its result — so a field-match (name/rpcUrl/chainId) is
+			// attacker-ambiguous (an invalid net A + a valid net B sharing those
+			// fields could pair B with A and graft A's account-state onto B's
+			// PXE target). Index-pairing is unforgeable. Only remap for a
+			// SUCCESSFUL restore whose id actually changed.
+			const oldNetworks = data.network as Array<{ id: string }>
+			for (let i = 0; i < newNetworks.length; i++) {
+				const restored = newNetworks[i]
+				const old = oldNetworks[i]
+				if (restored.restoreError || !old || old.id === restored.id) continue
+				remapIdInBackupData(data, "networkId", restored.id, old.id)
 			}
 			recordRestoreErrors(NETWORK_SERVICE_NAME, newNetworks)
 
@@ -412,6 +427,43 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			try {
 				const newAccounts = await accountService.restore(data.account)
 				recordRestoreErrors(ACCOUNT_SERVICE_NAME, newAccounts)
+
+				// P1 tx-restore provenance filter. `TransactionService.restore`
+				// writes txs verbatim and reads them by `account` address, so a
+				// backup tx whose `account` is NOT an account SUCCESSFULLY
+				// imported by THIS restore could surface in another profile's
+				// activity — and, now that the chainId-only chain-purge
+				// subscriber is removed, would never be purged. "Account exists in
+				// storage" is NOT sufficient (a crafted backup could name a
+				// pre-existing foreign-profile account); the allow-set is the
+				// accounts this restore just created. Drop-and-record the rest
+				// BEFORE the restore loop below writes them.
+				const importedAddresses = new Set(
+					(newAccounts as Array<{ address?: unknown; restoreError?: unknown }>)
+						.filter((a) => !a.restoreError && typeof a.address === "string")
+						.map((a) => a.address as string),
+				)
+				const txSlice = (data as Record<string, unknown>)[TRANSACTION_SERVICE_NAME]
+				if (Array.isArray(txSlice)) {
+					let dropped = 0
+					;(data as Record<string, unknown>)[TRANSACTION_SERVICE_NAME] = (txSlice as Array<Record<string, unknown>>).filter(
+						(tx) => {
+							const ok = typeof tx.account === "string" && importedAddresses.has(tx.account)
+							if (!ok) dropped++
+							return ok
+						},
+					)
+					// Recorded, not silent — but NOT via restoreErrorLog: a dropped
+					// tx is a security FILTER action (its account is foreign/corrupt,
+					// nothing the user did or can fix), so it must not flip a clean
+					// import into the "finished with errors" UX. A failed-account tx
+					// is already surfaced by its account's restoreError above.
+					if (dropped > 0) {
+						console.warn(
+							`[full-backup-import] dropped ${dropped} transaction(s) referencing an account not imported from this backup`,
+						)
+					}
+				}
 			} catch (err) {
 				// `AccountService` throws `new Error("Duplicate address")`
 				// when an imported account's address collides with one
@@ -441,21 +493,61 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			}
 
 			const tokenService = new TokenServiceClient()
-			const newTokens = (await tokenService.restore(data.token)) as Array<{
+			let tokenRestoreResult: unknown
+			try {
+				tokenRestoreResult = await tokenService.restore(data.token)
+			} finally {
+				tokenService.disconnect() // P7: disconnect even if restore throws
+			}
+			const newTokens = tokenRestoreResult as Array<{
 				id: string
+				chainId: number
 				contract: string
 				restoreError?: string
 			}>
-			tokenService.disconnect()
 			if (data["token-balance"]?.length) {
-				const oldTokens = data.token as Array<{ id: string; contract: string }>
-				const oldIdToContract = new Map(oldTokens.map((t) => [t.id, t.contract]))
-				const contractToNewId = new Map(newTokens.filter((t) => !t.restoreError).map((t) => [t.contract, t.id]))
+				// Key the old→new token map by (chainId, contract), NOT contract
+				// alone: the SAME token contract can exist on two chains, and a
+				// contract-only key collapses both networks' balances onto the
+				// last-restored token id. Balance rows carry no chainId, so the
+				// composite key is sourced from the OLD token via the balance's
+				// `token` (old id). A duplicate old (chainId, contract) is
+				// ambiguous → skip-and-record (never last-wins).
+				const oldTokens = data.token as Array<{ id: string; chainId: number; contract: string }>
+				const oldIdToKey = new Map(oldTokens.map((t) => [t.id, `${t.chainId}:${t.contract}`]))
+				const keyToNewId = new Map<string, string>()
+				const ambiguousKeys = new Set<string>()
+				// Detect ambiguity from the OLD side too, not just successfully-restored
+				// NEW tokens: if two OLD tokens share (chainId, contract) and one FAILS
+				// to restore, the new side looks unambiguous and would silently graft the
+				// failed token's balances onto the surviving one. A duplicated old key is
+				// unattributable on its face → mark ambiguous → skip-and-record.
+				// Count from the OLD token array directly (not `oldIdToKey.values()`,
+				// which a hostile duplicate id would collapse) — backup blobs are
+				// attacker-controlled.
+				const oldKeyCounts = new Map<string, number>()
+				for (const t of oldTokens) {
+					const k = `${t.chainId}:${t.contract}`
+					oldKeyCounts.set(k, (oldKeyCounts.get(k) ?? 0) + 1)
+				}
+				for (const [key, count] of oldKeyCounts) if (count > 1) ambiguousKeys.add(key)
+				for (const t of newTokens) {
+					if (t.restoreError) continue
+					const k = `${t.chainId}:${t.contract}`
+					if (keyToNewId.has(k)) ambiguousKeys.add(k)
+					else keyToNewId.set(k, t.id)
+				}
+				const droppedBalances: unknown[] = []
 				data["token-balance"] = data["token-balance"].flatMap((tb) => {
-					const contract = oldIdToContract.get(tb.token as string)
-					const newId = contract ? contractToNewId.get(contract) : undefined
-					return newId ? [{ ...tb, token: newId }] : []
+					const oldKey = oldIdToKey.get(tb.token as string)
+					const newId = oldKey !== undefined && !ambiguousKeys.has(oldKey) ? keyToNewId.get(oldKey) : undefined
+					if (!newId) {
+						droppedBalances.push({ ...tb, restoreError: "Token balance could not be re-linked to a restored token" })
+						return []
+					}
+					return [{ ...tb, token: newId }]
 				})
+				if (droppedBalances.length) restoreErrorLog.value[TOKEN_BALANCE_SERVICE_NAME] = droppedBalances
 			}
 			recordRestoreErrors(TOKEN_SERVICE_NAME, newTokens)
 
@@ -471,16 +563,23 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				{ name: CONTACT_SERVICE_NAME, client: new ContactServiceClient() as never },
 				{ name: CONFIG_SERVICE_NAME, client: new ConfigServiceClient() as never },
 			]
-			for (const { name, client } of backupServices) {
-				const sliceData = data[name]
-				if (Array.isArray(sliceData)) {
-					const restoredData =
-						name === ACCOUNT_STATE_SERVICE_NAME
-							? await client.restore(sliceData, createdNetworks)
-							: await client.restore(sliceData)
-					client.disconnect()
-					recordRestoreErrors(name, restoredData)
+			// Whole-loop try/finally: every client is constructed up-front, so a
+			// mid-loop throw (or a non-array slice that skips a client's body) must
+			// still disconnect ALL of them — a per-iteration finally would only
+			// clean the client that threw, leaking the ones after it (P7).
+			try {
+				for (const { name, client } of backupServices) {
+					const sliceData = data[name]
+					if (Array.isArray(sliceData)) {
+						const restoredData =
+							name === ACCOUNT_STATE_SERVICE_NAME
+								? await client.restore(sliceData, createdNetworks)
+								: await client.restore(sliceData)
+						recordRestoreErrors(name, restoredData)
+					}
 				}
+			} finally {
+				for (const { client } of backupServices) client.disconnect()
 			}
 
 			// Late activation: open the session NOW that all backup data is
@@ -500,7 +599,17 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 
 			restoreStatus.value = "finished"
 			if (!isRestoreHasErrors.value) {
-				opts.completeImport(newProfile)
+				// AWAIT completeImport in an isolated try/catch (P7). At this point
+				// the import genuinely succeeded (data written, session opened via
+				// finalizeRestore), so a rejected completion handshake must NOT flip
+				// the status back to "failed" or reach the outer catch's rollback —
+				// it must only surface, never undo. An un-awaited call also leaves a
+				// dangling promise that hangs the "Finishing import…" spinner.
+				try {
+					await opts.completeImport(newProfile)
+				} catch (err) {
+					console.error("completeImport failed after a successful restore:", (err as Error)?.message || err)
+				}
 				return
 			}
 			importedProfile.value = newProfile

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — backup-restore-corruption-fix</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .bug { background: #fef2f2; border-left: 3px solid #dc2626; padding: 0.75rem 1rem; margin: 0.75rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Backup-restore data-corruption fixes</h1>
+  <p>The last audit of the just-merged backup-import feature found that the <em>restore</em> path (and the profile-deletion it triggers on rollback) can silently corrupt data. This plan fixes the three serious corruption bugs plus two cheap robustness fixes, as one PR — the last thing standing between us and "the migration arc is closed."</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>mid.</strong> Rubric: 1 dimension is HIGH (security sensitivity — the restore path handles attacker-controlled backup files). The rest are low: it's contained to the backup/transaction services, reversible, no migration (pre-production), no external coupling, no novel surface. One-high → <code>mid</code>. The dual audit made it meatier but not broader.</p>
+
+  <h2>The bugs (all found by the scoped bug hunt, all verified)</h2>
+  <div class="bug"><strong>P1 (high) — deleting one profile wipes another's transaction history.</strong> When a restore fails and rolls back (the most common case: accidentally re-importing your own backup), the cleanup deletes <em>every</em> profile's transactions on that blockchain, not just the one being removed — because transaction records don't record which profile they belong to.</div>
+  <div class="bug"><strong>P2 (high) — importing multiple networks grafts data onto the wrong one.</strong> A bookkeeping step that renumbers network references rewrites <em>all</em> of them to a single new id instead of matching old→new one-to-one.</div>
+  <div class="bug"><strong>P3 (high) — same token on two chains collapses balances.</strong> If you hold the same token contract on two networks, restore mixes up which balance belongs where.</div>
+  <p class="muted">Plus P6 (test fixtures don't match the real data shapes, so some tests pass on data production would reject) and P7 (a hung "finishing…" spinner + leaked connections on error) — both cheap, folded in.</p>
+
+  <h2>What the audit changed (the interesting part)</h2>
+  <p>My first draft fixed P1 by adding a "which profile" tag to every transaction. Both independent auditors (Codex and a fresh Opus review) found a better answer: the code <em>already</em> has a correct, profile-accurate cleanup path (when an account is deleted, its transactions go with it) — and that path already runs on every deletion. The buggy cleanup is simply a <em>second, redundant</em> path that over-reaches. So the fix is to <strong>delete the redundant buggy code</strong>, not add new code. Simpler, safer, and it removes a security hole the first draft would have introduced (trusting a "which profile" tag that comes from an attacker-controlled backup file).</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: P1 — remove the redundant cleanup</h3>
+    <p>Delete the buggy chain-wide transaction purge; rely on the existing account-scoped cleanup that's already correct for both deletion triggers.</p>
+    <p class="muted">Proves itself by: a new test where deleting profile B leaves profile A's transactions intact — red before, green after — plus the existing transaction tests, typecheck, lint.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: P2 + P3 — precise old→new matching</h3>
+    <p>Renumber network references one-to-one (only the row that had the old id), and match token balances by (chain + contract) instead of contract alone. Also fix the old→new network match itself, which the audit found silently broken for the current network shape.</p>
+    <p class="muted">Proves itself by: multi-network and same-contract-two-chains tests asserting no cross-graft, plus typecheck + lint.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: P6 + P7 — real-shaped fixtures + spinner/leak fixes</h3>
+    <p>Rebuild test fixtures from the real data schemas; await the final handshake in its own error-safe block; always disconnect service clients.</p>
+    <p class="muted">Proves itself by: composable + component tests, typecheck, lint.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: live-sandbox proof</h3>
+    <p>A new network end-to-end test that reproduces the multi-profile / multi-network corruption on a real Aztec sandbox and proves it's fixed.</p>
+    <p class="muted">Proves itself by: <code>bun run e2e:agent backup-restore-integrity</code> green on a quiet machine + <code>audit:vue</code> exit 0 + the existing smoke suite still green.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>"Pre-production" is load-bearing: there are no real users, so a data-shape change would need no migration. That's why the first-draft P1 (add a field) was even on the table — but the audit found removing code is strictly better here, so no shape change happens at all. The backup file is treated as hostile input throughout (its checksum proves it wasn't accidentally corrupted, not that it came from us).</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li>None blocking. One deliberate tradeoff: after Phase 1, a transaction whose account was <em>already</em> deleted won't be swept by a later network purge — but such a transaction is already an inert orphan, not corruption. A lazy sweep for those is a possible future follow-up, not this PR.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: P1 + P2 + P3 + the cheap P6/P7. (P4/P5 stay separate follow-ups.)</li>
+      <li>Confirm tier <code>mid</code>.</li>
+      <li>Confirm validation: unit/component per phase + a live-sandbox network round-trip in Phase 4.</li>
+      <li>Approve / conditionally approve / reject.</li>
+    </ul>
+    <p class="muted">Codex verdict: v1 <strong>reject</strong> → v2 <strong>reject</strong> (both found real issues) → <strong>v3 conditional-approve, conditions met</strong>. Two rounds of hostile audit reshaped the P1 fix (from "add a field" to "delete redundant buggy code" to "+ a restore provenance filter") and P2 (to unforgeable index-pairing). The plan is audit-clean.</p>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p class="warning">Use exactly ONE per session — they don't compose.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal (completion is transcript-observable)</h3>
+      <pre><code>/goal All 4 phases marked ✓ in implementations-plan/backup-restore-corruption-fix/plan.md, each ✓ backed by its phase's Validation gate reported passing in the transcript; for each phase the agent printed LESSONS_FILE=implementations-plan/backup-restore-corruption-fix/lessons/phase-N.md; the Phase-4 network e2e (bun run e2e:agent backup-restore-integrity) reported green on a quiet machine; /code-review max --fix complete with fixes applied + committed separately; codex post-impl audit complete (xhigh, adversarial: attack the removed-subscriber correctness, the P2 old→new pairing, the P3 composite key) with high/critical addressed; bun run typecheck and bun run lint both exit 0 in the transcript.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/backup-restore-corruption-fix forward. Never idle. Each firing: reality-check plan.md + lessons/ + git status; pick the next pending phase; after each edit run bun run typecheck + the touched test file; a phase is green ONLY when its plan.md Validation gate passes — then mark ✓, file lessons/phase-N.md, print LESSONS_FILE=..., advance. Phase 4 network e2e: bun run e2e:agent on a quiet machine. Stuck or facing a decision? consult /codex xhigh and act on the stronger argument (log it), never wait for me. All phases ✓? /code-review max --fix (commit separately) → codex post-impl audit → address high/critical → wrap-up. Hard limits: never merge to main/release, never publish, never expand scope beyond plan.md.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a> · <a href="audit-codex.md">codex audit</a> · <a href="audit-fable.md">fable audit</a></p>
+</body>
+</html>

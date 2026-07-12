@@ -56,37 +56,32 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		this.accountService = services.get(AccountService.name)
 		this.networkService = services.get(NetworkService.name)
 
+		// Tx cleanup on network/profile deletion flows through `onAccountDeleted`
+		// ONLY — it is account-scoped (= profile-accurate). A chain-purge
+		// subscriber that filtered by chainId alone was REMOVED: it over-purged
+		// EVERY profile's txs on a shared chain (tx rows carry no profileId), and
+		// it was redundant — `NetworkService.purgeChain` already cascades account
+		// deletion via `AccountService`'s own chain-purge subscriber, which emits
+		// `onAccountDeleted` per account. See implementations-plan/
+		// backup-restore-corruption-fix (P1).
+		//
+		// KNOWN GAP (deferred to P4, see plan §"Deferred: P4"): `onAccountDeleted`
+		// is dispatched via `EventHandler.invoke`, which discards this async
+		// handler's promise — so the tx delete is NOT awaited by the deletion
+		// cascade. A SW kill mid-cascade can leave orphan txs; re-adding the chain
+		// recreates the deterministic account address and resurrects them. This is
+		// an orphan-leak, not cross-profile corruption. The correct fix is an
+		// end-to-end awaited deletion coordinator (AccountService snapshots the
+		// exact Account[] and passes the authoritative addresses to awaited
+		// subscribers; ProfileService.deleteProfile awaits the profile cascade) —
+		// too broad for this PR, and inert pre-production (zero users).
 		this.accountService.onAccountDeleted.add(this.onAccountDeleted)
-		this.networkService.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
 
 		for (const tx of (await this.txs.getValues()).filter((x) => x.status === TxStatus.Pending)) {
 			this.pending.set(tx.hash, tx)
 		}
 
 		this.runWorker()
-	}
-
-	/**
-	 * Wipe all transactions for `(profileId, chainId)`. Drops in-flight
-	 * pending entries first so the polling worker stops touching them, then
-	 * deletes the rows + emits `onTransactionDeleted`. Called by
-	 * `NetworkService.purgeChain`.
-	 *
-	 * The `profileId` arg is unused — Tx records carry chainId but not
-	 * profileId; we filter by chainId alone. Profile cleanup goes through
-	 * `onAccountDeleted` for accuracy when multiple profiles share a chain.
-	 */
-	public async clearChainState(_profileId: string, chainId: number): Promise<void> {
-		await this.ensureInitialized()
-		const txs = (await this.txs.getValues()).filter((x) => x.chainId === chainId)
-		await purgeRows(
-			txs,
-			(tx) => {
-				this.pending.delete(tx.hash)
-				return this.txs.delete(tx.hash)
-			},
-			(tx) => this.emit("onTransactionDeleted", tx),
-		)
 	}
 
 	public async getTransactions(account: string): Promise<Tx[]> {
