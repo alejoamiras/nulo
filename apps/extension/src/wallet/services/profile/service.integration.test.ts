@@ -151,6 +151,9 @@ async function makeService(ttlOrInit: number | { sessionTtl?: number; strict?: b
 	services.add(service)
 
 	await services.start()
+	// deleteProfile now requires the coordinator delegate (finding D); these tests
+	// exercise the profile lifecycle, not the purge cascade → no-op delegate.
+	service.setDeletionDelegate({ snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }), runFor: async () => {} })
 	return { api, config, logger, service, passkeys }
 }
 
@@ -178,6 +181,7 @@ async function makeServiceFromExistingApi(
 	services.add(service)
 
 	await services.start()
+	service.setDeletionDelegate({ snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }), runFor: async () => {} })
 	return { config, logger, service }
 }
 
