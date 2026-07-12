@@ -367,9 +367,17 @@ test("passkey full-backup export: Escape during modal resets agreement gate", as
 
 		await clickByTestId(page, "agree-continue-btn")
 
-		// Press Escape via the page's keydown handler in PasskeyCeremony-
-		// Dialog.vue. Wait for the modal to dismount and the agreement
-		// gate to return.
+		// Wait for the ceremony modal to actually MOUNT before pressing Escape.
+		// Its Escape handler is a `window` keydown listener attached in the
+		// dialog's onMounted; agree → handleBackup → getPasskeyCredentialId
+		// (async) → runCeremony mounts the dialog. On a loaded CI runner that
+		// async gap can exceed the old immediate-Escape, so the key was lost and
+		// the ceremony hung (authenticator torn down) → gate never reset. Waiting
+		// for the dialog first makes the Escape land deterministically.
+		await page.waitForSelector('[data-testid="passkey-ceremony-dialog"]', { visible: true, timeout: 15_000 })
+
+		// Press Escape via the dialog's window keydown handler. Wait for the
+		// modal to dismount and the agreement gate to return.
 		await page.keyboard.press("Escape")
 
 		await page.waitForFunction(

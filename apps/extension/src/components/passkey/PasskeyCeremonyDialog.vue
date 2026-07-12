@@ -80,7 +80,7 @@ onBeforeUnmount(() => {
 <template>
 	<teleport to="#popup">
 		<div :class="$style.backdrop">
-			<div :class="$style.card">
+			<div :class="$style.card" data-testid="passkey-ceremony-dialog">
 				<div :class="$style.spinner" />
 				<h2 :class="$style.title">Waiting for passkey…</h2>
 				<p :class="$style.subtitle">Use your authenticator (Touch ID, Windows Hello, security key) to continue.</p>
