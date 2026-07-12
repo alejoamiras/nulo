@@ -103,6 +103,13 @@ export async function runRouterDeposit(
 			"runRouterDeposit: private deposit requires claimSalt (recipient-committed) — a random secret strands the deposit against claim_private",
 		)
 	}
+	// A nonzero-but-invalid recipient (a field that isn't a point on Grumpkin) would be committed into
+	// the deposit and then mint an undecryptable, unspendable note — the commitment makes it
+	// unrecoverable. Fail closed before the irreversible L1 tx. (The Noir claim_private wants a matching
+	// is_valid() assert on the next redeploy; today the faucet's wallet-sourced recipient is always valid.)
+	if (!(await AztecAddress.fromStringUnsafe(p.aztecRecipient).isValid())) {
+		throw new Error("runRouterDeposit: aztecRecipient is not a valid Aztec address (not a Grumpkin point) — refusing to deposit")
+	}
 	// PRIVATE: derive from (salt, recipient); the value to persist/claim is the SALT. PUBLIC: raw random secret.
 	const claimValue = p.isPrivate ? (p.claimSalt as Fr) : Fr.random()
 	const secret = p.isPrivate ? deriveTokenClaimSecret(p.claimSalt as Fr, AztecAddress.fromStringUnsafe(p.aztecRecipient)) : claimValue
@@ -320,6 +327,11 @@ export async function runSwapBridge(
 				`runSwapBridge: private fuel must target the PrivateFPC (${PRIVATE_FPC_ADDRESS}); got fuelRecipient=${p.fuelRecipient}`,
 			)
 		}
+	}
+	// A nonzero-but-invalid recipient (not a Grumpkin point) strands the deposit — it would mint an
+	// undecryptable note, and the commitment makes it unrecoverable. Fail closed before the L1 tx.
+	if (!(await AztecAddress.fromStringUnsafe(p.aztecRecipient).isValid())) {
+		throw new Error("runSwapBridge: aztecRecipient is not a valid Aztec address (not a Grumpkin point) — refusing to deposit")
 	}
 	// PRIVATE token leg: the secret is derived from (tokenClaimSalt, recipient) so claim_private can
 	// re-derive it — the VALUE the L2 claim passes is the SALT (returned as tokenSecretHex). PUBLIC token

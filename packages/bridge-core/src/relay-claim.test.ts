@@ -90,13 +90,16 @@ describe("assertSaltV2", () => {
 })
 
 describe("redactDescriptorForLog", () => {
-	it("redacts the salt and keeps the rest", () => {
+	it("redacts the salt AND the linkage (recipient, amount, leaf); keeps only the public bridge", () => {
 		const view = redactDescriptorForLog(parseClaimDescriptor(validRaw()))
 		expect(view.salt).toBe("<redacted>")
-		expect(view.bridge).toBe(BRIDGE)
-		expect(view.recipient).toBe(RECIPIENT)
-		expect(view.amount).toBe("1000")
-		expect(view.leafIndex).toBe("7")
-		expect(JSON.stringify(view)).not.toContain(SALT)
+		expect(view.recipient).toBe("<redacted>")
+		expect(view.amount).toBe("<redacted>")
+		expect(view.leafIndex).toBe("<redacted>")
+		expect(view.bridge).toBe(BRIDGE) // the public contract, shared by every deposit — not linkage
+		// The linkage credentials (salt + recipient) never leak into the log view.
+		const s = JSON.stringify(view)
+		expect(s).not.toContain(SALT)
+		expect(s).not.toContain(RECIPIENT)
 	})
 })

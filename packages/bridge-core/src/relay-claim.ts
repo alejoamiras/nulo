@@ -89,13 +89,19 @@ export function assertSaltV2(manifest: unknown): void {
 	}
 }
 
-/** A log-safe view of a descriptor: everything except the salt, which is replaced by a marker. */
+/**
+ * A log-safe view of a descriptor. The salt is a linkage credential — but so are the recipient, amount,
+ * and leaf index TOGETHER (they reconstruct the deposit↔recipient↔amount link the salt is meant to hide),
+ * so ALL of them are redacted, not just the salt. Only the bridge address (a public contract shared by
+ * every deposit) is kept, for operational sanity. Prefer logging tx hashes + attempt/result over
+ * descriptor contents. (codex ultra Low: redacting the salt alone still leaked the protected linkage.)
+ */
 export function redactDescriptorForLog(d: RelayClaimDescriptor): Record<string, string> {
 	return {
 		bridge: d.bridge,
-		recipient: d.recipient,
-		amount: d.amount.toString(),
-		leafIndex: d.leafIndex.toString(),
+		recipient: "<redacted>",
+		amount: "<redacted>",
+		leafIndex: "<redacted>",
 		salt: "<redacted>",
 	}
 }

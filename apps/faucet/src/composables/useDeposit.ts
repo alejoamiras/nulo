@@ -651,6 +651,12 @@ export function useDepositFlow() {
 					"This deployment predates recipient-committed private claims (manifest lacks privateClaimMode: salt-v2). Private bridging is unavailable here — use a public bridge or wait for the cutover.",
 				)
 			}
+			// Defense-in-depth (codex ultra Low): a nonzero-but-invalid recipient (not a Grumpkin point)
+			// would be committed and then mint an undecryptable, unrecoverable note. The wallet-connected
+			// address is always valid, but fail closed here too before the irreversible L1 tx.
+			if (!(await AztecAddress.fromStringUnsafe(recipient).isValid())) {
+				throw new Error("Selected account is not a valid Aztec address — refusing to bridge.")
+			}
 			// `secret` is the value stored + claimed-with: for PRIVATE it's the recipient-committed claim_salt
 			// (claim_private re-derives the consumption secret from it + the recipient); for PUBLIC it's the raw
 			// secret (claim_public binds the recipient in its content hash). The L1-committed secretHash is over

@@ -126,6 +126,9 @@ contract SwapBridgeRouterFuzzTest is Test {
             w.isPrivate = !w.isPrivate; // bool: the flip is the mutation
         } else {
             vm.assume(delta != 0);
+            // Address fields keep only the low 160 bits — a delta set only in the high bits would XOR
+            // away under truncation, a silent non-mutation that would falsely pass. Require low 160 bits.
+            if (which == 0 || which == 1 || which == 11) vm.assume(uint160(delta) != 0);
             if (which == 0) w.tokenPortal = address(uint160(uint256(uint160(w.tokenPortal)) ^ delta));
             else if (which == 1) w.bridgeToken = address(uint160(uint256(uint160(w.bridgeToken)) ^ delta));
             else if (which == 2) w.totalAmount ^= delta;

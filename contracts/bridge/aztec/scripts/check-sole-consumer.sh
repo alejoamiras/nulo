@@ -62,6 +62,29 @@ check_file() {
 		echo "SOLE-CONSUMER VIOLATION: claim_private body does not consume an L1→L2 message where it derives" >&2
 		return 1
 	fi
+
+	# (c) Dataflow (codex ultra Low): the secret passed to consume must be the value DERIVED from
+	#     derive_claim_secret, not a raw param. Catches "derive then ignore it" (`let _ = derive(...);
+	#     consume(.., claim_salt, ..)`) and "consume with the raw salt". Extract the var bound to
+	#     derive_claim_secret and require claim_private's consume use THAT var as its secret (2nd) arg.
+	local derived_var
+	derived_var=$(printf '%s' "$body" | sed -nE 's/.*let[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*derive_claim_secret[[:space:]]*\(.*/\1/p' | head -1)
+	if [ -z "$derived_var" ] || [ "$derived_var" = "_" ]; then
+		echo "SOLE-CONSUMER VIOLATION: claim_private does not bind the derived secret to a real variable (let X = derive_claim_secret(...))" >&2
+		return 1
+	fi
+	if ! printf '%s' "$body" | grep -qE "consume_l1_to_l2_message[[:space:]]*\([^,]*,[[:space:]]*${derived_var}[[:space:]]*,"; then
+		echo "SOLE-CONSUMER VIOLATION: claim_private consume does not use the derived secret ($derived_var) as its secret arg — bearer/dataflow bypass" >&2
+		return 1
+	fi
+
+	# (d) Ban lower-level messaging/nullifier primitives (codex ultra Low): they can consume or nullify a
+	#     message WITHOUT going through consume_l1_to_l2_message, bypassing (a)-(c) entirely.
+	if printf '%s' "$flat" | grep -qE "process_l1_to_l2_message|push_nullifier"; then
+		echo "SOLE-CONSUMER VIOLATION: a lower-level messaging/nullifier primitive is present — it can bypass consume_l1_to_l2_message" >&2
+		return 1
+	fi
+
 	return 0
 }
 
@@ -115,8 +138,39 @@ fn claim_private(recipient: AztecAddress, amount: u128, claim_salt: Field, messa
 EOF
 	check_file "$tmp/three.nr" >/dev/null 2>&1 && { echo "SELF-TEST FAIL: 3-consumer regression accepted" >&2; fails=1; }
 
+	# Regression 4: derive is CALLED but its result is discarded; consume uses the raw claim_salt (dataflow bypass).
+	cat >"$tmp/dataflow.nr" <<'EOF'
+use claim_secret_lib::derive_claim_secret;
+fn claim_public(to: AztecAddress, amount: u128, secret: Field, message_leaf_index: Field) {
+    self.context.consume_l1_to_l2_message(content_hash, secret, config.portal, message_leaf_index);
+}
+fn claim_private(recipient: AztecAddress, amount: u128, claim_salt: Field, message_leaf_index: Field) {
+    let _ = derive_claim_secret(claim_salt, recipient);
+    self.context.consume_l1_to_l2_message(content_hash, claim_salt, config.portal, message_leaf_index);
+}
+EOF
+	check_file "$tmp/dataflow.nr" >/dev/null 2>&1 && { echo "SELF-TEST FAIL: derive-but-consume-raw-salt dataflow bypass accepted" >&2; fails=1; }
+
+	# Regression 5: a lower-level primitive path (process_l1_to_l2_message + push_nullifier) that never
+	# calls consume_l1_to_l2_message, alongside a legit-looking claim_private that passes (a)-(c).
+	cat >"$tmp/lowlevel.nr" <<'EOF'
+use claim_secret_lib::derive_claim_secret;
+fn claim_public(to: AztecAddress, amount: u128, secret: Field, message_leaf_index: Field) {
+    self.context.consume_l1_to_l2_message(content_hash, secret, config.portal, message_leaf_index);
+}
+fn claim_private(recipient: AztecAddress, amount: u128, claim_salt: Field, message_leaf_index: Field) {
+    let secret = derive_claim_secret(claim_salt, recipient);
+    self.context.consume_l1_to_l2_message(content_hash, secret, config.portal, message_leaf_index);
+}
+fn claim_bearer(raw: Field, leaf: Field) {
+    let m = self.context.process_l1_to_l2_message(raw, leaf);
+    self.context.push_nullifier(m);
+}
+EOF
+	check_file "$tmp/lowlevel.nr" >/dev/null 2>&1 && { echo "SELF-TEST FAIL: lower-level primitive bypass accepted" >&2; fails=1; }
+
 	if [ "$fails" -ne 0 ]; then echo "❌ check-sole-consumer self-test FAILED" >&2; exit 1; fi
-	echo "✅ check-sole-consumer self-test passed (real source upheld; 3 bearer regressions rejected)"
+	echo "✅ check-sole-consumer self-test passed (real source upheld; 5 bearer regressions rejected)"
 	exit 0
 fi
 

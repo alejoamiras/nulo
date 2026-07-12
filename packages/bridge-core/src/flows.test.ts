@@ -145,6 +145,18 @@ describe("flows — runSwapBridge injectable fuel secret (L3)", () => {
 		expect(writeArg.args[0].aztecRecipient).toBe(AZTEC_RECIPIENT)
 	})
 
+	// codex ultra Low: a nonzero-but-invalid recipient strands the deposit (an undecryptable note the
+	// commitment makes unrecoverable). 0x..03 is canonical + nonzero but NOT a Grumpkin point.
+	it("rejects a nonzero-but-invalid recipient (not a Grumpkin point) BEFORE signing", async () => {
+		const l1 = makeL1()
+		const injected = deriveBridgeSecret(Fr.zero(), AztecAddress.fromStringUnsafe(AZTEC_RECIPIENT))
+		// RECIPIENT (0x..03) is canonical + nonzero but NOT a Grumpkin point (isValid() === false).
+		await expect(
+			runSwapBridge(l1 as never, { ...baseParams, aztecRecipient: RECIPIENT, fuelSecret: injected } as never),
+		).rejects.toThrow(/not a valid Aztec address/)
+		expect(l1.wallet.signTypedData).not.toHaveBeenCalled()
+	})
+
 	it("F2: private token leg with no tokenClaimSalt is rejected BEFORE signing", async () => {
 		const l1 = makeL1()
 		const injected = deriveBridgeSecret(Fr.zero(), AztecAddress.fromStringUnsafe(AZTEC_RECIPIENT))
