@@ -10,7 +10,7 @@ import { requireActiveProfile } from "@/wallet/services/profile/require-active-p
 import { StepContent, type WrappedTask } from "@/wallet/services/task/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
-import { sleep } from "@/wallet/utils"
+import { Lock, sleep } from "@/wallet/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
@@ -41,6 +41,9 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 
 	private readonly txs: EntityStorage<Tx>
 	private readonly pending = new Map<string, Tx>()
+	// Serializes restore's read-modify-write (contains → set) so two concurrent
+	// imports can't both pass the create-only check for the same hash.
+	private readonly lock = new Lock()
 
 	private profileService: ProfileService = null!
 	private accountService: AccountService = null!
@@ -305,22 +308,45 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 
 		const result: Restored<Tx>[] = []
 
-		for (const tx of txs) {
-			try {
-				await this.txs.set(tx.hash, tx)
-
-				result.push(tx)
-				if (tx.status !== TxStatus.Pending) continue
-
-				this.pending.set(tx.hash, tx)
-			} catch (err) {
-				result.push({
-					...tx,
-					restoreError: toRestoreError(err),
-				})
+		await this.lock.enter()
+		try {
+			for (const tx of txs) {
+				try {
+					// D16: never restore a Pending tx. `submittedEndpointUrl` is
+					// backup-controlled and `updateTx` dials it (or, when absent, the
+					// ACTIVE profile's node) — the sync worker would leak an
+					// attacker-chosen hash to the wrong RPC. Pending is transient sync
+					// state that re-derives on the next real submission. Drop-and-record;
+					// NEVER write it (a written Pending row is re-armed by the init scan)
+					// and NEVER add it to `this.pending`.
+					if (tx.status === TxStatus.Pending) {
+						result.push({ ...tx, restoreError: "restored pending transaction rejected" })
+						continue
+					}
+					// B: create-only. `EntityStorage.set` is an upsert on the
+					// profile-shared txs root keyed by `hash`; a crafted hash equal to a
+					// victim's tx would overwrite (erase) it. A restore must never
+					// overwrite an existing tx.
+					if (await this.txs.contains(tx.hash)) {
+						result.push({ ...tx, restoreError: "transaction already exists (hash collision)" })
+						continue
+					}
+					// H: validate + canonicalize the persisted shape (mirror the read
+					// codec) so a malformed row is recorded, not written + codec-hidden.
+					const row = TxSchema.parse(tx)
+					await this.txs.set(row.hash, row)
+					result.push(row)
+				} catch (err) {
+					result.push({
+						...tx,
+						restoreError: toRestoreError(err),
+					})
+				}
 			}
-		}
 
-		return result
+			return result
+		} finally {
+			this.lock.leave()
+		}
 	}
 }

@@ -412,5 +412,32 @@ describe("cross-profile isolation (standing gate)", () => {
 			await new Promise((r) => setTimeout(r, 0))
 			expect((await txService.getTransactions(A1)).map((t) => t.hash)).toEqual(["h1"])
 		})
+
+		test("(P2/B) restore never overwrites an existing tx — hash-collision is create-only", async () => {
+			// h1 already exists (seeded, owned by A1). A crafted backup reuses that
+			// hash with a DIFFERENT account; a pre-fix upsert would ERASE the original.
+			const [res] = await txService.restore([mkTx("h1", "0xattacker")])
+			expect(res.restoreError).toBeDefined()
+			expect((await txService.getTransaction("h1")).account).toBe(A1)
+		})
+
+		test("(P2/D16) restore rejects a Pending tx — never written, never polled", async () => {
+			const pending = {
+				chainId: 1,
+				account: A1,
+				nonce: "0",
+				feePaymentMethod: 0,
+				hash: "hp",
+				createdAt: 0,
+				updatedAt: 0,
+				status: 0, // Pending — the sync worker would dial its backup-controlled endpoint.
+				origin: { type: "wallet" },
+				calls: [{ contract: "0xc", method: "m", args: [] }],
+			}
+			const [res] = await txService.restore([pending as never])
+			expect(res.restoreError).toBeDefined()
+			await expect(txService.getTransaction("hp")).rejects.toThrow()
+			expect((await txService.getTransactions(A1)).map((t) => t.hash)).not.toContain("hp")
+		})
 	})
 })
