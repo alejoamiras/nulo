@@ -71,7 +71,8 @@ _Replaced the `(chainId,contract)` composite key with INDEX-pairing (`oldTokens[
 - **Tests:** token `chainId:"1:"`→error + balance dropped + neither persisted; two same-contract tokens, token 2 fails → token 1's balance links to token 1 (assert id+message); duplicate old token id → dependent balances dropped; same-contract-two-chains stays distinct.
 - **Gate:** `bun run --cwd apps/extension vitest run src/composables/useFullBackupImport.test.ts src/wallet/services/token`.
 
-### Phase 6 — `onTokenDeleted` carries authoritative `profileId` (C) ☐
+### Phase 6 — `onTokenDeleted` carries authoritative `profileId` (C) ✓ (`da71eba`)
+_Added `TokenDeleted = TokenInfo & {profileId}`; both emit sites (`clearChainState`, `_deleteTokenById`) + the client's event handler now carry `token.profileId`. `IncomingTransferService.onTokenDeleted` scopes to `token.profileId` via the new lock-free `NetworkService.getNetworksRaw(profileId, chainId)` (also needed by P8), NOT `getActiveProfile()`. Pin: deleting inactive P2's token routes all record/trust/network scoping to P2, never active P1 (property-injected test — fails pre-fix). Scenario fixtures updated (tokenA gains profileId; stub gains getNetworksRaw). 183 tests green._
 - `TokenDeleted = TokenInfo & {profileId}`; emit at `token/service.ts:99,300` with `token.profileId`; `IncomingTransferService.onTokenDeleted` uses payload `profileId` NOT `getActiveProfile()`.
 - **Tests (`cross-profile-isolation.test.ts`):** delete inactive P2's token sharing `(chainId,contract)` with active P1 → P1 records+trust UNTOUCHED.
 - **Gate:** `bun run --cwd apps/extension vitest run src/wallet/services/cross-profile-isolation.test.ts src/wallet/services/incoming-transfer && bun run typecheck`.
