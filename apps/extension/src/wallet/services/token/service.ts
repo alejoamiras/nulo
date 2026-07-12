@@ -564,7 +564,11 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			// so a single write consumes an id and the next row picks up after it.
 			let id = await nextNumericId(this.tokens)
 			return await restoreRows(tokens, async (token) => {
-				const row = { ...token, id }
+				// Validate the persisted shape BEFORE consuming an id/writing: a token
+				// with e.g. `chainId: "1:"` would otherwise "succeed", have a balance
+				// relinked to it, then be rejected by the read codec — leaving an
+				// orphaned balance. Parsing here records it as a restoreError instead.
+				const row = TokenSchema.parse({ ...token, id })
 				await this.tokens.set(`${id}`, row)
 				id++
 				return row

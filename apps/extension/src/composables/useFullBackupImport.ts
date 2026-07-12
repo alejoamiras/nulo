@@ -434,6 +434,9 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			remapByMap(data, "networkId", oldToNew)
 			recordRestoreErrors(NETWORK_SERVICE_NAME, newNetworks)
 
+			// Hoisted above the account try so the token re-link's chain-equality
+			// check (after the try) can see which (chainId, address) pairs were imported.
+			const importedChainAddress = new Set<string>()
 			const accountService = new AccountServiceClient()
 			try {
 				const newAccounts = await accountService.restore(data.account)
@@ -449,7 +452,6 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				// account); the allow-set is exactly this restore's accounts. Drop
 				// BEFORE the restore loop below writes them.
 				const importedAddresses = new Set<string>()
-				const importedChainAddress = new Set<string>()
 				for (const a of newAccounts as Array<{ address?: unknown; chainId?: unknown; restoreError?: unknown }>) {
 					if (a.restoreError || typeof a.address !== "string") continue
 					importedAddresses.add(a.address)
@@ -535,54 +537,52 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				tokenService.disconnect() // P7: disconnect even if restore throws
 			}
 			const newTokens = tokenRestoreResult as Array<{
-				id: string
+				id: unknown
 				chainId: number
 				contract: string
 				restoreError?: string
 			}>
 			if (data["token-balance"]?.length) {
-				// Key the old→new token map by (chainId, contract), NOT contract
-				// alone: the SAME token contract can exist on two chains, and a
-				// contract-only key collapses both networks' balances onto the
-				// last-restored token id. Balance rows carry no chainId, so the
-				// composite key is sourced from the OLD token via the balance's
-				// `token` (old id). A duplicate old (chainId, contract) is
-				// ambiguous → skip-and-record (never last-wins).
-				const oldTokens = data.token as Array<{ id: string; chainId: number; contract: string }>
-				const oldIdToKey = new Map(oldTokens.map((t) => [t.id, `${t.chainId}:${t.contract}`]))
-				const keyToNewId = new Map<string, string>()
-				const ambiguousKeys = new Set<string>()
-				// Detect ambiguity from the OLD side too, not just successfully-restored
-				// NEW tokens: if two OLD tokens share (chainId, contract) and one FAILS
-				// to restore, the new side looks unambiguous and would silently graft the
-				// failed token's balances onto the surviving one. A duplicated old key is
-				// unattributable on its face → mark ambiguous → skip-and-record.
-				// Count from the OLD token array directly (not `oldIdToKey.values()`,
-				// which a hostile duplicate id would collapse) — backup blobs are
-				// attacker-controlled.
-				const oldKeyCounts = new Map<string, number>()
-				for (const t of oldTokens) {
-					const k = `${t.chainId}:${t.contract}`
-					oldKeyCounts.set(k, (oldKeyCounts.get(k) ?? 0) + 1)
-				}
-				for (const [key, count] of oldKeyCounts) if (count > 1) ambiguousKeys.add(key)
-				for (const t of newTokens) {
-					if (t.restoreError) continue
-					const k = `${t.chainId}:${t.contract}`
-					if (keyToNewId.has(k)) ambiguousKeys.add(k)
-					else keyToNewId.set(k, t.id)
+				// Pair each restored token to its source by RESULT INDEX
+				// (`TokenService.restore` returns one ordered result per input, same as
+				// networks). This REPLACES the (chainId,contract) composite key: no
+				// cross-chain collapse, no ambiguity heuristic, and one duplicate token
+				// FAILING no longer drops a surviving token's balance. The index also
+				// gives token-OWNERSHIP for free — a balance's token maps only to a
+				// token THIS restore created.
+				const oldTokens = data.token as Array<{ id: unknown; chainId: number }>
+				const oldIdToNew = new Map<unknown, unknown>()
+				const oldIdToChain = new Map<unknown, number>()
+				for (let i = 0; i < newTokens.length; i++) {
+					const old = oldTokens[i]
+					if (!old) continue
+					oldIdToChain.set(old.id, old.chainId)
+					if (!newTokens[i].restoreError) oldIdToNew.set(old.id, newTokens[i].id)
 				}
 				const droppedBalances: unknown[] = []
-				data["token-balance"] = data["token-balance"].flatMap((tb) => {
-					const oldKey = oldIdToKey.get(tb.token as string)
-					const newId = oldKey !== undefined && !ambiguousKeys.has(oldKey) ? keyToNewId.get(oldKey) : undefined
-					if (!newId) {
+				data["token-balance"] = data["token-balance"].flatMap((tb: Record<string, unknown>) => {
+					const newId = oldIdToNew.get(tb.token)
+					// token/account chain-equality (final pass): the balance's account
+					// must be an account imported ON THE TOKEN'S CHAIN. Addresses are
+					// chain-distinct, so this rejects a balance pairing an imported
+					// account with a token on a chain that account wasn't imported on.
+					const tokenChain = oldIdToChain.get(tb.token)
+					const chainOk =
+						tokenChain !== undefined &&
+						typeof tb.account === "string" &&
+						importedChainAddress.has(`${tokenChain}:${tb.account}`)
+					if (newId === undefined || !chainOk) {
 						droppedBalances.push({ ...tb, restoreError: "Token balance could not be re-linked to a restored token" })
 						return []
 					}
 					return [{ ...tb, token: newId }]
 				})
-				if (droppedBalances.length) restoreErrorLog.value[TOKEN_BALANCE_SERVICE_NAME] = droppedBalances
+				if (droppedBalances.length) {
+					restoreErrorLog.value[TOKEN_BALANCE_SERVICE_NAME] = [
+						...(restoreErrorLog.value[TOKEN_BALANCE_SERVICE_NAME] ?? []),
+						...droppedBalances,
+					]
+				}
 			}
 			recordRestoreErrors(TOKEN_SERVICE_NAME, newTokens)
 

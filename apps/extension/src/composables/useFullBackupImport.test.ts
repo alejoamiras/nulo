@@ -702,7 +702,12 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
 		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
-		accountClient.restore.mockResolvedValue([{ address: "0xa", chainId: 1 }])
+		// 0xa is imported on BOTH chains (chain-distinct accounts) so each chain's
+		// balance passes the token/account chain-equality check.
+		accountClient.restore.mockResolvedValue([
+			{ address: "0xa", chainId: 1 },
+			{ address: "0xa", chainId: 2 },
+		])
 		tokenClient.restore.mockResolvedValue([
 			{ id: "n1", chainId: 1, contract: "0xT" },
 			{ id: "n2", chainId: 2, contract: "0xT" },
@@ -718,7 +723,7 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 		])
 	})
 
-	it("skips-and-records a balance whose old token key is ambiguous (duplicate (chainId,contract))", async () => {
+	it("index-pairs duplicate-contract tokens distinctly — a balance maps to its OWN token by id (not dropped)", async () => {
 		const opts = makeOpts()
 		const c = useFullBackupImport(opts)
 		const backup = await buildBackup({
@@ -735,7 +740,8 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
 		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xa", chainId: 1 }])
-		// Both restore to the SAME (chainId, contract) → ambiguous → skip-and-record.
+		// Both restore successfully; INDEX-pairing maps old id 1→n1, 2→n2 — the old
+		// composite-key approach used to falsely DROP this balance as "ambiguous".
 		tokenClient.restore.mockResolvedValue([
 			{ id: "n1", chainId: 1, contract: "0xDUP" },
 			{ id: "n2", chainId: 1, contract: "0xDUP" },
@@ -743,8 +749,7 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 
 		await c.restoreBackup()
 
-		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([])
-		expect(c.restoreErrorLog.value["token-balance"]).toHaveLength(1)
+		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([{ id: 10, token: "n1", account: "0xa" }])
 	})
 
 	it("detects OLD-side ambiguity: two old tokens share (chainId,contract), one FAILS restore → balance NOT grafted onto survivor", async () => {
