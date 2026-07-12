@@ -437,16 +437,24 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				)
 				const txSlice = (data as Record<string, unknown>)[TRANSACTION_SERVICE_NAME]
 				if (Array.isArray(txSlice)) {
-					const foreign: unknown[] = []
+					let dropped = 0
 					;(data as Record<string, unknown>)[TRANSACTION_SERVICE_NAME] = (txSlice as Array<Record<string, unknown>>).filter(
 						(tx) => {
 							const ok = typeof tx.account === "string" && importedAddresses.has(tx.account)
-							if (!ok)
-								foreign.push({ ...tx, restoreError: "Transaction references an account not imported from this backup" })
+							if (!ok) dropped++
 							return ok
 						},
 					)
-					if (foreign.length) restoreErrorLog.value[TRANSACTION_SERVICE_NAME] = foreign
+					// Recorded, not silent — but NOT via restoreErrorLog: a dropped
+					// tx is a security FILTER action (its account is foreign/corrupt,
+					// nothing the user did or can fix), so it must not flip a clean
+					// import into the "finished with errors" UX. A failed-account tx
+					// is already surfaced by its account's restoreError above.
+					if (dropped > 0) {
+						console.warn(
+							`[full-backup-import] dropped ${dropped} transaction(s) referencing an account not imported from this backup`,
+						)
+					}
 				}
 			} catch (err) {
 				// `AccountService` throws `new Error("Duplicate address")`

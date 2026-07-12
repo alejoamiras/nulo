@@ -414,16 +414,19 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xMINE" }])
 
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
 		await c.restoreBackup()
 
 		// Only the imported-account tx reaches restore; the foreign one is dropped
 		// BEFORE it can be written (it would otherwise surface in another profile's
 		// activity and never be purged after the subscriber removal).
 		expect(transactionClient.restore).toHaveBeenCalledWith([{ hash: "h1", account: "0xMINE", chainId: 1 }])
-		// The drop is recorded, not silent.
-		expect(c.restoreErrorLog.value.transaction).toEqual([
-			{ hash: "h2", account: "0xFOREIGN", chainId: 1, restoreError: expect.stringContaining("not imported") },
-		])
+		// Recorded (console), NOT surfaced as a user-facing restore error — a
+		// dropped foreign/corrupt tx must not flip a clean import to error-mode.
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining("dropped 1 transaction"))
+		expect(c.restoreErrorLog.value.transaction).toBeUndefined()
+		expect(c.isRestoreHasErrors.value).toBe(false)
+		warn.mockRestore()
 	})
 
 	it("keeps every tx when all accounts were imported (no false drops)", async () => {
@@ -468,10 +471,15 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
 		accountClient.restore.mockResolvedValue([{ address: "0xOK" }, { address: "0xBAD", restoreError: "boom" }])
 
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
 		await c.restoreBackup()
 
+		// The tx's account failed to restore → dropped (allow-set is SUCCESSFUL
+		// accounts). The failed ACCOUNT already surfaces its own restoreError, so
+		// the dropped tx is only console-recorded, not double-flagged.
 		expect(transactionClient.restore).toHaveBeenCalledWith([])
-		expect(c.restoreErrorLog.value.transaction).toHaveLength(1)
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining("dropped 1 transaction"))
+		warn.mockRestore()
 	})
 })
 
