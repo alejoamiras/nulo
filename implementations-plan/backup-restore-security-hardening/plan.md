@@ -1,6 +1,6 @@
 # Backup-restore security hardening — plan (deep) · v2
 
-**Status:** v3 — folds the final fresh codex pass on v2 (`reject` with 5 precise, prescriptive holes, all foldable; architecture D1/D6/D7 confirmed viable, ONE PR confirmed necessary). Added D15 (non-dropping tombstone), D16 (reject all restored pending txs), D17 (return parsed rows); P2/P3/P7/P8 tightened (attacker-endpoint, token-ownership, 8th PXE subscriber + profile-wide clear, lock-free snapshot APIs). Phase 1 partially IMPLEMENTED (`cfa4290`). PENDING: quick codex confirmation of v3 → `eli5.html` → finish implementing. · **Tier: deep.** · **ONE comprehensive PR** `feat/backup-restore-security-hardening` → `dev`.
+**Status:** ✅ APPROVED (codex v3 confirmation: "No remaining release-blocking gap. You can start implementing."). Deep blueprint complete: 3 legs → consolidate + ledger → contradiction-check → double audit (codex+Opus, both reject v1) → final fresh pass (reject v2, 5 holes) → v3 folds all → D4 adjudication (codex conceded) → v3 approve. **Now IMPLEMENTING.** Phase 1 core done (`cfa4290`). · **Tier: deep.** · **ONE comprehensive PR** `feat/backup-restore-security-hardening` → `dev`.
 
 ## Goal
 Fix ALL verified findings in [`findings.md`](./findings.md) (A–H + tests + structural) in one coherent PR. After it: a restored row can only ever bind to an account THIS restore just created on a chain with a successfully-restored network; profile/network deletion is atomic, awaited, and **verifiably** privacy-erasing (no survivor rows, no resurrection, no false-success). Do NOT revert #275's four applied fixes.
@@ -38,7 +38,7 @@ Fix ALL verified findings in [`findings.md`](./findings.md) (A–H + tests + str
 
 ## Phases (each ends with a real Validation gate; tests must FAIL on pre-fix code)
 
-### Phase 1 — validate EVERY restore writer before persist (finding H) ☐
+### Phase 1 — validate EVERY restore writer before persist (finding H) ◐ core done (`cfa4290`); token-balance/auth-registry malformed pins fold into P3
 - At EVERY service `restore` boundary that writes a persistent row — account, token, token-balance, auth-registry, transaction (P2), **contact, fpc**, and any other profile-bearing writer — `Schema.safeParse` each row inside the per-row capture; a parse failure sets the existing `restoreError` (server-side) and does NOT write. Best-effort preserved (one bad row never drops the rest). NO `RestoreResult<T>` shape change.
 - **Why every writer:** a codec-hidden malformed contact/FPC row survives AND is invisible to the deletion cleanup's `getValues()` → permanent private-data leak (codex/Opus H1).
 - **Tests:** malformed `TokenBalanceRaw`/`Account`/`Contact`/`Fpc` rejected at restore + never in raw storage (pre-fix: persists + reads back `undefined`); schema-real integration (real service + FakeBrowserApi, complete rows, positive raw-storage read).
