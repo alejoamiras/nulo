@@ -224,6 +224,18 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		}
 	}
 
+	/** Awaited balance purge for a SET of token ids — called by the deletion
+	 *  coordinator with the tombstone's token snapshot (finding D). Idempotent. */
+	public async purgeForTokens(tokenIds: readonly number[]): Promise<void> {
+		await this.ensureInitialized()
+		const set = new Set(tokenIds)
+		for (const tb of (await this.repo.getAll()).filter((x) => set.has(x.token))) {
+			if (this.tokens.has(tb.token)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
+			await this.repo.delete(tb.id)
+		}
+		for (const id of set) this.tokens.delete(id)
+	}
+
 	private readonly onTransactionUpdated = async (tx: Tx) => {
 		if (tx.status !== TxStatus.Pending) {
 			if (tx.origin.type === OriginType.UI) {

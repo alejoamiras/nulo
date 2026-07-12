@@ -186,7 +186,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	protected async init(services: ServiceCollection) {
 		this.profileService = services.get(ProfileService.name)
 		this.profileService.onActiveProfileChanged.add(this.onActiveProfileChanged)
-		this.profileService.onProfileDeleted.add(this.onProfileDeleted)
+		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile` (D).
 		this.pxeServiceClient = new PxeServiceClient(this.logger)
 	}
 
@@ -599,19 +599,29 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	 * only after this method resolves.
 	 */
 	public async purgeChain(profileId: string, chainId: number, networkId: string): Promise<void> {
+		// FAIL-FAST (finding D, codex blocker): run every step best-effort so a
+		// single failure doesn't strand the others, but PROPAGATE if ANY failed —
+		// the deletion coordinator must keep the tombstone + retry (idempotent), not
+		// treat a swallowed subscriber/PXE failure as "chain erased".
+		const errors: unknown[] = []
 		for (const subscriber of this.chainPurgeSubscribers) {
 			try {
 				await subscriber(profileId, chainId, networkId)
 			} catch (error) {
 				this.logError(`purgeChain subscriber failed for (${profileId}, ${chainId})`, getErrorMessage(error))
+				errors.push(error)
 			}
 		}
 		try {
 			await this.pxeServiceClient.clearChainState(profileId, chainId)
 		} catch (error) {
 			this.logError(`PxeServiceClient.clearChainState failed`, getErrorMessage(error))
+			errors.push(error)
 		}
 		this.emit("onChainPurged", { profileId, chainId })
+		if (errors.length) {
+			throw new Error(`purgeChain failed for (${profileId}, ${chainId}): ${errors.map(getErrorMessage).join("; ")}`)
+		}
 	}
 
 	private readonly chainPurgeSubscribers: Array<(profileId: string, chainId: number, networkId: string) => Promise<void>> = []
@@ -702,23 +712,25 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		}
 	}
 
-	private readonly onProfileDeleted = async (profile: ProfileInfo) => {
-		this.logDebug(`Profile ${profile.id} deleted, purging chains + removing networks`)
+	/** Awaited profile-scoped network purge, called by the deletion coordinator
+	 *  (relocated from the removed fire-and-forget `onProfileDeleted` sub — D).
+	 *  FAIL-FAST: a `purgeChain`/PXE failure now PROPAGATES (was log-and-continue)
+	 *  so the coordinator keeps the tombstone + retries rather than reporting a
+	 *  false "deleted". */
+	public async purgeForProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		this.logDebug(`purgeForProfile ${profileId}: purge chains + remove networks`)
 		try {
 			await this.lock.enter()
 			this.nodes.clear()
 			this.transientNodes.clear()
-			const networks = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
+			const networks = (await this.storage.getValues()).filter((n) => n.profileId === profileId)
 			for (const network of networks) {
-				try {
-					await this.purgeChain(profile.id, network.chainId, network.id)
-				} catch (error) {
-					this.logError(`purgeChain failed during onProfileDeleted`, getErrorMessage(error))
-				}
+				await this.purgeChain(profileId, network.chainId, network.id)
 				await this.storage.delete(network.id)
 				this.emit("onNetworkDeleted", network)
 			}
-			await this.browserApi.storage.local.remove(activeKey(profile.id))
+			await this.browserApi.storage.local.remove(activeKey(profileId))
 		} finally {
 			this.lock.leave()
 		}

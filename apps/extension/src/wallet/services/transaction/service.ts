@@ -166,17 +166,30 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	}
 
 	private readonly onAccountDeleted = async (account: Account) => {
-		this.logDebug(`Account ${account.address} deleted, remove related txs`)
-		const txs = (await this.txs.getValues()).filter((x) => x.account === account.address)
-		await purgeRows(
-			txs,
-			(tx) => {
-				this.logDebug(`Remove tx ${tx.hash}`)
-				this.pending.delete(tx.hash)
-				return this.txs.delete(tx.hash)
-			},
-			(tx) => this.emit("onTransactionDeleted", tx),
-		)
+		await this.purgeForAccounts([account.address])
+	}
+
+	/** Awaited tx purge for a SET of accounts — called by the deletion coordinator
+	 *  with the tombstone's authoritative address snapshot (finding D). Runs under
+	 *  the tx lock; idempotent. `onAccountDeleted` delegates here so the single-
+	 *  account (deleteNetwork chain-purge) path shares one implementation. */
+	public async purgeForAccounts(addresses: readonly string[]): Promise<void> {
+		await this.ensureInitialized()
+		const set = new Set(addresses)
+		await this.lock.enter()
+		try {
+			const txs = (await this.txs.getValues()).filter((x) => set.has(x.account))
+			await purgeRows(
+				txs,
+				(tx) => {
+					this.pending.delete(tx.hash)
+					return this.txs.delete(tx.hash)
+				},
+				(tx) => this.emit("onTransactionDeleted", tx),
+			)
+		} finally {
+			this.lock.leave()
+		}
 	}
 
 	private async runWorker() {
