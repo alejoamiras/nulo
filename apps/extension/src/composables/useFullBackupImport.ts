@@ -412,6 +412,35 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			try {
 				const newAccounts = await accountService.restore(data.account)
 				recordRestoreErrors(ACCOUNT_SERVICE_NAME, newAccounts)
+
+				// P1 tx-restore provenance filter. `TransactionService.restore`
+				// writes txs verbatim and reads them by `account` address, so a
+				// backup tx whose `account` is NOT an account SUCCESSFULLY
+				// imported by THIS restore could surface in another profile's
+				// activity — and, now that the chainId-only chain-purge
+				// subscriber is removed, would never be purged. "Account exists in
+				// storage" is NOT sufficient (a crafted backup could name a
+				// pre-existing foreign-profile account); the allow-set is the
+				// accounts this restore just created. Drop-and-record the rest
+				// BEFORE the restore loop below writes them.
+				const importedAddresses = new Set(
+					(newAccounts as Array<{ address?: unknown; restoreError?: unknown }>)
+						.filter((a) => !a.restoreError && typeof a.address === "string")
+						.map((a) => a.address as string),
+				)
+				const txSlice = (data as Record<string, unknown>)[TRANSACTION_SERVICE_NAME]
+				if (Array.isArray(txSlice)) {
+					const foreign: unknown[] = []
+					;(data as Record<string, unknown>)[TRANSACTION_SERVICE_NAME] = (txSlice as Array<Record<string, unknown>>).filter(
+						(tx) => {
+							const ok = typeof tx.account === "string" && importedAddresses.has(tx.account)
+							if (!ok)
+								foreign.push({ ...tx, restoreError: "Transaction references an account not imported from this backup" })
+							return ok
+						},
+					)
+					if (foreign.length) restoreErrorLog.value[TRANSACTION_SERVICE_NAME] = foreign
+				}
 			} catch (err) {
 				// `AccountService` throws `new Error("Duplicate address")`
 				// when an imported account's address collides with one

@@ -381,6 +381,86 @@ describe("useFullBackupImport — backup migration wiring", () => {
 	})
 })
 
+describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
+	it("drops-and-records a tx whose account was NOT imported by this restore", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				account: [{ address: "0xMINE" }],
+				transaction: [
+					{ hash: "h1", account: "0xMINE", chainId: 1 },
+					{ hash: "h2", account: "0xFOREIGN", chainId: 1 },
+				],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([{ address: "0xMINE" }])
+
+		await c.restoreBackup()
+
+		// Only the imported-account tx reaches restore; the foreign one is dropped
+		// BEFORE it can be written (it would otherwise surface in another profile's
+		// activity and never be purged after the subscriber removal).
+		expect(transactionClient.restore).toHaveBeenCalledWith([{ hash: "h1", account: "0xMINE", chainId: 1 }])
+		// The drop is recorded, not silent.
+		expect(c.restoreErrorLog.value.transaction).toEqual([
+			{ hash: "h2", account: "0xFOREIGN", chainId: 1, restoreError: expect.stringContaining("not imported") },
+		])
+	})
+
+	it("keeps every tx when all accounts were imported (no false drops)", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				account: [{ address: "0xA" }, { address: "0xB" }],
+				transaction: [
+					{ hash: "h1", account: "0xA", chainId: 1 },
+					{ hash: "h2", account: "0xB", chainId: 1 },
+				],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([{ address: "0xA" }, { address: "0xB" }])
+
+		await c.restoreBackup()
+
+		expect(transactionClient.restore).toHaveBeenCalledWith([
+			{ hash: "h1", account: "0xA", chainId: 1 },
+			{ hash: "h2", account: "0xB", chainId: 1 },
+		])
+		expect(c.restoreErrorLog.value.transaction).toBeUndefined()
+	})
+
+	it("drops a tx whose account FAILED to import (allow-set is SUCCESSFUL accounts only)", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				account: [{ address: "0xOK" }, { address: "0xBAD" }],
+				transaction: [{ hash: "h1", account: "0xBAD", chainId: 1 }],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([{ address: "0xOK" }, { address: "0xBAD", restoreError: "boom" }])
+
+		await c.restoreBackup()
+
+		expect(transactionClient.restore).toHaveBeenCalledWith([])
+		expect(c.restoreErrorLog.value.transaction).toHaveLength(1)
+	})
+})
+
 describe("useFullBackupImport — failure branches", () => {
 	it("surfaces restoreError when ProfileService.restore returns one", async () => {
 		const opts = makeOpts()
