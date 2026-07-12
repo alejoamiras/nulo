@@ -149,3 +149,21 @@ tripwire checks text-presence not dataflow; (3) relayer log redacts the salt but
 recipient+amount+leaf (the linkage the salt protects); (4) CI runs TS tests but NOT the Noir keystone
 / sole-consumer self-test — a Noir-only drift can merge green; (5) the new Solidity fuzz/fork tests
 overstate coverage (mock ignores selector/secret; `delta=1<<160` truncates an address mutation).
+
+## `[✓ 2026-07-12]` Post-promotion: ultra follow-ups shipped + LIVE private canary re-verified
+
+After the promotion, implemented the codex-ultra Low/Info follow-ups (`edcb11b`, all sensible ones
+except the ④ CI Noir gate, deferred per owner): the `isValid()` recipient guard (flows.ts both paths +
+useDeposit.ts, negative-test-pinned), the relayer log redaction (recipient/amount/leaf, not just salt),
+the `SwapBridgeRouterFuzz` `delta`-truncation fix (high-bits delta was a silent no-op on address
+fields), and the sole-consumer tripwire hardening (dataflow check + lower-level-primitive ban, 5
+self-test regressions). Gates: bridge-core 154 + faucet 426, forge fuzz 5/256, self-test 5/5,
+audit:faucet green.
+
+**LIVE re-verification before manual smoke** — `smoke-existing-testnet.ts --private --config
+testnet-bridge.json` (the PROMOTED manifest) PASSED in 3.7m: recipient-committed private deposit (100
+AZLO, leafIndex 14894080) → `claim_private` settled (revertCode 0) → balance bridged. Proves the
+promoted deployment's private path works end-to-end TODAY. Note the canary uses the DIRECT-portal
+`depositToAztecPrivate` path, so it validates the core commitment + promoted contracts, NOT the router
+`aztecRecipient`-zeroing (which is unit-pinned + behavior-preserving: the router ignores that field on
+the private path, and the faucet reads only leaf/key from the event, never the recipient).
