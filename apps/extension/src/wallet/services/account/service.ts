@@ -232,10 +232,25 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		const hasIntersectionByAddress = hasIntersectionByKeys(await this.storage.getValues(), accounts, ["address"])
 		if (hasIntersectionByAddress) throw new Error("Duplicate address")
 
+		const seen = new Set<string>()
 		for (const account of accounts) {
 			try {
-				await this.storage.set(account.address, account)
-				result.push(account)
+				// H: validate + canonicalize the persisted shape (mirror the read codec).
+				const parsed = AccountSchema.parse(account)
+				// F: reject an empty/whitespace address. "Successfully restored" must NOT
+				// mean "set() didn't throw" for a blank address — a blank-account row
+				// would otherwise join the imported-account allow-set and let a tx/authwit
+				// referencing "" through. (Full AztecAddress canonicalization is a stronger
+				// follow-up; a legit backup's addresses are already canonical, so the
+				// composable's address-match stays exact for real data.)
+				if (parsed.address.trim().length === 0) throw new Error("empty account address")
+				// Dedupe within the batch — the storage-intersection check above only
+				// covers pre-existing rows, so two identical addresses in one restore
+				// would otherwise both "succeed" (last write wins).
+				if (seen.has(parsed.address)) throw new Error("duplicate account address in batch")
+				seen.add(parsed.address)
+				await this.storage.set(parsed.address, parsed)
+				result.push(parsed)
 			} catch (err) {
 				result.push({
 					...account,
