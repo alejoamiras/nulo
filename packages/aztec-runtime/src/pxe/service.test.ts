@@ -167,3 +167,51 @@ describe("PxeService.getContractInstance cascade", () => {
 		expect(f.nodeCalls).toBe(0)
 	})
 })
+
+describe("PxeService deletion honesty (finding D)", () => {
+	beforeEach(() => {
+		vi.stubGlobal("chrome", {
+			runtime: { onMessage: { addListener: () => {}, removeListener: () => {} }, sendMessage: () => Promise.resolve() },
+		})
+	})
+	afterEach(() => vi.unstubAllGlobals())
+
+	// A fake IDBOpenDBRequest that fires the chosen lifecycle callback async.
+	function fireReq(kind: "success" | "error"): unknown {
+		const req: Record<string, unknown> = {}
+		queueMicrotask(() => {
+			if (kind === "success") (req.onsuccess as () => void)?.()
+			else {
+				req.error = new Error("boom")
+				;(req.onerror as () => void)?.()
+			}
+		})
+		return req
+	}
+
+	test("clearChainState REJECTS when deleteDatabase errors — no false 'deleted'", async () => {
+		const service = makeService(makeFactory({}).factory)
+		;(service as unknown as { registry: unknown }).registry = { dispose: async () => {} }
+		vi.stubGlobal("indexedDB", { deleteDatabase: () => fireReq("error") })
+		await expect(service.clearChainState("p1", 1)).rejects.toThrow()
+	})
+
+	test("clearProfileState deletes the profile's DBs by prefix but KEEPS keyval-store while another profile survives", async () => {
+		const service = makeService(makeFactory({}).factory)
+		;(service as unknown as { registry: unknown }).registry = { disposeProfile: async () => {} }
+		const deleted: string[] = []
+		let dbs = [{ name: "pxe/p1/1" }, { name: "pxe/p2/1" }, { name: "keyval-store" }]
+		vi.stubGlobal("indexedDB", {
+			databases: async () => dbs,
+			deleteDatabase: (name: string) => {
+				deleted.push(name)
+				dbs = dbs.filter((d) => d.name !== name)
+				return fireReq("success")
+			},
+		})
+		await service.clearProfileState("p1")
+		expect(deleted).toContain("pxe/p1/1")
+		expect(deleted).not.toContain("pxe/p2/1") // another profile's DB — untouched
+		expect(deleted).not.toContain("keyval-store") // shared — kept while p2 survives
+	})
+})

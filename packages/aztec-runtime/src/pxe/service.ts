@@ -80,6 +80,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		"getSyncedBlockHeader",
 		"getBlockTimestamp",
 		"clearChainState",
+		"clearProfileState",
 	)
 
 	private readonly profiles: IProfileReader
@@ -183,7 +184,10 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			}
 		}
 
-		this.profiles.onProfileDeleted.add(this.onProfileDeleted)
+		// NOTE: PXE cleanup on profile deletion is NO LONGER a fire-and-forget
+		// `onProfileDeleted` subscriber (it raced the cascade + unconditionally
+		// deleted the shared keyval-store = cross-profile corruption, finding D).
+		// The deletion coordinator now calls the awaited `clearProfileState`.
 		this.profiles.onActiveProfileChanged.add(this.onActiveProfileChanged)
 		await this.profiles.connect()
 	}
@@ -464,17 +468,64 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		await barrier.read(async () => {
 			await chainGuard.write(async () => {
 				await this.registry.dispose(profileId, chainId)
-				const dbName = chainDataDir({ profileId, chainId })
-				await new Promise<void>((resolve) => {
-					const req = indexedDB.deleteDatabase(dbName)
-					req.onsuccess = () => resolve()
-					req.onerror = () => resolve()
-					req.onblocked = () => {
-						this.logWarn("clearChainState: deleteDatabase blocked", dbName)
-						resolve()
-					}
-				})
+				await this.deleteDb(chainDataDir({ profileId, chainId }))
 			})
+		})
+	}
+
+	/**
+	 * Profile-wide PXE erase (finding D). Deletes every PXE database for the
+	 * profile by PREFIX — a per-chain `clearChainState` misses a DB on a chainId
+	 * whose network row is gone — and the SHARED keyval-store only when no PXE DB
+	 * survives for ANY profile. AWAITED + rejects on failure so the deletion
+	 * coordinator can treat a rejection as a critical, retryable erasure failure.
+	 */
+	public async clearProfileState(profileId: string): Promise<void> {
+		const barrier = this.getProfileBarrier(profileId)
+		try {
+			await barrier.enterWrite()
+			await this.registry.disposeProfile(profileId)
+			const guardPrefix = chainRegistryKeyPrefix(profileId)
+			for (const k of Array.from(this.chainGuards.keys())) if (k.startsWith(guardPrefix)) this.chainGuards.delete(k)
+			const dbPrefix = chainDataDirPrefix(profileId)
+			for (const db of await indexedDB.databases()) {
+				if (db.name?.startsWith(dbPrefix)) await this.deleteDb(db.name)
+			}
+			// keyval-store is SHARED across every profile's PXE DBs — deleting it
+			// unconditionally corrupts a surviving profile's PXE (finding D). Only
+			// delete it once NO PXE DB remains.
+			const remaining = (await indexedDB.databases()).some((x) => x.name?.startsWith(PXE_DATA_DIR_ROOT))
+			if (!remaining) {
+				const keyval = (await indexedDB.databases()).find((x) => x.name === "keyval-store")
+				if (keyval?.name) await this.deleteDb(keyval.name)
+			}
+		} finally {
+			barrier.leaveWrite()
+			this.profileBarriers.delete(profileId)
+		}
+	}
+
+	/**
+	 * Delete an IndexedDB database, AWAITED. `onerror` REJECTS (never
+	 * false-success — a "deleted" profile must be verifiably erased). `onblocked`
+	 * waits up to `timeoutMs` for the blocking connection to close (then
+	 * `onsuccess` fires); if still blocked at the deadline, reject rather than
+	 * hang forever or silently lie.
+	 */
+	private deleteDb(name: string, timeoutMs = 5_000): Promise<void> {
+		return new Promise<void>((resolve, reject) => {
+			const req = indexedDB.deleteDatabase(name)
+			let timer: ReturnType<typeof setTimeout> | undefined
+			const finish = (fn: () => void) => {
+				if (timer) clearTimeout(timer)
+				fn()
+			}
+			req.onsuccess = () => finish(resolve)
+			req.onerror = () => finish(() => reject(req.error ?? new Error(`deleteDatabase failed: ${name}`)))
+			req.onblocked = () => {
+				this.logWarn("deleteDatabase blocked (waiting for close):", name)
+				timer = setTimeout(() => reject(new Error(`deleteDatabase blocked past timeout: ${name}`)), timeoutMs)
+			}
 		})
 	}
 
@@ -516,34 +567,6 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		} catch (err) {
 			this.logError(`[WRITE] ${label} failed after ${Date.now() - start}ms`, err instanceof Error ? err.message : String(err))
 			throw err
-		}
-	}
-
-	private readonly onProfileDeleted = async (profile: { id: string }): Promise<void> => {
-		const barrier = this.getProfileBarrier(profile.id)
-		try {
-			await barrier.enterWrite()
-			// All chain ops on this profile have drained — safe to dispose.
-			await this.registry.disposeProfile(profile.id)
-			// Drop the per-chain guards for this profile. They're idle (drained
-			// by the barrier above) so deletion is race-free.
-			const prefix = chainRegistryKeyPrefix(profile.id)
-			for (const k of Array.from(this.chainGuards.keys())) {
-				if (k.startsWith(prefix)) this.chainGuards.delete(k)
-			}
-			// ArtifactRegistry stores compiled-in artifacts keyed by
-			// content-addressed class id; not profile-scoped. Skipping the
-			// clear here was a deliberate Week 3 change — `clear()` on
-			// profile delete used to nuke the bundle for every surviving
-			// profile too, causing a wasted reload on next access.
-			for (const db of await indexedDB.databases()) {
-				if (db.name?.startsWith(chainDataDirPrefix(profile.id)) || db.name === "keyval-store") {
-					const _ = indexedDB.deleteDatabase(db.name)
-				}
-			}
-		} finally {
-			barrier.leaveWrite()
-			this.profileBarriers.delete(profile.id)
 		}
 	}
 
