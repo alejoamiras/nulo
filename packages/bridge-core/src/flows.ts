@@ -115,7 +115,11 @@ export async function runRouterDeposit(
 		bridgeToken: p.bridgeToken,
 		totalAmount: p.amount,
 		fuelAmount: 0n,
-		aztecRecipient: p.aztecRecipient,
+		// PRIVATE: recipient is committed via tokenSecretHash (H(derive(salt, recipient))) and is NOT
+		// published — the router ignores it on the private path but EMITS it as an indexed event, so a
+		// real value here would leak R and defeat recipient privacy. Zero on-chain; the claim re-derives
+		// the secret from R (which stays only in the local recovery record).
+		aztecRecipient: p.isPrivate ? ZERO_BYTES32 : p.aztecRecipient,
 		fuelRecipient: ZERO_BYTES32,
 		tokenSecretHash: secretHash.toString() as Hex,
 		fuelSecretHash: ZERO_BYTES32,
@@ -139,7 +143,7 @@ export async function runRouterDeposit(
 		tokenPortal: p.tokenPortal,
 		bridgeToken: p.bridgeToken,
 		amount: p.amount,
-		aztecRecipient: p.aztecRecipient,
+		aztecRecipient: p.isPrivate ? ZERO_BYTES32 : p.aztecRecipient,
 		secretHash: secretHash.toString(),
 		isPrivate: p.isPrivate,
 	}
@@ -342,7 +346,9 @@ export async function runSwapBridge(
 		bridgeToken: p.bridgeToken,
 		totalAmount: p.totalAmount,
 		fuelAmount: p.fuelAmount,
-		aztecRecipient: p.aztecRecipient,
+		// PRIVATE recipient is committed via tokenSecretHash, never published — zero the on-chain field so
+		// the router's indexed BridgeWithFuel event can't leak R (privacy); the private path ignores it.
+		aztecRecipient: p.isPrivate ? ZERO_BYTES32 : p.aztecRecipient,
 		fuelRecipient: p.fuelRecipient,
 		tokenSecretHash,
 		fuelSecretHash,
@@ -367,7 +373,7 @@ export async function runSwapBridge(
 		bridgeToken: p.bridgeToken,
 		totalAmount: p.totalAmount,
 		fuelAmount: p.fuelAmount,
-		aztecRecipient: p.aztecRecipient,
+		aztecRecipient: p.isPrivate ? ZERO_BYTES32 : p.aztecRecipient,
 		fuelRecipient: p.fuelRecipient,
 		tokenSecretHash,
 		fuelSecretHash,

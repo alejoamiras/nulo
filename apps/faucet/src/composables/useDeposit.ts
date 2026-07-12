@@ -759,7 +759,9 @@ export function useDepositFlow() {
 					bridgeToken: L1_USDC,
 					totalAmount: amount,
 					fuelAmount: fuelSlice,
-					aztecRecipient: recipient as `0x${string}`,
+					// PRIVATE: recipient is committed via tokenSecretHash, NOT published — the router ignores it on
+					// the private path but EMITS it indexed, so a real value here leaks R. Zero it for private.
+					aztecRecipient: (isPrivate ? `0x${"0".repeat(64)}` : recipient) as `0x${string}`,
 					// PRIVATE fuel lands at the PrivateFPC (claimer-bound by the secret); PUBLIC fuel at the user.
 					// A bug here either leaks (user addr on L1) or strands (FJ to a non-FPC) — the headline invariant.
 					fuelRecipient: (isPrivate ? PRIVATE_FPC_ADDRESS : recipient) as `0x${string}`,
@@ -897,7 +899,9 @@ export function useDepositFlow() {
 				bridgeToken: L1_USDC,
 				totalAmount: tokenAmount,
 				fuelAmount: 0n,
-				aztecRecipient: recipient as `0x${string}`,
+				// PRIVATE recipient is committed via secretHash, never published — zero it so the router's
+				// indexed Bridge event can't leak R (privacy). PUBLIC binds R in the portal content hash.
+				aztecRecipient: (isPrivate ? `0x${"0".repeat(64)}` : recipient) as `0x${string}`,
 				fuelRecipient: `0x${"0".repeat(64)}`,
 				tokenSecretHash: id as `0x${string}`,
 				fuelSecretHash: `0x${"0".repeat(64)}`,
@@ -926,7 +930,7 @@ export function useDepositFlow() {
 							tokenPortal: L1_PORTAL,
 							bridgeToken: L1_USDC,
 							amount: tokenAmount,
-							aztecRecipient: recipient as `0x${string}`,
+							aztecRecipient: bridgeWitness.aztecRecipient,
 							secretHash: id as `0x${string}`,
 							isPrivate,
 						},

@@ -114,6 +114,37 @@ describe("flows — runSwapBridge injectable fuel secret (L3)", () => {
 		expect(tokenArg.tokenSecretHash).toBe((await tokenClaimSecretHash(new Fr(0x7abcn), claimer)).toString())
 	})
 
+	// PRIVACY PIN (codex ultra Medium): the recipient is committed via tokenSecretHash and must NOT be
+	// published on-chain — the router ignores aztecRecipient on the private path but EMITS it as an
+	// indexed event, so a real value would let any observer read R off L1 (defeating the salt-entropy
+	// protection). A future refactor that re-passes the real recipient for private turns this red.
+	it("PRIVACY: a private deposit zeroes the on-chain aztecRecipient while still committing to R", async () => {
+		const l1 = makeL1()
+		const claimer = AztecAddress.fromStringUnsafe(AZTEC_RECIPIENT)
+		const injected = deriveBridgeSecret(Fr.zero(), claimer)
+		await runSwapBridge(l1 as never, { ...baseParams, fuelSecret: injected } as never)
+
+		const ZERO32 = `0x${"0".repeat(64)}`
+		const writeArg = (l1.wallet.writeContract.mock.calls[0] as unknown[])[0] as {
+			args: [{ aztecRecipient: string; tokenSecretHash: string }]
+		}
+		// R is NOT on-chain (a real value leaks via the router's indexed BridgeWithFuel event)…
+		expect(writeArg.args[0].aztecRecipient).toBe(ZERO32)
+		expect(writeArg.args[0].aztecRecipient).not.toBe(AZTEC_RECIPIENT)
+		// …but the commitment STILL binds the real recipient, so claim_private re-derives + mints to R.
+		expect(writeArg.args[0].tokenSecretHash).toBe((await tokenClaimSecretHash(baseParams.tokenClaimSalt, claimer)).toString())
+		// The signed witness matches the calldata (else the Permit2 signature wouldn't verify).
+		const typed = (l1.wallet.signTypedData.mock.calls[0] as unknown[])[0] as { message: { witness: { aztecRecipient: string } } }
+		expect(typed.message.witness.aztecRecipient).toBe(ZERO32)
+	})
+
+	it("PUBLIC deposit still passes the real aztecRecipient on-chain (recipient bound in the content hash)", async () => {
+		const l1 = makeL1()
+		await runSwapBridge(l1 as never, { ...baseParams, isPrivate: false } as never)
+		const writeArg = (l1.wallet.writeContract.mock.calls[0] as unknown[])[0] as { args: [{ aztecRecipient: string }] }
+		expect(writeArg.args[0].aztecRecipient).toBe(AZTEC_RECIPIENT)
+	})
+
 	it("F2: private token leg with no tokenClaimSalt is rejected BEFORE signing", async () => {
 		const l1 = makeL1()
 		const injected = deriveBridgeSecret(Fr.zero(), AztecAddress.fromStringUnsafe(AZTEC_RECIPIENT))
