@@ -68,16 +68,11 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		// `onAccountDeleted` per account. See implementations-plan/
 		// backup-restore-corruption-fix (P1).
 		//
-		// KNOWN GAP (deferred to P4, see plan §"Deferred: P4"): `onAccountDeleted`
-		// is dispatched via `EventHandler.invoke`, which discards this async
-		// handler's promise — so the tx delete is NOT awaited by the deletion
-		// cascade. A SW kill mid-cascade can leave orphan txs; re-adding the chain
-		// recreates the deterministic account address and resurrects them. This is
-		// an orphan-leak, not cross-profile corruption. The correct fix is an
-		// end-to-end awaited deletion coordinator (AccountService snapshots the
-		// exact Account[] and passes the authoritative addresses to awaited
-		// subscribers; ProfileService.deleteProfile awaits the profile cascade) —
-		// too broad for this PR, and inert pre-production (zero users).
+		// This `onAccountDeleted` sub stays for the standalone `deleteNetwork`
+		// chain-purge path (best-effort). PROFILE deletion no longer relies on it:
+		// the ProfileDeletionCoordinator now calls the AWAITED `purgeForAccounts`
+		// directly with the tombstone's address snapshot, and the worker's write is
+		// fenced (see `updateTx`) so a mid-poll tx can't resurrect (finding D).
 		this.accountService.onAccountDeleted.add(this.onAccountDeleted)
 
 		for (const tx of (await this.txs.getValues()).filter((x) => x.status === TxStatus.Pending)) {
@@ -124,37 +119,44 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		estimatedFee?: string,
 		gasDetails?: TxGasDetails,
 	): Promise<Tx> {
-		if (await this.txs.get(hash)) {
-			throw new Error("duplicated hash")
+		// Under the tx lock (codex blocker): serialize the dup-check + write against
+		// restore's create-only check + the coordinator's purge (finding D).
+		await this.lock.enter()
+		try {
+			if (await this.txs.get(hash)) {
+				throw new Error("duplicated hash")
+			}
+			const now = Date.now()
+			// `submittedEndpointUrl` is resolved by the EXECUTOR from the network it
+			// actually built+submitted against (captured before prove/send), then
+			// passed in. It is NOT re-derived here from active-profile state: a TTL
+			// auto-lock or profile switch DURING the (slow) prove would make an
+			// active-profile lookup throw or resolve the wrong profile's endpoint,
+			// recording a wrong/undefined URL — which at poll time routes the receipt
+			// fetch to the active profile's RPC (a cross-profile leak). See
+			// `NetworkService.getNodeForUrl`.
+			const tx: Tx = {
+				origin,
+				chainId,
+				account,
+				calls,
+				nonce,
+				feePaymentMethod,
+				hash,
+				createdAt: now,
+				updatedAt: now,
+				status: TxStatus.Pending,
+				estimatedFee,
+				gasDetails,
+				submittedEndpointUrl,
+			}
+			await this.txs.set(tx.hash, tx)
+			this.emit("onTransactionAdded", tx)
+			this.pending.set(tx.hash, tx)
+			return tx
+		} finally {
+			this.lock.leave()
 		}
-		const now = Date.now()
-		// `submittedEndpointUrl` is resolved by the EXECUTOR from the network it
-		// actually built+submitted against (captured before prove/send), then
-		// passed in. It is NOT re-derived here from active-profile state: a TTL
-		// auto-lock or profile switch DURING the (slow) prove would make an
-		// active-profile lookup throw or resolve the wrong profile's endpoint,
-		// recording a wrong/undefined URL — which at poll time routes the receipt
-		// fetch to the active profile's RPC (a cross-profile leak). See
-		// `NetworkService.getNodeForUrl`.
-		const tx: Tx = {
-			origin,
-			chainId,
-			account,
-			calls,
-			nonce,
-			feePaymentMethod,
-			hash,
-			createdAt: now,
-			updatedAt: now,
-			status: TxStatus.Pending,
-			estimatedFee,
-			gasDetails,
-			submittedEndpointUrl,
-		}
-		await this.txs.set(tx.hash, tx)
-		this.emit("onTransactionAdded", tx)
-		this.pending.set(tx.hash, tx)
-		return tx
 	}
 
 	public async waitForTx(txHash: string, parentTask?: WrappedTask) {
@@ -246,20 +248,32 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			return
 		}
 
-		tx.updatedAt = Date.now()
-		tx.status = status
-		tx.executionResult = executionResult
-		tx.block =
-			receipt.blockHash && receipt.blockNumber ? { hash: receipt.blockHash.toString(), number: receipt.blockNumber } : undefined
-		tx.fee = receipt.transactionFee?.toString()
-		tx.error = receipt.error
+		// The node fetch above ran UNLOCKED (network I/O). Re-check + persist UNDER
+		// the tx lock: a concurrent profile-delete purge (`purgeForAccounts`, same
+		// lock) removes this tx from `this.pending` + storage. Without the guarded
+		// re-check, the worker's stale write would RESURRECT a deleted profile's tx
+		// (finding D — in-flight-write fencing). `pending.has` is the fence: the
+		// purge deletes the entry, so a purged tx is skipped here.
+		await this.lock.enter()
+		try {
+			if (!this.pending.has(tx.hash)) return
+			tx.updatedAt = Date.now()
+			tx.status = status
+			tx.executionResult = executionResult
+			tx.block =
+				receipt.blockHash && receipt.blockNumber ? { hash: receipt.blockHash.toString(), number: receipt.blockNumber } : undefined
+			tx.fee = receipt.transactionFee?.toString()
+			tx.error = receipt.error
 
-		await this.txs.set(tx.hash, tx)
-		this.emit("onTransactionUpdated", tx)
-		if (tx.status !== TxStatus.Pending) {
-			this.pending.delete(tx.hash)
+			await this.txs.set(tx.hash, tx)
+			this.emit("onTransactionUpdated", tx)
+			if (tx.status !== TxStatus.Pending) {
+				this.pending.delete(tx.hash)
+			}
+			this.logDebug(`Tx ${tx.hash.slice(0, 8)} ${receipt.status}`)
+		} finally {
+			this.lock.leave()
 		}
-		this.logDebug(`Tx ${tx.hash.slice(0, 8)} ${receipt.status}`)
 	}
 
 	private getTxStatus(status: AztecTxStatus): TxStatus {
