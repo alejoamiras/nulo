@@ -640,6 +640,57 @@ describe("useFullBackupImport — network index-pairing (P2)", () => {
 			expect.anything(),
 		)
 	})
+
+	it("(3+ matrix) index-pairs a mixed changed/failed/unchanged/changed set correctly", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				network: [
+					{ id: "N1", name: "A", chainId: 1 },
+					{ id: "N2", name: "B", chainId: 2 },
+					{ id: "N3", name: "C", chainId: 3 },
+					{ id: "N4", name: "D", chainId: 4 },
+				],
+				"account-state": [
+					{ networkId: "N1", contracts: [], senders: [] },
+					{ networkId: "N2", contracts: [], senders: [] },
+					{ networkId: "N3", contracts: [], senders: [] },
+					{ networkId: "N4", contracts: [], senders: [] },
+				],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		accountClient.restore.mockResolvedValue([])
+		// index 0 changed (N1→M1); index 1 FAILED (raw fields spread back); index 2
+		// unchanged (N3 kept its id); index 3 changed (N4→M4).
+		networkClient.restore.mockResolvedValue([
+			{ id: "M1", name: "A", chainId: 1 },
+			{ id: "N2", name: "B", chainId: 2, restoreError: "boom" },
+			{ id: "N3", name: "C", chainId: 3 },
+			{ id: "M4", name: "D", chainId: 4 },
+		])
+
+		await c.restoreBackup()
+
+		expect(accountStateClient.restore).toHaveBeenCalledWith(
+			[
+				{ networkId: "M1", contracts: [], senders: [] }, // N1 → M1
+				{ networkId: "N2", contracts: [], senders: [] }, // N2 failed → not remapped
+				{ networkId: "N3", contracts: [], senders: [] }, // N3 unchanged
+				{ networkId: "M4", contracts: [], senders: [] }, // N4 → M4
+			],
+			expect.anything(),
+		)
+	})
+
+	// NB: the composable also skips DUPLICATED source ids from the remap map
+	// (sourceIdCounts), but a backup carrying two networks with the same root id
+	// is rejected upstream by backup normalization (backup-migration-registry
+	// duplicate-root-id guard) before restore runs — so that skip is unreachable
+	// defense-in-depth here and is covered by the normalization dup-rejection
+	// test, not this composable path.
 })
 
 describe("useFullBackupImport — profileId normalization (P2 hardening)", () => {

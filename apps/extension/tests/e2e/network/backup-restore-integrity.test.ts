@@ -35,7 +35,10 @@ const hasConfig = aztecConfig !== undefined
 
 const FOREIGN_ACCOUNT = `0x${"de".repeat(32)}`
 
-test.skipIf(!hasConfig)("agent-runner contract: a live sandbox must be configured (no false skip)", () => {
+// UNCONDITIONAL arming contract (Phase 9): this file runs ONLY via the network
+// e2e agent runner, which provisions a live sandbox — so an absent config here
+// means the required gate mis-set up and must FAIL, never vacuously skip.
+test("agent-runner contract: a live sandbox must be configured (no false skip)", () => {
 	expect(hasConfig).toBe(true)
 })
 
