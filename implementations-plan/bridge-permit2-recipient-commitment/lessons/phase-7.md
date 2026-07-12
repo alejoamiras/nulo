@@ -104,3 +104,48 @@ re-queued on the new head. The candidate/code is untouched — this was integrat
 change to the held work. **Lesson: an index.md append-collision is the expected steady-state churn for
 a long-lived branch; resolve it in-loop (union, no code review needed) rather than surfacing — it's not
 a decision, and letting the PR sit CONFLICTING would block the eventual user merge.**
+
+## `[✓ 2026-07-12]` PROMOTION EXECUTED — triggered by a CF-preview scope violation + a codex-ultra privacy fix
+
+**What happened.** The user loaded the **Cloudflare branch preview** of the faucet and hit, at
+connect time: `Scope violation: registerContract targets 0x1244fe1f…, not permitted by granted
+contracts scope`. Diagnosis (all addresses computed locally, not guessed):
+
+- The CF preview builds the **committed** branch, whose `testnet-bridge.json` still pinned the
+  **pre-cutover** bridge `0x11e18…` (deployed with the OLD *bearer* artifact), while the branch
+  BUNDLES the NEW recipient-commitment `token_bridge` artifact.
+- The faucet's capability scope uses the **pinned** manifest address; `registerContract` uses the
+  **rebuilt** instance (`getContractInstanceFromInstantiationParams`, artifact-dependent). New
+  artifact → class-id change → the bridge rebuilds to `0x1244fe1f…` ≠ pinned `0x11e18…` → scope
+  violation. Proxy/token don't drift (their bytecode is unchanged; only `token_bridge` changed).
+- **This was NOT a new bug — it is exactly the F1/L9 condition already documented in plan.md:50**
+  ("the dev faucet's connect-time bridge rebuild is *expectedly* broken against the old stack during
+  the Phase 2→7 window"). The prescribed resolution is Phase 7 promotion. My local check passed
+  earlier only because the working tree had the uncommitted candidate override — a reminder to test
+  the diagnosis against `git show origin/<branch>:…`, not the dirty working tree.
+
+**User go.** The user chose "point the CF branch preview at the candidate (= promote)" — the explicit
+Phase 7 gate. Executed the runbook: `cp` candidate → `testnet-bridge.json` (salt-v2) → `biome format`
+→ `audit:faucet` green → committed (`752fd02`) + pushed to PR #260. With the candidate manifest the
+rebuilt bridge matches the pinned `0x0f13…` again (verified) — the scope violation is gone.
+
+**Codex `gpt-5.6-sol` @ ultra audit (bundled fix `e005e6d`).** Ran on the recipient-commitment
+surface. Verdict: NO Critical/High, no fund-theft/redirect (commitment binding sound). But ONE
+confirmed **Medium** I verified in code: private deposits published the recipient `R` as the router's
+**indexed** `Bridge`/`BridgeWithFuel` event (+ signed witness + calldata), even though the router
+ignores that field on the private path — so an observer read `R` straight off L1, defeating the
+salt-entropy privacy protection with zero brute-force. Prior audits mis-filed the indexed
+`aztecRecipient` as "cosmetic"; under recipient-commitment it IS the protected secret. **Fix
+(client-side, no redeploy):** zero `aztecRecipient` on-chain for private in both `flows.ts` paths +
+both `useDeposit.ts` paths; the real `R` stays only in the local recovery record, the commitment
+still binds it. Pinned by new `flows.test.ts` privacy tests. **Lesson: for a privacy feature, audit
+what the L1 transcript (calldata + INDEXED events) reveals, not just the on-chain execution path — a
+field the contract ignores can still be the leak.** Next-router hardening: enforce `isPrivate =>
+aztecRecipient == 0` on-chain.
+
+**Follow-ups (codex Lows/Info, none blocking testnet):** (1) guard `recipient.isValid()` before the
+irreversible L1 tx (a nonzero-but-invalid Grumpkin address strands a deposit); (2) the sole-consumer
+tripwire checks text-presence not dataflow; (3) relayer log redacts the salt but prints
+recipient+amount+leaf (the linkage the salt protects); (4) CI runs TS tests but NOT the Noir keystone
+/ sole-consumer self-test — a Noir-only drift can merge green; (5) the new Solidity fuzz/fork tests
+overstate coverage (mock ignores selector/secret; `delta=1<<160` truncates an address mutation).
