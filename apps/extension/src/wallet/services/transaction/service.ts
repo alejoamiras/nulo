@@ -64,6 +64,17 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		// deletion via `AccountService`'s own chain-purge subscriber, which emits
 		// `onAccountDeleted` per account. See implementations-plan/
 		// backup-restore-corruption-fix (P1).
+		//
+		// KNOWN GAP (deferred to P4, see plan §"Deferred: P4"): `onAccountDeleted`
+		// is dispatched via `EventHandler.invoke`, which discards this async
+		// handler's promise — so the tx delete is NOT awaited by the deletion
+		// cascade. A SW kill mid-cascade can leave orphan txs; re-adding the chain
+		// recreates the deterministic account address and resurrects them. This is
+		// an orphan-leak, not cross-profile corruption. The correct fix is an
+		// end-to-end awaited deletion coordinator (AccountService snapshots the
+		// exact Account[] and passes the authoritative addresses to awaited
+		// subscribers; ProfileService.deleteProfile awaits the profile cascade) —
+		// too broad for this PR, and inert pre-production (zero users).
 		this.accountService.onAccountDeleted.add(this.onAccountDeleted)
 
 		for (const tx of (await this.txs.getValues()).filter((x) => x.status === TxStatus.Pending)) {

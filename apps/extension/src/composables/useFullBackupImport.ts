@@ -191,7 +191,10 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 
 	function recordRestoreErrors(serviceName: string, data: unknown) {
 		const errors = collectRestoreErrors(serviceName, data)
-		if (errors) restoreErrorLog.value[serviceName] = errors
+		// APPEND, not assign: some services already have entries recorded before
+		// their restore runs (e.g. token-balance's un-relinkable rows are recorded
+		// pre-restore) — a plain assignment would clobber those diagnostics.
+		if (errors) restoreErrorLog.value[serviceName] = [...(restoreErrorLog.value[serviceName] ?? []), ...errors]
 	}
 
 	async function restoreBackup() {
@@ -374,9 +377,14 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			}
 			createdProfileId = newProfile.id
 
-			if (newProfile.id !== profile.id) {
-				remapIdInBackupData(data, "profileId", newProfile.id)
-			}
+			// UNCONDITIONAL all-rows remap, even when the restored root profile id is
+			// unchanged. A full backup is exactly ONE profile's data, so every child
+			// row must bind to the profile we just created. Guarding this on
+			// `newProfile.id !== profile.id` left a graft hole: a crafted backup whose
+			// root profile id is unused (so restore keeps it) but whose child rows
+			// carry a VICTIM profile id would skip the remap and write those rows under
+			// the victim. Rewriting every `profileId` to `newProfile.id` closes it.
+			remapIdInBackupData(data, "profileId", newProfile.id)
 
 			const newNetworks = (await networkService.restore(data.network)) as Array<{
 				id: string
@@ -509,6 +517,20 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				const oldIdToKey = new Map(oldTokens.map((t) => [t.id, `${t.chainId}:${t.contract}`]))
 				const keyToNewId = new Map<string, string>()
 				const ambiguousKeys = new Set<string>()
+				// Detect ambiguity from the OLD side too, not just successfully-restored
+				// NEW tokens: if two OLD tokens share (chainId, contract) and one FAILS
+				// to restore, the new side looks unambiguous and would silently graft the
+				// failed token's balances onto the surviving one. A duplicated old key is
+				// unattributable on its face → mark ambiguous → skip-and-record.
+				// Count from the OLD token array directly (not `oldIdToKey.values()`,
+				// which a hostile duplicate id would collapse) — backup blobs are
+				// attacker-controlled.
+				const oldKeyCounts = new Map<string, number>()
+				for (const t of oldTokens) {
+					const k = `${t.chainId}:${t.contract}`
+					oldKeyCounts.set(k, (oldKeyCounts.get(k) ?? 0) + 1)
+				}
+				for (const [key, count] of oldKeyCounts) if (count > 1) ambiguousKeys.add(key)
 				for (const t of newTokens) {
 					if (t.restoreError) continue
 					const k = `${t.chainId}:${t.contract}`
