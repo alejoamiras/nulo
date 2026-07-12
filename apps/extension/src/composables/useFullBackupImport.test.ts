@@ -173,8 +173,22 @@ async function buildBackup(overrides: Record<string, unknown> = {}) {
 		"master-key": Buffer.from(new Uint8Array(32)).toString("base64"),
 		data: {
 			profile: { id: "src-profile-id", name: "Imported", type: "password" },
-			network: [{ id: "src-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }],
-			account: [{ address: "0xaaaa" }],
+			// P6: schema-realistic default fixtures (new-shape network with
+			// endpoints[]; schema-complete account) so the default path mirrors
+			// what the real services accept + the #220 read-codecs validate.
+			network: [
+				{
+					id: "src-net-1",
+					profileId: "src-profile-id",
+					name: "Testnet",
+					rpcUrl: "https://t/",
+					chainId: 1,
+					kind: "custom",
+					endpoints: [{ id: "src-ep-1", rpcUrl: "https://t/" }],
+					primaryEndpointId: "src-ep-1",
+				},
+			],
+			account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa", index: 0, type: 0, name: "Account 1", visible: true }],
 			token: [],
 			// Present-but-empty: the mocked v2 migration READS contacts, and a
 			// missing non-optional slice a pending migration reads rejects.
@@ -600,6 +614,52 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 
 		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([])
 		expect(c.restoreErrorLog.value["token-balance"]).toHaveLength(1)
+	})
+})
+
+describe("useFullBackupImport — completeImport + client hygiene (P7)", () => {
+	it("a rejected completeImport keeps status 'finished' and does NOT roll back", async () => {
+		const opts = makeOpts()
+		opts.completeImport = vi.fn().mockRejectedValue(new Error("handshake failed"))
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup()
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
+
+		await c.restoreBackup()
+
+		// The import genuinely succeeded — a failed handshake must not undo it.
+		expect(c.restoreStatus.value).toBe("finished")
+		expect(profileClient.deleteProfile).not.toHaveBeenCalled()
+		expect(opts.fillError).not.toHaveBeenCalledWith("full_backup", "Import failed", expect.anything())
+	})
+
+	it("disconnects EVERY backup-service client even when a mid-loop restore throws", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup()
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
+		// TRANSACTION is the FIRST client in the backup-services loop; make it throw.
+		transactionClient.restore = vi.fn().mockRejectedValue(new Error("kaboom"))
+
+		await c.restoreBackup()
+
+		// The whole-loop finally must disconnect every constructed client — the
+		// one that threw AND all the ones after it that never ran.
+		expect(transactionClient.disconnect).toHaveBeenCalled()
+		expect(tokenBalanceClient.disconnect).toHaveBeenCalled()
+		expect(accountStateClient.disconnect).toHaveBeenCalled()
+		expect(authRegistryClient.disconnect).toHaveBeenCalled()
+		expect(fpcClient.disconnect).toHaveBeenCalled()
+		expect(contactClient.disconnect).toHaveBeenCalled()
+		expect(configClient.disconnect).toHaveBeenCalled()
 	})
 })
 

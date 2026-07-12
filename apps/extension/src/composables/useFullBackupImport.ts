@@ -477,13 +477,18 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			}
 
 			const tokenService = new TokenServiceClient()
-			const newTokens = (await tokenService.restore(data.token)) as Array<{
+			let tokenRestoreResult: unknown
+			try {
+				tokenRestoreResult = await tokenService.restore(data.token)
+			} finally {
+				tokenService.disconnect() // P7: disconnect even if restore throws
+			}
+			const newTokens = tokenRestoreResult as Array<{
 				id: string
 				chainId: number
 				contract: string
 				restoreError?: string
 			}>
-			tokenService.disconnect()
 			if (data["token-balance"]?.length) {
 				// Key the old→new token map by (chainId, contract), NOT contract
 				// alone: the SAME token contract can exist on two chains, and a
@@ -528,16 +533,23 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				{ name: CONTACT_SERVICE_NAME, client: new ContactServiceClient() as never },
 				{ name: CONFIG_SERVICE_NAME, client: new ConfigServiceClient() as never },
 			]
-			for (const { name, client } of backupServices) {
-				const sliceData = data[name]
-				if (Array.isArray(sliceData)) {
-					const restoredData =
-						name === ACCOUNT_STATE_SERVICE_NAME
-							? await client.restore(sliceData, createdNetworks)
-							: await client.restore(sliceData)
-					client.disconnect()
-					recordRestoreErrors(name, restoredData)
+			// Whole-loop try/finally: every client is constructed up-front, so a
+			// mid-loop throw (or a non-array slice that skips a client's body) must
+			// still disconnect ALL of them — a per-iteration finally would only
+			// clean the client that threw, leaking the ones after it (P7).
+			try {
+				for (const { name, client } of backupServices) {
+					const sliceData = data[name]
+					if (Array.isArray(sliceData)) {
+						const restoredData =
+							name === ACCOUNT_STATE_SERVICE_NAME
+								? await client.restore(sliceData, createdNetworks)
+								: await client.restore(sliceData)
+						recordRestoreErrors(name, restoredData)
+					}
 				}
+			} finally {
+				for (const { client } of backupServices) client.disconnect()
 			}
 
 			// Late activation: open the session NOW that all backup data is
@@ -557,7 +569,17 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 
 			restoreStatus.value = "finished"
 			if (!isRestoreHasErrors.value) {
-				opts.completeImport(newProfile)
+				// AWAIT completeImport in an isolated try/catch (P7). At this point
+				// the import genuinely succeeded (data written, session opened via
+				// finalizeRestore), so a rejected completion handshake must NOT flip
+				// the status back to "failed" or reach the outer catch's rollback —
+				// it must only surface, never undo. An un-awaited call also leaves a
+				// dangling promise that hangs the "Finishing import…" spinner.
+				try {
+					await opts.completeImport(newProfile)
+				} catch (err) {
+					console.error("completeImport failed after a successful restore:", (err as Error)?.message || err)
+				}
 				return
 			}
 			importedProfile.value = newProfile
