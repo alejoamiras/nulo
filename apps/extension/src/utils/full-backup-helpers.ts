@@ -100,17 +100,42 @@ export function collectRestoreErrors(serviceName: string, data: unknown): unknow
  * are rewritten, which also NORMALIZES any hostile row whose `profileId` ≠ the
  * real one, so a crafted backup cannot smuggle a foreign owner.
  */
-export function remapIdInBackupData(data: Record<string, unknown>, idKey: string, newId: string, oldId?: string): void {
+/**
+ * Rewrite EVERY row's `idKey` to `newId`, ignoring its current value. For a
+ * single-valued key like `profileId`: a full backup is exactly one profile's
+ * data, so every child row must bind to the created profile — this normalizes
+ * any hostile foreign `profileId` a crafted backup smuggled onto a child row.
+ */
+export function normalizeAllIds(data: Record<string, unknown>, idKey: string, newId: string): void {
 	for (const key of Object.keys(data)) {
 		const value = data[key]
-		if (Array.isArray(value)) {
-			data[key] = value.map((item) => {
-				if (item && typeof item === "object" && idKey in item) {
-					if (oldId !== undefined && (item as Record<string, unknown>)[idKey] !== oldId) return item
-					return { ...(item as Record<string, unknown>), [idKey]: newId }
-				}
-				return item
-			})
-		}
+		if (!Array.isArray(value)) continue
+		data[key] = value.map((item) =>
+			item && typeof item === "object" && idKey in item ? { ...(item as Record<string, unknown>), [idKey]: newId } : item,
+		)
+	}
+}
+
+/**
+ * Rewrite each row's `idKey` via `oldToNew`, looking up each row's ORIGINAL value
+ * exactly once in a single pass. This is REQUIRED (over sequential per-id remaps)
+ * to avoid cascade-aliasing: a per-id `A→R` pass followed by an `R→S` pass would
+ * rewrite the already-remapped `A→R` rows a second time when it processes a later
+ * source id that equals the freshly-random `R`. Building the complete map first
+ * and looking up the original value guarantees one rewrite per row.
+ */
+export function remapByMap(data: Record<string, unknown>, idKey: string, oldToNew: Map<string, string>): void {
+	if (oldToNew.size === 0) return
+	for (const key of Object.keys(data)) {
+		const value = data[key]
+		if (!Array.isArray(value)) continue
+		data[key] = value.map((item) => {
+			if (item && typeof item === "object" && idKey in item) {
+				const cur = (item as Record<string, unknown>)[idKey]
+				const next = typeof cur === "string" ? oldToNew.get(cur) : undefined
+				if (next !== undefined) return { ...(item as Record<string, unknown>), [idKey]: next }
+			}
+			return item
+		})
 	}
 }

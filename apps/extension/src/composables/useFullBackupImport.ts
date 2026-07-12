@@ -25,7 +25,7 @@ import { TRANSACTION_SERVICE_NAME } from "@/wallet/services/transaction/spec"
 import { UserRejectedError } from "@nulo/extension-messaging/errors"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import type { PasskeyRequest } from "@/wallet/services/passkey/spec"
-import { type BackupSelection, collectRestoreErrors, readBackupFile, remapIdInBackupData } from "@/utils/full-backup-helpers"
+import { type BackupSelection, collectRestoreErrors, normalizeAllIds, readBackupFile, remapByMap } from "@/utils/full-backup-helpers"
 import { BACKUP_SCHEMA_VERSION_FIELD, COMPAT_EPOCH_FIELD, isSupportedCompatEpoch } from "@/wallet/services/backup/backup-migration-registry"
 import { maxBackupSchemaVersion, migrateBackupData } from "@/wallet/services/backup/backup-migrator"
 
@@ -384,7 +384,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// root profile id is unused (so restore keeps it) but whose child rows
 			// carry a VICTIM profile id would skip the remap and write those rows under
 			// the victim. Rewriting every `profileId` to `newProfile.id` closes it.
-			remapIdInBackupData(data, "profileId", newProfile.id)
+			normalizeAllIds(data, "profileId", newProfile.id)
 
 			const newNetworks = (await networkService.restore(data.network)) as Array<{
 				id: string
@@ -415,12 +415,23 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// PXE target). Index-pairing is unforgeable. Only remap for a
 			// SUCCESSFUL restore whose id actually changed.
 			const oldNetworks = data.network as Array<{ id: string }>
+			// A duplicated source id can't form an unambiguous old→new map, so skip
+			// it (its networkId rows stay un-remapped → account-state finds no
+			// matching created network and ignores them). Backup normalization already
+			// rejects duplicate root ids; this is a defensive backstop.
+			const sourceIdCounts = new Map<string, number>()
+			for (const n of oldNetworks) sourceIdCounts.set(n.id, (sourceIdCounts.get(n.id) ?? 0) + 1)
+			const oldToNew = new Map<string, string>()
 			for (let i = 0; i < newNetworks.length; i++) {
 				const restored = newNetworks[i]
 				const old = oldNetworks[i]
-				if (restored.restoreError || !old || old.id === restored.id) continue
-				remapIdInBackupData(data, "networkId", restored.id, old.id)
+				if (restored.restoreError || !old || old.id === restored.id || (sourceIdCounts.get(old.id) ?? 0) > 1) continue
+				oldToNew.set(old.id, restored.id)
 			}
+			// ONE pass over the COMPLETE map — each row's original networkId is looked
+			// up exactly once, so a freshly-random new id colliding with a later source
+			// id can't cascade-rewrite already-remapped rows (finding E).
+			remapByMap(data, "networkId", oldToNew)
 			recordRestoreErrors(NETWORK_SERVICE_NAME, newNetworks)
 
 			const accountService = new AccountServiceClient()

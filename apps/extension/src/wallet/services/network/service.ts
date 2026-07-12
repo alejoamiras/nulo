@@ -630,6 +630,15 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		try {
 			await this.lock.enter()
 			const existing = await this.storage.getValues()
+			// A collision re-roll must avoid every SOURCE id in this batch too, not
+			// just stored ids — a fresh id equal to a LATER source id would alias that
+			// network's remapped child rows (finding E; belt-and-suspenders with the
+			// composable's single-pass map).
+			const sourceIds = new Set<string>()
+			for (const n of networks) {
+				const nid = (n as { id?: unknown } | null)?.id
+				if (typeof nid === "string") sourceIds.add(nid)
+			}
 			for (const raw of networks) {
 				try {
 					if (!isNewShapeNetwork(raw)) {
@@ -651,7 +660,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 						throw new Error(`A network for chain ${candidate.chainId} already exists in profile ${candidate.profileId}.`)
 					}
 					let id = candidate.id
-					while (await this.storage.contains(id)) id = getRandomHex(8)
+					while ((await this.storage.contains(id)) || (id !== candidate.id && sourceIds.has(id))) id = getRandomHex(8)
 					const stored: Network = { ...candidate, id }
 					await this.storage.set(id, stored)
 					existing.push(stored)
