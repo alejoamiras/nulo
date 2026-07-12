@@ -439,8 +439,11 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			let id = array_max((await this.authwits.getValues()).map((x) => x.id)) + 1
 			for (const authwit of authwits) {
 				try {
-					await this.authwits.set(`${id}`, { ...authwit, id })
-					result.push({ ...authwit, id })
+					// Parse the persisted shape so a malformed backup authwit is recorded
+					// as restoreError, not silently written + codec-hidden on read.
+					const row = AuthwitSchema.parse({ ...authwit, id })
+					await this.authwits.set(`${id}`, row)
+					result.push(row)
 					id++
 				} catch (err) {
 					result.push({

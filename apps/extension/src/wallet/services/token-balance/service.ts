@@ -19,7 +19,14 @@ import type { BackgroundTickerPort, BrowserApi } from "@nulo/wallet-core/ports"
 import { BalanceJobQueue } from "./balance-job-queue"
 import { BalanceProjector } from "./balance-projector"
 import { BalanceRepository } from "./balance-repository"
-import { TOKEN_BALANCE_SERVICE_NAME, type TokenBalanceRaw, type TokenBalanceInfo, type Methods, type Events } from "./spec"
+import {
+	TOKEN_BALANCE_SERVICE_NAME,
+	type TokenBalanceRaw,
+	TokenBalanceRawSchema,
+	type TokenBalanceInfo,
+	type Methods,
+	type Events,
+} from "./spec"
 
 export * from "./spec"
 
@@ -280,8 +287,13 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		for (const tb of tokenBalances) {
 			try {
 				const id = await this.repo.allocateId()
-				await this.repo.set({ ...tb, id })
-				result.push({ ...tb, id })
+				// Parse the exact persisted shape: an unvalidated restore row that fails
+				// the read-codec is KEPT-but-hidden by EntityStorage.decodeRow (invisible
+				// on read AND to a later getValues() cleanup). Parse here so a malformed
+				// backup row is recorded as restoreError, never written.
+				const row = TokenBalanceRawSchema.parse({ ...tb, id })
+				await this.repo.set(row)
+				result.push(row)
 			} catch (err) {
 				result.push({
 					...tb,

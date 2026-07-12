@@ -270,6 +270,9 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 					id = getRandomHex(8)
 				}
 				const written = { ...contact, id }
+				// Parse the persisted shape so a malformed backup contact is recorded as
+				// restoreError, not silently written + codec-hidden on read.
+				ContactSchema.parse(written)
 				await this.storage.set(id, written)
 				return written
 			})

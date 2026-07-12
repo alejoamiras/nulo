@@ -459,6 +459,9 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 					address: rest.address,
 					name: rest.name,
 				}
+				// Parse the persisted shape so a malformed backup fpc is recorded as
+				// restoreError, not silently written + codec-hidden on read.
+				StoredFpcSchema.parse(stored)
 				await this.storage.set(id, stored)
 				return { ...stored, isProtocol: false }
 			})
