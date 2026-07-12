@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harden-Quality Arc — Round 2 (ELI5)</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;color:#222;line-height:1.6}
+  @media (prefers-color-scheme: dark){body{background:#1a1a1b;color:#e6e6e6}pre{background:#23232a!important}.phase{background:#202024!important}.approval{background:#16243a!important}.warn{background:#2a2410!important}a{color:#5aa1ff}}
+  h1{font-size:1.7rem;margin-bottom:.3rem}h2{font-size:1.25rem;margin-top:2.2rem}h3{font-size:1.02rem;margin-top:1.2rem;color:#444}
+  code{font-family:ui-monospace,Menlo,monospace;font-size:.85rem;background:#f4f4f4;padding:0 3px;border-radius:3px}
+  @media (prefers-color-scheme: dark){code{background:#2a2a30}}
+  .phase{margin:.9rem 0;padding:.7rem 1rem;border-left:3px solid #ccc;background:#fafafa;border-radius:4px}
+  .muted{color:#777;font-size:.9rem}
+  .warn{background:#fff8e1;border-left:3px solid #f0a020;padding:.8rem 1rem;border-radius:4px;margin:1rem 0}
+  .approval{background:#eef6ff;padding:1rem 1.2rem;border-left:3px solid #0366d6;border-radius:4px;margin:1.5rem 0}
+  a{color:#0366d6}
+</style>
+</head>
+<body>
+
+<h1>Harden-Quality Arc — Round 2</h1>
+<p>Round-1 fixed 21 of 22 code-quality problems and bundled them into open PR <strong>#220</strong>. Round-2 finishes the last one (Q-13), fixes a <strong>real privacy bug</strong> found while planning it, and completes the five pieces I deliberately left for later — all on the same branch, so you review + merge <em>one complete arc</em> after your manual QA.</p>
+
+<h2>Your decisions, baked in</h2>
+<ul>
+  <li><strong>Don't merge #220 yet</strong> — you'll QA the whole thing; round-2 grows the same PR.</li>
+  <li><strong>Build Q-13</strong> (kill the copy-pasted code across ~10 services) + <strong>add the ownership guards</strong>.</li>
+  <li><strong>Fix the backup leak</strong>, folded into Q-13.</li>
+  <li><strong>Don't change how backups behave otherwise</strong> — you'll do dedicated backup/migration work later.</li>
+  <li><strong>Q-02: you authorized</strong> the one careful edit to a frozen security test (with a diff you review before merge).</li>
+  <li><strong>P18b: strong types are fine</strong> — but every type tied to the <code>@aztec</code> library gets logged in a new <code>UPDATE.md</code> so upgrades have a checklist.</li>
+</ul>
+
+<h2>The real privacy bug (why this matters)</h2>
+<div class="warn"><strong>When you export/back up one profile, the file also contains your other profiles' token balances.</strong> The export code looks up the active profile but then hands back <em>every</em> profile's balances (a dead variable — a classic bug). Your tokens and contacts export correctly; only balances leak. We fix it by returning only the active profile's balances. It changes what's <em>in</em> the file (drops the foreign data), not the file's format — so it's compatible with "don't touch backups." Two smaller, website-unreachable "guess-the-ID" gaps (internal code could reach another profile's token / another account's authwits by guessing a number) get seatbelts too.</div>
+
+<h2>The phases (all on <code>dev-quality</code>, one PR each)</h2>
+<div class="phase"><h3>R0 · UPDATE.md</h3>A new upgrade-checklist doc for bumping <code>@aztec</code>. Later phases add their coupled types to it. <span class="muted">Proves itself by: lint + the doc + a CLAUDE.md link.</span></div>
+<div class="phase"><h3>R1 · Q-13 + the leak + the guards</h3>The big one. Collapse the copy-pasted "restore rows / hand out IDs / check ownership / delete a profile's rows" boilerplate into shared helpers, one service per PR. A cross-profile isolation test is written first and must stay green — it's what proves no profile can see another's data. The leak fix + guards land here. Backup <em>restore</em> behavior is preserved exactly. <span class="muted">Proves itself by: per-service tests + the isolation suite + smoke + full network.</span></div>
+<div class="phase"><h3>R2 · Q-15 lock race</h3>Fix the real bug round-1 found: locking right after a password change can briefly show the wrong screen. <span class="muted">Proves itself by: a new race test + the change-password smoke test.</span></div>
+<div class="phase"><h3>R3 · P16b dApp windows</h3>De-duplicate the dApp approval-window shells (connect/cancel/cleanup ordering) — characterize first, preserve ordering. <span class="muted">Proves itself by: window tests + smoke + full network.</span></div>
+<div class="phase"><h3>R4 · P18b PXE table</h3>Generate the PXE method list from one table, strongly typed against <code>@aztec</code>, with every coupled type logged in <code>UPDATE.md</code>. Service-worker-only methods stay hidden. <span class="muted">Proves itself by: pxe tests + typecheck + smoke + full network.</span></div>
+<div class="phase"><h3>R5 · Q-01 codecs</h3>Extend round-1's storage validation to the rest of the stores (each rejects corrupt data safely, with a round-trip test corpus). Backup-import validation is touched minimally. <span class="muted">Proves itself by: per-store tests + corpus + smoke + full network.</span></div>
+<div class="phase"><h3>R6 · Q-02 typed dispatch (last, most sensitive)</h3>Give each dApp method typed arguments. This needs the one authorized edit to the frozen security test — done <strong>add-only</strong> (never relaxes an existing permission check), re-proven by a hostile-dApp test suite, and the exact diff shown to you before merge. <span class="muted">Proves itself by: the edited oracle green + the adversarial-bypass suite + smoke + full network.</span></div>
+<div class="phase"><h3>R7 · Final sweep → you</h3>Full-network sweep + a fresh confidence pass, refresh the summaries; #220 now holds the whole arc. <strong>I stop; you QA + merge.</strong></div>
+
+<h2>The one deliberate risk (and how it's contained)</h2>
+<p>R6 is the single place we edit a frozen security test — the thing round-1 refused to touch. It's contained by an <strong>add-only rule</strong> (the existing permission assertions stay byte-identical; we only <em>add</em> argument-shape checks), a <strong>hostile-dApp test suite</strong> that must prove no method got easier to call, and <strong>you reviewing the exact diff</strong> before it merges. If any change would touch an existing permission assertion, I stop and ask.</p>
+
+<div class="approval">
+<h2>What I need you to approve</h2>
+<ul>
+  <li>The scope (Q-13 + leak fix + guards + the 5 follow-ons) and the <code>deep</code> tier.</li>
+  <li>The phase order R0→R7 and that everything lands on <code>dev-quality</code> before you QA + merge #220.</li>
+  <li>The R6 add-only oracle-edit protocol (add-only + hostile-suite + your diff review).</li>
+</ul>
+<p class="muted">Two independent adversarial audits (codex + opus) ran against this plan — both <strong>SHIP-WITH-FIXES</strong>, and they independently caught the same two traps (guarding delete would break profile-deletion; the oracle diff proves permissions unchanged but not argument-safety). All fixes are folded in (see <a href="audit-codex.md">audit-codex.md</a> + <a href="audit-fable.md">audit-fable.md</a>). On your approval I re-arm the autonomous loop for round-2.</p>
+</div>
+
+<p class="muted"><a href="plan.md">Full plan.md</a> · <a href="../findings/Q-13/plan.md">Q-13 deep blueprint (round-1)</a> · <a href="../WRAP-UP.md">round-1 WRAP-UP</a></p>
+</body>
+</html>

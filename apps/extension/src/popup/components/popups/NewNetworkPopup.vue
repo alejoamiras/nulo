@@ -97,25 +97,10 @@ const handleCreateNetwork = async () => {
 	}
 }
 
-watch(
-	() => props.show,
-	() => {
-		if (!props.show) {
-			document.removeEventListener("keydown", onKeydown)
-
-			form.reset()
-		} else {
-			document.addEventListener("keydown", onKeydown)
-		}
-	},
-)
-
-const onKeydown = (e) => {
-	if (e.key !== "Enter") return
-	const target = e.target
-	if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-	handleCreateNetwork()
-}
+usePopupEntity(() => props.show, {
+	submit: handleCreateNetwork,
+	onHide: () => form.reset(),
+})
 </script>
 
 <template>

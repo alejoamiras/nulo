@@ -3,6 +3,8 @@
  * No vue, no chrome.*, no service clients — safe to import anywhere.
  */
 
+import { fromBase64 } from "@/wallet/utils"
+
 export type BackupFileType = "plain" | "encrypted" | "unknown"
 
 export interface BackupSelection {
@@ -16,7 +18,7 @@ export function detectBackupType(text: string): BackupFileType {
 	const trimmed = text.trim()
 	if (trimmed.startsWith("{") || trimmed.startsWith("[")) return "plain"
 	try {
-		const bytes = Uint8Array.from(atob(trimmed), (c) => c.charCodeAt(0))
+		const bytes = fromBase64(trimmed)
 		if (bytes.length >= 13 && bytes[0] === 0) return "encrypted"
 	} catch {
 		return "unknown"
@@ -87,16 +89,24 @@ export function collectRestoreErrors(serviceName: string, data: unknown): unknow
 }
 
 /**
- * Rewrite all `*.{idKey}` references inside `backup.data` from `oldId` →
- * `newId`. Used after profile/network restore returns a different id than
- * the source backup so child rows still link to the new parent.
+ * Rewrite `*.{idKey}` references inside `backup.data` to `newId`, after
+ * profile/network restore returns a different id than the source backup.
+ *
+ * `oldId` SCOPES the rewrite: only rows whose `idKey` currently equals `oldId`
+ * are rewritten (required when a key is multi-valued across the backup —
+ * `networkId`, where each of N networks maps to its OWN new id; an all-rows
+ * rewrite would graft every child onto the LAST network). Omit `oldId` for a
+ * single-valued key (`profileId` — exactly one profile per backup): all rows
+ * are rewritten, which also NORMALIZES any hostile row whose `profileId` ≠ the
+ * real one, so a crafted backup cannot smuggle a foreign owner.
  */
-export function remapIdInBackupData(data: Record<string, unknown>, idKey: string, newId: string): void {
+export function remapIdInBackupData(data: Record<string, unknown>, idKey: string, newId: string, oldId?: string): void {
 	for (const key of Object.keys(data)) {
 		const value = data[key]
 		if (Array.isArray(value)) {
 			data[key] = value.map((item) => {
 				if (item && typeof item === "object" && idKey in item) {
+					if (oldId !== undefined && (item as Record<string, unknown>)[idKey] !== oldId) return item
 					return { ...(item as Record<string, unknown>), [idKey]: newId }
 				}
 				return item

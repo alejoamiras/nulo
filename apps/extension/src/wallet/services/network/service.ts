@@ -8,6 +8,8 @@ import type { NodeFactory } from "@nulo/aztec-runtime/ports"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
+import { requireOwnedRow } from "@/wallet/services/require-owned-row"
+import { nextRandomId } from "@/wallet/services/id-allocators"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
@@ -29,9 +31,11 @@ import {
 	type NetworkEndpoint,
 	type NetworkInfo,
 	NETWORK_SERVICE_NAME,
+	NETWORK_STORAGE_ROOT,
 	NetworkMethodSchemas,
 	NetworkSchema,
 	NodeStatus,
+	NetworkRowSchema,
 } from "./spec"
 
 export * from "./spec"
@@ -174,7 +178,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		nodeFactory?: NodeFactory,
 	) {
 		super(NETWORK_SERVICE_NAME, logger)
-		this.storage = new EntityStorage<Network>("nulo:core:networks", browserApi.storage.local)
+		this.storage = new EntityStorage<Network>(NETWORK_STORAGE_ROOT, browserApi.storage.local, (raw) => NetworkRowSchema.parse(raw))
 		this.lock = new Lock("network", logger)
 		this.nodeFactory = nodeFactory ?? new AztecNodeFactoryAdapter()
 	}
@@ -234,8 +238,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		validateParams(NetworkMethodSchemas.getNetwork.params, [id], "getNetwork")
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
-		const network = await this.storage.get(id)
-		if (network?.profileId !== profile.id) throw new Error("Invalid id")
+		const network = requireOwnedRow(await this.storage.get(id), profile.id)
 		return network
 	}
 
@@ -282,8 +285,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
-			const network = await this.storage.get(id)
-			if (network?.profileId !== profile.id) throw new Error("Invalid id")
+			const network = requireOwnedRow(await this.storage.get(id), profile.id)
 			if (network.name === name) return network
 			const collision = (await this.storage.getValues()).find((n) => n.profileId === profile.id && n.id !== id && n.name === name)
 			if (collision) throw new Error(`Name '${name}' already in use.`)
@@ -302,8 +304,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
-			const network = await this.storage.get(id)
-			if (network?.profileId !== profile.id) throw new Error("Invalid id")
+			const network = requireOwnedRow(await this.storage.get(id), profile.id)
 			const activeId = await this._readActive(profile.id)
 			if (activeId === id) {
 				throw new Error(`${ERR_ACTIVE_NETWORK}: Cannot delete the active network. Switch to another chain first.`)
@@ -325,8 +326,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
-			const network = await this.storage.get(id)
-			if (network?.profileId !== profile.id) throw new Error("Invalid id")
+			const network = requireOwnedRow(await this.storage.get(id), profile.id)
 			await this._writeActive(profile.id, id)
 			const primaryEndpoint = network.endpoints.find((e) => e.id === network.primaryEndpointId)
 			if (primaryEndpoint) {
@@ -348,13 +348,11 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		// Peek the network's kind unlocked so the chainId probe can short-circuit
 		// for `kind === "local"` regardless of how the URL was edited. The lock-
 		// guarded re-read below handles the (rare) deletion race.
-		const peek = await this.storage.get(networkId)
-		if (peek?.profileId !== profile.id) throw new Error("Invalid id")
+		const peek = requireOwnedRow(await this.storage.get(networkId), profile.id)
 		const probedChainId = await this._getChainId(rpcUrl, peek.kind)
 		try {
 			await this.lock.enter()
-			const network = await this.storage.get(networkId)
-			if (network?.profileId !== profile.id) throw new Error("Invalid id")
+			const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
 			if (probedChainId !== network.chainId) {
 				throw new Error(
 					`${ERR_ENDPOINT_CHAIN_MISMATCH}: This RPC reports chainId ${probedChainId}, but this network is chain ${network.chainId}.`,
@@ -390,16 +388,14 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const normalized = normalizeRpcUrl(rpcUrl)
 		// Peek the network's kind so the chainId probe can short-circuit for
 		// `kind === "local"` regardless of how the URL was edited.
-		const peek = await this.storage.get(networkId)
-		if (peek?.profileId !== profile.id) throw new Error("Invalid id")
+		const peek = requireOwnedRow(await this.storage.get(networkId), profile.id)
 		// Probe outside the lock when URL changes (network call).
 		let probedChainId: number | undefined
 		// We probe regardless to keep semantics simple — chainId could have shifted on the same URL.
 		probedChainId = await this._getChainId(rpcUrl, peek.kind)
 		try {
 			await this.lock.enter()
-			const network = await this.storage.get(networkId)
-			if (network?.profileId !== profile.id) throw new Error("Invalid id")
+			const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
 			if (probedChainId !== undefined && probedChainId !== network.chainId) {
 				throw new Error(
 					`${ERR_ENDPOINT_CHAIN_MISMATCH}: This RPC reports chainId ${probedChainId}, but this network is chain ${network.chainId}.`,
@@ -436,8 +432,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
-			const network = await this.storage.get(networkId)
-			if (network?.profileId !== profile.id) throw new Error("Invalid id")
+			const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
 			const idx = network.endpoints.findIndex((e) => e.id === endpointId)
 			if (idx < 0) throw new Error("Invalid endpoint id")
 			if (network.endpoints.length === 1) {
@@ -462,8 +457,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
-			const network = await this.storage.get(networkId)
-			if (network?.profileId !== profile.id) throw new Error("Invalid id")
+			const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
 			if (!network.endpoints.some((e) => e.id === endpointId)) throw new Error("Invalid endpoint id")
 			if (network.primaryEndpointId === endpointId) return network
 			network.primaryEndpointId = endpointId
@@ -483,8 +477,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		validateParams(NetworkMethodSchemas.getNodeStatus.params, [networkId], "getNodeStatus")
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
-		const network = await this.storage.get(networkId)
-		if (network?.profileId !== profile.id) throw new Error("Invalid id")
+		const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
 		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
 		if (!primary) return NodeStatus.Inactive
 		try {
@@ -731,11 +724,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	}
 
 	private async _freshStored8(): Promise<string> {
-		let id: string
-		do {
-			id = getRandomHex(8)
-		} while (await this.storage.contains(id))
-		return id
+		return nextRandomId(this.storage)
 	}
 
 	private _fresh8(taken: string[]): string {

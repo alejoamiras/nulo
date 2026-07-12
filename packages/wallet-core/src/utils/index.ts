@@ -1,4 +1,5 @@
 export * from "./arrays"
+export * from "./encoding"
 export * from "./errors"
 export * from "./event-handler"
 export * from "./lock"

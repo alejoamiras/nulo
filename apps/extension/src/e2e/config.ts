@@ -49,3 +49,17 @@ export const E2E_PROVERLESS = PROVERLESS && PROVERLESS_CONFIRM
 export const E2E_PROVERLESS_BUILD_STAMP: "NULO_E2E_PROVERLESS_BUILD_STAMP" | null = E2E_PROVERLESS
 	? "NULO_E2E_PROVERLESS_BUILD_STAMP"
 	: null
+
+/**
+ * E2E-only migration fixture flag. When armed at BUILD time, the migrations
+ * registry includes the v2 fixture migration (`@/e2e/migration-fixture`) that
+ * the smoke suite (`tests/e2e/migration.test.ts`) drives end-to-end through
+ * the real boot path. Statically false without the env, so the fixture — and
+ * its `nulo:e2e:mig-fixture` marker — is dead-code-eliminated from production
+ * builds; the `_build-extension.yml` negative grep enforces the absence.
+ *
+ * A single flag (no proverless-style confirm pair) is proportionate: unlike a
+ * proverless wallet, an accidentally-shipped fixture is inert — it transforms
+ * only rows under its own test-only root, which no real install has.
+ */
+export const E2E_MIGRATION_FIXTURE = (import.meta.env.VITE_NULO_E2E_MIGRATION_FIXTURE ?? "") === "1"

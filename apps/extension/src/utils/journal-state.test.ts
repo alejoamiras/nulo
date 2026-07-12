@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, test } from "vitest"
+import { KNOWN_JOB_ERROR_KINDS } from "@nulo/wallet-core/jobs"
 import type { OperationKind, OperationRecord } from "@/wallet/services/operation-journal/spec"
 import {
 	ACTIVITY_FEED_KINDS,
@@ -494,5 +495,28 @@ describe("categoricalLabel — B2 failure category + context for journal/[id].vu
 		expect(label).not.toContain("evil")
 		expect(context).not.toContain("evil")
 		expect(context).not.toContain("http")
+	})
+})
+
+describe("KNOWN_JOB_ERROR_KINDS taxonomy coverage", () => {
+	// Every known kind must drive a non-empty, non-throwing UI label through both
+	// chokepoint helpers — adding a kind without a UX path surfaces here, not as a
+	// blank card in production. Token-import kinds intentionally hit the generic
+	// default; the assertion is non-empty, not bespoke.
+	const failedWith = (kind: string): OperationRecord =>
+		recordWith({ progress: { stage: "failed" }, error: { kind, message: "x", normalizedRaw: null } })
+
+	test("every known kind humanizes to a non-empty string, never throws", () => {
+		for (const kind of KNOWN_JOB_ERROR_KINDS) {
+			expect(() => humanizeErrorKind(kind)).not.toThrow()
+			expect(humanizeErrorKind(kind).length).toBeGreaterThan(0)
+		}
+	})
+
+	test("every known kind drives a non-empty categoricalLabel, never throws", () => {
+		for (const kind of KNOWN_JOB_ERROR_KINDS) {
+			expect(() => categoricalLabel(failedWith(kind))).not.toThrow()
+			expect(categoricalLabel(failedWith(kind)).label.length).toBeGreaterThan(0)
+		}
 	})
 })

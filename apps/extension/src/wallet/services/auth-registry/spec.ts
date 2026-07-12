@@ -1,6 +1,18 @@
+import { z } from "zod"
 import type { FeeSettings, AuthwitContent } from "@/wallet/services/execution/spec"
 
 export const AUTH_REGISTRY_SERVICE_NAME = "auth-registry"
+
+/** EntityStorage root for authwit rows (keyed by `String(authwit.id)`). Frozen:
+ *  renaming detaches every existing row; the backup-migration registry pins it. */
+export const AUTH_REGISTRY_STORAGE_ROOT = "nulo:core:auth-registry"
+
+/** EntityStorage root for per-account enable flags. Backup-ABSENT by design:
+ *  `backup()` never exports it and absence defaults to `true` at read time, so
+ *  a backup migration touching this root cannot distinguish "disabled" from
+ *  "absent" — the backup-migration guardrail blocks import for any migration
+ *  that reads or writes it. */
+export const AUTH_REGISTRY_ENABLED_STORAGE_ROOT = "nulo:core:auth-registry-enabled"
 
 export const MAX_REVOKES_PER_TX = 28 // Aztec protocol limitation
 
@@ -27,6 +39,21 @@ export type Authwit = {
 	/** The tx that wrote this authwit on-chain — the reconcile key. */
 	txHash?: string
 }
+
+/** Storage codec row schema. `content` is deliberately shape-tolerant: it is a
+ *  deep wallet-bridge-owned union used for DISPLAY only — the registry branches
+ *  on the flat fields, and rejecting an old content variant would hide the row. */
+export const AuthwitSchema: z.ZodType<Authwit> = z.object({
+	id: z.number(),
+	account: z.string(),
+	hash: z.string(),
+	content: z.custom<AuthwitContent>((v) => typeof v === "object" && v !== null),
+	pending: z.boolean().optional(),
+	txHash: z.string().optional(),
+})
+
+/** Codec for the per-account enabled-flag store (rows are bare booleans). */
+export const AuthwitStatusSchema = z.boolean()
 
 export type Methods = {
 	/**

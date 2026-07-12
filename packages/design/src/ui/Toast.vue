@@ -1,5 +1,7 @@
 <script setup lang="ts">
-type Kind = "ok" | "error" | "info"
+import type { SeverityTone } from "../severity"
+
+type Kind = Extract<SeverityTone, "ok" | "error" | "info">
 
 withDefaults(
 	defineProps<{

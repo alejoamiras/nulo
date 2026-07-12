@@ -56,6 +56,16 @@
 	},
 	"overrides": [
 		{
+			"includes": ["**/*.test.ts"],
+			"linter": {
+				"rules": {
+					"complexity": {
+						"useArrowFunction": "off"
+					}
+				}
+			}
+		},
+		{
 			"includes": ["packages/design/src/**"],
 			"linter": {
 				"rules": {

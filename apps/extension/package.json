@@ -60,6 +60,7 @@
 		"@nulo/wallet-bridge": "workspace:*",
 		"@nulo/wallet-core": "workspace:*",
 		"@nulo/wallet-crypto": "workspace:*",
+		"@nulo/wallet-sdk-schema-patch": "workspace:*",
 		"@replit/codemirror-indentation-markers": "^6.5.3",
 		"@alejoamiras/aztec-fee-payment": "5.0.0-rc.2",
 		"codemirror": "^6.0.2",

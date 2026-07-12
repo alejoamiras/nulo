@@ -1,0 +1,17 @@
+# Phase 6 — network e2e round-trip — lessons
+
+**Status: ✓ complete.** Gate: `bun run e2e:agent backup-migration-roundtrip` GREEN on a quiet machine (load ~0.5; 2 passed / 0 skipped, 90s test phase) — the arming-contract test fails-not-skips, and the round-trip proved: real export → doctored to pre-shape v1 → migrated through the real engine → restored in a fresh extension → SAME on-chain account (profile-id-preserving restore ⇒ identical key derivation) → the REAL 1,000-token balance synced through the wallet's own PXE. Regression: light network slice (`networks`, `meta-getChainInfo`, `connect-dapp`) via `e2e:agent` + the full suite runs on the PR's required `network-e2e-status` check.
+
+## THE CATCH OF THE PLAN — a real, shipping export bug found by this harness
+Run 1 failed at the doctoring step: the captured REAL export had `data = { "undefined": <last slice> }`. Root cause: `full.vue` keyed slices with `s.name?.replace("-client", "")`, but **client instances expose no `name` field** (the base client stores `clientName`, private) — so every slice was written to the literal key `"undefined"`, each overwriting the last. Nothing ever caught it because (a) full.vue is plain-JS `<script setup>` (no typecheck), (b) the smoke export test only asserts CTAs, and (c) all import tests use SYNTHETIC backups. **Every real full-backup export to date was garbage** (one config slice under a bogus key; master-key intact). Fixed: `backupServices` is now `{ name: <SERVICE_NAME const>, client }` pairs — the same constants the import registry pins. The Phase-6 harness paid for itself before it was even merged (this is exactly the A2 gap the plan closed).
+
+## Harness design notes (for future migrations — they inherit this coverage)
+- **The runner arms the fixture:** `agent.sh` now stamps `VITE_NULO_E2E_MIGRATION_FIXTURE=1` into every network wallet build (positive marker grep guards propagation) and exports `NULO_E2E_MIGRATION_FIXTURE=1` to vitest. Inert for other tests; prod-bundle negative grep unchanged.
+- **Download capture without the native prompt:** `downloads` is an *optional* permission (un-clickable browser prompt), so the test stubs `chrome.permissions.contains` + `chrome.downloads.download` in-page, fetches the blob URL *inside* the stub (before `downloadFile`'s `finally` revokes it), and gunzips with the page's own `DecompressionStream`.
+- **Checksum recompute after doctoring is legitimate** — a plain backup's checksum is integrity detection, not authentication (the import verifies it before anything else, which is exactly what the doctored blob satisfies).
+- **Synthetic backups elsewhere must carry `contact: []`** because the stamped backup fixture reads that root (see phase-5 lessons).
+- `tokenReadyExtension` (file-scoped) provides the funded wallet; the second browser gets its own temp `userDataDir` and is closed + removed in `finally` — parallel-agent safe, nothing killed by name.
+
+## Environment notes
+- Another agent ran its own Aztec sandbox (fixed ports 18080/8545) on this machine throughout — zero clashes: `e2e:agent` resolves ephemeral ports per run. A transient `[aztec-node] Error: Address already in use` in run 1's boot was non-fatal (sub-service retry); the documented bind-and-release race is real but self-healing here.
+- The trailing `close timed out after 10000ms … Vite server from exiting` vitest note is cosmetic; exit code was 0.

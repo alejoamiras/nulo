@@ -8,7 +8,7 @@
 
 <script setup>
 /** Utils */
-import { Config } from "@/wallet/config"
+import { defaultConfig as makeDefaultConfig } from "@/wallet/config"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { debounce } from "@/utils/general"
@@ -27,7 +27,7 @@ configService.onUpdate.add(onSettingUpdate)
 const profileService = new ProfileServiceClient()
 const isLoading = ref(true)
 
-const defaultConfig = new Config()
+const defaultConfig = makeDefaultConfig()
 const MAX_SESSION_TTL = 1440
 const sessionTtl = ref(defaultConfig.sessionTtl)
 const sessionTtlMinutes = ref(0)

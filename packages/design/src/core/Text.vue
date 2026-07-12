@@ -1,22 +1,28 @@
 <script setup lang="ts">
-import { computed } from "vue"
+import { computed, type PropType } from "vue"
+import type { TextColorName } from "../color-names"
+import type { TextAlign } from "../layout-names"
+import type { FontSize, FontWeight } from "../tokens"
 
 const props = defineProps({
+	// Static Vue attrs arrive as strings (`size="13"`), dynamic binds as numbers (`:size="13"`) —
+	// accept both the token and its stringified form.
 	size: {
-		type: String,
+		type: String as PropType<FontSize | `${FontSize}`>,
 	},
 	weight: {
-		type: String,
+		type: String as PropType<FontWeight | `${FontWeight}`>,
 	},
+	// Line-height is an open scale (no token union); the class is `lh--${height}`.
 	height: {
 		type: String,
 		default: "100",
 	},
 	align: {
-		type: String,
+		type: String as PropType<TextAlign>,
 	},
 	color: {
-		type: String,
+		type: String as PropType<TextColorName>,
 	},
 	noWrap: {
 		type: Boolean,

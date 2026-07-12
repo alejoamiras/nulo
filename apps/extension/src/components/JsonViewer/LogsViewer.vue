@@ -11,7 +11,7 @@ import { searchKeymap } from "@codemirror/search"
 import LogsToolbar from "./LogsToolbar.vue"
 
 /** Utils */
-import { Config } from "@/wallet/config"
+import { defaultConfig } from "@/wallet/config"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { LogViewerServiceClient } from "@/wallet/services/log-viewer/client"
 import { downloadFile } from "@/utils"
@@ -43,7 +43,7 @@ const filteredLogs = computed(() => logs.value.filter((log) => filters.isLogIncl
 const AUTO_SCROLL_TIMEOUT_MS = 30_000
 const SCROLL_DISABLE_THRESHOLD = 20
 const MAX_LOGS_DIFF = 100
-const maxLogsCount = ref(new Config().debugMode ? 10_000 : 1_000)
+const maxLogsCount = ref(defaultConfig().debugMode ? 10_000 : 1_000)
 
 const shouldAutoScroll = ref(true)
 const showScrollBtn = ref(false)

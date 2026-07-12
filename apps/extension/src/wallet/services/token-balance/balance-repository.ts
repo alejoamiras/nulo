@@ -12,13 +12,15 @@
 import { array_max } from "@/wallet/utils"
 import { EntityStorage } from "@/wallet/storage"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
-import type { TokenBalanceRaw } from "./spec"
+import { TOKEN_BALANCE_STORAGE_ROOT, TokenBalanceRawSchema, type TokenBalanceRaw } from "./spec"
 
 export class BalanceRepository {
 	private readonly storage: EntityStorage<TokenBalanceRaw>
 
 	public constructor(browserApi: BrowserApi) {
-		this.storage = new EntityStorage<TokenBalanceRaw>("nulo:core:token-balances", browserApi.storage.local)
+		this.storage = new EntityStorage<TokenBalanceRaw>(TOKEN_BALANCE_STORAGE_ROOT, browserApi.storage.local, (raw) =>
+			TokenBalanceRawSchema.parse(raw),
+		)
 	}
 
 	public async get(id: number): Promise<TokenBalanceRaw | undefined> {

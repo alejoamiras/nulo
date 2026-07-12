@@ -189,3 +189,31 @@ export type AztecCreateAuthWitOperation = {
 	readonly accountAddress: string
 	readonly messageHashOrIntent: IntentInnerHash | CallIntent
 }
+
+// ── Draft operations ────────────────────────────────────────────────────────
+//
+// The executable `Operation` requires `feeSettings` on the two send-like kinds.
+// A DRAFT is the same union with `feeSettings` honestly optional — the shape that
+// exists (a) in the popup while the user hasn't picked a fee method yet, and (b)
+// as the materializer's output before the silent-path fee is asserted. Sharing it
+// here (beside `Operation`) lets the dApp-interaction materializer AND the popup
+// narrow a draft to `Operation` via the SAME `assertExecutableOperation`
+// (operation-validation.ts) instead of an `as unknown as Operation` cast.
+// `Operation` itself is intentionally NOT loosened.
+
+/** `aztec_sendTx` with `feeSettings` optional (executable once it's set). */
+export type DraftAztecSendTxOperation = Omit<AztecSendTxOperation, "feeSettings"> & {
+	feeSettings?: FeeSettings
+}
+
+/** `send_transaction` with `feeSettings` optional. */
+export type DraftSendTransactionOperation = Omit<SendTransactionOperation, "feeSettings"> & {
+	feeSettings?: FeeSettings
+}
+
+/** All `Operation` variants, with `feeSettings` optionalised on the two send-like
+ *  kinds where the wallet (not the dApp) supplies it. Discriminated by `kind`. */
+export type DraftOperation =
+	| Exclude<Operation, AztecSendTxOperation | SendTransactionOperation>
+	| DraftAztecSendTxOperation
+	| DraftSendTransactionOperation

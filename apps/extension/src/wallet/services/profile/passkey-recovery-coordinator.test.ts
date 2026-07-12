@@ -9,7 +9,7 @@ import { describe, expect, test, vi } from "vitest"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
-import type { PasskeyCredential } from "@nulo/wallet-crypto"
+import { asBase64CredentialId, asBase64SecretPrf, asHexUserHandle, type PasskeyCredential } from "@nulo/wallet-crypto"
 import type { PasskeyService } from "@/wallet/services/passkey/service"
 import { PasskeyRecoveryCoordinator } from "./passkey-recovery-coordinator"
 import type { Profile } from "./spec"
@@ -66,7 +66,7 @@ describe("PasskeyRecoveryCoordinator", () => {
 			expect(createKey).toHaveBeenCalledWith("profile-123", "Test")
 			expect(result.credentialId).toBe("cred-profile-123")
 			expect(result.userHandle).toBe("profile-123")
-			expect(result.secret.toString("hex")).toBe(frBytes("02").toString("hex"))
+			expect(Buffer.from(result.secret).toString("hex")).toBe(frBytes("02").toString("hex"))
 		})
 
 		test("propagates errors from the underlying PasskeyService", async () => {
@@ -96,7 +96,7 @@ describe("PasskeyRecoveryCoordinator", () => {
 			expect(getKey).toHaveBeenCalledWith("known-credential-id")
 			expect(recovery.credentialId).toBe("known-credential-id")
 			expect(recovery.userHandle).toBe("handle-from-credential")
-			expect(recovery.secret.toString("hex")).toBe(frBytes("03").toString("hex"))
+			expect(Buffer.from(recovery.secret).toString("hex")).toBe(frBytes("03").toString("hex"))
 		})
 	})
 
@@ -143,13 +143,17 @@ describe("PasskeyRecoveryCoordinator", () => {
 			const passkeys = makeFakePasskeyService({ materialize: materialize as never })
 			const coord = newCoordinator(passkeys)
 
-			const data = { id: "cred-from-modal", prf: "prf-bytes-base64", userHandle: "uh-from-modal" }
+			const data = {
+				id: asBase64CredentialId("cred-from-modal"),
+				prf: asBase64SecretPrf("prf-bytes-base64"),
+				userHandle: asHexUserHandle("uh-from-modal"),
+			}
 			const recovery = await coord.recoverFromCredentialData(data)
 
 			expect(materialize).toHaveBeenCalledWith(data)
 			expect(recovery.credentialId).toBe("cred-from-modal")
 			expect(recovery.userHandle).toBe("uh-from-modal")
-			expect(recovery.secret.toString("hex")).toBe(frBytes("06").toString("hex"))
+			expect(Buffer.from(recovery.secret).toString("hex")).toBe(frBytes("06").toString("hex"))
 		})
 
 		test("propagates undefined userHandle from the materialized credential", async () => {
@@ -162,7 +166,10 @@ describe("PasskeyRecoveryCoordinator", () => {
 			})
 			const coord = newCoordinator(passkeys)
 
-			const recovery = await coord.recoverFromCredentialData({ id: "cred-no-handle", prf: "prf-bytes" })
+			const recovery = await coord.recoverFromCredentialData({
+				id: asBase64CredentialId("cred-no-handle"),
+				prf: asBase64SecretPrf("prf-bytes"),
+			})
 			expect(recovery.userHandle).toBeUndefined()
 		})
 
@@ -174,7 +181,9 @@ describe("PasskeyRecoveryCoordinator", () => {
 			})
 			const coord = newCoordinator(passkeys)
 
-			await expect(coord.recoverFromCredentialData({ id: "x", prf: "bad" })).rejects.toThrow(/invalid PRF/)
+			await expect(coord.recoverFromCredentialData({ id: asBase64CredentialId("x"), prf: asBase64SecretPrf("bad") })).rejects.toThrow(
+				/invalid PRF/,
+			)
 		})
 	})
 

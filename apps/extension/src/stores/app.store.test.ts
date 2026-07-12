@@ -7,13 +7,14 @@ describe("app.store.onTxAdded — destination resolution via getPrimaryCall", ()
 	beforeEach(() => {
 		setActivePinia(createPinia())
 		// `tests/vitest.setup.ts` stubs `chrome.storage` as an empty object;
-		// app.store's `useSyncedRef("loggerWindowId", null)` calls
-		// `chrome.storage.local.get` AND `chrome.storage.onChanged.addListener`
-		// at factory-time. Stub both so the store can instantiate.
+		// app.store's `useSyncedRef("loggerWindowId", null)` reads storage
+		// through the migration-aware facade (promise-form `get`) AND registers
+		// `chrome.storage.onChanged.addListener` at factory-time. Stub both so
+		// the store can instantiate.
 		// biome-ignore lint/suspicious/noExplicitAny: chrome stub assignment
 		;(chrome.storage as any).local = {
-			get: vi.fn((_keys: string[], cb: (result: Record<string, unknown>) => void) => cb({})),
-			set: vi.fn((_items: Record<string, unknown>, cb?: () => void) => cb?.()),
+			get: vi.fn(async (_keys?: string | string[]) => ({})),
+			set: vi.fn(async (_items: Record<string, unknown>) => {}),
 		}
 		// biome-ignore lint/suspicious/noExplicitAny: chrome stub assignment
 		;(chrome.storage as any).onChanged = {

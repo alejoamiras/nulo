@@ -7,7 +7,9 @@ import { NodeStatus } from "@/wallet/services/network/client"
 import type { ProfileInfo } from "@/wallet/services/profile/client"
 import type { Tx } from "@/wallet/services/transaction/spec"
 import type { BlockExplorerType } from "@/wallet/constants/explorers"
+import { requireAccount, requireNetwork } from "@/utils/core"
 import { getPrimaryCall } from "@/utils/tx-enrichment"
+import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
 import { useSyncedRef } from "@/composables/syncedRef.js"
 
@@ -31,12 +33,12 @@ export const useAppStore = defineStore("app", () => {
 	const onboardingCompleted = ref<boolean>(false)
 	const ONBOARDING_COMPLETED_KEY = "nulo:onboarding:completed"
 	const loadOnboardingCompleted = async () => {
-		const result = await chrome.storage.local.get(ONBOARDING_COMPLETED_KEY)
+		const result = await storageLocalGet(ONBOARDING_COMPLETED_KEY)
 		onboardingCompleted.value = result[ONBOARDING_COMPLETED_KEY] === true
 	}
 	const setOnboardingCompleted = async (value: boolean) => {
 		onboardingCompleted.value = value
-		await chrome.storage.local.set({ [ONBOARDING_COMPLETED_KEY]: value })
+		await storageLocalSet({ [ONBOARDING_COMPLETED_KEY]: value })
 	}
 
 	const profile = ref<ProfileInfo>()
@@ -51,7 +53,7 @@ export const useAppStore = defineStore("app", () => {
 	const pageAwaitingAuth = ref<string>("")
 
 	const setupActiveAccount = async () => {
-		const activeAccountResult = await chrome.storage.local.get("nulo:ui:activeAccount")
+		const activeAccountResult = await storageLocalGet("nulo:ui:activeAccount")
 		if ("nulo:ui:activeAccount" in activeAccountResult) {
 			const activeAccountAddress = activeAccountResult["nulo:ui:activeAccount"]
 			const activeAccount = accounts.value.find((a) => a.address === activeAccountAddress)
@@ -62,13 +64,13 @@ export const useAppStore = defineStore("app", () => {
 		}
 
 		account.value = accounts.value[0]
-		await chrome.storage.local.set({
+		await storageLocalSet({
 			"nulo:ui:activeAccount": account.value?.address,
 		})
 	}
 	const selectAccount = async (acc: Account) => {
 		account.value = acc
-		await chrome.storage.local.set({
+		await storageLocalSet({
 			"nulo:ui:activeAccount": acc.address,
 		})
 	}
@@ -76,13 +78,13 @@ export const useAppStore = defineStore("app", () => {
 		if (!profile.value || !network.value) return
 		const accIdx = accounts.value.findIndex((a) => acc.address === a.address)
 
-		await managers.account.changeAccountVisibility(profile.value.id, network.value.chainId, acc.address, value)
+		await requireAccount().changeAccountVisibility(profile.value.id, network.value.chainId, acc.address, value)
 		accounts.value[accIdx] = { ...acc, visible: value }
 
 		if (!value) {
 			if (accounts.value.length) {
 				account.value = accounts.value.filter((a) => a.visible).sort((a, b) => a.index - b.index)[0]
-				await chrome.storage.local.set({
+				await storageLocalSet({
 					"nulo:ui:activeAccount": account.value?.address,
 				})
 			}
@@ -92,7 +94,7 @@ export const useAppStore = defineStore("app", () => {
 		if (!profile.value || !network.value) return
 		const accIdx = accounts.value.findIndex((a) => address === a.address)
 
-		await managers.account.changeAccountName(profile.value.id, network.value.chainId, address, name)
+		await requireAccount().changeAccountName(profile.value.id, network.value.chainId, address, name)
 
 		const updatedAccount = { ...accounts.value[accIdx], name: name }
 		accounts.value[accIdx] = updatedAccount
@@ -109,18 +111,18 @@ export const useAppStore = defineStore("app", () => {
 		if (!network.value) return
 		networkStatus.value = "sync"
 		const oldNetworkId = network.value?.id
-		const status = await managers.network.getNodeStatus(network.value.id)
+		const status = await requireNetwork().getNodeStatus(network.value.id)
 
 		if (oldNetworkId !== network.value?.id) return
 
 		networkStatus.value = NodeStatus[status]
 	}
 	const renameNetwork = async (id: string, name: string) => {
-		await managers.network.renameNetwork(id, name)
-		networks.value = await managers.network.getNetworks()
+		await requireNetwork().renameNetwork(id, name)
+		networks.value = await requireNetwork().getNetworks()
 	}
 	const removeNetwork = async (target: Network) => {
-		await managers.network.deleteNetwork(target.id)
+		await requireNetwork().deleteNetwork(target.id)
 		networks.value = networks.value.filter((n) => n.id !== target.id)
 	}
 

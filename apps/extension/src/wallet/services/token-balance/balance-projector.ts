@@ -20,7 +20,7 @@ import { getViewSimulationDeps } from "@/wallet/services/execution/helpers/get-v
 import type { NetworkService } from "@/wallet/services/network/service"
 import type { ProfileService } from "@/wallet/services/profile/service"
 import type { PxeServiceClient } from "@/wallet/services/pxe/client"
-import { BalanceOfPrivateFn, BalanceOfPublicFn } from "@/wallet/services/token/functions"
+import { createViewTokenFn, TOKEN_FN_DESCRIPTORS } from "@/wallet/services/token/functions"
 import type { TokenService, Token } from "@/wallet/services/token/service"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { ViewFn } from "@/wallet/utils/fn"
@@ -99,7 +99,7 @@ export class BalanceProjector {
 			const calls: [CallAction | EncodedCallAction, number, boolean, ViewFn][] = []
 			const perBalance: Record<number, { privateBalance: string; publicBalance: string }> = {}
 			// Cache so the two passes below don't re-fetch the same token metadata.
-			const tokenCache = new Map<number, Awaited<ReturnType<typeof this.tokens.getTokenRaw>>>()
+			const tokenCache = new Map<number, Awaited<ReturnType<typeof this.tokens.getTokenRaw>> | undefined>()
 
 			// Pass 0: initialize perBalance entries + populate the token cache.
 			for (let i = 0; i < balances.length; i++) {
@@ -108,7 +108,10 @@ export class BalanceProjector {
 					privateBalance: balance.privateBalance ?? "0",
 					publicBalance: balance.publicBalance ?? "0",
 				}
-				tokenCache.set(balance.id, await this.tokens.getTokenRaw(balance.token))
+				// `.catch(undefined)` absorbs the ownership guard on `getTokenRaw`: a
+				// stale/foreign balance whose token the active profile doesn't own now
+				// throws — cache undefined so the passes below skip it (see `if (!token)`).
+				tokenCache.set(balance.id, await this.tokens.getTokenRaw(balance.token).catch(() => undefined))
 			}
 
 			// Pass 1: enqueue every PUBLIC call across all balances first.
@@ -121,9 +124,13 @@ export class BalanceProjector {
 			for (let i = 0; i < balances.length; i++) {
 				const balance = balances[i]
 				const token = tokenCache.get(balance.id)
-				if (!token) continue // unreachable: pass 0 populated for every balance
+				if (!token) continue // skip a balance whose token the active profile doesn't own (ownership guard)
 				if (token.balanceOfPublicFn) {
-					const fn = BalanceOfPublicFn.new(token.balanceOfPublicFn.name, token.balanceOfPublicFn.impl)
+					const fn = createViewTokenFn(
+						TOKEN_FN_DESCRIPTORS.balanceOfPublic,
+						token.balanceOfPublicFn.name,
+						token.balanceOfPublicFn.impl,
+					)
 					await this.enqueueCall(calls, fn, token, account, i, false)
 				} else {
 					perBalance[balance.id].publicBalance = "0"
@@ -134,9 +141,13 @@ export class BalanceProjector {
 			for (let i = 0; i < balances.length; i++) {
 				const balance = balances[i]
 				const token = tokenCache.get(balance.id)
-				if (!token) continue // unreachable: pass 0 populated for every balance
+				if (!token) continue // skip a balance whose token the active profile doesn't own (ownership guard)
 				if (token.balanceOfPrivateFn) {
-					const fn = BalanceOfPrivateFn.new(token.balanceOfPrivateFn.name, token.balanceOfPrivateFn.impl)
+					const fn = createViewTokenFn(
+						TOKEN_FN_DESCRIPTORS.balanceOfPrivate,
+						token.balanceOfPrivateFn.name,
+						token.balanceOfPrivateFn.impl,
+					)
 					await this.enqueueCall(calls, fn, token, account, i, true)
 				} else {
 					perBalance[balance.id].privateBalance = "0"

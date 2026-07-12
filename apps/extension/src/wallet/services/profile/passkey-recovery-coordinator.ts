@@ -25,7 +25,7 @@
 
 import type { ILogger } from "@/wallet/logger"
 import type { PasskeyService } from "@/wallet/services/passkey/service"
-import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
+import type { Base64CredentialId, HexUserHandle, MasterSecretBytes, PasskeyCredentialData } from "@nulo/wallet-crypto"
 import type { Profile } from "./spec"
 
 /** Shape returned by create / import paths — everything the facade
@@ -36,10 +36,10 @@ import type { Profile } from "./spec"
  *  not an `Fr` instance — `SessionManager.open()` consumes a buffer
  *  directly, so there is no reason to round-trip through `Fr`. */
 export type PasskeyRecovery = {
-	credentialId: string
-	secret: Buffer<ArrayBuffer>
+	credentialId: Base64CredentialId
+	secret: MasterSecretBytes
 	/** Optional because WebAuthn `get` may omit userHandle. */
-	userHandle?: string
+	userHandle?: HexUserHandle
 }
 
 export class PasskeyRecoveryCoordinator {

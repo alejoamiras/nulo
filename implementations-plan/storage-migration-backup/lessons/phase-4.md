@@ -1,0 +1,13 @@
+# Phase 4 — wire BackupMigrator + atomicity + rollback hardening — lessons
+
+**Status: ✓ complete.** Gate: `useFullBackupImport.test.ts` (29) + backup module suites — 77 pass; full unit suite 2761 pass; `bun run typecheck` exit 0; `bun run lint` exit 0.
+
+## What was built
+- `migrateBackupData({ data: backup.data, backupSchemaVersion })` inserted after the version-range gate, BEFORE any service client is constructed. `incompatible` → "Incompatible backup" with the migrator's reason; `failed` → "Import failed: the backup could not be upgraded…". The migrated `data` replaces the parsed slices; the early `const data = backup.data as …` alias moved below the migrate call. Checksum is verified over the ORIGINAL body and dropped — never recomputed post-migration. `master-key` stays a top-level field and never enters the migrator.
+- **Rollback hardening (M6):** `createdProfileId` + `finalizeStarted` bookkeeping; the outer catch now deletes the orphan profile when a restore step throws PRE-finalize. The post-finalize keep-for-unlock behavior is preserved (`finalizeStarted` flips right before the finalize call, whose own catch returns without rethrow). Pinned by: account-throw → delete, token-throw → delete, finalize-throw → keep (pre-existing test asserts deleteProfile NOT called).
+- Test harness: `vi.mock("@/wallet/storage/migrations")` injects a REAL `defineRowMapMigration` v2 (contact `legacyName→name`) via `vi.importActual`, so EVERY restore test in the file now exercises migrate-then-restore 1→2; a dedicated test asserts contactClient.restore received the current-shape row (renamed + profileId remapped). Atomicity pin: unknown slice → reject with `profileClient.restore` never invoked.
+
+## Gotchas
+- `buildBackup`'s `...overrides` at body level silently CLOBBERED the merged `data` defaults (pre-existing trap) — passkey/F3 tests broke when the v2 migration started reading contacts. Fixed by destructuring `data` out of the overrides before spreading.
+- **Biome's `useArrowFunction` autofix struck AGAIN** on a scoped `--write` over the test file, re-breaking the vitest constructor mocks (vitest 4 can't `new` an arrow impl). Root-caused as a standing hazard → disabled `complexity/useArrowFunction` for `**/*.test.ts` via a `biome.json` override (the fix is actively harmful there; the rule stays ON for source files). This also removes ~50 baseline warnings.
+- When the composable-under-test gains a new module dependency, remember this file's module graph is heavily `vi.mock`ed — the migrations mock must export every name the real module exports that the graph touches (`BASELINE_VERSION`, `realMigrations`, `migrations`, `backupMigrations`).

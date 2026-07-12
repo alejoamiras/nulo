@@ -1,5 +1,5 @@
 <script setup>
-import { Config } from "@/wallet/config"
+import { defaultConfig as makeDefaultConfig } from "@/wallet/config"
 import { LogLevel } from "@/wallet/logger"
 import { LogViewerServiceClient } from "@/wallet/services/log-viewer/client"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
@@ -31,7 +31,7 @@ logViewerService.onLog.add(onLogAdded)
 const configService = new ConfigServiceClient()
 configService.onUpdate.add(onSettingUpdate)
 
-const defaultConfig = new Config()
+const defaultConfig = makeDefaultConfig()
 const indicateFailures = ref(defaultConfig.indicateFailures)
 const showNode = ref(defaultConfig.showNode)
 

@@ -31,6 +31,10 @@ jobs:
     timeout-minutes: 20
     env:
       EXTENSION_PATH: ${{ inputs.extension_path }}
+      # Single source for BOTH the build stamp and the runner flag below: if
+      # these ever diverge, migration.test.ts silently skips (build armed,
+      # runner unaware) or times out (runner armed, build without the fixture).
+      MIGRATION_FIXTURE_ARMED: ${{ (inputs.artifact_name == '' && inputs.extension_path == '') && '1' || '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -53,10 +57,22 @@ jobs:
 
       - name: Build Chrome (no artifact, no override)
         if: inputs.artifact_name == '' && inputs.extension_path == ''
+        # The migration-fixture stamp arms the e2e-only v2 migration so
+        # tests/e2e/migration.test.ts can drive the migrator end-to-end. It is
+        # inert for every other smoke test (fresh installs stamp max and run
+        # nothing) and never ships: prod builds omit the env, and
+        # _build-extension.yml greps release bundles for the marker.
         run: bun run --cwd apps/extension build:chrome
+        env:
+          VITE_NULO_E2E_MIGRATION_FIXTURE: ${{ env.MIGRATION_FIXTURE_ARMED }}
 
       - name: Run smoke e2e
         run: bun run --cwd apps/extension test:e2e
+        env:
+          # Tell the suite whether the loaded build carries the fixture. Unset
+          # on the release-artifact path (prod zips exclude the fixture by
+          # design), where migration.test.ts skips itself.
+          NULO_E2E_MIGRATION_FIXTURE: ${{ env.MIGRATION_FIXTURE_ARMED }}
 
       - name: Upload smoke logs on failure
         if: failure()

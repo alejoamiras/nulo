@@ -93,8 +93,8 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		// surviving non-terminal records as failed on SW restart — same
 		// behavior as before, just the durability layer changed.
 		this.storage = browserApi
-			? new EntityStorage<OperationRecord>("nulo:journal", browserApi.storage.local)
-			: new EntityStorage<OperationRecord>("nulo:journal", chrome.storage.local)
+			? new EntityStorage<OperationRecord>("nulo:journal", browserApi.storage.local, (raw) => OperationRecordSchema.parse(raw))
+			: new EntityStorage<OperationRecord>("nulo:journal", chrome.storage.local, (raw) => OperationRecordSchema.parse(raw))
 		// Instantiated in the constructor (not as a field initializer) so the
 		// logger reference is guaranteed to be the same instance the base
 		// Service stores on `this`. See class field comment above for the
@@ -115,43 +115,26 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	}
 
 	/**
-	 * Load a single record and re-validate it against `OperationRecordSchema`.
-	 *
-	 * Layer 1 (`EntityStorage`) catches byte-level JSON corruption. This is
-	 * layer 2: a row that *parses* as JSON but doesn't fit the schema (e.g.
-	 * a forward-incompatible field set written by a future version) gets
-	 * dropped here so downstream FSM/lookup code never sees a malformed
-	 * record. The kind ↔ stage invariants downstream of this load (e.g.
-	 * `assertCanTransition`) all assume a schema-valid `OperationRecord`.
+	 * Load a single record. Validation now lives in `EntityStorage`'s injected
+	 * `OperationRecordSchema` codec (constructor): a byte-corrupt row is dropped
+	 * (layer 1); a row that parses as JSON but fails the schema is KEPT (not
+	 * deleted) and read as `undefined` — see `EntityStorage.decodeRow`. This
+	 * changed the old behavior, which DELETED schema-invalid rows; keeping them
+	 * avoids silent data loss on a forward-incompatible shape while downstream
+	 * FSM/lookup code still never sees a schema-invalid record (the kind↔stage
+	 * invariants downstream assume a schema-valid `OperationRecord`).
 	 */
 	private async _loadValidated(id: string): Promise<OperationRecord | undefined> {
-		const raw = await this.storage.get(id)
-		if (raw === undefined) return undefined
-		const parsed = OperationRecordSchema.safeParse(raw)
-		if (parsed.success) return parsed.data
-		this.logError(`dropping schema-invalid record ${id}: ${parsed.error.message}`)
-		await this.storage.delete(id)
-		return undefined
+		return this.storage.get(id)
 	}
 
 	/**
-	 * Multi-row variant of `_loadValidated`. `EntityStorage.getAll` already
-	 * skips byte-malformed rows; this pass drops schema-invalid ones (and
-	 * deletes them) so callers iterate only over records they can trust.
+	 * Multi-row variant of `_loadValidated`. `EntityStorage.getAll` applies the
+	 * injected codec per row — byte-corrupt rows dropped, schema-invalid rows
+	 * KEPT-but-skipped — so callers iterate only over schema-valid records.
 	 */
 	private async _loadAllValidated(): Promise<OperationRecord[]> {
-		const all = await this.storage.getAll()
-		const out: OperationRecord[] = []
-		for (const [id, raw] of all) {
-			const parsed = OperationRecordSchema.safeParse(raw)
-			if (parsed.success) {
-				out.push(parsed.data)
-			} else {
-				this.logError(`dropping schema-invalid record ${id}: ${parsed.error.message}`)
-				await this.storage.delete(id)
-			}
-		}
-		return out
+		return (await this.storage.getAll()).map(([, record]) => record)
 	}
 
 	/**
