@@ -428,42 +428,66 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				const newAccounts = await accountService.restore(data.account)
 				recordRestoreErrors(ACCOUNT_SERVICE_NAME, newAccounts)
 
-				// P1 tx-restore provenance filter. `TransactionService.restore`
-				// writes txs verbatim and reads them by `account` address, so a
-				// backup tx whose `account` is NOT an account SUCCESSFULLY
-				// imported by THIS restore could surface in another profile's
-				// activity — and, now that the chainId-only chain-purge
-				// subscriber is removed, would never be purged. "Account exists in
-				// storage" is NOT sufficient (a crafted backup could name a
-				// pre-existing foreign-profile account); the allow-set is the
-				// accounts this restore just created. Drop-and-record the rest
+				// Provenance filter for EVERY account-owned slice (tx, auth-registry,
+				// token-balance). Each service writes rows verbatim and reads them by
+				// `account`, so a backup row whose `account` is NOT an account
+				// SUCCESSFULLY imported by THIS restore could surface in a victim
+				// profile (auth-registry corrupts its revocation index; a balance
+				// grafts under the victim). "Account exists in storage" is NOT
+				// sufficient (a crafted backup could name a pre-existing foreign
+				// account); the allow-set is exactly this restore's accounts. Drop
 				// BEFORE the restore loop below writes them.
-				const importedAddresses = new Set(
-					(newAccounts as Array<{ address?: unknown; restoreError?: unknown }>)
-						.filter((a) => !a.restoreError && typeof a.address === "string")
-						.map((a) => a.address as string),
-				)
-				const txSlice = (data as Record<string, unknown>)[TRANSACTION_SERVICE_NAME]
-				if (Array.isArray(txSlice)) {
+				const importedAddresses = new Set<string>()
+				const importedChainAddress = new Set<string>()
+				for (const a of newAccounts as Array<{ address?: unknown; chainId?: unknown; restoreError?: unknown }>) {
+					if (a.restoreError || typeof a.address !== "string") continue
+					importedAddresses.add(a.address)
+					if (typeof a.chainId === "number") importedChainAddress.add(`${a.chainId}:${a.address}`)
+				}
+				// Drop-and-record via console.warn, NOT restoreErrorLog: a filtered row
+				// is a security action (foreign/corrupt account, nothing the user did or
+				// can fix), so it must not flip a clean import into the "finished with
+				// errors" UX. A failed-account row is already surfaced by its account's
+				// own restoreError above.
+				const filterByAccount = (name: string, keep: (row: Record<string, unknown>) => boolean, label: string) => {
+					const slice = (data as Record<string, unknown>)[name]
+					if (!Array.isArray(slice)) return
 					let dropped = 0
-					;(data as Record<string, unknown>)[TRANSACTION_SERVICE_NAME] = (txSlice as Array<Record<string, unknown>>).filter(
-						(tx) => {
-							const ok = typeof tx.account === "string" && importedAddresses.has(tx.account)
-							if (!ok) dropped++
-							return ok
-						},
-					)
-					// Recorded, not silent — but NOT via restoreErrorLog: a dropped
-					// tx is a security FILTER action (its account is foreign/corrupt,
-					// nothing the user did or can fix), so it must not flip a clean
-					// import into the "finished with errors" UX. A failed-account tx
-					// is already surfaced by its account's restoreError above.
+					;(data as Record<string, unknown>)[name] = (slice as Array<Record<string, unknown>>).filter((row) => {
+						const ok = keep(row)
+						if (!ok) dropped++
+						return ok
+					})
 					if (dropped > 0) {
 						console.warn(
-							`[full-backup-import] dropped ${dropped} transaction(s) referencing an account not imported from this backup`,
+							`[full-backup-import] dropped ${dropped} ${label} referencing an account not imported from this backup`,
 						)
 					}
 				}
+				// tx carries its OWN chainId → key by the (chainId, account) tuple so a
+				// tx can't reference an imported address on a DIFFERENT chain (F).
+				filterByAccount(
+					TRANSACTION_SERVICE_NAME,
+					(tx) =>
+						typeof tx.account === "string" &&
+						typeof tx.chainId === "number" &&
+						importedChainAddress.has(`${tx.chainId}:${tx.account}`),
+					"transaction(s)",
+				)
+				// auth-registry + token-balance carry `account` but no independently
+				// forgeable chainId (addresses are chain-distinct), so address membership
+				// is sufficient. (token-balance ALSO gets token-ownership + chain-equality
+				// in the re-link step below.)
+				filterByAccount(
+					AUTH_REGISTRY_SERVICE_NAME,
+					(aw) => typeof aw.account === "string" && importedAddresses.has(aw.account),
+					"authwit(s)",
+				)
+				filterByAccount(
+					TOKEN_BALANCE_SERVICE_NAME,
+					(tb) => typeof tb.account === "string" && importedAddresses.has(tb.account),
+					"token-balance(s)",
+				)
 			} catch (err) {
 				// `AccountService` throws `new Error("Duplicate address")`
 				// when an imported account's address collides with one
