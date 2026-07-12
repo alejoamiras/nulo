@@ -119,6 +119,12 @@ function makeNetworkStub(networks: { id: string; chainId: number }[] = [{ id: "n
 			if (chainId === undefined) return networks
 			return networks.filter((n) => n.chainId === chainId)
 		}),
+		// Profile-scoped read (finding C) — the stub networks belong to the test
+		// profile, so filter by chainId only (profileId is accepted + ignored).
+		getNetworksRaw: vi.fn().mockImplementation(async (_profileId: string, chainId?: number) => {
+			if (chainId === undefined) return networks
+			return networks.filter((n) => n.chainId === chainId)
+		}),
 		getNetwork: vi.fn().mockImplementation(async (id: string) => networks.find((n) => n.id === id)),
 		registerChainPurgeSubscriber(sub: typeof purgeSub) {
 			purgeSub = sub
@@ -256,7 +262,7 @@ beforeEach(() => {
 // ── Tests ───────────────────────────────────────────────────────────────
 
 const validNullifier = (n: number) => `0x${n.toString(16).padStart(64, "0")}`
-const tokenA = { id: 1, chainId: 1, contract: "0xtokenA", symbol: "TKA", decimals: 18 }
+const tokenA = { id: 1, profileId: "p1", chainId: 1, contract: "0xtokenA", symbol: "TKA", decimals: 18 }
 const tokenB = { id: 2, chainId: 1, contract: "0xtokenB", symbol: "TKB", decimals: 18 }
 
 function note(

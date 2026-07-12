@@ -234,6 +234,18 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		)
 	}
 
+	/**
+	 * Lock-free, profileId-parameterized network read. Does NOT go through
+	 * `requireActiveProfile`, so it's safe to call under the profile facade lock
+	 * (the deletion coordinator's snapshot) AND from profile-scoped cleanup
+	 * consumers (e.g. `IncomingTransfer.onTokenDeleted`) that must scope to the
+	 * DELETED token's profile, never the active one (finding C).
+	 */
+	public async getNetworksRaw(profileId: string, chainId?: number): Promise<Network[]> {
+		await this.ensureInitialized()
+		return (await this.storage.getValues()).filter((n) => n.profileId === profileId && (chainId === undefined || n.chainId === chainId))
+	}
+
 	public async getNetwork(id: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.getNetwork.params, [id], "getNetwork")
 		await this.ensureInitialized()

@@ -25,6 +25,7 @@ import { simulate } from "@/wallet/utils/fn"
 import {
 	type Token,
 	type TokenInfo,
+	type TokenDeleted,
 	TOKEN_SERVICE_NAME,
 	TOKEN_STORAGE_ROOT,
 	TokenSchema,
@@ -53,7 +54,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 
 	public readonly onTokenAdded = new EventHandler<TokenInfo>()
 	public readonly onTokenUpdated = new EventHandler<TokenInfo>()
-	public readonly onTokenDeleted = new EventHandler<TokenInfo>()
+	public readonly onTokenDeleted = new EventHandler<TokenDeleted>()
 
 	private readonly tokens: EntityStorage<Token>
 	private readonly lock = new Lock()
@@ -96,7 +97,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		await purgeRows(
 			tokens,
 			(token) => this.tokens.delete(`${token.id}`),
-			(token) => this.emit("onTokenDeleted", getTokenInfo(token)),
+			(token) => this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId }),
 		)
 	}
 
@@ -297,7 +298,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				throw new Error("unknown token id")
 			}
 			await this.tokens.delete(`${id}`)
-			this.emit("onTokenDeleted", getTokenInfo(token))
+			this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId })
 			return getTokenInfo(token)
 		} finally {
 			this.lock.leave()

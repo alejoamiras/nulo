@@ -2,7 +2,7 @@ import type { MethodsSpec, ServiceSpec } from "@/wallet/base"
 import { ServiceClient, definePassthroughs } from "@nulo/extension-messaging/background"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import { type Events, type Methods, TOKEN_SERVICE_NAME, type TokenInfo } from "./spec"
+import { type Events, type Methods, TOKEN_SERVICE_NAME, type TokenInfo, type TokenDeleted } from "./spec"
 
 export * from "./spec"
 
@@ -35,7 +35,7 @@ export interface TokenServiceClient extends MethodsSpec<Methods> {}
 export class TokenServiceClient extends ServiceClient<Methods, Events> implements ServiceSpec<Methods, Events> {
 	public readonly onTokenAdded = new EventHandler<TokenInfo>()
 	public readonly onTokenUpdated = new EventHandler<TokenInfo>()
-	public readonly onTokenDeleted = new EventHandler<TokenInfo>()
+	public readonly onTokenDeleted = new EventHandler<TokenDeleted>()
 
 	public constructor(name?: string) {
 		super(TOKEN_SERVICE_NAME, new LoggerServiceClient(), name)
