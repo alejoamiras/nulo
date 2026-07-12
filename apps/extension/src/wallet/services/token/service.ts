@@ -82,7 +82,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		this.accounts = services.get(AccountService.name)
 		this.tasks = services.get(TaskService.name)
 		this.journal = services.get(OperationJournalService.name)
-		this.profiles.onProfileDeleted.add(this.onProfileDeleted)
+		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile` (D).
 		this.networks.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
 	}
 
@@ -542,10 +542,14 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		return tokens.find((token) => token.profileId === profileId && token.chainId === chainId && token.contract === contract)
 	}
 
-	private readonly onProfileDeleted = async (profile: ProfileInfo) => {
-		this.logDebug(`Profile ${profile.id} deleted, remove related tokens`)
-		for (const token of (await this.tokens.getValues()).filter((x) => x.profileId === profile.id)) {
-			this.logDebug(`Remove token ${token.id}`)
+	/** Awaited profile-scoped token purge, called by the deletion coordinator
+	 *  (relocated from the removed fire-and-forget `onProfileDeleted` sub — D).
+	 *  Idempotent. `_deleteTokenById` emits `onTokenDeleted` with the authoritative
+	 *  profileId (P6), so token-balance/incoming cleanup stays profile-accurate. */
+	public async purgeForProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		this.logDebug(`purgeForProfile ${profileId}: remove related tokens`)
+		for (const token of (await this.tokens.getValues()).filter((x) => x.profileId === profileId)) {
 			await this._deleteTokenById(token.id)
 		}
 	}

@@ -43,7 +43,8 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 
 	protected async init(services: ServiceCollection): Promise<void> {
 		this.profileService = services.get(ProfileService.name)
-		this.profileService.onProfileDeleted.add(this.onProfileDeleted)
+		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile`,
+		// NOT a fire-and-forget `onProfileDeleted` subscriber (finding D).
 		const networkService = services.get(NetworkService.name) as NetworkService
 		networkService.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
 	}
@@ -205,15 +206,24 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		return poseidon2Hash([master, chainId, type, index])
 	}
 
-	private readonly onProfileDeleted = async (profile: ProfileInfo) => {
-		this.logDebug(`profile ${profile.id} deleted, remove related accounts`)
-		const accounts = (await this.storage.getValues()).filter((x) => x.profileId === profile.id)
+	/** Lock-free, profileId-parameterized account read — for the deletion
+	 *  coordinator's snapshot (safe under the facade lock: no requireActiveProfile). */
+	public async getAccountsRaw(profileId: string): Promise<Account[]> {
+		await this.ensureInitialized()
+		return (await this.storage.getValues()).filter((x) => x.profileId === profileId)
+	}
+
+	/** Awaited profile-scoped account purge, called by the deletion coordinator.
+	 *  (Relocated from the removed fire-and-forget `onProfileDeleted` subscriber so
+	 *  deletion is awaited end-to-end — finding D.) Idempotent: delete-of-gone is a
+	 *  no-op, so a resumed/re-run coordinator converges. */
+	public async purgeForProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		this.logDebug(`purgeForProfile ${profileId}: remove related accounts`)
+		const accounts = (await this.storage.getValues()).filter((x) => x.profileId === profileId)
 		await purgeRows(
 			accounts,
-			(account) => {
-				this.logDebug(`remove account ${account.address}`)
-				return this.storage.delete(account.address)
-			},
+			(account) => this.storage.delete(account.address),
 			(account) => this.emit("onAccountDeleted", account),
 		)
 	}

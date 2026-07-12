@@ -58,7 +58,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 
 	protected async init(services: ServiceCollection) {
 		this.profileService = services.get(ProfileService.name)
-		this.profileService.onProfileDeleted.add(this.onProfileDeleted)
+		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile` (D).
 	}
 
 	public async getDappSessions(): Promise<DappSession[]> {
@@ -340,11 +340,14 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		}
 	}
 
-	private readonly onProfileDeleted = async (profile: ProfileInfo) => {
-		this.logDebug(`Profile ${profile.id} deleted, remove related dapp sessions`)
+	/** Awaited profile-scoped purge, called by the deletion coordinator (relocated
+	 *  from the removed fire-and-forget `onProfileDeleted` sub — finding D). */
+	public async purgeForProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		this.logDebug(`purgeForProfile ${profileId}: remove related dapp sessions`)
 		try {
 			await this.lock.enter()
-			const sessions = (await this.storage.getValues()).filter((x) => x.profileId === profile.id)
+			const sessions = (await this.storage.getValues()).filter((x) => x.profileId === profileId)
 			await purgeRows(
 				sessions,
 				(session) => {

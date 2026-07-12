@@ -175,8 +175,9 @@ describe("cross-profile isolation (standing gate)", () => {
 			// route through the internal UNGUARDED delete (a naive guard would throw here
 			// on p2's token while p1 is active, orphaning rows).
 			profile.setActiveProfile(p1)
-			profile.onProfileDeleted.invoke(p2)
-			await new Promise((r) => setTimeout(r, 0))
+			// Profile-delete cleanup is now the coordinator's AWAITED purgeForProfile,
+			// not a fire-and-forget onProfileDeleted subscriber (finding D).
+			await tokens.purgeForProfile(p2.id)
 			expect((await tokens.getTokens(p2.id)).map((t) => t.id)).toEqual([])
 			expect((await tokens.getTokens(p1.id)).map((t) => t.id)).toEqual([1])
 		})

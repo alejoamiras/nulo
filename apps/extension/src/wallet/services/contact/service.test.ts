@@ -211,11 +211,9 @@ describe("ContactService (port-migrated)", () => {
 			profile.setActiveProfile(profileB)
 			await contactService.addContact("Bob", "0xb")
 
-			// Fire the event ContactService subscribes to in init().
-			profile.onProfileDeleted.invoke(profileA)
-
-			// Allow the async handler to run.
-			await new Promise((resolve) => setTimeout(resolve, 0))
+			// Profile-delete cleanup is now the coordinator's AWAITED call, not a
+			// fire-and-forget onProfileDeleted subscriber (finding D).
+			await contactService.purgeForProfile(profileA.id)
 
 			profile.setActiveProfile(profileA)
 			expect(await contactService.getContacts()).toEqual([])

@@ -88,8 +88,9 @@ describe("DappSessionService composition — in-process, no sandbox", () => {
 		await service.addDappSession({ url: "https://b.xyz" }, [], [], AccessLevel.Transactions, "0xA")
 		expect(await service.getDappSessions()).toHaveLength(2)
 
-		onProfileDeleted.invoke({ id: "p1" } as ProfileInfo)
-		await waitFor(async () => (await service.getDappSessions()).length === 0)
+		// Profile-delete cleanup is now the coordinator's AWAITED call (finding D).
+		void onProfileDeleted
+		await service.purgeForProfile("p1")
 		expect(await service.getDappSessions()).toHaveLength(0)
 	})
 })
