@@ -398,13 +398,20 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				return
 			}
 
-			for (const network of newNetworks) {
-				const oldNetwork = (data.network as Array<{ id: string; name: string; rpcUrl: string; chainId: string }>).find(
-					(n) => n.name === network.name && n.rpcUrl === network.rpcUrl && n.chainId === network.chainId,
-				)
-				if (oldNetwork && oldNetwork.id !== network.id) {
-					remapIdInBackupData(data, "networkId", network.id)
-				}
+			// Pair each restored network to its source by RESULT INDEX, not a
+			// field-match: `NetworkService.restore` returns exactly one result
+			// per input, in order, and spreads a FAILED input's raw fields back
+			// into its result — so a field-match (name/rpcUrl/chainId) is
+			// attacker-ambiguous (an invalid net A + a valid net B sharing those
+			// fields could pair B with A and graft A's account-state onto B's
+			// PXE target). Index-pairing is unforgeable. Only remap for a
+			// SUCCESSFUL restore whose id actually changed.
+			const oldNetworks = data.network as Array<{ id: string }>
+			for (let i = 0; i < newNetworks.length; i++) {
+				const restored = newNetworks[i]
+				const old = oldNetworks[i]
+				if (restored.restoreError || !old || old.id === restored.id) continue
+				remapIdInBackupData(data, "networkId", restored.id, old.id)
 			}
 			recordRestoreErrors(NETWORK_SERVICE_NAME, newNetworks)
 
@@ -472,19 +479,40 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			const tokenService = new TokenServiceClient()
 			const newTokens = (await tokenService.restore(data.token)) as Array<{
 				id: string
+				chainId: number
 				contract: string
 				restoreError?: string
 			}>
 			tokenService.disconnect()
 			if (data["token-balance"]?.length) {
-				const oldTokens = data.token as Array<{ id: string; contract: string }>
-				const oldIdToContract = new Map(oldTokens.map((t) => [t.id, t.contract]))
-				const contractToNewId = new Map(newTokens.filter((t) => !t.restoreError).map((t) => [t.contract, t.id]))
+				// Key the old→new token map by (chainId, contract), NOT contract
+				// alone: the SAME token contract can exist on two chains, and a
+				// contract-only key collapses both networks' balances onto the
+				// last-restored token id. Balance rows carry no chainId, so the
+				// composite key is sourced from the OLD token via the balance's
+				// `token` (old id). A duplicate old (chainId, contract) is
+				// ambiguous → skip-and-record (never last-wins).
+				const oldTokens = data.token as Array<{ id: string; chainId: number; contract: string }>
+				const oldIdToKey = new Map(oldTokens.map((t) => [t.id, `${t.chainId}:${t.contract}`]))
+				const keyToNewId = new Map<string, string>()
+				const ambiguousKeys = new Set<string>()
+				for (const t of newTokens) {
+					if (t.restoreError) continue
+					const k = `${t.chainId}:${t.contract}`
+					if (keyToNewId.has(k)) ambiguousKeys.add(k)
+					else keyToNewId.set(k, t.id)
+				}
+				const droppedBalances: unknown[] = []
 				data["token-balance"] = data["token-balance"].flatMap((tb) => {
-					const contract = oldIdToContract.get(tb.token as string)
-					const newId = contract ? contractToNewId.get(contract) : undefined
-					return newId ? [{ ...tb, token: newId }] : []
+					const oldKey = oldIdToKey.get(tb.token as string)
+					const newId = oldKey !== undefined && !ambiguousKeys.has(oldKey) ? keyToNewId.get(oldKey) : undefined
+					if (!newId) {
+						droppedBalances.push({ ...tb, restoreError: "Token balance could not be re-linked to a restored token" })
+						return []
+					}
+					return [{ ...tb, token: newId }]
 				})
+				if (droppedBalances.length) restoreErrorLog.value[TOKEN_BALANCE_SERVICE_NAME] = droppedBalances
 			}
 			recordRestoreErrors(TOKEN_SERVICE_NAME, newTokens)
 

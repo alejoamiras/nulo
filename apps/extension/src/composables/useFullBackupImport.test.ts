@@ -461,6 +461,148 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 	})
 })
 
+describe("useFullBackupImport — network index-pairing (P2)", () => {
+	it("remaps each network's child rows to ITS new id by index — never cross-grafts", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				network: [
+					{ id: "N1", name: "A", chainId: 1 },
+					{ id: "N2", name: "B", chainId: 2 },
+				],
+				"account-state": [
+					{ networkId: "N1", contracts: [], senders: [] },
+					{ networkId: "N2", contracts: [], senders: [] },
+				],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		// Both ids collide on restore → new ids, index i ↔ data.network[i].
+		networkClient.restore.mockResolvedValue([
+			{ id: "M1", name: "A", chainId: 1 },
+			{ id: "M2", name: "B", chainId: 2 },
+		])
+		accountClient.restore.mockResolvedValue([])
+
+		await c.restoreBackup()
+
+		expect(accountStateClient.restore).toHaveBeenCalledWith(
+			[
+				{ networkId: "M1", contracts: [], senders: [] },
+				{ networkId: "M2", contracts: [], senders: [] },
+			],
+			expect.anything(),
+		)
+	})
+
+	it("is unforgeable: a FAILED net A + valid net B sharing name+chainId does NOT graft B's rows onto A", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				network: [
+					{ id: "NA", name: "Same", chainId: 7 },
+					{ id: "NB", name: "Same", chainId: 7 },
+				],
+				"account-state": [
+					{ networkId: "NA", contracts: [], senders: [] },
+					{ networkId: "NB", contracts: [], senders: [] },
+				],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		// index 0 (NA) FAILED (raw fields spread back); index 1 (NB) succeeded with a new id.
+		networkClient.restore.mockResolvedValue([
+			{ id: "NA", name: "Same", chainId: 7, restoreError: "boom" },
+			{ id: "MB", name: "Same", chainId: 7 },
+		])
+		accountClient.restore.mockResolvedValue([])
+
+		await c.restoreBackup()
+
+		// NB's row → MB (index-paired); NA's row untouched (NA failed → no remap),
+		// NOT grafted to MB. A field-match would have paired MB with NA here.
+		expect(accountStateClient.restore).toHaveBeenCalledWith(
+			[
+				{ networkId: "NA", contracts: [], senders: [] },
+				{ networkId: "MB", contracts: [], senders: [] },
+			],
+			expect.anything(),
+		)
+	})
+})
+
+describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", () => {
+	it("keeps same-contract tokens on different chains distinct (no balance collapse)", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				token: [
+					{ id: 1, chainId: 1, contract: "0xT" },
+					{ id: 2, chainId: 2, contract: "0xT" },
+				],
+				"token-balance": [
+					{ id: 10, token: 1, account: "0xa" },
+					{ id: 11, token: 2, account: "0xa" },
+				],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([])
+		tokenClient.restore.mockResolvedValue([
+			{ id: "n1", chainId: 1, contract: "0xT" },
+			{ id: "n2", chainId: 2, contract: "0xT" },
+		])
+
+		await c.restoreBackup()
+
+		// Balance for old token 1 (chain 1) → n1; for old token 2 (chain 2) → n2.
+		// A contract-only key would collapse both onto the last (n2).
+		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([
+			{ id: 10, token: "n1", account: "0xa" },
+			{ id: 11, token: "n2", account: "0xa" },
+		])
+	})
+
+	it("skips-and-records a balance whose old token key is ambiguous (duplicate (chainId,contract))", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				token: [
+					{ id: 1, chainId: 1, contract: "0xDUP" },
+					{ id: 2, chainId: 1, contract: "0xDUP" },
+				],
+				"token-balance": [{ id: 10, token: 1, account: "0xa" }],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([])
+		// Both restore to the SAME (chainId, contract) → ambiguous → skip-and-record.
+		tokenClient.restore.mockResolvedValue([
+			{ id: "n1", chainId: 1, contract: "0xDUP" },
+			{ id: "n2", chainId: 1, contract: "0xDUP" },
+		])
+
+		await c.restoreBackup()
+
+		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([])
+		expect(c.restoreErrorLog.value["token-balance"]).toHaveLength(1)
+	})
+})
+
 describe("useFullBackupImport — failure branches", () => {
 	it("surfaces restoreError when ProfileService.restore returns one", async () => {
 		const opts = makeOpts()
