@@ -89,3 +89,18 @@ shelling `biome` into the crash-safe atomic-write path — the post-cp format st
 Per the standing user gate + the WIPE plan: promotion = `cp candidate → testnet-bridge.json` (carrying
 `privateClaimMode: salt-v2`) + `audit:faucet` + ship faucet+code as ONE release. NOT run without an
 explicit second go.
+
+## Watch-state event: dev-conflict on the docs index (resolved in-loop)
+
+While holding at the promotion gate, a new `dev` commit (the `backup-restore-corruption-fix` merge)
+appended an entry to `implementations-plan/index.md` at the same spot my branch had appended the
+bridge entry → GitHub flipped PR #260 `mergeable` UNKNOWN → **CONFLICTING**. A trial merge
+(`git merge origin/dev --no-commit`, after stashing the local-only `testnet-bridge.json` override so it
+was never at risk) confirmed the ONLY conflict was `index.md` — a pure append-collision, zero code,
+zero permission-semantics. Resolved by taking the UNION of both entries (dev's completed
+backup-restore line first, then my in-progress bridge line, preserving chronological-append order),
+merge-committed unsigned (loop/AFK authorization) + pushed. PR back to MERGEABLE; required checks
+re-queued on the new head. The candidate/code is untouched — this was integration hygiene, not a
+change to the held work. **Lesson: an index.md append-collision is the expected steady-state churn for
+a long-lived branch; resolve it in-loop (union, no code review needed) rather than surfacing — it's not
+a decision, and letting the PR sit CONFLICTING would block the eventual user merge.**
