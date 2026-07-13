@@ -98,13 +98,9 @@ export class NuloAccount implements IAccountContract {
 		pxe: IPXE,
 		payload: ExecutionPayload,
 		options: DefaultAccountEntrypointOptions,
+		chainInfo: ChainInfo,
 		gasSettingsRPC?: PartialGasSettingsRPC,
 	): Promise<TxExecutionRequest> {
-		const { l1ChainId, rollupVersion } = await node.getNodeInfo()
-		const chainInfo: ChainInfo = {
-			chainId: new Fr(l1ChainId),
-			version: new Fr(rollupVersion),
-		}
 		// Use the shared `completeFeeOptions` translator so both the
 		// standard and fast paths produce identical `GasSettings` for
 		// identical inputs. Mirrors upstream

@@ -16,7 +16,7 @@ export type MinimalStorageArea = {
 }
 
 /** Maximum chars of a malformed payload preserved in the parse-failure log. */
-const PARSE_FAILURE_PREVIEW_MAX = 200
+export const PARSE_FAILURE_PREVIEW_MAX = 200
 
 export class EntityStorage<T> {
 	private readonly storage: MinimalStorageArea
@@ -131,6 +131,32 @@ export class EntityStorage<T> {
 			if (!k.startsWith(path)) continue
 			const entity = this.decodeRow(k, v)
 			if (entity !== undefined) out.push(entity)
+		}
+		return out
+	}
+
+	/**
+	 * RAW, codec-free enumeration: `[id, JSON.parse(value)]` for every stored row,
+	 * INCLUDING rows the schema/codec would hide (validation-failed but kept). The
+	 * `id` is the true storage-key suffix — NOT any id embedded in the value — so a
+	 * caller that deletes by it removes the row that actually exists at that key.
+	 *
+	 * For maintenance paths (e.g. a profile-scoped purge) that MUST act on every
+	 * row regardless of validity and cannot trust the row's self-reported id. A row
+	 * whose stored value is itself unparseable JSON is skipped (there is nothing to
+	 * key a predicate off) — those are handled by the syntax-drop path on normal reads.
+	 */
+	public async rawEntries(): Promise<Array<[string, unknown]>> {
+		const path = `${this.root}@`
+		const res = await this.storage.get()
+		const out: Array<[string, unknown]> = []
+		for (const [k, v] of Object.entries(res)) {
+			if (!k.startsWith(path)) continue
+			try {
+				out.push([k.substring(path.length), JSON.parse(v as string)])
+			} catch {
+				// unparseable value — no readable predicate field; leave it.
+			}
 		}
 		return out
 	}

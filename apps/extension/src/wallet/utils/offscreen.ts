@@ -2,6 +2,10 @@ export const OFFSCREEN_READY_MESSAGE = "OFFSCREEN_READY"
 export const OFFSCREEN_PING = "OFFSCREEN_PING"
 export const OFFSCREEN_PONG = "OFFSCREEN_PONG"
 export const OFFSCREEN_KEEPALIVE = "OFFSCREEN_KEEPALIVE"
+/** F-10: broadcast (Firefox only) so a stale offscreen from a prior SW
+ *  instance recognizes it's been superseded and self-closes. Payload:
+ *  `{ type: OFFSCREEN_ADOPT_INSTANCE, token }`. */
+export const OFFSCREEN_ADOPT_INSTANCE = "OFFSCREEN_ADOPT_INSTANCE"
 
 let offscreenTimeout: NodeJS.Timeout
 let offscreenPromise: Promise<void> | null = null
@@ -43,6 +47,38 @@ function hasOffscreenApi(): boolean {
  * lifetime — see the SW-restart-leak caveat in `ensureOffscreenRunning`.
  */
 let firefoxOffscreenWindowId: number | null = null
+
+/**
+ * F-10: per-SW-lifetime token stamped into the Firefox offscreen window's URL,
+ * so a stale window (leaked across a SW restart) can recognize it's been
+ * superseded and self-close. Lazy so `crypto.randomUUID` isn't invoked at
+ * import time under vitest's node env.
+ */
+let _firefoxInstanceToken: string | undefined
+function firefoxInstanceToken(): string {
+	if (_firefoxInstanceToken === undefined) _firefoxInstanceToken = crypto.randomUUID()
+	return _firefoxInstanceToken
+}
+
+/**
+ * F-10: decide whether an incoming `OFFSCREEN_ADOPT_INSTANCE` broadcast means
+ * THIS offscreen window has been superseded and should self-close. True only
+ * when: the offscreen has a token (`myInstanceToken !== null`, i.e. Firefox),
+ * the sender is the same-extension SW (matching `runtime.id`, no `tab`), the
+ * message is an ADOPT, and it names a DIFFERENT instance token. Pure so the
+ * two-stale-plus-one-fresh case is unit-testable.
+ */
+export function isSupersededByAdopt(
+	message: unknown,
+	sender: chrome.runtime.MessageSender | undefined,
+	myInstanceToken: string | null,
+): boolean {
+	if (myInstanceToken === null) return false
+	const m = message as { type?: unknown; token?: unknown } | null
+	return (
+		sender?.id === chrome.runtime.id && sender.tab === undefined && m?.type === OFFSCREEN_ADOPT_INSTANCE && m.token !== myInstanceToken
+	)
+}
 
 const onOffscreenReady = (message: unknown) => {
 	if (message === OFFSCREEN_READY_MESSAGE) {
@@ -164,8 +200,9 @@ async function createOffscreen() {
 	// the browser refuses (rare, but typed that way) — fail loud so the
 	// caller's create-promise rejection path runs and the ready-gate can
 	// time out cleanly instead of hanging on a missing window id.
+	const token = firefoxInstanceToken()
 	const win = await chrome.windows.create({
-		url: chrome.runtime.getURL(path),
+		url: `${chrome.runtime.getURL(path)}?instance=${token}`,
 		state: "minimized",
 		focused: false,
 	})
@@ -173,6 +210,11 @@ async function createOffscreen() {
 		throw new Error("Firefox offscreen fallback: chrome.windows.create resolved without a window")
 	}
 	firefoxOffscreenWindowId = win.id ?? null
+	// F-10: notify any stale offscreen (a prior SW instance's window, leaked
+	// across a SW restart) that a newer instance now owns the offscreen — it
+	// self-closes on token mismatch. Broadcast here, before the ready-gate
+	// awaits below routes any PXE traffic, so the stale window is gone first.
+	chrome.runtime.sendMessage({ type: OFFSCREEN_ADOPT_INSTANCE, token }).catch(() => {})
 }
 
 /**

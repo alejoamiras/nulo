@@ -21,7 +21,19 @@ export class ConfigStore implements IConfigStore {
 	}
 
 	public async load() {
-		const storedConfig = await this.storage.get()
+		let storedConfig: Config | undefined
+		try {
+			storedConfig = await this.storage.get()
+		} catch (err) {
+			// F-13: `ValueStorage.get()` is fail-closed (throws on a malformed /
+			// undecodable value and PRESERVES it for a repair path). A corrupt
+			// `nulo:config` must NOT poison startup — this `load()` runs inside the
+			// runtime's `Promise.all`, so a propagating throw aborts the whole boot.
+			// Swallow it and continue on defaults; the bad value stays in storage
+			// for diagnosis / a future migration.
+			console.error(`ConfigStore.load: undecodable config, booting on defaults — ${err instanceof Error ? err.message : String(err)}`)
+			return
+		}
 		if (storedConfig && typeof storedConfig === "object") {
 			await this.apply(storedConfig)
 		}

@@ -39,6 +39,20 @@ const capabilities = ref<UICapabilityItem[]>([])
 
 const needsAccountSelection = ref(false)
 const availableAccounts = ref<UIAccount[]>([])
+
+// The `accounts` capability's `canCreateAuthWit` sub-permission lets the dApp obtain the
+// user's signature over auth-witnesses (authorizing actions on their behalf). It used to be
+// granted invisibly — the accounts cap is approved via the account picker and this flag was
+// never surfaced. Surface it explicitly so consent is informed.
+const accountsCanCreateAuthWit = computed(() => {
+	const delta = (payload.value?.params?.delta ?? []) as Capability[]
+	// Coerce truthy — NOT `=== true`. The wire value is unstructured (`unknown`,
+	// raw-cast at the dispatcher), and enforcement reads it truthy
+	// (method-scope-checkers `c.canCreateAuthWit &&`, dispatcher `Boolean(...)`).
+	// A strict `=== true` here would let a dApp send `canCreateAuthWit: 1` to
+	// suppress this consent warning while the capability is still granted+enforced.
+	return delta.some((c) => c.type === "accounts" && Boolean((c as { canCreateAuthWit?: unknown }).canCreateAuthWit))
+})
 const selectedAccounts = ref<UIAccount[]>([])
 const accountAliases = ref<Record<string, string>>({})
 
@@ -264,6 +278,14 @@ onUnmounted(disposeWindow)
 			<Flex direction="column" gap="20" :class="$style.sections">
 				<Flex v-if="needsAccountSelection" direction="column" gap="10" wide>
 					<SectionLabel label="Select accounts to share" :count="availableAccounts.length" />
+
+					<Flex v-if="accountsCanCreateAuthWit" gap="6" align="center" data-testid="cap-can-create-authwit-warning">
+						<Icon name="info" size="14" color="orange" />
+						<Text size="12" color="secondary">
+							This app can create auth-witnesses — request your signature to authorize actions on your behalf — for
+							the account(s) you share.
+						</Text>
+					</Flex>
 
 					<ItemsContainer>
 						<AccountSelectRow

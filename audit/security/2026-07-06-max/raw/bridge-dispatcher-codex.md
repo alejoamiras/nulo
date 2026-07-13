@@ -1,0 +1,43 @@
+CLUSTER: bridge-dispatcher
+
+## Findings
+
+### [1] Function scope checks authorize spoofable `name` while execution uses `selector`
+
+**Impact factors:** Integrity/authorization violation, with possible confidentiality impact for simulation/utility reads; single wallet user blast radius; sensitive wallet account state and transaction authority. Attack vector: network via malicious dApp page; attack complexity: low once a capability grant exists; privileges required: none beyond an already-approved dApp session/capability; user interaction: none for direct `simulateTx`/`executeUtility`/`profileTx`/`createAuthWit` paths after prior grant, required only for popup-routed `sendTx`.
+
+**Evidence confidence:** high.
+
+**OWASP / CWE mapping:** OWASP Top 10 A01 Broken Access Control; CWE-863 Incorrect Authorization; CWE-20 Improper Input Validation.
+
+**Trace:** Untrusted wallet RPC args enter `WalletSdkDispatcher.dispatch(methodName, args, ctx)` at `packages/wallet-bridge/src/dispatcher.ts:275`. The dispatcher enforces per-message scope with those raw args at `packages/wallet-bridge/src/dispatcher.ts:299` and `packages/wallet-bridge/src/dispatcher.ts:320`. For call-scoped methods, the scope check compares only the dApp-supplied display name: transaction calls use `call.name` at `packages/wallet-bridge/src/method-scope-checkers.ts:121`, simulation calls use `call.name` at `packages/wallet-bridge/src/method-scope-checkers.ts:160`, utility calls use `call.name` at `packages/wallet-bridge/src/method-scope-checkers.ts:174`, and authwit call intents use `intent.call.name` at `packages/wallet-bridge/src/method-scope-checkers.ts:281`. The dispatcher then forwards the original call object unchanged into execution requests: `sendTx` forwards `exec: args[0]` at `packages/wallet-bridge/src/dispatcher.ts:541` to `packages/wallet-bridge/src/dispatcher.ts:545`, `simulateTx` forwards `exec: args[0]` at `packages/wallet-bridge/src/dispatcher.ts:1129` to `packages/wallet-bridge/src/dispatcher.ts:1135`, `executeUtility` forwards `call: args[0]` at `packages/wallet-bridge/src/dispatcher.ts:1137` to `packages/wallet-bridge/src/dispatcher.ts:1146`, `profileTx` forwards `exec: args[0]` at `packages/wallet-bridge/src/dispatcher.ts:1148` to `packages/wallet-bridge/src/dispatcher.ts:1154`, and `createAuthWit` forwards `messageHashOrIntent: args[1]` at `packages/wallet-bridge/src/dispatcher.ts:1156` to `packages/wallet-bridge/src/dispatcher.ts:1162`. Trace exits cluster at direct execution handoff `packages/wallet-bridge/src/dispatcher.ts:373`; the immediate execution path parses each `FunctionCall` and copies both `name` and `selector` into an encoded action at `apps/extension/src/wallet/services/execution/operation-planner.ts:207` to `apps/extension/src/wallet/services/execution/operation-planner.ts:219`, then builds the executable call from `action.selector` while `action.name` is only used as `fnName` metadata at `apps/extension/src/wallet/services/execution/tx-request-builder.ts:311` to `apps/extension/src/wallet/services/execution/tx-request-builder.ts:323`.
+
+**Missing control:** The dispatcher never binds `call.name` to `call.selector` against the target contract artifact before using `name` for authorization. Scope enforcement should authorize the actual executable selector, or resolve the selector from the authorized function name and reject mismatches.
+
+**Exploit story / violation scenario:** A user grants `https://evil.example` a transaction or simulation scope for `{ contract: TOKEN, function: "transfer" }`. The dApp sends a wallet-sdk `FunctionCall` with `to: TOKEN`, `name: "transfer"`, but `selector` and `args` for a different function such as `approve`, `burn`, or a private-state-reading utility. The dispatcher sees `transfer@TOKEN` and passes the scope check. The execution layer parses the same call and executes/signs/simulates the selector supplied by the attacker, not the function name that was authorized.
+
+**Preconditions:** The dApp has an active session and a granted scoped capability covering a benign function name on the target contract. The attacker can construct raw wallet-sdk messages or a `FunctionCall` object containing inconsistent `name` and `selector` fields.
+
+**Why mitigations fail:** Zod narrowing only verifies the call shape is parseable; it does not prove semantic consistency between `name`, ABI parameters, and selector. Capability enforcement checks only capability type. The per-message scope enforcement does run, but it gates on attacker-controlled metadata rather than the executable selector.
+
+**Instances:** `packages/wallet-bridge/src/method-scope-checkers.ts:121`, `packages/wallet-bridge/src/method-scope-checkers.ts:160`, `packages/wallet-bridge/src/method-scope-checkers.ts:174`, `packages/wallet-bridge/src/method-scope-checkers.ts:281`.
+
+### [2] Raw-hash `createAuthWit` bypasses transaction/simulation scope and signs silently
+
+**Impact factors:** Integrity/authorization violation; single wallet user blast radius; sensitive signing authority over account-authwit payloads. Attack vector: network via malicious dApp page; attack complexity: low if the dApp can compute or obtain the intended authwit message hash; privileges required: none beyond an already-approved dApp session with `accounts.canCreateAuthWit`; user interaction: none after the prior grant because dispatcher routes `createAuthWit` directly to execution.
+
+**Evidence confidence:** high.
+
+**OWASP / CWE mapping:** OWASP Top 10 A01 Broken Access Control; CWE-863 Incorrect Authorization.
+
+**Trace:** `createAuthWit` is registered as an `accounts` capability method at `packages/wallet-bridge/src/method-descriptors.ts:107` to `packages/wallet-bridge/src/method-descriptors.ts:110`. Its scope checker enforces the source account at `packages/wallet-bridge/src/method-scope-checkers.ts:255` to `packages/wallet-bridge/src/method-scope-checkers.ts:270` and attempts transaction/simulation scope checks only for structured call intents or consumer inner hashes at `packages/wallet-bridge/src/method-scope-checkers.ts:279` to `packages/wallet-bridge/src/method-scope-checkers.ts:303`. If the dApp supplies a raw `Fr` message hash, the checker falls through with no semantic authorization at `packages/wallet-bridge/src/method-scope-checkers.ts:306` to `packages/wallet-bridge/src/method-scope-checkers.ts:308`. The dispatcher then forwards `args[1]` unchanged into the `aztec_createAuthWit` operation at `packages/wallet-bridge/src/dispatcher.ts:1156` to `packages/wallet-bridge/src/dispatcher.ts:1162` and directly executes it at `packages/wallet-bridge/src/dispatcher.ts:370` to `packages/wallet-bridge/src/dispatcher.ts:374`. Trace exits cluster at execution handoff; the immediate execution handler treats the opaque value as a raw `Fr` and signs it at `apps/extension/src/wallet/services/execution/service.ts:680` to `apps/extension/src/wallet/services/execution/service.ts:685`.
+
+**Missing control:** Raw message hashes are accepted for dApp-originated `createAuthWit` without requiring a structured, scope-checkable intent or an explicit unrestricted authwit grant. The dispatcher should reject opaque hashes from dApps, or require them to be bound to a previously approved wildcard scope.
+
+**Exploit story / violation scenario:** The user grants a dApp `accounts.canCreateAuthWit=true` plus a restricted transaction scope such as `transfer@TOKEN`. The dApp computes the authwit message hash for `approve@TOKEN` or another unauthorized call and sends `createAuthWit(userAccount, rawHash)`. Because the payload is opaque, the transaction/simulation scope check is skipped, and the execution service signs the hash. The dApp receives an auth witness for an action outside the granted function scope.
+
+**Preconditions:** Active dApp session; stored `accounts` grant has `canCreateAuthWit=true`; attacker can compute the target authwit hash. A restrictive transaction or simulation grant makes the scope-bypass explicit, but the raw-hash path is unbounded even without such a grant.
+
+**Why mitigations fail:** The existing checker only validates scope when it can inspect `contract` and `method`. Zod parsing of the final raw hash proves only that it is an `Fr`, not what operation it authorizes. Because `createAuthWit` is an account operation, it bypasses the popup-mediated `DappInteractionService` path entirely.
+
+**Instances:** `packages/wallet-bridge/src/method-scope-checkers.ts:306`, `packages/wallet-bridge/src/method-scope-checkers.ts:307`, `packages/wallet-bridge/src/method-scope-checkers.ts:308`.

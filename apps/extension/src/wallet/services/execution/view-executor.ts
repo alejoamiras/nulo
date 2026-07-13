@@ -29,7 +29,7 @@ import { type NetworkService, networkInfoFrom } from "@/wallet/services/network/
 import type { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import type { PxeServiceClient } from "@/wallet/services/pxe/client"
-import { type ContractResolver, findFunctionByName } from "./contract-resolver"
+import { type ContractResolver, findFunctionByName, findFunctionBySelector } from "./contract-resolver"
 import { rehydrateOptimizablePrefix, runFastPath } from "./fast-path"
 import { applyEmbeddedFpcGasCap } from "./fee/embedded-fpc-cap"
 import { suggestGasLimits } from "./fee/fee-strategy"
@@ -334,7 +334,48 @@ export class ViewExecutor {
 		const account = await this.deps.accountService.getAccountContract(profile.id, network.chainId, op.accountAddress)
 		const pxe = this.deps.pxeService.getPXE(networkInfoFrom(network))
 		await account.ensureRegistered(pxe)
-		return pxe.executeUtility(op.call, {
+		// F-02: bind the dApp-supplied `name` to the SELECTOR's real function
+		// before executing. `checkExecuteUtility` (method-scope-checkers) authorizes
+		// on `call.name`, but `pxe.executeUtility` dispatches by `call.selector`.
+		// Without this bind a dApp scoped for `symbol` could send
+		// `{name:"symbol", selector:<balance_of_private>}` — scope passes on the
+		// name, PXE runs the selector and returns the user's PRIVATE state. Resolve
+		// the ABI, reject a name/selector mismatch, and rebuild the call from ABI
+		// truth (isStatic/type/returnTypes), mirroring the four tx/authwit sinks.
+		// A present-but-mismatched name is rejected; an EMPTY name ("") is also
+		// rejected (it is NOT treated as "absent" — doing so let a dApp scope
+		// `{function:""}` and sign a different selector silently). Only a genuinely
+		// absent (`undefined`) name skips the check, and only a wildcard scope
+		// authorizes such a selector-only call.
+		// `checkExecuteUtility` validates `to`/`name` presence but NOT `selector`;
+		// guard it before dereferencing so a malformed call is a controlled error,
+		// not a raw TypeError from `.toString()`.
+		if (op.call.to === undefined || op.call.selector === undefined) {
+			throw new Error("Malformed executeUtility: call requires a `to` and a `selector`")
+		}
+		const [, instance] = await this.deps.resolver.resolveInstance(pxe, op.call.to.toString())
+		const [, artifact] = await this.deps.resolver.resolveArtifact(pxe, instance.currentContractClassId.toString())
+		const fn = await findFunctionBySelector(artifact, op.call.selector.toString())
+		if (!fn) {
+			throw new Error("Method not found")
+		}
+		if (op.call.name !== undefined && op.call.name !== fn.name) {
+			throw new Error(`Scope violation: call name "${op.call.name}" does not match selector's function "${fn.name}" on ${op.call.to}`)
+		}
+		const boundCall = new FunctionCall(
+			fn.name,
+			op.call.to,
+			op.call.selector,
+			fn.functionType,
+			// hideMsgSender only applies to enqueued public calls; a utility read
+			// has no msg_sender to hide. Force `false` (matching executeSimulateUtility)
+			// rather than trust the dApp-supplied flag.
+			false,
+			fn.isStatic,
+			op.call.args,
+			fn.returnTypes ?? [],
+		)
+		return pxe.executeUtility(boundCall, {
 			authwits: await z.array(AuthWitness.schema).optional().parseAsync(op.opts.authWitnesses),
 			scopes: await z.array(AztecAddress.schema).parseAsync(op.opts.scopes),
 		})

@@ -50,6 +50,10 @@ export type DappSession = {
 	accountAliases?: Record<string, string>
 	capabilityGrants?: GrantedCapabilityRecord[]
 	capabilityRejections?: RejectedCapabilityRecord[]
+	/** F-12: HMAC-SHA256 (base64) over the canonical row minus this field.
+	 *  Written on persist, verified on read; a row that fails (or lacks it) is
+	 *  dropped so a storage-tampered row can't mint grants. */
+	mac?: string
 }
 
 const tolerantRecord = (v: unknown) => typeof v === "object" && v !== null
@@ -77,6 +81,11 @@ export const DappSessionSchema: z.ZodType<DappSession> = z.object({
 	accountAliases: z.record(z.string(), z.string()).optional(),
 	capabilityGrants: z.array(z.custom<GrantedCapabilityRecord>(tolerantRecord)).optional(),
 	capabilityRejections: z.array(z.custom<RejectedCapabilityRecord>(tolerantRecord)).optional(),
+	// F-12: the per-row integrity tag. Written by `DappSessionMacStorage`, which
+	// wraps this store — the schema MUST carry it so the boundary codec doesn't
+	// strip the `mac` before the MAC layer can verify it (zod object-parse drops
+	// unknown keys). Mirrors the `mac?: string` field on the DappSession type.
+	mac: z.string().optional(),
 })
 
 export type Methods = {

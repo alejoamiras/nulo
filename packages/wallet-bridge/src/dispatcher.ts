@@ -66,6 +66,7 @@ import type {
 import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
 import { METHOD_REGISTRY, METHOD_TO_KIND, NETWORK_ONLY_KINDS, ACCOUNT_KINDS, assertKnownMethod } from "./method-descriptors"
 import type {
+	AztecCreateAuthWitRequest,
 	AztecSendTxRequest,
 	CapabilityResult,
 	ExecutionResult,
@@ -86,6 +87,7 @@ import type {
 } from "./operation"
 import type { OperationResult } from "./operation-result"
 import { enforceScope, enforceScopeWithSession } from "./scope-enforcement"
+import { isCreateAuthWitCoveredByTxOrSimulationScope } from "./method-scope-checkers"
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { OriginType, type LocalTxOrigin } from "./transaction-origin"
 import type { SessionContext } from "./types"
@@ -310,6 +312,59 @@ type CapabilityManifest = {
 // the batching logic that lived behind `simulate_views` now lives in
 // extension/.../execution/helpers/batched-view-simulation.ts.
 
+/**
+ * Structural arg-shape guard for authorization-sensitive dApp methods, run before
+ * capability/scope enforcement so the scope checkers + handlers dereference validated
+ * shapes rather than raw `unknown` (F-08). Deliberately dependency-free — wallet-bridge is
+ * transport-shaped and does NOT import `WalletSchema`; it validates only the
+ * authorization-relevant fields the scope/handler layer uses. Full Aztec-object parsing
+ * stays downstream (execution-layer Zod). Residual: this is not a complete WalletSchema parse;
+ * grantPublicAuthwit/registerToken rely on their handlers' own (String-coercion-tolerant) checks.
+ */
+function assertAuthRelevantArgShape(methodName: string, args: unknown[]): void {
+	const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null
+	const bad = (m: string): never => {
+		throw new Error(`Malformed ${methodName} request: ${m}`)
+	}
+	const assertCall = (c: unknown, where: string) => {
+		if (!isObj(c) || c.to === undefined || typeof c.name !== "string") {
+			bad(`${where} must have \`to\` and a string \`name\``)
+		}
+	}
+	const assertExecCalls = (exec: unknown) => {
+		if (!isObj(exec)) bad("exec payload must be an object")
+		const calls = (exec as Record<string, unknown>).calls
+		if (!Array.isArray(calls)) bad("exec.calls must be an array")
+		for (const c of calls as unknown[]) assertCall(c, "each call")
+	}
+
+	switch (methodName) {
+		case "sendTx":
+		case "profileTx":
+			// simulateTx is intentionally NOT guarded here: post-merge with dev's
+			// arg-guard refactor, its exec validation is owned by
+			// `checkSimulationTransactions` (optional-chains `exec?.calls`, requires
+			// an array, coerces `to`/tolerates missing `name`) plus the downstream
+			// execution-layer Zod — so a dispatcher-level shape guard is redundant and
+			// would preempt the capability error that path pins.
+			assertExecCalls(args[0])
+			break
+		case "executeUtility":
+			assertCall(args[0], "call")
+			break
+		case "createAuthWit":
+			// args[0] = from; args[1]'s CallIntent/IntentInnerHash shape is enforced by
+			// checkCreateAuthWit (structured-intent requirement + raw-Fr reject).
+			if (args[0] === undefined || args[0] === null) bad("`from` (args[0]) is required")
+			break
+		case "registerToken":
+			if (args[0] === undefined || args[0] === null || args[1] === undefined || args[1] === null) {
+				bad("both positional arguments are required")
+			}
+			break
+	}
+}
+
 export class WalletSdkDispatcher {
 	constructor(
 		private readonly networkService: INetworkReader,
@@ -364,6 +419,10 @@ export class WalletSdkDispatcher {
 		if (argSchema && !argSchema(args)) {
 			throw new Error(`Invalid arguments for wallet method: ${methodName}`)
 		}
+
+		// F-08: structural arg-shape guard for authorization-sensitive methods, before any
+		// capability/scope logic dereferences the args.
+		assertAuthRelevantArgShape(methodName, args)
 
 		// Enforce capability grants (type-level) then scope (per-operation +
 		// per-account allow-list).
@@ -431,6 +490,9 @@ export class WalletSdkDispatcher {
 		}
 		if (methodName === "grantPublicAuthwit") {
 			return this.handleGrantPublicAuthwit(args, ctx, dappSession)
+		}
+		if (methodName === "createAuthWit") {
+			return this.handleCreateAuthWit(args, ctx, dappSession, grants)
 		}
 
 		const kind = METHOD_TO_KIND[methodName]
@@ -632,6 +694,50 @@ export class WalletSdkDispatcher {
 			{ onExecutionEnqueued: hooks?.onExecutionEnqueued, queuedJournalId: hooks?.queuedJournalId, originKey: ctx.origin },
 		)
 
+		return this.unwrapResult(results[0])
+	}
+
+	/**
+	 * Handle createAuthWit: resolve the signer from args[0] (not the session default),
+	 * then route by scope coverage. A CallIntent covered by a granted tx/sim scope is
+	 * within authority the dApp already holds → sign silently. An uncovered call, or any
+	 * IntentInnerHash (whose inner hash is fully attacker-chosen), → confirmation popup.
+	 * No sendTx FIFO hooks: the background's non-send safety-net releases the baton.
+	 */
+	private async handleCreateAuthWit(
+		args: unknown[],
+		ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+		grants: GrantedCapabilityRecord[],
+	): Promise<unknown> {
+		if (!dappSession) {
+			throw new Error(`No dApp session found for origin ${ctx.origin}`)
+		}
+		const requestedFrom = String(args[0])
+		const [network, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedFrom)
+		const messageHashOrIntent = args[1] as AztecCreateAuthWitOperation["messageHashOrIntent"]
+
+		if (isCreateAuthWitCoveredByTxOrSimulationScope(messageHashOrIntent, grants)) {
+			const operation: AztecCreateAuthWitOperation = {
+				kind: "aztec_createAuthWit",
+				networkId: network.id,
+				accountAddress: account.address,
+				messageHashOrIntent,
+			}
+			const origin: LocalTxOrigin = { type: OriginType.DAPP, name: ctx.origin }
+			const results = await this.executionService.executeOperations([operation], origin)
+			return this.unwrapResult(results[0])
+		}
+
+		const authwitReq: AztecCreateAuthWitRequest = {
+			kind: "aztec_createAuthWit",
+			account: formatCaipAccount(ctx.chainId, account.address),
+			messageHashOrIntent,
+		}
+		const results = await this.dappInteractionService.execute({
+			sessionId: dappSession.id,
+			operations: [authwitReq],
+		})
 		return this.unwrapResult(results[0])
 	}
 

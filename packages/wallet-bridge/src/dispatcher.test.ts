@@ -1739,6 +1739,29 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 	})
 })
 
+describe("F-08 authorization-relevant arg-shape guard", () => {
+	const dispatcher = makeDispatcher(makeSessionWriter(makeSession()).writer, async () => ({}) as CapabilityResult)
+
+	test("sendTx with non-array exec.calls is rejected before authz", async () => {
+		await expect(dispatcher.dispatch("sendTx", [{ calls: "nope" }], ctx)).rejects.toThrow(/Malformed sendTx/)
+	})
+	test("sendTx with a call missing a string name is rejected", async () => {
+		await expect(dispatcher.dispatch("sendTx", [{ calls: [{ to: "0xabc" }] }], ctx)).rejects.toThrow(/Malformed sendTx/)
+	})
+	test("executeUtility with a non-object call is rejected", async () => {
+		await expect(dispatcher.dispatch("executeUtility", ["nope"], ctx)).rejects.toThrow(/Malformed executeUtility/)
+	})
+	test("createAuthWit with a missing `from` is rejected before authz", async () => {
+		// Post-merge, dev's registry `argSchema` (argsCreateAuthWit) owns this
+		// rejection and fires FIRST — so the message is the generic arg-guard one,
+		// not F-08's "Malformed". The security property (rejected pre-authz) holds.
+		await expect(dispatcher.dispatch("createAuthWit", [], ctx)).rejects.toThrow(/Invalid arguments for wallet method: createAuthWit/)
+	})
+	test("registerToken with a null positional arg is rejected", async () => {
+		await expect(dispatcher.dispatch("registerToken", ["0xtok", null], ctx)).rejects.toThrow(/Malformed registerToken/)
+	})
+})
+
 describe("dispatcher — arg guards: order, tolerance, batch-leg validation", () => {
 	function makeBareDispatcher(session: IDappSessionRef | undefined) {
 		const writer: IDappSessionWriter = {
