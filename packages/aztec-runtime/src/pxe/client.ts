@@ -199,4 +199,8 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 	public async clearChainState(profileId: string, chainId: number): Promise<void> {
 		await this.request("clearChainState", profileId, chainId)
 	}
+
+	public async clearProfileState(profileId: string): Promise<void> {
+		await this.request("clearProfileState", profileId)
+	}
 }

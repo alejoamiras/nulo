@@ -1,6 +1,6 @@
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { toRestoreError } from "@/utils/restore-error"
-import type { BrowserApi } from "@nulo/wallet-core/ports"
+import type { BrowserApi, StorageArea } from "@nulo/wallet-core/ports"
 import type { IConfig } from "@/wallet/config"
 import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
@@ -25,6 +25,9 @@ import { PasskeyRecoveryCoordinator, type PasskeyRecovery } from "./passkey-reco
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import { SessionManager } from "./session-manager"
 import { PROFILE_SERVICE_NAME, type ProfileInfo, type Profile, type Events, type Methods, type RestoreSecret } from "./spec"
+import { TombstoneRepository } from "./tombstone-repository"
+import { ProfileDeletionState, type ExecutionFence } from "./profile-deletion-state"
+import type { ProfileDeletionDelegate } from "../profile-deletion/types"
 
 export * from "./spec"
 
@@ -87,6 +90,18 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 */
 	private readonly pendingRestoreSecrets = new Map<string, MasterSecretBytes>()
 
+	/** Durable delete-in-progress markers (finding D). NOT an EntityStorage — see
+	 *  TombstoneRepository: a corrupt tombstone must still reserve its id. */
+	private readonly tombstones: TombstoneRepository
+	/** In-memory reserved-id set + per-profile deletion epoch (fencing). Seeded
+	 *  from the tombstone raw keys in `init()` BEFORE the session is restored.
+	 *  Shared (via {@link getDeletionState}) with Execution + Transaction so a
+	 *  worker that captured an epoch before a purge is fenced when it persists. */
+	private readonly deletionState = new ProfileDeletionState()
+	/** Lazily injected by the last-started ProfileDeletionCoordinator — the purge
+	 *  executor. Never a topological dependency (would be a cycle). */
+	private deletionDelegate: ProfileDeletionDelegate | null = null
+
 	/**
 	 * @param browserApi Optional. Tests pass `FakeBrowserApi` so the
 	 *        collaborators work off in-memory storage without chrome.*. The
@@ -96,6 +111,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	public constructor(config: IConfig, logger: ILogger, browserApi?: BrowserApi) {
 		super(PROFILE_SERVICE_NAME, logger)
 		this.repo = new ProfileRepository(browserApi)
+		this.tombstones = new TombstoneRepository((browserApi?.storage.local ?? chrome.storage.local) as StorageArea)
 		this.secretBox = new PasswordSecretBox()
 		this.sessionManager = new SessionManager(
 			config,
@@ -131,12 +147,27 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		this.passkeys = services.get(PasskeyService.name)
 		this.passkeyCoordinator = new PasskeyRecoveryCoordinator(this.passkeys, this.logger)
 
+		// Seed the reserved-id set from the durable tombstone RAW keys BEFORE the
+		// session is restored / any profile becomes visible — a tombstoned id must
+		// never be reused or unlocked while its deletion is still pending (finding D).
+		this.deletionState.initReserved(await this.tombstones.reservedIds())
+		// Hydrate the deletion EPOCH for each VALID tombstone (raw-key reserve above
+		// is fail-closed for corrupt ones; the epoch fence needs the payload). This
+		// arms assertCurrent BEFORE any execution can run (D13). Corrupt tombstones
+		// stay reserved with epoch 0 — still unreusable, just not epoch-fenced.
+		for (const t of await this.tombstones.validPayloads()) {
+			this.deletionState.hydrateDeletion(t.profileId, t.epoch)
+		}
+
 		// Silent restore: SessionManager handles TTL expiry, missing
 		// profile, wrong creds, and passkey-can't-silently-restore
 		// internally. No emit on restore — subscribers pull via
 		// getActiveProfile() when they mount.
 		await this.sessionManager.restore(
-			(id) => this.repo.get(id),
+			// A tombstoned profile (SW died mid-delete: row present, id reserved) must
+			// NOT have its session restored — it's being erased. Gate the lookup so no
+			// downstream unlock/export/secret path can observe an active session for it.
+			(id) => (this.deletionState.isReserved(id) ? Promise.resolve(undefined) : this.repo.get(id)),
 			(passhash, profile) =>
 				this.secretBox.unsealWithPasshash(passhash, {
 					guard: asBase64Ciphertext(profile.guard),
@@ -149,13 +180,33 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		await this.ensureInitialized()
 		return this.runExclusive(async () => {
 			const session = await this.sessionManager.getActive()
-			return session ? this.getProfileInfo(session.profile) : undefined
+			if (!session || this.deletionState.isReserved(session.profile.id)) return undefined
+			return this.getProfileInfo(session.profile)
+		})
+	}
+
+	/** Capture the {profileId, epoch} execution fence ATOMICALLY under the facade
+	 *  lock (D13). The active-session read, the reserved-id check, and the epoch
+	 *  read MUST be one critical section — `deleteProfile`'s phase 1 (beginDeletion
+	 *  + reserve) runs under the SAME lock, so this either captures the pre-delete
+	 *  epoch (then the later addTransaction assert fails) or sees the id already
+	 *  reserved and rejects. Composing getActiveProfile + capture across separate
+	 *  lock acquisitions would let a delete slip between them (codex TOCTOU). */
+	public async captureExecutionFence(): Promise<ExecutionFence> {
+		await this.ensureInitialized()
+		return this.runExclusive(async () => {
+			const session = await this.sessionManager.getActive()
+			if (!session || this.deletionState.isReserved(session.profile.id)) {
+				throw new Error("Wallet locked")
+			}
+			return { profileId: session.profile.id, epoch: this.deletionState.capture(session.profile.id) }
 		})
 	}
 
 	public async getProfiles(): Promise<ProfileInfo[]> {
 		await this.ensureInitialized()
-		return (await this.repo.getAll()).map(this.getProfileInfo)
+		// A tombstoned (deletion-pending) profile is ABSENT to every read (finding D).
+		return (await this.repo.getAll()).filter((p) => !this.deletionState.isReserved(p.id)).map(this.getProfileInfo)
 	}
 
 	public async createProfile(name: string, password: string): Promise<ProfileInfo> {
@@ -164,7 +215,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		const { passhash, encrypted } = await this.secretBox.seal(password, secret)
 		try {
 			return await this.runExclusive(async () => {
-				const id = await this.repo.generateUniqueId()
+				const id = await this.nextUnreservedId()
 
 				const profile: Profile = {
 					id,
@@ -206,6 +257,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (!fetched) {
 				throw new Error("Invalid profile id")
 			}
+			// A tombstoned profile (mid-delete: row present, id reserved) must not
+			// be unlocked — its data is being purged. `repo.get` alone is blind to
+			// the reservation.
+			if (this.deletionState.isReserved(id)) {
+				throw new Error("Invalid profile id")
+			}
 			if (fetched.type === "passkey") {
 				throw new Error("Profile requires passkey")
 			}
@@ -231,6 +288,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			return await this.runExclusive(async () => {
 				const current = await this.repo.get(id)
 				if (!current) {
+					throw new Error("Invalid profile id")
+				}
+				// A deletion that began during the (lock-free) phase-2 unseal must
+				// abort the unlock — the id is now reserved even if the row lingers.
+				if (this.deletionState.isReserved(id)) {
 					throw new Error("Invalid profile id")
 				}
 				if (current.type !== "password") {
@@ -260,7 +322,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 */
 	public async generateProfileId(): Promise<string> {
 		await this.ensureInitialized()
-		return await this.repo.generateUniqueId()
+		return await this.nextUnreservedId()
 	}
 
 	public async createPasskeyProfile(name: string, credentialData?: PasskeyCredentialData): Promise<ProfileInfo> {
@@ -274,7 +336,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// `passkey.createKey(id, name)` → `openWindowAndWait`.
 		// Generate the id BEFORE entering the lock so the passkey UI
 		// prompt below doesn't hold the facade lock for minutes.
-		const id = credentialData?.userHandle ?? (await this.repo.generateUniqueId())
+		const id = credentialData?.userHandle ?? (await this.nextUnreservedId())
 		const recovery = await this.acquireRecovery({ ceremony: "create", userHandle: id, name }, credentialData)
 
 		try {
@@ -286,7 +348,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// `userHandle` (= the OLD id) out of sync with the persisted
 				// profile id. Caller is responsible for re-running the entire
 				// flow with a fresh id (and a fresh WebAuthn ceremony).
-				if (await this.repo.contains(id)) {
+				if ((await this.repo.contains(id)) || this.deletionState.isReserved(id)) {
 					throw new ProfileIdConflictError()
 				}
 
@@ -321,6 +383,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		return this.runExclusive(async () => {
 			const fetched = await this.repo.get(id)
 			if (!fetched) throw new Error("Invalid profile id")
+			if (this.deletionState.isReserved(id)) throw new Error("Invalid profile id")
 			if (fetched.type !== "passkey") throw new Error("Profile requires password")
 			if (!fetched.credentialId) throw new Error("Missing credentialId")
 			return fetched.credentialId
@@ -334,6 +397,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		const snapshot = await this.runExclusive(async () => {
 			const fetched = await this.repo.get(id)
 			if (!fetched) {
+				throw new Error("Invalid profile id")
+			}
+			// A tombstoned profile (mid-delete) must not be unlocked (see unlockProfile).
+			if (this.deletionState.isReserved(id)) {
 				throw new Error("Invalid profile id")
 			}
 			if (fetched.type === "password") {
@@ -369,6 +436,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			return await this.runExclusive(async () => {
 				const current = await this.repo.get(id)
 				if (!current) {
+					throw new Error("Invalid profile id")
+				}
+				// A deletion that began during the (lock-free) WebAuthn prompt must
+				// abort the unlock — the id is now reserved even if the row lingers.
+				if (this.deletionState.isReserved(id)) {
 					throw new Error("Invalid profile id")
 				}
 				if (current.type !== "passkey") {
@@ -516,12 +588,19 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	public async confirmProfileOperation(id: string, password?: string): Promise<boolean> {
 		await this.ensureInitialized()
 
-		const snapshot = await this.runExclusive(async () => {
+		const { snapshot, capturedEpoch } = await this.runExclusive(async () => {
 			const fetched = await this.repo.get(id)
 			if (!fetched) {
 				throw new Error("Invalid profile id")
 			}
-			return fetched
+			// A tombstoned profile (mid-delete) must not be confirmable (codex verify).
+			if (this.deletionState.isReserved(id)) {
+				throw new Error("Invalid profile id")
+			}
+			// Capture the deletion epoch atomically with the snapshot — a delete
+			// (even one FOLLOWED by a same-id restore) bumps it permanently, so the
+			// post-op check below rejects a stale generation (codex verify r3).
+			return { snapshot: fetched, capturedEpoch: this.deletionState.capture(id) }
 		})
 
 		try {
@@ -550,6 +629,16 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// coordinator. Codex audit Q2 validated this shape.
 				await this.passkeyCoordinator.confirm(snapshot)
 			}
+			// Revalidate AFTER the async credential op (codex verify): a delete that
+			// completed during the (unlocked) derivation/prompt — even one followed by
+			// a same-id restore — must not report success for the stale generation.
+			// The epoch check distinguishes generations; a LEGIT concurrent password
+			// change does NOT bump the epoch, so confirm still succeeds.
+			await this.runExclusive(async () => {
+				if (!(await this.repo.get(id)) || this.deletionState.isReserved(id) || !this.deletionState.isCurrent(id, capturedEpoch)) {
+					throw new Error("Invalid profile id")
+				}
+			})
 			return true
 		} catch (error) {
 			this.logError("Failed to confirm operation", getErrorMessage(error))
@@ -557,34 +646,107 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		}
 	}
 
+	/** Injected by the last-started ProfileDeletionCoordinator (finding D). */
+	public setDeletionDelegate(delegate: ProfileDeletionDelegate): void {
+		this.deletionDelegate = delegate
+	}
+
+	/** The SHARED deletion state (reserved ids + per-profile epoch). Execution +
+	 *  Transaction resolve this at init so a write that captured an epoch before a
+	 *  delete is fenced when it tries to persist afterward (D13). */
+	public getDeletionState(): ProfileDeletionState {
+		return this.deletionState
+	}
+
+	/** A fresh profile id that is neither in storage NOR reserved by a pending
+	 *  deletion (fail-CLOSED against successor-clobber, finding D). */
+	private async nextUnreservedId(): Promise<string> {
+		let id = await this.repo.generateUniqueId()
+		while (this.deletionState.isReserved(id)) id = await this.repo.generateUniqueId()
+		return id
+	}
+
+	/**
+	 * Atomic, awaited, privacy-erasing profile deletion (finding D). THREE phases:
+	 *  1. UNDER the facade lock: snapshot (lock-free reads) → write the durable
+	 *     tombstone (reserves the id + bumps the deletion epoch, fencing in-flight
+	 *     writes) → delete the profile row → close the session → UI-only emit.
+	 *  2. OUTSIDE the lock: the coordinator's awaited purge of EVERY profile-bearing
+	 *     root. A failure leaves the tombstone → resume retries; the id stays reserved.
+	 *  3. UNDER the lock: clear the tombstone (epoch-guarded) + release the reservation.
+	 */
 	public async deleteProfile(id: string): Promise<ProfileInfo> {
 		await this.ensureInitialized()
-		return this.runExclusive(async () => {
+		const delegate = this.deletionDelegate
+		if (!delegate) throw new Error("deletion coordinator not ready")
+
+		const { profile, epoch, snapshot } = await this.runExclusive(async () => {
 			const profile = await this.repo.get(id)
-			if (!profile) {
+			if (!profile || this.deletionState.isReserved(id)) {
 				throw new Error("Invalid profile id")
 			}
-
+			const snapshot = await delegate.snapshot(id)
+			const epoch = this.deletionState.beginDeletion(id)
+			await this.tombstones.write({ profileId: id, ...snapshot, epoch })
 			await this.repo.delete(id)
-
-			this.emit("onProfileDeleted", this.getProfileInfo(profile))
-
+			// Close the session BEFORE the emit (a subscriber reacting to the emit
+			// must not observe a still-open session for a deleted profile).
 			if (this.sessionManager.isActive(id)) {
 				await this.sessionManager.close()
 			}
-
-			// Cleanup: any pending restore secret for this profile is now
-			// unreachable. Happens when a backup-import rollback (e.g. the
-			// Duplicate-address case) deletes the freshly-created profile
-			// before finalize runs.
 			const pending = this.pendingRestoreSecrets.get(id)
 			if (pending) {
 				this.pendingRestoreSecrets.delete(id)
 				zeroize(pending)
 			}
-
-			return profile
+			this.emit("onProfileDeleted", this.getProfileInfo(profile))
+			return { profile, epoch, snapshot }
 		})
+
+		await delegate.runFor(id, snapshot)
+
+		await this.runExclusive(async () => {
+			await this.tombstones.clearIfSame(id, epoch)
+			this.deletionState.release(id)
+		})
+		return profile
+	}
+
+	/**
+	 * Resume any deletion a prior SW left tombstoned (crashed mid-cleanup). Called
+	 * AFTER `services.start()` so it never blocks unrelated startup. Idempotent;
+	 * a corrupt tombstone stays reserved ("deletion pending"), never fails open.
+	 */
+	public async resumePendingDeletions(): Promise<void> {
+		const delegate = this.deletionDelegate
+		if (!delegate) return
+		// TELEMETRY: a corrupt tombstone reserves its id (fail-closed) but can't be
+		// auto-resumed — surface it for manual recovery. We do NOT drop it (that would
+		// fail OPEN: the row is already deleted but purge may still be pending).
+		const corrupt = await this.tombstones.corruptIds()
+		if (corrupt.length) {
+			this.logError(
+				`profile-deletion: ${corrupt.length} corrupt tombstone(s) reserved but un-resumable (manual recovery)`,
+				corrupt.join(","),
+			)
+		}
+		for (const t of await this.tombstones.validPayloads()) {
+			try {
+				// Complete phase 1 idempotently — a crash may have written the tombstone
+				// but not yet deleted the row / closed the session.
+				await this.runExclusive(async () => {
+					if (await this.repo.get(t.profileId)) await this.repo.delete(t.profileId)
+					if (this.sessionManager.isActive(t.profileId)) await this.sessionManager.close()
+				})
+				await delegate.runFor(t.profileId, { addresses: t.addresses, tokenIds: t.tokenIds, networkIds: t.networkIds })
+				await this.runExclusive(async () => {
+					await this.tombstones.clearIfSame(t.profileId, t.epoch)
+					this.deletionState.release(t.profileId)
+				})
+			} catch (err) {
+				this.logError(`resume deletion failed for ${t.profileId}`, getErrorMessage(err))
+			}
+		}
 	}
 
 	public async importEncrypted(name: string, secret: string, password: string): Promise<ProfileInfo> {
@@ -652,6 +814,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (session?.session.profile !== id) {
 				throw new Error("Profile locked")
 			}
+			// A tombstoned profile (mid-delete) must not export its encrypted blob —
+			// belt-and-suspenders with the gated session restore (a delete under this
+			// same facade lock closes the session + reserves before releasing).
+			if (this.deletionState.isReserved(id)) {
+				throw new Error("Invalid profile id")
+			}
 			const profile = await this.repo.get(id)
 			if (!profile) {
 				throw new Error("Invalid profile id")
@@ -665,10 +833,20 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 	public async exportPlain(id: string, password?: string, credentialData?: PasskeyCredentialData): Promise<string> {
 		await this.ensureInitialized()
-		const profile = await this.repo.get(id)
-		if (!profile) {
-			throw new Error("Invalid profile id")
-		}
+		// Capture the row + deletion epoch ATOMICALLY under the lock. A delete
+		// (even one followed by a same-id restore) bumps the epoch permanently, so
+		// the post-derivation check rejects a stale generation (codex verify r3).
+		const { profile, capturedEpoch } = await this.runExclusive(async () => {
+			const profile = await this.repo.get(id)
+			if (!profile) {
+				throw new Error("Invalid profile id")
+			}
+			// A tombstoned profile (mid-delete) must not export its master secret.
+			if (this.deletionState.isReserved(id)) {
+				throw new Error("Invalid profile id")
+			}
+			return { profile, capturedEpoch: this.deletionState.capture(id) }
+		})
 
 		if (profile.type === "passkey") {
 			// Path A: caller (popup) ran the in-page WebAuthn ceremony via the
@@ -703,7 +881,14 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (!current) {
 				throw new Error("Invalid profile id")
 			}
-			if (current.type !== "passkey" || current.credentialId !== profile.credentialId) {
+			// A delete that completed during the (unlocked) WebAuthn prompt must not
+			// still return the credentialId (codex verify).
+			if (
+				this.deletionState.isReserved(id) ||
+				!this.deletionState.isCurrent(id, capturedEpoch) ||
+				current.type !== "passkey" ||
+				current.credentialId !== profile.credentialId
+			) {
 				throw new Error("Invalid profile id")
 			}
 			return current.credentialId
@@ -725,6 +910,15 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				if (!secret) {
 					throw new InvalidPasswordError()
 				}
+				// Revalidate AFTER the slow unseal (codex verify): a delete that
+				// completed DURING derivation — even fully (row gone, reservation
+				// released) — must not still hand back the now-erased profile's
+				// master secret. Re-fetch catches gone/reimported; isReserved catches
+				// mid-delete.
+				const still = await this.repo.get(id)
+				if (!still || this.deletionState.isReserved(id) || !this.deletionState.isCurrent(id, capturedEpoch)) {
+					throw new Error("Invalid profile id")
+				}
 				return Buffer.from(secret).toString("base64")
 			} finally {
 				// zero secret after base64-encode escapes (the base64
@@ -739,10 +933,18 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 	public async exportMnemonic(id: string, password: string): Promise<string[]> {
 		await this.ensureInitialized()
-		const profile = await this.repo.get(id)
-		if (!profile) {
-			throw new Error("Invalid profile id")
-		}
+		// Capture row + deletion epoch atomically (see exportPlain / codex verify r3).
+		const { profile, capturedEpoch } = await this.runExclusive(async () => {
+			const profile = await this.repo.get(id)
+			if (!profile) {
+				throw new Error("Invalid profile id")
+			}
+			// A tombstoned profile (mid-delete) must not export its seed phrase.
+			if (this.deletionState.isReserved(id)) {
+				throw new Error("Invalid profile id")
+			}
+			return { profile, capturedEpoch: this.deletionState.capture(id) }
+		})
 		if (profile.type === "passkey") {
 			throw new Error("Operation not supported for passkey profile")
 		}
@@ -756,7 +958,18 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// exact string for its wrong-password branch.
 				throw new Error("Invalid profile old password")
 			}
-			return await getMnemonic(secret)
+			// Derive the words FIRST, THEN revalidate under the lock — getMnemonic
+			// awaits crypto.subtle.digest, so a check placed before it leaves a
+			// window where a delete interleaves during the digest and the erased
+			// profile's seed is still returned (codex verify r4). No async op runs
+			// after this critical section.
+			const mnemonic = await getMnemonic(secret)
+			await this.runExclusive(async () => {
+				if (!(await this.repo.get(id)) || this.deletionState.isReserved(id) || !this.deletionState.isCurrent(id, capturedEpoch)) {
+					throw new Error("Invalid profile id")
+				}
+			})
+			return mnemonic
 		} finally {
 			// zero secret after mnemonic words derived. The mnemonic
 			// is itself sensitive (the user shows it on screen), but
@@ -768,7 +981,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 	public async getProfileSecret(id: string): Promise<Fr> {
 		await this.ensureInitialized()
-		return this.runExclusive(() => this.sessionManager.getSecret(id))
+		return this.runExclusive(() => {
+			// A profile queued for deletion must not hand out its secret — a half-
+			// deleted profile (tombstoned but not yet purged) is being erased.
+			if (this.deletionState.isReserved(id)) throw new Error("Invalid profile id")
+			return this.sessionManager.getSecret(id)
+		})
 	}
 
 	/**
@@ -779,7 +997,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	private async importPasswordProfile(name: string, secret: MasterSecretBytes, passhash: Passhash): Promise<Profile> {
 		try {
 			return await this.runExclusive(async () => {
-				const id = await this.repo.generateUniqueId()
+				const id = await this.nextUnreservedId()
 				const encrypted = await this.secretBox.sealWithPasshash(passhash, secret)
 				const profile: Profile = {
 					id,
@@ -811,13 +1029,17 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	): Promise<Profile> {
 		try {
 			return await this.runExclusive(async () => {
-				if (userHandle && (await this.repo.contains(userHandle))) {
+				if (userHandle && ((await this.repo.contains(userHandle)) || this.deletionState.isReserved(userHandle))) {
 					throw new Error("Passkey profile already exists")
 				}
 
 				// It is unclear if this case is possible, this is a fallback:
 				if (!userHandle) {
-					userHandle = await this.repo.generateUniqueId()
+					// MUST exclude reserved ids — this userHandle becomes the profile id,
+					// and generateUniqueId only checks storage (a tombstoned profile's row
+					// is already deleted, so its reserved id would otherwise be reused →
+					// the resumed purge clobbers the new profile — audit id-reuse).
+					userHandle = await this.nextUnreservedId()
 				}
 
 				const id = userHandle
@@ -899,7 +1121,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 							passhash = sealed.passhash
 
 							let id = profile.id
-							while (await this.repo.contains(id)) {
+							while ((await this.repo.contains(id)) || this.deletionState.isReserved(id)) {
 								id = await this.repo.generateUniqueId()
 							}
 
@@ -968,13 +1190,15 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					// must NOT reach a lock.leave() (the prior single try/finally
 					// called leave() even when enter() was never reached).
 					return await this.runExclusive(async () => {
-						if (id && (await this.repo.contains(id))) {
+						if (id && ((await this.repo.contains(id)) || this.deletionState.isReserved(id))) {
 							throw new Error("Passkey profile already exists")
 						}
 
 						// It is unclear if this case is possible, this is a fallback:
 						if (!id) {
-							id = await this.repo.generateUniqueId()
+							// Exclude reserved ids (see importPasskeyProfile) — generateUniqueId
+							// only checks storage, so a tombstoned id could be reused here.
+							id = await this.nextUnreservedId()
 						}
 
 						const newProfile: Profile = {
@@ -1038,6 +1262,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		return this.runExclusive(async () => {
 			const profile = await this.repo.get(id)
 			if (!profile) {
+				throw new Error("Invalid profile id")
+			}
+			// A tombstoned profile (SW died mid-delete: row still present, id
+			// reserved) must not open a session — it is being erased. Gate here as
+			// well as at row-read so a delete that began mid-restore is caught.
+			if (this.deletionState.isReserved(id)) {
 				throw new Error("Invalid profile id")
 			}
 

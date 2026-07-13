@@ -154,6 +154,19 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		)
 	}
 
+	/** Awaited profile-scoped journal purge — the deletion coordinator calls this
+	 *  to catch records on a network-less chain that the per-network
+	 *  `clearChainState` (chain-purge cascade) misses (finding D). */
+	public async purgeForProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		const records = (await this._loadAllValidated()).filter((r) => r.profileId === profileId)
+		await purgeRows(
+			records,
+			(record) => this.storage.delete(record.id),
+			(record) => this.emit("onOperationDeleted", record),
+		)
+	}
+
 	public async createOperation(input: NewOperationInput): Promise<OperationRecord> {
 		validateParams(OperationJournalMethodSchemas.createOperation.params, [input], "createOperation")
 		await this.ensureInitialized()

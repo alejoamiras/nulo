@@ -62,6 +62,7 @@ export const PXE_METHOD_DESCRIPTORS = {
 	getSyncedBlockHeader: { rpc: true, ipxe: true, requiresNetwork: true },
 	getBlockTimestamp: { rpc: true, ipxe: false, requiresNetwork: true },
 	clearChainState: { rpc: true, ipxe: false, requiresNetwork: false },
+	clearProfileState: { rpc: true, ipxe: false, requiresNetwork: false },
 } as const satisfies Record<keyof Methods, PxeMethodDescriptor>
 
 type Descriptors = typeof PXE_METHOD_DESCRIPTORS

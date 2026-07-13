@@ -412,7 +412,7 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
 		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
-		accountClient.restore.mockResolvedValue([{ address: "0xMINE" }])
+		accountClient.restore.mockResolvedValue([{ address: "0xMINE", chainId: 1 }])
 
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
 		await c.restoreBackup()
@@ -445,7 +445,10 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
 		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
-		accountClient.restore.mockResolvedValue([{ address: "0xA" }, { address: "0xB" }])
+		accountClient.restore.mockResolvedValue([
+			{ address: "0xA", chainId: 1 },
+			{ address: "0xB", chainId: 1 },
+		])
 
 		await c.restoreBackup()
 
@@ -479,6 +482,86 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 		// the dropped tx is only console-recorded, not double-flagged.
 		expect(transactionClient.restore).toHaveBeenCalledWith([])
 		expect(warn).toHaveBeenCalledWith(expect.stringContaining("dropped 1 transaction"))
+		warn.mockRestore()
+	})
+})
+
+describe("useFullBackupImport — account-owned-slice provenance (P3)", () => {
+	it("drops an auth-registry row whose account was NOT imported (graft closed)", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				account: [{ address: "0xMINE", chainId: 1 }],
+				"auth-registry": [
+					{ id: 1, account: "0xMINE", hash: "0xh1" },
+					{ id: 2, account: "0xVICTIM", hash: "0xh2" },
+				],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([{ address: "0xMINE", chainId: 1 }])
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+		await c.restoreBackup()
+
+		// Only the imported-account authwit reaches restore; the foreign one is
+		// dropped before it can graft into the victim's revocation index.
+		expect(authRegistryClient.restore).toHaveBeenCalledWith([{ id: 1, account: "0xMINE", hash: "0xh1" }])
+		warn.mockRestore()
+	})
+
+	it("drops a token-balance whose account was NOT imported (graft closed)", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				account: [{ address: "0xMINE", chainId: 1 }],
+				token: [{ id: 1, chainId: 1, contract: "0xT" }],
+				"token-balance": [
+					{ id: 10, token: 1, account: "0xMINE" },
+					{ id: 11, token: 1, account: "0xVICTIM" },
+				],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([{ address: "0xMINE", chainId: 1 }])
+		tokenClient.restore.mockResolvedValue([{ id: "n1", chainId: 1, contract: "0xT" }])
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+		await c.restoreBackup()
+
+		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([{ id: 10, token: "n1", account: "0xMINE" }])
+		warn.mockRestore()
+	})
+
+	it("drops a tx referencing an imported account on the WRONG chain (chain-provenance)", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				account: [{ address: "0xMINE", chainId: 1 }],
+				transaction: [
+					{ hash: "h1", account: "0xMINE", chainId: 1 },
+					{ hash: "h2", account: "0xMINE", chainId: 2 },
+				],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([{ address: "0xMINE", chainId: 1 }])
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+		await c.restoreBackup()
+
+		// 0xMINE was imported on chain 1 only → the chain-2 tx is dropped (an
+		// address-only filter would have admitted it).
+		expect(transactionClient.restore).toHaveBeenCalledWith([{ hash: "h1", account: "0xMINE", chainId: 1 }])
 		warn.mockRestore()
 	})
 })
@@ -557,6 +640,57 @@ describe("useFullBackupImport — network index-pairing (P2)", () => {
 			expect.anything(),
 		)
 	})
+
+	it("(3+ matrix) index-pairs a mixed changed/failed/unchanged/changed set correctly", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				network: [
+					{ id: "N1", name: "A", chainId: 1 },
+					{ id: "N2", name: "B", chainId: 2 },
+					{ id: "N3", name: "C", chainId: 3 },
+					{ id: "N4", name: "D", chainId: 4 },
+				],
+				"account-state": [
+					{ networkId: "N1", contracts: [], senders: [] },
+					{ networkId: "N2", contracts: [], senders: [] },
+					{ networkId: "N3", contracts: [], senders: [] },
+					{ networkId: "N4", contracts: [], senders: [] },
+				],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		accountClient.restore.mockResolvedValue([])
+		// index 0 changed (N1→M1); index 1 FAILED (raw fields spread back); index 2
+		// unchanged (N3 kept its id); index 3 changed (N4→M4).
+		networkClient.restore.mockResolvedValue([
+			{ id: "M1", name: "A", chainId: 1 },
+			{ id: "N2", name: "B", chainId: 2, restoreError: "boom" },
+			{ id: "N3", name: "C", chainId: 3 },
+			{ id: "M4", name: "D", chainId: 4 },
+		])
+
+		await c.restoreBackup()
+
+		expect(accountStateClient.restore).toHaveBeenCalledWith(
+			[
+				{ networkId: "M1", contracts: [], senders: [] }, // N1 → M1
+				{ networkId: "N2", contracts: [], senders: [] }, // N2 failed → not remapped
+				{ networkId: "N3", contracts: [], senders: [] }, // N3 unchanged
+				{ networkId: "M4", contracts: [], senders: [] }, // N4 → M4
+			],
+			expect.anything(),
+		)
+	})
+
+	// NB: the composable also skips DUPLICATED source ids from the remap map
+	// (sourceIdCounts), but a backup carrying two networks with the same root id
+	// is rejected upstream by backup normalization (backup-migration-registry
+	// duplicate-root-id guard) before restore runs — so that skip is unreachable
+	// defense-in-depth here and is covered by the normalization dup-rejection
+	// test, not this composable path.
 })
 
 describe("useFullBackupImport — profileId normalization (P2 hardening)", () => {
@@ -619,7 +753,12 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
 		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
-		accountClient.restore.mockResolvedValue([])
+		// 0xa is imported on BOTH chains (chain-distinct accounts) so each chain's
+		// balance passes the token/account chain-equality check.
+		accountClient.restore.mockResolvedValue([
+			{ address: "0xa", chainId: 1 },
+			{ address: "0xa", chainId: 2 },
+		])
 		tokenClient.restore.mockResolvedValue([
 			{ id: "n1", chainId: 1, contract: "0xT" },
 			{ id: "n2", chainId: 2, contract: "0xT" },
@@ -635,7 +774,7 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 		])
 	})
 
-	it("skips-and-records a balance whose old token key is ambiguous (duplicate (chainId,contract))", async () => {
+	it("index-pairs duplicate-contract tokens distinctly — a balance maps to its OWN token by id (not dropped)", async () => {
 		const opts = makeOpts()
 		const c = useFullBackupImport(opts)
 		const backup = await buildBackup({
@@ -651,8 +790,9 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
 		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
-		accountClient.restore.mockResolvedValue([])
-		// Both restore to the SAME (chainId, contract) → ambiguous → skip-and-record.
+		accountClient.restore.mockResolvedValue([{ address: "0xa", chainId: 1 }])
+		// Both restore successfully; INDEX-pairing maps old id 1→n1, 2→n2 — the old
+		// composite-key approach used to falsely DROP this balance as "ambiguous".
 		tokenClient.restore.mockResolvedValue([
 			{ id: "n1", chainId: 1, contract: "0xDUP" },
 			{ id: "n2", chainId: 1, contract: "0xDUP" },
@@ -660,8 +800,7 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 
 		await c.restoreBackup()
 
-		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([])
-		expect(c.restoreErrorLog.value["token-balance"]).toHaveLength(1)
+		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([{ id: 10, token: "n1", account: "0xa" }])
 	})
 
 	it("detects OLD-side ambiguity: two old tokens share (chainId,contract), one FAILS restore → balance NOT grafted onto survivor", async () => {
@@ -681,7 +820,7 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
 		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
-		accountClient.restore.mockResolvedValue([])
+		accountClient.restore.mockResolvedValue([{ address: "0xa", chainId: 1 }])
 		// token 1 succeeds; token 2 FAILS. The NEW side now sees only ONE
 		// (1,0xDUP) → looks unambiguous. The OLD-side duplicate must still mark
 		// the key ambiguous, or the balance would silently graft onto n1.
@@ -712,7 +851,7 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
 		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
-		accountClient.restore.mockResolvedValue([])
+		accountClient.restore.mockResolvedValue([{ address: "0xa", chainId: 1 }])
 		tokenClient.restore.mockResolvedValue([{ id: "n1", chainId: 1, contract: "0xT" }])
 		// The re-linked balance then FAILS its actual restore. recordRestoreErrors
 		// must APPEND this to the drop diagnostic, not overwrite it.

@@ -37,6 +37,7 @@ import { OperationJournalService } from "./services/operation-journal/service"
 import { JournalGC } from "./services/operation-journal/gc"
 import { JournalReaper } from "./services/operation-journal/reaper"
 import { PasskeyService } from "./services/passkey/service"
+import { ProfileDeletionCoordinator } from "./services/profile-deletion/coordinator"
 import { ProfileService } from "./services/profile/service"
 import { TaskService } from "./services/task/service"
 import { TokenService } from "./services/token/service"
@@ -197,9 +198,19 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		services.add(new TransactionService(logger, browserApi))
 		services.add(new IncomingTransferService(logger, browserApi))
 		services.add(new PasskeyService(logger, windowManager))
+		// Started LAST (declares dependencies on every service it purges) — finding D.
+		const deletionCoordinator = new ProfileDeletionCoordinator(logger)
+		services.add(deletionCoordinator)
 
 		await services.start()
 		logger.log("wallet", LogLevel.Info, "Services started")
+
+		// Resume any profile deletion a prior SW left tombstoned (crashed
+		// mid-cleanup). Fire-and-forget so it never blocks startup; idempotent +
+		// single-flight; a corrupt tombstone stays reserved ("deletion pending").
+		void deletionCoordinator
+			.resumePending()
+			.catch((error) => logger.log("wallet", LogLevel.Error, "resumePendingDeletions failed", getErrorMessage(error)))
 
 		// Phase 2 Week 4: durable-job reaper. Runs a chrome.alarms-driven
 		// sweep + a boot sweep against the operation journal; transitions

@@ -19,6 +19,7 @@ import { ServiceCollection, type IService } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { PROFILE_SERVICE_NAME, type ProfileInfo } from "@/wallet/services/profile/spec"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { svc } from "./composition-harness"
 import { ContactService } from "./contact/service"
 import { FpcService } from "./fpc/service"
@@ -47,9 +48,15 @@ class FakeProfileService implements IService {
 	public readonly onProfileDeleted = new EventHandler<ProfileInfo>()
 	public readonly onActiveProfileChanged = new EventHandler<ProfileInfo | undefined>()
 	private active: ProfileInfo | undefined
+	// Shared with TransactionService for the D13 execution fence — no deletion is
+	// driven in these tests, so a fresh state (epoch 0) is inert here.
+	private readonly deletionState = new ProfileDeletionState()
 	public async start(): Promise<void> {}
 	public async getActiveProfile(): Promise<ProfileInfo | undefined> {
 		return this.active
+	}
+	public getDeletionState(): ProfileDeletionState {
+		return this.deletionState
 	}
 	public setActiveProfile(profile: ProfileInfo | undefined): void {
 		this.active = profile
@@ -175,8 +182,9 @@ describe("cross-profile isolation (standing gate)", () => {
 			// route through the internal UNGUARDED delete (a naive guard would throw here
 			// on p2's token while p1 is active, orphaning rows).
 			profile.setActiveProfile(p1)
-			profile.onProfileDeleted.invoke(p2)
-			await new Promise((r) => setTimeout(r, 0))
+			// Profile-delete cleanup is now the coordinator's AWAITED purgeForProfile,
+			// not a fire-and-forget onProfileDeleted subscriber (finding D).
+			await tokens.purgeForProfile(p2.id)
 			expect((await tokens.getTokens(p2.id)).map((t) => t.id)).toEqual([])
 			expect((await tokens.getTokens(p1.id)).map((t) => t.id)).toEqual([1])
 		})
@@ -411,6 +419,33 @@ describe("cross-profile isolation (standing gate)", () => {
 			for (const fn of chainPurgeSubs) await fn(p2.id, 1, "net-p2")
 			await new Promise((r) => setTimeout(r, 0))
 			expect((await txService.getTransactions(A1)).map((t) => t.hash)).toEqual(["h1"])
+		})
+
+		test("(P2/B) restore never overwrites an existing tx — hash-collision is create-only", async () => {
+			// h1 already exists (seeded, owned by A1). A crafted backup reuses that
+			// hash with a DIFFERENT account; a pre-fix upsert would ERASE the original.
+			const [res] = await txService.restore([mkTx("h1", "0xattacker")])
+			expect(res.restoreError).toBeDefined()
+			expect((await txService.getTransaction("h1")).account).toBe(A1)
+		})
+
+		test("(P2/D16) restore rejects a Pending tx — never written, never polled", async () => {
+			const pending = {
+				chainId: 1,
+				account: A1,
+				nonce: "0",
+				feePaymentMethod: 0,
+				hash: "hp",
+				createdAt: 0,
+				updatedAt: 0,
+				status: 0, // Pending — the sync worker would dial its backup-controlled endpoint.
+				origin: { type: "wallet" },
+				calls: [{ contract: "0xc", method: "m", args: [] }],
+			}
+			const [res] = await txService.restore([pending as never])
+			expect(res.restoreError).toBeDefined()
+			await expect(txService.getTransaction("hp")).rejects.toThrow()
+			expect((await txService.getTransactions(A1)).map((t) => t.hash)).not.toContain("hp")
 		})
 	})
 })

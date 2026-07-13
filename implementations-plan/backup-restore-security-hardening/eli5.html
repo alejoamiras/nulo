@@ -1,0 +1,36 @@
+<h1>Backup-restore security hardening — the plain-language version</h1>
+
+<p><strong>The one-liner:</strong> when you import a wallet backup, or delete a wallet profile, the extension currently has holes that let a <em>malicious backup</em> corrupt or spy on your <em>other</em> profiles, and lets "deleted" data secretly survive. This one PR closes all of them.</p>
+
+<p>See <a href="plan.md">plan.md</a> for the full plan, <a href="findings.md">findings.md</a> for the verified bugs, and <code>reviews/</code> + <code>audit-*.md</code> for the review trail.</p>
+
+<h2>Why this is a "deep" plan</h2>
+<p>Three things are all HIGH: it's <strong>security-sensitive</strong> (cross-profile data theft/destruction + privacy), it has a <strong>big blast radius</strong> (7+ services, the whole deletion cascade, PXE), and the core fix (an "awaited deletion coordinator") is <strong>novel</strong> for this codebase. So it went through the heavy process: three independent plans, a double audit (codex + Opus), a fresh final review, and a confirmation pass — five review rounds. Each round found real holes the last missed. It's approved now.</p>
+
+<h2>The bugs, in plain terms</h2>
+<ul>
+  <li><strong>A malicious backup could plant data in your other profiles.</strong> The old code only checked one of three "account-owned" data types. Now every restored row must belong to an account this very import created, on the chain it was created on.</li>
+  <li><strong>A malicious backup could erase one of your real transactions</strong> by reusing its ID. Now a restore never overwrites an existing row.</li>
+  <li><strong>A restored "pending" transaction could leak an attacker's chosen hash to whatever wallet's server was active.</strong> Now restored pending transactions are dropped (they're just transient sync state).</li>
+  <li><strong>Deleting one profile could wipe another profile's transfer history</strong> (a shared bit of code used "whoever is active now" instead of "the profile being deleted"). Fixed.</li>
+  <li><strong>"Deleted" didn't always mean deleted.</strong> The cleanup after deletion was fire-and-forget — a badly-timed shutdown could leave orphaned data, and re-adding the same network could <em>resurrect</em> it. Worse, some data (contacts, connected sites, storage on a network you'd removed) was never cleaned at all. The fix is a proper <strong>deletion coordinator</strong>: it takes a durable "tombstone" note, erases every kind of data while you wait, and only then frees the profile — surviving restarts and refusing to reuse the ID until erasure is confirmed.</li>
+</ul>
+
+<h2>The 9 phases (each proves itself with tests that fail on today's code)</h2>
+<ol>
+  <li><strong>Validate every restore writer</strong> — reject malformed backup rows instead of silently storing invisible garbage. <em>(core done)</em></li>
+  <li><strong>Transactions: create-only + drop restored pending txs</strong> — no overwrites, no attacker-controlled server calls.</li>
+  <li><strong>Provenance on every account-owned slice</strong> — a restored row must belong to a just-imported account on its own chain; verify token ownership too.</li>
+  <li><strong>One-pass network ID remap</strong> — no aliasing, reject duplicate attacker IDs.</li>
+  <li><strong>Token relink by index</strong> — simpler + no misgrafted balances.</li>
+  <li><strong>Token-deletion carries the right profile ID</strong> — stop wiping the wrong profile.</li>
+  <li><strong>PXE deletion tells the truth</strong> — don't report failed erasure as success; a profile-wide clear catches orphans.</li>
+  <li><strong>The awaited deletion coordinator + durable tombstones</strong> — the big one: atomic, restart-safe, privacy-erasing deletion.</li>
+  <li><strong>Coverage + a required end-to-end test</strong> — the sandbox test must fail (not skip) if it can't run.</li>
+</ol>
+
+<h2>How it gets validated</h2>
+<p>Every phase runs typecheck + lint + its unit/integration tests; the deletion phases add composition tests (real service graph) and a live-sandbox end-to-end test (import a doctored backup, delete + re-add, prove nothing leaks or resurrects). It all ships as <strong>one PR</strong> — splitting it would leave exploitable half-states.</p>
+
+<h2>The seeds that drive it</h2>
+<p><strong>/goal</strong> and <strong>/loop</strong> are recorded in the session; the loop drives the phases to completion, consults codex <code>gpt-5.6-sol</code> at every fork, runs the gates, and opens + merges the PR to <code>dev</code> only when the three required CI checks are green.</p>

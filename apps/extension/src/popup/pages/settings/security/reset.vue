@@ -37,12 +37,30 @@ const confirmText = ref("")
 
 const isReadyToReset = computed(() => checks.permanent && checks.undone && checks.sure && confirmText.value === appStore.profile?.name)
 
+const isResetting = ref(false)
+
 const handleReset = async () => {
-	if (!isReadyToReset.value) return
+	if (!isReadyToReset.value || isResetting.value) return
 
-	managers.profile.deleteProfile(appStore.profile.id)
+	// Capture the id BEFORE awaiting — the delete emits onProfileDeleted, whose
+	// handlers may null appStore.profile mid-await.
+	const deletedId = appStore.profile.id
 
-	appStore.profiles = appStore.profiles.filter((p) => p.id !== appStore.profile.id)
+	// AWAIT the deletion: deleteProfile now drives the coordinator's full awaited
+	// purge internally. If it REJECTS (e.g. the coordinator isn't ready, or a
+	// purge failed and the tombstone was retained), we must NOT clear local state
+	// or show success — the profile still exists and its data is mid-erase.
+	isResetting.value = true
+	try {
+		await managers.profile.deleteProfile(deletedId)
+	} catch (_err) {
+		isResetting.value = false
+		openToast({ label: "Couldn't delete profile — try again", icon: "warning" })
+		return
+	}
+	isResetting.value = false
+
+	appStore.profiles = appStore.profiles.filter((p) => p.id !== deletedId)
 	appStore.profile = appStore.profiles.length && appStore.profiles[0]
 	appStore.networks = []
 	appStore.network = null
@@ -151,7 +169,7 @@ onBeforeUnmount(() => {
 		</Flex>
 
 		<div :class="$style.bottom">
-			<Button @click="handleReset" :disabled="!isReadyToReset" variant="cta_destructive" data-testid="reset-submit-btn">
+			<Button @click="handleReset" :disabled="!isReadyToReset || isResetting" variant="cta_destructive" data-testid="reset-submit-btn">
 				Delete Profile
 			</Button>
 		</div>

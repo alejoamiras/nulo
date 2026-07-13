@@ -24,6 +24,7 @@ import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { ServiceCollection } from "@/wallet/base"
 import { ProfileService } from "@/wallet/services/profile/service"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
 import { ContactService } from "@/wallet/services/contact/service"
@@ -107,7 +108,16 @@ async function makeHarness() {
 	journal.onOperationUpdated.add((rec) => stages.push(rec.progress.stage))
 
 	const collection = new ServiceCollection()
-	collection.add(svc(ProfileService.name, { getActiveProfile: async () => ({ id: "p1" }) }))
+	// One shared ProfileDeletionState so Execution's captureFence + Transaction's
+	// addTransaction assert against the SAME epoch map (D13 fence wiring).
+	const deletionState = new ProfileDeletionState()
+	collection.add(
+		svc(ProfileService.name, {
+			getActiveProfile: async () => ({ id: "p1" }),
+			getDeletionState: () => deletionState,
+			captureExecutionFence: async () => ({ profileId: "p1", epoch: deletionState.capture("p1") }),
+		}),
+	)
 	collection.add(svc(NetworkService.name, { getNetwork: async () => NETWORK, getNode: async () => fakeNode }))
 	collection.add(svc(AccountService.name, { getAccountContract: async () => ({ address: ACCOUNT }) }))
 	collection.add(

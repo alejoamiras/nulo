@@ -186,7 +186,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	protected async init(services: ServiceCollection) {
 		this.profileService = services.get(ProfileService.name)
 		this.profileService.onActiveProfileChanged.add(this.onActiveProfileChanged)
-		this.profileService.onProfileDeleted.add(this.onProfileDeleted)
+		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile` (D).
 		this.pxeServiceClient = new PxeServiceClient(this.logger)
 	}
 
@@ -232,6 +232,18 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		return (await this.storage.getValues()).filter(
 			(n) => n.profileId === profile.id && (chainId === undefined || n.chainId === chainId),
 		)
+	}
+
+	/**
+	 * Lock-free, profileId-parameterized network read. Does NOT go through
+	 * `requireActiveProfile`, so it's safe to call under the profile facade lock
+	 * (the deletion coordinator's snapshot) AND from profile-scoped cleanup
+	 * consumers (e.g. `IncomingTransfer.onTokenDeleted`) that must scope to the
+	 * DELETED token's profile, never the active one (finding C).
+	 */
+	public async getNetworksRaw(profileId: string, chainId?: number): Promise<Network[]> {
+		await this.ensureInitialized()
+		return (await this.storage.getValues()).filter((n) => n.profileId === profileId && (chainId === undefined || n.chainId === chainId))
 	}
 
 	public async getNetwork(id: string): Promise<Network> {
@@ -587,19 +599,29 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	 * only after this method resolves.
 	 */
 	public async purgeChain(profileId: string, chainId: number, networkId: string): Promise<void> {
+		// FAIL-FAST (finding D, codex blocker): run every step best-effort so a
+		// single failure doesn't strand the others, but PROPAGATE if ANY failed —
+		// the deletion coordinator must keep the tombstone + retry (idempotent), not
+		// treat a swallowed subscriber/PXE failure as "chain erased".
+		const errors: unknown[] = []
 		for (const subscriber of this.chainPurgeSubscribers) {
 			try {
 				await subscriber(profileId, chainId, networkId)
 			} catch (error) {
 				this.logError(`purgeChain subscriber failed for (${profileId}, ${chainId})`, getErrorMessage(error))
+				errors.push(error)
 			}
 		}
 		try {
 			await this.pxeServiceClient.clearChainState(profileId, chainId)
 		} catch (error) {
 			this.logError(`PxeServiceClient.clearChainState failed`, getErrorMessage(error))
+			errors.push(error)
 		}
 		this.emit("onChainPurged", { profileId, chainId })
+		if (errors.length) {
+			throw new Error(`purgeChain failed for (${profileId}, ${chainId}): ${errors.map(getErrorMessage).join("; ")}`)
+		}
 	}
 
 	private readonly chainPurgeSubscribers: Array<(profileId: string, chainId: number, networkId: string) => Promise<void>> = []
@@ -630,6 +652,15 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		try {
 			await this.lock.enter()
 			const existing = await this.storage.getValues()
+			// A collision re-roll must avoid every SOURCE id in this batch too, not
+			// just stored ids — a fresh id equal to a LATER source id would alias that
+			// network's remapped child rows (finding E; belt-and-suspenders with the
+			// composable's single-pass map).
+			const sourceIds = new Set<string>()
+			for (const n of networks) {
+				const nid = (n as { id?: unknown } | null)?.id
+				if (typeof nid === "string") sourceIds.add(nid)
+			}
 			for (const raw of networks) {
 				try {
 					if (!isNewShapeNetwork(raw)) {
@@ -651,7 +682,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 						throw new Error(`A network for chain ${candidate.chainId} already exists in profile ${candidate.profileId}.`)
 					}
 					let id = candidate.id
-					while (await this.storage.contains(id)) id = getRandomHex(8)
+					while ((await this.storage.contains(id)) || (id !== candidate.id && sourceIds.has(id))) id = getRandomHex(8)
 					const stored: Network = { ...candidate, id }
 					await this.storage.set(id, stored)
 					existing.push(stored)
@@ -681,23 +712,25 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		}
 	}
 
-	private readonly onProfileDeleted = async (profile: ProfileInfo) => {
-		this.logDebug(`Profile ${profile.id} deleted, purging chains + removing networks`)
+	/** Awaited profile-scoped network purge, called by the deletion coordinator
+	 *  (relocated from the removed fire-and-forget `onProfileDeleted` sub — D).
+	 *  FAIL-FAST: a `purgeChain`/PXE failure now PROPAGATES (was log-and-continue)
+	 *  so the coordinator keeps the tombstone + retries rather than reporting a
+	 *  false "deleted". */
+	public async purgeForProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		this.logDebug(`purgeForProfile ${profileId}: purge chains + remove networks`)
 		try {
 			await this.lock.enter()
 			this.nodes.clear()
 			this.transientNodes.clear()
-			const networks = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
+			const networks = (await this.storage.getValues()).filter((n) => n.profileId === profileId)
 			for (const network of networks) {
-				try {
-					await this.purgeChain(profile.id, network.chainId, network.id)
-				} catch (error) {
-					this.logError(`purgeChain failed during onProfileDeleted`, getErrorMessage(error))
-				}
+				await this.purgeChain(profileId, network.chainId, network.id)
 				await this.storage.delete(network.id)
 				this.emit("onNetworkDeleted", network)
 			}
-			await this.browserApi.storage.local.remove(activeKey(profile.id))
+			await this.browserApi.storage.local.remove(activeKey(profileId))
 		} finally {
 			this.lock.leave()
 		}

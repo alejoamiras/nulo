@@ -10,8 +10,20 @@
  */
 import { beforeEach, describe, expect, test } from "vitest"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
+import { EventHandler } from "@nulo/wallet-core/utils"
+import { ServiceCollection } from "@/wallet/base"
+import { ConfigStore } from "@/wallet/config"
+import { LoggerStore } from "@/wallet/logger"
+import { ACCOUNT_SERVICE_NAME } from "@/wallet/services/account/spec"
 import type { AuthwitContent } from "@/wallet/services/execution/spec"
+import { EXECUTION_SERVICE_NAME } from "@/wallet/services/execution/spec"
+import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
+import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
+import { TASK_SERVICE_NAME } from "@/wallet/services/task/spec"
+import { TRANSACTION_SERVICE_NAME } from "@/wallet/services/transaction/spec"
+import { svc } from "../composition-harness"
 import { AuthRegistryService, MAX_TRACKED_AUTHWITS_PER_ACCOUNT } from "./service"
+import type { Authwit } from "./spec"
 
 const noopLogger = { log: () => {} }
 const A = "0xowner"
@@ -75,5 +87,49 @@ describe("AuthRegistryService — pending/reconcile/cap (Phase 5)", () => {
 		await expect(svc.assertWithinCap(A, ["0xnew1", "0xnew2"])).rejects.toThrow(/exceed the .* tracked public-authwit limit/)
 		// 255 existing + 1 unique-new ("0xe0" is already tracked → deduped) = 256 ≤ 256 ⇒ ok.
 		await expect(svc.assertWithinCap(A, ["0xe0", "0xnew1"])).resolves.toBeUndefined()
+	})
+})
+
+describe("AuthRegistryService.restore — hostile-row validation (P1)", () => {
+	let service: AuthRegistryService
+	beforeEach(async () => {
+		// restore() gates on ensureInitialized(); run the real lifecycle over stub
+		// peers (init only subscribes to onAccountDeleted + onTransactionUpdated).
+		const api = new FakeBrowserApi()
+		api.reset()
+		const services = new ServiceCollection()
+		services.add(svc(PROFILE_SERVICE_NAME, {}))
+		services.add(svc(NETWORK_SERVICE_NAME, {}))
+		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountDeleted: new EventHandler() }))
+		services.add(svc(EXECUTION_SERVICE_NAME, {}))
+		services.add(svc(TRANSACTION_SERVICE_NAME, { onTransactionUpdated: new EventHandler() }))
+		services.add(svc(TASK_SERVICE_NAME, {}))
+		service = new AuthRegistryService(new LoggerStore(new ConfigStore()) as never, api)
+		services.add(service)
+		await services.start()
+	})
+
+	const authwit = (account: string, hash: string): Authwit => ({ id: 0, account, hash, content })
+
+	test("records a schema-invalid row (content not an object) as restoreError, never writes it", async () => {
+		// content must be a non-null object; a hostile backup authwit with content:null
+		// would pass EntityStorage's write but be codec-hidden on read. restore() must
+		// parse-reject it up front so it never reaches storage.
+		const bad = { id: 0, account: A, hash: "0xh", content: null } as unknown as Authwit
+
+		const [restored] = await service.restore([bad])
+
+		expect(restored.restoreError).toBeTruthy()
+		expect(await service.getAuthwits(A)).toHaveLength(0)
+	})
+
+	test("a malformed row (non-string hash) does not abort the batch — the valid sibling lands", async () => {
+		const bad = { id: 0, account: A, hash: 123, content } as unknown as Authwit
+
+		const restored = await service.restore([bad, authwit(A, "0xgood")])
+
+		expect(restored[0].restoreError).toBeTruthy()
+		expect(restored[1].restoreError).toBeUndefined()
+		expect((await service.getAuthwits(A)).map((r) => r.hash)).toEqual(["0xgood"])
 	})
 })

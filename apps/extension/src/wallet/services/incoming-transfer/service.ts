@@ -6,7 +6,7 @@ import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { NetworkService, type Network } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
-import { TokenService, type Token, type TokenInfo } from "@/wallet/services/token/service"
+import { TokenService, type Token, type TokenInfo, type TokenDeleted } from "@/wallet/services/token/service"
 import { TransactionService, type Tx } from "@/wallet/services/transaction/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { NoteService, type RawNote } from "@/wallet/services/note/service"
@@ -162,10 +162,12 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		this.tokenService.onTokenDeleted.add(this.onTokenDeleted)
 		this.transactionService.onTransactionAdded.add(this.onTransactionAdded)
 		// Profile lifecycle: re-hydrate the scheduler set when the active
-		// profile changes (otherwise we keep scanning the old profile's
-		// tokens). Wipe stored records when a profile is deleted.
+		// profile changes (otherwise we keep scanning the old profile's tokens).
+		// NB: profile DELETION cleanup is NOT wired here — the deletion coordinator
+		// calls `clearProfile` DIRECTLY + AWAITED (coordinator.ts). A fire-and-forget
+		// `onProfileDeleted` sub here would run un-awaited AFTER the coordinator
+		// releases the id, re-introducing the exact race D7 removed (audit H3/D7).
 		this.profileService.onActiveProfileChanged.add(this.onActiveProfileChanged)
-		this.profileService.onProfileDeleted.add(this.onProfileDeleted)
 		// Account lifecycle (codex post-impl audit C3): without these, a newly
 		// added account stays unscanned until SW restart (or the user adds a
 		// token), and a deleted account keeps polling PXE indefinitely — both
@@ -196,10 +198,6 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 	private onActiveProfileChanged = async (): Promise<void> => {
 		await this.hydrateSchedulers()
-	}
-
-	private onProfileDeleted = async (profile: { id: string }): Promise<void> => {
-		await this.clearProfile(profile.id)
 	}
 
 	private onAccountAdded = async (_account: { chainId: number; address: string }): Promise<void> => {
@@ -476,16 +474,18 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		}
 	}
 
-	private onTokenDeleted = async (token: TokenInfo): Promise<void> => {
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) return
-		const network = await this.resolveNetworkByChainId(token.chainId)
+	private onTokenDeleted = async (token: TokenDeleted): Promise<void> => {
+		// Scope to the DELETED token's profile (finding C), NOT the active profile:
+		// deleting an inactive profile's token must not wipe the ACTIVE profile's
+		// incoming-transfer records + trust for a shared (chain, contract).
+		const profileId = token.profileId
+		const network = (await this.networkService.getNetworksRaw(profileId, token.chainId))[0]
 		if (!network) return
 
 		await this.withServiceLock(async () => {
 			// Scheduler teardown + row mutations both inside the lock so a
 			// concurrent scan can't slip a row in between teardown + wipe.
-			const accounts = await this.accountService.getAccounts(profile.id, network.chainId)
+			const accounts = await this.accountService.getAccounts(profileId, network.chainId)
 			for (const account of accounts) {
 				const key = this.schedulerKey(network.id, account.address)
 				const contracts = this.watchedContracts.get(key)
@@ -501,14 +501,14 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 			// Records wipe + trust reset. Re-add re-indexes via PXE with
 			// identical blockTimestamps so activity-feed order is preserved.
-			const records = await this.repo.listByContract(profile.id, network.id, token.contract)
+			const records = await this.repo.listByContract(profileId, network.id, token.contract)
 			for (const record of records) {
 				await this.repo.deleteRecord(record.siloedNullifier)
 				this.emit("onIncomingTransferDeleted", record)
 			}
-			const trustRecord = await this.repo.getTrust(profile.id, network.id, token.contract)
+			const trustRecord = await this.repo.getTrust(profileId, network.id, token.contract)
 			if (trustRecord) {
-				const updated = await this.repo.setTrust(profile.id, network.id, token.contract, "unknown")
+				const updated = await this.repo.setTrust(profileId, network.id, token.contract, "unknown")
 				this.emit("onIncomingTrustChanged", updated)
 			}
 

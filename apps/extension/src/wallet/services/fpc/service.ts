@@ -69,7 +69,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		this.pxeService = new PxeServiceClient(this.logger)
 		this.profileService = services.get(ProfileService.name)
 		this.networkService = services.get(NetworkService.name)
-		this.profileService.onProfileDeleted.add(this.onProfileDeleted)
+		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile` (D).
 		this.networkService.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
 	}
 
@@ -403,11 +403,14 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		throw new Error("Unsupported FPC artifact")
 	}
 
-	private readonly onProfileDeleted = async (profile: ProfileInfo) => {
-		this.logDebug(`Profile ${profile.id} deleted, remove related FPCs`)
+	/** Awaited profile-scoped purge, called by the deletion coordinator (relocated
+	 *  from the removed fire-and-forget `onProfileDeleted` sub — finding D). */
+	public async purgeForProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		this.logDebug(`purgeForProfile ${profileId}: remove related FPCs`)
 		try {
 			await this.lock.enter()
-			const fpcs = (await this.storage.getValues()).filter((fpc) => fpc.profileId === profile.id)
+			const fpcs = (await this.storage.getValues()).filter((fpc) => fpc.profileId === profileId)
 			await purgeRows(
 				fpcs,
 				(fpc) => {
@@ -459,6 +462,9 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 					address: rest.address,
 					name: rest.name,
 				}
+				// Parse the persisted shape so a malformed backup fpc is recorded as
+				// restoreError, not silently written + codec-hidden on read.
+				StoredFpcSchema.parse(stored)
 				await this.storage.set(id, stored)
 				return { ...stored, isProtocol: false }
 			})
