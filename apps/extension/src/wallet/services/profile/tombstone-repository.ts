@@ -77,6 +77,24 @@ export class TombstoneRepository {
 		return out
 	}
 
+	/** TELEMETRY only: ids whose raw row EXISTS but can NOT be decoded — reserved
+	 *  (the id stays locked, fail-CLOSED) but un-resumable, so cleanup can't finish
+	 *  automatically. Surfaced at resume for manual recovery. It is NEVER dropped:
+	 *  a corrupt tombstone whose profile row is absent is a phase-1-done,
+	 *  purge-PENDING deletion (the tombstone is written BEFORE the row is deleted),
+	 *  so auto-dropping it would fail OPEN — abandoning a real in-progress deletion
+	 *  + reopening the id for reuse. Both plan auditors flagged auto-repair as unsafe. */
+	public async corruptIds(): Promise<string[]> {
+		const all = await this.storage.get()
+		const prefix = `${PROFILE_TOMBSTONE_ROOT}@`
+		const out: string[] = []
+		for (const [k, v] of Object.entries(all)) {
+			if (!k.startsWith(prefix)) continue
+			if (!this.parse(v)) out.push(k.slice(prefix.length))
+		}
+		return out
+	}
+
 	private parse(raw: unknown): Tombstone | undefined {
 		if (typeof raw !== "string") return undefined
 		try {

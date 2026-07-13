@@ -551,6 +551,11 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				// gives token-OWNERSHIP for free — a balance's token maps only to a
 				// token THIS restore created.
 				const oldTokens = data.token as Array<{ id: unknown; chainId: number }>
+				// NB (dup-token-id): the index-paired maps below key on `old.id`, so two
+				// backup tokens sharing an id would last-wins-collapse. That case is
+				// UNREACHABLE here — backup normalization rejects a slice with a duplicate
+				// row id up front (backup-migration-registry.ts "duplicate row id"), so a
+				// dup-token-id backup fails before restore. No composable guard needed.
 				const oldIdToNew = new Map<unknown, unknown>()
 				const oldIdToChain = new Map<unknown, number>()
 				for (let i = 0; i < newTokens.length; i++) {

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blueprint ELI5 — backup-restore-residuals</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+  h1,h2,h3 { font-weight: 600; } h1 { font-size: 1.8rem; } h2 { font-size: 1.3rem; margin-top: 2.5rem; } h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+  code,pre { font-family: ui-monospace, Menlo, monospace; font-size: 0.9rem; } pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+  .phase { margin: 1.25rem 0; padding: 0.75rem 1.1rem; border-left: 3px solid #ccc; background: #fafafa; }
+  .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+  .recommended { background: #fff8e1; border-left-color: #f0a020; }
+  .warning { color: #b45309; font-weight: 600; }
+  .approval { background: #eef6ff; padding: 1rem 1.1rem; border-left: 3px solid #0366d6; }
+  .muted { color: #666; font-size: 0.9rem; } a { color: #0366d6; }
+</style>
+</head>
+<body>
+<h1>backup-restore-residuals</h1>
+<p>The previous arc (#276) made profile deletion <em>atomic and awaited</em>, and fenced the transaction write path so a transfer finishing after you delete a profile can't recreate a "ghost" transaction. But it deliberately left two write paths un-fenced (token metadata + balance projection) as a documented pre-production follow-up. This plan closes those — plus a few small cleanups — so deletion is airtight with <strong>zero deferrals</strong>: no ghost tokens, no ghost balances, ever.</p>
+
+<h2>Why <code>mid</code> tier</h2>
+<p>Security-sensitivity is HIGH (a resurrection bug leaks/keeps data you asked to erase) — that's 1 high on the rubric → <code>mid</code>. It's a single package, and the fix reuses an <em>already-proven</em> mechanism (the deletion "epoch" fence from #276), so novelty is low. The dual audit revealed the concurrency surface is bigger than it first looked (≈6 writers, needs per-lock atomicity), so this sits at the mid/deep boundary — if the final review still finds a critical, we escalate to <code>deep</code>.</p>
+
+<h2>The idea, in one picture</h2>
+<p>Every profile owns rows (tokens, balances). When you delete a profile, a coordinator purges all its rows. The danger: a slow background job (fetching a token's name, computing a balance) that <em>started before</em> the delete can <em>finish after</em> the purge and write its row back — into the deleted (or a brand-new same-id) profile. The fix stamps each such job with the profile's "deletion epoch" when it starts, and — right before it writes, holding the same lock the purge uses — checks the stamp is still valid AND the profile isn't being deleted. If not, it throws (for user actions) or quietly skips (for background refreshes).</p>
+
+<h2>Phases</h2>
+<div class="phase"><h3>1. Fence primitive + token wiring</h3><p>Add a reservation-aware check (<code>isLive</code> = not-being-deleted AND same epoch) and give the token service the shared deletion state + an internal "who owns this token" resolver.</p><p class="muted">Proves itself by: unit tests for isLive (reserved / stale-epoch / corrupt-tombstone / live) + typecheck + lint.</p></div>
+<div class="phase"><h3>2. Token-write fences</h3><p>Fence every token writer (add, update, chain-purge lock, restore) so a token-add finishing after a delete is rejected — and fix a related bug where a stale add leaves an orphan "journal" row.</p><p class="muted">Proves itself by: deterministic token tests with an injected "pause mid-fetch" hook + typecheck + lint.</p></div>
+<div class="phase"><h3>3. Balance-write fences</h3><p>Add a shared balance lock so the balance projector, the purge, the fire-and-forget balance-creation callbacks, and restore all coordinate — no balance row survives its profile.</p><p class="muted">Proves itself by: deterministic balance tests (pause mid-projection) + successor-id-reuse test + typecheck + lint.</p></div>
+<div class="phase"><h3>4. Coordinator unit test</h3><p>Directly test the 12-step deletion purge: everything awaited, correct order, PXE cleared last, a failure keeps the tombstone.</p><p class="muted">Proves itself by: the new coordinator test + a ProfileService integration pin for "tombstone retained on failure".</p></div>
+<div class="phase"><h3>5. Reject duplicate token-ids in import</h3><p>A hostile backup with two tokens sharing an id no longer silently collapses the relink map — the collision is dropped + recorded.</p><p class="muted">Proves itself by: a composable test with two same-id tokens.</p></div>
+<div class="phase"><h3>6. Corrupt-tombstone telemetry (NOT auto-repair)</h3><p>Both auditors flagged that auto-dropping a corrupt tombstone can silently abandon a real in-progress deletion (fail-open). So we only <em>log/count</em> corrupt tombstones for manual recovery — they stay fail-closed.</p><p class="muted">Proves itself by: tests that a corrupt tombstone is counted + logged + RETAINED.</p></div>
+<div class="phase"><h3>7. Docs + end-to-end proof</h3><p>Mark D13 COMPLETE in the index, and extend the live-sandbox e2e to add-a-token / refresh-a-balance mid-delete and assert nothing resurrects.</p><p class="muted">Proves itself by: <code>bun run audit:vue</code> green + the extended network e2e green.</p></div>
+
+<h2>Human context</h2>
+<p>"Epoch" = a counter bumped each time a profile deletion begins; it's never reset, so a job holding an old epoch is provably stale. "Reserved" = an id currently being deleted. "Lock" = a mutex; holding the same one the purge holds is what makes the check-then-write atomic (no gap for a delete to sneak in).</p>
+
+<h2>Open questions</h2>
+<ul>
+<li>Tier: stays <code>mid</code> unless the final codex pass finds a critical → then <code>deep</code>. (Resolved AFK.)</li>
+<li>Adding a balance lock must not deadlock against locks the projector/task-service already hold — the final review checks lock-ordering.</li>
+</ul>
+
+<div class="approval">
+<h2>Approval (self-approved AFK per your standing mandate)</h2>
+<ul>
+<li>Scope: the 6 residuals from the parent arc's Follow-ups; nothing beyond + directly-required refactors.</li>
+<li>Tier: <code>mid</code> (escalate to <code>deep</code> only if the final pass finds a critical).</li>
+<li>Validation: typecheck · lint · unit+component (deterministic hold-point pins) · <code>e2e:agent</code> deletion + token/balance round-trips.</li>
+<li>No <code>/harden</code> scheduling — this IS the hardening finish.</li>
+</ul>
+</div>
+
+<section class="seeds">
+<h2>Implementation seeds</h2>
+<p class="warning">Use exactly ONE per session — they don't compose.</p>
+<div class="phase recommended"><h3>Recommended: /goal (completion is transcript-observable)</h3>
+<pre><code>/goal All 7 phases marked ✓ in implementations-plan/backup-restore-residuals/plan.md, each backed by its Validation gate reported passing in the transcript; every profile-owned-row writer (addToken, updateToken/clearChainState, token.restore, balance projection, detached createTokenBalance, balance.restore) epoch-fenced; corrupt-tombstone stays fail-closed (telemetry only); `bun run typecheck` and `bun run lint` exit 0; /code-review max --fix applied + committed separately; codex xhigh post-impl audit returns PASS with every high/critical FIXED (no deferrals); PR opened, quality-status + network-e2e-status + smoke-e2e-status green, squash-merged to dev.</code></pre></div>
+<h3>Alternative: /loop 15m</h3>
+<pre><code>/loop 15m Drive implementations-plan/backup-restore-residuals per plan.md. Never idle. Each firing: reality-check plan.md + lessons/ + git status; do the next pending phase; after each edit run bun run typecheck + the touched test; phase green ONLY when its plan.md Validation gate passes → mark ✓ + file lessons/phase-N.md. Decision fork → codex xhigh, act on the stronger argument, log it. All ✓ → /code-review max --fix (commit separately) → codex xhigh post-impl audit → fix every high/critical (no deferrals) → PR → CI green → squash-merge to dev. Hard limits: never main/release, never publish, never force-push shared, no scope creep, never weaken a gate.</code></pre>
+</section>
+<p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons</a> · <a href="./audit-codex.md">codex audit</a> · <a href="./audit-fable.md">fable/Opus audit</a></p>
+</body>
+</html>
