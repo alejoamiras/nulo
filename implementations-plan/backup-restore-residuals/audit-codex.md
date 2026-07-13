@@ -1,0 +1,18 @@
+# Codex plan audit — backup-restore-residuals
+
+## v1 (against plan v1) — VERDICT: `reject`
+Blockers: (1) tombstone repair fails open; (2) balance fence non-atomic; (3) multiple resurrection writes unfenced; (4) wrong audit base.
+
+Findings (folded into plan v2's decision ledger):
+1. **Critical — D-D tombstone repair discards a pending deletion.** Two-phase delete writes the tombstone THEN deletes the profile row THEN purges. A crash before purge + a corrupt tombstone → `repairOrphaned` sees "profile absent" → drops it → tx/auth/balance/PXE data remains, id reusable. "Absent ⇒ nothing to purge" is backwards during phase-2. → telemetry only, no drop.
+2. **Critical — balance fence non-atomic.** `balance-job-queue.ts:138-153` shares no lock with `TokenBalanceService.purgeForTokens` (`token-balance/service.ts:227-237`): isCurrent passes → purge deletes → `repo.set` afterward. → shared balance-write lock across projection/purge/create/restore; check while held.
+3. **Critical — capture must reject `isReserved` atomically with epoch.** `isCurrent` (`profile-deletion-state.ts:67-75`) compares only epochs; a job enqueued after `beginDeletion` captures the new epoch → stays "current"; corrupt tombstones hydrate reserved-with-epoch-0. → `isLive = !isReserved && isCurrent`.
+4. **High — omitted writers.** detached `onTokenAdded`/`onAccountAdded`→`createTokenBalance`→`repo.set` (`token-balance/service.ts:156-168,198-209`, fire-and-forget via `EventHandler.invoke`), `TokenService.restore` (`token/service.ts:567-587`), `TokenBalanceService.restore` (`token-balance/service.ts:296-317`). Must be fenced for D13 COMPLETE.
+5. **High — `updateToken` purge-safe but not vs `clearChainState`** (`token/service.ts:94-102` deletes without the token lock). Also `updateToken` does NOT "already hold the epoch"; capture explicitly. No independent `registerToken` (delegates to `addToken`).
+6. **High — `addToken` journal ordering.** Journal op created before the lock/fence (`token/service.ts:153-170`); coordinator purges journals before tokens (`coordinator.ts:119-121`) → stale add leaves a post-delete journal row.
+7. **Medium — identity via authoritative ownership.** `(id,token,account)` all recur; compare the live token's `profileId`. `getTokenRaw` is active-profile-gated → false-skip after a profile switch → need an internal owner resolver.
+8. **Medium — inline, not a guard helper** (a helper can't give atomicity; the leaf lock is the choke point; throw-vs-skip is caller policy).
+9. **Low — concurrency proof.** The e2e only polls eventual state; add deterministic pins w/ hold-points for reservation-era enqueue, delete-between-check-write, detached creation, restore writers, callback suppression, successor reuse. Coordinator-only test ≠ "tombstone retained" (needs ProfileService integration).
+10. **Operational — wrong base** (HEAD `dff435f` lacked the mechanism; `dev`=`fb61a63` has it). Rebased.
+
+## v2 (against plan v2) — final fresh-context pass: _pending (see below / audit-codex-v2 section)._
