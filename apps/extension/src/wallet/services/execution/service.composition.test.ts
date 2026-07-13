@@ -111,7 +111,13 @@ async function makeHarness() {
 	// One shared ProfileDeletionState so Execution's captureFence + Transaction's
 	// addTransaction assert against the SAME epoch map (D13 fence wiring).
 	const deletionState = new ProfileDeletionState()
-	collection.add(svc(ProfileService.name, { getActiveProfile: async () => ({ id: "p1" }), getDeletionState: () => deletionState }))
+	collection.add(
+		svc(ProfileService.name, {
+			getActiveProfile: async () => ({ id: "p1" }),
+			getDeletionState: () => deletionState,
+			captureExecutionFence: async () => ({ profileId: "p1", epoch: deletionState.capture("p1") }),
+		}),
+	)
 	collection.add(svc(NetworkService.name, { getNetwork: async () => NETWORK, getNode: async () => fakeNode }))
 	collection.add(svc(AccountService.name, { getAccountContract: async () => ({ address: ACCOUNT }) }))
 	collection.add(

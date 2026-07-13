@@ -329,6 +329,25 @@ describe("ProfileService integration", () => {
 			await expect(service.exportPlain(profile.id, "wrong")).rejects.toThrow(/Invalid profile password/)
 		}, 30_000)
 
+		test("(audit C1) exportPlain + exportMnemonic REJECT a tombstoned profile — no secret exfil mid-delete", async () => {
+			const { service } = await makeService()
+			const profile = await service.createProfile("P", "pass1234")
+			// Simulate a delete beginning: the id is reserved (+ epoch bumped) while
+			// the row/session still linger (the SW-died-mid-delete window).
+			service.getDeletionState().beginDeletion(profile.id)
+			await expect(service.exportPlain(profile.id, "pass1234")).rejects.toThrow(/Invalid profile id/)
+			await expect(service.exportMnemonic(profile.id, "pass1234")).rejects.toThrow(/Invalid profile id/)
+		}, 30_000)
+
+		test("(audit D13) captureExecutionFence captures the current epoch, then rejects once reserved (atomic)", async () => {
+			const { service } = await makeService()
+			await service.createProfile("P", "pass1234")
+			const fence = await service.captureExecutionFence()
+			expect(fence.epoch).toBe(0)
+			service.getDeletionState().beginDeletion(fence.profileId)
+			await expect(service.captureExecutionFence()).rejects.toThrow(/Wallet locked/)
+		}, 30_000)
+
 		test("exportPlain for passkey profile returns credentialId", async () => {
 			const { service } = await makeService()
 			const profile = await service.createPasskeyProfile("PK")

@@ -26,7 +26,7 @@ import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import { SessionManager } from "./session-manager"
 import { PROFILE_SERVICE_NAME, type ProfileInfo, type Profile, type Events, type Methods, type RestoreSecret } from "./spec"
 import { TombstoneRepository } from "./tombstone-repository"
-import { ProfileDeletionState } from "./profile-deletion-state"
+import { ProfileDeletionState, type ExecutionFence } from "./profile-deletion-state"
 import type { ProfileDeletionDelegate } from "../profile-deletion/types"
 
 export * from "./spec"
@@ -164,7 +164,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// internally. No emit on restore — subscribers pull via
 		// getActiveProfile() when they mount.
 		await this.sessionManager.restore(
-			(id) => this.repo.get(id),
+			// A tombstoned profile (SW died mid-delete: row present, id reserved) must
+			// NOT have its session restored — it's being erased. Gate the lookup so no
+			// downstream unlock/export/secret path can observe an active session for it.
+			(id) => (this.deletionState.isReserved(id) ? Promise.resolve(undefined) : this.repo.get(id)),
 			(passhash, profile) =>
 				this.secretBox.unsealWithPasshash(passhash, {
 					guard: asBase64Ciphertext(profile.guard),
@@ -179,6 +182,24 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			const session = await this.sessionManager.getActive()
 			if (!session || this.deletionState.isReserved(session.profile.id)) return undefined
 			return this.getProfileInfo(session.profile)
+		})
+	}
+
+	/** Capture the {profileId, epoch} execution fence ATOMICALLY under the facade
+	 *  lock (D13). The active-session read, the reserved-id check, and the epoch
+	 *  read MUST be one critical section — `deleteProfile`'s phase 1 (beginDeletion
+	 *  + reserve) runs under the SAME lock, so this either captures the pre-delete
+	 *  epoch (then the later addTransaction assert fails) or sees the id already
+	 *  reserved and rejects. Composing getActiveProfile + capture across separate
+	 *  lock acquisitions would let a delete slip between them (codex TOCTOU). */
+	public async captureExecutionFence(): Promise<ExecutionFence> {
+		await this.ensureInitialized()
+		return this.runExclusive(async () => {
+			const session = await this.sessionManager.getActive()
+			if (!session || this.deletionState.isReserved(session.profile.id)) {
+				throw new Error("Wallet locked")
+			}
+			return { profileId: session.profile.id, epoch: this.deletionState.capture(session.profile.id) }
 		})
 	}
 
@@ -362,6 +383,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		return this.runExclusive(async () => {
 			const fetched = await this.repo.get(id)
 			if (!fetched) throw new Error("Invalid profile id")
+			if (this.deletionState.isReserved(id)) throw new Error("Invalid profile id")
 			if (fetched.type !== "passkey") throw new Error("Profile requires password")
 			if (!fetched.credentialId) throw new Error("Missing credentialId")
 			return fetched.credentialId
@@ -765,6 +787,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (session?.session.profile !== id) {
 				throw new Error("Profile locked")
 			}
+			// A tombstoned profile (mid-delete) must not export its encrypted blob —
+			// belt-and-suspenders with the gated session restore (a delete under this
+			// same facade lock closes the session + reserves before releasing).
+			if (this.deletionState.isReserved(id)) {
+				throw new Error("Invalid profile id")
+			}
 			const profile = await this.repo.get(id)
 			if (!profile) {
 				throw new Error("Invalid profile id")
@@ -780,6 +808,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		await this.ensureInitialized()
 		const profile = await this.repo.get(id)
 		if (!profile) {
+			throw new Error("Invalid profile id")
+		}
+		// A tombstoned profile (mid-delete) must not export its master secret.
+		if (this.deletionState.isReserved(id)) {
 			throw new Error("Invalid profile id")
 		}
 
@@ -854,6 +886,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		await this.ensureInitialized()
 		const profile = await this.repo.get(id)
 		if (!profile) {
+			throw new Error("Invalid profile id")
+		}
+		// A tombstoned profile (mid-delete) must not export its seed phrase.
+		if (this.deletionState.isReserved(id)) {
 			throw new Error("Invalid profile id")
 		}
 		if (profile.type === "passkey") {

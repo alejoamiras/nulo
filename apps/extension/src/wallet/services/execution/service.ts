@@ -16,7 +16,7 @@ import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { AccountService } from "@/wallet/services/account/service"
 import { ContactService } from "@/wallet/services/contact/service"
 import { ProfileService } from "@/wallet/services/profile/service"
-import type { ExecutionFence, ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { TokenService } from "@/wallet/services/token/service"
@@ -97,7 +97,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	private tokenService: TokenService = null!
 	private fpcService: FpcService = null!
 	private transactionService: TransactionService = null!
-	private deletionState: ProfileDeletionState = null!
 	private authRegistryService: AuthRegistryService = null!
 	private taskService: TaskService = null!
 	private operationJournal: OperationJournalService = null!
@@ -165,7 +164,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		this.authRegistryService = services.get(AuthRegistryService.name)
 		this.taskService = services.get(TaskService.name)
 		this.operationJournal = services.get(OperationJournalService.name)
-		this.deletionState = this.profileService.getDeletionState()
 		this.planner = new OperationPlanner(this.profileService, this.tokenService)
 		this.resolver = new ContractResolver(this.logger)
 		this.authwit = new AuthwitDiscoverer(this.logger)
@@ -305,12 +303,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 	/** Capture the {profileId, epoch} fence at execution AUTHORIZATION (before the
 	 *  slow prove) so `addTransaction` can reject a completing prove whose profile
-	 *  was deleted meanwhile (D13). Capturing here — NOT inside proveAndSend — is
-	 *  what makes the fence sound: an op that reaches proveAndSend after a delete
-	 *  would otherwise capture the NEW epoch and slip through. */
+	 *  was deleted meanwhile (D13). Delegates to ProfileService so the active-read +
+	 *  reserved-check + epoch-capture are ATOMIC under the facade lock — composing
+	 *  requireActiveProfile + capture here would leave a TOCTOU (codex verify). */
 	private async captureFence(): Promise<ExecutionFence> {
-		const profile = await requireActiveProfile(this.profileService, "Wallet locked")
-		return { profileId: profile.id, epoch: this.deletionState.capture(profile.id) }
+		return this.profileService.captureExecutionFence()
 	}
 
 	public async executeTransfer(
