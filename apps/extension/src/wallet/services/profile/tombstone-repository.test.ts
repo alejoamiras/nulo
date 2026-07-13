@@ -42,6 +42,19 @@ describe("TombstoneRepository — fail-closed id reservation (D11/D15)", () => {
 		expect(still[`${PROFILE_TOMBSTONE_ROOT}@pX`]).toBe("{not json")
 	})
 
+	test("corruptIds surfaces a reserved-but-undecodable tombstone for TELEMETRY (never repairs/drops)", async () => {
+		const { api, repo } = make()
+		await repo.write(mk("good1"))
+		await api.storage.local.set({ [`${PROFILE_TOMBSTONE_ROOT}@bad1`]: "{not json" })
+
+		// telemetry lists ONLY the corrupt id (the valid one is not "corrupt").
+		expect(await repo.corruptIds()).toEqual(["bad1"])
+		// …and it stays reserved + on disk (surface for manual recovery, NEVER dropped).
+		expect(await repo.reservedIds()).toEqual(new Set(["good1", "bad1"]))
+		const still = await api.storage.local.get(`${PROFILE_TOMBSTONE_ROOT}@bad1`)
+		expect(still[`${PROFILE_TOMBSTONE_ROOT}@bad1`]).toBe("{not json")
+	})
+
 	test("clearIfSame only clears when the epoch matches (a re-deletion's marker survives)", async () => {
 		const { repo } = make()
 		await repo.write(mk("p1", { epoch: 2 }))

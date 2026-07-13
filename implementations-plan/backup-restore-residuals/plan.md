@@ -1,4 +1,12 @@
-# backup-restore-residuals — finish D13 to zero deferrals + low-severity cleanups (v3, DEEP)
+# backup-restore-residuals — finish D13 to zero deferrals + low-severity cleanups
+
+> ## OUTCOME (read first)
+> **7 audit passes** (5 codex xhigh + 2 Opus) unanimously proved that the two D13 SECURITY fences (token-metadata + balance-projection) CANNOT be closed to provable zero-resurrection as one PR — they decompose into a wallet-wide deletion-concurrency redesign across ~10 leaf services + a service-worker leaf-draining protocol + a token↔network lock-order redesign (the "atomic" fix INTRODUCES an ABBA deadlock) + a **novel cross-process PXE offscreen-barrier generation fence** (a SW `isLive` check provably can't fence the offscreen worker). codex NO-GO'd the design until those are built explicitly. Both auditors: the parent arc's **deferral was the correct pre-production call.**
+>
+> **SHIPPED (this PR):** the 4 low-severity, deadlock-free cleanups — a direct `coordinator.test.ts` (awaited order + pxe-last + fail-fast + single-flight), corrupt-tombstone **TELEMETRY** (`corruptIds` surfaced at resume; auto-repair REJECTED by both auditors as fail-open), the confirmation that **dup-token-id is already blocked upstream** by backup normalization (documented, no redundant code), and the `index.md` entries.
+> **DEFERRED (tracked epic):** the token-metadata + balance-projection epoch fences → a deliberate deep/mega-deep multi-PR effort. The v1→v3 design below + `audit-codex.md`/`audit-fable.md` (7 passes) are its ~80%-complete design doc.
+
+## (v3 DEEP design history — the epic's blueprint, NOT shipped here)
 
 **Tier: `deep`** (ESCALATED from mid — the final fresh-codex pass on v2 surfaced 2 criticals: the leaf purges are NOT lock-atomic with their writers, and the writer set spans 5 leaf services (token, balance, account, incoming-transfer, operation-journal). Rubric: security HIGH + blast-radius HIGH (a cross-cutting concurrency change to the deletion purge + every leaf's write lock). Still ONE mechanism (the proven monotonic epoch fence) but the correct fix is architectural, not a per-writer patch. Branch off `dev` → `dev`, ONE PR.
 

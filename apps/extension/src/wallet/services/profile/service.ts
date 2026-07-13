@@ -720,6 +720,16 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	public async resumePendingDeletions(): Promise<void> {
 		const delegate = this.deletionDelegate
 		if (!delegate) return
+		// TELEMETRY: a corrupt tombstone reserves its id (fail-closed) but can't be
+		// auto-resumed — surface it for manual recovery. We do NOT drop it (that would
+		// fail OPEN: the row is already deleted but purge may still be pending).
+		const corrupt = await this.tombstones.corruptIds()
+		if (corrupt.length) {
+			this.logError(
+				`profile-deletion: ${corrupt.length} corrupt tombstone(s) reserved but un-resumable (manual recovery)`,
+				corrupt.join(","),
+			)
+		}
 		for (const t of await this.tombstones.validPayloads()) {
 			try {
 				// Complete phase 1 idempotently — a crash may have written the tombstone
