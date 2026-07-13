@@ -948,13 +948,18 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// exact string for its wrong-password branch.
 				throw new Error("Invalid profile old password")
 			}
-			// Revalidate AFTER the slow unseal (codex verify): a delete completing
-			// during derivation must not still hand back the erased profile's seed.
-			const still = await this.repo.get(id)
-			if (!still || this.deletionState.isReserved(id) || !this.deletionState.isCurrent(id, capturedEpoch)) {
-				throw new Error("Invalid profile id")
-			}
-			return await getMnemonic(secret)
+			// Derive the words FIRST, THEN revalidate under the lock — getMnemonic
+			// awaits crypto.subtle.digest, so a check placed before it leaves a
+			// window where a delete interleaves during the digest and the erased
+			// profile's seed is still returned (codex verify r4). No async op runs
+			// after this critical section.
+			const mnemonic = await getMnemonic(secret)
+			await this.runExclusive(async () => {
+				if (!(await this.repo.get(id)) || this.deletionState.isReserved(id) || !this.deletionState.isCurrent(id, capturedEpoch)) {
+					throw new Error("Invalid profile id")
+				}
+			})
+			return mnemonic
 		} finally {
 			// zero secret after mnemonic words derived. The mnemonic
 			// is itself sensitive (the user shows it on screen), but
