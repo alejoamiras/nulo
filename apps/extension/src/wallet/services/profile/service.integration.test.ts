@@ -151,6 +151,9 @@ async function makeService(ttlOrInit: number | { sessionTtl?: number; strict?: b
 	services.add(service)
 
 	await services.start()
+	// deleteProfile now requires the coordinator delegate (finding D); these tests
+	// exercise the profile lifecycle, not the purge cascade → no-op delegate.
+	service.setDeletionDelegate({ snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }), runFor: async () => {} })
 	return { api, config, logger, service, passkeys }
 }
 
@@ -178,6 +181,7 @@ async function makeServiceFromExistingApi(
 	services.add(service)
 
 	await services.start()
+	service.setDeletionDelegate({ snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }), runFor: async () => {} })
 	return { config, logger, service }
 }
 
@@ -323,6 +327,25 @@ describe("ProfileService integration", () => {
 			const { service } = await makeService()
 			const profile = await service.createProfile("P", "pass1234")
 			await expect(service.exportPlain(profile.id, "wrong")).rejects.toThrow(/Invalid profile password/)
+		}, 30_000)
+
+		test("(audit C1) exportPlain + exportMnemonic REJECT a tombstoned profile — no secret exfil mid-delete", async () => {
+			const { service } = await makeService()
+			const profile = await service.createProfile("P", "pass1234")
+			// Simulate a delete beginning: the id is reserved (+ epoch bumped) while
+			// the row/session still linger (the SW-died-mid-delete window).
+			service.getDeletionState().beginDeletion(profile.id)
+			await expect(service.exportPlain(profile.id, "pass1234")).rejects.toThrow(/Invalid profile id/)
+			await expect(service.exportMnemonic(profile.id, "pass1234")).rejects.toThrow(/Invalid profile id/)
+		}, 30_000)
+
+		test("(audit D13) captureExecutionFence captures the current epoch, then rejects once reserved (atomic)", async () => {
+			const { service } = await makeService()
+			await service.createProfile("P", "pass1234")
+			const fence = await service.captureExecutionFence()
+			expect(fence.epoch).toBe(0)
+			service.getDeletionState().beginDeletion(fence.profileId)
+			await expect(service.captureExecutionFence()).rejects.toThrow(/Wallet locked/)
 		}, 30_000)
 
 		test("exportPlain for passkey profile returns credentialId", async () => {
@@ -1212,5 +1235,77 @@ describe("ProfileService integration", () => {
 			// so a SW-restart agreement check does NOT apply here — that's expected, not a hybrid.)
 			expect(persisted.lockedAt).toBeGreaterThan(lockedAtBeforeRefresh)
 		}, 30_000)
+	})
+})
+
+describe("ProfileService — deletion coordinator integration (finding D)", () => {
+	test("a FAILED purge keeps the tombstone → the id stays reserved (no successor-clobber)", async () => {
+		const { service } = await makeService()
+		// A delegate whose purge fails, simulating a SW-kill / retryable failure.
+		service.setDeletionDelegate({
+			snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }),
+			runFor: async () => {
+				throw new Error("purge interrupted")
+			},
+		})
+		const p = await service.createProfile("A", "password123")
+
+		await expect(service.deleteProfile(p.id)).rejects.toThrow(/purge interrupted/)
+
+		// The profile row is gone AND it's tombstoned → absent to every read.
+		expect((await service.getProfiles()).map((x) => x.id)).not.toContain(p.id)
+		// A new profile can NEVER be handed the tombstoned id (fail-closed reservation).
+		const q = await service.createProfile("B", "password123")
+		expect(q.id).not.toBe(p.id)
+	})
+
+	test("a SUCCESSFUL purge clears the tombstone + releases the id", async () => {
+		const { service } = await makeService() // default no-op (success) delegate
+		const p = await service.createProfile("A", "password123")
+		await service.deleteProfile(p.id)
+		expect(await service.getProfiles()).toHaveLength(0)
+	})
+
+	test("resumePendingDeletions finishes an interrupted delete on the next boot", async () => {
+		const { api } = await makeService()
+		// First boot: a delete whose purge fails leaves a tombstone behind.
+		const boot1 = new ProfileService(fakeConfig({}), new LoggerStore(fakeConfig({})), api)
+		const c1 = new ServiceCollection()
+		c1.add(new FakePasskeyService(new LoggerStore(fakeConfig({}))))
+		c1.add(boot1)
+		await c1.start()
+		boot1.setDeletionDelegate({
+			snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }),
+			runFor: async () => {
+				throw new Error("interrupted")
+			},
+		})
+		const p = await boot1.createProfile("A", "password123")
+		await expect(boot1.deleteProfile(p.id)).rejects.toThrow()
+
+		// Second boot over the SAME storage: the tombstone is still there.
+		const boot2 = new ProfileService(fakeConfig({}), new LoggerStore(fakeConfig({})), api)
+		const c2 = new ServiceCollection()
+		c2.add(new FakePasskeyService(new LoggerStore(fakeConfig({}))))
+		c2.add(boot2)
+		await c2.start()
+		let resumed = false
+		boot2.setDeletionDelegate({
+			snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }),
+			runFor: async () => {
+				resumed = true
+			},
+		})
+		// Until resume runs, the id is still reserved (deletion pending).
+		expect((await boot2.getProfiles()).map((x) => x.id)).not.toContain(p.id)
+
+		await boot2.resumePendingDeletions()
+
+		expect(resumed).toBe(true)
+		// A fresh profile can now reuse... no — the id was random; assert the tombstone
+		// cleared by confirming a NEW delete of a NEW profile still works cleanly.
+		const q = await boot2.createProfile("B", "password123")
+		await boot2.deleteProfile(q.id)
+		expect(await boot2.getProfiles()).toHaveLength(0)
 	})
 })

@@ -58,6 +58,7 @@ import type {
 	TransferFeeEstimate,
 } from "./spec"
 import type { TxRequestBuilder } from "./tx-request-builder"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import { getEstimatedFee, getGasDetails } from "./tx-fee-details"
 import { detectEmbeddedFeePayment } from "./utils/fee-detection"
 
@@ -250,7 +251,12 @@ export class DappSendExecutor {
 		}
 	}
 
-	public async executeSendTransaction(op: SendTransactionOperation, origin: LocalTxOrigin, parentTask?: WrappedTask): Promise<string> {
+	public async executeSendTransaction(
+		op: SendTransactionOperation,
+		origin: LocalTxOrigin,
+		parentTask?: WrappedTask,
+		fence?: ExecutionFence,
+	): Promise<string> {
 		// JS-context trust boundary: approveInteraction() at
 		// dapp-interaction/service.ts ships popup-built operations through
 		// without further validation. If the popup leaks a draft op with
@@ -316,6 +322,7 @@ export class DappSendExecutor {
 						primaryEndpointUrl(network),
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
+						fence,
 					)
 					if (pendingPublicAuthwits.length > 0) {
 						await this.deps.recordPendingAuthwits(account.address.toString(), pendingPublicAuthwits, hash)
@@ -336,6 +343,7 @@ export class DappSendExecutor {
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
 		hooks?: ExecutionHooks,
+		fence?: ExecutionFence,
 	): Promise<SendReturn<InteractionWaitOptions>> {
 		// `default_entrypoint` is a special dApp path that bypasses the
 		// standard tx-build pipeline and runs its own kernelless discovery.
@@ -343,7 +351,7 @@ export class DappSendExecutor {
 		// release at the right point (and benefit from the queued-record
 		// claim if one was pre-allocated).
 		if (op.executionMode === "default_entrypoint") {
-			return this.executeNoFromSendTx(op, origin, parentTask, hooks)
+			return this.executeNoFromSendTx(op, origin, parentTask, hooks, fence)
 		}
 
 		// JS-context trust boundary: approveInteraction() ships popup-built
@@ -441,6 +449,7 @@ export class DappSendExecutor {
 							primaryEndpointUrl(network),
 							getEstimatedFee(txRequest),
 							getGasDetails(txRequest),
+							fence,
 						)
 						if (pendingPublicAuthwits.length > 0) {
 							await this.deps.recordPendingAuthwits(account.address.toString(), pendingPublicAuthwits, hash)
@@ -467,6 +476,7 @@ export class DappSendExecutor {
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
 		hooks?: ExecutionHooks,
+		fence?: ExecutionFence,
 	): Promise<SendReturn<InteractionWaitOptions>> {
 		this.deps.logDebug(
 			`executeNoFromSendTx: starting, accountAddress=${op.accountAddress}, calls=${op.exec?.calls?.length}, additionalScopes=${JSON.stringify(op.opts?.additionalScopes)}`,
@@ -603,6 +613,7 @@ export class DappSendExecutor {
 							primaryEndpointUrl(network),
 							getEstimatedFee(txRequest),
 							getGasDetails(txRequest),
+							fence,
 						),
 				})
 

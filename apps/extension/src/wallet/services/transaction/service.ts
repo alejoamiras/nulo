@@ -6,11 +6,12 @@ import type { ILogger } from "@/wallet/logger"
 import { AccountService, type Account } from "@/wallet/services/account/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService } from "@/wallet/services/profile/service"
+import type { ExecutionFence, ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { StepContent, type WrappedTask } from "@/wallet/services/task/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
-import { sleep } from "@/wallet/utils"
+import { Lock, sleep } from "@/wallet/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
@@ -41,10 +42,14 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 
 	private readonly txs: EntityStorage<Tx>
 	private readonly pending = new Map<string, Tx>()
+	// Serializes restore's read-modify-write (contains → set) so two concurrent
+	// imports can't both pass the create-only check for the same hash.
+	private readonly lock = new Lock()
 
 	private profileService: ProfileService = null!
 	private accountService: AccountService = null!
 	private networkService: NetworkService = null!
+	private deletionState: ProfileDeletionState = null!
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(TRANSACTION_SERVICE_NAME, logger)
@@ -55,6 +60,9 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		this.profileService = services.get(ProfileService.name)
 		this.accountService = services.get(AccountService.name)
 		this.networkService = services.get(NetworkService.name)
+		// The SHARED deletion state — addTransaction asserts an execution's captured
+		// epoch is still current before writing (D13).
+		this.deletionState = this.profileService.getDeletionState()
 
 		// Tx cleanup on network/profile deletion flows through `onAccountDeleted`
 		// ONLY — it is account-scoped (= profile-accurate). A chain-purge
@@ -65,16 +73,11 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		// `onAccountDeleted` per account. See implementations-plan/
 		// backup-restore-corruption-fix (P1).
 		//
-		// KNOWN GAP (deferred to P4, see plan §"Deferred: P4"): `onAccountDeleted`
-		// is dispatched via `EventHandler.invoke`, which discards this async
-		// handler's promise — so the tx delete is NOT awaited by the deletion
-		// cascade. A SW kill mid-cascade can leave orphan txs; re-adding the chain
-		// recreates the deterministic account address and resurrects them. This is
-		// an orphan-leak, not cross-profile corruption. The correct fix is an
-		// end-to-end awaited deletion coordinator (AccountService snapshots the
-		// exact Account[] and passes the authoritative addresses to awaited
-		// subscribers; ProfileService.deleteProfile awaits the profile cascade) —
-		// too broad for this PR, and inert pre-production (zero users).
+		// This `onAccountDeleted` sub stays for the standalone `deleteNetwork`
+		// chain-purge path (best-effort). PROFILE deletion no longer relies on it:
+		// the ProfileDeletionCoordinator now calls the AWAITED `purgeForAccounts`
+		// directly with the tombstone's address snapshot, and the worker's write is
+		// fenced (see `updateTx`) so a mid-poll tx can't resurrect (finding D).
 		this.accountService.onAccountDeleted.add(this.onAccountDeleted)
 
 		for (const tx of (await this.txs.getValues()).filter((x) => x.status === TxStatus.Pending)) {
@@ -120,38 +123,58 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		submittedEndpointUrl: string | undefined,
 		estimatedFee?: string,
 		gasDetails?: TxGasDetails,
+		fence?: ExecutionFence,
 	): Promise<Tx> {
-		if (await this.txs.get(hash)) {
-			throw new Error("duplicated hash")
+		// Under the tx lock (codex blocker): serialize the dup-check + write against
+		// restore's create-only check + the coordinator's purge (finding D).
+		await this.lock.enter()
+		try {
+			// D13: an execution captured {profileId, epoch} when it was authorized.
+			// If a deletion of that profile has since begun (epoch advanced) OR the
+			// owning account row is already purged/re-owned, reject — a completing
+			// prove must not recreate a pending tx after its profile was deleted.
+			// Both checks are bound to the CAPTURED profileId: a successor that reused
+			// the deterministic address owns a DIFFERENT profileId, so getAccount
+			// returns undefined here even after the epoch is released.
+			if (fence) {
+				this.deletionState.assertCurrent(fence.profileId, fence.epoch)
+				const owner = await this.accountService.getAccount(fence.profileId, chainId, account)
+				if (!owner) throw new Error("stale execution owner — account no longer exists")
+			}
+			if (await this.txs.get(hash)) {
+				throw new Error("duplicated hash")
+			}
+			const now = Date.now()
+			// `submittedEndpointUrl` is resolved by the EXECUTOR from the network it
+			// actually built+submitted against (captured before prove/send), then
+			// passed in. It is NOT re-derived here from active-profile state: a TTL
+			// auto-lock or profile switch DURING the (slow) prove would make an
+			// active-profile lookup throw or resolve the wrong profile's endpoint,
+			// recording a wrong/undefined URL — which at poll time routes the receipt
+			// fetch to the active profile's RPC (a cross-profile leak). See
+			// `NetworkService.getNodeForUrl`.
+			const tx: Tx = {
+				origin,
+				chainId,
+				account,
+				calls,
+				nonce,
+				feePaymentMethod,
+				hash,
+				createdAt: now,
+				updatedAt: now,
+				status: TxStatus.Pending,
+				estimatedFee,
+				gasDetails,
+				submittedEndpointUrl,
+			}
+			await this.txs.set(tx.hash, tx)
+			this.emit("onTransactionAdded", tx)
+			this.pending.set(tx.hash, tx)
+			return tx
+		} finally {
+			this.lock.leave()
 		}
-		const now = Date.now()
-		// `submittedEndpointUrl` is resolved by the EXECUTOR from the network it
-		// actually built+submitted against (captured before prove/send), then
-		// passed in. It is NOT re-derived here from active-profile state: a TTL
-		// auto-lock or profile switch DURING the (slow) prove would make an
-		// active-profile lookup throw or resolve the wrong profile's endpoint,
-		// recording a wrong/undefined URL — which at poll time routes the receipt
-		// fetch to the active profile's RPC (a cross-profile leak). See
-		// `NetworkService.getNodeForUrl`.
-		const tx: Tx = {
-			origin,
-			chainId,
-			account,
-			calls,
-			nonce,
-			feePaymentMethod,
-			hash,
-			createdAt: now,
-			updatedAt: now,
-			status: TxStatus.Pending,
-			estimatedFee,
-			gasDetails,
-			submittedEndpointUrl,
-		}
-		await this.txs.set(tx.hash, tx)
-		this.emit("onTransactionAdded", tx)
-		this.pending.set(tx.hash, tx)
-		return tx
 	}
 
 	public async waitForTx(txHash: string, parentTask?: WrappedTask) {
@@ -163,17 +186,30 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	}
 
 	private readonly onAccountDeleted = async (account: Account) => {
-		this.logDebug(`Account ${account.address} deleted, remove related txs`)
-		const txs = (await this.txs.getValues()).filter((x) => x.account === account.address)
-		await purgeRows(
-			txs,
-			(tx) => {
-				this.logDebug(`Remove tx ${tx.hash}`)
-				this.pending.delete(tx.hash)
-				return this.txs.delete(tx.hash)
-			},
-			(tx) => this.emit("onTransactionDeleted", tx),
-		)
+		await this.purgeForAccounts([account.address])
+	}
+
+	/** Awaited tx purge for a SET of accounts — called by the deletion coordinator
+	 *  with the tombstone's authoritative address snapshot (finding D). Runs under
+	 *  the tx lock; idempotent. `onAccountDeleted` delegates here so the single-
+	 *  account (deleteNetwork chain-purge) path shares one implementation. */
+	public async purgeForAccounts(addresses: readonly string[]): Promise<void> {
+		await this.ensureInitialized()
+		const set = new Set(addresses)
+		await this.lock.enter()
+		try {
+			const txs = (await this.txs.getValues()).filter((x) => set.has(x.account))
+			await purgeRows(
+				txs,
+				(tx) => {
+					this.pending.delete(tx.hash)
+					return this.txs.delete(tx.hash)
+				},
+				(tx) => this.emit("onTransactionDeleted", tx),
+			)
+		} finally {
+			this.lock.leave()
+		}
 	}
 
 	private async runWorker() {
@@ -230,20 +266,32 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			return
 		}
 
-		tx.updatedAt = Date.now()
-		tx.status = status
-		tx.executionResult = executionResult
-		tx.block =
-			receipt.blockHash && receipt.blockNumber ? { hash: receipt.blockHash.toString(), number: receipt.blockNumber } : undefined
-		tx.fee = receipt.transactionFee?.toString()
-		tx.error = receipt.error
+		// The node fetch above ran UNLOCKED (network I/O). Re-check + persist UNDER
+		// the tx lock: a concurrent profile-delete purge (`purgeForAccounts`, same
+		// lock) removes this tx from `this.pending` + storage. Without the guarded
+		// re-check, the worker's stale write would RESURRECT a deleted profile's tx
+		// (finding D — in-flight-write fencing). `pending.has` is the fence: the
+		// purge deletes the entry, so a purged tx is skipped here.
+		await this.lock.enter()
+		try {
+			if (!this.pending.has(tx.hash)) return
+			tx.updatedAt = Date.now()
+			tx.status = status
+			tx.executionResult = executionResult
+			tx.block =
+				receipt.blockHash && receipt.blockNumber ? { hash: receipt.blockHash.toString(), number: receipt.blockNumber } : undefined
+			tx.fee = receipt.transactionFee?.toString()
+			tx.error = receipt.error
 
-		await this.txs.set(tx.hash, tx)
-		this.emit("onTransactionUpdated", tx)
-		if (tx.status !== TxStatus.Pending) {
-			this.pending.delete(tx.hash)
+			await this.txs.set(tx.hash, tx)
+			this.emit("onTransactionUpdated", tx)
+			if (tx.status !== TxStatus.Pending) {
+				this.pending.delete(tx.hash)
+			}
+			this.logDebug(`Tx ${tx.hash.slice(0, 8)} ${receipt.status}`)
+		} finally {
+			this.lock.leave()
 		}
-		this.logDebug(`Tx ${tx.hash.slice(0, 8)} ${receipt.status}`)
 	}
 
 	private getTxStatus(status: AztecTxStatus): TxStatus {
@@ -305,22 +353,45 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 
 		const result: Restored<Tx>[] = []
 
-		for (const tx of txs) {
-			try {
-				await this.txs.set(tx.hash, tx)
-
-				result.push(tx)
-				if (tx.status !== TxStatus.Pending) continue
-
-				this.pending.set(tx.hash, tx)
-			} catch (err) {
-				result.push({
-					...tx,
-					restoreError: toRestoreError(err),
-				})
+		await this.lock.enter()
+		try {
+			for (const tx of txs) {
+				try {
+					// D16: never restore a Pending tx. `submittedEndpointUrl` is
+					// backup-controlled and `updateTx` dials it (or, when absent, the
+					// ACTIVE profile's node) — the sync worker would leak an
+					// attacker-chosen hash to the wrong RPC. Pending is transient sync
+					// state that re-derives on the next real submission. Drop-and-record;
+					// NEVER write it (a written Pending row is re-armed by the init scan)
+					// and NEVER add it to `this.pending`.
+					if (tx.status === TxStatus.Pending) {
+						result.push({ ...tx, restoreError: "restored pending transaction rejected" })
+						continue
+					}
+					// B: create-only. `EntityStorage.set` is an upsert on the
+					// profile-shared txs root keyed by `hash`; a crafted hash equal to a
+					// victim's tx would overwrite (erase) it. A restore must never
+					// overwrite an existing tx.
+					if (await this.txs.contains(tx.hash)) {
+						result.push({ ...tx, restoreError: "transaction already exists (hash collision)" })
+						continue
+					}
+					// H: validate + canonicalize the persisted shape (mirror the read
+					// codec) so a malformed row is recorded, not written + codec-hidden.
+					const row = TxSchema.parse(tx)
+					await this.txs.set(row.hash, row)
+					result.push(row)
+				} catch (err) {
+					result.push({
+						...tx,
+						restoreError: toRestoreError(err),
+					})
+				}
 			}
-		}
 
-		return result
+			return result
+		} finally {
+			this.lock.leave()
+		}
 	}
 }

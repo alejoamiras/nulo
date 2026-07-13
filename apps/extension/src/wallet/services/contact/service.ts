@@ -56,7 +56,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 
 	protected async init(services: ServiceCollection) {
 		this.profileService = services.get(ProfileService.name)
-		this.profileService.onProfileDeleted.add(this.onProfileDeleted)
+		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile` (D).
 	}
 
 	public async getContacts(): Promise<Contact[]> {
@@ -233,11 +233,14 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 	 * deleted profiles are cleaned up as a side-effect of the chain purge,
 	 * not by this listener.
 	 */
-	private readonly onProfileDeleted = async (profile: ProfileInfo) => {
-		this.logDebug(`Profile ${profile.id} deleted, remove related contacts`)
+	/** Awaited profile-scoped purge, called by the deletion coordinator (relocated
+	 *  from the removed fire-and-forget `onProfileDeleted` sub — finding D). */
+	public async purgeForProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		this.logDebug(`purgeForProfile ${profileId}: remove related contacts`)
 		try {
 			await this.lock.enter()
-			const contacts = (await this.storage.getValues()).filter((c) => c.profileId === profile.id)
+			const contacts = (await this.storage.getValues()).filter((c) => c.profileId === profileId)
 			await purgeRows(
 				contacts,
 				(contact) => {
@@ -270,6 +273,9 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 					id = getRandomHex(8)
 				}
 				const written = { ...contact, id }
+				// Parse the persisted shape so a malformed backup contact is recorded as
+				// restoreError, not silently written + codec-hidden on read.
+				ContactSchema.parse(written)
 				await this.storage.set(id, written)
 				return written
 			})

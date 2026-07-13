@@ -9,7 +9,7 @@ import { requireActiveProfile } from "@/wallet/services/profile/require-active-p
 import { NetworkService } from "@/wallet/services/network/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
-import { array_max, hasIntersectionByKeys } from "@/wallet/utils"
+import { array_max, hasIntersectionByKeys, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { NuloAccount, type IAccountContract } from "@nulo/aztec-runtime/account"
@@ -33,6 +33,10 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public readonly onAccountDeleted = new EventHandler<Account>()
 
 	private readonly storage: EntityStorage<Account>
+	// Serialises restore() so two concurrent full-backup imports of the same
+	// address can't BOTH pass the intersection check and BOTH write the global
+	// address-keyed row (last-writer-wins ownership flip — audit H4).
+	private readonly restoreLock = new Lock()
 
 	private profileService: ProfileService = null!
 
@@ -43,7 +47,8 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 
 	protected async init(services: ServiceCollection): Promise<void> {
 		this.profileService = services.get(ProfileService.name)
-		this.profileService.onProfileDeleted.add(this.onProfileDeleted)
+		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile`,
+		// NOT a fire-and-forget `onProfileDeleted` subscriber (finding D).
 		const networkService = services.get(NetworkService.name) as NetworkService
 		networkService.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
 	}
@@ -205,16 +210,32 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		return poseidon2Hash([master, chainId, type, index])
 	}
 
-	private readonly onProfileDeleted = async (profile: ProfileInfo) => {
-		this.logDebug(`profile ${profile.id} deleted, remove related accounts`)
-		const accounts = (await this.storage.getValues()).filter((x) => x.profileId === profile.id)
+	/** Lock-free, profileId-parameterized account read — for the deletion
+	 *  coordinator's snapshot (safe under the facade lock: no requireActiveProfile). */
+	public async getAccountsRaw(profileId: string): Promise<Account[]> {
+		await this.ensureInitialized()
+		return (await this.storage.getValues()).filter((x) => x.profileId === profileId)
+	}
+
+	/** Awaited profile-scoped account purge, called by the deletion coordinator.
+	 *  (Relocated from the removed fire-and-forget `onProfileDeleted` subscriber so
+	 *  deletion is awaited end-to-end — finding D.) Idempotent: delete-of-gone is a
+	 *  no-op, so a resumed/re-run coordinator converges. */
+	public async purgeForProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		this.logDebug(`purgeForProfile ${profileId}: remove related accounts`)
+		const accounts = (await this.storage.getValues()).filter((x) => x.profileId === profileId)
+		// SILENT: the deletion coordinator awaits every dependent purge DIRECTLY
+		// (txs/auth via purgeForAccounts, balances via purgeForTokens, incoming via
+		// clearProfile), so re-emitting onAccountDeleted here is redundant — and its
+		// fire-and-forget consumers (auth/tx/incoming) run async AFTER the coordinator
+		// releases the id, clobbering a successor that reuses this deterministic
+		// address (audit H3). The standalone deleteNetwork/deleteAccount paths keep
+		// their emit; only the profile-wide purge goes silent.
 		await purgeRows(
 			accounts,
-			(account) => {
-				this.logDebug(`remove account ${account.address}`)
-				return this.storage.delete(account.address)
-			},
-			(account) => this.emit("onAccountDeleted", account),
+			(account) => this.storage.delete(account.address),
+			() => {},
 		)
 	}
 
@@ -227,23 +248,47 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public async restore(accounts: Account[]): Promise<Restored<Account>[]> {
 		await this.ensureInitialized()
 
-		const result: Restored<Account>[] = []
+		// Serialise the whole restore: the intersection check + the writes must be
+		// atomic w.r.t. a concurrent restore, or two imports of the same address
+		// both pass the check then both write (last-writer-wins ownership — H4).
+		try {
+			await this.restoreLock.enter()
 
-		const hasIntersectionByAddress = hasIntersectionByKeys(await this.storage.getValues(), accounts, ["address"])
-		if (hasIntersectionByAddress) throw new Error("Duplicate address")
+			const result: Restored<Account>[] = []
 
-		for (const account of accounts) {
-			try {
-				await this.storage.set(account.address, account)
-				result.push(account)
-			} catch (err) {
-				result.push({
-					...account,
-					restoreError: toRestoreError(err),
-				})
+			const hasIntersectionByAddress = hasIntersectionByKeys(await this.storage.getValues(), accounts, ["address"])
+			if (hasIntersectionByAddress) throw new Error("Duplicate address")
+
+			const seen = new Set<string>()
+			for (const account of accounts) {
+				try {
+					// H: validate + canonicalize the persisted shape (mirror the read codec).
+					const parsed = AccountSchema.parse(account)
+					// F: reject an empty/whitespace address. "Successfully restored" must NOT
+					// mean "set() didn't throw" for a blank address — a blank-account row
+					// would otherwise join the imported-account allow-set and let a tx/authwit
+					// referencing "" through. (Full AztecAddress canonicalization is a stronger
+					// follow-up; a legit backup's addresses are already canonical, so the
+					// composable's address-match stays exact for real data.)
+					if (parsed.address.trim().length === 0) throw new Error("empty account address")
+					// Dedupe within the batch — the storage-intersection check above only
+					// covers pre-existing rows, so two identical addresses in one restore
+					// would otherwise both "succeed" (last write wins).
+					if (seen.has(parsed.address)) throw new Error("duplicate account address in batch")
+					seen.add(parsed.address)
+					await this.storage.set(parsed.address, parsed)
+					result.push(parsed)
+				} catch (err) {
+					result.push({
+						...account,
+						restoreError: toRestoreError(err),
+					})
+				}
 			}
-		}
 
-		return result
+			return result
+		} finally {
+			this.restoreLock.leave()
+		}
 	}
 }

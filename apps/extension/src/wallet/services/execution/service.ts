@@ -16,6 +16,7 @@ import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { AccountService } from "@/wallet/services/account/service"
 import { ContactService } from "@/wallet/services/contact/service"
 import { ProfileService } from "@/wallet/services/profile/service"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { TokenService } from "@/wallet/services/token/service"
@@ -300,6 +301,15 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		this.fpcService.onFpcDeleted.add(invalidateOnPrivateFpc)
 	}
 
+	/** Capture the {profileId, epoch} fence at execution AUTHORIZATION (before the
+	 *  slow prove) so `addTransaction` can reject a completing prove whose profile
+	 *  was deleted meanwhile (D13). Delegates to ProfileService so the active-read +
+	 *  reserved-check + epoch-capture are ATOMIC under the facade lock — composing
+	 *  requireActiveProfile + capture here would leave a TOCTOU (codex verify). */
+	private async captureFence(): Promise<ExecutionFence> {
+		return this.profileService.captureExecutionFence()
+	}
+
 	public async executeTransfer(
 		networkId: string,
 		accountAddress: string,
@@ -312,9 +322,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	): Promise<string> {
 		await this.ensureInitialized()
 		amount = coerceAmount(amount)
+		const fence = await this.captureFence()
 		return this.transferExecutor.execute(
 			{ networkId, accountAddress, tokenId, transferType, recipientAddress, amount, feeSettings },
 			precomputedEstimateId,
+			fence,
 		)
 	}
 
@@ -442,7 +454,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 					}
 					case "aztec_sendTx": {
 						// Hooks forwarded ONLY to aztec_sendTx; other ops don't need them.
-						result = await this.dappSendExecutor.executeAztecSendTx(operation, origin, operationTask, hooks)
+						// Capture the deletion fence HERE (a send op that writes a tx),
+						// not at the batch top — read-only ops must not trip the
+						// unlock check, and this is still before the prove (D13).
+						const fence = await this.captureFence()
+						result = await this.dappSendExecutor.executeAztecSendTx(operation, origin, operationTask, hooks, fence)
 						break
 					}
 					case "aztec_createAuthWit": {
@@ -568,7 +584,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 	public async executeSendTransaction(op: SendTransactionOperation, origin: LocalTxOrigin, parentTask?: WrappedTask): Promise<string> {
 		await this.ensureInitialized()
-		return this.dappSendExecutor.executeSendTransaction(op, origin, parentTask)
+		const fence = await this.captureFence()
+		return this.dappSendExecutor.executeSendTransaction(op, origin, parentTask, fence)
 	}
 
 	/**

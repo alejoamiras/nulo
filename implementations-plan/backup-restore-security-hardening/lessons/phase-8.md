@@ -1,0 +1,19 @@
+# Phase 8 — deletion coordinator + tombstones (D core) — lessons
+
+**Status: ◐ core ✓ (6 commits `fd9e8a9`→`3c038e1`); D13 secondary write-paths remain.** Gate: full unit suite 3039 pass, 0 fail; typecheck 0; lint 0. Codex wiring consult saved at `consult-phase8-wiring.md`.
+
+## What was built
+- **`TombstoneRepository`** (raw `storage.local`, NOT EntityStorage): `reservedIds()` from RAW keys (never decodes → a corrupt tombstone still reserves its id, fail-CLOSED); `validPayloads()` for resume (skips but never removes corrupt); `clearIfSame(id, epoch)`. **Why not EntityStorage:** its `getValues()` auto-REMOVES syntax-invalid rows on decode → a corrupt tombstone would vanish → id-reuse fails OPEN.
+- **`ProfileDeletionState`**: in-memory reserved-id set + per-profile deletion epoch (`capture`/`beginDeletion`/`assertCurrent`).
+- **11 leaf purge methods** — `purgeForProfile` (account/token/network/fpc/contact/dapp-session/journal), `purgeForAccounts` (tx/auth), `purgeForTokens` (token-balance), `clearProfile` (incoming, pre-existing). The fire-and-forget `onProfileDeleted` subs were REMOVED; the account/token-scoped `onAccountDeleted`/`onTokenDeleted` subs stay for the standalone `deleteNetwork` chain-purge path.
+- **`purgeChain` fail-fast** (codex blocker 1): runs every step best-effort but PROPAGATES if any failed → the coordinator keeps the tombstone + retries.
+- **`ProfileDeletionCoordinator`** — a last-started `IService` (declares deps on all 12 leaves) that injects itself as ProfileService's lazy delegate; `snapshot` (lock-free `getAccountsRaw`/`getTokensRaw`/`getNetworksRaw`) + `runFor` (awaited, single-flight, idempotent, address-derived-purges-BEFORE-network-tail) + PXE `clearProfileState`.
+- **Two-phase `deleteProfile`** — phase 1 UNDER the facade lock (snapshot → tombstone write + epoch bump → row delete → session close BEFORE emit → UI-only emit); phase 2 OUTSIDE the lock (`delegate.runFor`); phase 3 UNDER lock (epoch-guarded `clearIfSame` + release). **`resumePendingDeletions`** re-runs phase 1 idempotently + the purge on next boot.
+- **Read-gating (fail-closed):** `getProfiles`/`getActiveProfile` exclude reserved ids; every `contains(id)`/`contains(userHandle)` collision check ALSO excludes reserved; new-profile generators route through `nextUnreservedId`. Reserved set seeded from RAW tombstone keys in `init()` BEFORE session restore.
+- **D13 primary fence:** `updateTx` re-checks `pending.has(hash)` UNDER the tx lock before writing (the purge `pending.delete`s → skipped); `addTransaction` wrapped in the tx lock.
+
+## Key decisions / gotchas
+- **Circular-import avoidance:** the `ProfileDeletionDelegate` interface lives in `profile-deletion/types.ts` (NOT the coordinator, which imports every leaf) so ProfileService imports the type without the coordinator → no cycle. The coordinator resolves ProfileService lazily at `start()`, never in `init()`.
+- **zsh doesn't word-split unquoted vars** — use `${=VAR}` or explicit paths in git/biome commands.
+- **Every service-purge test that fired `onProfileDeleted.invoke`** had to switch to calling `purgeForProfile` directly (the sub was removed); the profile integration harness needed a stub delegate injected (deleteProfile now requires one).
+- **D13 RESIDUAL (documented for the post-impl audit):** token-metadata (`token/service.ts`), balance-projection (`balance-job-queue.ts`), and approved-execution write paths are NOT yet epoch-fenced. A mid-flight one could resurrect a row after purge. It's a narrow window (those are less periodic than the 1s tx poller, which IS fenced), and the successor-clobber / network-less-leak / atomicity / PXE-privacy vectors are all closed. The remaining fix = inject the shared `ProfileDeletionState` into those services + `assertCurrent` after acquiring their write lock. Flagged, not silently skipped.

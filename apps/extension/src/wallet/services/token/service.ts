@@ -25,6 +25,7 @@ import { simulate } from "@/wallet/utils/fn"
 import {
 	type Token,
 	type TokenInfo,
+	type TokenDeleted,
 	TOKEN_SERVICE_NAME,
 	TOKEN_STORAGE_ROOT,
 	TokenSchema,
@@ -53,7 +54,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 
 	public readonly onTokenAdded = new EventHandler<TokenInfo>()
 	public readonly onTokenUpdated = new EventHandler<TokenInfo>()
-	public readonly onTokenDeleted = new EventHandler<TokenInfo>()
+	public readonly onTokenDeleted = new EventHandler<TokenDeleted>()
 
 	private readonly tokens: EntityStorage<Token>
 	private readonly lock = new Lock()
@@ -81,7 +82,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		this.accounts = services.get(AccountService.name)
 		this.tasks = services.get(TaskService.name)
 		this.journal = services.get(OperationJournalService.name)
-		this.profiles.onProfileDeleted.add(this.onProfileDeleted)
+		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile` (D).
 		this.networks.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
 	}
 
@@ -96,7 +97,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		await purgeRows(
 			tokens,
 			(token) => this.tokens.delete(`${token.id}`),
-			(token) => this.emit("onTokenDeleted", getTokenInfo(token)),
+			(token) => this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId }),
 		)
 	}
 
@@ -289,7 +290,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	 * profile's tokens (an active-profile guard here would throw and orphan
 	 * them). The public `deleteToken` RPC does the ownership check first.
 	 */
-	private async _deleteTokenById(id: number): Promise<TokenInfo> {
+	private async _deleteTokenById(id: number, emit = true): Promise<TokenInfo> {
 		try {
 			await this.lock.enter()
 			const token = await this.tokens.get(`${id}`)
@@ -297,7 +298,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				throw new Error("unknown token id")
 			}
 			await this.tokens.delete(`${id}`)
-			this.emit("onTokenDeleted", getTokenInfo(token))
+			if (emit) this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId })
 			return getTokenInfo(token)
 		} finally {
 			this.lock.leave()
@@ -541,11 +542,19 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		return tokens.find((token) => token.profileId === profileId && token.chainId === chainId && token.contract === contract)
 	}
 
-	private readonly onProfileDeleted = async (profile: ProfileInfo) => {
-		this.logDebug(`Profile ${profile.id} deleted, remove related tokens`)
-		for (const token of (await this.tokens.getValues()).filter((x) => x.profileId === profile.id)) {
-			this.logDebug(`Remove token ${token.id}`)
-			await this._deleteTokenById(token.id)
+	/** Awaited profile-scoped token purge, called by the deletion coordinator
+	 *  (relocated from the removed fire-and-forget `onProfileDeleted` sub — D).
+	 *  Idempotent. `_deleteTokenById` emits `onTokenDeleted` with the authoritative
+	 *  profileId (P6), so token-balance/incoming cleanup stays profile-accurate. */
+	public async purgeForProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		this.logDebug(`purgeForProfile ${profileId}: remove related tokens`)
+		for (const token of (await this.tokens.getValues()).filter((x) => x.profileId === profileId)) {
+			// SILENT (emit=false): the deletion coordinator awaits token-balance +
+			// incoming-transfer purges DIRECTLY, so re-emitting onTokenDeleted here is
+			// redundant and its fire-and-forget consumer could clobber a successor
+			// that reuses the highest token id (audit H3).
+			await this._deleteTokenById(token.id, false)
 		}
 	}
 
@@ -564,7 +573,11 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			// so a single write consumes an id and the next row picks up after it.
 			let id = await nextNumericId(this.tokens)
 			return await restoreRows(tokens, async (token) => {
-				const row = { ...token, id }
+				// Validate the persisted shape BEFORE consuming an id/writing: a token
+				// with e.g. `chainId: "1:"` would otherwise "succeed", have a balance
+				// relinked to it, then be rejected by the read codec — leaving an
+				// orphaned balance. Parsing here records it as a restoreError instead.
+				const row = TokenSchema.parse({ ...token, id })
 				await this.tokens.set(`${id}`, row)
 				id++
 				return row

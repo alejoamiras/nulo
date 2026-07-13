@@ -223,11 +223,19 @@ export type Methods = {
 	): { name: string; symbol: string; decimals: number; interface: TokenInterface }
 }
 
+/**
+ * `onTokenDeleted` payload. `TokenInfo` is deliberately profile-stripped (it's
+ * the RPC-facing shape), but deletion consumers MUST scope to the DELETED token's
+ * profile — using the active profile instead wipes the wrong profile's data
+ * (finding C). So the deletion event carries the authoritative `profileId`.
+ */
+export type TokenDeleted = TokenInfo & { profileId: string }
+
 export type Events = {
 	/** Emitted when a new token is created */
 	onTokenAdded: TokenInfo
 	/** Emitted when an existing token is updated */
 	onTokenUpdated: TokenInfo
 	/** Emitted when an existing token is deleted */
-	onTokenDeleted: TokenInfo
+	onTokenDeleted: TokenDeleted
 }

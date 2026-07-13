@@ -8,9 +8,9 @@ import { PXEProxy } from "./proxy"
 const SW_ONLY = ["getNoteSchemas", "getBlockTimestamp", "clearChainState"] as const
 
 describe("PXE_METHOD_DESCRIPTORS", () => {
-	test("covers the full 21-method surface with every flag explicit", () => {
+	test("covers the full 22-method surface with every flag explicit", () => {
 		const names = Object.keys(PXE_METHOD_DESCRIPTORS)
-		expect(names).toHaveLength(21)
+		expect(names).toHaveLength(22)
 		for (const name of names) {
 			const d = PXE_METHOD_DESCRIPTORS[name as keyof typeof PXE_METHOD_DESCRIPTORS]
 			expect(typeof d.rpc).toBe("boolean")

@@ -13,8 +13,18 @@
 
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
+import { EventHandler } from "@nulo/wallet-core/utils"
+import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
+import { ACCOUNT_SERVICE_NAME } from "@/wallet/services/account/spec"
+import { EXECUTION_SERVICE_NAME } from "@/wallet/services/execution/spec"
+import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
+import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
+import { TASK_SERVICE_NAME } from "@/wallet/services/task/spec"
+import { TOKEN_SERVICE_NAME } from "@/wallet/services/token/spec"
+import { TRANSACTION_SERVICE_NAME } from "@/wallet/services/transaction/spec"
+import { svc } from "../composition-harness"
 import { BalanceRepository } from "./balance-repository"
 import { TokenBalanceService } from "./service"
 import type { TokenBalanceRaw } from "./spec"
@@ -81,5 +91,69 @@ describe("TokenBalanceService.onTokenDeleted purge cascade", () => {
 		await invokeDelete(1)
 
 		expect((await seedRepo.getAll()).map((b) => b.id)).toEqual([3])
+	})
+})
+
+describe("TokenBalanceService.restore — hostile-row validation (P1)", () => {
+	let service: TokenBalanceService
+	let seedRepo: BalanceRepository
+
+	beforeEach(async () => {
+		const api = new FakeBrowserApi()
+		api.reset()
+		seedRepo = new BalanceRepository(api)
+		// restore() gates on ensureInitialized(), so run the real lifecycle over
+		// stub peers. A no-op ticker keeps the balance queue from scheduling a real
+		// interval (no open handle / background poll in the unit run).
+		const noopTicker = { subscribe: () => ({ cancel: () => {} }) } as never
+		const services = new ServiceCollection()
+		services.add(svc(PROFILE_SERVICE_NAME, { onActiveProfileChanged: new EventHandler(), getActiveProfile: async () => undefined }))
+		services.add(svc(NETWORK_SERVICE_NAME, {}))
+		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountAdded: new EventHandler() }))
+		services.add(
+			svc(TOKEN_SERVICE_NAME, {
+				onTokenAdded: new EventHandler(),
+				onTokenUpdated: new EventHandler(),
+				onTokenDeleted: new EventHandler(),
+				getTokensRaw: async () => [],
+			}),
+		)
+		services.add(svc(TRANSACTION_SERVICE_NAME, { onTransactionUpdated: new EventHandler() }))
+		services.add(svc(EXECUTION_SERVICE_NAME, {}))
+		services.add(svc(TASK_SERVICE_NAME, {}))
+		service = new TokenBalanceService(new LoggerStore(new ConfigStore()), api, noopTicker)
+		services.add(service)
+		await services.start()
+	})
+
+	test("records a schema-invalid row as restoreError and never writes it", async () => {
+		// account must be a string; a hostile backup row with a non-string account
+		// would pass EntityStorage's write but be codec-hidden on read (invisible to
+		// a later getValues() cleanup). restore() must parse-reject it up front.
+		const bad = { id: 5, token: 1, account: 123, updatedAt: 0 } as unknown as TokenBalanceRaw
+
+		const [restored] = await service.restore([bad])
+
+		expect(restored.restoreError).toBeTruthy()
+		expect(await seedRepo.getAll()).toEqual([])
+	})
+
+	test("writes a valid row under a freshly allocated id (input id is ignored)", async () => {
+		const [restored] = await service.restore([balance(999, 1)])
+
+		expect(restored.restoreError).toBeUndefined()
+		const all = await seedRepo.getAll()
+		expect(all).toHaveLength(1)
+		expect(all[0].token).toBe(1)
+	})
+
+	test("a malformed row does not abort the batch — the valid sibling still lands", async () => {
+		const bad = { id: 5, token: 1, account: 123, updatedAt: 0 } as unknown as TokenBalanceRaw
+
+		const restored = await service.restore([bad, balance(7, 2)])
+
+		expect(restored[0].restoreError).toBeTruthy()
+		expect(restored[1].restoreError).toBeUndefined()
+		expect((await seedRepo.getAll()).map((b) => b.token)).toEqual([2])
 	})
 })

@@ -1,0 +1,20 @@
+# Phase 9 — coverage completion + unconditional e2e contract — lessons
+
+**Status: ✓ (unit `502b883`; e2e extension + chainId fix next commit).** Gate PASSED: `bun run audit:vue` (3045 unit pass, typecheck 0, lint 0) + `bun run e2e:agent tests/e2e/network/backup-restore-integrity.test.ts` → `Tests 2 passed (2)`.
+
+## What was added
+- **Composable (`useFullBackupImport.test.ts`):** a 3+ network mixed `changed/failed/unchanged/changed` index-pairing matrix pin (finding E — a 4-network set index-remaps to `[M1, N2, N3, M4]`, no cascade-aliasing).
+- **Dropped the composable dup-source-id pin as UNREACHABLE:** a backup with two networks sharing a root id is rejected UPSTREAM by backup normalization (`backup-migration-registry` duplicate-root-id guard) before restore runs, so the composable's `sourceIdCounts` skip can't be exercised through `restoreBackup`. The cascade-aliasing core of E is already pinned at the helper level (`remapByMap` N1→R, R→S single-pass). Documented in-place instead of a dead test.
+- **token-balance + auth-registry restore hostile-row pins (P1, deferred from P3):** a schema-invalid row is recorded as `restoreError` and never written; a malformed row doesn't abort the batch (valid sibling still lands).
+- **e2e extension:** doctored backup now also carries a foreign AUTHWIT + foreign TOKEN-BALANCE (both dropped) + a funded authwit (survives), and a **delete → re-add round-trip** (finding D).
+- **Arming test made UNCONDITIONAL:** absent sandbox config in this network-only file is a mis-set gate → FAIL, never vacuous skip.
+
+## Key gotchas
+- **Service `restore()` gates on `ensureInitialized()`** → a direct `new Service()` unit hangs at 5s. Must drive the real lifecycle: `ServiceCollection` + `svc(NAME, {stubMethods})` peers + `await services.start()` (the house pattern from `account/service.test.ts`). token-balance resolves 7 peers and starts a balance-queue ticker → inject a **no-op `BackgroundTickerPort`** (`{ subscribe: () => ({ cancel(){} }) }`) as the 3rd ctor arg so no real interval leaks. auth-registry is cheap (init only subscribes to two EventHandlers).
+- **Backup data slice keys are the SERVICE names:** `data["auth-registry"]`, `data["token-balance"]` (NOT `authwit`/`tokenBalance`) — verified against `backup-migration-registry.test.ts`. The auth root prefix `nulo:core:auth-registry@` does NOT collide with `nulo:core:auth-registry-enabled@` (the `@` after `auth-registry` disambiguates).
+
+## The pre-existing e2e bug this phase surfaced (real find)
+The P1 provenance e2e keyed its doctored tx to `exported.data.network[0].chainId`, but the `tokenReadyExtension` wallet seeds **4 networks + 2 accounts**, and the FUNDED account lives on chainId **0** — `network[0]` is a *different* chain (2793892258). The tx provenance filter keys by the `(chainId, address)` TUPLE (`importedChainAddress.has("${tx.chainId}:${account}")`), so the funded tx was (correctly!) dropped as cross-chain → `txAccounts === []`. The committed test's tx logic was identical, so **this test had never run green on a real multi-network sandbox** — network e2e is gated/expensive and Phase 9 is the first time it ran. Fix: derive the tx chainId from the **funded account's own backup row** (`backupAccounts.find(a => a.address === funded).chainId`), not `network[0]`. Diagnosed by dumping raw-storage account/network/tx chainIds via a temporary `[DIAG]` `console.log` (removed after).
+
+## Deletion round-trip design
+The reset UI (`reset.vue`) fires `deleteProfile` **without awaiting** (optimistic nav to `/register`) — the coordinator's INTERNAL awaits (phases 1→2→3) are what guarantee completion. So the e2e can't read storage once after nav; it **polls** (≤60s) until `txs/accounts/tokens/tombstones` roots are all empty. A stuck tombstone or orphaned row = a fire-and-forget regression → poll times out → test fails. `networks` is excluded from the assertion (a fresh `/register` state may re-seed default networks profile-independently). Then `registerProfile(ctx2)` + assert no `nulo:core:txs@` = no resurrection.

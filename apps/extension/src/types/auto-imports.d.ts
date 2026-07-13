@@ -83,6 +83,7 @@ declare global {
   const markRaw: typeof import('vue').markRaw
   const migrationIdle: typeof import('../utils/storage').migrationIdle
   const nextTick: typeof import('vue').nextTick
+  const normalizeAllIds: typeof import('../utils/full-backup-helpers').normalizeAllIds
   const normalizeAmount: typeof import('../utils/amount').normalizeAmount
   const onActivated: typeof import('vue').onActivated
   const onBeforeMount: typeof import('vue').onBeforeMount
@@ -113,6 +114,7 @@ declare global {
   const readonly: typeof import('vue').readonly
   const ref: typeof import('vue').ref
   const refreshBalances: typeof import('../utils/core').refreshBalances
+  const remapByMap: typeof import('../utils/full-backup-helpers').remapByMap
   const remapIdInBackupData: typeof import('../utils/full-backup-helpers').remapIdInBackupData
   const requireAccount: typeof import('../utils/core').requireAccount
   const requireNetwork: typeof import('../utils/core').requireNetwork
@@ -348,6 +350,7 @@ declare module 'vue' {
     readonly markRaw: UnwrapRef<typeof import('vue')['markRaw']>
     readonly migrationIdle: UnwrapRef<typeof import('../utils/storage')['migrationIdle']>
     readonly nextTick: UnwrapRef<typeof import('vue')['nextTick']>
+    readonly normalizeAllIds: UnwrapRef<typeof import('../utils/full-backup-helpers')['normalizeAllIds']>
     readonly normalizeAmount: UnwrapRef<typeof import('../utils/amount')['normalizeAmount']>
     readonly onActivated: UnwrapRef<typeof import('vue')['onActivated']>
     readonly onBeforeMount: UnwrapRef<typeof import('vue')['onBeforeMount']>
@@ -378,7 +381,7 @@ declare module 'vue' {
     readonly readonly: UnwrapRef<typeof import('vue')['readonly']>
     readonly ref: UnwrapRef<typeof import('vue')['ref']>
     readonly refreshBalances: UnwrapRef<typeof import('../utils/core')['refreshBalances']>
-    readonly remapIdInBackupData: UnwrapRef<typeof import('../utils/full-backup-helpers')['remapIdInBackupData']>
+    readonly remapByMap: UnwrapRef<typeof import('../utils/full-backup-helpers')['remapByMap']>
     readonly requireAccount: UnwrapRef<typeof import('../utils/core')['requireAccount']>
     readonly requireNetwork: UnwrapRef<typeof import('../utils/core')['requireNetwork']>
     readonly requireTransaction: UnwrapRef<typeof import('../utils/core')['requireTransaction']>

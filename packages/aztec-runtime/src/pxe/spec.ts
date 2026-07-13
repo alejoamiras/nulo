@@ -78,4 +78,10 @@ export type Methods = {
 	 * NetworkService.purgeChain coordinator when a chain is removed.
 	 */
 	clearChainState(profileId: string, chainId: number): void
+	/** Profile-wide PXE erase: deletes ALL of a profile's PXE databases by
+	 *  prefix (catches orphan/network-less DBs a per-chain clear misses) and
+	 *  the shared keyval-store only when no PXE DB survives. Awaited +
+	 *  failure-propagating — the deletion coordinator treats a rejection as a
+	 *  critical, retryable erasure failure. */
+	clearProfileState(profileId: string): void
 }
