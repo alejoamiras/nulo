@@ -190,14 +190,14 @@ describe("PxeService deletion honesty (finding D)", () => {
 	}
 
 	test("clearChainState REJECTS when deleteDatabase errors — no false 'deleted'", async () => {
-		const service = makeService(makeFactory({}).factory)
+		const service = makeService(makeFactory({ nodeBehavior: "throws" }).factory)
 		;(service as unknown as { registry: unknown }).registry = { dispose: async () => {} }
 		vi.stubGlobal("indexedDB", { deleteDatabase: () => fireReq("error") })
 		await expect(service.clearChainState("p1", 1)).rejects.toThrow()
 	})
 
 	test("clearProfileState deletes the profile's DBs by prefix but KEEPS keyval-store while another profile survives", async () => {
-		const service = makeService(makeFactory({}).factory)
+		const service = makeService(makeFactory({ nodeBehavior: "throws" }).factory)
 		;(service as unknown as { registry: unknown }).registry = { disposeProfile: async () => {} }
 		const deleted: string[] = []
 		let dbs = [{ name: "pxe/p1/1" }, { name: "pxe/p2/1" }, { name: "keyval-store" }]
