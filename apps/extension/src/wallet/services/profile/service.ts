@@ -588,7 +588,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	public async confirmProfileOperation(id: string, password?: string): Promise<boolean> {
 		await this.ensureInitialized()
 
-		const snapshot = await this.runExclusive(async () => {
+		const { snapshot, capturedEpoch } = await this.runExclusive(async () => {
 			const fetched = await this.repo.get(id)
 			if (!fetched) {
 				throw new Error("Invalid profile id")
@@ -597,7 +597,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (this.deletionState.isReserved(id)) {
 				throw new Error("Invalid profile id")
 			}
-			return fetched
+			// Capture the deletion epoch atomically with the snapshot — a delete
+			// (even one FOLLOWED by a same-id restore) bumps it permanently, so the
+			// post-op check below rejects a stale generation (codex verify r3).
+			return { snapshot: fetched, capturedEpoch: this.deletionState.capture(id) }
 		})
 
 		try {
@@ -627,12 +630,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				await this.passkeyCoordinator.confirm(snapshot)
 			}
 			// Revalidate AFTER the async credential op (codex verify): a delete that
-			// completed during the (unlocked) derivation/prompt must not report a
-			// successful confirmation for the now-erased profile. confirm returns a
-			// boolean (no secret), so the delete check suffices — and must NOT reject
-			// a LEGIT concurrent password change (that's not a delete).
+			// completed during the (unlocked) derivation/prompt — even one followed by
+			// a same-id restore — must not report success for the stale generation.
+			// The epoch check distinguishes generations; a LEGIT concurrent password
+			// change does NOT bump the epoch, so confirm still succeeds.
 			await this.runExclusive(async () => {
-				if (!(await this.repo.get(id)) || this.deletionState.isReserved(id)) {
+				if (!(await this.repo.get(id)) || this.deletionState.isReserved(id) || !this.deletionState.isCurrent(id, capturedEpoch)) {
 					throw new Error("Invalid profile id")
 				}
 			})
@@ -653,17 +656,6 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 *  delete is fenced when it tries to persist afterward (D13). */
 	public getDeletionState(): ProfileDeletionState {
 		return this.deletionState
-	}
-
-	/** Stable identity of a profile ROW (its sealed creds) — used to revalidate
-	 *  after a slow unlocked op that a delete+reimport didn't reuse the id with
-	 *  DIFFERENT creds (would otherwise leak the pre-delete secret; C1 revalidation). */
-	private profileIdentity(p: Profile | undefined): string | undefined {
-		if (!p) return undefined
-		// The Profile discriminated union is intersected with ProfileInfo, which
-		// defeats `p.type ===` narrowing — read the sealed fields off a widened view.
-		const row = p as { type: string; guard?: string; secret?: string; credentialId?: string }
-		return row.type === "passkey" ? `pk:${row.credentialId}` : `pw:${row.guard}:${row.secret}`
 	}
 
 	/** A fresh profile id that is neither in storage NOR reserved by a pending
@@ -831,14 +823,20 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 	public async exportPlain(id: string, password?: string, credentialData?: PasskeyCredentialData): Promise<string> {
 		await this.ensureInitialized()
-		const profile = await this.repo.get(id)
-		if (!profile) {
-			throw new Error("Invalid profile id")
-		}
-		// A tombstoned profile (mid-delete) must not export its master secret.
-		if (this.deletionState.isReserved(id)) {
-			throw new Error("Invalid profile id")
-		}
+		// Capture the row + deletion epoch ATOMICALLY under the lock. A delete
+		// (even one followed by a same-id restore) bumps the epoch permanently, so
+		// the post-derivation check rejects a stale generation (codex verify r3).
+		const { profile, capturedEpoch } = await this.runExclusive(async () => {
+			const profile = await this.repo.get(id)
+			if (!profile) {
+				throw new Error("Invalid profile id")
+			}
+			// A tombstoned profile (mid-delete) must not export its master secret.
+			if (this.deletionState.isReserved(id)) {
+				throw new Error("Invalid profile id")
+			}
+			return { profile, capturedEpoch: this.deletionState.capture(id) }
+		})
 
 		if (profile.type === "passkey") {
 			// Path A: caller (popup) ran the in-page WebAuthn ceremony via the
@@ -875,7 +873,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			}
 			// A delete that completed during the (unlocked) WebAuthn prompt must not
 			// still return the credentialId (codex verify).
-			if (this.deletionState.isReserved(id) || current.type !== "passkey" || current.credentialId !== profile.credentialId) {
+			if (
+				this.deletionState.isReserved(id) ||
+				!this.deletionState.isCurrent(id, capturedEpoch) ||
+				current.type !== "passkey" ||
+				current.credentialId !== profile.credentialId
+			) {
 				throw new Error("Invalid profile id")
 			}
 			return current.credentialId
@@ -903,7 +906,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// master secret. Re-fetch catches gone/reimported; isReserved catches
 				// mid-delete.
 				const still = await this.repo.get(id)
-				if (!still || this.deletionState.isReserved(id) || this.profileIdentity(still) !== this.profileIdentity(profile)) {
+				if (!still || this.deletionState.isReserved(id) || !this.deletionState.isCurrent(id, capturedEpoch)) {
 					throw new Error("Invalid profile id")
 				}
 				return Buffer.from(secret).toString("base64")
@@ -920,14 +923,18 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 	public async exportMnemonic(id: string, password: string): Promise<string[]> {
 		await this.ensureInitialized()
-		const profile = await this.repo.get(id)
-		if (!profile) {
-			throw new Error("Invalid profile id")
-		}
-		// A tombstoned profile (mid-delete) must not export its seed phrase.
-		if (this.deletionState.isReserved(id)) {
-			throw new Error("Invalid profile id")
-		}
+		// Capture row + deletion epoch atomically (see exportPlain / codex verify r3).
+		const { profile, capturedEpoch } = await this.runExclusive(async () => {
+			const profile = await this.repo.get(id)
+			if (!profile) {
+				throw new Error("Invalid profile id")
+			}
+			// A tombstoned profile (mid-delete) must not export its seed phrase.
+			if (this.deletionState.isReserved(id)) {
+				throw new Error("Invalid profile id")
+			}
+			return { profile, capturedEpoch: this.deletionState.capture(id) }
+		})
 		if (profile.type === "passkey") {
 			throw new Error("Operation not supported for passkey profile")
 		}
@@ -944,7 +951,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			// Revalidate AFTER the slow unseal (codex verify): a delete completing
 			// during derivation must not still hand back the erased profile's seed.
 			const still = await this.repo.get(id)
-			if (!still || this.deletionState.isReserved(id) || this.profileIdentity(still) !== this.profileIdentity(profile)) {
+			if (!still || this.deletionState.isReserved(id) || !this.deletionState.isCurrent(id, capturedEpoch)) {
 				throw new Error("Invalid profile id")
 			}
 			return await getMnemonic(secret)
