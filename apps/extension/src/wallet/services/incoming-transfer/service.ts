@@ -162,10 +162,12 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		this.tokenService.onTokenDeleted.add(this.onTokenDeleted)
 		this.transactionService.onTransactionAdded.add(this.onTransactionAdded)
 		// Profile lifecycle: re-hydrate the scheduler set when the active
-		// profile changes (otherwise we keep scanning the old profile's
-		// tokens). Wipe stored records when a profile is deleted.
+		// profile changes (otherwise we keep scanning the old profile's tokens).
+		// NB: profile DELETION cleanup is NOT wired here — the deletion coordinator
+		// calls `clearProfile` DIRECTLY + AWAITED (coordinator.ts). A fire-and-forget
+		// `onProfileDeleted` sub here would run un-awaited AFTER the coordinator
+		// releases the id, re-introducing the exact race D7 removed (audit H3/D7).
 		this.profileService.onActiveProfileChanged.add(this.onActiveProfileChanged)
-		this.profileService.onProfileDeleted.add(this.onProfileDeleted)
 		// Account lifecycle (codex post-impl audit C3): without these, a newly
 		// added account stays unscanned until SW restart (or the user adds a
 		// token), and a deleted account keeps polling PXE indefinitely — both
@@ -196,10 +198,6 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 	private onActiveProfileChanged = async (): Promise<void> => {
 		await this.hydrateSchedulers()
-	}
-
-	private onProfileDeleted = async (profile: { id: string }): Promise<void> => {
-		await this.clearProfile(profile.id)
 	}
 
 	private onAccountAdded = async (_account: { chainId: number; address: string }): Promise<void> => {

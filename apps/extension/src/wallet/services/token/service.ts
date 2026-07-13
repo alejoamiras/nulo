@@ -290,7 +290,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	 * profile's tokens (an active-profile guard here would throw and orphan
 	 * them). The public `deleteToken` RPC does the ownership check first.
 	 */
-	private async _deleteTokenById(id: number): Promise<TokenInfo> {
+	private async _deleteTokenById(id: number, emit = true): Promise<TokenInfo> {
 		try {
 			await this.lock.enter()
 			const token = await this.tokens.get(`${id}`)
@@ -298,7 +298,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				throw new Error("unknown token id")
 			}
 			await this.tokens.delete(`${id}`)
-			this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId })
+			if (emit) this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId })
 			return getTokenInfo(token)
 		} finally {
 			this.lock.leave()
@@ -550,7 +550,11 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		await this.ensureInitialized()
 		this.logDebug(`purgeForProfile ${profileId}: remove related tokens`)
 		for (const token of (await this.tokens.getValues()).filter((x) => x.profileId === profileId)) {
-			await this._deleteTokenById(token.id)
+			// SILENT (emit=false): the deletion coordinator awaits token-balance +
+			// incoming-transfer purges DIRECTLY, so re-emitting onTokenDeleted here is
+			// redundant and its fire-and-forget consumer could clobber a successor
+			// that reuses the highest token id (audit H3).
+			await this._deleteTokenById(token.id, false)
 		}
 	}
 

@@ -4,7 +4,7 @@
  * lifecycle via `ServiceCollection`.
  */
 
-import { beforeEach, describe, expect, test } from "vitest"
+import { beforeEach, describe, expect, test, vi } from "vitest"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { ServiceCollection } from "@/wallet/base"
@@ -58,5 +58,34 @@ describe("AccountService.restore — validation + provenance (P3)", () => {
 		expect(res.restoreError).toBeUndefined()
 		const raw = await api.storage.local.get(null)
 		expect(Object.keys(raw).some((k) => k.includes("0x111"))).toBe(true)
+	})
+
+	test("(H4) two concurrent restores of the SAME address — the lock lets exactly ONE win", async () => {
+		// Without the restore lock both would pass the (empty-store) intersection
+		// check and both write the global address-keyed row (ownership flip). The
+		// lock serialises them → the 2nd sees the 1st's write → throws Duplicate.
+		const results = await Promise.allSettled([
+			accountService.restore([mkAccount("0xrace")]),
+			accountService.restore([mkAccount("0xrace")]),
+		])
+		const fulfilled = results.filter((r) => r.status === "fulfilled")
+		const rejected = results.filter((r) => r.status === "rejected")
+		expect(fulfilled).toHaveLength(1)
+		expect(rejected).toHaveLength(1)
+		expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ message: expect.stringContaining("Duplicate address") })
+	})
+
+	test("(H3) purgeForProfile removes rows but emits NO onAccountDeleted (coordinator awaits dependents directly)", async () => {
+		await accountService.restore([mkAccount("0xp1a"), mkAccount("0xp1b")])
+		const emit = vi.spyOn(accountService as unknown as { emit: (e: string, p: unknown) => void }, "emit")
+
+		await accountService.purgeForProfile("p1")
+
+		// Rows gone…
+		const raw = await api.storage.local.get(null)
+		expect(Object.keys(raw).some((k) => k.startsWith("nulo:core:accounts@"))).toBe(false)
+		// …but no fire-and-forget onAccountDeleted (its async consumers would run
+		// after the coordinator releases the id and clobber a successor — audit H3).
+		expect(emit.mock.calls.filter(([e]) => e === "onAccountDeleted")).toHaveLength(0)
 	})
 })

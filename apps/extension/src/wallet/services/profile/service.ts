@@ -227,6 +227,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (!fetched) {
 				throw new Error("Invalid profile id")
 			}
+			// A tombstoned profile (mid-delete: row present, id reserved) must not
+			// be unlocked — its data is being purged. `repo.get` alone is blind to
+			// the reservation.
+			if (this.deletionState.isReserved(id)) {
+				throw new Error("Invalid profile id")
+			}
 			if (fetched.type === "passkey") {
 				throw new Error("Profile requires passkey")
 			}
@@ -252,6 +258,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			return await this.runExclusive(async () => {
 				const current = await this.repo.get(id)
 				if (!current) {
+					throw new Error("Invalid profile id")
+				}
+				// A deletion that began during the (lock-free) phase-2 unseal must
+				// abort the unlock — the id is now reserved even if the row lingers.
+				if (this.deletionState.isReserved(id)) {
 					throw new Error("Invalid profile id")
 				}
 				if (current.type !== "password") {
@@ -357,6 +368,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (!fetched) {
 				throw new Error("Invalid profile id")
 			}
+			// A tombstoned profile (mid-delete) must not be unlocked (see unlockProfile).
+			if (this.deletionState.isReserved(id)) {
+				throw new Error("Invalid profile id")
+			}
 			if (fetched.type === "password") {
 				throw new Error("Profile requires password")
 			}
@@ -390,6 +405,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			return await this.runExclusive(async () => {
 				const current = await this.repo.get(id)
 				if (!current) {
+					throw new Error("Invalid profile id")
+				}
+				// A deletion that began during the (lock-free) WebAuthn prompt must
+				// abort the unlock — the id is now reserved even if the row lingers.
+				if (this.deletionState.isReserved(id)) {
 					throw new Error("Invalid profile id")
 				}
 				if (current.type !== "passkey") {
@@ -845,7 +865,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 	public async getProfileSecret(id: string): Promise<Fr> {
 		await this.ensureInitialized()
-		return this.runExclusive(() => this.sessionManager.getSecret(id))
+		return this.runExclusive(() => {
+			// A profile queued for deletion must not hand out its secret — a half-
+			// deleted profile (tombstoned but not yet purged) is being erased.
+			if (this.deletionState.isReserved(id)) throw new Error("Invalid profile id")
+			return this.sessionManager.getSecret(id)
+		})
 	}
 
 	/**
@@ -894,7 +919,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 				// It is unclear if this case is possible, this is a fallback:
 				if (!userHandle) {
-					userHandle = await this.repo.generateUniqueId()
+					// MUST exclude reserved ids — this userHandle becomes the profile id,
+					// and generateUniqueId only checks storage (a tombstoned profile's row
+					// is already deleted, so its reserved id would otherwise be reused →
+					// the resumed purge clobbers the new profile — audit id-reuse).
+					userHandle = await this.nextUnreservedId()
 				}
 
 				const id = userHandle
@@ -1051,7 +1080,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 						// It is unclear if this case is possible, this is a fallback:
 						if (!id) {
-							id = await this.repo.generateUniqueId()
+							// Exclude reserved ids (see importPasskeyProfile) — generateUniqueId
+							// only checks storage, so a tombstoned id could be reused here.
+							id = await this.nextUnreservedId()
 						}
 
 						const newProfile: Profile = {
@@ -1115,6 +1146,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		return this.runExclusive(async () => {
 			const profile = await this.repo.get(id)
 			if (!profile) {
+				throw new Error("Invalid profile id")
+			}
+			// A tombstoned profile (SW died mid-delete: row still present, id
+			// reserved) must not open a session — it is being erased. Gate here as
+			// well as at row-read so a delete that began mid-restore is caught.
+			if (this.deletionState.isReserved(id)) {
 				throw new Error("Invalid profile id")
 			}
 
