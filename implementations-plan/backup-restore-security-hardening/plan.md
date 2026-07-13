@@ -100,6 +100,15 @@ _Unit (`502b883`): 3+ network mixed changed/failed/unchanged/changed index-pairi
 - Make `backup-restore-integrity.test.ts` arming test UNCONDITIONAL in required CI (absent sandbox FAILS); extend to foreign auth/balance rows + delete→re-add round-trip (no resurrected tx, no wrong-RPC hash query).
 - **Gate:** `bun run audit:vue && bun run e2e:agent tests/e2e/network/backup-restore-integrity.test.ts && bun run e2e:agent`.
 
+### Phase 10 — post-impl audit fixes (codex BLOCK → resolved) ✓ (`32b035b`, `1eb3026`)
+_The codex post-impl adversarial audit ([`audit-codex-postimpl.md`](./audit-codex-postimpl.md), session `019f58be`) returned **BLOCK**; a second independent review corroborated + extended it. Fixed: C1 (half-deleted profile unlockable → reserved-id gate on unlock/passkey-unlock/finalizeRestore/getProfileSecret), a passkey id-gen fail-open (routed through `nextUnreservedId`), H3 (purgeForProfile re-emitted delete events → made silent; coordinator awaits dependents directly), H4 (AccountService.restore lock), M5 (reset.vue awaits+catches deleteProfile; removed IncomingTransfer's fire-and-forget onProfileDeleted sub), and **C2/D13** (the epoch fence was DEAD CODE — wired end-to-end on the tx path: shared ProfileDeletionState, tombstone-epoch hydration on resume, capture-at-authorization → ExecutionFence threaded through both executors → addTransaction asserts epoch-current + owning-account-exists under the tx lock). Pins: `transaction/service.test.ts` (D13), account `service.test.ts` (H3/H4). Full unit suite 3051 pass. See [`lessons/phase-10-audit-fixes.md`](./lessons/phase-10-audit-fixes.md)._
+
+## Follow-ups (pre-production, codex-backed deferrals — D13 NOT claimed complete)
+codex's D13 verdict explicitly permitted deferring these as tracked pre-production items (the demonstrated resurrection vector — a completing transfer — IS fenced; these are far less periodic than the 1s tx poller). Their eventual fix uses the SAME profile epoch (existence-only is unsafe under numeric-id/address reuse):
+- **token-metadata** (`token/service.ts`): capture epoch before PXE/network work, `assertCurrent` under the token lock immediately before persist.
+- **balance-projection** (`balance-job-queue.ts`): carry the epoch in the queued job; assert before `repo.set` AND verify the balance's `(id, token, account)` identity.
+- **coordinator.purge** direct unit test (`coordinator.test.ts`); duplicate old-token-id rejection in the composable relink; corrupt-tombstone repair/telemetry path.
+
 ## Sequencing
 P1 first (substrate). Restore-path (2,3,4,5 — 2+3 coupled; 4,5 share the index-map refactor) parallel to delete-path (6,7,8 — 7 before 8; 6 independent; 8 the hub). P9 last. ONE PR; phase commits conventional + separately green.
 
