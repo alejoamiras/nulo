@@ -593,6 +593,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (!fetched) {
 				throw new Error("Invalid profile id")
 			}
+			// A tombstoned profile (mid-delete) must not be confirmable (codex verify).
+			if (this.deletionState.isReserved(id)) {
+				throw new Error("Invalid profile id")
+			}
 			return fetched
 		})
 
@@ -622,6 +626,16 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// coordinator. Codex audit Q2 validated this shape.
 				await this.passkeyCoordinator.confirm(snapshot)
 			}
+			// Revalidate AFTER the async credential op (codex verify): a delete that
+			// completed during the (unlocked) derivation/prompt must not report a
+			// successful confirmation for the now-erased profile. confirm returns a
+			// boolean (no secret), so the delete check suffices — and must NOT reject
+			// a LEGIT concurrent password change (that's not a delete).
+			await this.runExclusive(async () => {
+				if (!(await this.repo.get(id)) || this.deletionState.isReserved(id)) {
+					throw new Error("Invalid profile id")
+				}
+			})
 			return true
 		} catch (error) {
 			this.logError("Failed to confirm operation", getErrorMessage(error))
@@ -639,6 +653,17 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 *  delete is fenced when it tries to persist afterward (D13). */
 	public getDeletionState(): ProfileDeletionState {
 		return this.deletionState
+	}
+
+	/** Stable identity of a profile ROW (its sealed creds) — used to revalidate
+	 *  after a slow unlocked op that a delete+reimport didn't reuse the id with
+	 *  DIFFERENT creds (would otherwise leak the pre-delete secret; C1 revalidation). */
+	private profileIdentity(p: Profile | undefined): string | undefined {
+		if (!p) return undefined
+		// The Profile discriminated union is intersected with ProfileInfo, which
+		// defeats `p.type ===` narrowing — read the sealed fields off a widened view.
+		const row = p as { type: string; guard?: string; secret?: string; credentialId?: string }
+		return row.type === "passkey" ? `pk:${row.credentialId}` : `pw:${row.guard}:${row.secret}`
 	}
 
 	/** A fresh profile id that is neither in storage NOR reserved by a pending
@@ -848,7 +873,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (!current) {
 				throw new Error("Invalid profile id")
 			}
-			if (current.type !== "passkey" || current.credentialId !== profile.credentialId) {
+			// A delete that completed during the (unlocked) WebAuthn prompt must not
+			// still return the credentialId (codex verify).
+			if (this.deletionState.isReserved(id) || current.type !== "passkey" || current.credentialId !== profile.credentialId) {
 				throw new Error("Invalid profile id")
 			}
 			return current.credentialId
@@ -869,6 +896,15 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			try {
 				if (!secret) {
 					throw new InvalidPasswordError()
+				}
+				// Revalidate AFTER the slow unseal (codex verify): a delete that
+				// completed DURING derivation — even fully (row gone, reservation
+				// released) — must not still hand back the now-erased profile's
+				// master secret. Re-fetch catches gone/reimported; isReserved catches
+				// mid-delete.
+				const still = await this.repo.get(id)
+				if (!still || this.deletionState.isReserved(id) || this.profileIdentity(still) !== this.profileIdentity(profile)) {
+					throw new Error("Invalid profile id")
 				}
 				return Buffer.from(secret).toString("base64")
 			} finally {
@@ -904,6 +940,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// Identity-stable error message — the import flow expects this
 				// exact string for its wrong-password branch.
 				throw new Error("Invalid profile old password")
+			}
+			// Revalidate AFTER the slow unseal (codex verify): a delete completing
+			// during derivation must not still hand back the erased profile's seed.
+			const still = await this.repo.get(id)
+			if (!still || this.deletionState.isReserved(id) || this.profileIdentity(still) !== this.profileIdentity(profile)) {
+				throw new Error("Invalid profile id")
 			}
 			return await getMnemonic(secret)
 		} finally {
