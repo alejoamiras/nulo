@@ -15,4 +15,12 @@ Findings (folded into plan v2's decision ledger):
 9. **Low — concurrency proof.** The e2e only polls eventual state; add deterministic pins w/ hold-points for reservation-era enqueue, delete-between-check-write, detached creation, restore writers, callback suppression, successor reuse. Coordinator-only test ≠ "tombstone retained" (needs ProfileService integration).
 10. **Operational — wrong base** (HEAD `dff435f` lacked the mechanism; `dev`=`fb61a63` has it). Rebased.
 
-## v2 (against plan v2) — final fresh-context pass: _pending (see below / audit-codex-v2 section)._
+## v2 (against plan v2) — final fresh-context pass — VERDICT: `reject` → escalate to `deep`
+`v2 closes: [1 yes, 2 yes, 3 NO, 4 yes]`. Two NEW criticals:
+- **C1 — leaf purge not lock-atomic with its writers.** `token/service.ts:549 purgeForProfile` snapshots at :552 OUTSIDE the lock, then locks per-row in `_deleteTokenById`. A writer's in-flight `tokens.set` is missed by the snapshot even with an isLive check → row survives. FIX: purge holds the leaf lock across the ENTIRE snapshot-and-delete.
+- **C2 — writer set still incomplete.** Also unfenced: account `createAccountInternal` (`account/service.ts:108`, writes `:125` after `NuloAccount.new` pause), incoming-transfer trust (`onTokenAdded:440`→`:458-462`, detached), operation-journal `createOperation:160`/transition (`:235`→`:303`). "Every writer" was false.
+- Medium: `balance-projector.ts:64,:114` still active-gated `getTokenRaw` → profile-switch false-skip (declare policy + pin). isLive itself has no TOCTOU with a whole-purge leaf lock (linearizable).
+
+→ v3 (DEEP): atomic-purge refactor per leaf + isLive gate on the FULL 5-leaf writer set + switch-skip policy.
+
+## v3 (against plan v3) — double audit + final pass: _in flight._

@@ -1,6 +1,11 @@
-# backup-restore-residuals — finish D13 to zero deferrals + low-severity cleanups (v2)
+# backup-restore-residuals — finish D13 to zero deferrals + low-severity cleanups (v3, DEEP)
 
-**Tier: `mid`** (at the mid/deep boundary — security-sensitivity HIGH + concurrency-correctness now non-trivial after the dual audit; still ONE mechanism = the proven monotonic deletion-epoch fence, single-package `apps/extension`, low novelty). Branch off `dev` → `dev`, ONE PR. If the final fresh-codex pass still surfaces a critical, ESCALATE to `deep`.
+**Tier: `deep`** (ESCALATED from mid — the final fresh-codex pass on v2 surfaced 2 criticals: the leaf purges are NOT lock-atomic with their writers, and the writer set spans 5 leaf services (token, balance, account, incoming-transfer, operation-journal). Rubric: security HIGH + blast-radius HIGH (a cross-cutting concurrency change to the deletion purge + every leaf's write lock). Still ONE mechanism (the proven monotonic epoch fence) but the correct fix is architectural, not a per-writer patch. Branch off `dev` → `dev`, ONE PR.
+
+> **The core architectural fix (v3):** D13 resurrection is closed by TWO invariants applied UNIFORMLY to every profile-owned-row leaf:
+> 1. **Atomic purge** — each leaf's `purgeFor*` holds the leaf's write lock across its ENTIRE snapshot-and-delete (NOT snapshot-outside-then-lock-per-row). This is the fix for codex-final C1: today `token.purgeForProfile` (`token/service.ts:549`) snapshots at :552 outside the lock, so a concurrent writer's in-flight `set` is missed.
+> 2. **isLive writer gate** — every writer re-checks `isLive(profileId, capturedEpoch) = !isReserved && isCurrent` UNDER that same leaf lock, immediately before its write.
+> Together they linearize writer↔purge on one lock: write-before-purge → the row is snapshotted + deleted; purge-before-write → `isLive` is false → skip/throw. No TOCTOU (isLive reads are synchronous, no await).
 
 > **Base note (audit-caught, v1→v2):** the worktree was first cut off `origin/HEAD` = `origin/fix/harden-findings` (harden line), which lacks #276. BOTH audit legs REJECTED v1 because every mechanism fact was absent. Re-baselined `git reset --hard origin/dev` → HEAD `fb61a63` (#276 present). All facts below re-verified against THIS base.
 
@@ -16,45 +21,63 @@ Make **D13 COMPLETE**: every profile-owned-row writer that can complete AFTER th
 - **Two-phase delete** (`profile/service.ts` deleteProfile): phase-1 writes the tombstone THEN `repo.delete(id)` THEN (outside lock) awaited purge THEN clear tombstone. So **"profile row absent from storage" does NOT mean "nothing to purge"** — it means phase-1 done, purge maybe pending (audit D-D: auto-dropping a corrupt tombstone here is FAIL-OPEN).
 - **Relink** (`useFullBackupImport.ts`): `tokenService.restore(data.token):535` → index-pairs `oldTokens[i]→newTokens[i]:553-557` building `oldIdToChain` keyed by `old.id` → a duplicated backup `token.id` collapses that map (last-wins). Network dup-source-id is already skipped via `sourceIdCounts`; tokens are not.
 
-## Fence design (audit-consolidated)
-1. **Primitive:** add `ProfileDeletionState.isLive(id, capturedEpoch): boolean = !isReserved(id) && isCurrent(id, capturedEpoch)` (reservation-aware). Capture = `{profileId, epoch:capture(id)}` read while NOT reserved (else the op is already dead). Keep `assertCurrent` for throw-sites.
-2. **Per-leaf shared lock, inline (NOT a guard helper — audit finding 8):** each writer captures the fence at AUTHORIZATION/enqueue, then re-checks `isLive` **while holding the same leaf lock the coordinator's purge takes**, immediately before the write. A helper can't give atomicity (deletion can begin while its `writeFn` awaits); the leaf lock is the choke point.
-3. **Owner resolver:** add an INTERNAL, non-active-profile-gated `TokenService.getOwnerProfileId(tokenId)` (reads the raw token row's `profileId`) so the balance fence resolves the authoritative owner without the active-profile skip. Compare the LIVE token's `profileId` to the captured profile — this (not `(id,token,account)` alone) defeats successor-id reuse.
-4. **Policy:** user/dapp writes (`addToken`) THROW on a dead fence; background refreshes (balance projection, detached callbacks) SKIP. Restores THROW (record `restoreError`).
+## Fence design (v3 — atomic purge + isLive gate, uniform across leaves)
+1. **Primitive:** `ProfileDeletionState.isLive(id, capturedEpoch) = !isReserved(id) && isCurrent(id, capturedEpoch)` (reservation-aware — closes codex C3: a post-`beginDeletion` enqueue captures the new epoch so bare `isCurrent` stays true; `isReserved` catches it; corrupt-tombstone epoch-0-reserved also caught). Capture `{profileId, epoch}` at authorization while NOT reserved. Reads are synchronous → no TOCTOU.
+2. **Atomic purge (the load-bearing v3 change):** refactor each leaf's `purgeFor*` to hold the leaf write lock across the WHOLE snapshot-and-delete. Per leaf: `token.purgeForProfile`, `token-balance.purgeForTokens`, `account.purgeForProfile`, `incoming.clearProfile`, `operation-journal.purgeForProfile`. (Networks/PXE/tx/auth are already awaited + tx is fenced; confirm they hold their lock across snapshot-delete too.)
+3. **isLive writer gate, inline under the leaf lock (NOT a helper — codex #8: a helper can't give atomicity):** every writer re-checks `isLive` under the same leaf lock, immediately before its write.
+4. **Owner resolver:** INTERNAL, active-profile-INDEPENDENT `TokenService.getOwnerProfileId(tokenId)` (raw token row's `profileId`) — the balance fence resolves the authoritative owner. Compare the LIVE token's `profileId` to the captured profile (defeats successor-id reuse; `(id,token,account)` alone recurs — codex #7).
+5. **Profile-switch policy (codex-final medium):** `balance-projector` still uses active-gated `getTokenRaw` (`:64,:114`). A queued P1 refresh after switching to P2 is SKIPPED — declared POLICY (the balance is stale-not-wrong; re-refreshes on switch-back). Pin it so it's intentional, not an accidental false-skip.
+6. **Policy:** user/dapp writes (addToken, createAccount) THROW on a dead fence; background refreshes (balance projection, detached onTokenAdded/onAccountAdded callbacks) SKIP; restores THROW (`restoreError`); journal create/transition on a dead fence → no-op.
+
+## Full writer inventory (codex-enumerated — the "no writer left behind" set)
+| Leaf | Writer(s) | Purge counterpart | Fence action |
+|---|---|---|---|
+| token | `addToken:132`, `updateToken:224`, `restore:571` | `purgeForProfile:549` (+ `clearChainState:~94`) | atomic purge + isLive gate on all 3; clearChainState takes the token lock; addToken journal-op created inside the fence (no post-delete journal row — codex #6) |
+| token-balance | projection `repo.set` (`balance-job-queue:151`), detached `createTokenBalance` (`service:156-168,198-209`), `restore:296` | `purgeForTokens:227` | shared balance Lock across all + purge; isLive under it |
+| account | `createAccountInternal:108` (writes `:125` after `NuloAccount.new` pause) | `purgeForProfile` | atomic purge + isLive gate; share the per-tuple serialization with purge |
+| incoming-transfer | `onTokenAdded:440` (trust write `:458-462`, detached) | `clearProfile` | atomic purge + isLive gate under `serviceLock` |
+| operation-journal | `createOperation:160`, transitions (`:235`→`:303`) | `purgeForProfile` | atomic purge + isLive gate on create + transition |
 
 ## Phases
 
-### Phase 1 — fence primitive + token-service wiring ☐
+### Phase 1 — fence primitive + shared-state wiring ☐
 - `ProfileDeletionState.isLive(id, epoch)` (reservation-aware) + unit pins (reserved→false; stale epoch→false; corrupt-tombstone epoch-0-reserved→false; live→true).
-- Inject `deletionState` into `TokenService` at init (`getDeletionState()`); add internal `getOwnerProfileId(tokenId)`.
+- Inject `deletionState` (`getDeletionState()`) into every leaf that will fence: TokenService, TokenBalanceService, AccountService, IncomingTransferService, OperationJournalService. Add internal active-independent `TokenService.getOwnerProfileId(tokenId)`.
 - **Gate:** typecheck 0 · lint 0 · `vitest run src/wallet/services/profile/profile-deletion-state.test.ts`.
 
-### Phase 2 — token-write fences (addToken, updateToken, clearChainState lock, restore, journal order) ☐
-- `addToken`: capture epoch at entry (before `fetchTokenMetadata`); re-check `isLive(profileId, epoch)` under `this.lock` immediately before `tokens.set` → THROW if dead. Fix the journal-ordering race: create/keep the journal op INSIDE the fence, or delete it on a dead-fence throw (no post-delete journal row).
-- `updateToken`: add the explicit `isLive` assert under the lock before `set` (defensive; the reread already blocks purgeForProfile).
-- `clearChainState`: take `this.lock` (so a racing `updateToken` can't rewrite a chain-purged token — audit finding 5).
-- `TokenService.restore`: fence each row (`isLive` under the lock before `set`) → `restoreError` on dead.
-- **Gate:** typecheck 0 · lint 0 · `vitest run src/wallet/services/token` — deterministic pins (inject a metadata-fetch hold-point): add mid-delete → THROW, not written; chain-purge mid-update → not rewritten; restore into a reserved profile → restoreError; normal add/update/restore still work.
+### Phase 2 — ATOMIC PURGE refactor (the load-bearing v3 change) ☐
+- Refactor each leaf `purgeFor*` to hold the leaf write lock across the WHOLE snapshot-and-delete (currently they snapshot-outside-then-lock-per-row — codex C1): `token.purgeForProfile`, `token-balance.purgeForTokens`, `account.purgeForProfile`, `incoming.clearProfile`, `operation-journal.purgeForProfile`. Verify the already-awaited leaves (networks/pxe, tx, auth) also snapshot-and-delete under one lock; fix any that don't.
+- **Gate:** typecheck 0 · lint 0 · `vitest run src/wallet/services` (no regression in the existing purge/cross-profile-isolation suites) — plus a pin per refactored leaf that a writer racing the purge (write-before-purge ordering) ends with the row DELETED (linearizable), via an injected purge hold-point.
 
-### Phase 3 — balance-write fences (shared balance lock: projection + purge + create + restore) ☐
-- Introduce a `Lock` in `TokenBalanceService`/`BalanceJobQueue` shared by `repo.set` (projection), `purgeForTokens`, `createTokenBalance` (the detached callbacks), and `restore`. Inject `deletionState`.
-- `enqueue`: resolve owner `profileId` via `TokenService.getOwnerProfileId(token)`; if already gone, skip before creating a task; else capture `{profileId, epoch}` on the queued item.
-- Before `repo.set` (projection) AND in the detached `createTokenBalance` AND in `restore`: under the shared balance lock, `isLive(profileId, epoch)` (+ live-owner identity) → SKIP (background) / restoreError (restore). `purgeForTokens` takes the same lock so check+write is atomic with purge.
-- **Gate:** typecheck 0 · lint 0 · `vitest run src/wallet/services/token-balance` — deterministic pins (project hold-point): delete between check and set → no `repo.set`, no `onBalanceUpdated`; detached callback after purge → suppressed; restore into reserved → restoreError; successor-id reuse (owner mismatch) → skipped; normal projection writes.
+### Phase 3 — token-write fences (add/update/clearChainState/restore + journal order) ☐
+- `addToken`: capture epoch at entry (before `fetchTokenMetadata`); re-check `isLive` under `this.lock` immediately before `tokens.set` → THROW if dead; the journal op is created/committed INSIDE the fence (no post-delete journal row — codex #6).
+- `updateToken`: explicit `isLive` assert under the lock before `set`. `clearChainState`: take `this.lock`. `restore`: fence each row → `restoreError` on dead.
+- **Gate:** typecheck 0 · lint 0 · `vitest run src/wallet/services/token` — deterministic pins (metadata-fetch hold-point): add mid-delete → THROW + not written + no orphan journal; chain-purge mid-update → not rewritten; restore into reserved → restoreError; normals still work.
 
-### Phase 4 — coordinator direct unit test ☐
+### Phase 4 — balance-write fences (shared balance lock + owner resolver + switch policy) ☐
+- Shared `Lock` in `TokenBalanceService`/`BalanceJobQueue` across projection `repo.set`, `purgeForTokens`, the detached `createTokenBalance` (onTokenAdded/onAccountAdded), and `restore`. `enqueue`: resolve owner via `getOwnerProfileId`; skip-before-task if gone; else capture `{profileId, epoch}`.
+- Under the shared lock before each write: `isLive` (+ live-owner identity) → SKIP (background) / restoreError (restore). The profile-switch skip (`balance-projector` active-gated `getTokenRaw`) is declared POLICY + pinned.
+- **Gate:** typecheck 0 · lint 0 · `vitest run src/wallet/services/token-balance` — deterministic pins (project hold-point): purge-before-set → no set/no `onBalanceUpdated`; write-before-purge → row ends deleted; detached callback after purge → suppressed; restore into reserved → restoreError; successor-id owner-mismatch → skipped; profile-switch → skipped-by-policy; normal writes.
+
+### Phase 5 — account / incoming-transfer / operation-journal write fences ☐
+- **account** (`createAccountInternal:108`): capture epoch before `NuloAccount.new`; `isLive` under the per-tuple serialization (shared with `purgeForProfile`) before the `:125` write → THROW on dead. (Account creation needs the session secret; a delete closes the session — confirm + pin the capture-then-delete window.)
+- **incoming-transfer** (`onTokenAdded:440` → trust write `:458-462`): `isLive` under `serviceLock` before the trust write → SKIP on dead (detached callback).
+- **operation-journal** (`createOperation:160`, transitions `:235`→`:303`): `isLive` under the journal lock before create + before the transition write → no-op on dead.
+- **Gate:** typecheck 0 · lint 0 · `vitest run src/wallet/services/account src/wallet/services/incoming-transfer src/wallet/services/operation-journal` — deterministic pins (hold-point per writer): each writer racing its purge → no resurrected row; normals work.
+
+### Phase 6 — coordinator direct unit test ☐
 - `profile-deletion/coordinator.test.ts`: stub leaves record call order → assert every purge awaited, address-derived (txs/auth/balances) BEFORE the account/token/network tail, `pxe.clearProfileState` last, a leaf throw propagates. NB (audit finding 9): "tombstone retained on failure" is proven at the ProfileService integration layer (add a pin there), not here.
 - **Gate:** typecheck 0 · lint 0 · `vitest run src/wallet/services/profile-deletion src/wallet/services/profile/service.integration.test.ts`.
 
-### Phase 5 — reject duplicate old-token-id in relink ☐
+### Phase 7 — reject duplicate old-token-id in relink ☐
 - In `useFullBackupImport` relink: detect duplicated `token.id` in the backup slice (mirror `sourceIdCounts`); drop the collided rows to `restoreErrorLog` instead of collapsing `oldIdToChain`.
 - **Gate:** typecheck 0 · lint 0 · `vitest run src/composables/useFullBackupImport.test.ts` — pin: two `token.id:5` → map intact, collision recorded.
 
-### Phase 6 — corrupt-tombstone TELEMETRY only (NO auto-repair — audit D-D) ☐
+### Phase 8 — corrupt-tombstone TELEMETRY only (NO auto-repair — audit D-D) ☐
 - `TombstoneRepository`: `validPayloads()` already skips corrupt. ADD only: a `corruptCount()/logCorrupt()` surfaced at coordinator resume (count + ids, warn) for manual recovery. **NO `repairOrphaned`/auto-drop** — a corrupt tombstone whose profile row is absent is a phase-1-done, purge-pending deletion; dropping it is fail-OPEN. Fail-closed stays.
 - **Gate:** typecheck 0 · lint 0 · `vitest run src/wallet/services/profile/tombstone-repository.test.ts` — pins: corrupt row → counted + logged + RETAINED (still reserved); no drop path exists.
 
-### Phase 7 — docs + index + e2e ☐
+### Phase 9 — docs + index + e2e ☐
 - `implementations-plan/index.md`: list BOTH plans; flip the parent § Follow-ups D13 note → "COMPLETE (backup-restore-residuals)".
 - **Gate:** `bun run audit:vue` green · `bun run e2e:agent tests/e2e/network/backup-restore-integrity.test.ts` extended: during the delete→re-add round-trip, trigger a token-add + a balance-refresh mid-delete (with the deterministic hold-points wired through a test hook) and assert NO resurrected token/balance row.
 
@@ -77,6 +100,10 @@ Threat: a user/dapp action (add token, balance refresh) OR a fire-and-forget eve
 | Helper vs inline | Per-service INLINE under the leaf lock. | codex #8 + Opus 3 (helper can't provide atomicity). |
 | Tombstone (D-D) | TELEMETRY only, NO auto-drop. | codex #1 + Opus C3/D-D (fail-open during phase-2). Rejected: `repairOrphaned`. |
 | Proof | Deterministic unit/integration pins w/ injected hold-points; e2e extended; coordinator test ≠ tombstone-retention proof. | codex #9. Rejected: polling-only e2e as proof. |
+| **Atomic purge (v3/codex-final C1)** | Each leaf `purgeFor*` holds the leaf lock across the WHOLE snapshot-and-delete (not snapshot-outside-then-lock-per-row). This is what actually linearizes writer↔purge; the isLive gate alone is insufficient because the purge's snapshot misses an in-flight write. | codex-final C1. Rejected: v2's "isLive under the lock before write" WITHOUT the atomic-purge refactor. |
+| **Writer set = 5 leaves (v3/codex-final C2)** | +account (`createAccountInternal`), +incoming-transfer trust (`onTokenAdded`), +operation-journal (`createOperation`/transition). | codex-final C2. Rejected: v2's token+balance-only scope. |
+| **Profile-switch skip** | Declared POLICY (queued P1 refresh after switch→P2 is skipped; stale-not-wrong; re-refreshes on switch-back) + pinned, rather than re-plumbing profile-bound projection deps. | codex-final medium. |
+| **Tier** | ESCALATED mid→deep (2 criticals in the final v2 pass triggered the plan's own escalation rule + codex's explicit call). | codex-final. |
 
 ## Audit trail
 - v1 dual audit (WRONG base, both caught it): `audit-codex.md`, `audit-fable.md`. v2 final fresh-codex pass appended to `audit-codex.md`. Both v1 legs also yielded the substantive findings folded above.
