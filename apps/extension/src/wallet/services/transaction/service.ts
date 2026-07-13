@@ -6,6 +6,7 @@ import type { ILogger } from "@/wallet/logger"
 import { AccountService, type Account } from "@/wallet/services/account/service"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService } from "@/wallet/services/profile/service"
+import type { ExecutionFence, ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { StepContent, type WrappedTask } from "@/wallet/services/task/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
@@ -48,6 +49,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	private profileService: ProfileService = null!
 	private accountService: AccountService = null!
 	private networkService: NetworkService = null!
+	private deletionState: ProfileDeletionState = null!
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(TRANSACTION_SERVICE_NAME, logger)
@@ -58,6 +60,9 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		this.profileService = services.get(ProfileService.name)
 		this.accountService = services.get(AccountService.name)
 		this.networkService = services.get(NetworkService.name)
+		// The SHARED deletion state — addTransaction asserts an execution's captured
+		// epoch is still current before writing (D13).
+		this.deletionState = this.profileService.getDeletionState()
 
 		// Tx cleanup on network/profile deletion flows through `onAccountDeleted`
 		// ONLY — it is account-scoped (= profile-accurate). A chain-purge
@@ -118,11 +123,24 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		submittedEndpointUrl: string | undefined,
 		estimatedFee?: string,
 		gasDetails?: TxGasDetails,
+		fence?: ExecutionFence,
 	): Promise<Tx> {
 		// Under the tx lock (codex blocker): serialize the dup-check + write against
 		// restore's create-only check + the coordinator's purge (finding D).
 		await this.lock.enter()
 		try {
+			// D13: an execution captured {profileId, epoch} when it was authorized.
+			// If a deletion of that profile has since begun (epoch advanced) OR the
+			// owning account row is already purged/re-owned, reject — a completing
+			// prove must not recreate a pending tx after its profile was deleted.
+			// Both checks are bound to the CAPTURED profileId: a successor that reused
+			// the deterministic address owns a DIFFERENT profileId, so getAccount
+			// returns undefined here even after the epoch is released.
+			if (fence) {
+				this.deletionState.assertCurrent(fence.profileId, fence.epoch)
+				const owner = await this.accountService.getAccount(fence.profileId, chainId, account)
+				if (!owner) throw new Error("stale execution owner — account no longer exists")
+			}
 			if (await this.txs.get(hash)) {
 				throw new Error("duplicated hash")
 			}

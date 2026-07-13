@@ -16,6 +16,7 @@ import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { AccountService } from "@/wallet/services/account/service"
 import { ContactService } from "@/wallet/services/contact/service"
 import { ProfileService } from "@/wallet/services/profile/service"
+import type { ExecutionFence, ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { TokenService } from "@/wallet/services/token/service"
@@ -96,6 +97,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	private tokenService: TokenService = null!
 	private fpcService: FpcService = null!
 	private transactionService: TransactionService = null!
+	private deletionState: ProfileDeletionState = null!
 	private authRegistryService: AuthRegistryService = null!
 	private taskService: TaskService = null!
 	private operationJournal: OperationJournalService = null!
@@ -163,6 +165,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		this.authRegistryService = services.get(AuthRegistryService.name)
 		this.taskService = services.get(TaskService.name)
 		this.operationJournal = services.get(OperationJournalService.name)
+		this.deletionState = this.profileService.getDeletionState()
 		this.planner = new OperationPlanner(this.profileService, this.tokenService)
 		this.resolver = new ContractResolver(this.logger)
 		this.authwit = new AuthwitDiscoverer(this.logger)
@@ -300,6 +303,16 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		this.fpcService.onFpcDeleted.add(invalidateOnPrivateFpc)
 	}
 
+	/** Capture the {profileId, epoch} fence at execution AUTHORIZATION (before the
+	 *  slow prove) so `addTransaction` can reject a completing prove whose profile
+	 *  was deleted meanwhile (D13). Capturing here — NOT inside proveAndSend — is
+	 *  what makes the fence sound: an op that reaches proveAndSend after a delete
+	 *  would otherwise capture the NEW epoch and slip through. */
+	private async captureFence(): Promise<ExecutionFence> {
+		const profile = await requireActiveProfile(this.profileService, "Wallet locked")
+		return { profileId: profile.id, epoch: this.deletionState.capture(profile.id) }
+	}
+
 	public async executeTransfer(
 		networkId: string,
 		accountAddress: string,
@@ -312,9 +325,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	): Promise<string> {
 		await this.ensureInitialized()
 		amount = coerceAmount(amount)
+		const fence = await this.captureFence()
 		return this.transferExecutor.execute(
 			{ networkId, accountAddress, tokenId, transferType, recipientAddress, amount, feeSettings },
 			precomputedEstimateId,
+			fence,
 		)
 	}
 
@@ -442,7 +457,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 					}
 					case "aztec_sendTx": {
 						// Hooks forwarded ONLY to aztec_sendTx; other ops don't need them.
-						result = await this.dappSendExecutor.executeAztecSendTx(operation, origin, operationTask, hooks)
+						// Capture the deletion fence HERE (a send op that writes a tx),
+						// not at the batch top — read-only ops must not trip the
+						// unlock check, and this is still before the prove (D13).
+						const fence = await this.captureFence()
+						result = await this.dappSendExecutor.executeAztecSendTx(operation, origin, operationTask, hooks, fence)
 						break
 					}
 					case "aztec_createAuthWit": {
@@ -568,7 +587,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 	public async executeSendTransaction(op: SendTransactionOperation, origin: LocalTxOrigin, parentTask?: WrappedTask): Promise<string> {
 		await this.ensureInitialized()
-		return this.dappSendExecutor.executeSendTransaction(op, origin, parentTask)
+		const fence = await this.captureFence()
+		return this.dappSendExecutor.executeSendTransaction(op, origin, parentTask, fence)
 	}
 
 	/**

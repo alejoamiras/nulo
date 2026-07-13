@@ -19,6 +19,7 @@ import { ServiceCollection, type IService } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { PROFILE_SERVICE_NAME, type ProfileInfo } from "@/wallet/services/profile/spec"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { svc } from "./composition-harness"
 import { ContactService } from "./contact/service"
 import { FpcService } from "./fpc/service"
@@ -47,9 +48,15 @@ class FakeProfileService implements IService {
 	public readonly onProfileDeleted = new EventHandler<ProfileInfo>()
 	public readonly onActiveProfileChanged = new EventHandler<ProfileInfo | undefined>()
 	private active: ProfileInfo | undefined
+	// Shared with TransactionService for the D13 execution fence — no deletion is
+	// driven in these tests, so a fresh state (epoch 0) is inert here.
+	private readonly deletionState = new ProfileDeletionState()
 	public async start(): Promise<void> {}
 	public async getActiveProfile(): Promise<ProfileInfo | undefined> {
 		return this.active
+	}
+	public getDeletionState(): ProfileDeletionState {
+		return this.deletionState
 	}
 	public setActiveProfile(profile: ProfileInfo | undefined): void {
 		this.active = profile

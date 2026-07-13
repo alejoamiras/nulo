@@ -94,7 +94,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 *  TombstoneRepository: a corrupt tombstone must still reserve its id. */
 	private readonly tombstones: TombstoneRepository
 	/** In-memory reserved-id set + per-profile deletion epoch (fencing). Seeded
-	 *  from the tombstone raw keys in `init()` BEFORE the session is restored. */
+	 *  from the tombstone raw keys in `init()` BEFORE the session is restored.
+	 *  Shared (via {@link getDeletionState}) with Execution + Transaction so a
+	 *  worker that captured an epoch before a purge is fenced when it persists. */
 	private readonly deletionState = new ProfileDeletionState()
 	/** Lazily injected by the last-started ProfileDeletionCoordinator — the purge
 	 *  executor. Never a topological dependency (would be a cycle). */
@@ -149,6 +151,13 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// session is restored / any profile becomes visible — a tombstoned id must
 		// never be reused or unlocked while its deletion is still pending (finding D).
 		this.deletionState.initReserved(await this.tombstones.reservedIds())
+		// Hydrate the deletion EPOCH for each VALID tombstone (raw-key reserve above
+		// is fail-closed for corrupt ones; the epoch fence needs the payload). This
+		// arms assertCurrent BEFORE any execution can run (D13). Corrupt tombstones
+		// stay reserved with epoch 0 — still unreusable, just not epoch-fenced.
+		for (const t of await this.tombstones.validPayloads()) {
+			this.deletionState.hydrateDeletion(t.profileId, t.epoch)
+		}
 
 		// Silent restore: SessionManager handles TTL expiry, missing
 		// profile, wrong creds, and passkey-can't-silently-restore
@@ -601,6 +610,13 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	/** Injected by the last-started ProfileDeletionCoordinator (finding D). */
 	public setDeletionDelegate(delegate: ProfileDeletionDelegate): void {
 		this.deletionDelegate = delegate
+	}
+
+	/** The SHARED deletion state (reserved ids + per-profile epoch). Execution +
+	 *  Transaction resolve this at init so a write that captured an epoch before a
+	 *  delete is fenced when it tries to persist afterward (D13). */
+	public getDeletionState(): ProfileDeletionState {
+		return this.deletionState
 	}
 
 	/** A fresh profile id that is neither in storage NOR reserved by a pending

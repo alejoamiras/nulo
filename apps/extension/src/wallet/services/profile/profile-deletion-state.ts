@@ -10,6 +10,12 @@
  * is loaded ONCE from the tombstone raw keys at startup and mutated only by the
  * sole tombstone writer under the facade lock.
  */
+/** Binds a tx write to the profile + deletion-epoch that AUTHORIZED the
+ *  execution, captured at op-start (before the slow prove). `addTransaction`
+ *  asserts it's still current under the tx lock, so a purge that began mid-prove
+ *  can't be out-raced by a completing execution recreating a pending tx (D13). */
+export type ExecutionFence = { profileId: string; epoch: number }
+
 export class ProfileDeletionState {
 	private readonly reserved = new Set<string>()
 	private readonly epochs = new Map<string, number>()
@@ -18,6 +24,16 @@ export class ProfileDeletionState {
 	 *  BEFORE the session is restored / any profile becomes visible. */
 	public initReserved(ids: Iterable<string>): void {
 		for (const id of ids) this.reserved.add(id)
+	}
+
+	/** Restore a pending deletion's EPOCH from its durable tombstone at startup —
+	 *  set it to AT LEAST the persisted epoch (never below) + reserve the id. Do
+	 *  NOT `beginDeletion()` on resume: blindly incrementing would diverge from the
+	 *  tombstone epoch a pre-crash write may have captured (D13, codex). Called
+	 *  from ProfileService.init BEFORE execution is exposed. */
+	public hydrateDeletion(id: string, storedEpoch: number): void {
+		this.epochs.set(id, Math.max(this.capture(id), storedEpoch))
+		this.reserved.add(id)
 	}
 
 	/** A tombstoned id must be treated as ABSENT by every profile read + unlock. */

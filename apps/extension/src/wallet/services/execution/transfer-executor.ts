@@ -28,6 +28,7 @@ import type { Network } from "@/wallet/services/network/service"
 import { primaryEndpointUrl } from "@/wallet/services/network/spec"
 import type { NewOperationInput, OperationRecord } from "@/wallet/services/operation-journal/spec"
 import type { ProfileInfo } from "@/wallet/services/profile/service"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { type TaskService, type WrappedTask, TransferContent } from "@/wallet/services/task/service"
 import { OriginType, type LocalTxOrigin, type TransactionService, type Tx } from "@/wallet/services/transaction/service"
@@ -75,7 +76,7 @@ export interface TransferExecutorDeps {
 export class TransferExecutor {
 	public constructor(private readonly deps: TransferExecutorDeps) {}
 
-	public async execute(req: TransferRequest, precomputedEstimateId?: string): Promise<string> {
+	public async execute(req: TransferRequest, precomputedEstimateId?: string, fence?: ExecutionFence): Promise<string> {
 		const { networkId, accountAddress, tokenId, transferType, recipientAddress, amount } = req
 		const origin: LocalTxOrigin = { type: OriginType.UI }
 		const transferContent = new TransferContent(tokenId, transferType, accountAddress, recipientAddress, amount)
@@ -234,6 +235,7 @@ export class TransferExecutor {
 						primaryEndpointUrl(network),
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
+						fence,
 					),
 			})
 			transferTask.complete()
