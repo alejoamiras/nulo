@@ -134,7 +134,7 @@ import { simulateViaNode } from "@aztec/wallet-sdk/base-wallet"
 import { completeFeeOptions } from "@nulo/aztec-runtime/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
-import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
+import { assertLiveChainIdentity, chainInfoFrom } from "@nulo/aztec-runtime/utils"
 import type { CallAction, EncodedCallAction } from "@nulo/wallet-bridge"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { type ILogger, LogLevel } from "@/wallet/logger"
@@ -272,6 +272,20 @@ export async function batchedViewSimulation(
 		}
 	}
 
+	// The slow arm shares the fast arm's validated chain identity. Derive +
+	// validate it here when the fast arm didn't set it (a slow-only batch, or a
+	// fast-arm bail on gasSettings) so the slow request commits the SAME identity
+	// the fast arm used — never a second, UNVALIDATED `getNodeInfo()` tuple. A
+	// drifted RPC returning tuple A then B would otherwise validate A for the fast
+	// arm while the slow arm silently signs/simulates against B, merging two chain
+	// identities into one result. `assertLiveChainIdentity` also covers slow-only
+	// batches, which previously did no chain-identity check at all.
+	if (slowTuples.length > 0 && !chainInfo) {
+		const nodeInfo = await node.getNodeInfo()
+		assertLiveChainIdentity(network, nodeInfo)
+		chainInfo = chainInfoFrom(nodeInfo)
+	}
+
 	// Launch utility eagerly NOW (anchor read complete). One promise per utility
 	// call; the array is constructed exactly once and is NEVER re-launched on
 	// fast-arm rerun (pinned by unit test).
@@ -289,7 +303,7 @@ export async function batchedViewSimulation(
 			? runFastArm(leadingFast, blockHeader, chainInfo, gasSettings, node, account.address)
 			: Promise.resolve([])
 	const slowArmPromise: Promise<{ simulatedTx: SlowArmResult; txRequest: TxRequestLike } | null> =
-		slowTuples.length > 0 ? runSlowArm(slowTuples, account, node, pxe) : Promise.resolve(null)
+		slowTuples.length > 0 ? runSlowArm(slowTuples, account, node, pxe, chainInfo as ChainInfo) : Promise.resolve(null)
 
 	const [fastSettled, slowSettled] = await Promise.allSettled([fastArmPromise, slowArmPromise])
 
@@ -341,7 +355,7 @@ export async function batchedViewSimulation(
 			const slotIndex = t.functionCall.type === FunctionType.PUBLIC ? publicIdx++ : privateIdx++
 			combined.push([t.functionCall, t.originalIndex, slotIndex, t.returnTypes])
 		}
-		slowResult = await runSlowArm(combined, account, node, pxe)
+		slowResult = await runSlowArm(combined, account, node, pxe, chainInfo as ChainInfo)
 		// Wipe fast results — combined slow arm covers everything now.
 		fastResults = null
 		// Replace slowTuples so unpack reads from the combined indexing.
@@ -429,6 +443,7 @@ async function runSlowArm(
 	account: IAccountContract,
 	node: AztecNode,
 	pxe: IPXE,
+	chainInfo: ChainInfo,
 ): Promise<{ simulatedTx: SlowArmResult; txRequest: TxRequestLike }> {
 	const payload = new ExecutionPayload(
 		slowTuples.map((x) => x[0]),
@@ -436,11 +451,19 @@ async function runSlowArm(
 		[],
 		[],
 	)
-	const txRequest = await account.buildTxExecutionRequest(node, pxe, payload, {
-		cancellable: false,
-		txNonce: Fr.random(),
-		feePaymentMethodOptions: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
-	})
+	const txRequest = await account.buildTxExecutionRequest(
+		node,
+		pxe,
+		payload,
+		{
+			cancellable: false,
+			txNonce: Fr.random(),
+			feePaymentMethodOptions: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
+		},
+		// The caller derived + `assertLiveChainIdentity`-validated this ONCE and
+		// shares it with the fast arm — do NOT re-fetch an unvalidated tuple here.
+		chainInfo,
+	)
 	const simulatedTx = await pxe.simulateTx(txRequest, {
 		simulatePublic: true,
 		skipFeeEnforcement: true,

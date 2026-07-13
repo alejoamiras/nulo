@@ -739,10 +739,10 @@ describe("batchedViewSimulation — fast arm (PUBLIC+isStatic leading prefix)", 
 		})
 		const origBuildTxReq = deps.account.buildTxExecutionRequest.bind(deps.account)
 		// biome-ignore lint/suspicious/noExplicitAny: stub patching
-		;(deps.account as any).buildTxExecutionRequest = vi.fn(async (n: unknown, pxeArg: unknown, payload: unknown, opts: unknown) => {
+		;(deps.account as any).buildTxExecutionRequest = vi.fn(async (...args: unknown[]) => {
 			events.push("slow-arm-build")
 			// biome-ignore lint/suspicious/noExplicitAny: forward through stub boundary
-			return origBuildTxReq(n as any, pxeArg as any, payload as any, opts as any)
+			return (origBuildTxReq as any)(...args)
 		})
 		// Mixed batch → both fast and slow arms dispatched. Utility launches
 		// between anchor read and tx-arm dispatch.

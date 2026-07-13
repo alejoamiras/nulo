@@ -1,5 +1,6 @@
 import { describe, test, expect } from "vitest"
 import { enforceScope, enforceScopeWithSession } from "./scope-enforcement"
+import { isCreateAuthWitCoveredByTxOrSimulationScope } from "./method-scope-checkers"
 import type { Capability, GrantedCapabilityRecord } from "./capabilities"
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -298,6 +299,21 @@ describe("simulateTx", () => {
 		const grants = [grant({ type: "simulation", utilities: { scope: "*" } })]
 		expect(() => enforceScope("simulateTx", [exec([{ to: addr(ADDR_A), name: "fn" }])], grants)).toThrow(/Scope violation/)
 	})
+
+	test("(SECURITY) an EMPTY function name is rejected even under a matching {function:''} scope", () => {
+		// The empty-name bypass: a dApp scopes `{function:""}` and sends `name:""`.
+		// matchesScope must NOT authorize it — the ABI sinks would otherwise treat
+		// "" as "absent" and sign/run a different selector silently.
+		const grants = [grant({ type: "simulation", transactions: { scope: [{ contract: ADDR_A, function: "" }] } })]
+		expect(() => enforceScope("simulateTx", [exec([{ to: addr(ADDR_A), name: "" }])], grants)).toThrow(/Scope violation/)
+	})
+
+	test("(SECURITY) a null call element is a controlled scope error, not a TypeError", () => {
+		// F-08: checkSimulationTransactions must validate each call element before
+		// dereferencing `call.to` (a null entry previously threw a raw TypeError).
+		const grants = [grant({ type: "simulation", transactions: { scope: "*" } })]
+		expect(() => enforceScope("simulateTx", [{ calls: [null] }], grants)).toThrow(/exec\.calls entries must be objects/)
+	})
 })
 
 // ── executeUtility ────────────────────────────────────────────────────
@@ -389,7 +405,10 @@ describe("createAuthWit", () => {
 
 	test("canCreateAuthWit + matching account passes", () => {
 		const grants = [grant(accountsCap(true, [ADDR_A]))]
-		expect(() => enforceScope("createAuthWit", [addr(ADDR_A), {}], grants)).not.toThrow()
+		// A structured intent is required now (raw/unstructured args[1] is rejected — F-01);
+		// accounts-only, so the call-level check is inapplicable.
+		const intent = { caller: addr(ADDR_A), call: { to: addr(ADDR_B), name: "transfer" } }
+		expect(() => enforceScope("createAuthWit", [addr(ADDR_A), intent], grants)).not.toThrow()
 	})
 
 	test("canCreateAuthWit with NO accounts list (manifest omits it) passes — regression for the createAuthWit crash", () => {
@@ -397,7 +416,8 @@ describe("createAuthWit", () => {
 		// canCreateAuthWit WITHOUT an `accounts` list. This must not throw "Cannot read properties of
 		// undefined (reading 'some')" — it's permitted, bounded by the wallet + the call-scope check.
 		const grants = [grant({ type: "accounts", canCreateAuthWit: true } as Capability)]
-		expect(() => enforceScope("createAuthWit", [addr(ADDR_A), {}], grants)).not.toThrow()
+		const intent = { caller: addr(ADDR_A), call: { to: addr(ADDR_B), name: "transfer" } }
+		expect(() => enforceScope("createAuthWit", [addr(ADDR_A), intent], grants)).not.toThrow()
 	})
 
 	test("canCreateAuthWit: false throws", () => {
@@ -408,6 +428,14 @@ describe("createAuthWit", () => {
 	test("account not in list throws", () => {
 		const grants = [grant(accountsCap(true, [ADDR_A]))]
 		expect(() => enforceScope("createAuthWit", [addr(ADDR_B), {}], grants)).toThrow(/Scope violation/)
+	})
+
+	test("raw / unstructured messageHashOrIntent is rejected — F-01", () => {
+		// A dApp-supplied raw message hash carries no semantic info to scope-check, so it
+		// cannot be proven within scope. The pre-fix code let it fall through and get signed
+		// silently. It must now be rejected; the dApp must pass a structured CallIntent.
+		const grants = [grant(accountsCap(true, [ADDR_A]))]
+		expect(() => enforceScope("createAuthWit", [addr(ADDR_A), "0xdeadbeef"], grants)).toThrow(/structured call intent/)
 	})
 
 	// ── CallIntent target-call scope enforcement ──────────────────────────
@@ -493,11 +521,42 @@ describe("createAuthWit", () => {
 		expect(() => enforceScope("createAuthWit", [addr(ADDR_A), innerHash(ADDR_B)], grants)).toThrow(/Scope violation/)
 	})
 
-	// ── Raw message hash (unchanged backward-compat) ──────────────────────
+	// ── Raw / unstructured message hash — rejected (F-01) ─────────────────
 
-	test("raw empty object treated as raw hash — accounts check still applies", () => {
+	test("raw empty object (unstructured) is rejected — F-01", () => {
+		// Was pinned as "accounts check still applies" (no-throw); that was the F-01 hole —
+		// an unstructured args[1] fell through the scope check and got signed silently. Now rejected.
 		const grants = [grant(accountsCap(true, [ADDR_A]))]
-		expect(() => enforceScope("createAuthWit", [addr(ADDR_A), {}], grants)).not.toThrow()
+		expect(() => enforceScope("createAuthWit", [addr(ADDR_A), {}], grants)).toThrow(/structured call intent/)
+	})
+})
+
+// ── createAuthWit silent-vs-popup routing (dispatcher coverage helper) ──
+
+describe("isCreateAuthWitCoveredByTxOrSimulationScope", () => {
+	const txGrant = grant({ type: "transaction", scope: [{ contract: ADDR_B, function: "transfer" }] } as Capability)
+	const callIntent = (to: string, name: string) => ({ caller: addr(ADDR_A), call: { to: addr(to), name } })
+	const innerHash = (consumer: string) => ({ consumer: addr(consumer), innerHash: "0xabc" })
+
+	test("covered CallIntent → true (routes to silent execution)", () => {
+		expect(isCreateAuthWitCoveredByTxOrSimulationScope(callIntent(ADDR_B, "transfer"), [txGrant])).toBe(true)
+	})
+	test("uncovered CallIntent (wrong function) → false (routes to popup)", () => {
+		expect(isCreateAuthWitCoveredByTxOrSimulationScope(callIntent(ADDR_B, "burn"), [txGrant])).toBe(false)
+	})
+	test("CallIntent with no tx/sim grant → false (routes to popup)", () => {
+		expect(isCreateAuthWitCoveredByTxOrSimulationScope(callIntent(ADDR_B, "transfer"), [])).toBe(false)
+	})
+	test("IntentInnerHash → false (always routes to popup)", () => {
+		expect(isCreateAuthWitCoveredByTxOrSimulationScope(innerHash(ADDR_B), [txGrant])).toBe(false)
+	})
+	test("simulation.transactions scope also covers → true", () => {
+		const simGrant = grant({ type: "simulation", transactions: { scope: [{ contract: ADDR_B, function: "transfer" }] } } as Capability)
+		expect(isCreateAuthWitCoveredByTxOrSimulationScope(callIntent(ADDR_B, "transfer"), [simGrant])).toBe(true)
+	})
+	test("raw / non-structured → false", () => {
+		expect(isCreateAuthWitCoveredByTxOrSimulationScope("0xhash", [txGrant])).toBe(false)
+		expect(isCreateAuthWitCoveredByTxOrSimulationScope({}, [txGrant])).toBe(false)
 	})
 })
 

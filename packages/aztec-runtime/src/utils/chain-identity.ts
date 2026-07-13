@@ -23,6 +23,9 @@
  * - Read-only / metadata paths where chain identity isn't trust-load-bearing.
  */
 
+import { Fr } from "@aztec/foundation/curves/bn254"
+import type { ChainInfo } from "@aztec/entrypoints/interfaces"
+
 export interface LiveNodeChainInfo {
 	l1ChainId: number
 	rollupVersion: number
@@ -55,4 +58,14 @@ export function assertLiveChainIdentity(network: SelectedNetworkChainInfo, nodeI
 			`Chain identity mismatch: selected network has chainId=${network.chainId} but live node reports composite=${liveComposite} (l1ChainId=${nodeInfo.l1ChainId}, rollupVersion=${nodeInfo.rollupVersion}). Refusing to sign/prove against a drifted endpoint.`,
 		)
 	}
+}
+
+/**
+ * Build the `ChainInfo` (Fr-encoded `l1ChainId` + `rollupVersion`) that the
+ * account entrypoint commits to, from a live node's raw identity. On the
+ * signing path the caller MUST pass a `nodeInfo` already checked with
+ * `assertLiveChainIdentity`; this helper performs no validation itself.
+ */
+export function chainInfoFrom(nodeInfo: LiveNodeChainInfo): ChainInfo {
+	return { chainId: new Fr(nodeInfo.l1ChainId), version: new Fr(nodeInfo.rollupVersion) }
 }

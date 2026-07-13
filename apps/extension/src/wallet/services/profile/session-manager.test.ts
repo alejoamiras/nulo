@@ -1,10 +1,13 @@
 /**
  * Unit tests for `SessionManager`.
  *
- * Uses `FakeBrowserApi` — no `chrome.storage`, no real crypto. Focus:
+ * Uses `FakeBrowserApi` — no `chrome.storage`, no real chrome. Focus:
  *   - TTL semantics (including the `sessionTtl === 0` never-expires branch).
  *   - `restore()` init-only silent contract (no emit).
  *   - Persisted `Session` shape lock — frozen.
+ *   - F-11 bearer: `open()` persists a random-token-wrapped secret (never a
+ *     password-equivalent passhash); `restore()` unwraps it; a legacy
+ *     `passhash`-shaped session is never accepted (one-time re-unlock).
  *   - `open` / `close` / `refresh` lifecycle emits exactly as the facade
  *     expects.
  */
@@ -13,6 +16,7 @@ import { asMasterSecretBytes, asPasshash, type MasterSecretBytes } from "@nulo/w
 import { describe, expect, test, vi } from "vitest"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
+import { SessionSecretBox, type SessionWrappedSecret } from "@nulo/wallet-crypto"
 import type { ConfigProp, IConfig } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { EventHandler } from "@nulo/wallet-core/utils"
@@ -23,9 +27,9 @@ import { SESSION_STORAGE_ROOT, SESSION_TTL_ALARM_NAME, SessionManager } from "./
  *  `strictSecurityMode` updates by invoking `onUpdate` directly; avoids
  *  `ConfigStore`'s `chrome.storage` dependency.
  *
- *  Defaults `strictSecurityMode` to `false` so the bearer-cache tests
- *  (which assert the passhash IS persisted) keep their semantics.
- *  Strict-mode tests opt in via `setStrict(true)`. */
+ *  Defaults `strictSecurityMode` to `false` so the bearer tests (which
+ *  assert the bearer IS persisted) keep their semantics. Strict-mode
+ *  tests opt in via `setStrict(true)`. */
 function fakeConfig(
 	initialTtl: number,
 	initialStrict = false,
@@ -76,6 +80,21 @@ function secretBuffer(): MasterSecretBytes {
 	const buf = new Uint8Array(new ArrayBuffer(32))
 	for (let i = 0; i < 32; i++) buf[i] = i + 1
 	return asMasterSecretBytes(buf as Uint8Array<ArrayBuffer>)
+}
+
+/** Shared box for seeding genuine F-11 bearers in `restore()` tests. Mirrors
+ *  exactly what `open()` persists — a random-token-wrapped secret, AAD-bound
+ *  to the profile id — so `restore()` unwraps it the same way in production. */
+const bearerBox = new SessionSecretBox()
+
+/** Produce a real bearer for `secret` bound to `profileId`. */
+async function makeBearer(profileId: string, secret = secretBuffer()): Promise<SessionWrappedSecret> {
+	return bearerBox.wrap(secret, profileId)
+}
+
+/** Seed a persisted `Session` directly (bypass `open()`, which emits). */
+async function seedSession(api: FakeBrowserApi, session: Session): Promise<void> {
+	await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(session) })
 }
 
 function setup(
@@ -131,7 +150,9 @@ describe("SessionManager", () => {
 			expect(raw[SESSION_STORAGE_ROOT]).toBeDefined()
 			const persisted: Session = JSON.parse(raw[SESSION_STORAGE_ROOT] as string)
 			expect(persisted.profile).toBe("pid")
-			expect(typeof persisted.passhash).toBe("string")
+			expect(persisted.bearer?.v).toBe(1)
+			// F-11: no password-equivalent value in the persisted session.
+			expect(persisted.passhash).toBeUndefined()
 			expect(typeof persisted.since).toBe("number")
 		})
 
@@ -140,12 +161,12 @@ describe("SessionManager", () => {
 			await expect(manager.getActive()).resolves.toBeUndefined()
 		})
 
-		test("passkey profile open does not persist a passhash", async () => {
+		test("passkey profile open does not persist a bearer", async () => {
 			const { api, manager } = setup()
 			await manager.open(passkeyProfile(), secretBuffer())
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			const persisted: Session = JSON.parse(raw[SESSION_STORAGE_ROOT] as string)
-			expect(persisted.passhash).toBeUndefined()
+			expect(persisted.bearer).toBeUndefined()
 		})
 	})
 
@@ -287,41 +308,49 @@ describe("SessionManager", () => {
 
 	describe("restore (init-only, silent)", () => {
 		test("re-hydrates a valid password session without emitting", async () => {
-			// Seed a persisted session directly (bypass open, which emits).
 			const { api, emits, manager } = setup()
 			const profile = passwordProfile("abc")
-			const session: Session = {
+			await seedSession(api, {
 				profile: "abc",
-				passhash: Buffer.from(asPasshash(new ArrayBuffer(8))).toString("base64"),
+				bearer: await makeBearer("abc"),
 				since: Date.now(),
-			}
-			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(session) })
+			})
 
 			const lookup = vi.fn(async (_: string) => profile as Profile)
-			const unseal = vi.fn(async () => secretBuffer())
-
-			await manager.restore(lookup, unseal)
+			await manager.restore(lookup)
 
 			expect(emits).toEqual([]) // SILENT
 			const active = await manager.getActive()
 			expect(active?.profile).toEqual(profile)
+			expect(active?.secret).toBeInstanceOf(Fr)
 			expect(lookup).toHaveBeenCalledWith("abc")
-			expect(unseal).toHaveBeenCalledOnce()
+		})
+
+		test("(F-11) restore unwraps the bearer back to the exact master secret", async () => {
+			const { api, manager } = setup()
+			const secret = secretBuffer()
+			await seedSession(api, {
+				profile: "abc",
+				bearer: await makeBearer("abc", secret),
+				since: Date.now(),
+			})
+
+			await manager.restore(async () => passwordProfile("abc"))
+
+			const active = await manager.getActive()
+			expect(active).toBeDefined()
+			expect(Buffer.from(active?.secret.toBuffer() ?? new Uint8Array()).toString("hex")).toBe(Buffer.from(secret).toString("hex"))
 		})
 
 		test("silently drops an expired session on restore", async () => {
 			const { api, emits, manager } = setup(50)
-			const expired: Session = {
+			await seedSession(api, {
 				profile: "abc",
-				passhash: Buffer.from(asPasshash(new ArrayBuffer(8))).toString("base64"),
+				bearer: await makeBearer("abc"),
 				since: Date.now() - 1000,
-			}
-			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(expired) })
+			})
 
-			await manager.restore(
-				async () => passwordProfile("abc"),
-				async () => secretBuffer(),
-			)
+			await manager.restore(async () => passwordProfile("abc"))
 
 			expect(emits).toEqual([])
 			await expect(manager.getActive()).resolves.toBeUndefined()
@@ -331,35 +360,49 @@ describe("SessionManager", () => {
 
 		test("silently drops when profile no longer exists", async () => {
 			const { api, emits, manager } = setup()
-			const session: Session = {
+			await seedSession(api, {
 				profile: "gone",
-				passhash: Buffer.from(asPasshash(new ArrayBuffer(8))).toString("base64"),
+				bearer: await makeBearer("gone"),
 				since: Date.now(),
-			}
-			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(session) })
+			})
 
-			await manager.restore(
-				async () => undefined,
-				async () => secretBuffer(),
-			)
+			await manager.restore(async () => undefined)
 
 			expect(emits).toEqual([])
 			await expect(manager.getActive()).resolves.toBeUndefined()
 		})
 
-		test("silently drops when unseal returns null (wrong creds / corrupt)", async () => {
+		test("(F-11) silently drops when the bearer fails to unwrap (tampered / bad tag)", async () => {
 			const { api, emits, manager } = setup()
-			const session: Session = {
+			const bearer = await makeBearer("abc")
+			const tampered = Buffer.from(bearer.wrappedSecret, "base64")
+			tampered[tampered.length - 1] ^= 0xff
+			await seedSession(api, {
+				profile: "abc",
+				bearer: { ...bearer, wrappedSecret: tampered.toString("base64") },
+				since: Date.now(),
+			})
+
+			await manager.restore(async () => passwordProfile("abc"))
+
+			expect(emits).toEqual([])
+			await expect(manager.getActive()).resolves.toBeUndefined()
+			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
+			expect(SESSION_STORAGE_ROOT in raw).toBe(false)
+		})
+
+		test("(F-11) legacy passhash-shaped session → silentClose (one-time re-unlock)", async () => {
+			// Pre-F-11 sessions persisted a password-equivalent `passhash`. The
+			// new restore() NEVER accepts it — the profile record is intact, the
+			// user just re-unlocks once. No re-registration, no wipe (option (a)).
+			const { api, emits, manager } = setup()
+			await seedSession(api, {
 				profile: "abc",
 				passhash: Buffer.from(asPasshash(new ArrayBuffer(8))).toString("base64"),
 				since: Date.now(),
-			}
-			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(session) })
+			})
 
-			await manager.restore(
-				async () => passwordProfile("abc"),
-				async () => null,
-			)
+			await manager.restore(async () => passwordProfile("abc"))
 
 			expect(emits).toEqual([])
 			await expect(manager.getActive()).resolves.toBeUndefined()
@@ -369,31 +412,21 @@ describe("SessionManager", () => {
 
 		test("passkey profile: leaves persisted record, does not activate, no emit", async () => {
 			const { api, emits, manager } = setup()
-			const session: Session = {
-				profile: "abc",
-				since: Date.now(),
-			}
-			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(session) })
+			await seedSession(api, { profile: "abc", since: Date.now() })
 
-			const unseal = vi.fn(async () => null)
-			await manager.restore(async () => passkeyProfile("abc"), unseal)
+			await manager.restore(async () => passkeyProfile("abc"))
 
 			expect(emits).toEqual([])
 			await expect(manager.getActive()).resolves.toBeUndefined()
-			expect(unseal).not.toHaveBeenCalled()
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			expect(SESSION_STORAGE_ROOT in raw).toBe(true)
 		})
 
-		test("password session missing passhash → silent close", async () => {
+		test("password session missing bearer → silent close", async () => {
 			const { api, emits, manager } = setup()
-			const session: Session = { profile: "abc", since: Date.now() }
-			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(session) })
+			await seedSession(api, { profile: "abc", since: Date.now() })
 
-			await manager.restore(
-				async () => passwordProfile("abc"),
-				async () => secretBuffer(),
-			)
+			await manager.restore(async () => passwordProfile("abc"))
 
 			expect(emits).toEqual([])
 			await expect(manager.getActive()).resolves.toBeUndefined()
@@ -403,10 +436,7 @@ describe("SessionManager", () => {
 
 		test("no persisted session → no-op", async () => {
 			const { emits, manager } = setup()
-			await manager.restore(
-				async () => passwordProfile("abc"),
-				async () => secretBuffer(),
-			)
+			await manager.restore(async () => passwordProfile("abc"))
 			expect(emits).toEqual([])
 			await expect(manager.getActive()).resolves.toBeUndefined()
 		})
@@ -421,7 +451,7 @@ describe("SessionManager", () => {
 			expect(SESSION_STORAGE_ROOT).toBe("nulo:core:session")
 		})
 
-		test("persisted Session shape is { profile, passhash?, since, lockedAt? }", async () => {
+		test("persisted Session shape is { profile, bearer?, since, lockedAt? }", async () => {
 			const { api, manager } = setup()
 			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
@@ -431,7 +461,7 @@ describe("SessionManager", () => {
 			// derives the value via `since + sessionTtl`. Both branches
 			// are tested: with TTL (`lockedAt` present) and without
 			// (omitted).
-			expect(Object.keys(persisted).sort()).toEqual(["lockedAt", "passhash", "profile", "since"])
+			expect(Object.keys(persisted).sort()).toEqual(["bearer", "lockedAt", "profile", "since"])
 		})
 
 		test("persisted Session omits lockedAt when sessionTtl=0", async () => {
@@ -440,7 +470,7 @@ describe("SessionManager", () => {
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			const persisted: Session = JSON.parse(raw[SESSION_STORAGE_ROOT] as string)
 			// `lockedAt: undefined` is dropped by JSON.stringify.
-			expect(Object.keys(persisted).sort()).toEqual(["passhash", "profile", "since"])
+			expect(Object.keys(persisted).sort()).toEqual(["bearer", "profile", "since"])
 		})
 	})
 
@@ -584,6 +614,7 @@ describe("SessionManager", () => {
 		test("SW restart with persisted lockedAt < now silentCloses (no emit)", async () => {
 			const ttl = 60_000
 			const { api, emits, manager } = setup(ttl)
+			const bearer = await makeBearer("pid")
 			vi.useFakeTimers()
 			vi.setSystemTime(new Date("2026-04-26T10:00:00Z"))
 
@@ -593,15 +624,12 @@ describe("SessionManager", () => {
 				profile: "pid",
 				since: Date.now() - 120_000,
 				lockedAt: Date.now() - 60_000, // already expired
-				passhash: Buffer.from(asPasshash(new ArrayBuffer(8))).toString("base64"),
+				bearer,
 			}
-			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(stale) })
+			await seedSession(api, stale)
 
 			emits.length = 0
-			await manager.restore(
-				async () => passwordProfile(),
-				async () => secretBuffer(),
-			)
+			await manager.restore(async () => passwordProfile())
 
 			expect(await manager.getActive()).toBeUndefined()
 			// silentClose semantics — no emit on init-time cleanup.
@@ -622,59 +650,59 @@ describe("SessionManager", () => {
 	 * going through `ConfigStore`.
 	 */
 	describe("M4.2 — open + strictSecurityMode", () => {
-		test("strict ON: open ignores passhash, persisted Session has no bearer", async () => {
+		test("strict ON: open ignores passhash presence, persisted Session has no bearer", async () => {
 			const { api, manager } = setup(1_800_000, true) // strict ON
 			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			const persisted: Session = JSON.parse(raw[SESSION_STORAGE_ROOT] as string)
 			expect(persisted.profile).toBe("pid")
-			expect(persisted.passhash).toBeUndefined()
-			// In-memory active session also has no passhash leak.
+			expect(persisted.bearer).toBeUndefined()
+			// In-memory active session also has no bearer leak.
 			const active = await manager.getActive()
-			expect(active?.session.passhash).toBeUndefined()
+			expect(active?.session.bearer).toBeUndefined()
 		})
 
-		test("strict OFF: open persists passhash (legacy bearer behavior)", async () => {
+		test("strict OFF: open persists a random-token bearer", async () => {
 			const { api, manager } = setup(1_800_000, false) // strict OFF
 			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			const persisted: Session = JSON.parse(raw[SESSION_STORAGE_ROOT] as string)
-			expect(typeof persisted.passhash).toBe("string")
+			expect(persisted.bearer?.v).toBe(1)
+			expect(typeof persisted.bearer?.token).toBe("string")
+			expect(typeof persisted.bearer?.wrappedSecret).toBe("string")
+			// F-11: no password-equivalent value alongside the bearer.
+			expect(persisted.passhash).toBeUndefined()
 			const active = await manager.getActive()
-			expect(typeof active?.session.passhash).toBe("string")
+			expect(active?.session.bearer?.v).toBe(1)
 		})
 
-		test("strict ON + passkey-style open (no passhash arg) — persisted Session has no passhash regardless", async () => {
+		test("strict ON + passkey-style open (no passhash arg) — no bearer regardless", async () => {
 			const { api, manager } = setup(1_800_000, true)
 			await manager.open(passkeyProfile(), secretBuffer())
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			const persisted: Session = JSON.parse(raw[SESSION_STORAGE_ROOT] as string)
-			expect(persisted.passhash).toBeUndefined()
+			expect(persisted.bearer).toBeUndefined()
 		})
 	})
 
 	describe("M4.2 — restore + strictSecurityMode", () => {
-		test("strict ON + stale passhash → silentClose + no in-memory session", async () => {
+		test("strict ON + persisted bearer → silentClose + no in-memory session", async () => {
 			const { api } = setup(1_800_000, false)
+			const bearer = await makeBearer("pid")
 			vi.useFakeTimers()
 			vi.setSystemTime(new Date("2026-04-26T10:00:00Z"))
 
-			// Inject a persisted Session with passhash (as a prior lenient
-			// session would leave behind).
-			const legacy: Session = {
+			// A bearer left behind by a prior lenient session.
+			await seedSession(api, {
 				profile: "pid",
 				since: Date.now(),
 				lockedAt: Date.now() + 1_800_000,
-				passhash: Buffer.from(asPasshash(new ArrayBuffer(8))).toString("base64"),
-			}
-			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(legacy) })
+				bearer,
+			})
 
 			// New SessionManager observes the persisted state with strict ON.
 			const { manager: m2, emits: e2 } = setupFromExistingApi(api, 1_800_000, true)
-			await m2.restore(
-				async () => passwordProfile(),
-				async () => secretBuffer(),
-			)
+			await m2.restore(async () => passwordProfile())
 
 			expect(await m2.getActive()).toBeUndefined()
 			expect(e2).toEqual([]) // silent — no emit on init cleanup
@@ -683,24 +711,21 @@ describe("SessionManager", () => {
 			vi.useRealTimers()
 		})
 
-		test("strict OFF + persisted passhash → silent restore (legacy lenient behavior)", async () => {
+		test("strict OFF + persisted bearer → silent restore (lenient)", async () => {
 			const { api } = setup(1_800_000, false)
+			const bearer = await makeBearer("pid")
 			vi.useFakeTimers()
 			vi.setSystemTime(new Date("2026-04-26T10:00:00Z"))
 
-			const fresh: Session = {
+			await seedSession(api, {
 				profile: "pid",
 				since: Date.now(),
 				lockedAt: Date.now() + 1_800_000,
-				passhash: Buffer.from(asPasshash(new ArrayBuffer(8))).toString("base64"),
-			}
-			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(fresh) })
+				bearer,
+			})
 
 			const { manager: m2 } = setupFromExistingApi(api, 1_800_000, false)
-			await m2.restore(
-				async () => passwordProfile(),
-				async () => secretBuffer(),
-			)
+			await m2.restore(async () => passwordProfile())
 
 			const active = await m2.getActive()
 			expect(active).toBeDefined()
@@ -708,24 +733,20 @@ describe("SessionManager", () => {
 			vi.useRealTimers()
 		})
 
-		test("strict ON + passkey session (no passhash) → unchanged short-circuit (no silentClose)", async () => {
+		test("strict ON + passkey session (no bearer) → unchanged short-circuit (no silentClose)", async () => {
 			const { api } = setup(1_800_000, false)
 			vi.useFakeTimers()
 			vi.setSystemTime(new Date("2026-04-26T10:00:00Z"))
 
-			const passkeySession: Session = {
+			await seedSession(api, {
 				profile: "pid",
 				since: Date.now(),
 				lockedAt: Date.now() + 1_800_000,
-				// no passhash — passkey-style record
-			}
-			await api.storage.session.set({ [SESSION_STORAGE_ROOT]: JSON.stringify(passkeySession) })
+				// no bearer — passkey-style record
+			})
 
 			const { manager: m2 } = setupFromExistingApi(api, 1_800_000, true)
-			await m2.restore(
-				async () => passkeyProfile(),
-				async () => secretBuffer(),
-			)
+			await m2.restore(async () => passkeyProfile())
 
 			// Passkey branch leaves the persisted record alone (popup will prompt).
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
@@ -735,60 +756,60 @@ describe("SessionManager", () => {
 		})
 	})
 
-	describe("M4.2 — clearPasshash", () => {
+	describe("M4.2 — clearBearer", () => {
 		test("no-op when no session is open", async () => {
 			const { api, manager } = setup(1_800_000, false)
-			await manager.clearPasshash()
+			await manager.clearBearer()
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			expect(SESSION_STORAGE_ROOT in raw).toBe(false)
 		})
 
-		test("no-op when persisted session has no passhash (passkey)", async () => {
+		test("no-op when persisted session has no bearer (passkey)", async () => {
 			const { api, manager } = setup(1_800_000, false)
 			await manager.open(passkeyProfile(), secretBuffer())
 			const beforeRaw = await api.storage.session.get(SESSION_STORAGE_ROOT)
-			await manager.clearPasshash()
+			await manager.clearBearer()
 			const afterRaw = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			expect(afterRaw[SESSION_STORAGE_ROOT]).toBe(beforeRaw[SESSION_STORAGE_ROOT])
 		})
 
-		test("drops persisted passhash AND in-memory activeSession.session.passhash", async () => {
+		test("drops persisted bearer AND in-memory activeSession.session.bearer", async () => {
 			const { api, manager } = setup(1_800_000, false)
 			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
 			// Sanity: bearer present.
 			const before = JSON.parse((await api.storage.session.get(SESSION_STORAGE_ROOT))[SESSION_STORAGE_ROOT] as string) as Session
-			expect(typeof before.passhash).toBe("string")
-			expect(typeof (await manager.getActive())?.session.passhash).toBe("string")
+			expect(before.bearer?.v).toBe(1)
+			expect((await manager.getActive())?.session.bearer?.v).toBe(1)
 
-			await manager.clearPasshash()
+			await manager.clearBearer()
 
 			const after = JSON.parse((await api.storage.session.get(SESSION_STORAGE_ROOT))[SESSION_STORAGE_ROOT] as string) as Session
-			expect(after.passhash).toBeUndefined()
+			expect(after.bearer).toBeUndefined()
 			expect(after.profile).toBe("pid") // other fields preserved
 			// CRITICAL invariant: in-memory copy also cleared, otherwise refresh()
 			// would re-persist the bearer on TTL bumps (codex audit BLOCKING).
-			expect((await manager.getActive())?.session.passhash).toBeUndefined()
+			expect((await manager.getActive())?.session.bearer).toBeUndefined()
 		})
 
-		test("refresh() after clearPasshash does NOT re-persist passhash", async () => {
+		test("refresh() after clearBearer does NOT re-persist the bearer", async () => {
 			const { api, manager } = setup(1_800_000, false)
 			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
-			await manager.clearPasshash()
+			await manager.clearBearer()
 
 			// refresh() reads activeSession.session and re-persists. If the
-			// in-memory copy still had passhash, this would re-write the
-			// bearer to storage — strict mode would be silently undone.
+			// in-memory copy still had the bearer, this would re-write it to
+			// storage — strict mode would be silently undone.
 			await manager.refresh()
 
 			const persisted = JSON.parse((await api.storage.session.get(SESSION_STORAGE_ROOT))[SESSION_STORAGE_ROOT] as string) as Session
-			expect(persisted.passhash).toBeUndefined()
+			expect(persisted.bearer).toBeUndefined()
 		})
 
 		test("idempotent: calling twice succeeds without error", async () => {
 			const { manager } = setup(1_800_000, false)
 			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
-			await manager.clearPasshash()
-			await expect(manager.clearPasshash()).resolves.toBeUndefined()
+			await manager.clearBearer()
+			await expect(manager.clearBearer()).resolves.toBeUndefined()
 		})
 	})
 
@@ -796,17 +817,17 @@ describe("SessionManager", () => {
 		test("toggle ON during unlocked password session → bearer cleared from storage + memory", async () => {
 			const { api, config, manager } = setup(1_800_000, false)
 			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
-			expect(typeof (await manager.getActive())?.session.passhash).toBe("string")
+			expect((await manager.getActive())?.session.bearer?.v).toBe(1)
 
 			config.setStrict(true)
-			// The handler fires `void clearPasshash()` — flush microtasks.
+			// The handler fires `void clearBearer()` — flush microtasks.
 			await Promise.resolve()
 			await Promise.resolve()
 			await Promise.resolve()
 
 			const persisted = JSON.parse((await api.storage.session.get(SESSION_STORAGE_ROOT))[SESSION_STORAGE_ROOT] as string) as Session
-			expect(persisted.passhash).toBeUndefined()
-			expect((await manager.getActive())?.session.passhash).toBeUndefined()
+			expect(persisted.bearer).toBeUndefined()
+			expect((await manager.getActive())?.session.bearer).toBeUndefined()
 			// Master secret survives the toggle — toggle ON is not a force-lock.
 			expect((await manager.getActive())?.secret).toBeInstanceOf(Fr)
 		})
@@ -814,7 +835,7 @@ describe("SessionManager", () => {
 		test("toggle OFF during unlocked strict session → no immediate effect (no backfill)", async () => {
 			const { api, config, manager } = setup(1_800_000, true)
 			await manager.open(passwordProfile(), secretBuffer(), asPasshash(new ArrayBuffer(8)))
-			expect((await manager.getActive())?.session.passhash).toBeUndefined()
+			expect((await manager.getActive())?.session.bearer).toBeUndefined()
 
 			config.setStrict(false)
 			await Promise.resolve()
@@ -823,11 +844,11 @@ describe("SessionManager", () => {
 			// No backfill. Existing session stays bearer-less. The bearer
 			// returns on the NEXT unlock via open()'s gate.
 			const persisted = JSON.parse((await api.storage.session.get(SESSION_STORAGE_ROOT))[SESSION_STORAGE_ROOT] as string) as Session
-			expect(persisted.passhash).toBeUndefined()
-			expect((await manager.getActive())?.session.passhash).toBeUndefined()
+			expect(persisted.bearer).toBeUndefined()
+			expect((await manager.getActive())?.session.bearer).toBeUndefined()
 		})
 
-		test("toggle ON during passkey session → no-op (no passhash to clear)", async () => {
+		test("toggle ON during passkey session → no-op (no bearer to clear)", async () => {
 			const { api, config, manager } = setup(1_800_000, false)
 			await manager.open(passkeyProfile(), secretBuffer())
 			config.setStrict(true)
@@ -835,7 +856,7 @@ describe("SessionManager", () => {
 			await Promise.resolve()
 
 			const persisted = JSON.parse((await api.storage.session.get(SESSION_STORAGE_ROOT))[SESSION_STORAGE_ROOT] as string) as Session
-			expect(persisted.passhash).toBeUndefined()
+			expect(persisted.bearer).toBeUndefined()
 			expect(await manager.getActive()).toBeDefined()
 		})
 	})

@@ -40,6 +40,13 @@ function matchesPattern(contract: string, fn: string, pattern: ScopePattern): bo
 }
 
 function matchesScope(contract: string, fn: string, scope: Scope): boolean {
+	// An EMPTY function name is never a legitimate call target. Refuse to match it
+	// against ANY scope (including "*") so a `{function:""}` grant + a `name:""`
+	// call cannot be authorized. This is the authorization-side half of the
+	// empty-name defense; the ABI sinks separately reject an empty `name` (which
+	// they would otherwise treat as "absent" and skip the name↔selector bind,
+	// silently signing an authwit for a different selector).
+	if (fn === "") return false
 	if (scope === "*") return true
 	return scope.some((p) => matchesPattern(contract, fn, p))
 }
@@ -154,6 +161,17 @@ function checkSimulationTransactions(methodName: string, args: unknown[], grants
 	if (!caps.length) return
 
 	const typedCalls = calls as WireCall[]
+	// F-08: never dereference a raw-unknown call element. A null/non-object entry
+	// (or one missing `to`) is malformed — surface a controlled scope error rather
+	// than a `TypeError: null is not an object` from `call.to`. (simulateTx/profileTx
+	// are checker-owned post-merge, so this deep guard lives here, not in the
+	// dispatcher's `assertAuthRelevantArgShape`.) A non-string `name` is coerced
+	// safely below and rejected by the downstream execution-layer Zod.
+	for (const call of typedCalls) {
+		if (typeof call !== "object" || call === null || (call as WireCall).to === undefined) {
+			throw new Error(`Scope enforcement: ${methodName} exec.calls entries must be objects with a \`to\` field`)
+		}
+	}
 	const permitted = caps.some((c) => {
 		const scope = c.transactions?.scope
 		if (!scope) return false
@@ -252,6 +270,18 @@ function isIntentInnerHash(x: unknown): x is IntentInnerHashShape {
 	return "consumer" in obj && "innerHash" in obj
 }
 
+/**
+ * Whether a dApp createAuthWit intent's target call is covered by a granted
+ * transaction/simulation scope. The dispatcher uses this to route a covered call
+ * to silent execution and an uncovered call — or any `IntentInnerHash`, which
+ * carries no call to check — to an explicit confirmation popup.
+ */
+export function isCreateAuthWitCoveredByTxOrSimulationScope(intent: unknown, grants: GrantedCapabilityRecord[]): boolean {
+	if (!isCallIntent(intent)) return false
+	const { permitted } = callWithinTxOrSimulationScope(String(intent.call.to), intent.call.name, grants)
+	return permitted
+}
+
 export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRecord[]): void {
 	const from = String(args[0])
 
@@ -303,8 +333,11 @@ export function checkCreateAuthWit(args: unknown[], grants: GrantedCapabilityRec
 		return
 	}
 
-	// Raw Fr message hash (pre-computed by wallet-sdk) — no semantic info to
-	// validate beyond the accounts-level check above.
+	// Raw Fr message hash: a dApp-supplied pre-computed hash carries no semantic
+	// info to scope-check, so it cannot be proven within the granted scope. Reject
+	// it — a dApp must pass a structured CallIntent. (An inner-hash is handled above;
+	// the dispatcher routes createAuthWit to explicit user confirmation.)
+	throw new Error("Scope violation: createAuthWit requires a structured call intent; a raw message hash cannot be authorized")
 }
 
 /**

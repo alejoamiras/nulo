@@ -1,6 +1,7 @@
 import type { ILogger } from "@nulo/wallet-core/logger"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { BaseService } from "../core/base-service"
+import { isTrustedInternalSender } from "../core/sender-auth"
 import type { ResponseContentLike } from "../core/base-client"
 import { MessageType } from "../messages"
 import type { EventMessage, RequestMessage } from "./messages"
@@ -33,7 +34,10 @@ export abstract class Service<TRequests extends MethodsMap, TEvents extends Even
 		chrome.runtime.onMessage.addListener(this.onMessageListener)
 	}
 
-	private readonly onMessageListener = (message: RequestMessage<TRequests>): boolean => {
+	private readonly onMessageListener = (message: RequestMessage<TRequests>, sender: chrome.runtime.MessageSender): boolean => {
+		// F-09: only same-extension SW / popup / offscreen senders may drive the
+		// offscreen listener — reject foreign extensions and any tab-bound sender.
+		if (!isTrustedInternalSender(sender)) return false
 		if (typeof message === "object" && message !== null && message.to === this.name) {
 			this.onMessage(message) // fire and forget
 		}

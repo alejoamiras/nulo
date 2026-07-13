@@ -163,17 +163,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// profile, wrong creds, and passkey-can't-silently-restore
 		// internally. No emit on restore — subscribers pull via
 		// getActiveProfile() when they mount.
-		await this.sessionManager.restore(
-			// A tombstoned profile (SW died mid-delete: row present, id reserved) must
-			// NOT have its session restored — it's being erased. Gate the lookup so no
-			// downstream unlock/export/secret path can observe an active session for it.
-			(id) => (this.deletionState.isReserved(id) ? Promise.resolve(undefined) : this.repo.get(id)),
-			(passhash, profile) =>
-				this.secretBox.unsealWithPasshash(passhash, {
-					guard: asBase64Ciphertext(profile.guard),
-					secret: asBase64Ciphertext(profile.secret),
-				}),
-		)
+		// F-11: the silent-restore bearer is a random-token wrapped secret
+		// (SessionSecretBox), so `restore()` needs no passhash unsealer. dev's
+		// tombstone gate is preserved: a tombstoned profile (SW died mid-delete:
+		// row present, id reserved) must NOT have its session restored — it's being
+		// erased, so no downstream unlock/export/secret path can observe it.
+		await this.sessionManager.restore((id) => (this.deletionState.isReserved(id) ? Promise.resolve(undefined) : this.repo.get(id)))
 	}
 
 	public async getActiveProfile(): Promise<ProfileInfo | undefined> {
@@ -503,6 +498,36 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		return this.runExclusive(async () => {
 			await this.sessionManager.close()
 		})
+	}
+
+	/**
+	 * F-12: derive the per-profile, NON-EXTRACTABLE HMAC key that signs
+	 * DappSession rows. The raw master secret never leaves this service — only
+	 * the derived (non-exportable) key is handed out. Propagates the "Profile
+	 * locked" throw from `getSecret`, which the DappSession read path treats as
+	 * "drop rows until unlock". Key is per-profile (IKM = the profile master
+	 * secret), so a row signed under one profile can't verify under another.
+	 */
+	public async deriveDappSessionMacKey(profileId: string): Promise<CryptoKey> {
+		const secret = await this.sessionManager.getSecret(profileId)
+		const ikm = new Uint8Array(secret.toBuffer())
+		try {
+			const baseKey = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveKey"])
+			return await crypto.subtle.deriveKey(
+				{
+					name: "HKDF",
+					hash: "SHA-256",
+					salt: new TextEncoder().encode("nulo:dappsession-mac:salt:v1"),
+					info: new TextEncoder().encode("nulo:dappsession-mac:v1"),
+				},
+				baseKey,
+				{ name: "HMAC", hash: "SHA-256" },
+				false,
+				["sign", "verify"],
+			)
+		} finally {
+			zeroize(ikm)
+		}
 	}
 
 	public async refreshSession(): Promise<void> {

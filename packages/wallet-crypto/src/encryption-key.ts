@@ -1,5 +1,6 @@
 import { bytesToHex } from "@nulo/wallet-core/utils"
 import { asPasshash, type Passhash } from "./secret-types"
+import { zeroize } from "./zeroize"
 
 /** OWASP-recommended minimum for PBKDF2-SHA256 (2023). */
 const PBKDF2_ITERATIONS = 600_000
@@ -79,7 +80,15 @@ export class EncryptionKey {
 	 */
 	public static async fromPassword(password: string): Promise<EncryptionKey> {
 		const passhash = await EncryptionKey.getPasshash(password)
-		return EncryptionKey.fromPasshash(passhash)
+		try {
+			return await EncryptionKey.fromPasshash(passhash)
+		} finally {
+			// Wipe the password-equivalent SHA-256 scratch once `importKey` has
+			// copied it into the non-extractable PBKDF2 base key. The `password`
+			// string itself and the CryptoKey internals are not wipeable (see
+			// zeroize caveats).
+			zeroize(passhash)
+		}
 	}
 
 	/**

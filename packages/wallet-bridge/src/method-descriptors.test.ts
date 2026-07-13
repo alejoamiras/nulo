@@ -65,7 +65,7 @@ const FROZEN_METHOD_TO_KIND: Record<string, string> = {
 	simulateTx: "aztec_simulateTx",
 	executeUtility: "aztec_executeUtility",
 	profileTx: "aztec_profileTx",
-	createAuthWit: "aztec_createAuthWit",
+	// createAuthWit is now handler-routed (like sendTx/registerToken/grantPublicAuthwit) — no METHOD_TO_KIND entry.
 }
 
 const FROZEN_NETWORK_ONLY = new Set([
@@ -78,7 +78,7 @@ const FROZEN_NETWORK_ONLY = new Set([
 	"aztec_registerContract",
 ])
 
-const FROZEN_ACCOUNT = new Set(["aztec_simulateTx", "aztec_executeUtility", "aztec_profileTx", "aztec_createAuthWit"])
+const FROZEN_ACCOUNT = new Set(["aztec_simulateTx", "aztec_executeUtility", "aztec_profileTx"])
 
 // Method → the EXACT checker function the pre-refactor METHOD_SCOPE_CHECKER referenced.
 // For the 11 pre-named checkers this is byte-identical; for sendTx/simulateTx/profileTx

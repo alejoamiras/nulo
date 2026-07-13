@@ -1,0 +1,57 @@
+**Blocking / High-Risk Gaps**
+
+1. **Per-unit PR CI assumption is false.** The plan says unit PRs into `fix/harden-findings` run advisory CI ([plan.md:12](/home/homelab/Projects/nulo/nulo-2/implementations-plan/harden-findings-remediation/plan.md:12), [plan.md:169](/home/homelab/Projects/nulo/nulo-2/implementations-plan/harden-findings-remediation/plan.md:169)). Current workflows only trigger `pull_request.branches: [main, dev]`: [pr-quick.yml:3](/home/homelab/Projects/nulo/nulo-2/.github/workflows/pr-quick.yml:3), [pr-smoke-e2e.yml:3](/home/homelab/Projects/nulo/nulo-2/.github/workflows/pr-smoke-e2e.yml:3), [pr-network-e2e.yml:11](/home/homelab/Projects/nulo/nulo-2/.github/workflows/pr-network-e2e.yml:11). `.github/README.md` confirms PR CI runs for PRs to `dev`/`main`, not arbitrary integration branches ([.github/README.md:40](/home/homelab/Projects/nulo/nulo-2/.github/README.md:40)).  
+   **Change the plan:** either add `fix/harden-findings` to those workflow branch filters in the first integration-branch commit, or state unit PRs have no GitHub CI and require logged local gates plus one fully gated promote PR. Do not leave this as “verify on first PR.”
+
+2. **Unit A can regress the boundary if selector binding is bolted on downstream after authorization.** The plan correctly flags ABI reachability as an open question ([plan.md:71](/home/homelab/Projects/nulo/nulo-2/implementations-plan/harden-findings-remediation/plan.md:71)), but current scope checks are synchronous and compare attacker `name` fields ([method-scope-checkers.ts:109](/home/homelab/Projects/nulo/nulo-2/packages/wallet-bridge/src/method-scope-checkers.ts:109), [method-scope-checkers.ts:279](/home/homelab/Projects/nulo/nulo-2/packages/wallet-bridge/src/method-scope-checkers.ts:279)). ABI/artifact resolution is already downstream in `TxRequestBuilder` ([tx-request-builder.ts:125](/home/homelab/Projects/nulo/nulo-2/apps/extension/src/wallet/services/execution/tx-request-builder.ts:125), [tx-request-builder.ts:304](/home/homelab/Projects/nulo/nulo-2/apps/extension/src/wallet/services/execution/tx-request-builder.ts:304)) and `ContractResolver` ([contract-resolver.ts:50](/home/homelab/Projects/nulo/nulo-2/apps/extension/src/wallet/services/execution/contract-resolver.ts:50)).  
+   **Attacker target:** any gap where scope still passes on raw `name`, while execution later rejects only some paths or popup already displayed attacker text.  
+   **Change the plan:** require a pre-sign/pre-popup semantic authorization stage that canonicalizes each call to ABI-resolved `{contract, selector, verifiedName}` and scopes that canonical form. If the synchronous dispatcher cannot do it, the plan must describe how authorization is deferred without allowing any signing/execution/popup approval to observe unverified dApp labels.
+
+3. **Unit A’s faucet authwit assumption is not proven enough.** The bridge combined manifest grants `canCreateAuthWit: true` ([capabilities.ts:218](/home/homelab/Projects/nulo/nulo-2/apps/faucet/src/lib/capabilities.ts:218)). Private withdraw calls `aztec.createAuthWit(fromAddr, { caller, call: await ...getFunctionCall() })`, so source-level intent is structured, not raw ([useWithdraw.ts:227](/home/homelab/Projects/nulo/nulo-2/apps/faucet/src/composables/useWithdraw.ts:227)). Public withdraw uses `SetPublicAuthwitContractInteraction` and sends a registry tx, not direct raw `createAuthWit` ([useWithdraw.ts:241](/home/homelab/Projects/nulo/nulo-2/apps/faucet/src/composables/useWithdraw.ts:241)). But the actual risk is serialization across wallet-sdk/content-script/SW: `executeAztecCreateAuthWit` still accepts call intent, inner hash, or raw `Fr` and signs all three ([service.ts:657](/home/homelab/Projects/nulo/nulo-2/apps/extension/src/wallet/services/execution/service.ts:657)).  
+   **Change the plan:** Unit A gate must include either the real faucet private-withdraw flow or a captured serialized fixture proving `FunctionCall` arrives with selector/name/type/args/returnTypes intact. Add `bun run test:faucet` or targeted faucet tests to Unit A.
+
+4. **Unit G’s proposed `sender.id === runtime.id` is insufficient by itself.** A content script sender can also have the extension id; the distinguishing signal is usually `sender.tab` / sender URL/context. Current offscreen listener ignores sender entirely ([offscreen/service.ts:36](/home/homelab/Projects/nulo/nulo-2/packages/extension-messaging/src/offscreen/service.ts:36)); background `Port` service accepts by port name only ([background/service.ts:36](/home/homelab/Projects/nulo/nulo-2/packages/extension-messaging/src/background/service.ts:36)).  
+   **Change the plan:** require `sender.id === runtime.id` plus rejection of tab/content-script senders (`sender.tab` present), and explicit allowlisting of extension pages/service worker/offscreen contexts. Add Firefox sender-shape tests. The instance token in G/H must not become the only auth control; it is stale-instance separation, not sender authentication.
+
+5. **Unit L is directionally right but underspecified enough to create a new bearer bug.** Current `passhash` is `SHA-256(password)` ([encryption-key.ts:97](/home/homelab/Projects/nulo/nulo-2/packages/wallet-crypto/src/encryption-key.ts:97)) and is persisted in session storage when strict mode is off ([session-manager.ts:202](/home/homelab/Projects/nulo/nulo-2/apps/extension/src/wallet/services/profile/session-manager.ts:202), [spec.ts:31](/home/homelab/Projects/nulo/nulo-2/apps/extension/src/wallet/services/profile/spec.ts:31)). A “random wrapping token” preserves silent restore only if something decryptable by that token is stored; if stored incorrectly, it just becomes a new password-equivalent session bearer.  
+   **Change the plan:** Unit L must define the exact new session/profile row shape, token lifetime, lock/TTL deletion behavior, storage wipe keys, and threat property: “session-storage read can restore until TTL, but cannot offline-crack password or unlock after session deletion.” Do not touch AES-GCM/PBKDF2 primitives; the report explicitly says that core is sound ([report.md:122](/home/homelab/Projects/nulo/nulo-2/audit/security/2026-07-06-max/report.md:122)).
+
+**Assumption Attack**
+
+**Facts**
+- “All 14 findings verified” is accurate: verified table lists F-01 through F-14, 14 total ([verified.md:5](/home/homelab/Projects/nulo/nulo-2/audit/security/2026-07-06-max/findings/verified.md:5)).
+- Tooling names are real in `package.json`: `lint`, `typecheck:all`, `test`, `test:e2e`, `e2e:agent`, `build`, `build:firefox`, `audit:vue` ([package.json:13](/home/homelab/Projects/nulo/nulo-2/package.json:13)).
+- `@nulo/bridge-core` is faucet-only by package manifest evidence: `apps/faucet` depends on it ([apps/faucet/package.json:18](/home/homelab/Projects/nulo/nulo-2/apps/faucet/package.json:18)); no other package manifest hit was found.
+- `dev`/`main` protection and required checks are documented as real ([CLAUDE.md:39](/home/homelab/Projects/nulo/nulo-2/CLAUDE.md:39), [CLAUDE.md:45](/home/homelab/Projects/nulo/nulo-2/CLAUDE.md:45)).
+- “No production users” was not independently proven from the files I read. Treat it as a product assertion, not a security fact, and keep the Unit L wipe as an explicit user decision.
+
+**Inferences**
+- ABI reachable “at or before authorization time” is unsafe. Today the ABI is reachable in execution builder/resolver, not in the synchronous scope checker. Plan must require a concrete async semantic-auth boundary.
+- “Rejecting raw authwit hashes does not break faucet withdraw” is only partially supported. Source-level private withdraw is structured, but serialized wire shape still needs proof. Add fixture/e2e.
+- “Per-unit PRs run CI advisorily” is false under current workflows. Fix workflow triggers or change strategy.
+- “Bearer redesign preserves silent restore UX” is not established. It needs a real design, because silent restore necessarily keeps some bearer material alive for the session.
+
+**Asks**
+- Unit L scope cannot remain “approval-gate decision” while the campaign is “fully autonomous” ([plan.md:7](/home/homelab/Projects/nulo/nulo-2/implementations-plan/harden-findings-remediation/plan.md:7), [plan.md:44](/home/homelab/Projects/nulo/nulo-2/implementations-plan/harden-findings-remediation/plan.md:44)). Resolve before execution: full storage bump vs memory-only vs defer.
+- Decide raw/opaque authwit policy: hard reject all raw `Fr` and `IntentInnerHash`, or allow only with explicit dangerous per-request popup. My recommendation: hard reject dApp-origin raw `Fr`; require structured call intent for silent path.
+- Decide CI strategy for integration branch before first unit PR.
+- Decide whether Unit I may wipe/reseed all dApp sessions instead of migrating/MACing existing rows. With no production users, wipe is simpler and less error-prone.
+
+**Plan Quality**
+
+The 12-unit decomposition is mostly right. A/B split is acceptable only because the promote PR ships them together; the report explicitly couples F-01/F-02/F-08 and F-02/F-07 ([report.md:174](/home/homelab/Projects/nulo/nulo-2/audit/security/2026-07-06-max/report.md:174)). G/H are tightly coupled and may be cleaner as one offscreen-auth unit because both touch sender/token routing. E/L are conceptually coupled through strict-mode/passhash persistence but can remain separate if L runs last.
+
+Unit I is under-specified: “MAC with a profile-local key” ([plan.md:119](/home/homelab/Projects/nulo/nulo-2/implementations-plan/harden-findings-remediation/plan.md:119)) is meaningful only if the key is not stored next to the tamperable rows. Use the active profile master secret or a derived non-exported key; MAC canonical fields including `sessionId`, `origin`, `chainId`, `profileId`, accounts, grants, confirmation level, and version. If unavailable while locked, drop rows until unlock or wipe/reseed.
+
+Sequencing is sound: A first, B immediately after, L last. The “risk-first with quick wins” ledger is defensible ([plan.md:177](/home/homelab/Projects/nulo/nulo-2/implementations-plan/harden-findings-remediation/plan.md:177)). The tier-as-design-rigor model is acceptable for non-crypto units, but DEEP units A and L need concrete pre-code design artifacts with invariants and negative tests, not just advisory notes.
+
+Validation gates need tightening by layer:
+- Network `e2e:agent` is required for A, C, and G/H if PXE/offscreen transport changes; it is also justified once after L because storage/session changes can break account restore/unlock flows.
+- D probably needs extension smoke plus targeted queue tests; full network e2e is not strictly necessary unless discovery tests only exist there.
+- E, I, J, K can be unit/component/composition plus smoke.
+- A must add faucet/private-withdraw or serialized `createAuthWit` fixture coverage.
+- Unit L must add migration/wipe assertions for `nulo:core:session` and any new wrapped-session fields, not just crypto vectors.
+
+**Verdict**
+
+VERDICT: conditional approve (conditions: fix the integration-branch CI strategy; make Unit A enforce selector/authwit semantics before authorization and add faucet private-withdraw serialization tests; strengthen Unit G sender/tab/token requirements; specify Unit I MAC key source and Unit L exact session-bearer/storage-bump design before coding)
