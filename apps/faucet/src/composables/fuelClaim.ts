@@ -4,7 +4,7 @@
  * Aztec SDK / the pure `fuel-claim-state` lib, and takes the wallet + sponsored-FPC + floor as
  * ARGUMENTS — never a faucet singleton — so `useDeposit → fuelClaim → bridge-core` stays acyclic.
  *
- * PUBLIC: `FeeJuice.claim_and_end_setup` paid by the Sponsored FPC (the FJ lands in the public balance).
+ * PUBLIC: `FeeJuice.claim` paid by the Sponsored FPC (the FJ lands in the public balance).
  * PRIVATE: the carrier-less embedded-FPC tx — `new BatchCall(wallet, [])` (no app call) paid by
  * `privateMintAndPayFee`, which runs `FeeJuice.claim` + `PrivateFPC.mint_and_pay_fee` as setup and
  * credits `(amount − max_gas_cost)` to the claimer. The live sequencer's acceptance of a zero-app-call
@@ -144,7 +144,11 @@ export async function buildFuelClaimInteraction(rec: DepositJournalRecord, deps:
 	const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
 	const fj = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
 	const secret = Fr.fromString(secretHex)
-	const claim = () => fj.methods.claim_and_end_setup(recipient, received, secret, leaf)
+	// Plain `claim`, NOT `claim_and_end_setup`: the latter calls end_setup() and is only valid as the
+	// fee payload (FeeJuicePaymentMethodWithClaim places it in the setup phase). Here the Sponsored FPC
+	// pays — its fee payment already ends setup, so an app-phase claim_and_end_setup asserts on every
+	// attempt (caught live by the direct-FJ canary on the 5.0.0 testnet).
+	const claim = () => fj.methods.claim(recipient, received, secret, leaf)
 	return {
 		simulate: () => claim().simulate({ from: recipient, fee: sponsored } as never),
 		send: async () => {

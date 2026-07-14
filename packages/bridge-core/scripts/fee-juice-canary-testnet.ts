@@ -7,8 +7,8 @@
  *   2. FeeAssetHandler.mint(owner)            — the wallet's mint button
  *   3. approve + FeeJuicePortal.depositToAztecPublic(to, minFj, secretHash)  — deposits EXACTLY
  *      the manifest's minFj, so the floor the manifest promises the wallet is what gets proven
- *   4. fresh L2 account (sponsored-FPC deploy), then FeeJuice.claim_and_end_setup paid by the
- *      Sponsored FPC — the faucet's public claim lane — and the FULL deposit must land as balance.
+ *   4. fresh L2 account (sponsored-FPC deploy), then FeeJuice.claim paid by the Sponsored FPC —
+ *      the faucet's public claim lane — and the FULL deposit must land as balance.
  *
  * Run: bun scripts/fee-juice-canary-testnet.ts --config <candidate.json>
  *      (PRIVATE_KEY + SEPOLIA_RPC_URL in packages/bridge-core/.env)
@@ -167,7 +167,11 @@ async function main() {
 	console.log(`deposited: ${deposit.amount} FJ-wei, leaf ${deposit.leafIndex} (${mins()})`)
 	if (deposit.amount !== minFj) throw new Error(`deposit event amount ${deposit.amount} != minFj ${minFj}`)
 
-	// 5. The faucet's PUBLIC claim lane: FeeJuice.claim_and_end_setup paid by the Sponsored FPC.
+	// 5. The faucet's PUBLIC claim lane: FeeJuice.claim paid by the Sponsored FPC. NOT
+	//    claim_and_end_setup — that variant calls end_setup() and is ONLY valid as the fee payload
+	//    (FeeJuicePaymentMethodWithClaim places it in the setup phase); under a sponsored fee the FPC
+	//    already ended setup, so an app-phase claim_and_end_setup asserts on every attempt (live-caught
+	//    by this canary: 149 failed simulates while the message witness was provably available).
 	//    Retry until the L1→L2 message syncs (same cadence as fuel-testnet's claim loop).
 	const feeJuice = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, ewallet as never)
 	const fjBalance = async (): Promise<bigint> => {
@@ -178,14 +182,16 @@ async function main() {
 	let settled = false
 	for (let i = 0; i < 300 && !settled; i++) {
 		try {
-			await feeJuice.methods.claim_and_end_setup(from, deposit.amount, plan.secret, new Fr(deposit.leafIndex)).send({
+			await feeJuice.methods.claim(from, deposit.amount, plan.secret, new Fr(deposit.leafIndex)).send({
 				from,
 				fee: sponsoredFee,
 				wait: { waitForStatus: TxStatus.PROPOSED },
 			} as never)
 			settled = true
-		} catch {
-			if (i % 10 === 0) console.log(`claim not ready (message syncing)… (${mins()})`)
+		} catch (e) {
+			// Surface the real error on the retry cadence — a swallowed persistent assert looks identical
+			// to a slow message sync from the outside (the claim_and_end_setup bug hid behind this).
+			if (i % 10 === 0) console.log(`claim retry (${mins()}): ${e instanceof Error ? e.message.slice(0, 200) : e}`)
 			await new Promise((r) => setTimeout(r, 6000))
 		}
 	}
