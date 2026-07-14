@@ -425,16 +425,16 @@ export async function setupPreFundedAccount(
 	const { PrivateFPCContract } = await import("@alejoamiras/aztec-fee-payment/artifacts/private")
 	const { bridgeForMint } = await import("./aztec-private-fpc-bridge")
 
-	// PrivateFPC instance salt MUST be Fr.zero() to match Nulo's auto-discovery
-	// (fpc/service.ts:91-94: salt=Fr.zero(), deployer=AztecAddress.ZERO). 5.0 rejects the old
-	// `deploy().register()` path here ("deployer is not yet locked" — a ZERO deployer isn't
-	// locked, and 5.0 moved salt/deployer to construction-time options). Compute + register the
-	// instance the SAME way the wallet does, which both sidesteps that and guarantees the address
-	// matches the wallet's auto-discovery.
+	// PrivateFPC instance salt MUST match Nulo's auto-discovery (fpc/service.ts: the CANONICAL
+	// salt 0x…01 from 5.0.0 onward + deployer=AztecAddress.ZERO — see bridge-core's
+	// private-fpc-canonical.json). 5.0 rejects the old `deploy().register()` path here
+	// ("deployer is not yet locked" — a ZERO deployer isn't locked, and 5.0 moved salt/deployer
+	// to construction-time options). Compute + register the instance the SAME way the wallet
+	// does, which both sidesteps that and guarantees the address matches the auto-discovery.
 	// biome-ignore lint/suspicious/noExplicitAny: aztec-stdlib instance mismatch between @wonderland's pinned version and Nulo's
 	const fpcArtifact = (PrivateFPCContract as any).artifact
 	const fpcInstance = await getContractInstanceFromInstantiationParams(fpcArtifact, {
-		salt: Fr.ZERO,
+		salt: new Fr(1n),
 		deployer: AztecAddress.ZERO,
 	})
 	// biome-ignore lint/suspicious/noExplicitAny: see above

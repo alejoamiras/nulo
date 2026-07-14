@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -12,6 +13,7 @@ import { describe, expect, it } from "vitest"
 import {
 	DOM_SEP__FPC_BRIDGE_SECRET,
 	PRIVATE_FPC_ADDRESS,
+	PRIVATE_FPC_SALT,
 	deriveBridgeSecret,
 	privateFeeJuicePayment,
 	privateFuelSecretHash,
@@ -79,17 +81,37 @@ describe("private-fuel keystone", () => {
 		expect((await privateFuelSecretHash(salt, claimer)).toString()).toBe(secretHash)
 	})
 
-	it("ADDRESS TRIPWIRE — re-deriving from the installed artifact matches PRIVATE_FPC_ADDRESS", async () => {
-		const rawJson = JSON.parse(
-			readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "target/private_contract-PrivateFPC.json"), "utf8"),
-		)
-		const artifact = loadContractArtifact(rawJson)
+	it("ADDRESS TRIPWIRE — re-deriving from the installed artifact at the CANONICAL salt matches PRIVATE_FPC_ADDRESS", async () => {
+		const rawBytes = readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "target/private_contract-PrivateFPC.json"))
+		const artifact = loadContractArtifact(JSON.parse(rawBytes.toString("utf8")))
 		const instance = await getContractInstanceFromInstantiationParams(artifact, {
 			constructorArgs: [],
-			salt: Fr.zero(),
+			salt: Fr.fromHexString(PRIVATE_FPC_SALT),
 			deployer: AztecAddress.ZERO,
 		})
 		expect(instance.address.toString()).toBe(PRIVATE_FPC_ADDRESS)
+	})
+
+	it("CANONICAL DESCRIPTOR — constants, descriptor JSON, and the installed artifact digest all agree", async () => {
+		// private-fpc-canonical.json mirrors the publisher's canonical-deployment.json (extended
+		// with the artifact digest). This pin makes the pinned identity single-sourced-by-test:
+		// the exported constants, the committed descriptor, and the actually-installed artifact
+		// bytes cannot drift apart silently. check-fpc-version.ts consumes the same descriptor.
+		const descriptor = JSON.parse(
+			readFileSync(join(fileURLToPath(new URL(".", import.meta.url)), "private-fpc-canonical.json"), "utf8"),
+		)
+		expect(descriptor.expectedAddress).toBe(PRIVATE_FPC_ADDRESS)
+		expect(descriptor.salt).toBe(PRIVATE_FPC_SALT)
+		expect(descriptor.deployer).toBe(AztecAddress.ZERO.toString())
+
+		const rawBytes = readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "target/private_contract-PrivateFPC.json"))
+		const digest = createHash("sha256").update(rawBytes).digest("hex")
+		expect(digest).toBe(descriptor.artifactSha256)
+
+		const installedVersion = JSON.parse(
+			readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "package.json"), "utf8"),
+		).version
+		expect(installedVersion).toBe(descriptor.aztecVersion)
 	})
 })
 
