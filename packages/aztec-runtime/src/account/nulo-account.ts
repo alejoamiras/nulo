@@ -89,7 +89,13 @@ export class NuloAccount implements IAccountContract {
 	}
 
 	public async ensureContractRegistered(pxe: IPXE): Promise<void> {
-		const instance = await pxe.getContractInstance(this.address)
+		// PXE-LOCAL ONLY: this asks "is OUR account contract already registered in the PXE?" — a local
+		// question. The default node cascade is both wrong (an extension account is ctor-init only and
+		// never published on-chain, so the node never has it) and dangerous: against an unreachable node
+		// (offline / node-free smoke) the node client retries with backoff and blows the caller's timeout,
+		// which wedged the post-restore boot. 5.0.0's PXE returns a preimage, so a local miss cascaded to
+		// the node where rc.2 returned the instance directly — pxeOnly restores the offline-safe behavior.
+		const instance = await pxe.getContractInstance(this.address, { pxeOnly: true })
 		if (!instance) {
 			this.logger.log(this.name, LogLevel.Debug, "register contract...")
 			await pxe.registerContract({ instance: this.instance, artifact: this.artifact })
