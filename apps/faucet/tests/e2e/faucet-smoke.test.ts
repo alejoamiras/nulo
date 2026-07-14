@@ -87,10 +87,10 @@ vi.mock("@aztec/aztec.js/addresses", async (importActual) => {
 	return actual
 })
 
-vi.mock("@alejoamiras/aztec-standards/dist/src/artifacts/Dripper.js", () => ({
+vi.mock("@alejoamiras/aztec-standards/artifacts/src/artifacts/Dripper.js", () => ({
 	DripperContractArtifact: { name: "Dripper" },
 }))
-vi.mock("@alejoamiras/aztec-standards/dist/src/artifacts/Token.js", () => ({
+vi.mock("@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js", () => ({
 	TokenContractArtifact: { name: "Token" },
 }))
 

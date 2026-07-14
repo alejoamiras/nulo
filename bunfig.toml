@@ -42,12 +42,14 @@ linker = "hoisted"
 minimumReleaseAge = 604800
 
 # Excludes (the ONLY packages exempt from the 7-day gate):
-# - The @aztec/* 5.0.0-rc.2 set (30 names incl. transitives, enumerated from the lockfile —
-#   the gate bites ANY fresh resolution, not just direct pins): published ~2026-07-01, ages
-#   out ~2026-07-08. TEMPORARY — remove in a follow-up PR after that date.
-# - @alejoamiras/{aztec-accelerator,aztec-standards,aztec-fee-payment}: the rc.2 line
-#   (accelerator republished 2026-06-30; standards + fee-payment npm-takeover published
-#   2026-07-02, age out ~2026-07-09). Same follow-up removes them.
+# - The @aztec/* 5.0.0 stable set (names incl. transitives, enumerated from the lockfile —
+#   the gate bites ANY fresh resolution, not just direct pins): published 2026-07-13, ages
+#   out ~2026-07-21. TEMPORARY — remove in a follow-up PR after that date. Provenance is
+#   checked at bump time instead (npm audit signatures + attestations; see the aztec-update
+#   skill + implementations-plan/aztec-5.0.0-stable/).
+# - @alejoamiras/{aztec-accelerator,aztec-standards,aztec-fee-payment}: the 5.0.0 line
+#   (accelerator published 2026-07-13; standards + fee-payment 2026-07-14, age out
+#   ~2026-07-21). Same follow-up removes them.
 # The puppeteer closure (aged out 2026-05) and the rc.1 set were dropped once past the
 # window. On Bun 1.3.13+ a frozen-lockfile install of already-pinned versions doesn't trip
 # the gate; it only bites active re-resolution, so dropping aged-out excludes is safe.

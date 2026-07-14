@@ -165,7 +165,7 @@ export function bindAuthwit(root: HTMLElement): void {
 			if (!s.selectedAccount) throw new Error("No selected account")
 			const amount = getInput("authwitAmount") || "1"
 			const nonce = getInput("authwitNonce") || "1"
-			const { TokenContract } = await import("@alejoamiras/aztec-standards/dist/src/artifacts/Token.js")
+			const { TokenContract } = await import("@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js")
 			// biome-ignore lint/suspicious/noExplicitAny: structural typing across SDK boundary
 			const token: any = await TokenContract.at(AztecAddress.fromStringUnsafe(tokenAddress), wallet as any)
 			const callerAddr = AztecAddress.fromStringUnsafe(s.selectedAccount)

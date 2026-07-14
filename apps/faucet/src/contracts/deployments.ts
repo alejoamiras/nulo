@@ -2,8 +2,8 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
-import { DripperContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Dripper.js"
-import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
+import { DripperContractArtifact } from "@alejoamiras/aztec-standards/artifacts/src/artifacts/Dripper.js"
+import { TokenContractArtifact } from "@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js"
 import deploymentsJson from "./deployments.json"
 
 /*
