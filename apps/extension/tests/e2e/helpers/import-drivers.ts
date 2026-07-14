@@ -256,7 +256,7 @@ export function buildSyntheticBackup({
 	const body = {
 		"wallet-version": "test",
 		"aztec-version": "test",
-		"compat-epoch": 2,
+		"compat-epoch": 3,
 		"backup-schema-version": 1,
 		"master-key": masterBase64,
 		data: {

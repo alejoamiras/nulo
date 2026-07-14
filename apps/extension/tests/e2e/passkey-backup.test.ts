@@ -127,7 +127,7 @@ function buildSyntheticPasskeyBackup(credentialId: string, accountAddress: strin
 	const body = {
 		"wallet-version": "test",
 		"aztec-version": "test",
-		"compat-epoch": 2,
+		"compat-epoch": 3,
 		"backup-schema-version": 1,
 		"master-key": credentialId,
 		data: {
