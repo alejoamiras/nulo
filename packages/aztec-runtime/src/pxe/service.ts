@@ -156,34 +156,56 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	}
 
 	protected async init() {
-		// Orphan cleanup, both storage generations:
-		//  - OPFS (the live 5.0.0 backend): the store registry IS the OPFS tree — enumerate
-		//    `pxe/<profileId>/<chainId>` dirs and remove any whose profile no longer exists.
-		//    Needs no live runtime (that is the point of the registry).
-		//  - IndexedDB (LEGACY, rc.2-era): one-way cleanup of pre-OPFS databases — not a
-		//    fallback backend and not a migration; the old data is unreadable by 5.0.0 anyway
-		//    (upstream wiped on schema bump) so only the bytes are being reclaimed.
-		const profiles = await this.profiles.getProfiles()
-		for (const coords of await listChainStoreDirs()) {
-			if (!profiles.some((x) => x.id === coords.profileId)) {
-				this.logWarn(`init: removing orphan OPFS PXE store ${chainDataDir(coords)}`)
-				await removeChainStoreDir(coords)
-			}
-		}
+		// Orphan cleanup runs DEFERRED, never on the init path: this init can be triggered by a
+		// deletion-driven offscreen boot, where the SW's deletion coordinator is awaiting our RPC
+		// while holding the ProfileService lock — an init-time `profiles.getProfiles()` call
+		// would deadlock the reset flow. The deferred sweep is race-safe against that in-flight
+		// deletion: the profile row still exists while its purge runs (the coordinator deletes
+		// the row LAST), so the sweep skips it; every removal is idempotent + NotFound-swallowed.
+		void this.sweepOrphanStores().catch((err) =>
+			this.logWarn("deferred orphan-store sweep failed", err instanceof Error ? err.message : String(err)),
+		)
 
+		// NOTE: PXE cleanup on profile deletion is NO LONGER a fire-and-forget
+		// `onProfileDeleted` subscriber (it raced the cascade + unconditionally
+		// deleted the shared keyval-store = cross-profile corruption, finding D).
+		// The deletion coordinator now calls the awaited `clearProfileState`.
+		this.profiles.onActiveProfileChanged.add(this.onActiveProfileChanged)
+		await this.profiles.connect()
+	}
+
+	/**
+	 * Orphan cleanup, both storage generations (deferred from init — see the deadlock note there):
+	 *  - OPFS (the live 5.0.0 backend): the store registry IS the OPFS tree — enumerate
+	 *    `pxe/<profileId>/<chainId>` dirs and remove any whose profile no longer exists. Needs no
+	 *    live runtime (that is the point of the registry).
+	 *  - IndexedDB (LEGACY, rc.2-era): one-way cleanup of pre-OPFS databases — not a fallback
+	 *    backend and not a migration; the old data is unreadable by 5.0.0 anyway (upstream wiped
+	 *    on schema bump) so only the bytes are being reclaimed. Sweeps them ALL, plus the shared
+	 *    keyval-store once none remain.
+	 */
+	private async sweepOrphanStores(): Promise<void> {
+		const opfsDirs = await listChainStoreDirs()
 		const dbs = await indexedDB.databases()
 		const pxes = dbs.filter((x) => x.name?.startsWith(PXE_DATA_DIR_ROOT))
+		if (opfsDirs.length) {
+			const profiles = await this.profiles.getProfiles()
+			for (const coords of opfsDirs) {
+				if (!profiles.some((x) => x.id === coords.profileId)) {
+					this.logWarn(`sweep: removing orphan OPFS PXE store ${chainDataDir(coords)}`)
+					await removeChainStoreDir(coords)
+				}
+			}
+		}
 		if (pxes.length) {
 			for (let i = pxes.length - 1; i >= 0; i--) {
-				// Every rc.2-era PXE IndexedDB is legacy debris under the OPFS backend — sweep
-				// them all (not just orphans), plus the shared keyval-store once none remain.
 				await new Promise<void>((resolve, reject) => {
 					const req = indexedDB.deleteDatabase(pxes[i].name!)
 					req.onsuccess = () => resolve()
 					req.onerror = () => reject(req.error)
 					req.onblocked = () => {
 						this.logWarn("deleteDatabase blocked (DB still in use):", pxes[i].name)
-						resolve() // Skip — don't hang init forever
+						resolve() // Skip — don't hang the sweep forever
 					}
 				})
 				pxes.splice(i, 1)
@@ -203,13 +225,6 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				}
 			}
 		}
-
-		// NOTE: PXE cleanup on profile deletion is NO LONGER a fire-and-forget
-		// `onProfileDeleted` subscriber (it raced the cascade + unconditionally
-		// deleted the shared keyval-store = cross-profile corruption, finding D).
-		// The deletion coordinator now calls the awaited `clearProfileState`.
-		this.profiles.onActiveProfileChanged.add(this.onActiveProfileChanged)
-		await this.profiles.connect()
 	}
 
 	public async getContractInstance(

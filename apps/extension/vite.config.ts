@@ -1,4 +1,5 @@
-import { dirname, relative } from "node:path"
+import { existsSync, readFileSync } from "node:fs"
+import { dirname, join, relative } from "node:path"
 import { fileURLToPath, URL } from "node:url"
 import vue from "@vitejs/plugin-vue"
 import usePages from "vite-plugin-pages"
@@ -223,6 +224,42 @@ export default defineConfig({
 						return
 					}
 					next()
+				})
+			},
+		},
+
+		// The offscreen PXE's encrypted SQLite-OPFS store spawns a worker whose emscripten glue
+		// resolves `sqlite3.wasm` at runtime via a `locateFile` fallback that bundlers cannot
+		// rewrite — it requests the BARE `assets/sqlite3.wasm` next to the worker chunk, not the
+		// hash-renamed asset vite emits for the static `new URL(...)` path. In the packed
+		// extension that bare request 404s and the worker hangs SILENTLY on init (no onerror),
+		// which wedges every store open — and, transitively, profile deletion. Emit unhashed
+		// copies alongside the hashed ones (same fix the sibling repo shipped for its SPA; the
+		// async proxy rides along for the non-SAH OPFS VFS the glue can also probe for).
+		{
+			name: "sqlite3mc-wasm-emit",
+			apply: "build",
+			generateBundle() {
+				// The package's exports map doesn't expose ./package.json, so resolve by walking the
+				// node_modules chain from this config (hoisted install ⇒ the repo root hit).
+				const vendor = (() => {
+					let dir = dirname(fileURLToPath(import.meta.url))
+					while (dir !== dirname(dir)) {
+						const candidate = join(dir, "node_modules", "@aztec", "sqlite3mc-wasm")
+						if (existsSync(candidate)) return candidate
+						dir = dirname(dir)
+					}
+					throw new Error("sqlite3mc-wasm-emit: cannot locate @aztec/sqlite3mc-wasm in any node_modules")
+				})()
+				this.emitFile({
+					type: "asset",
+					fileName: "assets/sqlite3.wasm",
+					source: readFileSync(join(vendor, "vendor/jswasm/sqlite3.wasm")),
+				})
+				this.emitFile({
+					type: "asset",
+					fileName: "assets/sqlite3-opfs-async-proxy.js",
+					source: readFileSync(join(vendor, "vendor/jswasm/sqlite3-opfs-async-proxy.js")),
 				})
 			},
 		},
