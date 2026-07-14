@@ -172,13 +172,10 @@ async function sendStandaloneFjClaim(
 	const fj = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
 	let receiptTxHash: string
 	try {
+		// Plain `claim`, NOT `claim_and_end_setup`: the sponsored fee payment already ends setup, so
+		// the end-setup variant asserts as an app-phase call (see fuelClaim.ts — same live-caught bug).
 		const { receipt } = (await fj.methods
-			.claim_and_end_setup(
-				recipientAddr,
-				BigInt(fuel.received ?? "0"),
-				Fr.fromString(fuel.secret),
-				new Fr(BigInt(fuel.leafIndex ?? "0")),
-			)
+			.claim(recipientAddr, BigInt(fuel.received ?? "0"), Fr.fromString(fuel.secret), new Fr(BigInt(fuel.leafIndex ?? "0")))
 			.send({ from: recipientAddr, fee: sponsored, wait: { waitForStatus: TxStatus.PROPOSED } } as never)) as {
 			receipt: { txHash: unknown }
 		}

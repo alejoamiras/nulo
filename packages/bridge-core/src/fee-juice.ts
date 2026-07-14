@@ -78,8 +78,9 @@ export const publicFeeJuicePayment = (sender: AztecAddress, claim: FeeJuiceClaim
 export const sponsoredFeePayment = (fpc: AztecAddress): SponsoredFeePaymentMethod => new SponsoredFeePaymentMethod(fpc)
 
 /**
- * The `claim_and_end_setup` call args for claiming bridged Fee Juice as a standalone payload
- * (mirrors the extension's fee-juice claim). Use when claiming FJ to balance rather than
+ * The FeeJuice claim call args for claiming bridged Fee Juice as a standalone payload
+ * (mirrors the extension's fee-juice claim; use plain `claim` for an app-phase call — only the
+ * fee payload may `claim_and_end_setup`). Use when claiming FJ to balance rather than
  * binding the claim to a single tx's fee via {@link publicFeeJuicePayment}.
  */
 export const feeJuiceClaimArgs = (
