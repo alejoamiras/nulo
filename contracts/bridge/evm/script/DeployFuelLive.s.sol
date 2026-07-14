@@ -46,7 +46,7 @@ contract DeployFuelLive is Script {
     address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
     // ── The live AZLO (18 dec, permissionless capped mint, Permit2 pre-approved) ──
-    address constant AZLO = 0x457F9CDB972E036B07f49C23cee78D0c689CD389;
+    address constant AZLO = 0xB8ebd156dC94cdE08ec9E7EF0501232B2DbedEcE;
 
     // ── AZLO/WETH pool: 100 AZLO per WETH (cheap-FJ economics, plan ledger L10) ──
     // currency0 = AZLO (0xa40a… < 0xfFf9…), price c1/c0 = 0.01, sqrt(0.01)·2^96:
