@@ -2,7 +2,7 @@
 
 **Tier:** `mid` (rubric at Phase 0.5: novelty LOW — 4th bump on this line, and this exact rc.2→5.0.0 migration shipped in aztec-accelerator (2026-07-13) + ecosystem-tooling (2026-07-14) with detailed lessons; blast radius + irreversibility HIGH — live Sepolia broadcasts, Fee Juice movement, wallet-wide address change; precedent: the rc.2 bump here and the accelerator stable bump both ran `mid`). **Audits:** codex `gpt-5.6-sol` at `model_reasoning_effort=xhigh` (its max) + fable subagent, dual + final fresh-context pass. **Branch:** `worktree-aztec-5.0.0-stable`.
 
-**Status: v5 — GATE-READY. Fable r1 folded; codex r1 folded; final-pass r1 (reject) folded with two explicit reasoned rejections; final-pass re-verdict on v4: `conditional approve` — all four conditions folded into this v5. Awaiting user approval.**
+**Status: ✅ APPROVED 2026-07-14** — the user activated the recommended `/goal` seed (implementation directive) with all gate defaults kept **plus D9 flipped: at-rest store encryption adopted in-arc**. Audit trail: fable r1 `conditional approve` (folded) → codex r1 `reject` (folded) → codex final-pass `reject` (folded, 2 reasoned rejections) → codex re-verdict **`conditional approve`, all 4 conditions folded**. Seeds below are FINAL (the active `/goal` matches verbatim). Implementation in progress.
 
 ## Summary
 
@@ -211,7 +211,7 @@ Release runbook: promote `dev → main` → Release PR (auto-unstick ON) → pub
 - **Codex final fresh-context pass, round 1 (2026-07-14, `audit-codex.md` §Final pass):** `reject` (blocking 1–7) — **folded in v4**: F1 → dual-endpoint attempt + documented single-node posture + per-group re-validation (codex's own fallback option adopted); F2 → schema-validated `intent.json` + verify-intent script; F3 → enforcing wrapper + plan-pinned signer + caps; F4 → strict candidate schema + direct-FJ candidate canary + Phase-7 Fuel-surface canary; F5 → no-blanket lock-diff + Nargo commit pinning + provenance-subject recording + D10 honest reword (cross-repo artifact reproduction REJECTED with reason); F6 → the two-regime vector split (rc.2-address-KAV contradiction removed); F7 → fail-closed, fallback REMOVED, Firefox honesty; F8/F9/F10 → asserts, assumption rewords, ask splits, ledger rewords. Two explicit reasoned rejections recorded: cross-repo reproducible-build verification (Scope #3) and the full second-Aztec-node REQUIREMENT (adopted as attempt + documented posture, per the finding's own fallback).
 - **Codex final pass, re-verdict on v4 (2026-07-14, `audit-codex.md` §Final pass round 2):** **`conditional approve`** (with conditions: (1) verify-intent constructor-aware + assert all privileged live state; (2) stable source-tree/mutable-artifact lifecycle + explicit revalidation before every broadcast group; (3) pin the complete `AccountPrivacyKeys` wire vector; (4) seed + verify cleanup of legacy rc.2 IndexedDB stores). **ALL FOUR CONDITIONS FOLDED into this v5** (Scope #10(b), Phase 5 steps 1–9, Scope #4 Regime B, Phase 3 step 4). Codex also confirmed the two documented residuals (capped single-node testnet trust; first-party artifact pipeline) are proportionate as stated.
 
-## Seeds (DRAFT — finalized after the approval gate)
+## Seeds (FINAL — the `/goal` below is ACTIVE in the implementation session since 2026-07-14)
 
 ### Recommended: `/goal`
 
