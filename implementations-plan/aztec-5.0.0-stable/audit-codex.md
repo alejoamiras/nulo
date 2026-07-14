@@ -60,3 +60,18 @@ See plan.md v3 — every blocking finding folded or explicitly dispositioned; ve
 ### Disposition (plan v4)
 
 All ten folded; two explicit reasoned rejections recorded in plan.md (Scope #3: cross-repo reproducible-build verification of first-party artifacts — delegated to ecosystem-tooling's audited pipeline; Scope #10: the hard second-Aztec-node REQUIREMENT — adopted as attempt-plus-documented-posture, per the finding's own fallback clause). Re-verdict requested from the same session on v4.
+
+## Final fresh-context pass — round 2 (re-verdict on plan v4, resumed session)
+
+**Date:** 2026-07-14 · **Input:** plan.md v4 + the per-finding disposition summary.
+
+Codex confirmed the two explicit residuals are proportionate as documented ("capped single-node testnet trust and reliance on the first-party artifact pipeline are acceptable when documented as v4 does"), flagged four insufficient folds:
+
+1. **[High] verify-intent — privileged contract state unchecked**: runtime code hashes don't validate mutable storage (router `owner`/`swapTarget`/sweep; swap ownership). Require constructor-aware verification + readbacks of every privileged binding (owner/admin, Permit2, FeeJuicePortal, swap target, pool manager, FJ, WETH, portal bindings).
+2. **[Medium] Intent lifecycle**: v4 wrote the clean-tree hash before the chainId-cascade edits; define an immutable source snapshot + a narrow mutable operational-file allowlist, land all source/config changes before intent review, and name the identity revalidation before each broadcast group (steps 3,4,5,7,8,9) explicitly.
+3. **[Medium] Regime-B vectors**: pin the COMPLETE serialized `AccountPrivacyKeys` (every privacy-secret + public-key field) + the resulting `CompleteAddress`, not just the public set.
+4. **[Medium] Legacy storage**: removing the IndexedDB fallback is correct, but rc.2 IndexedDB stores need one-way cleanup — seed legacy fixtures in the production spike and prove targeted/profile purge removes them without harming another profile.
+
+**Verdict:** `conditional approve (with conditions: make verify-intent constructor-aware and assert all privileged live state; define a stable source-tree/mutable-artifact lifecycle and explicitly revalidate before every broadcast group; pin the complete AccountPrivacyKeys wire vector; seed and verify cleanup of legacy rc.2 IndexedDB stores)`
+
+**Disposition:** all four conditions folded into plan v5 (Scope #10(b) verify-intent readbacks + lifecycle; Phase 5 reorder with per-step revalidation; Scope #4 Regime-B full wire vector; Phase 3 step 4 legacy-cleanup proof). This closes the audit trail: fable r1 conditional-approve (folded) → codex r1 reject (folded) → final-pass reject (folded + 2 reasoned rejections) → final-pass re-verdict **conditional approve, conditions folded**.
