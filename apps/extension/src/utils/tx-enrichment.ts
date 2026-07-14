@@ -1,3 +1,5 @@
+import { FEE_JUICE_ADDRESS } from "@aztec/constants"
+import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { OriginType } from "@/wallet/services/transaction/spec"
 import type { TxOrigin } from "@/wallet/services/transaction/spec"
 import { trimAddress } from "@/utils/string"
@@ -31,6 +33,14 @@ const METHOD_LABELS: Record<string, string> = {
 	claim: "Claim Fee Juice",
 }
 
+/** The L2 Fee Juice contract (a protocol constant). Labels below are meaningful ONLY on it. */
+const FEE_JUICE_L2_ADDRESS = AztecAddress.fromNumberUnsafe(FEE_JUICE_ADDRESS).toString().toLowerCase()
+
+/** Methods whose "Claim Fee Juice" label is protocol-specific — a third-party contract's
+ *  identically-named `claim`/`claim_and_end_setup` must NOT inherit fee-juice semantics on a
+ *  trust surface (it would misdescribe what the user is authorizing). */
+const FEE_JUICE_ONLY_LABELS = new Set(["claim", "claim_and_end_setup"])
+
 /**
  * Look up the wallet-curated friendly label for `method` from
  * `METHOD_LABELS`. Returns `null` for anything not in the allowlist —
@@ -40,7 +50,12 @@ const METHOD_LABELS: Record<string, string> = {
  * title-casing of a dApp-controlled function name on a trust-sensitive
  * surface would only add noise.
  */
-export function getMethodLabel(method: string): string | null {
+export function getMethodLabel(method: string, contract?: string): string | null {
+	// Fee-juice-only labels apply solely on the FeeJuice protocol contract. When a contract is given
+	// and it isn't that one, suppress the label so a third-party `claim` isn't mislabeled as fee juice.
+	if (FEE_JUICE_ONLY_LABELS.has(method) && contract !== undefined && contract.toLowerCase() !== FEE_JUICE_L2_ADDRESS) {
+		return null
+	}
 	return METHOD_LABELS[method] ?? null
 }
 

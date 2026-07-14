@@ -54,15 +54,29 @@ export async function openChainStore({ network, rollupAddress, storeKey, log }: 
 	// holding the chain guard, and transitively wedge profile deletion. 30s is generous for a
 	// worker boot + wasm compile on any hardware; converting the silence into a loud error keeps
 	// the failure fail-closed AND recoverable.
-	const store = await Promise.race([
-		AztecSQLiteOPFSStore.open(log, DB_NAME, false, chainDataDir(network), keyCopy),
-		new Promise<never>((_, reject) =>
-			setTimeout(
-				() => reject(new Error(`openChainStore: sqlite worker did not answer init within 30s for ${chainDataDir(network)}`)),
-				30_000,
-			),
-		),
-	])
+	const openPromise = AztecSQLiteOPFSStore.open(log, DB_NAME, false, chainDataDir(network), keyCopy)
+	let timer: ReturnType<typeof setTimeout> | undefined
+	let store: AztecSQLiteOPFSStore
+	try {
+		store = await Promise.race([
+			openPromise,
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(
+					() => reject(new Error(`openChainStore: sqlite worker did not answer init within 30s for ${chainDataDir(network)}`)),
+					30_000,
+				)
+			}),
+		])
+	} catch (err) {
+		// The timeout (or the open itself) rejected. If it was the timeout, `openPromise` may STILL
+		// resolve later with a live worker holding the exclusive SAH-pool lock that nothing else can
+		// release — close that abandoned store so it can't permanently wedge every later open of this
+		// dir (and block purge's removeEntry). A rejected openPromise is handled here too (no leak).
+		openPromise.then((s) => s.close().catch(() => {})).catch(() => {})
+		throw err
+	} finally {
+		clearTimeout(timer)
+	}
 	try {
 		await initStoreVersionStamp(store, rollupAddress, log)
 	} catch (err) {

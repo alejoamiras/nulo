@@ -15,6 +15,15 @@
  */
 import type { ContractInstancePreimageWithAddress, ContractInstanceWithAddress } from "@aztec/stdlib/contract"
 
+/**
+ * A DEFINITIVE node answer ("this contract is upgraded"), not a transient failure. Callers that
+ * degrade node errors to "not found" (best-effort lookups) MUST re-throw this — swallowing it would
+ * silently serve a stale known-bundle instance for a contract the node says is unsupported.
+ */
+export class ContractUpgradedError extends Error {
+	public readonly isContractUpgraded = true as const
+}
+
 /** PXE preimage → effective instance under the no-upgrades assumption (see module doc). */
 export function hydratePreimage(preimage: ContractInstancePreimageWithAddress): ContractInstanceWithAddress {
 	return { ...preimage, currentContractClassId: preimage.originalContractClassId }
@@ -23,7 +32,7 @@ export function hydratePreimage(preimage: ContractInstancePreimageWithAddress): 
 /** Node-sourced instances carry chain truth: reject upgraded contracts loudly at entry. */
 export function assertNotUpgraded(instance: ContractInstanceWithAddress): ContractInstanceWithAddress {
 	if (!instance.currentContractClassId.equals(instance.originalContractClassId)) {
-		throw new Error(
+		throw new ContractUpgradedError(
 			`contract ${instance.address.toString()} has been upgraded on-chain ` +
 				`(original class ${instance.originalContractClassId.toString()} -> current ${instance.currentContractClassId.toString()}); ` +
 				"upgraded contracts are not supported by this wallet",
