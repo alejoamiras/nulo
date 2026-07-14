@@ -61,7 +61,7 @@ Bump the `@aztec/*` line `5.0.0-rc.2` → `5.0.0` (66 pins across 8 package.json
 
 **Validation gate** — Commands: both vector-fixture sets committed · `bun install` · the lock-diff exception script (every non-Aztec change enumerated + dispositioned) · zero-rc.2 grep · frozen-lockfile re-install · `npm audit signatures` 0-invalid + attestation subjects match expected repos · inventory in lessons. Layers: reference-vectors · install · lockfile · supply-chain · inventory.
 
-### Phase 2 — API migration: signing-key-root + PXE seam + FPC canonical + TS churn
+### Phase 2 ✓ — API migration: signing-key-root + PXE seam + FPC canonical + TS churn (gate green 2026-07-14 — `lessons/phase-2.md`)
 
 1. **Account inversion** via the ONE exported helper; Regime-A AND Regime-B vectors must pass UNMODIFIED (equality, no exceptions).
 2. **`registerAccount` reshape** + hygiene pin + the registered-`CompleteAddress`-equals-expected assert (final-pass F8).

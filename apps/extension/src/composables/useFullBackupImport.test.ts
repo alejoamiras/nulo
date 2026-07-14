@@ -168,7 +168,7 @@ import { useFullBackupImport } from "./useFullBackupImport"
 async function buildBackup(overrides: Record<string, unknown> = {}) {
 	const { data: dataOverride, ...bodyOverrides } = overrides
 	const body = {
-		"compat-epoch": 2,
+		"compat-epoch": 3,
 		"backup-schema-version": 1,
 		"master-key": Buffer.from(new Uint8Array(32)).toString("base64"),
 		data: {
@@ -331,8 +331,9 @@ describe("useFullBackupImport — guards before any writes", () => {
 		expect(profileClient.restore).not.toHaveBeenCalled()
 	}
 
-	it("rejects an unsupported compat-epoch", async () => {
-		await expectRejected(await buildBackup({ "compat-epoch": 3 }), "Incompatible backup")
+	it("rejects an unsupported compat-epoch (incl. the rc-era epoch 2 — pre-signing-key-root addresses)", async () => {
+		await expectRejected(await buildBackup({ "compat-epoch": 2 }), "Incompatible backup")
+		await expectRejected(await buildBackup({ "compat-epoch": 4 }), "Incompatible backup")
 	})
 
 	it("rejects a pre-baseline blob (legacy schema-version only, no new fields) with the re-export copy", async () => {
@@ -360,7 +361,7 @@ describe("useFullBackupImport — guards before any writes", () => {
 	it("verifies the checksum BEFORE any version field is interpreted", async () => {
 		// Bad epoch AND bad checksum: the integrity error must win — the
 		// trust-gate order is checksum → epoch → schema-version.
-		const backup = await buildBackup({ "compat-epoch": 3 })
+		const backup = await buildBackup({ "compat-epoch": 2 })
 		;(backup as { checksum: string }).checksum = "deadbeef"
 		await expectRejected(backup, "Backup Integrity Check Failed")
 	})
