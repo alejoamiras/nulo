@@ -25,6 +25,7 @@ import { EthAddress } from "@aztec/foundation/eth-address"
 import { FeeJuiceContractArtifact } from "@aztec/noir-contracts.js/FeeJuice"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
+import { PRIVATE_FPC_SALT } from "../src/private-fuel"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js"
 import { type Abi, createPublicClient, createWalletClient, defineChain, http } from "viem"
@@ -166,10 +167,10 @@ async function main() {
 	await registerLive("proxy", bridgeProxyArtifact, CONFIG.l2.proxy)
 	const feeJuice = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, ewallet as never)
 
-	// Register the Wonderland PrivateFPC locally (instance + class). It has no public functions / no
-	// init, so 5.0 needs NO on-chain deploy (codex 019ee697); the private-kernel oracle DOES need both
-	// the instance + class preimages, so registerContract (not just the class). Salt 0 reproduces the
-	// pinned PRIVATE_FPC_ADDRESS from the 5.0 artifact.
+	// Register the PrivateFPC locally (instance + class). It has no public functions / no init, so 5.0
+	// needs NO on-chain deploy (codex 019ee697); the private-kernel oracle DOES need both the instance +
+	// class preimages, so registerContract (not just the class). The canonical salt reproduces the pinned
+	// PRIVATE_FPC_ADDRESS from the 5.0.0 artifact.
 	const privateFpcArtifact = loadContractArtifact(
 		JSON.parse(
 			readFileSync(
@@ -191,7 +192,8 @@ async function main() {
 	const privateFpcInstance = await getContractInstanceFromInstantiationParams(
 		privateFpcArtifact as never,
 		{
-			salt: new Fr(0),
+			// The CANONICAL salt (fixed from 5.0.0 onward — see private-fuel.ts PRIVATE_FPC_SALT).
+			salt: Fr.fromHexString(PRIVATE_FPC_SALT),
 			publicKeys: PublicKeys.default(),
 			deployer: AztecAddress.ZERO,
 		} as never,
