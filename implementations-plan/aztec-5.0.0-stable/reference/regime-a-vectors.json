@@ -1,0 +1,18 @@
+{
+	"source": "@aztec/stdlib@5.0.0-rc.2 deriveSigningKey (installed node_modules)",
+	"construction": "sha512ToGrumpkinScalar([seed, DomainSeparator.IVSK_M])",
+	"domainSeparator": {
+		"name": "IVSK_M",
+		"value": 2747825907
+	},
+	"vectors": [
+		{
+			"seed": "0x0000000000000000000000000000000000000000000000000000000000000042",
+			"signingKey": "0x14a31cb4d33a144675e70634830292153f78e8318e51f26a2f212783eb0a3cbc"
+		},
+		{
+			"seed": "0x0000000000000000000000000000000000000000000000000000000000001337",
+			"signingKey": "0x06de3315eea486fed5f27be5016611ce072c662c1a6700cb59f7f7454cba261b"
+		}
+	]
+}
