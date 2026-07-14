@@ -22,7 +22,7 @@ import { L1FeeJuicePortalManager } from "@aztec/aztec.js/ethereum"
 import { ProtocolContractAddress } from "@aztec/aztec.js/protocol"
 import { createExtendedL1Client } from "@aztec/ethereum/client"
 import { SponsoredFPCContractArtifact } from "@aztec/noir-contracts.js/SponsoredFPC"
-import { TokenContract } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
+import { TokenContract } from "@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js"
 
 /**
  * Aztec L2 node URL. Defaults to http://localhost:8080 (the standard sandbox port).

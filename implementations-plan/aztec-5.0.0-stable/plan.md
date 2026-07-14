@@ -50,7 +50,7 @@ Bump the `@aztec/*` line `5.0.0-rc.2` → `5.0.0` (66 pins across 8 package.json
 
 ## Main plan
 
-### Phase 1 — Reference vectors + mechanical bump + install + break inventory
+### Phase 1 ✓ — Reference vectors + mechanical bump + install + break inventory (gate green 2026-07-14 — `lessons/phase-1.md`)
 
 0. **Regime-A vectors** (rc.2 still installed): seed→signingKey ×2 from the installed upstream `deriveSigningKey`. **Regime-B vectors**: commit `reference/derive-vectors.ts` + the hash-pinned 5.0.0 tarball digests + exact outputs (signingKey→secretKey, seed→address, AccountPrivacyKeys public set) generated in the scratchpad against the PUBLISHED tarballs (D13). Both fixture sets committed before any implementation exists.
 1. `bunfig.toml` re-date + post-install transitive-name reconciliation.

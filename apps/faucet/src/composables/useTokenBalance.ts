@@ -1,7 +1,7 @@
 import type { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Contract } from "@aztec/aztec.js/contracts"
 import type { Wallet } from "@aztec/aztec.js/wallet"
-import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js"
 import { ref, type Ref } from "vue"
 
 const POLL_INTERVAL_MS = 15_000
