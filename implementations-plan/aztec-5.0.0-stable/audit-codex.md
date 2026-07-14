@@ -35,3 +35,28 @@
 
 ### Disposition
 See plan.md v3 — every blocking finding folded or explicitly dispositioned; verdict to be re-taken by the final fresh-context pass.
+
+## Final fresh-context pass — round 1
+
+**Model:** gpt-5.6-sol · **Effort:** xhigh · **Sandbox:** read-only · **Date:** 2026-07-14 · **Input:** plan.md v3 + audit-fable.md + audit-codex.md (round 1). Fresh session (not a resume).
+
+**Verdict:** `reject (with blocking findings: 1–7)`
+
+### Findings (condensed; severities as issued)
+
+1. **[Critical]** The independent-Aztec-node requirement wasn't folded: one Aztec RPC + L1 cannot validate L2 contract/receipt honesty; a malicious node can fake the FPC deploy + claim settlement. Fix: two independently operated Aztec nodes machine-checked, or an L1-verifiable settlement proof with the weaker posture surfaced. Re-validate before/after each irreversible operation, not just pre-flight.
+2. **[High]** No semantic deployed-code gate replaces the demoted Etherscan check: the intent record was prose; candidate SHA-256 proves JSON identity, not that contracts are the reviewed code. Fix: schema-validated intent artifact (git-tree hash, artifact/class digests, constructor args, code hashes, predicted addresses) + a verifier run before signing and promotion.
+3. **[High]** Spend limits unenforced: `DeployFuelLive` defaults `WETH_SEED=0.22 ether` etc.; a misspelled env silently selects defaults; env-derived signer allowlist is tautological; post-flight balance check detects loss after the fact. Fix: intent-enforcing wrapper (all params explicit, unknown/missing rejected, plan-pinned approved signer, per-asset + cumulative caps pre-checked, dry-run-bound broadcast, per-step reconciliation).
+4. **[High]** The direct Fee-Juice faucet lane can ship broken while all gates pass: `fuel-testnet` exercises `l1.fuel`, not `l1.feeJuice`; the candidate type leaves `fuel` untyped and `bridge-deployments.ts` casts unvalidated; rc.2 already shipped a stale carried portal this way. Fix: strict shared candidate schema + pre-promotion public/private direct-FJ deposit→claim canaries + a Phase-7 public Fuel-surface canary.
+5. **[High]** Supply chain incomplete: blanket in-range `^` acceptance; mutable Nargo tags (recording SHAs ≠ pinning); attestations prove origin, not reviewed-source correspondence; D10's "independent second trust root" is false (same publisher lineage). Fix: enumerate/disposition every unrelated change; commit-pin Noir deps; verify provenance subjects; reproducibly compare the FPC artifact to source; reword D10.
+6. **[High]** The full-address reference gate was self-contradictory: an rc.2-captured seed→address CANNOT be a 5.0.0 known answer (stable `deriveKeys` changed) — "explain the shift" isn't a KAT. Fix: rc.2 vectors = continuity-only; capture stable references from the hash-pinned published 5.0.0 tarball via a committed reference script; strict equality, no exceptions.
+7. **[High]** The IndexedDB fallback had no isolation/deletion gate (contradicts D8; the spike proves only the OPFS path). Fix: fail closed (don't ship the fallback) or force-test it; drop the "Firefox if trivially drivable" hedge.
+8. **[Medium]** Missing semantic asserts: registerContract returned-address equality; upgraded-instance regression tests; registerAccount CompleteAddress equality; machine-dispositioned class-id inventory.
+9. **[Medium]** Assumption attack: Fact 2 (excludes are the rc.2-known set); Fact 8 (gate is major-only compare, broader than prerelease-stripping); "independent FPC root" not a fact; I1 (fallback untested), I5 (tag mutability), I7 (one probe vs per-step promise), I8 (name the confirmed items); "encryption parity" unsafe (different plaintext surface). Asks bundled — split backend/Firefox/fallback, make hardening explicit, separate footer from encryption, surface signer addresses + numeric ceilings.
+10. **[Medium]** Ledger consistency: D3 vs D8 tension; D11 rejected-things surviving operationally; D13 independence overclaim; D10 overstated; D9's plaintext acceptance should be its own explicit decision.
+
+**Resolved properly (acknowledged):** the pre-promotion FPC settle + salt sweep + hardened gate; compat-epoch bump; OPFS injection + 2×2 spike; createSchnorrAccount semantics + `as any` removal; preimage/instance correction; digest binding + candidate-first + dry-run-first + Etherscan demotion; Phase 7.
+
+### Disposition (plan v4)
+
+All ten folded; two explicit reasoned rejections recorded in plan.md (Scope #3: cross-repo reproducible-build verification of first-party artifacts — delegated to ecosystem-tooling's audited pipeline; Scope #10: the hard second-Aztec-node REQUIREMENT — adopted as attempt-plus-documented-posture, per the finding's own fallback clause). Re-verdict requested from the same session on v4.
