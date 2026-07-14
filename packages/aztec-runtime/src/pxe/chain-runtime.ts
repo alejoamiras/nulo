@@ -1,11 +1,19 @@
 import { getPXEConfig, type PXEConfig } from "@aztec/pxe/config"
 import { createPXE, type PXE } from "@aztec/pxe/client/bundle"
+import { createLogger } from "@aztec/foundation/log"
+import type { AztecSQLiteOPFSStore } from "@aztec/kv-store/sqlite-opfs"
 import { WASMSimulator } from "@aztec/simulator/client"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { AcceleratorProver, type AcceleratorPhase } from "@alejoamiras/aztec-accelerator"
 import { AztecNodeFactoryAdapter } from "../adapters/aztec-node-factory-adapter"
 import type { NodeFactory } from "../ports/node-factory-port"
 import { chainDataDir, chainRegistryKey, chainRegistryKeyPrefix } from "./chain-coordinates"
+import { openChainStore } from "./opfs-store"
+
+/** Typed marker for "the per-profile store key was never provisioned to this offscreen" — the
+ *  SW-side client recognizes it, re-provisions via its key provider, and retries once (covers
+ *  offscreen-document restarts, which drop all in-memory state including the key map). */
+export const PXE_STORE_KEY_MISSING = "PXE_STORE_KEY_MISSING"
 
 /** Optional accelerator-server endpoint. Orthogonal to the proving mode —
  *  meaningful only in non-proverless modes; ignored under `proverless`. Stays
@@ -66,14 +74,21 @@ export class ChainRuntime {
 		public readonly node: AztecNode,
 		public readonly pxe: PXE,
 		public readonly rpcUrl: string,
+		/** The injected per-(profile, chain) encrypted store. The runtime OWNS the handle:
+		 *  dispose() closes it (releasing the SAH-pool directory lock), deleteStore() erases it.
+		 *  Undefined only for test fakes. */
+		private readonly store?: AztecSQLiteOPFSStore,
 	) {}
 
 	/**
-	 * Shut down the PXE. `pxe.stop()` drains the job queue rather than
-	 * aborting in-flight work (verified against upstream @aztec/pxe); so
-	 * correctness across profile switch comes from the ReadWriteGuard's
-	 * drain-on-write semantics, not teardown. This method just releases
-	 * handles after the guard has ensured no readers remain.
+	 * Shut down the PXE, then close the owned store. `pxe.stop()` drains the
+	 * job queue rather than aborting in-flight work (verified against
+	 * upstream @aztec/pxe); so correctness across profile switch comes from
+	 * the ReadWriteGuard's drain-on-write semantics, not teardown. Closing
+	 * the store releases the SAH-pool's exclusive directory lock — REQUIRED
+	 * before the same (profile, chain) can be reopened or its directory
+	 * removed. A failed close is rethrown (fail-closed): a silently-leaked
+	 * lock would wedge every future open of this chain.
 	 */
 	public async dispose(): Promise<void> {
 		const stoppable = this.pxe as unknown as { stop?: () => Promise<void> }
@@ -85,14 +100,16 @@ export class ChainRuntime {
 				// is not actionable here.
 			}
 		}
+		await this.store?.close()
 	}
 }
 
 /** Seam for unit tests: swap this out with a fake that returns a
  *  fixture `ChainRuntime` (e.g. with mock PXE / node) instead of
- *  running real PXE init. */
+ *  running real PXE init. `storeKey` is the per-profile 32-byte store
+ *  encryption key (required by the production factory; fakes ignore it). */
 export interface PxeFactory {
-	createChainRuntime(network: NetworkInfo): Promise<ChainRuntime>
+	createChainRuntime(network: NetworkInfo, storeKey?: Uint8Array): Promise<ChainRuntime>
 }
 
 export class ProductionPxeFactory implements PxeFactory {
@@ -113,13 +130,30 @@ export class ProductionPxeFactory implements PxeFactory {
 		this.port = options?.port
 	}
 
-	public async createChainRuntime(network: NetworkInfo): Promise<ChainRuntime> {
+	public async createChainRuntime(network: NetworkInfo, storeKey?: Uint8Array): Promise<ChainRuntime> {
+		// Fail-closed: PXE state is encrypted at rest, so a chain runtime cannot boot without the
+		// profile's store key (provisioned by the SW after unlock; re-provisioned on demand when
+		// the offscreen restarts — the client recognizes this marker and retries once).
+		if (!storeKey) {
+			throw new Error(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile ${network.profileId}`)
+		}
 		const node = this.nodeFactory.createNode(network.rpcUrl)
 		const config = {
 			...getPXEConfig(),
 			dataDirectory: chainDataDir(network),
 			proverEnabled: !this.proverless,
 		} as PXEConfig
+
+		// The injected per-(profile, chain) ENCRYPTED store (see opfs-store.ts for why the
+		// upstream default path must never ship). The rollup address scopes the wipe-on-reset
+		// stamp to exactly this chain's store.
+		const rollupAddress = (await node.getL1ContractAddresses()).rollupAddress?.toString()
+		const store = await openChainStore({
+			network,
+			rollupAddress,
+			storeKey,
+			log: createLogger("pxe:data", { actor: chainDataDir(network) }),
+		})
 		// Pass an explicit WASMSimulator into both the prover AND the PXE
 		// config so neither falls back to dynamic-import
 		// `@aztec/simulator/client` at runtime. The dynamic-import fallback
@@ -137,8 +171,8 @@ export class ProductionPxeFactory implements PxeFactory {
 		// preflight. The `simulator` is still passed so kernel sim stays on
 		// the bundled WASM path (same MV3 reason as above).
 		if (this.proverless) {
-			const pxe = await createPXE(node, config, { simulator })
-			return new ChainRuntime(network.chainId, node, pxe, network.rpcUrl)
+			const pxe = await createPXE(node, config, { simulator, store })
+			return new ChainRuntime(network.chainId, node, pxe, network.rpcUrl, store)
 		}
 
 		// Required-mode (CI only): the onPhase callback throws synchronously
@@ -186,8 +220,8 @@ export class ProductionPxeFactory implements PxeFactory {
 			}
 		}
 
-		const pxe = await createPXE(node, config, { proverOrOptions: prover, simulator })
-		return new ChainRuntime(network.chainId, node, pxe, network.rpcUrl)
+		const pxe = await createPXE(node, config, { proverOrOptions: prover, simulator, store })
+		return new ChainRuntime(network.chainId, node, pxe, network.rpcUrl, store)
 	}
 }
 
@@ -222,8 +256,10 @@ export class ChainRuntimeRegistry {
 	/** Lazy-init for `(network.profileId, network.chainId)`. Concurrent
 	 *  callers share the same init promise. If the runtime exists but
 	 *  its rpcUrl no longer matches (network re-bound), the existing
-	 *  runtime is disposed and re-initialized under the new URL. */
-	public async getOrInit(network: NetworkInfo): Promise<ChainRuntime> {
+	 *  runtime is disposed and re-initialized under the new URL.
+	 *  `storeKey` is only consumed on an actual init (the production
+	 *  factory fail-closes without it). */
+	public async getOrInit(network: NetworkInfo, storeKey?: Uint8Array): Promise<ChainRuntime> {
 		const k = this.key(network.profileId, network.chainId)
 		const existing = this.runtimes.get(k)
 		if (existing && existing.rpcUrl === network.rpcUrl) {
@@ -237,7 +273,7 @@ export class ChainRuntimeRegistry {
 		let promise = this.initPromises.get(k)
 		if (!promise) {
 			promise = this.factory
-				.createChainRuntime(network)
+				.createChainRuntime(network, storeKey)
 				.then((runtime) => {
 					this.runtimes.set(k, runtime)
 					this.initPromises.delete(k)

@@ -83,4 +83,8 @@ export type Methods = {
 	 *  failure-propagating — the deletion coordinator treats a rejection as a
 	 *  critical, retryable erasure failure. */
 	clearProfileState(profileId: string): void
+	/** Provision the per-profile 32-byte PXE store encryption key (base64). Derived SW-side
+	 *  from the profile master; in-memory only offscreen-side; a chain runtime fail-closes
+	 *  without it. Idempotent — re-provisioned after an offscreen restart. */
+	provisionChainStoreKey(profileId: string, storeKeyBase64: string): void
 }

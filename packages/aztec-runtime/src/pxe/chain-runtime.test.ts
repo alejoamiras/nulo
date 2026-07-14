@@ -61,13 +61,20 @@ import { createPXE } from "@aztec/pxe/client/bundle"
 import { ProductionPxeFactory } from "./chain-runtime"
 import type { NodeFactory } from "../ports/node-factory-port"
 
+// The injected encrypted store is unit-mocked (real OPFS needs a browser; the production-build
+// spike is the empirical proof). The factory only needs open/close handles here.
+vi.mock("./opfs-store", () => ({
+	openChainStore: vi.fn(async () => ({ close: async () => {}, delete: async () => {} })),
+}))
+
 const createPXEMock = vi.mocked(createPXE)
 
 const fakeNodeFactory: NodeFactory = {
-	createNode: () => ({}) as never,
+	createNode: () => ({ getL1ContractAddresses: async () => ({ rollupAddress: undefined }) }) as never,
 }
 
 const fakeNetwork = { profileId: "p", chainId: 31337, rpcUrl: "http://node.local" }
+const fakeStoreKey = new Uint8Array(32)
 
 beforeEach(() => {
 	acceleratorProverInstances.length = 0
@@ -82,7 +89,7 @@ describe("ProductionPxeFactory default (production) mode", () => {
 	test("constructs AcceleratorProver without onPhase callback", async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: false }) // would be ignored
 		const factory = new ProductionPxeFactory(fakeNodeFactory)
-		await factory.createChainRuntime(fakeNetwork)
+		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
 		expect(acceleratorProverInstances).toHaveLength(1)
 		expect(acceleratorProverInstances[0].onPhase).toBeUndefined()
 	})
@@ -90,20 +97,20 @@ describe("ProductionPxeFactory default (production) mode", () => {
 	test("does NOT invoke checkAcceleratorStatus preflight", async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
 		const factory = new ProductionPxeFactory(fakeNodeFactory)
-		await factory.createChainRuntime(fakeNetwork)
+		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
 		expect(checkAcceleratorStatusMock).not.toHaveBeenCalled()
 	})
 
 	test("does NOT pass host/port to AcceleratorProver when not configured", async () => {
 		const factory = new ProductionPxeFactory(fakeNodeFactory)
-		await factory.createChainRuntime(fakeNetwork)
+		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
 		expect(acceleratorProverInstances[0].accelerator).toBeUndefined()
 	})
 
 	test("succeeds even when accelerator is reported unavailable", async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: false })
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "default" })
-		await expect(factory.createChainRuntime(fakeNetwork)).resolves.toBeDefined()
+		await expect(factory.createChainRuntime(fakeNetwork, fakeStoreKey)).resolves.toBeDefined()
 	})
 })
 
@@ -111,19 +118,19 @@ describe("ProductionPxeFactory required mode", () => {
 	test("preflight throws when checkAcceleratorStatus reports unavailable", async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: false })
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
-		await expect(factory.createChainRuntime(fakeNetwork)).rejects.toThrow(/accelerator-required.*unavailable/)
+		await expect(factory.createChainRuntime(fakeNetwork, fakeStoreKey)).rejects.toThrow(/accelerator-required.*unavailable/)
 	})
 
 	test("preflight does NOT throw when available", async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
-		await expect(factory.createChainRuntime(fakeNetwork)).resolves.toBeDefined()
+		await expect(factory.createChainRuntime(fakeNetwork, fakeStoreKey)).resolves.toBeDefined()
 	})
 
 	test("preflight invokes checkAcceleratorStatus exactly once", async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
-		await factory.createChainRuntime(fakeNetwork)
+		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
 		expect(checkAcceleratorStatusMock).toHaveBeenCalledTimes(1)
 	})
 
@@ -131,14 +138,14 @@ describe("ProductionPxeFactory required mode", () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		checkAcceleratorStatusMock.mockResolvedValue({ available: true, needsDownload: true, sdkAztecVersion: "4.2.0" })
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
-		await expect(factory.createChainRuntime(fakeNetwork)).resolves.toBeDefined()
+		await expect(factory.createChainRuntime(fakeNetwork, fakeStoreKey)).resolves.toBeDefined()
 		expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/needsDownload=true/))
 	})
 
 	test('onPhase throws on phase="fallback"', async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
-		await factory.createChainRuntime(fakeNetwork)
+		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
 		const onPhase = acceleratorProverInstances[0].onPhase
 		expect(onPhase).toBeDefined()
 		expect(() => onPhase?.("fallback")).toThrow(/SDK emitted phase="fallback"/)
@@ -147,7 +154,7 @@ describe("ProductionPxeFactory required mode", () => {
 	test('onPhase throws on phase="denied"', async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
-		await factory.createChainRuntime(fakeNetwork)
+		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
 		const onPhase = acceleratorProverInstances[0].onPhase
 		expect(() => onPhase?.("denied")).toThrow(/SDK emitted phase="denied"/)
 	})
@@ -155,7 +162,7 @@ describe("ProductionPxeFactory required mode", () => {
 	test("onPhase does NOT throw on benign phases", async () => {
 		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
-		await factory.createChainRuntime(fakeNetwork)
+		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
 		const onPhase = acceleratorProverInstances[0].onPhase
 		const benign: AcceleratorPhase[] = ["detect", "serialize", "transmit", "proving", "proved", "receive"]
 		for (const p of benign) {
@@ -167,7 +174,7 @@ describe("ProductionPxeFactory required mode", () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		checkAcceleratorStatusMock.mockResolvedValue({ available: true })
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "required" })
-		await factory.createChainRuntime(fakeNetwork)
+		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
 		const onPhase = acceleratorProverInstances[0].onPhase
 		expect(() => onPhase?.("downloading")).not.toThrow()
 		expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/phase="downloading"/))
@@ -180,7 +187,7 @@ describe("ProductionPxeFactory required mode", () => {
 			host: "127.0.0.1",
 			port: 59833,
 		})
-		await factory.createChainRuntime(fakeNetwork)
+		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
 		expect(acceleratorProverInstances[0].accelerator).toEqual({
 			host: "127.0.0.1",
 			port: 59833,
@@ -191,13 +198,13 @@ describe("ProductionPxeFactory required mode", () => {
 describe("ProductionPxeFactory proverless mode (e2e-only)", () => {
 	test("does NOT construct an AcceleratorProver", async () => {
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "proverless" })
-		await factory.createChainRuntime(fakeNetwork)
+		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
 		expect(acceleratorProverInstances).toHaveLength(0)
 	})
 
 	test("sets proverEnabled:false and omits proverOrOptions (default fakeProofs prover)", async () => {
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "proverless" })
-		await factory.createChainRuntime(fakeNetwork)
+		await factory.createChainRuntime(fakeNetwork, fakeStoreKey)
 		const lastCall = createPXEMock.mock.calls.at(-1)!
 		const config = lastCall[1] as { proverEnabled?: boolean }
 		const options = lastCall[2] as { proverOrOptions?: unknown; simulator?: unknown }

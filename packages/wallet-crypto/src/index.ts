@@ -16,6 +16,7 @@
  */
 
 export { deriveNuloAccountKeys, deriveSigningKeyFromSeed } from "./account-derivation"
+export { derivePxeStoreKey, PXE_STORE_KDF_LABEL } from "./pxe-store-key"
 export { EncryptionKey } from "./encryption-key"
 export { PasswordSecretBox, type EncryptedProfileSecret, type Sealed } from "./password-secret-box"
 export { SessionSecretBox, type SessionWrappedSecret } from "./session-secret-box"
