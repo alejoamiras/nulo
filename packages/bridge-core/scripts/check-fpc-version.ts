@@ -25,7 +25,9 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { loadContractArtifact } from "@aztec/stdlib/abi"
-import { getContractClassFromArtifact } from "@aztec/stdlib/contract"
+import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { getContractClassFromArtifact, getContractInstanceFromInstantiationParams } from "@aztec/stdlib/contract"
+import { Fr } from "@aztec/foundation/curves/bn254"
 
 import { PRIVATE_FPC_ADDRESS, PRIVATE_FPC_SALT } from "../src/private-fuel"
 
@@ -51,6 +53,9 @@ async function rpc<T>(method: string, params: unknown[]): Promise<T> {
 	if (!res.ok) throw new Error(`${method}: HTTP ${res.status}`)
 	const body = (await res.json()) as { result?: T; error?: { message: string } }
 	if (body.error) throw new Error(`${method}: RPC error — ${body.error.message}`)
+	// A response with NEITHER `result` nor `error` is malformed — an ERROR, never a clean absence.
+	// (Valid absence returns `result: null`, which is present-but-null and passes this guard.)
+	if (!("result" in body)) throw new Error(`${method}: malformed RPC response (no result, no error)`)
 	return body.result as T
 }
 
@@ -82,6 +87,20 @@ async function main() {
 		fail("descriptor/constants drift — private-fpc-canonical.json disagrees with the private-fuel.ts pins.")
 	}
 
+	// 3b. Re-derive the address from the INSTALLED artifact + canonical salt + zero deployer, and bind
+	// it to the pin. Without this, descriptor+constant could be coherently edited to an arbitrary
+	// (absent) address and still pass version+digest — the standalone gate would green a wrong pin.
+	const rederived = (
+		await getContractInstanceFromInstantiationParams(loadContractArtifact(JSON.parse(artifactBytes.toString("utf8"))), {
+			constructorArgs: [],
+			salt: Fr.fromHexString(PRIVATE_FPC_SALT),
+			deployer: AztecAddress.ZERO,
+		})
+	).address.toString()
+	if (rederived !== PRIVATE_FPC_ADDRESS) {
+		fail(`re-derived address ${rederived} (from the installed artifact + canonical salt) != pinned ${PRIVATE_FPC_ADDRESS}.`)
+	}
+
 	// 1. EXACT version agreement across all three sources.
 	if (String(pkg.version) !== descriptor.aztecVersion) {
 		fail(`installed @alejoamiras/aztec-fee-payment ${pkg.version} != descriptor aztecVersion ${descriptor.aztecVersion}.`)
@@ -104,15 +123,27 @@ async function main() {
 	const live = await rpc<{ originalContractClassId?: string; currentContractClassId?: string } | null>("node_getContract", [
 		PRIVATE_FPC_ADDRESS,
 	])
+	// (RPC failure already threw above; a malformed no-result response now throws too — never absence.)
 	if (live) {
-		const liveClass = String(live.originalContractClassId ?? "")
-		if (liveClass !== expectedClassId.toString()) {
+		const expected = expectedClassId.toString()
+		const originalClass = String(live.originalContractClassId ?? "")
+		// BOTH ids must equal the expected class. Checking only `original` would GREEN an UPGRADED
+		// contract: its original class stays correct while `current` points at different/malicious
+		// code that actually runs — and deposits to it can be consumed or stranded (fund loss).
+		const currentClass = String(live.currentContractClassId ?? "")
+		if (originalClass !== expected) {
 			fail(
-				`the pinned address is DEPLOYED with class ${liveClass}, but the installed artifact computes ` +
-					`${expectedClassId.toString()} — wrong contract at our address; never deposit.`,
+				`the pinned address is DEPLOYED with original class ${originalClass}, but the installed artifact ` +
+					`computes ${expected} — wrong contract at our address; never deposit.`,
 			)
 		}
-		console.log("live contract      : DEPLOYED with the expected class", expectedClassId.toString())
+		if (currentClass !== expected) {
+			fail(
+				`the pinned address has been UPGRADED (current class ${currentClass} != expected ${expected}) — ` +
+					"the running code is not the pinned artifact; never deposit.",
+			)
+		}
+		console.log("live contract      : DEPLOYED with the expected class (original == current ==", `${expected})`)
 	} else {
 		console.log("live contract      : absent (clean) — deploy via deploy-private-fpc-testnet.ts")
 	}

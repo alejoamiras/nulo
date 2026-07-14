@@ -53,7 +53,11 @@ describe("assertTestnetIdentity", () => {
 	})
 
 	test("the error names both the got + expected wallet chainId", () => {
-		expect(() => assertTestnetIdentity({ l1ChainId: 11155111, rollupVersion: 4127419662 })).toThrow(/4138294185|2793892258/)
+		// Assert BOTH the got (4138294185) AND the current expected (1816023401) appear, so a stale
+		// expected in the message can't be masked by matching only the supplied bad value.
+		const run = () => assertTestnetIdentity({ l1ChainId: 11155111, rollupVersion: 4127419662 })
+		expect(run).toThrow(/4138294185/)
+		expect(run).toThrow(/1816023401/)
 	})
 
 	test("wrong L1 chain id is rejected", () => {
