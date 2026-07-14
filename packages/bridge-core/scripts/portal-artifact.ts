@@ -29,7 +29,9 @@ export const FORKED_PORTAL_KECCAK = "0x1820c1ab1da9ffcd9e443350639e803a8019f624a
 /** Creation/runtime code hashes + solc version of the reviewed fork build. Regenerated for the
  *  5.0.0-rc.2 l1-contracts toolchain (the fork's `@aztec` interface imports now resolve against
  *  rc.2; the fork source itself is unchanged beyond the repathed header comment). The candidate
- *  smoke's deposit→claim round-trip is the empirical proof of the rc.2 portal semantics. */
+ *  smoke's deposit→claim round-trip is the empirical proof of the rc.2 portal semantics.
+ *  Re-validated live on the 5.0.0 network (Etherscan-verified + candidate smoke) without a
+ *  recompile — the artifact provenance stays the rc.2 toolchain deliberately. */
 export const PORTAL_PIN = {
 	solc: "0.8.30",
 	initCodeHash: "0x7886020a18cdd8d5b6dea0bfb94e2edbdf7d5e4927094f3a17b7022840b4d26e",

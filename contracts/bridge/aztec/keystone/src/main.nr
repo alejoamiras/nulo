@@ -3,7 +3,7 @@
 // (test/ContentHash.t.sol) against the SAME constants. Equality across both
 // toolchains is the one cross-chain boundary guard the TXE can't provide: if a
 // selector or arg order ever drifts, a deposit's L1->L2 message becomes
-// unconsumable and funds strand. Run: nargo test (with the rc.2 nargo).
+// unconsumable and funds strand. Run: nargo test (with the 5.0.0 nargo).
 
 use aztec::protocol::address::{AztecAddress, EthAddress};
 use aztec::protocol::traits::FromField;
