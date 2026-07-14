@@ -49,7 +49,20 @@ export async function openChainStore({ network, rollupAddress, storeKey, log }: 
 	// Upstream TRANSFERS the key buffer to its worker (detaching it) — always hand over a copy so
 	// the provisioned per-profile key survives for the next chain's open.
 	const keyCopy = new Uint8Array(storeKey)
-	const store = await AztecSQLiteOPFSStore.open(log, DB_NAME, false, chainDataDir(network), keyCopy)
+	// Bounded open: the store's worker protocol has NO timeout, and a worker that fails to load
+	// its wasm hangs SILENTLY on init (no onerror) — which would wedge this open forever while
+	// holding the chain guard, and transitively wedge profile deletion. 30s is generous for a
+	// worker boot + wasm compile on any hardware; converting the silence into a loud error keeps
+	// the failure fail-closed AND recoverable.
+	const store = await Promise.race([
+		AztecSQLiteOPFSStore.open(log, DB_NAME, false, chainDataDir(network), keyCopy),
+		new Promise<never>((_, reject) =>
+			setTimeout(
+				() => reject(new Error(`openChainStore: sqlite worker did not answer init within 30s for ${chainDataDir(network)}`)),
+				30_000,
+			),
+		),
+	])
 	try {
 		await initStoreVersionStamp(store, rollupAddress, log)
 	} catch (err) {
@@ -100,10 +113,12 @@ const OPFS_ROOT = PXE_DATA_DIR_ROOT.replace(/\/$/, "")
 
 async function opfsRoot(): Promise<FileSystemDirectoryHandle | undefined> {
 	// Capability guard: OPFS exists only in browser contexts (the offscreen document). Under
-	// node-env unit tests (and any non-OPFS host) the registry is simply empty.
+	// node-env unit tests (and any non-OPFS host) the registry is simply empty. A rejecting
+	// `getDirectory()` is treated the same as absence — in a context where OPFS never worked,
+	// no OPFS store exists to enumerate or erase, and a purge must not wedge on it.
 	if (typeof navigator === "undefined" || !navigator.storage?.getDirectory) return undefined
-	const top = await navigator.storage.getDirectory()
 	try {
+		const top = await navigator.storage.getDirectory()
 		return await top.getDirectoryHandle(OPFS_ROOT)
 	} catch {
 		return undefined
