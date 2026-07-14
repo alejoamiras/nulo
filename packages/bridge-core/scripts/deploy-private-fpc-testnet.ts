@@ -1,7 +1,7 @@
 /**
- * One-shot after a testnet reset: universally deploy the Wonderland PrivateFPC (salt 0,
- * deployer ZERO — the aztec.js default) so its address matches the pinned
- * `PRIVATE_FPC_ADDRESS` in `src/private-fuel.ts`. The deployment is permissionless (the
+ * One-shot after a testnet reset: universally deploy the PrivateFPC at the CANONICAL salt
+ * (`PRIVATE_FPC_SALT`, `0x…01` from 5.0.0 onward), deployer ZERO, so its address matches the
+ * pinned `PRIVATE_FPC_ADDRESS` in `src/private-fuel.ts`. The deployment is permissionless (the
  * derivation binds no deployer), idempotent (exits early if the instance already exists),
  * and fee-paid by a throwaway account via the network's SponsoredFPC.
  *

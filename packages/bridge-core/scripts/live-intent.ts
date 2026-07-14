@@ -18,7 +18,7 @@
  * UNDERLYING() + handler's FEE_ASSET() on L1.
  */
 import { createHash } from "node:crypto"
-import { execSync } from "node:child_process"
+import { execFileSync, execSync } from "node:child_process"
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -55,8 +55,22 @@ async function rpc<T>(url: string, method: string, params: unknown[]): Promise<T
 
 const sha256 = (p: string) => createHash("sha256").update(readFileSync(p)).digest("hex")
 
-function cast(args: string): string {
-	return execSync(`${CAST} ${args}`, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
+/** Run `cast` with an ARGV array — NEVER a shell string. A node-returned address containing shell
+ *  metacharacters must not be able to execute commands (the deployer key is in this process's env);
+ *  execFileSync bypasses the shell entirely so no interpolated value is ever parsed as a command. */
+function cast(args: string[]): string {
+	return execFileSync(CAST, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
+}
+
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/
+/** Fail-closed validation for any value that flows into a `cast` invocation from an UNTRUSTED source
+ *  (a node RPC response, primarily). Even with execFileSync closing the shell vector, a malformed
+ *  address must hard-stop rather than silently produce a wrong on-chain read. */
+function requireAddress(value: string | undefined, label: string): string {
+	if (!value || !EVM_ADDRESS.test(value)) {
+		throw new Error(`${label} is not a valid 20-byte address: ${JSON.stringify(value)} — STOP`)
+	}
+	return value
 }
 
 interface NodeIdentity {
@@ -81,6 +95,8 @@ export interface DeployIntent {
 		| { posture: "SINGLE-L2-NODE (documented residual: no second public endpoint; L1-anchored; caps bound exposure)" }
 	signer: string
 	caps: typeof CAPS
+	/** The signer's ETH balance at build time (pre-spend). verify enforces `baseline - now <= cap`. */
+	startingBalanceEth: number
 	artifacts: { privateFpc: { address: string; salt: string; sha256: string }; noirTargets: Record<string, string> }
 	source: { commit: string; treeClean: boolean; operationalAllowlist: string[] }
 	candidateSha256?: string
@@ -103,11 +119,12 @@ async function build(intentPath: string): Promise<void> {
 	const identity = await probeIdentity(NODE_URL)
 	const walletChainId = (identity.l1ChainId ^ identity.rollupVersion) >>> 0
 
-	// Independent L1 corroboration of the node's claims — a lying/stale node fails here.
-	const rollup = identity.l1ContractAddresses.rollupAddress
-	const portal = identity.l1ContractAddresses.feeJuicePortalAddress
-	const rollupCode = cast(`code ${rollup} --rpc-url ${sepolia}`)
-	const portalCode = cast(`code ${portal} --rpc-url ${sepolia}`)
+	// Independent L1 corroboration of the node's claims — a lying/stale node fails here. The node
+	// controls these strings, so validate them as addresses BEFORE they reach `cast`.
+	const rollup = requireAddress(identity.l1ContractAddresses.rollupAddress, "node rollupAddress")
+	const portal = requireAddress(identity.l1ContractAddresses.feeJuicePortalAddress, "node feeJuicePortalAddress")
+	const rollupCode = cast(["code", rollup, "--rpc-url", sepolia])
+	const portalCode = cast(["code", portal, "--rpc-url", sepolia])
 
 	// Second Aztec endpoint, when one exists.
 	const secondUrl = process.env.INTENT_SECOND_AZTEC_RPC
@@ -122,10 +139,15 @@ async function build(intentPath: string): Promise<void> {
 		secondEndpoint = { posture: "SINGLE-L2-NODE (documented residual: no second public endpoint; L1-anchored; caps bound exposure)" }
 	}
 
-	const signer = cast(`wallet address --private-key ${pk}`)
+	const signer = cast(["wallet", "address", "--private-key", pk])
 	if (signer.toLowerCase() !== PLAN_PINNED_L1_SIGNER.toLowerCase()) {
 		throw new Error(`env-derived signer ${signer} != plan-pinned ${PLAN_PINNED_L1_SIGNER} — HARD STOP`)
 	}
+
+	// The PRE-SPEND baseline the caps are measured against. Recorded ONCE at build (before any
+	// broadcast); verify computes `baseline - current` and hard-stops if it exceeds maxTotalEthSpend.
+	const startingBalanceEth = Number(cast(["balance", signer, "--rpc-url", sepolia, "--ether"]))
+	if (!Number.isFinite(startingBalanceEth)) throw new Error(`could not read starting signer balance — STOP`)
 
 	const commit = execSync("git rev-parse HEAD", { cwd: repoRoot, encoding: "utf8" }).trim()
 	const dirty = execSync("git status --porcelain", { cwd: repoRoot, encoding: "utf8" })
@@ -157,6 +179,7 @@ async function build(intentPath: string): Promise<void> {
 		secondEndpoint,
 		signer,
 		caps: CAPS,
+		startingBalanceEth,
 		artifacts: {
 			privateFpc: {
 				address: PRIVATE_FPC_ADDRESS,
@@ -190,6 +213,20 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 	const sepolia = process.env.SEPOLIA_RPC_URL
 	if (!sepolia) throw new Error("SEPOLIA_RPC_URL required")
 
+	// The intent is the gate's own trust anchor (caps, signer, digests). It lives under the
+	// otherwise-allowlisted lessons dir, so once it carries a recorded candidate digest (i.e. we are
+	// PAST the one-time digest-recording verify and into the gating regime) it MUST be committed — an
+	// uncommitted edit to weaken caps/signer/digest would otherwise slip through the tree check.
+	if (intent.candidateSha256) {
+		const intentStatus = execSync(`git status --porcelain -- ${JSON.stringify(intentPath)}`, {
+			cwd: repoRoot,
+			encoding: "utf8",
+		}).trim()
+		if (intentStatus.length > 0) {
+			throw new Error(`intent.json is uncommitted — the gate's own anchor must be committed before promotion:\n${intentStatus}`)
+		}
+	}
+
 	// Tree discipline at EVERY verify, not just at build: only allowlisted operational files may be
 	// dirty during the live arc. A non-allowlisted source change must be committed (fix-forward,
 	// logged in lessons) before the next broadcast group — never carried silently into a promotion.
@@ -212,7 +249,7 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 	// Signer re-check.
 	const pk = process.env.PRIVATE_KEY
 	if (pk) {
-		const signer = cast(`wallet address --private-key ${pk}`)
+		const signer = cast(["wallet", "address", "--private-key", pk])
 		if (signer.toLowerCase() !== intent.signer.toLowerCase()) throw new Error(`signer ${signer} != intent ${intent.signer} — STOP`)
 	}
 
@@ -234,32 +271,49 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 			writeFileSync(intentPath, `${JSON.stringify(intent, null, "\t")}\n`)
 			console.log(`✓ candidate digest recorded: ${digest}`)
 		}
-		// Privileged-state readbacks on L1 (a fingerprint can't catch a wrong owner/binding).
+		// Privileged-state readbacks on L1 (a fingerprint can't catch a wrong owner/binding). The
+		// candidate addresses are schema-validated (EVM-address regex), so they're shell-safe; passed
+		// as argv all the same. The `"UNDERLYING()(address)"` sig is one argv element (no shell parse).
 		if (candidate.l1.feeJuice) {
-			const underlying = cast(`call ${candidate.l1.feeJuice.portal} "UNDERLYING()(address)" --rpc-url ${sepolia}`)
+			const underlying = cast(["call", candidate.l1.feeJuice.portal, "UNDERLYING()(address)", "--rpc-url", sepolia])
 			if (underlying.toLowerCase() !== candidate.l1.feeJuice.asset.toLowerCase()) {
 				throw new Error(`portal UNDERLYING ${underlying} != manifest asset ${candidate.l1.feeJuice.asset} — STOP`)
 			}
-			const feeAsset = cast(`call ${candidate.l1.feeJuice.feeAssetHandler} "FEE_ASSET()(address)" --rpc-url ${sepolia}`)
+			const feeAsset = cast(["call", candidate.l1.feeJuice.feeAssetHandler, "FEE_ASSET()(address)", "--rpc-url", sepolia])
 			if (feeAsset.toLowerCase() !== candidate.l1.feeJuice.asset.toLowerCase()) {
 				throw new Error(`handler FEE_ASSET ${feeAsset} != manifest asset — STOP`)
 			}
 		}
 		if (candidate.l1.fuel) {
-			const owner = cast(`call ${candidate.l1.fuel.router} "owner()(address)" --rpc-url ${sepolia}`).toLowerCase()
+			const owner = cast(["call", candidate.l1.fuel.router, "owner()(address)", "--rpc-url", sepolia]).toLowerCase()
 			if (owner !== intent.signer.toLowerCase()) throw new Error(`router owner ${owner} != our signer — STOP (privileged binding)`)
-			const swapTarget = cast(`call ${candidate.l1.fuel.router} "swapTarget()(address)" --rpc-url ${sepolia}`).toLowerCase()
+			const swapTarget = cast(["call", candidate.l1.fuel.router, "swapTarget()(address)", "--rpc-url", sepolia]).toLowerCase()
 			if (swapTarget !== candidate.l1.fuel.swapTarget.toLowerCase())
 				throw new Error(`router swapTarget ${swapTarget} != manifest — STOP`)
 		}
 		console.log("✓ candidate strict-valid + privileged readbacks agree")
 	}
 
-	// Balance-within-caps reconciliation.
-	const balance = Number(cast(`balance ${intent.signer} --rpc-url ${sepolia} --ether`))
-	console.log(
-		`✓ verify green — rollupVersion ${now.rollupVersion}, signer balance ${balance} ETH (caps: ≤${intent.caps.maxTotalEthSpend} total spend)`,
-	)
+	// Balance-within-caps reconciliation — ENFORCED, not merely printed. A build recorded the
+	// pre-spend baseline; if the cumulative spend since then exceeds the cap, hard-stop.
+	const balance = Number(cast(["balance", intent.signer, "--rpc-url", sepolia, "--ether"]))
+	if (typeof intent.startingBalanceEth === "number" && Number.isFinite(intent.startingBalanceEth)) {
+		const spent = intent.startingBalanceEth - balance
+		const cap = Number(intent.caps.maxTotalEthSpend)
+		if (spent > cap) {
+			throw new Error(
+				`spend ${spent.toFixed(6)} ETH EXCEEDS the ${cap} ETH cap (baseline ${intent.startingBalanceEth} → now ${balance}) — STOP`,
+			)
+		}
+		console.log(
+			`✓ verify green — rollupVersion ${now.rollupVersion}, spend ${spent.toFixed(6)}/${cap} ETH (baseline ${intent.startingBalanceEth} → ${balance})`,
+		)
+	} else {
+		// Legacy intent with no recorded baseline: fall back to printing (can't enforce a delta).
+		console.log(
+			`✓ verify green — rollupVersion ${now.rollupVersion}, signer balance ${balance} ETH (caps: ≤${intent.caps.maxTotalEthSpend} total spend; no baseline to enforce)`,
+		)
+	}
 }
 
 const [, , cmd, intentPath, ...rest] = process.argv
