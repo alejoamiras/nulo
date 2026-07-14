@@ -4,7 +4,7 @@
  */
 export const CHAIN_IDS = {
 	MAINNET: 2934756904, // (1 ^ 2934756905) >>> 0 — Alpha mainnet
-	TESTNET: 2793892258, // (11155111 ^ 2787991301) >>> 0 — V5 testnet rollup version
+	TESTNET: 1816023401, // (11155111 ^ 1821665230) >>> 0 — V5 testnet rollup version
 	DEVNET: 896946031, // (11155111 ^ 903641544) >>> 0 — v4-devnet-3
 	SANDBOX: 0, // localhost:8080
 } as const
