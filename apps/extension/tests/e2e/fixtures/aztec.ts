@@ -362,7 +362,7 @@ export async function setupPreFundedAccount(
 
 	// Lazy imports: heavy aztec deps + workspace pkg, only needed when fixture runs.
 	const { poseidon2Hash } = await import("@aztec/foundation/crypto/sync")
-	const { deriveSigningKey } = await import("@aztec/stdlib/keys")
+	const { deriveNuloAccountKeys } = await import("@nulo/wallet-crypto")
 	const { NuloAccount } = await import("@nulo/aztec-runtime/account")
 	const { createLogger } = await import("@aztec/foundation/log")
 	const logger = createLogger("setup-pre-funded-account")
@@ -371,20 +371,20 @@ export async function setupPreFundedAccount(
 	// Use Fr.random for the master so the 32-byte buffer stays within BN254 modulus
 	// (Fr.fromBuffer is strict — see session-manager.ts:210).
 	const master = Fr.random()
-	const accountSecret = poseidon2Hash([master, new Fr(LOCAL_NETWORK_CHAIN_ID), new Fr(ACCOUNT_TYPE_NULO_V1), new Fr(ACCOUNT_INDEX)])
-	const signingKey = deriveSigningKey(accountSecret)
+	const accountSeed = poseidon2Hash([master, new Fr(LOCAL_NETWORK_CHAIN_ID), new Fr(ACCOUNT_TYPE_NULO_V1), new Fr(ACCOUNT_INDEX)])
+	// Signing-key-root model (NULO-ACCOUNT-KDF v1): seed → signing key (root) → privacy secret.
+	const { signingKey, secretKey } = await deriveNuloAccountKeys(accountSeed)
 
 	// Sanity check the derived address against NuloAccount's path so the fixture
 	// fails fast if the upstream Schnorr / NuloAccount implementations diverge.
-	const nuloAccountContract = await NuloAccount.new(accountSecret, logger)
+	const nuloAccountContract = await NuloAccount.new(accountSeed, logger)
 	const expectedAddress = nuloAccountContract.address
 	logger.info(`Expected derived address: ${expectedAddress.toString()}`)
 
 	// Step 2 — Create the script-side schnorr account in the wallet's PXE.
-	// Matches holonym-aztec-bridge/bridge-script/utils/deploy_account.ts:31.
-	// EmbeddedWallet.createSchnorrAccount(secret, salt, signingKey) returns an AccountManager.
-	// biome-ignore lint/suspicious/noExplicitAny: EmbeddedWallet's createSchnorrAccount type isn't exposed in the slim Wallet types we import
-	const accountManager = await (wallet as any).createSchnorrAccount(accountSecret, Fr.ZERO, signingKey)
+	// EmbeddedWallet.createSchnorrAccount(secretKey, salt, signingKey) returns an AccountManager —
+	// called WITHOUT a cast so the compiler checks the argument order against upstream.
+	const accountManager = await wallet.createSchnorrAccount(secretKey, Fr.ZERO, signingKey)
 	if (accountManager.address.toString() !== expectedAddress.toString()) {
 		throw new Error(
 			`Address derivation parity broken: NuloAccount=${expectedAddress.toString()} vs createSchnorrAccount=${accountManager.address.toString()}`,

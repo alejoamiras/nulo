@@ -14,7 +14,7 @@ import { Fr } from "@aztec/aztec.js/fields"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
-import { deriveSigningKey } from "@aztec/stdlib/keys"
+import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { PrivateFPCContract } from "@alejoamiras/aztec-fee-payment/artifacts/private"
 import { PRIVATE_FPC_ADDRESS } from "../src/private-fuel"
@@ -35,7 +35,8 @@ async function main() {
 	// Throwaway account; the SponsoredFPC pays its deployment AND the FPC deploy.
 	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
 	const secret = Fr.random()
-	const manager = await ewallet.createSchnorrAccount(secret, Fr.random(), deriveSigningKey(secret))
+	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
+	const manager = await ewallet.createSchnorrAccount(secretKey, Fr.random(), signingKey)
 	const l2account = await manager.getAccount()
 
 	const sponsored = await getContractInstanceFromInstantiationParams(SponsoredFPCContract.artifact, {
