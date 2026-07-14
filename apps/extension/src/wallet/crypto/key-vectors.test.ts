@@ -73,7 +73,7 @@ import { Fr } from "@aztec/foundation/curves/bn254"
 import { deriveSigningKeyFromSeed } from "@nulo/wallet-crypto"
 import { EncryptionKey } from "@nulo/wallet-crypto"
 import { PasskeyCredential } from "@nulo/wallet-crypto"
-import { PASSKEY_PRF_LABEL } from "@nulo/wallet-crypto"
+import { PASSKEY_PRF_LABEL, PXE_STORE_KDF_LABEL, derivePxeStoreKey } from "@nulo/wallet-crypto"
 import { AccountType } from "@/wallet/services/account/spec"
 
 /** Reusable hex helper — keeps fixture constants readable. */
@@ -203,6 +203,27 @@ describe("M2.6 — cryptographic derivation vectors", () => {
 	// catches a drive-by refactor before it breaks wallets.
 	test("V9 — AccountType.Nulo_v1 === 0", () => {
 		expect(AccountType.Nulo_v1).toBe(0)
+	})
+
+	// ── V11: derivePxeStoreKey(master, profileId) — NULO-PXE-STORE-KDF v1 ──
+	//
+	// The per-profile ChaCha20 key for the encrypted SQLite-OPFS PXE stores
+	// (HKDF-SHA256, label "nulo:pxe-store:v1", salt bound to the profileId).
+	// A Nulo-novel construction, so this is a DRIFT PIN (like V8): it locks
+	// what we ship — changing the label, salt shape, or HKDF params orphans
+	// every encrypted PXE store on disk (state resets, not data loss: the
+	// PXE re-syncs — but never change it casually).
+	test("V11 — derivePxeStoreKey(fixedMaster, fixture profileId) matches fixture + is not the master", async () => {
+		expect(PXE_STORE_KDF_LABEL).toBe("nulo:pxe-store:v1")
+		const master = new Uint8Array(32)
+		master[31] = 0x42
+		const key = await derivePxeStoreKey(master, "profile-fixture-1")
+		expect(key).toHaveLength(32)
+		expect(toHex(key)).toBe("7bc1e3d33de01d8650471666c8daa55436a18c77644bfcfd683aba02465018d4")
+		expect(toHex(key)).not.toBe(toHex(master))
+		// Distinct profiles derive distinct keys from the same master.
+		const other = await derivePxeStoreKey(master, "profile-fixture-2")
+		expect(toHex(other)).not.toBe(toHex(key))
 	})
 
 	// ── P1: HKDF-SHA256 RFC 5869 Appendix A.1 ────────────────────────

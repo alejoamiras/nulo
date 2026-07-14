@@ -39,6 +39,8 @@ import { JournalReaper } from "./services/operation-journal/reaper"
 import { PasskeyService } from "./services/passkey/service"
 import { ProfileDeletionCoordinator } from "./services/profile-deletion/coordinator"
 import { ProfileService } from "./services/profile/service"
+import { registerPxeStoreKeyProvider } from "./services/pxe/client"
+import { derivePxeStoreKey } from "@nulo/wallet-crypto"
 import { TaskService } from "./services/task/service"
 import { TokenService } from "./services/token/service"
 import { TokenBalanceService } from "./services/token-balance/service"
@@ -191,7 +193,17 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// composition root passed no port — see session-manager.ts "proactive TTL lights up once the
 		// composition root wires browserApi"). Accepted behavior change; seam-pinned in
 		// service.integration.test.ts "Q10 composition seam".
-		services.add(new ProfileService(config, logger, browserApi))
+		const profileService = new ProfileService(config, logger, browserApi)
+		services.add(profileService)
+		// The per-profile PXE store encryption key: derived on demand from the in-memory master
+		// (HKDF, wallet-crypto) and provisioned to the offscreen by the PXE clients' missing-key
+		// retry path. The master never crosses the seam; a locked profile yields undefined and
+		// the PXE op fails as it should.
+		registerPxeStoreKeyProvider(async (profileId) => {
+			const master = await profileService.getProfileSecret(profileId).catch(() => undefined)
+			if (!master) return undefined
+			return derivePxeStoreKey(new Uint8Array(master.toBuffer()), profileId)
+		})
 		services.add(new TaskService(logger))
 		services.add(new TokenService(logger, browserApi))
 		services.add(new TokenBalanceService(logger, browserApi))

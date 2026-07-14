@@ -60,6 +60,10 @@ import { PXEProxy } from "./proxy"
 const PROVE_TX_TIMEOUT_MS = 30 * 60_000
 
 export class PxeServiceClientBase extends ServiceClient<Methods> implements ServiceSpec<Methods> {
+	/** SW-side derivation hook for the per-profile store encryption key (see
+	 *  `setStoreKeyProvider`). Undefined until the embedder wires it at boot. */
+	private storeKeyProvider?: (profileId: string) => Promise<Uint8Array | undefined>
+
 	public constructor(logger: ILogger) {
 		super(PXE_SERVICE_NAME, logger)
 	}
@@ -67,6 +71,40 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 	protected override getRequestTimeoutMs(method: keyof Methods): number {
 		if (method === "proveTx") return PROVE_TX_TIMEOUT_MS
 		return super.getRequestTimeoutMs(method)
+	}
+
+	/**
+	 * Register the SW-side store-key derivation hook (typically `derivePxeStoreKey(master,
+	 * profileId)` against the in-memory session). The offscreen holds provisioned keys in memory
+	 * only, so an offscreen-document restart drops them; when a request then fails with the
+	 * `PXE_STORE_KEY_MISSING` marker, this client derives + re-provisions + retries ONCE. The
+	 * provider returning `undefined` (profile locked / no session) lets the original error
+	 * propagate — a locked profile cannot open its encrypted PXE store, by design.
+	 */
+	public setStoreKeyProvider(provider: (profileId: string) => Promise<Uint8Array | undefined>): void {
+		this.storeKeyProvider = provider
+	}
+
+	protected override async request<T extends keyof Methods>(
+		method: T,
+		...args: Parameters<Methods[T]>
+	): Promise<Awaited<ReturnType<Methods[T]>>> {
+		try {
+			return await super.request(method, ...args)
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err)
+			const profileId = (args[0] as NetworkInfo | undefined)?.profileId
+			if (method === "provisionChainStoreKey" || !message.includes("PXE_STORE_KEY_MISSING") || !profileId || !this.storeKeyProvider) {
+				throw err
+			}
+			const key = await this.storeKeyProvider(profileId)
+			if (!key) throw err
+			await super.request(
+				"provisionChainStoreKey" as T,
+				...([profileId, btoa(String.fromCharCode(...key))] as unknown as Parameters<Methods[T]>),
+			)
+			return await super.request(method, ...args)
+		}
 	}
 
 	public getPXE(network: NetworkInfo): IPXE {
@@ -198,5 +236,11 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 
 	public async clearProfileState(profileId: string): Promise<void> {
 		await this.request("clearProfileState", profileId)
+	}
+
+	/** Provision the per-profile PXE store encryption key (32 bytes, base64-encoded). Called by
+	 *  the embedder after unlock; also fired automatically by the missing-key retry path. */
+	public async provisionChainStoreKey(profileId: string, storeKeyBase64: string): Promise<void> {
+		await this.request("provisionChainStoreKey", profileId, storeKeyBase64)
 	}
 }

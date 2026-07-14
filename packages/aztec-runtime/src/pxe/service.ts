@@ -36,6 +36,7 @@ import { ReadWriteGuard } from "@nulo/wallet-core/utils"
 import type { NetworkInfo } from "./chain-runtime"
 import { ChainRuntimeRegistry, ProductionPxeFactory, type PxeFactory } from "./chain-runtime"
 import { PXE_DATA_DIR_ROOT, chainDataDir, chainDataDirPrefix, chainRegistryKey, chainRegistryKeyPrefix } from "./chain-coordinates"
+import { listChainStoreDirs, removeChainStoreDir, removeProfileStoreDirs } from "./opfs-store"
 import { ArtifactRegistry } from "./artifact-registry"
 import { loadProductionKnownArtifacts } from "./known-artifacts"
 import { loadProductionNoteSchemas, type NoteSchema } from "./note-schemas"
@@ -82,6 +83,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		"getBlockTimestamp",
 		"clearChainState",
 		"clearProfileState",
+		"provisionChainStoreKey",
 	)
 
 	private readonly profiles: IProfileReader
@@ -117,6 +119,10 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	private readonly guardLogger: ILogger
 	private readonly registry: ChainRuntimeRegistry
 	private readonly artifacts: ArtifactRegistry
+	/** Per-profile 32-byte store encryption keys, provisioned by the SW after unlock (and
+	 *  re-provisioned on demand after an offscreen restart — in-memory only, never persisted).
+	 *  Dropped on profile delete. */
+	private readonly storeKeys = new Map<string, Uint8Array>()
 
 	public constructor(profiles: IProfileReader, logger: ILogger, factory?: PxeFactory) {
 		super(PXE_SERVICE_NAME, logger)
@@ -150,24 +156,37 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	}
 
 	protected async init() {
-		// delete orphan PXE DBs
+		// Orphan cleanup, both storage generations:
+		//  - OPFS (the live 5.0.0 backend): the store registry IS the OPFS tree — enumerate
+		//    `pxe/<profileId>/<chainId>` dirs and remove any whose profile no longer exists.
+		//    Needs no live runtime (that is the point of the registry).
+		//  - IndexedDB (LEGACY, rc.2-era): one-way cleanup of pre-OPFS databases — not a
+		//    fallback backend and not a migration; the old data is unreadable by 5.0.0 anyway
+		//    (upstream wiped on schema bump) so only the bytes are being reclaimed.
+		const profiles = await this.profiles.getProfiles()
+		for (const coords of await listChainStoreDirs()) {
+			if (!profiles.some((x) => x.id === coords.profileId)) {
+				this.logWarn(`init: removing orphan OPFS PXE store ${chainDataDir(coords)}`)
+				await removeChainStoreDir(coords)
+			}
+		}
+
 		const dbs = await indexedDB.databases()
 		const pxes = dbs.filter((x) => x.name?.startsWith(PXE_DATA_DIR_ROOT))
 		if (pxes.length) {
-			const profiles = await this.profiles.getProfiles()
 			for (let i = pxes.length - 1; i >= 0; i--) {
-				if (!profiles.some((x) => pxes[i].name!.startsWith(chainDataDirPrefix(x.id)))) {
-					await new Promise<void>((resolve, reject) => {
-						const req = indexedDB.deleteDatabase(pxes[i].name!)
-						req.onsuccess = () => resolve()
-						req.onerror = () => reject(req.error)
-						req.onblocked = () => {
-							this.logWarn("deleteDatabase blocked (DB still in use):", pxes[i].name)
-							resolve() // Skip — don't hang init forever
-						}
-					})
-					pxes.splice(i, 1)
-				}
+				// Every rc.2-era PXE IndexedDB is legacy debris under the OPFS backend — sweep
+				// them all (not just orphans), plus the shared keyval-store once none remain.
+				await new Promise<void>((resolve, reject) => {
+					const req = indexedDB.deleteDatabase(pxes[i].name!)
+					req.onsuccess = () => resolve()
+					req.onerror = () => reject(req.error)
+					req.onblocked = () => {
+						this.logWarn("deleteDatabase blocked (DB still in use):", pxes[i].name)
+						resolve() // Skip — don't hang init forever
+					}
+				})
+				pxes.splice(i, 1)
 			}
 			if (!pxes.length) {
 				const keyval = dbs.find((x) => x.name === "keyval-store")
@@ -497,7 +516,14 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		const chainGuard = this.getChainGuard(profileId, chainId)
 		await barrier.read(async () => {
 			await chainGuard.write(async () => {
+				// Dispose closes the owned store (releasing the SAH-pool lock), then the OPFS
+				// directory removal reclaims the encrypted bytes — it needs NO live runtime, so
+				// a chain whose PXE never booted this session purges identically. The key stays
+				// with the profile (other chains share it); crypto-erase for the profile as a
+				// whole happens in clearProfileState. The IndexedDB delete is the LEGACY
+				// (rc.2-era) cleanup layer.
 				await this.registry.dispose(profileId, chainId)
+				await removeChainStoreDir({ profileId, chainId })
 				await this.deleteDb(chainDataDir({ profileId, chainId }))
 			})
 		})
@@ -517,6 +543,12 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			await this.registry.disposeProfile(profileId)
 			const guardPrefix = chainRegistryKeyPrefix(profileId)
 			for (const k of Array.from(this.chainGuards.keys())) if (k.startsWith(guardPrefix)) this.chainGuards.delete(k)
+			// Crypto-erase first (drop the in-memory key — the encrypted stores become
+			// unreadable even if a removal below is interrupted), then reclaim the OPFS bytes
+			// (registry-driven — covers chains whose network row or runtime is already gone),
+			// then the LEGACY rc.2-era IndexedDB sweep.
+			this.storeKeys.delete(profileId)
+			await removeProfileStoreDirs(profileId)
 			const dbPrefix = chainDataDirPrefix(profileId)
 			for (const db of await indexedDB.databases()) {
 				if (db.name?.startsWith(dbPrefix)) await this.deleteDb(db.name)
@@ -533,6 +565,21 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			barrier.leaveWrite()
 			this.profileBarriers.delete(profileId)
 		}
+	}
+
+	/**
+	 * Provision the per-profile 32-byte store encryption key (base64 over the wire; derived
+	 * SW-side from the profile master via `derivePxeStoreKey` — the master itself never crosses).
+	 * Held in memory only; a chain runtime cannot boot without it (fail-closed — see
+	 * `PXE_STORE_KEY_MISSING` in chain-runtime.ts). Idempotent; re-provision after an offscreen
+	 * restart is the expected path.
+	 */
+	public async provisionChainStoreKey(profileId: string, storeKeyBase64: string): Promise<void> {
+		const key = Uint8Array.from(atob(storeKeyBase64), (c) => c.charCodeAt(0))
+		if (key.length !== 32) {
+			throw new Error(`provisionChainStoreKey: expected a 32-byte key, got ${key.length}`)
+		}
+		this.storeKeys.set(profileId, key)
 	}
 
 	/**
@@ -567,7 +614,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			this.logDebug(`[DEBUG] [READ] ${label} starting`)
 			const result = await barrier.read(async () => {
 				return chainGuard.read(async () => {
-					const runtime = await this.registry.getOrInit(network)
+					const runtime = await this.registry.getOrInit(network, this.storeKeys.get(network.profileId))
 					return fn(runtime.pxe, runtime.node)
 				})
 			})
@@ -587,7 +634,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			this.logDebug(`[DEBUG] [WRITE] ${label} waiting for lock`)
 			return await barrier.read(async () => {
 				return chainGuard.write(async () => {
-					const runtime = await this.registry.getOrInit(network)
+					const runtime = await this.registry.getOrInit(network, this.storeKeys.get(network.profileId))
 					this.logDebug(`[DEBUG] [WRITE] ${label} lock acquired, executing`)
 					const result = await fn(runtime.pxe, runtime.node)
 					this.logDebug(`[DEBUG] [WRITE] ${label} completed (${Date.now() - start}ms)`)
