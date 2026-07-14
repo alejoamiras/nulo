@@ -97,9 +97,13 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 			constructorArgs: [],
 			salt: Fr.zero(),
 		})
+		// The PrivateFPC canonical salt is a FIXED project constant from 5.0.0 onward (the
+		// fee-payment package's canonical-deployment contract; rc-era used salt 0). Must equal
+		// bridge-core's PRIVATE_FPC_SALT / private-fpc-canonical.json — the derivation from this
+		// (artifact, salt, deployer) is machine-asserted there (layering bars the import here).
 		const privateInstance = await getContractInstanceFromInstantiationParams(PrivateFPCContractArtifact, {
 			constructorArgs: [],
-			salt: Fr.zero(),
+			salt: new Fr(1n),
 			deployer: AztecAddress.ZERO,
 		})
 		const addresses: ProtocolAddresses = {

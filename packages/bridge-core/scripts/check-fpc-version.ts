@@ -1,19 +1,33 @@
 /**
- * Pre-P4 fail-closed gate: reconcile the live network's Aztec version against the Wonderland
- * artifact our PrivateFPC address was pinned from. The FPC address is bytecode + @aztec-version
- * specific — depositing real Fee Juice to an address derived from the wrong version is an
- * UNRECOVERABLE loss. Run this (read-only, no keys) before any fund-moving private-fuel run.
+ * Fail-closed PrivateFPC gate: reconcile the live network, the installed fee-payment artifact, and
+ * the canonical descriptor (`src/private-fpc-canonical.json`) before ANY fund-moving private-fuel
+ * step. The FPC address is bytecode + @aztec-version + salt specific — depositing real Fee Juice to
+ * an address derived from the wrong artifact is an UNRECOVERABLE loss.
  *
  *   AZTEC_NODE_URL=https://v5.testnet.rpc.aztec-labs.com bun packages/bridge-core/scripts/check-fpc-version.ts
  *
- * Exit 0 = the network's major.minor matches the artifact pin. Exit 1 = mismatch (STOP: re-pin via
- * the bridge-core address tripwire + dust-canary on the live net before trusting the address).
+ * Checks (ALL must hold — exit 1 otherwise):
+ *   1. EXACT full-version agreement: installed package == descriptor == live nodeVersion. No
+ *      prerelease-stripping, no major-only compare — "5.0.0-rc.2" vs a 5.0.0 node FAILS (the old
+ *      gate's false-green; a version bump is exactly the op that opens the loss window).
+ *   2. Artifact digest: sha256 of the installed artifact == descriptor.artifactSha256.
+ *   3. Descriptor/constants coherence: descriptor address+salt == the exported pins.
+ *   4. Live class: if the pinned address is already deployed, its ORIGINAL class id must equal the
+ *      class id computed from the installed artifact (a different class at our address = wrong
+ *      contract — never deposit). An RPC failure is an ERROR (exit 1), never treated as absence;
+ *      clean absence is fine (the deploy script creates it).
+ *
+ * Read-only, no keys. The live dust canary (pre-promotion) stays the authoritative on-net proof.
  */
+import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { PRIVATE_FPC_ADDRESS } from "../src/private-fuel"
+import { loadContractArtifact } from "@aztec/stdlib/abi"
+import { getContractClassFromArtifact } from "@aztec/stdlib/contract"
+
+import { PRIVATE_FPC_ADDRESS, PRIVATE_FPC_SALT } from "../src/private-fuel"
 
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 
@@ -28,51 +42,85 @@ function resolvePackageFile(pkg: string, file: string): string {
 	throw new Error(`Cannot find ${pkg}/${file} in any node_modules`)
 }
 
-const majorMinor = (v: string): string => v.replace(/^v/, "").split(".").slice(0, 2).join(".")
-const major = (v: string): number => Number(v.replace(/^v/, "").split(".")[0])
-
-async function main() {
-	const pkg = JSON.parse(readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "package.json"), "utf8"))
-	// "4.2.0-prerelease.215fd08" → the @aztec line the artifact was compiled against.
-	const artifactAztecVersion = String(pkg.version).split("-")[0]
-
+async function rpc<T>(method: string, params: unknown[]): Promise<T> {
 	const res = await fetch(NODE_URL, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "node_getNodeInfo", params: [] }),
+		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
 	})
-	const info = (await res.json()).result as { nodeVersion: string; l1ChainId: number; rollupVersion: number }
-
-	console.log("node URL          :", NODE_URL)
-	console.log("network nodeVersion:", info.nodeVersion, `(l1ChainId=${info.l1ChainId}, rollupVersion=${info.rollupVersion})`)
-	console.log("artifact @aztec    :", artifactAztecVersion, `(@alejoamiras/aztec-fee-payment ${pkg.version})`)
-	console.log("pinned FPC address :", PRIVATE_FPC_ADDRESS)
-
-	// Aztec testnet is backward-compatible across MINOR bumps — a 4.2.0-compiled contract class is
-	// supported + deployed on 4.3.x (confirmed for the live testnet, 2026-06-14). Only a MAJOR bump
-	// risks changing the contract-class-id / private-proving so the pinned address or the class is
-	// rejected; that is the fail-closed gate. The P4 dust canary stays the authoritative on-net proof.
-	if (major(info.nodeVersion) !== major(artifactAztecVersion)) {
-		console.error(
-			`\n✗ MAJOR VERSION MISMATCH — network ${majorMinor(info.nodeVersion)} vs artifact ${majorMinor(artifactAztecVersion)}.\n` +
-				"  A major bump can change contract-class-id / private proving, so the pinned FPC address and the\n" +
-				"  4.x-compiled class may not be accepted. Do NOT deposit real Fee Juice until either a matching\n" +
-				"  Wonderland artifact is pinned (re-green the bridge-core address tripwire) OR a live dust canary\n" +
-				"  round-trips a minimal claim against this address (plan P4).",
-		)
-		process.exit(1)
-	}
-	if (majorMinor(info.nodeVersion) !== majorMinor(artifactAztecVersion)) {
-		console.log(
-			`\n✓ same major; network ${majorMinor(info.nodeVersion)} vs artifact ${majorMinor(artifactAztecVersion)} (minor diff,\n` +
-				"  backward-compatible). The dust canary (plan P4) remains the on-network proof before scaling.",
-		)
-	} else {
-		console.log("\n✓ network and artifact major.minor agree.")
-	}
+	if (!res.ok) throw new Error(`${method}: HTTP ${res.status}`)
+	const body = (await res.json()) as { result?: T; error?: { message: string } }
+	if (body.error) throw new Error(`${method}: RPC error — ${body.error.message}`)
+	return body.result as T
 }
 
-main().catch((e) => {
-	console.error(e)
+const fail = (msg: string): never => {
+	console.error(`\n✗ ${msg}`)
+	process.exit(1)
+}
+
+async function main() {
+	const here = fileURLToPath(new URL(".", import.meta.url))
+	const descriptor = JSON.parse(readFileSync(join(here, "..", "src", "private-fpc-canonical.json"), "utf8")) as {
+		aztecVersion: string
+		salt: string
+		expectedAddress: string
+		artifactSha256: string
+	}
+	const pkg = JSON.parse(readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "package.json"), "utf8"))
+	const artifactBytes = readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "target/private_contract-PrivateFPC.json"))
+
+	const info = await rpc<{ nodeVersion: string; l1ChainId: number; rollupVersion: number }>("node_getNodeInfo", [])
+
+	console.log("node URL           :", NODE_URL)
+	console.log("network nodeVersion:", info.nodeVersion, `(l1ChainId=${info.l1ChainId}, rollupVersion=${info.rollupVersion})`)
+	console.log("installed package  :", String(pkg.version), "| descriptor:", descriptor.aztecVersion)
+	console.log("pinned FPC address :", PRIVATE_FPC_ADDRESS, `(salt ${PRIVATE_FPC_SALT})`)
+
+	// 3. Descriptor/constants coherence (also machine-asserted in private-fuel.test.ts).
+	if (descriptor.expectedAddress !== PRIVATE_FPC_ADDRESS || descriptor.salt !== PRIVATE_FPC_SALT) {
+		fail("descriptor/constants drift — private-fpc-canonical.json disagrees with the private-fuel.ts pins.")
+	}
+
+	// 1. EXACT version agreement across all three sources.
+	if (String(pkg.version) !== descriptor.aztecVersion) {
+		fail(`installed @alejoamiras/aztec-fee-payment ${pkg.version} != descriptor aztecVersion ${descriptor.aztecVersion}.`)
+	}
+	if (info.nodeVersion !== descriptor.aztecVersion) {
+		fail(
+			`network nodeVersion ${info.nodeVersion} != pinned artifact version ${descriptor.aztecVersion} — ` +
+				"EXACT match required (a version bump is exactly the operation that opens the unrecoverable-deposit window).",
+		)
+	}
+
+	// 2. Artifact digest.
+	const digest = createHash("sha256").update(artifactBytes).digest("hex")
+	if (digest !== descriptor.artifactSha256) {
+		fail(`installed artifact sha256 ${digest} != descriptor ${descriptor.artifactSha256}.`)
+	}
+
+	// 4. Live class at the pinned address (RPC failure = error, NOT absence).
+	const expectedClassId = (await getContractClassFromArtifact(loadContractArtifact(JSON.parse(artifactBytes.toString("utf8"))))).id
+	const live = await rpc<{ originalContractClassId?: string; currentContractClassId?: string } | null>("node_getContract", [
+		PRIVATE_FPC_ADDRESS,
+	])
+	if (live) {
+		const liveClass = String(live.originalContractClassId ?? "")
+		if (liveClass !== expectedClassId.toString()) {
+			fail(
+				`the pinned address is DEPLOYED with class ${liveClass}, but the installed artifact computes ` +
+					`${expectedClassId.toString()} — wrong contract at our address; never deposit.`,
+			)
+		}
+		console.log("live contract      : DEPLOYED with the expected class", expectedClassId.toString())
+	} else {
+		console.log("live contract      : absent (clean) — deploy via deploy-private-fpc-testnet.ts")
+	}
+
+	console.log("\n✓ FPC gate green — exact version + digest + live class all agree.")
+}
+
+main().catch((err) => {
+	console.error("\n✗ gate errored (treat as RED — an RPC failure is never absence):", err instanceof Error ? err.message : err)
 	process.exit(1)
 })
