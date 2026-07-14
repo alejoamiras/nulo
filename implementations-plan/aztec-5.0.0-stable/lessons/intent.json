@@ -1,5 +1,5 @@
 {
-	"builtAt": "2026-07-14T17:40:11.537Z",
+	"builtAt": "2026-07-14T17:55:41.409Z",
 	"primaryRpc": "https://v5.testnet.rpc.aztec-labs.com",
 	"identity": {
 		"nodeVersion": "5.0.0",
@@ -40,7 +40,7 @@
 		}
 	},
 	"source": {
-		"commit": "d394c1b2f2d2e5b44733cd0a6557dd1d248143b0",
+		"commit": "8dccc9a8a103cee42e00d61040b51c30baf9acee",
 		"treeClean": true,
 		"operationalAllowlist": [
 			"apps/faucet/public/testnet-bridge.candidate.json",
@@ -49,5 +49,6 @@
 			"packages/bridge-core/deploy-journal.jsonl",
 			"implementations-plan/aztec-5.0.0-stable/lessons/"
 		]
-	}
+	},
+	"candidateSha256": "55a74fb3f1184339368248385cfc44c15de4b848822170dcf0e387c695d827a1"
 }

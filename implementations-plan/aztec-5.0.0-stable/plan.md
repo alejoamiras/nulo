@@ -94,7 +94,7 @@ Bump the `@aztec/*` line `5.0.0-rc.2` → `5.0.0` (66 pins across 8 package.json
 
 **Validation gate** — the 3 compiles · inventory scripts · `test:all` · `lint` · builds; everything green except `verify:deployments`.
 
-### Phase 5 — Coupled testnet redeploy (live; testnet-broadcast authorization from Phase 0; executed under the intent tooling)
+### Phase 5 ✓ — Coupled testnet redeploy (live; testnet-broadcast authorization from Phase 0; executed under the intent tooling) (gate green 2026-07-14 — `lessons/phase-5.md`: all 5 candidate proofs + promotion at pinned digest `55a74fb3…` + verify:deployments/drip/balance-caps green; spend 0.233/0.5 ETH, seed 0.22/0.25 WETH)
 
 0. **Deploy-tooling hardening first** (all unit-tested BEFORE any live step): the strict candidate schema (writer + every consumer; `bridge-deployments.ts` stops casting), `intent.json` + its zod schema, the verify-intent script (codehash/UNDERLYING/FEE_ASSET/class-id/signer checks), the live-run wrapper (explicit-params-only, dry-run-bound broadcast, per-asset + cumulative caps, balance reconciliation).
 1. **Source/config changes FIRST** (re-verdict condition 2 — all tracked-file edits land BEFORE the intent snapshot): chainId cascade (4 sites) + L1 constants re-pin, committed.
