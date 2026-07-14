@@ -154,6 +154,24 @@ export class ProductionPxeFactory implements PxeFactory {
 			storeKey,
 			log: createLogger("pxe:data", { actor: chainDataDir(network) }),
 		})
+		// Once the store is open it holds the pool dir's EXCLUSIVE SAH lock, so ANY throw before a
+		// ChainRuntime takes ownership (createPXE failure, the required-mode preflight) must close it
+		// — otherwise the leaked lock permanently wedges every later open of this dir AND blocks the
+		// purge's removeEntry. ChainRuntime.dispose() owns close() on the success path.
+		try {
+			return await this.buildRuntime(network, node, config, store)
+		} catch (err) {
+			await store.close().catch(() => {})
+			throw err
+		}
+	}
+
+	private async buildRuntime(
+		network: NetworkInfo,
+		node: AztecNode,
+		config: PXEConfig,
+		store: AztecSQLiteOPFSStore,
+	): Promise<ChainRuntime> {
 		// Pass an explicit WASMSimulator into both the prover AND the PXE
 		// config so neither falls back to dynamic-import
 		// `@aztec/simulator/client` at runtime. The dynamic-import fallback

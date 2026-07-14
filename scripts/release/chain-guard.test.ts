@@ -8,12 +8,12 @@ import {
 } from "./chain-guard"
 
 describe("walletChainId (the XOR the wallet uses)", () => {
-	test("canonical V5 alpha-testnet — single-sourced from chain-constants → 2793892258", () => {
+	test("canonical 5.0.0 testnet — single-sourced from chain-constants → 1816023401", () => {
 		// Canary: chain-guard now imports the pair from apps/faucet/src/lib/chain-constants.ts,
 		// so a testnet redeploy that bumps that file surfaces HERE too (no silent drift).
 		expect(TESTNET_L1_CHAIN_ID).toBe(11155111)
-		expect(TESTNET_ROLLUP_VERSION).toBe(2787991301)
-		expect(TESTNET_WALLET_CHAIN_ID).toBe(2793892258)
+		expect(TESTNET_ROLLUP_VERSION).toBe(1821665230)
+		expect(TESTNET_WALLET_CHAIN_ID).toBe(1816023401)
 		expect(walletChainId(TESTNET_L1_CHAIN_ID, TESTNET_ROLLUP_VERSION)).toBe(TESTNET_WALLET_CHAIN_ID)
 	})
 

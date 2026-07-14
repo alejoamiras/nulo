@@ -207,6 +207,29 @@ describe("PxeService.getContractInstance cascade", () => {
 		await expect(service.getContractInstance(network, address)).rejects.toThrow(/upgraded/)
 		expect(f.nodeCalls).toBe(1)
 	})
+
+	test("nodeBestEffort: true does NOT swallow the upgrade rejection into the known-bundle fallback", async () => {
+		// The upgrade rejection is a DEFINITIVE node answer, not a hiccup — best-effort must re-throw it
+		// (ContractUpgradedError) rather than degrade to a stale known-bundle instance (finding #5).
+		const original = { toString: () => "class-original", equals: () => false }
+		const current = { toString: () => "class-upgraded", equals: (o: { toString(): string }) => o.toString() === "class-upgraded" }
+		const nodeInstance = {
+			address: { toString: () => "0xupgraded" },
+			originalContractClassId: original,
+			currentContractClassId: current,
+		} as unknown as ContractInstanceWithAddress
+		const f = makeFactory({ nodeBehavior: "returns-instance", nodeInstance })
+		const service = makeService(f.factory)
+		// A known-bundle hit is available — the bug would serve THIS instead of throwing.
+		const knownInstance = { address: { toString: () => "known" } } as unknown as ContractInstanceWithAddress
+		;(
+			service as unknown as {
+				artifacts: { ensureKnown: () => Promise<void>; getKnownInstance: (a: string) => ContractInstanceWithAddress }
+			}
+		).artifacts = { ensureKnown: async () => {}, getKnownInstance: () => knownInstance }
+
+		await expect(service.getContractInstance(network, address, { nodeBestEffort: true })).rejects.toThrow(/upgraded/)
+	})
 })
 
 describe("PxeService deletion honesty (finding D)", () => {

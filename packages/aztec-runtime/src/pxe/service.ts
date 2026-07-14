@@ -15,7 +15,7 @@ import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { NoteDao } from "@aztec/stdlib/note"
 import { deriveKeys } from "@aztec/stdlib/keys"
 import type { NotesFilter } from "./spec"
-import { assertNotUpgraded, hydratePreimage } from "./effective-class"
+import { ContractUpgradedError, assertNotUpgraded, hydratePreimage } from "./effective-class"
 import {
 	type BlockHeader,
 	SimulationOverrides,
@@ -245,6 +245,10 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 					const nodeInstance = await node.getContract(address)
 					instance = nodeInstance ? assertNotUpgraded(nodeInstance) : undefined
 				} catch (err) {
+					// An upgrade rejection is a DEFINITIVE node answer, not a hiccup — re-throw it even in
+					// best-effort mode, or the cascade would silently serve a stale known-bundle instance
+					// for a contract the node says is unsupported.
+					if (err instanceof ContractUpgradedError) throw err
 					if (!opts?.nodeBestEffort) throw err
 					// Node hiccup on a best-effort lookup: degrade to "not found"
 					// and continue the cascade so the local known-bundle still has a chance.
