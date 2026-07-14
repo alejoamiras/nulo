@@ -40,7 +40,8 @@ import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { poseidon2Hash } from "@aztec/foundation/crypto/poseidon"
 import { createLogger } from "@aztec/foundation/log"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
-import { deriveSigningKey } from "@aztec/stdlib/keys"
+import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
+import type { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { DripperContract, DripperContractArtifact } from "@alejoamiras/aztec-standards/artifacts/src/artifacts/Dripper.js"
 import { TokenContract, TokenContractArtifact } from "@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js"
@@ -298,9 +299,9 @@ async function run(): Promise<void> {
 		const nodeInfo = await node.getNodeInfo()
 		logger.info(`Connected to node ${nodeInfo.nodeVersion}`)
 
-		const accountManager = await (account.kind === "hex"
-			? wallet.createSchnorrAccount(account.secret, account.salt, account.signingKey)
-			: wallet.createSchnorrAccount(account.secret, Fr.ZERO))
+		// Signing-key-root model (NULO-ACCOUNT-KDF v1): the env-derived value is the SEED; the
+		// signing key roots the account and the privacy secret derives one-way from it.
+		const accountManager = await wallet.createSchnorrAccount(account.secretKey, account.salt, account.signingKey)
 		const accountInstance = await accountManager.getAccount()
 		logger.info(`Deployer account: ${accountInstance.getAddress().toString()}`)
 
@@ -358,7 +359,7 @@ async function run(): Promise<void> {
 
 // Allow `bun run scripts/deploy.ts` direct invocation. Also exports the
 // helpers above so tests (if added later) can import them.
-type DeployerKeys = { kind: "hex"; secret: Fr; salt: Fr; signingKey: ReturnType<typeof deriveSigningKey> } | { kind: "utf8"; secret: Fr }
+type DeployerKeys = { secretKey: Fr; salt: Fr; signingKey: GrumpkinScalar }
 
 function frFromHexReduce(hex: string): Fr {
 	return Fr.fromBufferReduce(Buffer.from(hex.replace(/^0x/, "").padStart(64, "0"), "hex"))
@@ -374,16 +375,18 @@ async function resolveDeployerKeys(): Promise<DeployerKeys> {
 	if (hexSecret && hexSalt) {
 		// An Ethereum secp256k1 key can exceed the BN254 field modulus - reduce instead of
 		// throwing (deterministic: the same input always derives the same account).
-		const secret = frFromHexReduce(hexSecret)
+		const seed = frFromHexReduce(hexSecret)
 		const salt = frFromHexReduce(hexSalt)
-		return { kind: "hex", secret, salt, signingKey: deriveSigningKey(secret) }
+		const { signingKey, secretKey } = await deriveNuloAccountKeys(seed)
+		return { secretKey, salt, signingKey }
 	}
 	// Fallback: a free-form string that gets poseidon-hashed. Original
 	// upstream pattern; convenient for one-off testnet experiments.
 	const utf8 = process.env.DEPLOYER_SECRET
 	if (utf8 && utf8.trim().length >= 32) {
-		const secret = await poseidon2Hash([Fr.fromBufferReduce(Buffer.from(utf8, "utf8"))])
-		return { kind: "utf8", secret }
+		const seed = await poseidon2Hash([Fr.fromBufferReduce(Buffer.from(utf8, "utf8"))])
+		const { signingKey, secretKey } = await deriveNuloAccountKeys(seed)
+		return { secretKey, salt: Fr.ZERO, signingKey }
 	}
 	throw new Error(
 		"Provide either DEPLOYER_SECRET_KEY+DEPLOYER_SALT (hex Frs, reuses an existing account) " +
