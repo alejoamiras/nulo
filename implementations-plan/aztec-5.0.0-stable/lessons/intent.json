@@ -27,6 +27,7 @@
 		"maxTotalEthSpend": "0.5",
 		"maxWethSeed": "0.25"
 	},
+	"startingBalanceEth": 8.761,
 	"artifacts": {
 		"privateFpc": {
 			"address": "0x257aa8701e8801b2c03a6b03cdf385c4fa9200efda1dc41f94a905980efc86e9",
