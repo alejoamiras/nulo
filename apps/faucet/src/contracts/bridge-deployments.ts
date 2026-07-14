@@ -5,14 +5,20 @@ import { PublicKeys } from "@aztec/aztec.js/keys"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { TokenContractArtifact } from "@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js"
 import { bridgeProxyArtifact, tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
-import config from "../../public/testnet-bridge.json"
+import { parseCandidateManifest } from "@nulo/bridge-core"
+import rawConfig from "../../public/testnet-bridge.json"
 
 /*
  * testnet-bridge.json is DEPLOY METADATA, not registerable instances. We rebuild each L2
  * instance here via getContractInstanceFromInstantiationParams - same salt + args + universal
  * deploy (deployer = ZERO) as deploy-bridge-testnet.ts, so the addresses agree by construction.
  * Mirrors src/contracts/deployments.ts for the faucet's own contracts.
+ *
+ * STRICT-validated at module init (candidate-schema): a malformed or stale-shaped manifest fails
+ * the faucet loudly at boot instead of shipping a broken lane (the rc.2 arc shipped a stale
+ * carried feeJuicePortal precisely because this file used to cast an untyped `fuel` block).
  */
+const config = parseCandidateManifest(rawConfig)
 
 export const L1_USDC = config.l1.usdc as `0x${string}`
 export const L1_PORTAL = config.l1.portal as `0x${string}`
@@ -34,7 +40,14 @@ export interface FuelDeployment {
 	minFuelFj: bigint
 }
 
-const fuelCfg = (config.l1 as { fuel?: Record<string, unknown> }).fuel
+// Fully typed via the strict schema — the pool keys the swap UI needs are asserted here (the
+// schema keeps `pools` an open record; the faucet's swap lane requires these two specifically).
+const fuelCfg = config.l1.fuel
+const requiredPools = (pools: Record<string, { fee: number; tickSpacing: number }>): FuelDeployment["pools"] => {
+	const { azloWeth, ethFj } = pools
+	if (!azloWeth || !ethFj) throw new Error("bridge manifest: l1.fuel.pools must include azloWeth and ethFj")
+	return { azloWeth, ethFj }
+}
 export const BRIDGE_FUEL: FuelDeployment | undefined = fuelCfg
 	? {
 			router: fuelCfg.router as `0x${string}`,
@@ -44,23 +57,23 @@ export const BRIDGE_FUEL: FuelDeployment | undefined = fuelCfg
 			quoter: fuelCfg.quoter as `0x${string}`,
 			weth: fuelCfg.weth as `0x${string}`,
 			feeJuice: fuelCfg.feeJuice as `0x${string}`,
-			pools: fuelCfg.pools as FuelDeployment["pools"],
-			slippageBps: fuelCfg.slippageBps as number,
-			minFuelFj: BigInt(fuelCfg.minFuelFj as string),
+			pools: requiredPools(fuelCfg.pools),
+			slippageBps: fuelCfg.slippageBps,
+			minFuelFj: BigInt(fuelCfg.minFuelFj),
 		}
 	: undefined
 
 /** The canonical direct Fee-Juice bridge config (`l1.feeJuice`) — independent of `BRIDGE_FUEL` (the
  *  swap stack) so a removed swap deployment never disables Fuel. Absent ⇒ the Fuel tab never renders.
  *  `FUEL_ASSET` is cross-checked against the portal's `UNDERLYING()` at runtime (Phase 3, fail-closed). */
-const feeJuiceCfg = (config.l1 as { feeJuice?: Record<string, unknown> }).feeJuice
+const feeJuiceCfg = config.l1.feeJuice
 export const FUEL_PORTAL = feeJuiceCfg?.portal as `0x${string}` | undefined
 export const FUEL_ASSET = feeJuiceCfg?.asset as `0x${string}` | undefined
 /** Permissionless testnet FeeAssetHandler that mints the L1 fee asset. The pinned address IS the trust
  *  boundary — it must be reviewed against the node's `l1ContractAddresses.feeAssetHandlerAddress`; the
  *  mint path also cross-checks its `FEE_ASSET()` against `FUEL_ASSET` fail-closed. */
 export const FUEL_ASSET_HANDLER = feeJuiceCfg?.feeAssetHandler as `0x${string}` | undefined
-export const FUEL_MIN_FJ = feeJuiceCfg?.minFj ? BigInt(feeJuiceCfg.minFj as string) : undefined
+export const FUEL_MIN_FJ = feeJuiceCfg?.minFj ? BigInt(feeJuiceCfg.minFj) : undefined
 
 export const BRIDGE_PROXY = AztecAddress.fromStringUnsafe(config.l2.proxy.address)
 export const BRIDGE_TOKEN = AztecAddress.fromStringUnsafe(config.l2.token.address)
