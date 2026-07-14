@@ -74,7 +74,7 @@ Bump the `@aztec/*` line `5.0.0-rc.2` → `5.0.0` (66 pins across 8 package.json
 
 **Validation gate** — Commands: `typecheck:all` · `test:all` · `lint` · the 5 builds. Pass: all exit 0 (incl. both vector regimes, hygiene + address-equality pins, upgraded-instance regressions, descriptor derivations, epoch reject, re-pinned tripwire, schema-patch guards, dispatcher reachability). Builds = compile-level only; OPFS runtime proof is Phase 3's. **Fast-fail:** non-mechanical break → stop, codex triage, re-plan.
 
-### Phase 3 — Offscreen PXE storage backend (SQLite-OPFS, store-injected, fail-closed)
+### Phase 3 ✓ — Offscreen PXE storage backend (SQLite-OPFS, store-injected, fail-closed) (gate green 2026-07-14 — `lessons/phase-3.md`)
 
 1. Per-(profile, chain) store injection (Nulo-owned names; `ChainRuntime` owns handles; fail-closed close/delete; the registry records backend type + identifier per store), **opened ENCRYPTED** (D9-adopted): the per-profile HKDF store key (new dedicated label in `@nulo/wallet-crypto`, pinned by a new stop-set vector) passed as `AztecSQLiteOPFSStore.open`'s `encryptionKey`; the key travels only with the chain-runtime boot message while the profile is unlocked, never persisted.
 2. Purge rework (`store.delete()` + registry-driven removal; works with NO live runtime; `chain-coordinates.ts` comment updated) — with encryption, purge additionally gets **crypto-erase semantics** (key discard makes residual bytes unreadable even if an unlink is interrupted).
@@ -83,7 +83,7 @@ Bump the `@aztec/*` line `5.0.0-rc.2` → `5.0.0` (66 pins across 8 package.json
 
 **Validation gate** — Commands: `test:e2e` (smoke) · the committed spike script (all checks; OPFS layout to lessons) · `typecheck:all` + touched units + `lint`. **Fast-fail (fail-closed):** OPFS unavailable in the offscreen document ⇒ STOP the plan and re-gate with the user — no fallback backend ships (final-pass F7).
 
-### Phase 4 — Noir surface + shift inventory
+### Phase 4 ✓ — Noir surface + shift inventory (gate green 2026-07-14 — `lessons/phase-4.md`)
 
 1. `aztec-up install 5.0.0`; `compile.sh` → 5.0.0.
 2. Nargo tags ×5 → `v5.0.0`; `token` → ecosystem-tooling `v5.0.0`; commit-pin or SHA-assert per Scope #3.
