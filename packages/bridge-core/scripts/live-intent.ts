@@ -190,6 +190,17 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 	const sepolia = process.env.SEPOLIA_RPC_URL
 	if (!sepolia) throw new Error("SEPOLIA_RPC_URL required")
 
+	// Tree discipline at EVERY verify, not just at build: only allowlisted operational files may be
+	// dirty during the live arc. A non-allowlisted source change must be committed (fix-forward,
+	// logged in lessons) before the next broadcast group — never carried silently into a promotion.
+	const dirtyNow = execSync("git status --porcelain", { cwd: repoRoot, encoding: "utf8" })
+		.split("\n")
+		.filter(Boolean)
+		.filter((l) => !OPERATIONAL_ALLOWLIST.some((a) => l.slice(3).startsWith(a)))
+	if (dirtyNow.length > 0) {
+		throw new Error(`non-allowlisted files dirty during the live arc — commit or revert first:\n${dirtyNow.join("\n")}`)
+	}
+
 	// Identity re-validation (before EVERY broadcast group + at promotion).
 	const now = await probeIdentity(intent.primaryRpc)
 	if (now.rollupVersion !== intent.identity.rollupVersion)
