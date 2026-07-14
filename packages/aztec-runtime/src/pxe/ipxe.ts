@@ -34,7 +34,6 @@ export interface IPXE {
 	getRegisteredAccounts(): Promise<CompleteAddress[]>
 	registerContractClass(artifact: ContractArtifact): Promise<void>
 	registerContract(contract: { instance: ContractInstanceWithAddress; artifact?: ContractArtifact }): Promise<void>
-	updateContract(contractAddress: AztecAddress, artifact: ContractArtifact): Promise<void>
 	getContracts(): Promise<AztecAddress[]>
 	getNotes(filter: NotesFilter): Promise<NoteDao[]>
 	proveTx(txRequest: TxExecutionRequest, scopes: AztecAddress[]): Promise<TxProvingResult>

@@ -8,9 +8,9 @@ import { PXEProxy } from "./proxy"
 const SW_ONLY = ["getNoteSchemas", "getBlockTimestamp", "clearChainState"] as const
 
 describe("PXE_METHOD_DESCRIPTORS", () => {
-	test("covers the full 22-method surface with every flag explicit", () => {
+	test("covers the full 21-method surface with every flag explicit", () => {
 		const names = Object.keys(PXE_METHOD_DESCRIPTORS)
-		expect(names).toHaveLength(22)
+		expect(names).toHaveLength(21)
 		for (const name of names) {
 			const d = PXE_METHOD_DESCRIPTORS[name as keyof typeof PXE_METHOD_DESCRIPTORS]
 			expect(typeof d.rpc).toBe("boolean")
@@ -19,9 +19,9 @@ describe("PXE_METHOD_DESCRIPTORS", () => {
 		}
 	})
 
-	test("derives the 18-method in-process subset with no duplicates", () => {
-		expect(PXE_IPXE_METHODS).toHaveLength(18)
-		expect(new Set(PXE_IPXE_METHODS).size).toBe(18)
+	test("derives the 17-method in-process subset with no duplicates", () => {
+		expect(PXE_IPXE_METHODS).toHaveLength(17)
+		expect(new Set(PXE_IPXE_METHODS).size).toBe(17)
 	})
 
 	test("excludes the SW-only methods from the in-process subset", () => {

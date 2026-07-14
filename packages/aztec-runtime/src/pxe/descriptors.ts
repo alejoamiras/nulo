@@ -51,7 +51,6 @@ export const PXE_METHOD_DESCRIPTORS = {
 	getRegisteredAccounts: { rpc: true, ipxe: true, requiresNetwork: true },
 	registerContractClass: { rpc: true, ipxe: true, requiresNetwork: true },
 	registerContract: { rpc: true, ipxe: true, requiresNetwork: true },
-	updateContract: { rpc: true, ipxe: true, requiresNetwork: true },
 	getContracts: { rpc: true, ipxe: true, requiresNetwork: true },
 	getNotes: { rpc: true, ipxe: true, requiresNetwork: true },
 	proveTx: { rpc: true, ipxe: true, requiresNetwork: true },

@@ -15,6 +15,7 @@
  * helpers, and pure bytes.
  */
 
+export { deriveNuloAccountKeys, deriveSigningKeyFromSeed } from "./account-derivation"
 export { EncryptionKey } from "./encryption-key"
 export { PasswordSecretBox, type EncryptedProfileSecret, type Sealed } from "./password-secret-box"
 export { SessionSecretBox, type SessionWrappedSecret } from "./session-secret-box"

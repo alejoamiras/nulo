@@ -184,6 +184,7 @@
         "@aztec/stdlib": "5.0.0",
         "@nulo/extension-messaging": "workspace:*",
         "@nulo/wallet-core": "workspace:*",
+        "@nulo/wallet-crypto": "workspace:*",
         "zod": "^4.4.3",
       },
       "devDependencies": {
@@ -287,6 +288,8 @@
       "name": "@nulo/wallet-crypto",
       "version": "0.1.0",
       "dependencies": {
+        "@aztec/accounts": "5.0.0",
+        "@aztec/constants": "5.0.0",
         "@aztec/foundation": "5.0.0",
         "@nulo/wallet-core": "workspace:*",
       },

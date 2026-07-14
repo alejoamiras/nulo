@@ -13,7 +13,9 @@ import {
 import { BlockParameterSchema } from "@aztec/stdlib/block"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { NoteDao } from "@aztec/stdlib/note"
+import { deriveKeys } from "@aztec/stdlib/keys"
 import type { NotesFilter } from "./spec"
+import { assertNotUpgraded, hydratePreimage } from "./effective-class"
 import {
 	type BlockHeader,
 	SimulationOverrides,
@@ -69,7 +71,6 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		"getRegisteredAccounts",
 		"registerContractClass",
 		"registerContract",
-		"updateContract",
 		"getContracts",
 		"getNotes",
 		"proveTx",
@@ -199,10 +200,16 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	): Promise<ContractInstanceWithAddress | undefined> {
 		address = await AztecAddress.schema.parseAsync(address)
 		return this.withPxeRead("getContractInstance", network, async (pxe, node) => {
-			let instance = await pxe.getContractInstance(address)
+			// 5.0.0: the PXE returns the address PREIMAGE (no currentContractClassId); the node
+			// returns the full chain-derived instance. Both funnel through the effective-class
+			// helper: node-sourced instances reject upgrades explicitly, PXE preimages hydrate
+			// under the documented no-upgrades assumption.
+			const preimage = await pxe.getContractInstance(address)
+			let instance = preimage ? hydratePreimage(preimage) : undefined
 			if (!instance && !opts?.pxeOnly) {
 				try {
-					instance = await node.getContract(address)
+					const nodeInstance = await node.getContract(address)
+					instance = nodeInstance ? assertNotUpgraded(nodeInstance) : undefined
 				} catch (err) {
 					if (!opts?.nodeBestEffort) throw err
 					// Node hiccup on a best-effort lookup: degrade to "not found"
@@ -239,9 +246,26 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	}
 
 	public async registerAccount(network: NetworkInfo, secretKey: Fr, partialAddress: PartialAddress): Promise<CompleteAddress> {
-		return this.withPxeWrite("registerAccount", network, async (pxe) =>
-			pxe.registerAccount(await Fr.schema.parseAsync(secretKey), await Fr.schema.parseAsync(partialAddress)),
-		)
+		return this.withPxeWrite("registerAccount", network, async (pxe) => {
+			// The seam wire carries only the derived privacy SECRET KEY — never the account seed and
+			// never the signing key (5.0.0 trust model: the PXE must not hold ownership material, and
+			// the signing key is not recoverable from `secretKey`). Upstream now takes the explicit
+			// `AccountPrivacyKeys` struct: the four privacy secrets + the message-signing/fallback
+			// PUBLIC keys, all derived here from `secretKey`.
+			const parsed = await Fr.schema.parseAsync(secretKey)
+			const keys = await deriveKeys(parsed)
+			return pxe.registerAccount(
+				{
+					masterNullifierHidingSecretKey: keys.masterNullifierHidingSecretKey,
+					masterIncomingViewingSecretKey: keys.masterIncomingViewingSecretKey,
+					masterOutgoingViewingSecretKey: keys.masterOutgoingViewingSecretKey,
+					masterTaggingSecretKey: keys.masterTaggingSecretKey,
+					masterMessageSigningPublicKey: keys.masterMessageSigningPublicKey,
+					masterFallbackPublicKey: keys.masterFallbackPublicKey,
+				},
+				await Fr.schema.parseAsync(partialAddress),
+			)
+		})
 	}
 
 	public async registerSender(network: NetworkInfo, address: AztecAddress): Promise<AztecAddress> {
@@ -280,18 +304,24 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		network: NetworkInfo,
 		contract: { instance: ContractInstanceWithAddress; artifact?: ContractArtifact },
 	): Promise<void> {
-		return this.withPxeWrite("registerContract", network, async (pxe) =>
-			pxe.registerContract({
-				instance: await ContractInstanceWithAddressSchema.parseAsync(contract.instance),
-				artifact: await ContractArtifactSchema.optional().parseAsync(contract.artifact),
-			}),
-		)
-	}
-
-	public async updateContract(network: NetworkInfo, contractAddress: AztecAddress, artifact: ContractArtifact): Promise<void> {
-		return this.withPxeWrite("updateContract", network, async (pxe) =>
-			pxe.updateContract(await AztecAddress.schema.parseAsync(contractAddress), await ContractArtifactSchema.parseAsync(artifact)),
-		)
+		// 5.0.0 split class and instance registration: our seam keeps the `{instance, artifact?}`
+		// wire shape and performs both upstream calls. The upstream `registerContract` takes the
+		// address PREIMAGE and returns the address it derived — asserting it against the supplied
+		// instance's address makes a malformed preimage/address pair fail loudly at registration
+		// instead of surfacing later as a wrong-contract identity.
+		return this.withPxeWrite("registerContract", network, async (pxe) => {
+			const instance = await ContractInstanceWithAddressSchema.parseAsync(contract.instance)
+			const artifact = await ContractArtifactSchema.optional().parseAsync(contract.artifact)
+			if (artifact) {
+				await pxe.registerContractClass(artifact)
+			}
+			const derived = await pxe.registerContract(instance)
+			if (!derived.equals(instance.address)) {
+				throw new Error(
+					`registerContract address mismatch: PXE derived ${derived.toString()} from the preimage, expected ${instance.address.toString()}`,
+				)
+			}
+		})
 	}
 
 	public async getContracts(network: NetworkInfo): Promise<AztecAddress[]> {

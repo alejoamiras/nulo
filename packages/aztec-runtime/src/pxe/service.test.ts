@@ -155,16 +155,57 @@ describe("PxeService.getContractInstance cascade", () => {
 		expect(f.nodeCalls).toBe(1)
 	})
 
-	test("PXE hit short-circuits — node is never called", async () => {
-		const pxeInstance = { address: { toString: () => "pxe-local" } } as unknown as ContractInstanceWithAddress
+	test("PXE hit short-circuits — node is never called; preimage hydrates current := original", async () => {
+		// 5.0.0: the PXE returns the address PREIMAGE. The seam hydrates it through
+		// `hydratePreimage`, filling `currentContractClassId` from the original (the documented
+		// no-upgrades assumption) — so the returned value is a new object, not the mock itself.
+		const originalClassId = { toString: () => "class-original", equals: () => true }
+		const pxeInstance = {
+			address: { toString: () => "pxe-local" },
+			originalContractClassId: originalClassId,
+		} as unknown as ContractInstanceWithAddress
 		const f = makeFactory({ pxeInstance, nodeBehavior: "throws" })
 		const service = makeService(f.factory)
 
 		const result = await service.getContractInstance(network, address)
 
-		expect(result).toBe(pxeInstance)
+		expect(result).toEqual({ ...pxeInstance, currentContractClassId: originalClassId })
+		expect(result?.currentContractClassId).toBe(originalClassId)
 		expect(f.pxeCalls).toBe(1)
 		expect(f.nodeCalls).toBe(0)
+	})
+
+	test("node hit with an IMMUTABLE contract (current == original) passes through", async () => {
+		const classId = { toString: () => "class-a", equals: (o: { toString(): string }) => o.toString() === "class-a" }
+		const nodeInstance = {
+			address: { toString: () => "node-hit" },
+			originalContractClassId: classId,
+			currentContractClassId: classId,
+		} as unknown as ContractInstanceWithAddress
+		const f = makeFactory({ nodeBehavior: "returns-instance", nodeInstance })
+		const service = makeService(f.factory)
+
+		const result = await service.getContractInstance(network, address)
+
+		expect(result).toBe(nodeInstance)
+		expect(f.nodeCalls).toBe(1)
+	})
+
+	test("node hit with an UPGRADED contract (current != original) fails explicitly", async () => {
+		// The wallet does not support upgraded contracts: executing against the ORIGINAL
+		// artifact would be silently wrong, so the seam rejects at entry (effective-class.ts).
+		const original = { toString: () => "class-original", equals: () => false }
+		const current = { toString: () => "class-upgraded", equals: (o: { toString(): string }) => o.toString() === "class-upgraded" }
+		const nodeInstance = {
+			address: { toString: () => "0xupgraded" },
+			originalContractClassId: original,
+			currentContractClassId: current,
+		} as unknown as ContractInstanceWithAddress
+		const f = makeFactory({ nodeBehavior: "returns-instance", nodeInstance })
+		const service = makeService(f.factory)
+
+		await expect(service.getContractInstance(network, address)).rejects.toThrow(/upgraded/)
+		expect(f.nodeCalls).toBe(1)
 	})
 })
 

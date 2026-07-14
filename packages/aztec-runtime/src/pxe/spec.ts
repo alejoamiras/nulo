@@ -46,7 +46,6 @@ export type Methods = {
 	getRegisteredAccounts(network: NetworkInfo): CompleteAddress[]
 	registerContractClass(network: NetworkInfo, artifact: ContractArtifact): void
 	registerContract(network: NetworkInfo, contract: { instance: ContractInstanceWithAddress; artifact?: ContractArtifact }): void
-	updateContract(network: NetworkInfo, contractAddress: AztecAddress, artifact: ContractArtifact): void
 	getContracts(network: NetworkInfo): AztecAddress[]
 	getNotes(network: NetworkInfo, filter: NotesFilter): NoteDao[]
 	proveTx(network: NetworkInfo, txRequest: TxExecutionRequest, scopes: AztecAddress[]): TxProvingResult
