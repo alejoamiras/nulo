@@ -127,10 +127,6 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 		await this.request("registerContract", network, contract)
 	}
 
-	public async updateContract(network: NetworkInfo, contractAddress: AztecAddress, artifact: ContractArtifact): Promise<void> {
-		await this.request("updateContract", network, contractAddress, artifact)
-	}
-
 	public async getContracts(network: NetworkInfo): Promise<AztecAddress[]> {
 		const result = await this.request("getContracts", network)
 		return await z.array(AztecAddress.schema).parseAsync(result)

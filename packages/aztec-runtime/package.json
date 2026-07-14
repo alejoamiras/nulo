@@ -31,6 +31,7 @@
 		"@alejoamiras/aztec-standards": "5.0.0",
 		"@nulo/extension-messaging": "workspace:*",
 		"@nulo/wallet-core": "workspace:*",
+		"@nulo/wallet-crypto": "workspace:*",
 		"@alejoamiras/aztec-fee-payment": "5.0.0",
 		"zod": "^4.4.3"
 	},
