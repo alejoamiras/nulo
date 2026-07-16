@@ -55,3 +55,6 @@ packages/bridge-core/sandbox-deploy/
 # Bridge cutover deploy artifacts (transient; the promoted manifest is testnet-bridge.json)
 apps/faucet/public/testnet-bridge.candidate.json
 apps/faucet/public/testnet-bridge.journal*.jsonl
+
+# bridge-core deploy closure (transient single-version 5.0.1 build; see scripts/deploy-closure.sh)
+/.deploy-closure/

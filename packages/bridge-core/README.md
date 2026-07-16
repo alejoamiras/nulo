@@ -26,6 +26,45 @@ and the sandbox deploy script drive these functions; the proven reference for ev
 | `bun run test` | vitest — 41 tests (pure fns + mocked-L1 orchestrations). |
 | `bun run typecheck` | `tsc --noEmit`. |
 | `bun run deploy:sandbox [--smoke]` | Deploy the full L1+L2 stack to a local aztec sandbox; `--smoke` runs deposit public/private + withdraw public/private end-to-end. Env-pointed via `SANDBOX_L1_RPC` / `SANDBOX_NODE_URL` (default `:8545` / `:8080`). |
+| `scripts/deploy-closure.sh [--verify]` | Build an isolated single-version **@aztec 5.0.1** closure to run the deploy scripts (see below). |
+
+## Deploy closure (single-version @aztec 5.0.1)
+
+The nulo workspace is mid-migration: bridge-core pins `@aztec/* 5.0.1` while the rest of
+the monorepo still pins 5.0.0. In a hoisted bun workspace that produces **two physical
+copies** of the shared `@aztec` libs (foundation/stdlib/constants/ethereum) — root 5.0.0,
+nested 5.0.1 — and two copies of the same class crash the moment `@aztec/stdlib`'s
+`block_hash.js` constructs `GENESIS_BLOCK_HEADER_HASH`:
+`Type 'object' ... passed to BaseField ctor`. So the deploy scripts (`deploy-sandbox.ts`,
+`deploy-bridge-testnet.ts`, …) **cannot run from the workspace tree** as-is.
+
+`scripts/deploy-closure.sh` builds a throwaway mini-workspace **outside** nulo's
+`package.json` graph and **outside** nulo's `bunfig.toml`, containing bridge-core plus the
+two `@nulo` packages it imports (`wallet-crypto`, `wallet-core`) with their `@aztec` pins
+rewritten to 5.0.1. Every package agrees on one `@aztec` version → **exactly one physical
+copy** → no crash. Because the closure has no bunfig, nulo's 7-day supply-chain
+`minimumReleaseAge` gate does not apply there (the real control in `nulo/bunfig.toml` is
+left untouched) and there are no `patchedDependencies` to collide with an all-5.0.1
+resolution.
+
+```bash
+# build + verify (single-copy check, tsc, dry runtime import — NO deploy)
+AZTEC_STANDARDS_DIR=<clone>/aztec-standards packages/bridge-core/scripts/deploy-closure.sh --verify
+
+# then run a deploy script FROM the closure (needs the real artifacts + L1 keys):
+cd .deploy-closure/bridge-core
+BRIDGE_EVM_OUT=<repo>/contracts/bridge/evm/out \
+BRIDGE_EVM_ROOT=<repo>/contracts/bridge/evm \
+BRIDGE_AZTEC_DIR=<repo>/contracts/bridge/aztec \
+AZTEC_STANDARDS_DIR=<clone>/aztec-standards \
+bun scripts/deploy-sandbox.ts --smoke        # local sandbox; testnet uses deploy-bridge-testnet.ts
+```
+
+The closure dir (`.deploy-closure/`, gitignored) is transient — re-run the script after
+any source change. The env vars point the copied scripts back at the real repo artifacts
+(they default to a repo-relative layout that doesn't exist from the closure dir).
+`AZTEC_STANDARDS_DIR` must hold a **transpiled** `target/token_contract-Token.json` (run
+`aztec compile src/token_contract` in the aztec-standards clone once).
 
 ## Key invariants
 

@@ -39,7 +39,9 @@ export const PORTAL_PIN = {
 } as const
 
 const here = dirname(fileURLToPath(import.meta.url))
-const EVM_ROOT = join(here, "..", "..", "..", "contracts", "bridge", "evm")
+// Default to the repo layout; BRIDGE_EVM_ROOT lets this run from an isolated deploy
+// closure (see scripts/deploy-closure.sh) whose dir isn't under the repo tree.
+const EVM_ROOT = process.env.BRIDGE_EVM_ROOT ?? join(here, "..", "..", "..", "contracts", "bridge", "evm")
 export const VENDORED_FORK = join(EVM_ROOT, "upstream", "NuloTokenPortal.sol")
 export const PORTAL_BUILD_JSON = join(EVM_ROOT, "upstream", "NuloTokenPortal.build.json")
 const STAGE_REL = join("test", "portals", "NuloTokenPortal.sol")
