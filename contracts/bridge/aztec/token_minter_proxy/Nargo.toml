@@ -4,5 +4,11 @@ authors = ["Anmol Bansal <anmolbansal1807@gmail.com>"]
 type = "contract"
 
 [dependencies]
-aztec = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v5.0.0", directory = "noir-projects/aztec-nr/aztec" }
-token = { git = "https://github.com/alejoamiras/ecosystem-tooling", tag = "v5.0.0", directory = "packages/aztec-standards/src/token_contract" }
+aztec = { git = "https://github.com/AztecProtocol/aztec-packages/", tag = "v5.0.1", directory = "noir-projects/aztec-nr/aztec" }
+# The proxy mints the canonical AztecProtocol/aztec-standards@v5.0.1 token_contract. Wired here as a
+# local-clone path so it resolves to the SAME token crate instance the downstream betting-pool spends
+# (mixing a git dep with a path dep to identical content makes nargo instantiate two `token` crates
+# and every shared type conflicts). For an upstream PR that doesn't have the clone side-by-side, swap
+# this line for the git form (identical content, tag v5.0.1):
+#   token = { git = "https://github.com/AztecProtocol/aztec-standards", tag = "v5.0.1", directory = "src/token_contract" }
+token = { path = "../../../../../aztec-standards/src/token_contract" }
