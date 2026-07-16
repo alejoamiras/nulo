@@ -39,7 +39,6 @@ import { RegistryAbi } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { TokenContractArtifact } from "@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js"
 import { type Abi, createPublicClient, createWalletClient, defineChain, getContract, http, keccak256 } from "viem"
 import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts"
 import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
@@ -59,8 +58,10 @@ if (!PRIVATE_KEY && !MNEMONIC) throw new Error("PRIVATE_KEY or MNEMONIC required
 const fromJournalMode = process.argv.includes("--from-journal")
 
 const here = dirname(fileURLToPath(import.meta.url))
-const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
-const AZTEC = join(here, "..", "..", "..", "contracts", "bridge", "aztec")
+// Artifact dirs default to the repo layout; env overrides let this run from an isolated
+// deploy closure (see scripts/deploy-closure.sh) whose dir isn't under the repo tree.
+const OUT = process.env.BRIDGE_EVM_OUT ?? join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
+const AZTEC = process.env.BRIDGE_AZTEC_DIR ?? join(here, "..", "..", "..", "contracts", "bridge", "aztec")
 const PUBLIC_DIR = join(here, "..", "..", "..", "apps", "faucet", "public")
 const LIVE_PATH = join(PUBLIC_DIR, "testnet-bridge.json")
 const CANDIDATE_PATH = join(PUBLIC_DIR, "testnet-bridge.candidate.json")
@@ -81,6 +82,14 @@ function evmArtifact(name: string): { abi: unknown[]; bytecode: `0x${string}` } 
 function nargoArtifact(rel: string) {
 	return loadContractArtifact(JSON.parse(readFileSync(join(AZTEC, rel), "utf8")))
 }
+
+// AztecProtocol/aztec-standards@v5.0.1 Token — the token the minter proxy mints and our
+// BettingPool/escrow spend (see token_minter_proxy/Nargo.toml, same clone side-by-side).
+// TODO(after 2026-07-23): swap for the npm package once it ages past bunfig's 7-day
+// minimumReleaseAge gate (published 2026-07-16):
+//   import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
+const STANDARDS = process.env.AZTEC_STANDARDS_DIR ?? join(here, "..", "..", "..", "..", "aztec-standards")
+const TokenContractArtifact = loadContractArtifact(JSON.parse(readFileSync(join(STANDARDS, "target", "token_contract-Token.json"), "utf8")))
 
 async function nodeL1Addresses(): Promise<Record<string, `0x${string}`>> {
 	const res = await fetch(NODE_URL, {
@@ -261,7 +270,10 @@ async function main() {
 		"token",
 		"Token",
 		TokenContractArtifact,
-		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address],
+		// v5.0.1 AztecProtocol/aztec-standards token: constructor_with_minter gained a 5th arg,
+		// `auth_contract` (per-transfer authorization contract; ZERO disables it → standard authwit).
+		// minter = proxy, auth_contract = ZERO — matches deploy-sandbox.ts + the bridge_integration TXE test.
+		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address, AztecAddress.ZERO],
 		"constructor_with_minter",
 		salts.token,
 	)
@@ -404,7 +416,9 @@ async function main() {
 				address: token.address.toString(),
 				salt: salts.token,
 				constructorArtifact: "constructor_with_minter",
-				constructorArgs: [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address.toString()],
+				// 5th arg auth_contract = ZERO — must match the deploy call above so a consumer
+				// recomputing the address from this manifest lands on the deployed instance.
+				constructorArgs: [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address.toString(), AztecAddress.ZERO.toString()],
 			},
 			bridge: {
 				address: bridge.address.toString(),
