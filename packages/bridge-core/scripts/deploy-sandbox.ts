@@ -24,14 +24,12 @@ import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
-import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { TokenPortalAbi, TokenPortalBytecode } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { TokenContractArtifact } from "@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js"
 import { createPublicClient, createWalletClient, defineChain, getContract, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 
@@ -46,8 +44,10 @@ const PERMIT2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3" as const
 const ACCOUNT0_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const
 
 const here = dirname(fileURLToPath(import.meta.url))
-const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
-const AZTEC = join(here, "..", "..", "..", "contracts", "bridge", "aztec")
+// Artifact dirs default to the repo layout; env overrides let the script run from an isolated
+// install (e.g. a clean single-copy @aztec 5.0.1 closure) while reading the real artifacts.
+const OUT = process.env.BRIDGE_EVM_OUT ?? join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
+const AZTEC = process.env.BRIDGE_AZTEC_DIR ?? join(here, "..", "..", "..", "contracts", "bridge", "aztec")
 
 const sandbox = defineChain({
 	id: 31337,
@@ -64,6 +64,14 @@ function evmArtifact(name: string): { abi: unknown[]; bytecode: `0x${string}` } 
 function nargoArtifact(rel: string) {
 	return loadContractArtifact(JSON.parse(readFileSync(join(AZTEC, rel), "utf8")))
 }
+
+// AztecProtocol/aztec-standards@v5.0.1 Token — the token the minter proxy mints (see
+// token_minter_proxy/Nargo.toml, which resolves the same clone side-by-side with this repo).
+// TODO(after 2026-07-23): swap for the npm package once it ages past bunfig's 7-day
+// minimumReleaseAge gate (published 2026-07-16):
+//   import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
+const STANDARDS = process.env.AZTEC_STANDARDS_DIR ?? join(here, "..", "..", "..", "..", "aztec-standards")
+const TokenContractArtifact = loadContractArtifact(JSON.parse(readFileSync(join(STANDARDS, "target", "token_contract-Token.json"), "utf8")))
 
 async function nodeAddrs(): Promise<{ registry: `0x${string}`; feeJuice: `0x${string}`; feeJuicePortal: `0x${string}` }> {
 	const res = await fetch(NODE_URL, {
@@ -108,7 +116,10 @@ async function main() {
 	const node = createAztecNodeClient(NODE_URL)
 	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: false } })
 	const [acct] = await getInitialTestAccountsData()
-	const manager = await ewallet.createSchnorrAccount(acct.secret, acct.salt, acct.signingKey)
+	// 5.0.1 local-network pre-deploys its funded test accounts as SchnorrInitializerlessAccount.
+	// Re-derive with the matching flavor so `from` resolves to the deployed+funded on-chain account
+	// (createSchnorrAccount would yield a different, undeployed address → "Failed to get a note").
+	const manager = await ewallet.createSchnorrInitializerlessAccount(acct.secret, acct.salt, acct.signingKey)
 	const deployer = await manager.getAccount()
 	const from = deployer.getAddress()
 	console.log("L2 deployer", from.toString())
@@ -119,7 +130,10 @@ async function main() {
 	} catch {}
 	const fee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
 	const opts = { from, fee }
-	const sendOpts = { ...opts, wait: { waitForStatus: TxStatus.PROPOSED } }
+	// Wait for CHECKPOINTED (not just PROPOSED): each step here depends on the previous one's state
+	// being committed to world state. A public call on a contract deployed only to PROPOSED reverts
+	// with "Contract ... is not deployed" — the public bytecode isn't queryable until checkpointed.
+	const sendOpts = { ...opts, wait: { waitForStatus: TxStatus.CHECKPOINTED } }
 
 	const deployL2 = async (label: string, art: unknown, args: unknown[], ctor: string): Promise<Contract> => {
 		const salt = Fr.random()
@@ -133,11 +147,16 @@ async function main() {
 				constructorArtifact: ctor,
 			} as never,
 		)
-		await Contract.deploy(ewallet as never, art as never, args as never, ctor).send({
-			...opts,
-			contractAddressSalt: salt,
+		// 5.0.1: salt + universalDeploy are construction-time DeployInstantiationOptions (the 5th arg
+		// of Contract.deploy), NOT send options. In 5.0.0 they were passed to .send(); passing them
+		// there now is silently ignored, so the deploy lands at a different (default-salt) address than
+		// the separately-computed `instance.address`, and later calls hit "Contract ... is not deployed".
+		await Contract.deploy(ewallet as never, art as never, args as never, ctor, {
+			salt,
 			universalDeploy: true,
-			wait: { waitForStatus: TxStatus.PROPOSED },
+		} as never).send({
+			...opts,
+			wait: { waitForStatus: TxStatus.CHECKPOINTED },
 		} as never)
 		const c = await Contract.at(instance.address, art as never, ewallet as never)
 		console.log(`${label}:`, c.address.toString())
@@ -153,7 +172,10 @@ async function main() {
 	const token = await deployL2(
 		"Token",
 		TokenContractArtifact,
-		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address],
+		// v5.0.1 AztecProtocol/aztec-standards token: constructor_with_minter gained a 5th arg,
+		// `auth_contract` (per-transfer authorization contract; ZERO disables it → standard authwit).
+		// minter = proxy, auth_contract = ZERO — matches the passing bridge_integration TXE test.
+		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address, AztecAddress.ZERO],
 		"constructor_with_minter",
 	)
 	const bridge = await deployL2(
@@ -325,9 +347,17 @@ async function main() {
 		if (!eff) throw new Error("no tx effect for exit")
 		const messageHash = eff.data.l2ToL1Msgs[0]
 		if (!messageHash) throw new Error("no L2→L1 message in exit tx")
-		const wit = await computeL2ToL1MembershipWitness(node, messageHash, exitTxHash, 0)
+		// 5.0.1: the node RPC builds the witness (picks the smallest partial-proof Outbox root covering the tx).
+		const wit = await node.getL2ToL1MembershipWitness(exitTxHash, messageHash, 0)
 		if (!wit) throw new Error("L2→L1 witness not available")
-		console.log("withdraw witness: epoch", wit.epochNumber, "leafIndex", wit.leafIndex.toString())
+		console.log(
+			"withdraw witness: epoch",
+			wit.epochNumber,
+			"numCheckpoints",
+			wit.numCheckpointsInEpoch,
+			"leafIndex",
+			wit.leafIndex.toString(),
+		)
 
 		const path = wit.siblingPath.toBufferArray().map((b: Buffer) => `0x${b.toString("hex")}` as `0x${string}`)
 		const balOf = async (): Promise<bigint> =>
@@ -345,7 +375,16 @@ async function main() {
 			address: portal,
 			abi: TokenPortalAbi as never,
 			functionName: "withdraw",
-			args: [account.address, wAmount, false, BigInt(wit.epochNumber), wit.leafIndex, path] as never,
+			// 5.0.1 portal ABI: withdraw() gained _numCheckpointsInEpoch (partial-proof Outbox roots).
+			args: [
+				account.address,
+				wAmount,
+				false,
+				BigInt(wit.epochNumber),
+				BigInt(wit.numCheckpointsInEpoch),
+				wit.leafIndex,
+				path,
+			] as never,
 			account,
 		})
 		await pub.waitForTransactionReceipt({ hash: await wallet.writeContract(wReq.request as never) })
@@ -360,9 +399,10 @@ async function main() {
 		const wpNonce = Fr.random()
 		const ni = await node.getNodeInfo()
 		const chainInfo = { chainId: new Fr(ni.l1ChainId), version: new Fr(ni.rollupVersion) }
+		// 5.0.1: createAuthWit takes a CallIntent ({ caller, call: FunctionCall }), not an interaction.
 		const burnAuthwit = await deployer.createAuthWit(
-			{ caller: proxy.address, action: token.methods.burn_private(from, wpAmount, wpNonce) },
-			chainInfo as never,
+			{ caller: proxy.address, call: await token.methods.burn_private(from, wpAmount, wpNonce).getFunctionCall() },
+			chainInfo,
 		)
 		const { receipt: exitPReceipt } = await bridge.methods
 			.exit_to_l1_private(EthAddress.fromString(account.address), wpAmount, EthAddress.ZERO, wpNonce)
@@ -373,7 +413,7 @@ async function main() {
 		if (!effP) throw new Error("no tx effect for private exit")
 		const messageHashP = effP.data.l2ToL1Msgs[0]
 		if (!messageHashP) throw new Error("no L2→L1 message in private exit")
-		const witP = await computeL2ToL1MembershipWitness(node, messageHashP, exitPTxHash, 0)
+		const witP = await node.getL2ToL1MembershipWitness(exitPTxHash, messageHashP, 0)
 		if (!witP) throw new Error("private withdraw witness not available")
 		const pathP = witP.siblingPath.toBufferArray().map((b: Buffer) => `0x${b.toString("hex")}` as `0x${string}`)
 		const usdcBeforeP = await balOf()
@@ -381,7 +421,15 @@ async function main() {
 			address: portal,
 			abi: TokenPortalAbi as never,
 			functionName: "withdraw",
-			args: [account.address, wpAmount, false, BigInt(witP.epochNumber), witP.leafIndex, pathP] as never,
+			args: [
+				account.address,
+				wpAmount,
+				false,
+				BigInt(witP.epochNumber),
+				BigInt(witP.numCheckpointsInEpoch),
+				witP.leafIndex,
+				pathP,
+			] as never,
 			account,
 		})
 		await pub.waitForTransactionReceipt({ hash: await wallet.writeContract(wReqP.request as never) })

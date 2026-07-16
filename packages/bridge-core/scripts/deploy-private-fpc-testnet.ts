@@ -35,8 +35,9 @@ async function main() {
 	// Throwaway account; the SponsoredFPC pays its deployment AND the FPC deploy.
 	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
 	const secret = Fr.random()
-	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
-	const manager = await ewallet.createSchnorrAccount(secretKey, Fr.random(), signingKey)
+	// 5.0.0-typed seam: wallet-crypto pins @aztec 5.0.0 (runtime-compatible patch drift vs our 5.0.1)
+	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret as never)
+	const manager = await ewallet.createSchnorrAccount(secretKey as never, Fr.random(), signingKey as never)
 	const l2account = await manager.getAccount()
 
 	const sponsored = await getContractInstanceFromInstantiationParams(SponsoredFPCContract.artifact, {
@@ -60,7 +61,8 @@ async function main() {
 	// same pattern as the faucet's deploy.ts); the account only supplies `from` + pays via sponsored.
 	console.log(`deploying PrivateFPC (canonical salt, deployer ZERO)… (${mins()})`)
 	const result = await PrivateFPCContract.deploy(ewallet as never, {
-		salt: Fr.fromHexString(PRIVATE_FPC_SALT),
+		// 5.0.0-typed seam: @alejoamiras/aztec-fee-payment pins @aztec 5.0.0 (no 5.0.1 published)
+		salt: Fr.fromHexString(PRIVATE_FPC_SALT) as never,
 		universalDeploy: true,
 	}).send({
 		fee,

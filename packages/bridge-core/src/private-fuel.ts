@@ -76,7 +76,9 @@ export const privateMintAndPayFee = (
 	secret: Fr,
 	salt: Fr,
 	leafIndex: Fr,
-): PrivateMintAndPayFeePaymentMethod => new PrivateMintAndPayFeePaymentMethod(fpc, amount, secret, salt, leafIndex)
+	// 5.0.0-typed seam: @alejoamiras/aztec-fee-payment pins @aztec 5.0.0 (no 5.0.1 published)
+): PrivateMintAndPayFeePaymentMethod =>
+	new PrivateMintAndPayFeePaymentMethod(fpc as never, amount, secret as never, salt as never, leafIndex as never)
 
 /**
  * Pay a tx's gas from an EXISTING private Fee Juice balance already held at the PrivateFPC — the
@@ -90,4 +92,7 @@ export const privateMintAndPayFee = (
  * (`gasLimits·maxFeesPerGas`) and does NOT refund the unused portion. Commit a tight, inclusion-safe
  * `maxFeesPerGas` and gate on `maxGasCostFor` against the same gas settings, or the caller overpays.
  */
-export const privateFeeJuicePayment = (fpc: AztecAddress): FPCFeePaymentMethod => new FPCFeePaymentMethod(fpc)
+// biome-ignore-start lint/correctness/noUnusedVariables: (none) — seam comment anchor
+// 5.0.0-typed seam as above.
+// biome-ignore-end lint/correctness/noUnusedVariables: anchor
+export const privateFeeJuicePayment = (fpc: AztecAddress): FPCFeePaymentMethod => new FPCFeePaymentMethod(fpc as never)

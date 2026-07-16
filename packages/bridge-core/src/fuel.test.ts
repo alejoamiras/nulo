@@ -72,7 +72,8 @@ describe("fuel — carrierless private claim spike (Phase 1 STOP-gate)", () => {
 	it("payload is carrier-less: exactly the 2 FPC setup calls (no app call), feePayer = FPC", async () => {
 		const salt = new Fr(99n)
 		const method = privateMintAndPayFee(fpc, 12_000n, deriveBridgeSecret(salt, recipient), salt, new Fr(7n))
-		const payload = await buildCarrierlessFuelClaimPayload(method)
+		// 5.0.0-typed seam: method comes from @alejoamiras/aztec-fee-payment (pins @aztec 5.0.0)
+		const payload = await buildCarrierlessFuelClaimPayload(method as never)
 		// Empty app payload contributes nothing ⇒ exactly FeeJuice.claim + PrivateFPC.mint_and_pay_fee.
 		expect(payload.calls).toHaveLength(2)
 		expect((await method.getFeePayer()).toString()).toBe(PRIVATE_FPC_ADDRESS)

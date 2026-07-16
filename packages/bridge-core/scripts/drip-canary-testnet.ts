@@ -46,8 +46,9 @@ async function main() {
 
 	const node = createAztecNodeClient(NODE_URL)
 	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
-	const { signingKey, secretKey } = await deriveNuloAccountKeys(Fr.random())
-	const manager = await ewallet.createSchnorrAccount(secretKey, Fr.random(), signingKey)
+	// 5.0.0-typed seam: wallet-crypto pins @aztec 5.0.0 (runtime-compatible patch drift vs our 5.0.1)
+	const { signingKey, secretKey } = await deriveNuloAccountKeys(Fr.random() as never)
+	const manager = await ewallet.createSchnorrAccount(secretKey as never, Fr.random(), signingKey as never)
 	const from = (await manager.getAccount()).getAddress()
 	console.log(`L2 drip recipient ${from.toString()}`)
 
