@@ -1,0 +1,150 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aztec-5.0.1-line — the plan, plainly</title>
+<style>
+  :root{
+    --paper:#FAF9F6; --ink:#22262B; --muted:#6B7076; --line:#E3E0D8;
+    --accent:#0E7C6B; --accent-soft:#E7F2EF;
+    --live:#B4690E; --live-soft:#F8EFE2;
+    --stop:#A3333D; --stop-soft:#F7E9EA;
+    --mono-bg:#F1EFE9;
+  }
+  @media (prefers-color-scheme: dark){:root{
+    --paper:#14181C; --ink:#E6E4DF; --muted:#9BA0A6; --line:#2A3036;
+    --accent:#3BAF9A; --accent-soft:#16302B;
+    --live:#D9924A; --live-soft:#33270F;
+    --stop:#D2606C; --stop-soft:#361A1E;
+    --mono-bg:#1D2227;
+  }}
+  :root[data-theme="dark"]{
+    --paper:#14181C; --ink:#E6E4DF; --muted:#9BA0A6; --line:#2A3036;
+    --accent:#3BAF9A; --accent-soft:#16302B;
+    --live:#D9924A; --live-soft:#33270F;
+    --stop:#D2606C; --stop-soft:#361A1E;
+    --mono-bg:#1D2227;
+  }
+  :root[data-theme="light"]{
+    --paper:#FAF9F6; --ink:#22262B; --muted:#6B7076; --line:#E3E0D8;
+    --accent:#0E7C6B; --accent-soft:#E7F2EF;
+    --live:#B4690E; --live-soft:#F8EFE2;
+    --stop:#A3333D; --stop-soft:#F7E9EA;
+    --mono-bg:#F1EFE9;
+  }
+  body{background:var(--paper);color:var(--ink);font:16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;padding:0 20px 96px;}
+  main{max-width:70ch;margin:0 auto;}
+  h1,h2,h3{font-family:ui-serif,Iowan Old Style,Georgia,serif;line-height:1.25;text-wrap:balance;}
+  h1{font-size:2rem;margin:64px 0 8px;}
+  h2{font-size:1.35rem;margin:48px 0 12px;}
+  .kicker{letter-spacing:.14em;text-transform:uppercase;font-size:.72rem;color:var(--accent);font-weight:600;}
+  .sub{color:var(--muted);margin:0 0 32px;}
+  p{margin:0 0 16px;}
+  a{color:var(--accent);}
+  .card{border:1px solid var(--line);border-radius:8px;padding:16px 20px;margin:0 0 14px;}
+  .phase{display:flex;gap:16px;}
+  .phase .num{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;color:var(--accent);min-width:2.2em;}
+  .phase.live .num{color:var(--live);}
+  .phase h3{margin:0 0 6px;font-size:1.05rem;}
+  .gate{margin-top:10px;padding:8px 12px;background:var(--accent-soft);border-radius:6px;font-size:.9rem;}
+  .phase.live .gate{background:var(--live-soft);}
+  .gate b{color:var(--accent);}
+  .phase.live .gate b{color:var(--live);}
+  .stopbox{background:var(--stop-soft);border:1px solid var(--stop);border-radius:8px;padding:14px 18px;margin:0 0 14px;font-size:.95rem;}
+  .stopbox b{color:var(--stop);}
+  pre{background:var(--mono-bg);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font:.82rem/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word;}
+  table{border-collapse:collapse;width:100%;font-size:.9rem;}
+  td,th{border-top:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top;}
+  th{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);}
+  .quiet{color:var(--muted);font-size:.9rem;}
+  ul{padding-left:1.2em;margin:0 0 16px;}
+  li{margin-bottom:6px;}
+</style>
+<main>
+  <div class="kicker">Implementation plan · deep tier · v4 gate-ready</div>
+  <h1>Everything to 5.0.1, everything fixed, everything shipped</h1>
+  <p class="sub">One mega-PR growing <a href="https://github.com/alejoamiras/nulo/pull/282">#282</a>, then the release — under your standing authorization. Full plan: <a href="plan.md">plan.md</a> · audits: <a href="audit-codex-r1.md">codex&nbsp;r1</a>, <a href="audit-fable-r1.md">fable&nbsp;r1</a>, <a href="audit-codex-final.md">final&nbsp;pass</a></p>
+
+  <p><b>The one-paragraph version.</b> We bump the wallet's Aztec engine to 5.0.1 <i>first</i> (it fixes the exact storage plumbing our bug lives next to), then fix the restore-boot deadlock and all of #281's concurrency hazards on that fresh base, then swap to the official <code>@aztec-foundation/aztec-standards</code> package — which changes contract fingerprints, forcing a fresh testnet deployment of the L2 contracts, faucet, and fee-payment contract — and finally promote to main, cut the stable extension release, and prove it by using the real public website.</p>
+
+  <h2>Why the heavyweight process</h2>
+  <p class="quiet">Rubric: blast radius HIGH (restore/deletion paths + a public release), irreversibility HIGH (published release, live deploys), security HIGH (locks guarding encrypted stores; fund-moving deploys), external coupling HIGH (npm, testnet, RPC version skew). ≥2 HIGH ⇒ deep tier: 3 independent plans → consolidation → contradiction-check (9 findings) → double hostile audit (17 findings) → final fresh-context pass (6 conditions). Every round changed the plan; the ledger in plan.md records each fold and flip.</p>
+
+  <h2>The phases</h2>
+
+  <div class="card phase"><div class="num">P0</div><div>
+    <h3>Catch the bug in a jar</h3>
+    <p>Reproduce the restore-boot hang locally and write a small fast test that fails <i>because of</i> the deadlock — before touching anything. If we can't reproduce it, we stop: the diagnosis would be wrong.</p>
+    <div class="gate"><b>Proves itself by:</b> the hang observed locally + the new pin test red on today's code for the exact suspected mechanism.</div>
+  </div></div>
+
+  <div class="card phase"><div class="num">P1</div><div>
+    <h3>Engine swap to 5.0.1 (nothing on-chain moves)</h3>
+    <p>All <code>@aztec/*</code> + the accelerator go to 5.0.1 under the full supply-chain ritual (fresh lockfile, scripts disabled, signature audit in a scratch project, secret-free shell). The two packages that would change contract identities wait until P4, so the live deployment stays verifiably intact. One safety decision flips here: on storage-version mismatch our encrypted stores now <b>refuse to open</b> instead of wiping — the audits proved wipes could destroy user data and could be triggered by a lying RPC.</p>
+    <div class="gate"><b>Proves itself by:</b> full typecheck/tests/lint green, <code>verify:deployments</code> still green, derivation vectors byte-identical, and the P0 bug still reproducing the same way.</div>
+  </div></div>
+
+  <div class="card phase"><div class="num">P2</div><div>
+    <h3>Kill the deadlock class, not just the bug</h3>
+    <p>Profile events stop firing while the profile lock is held (the root cause). The store-key path becomes lock-free, keys are pushed to the engine proactively, and both lock utilities get tamper-proof ownership — their old "force-release after 5 minutes" self-heal (which corrupted state) becomes a loud log instead.</p>
+    <div class="gate"><b>Proves itself by:</b> the P0 pin turning green + a battery of ordering/re-entrancy tests that fail on the old code.</div>
+  </div></div>
+
+  <div class="card phase"><div class="num">P3</div><div>
+    <h3>The deletion fence (#281 complete)</h3>
+    <p>Every profile gets a permanent random "incarnation number". Deleting a profile burns its number forever, so no delayed message can ever resurrect a deleted profile's encrypted store — even across engine restarts (the final audit caught that our first design was literally impossible: the offscreen engine can't read extension storage, so the service worker is the sole authority). Plus: endpoint-switch races fixed, purge errors made loud, and a visible "waiting for an in-flight operation" state so deletion never looks hung.</p>
+    <div class="gate"><b>Proves itself by:</b> the full race-condition test matrix + the three previously-failing backup e2e tests green locally.</div>
+  </div></div>
+
+  <div class="card phase"><div class="num">P4</div><div>
+    <h3>New identities: official standards + fee-payment 5.0.1</h3>
+    <p>The community-fork era ends: <code>@aztec-foundation/aztec-standards</code> replaces the personal-scope package — but only after a hard trust gate (npm provenance must cryptographically bind the package to the official repo's tag; <b>if that attestation is missing, we stop and ask you</b>). The fee-payment contract moves to 5.0.1, which moves the canonical PrivateFPC address, re-pinned under a new fund-safety gate that accepts exactly one audited combination of artifact + network. Noir contracts recompile on the 5.0.1 toolchain.</p>
+    <div class="gate"><b>Proves itself by:</b> trust gates green (or stopped), the FPC gate green against the live node, and the drift detectors turning red <i>exactly where predicted</i> — the proof a redeploy is needed.</div>
+  </div></div>
+
+  <div class="card phase"><div class="num">P5</div><div>
+    <h3>Sharpen the deploy tools before going live</h3>
+    <p>The deploy scripts gain what this deployment needs and the audits demanded: a mode that reuses the existing AZLO token (today they always mint a new one), candidate files for the faucet so nothing touches live configs early, a tamper-resistant one-command promotion, and identity checks that compare the node's claims against what we already know to be true.</p>
+    <div class="gate"><b>Proves itself by:</b> unit tests over every new mode + the promote path.</div>
+  </div></div>
+
+  <div class="card phase live"><div class="num">P6</div><div>
+    <h3>The live redeploy (real broadcasts, testnet)</h3>
+    <p>Keep: the protocol portal, AZLO, all the swap/fuel plumbing. Redeploy: the app token portal (it's welded to the old bridge address), the L2 contracts, the faucet, and the new PrivateFPC. Candidate-first, verified before every broadcast group, proven by six canaries (smoke, fueled, private settle, direct fee-juice, drip, verify-l1), then promoted atomically with a receipt. Spend stays inside the ≤0.5 ETH cap — expected well under 0.1.</p>
+    <div class="gate"><b>Proves itself by:</b> all canaries + promotion receipt + post-promotion checks + spend reconciliation.</div>
+  </div></div>
+
+  <div class="card phase"><div class="num">P7</div><div>
+    <h3>Land it</h3>
+    <p>Docs and lessons updated, a max-effort code review with fixes, a codex post-implementation audit over the sensitive surfaces, and one squash-merge of #282 with all three CI gates green. Any post-deploy code change gets classified — if it touches deploy-affecting files, the live proofs re-run before merge.</p>
+    <div class="gate"><b>Proves itself by:</b> quality + smoke + network e2e green on the final head; merged; dev green.</div>
+  </div></div>
+
+  <div class="card phase live"><div class="num">R</div><div>
+    <h3>Release + prove it in public</h3>
+    <p>Promote dev→main, let release-please + auto-unstick publish, flip <code>verify-live</code> to a required check, and then the part no robot can fake: with the released extension in a clean browser, do one real drip and one real Fuel deposit→claim through the actual public website. Rollback paths are pre-defined.</p>
+    <div class="gate"><b>Proves itself by:</b> release assets present, live site serving the new build + chain, both public flows recorded with hashes.</div>
+  </div></div>
+
+  <h2>Where we will stop and ask you</h2>
+  <div class="stopbox"><b>Only three conditions surface mid-run</b> (otherwise the standing authorization carries to the end):
+    <ul>
+      <li>The official standards package ships <b>without a provenance attestation</b> — we stop and bring you the alternative binding plan.</li>
+      <li>A second Aztec RPC exists and <b>disagrees</b> with the primary — unconditional stop (mere absence of a second RPC is the already-accepted capped-risk posture).</li>
+      <li>Reality contradicts a probe — the testnet resets mid-arc, or the token-reuse deploy turns out impossible as shaped.</li>
+    </ul>
+  </div>
+
+  <h2>Human context worth having</h2>
+  <ul>
+    <li><b>Why bump before fixing:</b> your call, and the evidence agreed — 5.0.1 patched the exact storage layer (#24647 handle-release) our #281 work hardens. Fixing on 5.0.0 meant patching around bugs that vanish a phase later.</li>
+    <li><b>Why the redeploy is unavoidable:</b> the new standards package compiles to different bytecode → different contract fingerprints → our own tripwires (correctly) refuse the mismatch until the testnet runs the new contracts.</li>
+    <li><b>What the audits changed:</b> wipe→refuse on store mismatch; the trust gate became a cryptographic binding instead of metadata checks; the "atomic promote" became a receipt-backed verified sequence; the impossible offscreen-storage fence became SW-authoritative; the release gains a wired-hook preflight + defined rollback.</li>
+  </ul>
+
+  <h2>Draft seeds (finalized at approval)</h2>
+  <p class="quiet">Goal — the condition an active Stop hook holds the run to:</p>
+  <pre>/goal Phases P0–P7 + R marked ✓ in implementations-plan/aztec-5.0.1-line/plan.md (per-phase headers), each ✓ backed by its gate as written in plan.md reporting passing in the transcript, with LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-&lt;N&gt;.md printed per phase; the P0 composition pin observed red pre-fix and green after P2; the three restore e2e (smoke backup-roundtrip, network backup-restore-integrity + backup-migration-roundtrip) green under 5.0.1; the P4 trust STOP-gates green or the run stopped at a conditional ask; P6's proofs (FPC predeploy + require-deployed, verify-l1, candidate smoke, fueled smoke, settle canary, direct-FJ canary, drip canary), the promote receipt, and post-promotion checks (verify:deployments, drip, caps reconciliation) all green with intent verify passing before every broadcast group; /code-review max --fix applied and committed separately; the codex post-impl audit (gpt-5.6-sol, xhigh, targeted checklist: lock/emit redesign, incarnation fence, FPC compat map + source binding, promote path, reuse-token mode, trust gates) complete with high/critical addressed; bun run test:all and bun run lint exit 0; PR #282 (Closes #281) labeled e2e:network + e2e:smoke with quality-status, smoke-e2e-status, network-e2e-status green on its final head and squash-merged with dev green; the Release executed under standing authorization (promote merge-committed, release published with chrome+firefox zips + SHASUMS, verify-live required + hook preflight landed, both public-surface flows recorded with hashes, back-sync merge-committed) — OR the run is stopped AT the specific gate of a surfaced conditional ask.</pre>
+  <p class="quiet">Loop — the standing work instruction:</p>
+  <pre>/loop work implementations-plan/aztec-5.0.1-line/plan.md phase by phase, in order. Before each phase: re-read its section + gate. Run every gate command and show real output. Append lessons to implementations-plan/aztec-5.0.1-line/lessons/phase-&lt;N&gt;.md as you go and print LESSONS_FILE=&lt;path&gt; when a phase closes. Honor every STOP rule and the three conditional asks — stop and surface, never improvise past them. Never weaken a CI gate. Small conventional commits, signing skipped per AFK policy. Live broadcasts only through the intent tooling with verify before each group.</pre>
+
+  <p class="quiet" style="margin-top:40px">Decision trail: <a href="plan.md">plan.md</a> (ledger at the end) · legs: <a href="leg-main.md">main</a>, <a href="leg-codex.md">codex</a>, <a href="leg-fable-summary.md">fable</a>.</p>
+</main>
