@@ -20,6 +20,12 @@ P3 applies the v2+audit folds onto an ALREADY-PARTIALLY-BUILT surface. What exis
    `dispose()` threw (its `store.close()` failed → lock leaked; the retained reference is the ONLY
    retry handle — a dropped one wedges every future open of that chain), throw `AggregateError` so the
    deletion coordinator treats the erasure as incomplete + retryable, never falsely clean. +2 tests.
+3. **clearProfileState retains the barrier on failure** (`16d52e4`): the `finally` released the write
+   lock AND deleted the `profileBarriers` entry unconditionally, so a failed erase dropped the fence
+   (a read could slip past before the coordinator retried). Now the barrier entry is deleted only on
+   the SUCCESS path; on failure it is RETAINED (profile stays a known being-deleted entity, same-gen
+   retry reuses it) while the write lock is still released in `finally` (an unreleased write lock would
+   deadlock the retry). Pairs with fold 2. +1 unit test.
 
 ## Remaining P3 work
 - **Persisted ≥128-bit Web-Crypto `pxeGeneration`** on Profile rows + tombstone carry; the incarnation
@@ -31,9 +37,6 @@ P3 applies the v2+audit folds onto an ALREADY-PARTIALLY-BUILT surface. What exis
   transport-impossibility with a test, don't only assume it. This is the largest, highest-blast-radius
   piece (schema + SW + offscreen + client); its true gate is cross-restart e2e (CI-bound here).
 - **D3 rebind under chain WRITE** (peek/create split; no read→write upgrade; bounded retry).
-- **`clearProfileState` failure retains state+barrier** (currently the `finally` releases + deletes the
-  barrier unconditionally — the audit wants failure to RETAIN so a same-gen retry is idempotent). This
-  is the coordinator-side half of the dispose fold above.
 - **D7 sweep removal** (profile dirs only via profile purge + positive absence check) — CAUTION:
   removing `sweepOrphanStores` changes cleanup semantics; confirm the audit rationale (reserved/
   tombstoned profiles must not be swept) before deleting.
