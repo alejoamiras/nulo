@@ -90,7 +90,42 @@ This is a **session-secret ↔ encrypted-store-key lifecycle** fix. It replaces 
 (emit-after-release). P3's #281 hardening (audit-real resurrection/purge hazards) survives on its
 own merits, unchanged. P1 (5.0.1 bump) and P4–R are unaffected.
 
+## Severity reframe (strict is the DEFAULT — but recovery likely already exists)
+`strictSecurityMode` defaults to **true** in production (`config/config.ts:26`
+`z.boolean().default(true)`). So every fresh install is strict: after ANY MV3 worker restart the
+in-memory master is gone and the profile is locked until re-unlock. That sounds catastrophic, but
+the normal recovery path almost certainly already works and this is NOT an all-users PXE break:
+
+- The `PXE_STORE_KEY_MISSING` retry (`pxe/client.ts:88-108`) calls the store-key provider on demand;
+  once the user re-unlocks (session active again), `getProfileSecret` returns the master → the key
+  re-derives → the PXE boots. So in ordinary use a worker restart shows the unlock screen, the user
+  enters their password, and the wallet (incl. its encrypted PXE) comes back — exactly strict mode's
+  promise. Normal e2e (onboarding/token) pass because they either don't cycle the SW mid-boot or
+  they re-unlock.
+- The RESTORE case is special ONLY because the import flow is programmatically MID-bootstrap when the
+  SW restarts (`completeImport` → `waitForProfileActive(30s)`), with no human re-unlock in that
+  window. It waits out the 30 s, routes to `/popup/auth` (correct!), and the `backup-roundtrip` e2e
+  — which asserts a straight path to `/popup/general` with NO re-unlock — times out.
+
+**So the likely truth: this is substantially an E2E-EXPECTATION mismatch + a UX-latency issue (a 30 s
+silent wait before the unlock screen), not a catastrophic product break.** A restored user re-enters
+their password once and recovers. **UNVERIFIED (the one open test):** does a re-unlock AFTER the
+restore-time SW restart actually re-provision the key and boot the PXE end-to-end? Strongly implied
+by the retry code, but not yet driven in the harness.
+
+## Re-aim options for the user (sharpened)
+1. **Minimal (if the unlock-recovery holds):** make `completeImport` detect the locked state and
+   route to `/popup/auth` promptly (drop the 30 s dead wait), and fix the `backup-roundtrip` e2e to
+   drive the re-unlock then assert `/popup/general`. Small, targeted; no lifecycle redesign.
+2. **UX-hardening (worthwhile regardless):** persist a short-lived, strict-compatible recovery bearer
+   so a routine worker restart does NOT force a re-unlock within the session TTL — closes the "strict
+   users get logged out constantly" UX papercut and makes restore seamless. Bigger; touches the F-11
+   bearer policy (security-sensitive — needs its own audit).
+3. **Reconsider the strict default** (separate question): whether fresh installs should default to
+   strict at all, given it makes every worker restart a re-unlock.
+
 ## STOP
-Per P0's gate, PR-A's restore fix is paused for a re-aim: **rewrite P2 as the strict-mode /
-SW-restart / encrypted-store recovery fix above.** Everything else in the plan stands. Awaiting the
-user's go on the re-aim. Instrumentation reverted; tree clean.
+Per P0's gate, PR-A's restore fix is paused for a re-aim. The next concrete step (pure diagnosis, no
+scope commitment) is to VERIFY option-1's premise by driving a re-unlock in the harness. Awaiting the
+user's steer on which option to build. Everything else in the plan (P1 bump, P3 #281, P4–R) stands.
+Instrumentation reverted; tree clean.
