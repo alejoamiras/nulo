@@ -9,7 +9,10 @@
 > in strict mode (no bearer) the encrypted-store key is unrecoverable without re-unlock, so the PXE
 > fail-closes forever with no recovery path. **Re-aimed P2 = strict-mode/SW-restart/encrypted-store
 > recovery** (stop the infinite retry → surface locked → re-provision + reboot the PXE on unlock).
-> P3's #281 hardening + P1 + P4–R all stand. Awaiting the user's go on the re-aim.
+> **VERIFIED (`lessons/phase-p0.md`): recovery HOLDS** — close+reopen the popup lands on
+> `/popup/general` cleanly; the wallet is NOT broken, only the IMPORT PAGE wedges on the worker
+> restart. So the re-aimed **P2 shrinks to import-page resilience + realistic-recovery e2e** (no
+> lock/emit/lifecycle redesign). P3's #281 hardening + P1 + P4–R all stand. Awaiting the user's go.
 
 
 Deep-tier blueprint. Legs archived (`leg-main.md`, `leg-codex.md`, `leg-fable-summary.md`);

@@ -124,8 +124,39 @@ by the retry code, but not yet driven in the harness.
 3. **Reconsider the strict default** (separate question): whether fresh installs should default to
    strict at all, given it makes every worker restart a re-unlock.
 
+## VERIFIED (harness experiment, reverted): recovery HOLDS — the bug is import-page resilience
+Drove the real user recovery in a temporary (now-reverted) test patch:
+- `first-landed=timeout-general` — the stuck IMPORT PAGE reaches neither `/popup/general` nor
+  `/popup/auth` in 65 s. It does not self-recover; it holds a dead SW connection.
+- `fresh-hash=#/popup/general` — after **close + reopen the popup**, the fresh popup lands DIRECTLY
+  on `/popup/general` (the session survived in `chrome.storage.session`; no re-unlock was even
+  required). `recovery=HOLDS`.
+
+**Conclusion:** the encrypted store is NOT unrecoverable and the wallet is NOT broken. Only the
+IMPORT PAGE wedges when the MV3 worker restarts mid-bootstrap — a fresh popup boots cleanly. A real
+user who sees the import screen hang just reopens the extension and finds a working wallet.
+
+Residual to pin during the fix (not decision-blocking): assert a PXE-dependent op (not just the
+route) after reopen — the experiment confirmed the ROUTE recovers; the option-#1 e2e will confirm
+the PXE op recovers.
+
+## The fix is SMALL (this supersedes the earlier three-option framing)
+Re-aimed P2 becomes **import-page resilience**, not a lock/emit/lifecycle redesign:
+1. The full-backup import must not silently hang when the SW restarts mid-bootstrap: detect the
+   bootstrap timeout / dead-SW condition and either transparently reconnect (fresh popup state) or
+   route the user to reopen/unlock — never a 30 s+ dead "Finishing…" screen.
+2. Fix the three restore e2e to model the realistic recovery (reopen/unlock → assert `/popup/general`
+   + one PXE-dependent read), replacing the current unrealistic "straight to general, no reopen"
+   assertion.
+No emit-after-release change, no incarnation fence for THIS bug (P3's #281 hardening stays on its own
+independent merits), no encrypted-store lifecycle overhaul.
+
+Separately worth the user's eye (NOT part of this fix): strict mode defaults to `true`
+(`config/config.ts:26`), so a routine worker restart forces a re-unlock — a UX papercut whose
+mitigation (a short-lived strict-compatible recovery bearer) is a bigger, security-sensitive change
+best filed on its own.
+
 ## STOP
-Per P0's gate, PR-A's restore fix is paused for a re-aim. The next concrete step (pure diagnosis, no
-scope commitment) is to VERIFY option-1's premise by driving a re-unlock in the harness. Awaiting the
-user's steer on which option to build. Everything else in the plan (P1 bump, P3 #281, P4–R) stands.
-Instrumentation reverted; tree clean.
+Per P0's gate, PR-A's restore fix is paused for the re-aim: **rewrite P2 as import-page resilience +
+realistic-recovery e2e (small).** P1 (5.0.1 bump), P3 (#281), and P4–R are unaffected. Awaiting the
+user's go. Instrumentation + the diagnostic test patch reverted; tree clean.
