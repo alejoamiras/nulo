@@ -1,10 +1,10 @@
-# aztec-5.0.1-line — plan (v4 — final fresh-context codex pass folded; GATE-READY)
+# aztec-5.0.1-line — plan (v4 — APPROVED 2026-07-17)
 
 Deep-tier blueprint. Legs archived (`leg-main.md`, `leg-codex.md`, `leg-fable-summary.md`);
 contradiction round folded in v2; double audit folded here (`audit-codex-r1.md` reject → all
 critical/high addressed; `audit-fable-r1.md` conditional-approve → all findings addressed).
 Final fresh-context codex pass: **conditional-approve** (`audit-codex-final.md`) — all six
-conditions folded in this v4. Ready for the approval gate.
+conditions folded in this v4. **APPROVED by the user 2026-07-17** — standing authorization active through the release; three conditional asks stop the run if hit.
 
 ## Summary
 
