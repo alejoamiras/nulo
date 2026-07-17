@@ -49,9 +49,48 @@ subsystem this arc introduced.
   must guarantee the session's master is live when the store opens (and surface a clean re-unlock
   prompt instead of an infinite silent retry when it isn't).
 
+## Root cause — DEFINITIVE (second instrumented pass)
+Probed `SessionManager` construction + `open()` + `getActive()`. The exact timeline (import-side
+extension, profile `fed2f974`):
+1. `open SET activeSession … strict=true persistBearer=false ttl=1800000` → `open DONE
+   activeStill=fed2f974` → store-key provider `present=true` → **PXE boots normally**.
+2. ~18 s later: **`SessionManager CONSTRUCTED` fires AGAIN — the MV3 service worker RESTARTED.**
+   The new instance's in-memory `activeSession` is empty.
+3. `getActive()` returns undefined (it checks ONLY the in-memory `activeSession`; it does NOT
+   re-hydrate from disk on demand). Because the profile is **strict mode with `persistBearer=false`**
+   (F-11: strict persists no silent-restore bearer), there is no way to recover the master secret
+   without the password. → `getProfileSecret` throws `"Profile locked"` → store key unavailable →
+   `createChainRuntime` fail-closes with `PXE_STORE_KEY_MISSING` → the client's one retry also
+   fails → the PXE never re-opens its encrypted store → the import bootstrap never completes.
+
+**The bug (one sentence):** the encrypted per-profile PXE store — this arc's own new subsystem —
+derives its key from the IN-MEMORY master secret, but a routine MV3 worker restart drops that
+secret, and in strict mode (no bearer) it is unrecoverable without a re-unlock, so the PXE is
+permanently locked out with no recovery path and the boot silently retries forever. NO lock
+contention, NO emit ordering, NO deletion race is involved.
+
+Why restore triggers it (and normal flows don't): the restore path is unusually heavy (migration +
+multi-slice restore + big storage writes + offscreen boot), which reliably provokes an SW restart
+mid-flow; a fresh install lands in strict mode; and the restored profile is a password profile
+whose master lives only in memory post-`finalizeRestore`.
+
+## The fix direction (SINGLE — no fork)
+The encrypted-store boot must treat "profile locked" as a **recoverable, expected** state, not an
+infinite silent retry:
+1. The store-key provider / `createChainRuntime` retry must STOP after the profile is observed
+   locked and surface a "locked — unlock to continue" signal, instead of looping `PXE_STORE_KEY_
+   MISSING` forever.
+2. The re-unlock (password) path must **re-provision the store key and (re)boot the chain runtime**
+   — i.e. unlock becomes the recovery trigger for the encrypted store, symmetric to how it already
+   provisions on first unlock.
+3. The import flow (`completeImport` / `waitForProfileActive`) must recognize a locked profile and
+   route to `/popup/auth` promptly rather than waiting out the 30 s bootstrap timeout — and the
+   post-unlock continuation must land the user on `/popup/general` with a live PXE.
+This is a **session-secret ↔ encrypted-store-key lifecycle** fix. It replaces the plan's dead P2
+(emit-after-release). P3's #281 hardening (audit-real resurrection/purge hazards) survives on its
+own merits, unchanged. P1 (5.0.1 bump) and P4–R are unaffected.
+
 ## STOP
-Per P0's gate ("if the localized mechanism does not reproduce → STOP, re-aim"), PR-A's P2/P3 shape
-is paused pending a re-aim of the restore-boot fix around the proven mechanism. Surfaced to the
-user. Instrumentation reverted (diagnostic-only). The #281 hardening and the 5.0.1 bump/redeploy/
-release phases are unaffected in principle, but the restore fix — the thing that turns #282 green —
-needs new design.
+Per P0's gate, PR-A's restore fix is paused for a re-aim: **rewrite P2 as the strict-mode /
+SW-restart / encrypted-store recovery fix above.** Everything else in the plan stands. Awaiting the
+user's go on the re-aim. Instrumentation reverted; tree clean.

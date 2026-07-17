@@ -4,9 +4,12 @@
 > repro proved there is **no lock/emit deadlock**: the restored profile's session is *locked/inactive*
 > when its encrypted PXE store boots, so the store key can't be derived and the PXE fail-closes
 > forever (`lessons/phase-p0.md`). **P2 (emit-after-release) targets a non-existent bug.** The
-> restore fix needs a re-aim around the session-secret ↔ encrypted-store-key lifecycle. P3's #281
-> hardening and the 5.0.1 bump/redeploy/release phases stand; PR-A's restore fix is paused pending
-> the user's re-aim decision. See the report in the transcript.
+> restore fix needs a re-aim around the session-secret ↔ encrypted-store-key lifecycle. **ROOT
+> CAUSE now DEFINITIVE (`lessons/phase-p0.md`):** an MV3 worker restart drops the in-memory master;
+> in strict mode (no bearer) the encrypted-store key is unrecoverable without re-unlock, so the PXE
+> fail-closes forever with no recovery path. **Re-aimed P2 = strict-mode/SW-restart/encrypted-store
+> recovery** (stop the infinite retry → surface locked → re-provision + reboot the PXE on unlock).
+> P3's #281 hardening + P1 + P4–R all stand. Awaiting the user's go on the re-aim.
 
 
 Deep-tier blueprint. Legs archived (`leg-main.md`, `leg-codex.md`, `leg-fable-summary.md`);
