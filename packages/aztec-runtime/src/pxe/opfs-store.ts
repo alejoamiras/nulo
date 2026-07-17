@@ -149,15 +149,21 @@ const OPFS_ROOT = PXE_DATA_DIR_ROOT.replace(/\/$/, "")
 
 async function opfsRoot(): Promise<FileSystemDirectoryHandle | undefined> {
 	// Capability guard: OPFS exists only in browser contexts (the offscreen document). Under
-	// node-env unit tests (and any non-OPFS host) the registry is simply empty. A rejecting
-	// `getDirectory()` is treated the same as absence — in a context where OPFS never worked,
-	// no OPFS store exists to enumerate or erase, and a purge must not wedge on it.
+	// node-env unit tests (and any non-OPFS host) the API is simply ABSENT → empty registry.
 	if (typeof navigator === "undefined" || !navigator.storage?.getDirectory) return undefined
+	// A rejecting `getDirectory()` (API present but denied — e.g. a SecurityError) is NOT absence,
+	// so it propagates. `getOrCreate` is intentionally not used: absence of the pxe root is the
+	// only benign case, and it surfaces below as NotFoundError.
+	const top = await navigator.storage.getDirectory()
 	try {
-		const top = await navigator.storage.getDirectory()
 		return await top.getDirectoryHandle(OPFS_ROOT)
-	} catch {
-		return undefined
+	} catch (err) {
+		// The ONLY swallowed case is "the pxe root dir doesn't exist yet" — a legitimately empty
+		// registry (no store ever created). EVERY other failure (SecurityError, quota, corruption)
+		// is REAL and MUST propagate: masking it as "no stores" would let a purge falsely report
+		// success or an enumerate silently miss live stores (D-audit: opfsRoot narrowing).
+		if ((err as DOMException)?.name === "NotFoundError") return undefined
+		throw err
 	}
 }
 

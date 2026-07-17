@@ -1,11 +1,11 @@
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { DatabaseVersion } from "@aztec/stdlib/database-version/version"
 import type { AztecSQLiteOPFSStore } from "@aztec/kv-store/sqlite-opfs"
-import { initStoreVersionStamp, PxeStoreVersionMismatch, PXE_DATA_SCHEMA_VERSION_PIN } from "./opfs-store"
+import { initStoreVersionStamp, listChainStoreDirs, PxeStoreVersionMismatch, PXE_DATA_SCHEMA_VERSION_PIN } from "./opfs-store"
 
 const nullLog = { warn: () => {}, info: () => {}, debug: () => {}, error: () => {}, verbose: () => {}, fatal: () => {} } as never
 
@@ -89,5 +89,32 @@ describe("initStoreVersionStamp — refuse-and-preserve on mismatch (D-B2v3, 5.0
 		const { store, calls } = fakeStore("not-a-valid-database-version-stamp")
 		await expect(initStoreVersionStamp(store, ROLLUP, nullLog)).rejects.toBeInstanceOf(PxeStoreVersionMismatch)
 		expect(calls.cleared).toBe(false)
+	})
+})
+
+describe("opfsRoot narrowing — absence is benign, every other error propagates (D-audit)", () => {
+	const realNavigator = globalThis.navigator
+
+	afterEach(() => {
+		// Restore the original navigator (undefined under node-env) — configurable so the next
+		// test's stub can redefine it.
+		Object.defineProperty(globalThis, "navigator", { value: realNavigator, configurable: true })
+	})
+
+	function stubNavigator(getDirectoryHandle: () => Promise<unknown>): void {
+		Object.defineProperty(globalThis, "navigator", {
+			value: { storage: { getDirectory: async () => ({ getDirectoryHandle, entries: async function* () {} }) } },
+			configurable: true,
+		})
+	}
+
+	it("treats a missing pxe root (NotFoundError) as an EMPTY registry (not an error)", async () => {
+		stubNavigator(() => Promise.reject(new DOMException("nope", "NotFoundError")))
+		await expect(listChainStoreDirs()).resolves.toEqual([])
+	})
+
+	it("PROPAGATES a non-NotFound failure (e.g. SecurityError) — never masks it as 'no stores'", async () => {
+		stubNavigator(() => Promise.reject(new DOMException("denied", "SecurityError")))
+		await expect(listChainStoreDirs()).rejects.toThrow("denied")
 	})
 })
