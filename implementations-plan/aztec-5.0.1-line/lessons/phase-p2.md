@@ -64,11 +64,26 @@ restore lands on "completed with errors". The quality gate (unit/lint/typecheck/
   and `[aztec-node] Error: Address already in use` (port-collision boot) are BOTH documented in
   `harden-quality-arc/lessons/Q-0{6,7}.md` as infra flakes that clear on re-run — they inflated the
   "systemic network failure" picture. The deterministic signal is the restore trio.
-- **FIX (real, required for P2's gate)**: provision the PXE store key BEFORE the account-state restore
-  step (or defer contract registration until after `finalizeRestore` opens the session / re-register
-  on next unlock). This is the "new finding" previously mis-filed as a deferrable P3 robustness item —
-  it is in fact the CORE restore-e2e blocker under 5.0.1 and must be fixed before P2/P3 e2e go green.
-  Delicate (restore-pipeline ordering + session lifecycle; user-data path) — implement with care.
+- **FIX (real, required for P2's gate) — scoped**: the store-key provider
+  (`runtime.ts:202`) does `derivePxeStoreKey(getProfileSecret(profileId))`, and
+  `getProfileSecret` → `sessionManager.getSecret(id)` needs an **OPEN session**. Restore DEFERS
+  session-open to `finalizeRestore` (so `onActiveProfileChanged` fires only after all slices are
+  written — `service.ts:1166,1201,1284`). So during the account-state restore step there is no
+  open session → provider returns undefined → `PXE_STORE_KEY_MISSING` propagates. And account-state
+  has **NO boot/unlock re-registration** (its only `registerContract` is in `restore`,
+  `service.ts:226`) — so "defer to next unlock" is NOT free; it needs a new sync path. Three
+  candidate fixes, each a session-lifecycle DESIGN FORK on the user-data path (warrants a codex
+  consult before implementing):
+  1. **Open the session at the START of restore but SUPPRESS the `onActiveProfileChanged` emit until
+     `finalizeRestore`** (split "secret available" from "activate") — most principled; touches
+     `sessionManager`/restore.
+  2. **Explicit provision RPC during restore** — `useFullBackupImport` unseals the just-created
+     profile's secret with the password it already holds, derives the store key, provisions it before
+     the account-state step — most surgical; adds a provision entrypoint.
+  3. **Reorder account-state restore to AFTER `finalizeRestore`** — simplest but risks app.vue's
+     activation handler (`getOrInitNetworks`/`ensureDefaultAccount`) running before contracts register.
+  This is the CORE restore-e2e blocker under 5.0.1 (mis-filed earlier as a deferrable P3 item); it
+  must land before P2/P3 e2e go green. Implement with care + a fresh context.
 
 ## (SUPERSEDED by the correction above) BLOCKER — local smoke/network e2e cannot pass ON THIS BOX
 Running `backup-roundtrip` smoke locally fails identically on the PRISTINE pre-P2
