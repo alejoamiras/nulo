@@ -44,7 +44,33 @@ race-free "the listener has genuinely given up" signal.**
 - The rewritten smoke deliberately does NOT tolerate a "completed with errors" screen
   → it stays a real gate (green only when restore is clean, as on CI).
 
-## BLOCKER — local smoke/network e2e cannot pass ON THIS BOX (root-caused, NOT a code bug, NOT 5.0.1)
+## ⚠️ CORRECTION (CI-confirmed) — the restore failure is a REAL 5.0.1 REGRESSION, not environmental
+The "environmental SW-eviction, CI will be green" conclusion below was **WRONG**. Pushing to CI
+(PR #282, run 29620113858 / 29620113805) proved it: `backup-roundtrip` (smoke) and
+`backup-migration-roundtrip` (network) FAIL on a dedicated CI runner too — timing out because the
+restore lands on "completed with errors". The quality gate (unit/lint/typecheck/build) is GREEN.
+- **`dev` (5.0.0) has smoke + network e2e GREEN**; my 5.0.1 branch fails the restore trio. My
+  PRISTINE P1 tree already failed backup-roundtrip locally → the regression is in **P1 (the 5.0.1
+  bump)**, not P2/P3.
+- **Root cause**: under 5.0.1 the exported account-state slice includes the account's OWN contract
+  instance (`0x086c…`, class-id `0x020ec199…`); restore calls `pxeService.registerContract` for it
+  DURING `restoreBackup`, BEFORE `finalizeRestore` opens the session — so the per-profile PXE store
+  key is not yet provisioned and the client's `PXE_STORE_KEY_MISSING` retry-once provider can't
+  supply it (the profile secret isn't available pre-finalize). `registerContract` throws → the row is
+  recorded as a restore error → `isRestoreHasErrors` → the import stops on the manual "Continue"
+  screen instead of auto-advancing. On 5.0.0 the account-state slice apparently had no such contract
+  to register during restore, so the store key was never needed that early.
+- **The known flakes masked it**: `tokens.test.ts "import token by contract address"` (frame-detach)
+  and `[aztec-node] Error: Address already in use` (port-collision boot) are BOTH documented in
+  `harden-quality-arc/lessons/Q-0{6,7}.md` as infra flakes that clear on re-run — they inflated the
+  "systemic network failure" picture. The deterministic signal is the restore trio.
+- **FIX (real, required for P2's gate)**: provision the PXE store key BEFORE the account-state restore
+  step (or defer contract registration until after `finalizeRestore` opens the session / re-register
+  on next unlock). This is the "new finding" previously mis-filed as a deferrable P3 robustness item —
+  it is in fact the CORE restore-e2e blocker under 5.0.1 and must be fixed before P2/P3 e2e go green.
+  Delicate (restore-pipeline ordering + session lifecycle; user-data path) — implement with care.
+
+## (SUPERSEDED by the correction above) BLOCKER — local smoke/network e2e cannot pass ON THIS BOX
 Running `backup-roundtrip` smoke locally fails identically on the PRISTINE pre-P2
 tree (stash-tested) — so it is not a P2 regression. Definitive root cause captured by
 forwarding the offscreen/SW console:

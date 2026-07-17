@@ -124,19 +124,23 @@ artifacts still 5.0.0-compiled — the live deployment is untouched by this phas
 still reproduces the SAME way post-bump (or is noted as resolved by 5.0.1 itself); smokes that
 don't touch the restore path green. **`LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p1.md`.**
 
-### P2 — Import-page recovery (the ACTUAL restore fix; re-aimed from P0) ◑
-> **◑ CODE COMPLETE; e2e gate CI-DEFERRED (local box blocked, root-caused).** New pure
-> `completeImportWithRecovery` orchestrator (+7 unit tests): fast-path activation else run the
-> fresh-popup recovery (`hydrateKnownProfile`) — never a dead-end wait. Both import pages wired;
-> onboarding unified on it. A disconnect-watch variant was tried + reverted (races the live
-> bootstrap — the timeout is the only race-free signal). The three restore e2e rewritten to the
-> realistic settle→recover model + a lock/unlock store-reopen assertion (new `reopenAndRecoverAfterImport`
-> helper). **Local smoke/network e2e cannot pass on THIS host: the MV3 SW is evicted under
-> multi-agent load → master dropped → `PXE_STORE_KEY_MISSING` → account-state restore errors. Proven
-> environmental (identical failure on the PRISTINE pre-P2 tree; NOT 5.0.1 — the error is store-key
-> provisioning, not a protocol/version rejection). Honest gate = CI (green on dev).** typecheck:all 0,
-> composable units 57, lint 0, build green. **NEW FINDING handed to P3** (see P3). Not marked ✓ — the
-> e2e gate line is validated at CI/P7. `LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p2.md`.
+### P2 — Import-page recovery (the ACTUAL restore fix; re-aimed from P0) ◑ BLOCKED
+> **◑ import-page recovery CODE done + unit-green; but the restore e2e is RED on CI — a real 5.0.1
+> regression, NOT environmental (earlier "SW-eviction, CI-green" call CORRECTED).** New pure
+> `completeImportWithRecovery` orchestrator (+7 unit tests); both import pages wired; the three restore
+> e2e rewritten to settle→recover + a `reopenAndRecoverAfterImport` store-reopen assertion. Local
+> gates green (typecheck:all 0, composable units 57, lint 0, build). **CI (PR #282) verdict:
+> quality-status GREEN; smoke-e2e + network-e2e RED — `backup-roundtrip` + `backup-migration-roundtrip`
+> fail because under 5.0.1 the exported account-state includes the account's own contract, and restore
+> calls `registerContract` for it BEFORE `finalizeRestore` provisions the PXE store key →
+> `PXE_STORE_KEY_MISSING` → "completed with errors" → no auto-advance.** dev (5.0.0) is green; the
+> pristine P1 tree already fails it → the regression is P1 (the bump), surfaced by P2's honest
+> assertions. The `tokens.test.ts` frame-detach + `Address already in use` network failures are
+> documented flakes (Q-06/Q-07) that clear on re-run. **FIX REQUIRED (was mis-filed as a P3
+> robustness item): provision the store key before account-state restore, or defer contract
+> registration to post-finalize / next-unlock — delicate (restore ordering + session lifecycle;
+> user-data path).** Not ✓ until that fix lands + the restore trio is green on CI.
+> `LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p2.md`.
 
 The bug (P0-proven): the full-backup import page silently wedges when the MV3 service worker
 restarts mid-bootstrap, because `completeImport` (`import.vue`) awaits `waitForProfileActive` on a
