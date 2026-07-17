@@ -591,13 +591,15 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			}
 			recordRestoreErrors(TOKEN_SERVICE_NAME, newTokens)
 
+			// ACCOUNT_STATE is deliberately NOT in this loop — it is restored AFTER
+			// finalizeRestore (below), because its `registerContract` needs the PXE
+			// store key, which is only provisionable once the session is open.
 			const backupServices: Array<{
 				name: string
 				client: { restore: (...args: unknown[]) => Promise<unknown>; disconnect: () => void }
 			}> = [
 				{ name: TRANSACTION_SERVICE_NAME, client: new TransactionServiceClient() as never },
 				{ name: TOKEN_BALANCE_SERVICE_NAME, client: new TokenBalanceServiceClient() as never },
-				{ name: ACCOUNT_STATE_SERVICE_NAME, client: new AccountStateServiceClient() as never },
 				{ name: AUTH_REGISTRY_SERVICE_NAME, client: new AuthRegistryServiceClient() as never },
 				{ name: FPC_SERVICE_NAME, client: new FpcServiceClient() as never },
 				{ name: CONTACT_SERVICE_NAME, client: new ContactServiceClient() as never },
@@ -611,11 +613,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				for (const { name, client } of backupServices) {
 					const sliceData = data[name]
 					if (Array.isArray(sliceData)) {
-						const restoredData =
-							name === ACCOUNT_STATE_SERVICE_NAME
-								? await client.restore(sliceData, createdNetworks)
-								: await client.restore(sliceData)
-						recordRestoreErrors(name, restoredData)
+						recordRestoreErrors(name, await client.restore(sliceData))
 					}
 				}
 			} finally {
@@ -635,6 +633,28 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				restoreStatus.value = "failed"
 				opts.fillError("full_backup", "Couldn't open the imported profile", err instanceof Error ? err.message : String(err))
 				return
+			}
+
+			// Restore account-state (PXE contract registrations + senders) AFTER
+			// finalizeRestore — NOT in the loop above. Its `registerContract` needs the
+			// per-profile PXE store key, which the client's PXE_STORE_KEY_MISSING
+			// retry-once provisions via `getProfileSecret` — and that only yields the
+			// master once the session is OPEN (finalizeRestore opens it). Under 5.0.1 the
+			// exported account-state includes the account's OWN contract, so running this
+			// pre-finalize (as it used to) hit PXE_STORE_KEY_MISSING and stranded the
+			// import on "completed with errors". app.vue's activation handler only
+			// auto-seeds networks/accounts — never account-state contract registrations —
+			// so there is no import-race with running this after the emit. Recorded into
+			// restoreErrorLog BEFORE the isRestoreHasErrors gate below so a genuine
+			// registration failure still surfaces (and still blocks auto-completion).
+			const accountStateSlice = data[ACCOUNT_STATE_SERVICE_NAME]
+			if (Array.isArray(accountStateSlice)) {
+				const accountStateService = new AccountStateServiceClient()
+				try {
+					recordRestoreErrors(ACCOUNT_STATE_SERVICE_NAME, await accountStateService.restore(accountStateSlice, createdNetworks))
+				} finally {
+					accountStateService.disconnect()
+				}
 			}
 
 			restoreStatus.value = "finished"
