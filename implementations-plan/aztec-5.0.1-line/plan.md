@@ -1,5 +1,14 @@
 # aztec-5.0.1-line — plan (v4 — APPROVED 2026-07-17)
 
+> **⚠️ P0 STOPPED THE RUN (2026-07-17) — the restore-boot diagnosis was WRONG.** P0's instrumented
+> repro proved there is **no lock/emit deadlock**: the restored profile's session is *locked/inactive*
+> when its encrypted PXE store boots, so the store key can't be derived and the PXE fail-closes
+> forever (`lessons/phase-p0.md`). **P2 (emit-after-release) targets a non-existent bug.** The
+> restore fix needs a re-aim around the session-secret ↔ encrypted-store-key lifecycle. P3's #281
+> hardening and the 5.0.1 bump/redeploy/release phases stand; PR-A's restore fix is paused pending
+> the user's re-aim decision. See the report in the transcript.
+
+
 Deep-tier blueprint. Legs archived (`leg-main.md`, `leg-codex.md`, `leg-fable-summary.md`);
 contradiction round folded in v2; double audit folded here (`audit-codex-r1.md` reject → all
 critical/high addressed; `audit-fable-r1.md` conditional-approve → all findings addressed).
