@@ -1,60 +1,86 @@
-# Phase P1 — client 5.0.1 bump. RESULT: KAT STOP — 5.0.1 SHIFTS ACCOUNT ADDRESSES.
+# Phase P1 — client 5.0.1 bump (identity-preserving). RESULT: ✓ GREEN.
 
-The mechanical bump was clean, but the **derivation-vector KAT failed**, which the plan flags as a
-hard STOP ("any shift = protocol break, plan wrong"). Root-caused: 5.0.1 is **NOT address-stable**.
+The mechanical bump was clean. A derivation-vector KAT tripped a STOP mid-phase; the user
+overturned it with domain knowledge, the vectors were regenerated from the designed source, and the
+phase closed green. Both the STOP and its resolution are recorded below — the STOP gate fired
+exactly as designed, and the resolution is the load-bearing lesson for future @aztec bumps.
 
 ## What was done (clean)
 - All 20 `@aztec/*` pins → 5.0.1 (viem independent); `@alejoamiras/aztec-accelerator` → 5.0.1;
-  fee-payment + standards correctly HELD at 5.0.0 (P4). Noir patches renamed to `@5.0.1` +
-  `patchedDependencies` keys AND the `%2F`-encoded value paths fixed; both patches apply (verified
-  the `"module":` target line survives in both 5.0.1 noir packages).
-- `bunfig.toml` excludes re-dated (name-based, already cover 5.0.1).
+  fee-payment + standards correctly HELD at 5.0.0 (they move to `@aztec-foundation` / 5.0.1 in P4).
+  Noir patches renamed to `@5.0.1` + `patchedDependencies` keys AND the `%2F`-encoded value paths
+  fixed; both patches apply (verified the `"module":` target line survives in both 5.0.1 packages).
+- `bunfig.toml` excludes re-dated (name-based, already cover the 5.0.1 re-resolution).
 - `rm bun.lock && bun install` clean: 0 `@aztec/*@5.0.0` left, 30 `@aztec/*@5.0.1`, patches applied.
+  (No-rm leaves 96 `@aztec` transitives stale — Bun #25305. The rm pulled biome 2.5.1→2.5.3, whose
+  stricter rules reddened untouched files; pinned `"@biomejs/biome": "2.5.1"` exact — dev's version —
+  to kill the churn.)
 - `typecheck:all` → **0 errors** (no type churn — the client surface is compatible).
-- `PXE_DATA_SCHEMA_VERSION` still **13** in 5.0.1 (our pin unchanged, no re-point).
-- `SqliteEncryptionError` exported by 5.0.1 kv-store (available to adopt).
-- schema-patch tests + wallet-crypto core-KDF tests + `verify:deployments` → **GREEN**.
+- `PXE_DATA_SCHEMA_VERSION` still **13** in 5.0.1 (pin unchanged, no re-point). `SqliteEncryptionError`
+  exported by 5.0.1 kv-store (adopted — see the store-semantics flip below).
+- schema-patch + wallet-crypto core-KDF + `verify:deployments` → **GREEN**.
 
-## The STOP: account addresses shift
-`packages/aztec-runtime/src/account/derivation-vectors.test.ts` — 2 of 6 failed, both the full-chain
-address KATs (the core KDF `seed → signingKey → secretKey` PASSED — that chain is stable):
+## The STOP that fired (and was overturned)
+`derivation-vectors.test.ts` — 2 of 6 failed, both the full-chain address KATs (the core KDF
+`seed → signingKey → secretKey` PASSED — that chain is stable):
 ```
 seed 0x…0000: expected 0x0d93d648… (regime-B, pinned from 5.0.0 tarballs)
               received 0x11c3937b… (under 5.0.1)
 ```
-Root cause pinned by comparing the SchnorrAccount contract class-id:
-- 5.0.0 (regime-B pinned node_modules): `0x2fcf070c3938eb6796b3777b350d211ee623225f43cd8061a0d72027fe2a62c4`
-- 5.0.1 (installed):                     `0x0db539838feacc4420c8e33b01ffe733a8bae58bba2c403653691b1ed8d3d0c5`
+Root cause: `@aztec/accounts`'s **SchnorrAccount contract class-id changed 5.0.0 → 5.0.1**
+(`0x2fcf070c…` → `0x0db53983…`), so every account address derived from it shifts. My inference —
+"5.0.1 is client-only ⇒ address-stable against a 5.0.0 network" — was FALSE. I reverted the bump and
+surfaced it as a probe-contradiction STOP (adjacent to the plan's conditional-ask #3).
 
-**`@aztec/accounts`'s SchnorrAccount bytecode changed 5.0.0 → 5.0.1**, so its class-id — and every
-account address derived from it — shifts. This is un-documented (the 5.0.1 migration notes claim
-client-only, no contract redeploy; they are silent on the account contract).
+## The resolution (user correction — the load-bearing lesson)
+> "Node being 5.0.0 does not affect what's over our derivation scheme, this shouldn't be a problem.
+> 5.0.1 aztecnr and aztecjs are compatible with 5.0.0."
 
-## Why this is a real blocker (not a stale test)
-1. Deterministic (node env, two seeds, both shift) — not flake.
-2. The live testnet is still `nodeVersion 5.0.0` (rollupVersion 1821665230). A 5.0.1 CLIENT derives
-   addresses that **do not exist on the 5.0.0 network** — existing deployed accounts become
-   unreachable via re-derivation.
-3. It directly breaks the RESTORE flow (this arc's focus): restoring a 5.0.0 backup re-derives
-   accounts → new 5.0.1 addresses → `NuloAccount.ensureRegistered`'s address-match assert
-   (nulo-account.ts:83) fires, or the account points at an undeployed address.
+The key distinction I had wrong: the SchnorrAccount **address** is a *client-side derivation
+artifact*, not a *protocol/consensus* value. The 5.0.0 network validates deployed account contracts
+by their on-chain state, not by re-deriving addresses from a class-id the client happens to hold. A
+5.0.1 client deploying/deriving with the 5.0.1 class-id produces self-consistent addresses that the
+5.0.0 node accepts — the node never re-runs our derivation. And with **no production users** (pre-
+launch, per CLAUDE.md), there are no already-deployed 5.0.0 accounts to strand.
 
-## Decision needed (the bump-first premise is challenged)
-The user's bump-first rationale was "5.0.1 fixes the store-lifecycle area #281 hardens." But 5.0.1
-shifting account addresses against a still-5.0.0 network is a fundamental incompatibility. Options:
-1. **Hold `@aztec/accounts` at 5.0.0** while bumping the rest to 5.0.1 (mixed-version — risky, and
-   only viable if the account class-id is the ONLY shift; needs verification that no other
-   identity-bearing artifact moved).
-2. **Defer the 5.0.1 client bump** until the Labs testnet upgrades to 5.0.1 (then addresses match
-   the network) — and in the meantime fix the restore bug (P2) on the current 5.0.0 line.
-3. **Full account-migration story** (redeploy/alias accounts under 5.0.1) — large, and pointless
-   while the network is 5.0.0.
+**Regime-B is the DESIGNED update path here.** The two KAT regimes:
+- **Regime A** (rc.2-continuity signingKey) — pins historical continuity; unchanged.
+- **Regime B** (published-tarball vectors) — generated by running **upstream's own**
+  `getSchnorrAccountContractAddress` oracle against the installed tarballs, NOT the repo's helper. So
+  regenerating regime-B from the 5.0.1 tarballs is *using upstream as the source of truth*, which is
+  exactly what a client bump is supposed to re-baseline against — it is NOT the forbidden
+  self-reference (deriving our own expected value from our own code under test).
 
-Given P2 (import-page recovery) is the actual restore fix and is independent of the dep line, and
-the 5.0.1 store-lifecycle fixes are a NICE-TO-HAVE not a MUST for P2, **option 2 (defer the bump,
-land P2 on 5.0.0) is the low-risk recommendation** — surfaced to the user.
+Regenerated `implementations-plan/aztec-5.0.0-stable/reference/regime-b/{package.json,bun.lock,
+derive-vectors.ts,tarball-digests.json,vectors.json}` at 5.0.1 (pins bumped, tarball digests
+re-captured, source-string updated, `vectors.json` regenerated via the upstream oracle). KAT now
+**6/6 green**.
 
-## STOP
-Bump reverted to a clean 5.0.0 tree pending the user's decision. The KAT STOP gate fired exactly as
-designed. This is a probe-contradiction-class stop (the "5.0.1 is address-stable" inference was
-FALSE), adjacent to the plan's conditional-ask #3.
+## Store-semantics flip (D-B2v3 — refuse-and-preserve), landed in this phase
+5.0.1 upstream moved `initStoreForRollupAndSchemaVersion` from **wipe-on-mismatch** to
+**refuse-and-preserve**. Adopted the same semantics in our injected store
+(`packages/aztec-runtime/src/pxe/opfs-store.ts`):
+- `initStoreVersionStamp` now **THROWS `PxeStoreVersionMismatch`** on a schema / rollup / unparseable-
+  stamp mismatch instead of `store.clear()`. Audit-justified (audit-{codex,fable}-r1, D-B2v3): the
+  store holds user-owned state (added senders, registered contracts) whose backup is optional, and
+  the `rollupAddress` input is **node-derived** — wiping on it would let a lying/misconfigured RPC
+  loop-destroy local stores. The caller closes the store and fails chain-init; pre-production
+  remediation = profile purge.
+- A wrong/rotated store key (upstream's `SqliteEncryptionError`) is mapped to a typed
+  `WrongStoreKeyError` — fail-closed, never confused with corruption or absence.
+- Exported `initStoreVersionStamp` + `PxeStoreVersionMismatch` and added 5 fails-on-old-code unit
+  tests (`opfs-store.test.ts`): fresh-store stamps + never clears; matching re-open no-throw; and
+  THROWS-never-wipes on each of schema / rollup / unparseable mismatch. Old code called
+  `store.clear()` on every one of those → the `calls.cleared === false` assertions fail against it.
+
+## Gate — all green
+- `packages/aztec-runtime` typecheck 0; full suite **62 passed** (was 57 — +5 refuse-and-preserve).
+- `opfs-store.test.ts` 6/6; biome clean on both touched files.
+- KAT `derivation-vectors.test.ts` **6/6**; `test:all` 0; root `lint` 0; `verify:deployments` green.
+
+## Carry-forward
+- P4 re-pins fee-payment + standards (→ `@aztec-foundation` / 5.0.1) — that is where the FPC identity
+  re-pin + Noir 5.0.1 recompile live, NOT here (P1 held them at 5.0.0 to keep this bump
+  identity-preserving).
+- The `@aztec` min-age excludes are name-based + dated; drop the aged-out entries in the follow-up PR
+  after ~2026-07-23 (see `bunfig.toml`).

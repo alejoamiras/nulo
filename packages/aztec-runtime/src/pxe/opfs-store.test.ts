@@ -1,8 +1,32 @@
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { describe, expect, it } from "vitest"
-import { PXE_DATA_SCHEMA_VERSION_PIN } from "./opfs-store"
+import { describe, expect, it, vi } from "vitest"
+import { EthAddress } from "@aztec/foundation/eth-address"
+import { DatabaseVersion } from "@aztec/stdlib/database-version/version"
+import type { AztecSQLiteOPFSStore } from "@aztec/kv-store/sqlite-opfs"
+import { initStoreVersionStamp, PxeStoreVersionMismatch, PXE_DATA_SCHEMA_VERSION_PIN } from "./opfs-store"
+
+const nullLog = { warn: () => {}, info: () => {}, debug: () => {}, error: () => {}, verbose: () => {}, fatal: () => {} } as never
+
+/** Fake store whose `dbVersion` singleton returns a preset stamp; records clear()/set() calls. */
+function fakeStore(storedStamp: string | undefined) {
+	const calls = { cleared: false, set: undefined as string | undefined }
+	const store = {
+		openSingleton: () => ({
+			getAsync: async () => storedStamp,
+			set: async (v: string) => {
+				calls.set = v
+			},
+		}),
+		clear: vi.fn(async () => {
+			calls.cleared = true
+		}),
+	} as unknown as AztecSQLiteOPFSStore
+	return { store, calls }
+}
+
+const ROLLUP = "0x00000000000000000000000000000000000000aa"
 
 function resolvePackageFile(pkg: string, file: string): string {
 	const parts = pkg.startsWith("@") ? pkg.split("/").slice(0, 2) : [pkg.split("/")[0]]
@@ -26,5 +50,44 @@ describe("opfs-store upstream pins", () => {
 		const match = source.match(/PXE_DATA_SCHEMA_VERSION\s*=\s*(\d+)/)
 		expect(match).not.toBeNull()
 		expect(Number(match?.[1])).toBe(PXE_DATA_SCHEMA_VERSION_PIN)
+	})
+})
+
+describe("initStoreVersionStamp — refuse-and-preserve on mismatch (D-B2v3, 5.0.1-aligned)", () => {
+	function stampFor(schemaVersion: number, rollup: string): string {
+		return new DatabaseVersion(schemaVersion, EthAddress.fromString(rollup)).toBuffer().toString("utf-8")
+	}
+
+	it("stamps a fresh (empty) store and never clears", async () => {
+		const { store, calls } = fakeStore(undefined)
+		await initStoreVersionStamp(store, ROLLUP, nullLog)
+		expect(calls.cleared).toBe(false)
+		expect(calls.set).toBe(stampFor(PXE_DATA_SCHEMA_VERSION_PIN, ROLLUP))
+	})
+
+	it("re-opens a matching store without throwing or clearing", async () => {
+		const { store, calls } = fakeStore(stampFor(PXE_DATA_SCHEMA_VERSION_PIN, ROLLUP))
+		await expect(initStoreVersionStamp(store, ROLLUP, nullLog)).resolves.toBeUndefined()
+		expect(calls.cleared).toBe(false)
+	})
+
+	it("THROWS (never wipes) on a schema-version mismatch", async () => {
+		const { store, calls } = fakeStore(stampFor(PXE_DATA_SCHEMA_VERSION_PIN - 1, ROLLUP))
+		await expect(initStoreVersionStamp(store, ROLLUP, nullLog)).rejects.toBeInstanceOf(PxeStoreVersionMismatch)
+		expect(calls.cleared).toBe(false)
+		expect(calls.set).toBeUndefined()
+	})
+
+	it("THROWS (never wipes) on a rollup-address mismatch", async () => {
+		const otherRollup = "0x00000000000000000000000000000000000000bb"
+		const { store, calls } = fakeStore(stampFor(PXE_DATA_SCHEMA_VERSION_PIN, otherRollup))
+		await expect(initStoreVersionStamp(store, ROLLUP, nullLog)).rejects.toBeInstanceOf(PxeStoreVersionMismatch)
+		expect(calls.cleared).toBe(false)
+	})
+
+	it("THROWS (never wipes) on an unparseable stamp — a hostile/corrupt blob is refused, not wiped", async () => {
+		const { store, calls } = fakeStore("not-a-valid-database-version-stamp")
+		await expect(initStoreVersionStamp(store, ROLLUP, nullLog)).rejects.toBeInstanceOf(PxeStoreVersionMismatch)
+		expect(calls.cleared).toBe(false)
 	})
 })

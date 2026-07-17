@@ -13,18 +13,29 @@
  * `encryptionKey` — see `@nulo/wallet-crypto`'s `derivePxeStoreKey`). Fail-closed: no key, no
  * store. Purge is crypto-erase plus unlink.
  *
- * Version/rollup hygiene: upstream's `initStoreForRollupAndSchemaVersion` (which the default path
- * runs and injection bypasses) is mirrored here VERBATIM against the same singleton key, so a PXE
- * schema bump or a rollup redeploy wipes exactly the affected store — upstream's own reset
- * semantics, correctly scoped. `PXE_DATA_SCHEMA_VERSION_PIN` mirrors upstream's non-exported
- * constant; `opfs-store.test.ts` asserts it against the installed package so a silent upstream
- * bump fails the build instead of stranding stores on a stale stamp.
+ * Version/rollup hygiene: against the same `dbVersion` singleton key upstream uses, we REFUSE to
+ * open a store whose stamp mismatches the target schema/rollup — matching upstream 5.0.1's
+ * refuse-and-preserve flip (5.0.0's `initStoreForRollupAndSchemaVersion` WIPED; 5.0.1 does not) and
+ * the D-B2v3 audit decision (the store holds user-owned state; the rollupAddress input is
+ * node-derived, so wiping on it would let a lying RPC loop-destroy local stores). A mismatch throws
+ * `PxeStoreVersionMismatch` and the caller fails chain-init; pre-production remediation = profile
+ * purge. `PXE_DATA_SCHEMA_VERSION_PIN` mirrors upstream's non-exported constant; `opfs-store.test.ts`
+ * asserts it against the installed package so a silent upstream bump fails the build.
+ * A wrong store key surfaces as `SqliteEncryptionError` from upstream — mapped to a typed
+ * `WrongStoreKeyError` (never confused with corruption or absence).
  */
 import type { Logger } from "@aztec/foundation/log"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { AztecSQLiteOPFSStore } from "@aztec/kv-store/sqlite-opfs"
+import { SqliteEncryptionError } from "@aztec/kv-store/sqlite-opfs"
 import { DatabaseVersion } from "@aztec/stdlib/database-version/version"
 import { chainDataDir, PXE_DATA_DIR_ROOT, type ChainCoordinates } from "./chain-coordinates"
+
+/** The store key did not decrypt the existing store — a wrong/rotated per-profile key, NOT
+ *  corruption and NOT absence. Fail-closed and distinct so callers never silently re-create. */
+export class WrongStoreKeyError extends Error {
+	public readonly isWrongStoreKey = true as const
+}
 
 /** Mirror of upstream `@aztec/pxe`'s non-exported `PXE_DATA_SCHEMA_VERSION` (drift-tested). */
 export const PXE_DATA_SCHEMA_VERSION_PIN = 13
@@ -73,6 +84,11 @@ export async function openChainStore({ network, rollupAddress, storeKey, log }: 
 		// release — close that abandoned store so it can't permanently wedge every later open of this
 		// dir (and block purge's removeEntry). A rejected openPromise is handled here too (no leak).
 		openPromise.then((s) => s.close().catch(() => {})).catch(() => {})
+		// A wrong/rotated store key surfaces as upstream's SqliteEncryptionError — map it to a typed,
+		// fail-closed error so callers never mistake it for corruption or an absent store.
+		if (err instanceof SqliteEncryptionError) {
+			throw new WrongStoreKeyError(`openChainStore: wrong store key for ${chainDataDir(network)} (${err.message})`)
+		}
 		throw err
 	} finally {
 		clearTimeout(timer)
@@ -86,38 +102,44 @@ export async function openChainStore({ network, rollupAddress, storeKey, log }: 
 	return store
 }
 
+/** A store whose on-disk stamp (schema version / rollup address) mismatches the current target. The
+ *  caller must NOT wipe — the encrypted store holds user-owned state (added senders, registered
+ *  contracts) whose backup is optional, and the mismatch's `rollupAddress` input is node-derived, so
+ *  wiping on it would let a lying/misconfigured RPC loop-destroy local stores. Surface it instead. */
+export class PxeStoreVersionMismatch extends Error {
+	public readonly isPxeStoreVersionMismatch = true as const
+}
+
 /**
- * Verbatim mirror of upstream `initStoreForRollupAndSchemaVersion` (not exported from
- * `@aztec/kv-store`'s public surface): clears the store when the schema version or rollup address
- * differs from the stamp, then (re)stamps. Same `dbVersion` singleton key as upstream.
+ * 5.0.1-aligned version guard for OUR injected store. Upstream 5.0.1 moved from wipe-on-mismatch to
+ * REFUSE-and-preserve (`initStoreForRollupAndSchemaVersion` no longer clears), and two audit facts
+ * (audit-{codex,fable}-r1, D-B2v3) confirmed the flip is right here: the store holds user state whose
+ * backup is optional, and the rollupAddress input is node-derived (a lying RPC could wipe-loop). So
+ * on a schema/rollup/parse mismatch we THROW `PxeStoreVersionMismatch` (the caller closes the store
+ * and fails chain-init; pre-production remediation = profile purge) — NEVER `store.clear()`.
  */
-async function initStoreVersionStamp(store: AztecSQLiteOPFSStore, rollupAddress: string | undefined, log: Logger): Promise<void> {
+export async function initStoreVersionStamp(store: AztecSQLiteOPFSStore, rollupAddress: string | undefined, log: Logger): Promise<void> {
 	const target = new DatabaseVersion(PXE_DATA_SCHEMA_VERSION_PIN, rollupAddress ? EthAddress.fromString(rollupAddress) : EthAddress.ZERO)
 	const dbVersion = store.openSingleton<string>("dbVersion")
 	const stored = await dbVersion.getAsync()
 	if (stored) {
-		let needsClear = false
+		let mismatch: string | undefined
 		try {
 			const storedVersion = DatabaseVersion.fromBuffer(Buffer.from(stored, "utf-8"))
 			const cmp = storedVersion.cmp(target)
 			if (cmp === undefined) {
-				log.warn("PXE store rollup address changed, clearing this chain's database", {
-					stored: storedVersion.rollupAddress.toString(),
-					current: target.rollupAddress.toString(),
-				})
-				needsClear = true
+				mismatch = `rollup address changed (stored ${storedVersion.rollupAddress.toString()} != current ${target.rollupAddress.toString()})`
 			} else if (cmp !== 0) {
-				log.warn("PXE store schema version changed, clearing this chain's database", {
-					stored: storedVersion.schemaVersion,
-					current: PXE_DATA_SCHEMA_VERSION_PIN,
-				})
-				needsClear = true
+				mismatch = `schema version changed (stored ${storedVersion.schemaVersion} != current ${PXE_DATA_SCHEMA_VERSION_PIN})`
 			}
 		} catch (err) {
-			log.warn("Failed to parse the PXE store version stamp, clearing this chain's database", { err })
-			needsClear = true
+			mismatch = `stamp failed to parse (${err instanceof Error ? err.message : String(err)})`
 		}
-		if (needsClear) await store.clear()
+		if (mismatch) {
+			// REFUSE, do not wipe (D-B2v3). The store's bytes are preserved for the operator.
+			log.warn("PXE store version mismatch — refusing to open (preserving data)", { detail: mismatch })
+			throw new PxeStoreVersionMismatch(`PXE store version mismatch — refusing to open (preserving data): ${mismatch}`)
+		}
 	}
 	await dbVersion.set(target.toBuffer().toString("utf-8"))
 }

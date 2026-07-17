@@ -77,7 +77,16 @@ fired correctly, re-aiming P2 below). The originally-planned `test.fails` compos
 SUPERSEDED by the P2 e2e that models real recovery (the composition layer can't reproduce a
 cross-process SW-restart; the e2e is the honest harness). ✓
 
-### P1 — Client 5.0.1 bump (identity-preserving; deployment untouched)
+### P1 — Client 5.0.1 bump (identity-preserving; deployment untouched) ✓
+> **✓ CLOSED.** All 20 `@aztec/*` + accelerator → 5.0.1; fee-payment/standards held at 5.0.0 (→ P4);
+> Noir patches renamed + applied; biome pinned 2.5.1. The mid-phase KAT STOP (SchnorrAccount class-id
+> shift `0x2fcf070c…`→`0x0db53983…`) was **overturned by the user**: 5.0.1 aztec-nr/aztec.js are
+> compatible with a 5.0.0 node (the account address is a client-side derivation artifact the node
+> never re-derives; pre-production ⇒ no stranded accounts). Regime-B vectors regenerated from the
+> 5.0.1 published tarballs via **upstream's own oracle** (the designed update path, not
+> self-reference) → KAT 6/6. Store-semantics flipped to refuse-and-preserve (D-B2v3): +5
+> fails-on-old-code tests. Gates: typecheck:all 0, test:all 0 (aztec-runtime 62), lint 0,
+> verify:deployments green. `LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p1.md`.
 - `@aztec/*` → exact 5.0.1 (viem independent); `@alejoamiras/aztec-accelerator` → 5.0.1
   (accelerator-server: if a 5.0.1 binary exists in its releases, re-pin the SHA-256 in
   `_network-e2e.yml` from release assets; else the 5.0.0 server + CI required-mode preflight is
